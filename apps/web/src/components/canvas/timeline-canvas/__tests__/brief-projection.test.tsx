@@ -134,7 +134,8 @@ describe('TimelineCanvasAdapter.projectGraphForLayer — Brief projection (block
     const { nodes } = adapter.projectGraph(graph);
 
     // ONLY the era entity renders on the Brief layer.
-    expect(nodes).toHaveLength(1);
+    // V1.126 P1: directed-axis spine node is also added.
+    expect(nodes).toHaveLength(2);
     const node = nodes[0] as Node<TimelineNodeData>;
     expect(node.id).toBe('entity:kb-era-1');
     expect(node.type).toBe('timeline-brief-era');
@@ -363,7 +364,8 @@ describe('TimelineCanvasAdapter.projectGraphForLayer — Narrative projection (V
     );
     const { nodes } = adapter.projectGraph(graph);
 
-    expect(nodes).toHaveLength(1);
+    // V1.126 P1: directed-axis spine node is also added.
+    expect(nodes).toHaveLength(2);
     const node = nodes[0] as Node<TimelineNodeData>;
     expect(node.type).toBe('timeline-event');
     expect(node.data.layoutHint).toBe('event');
@@ -455,7 +457,8 @@ describe('TimelineCanvasAdapter.projectGraph — default layer delegation', () =
     const { nodes } = adapter.projectGraph(graph);
 
     // Narrative projection: the event renders; the era is excluded.
-    expect(nodes).toHaveLength(1);
+    // V1.126 P1: directed-axis spine node is also added.
+    expect(nodes).toHaveLength(2);
     expect(nodes[0].id).toBe('entity:kb-event-1');
     expect(nodes[0].type).toBe('timeline-event');
   });
@@ -483,7 +486,8 @@ describe('TimelineCanvasAdapter.projectGraph — default layer delegation', () =
     const { nodes } = adapter.projectGraph(graph);
 
     // Brief projection: only the era renders.
-    expect(nodes).toHaveLength(1);
+    // V1.126 P1: directed-axis spine node is also added.
+    expect(nodes).toHaveLength(2);
     expect(nodes[0].id).toBe('entity:kb-era-1');
     expect(nodes[0].type).toBe('timeline-brief-era');
   });
@@ -491,12 +495,12 @@ describe('TimelineCanvasAdapter.projectGraph — default layer delegation', () =
 
 // ─── Node-type registry (additive over V1.122) ──────────────────────────────
 
-describe('TimelineCanvasAdapter — node-type registry (V1.123 P1 T2)', () => {
-  it("registers 'timeline-brief-era' alongside V1.122 'timeline-event' + 'timeline-key-block'", () => {
+describe('TimelineCanvasAdapter — node-type registry (V1.123 P1 T2 + V1.126 P1)', () => {
+  it("registers 'timeline-brief-era' alongside V1.122 'timeline-event' + 'timeline-key-block' + V1.126 'directedAxisSpine'", () => {
     const adapter = createTimelineCanvasAdapter({ current: makeContext() });
     const keys = Object.keys(adapter.nodeTypes).sort();
     expect(keys).toEqual(
-      ['timeline-brief-era', 'timeline-event', 'timeline-key-block'].sort(),
+      ['directedAxisSpine', 'timeline-brief-era', 'timeline-event', 'timeline-key-block'].sort(),
     );
   });
 

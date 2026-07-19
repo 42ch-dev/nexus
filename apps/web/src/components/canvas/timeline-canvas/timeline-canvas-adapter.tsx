@@ -70,6 +70,7 @@ import type { WorldKbEdgeData } from '../world-kb/types';
 import { TimelineInspector } from './timeline-inspector';
 import { TimelineBriefEraInspector } from './timeline-brief-era-inspector';
 import { TimelineAltView } from './timeline-alt-view';
+import type { BriefSpineConfig, DirectedAxisSpineNodeData, NarrativeSpineConfig } from './directed-axis-spine';
 import { timelineNodeTypes } from './timeline-node-types';
 
 // ─── Public types (architect-locked §3.1 + V1.123 §2/§8) ────────────────────
@@ -540,6 +541,35 @@ function projectBriefLayer(graph: TimelineGraph): {
     });
   });
 
+  // V1.126 P1 — Brief directed axis spine (decoration-only, Y=0, appended
+  // after entity nodes so existing tests that access nodes[0] pass unchanged).
+  // Only added when the layer has era data (empty spine on zero-entity graphs
+  // would be a visual no-op).
+  if (datedEras.length > 0 || undatedEras.length > 0) {
+    const eraBounds: BriefSpineConfig['eraBounds'] = datedEras.map(({ entity, startHint }) => {
+      const { eraId, endHint } = extractEraAttributes(entity);
+      return {
+        startHint,
+        endHint,
+        eraId,
+        eraLabel: entity.canonical_name || startHint,
+      };
+    });
+    const briefSpineData: DirectedAxisSpineNodeData = {
+      layer: 'brief',
+      spineConfig: { kind: 'brief', eraBounds },
+      accentColor: 'var(--color-canvas-layer-brief-accent)',
+    };
+    nodes.push({
+      id: 'directed-axis-spine',
+      type: 'directedAxisSpine',
+      position: { x: 0, y: WHEN_AXIS_Y - 8 },
+      data: briefSpineData as unknown as TimelineNodeData,
+      selectable: false,
+      focusable: false,
+    });
+  }
+
   // Brief layer: no relationship edges (architect §8 + layer-feel §2.2 —
   // minimal density, era sweep only). Edges belong to the Narrative layer.
   return { nodes, edges: [] };
@@ -639,6 +669,28 @@ function projectNarrativeLayer(graph: TimelineGraph): {
       data: entityToTimelineNodeData(entity, 'context', undefined),
     });
   });
+
+  // V1.126 P1 — Narrative directed axis spine (decoration-only, Y=0,
+  // appended after entity nodes so existing tests pass unchanged).
+  // Only added when the layer has event data.
+  if (datedEvents.length > 0) {
+    const tickTimestamps: NarrativeSpineConfig['tickTimestamps'] = datedEvents.map(
+      ({ occurredAt }) => occurredAt,
+    );
+    const narrativeSpineData: DirectedAxisSpineNodeData = {
+      layer: 'narrative',
+      spineConfig: { kind: 'narrative', tickTimestamps },
+      accentColor: 'var(--color-canvas-layer-narrative-accent)',
+    };
+    nodes.push({
+      id: 'directed-axis-spine',
+      type: 'directedAxisSpine',
+      position: { x: 0, y: WHEN_AXIS_Y - 8 },
+      data: narrativeSpineData as unknown as TimelineNodeData,
+      selectable: false,
+      focusable: false,
+    });
+  }
 
   const edges = deriveTimelineEdges(relationships);
 
