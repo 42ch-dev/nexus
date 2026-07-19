@@ -17,5 +17,6 @@
   "listAriaLabel": "Worlds",
   "timelineActivity": "Timeline activity",
   "timelineActivityLastEdited": "Timeline · last edited {{when}}",
+  "timelineActivityOverview": "{{era}} eras · {{event}} events · {{when}}",
   "timelineActivityFallback": "Timeline · no activity yet"
 }

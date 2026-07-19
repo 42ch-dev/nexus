@@ -11,6 +11,7 @@ pub mod preset_management;
 pub mod reading;
 pub mod runtime;
 pub mod schedule;
+pub mod timeline;
 pub mod works;
 pub mod workspace;
 
@@ -27,5 +28,6 @@ pub use preset_management::*;
 pub use reading::*;
 pub use runtime::*;
 pub use schedule::*;
+pub use timeline::*;
 pub use works::*;
 pub use workspace::*;

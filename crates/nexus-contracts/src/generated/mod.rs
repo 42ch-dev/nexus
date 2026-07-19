@@ -145,6 +145,7 @@ pub const SCHEMA_VERSIONS: &[(&str, u32)] = &[
     ("ScheduleSummary", 1),
     ("SignalScheduleRequest", 1),
     ("SignalScheduleResponse", 1),
+    ("TimelineOverviewResponse", 1),
     ("AppendInspirationRequest", 1),
     ("AppendInspirationResponse", 1),
     ("ChapterBody", 1),

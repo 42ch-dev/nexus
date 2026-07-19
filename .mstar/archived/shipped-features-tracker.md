@@ -135,6 +135,7 @@ Archived from [deferred-features-cross-version-tracker.md](../knowledge/deferred
 | FEAT-WORLD-KB-RELATIONSHIPS | World KB relationships surface (`world_kb.patch_relationship` + `kb_relationships` table) | Shipped V1.74 | Typed relationship β — hybrid taxonomy + directed/`symmetric` single-row semantics + per-row OCC. `@42ch/nexus-contracts` 0.9.0 → 0.10.0. |
 | REL-01 | POST /memory/review synchronous whole-queue pipeline — add bound/timeout/cancellation/concurrency | Shipped V1.80 | Bounded/serialized/deadline-aware rewrite (REVIEW_BATCH_LIMIT=50 + per-creator mutex + 5s partial-progress + has_more/processed drain). `R-V178P0-QC3-003` resolved. |
 | DF-49 | Standalone MCP server for Nexus capabilities | Cancelled V1.79 | Conflicts with ACP-client product direction (`STRATEGY.md`: CLI is an ACP client, not a server) + circular-invocation risk. |
+| DF-V1123-COMPOSITE-ENDPOINT | `GET /v1/daemon/timeline/overview` composite endpoint (overview slice) | V1.126 P2 | V1.123 compass-named; implicitly registered via `status.json` tracking_links; closed by V1.126 P2 without an open-row phase. Plan: `2026-07-20-v1.126-p2-composite-timeline-endpoint`. |
 
 ---
 

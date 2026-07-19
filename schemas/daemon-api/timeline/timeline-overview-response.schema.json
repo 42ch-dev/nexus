@@ -1,0 +1,29 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/daemon-api/timeline/timeline-overview-response.schema.json",
+  "schema_version": 1,
+  "title": "Nexus TimelineOverviewResponse",
+  "description": "Cursor-paginated overview of visible Worlds with per-World era/event counts and last activity timestamp. Response for GET /v1/daemon/timeline/overview.",
+  "type": "object",
+  "required": ["worlds", "total_worlds"],
+  "properties": {
+    "worlds": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["world_id", "era_count", "event_count"],
+        "properties": {
+          "world_id": { "type": "string" },
+          "title": { "type": ["string", "null"] },
+          "era_count": { "type": "integer", "minimum": 0 },
+          "event_count": { "type": "integer", "minimum": 0 },
+          "last_event_at": { "type": ["string", "null"], "format": "date-time" }
+        }
+      },
+      "maxItems": 20
+    },
+    "cursor": { "type": ["string", "null"] },
+    "total_worlds": { "type": "integer", "minimum": 0 }
+  },
+  "additionalProperties": false
+}
