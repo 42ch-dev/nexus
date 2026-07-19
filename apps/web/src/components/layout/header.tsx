@@ -1,11 +1,13 @@
-import { Moon, Sun } from 'lucide-react';
+import { Moon, Settings, Sun } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+import { NavLink } from 'react-router-dom';
 
 import { NexusLogo } from '@/components/brand/nexus-logo';
 import { DaemonHealthIndicator } from '@/components/daemon-health-indicator';
 import { Button } from '@/components/ui/button';
 import { useTheme } from '@/components/theme-provider';
 import { useDesktopCapabilities } from '@/lib/client-context';
+import { cn } from '@/lib/utils';
 
 /**
  * App shell header. Shows the surface title, the daemon health indicator
@@ -26,8 +28,22 @@ export function Header({ title }: { title: string }) {
         <NexusLogo className="h-7 lg:hidden" />
         <h1 className="truncate text-heading-20 font-heading tracking-tight text-gray-1000">{title}</h1>
       </div>
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-2">
         {desktop ? null : <DaemonHealthIndicator />}
+        <NavLink
+          to="/settings"
+          data-testid="header-settings-link"
+          aria-label={t('nav.settings')}
+          title={t('nav.settings')}
+          className={({ isActive }) =>
+            cn(
+              'inline-flex h-8 w-8 items-center justify-center rounded-control text-gray-1000 transition-colors duration-state ease-standard hover:bg-gray-alpha-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-700 focus-visible:ring-offset-2 motion-reduce:transition-none',
+              isActive && 'bg-gray-alpha-100',
+            )
+          }
+        >
+          <Settings className="h-4 w-4" aria-hidden />
+        </NavLink>
         <Button
           variant="tertiary"
           size="small"

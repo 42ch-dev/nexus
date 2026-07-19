@@ -168,16 +168,12 @@ describe('Sidebar', () => {
     );
   });
 
-  it('exposes Settings as a footer utility link above profiles', async () => {
+  it('does not expose a Settings row in the sidebar footer (V1.125 P2)', async () => {
     useSidebarHandlers();
 
     renderInApp(<Sidebar />, { client: makeClient(), activeCreatorId: 'creator-a' });
 
-    const link = screen.getByTestId('settings-footer-utility-link');
-    expect(link).toHaveAttribute('href', '/settings');
-    expect(link).toHaveTextContent('Settings');
-    // Settings stays visible on Creator tab (not tab-scoped).
-    expect(screen.getByRole('tab', { name: 'Creator', selected: true })).toBeInTheDocument();
+    expect(screen.queryByTestId('settings-footer-utility-link')).not.toBeInTheDocument();
   });
 
   it('renders localized labels when locale is zh-CN', async () => {
@@ -192,8 +188,6 @@ describe('Sidebar', () => {
     expect(screen.getByRole('link', { name: '全部作品' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: '世界' })).toBeInTheDocument();
     expect(screen.queryByRole('link', { name: '记忆' })).not.toBeInTheDocument();
-    const link = screen.getByTestId('settings-footer-utility-link');
-    expect(link).toHaveTextContent('设置');
 
     await user.click(screen.getByRole('tab', { name: '编排' }));
     expect(screen.getByRole('link', { name: '记忆' })).toBeInTheDocument();
@@ -429,15 +423,16 @@ describe('Sidebar — layout structure (AD-P2-2 T1)', () => {
     expect(tabpanel).toHaveClass('overflow-auto');
     expect(tabpanel).toHaveClass('flex-1');
 
-    // Settings is a footer utility — it sits OUTSIDE the scrolling tabpanel.
-    const settingsLink = screen.getByTestId('settings-footer-utility-link');
-    expect(tabpanel.contains(settingsLink)).toBe(false);
+    await waitFor(() =>
+      expect(screen.getByRole('toolbar', { name: 'Profiles' })).toBeInTheDocument(),
+    );
 
-    // The footer block container has a single border-t separating it from nav.
-    expect(settingsLink.parentElement).toHaveClass('border-t');
+    const toolbar = screen.getByRole('toolbar', { name: 'Profiles' });
+    expect(tabpanel.contains(toolbar)).toBe(false);
+    expect(toolbar.closest('.border-t')).not.toBeNull();
   });
 
-  it('places Settings and Profiles in one bottom-aligned footer block', async () => {
+  it('places Profiles in a bottom-aligned footer block', async () => {
     useSidebarHandlers();
     renderInApp(<Sidebar />, { client: makeClient(), activeCreatorId: 'creator-a' });
 
@@ -446,20 +441,11 @@ describe('Sidebar — layout structure (AD-P2-2 T1)', () => {
       expect(screen.getByRole('toolbar', { name: 'Profiles' })).toBeInTheDocument(),
     );
 
-    const settingsLink = screen.getByTestId('settings-footer-utility-link');
     const toolbar = screen.getByRole('toolbar', { name: 'Profiles' });
     const tabpanel = screen.getByRole('tabpanel');
 
-    // Both Settings and Profiles are outside the scrolling nav region.
-    expect(tabpanel.contains(settingsLink)).toBe(false);
     expect(tabpanel.contains(toolbar)).toBe(false);
-
-    // Both share the same bottom block (the element with border-t that contains
-    // the Settings link). The toolbar may be nested one level deeper inside the
-    // FooterProfilesChrome wrapper, so verify common ancestry.
-    const bottomBlock = settingsLink.parentElement;
-    expect(bottomBlock).toHaveClass('border-t');
-    expect(bottomBlock!.contains(toolbar)).toBe(true);
+    expect(toolbar.closest('.border-t')).not.toBeNull();
   });
 });
 

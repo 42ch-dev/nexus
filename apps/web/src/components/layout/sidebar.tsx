@@ -131,14 +131,12 @@ export function Sidebar() {
       <ShellSidebarChrome
         activeTab={activeTab}
         activeRoute={pathname}
-        settingsActive={pathname.startsWith('/settings')}
         navGroups={groups}
         onTabChange={setActiveTab}
         logo={<NexusLogo />}
         footer={<FooterProfiles />}
         creatorTabLabel={t('nav.creator')}
         orchestratorTabLabel={t('nav.orchestrator')}
-        settingsLabel={t('nav.settings')}
         primaryNavigationAriaLabel={t('aria.primaryNavigation')}
         isActiveItem={(item, route) => {
           if (item.to === '/works') return route === '/works';
@@ -156,15 +154,6 @@ export function Sidebar() {
         renderNavItem={(item, className, content, isActive) => (
           <NavLink
             to={item.to}
-            className={cn(className, isActive ? 'bg-gray-alpha-100 text-gray-1000' : undefined)}
-          >
-            {content}
-          </NavLink>
-        )}
-        renderSettingsLink={(to, className, content, isActive) => (
-          <NavLink
-            to={to}
-            data-testid="settings-footer-utility-link"
             className={cn(className, isActive ? 'bg-gray-alpha-100 text-gray-1000' : undefined)}
           >
             {content}

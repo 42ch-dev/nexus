@@ -386,7 +386,7 @@ describe('Settings shell routes', () => {
     expect(screen.getByTestId('location-hash')).toHaveTextContent('#setup');
   });
 
-  it('exposes Settings in sidebar footer utility and opens Agent via /settings', async () => {
+  it('exposes Settings in the header and opens Agent via /settings (V1.125 P2)', async () => {
     const user = userEvent.setup();
     useHandlers(scanHandler(), creatorsHandler(), healthHandler());
 
@@ -405,8 +405,9 @@ describe('Settings shell routes', () => {
       },
     );
 
-    const settingsLink = await screen.findByTestId('settings-footer-utility-link');
-    expect(settingsLink).toHaveTextContent('Settings');
+    const settingsLink = await screen.findByTestId('header-settings-link');
+    expect(settingsLink).toHaveAttribute('href', '/settings');
+    expect(settingsLink).toHaveAttribute('aria-label', 'Settings');
 
     await user.click(settingsLink);
 
