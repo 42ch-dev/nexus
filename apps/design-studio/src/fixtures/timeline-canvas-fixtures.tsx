@@ -350,12 +350,90 @@ function KeyBlockFixtureFrame() {
 }
 
 /* ------------------------------------------------------------------ */
+/*  §4.4 V1.126 P1 — Directed axis spine (static SVG samples)            */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Static SVG spine samples for the three layer-differentiated directed
+ * center axes. Presentational-only — no RF types, no daemon data.
+ * Brief: thick L-to-R arrow with gradient era ticks.
+ * Narrative: thin connecting line + discrete tick marks.
+ * Moment: chapter-scoped micro-segments (density-encoded per ND-A1).
+ */
+const ACCENT_BRIEF = 'var(--color-canvas-layer-brief-accent)';
+const ACCENT_NARRATIVE = 'var(--color-canvas-layer-narrative-accent)';
+
+function BriefSpineSample() {
+  return (
+    <svg width={400} height={48} className="block" aria-hidden>
+      <defs>
+        <linearGradient id="studio-brief-grad" x1="0" y1="0" x2="1" y2="0">
+          <stop offset="0%" stopColor={ACCENT_BRIEF} stopOpacity="0.4" />
+          <stop offset="100%" stopColor={ACCENT_BRIEF} stopOpacity="1" />
+        </linearGradient>
+      </defs>
+      <line x1={20} y1={24} x2={340} y2={24} stroke="url(#studio-brief-grad)" strokeWidth={4} strokeLinecap="round" />
+      <polygon points={`360,24 340,16 340,32`} fill={ACCENT_BRIEF} />
+      <line x1={20} y1={18} x2={20} y2={30} stroke={ACCENT_BRIEF} strokeWidth={2} strokeLinecap="round" />
+      <text x={20} y={44} textAnchor="middle" fill={ACCENT_BRIEF} fontSize={10} fontFamily="var(--font-sans, ui-sans-serif, system-ui)">Era 1</text>
+      <line x1={180} y1={18} x2={180} y2={30} stroke={ACCENT_BRIEF} strokeWidth={2} strokeLinecap="round" />
+      <text x={180} y={44} textAnchor="middle" fill={ACCENT_BRIEF} fontSize={10} fontFamily="var(--font-sans, ui-sans-serif, system-ui)">Era 2</text>
+      <line x1={340} y1={18} x2={340} y2={30} stroke={ACCENT_BRIEF} strokeWidth={2} strokeLinecap="round" />
+      <text x={340} y={44} textAnchor="middle" fill={ACCENT_BRIEF} fontSize={10} fontFamily="var(--font-sans, ui-sans-serif, system-ui)">Era 3</text>
+    </svg>
+  );
+}
+
+function NarrativeSpineSample() {
+  return (
+    <svg width={400} height={40} className="block" aria-hidden>
+      <line x1={20} y1={20} x2={380} y2={20} stroke={ACCENT_NARRATIVE} strokeWidth={1.5} strokeLinecap="round" strokeOpacity={0.6} />
+      {[60, 120, 180, 240, 300, 360].map((x, i) => (
+        <line key={i} x1={x} y1={16} x2={x} y2={24} stroke={ACCENT_NARRATIVE} strokeWidth={1.5} strokeLinecap="round" />
+      ))}
+      {[60, 180, 300].map((x, i) => (
+        <text key={i} x={x} y={34} textAnchor="middle" fill={ACCENT_NARRATIVE} fontSize={9} fontFamily="var(--font-sans, ui-sans-serif, system-ui)" opacity={0.7}>tick</text>
+      ))}
+    </svg>
+  );
+}
+
+function DirectedAxisFixtureFrame() {
+  return (
+    <FixtureFrame
+      title="V1.126 P1 — Directed axis spine"
+      description="Layer-differentiated directed center axis on the World Timeline. Brief (amber) = thick era-spanning arrow with gradient ticks at era boundaries. Narrative (blue) = thin discrete event-pin axis with fine-grained tick marks. Each layer reads at a glance as a different visual rhythm — not just token-color-different (ND-7)."
+      testId="timeline-fixture-directed-axis"
+    >
+      <VariantMatrix testId="timeline-directed-axis-matrix">
+        <VariantChip label="Brief layer spine">
+          <div className="flex flex-col gap-2 rounded-card border border-gray-alpha-300 bg-canvas-surface p-4">
+            <span className="text-label-12 font-medium" style={{ color: ACCENT_BRIEF }}>
+              Brief — era-spanning arrow
+            </span>
+            <BriefSpineSample />
+          </div>
+        </VariantChip>
+        <VariantChip label="Narrative layer spine">
+          <div className="flex flex-col gap-2 rounded-card border border-gray-alpha-300 bg-canvas-surface p-4">
+            <span className="text-label-12 font-medium" style={{ color: ACCENT_NARRATIVE }}>
+              Narrative — discrete event-pin axis
+            </span>
+            <NarrativeSpineSample />
+          </div>
+        </VariantChip>
+      </VariantMatrix>
+    </FixtureFrame>
+  );
+}
+
+/* ------------------------------------------------------------------ */
 /*  Public fixture component                                            */
 /* ------------------------------------------------------------------ */
 
 /**
- * World Timeline fixtures — three frames (Brief-era / Event / KeyBlock)
- * covering boundary §4.1–§4.3 variant matrices. Presentational-only; no
+ * World Timeline fixtures — Brief-era / Event / KeyBlock / Directed axis
+ * covering boundary §4.1–§4.4 variant matrices. Presentational-only; no
  * daemon, no RF, no contracts, no i18n.
  */
 export function TimelineCanvasFixtures() {
@@ -364,6 +442,7 @@ export function TimelineCanvasFixtures() {
       <BriefEraFixtureFrame />
       <EventFixtureFrame />
       <KeyBlockFixtureFrame />
+      <DirectedAxisFixtureFrame />
     </div>
   );
 }

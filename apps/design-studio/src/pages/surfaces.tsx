@@ -748,7 +748,17 @@ export function SurfacesCanvasPage() {
           <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
             canvas-layer-narrative-accent
           </code>
-          ). Static English product vocabulary only — no{' '}
+          ). V1.126 P1 adds a layer-differentiated directed center axis:
+           Brief = thick era-spanning arrow (
+           <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+             canvas-layer-brief-accent
+           </code>
+           ), Narrative = thin discrete event-pin axis (
+           <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+             canvas-layer-narrative-accent
+           </code>
+           ). Each layer has a distinct visual rhythm — not just token-color-different
+           (ND-7). Static English product vocabulary only — no{' '}
           <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
             @xyflow/react
           </code>
@@ -784,7 +794,13 @@ export function SurfacesCanvasPage() {
           <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
             canvas-layer-moment-accent
           </code>
-          . Static English product vocabulary only — no{' '}
+. V1.126 P1 adds the Moment layer directed center axis: chapter-scoped micro-segments (
+           <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+             canvas-layer-moment-accent
+           </code>
+           ) with density-encoding per ND-A1 (segment length ∝ scene count). Narrative
+           layer also gets the discrete pin axis treatment (cross-surface consistency
+           with World Timeline). Static English product vocabulary only — no{' '}
           <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
             @xyflow/react
           </code>
