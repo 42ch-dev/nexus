@@ -4,7 +4,7 @@
   "plans": [
     {
       "plan_id": "2026-07-20-v1.126-p3-status-compaction-residual-cleanup",
-      "status": "InProgress",
+      "status": "Done",
       "iteration_refs": [
         "V1.126"
       ],
@@ -13,7 +13,12 @@
         "spec_integration_branch": "iteration/v1.126",
         "merge_target": "iteration/v1.126",
         "working_branch": "feature/v1.126-p3-status-compaction-residual-cleanup",
-        "wire_contracts_changed": false
+        "wire_contracts_changed": false,
+        "done_at": "2026-07-20",
+        "qc_verdict": "Approve with residuals (post-fix-wave)",
+        "qa_verdict": "Pass (conditional; defect resolved)",
+        "residuals_open_count": 4,
+        "merge_commit": "merged into iteration/v1.126"
       }
     }
   ],
