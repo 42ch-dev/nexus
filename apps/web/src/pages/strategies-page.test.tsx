@@ -91,8 +91,31 @@ describe('StrategiesPage', () => {
 
     renderStrategies();
 
-    await waitFor(() => expect(screen.getByText('Could not load presets.')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('Could not load presets')).toBeInTheDocument());
     expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument();
+    expect(screen.queryByText('Could not load this view')).not.toBeInTheDocument();
+  });
+
+  it('renders unavailable state when orchestration engine is down (503)', async () => {
+    useHandlers(
+      http.get('/v1/daemon/presets', () =>
+        HttpResponse.json(
+          {
+            success: false,
+            error: { code: 'service_unavailable', message: 'engine not available' },
+          },
+          { status: 503 },
+        ),
+      ),
+    );
+
+    renderStrategies();
+
+    await waitFor(() =>
+      expect(screen.getByText('Orchestration engine not running')).toBeInTheDocument(),
+    );
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument();
+    expect(screen.queryByText('Could not load this view')).not.toBeInTheDocument();
   });
 
   it('switches to zh-CN locale without remounting', async () => {

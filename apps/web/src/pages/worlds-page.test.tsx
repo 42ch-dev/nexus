@@ -128,6 +128,42 @@ describe('WorldsPage', () => {
     });
   });
 
+  it('renders a card-sized Work-create CTA when no worlds exist (V1.125 P2)', async () => {
+    const user = userEvent.setup();
+    useHandlers(
+      http.get('/v1/daemon/narrative/worlds', () => HttpResponse.json({ worlds: [] })),
+      http.get('/v1/daemon/works', () =>
+        HttpResponse.json({ items: [], pagination: { limit: 20, has_more: false } }),
+      ),
+    );
+
+    renderWorlds();
+
+    const cta = await screen.findByTestId('worlds-empty-create-work');
+    expect(cta).toHaveTextContent('Create a Work to get started');
+    expect(cta.className).toMatch(/\bmin-h-\[7\.5rem\]/);
+
+    await user.click(cta);
+    expect(await screen.findByRole('dialog', { name: 'Create Work' })).toBeInTheDocument();
+  });
+
+  it('shows Create World card when client exposes createWorld (V1.125 P2)', async () => {
+    useHandlers(
+      http.get('/v1/daemon/narrative/worlds', () => HttpResponse.json({ worlds: [] })),
+    );
+
+    const clientWithCreateWorld = Object.assign(new BrowserClient(), {
+      createWorld: async () => ({ world_id: 'w-new' }),
+    });
+
+    renderInApp(<WorldsPage />, { client: clientWithCreateWorld });
+
+    expect(await screen.findByTestId('worlds-empty-create-world')).toHaveTextContent(
+      'Start a new World',
+    );
+    expect(screen.queryByTestId('worlds-empty-create-work')).not.toBeInTheDocument();
+  });
+
   it('renders the honest empty state when no worlds exist', async () => {
     useHandlers(
       http.get('/v1/daemon/narrative/worlds', () => HttpResponse.json({ worlds: [] })),
@@ -135,7 +171,7 @@ describe('WorldsPage', () => {
 
     renderWorlds();
 
-    expect(await screen.findByText('No worlds yet')).toBeInTheDocument();
+    expect(await screen.findByTestId('worlds-empty-create-work')).toBeInTheDocument();
   });
 
   it('renders the loading state before data resolves', async () => {

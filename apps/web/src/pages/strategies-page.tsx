@@ -7,8 +7,9 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
-import { EmptyState, ErrorState, LoadingState } from '@/components/ui/states';
+import { EmptyState, ErrorState, LoadingState, UnavailableState } from '@/components/ui/states';
 import { useDeletePreset, usePresets, useReloadPreset } from '@/api/queries';
+import { isOrchestrationEngineUnavailable } from '@/lib/nexus/errors';
 import type { PresetSummary } from '@42ch/nexus-contracts';
 
 import { ScaffoldPresetDialog } from './dialogs/scaffold-preset-dialog';
@@ -77,7 +78,19 @@ export function StrategiesPage() {
       </div>
 
       {presets.isError ? (
-        <ErrorState description={t('errorDescription')} onRetry={() => presets.refetch()} />
+        isOrchestrationEngineUnavailable(presets.error) ? (
+          <UnavailableState
+            title={t('engineUnavailableTitle')}
+            description={t('engineUnavailableDescription')}
+            onRetry={() => presets.refetch()}
+          />
+        ) : (
+          <ErrorState
+            title={t('errorTitle')}
+            description={t('errorDescription')}
+            onRetry={() => presets.refetch()}
+          />
+        )
       ) : presets.isLoading ? (
         <Card className="shadow-card">
           <CardContent>

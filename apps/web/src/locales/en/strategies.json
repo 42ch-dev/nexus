@@ -5,6 +5,9 @@
   "scaffoldPreset": "Scaffold",
   "refreshAria": "Refresh presets",
   "errorDescription": "Could not load presets.",
+  "errorTitle": "Could not load presets",
+  "engineUnavailableTitle": "Orchestration engine not running",
+  "engineUnavailableDescription": "Start the daemon orchestration engine, then try again.",
   "loading": "Loading presets…",
   "userPresets": {
     "title": "User presets",

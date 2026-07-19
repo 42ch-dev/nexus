@@ -136,9 +136,31 @@ describe('SessionsPage', () => {
 
     renderSessions();
 
-    expect(await screen.findByText('Could not load this view')).toBeInTheDocument();
+    expect(await screen.findByText('Could not load sessions')).toBeInTheDocument();
     expect(screen.getByText(/Could not load orchestration sessions/i)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument();
+    expect(screen.queryByText('Could not load this view')).not.toBeInTheDocument();
+  });
+
+  it('renders unavailable state when orchestration engine is down (503)', async () => {
+    useHandlers(
+      http.get('/v1/daemon/orchestration/sessions', () =>
+        HttpResponse.json(
+          {
+            success: false,
+            error: { code: 'service_unavailable', message: 'engine not available' },
+          },
+          { status: 503 },
+        ),
+      ),
+    );
+
+    renderSessions();
+
+    expect(await screen.findByText('Orchestration engine not running')).toBeInTheDocument();
+    expect(screen.getByText(/Start the daemon orchestration engine/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument();
+    expect(screen.queryByText('Could not load this view')).not.toBeInTheDocument();
   });
 
   it('switches to zh-CN locale without remounting', async () => {

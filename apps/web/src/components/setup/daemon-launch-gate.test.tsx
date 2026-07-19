@@ -101,7 +101,7 @@ describe('DaemonLaunchGate', () => {
     expect(startDaemon).not.toHaveBeenCalled();
   });
 
-  it('desktop passes gate when initial status is degraded', async () => {
+  it('desktop keeps splash when initial status is degraded (V1.125)', async () => {
     healthUnavailable();
     const startDaemon = vi.fn(() => Promise.resolve());
     const getDaemonStatus = vi.fn(() =>
@@ -116,17 +116,20 @@ describe('DaemonLaunchGate', () => {
       }),
     });
 
-    await waitFor(() => expect(screen.getByTestId('routes')).toBeInTheDocument());
+    await waitFor(() => expect(getDaemonStatus).toHaveBeenCalled());
+    expect(screen.getByText('Starting daemon…')).toBeInTheDocument();
+    expect(screen.queryByTestId('routes')).not.toBeInTheDocument();
     expect(startDaemon).not.toHaveBeenCalled();
   });
 
-  it('desktop becomes ready via health when status subscription is unavailable', async () => {
+  it('desktop does not unlock on health alone when status IPC is unavailable (V1.125)', async () => {
     useHandlers(
       http.get('/v1/daemon/runtime/health', () =>
         HttpResponse.json({ status: 'ok', version: 'test' }),
       ),
     );
 
+    vi.useFakeTimers({ shouldAdvanceTime: true });
     const startDaemon = vi.fn(() => Promise.resolve());
     renderGate({
       desktop: makeDesktop({
@@ -137,8 +140,51 @@ describe('DaemonLaunchGate', () => {
     });
 
     expect(screen.getByText('Starting daemon…')).toBeInTheDocument();
-    await waitFor(() => expect(screen.getByTestId('routes')).toBeInTheDocument());
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5_000);
+    });
+
+    expect(screen.queryByTestId('routes')).not.toBeInTheDocument();
     expect(startDaemon).not.toHaveBeenCalled();
+  });
+
+  it('desktop unlocks via health poll only after status reports running', async () => {
+    useHandlers(
+      http.get('/v1/daemon/runtime/health', () =>
+        HttpResponse.json({ status: 'ok', version: 'test' }),
+      ),
+    );
+
+    let statusCalls = 0;
+    const getDaemonStatus = vi.fn(() => {
+      statusCalls += 1;
+      if (statusCalls === 1) {
+        return Promise.resolve({ state: 'starting', port: 8420 } as DaemonStatus);
+      }
+      return Promise.resolve({
+        state: 'running',
+        port: 8420,
+        version: 'test',
+      } satisfies DaemonStatus);
+    });
+
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    renderGate({
+      desktop: makeDesktop({
+        getDaemonStatus,
+        onDaemonStatusChanged: () => Promise.resolve(() => {}),
+      }),
+    });
+
+    expect(screen.getByText('Starting daemon…')).toBeInTheDocument();
+    expect(screen.queryByTestId('routes')).not.toBeInTheDocument();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_600);
+    });
+
+    await waitFor(() => expect(screen.getByTestId('routes')).toBeInTheDocument());
   });
 
   it('surfaces timeout error with retry and reset affordances', async () => {

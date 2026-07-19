@@ -18,8 +18,9 @@ import { useTranslation } from 'react-i18next';
 import type { Connection, Edge, Node } from '@xyflow/react';
 
 import { CanvasShell } from '@/components/canvas/canvas-shell';
-import { ErrorState, LoadingState } from '@/components/ui/states';
+import { ErrorState, LoadingState, UnavailableState } from '@/components/ui/states';
 import { useRegisterCommand } from '@/lib/canvas/command-registry';
+import { isOrchestrationEngineUnavailable } from '@/lib/nexus/errors';
 import type { StrategyEdgeData, StrategyNodeData } from '@/lib/canvas/strategy-graph';
 import { useCanvasSurface, type CanvasSurfaceQueryResult } from '@/components/canvas/use-canvas-surface';
 
@@ -226,8 +227,24 @@ export function StrategyCanvas({ presetId }: StrategyCanvasProps) {
   );
 
   if (strategyState.graphQuery.isLoading) return <LoadingState label={t('strategy.loading')} />;
-  if (strategyState.graphQuery.isError)
-    return <ErrorState description={t('strategy.loadError')} onRetry={() => strategyState.graphQuery.refetch()} />;
+  if (strategyState.graphQuery.isError) {
+    if (isOrchestrationEngineUnavailable(strategyState.graphQuery.error)) {
+      return (
+        <UnavailableState
+          title={t('strategy.engineUnavailableTitle')}
+          description={t('strategy.engineUnavailableDescription')}
+          onRetry={() => strategyState.graphQuery.refetch()}
+        />
+      );
+    }
+    return (
+      <ErrorState
+        title={t('strategy.loadErrorTitle')}
+        description={t('strategy.loadError')}
+        onRetry={() => strategyState.graphQuery.refetch()}
+      />
+    );
+  }
 
   const parsed = strategyState.graphQuery.data?.parsed;
   const problems = parsed?.problems ?? [];

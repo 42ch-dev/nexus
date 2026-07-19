@@ -5,7 +5,6 @@ import { CanvasNavCommands } from '@/components/canvas/canvas-nav-commands';
 import { CommandPalette, openPalette } from '@/components/command-palette';
 import { DaemonStatusBar } from '@/components/layout/daemon-status-bar';
 import { Header } from '@/components/layout/header';
-import { MainBanner } from '@/components/layout/main-banner';
 import { Sidebar } from '@/components/layout/sidebar';
 import { useHotkey } from '@/lib/use-hotkey';
 import { useTimelineShortcut } from '@/lib/keyboard-shortcuts';
@@ -51,8 +50,8 @@ function useRouteTitle(): string {
  *
  * Fixed 248px sidebar at `lg` and above; collapses to a horizontal top nav
  * below `lg`. Main content max-width 1200px with 24px desktop / 16px mobile
- * side padding. V1.94 adds the {@link MainBanner} for daemon degraded/error
- * states; the footer status bar is restart-icon-only when running.
+ * side padding. V1.125 removes the in-shell daemon banner — pre-ready blocking
+ * is owned by {@link DaemonLaunchGate} fullscreen splash only.
  */
 export function RootLayout() {
   const { t } = useTranslation('shell');
@@ -78,7 +77,7 @@ export function RootLayout() {
     <div className="flex h-screen overflow-hidden bg-background-100 text-gray-1000">
       {/* Desktop sidebar — full-height rail (AD-P2-2): h-screen + overflow-hidden
           so the sidebar chrome manages its own internal scroll (nav scrolls in
-          the middle; Settings + Profiles footer block is pinned at the bottom).
+          the middle; the Profiles footer block is pinned at the bottom).
           Width consumes the DESIGN.md sidebar-nav.width token (w-sidebar-nav-width). */}
       <aside className="hidden h-screen w-sidebar-nav-width shrink-0 flex-col overflow-hidden lg:flex">
         <Sidebar />
@@ -110,8 +109,6 @@ export function RootLayout() {
         </nav>
 
         <Header title={title} />
-
-        <MainBanner />
 
         {/* Content region — the ONLY scroll region (AD-P2-2). min-h-0 allows
             the flex child to shrink within the column so overflow scrolls here

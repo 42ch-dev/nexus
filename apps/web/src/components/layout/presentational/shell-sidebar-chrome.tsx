@@ -1,4 +1,4 @@
-import { ChevronRight, Settings, type LucideIcon } from 'lucide-react';
+import { ChevronRight, type LucideIcon } from 'lucide-react';
 import { useState, type ReactNode } from 'react';
 
 import { cn } from '@/lib/utils';
@@ -31,7 +31,6 @@ export type RenderNavItem = (
 export interface ShellSidebarChromeProps {
   activeTab: ShellSidebarTab;
   activeRoute: string;
-  settingsActive: boolean;
   navGroups: ShellNavGroup[];
   onTabChange: (tab: ShellSidebarTab) => void;
   /** Optional logo slot — apps should pass their theme-aware wordmark. */
@@ -52,19 +51,10 @@ export interface ShellSidebarChromeProps {
    * for downstream fixtures. Do not pass from production sidebar.
    */
   drillInItems?: ShellNavItem[];
-  /** Optional custom renderer for the Settings footer utility link. */
-  renderSettingsLink?: (
-    to: string,
-    className: string,
-    content: ReactNode,
-    isActive: boolean,
-  ) => ReactNode;
   /** Optional label for the Creator tab (defaults to English for fixtures). */
   creatorTabLabel?: string;
   /** Optional label for the Orchestrator tab (defaults to English for fixtures). */
   orchestratorTabLabel?: string;
-  /** Optional label for the Settings footer utility (defaults to English). */
-  settingsLabel?: string;
   /** Optional aria-label for the primary navigation tablist. */
   primaryNavigationAriaLabel?: string;
   /** Optional test id for the root sidebar chrome. */
@@ -80,18 +70,15 @@ export interface ShellSidebarChromeProps {
 export function ShellSidebarChrome({
   activeTab,
   activeRoute,
-  settingsActive,
   navGroups,
   onTabChange,
   logo,
   footer,
   renderNavItem = defaultRenderNavItem,
-  renderSettingsLink = defaultRenderSettingsLink,
   isActiveItem,
   drillInItems,
   creatorTabLabel = 'Creator',
   orchestratorTabLabel = 'Orchestrator',
-  settingsLabel = 'Settings',
   primaryNavigationAriaLabel = 'Primary navigation',
   'data-testid': dataTestId,
 }: ShellSidebarChromeProps) {
@@ -157,24 +144,11 @@ export function ShellSidebarChrome({
         </ul>
       )}
 
-      <div className="mt-auto flex flex-col gap-2 border-t border-gray-alpha-400 pt-3">
-        {/* Footer utility — Settings is cross-cutting (not tab-scoped). */}
-        {renderSettingsLink(
-          '/settings',
-          cn(
-            'group relative flex h-sidebar-nav-item-height items-center gap-2 rounded-control px-3 text-label-14 transition-colors duration-state ease-standard motion-reduce:transition-none',
-            settingsActive
-              ? 'bg-gray-alpha-100 text-gray-1000'
-              : 'text-gray-600 hover:bg-gray-alpha-100 hover:text-gray-900',
-          ),
-          <>
-            <Settings className="h-4 w-4 shrink-0" aria-hidden />
-            <span>{settingsLabel}</span>
-          </>,
-          settingsActive,
-        )}
-        {footer}
-      </div>
+      {footer ? (
+        <div className="mt-auto flex flex-col gap-2 border-t border-gray-alpha-400 pt-3">
+          {footer}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -186,24 +160,6 @@ function defaultRenderNavItem(
 ): ReactNode {
   return (
     <a href={item.to} className={className}>
-      {content}
-    </a>
-  );
-}
-
-function defaultRenderSettingsLink(
-  to: string,
-  className: string,
-  content: ReactNode,
-  isActive: boolean,
-): ReactNode {
-  return (
-    <a
-      href={to}
-      className={className}
-      data-testid="settings-footer-utility-link"
-      aria-current={isActive ? 'page' : undefined}
-    >
       {content}
     </a>
   );

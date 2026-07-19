@@ -251,7 +251,6 @@ function ShellSidebarFixture() {
         <ShellSidebarChrome
           activeTab={activeTab}
           activeRoute="#works"
-          settingsActive={false}
           navGroups={groups}
           onTabChange={setActiveTab}
           logo={
