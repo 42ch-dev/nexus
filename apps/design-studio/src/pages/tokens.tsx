@@ -301,11 +301,48 @@ const CANVAS_TOKEN_GROUPS: CanvasTokenGroup[] = [
   {
     title: 'Accent spines',
     hint:
-      'Per-surface identity — the three spine colors NodeChromeShell renders as a 3px border-l-[3px] stripe when accent="strategy" | "outline" | "worldkb". strategy=purple-700, outline=amber-700, worldkb=teal-700 (DESIGN.md §Canvas Surface).',
+      'Surface spines (strategy / outline / worldkb). Timeline surface accent lives in Canvas — Timeline accent spine; layer feel lives in Canvas — Layer accents. strategy=purple-700, outline=amber-700, worldkb=teal-700 (DESIGN.md §Canvas Surface).',
     tokens: [
       { label: 'canvas-strategy-accent', varName: '--color-canvas-strategy-accent' },
       { label: 'canvas-outline-accent', varName: '--color-canvas-outline-accent' },
       { label: 'canvas-worldkb-accent', varName: '--color-canvas-worldkb-accent' },
+    ],
+  },
+  {
+    title: 'Canvas — Timeline accent spine',
+    hint:
+      'Surface-level Timeline identity (blue-700). Distinct from per-layer accents.',
+    tokens: [
+      { label: 'canvas-timeline-accent', varName: '--color-canvas-timeline-accent' },
+    ],
+  },
+  {
+    title: 'Canvas — Layer accents',
+    hint:
+      'Intra-surface Brief / Narrative / Moment feel (V1.123 P4). Used on Timeline node icons and badges.',
+    tokens: [
+      { label: 'canvas-layer-brief-accent', varName: '--color-canvas-layer-brief-accent' },
+      { label: 'canvas-layer-narrative-accent', varName: '--color-canvas-layer-narrative-accent' },
+      { label: 'canvas-layer-moment-accent', varName: '--color-canvas-layer-moment-accent' },
+    ],
+  },
+  {
+    title: 'Canvas — Outline Timeline pins',
+    hint:
+      'Outline canvas when-axis pins/markers (not World Timeline card chrome).',
+    tokens: [
+      { label: 'canvas-outline-timeline-event-pin', varName: '--color-canvas-outline-timeline-event-pin' },
+      { label: 'canvas-outline-timeline-marker', varName: '--color-canvas-outline-timeline-marker' },
+    ],
+  },
+  {
+    title: 'Soul Viz — Timeline axes',
+    hint:
+      'Soul visualization timeline axis geometry colors (light/dark differ).',
+    tokens: [
+      { label: 'soul-viz-timeline-axis-line', varName: '--color-soul-viz-timeline-axis-line' },
+      { label: 'soul-viz-timeline-axis-tick', varName: '--color-soul-viz-timeline-axis-tick' },
+      { label: 'soul-viz-timeline-axis-label', varName: '--color-soul-viz-timeline-axis-label' },
     ],
   },
 ];
@@ -1087,7 +1124,8 @@ function CanvasSection() {
           )}
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
             {group.tokens.map((t) =>
-              group.title === 'Accent spines' ? (
+              group.title === 'Accent spines' ||
+              group.title === 'Canvas — Timeline accent spine' ? (
                 <CanvasAccentSpineSwatch key={t.varName} token={t} />
               ) : (
                 <CanvasColorSwatch key={t.varName} token={t} />
