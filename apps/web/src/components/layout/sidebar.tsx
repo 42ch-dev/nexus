@@ -220,9 +220,10 @@ export function Sidebar() {
                 ? [
                     {
                       id: 'agent',
-                      label: `${t('submenu.agent')}: ${t('submenu.unassigned')}`,
+                      label: t('submenu.agentLabel', { status: t('submenu.unassigned') }),
                       icon: User,
                       onSelect: () => {
+                        agentDialog.setTitle(t('submenu.agentDialogTitle', { entityName: item.label }));
                         agentDialog.setOpen(true);
                       },
                     },

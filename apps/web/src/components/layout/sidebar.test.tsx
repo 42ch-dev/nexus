@@ -763,6 +763,60 @@ describe('Sidebar — submenu trigger (V1.126 P0 T1)', () => {
       expect(screen.queryByRole('menu', { name: 'Row actions' })).not.toBeInTheDocument(),
     );
   });
+
+  it('trigger button has aria-haspopup="menu" (V1.126 P0 T3)', async () => {
+    renderSidebarWithWorks();
+
+    await waitFor(() =>
+      expect(screen.getByRole('link', { name: 'Alpha Novel' })).toBeInTheDocument(),
+    );
+
+    const menuBtn = screen.getByRole('button', { name: /Open menu for Alpha Novel/i });
+    expect(menuBtn).toHaveAttribute('aria-haspopup', 'menu');
+  });
+
+  it('aria-expanded toggles with submenu open state (V1.126 P0 T3)', async () => {
+    const user = userEvent.setup();
+    renderSidebarWithWorks();
+
+    await waitFor(() =>
+      expect(screen.getByRole('link', { name: 'Alpha Novel' })).toBeInTheDocument(),
+    );
+
+    const menuBtn = screen.getByRole('button', { name: /Open menu for Alpha Novel/i });
+    expect(menuBtn).toHaveAttribute('aria-expanded', 'false');
+
+    await user.click(menuBtn);
+    await waitFor(() =>
+      expect(screen.getByRole('menu', { name: 'Row actions' })).toBeInTheDocument(),
+    );
+    expect(menuBtn).toHaveAttribute('aria-expanded', 'true');
+
+    await user.keyboard('{Escape}');
+    await waitFor(() =>
+      expect(screen.queryByRole('menu', { name: 'Row actions' })).not.toBeInTheDocument(),
+    );
+    expect(menuBtn).toHaveAttribute('aria-expanded', 'false');
+  });
+
+  it('submenu items have role="menuitem" (V1.126 P0 T3)', async () => {
+    const user = userEvent.setup();
+    renderSidebarWithWorks();
+
+    await waitFor(() =>
+      expect(screen.getByRole('link', { name: 'Alpha Novel' })).toBeInTheDocument(),
+    );
+
+    const menuBtn = screen.getByRole('button', { name: /Open menu for Alpha Novel/i });
+    await user.click(menuBtn);
+
+    await waitFor(() => {
+      expect(screen.getByRole('menuitem', { name: /Open Timeline/i })).toBeInTheDocument();
+      expect(screen.getByRole('menuitem', { name: /Open Outline/i })).toBeInTheDocument();
+      expect(screen.getByRole('menuitem', { name: /Agent:/i })).toBeInTheDocument();
+      expect(screen.getByRole('menuitem', { name: /Rename/i })).toBeInTheDocument();
+    });
+  });
 });
 
 describe('Sidebar — submenu contents (V1.126 P0 T2)', () => {

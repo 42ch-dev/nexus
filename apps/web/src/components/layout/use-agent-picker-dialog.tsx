@@ -55,11 +55,13 @@ function resolvePickerStatus(
 export interface AgentPickerDialogHandle {
   open: boolean;
   setOpen: (open: boolean) => void;
+  setTitle: (title: string) => void;
   dialog: React.ReactNode;
 }
 
-export function useAgentPickerDialog(): AgentPickerDialogHandle {
+export function useAgentPickerDialog(initialTitle?: string): AgentPickerDialogHandle {
   const [open, setOpen] = useState(false);
+  const [dialogTitle, setDialogTitle] = useState(initialTitle ?? '');
   const { t } = useTranslation('settings');
   const desktop = useDesktopCapabilities();
   const qc = useQueryClient();
@@ -98,7 +100,7 @@ export function useAgentPickerDialog(): AgentPickerDialogHandle {
 
   const dialog = (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogContent title={t('agent.title')}>
+      <DialogContent title={dialogTitle || t('agent.title')}>
         <AgentPicker
           status={status}
           defaultGrid={status === 'ready' ? defaultGrid : []}
@@ -118,5 +120,5 @@ export function useAgentPickerDialog(): AgentPickerDialogHandle {
     </Dialog>
   );
 
-  return { open, setOpen, dialog };
+  return { open, setOpen, setTitle: setDialogTitle, dialog };
 }
