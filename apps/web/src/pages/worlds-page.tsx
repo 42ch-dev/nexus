@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { EmptyState, ErrorState, LoadingState } from '@/components/ui/states';
 import { useNarrativeWorlds } from '@/api/queries';
+import { formatRelative } from '@/lib/format';
 
 /**
  * Worlds picker (V1.115 T3 — R-V1111P1-WORLDS-PICKER; V1.122 P1 T3 retarget).
@@ -66,6 +67,19 @@ export function WorldsPage() {
             <ul className="flex flex-col gap-2" aria-label={t('listAriaLabel')}>
               {worlds.data.map((world) => {
                 const label = world.title || world.world_id;
+                // V1.123 P3 Task 3 — Timeline activity surface. Per plan
+                // Global Constraints + architect §8, the durable slice is
+                // the last-edited timestamp from `world.updated_at` (the
+                // World wire type marks it optional, so the fallback handles
+                // worlds without it). Per-World graph fetches for era/event
+                // counts are an N+1 cost the list endpoint performance
+                // cannot absorb; that composite is deferred to a future
+                // endpoint (`DF-V1122-DEEPER-WB` stays deferred).
+                const activityText = world.updated_at
+                  ? t('timelineActivityLastEdited', {
+                      when: formatRelative(world.updated_at),
+                    })
+                  : t('timelineActivityFallback');
                 return (
                   <li key={world.world_id}>
                     <button
@@ -88,6 +102,15 @@ export function WorldsPage() {
                             {world.world_id}
                           </span>
                         )}
+                        {/* V1.123 P3 T3 — Timeline activity surface. The
+                            testid is namespaced by world_id so tests can
+                            target a specific world row without ambiguity. */}
+                        <span
+                          className="block truncate text-copy-13 text-gray-700"
+                          data-testid={`world-timeline-activity-${world.world_id}`}
+                        >
+                          {activityText}
+                        </span>
                       </span>
                     </button>
                   </li>

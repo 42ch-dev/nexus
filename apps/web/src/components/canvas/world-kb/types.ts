@@ -62,7 +62,15 @@ export interface WorldKbEdgeData {
   source?: 'manual' | 'extraction';
 }
 
-/** All BlockType variants that may appear as World KB entities. */
+/**
+ * All BlockType variants that may appear as World KB entities.
+ *
+ * V1.123 P1: `'era'` is intentionally NOT listed here — era KeyBlocks are
+ * World-scoped world-shape markers surfaced on the Timeline Brief layer only
+ * (architect-locked `three-layer-architecture.md` §2 + §8). They are not
+ * editable from the World KB surface (no `kb.patch_entity` write affordance
+ * in the World KB inspector); Timeline Brief is their hero surface.
+ */
 export const WORLD_KB_BLOCK_TYPES: readonly BlockType[] = [
   'character',
   'ability',
@@ -84,7 +92,15 @@ export const WORLD_KB_BLOCK_TYPES: readonly BlockType[] = [
   'act',
 ] as const;
 
-/** Human-readable label for each BlockType (Title Case per DESIGN.md voice). */
+/**
+ * Human-readable label for each BlockType (Title Case per DESIGN.md voice).
+ *
+ * V1.123 P1 (compiler-forced by Task 1's `BlockType` wire expansion): added
+ * `era: 'Era'` so `Record<BlockType, string>` stays exhaustive. The label
+ * surfaces in read-only contexts (Timeline Brief-era node, alt-view table);
+ * the World KB inspector intentionally does not offer `era` in its
+ * block-type selector (see `WORLD_KB_BLOCK_TYPES` above).
+ */
 export const BLOCK_TYPE_LABELS: Record<BlockType, string> = {
   character: 'Character',
   ability: 'Ability',
@@ -104,6 +120,7 @@ export const BLOCK_TYPE_LABELS: Record<BlockType, string> = {
   dialogue: 'Dialogue',
   beat: 'Beat',
   act: 'Act',
+  era: 'Era',
 };
 
 /**

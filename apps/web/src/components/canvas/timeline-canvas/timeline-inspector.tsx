@@ -1,6 +1,6 @@
 /**
  * Timeline inspector — inline title/body editor for a selected Timeline node
- * (V1.122 P1 T4).
+ * (V1.122 P1 T4) + cross-surface navigation affordance (V1.123 P3 Task 4).
  *
  * Edits a World-scoped KeyBlock entity via the orchestrator's `onPatchEntity`
  * callback, which routes the patch through `NexusClient.worldKbPatchEntity`
@@ -18,9 +18,18 @@
  * `validation_summary.errors[]` inline (mirrors the V1.73 entity inspector).
  * Conflict UX (409): handed off to the orchestrator via `onConflict`, which
  * opens the world-kb-flavored `WorldKbEntityConflictModal`.
+ *
+ * V1.123 P3 Task 4 — event nodes (`layoutHint === 'event'`) ALSO surface a
+ * "View in Work Timeline" affordance when a realizing Work is bound
+ * (`ctxRef.current.boundWorkId` + `ctxRef.current.onViewInWorkTimeline` both
+ * present). The affordance hides when either slot is absent (honest scope
+ * cut per plan §"If binding is missing or unreliable, P3 hides the
+ * affordance"). Context (non-event) nodes do NOT surface the CTA even when a
+ * realizing Work exists — the cross-surface binding axis is event-only.
  */
 import { useEffect, useState, type MutableRefObject } from 'react';
 import { useTranslation } from 'react-i18next';
+import { BookOpen } from 'lucide-react';
 import type { Node } from '@xyflow/react';
 
 import { Textarea } from '@/components/ui/textarea';
@@ -218,6 +227,31 @@ export function TimelineInspector({ node, ctxRef }: TimelineInspectorProps) {
             <li key={i}>{err}</li>
           ))}
         </ul>
+      ) : null}
+
+      {/* V1.123 P3 Task 4 — cross-surface navigation affordance.
+          Reserved for event nodes (`layoutHint === 'event'`) — the
+          cross-surface binding axis is World-event ↔ Work-event only;
+          context entities (characters, locations) do not surface this CTA
+          even when a realizing Work is bound. The affordance also hides
+          when the orchestrator has not supplied `boundWorkId` + the
+          navigation callback (honest scope cut per plan §). */}
+      {data.layoutHint === 'event' && ctx.boundWorkId && ctx.onViewInWorkTimeline ? (
+        <button
+          type="button"
+          data-testid="timeline-view-in-work-timeline"
+          data-work-id={ctx.boundWorkId}
+          onClick={ctx.onViewInWorkTimeline}
+          aria-label={t('timeline.inspector.viewInWorkTimelineAria', {
+            defaultValue: 'Open the Work that realizes this World on the Work Timeline',
+          })}
+          className="inline-flex items-center gap-1.5 self-start rounded-control border border-gray-alpha-400 bg-background-100 px-3 py-1.5 text-button-12 text-gray-900 shadow-elevation-2 hover:bg-gray-alpha-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-700 focus-visible:ring-offset-2"
+        >
+          <BookOpen className="h-3.5 w-3.5" aria-hidden />
+          {t('timeline.inspector.viewInWorkTimeline', {
+            defaultValue: 'View in Work Timeline',
+          })}
+        </button>
       ) : null}
 
       <div className="flex items-center justify-between gap-2">

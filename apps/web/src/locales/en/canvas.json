@@ -45,7 +45,9 @@
     }
   },
   "canvasShell": {
-    "relayout": "Re-layout"
+    "relayout": "Re-layout",
+    "timelineBadge": "Timeline",
+    "timelineBadgeAria": "Timeline surface — central instrument"
   },
   "outlineCanvas": {
     "showGraph": "Show graph",
@@ -643,6 +645,21 @@
       "showGraph": "Show graph",
       "showList": "Show list view"
     },
+    "layerSwitcher": {
+      "ariaLabel": "Timeline layer",
+      "brief": "Brief",
+      "narrative": "Narrative"
+    },
+    "breadcrumb": {
+      "ariaLabel": "Timeline layer path"
+    },
+    "brief": {
+      "emptyState": {
+        "title": "No era markers yet",
+        "message": "Brief shows the world's shape across ages. Switch to Narrative to browse events, or add era markers when the Brief carrier is ready.",
+        "cta": "Switch to Narrative"
+      }
+    },
     "inspector": {
       "title": "Timeline entity",
       "description": "Edit this entity's title and body. Routes through the World KB write boundary.",
@@ -655,6 +672,8 @@
       "bodyJsonError": "Body must be valid JSON.",
       "bodyJsonObjectError": "Body must be a JSON object.",
       "bodyPlaceholder": "Free-form body JSON…",
+      "viewInWorkTimeline": "View in Work Timeline",
+      "viewInWorkTimelineAria": "Open the Work that realizes this World on the Work Timeline",
       "field": {
         "title": "Title",
         "body": "Body",
@@ -669,6 +688,26 @@
       "sourceAnchorCount_one": "{{count}} source anchor",
       "sourceAnchorCount_other": "{{count}} source anchors",
       "aria": "Timeline event: {{name}}"
+    },
+    "briefEraNode": {
+      "unnamed": "(unnamed era)",
+      "temporalUnknown": "Era time span unknown",
+      "selected": "Selected Brief era",
+      "sourceAnchorCount_one": "{{count}} source anchor",
+      "sourceAnchorCount_other": "{{count}} source anchors",
+      "aria": "Brief era: {{name}}",
+      "span": "{{start}} → {{end}}"
+    },
+    "briefEraInspector": {
+      "title": "Brief era",
+      "description": "Era markers from the world-shape Brief carrier. Edit title or body JSON; structured era fields are read-only until the Brief carrier lands.",
+      "aria": "Brief-era inspector for {{name}}",
+      "identityAria": "Era identity markers",
+      "field": {
+        "eraId": "Era id",
+        "span": "Time span",
+        "worldSummary": "World summary"
+      }
     },
     "keyBlockNode": {
       "unnamed": "(unnamed entity)",
@@ -704,6 +743,97 @@
         "asc": "ascending",
         "desc": "descending"
       }
+    }
+  },
+  "workTimeline": {
+    "loading": "Loading Work Timeline…",
+    "loadError": "Could not load the work timeline.",
+    "canvasAriaLabel": "Work timeline canvas",
+    "empty": {
+      "title": "This work's timeline is empty",
+      "description": "Outline events you add through the Outline surface will appear here."
+    },
+    "header": {
+      "title": "Work Timeline",
+      "description": "The work's narrative + moments. Pivots to Outline for edits.",
+      "peerNavAria": "Peer surfaces",
+      "outlineLink": "Outline"
+    },
+    "layerSwitcher": {
+      "ariaLabel": "Work Timeline layer",
+      "narrative": "Narrative",
+      "moment": "Moment"
+    },
+    "breadcrumb": {
+      "ariaLabel": "Work Timeline layer path"
+    },
+    "narrativeEventNode": {
+      "aria": "Work timeline event: {{name}}",
+      "unnamed": "(unnamed event)",
+      "chapterBadge": "Ch. {{chapter}}",
+      "noChapter": "No chapter anchor",
+      "selected": "Selected work timeline event"
+    },
+    "momentSceneNode": {
+      "aria": "Scene: {{name}}",
+      "unnamed": "(untitled scene)",
+      "anchor": "Ch. {{chapter}} · {{scene}}",
+      "selected": "Selected scene"
+    },
+    "momentBeatNode": {
+      "aria": "Beat: {{name}}",
+      "unnamed": "(untitled beat)",
+      "anchor": "Ch. {{chapter}} · {{scene}} · {{beat}}",
+      "selected": "Selected beat"
+    },
+    "moment": {
+      "emptyState": {
+        "title": "No scene or beat data yet",
+        "message": "Moment is scene-precise and manuscript-anchored. Add scenes and beats in Outline, or switch to Narrative for events.",
+        "cta": "Switch to Narrative"
+      }
+    },
+    "inspector": {
+      "eventTitle": "Narrative event",
+      "eventDescription": "Work-scoped event on the Narrative when-axis. Edits route through the Outline surface.",
+      "sceneTitle": "Scene",
+      "sceneDescription": "Scene-level manuscript anchor on the Moment layer. Edits route through the Outline surface.",
+      "beatTitle": "Beat",
+      "beatDescription": "Beat pin inside a scene. Edits route through the Outline surface.",
+      "editInOutline": "Edit in Outline",
+      "manuscriptAnchor": "Manuscript anchor",
+      "noManuscriptAnchor": "No manuscript anchor",
+      "viewOnWorldTimeline": "View on World Timeline",
+      "viewOnWorldTimelineAria": "Open this Work's bound World on the World Timeline",
+      "aria": "Work Timeline inspector for {{name}}",
+      "fields": {
+        "eventId": "Event id",
+        "sceneId": "Scene id",
+        "beatId": "Beat id",
+        "chapter": "Chapter",
+        "description": "Description",
+        "status": "Status"
+      }
+    }
+  },
+  "globalTimeline": {
+    "title": "Timeline",
+    "description": "Recent Timeline activity across all Worlds.",
+    "listAriaLabel": "Recent Timeline activity by World",
+    "loading": "Loading Timeline…",
+    "loadError": "Could not load the global Timeline.",
+    "empty": {
+      "title": "No Timeline activity yet",
+      "description": "Worlds will appear here once a Work creates one."
+    },
+    "activitySummary": "{{layer}} · Brief: {{era}} · Narrative: {{event}}",
+    "activityFallback": "Timeline",
+    "activityLoading": "Loading activity…",
+    "activityError": "Activity unavailable",
+    "lastEdited": "Last edited {{when}}",
+    "layer": {
+      "brief": "Brief",
+      "narrative": "Narrative"
     }
   }
 }

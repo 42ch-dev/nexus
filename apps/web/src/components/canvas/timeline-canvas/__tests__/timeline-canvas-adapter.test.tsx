@@ -272,11 +272,19 @@ describe('TimelineCanvasAdapter.projectGraph — entity projection', () => {
     expect(result.edges).toEqual([]);
   });
 
-  it('registers exactly two node types (timeline-event + timeline-key-block) and NO fork marker', () => {
+  it('registers the V1.122 timeline-event + timeline-key-block node types and NO fork marker', () => {
+    // V1.123 P1 T2 update: the registry now also includes `timeline-brief-era`
+    // (the Brief-era node type per architect §2.3). The V1.122 invariant
+    // under test — "no fork marker ever registers" — is preserved by the
+    // `.not.toContain('fork'…)` assertions below.
     const adapter = createTimelineCanvasAdapter({ current: makeContext() });
-    expect(Object.keys(adapter.nodeTypes).sort()).toEqual(
-      ['timeline-event', 'timeline-key-block'].sort(),
-    );
+    const keys = Object.keys(adapter.nodeTypes);
+    expect(keys).toContain('timeline-event');
+    expect(keys).toContain('timeline-key-block');
+    expect(keys).toContain('timeline-brief-era');
+    for (const forbidden of ['fork-marker', 'forkmarker', 'fork']) {
+      expect(keys.map((k) => k.toLowerCase())).not.toContain(forbidden);
+    }
   });
 
   it('attaches source anchor count to entity node data (grounding badge metadata)', () => {

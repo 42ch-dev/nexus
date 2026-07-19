@@ -79,6 +79,118 @@ describe('Sidebar', () => {
     expect(modulesLink).toHaveAttribute('href', '/modules');
   });
 
+  // V1.123 P3 Task 1 — Timeline primary-nav entry. The global Timeline
+  // view (`/timeline`) is reachable from the Creator tab as a peer to Works
+  // / Worlds / Memories. Pinning it FIRST gives the central instrument
+  // structural prominence per `three-layer-product-spec.md`.
+  it('exposes the Timeline nav link under the Creator tab with a valid route (V1.123 P3 T1)', async () => {
+    useSidebarHandlers();
+
+    renderInApp(<Sidebar />, { client: makeClient(), activeCreatorId: 'creator-a' });
+
+    const timelineLink = screen.getByRole('link', { name: 'Timeline' });
+    expect(timelineLink).toHaveAttribute('href', '/timeline');
+    // The link is on the Creator tab (selected by default).
+    expect(screen.getByRole('tab', { name: 'Creator', selected: true })).toBeInTheDocument();
+  });
+
+  it('renders localized Timeline label when locale is zh-CN (V1.123 P3 T1)', async () => {
+    window.localStorage.setItem('nexus-web-locale', 'zh-CN');
+    useSidebarHandlers();
+
+    renderInApp(<Sidebar />, { client: makeClient(), activeCreatorId: 'creator-a' });
+
+    expect(screen.getByRole('link', { name: '时间线' })).toHaveAttribute('href', '/timeline');
+  });
+
+  // V1.123 P5 (PR #157 Greptile fix) — per-Work Timeline discoverability.
+  // `/works/:id/timeline` was reachable only via the Canvas shell ⌘K palette
+  // (`go.work-timeline`); the primary sidebar now mirrors each per-Work
+  // Outline row with a Timeline entry so authors can switch surfaces without
+  // ⌘K. Outline remains the per-Work default (V1.118); the Work Timelines
+  // group sits AFTER Works so Timeline stays discoverable but secondary.
+  it('exposes a per-Work Timeline link in a Work Timelines sidebar group (V1.123 P5)', async () => {
+    useSidebarHandlers([
+      {
+        work_id: 'work-alpha',
+        title: 'Alpha Novel',
+        status: 'active',
+        intake_status: 'ready',
+        primary_preset_id: 'preset-1',
+        updated_at: '2026-01-01T00:00:00Z',
+      },
+    ]);
+
+    renderInApp(<Sidebar />, { client: makeClient(), activeCreatorId: 'creator-a' });
+
+    // Wait for the Works query to resolve so the conditional Work Timelines
+    // group mounts alongside the per-Work Outline rows.
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: /Work Timelines/i })).toBeInTheDocument(),
+    );
+    // The per-Work Timeline entry links to the timeline route (not outline).
+    expect(screen.getByRole('link', { name: 'Alpha Novel Timeline' })).toHaveAttribute(
+      'href',
+      '/works/work-alpha/timeline',
+    );
+  });
+
+  it('keeps Outline as the per-Work default route alongside the new Timeline entry (V1.123 P5)', async () => {
+    useSidebarHandlers([
+      {
+        work_id: 'work-alpha',
+        title: 'Alpha Novel',
+        status: 'active',
+        intake_status: 'ready',
+        primary_preset_id: 'preset-1',
+        updated_at: '2026-01-01T00:00:00Z',
+      },
+    ]);
+
+    renderInApp(<Sidebar />, { client: makeClient(), activeCreatorId: 'creator-a' });
+
+    // Outline entry still uses the bare work title (per-Work default — V1.118).
+    await waitFor(() =>
+      expect(screen.getByRole('link', { name: 'Alpha Novel' })).toHaveAttribute(
+        'href',
+        '/works/work-alpha/outline',
+      ),
+    );
+  });
+
+  it('does not render the Work Timelines group when no Works exist (V1.123 P5)', async () => {
+    useSidebarHandlers([]);
+
+    renderInApp(<Sidebar />, { client: makeClient(), activeCreatorId: 'creator-a' });
+
+    // An empty group would be sidebar noise — suppress it entirely.
+    expect(screen.queryByRole('button', { name: /Work Timelines/i })).not.toBeInTheDocument();
+  });
+
+  it('renders localized Work Timelines labels when locale is zh-CN (V1.123 P5)', async () => {
+    window.localStorage.setItem('nexus-web-locale', 'zh-CN');
+    useSidebarHandlers([
+      {
+        work_id: 'work-alpha',
+        title: 'Alpha Novel',
+        status: 'active',
+        intake_status: 'ready',
+        primary_preset_id: 'preset-1',
+        updated_at: '2026-01-01T00:00:00Z',
+      },
+    ]);
+
+    renderInApp(<Sidebar />, { client: makeClient(), activeCreatorId: 'creator-a' });
+
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: /作品时间线/ })).toBeInTheDocument(),
+    );
+    expect(screen.getByRole('link', { name: 'Alpha Novel 时间线' })).toHaveAttribute(
+      'href',
+      '/works/work-alpha/timeline',
+    );
+  });
+
   it('does not expose Connect or Daemon as top-level nav items', async () => {
     useSidebarHandlers();
 
@@ -474,5 +586,92 @@ describe('Sidebar — work routes (V1.118 P2)', () => {
     const allWorks = screen.getByRole('link', { name: 'All Works' });
     expect(allWorks).not.toHaveClass('bg-gray-alpha-100');
     expect(allWorks.querySelector('[data-testid="sidebar-active-bar"]')).toBeNull();
+  });
+});
+
+describe('Sidebar — Work Timeline active state (V1.123 P5)', () => {
+  beforeEach(async () => {
+    window.localStorage.clear();
+    await i18n.changeLanguage('en');
+  });
+
+  /**
+   * Per-Work Timeline surfaces (`/works/:id/timeline`, V1.123 P2 T5) now have
+   * a peer sidebar entry. The active-state contract is:
+   *   - `/works/:id/timeline` → Timeline row active, Outline row inactive.
+   *   - `/works/:id/outline`  → Outline row active, Timeline row inactive.
+   *   - `/works/:id/chapters` → Outline row still active (Outline owns sibling
+   *     surfaces), Timeline row inactive.
+   * This avoids double-highlight and gives the author an unambiguous signal
+   * of which Work surface they are on.
+   */
+  function renderSidebarAtRoute(initialPath: string) {
+    useSidebarHandlers([
+      {
+        work_id: 'work-42',
+        title: 'Drill Novel',
+        status: 'active',
+        intake_status: 'ready',
+        primary_preset_id: 'preset-1',
+        updated_at: '2026-01-01T00:00:00Z',
+      },
+    ]);
+    renderInApp(
+      <Routes>
+        <Route element={<Sidebar />}>
+          <Route path="works/:workId/outline" element={null} />
+          <Route path="works/:workId/chapters" element={null} />
+          <Route path="works/:workId/timeline" element={null} />
+        </Route>
+      </Routes>,
+      {
+        client: makeClient(),
+        activeCreatorId: 'creator-a',
+        initialRouterEntries: [initialPath],
+      },
+    );
+  }
+
+  it('highlights the Timeline row on /works/:id/timeline and NOT the Outline row', async () => {
+    renderSidebarAtRoute('/works/work-42/timeline');
+
+    const timelineLink = await waitFor(() =>
+      screen.getByRole('link', { name: 'Drill Novel Timeline' }),
+    );
+    expect(timelineLink).toHaveClass('bg-gray-alpha-100', 'text-gray-1000');
+    expect(timelineLink.querySelector('[data-testid="sidebar-active-bar"]')).toHaveClass(
+      'w-[2px]',
+      'bg-blue-700',
+    );
+
+    // Outline row is no longer claiming /timeline (V1.123 P5 refinement).
+    const outlineLink = screen.getByRole('link', { name: 'Drill Novel' });
+    expect(outlineLink).not.toHaveClass('bg-gray-alpha-100');
+    expect(outlineLink.querySelector('[data-testid="sidebar-active-bar"]')).toBeNull();
+  });
+
+  it('keeps Outline highlighted on /works/:id/outline and leaves Timeline inactive', async () => {
+    renderSidebarAtRoute('/works/work-42/outline');
+
+    const outlineLink = await waitFor(() =>
+      screen.getByRole('link', { name: 'Drill Novel' }),
+    );
+    expect(outlineLink).toHaveClass('bg-gray-alpha-100', 'text-gray-1000');
+
+    const timelineLink = screen.getByRole('link', { name: 'Drill Novel Timeline' });
+    expect(timelineLink).not.toHaveClass('bg-gray-alpha-100');
+    expect(timelineLink.querySelector('[data-testid="sidebar-active-bar"]')).toBeNull();
+  });
+
+  it('keeps Outline highlighted on sibling surfaces like /works/:id/chapters', async () => {
+    renderSidebarAtRoute('/works/work-42/chapters');
+
+    const outlineLink = await waitFor(() =>
+      screen.getByRole('link', { name: 'Drill Novel' }),
+    );
+    expect(outlineLink).toHaveClass('bg-gray-alpha-100', 'text-gray-1000');
+
+    const timelineLink = screen.getByRole('link', { name: 'Drill Novel Timeline' });
+    expect(timelineLink).not.toHaveClass('bg-gray-alpha-100');
   });
 });

@@ -9,6 +9,7 @@ import { SetupGate } from '@/components/setup/setup-gate';
 import { ChapterPage } from '@/pages/chapter-page';
 import { ChaptersPage } from '@/pages/chapters-page';
 import { FindingsPage } from '@/pages/findings-page';
+import { GlobalTimelinePage } from '@/pages/global-timeline-page';
 import { MemoryPage } from '@/pages/memory-page';
 import { ModulesPage } from '@/pages/modules-page';
 import { NotFoundPage } from '@/pages/not-found-page';
@@ -37,6 +38,16 @@ const StrategyDetailPage = lazy(() =>
 // surface and is not part of the Control Room bootstrap path.
 const OutlinePage = lazy(() =>
   import('@/pages/outline-page').then((m) => ({ default: m.OutlinePage })),
+);
+
+// Route-split: the Work Timeline canvas (V1.123 P2 T5) is a peer of Outline
+// from the Work Canvas shell. Lazy-loaded alongside the other canvas routes so
+// React Flow stays out of the Control Room bootstrap chunk
+// (canvas-strategy-surface.md §3.1). Work entry stays Outline (V1.118
+// regression) — this route is a SIBLING at `/works/:workId/timeline`, NOT the
+// index.
+const WorkTimelinePage = lazy(() =>
+  import('@/pages/work-timeline-page').then((m) => ({ default: m.WorkTimelinePage })),
 );
 
 // Route-split: the World KB canvas pulls in `@xyflow/react` and is lazy-loaded
@@ -75,6 +86,12 @@ function AppRoutes() {
       <Route path="setup" element={<SetupWizardPage />} />
       <Route element={<SetupGate><RootLayout /></SetupGate>}>
         <Route index element={<Navigate to="/works" replace />} />
+        {/* V1.123 P3 Task 1 — global Timeline entry in primary nav.
+            Cross-World overview composed client-side; sibling of `/works`
+            and `/worlds`. Per-World Timeline stays at
+            `/worlds/:worldId/timeline` (V1.122 P1 T3 hero surface); Work
+            Timeline stays at `/works/:workId/timeline` (V1.123 P2 T5). */}
+        <Route path="timeline" element={<GlobalTimelinePage />} />
         <Route path="works" element={<WorksPage />} />
         <Route path="works/chapters" element={<ChaptersPage />} />
         <Route path="works/:workId" element={<WorkShellLayout />}>
@@ -84,6 +101,17 @@ function AppRoutes() {
             element={
               <Suspense fallback={<LoadingState label="Loading Outline…" />}>
                 <OutlinePage />
+              </Suspense>
+            }
+          />
+          {/* V1.123 P2 T5 — Work Timeline peer surface. Sibling of `outline`;
+              index redirect above still points to `outline` so the Work entry
+              default stays Outline (V1.118 regression preserved). */}
+          <Route
+            path="timeline"
+            element={
+              <Suspense fallback={<LoadingState label="Loading Work Timeline…" />}>
+                <WorkTimelinePage />
               </Suspense>
             }
           />

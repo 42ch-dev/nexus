@@ -17,6 +17,15 @@
     "world-kb": "World KB"
   },
   "go": {
+    "timeline": {
+      "label": "Go to Timeline",
+      "keywords": {
+        "worlds": "worlds",
+        "brief": "brief",
+        "narrative": "narrative",
+        "recent": "recent"
+      }
+    },
     "strategy": {
       "label": "Go to Strategies",
       "keywords": {
@@ -42,6 +51,15 @@
         "relationships": "relationships",
         "world-canvas": "world canvas",
         "lore": "lore"
+      }
+    },
+    "work-timeline": {
+      "label": "Go to Work Timeline",
+      "keywords": {
+        "narrative": "narrative",
+        "moment": "moment",
+        "scenes": "scenes",
+        "beats": "beats"
       }
     }
   },

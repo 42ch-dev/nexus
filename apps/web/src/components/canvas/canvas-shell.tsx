@@ -33,6 +33,7 @@ import {
   type OnReconnect,
 } from '@xyflow/react';
 
+import type { CanvasSurfaceKind } from './canvas-surface-adapter';
 import { useCanvasViewport } from './use-canvas-viewport';
 
 import '@xyflow/react/dist/style.css';
@@ -94,6 +95,19 @@ export interface CanvasShellProps {
   surfaceKey?: string;
   /** Optional re-layout action rendered inside the canvas when provided. */
   relayout?: () => void;
+  /**
+   * V1.123 P3 T2 — surface identity driving visual prominence treatment.
+   * When set to `'timeline'` or `'work-timeline'`, the shell renders a
+   * {@link CanvasShellTimelineBadge} overlay so the Timeline surface reads
+   * as the central instrument (per `three-layer-product-spec.md`).
+   * Other surfaces (`'strategy'`, `'outline'`, `'world-kb-*'`) render no
+   * badge; their per-surface accent already lives in the node stroke color
+   * (`--color-canvas-{strategy,outline,worldkb}-accent`).
+   *
+   * The attribute also surfaces on the shell root as
+   * `data-surface-kind` for downstream styling / integration tests.
+   */
+  surfaceKind?: CanvasSurfaceKind;
 }
 
 /**
@@ -114,6 +128,7 @@ function CanvasShellInner({
   children,
   surfaceKey,
   relayout,
+  surfaceKind,
 }: CanvasShellProps) {
   const { t } = useTranslation('canvas');
   // FB-GS-000 — cache pan/zoom so a graph↔list toggle does not drop the
@@ -124,15 +139,34 @@ function CanvasShellInner({
   // tokens (per-theme tunable; dark canvas is ink, not neutral flip).
   const gridMetrics = useCanvasGridMetrics();
 
+  // V1.123 P3 T2 — Timeline visual prominence. The shell renders a small
+  // accent badge overlay when the active surface is the World Timeline or
+  // Work Timeline so the central instrument reads as visually distinct from
+  // Strategy / Outline / World KB canvases. Other surfaces render no badge.
+  const showTimelineBadge =
+    surfaceKind === 'timeline' || surfaceKind === 'work-timeline';
+
   return (
     <div
       data-command-palette-ignore
+      data-surface-kind={surfaceKind}
       className="relative h-[calc(100vh-180px)] min-h-[420px] w-full overflow-hidden rounded-card border border-gray-alpha-400 bg-canvas-surface"
     >
       {/* Screen-reader graph summary (A8 #3) — live region, polite. */}
       <div className="sr-only" role="status" aria-live="polite" aria-atomic="true">
         {summaryText}
       </div>
+
+      {/* V1.123 P3 T2 — Timeline prominence badge overlay. Rendered ABOVE
+          the React Flow pane (z-10) so the accent treatment stays visible
+          across viewport pans / zooms. Sibling to the SR summary so the
+          i18n namespace resolves once for both. */}
+      {showTimelineBadge ? (
+        <CanvasShellTimelineBadge
+          label={t('canvasShell.timelineBadge')}
+          ariaLabel={t('canvasShell.timelineBadgeAria')}
+        />
+      ) : null}
 
       <ReactFlow
         nodes={nodes}
@@ -209,5 +243,56 @@ export function CanvasShell(props: CanvasShellProps) {
     <ReactFlowProvider>
       <CanvasShellInner {...props} />
     </ReactFlowProvider>
+  );
+}
+
+/**
+ * V1.123 P3 T2 — Timeline visual prominence badge (presentational).
+ *
+ * A small overlay rendered inside `CanvasShell` when the active surface is
+ * the World Timeline or Work Timeline. The badge:
+ *   - carries the Timeline accent color (`--color-canvas-timeline-accent`,
+ *     the brand-blue per the Canvas/SOUL invariant) so the Timeline surface
+ *     reads as visually distinct from Strategy (purple) / Outline (amber) /
+ *     World KB (teal);
+ *   - exposes `role="status"` + `aria-label` so assistive tech announces the
+ *     surface context without sighted-only cues (the accent dot is
+ *     `aria-hidden`);
+ *   - is exported so the prominence contract can be tested without mounting
+ *     the full React Flow chrome.
+ *
+ * `simplify:` the inline `style` references the CSS variable directly
+ * (mirrors the existing per-surface accent pattern in
+ * `timeline-canvas-adapter.tsx::deriveTimelineEdges`). No Tailwind utility
+ * class is introduced, so no `cn.ts` class-group registration is needed; if
+ * a future iteration adds a `text-canvas-timeline-accent` Tailwind class,
+ * that class MUST be registered in `packages/nexus-ui/src/lib/cn.ts` per the
+ * V1.94/V1.121 tailwind-merge lesson.
+ */
+export function CanvasShellTimelineBadge({
+  label,
+  ariaLabel,
+}: {
+  label: string;
+  ariaLabel: string;
+}) {
+  return (
+    <div
+      data-testid="canvas-shell-timeline-badge"
+      role="status"
+      aria-label={ariaLabel}
+      className="pointer-events-none absolute left-3 top-3 z-10 inline-flex items-center gap-1.5 rounded-control border bg-background-100 px-2 py-1 text-button-12 font-semibold shadow-elevation-2"
+      style={{
+        borderColor: 'var(--color-canvas-timeline-accent)',
+        color: 'var(--color-canvas-timeline-accent)',
+      }}
+    >
+      <span
+        aria-hidden
+        className="inline-block h-1.5 w-1.5 rounded-full"
+        style={{ backgroundColor: 'var(--color-canvas-timeline-accent)' }}
+      />
+      {label}
+    </div>
   );
 }

@@ -141,3 +141,4 @@ Implementation-detail SSOT that is not iteration-scoped stays in [`.mstar/knowle
 | V1.120 | [v1.120/](v1.120/) | completed | 3 spec(s) |
 | V1.121 | [v1.121/](v1.121/) | completed | 4 spec(s) |
 | V1.122 | [v1.122/](v1.122/) | completed | 3 spec(s) |
+| V1.123 | [v1.123/](v1.123/) | completed | 3 spec(s) |

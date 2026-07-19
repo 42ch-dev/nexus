@@ -45,7 +45,9 @@
     }
   },
   "canvasShell": {
-    "relayout": "重新布局"
+    "relayout": "重新布局",
+    "timelineBadge": "时间线",
+    "timelineBadgeAria": "时间线表面——核心工具"
   },
   "outlineCanvas": {
     "showGraph": "显示图谱",
@@ -632,6 +634,21 @@
       "showGraph": "显示图形",
       "showList": "显示列表视图"
     },
+    "layerSwitcher": {
+      "ariaLabel": "时间轴图层",
+      "brief": "概览",
+      "narrative": "叙事"
+    },
+    "breadcrumb": {
+      "ariaLabel": "时间轴图层路径"
+    },
+    "brief": {
+      "emptyState": {
+        "title": "尚无纪元标记",
+        "message": "概览展示世界跨越时代的形态。切换到叙事以浏览事件，或在概览载体就绪后添加纪元标记。",
+        "cta": "切换到叙事"
+      }
+    },
     "inspector": {
       "title": "时间轴实体",
       "description": "编辑此实体的标题与正文。变更通过世界知识库写入边界提交。",
@@ -644,6 +661,8 @@
       "bodyJsonError": "正文必须是有效的 JSON。",
       "bodyJsonObjectError": "正文必须是 JSON 对象。",
       "bodyPlaceholder": "自由格式的正文 JSON…",
+      "viewInWorkTimeline": "在作品时间轴中查看",
+      "viewInWorkTimelineAria": "在 Work Timeline 中打开承接此世界的作品",
       "field": {
         "title": "标题",
         "body": "正文",
@@ -658,6 +677,26 @@
       "sourceAnchorCount_one": "{{count}} 个来源锚点",
       "sourceAnchorCount_other": "{{count}} 个来源锚点",
       "aria": "时间线事件：{{name}}"
+    },
+    "briefEraNode": {
+      "unnamed": "(未命名纪元)",
+      "temporalUnknown": "纪元时间跨度未知",
+      "selected": "已选中概览纪元",
+      "sourceAnchorCount_one": "{{count}} 个来源锚点",
+      "sourceAnchorCount_other": "{{count}} 个来源锚点",
+      "aria": "概览纪元：{{name}}",
+      "span": "{{start}} → {{end}}"
+    },
+    "briefEraInspector": {
+      "title": "概览纪元",
+      "description": "来自世界形态概览载体的纪元标记。可编辑标题或正文 JSON；结构化纪元字段在概览载体落地前为只读。",
+      "aria": "{{name}} 的概览纪元检查器",
+      "identityAria": "纪元身份标记",
+      "field": {
+        "eraId": "纪元 ID",
+        "span": "时间跨度",
+        "worldSummary": "世界概述"
+      }
     },
     "keyBlockNode": {
       "unnamed": "(未命名实体)",
@@ -693,6 +732,97 @@
         "asc": "升序",
         "desc": "降序"
       }
+    }
+  },
+  "workTimeline": {
+    "loading": "正在加载作品时间轴…",
+    "loadError": "无法加载作品时间轴。",
+    "canvasAriaLabel": "作品时间轴画布",
+    "empty": {
+      "title": "该作品的时间轴为空",
+      "description": "通过作品大纲面板添加的大纲事件将显示在此处。"
+    },
+    "header": {
+      "title": "作品时间轴",
+      "description": "作品的叙事与瞬间。切换到大纲进行编辑。",
+      "peerNavAria": "同级面板",
+      "outlineLink": "大纲"
+    },
+    "layerSwitcher": {
+      "ariaLabel": "作品时间轴图层",
+      "narrative": "叙事",
+      "moment": "瞬间"
+    },
+    "breadcrumb": {
+      "ariaLabel": "作品时间轴图层路径"
+    },
+    "narrativeEventNode": {
+      "aria": "作品时间轴事件：{{name}}",
+      "unnamed": "(未命名事件)",
+      "chapterBadge": "第 {{chapter}} 章",
+      "noChapter": "无章节锚点",
+      "selected": "已选中作品时间轴事件"
+    },
+    "momentSceneNode": {
+      "aria": "场景：{{name}}",
+      "unnamed": "(未命名场景)",
+      "anchor": "第 {{chapter}} 章 · {{scene}}",
+      "selected": "已选中场景"
+    },
+    "momentBeatNode": {
+      "aria": "节拍：{{name}}",
+      "unnamed": "(未命名节拍)",
+      "anchor": "第 {{chapter}} 章 · {{scene}} · {{beat}}",
+      "selected": "已选中节拍"
+    },
+    "moment": {
+      "emptyState": {
+        "title": "尚无场景或节拍数据",
+        "message": "瞬间聚焦场景精度并锚定到稿件。请在大纲中添加场景与节拍，或切换到叙事查看事件。",
+        "cta": "切换到叙事"
+      }
+    },
+    "inspector": {
+      "eventTitle": "叙事事件",
+      "eventDescription": "叙事 when 轴上的作品级事件。编辑通过作品大纲面板提交。",
+      "sceneTitle": "场景",
+      "sceneDescription": "瞬间图层上的场景级稿件锚点。编辑通过作品大纲面板提交。",
+      "beatTitle": "节拍",
+      "beatDescription": "场景内的节拍。编辑通过作品大纲面板提交。",
+      "editInOutline": "在大纲中编辑",
+      "manuscriptAnchor": "稿件锚点",
+      "noManuscriptAnchor": "无稿件锚点",
+      "viewOnWorldTimeline": "在世界时间轴中查看",
+      "viewOnWorldTimelineAria": "在 World Timeline 中打开此作品绑定的世界",
+      "aria": "{{name}} 的作品时间轴检查器",
+      "fields": {
+        "eventId": "事件 ID",
+        "sceneId": "场景 ID",
+        "beatId": "节拍 ID",
+        "chapter": "章节",
+        "description": "描述",
+        "status": "状态"
+      }
+    }
+  },
+  "globalTimeline": {
+    "title": "时间线",
+    "description": "所有世界的近期时间线活动。",
+    "listAriaLabel": "按世界分组的近期时间线活动",
+    "loading": "正在加载时间线…",
+    "loadError": "无法加载全局时间线。",
+    "empty": {
+      "title": "暂无时间线活动",
+      "description": "当作品创建世界后，世界会出现在这里。"
+    },
+    "activitySummary": "{{layer}} · 简介：{{era}} · 叙事：{{event}}",
+    "activityFallback": "时间线",
+    "activityLoading": "正在加载活动…",
+    "activityError": "活动不可用",
+    "lastEdited": "上次编辑 {{when}}",
+    "layer": {
+      "brief": "简介",
+      "narrative": "叙事"
     }
   }
 }

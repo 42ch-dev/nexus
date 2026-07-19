@@ -17,6 +17,15 @@
     "world-kb": "世界知识库"
   },
   "go": {
+    "timeline": {
+      "label": "前往时间线",
+      "keywords": {
+        "worlds": "世界",
+        "brief": "简介",
+        "narrative": "叙事",
+        "recent": "最近"
+      }
+    },
     "strategy": {
       "label": "前往策略",
       "keywords": {
@@ -42,6 +51,15 @@
         "relationships": "关系",
         "world-canvas": "世界画布",
         "lore": "背景设定"
+      }
+    },
+    "work-timeline": {
+      "label": "前往作品时间轴",
+      "keywords": {
+        "narrative": "叙事",
+        "moment": "瞬间",
+        "scenes": "场景",
+        "beats": "节拍"
       }
     }
   },

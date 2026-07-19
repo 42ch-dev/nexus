@@ -27,14 +27,79 @@
         "merge_target": "iteration/v1.122",
         "working_branch": "feature/v1.122-timeline-first-canvas"
       }
+    },
+    {
+      "plan_id": "2026-07-18-v1.123-three-layer-timeline-spec",
+      "status": "Done",
+      "iteration_refs": [
+        "V1.123"
+      ],
+      "metadata": {
+        "primary_spec": ".mstar/specs/canvas-strategy-surface.md",
+        "spec_integration_branch": "iteration/v1.123",
+        "merge_target": "iteration/v1.123",
+        "working_branch": "feature/v1.123-three-layer-timeline-spec"
+      }
+    },
+    {
+      "plan_id": "2026-07-18-v1.123-world-timeline-brief-narrative",
+      "status": "Done",
+      "iteration_refs": [
+        "V1.123"
+      ],
+      "metadata": {
+        "primary_spec": ".mstar/specs/canvas-strategy-surface.md",
+        "spec_integration_branch": "iteration/v1.123",
+        "merge_target": "iteration/v1.123",
+        "working_branch": "feature/v1.123-world-timeline-brief-narrative"
+      }
+    },
+    {
+      "plan_id": "2026-07-18-v1.123-work-timeline-narrative-moment",
+      "status": "Done",
+      "iteration_refs": [
+        "V1.123"
+      ],
+      "metadata": {
+        "primary_spec": ".mstar/specs/canvas-strategy-surface.md",
+        "spec_integration_branch": "iteration/v1.123",
+        "merge_target": "iteration/v1.123",
+        "working_branch": "feature/v1.123-work-timeline-narrative-moment"
+      }
+    },
+    {
+      "plan_id": "2026-07-18-v1.123-timeline-first-ia-deepening",
+      "status": "Done",
+      "iteration_refs": [
+        "V1.123"
+      ],
+      "metadata": {
+        "primary_spec": ".mstar/specs/canvas-strategy-surface.md",
+        "spec_integration_branch": "iteration/v1.123",
+        "merge_target": "iteration/v1.123",
+        "working_branch": "feature/v1.123-timeline-first-ia-deepening"
+      }
+    },
+    {
+      "plan_id": "2026-07-18-v1.123-three-layer-zoom-experience",
+      "status": "Done",
+      "iteration_refs": [
+        "V1.123"
+      ],
+      "metadata": {
+        "primary_spec": ".mstar/specs/canvas-strategy-surface.md",
+        "spec_integration_branch": "iteration/v1.123",
+        "merge_target": "iteration/v1.123",
+        "working_branch": "feature/v1.123-three-layer-zoom-experience"
+      }
     }
   ],
   "metadata": {
     "integration_branch_retired": false,
     "iteration_base_branch": "main",
-    "last_integration_branch": "iteration/v1.122",
-    "latest_active_compass": "v1.122/delivery-compass.md",
-    "latest_active_iteration": "V1.122",
+    "last_integration_branch": "iteration/v1.123",
+    "latest_active_compass": "v1.123/delivery-compass.md",
+    "latest_active_iteration": "V1.123",
     "latest_ship": {
       "iteration": "V1.122",
       "compass": "v1.122/delivery-compass.md",
@@ -45,7 +110,7 @@
     "platform_integration": "paused — local-only until further notice",
     "pre_implement_gate": null,
     "pre_iteration_hotfix": null,
-    "spec_integration_branch": "iteration/v1.122",
+    "spec_integration_branch": "iteration/v1.123",
     "spec_refs_index": ".mstar/specs/README.md",
     "target_branch": "main",
     "tech_debt_summary": {
@@ -2265,6 +2330,619 @@
         "lifecycle": "open",
         "description": "Minor stroke-color mapping extraction in edge types",
         "tracking_link": ".mstar/plans/2026-07-18-v1.122-timeline-first-canvas.md#review-gate-summary"
+      }
+    ],
+    "2026-07-18-v1.123-three-layer-timeline-spec": [
+      {
+        "id": "R-V1123P0QC1-M002",
+        "severity": "low",
+        "title": "P2 WorkTimelineLayerAdapter onViewOnWorldTimeline callback ordering — P2 may ship before P3 orchestrator exists",
+        "lifecycle": "open",
+        "source": "qc1",
+        "closure_note": null,
+        "tracking_link": ".mstar/plans/2026-07-18-v1.123-work-timeline-narrative-moment.md (P2 implementer note: stub callback; P3 wires)"
+      },
+      {
+        "id": "R-V1123P0QC1-M003",
+        "severity": "low",
+        "title": "CONCEPTS.md § Timeline body wording — clarify Timeline = spine instrument vs event list",
+        "lifecycle": "open",
+        "source": "qc1",
+        "closure_note": null,
+        "tracking_link": null
+      },
+      {
+        "id": "R-V1123P0QC1-N001",
+        "severity": "nit",
+        "title": "entity-scope-model.md Last updated header stale (V1.62)",
+        "lifecycle": "open",
+        "source": "qc1",
+        "closure_note": null,
+        "tracking_link": null
+      },
+      {
+        "id": "R-V1123P0QC1-N002",
+        "severity": "nit",
+        "title": "CONCEPTS.md Timeline term ambiguity (spine instrument vs event list)",
+        "lifecycle": "open",
+        "source": "qc1",
+        "closure_note": null,
+        "tracking_link": null
+      },
+      {
+        "id": "R-V1123P0QC3-W001",
+        "severity": "low",
+        "title": "Tech-debt trajectory accelerating — status.json 98KB (>> 20KB threshold), 28+ accumulated low/nit residuals",
+        "lifecycle": "open",
+        "source": "qc3",
+        "closure_note": null,
+        "tracking_link": "DF-V1123-RESIDUAL-CLEANUP + DF-V1123-STATUS-COMPACT (V1.124 polish)"
+      },
+      {
+        "id": "R-V1123P0QC3-W002",
+        "severity": "low",
+        "title": "Moment layer untestable with real data — V1.72 WorkOutline wire has no scenes/beats; V1.123 P2 Moment projection exercised only with fixtures",
+        "lifecycle": "open",
+        "source": "qc3",
+        "closure_note": null,
+        "tracking_link": "DF-V1123-MOMENT-WIRE (V1.124+)"
+      },
+      {
+        "id": "R-V1123P0QC3-W003",
+        "severity": "low",
+        "title": "P3 global Timeline N+1 fetch risk — 5–10 parallel kb/graph calls for visible Worlds",
+        "lifecycle": "open",
+        "source": "qc3",
+        "closure_note": null,
+        "tracking_link": ".mstar/plans/2026-07-18-v1.123-timeline-first-ia-deepening.md (P3 honest scope cut: degrade to recent Timeline activity list if composite fetch too expensive)"
+      },
+      {
+        "id": "R-V1123P0QC3-S001",
+        "severity": "nit",
+        "title": "Narrative terminology collision risk in code comments (vs prose-craft sense)",
+        "lifecycle": "open",
+        "source": "qc3",
+        "closure_note": null,
+        "tracking_link": null
+      },
+      {
+        "id": "R-V1123P0QC3-S002",
+        "severity": "low",
+        "title": "WorkTimelineLayer closed union type needs refactoring for V1.124+ extensibility",
+        "lifecycle": "open",
+        "source": "qc3",
+        "closure_note": null,
+        "tracking_link": "V1.124+ when Work Brief or World Moment layer promoted"
+      },
+      {
+        "id": "R-V1123P0QC3-S003",
+        "severity": "nit",
+        "title": "Moment Edit in Outline is full navigation, not inline editing",
+        "lifecycle": "open",
+        "source": "qc3",
+        "closure_note": null,
+        "tracking_link": "UX enhancement for V1.124+"
+      },
+      {
+        "id": "R-V1123P0QC3-S004",
+        "severity": "nit",
+        "title": "Semantic zoom threshold (0.55–0.70 band) relies on React Flow version contract",
+        "lifecycle": "open",
+        "source": "qc3",
+        "closure_note": null,
+        "tracking_link": "Pin React Flow version in P4 implementer constraints"
+      },
+      {
+        "id": "R-V1123P0QC3-N001",
+        "severity": "nit",
+        "title": "QC3 Nit details (see qc3.md)",
+        "lifecycle": "open",
+        "source": "qc3",
+        "closure_note": null,
+        "tracking_link": null
+      }
+    ],
+    "2026-07-18-v1.123-world-timeline-brief-narrative": [
+      {
+        "id": "R-V1123P1QC1-S001",
+        "severity": "nit",
+        "title": "Spec deviation cross-link documentation (TimelineEraNodeData / TimelineLayerAdapter omissions are pragmatic; document the choice)",
+        "lifecycle": "open",
+        "source": "qc1",
+        "closure_note": null,
+        "tracking_link": null
+      },
+      {
+        "id": "R-V1123P1QC1-S002",
+        "severity": "nit",
+        "title": "TimelineLayer per-surface alias note (per-surface layer types vs shared)",
+        "lifecycle": "open",
+        "source": "qc1",
+        "closure_note": null,
+        "tracking_link": null
+      },
+      {
+        "id": "R-V1123P1QC1-S003",
+        "severity": "low",
+        "title": "Layer-switch-back-to-Brief with era data test gap (L2 acknowledged)",
+        "lifecycle": "open",
+        "source": "qc1",
+        "closure_note": null,
+        "tracking_link": null
+      },
+      {
+        "id": "R-V1123P1QC1-S004",
+        "severity": "low",
+        "title": "validate_block_type staleness pre-existing (rejects post-V1.54 BlockType values; not on Brief path; pre-existing from V1.54)",
+        "lifecycle": "open",
+        "source": "qc1",
+        "closure_note": null,
+        "tracking_link": "Pre-existing tech debt from V1.54"
+      },
+      {
+        "id": "R-V1123P1QC1-S005",
+        "severity": "nit",
+        "title": "parse_block_type era arm documentation (deferred; document if extract pipeline ever needs it)",
+        "lifecycle": "open",
+        "source": "qc1",
+        "closure_note": null,
+        "tracking_link": null
+      },
+      {
+        "id": "R-V1123P1QC2-S001",
+        "severity": "low",
+        "title": "Test coverage for malformed era attributes (missing start_hint, invalid date format)",
+        "lifecycle": "open",
+        "source": "qc2",
+        "closure_note": null,
+        "tracking_link": null
+      },
+      {
+        "id": "R-V1123P1QC2-S002",
+        "severity": "nit",
+        "title": "parse_block_type fallback documentation (era falls back to Character default)",
+        "lifecycle": "open",
+        "source": "qc2",
+        "closure_note": null,
+        "tracking_link": null
+      },
+      {
+        "id": "R-V1123P1QC3-S001",
+        "severity": "low",
+        "title": "No performance regression test for large datasets (50+ eras, 1000+ entities)",
+        "lifecycle": "open",
+        "source": "qc3",
+        "closure_note": null,
+        "tracking_link": null
+      },
+      {
+        "id": "R-V1123P1QC3-S002",
+        "severity": "low",
+        "title": "hasSuppliedPositions: true masks Brief layer feel on first open (UX gap; P4 polish candidate)",
+        "lifecycle": "open",
+        "source": "qc3",
+        "closure_note": null,
+        "tracking_link": "P4 implementer note"
+      },
+      {
+        "id": "R-V1123P1QC3-S003",
+        "severity": "low",
+        "title": "Adapter factory rebuild pattern does not scale to continuous zoom (P4 semantic zoom may need different pattern)",
+        "lifecycle": "open",
+        "source": "qc3",
+        "closure_note": null,
+        "tracking_link": "P4 implementer note"
+      }
+    ],
+    "2026-07-18-v1.123-work-timeline-narrative-moment": [
+      {
+        "id": "R-V1123P2QC1-S001",
+        "severity": "nit",
+        "title": "client?: unknown slot in WorkTimelineCanvasAdapter context — outside spec §7.1; recommend spec footnote at iteration-close",
+        "lifecycle": "open",
+        "source": "qc1",
+        "closure_note": null,
+        "tracking_link": null
+      },
+      {
+        "id": "R-V1123P2QC1-S002",
+        "severity": "nit",
+        "title": "sceneBeatFixture? injection seam undocumented in spec; forward-compatible but recommend §3.5/§7.5 note",
+        "lifecycle": "open",
+        "source": "qc1",
+        "closure_note": null,
+        "tracking_link": null
+      },
+      {
+        "id": "R-V1123P2QC1-S003",
+        "severity": "low",
+        "title": "Inline WorkTimelineLayerSwitcher duplicates inline TimelineLayerSwitcher shape; promote to packages/nexus-ui at P3/P4 boundary (YAGNI for V1.123)",
+        "lifecycle": "open",
+        "source": "qc1",
+        "closure_note": null,
+        "tracking_link": "P3/P4 polish candidate"
+      },
+      {
+        "id": "R-V1123P2QC1-S004",
+        "severity": "low",
+        "title": "Layer state is useState only (no URL ?layer=); URL persistence is P3 scope per layer-feel-differentiation.md §5",
+        "lifecycle": "open",
+        "source": "qc1",
+        "closure_note": null,
+        "tracking_link": "P3 implementer note"
+      },
+      {
+        "id": "R-V1123P2QC1-S005",
+        "severity": "nit",
+        "title": "WorkTimelineNodeData.status? field extends spec §7.1 by one slot (outline-scene status carry from V1.108 fixtures); architecturally honest, recommend spec follow-up",
+        "lifecycle": "open",
+        "source": "qc1",
+        "closure_note": null,
+        "tracking_link": null
+      },
+      {
+        "id": "R-V1123P2QC3-S001",
+        "severity": "low",
+        "title": "No performance regression test for large Works (100+ chapters, 1000+ scenes) when wire-data Moment ships (DF-V1123-MOMENT-WIRE V1.124+)",
+        "lifecycle": "open",
+        "source": "qc3",
+        "closure_note": null,
+        "tracking_link": "DF-V1123-MOMENT-WIRE (V1.124+)"
+      },
+      {
+        "id": "R-V1123P2QC3-S002",
+        "severity": "low",
+        "title": "Moment fixture-driven perf characteristics acceptable for V1.123 MVP; document future wire-data scale risk",
+        "lifecycle": "open",
+        "source": "qc3",
+        "closure_note": null,
+        "tracking_link": null
+      },
+      {
+        "id": "R-V1123P2QC3-S003",
+        "severity": "nit",
+        "title": "Layer swap re-projection: factory rebuild pattern acceptable for V1.123; P4 continuous zoom may need different pattern (overlap with R-V1123P1QC3-S003)",
+        "lifecycle": "open",
+        "source": "qc3",
+        "closure_note": null,
+        "tracking_link": "P4 implementer note"
+      },
+      {
+        "id": "R-V1123P2QC3-S004",
+        "severity": "nit",
+        "title": "i18n key documentation: workTimeline.* namespace cross-ref with spec",
+        "lifecycle": "open",
+        "source": "qc3",
+        "closure_note": null,
+        "tracking_link": null
+      },
+      {
+        "id": "R-V1123P2QC3-S005",
+        "severity": "low",
+        "title": "Inspector dispatch pattern (adapter.renderInspector): mirror P1 Brief-era precedent; promote to V1.114 adapter recipe at iteration-close if pattern recurs in P3/P4",
+        "lifecycle": "open",
+        "source": "qc3",
+        "closure_note": null,
+        "tracking_link": null
+      },
+      {
+        "id": "R-V1123P2QC3-S006",
+        "severity": "low",
+        "title": "Future Moment-on-wire migration (DF-V1123-MOMENT-WIRE): adapter contract survives upgrade because V1.108 OutlineSceneNodeData/OutlineBeatNodeData are UI types reading from projection",
+        "lifecycle": "open",
+        "source": "qc3",
+        "closure_note": null,
+        "tracking_link": "DF-V1123-MOMENT-WIRE (V1.124+)"
+      },
+      {
+        "id": "R-V1123P2QC3-S007",
+        "severity": "nit",
+        "title": "P3 cross-surface hooks declared (worldId, onViewOnWorldTimeline) but unused in P2; P3 will wire",
+        "lifecycle": "open",
+        "source": "qc3",
+        "closure_note": null,
+        "tracking_link": "P3 implementer note"
+      },
+      {
+        "id": "R-V1123P2QC3-S008",
+        "severity": "nit",
+        "title": "P4 zoom integration: Moment layer TB direction can integrate with semantic zoom",
+        "lifecycle": "open",
+        "source": "qc3",
+        "closure_note": null,
+        "tracking_link": "P4 implementer note"
+      },
+      {
+        "id": "R-V1123P2QC3-S009",
+        "severity": "nit",
+        "title": "P2 test suite perf: 1426/1426 vitest pass in ~20s; acceptable",
+        "lifecycle": "open",
+        "source": "qc3",
+        "closure_note": null,
+        "tracking_link": null
+      },
+      {
+        "id": "R-V1123P2QC3-S010",
+        "severity": "nit",
+        "title": "React Flow v12 stable APIs used; future version compatibility verified",
+        "lifecycle": "open",
+        "source": "qc3",
+        "closure_note": null,
+        "tracking_link": null
+      },
+      {
+        "id": "R-V1123P2QC3-S011",
+        "severity": "nit",
+        "title": "Residual surface mapped against P0 + P1 residuals; DF-V1123-MOMENT-WIRE primary future-risk",
+        "lifecycle": "open",
+        "source": "qc3",
+        "closure_note": null,
+        "tracking_link": "DF-V1123-MOMENT-WIRE"
+      },
+      {
+        "id": "R-V1123P2QC3-S012",
+        "severity": "nit",
+        "title": "Brief path adaptations (routes/ -> pages/; work-canvas-shell.tsx -> canvas-nav-commands.tsx) are project-canonical; recommend spec/path doc update at iteration-close",
+        "lifecycle": "open",
+        "source": "qc3",
+        "closure_note": null,
+        "tracking_link": null
+      }
+    ],
+    "2026-07-18-v1.123-timeline-first-ia-deepening": [
+      {
+        "id": "R-V1123P3-001",
+        "severity": "low",
+        "title": "Per-World era/event counts deferred to V1.124+ composite daemon endpoint (N+1 mitigation per architect §5)",
+        "lifecycle": "open",
+        "source": "impl-batch-a",
+        "closure_note": null,
+        "tracking_link": "DF-V1123-COMPOSITE-ENDPOINT (V1.124+)"
+      },
+      {
+        "id": "R-V1123P3-002",
+        "severity": "low",
+        "title": "Per-Work timeline_events.length deferred to V1.124+ composite endpoint",
+        "lifecycle": "open",
+        "source": "impl-batch-a",
+        "closure_note": null,
+        "tracking_link": "DF-V1123-COMPOSITE-ENDPOINT (V1.124+)"
+      },
+      {
+        "id": "R-V1123P3-003",
+        "severity": "low",
+        "title": "Global Timeline view N=5 cap on per-World graph fan-out (plan floor; no composite endpoint)",
+        "lifecycle": "open",
+        "source": "impl-batch-a",
+        "closure_note": null,
+        "tracking_link": "P3 plan mitigation"
+      },
+      {
+        "id": "R-V1123P3-004",
+        "severity": "low",
+        "title": "Composite-endpoint work deferred to V1.124+",
+        "lifecycle": "open",
+        "source": "impl-batch-a",
+        "closure_note": null,
+        "tracking_link": "DF-V1123-COMPOSITE-ENDPOINT (V1.124+)"
+      },
+      {
+        "id": "R-V1123P3-005",
+        "severity": "low",
+        "title": "Per-event highlight omitted in cross-surface nav (no wire binding today)",
+        "lifecycle": "open",
+        "source": "impl-batch-b",
+        "closure_note": null,
+        "tracking_link": "DF-V1123-CROSS-SURFACE-BINDING"
+      },
+      {
+        "id": "R-V1123P3-006",
+        "severity": "low",
+        "title": "Composite-endpoint follow-up for cross-surface Work-detail fan-out (N=20 cap today)",
+        "lifecycle": "open",
+        "source": "impl-batch-b",
+        "closure_note": null,
+        "tracking_link": "DF-V1123-COMPOSITE-ENDPOINT (V1.124+)"
+      },
+      {
+        "id": "R-V1123P3-007",
+        "severity": "nit",
+        "title": "Scene/beat + context nodes excluded from cross-surface CTAs (only Moment + Narrative event nodes have CTAs)",
+        "lifecycle": "open",
+        "source": "impl-batch-b",
+        "closure_note": null,
+        "tracking_link": null
+      },
+      {
+        "id": "R-V1123P3QC1-S001",
+        "severity": "nit",
+        "title": "go.timeline command palette icon (Clock) diverges from sidebar (CalendarRange) — cosmetic",
+        "lifecycle": "open",
+        "source": "qc1",
+        "closure_note": null,
+        "tracking_link": null
+      },
+      {
+        "id": "R-V1123P3QC1-S002",
+        "severity": "nit",
+        "title": "i18n activitySummary renders layer name twice — cosmetic",
+        "lifecycle": "open",
+        "source": "qc1",
+        "closure_note": null,
+        "tracking_link": null
+      },
+      {
+        "id": "R-V1123P3QC1-S003",
+        "severity": "nit",
+        "title": "onViewOnWorldTimeline callback ignores node arg — forward-compat for P4 ?event= URL extension",
+        "lifecycle": "open",
+        "source": "qc1",
+        "closure_note": null,
+        "tracking_link": "P4 implementer note"
+      },
+      {
+        "id": "R-V1123P3QC1-S004",
+        "severity": "low",
+        "title": "Index-based useQueries lookup alignment — fragile under future filtering",
+        "lifecycle": "open",
+        "source": "qc1",
+        "closure_note": null,
+        "tracking_link": null
+      },
+      {
+        "id": "R-V1123P3QC1-S005",
+        "severity": "nit",
+        "title": "Inline-style accent pattern in CanvasShellTimelineBadge not registered as Tailwind utility",
+        "lifecycle": "open",
+        "source": "qc1",
+        "closure_note": null,
+        "tracking_link": null
+      },
+      {
+        "id": "R-V1123P3QC1-S006",
+        "severity": "nit",
+        "title": "useTimelineShortcut chord state machine not lifted into useHotkey (acceptable; flag if 2nd chord surface appears)",
+        "lifecycle": "open",
+        "source": "qc1",
+        "closure_note": null,
+        "tracking_link": null
+      },
+      {
+        "id": "R-V1123P3QC1-S007",
+        "severity": "low",
+        "title": "Activity-badge 'last edited Xh ago' indicator not surfaced on Canvas shell (P4 polish candidate)",
+        "lifecycle": "open",
+        "source": "qc1",
+        "closure_note": null,
+        "tracking_link": "P4 polish candidate"
+      },
+      {
+        "id": "R-V1123P3QC3-S001",
+        "severity": "low",
+        "title": "Ad-hoc query key ['work-detail', workId] diverges from queryKeys.ts convention",
+        "lifecycle": "open",
+        "source": "qc3",
+        "closure_note": null,
+        "tracking_link": null
+      },
+      {
+        "id": "R-V1123P3QC3-S002",
+        "severity": "nit",
+        "title": "Cross-surface N=20 fan-out lacks simplify: performance ceiling doc",
+        "lifecycle": "open",
+        "source": "qc3",
+        "closure_note": null,
+        "tracking_link": null
+      },
+      {
+        "id": "R-V1123P3QC3-S003",
+        "severity": "nit",
+        "title": "Global Timeline staleTime (5s) vs per-World graph staleTime (0) undocumented",
+        "lifecycle": "open",
+        "source": "qc3",
+        "closure_note": null,
+        "tracking_link": null
+      }
+    ],
+    "2026-07-18-v1.123-three-layer-zoom-experience": [
+      {
+        "id": "R-V1123P4QC1-S001",
+        "severity": "low",
+        "title": "key={activeLayer} remount destroys RF selection state on layer swap (medium future-risk; documented trade-off)",
+        "lifecycle": "open",
+        "source": "qc1",
+        "closure_note": null,
+        "tracking_link": "P5+ selection-persistence candidate"
+      },
+      {
+        "id": "R-V1123P4QC1-S002",
+        "severity": "nit",
+        "title": "--color-canvas-layer-narrative-accent defined but dormant (spec §6.1 allowance; future tuning knob)",
+        "lifecycle": "open",
+        "source": "qc1",
+        "closure_note": null,
+        "tracking_link": null
+      },
+      {
+        "id": "R-V1123P4QC1-S003",
+        "severity": "low",
+        "title": "URL-write logic duplicated between Timeline + Work Timeline orchestrators (~30 LOC × 2); suggest P5+ extraction to useLayerUrlState",
+        "lifecycle": "open",
+        "source": "qc1",
+        "closure_note": null,
+        "tracking_link": "P5+ refactor candidate"
+      },
+      {
+        "id": "R-V1123P4QC1-S004",
+        "severity": "nit",
+        "title": "LayerBreadcrumb is binary (coarse/fine); 3-level chain would need API evolution (V1.124+ if relevant)",
+        "lifecycle": "open",
+        "source": "qc1",
+        "closure_note": null,
+        "tracking_link": null
+      },
+      {
+        "id": "R-V1123P4QC1-S005",
+        "severity": "nit",
+        "title": "Tailwind-merge safety for new color utilities verified (negative finding — no bug; V1.94 risk doesn't apply to plain text-color tokens)",
+        "lifecycle": "open",
+        "source": "qc1",
+        "closure_note": null,
+        "tracking_link": null
+      },
+      {
+        "id": "R-V1123P4QC3-S001",
+        "severity": "low",
+        "title": "useViewport() unbounded re-render cost; consider throttling for very large graphs",
+        "lifecycle": "open",
+        "source": "qc3",
+        "closure_note": null,
+        "tracking_link": "P5+ perf polish"
+      },
+      {
+        "id": "R-V1123P4QC3-S002",
+        "severity": "low",
+        "title": "Semantic zoom history pollution (browser back button through layer swaps)",
+        "lifecycle": "open",
+        "source": "qc3",
+        "closure_note": null,
+        "tracking_link": "P5+ UX polish"
+      },
+      {
+        "id": "R-V1123P4QC3-S003",
+        "severity": "nit",
+        "title": "URL state read/write overhead acceptable for V1.123; document for future scale",
+        "lifecycle": "open",
+        "source": "qc3",
+        "closure_note": null,
+        "tracking_link": null
+      },
+      {
+        "id": "R-V1123P4QC3-S004",
+        "severity": "low",
+        "title": "CSS transition ceiling when Framer Motion arrives (P5+ if richer animation needed)",
+        "lifecycle": "open",
+        "source": "qc3",
+        "closure_note": null,
+        "tracking_link": "P5+ animation upgrade"
+      },
+      {
+        "id": "R-V1123P4QC3-S005",
+        "severity": "nit",
+        "title": "React Flow v12 stable APIs used; future version risk low",
+        "lifecycle": "open",
+        "source": "qc3",
+        "closure_note": null,
+        "tracking_link": null
+      },
+      {
+        "id": "R-V1123P4QC3-S006",
+        "severity": "nit",
+        "title": "Residual surface mapped; P0-P3 residuals unaffected (observation; not actionable)",
+        "lifecycle": "open",
+        "source": "qc3",
+        "closure_note": null,
+        "tracking_link": null
       }
     ]
   }

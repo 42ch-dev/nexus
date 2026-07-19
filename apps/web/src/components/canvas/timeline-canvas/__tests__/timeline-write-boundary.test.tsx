@@ -281,11 +281,20 @@ describe('TimelineInspector — write-boundary wiring (T4)', () => {
 // the inspector surfaces without React Flow selection (jsdom does not measure
 // RF nodes).
 
-vi.mock('@/components/canvas/canvas-shell', () => ({
-  CanvasShell: ({ children }: { children?: React.ReactNode }) => (
-    <div data-testid="canvas-shell-mock">{children}</div>
-  ),
-}));
+vi.mock('@/components/canvas/canvas-shell', async () => {
+  // V1.123 P4 Task 3 — the real `CanvasShell` wraps children in a
+  // `<ReactFlowProvider>`; the mock must do the same so the
+  // `<SemanticZoomBridge>` child (which calls `useViewport()`) mounts
+  // cleanly without throwing "ReactFlowProvider as an ancestor".
+  const { ReactFlowProvider } = await import('@xyflow/react');
+  return {
+    CanvasShell: ({ children }: { children?: React.ReactNode }) => (
+      <ReactFlowProvider>
+        <div data-testid="canvas-shell-mock">{children}</div>
+      </ReactFlowProvider>
+    ),
+  };
+});
 
 // Stub the layout/canvas hook so the test does not depend on RF measurement.
 // Returning a minimal shape keeps the orchestrator's render branches intact.

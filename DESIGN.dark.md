@@ -552,6 +552,14 @@ components:
     # the same brand semantic scales in both themes).
     canvas-outline-accent: "{colors.amber-700}"
     canvas-worldkb-accent: "{colors.teal-700}"
+    # V1.123 P3 T2: Timeline accent spine (mirrors light).
+    canvas-timeline-accent: "{colors.blue-700}"
+    # V1.123 P4 Task 2: per-layer feel accents (mirrors light). gray-900
+    # projects to #e0e0e0 in dark theme so the Moment ink hue stays legible
+    # against the inverted dark canvas background — see DESIGN.md comment.
+    canvas-layer-brief-accent: "{colors.amber-700}"
+    canvas-layer-narrative-accent: "{colors.blue-700}"
+    canvas-layer-moment-accent: "{colors.gray-900}"
     canvas-write-dirty: "{colors.amber-700}"
     canvas-write-conflict: "{colors.red-700}"
     canvas-write-success: "{colors.green-700}"

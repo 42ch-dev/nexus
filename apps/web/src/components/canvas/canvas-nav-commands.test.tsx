@@ -96,6 +96,7 @@ function renderInLayout(
         >
           <Route path="works/:workId" element={<div />} />
           <Route path="works/:workId/outline" element={<div />} />
+          <Route path="works/:workId/timeline" element={<div />} />
           <Route path="worlds/:worldId/kb" element={<div />} />
           <Route path="strategies" element={<div />} />
           <Route path="sessions" element={<div />} />
@@ -121,18 +122,26 @@ afterEach(() => {
 });
 
 describe('CanvasNavCommands — registration', () => {
-  it('registers exactly the three nav commands', () => {
+  // V1.123 P2 Task 5 — `go.work-timeline` registered alongside the V1.111
+  // trio (`go.outline`, `go.strategy`, `go.world-kb`). Surgical relaxation of
+  // the V1.111 "exactly three" assertion: same Navigate group, same labelKey
+  // shape, additive only.
+  // V1.123 P3 Task 2 — `go.timeline` (global Timeline entry) registered
+  // alongside the V1.123 P2 quartet. Always available; same Navigate group.
+  it('registers the Navigate-family commands (incl. Work Timeline V1.123 P2, global Timeline V1.123 P3 T2)', () => {
     renderInLayout('/sessions');
     expect(getCommands().map((c) => c.id).sort()).toEqual([
       'go.outline',
       'go.strategy',
+      'go.timeline',
+      'go.work-timeline',
       'go.world-kb',
     ]);
   });
 
   it('unregisters all commands on unmount (no leak across mounts)', () => {
     const { unmount } = renderInLayout('/sessions');
-    expect(getCommands()).toHaveLength(3);
+    expect(getCommands()).toHaveLength(5);
     unmount();
     expect(getCommands()).toEqual([]);
   });
@@ -209,6 +218,42 @@ describe('CanvasNavCommands — Go to World KB (worldId-gated)', () => {
       cmd?.handler();
     });
     expect(probe.read()).toBe('/worlds/world-9/kb');
+  });
+});
+
+describe('CanvasNavCommands — Go to Work Timeline (workId-gated, V1.123 P2)', () => {
+  // Plan AC-V1123-11: Work Timeline reachable as a peer surface from Work
+  // Canvas shell. The command is workId-gated (mirrors `go.outline`); the
+  // handler encodes the workId so space-bearing ids stay one path segment.
+  it('is hidden when no workId is in the URL', () => {
+    renderInLayout('/sessions');
+    expect(findById('go.work-timeline')?.available?.()).toBe(false);
+  });
+
+  it('is available and navigates to /works/:workId/timeline when on a Work route', () => {
+    const { probe } = renderInLayout('/works/w-123');
+    const cmd = findById('go.work-timeline');
+    expect(cmd?.available?.()).toBe(true);
+    act(() => {
+      cmd?.handler();
+    });
+    expect(probe.read()).toBe('/works/w-123/timeline');
+  });
+
+  it('is available on the Outline route (workId still present — peer reachable)', () => {
+    // Work Timeline is a peer of Outline from the Work Canvas shell; the
+    // command MUST stay available while the user is on `/works/:workId/outline`
+    // so they can pivot Outline → Work Timeline without going through the list.
+    renderInLayout('/works/w-1/outline');
+    expect(findById('go.work-timeline')?.available?.()).toBe(true);
+  });
+
+  it('encodes the workId so a space-bearing id stays one path segment', () => {
+    const { probe } = renderInLayout('/works/w%204');
+    act(() => {
+      findById('go.work-timeline')?.handler();
+    });
+    expect(probe.read()).toBe('/works/w%204/timeline');
   });
 });
 

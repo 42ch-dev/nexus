@@ -10,5 +10,8 @@
   "listTitle": "全部世界",
   "openKb": "打开知识库",
   "openTimeline": "打开时间轴",
-  "listAriaLabel": "世界"
+  "listAriaLabel": "世界",
+  "timelineActivity": "时间线活动",
+  "timelineActivityLastEdited": "时间线 · 上次编辑 {{when}}",
+  "timelineActivityFallback": "时间线 · 暂无活动"
 }
