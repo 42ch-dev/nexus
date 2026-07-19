@@ -28,7 +28,7 @@ Parent rules: [`../AGENTS.md`](../AGENTS.md) (apps placement), root [`AGENTS.md`
 | `@web-setup/*` | `../web/src/components/setup/*` | Gallery-only import of app-shared setup compositions (e.g. AgentPicker, WorkspacePathField) — props-driven; no contracts/daemon |
 | `@web-layout/*` | `../web/src/components/layout/presentational/*` | Shell chrome extracts (sidebar, footer profiles, header/health) — props-driven; no routing or daemon hooks (V1.107) |
 | `@web-settings/*` | `../web/src/components/settings/presentational/*` | Settings section chrome extracts (ConnectDaemon form, Setup section) — props-driven; no IPC (V1.107) |
-| `@web-canvas/*` | `../web/src/components/canvas/presentational/*` | Canvas node-chrome extracts (`NodeChromeShell`) — props-driven; no `@xyflow/react`, no RF types (V1.115) |
+| `@web-canvas/*` | `../web/src/components/canvas/presentational/*` | Canvas node-chrome extracts (`NodeChromeShell`, V1.115; Timeline body chrome `timeline-node-chrome` — six exports `TimelineBriefEraChrome` / `TimelineEventChrome` / `TimelineKeyBlockChrome` / `WorkTimelineNarrativeEventChrome` / `WorkTimelineMomentSceneChrome` / `WorkTimelineMomentBeatChrome`, V1.124) — props-driven; no `@xyflow/react`, no RF types, no contracts, no `useTranslation` |
 | `@web-lib/utils` | `../web/src/lib/utils.ts` | `cn()` only |
 | `@42ch/nexus-ui` | workspace package | Brand VI plus promoted presentational primitives (Button, Badge, Card, Input, Label, Textarea, Select, Toast) through public exports |
 | `@nexus/design-tokens` | `tooling/design-tokens` | Shared CSS + Tailwind preset |
@@ -79,7 +79,7 @@ No daemon or Tauri required.
 - Read-only gallery — no YAML write-back, no localStorage token overrides
 - App chrome shows **Read-only · edit `DESIGN.md`** (repo-root SSOT helper)
 - Voice & Content and Surfaces fixture strings: [IA guide §4.4–§4.5](../../.mstar/iterations/v1.98/guides/design-studio-information-architecture.md) — sourced from DESIGN § Voice & Content and shipped product copy
-- Canvas surfaces fixture (`src/fixtures/canvas-surfaces-fixtures.tsx`) mirrors all three canvas surfaces — Outline, Strategy, and World KB — via the shared `canvas-*` / `canvas-worldkb-*` / `canvas-strategy-accent` tokens (light/dark driven by the `.dark` token block).
+- Canvas surfaces fixture mirrors Outline + Strategy + WorldKB + World Timeline + Work Timeline node chrome. Global Timeline overview fixtures are P2 (not yet full six-`CanvasSurfaceKind` coverage).
 
 ## Audiences
 

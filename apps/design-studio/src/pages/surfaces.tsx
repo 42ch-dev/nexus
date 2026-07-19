@@ -21,6 +21,8 @@ import {
 } from '@/fixtures/shell-nav-data';
 import { SettingsHostFixtures } from '@/fixtures/settings-host-fixtures';
 import { SetupWizardChromeFixtures } from '@/fixtures/setup-wizard-chrome-fixtures';
+import { TimelineCanvasFixtures } from '@/fixtures/timeline-canvas-fixtures';
+import { WorkTimelineCanvasFixtures } from '@/fixtures/work-timeline-canvas-fixtures';
 
 /* ------------------------------------------------------------------ */
 /*  Data — IA guide §4.5 fixtures (canonical copy strings)              */
@@ -610,76 +612,147 @@ export function SurfacesBannerPage() {
 
 export function SurfacesCanvasPage() {
   return (
-    <section data-testid="surfaces-canvas">
-      <SurfaceHeading>Canvas — Three mirrored surfaces + shared chrome</SurfaceHeading>
-      <p className="text-copy-14 text-gray-700 mb-6">
-        Presentational preview of the canvas surface chrome. All three App
-        canvas surfaces are mirrored as static markup using the same tokens
-        shared via{' '}
-        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
-          @nexus/design-tokens
-        </code>
-        :{' '}
-        <strong className="font-medium text-gray-1000">Outline</strong> (Volume
-        / Chapter / Timeline Event / Scene / Beat node kinds, mirroring{' '}
-        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
-          outline-nodes.tsx
-        </code>{' '}
-        +{' '}
-        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
-          scene-beat-nodes.tsx
-        </code>
-        ),{' '}
-        <strong className="font-medium text-gray-1000">Strategy</strong>{' '}
-        (state-machine states, join, terminal, labeled transitions, inspector,
-        and validation panel, mirroring{' '}
-        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
-          strategy-nodes.tsx
-        </code>{' '}
-        +{' '}
-        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
-          strategy-canvas/*
-        </code>
-        ), and{' '}
-        <strong className="font-medium text-gray-1000">World KB</strong>{' '}
-        (entity cards, source-anchor provenance, typed relationship edges, and
-        relationship inspector, mirroring{' '}
-        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
-          world-kb/*
-        </code>
-        ). The shared shell chrome — dot-grid background, zoom controls,
-        minimap swatch — and right-click context menu matrices are common to all
-        three, painted from{' '}
-        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
-          canvas-outline-*
-        </code>
-        ,{' '}
-        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
-          canvas-node-*
-        </code>
-        ,{' '}
-        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
-          canvas-strategy-accent
-        </code>
-        , and{' '}
-        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
-          canvas-worldkb-*
-        </code>{' '}
-        tokens. No{' '}
-        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
-          @xyflow/react
-        </code>
-        , no{' '}
-        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
-          NexusClient
-        </code>
-        , no{' '}
-        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
-          @42ch/nexus-contracts
-        </code>
-        — light/dark acceptance here carries to the App graph.
-      </p>
-      <CanvasSurfacesFixtures />
-    </section>
+    <div data-testid="surfaces-canvas">
+      <section>
+        <SurfaceHeading>Canvas — Three mirrored surfaces + shared chrome</SurfaceHeading>
+        <p className="text-copy-14 text-gray-700 mb-6">
+          Presentational preview of the canvas surface chrome. All three App
+          canvas surfaces are mirrored as static markup using the same tokens
+          shared via{' '}
+          <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+            @nexus/design-tokens
+          </code>
+          :{' '}
+          <strong className="font-medium text-gray-1000">Outline</strong> (Volume
+          / Chapter / Timeline Event / Scene / Beat node kinds, mirroring{' '}
+          <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+            outline-nodes.tsx
+          </code>{' '}
+          +{' '}
+          <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+            scene-beat-nodes.tsx
+          </code>
+          ),{' '}
+          <strong className="font-medium text-gray-1000">Strategy</strong>{' '}
+          (state-machine states, join, terminal, labeled transitions, inspector,
+          and validation panel, mirroring{' '}
+          <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+            strategy-nodes.tsx
+          </code>{' '}
+          +{' '}
+          <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+            strategy-canvas/*
+          </code>
+          ), and{' '}
+          <strong className="font-medium text-gray-1000">World KB</strong>{' '}
+          (entity cards, source-anchor provenance, typed relationship edges, and
+          relationship inspector, mirroring{' '}
+          <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+            world-kb/*
+          </code>
+          ). The shared shell chrome — dot-grid background, zoom controls,
+          minimap swatch — and right-click context menu matrices are common to all
+          three, painted from{' '}
+          <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+            canvas-outline-*
+          </code>
+          ,{' '}
+          <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+            canvas-node-*
+          </code>
+          ,{' '}
+          <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+            canvas-strategy-accent
+          </code>
+          , and{' '}
+          <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+            canvas-worldkb-*
+          </code>{' '}
+          tokens. No{' '}
+          <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+            @xyflow/react
+          </code>
+          , no{' '}
+          <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+            NexusClient
+          </code>
+          , no{' '}
+          <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+            @42ch/nexus-contracts
+          </code>
+          — light/dark acceptance here carries to the App graph.
+        </p>
+        <CanvasSurfacesFixtures />
+      </section>
+
+      {/* V1.124 P0 T3 — World Timeline node chrome (Brief-era / Event / KeyBlock) */}
+      <section className="mt-10" data-testid="surfaces-world-timeline">
+        <SurfaceHeading>World Timeline</SurfaceHeading>
+        <p className="text-copy-14 text-gray-700 mb-6">
+          World Timeline node chrome for visual acceptance without the daemon —
+          Brief-era markers, Narrative Events, and KeyBlock Context cluster
+          cards. Composes the shared extracts{' '}
+          <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+            @web-canvas/node-chrome-shell
+          </code>{' '}
+          +{' '}
+          <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+            @web-canvas/timeline-node-chrome
+          </code>{' '}
+          (same modules App RF wrappers use). Surface spine is{' '}
+          <strong className="font-medium text-gray-1000">worldkb</strong>; layer
+          accents are Brief (
+          <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+            canvas-layer-brief-accent
+          </code>
+          ) and Narrative (
+          <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+            canvas-layer-narrative-accent
+          </code>
+          ). Static English product vocabulary only — no{' '}
+          <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+            @xyflow/react
+          </code>
+          , no contracts, no i18n. Layer breadcrumb is P2.
+        </p>
+        <TimelineCanvasFixtures />
+      </section>
+
+      {/* V1.124 P0 T4 — Work Timeline node chrome (Narrative + Moment scene + beat) */}
+      <section className="mt-10" data-testid="surfaces-work-timeline">
+        <SurfaceHeading>Work Timeline</SurfaceHeading>
+        <p className="text-copy-14 text-gray-700 mb-6">
+          Work Timeline node chrome for visual acceptance without the daemon —
+          Narrative events plus Moment scene and beat cards (Moment = scene +
+          beat; both required). Composes the shared extracts{' '}
+          <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+            @web-canvas/node-chrome-shell
+          </code>{' '}
+          +{' '}
+          <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+            @web-canvas/timeline-node-chrome
+          </code>{' '}
+          (same modules App RF wrappers use). Narrative spine is{' '}
+          <strong className="font-medium text-gray-1000">worldkb</strong> with
+          layer accent{' '}
+          <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+            canvas-layer-narrative-accent
+          </code>
+          ; Moment scene/beat spine is{' '}
+          <strong className="font-medium text-gray-1000">outline</strong> with
+          layer accent{' '}
+          <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+            canvas-layer-moment-accent
+          </code>
+          . Static English product vocabulary only — no{' '}
+          <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+            @xyflow/react
+          </code>
+          , no contracts, no i18n. Layer breadcrumb is P2; Global Timeline
+          overview fixtures are P2.
+        </p>
+        <WorkTimelineCanvasFixtures />
+      </section>
+    </div>
   );
 }
