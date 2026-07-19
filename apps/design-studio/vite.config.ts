@@ -44,6 +44,11 @@ export default defineConfig({
         '@web-settings': path.resolve(__dirname, '../web/src/components/settings/presentational'),
         // Gallery-only alias for app-shared canvas node-chrome extracts (V1.115 NodeChromeShell).
         '@web-canvas': path.resolve(__dirname, '../web/src/components/canvas/presentational'),
+        // Gallery-only alias for Global Timeline list chrome (V1.124 P2).
+        '@web-global-timeline': path.resolve(
+          __dirname,
+          '../web/src/components/global-timeline/presentational',
+        ),
         '@web-lib/utils': path.resolve(__dirname, '../web/src/lib/utils'),
       },
     },

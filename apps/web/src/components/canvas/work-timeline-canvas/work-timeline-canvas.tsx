@@ -368,18 +368,21 @@ function WorkTimelineCanvasHeader({
             surfaceKey="work-timeline"
             coarseSegment={{
               layer: 'narrative',
-              labelKey: 'workTimeline.layerSwitcher.narrative',
-              defaultValue: 'Narrative',
+              label: t('workTimeline.layerSwitcher.narrative', {
+                defaultValue: 'Narrative',
+              }),
             }}
             fineSegment={{
               layer: 'moment',
-              labelKey: 'workTimeline.layerSwitcher.moment',
-              defaultValue: 'Moment',
+              label: t('workTimeline.layerSwitcher.moment', {
+                defaultValue: 'Moment',
+              }),
             }}
             activeLayer={activeLayer}
             onLayerChange={onLayerChange}
-            ariaLabelKey="workTimeline.breadcrumb.ariaLabel"
-            ariaLabelDefaultValue="Work Timeline layer path"
+            ariaLabel={t('workTimeline.breadcrumb.ariaLabel', {
+              defaultValue: 'Work Timeline layer path',
+            })}
           />
         ) : null}
         {showLayerSwitcher ? (

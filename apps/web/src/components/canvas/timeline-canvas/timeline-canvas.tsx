@@ -713,18 +713,21 @@ function TimelineCanvasHeader({
             surfaceKey="timeline"
             coarseSegment={{
               layer: 'brief',
-              labelKey: 'timeline.layerSwitcher.brief',
-              defaultValue: 'Brief',
+              label: t('timeline.layerSwitcher.brief', {
+                defaultValue: 'Brief',
+              }),
             }}
             fineSegment={{
               layer: 'narrative',
-              labelKey: 'timeline.layerSwitcher.narrative',
-              defaultValue: 'Narrative',
+              label: t('timeline.layerSwitcher.narrative', {
+                defaultValue: 'Narrative',
+              }),
             }}
             activeLayer={activeLayer}
             onLayerChange={onLayerChange}
-            ariaLabelKey="timeline.breadcrumb.ariaLabel"
-            ariaLabelDefaultValue="Timeline layer path"
+            ariaLabel={t('timeline.breadcrumb.ariaLabel', {
+              defaultValue: 'Timeline layer path',
+            })}
           />
         ) : null}
         {/* V1.123 P1 T3 — Brief ↔ Narrative layer switcher (layer-feel §3.2).
