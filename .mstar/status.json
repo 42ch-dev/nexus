@@ -43,25 +43,21 @@
         "nit": 24
       },
       "by_target": {
-        "V1.96": 1,
-        "hotfix": 1,
+        "post-V1.92": 1,
         "post-V1.112": 1,
         "post-V1.116": 1,
-        "post-V1.121": 15,
-        "unspecified": 24
+        "hotfix-v1.116": 1,
+        "post-V1.125": 28
       },
       "by_plan": {
         "2026-07-05-v1.92-closure": 1,
         "2026-07-12-v1.112-i18n-ui-migration": 1,
         "2026-07-13-v1.116-agent-detection-codex-native": 1,
         "2026-07-16-hotfix-setup-continue-404": 1,
-        "2026-07-17-v1.121-app-surfaces-elevation": 5,
-        "2026-07-17-v1.121-canvas-reading-elevation": 6,
-        "2026-07-17-v1.121-component-library-elevation": 3,
-        "2026-07-17-v1.121-design-language-foundation": 1,
         "2026-07-20-v1.126-p0-shell-selection-submenu": 8,
         "2026-07-20-v1.126-p1-canvas-directed-axis": 5,
-        "2026-07-20-v1.126-p2-composite-timeline-endpoint": 11
+        "2026-07-20-v1.126-p2-composite-timeline-endpoint": 11,
+        "2026-07-20-v1.126-p3-status-compaction-residual-cleanup": 4
       }
     },
     "updated_at": "2026-07-19"
