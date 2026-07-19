@@ -124,6 +124,43 @@ describe('ModulesPage', () => {
     expect(await screen.findByText('No modules installed')).toBeInTheDocument();
   });
 
+  it('renders the error state when the daemon fails', async () => {
+    useHandlers(
+      http.get('/v1/daemon/compute/modules', () =>
+        HttpResponse.json(
+          { success: false, error: { code: 'internal', message: 'boom' } },
+          { status: 500 },
+        ),
+      ),
+    );
+
+    renderModules();
+
+    expect(await screen.findByText('Could not load modules')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument();
+    expect(screen.queryByText('Could not load this view')).not.toBeInTheDocument();
+  });
+
+  it('renders unavailable state when orchestration engine is down (503)', async () => {
+    useHandlers(
+      http.get('/v1/daemon/compute/modules', () =>
+        HttpResponse.json(
+          {
+            success: false,
+            error: { code: 'service_unavailable', message: 'engine not available' },
+          },
+          { status: 503 },
+        ),
+      ),
+    );
+
+    renderModules();
+
+    expect(await screen.findByText('Orchestration engine not running')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument();
+    expect(screen.queryByText('Could not load this view')).not.toBeInTheDocument();
+  });
+
   it('renders the loading state before data resolves', async () => {
     useHandlers(
       http.get('/v1/daemon/compute/modules', async () => {

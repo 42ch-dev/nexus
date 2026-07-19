@@ -44,6 +44,21 @@ export class NexusClientError extends Error {
     this.details = details;
   }
 
+  /**
+   * True when the daemon orchestration engine is not running (503 /
+   * `service_unavailable` / message contains "engine not available").
+   * List surfaces map this to honest unavailable/empty UX — not the generic
+   * `common.error.title` crash framing.
+   */
+  static isOrchestrationEngineUnavailable(error: unknown): boolean {
+    return (
+      error instanceof NexusClientError
+      && error.status === 503
+      && (error.code === 'service_unavailable'
+        || error.message.toLowerCase().includes('engine not available'))
+    );
+  }
+
   static fromBody(status: number, body: unknown): NexusClientError {
     // The daemon runtime wraps the canonical ErrorResponse under `error`:
     //   { success: false, error: { code, message, details?, request_id? } }
@@ -61,4 +76,9 @@ export class NexusClientError extends Error {
       inner.details ?? parsed.details,
     );
   }
+}
+
+/** @see NexusClientError.isOrchestrationEngineUnavailable */
+export function isOrchestrationEngineUnavailable(error: unknown): boolean {
+  return NexusClientError.isOrchestrationEngineUnavailable(error);
 }

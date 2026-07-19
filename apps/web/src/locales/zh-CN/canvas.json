@@ -189,6 +189,9 @@
   "strategy": {
     "loading": "加载策略中…",
     "loadError": "加载策略失败。",
+    "loadErrorTitle": "无法加载策略",
+    "engineUnavailableTitle": "编排引擎未运行",
+    "engineUnavailableDescription": "请启动守护进程编排引擎后重试。",
     "graphAriaLabel": "策略空间图谱",
     "header": {
       "title": "策略",

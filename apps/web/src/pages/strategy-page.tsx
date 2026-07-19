@@ -20,8 +20,9 @@ import { useNavigate, useParams } from 'react-router-dom';
 
 import { StrategyCanvas } from '@/components/canvas/strategy-canvas';
 import { Button } from '@/components/ui/button';
-import { EmptyState, LoadingState } from '@/components/ui/states';
+import { EmptyState, ErrorState, LoadingState, UnavailableState } from '@/components/ui/states';
 import { usePresets } from '@/api/queries';
+import { isOrchestrationEngineUnavailable } from '@/lib/nexus/errors';
 
 export function StrategyPage() {
   const { t } = useTranslation('strategies');
@@ -35,6 +36,41 @@ export function StrategyPage() {
 
   if (presets.isLoading) {
     return <LoadingState label={t('strategyDetail.loading')} />;
+  }
+
+  if (presets.isError) {
+    const retry = () => void presets.refetch();
+    const backButton = (
+      <Button type="button" variant="secondary" size="small" onClick={handleBack}>
+        <ArrowLeft className="h-4 w-4" aria-hidden />
+        {t('strategyDetail.back')}
+      </Button>
+    );
+
+    if (isOrchestrationEngineUnavailable(presets.error)) {
+      return (
+        <UnavailableState
+          title={t('engineUnavailableTitle')}
+          description={t('engineUnavailableDescription')}
+          onRetry={retry}
+          action={backButton}
+        />
+      );
+    }
+
+    return (
+      <div className="flex flex-col gap-4">
+        <Button type="button" variant="tertiary" size="small" onClick={handleBack} className="self-start">
+          <ArrowLeft className="h-4 w-4" aria-hidden />
+          {t('strategyDetail.back')}
+        </Button>
+        <ErrorState
+          title={t('errorTitle')}
+          description={t('errorDescription')}
+          onRetry={retry}
+        />
+      </div>
+    );
   }
 
   const all = presets.data

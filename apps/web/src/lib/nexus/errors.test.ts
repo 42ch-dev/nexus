@@ -9,7 +9,7 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import { NexusClientError } from './errors';
+import { NexusClientError, isOrchestrationEngineUnavailable } from './errors';
 
 describe('NexusClientError.fromBody', () => {
   it('unwraps the daemon envelope { success, error: { code, message } }', () => {
@@ -84,5 +84,27 @@ describe('NexusClientError constructor', () => {
     expect(error.details).toEqual({ field: 'title' });
     expect(error.name).toBe('NexusClientError');
     expect(error).toBeInstanceOf(Error);
+  });
+});
+
+describe('isOrchestrationEngineUnavailable', () => {
+  it('returns true for 503 service_unavailable', () => {
+    const error = new NexusClientError(503, 'service_unavailable', 'engine not available');
+    expect(isOrchestrationEngineUnavailable(error)).toBe(true);
+  });
+
+  it('returns true for 503 with engine-not-available message', () => {
+    const error = new NexusClientError(503, 'http_503', 'Orchestration engine not available');
+    expect(isOrchestrationEngineUnavailable(error)).toBe(true);
+  });
+
+  it('returns false for other status codes', () => {
+    const error = new NexusClientError(500, 'internal', 'boom');
+    expect(isOrchestrationEngineUnavailable(error)).toBe(false);
+  });
+
+  it('returns false for non-NexusClientError values', () => {
+    expect(isOrchestrationEngineUnavailable(new Error('nope'))).toBe(false);
+    expect(isOrchestrationEngineUnavailable(null)).toBe(false);
   });
 });
