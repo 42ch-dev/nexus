@@ -151,7 +151,7 @@ describe('TimelineCanvasAdapter.projectGraph — entity projection', () => {
     const adapter = createTimelineCanvasAdapter({ current: makeContext() });
     const { nodes } = adapter.projectGraph(graph);
 
-    expect(nodes).toHaveLength(1);
+    expect(nodes).toHaveLength(2);
     const node = nodes[0] as Node<TimelineNodeData>;
     expect(node.type).toBe('timeline-event');
     expect(node.data.layoutHint).toBe('event');

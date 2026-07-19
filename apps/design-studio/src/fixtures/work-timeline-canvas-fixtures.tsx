@@ -311,12 +311,71 @@ function MomentBeatFixtureFrame() {
 }
 
 /* ------------------------------------------------------------------ */
+/*  §4.7 V1.126 P1 — Moment directed axis spine (static SVG sample)      */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Static SVG spine sample for the Moment layer's chapter-scoped micro-axis.
+ * Density-encoded per ND-A1: segment length proportional to scene count.
+ * Chapter labels sit above each segment; scene ticks inside.
+ */
+const ACCENT_MOMENT = 'var(--color-canvas-layer-moment-accent)';
+
+function MomentSpineSample() {
+  return (
+    <svg width={420} height={48} className="block" aria-hidden>
+      <line x1={20} y1={24} x2={140} y2={24} stroke={ACCENT_MOMENT} strokeWidth={3} strokeLinecap="round" />
+      <text x={80} y={42} textAnchor="middle" fill={ACCENT_MOMENT} fontSize={9} fontFamily="var(--font-sans, ui-sans-serif, system-ui)">Ch. 1</text>
+      <line x1={25} y1={21} x2={25} y2={27} stroke={ACCENT_MOMENT} strokeWidth={1} strokeLinecap="round" opacity={0.7} />
+      <line x1={55} y1={21} x2={55} y2={27} stroke={ACCENT_MOMENT} strokeWidth={1} strokeLinecap="round" opacity={0.7} />
+      <line x1={85} y1={21} x2={85} y2={27} stroke={ACCENT_MOMENT} strokeWidth={1} strokeLinecap="round" opacity={0.7} />
+      <line x1={115} y1={21} x2={115} y2={27} stroke={ACCENT_MOMENT} strokeWidth={1} strokeLinecap="round" opacity={0.7} />
+
+      <line x1={140} y1={24} x2={260} y2={24} stroke={ACCENT_MOMENT} strokeWidth={3} strokeLinecap="round" />
+      <text x={200} y={42} textAnchor="middle" fill={ACCENT_MOMENT} fontSize={9} fontFamily="var(--font-sans, ui-sans-serif, system-ui)">Ch. 2</text>
+      <line x1={160} y1={21} x2={160} y2={27} stroke={ACCENT_MOMENT} strokeWidth={1} strokeLinecap="round" opacity={0.7} />
+      <line x1={200} y1={21} x2={200} y2={27} stroke={ACCENT_MOMENT} strokeWidth={1} strokeLinecap="round" opacity={0.7} />
+      <line x1={240} y1={21} x2={240} y2={27} stroke={ACCENT_MOMENT} strokeWidth={1} strokeLinecap="round" opacity={0.7} />
+
+      <line x1={260} y1={24} x2={400} y2={24} stroke={ACCENT_MOMENT} strokeWidth={3} strokeLinecap="round" />
+      <polygon points={`395,24 380,16 380,32`} fill={ACCENT_MOMENT} />
+      <text x={330} y={42} textAnchor="middle" fill={ACCENT_MOMENT} fontSize={9} fontFamily="var(--font-sans, ui-sans-serif, system-ui)">Ch. 3</text>
+      <line x1={280} y1={21} x2={280} y2={27} stroke={ACCENT_MOMENT} strokeWidth={1} strokeLinecap="round" opacity={0.7} />
+      <line x1={320} y1={21} x2={320} y2={27} stroke={ACCENT_MOMENT} strokeWidth={1} strokeLinecap="round" opacity={0.7} />
+      <line x1={360} y1={21} x2={360} y2={27} stroke={ACCENT_MOMENT} strokeWidth={1} strokeLinecap="round" opacity={0.7} />
+      <line x1={380} y1={21} x2={380} y2={27} stroke={ACCENT_MOMENT} strokeWidth={1} strokeLinecap="round" opacity={0.7} />
+    </svg>
+  );
+}
+
+function MomentSpineFixtureFrame() {
+  return (
+    <FixtureFrame
+      title="V1.126 P1 — Moment directed axis spine"
+      description="Moment layer chapter-scoped micro-axis on the Work Timeline. Gray segments are chapter-length; density-encoded per ND-A1 (segment length ∝ scene count) — a deliberate rhythm break from Brief+Narrative's time-span convention. Scene ticks sit inside each segment. Arrow head at the rightmost segment."
+      testId="work-timeline-fixture-moment-spine"
+    >
+      <VariantMatrix testId="work-timeline-moment-spine-matrix">
+        <VariantChip label="Moment layer spine">
+          <div className="flex flex-col gap-2 rounded-card border border-gray-alpha-300 bg-canvas-surface p-4">
+            <span className="text-label-12 font-medium" style={{ color: ACCENT_MOMENT }}>
+              Moment — chapter micro-segments
+            </span>
+            <MomentSpineSample />
+          </div>
+        </VariantChip>
+      </VariantMatrix>
+    </FixtureFrame>
+  );
+}
+
+/* ------------------------------------------------------------------ */
 /*  Public fixture component                                            */
 /* ------------------------------------------------------------------ */
 
 /**
- * Work Timeline fixtures — three frames (Narrative event / Moment scene /
- * Moment beat) covering boundary §4.4–§4.6 variant matrices.
+ * Work Timeline fixtures — Narrative event / Moment scene / Moment beat /
+ * Moment spine covering boundary §4.4–§4.7 variant matrices.
  * Presentational-only; no daemon, no RF, no contracts, no i18n.
  * Moment = scene + beat (both required).
  */
@@ -326,6 +385,7 @@ export function WorkTimelineCanvasFixtures() {
       <NarrativeEventFixtureFrame />
       <MomentSceneFixtureFrame />
       <MomentBeatFixtureFrame />
+      <MomentSpineFixtureFrame />
     </div>
   );
 }

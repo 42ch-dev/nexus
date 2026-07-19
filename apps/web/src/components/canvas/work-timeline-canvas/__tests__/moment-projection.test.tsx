@@ -269,7 +269,8 @@ describe('WorkTimelineCanvasAdapter — Moment projection reads fixture from ctx
     );
     const { nodes } = adapter.projectGraph(g);
 
-    expect(nodes).toHaveLength(1);
+    // V1.126 P1: directed-axis spine node is also added.
+    expect(nodes).toHaveLength(2);
     expect(nodes[0].type).toBe('work-timeline-moment-scene');
     expect(nodes[0].id).toBe('wt-scene:sc-1');
   });
@@ -278,8 +279,9 @@ describe('WorkTimelineCanvasAdapter — Moment projection reads fixture from ctx
     const adapter = createWorkTimelineCanvasAdapter({ current: makeContext() });
 
     // Task 2 registered only the Narrative event node; Task 3 adds the
-    // Moment scene + beat nodes. The registry has exactly three entries.
+    // Moment scene + beat nodes. V1.126 P1 adds directedAxisSpine.
     expect(Object.keys(adapter.nodeTypes).sort()).toEqual([
+      'directedAxisSpine',
       'work-timeline-moment-beat',
       'work-timeline-moment-scene',
       'work-timeline-narrative-event',
