@@ -176,14 +176,25 @@ P2 Task 1 Execute must still **enumerate every file** under `apps/web/src/compon
 
 ---
 
-## 7. Deferred-to-roadmap section (P2 Task 4 fills triggers)
+## 7. Deferred to roadmap (P2 Task 4 — Execute 2026-07-19)
 
-| Item | Why deferred | Revisit trigger |
-|------|--------------|-----------------|
-| idea-input | Daemon/strategy-hook coupled | Pure composer chrome extract ≤ one task |
-| canvas-nav-commands | Command registry / router | Not a Surfaces gallery target unless chrome-only palette UI appears |
-| Alt-view toggles (if not fixture-ed) | RF/surface-state coupling | Cheap presentational strip confirmed |
-| Full canvas/** inventory residuals | Priority set first | Next Studio-first gap iteration |
+Surfaces classified **`web-only wrapper`** (or deferred `studio-local`) that did **not** receive a Studio fixture in V1.124 P2. Priority fixtures landed: Global Timeline list chrome, Layer breadcrumb, conflict-modal shared chrome.
+
+| Surface | Path(s) | Bucket | Why deferred / keep-app-local | Revisit trigger |
+|---------|---------|--------|-------------------------------|-----------------|
+| Idea input | `canvas/idea-input.tsx` | `web-only wrapper` | Strategy run/steer/resume hooks (`useRunStrategy` etc.) — presentational layer *is* the product-state coupling | Fixture when a pure composer chrome exists without strategy hooks (extract cost ≤ one task) |
+| Canvas nav commands | `canvas/canvas-nav-commands.tsx` | `web-only wrapper` | `useRegisterCommand` + `useNavigate` + route params — command registry behavior, not a visual gallery target | Only if a chrome-only palette UI appears independent of the registry |
+| Outline alt-view | `outline-canvas/outline-alt-view.tsx` | `web-only wrapper` | Surface-specific list chrome bound to outline projection + sort state; RF-free strip not cheap enough for this plan | Fixture when a shared alt-view toggle/list strip extracts RF-free in ≤ one task |
+| Strategy alt-view | `strategy-alt-view.tsx` | `web-only wrapper` | Coupled to strategy canvas view-mode / SM state | Same as Outline alt-view |
+| World KB alt-view | `world-kb/world-kb-alt-view.tsx` | `web-only wrapper` | Coupled to entity/relationship table projection | Same as Outline alt-view |
+| Timeline alt-view | `timeline-canvas/timeline-alt-view.tsx` | `web-only wrapper` | Orthogonal to P0 node chrome; RF/viewport-preference bound | Same as Outline alt-view |
+| Timeline RF node wrappers | `timeline-node-types.tsx`, `work-timeline-node-types.tsx` | `web-only wrapper` | RF `Handle`/`NodeProps` *is* the layer — bodies covered by P0 `timeline-node-chrome` | — |
+| Canvas shell / adapters / inspectors | `canvas-shell.tsx`, `*-adapter.tsx`, `**/inspectors/**` | Mostly `web-only wrapper` | Mixed RF + daemon + product routing | Individual extracts when a second gallery need appears |
+| World KB entity nodes / graphs | `world-kb/entity-node.tsx`, `world-kb-canvas.tsx`, … | `web-only wrapper` | RF + contracts; partially mirrored via existing Studio WorldKB samples | Promote only if package criteria met (P3) |
+| Domain conflict wrappers | `conflict-modal.tsx`, `outline-conflict-modal.tsx`, `world-kb-*-conflict-modal.tsx` | `web-only wrapper` | Product field mapping + i18n adapters over shared chrome (fixture = chrome only) | — |
+| Full canvas/** silent-gap residuals | appendix §9 | mixed | Priority set 1–3 fixture-ed first | Next Studio-first gap iteration consumes appendix rows with `action=defer` |
+
+**Product-relevant roadmap note:** Alt-view toggles remain the highest deferred visual candidates after P2; do not force fixtures until a cheap RF-free strip is confirmed. idea-input / nav-commands stay behavior-coupled by default.
 
 ---
 
@@ -195,3 +206,44 @@ P2 Task 1 Execute must still **enumerate every file** under `apps/web/src/compon
 | `studio-timeline-fixture-boundaries.md` | P0 Timeline nodes (priority sibling, not P2) |
 | `studio-fixture-acceptance-criteria.md` | F1–F9 for any fixture landed here |
 | P3 plan | Consumes classifications for promotion table |
+
+---
+
+## 9. Appendix — full file-walk (P2 Task 1 Execute)
+
+Additive inventory under `apps/web/src/components/canvas/**` + `global-timeline/**`. **Does not reorder** §3 priority or reopen §4 extract locks. Coupling codes: **RF** = `@xyflow/react`; **D** = daemon/hooks/client; **C** = contracts; **R** = router; **I** = i18n only; **none** = presentational.
+
+| File | Product sentence | Coupling | Bucket | Action |
+|------|------------------|----------|--------|--------|
+| `global-timeline/global-timeline-view.tsx` | Cross-World Timeline activity page | D+C+R+I | studio-local (via extract) | **Fixture P2** — composes list chrome |
+| `global-timeline/presentational/global-timeline-list-chrome.tsx` | List Card + rows chrome | none | studio-local fixture | **Fixture P2** `@web-global-timeline/*` |
+| `canvas/layer-breadcrumb.tsx` | Re-export of presentational breadcrumb | none | studio-local | Re-export |
+| `canvas/presentational/layer-breadcrumb.tsx` | Layer path zoom-out chrome | none | studio-local fixture | **Fixture P2** `@web-canvas/layer-breadcrumb` |
+| `canvas/conflict-modal-base.tsx` | i18n adapter → chrome | I | web-only wrapper | Adapter only |
+| `canvas/presentational/conflict-modal-chrome.tsx` | Shared conflict dialog shell | none | studio-local fixture | **Fixture P2** `@web-canvas/conflict-modal-chrome` |
+| `canvas/conflict-modal.tsx` | Strategy conflict field mapper | I+product | web-only wrapper | Defer (adapter) |
+| `canvas/outline-conflict-modal.tsx` | Outline conflict field mapper | I+product | web-only wrapper | Defer (adapter) |
+| `canvas/outline-canvas/conflict-modal.tsx` | Outline dialog host | product | web-only wrapper | Defer |
+| `canvas/world-kb/world-kb-conflict-modal.tsx` | World KB entity conflict | I+product | web-only wrapper | Defer (adapter) |
+| `canvas/world-kb/world-kb-relationship-conflict-modal.tsx` | World KB relationship conflict | I+product | web-only wrapper | Defer (adapter) |
+| `canvas/idea-input.tsx` | Strategy idea composer | D+hooks | web-only wrapper | **Defer** §7 |
+| `canvas/canvas-nav-commands.tsx` | Canvas command registration | R+commands | web-only wrapper | **Defer** §7 |
+| `canvas/strategy-alt-view.tsx` | Strategy list/alt chrome | surface state | web-only wrapper | **Defer** §7 |
+| `canvas/outline-canvas/outline-alt-view.tsx` | Outline chapters/timeline list | surface state | web-only wrapper | **Defer** §7 |
+| `canvas/world-kb/world-kb-alt-view.tsx` | World KB table alt | surface state | web-only wrapper | **Defer** §7 |
+| `canvas/timeline-canvas/timeline-alt-view.tsx` | Timeline list alt | surface state | web-only wrapper | **Defer** §7 |
+| `canvas/presentational/node-chrome-shell.tsx` | Shared node card shell | none | studio-local fixture | P0 / existing |
+| `canvas/presentational/timeline-node-chrome.tsx` | Timeline node bodies | none | studio-local fixture | P0 |
+| `canvas/timeline-canvas/timeline-node-types.tsx` | RF World Timeline nodes | RF | web-only wrapper | P0 body extract covers chrome |
+| `canvas/work-timeline-canvas/work-timeline-node-types.tsx` | RF Work Timeline nodes | RF | web-only wrapper | P0 body extract covers chrome |
+| `canvas/canvas-shell.tsx` | Canvas viewport chrome | RF+product | web-only wrapper | Defer |
+| `canvas/canvas-surface-adapter.ts` | Surface adapter types/helpers | product | web-only wrapper | Defer (no visual) |
+| `canvas/use-canvas-surface.ts` / `use-auto-layout.ts` / `use-canvas-viewport.ts` / `use-semantic-zoom.ts` | Canvas hooks | RF/D | web-only wrapper | Defer (no visual) |
+| `canvas/strategy-canvas.tsx` + `strategy-canvas/**` | Strategy surface host + SM + inspectors | RF+D+C | web-only wrapper | Defer; nodes partially in Studio samples |
+| `canvas/strategy-nodes.tsx` | Strategy RF nodes | RF | web-only wrapper | Studio samples exist |
+| `canvas/outline-canvas.tsx` + `outline-canvas/**` | Outline surface host + nodes + inspectors | RF+D+C | web-only wrapper | Defer; nodes partially in Studio samples |
+| `canvas/timeline-canvas/**` (host/adapter/inspectors) | World Timeline surface | RF+D+C | web-only wrapper | Node chrome P0; host stays App |
+| `canvas/work-timeline-canvas/**` | Work Timeline surface | RF+D+C | web-only wrapper | Node chrome P0; host stays App |
+| `canvas/world-kb/**` (canvas/header/tables/inspectors/nodes) | World KB graph surface | RF+D+C | web-only wrapper | Partial Studio samples; no new P2 fixture |
+
+**Execute confirmation:** Fixture scope matches §3 — Global Timeline → Layer breadcrumb → conflict-modal chrome landed; alt-views deferred per §4.4 / §7.

@@ -24,38 +24,26 @@
  * ceiling — a future composite endpoint (`DF-V1122-DEEPER-WB` stays
  * deferred) would lift it without UI churn.
  *
- * Each row links to the per-World Timeline route (the hero surface). The
- * `data-layer` attribute records the derived layer (`brief` when the World
- * has any `block_type=era` entity, else `narrative`) so the activity list
- * doubles as a Brief/Narrative affordance hint without requiring the user to
- * enter each World to find out. Per-layer counts (Brief: era count;
- * Narrative: event count) surface when the graph fetch resolves; on
- * per-World fetch failure the row degrades gracefully to "Timeline" fallback
- * copy and the `data-layer` falls back to `narrative`.
+ * V1.124 P2: presentational list chrome lives in
+ * `presentational/global-timeline-list-chrome.tsx` (Studio:
+ * `@web-global-timeline/global-timeline-list-chrome`). This module owns hooks,
+ * contracts types, router `Link`, and i18n only.
  */
-import { useMemo } from 'react';
+import { useMemo, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router-dom';
 import { useQueries } from '@tanstack/react-query';
-import { CalendarRange } from 'lucide-react';
 
 import { useNarrativeWorlds } from '@/api/queries';
 import { useNexusClient } from '@/lib/client-context';
 import { queryKeys } from '@/lib/nexus/query-keys';
 import { formatRelative } from '@/lib/format';
-import {
-  EmptyState,
-  ErrorState,
-  LoadingState,
-} from '@/components/ui/states';
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from '@/components/ui/card';
 import type { WorldKbGraphResponse } from '@42ch/nexus-contracts';
+
+import {
+  GlobalTimelineListChrome,
+  type GlobalTimelineListRow,
+} from '@/components/global-timeline/presentational/global-timeline-list-chrome';
 
 /**
  * Cap on the per-World graph fan-out. The plan Global Constraints allow
@@ -96,6 +84,24 @@ function deriveLayer(graph: WorldKbGraphResponse | undefined): {
   };
 }
 
+function renderAppRow(
+  row: GlobalTimelineListRow,
+  className: string,
+  content: ReactNode,
+) {
+  return (
+    <Link
+      to={`/worlds/${encodeURIComponent(row.id)}/timeline`}
+      data-testid="global-timeline-row"
+      data-world-id={row.id}
+      data-layer={row.layer ?? 'narrative'}
+      className={className}
+    >
+      {content}
+    </Link>
+  );
+}
+
 export function GlobalTimelineView() {
   const { t } = useTranslation('canvas');
   const worlds = useNarrativeWorlds();
@@ -128,119 +134,81 @@ export function GlobalTimelineView() {
     })),
   });
 
+  const chromeShared = {
+    title: t('globalTimeline.title'),
+    description: t('globalTimeline.description'),
+    listAriaLabel: t('globalTimeline.listAriaLabel'),
+    emptyTitle: t('globalTimeline.empty.title'),
+    emptyDescription: t('globalTimeline.empty.description'),
+    loadingLabel: t('globalTimeline.loading'),
+    errorDescription: t('globalTimeline.loadError'),
+  };
+
   if (worlds.isLoading) {
     return (
-      <div data-testid="global-timeline-loading">
-        <LoadingState label={t('globalTimeline.loading')} />
-      </div>
+      <GlobalTimelineListChrome
+        {...chromeShared}
+        state="loading"
+        rows={[]}
+      />
     );
   }
   if (worlds.isError) {
     return (
-      <div data-testid="global-timeline-error">
-        <ErrorState
-          description={t('globalTimeline.loadError')}
-          onRetry={() => worlds.refetch()}
-        />
-      </div>
+      <GlobalTimelineListChrome
+        {...chromeShared}
+        state="error"
+        rows={[]}
+        onRetry={() => worlds.refetch()}
+      />
     );
   }
   if (!worlds.data || worlds.data.length === 0) {
     return (
-      <Card
-        className="shadow-card"
-        data-testid="global-timeline-view"
-      >
-        <CardHeader>
-          <CardTitle voice="content">{t('globalTimeline.title')}</CardTitle>
-          <CardDescription>{t('globalTimeline.description')}</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <EmptyState
-            title={t('globalTimeline.empty.title')}
-            description={t('globalTimeline.empty.description')}
-          />
-        </CardContent>
-      </Card>
+      <GlobalTimelineListChrome
+        {...chromeShared}
+        state="empty"
+        rows={[]}
+      />
     );
   }
 
-  return (
-    <Card
-      className="shadow-card"
-      data-testid="global-timeline-view"
-    >
-      <CardHeader>
-        {/* V1.121 v0.4 voice-split: page-level entity title is content voice
-            (serif display-24). The global Timeline is the author's central
-            instrument — the serif display treatment mirrors the Worlds list
-            page. */}
-        <CardTitle voice="content">{t('globalTimeline.title')}</CardTitle>
-        <CardDescription>{t('globalTimeline.description')}</CardDescription>
-      </CardHeader>
-      <CardContent>
-        <ul
-          className="flex flex-col gap-2"
-          aria-label={t('globalTimeline.listAriaLabel')}
-        >
-          {visibleWorlds.map((world, i) => {
-            const graphQuery = graphQueries[i];
-            const graph = graphQuery?.data as
-              | WorldKbGraphResponse
-              | undefined;
-            const { layer, eraCount, eventCount } = deriveLayer(graph);
-            const graphLoading = graphQuery?.isLoading ?? false;
-            const graphError = graphQuery?.isError ?? false;
-            const label = world.title || world.world_id;
-            const activityText = graphLoading
-              ? t('globalTimeline.activityLoading')
-              : graphError
-                ? t('globalTimeline.activityError')
-                : t('globalTimeline.activitySummary', {
-                    layer: t(`globalTimeline.layer.${layer}`),
-                    era: eraCount,
-                    event: eventCount,
-                  });
+  const rows: GlobalTimelineListRow[] = visibleWorlds.map((world, i) => {
+    const graphQuery = graphQueries[i];
+    const graph = graphQuery?.data as WorldKbGraphResponse | undefined;
+    const { layer, eraCount, eventCount } = deriveLayer(graph);
+    const graphLoading = graphQuery?.isLoading ?? false;
+    const graphError = graphQuery?.isError ?? false;
+    const label = world.title || world.world_id;
+    const activityText = graphLoading
+      ? t('globalTimeline.activityLoading')
+      : graphError
+        ? t('globalTimeline.activityError')
+        : t('globalTimeline.activitySummary', {
+            layer: t(`globalTimeline.layer.${layer}`),
+            era: eraCount,
+            event: eventCount,
+          });
 
-            return (
-              <li key={world.world_id}>
-                <Link
-                  to={`/worlds/${encodeURIComponent(world.world_id)}/timeline`}
-                  data-testid="global-timeline-row"
-                  data-world-id={world.world_id}
-                  data-layer={layer}
-                  className="flex w-full items-center gap-3 rounded-card border border-gray-alpha-400 p-3 text-left transition-colors duration-state ease-standard hover:bg-gray-alpha-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-700 focus-visible:ring-offset-2"
-                >
-                  <CalendarRange
-                    className="h-5 w-5 shrink-0 text-blue-700"
-                    aria-hidden
-                  />
-                  <span className="min-w-0 flex-1">
-                    {/* V1.121 v0.4: world titles stay content voice (serif
-                        display-20) — mirrors the Worlds list page. */}
-                    <span className="block truncate font-display text-display-20 tracking-tight text-gray-1000">
-                      {label}
-                    </span>
-                    <span
-                      className="block truncate text-copy-13 text-gray-700"
-                      data-testid="global-timeline-row-activity"
-                    >
-                      {activityText}
-                    </span>
-                    {world.updated_at ? (
-                      <span className="block truncate text-copy-13-mono text-gray-700">
-                        {t('globalTimeline.lastEdited', {
-                          when: formatRelative(world.updated_at),
-                        })}
-                      </span>
-                    ) : null}
-                  </span>
-                </Link>
-              </li>
-            );
-          })}
-        </ul>
-      </CardContent>
-    </Card>
+    return {
+      id: world.world_id,
+      label,
+      activityText,
+      layer,
+      lastEditedText: world.updated_at
+        ? t('globalTimeline.lastEdited', {
+            when: formatRelative(world.updated_at),
+          })
+        : undefined,
+    };
+  });
+
+  return (
+    <GlobalTimelineListChrome
+      {...chromeShared}
+      state="ready"
+      rows={rows}
+      renderRow={renderAppRow}
+    />
   );
 }

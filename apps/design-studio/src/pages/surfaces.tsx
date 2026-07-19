@@ -21,6 +21,9 @@ import {
 } from '@/fixtures/shell-nav-data';
 import { SettingsHostFixtures } from '@/fixtures/settings-host-fixtures';
 import { SetupWizardChromeFixtures } from '@/fixtures/setup-wizard-chrome-fixtures';
+import { ConflictModalFixtures } from '@/fixtures/conflict-modal-fixtures';
+import { GlobalTimelineFixtures } from '@/fixtures/global-timeline-fixtures';
+import { LayerBreadcrumbFixtures } from '@/fixtures/layer-breadcrumb-fixtures';
 import { TimelineCanvasFixtures } from '@/fixtures/timeline-canvas-fixtures';
 import { WorkTimelineCanvasFixtures } from '@/fixtures/work-timeline-canvas-fixtures';
 
@@ -713,7 +716,8 @@ export function SurfacesCanvasPage() {
           <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
             @xyflow/react
           </code>
-          , no contracts, no i18n. Layer breadcrumb is P2.
+          , no contracts, no i18n. Layer breadcrumb fixtures are below (V1.124
+          P2).
         </p>
         <TimelineCanvasFixtures />
       </section>
@@ -748,10 +752,64 @@ export function SurfacesCanvasPage() {
           <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
             @xyflow/react
           </code>
-          , no contracts, no i18n. Layer breadcrumb is P2; Global Timeline
-          overview fixtures are P2.
+          ,           no contracts, no i18n. Layer breadcrumb and Global Timeline overview
+          fixtures are below (V1.124 P2).
         </p>
         <WorkTimelineCanvasFixtures />
+      </section>
+
+      {/* V1.124 P2 T2 — Global Timeline list chrome */}
+      <section className="mt-10" data-testid="surfaces-global-timeline">
+        <SurfaceHeading>Global Timeline</SurfaceHeading>
+        <p className="text-copy-14 text-gray-700 mb-6">
+          Cross-World Timeline activity list chrome for visual acceptance
+          without the daemon. Composes{' '}
+          <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+            @web-global-timeline/global-timeline-list-chrome
+          </code>{' '}
+          (same extract App{' '}
+          <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+            GlobalTimelineView
+          </code>{' '}
+          uses after mapping hooks → row props). Frames: populated (≥3 Worlds),
+          empty, loading, error. Static English product vocabulary — no daemon,
+          no contracts, no router, no i18n.
+        </p>
+        <GlobalTimelineFixtures />
+      </section>
+
+      {/* V1.124 P2 T3a — Layer breadcrumb */}
+      <section className="mt-10" data-testid="surfaces-layer-breadcrumb">
+        <SurfaceHeading>Layer Breadcrumb</SurfaceHeading>
+        <p className="text-copy-14 text-gray-700 mb-6">
+          Three-layer zoom affordance used on World Timeline (Brief ↔ Narrative)
+          and Work Timeline (Narrative ↔ Moment). Composes{' '}
+          <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+            @web-canvas/layer-breadcrumb
+          </code>
+          . Parent segment is a focusable zoom-out button; active segment uses{' '}
+          <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+            aria-current=&quot;page&quot;
+          </code>
+          . Static English labels — no RF, no i18n.
+        </p>
+        <LayerBreadcrumbFixtures />
+      </section>
+
+      {/* V1.124 P2 T3b — Conflict-modal shared chrome */}
+      <section className="mt-10" data-testid="surfaces-conflict-modals">
+        <SurfaceHeading>Conflict Modals</SurfaceHeading>
+        <p className="text-copy-14 text-gray-700 mb-6">
+          One shared conflict-resolution shell used by Strategy, Outline, and
+          World KB adapters. Composes{' '}
+          <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+            @web-canvas/conflict-modal-chrome
+          </code>
+          . Frames: always-open gallery preview, resolve path (Reapply enabled),
+          overlap path (Reapply disabled). Domain field mapping stays App-only —
+          not three parallel modal UIs.
+        </p>
+        <ConflictModalFixtures />
       </section>
     </div>
   );
