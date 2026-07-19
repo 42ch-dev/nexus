@@ -79,7 +79,7 @@ No daemon or Tauri required.
 - Read-only gallery — no YAML write-back, no localStorage token overrides
 - App chrome shows **Read-only · edit `DESIGN.md`** (repo-root SSOT helper)
 - Voice & Content and Surfaces fixture strings: [IA guide §4.4–§4.5](../../.mstar/iterations/v1.98/guides/design-studio-information-architecture.md) — sourced from DESIGN § Voice & Content and shipped product copy
-- Canvas surfaces fixture (`src/fixtures/canvas-surfaces-fixtures.tsx`) mirrors Outline, Strategy, and World KB chrome. In V1.124, it expands to include World Timeline + Work Timeline node chrome (P0); Global Timeline overview fixtures are P2 (not yet full six-`CanvasSurfaceKind` coverage).
+- Canvas surfaces fixture mirrors Outline + Strategy + WorldKB + World Timeline + Work Timeline node chrome. Global Timeline overview fixtures are P2 (not yet full six-`CanvasSurfaceKind` coverage).
 
 ## Audiences
 

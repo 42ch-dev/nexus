@@ -22,6 +22,7 @@ import {
 import { SettingsHostFixtures } from '@/fixtures/settings-host-fixtures';
 import { SetupWizardChromeFixtures } from '@/fixtures/setup-wizard-chrome-fixtures';
 import { TimelineCanvasFixtures } from '@/fixtures/timeline-canvas-fixtures';
+import { WorkTimelineCanvasFixtures } from '@/fixtures/work-timeline-canvas-fixtures';
 
 /* ------------------------------------------------------------------ */
 /*  Data — IA guide §4.5 fixtures (canonical copy strings)              */
@@ -712,10 +713,45 @@ export function SurfacesCanvasPage() {
           <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
             @xyflow/react
           </code>
-          , no contracts, no i18n. Layer breadcrumb is P2; Work Timeline fixtures
-          land in P0 Task 4.
+          , no contracts, no i18n. Layer breadcrumb is P2.
         </p>
         <TimelineCanvasFixtures />
+      </section>
+
+      {/* V1.124 P0 T4 — Work Timeline node chrome (Narrative + Moment scene + beat) */}
+      <section className="mt-10" data-testid="surfaces-work-timeline">
+        <SurfaceHeading>Work Timeline</SurfaceHeading>
+        <p className="text-copy-14 text-gray-700 mb-6">
+          Work Timeline node chrome for visual acceptance without the daemon —
+          Narrative events plus Moment scene and beat cards (Moment = scene +
+          beat; both required). Composes the shared extracts{' '}
+          <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+            @web-canvas/node-chrome-shell
+          </code>{' '}
+          +{' '}
+          <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+            @web-canvas/timeline-node-chrome
+          </code>{' '}
+          (same modules App RF wrappers use). Narrative spine is{' '}
+          <strong className="font-medium text-gray-1000">worldkb</strong> with
+          layer accent{' '}
+          <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+            canvas-layer-narrative-accent
+          </code>
+          ; Moment scene/beat spine is{' '}
+          <strong className="font-medium text-gray-1000">outline</strong> with
+          layer accent{' '}
+          <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+            canvas-layer-moment-accent
+          </code>
+          . Static English product vocabulary only — no{' '}
+          <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+            @xyflow/react
+          </code>
+          , no contracts, no i18n. Layer breadcrumb is P2; Global Timeline
+          overview fixtures are P2.
+        </p>
+        <WorkTimelineCanvasFixtures />
       </section>
     </div>
   );
