@@ -26,6 +26,12 @@ struct WorldOverviewRow {
 }
 
 fn decode_cursor(raw: &str) -> Result<String, NexusApiError> {
+    if raw.len() > 256 {
+        return Err(NexusApiError::InvalidInput {
+            field: "cursor".to_string(),
+            reason: "cursor too long".to_string(),
+        });
+    }
     let world_id = raw
         .strip_prefix(CURSOR_PREFIX)
         .ok_or_else(|| NexusApiError::InvalidInput {
@@ -66,28 +72,20 @@ pub async fn get_timeline_overview(
         r"SELECT
             nw.world_id,
             nw.title,
-            COALESCE(era.cnt, 0) as era_count,
-            COALESCE(evt.cnt, 0) as event_count,
-            evt_max.last_event_at
+            COALESCE(kb_agg.era_count, 0) as era_count,
+            COALESCE(kb_agg.event_count, 0) as event_count,
+            kb_agg.last_event_at
         FROM narrative_worlds nw
         LEFT JOIN (
-            SELECT world_id, COUNT(*) as cnt
+            SELECT
+                world_id,
+                SUM(CASE WHEN block_type = 'era' THEN 1 ELSE 0 END) as era_count,
+                SUM(CASE WHEN block_type = 'event' THEN 1 ELSE 0 END) as event_count,
+                MAX(CASE WHEN block_type = 'event' THEN created_at ELSE NULL END) as last_event_at
             FROM kb_key_blocks
-            WHERE block_type = 'era' AND status NOT IN ('deleted', 'merged', 'deprecated')
+            WHERE status NOT IN ('deleted', 'merged', 'deprecated')
             GROUP BY world_id
-        ) era ON nw.world_id = era.world_id
-        LEFT JOIN (
-            SELECT world_id, COUNT(*) as cnt
-            FROM kb_key_blocks
-            WHERE block_type = 'event' AND status NOT IN ('deleted', 'merged', 'deprecated')
-            GROUP BY world_id
-        ) evt ON nw.world_id = evt.world_id
-        LEFT JOIN (
-            SELECT world_id, MAX(created_at) as last_event_at
-            FROM kb_key_blocks
-            WHERE block_type = 'event' AND status NOT IN ('deleted', 'merged', 'deprecated')
-            GROUP BY world_id
-        ) evt_max ON nw.world_id = evt_max.world_id
+        ) kb_agg ON nw.world_id = kb_agg.world_id
         {where_clause}
         ORDER BY nw.world_id ASC
         LIMIT {limit}",
@@ -117,8 +115,7 @@ pub async fn get_timeline_overview(
         None
     };
 
-    // SAFETY: dynamic SQL — count query.
-    let total_worlds: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM narrative_worlds")
+    let total_worlds: i64 = sqlx::query_scalar!("SELECT COUNT(*) FROM narrative_worlds")
         .fetch_one(pool)
         .await
         .map_err(|e| NexusApiError::Internal {
@@ -148,7 +145,7 @@ pub async fn get_timeline_overview(
             .collect(),
         cursor,
         #[allow(clippy::cast_sign_loss)]
-        total_worlds: total_worlds.0 as u64,
+        total_worlds: total_worlds as u64,
     }))
 }
 
@@ -327,6 +324,24 @@ mod tests {
         assert_eq!(page2.worlds[5].world_id, "wld_test_world");
 
         drop(state);
+        drop(tmp);
+    }
+
+    #[tokio::test]
+    async fn cursor_too_long() {
+        let (tmp, nexus_home, db_path) = create_test_workspace().await;
+        let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
+        let long_cursor = format!("tl:{}", "a".repeat(1000));
+        let result =
+            get_timeline_overview(State(state), make_query(Some(long_cursor))).await;
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            NexusApiError::InvalidInput { field, reason } => {
+                assert_eq!(field, "cursor");
+                assert_eq!(reason, "cursor too long");
+            }
+            other => panic!("Expected InvalidInput, got: {other:?}"),
+        }
         drop(tmp);
     }
 
