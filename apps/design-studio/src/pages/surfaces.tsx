@@ -85,7 +85,7 @@ const SURFACES_SECTIONS = [
     label: 'Selection Submenu',
     path: '/surfaces/selection-submenu',
     end: false,
-    desc: 'Selection submenu stub fixture (V1.126 P0 T1)',
+    desc: 'Selection submenu fixture — 6 variants (V1.126 P0 T4)',
   },
 ] as const;
 
@@ -622,16 +622,28 @@ export function SurfacesBannerPage() {
 export function SurfacesSelectionSubmenuPage() {
   return (
     <section data-testid="surfaces-selection-submenu">
-      <SurfaceHeading>Selection Submenu — Stub fixture (V1.126 P0 T1)</SurfaceHeading>
+      <SurfaceHeading>Selection Submenu — 6 variants (V1.126 P0 T4)</SurfaceHeading>
       <p className="text-copy-14 text-gray-700 mb-6">
-        Minimal stub fixture for the selection submenu presentational component
+        Full fixture matrix for the selection submenu presentational component
         from{' '}
         <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
           @web-shell/selection-submenu
         </code>
-        . World and Work variants with placeholder items. Full fixture with all
-        variants (light + dark, agent states, rename/delete) lands in T4.
+        . All six variants cover World/Work rows, light/dark themes, rename in
+        progress, and the agent dialog overlay. The delete variant is
+        intentionally omitted — deferred per R-V1126P0-T2-001.
       </p>
+
+      <div className="mb-4 rounded-card border border-gray-alpha-200 bg-background-100 p-3">
+        <p className="text-label-14 font-medium text-gray-1000 mb-2">Legend</p>
+        <ul className="flex flex-col gap-1 text-copy-13 text-gray-700">
+          <li><strong className="text-gray-1000">1–2:</strong> World row (KB item) + submenu open, light / dark</li>
+          <li><strong className="text-gray-1000">3–4:</strong> Work row (Outline item) + submenu open, light / dark</li>
+          <li><strong className="text-gray-1000">5:</strong> Rename in progress — inline edit active with blue focus ring</li>
+          <li><strong className="text-gray-1000">6:</strong> Agent dialog overlay — submenu closed, AgentPicker dialog open with entity-name title</li>
+        </ul>
+      </div>
+
       <SelectionSubmenuStubFixtures />
     </section>
   );

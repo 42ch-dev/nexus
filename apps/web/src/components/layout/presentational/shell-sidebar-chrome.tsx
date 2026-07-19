@@ -19,6 +19,9 @@ export interface ShellNavGroup {
   items: ShellNavItem[];
 }
 
+/** Custom renderer for a nav item (receives the computed className, SSOT inner
+ * content, and active state). The chrome always resolves a default before
+ * passing it to its sub-renderers, so helpers take this as required. */
 export type RenderNavItem = (
   item: ShellNavItem,
   className: string,
@@ -31,23 +34,59 @@ export interface ShellSidebarChromeProps {
   activeRoute: string;
   navGroups: ShellNavGroup[];
   onTabChange: (tab: ShellSidebarTab) => void;
+  /** Optional logo slot — apps should pass their theme-aware wordmark. */
   logo?: ReactNode;
+  /** Optional footer slot rendered below the Settings utility (e.g. profile switcher). */
   footer?: ReactNode;
   renderNavItem?: RenderNavItem;
+  /** Optional per-item active-state override. When provided, the chrome calls it
+   * for every item INSTEAD of the built-in `activeRoute === item.to ||
+   * activeRoute.startsWith(item.to + '/')` prefix match. Lets hosts that need
+   * resolver-driven active state (e.g. Canvas surface matching) keep the
+   * chrome's markup SSOT instead of mirroring it. When absent, the built-in
+   * match is preserved (backward-compatible).
+   */
   isActiveItem?: (item: ShellNavItem, activeRoute: string) => boolean;
+  /**
+   * @deprecated V1.118 P2 — work-context drill-in is retired; keep one release
+   * for downstream fixtures. Do not pass from production sidebar.
+   */
   drillInItems?: ShellNavItem[];
+  /** Optional label for the Creator tab (defaults to English for fixtures). */
   creatorTabLabel?: string;
+  /** Optional label for the Orchestrator tab (defaults to English for fixtures). */
   orchestratorTabLabel?: string;
+  /** Optional aria-label for the primary navigation tablist. */
   primaryNavigationAriaLabel?: string;
+  /** Optional test id for the root sidebar chrome. */
   'data-testid'?: string;
+  /**
+   * Optional render-prop for a contextual submenu on a nav item.
+   * When provided, the row gains a `•••` button, and `Enter` / `⌘.` / `Ctrl+.`
+   * keyboard triggers open the submenu. The close callback returns focus to the
+   * triggering row.
+   *
+   * V1.126 P0 T1 fix wave: anchorEl param added so the popover can be anchored
+   * without re-querying DOM; post-hoc ratification pending architect plan-QC.
+   */
   renderSubmenu?: (
     item: ShellNavItem,
     close: () => void,
     anchorEl: HTMLElement,
   ) => ReactNode;
+  /**
+   * Optional predicate to determine which nav items show the submenu trigger.
+   * When absent, all items get the trigger when `renderSubmenu` is provided.
+   */
   hasSubmenu?: (item: ShellNavItem) => boolean;
 }
 
+/**
+ * Presentational app shell sidebar — DESIGN.md §Sidebar Nav SSOT.
+ *
+ * No routing, no daemon hooks, no profile state. The host owns the active tab,
+ * active route resolution, and link implementation (NavLink in the App wrapper).
+ */
 export function ShellSidebarChrome({
   activeTab,
   activeRoute,
@@ -239,6 +278,11 @@ function NavGroupChrome({
 
   return (
     <li className="flex flex-col gap-1">
+      {/* Parent = group/disclosure label only — no competing selected fill.
+          V1.121 P2: the disclosure affordance transitions at duration-state
+          (120ms ease-standard — DESIGN.md §Motion state transitions); the
+          chevron rotates open/closed. Reduced motion = instant (motion-reduce
+          + the global index.css reset). */}
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
@@ -277,6 +321,12 @@ function NavGroupChrome({
   );
 }
 
+/**
+ * Shared per-item `<li>` renderer — used by both group disclosures and the
+ * flat drill-in list so item markup (active bar, icon, label, active classes)
+ * stays in one place. The active state comes from `isActiveItem` when provided,
+ * else the built-in `item.to` prefix match.
+ */
 function NavItemLi({
   item,
   activeRoute,

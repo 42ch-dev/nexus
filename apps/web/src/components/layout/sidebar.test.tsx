@@ -695,7 +695,7 @@ describe('Sidebar — submenu trigger (V1.126 P0 T1)', () => {
     );
   });
 
-  it('closes submenu on Escape', async () => {
+  it('closes submenu on Escape and returns focus to trigger', async () => {
     const user = userEvent.setup();
     renderSidebarWithWorks();
 
@@ -713,6 +713,7 @@ describe('Sidebar — submenu trigger (V1.126 P0 T1)', () => {
     await waitFor(() =>
       expect(screen.queryByRole('menu', { name: 'Row actions' })).not.toBeInTheDocument(),
     );
+    expect(document.activeElement).toBe(menuBtn);
   });
 
   it('click on row body still navigates (existing behavior preserved)', async () => {
