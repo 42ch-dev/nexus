@@ -46,7 +46,8 @@ describe('Sidebar', () => {
     expect(screen.getByRole('tab', { name: 'Creator', selected: true })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'All Works' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Worlds' })).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Memories' })).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Memories' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Memory' })).not.toBeInTheDocument();
   });
 
   it('swaps to Orchestrator tab and shows runtime/strategy links', async () => {
@@ -58,12 +59,13 @@ describe('Sidebar', () => {
     await user.click(screen.getByRole('tab', { name: 'Orchestrator' }));
 
     expect(screen.getByRole('tab', { name: 'Orchestrator', selected: true })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Memory' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Strategies' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Sessions' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Schedule' })).toBeInTheDocument();
     // AC-P2-2: Capabilities is soft-removed from the Orchestration sidebar.
     expect(screen.queryByRole('link', { name: 'Capabilities' })).not.toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Modules' })).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Strategies' })).toBeInTheDocument();
 
     expect(screen.queryByRole('link', { name: 'All Works' })).not.toBeInTheDocument();
   });
@@ -242,11 +244,12 @@ describe('Sidebar', () => {
     expect(screen.getByRole('tab', { name: '编排' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: '全部作品' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: '世界' })).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: '记忆' })).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: '记忆' })).not.toBeInTheDocument();
     const link = screen.getByTestId('settings-footer-utility-link');
     expect(link).toHaveTextContent('设置');
 
     await user.click(screen.getByRole('tab', { name: '编排' }));
+    expect(screen.getByRole('link', { name: '记忆' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '计算' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: '模块' })).toBeInTheDocument();
   });
@@ -271,9 +274,8 @@ describe('Sidebar', () => {
       'bg-blue-700',
     );
 
-    const memories = screen.getByRole('link', { name: 'Memories' });
-    expect(memories).toHaveClass('text-gray-600');
-    expect(memories).not.toHaveClass('bg-gray-alpha-100');
+    const memories = screen.queryByRole('link', { name: 'Memories' });
+    expect(memories).not.toBeInTheDocument();
   });
 
   it('group disclosure transitions at duration-state with a rotating chevron (V1.121 P2 T1)', async () => {
@@ -316,7 +318,7 @@ describe('Sidebar', () => {
     expect(chevron!.getAttribute('class')).not.toMatch(/\brotate-90\b/);
   });
 
-  it('highlights Memories on /memory via prefix match (V1.118 P1)', async () => {
+  it('selects Orchestrator tab and highlights Memory on /memory (V1.125 P1)', async () => {
     useSidebarHandlers();
 
     renderInApp(<Sidebar />, {
@@ -325,15 +327,14 @@ describe('Sidebar', () => {
       initialRouterEntries: ['/memory'],
     });
 
-    const memories = screen.getByRole('link', { name: 'Memories' });
-    expect(memories).toHaveClass('bg-gray-alpha-100', 'text-gray-1000');
-    expect(memories.querySelector('[data-testid="sidebar-active-bar"]')).toHaveClass(
+    expect(screen.getByRole('tab', { name: 'Orchestrator', selected: true })).toBeInTheDocument();
+    const memory = screen.getByRole('link', { name: 'Memory' });
+    expect(memory).toHaveAttribute('href', '/memory');
+    expect(memory).toHaveClass('bg-gray-alpha-100', 'text-gray-1000');
+    expect(memory.querySelector('[data-testid="sidebar-active-bar"]')).toHaveClass(
       'w-[2px]',
       'bg-blue-700',
     );
-
-    const allWorks = screen.getByRole('link', { name: 'All Works' });
-    expect(allWorks).not.toHaveClass('bg-gray-alpha-100');
   });
 
   it('highlights Worlds on /worlds via prefix match (V1.118 P1)', async () => {
@@ -356,14 +357,15 @@ describe('Sidebar', () => {
     expect(allWorks).not.toHaveClass('bg-gray-alpha-100');
   });
 
-  it('shows three peer groups with no Creator meta-group mixing canvas (V1.118 P1)', async () => {
+  it('shows Creator peer groups without Memories (V1.125 P1)', async () => {
     useSidebarHandlers();
 
     renderInApp(<Sidebar />, { client: makeClient(), activeCreatorId: 'creator-a' });
 
     expect(screen.getByRole('button', { name: /Works/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Worlds/i })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Memories/i })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Memories/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Memories' })).not.toBeInTheDocument();
 
     // No Creator meta-group label as a nav group (tab label "Creator" remains).
     expect(screen.queryByRole('button', { name: /^Creator$/i })).not.toBeInTheDocument();
@@ -374,7 +376,37 @@ describe('Sidebar', () => {
     expect(screen.queryByRole('button', { name: 'Canvas' })).not.toBeInTheDocument();
 
     expect(screen.getByRole('link', { name: 'Worlds' })).toHaveAttribute('href', '/worlds');
-    expect(screen.getByRole('link', { name: 'Memories' })).toHaveAttribute('href', '/memory');
+  });
+
+  it('orders Orchestrator groups Memory → Strategies → Runtime → Compute (V1.125 P1)', async () => {
+    const user = userEvent.setup();
+    useSidebarHandlers();
+
+    renderInApp(<Sidebar />, { client: makeClient(), activeCreatorId: 'creator-a' });
+    await user.click(screen.getByRole('tab', { name: 'Orchestrator' }));
+
+    const groupButtons = screen
+      .getAllByRole('button')
+      .filter((el) => ['Memory', 'Strategies', 'Runtime', 'Compute'].includes(el.textContent ?? ''));
+    expect(groupButtons.map((el) => el.textContent)).toEqual([
+      'Memory',
+      'Strategies',
+      'Runtime',
+      'Compute',
+    ]);
+  });
+
+  it('selects Orchestrator tab on /strategies deep link (V1.125 P1)', async () => {
+    useSidebarHandlers();
+
+    renderInApp(<Sidebar />, {
+      client: makeClient(),
+      activeCreatorId: 'creator-a',
+      initialRouterEntries: ['/strategies/user%2Ffoo'],
+    });
+
+    expect(screen.getByRole('tab', { name: 'Orchestrator', selected: true })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Strategies' })).toHaveClass('bg-gray-alpha-100');
   });
 
   it('lists work rows from the Works query under the Works group', async () => {
@@ -527,7 +559,7 @@ describe('Sidebar — work routes (V1.118 P2)', () => {
     expect(screen.getByRole('tab', { name: 'Orchestrator' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Works/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Worlds/i })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Memories/i })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Memories/i })).not.toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'All Works' })).toBeInTheDocument();
 
     await waitFor(() =>
