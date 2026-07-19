@@ -62,6 +62,7 @@ import type {
   SceneBeatFixturePayload,
   SceneFixture,
 } from '../outline-canvas/graph-projection';
+import type { DirectedAxisSpineNodeData, MomentSpineConfig, NarrativeSpineConfig } from '../timeline-canvas/directed-axis-spine';
 import { workTimelineNodeTypes } from './work-timeline-node-types';
 import { renderWorkTimelineInspector } from './work-timeline-inspector';
 
@@ -377,6 +378,28 @@ function projectNarrativeLayer(graph: WorkTimelineGraph): {
     };
   });
 
+  // V1.126 P1 — Work Timeline Narrative directed axis spine (decoration-only,
+  // Y=0, appended after entity nodes). Uses event_id as tick markers for
+  // cross-surface consistency with World Timeline Narrative.
+  if (sorted.length > 0) {
+    const tickTimestamps: NarrativeSpineConfig['tickTimestamps'] = sorted.map(
+      (evt) => evt.event_id,
+    );
+    const narrativeSpineData: DirectedAxisSpineNodeData = {
+      layer: 'narrative',
+      spineConfig: { kind: 'narrative', tickTimestamps },
+      accentColor: 'var(--color-canvas-layer-narrative-accent)',
+    };
+    nodes.push({
+      id: 'directed-axis-spine',
+      type: 'directedAxisSpine',
+      position: { x: 0, y: NARRATIVE_AXIS_Y - 8 },
+      data: narrativeSpineData as unknown as WorkTimelineNodeData,
+      selectable: false,
+      focusable: false,
+    });
+  }
+
   const edges = deriveForeshadowEdges(graph);
 
   return { nodes, edges };
@@ -554,6 +577,41 @@ function projectMomentLayer(
         },
         data,
       });
+    });
+  }
+
+  // V1.126 P1 — Moment directed axis spine (decoration-only, Y=0).
+  // Density-encoded: segment length proportional to scene count per ND-A1.
+  // This is a deliberate rhythm break from Brief+Narrative's time-span
+  // convention (see spec ND-A1).
+  if (sortedChapterIds.length > 0) {
+    const chapterSegments: MomentSpineConfig['chapterSegments'] = sortedChapterIds.map(
+      (chapterId) => {
+        const scenes = scenesByChapter.get(chapterId) ?? [];
+        const sceneTicks = scenes.map((s) => s.sceneId);
+        return {
+          chapterId,
+          chapterLabel: `Ch. ${chapterId}`,
+          sceneCount: scenes.length,
+          sceneTicks,
+        };
+      },
+    );
+    const momentSpineData: DirectedAxisSpineNodeData = {
+      layer: 'moment',
+      spineConfig: {
+        kind: 'moment',
+        chapterSegments,
+      },
+      accentColor: 'var(--color-canvas-layer-moment-accent)',
+    };
+    nodes.push({
+      id: 'directed-axis-spine',
+      type: 'directedAxisSpine',
+      position: { x: 0, y: MOMENT_ORIGIN_Y - 12 },
+      data: momentSpineData as unknown as WorkTimelineNodeData,
+      selectable: false,
+      focusable: false,
     });
   }
 
