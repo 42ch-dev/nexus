@@ -163,7 +163,7 @@
     },
     {
       "plan_id": "2026-07-19-v1.125-orchestration-repair-memory",
-      "status": "Todo",
+      "status": "InProgress",
       "iteration_refs": [
         "V1.125"
       ],
