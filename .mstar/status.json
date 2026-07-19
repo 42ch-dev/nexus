@@ -147,7 +147,7 @@
     },
     {
       "plan_id": "2026-07-19-v1.125-shell-daemon-agent",
-      "status": "Todo",
+      "status": "Done",
       "iteration_refs": [
         "V1.125"
       ],
@@ -156,7 +156,9 @@
         "spec_integration_branch": "iteration/v1.125",
         "merge_target": "iteration/v1.125",
         "working_branch": "feature/v1.125-shell-daemon-agent",
-        "description": "Daemon fullscreen gate + agent instant-apply + Codex version"
+        "description": "Daemon fullscreen gate + agent instant-apply + Codex version",
+        "qa_gate": "pm-acceptance",
+        "qc_decision": "approve_with_residuals"
       }
     },
     {

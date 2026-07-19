@@ -50,7 +50,7 @@ Make Control Room trustworthy again (daemon wait, agent apply/footer, orchestrat
 
 | plan_id | Name | Status | Notes |
 |---------|------|--------|-------|
-| `2026-07-19-v1.125-shell-daemon-agent` | P0 — Shell daemon gate + agent instant-apply | Todo | Must |
+| `2026-07-19-v1.125-shell-daemon-agent` | P0 — Shell daemon gate + agent instant-apply | Done | Must |
 | `2026-07-19-v1.125-orchestration-repair-memory` | P1 — Orchestration repair + Memory move | Todo | Must |
 | `2026-07-19-v1.125-creation-world-first-ia` | P2 — Creation World-first IA first slice | Todo | Must |
 
