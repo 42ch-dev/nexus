@@ -214,7 +214,7 @@
     },
     {
       "plan_id": "2026-07-20-v1.126-p1-canvas-directed-axis",
-      "status": "Todo",
+      "status": "Done",
       "iteration_refs": [
         "V1.126"
       ],
@@ -223,7 +223,12 @@
         "spec_integration_branch": "iteration/v1.126",
         "merge_target": "iteration/v1.126",
         "working_branch": "feature/v1.126-p1-canvas-directed-axis",
-        "wire_contracts_changed": false
+        "wire_contracts_changed": false,
+        "done_at": "2026-07-20",
+        "qc_verdict": "Approve with residuals",
+        "qa_verdict": "Pass (mandatory)",
+        "residuals_open_count": 5,
+        "merge_commit": "merged into iteration/v1.126"
       }
     },
     {
@@ -276,13 +281,13 @@
     "target_branch": "main",
     "tech_debt_summary": {
       "updated_at": "2026-07-20",
-      "total_open": 261,
+      "total_open": 266,
       "by_severity": {
         "critical": 0,
         "high": 1,
         "medium": 3,
         "low": 102,
-        "nit": 155
+        "nit": 160
       },
       "by_target": {
         "V1.96": 8,
@@ -3302,6 +3307,89 @@
         "closure_note": null,
         "tracking_link": ".mstar/sdd/2026-07-20-v1.126-p0-shell-selection-submenu/review/qc-consolidated.md",
         "notes": "qc3 S-8 / QC2-S-001; V1.127+ polish."
+      }
+    ],
+    "2026-07-20-v1.126-p1-canvas-directed-axis": [
+      {
+        "id": "R-V1126P1-QC-R1-001",
+        "severity": "medium",
+        "title": "Brief spine empty gradient arrow on undated eras (qc3 R1)",
+        "lifecycle": "closed",
+        "closure_note": "Fixed in V1.126 P1 QC fix wave (commit 12026fa5)",
+        "tracking_link": ".mstar/sdd/2026-07-20-v1.126-p1-canvas-directed-axis/review/qc-consolidated.md",
+        "notes": "qc3 R1 resolved."
+      },
+      {
+        "id": "R-V1126P1-QC-W-001",
+        "severity": "low",
+        "title": "directed-axis-spine header comment missing (qc1 W-1)",
+        "lifecycle": "closed",
+        "closure_note": "Fixed in V1.126 P1 QC fix wave (commit 12026fa5)",
+        "tracking_link": ".mstar/sdd/2026-07-20-v1.126-p1-canvas-directed-axis/review/qc-consolidated.md",
+        "notes": "qc1 W-1 resolved."
+      },
+      {
+        "id": "R-V1126P1-QC-W-002",
+        "severity": "low",
+        "title": "Magic Y-offsets inconsistent + undocumented (qc1 W-2)",
+        "lifecycle": "closed",
+        "closure_note": "Fixed in V1.126 P1 QC fix wave (commit 12026fa5)",
+        "tracking_link": ".mstar/sdd/2026-07-20-v1.126-p1-canvas-directed-axis/review/qc-consolidated.md",
+        "notes": "qc1 W-2 resolved; SPINE_Y_OFFSET constant + comment."
+      },
+      {
+        "id": "R-V1126P1-QC-W-003",
+        "severity": "low",
+        "title": "Spine position math doc factually wrong (qc1 W-3)",
+        "lifecycle": "closed",
+        "closure_note": "Fixed in V1.126 P1 QC fix wave (commit 12026fa5)",
+        "tracking_link": ".mstar/sdd/2026-07-20-v1.126-p1-canvas-directed-axis/review/qc-consolidated.md",
+        "notes": "qc1 W-3 resolved."
+      },
+      {
+        "id": "R-V1126P1-QC-S-001",
+        "severity": "nit",
+        "title": "Extraction alias exploration (qc1 S-1)",
+        "lifecycle": "open",
+        "closure_note": null,
+        "tracking_link": ".mstar/sdd/2026-07-20-v1.126-p1-canvas-directed-axis/review/qc-consolidated.md",
+        "notes": "qc1 S-1; V1.127+ polish."
+      },
+      {
+        "id": "R-V1126P1-QC-S-002",
+        "severity": "nit",
+        "title": "Future layer extensibility (qc1 S-2)",
+        "lifecycle": "open",
+        "closure_note": null,
+        "tracking_link": ".mstar/sdd/2026-07-20-v1.126-p1-canvas-directed-axis/review/qc-consolidated.md",
+        "notes": "qc1 S-2; V1.127+ polish."
+      },
+      {
+        "id": "R-V1126P1-QC-S-003",
+        "severity": "nit",
+        "title": "Runtime shape validation (qc2 S-1)",
+        "lifecycle": "open",
+        "closure_note": null,
+        "tracking_link": ".mstar/sdd/2026-07-20-v1.126-p1-canvas-directed-axis/review/qc-consolidated.md",
+        "notes": "qc2 S-1; V1.127+ polish."
+      },
+      {
+        "id": "R-V1126P1-QC-S-004",
+        "severity": "nit",
+        "title": "Studio fixture tick positioning divergence doc (qc2 S-2)",
+        "lifecycle": "open",
+        "closure_note": null,
+        "tracking_link": ".mstar/sdd/2026-07-20-v1.126-p1-canvas-directed-axis/review/qc-consolidated.md",
+        "notes": "qc2 S-2; V1.127+ polish."
+      },
+      {
+        "id": "R-V1126P1-QC-S-005",
+        "severity": "nit",
+        "title": "Scale-stress tests for spine geometry (qc3 S-1)",
+        "lifecycle": "open",
+        "closure_note": null,
+        "tracking_link": ".mstar/sdd/2026-07-20-v1.126-p1-canvas-directed-axis/review/qc-consolidated.md",
+        "notes": "qc3 S-1; V1.127+ polish; 1000-event stress test."
       }
     ]
   }
