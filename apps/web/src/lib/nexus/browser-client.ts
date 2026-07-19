@@ -196,6 +196,12 @@ export class BrowserClient implements NexusClient {
       request,
     );
   }
+  deleteWork(workId: string): Promise<void> {
+    return this.delete<void>(`/v1/daemon/works/${encodeURIComponent(workId)}`);
+  }
+  deleteWorld(worldId: string): Promise<void> {
+    return this.delete<void>(`/v1/daemon/worlds/${encodeURIComponent(worldId)}`);
+  }
 
   // ── Orchestration sessions ─────────────────────────────────────────────────
   listSessions(query?: ListSessionsQuery): Promise<ListSessionsResponse> {

@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { NavLink, useLocation } from 'react-router-dom';
+import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import {
   BookOpen,
   BrainCircuit,
@@ -9,12 +9,18 @@ import {
   Globe,
   Layers,
   ListChecks,
+  Pencil,
   Sparkles,
+  Trash2,
+  User,
 } from 'lucide-react';
 
-import { flattenPages, useWorks } from '@/api/queries';
+import { flattenPages, usePatchWork, useDeleteWork, useWorks } from '@/api/queries';
 import { NexusLogo } from '@/components/brand/nexus-logo';
+import { Dialog, DialogContent, DialogClose } from '@/components/ui/dialog';
+import { Button } from '@/components/ui/button';
 import { FooterProfiles } from '@/components/layout/footer-profiles';
+import { useAgentPickerDialog } from '@/components/layout/use-agent-picker-dialog';
 import {
   ShellSidebarChrome,
   type ShellNavGroup,
@@ -62,13 +68,64 @@ function tabFromPathname(pathname: string): ShellSidebarTab {
 export function Sidebar() {
   const { t } = useTranslation('shell');
   const { pathname } = useLocation();
+  const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState<ShellSidebarTab>(() => tabFromPathname(pathname));
   const worksQuery = useWorks({ limit: 12 });
   const works = useMemo(() => flattenPages(worksQuery.data), [worksQuery.data]);
+  const patchWork = usePatchWork();
+  const deleteWork = useDeleteWork();
+  const agentDialog = useAgentPickerDialog();
+
+  const [renamingItem, setRenamingItem] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState('');
+  const [deletingItem, setDeletingItem] = useState<ShellNavItem | null>(null);
+  const renameInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     setActiveTab(tabFromPathname(pathname));
   }, [pathname]);
+
+  function extractWorkId(item: ShellNavItem): string | null {
+    const match = /^\/works\/([^/]+)/.exec(item.to);
+    if (match) {
+      const id = decodeURIComponent(match[1]);
+      return id === '' ? null : id;
+    }
+    return null;
+  }
+
+  function isEntityItem(item: ShellNavItem): boolean {
+    return extractWorkId(item) !== null;
+  }
+
+  useEffect(() => {
+    if (renamingItem && renameInputRef.current) {
+      renameInputRef.current.focus();
+      renameInputRef.current.select();
+    }
+  }, [renamingItem]);
+
+  function handleRenameSubmit() {
+    const itemTo = renamingItem;
+    if (!itemTo || !renameValue.trim()) {
+      setRenamingItem(null);
+      return;
+    }
+    const wid = extractWorkId({ to: itemTo, label: '', icon: BookOpen });
+    if (wid) {
+      patchWork.mutate({ workId: wid, request: { title: renameValue.trim() } });
+    }
+    setRenamingItem(null);
+  }
+
+  function handleDeleteConfirm() {
+    if (!deletingItem) return;
+    const workId = extractWorkId(deletingItem);
+    if (workId) {
+      deleteWork.mutate(workId);
+    }
+    setDeletingItem(null);
+  }
 
   const creatorGroups: ShellNavGroup[] = useMemo(
     () => [
@@ -134,30 +191,84 @@ export function Sidebar() {
       const isWork = item.to.startsWith('/works');
       if (!isWorld && !isWork) return null;
 
+      const workId = extractWorkId(item);
+      const isEntity = isEntityItem(item);
+
       return (
-        <SelectionSubmenu
-          open
-          onClose={close}
-          anchorEl={anchorEl}
-          ariaLabel={t('submenu.ariaLabel')}
-          items={[
-            {
-              id: 'open-timeline',
-              label: t('submenu.openTimeline'),
-              icon: BookOpen,
-              onSelect: () => {},
-            },
-            {
-              id: 'open-secondary',
-              label: isWorld ? t('submenu.openKb') : t('submenu.openOutline'),
-              icon: isWorld ? Globe : BookOpen,
-              onSelect: () => {},
-            },
-          ]}
-        />
+        <>
+          <SelectionSubmenu
+            open
+            onClose={close}
+            anchorEl={anchorEl}
+            ariaLabel={t('submenu.ariaLabel')}
+            items={[
+              {
+                id: 'open-timeline',
+                label: t('submenu.openTimeline'),
+                icon: BookOpen,
+                onSelect: () => {
+                  if (workId) {
+                    navigate(`/works/${encodeURIComponent(workId)}/timeline`);
+                  } else if (isWorld) {
+                    navigate('/worlds/timeline');
+                  } else {
+                    navigate('/works/timeline');
+                  }
+                },
+              },
+              {
+                id: 'open-secondary',
+                label: isWorld ? t('submenu.openKb') : t('submenu.openOutline'),
+                icon: isWorld ? Globe : BookOpen,
+                onSelect: () => {
+                  if (workId) {
+                    navigate(`/works/${encodeURIComponent(workId)}/outline`);
+                  } else if (isWorld) {
+                    navigate('/worlds/kb');
+                  } else {
+                    navigate('/works/outline');
+                  }
+                },
+              },
+              ...(isEntity
+                ? [
+                    {
+                      id: 'agent',
+                      label: `${t('submenu.agent')}: ${t('submenu.unassigned')}`,
+                      icon: User,
+                      onSelect: () => {
+                        agentDialog.setOpen(true);
+                      },
+                    },
+                    {
+                      id: 'rename',
+                      label: t('submenu.rename'),
+                      icon: Pencil,
+                      onSelect: () => {
+                        setRenamingItem(item.to);
+                        setRenameValue(item.label);
+                        close();
+                      },
+                    },
+                    {
+                      id: 'delete',
+                      label: t('submenu.delete'),
+                      icon: Trash2,
+                      variant: 'danger' as const,
+                      onSelect: () => {
+                        setDeletingItem(item);
+                        close();
+                      },
+                    },
+                  ]
+                : []),
+            ]}
+          />
+          {agentDialog.dialog}
+        </>
       );
     },
-    [t],
+    [t, navigate, agentDialog],
   );
 
   return (
@@ -176,9 +287,6 @@ export function Sidebar() {
         hasSubmenu={(item) => item.to.startsWith('/worlds') || item.to.startsWith('/works')}
         isActiveItem={(item, route) => {
           if (item.to === '/works') return route === '/works';
-          // Per-Work Outline row — claim Outline + sibling surfaces under the
-          // Work (e.g. /chapters, /body, /timeline) so the Work stays visually
-          // selected while the author moves between surfaces.
           const outlineMatch = /^\/works\/([^/]+)\/outline$/.exec(item.to);
           if (outlineMatch) {
             const encodedWorkId = outlineMatch[1];
@@ -187,15 +295,80 @@ export function Sidebar() {
           }
           return route === item.to || route.startsWith(`${item.to}/`);
         }}
-        renderNavItem={(item, className, content, isActive) => (
-          <NavLink
-            to={item.to}
-            className={cn(className, isActive ? 'bg-gray-alpha-100 text-gray-1000' : undefined)}
-          >
-            {content}
-          </NavLink>
-        )}
+        renderNavItem={(item, className, content, isActive) => {
+          // V1.126 P0 T2: if this item is being renamed, render an inline edit
+          const isRenaming = renamingItem === item.to;
+          return (
+            <NavLink
+              to={item.to}
+              className={cn(className, isActive ? 'bg-gray-alpha-100 text-gray-1000' : undefined)}
+              onClick={(e) => {
+                if (isRenaming) {
+                  e.preventDefault();
+                }
+              }}
+            >
+              {isRenaming ? (
+                <input
+                  ref={renameInputRef}
+                  type="text"
+                  value={renameValue}
+                  onChange={(e) => setRenameValue(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      handleRenameSubmit();
+                    }
+                    if (e.key === 'Escape') {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      setRenamingItem(null);
+                    }
+                  }}
+                  onBlur={() => handleRenameSubmit()}
+                  className="w-full rounded-control border border-blue-700 bg-background-100 px-2 py-0.5 text-label-14 text-gray-1000 outline-none"
+                  onClick={(e) => e.stopPropagation()}
+                  data-testid="sidebar-rename-input"
+                />
+              ) : (
+                content
+              )}
+            </NavLink>
+          );
+        }}
       />
+
+      {/* Delete confirmation dialog */}
+      <Dialog
+        open={deletingItem !== null}
+        onOpenChange={(open) => {
+          if (!open) setDeletingItem(null);
+        }}
+      >
+        <DialogContent
+          title={t('submenu.deleteConfirmTitle', { name: deletingItem?.label ?? '' })}
+          description={t('submenu.deleteConfirmDescription', {
+            type: deletingItem?.to.startsWith('/worlds') ? 'world' : 'work',
+          })}
+        >
+          <div className="flex justify-end gap-2">
+            <DialogClose asChild>
+              <Button variant="secondary" size="small">
+                {t('submenu.deleteConfirmCancel')}
+              </Button>
+            </DialogClose>
+            <Button
+              variant="destructive"
+              size="small"
+              onClick={() => handleDeleteConfirm()}
+              data-testid="sidebar-delete-confirm-btn"
+            >
+              {t('submenu.deleteConfirmAction')}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </nav>
   );
 }

@@ -143,6 +143,16 @@
     "triggerAriaLabel": "打开 {{label}} 的菜单",
     "openTimeline": "打开时间线",
     "openKb": "打开知识库",
-    "openOutline": "打开大纲"
+    "openOutline": "打开大纲",
+    "agent": "智能体",
+    "unassigned": "未分配",
+    "rename": "重命名",
+    "delete": "删除",
+    "deleteConfirmTitle": "删除 {{name}}",
+    "deleteConfirmDescription": "此操作不可撤销。{{type}}及其所有数据将被永久删除。",
+    "deleteConfirmAction": "删除",
+    "deleteConfirmCancel": "取消",
+    "renameFailed": "重命名失败，请重试。",
+    "deleteFailed": "删除失败，请重试。"
   }
 }

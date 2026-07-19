@@ -251,6 +251,32 @@ export function usePatchWork() {
   });
 }
 
+export function useDeleteWork() {
+  const client = useNexusClient();
+  const qc = useQueryClient();
+  const errorToast = useErrorToast();
+  return useMutation({
+    mutationFn: (workId: string) => client.deleteWork(workId),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: queryKeys.works.lists() });
+    },
+    onError: (error) => errorToast(error, 'error.couldNotDeleteWork'),
+  });
+}
+
+export function useDeleteWorld() {
+  const client = useNexusClient();
+  const qc = useQueryClient();
+  const errorToast = useErrorToast();
+  return useMutation({
+    mutationFn: (worldId: string) => client.deleteWorld(worldId),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: queryKeys.works.lists() });
+    },
+    onError: (error) => errorToast(error, 'error.couldNotDeleteWorld'),
+  });
+}
+
 /**
  * Update a finding (V1.77 findings-remediation). Optimistically patches the
  * finding in the cached findings list before the server responds, rolls back on

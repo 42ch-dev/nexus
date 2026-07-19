@@ -764,3 +764,170 @@ describe('Sidebar — submenu trigger (V1.126 P0 T1)', () => {
     );
   });
 });
+
+describe('Sidebar — submenu contents (V1.126 P0 T2)', () => {
+  beforeEach(async () => {
+    window.localStorage.clear();
+    await i18n.changeLanguage('en');
+  });
+
+  function renderWithWork() {
+    useHandlers(
+      http.get('/v1/daemon/creators', () =>
+        HttpResponse.json({
+          items: [{ creator_id: 'creator-a', display_name: 'Alice' }],
+          pagination: { limit: 20, has_more: false },
+        }),
+      ),
+      worksList([
+        {
+          work_id: 'work-alpha',
+          title: 'Alpha Novel',
+          status: 'active',
+          intake_status: 'ready',
+          primary_preset_id: 'preset-1',
+          updated_at: '2026-01-01T00:00:00Z',
+        },
+      ]),
+      http.post('/v1/daemon/agent-host/scan', () =>
+        HttpResponse.json({ agents: [] }),
+      ),
+    );
+    renderInApp(<Sidebar />, { client: makeClient(), activeCreatorId: 'creator-a' });
+  }
+
+  it('shows Open Timeline and Open Outline items on Work submenu', async () => {
+    const user = userEvent.setup();
+    renderWithWork();
+
+    await waitFor(() =>
+      expect(screen.getByRole('link', { name: 'Alpha Novel' })).toBeInTheDocument(),
+    );
+
+    const menuBtn = screen.getByRole('button', { name: /Open menu for Alpha Novel/i });
+    await user.click(menuBtn);
+
+    await waitFor(() => {
+      expect(screen.getByRole('menuitem', { name: /Open Timeline/i })).toBeInTheDocument();
+      expect(screen.getByRole('menuitem', { name: /Open Outline/i })).toBeInTheDocument();
+    });
+  });
+
+  it('shows Open Timeline and Open KB on World submenu', async () => {
+    const user = userEvent.setup();
+    renderWithWork();
+
+    const worldsBtn = screen.getByRole('button', { name: /Open menu for Worlds/i });
+    await user.click(worldsBtn);
+
+    await waitFor(() => {
+      expect(screen.getByRole('menuitem', { name: /Open Timeline/i })).toBeInTheDocument();
+      expect(screen.getByRole('menuitem', { name: /Open KB/i })).toBeInTheDocument();
+    });
+  });
+
+  it('shows Agent, Rename, and Delete items on Work submenu', async () => {
+    const user = userEvent.setup();
+    renderWithWork();
+
+    await waitFor(() =>
+      expect(screen.getByRole('link', { name: 'Alpha Novel' })).toBeInTheDocument(),
+    );
+
+    const menuBtn = screen.getByRole('button', { name: /Open menu for Alpha Novel/i });
+    await user.click(menuBtn);
+
+    await waitFor(() => {
+      expect(screen.getByRole('menuitem', { name: /Agent:/i })).toBeInTheDocument();
+      expect(screen.getByRole('menuitem', { name: /Rename/i })).toBeInTheDocument();
+      expect(screen.getByRole('menuitem', { name: /Delete/i })).toBeInTheDocument();
+    });
+  });
+
+  it('does not show Agent, Rename, Delete on World group-level submenu', async () => {
+    const user = userEvent.setup();
+    renderWithWork();
+
+    const worldsBtn = screen.getByRole('button', { name: /Open menu for Worlds/i });
+    await user.click(worldsBtn);
+
+    await waitFor(() => {
+      expect(screen.getByRole('menu', { name: 'Row actions' })).toBeInTheDocument();
+    });
+
+    expect(screen.queryByRole('menuitem', { name: /Agent:/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('menuitem', { name: /Rename/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('menuitem', { name: /Delete/i })).not.toBeInTheDocument();
+  });
+
+  it('Rename item triggers inline edit on Work submenu', async () => {
+    const user = userEvent.setup();
+    renderWithWork();
+
+    await waitFor(() =>
+      expect(screen.getByRole('link', { name: 'Alpha Novel' })).toBeInTheDocument(),
+    );
+
+    const menuBtn = screen.getByRole('button', { name: /Open menu for Alpha Novel/i });
+    await user.click(menuBtn);
+
+    await waitFor(() =>
+      expect(screen.getByRole('menuitem', { name: /Rename/i })).toBeInTheDocument(),
+    );
+
+    const renameItem = screen.getByRole('menuitem', { name: /Rename/i });
+    await user.click(renameItem);
+
+    await waitFor(() =>
+      expect(screen.getByTestId('sidebar-rename-input')).toBeInTheDocument(),
+    );
+  });
+
+  it('Delete item shows confirmation dialog on Work submenu', async () => {
+    const user = userEvent.setup();
+    renderWithWork();
+
+    await waitFor(() =>
+      expect(screen.getByRole('link', { name: 'Alpha Novel' })).toBeInTheDocument(),
+    );
+
+    const menuBtn = screen.getByRole('button', { name: /Open menu for Alpha Novel/i });
+    await user.click(menuBtn);
+
+    await waitFor(() =>
+      expect(screen.getByRole('menuitem', { name: /Delete/i })).toBeInTheDocument(),
+    );
+
+    const deleteItem = screen.getByRole('menuitem', { name: /Delete/i });
+    await user.click(deleteItem);
+
+    await waitFor(() =>
+      expect(screen.getByRole('dialog', { name: /Delete Alpha Novel/i })).toBeInTheDocument(),
+    );
+  });
+
+  it('Delete confirmation dialog has Cancel and Delete buttons', async () => {
+    const user = userEvent.setup();
+    renderWithWork();
+
+    await waitFor(() =>
+      expect(screen.getByRole('link', { name: 'Alpha Novel' })).toBeInTheDocument(),
+    );
+
+    const menuBtn = screen.getByRole('button', { name: /Open menu for Alpha Novel/i });
+    await user.click(menuBtn);
+
+    await waitFor(() =>
+      expect(screen.getByRole('menuitem', { name: /Delete/i })).toBeInTheDocument(),
+    );
+
+    const deleteItem = screen.getByRole('menuitem', { name: /Delete/i });
+    await user.click(deleteItem);
+
+    await waitFor(() => {
+      expect(screen.getByRole('dialog', { name: /Delete Alpha Novel/i })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /Cancel/i })).toBeInTheDocument();
+      expect(screen.getByTestId('sidebar-delete-confirm-btn')).toBeInTheDocument();
+    });
+  });
+});

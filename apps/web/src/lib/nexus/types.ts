@@ -178,6 +178,10 @@ export interface NexusClient {
   createWork(request: CreateWorkRequest): Promise<CreateWorkResponse>;
   /** `PATCH /v1/daemon/works/{work_id}` — status/stage/archive (free-string status). */
   patchWork(workId: string, request: PatchWorkRequest): Promise<WorkDetailResponse>;
+  /** `DELETE /v1/daemon/works/{work_id}` — delete a work. */
+  deleteWork(workId: string): Promise<void>;
+  /** `DELETE /v1/daemon/worlds/{world_id}` — delete a world. */
+  deleteWorld(worldId: string): Promise<void>;
 
   // ── Orchestration sessions ────────────────────────────────────────────────
   /** `GET /v1/daemon/orchestration/sessions` — cursor list (F-P3/F-F1; canonical `items` key). */

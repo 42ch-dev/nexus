@@ -143,6 +143,16 @@
     "triggerAriaLabel": "Open menu for {{label}}",
     "openTimeline": "Open Timeline",
     "openKb": "Open KB",
-    "openOutline": "Open Outline"
+    "openOutline": "Open Outline",
+    "agent": "Agent",
+    "unassigned": "Unassigned",
+    "rename": "Rename",
+    "delete": "Delete",
+    "deleteConfirmTitle": "Delete {{name}}",
+    "deleteConfirmDescription": "This action cannot be undone. The {{type}} and all its data will be permanently deleted.",
+    "deleteConfirmAction": "Delete",
+    "deleteConfirmCancel": "Cancel",
+    "renameFailed": "Failed to rename. Please try again.",
+    "deleteFailed": "Failed to delete. Please try again."
   }
 }
