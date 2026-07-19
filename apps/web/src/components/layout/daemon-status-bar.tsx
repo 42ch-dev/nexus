@@ -3,8 +3,8 @@
  *
  * V1.117 P2 (T3): single-line footer — left = state dot + "Daemon running"
  * label + lowercase `running` tag; right = clickable agent badge (name+version
- * or placeholder, navigates to `/settings/agent`) + Restart control. Non-running
- * states remain surfaced by the top-of-main-content {@link MainBanner}, not here.
+ * or placeholder, navigates to `/settings/agent`) + Restart control. Pre-ready
+ * blocking is owned by {@link DaemonLaunchGate}; mid-session restart lives here.
  *
  * Browser build: returns `null`.
  */

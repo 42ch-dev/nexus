@@ -12,12 +12,15 @@ interface DaemonLaunchGateProps {
 }
 
 const WAIT_TIMEOUT_MS = 25_000;
+/** Secondary health poll cadence while waiting for `running` (V1.125). */
+const HEALTH_POLL_MS = 1_500;
 
 /**
- * Outer application launch gate (V1.105 P0).
+ * Outer application launch gate (V1.105 P0, V1.125 tightened).
  *
- * Desktop: fullscreen splash until the daemon is Ready (health or status
- * running/degraded). Browser: instant pass.
+ * Desktop: fullscreen splash until daemon status is `running` only. Browser:
+ * instant pass. Health probes during wait are attach-race helpers — they do
+ * not unlock without a `running` status (V1.125 AC-V1125-1).
  *
  * Happy path never calls `startDaemon` — Tauri `.setup()` always starts the
  * sidecar (D2). Recovery: reload (retry) or `resetLocalDatabase` then reload
@@ -40,6 +43,7 @@ export function DaemonLaunchGate({ children }: DaemonLaunchGateProps) {
     let cancelled = false;
     let unsub: (() => void) | undefined;
     let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    let pollId: ReturnType<typeof setInterval> | undefined;
     let ready = false; // Guard: timeout callback must not race after markReady.
     const cap = desktop;
 
@@ -60,7 +64,7 @@ export function DaemonLaunchGate({ children }: DaemonLaunchGateProps) {
 
     function applyStatus(status: DaemonStatus) {
       if (cancelled) return;
-      if (status.state === 'running' || status.state === 'degraded') {
+      if (status.state === 'running') {
         markReady();
       } else if (status.state === 'starting' || status.state === 'stopped') {
         // D2: Tauri `.setup()` owns start — keep waiting; do not call startDaemon.
@@ -72,14 +76,39 @@ export function DaemonLaunchGate({ children }: DaemonLaunchGateProps) {
       }
     }
 
-    /** Health success → Ready. Failure is non-terminal while still waiting. */
+    /**
+     * Health success is not sufficient to unlock (V1.125) — re-fetch status so
+     * attach races can observe `running`. IPC-unavailable fallback may still
+     * unlock on health alone when status cannot be read.
+     */
     async function probeForReady() {
       try {
         await client.health();
-        markReady();
+        if (cancelled || ready) return;
+        try {
+          const status = await cap.getDaemonStatus();
+          if (!cancelled) applyStatus(status);
+        } catch {
+          // Last resort when status IPC is unavailable — health is the only signal.
+          if (!cancelled && !ready) markReady();
+        }
       } catch {
         // Ignore — status events / timeout own failure UX during wait.
       }
+    }
+
+    function clearHealthPoll() {
+      if (pollId !== undefined) {
+        clearInterval(pollId);
+        pollId = undefined;
+      }
+    }
+
+    function startHealthPoll() {
+      clearHealthPoll();
+      pollId = setInterval(() => {
+        void probeForReady();
+      }, HEALTH_POLL_MS);
     }
 
     async function subscribe() {
@@ -87,16 +116,20 @@ export function DaemonLaunchGate({ children }: DaemonLaunchGateProps) {
         const status = await cap.getDaemonStatus();
         if (cancelled) return;
 
-        if (status.state === 'running' || status.state === 'degraded') {
+        if (status.state === 'running') {
           applyStatus(status);
           return;
         }
 
         applyStatus(status);
+        startHealthPoll();
 
         const listen = await cap.onDaemonStatusChanged((next) => {
           applyStatus(next);
-          if (next.state === 'running' || next.state === 'degraded') return;
+          if (next.state === 'running') {
+            clearHealthPoll();
+            return;
+          }
           // Opportunistic health check after non-ready events (attach races).
           void probeForReady();
         });
@@ -130,7 +163,7 @@ export function DaemonLaunchGate({ children }: DaemonLaunchGateProps) {
         .getDaemonStatus()
         .then((status) => {
           if (cancelled || ready) return;
-          if (status.state === 'running' || status.state === 'degraded') {
+          if (status.state === 'running') {
             applyStatus(status);
             return;
           }
@@ -155,6 +188,7 @@ export function DaemonLaunchGate({ children }: DaemonLaunchGateProps) {
     return () => {
       cancelled = true;
       clearWaitTimeout();
+      clearHealthPoll();
       unsub?.();
     };
   }, [client, desktop, t]);

@@ -260,7 +260,7 @@ describe('SettingsAgentSection preselect (G1)', () => {
     });
   });
 
-  it('persists via setAgentProfile on Save Agent, dirty-gated (AC-P1-1)', async () => {
+  it('applies profile instantly on card select (AC-V1125-2)', async () => {
     const user = userEvent.setup();
     const setAgentProfile = vi.fn(() => Promise.resolve());
     const getAgentProfile = vi.fn(() =>
@@ -277,41 +277,24 @@ describe('SettingsAgentSection preselect (G1)', () => {
       },
     );
 
-    // codex-native is preselected by the saved profile → CLEAN (Save disabled).
+    await waitFor(() => expect(getAgentProfile).toHaveBeenCalled());
     await waitFor(() => {
       const pressed = screen
         .getAllByTestId('agent-card-select-codex-native')
         .filter((el) => el.getAttribute('aria-pressed') === 'true');
       expect(pressed.length).toBeGreaterThanOrEqual(1);
     });
-    await waitFor(() => expect(getAgentProfile).toHaveBeenCalled());
 
-    // AC-P1-1: selection matches last-saved profile → Save disabled.
-    await waitFor(() =>
-      expect(screen.getByTestId('settings-save-agent')).toBeDisabled(),
-    );
+    expect(screen.queryByTestId('settings-save-agent')).not.toBeInTheDocument();
 
-    // DIRTY: switch to claude → Save enabled.
     await user.click(screen.getByTestId('agent-card-select-claude-native'));
-    await waitFor(() =>
-      expect(screen.getByTestId('settings-save-agent')).not.toBeDisabled(),
-    );
-
-    await user.click(screen.getByTestId('settings-save-agent'));
 
     await waitFor(() =>
       expect(setAgentProfile).toHaveBeenCalledWith('claude-code', 'claude'),
     );
-    expect(await screen.findByText('Agent profile saved')).toBeInTheDocument();
-
-    // AC-P1-1: after Save success the baseline updates and the gate closes
-    // (clean again → Save disabled).
-    await waitFor(() =>
-      expect(screen.getByTestId('settings-save-agent')).toBeDisabled(),
-    );
   });
 
-  it('AC-P1-2/AC-P1-7: Save invalidates the query keys DaemonStatusBar consumes (footer refresh signal)', async () => {
+  it('invalidates footer query keys on instant card select (AC-V1125-2)', async () => {
     const user = userEvent.setup();
     const setAgentProfile = vi.fn(() => Promise.resolve());
     const getAgentProfile = vi.fn(() =>
@@ -331,24 +314,13 @@ describe('SettingsAgentSection preselect (G1)', () => {
       },
     );
 
-    // Wait for preselect (clean) then dirty + save.
     await waitFor(() => expect(getAgentProfile).toHaveBeenCalled());
-    await waitFor(() =>
-      expect(screen.getByTestId('settings-save-agent')).toBeDisabled(),
-    );
-
     await user.click(screen.getByTestId('agent-card-select-claude-native'));
-    await waitFor(() =>
-      expect(screen.getByTestId('settings-save-agent')).not.toBeDisabled(),
-    );
-    await user.click(screen.getByTestId('settings-save-agent'));
 
     await waitFor(() =>
       expect(setAgentProfile).toHaveBeenCalledWith('claude-code', 'claude'),
     );
 
-    // Footer refresh signal: exactly the keys DaemonStatusBar reads are
-    // invalidated so the agent badge refreshes without a 10s poll (AD-P1-1).
     expect(invalidateSpy).toHaveBeenCalledWith({
       queryKey: queryKeys.agentProfile.detail(),
     });
@@ -357,38 +329,37 @@ describe('SettingsAgentSection preselect (G1)', () => {
     });
   });
 
-  it('shows locked desktop-only toast when saving without desktop caps', async () => {
-    const user = userEvent.setup();
-    useHandlers(scanHandler(), creatorsHandler());
+  it('preselects saved profile when scan name differs but launch command matches', async () => {
+    const getAgentProfile = vi.fn(() =>
+      Promise.resolve({ name: 'codex', launchCommand: 'codex' }),
+    );
+    const agents = [
+      {
+        name: 'codex (native CLI)',
+        registry_agent_id: null,
+        launch_command: '/usr/local/bin/codex',
+        installed: true,
+        version: 'codex 1.2.3',
+      },
+      ...MIXED_AGENTS,
+    ];
+    useHandlers(scanHandler(agents), creatorsHandler());
 
     renderInApp(
       <Routes>{settingsRouteTree}</Routes>,
       {
         client: makeClient(),
-        desktop: null,
+        desktop: makeDesktop({ getAgentProfile }),
         initialRouterEntries: ['/settings/agent'],
       },
     );
 
-    // claude-native is the first installed agent; without desktop caps the
-    // browser auto-select falls back to it so Save is enabled.
-    await waitFor(() =>
-      expect(screen.getByTestId('agent-card-claude-native')).toBeInTheDocument(),
-    );
+    await waitFor(() => expect(getAgentProfile).toHaveBeenCalled());
 
-    // Browser falls back to first installed so Save is enabled.
     await waitFor(() => {
-      expect(screen.getByTestId('settings-save-agent')).not.toBeDisabled();
+      const custom = screen.getByTestId('agent-picker-custom-launch');
+      expect(within(custom).getByRole('textbox')).toHaveValue('');
     });
-
-    await user.click(screen.getByTestId('settings-save-agent'));
-
-    expect(await screen.findByText('Save agent on desktop')).toBeInTheDocument();
-    expect(
-      await screen.findByText(
-        'Open the Nexus desktop app to change your local agent.',
-      ),
-    ).toBeInTheDocument();
   });
 
   it('AC-P2-6: Settings uses the same default-grid pipeline as Setup (no fork)', async () => {

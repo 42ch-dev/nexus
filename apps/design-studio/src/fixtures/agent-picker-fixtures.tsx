@@ -16,17 +16,17 @@ import {
 
 const INSTALLED_ONLY: AgentPickerItem[] = [
   {
-    id: 'claude-acp',
-    name: 'Claude Code',
+    id: 'claude-native',
+    name: 'claude (native CLI)',
     version: '1.0.42',
-    description: 'Anthropic coding agent via ACP.',
+    description: 'Anthropic coding agent via native CLI.',
     installed: true,
     installUrl: 'https://docs.anthropic.com/en/docs/claude-code',
     docsUrl: 'https://docs.anthropic.com/en/docs/claude-code',
   },
   {
-    id: 'codex-acp',
-    name: 'Codex',
+    id: 'codex-native',
+    name: 'codex (native CLI)',
     version: '0.12.0',
     description: 'OpenAI Codex CLI.',
     installed: true,
@@ -80,7 +80,7 @@ function FixtureFrame({
 }
 
 function InteractiveSelectedFixture() {
-  const [selectedId, setSelectedId] = useState<string | null>('claude-acp');
+  const [selectedId, setSelectedId] = useState<string | null>('claude-native');
   const [custom, setCustom] = useState('');
   return (
     <AgentPicker
