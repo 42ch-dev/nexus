@@ -1,0 +1,14 @@
+[
+  {
+    "id": "R-V1103P2QC-S001",
+    "severity": "nit",
+    "lifecycle": "resolved",
+    "title": "Optional FingerprintGate /connect allowlist cleanup",
+    "summary": "qc3 suggestion: drop stale /connect from bypass allowlist",
+    "target": "accept",
+    "source": "qc3",
+    "decision": "defer",
+    "closure_note": "Archived as low/nit bulk (V1.126 P3 gate)",
+    "archived_at": "2026-07-20T00:00:00Z"
+  }
+]

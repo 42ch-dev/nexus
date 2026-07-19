@@ -1,34 +1,80 @@
-{
-  "schema_version": 1,
-  "description": "Archived resolved residuals from 2026-07-08-v1.100-ui-hygiene-guardrails.",
-  "plan_id": "2026-07-08-v1.100-ui-hygiene-guardrails",
-  "entries": [
-    {
-      "id": "R-V1100P1QC1-W002",
-      "title": "Promoted-primitive list duplicated in 3 places (script WRAPPER_CANDIDATES, script promoted loop, spec table) — P2 promotion requires coordinated 3-location edits",
-      "severity": "low",
-      "decision": "fix",
-      "owner": "@frontend-dev",
-      "target": "V1.102",
-      "lifecycle": "resolved",
-      "tracking_link": ".mstar/plans/2026-07-09-v1.102-ui-hygiene.md",
-      "note": "Resolved in V1.102 P2 Task 4: single PROMOTED_PRIMITIVES array drives WRAPPER_CANDIDATES + Studio @web-ui ban loop.",
-      "archived_at": "2026-07-09"
-    },
-    {
-      "id": "R-V1100P2QC3-S001",
-      "title": "Stale comment in check-ui-guardrails.sh:75-76 says 'P2 will promote' but P2 has promoted input/label/textarea",
-      "severity": "nit",
-      "decision": "defer",
-      "owner": "@frontend-dev",
-      "target": "post-V1.100",
-      "lifecycle": "resolved",
-      "tracking_link": ".mstar/sdd/2026-07-08-v1.100-form-field-component-promotion/review/qc-consolidated.md",
-      "note": "Factual inaccuracy now; trivial cleanup on next script touch. QC source: P2 qc3 S-001",
-      "closed_reason": "already_resolved_script_evolved",
-      "closed_at": "2026-07-12",
-      "archived_at": "2026-07-12"
-    }
-  ],
-  "archived_at": "2026-07-12"
-}
+[
+  {
+    "id": "R-V1100P1QC1-W002",
+    "title": "Promoted-primitive list duplicated in 3 places (script WRAPPER_CANDIDATES, script promoted loop, spec table) \u2014 P2 promotion requires coordinated 3-location edits",
+    "severity": "low",
+    "decision": "fix",
+    "owner": "@frontend-dev",
+    "target": "V1.102",
+    "lifecycle": "resolved",
+    "tracking_link": ".mstar/plans/2026-07-09-v1.102-ui-hygiene.md",
+    "note": "Resolved in V1.102 P2 Task 4: single PROMOTED_PRIMITIVES array drives WRAPPER_CANDIDATES + Studio @web-ui ban loop.",
+    "archived_at": "2026-07-09"
+  },
+  {
+    "id": "R-V1100P2QC3-S001",
+    "title": "Stale comment in check-ui-guardrails.sh:75-76 says 'P2 will promote' but P2 has promoted input/label/textarea",
+    "severity": "nit",
+    "decision": "defer",
+    "owner": "@frontend-dev",
+    "target": "post-V1.100",
+    "lifecycle": "resolved",
+    "tracking_link": ".mstar/sdd/2026-07-08-v1.100-form-field-component-promotion/review/qc-consolidated.md",
+    "note": "Factual inaccuracy now; trivial cleanup on next script touch. QC source: P2 qc3 S-001",
+    "closed_reason": "already_resolved_script_evolved",
+    "closed_at": "2026-07-12",
+    "archived_at": "2026-07-12"
+  },
+  {
+    "id": "R-V1100P1QC2-W001",
+    "title": "Static-only detection (grep) cannot catch dynamic import()/require() bypasses of forbidden imports",
+    "severity": "low",
+    "decision": "accept",
+    "owner": "@frontend-dev",
+    "target": "post-V1.100",
+    "lifecycle": "resolved",
+    "tracking_link": ".mstar/sdd/2026-07-08-v1.100-ui-hygiene-guardrails/review/qc-consolidated.md",
+    "note": "Inherent limitation of shell-grep mechanism; matches check-schema-drift.sh precedent. No current bypass in tree. QC source: qc2 W-001",
+    "closure_note": "Archived as low/nit bulk (V1.126 P3 gate)",
+    "archived_at": "2026-07-20T00:00:00Z"
+  },
+  {
+    "id": "R-V1100P1QC2-W002",
+    "title": "cn-dupe scan scoped to apps/ only, not tooling/ \u2014 accidental tooling duplication would not fail the gate",
+    "severity": "nit",
+    "decision": "accept",
+    "owner": "@frontend-dev",
+    "target": "post-V1.100",
+    "lifecycle": "resolved",
+    "tracking_link": ".mstar/sdd/2026-07-08-v1.100-ui-hygiene-guardrails/review/qc-consolidated.md",
+    "note": "Architecture decision + packages/nexus-ui/AGENTS.md forbid tooling duplication. Low risk. QC source: qc2 W-002",
+    "closure_note": "Archived as low/nit bulk (V1.126 P3 gate)",
+    "archived_at": "2026-07-20T00:00:00Z"
+  },
+  {
+    "id": "R-V1100P1QC3-S001",
+    "title": "No automated regression test for check-ui-guardrails.sh itself (patterns verified manually only)",
+    "severity": "low",
+    "decision": "defer",
+    "owner": "@frontend-dev",
+    "target": "post-V1.100",
+    "lifecycle": "resolved",
+    "tracking_link": ".mstar/sdd/2026-07-08-v1.100-ui-hygiene-guardrails/review/qc-consolidated.md",
+    "note": "Script is simple grep; failure fixtures proven manually. Add bats/shell self-test if guardrail grows. QC source: qc3 S-001",
+    "closure_note": "Archived as low/nit bulk (V1.126 P3 gate)",
+    "archived_at": "2026-07-20T00:00:00Z"
+  },
+  {
+    "id": "R-V1100P1QC3-S003",
+    "title": "Vacuously-passing warnings on empty dirs could mask misconfiguration if WRAPPER_DIR/STUDIO_SRC paths change",
+    "severity": "nit",
+    "decision": "defer",
+    "owner": "@frontend-dev",
+    "target": "post-V1.100",
+    "lifecycle": "resolved",
+    "tracking_link": ".mstar/sdd/2026-07-08-v1.100-ui-hygiene-guardrails/review/qc-consolidated.md",
+    "note": "Fail-on-missing-dir would be stricter. Low risk \u2014 dir renames caught by other CI jobs. QC source: qc3 S-003",
+    "closure_note": "Archived as low/nit bulk (V1.126 P3 gate)",
+    "archived_at": "2026-07-20T00:00:00Z"
+  }
+]

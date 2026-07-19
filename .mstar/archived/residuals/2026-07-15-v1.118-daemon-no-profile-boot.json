@@ -1,0 +1,67 @@
+[
+  {
+    "id": "R-V1118P0-H2",
+    "title": "Pool-backed background subsystems (schedule/cron/refresh) only wire at boot when pool exists; not started on runtime Profile attach",
+    "severity": "low",
+    "decision": "defer",
+    "owner": "@fullstack-dev",
+    "target": "post-V1.118",
+    "lifecycle": "resolved",
+    "tracking_link": ".mstar/plans/2026-07-15-v1.118-daemon-no-profile-boot.md",
+    "note": "QC H2 / daemon-runtime \u00a717.7. HTTP Tier-2 OK via lazy-open.",
+    "closure_note": "Archived as low/nit bulk (V1.126 P3 gate)",
+    "archived_at": "2026-07-20T00:00:00Z"
+  },
+  {
+    "id": "R-V1118P0-I1",
+    "title": "Desktop clean_home / v118 regression tests not wired into GitHub Actions",
+    "severity": "low",
+    "decision": "defer",
+    "owner": "@ops-engineer",
+    "target": "post-V1.118",
+    "lifecycle": "resolved",
+    "tracking_link": ".mstar/plans/2026-07-15-v1.118-daemon-no-profile-boot.md",
+    "note": "QC I-1 / T3 review. Tests exist locally; need sidecar + cargo test step.",
+    "closure_note": "Archived as low/nit bulk (V1.126 P3 gate)",
+    "archived_at": "2026-07-20T00:00:00Z"
+  },
+  {
+    "id": "R-V1118P0-PATCH",
+    "title": "PATCH /creators/{id} display_name calls pool_or_uninit \u2014 may 409 before pool attach",
+    "severity": "nit",
+    "decision": "defer",
+    "owner": "@fullstack-dev",
+    "target": "post-V1.118",
+    "lifecycle": "resolved",
+    "tracking_link": ".mstar/plans/2026-07-15-v1.118-daemon-no-profile-boot.md",
+    "note": "Documented in handler rustdoc + \u00a717.7.",
+    "closure_note": "Archived as low/nit bulk (V1.126 P3 gate)",
+    "archived_at": "2026-07-20T00:00:00Z"
+  },
+  {
+    "id": "R-V1118P0-WS-INIT",
+    "title": "POST /workspace/init returns 500 Internal instead of 409 uninitialized when no pool",
+    "severity": "low",
+    "decision": "defer",
+    "owner": "@fullstack-dev",
+    "target": "post-V1.118",
+    "lifecycle": "resolved",
+    "tracking_link": ".mstar/plans/2026-07-15-v1.118-daemon-no-profile-boot.md",
+    "note": "QC2 W-005.",
+    "closure_note": "Archived as low/nit bulk (V1.126 P3 gate)",
+    "archived_at": "2026-07-20T00:00:00Z"
+  },
+  {
+    "id": "R-V1118P0-STALE-POOL",
+    "title": "Tier-2 ensure_creator_pool failure maps to 500 Internal rather than stable 4xx",
+    "severity": "low",
+    "decision": "defer",
+    "owner": "@fullstack-dev",
+    "target": "post-V1.118",
+    "lifecycle": "resolved",
+    "tracking_link": ".mstar/plans/2026-07-15-v1.118-daemon-no-profile-boot.md",
+    "note": "QC2 W-006.",
+    "closure_note": "Archived as low/nit bulk (V1.126 P3 gate)",
+    "archived_at": "2026-07-20T00:00:00Z"
+  }
+]

@@ -1,0 +1,28 @@
+[
+  {
+    "id": "R-HOTFIX-404-PARAM-SYNTAX",
+    "title": "Daemon routes mix {param} and :param; creators GET/PATCH needed :param when {id}:verb sibling exists",
+    "severity": "low",
+    "decision": "defer",
+    "owner": "@fullstack-dev",
+    "target": "backlog",
+    "lifecycle": "resolved",
+    "tracking_link": ".mstar/sdd/2026-07-16-hotfix-setup-continue-404/review/qc.md",
+    "note": "QC single-review residual. Hotfix scoped to creators; optional convention audit later.",
+    "closure_note": "Archived as low/nit bulk (V1.126 P3 gate)",
+    "archived_at": "2026-07-20T00:00:00Z"
+  },
+  {
+    "id": "R-HOTFIX-404-MANUAL-DOGFOOD",
+    "title": "Author desktop dogfood: Setup Workspace Continue after daemon rebuild",
+    "severity": "low",
+    "decision": "verify",
+    "owner": "@project-manager",
+    "target": "pre-merge",
+    "lifecycle": "resolved",
+    "tracking_link": ".mstar/plans/2026-07-16-hotfix-setup-continue-404.md",
+    "note": "QA could not launch Tauri; one Continue click after rebuild confirms unblock.",
+    "closure_note": "Archived as low/nit bulk (V1.126 P3 gate)",
+    "archived_at": "2026-07-20T00:00:00Z"
+  }
+]

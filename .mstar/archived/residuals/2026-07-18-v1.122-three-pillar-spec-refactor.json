@@ -1,0 +1,72 @@
+[
+  {
+    "id": "R-V1122P0QC3-W001",
+    "severity": "low",
+    "source": "QC3 W-001",
+    "lifecycle": "resolved",
+    "description": "Large-graph projection performance guidance not cross-referenced in Draft overlay \u00a73.3.2",
+    "tracking_link": ".mstar/plans/2026-07-18-v1.122-three-pillar-spec-refactor.md#review-gate-summary",
+    "closure_note": "Archived as low/nit bulk (V1.126 P3 gate)",
+    "archived_at": "2026-07-20T00:00:00Z"
+  },
+  {
+    "id": "R-V1122P0QC1-S001",
+    "severity": "nit",
+    "source": "QC1 S-1",
+    "lifecycle": "resolved",
+    "description": "\u00a71 surface-count dissonance in canvas-strategy-surface.md",
+    "tracking_link": ".mstar/plans/2026-07-18-v1.122-three-pillar-spec-refactor.md#review-gate-summary",
+    "closure_note": "Archived as low/nit bulk (V1.126 P3 gate)",
+    "archived_at": "2026-07-20T00:00:00Z"
+  },
+  {
+    "id": "R-V1122P0QC1-S002",
+    "severity": "nit",
+    "source": "QC1 S-2",
+    "lifecycle": "resolved",
+    "description": "\u00a74.5->\u00a74.6 anchor renumbering (file-local)",
+    "tracking_link": ".mstar/plans/2026-07-18-v1.122-three-pillar-spec-refactor.md#review-gate-summary",
+    "closure_note": "Archived as low/nit bulk (V1.126 P3 gate)",
+    "archived_at": "2026-07-20T00:00:00Z"
+  },
+  {
+    "id": "R-V1122P0QC1-S003",
+    "severity": "nit",
+    "source": "QC1 S-3",
+    "lifecycle": "resolved",
+    "description": "Route prefix divergence /v1/local/ vs /v1/daemon/ - informational for P1",
+    "tracking_link": ".mstar/plans/2026-07-18-v1.122-three-pillar-spec-refactor.md#review-gate-summary",
+    "closure_note": "Archived as low/nit bulk (V1.126 P3 gate)",
+    "archived_at": "2026-07-20T00:00:00Z"
+  },
+  {
+    "id": "R-V1122P0QC3-S001",
+    "severity": "nit",
+    "source": "QC3 S-001",
+    "lifecycle": "resolved",
+    "description": "Draft overlay lacks explicit P5 merge path",
+    "tracking_link": ".mstar/plans/2026-07-18-v1.122-three-pillar-spec-refactor.md#review-gate-summary",
+    "closure_note": "Archived as low/nit bulk (V1.126 P3 gate)",
+    "archived_at": "2026-07-20T00:00:00Z"
+  },
+  {
+    "id": "R-V1122P0QC3-S002",
+    "severity": "nit",
+    "source": "QC3 S-002",
+    "lifecycle": "resolved",
+    "description": "DF-V1122-COMPUTE-ON-TIMELINE compound Pillar value",
+    "tracking_link": ".mstar/plans/2026-07-18-v1.122-three-pillar-spec-refactor.md#review-gate-summary",
+    "closure_note": "Archived as low/nit bulk (V1.126 P3 gate)",
+    "archived_at": "2026-07-20T00:00:00Z"
+  },
+  {
+    "id": "R-V1122P0QC3-S003",
+    "severity": "nit",
+    "source": "QC3 S-003",
+    "lifecycle": "resolved",
+    "description": "12 shipped DTOs/routes count in \u00a73.3.2 - maintenance liability",
+    "tracking_link": ".mstar/plans/2026-07-18-v1.122-three-pillar-spec-refactor.md#review-gate-summary",
+    "closure_note": "Archived as low/nit bulk (V1.126 P3 gate)",
+    "archived_at": "2026-07-20T00:00:00Z"
+  }
+]

@@ -1,0 +1,57 @@
+[
+  {
+    "id": "R-V1102P1QC-S001",
+    "severity": "nit",
+    "lifecycle": "resolved",
+    "summary": "Mobile nav assert specificity",
+    "source": "qc-tri",
+    "plan_id": "2026-07-09-v1.102-settings-shell",
+    "target": "unspecified",
+    "closure_note": "Archived as low/nit bulk (V1.126 P3 gate)",
+    "archived_at": "2026-07-20T00:00:00Z"
+  },
+  {
+    "id": "R-V1102P1QC-S002",
+    "severity": "nit",
+    "lifecycle": "resolved",
+    "summary": "Custom-launch persist test optional",
+    "source": "qc-tri",
+    "plan_id": "2026-07-09-v1.102-settings-shell",
+    "target": "unspecified",
+    "closure_note": "Archived as low/nit bulk (V1.126 P3 gate)",
+    "archived_at": "2026-07-20T00:00:00Z"
+  },
+  {
+    "id": "R-V1102P1QC-S003",
+    "severity": "nit",
+    "lifecycle": "resolved",
+    "summary": "Settings reject-path test optional",
+    "source": "qc-tri",
+    "plan_id": "2026-07-09-v1.102-settings-shell",
+    "target": "unspecified",
+    "closure_note": "Archived as low/nit bulk (V1.126 P3 gate)",
+    "archived_at": "2026-07-20T00:00:00Z"
+  },
+  {
+    "id": "R-V1102P1QC-S004",
+    "severity": "nit",
+    "lifecycle": "resolved",
+    "summary": "getAgentProfile preselect deferred per spec",
+    "source": "qc-tri",
+    "plan_id": "2026-07-09-v1.102-settings-shell",
+    "target": "unspecified",
+    "closure_note": "Archived as low/nit bulk (V1.126 P3 gate)",
+    "archived_at": "2026-07-20T00:00:00Z"
+  },
+  {
+    "id": "R-V1102P1QC-S005",
+    "severity": "nit",
+    "lifecycle": "resolved",
+    "summary": "Mapping extract / Studio Save CTA polish optional",
+    "source": "qc-tri",
+    "plan_id": "2026-07-09-v1.102-settings-shell",
+    "target": "unspecified",
+    "closure_note": "Archived as low/nit bulk (V1.126 P3 gate)",
+    "archived_at": "2026-07-20T00:00:00Z"
+  }
+]

@@ -1,0 +1,15 @@
+[
+  {
+    "id": "R-V1109-P2-QC2-S001",
+    "title": "AbortController in useVerifyAgent discards stale results on unmount but doesn't pass signal to client.scanAgents (no true HTTP cancellation)",
+    "severity": "nit",
+    "decision": "accept",
+    "owner": "@frontend-dev",
+    "target": "post-V1.109",
+    "lifecycle": "resolved",
+    "tracking_link": ".mstar/plans/2026-07-11-v1.109-canvas-graph-scale.md",
+    "note": "Local-only read-only scan; true cancellation requires client API support. QC source: QC2 suggestion",
+    "closure_note": "Accepted: abort-on-unmount prevents stale mutation settlement; true HTTP cancellation requires client API support.",
+    "archived_at": "2026-07-20T00:00:00Z"
+  }
+]

@@ -1,47 +1,67 @@
-{
-  "plan_id": "2026-07-09-v1.101-setup-wizard-ui-polish",
-  "schema_version": 1,
-  "archived_at": "2026-07-09T14:50:00+0800",
-  "archived_reason": "V1.101 P1 Task 4: close R-V1100P0SMOKE-UI-BACK/STEPS/POLL on automated evidence; human smoke remains separate non-blocker.",
-  "entries": [
-    {
-      "id": "R-V1100P0SMOKE-UI-BACK",
-      "title": "Setup wizard Back button position is incorrect (smoke observation)",
-      "severity": "low",
-      "lifecycle": "resolved",
-      "closed_at": "2026-07-09",
-      "closed_by": "2026-07-09-v1.101-setup-wizard-ui-polish",
-      "source_plan_id": "2026-07-08-v1.100-desktop-clean-state-first-launch",
-      "tracking_link": ".mstar/plans/2026-07-09-v1.101-setup-wizard-ui-polish.md",
-      "archived_at": "2026-07-09",
-      "closure_note": "Automated close: Studio chrome fixtures with horizontal Back/Continue CTA (af1d6f19); App daemon+agent CTA adjacency (2fa00759). Evidence: design-studio Vitest wizard chrome; web setup-step-daemon/agent CTA row tests. Interactive macOS smoke NOT claimed.",
-      "closure_evidence": "commits 336a544a,af1d6f19,2fa00759; plan .mstar/plans/2026-07-09-v1.101-setup-wizard-ui-polish.md"
-    },
-    {
-      "id": "R-V1100P0SMOKE-UI-STEPS",
-      "title": "Setup wizard sidebar Steps indicator displays abnormally (smoke observation)",
-      "severity": "low",
-      "lifecycle": "resolved",
-      "closed_at": "2026-07-09",
-      "closed_by": "2026-07-09-v1.101-setup-wizard-ui-polish",
-      "source_plan_id": "2026-07-08-v1.100-desktop-clean-state-first-launch",
-      "tracking_link": ".mstar/plans/2026-07-09-v1.101-setup-wizard-ui-polish.md",
-      "archived_at": "2026-07-09",
-      "closure_note": "Automated close: Studio Steps matrices complete/active/pending numbered (af1d6f19); App StepIndicator data-step-status + aside/nav fix (2fa00759). Evidence: Studio + setup-wizard-page Vitest status mapping. Interactive macOS smoke NOT claimed.",
-      "closure_evidence": "commits 336a544a,af1d6f19,2fa00759; plan .mstar/plans/2026-07-09-v1.101-setup-wizard-ui-polish.md"
-    },
-    {
-      "id": "R-V1100P0SMOKE-UI-POLL",
-      "title": "Daemon status detection interval inconsistent: fast Back-re-entry shows 'running' immediately, but waiting shows delay before 'running' — polling interval / race issue",
-      "severity": "low",
-      "lifecycle": "resolved",
-      "closed_at": "2026-07-09",
-      "closed_by": "2026-07-09-v1.101-setup-wizard-ui-polish",
-      "source_plan_id": "2026-07-08-v1.100-desktop-clean-state-first-launch",
-      "tracking_link": ".mstar/plans/2026-07-09-v1.101-setup-wizard-ui-polish.md",
-      "archived_at": "2026-07-09",
-      "closure_note": "Automated close: probe-first daemon status + ≤1 onDaemonStatusChanged; remount re-probe (2fa00759); contract lock (336a544a). Evidence: setup-step-daemon Vitest subscription/remount/post-start probe. No event-bus rewrite. Interactive macOS smoke NOT claimed.",
-      "closure_evidence": "commits 336a544a,af1d6f19,2fa00759; plan .mstar/plans/2026-07-09-v1.101-setup-wizard-ui-polish.md"
-    }
-  ]
-}
+[
+  {
+    "id": "R-V1100P0SMOKE-UI-BACK",
+    "title": "Setup wizard Back button position is incorrect (smoke observation)",
+    "severity": "low",
+    "lifecycle": "resolved",
+    "closed_at": "2026-07-09",
+    "closed_by": "2026-07-09-v1.101-setup-wizard-ui-polish",
+    "source_plan_id": "2026-07-08-v1.100-desktop-clean-state-first-launch",
+    "tracking_link": ".mstar/plans/2026-07-09-v1.101-setup-wizard-ui-polish.md",
+    "archived_at": "2026-07-09",
+    "closure_note": "Automated close: Studio chrome fixtures with horizontal Back/Continue CTA (af1d6f19); App daemon+agent CTA adjacency (2fa00759). Evidence: design-studio Vitest wizard chrome; web setup-step-daemon/agent CTA row tests. Interactive macOS smoke NOT claimed.",
+    "closure_evidence": "commits 336a544a,af1d6f19,2fa00759; plan .mstar/plans/2026-07-09-v1.101-setup-wizard-ui-polish.md"
+  },
+  {
+    "id": "R-V1100P0SMOKE-UI-STEPS",
+    "title": "Setup wizard sidebar Steps indicator displays abnormally (smoke observation)",
+    "severity": "low",
+    "lifecycle": "resolved",
+    "closed_at": "2026-07-09",
+    "closed_by": "2026-07-09-v1.101-setup-wizard-ui-polish",
+    "source_plan_id": "2026-07-08-v1.100-desktop-clean-state-first-launch",
+    "tracking_link": ".mstar/plans/2026-07-09-v1.101-setup-wizard-ui-polish.md",
+    "archived_at": "2026-07-09",
+    "closure_note": "Automated close: Studio Steps matrices complete/active/pending numbered (af1d6f19); App StepIndicator data-step-status + aside/nav fix (2fa00759). Evidence: Studio + setup-wizard-page Vitest status mapping. Interactive macOS smoke NOT claimed.",
+    "closure_evidence": "commits 336a544a,af1d6f19,2fa00759; plan .mstar/plans/2026-07-09-v1.101-setup-wizard-ui-polish.md"
+  },
+  {
+    "id": "R-V1100P0SMOKE-UI-POLL",
+    "title": "Daemon status detection interval inconsistent: fast Back-re-entry shows 'running' immediately, but waiting shows delay before 'running' \u2014 polling interval / race issue",
+    "severity": "low",
+    "lifecycle": "resolved",
+    "closed_at": "2026-07-09",
+    "closed_by": "2026-07-09-v1.101-setup-wizard-ui-polish",
+    "source_plan_id": "2026-07-08-v1.100-desktop-clean-state-first-launch",
+    "tracking_link": ".mstar/plans/2026-07-09-v1.101-setup-wizard-ui-polish.md",
+    "archived_at": "2026-07-09",
+    "closure_note": "Automated close: probe-first daemon status + \u22641 onDaemonStatusChanged; remount re-probe (2fa00759); contract lock (336a544a). Evidence: setup-step-daemon Vitest subscription/remount/post-start probe. No event-bus rewrite. Interactive macOS smoke NOT claimed.",
+    "closure_evidence": "commits 336a544a,af1d6f19,2fa00759; plan .mstar/plans/2026-07-09-v1.101-setup-wizard-ui-polish.md"
+  },
+  {
+    "id": "R-V1101P1-001",
+    "title": "Optional Back click-through polish from QC2 F-002",
+    "severity": "nit",
+    "decision": "defer",
+    "owner": "@frontend-dev",
+    "target": "post-V1.101",
+    "lifecycle": "resolved",
+    "tracking_link": ".mstar/plans/2026-07-09-v1.101-setup-wizard-ui-polish.md",
+    "note": "Non-blocking QC suggestion after Approve.",
+    "closure_note": "Archived as low/nit bulk (V1.126 P3 gate)",
+    "archived_at": "2026-07-20T00:00:00Z"
+  },
+  {
+    "id": "R-V1101P1-002",
+    "title": "data-layout on single-button CTAs (welcome/done)",
+    "severity": "nit",
+    "decision": "defer",
+    "owner": "@frontend-dev",
+    "target": "post-V1.101",
+    "lifecycle": "resolved",
+    "tracking_link": ".mstar/plans/2026-07-09-v1.101-setup-wizard-ui-polish.md",
+    "note": "QC2 F-003 suggestion.",
+    "closure_note": "Archived as low/nit bulk (V1.126 P3 gate)",
+    "archived_at": "2026-07-20T00:00:00Z"
+  }
+]
