@@ -6,7 +6,7 @@
 
 ## Rule
 
-Any PR that adds a gallery-projected `--color-*` token to `tooling/design-tokens/src/tokens.css` **must**, in the **same PR**, register that token in `apps/design-studio/src/pages/tokens.tsx` (Tokens page swatch + group). Light and dark values must both resolve (theme toggle or equivalent test). If gallery registration cannot ship in the same change, file a `residual_findings` row (severity ≥ important) naming the token and the Tokens page path — do not merge silent CSS-only tokens.
+Any PR that adds a gallery-projected `--color-*` token to `tooling/design-tokens/src/tokens.css` **must**, in the **same PR**, register that token in `apps/design-studio/src/pages/tokens.tsx` (Tokens page swatch + group). Light and dark values must both resolve (theme toggle or equivalent test). If gallery registration cannot ship in the same change, file a `residual_findings` row (severity ≥ medium) naming the token and the Tokens page path — do not merge silent CSS-only tokens.
 
 ## Why this note exists
 

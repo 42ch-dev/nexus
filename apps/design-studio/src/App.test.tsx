@@ -1977,6 +1977,47 @@ describe('Tokens page — Canvas token gallery (V1.121 P3)', () => {
       expect(screen.getByText(label)).toBeInTheDocument();
     }
   });
+
+  it('V1.124 P1 - CSS-variable bindings: swatch styles reference the expected var(--color-*) names', () => {
+    // Verify that the rendered swatch elements have style attributes referencing
+    // the correct CSS custom properties. jsdom cannot resolve the actual color
+    // values, but asserting the var() binding is present confirms the wiring
+    // between tokens.tsx entries and the CSS variable names in tokens.css.
+    const groups = [
+      { testId: 'canvas-token-group-4', vars: ['var(--color-canvas-timeline-accent)'] },
+      {
+        testId: 'canvas-token-group-5',
+        vars: [
+          'var(--color-canvas-layer-brief-accent)',
+          'var(--color-canvas-layer-narrative-accent)',
+          'var(--color-canvas-layer-moment-accent)',
+        ],
+      },
+      {
+        testId: 'canvas-token-group-6',
+        vars: [
+          'var(--color-canvas-outline-timeline-event-pin)',
+          'var(--color-canvas-outline-timeline-marker)',
+        ],
+      },
+      {
+        testId: 'canvas-token-group-7',
+        vars: [
+          'var(--color-soul-viz-timeline-axis-line)',
+          'var(--color-soul-viz-timeline-axis-tick)',
+          'var(--color-soul-viz-timeline-axis-label)',
+        ],
+      },
+    ];
+
+    for (const { testId, vars } of groups) {
+      const group = screen.getByTestId(testId);
+      const groupHTML = group.innerHTML;
+      for (const v of vars) {
+        expect(groupHTML).toContain(v);
+      }
+    }
+  });
 });
 
 /* ---- V1.121 P3 T4 — parity sweep (light/dark DOM assertions) ------------ */
