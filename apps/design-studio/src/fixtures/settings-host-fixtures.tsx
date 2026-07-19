@@ -328,7 +328,7 @@ function InteractiveSettingsPicker({
 
 /**
  * Agent section body chrome — mirrors apps/web SettingsAgentSection layout
- * (helper + picker + Save Agent) without scan/IPC.
+ * (helper + picker; instant-apply on select) without scan/IPC.
  */
 function SettingsAgentSectionChrome({
   initialSelectedId = PRESELECTED_AGENT_ID,
@@ -337,7 +337,6 @@ function SettingsAgentSectionChrome({
 }) {
   const [selectedId, setSelectedId] = useState<string | null>(initialSelectedId);
   const [custom, setCustom] = useState('');
-  const canSave = Boolean(selectedId || custom.trim());
 
   return (
     <div
@@ -358,16 +357,6 @@ function SettingsAgentSectionChrome({
           customLaunchValue={custom}
           onCustomLaunchChange={setCustom}
         />
-      </div>
-      <div className="flex items-center gap-3">
-        <Button
-          variant="primary"
-          type="button"
-          disabled={!canSave}
-          data-testid="settings-save-agent"
-        >
-          Save Agent
-        </Button>
       </div>
     </div>
   );
@@ -683,7 +672,7 @@ export function SettingsHostFixtures() {
           Agent section (preselected)
         </h4>
         <p className="text-copy-13 text-gray-700 mb-4">
-          Section chrome with locked helper copy, AgentPicker, and Save Agent.
+          Section chrome with locked helper copy and AgentPicker (instant-apply).
           Codex starts selected to show saved-profile preselect (G1 visual) —
           props-driven only; no App IPC.
         </p>

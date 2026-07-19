@@ -748,7 +748,7 @@ describe('Surfaces page — AgentPicker fixtures', () => {
   });
 
   it('renders installed and not-installed cards in mixed fixture', () => {
-    const installed = screen.getAllByTestId('agent-card-claude-acp');
+    const installed = screen.getAllByTestId('agent-card-claude-native');
     expect(installed.length).toBeGreaterThanOrEqual(1);
     expect(installed[0]).toHaveAttribute('data-installed', 'true');
 
@@ -775,7 +775,7 @@ describe('Surfaces page — AgentPicker fixtures', () => {
 
   it('marks selected fixture with aria-pressed', () => {
     const pressed = screen
-      .getAllByTestId('agent-card-select-claude-acp')
+      .getAllByTestId('agent-card-select-claude-native')
       .filter((el) => el.getAttribute('aria-pressed') === 'true');
     expect(pressed.length).toBeGreaterThanOrEqual(1);
   });
@@ -919,7 +919,7 @@ describe('Surfaces page — Settings shell chrome fixtures', () => {
     ).toBeInTheDocument();
   });
 
-  it('renders Agent section fixture with locked helper, preselected Codex, and Save Agent', () => {
+  it('renders Agent section fixture with locked helper and preselected Codex (instant-apply)', () => {
     const agentRoot = screen.getByTestId(
       'settings-host-fixture-agent-section',
     );
@@ -940,8 +940,8 @@ describe('Surfaces page — Settings shell chrome fixtures', () => {
       .filter((el) => el.getAttribute('aria-pressed') === 'true');
     expect(claudePressed.length).toBe(0);
     expect(
-      within(agentRoot).getByTestId('settings-save-agent'),
-    ).toHaveTextContent('Save Agent');
+      within(agentRoot).queryByTestId('settings-save-agent'),
+    ).not.toBeInTheDocument();
   });
 
   it('renders Connection section fixture with locked helper and form chrome', () => {
@@ -1137,7 +1137,7 @@ describe('Surfaces page — Settings shell chrome fixtures', () => {
   it('retains AgentPicker thin-host reference for P1', () => {
     const regions = screen.getAllByTestId('settings-host-picker-region');
     expect(regions.length).toBeGreaterThanOrEqual(1);
-    const cards = screen.getAllByTestId('agent-card-claude-acp');
+    const cards = screen.getAllByTestId('agent-card-claude-native');
     expect(cards.length).toBeGreaterThanOrEqual(1);
     expect(
       screen.getAllByTestId('agent-picker-custom-launch').length,
