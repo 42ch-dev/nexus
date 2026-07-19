@@ -5,9 +5,10 @@ import { StatusBadge } from '@/components/status-badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { EmptyState, ErrorState, LoadingState } from '@/components/ui/states';
+import { EmptyState, ErrorState, LoadingState, UnavailableState } from '@/components/ui/states';
 import { useSessions } from '@/api/queries';
 import { shortId } from '@/lib/format';
+import { isOrchestrationEngineUnavailable } from '@/lib/nexus/errors';
 
 /**
  * Orchestration sessions view (Control Room — READ) — web-ui.md §6.1 #2.
@@ -43,10 +44,19 @@ export function SessionsPage() {
       </CardHeader>
       <CardContent>
         {sessions.isError ? (
-          <ErrorState
-            description={t('errorDescription')}
-            onRetry={() => sessions.refetch()}
-          />
+          isOrchestrationEngineUnavailable(sessions.error) ? (
+            <UnavailableState
+              title={t('engineUnavailableTitle')}
+              description={t('engineUnavailableDescription')}
+              onRetry={() => sessions.refetch()}
+            />
+          ) : (
+            <ErrorState
+              title={t('errorTitle')}
+              description={t('errorDescription')}
+              onRetry={() => sessions.refetch()}
+            />
+          )
         ) : sessions.isLoading ? (
           <LoadingState label={t('loading')} />
         ) : !sessions.data || sessions.data.length === 0 ? (

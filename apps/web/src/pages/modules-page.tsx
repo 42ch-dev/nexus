@@ -11,8 +11,9 @@ import { useTranslation } from 'react-i18next';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { EmptyState, ErrorState, LoadingState } from '@/components/ui/states';
+import { EmptyState, ErrorState, LoadingState, UnavailableState } from '@/components/ui/states';
 import { useComputeModule, useComputeModules } from '@/api/queries';
+import { isOrchestrationEngineUnavailable } from '@/lib/nexus/errors';
 import { cn } from '@/lib/utils';
 
 export function ModulesPage() {
@@ -46,7 +47,19 @@ export function ModulesPage() {
       </CardHeader>
       <CardContent>
         {modules.isError ? (
-          <ErrorState description={t('errorDescription')} onRetry={() => modules.refetch()} />
+          isOrchestrationEngineUnavailable(modules.error) ? (
+            <UnavailableState
+              title={t('engineUnavailableTitle')}
+              description={t('engineUnavailableDescription')}
+              onRetry={() => modules.refetch()}
+            />
+          ) : (
+            <ErrorState
+              title={t('errorTitle')}
+              description={t('errorDescription')}
+              onRetry={() => modules.refetch()}
+            />
+          )
         ) : modules.isLoading ? (
           <LoadingState label={t('loading')} />
         ) : !modules.data || modules.data.length === 0 ? (
@@ -120,7 +133,22 @@ function ModuleDetailPanel({ moduleId }: { moduleId: string }) {
     return <LoadingState label={t('detail.loading')} />;
   }
   if (detail.isError) {
-    return <ErrorState description={t('detail.errorDescription')} onRetry={() => detail.refetch()} />;
+    if (isOrchestrationEngineUnavailable(detail.error)) {
+      return (
+        <UnavailableState
+          title={t('detail.engineUnavailableTitle')}
+          description={t('detail.engineUnavailableDescription')}
+          onRetry={() => detail.refetch()}
+        />
+      );
+    }
+    return (
+      <ErrorState
+        title={t('detail.errorTitle')}
+        description={t('detail.errorDescription')}
+        onRetry={() => detail.refetch()}
+      />
+    );
   }
   if (!detail.data) {
     return null;

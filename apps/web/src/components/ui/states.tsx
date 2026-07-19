@@ -58,6 +58,53 @@ export function EmptyState({
 }
 
 /**
+ * UnavailableState — orchestration engine idle or not started. Neutral tone
+ * (not `ErrorState` crash framing) with an optional Retry action.
+ */
+export function UnavailableState({
+  title,
+  description,
+  onRetry,
+  retryLabel,
+  action,
+  className,
+}: {
+  title: string;
+  description?: string;
+  onRetry?: () => void;
+  retryLabel?: string;
+  action?: ReactNode;
+  className?: string;
+}) {
+  const { t } = useTranslation('common');
+  return (
+    <div
+      className={cn(
+        'flex flex-col items-center justify-center gap-2 py-16 text-center',
+        className,
+      )}
+    >
+      <p className="font-display text-display-24 text-gray-1000">{title}</p>
+      {description && <p className="max-w-sm text-copy-14 text-gray-900">{description}</p>}
+      {(onRetry || action) && (
+        <div className="mt-2 flex flex-wrap items-center justify-center gap-2">
+          {onRetry && (
+            <button
+              type="button"
+              onClick={onRetry}
+              className="text-label-14 font-medium text-blue-700 transition-colors duration-state ease-standard hover:text-blue-800"
+            >
+              {retryLabel ?? t('error.retry')}
+            </button>
+          )}
+          {action}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
  * ErrorState — DESIGN.md §Voice & Content error pattern: what happened + what
  * to do next. The transport `message` already came from the shared
  * ErrorResponse via NexusClientError (W-1 fix).

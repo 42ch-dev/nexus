@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { NavLink, useLocation } from 'react-router-dom';
 import {
@@ -37,15 +37,38 @@ import { cn } from '@/lib/utils';
  * creator profile, and the route-derived active state. The chrome owns the
  * markup, classes, and `data-testid` SSOT.
  *
+ * V1.125 P1 moves Memory under Orchestrator (first group) and derives the
+ * active tab from orchestration route prefixes so deep links select the right tab.
+ *
  * Active-highlight note: peer items use prefix matching via
  * {@link ShellSidebarChrome}'s `isActiveItem` callback.
  */
+const ORCHESTRATOR_ROUTE_PREFIXES = [
+  '/memory',
+  '/strategies',
+  '/sessions',
+  '/schedule',
+  '/modules',
+] as const;
+
+function tabFromPathname(pathname: string): ShellSidebarTab {
+  return ORCHESTRATOR_ROUTE_PREFIXES.some(
+    (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`),
+  )
+    ? 'orchestrator'
+    : 'creator';
+}
+
 export function Sidebar() {
   const { t } = useTranslation('shell');
-  const [activeTab, setActiveTab] = useState<ShellSidebarTab>('creator');
   const { pathname } = useLocation();
+  const [activeTab, setActiveTab] = useState<ShellSidebarTab>(() => tabFromPathname(pathname));
   const worksQuery = useWorks({ limit: 12 });
   const works = useMemo(() => flattenPages(worksQuery.data), [worksQuery.data]);
+
+  useEffect(() => {
+    setActiveTab(tabFromPathname(pathname));
+  }, [pathname]);
 
   const creatorGroups: ShellNavGroup[] = useMemo(
     () => [
@@ -102,17 +125,22 @@ export function Sidebar() {
         label: t('nav.worlds'),
         items: [{ to: '/worlds', label: t('nav.worlds'), icon: Globe }],
       },
-      {
-        id: 'memories',
-        label: t('nav.memories'),
-        items: [{ to: '/memory', label: t('nav.memories'), icon: BrainCircuit }],
-      },
     ],
     [t, works],
   );
 
   const orchestratorGroups: ShellNavGroup[] = useMemo(
     () => [
+      {
+        id: 'memory',
+        label: t('nav.memory'),
+        items: [{ to: '/memory', label: t('nav.memory'), icon: BrainCircuit }],
+      },
+      {
+        id: 'strategies',
+        label: t('nav.strategies'),
+        items: [{ to: '/strategies', label: t('nav.strategies'), icon: Sparkles }],
+      },
       {
         id: 'runtime',
         label: t('nav.runtime'),
@@ -125,14 +153,6 @@ export function Sidebar() {
         id: 'compute',
         label: t('nav.compute'),
         items: [{ to: '/modules', label: t('nav.modules'), icon: Cpu }],
-      },
-      {
-        // Strategy lives under Orchestration (AC-P2-4) — a plain /strategies
-        // link. It was a Canvas item in V1.111; V1.117 drops the canvas
-        // resolver path for it (the prefix match highlights /strategies/*).
-        id: 'strategies',
-        label: t('nav.strategies'),
-        items: [{ to: '/strategies', label: t('nav.strategies'), icon: Sparkles }],
       },
     ],
     [t],
