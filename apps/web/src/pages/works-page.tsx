@@ -9,10 +9,11 @@ import { Button } from '@/components/ui/button';
 import {
   Card, CardContent, CardDescription, CardHeader, CardTitle,
 } from '@/components/ui/card';
+import { EmptyCreateCard } from '@/components/ui/empty-create-card';
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table';
-import { EmptyState, ErrorState, LoadingState } from '@/components/ui/states';
+import { ErrorState, LoadingState } from '@/components/ui/states';
 import { flattenPages, useWorks } from '@/api/queries';
 import { formatRelative, shortId } from '@/lib/format';
 
@@ -84,15 +85,12 @@ export function WorksPage() {
           ) : query.isLoading ? (
             <LoadingState label={t('loading')} />
           ) : works.length === 0 ? (
-            <EmptyState
-              title={t('emptyTitle')}
-              description={t('emptyDescription')}
-              action={
-                <Button type="button" variant="secondary" size="small" onClick={() => setCreateOpen(true)}>
-                  <Plus className="h-4 w-4" aria-hidden />
-                  {t('create')}
-                </Button>
-              }
+            <EmptyCreateCard
+              icon={Plus}
+              title={t('emptyCreateTitle')}
+              description={t('emptyCreateDescription')}
+              onClick={() => setCreateOpen(true)}
+              data-testid="works-empty-create"
             />
           ) : (
             <>

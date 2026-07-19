@@ -15,6 +15,7 @@ import { BrowserClient } from '@/lib/nexus';
 import { i18n } from '@/lib/i18n/config';
 import { WorksPage } from '@/pages/works-page';
 import { act, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 
 const client = () => new BrowserClient();
 
@@ -55,6 +56,23 @@ describe('WorksPage', () => {
     expect(screen.getByText('Active')).toBeInTheDocument();
   });
 
+  it('renders a card-sized Create Work CTA when there are no works (V1.125 P2)', async () => {
+    const user = userEvent.setup();
+    useHandlers(
+      http.get('/v1/daemon/works', () =>
+        HttpResponse.json({ items: [], pagination: { limit: 20, has_more: false } }),
+      ),
+    );
+
+    renderWorks();
+    const cta = await screen.findByTestId('works-empty-create');
+    expect(cta).toHaveTextContent('Start a new creative Work');
+    expect(cta.className).toMatch(/\bmin-h-\[7\.5rem\]/);
+
+    await user.click(cta);
+    expect(await screen.findByRole('dialog', { name: 'Create Work' })).toBeInTheDocument();
+  });
+
   it('renders the empty state when there are no works', async () => {
     useHandlers(
       http.get('/v1/daemon/works', () =>
@@ -64,8 +82,8 @@ describe('WorksPage', () => {
 
     renderWorks();
 
-    expect(await screen.findByText('No works yet')).toBeInTheDocument();
-    expect(screen.getByText(/Create a Work to start the local loop/i)).toBeInTheDocument();
+    expect(await screen.findByTestId('works-empty-create')).toBeInTheDocument();
+    expect(screen.getByText(/Start a new creative Work/i)).toBeInTheDocument();
   });
 
   it('renders the error state and offers retry when the daemon fails', async () => {
@@ -93,9 +111,9 @@ describe('WorksPage', () => {
     );
 
     renderWorks();
-    await waitFor(() => expect(screen.getByText('No works yet')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByTestId('works-empty-create')).toBeInTheDocument());
 
-    // The Create Work button is present in both the toolbar and the empty state.
+    // The Create Work button is present in both the toolbar and the empty card.
     const createButtons = screen.getAllByRole('button', { name: /^Create$/i });
     expect(createButtons.length).toBeGreaterThanOrEqual(1);
     // Sanity: the table column header / title text is present.

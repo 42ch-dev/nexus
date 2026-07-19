@@ -10,6 +10,8 @@
   "loading": "正在加载作品…",
   "emptyTitle": "暂无作品",
   "emptyDescription": "创建作品以启动本地循环。",
+  "emptyCreateTitle": "创建",
+  "emptyCreateDescription": "在本地运行时中启动一个新的创作作品。",
   "untitled": "（未命名）",
   "columns": {
     "title": "标题",

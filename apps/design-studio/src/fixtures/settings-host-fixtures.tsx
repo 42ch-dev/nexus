@@ -616,7 +616,6 @@ function SettingsShellChromeFixture() {
         <ShellSidebarChrome
           activeTab={activeTab}
           activeRoute="#works"
-          settingsActive
           navGroups={groups}
           onTabChange={setActiveTab}
           logo={

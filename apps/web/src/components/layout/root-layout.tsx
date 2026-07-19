@@ -77,7 +77,7 @@ export function RootLayout() {
     <div className="flex h-screen overflow-hidden bg-background-100 text-gray-1000">
       {/* Desktop sidebar — full-height rail (AD-P2-2): h-screen + overflow-hidden
           so the sidebar chrome manages its own internal scroll (nav scrolls in
-          the middle; Settings + Profiles footer block is pinned at the bottom).
+          the middle; the Profiles footer block is pinned at the bottom).
           Width consumes the DESIGN.md sidebar-nav.width token (w-sidebar-nav-width). */}
       <aside className="hidden h-screen w-sidebar-nav-width shrink-0 flex-col overflow-hidden lg:flex">
         <Sidebar />

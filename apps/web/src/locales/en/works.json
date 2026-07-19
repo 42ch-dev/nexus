@@ -10,6 +10,8 @@
   "loading": "Loading works…",
   "emptyTitle": "No works yet",
   "emptyDescription": "Create a Work to start the local loop.",
+  "emptyCreateTitle": "Create",
+  "emptyCreateDescription": "Start a new creative Work in the local runtime.",
   "untitled": "(untitled)",
   "columns": {
     "title": "Title",

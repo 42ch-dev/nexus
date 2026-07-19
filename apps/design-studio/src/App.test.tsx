@@ -818,12 +818,12 @@ describe('Surfaces page — Settings shell chrome fixtures', () => {
     ).toBeInTheDocument();
   });
 
-  it('renders shell chrome with footer utility Settings link', () => {
+  it('renders shell chrome without footer utility Settings link (V1.125 P2)', () => {
     const settingsShell = screen.getByTestId('settings-shell-chrome');
     expect(settingsShell).toBeInTheDocument();
-    const link = within(settingsShell).getByTestId('settings-footer-utility-link');
-    expect(link).toHaveTextContent('Settings');
-    expect(link).toHaveAttribute('aria-current', 'page');
+    expect(
+      within(settingsShell).queryByTestId('settings-footer-utility-link'),
+    ).not.toBeInTheDocument();
   });
 
   it('renders section nav with Agent, Workspace, Advanced', () => {
