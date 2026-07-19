@@ -78,8 +78,8 @@ export function DaemonLaunchGate({ children }: DaemonLaunchGateProps) {
 
     /**
      * Health success is not sufficient to unlock (V1.125) — re-fetch status so
-     * attach races can observe `running`. IPC-unavailable fallback may still
-     * unlock on health alone when status cannot be read.
+     * attach races can observe `running`. When status IPC is unavailable, keep
+     * waiting; timeout surfaces the error UX.
      */
     async function probeForReady() {
       try {
@@ -89,8 +89,7 @@ export function DaemonLaunchGate({ children }: DaemonLaunchGateProps) {
           const status = await cap.getDaemonStatus();
           if (!cancelled) applyStatus(status);
         } catch {
-          // Last resort when status IPC is unavailable — health is the only signal.
-          if (!cancelled && !ready) markReady();
+          // Status IPC unavailable — health alone must not unlock.
         }
       } catch {
         // Ignore — status events / timeout own failure UX during wait.
@@ -142,16 +141,9 @@ export function DaemonLaunchGate({ children }: DaemonLaunchGateProps) {
         void probeForReady();
       } catch {
         if (cancelled) return;
-        // Subscription unavailable — fall back to health-only wait.
-        try {
-          await client.health();
-          markReady();
-        } catch (err) {
-          if (!cancelled) {
-            setDaemonReady(false);
-            setError(errorMessage(err) || t('error.daemonNotResponding'));
-          }
-        }
+        // Subscription unavailable — poll health and re-check status for `running`.
+        startHealthPoll();
+        void probeForReady();
       }
     }
 

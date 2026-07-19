@@ -593,6 +593,10 @@ describe('Sidebar — Work Timeline routes (V1.125 P2)', () => {
       screen.getByRole('link', { name: 'Drill Novel' }),
     );
     expect(outlineLink).toHaveClass('bg-gray-alpha-100', 'text-gray-1000');
+    expect(outlineLink.querySelector('[data-testid="sidebar-active-bar"]')).toHaveClass(
+      'w-[2px]',
+      'bg-blue-700',
+    );
     expect(screen.queryByRole('link', { name: 'Drill Novel Timeline' })).not.toBeInTheDocument();
   });
 });
