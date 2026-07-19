@@ -1,0 +1,14 @@
+[
+  {
+    "id": "R-V1103P1QC-S001",
+    "severity": "nit",
+    "lifecycle": "resolved",
+    "title": "Optional extract shared agent mapping helpers",
+    "summary": "qc1 F-003 shared helper extract non-blocking",
+    "target": "accept",
+    "source": "qc1",
+    "decision": "defer",
+    "closure_note": "Archived as low/nit bulk (V1.126 P3 gate)",
+    "archived_at": "2026-07-20T00:00:00Z"
+  }
+]

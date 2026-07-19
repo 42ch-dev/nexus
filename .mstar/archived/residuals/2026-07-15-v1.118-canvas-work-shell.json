@@ -1,0 +1,41 @@
+[
+  {
+    "id": "R-V1118P2-ORPHAN",
+    "title": "WorkDetailPage unrouted after outline-default shell \u2014 update/archive/findings entry points lost",
+    "severity": "low",
+    "decision": "defer",
+    "owner": "@frontend-dev",
+    "target": "post-V1.118",
+    "lifecycle": "resolved",
+    "tracking_link": ".mstar/plans/2026-07-15-v1.118-canvas-work-shell.md",
+    "note": "QC3 W-001. Re-home actions in rail/menu.",
+    "closure_note": "Archived as low/nit bulk (V1.126 P3 gate)",
+    "archived_at": "2026-07-20T00:00:00Z"
+  },
+  {
+    "id": "R-V1118P2-CHAPTERS-ID",
+    "title": "workId===chapters collides with reserved /works/chapters flat route (isWorkShellRoute false-negative)",
+    "severity": "nit",
+    "decision": "defer",
+    "owner": "@frontend-dev",
+    "target": "post-V1.118",
+    "lifecycle": "resolved",
+    "tracking_link": ".mstar/plans/2026-07-15-v1.118-canvas-work-shell.md",
+    "note": "Documented in work-shell-routes.ts; forbid at create or refine detector.",
+    "closure_note": "Archived as low/nit bulk (V1.126 P3 gate)",
+    "archived_at": "2026-07-20T00:00:00Z"
+  },
+  {
+    "id": "R-V1118P2-BODY-NAV",
+    "title": "No shell-visible Body/chapters navigation after drill-in retirement",
+    "severity": "low",
+    "decision": "defer",
+    "owner": "@frontend-dev",
+    "target": "post-V1.118",
+    "lifecycle": "resolved",
+    "tracking_link": ".mstar/plans/2026-07-15-v1.118-canvas-work-shell.md",
+    "note": "QC3 W-003. Routes work; discoverability gap.",
+    "closure_note": "Archived as low/nit bulk (V1.126 P3 gate)",
+    "archived_at": "2026-07-20T00:00:00Z"
+  }
+]

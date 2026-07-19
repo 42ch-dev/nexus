@@ -1,22 +1,42 @@
-{
-  "schema_version": 1,
-  "description": "Archived resolved residuals from 2026-07-11-v1.109-canvas-scene-beat.",
-  "plan_id": "2026-07-11-v1.109-canvas-scene-beat",
-  "entries": [
-    {
-      "id": "R-V1109-P0-QC1-W001",
-      "title": "R-V1108P1QC1-S002 (Studio imports extracted chrome) not actually closed — Studio re-mirrors chrome as static markup (RF-coupled, import boundary forbids RF deps)",
-      "severity": "suggestion",
-      "decision": "defer",
-      "owner": "@frontend-dev",
-      "target": "post-V1.109",
-      "lifecycle": "resolved",
-      "tracking_link": ".mstar/plans/2026-07-11-v1.109-canvas-scene-beat.md",
-      "note": "Re-scope: only R-V1108P0QC1-S001 (hook extract) is closed by P0. QC source: QC1 F-001",
-      "closed_reason": "locked_direction_static_mirror",
-      "closed_at": "2026-07-12",
-      "archived_at": "2026-07-12"
-    }
-  ],
-  "archived_at": "2026-07-12"
-}
+[
+  {
+    "id": "R-V1109-P0-QC1-W001",
+    "title": "R-V1108P1QC1-S002 (Studio imports extracted chrome) not actually closed \u2014 Studio re-mirrors chrome as static markup (RF-coupled, import boundary forbids RF deps)",
+    "severity": "suggestion",
+    "decision": "defer",
+    "owner": "@frontend-dev",
+    "target": "post-V1.109",
+    "lifecycle": "resolved",
+    "tracking_link": ".mstar/plans/2026-07-11-v1.109-canvas-scene-beat.md",
+    "note": "Re-scope: only R-V1108P0QC1-S001 (hook extract) is closed by P0. QC source: QC1 F-001",
+    "closed_reason": "locked_direction_static_mirror",
+    "closed_at": "2026-07-12",
+    "archived_at": "2026-07-12"
+  },
+  {
+    "id": "R-V1109-P0-QC3-W001",
+    "title": "Fixture object literal identity causes projection re-memo; production safe (module constant), Design Studio/test consumers should stabilize refs",
+    "severity": "nit",
+    "decision": "accept",
+    "owner": "@frontend-dev",
+    "target": "unspecified",
+    "lifecycle": "resolved",
+    "tracking_link": ".mstar/plans/2026-07-11-v1.109-canvas-scene-beat.md",
+    "note": "Production safe via EMPTY_SCENE_BEAT_FIXTURE. QC source: QC3 W1",
+    "closure_note": "Production-safe: EMPTY_SCENE_BEAT_FIXTURE is a module-level constant with stable identity.",
+    "archived_at": "2026-07-20T00:00:00Z"
+  },
+  {
+    "id": "R-V1109-P0-QC3-W002",
+    "title": "beatParentSceneTitle uses Array.find() O(n) on fixture scenes every render; index when real wire data arrives",
+    "severity": "nit",
+    "decision": "close",
+    "owner": "@frontend-dev",
+    "target": "post-V1.114",
+    "lifecycle": "resolved",
+    "tracking_link": ".mstar/plans/2026-07-11-v1.109-canvas-scene-beat.md",
+    "note": "Acceptable for small fixture arrays; revisit when real wire scene/beat data arrives. QC source: QC3 W2",
+    "closure_note": "Closed by V1.115 P1 \u2014 2026-07-11-v1.109-canvas-scene-beat",
+    "archived_at": "2026-07-20T00:00:00Z"
+  }
+]

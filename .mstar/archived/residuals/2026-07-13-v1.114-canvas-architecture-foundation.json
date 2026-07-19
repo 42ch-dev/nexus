@@ -1,0 +1,54 @@
+[
+  {
+    "id": "R-V1114P0QC1-W001",
+    "title": "Strategy adapter projectGraph is a passthrough (real projection upstream in useStrategyCanvas); spec worked-example may propagate the divergence",
+    "severity": "low",
+    "decision": "defer",
+    "owner": "@frontend-dev",
+    "target": "post-V1.114",
+    "lifecycle": "resolved",
+    "tracking_link": ".mstar/plans/2026-07-13-v1.114-canvas-architecture-foundation.md",
+    "note": "qc1 W-001. Architectural smell; does not block the adapter pattern.",
+    "closure_note": "Archived as low/nit bulk (V1.126 P3 gate)",
+    "archived_at": "2026-07-20T00:00:00Z"
+  },
+  {
+    "id": "R-V1114P0QC1-W002",
+    "title": "World KB renderInspector/renderAltView ignore the node parameter; routes via ctxRef instead of contract",
+    "severity": "low",
+    "decision": "defer",
+    "owner": "@frontend-dev",
+    "target": "post-V1.114",
+    "lifecycle": "resolved",
+    "tracking_link": ".mstar/plans/2026-07-13-v1.114-canvas-architecture-foundation.md",
+    "note": "qc1 W-002. Contract divergence; functional today.",
+    "closure_note": "Archived as low/nit bulk (V1.126 P3 gate)",
+    "archived_at": "2026-07-20T00:00:00Z"
+  },
+  {
+    "id": "R-V1114P0QC1-W003",
+    "title": "useAutoLayout first-run always lays out even if surface supplied positions; future surface with persisted positions would regress",
+    "severity": "low",
+    "decision": "defer",
+    "owner": "@frontend-dev",
+    "target": "post-V1.114",
+    "lifecycle": "resolved",
+    "tracking_link": ".mstar/plans/2026-07-13-v1.114-canvas-architecture-foundation.md",
+    "note": "qc1 W-003. Edge case for future persisted-layout surfaces.",
+    "closure_note": "Archived as low/nit bulk (V1.126 P3 gate)",
+    "archived_at": "2026-07-20T00:00:00Z"
+  },
+  {
+    "id": "R-V1114P0QC2-M001",
+    "title": "useAutoLayout non-null assertion on dagre output labels (use-auto-layout.ts:77)",
+    "severity": "nit",
+    "decision": "defer",
+    "owner": "@frontend-dev",
+    "target": "post-V1.114",
+    "lifecycle": "resolved",
+    "tracking_link": ".mstar/plans/2026-07-13-v1.114-canvas-architecture-foundation.md",
+    "note": "qc2 Minor. Latent robustness gap.",
+    "closure_note": "Archived as low/nit bulk (V1.126 P3 gate)",
+    "archived_at": "2026-07-20T00:00:00Z"
+  }
+]

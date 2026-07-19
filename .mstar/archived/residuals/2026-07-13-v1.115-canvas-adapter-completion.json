@@ -1,0 +1,80 @@
+[
+  {
+    "id": "R-V1115P0QC1-W001",
+    "title": "Strategy onReconnect dropped optimistic edge update \u2014 visible UX lag (edge moves on refetch, not immediately)",
+    "severity": "low",
+    "decision": "accept",
+    "owner": "@frontend-dev",
+    "target": "post-V1.115",
+    "lifecycle": "resolved",
+    "tracking_link": ".mstar/plans/2026-07-13-v1.115-canvas-adapter-completion.md",
+    "note": "QC1-W-001. Documented T2 behavior change; reconnect routing/conflict handling unchanged; optimistic visual feedback is UX enhancement.",
+    "closure_note": "Archived as low/nit bulk (V1.126 P3 gate)",
+    "archived_at": "2026-07-20T00:00:00Z"
+  },
+  {
+    "id": "R-V1115P0QC1-W002",
+    "title": "Greptile Issue 4 regression coverage gap \u2014 deleted reconnect scenario in use-strategy-canvas.test.tsx not replaced",
+    "severity": "low",
+    "decision": "defer",
+    "owner": "@frontend-dev",
+    "target": "post-V1.115",
+    "lifecycle": "resolved",
+    "tracking_link": ".mstar/plans/2026-07-13-v1.115-canvas-adapter-completion.md",
+    "note": "QC1-W-002. Test-coverage polish.",
+    "closure_note": "Archived as low/nit bulk (V1.126 P3 gate)",
+    "archived_at": "2026-07-20T00:00:00Z"
+  },
+  {
+    "id": "R-V1115P0QC1-S002",
+    "title": "Outline orchestrator grew to 537 lines \u2014 extract selection hook when >600",
+    "severity": "nit",
+    "decision": "defer",
+    "owner": "@frontend-dev",
+    "target": "post-V1.115",
+    "lifecycle": "resolved",
+    "tracking_link": ".mstar/plans/2026-07-13-v1.115-canvas-adapter-completion.md",
+    "note": "QC1-S-002. Module-split threshold.",
+    "closure_note": "Archived as low/nit bulk (V1.126 P3 gate)",
+    "archived_at": "2026-07-20T00:00:00Z"
+  },
+  {
+    "id": "R-V1115P0QC1-S003",
+    "title": "World KB context keeps selection alongside node.data routing \u2014 harden against future consolidation",
+    "severity": "nit",
+    "decision": "defer",
+    "owner": "@frontend-dev",
+    "target": "post-V1.115",
+    "lifecycle": "resolved",
+    "tracking_link": ".mstar/plans/2026-07-13-v1.115-canvas-adapter-completion.md",
+    "note": "QC1-S-003. Hardening; functional today.",
+    "closure_note": "Archived as low/nit bulk (V1.126 P3 gate)",
+    "archived_at": "2026-07-20T00:00:00Z"
+  },
+  {
+    "id": "R-V1115P0QC1-S004",
+    "title": "Position-merge sync test orphaned by refactor \u2014 relocate to use-canvas-surface.test.ts",
+    "severity": "nit",
+    "decision": "defer",
+    "owner": "@frontend-dev",
+    "target": "post-V1.115",
+    "lifecycle": "resolved",
+    "tracking_link": ".mstar/plans/2026-07-13-v1.115-canvas-adapter-completion.md",
+    "note": "QC1-S-004. Test relocation polish.",
+    "closure_note": "Archived as low/nit bulk (V1.126 P3 gate)",
+    "archived_at": "2026-07-20T00:00:00Z"
+  },
+  {
+    "id": "R-V1115P0QC2-S001",
+    "title": "Add integration test for hasSuppliedPositions end-to-end behavior",
+    "severity": "nit",
+    "decision": "defer",
+    "owner": "@frontend-dev",
+    "target": "post-V1.115",
+    "lifecycle": "resolved",
+    "tracking_link": ".mstar/plans/2026-07-13-v1.115-canvas-adapter-completion.md",
+    "note": "QC2-S-001. Test-coverage polish.",
+    "closure_note": "Archived as low/nit bulk (V1.126 P3 gate)",
+    "archived_at": "2026-07-20T00:00:00Z"
+  }
+]
