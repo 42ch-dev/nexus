@@ -1067,7 +1067,7 @@ fn build_schema_map() -> Vec<SchemaEntry> {
             Strict,
             WorldSnapshotResponse
         ),
-    entry!(
+        entry!(
             "schemas/daemon-api/timeline/timeline-overview-response.schema.json",
             Strict,
             TimelineOverviewResponse

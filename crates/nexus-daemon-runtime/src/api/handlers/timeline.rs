@@ -63,7 +63,7 @@ pub async fn get_timeline_overview(
 
     #[allow(clippy::uninlined_format_args)]
     let sql = format!(
-        r#"SELECT
+        r"SELECT
             nw.world_id,
             nw.title,
             COALESCE(era.cnt, 0) as era_count,
@@ -90,7 +90,7 @@ pub async fn get_timeline_overview(
         ) evt_max ON nw.world_id = evt_max.world_id
         {where_clause}
         ORDER BY nw.world_id ASC
-        LIMIT {limit}"#,
+        LIMIT {limit}",
         where_clause = where_clause,
         limit = limit,
     );
@@ -100,16 +100,16 @@ pub async fn get_timeline_overview(
     if let Some(ref cursor_world_id) = bind_value {
         query = query.bind(cursor_world_id);
     }
-    let rows = query.fetch_all(pool).await.map_err(|e| NexusApiError::Internal {
-        code: "DATABASE_ERROR".to_string(),
-        message: e.to_string(),
-    })?;
+    let rows = query
+        .fetch_all(pool)
+        .await
+        .map_err(|e| NexusApiError::Internal {
+            code: "DATABASE_ERROR".to_string(),
+            message: e.to_string(),
+        })?;
 
     let has_more = rows.len() > DEFAULT_PAGE_SIZE;
-    let worlds = rows
-        .into_iter()
-        .take(DEFAULT_PAGE_SIZE)
-        .collect::<Vec<_>>();
+    let worlds = rows.into_iter().take(DEFAULT_PAGE_SIZE).collect::<Vec<_>>();
 
     let cursor = if has_more {
         worlds.last().map(|w| encode_cursor(&w.world_id))
@@ -188,10 +188,7 @@ mod tests {
         created_at: Option<&str>,
     ) {
         use uuid::Uuid;
-        let block_id = format!(
-            "kb_{}",
-            Uuid::new_v4().to_string().replace('-', "")
-        );
+        let block_id = format!("kb_{}", Uuid::new_v4().to_string().replace('-', ""));
         let name = format!("{block_type}_{}", &block_id[3..11]);
         let ts = created_at.unwrap_or("2026-01-01T00:00:00Z");
         // SAFETY: test-only data setup.
@@ -233,7 +230,11 @@ mod tests {
 
         let result = get_timeline_overview(State(state.clone()), make_query(None)).await;
         let resp = result.expect("handler should succeed");
-        assert_eq!(resp.worlds.len(), 3, "should include seeded world + 2 test worlds");
+        assert_eq!(
+            resp.worlds.len(),
+            3,
+            "should include seeded world + 2 test worlds"
+        );
         assert_eq!(resp.worlds[0].world_id, "wld_a");
         assert_eq!(resp.worlds[0].title.as_deref(), Some("World A"));
         assert_eq!(resp.worlds[0].era_count, 0);
@@ -261,25 +262,35 @@ mod tests {
 
         let result = get_timeline_overview(State(state.clone()), make_query(None)).await;
         let resp = result.expect("handler should succeed");
-        assert_eq!(resp.worlds.len(), 3, "should include seeded world + 2 test worlds");
+        assert_eq!(
+            resp.worlds.len(),
+            3,
+            "should include seeded world + 2 test worlds"
+        );
 
-        let wld_a = resp.worlds.iter().find(|w| w.world_id == "wld_a").expect("wld_a");
+        let wld_a = resp
+            .worlds
+            .iter()
+            .find(|w| w.world_id == "wld_a")
+            .expect("wld_a");
         assert_eq!(wld_a.era_count, 2);
         assert_eq!(wld_a.event_count, 1);
-        assert_eq!(
-            wld_a.last_event_at.as_deref(),
-            Some("2026-06-03T00:00:00Z")
-        );
+        assert_eq!(wld_a.last_event_at.as_deref(), Some("2026-06-03T00:00:00Z"));
 
-        let wld_b = resp.worlds.iter().find(|w| w.world_id == "wld_b").expect("wld_b");
+        let wld_b = resp
+            .worlds
+            .iter()
+            .find(|w| w.world_id == "wld_b")
+            .expect("wld_b");
         assert_eq!(wld_b.era_count, 0);
         assert_eq!(wld_b.event_count, 1);
-        assert_eq!(
-            wld_b.last_event_at.as_deref(),
-            Some("2026-06-04T00:00:00Z")
-        );
+        assert_eq!(wld_b.last_event_at.as_deref(), Some("2026-06-04T00:00:00Z"));
 
-        let seeded = resp.worlds.iter().find(|w| w.world_id == "wld_test_world").expect("seeded");
+        let seeded = resp
+            .worlds
+            .iter()
+            .find(|w| w.world_id == "wld_test_world")
+            .expect("seeded");
         assert_eq!(seeded.era_count, 0);
         assert_eq!(seeded.event_count, 0);
 
