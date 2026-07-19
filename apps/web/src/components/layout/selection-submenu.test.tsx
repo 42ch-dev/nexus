@@ -65,4 +65,29 @@ describe('SelectionSubmenu', () => {
       document.body.removeChild(anchor);
     }
   });
+
+  it('dismisses on Tab out via onClose', () => {
+    const anchor = document.createElement('button');
+    document.body.appendChild(anchor);
+    const onClose = vi.fn();
+    try {
+      render(
+        <SelectionSubmenu
+          items={[
+            { id: 'a', label: 'Action A', onSelect: () => {} },
+          ]}
+          open
+          onClose={onClose}
+          anchorEl={anchor}
+          ariaLabel="Test menu"
+        />,
+      );
+
+      const menu = screen.getByRole('menu', { name: 'Test menu' });
+      menu.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true }));
+      expect(onClose).toHaveBeenCalled();
+    } finally {
+      document.body.removeChild(anchor);
+    }
+  });
 });

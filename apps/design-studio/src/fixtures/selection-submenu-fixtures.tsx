@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react';
 
-import { SelectionSubmenu, type SelectionMenuItem } from '@web-shell/selection-submenu';
+import { SelectionSubmenu, type SelectionMenuItem } from '@web-shell/selection-submenu'; // @web-shell/selection-submenu - transitional until package promotion criteria met
 
 function SelectionSubmenuDemo({
   label,

@@ -741,4 +741,26 @@ describe('Sidebar — submenu trigger (V1.126 P0 T1)', () => {
 
     expect(screen.queryByRole('menu', { name: 'Row actions' })).not.toBeInTheDocument();
   });
+
+  it('closes submenu on route change (NavLink click)', async () => {
+    const user = userEvent.setup();
+    renderSidebarWithWorks();
+
+    await waitFor(() =>
+      expect(screen.getByRole('link', { name: 'Alpha Novel' })).toBeInTheDocument(),
+    );
+
+    const menuBtn = screen.getByRole('button', { name: /Open menu for Alpha Novel/i });
+    await user.click(menuBtn);
+    await waitFor(() =>
+      expect(screen.getByRole('menu', { name: 'Row actions' })).toBeInTheDocument(),
+    );
+
+    const worldsLink = screen.getByRole('link', { name: 'Worlds' });
+    await user.click(worldsLink);
+
+    await waitFor(() =>
+      expect(screen.queryByRole('menu', { name: 'Row actions' })).not.toBeInTheDocument(),
+    );
+  });
 });

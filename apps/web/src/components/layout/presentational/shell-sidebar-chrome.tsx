@@ -65,6 +65,9 @@ export interface ShellSidebarChromeProps {
    * When provided, the row gains a `•••` button, and `Enter` / `⌘.` / `Ctrl+.`
    * keyboard triggers open the submenu. The close callback returns focus to the
    * triggering row.
+   *
+   * V1.126 P0 T1 fix wave: anchorEl param added so the popover can be anchored
+   * without re-querying DOM; post-hoc ratification pending architect plan-QC.
    */
   renderSubmenu?: (
     item: ShellNavItem,
