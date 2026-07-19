@@ -134,6 +134,7 @@ export * from './daemon-api/schedule/ScheduleConcurrencyRequest';
 export * from './daemon-api/schedule/ScheduleSummary';
 export * from './daemon-api/schedule/SignalScheduleRequest';
 export * from './daemon-api/schedule/SignalScheduleResponse';
+export * from './daemon-api/timeline/TimelineOverviewResponse';
 export * from './daemon-api/works/AppendInspirationRequest';
 export * from './daemon-api/works/AppendInspirationResponse';
 export * from './daemon-api/works/chapters/ChapterBody';
@@ -339,6 +340,7 @@ export const SCHEMA_VERSIONS: Record<string, number> = {
   ScheduleSummary: 1,
   SignalScheduleRequest: 1,
   SignalScheduleResponse: 1,
+  TimelineOverviewResponse: 1,
   AppendInspirationRequest: 1,
   AppendInspirationResponse: 1,
   ChapterBody: 1,

@@ -233,7 +233,7 @@
     },
     {
       "plan_id": "2026-07-20-v1.126-p2-composite-timeline-endpoint",
-      "status": "Todo",
+      "status": "InProgress",
       "iteration_refs": [
         "V1.126"
       ],
