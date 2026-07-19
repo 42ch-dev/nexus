@@ -99,6 +99,7 @@ import type {
   StrategyPatchResponse,
   StrategyPatchStateRequest,
   StrategyPatchTransitionRequest,
+  TimelineOverviewResponse,
   TimelinePatchEventRequest,
   UpdateFindingRequest,
   UpdatePresetRequest,
@@ -368,6 +369,13 @@ export interface NexusClient {
    * shape is promoted to a generated list response once P0 lands the schema.
    */
   listNarrativeWorlds(): Promise<World[]>;
+  /**
+   * `GET /v1/daemon/timeline/overview` — cursor-paginated overview of visible
+   * Worlds with per-World era/event counts and last activity timestamp.
+   * V1.126 P2: replaces the N=5–10 parallel `kb/graph` fan-out in the global
+   * Timeline view with one composite call.
+   */
+  getTimelineOverview(cursor?: string): Promise<TimelineOverviewResponse>;
   /**
    * `GET /v1/daemon/memory/pending-review?creator_id={id}` — cursor-paginated
    * pending-review list for the active creator (default 50, max 250; cursor is
