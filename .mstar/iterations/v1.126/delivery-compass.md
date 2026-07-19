@@ -1,10 +1,11 @@
 ---
 iteration_id: V1.126
 start_date: 2026-07-20
-status: locked
+status: completed
 iteration_base_branch: main
 target_branch: main
 spec_integration_branch: iteration/v1.126
+end_date: 2026-07-20
 plans:
   - 2026-07-20-v1.126-p0-shell-selection-submenu
   - 2026-07-20-v1.126-p1-canvas-directed-axis
@@ -146,13 +147,13 @@ Concrete exclusions (if a PR does any of these, it is out of V1.126 scope):
 
 ## Roadmap Position
 
-- **Current iteration (V1.126)**: Shell + Canvas deepening + Tech-debt gate — V1.125 Non-Goal follow-ups land; composite Timeline endpoint closes the rolled-forward `DF-V1122-DEEPER-WB` route slice; `status.json` returns under 20 KB.
-- **Next iteration (V1.127+) candidates** (pick after dogfood; owner: product-manager): (a) Fork UI (`DF-V1122-FORK-UI`); (b) Computable pillar UI (`DF-V1122-COMPUTABLE-UI`); (c) compute-on-timeline (`DF-V1122-COMPUTE-ON-TIMELINE`); (d) World Moment layer (`DF-V1123-WORLD-MOMENT`); (e) Work Brief layer (`DF-V1123-WORK-BRIEF`); (f) Moment-on-wire migration (`DF-V1123-MOMENT-WIRE`); (g) Schedule→cron role UX (V1.125 Non-Goal); (h) Harness UI rename (`DF-V1122-HARNESS-RENAME`); (i) desktop menu-bar daemon control (`DF-71`). **Trigger:** V1.126 shipped + dogfood feedback on selection submenu + directed axis.
+- **Current iteration (V1.126)**: **delivered** (2026-07-20) — Shell + Canvas deepening + Tech-debt gate. V1.125 Non-Goal follow-ups landed (selection submenu + canvas directed axis); composite Timeline endpoint closed the rolled-forward `DF-V1122-DEEPER-WB` route slice; `status.json` returned under 20 KB (145 KB → 14.6 KB; 277 → 32 open residuals). 4 business plans Done (P0 + P1 + P2 + P3).
+- **Next iteration (V1.127+) candidates** (pick after dogfood; owner: product-manager): (a) Fork UI (`DF-V1122-FORK-UI`); (b) Computable pillar UI (`DF-V1122-COMPUTABLE-UI`); (c) compute-on-timeline (`DF-V1122-COMPUTE-ON-TIMELINE`); (d) World Moment layer (`DF-V1123-WORLD-MOMENT`); (e) Work Brief layer (`DF-V1123-WORK-BRIEF`); (f) Moment-on-wire migration (`DF-V1123-MOMENT-WIRE`); (g) Schedule→cron role UX (V1.125 Non-Goal); (h) Harness UI rename (`DF-V1122-HARNESS-RENAME`); (i) desktop menu-bar daemon control (`DF-71`); (j) **P0 Delete selection-submenu follow-up** — daemon `DELETE /v1/daemon/works/{id}` + `DELETE /v1/daemon/worlds/{id}` route promotion (R-V1126P0-T2-001; would flip P0 to `wire_contracts_changed: true` retroactively — pick as own plan); (k) full per-World `GET /v1/daemon/worlds/{world_id}/timeline` route (DF-V1122-DEEPER-WB remainder slice). **Trigger:** V1.126 shipped + dogfood feedback on selection submenu + directed axis + composite endpoint perf.
 - **Promotion triggers recorded this iteration:**
-  - **Selection submenu chrome** (`@web-shell/selection-submenu` or similar): promote to `@42ch/nexus-ui` when a **second non-shell consumer** needs the same submenu shape. Currently shell-only.
-  - **Directed-axis layer spine** (`@web-canvas/directed-axis-spine`): promote to `@42ch/nexus-ui` when a **non-canvas consumer** needs the spine primitive. Currently canvas-only.
+  - **Selection submenu chrome** (`@web-shell/selection-submenu`): promote to `@42ch/nexus-ui` when a **second non-shell consumer** needs the same submenu shape. Currently shell-only + Studio fixture.
+  - **Directed-axis layer spine** (`DirectedAxisSpine` kept app-local per ND-A7 — RF dependency): promote to `@web-canvas/directed-axis-spine` when a non-canvas consumer needs the pure SVG spine primitive. Currently 4 in-canvas consumers.
   - **Composite Timeline client** (`useTimelineOverview` query): stays app-local; the wire DTO ships in `@42ch/nexus-contracts` per codegen.
-- **最终目标**: Every Nexus surface expresses one coherent literary-computational design language, with the Timeline/Canvas bet deepening iteratively and the harness hygiene gate staying under threshold so future iterations stop paying tech-debt interest. V1.126 closes the largest rolled-forward cluster (composite endpoint + selection shell) and resets the residual count.
+- **最终目标**: Every Nexus surface expresses one coherent literary-computational design language, with the Timeline/Canvas bet deepening iteratively and the harness hygiene gate staying under threshold so future iterations stop paying tech-debt interest. V1.126 closes the largest rolled-forward cluster (composite endpoint + selection shell + status compaction) and resets the residual count to a maintainable floor.
 
 ## Delivery Branch Policy
 
@@ -255,28 +256,38 @@ Plans: `.mstar/plans/2026-07-20-v1.126-p0-shell-selection-submenu.md` · `.mstar
 
 | plan_id | QC decision | QA gate | Residuals | Durable summary |
 |---------|-------------|---------|-----------|-----------------|
-| `2026-07-20-v1.126-p0-shell-selection-submenu` | TBD | TBD | TBD | TBD |
-| `2026-07-20-v1.126-p1-canvas-directed-axis` | TBD | TBD | TBD | TBD |
-| `2026-07-20-v1.126-p2-composite-timeline-endpoint` | TBD | TBD | TBD | TBD |
-| `2026-07-20-v1.126-p3-status-compaction-residual-cleanup` | TBD | TBD | TBD | TBD |
+| `2026-07-20-v1.126-p0-shell-selection-submenu` | Approve with residuals | mandatory — Pass | 8 open (1 low Delete-deferred + 7 nit polish) | `{PLAN_DIR}/2026-07-20-v1.126-p0-shell-selection-submenu.md` + SDD review bundle |
+| `2026-07-20-v1.126-p1-canvas-directed-axis` | Approve with residuals | mandatory — Pass | 5 open nit polish | `{PLAN_DIR}/2026-07-20-v1.126-p1-canvas-directed-axis.md` + SDD review bundle |
+| `2026-07-20-v1.126-p2-composite-timeline-endpoint` | Approve with residuals | mandatory — Pass (post-sqlx-cache-fix) | 11 open (2 low + 9 nit) | `{PLAN_DIR}/2026-07-20-v1.126-p2-composite-timeline-endpoint.md` + SDD review bundle |
+| `2026-07-20-v1.126-p3-status-compaction-residual-cleanup` | Approve with residuals | mandatory — Conditional Pass → Pass (post-rollup-refresh) | 4 open (1 low + 3 nit) | `{PLAN_DIR}/2026-07-20-v1.126-p3-status-compaction-residual-cleanup.md` + SDD review bundle |
 
 Notes:
 
 - Raw review bundle: `{SDD_DIR}/review/` (ephemeral; do not rely on it after Done).
-- Open residual SSOT: `.mstar/status.json` root `residual_findings[<plan-id>]`.
+- Open residual SSOT: `.mstar/status.json` root `residual_findings[<plan-id>]` (now ≤ 20 KB total).
+- DF closures: `DF-V1122-DEEPER-WB` (route slice closed; per-World remainder open), `DF-V1123-COMPOSITE-ENDPOINT` (closed; implicit registration backfilled), `DF-V1123-STATUS-COMPACT` + `DF-V1123-RESIDUAL-CLEANUP` + `DF-V1122-STATUS-COMPACT` (all closed).
 
 ## Compound Round Summary
 
 > Filled at iteration-close.
 
-- 结晶文档数：TBD
-- 新增 CONCEPTS.md 条目：TBD
-- 触发 compound-refresh：TBD
+- 结晶文档数：**2**
+  - [`conventions/profile-b-residual-archival-procedure.md`](../../knowledge/conventions/profile-b-residual-archival-procedure.md) — Profile B residual archival procedure (eligibility rule + closure-note enum + 8-step procedure; V1.126 P3 distilled).
+  - [`conventions/subagent-empty-response-fallback.md`](../../knowledge/conventions/subagent-empty-response-fallback.md) — Subagent empty-response fallback pattern (detection + retry/general sequence + PM whitelist + V1.126 frequency data).
+- Iteration package promotion triage: 4 specs inventoried; **Keep snapshot** for all 4 (`shell-selection-submenu.md`, `canvas-directed-axis.md`, `composite-timeline-endpoint.md`, `status-compaction-residual-cleanup.md`) — they are iteration-scoped working specs; the reusable patterns were promoted to the 2 knowledge docs above. No guides (Phase 1 §1.6 seat 3 declined per V1.124 pattern).
+- 新增 CONCEPTS.md 条目：**0** (no new domain terms — V1.126 reused existing Brief/Narrative/Moment/Timeline vocabulary).
+- 触发 compound-refresh：**否** (no stale knowledge docs identified; the 2 new docs don't overlap with existing).
 
 ## Iteration Retrospective (minimal)
 
-> Filled at iteration-close.
-
-- 做得好的：TBD
-- 可改进的：TBD
-- 下迭代建议：TBD
+- **做得好的**：
+  - 4 business plans shipped end-to-end (P0 shell submenu + P1 canvas directed axis + P2 composite endpoint + P3 status compaction) within L budget.
+  - Real product deepening + real tech-debt gate (145 KB → 14.6 KB; 277 → 32 residuals; 3 DF rows closed).
+  - `DF-V1122-DEEPER-WB` rolled-forward 3 times finally picked up (route slice).
+  - QC tri-review caught real issues (P0 ND-A5 violation; P2 sqlx cache; P3 duplicates) → fix waves shipped.
+  - 2 knowledge docs crystallized for future iterations.
+- **可改进的**：
+  - **Subagent dispatch reliability** — 5 empty-response fallbacks out of ~22 dispatches (~23% rate). V1.124 retrospective first flagged; V1.126 confirms pattern. Root cause needs investigation (likely OpenCode routing / context-length / token-budget). The `general` fallback worked 100% of the time it was tried.
+  - **AC stretch target miss** — P3 AC `total_open ≤ 30` not met (actual 32). Amendment path worked but consumes a fix wave. Future plans should set ACs that account for kept-open current-iteration + medium/high carry-forward.
+  - **Phase 1 §1.6 seat 3 fallback** — writing-specialist empty response; PM inline hygiene fallback applied. The corpus-hygiene work was minimal (Status line updates) but the empty-response made the seat non-productive.
+- **下迭代建议**：V1.127 should investigate subagent dispatch reliability root cause (OpenCode host + specialist agent routing). Otherwise pick from roadmap (a) Fork UI; (b) Computable pillar UI; or (j) P0 Delete follow-up (daemon DELETE routes). Trigger: V1.126 dogfood feedback on selection submenu + directed axis + composite endpoint perf.

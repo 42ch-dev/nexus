@@ -1,37 +1,18 @@
 {
   "version": 1,
   "updated_at": "2026-07-19",
-  "plans": [
-    {
-      "plan_id": "2026-07-20-v1.126-p3-status-compaction-residual-cleanup",
-      "status": "Done",
-      "iteration_refs": [
-        "V1.126"
-      ],
-      "metadata": {
-        "primary_spec": ".mstar/iterations/v1.126/specs/status-compaction-residual-cleanup.md",
-        "spec_integration_branch": "iteration/v1.126",
-        "merge_target": "iteration/v1.126",
-        "working_branch": "feature/v1.126-p3-status-compaction-residual-cleanup",
-        "wire_contracts_changed": false,
-        "done_at": "2026-07-20",
-        "qc_verdict": "Approve with residuals (post-fix-wave)",
-        "qa_verdict": "Pass (conditional; defect resolved)",
-        "residuals_open_count": 4,
-        "merge_commit": "merged into iteration/v1.126"
-      }
-    }
-  ],
+  "plans": [],
   "metadata": {
     "integration_branch_retired": false,
     "iteration_base_branch": "main",
     "latest_active_compass": "v1.126/delivery-compass.md",
-    "latest_active_iteration": "V1.126",
+    "latest_active_iteration": "V1.126 (Shipped)",
     "latest_ship": {
-      "iteration": "V1.123",
-      "shipped_at": "2026-07-19",
-      "pr": "https://github.com/42ch-dev/nexus/pull/157",
-      "merge_commit": "f7b318ff8c8d230c9c0434f48ce47bc1fb7fa873"
+      "iteration": "V1.126",
+      "compass": "v1.126/delivery-compass.md",
+      "shipped_at": "2026-07-20",
+      "pr": "pending",
+      "merge_commit": "pending"
     },
     "platform_integration": "paused — local-only until further notice",
     "spec_integration_branch": "iteration/v1.126",
