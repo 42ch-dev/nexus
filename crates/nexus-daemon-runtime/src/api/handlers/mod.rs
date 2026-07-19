@@ -21,6 +21,7 @@ pub mod references;
 pub mod runtime;
 pub mod soul_narrative_synthesizer;
 pub mod strategy;
+pub mod timeline;
 pub mod works;
 pub mod workspace;
 pub mod workspaces;

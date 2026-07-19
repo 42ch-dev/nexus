@@ -500,6 +500,17 @@ fn compute_routes() -> Router<WorkspaceState> {
         )
 }
 
+/// Timeline overview routes (V1.126 P2).
+///
+/// Composite cursor-paginated overview of visible Worlds with per-World
+/// era/event counts and last activity timestamp. No new persistence.
+fn timeline_routes() -> Router<WorkspaceState> {
+    Router::new().route(
+        "/v1/daemon/timeline/overview",
+        get(handlers::timeline::get_timeline_overview),
+    )
+}
+
 /// Profile-scoped (Tier-2) routes — require active creator + lazy-open pool.
 fn tier2_routes() -> Router<WorkspaceState> {
     Router::new()
@@ -522,6 +533,7 @@ fn tier2_routes() -> Router<WorkspaceState> {
         )
         .merge(orchestration_routes())
         .merge(agent_host_tier2_routes())
+        .merge(timeline_routes())
 }
 
 /// Create the Daemon API router
