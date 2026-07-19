@@ -294,6 +294,9 @@ export function WorkTimelineCanvas({ workId, sceneBeatFixture }: WorkTimelineCan
             surfaceKey="work-timeline"
             surfaceKind="work-timeline"
             relayout={surface.relayout}
+            fitViewOptions={{
+              nodes: surface.nodes.filter((n) => n.type !== 'directedAxisSpine'),
+            }}
           >
             {/* V1.123 P4 Task 3 — semantic zoom bridge. Mounts inside
                 CanvasShell so it lives within the ReactFlowProvider; observes

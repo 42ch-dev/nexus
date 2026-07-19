@@ -24,6 +24,7 @@ import {
   ReactFlowProvider,
   applyNodeChanges,
   type Edge,
+  type FitViewOptions,
   type Node,
   type NodeChange,
   type NodeTypes,
@@ -108,6 +109,13 @@ export interface CanvasShellProps {
    * `data-surface-kind` for downstream styling / integration tests.
    */
   surfaceKind?: CanvasSurfaceKind;
+  /**
+   * V1.126 P1 — optional fitView options override. When provided, these
+   * options are merged into the default `{ padding: 0.2 }`. Surfaces that
+   * need to exclude certain nodes from fit-bounds calculations (e.g. the
+   * directed-axis-spine decoration node) can pass a `nodes` filter here.
+   */
+  fitViewOptions?: FitViewOptions;
 }
 
 /**
@@ -129,6 +137,7 @@ function CanvasShellInner({
   surfaceKey,
   relayout,
   surfaceKind,
+  fitViewOptions,
 }: CanvasShellProps) {
   const { t } = useTranslation('canvas');
   // FB-GS-000 — cache pan/zoom so a graph↔list toggle does not drop the
@@ -180,7 +189,7 @@ function CanvasShellInner({
         nodesFocusable
         edgesFocusable
         fitView={!hasCachedViewport}
-        fitViewOptions={{ padding: 0.2 }}
+        fitViewOptions={{ padding: 0.2, ...fitViewOptions }}
         defaultViewport={hasCachedViewport ? cachedViewport : undefined}
         onMove={(_, viewport) => onViewportChange(viewport)}
         proOptions={{ hideAttribution: true }}

@@ -621,16 +621,18 @@ describe('Sidebar — submenu trigger (V1.126 P0 T1)', () => {
     renderInApp(<Sidebar />, { client: makeClient(), activeCreatorId: 'creator-a' });
   }
 
-  it('renders a ••• button on World and Work rows (hover-visible)', async () => {
+  it('renders a ••• button on Work entity rows but not on aggregate rows (V1.126 PR fix)', async () => {
     renderSidebarWithWorks();
 
     await waitFor(() =>
       expect(screen.getByRole('link', { name: 'Alpha Novel' })).toBeInTheDocument(),
     );
 
-    const worldsBtn = screen.getByRole('button', { name: /Open menu for Worlds/i });
+    // Aggregate rows (Worlds, All Works) must NOT have a submenu trigger.
+    expect(screen.queryByRole('button', { name: /Open menu for Worlds/i })).toBeNull();
+    expect(screen.queryByRole('button', { name: /Open menu for All Works/i })).toBeNull();
+    // Entity rows must still have a submenu trigger.
     const alphaBtn = screen.getByRole('button', { name: /Open menu for Alpha Novel/i });
-    expect(worldsBtn).toBeInTheDocument();
     expect(alphaBtn).toBeInTheDocument();
   });
 
@@ -661,7 +663,7 @@ describe('Sidebar — submenu trigger (V1.126 P0 T1)', () => {
     );
   });
 
-  it('opens submenu on Enter key when row is focused', async () => {
+  it('opens submenu on Enter key when entity row is focused', async () => {
     const user = userEvent.setup();
     renderSidebarWithWorks();
 
@@ -669,8 +671,8 @@ describe('Sidebar — submenu trigger (V1.126 P0 T1)', () => {
       expect(screen.getByRole('link', { name: 'Alpha Novel' })).toBeInTheDocument(),
     );
 
-    const worldsLink = screen.getByRole('link', { name: 'Worlds' });
-    worldsLink.focus();
+    const workLink = screen.getByRole('link', { name: 'Alpha Novel' });
+    workLink.focus();
     await user.keyboard('{Enter}');
 
     await waitFor(() =>
@@ -678,7 +680,7 @@ describe('Sidebar — submenu trigger (V1.126 P0 T1)', () => {
     );
   });
 
-  it('opens submenu on Ctrl+. / Cmd+. when row is focused', async () => {
+  it('opens submenu on Ctrl+. / Cmd+. when entity row is focused', async () => {
     const user = userEvent.setup();
     renderSidebarWithWorks();
 
@@ -686,8 +688,8 @@ describe('Sidebar — submenu trigger (V1.126 P0 T1)', () => {
       expect(screen.getByRole('link', { name: 'Alpha Novel' })).toBeInTheDocument(),
     );
 
-    const worldsLink = screen.getByRole('link', { name: 'Worlds' });
-    worldsLink.focus();
+    const workLink = screen.getByRole('link', { name: 'Alpha Novel' });
+    workLink.focus();
     await user.keyboard('{Control>}.{/Control}');
 
     await waitFor(() =>
@@ -868,17 +870,19 @@ describe('Sidebar — submenu contents (V1.126 P0 T2)', () => {
     });
   });
 
-  it('shows Open Timeline and Open KB on World submenu', async () => {
-    const user = userEvent.setup();
+  it('does not show submenu on World aggregate row (V1.126 PR fix)', () => {
     renderWithWork();
 
-    const worldsBtn = screen.getByRole('button', { name: /Open menu for Worlds/i });
-    await user.click(worldsBtn);
+    // Aggregate rows (/worlds, /works) must NOT render a submenu trigger.
+    const worldsBtn = screen.queryByRole('button', { name: /Open menu for Worlds/i });
+    expect(worldsBtn).toBeNull();
+  });
 
-    await waitFor(() => {
-      expect(screen.getByRole('menuitem', { name: /Open Timeline/i })).toBeInTheDocument();
-      expect(screen.getByRole('menuitem', { name: /Open KB/i })).toBeInTheDocument();
-    });
+  it('does not show submenu on All Works aggregate row (V1.126 PR fix)', () => {
+    renderWithWork();
+
+    const allWorksBtn = screen.queryByRole('button', { name: /Open menu for All Works/i });
+    expect(allWorksBtn).toBeNull();
   });
 
   it('shows Agent and Rename items on Work submenu', async () => {
@@ -896,21 +900,6 @@ describe('Sidebar — submenu contents (V1.126 P0 T2)', () => {
       expect(screen.getByRole('menuitem', { name: /Agent:/i })).toBeInTheDocument();
       expect(screen.getByRole('menuitem', { name: /Rename/i })).toBeInTheDocument();
     });
-  });
-
-  it('does not show Agent, Rename on World group-level submenu', async () => {
-    const user = userEvent.setup();
-    renderWithWork();
-
-    const worldsBtn = screen.getByRole('button', { name: /Open menu for Worlds/i });
-    await user.click(worldsBtn);
-
-    await waitFor(() => {
-      expect(screen.getByRole('menu', { name: 'Row actions' })).toBeInTheDocument();
-    });
-
-    expect(screen.queryByRole('menuitem', { name: /Agent:/i })).not.toBeInTheDocument();
-    expect(screen.queryByRole('menuitem', { name: /Rename/i })).not.toBeInTheDocument();
   });
 
   it('Rename item triggers inline edit on Work submenu', async () => {

@@ -225,6 +225,7 @@ export function Sidebar() {
                       onSelect: () => {
                         agentDialog.setTitle(t('submenu.agentDialogTitle', { entityName: item.label }));
                         agentDialog.setOpen(true);
+                        close();
                       },
                     },
                     {
@@ -241,7 +242,6 @@ export function Sidebar() {
                 : []),
             ]}
           />
-          {agentDialog.dialog}
         </>
       );
     },
@@ -261,7 +261,7 @@ export function Sidebar() {
         orchestratorTabLabel={t('nav.orchestrator')}
         primaryNavigationAriaLabel={t('aria.primaryNavigation')}
         renderSubmenu={renderSubmenu}
-        hasSubmenu={(item) => item.to.startsWith('/worlds') || item.to.startsWith('/works')}
+        hasSubmenu={(item) => isEntityItem(item)}
         isActiveItem={(item, route) => {
           if (item.to === '/works') return route === '/works';
           const outlineMatch = /^\/works\/([^/]+)\/outline$/.exec(item.to);
@@ -315,6 +315,7 @@ export function Sidebar() {
           );
         }}
       />
+      {agentDialog.dialog}
     </nav>
   );
 }
