@@ -71,6 +71,7 @@ import { TimelineInspector } from './timeline-inspector';
 import { TimelineBriefEraInspector } from './timeline-brief-era-inspector';
 import { TimelineAltView } from './timeline-alt-view';
 import type { BriefSpineConfig, DirectedAxisSpineNodeData, NarrativeSpineConfig } from './directed-axis-spine';
+import { SPINE_Y_OFFSET } from './directed-axis-spine';
 import { timelineNodeTypes } from './timeline-node-types';
 
 // ─── Public types (architect-locked §3.1 + V1.123 §2/§8) ────────────────────
@@ -543,9 +544,9 @@ function projectBriefLayer(graph: TimelineGraph): {
 
   // V1.126 P1 — Brief directed axis spine (decoration-only, Y=0, appended
   // after entity nodes so existing tests that access nodes[0] pass unchanged).
-  // Only added when the layer has era data (empty spine on zero-entity graphs
-  // would be a visual no-op).
-  if (datedEras.length > 0 || undatedEras.length > 0) {
+  // Only added when at least one dated era exists (eras with start_hint).
+  // If all eras are undated, omit the spine — no temporal axis to render.
+  if (datedEras.length > 0) {
     const eraBounds: BriefSpineConfig['eraBounds'] = datedEras.map(({ entity, startHint }) => {
       const { eraId, endHint } = extractEraAttributes(entity);
       return {
@@ -563,7 +564,7 @@ function projectBriefLayer(graph: TimelineGraph): {
     nodes.push({
       id: 'directed-axis-spine',
       type: 'directedAxisSpine',
-      position: { x: 0, y: WHEN_AXIS_Y - 8 },
+      position: { x: 0, y: WHEN_AXIS_Y + SPINE_Y_OFFSET },
       data: briefSpineData as unknown as TimelineNodeData,
       selectable: false,
       focusable: false,
@@ -685,7 +686,7 @@ function projectNarrativeLayer(graph: TimelineGraph): {
     nodes.push({
       id: 'directed-axis-spine',
       type: 'directedAxisSpine',
-      position: { x: 0, y: WHEN_AXIS_Y - 8 },
+      position: { x: 0, y: WHEN_AXIS_Y + SPINE_Y_OFFSET },
       data: narrativeSpineData as unknown as TimelineNodeData,
       selectable: false,
       focusable: false,

@@ -253,6 +253,40 @@ describe('TimelineCanvasAdapter.projectGraphForLayer — Brief projection (block
     expect(datedNode.position.y).toBe(0);
   });
 
+  it('omits directedAxisSpine when all eras lack start_hint (R1 guard)', () => {
+    // V1.126 P1 QC fix R1: the brief spine should only render when at least
+    // one dated era exists. An all-undated era set should not emit a spine.
+    const undatedA = eraEntity({
+      key_block_id: 'kb-era-undated-a',
+      canonical_name: 'The Forgotten Age',
+      body: { attributes: { era_id: 'era-forgotten-a' } },
+    });
+    const undatedB = eraEntity({
+      key_block_id: 'kb-era-undated-b',
+      canonical_name: 'The Lost Age',
+      body: { attributes: { era_id: 'era-forgotten-b' } },
+    });
+    const graph: WorldKbGraphResponse = {
+      entities: [undatedA, undatedB],
+      source_anchors: [],
+      relationships: [],
+    };
+
+    const adapter = createTimelineCanvasAdapter(
+      { current: makeContext() },
+      'brief',
+    );
+    const { nodes } = adapter.projectGraph(graph);
+
+    // Both undated eras appear as era nodes...
+    expect(nodes).toHaveLength(2);
+    expect(nodes[0].data.startHint).toBeUndefined();
+    expect(nodes[1].data.startHint).toBeUndefined();
+    // ...but no directed-axis-spine node is emitted (all eras are undated).
+    const spineNode = nodes.find((n) => n.id === 'directed-axis-spine');
+    expect(spineNode).toBeUndefined();
+  });
+
   it('carries era markers (eraId, startHint, endHint, worldSummary) extracted from body.attributes', () => {
     const era = eraEntity({
       key_block_id: 'kb-era-1',

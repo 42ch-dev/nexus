@@ -63,6 +63,7 @@ import type {
   SceneFixture,
 } from '../outline-canvas/graph-projection';
 import type { DirectedAxisSpineNodeData, MomentSpineConfig, NarrativeSpineConfig } from '../timeline-canvas/directed-axis-spine';
+import { SPINE_Y_OFFSET } from '../timeline-canvas/directed-axis-spine';
 import { workTimelineNodeTypes } from './work-timeline-node-types';
 import { renderWorkTimelineInspector } from './work-timeline-inspector';
 
@@ -393,7 +394,7 @@ function projectNarrativeLayer(graph: WorkTimelineGraph): {
     nodes.push({
       id: 'directed-axis-spine',
       type: 'directedAxisSpine',
-      position: { x: 0, y: NARRATIVE_AXIS_Y - 8 },
+      position: { x: 0, y: NARRATIVE_AXIS_Y + SPINE_Y_OFFSET },
       data: narrativeSpineData as unknown as WorkTimelineNodeData,
       selectable: false,
       focusable: false,
@@ -608,7 +609,7 @@ function projectMomentLayer(
     nodes.push({
       id: 'directed-axis-spine',
       type: 'directedAxisSpine',
-      position: { x: 0, y: MOMENT_ORIGIN_Y - 12 },
+      position: { x: 0, y: MOMENT_ORIGIN_Y + SPINE_Y_OFFSET },
       data: momentSpineData as unknown as WorkTimelineNodeData,
       selectable: false,
       focusable: false,

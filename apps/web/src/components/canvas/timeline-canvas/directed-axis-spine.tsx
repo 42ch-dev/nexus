@@ -1,3 +1,16 @@
+/**
+ * DirectedAxisSpine — V1.126 P1 canvas directed center axis renderer.
+ *
+ * Extraction decision: kept app-local under apps/web/src/components/canvas/timeline-canvas/
+ * (NOT promoted to @web-canvas/directed-axis-spine alias) because the renderer depends on
+ * @xyflow/react NodeProps and React Flow custom-node lifecycle. Per V1.106 extraction rule
+ * + V1.115 @web-canvas/node-chrome-shell precedent, RF-coupled chrome stays app-local.
+ *
+ * Future extraction trigger: if a non-canvas consumer needs the directed spine primitive
+ * (e.g. a future print/export surface), refactor to extract the pure SVG renderer (the
+ * <line>, <polygon>, gradient defs) into @web-canvas/directed-axis-spine while keeping
+ * the RF NodeProps wrapper app-local.
+ */
 import { memo } from 'react';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 
@@ -41,6 +54,21 @@ export interface DirectedAxisSpineNodeData {
 const SPINE_HEIGHT = 32;
 const ARROW_HEAD_SIZE = 10;
 const TICK_LABEL_OFFSET = 14;
+
+// Y-offset (in RF coordinate units) of the directed spine above the canvas when-axis (Y=0).
+// The spine floats slightly above the entity card cluster (which spans Y=0 to ~Y=40) so
+// the arrow + ticks read as a separate "time spine" rather than overlapping entity chrome.
+// Same value used across all 4 emission sites (World Brief / World Narrative / Work Narrative
+// / Work Moment) — keep in sync if the canvas vertical layout changes.
+export const SPINE_Y_OFFSET = -8;
+
+// Position math: the spine node is placed at RF coordinate (0, SPINE_Y_OFFSET) where
+// SPINE_Y_OFFSET = -8. In world coordinates, the visible spine line appears at
+// world y = (axis_Y) + |SPINE_Y_OFFSET|, which falls INSIDE the entity card cluster
+// (cards span Y=0 to ~Y=40). Visual overlap with entity cards is intentional — the
+// spine renders ON TOP of the cluster via z-index, not above it. If the canvas vertical
+// layout changes (e.g. entity cards grow taller), SPINE_Y_OFFSET must be updated to
+// maintain the visual position relative to the cluster.
 
 const SPINE_VIEWPORT_WIDTH = 4000;
 
