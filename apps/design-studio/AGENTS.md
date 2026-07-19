@@ -30,6 +30,7 @@ Parent rules: [`../AGENTS.md`](../AGENTS.md) (apps placement), root [`AGENTS.md`
 | `@web-settings/*` | `../web/src/components/settings/presentational/*` | Settings section chrome extracts (ConnectDaemon form, Setup section) — props-driven; no IPC (V1.107) |
 | `@web-canvas/*` | `../web/src/components/canvas/presentational/*` | Canvas node-chrome extracts (`NodeChromeShell`, V1.115; Timeline body chrome `timeline-node-chrome` — six exports; Layer breadcrumb `layer-breadcrumb`; conflict-modal shared shell `conflict-modal-chrome`, V1.124 P2) — props-driven; no `@xyflow/react`, no RF types, no contracts, no `useTranslation` |
 | `@web-global-timeline/*` | `../web/src/components/global-timeline/presentational/*` | Global Timeline list chrome extract (`global-timeline-list-chrome`, V1.124 P2) — props-driven rows / empty / loading / error frames; no daemon, no contracts, no router, no `useTranslation` |
+| `@web-shell/selection-submenu` | `../web/src/components/selection-submenu/` | V1.126 P0 — selection submenu presentational (transitional alias to apps/web/src/components/selection-submenu/) |
 | `@web-lib/utils` | `../web/src/lib/utils.ts` | `cn()` only |
 | `@42ch/nexus-ui` | workspace package | Brand VI plus promoted presentational primitives (Button, Badge, Card, Input, Label, Textarea, Select, Toast) through public exports |
 | `@nexus/design-tokens` | `tooling/design-tokens` | Shared CSS + Tailwind preset |

@@ -1,5 +1,6 @@
-import { ChevronRight, type LucideIcon } from 'lucide-react';
-import { useState, type ReactNode } from 'react';
+import { ChevronRight, Ellipsis, type LucideIcon } from 'lucide-react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { useLocation } from 'react-router-dom';
 
 import { cn } from '@/lib/utils';
 
@@ -59,6 +60,25 @@ export interface ShellSidebarChromeProps {
   primaryNavigationAriaLabel?: string;
   /** Optional test id for the root sidebar chrome. */
   'data-testid'?: string;
+  /**
+   * Optional render-prop for a contextual submenu on a nav item.
+   * When provided, the row gains a `•••` button, and `Enter` / `⌘.` / `Ctrl+.`
+   * keyboard triggers open the submenu. The close callback returns focus to the
+   * triggering row.
+   *
+   * V1.126 P0 T1 fix wave: anchorEl param added so the popover can be anchored
+   * without re-querying DOM; post-hoc ratification pending architect plan-QC.
+   */
+  renderSubmenu?: (
+    item: ShellNavItem,
+    close: () => void,
+    anchorEl: HTMLElement,
+  ) => ReactNode;
+  /**
+   * Optional predicate to determine which nav items show the submenu trigger.
+   * When absent, all items get the trigger when `renderSubmenu` is provided.
+   */
+  hasSubmenu?: (item: ShellNavItem) => boolean;
 }
 
 /**
@@ -81,7 +101,34 @@ export function ShellSidebarChrome({
   orchestratorTabLabel = 'Orchestrator',
   primaryNavigationAriaLabel = 'Primary navigation',
   'data-testid': dataTestId,
+  renderSubmenu,
+  hasSubmenu,
 }: ShellSidebarChromeProps) {
+  const [submenuItem, setSubmenuItem] = useState<ShellNavItem | null>(null);
+  const [submenuAnchor, setSubmenuAnchor] = useState<HTMLElement | null>(null);
+  const triggerRef = useRef<HTMLElement | null>(null);
+  const { pathname } = useLocation();
+
+  const closeSubmenu = useCallback(() => {
+    setSubmenuItem(null);
+    setSubmenuAnchor(null);
+    triggerRef.current?.focus();
+    triggerRef.current = null;
+  }, []);
+
+  useEffect(() => {
+    closeSubmenu();
+  }, [pathname, closeSubmenu]);
+
+  const handleOpenSubmenu = useCallback(
+    (item: ShellNavItem, el: HTMLElement) => {
+      triggerRef.current = document.activeElement as HTMLElement;
+      setSubmenuItem(item);
+      setSubmenuAnchor(el);
+    },
+    [],
+  );
+
   return (
     <div
       className="flex h-full w-full flex-col gap-2 border-r border-gray-alpha-400 bg-background-100 p-3"
@@ -123,6 +170,10 @@ export function ShellSidebarChrome({
               activeRoute={activeRoute}
               isActiveItem={isActiveItem}
               renderNavItem={renderNavItem}
+              renderSubmenu={renderSubmenu}
+              hasSubmenu={hasSubmenu}
+              onOpenSubmenu={handleOpenSubmenu}
+              isSubmenuOpenForItem={submenuItem?.to === item.to}
             />
           ))}
         </ul>
@@ -139,10 +190,18 @@ export function ShellSidebarChrome({
               activeRoute={activeRoute}
               renderNavItem={renderNavItem}
               isActiveItem={isActiveItem}
+              renderSubmenu={renderSubmenu}
+              hasSubmenu={hasSubmenu}
+              onOpenSubmenu={handleOpenSubmenu}
+              submenuItem={submenuItem}
             />
           ))}
         </ul>
       )}
+
+      {submenuItem && renderSubmenu && submenuAnchor
+        ? renderSubmenu(submenuItem, closeSubmenu, submenuAnchor)
+        : null}
 
       {footer ? (
         <div className="mt-auto flex flex-col gap-2 border-t border-gray-alpha-400 pt-3">
@@ -200,11 +259,19 @@ function NavGroupChrome({
   activeRoute,
   renderNavItem,
   isActiveItem,
+  renderSubmenu,
+  hasSubmenu,
+  onOpenSubmenu,
+  submenuItem,
 }: {
   group: ShellNavGroup;
   activeRoute: string;
   renderNavItem: RenderNavItem;
   isActiveItem?: ShellSidebarChromeProps['isActiveItem'];
+  renderSubmenu?: ShellSidebarChromeProps['renderSubmenu'];
+  hasSubmenu?: ShellSidebarChromeProps['hasSubmenu'];
+  onOpenSubmenu?: (item: ShellNavItem, el: HTMLElement) => void;
+  submenuItem?: ShellNavItem | null;
 }) {
   const [open, setOpen] = useState(group.defaultOpen ?? true);
   const hasMultiple = group.items.length > 1;
@@ -242,6 +309,10 @@ function NavGroupChrome({
               activeRoute={activeRoute}
               isActiveItem={isActiveItem}
               renderNavItem={renderNavItem}
+              renderSubmenu={renderSubmenu}
+              hasSubmenu={hasSubmenu}
+              onOpenSubmenu={onOpenSubmenu}
+              isSubmenuOpenForItem={submenuItem?.to === item.to}
             />
           ))}
         </ul>
@@ -261,41 +332,100 @@ function NavItemLi({
   activeRoute,
   isActiveItem,
   renderNavItem,
+  renderSubmenu,
+  hasSubmenu: hasSubmenuProp,
+  onOpenSubmenu,
+  isSubmenuOpenForItem,
 }: {
   item: ShellNavItem;
   activeRoute: string;
   isActiveItem?: ShellSidebarChromeProps['isActiveItem'];
   renderNavItem: RenderNavItem;
+  renderSubmenu?: ShellSidebarChromeProps['renderSubmenu'];
+  hasSubmenu?: ShellSidebarChromeProps['hasSubmenu'];
+  onOpenSubmenu?: (item: ShellNavItem, el: HTMLElement) => void;
+  isSubmenuOpenForItem?: boolean;
 }) {
   const isActive = isActiveItem
     ? isActiveItem(item, activeRoute)
     : activeRoute === item.to || activeRoute.startsWith(`${item.to}/`);
+  const hasSubmenu = !!(hasSubmenuProp ? hasSubmenuProp(item) : renderSubmenu);
+  const submenuButtonRef = useRef<HTMLButtonElement>(null);
+
+  function handleKeyDown(e: React.KeyboardEvent) {
+    if (!hasSubmenu) return;
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      e.stopPropagation();
+      onOpenSubmenu?.(item, e.currentTarget as HTMLElement);
+      return;
+    }
+    if (e.key === '.' && (e.metaKey || e.ctrlKey)) {
+      e.preventDefault();
+      e.stopPropagation();
+      onOpenSubmenu?.(item, e.currentTarget as HTMLElement);
+    }
+  }
+
   return (
-    <li>
-      {renderNavItem(
-        item,
-        cn(
-          'group relative flex h-sidebar-nav-item-height items-center gap-2 rounded-control px-3 text-label-14 transition-colors duration-state ease-standard motion-reduce:transition-none',
-          isActive
-            ? 'bg-gray-alpha-100 text-gray-1000'
-            : 'text-gray-600 hover:bg-gray-alpha-100 hover:text-gray-900',
-        ),
-        <>
-          {isActive && (
-            <span
-              aria-hidden
-              data-testid="sidebar-active-bar"
-              className="absolute left-0 top-1/2 h-5 w-[2px] -translate-y-1/2 rounded-pill bg-blue-700"
-            />
-          )}
-          <item.icon
-            className={cn('h-4 w-4 shrink-0', isActive ? 'opacity-100' : 'opacity-70')}
-            aria-hidden
-          />
-          <span>{item.label}</span>
-        </>,
-        isActive,
+    <li
+      onKeyDown={handleKeyDown}
+      className={cn(
+        'group relative',
+        hasSubmenu && 'pr-2',
       )}
+    >
+      <div className="flex items-center">
+        <div className="flex-1 min-w-0">
+          {renderNavItem(
+            item,
+            cn(
+              'group relative flex h-sidebar-nav-item-height items-center gap-2 rounded-control px-3 text-label-14 transition-colors duration-state ease-standard motion-reduce:transition-none',
+              isActive
+                ? 'bg-gray-alpha-100 text-gray-1000'
+                : 'text-gray-600 hover:bg-gray-alpha-100 hover:text-gray-900',
+            ),
+            <>
+              {isActive && (
+                <span
+                  aria-hidden
+                  data-testid="sidebar-active-bar"
+                  className="absolute left-0 top-1/2 h-5 w-[2px] -translate-y-1/2 rounded-pill bg-blue-700"
+                />
+              )}
+              <item.icon
+                className={cn('h-4 w-4 shrink-0', isActive ? 'opacity-100' : 'opacity-70')}
+                aria-hidden
+              />
+              <span className="truncate">{item.label}</span>
+            </>,
+            isActive,
+          )}
+        </div>
+        {hasSubmenu && (
+          <button
+            ref={submenuButtonRef}
+            type="button"
+            aria-haspopup="menu"
+            aria-expanded={isSubmenuOpenForItem}
+            aria-label={`Open menu for ${item.label}`}
+            tabIndex={-1}
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              onOpenSubmenu?.(item, e.currentTarget);
+            }}
+            className={cn(
+              'flex h-6 w-6 shrink-0 items-center justify-center rounded-control text-gray-400 opacity-0 transition-opacity duration-state ease-standard motion-reduce:transition-none',
+              'group-hover:opacity-100 group-focus-within:opacity-100',
+              'hover:bg-gray-alpha-200 hover:text-gray-700',
+              'focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-700 focus-visible:ring-offset-1',
+            )}
+          >
+            <Ellipsis className="h-4 w-4" aria-hidden />
+          </button>
+        )}
+      </div>
     </li>
   );
 }

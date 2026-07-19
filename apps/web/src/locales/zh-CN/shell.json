@@ -137,5 +137,18 @@
     "previewProfile": "作品类型",
     "previewUpdated": "更新时间",
     "untitled": "未命名"
+  },
+  "submenu": {
+    "ariaLabel": "行操作",
+    "triggerAriaLabel": "打开 {{label}} 的菜单",
+    "agentLabel": "智能体：{{status}}",
+    "agentDialogTitle": "为 {{entityName}} 分配智能体",
+    "openTimeline": "打开时间线",
+    "openKb": "打开知识库",
+    "openOutline": "打开大纲",
+    "agent": "智能体",
+    "unassigned": "未分配",
+    "rename": "重命名",
+    "renameFailed": "重命名失败，请重试。"
   }
 }

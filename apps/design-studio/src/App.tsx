@@ -14,6 +14,7 @@ import {
   SurfacesIndexPage,
   SurfacesLaunchPage,
   SurfacesLayout,
+  SurfacesSelectionSubmenuPage,
   SurfacesSetupPage,
   SurfacesShellPage,
 } from '@/pages/surfaces';
@@ -61,6 +62,7 @@ export function App() {
             <Route path="daemon" element={<SurfacesDaemonPage />} />
             <Route path="launch" element={<SurfacesLaunchPage />} />
             <Route path="banner" element={<SurfacesBannerPage />} />
+            <Route path="selection-submenu" element={<SurfacesSelectionSubmenuPage />} />
           </Route>
         </Routes>
       </main>

@@ -137,5 +137,18 @@
     "previewProfile": "Work profile",
     "previewUpdated": "Updated",
     "untitled": "Untitled"
+  },
+  "submenu": {
+    "ariaLabel": "Row actions",
+    "triggerAriaLabel": "Open menu for {{label}}",
+    "agentLabel": "Agent: {{status}}",
+    "agentDialogTitle": "Assign agent to {{entityName}}",
+    "openTimeline": "Open Timeline",
+    "openKb": "Open KB",
+    "openOutline": "Open Outline",
+    "agent": "Agent",
+    "unassigned": "Unassigned",
+    "rename": "Rename",
+    "renameFailed": "Failed to rename. Please try again."
   }
 }

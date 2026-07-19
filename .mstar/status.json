@@ -195,7 +195,7 @@
     },
     {
       "plan_id": "2026-07-20-v1.126-p0-shell-selection-submenu",
-      "status": "Todo",
+      "status": "InProgress",
       "iteration_refs": [
         "V1.126"
       ],
@@ -3178,6 +3178,17 @@
         "source": "qc3",
         "closure_note": null,
         "tracking_link": null
+      }
+    ],
+    "2026-07-20-v1.126-p0-shell-selection-submenu": [
+      {
+        "id": "R-V1126P0-T2-001",
+        "severity": "low",
+        "title": "Delete action omitted from selection submenu — no DELETE route exists for works/worlds",
+        "lifecycle": "open",
+        "closure_note": null,
+        "tracking_link": ".mstar/plans/2026-07-20-v1.126-p0-shell-selection-submenu.md#Review Gate Summary",
+        "notes": "V1.127+ candidate: either promote DELETE /v1/daemon/works/{id} + DELETE /v1/daemon/worlds/{id} to daemon (would flip P0 to wire_contracts_changed: true retroactively — pick as own plan), or use a soft-delete via PATCH {status: 'deleted'} pattern. Submenu ships with 4 items (Timeline / KB-or-Outline / Agent / Rename) in V1.126."
       }
     ]
   }

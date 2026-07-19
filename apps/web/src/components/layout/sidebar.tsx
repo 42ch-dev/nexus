@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { NavLink, useLocation } from 'react-router-dom';
+import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import {
   BookOpen,
   BrainCircuit,
@@ -9,17 +9,22 @@ import {
   Globe,
   Layers,
   ListChecks,
+  Pencil,
   Sparkles,
+  User,
 } from 'lucide-react';
 
-import { flattenPages, useWorks } from '@/api/queries';
+import { flattenPages, usePatchWork, useWorks } from '@/api/queries';
 import { NexusLogo } from '@/components/brand/nexus-logo';
 import { FooterProfiles } from '@/components/layout/footer-profiles';
+import { useAgentPickerDialog } from '@/components/layout/use-agent-picker-dialog';
 import {
   ShellSidebarChrome,
   type ShellNavGroup,
+  type ShellNavItem,
   type ShellSidebarTab,
 } from '@/components/layout/presentational/shell-sidebar-chrome';
+import { SelectionSubmenu } from '@/components/selection-submenu/selection-submenu';
 import { cn } from '@/lib/utils';
 
 /**
@@ -60,13 +65,53 @@ function tabFromPathname(pathname: string): ShellSidebarTab {
 export function Sidebar() {
   const { t } = useTranslation('shell');
   const { pathname } = useLocation();
+  const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState<ShellSidebarTab>(() => tabFromPathname(pathname));
   const worksQuery = useWorks({ limit: 12 });
   const works = useMemo(() => flattenPages(worksQuery.data), [worksQuery.data]);
+  const patchWork = usePatchWork();
+  const agentDialog = useAgentPickerDialog();
+
+  const [renamingItem, setRenamingItem] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState('');
+  const renameInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     setActiveTab(tabFromPathname(pathname));
   }, [pathname]);
+
+  function extractWorkId(item: ShellNavItem): string | null {
+    const match = /^\/works\/([^/]+)/.exec(item.to);
+    if (match) {
+      const id = decodeURIComponent(match[1]);
+      return id === '' ? null : id;
+    }
+    return null;
+  }
+
+  function isEntityItem(item: ShellNavItem): boolean {
+    return extractWorkId(item) !== null;
+  }
+
+  useEffect(() => {
+    if (renamingItem && renameInputRef.current) {
+      renameInputRef.current.focus();
+      renameInputRef.current.select();
+    }
+  }, [renamingItem]);
+
+  function handleRenameSubmit() {
+    const itemTo = renamingItem;
+    if (!itemTo || !renameValue.trim()) {
+      setRenamingItem(null);
+      return;
+    }
+    const wid = extractWorkId({ to: itemTo, label: '', icon: BookOpen });
+    if (wid) {
+      patchWork.mutate({ workId: wid, request: { title: renameValue.trim() } });
+    }
+    setRenamingItem(null);
+  }
 
   const creatorGroups: ShellNavGroup[] = useMemo(
     () => [
@@ -126,6 +171,83 @@ export function Sidebar() {
 
   const groups = activeTab === 'creator' ? creatorGroups : orchestratorGroups;
 
+  const renderSubmenu = useCallback(
+    (item: ShellNavItem, close: () => void, anchorEl: HTMLElement) => {
+      const isWorld = item.to.startsWith('/worlds');
+      const isWork = item.to.startsWith('/works');
+      if (!isWorld && !isWork) return null;
+
+      const workId = extractWorkId(item);
+      const isEntity = isEntityItem(item);
+
+      return (
+        <>
+          <SelectionSubmenu
+            open
+            onClose={close}
+            anchorEl={anchorEl}
+            ariaLabel={t('submenu.ariaLabel')}
+            items={[
+              {
+                id: 'open-timeline',
+                label: t('submenu.openTimeline'),
+                icon: BookOpen,
+                onSelect: () => {
+                  if (workId) {
+                    navigate(`/works/${encodeURIComponent(workId)}/timeline`);
+                  } else if (isWorld) {
+                    navigate('/worlds/timeline');
+                  } else {
+                    navigate('/works/timeline');
+                  }
+                },
+              },
+              {
+                id: 'open-secondary',
+                label: isWorld ? t('submenu.openKb') : t('submenu.openOutline'),
+                icon: isWorld ? Globe : BookOpen,
+                onSelect: () => {
+                  if (workId) {
+                    navigate(`/works/${encodeURIComponent(workId)}/outline`);
+                  } else if (isWorld) {
+                    navigate('/worlds/kb');
+                  } else {
+                    navigate('/works/outline');
+                  }
+                },
+              },
+              ...(isEntity
+                ? [
+                    {
+                      id: 'agent',
+                      label: t('submenu.agentLabel', { status: t('submenu.unassigned') }),
+                      icon: User,
+                      onSelect: () => {
+                        agentDialog.setTitle(t('submenu.agentDialogTitle', { entityName: item.label }));
+                        agentDialog.setOpen(true);
+                      },
+                    },
+                    {
+                      id: 'rename',
+                      label: t('submenu.rename'),
+                      icon: Pencil,
+                      onSelect: () => {
+                        setRenamingItem(item.to);
+                        setRenameValue(item.label);
+                        close();
+                      },
+                    },
+                  ]
+                : []),
+            ]}
+          />
+          {agentDialog.dialog}
+        </>
+      );
+    },
+    [t, navigate, agentDialog],
+  );
+
   return (
     <nav aria-label={t('aria.primary')} className="min-h-0 flex-1">
       <ShellSidebarChrome
@@ -138,11 +260,10 @@ export function Sidebar() {
         creatorTabLabel={t('nav.creator')}
         orchestratorTabLabel={t('nav.orchestrator')}
         primaryNavigationAriaLabel={t('aria.primaryNavigation')}
+        renderSubmenu={renderSubmenu}
+        hasSubmenu={(item) => item.to.startsWith('/worlds') || item.to.startsWith('/works')}
         isActiveItem={(item, route) => {
           if (item.to === '/works') return route === '/works';
-          // Per-Work Outline row — claim Outline + sibling surfaces under the
-          // Work (e.g. /chapters, /body, /timeline) so the Work stays visually
-          // selected while the author moves between surfaces.
           const outlineMatch = /^\/works\/([^/]+)\/outline$/.exec(item.to);
           if (outlineMatch) {
             const encodedWorkId = outlineMatch[1];
@@ -151,14 +272,48 @@ export function Sidebar() {
           }
           return route === item.to || route.startsWith(`${item.to}/`);
         }}
-        renderNavItem={(item, className, content, isActive) => (
-          <NavLink
-            to={item.to}
-            className={cn(className, isActive ? 'bg-gray-alpha-100 text-gray-1000' : undefined)}
-          >
-            {content}
-          </NavLink>
-        )}
+        renderNavItem={(item, className, content, isActive) => {
+          // V1.126 P0 T2: if this item is being renamed, render an inline edit
+          const isRenaming = renamingItem === item.to;
+          return (
+            <NavLink
+              to={item.to}
+              className={cn(className, isActive ? 'bg-gray-alpha-100 text-gray-1000' : undefined)}
+              onClick={(e) => {
+                if (isRenaming) {
+                  e.preventDefault();
+                }
+              }}
+            >
+              {isRenaming ? (
+                <input
+                  ref={renameInputRef}
+                  type="text"
+                  value={renameValue}
+                  onChange={(e) => setRenameValue(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      handleRenameSubmit();
+                    }
+                    if (e.key === 'Escape') {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      setRenamingItem(null);
+                    }
+                  }}
+                  onBlur={() => handleRenameSubmit()}
+                  className="w-full rounded-control border border-blue-700 bg-background-100 px-2 py-0.5 text-label-14 text-gray-1000 outline-none"
+                  onClick={(e) => e.stopPropagation()}
+                  data-testid="sidebar-rename-input"
+                />
+              ) : (
+                content
+              )}
+            </NavLink>
+          );
+        }}
       />
     </nav>
   );
