@@ -3,6 +3,11 @@
   "updated_at": "2026-07-20",
   "entries": [
     {
+      "at": "2026-07-20 (V1.126 P3 QC fix wave)",
+      "message": "P3 QC W-002 ratification: ~24 pre-existing archived residual entries use non-ND-A2 closure_note formats (legacy 'archived for V1.NN cleanup' etc.). Ratified as accepted legacy drift; future archival MUST use ND-A2 enum. ND-A2 spec text unchanged.",
+      "plan_id": "2026-07-20-v1.126-p3-status-compaction-residual-cleanup"
+    },
+    {
       "at": "2026-07-20 (V1.126 P3 compaction)",
       "message": "V1.126 P3 tech-debt gate: status.json compacted from 145KB to 17KB. 244 low/nit residuals archived from V1.91\u2013V1.124 plans to .mstar/archived/residuals/. tech_debt_summary refreshed. 43 open residuals remain (1 high, 3 medium, 10 low, 29 nit). DF-V1123-STATUS-COMPACT + DF-V1123-RESIDUAL-CLEANUP + DF-V1122-STATUS-COMPACT closed.",
       "plan_id": "2026-07-20-v1.126-p3-status-compaction-residual-cleanup"

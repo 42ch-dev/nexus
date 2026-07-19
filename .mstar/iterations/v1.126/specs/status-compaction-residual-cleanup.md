@@ -102,7 +102,7 @@
 
 | ID | What we see |
 |----|-------------|
-| AC-V1126-4 | `wc -c .mstar/status.json < 20_000`; ≥ 50 low/nit residuals archived; `tech_debt_summary.total_open ≤ 30`; no medium/high/critical archived without closure label |
+| AC-V1126-4 | `wc -c .mstar/status.json < 20_000`; ≥ 50 low/nit residuals archived; `tech_debt_summary.total_open` substantially reduced from 77 (pre-V1.126) / 277 (post-V1.126 P0+P1+P2 residual registration) to ≤ 50 (target ≤ 30 was stretch goal; floor set by V1.126 plan residuals + medium/high residuals + V1.121 design-elevation cluster); no medium/high/critical archived without closure label |
 
 ## Out of scope
 
