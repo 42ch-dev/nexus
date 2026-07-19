@@ -204,7 +204,7 @@ describe('Sidebar', () => {
       initialRouterEntries: ['/works'],
     });
 
-    const worksGroup = screen.getByRole('button', { name: /Works/i });
+    const worksGroup = screen.getByRole('button', { name: 'Works' });
     expect(worksGroup).toHaveClass('text-gray-600');
     expect(worksGroup).not.toHaveClass('bg-gray-alpha-100');
 
@@ -240,7 +240,7 @@ describe('Sidebar', () => {
       expect(screen.getByRole('link', { name: 'Alpha Novel' })).toBeInTheDocument(),
     );
 
-    const worksGroup = screen.getByRole('button', { name: /Works/i });
+    const worksGroup = screen.getByRole('button', { name: 'Works' });
     expect(worksGroup).toHaveAttribute('aria-expanded', 'true');
     expect(worksGroup.className).toMatch(/\bduration-state\b/);
     expect(worksGroup.className).toMatch(/\bmotion-reduce:transition-none\b/);
@@ -303,8 +303,8 @@ describe('Sidebar', () => {
 
     renderInApp(<Sidebar />, { client: makeClient(), activeCreatorId: 'creator-a' });
 
-    expect(screen.getByRole('button', { name: /Worlds/i })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Works/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Worlds' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Works' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Memories/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Memories' })).not.toBeInTheDocument();
 
@@ -490,8 +490,8 @@ describe('Sidebar — work routes (V1.118 P2)', () => {
 
     expect(screen.getByRole('tab', { name: 'Creator', selected: true })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: 'Orchestrator' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Works/i })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Worlds/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Works' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Worlds' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Memories/i })).not.toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'All Works' })).toBeInTheDocument();
 
@@ -598,5 +598,147 @@ describe('Sidebar — Work Timeline routes (V1.125 P2)', () => {
       'bg-blue-700',
     );
     expect(screen.queryByRole('link', { name: 'Drill Novel Timeline' })).not.toBeInTheDocument();
+  });
+});
+
+describe('Sidebar — submenu trigger (V1.126 P0 T1)', () => {
+  beforeEach(async () => {
+    window.localStorage.clear();
+    await i18n.changeLanguage('en');
+  });
+
+  function renderSidebarWithWorks() {
+    useSidebarHandlers([
+      {
+        work_id: 'work-alpha',
+        title: 'Alpha Novel',
+        status: 'active',
+        intake_status: 'ready',
+        primary_preset_id: 'preset-1',
+        updated_at: '2026-01-01T00:00:00Z',
+      },
+    ]);
+    renderInApp(<Sidebar />, { client: makeClient(), activeCreatorId: 'creator-a' });
+  }
+
+  it('renders a ••• button on World and Work rows (hover-visible)', async () => {
+    renderSidebarWithWorks();
+
+    await waitFor(() =>
+      expect(screen.getByRole('link', { name: 'Alpha Novel' })).toBeInTheDocument(),
+    );
+
+    const worldsBtn = screen.getByRole('button', { name: /Open menu for Worlds/i });
+    const alphaBtn = screen.getByRole('button', { name: /Open menu for Alpha Novel/i });
+    expect(worldsBtn).toBeInTheDocument();
+    expect(alphaBtn).toBeInTheDocument();
+  });
+
+  it('does not render ••• button on Orchestrator rows', async () => {
+    const user = userEvent.setup();
+    useSidebarHandlers();
+    renderInApp(<Sidebar />, { client: makeClient(), activeCreatorId: 'creator-a' });
+
+    await user.click(screen.getByRole('tab', { name: 'Orchestrator' }));
+
+    expect(screen.queryByRole('button', { name: /Open menu for Memory/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Open menu for Strategies/i })).not.toBeInTheDocument();
+  });
+
+  it('opens submenu on ••• button click', async () => {
+    const user = userEvent.setup();
+    renderSidebarWithWorks();
+
+    await waitFor(() =>
+      expect(screen.getByRole('link', { name: 'Alpha Novel' })).toBeInTheDocument(),
+    );
+
+    const menuBtn = screen.getByRole('button', { name: /Open menu for Alpha Novel/i });
+    await user.click(menuBtn);
+
+    await waitFor(() =>
+      expect(screen.getByRole('menu', { name: 'Row actions' })).toBeInTheDocument(),
+    );
+  });
+
+  it('opens submenu on Enter key when row is focused', async () => {
+    const user = userEvent.setup();
+    renderSidebarWithWorks();
+
+    await waitFor(() =>
+      expect(screen.getByRole('link', { name: 'Alpha Novel' })).toBeInTheDocument(),
+    );
+
+    const worldsLink = screen.getByRole('link', { name: 'Worlds' });
+    worldsLink.focus();
+    await user.keyboard('{Enter}');
+
+    await waitFor(() =>
+      expect(screen.getByRole('menu', { name: 'Row actions' })).toBeInTheDocument(),
+    );
+  });
+
+  it('opens submenu on Ctrl+. / Cmd+. when row is focused', async () => {
+    const user = userEvent.setup();
+    renderSidebarWithWorks();
+
+    await waitFor(() =>
+      expect(screen.getByRole('link', { name: 'Alpha Novel' })).toBeInTheDocument(),
+    );
+
+    const worldsLink = screen.getByRole('link', { name: 'Worlds' });
+    worldsLink.focus();
+    await user.keyboard('{Control>}.{/Control}');
+
+    await waitFor(() =>
+      expect(screen.getByRole('menu', { name: 'Row actions' })).toBeInTheDocument(),
+    );
+  });
+
+  it('closes submenu on Escape', async () => {
+    const user = userEvent.setup();
+    renderSidebarWithWorks();
+
+    await waitFor(() =>
+      expect(screen.getByRole('link', { name: 'Alpha Novel' })).toBeInTheDocument(),
+    );
+
+    const menuBtn = screen.getByRole('button', { name: /Open menu for Alpha Novel/i });
+    await user.click(menuBtn);
+    await waitFor(() =>
+      expect(screen.getByRole('menu', { name: 'Row actions' })).toBeInTheDocument(),
+    );
+
+    await user.keyboard('{Escape}');
+    await waitFor(() =>
+      expect(screen.queryByRole('menu', { name: 'Row actions' })).not.toBeInTheDocument(),
+    );
+  });
+
+  it('click on row body still navigates (existing behavior preserved)', async () => {
+    const user = userEvent.setup();
+    useSidebarHandlers();
+    renderInApp(<Sidebar />, { client: makeClient(), activeCreatorId: 'creator-a' });
+
+    const worldsLink = screen.getByRole('link', { name: 'Worlds' });
+    expect(worldsLink).toHaveAttribute('href', '/worlds');
+
+    await user.click(worldsLink);
+
+    expect(screen.queryByRole('menu', { name: 'Row actions' })).not.toBeInTheDocument();
+  });
+
+  it('does not render submenu on Orchestrator tab rows', async () => {
+    const user = userEvent.setup();
+    useSidebarHandlers();
+    renderInApp(<Sidebar />, { client: makeClient(), activeCreatorId: 'creator-a' });
+
+    await user.click(screen.getByRole('tab', { name: 'Orchestrator' }));
+
+    const memoryLink = screen.getByRole('link', { name: 'Memory' });
+    memoryLink.focus();
+    await user.keyboard('{Enter}');
+
+    expect(screen.queryByRole('menu', { name: 'Row actions' })).not.toBeInTheDocument();
   });
 });

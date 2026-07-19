@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { NavLink, useLocation } from 'react-router-dom';
 import {
@@ -18,8 +18,10 @@ import { FooterProfiles } from '@/components/layout/footer-profiles';
 import {
   ShellSidebarChrome,
   type ShellNavGroup,
+  type ShellNavItem,
   type ShellSidebarTab,
 } from '@/components/layout/presentational/shell-sidebar-chrome';
+import { SelectionSubmenu } from '@/components/selection-submenu/selection-submenu';
 import { cn } from '@/lib/utils';
 
 /**
@@ -126,6 +128,38 @@ export function Sidebar() {
 
   const groups = activeTab === 'creator' ? creatorGroups : orchestratorGroups;
 
+  const renderSubmenu = useCallback(
+    (item: ShellNavItem, close: () => void, anchorEl: HTMLElement) => {
+      const isWorld = item.to.startsWith('/worlds');
+      const isWork = item.to.startsWith('/works');
+      if (!isWorld && !isWork) return null;
+
+      return (
+        <SelectionSubmenu
+          open
+          onClose={close}
+          anchorEl={anchorEl}
+          ariaLabel={t('submenu.ariaLabel')}
+          items={[
+            {
+              id: 'open-timeline',
+              label: t('submenu.openTimeline'),
+              icon: BookOpen,
+              onSelect: () => {},
+            },
+            {
+              id: 'open-secondary',
+              label: isWorld ? t('submenu.openKb') : t('submenu.openOutline'),
+              icon: isWorld ? Globe : BookOpen,
+              onSelect: () => {},
+            },
+          ]}
+        />
+      );
+    },
+    [t],
+  );
+
   return (
     <nav aria-label={t('aria.primary')} className="min-h-0 flex-1">
       <ShellSidebarChrome
@@ -138,6 +172,8 @@ export function Sidebar() {
         creatorTabLabel={t('nav.creator')}
         orchestratorTabLabel={t('nav.orchestrator')}
         primaryNavigationAriaLabel={t('aria.primaryNavigation')}
+        renderSubmenu={renderSubmenu}
+        hasSubmenu={(item) => item.to.startsWith('/worlds') || item.to.startsWith('/works')}
         isActiveItem={(item, route) => {
           if (item.to === '/works') return route === '/works';
           // Per-Work Outline row — claim Outline + sibling surfaces under the

@@ -137,5 +137,12 @@
     "previewProfile": "Work profile",
     "previewUpdated": "Updated",
     "untitled": "Untitled"
+  },
+  "submenu": {
+    "ariaLabel": "Row actions",
+    "triggerAriaLabel": "Open menu for {{label}}",
+    "openTimeline": "Open Timeline",
+    "openKb": "Open KB",
+    "openOutline": "Open Outline"
   }
 }

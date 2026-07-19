@@ -24,6 +24,7 @@ import { SetupWizardChromeFixtures } from '@/fixtures/setup-wizard-chrome-fixtur
 import { ConflictModalFixtures } from '@/fixtures/conflict-modal-fixtures';
 import { GlobalTimelineFixtures } from '@/fixtures/global-timeline-fixtures';
 import { LayerBreadcrumbFixtures } from '@/fixtures/layer-breadcrumb-fixtures';
+import { SelectionSubmenuStubFixtures } from '@/fixtures/selection-submenu-fixtures';
 import { TimelineCanvasFixtures } from '@/fixtures/timeline-canvas-fixtures';
 import { WorkTimelineCanvasFixtures } from '@/fixtures/work-timeline-canvas-fixtures';
 
@@ -79,6 +80,12 @@ const SURFACES_SECTIONS = [
     path: '/surfaces/banner',
     end: false,
     desc: 'Degraded daemon banner — starting, degraded, stopped, error',
+  },
+  {
+    label: 'Selection Submenu',
+    path: '/surfaces/selection-submenu',
+    end: false,
+    desc: 'Selection submenu stub fixture (V1.126 P0 T1)',
   },
 ] as const;
 
@@ -608,6 +615,24 @@ export function SurfacesBannerPage() {
         (daemon/desktop hooks forbidden in Studio).
       </p>
       <MainBannerFixtures />
+    </section>
+  );
+}
+
+export function SurfacesSelectionSubmenuPage() {
+  return (
+    <section data-testid="surfaces-selection-submenu">
+      <SurfaceHeading>Selection Submenu — Stub fixture (V1.126 P0 T1)</SurfaceHeading>
+      <p className="text-copy-14 text-gray-700 mb-6">
+        Minimal stub fixture for the selection submenu presentational component
+        from{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+          @web-shell/selection-submenu
+        </code>
+        . World and Work variants with placeholder items. Full fixture with all
+        variants (light + dark, agent states, rename/delete) lands in T4.
+      </p>
+      <SelectionSubmenuStubFixtures />
     </section>
   );
 }
