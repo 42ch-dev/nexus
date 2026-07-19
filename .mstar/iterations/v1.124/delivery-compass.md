@@ -1,10 +1,11 @@
 ---
 iteration_id: V1.124
 start_date: 2026-07-19
-status: locked
+status: completed
 iteration_base_branch: main
 target_branch: main
 spec_integration_branch: iteration/v1.124
+end_date: 2026-07-19
 plans:
   - 2026-07-19-v1.124-p0-studio-timeline-fixtures
   - 2026-07-19-v1.124-p1-studio-tokens-gallery-completion
@@ -150,7 +151,7 @@ Concrete exclusions (if a PR does any of these, it is out of V1.124 scope):
 
 ## Roadmap Position
 
-- **Current iteration (V1.124)**: Studio-first gap closure — make V1.122/V1.123 Timeline visuals and tokens **reviewable without the daemon**, audit sibling unrepresented surfaces, and close the promotion-decision loop.
+- **Current iteration (V1.124)**: **delivered** Studio-first gap closure — make V1.122/V1.123 Timeline visuals and tokens **reviewable without the daemon**, audit sibling unrepresented surfaces, and close the promotion-decision loop.
 - **Next iteration (V1.125 candidate) — product priority order** (caller may override at open; default PM autonomous resolve follows this order):
   1. **Fork creation/merge UI** (`DF-V1122-FORK-UI`) — **preferred next product bet.** Timeline is now the hero World instrument (V1.122/V1.123) and will be gallery-verifiable (V1.124); Fork is the missing author action that makes multi-timeline World history real. Highest PMF adjacency to the Timeline stack just shipped.
   2. **Computable pillar UI** (`DF-V1122-COMPUTABLE-UI`) — elevates the third STRATEGY pillar after Timeline/Canvas depth. Strong product value; slightly less adjacent to the just-closed Timeline visual stack than Fork.
@@ -224,14 +225,14 @@ Notes:
 
 > Filled at iteration-close.
 
-- 结晶文档数：TBD
-- 新增 CONCEPTS.md 条目：TBD
-- 触发 compound-refresh：TBD
+- 结晶文档数：0 (no new knowledge - all insights captured in iteration specs + root AGENTS.md policy + existing knowledge docs)
+- 新增 CONCEPTS.md 条目：0
+- 触发 compound-refresh：否
 
 ## Iteration Retrospective (minimal)
 
 > Filled at iteration-close.
 
-- 做得好的：TBD
-- 可改进的：TBD
-- 下迭代建议：TBD
+- 做得好的：Studio-first policy (root AGENTS.md) + 4 plans (P0-P3) closed the V1.122/V1.123 Timeline gap end-to-end. Extract + fixture + tokens gallery + promotion classification in one iteration. QC tri-review caught real issues (P1 test coverage, P3 non-canonical reasoning).
+- 可改进的：Subagent dispatch reliability was inconsistent (multiple empty responses from frontend-dev/fullstack-dev). PM had to commit on behalf of implementers and make docs fixes directly. Consider investigating the root cause.
+- 下迭代建议：V1.125 candidate = Fork UI (DF-V1122-FORK-UI) per roadmap priority. Also consider status.json compaction (122KB, 77 open residuals).
