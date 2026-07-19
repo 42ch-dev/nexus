@@ -1,12 +1,18 @@
+import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
-import { Globe, RefreshCw } from 'lucide-react';
+import { Globe, Plus, RefreshCw } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { EmptyState, ErrorState, LoadingState } from '@/components/ui/states';
+import { EmptyCreateCard } from '@/components/ui/empty-create-card';
+import { ErrorState, LoadingState } from '@/components/ui/states';
 import { useNarrativeWorlds } from '@/api/queries';
+import { useNexusClient } from '@/lib/client-context';
 import { formatRelative } from '@/lib/format';
+import { hasCreateWorldClient } from '@/lib/nexus/create-world';
+
+import { CreateWorkDialog } from './dialogs/create-work-dialog';
 
 /**
  * Worlds picker (V1.115 T3 — R-V1111P1-WORLDS-PICKER; V1.122 P1 T3 retarget).
@@ -25,7 +31,14 @@ import { formatRelative } from '@/lib/format';
 export function WorldsPage() {
   const { t } = useTranslation('worlds');
   const navigate = useNavigate();
+  const client = useNexusClient();
+  const canCreateWorld = useMemo(() => hasCreateWorldClient(client), [client]);
+  const [createWorkOpen, setCreateWorkOpen] = useState(false);
   const worlds = useNarrativeWorlds();
+
+  function handleCreateWorldClick() {
+    // CreateWorldDialog wires here when the wire contract ships.
+  }
 
   return (
     <div className="flex flex-col gap-4">
@@ -62,7 +75,25 @@ export function WorldsPage() {
           ) : worlds.isLoading ? (
             <LoadingState label={t('loading')} />
           ) : !worlds.data || worlds.data.length === 0 ? (
-            <EmptyState title={t('emptyTitle')} description={t('emptyDescription')} />
+            <div className="flex flex-col gap-3">
+              {canCreateWorld ? (
+                <EmptyCreateCard
+                  icon={Globe}
+                  title={t('emptyCreateWorldTitle')}
+                  description={t('emptyCreateWorldDescription')}
+                  onClick={handleCreateWorldClick}
+                  data-testid="worlds-empty-create-world"
+                />
+              ) : (
+                <EmptyCreateCard
+                  icon={Plus}
+                  title={t('emptyCreateWorkTitle')}
+                  description={t('emptyCreateWorkDescription')}
+                  onClick={() => setCreateWorkOpen(true)}
+                  data-testid="worlds-empty-create-work"
+                />
+              )}
+            </div>
           ) : (
             <ul className="flex flex-col gap-2" aria-label={t('listAriaLabel')}>
               {worlds.data.map((world) => {
@@ -120,6 +151,14 @@ export function WorldsPage() {
           )}
         </CardContent>
       </Card>
+
+      <CreateWorkDialog
+        open={createWorkOpen}
+        onOpenChange={setCreateWorkOpen}
+        onCreated={(workId) => {
+          navigate(`/works/${encodeURIComponent(workId)}/outline`);
+        }}
+      />
     </div>
   );
 }
