@@ -604,7 +604,11 @@ pub async fn scan(
             .is_none_or(|id| !suppress_ids.contains(id))
     });
 
-    agents.extend(native_entries.into_iter().map(map_native_catalog_entry));
+    agents.extend(
+        native_entries
+            .into_iter()
+            .map(|entry| map_native_catalog_entry(entry, &by_binary)),
+    );
 
     if req.filter.as_deref() == Some("installed") {
         agents.retain(|a| a.installed);
@@ -657,18 +661,27 @@ const NATIVE_PREFERRED_FAMILIES: &[(&str, &str)] = &[
 ];
 
 /// Map a native CLI catalog entry to an [`AgentScanEntry`].
-fn map_native_catalog_entry(entry: nexus_agent_host::ProviderCatalogEntry) -> AgentScanEntry {
+fn map_native_catalog_entry(
+    entry: nexus_agent_host::ProviderCatalogEntry,
+    by_binary: &HashMap<String, nexus_acp_host::registry::LocalInstallation>,
+) -> AgentScanEntry {
     let launch_command = match entry.launch {
         nexus_agent_host::LaunchStrategy::NativeCli { command, .. } => Some(command),
         nexus_agent_host::LaunchStrategy::Acp { .. } => None,
     };
+
+    let version = launch_command
+        .as_ref()
+        .map(|cmd| nexus_acp_host::registry::bare_command_name(cmd))
+        .and_then(|bare| by_binary.get(&bare))
+        .and_then(|li| li.version.clone());
 
     AgentScanEntry {
         name: entry.display_name,
         registry_agent_id: None,
         launch_command,
         installed: entry.health.available,
-        version: None,
+        version,
         description: None,
         icon_url: None,
     }
@@ -1173,7 +1186,9 @@ mod tests {
     #[tokio::test]
     async fn scan_endpoint_includes_native_cli_entries_when_on_path() {
         let _lock = SCAN_PATH_LOCK.lock().expect("lock scan tests");
-        let (server, tmp) = create_scan_test_app().await;
+        // Registry must list codex/claude binaries so PATH probes populate
+        // `by_binary` for native entry version lookup (V1.125).
+        let (server, tmp) = create_scan_test_app_with_native_acp_registry().await;
         let bin_dir = tmp.path().join("bin");
         write_shim(&bin_dir, "claude", "#!/bin/sh\necho \"claude 1.2.3\"\n");
         write_shim(&bin_dir, "codex", "#!/bin/sh\necho \"codex 1.2.3\"\n");
@@ -1203,6 +1218,10 @@ mod tests {
         assert!(codex.installed);
         assert!(codex.launch_command.is_some());
         assert_eq!(codex.registry_agent_id, None);
+        assert!(
+            codex.version.is_some(),
+            "native codex entry should include probed --version output"
+        );
     }
 
     #[tokio::test]
@@ -1411,6 +1430,48 @@ mod tests {
         assert!(entry.installed);
         assert_eq!(entry.launch_command.as_deref(), Some("cursor-agent"));
         assert_eq!(entry.version.as_deref(), Some("cursor-agent 1.2.3"));
+    }
+
+    #[test]
+    fn map_native_catalog_entry_populates_version_from_by_binary() {
+        use nexus_agent_host::capability::{CapabilityDescriptor, ProtocolKind, ProviderHealth};
+        use nexus_agent_host::{
+            DiscoverySource, LaunchStrategy, ProviderCatalogEntry, ProviderId, TrustLevel,
+        };
+
+        let entry = ProviderCatalogEntry {
+            provider_id: ProviderId::new("codex-native"),
+            display_name: "codex (native CLI)".to_string(),
+            protocol_kind: ProtocolKind::NativeCli,
+            launch: LaunchStrategy::NativeCli {
+                command: "/tmp/bin/codex".to_string(),
+                args: vec![],
+                env: std::collections::HashMap::new(),
+            },
+            source: DiscoverySource::PathScan,
+            trust: TrustLevel::LocalPath,
+            capabilities: CapabilityDescriptor::native_cli_limited(),
+            health: ProviderHealth {
+                provider_id: ProviderId::new("codex-native"),
+                available: true,
+                latency_ms: None,
+                message: None,
+            },
+        };
+
+        let mut by_binary = HashMap::new();
+        by_binary.insert(
+            "codex".to_string(),
+            nexus_acp_host::registry::LocalInstallation {
+                binary: "codex".to_string(),
+                version: Some("codex 1.2.3".to_string()),
+            },
+        );
+
+        let scan_entry = map_native_catalog_entry(entry, &by_binary);
+        assert!(scan_entry.installed);
+        assert_eq!(scan_entry.launch_command.as_deref(), Some("/tmp/bin/codex"));
+        assert_eq!(scan_entry.version.as_deref(), Some("codex 1.2.3"));
     }
 
     #[test]

@@ -857,7 +857,7 @@ describe('Surfaces page — Settings shell chrome fixtures', () => {
     ).toHaveAttribute('aria-current', 'page');
     const outlet = within(hostRoot).getByTestId('settings-shell-outlet');
     const agentSection = within(outlet).getByTestId('settings-agent-section');
-    expect(agentSection).toHaveAttribute('data-preselected', 'codex-acp');
+    expect(agentSection).toHaveAttribute('data-preselected', 'codex-native');
     expect(
       within(outlet).queryByTestId('settings-section-frame-agent'),
     ).not.toBeInTheDocument();
@@ -924,19 +924,19 @@ describe('Surfaces page — Settings shell chrome fixtures', () => {
       'settings-host-fixture-agent-section',
     );
     const section = within(agentRoot).getByTestId('settings-agent-section');
-    expect(section).toHaveAttribute('data-preselected', 'codex-acp');
+    expect(section).toHaveAttribute('data-preselected', 'codex-native');
     expect(
       within(agentRoot).getByText(
         /Choose which local ACP agent Nexus uses for creative work/i,
       ),
     ).toBeInTheDocument();
     const pressed = within(agentRoot)
-      .getAllByTestId('agent-card-select-codex-acp')
+      .getAllByTestId('agent-card-select-codex-native')
       .filter((el) => el.getAttribute('aria-pressed') === 'true');
     expect(pressed.length).toBeGreaterThanOrEqual(1);
     // Preselect is Codex, not the first-installed Claude default.
     const claudePressed = within(agentRoot)
-      .getAllByTestId('agent-card-select-claude-acp')
+      .getAllByTestId('agent-card-select-claude-native')
       .filter((el) => el.getAttribute('aria-pressed') === 'true');
     expect(claudePressed.length).toBe(0);
     expect(
