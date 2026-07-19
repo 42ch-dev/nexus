@@ -104,7 +104,7 @@ V1.123 shipped three-layer Timeline **feel** in `apps/web`. The product bet alre
 | `2026-07-19-v1.124-p0-studio-timeline-fixtures` | P0 — Studio-first Timeline fixtures + AGENTS.md policy land | Todo | Must; foundation; no upstream |
 | `2026-07-19-v1.124-p1-studio-tokens-gallery-completion` | P1 — Studio Tokens gallery completion | Todo | Must; disjoint files from P0 |
 | `2026-07-19-v1.124-p2-unrepresented-surface-audit` | P2 — Unrepresented surface audit + fixtures | Todo | Should; disjoint from P0/P1 |
-| `2026-07-19-v1.124-p3-promotion-classification-audit` | P3 — Promotion classification audit + decisions | Todo | Stretch; benefits from P0/P1/P2 evidence |
+| `2026-07-19-v1.124-p3-promotion-classification-audit` | P3 — Promotion classification audit + decisions | Done | Stretch; benefits from P0/P1/P2 evidence |
 
 Status values: `Todo` | `InProgress` | `InReview` | `Done` | `Blocked`
 
@@ -116,7 +116,7 @@ Status values: `Todo` | `InProgress` | `InReview` | `Done` | `Blocked`
 | P0 fixtures accepted in Studio | 2026-07-19 | pending |
 | P1 Tokens gallery complete | 2026-07-19 | pending |
 | P2 audit complete + fixtures landed | 2026-07-20 | pending |
-| P3 promotion decisions recorded | 2026-07-20 | pending |
+| P3 promotion decisions recorded | 2026-07-19 | in-progress |
 | Iteration close + PR | 2026-07-20 | pending |
 
 ## Acceptance Criteria
@@ -156,7 +156,13 @@ Concrete exclusions (if a PR does any of these, it is out of V1.124 scope):
   2. **Computable pillar UI** (`DF-V1122-COMPUTABLE-UI`) — elevates the third STRATEGY pillar after Timeline/Canvas depth. Strong product value; slightly less adjacent to the just-closed Timeline visual stack than Fork.
   3. **Harness UI rename** (`DF-V1122-HARNESS-RENAME`) — polish / IA honesty; lower PMF urgency than Fork or Computable.
   4. **status.json compaction + residual cleanup** (77 open) — continuous harness hygiene; may piggyback as a non-business pre-P-last gate inside a product iteration, but should not **be** the iteration direction unless caller redirects to debt-paydown.
-- **Promotion triggers recorded this iteration (filled by P3)**: e.g. Layer breadcrumb → promote to `@42ch/nexus-ui` when a **third** surface reuses the same chain pattern; other `studio-local fixture` → `promoted primitive` triggers land here at P3 Done.
+- **Promotion triggers recorded this iteration (P3):**
+- **NodeChromeShell** (`@web-canvas/node-chrome-shell`, V1.115): promote to `@42ch/nexus-ui` when a **second non-RF consumer** (e.g. desktop native node) needs the same card shell. Currently consumed by App RF wrappers + Studio fixtures.
+  - **Layer breadcrumb** (`@web-canvas/layer-breadcrumb`): promote to `@42ch/nexus-ui` when a **third** surface reuses the same layer-chain pattern (per source header comment). Currently two consumers: App (i18n adapter) + Studio (fixture); neither is a pure presentational consumer.
+  - **Timeline node chrome** (`@web-canvas/timeline-node-chrome`, 6 exports): promote when a **non-canvas consumer** needs Timeline body chrome. Currently App RF wrappers + Studio fixtures — both canvas-context.
+  - **Conflict-modal chrome** (`@web-canvas/conflict-modal-chrome`): promote when a **non-canvas consumer** needs conflict modal chrome. Currently App domain wrappers + Studio fixture — both canvas-context.
+  - **Global Timeline list chrome** (`@web-global-timeline/global-timeline-list-chrome`): promote when a **non-daemon, non-canvas consumer** needs list chrome rows. Currently daemon-coupled App view + Studio fixture.
+  - **No `future web product component`** candidates identified — all deferred surfaces are `web-only wrapper` with revisit triggers, not new product UI.
 - **最终目标**: Every Nexus surface expresses one coherent literary-computational design language — authored in DESIGN.md, projected through tokens, **verified in design-studio** — no surface-local visual invention (V1.106 Studio-first invariant). V1.121 locked the contract; V1.122/V1.123 applied it to Timeline in App; V1.124 makes that work **gallery-verifiable** so future visual change is cheap and policy-enforced.
 
 ## Delivery Branch Policy
