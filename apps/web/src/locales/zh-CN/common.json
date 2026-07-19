@@ -63,7 +63,6 @@
     "requestFailed": "请求失败",
     "couldNotCreateWork": "无法创建作品",
     "couldNotUpdateWork": "无法更新作品",
-    "couldNotUpdateWork": "无法更新作品",
     "couldNotUpdateFinding": "无法更新发现",
     "couldNotUpdateFindings": "无法批量更新发现",
     "couldNotScaffoldPreset": "无法生成预设模板",

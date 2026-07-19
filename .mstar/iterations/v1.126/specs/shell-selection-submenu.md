@@ -83,8 +83,9 @@ Today the Creator-tab sidebar row only navigates — clicking a World row naviga
 
 - **`ShellSidebarChromeProps` gains one new optional prop:**
   ```ts
-  renderSubmenu?: (item: ShellNavItem) => ReactNode;
+  renderSubmenu?: (item: ShellNavItem, close: () => void, anchorEl: HTMLElement) => ReactNode;
   ```
+  > T1 fix-wave ratified the 3rd `anchorEl` parameter post-hoc; needed so the popover can be anchored without re-querying DOM.
 - When `renderSubmenu` is provided, the chrome renders the submenu popover anchored to the active row's right edge. The chrome owns the popover portal container and the `isOpen` per-row state (tracked by `item.to`).
 - **Focus-trap lifecycle:** the submenu component (`SelectionSubmenu`) owns the focus trap (on mount → trap inside submenu; on Esc → release + return focus to the row). The chrome does **not** own focus management.
 - **Dismiss triggers:** outside-click, Esc, route change, `Tab` out of the submenu. The chrome listens to `useLocation()` for route-change dismiss.

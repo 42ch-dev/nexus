@@ -63,7 +63,6 @@
     "requestFailed": "Request failed",
     "couldNotCreateWork": "Could not create Work",
     "couldNotUpdateWork": "Could not update Work",
-    "couldNotUpdateWork": "Could not update Work",
     "couldNotUpdateFinding": "Could not update finding",
     "couldNotUpdateFindings": "Could not update findings",
     "couldNotScaffoldPreset": "Could not scaffold preset",

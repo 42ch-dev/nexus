@@ -2,6 +2,8 @@ import { useCallback, useMemo, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 
+import { useToast } from '@/lib/use-toast';
+
 import {
   AgentPicker,
   type AgentPickerItem,
@@ -63,6 +65,8 @@ export function useAgentPickerDialog(initialTitle?: string): AgentPickerDialogHa
   const [open, setOpen] = useState(false);
   const [dialogTitle, setDialogTitle] = useState(initialTitle ?? '');
   const { t } = useTranslation('settings');
+  const { t: commonT } = useTranslation('common');
+  const { toast } = useToast();
   const desktop = useDesktopCapabilities();
   const qc = useQueryClient();
   const scan = useScanAgents({ filter: 'all', registry_refresh: true });
@@ -93,6 +97,9 @@ export function useAgentPickerDialog(initialTitle?: string): AgentPickerDialogHa
           queryKey: queryKeys.agentHost.scan({ filter: 'all' }),
         });
         setOpen(false);
+      }).catch((err: unknown) => {
+        console.error('setAgentProfile failed', err);
+        toast({ variant: 'error', title: commonT('error.couldNotSaveAgentProfile') });
       });
     },
     [pickerSelection, desktop, qc],
@@ -120,5 +127,8 @@ export function useAgentPickerDialog(initialTitle?: string): AgentPickerDialogHa
     </Dialog>
   );
 
-  return { open, setOpen, setTitle: setDialogTitle, dialog };
+  return useMemo(
+    () => ({ open, setOpen, setTitle: setDialogTitle, dialog }),
+    [open, setOpen, setDialogTitle, dialog],
+  );
 }
