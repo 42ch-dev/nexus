@@ -195,7 +195,7 @@
     },
     {
       "plan_id": "2026-07-20-v1.126-p0-shell-selection-submenu",
-      "status": "InProgress",
+      "status": "Done",
       "iteration_refs": [
         "V1.126"
       ],
@@ -204,7 +204,12 @@
         "spec_integration_branch": "iteration/v1.126",
         "merge_target": "iteration/v1.126",
         "working_branch": "feature/v1.126-p0-shell-selection-submenu",
-        "wire_contracts_changed": false
+        "wire_contracts_changed": false,
+        "done_at": "2026-07-20",
+        "qc_verdict": "Approve with residuals",
+        "qa_verdict": "Pass (mandatory)",
+        "residuals_open_count": 8,
+        "merge_commit": "merged into iteration/v1.126"
       }
     },
     {
@@ -270,14 +275,14 @@
     "spec_refs_index": ".mstar/specs/README.md",
     "target_branch": "main",
     "tech_debt_summary": {
-      "updated_at": "2026-07-12",
-      "total_open": 77,
+      "updated_at": "2026-07-20",
+      "total_open": 261,
       "by_severity": {
         "critical": 0,
-        "high": 0,
-        "medium": 2,
-        "low": 28,
-        "nit": 47
+        "high": 1,
+        "medium": 3,
+        "low": 102,
+        "nit": 155
       },
       "by_target": {
         "V1.96": 8,
@@ -3189,6 +3194,114 @@
         "closure_note": null,
         "tracking_link": ".mstar/plans/2026-07-20-v1.126-p0-shell-selection-submenu.md#Review Gate Summary",
         "notes": "V1.127+ candidate: either promote DELETE /v1/daemon/works/{id} + DELETE /v1/daemon/worlds/{id} to daemon (would flip P0 to wire_contracts_changed: true retroactively — pick as own plan), or use a soft-delete via PATCH {status: 'deleted'} pattern. Submenu ships with 4 items (Timeline / KB-or-Outline / Agent / Rename) in V1.126."
+      },
+      {
+        "id": "R-V1126P0-QC-I-001",
+        "severity": "medium",
+        "title": "renderSubmenu callback identity instability (qc3 I-001)",
+        "lifecycle": "closed",
+        "closure_note": "Fixed in V1.126 P0 QC fix wave (commit 1901f34a)",
+        "tracking_link": ".mstar/sdd/2026-07-20-v1.126-p0-shell-selection-submenu/review/qc-consolidated.md",
+        "notes": "qc3 I-001: useAgentPickerDialog returns fresh object each render → sidebar chrome re-render cascade on worksQuery polling. Fix: useMemo/useCallback. Defer to V1.127+ fast-follow or hotfix."
+      },
+      {
+        "id": "R-V1126P0-QC-I-002",
+        "severity": "medium",
+        "title": "Unhandled promise rejection in setAgentProfile (qc3 I-002)",
+        "lifecycle": "closed",
+        "closure_note": "Fixed in V1.126 P0 QC fix wave (commit 1901f34a)",
+        "tracking_link": ".mstar/sdd/2026-07-20-v1.126-p0-shell-selection-submenu/review/qc-consolidated.md",
+        "notes": "qc3 I-002: desktop.setAgentProfile() has no .catch() → daemon disconnect silent unhandled rejection. Fix: add .catch + toast. Defer to V1.127+ fast-follow."
+      },
+      {
+        "id": "R-V1126P0-QC-W-001",
+        "severity": "low",
+        "title": "Duplicate couldNotUpdateWork locale key (qc1 W-1)",
+        "lifecycle": "closed",
+        "closure_note": "Fixed in V1.126 P0 QC fix wave (commit 1901f34a)",
+        "tracking_link": ".mstar/sdd/2026-07-20-v1.126-p0-shell-selection-submenu/review/qc-consolidated.md",
+        "notes": "qc1 W-1: T2 fix-wave added duplicate key in en+zh-CN common.json. RFC 8259 SHOULD-unique-key violation. Fix: dedupe."
+      },
+      {
+        "id": "R-V1126P0-QC-W-002",
+        "severity": "low",
+        "title": "design-studio AGENTS.md missing @web-shell/* (qc1 W-2)",
+        "lifecycle": "closed",
+        "closure_note": "Fixed in V1.126 P0 QC fix wave (commit 1901f34a)",
+        "tracking_link": ".mstar/sdd/2026-07-20-v1.126-p0-shell-selection-submenu/review/qc-consolidated.md",
+        "notes": "qc1 W-2: Allowed imports table doesn't list @web-shell/*."
+      },
+      {
+        "id": "R-V1126P0-QC-W-003",
+        "severity": "low",
+        "title": "Spec ND-A3 renderSubmenu signature drift (qc1 W-3)",
+        "lifecycle": "closed",
+        "closure_note": "Fixed in V1.126 P0 QC fix wave (commit 1901f34a)",
+        "tracking_link": ".mstar/sdd/2026-07-20-v1.126-p0-shell-selection-submenu/review/qc-consolidated.md",
+        "notes": "qc1 W-3: spec still says 1-param; T1 fix-wave ratified 3-param post-hoc. Spec text needs update."
+      },
+      {
+        "id": "R-V1126P0-QC-S-001",
+        "severity": "nit",
+        "title": "Two-source identity in handleOpenSubmenu (qc1 S-1)",
+        "lifecycle": "open",
+        "closure_note": null,
+        "tracking_link": ".mstar/sdd/2026-07-20-v1.126-p0-shell-selection-submenu/review/qc-consolidated.md",
+        "notes": "qc1 S-1; V1.127+ polish."
+      },
+      {
+        "id": "R-V1126P0-QC-S-002",
+        "severity": "nit",
+        "title": "No popover resize listener (qc1 S-2 / qc3 S-7)",
+        "lifecycle": "open",
+        "closure_note": null,
+        "tracking_link": ".mstar/sdd/2026-07-20-v1.126-p0-shell-selection-submenu/review/qc-consolidated.md",
+        "notes": "qc1 S-2 / qc3 S-7; V1.127+ polish."
+      },
+      {
+        "id": "R-V1126P0-QC-S-003",
+        "severity": "nit",
+        "title": "Stale renamingItem state on pathname change (qc1 S-3 / qc3 S-9)",
+        "lifecycle": "open",
+        "closure_note": null,
+        "tracking_link": ".mstar/sdd/2026-07-20-v1.126-p0-shell-selection-submenu/review/qc-consolidated.md",
+        "notes": "qc1 S-3 / qc3 S-9; qc2 verified row-scoped. Edge case in rapid route changes."
+      },
+      {
+        "id": "R-V1126P0-QC-S-004",
+        "severity": "nit",
+        "title": "Outside-click vs dialog portal interaction (qc1 S-4)",
+        "lifecycle": "open",
+        "closure_note": null,
+        "tracking_link": ".mstar/sdd/2026-07-20-v1.126-p0-shell-selection-submenu/review/qc-consolidated.md",
+        "notes": "qc1 S-4; V1.127+ polish."
+      },
+      {
+        "id": "R-V1126P0-QC-S-005",
+        "severity": "nit",
+        "title": "URL regex over typed workId field (qc1 S-5)",
+        "lifecycle": "open",
+        "closure_note": null,
+        "tracking_link": ".mstar/sdd/2026-07-20-v1.126-p0-shell-selection-submenu/review/qc-consolidated.md",
+        "notes": "qc1 S-5; V1.127+ polish."
+      },
+      {
+        "id": "R-V1126P0-QC-S-006",
+        "severity": "nit",
+        "title": "Memo gap on NavItemLi (qc3 S-6)",
+        "lifecycle": "open",
+        "closure_note": null,
+        "tracking_link": ".mstar/sdd/2026-07-20-v1.126-p0-shell-selection-submenu/review/qc-consolidated.md",
+        "notes": "qc3 S-6; V1.127+ polish."
+      },
+      {
+        "id": "R-V1126P0-QC-S-007",
+        "severity": "nit",
+        "title": "Unused anchorEl dep in outside-click effect (qc3 S-8 / QC2-S-001)",
+        "lifecycle": "open",
+        "closure_note": null,
+        "tracking_link": ".mstar/sdd/2026-07-20-v1.126-p0-shell-selection-submenu/review/qc-consolidated.md",
+        "notes": "qc3 S-8 / QC2-S-001; V1.127+ polish."
       }
     ]
   }
