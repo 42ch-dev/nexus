@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-07-18",
+  "updated_at": "2026-07-19",
   "plans": [
     {
       "plan_id": "2026-07-18-v1.122-three-pillar-spec-refactor",
@@ -92,14 +92,66 @@
         "merge_target": "iteration/v1.123",
         "working_branch": "feature/v1.123-three-layer-zoom-experience"
       }
+    },
+    {
+      "plan_id": "2026-07-19-v1.124-p0-studio-timeline-fixtures",
+      "status": "Todo",
+      "iteration_refs": [
+        "V1.124"
+      ],
+      "metadata": {
+        "primary_spec": ".mstar/specs/design-studio.md",
+        "spec_integration_branch": "iteration/v1.124",
+        "merge_target": "iteration/v1.124",
+        "working_branch": "feature/v1.124-p0-studio-timeline-fixtures"
+      }
+    },
+    {
+      "plan_id": "2026-07-19-v1.124-p1-studio-tokens-gallery-completion",
+      "status": "Todo",
+      "iteration_refs": [
+        "V1.124"
+      ],
+      "metadata": {
+        "primary_spec": ".mstar/specs/design-studio.md",
+        "spec_integration_branch": "iteration/v1.124",
+        "merge_target": "iteration/v1.124",
+        "working_branch": "feature/v1.124-p1-studio-tokens-gallery-completion"
+      }
+    },
+    {
+      "plan_id": "2026-07-19-v1.124-p2-unrepresented-surface-audit",
+      "status": "Todo",
+      "iteration_refs": [
+        "V1.124"
+      ],
+      "metadata": {
+        "primary_spec": ".mstar/specs/design-studio.md",
+        "spec_integration_branch": "iteration/v1.124",
+        "merge_target": "iteration/v1.124",
+        "working_branch": "feature/v1.124-p2-unrepresented-surface-audit"
+      }
+    },
+    {
+      "plan_id": "2026-07-19-v1.124-p3-promotion-classification-audit",
+      "status": "Todo",
+      "iteration_refs": [
+        "V1.124"
+      ],
+      "metadata": {
+        "primary_spec": ".mstar/specs/design-studio.md",
+        "spec_integration_branch": "iteration/v1.124",
+        "merge_target": "iteration/v1.124",
+        "working_branch": "feature/v1.124-p3-promotion-classification-audit"
+      }
     }
   ],
   "metadata": {
     "integration_branch_retired": false,
     "iteration_base_branch": "main",
     "last_integration_branch": "iteration/v1.123",
-    "latest_active_compass": "v1.123/delivery-compass.md",
-    "latest_active_iteration": "V1.123",
+    "latest_active_compass": "v1.124/delivery-compass.md",
+    "latest_active_iteration": "V1.124",
     "latest_ship": {
       "iteration": "V1.123",
       "compass": "v1.123/delivery-compass.md",
@@ -110,7 +162,7 @@
     "platform_integration": "paused — local-only until further notice",
     "pre_implement_gate": null,
     "pre_iteration_hotfix": null,
-    "spec_integration_branch": "iteration/v1.123",
+    "spec_integration_branch": "iteration/v1.124",
     "spec_refs_index": ".mstar/specs/README.md",
     "target_branch": "main",
     "tech_debt_summary": {
@@ -179,7 +231,7 @@
         "2026-07-12-v1.113-i18n-completion": 4
       }
     },
-    "updated_at": "2026-07-18"
+    "updated_at": "2026-07-19"
   },
   "residual_findings": {
     "2026-07-15-v1.119-setup-continue-unblock": [

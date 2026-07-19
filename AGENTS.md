@@ -77,6 +77,40 @@ See linked AGENTS.md files for per-directory decision rules and invariants:
 
 **New crate policy:** when adding a new package or crate to the monorepo, create an `AGENTS.md` in that directory — even if minimal — documenting its purpose, key rules, and dependencies.
 
+## UI Component Policy (Studio-first)
+
+UI work in this repo follows a **studio-first** routing rule. The visual proving ground is `apps/design-studio` (daemon-free Vite gallery); reusable presentational primitives live in `packages/nexus-ui`. Agents must **not** land a new visual system directly in `apps/web` and call it done — that is how V1.122/V1.123 Timeline visuals ended up with tokens in `@nexus/design-tokens` and implementations in `apps/web`, but no Studio gallery and no `@42ch/nexus-ui` representation. Visuals are tuned in Studio first; componentize so promotion stays cheap.
+
+### Decision rule
+
+| If the UI work… | Land it in… | Then |
+|-----------------|-------------|------|
+| Has any visual surface to review (new node, surface, layer, state, or token in use) | **`apps/design-studio`** — presentational fixture under `src/fixtures/` or `src/pages/surfaces.tsx`, light + dark, all variants | Visual acceptance here, before App wiring |
+| Is reusable across `apps/web` + Studio (or future external consumers) **and** pure presentational (no daemon / routing / product state) | **`packages/nexus-ui`** | Promote **after** Studio acceptance; record in plan/spec promotion list |
+| Is coupled to daemon / product state / app routing | **`apps/web/src/components/**`** | Mirror in Studio via a `@web-*` presentational extract alias when visual review is needed |
+
+### Workflow
+
+1. **Studio fixture first** — for any new UI surface, visual variant, or token-consuming component, add (or extend) a fixture in `apps/design-studio` that renders it in both themes with all variants visible. No App wiring claim before the fixture exists.
+2. **Componentize by default** — extract reusable presentational pieces into `@42ch/nexus-ui` rather than leaving them inline. "App-only for now" drifts; promotion is cheap, refactor-out is not. When in doubt, extract.
+3. **Tokens need a gallery** — new `--color-*` tokens landed in `tooling/design-tokens/src/tokens.css` must also appear in Studio's Tokens gallery in the same iteration. A token that exists in CSS but is not visible in Studio is a defect — file a residual.
+4. **Promotion requires a plan entry** — every primitive promotion into `@42ch/nexus-ui` is recorded in the active plan/spec's promotion list (see [`packages/nexus-ui/AGENTS.md`](packages/nexus-ui/AGENTS.md)). Do not silently promote.
+5. **App integration last** — once Studio visuals are accepted, wire real data/behavior in `apps/web` via a thin re-export wrapper (promoted primitive) or the `@web-*` alias (kept app-local).
+
+### Anti-patterns
+
+- Landing a new visual system (Timeline, Layer switcher, Story beats, Canvas surfaces, World/Work/Global Timeline, etc.) directly in `apps/web` with no Studio fixture.
+- Adding a token to `tokens.css` without showing it in Studio's Tokens gallery.
+- Promoting a primitive to `@42ch/nexus-ui` without a plan/spec entry, or before Studio visual acceptance.
+- Treating "App needs it now" as a reason to skip Studio — Studio fixtures are cheap; visual rework against wired App data is not.
+
+### Authority
+
+- Studio boundaries + `@web-*` aliases: [`apps/design-studio/AGENTS.md`](apps/design-studio/AGENTS.md)
+- Promotion rules + package boundary: [`packages/nexus-ui/AGENTS.md`](packages/nexus-ui/AGENTS.md)
+- Canonical workflow + classification labels (`promoted primitive` / `studio-local fixture` / `web-only wrapper` / `future web product component`): [`.mstar/knowledge/architecture-patterns/ui-component-promotion-workflow.md`](.mstar/knowledge/architecture-patterns/ui-component-promotion-workflow.md)
+- Studio spec: [`.mstar/specs/design-studio.md`](.mstar/specs/design-studio.md)
+
 ## Development Policy
 
 **Formatting:** `cargo fmt` must use a **pinned nightly** toolchain so local matches CI exactly (rustfmt formatting rules drift across nightly versions; CI's `Rust fmt & clippy` job pins `FMT_NIGHTLY` in `.github/workflows/ci.yml`). Current pin: **`nightly-2026-06-26`**. Install + use it: `rustup toolchain install nightly-2026-06-26 --component rustfmt` then `cargo +nightly-2026-06-26 fmt --all` (and `--check` to verify). Stable `cargo fmt` ignores `.rustfmt.toml`'s `ignore` field and will **incorrectly reformat** generated code under `crates/nexus-contracts/src/generated/`. When bumping the pin, update both CI and this line.
