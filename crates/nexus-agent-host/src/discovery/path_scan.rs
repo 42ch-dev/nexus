@@ -295,6 +295,39 @@ mod tests {
         assert!(entries.is_empty(), "suppressed ID should be skipped");
     }
 
+    /// Serialize tests that mutate `PATH` so concurrent tests do not see each
+    /// other's isolated environments. Mirrors the `SCAN_PATH_LOCK` pattern in
+    /// `crates/nexus-daemon-runtime/src/api/handlers/agent_host.rs:934`.
+    static SCAN_PATH_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    /// RAII guard that replaces `PATH` with a single directory on construction
+    /// and restores the previous value on drop. Ensures the test genuinely
+    /// depends on the stub binaries — without this, `find_command`'s
+    /// `which::which(command)` fallback (path_scan.rs:140) could discover a
+    /// real `codex`/`claude` binary on the host's PATH and the test would pass
+    /// even if the stubs were absent (qc1 W-002).
+    struct PathGuard {
+        previous: Option<String>,
+    }
+
+    impl PathGuard {
+        fn isolate(dir: &std::path::Path) -> Self {
+            let previous = std::env::var("PATH").ok();
+            let new_path = std::env::join_paths([dir.to_path_buf()]).expect("valid PATH");
+            std::env::set_var("PATH", new_path);
+            Self { previous }
+        }
+    }
+
+    impl Drop for PathGuard {
+        fn drop(&mut self) {
+            match self.previous {
+                Some(ref p) => std::env::set_var("PATH", p),
+                None => std::env::remove_var("PATH"),
+            }
+        }
+    }
+
     /// Verify that `scan_path_in` (the production scan path, not the test-only
     /// `scan_custom_path` helper) discovers BOTH native CLI providers when both
     /// stub binaries are present and executable in the scanned directory.
@@ -304,8 +337,17 @@ mod tests {
     /// executable bit to match real-world CLI conditions. Closes the coverage
     /// gap where existing tests only exercise codex / claude in isolation via
     /// the test helper.
+    ///
+    /// **PATH isolation (qc1 W-002):** `find_command` has a fallback that
+    /// calls `which::which(command)` against the process PATH. If the host has
+    /// real `codex`/`claude` installed, that fallback would make the test pass
+    /// even without the stubs. `PathGuard::isolate(temp_dir)` replaces PATH
+    /// with the temp directory for the test scope so the test genuinely
+    /// depends on the stubs.
     #[test]
     fn scan_path_in_discovers_both_providers_when_stubs_executable() {
+        let _lock = SCAN_PATH_LOCK.lock().expect("lock scan tests");
+
         let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
 
         let claude_path = temp_dir.path().join("claude");
@@ -315,6 +357,10 @@ mod tests {
 
         set_executable(&claude_path);
         set_executable(&codex_path);
+
+        // Isolate PATH so the test depends on the stubs, not on any real
+        // codex/claude that might be installed on the host (qc1 W-002).
+        let _path_guard = PathGuard::isolate(temp_dir.path());
 
         let config = AgentHostConfig::default();
         let entries = scan_path_in(&config, &[], &[temp_dir.path().to_path_buf()])
