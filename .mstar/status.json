@@ -3,21 +3,6 @@
   "updated_at": "2026-07-20",
   "plans": [
     {
-      "id": "2026-07-20-v1.128-p1-nle-timeline-canvas",
-      "file": ".mstar/plans/2026-07-20-v1.128-p1-nle-timeline-canvas.md",
-      "status": "Todo",
-      "title": "P1 \u2014 NLE Timeline canvas",
-      "metadata": {
-        "primary_spec": ".mstar/iterations/v1.128/specs/nle-timeline-canvas.md",
-        "spec_integration_branch": "iteration/v1.128",
-        "merge_target": "iteration/v1.128",
-        "iteration_refs": "v1.128",
-        "working_branch": "feature/v1.128-p1-nle-timeline-canvas",
-        "wire_contracts_changed": false,
-        "description": "NLE Timeline Studio-first then thin App adopt"
-      }
-    },
-    {
       "id": "2026-07-20-v1.128-p2-creator-create-controller-shell",
       "file": ".mstar/plans/2026-07-20-v1.128-p2-creator-create-controller-shell.md",
       "status": "Todo",
@@ -456,6 +441,16 @@
         "closure_note": null,
         "tracking_link": ".mstar/plans/2026-07-20-v1.128-p0-surfaces-chrome-ia.md#Review Gate Summary",
         "notes": "P3 T2 or V1.128+ doc hygiene; not blocking P0."
+      }
+    ],
+    "2026-07-20-v1.128-p1-nle-timeline-canvas": [
+      {
+        "id": "R-V1128P1-001",
+        "severity": "low",
+        "title": "Work Timeline lacks host-level NLE overlay test",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-20-v1.128-p1-nle-timeline-canvas.md#Review Gate Summary",
+        "notes": "World has layer-switcher overlay test; Work wired but no symmetric host test."
       }
     ]
   }
