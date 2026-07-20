@@ -164,6 +164,26 @@ describe('WorldsPage', () => {
     expect(screen.queryByTestId('worlds-empty-create-work')).not.toBeInTheDocument();
   });
 
+  it('disables the Create World card with a desktop-only tooltip when the bridge lacks createWorld (V1.127 P0 T1)', async () => {
+    // BrowserClient has no createWorld — every current bridge hits this path
+    // (architect seat 2 confirmed createWorld is absent on all bridges).
+    useHandlers(
+      http.get('/v1/daemon/narrative/worlds', () => HttpResponse.json({ worlds: [] })),
+    );
+
+    renderWorlds();
+
+    const card = await screen.findByTestId('worlds-empty-create-world');
+    // AC-V1127-1: card renders disabled with a desktop-only tooltip, not a
+    // silent no-op. `disabled` suppresses click activation (click is a no-op
+    // by construction) and removes the card from the tab order.
+    expect(card).toBeDisabled();
+    expect(card).toHaveAttribute('title', 'Open in the desktop app to create a World');
+    // The Create Work peer affordance stays available as the active path so
+    // the browser tester can still reach the Works → Worlds flow.
+    expect(screen.getByTestId('worlds-empty-create-work')).toBeInTheDocument();
+  });
+
   it('renders the honest empty state when no worlds exist', async () => {
     useHandlers(
       http.get('/v1/daemon/narrative/worlds', () => HttpResponse.json({ worlds: [] })),
@@ -231,6 +251,145 @@ describe('WorldsPage', () => {
     });
 
     expect(await screen.findByRole('heading', { name: '世界' })).toBeInTheDocument();
+  });
+
+  // V1.127 P0 T2 — overview cursor pagination (AC-V1127-2). The worlds list
+  // itself (useNarrativeWorlds) is unpaginated; the overview is auxiliary
+  // activity enrichment capped at 20 worlds per page. Load More fetches the
+  // next overview page using the cursor returned by the previous page.
+  describe('overview Load More (V1.127 P0 T2)', () => {
+    it('renders Load More when the overview returns a non-null cursor, fetches the next page with the cursor, and hides it once the cursor goes null', async () => {
+      const user = userEvent.setup();
+      let overviewCursor: string | null = null;
+      useHandlers(
+        http.get('/v1/daemon/narrative/worlds', () =>
+          HttpResponse.json({
+            worlds: [
+              world({ world_id: 'w-1', title: 'Alpha' }),
+              world({ world_id: 'w-2', title: 'Beta' }),
+            ],
+          }),
+        ),
+        http.get('/v1/daemon/timeline/overview', ({ request }) => {
+          const url = new URL(request.url);
+          overviewCursor = url.searchParams.get('cursor');
+          if (!overviewCursor) {
+            return HttpResponse.json({
+              worlds: [
+                {
+                  world_id: 'w-1',
+                  title: 'Alpha',
+                  era_count: 1,
+                  event_count: 0,
+                  last_event_at: null,
+                },
+              ],
+              cursor: 'abc',
+              total_worlds: 2,
+            });
+          }
+          return HttpResponse.json({
+            worlds: [
+              {
+                world_id: 'w-2',
+                title: 'Beta',
+                era_count: 0,
+                event_count: 1,
+                last_event_at: null,
+              },
+            ],
+            cursor: null,
+            total_worlds: 2,
+          });
+        }),
+      );
+
+      renderWorlds();
+
+      const loadMore = await screen.findByTestId('worlds-overview-load-more');
+      expect(loadMore).toBeInTheDocument();
+
+      await user.click(loadMore);
+
+      // Second overview fetch carried the cursor from page 1.
+      await waitFor(() => {
+        expect(overviewCursor).toBe('abc');
+      });
+      // Second page cursor is null → no more → control removed.
+      await waitFor(() => {
+        expect(screen.queryByTestId('worlds-overview-load-more')).not.toBeInTheDocument();
+      });
+    });
+
+    it('hides Load More when the overview cursor is null', async () => {
+      useHandlers(
+        http.get('/v1/daemon/narrative/worlds', () =>
+          HttpResponse.json({ worlds: [world({ world_id: 'w-1', title: 'Alpha' })] }),
+        ),
+        http.get('/v1/daemon/timeline/overview', () =>
+          HttpResponse.json({
+            worlds: [
+              {
+                world_id: 'w-1',
+                title: 'Alpha',
+                era_count: 1,
+                event_count: 0,
+                last_event_at: null,
+              },
+            ],
+            cursor: null,
+            total_worlds: 1,
+          }),
+        ),
+      );
+
+      renderWorlds();
+
+      await screen.findByText('Alpha');
+      expect(screen.queryByTestId('worlds-overview-load-more')).not.toBeInTheDocument();
+    });
+  });
+
+  // V1.127 P0 T3 — scoped overview error banner (AC-V1127-3). The world list
+  // (useNarrativeWorlds) keeps its own error handling; this is for the
+  // overview/activity enrichment composite endpoint only. The test QueryClient
+  // sets `retry: false`, so the overview query fails fast on the 500.
+  describe('overview error state (V1.127 P0 T3)', () => {
+    it('renders a scoped overview error banner with Retry when the overview fetch 500s and refetches on retry', async () => {
+      const user = userEvent.setup();
+      let overviewRequests = 0;
+      useHandlers(
+        http.get('/v1/daemon/narrative/worlds', () =>
+          HttpResponse.json({ worlds: [world({ world_id: 'w-1', title: 'Eryndor' })] }),
+        ),
+        http.get('/v1/daemon/timeline/overview', () => {
+          overviewRequests += 1;
+          return HttpResponse.json(
+            { error: { code: 'INTERNAL', message: 'boom' } },
+            { status: 500 },
+          );
+        }),
+      );
+
+      renderWorlds();
+
+      // The world list still renders — the overview error is scoped, not blocking.
+      expect(await screen.findByText('Eryndor')).toBeInTheDocument();
+
+      // Overview error banner appears above the list with the scoped copy.
+      const banner = await screen.findByTestId('worlds-overview-error');
+      expect(banner).toHaveTextContent("Couldn't load recent activity");
+
+      const initialRequests = overviewRequests;
+      expect(initialRequests).toBeGreaterThanOrEqual(1);
+
+      await user.click(screen.getByRole('button', { name: /try again/i }));
+
+      // Retry re-requested the overview endpoint.
+      await waitFor(() => {
+        expect(overviewRequests).toBe(initialRequests + 1);
+      });
+    });
   });
 });
 

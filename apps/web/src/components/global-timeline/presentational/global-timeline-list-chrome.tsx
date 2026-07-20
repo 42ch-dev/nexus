@@ -54,6 +54,8 @@ export interface GlobalTimelineListChromeProps {
   /** Host-owned row wrapper (e.g. react-router `Link`). */
   renderRow?: RenderGlobalTimelineRow;
   onRowActivate?: (row: GlobalTimelineListRow) => void;
+  /** Optional node rendered after the row list (e.g. Load More control). */
+  footer?: ReactNode;
   'data-testid'?: string;
 }
 
@@ -145,6 +147,7 @@ export function GlobalTimelineListChrome({
   onRetry,
   renderRow,
   onRowActivate,
+  footer,
   'data-testid': testId = 'global-timeline-view',
 }: GlobalTimelineListChromeProps) {
   if (state === 'loading') {
@@ -203,20 +206,23 @@ export function GlobalTimelineListChrome({
             </p>
           </div>
         ) : (
-          <ul className="flex flex-col gap-2" aria-label={listAriaLabel}>
-            {rows.map((row) => {
-              const content = <RowContent row={row} />;
-              return (
-                <li key={row.id}>
-                  {renderRow ? (
-                    renderRow(row, ROW_CLASS_NAME, content)
-                  ) : (
-                    <DefaultRow row={row} onRowActivate={onRowActivate} />
-                  )}
-                </li>
-              );
-            })}
-          </ul>
+          <>
+            <ul className="flex flex-col gap-2" aria-label={listAriaLabel}>
+              {rows.map((row) => {
+                const content = <RowContent row={row} />;
+                return (
+                  <li key={row.id}>
+                    {renderRow ? (
+                      renderRow(row, ROW_CLASS_NAME, content)
+                    ) : (
+                      <DefaultRow row={row} onRowActivate={onRowActivate} />
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+            {footer}
+          </>
         )}
       </CardContent>
     </Card>

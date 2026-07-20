@@ -834,6 +834,8 @@
     "activityLoading": "Loading activity…",
     "activityError": "Activity unavailable",
     "lastEdited": "Last edited {{when}}",
+    "loadMore": "Load more",
+    "loadingMore": "Loading…",
     "layer": {
       "brief": "Brief",
       "narrative": "Narrative"
