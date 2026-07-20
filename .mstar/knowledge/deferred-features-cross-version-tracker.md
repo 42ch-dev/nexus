@@ -1,10 +1,10 @@
 # Deferred Features — Cross-Version Tracker v2
 
-**Quick status**: **V1.126 active** — Shell Selection Submenu + Canvas Directed Axis + Composite Timeline Endpoint + Status Compaction. V1.125 Shipped (Shell Daemon Agent + Orchestration Repair Memory + Creation World-first IA). Platform **paused**.
+**Quick status**: **V1.127 active** — Dogfood-readiness sweep: Control Room author-loop fixes + native agent provider registration. V1.126 Shipped (Shell + Canvas deepening + Tech-debt gate). Platform **paused**.
 
 **Purpose**: Single source of truth for **open** and **backlog** features deferred from delivery compasses. Closed/shipped history lives in shipped archive.
 **Scope**: `nexus` OSS repository only.
-**Created**: 2026-04-21 · **Last updated**: 2026-07-18 (V1.123 Phase 1 product-manager seat 1 — DF-V1123-* inventory + DF-V1122-DEEPER-WB status note)
+**Created**: 2026-04-21 · **Last updated**: 2026-07-20 (V1.127 Phase 1 writing-specialist seat 3 — hygiene pass: DF-V1127-* rows, quick status, R-V1116P0QA-001 note)
 
 ---
 
@@ -65,6 +65,8 @@
 | DF-V1123-MULTI-TIMELINE | Canvas | Multiple parallel Timelines per World (alternate-history branches beyond Fork) | V1.123 | V1.125+ | L | V1.123 | [V1.123 compass](../iterations/v1.123/delivery-compass.md) Deferred. **Owner:** architect. **Trigger:** authors need branch comparison beyond Fork semantics. May absorb multi-timeline remainder of `DF-V1122-DEEPER-WB`. |
 | DF-V1123-GLOBAL-TIMELINE-MERGE | Canvas | Cross-World Timeline merge (read-write merged view, not read-only overview) | V1.123 | V1.125+ | L | V1.123 | [V1.123 compass](../iterations/v1.123/delivery-compass.md) Deferred. P3 global Timeline is **read-only overview** only. **Owner:** product-manager. **Trigger:** P3 overview proves valuable; merge needed for cross-World narrative. |
 | DF-V1123-CROSS-SURFACE-BINDING | Canvas | Cross-surface Timeline event binding (Work Timeline Moment ↔ World Timeline Narrative) — data link + UX | V1.123 | V1.124+ | S | V1.123 | P3 ships UX hints for cross-surface navigation but no formal data binding between Work events and World events. Track for V1.124+ data-binding iteration. QC1 R-V1123P0QC1-M001. |
+| DF-V1127-COMPOSITE-PERF | Cross-cutting | Composite-endpoint performance round: `total_worlds` cleanup, dynamic-SQL → static refactor, N+1 assertion, sqlx prepared-statement caching (scan items 7–8 + V1.126 P2 residual cluster) | V1.127 | V1.128+ | M | V1.127 | [V1.127 compass](../iterations/v1.127/delivery-compass.md) Roadmap Position (e). Pure-scale perf; manual tester with <100 worlds never sees the symptom. **Owner:** architect. **Trigger:** V1.127 dogfood shipped + user's manual testing review feedback. |
+| DF-V1127-NIT-CLOSEOUT | Cross-cutting | V1.126 nit residual close-out (22 nits beyond the 2 absorbed by V1.127 P0: R-V1126P0-QC-S-002, R-V1126P0-QC-S-003) | V1.127 | V1.128+ | S | V1.127 | [V1.127 compass](../iterations/v1.127/delivery-compass.md) Roadmap Position (f). Nits are polish, not test-blockers. **Owner:** frontend-dev. **Trigger:** capacity after V1.127 dogfood. |
 
 ### 2.4 Backlog (no committed target)
 
@@ -94,6 +96,8 @@ Non-feature reliability work routed out of feature iterations; picked up by a de
 
 Residual findings are tracked in [`status.json`](../status.json) → `residual_findings` + `metadata.tech_debt_summary`. The tracker does **not** mirror residual rows — `status.json` is authoritative. Current state: 43 open residuals tracked in [`status.json`](../status.json) via `metadata.tech_debt_summary` (updated 2026-07-20). Closed/historical: `.mstar/archived/residuals/<plan-id>.json`.
 
+**Notable in-flight residual:** `R-V1116P0QA-001` (CodexNativeProvider gap — native agents not registered in daemon HostManager) — in-flight V1.127 P1 (`native-agent-provider-registration`). Not closed until P1 ships.
+
 ---
 
 ## 4) Change control
@@ -106,9 +110,9 @@ Residual findings are tracked in [`status.json`](../status.json) → `residual_f
 
 ## 5) Quick index
 
-**Active iteration**: [V1.126](../iterations/v1.126/delivery-compass.md) (**active** — Shell Selection Submenu + Canvas Directed Axis + Composite Timeline Endpoint + Status Compaction; `iteration/v1.126`).
+**Active iteration**: [V1.127](../iterations/v1.127/delivery-compass.md) (**active** — Dogfood-readiness sweep: Control Room author-loop fixes + native agent provider registration; `iteration/v1.127`).
 
-**Latest shipped**: [V1.125](../iterations/v1.125/delivery-compass.md) (Shell Daemon Agent + Orchestration Repair Memory + Creation World-first IA; 2026-07-19).
+**Latest shipped**: [V1.126](../iterations/v1.126/delivery-compass.md) (Shell + Canvas deepening + Tech-debt gate; 2026-07-20).
 
 **Full iteration index**: [iterations/README.md](../iterations/README.md)
 
