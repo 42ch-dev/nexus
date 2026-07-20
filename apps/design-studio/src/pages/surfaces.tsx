@@ -631,18 +631,12 @@ export function SurfacesDaemonPage() {
   return (
     <section data-testid="surfaces-daemon">
       <SurfaceHeading>Daemon status strip</SurfaceHeading>
-      <SurfaceSourceBadges
-        importPaths={['@42ch/nexus-ui', '@web-ui/badge']}
-      />
+      <SurfaceSourceBadges importPaths={['@42ch/nexus-ui']} />
       <p className="text-copy-14 text-gray-700 mb-6">
         Healthy daemon status affordance — green dot, badge, helper text.
         Composed from{' '}
         <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
           @42ch/nexus-ui
-        </code>{' '}
-        +{' '}
-        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
-          @web-ui/*
         </code>{' '}
         with inline markup. Per DESIGN.md{' '}
         <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
