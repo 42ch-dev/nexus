@@ -101,6 +101,31 @@ export function SelectionSubmenu({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [open, anchorEl, onClose]);
 
+  useEffect(() => {
+    if (!open || !anchorEl) return;
+    // V1.127 P0 T4 (AC-V1127-4): dismiss on layout change. The popover is
+    // `position: fixed` and its coordinates are computed once from the
+    // anchor's rect at render (see below); scrolling the sidebar chrome's
+    // `overflow-auto` <ul> or resizing the window moves the anchor but not
+    // the popover, causing drift. Dismiss-on-layout-change keeps geometry
+    // simple (no reposition) and the submenu is cheap to reopen.
+    //
+    // `resize` fires only on `window`. `scroll` does NOT bubble natively, so
+    // a bubble-phase window listener would miss sidebar-container scrolls;
+    // capturing on `window` catches `scroll` on ANY descendant (the capture
+    // phase descends root → target), covering body-scroll and sidebar-scroll
+    // with a single listener. The capture flag must match on remove.
+    function handleLayoutChange() {
+      onClose();
+    }
+    window.addEventListener('resize', handleLayoutChange);
+    window.addEventListener('scroll', handleLayoutChange, { capture: true });
+    return () => {
+      window.removeEventListener('resize', handleLayoutChange);
+      window.removeEventListener('scroll', handleLayoutChange, { capture: true });
+    };
+  }, [open, anchorEl, onClose]);
+
   if (!open || !anchorEl) return null;
 
   const anchorRect = anchorEl.getBoundingClientRect();
