@@ -47,19 +47,20 @@
     "target_branch": "main",
     "tech_debt_summary": {
       "updated_at": "2026-07-20",
-      "total_open": 31,
+      "total_open": 39,
       "by_severity": {
         "critical": 0,
         "high": 0,
         "medium": 3,
         "low": 4,
-        "nit": 24
+        "nit": 32
       },
       "by_target": {
         "post-V1.92": 1,
         "post-V1.112": 1,
         "post-V1.116": 1,
-        "post-V1.125": 28
+        "post-V1.125": 28,
+        "post-V1.126": 8
       },
       "by_plan": {
         "2026-07-05-v1.92-closure": 1,
@@ -68,7 +69,8 @@
         "2026-07-20-v1.126-p0-shell-selection-submenu": 8,
         "2026-07-20-v1.126-p1-canvas-directed-axis": 5,
         "2026-07-20-v1.126-p2-composite-timeline-endpoint": 11,
-        "2026-07-20-v1.126-p3-status-compaction-residual-cleanup": 4
+        "2026-07-20-v1.126-p3-status-compaction-residual-cleanup": 4,
+        "2026-07-20-v1.127-p0-control-room-author-loop-fixes": 8
       }
     },
     "updated_at": "2026-07-20"
@@ -360,6 +362,80 @@
         "severity": "nit",
         "title": "latest_ship staleness (qc1 S-004)",
         "lifecycle": "open"
+      }
+    ],
+    "2026-07-20-v1.127-p0-control-room-author-loop-fixes": [
+      {
+        "id": "R-V1127P0-QC-S-001",
+        "severity": "nit",
+        "title": "T1 EmptyCreateCard disabled-extension instead of inlined button (qc1 S-001 + qc3 S-002)",
+        "lifecycle": "open",
+        "closure_note": null,
+        "tracking_link": ".mstar/sdd/2026-07-20-v1.127-p0-control-room-author-loop-fixes/review/qc-consolidated.md",
+        "notes": "V1.128+ polish. apps/web/src/pages/worlds-page.tsx:99-114."
+      },
+      {
+        "id": "R-V1127P0-QC-S-002",
+        "severity": "nit",
+        "title": "T2 has_more documentation drift — plan/spec/briefs/compass all reference has_more but schema has only cursor (qc1 S-002)",
+        "lifecycle": "open",
+        "closure_note": null,
+        "tracking_link": ".mstar/sdd/2026-07-20-v1.127-p0-control-room-author-loop-fixes/review/qc-consolidated.md",
+        "notes": "V1.128+ polish. Spec/plan/compass docs need has_more references corrected to cursor-only."
+      },
+      {
+        "id": "R-V1127P0-QC-S-003",
+        "severity": "nit",
+        "title": "T2 worlds-page Load More is activity-enrichment not list pagination — label may mislead (qc1 S-003)",
+        "lifecycle": "open",
+        "closure_note": null,
+        "tracking_link": ".mstar/sdd/2026-07-20-v1.127-p0-control-room-author-loop-fixes/review/qc-consolidated.md",
+        "notes": "V1.128+ polish. apps/web/src/pages/worlds-page.tsx:194-209."
+      },
+      {
+        "id": "R-V1127P0-QC-S-004",
+        "severity": "nit",
+        "title": "T2 queryKeys.timeline.overview vestigial cursor parameter (qc1 S-004 + qc3 S-003)",
+        "lifecycle": "open",
+        "closure_note": null,
+        "tracking_link": ".mstar/sdd/2026-07-20-v1.127-p0-control-room-author-loop-fixes/review/qc-consolidated.md",
+        "notes": "V1.128+ polish. apps/web/src/lib/nexus/query-keys.ts:128-131."
+      },
+      {
+        "id": "R-V1127P0-QC-S-005",
+        "severity": "nit",
+        "title": "T2 flattenOverviewWorlds defeats useMemo in worlds-page.tsx (qc3 S-001)",
+        "lifecycle": "open",
+        "closure_note": null,
+        "tracking_link": ".mstar/sdd/2026-07-20-v1.127-p0-control-room-author-loop-fixes/review/qc-consolidated.md",
+        "notes": "V1.128+ polish. Negligible at <=100 worlds. apps/web/src/pages/worlds-page.tsx:25,34."
+      },
+      {
+        "id": "R-V1127P0-QC-S-006",
+        "severity": "nit",
+        "title": "T2 empty-string cursor vs null cursor contract clarification (qc2 S-002)",
+        "lifecycle": "open",
+        "closure_note": null,
+        "tracking_link": ".mstar/sdd/2026-07-20-v1.127-p0-control-room-author-loop-fixes/review/qc-consolidated.md",
+        "notes": "V1.128+ polish. apps/web/src/api/queries.ts:232-233."
+      },
+      {
+        "id": "R-V1127P0-QC-S-007",
+        "severity": "nit",
+        "title": "T3 banner may flash on initial-load to error transition (qc2 S-003)",
+        "lifecycle": "open",
+        "closure_note": null,
+        "tracking_link": ".mstar/sdd/2026-07-20-v1.127-p0-control-room-author-loop-fixes/review/qc-consolidated.md",
+        "notes": "V1.128+ polish. Add !isInitialLoading guard if observed in dogfood. apps/web/src/pages/worlds-page.tsx:134-141."
+      },
+      {
+        "id": "R-V1127P0-QC-S-008",
+        "severity": "nit",
+        "title": "T4/T5/T6 documentation comments — capture-phase trade-off, history-replaceState, residual lifecycle notes (qc2 S-004/S-005/S-006)",
+        "lifecycle": "open",
+        "closure_note": null,
+        "tracking_link": ".mstar/sdd/2026-07-20-v1.127-p0-control-room-author-loop-fixes/review/qc-consolidated.md",
+        "notes": "V1.128+ polish. selection-submenu.tsx:121-126 + sidebar.tsx:103-112 + archived residual file."
       }
     ]
   }
