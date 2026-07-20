@@ -3,47 +3,71 @@
   "updated_at": "2026-07-20",
   "plans": [
     {
-      "id": "2026-07-20-v1.127-p0-control-room-author-loop-fixes",
-      "file": ".mstar/plans/2026-07-20-v1.127-p0-control-room-author-loop-fixes.md",
-      "status": "Done",
-      "title": "P0 — Control Room author-loop dogfood fixes",
+      "id": "2026-07-20-v1.128-p0-surfaces-chrome-ia",
+      "file": ".mstar/plans/2026-07-20-v1.128-p0-surfaces-chrome-ia.md",
+      "status": "Todo",
+      "title": "P0 \u2014 Surfaces chrome IA",
       "metadata": {
-        "primary_spec": ".mstar/iterations/v1.127/specs/control-room-author-loop-fixes.md",
-        "spec_integration_branch": "iteration/v1.127",
-        "merge_target": "iteration/v1.127",
-        "iteration_refs": "v1.127",
-        "working_branch": "feature/v1.127-p0-control-room-author-loop-fixes",
+        "primary_spec": ".mstar/iterations/v1.128/specs/surfaces-chrome-ia.md",
+        "spec_integration_branch": "iteration/v1.128",
+        "merge_target": "iteration/v1.128",
+        "iteration_refs": "v1.128",
+        "working_branch": "feature/v1.128-p0-surfaces-chrome-ia",
         "wire_contracts_changed": false,
-        "done_at": "2026-07-20",
-        "qc_verdict": "Approve with residuals",
-        "qa_verdict": "Pass (mandatory, acceptance-only)",
-        "residuals_open_count": 8
+        "description": "Surfaces sidebar + Banner retire + Selection overlay fix"
       }
     },
     {
-      "id": "2026-07-20-v1.127-p1-native-agent-provider-registration",
-      "file": ".mstar/plans/2026-07-20-v1.127-p1-native-agent-provider-registration.md",
-      "status": "Done",
-      "title": "P1 — Native agent provider registration in daemon HostManager",
+      "id": "2026-07-20-v1.128-p1-nle-timeline-canvas",
+      "file": ".mstar/plans/2026-07-20-v1.128-p1-nle-timeline-canvas.md",
+      "status": "Todo",
+      "title": "P1 \u2014 NLE Timeline canvas",
       "metadata": {
-        "primary_spec": ".mstar/iterations/v1.127/specs/native-agent-provider-registration.md",
-        "spec_integration_branch": "iteration/v1.127",
-        "merge_target": "iteration/v1.127",
-        "iteration_refs": "v1.127",
-        "working_branch": "feature/v1.127-p1-native-agent-provider-registration",
+        "primary_spec": ".mstar/iterations/v1.128/specs/nle-timeline-canvas.md",
+        "spec_integration_branch": "iteration/v1.128",
+        "merge_target": "iteration/v1.128",
+        "iteration_refs": "v1.128",
+        "working_branch": "feature/v1.128-p1-nle-timeline-canvas",
         "wire_contracts_changed": false,
-        "done_at": "2026-07-20",
-        "qc_verdict": "Approve with residuals (post-fix-wave)",
-        "qa_verdict": "Pass (mandatory, acceptance-only; session-create deferred to dogfood)",
-        "residuals_open_count": 1
+        "description": "NLE Timeline Studio-first then thin App adopt"
+      }
+    },
+    {
+      "id": "2026-07-20-v1.128-p2-creator-create-controller-shell",
+      "file": ".mstar/plans/2026-07-20-v1.128-p2-creator-create-controller-shell.md",
+      "status": "Todo",
+      "title": "P2 \u2014 Creator Create vs Controller shell",
+      "metadata": {
+        "primary_spec": ".mstar/iterations/v1.128/specs/creator-create-controller-shell.md",
+        "spec_integration_branch": "iteration/v1.128",
+        "merge_target": "iteration/v1.128",
+        "iteration_refs": "v1.128",
+        "working_branch": "feature/v1.128-p2-creator-create-controller-shell",
+        "wire_contracts_changed": false,
+        "description": "Create page vs Controller Panel stub"
+      }
+    },
+    {
+      "id": "2026-07-20-v1.128-p3-web-alias-clarity",
+      "file": ".mstar/plans/2026-07-20-v1.128-p3-web-alias-clarity.md",
+      "status": "Todo",
+      "title": "P3 \u2014 web-alias / nexus-ui clarity",
+      "metadata": {
+        "primary_spec": ".mstar/iterations/v1.128/specs/web-alias-clarity.md",
+        "spec_integration_branch": "iteration/v1.128",
+        "merge_target": "iteration/v1.128",
+        "iteration_refs": "v1.128",
+        "working_branch": "feature/v1.128-p3-web-alias-clarity",
+        "wire_contracts_changed": false,
+        "description": "Gallery/docs two-tier import clarity"
       }
     }
   ],
   "metadata": {
     "integration_branch_retired": false,
     "iteration_base_branch": "main",
-    "latest_active_compass": "v1.127/delivery-compass.md",
-    "latest_active_iteration": "V1.127 (Shipped)",
+    "latest_active_compass": "v1.128/delivery-compass.md",
+    "latest_active_iteration": "V1.128 (Active)",
     "latest_ship": {
       "iteration": "V1.127",
       "compass": "v1.127/delivery-compass.md",
@@ -51,8 +75,8 @@
       "pr": "https://github.com/42ch-dev/nexus/pull/161",
       "merge_commit": "5b0a3518c2db95f6dd51a0540a7c3a4b41ab62f3"
     },
-    "platform_integration": "paused — local-only until further notice",
-    "spec_integration_branch": "iteration/v1.127",
+    "platform_integration": "paused \u2014 local-only until further notice",
+    "spec_integration_branch": "iteration/v1.128",
     "spec_refs_index": ".mstar/specs/README.md",
     "target_branch": "main",
     "tech_debt_summary": {
@@ -119,11 +143,11 @@
       {
         "id": "R-V1126P0-T2-001",
         "severity": "low",
-        "title": "Delete action omitted from selection submenu — no DELETE route exists for works/worlds",
+        "title": "Delete action omitted from selection submenu \u2014 no DELETE route exists for works/worlds",
         "lifecycle": "open",
         "closure_note": null,
         "tracking_link": ".mstar/plans/2026-07-20-v1.126-p0-shell-selection-submenu.md#Review Gate Summary",
-        "notes": "V1.127+ candidate: either promote DELETE /v1/daemon/works/{id} + DELETE /v1/daemon/worlds/{id} to daemon (would flip P0 to wire_contracts_changed: true retroactively — pick as own plan), or use a soft-delete via PATCH {status: 'deleted'} pattern. Submenu ships with 4 items (Timeline / KB-or-Outline / Agent / Rename) in V1.126."
+        "notes": "V1.127+ candidate: either promote DELETE /v1/daemon/works/{id} + DELETE /v1/daemon/worlds/{id} to daemon (would flip P0 to wire_contracts_changed: true retroactively \u2014 pick as own plan), or use a soft-delete via PATCH {status: 'deleted'} pattern. Submenu ships with 4 items (Timeline / KB-or-Outline / Agent / Rename) in V1.126."
       },
       {
         "id": "R-V1126P0-QC-S-001",
@@ -376,7 +400,7 @@
       {
         "id": "R-V1127P0-QC-S-002",
         "severity": "nit",
-        "title": "T2 has_more documentation drift — plan/spec/briefs/compass all reference has_more but schema has only cursor (qc1 S-002)",
+        "title": "T2 has_more documentation drift \u2014 plan/spec/briefs/compass all reference has_more but schema has only cursor (qc1 S-002)",
         "lifecycle": "open",
         "closure_note": null,
         "tracking_link": ".mstar/sdd/2026-07-20-v1.127-p0-control-room-author-loop-fixes/review/qc-consolidated.md",
@@ -385,7 +409,7 @@
       {
         "id": "R-V1127P0-QC-S-003",
         "severity": "nit",
-        "title": "T2 worlds-page Load More is activity-enrichment not list pagination — label may mislead (qc1 S-003)",
+        "title": "T2 worlds-page Load More is activity-enrichment not list pagination \u2014 label may mislead (qc1 S-003)",
         "lifecycle": "open",
         "closure_note": null,
         "tracking_link": ".mstar/sdd/2026-07-20-v1.127-p0-control-room-author-loop-fixes/review/qc-consolidated.md",
@@ -430,7 +454,7 @@
       {
         "id": "R-V1127P0-QC-S-008",
         "severity": "nit",
-        "title": "T4/T5/T6 documentation comments — capture-phase trade-off, history-replaceState, residual lifecycle notes (qc2 S-004/S-005/S-006)",
+        "title": "T4/T5/T6 documentation comments \u2014 capture-phase trade-off, history-replaceState, residual lifecycle notes (qc2 S-004/S-005/S-006)",
         "lifecycle": "open",
         "closure_note": null,
         "tracking_link": ".mstar/sdd/2026-07-20-v1.127-p0-control-room-author-loop-fixes/review/qc-consolidated.md",

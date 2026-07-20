@@ -503,7 +503,9 @@
     "2026-07-19-v1.125-creation-world-first-ia",
     "2026-07-20-v1.126-p0-shell-selection-submenu",
     "2026-07-20-v1.126-p1-canvas-directed-axis",
-    "2026-07-20-v1.126-p2-composite-timeline-endpoint"
+    "2026-07-20-v1.126-p2-composite-timeline-endpoint",
+    "2026-07-20-v1.127-p0-control-room-author-loop-fixes",
+    "2026-07-20-v1.127-p1-native-agent-provider-registration"
   ],
   "iteration_summaries": {
     "v1.45": {

@@ -1,0 +1,18 @@
+{
+  "id": "2026-07-20-v1.127-p1-native-agent-provider-registration",
+  "file": ".mstar/plans/2026-07-20-v1.127-p1-native-agent-provider-registration.md",
+  "status": "Done",
+  "title": "P1 \u2014 Native agent provider registration in daemon HostManager",
+  "metadata": {
+    "primary_spec": ".mstar/iterations/v1.127/specs/native-agent-provider-registration.md",
+    "spec_integration_branch": "iteration/v1.127",
+    "merge_target": "iteration/v1.127",
+    "iteration_refs": "v1.127",
+    "working_branch": "feature/v1.127-p1-native-agent-provider-registration",
+    "wire_contracts_changed": false,
+    "done_at": "2026-07-20",
+    "qc_verdict": "Approve with residuals (post-fix-wave)",
+    "qa_verdict": "Pass (mandatory, acceptance-only; session-create deferred to dogfood)",
+    "residuals_open_count": 1
+  }
+}
