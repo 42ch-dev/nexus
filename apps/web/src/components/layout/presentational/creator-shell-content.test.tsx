@@ -14,7 +14,7 @@ const CREATE_LABELS = {
 const CONTROLLER_LABELS = {
   title: 'Controller Panel',
   description: 'Controller Panel — coming soon',
-  selectedLabel: 'Selected {{kind}}: {{label}}',
+  selectedSummary: 'Selected Work: Novel',
   back: 'Back',
 } as const;
 

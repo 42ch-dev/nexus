@@ -28,12 +28,19 @@ const CREATE_LABELS = {
   createWorldDisabledTitle: 'Create World is available on the Nexus desktop app only.',
 } as const;
 
-const CONTROLLER_LABELS = {
+const CONTROLLER_LABELS_BASE = {
   title: 'Controller Panel',
   description: 'Controller Panel — coming soon',
-  selectedLabel: 'Selected {{kind}}: {{label}}',
   back: 'Back',
 } as const;
+
+function controllerLabels(entity: CreatorEntityRef) {
+  const kind = entity.kind === 'world' ? 'World' : 'Work';
+  return {
+    ...CONTROLLER_LABELS_BASE,
+    selectedSummary: `Selected ${kind}: ${entity.label}`,
+  };
+}
 
 const SAMPLE_WORLD: CreatorEntityRef = {
   kind: 'world',
@@ -151,7 +158,7 @@ export function CreatorShellFixtures() {
               <CreatorShellContent
                 mode="controller"
                 selectedEntity={interactiveEntity}
-                labels={CONTROLLER_LABELS}
+                labels={controllerLabels(interactiveEntity)}
                 onBack={() => setInteractiveEntity(null)}
                 data-testid="creator-shell-interactive-content"
               />
@@ -216,7 +223,7 @@ export function CreatorShellFixtures() {
             <CreatorShellContent
               mode="controller"
               selectedEntity={SAMPLE_WORLD}
-              labels={CONTROLLER_LABELS}
+              labels={controllerLabels(SAMPLE_WORLD)}
               onBack={() => {}}
               data-testid="creator-shell-controller-world"
             />
@@ -235,7 +242,7 @@ export function CreatorShellFixtures() {
             <CreatorShellContent
               mode="controller"
               selectedEntity={SAMPLE_WORK}
-              labels={CONTROLLER_LABELS}
+              labels={controllerLabels(SAMPLE_WORLD)}
               onBack={() => {}}
               data-testid="creator-shell-controller-work"
             />

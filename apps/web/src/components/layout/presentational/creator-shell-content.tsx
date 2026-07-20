@@ -19,7 +19,8 @@ export type CreatorShellCreateLabels = {
 export type CreatorShellControllerLabels = {
   title: string;
   description: string;
-  selectedLabel: string;
+  /** Host-interpolated selection summary (i18n-friendly). */
+  selectedSummary: string;
   back: string;
 };
 
@@ -141,7 +142,6 @@ export function CreatorShellContent(props: CreatorShellContentProps) {
   }
 
   const { selectedEntity, labels, onBack } = props;
-  const kindLabel = selectedEntity.kind === 'world' ? 'World' : 'Work';
 
   return (
     <div
@@ -153,7 +153,7 @@ export function CreatorShellContent(props: CreatorShellContentProps) {
         <h1 className="font-display text-display-24 text-gray-1000">{labels.title}</h1>
         <p className="text-copy-14 text-gray-700">{labels.description}</p>
         <p className="text-copy-13 text-gray-700" data-testid="creator-controller-selected">
-          {labels.selectedLabel.replace('{{kind}}', kindLabel).replace('{{label}}', selectedEntity.label)}
+          {labels.selectedSummary}
         </p>
       </div>
       <div>

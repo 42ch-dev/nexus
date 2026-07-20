@@ -14,8 +14,9 @@ import {
   User,
 } from 'lucide-react';
 
-import { flattenPages, usePatchWork, useWorks } from '@/api/queries';
+import { flattenPages, usePatchWork, useWorks, useNarrativeWorlds } from '@/api/queries';
 import { NexusLogo } from '@/components/brand/nexus-logo';
+import { useCreatorEntitySelection } from '@/components/layout/creator-entity-selection-context';
 import { FooterProfiles } from '@/components/layout/footer-profiles';
 import { useAgentPickerDialog } from '@/components/layout/use-agent-picker-dialog';
 import {
@@ -69,8 +70,11 @@ export function Sidebar() {
   const [activeTab, setActiveTab] = useState<ShellSidebarTab>(() => tabFromPathname(pathname));
   const worksQuery = useWorks({ limit: 12 });
   const works = useMemo(() => flattenPages(worksQuery.data), [worksQuery.data]);
+  const worldsQuery = useNarrativeWorlds();
+  const worlds = useMemo(() => worldsQuery.data ?? [], [worldsQuery.data]);
   const patchWork = usePatchWork();
   const agentDialog = useAgentPickerDialog();
+  const { setSelectedEntity, clearSelectedEntity } = useCreatorEntitySelection();
 
   const [renamingItem, setRenamingItem] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
@@ -89,8 +93,35 @@ export function Sidebar() {
     return null;
   }
 
+  function extractWorldId(item: ShellNavItem): string | null {
+    const match = /^\/worlds\/([^/]+)/.exec(item.to);
+    if (match) {
+      const id = decodeURIComponent(match[1]);
+      return id === '' ? null : id;
+    }
+    return null;
+  }
+
   function isEntityItem(item: ShellNavItem): boolean {
-    return extractWorkId(item) !== null;
+    return extractWorkId(item) !== null || extractWorldId(item) !== null;
+  }
+
+  function isHubAggregateItem(item: ShellNavItem): boolean {
+    return item.to === '/worlds' || item.to === '/works';
+  }
+
+  function activateEntitySelection(item: ShellNavItem) {
+    const workId = extractWorkId(item);
+    if (workId) {
+      setSelectedEntity({ kind: 'work', id: workId, label: item.label });
+      navigate('/works');
+      return;
+    }
+    const worldId = extractWorldId(item);
+    if (worldId) {
+      setSelectedEntity({ kind: 'world', id: worldId, label: item.label });
+      navigate('/worlds');
+    }
   }
 
   useEffect(() => {
@@ -133,7 +164,14 @@ export function Sidebar() {
       {
         id: 'worlds',
         label: t('nav.worlds'),
-        items: [{ to: '/worlds', label: t('nav.worlds'), icon: Globe }],
+        items: [
+          { to: '/worlds', label: t('nav.worlds'), icon: Globe },
+          ...worlds.map((world) => ({
+            to: `/worlds/${encodeURIComponent(world.world_id)}/timeline`,
+            label: world.title || world.world_id,
+            icon: Globe,
+          })),
+        ],
       },
       {
         id: 'works',
@@ -148,7 +186,7 @@ export function Sidebar() {
         ],
       },
     ],
-    [t, works],
+    [t, works, worlds],
   );
 
   const orchestratorGroups: ShellNavGroup[] = useMemo(
@@ -293,6 +331,15 @@ export function Sidebar() {
               onClick={(e) => {
                 if (isRenaming) {
                   e.preventDefault();
+                  return;
+                }
+                if (isHubAggregateItem(item)) {
+                  clearSelectedEntity();
+                  return;
+                }
+                if (isEntityItem(item)) {
+                  e.preventDefault();
+                  activateEntitySelection(item);
                 }
               }}
             >
