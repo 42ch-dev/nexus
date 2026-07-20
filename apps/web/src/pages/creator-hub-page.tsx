@@ -61,9 +61,24 @@ export function CreatorHubPage() {
           createWorldDisabledTitle: tWorlds('create.desktop-only'),
         }}
         onCreateWorld={() => {
-          if (hasCreateWorldClient(client)) {
-            return;
-          }
+          void (async () => {
+            if (!hasCreateWorldClient(client)) {
+              return;
+            }
+            try {
+              const result = (await client.createWorld({})) as {
+                world_id?: string;
+                id?: string;
+              };
+              const worldId = result.world_id ?? result.id;
+              if (typeof worldId === 'string' && worldId.length > 0) {
+                clearSelectedEntity();
+                navigate(`/worlds/${encodeURIComponent(worldId)}/timeline`);
+              }
+            } catch {
+              // Surface stays on Create page; toast deferred until Create World wire lands.
+            }
+          })();
         }}
         onCreateWork={() => setCreateWorkOpen(true)}
         data-testid="creator-hub-create"
