@@ -3,21 +3,6 @@
   "updated_at": "2026-07-20",
   "plans": [
     {
-      "id": "2026-07-20-v1.128-p2-creator-create-controller-shell",
-      "file": ".mstar/plans/2026-07-20-v1.128-p2-creator-create-controller-shell.md",
-      "status": "Todo",
-      "title": "P2 \u2014 Creator Create vs Controller shell",
-      "metadata": {
-        "primary_spec": ".mstar/iterations/v1.128/specs/creator-create-controller-shell.md",
-        "spec_integration_branch": "iteration/v1.128",
-        "merge_target": "iteration/v1.128",
-        "iteration_refs": "v1.128",
-        "working_branch": "feature/v1.128-p2-creator-create-controller-shell",
-        "wire_contracts_changed": false,
-        "description": "Create page vs Controller Panel stub"
-      }
-    },
-    {
       "id": "2026-07-20-v1.128-p3-web-alias-clarity",
       "file": ".mstar/plans/2026-07-20-v1.128-p3-web-alias-clarity.md",
       "status": "Todo",
@@ -451,6 +436,15 @@
         "lifecycle": "open",
         "tracking_link": ".mstar/plans/2026-07-20-v1.128-p1-nle-timeline-canvas.md#Review Gate Summary",
         "notes": "World has layer-switcher overlay test; Work wired but no symmetric host test."
+      }
+    ],
+    "2026-07-20-v1.128-p2-creator-create-controller-shell": [
+      {
+        "id": "R-V1128P2-001",
+        "severity": "nit",
+        "title": "Creator hub integration tests cover Work selection only (no World row)",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-20-v1.128-p2-creator-create-controller-shell.md#Review Gate Summary"
       }
     ]
   }

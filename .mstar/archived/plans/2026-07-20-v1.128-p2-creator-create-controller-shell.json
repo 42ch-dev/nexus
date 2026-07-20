@@ -1,0 +1,19 @@
+{
+  "id": "2026-07-20-v1.128-p2-creator-create-controller-shell",
+  "file": ".mstar/plans/2026-07-20-v1.128-p2-creator-create-controller-shell.md",
+  "status": "Done",
+  "title": "P2 \u2014 Creator Create vs Controller shell",
+  "metadata": {
+    "primary_spec": ".mstar/iterations/v1.128/specs/creator-create-controller-shell.md",
+    "spec_integration_branch": "iteration/v1.128",
+    "merge_target": "iteration/v1.128",
+    "iteration_refs": "v1.128",
+    "working_branch": "feature/v1.128-p2-creator-create-controller-shell",
+    "wire_contracts_changed": false,
+    "description": "Create page vs Controller Panel stub",
+    "done_at": "2026-07-20",
+    "qc_verdict": "Approve with residuals",
+    "qa_verdict": "Pass (mandatory, acceptance-only)",
+    "residuals_open_count": 1
+  }
+}
