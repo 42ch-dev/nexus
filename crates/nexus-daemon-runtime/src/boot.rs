@@ -728,6 +728,14 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
         // filesystem touch and is safe to call when the CLI is absent (probe
         // is lazy). `HashMap::insert` replaces silently — safe on re-boot
         // (architect AQ-3; closes R-V1116P0QA-001).
+        //
+        // Defensive-wrapping trade-off (qc1/qc3 S-001): straight-line
+        // registration without `match`/`if let Ok(...)` is safe because
+        // `default_config()` is a pure constructor that does not panic — it
+        // builds the struct with the command name and returns immediately.
+        // The actual CLI lookup happens later in `probe()` (via `which`)
+        // and `execute()` (process spawn), both of which handle a missing
+        // binary gracefully. Wrapping here would add ceremony without value.
         manager
             .register_provider(Arc::new(CodexNativeProvider::default_config()))
             .await;
