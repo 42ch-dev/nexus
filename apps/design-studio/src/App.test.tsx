@@ -715,11 +715,39 @@ describe('Surfaces page — selection submenu fixtures', () => {
     expect(input).toHaveValue('My Fantasy World');
   });
 
-  it('renders agent dialog overlay with entity-name title', () => {
+  it('renders agent dialog overlay with entity-name title after Open', () => {
     const agentFrame = screen.getByTestId('selection-submenu-agent-dialog-frame');
-    const dialog = within(agentFrame).getByRole('dialog', { name: /Assign agent to My Fantasy World/i });
+    expect(within(agentFrame).queryByRole('dialog')).not.toBeInTheDocument();
+
+    fireEvent.click(
+      within(agentFrame).getByRole('button', { name: 'Open agent dialog' }),
+    );
+    const dialog = within(agentFrame).getByRole('dialog', {
+      name: /Assign agent to My Fantasy World/i,
+    });
     expect(dialog).toBeInTheDocument();
     expect(dialog).toHaveAttribute('aria-modal', 'true');
+    expect(dialog.className).toContain('absolute');
+    expect(dialog.className).not.toContain('fixed');
+  });
+
+  it('closes agent dialog so sibling variants stay reachable and reopen works (V1.128 P0 T3)', () => {
+    const agentFrame = screen.getByTestId('selection-submenu-agent-dialog-frame');
+    fireEvent.click(
+      within(agentFrame).getByRole('button', { name: 'Open agent dialog' }),
+    );
+    expect(within(agentFrame).getByRole('dialog')).toBeInTheDocument();
+
+    fireEvent.click(within(agentFrame).getByRole('button', { name: 'Cancel' }));
+    expect(within(agentFrame).queryByRole('dialog')).not.toBeInTheDocument();
+
+    const worldLight = screen.getByTestId('selection-submenu-world-light');
+    expect(within(worldLight).getByRole('menu')).toBeInTheDocument();
+
+    fireEvent.click(
+      within(agentFrame).getByRole('button', { name: 'Open agent dialog' }),
+    );
+    expect(within(agentFrame).getByRole('dialog')).toBeInTheDocument();
   });
 
   it('renders dark variant with dark class wrapper', () => {
