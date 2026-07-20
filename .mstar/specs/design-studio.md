@@ -58,6 +58,16 @@ Design Studio is a **standalone Vite + React SPA** (`apps/design-studio`) that m
 
 ### 3.2 What studio may import
 
+**Two-tier model (V1.128):** Studio consumes both `@42ch/nexus-ui` **and** `@web-*` aliases. They are not interchangeable.
+
+| Tier | Pattern | Meaning |
+| --- | --- | --- |
+| Promoted primitive | `@42ch/nexus-ui` | Publishable package export after Studio visual acceptance |
+| App presentational extract | `@web-layout/*`, `@web-canvas/*`, `@web-setup/*`, `@web-settings/*`, `@web-global-timeline/*`, `@web-shell/*`, … | Monorepo-only alias → `apps/web` props-driven chrome |
+| Transitional primitive | `@web-ui/*` | Unpromoted `apps/web/src/components/ui/*` mirror |
+
+Surfaces gallery sections display source badges distinguishing extract vs promoted. Mass migration of `@web-*` into `@42ch/nexus-ui` is **out of scope** — clarity over consolidation. Detail: [web-alias-clarity](../iterations/v1.128/specs/web-alias-clarity.md).
+
 | Source | Allowed | Notes |
 | --- | --- | --- |
 | Root `DESIGN.md` / `DESIGN.dark.md` | Yes | SSOT; consumed via `@nexus/design-tokens` CSS pipeline |
@@ -165,10 +175,9 @@ Section nav labels and per-component matrix: [IA guide](../iterations/v1.98/guid
 | Route | Fixture file | Classification |
 |-------|--------------|----------------|
 | `/surfaces/launch` | `launch-daemon-fixtures.tsx` | `@web-setup/daemon-ready-splash` import |
-| `/surfaces/banner` | `main-banner-fixtures.tsx` | Composition-only (no App `main-banner.tsx` import) |
 | `/components` Toast section | `toast-fixtures.tsx` or inline | `@42ch/nexus-ui` + Studio renderer |
 
-Register Launch and Banner in `SURFACES_SECTIONS` alongside existing Setup / Shell / AgentPicker / Daemon slices.
+Register Launch in `SURFACES_SECTIONS` alongside existing Setup / Shell / AgentPicker / Daemon slices. **Banner** (`/surfaces/banner`, `main-banner-fixtures.tsx`) was a V1.106 composition-only sketch — **removed in V1.128 P0** (closes residual R-V1128P0-001); do not re-add without a new plan entry.
 
 ### V1.107 Surfaces and import amendments (P0 Must — iteration detail)
 
