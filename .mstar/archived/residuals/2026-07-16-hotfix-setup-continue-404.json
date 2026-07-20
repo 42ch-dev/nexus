@@ -1,28 +1,41 @@
-{
-  "schema_version": "1.0",
-  "archived_at": "2026-07-20T00:00:00Z",
-  "plan_id": "2026-07-16-hotfix-setup-continue-404",
-  "source_iteration": "V1.127",
-  "source_plan": "2026-07-20-v1.127-p0-control-room-author-loop-fixes",
-  "source_task": "T6",
-  "entries": [
-    {
-      "id": "R-HOTFIX-SETUP-CONTINUE-404",
-      "title": "PATCH/GET /v1/daemon/creators/{creator_id} returns Axum framework 404 (empty body); Setup Continue updateCreator blocked",
-      "severity": "high",
-      "decision": "fix_now",
-      "owner": "@fullstack-dev",
-      "target": "hotfix",
-      "lifecycle": "closed",
-      "tracking_link": ".mstar/plans/2026-07-16-hotfix-setup-continue-404.md",
-      "note": "Fixed on fix/setup-continue-creator-patch-404 (5004cb08). Pending QA + merge.",
-      "closure_note": "Shipped — fix e320e62d on main HEAD (PR #153)",
-      "closure_evidence": {
-        "commit": "e320e62d",
-        "commit_subject": "fix: Setup Continue 404 on creator PATCH (#153)",
-        "verified_via": "git merge-base --is-ancestor e320e62d main → exit 0 (confirmed ancestor of main HEAD)",
-        "pr": "https://github.com/42ch-dev/nexus/pull/153"
-      }
-    }
-  ]
-}
+[
+  {
+    "id": "R-HOTFIX-404-PARAM-SYNTAX",
+    "title": "Daemon routes mix {param} and :param; creators GET/PATCH needed :param when {id}:verb sibling exists",
+    "severity": "low",
+    "decision": "defer",
+    "owner": "@fullstack-dev",
+    "target": "backlog",
+    "lifecycle": "resolved",
+    "tracking_link": ".mstar/sdd/2026-07-16-hotfix-setup-continue-404/review/qc.md",
+    "note": "QC single-review residual. Hotfix scoped to creators; optional convention audit later.",
+    "closure_note": "Archived as low/nit bulk (V1.126 P3 gate)",
+    "archived_at": "2026-07-20T00:00:00Z"
+  },
+  {
+    "id": "R-HOTFIX-404-MANUAL-DOGFOOD",
+    "title": "Author desktop dogfood: Setup Workspace Continue after daemon rebuild",
+    "severity": "low",
+    "decision": "verify",
+    "owner": "@project-manager",
+    "target": "pre-merge",
+    "lifecycle": "resolved",
+    "tracking_link": ".mstar/plans/2026-07-16-hotfix-setup-continue-404.md",
+    "note": "QA could not launch Tauri; one Continue click after rebuild confirms unblock.",
+    "closure_note": "Archived as low/nit bulk (V1.126 P3 gate)",
+    "archived_at": "2026-07-20T00:00:00Z"
+  },
+  {
+    "id": "R-HOTFIX-SETUP-CONTINUE-404",
+    "title": "PATCH/GET /v1/daemon/creators/{creator_id} returns Axum framework 404 (empty body); Setup Continue updateCreator blocked",
+    "severity": "high",
+    "decision": "fix_now",
+    "owner": "@fullstack-dev",
+    "target": "hotfix",
+    "lifecycle": "closed",
+    "tracking_link": ".mstar/plans/2026-07-16-hotfix-setup-continue-404.md",
+    "note": "Fixed on fix/setup-continue-creator-patch-404 (5004cb08). Pending QA + merge.",
+    "closure_note": "Shipped — fix e320e62d on main HEAD (PR #153)",
+    "archived_at": "2026-07-20T00:00:00Z"
+  }
+]
