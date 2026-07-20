@@ -723,28 +723,53 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
         };
 
         let manager = nexus_agent_host::core::manager::HostManager::new();
-        // Register always-on native CLI providers so agent discovery surfaces
-        // them without relying on PATH scan. `default_config()` performs no
-        // filesystem touch and is safe to call when the CLI is absent (probe
-        // is lazy). `HashMap::insert` replaces silently — safe on re-boot
-        // (architect AQ-3; closes R-V1116P0QA-001).
+        // Probe CLI presence before registering. Providers whose CLI is
+        // absent from PATH are NOT registered, so `/providers` and the
+        // AgentPicker UI do not surface them — avoiding a false promise
+        // where the UI offers a session path that only fails at
+        // process-spawn time (greptile P1; supersedes the qc1 W-001
+        // deferral R-V1127P1-QC-W-001, now closed).
         //
-        // Defensive-wrapping trade-off (qc1/qc3 S-001): straight-line
-        // registration without `match`/`if let Ok(...)` is safe because
-        // `default_config()` is a pure constructor that does not panic — it
-        // builds the struct with the command name and returns immediately.
-        // The actual CLI lookup happens later in `probe()` (via `which`)
-        // and `execute()` (process spawn), both of which handle a missing
-        // binary gracefully. Wrapping here would add ceremony without value.
-        manager
-            .register_provider(Arc::new(CodexNativeProvider::default_config()))
-            .await;
-        manager
-            .register_provider(Arc::new(ClaudeCliProvider::default_config()))
-            .await;
+        // `default_config()` is a pure constructor that does not panic;
+        // `which::which()` is a fast PATH lookup (~1ms). Both are safe
+        // to call unconditionally at boot.
+        let mut providers_registered = 0u32;
+
+        if which::which("codex").is_ok() {
+            manager
+                .register_provider(Arc::new(CodexNativeProvider::default_config()))
+                .await;
+            providers_registered += 1;
+            tracing::info!(
+                provider = "codex-native",
+                "registered native agent provider"
+            );
+        } else {
+            tracing::warn!(
+                provider = "codex-native",
+                "CLI not found on PATH; skipping registration"
+            );
+        }
+
+        if which::which("claude").is_ok() {
+            manager
+                .register_provider(Arc::new(ClaudeCliProvider::default_config()))
+                .await;
+            providers_registered += 1;
+            tracing::info!(
+                provider = "claude-native",
+                "registered native agent provider"
+            );
+        } else {
+            tracing::warn!(
+                provider = "claude-native",
+                "CLI not found on PATH; skipping registration"
+            );
+        }
+
         tracing::info!(
-            providers_registered = 2,
-            "registered native agent providers (codex-native, claude-native)"
+            providers_registered,
+            "native agent provider registration complete"
         );
         Arc::new(manager)
     };
