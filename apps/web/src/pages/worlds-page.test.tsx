@@ -252,6 +252,103 @@ describe('WorldsPage', () => {
 
     expect(await screen.findByRole('heading', { name: '世界' })).toBeInTheDocument();
   });
+
+  // V1.127 P0 T2 — overview cursor pagination (AC-V1127-2). The worlds list
+  // itself (useNarrativeWorlds) is unpaginated; the overview is auxiliary
+  // activity enrichment capped at 20 worlds per page. Load More fetches the
+  // next overview page using the cursor returned by the previous page.
+  describe('overview Load More (V1.127 P0 T2)', () => {
+    it('renders Load More when the overview returns a non-null cursor, fetches the next page with the cursor, and hides it once the cursor goes null', async () => {
+      const user = userEvent.setup();
+      let overviewCursor: string | null = null;
+      useHandlers(
+        http.get('/v1/daemon/narrative/worlds', () =>
+          HttpResponse.json({
+            worlds: [
+              world({ world_id: 'w-1', title: 'Alpha' }),
+              world({ world_id: 'w-2', title: 'Beta' }),
+            ],
+          }),
+        ),
+        http.get('/v1/daemon/timeline/overview', ({ request }) => {
+          const url = new URL(request.url);
+          overviewCursor = url.searchParams.get('cursor');
+          if (!overviewCursor) {
+            return HttpResponse.json({
+              worlds: [
+                {
+                  world_id: 'w-1',
+                  title: 'Alpha',
+                  era_count: 1,
+                  event_count: 0,
+                  last_event_at: null,
+                },
+              ],
+              cursor: 'abc',
+              total_worlds: 2,
+            });
+          }
+          return HttpResponse.json({
+            worlds: [
+              {
+                world_id: 'w-2',
+                title: 'Beta',
+                era_count: 0,
+                event_count: 1,
+                last_event_at: null,
+              },
+            ],
+            cursor: null,
+            total_worlds: 2,
+          });
+        }),
+      );
+
+      renderWorlds();
+
+      const loadMore = await screen.findByTestId('worlds-overview-load-more');
+      expect(loadMore).toBeInTheDocument();
+
+      await user.click(loadMore);
+
+      // Second overview fetch carried the cursor from page 1.
+      await waitFor(() => {
+        expect(overviewCursor).toBe('abc');
+      });
+      // Second page cursor is null → no more → control removed.
+      await waitFor(() => {
+        expect(screen.queryByTestId('worlds-overview-load-more')).not.toBeInTheDocument();
+      });
+    });
+
+    it('hides Load More when the overview cursor is null', async () => {
+      useHandlers(
+        http.get('/v1/daemon/narrative/worlds', () =>
+          HttpResponse.json({ worlds: [world({ world_id: 'w-1', title: 'Alpha' })] }),
+        ),
+        http.get('/v1/daemon/timeline/overview', () =>
+          HttpResponse.json({
+            worlds: [
+              {
+                world_id: 'w-1',
+                title: 'Alpha',
+                era_count: 1,
+                event_count: 0,
+                last_event_at: null,
+              },
+            ],
+            cursor: null,
+            total_worlds: 1,
+          }),
+        ),
+      );
+
+      renderWorlds();
+
+      await screen.findByText('Alpha');
+      expect(screen.queryByTestId('worlds-overview-load-more')).not.toBeInTheDocument();
+    });
+  });
 });
 
 // V1.121 v0.4 — voice-split discipline (DESIGN.md §Design Concept).

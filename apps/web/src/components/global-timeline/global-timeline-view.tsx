@@ -9,8 +9,9 @@ import { type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router-dom';
 
-import { useTimelineOverview } from '@/api/queries';
+import { useTimelineOverview, flattenOverviewWorlds } from '@/api/queries';
 import { formatRelative } from '@/lib/format';
+import { Button } from '@/components/ui/button';
 
 import {
   GlobalTimelineListChrome,
@@ -38,6 +39,7 @@ function renderAppRow(
 export function GlobalTimelineView() {
   const { t } = useTranslation('canvas');
   const overview = useTimelineOverview();
+  const worlds = flattenOverviewWorlds(overview.data);
 
   const chromeShared = {
     title: t('globalTimeline.title'),
@@ -68,7 +70,7 @@ export function GlobalTimelineView() {
       />
     );
   }
-  if (!overview.data || overview.data.worlds.length === 0) {
+  if (worlds.length === 0) {
     return (
       <GlobalTimelineListChrome
         {...chromeShared}
@@ -78,7 +80,7 @@ export function GlobalTimelineView() {
     );
   }
 
-  const rows: GlobalTimelineListRow[] = overview.data.worlds.map((world) => {
+  const rows: GlobalTimelineListRow[] = worlds.map((world) => {
     const label = world.title || world.world_id;
     const layer = world.era_count > 0 ? 'brief' : 'narrative';
     const activityText = t('globalTimeline.activitySummary', {
@@ -100,12 +102,35 @@ export function GlobalTimelineView() {
     };
   });
 
+  // V1.127 P0 T2: "Load more" pages past the daemon's 20-World page cap.
+  // `hasNextPage` is true when the last overview page returned a non-null
+  // next cursor (see useTimelineOverview.getNextPageParam).
+  const footer = overview.hasNextPage ? (
+    <div className="pt-2">
+      <Button
+        type="button"
+        variant="tertiary"
+        className="w-full"
+        onClick={() => {
+          void overview.fetchNextPage();
+        }}
+        disabled={overview.isFetchingNextPage}
+        data-testid="global-timeline-load-more"
+      >
+        {overview.isFetchingNextPage
+          ? t('globalTimeline.loadingMore')
+          : t('globalTimeline.loadMore')}
+      </Button>
+    </div>
+  ) : null;
+
   return (
     <GlobalTimelineListChrome
       {...chromeShared}
       state="ready"
       rows={rows}
       renderRow={renderAppRow}
+      footer={footer}
     />
   );
 }

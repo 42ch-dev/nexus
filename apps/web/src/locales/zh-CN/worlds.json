@@ -21,5 +21,7 @@
   "timelineActivity": "时间线活动",
   "timelineActivityLastEdited": "时间线 · 上次编辑 {{when}}",
   "timelineActivityOverview": "{{era}} 个纪元 · {{event}} 个事件 · {{when}}",
-  "timelineActivityFallback": "时间线 · 暂无活动"
+  "timelineActivityFallback": "时间线 · 暂无活动",
+  "loadMore": "加载更多",
+  "loadingMore": "加载中…"
 }

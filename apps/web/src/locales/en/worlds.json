@@ -21,5 +21,7 @@
   "timelineActivity": "Timeline activity",
   "timelineActivityLastEdited": "Timeline · last edited {{when}}",
   "timelineActivityOverview": "{{era}} eras · {{event}} events · {{when}}",
-  "timelineActivityFallback": "Timeline · no activity yet"
+  "timelineActivityFallback": "Timeline · no activity yet",
+  "loadMore": "Load more",
+  "loadingMore": "Loading…"
 }

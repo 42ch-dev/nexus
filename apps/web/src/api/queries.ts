@@ -50,6 +50,7 @@ import type {
   ScanRequest,
   ScanResponse,
   SoulNarrativeResponse,
+  TimelineOverviewResponse,
   UpdateFindingRequest,
   ValidatePresetRequest,
   WorkSummary,
@@ -206,15 +207,40 @@ export function usePresets() {
   });
 }
 
-// ── Timeline (V1.126 P2) ──────────────────────────────────────────────────────
+// ── Timeline (V1.126 P2; V1.127 P0 T2 infinite pagination) ────────────────────
 
-export function useTimelineOverview(cursor?: string) {
+/**
+ * Cursor-paginated global Timeline overview across all Worlds.
+ *
+ * V1.127 P0 T2: upgraded from a single-page `useQuery` to `useInfiniteQuery`
+ * so the Global Timeline + Worlds page can page past the daemon's 20-World
+ * page cap (`TimelineOverviewResponse.worlds.maxItems: 20`). The composite
+ * response carries the NEXT cursor directly as `TimelineOverviewResponse.cursor`
+ * — there is no separate `has_more` flag, so `getNextPageParam` treats a
+ * non-null cursor as "has next page" and the cursor string itself as the next
+ * page param. Consumers drive their "Load more" controls off `hasNextPage` /
+ * `fetchNextPage` and flatten pages via {@link flattenOverviewWorlds}.
+ */
+export function useTimelineOverview() {
   const client = useNexusClient();
-  return useQuery({
-    queryKey: queryKeys.timeline.overview(cursor),
-    queryFn: () => client.getTimelineOverview(cursor),
+  return useInfiniteQuery({
+    queryKey: queryKeys.timeline.overview(),
+    initialPageParam: FIRST_PAGE,
+    queryFn: async ({ pageParam }): Promise<TimelineOverviewResponse> => {
+      return client.getTimelineOverview(pageParam);
+    },
+    getNextPageParam: (lastPage: TimelineOverviewResponse): Cursor =>
+      lastPage.cursor ?? undefined,
     staleTime: 10_000,
   });
+}
+
+/** Flatten the infinite overview pages into one worlds array. */
+export function flattenOverviewWorlds(
+  data: { pages: TimelineOverviewResponse[] } | undefined,
+): TimelineOverviewResponse['worlds'] {
+  if (!data) return [];
+  return data.pages.flatMap((p) => p.worlds);
 }
 
 // ── Mutations (Setup writes) ─────────────────────────────────────────────────
