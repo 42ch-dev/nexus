@@ -88,3 +88,9 @@ Engineering reference for the Nexus OSS harness **knowledge** tree.
 | [conventions/three-layer-timeline-feel.md](conventions/three-layer-timeline-feel.md) | Three-layer Timeline feel differentiation contract — per-layer layout/density/visual/zoom contract honoring "三层不一样的感受" mandate; semantic zoom (not viewport zoom); CSS keyframe vs Framer Motion; URL persistence; honest empty-state per layer (V1.123 P4 compound distilled) |
 | [conventions/profile-b-residual-archival-procedure.md](conventions/profile-b-residual-archival-procedure.md) | Profile B residual archival procedure — eligibility rule + mixed-severity handling + closure-note ND-A2 enum + 8-step procedure for keeping `.mstar/status.json` under the 20 KB hygiene line (V1.126 P3 distilled; closes DF-V1123-STATUS-COMPACT + DF-V1123-RESIDUAL-CLEANUP) |
 | [conventions/subagent-empty-response-fallback.md](conventions/subagent-empty-response-fallback.md) | Subagent empty-response fallback pattern — detection + retry/general-fallback sequence + PM inline whitelist + documentation requirement for specialist-subagent empty results on OpenCode (V1.124 first flagged; V1.126 frequency data + fallback sequence distilled) |
+
+### V1.127 additions
+
+| Document | Description |
+| --- | --- |
+| [workflow-patterns/predictive-scan-endpoint-verification.md](workflow-patterns/predictive-scan-endpoint-verification.md) | Predictive scan endpoint verification — `explore` subagent scans must verify user-visible symptom claims against actual endpoint handlers; architect seat 2 should catch framing errors during AQ resolution; AC reframing during QC fix wave is legitimate when delivered value diverges from locked AC (V1.127 P1 qc1 C-001 distilled) |

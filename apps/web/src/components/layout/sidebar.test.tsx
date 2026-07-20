@@ -1,6 +1,6 @@
 import { http, HttpResponse } from 'msw';
 import { describe, expect, it, vi, beforeEach } from 'vitest';
-import { screen, waitFor } from '@testing-library/react';
+import { screen, waitFor, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Route, Routes } from 'react-router-dom';
 
@@ -1005,5 +1005,69 @@ describe('Sidebar — submenu contents (V1.126 P0 T2)', () => {
     await waitFor(() => {
       expect(screen.getByText(/Could not update Work/i)).toBeInTheDocument();
     });
+  });
+});
+
+describe('Sidebar — rename clear on navigation (V1.127 P0 T5)', () => {
+  beforeEach(async () => {
+    window.localStorage.clear();
+    await i18n.changeLanguage('en');
+  });
+
+  function renderWithWork() {
+    useHandlers(
+      http.get('/v1/daemon/creators', () =>
+        HttpResponse.json({
+          items: [{ creator_id: 'creator-a', display_name: 'Alice' }],
+          pagination: { limit: 20, has_more: false },
+        }),
+      ),
+      worksList([
+        {
+          work_id: 'work-alpha',
+          title: 'Alpha Novel',
+          status: 'active',
+          intake_status: 'ready',
+          primary_preset_id: 'preset-1',
+          updated_at: '2026-01-01T00:00:00Z',
+        },
+      ]),
+      http.post('/v1/daemon/agent-host/scan', () =>
+        HttpResponse.json({ agents: [] }),
+      ),
+    );
+    renderInApp(<Sidebar />, { client: makeClient(), activeCreatorId: 'creator-a' });
+  }
+
+  it('clears the rename input when the route changes via pathname effect (AC-V1127-5)', async () => {
+    const user = userEvent.setup();
+    renderWithWork();
+
+    // Enter rename mode on the Work row.
+    await waitFor(() =>
+      expect(screen.getByRole('link', { name: 'Alpha Novel' })).toBeInTheDocument(),
+    );
+    const menuBtn = screen.getByRole('button', { name: /Open menu for Alpha Novel/i });
+    await user.click(menuBtn);
+    await waitFor(() =>
+      expect(screen.getByRole('menuitem', { name: /Rename/i })).toBeInTheDocument(),
+    );
+    await user.click(screen.getByRole('menuitem', { name: /Rename/i }));
+
+    // Rename input is now visible inline.
+    await waitFor(() =>
+      expect(screen.getByTestId('sidebar-rename-input')).toBeInTheDocument(),
+    );
+
+    // Navigate to a different route via a sibling NavLink. Use fireEvent
+    // (not userEvent) so the rename input does NOT blur — this isolates the
+    // pathname effect as the clear mechanism. (Blur-commit is existing
+    // V1.126 behavior and is covered by the "Rename mutation calls PATCH"
+    // test above; userEvent.click would blur-first and conflate the two.)
+    fireEvent.click(screen.getByRole('link', { name: 'Worlds' }));
+
+    await waitFor(() =>
+      expect(screen.queryByTestId('sidebar-rename-input')).not.toBeInTheDocument(),
+    );
   });
 });

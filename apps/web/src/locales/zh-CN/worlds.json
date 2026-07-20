@@ -11,6 +11,9 @@
   "emptyCreateWorkDescription": "创建作品以开始 — 世界由作品创建。",
   "emptyCreateWorldTitle": "创建",
   "emptyCreateWorldDescription": "在本地运行时中启动一个新世界。",
+  "create": {
+    "desktop-only": "在桌面应用中创建 World"
+  },
   "listTitle": "全部世界",
   "openKb": "打开知识库",
   "openTimeline": "打开时间轴",
@@ -18,5 +21,10 @@
   "timelineActivity": "时间线活动",
   "timelineActivityLastEdited": "时间线 · 上次编辑 {{when}}",
   "timelineActivityOverview": "{{era}} 个纪元 · {{event}} 个事件 · {{when}}",
-  "timelineActivityFallback": "时间线 · 暂无活动"
+  "timelineActivityFallback": "时间线 · 暂无活动",
+  "loadMore": "加载更多",
+  "loadingMore": "加载中…",
+  "overview": {
+    "failed": "无法加载最近活动"
+  }
 }

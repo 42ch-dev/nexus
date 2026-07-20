@@ -718,7 +718,59 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
 
     // --- Section 5: Agent Host subsystem ---
     let agent_host_facade: Arc<dyn nexus_agent_host::HostFacade> = {
+        use nexus_agent_host::providers::native_cli::{
+            claude::ClaudeCliProvider, codex::CodexNativeProvider,
+        };
+
         let manager = nexus_agent_host::core::manager::HostManager::new();
+        // Probe CLI presence before registering. Providers whose CLI is
+        // absent from PATH are NOT registered, so `/providers` and the
+        // AgentPicker UI do not surface them — avoiding a false promise
+        // where the UI offers a session path that only fails at
+        // process-spawn time (greptile P1; supersedes the qc1 W-001
+        // deferral R-V1127P1-QC-W-001, now closed).
+        //
+        // `default_config()` is a pure constructor that does not panic;
+        // `which::which()` is a fast PATH lookup (~1ms). Both are safe
+        // to call unconditionally at boot.
+        let mut providers_registered = 0u32;
+
+        if which::which("codex").is_ok() {
+            manager
+                .register_provider(Arc::new(CodexNativeProvider::default_config()))
+                .await;
+            providers_registered += 1;
+            tracing::info!(
+                provider = "codex-native",
+                "registered native agent provider"
+            );
+        } else {
+            tracing::warn!(
+                provider = "codex-native",
+                "CLI not found on PATH; skipping registration"
+            );
+        }
+
+        if which::which("claude").is_ok() {
+            manager
+                .register_provider(Arc::new(ClaudeCliProvider::default_config()))
+                .await;
+            providers_registered += 1;
+            tracing::info!(
+                provider = "claude-native",
+                "registered native agent provider"
+            );
+        } else {
+            tracing::warn!(
+                provider = "claude-native",
+                "CLI not found on PATH; skipping registration"
+            );
+        }
+
+        tracing::info!(
+            providers_registered,
+            "native agent provider registration complete"
+        );
         Arc::new(manager)
     };
     state.set_agent_host(Arc::clone(&agent_host_facade));

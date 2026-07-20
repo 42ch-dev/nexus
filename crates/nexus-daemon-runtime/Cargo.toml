@@ -67,6 +67,8 @@ rcgen = "0.13"
 rustls-pemfile = "2"
 # V1.92 P0: parse persisted certificate SANs to detect bind-host mismatch.
 x509-parser = "0.17"
+# V1.127 P1 greploop: probe native CLI presence at boot before register_provider.
+which = { workspace = true }
 
 [dev-dependencies]
 axum-test = "15"
@@ -75,7 +77,6 @@ nexus-orchestration = { path = "../nexus-orchestration" }
 serial_test = "3"
 criterion = { version = "0.5", features = ["html_reports"] }
 tokio-rustls = "0.26"
-which = { workspace = true }
 
 [[bench]]
 name = "dispatch_latency"

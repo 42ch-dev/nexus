@@ -823,6 +823,8 @@
     "activityLoading": "正在加载活动…",
     "activityError": "活动不可用",
     "lastEdited": "上次编辑 {{when}}",
+    "loadMore": "加载更多",
+    "loadingMore": "加载中…",
     "layer": {
       "brief": "简介",
       "narrative": "叙事"
