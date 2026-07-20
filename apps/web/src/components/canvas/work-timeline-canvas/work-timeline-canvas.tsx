@@ -52,6 +52,8 @@ import {
   type WorkTimelineCanvasAdapterContext,
   type WorkTimelineLayer,
 } from './work-timeline-canvas-adapter';
+import { NleTimelineBandOverlay } from '../timeline-canvas/nle-timeline-band-overlay';
+import { filterTimelineEntityNodes } from '../timeline-canvas/nle-timeline-projection';
 
 export interface WorkTimelineCanvasProps {
   workId: string;
@@ -283,7 +285,7 @@ export function WorkTimelineCanvas({ workId, sceneBeatFixture }: WorkTimelineCan
         // is constant across layers).
         <div key={activeLayer} className="nexus-layer-enter" data-testid="work-timeline-canvas-layer-transition">
           <CanvasShell
-            nodes={surface.nodes}
+            nodes={filterTimelineEntityNodes(surface.nodes)}
             edges={surface.edges}
             nodeTypes={surface.nodeTypes}
             onNodesChange={surface.onNodesChange}
@@ -295,9 +297,17 @@ export function WorkTimelineCanvas({ workId, sceneBeatFixture }: WorkTimelineCan
             surfaceKind="work-timeline"
             relayout={surface.relayout}
             fitViewOptions={{
-              nodes: surface.nodes.filter((n) => n.type !== 'directedAxisSpine'),
+              nodes: filterTimelineEntityNodes(surface.nodes),
             }}
           >
+            <NleTimelineBandOverlay
+              nodes={surface.nodes}
+              surface="work"
+              activeLayer={activeLayer}
+              scrollAriaLabel={t('workTimeline.nleBandScrollAriaLabel', {
+                defaultValue: 'Work Timeline scrub area',
+              })}
+            />
             {/* V1.123 P4 Task 3 — semantic zoom bridge. Mounts inside
                 CanvasShell so it lives within the ReactFlowProvider; observes
                 viewport zoom and fires `handleLayerChange` when the user crosses

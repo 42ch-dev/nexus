@@ -81,6 +81,8 @@ import {
 } from './timeline-canvas-adapter';
 import type { TimelineNodeData } from './timeline-canvas-adapter';
 import { WorldKbEntityConflictModal, type WorldKbEntityConflictDraft } from '../world-kb/world-kb-conflict-modal';
+import { NleTimelineBandOverlay } from './nle-timeline-band-overlay';
+import { filterTimelineEntityNodes } from './nle-timeline-projection';
 
 export interface TimelineCanvasProps {
   worldId: string;
@@ -600,7 +602,7 @@ export function TimelineCanvas({ worldId }: TimelineCanvasProps) {
         // module-level cache (surfaceKey="timeline" is constant across layers).
         <div key={activeLayer} className="nexus-layer-enter" data-testid="timeline-canvas-layer-transition">
           <CanvasShell
-            nodes={surface.nodes}
+            nodes={filterTimelineEntityNodes(surface.nodes)}
             edges={surface.edges}
             nodeTypes={surface.nodeTypes}
             onNodesChange={surface.onNodesChange}
@@ -610,9 +612,15 @@ export function TimelineCanvas({ worldId }: TimelineCanvasProps) {
             surfaceKind="timeline"
             relayout={surface.relayout}
             fitViewOptions={{
-              nodes: surface.nodes.filter((n) => n.type !== 'directedAxisSpine'),
+              nodes: filterTimelineEntityNodes(surface.nodes),
             }}
           >
+            <NleTimelineBandOverlay
+              nodes={surface.nodes}
+              surface="world"
+              activeLayer={activeLayer}
+              scrollAriaLabel={t('timeline.nleBandScrollAriaLabel')}
+            />
             {/* V1.123 P4 Task 3 — semantic zoom bridge. Mounts inside
                 CanvasShell so it lives within the ReactFlowProvider; observes
                 viewport zoom and fires `handleLayerChange` when the user
