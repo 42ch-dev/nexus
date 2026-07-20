@@ -1,11 +1,9 @@
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 
 import { CreatorShellContent } from '@/components/layout/presentational/creator-shell-content';
 import { useCreatorEntitySelection } from '@/components/layout/creator-entity-selection-context';
-import { useNexusClient } from '@/lib/client-context';
-import { hasCreateWorldClient } from '@/lib/nexus/create-world';
 import { CreateWorkDialog } from '@/pages/dialogs/create-work-dialog';
 
 /**
@@ -13,14 +11,15 @@ import { CreateWorkDialog } from '@/pages/dialogs/create-work-dialog';
  *
  * Selection SSOT is {@link useCreatorEntitySelection}; canvas routes under
  * `/works/:workId/*` and `/worlds/:worldId/*` remain orthogonal per spec.
+ *
+ * Create World stays disabled until a typed `createWorld` success/error contract
+ * lands (V1.127+ wire). Honest Work-create remains the enabled CTA.
  */
 export function CreatorHubPage() {
   const { t: tShell } = useTranslation('shell');
   const { t: tWorlds } = useTranslation('worlds');
   const { selectedEntity, clearSelectedEntity } = useCreatorEntitySelection();
-  const client = useNexusClient();
   const navigate = useNavigate();
-  const canCreateWorld = useMemo(() => hasCreateWorldClient(client), [client]);
   const [createWorkOpen, setCreateWorkOpen] = useState(false);
 
   if (selectedEntity) {
@@ -52,7 +51,7 @@ export function CreatorHubPage() {
     <>
       <CreatorShellContent
         mode="create"
-        canCreateWorld={canCreateWorld}
+        canCreateWorld={false}
         labels={{
           createWorldTitle: tWorlds('emptyCreateWorldTitle'),
           createWorldDescription: tWorlds('emptyCreateWorldDescription'),
@@ -60,26 +59,7 @@ export function CreatorHubPage() {
           createWorkDescription: tWorlds('emptyCreateWorkDescription'),
           createWorldDisabledTitle: tWorlds('create.desktop-only'),
         }}
-        onCreateWorld={() => {
-          void (async () => {
-            if (!hasCreateWorldClient(client)) {
-              return;
-            }
-            try {
-              const result = (await client.createWorld({})) as {
-                world_id?: string;
-                id?: string;
-              };
-              const worldId = result.world_id ?? result.id;
-              if (typeof worldId === 'string' && worldId.length > 0) {
-                clearSelectedEntity();
-                navigate(`/worlds/${encodeURIComponent(worldId)}/timeline`);
-              }
-            } catch {
-              // Surface stays on Create page; toast deferred until Create World wire lands.
-            }
-          })();
-        }}
+        onCreateWorld={() => undefined}
         onCreateWork={() => setCreateWorkOpen(true)}
         data-testid="creator-hub-create"
       />
