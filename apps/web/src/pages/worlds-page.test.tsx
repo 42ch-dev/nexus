@@ -349,6 +349,48 @@ describe('WorldsPage', () => {
       expect(screen.queryByTestId('worlds-overview-load-more')).not.toBeInTheDocument();
     });
   });
+
+  // V1.127 P0 T3 — scoped overview error banner (AC-V1127-3). The world list
+  // (useNarrativeWorlds) keeps its own error handling; this is for the
+  // overview/activity enrichment composite endpoint only. The test QueryClient
+  // sets `retry: false`, so the overview query fails fast on the 500.
+  describe('overview error state (V1.127 P0 T3)', () => {
+    it('renders a scoped overview error banner with Retry when the overview fetch 500s and refetches on retry', async () => {
+      const user = userEvent.setup();
+      let overviewRequests = 0;
+      useHandlers(
+        http.get('/v1/daemon/narrative/worlds', () =>
+          HttpResponse.json({ worlds: [world({ world_id: 'w-1', title: 'Eryndor' })] }),
+        ),
+        http.get('/v1/daemon/timeline/overview', () => {
+          overviewRequests += 1;
+          return HttpResponse.json(
+            { error: { code: 'INTERNAL', message: 'boom' } },
+            { status: 500 },
+          );
+        }),
+      );
+
+      renderWorlds();
+
+      // The world list still renders — the overview error is scoped, not blocking.
+      expect(await screen.findByText('Eryndor')).toBeInTheDocument();
+
+      // Overview error banner appears above the list with the scoped copy.
+      const banner = await screen.findByTestId('worlds-overview-error');
+      expect(banner).toHaveTextContent("Couldn't load recent activity");
+
+      const initialRequests = overviewRequests;
+      expect(initialRequests).toBeGreaterThanOrEqual(1);
+
+      await user.click(screen.getByRole('button', { name: /try again/i }));
+
+      // Retry re-requested the overview endpoint.
+      await waitFor(() => {
+        expect(overviewRequests).toBe(initialRequests + 1);
+      });
+    });
+  });
 });
 
 // V1.121 v0.4 — voice-split discipline (DESIGN.md §Design Concept).

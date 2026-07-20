@@ -124,6 +124,21 @@ export function WorldsPage() {
             </div>
           ) : (
             <>
+              {/* V1.127 P0 T3 (AC-V1127-3): scoped overview error banner. The
+                world list (useNarrativeWorlds) has its own error handling
+                above (line 76); this banner is for the overview/activity
+                enrichment composite endpoint only, so a 5xx surfaces a Retry
+                instead of silently degrading every row to "no recent
+                activity". ErrorState defaults title + retry label from the
+                common namespace (mirrors the world-list ErrorState usage). */}
+              {overview.isError ? (
+                <div className="pb-2" data-testid="worlds-overview-error">
+                  <ErrorState
+                    description={t('overview.failed')}
+                    onRetry={() => overview.refetch()}
+                  />
+                </div>
+              ) : null}
               <ul className="flex flex-col gap-2" aria-label={t('listAriaLabel')}>
                 {worlds.data.map((world) => {
                   const label = world.title || world.world_id;
