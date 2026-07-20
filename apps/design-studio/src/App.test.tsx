@@ -346,6 +346,17 @@ const SURFACES_SECTION_ROUTES = [
 ] as const;
 
 describe('Surfaces section menu — deep links', () => {
+  it('uses a persistent left sidebar (not horizontal pills)', () => {
+    mockMatchMedia(false);
+    renderStudio('/surfaces');
+
+    expect(screen.getByTestId('surfaces-section-sidebar')).toBeInTheDocument();
+    const sectionNav = screen.getByTestId('surfaces-section-nav');
+    expect(sectionNav).toHaveAttribute('data-layout', 'sidebar');
+    expect(sectionNav.className).toContain('flex-col');
+    expect(sectionNav.className).not.toContain('flex-wrap');
+  });
+
   it.each(SURFACES_SECTION_ROUTES)(
     'renders $testId at $route with section nav',
     ({ route, testId, linkLabel }) => {

@@ -105,8 +105,9 @@ function SurfacesSectionNav() {
   return (
     <nav
       aria-label="Surfaces sections"
-      className="flex flex-wrap gap-1 mb-8 pb-4 border-b border-gray-alpha-200"
+      className="flex flex-col gap-0.5 w-44"
       data-testid="surfaces-section-nav"
+      data-layout="sidebar"
     >
       {SURFACES_SECTIONS.map(({ label, path, end }) => (
         <NavLink
@@ -115,7 +116,7 @@ function SurfacesSectionNav() {
           end={end}
           className={({ isActive }) =>
             cn(
-              'px-3 py-1.5 rounded-md text-label-14 transition-colors',
+              'block px-3 py-2 rounded-md text-label-14 transition-colors',
               isActive
                 ? 'bg-gray-alpha-200 text-gray-1000 font-medium'
                 : 'text-gray-700 hover:text-gray-1000 hover:bg-gray-alpha-100',
@@ -130,8 +131,9 @@ function SurfacesSectionNav() {
 }
 
 /**
- * Shared Surfaces chrome: page title + Studio-only section menu.
- * Nested routes render via Outlet (V1.102 P2 Surfaces IA).
+ * Shared Surfaces chrome: page title + persistent left section sidebar.
+ * Nested routes render via Outlet beside the sidebar (V1.102 P2 Surfaces IA;
+ * V1.128 P0 T1 left-sidebar IA).
  */
 export function SurfacesLayout() {
   return (
@@ -161,8 +163,17 @@ export function SurfacesLayout() {
         ). Studio-only deep links — not App Settings IA.
       </p>
 
-      <SurfacesSectionNav />
-      <Outlet />
+      <div className="flex gap-8 items-start">
+        <aside
+          className="sticky top-16 shrink-0 border-r border-gray-alpha-200 pr-4"
+          data-testid="surfaces-section-sidebar"
+        >
+          <SurfacesSectionNav />
+        </aside>
+        <div className="flex-1 min-w-0">
+          <Outlet />
+        </div>
+      </div>
     </div>
   );
 }
