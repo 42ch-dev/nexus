@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 
 import { CanvasNavCommands } from '@/components/canvas/canvas-nav-commands';
 import { CommandPalette, openPalette } from '@/components/command-palette';
+import { CreatorEntitySelectionProvider } from '@/components/layout/creator-entity-selection-context';
 import { DaemonStatusBar } from '@/components/layout/daemon-status-bar';
 import { Header } from '@/components/layout/header';
 import { Sidebar } from '@/components/layout/sidebar';
@@ -74,6 +75,7 @@ export function RootLayout() {
   useTimelineShortcut(() => navigate('/timeline'));
 
   return (
+    <CreatorEntitySelectionProvider>
     <div className="flex h-screen overflow-hidden bg-background-100 text-gray-1000">
       {/* Desktop sidebar — full-height rail (AD-P2-2): h-screen + overflow-hidden
           so the sidebar chrome manages its own internal scroll (nav scrolls in
@@ -139,5 +141,6 @@ export function RootLayout() {
           layers above the main column. */}
       <CommandPalette />
     </div>
+    </CreatorEntitySelectionProvider>
   );
 }

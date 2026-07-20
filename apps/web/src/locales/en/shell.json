@@ -104,6 +104,16 @@
     "creating": "Scaffolding preset…",
     "submit": "Scaffold"
   },
+  "creator": {
+    "controllerTitle": "Controller Panel",
+    "controllerDescription": "Controller Panel — coming soon",
+    "controllerSelected": "Selected {{kind}}: {{label}}",
+    "controllerBack": "Back",
+    "entityKind": {
+      "world": "World",
+      "work": "Work"
+    }
+  },
   "workCreate": {
     "title": "Create Work",
     "description": "Start a new creative Work in the local runtime.",

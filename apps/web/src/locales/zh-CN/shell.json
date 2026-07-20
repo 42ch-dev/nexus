@@ -104,6 +104,16 @@
     "creating": "正在生成预设模板…",
     "submit": "生成"
   },
+  "creator": {
+    "controllerTitle": "控制面板",
+    "controllerDescription": "控制面板 — 即将推出",
+    "controllerSelected": "已选{{kind}}：{{label}}",
+    "controllerBack": "返回",
+    "entityKind": {
+      "world": "世界",
+      "work": "作品"
+    }
+  },
   "workCreate": {
     "title": "创建作品",
     "description": "在本地运行时中启动一个新的创作作品。",
