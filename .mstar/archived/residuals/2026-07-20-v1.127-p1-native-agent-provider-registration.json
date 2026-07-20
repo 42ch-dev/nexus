@@ -1,0 +1,26 @@
+{
+  "plan_id": "2026-07-20-v1.127-p1-native-agent-provider-registration",
+  "archived_at": "2026-07-20T11:10:00+0000",
+  "archived_by": "greploop fix wave 1 (PR #161) — boot.rs CLI probe fix",
+  "residual_findings": [
+    {
+      "id": "R-V1127P1-QC-W-001",
+      "severity": "nit",
+      "title": "/providers.available inaccurate — HostManager::start() marks providers available without CLI probe (qc1 W-001)",
+      "lifecycle": "resolved",
+      "source": "qc-consolidated.md",
+      "scope": "crates/nexus-agent-host/src/core/manager.rs:215-222",
+      "decision": "fix_now",
+      "owner": "@fullstack-dev",
+      "target_iteration": "V1.127 greploop",
+      "tracking": "Greptile P1 on PR #161 — UX false-promise issue (UI starts session that fails at process-spawn time)",
+      "closed_at": "2026-07-20",
+      "closure_note": "Fixed in greploop iteration 1 — boot.rs now probes CLI presence via which::which() before register_provider; providers absent from PATH are not registered; closes the false-promise UX issue.",
+      "resolution": {
+        "plan_id": "2026-07-20-v1.127-p1-native-agent-provider-registration",
+        "commit": "greploop-wave-1",
+        "mechanism": "boot.rs wraps each register_provider call in which::which(cmd).is_ok() check; absent CLIs are skipped with a warn-level log"
+      }
+    }
+  ]
+}
