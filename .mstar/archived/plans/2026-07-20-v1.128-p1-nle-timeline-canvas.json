@@ -1,0 +1,19 @@
+{
+  "id": "2026-07-20-v1.128-p1-nle-timeline-canvas",
+  "file": ".mstar/plans/2026-07-20-v1.128-p1-nle-timeline-canvas.md",
+  "status": "Done",
+  "title": "P1 \u2014 NLE Timeline canvas",
+  "metadata": {
+    "primary_spec": ".mstar/iterations/v1.128/specs/nle-timeline-canvas.md",
+    "spec_integration_branch": "iteration/v1.128",
+    "merge_target": "iteration/v1.128",
+    "iteration_refs": "v1.128",
+    "working_branch": "feature/v1.128-p1-nle-timeline-canvas",
+    "wire_contracts_changed": false,
+    "description": "NLE Timeline Studio-first then thin App adopt",
+    "done_at": "2026-07-20",
+    "qc_verdict": "Approve with residuals",
+    "qa_verdict": "Pass (mandatory, acceptance-only)",
+    "residuals_open_count": 1
+  }
+}

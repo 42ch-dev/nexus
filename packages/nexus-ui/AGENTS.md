@@ -12,6 +12,18 @@ Publishable npm workspace package for Nexus brand assets, design tokens, theme C
 
 ## Boundaries
 
+### Two-tier model vs this package (V1.128)
+
+`@42ch/nexus-ui` holds **only promoted primitives** — brand VI plus plan-approved pure presentational React (Button, Badge, Card, Input, Label, Textarea, Select, Toast, `cn`, logos).
+
+| Import elsewhere | Lives in this package? | Notes |
+| --- | --- | --- |
+| `@42ch/nexus-ui` | **Yes** | Public named exports only — not every UI symbol in Nexus |
+| `@web-ui/*` | **No** | Transitional mirror of unpromoted `apps/web/src/components/ui/*` |
+| `@web-layout/*`, `@web-canvas/*`, `@web-setup/*`, `@web-settings/*`, `@web-global-timeline/*`, `@web-shell/*` | **No** | Design Studio Vite aliases to `apps/web` presentational extracts — product chrome, not package candidates unless a plan promotion list says otherwise |
+
+**Do not** assume “import everything from nexus-ui.” App shell, canvas chrome, setup compositions, and settings section bodies stay in `apps/web` (surfaced in Studio via `@web-*`) until an explicit promotion decision.
+
 - **Consumer wrappers** under `apps/web/src/components/ui/` that re-export from this package (`button.tsx`, `badge.tsx`, `card.tsx`, `input.tsx`, `label.tsx`, `textarea.tsx`, `select.tsx`) **must not** import `clsx`, `class-variance-authority`, `tailwind-merge`, `@/lib/*`, or deep-import `@42ch/nexus-ui/src/*`. The package is the sole class-merge authority (`cn`). Enforced by `tooling/check-ui-guardrails.sh` (CI job `ui-guardrails`).
 
 - **Must not** import from `apps/web`, `apps/design-studio`, `nexus-platform`, app aliases, daemon clients, app routing/state, Tauri IPC, or localStorage

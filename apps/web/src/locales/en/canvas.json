@@ -634,6 +634,7 @@
     "loading": "Loading Timeline…",
     "loadError": "Could not load the world timeline.",
     "canvasAriaLabel": "World timeline canvas",
+    "nleBandScrollAriaLabel": "World Timeline scrub area",
     "orderingDisclaimer": "Timeline order is inferred from available event data; not a canonical chronology.",
     "empty": {
       "title": "This World's timeline is empty",
@@ -752,6 +753,7 @@
     "loading": "Loading Work Timeline…",
     "loadError": "Could not load the work timeline.",
     "canvasAriaLabel": "Work timeline canvas",
+    "nleBandScrollAriaLabel": "Work Timeline scrub area",
     "empty": {
       "title": "This work's timeline is empty",
       "description": "Outline events you add through the Outline surface will appear here."

@@ -964,11 +964,13 @@ export const SOUL_REFETCH_MS = 30_000;
  * client-filter by owner. V1.82 mocks the response shape against the generated
  * `World` domain contract until P0 lands the generated list-response type.
  */
-export function useNarrativeWorlds() {
+export function useNarrativeWorlds(options?: { limit?: number }) {
   const client = useNexusClient();
+  const limit = options?.limit;
   return useQuery({
     queryKey: queryKeys.memory.worlds(),
     queryFn: (): Promise<World[]> => client.listNarrativeWorlds(),
+    select: (data) => (limit != null ? data.slice(0, limit) : data),
   });
 }
 

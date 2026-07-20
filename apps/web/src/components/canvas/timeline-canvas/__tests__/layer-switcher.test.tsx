@@ -365,4 +365,29 @@ describe('TimelineCanvas — layer swap does not trigger forbidden writes (T3 ne
     expect(client.worldKbPromoteCandidate).not.toHaveBeenCalled();
     expect(client.patchTimelineEvent).not.toHaveBeenCalled();
   });
+
+  it('renders NLE multi-track band overlay in the canvas host (V1.128 P1 T3)', async () => {
+    const graph: WorldKbGraphResponse = {
+      entities: [
+        eraEntity({
+          key_block_id: 'kb-era-1',
+          canonical_name: 'The First Age',
+        }),
+      ],
+      source_anchors: [],
+      relationships: [],
+    };
+    renderInApp(<TimelineCanvas worldId="world-7" />, {
+      client: makeMockClient(graph),
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('nle-timeline-band-overlay')).toBeInTheDocument();
+    });
+    expect(screen.getByTestId('nle-timeline-chrome-app')).toBeInTheDocument();
+    expect(screen.getByTestId('nle-timeline-label-brief')).toHaveTextContent('Brief');
+    expect(
+      screen.queryByTestId('nle-timeline-clip-detach-ev-1'),
+    ).not.toBeInTheDocument();
+  });
 });

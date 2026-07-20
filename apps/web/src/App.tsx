@@ -21,8 +21,7 @@ import { SettingsAppearanceSection } from '@/pages/settings/settings-appearance-
 import { SettingsShellLayout } from '@/pages/settings/settings-shell-layout';
 import { SettingsWorkspaceSection } from '@/pages/settings/settings-workspace-section';
 import { WorkShellLayout } from '@/components/layout/work-shell-layout';
-import { WorksPage } from '@/pages/works-page';
-import { WorldsPage } from '@/pages/worlds-page';
+import { CreatorHubPage } from '@/pages/creator-hub-page';
 import { SetupWizardPage } from '@/pages/setup-wizard-page';
 import { StrategiesPage } from '@/pages/strategies-page';
 import { LoadingState } from '@/components/ui/states';
@@ -92,7 +91,7 @@ function AppRoutes() {
             `/worlds/:worldId/timeline` (V1.122 P1 T3 hero surface); Work
             Timeline stays at `/works/:workId/timeline` (V1.123 P2 T5). */}
         <Route path="timeline" element={<GlobalTimelinePage />} />
-        <Route path="works" element={<WorksPage />} />
+        <Route path="works" element={<CreatorHubPage />} />
         <Route path="works/chapters" element={<ChaptersPage />} />
         <Route path="works/:workId" element={<WorkShellLayout />}>
           <Route index element={<Navigate to="outline" replace />} />
@@ -120,7 +119,7 @@ function AppRoutes() {
         </Route>
         <Route
           path="worlds"
-          element={<WorldsPage />}
+          element={<CreatorHubPage />}
         />
         {/* V1.122 P1 T3 — Timeline is the default World entry. The index
             redirect sends `/worlds/:worldId` to `/worlds/:worldId/timeline`

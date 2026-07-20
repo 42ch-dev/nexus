@@ -623,6 +623,7 @@
     "loading": "正在加载时间轴…",
     "loadError": "无法加载世界时间轴。",
     "canvasAriaLabel": "世界时间轴画布",
+    "nleBandScrollAriaLabel": "世界时间轴横向浏览区域",
     "orderingDisclaimer": "时间轴顺序根据可用事件数据推断，并非权威年表。",
     "empty": {
       "title": "该世界的时间轴为空",
@@ -741,6 +742,7 @@
     "loading": "正在加载作品时间轴…",
     "loadError": "无法加载作品时间轴。",
     "canvasAriaLabel": "作品时间轴画布",
+    "nleBandScrollAriaLabel": "作品时间轴横向浏览区域",
     "empty": {
       "title": "该作品的时间轴为空",
       "description": "通过作品大纲面板添加的大纲事件将显示在此处。"

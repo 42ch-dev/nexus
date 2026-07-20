@@ -1,49 +1,12 @@
 {
   "version": 1,
   "updated_at": "2026-07-20",
-  "plans": [
-    {
-      "id": "2026-07-20-v1.127-p0-control-room-author-loop-fixes",
-      "file": ".mstar/plans/2026-07-20-v1.127-p0-control-room-author-loop-fixes.md",
-      "status": "Done",
-      "title": "P0 — Control Room author-loop dogfood fixes",
-      "metadata": {
-        "primary_spec": ".mstar/iterations/v1.127/specs/control-room-author-loop-fixes.md",
-        "spec_integration_branch": "iteration/v1.127",
-        "merge_target": "iteration/v1.127",
-        "iteration_refs": "v1.127",
-        "working_branch": "feature/v1.127-p0-control-room-author-loop-fixes",
-        "wire_contracts_changed": false,
-        "done_at": "2026-07-20",
-        "qc_verdict": "Approve with residuals",
-        "qa_verdict": "Pass (mandatory, acceptance-only)",
-        "residuals_open_count": 8
-      }
-    },
-    {
-      "id": "2026-07-20-v1.127-p1-native-agent-provider-registration",
-      "file": ".mstar/plans/2026-07-20-v1.127-p1-native-agent-provider-registration.md",
-      "status": "Done",
-      "title": "P1 — Native agent provider registration in daemon HostManager",
-      "metadata": {
-        "primary_spec": ".mstar/iterations/v1.127/specs/native-agent-provider-registration.md",
-        "spec_integration_branch": "iteration/v1.127",
-        "merge_target": "iteration/v1.127",
-        "iteration_refs": "v1.127",
-        "working_branch": "feature/v1.127-p1-native-agent-provider-registration",
-        "wire_contracts_changed": false,
-        "done_at": "2026-07-20",
-        "qc_verdict": "Approve with residuals (post-fix-wave)",
-        "qa_verdict": "Pass (mandatory, acceptance-only; session-create deferred to dogfood)",
-        "residuals_open_count": 1
-      }
-    }
-  ],
+  "plans": [],
   "metadata": {
     "integration_branch_retired": false,
     "iteration_base_branch": "main",
-    "latest_active_compass": "v1.127/delivery-compass.md",
-    "latest_active_iteration": "V1.127 (Shipped)",
+    "latest_active_compass": "v1.128/delivery-compass.md",
+    "latest_active_iteration": "V1.128 (completed)",
     "latest_ship": {
       "iteration": "V1.127",
       "compass": "v1.127/delivery-compass.md",
@@ -51,19 +14,19 @@
       "pr": "https://github.com/42ch-dev/nexus/pull/161",
       "merge_commit": "5b0a3518c2db95f6dd51a0540a7c3a4b41ab62f3"
     },
-    "platform_integration": "paused — local-only until further notice",
-    "spec_integration_branch": "iteration/v1.127",
+    "platform_integration": "paused \u2014 local-only until further notice",
+    "spec_integration_branch": "iteration/v1.128",
     "spec_refs_index": ".mstar/specs/README.md",
     "target_branch": "main",
     "tech_debt_summary": {
       "updated_at": "2026-07-20",
-      "total_open": 38,
+      "total_open": 40,
       "by_severity": {
         "critical": 0,
         "high": 0,
         "medium": 2,
-        "low": 4,
-        "nit": 32
+        "low": 5,
+        "nit": 33
       },
       "by_target": {
         "post-V1.92": 1,
@@ -71,7 +34,8 @@
         "post-V1.116": 0,
         "post-V1.125": 28,
         "post-V1.126": 8,
-        "post-V1.127": 0
+        "post-V1.127": 0,
+        "post-V1.128": 2
       },
       "by_plan": {
         "2026-07-05-v1.92-closure": 1,
@@ -82,7 +46,9 @@
         "2026-07-20-v1.126-p2-composite-timeline-endpoint": 11,
         "2026-07-20-v1.126-p3-status-compaction-residual-cleanup": 4,
         "2026-07-20-v1.127-p0-control-room-author-loop-fixes": 8,
-        "2026-07-20-v1.127-p1-native-agent-provider-registration": 0
+        "2026-07-20-v1.127-p1-native-agent-provider-registration": 0,
+        "2026-07-20-v1.128-p1-nle-timeline-canvas": 1,
+        "2026-07-20-v1.128-p2-creator-create-controller-shell": 1
       }
     },
     "updated_at": "2026-07-20"
@@ -119,11 +85,11 @@
       {
         "id": "R-V1126P0-T2-001",
         "severity": "low",
-        "title": "Delete action omitted from selection submenu — no DELETE route exists for works/worlds",
+        "title": "Delete action omitted from selection submenu \u2014 no DELETE route exists for works/worlds",
         "lifecycle": "open",
         "closure_note": null,
         "tracking_link": ".mstar/plans/2026-07-20-v1.126-p0-shell-selection-submenu.md#Review Gate Summary",
-        "notes": "V1.127+ candidate: either promote DELETE /v1/daemon/works/{id} + DELETE /v1/daemon/worlds/{id} to daemon (would flip P0 to wire_contracts_changed: true retroactively — pick as own plan), or use a soft-delete via PATCH {status: 'deleted'} pattern. Submenu ships with 4 items (Timeline / KB-or-Outline / Agent / Rename) in V1.126."
+        "notes": "V1.127+ candidate: either promote DELETE /v1/daemon/works/{id} + DELETE /v1/daemon/worlds/{id} to daemon (would flip P0 to wire_contracts_changed: true retroactively \u2014 pick as own plan), or use a soft-delete via PATCH {status: 'deleted'} pattern. Submenu ships with 4 items (Timeline / KB-or-Outline / Agent / Rename) in V1.126."
       },
       {
         "id": "R-V1126P0-QC-S-001",
@@ -376,7 +342,7 @@
       {
         "id": "R-V1127P0-QC-S-002",
         "severity": "nit",
-        "title": "T2 has_more documentation drift — plan/spec/briefs/compass all reference has_more but schema has only cursor (qc1 S-002)",
+        "title": "T2 has_more documentation drift \u2014 plan/spec/briefs/compass all reference has_more but schema has only cursor (qc1 S-002)",
         "lifecycle": "open",
         "closure_note": null,
         "tracking_link": ".mstar/sdd/2026-07-20-v1.127-p0-control-room-author-loop-fixes/review/qc-consolidated.md",
@@ -385,7 +351,7 @@
       {
         "id": "R-V1127P0-QC-S-003",
         "severity": "nit",
-        "title": "T2 worlds-page Load More is activity-enrichment not list pagination — label may mislead (qc1 S-003)",
+        "title": "T2 worlds-page Load More is activity-enrichment not list pagination \u2014 label may mislead (qc1 S-003)",
         "lifecycle": "open",
         "closure_note": null,
         "tracking_link": ".mstar/sdd/2026-07-20-v1.127-p0-control-room-author-loop-fixes/review/qc-consolidated.md",
@@ -430,13 +396,33 @@
       {
         "id": "R-V1127P0-QC-S-008",
         "severity": "nit",
-        "title": "T4/T5/T6 documentation comments — capture-phase trade-off, history-replaceState, residual lifecycle notes (qc2 S-004/S-005/S-006)",
+        "title": "T4/T5/T6 documentation comments \u2014 capture-phase trade-off, history-replaceState, residual lifecycle notes (qc2 S-004/S-005/S-006)",
         "lifecycle": "open",
         "closure_note": null,
         "tracking_link": ".mstar/sdd/2026-07-20-v1.127-p0-control-room-author-loop-fixes/review/qc-consolidated.md",
         "notes": "V1.128+ polish. selection-submenu.tsx:121-126 + sidebar.tsx:103-112 + archived residual file."
       }
     ],
-    "2026-07-20-v1.127-p1-native-agent-provider-registration": []
+    "2026-07-20-v1.127-p1-native-agent-provider-registration": [],
+    "2026-07-20-v1.128-p0-surfaces-chrome-ia": [],
+    "2026-07-20-v1.128-p1-nle-timeline-canvas": [
+      {
+        "id": "R-V1128P1-001",
+        "severity": "low",
+        "title": "Work Timeline lacks host-level NLE overlay test",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-20-v1.128-p1-nle-timeline-canvas.md#Review Gate Summary",
+        "notes": "World has layer-switcher overlay test; Work wired but no symmetric host test."
+      }
+    ],
+    "2026-07-20-v1.128-p2-creator-create-controller-shell": [
+      {
+        "id": "R-V1128P2-001",
+        "severity": "nit",
+        "title": "Creator hub integration tests cover Work selection only (no World row)",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-20-v1.128-p2-creator-create-controller-shell.md#Review Gate Summary"
+      }
+    ]
   }
 }
