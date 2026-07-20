@@ -141,7 +141,7 @@ export function CreatorShellContent(props: CreatorShellContentProps) {
     );
   }
 
-  const { selectedEntity, labels, onBack } = props;
+  const { labels, onBack } = props;
 
   return (
     <div

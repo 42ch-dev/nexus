@@ -70,7 +70,7 @@ export function Sidebar() {
   const [activeTab, setActiveTab] = useState<ShellSidebarTab>(() => tabFromPathname(pathname));
   const worksQuery = useWorks({ limit: 12 });
   const works = useMemo(() => flattenPages(worksQuery.data), [worksQuery.data]);
-  const worldsQuery = useNarrativeWorlds();
+  const worldsQuery = useNarrativeWorlds({ limit: 12 });
   const worlds = useMemo(() => worldsQuery.data ?? [], [worldsQuery.data]);
   const patchWork = usePatchWork();
   const agentDialog = useAgentPickerDialog();

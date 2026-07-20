@@ -242,7 +242,7 @@ export function CreatorShellFixtures() {
             <CreatorShellContent
               mode="controller"
               selectedEntity={SAMPLE_WORK}
-              labels={controllerLabels(SAMPLE_WORLD)}
+              labels={controllerLabels(SAMPLE_WORK)}
               onBack={() => {}}
               data-testid="creator-shell-controller-work"
             />
