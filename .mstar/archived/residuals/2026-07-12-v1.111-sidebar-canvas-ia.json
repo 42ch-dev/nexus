@@ -1,0 +1,15 @@
+[
+  {
+    "id": "R-V1111P1-WORLDS-PICKER",
+    "title": "World KB sidebar item disabled when no worldId active (no /worlds picker route exists; only /worlds/:worldId/kb)",
+    "severity": "low",
+    "decision": "close",
+    "owner": "@frontend-dev",
+    "target": "post-V1.114",
+    "lifecycle": "resolved",
+    "tracking_link": ".mstar/plans/2026-07-12-v1.111-sidebar-canvas-ia.md",
+    "note": "qc1 flag + T3 reviewer. Honest disabled+aria-disabled; palette go.world-kb has same gating. Durable fix: /worlds picker route. QC source: qc-consolidated.md",
+    "closure_note": "Closed by V1.115 P1 \u2014 2026-07-12-v1.111-sidebar-canvas-ia",
+    "archived_at": "2026-07-20T00:00:00Z"
+  }
+]

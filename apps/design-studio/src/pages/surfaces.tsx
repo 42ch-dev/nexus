@@ -24,6 +24,7 @@ import { SetupWizardChromeFixtures } from '@/fixtures/setup-wizard-chrome-fixtur
 import { ConflictModalFixtures } from '@/fixtures/conflict-modal-fixtures';
 import { GlobalTimelineFixtures } from '@/fixtures/global-timeline-fixtures';
 import { LayerBreadcrumbFixtures } from '@/fixtures/layer-breadcrumb-fixtures';
+import { SelectionSubmenuStubFixtures } from '@/fixtures/selection-submenu-fixtures';
 import { TimelineCanvasFixtures } from '@/fixtures/timeline-canvas-fixtures';
 import { WorkTimelineCanvasFixtures } from '@/fixtures/work-timeline-canvas-fixtures';
 
@@ -79,6 +80,12 @@ const SURFACES_SECTIONS = [
     path: '/surfaces/banner',
     end: false,
     desc: 'Degraded daemon banner — starting, degraded, stopped, error',
+  },
+  {
+    label: 'Selection Submenu',
+    path: '/surfaces/selection-submenu',
+    end: false,
+    desc: 'Selection submenu fixture — 6 variants (V1.126 P0 T4)',
   },
 ] as const;
 
@@ -612,6 +619,36 @@ export function SurfacesBannerPage() {
   );
 }
 
+export function SurfacesSelectionSubmenuPage() {
+  return (
+    <section data-testid="surfaces-selection-submenu">
+      <SurfaceHeading>Selection Submenu — 6 variants (V1.126 P0 T4)</SurfaceHeading>
+      <p className="text-copy-14 text-gray-700 mb-6">
+        Full fixture matrix for the selection submenu presentational component
+        from{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+          @web-shell/selection-submenu
+        </code>
+        . All six variants cover World/Work rows, light/dark themes, rename in
+        progress, and the agent dialog overlay. The delete variant is
+        intentionally omitted — deferred per R-V1126P0-T2-001.
+      </p>
+
+      <div className="mb-4 rounded-card border border-gray-alpha-200 bg-background-100 p-3">
+        <p className="text-label-14 font-medium text-gray-1000 mb-2">Legend</p>
+        <ul className="flex flex-col gap-1 text-copy-13 text-gray-700">
+          <li><strong className="text-gray-1000">1–2:</strong> World row (KB item) + submenu open, light / dark</li>
+          <li><strong className="text-gray-1000">3–4:</strong> Work row (Outline item) + submenu open, light / dark</li>
+          <li><strong className="text-gray-1000">5:</strong> Rename in progress — inline edit active with blue focus ring</li>
+          <li><strong className="text-gray-1000">6:</strong> Agent dialog overlay — submenu closed, AgentPicker dialog open with entity-name title</li>
+        </ul>
+      </div>
+
+      <SelectionSubmenuStubFixtures />
+    </section>
+  );
+}
+
 export function SurfacesCanvasPage() {
   return (
     <div data-testid="surfaces-canvas">
@@ -711,7 +748,17 @@ export function SurfacesCanvasPage() {
           <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
             canvas-layer-narrative-accent
           </code>
-          ). Static English product vocabulary only — no{' '}
+          ). V1.126 P1 adds a layer-differentiated directed center axis:
+           Brief = thick era-spanning arrow (
+           <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+             canvas-layer-brief-accent
+           </code>
+           ), Narrative = thin discrete event-pin axis (
+           <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+             canvas-layer-narrative-accent
+           </code>
+           ). Each layer has a distinct visual rhythm — not just token-color-different
+           (ND-7). Static English product vocabulary only — no{' '}
           <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
             @xyflow/react
           </code>
@@ -747,7 +794,13 @@ export function SurfacesCanvasPage() {
           <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
             canvas-layer-moment-accent
           </code>
-          . Static English product vocabulary only — no{' '}
+. V1.126 P1 adds the Moment layer directed center axis: chapter-scoped micro-segments (
+           <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+             canvas-layer-moment-accent
+           </code>
+           ) with density-encoding per ND-A1 (segment length ∝ scene count). Narrative
+           layer also gets the discrete pin axis treatment (cross-surface consistency
+           with World Timeline). Static English product vocabulary only — no{' '}
           <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
             @xyflow/react
           </code>

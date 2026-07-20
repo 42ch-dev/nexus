@@ -1,36 +1,43 @@
-{
-  "schema_version": 1,
-  "description": "Archived resolved residuals from 2026-07-10-v1.106-ui-continuity.",
-  "plan_id": "2026-07-10-v1.106-ui-continuity",
-  "entries": [
-    {
-      "id": "R-V1106P2-001",
-      "title": "Stale /settings/connection comments in connect-daemon-form.tsx + test header after route consolidation",
-      "severity": "nit",
-      "decision": "defer",
-      "owner": "@frontend-dev",
-      "target": "post-V1.106",
-      "lifecycle": "resolved",
-      "tracking_link": ".mstar/plans/2026-07-10-v1.106-ui-continuity.md",
-      "note": "QC1 F-005 / QC2 W-001. Non-functional comment drift.",
-      "closed_reason": "closed_by_fix_sweep",
-      "closed_at": "2026-07-12",
-      "archived_at": "2026-07-12"
-    },
-    {
-      "id": "R-V1106P2-002",
-      "title": "Add scrollIntoView for #setup hash anchor on Advanced page",
-      "severity": "suggestion",
-      "decision": "defer",
-      "owner": "@frontend-dev",
-      "target": "post-V1.106",
-      "lifecycle": "resolved",
-      "tracking_link": ".mstar/plans/2026-07-10-v1.106-ui-continuity.md",
-      "note": "QC3 S-001. Hash sets correctly; auto-scroll enhancement.",
-      "closed_reason": "roadmap_next",
-      "closed_at": "2026-07-12",
-      "archived_at": "2026-07-12"
-    }
-  ],
-  "archived_at": "2026-07-12"
-}
+[
+  {
+    "id": "R-V1106P2-001",
+    "title": "Stale /settings/connection comments in connect-daemon-form.tsx + test header after route consolidation",
+    "severity": "nit",
+    "decision": "defer",
+    "owner": "@frontend-dev",
+    "target": "post-V1.106",
+    "lifecycle": "resolved",
+    "tracking_link": ".mstar/plans/2026-07-10-v1.106-ui-continuity.md",
+    "note": "QC1 F-005 / QC2 W-001. Non-functional comment drift.",
+    "closed_reason": "closed_by_fix_sweep",
+    "closed_at": "2026-07-12",
+    "archived_at": "2026-07-12"
+  },
+  {
+    "id": "R-V1106P2-002",
+    "title": "Add scrollIntoView for #setup hash anchor on Advanced page",
+    "severity": "suggestion",
+    "decision": "defer",
+    "owner": "@frontend-dev",
+    "target": "post-V1.106",
+    "lifecycle": "resolved",
+    "tracking_link": ".mstar/plans/2026-07-10-v1.106-ui-continuity.md",
+    "note": "QC3 S-001. Hash sets correctly; auto-scroll enhancement.",
+    "closed_reason": "roadmap_next",
+    "closed_at": "2026-07-12",
+    "archived_at": "2026-07-12"
+  },
+  {
+    "id": "R-V1106P2-003",
+    "title": "Badge queued individual test missing 16% fill assertion (matrix covers it)",
+    "severity": "nit",
+    "decision": "accept",
+    "owner": "@frontend-dev",
+    "target": "accept",
+    "lifecycle": "resolved",
+    "tracking_link": ".mstar/plans/2026-07-10-v1.106-ui-continuity.md",
+    "note": "QC1 F-001. it.each matrix at badge.test.tsx:55 covers the contract.",
+    "closure_note": "Archived as low/nit bulk (V1.126 P3 gate)",
+    "archived_at": "2026-07-20T00:00:00Z"
+  }
+]

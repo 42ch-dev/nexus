@@ -1,0 +1,93 @@
+[
+  {
+    "id": "R-V1120P0QC2-S001",
+    "title": "Pre-existing path traversal on preset_id in preset_management.rs handlers (add validate_preset_id guard)",
+    "severity": "low",
+    "decision": "defer",
+    "owner": "@fullstack-dev",
+    "target": "post-V1.120",
+    "lifecycle": "resolved",
+    "tracking_link": ".mstar/plans/2026-07-17-v1.120-strategies-repair.md",
+    "note": "QC2 S-001. Not introduced by this diff; local-only daemon mitigates. Mirror strategy.rs validate_strategy_id.",
+    "closure_note": "Archived as low/nit bulk (V1.126 P3 gate)",
+    "archived_at": "2026-07-20T00:00:00Z"
+  },
+  {
+    "id": "R-V1120P0QC2-S002",
+    "title": "strategy.rs:145 same _system literal-join bug class on PATCH classification (404 vs 400)",
+    "severity": "low",
+    "decision": "defer",
+    "owner": "@fullstack-dev",
+    "target": "post-V1.120",
+    "lifecycle": "resolved",
+    "tracking_link": ".mstar/plans/2026-07-17-v1.120-strategies-repair.md",
+    "note": "QC2 S-002 / L2-M1. Reuse system_preset_dir_for_id. File is nexus-daemon-runtime/src/api/handlers/strategy.rs (QC1 attribution fix).",
+    "closure_note": "Archived as low/nit bulk (V1.126 P3 gate)",
+    "archived_at": "2026-07-20T00:00:00Z"
+  },
+  {
+    "id": "R-V1120P0QC2-S003",
+    "title": "Per-row Validate cannot prefill path (contract-bound)",
+    "severity": "low",
+    "decision": "defer",
+    "owner": "@frontend-dev",
+    "target": "post-V1.120",
+    "lifecycle": "resolved",
+    "tracking_link": ".mstar/plans/2026-07-17-v1.120-strategies-repair.md",
+    "note": "QC1 S1 / QC2 S-003 / QC3 S-003. Needs validate_preset id-acceptance or PresetSummary.path \u2014 wire change.",
+    "closure_note": "Archived as low/nit bulk (V1.126 P3 gate)",
+    "archived_at": "2026-07-20T00:00:00Z"
+  },
+  {
+    "id": "R-V1120P0QC2-S004",
+    "title": "No success toast on delete preset",
+    "severity": "nit",
+    "decision": "defer",
+    "owner": "@frontend-dev",
+    "target": "post-V1.120",
+    "lifecycle": "resolved",
+    "tracking_link": ".mstar/plans/2026-07-17-v1.120-strategies-repair.md",
+    "note": "QC2 S-004. Matches scaffold/delete silent-success convention.",
+    "closure_note": "Archived as low/nit bulk (V1.126 P3 gate)",
+    "archived_at": "2026-07-20T00:00:00Z"
+  },
+  {
+    "id": "R-V1120P0QC2-S005",
+    "title": "No delete/update rejection test for _system.* presets",
+    "severity": "nit",
+    "decision": "defer",
+    "owner": "@fullstack-dev",
+    "target": "post-V1.120",
+    "lifecycle": "resolved",
+    "tracking_link": ".mstar/plans/2026-07-17-v1.120-strategies-repair.md",
+    "note": "QC2 S-005. Classification side effect of T1 fix untested.",
+    "closure_note": "Archived as low/nit bulk (V1.126 P3 gate)",
+    "archived_at": "2026-07-20T00:00:00Z"
+  },
+  {
+    "id": "R-V1120P0QC3-S001",
+    "title": "useDeletePreset default mutation retry not self-documenting",
+    "severity": "nit",
+    "decision": "accept",
+    "owner": "@frontend-dev",
+    "target": "accept",
+    "lifecycle": "resolved",
+    "tracking_link": ".mstar/plans/2026-07-17-v1.120-strategies-repair.md",
+    "note": "QC3 S-001. Consistent with file convention; DELETE retry:0 is safer default.",
+    "closure_note": "Archived as low/nit bulk (V1.126 P3 gate)",
+    "archived_at": "2026-07-20T00:00:00Z"
+  },
+  {
+    "id": "R-V1120P0QC3-S002",
+    "title": "Detail page shares queryKeys.presets.list() invalidation blast radius",
+    "severity": "nit",
+    "decision": "accept",
+    "owner": "@frontend-dev",
+    "target": "accept",
+    "lifecycle": "resolved",
+    "tracking_link": ".mstar/plans/2026-07-17-v1.120-strategies-repair.md",
+    "note": "QC3 S-002. Architecturally correct shared data model.",
+    "closure_note": "Archived as low/nit bulk (V1.126 P3 gate)",
+    "archived_at": "2026-07-20T00:00:00Z"
+  }
+]

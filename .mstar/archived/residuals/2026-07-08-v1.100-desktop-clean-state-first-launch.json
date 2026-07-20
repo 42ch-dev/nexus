@@ -1,0 +1,41 @@
+[
+  {
+    "id": "R-V1100P0QC1-S001",
+    "title": "Contract says rerun-setup 'still writes workspace_path' but impl early-returns when creator exists; benign (wizard step 1 persists workspace_path first)",
+    "severity": "low",
+    "decision": "defer",
+    "owner": "@architect",
+    "target": "post-V1.100",
+    "lifecycle": "resolved",
+    "tracking_link": ".mstar/sdd/2026-07-08-v1.100-desktop-clean-state-first-launch/review/qc-consolidated.md",
+    "note": "Contract-vs-impl doc gap; benign in practice. QC source: P0 qc1 S-1",
+    "closure_note": "Archived as low/nit bulk (V1.126 P3 gate)",
+    "archived_at": "2026-07-20T00:00:00Z"
+  },
+  {
+    "id": "R-V1100P0QC3-S001",
+    "title": "Double-read of config.toml in bootstrap write path",
+    "severity": "nit",
+    "decision": "accept",
+    "owner": "@fullstack-dev",
+    "target": "post-V1.100",
+    "lifecycle": "resolved",
+    "tracking_link": ".mstar/sdd/2026-07-08-v1.100-desktop-clean-state-first-launch/review/qc-consolidated.md",
+    "note": "Once-per-launch; negligible. QC source: P0 qc3 S-001",
+    "closure_note": "Archived as low/nit bulk (V1.126 P3 gate)",
+    "archived_at": "2026-07-20T00:00:00Z"
+  },
+  {
+    "id": "R-V1100P0QC3-S002",
+    "title": "uuid dep (~150KB) added for 12 hex chars; could use existing fastrand",
+    "severity": "nit",
+    "decision": "defer",
+    "owner": "@fullstack-dev",
+    "target": "post-V1.100",
+    "lifecycle": "resolved",
+    "tracking_link": ".mstar/sdd/2026-07-08-v1.100-desktop-clean-state-first-launch/review/qc-consolidated.md",
+    "note": "Not blocking; defer to a dep-slim pass. QC source: P0 qc3 S-002",
+    "closure_note": "Archived as low/nit bulk (V1.126 P3 gate)",
+    "archived_at": "2026-07-20T00:00:00Z"
+  }
+]

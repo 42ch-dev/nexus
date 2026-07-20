@@ -1,0 +1,42 @@
+[
+  {
+    "id": "R-V1126P1-QC-R1-001",
+    "severity": "medium",
+    "title": "Brief spine empty gradient arrow on undated eras (qc3 R1)",
+    "lifecycle": "resolved",
+    "closure_note": "Fixed in V1.126 P1 QC fix wave (commit 12026fa5)",
+    "tracking_link": ".mstar/sdd/2026-07-20-v1.126-p1-canvas-directed-axis/review/qc-consolidated.md",
+    "notes": "qc3 R1 resolved.",
+    "archived_at": "2026-07-20T00:00:00Z"
+  },
+  {
+    "id": "R-V1126P1-QC-W-001",
+    "severity": "low",
+    "title": "directed-axis-spine header comment missing (qc1 W-1)",
+    "lifecycle": "resolved",
+    "closure_note": "Fixed in V1.126 P1 QC fix wave (commit 12026fa5)",
+    "tracking_link": ".mstar/sdd/2026-07-20-v1.126-p1-canvas-directed-axis/review/qc-consolidated.md",
+    "notes": "qc1 W-1 resolved.",
+    "archived_at": "2026-07-20T00:00:00Z"
+  },
+  {
+    "id": "R-V1126P1-QC-W-002",
+    "severity": "low",
+    "title": "Magic Y-offsets inconsistent + undocumented (qc1 W-2)",
+    "lifecycle": "resolved",
+    "closure_note": "Fixed in V1.126 P1 QC fix wave (commit 12026fa5)",
+    "tracking_link": ".mstar/sdd/2026-07-20-v1.126-p1-canvas-directed-axis/review/qc-consolidated.md",
+    "notes": "qc1 W-2 resolved; SPINE_Y_OFFSET constant + comment.",
+    "archived_at": "2026-07-20T00:00:00Z"
+  },
+  {
+    "id": "R-V1126P1-QC-W-003",
+    "severity": "low",
+    "title": "Spine position math doc factually wrong (qc1 W-3)",
+    "lifecycle": "resolved",
+    "closure_note": "Fixed in V1.126 P1 QC fix wave (commit 12026fa5)",
+    "tracking_link": ".mstar/sdd/2026-07-20-v1.126-p1-canvas-directed-axis/review/qc-consolidated.md",
+    "notes": "qc1 W-3 resolved.",
+    "archived_at": "2026-07-20T00:00:00Z"
+  }
+]

@@ -1,47 +1,70 @@
-{
-  "plan_id": "2026-07-09-v1.101-select-component-promotion",
-  "findings": [
-    {
-      "id": "R-V1101P2-001",
-      "title": "Studio AGENTS transitional prose still generic (V1.98→V1.99) while Forbidden lists Select as promoted",
-      "severity": "nit",
-      "decision": "defer",
-      "owner": "@frontend-dev",
-      "target": "post-V1.101",
-      "lifecycle": "resolved",
-      "tracking_link": ".mstar/plans/2026-07-09-v1.101-select-component-promotion.md",
-      "note": "QC3-S001 after revalidation Approve. Non-blocking.",
-      "closed_at": "2026-07-10",
-      "closed_by": "V1.106 P0 T1",
-      "closure_note": "Closed by V1.106 P0 T1 — Studio AGENTS transitional prose and Allowed table updated to reflect promoted primitives (Input/Label/Textarea/Select)."
-    },
-    {
-      "id": "R-V1101P2-002",
-      "title": "Studio AGENTS Allowed table still says “V1.99-approved presentational primitives”",
-      "severity": "nit",
-      "decision": "defer",
-      "owner": "@frontend-dev",
-      "target": "post-V1.101",
-      "lifecycle": "resolved",
-      "tracking_link": ".mstar/plans/2026-07-09-v1.101-select-component-promotion.md",
-      "note": "QC1 S-002. Optional doc tidy.",
-      "closed_at": "2026-07-10",
-      "closed_by": "V1.106 P0 T1",
-      "closure_note": "Closed by V1.106 P0 T1 — Studio AGENTS Allowed table now lists the promoted primitives explicitly."
-    },
-    {
-      "id": "R-V1101P2-005",
-      "title": "packages/nexus-ui/src/index.ts header still frames package as V1.99-approved",
-      "severity": "nit",
-      "decision": "defer",
-      "owner": "@frontend-dev",
-      "target": "post-V1.101",
-      "lifecycle": "resolved",
-      "tracking_link": ".mstar/plans/2026-07-09-v1.101-select-component-promotion.md",
-      "note": "QC2 F-003. Cosmetic; Select export comment already cites V1.101.",
-      "closed_at": "2026-07-10",
-      "closed_by": "V1.106 P0 T1",
-      "closure_note": "Closed by V1.106 P0 T1 — packages/nexus-ui/src/index.ts header now reflects V1.99, V1.100, and V1.101 promoted primitives."
-    }
-  ]
-}
+[
+  {
+    "id": "R-V1101P2-001",
+    "title": "Studio AGENTS transitional prose still generic (V1.98\u2192V1.99) while Forbidden lists Select as promoted",
+    "severity": "nit",
+    "decision": "defer",
+    "owner": "@frontend-dev",
+    "target": "post-V1.101",
+    "lifecycle": "resolved",
+    "tracking_link": ".mstar/plans/2026-07-09-v1.101-select-component-promotion.md",
+    "note": "QC3-S001 after revalidation Approve. Non-blocking.",
+    "closed_at": "2026-07-10",
+    "closed_by": "V1.106 P0 T1",
+    "closure_note": "Closed by V1.106 P0 T1 \u2014 Studio AGENTS transitional prose and Allowed table updated to reflect promoted primitives (Input/Label/Textarea/Select)."
+  },
+  {
+    "id": "R-V1101P2-002",
+    "title": "Studio AGENTS Allowed table still says \u201cV1.99-approved presentational primitives\u201d",
+    "severity": "nit",
+    "decision": "defer",
+    "owner": "@frontend-dev",
+    "target": "post-V1.101",
+    "lifecycle": "resolved",
+    "tracking_link": ".mstar/plans/2026-07-09-v1.101-select-component-promotion.md",
+    "note": "QC1 S-002. Optional doc tidy.",
+    "closed_at": "2026-07-10",
+    "closed_by": "V1.106 P0 T1",
+    "closure_note": "Closed by V1.106 P0 T1 \u2014 Studio AGENTS Allowed table now lists the promoted primitives explicitly."
+  },
+  {
+    "id": "R-V1101P2-005",
+    "title": "packages/nexus-ui/src/index.ts header still frames package as V1.99-approved",
+    "severity": "nit",
+    "decision": "defer",
+    "owner": "@frontend-dev",
+    "target": "post-V1.101",
+    "lifecycle": "resolved",
+    "tracking_link": ".mstar/plans/2026-07-09-v1.101-select-component-promotion.md",
+    "note": "QC2 F-003. Cosmetic; Select export comment already cites V1.101.",
+    "closed_at": "2026-07-10",
+    "closed_by": "V1.106 P0 T1",
+    "closure_note": "Closed by V1.106 P0 T1 \u2014 packages/nexus-ui/src/index.ts header now reflects V1.99, V1.100, and V1.101 promoted primitives."
+  },
+  {
+    "id": "R-V1101P2-003",
+    "title": "Studio invalid Select fixture uses -helper suffix on role=alert error node",
+    "severity": "nit",
+    "decision": "defer",
+    "owner": "@frontend-dev",
+    "target": "post-V1.101",
+    "lifecycle": "resolved",
+    "tracking_link": ".mstar/plans/2026-07-09-v1.101-select-component-promotion.md",
+    "note": "QC2 F-001. Prefer \u2026-error for parity with form-field fixtures.",
+    "closure_note": "Archived as low/nit bulk (V1.126 P3 gate)",
+    "archived_at": "2026-07-20T00:00:00Z"
+  },
+  {
+    "id": "R-V1101P2-004",
+    "title": "Package Select tests lack consumer aria-invalid override case (Input parity)",
+    "severity": "low",
+    "decision": "defer",
+    "owner": "@frontend-dev",
+    "target": "post-V1.101",
+    "lifecycle": "resolved",
+    "tracking_link": ".mstar/plans/2026-07-09-v1.101-select-component-promotion.md",
+    "note": "QC2 F-002. Behavior matches Input; explicit override test would lock spread-order.",
+    "closure_note": "Archived as low/nit bulk (V1.126 P3 gate)",
+    "archived_at": "2026-07-20T00:00:00Z"
+  }
+]

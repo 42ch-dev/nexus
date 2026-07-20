@@ -1,0 +1,22 @@
+{
+  "schema_version": "1.0",
+  "archived_at": "2026-07-20T00:00:00Z",
+  "plan": {
+    "id": "2026-07-20-v1.126-p1-canvas-directed-axis",
+    "file": ".mstar/plans/2026-07-20-v1.126-p1-canvas-directed-axis.md",
+    "status": "Done",
+    "metadata": {
+      "primary_spec": ".mstar/iterations/v1.126/specs/canvas-directed-axis.md",
+      "spec_integration_branch": "iteration/v1.126",
+      "merge_target": "iteration/v1.126",
+      "working_branch": "feature/v1.126-p1-canvas-directed-axis",
+      "wire_contracts_changed": false,
+      "done_at": "2026-07-20",
+      "qc_verdict": "Approve with residuals",
+      "qa_verdict": "Pass (mandatory)",
+      "residuals_open_count": 5,
+      "merge_commit": "merged into iteration/v1.126"
+    },
+    "title": "P1 \u2014 Canvas directed center axis (Brief / Narrative / Moment)"
+  }
+}

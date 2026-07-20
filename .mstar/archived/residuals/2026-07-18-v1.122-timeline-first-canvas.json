@@ -1,0 +1,62 @@
+[
+  {
+    "id": "R-V1122P1QC2-W001",
+    "severity": "low",
+    "source": "QC2 W-001",
+    "lifecycle": "resolved",
+    "description": "Missing OCC version doc in TimelineInspector.handleSubmit (behavior correct)",
+    "tracking_link": ".mstar/plans/2026-07-18-v1.122-timeline-first-canvas.md#review-gate-summary",
+    "closure_note": "Archived as low/nit bulk (V1.126 P3 gate)",
+    "archived_at": "2026-07-20T00:00:00Z"
+  },
+  {
+    "id": "R-V1122P1QC3-W001",
+    "severity": "low",
+    "source": "QC3 W-001",
+    "lifecycle": "resolved",
+    "description": "No visible-node cap/lazy-expand for large World KB graphs (mitigated by hasSuppliedPositions + LAYOUT_WARN_MS)",
+    "tracking_link": ".mstar/plans/2026-07-18-v1.122-timeline-first-canvas.md#review-gate-summary",
+    "closure_note": "Archived as low/nit bulk (V1.126 P3 gate)",
+    "archived_at": "2026-07-20T00:00:00Z"
+  },
+  {
+    "id": "R-V1122P1QC3-W002",
+    "severity": "low",
+    "source": "QC3 W-002",
+    "lifecycle": "resolved",
+    "description": "TimelineAltView not virtualized (MVP < 100 entities; DF-V1122-ALT-VIEW-VIRTUAL)",
+    "tracking_link": ".mstar/plans/2026-07-18-v1.122-timeline-first-canvas.md#review-gate-summary",
+    "closure_note": "Archived as low/nit bulk (V1.126 P3 gate)",
+    "archived_at": "2026-07-20T00:00:00Z"
+  },
+  {
+    "id": "R-V1122P1QC3-W003",
+    "severity": "low",
+    "source": "QC3 W-003",
+    "lifecycle": "resolved",
+    "description": "In-app dirty-state guard deferred (BrowserRouter); useBeforeUnload covers tab close only (DF-V1122-DIRTY-GUARD-INAPP)",
+    "tracking_link": ".mstar/plans/2026-07-18-v1.122-timeline-first-canvas.md#review-gate-summary",
+    "closure_note": "Archived as low/nit bulk (V1.126 P3 gate)",
+    "archived_at": "2026-07-20T00:00:00Z"
+  },
+  {
+    "id": "R-V1122P1QC3-S001",
+    "severity": "nit",
+    "source": "QC3 S-001",
+    "lifecycle": "resolved",
+    "description": "Per-row Date.now() in formatUpdated (minor re-render cost)",
+    "tracking_link": ".mstar/plans/2026-07-18-v1.122-timeline-first-canvas.md#review-gate-summary",
+    "closure_note": "Archived as low/nit bulk (V1.126 P3 gate)",
+    "archived_at": "2026-07-20T00:00:00Z"
+  },
+  {
+    "id": "R-V1122P1QC3-S002",
+    "severity": "nit",
+    "source": "QC3 S-002",
+    "lifecycle": "resolved",
+    "description": "Minor stroke-color mapping extraction in edge types",
+    "tracking_link": ".mstar/plans/2026-07-18-v1.122-timeline-first-canvas.md#review-gate-summary",
+    "closure_note": "Archived as low/nit bulk (V1.126 P3 gate)",
+    "archived_at": "2026-07-20T00:00:00Z"
+  }
+]

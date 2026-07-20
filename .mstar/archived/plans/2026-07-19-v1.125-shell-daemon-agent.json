@@ -1,0 +1,19 @@
+{
+  "schema_version": "1.0",
+  "archived_at": "2026-07-20T00:00:00Z",
+  "plan": {
+    "id": "2026-07-19-v1.125-shell-daemon-agent",
+    "file": ".mstar/plans/2026-07-19-v1.125-shell-daemon-agent.md",
+    "status": "Done",
+    "metadata": {
+      "primary_spec": ".mstar/iterations/v1.125/specs/shell-daemon-agent.md",
+      "spec_integration_branch": "iteration/v1.125",
+      "merge_target": "iteration/v1.125",
+      "working_branch": "feature/v1.125-shell-daemon-agent",
+      "description": "Daemon fullscreen gate + agent instant-apply + Codex version",
+      "qa_gate": "pm-acceptance",
+      "qc_decision": "approve_with_residuals"
+    },
+    "title": "P0 \u2014 Shell daemon gate + agent instant-apply"
+  }
+}

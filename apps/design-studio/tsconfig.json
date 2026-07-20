@@ -30,7 +30,8 @@
       "@web-global-timeline/*": [
         "../web/src/components/global-timeline/presentational/*"
       ],
-      "@web-lib/utils": ["../web/src/lib/utils.ts"]
+      "@web-lib/utils": ["../web/src/lib/utils.ts"],
+      "@web-shell/*": ["../web/src/components/selection-submenu/*"]
     },
 
     /* Strictness */

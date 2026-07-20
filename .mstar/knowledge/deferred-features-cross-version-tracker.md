@@ -1,6 +1,6 @@
 # Deferred Features — Cross-Version Tracker v2
 
-**Quick status**: **V1.123 active** — Three-Layer Timeline (Brief · Narrative · Moment) + World/Work layer split + Timeline-first IA deepening. V1.122 Shipped (three-pillar pivot + Timeline-first World entry). Platform **paused**.
+**Quick status**: **V1.126 active** — Shell Selection Submenu + Canvas Directed Axis + Composite Timeline Endpoint + Status Compaction. V1.125 Shipped (Shell Daemon Agent + Orchestration Repair Memory + Creation World-first IA). Platform **paused**.
 
 **Purpose**: Single source of truth for **open** and **backlog** features deferred from delivery compasses. Closed/shipped history lives in shipped archive.
 **Scope**: `nexus` OSS repository only.
@@ -57,17 +57,14 @@
 | DF-V1122-COMPUTABLE-UI | Computable | Computable pillar UI surfacing (compute registry / canvas marketing) | V1.122 | V1.124+ | M | V1.122 | [V1.122 compass](../iterations/v1.122/delivery-compass.md) Non-Goal; still deferred in V1.123. **Owner:** product-manager. **Trigger:** dogfood shows authors cannot discover compute. |
 | DF-V1122-COMPUTE-ON-TIMELINE | Computable + Canvas | Invoke WASM compute from the Timeline surface | V1.122 | V1.124+ | L | V1.122 | [V1.122 compass](../iterations/v1.122/delivery-compass.md) Non-Goal; still deferred in V1.123. **Owner:** architect. **Trigger:** FEAT-WASM-COMPUTE V2 follow-ons + three-layer Timeline stable. Related: FEAT-WASM-COMPUTE V2 backlog. |
 | DF-V1122-FORK-UI | Canvas | Fork creation + fork-merge authoring UI | V1.122 | V1.124+ | L | V1.122 | [V1.122 compass](../iterations/v1.122/delivery-compass.md) Non-Goal; still deferred in V1.123. **Owner:** product-manager. **Trigger:** authors need alternate-history editing, not just read-only Fork-badge chrome. |
-| DF-V1122-DEEPER-WB | Canvas | Deeper World-building on Timeline (richer projection, multi-timeline, World-scoped `TimelineEvent` HTTP route `GET /v1/daemon/worlds/{world_id}/timeline`) | V1.122 | V1.124+ (route slice) / V1.125+ remainder | L | V1.122→V1.123 | [V1.122 compass](../iterations/v1.122/delivery-compass.md) Non-Goal. **V1.123 status (architect seat 2 LOCKED 2026-07-18):** Brief + Narrative layers on World Timeline compose from the existing `GET /v1/daemon/worlds/{world_id}/kb/graph` route (Brief = `block_type=era` KeyBlock; Narrative = V1.122 `block_type=event` KeyBlock). The route promotion `GET /v1/daemon/worlds/{world_id}/timeline` is **not required** for V1.123 PMF and stays deferred to V1.124+ — see [`iterations/v1.123/specs/three-layer-architecture.md`](../iterations/v1.123/specs/three-layer-architecture.md) §5. Multi-timeline remainder split to `DF-V1123-MULTI-TIMELINE`. **Owner:** architect. **Trigger:** V1.124+ author demand for World-scoped `TimelineEvent` row access via HTTP (causality graph, fork-marker progression, publish-marker history) that the KeyBlock-graph composition cannot satisfy. |
+| DF-V1122-DEEPER-WB | Canvas | Deeper World-building on Timeline (richer projection, multi-timeline, World-scoped `TimelineEvent` HTTP route `GET /v1/daemon/worlds/{world_id}/timeline`) | V1.122 | V1.126+ (remainder slice) / V1.125+ remainder | L | V1.122→V1.123→V1.126 | [V1.122 compass](../iterations/v1.122/delivery-compass.md) Non-Goal. **V1.126 P2 status:** Ships `GET /v1/daemon/timeline/overview` composite (overview slice, no event rows). Full per-World `GET /v1/daemon/worlds/{world_id}/timeline` row remains open under the same DF ID (remainder slice). **Owner:** architect. **Trigger:** V1.124+ author demand for World-scoped `TimelineEvent` row access via HTTP (causality graph, fork-marker progression, publish-marker history) that the KeyBlock-graph composition cannot satisfy. |
 | DF-V1122-V1121-RES | Cross-cutting | V1.121 15 low/nit design-elevation residuals | V1.122 | V1.124 polish | S | V1.122 | Still deferred under V1.123 Non-Goals (not business scope). **Owner:** frontend-dev. **Trigger:** capacity after three-layer ship. **SSOT:** [`status.json`](../status.json) `residual_findings` — do not mirror detail here. Related rollup: `DF-V1123-RESIDUAL-CLEANUP`. |
-| DF-V1122-STATUS-COMPACT | Cross-cutting | `status.json` size hygiene (<20 KB per `.mstar/AGENTS.md`) | V1.122 | Opportunistic / pre-P-last | S | V1.122 | Superseded for tracking by `DF-V1123-STATUS-COMPACT` (same hygiene gate). Keep row until compaction ships; then archive both. **Owner:** project-manager. |
 | DF-V1123-WORLD-MOMENT | Canvas | World Timeline Moment layer (scene-precision within World history) | V1.123 | V1.124+ | M | V1.123 | [V1.123 compass](../iterations/v1.123/delivery-compass.md) Non-Goal / Deferred inventory. **Owner:** product-manager. **Trigger:** authors need scene-precision when reading world history, not only when writing Works. |
 | DF-V1123-WORK-BRIEF | Canvas | Work Timeline Brief layer (world-shape projection for a Work) | V1.123 | V1.124+ | M | V1.123 | [V1.123 compass](../iterations/v1.123/delivery-compass.md) Non-Goal. **Owner:** product-manager. **Trigger:** authors need Work-level world-shape context beyond Outline. |
 | DF-V1123-ERA-TAXONOMY | Canvas | Rich era taxonomy for Brief layer (kingdoms, ages, sub-ages; not just era markers) | V1.123 | V1.124+ | L | V1.123 | [V1.123 compass](../iterations/v1.123/delivery-compass.md) Deferred. **Owner:** product-manager. **Trigger:** Brief MVP proves the abstraction; richer taxonomy needed. |
 | DF-V1123-MULTI-TIMELINE | Canvas | Multiple parallel Timelines per World (alternate-history branches beyond Fork) | V1.123 | V1.125+ | L | V1.123 | [V1.123 compass](../iterations/v1.123/delivery-compass.md) Deferred. **Owner:** architect. **Trigger:** authors need branch comparison beyond Fork semantics. May absorb multi-timeline remainder of `DF-V1122-DEEPER-WB`. |
 | DF-V1123-GLOBAL-TIMELINE-MERGE | Canvas | Cross-World Timeline merge (read-write merged view, not read-only overview) | V1.123 | V1.125+ | L | V1.123 | [V1.123 compass](../iterations/v1.123/delivery-compass.md) Deferred. P3 global Timeline is **read-only overview** only. **Owner:** product-manager. **Trigger:** P3 overview proves valuable; merge needed for cross-World narrative. |
 | DF-V1123-CROSS-SURFACE-BINDING | Canvas | Cross-surface Timeline event binding (Work Timeline Moment ↔ World Timeline Narrative) — data link + UX | V1.123 | V1.124+ | S | V1.123 | P3 ships UX hints for cross-surface navigation but no formal data binding between Work events and World events. Track for V1.124+ data-binding iteration. QC1 R-V1123P0QC1-M001. |
-| DF-V1123-RESIDUAL-CLEANUP | Cross-cutting | V1.121 + V1.122 + V1.123 low/nit residuals cleanup | V1.123 | V1.124 polish | M | V1.123 | [V1.123 compass](../iterations/v1.123/delivery-compass.md) Non-Goal as business scope. **Owner:** frontend-dev. **Trigger:** capacity after three-layer ship. **SSOT:** [`status.json`](../status.json) `residual_findings` — do not mirror detail here. |
-| DF-V1123-STATUS-COMPACT | Cross-cutting | `status.json` size hygiene (<20 KB per `.mstar/AGENTS.md`) | V1.123 | Opportunistic / pre-P-last | S | V1.123 | [V1.123 compass](../iterations/v1.123/delivery-compass.md) Non-Goal (harness hygiene, not a business plan). **Owner:** project-manager. **Trigger:** before any P-last close when `wc -c .mstar/status.json` ≥ 20 KB. |
 
 ### 2.4 Backlog (no committed target)
 
@@ -95,7 +92,7 @@ Non-feature reliability work routed out of feature iterations; picked up by a de
 
 ## 3) Residuals (SSOT pointer)
 
-Residual findings are tracked in [`status.json`](../status.json) → `residual_findings` + `metadata.tech_debt_summary`. The tracker does **not** mirror residual rows — `status.json` is authoritative. Current state: 78 open residuals tracked in [`status.json`](../status.json) via `metadata.tech_debt_summary` (updated 2026-07-12). Closed/historical: `.mstar/archived/residuals/<plan-id>.json`.
+Residual findings are tracked in [`status.json`](../status.json) → `residual_findings` + `metadata.tech_debt_summary`. The tracker does **not** mirror residual rows — `status.json` is authoritative. Current state: 43 open residuals tracked in [`status.json`](../status.json) via `metadata.tech_debt_summary` (updated 2026-07-20). Closed/historical: `.mstar/archived/residuals/<plan-id>.json`.
 
 ---
 
@@ -109,9 +106,9 @@ Residual findings are tracked in [`status.json`](../status.json) → `residual_f
 
 ## 5) Quick index
 
-**Active iteration**: [V1.123](../iterations/v1.123/delivery-compass.md) (**active** — Three-Layer Timeline Brief · Narrative · Moment; World/Work layer split; `iteration/v1.123`).
+**Active iteration**: [V1.126](../iterations/v1.126/delivery-compass.md) (**active** — Shell Selection Submenu + Canvas Directed Axis + Composite Timeline Endpoint + Status Compaction; `iteration/v1.126`).
 
-**Latest shipped**: [V1.122](../iterations/v1.122/delivery-compass.md) (three-pillar pivot + Timeline-first World entry; 2026-07-18).
+**Latest shipped**: [V1.125](../iterations/v1.125/delivery-compass.md) (Shell Daemon Agent + Orchestration Repair Memory + Creation World-first IA; 2026-07-19).
 
 **Full iteration index**: [iterations/README.md](../iterations/README.md)
 

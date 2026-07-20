@@ -79,6 +79,7 @@ import type {
   StrategyPatchResponse,
   StrategyPatchStateRequest,
   StrategyPatchTransitionRequest,
+  TimelineOverviewResponse,
   TimelinePatchEventRequest,
   UpdateFindingRequest,
   UpdatePresetRequest,
@@ -482,6 +483,12 @@ export class BrowserClient implements NexusClient {
   async listNarrativeWorlds(): Promise<World[]> {
     const res = await this.get<{ worlds: World[] }>('/v1/daemon/narrative/worlds');
     return res.worlds;
+  }
+  getTimelineOverview(cursor?: string): Promise<TimelineOverviewResponse> {
+    const params = cursor ? `?cursor=${encodeURIComponent(cursor)}` : '';
+    return this.get<TimelineOverviewResponse>(
+      `/v1/daemon/timeline/overview${params}`,
+    );
   }
   listPendingReviews(
     creatorId: string,

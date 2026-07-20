@@ -29,6 +29,7 @@ import {
   WorkTimelineMomentSceneChrome,
   WorkTimelineNarrativeEventChrome,
 } from '../presentational/timeline-node-chrome';
+import { DirectedAxisSpine } from '../timeline-canvas/directed-axis-spine';
 import type { WorkTimelineNodeData } from './work-timeline-canvas-adapter';
 
 // ─── Narrative event node (Task 2) ─────────────────────────────────────────
@@ -240,4 +241,5 @@ export const workTimelineNodeTypes = {
   'work-timeline-narrative-event': WorkTimelineNarrativeEventNode,
   'work-timeline-moment-scene': WorkTimelineMomentSceneNode,
   'work-timeline-moment-beat': WorkTimelineMomentBeatNode,
+  'directedAxisSpine': DirectedAxisSpine,
 } as const;

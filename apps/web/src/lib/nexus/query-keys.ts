@@ -125,4 +125,9 @@ export const queryKeys = {
         [...queryKeys.compute.modules.all(), 'detail', moduleId] as const,
     },
   },
+  timeline: {
+    all: ['timeline'] as const,
+    overview: (cursor?: string) =>
+      [...queryKeys.timeline.all, 'overview', cursor ?? '__first'] as const,
+  },
 } as const;

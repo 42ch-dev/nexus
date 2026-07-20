@@ -204,7 +204,7 @@ describe('Sidebar', () => {
       initialRouterEntries: ['/works'],
     });
 
-    const worksGroup = screen.getByRole('button', { name: /Works/i });
+    const worksGroup = screen.getByRole('button', { name: 'Works' });
     expect(worksGroup).toHaveClass('text-gray-600');
     expect(worksGroup).not.toHaveClass('bg-gray-alpha-100');
 
@@ -240,7 +240,7 @@ describe('Sidebar', () => {
       expect(screen.getByRole('link', { name: 'Alpha Novel' })).toBeInTheDocument(),
     );
 
-    const worksGroup = screen.getByRole('button', { name: /Works/i });
+    const worksGroup = screen.getByRole('button', { name: 'Works' });
     expect(worksGroup).toHaveAttribute('aria-expanded', 'true');
     expect(worksGroup.className).toMatch(/\bduration-state\b/);
     expect(worksGroup.className).toMatch(/\bmotion-reduce:transition-none\b/);
@@ -303,8 +303,8 @@ describe('Sidebar', () => {
 
     renderInApp(<Sidebar />, { client: makeClient(), activeCreatorId: 'creator-a' });
 
-    expect(screen.getByRole('button', { name: /Worlds/i })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Works/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Worlds' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Works' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Memories/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Memories' })).not.toBeInTheDocument();
 
@@ -490,8 +490,8 @@ describe('Sidebar — work routes (V1.118 P2)', () => {
 
     expect(screen.getByRole('tab', { name: 'Creator', selected: true })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: 'Orchestrator' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Works/i })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Worlds/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Works' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Worlds' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Memories/i })).not.toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'All Works' })).toBeInTheDocument();
 
@@ -598,5 +598,412 @@ describe('Sidebar — Work Timeline routes (V1.125 P2)', () => {
       'bg-blue-700',
     );
     expect(screen.queryByRole('link', { name: 'Drill Novel Timeline' })).not.toBeInTheDocument();
+  });
+});
+
+describe('Sidebar — submenu trigger (V1.126 P0 T1)', () => {
+  beforeEach(async () => {
+    window.localStorage.clear();
+    await i18n.changeLanguage('en');
+  });
+
+  function renderSidebarWithWorks() {
+    useSidebarHandlers([
+      {
+        work_id: 'work-alpha',
+        title: 'Alpha Novel',
+        status: 'active',
+        intake_status: 'ready',
+        primary_preset_id: 'preset-1',
+        updated_at: '2026-01-01T00:00:00Z',
+      },
+    ]);
+    renderInApp(<Sidebar />, { client: makeClient(), activeCreatorId: 'creator-a' });
+  }
+
+  it('renders a ••• button on Work entity rows but not on aggregate rows (V1.126 PR fix)', async () => {
+    renderSidebarWithWorks();
+
+    await waitFor(() =>
+      expect(screen.getByRole('link', { name: 'Alpha Novel' })).toBeInTheDocument(),
+    );
+
+    // Aggregate rows (Worlds, All Works) must NOT have a submenu trigger.
+    expect(screen.queryByRole('button', { name: /Open menu for Worlds/i })).toBeNull();
+    expect(screen.queryByRole('button', { name: /Open menu for All Works/i })).toBeNull();
+    // Entity rows must still have a submenu trigger.
+    const alphaBtn = screen.getByRole('button', { name: /Open menu for Alpha Novel/i });
+    expect(alphaBtn).toBeInTheDocument();
+  });
+
+  it('does not render ••• button on Orchestrator rows', async () => {
+    const user = userEvent.setup();
+    useSidebarHandlers();
+    renderInApp(<Sidebar />, { client: makeClient(), activeCreatorId: 'creator-a' });
+
+    await user.click(screen.getByRole('tab', { name: 'Orchestrator' }));
+
+    expect(screen.queryByRole('button', { name: /Open menu for Memory/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Open menu for Strategies/i })).not.toBeInTheDocument();
+  });
+
+  it('opens submenu on ••• button click', async () => {
+    const user = userEvent.setup();
+    renderSidebarWithWorks();
+
+    await waitFor(() =>
+      expect(screen.getByRole('link', { name: 'Alpha Novel' })).toBeInTheDocument(),
+    );
+
+    const menuBtn = screen.getByRole('button', { name: /Open menu for Alpha Novel/i });
+    await user.click(menuBtn);
+
+    await waitFor(() =>
+      expect(screen.getByRole('menu', { name: 'Row actions' })).toBeInTheDocument(),
+    );
+  });
+
+  it('opens submenu on Enter key when entity row is focused', async () => {
+    const user = userEvent.setup();
+    renderSidebarWithWorks();
+
+    await waitFor(() =>
+      expect(screen.getByRole('link', { name: 'Alpha Novel' })).toBeInTheDocument(),
+    );
+
+    const workLink = screen.getByRole('link', { name: 'Alpha Novel' });
+    workLink.focus();
+    await user.keyboard('{Enter}');
+
+    await waitFor(() =>
+      expect(screen.getByRole('menu', { name: 'Row actions' })).toBeInTheDocument(),
+    );
+  });
+
+  it('opens submenu on Ctrl+. / Cmd+. when entity row is focused', async () => {
+    const user = userEvent.setup();
+    renderSidebarWithWorks();
+
+    await waitFor(() =>
+      expect(screen.getByRole('link', { name: 'Alpha Novel' })).toBeInTheDocument(),
+    );
+
+    const workLink = screen.getByRole('link', { name: 'Alpha Novel' });
+    workLink.focus();
+    await user.keyboard('{Control>}.{/Control}');
+
+    await waitFor(() =>
+      expect(screen.getByRole('menu', { name: 'Row actions' })).toBeInTheDocument(),
+    );
+  });
+
+  it('closes submenu on Escape and returns focus to trigger', async () => {
+    const user = userEvent.setup();
+    renderSidebarWithWorks();
+
+    await waitFor(() =>
+      expect(screen.getByRole('link', { name: 'Alpha Novel' })).toBeInTheDocument(),
+    );
+
+    const menuBtn = screen.getByRole('button', { name: /Open menu for Alpha Novel/i });
+    await user.click(menuBtn);
+    await waitFor(() =>
+      expect(screen.getByRole('menu', { name: 'Row actions' })).toBeInTheDocument(),
+    );
+
+    await user.keyboard('{Escape}');
+    await waitFor(() =>
+      expect(screen.queryByRole('menu', { name: 'Row actions' })).not.toBeInTheDocument(),
+    );
+    expect(document.activeElement).toBe(menuBtn);
+  });
+
+  it('click on row body still navigates (existing behavior preserved)', async () => {
+    const user = userEvent.setup();
+    useSidebarHandlers();
+    renderInApp(<Sidebar />, { client: makeClient(), activeCreatorId: 'creator-a' });
+
+    const worldsLink = screen.getByRole('link', { name: 'Worlds' });
+    expect(worldsLink).toHaveAttribute('href', '/worlds');
+
+    await user.click(worldsLink);
+
+    expect(screen.queryByRole('menu', { name: 'Row actions' })).not.toBeInTheDocument();
+  });
+
+  it('does not render submenu on Orchestrator tab rows', async () => {
+    const user = userEvent.setup();
+    useSidebarHandlers();
+    renderInApp(<Sidebar />, { client: makeClient(), activeCreatorId: 'creator-a' });
+
+    await user.click(screen.getByRole('tab', { name: 'Orchestrator' }));
+
+    const memoryLink = screen.getByRole('link', { name: 'Memory' });
+    memoryLink.focus();
+    await user.keyboard('{Enter}');
+
+    expect(screen.queryByRole('menu', { name: 'Row actions' })).not.toBeInTheDocument();
+  });
+
+  it('closes submenu on route change (NavLink click)', async () => {
+    const user = userEvent.setup();
+    renderSidebarWithWorks();
+
+    await waitFor(() =>
+      expect(screen.getByRole('link', { name: 'Alpha Novel' })).toBeInTheDocument(),
+    );
+
+    const menuBtn = screen.getByRole('button', { name: /Open menu for Alpha Novel/i });
+    await user.click(menuBtn);
+    await waitFor(() =>
+      expect(screen.getByRole('menu', { name: 'Row actions' })).toBeInTheDocument(),
+    );
+
+    const worldsLink = screen.getByRole('link', { name: 'Worlds' });
+    await user.click(worldsLink);
+
+    await waitFor(() =>
+      expect(screen.queryByRole('menu', { name: 'Row actions' })).not.toBeInTheDocument(),
+    );
+  });
+
+  it('trigger button has aria-haspopup="menu" (V1.126 P0 T3)', async () => {
+    renderSidebarWithWorks();
+
+    await waitFor(() =>
+      expect(screen.getByRole('link', { name: 'Alpha Novel' })).toBeInTheDocument(),
+    );
+
+    const menuBtn = screen.getByRole('button', { name: /Open menu for Alpha Novel/i });
+    expect(menuBtn).toHaveAttribute('aria-haspopup', 'menu');
+  });
+
+  it('aria-expanded toggles with submenu open state (V1.126 P0 T3)', async () => {
+    const user = userEvent.setup();
+    renderSidebarWithWorks();
+
+    await waitFor(() =>
+      expect(screen.getByRole('link', { name: 'Alpha Novel' })).toBeInTheDocument(),
+    );
+
+    const menuBtn = screen.getByRole('button', { name: /Open menu for Alpha Novel/i });
+    expect(menuBtn).toHaveAttribute('aria-expanded', 'false');
+
+    await user.click(menuBtn);
+    await waitFor(() =>
+      expect(screen.getByRole('menu', { name: 'Row actions' })).toBeInTheDocument(),
+    );
+    expect(menuBtn).toHaveAttribute('aria-expanded', 'true');
+
+    await user.keyboard('{Escape}');
+    await waitFor(() =>
+      expect(screen.queryByRole('menu', { name: 'Row actions' })).not.toBeInTheDocument(),
+    );
+    expect(menuBtn).toHaveAttribute('aria-expanded', 'false');
+  });
+
+  it('submenu items have role="menuitem" (V1.126 P0 T3)', async () => {
+    const user = userEvent.setup();
+    renderSidebarWithWorks();
+
+    await waitFor(() =>
+      expect(screen.getByRole('link', { name: 'Alpha Novel' })).toBeInTheDocument(),
+    );
+
+    const menuBtn = screen.getByRole('button', { name: /Open menu for Alpha Novel/i });
+    await user.click(menuBtn);
+
+    await waitFor(() => {
+      expect(screen.getByRole('menuitem', { name: /Open Timeline/i })).toBeInTheDocument();
+      expect(screen.getByRole('menuitem', { name: /Open Outline/i })).toBeInTheDocument();
+      expect(screen.getByRole('menuitem', { name: /Agent:/i })).toBeInTheDocument();
+      expect(screen.getByRole('menuitem', { name: /Rename/i })).toBeInTheDocument();
+    });
+  });
+});
+
+describe('Sidebar — submenu contents (V1.126 P0 T2)', () => {
+  beforeEach(async () => {
+    window.localStorage.clear();
+    await i18n.changeLanguage('en');
+  });
+
+  function renderWithWork() {
+    useHandlers(
+      http.get('/v1/daemon/creators', () =>
+        HttpResponse.json({
+          items: [{ creator_id: 'creator-a', display_name: 'Alice' }],
+          pagination: { limit: 20, has_more: false },
+        }),
+      ),
+      worksList([
+        {
+          work_id: 'work-alpha',
+          title: 'Alpha Novel',
+          status: 'active',
+          intake_status: 'ready',
+          primary_preset_id: 'preset-1',
+          updated_at: '2026-01-01T00:00:00Z',
+        },
+      ]),
+      http.post('/v1/daemon/agent-host/scan', () =>
+        HttpResponse.json({ agents: [] }),
+      ),
+    );
+    renderInApp(<Sidebar />, { client: makeClient(), activeCreatorId: 'creator-a' });
+  }
+
+  it('shows Open Timeline and Open Outline items on Work submenu', async () => {
+    const user = userEvent.setup();
+    renderWithWork();
+
+    await waitFor(() =>
+      expect(screen.getByRole('link', { name: 'Alpha Novel' })).toBeInTheDocument(),
+    );
+
+    const menuBtn = screen.getByRole('button', { name: /Open menu for Alpha Novel/i });
+    await user.click(menuBtn);
+
+    await waitFor(() => {
+      expect(screen.getByRole('menuitem', { name: /Open Timeline/i })).toBeInTheDocument();
+      expect(screen.getByRole('menuitem', { name: /Open Outline/i })).toBeInTheDocument();
+    });
+  });
+
+  it('does not show submenu on World aggregate row (V1.126 PR fix)', () => {
+    renderWithWork();
+
+    // Aggregate rows (/worlds, /works) must NOT render a submenu trigger.
+    const worldsBtn = screen.queryByRole('button', { name: /Open menu for Worlds/i });
+    expect(worldsBtn).toBeNull();
+  });
+
+  it('does not show submenu on All Works aggregate row (V1.126 PR fix)', () => {
+    renderWithWork();
+
+    const allWorksBtn = screen.queryByRole('button', { name: /Open menu for All Works/i });
+    expect(allWorksBtn).toBeNull();
+  });
+
+  it('shows Agent and Rename items on Work submenu', async () => {
+    const user = userEvent.setup();
+    renderWithWork();
+
+    await waitFor(() =>
+      expect(screen.getByRole('link', { name: 'Alpha Novel' })).toBeInTheDocument(),
+    );
+
+    const menuBtn = screen.getByRole('button', { name: /Open menu for Alpha Novel/i });
+    await user.click(menuBtn);
+
+    await waitFor(() => {
+      expect(screen.getByRole('menuitem', { name: /Agent:/i })).toBeInTheDocument();
+      expect(screen.getByRole('menuitem', { name: /Rename/i })).toBeInTheDocument();
+    });
+  });
+
+  it('Rename item triggers inline edit on Work submenu', async () => {
+    const user = userEvent.setup();
+    renderWithWork();
+
+    await waitFor(() =>
+      expect(screen.getByRole('link', { name: 'Alpha Novel' })).toBeInTheDocument(),
+    );
+
+    const menuBtn = screen.getByRole('button', { name: /Open menu for Alpha Novel/i });
+    await user.click(menuBtn);
+
+    await waitFor(() =>
+      expect(screen.getByRole('menuitem', { name: /Rename/i })).toBeInTheDocument(),
+    );
+
+    const renameItem = screen.getByRole('menuitem', { name: /Rename/i });
+    await user.click(renameItem);
+
+    await waitFor(() =>
+      expect(screen.getByTestId('sidebar-rename-input')).toBeInTheDocument(),
+    );
+  });
+
+  it('Rename mutation calls PATCH with correct title on Enter', async () => {
+    let patchPayload: unknown;
+    useHandlers(
+      http.patch('/v1/daemon/works/:workId', async ({ request, params }) => {
+        patchPayload = { workId: params.workId, body: await request.json() };
+        return HttpResponse.json({});
+      }),
+    );
+
+    const user = userEvent.setup();
+    renderWithWork();
+
+    await waitFor(() =>
+      expect(screen.getByRole('link', { name: 'Alpha Novel' })).toBeInTheDocument(),
+    );
+
+    const menuBtn = screen.getByRole('button', { name: /Open menu for Alpha Novel/i });
+    await user.click(menuBtn);
+
+    await waitFor(() =>
+      expect(screen.getByRole('menuitem', { name: /Rename/i })).toBeInTheDocument(),
+    );
+
+    await user.click(screen.getByRole('menuitem', { name: /Rename/i }));
+
+    await waitFor(() =>
+      expect(screen.getByTestId('sidebar-rename-input')).toBeInTheDocument(),
+    );
+
+    const input = screen.getByTestId('sidebar-rename-input');
+    await user.clear(input);
+    await user.type(input, 'Beta Novel');
+    await user.keyboard('{Enter}');
+
+    await waitFor(() => {
+      expect(patchPayload).toEqual({
+        workId: 'work-alpha',
+        body: { title: 'Beta Novel' },
+      });
+    });
+  });
+
+  it('Rename failure shows error toast', async () => {
+    useHandlers(
+      http.patch('/v1/daemon/works/:workId', () =>
+        HttpResponse.json(
+          { success: false, error: { code: 'INTERNAL_ERROR', message: 'Server error' } },
+          { status: 500 },
+        ),
+      ),
+    );
+
+    const user = userEvent.setup();
+    renderWithWork();
+
+    await waitFor(() =>
+      expect(screen.getByRole('link', { name: 'Alpha Novel' })).toBeInTheDocument(),
+    );
+
+    const menuBtn = screen.getByRole('button', { name: /Open menu for Alpha Novel/i });
+    await user.click(menuBtn);
+
+    await waitFor(() =>
+      expect(screen.getByRole('menuitem', { name: /Rename/i })).toBeInTheDocument(),
+    );
+
+    await user.click(screen.getByRole('menuitem', { name: /Rename/i }));
+
+    await waitFor(() =>
+      expect(screen.getByTestId('sidebar-rename-input')).toBeInTheDocument(),
+    );
+
+    const input = screen.getByTestId('sidebar-rename-input');
+    await user.clear(input);
+    await user.type(input, 'Beta Novel');
+    await user.keyboard('{Enter}');
+
+    await waitFor(() => {
+      expect(screen.getByText(/Could not update Work/i)).toBeInTheDocument();
+    });
   });
 });

@@ -206,6 +206,17 @@ export function usePresets() {
   });
 }
 
+// ── Timeline (V1.126 P2) ──────────────────────────────────────────────────────
+
+export function useTimelineOverview(cursor?: string) {
+  const client = useNexusClient();
+  return useQuery({
+    queryKey: queryKeys.timeline.overview(cursor),
+    queryFn: () => client.getTimelineOverview(cursor),
+    staleTime: 10_000,
+  });
+}
+
 // ── Mutations (Setup writes) ─────────────────────────────────────────────────
 
 /** Surface a NexusClientError as a toast; callers may still read the result. */

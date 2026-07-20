@@ -121,9 +121,11 @@ describe('WorkTimelineCanvasAdapter.projectGraphForLayer — Narrative projectio
     );
     const { nodes } = adapter.projectGraph(g);
 
-    expect(nodes).toHaveLength(2);
-    expect(nodes.every((n) => n.type === 'work-timeline-narrative-event')).toBe(true);
-    const ids = nodes.map((n) => n.id).sort();
+    // V1.126 P1: excludes directed-axis spine from entity node assertions.
+    const entityNodes = nodes.filter((n) => n.type !== 'directedAxisSpine');
+    expect(entityNodes).toHaveLength(2);
+    expect(entityNodes.every((n) => n.type === 'work-timeline-narrative-event')).toBe(true);
+    const ids = entityNodes.map((n) => n.id).sort();
     expect(ids).toEqual(['wt-event:evt-1', 'wt-event:evt-2']);
   });
 
@@ -165,7 +167,9 @@ describe('WorkTimelineCanvasAdapter.projectGraphForLayer — Narrative projectio
     const { nodes } = projectWorkTimelineGraph(g, 'narrative');
 
     // Ordering: evt-early (ch1) → evt-mid (ch6) → evt-late (ch12) → evt-none.
-    const ids = nodes.map((n) => n.id);
+    // V1.126 P1: excludes directed-axis spine node.
+    const entityNodes = nodes.filter((n) => n.type !== 'directedAxisSpine');
+    const ids = entityNodes.map((n) => n.id);
     expect(ids).toEqual([
       'wt-event:evt-early',
       'wt-event:evt-mid',
@@ -184,7 +188,9 @@ describe('WorkTimelineCanvasAdapter.projectGraphForLayer — Narrative projectio
     });
 
     const { nodes } = projectWorkTimelineGraph(g, 'narrative');
-    const ids = nodes.map((n) => n.id);
+    // V1.126 P1: excludes directed-axis spine node.
+    const entityNodes = nodes.filter((n) => n.type !== 'directedAxisSpine');
+    const ids = entityNodes.map((n) => n.id);
     expect(ids).toEqual(['wt-event:evt-alpha', 'wt-event:evt-mid', 'wt-event:evt-zeta']);
   });
 
@@ -277,7 +283,8 @@ describe('WorkTimelineCanvasAdapter — adapter shape + default layer', () => {
     const adapter = createWorkTimelineCanvasAdapter({ current: makeContext() });
     const { nodes } = adapter.projectGraph(g);
 
-    expect(nodes).toHaveLength(1);
+    // V1.126 P1: directed-axis spine node is also added.
+    expect(nodes).toHaveLength(2);
     expect(nodes[0].type).toBe('work-timeline-narrative-event');
   });
 

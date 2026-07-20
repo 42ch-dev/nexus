@@ -1,0 +1,35 @@
+[
+  {
+    "id": "R-V1102P2QC-S001",
+    "severity": "nit",
+    "lifecycle": "resolved",
+    "summary": "Stale Surfaces daemon helper/blurb copy",
+    "source": "qc-tri",
+    "plan_id": "2026-07-09-v1.102-ui-hygiene",
+    "target": "unspecified",
+    "closure_note": "Archived as low/nit bulk (V1.126 P3 gate)",
+    "archived_at": "2026-07-20T00:00:00Z"
+  },
+  {
+    "id": "R-V1102P2QC-S002",
+    "severity": "nit",
+    "lifecycle": "resolved",
+    "summary": "Studio vs App Restart label density parity",
+    "source": "qc-tri",
+    "plan_id": "2026-07-09-v1.102-ui-hygiene",
+    "target": "unspecified",
+    "closure_note": "Archived as low/nit bulk (V1.126 P3 gate)",
+    "archived_at": "2026-07-20T00:00:00Z"
+  },
+  {
+    "id": "R-V1102P2QC-S003",
+    "severity": "nit",
+    "lifecycle": "resolved",
+    "summary": "Soft running Badge semantic reuse for Installed/healthy",
+    "source": "qc-tri",
+    "plan_id": "2026-07-09-v1.102-ui-hygiene",
+    "target": "unspecified",
+    "closure_note": "Archived as low/nit bulk (V1.126 P3 gate)",
+    "archived_at": "2026-07-20T00:00:00Z"
+  }
+]

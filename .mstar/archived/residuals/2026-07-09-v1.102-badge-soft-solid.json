@@ -1,0 +1,35 @@
+[
+  {
+    "id": "R-V1102P0QC-S001",
+    "severity": "nit",
+    "lifecycle": "resolved",
+    "summary": "Optional soft-row Studio smoke symmetry (testids/class asserts)",
+    "source": "qc-tri",
+    "plan_id": "2026-07-09-v1.102-badge-soft-solid",
+    "target": "unspecified",
+    "closure_note": "Archived as low/nit bulk (V1.126 P3 gate)",
+    "archived_at": "2026-07-20T00:00:00Z"
+  },
+  {
+    "id": "R-V1102P0QC-S002",
+    "severity": "nit",
+    "lifecycle": "resolved",
+    "summary": "Dark interactive Badge solid eyeball at human-smoke gate",
+    "source": "qc3",
+    "plan_id": "2026-07-09-v1.102-badge-soft-solid",
+    "target": "unspecified",
+    "closure_note": "Archived as low/nit bulk (V1.126 P3 gate)",
+    "archived_at": "2026-07-20T00:00:00Z"
+  },
+  {
+    "id": "R-V1102P0QC-S003",
+    "severity": "nit",
+    "lifecycle": "resolved",
+    "summary": "Optional README note for dark solid AA text",
+    "source": "qc2",
+    "plan_id": "2026-07-09-v1.102-badge-soft-solid",
+    "target": "unspecified",
+    "closure_note": "Archived as low/nit bulk (V1.126 P3 gate)",
+    "archived_at": "2026-07-20T00:00:00Z"
+  }
+]

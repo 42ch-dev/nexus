@@ -182,7 +182,8 @@ describe('TimelineCanvasAdapter.renderInspector — Brief-era dispatch', () => {
       'brief',
     );
     const { nodes } = adapter.projectGraph(graph);
-    expect(nodes).toHaveLength(1);
+    // V1.126 P1: nodes array includes the directed-axis spine node
+    expect(nodes).toHaveLength(2);
 
     const inspector = adapter.renderInspector!(nodes[0]!);
     expect(inspector).not.toBeNull();

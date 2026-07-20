@@ -36,6 +36,7 @@ import {
   TimelineKeyBlockChrome,
 } from '../presentational/timeline-node-chrome';
 import { BLOCK_TYPE_LABELS } from '../world-kb/types';
+import { DirectedAxisSpine } from './directed-axis-spine';
 import type { TimelineNodeData } from './timeline-canvas-adapter';
 
 function anchorCountOf(d: TimelineNodeData): number {
@@ -196,4 +197,5 @@ export const timelineNodeTypes = {
   'timeline-brief-era': TimelineBriefEraNode,
   'timeline-event': TimelineEventNode,
   'timeline-key-block': TimelineKeyBlockNode,
+  'directedAxisSpine': DirectedAxisSpine,
 } as const;

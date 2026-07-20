@@ -338,6 +338,11 @@ const SURFACES_SECTION_ROUTES = [
     testId: 'surfaces-banner',
     linkLabel: 'Banner',
   },
+  {
+    route: '/surfaces/selection-submenu',
+    testId: 'surfaces-selection-submenu',
+    linkLabel: 'Selection Submenu',
+  },
 ] as const;
 
 describe('Surfaces section menu — deep links', () => {
@@ -393,6 +398,9 @@ describe('Surfaces section menu — deep links', () => {
       'href',
       '/surfaces/banner',
     );
+    expect(
+      within(index).getByRole('link', { name: /Selection Submenu/ }),
+    ).toHaveAttribute('href', '/surfaces/selection-submenu');
   });
 });
 
@@ -690,6 +698,70 @@ describe('Surfaces page — main banner fixtures', () => {
     expect(
       within(bannerSection).queryAllByTestId(/^main-banner-/).length,
     ).toBe(4);
+  });
+});
+
+/* ---- surfaces page — selection submenu fixtures (V1.126 P0 T4) -------- */
+
+describe('Surfaces page — selection submenu fixtures', () => {
+  beforeEach(() => {
+    mockMatchMedia(false);
+    renderStudio('/surfaces/selection-submenu');
+  });
+
+  it('renders the selection submenu section heading', () => {
+    expect(
+      screen.getByRole('heading', { name: /Selection Submenu/ }),
+    ).toBeInTheDocument();
+  });
+
+  it('renders the legend with 4 items', () => {
+    expect(screen.getByText('Legend')).toBeInTheDocument();
+    const legend = screen.getByText('Legend').closest('div') as HTMLElement | null;
+    expect(legend).toBeInTheDocument();
+  });
+
+  it('renders all 6 fixture variants without console errors', () => {
+    expect(screen.getByTestId('selection-submenu-world-light')).toBeInTheDocument();
+    expect(screen.getByTestId('selection-submenu-world-dark')).toBeInTheDocument();
+    expect(screen.getByTestId('selection-submenu-work-light')).toBeInTheDocument();
+    expect(screen.getByTestId('selection-submenu-work-dark')).toBeInTheDocument();
+    expect(screen.getByTestId('selection-submenu-rename-frame')).toBeInTheDocument();
+    expect(screen.getByTestId('selection-submenu-agent-dialog-frame')).toBeInTheDocument();
+  });
+
+  it('renders submenu popover with menu items in World variant', () => {
+    const worldLight = screen.getByTestId('selection-submenu-world-light');
+    expect(within(worldLight).getByRole('menu')).toBeInTheDocument();
+    expect(within(worldLight).getByText('Open Timeline')).toBeInTheDocument();
+    expect(within(worldLight).getByText('Open KB')).toBeInTheDocument();
+  });
+
+  it('renders submenu popover with Outline item in Work variant', () => {
+    const workLight = screen.getByTestId('selection-submenu-work-light');
+    expect(within(workLight).getByRole('menu')).toBeInTheDocument();
+    expect(within(workLight).getByText('Open Outline')).toBeInTheDocument();
+  });
+
+  it('renders rename in progress with input field', () => {
+    const renameFrame = screen.getByTestId('selection-submenu-rename-frame');
+    const input = within(renameFrame).getByRole('textbox', { name: /Rename entity/i });
+    expect(input).toBeInTheDocument();
+    expect(input).toHaveValue('My Fantasy World');
+  });
+
+  it('renders agent dialog overlay with entity-name title', () => {
+    const agentFrame = screen.getByTestId('selection-submenu-agent-dialog-frame');
+    const dialog = within(agentFrame).getByRole('dialog', { name: /Assign agent to My Fantasy World/i });
+    expect(dialog).toBeInTheDocument();
+    expect(dialog).toHaveAttribute('aria-modal', 'true');
+  });
+
+  it('renders dark variant with dark class wrapper', () => {
+    const worldDark = screen.getByTestId('selection-submenu-world-dark');
+    const darkWrapper = worldDark.querySelector('.dark') as HTMLElement | null;
+    expect(darkWrapper).toBeInTheDocument();
+    expect(within(darkWrapper!).getByRole('menu')).toBeInTheDocument();
   });
 });
 
