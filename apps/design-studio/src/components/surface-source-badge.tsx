@@ -129,7 +129,7 @@ export function SurfaceSourceLegend() {
           </span>
         </li>
         <li className="flex flex-wrap items-center gap-2">
-          <SurfaceSourceBadge importPath="@web-ui/dialog" />
+          <SurfaceSourceBadge importPath="@web-ui/dialog" /> {/* transitional — legend example (not an import) */}
           <span>
             Unpromoted shadcn primitive still mirrored from{' '}
             <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">

@@ -542,7 +542,7 @@ export function SurfacesShellPage() {
             '@web-layout/shell-sidebar-chrome',
             '@web-layout/footer-profiles-chrome',
             '@web-setup/workspace-path-field',
-            '@web-ui/dialog',
+            '@web-ui/dialog', // transitional — badge path label (not an import)
           ]}
         />
         <p className="text-copy-14 text-gray-700 mb-6">

@@ -44,7 +44,7 @@ describe('getSurfaceSourceLabel', () => {
 
   it('can omit the import path', () => {
     expect(
-      getSurfaceSourceLabel('@web-ui/dialog', { includePath: false }),
+      getSurfaceSourceLabel('@web-ui/dialog', { includePath: false }), // transitional — test fixture string
     ).toBe('Transitional primitive');
   });
 });
@@ -70,7 +70,7 @@ describe('SurfaceSourceBadge', () => {
   });
 
   it('renders transitional tier', () => {
-    render(<SurfaceSourceBadge importPath="@web-ui/dialog" />);
+    render(<SurfaceSourceBadge importPath="@web-ui/dialog" />); // transitional — test fixture string
     expect(screen.getByTestId('surface-source-badge-transitional')).toBeInTheDocument();
   });
 });
