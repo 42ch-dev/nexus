@@ -11,6 +11,10 @@ import {
 import { FooterProfilesChrome } from '@web-layout/footer-profiles-chrome';
 import { DaemonHealthIndicatorChrome } from '@web-layout/daemon-health-indicator-chrome';
 
+import {
+  SurfaceSourceBadges,
+  SurfaceSourceLegend,
+} from '@/components/surface-source-badge';
 import { AgentPickerFixtures } from '@/fixtures/agent-picker-fixtures';
 import { CanvasSurfacesFixtures } from '@/fixtures/canvas-surfaces-fixtures';
 import { LaunchDaemonFixtures } from '@/fixtures/launch-daemon-fixtures';
@@ -136,18 +140,19 @@ export function SurfacesLayout() {
       <h2 className="text-heading-24 font-semibold text-gray-1000 mb-2">
         Surfaces
       </h2>
-      <p className="text-copy-16 text-gray-700 mb-6">
+      <p className="text-copy-16 text-gray-700 mb-4">
         Real product-surface slices — Setup wizard step card and App shell
-        chrome, composed as studio-local fixtures from{' '}
+        chrome, composed as studio-local fixtures. Each section below labels
+        whether imports are App presentational extracts (
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+          @web-*
+        </code>
+        ) or promoted primitives (
         <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
           @42ch/nexus-ui
-        </code>{' '}
-        (promoted) and{' '}
-        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
-          @web-ui/*
-        </code>{' '}
-        (transitional) primitives per IA guide §4.5. No daemon data, no live
-        routing, and no product-page imports (
+        </code>
+        ) per IA guide §4.5. No daemon data, no live routing, and no
+        product-page imports (
         <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
           pages/
         </code>{' '}
@@ -157,6 +162,7 @@ export function SurfacesLayout() {
         </code>
         ). Studio-only deep links — not App Settings IA.
       </p>
+      <SurfaceSourceLegend />
 
       <div className="flex gap-8 items-start">
         <aside
@@ -448,6 +454,14 @@ export function SurfacesSetupPage() {
   return (
     <section data-testid="surfaces-setup">
       <SurfaceHeading>Setup — Wizard chrome</SurfaceHeading>
+      <SurfaceSourceBadges
+        importPaths={[
+          '@web-setup/top-step-indicator',
+          '@web-setup/agent-picker',
+          '@web-setup/workspace-path-field',
+          '@42ch/nexus-ui',
+        ]}
+      />
       <p className="text-copy-14 text-gray-700 mb-6">
         Studio-local chrome fixtures for V1.105 P2 portrait shell: fixed
         480×min(720px, 85vh) card, top horizontal Steps (Agent / Workspace /
@@ -472,6 +486,12 @@ export function SurfacesShellPage() {
     <div data-testid="surfaces-shell">
       <section>
         <SurfaceHeading>App shell chrome</SurfaceHeading>
+        <SurfaceSourceBadges
+          importPaths={[
+            '@web-layout/shell-sidebar-chrome',
+            '@42ch/nexus-ui',
+          ]}
+        />
         <p className="text-copy-14 text-gray-700 mb-6">
           Sidebar tab strip (Creator / Orchestrator), nav groups, and Settings
           footer utility — rendered by the presentational{' '}
@@ -489,6 +509,13 @@ export function SurfacesShellPage() {
 
       <section className="mt-10" data-testid="surfaces-creator-shell">
         <SurfaceHeading>Creator shell — Create vs Controller</SurfaceHeading>
+        <SurfaceSourceBadges
+          importPaths={[
+            '@web-layout/creator-shell-content',
+            '@web-layout/shell-sidebar-chrome',
+            '@42ch/nexus-ui',
+          ]}
+        />
         <p className="text-copy-14 text-gray-700 mb-6">
           V1.128 P2 shell content modes via{' '}
           <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
@@ -508,6 +535,16 @@ export function SurfacesShellPage() {
       {/* Settings shell chrome stays discoverable under Shell (V1.103 P0) */}
       <section className="mt-10">
         <SurfaceHeading>Settings — Shell chrome</SurfaceHeading>
+        <SurfaceSourceBadges
+          importPaths={[
+            '@web-settings/connect-daemon-form-chrome',
+            '@web-settings/settings-setup-section-chrome',
+            '@web-layout/shell-sidebar-chrome',
+            '@web-layout/footer-profiles-chrome',
+            '@web-setup/workspace-path-field',
+            '@web-ui/dialog',
+          ]}
+        />
         <p className="text-copy-14 text-gray-700 mb-6">
           Studio-local chrome for DF-70 Settings shell: footer utility{' '}
           <strong className="font-medium text-gray-1000">Settings</strong>{' '}
@@ -536,6 +573,9 @@ export function SurfacesShellPage() {
 
       <section className="mt-10">
         <SurfaceHeading>Footer profiles</SurfaceHeading>
+        <SurfaceSourceBadges
+          importPaths={['@web-layout/footer-profiles-chrome']}
+        />
         <p className="text-copy-14 text-gray-700 mb-6">
           Profile switcher chrome from{' '}
           <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
@@ -548,6 +588,9 @@ export function SurfacesShellPage() {
 
       <section className="mt-10">
         <SurfaceHeading>Header health indicator</SurfaceHeading>
+        <SurfaceSourceBadges
+          importPaths={['@web-layout/daemon-health-indicator-chrome']}
+        />
         <p className="text-copy-14 text-gray-700 mb-6">
           Daemon health indicator chrome from{' '}
           <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
@@ -566,6 +609,7 @@ export function SurfacesAgentPickerPage() {
   return (
     <section className="mt-0" data-testid="surfaces-agent-picker">
       <SurfaceHeading>Setup — AgentPicker</SurfaceHeading>
+      <SurfaceSourceBadges importPaths={['@web-setup/agent-picker']} />
       <p className="text-copy-14 text-gray-700 mb-6">
         Presentational card grid from{' '}
         <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
@@ -587,6 +631,9 @@ export function SurfacesDaemonPage() {
   return (
     <section data-testid="surfaces-daemon">
       <SurfaceHeading>Daemon status strip</SurfaceHeading>
+      <SurfaceSourceBadges
+        importPaths={['@42ch/nexus-ui', '@web-ui/badge']}
+      />
       <p className="text-copy-14 text-gray-700 mb-6">
         Healthy daemon status affordance — green dot, badge, helper text.
         Composed from{' '}
@@ -612,6 +659,9 @@ export function SurfacesLaunchPage() {
   return (
     <section data-testid="surfaces-launch">
       <SurfaceHeading>Launch — Daemon splash</SurfaceHeading>
+      <SurfaceSourceBadges
+        importPaths={['@web-setup/daemon-ready-splash']}
+      />
       <p className="text-copy-14 text-gray-700 mb-6">
         Presentational desktop launch splash from{' '}
         <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
@@ -629,6 +679,9 @@ export function SurfacesSelectionSubmenuPage() {
   return (
     <section data-testid="surfaces-selection-submenu">
       <SurfaceHeading>Selection Submenu — 6 variants (V1.126 P0 T4)</SurfaceHeading>
+      <SurfaceSourceBadges
+        importPaths={['@web-shell/selection-submenu']}
+      />
       <p className="text-copy-14 text-gray-700 mb-6">
         Full fixture matrix for the selection submenu presentational component
         from{' '}
@@ -660,6 +713,9 @@ export function SurfacesCanvasPage() {
     <div data-testid="surfaces-canvas">
       <section>
         <SurfaceHeading>Canvas — Three mirrored surfaces + shared chrome</SurfaceHeading>
+        <SurfaceSourceBadges
+          importPaths={['@web-canvas/node-chrome-shell']}
+        />
         <p className="text-copy-14 text-gray-700 mb-6">
           Presentational preview of the canvas surface chrome. All three App
           canvas surfaces are mirrored as static markup using the same tokens
@@ -733,6 +789,9 @@ export function SurfacesCanvasPage() {
       {/* V1.128 P1 T1 — NLE multi-track Timeline band */}
       <section className="mt-10" data-testid="surfaces-nle-timeline">
         <SurfaceHeading>NLE Timeline</SurfaceHeading>
+        <SurfaceSourceBadges
+          importPaths={['@web-canvas/nle-timeline-chrome']}
+        />
         <p className="text-copy-14 text-gray-700 mb-6">
           NLE-style multi-track Timeline band for dogfood visual acceptance —
           vertically centered in the canvas host, horizontally scrubbable along
@@ -761,6 +820,12 @@ export function SurfacesCanvasPage() {
       {/* V1.124 P0 T3 — World Timeline node chrome (Brief-era / Event / KeyBlock) */}
       <section className="mt-10" data-testid="surfaces-world-timeline">
         <SurfaceHeading>World Timeline</SurfaceHeading>
+        <SurfaceSourceBadges
+          importPaths={[
+            '@web-canvas/node-chrome-shell',
+            '@web-canvas/timeline-node-chrome',
+          ]}
+        />
         <p className="text-copy-14 text-gray-700 mb-6">
           World Timeline node chrome for visual acceptance without the daemon —
           Brief-era markers, Narrative Events, and KeyBlock Context cluster
@@ -805,6 +870,12 @@ export function SurfacesCanvasPage() {
       {/* V1.124 P0 T4 — Work Timeline node chrome (Narrative + Moment scene + beat) */}
       <section className="mt-10" data-testid="surfaces-work-timeline">
         <SurfaceHeading>Work Timeline</SurfaceHeading>
+        <SurfaceSourceBadges
+          importPaths={[
+            '@web-canvas/node-chrome-shell',
+            '@web-canvas/timeline-node-chrome',
+          ]}
+        />
         <p className="text-copy-14 text-gray-700 mb-6">
           Work Timeline node chrome for visual acceptance without the daemon —
           Narrative events plus Moment scene and beat cards (Moment = scene +
@@ -847,6 +918,9 @@ export function SurfacesCanvasPage() {
       {/* V1.124 P2 T2 — Global Timeline list chrome */}
       <section className="mt-10" data-testid="surfaces-global-timeline">
         <SurfaceHeading>Global Timeline</SurfaceHeading>
+        <SurfaceSourceBadges
+          importPaths={['@web-global-timeline/global-timeline-list-chrome']}
+        />
         <p className="text-copy-14 text-gray-700 mb-6">
           Cross-World Timeline activity list chrome for visual acceptance
           without the daemon. Composes{' '}
@@ -867,6 +941,9 @@ export function SurfacesCanvasPage() {
       {/* V1.124 P2 T3a — Layer breadcrumb */}
       <section className="mt-10" data-testid="surfaces-layer-breadcrumb">
         <SurfaceHeading>Layer Breadcrumb</SurfaceHeading>
+        <SurfaceSourceBadges
+          importPaths={['@web-canvas/layer-breadcrumb']}
+        />
         <p className="text-copy-14 text-gray-700 mb-6">
           Three-layer zoom affordance used on World Timeline (Brief ↔ Narrative)
           and Work Timeline (Narrative ↔ Moment). Composes{' '}
@@ -885,6 +962,9 @@ export function SurfacesCanvasPage() {
       {/* V1.124 P2 T3b — Conflict-modal shared chrome */}
       <section className="mt-10" data-testid="surfaces-conflict-modals">
         <SurfaceHeading>Conflict Modals</SurfaceHeading>
+        <SurfaceSourceBadges
+          importPaths={['@web-canvas/conflict-modal-chrome']}
+        />
         <p className="text-copy-14 text-gray-700 mb-6">
           One shared conflict-resolution shell used by Strategy, Outline, and
           World KB adapters. Composes{' '}

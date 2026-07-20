@@ -426,6 +426,66 @@ describe('Surfaces section menu — deep links', () => {
   });
 });
 
+describe('Surfaces — import source badges (V1.128 P3 T1)', () => {
+  it('shows the two-tier legend on the Surfaces layout', () => {
+    mockMatchMedia(false);
+    renderStudio('/surfaces/shell');
+
+    const legend = screen.getByTestId('surface-source-legend');
+    expect(legend).toBeInTheDocument();
+    expect(
+      within(legend).getByTestId('surface-source-badge-extract'),
+    ).toBeInTheDocument();
+    expect(
+      within(legend).getByTestId('surface-source-badge-promoted'),
+    ).toBeInTheDocument();
+    expect(
+      within(legend).getByTestId('surface-source-badge-transitional'),
+    ).toBeInTheDocument();
+  });
+
+  it('labels Shell sections with extract badges', () => {
+    mockMatchMedia(false);
+    renderStudio('/surfaces/shell');
+
+    const shell = screen.getByTestId('surfaces-shell');
+    const badges = within(shell).getAllByTestId('surface-source-badge-extract');
+    expect(badges.length).toBeGreaterThanOrEqual(3);
+    expect(
+      within(shell).getAllByText('@web-layout/shell-sidebar-chrome').length,
+    ).toBeGreaterThanOrEqual(1);
+    expect(
+      within(shell).getAllByText('@web-layout/creator-shell-content').length,
+    ).toBeGreaterThanOrEqual(1);
+  });
+
+  it('labels Canvas NLE Timeline with the canvas extract badge', () => {
+    mockMatchMedia(false);
+    renderStudio('/surfaces/canvas');
+
+    const nle = screen.getByTestId('surfaces-nle-timeline');
+    expect(
+      within(nle).getAllByText('@web-canvas/nle-timeline-chrome').length,
+    ).toBeGreaterThanOrEqual(1);
+    expect(
+      within(nle).getByTestId('surface-source-badge-extract'),
+    ).toBeInTheDocument();
+  });
+
+  it('labels Selection Submenu with the shell extract badge', () => {
+    mockMatchMedia(false);
+    renderStudio('/surfaces/selection-submenu');
+
+    const section = screen.getByTestId('surfaces-selection-submenu');
+    expect(
+      within(section).getAllByText('@web-shell/selection-submenu').length,
+    ).toBeGreaterThanOrEqual(1);
+    expect(
+      within(section).getByTestId('surface-source-badge-extract'),
+    ).toBeInTheDocument();
+  });
+});
+
 /* ---- surfaces page fixtures (T4) ---------------------------------------- */
 
 describe('Surfaces page — setup wizard chrome fixtures', () => {
