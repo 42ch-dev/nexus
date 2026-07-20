@@ -34,6 +34,16 @@ export function WorldsPage() {
   }, [overview.data]);
 
   function handleCreateWorldClick() {
+    // Defensive: a future bridge may expose client.createWorld (V1.125 P2
+    // stub). Architect seat 2 (V1.127 P0) confirmed createWorld is absent on
+    // every current bridge, so this handler is unreachable today — when
+    // createWorld is absent the card below renders disabled-with-tooltip, so
+    // the false branch never fires either. Wiring (call createWorld, navigate
+    // to /worlds/<id>/timeline) is deferred to V1.128+ — adding create_world
+    // Tauri command + NexusClient.createWorld is a wire-contract change (NG-16).
+    if (hasCreateWorldClient(client)) {
+      return;
+    }
   }
 
   return (
@@ -77,13 +87,39 @@ export function WorldsPage() {
                   data-testid="worlds-empty-create-world"
                 />
               ) : (
-                <EmptyCreateCard
-                  icon={Plus}
-                  title={t('emptyCreateWorkTitle')}
-                  description={t('emptyCreateWorkDescription')}
-                  onClick={() => setCreateWorkOpen(true)}
-                  data-testid="worlds-empty-create-work"
-                />
+                <>
+                  {/*
+                    V1.127 P0 T1 (AC-V1127-1): createWorld is absent on every
+                    current bridge, so render the Create World affordance as a
+                    disabled card with a desktop-only tooltip instead of
+                    silently swapping it out. Inline (rather than EmptyCreateCard)
+                    because EmptyCreateCard has no disabled path; classes mirror
+                    its layout and drop hover/focus for the disabled state.
+                  */}
+                  <button
+                    type="button"
+                    disabled
+                    tabIndex={-1}
+                    title={t('create.desktop-only')}
+                    data-testid="worlds-empty-create-world"
+                    className="flex w-full min-h-[7.5rem] flex-col items-center justify-center gap-2 rounded-card border border-dashed border-gray-alpha-400 p-6 text-center opacity-60 motion-reduce:transition-none"
+                  >
+                    <Globe className="h-8 w-8 shrink-0 text-blue-700" aria-hidden />
+                    <span className="font-display text-display-20 tracking-tight text-gray-1000">
+                      {t('emptyCreateWorldTitle')}
+                    </span>
+                    <span className="max-w-sm text-copy-14 text-gray-700">
+                      {t('emptyCreateWorldDescription')}
+                    </span>
+                  </button>
+                  <EmptyCreateCard
+                    icon={Plus}
+                    title={t('emptyCreateWorkTitle')}
+                    description={t('emptyCreateWorkDescription')}
+                    onClick={() => setCreateWorkOpen(true)}
+                    data-testid="worlds-empty-create-work"
+                  />
+                </>
               )}
             </div>
           ) : (

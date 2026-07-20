@@ -11,6 +11,9 @@
   "emptyCreateWorkDescription": "创建作品以开始 — 世界由作品创建。",
   "emptyCreateWorldTitle": "创建",
   "emptyCreateWorldDescription": "在本地运行时中启动一个新世界。",
+  "create": {
+    "desktop-only": "在桌面应用中创建 World"
+  },
   "listTitle": "全部世界",
   "openKb": "打开知识库",
   "openTimeline": "打开时间轴",

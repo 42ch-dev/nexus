@@ -11,6 +11,9 @@
   "emptyCreateWorkDescription": "Create a Work to get started — Worlds are created from your Works.",
   "emptyCreateWorldTitle": "Create",
   "emptyCreateWorldDescription": "Start a new World in the local runtime.",
+  "create": {
+    "desktop-only": "Open in the desktop app to create a World"
+  },
   "listTitle": "All worlds",
   "openKb": "Open knowledge base",
   "openTimeline": "Open timeline",

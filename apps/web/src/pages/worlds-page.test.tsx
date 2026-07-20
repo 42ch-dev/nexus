@@ -164,6 +164,26 @@ describe('WorldsPage', () => {
     expect(screen.queryByTestId('worlds-empty-create-work')).not.toBeInTheDocument();
   });
 
+  it('disables the Create World card with a desktop-only tooltip when the bridge lacks createWorld (V1.127 P0 T1)', async () => {
+    // BrowserClient has no createWorld — every current bridge hits this path
+    // (architect seat 2 confirmed createWorld is absent on all bridges).
+    useHandlers(
+      http.get('/v1/daemon/narrative/worlds', () => HttpResponse.json({ worlds: [] })),
+    );
+
+    renderWorlds();
+
+    const card = await screen.findByTestId('worlds-empty-create-world');
+    // AC-V1127-1: card renders disabled with a desktop-only tooltip, not a
+    // silent no-op. `disabled` suppresses click activation (click is a no-op
+    // by construction) and removes the card from the tab order.
+    expect(card).toBeDisabled();
+    expect(card).toHaveAttribute('title', 'Open in the desktop app to create a World');
+    // The Create Work peer affordance stays available as the active path so
+    // the browser tester can still reach the Works → Worlds flow.
+    expect(screen.getByTestId('worlds-empty-create-work')).toBeInTheDocument();
+  });
+
   it('renders the honest empty state when no worlds exist', async () => {
     useHandlers(
       http.get('/v1/daemon/narrative/worlds', () => HttpResponse.json({ worlds: [] })),
