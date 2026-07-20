@@ -14,7 +14,6 @@ import { DaemonHealthIndicatorChrome } from '@web-layout/daemon-health-indicator
 import { AgentPickerFixtures } from '@/fixtures/agent-picker-fixtures';
 import { CanvasSurfacesFixtures } from '@/fixtures/canvas-surfaces-fixtures';
 import { LaunchDaemonFixtures } from '@/fixtures/launch-daemon-fixtures';
-import { MainBannerFixtures } from '@/fixtures/main-banner-fixtures';
 import {
   CREATOR_NAV,
   ORCHESTRATOR_NAV,
@@ -74,12 +73,6 @@ const SURFACES_SECTIONS = [
     path: '/surfaces/launch',
     end: false,
     desc: 'Desktop launch splash — waiting, error, and recovery',
-  },
-  {
-    label: 'Banner',
-    path: '/surfaces/banner',
-    end: false,
-    desc: 'Degraded daemon banner — starting, degraded, stopped, error',
   },
   {
     label: 'Selection Submenu',
@@ -605,27 +598,6 @@ export function SurfacesLaunchPage() {
         Reset local database. No daemon IPC, no Tauri commands.
       </p>
       <LaunchDaemonFixtures />
-    </section>
-  );
-}
-
-export function SurfacesBannerPage() {
-  return (
-    <section data-testid="surfaces-banner">
-      <SurfaceHeading>Launch — Daemon banner</SurfaceHeading>
-      <p className="text-copy-14 text-gray-700 mb-6">
-        Composition-only fixture replicating the Control Room degraded-daemon
-        banner. Built from{' '}
-        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
-          @42ch/nexus-ui
-        </code>{' '}
-        Button + inline markup. No import from{' '}
-        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
-          apps/web/src/components/layout/main-banner.tsx
-        </code>{' '}
-        (daemon/desktop hooks forbidden in Studio).
-      </p>
-      <MainBannerFixtures />
     </section>
   );
 }
