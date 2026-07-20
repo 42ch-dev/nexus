@@ -728,7 +728,9 @@ export function SurfacesCanvasPage() {
           <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
             @xyflow/react
           </code>
-          , no contracts, no i18n. Card-matrix node chrome samples remain
+          , no contracts, no i18n. The pull-off fixture (T2) detaches one item
+          from a track onto the canvas area using local fixture state only — it
+          does not ship in App Timeline. Card-matrix node chrome samples remain
           below for per-kind regression.
         </p>
         <NleTimelineCanvasFixtures />

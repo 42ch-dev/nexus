@@ -5,7 +5,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { NleTimelineCanvasFixtures } from '@/fixtures/nle-timeline-canvas-fixtures';
@@ -91,18 +91,18 @@ describe('NleTimelineCanvasFixtures render', () => {
     mockMatchMedia(false);
     render(<NleTimelineCanvasFixtures />);
 
-    const root = screen.getByTestId('nle-timeline-canvas-fixtures');
-    expect(within(root).getByTestId('nle-timeline-label-brief')).toHaveTextContent(
+    const band = screen.getByTestId('nle-timeline-fixture-band');
+    expect(within(band).getByTestId('nle-timeline-label-brief')).toHaveTextContent(
       'Brief',
     );
     expect(
-      within(root).getByTestId('nle-timeline-label-narrative'),
+      within(band).getByTestId('nle-timeline-label-narrative'),
     ).toHaveTextContent('Narrative');
-    expect(within(root).getByTestId('nle-timeline-label-moment')).toHaveTextContent(
+    expect(within(band).getByTestId('nle-timeline-label-moment')).toHaveTextContent(
       'Moment',
     );
-    expect(within(root).getByTestId('nle-timeline-scroll')).toBeInTheDocument();
-    expect(within(root).getByText('The Crossing')).toBeInTheDocument();
+    expect(within(band).getByTestId('nle-timeline-scroll')).toBeInTheDocument();
+    expect(within(band).getByText('The Crossing')).toBeInTheDocument();
   });
 
   it('renders under .dark without throw (theme class toggle)', () => {
@@ -111,5 +111,51 @@ describe('NleTimelineCanvasFixtures render', () => {
     expect(() => render(<NleTimelineCanvasFixtures />)).not.toThrow();
     expect(screen.getByTestId('nle-timeline-canvas-fixtures')).toBeInTheDocument();
     expect(screen.getByTestId('nle-timeline-chrome')).toBeInTheDocument();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Pull-off — AC-V1128-2b local-state interaction
+// ---------------------------------------------------------------------------
+
+describe('NleTimelineCanvasFixtures pull-off', () => {
+  it('detaches clip from track onto canvas area on Detach click', () => {
+    mockMatchMedia(false);
+    render(<NleTimelineCanvasFixtures />);
+
+    const pullOff = screen.getByTestId('nle-timeline-pull-off-demo');
+    expect(within(pullOff).getByTestId('nle-timeline-clip-ev-1')).toBeInTheDocument();
+    expect(
+      within(pullOff).queryByTestId('nle-pull-off-detached-item'),
+    ).not.toBeInTheDocument();
+
+    fireEvent.click(within(pullOff).getByTestId('nle-timeline-clip-detach-ev-1'));
+
+    expect(
+      within(pullOff).queryByTestId('nle-timeline-clip-ev-1'),
+    ).not.toBeInTheDocument();
+    expect(within(pullOff).getByTestId('nle-pull-off-detached-item')).toHaveTextContent(
+      'The Crossing',
+    );
+    expect(within(pullOff).getByTestId('nle-pull-off-detached-item')).toHaveTextContent(
+      'Detached from Narrative lane',
+    );
+  });
+
+  it('resets pull-off demo so clip returns to the Narrative lane', () => {
+    mockMatchMedia(false);
+    render(<NleTimelineCanvasFixtures />);
+
+    const pullOff = screen.getByTestId('nle-timeline-pull-off-demo');
+    fireEvent.click(within(pullOff).getByTestId('nle-timeline-clip-detach-ev-1'));
+    expect(within(pullOff).getByTestId('nle-pull-off-detached-item')).toBeInTheDocument();
+
+    fireEvent.click(within(pullOff).getByTestId('nle-pull-off-reset'));
+
+    expect(
+      within(pullOff).queryByTestId('nle-pull-off-detached-item'),
+    ).not.toBeInTheDocument();
+    expect(within(pullOff).getByTestId('nle-timeline-clip-ev-1')).toBeInTheDocument();
+    expect(within(pullOff).getByTestId('nle-pull-off-canvas-hint')).toBeInTheDocument();
   });
 });

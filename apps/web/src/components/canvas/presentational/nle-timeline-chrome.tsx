@@ -57,6 +57,10 @@ export type NleTimelineChromeProps = {
   rulerTicks?: NleTimelineRulerTick[];
   /** Accessible label for the horizontal scrub region. */
   scrollAriaLabel?: string;
+  /** Clip IDs that render a detach affordance (callback-driven; no internal state). */
+  detachableClipIds?: ReadonlySet<string>;
+  /** Fired when the user activates detach on a clip in `detachableClipIds`. */
+  onClipDetach?: (trackId: string, clip: NleTimelineClip) => void;
   className?: string;
   'data-testid'?: string;
 };
@@ -124,10 +128,14 @@ function NleTimelineClipBlock({
   clip,
   accent,
   laneHeightPx,
+  showDetach,
+  onDetach,
 }: {
   clip: NleTimelineClip;
   accent: NleTimelineTrackAccent;
   laneHeightPx: number;
+  showDetach?: boolean;
+  onDetach?: () => void;
 }) {
   const style: CSSProperties = {
     left: clip.startPx,
@@ -139,7 +147,7 @@ function NleTimelineClipBlock({
   return (
     <div
       className={cn(
-        'absolute flex items-center overflow-hidden rounded-md border px-2',
+        'absolute flex items-center gap-1 overflow-hidden rounded-md border px-2',
         'bg-canvas-node-fill text-copy-13 text-gray-1000 shadow-card',
         TRACK_ACCENT_CLIP_BORDER[accent],
         TRACK_ACCENT_CLIP_FILL[accent],
@@ -148,7 +156,25 @@ function NleTimelineClipBlock({
       data-testid={`nle-timeline-clip-${clip.id}`}
       title={clip.label}
     >
-      <span className="truncate">{clip.label}</span>
+      <span className="min-w-0 flex-1 truncate">{clip.label}</span>
+      {showDetach && onDetach ? (
+        <button
+          type="button"
+          className={cn(
+            'shrink-0 rounded px-1.5 py-0.5 text-label-12 font-medium',
+            'text-gray-700 hover:bg-gray-alpha-200 hover:text-gray-1000',
+            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-700',
+          )}
+          onClick={(event) => {
+            event.stopPropagation();
+            onDetach();
+          }}
+          aria-label={`Detach ${clip.label} from track`}
+          data-testid={`nle-timeline-clip-detach-${clip.id}`}
+        >
+          Detach
+        </button>
+      ) : null}
     </div>
   );
 }
@@ -157,10 +183,14 @@ function NleTimelineLane({
   track,
   contentWidthPx,
   laneHeightPx,
+  detachableClipIds,
+  onClipDetach,
 }: {
   track: NleTimelineTrack;
   contentWidthPx: number;
   laneHeightPx: number;
+  detachableClipIds?: ReadonlySet<string>;
+  onClipDetach?: (trackId: string, clip: NleTimelineClip) => void;
 }) {
   return (
     <div
@@ -174,6 +204,14 @@ function NleTimelineLane({
           clip={clip}
           accent={track.accent}
           laneHeightPx={laneHeightPx}
+          showDetach={detachableClipIds?.has(clip.id)}
+          onDetach={
+            onClipDetach
+              ? () => {
+                  onClipDetach(track.id, clip);
+                }
+              : undefined
+          }
         />
       ))}
     </div>
@@ -203,6 +241,8 @@ export function NleTimelineChrome({
   playheadPx,
   rulerTicks,
   scrollAriaLabel = 'Timeline scrub area',
+  detachableClipIds,
+  onClipDetach,
   className,
   'data-testid': dataTestId = 'nle-timeline-chrome',
 }: NleTimelineChromeProps) {
@@ -269,6 +309,8 @@ export function NleTimelineChrome({
                   track={track}
                   contentWidthPx={contentWidthPx}
                   laneHeightPx={laneHeightPx}
+                  detachableClipIds={detachableClipIds}
+                  onClipDetach={onClipDetach}
                 />
               ))}
               {playheadPx != null ? (

@@ -4,8 +4,8 @@
  * Boundary: the extract MUST NOT import `@xyflow/react` (architect lock).
  * Rendering: ≥2 labeled tracks, centered band host, horizontal scroll region.
  */
-import { describe, expect, it } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { describe, expect, it, vi } from 'vitest';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
@@ -129,5 +129,29 @@ describe('NleTimelineChrome rendering', () => {
     expect(
       container.querySelector('.text-canvas-layer-narrative-accent'),
     ).not.toBeNull();
+  });
+
+  it('renders detach affordance when detachableClipIds and onClipDetach are set', () => {
+    const onDetach = vi.fn();
+    render(
+      <NleTimelineChrome
+        tracks={TWO_TRACK_FIXTURE}
+        contentWidthPx={600}
+        detachableClipIds={new Set(['c2'])}
+        onClipDetach={onDetach}
+      />,
+    );
+
+    const detachButton = screen.getByTestId('nle-timeline-clip-detach-c2');
+    expect(detachButton).toHaveAttribute('aria-label', 'Detach Event clip from track');
+    expect(screen.queryByTestId('nle-timeline-clip-detach-c1')).not.toBeInTheDocument();
+
+    fireEvent.click(detachButton);
+    expect(onDetach).toHaveBeenCalledWith('narrative', {
+      id: 'c2',
+      label: 'Event clip',
+      startPx: 80,
+      widthPx: 100,
+    });
   });
 });
