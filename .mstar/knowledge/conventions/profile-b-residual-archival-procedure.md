@@ -44,7 +44,11 @@ Inherited (pre-existing) archived entries with non-enum formats may be ratified 
 
 ### Archive file shape
 
-`.mstar/archived/residuals/<plan-id>.json` is a bare JSON array of entries (same shape as the in-status.json entries plus `closure_note` + `archived_at`). Extend the existing file if it exists; do not overwrite.
+`.mstar/archived/residuals/<plan-id>.json` is a bare JSON array of entries (same shape as the in-status.json entries plus `closure_note` + `archived_at`). **Extend the existing file if it exists; do NOT overwrite.** Read its current contents first and merge — the same `<plan-id>.json` may have been written by an earlier iteration's bulk archival (V1.127 P0 T6 made this mistake: overwrote a 2-entry V1.126 P3 file with a single new V1.127 entry, losing both prior entries; caught by qc1 W-001).
+
+### Anti-pattern: PM-inline admin overwrite
+
+When PM does residual archival inline (PM whitelist: "Minimal non-behavioral text edits"), the temptation is to `Write` the archived file with a fresh single entry. **Do not.** Read the existing file first (`cat .mstar/archived/residuals/<plan-id>.json`), append the new entry, and write the merged array. The canonical shape is V1.0 flat-array (not V1.1 object-with-entries) per V1.126 P3 established convention.
 
 ### Procedure (8 steps)
 
@@ -52,7 +56,7 @@ Inherited (pre-existing) archived entries with non-enum formats may be ratified 
 2. Remove Done rows from hot `plans[]`.
 3. For each `residual_findings[<plan-id>]`: decide archive eligibility per the rule.
 4. Add `closure_note` per entry per the enum.
-5. Move (not copy) eligible arrays (or filtered entries) to `archived/residuals/<plan-id>.json`.
+5. Move (not copy) eligible arrays (or filtered entries) to `archived/residuals/<plan-id>.json` — **read first, merge, then write** (see Anti-pattern above).
 6. Refresh `metadata.tech_debt_summary` (total_open, by_severity, by_target, by_plan).
 7. Verify `wc -c .mstar/status.json < 20_000`.
 8. Add `notes.json` entry summarising the compaction.
@@ -71,9 +75,12 @@ Without this procedure, `status.json` grows monotonically. V1.126 P3 drove it fr
 
 V1.126 P3 archived 244 V1.91–V1.124 residuals + 15 V1.121 cluster residuals = 259 entries. Result: status.json 145 KB → 14.6 KB; total_open 277 → 32 (the 32 floor = 24 V1.126 plan own-residuals + 4 medium + 1 high + 3 carry-forward).
 
+V1.127 P0 T6 archived 1 high residual (`R-HOTFIX-SETUP-CONTINUE-404` shipped on main); PM inline admin initially overwrote the existing 2-entry V1.126 P3 file; qc1 W-001 caught it; fix `97da12c6` restored the V1.0 flat-array shape with the new entry appended.
+
 ## See also
 
 - `.mstar/AGENTS.md` § Pre-merge checklist #5 (size gate)
 - `mstar-plan-artifacts/references/done-compaction.md` (Profile A/B)
 - `mstar-compound` (knowledge crystallization)
 - `DF-V1123-STATUS-COMPACT` (closed V1.126 P3 — gate stays as standing checklist)
+- V1.127 P0 QC consolidated `qc1.md` W-001 resolution (overwrite lesson captured)

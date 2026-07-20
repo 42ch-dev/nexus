@@ -114,21 +114,7 @@
         "note": "Remaining hardcoded strings in works/schedule/sessions/strategies/capabilities pages + dialogs + content editor. Subagent non-functional during fix wave."
       }
     ],
-    "2026-07-13-v1.116-agent-detection-codex-native": [
-      {
-        "id": "R-V1116P0QA-001",
-        "title": "CodexNativeProvider not registered in HostManager (pre-existing gap shared with claude-native)",
-        "severity": "medium",
-        "decision": "defer",
-        "owner": "@fullstack-dev",
-        "target": "post-V1.116",
-        "lifecycle": "closed",
-        "tracking_link": ".mstar/plans/2026-07-13-v1.116-agent-detection-codex-native.md",
-        "note": "Discovery works (scan shows installed), but session creation fails. Same gap exists for claude-native. Wire both during boot in a follow-up.",
-        "closure_note": "Closed by V1.127 P1 T1 (commit a92fa47b) — both CodexNativeProvider and ClaudeCliProvider registered in HostManager via boot.rs::register_provider after HostManager::new(). Closes the architecture-coherence gap (AgentHostSubsystem invariant met) + create_session no longer fails with 'provider not registered'."
-      }
-    ],
-    "2026-07-16-hotfix-setup-continue-404": [],
+    "2026-07-13-v1.116-agent-detection-codex-native": [],
     "2026-07-20-v1.126-p0-shell-selection-submenu": [
       {
         "id": "R-V1126P0-T2-001",
