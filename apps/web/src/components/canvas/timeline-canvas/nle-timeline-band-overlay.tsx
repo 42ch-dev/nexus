@@ -50,7 +50,9 @@ export function NleTimelineBandOverlay({
       className="pointer-events-none absolute inset-x-0 top-1/2 z-[5] -translate-y-1/2 px-4"
       data-testid="nle-timeline-band-overlay"
     >
-      <div className="pointer-events-auto mx-auto max-w-full">
+      {/* Display-only in App: keep pointer-events-none so RF pan/zoom/select
+          reach nodes under the centered band. Horizontal scrub stays Studio. */}
+      <div className="pointer-events-none mx-auto max-w-full">
         <NleTimelineChrome
           tracks={tracks}
           contentWidthPx={contentWidthPx}
