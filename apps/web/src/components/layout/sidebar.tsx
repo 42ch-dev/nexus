@@ -100,6 +100,17 @@ export function Sidebar() {
     }
   }, [renamingItem]);
 
+  useEffect(() => {
+    // V1.127 P0 T5 (AC-V1127-5): clear stale rename state on navigation.
+    // Without this, renamingItem survives route changes and a stale rename
+    // input renders on the destination view. Dep is pathname ONLY — a
+    // :workId swap inside the same route does NOT change pathname, so this
+    // effect does not fire and an in-flight rename is never interrupted. The
+    // chrome's submenuItem is reset separately (chrome-owned).
+    setRenamingItem(null);
+    setRenameValue('');
+  }, [pathname]);
+
   function handleRenameSubmit() {
     const itemTo = renamingItem;
     if (!itemTo || !renameValue.trim()) {
