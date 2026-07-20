@@ -2,6 +2,8 @@
 
 Iteration package — `delivery-compass.md` + specs. Not `{KNOWLEDGE_DIR}/`. Worthy content is **promoted** at iteration-close via `mstar-compound`.
 
+**Status:** completed (2026-07-20). Integration branch `iteration/v1.128` pending squash-merge PR to `main`.
+
 **Phase 1 Review & Edit chain: COMPLETE** (PM seat 1 → architect seat 2 → writing-specialist seat 3).
 
 - **Seat 1 (product-manager):** User value + author-observable ACs on compass and all specs; P0 Banner/Selection Must; P1 dogfood scope cap; P2 Create page CTAs + Back semantics; P3 labeling over promotion.
@@ -12,7 +14,7 @@ Iteration package — `delivery-compass.md` + specs. Not `{KNOWLEDGE_DIR}/`. Wor
 
 | Document | Kind | Description | Status |
 |----------|------|-------------|--------|
-| [delivery-compass.md](delivery-compass.md) | compass | Scope, plans, branch policy | active (Phase 1 §1.6 Review chain complete) |
+| [delivery-compass.md](delivery-compass.md) | compass | Scope, plans, branch policy, iteration-close summaries | completed |
 | [specs/surfaces-chrome-ia.md](specs/surfaces-chrome-ia.md) | spec (P0) | Surfaces sidebar, Banner retire, Selection overlay | product-reviewed, architect-locked, writing-hygiene done |
 | [specs/nle-timeline-canvas.md](specs/nle-timeline-canvas.md) | spec (P1) | NLE Timeline Studio → App | product-reviewed, architect-locked, writing-hygiene done |
 | [specs/creator-create-controller-shell.md](specs/creator-create-controller-shell.md) | spec (P2) | Create page vs Controller Panel stub | product-reviewed, architect-locked, writing-hygiene done |
@@ -29,4 +31,6 @@ Iteration package — `delivery-compass.md` + specs. Not `{KNOWLEDGE_DIR}/`. Wor
 
 | Source | Promoted to | Date | Notes |
 |--------|-------------|------|-------|
-| | | | |
+| P2 creator-create-controller-shell | `knowledge/architecture-patterns/creator-shell-content-mode-pattern.md` | 2026-07-20 | New — context SSOT + Create/Controller modes |
+| P3 web-alias-clarity (+ P1 NLE overlay lesson) | `knowledge/architecture-patterns/ui-component-promotion-workflow.md` § V1.128 Extension | 2026-07-20 | Updated — two-tier import model + badges |
+| P1 nle-timeline-canvas (RF-free overlay) | *(folded into ui-component-promotion-workflow V1.128 extension)* | 2026-07-20 | Skipped standalone — overlaps canvas knowledge |

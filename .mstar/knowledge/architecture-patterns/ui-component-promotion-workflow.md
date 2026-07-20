@@ -1,7 +1,7 @@
 ---
 module: nexus-ui
 date: 2026-07-08
-last_updated: 2026-07-10
+last_updated: 2026-07-20
 problem_type: architecture_decision
 category: architecture-patterns
 severity: medium
@@ -125,3 +125,38 @@ V1.107 P0 closes the Toast loop and extends studio-first to shell/Settings chrom
 **Anti-pattern lesson (QC F-CRIT-001 + F-WARN-001):** Presentational chrome extracts must be **purely** props-driven — no internal state, no `keep-web` Radix Dialog, no Studio-only aliases (`@web-ui/*`) in App-source files. The `SettingsSetupSectionChrome` initially imported `Dialog` from `@web-ui/dialog` (a Studio-only alias undefined in `apps/web/tsconfig.json`) and owned `useState(confirmOpen)`, causing: (a) TS2307 typecheck failure (CI blocker), (b) architectural boundary violation (Radix `keep-web` inside presentational chrome). **Fix pattern:** hoist Dialog state + JSX into the host (App wrapper or Studio fixture); chrome exposes `onReRunSetup?: () => void` callback only. The chrome is markup + classes + `data-testid` SSOT — nothing more.
 
 **Studio Tailwind content (FB-000 root cause):** Many V1.106 "visual regressions" (Badge solid fills, Button destructive, TopStepIndicator circles invisible) were **not** component bugs — they were Studio Tailwind `content` glob gaps. Adding `../web/src/components/setup/**`, `../web/src/components/layout/presentational/**`, `../../packages/nexus-ui/src/**` fixed 5 FBs (001, 002, 005, 010, 011) without touching the components themselves. **Lesson:** before debugging a Studio visual regression, verify the Tailwind `content` array first.
+
+## V1.128 Extension — Two-tier Studio import model (`@web-*` vs `@42ch/nexus-ui`)
+
+V1.128 P3 made the import tiers **visible** in Surfaces badges and durable docs — without mass promotion.
+
+### Three import tiers (not two packages)
+
+| Tier | Pattern | npm? | Promotion path |
+| --- | --- | --- | --- |
+| **Promoted primitive** | `@42ch/nexus-ui` | Yes (workspace) | Studio visual acceptance → package export → Web thin re-export |
+| **App presentational extract** | `@web-layout/*`, `@web-canvas/*`, `@web-setup/*`, `@web-settings/*`, `@web-global-timeline/*`, `@web-shell/*`, … | **No** — monorepo Vite/tsconfig alias only | Studio fixture → `apps/web/**/presentational/*` extract → App host wiring; stays on `@web-*` until a plan promotion list entry |
+| **Transitional primitive** | `@web-ui/*` | **No** | Unpromoted shadcn mirror; inline `// transitional` comment required |
+
+**Lesson:** `@web-*` paths look like package names but are **not** npm exports. Copying a Surfaces fixture import does not mean the symbol ships from `@42ch/nexus-ui` — check the section source badge or `apps/design-studio/AGENTS.md` two-tier table first.
+
+### Labeling is the Must; promotion is optional
+
+- P3 success = gallery badges (`surface-source-badge-*` test ids) + AGENTS/spec two-tier tables — **zero** mass migration required.
+- Optional single-primitive promotion still follows §Promotion rules and an explicit plan promotion list entry; alias clarity must not be used as a excuse for bulk package moves.
+
+### Surfaces badge convention
+
+`classifySurfaceImport()` maps:
+
+- `@42ch/nexus-ui` → **Promoted primitive**
+- `@web-*` → **App presentational extract** (shows full alias path in badge copy)
+- `@web-ui/*` → **Transitional primitive**
+
+Daemon Surfaces sections that only compose promoted primitives must badge `@42ch/nexus-ui`, not a fictional `@web-daemon/*` alias (V1.128 P3 fix wave).
+
+### RF-free canvas extracts stay on `@web-canvas/*`
+
+NLE Timeline chrome (`nle-timeline-chrome`, V1.128 P1) is an `@web-canvas/*` presentational extract — **must not** import `@xyflow/react`. App RF hosts (`timeline-canvas.tsx`, `work-timeline-canvas.tsx`) mount a thin overlay (`nle-timeline-band-overlay.tsx`) that projects RF node data into extract props. Pull-off demo stays Studio fixture local state only; App adopt is chrome swap, not new RF DnD scope.
+
+**Normative iteration detail:** [web-alias-clarity.md](../../iterations/v1.128/specs/web-alias-clarity.md) · [nle-timeline-canvas.md](../../iterations/v1.128/specs/nle-timeline-canvas.md).

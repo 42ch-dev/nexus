@@ -1,7 +1,8 @@
 ---
 iteration_id: V1.128
 start_date: 2026-07-20
-status: locked
+end_date: 2026-07-20
+status: completed
 iteration_base_branch: main
 target_branch: main
 spec_integration_branch: iteration/v1.128
@@ -92,19 +93,19 @@ Net: Studio becomes a trustworthy visual proving ground for the next round of au
 
 | plan_id | Name | Status | Notes |
 |---------|------|--------|-------|
-| 2026-07-20-v1.128-p0-surfaces-chrome-ia | P0 — Surfaces chrome IA | Todo | **Must** — Banner retire + Selection reopen non-negotiable |
-| 2026-07-20-v1.128-p1-nle-timeline-canvas | P1 — NLE Timeline canvas | Todo | **Must** — Studio-first; scope capped |
-| 2026-07-20-v1.128-p2-creator-create-controller-shell | P2 — Creator Create vs Controller | Todo | **Must** — Create CTAs + Back semantics |
-| 2026-07-20-v1.128-p3-web-alias-clarity | P3 — `@web-*` / `@42ch/nexus-ui` clarity | Todo | **Must** — docs/labels; promotion optional |
+| 2026-07-20-v1.128-p0-surfaces-chrome-ia | P0 — Surfaces chrome IA | Done | Sidebar nav; Banner retired; Selection overlay scoped |
+| 2026-07-20-v1.128-p1-nle-timeline-canvas | P1 — NLE Timeline canvas | Done | Studio NLE fixtures + thin App overlay; pull-off Studio-only |
+| 2026-07-20-v1.128-p2-creator-create-controller-shell | P2 — Creator Create vs Controller | Done | `CreatorEntitySelectionContext` + Create/Controller stub |
+| 2026-07-20-v1.128-p3-web-alias-clarity | P3 — `@web-*` / `@42ch/nexus-ui` clarity | Done | Surfaces badges + two-tier docs; zero promotions |
 
 ## Milestones
 
 | Milestone | Target date | Status |
 |-----------|-------------|--------|
 | Spec freeze (Review chain) | 2026-07-20 | complete |
-| Dev complete | 2026-07-21 | pending |
-| QC complete | 2026-07-21 | pending |
-| Iteration close | 2026-07-21 | pending |
+| Dev complete | 2026-07-20 | complete |
+| QC complete | 2026-07-20 | complete |
+| Iteration close | 2026-07-20 | complete |
 
 ## Acceptance Criteria
 
@@ -126,8 +127,8 @@ Author-observable — each AC is verifiable in Design Studio and/or App without 
 
 ## Roadmap Position
 
-- **Current iteration (V1.128):** Studio-first UI dogfood from maintainer feedback after V1.127.
-- **Next iteration:** Full Controller Panel content; deeper NLE interactions; larger promotion waves; remaining V1.126 nit residuals. Trigger: V1.128 shipped + dogfood on Create/Controller + Timeline.
+- **Current iteration (V1.128):** **delivered** (2026-07-20) — Studio-first UI dogfood pass. 4 business plans shipped (Surfaces chrome IA, NLE Timeline canvas, Creator Create vs Controller shell, `@web-*` import clarity). Closed residual: `R-V1128P0-001` (design-studio.md Banner doc stale). Opened: 2 residuals (`R-V1128P1-001` low — Work Timeline host overlay test gap; `R-V1128P2-001` nit — World-row hub integration test). Integration branch `iteration/v1.128` @ `458b70e5` pending squash-merge PR to `main`.
+- **Next iteration (V1.129+) candidates:** (a) full Controller Panel business widgets; (b) deeper NLE interactions (trim, snap, persistence); (c) larger `@web-*` promotion waves; (d) V1.126/V1.127 nit polish close-out; (e) subagent dispatch reliability investigation (V1.127 retrospective carry-forward). **Trigger:** maintainer dogfood on Create/Controller + NLE Timeline after V1.128 lands on `main`.
 - **Long-term:** Studio-first promotion workflow + Control Room shell IA that matches author mental model (Create → select → control → canvas).
 
 ## Delivery Branch Policy
@@ -152,7 +153,7 @@ Author-observable — each AC is verifiable in Design Studio and/or App without 
 
 | Path | Kind | Status |
 |------|------|--------|
-| `README.md` | index | active (Phase 1 §1.6 Review chain complete) |
+| `README.md` | index | completed (iteration-close 2026-07-20) |
 | `specs/surfaces-chrome-ia.md` | spec (P0) | product-reviewed, architect-locked, writing-hygiene done |
 | `specs/nle-timeline-canvas.md` | spec (P1) | product-reviewed, architect-locked, writing-hygiene done |
 | `specs/creator-create-controller-shell.md` | spec (P2) | product-reviewed, architect-locked, writing-hygiene done |
@@ -162,16 +163,40 @@ Plans: `.mstar/plans/2026-07-20-v1.128-p0-surfaces-chrome-ia.md` · `.mstar/plan
 
 ## Quality Gate Summary
 
-> Filled at iteration-close.
+> Filled at iteration-close. Human summary only; per-plan gate details stay in each main plan, and open residual SSOT stays in `.mstar/status.json`.
 
 | plan_id | QC decision | QA gate | Residuals | Durable summary |
 |---------|-------------|---------|-----------|-----------------|
-| | | | | |
+| `2026-07-20-v1.128-p0-surfaces-chrome-ia` | Approve with residuals (post archival) | mandatory — Pass | 0 open (`R-V1128P0-001` archived) | Surfaces left sidebar; Banner retired from Studio; Selection Agent dialog scoped + reopenable |
+| `2026-07-20-v1.128-p1-nle-timeline-canvas` | Approve with residuals | mandatory — Pass | 1 open low (`R-V1128P1-001`) | NLE multi-track chrome in Studio + thin App overlay; pull-off Studio-only; RF-free `@web-canvas/nle-timeline-chrome` |
+| `2026-07-20-v1.128-p2-creator-create-controller-shell` | Approve with residuals (post fix wave `0ef7cecb`) | mandatory — Pass | 1 open nit (`R-V1128P2-001`) | `CreatorEntitySelectionContext` SSOT; Create page CTAs + Controller stub + Back clears selection |
+| `2026-07-20-v1.128-p3-web-alias-clarity` | Approve (post Daemon badge fix `22dba5e5`) | mandatory — Pass | 0 open | Surfaces source badges + two-tier AGENTS/spec docs; zero promotions |
+
+Notes:
+
+- Raw review bundle: `{SDD_DIR}/review/` for each plan (ephemeral).
+- Open residual SSOT: `.mstar/status.json` root `residual_findings[<plan-id>]` (17.8 KB total; under 20 KB hygiene line).
+- Closed this iteration: `R-V1128P0-001` (P0 Banner doc stale — fixed in P3 T2 + archived).
 
 ## Compound Round Summary
 
-> Filled at iteration-close.
+- Knowledge docs crystallized: **2** (1 new + 1 updated)
+  - **New:** [`architecture-patterns/creator-shell-content-mode-pattern.md`](../../knowledge/architecture-patterns/creator-shell-content-mode-pattern.md) — `CreatorEntitySelectionContext` as hub content-mode SSOT; Create page vs Controller stub; Back clears selection; `@web-layout/creator-shell-content` extract boundary (V1.128 P2 distilled).
+  - **Updated:** [`architecture-patterns/ui-component-promotion-workflow.md`](../../knowledge/architecture-patterns/ui-component-promotion-workflow.md) — V1.128 two-tier Studio import model (`@web-*` vs `@42ch/nexus-ui` vs `@web-ui/*`); Surfaces badge convention; RF-free `@web-canvas/*` NLE overlay adoption (V1.128 P3 + P1 distilled).
+- **Skipped:** NLE RF-free overlay as standalone doc — overlaps existing canvas knowledge + V1.128 iteration spec; key lesson folded into ui-component-promotion-workflow V1.128 extension.
+- Iteration package promotion triage: 4 specs inventoried; **Keep snapshot** for all (iteration-scoped working specs; durable patterns promoted above).
+- CONCEPTS.md entries added: **1** (Web UI — Create page / Controller Panel stub content-region modes; links to knowledge doc).
+- Compound-refresh trigger: **no** (no stale knowledge docs identified beyond the two promoted/updated entries).
 
 ## Iteration Retrospective (minimal)
 
-> Filled at iteration-close.
+- **What went well:**
+  - 4 business plans shipped serially (P0→P1→P2→P3) within L budget on a single day; all `wire_contracts_changed: false`.
+  - Studio-first gating held: NLE Timeline and Creator shell modes were visually accepted in Design Studio before App wiring.
+  - P3 delivered clarity without scope creep — zero mass promotions; Daemon Surfaces badge fix caught a promoted-vs-extract mislabel during QC.
+  - P0 Must items landed: Banner ghost removed from Studio; Selection Agent dialog no longer blocks sibling variants.
+- **What to improve:**
+  - Symmetric host-level tests lagged for Work Timeline NLE overlay (`R-V1128P1-001`) and World-row Creator hub integration (`R-V1128P2-001`) — both low/nit but should be closed early in V1.129 polish.
+  - NLE pull-off remains Studio-only by design; App authors should not expect detach persistence until a future iteration explicitly scopes it.
+  - Integration branch awaits squash-merge PR — `latest_ship` metadata stays on V1.127 until merge.
+- **Next iteration suggestion:** Dogfood V1.128 on `main`, then pick either (a) Controller Panel business content or (b) nit/test symmetry close-out before deeper NLE editor features.

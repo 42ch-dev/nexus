@@ -141,6 +141,8 @@ The infinite canvas surface that visually organizes creative material — worlds
 ### Web UI
 The local-first "Control Room + Setup" web interface (`apps/web`). A React SPA served by the daemon over HTTP (`127.0.0.1:8420`), providing the infinite canvas, workspace management, and structured writing tools. Reuses the `@42ch/nexus-contracts` TypeScript types — never hand-writes wire DTOs.
 
+On Creator hub routes (`/works`, `/worlds`), the **content region** flips between two modes (V1.128): **Create page** (no World/Work selected — card CTAs to create) and **Controller Panel stub** (entity selected — placeholder + **Back** that clears selection). Mode SSOT is `CreatorEntitySelectionContext`, orthogonal to canvas routes under `/works/:workId/*`. See [creator-shell-content-mode-pattern.md](.mstar/knowledge/architecture-patterns/creator-shell-content-mode-pattern.md).
+
 ### Desktop Shell
 The Tauri v2 native desktop client (`apps/desktop`). Wraps the web SPA (`apps/web/dist`) in a native window, adds OS-level capabilities (Open with…, Reveal in Finder, Copy Path, sidecar lifecycle management). Detects the Tauri runtime at startup and selects `TauriClient` over `BrowserClient` via capability detection.
 

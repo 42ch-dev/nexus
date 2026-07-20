@@ -6,7 +6,7 @@
     "integration_branch_retired": false,
     "iteration_base_branch": "main",
     "latest_active_compass": "v1.128/delivery-compass.md",
-    "latest_active_iteration": "V1.128 (Active)",
+    "latest_active_iteration": "V1.128 (completed)",
     "latest_ship": {
       "iteration": "V1.127",
       "compass": "v1.127/delivery-compass.md",
@@ -20,13 +20,13 @@
     "target_branch": "main",
     "tech_debt_summary": {
       "updated_at": "2026-07-20",
-      "total_open": 38,
+      "total_open": 40,
       "by_severity": {
         "critical": 0,
         "high": 0,
         "medium": 2,
-        "low": 4,
-        "nit": 32
+        "low": 5,
+        "nit": 33
       },
       "by_target": {
         "post-V1.92": 1,
@@ -34,7 +34,8 @@
         "post-V1.116": 0,
         "post-V1.125": 28,
         "post-V1.126": 8,
-        "post-V1.127": 0
+        "post-V1.127": 0,
+        "post-V1.128": 2
       },
       "by_plan": {
         "2026-07-05-v1.92-closure": 1,
@@ -45,7 +46,9 @@
         "2026-07-20-v1.126-p2-composite-timeline-endpoint": 11,
         "2026-07-20-v1.126-p3-status-compaction-residual-cleanup": 4,
         "2026-07-20-v1.127-p0-control-room-author-loop-fixes": 8,
-        "2026-07-20-v1.127-p1-native-agent-provider-registration": 0
+        "2026-07-20-v1.127-p1-native-agent-provider-registration": 0,
+        "2026-07-20-v1.128-p1-nle-timeline-canvas": 1,
+        "2026-07-20-v1.128-p2-creator-create-controller-shell": 1
       }
     },
     "updated_at": "2026-07-20"
