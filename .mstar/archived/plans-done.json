@@ -508,7 +508,8 @@
     "2026-07-20-v1.127-p1-native-agent-provider-registration",
     "2026-07-20-v1.128-p0-surfaces-chrome-ia",
     "2026-07-20-v1.128-p1-nle-timeline-canvas",
-    "2026-07-20-v1.128-p2-creator-create-controller-shell"
+    "2026-07-20-v1.128-p2-creator-create-controller-shell",
+    "2026-07-20-v1.128-p3-web-alias-clarity"
   ],
   "iteration_summaries": {
     "v1.45": {

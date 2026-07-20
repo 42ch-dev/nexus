@@ -18,6 +18,24 @@ Parent rules: [`../AGENTS.md`](../AGENTS.md) (apps placement), root [`AGENTS.md`
 
 ## Import boundaries (HARD)
 
+### Two-tier import model (V1.128)
+
+Design Studio and `apps/web` use **two distinct import tiers**. Do not treat every gallery import as `@42ch/nexus-ui`.
+
+| Tier | Import pattern | What it is | npm package? |
+| --- | --- | --- | --- |
+| **Promoted primitive** | `@42ch/nexus-ui` | Pure presentational React exported from the workspace package after Studio visual acceptance | Yes (workspace / publishable) |
+| **App presentational extract** | `@web-layout/*`, `@web-canvas/*`, `@web-setup/*`, `@web-settings/*`, `@web-global-timeline/*`, `@web-shell/*`, … | Vite/tsconfig aliases to `apps/web/**/presentational/*` (or setup compositions) — props-driven chrome the App also uses | **No** — local monorepo alias only |
+| **Transitional primitive** | `@web-ui/*` | Unpromoted shadcn mirror from `apps/web/src/components/ui/*` until promotion | **No** — local alias only |
+
+**Rules:**
+
+- Copying an import from a Surfaces fixture does **not** mean the symbol ships from npm — check the section source badge or this table first.
+- `@web-*` aliases remain valid; V1.128+ success is **clarity**, not mass migration into `@42ch/nexus-ui`.
+- Promote only through the studio-first workflow and an explicit plan promotion list entry.
+
+Surfaces pages label each section with badges (`surface-source-badge-*` test ids). Normative iteration detail: [web-alias-clarity](../../.mstar/iterations/v1.128/specs/web-alias-clarity.md).
+
 ### Allowed
 
 | Alias | Resolves to | Use |
