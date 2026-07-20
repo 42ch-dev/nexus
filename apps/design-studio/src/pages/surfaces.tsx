@@ -21,6 +21,7 @@ import {
 import { SettingsHostFixtures } from '@/fixtures/settings-host-fixtures';
 import { SetupWizardChromeFixtures } from '@/fixtures/setup-wizard-chrome-fixtures';
 import { ConflictModalFixtures } from '@/fixtures/conflict-modal-fixtures';
+import { CreatorShellFixtures } from '@/fixtures/creator-shell-fixtures';
 import { GlobalTimelineFixtures } from '@/fixtures/global-timeline-fixtures';
 import { LayerBreadcrumbFixtures } from '@/fixtures/layer-breadcrumb-fixtures';
 import { SelectionSubmenuStubFixtures } from '@/fixtures/selection-submenu-fixtures';
@@ -278,13 +279,16 @@ function ShellSidebarFixture() {
         />
       </div>
 
-      {/* Main content area — recessed background, placeholder indicates active workspace */}
+      {/* Main content area — V1.128 P2 shows Create page when no entity selected */}
       <div className="flex-1 bg-background-200 flex flex-col items-center justify-center min-w-0 p-8">
-        <div className="border-2 border-dashed border-gray-alpha-300 rounded-card w-full max-w-md p-8 text-center">
-          <p className="text-copy-14 text-gray-700 mb-1">Content panel</p>
-          <p className="text-copy-13 text-gray-500">
-            Active workspace — editor, canvas, or dashboard — rendered by the
-            product shell at runtime. Not part of this fixture.
+        <div
+          className="w-full max-w-lg rounded-card border border-gray-alpha-300 bg-background-100 p-6"
+          data-testid="app-shell-content-create"
+        >
+          <p className="text-label-14 text-gray-900 mb-4">Create page (empty selection)</p>
+          <p className="text-copy-13 text-gray-700 mb-4">
+            Card CTAs for World / Work — see Creator shell fixtures below for
+            Controller stub + interactive toggle.
           </p>
         </div>
       </div>
@@ -481,6 +485,24 @@ export function SurfacesShellPage() {
           , and no direct layout component imports.
         </p>
         <ShellSidebarFixture />
+      </section>
+
+      <section className="mt-10" data-testid="surfaces-creator-shell">
+        <SurfaceHeading>Creator shell — Create vs Controller</SurfaceHeading>
+        <p className="text-copy-14 text-gray-700 mb-6">
+          V1.128 P2 shell content modes via{' '}
+          <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+            @web-layout/creator-shell-content
+          </code>
+          . Toggle empty Create (honest{' '}
+          <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+            createWorld
+          </code>{' '}
+          detect + Work fallback) vs selected Controller stub (placeholder +
+          Back). Worlds-first nav data matches App sidebar IA. No App context,
+          no daemon client.
+        </p>
+        <CreatorShellFixtures />
       </section>
 
       {/* Settings shell chrome stays discoverable under Shell (V1.103 P0) */}

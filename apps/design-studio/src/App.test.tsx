@@ -562,12 +562,9 @@ describe('Surfaces page — app shell fixture', () => {
     expect(screen.getAllByText('Orchestrator').length).toBeGreaterThanOrEqual(1);
   });
 
-  it('renders Works nav group and All Works child', () => {
-    // "Works" appears as a nav group label — verify at least one instance.
-    expect(screen.getAllByText('Works').length).toBeGreaterThanOrEqual(1);
-    // Both the app shell fixture and Settings fixture use ShellSidebarChrome
-    // SSOT, so "All Works" renders in each.
-    expect(screen.getAllByText('All Works').length).toBeGreaterThanOrEqual(1);
+  it('renders Worlds-first nav and Create content placeholder', () => {
+    expect(screen.getAllByText('Worlds').length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByTestId('app-shell-content-create')).toBeInTheDocument();
   });
 
   it('renders Settings fixture sidebar with SSOT segmented pill tabs (FB-UI-002)', () => {
@@ -587,8 +584,8 @@ describe('Surfaces page — app shell fixture', () => {
 
   it('renders Settings fixture sidebar with sectioned icon nav (FB-UI-003)', () => {
     const settingsShell = screen.getByTestId('settings-shell-chrome');
-    // Creator nav groups render as section headers + icon+label items.
-    expect(within(settingsShell).getByText('Memory')).toBeInTheDocument();
+    // Creator nav groups render as section headers + icon+label items (V1.128 Worlds-first).
+    expect(within(settingsShell).getAllByText('Worlds').length).toBeGreaterThanOrEqual(1);
   });
 
   it('renders Settings fixture profiles as icon-only (FB-UI-001)', () => {
@@ -614,8 +611,10 @@ describe('Surfaces page — app shell fixture', () => {
     ).toBeInTheDocument();
   });
 
-  it('renders content panel placeholder', () => {
-    expect(screen.getByText('Content panel')).toBeInTheDocument();
+  it('renders Creator shell Create vs Controller fixtures (V1.128 P2 T1)', () => {
+    expect(screen.getByTestId('surfaces-creator-shell')).toBeInTheDocument();
+    expect(screen.getByTestId('creator-shell-fixtures')).toBeInTheDocument();
+    expect(screen.getByTestId('creator-shell-fixture-interactive')).toBeInTheDocument();
   });
 });
 
