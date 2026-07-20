@@ -24,6 +24,7 @@ import { ConflictModalFixtures } from '@/fixtures/conflict-modal-fixtures';
 import { GlobalTimelineFixtures } from '@/fixtures/global-timeline-fixtures';
 import { LayerBreadcrumbFixtures } from '@/fixtures/layer-breadcrumb-fixtures';
 import { SelectionSubmenuStubFixtures } from '@/fixtures/selection-submenu-fixtures';
+import { NleTimelineCanvasFixtures } from '@/fixtures/nle-timeline-canvas-fixtures';
 import { TimelineCanvasFixtures } from '@/fixtures/timeline-canvas-fixtures';
 import { WorkTimelineCanvasFixtures } from '@/fixtures/work-timeline-canvas-fixtures';
 
@@ -705,6 +706,32 @@ export function SurfacesCanvasPage() {
           — light/dark acceptance here carries to the App graph.
         </p>
         <CanvasSurfacesFixtures />
+      </section>
+
+      {/* V1.128 P1 T1 — NLE multi-track Timeline band */}
+      <section className="mt-10" data-testid="surfaces-nle-timeline">
+        <SurfaceHeading>NLE Timeline</SurfaceHeading>
+        <p className="text-copy-14 text-gray-700 mb-6">
+          NLE-style multi-track Timeline band for dogfood visual acceptance —
+          vertically centered in the canvas host, horizontally scrubbable along
+          the time axis, with labeled Brief / Narrative / Moment lanes.
+          Composes{' '}
+          <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+            @web-canvas/nle-timeline-chrome
+          </code>{' '}
+          (same extract App Timeline hosts adopt in T3). Pan the scroll region
+          to scrub across eras, events, and scenes. Layer accents use existing{' '}
+          <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+            canvas-layer-*-accent
+          </code>{' '}
+          tokens — no{' '}
+          <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+            @xyflow/react
+          </code>
+          , no contracts, no i18n. Card-matrix node chrome samples remain
+          below for per-kind regression.
+        </p>
+        <NleTimelineCanvasFixtures />
       </section>
 
       {/* V1.124 P0 T3 — World Timeline node chrome (Brief-era / Event / KeyBlock) */}
