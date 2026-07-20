@@ -718,7 +718,34 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
 
     // --- Section 5: Agent Host subsystem ---
     let agent_host_facade: Arc<dyn nexus_agent_host::HostFacade> = {
+        use nexus_agent_host::providers::native_cli::{
+            claude::ClaudeCliProvider, codex::CodexNativeProvider,
+        };
+
         let manager = nexus_agent_host::core::manager::HostManager::new();
+        // Register always-on native CLI providers so agent discovery surfaces
+        // them without relying on PATH scan. `default_config()` performs no
+        // filesystem touch and is safe to call when the CLI is absent (probe
+        // is lazy). `HashMap::insert` replaces silently — safe on re-boot
+        // (architect AQ-3; closes R-V1116P0QA-001).
+        //
+        // Defensive-wrapping trade-off (qc1/qc3 S-001): straight-line
+        // registration without `match`/`if let Ok(...)` is safe because
+        // `default_config()` is a pure constructor that does not panic — it
+        // builds the struct with the command name and returns immediately.
+        // The actual CLI lookup happens later in `probe()` (via `which`)
+        // and `execute()` (process spawn), both of which handle a missing
+        // binary gracefully. Wrapping here would add ceremony without value.
+        manager
+            .register_provider(Arc::new(CodexNativeProvider::default_config()))
+            .await;
+        manager
+            .register_provider(Arc::new(ClaudeCliProvider::default_config()))
+            .await;
+        tracing::info!(
+            providers_registered = 2,
+            "registered native agent providers (codex-native, claude-native)"
+        );
         Arc::new(manager)
     };
     state.set_agent_host(Arc::clone(&agent_host_facade));
