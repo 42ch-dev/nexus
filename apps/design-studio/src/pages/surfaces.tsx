@@ -14,7 +14,6 @@ import { DaemonHealthIndicatorChrome } from '@web-layout/daemon-health-indicator
 import { AgentPickerFixtures } from '@/fixtures/agent-picker-fixtures';
 import { CanvasSurfacesFixtures } from '@/fixtures/canvas-surfaces-fixtures';
 import { LaunchDaemonFixtures } from '@/fixtures/launch-daemon-fixtures';
-import { MainBannerFixtures } from '@/fixtures/main-banner-fixtures';
 import {
   CREATOR_NAV,
   ORCHESTRATOR_NAV,
@@ -76,12 +75,6 @@ const SURFACES_SECTIONS = [
     desc: 'Desktop launch splash — waiting, error, and recovery',
   },
   {
-    label: 'Banner',
-    path: '/surfaces/banner',
-    end: false,
-    desc: 'Degraded daemon banner — starting, degraded, stopped, error',
-  },
-  {
     label: 'Selection Submenu',
     path: '/surfaces/selection-submenu',
     end: false,
@@ -105,8 +98,9 @@ function SurfacesSectionNav() {
   return (
     <nav
       aria-label="Surfaces sections"
-      className="flex flex-wrap gap-1 mb-8 pb-4 border-b border-gray-alpha-200"
+      className="flex flex-col gap-0.5 w-44"
       data-testid="surfaces-section-nav"
+      data-layout="sidebar"
     >
       {SURFACES_SECTIONS.map(({ label, path, end }) => (
         <NavLink
@@ -115,7 +109,7 @@ function SurfacesSectionNav() {
           end={end}
           className={({ isActive }) =>
             cn(
-              'px-3 py-1.5 rounded-md text-label-14 transition-colors',
+              'block px-3 py-2 rounded-md text-label-14 transition-colors',
               isActive
                 ? 'bg-gray-alpha-200 text-gray-1000 font-medium'
                 : 'text-gray-700 hover:text-gray-1000 hover:bg-gray-alpha-100',
@@ -130,8 +124,9 @@ function SurfacesSectionNav() {
 }
 
 /**
- * Shared Surfaces chrome: page title + Studio-only section menu.
- * Nested routes render via Outlet (V1.102 P2 Surfaces IA).
+ * Shared Surfaces chrome: page title + persistent left section sidebar.
+ * Nested routes render via Outlet beside the sidebar (V1.102 P2 Surfaces IA;
+ * V1.128 P0 T1 left-sidebar IA).
  */
 export function SurfacesLayout() {
   return (
@@ -161,8 +156,17 @@ export function SurfacesLayout() {
         ). Studio-only deep links — not App Settings IA.
       </p>
 
-      <SurfacesSectionNav />
-      <Outlet />
+      <div className="flex gap-8 items-start">
+        <aside
+          className="sticky top-16 shrink-0 border-r border-gray-alpha-200 pr-4"
+          data-testid="surfaces-section-sidebar"
+        >
+          <SurfacesSectionNav />
+        </aside>
+        <div className="flex-1 min-w-0">
+          <Outlet />
+        </div>
+      </div>
     </div>
   );
 }
@@ -594,27 +598,6 @@ export function SurfacesLaunchPage() {
         Reset local database. No daemon IPC, no Tauri commands.
       </p>
       <LaunchDaemonFixtures />
-    </section>
-  );
-}
-
-export function SurfacesBannerPage() {
-  return (
-    <section data-testid="surfaces-banner">
-      <SurfaceHeading>Launch — Daemon banner</SurfaceHeading>
-      <p className="text-copy-14 text-gray-700 mb-6">
-        Composition-only fixture replicating the Control Room degraded-daemon
-        banner. Built from{' '}
-        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
-          @42ch/nexus-ui
-        </code>{' '}
-        Button + inline markup. No import from{' '}
-        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
-          apps/web/src/components/layout/main-banner.tsx
-        </code>{' '}
-        (daemon/desktop hooks forbidden in Studio).
-      </p>
-      <MainBannerFixtures />
     </section>
   );
 }

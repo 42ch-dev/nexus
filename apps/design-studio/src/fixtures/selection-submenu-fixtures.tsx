@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 
 import { SelectionSubmenu, type SelectionMenuItem } from '@web-shell/selection-submenu'; // @web-shell/selection-submenu - transitional until package promotion criteria met
 
@@ -153,82 +153,122 @@ function RenameInProgressFixture() {
   );
 }
 
-function AgentDialogFixture() {
+function InlineModalHost({
+  openLabel,
+  children,
+}: {
+  openLabel: string;
+  children: (api: {
+    open: boolean;
+    setOpen: (v: boolean) => void;
+  }) => ReactNode;
+}) {
+  const [open, setOpen] = useState(false);
   return (
-    <div className="relative" data-testid="selection-submenu-agent-dialog">
-      <div className="flex items-center gap-2">
-        <span className="truncate font-heading text-copy-14 font-semibold text-gray-1000">
-          My Fantasy World
-        </span>
-        <button
-          type="button"
-          aria-haspopup="menu"
-          aria-expanded="false"
-          aria-label="Open menu for My Fantasy World"
-          className="flex h-6 w-6 shrink-0 items-center justify-center rounded-control text-gray-400 hover:bg-gray-alpha-200 hover:text-gray-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-700 focus-visible:ring-offset-1"
-        >
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden>
-            <circle cx="8" cy="3" r="1.5" fill="currentColor" />
-            <circle cx="8" cy="8" r="1.5" fill="currentColor" />
-            <circle cx="8" cy="13" r="1.5" fill="currentColor" />
-          </svg>
-        </button>
-      </div>
-      <div
-        className="fixed inset-0 z-40 flex items-center justify-center bg-black/40"
-        role="dialog"
-        aria-modal="true"
-        aria-label="Assign agent to My Fantasy World"
+    <div className="relative min-h-[120px]">
+      <button
+        type="button"
+        className="mb-3 rounded-control border border-gray-alpha-400 bg-background-100 px-3 py-1.5 text-button-12 text-gray-900 hover:bg-gray-alpha-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-700 focus-visible:ring-offset-2"
+        onClick={() => setOpen(true)}
+        data-testid="selection-submenu-agent-dialog-open"
       >
-        <div className="w-full max-w-md rounded-card border border-gray-alpha-400 bg-background-100 p-6 shadow-modal">
-          <h3 className="font-heading text-heading-20 text-gray-1000 mb-1">
-            Assign agent to My Fantasy World
-          </h3>
-          <p className="text-copy-14 text-gray-700 mb-4">
-            Choose an agent to manage this entity.
-          </p>
-          <div className="flex flex-col gap-2">
-            <button
-              type="button"
-              className="flex w-full items-center gap-3 rounded-control border border-gray-alpha-300 bg-background-100 px-4 py-3 text-left text-copy-14 text-gray-700 hover:bg-gray-alpha-100"
-            >
-              <span className="flex h-8 w-8 items-center justify-center rounded-full bg-blue-100 text-label-14 text-blue-700">
-                C
-              </span>
-              <div className="flex-1">
-                <span className="font-medium text-gray-1000">Claude</span>
-                <span className="ml-2 text-label-12 text-gray-500">claude-native</span>
-              </div>
-            </button>
-            <button
-              type="button"
-              className="flex w-full items-center gap-3 rounded-control border border-gray-alpha-300 bg-background-100 px-4 py-3 text-left text-copy-14 text-gray-700 hover:bg-gray-alpha-100"
-            >
-              <span className="flex h-8 w-8 items-center justify-center rounded-full bg-green-100 text-label-14 text-green-700">
-                G
-              </span>
-              <div className="flex-1">
-                <span className="font-medium text-gray-1000">GPT-4</span>
-                <span className="ml-2 text-label-12 text-gray-500">openai-gpt4</span>
-              </div>
-            </button>
-          </div>
-          <div className="mt-4 flex justify-end gap-2">
-            <button
-              type="button"
-              className="rounded-control px-4 py-2 text-label-14 text-gray-700 hover:bg-gray-alpha-100"
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              className="rounded-control bg-blue-700 px-4 py-2 text-label-14 text-white hover:bg-blue-800"
-            >
-              Assign
-            </button>
-          </div>
+        {openLabel}
+      </button>
+      {children({ open, setOpen })}
+    </div>
+  );
+}
+
+function AgentDialogPanel({ onClose }: { onClose: () => void }) {
+  return (
+    <div
+      className="absolute inset-0 z-10 flex items-center justify-center rounded-card bg-black/40 p-4"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Assign agent to My Fantasy World"
+    >
+      <div className="w-full max-w-md rounded-card border border-gray-alpha-400 bg-background-100 p-6 shadow-modal">
+        <h3 className="font-heading text-heading-20 text-gray-1000 mb-1">
+          Assign agent to My Fantasy World
+        </h3>
+        <p className="text-copy-14 text-gray-700 mb-4">
+          Choose an agent to manage this entity.
+        </p>
+        <div className="flex flex-col gap-2">
+          <button
+            type="button"
+            className="flex w-full items-center gap-3 rounded-control border border-gray-alpha-300 bg-background-100 px-4 py-3 text-left text-copy-14 text-gray-700 hover:bg-gray-alpha-100"
+          >
+            <span className="flex h-8 w-8 items-center justify-center rounded-full bg-blue-100 text-label-14 text-blue-700">
+              C
+            </span>
+            <div className="flex-1">
+              <span className="font-medium text-gray-1000">Claude</span>
+              <span className="ml-2 text-label-12 text-gray-500">claude-native</span>
+            </div>
+          </button>
+          <button
+            type="button"
+            className="flex w-full items-center gap-3 rounded-control border border-gray-alpha-300 bg-background-100 px-4 py-3 text-left text-copy-14 text-gray-700 hover:bg-gray-alpha-100"
+          >
+            <span className="flex h-8 w-8 items-center justify-center rounded-full bg-green-100 text-label-14 text-green-700">
+              G
+            </span>
+            <div className="flex-1">
+              <span className="font-medium text-gray-1000">GPT-4</span>
+              <span className="ml-2 text-label-12 text-gray-500">openai-gpt4</span>
+            </div>
+          </button>
+        </div>
+        <div className="mt-4 flex justify-end gap-2">
+          <button
+            type="button"
+            className="rounded-control px-4 py-2 text-label-14 text-gray-700 hover:bg-gray-alpha-100"
+            onClick={onClose}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="rounded-control bg-blue-700 px-4 py-2 text-label-14 text-white hover:bg-blue-800"
+            onClick={onClose}
+          >
+            Assign
+          </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+function AgentDialogFixture() {
+  return (
+    <div data-testid="selection-submenu-agent-dialog">
+      <InlineModalHost openLabel="Open agent dialog">
+        {({ open, setOpen }) => (
+          <>
+            <div className="flex items-center gap-2">
+              <span className="truncate font-heading text-copy-14 font-semibold text-gray-1000">
+                My Fantasy World
+              </span>
+              <button
+                type="button"
+                aria-haspopup="menu"
+                aria-expanded="false"
+                aria-label="Open menu for My Fantasy World"
+                className="flex h-6 w-6 shrink-0 items-center justify-center rounded-control text-gray-400 hover:bg-gray-alpha-200 hover:text-gray-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-700 focus-visible:ring-offset-1"
+              >
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden>
+                  <circle cx="8" cy="3" r="1.5" fill="currentColor" />
+                  <circle cx="8" cy="8" r="1.5" fill="currentColor" />
+                  <circle cx="8" cy="13" r="1.5" fill="currentColor" />
+                </svg>
+              </button>
+            </div>
+            {open ? <AgentDialogPanel onClose={() => setOpen(false)} /> : null}
+          </>
+        )}
+      </InlineModalHost>
     </div>
   );
 }
@@ -283,7 +323,7 @@ export function SelectionSubmenuStubFixtures() {
 
         <VariantFrame
           label="Agent dialog overlay"
-          description="Submenu closed; AgentPicker dialog open with entity-name title"
+          description="Submenu closed; use Open to show AgentPicker dialog with entity-name title inside a scoped host"
           testId="selection-submenu-agent-dialog-frame"
         >
           <AgentDialogFixture />

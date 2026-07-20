@@ -3,21 +3,6 @@
   "updated_at": "2026-07-20",
   "plans": [
     {
-      "id": "2026-07-20-v1.128-p0-surfaces-chrome-ia",
-      "file": ".mstar/plans/2026-07-20-v1.128-p0-surfaces-chrome-ia.md",
-      "status": "Todo",
-      "title": "P0 \u2014 Surfaces chrome IA",
-      "metadata": {
-        "primary_spec": ".mstar/iterations/v1.128/specs/surfaces-chrome-ia.md",
-        "spec_integration_branch": "iteration/v1.128",
-        "merge_target": "iteration/v1.128",
-        "iteration_refs": "v1.128",
-        "working_branch": "feature/v1.128-p0-surfaces-chrome-ia",
-        "wire_contracts_changed": false,
-        "description": "Surfaces sidebar + Banner retire + Selection overlay fix"
-      }
-    },
-    {
       "id": "2026-07-20-v1.128-p1-nle-timeline-canvas",
       "file": ".mstar/plans/2026-07-20-v1.128-p1-nle-timeline-canvas.md",
       "status": "Todo",
@@ -461,6 +446,17 @@
         "notes": "V1.128+ polish. selection-submenu.tsx:121-126 + sidebar.tsx:103-112 + archived residual file."
       }
     ],
-    "2026-07-20-v1.127-p1-native-agent-provider-registration": []
+    "2026-07-20-v1.127-p1-native-agent-provider-registration": [],
+    "2026-07-20-v1.128-p0-surfaces-chrome-ia": [
+      {
+        "id": "R-V1128P0-001",
+        "severity": "nit",
+        "title": "design-studio.md still documents /surfaces/banner after Studio Banner retire",
+        "lifecycle": "open",
+        "closure_note": null,
+        "tracking_link": ".mstar/plans/2026-07-20-v1.128-p0-surfaces-chrome-ia.md#Review Gate Summary",
+        "notes": "P3 T2 or V1.128+ doc hygiene; not blocking P0."
+      }
+    ]
   }
 }

@@ -334,11 +334,6 @@ const SURFACES_SECTION_ROUTES = [
     linkLabel: 'Launch',
   },
   {
-    route: '/surfaces/banner',
-    testId: 'surfaces-banner',
-    linkLabel: 'Banner',
-  },
-  {
     route: '/surfaces/selection-submenu',
     testId: 'surfaces-selection-submenu',
     linkLabel: 'Selection Submenu',
@@ -346,6 +341,17 @@ const SURFACES_SECTION_ROUTES = [
 ] as const;
 
 describe('Surfaces section menu — deep links', () => {
+  it('uses a persistent left sidebar (not horizontal pills)', () => {
+    mockMatchMedia(false);
+    renderStudio('/surfaces');
+
+    expect(screen.getByTestId('surfaces-section-sidebar')).toBeInTheDocument();
+    const sectionNav = screen.getByTestId('surfaces-section-nav');
+    expect(sectionNav).toHaveAttribute('data-layout', 'sidebar');
+    expect(sectionNav.className).toContain('flex-col');
+    expect(sectionNav.className).not.toContain('flex-wrap');
+  });
+
   it.each(SURFACES_SECTION_ROUTES)(
     'renders $testId at $route with section nav',
     ({ route, testId, linkLabel }) => {
@@ -394,13 +400,29 @@ describe('Surfaces section menu — deep links', () => {
       'href',
       '/surfaces/launch',
     );
-    expect(within(index).getByRole('link', { name: /Banner/ })).toHaveAttribute(
-      'href',
-      '/surfaces/banner',
-    );
     expect(
       within(index).getByRole('link', { name: /Selection Submenu/ }),
     ).toHaveAttribute('href', '/surfaces/selection-submenu');
+  });
+
+  it('does not list Banner in the section sidebar (V1.128 P0 T2)', () => {
+    mockMatchMedia(false);
+    renderStudio('/surfaces');
+
+    const sectionNav = screen.getByTestId('surfaces-section-nav');
+    expect(
+      within(sectionNav).queryByRole('link', { name: 'Banner' }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('does not render a Banner gallery at /surfaces/banner (V1.128 P0 T2)', () => {
+    mockMatchMedia(false);
+    renderStudio('/surfaces/banner');
+
+    expect(screen.queryByTestId('surfaces-banner')).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId('main-banner-fixture-starting'),
+    ).not.toBeInTheDocument();
   });
 });
 
@@ -644,63 +666,6 @@ describe('Surfaces page — launch splash fixtures', () => {
   });
 });
 
-/* ---- surfaces page — main banner fixtures (V1.106 P0 Task 3) ----------- */
-
-describe('Surfaces page — main banner fixtures', () => {
-  beforeEach(() => {
-    mockMatchMedia(false);
-    renderStudio('/surfaces/banner');
-  });
-
-  it('renders the banner section heading', () => {
-    expect(
-      screen.getByRole('heading', { name: 'Launch — Daemon banner' }),
-    ).toBeInTheDocument();
-  });
-
-  it('renders all four main banner fixture variants', () => {
-    expect(screen.getByTestId('main-banner-fixture-starting')).toBeInTheDocument();
-    expect(screen.getByTestId('main-banner-fixture-degraded')).toBeInTheDocument();
-    expect(screen.getByTestId('main-banner-fixture-stopped')).toBeInTheDocument();
-    expect(screen.getByTestId('main-banner-fixture-error')).toBeInTheDocument();
-  });
-
-  it('shows port-conflict copy on the error variant', () => {
-    const errorFixture = screen.getByTestId('main-banner-fixture-error');
-    expect(within(errorFixture).getByText('Port unavailable')).toBeInTheDocument();
-    expect(
-      within(errorFixture).getByText(/Port 8420 is already in use/i),
-    ).toBeInTheDocument();
-  });
-
-  it('does not import the App MainBanner (composition-only)', () => {
-    // The fixture exposes stable, state-specific testids built from inline
-    // markup and @42ch/nexus-ui Button. The real apps/web banner has no
-    // data-testid and renders a single dynamic daemon state, so four matching
-    // fixture roots prove the fixture is used and the App banner is not
-    // imported.
-    const bannerSection = screen.getByTestId('surfaces-banner');
-    expect(
-      within(bannerSection).getByTestId('main-banner-fixture-starting'),
-    ).toBeInTheDocument();
-    expect(
-      within(bannerSection).getByTestId('main-banner-fixture-degraded'),
-    ).toBeInTheDocument();
-    expect(
-      within(bannerSection).getByTestId('main-banner-fixture-stopped'),
-    ).toBeInTheDocument();
-    expect(
-      within(bannerSection).getByTestId('main-banner-fixture-error'),
-    ).toBeInTheDocument();
-
-    // The real MainBanner does not emit any data-testid; an imported copy
-    // would add an uncontrolled root element without the fixture prefix.
-    expect(
-      within(bannerSection).queryAllByTestId(/^main-banner-/).length,
-    ).toBe(4);
-  });
-});
-
 /* ---- surfaces page — selection submenu fixtures (V1.126 P0 T4) -------- */
 
 describe('Surfaces page — selection submenu fixtures', () => {
@@ -750,11 +715,39 @@ describe('Surfaces page — selection submenu fixtures', () => {
     expect(input).toHaveValue('My Fantasy World');
   });
 
-  it('renders agent dialog overlay with entity-name title', () => {
+  it('renders agent dialog overlay with entity-name title after Open', () => {
     const agentFrame = screen.getByTestId('selection-submenu-agent-dialog-frame');
-    const dialog = within(agentFrame).getByRole('dialog', { name: /Assign agent to My Fantasy World/i });
+    expect(within(agentFrame).queryByRole('dialog')).not.toBeInTheDocument();
+
+    fireEvent.click(
+      within(agentFrame).getByRole('button', { name: 'Open agent dialog' }),
+    );
+    const dialog = within(agentFrame).getByRole('dialog', {
+      name: /Assign agent to My Fantasy World/i,
+    });
     expect(dialog).toBeInTheDocument();
     expect(dialog).toHaveAttribute('aria-modal', 'true');
+    expect(dialog.className).toContain('absolute');
+    expect(dialog.className).not.toContain('fixed');
+  });
+
+  it('closes agent dialog so sibling variants stay reachable and reopen works (V1.128 P0 T3)', () => {
+    const agentFrame = screen.getByTestId('selection-submenu-agent-dialog-frame');
+    fireEvent.click(
+      within(agentFrame).getByRole('button', { name: 'Open agent dialog' }),
+    );
+    expect(within(agentFrame).getByRole('dialog')).toBeInTheDocument();
+
+    fireEvent.click(within(agentFrame).getByRole('button', { name: 'Cancel' }));
+    expect(within(agentFrame).queryByRole('dialog')).not.toBeInTheDocument();
+
+    const worldLight = screen.getByTestId('selection-submenu-world-light');
+    expect(within(worldLight).getByRole('menu')).toBeInTheDocument();
+
+    fireEvent.click(
+      within(agentFrame).getByRole('button', { name: 'Open agent dialog' }),
+    );
+    expect(within(agentFrame).getByRole('dialog')).toBeInTheDocument();
   });
 
   it('renders dark variant with dark class wrapper', () => {
