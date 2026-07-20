@@ -23,14 +23,19 @@
     {
       "id": "2026-07-20-v1.127-p1-native-agent-provider-registration",
       "file": ".mstar/plans/2026-07-20-v1.127-p1-native-agent-provider-registration.md",
-      "status": "Todo",
+      "status": "Done",
       "title": "P1 — Native agent provider registration in daemon HostManager",
       "metadata": {
         "primary_spec": ".mstar/iterations/v1.127/specs/native-agent-provider-registration.md",
         "spec_integration_branch": "iteration/v1.127",
         "merge_target": "iteration/v1.127",
         "iteration_refs": "v1.127",
-        "wire_contracts_changed": false
+        "working_branch": "feature/v1.127-p1-native-agent-provider-registration",
+        "wire_contracts_changed": false,
+        "done_at": "2026-07-20",
+        "qc_verdict": "Approve with residuals (post-fix-wave)",
+        "qa_verdict": "Pass (mandatory, acceptance-only; session-create deferred to dogfood)",
+        "residuals_open_count": 1
       }
     }
   ],
@@ -52,18 +57,18 @@
     "target_branch": "main",
     "tech_debt_summary": {
       "updated_at": "2026-07-20",
-      "total_open": 40,
+      "total_open": 39,
       "by_severity": {
         "critical": 0,
         "high": 0,
-        "medium": 3,
+        "medium": 2,
         "low": 4,
         "nit": 33
       },
       "by_target": {
         "post-V1.92": 1,
         "post-V1.112": 1,
-        "post-V1.116": 1,
+        "post-V1.116": 0,
         "post-V1.125": 28,
         "post-V1.126": 8,
         "post-V1.127": 1
@@ -71,7 +76,7 @@
       "by_plan": {
         "2026-07-05-v1.92-closure": 1,
         "2026-07-12-v1.112-i18n-ui-migration": 1,
-        "2026-07-13-v1.116-agent-detection-codex-native": 1,
+        "2026-07-13-v1.116-agent-detection-codex-native": 0,
         "2026-07-20-v1.126-p0-shell-selection-submenu": 8,
         "2026-07-20-v1.126-p1-canvas-directed-axis": 5,
         "2026-07-20-v1.126-p2-composite-timeline-endpoint": 11,
@@ -117,9 +122,10 @@
         "decision": "defer",
         "owner": "@fullstack-dev",
         "target": "post-V1.116",
-        "lifecycle": "open",
+        "lifecycle": "closed",
         "tracking_link": ".mstar/plans/2026-07-13-v1.116-agent-detection-codex-native.md",
-        "note": "QA finding. Discovery works (scan shows installed), but session creation fails. Same gap exists for claude-native. Wire both during boot in a follow-up."
+        "note": "Discovery works (scan shows installed), but session creation fails. Same gap exists for claude-native. Wire both during boot in a follow-up.",
+        "closure_note": "Closed by V1.127 P1 T1 (commit a92fa47b) — both CodexNativeProvider and ClaudeCliProvider registered in HostManager via boot.rs::register_provider after HostManager::new(). Closes the architecture-coherence gap (AgentHostSubsystem invariant met) + create_session no longer fails with 'provider not registered'."
       }
     ],
     "2026-07-16-hotfix-setup-continue-404": [],
