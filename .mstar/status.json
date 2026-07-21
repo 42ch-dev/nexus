@@ -382,7 +382,8 @@
         "lifecycle": "open",
         "decision": "defer",
         "owner": "@fullstack-dev",
-        "target": "post-V1.129"
+        "target": "post-V1.129",
+        "note": "Boundary-isolated duplicate; refactor to shared helper if ctr_local becomes public."
       },
       {
         "id": "R-V1129P0-QC1-M-002",
@@ -391,7 +392,8 @@
         "lifecycle": "open",
         "decision": "defer",
         "owner": "@fullstack-dev",
-        "target": "post-V1.129"
+        "target": "post-V1.129",
+        "note": "Best-effort TLS substrings by design; replace with structured classifier if list grows."
       },
       {
         "id": "R-V1129P0-QC1-M-003",
@@ -400,7 +402,8 @@
         "lifecycle": "open",
         "decision": "defer",
         "owner": "@frontend-dev",
-        "target": "post-V1.129"
+        "target": "post-V1.129",
+        "note": "Capture snapshot at submit if dogfooders report retry-state confusion."
       },
       {
         "id": "R-V1129P0-QC1-M-004",
@@ -409,7 +412,8 @@
         "lifecycle": "open",
         "decision": "defer",
         "owner": "@fullstack-dev",
-        "target": "post-V1.129"
+        "target": "post-V1.129",
+        "note": "Output matches spec for documented inputs; restore TypeError branch if new input class appears."
       },
       {
         "id": "R-V1129P0-QC2-M-001",
@@ -428,7 +432,8 @@
         "lifecycle": "open",
         "decision": "defer",
         "owner": "@fullstack-dev",
-        "target": "post-V1.129"
+        "target": "post-V1.129",
+        "note": "Sub-microsecond check; gate behind JSON-parse failure path if perf becomes measurable."
       }
     ],
     "2026-07-21-v1.129-p1-transport-error-ux": [
@@ -439,7 +444,8 @@
         "lifecycle": "open",
         "decision": "defer",
         "owner": "@frontend-dev",
-        "target": "post-V1.129"
+        "target": "post-V1.129",
+        "note": "Coverage gap, no runtime failure; add per-kind surface assertions in a follow-up test pass."
       },
       {
         "id": "R-V1129P1-QC1-M-005",
@@ -448,7 +454,8 @@
         "lifecycle": "open",
         "decision": "defer",
         "owner": "@frontend-dev",
-        "target": "post-V1.129"
+        "target": "post-V1.129",
+        "note": "No drift guard; add compile-time parity test between mirror and source union."
       },
       {
         "id": "R-V1129P1-QC2-W-001",
@@ -457,7 +464,8 @@
         "lifecycle": "open",
         "decision": "defer",
         "owner": "@frontend-dev",
-        "target": "post-V1.129"
+        "target": "post-V1.129",
+        "note": "Same drift theme as QC1-M-005; close via the same parity-test follow-up."
       },
       {
         "id": "R-V1129P1-QC2-S-001",
@@ -466,7 +474,8 @@
         "lifecycle": "open",
         "decision": "defer",
         "owner": "@frontend-dev",
-        "target": "post-V1.129"
+        "target": "post-V1.129",
+        "note": "No observed warning; add pre-router nav guard if React warns in dogfooding."
       },
       {
         "id": "R-V1129P1-QC1-PROC-001",
@@ -475,7 +484,8 @@
         "lifecycle": "open",
         "decision": "defer",
         "owner": "@frontend-dev",
-        "target": "post-V1.129"
+        "target": "post-V1.129",
+        "note": "PM-accepted process exception; revisit only if Studio-first clause is amended."
       },
       {
         "id": "R-V1129P1-QC1-M-006",
@@ -484,7 +494,8 @@
         "lifecycle": "open",
         "decision": "defer",
         "owner": "@frontend-dev",
-        "target": "post-V1.129"
+        "target": "post-V1.129",
+        "note": "EN locale copy drift; sync en/zh-CN shell.json tls.body with BODY_COPY.tls in follow-up."
       }
     ]
   }
