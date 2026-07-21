@@ -1,0 +1,23 @@
+{
+  "plan_id": "2026-07-21-v1.129-p1-transport-error-ux",
+  "status": "Done",
+  "type": "feature",
+  "metadata": {
+    "primary_spec": ".mstar/iterations/v1.129/specs/transport-error-ux.md",
+    "spec_refs": [
+      ".mstar/iterations/v1.129/specs/transport-error-ux.md"
+    ],
+    "iteration_refs": [
+      ".mstar/iterations/v1.129/delivery-compass.md"
+    ],
+    "iteration_compass": "v1.129/delivery-compass.md",
+    "spec_integration_branch": "iteration/v1.129",
+    "working_branch": "plan/v1.129-p1-transport-error-ux",
+    "merge_target": "iteration/v1.129",
+    "wire_contracts_changed": false,
+    "iteration_id": "V1.129",
+    "head_sha": "e95d8983",
+    "qa_gate": "mandatory",
+    "qa_verdict": "Pass with residuals"
+  }
+}
