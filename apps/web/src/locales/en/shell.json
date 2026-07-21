@@ -123,6 +123,9 @@
       "offline": "Daemon offline — go to connection settings"
     }
   },
+  "settings": {
+    "title": "Settings"
+  },
   "scaffoldPreset": {
     "title": "Scaffold Preset",
     "description": "Create a new user preset from a name.",
