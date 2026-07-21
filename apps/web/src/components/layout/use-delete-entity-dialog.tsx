@@ -8,6 +8,7 @@ import {
 } from '@/api/queries';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
+import { useCreatorEntitySelection } from '@/components/layout/creator-entity-selection-context';
 
 /**
  * Confirm dialog for destructive Work / World delete (V1.129 P2 — R-V1126P0-T2-001).
@@ -48,6 +49,10 @@ export function useDeleteEntityDialog(): DeleteEntityDialogHandle {
   const [target, setTarget] = useState<DeleteEntityTarget | null>(null);
   const deleteWork = useDeleteWork();
   const deleteWorld = useDeleteWorld();
+  // Creator hub selection SSOT (V1.128 P2). When the deleted entity is the
+  // currently-selected one, clearing it prevents the /worlds or /works hub
+  // from continuing to render a now-deleted item until the user navigates.
+  const { selectedEntity, clearSelectedEntity } = useCreatorEntitySelection();
 
   const openDelete = (next: DeleteEntityTarget) => {
     setTarget(next);
@@ -61,6 +66,16 @@ export function useDeleteEntityDialog(): DeleteEntityDialogHandle {
   const handleConfirm = () => {
     if (!target) return;
     const onSuccess = () => {
+      // Clear the selection if it matches the deleted target. `handleConfirm`
+      // is recreated every render so `selectedEntity` is fresh at click time;
+      // the dialog is modal, so selection cannot change while it is open.
+      if (
+        selectedEntity &&
+        selectedEntity.kind === target.kind &&
+        selectedEntity.id === target.id
+      ) {
+        clearSelectedEntity();
+      }
       setOpen(false);
       setTarget(null);
     };
