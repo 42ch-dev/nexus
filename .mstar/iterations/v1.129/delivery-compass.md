@@ -1,7 +1,8 @@
 ---
 iteration_id: V1.129
 start_date: 2026-07-21
-status: locked
+end_date: 2026-07-21
+status: completed
 iteration_base_branch: main
 target_branch: main
 spec_integration_branch: iteration/v1.129
@@ -75,9 +76,9 @@ Make Profile/Creator creation actually work end-to-end (daemon route + web flow)
 
 | plan_id | Name | Status | Notes |
 |---------|------|--------|-------|
-| `2026-07-21-v1.129-p0-profile-create-reliability` | P0 — Profile/Creator create reliability + dialog error surface | Todo | Root-cause fix for the concrete caller bug |
-| `2026-07-21-v1.129-p1-transport-error-ux` | P1 — Transport-error UX sweep across the app | Todo | Applies P0 classification to every transport surface |
-| `2026-07-21-v1.129-p2-dogfood-nit-closeout` | P2 — Dogfood-visible nit closeout (V1.126–V1.128) | Todo | Subset of `metadata.tech_debt_summary` with user-visible symptoms |
+| `2026-07-21-v1.129-p0-profile-create-reliability` | P0 — Profile/Creator create reliability + dialog error surface | **Done** | QC tri: Approve/Approve w. residuals/Approve w. residuals; fix QC3-F-001 (primary CTA onClick); QA: Pass with residuals (6 Minor). HEAD `f5a82ba2`. |
+| `2026-07-21-v1.129-p1-transport-error-ux` | P1 — Transport-error UX sweep across the app | **Done** | QC tri: Request Changes/Approve w. residuals/Approve; fix F-001+F-002 (caller-owned copy + non-interactive Use Desktop App); QA: Pass with residuals (6 Minor). HEAD `e95d8983`. |
+| `2026-07-21-v1.129-p2-dogfood-nit-closeout` | P2 — Dogfood-visible nit closeout (V1.126–V1.128) | **Done** | QC tri: Request Changes/Approve/Approve; fix W-001 (status.json note restoration); QA: Pass. Anchors archived (R-V1126P0-T2-001, R-P1-001). HEAD `80034bb1`. |
 
 Status values: `Todo` | `InProgress` | `InReview` | `Done` | `Blocked`
 
@@ -94,12 +95,12 @@ P2 (Visible nits) — independent of P0/P1 but serial per iteration default
 
 | Milestone | Target date | Status |
 |-----------|-------------|--------|
-| Spec freeze (compass locked) | 2026-07-21 | pending |
-| P0 dev complete | 2026-07-21 | pending |
-| P1 dev complete | 2026-07-21 | pending |
-| P2 dev complete | 2026-07-21 | pending |
-| QC tri complete (all plans) | 2026-07-21 | pending |
-| Iteration close + PR | 2026-07-21 | pending |
+| Spec freeze (compass locked) | 2026-07-21 | ✅ done |
+| P0 dev complete | 2026-07-21 | ✅ done |
+| P1 dev complete | 2026-07-21 | ✅ done |
+| P2 dev complete | 2026-07-21 | ✅ done |
+| QC tri complete (all plans) | 2026-07-21 | ✅ done |
+| Iteration close + PR | 2026-07-21 | in progress |
 
 ## Acceptance Criteria
 
@@ -131,9 +132,9 @@ Manual tester can verify each item with **pass/fail** without reading source. "G
 
 ## Roadmap Position
 
-- **Current iteration (V1.129):** Usability bug-sweep — Profile/Creator create works end-to-end, transport failures speak honestly with a next step, dogfood-visible nits stop accumulating "that's wrong" hits. Direct response to manual tester feedback after V1.128.
-- **Next iteration (trigger):** After V1.129 ships a stable create + transport foundation, product picks the next **authoring** slice when author demand is clear — candidates: Canvas/Timeline work (`DF-V1123-WORLD-MOMENT`, `DF-V1123-WORK-BRIEF`, or `DF-V1122-COMPUTE-ON-TIMELINE`). **Do not start** that slice while create-still-broken or generic-blob still greets first open. Owner: product-manager (scope pick) + architect.
-- **Final goal:** A Nexus build where a manual tester can go from "open the app" → create a creator → switch profiles → open a World → edit timeline **without** a generic transport blob, a missing endpoint, or an obviously unfinished chrome string.
+- **Current iteration (V1.129):** **DELIVERED.** Usability bug-sweep — Profile/Creator create works end-to-end, transport failures speak honestly with a next step, dogfood-visible nits stop accumulating "that's wrong" hits. Direct response to manual tester feedback after V1.128.
+- **Next iteration (trigger):** After V1.129 ships a stable create + transport foundation, product picks the next **authoring** slice when author demand is clear — candidates: Canvas/Timeline work (`DF-V1123-WORLD-MOMENT`, `DF-V1123-WORK-BRIEF`, or `DF-V1122-COMPUTE-ON-TIMELINE`); or a follow-up compound pass to promote the V1.129 specs to `{KNOWLEDGE_DIR}/architecture-patterns/`. **Trigger:** author demand signals OR capacity for knowledge consolidation. **Owner:** product-manager (scope pick) + architect.
+- **Final goal:** A Nexus build where a manual tester can go from "open the app" → create a creator → switch profiles → open a World → edit timeline **without** a generic transport blob, a missing endpoint, or an obviously unfinished chrome string. V1.129 closes the first three of those five steps.
 
 ## Delivery Branch Policy
 
@@ -179,18 +180,34 @@ Manual tester can verify each item with **pass/fail** without reading source. "G
 
 ## Quality Gate Summary
 
-> Filled at iteration-close. Per-plan gate details in each main plan; open residual SSOT in `.mstar/status.json`.
+> Per-plan gate details in each main plan `## Review Gate Summary`; open residual SSOT in `.mstar/status.json`.
 
 | plan_id | QC decision | QA gate | Residuals | Durable summary |
 |---------|-------------|---------|-----------|-----------------|
-| `2026-07-21-v1.129-p0-profile-create-reliability` | pending | mandatory | pending | pending |
-| `2026-07-21-v1.129-p1-transport-error-ux` | pending | mandatory | pending | pending |
-| `2026-07-21-v1.129-p2-dogfood-nit-closeout` | pending | mandatory | pending | pending |
+| `2026-07-21-v1.129-p0-profile-create-reliability` | Approve (after fix) | mandatory — Pass with residuals | 6 Minor deferred (R-V1129P0-*) | `.mstar/plans/2026-07-21-v1.129-p0-profile-create-reliability.md#review-gate-summary` |
+| `2026-07-21-v1.129-p1-transport-error-ux` | Approve (after fix + PM exception) | mandatory — Pass with residuals | 6 Minor deferred (R-V1129P1-*) | `.mstar/plans/2026-07-21-v1.129-p1-transport-error-ux.md#review-gate-summary` |
+| `2026-07-21-v1.129-p2-dogfood-nit-closeout` | Approve (after fix) | mandatory — Pass | 1 Minor deferred (cascade tx); 2 anchors archived | `.mstar/plans/2026-07-21-v1.129-p2-dogfood-nit-closeout.md#review-gate-summary` |
+
+**Iteration QA evidence:** all three plans ran the mandatory QA gate (runtime + UI observable). Validation matrix across the iteration: cargo 837 tests + clippy clean + fmt clean; web 1644 tests; design-studio 235 tests; @42ch/nexus-ui 183 tests; UI guardrails clean.
 
 ## Compound Round Summary
 
-> Filled at iteration-close.
+- **Crystallization deferred to a follow-up compound pass** (non-blocking; recorded in `.mstar/iterations/v1.129/compound-summary.md`).
+- **Two promotion candidates identified:** (1) `TransportErrorKind` classification pattern → `{KNOWLEDGE_DIR}/architecture-patterns/transport-error-classification.md`; (2) Studio-first primitive promotion workflow (with caller-owned-copy contract) → `{KNOWLEDGE_DIR}/architecture-patterns/studio-first-primitive-promotion.md`.
+- **CONCEPTS.md:** no new domain terms introduced.
+- **compound-refresh:** not triggered (no stale knowledge surfaced).
 
 ## Iteration Retrospective (minimal)
 
-> Filled at iteration-close.
+- **做得好的 (Well):**
+  - Direction lock caught the concrete bug (missing `POST /v1/daemon/creators`) via code-first research before any human triage; the autonomous direction-lock rationale held through Phase 2.
+  - Architect pre-locked the cascade rules (`hard delete`, FK behavior) in Seat 2 — saved implementer cycles; no mid-plan re-architecture needed.
+  - QC tri-review caught two real correctness bugs (P0 QC3-F-001 hardcoded `onClick`; P1 QC1-F-001 i18n regression + F-002 no-op button) that L2 informal review missed — confirms the value of the mandatory N=3 tri.
+- **可改进的 (Improve):**
+  - The `general` subagent repeatedly returned empty on complex review prompts in this host — L2 informal review had to fall back to PM-thread (recorded explicitly). Host reliability for review-shaped prompts warrants investigation or a fallback role.
+  - T6 status.json compaction was too aggressive (dropped `notes` on 47 legacy rows). Should have used the pre-state as the source of truth for "what to keep" rather than re-deriving from scratch.
+  - P1's T1/T2 ordering deviated from the literal Studio-first policy — the spec could have anticipated this with a "fixture may import the package under promotion" clause; flagged for future plan-writing.
+- **下迭代建议 (Next):**
+  - Trigger `mstar-compound` in a near-term slice to promote the two identified pattern docs to `{KNOWLEDGE_DIR}/` before they go stale.
+  - Address the deferred QC1-M-005 type-mirror drift with a compile-time parity test in a follow-up.
+  - Watch for `DF-V1123-WORLD-MOMENT` / `DF-V1123-WORK-BRIEF` author demand signals to pick the next authoring slice.
