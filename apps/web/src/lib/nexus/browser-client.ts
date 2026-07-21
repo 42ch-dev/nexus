@@ -22,6 +22,8 @@ import type {
   CountPendingReviewsResponse,
   CreateWorkRequest,
   CreateWorkResponse,
+  CreateWorldRequest,
+  CreateWorldResponse,
   CreatorDetail,
   DeletePendingReviewResponse,
   EditCoreContextRequest,
@@ -190,6 +192,9 @@ export class BrowserClient implements NexusClient {
   }
   createWork(request: CreateWorkRequest): Promise<CreateWorkResponse> {
     return this.post<CreateWorkResponse>('/v1/daemon/works', request);
+  }
+  createWorld(request: CreateWorldRequest): Promise<CreateWorldResponse> {
+    return this.post<CreateWorldResponse>('/v1/daemon/worlds', request);
   }
   patchWork(workId: string, request: PatchWorkRequest): Promise<WorkDetailResponse> {
     return this.patch<WorkDetailResponse>(

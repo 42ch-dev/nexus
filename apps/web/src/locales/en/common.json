@@ -65,6 +65,7 @@
     "couldNotUpdateWork": "Could not update Work",
     "couldNotDeleteWork": "Could not delete Work",
     "couldNotDeleteWorld": "Could not delete World",
+    "couldNotCreateWorld": "Could not create World",
     "couldNotUpdateFinding": "Could not update finding",
     "couldNotUpdateFindings": "Could not update findings",
     "couldNotScaffoldPreset": "Could not scaffold preset",

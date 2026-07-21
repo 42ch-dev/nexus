@@ -160,6 +160,15 @@
     "create": "Create",
     "toastCreated": "Work created"
   },
+  "worldCreate": {
+    "title": "Create World",
+    "description": "Start a new World in the local runtime.",
+    "titleLabel": "Title",
+    "titlePlaceholder": "The World's name",
+    "validationError": "Title is required.",
+    "creating": "Creating World…",
+    "create": "Create"
+  },
   "workShell": {
     "railTitle": "Works",
     "railAria": "Works rail",

@@ -40,6 +40,8 @@ import type {
   CountPendingReviewsResponse,
   CreateWorkRequest,
   CreateWorkResponse,
+  CreateWorldRequest,
+  CreateWorldResponse,
   CreatorDetail,
   DeletePendingReviewResponse,
   EditCoreContextRequest,
@@ -177,6 +179,8 @@ export interface NexusClient {
   getWork(workId: string): Promise<WorkDetailResponse>;
   /** `POST /v1/daemon/works`. */
   createWork(request: CreateWorkRequest): Promise<CreateWorkResponse>;
+  /** `POST /v1/daemon/worlds`. */
+  createWorld(request: CreateWorldRequest): Promise<CreateWorldResponse>;
   /** `PATCH /v1/daemon/works/{work_id}` — status/stage/archive (free-string status). */
   patchWork(workId: string, request: PatchWorkRequest): Promise<WorkDetailResponse>;
   /**
