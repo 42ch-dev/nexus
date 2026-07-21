@@ -137,8 +137,11 @@ export function DaemonStatusBar() {
       await desktop.restartDaemon();
       await refresh();
     } catch (err) {
-      const message = errorMessage(err) || t('daemon.restartFailedFallback');
-      toast({ variant: 'error', title: t('daemon.restartFailed'), description: message });
+      const raw = errorMessage(err) || '';
+      const isPortConflict = raw.toLowerCase().includes('port') && raw.toLowerCase().includes('in use');
+      const title = isPortConflict ? t('daemon.restartPortConflict') : t('daemon.restartFailed');
+      const description = isPortConflict ? raw : (raw || t('daemon.restartFailedFallback'));
+      toast({ variant: 'error', title, description });
     } finally {
       setIsLoading(false);
     }
