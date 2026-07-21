@@ -79,8 +79,6 @@ export function ActiveCreatorProvider({
     return () => window.removeEventListener('storage', onStorage);
   }, []);
 
-  useDefaultProfileAutoSelect(activeCreatorId, setActiveCreatorId);
-
   return (
     <ActiveCreatorContext.Provider value={{ activeCreatorId, setActiveCreatorId }}>
       {children}
@@ -88,7 +86,7 @@ export function ActiveCreatorProvider({
   );
 }
 
-function useDefaultProfileAutoSelect(
+export function useDefaultProfileAutoSelect(
   activeCreatorId: string | null,
   setActiveCreatorId: (id: string | null) => void,
 ) {
@@ -112,6 +110,18 @@ function useDefaultProfileAutoSelect(
     }
     resolved.current = true;
   }, [items, activeCreatorId, setActiveCreatorId]);
+}
+
+/**
+ * V1.130 T4: Render this inside the app tree where both ActiveCreatorProvider
+ * and QueryClientProvider are available. It auto-selects the Default profile.
+ * In tests without QueryClient, simply don't render this component.
+ */
+export function DefaultProfileCoordinator() {
+  const activeCreatorId = useActiveCreatorId();
+  const setActiveCreatorId = useSetActiveCreatorId();
+  useDefaultProfileAutoSelect(activeCreatorId, setActiveCreatorId);
+  return null;
 }
 
 export function useActiveCreatorId(): string | null {
