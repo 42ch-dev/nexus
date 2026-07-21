@@ -55,6 +55,7 @@
     "restartConfirm": "Restarting the daemon will interrupt any running orchestration. Continue?",
     "restartFailed": "Daemon restart failed",
     "restartFailedFallback": "Daemon restart failed.",
+    "restartPortConflict": "Another process is using the daemon port. Quit the other Nexus instance or change the port.",
     "starting": "Daemon starting…",
     "reconnecting": "Daemon reconnecting",
     "stopped": "Daemon stopped",

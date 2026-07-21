@@ -134,8 +134,7 @@ export function DaemonStatusBar() {
     if (!confirmed) return;
     setIsLoading(true);
     try {
-      await desktop.stopDaemon();
-      await desktop.startDaemon();
+      await desktop.restartDaemon();
       await refresh();
     } catch (err) {
       const message = errorMessage(err) || t('daemon.restartFailedFallback');

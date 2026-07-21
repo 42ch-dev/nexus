@@ -79,10 +79,7 @@ export function MainBanner() {
     if (!desktop) return;
     setIsLoading(true);
     try {
-      if (state !== 'stopped') {
-        await desktop.stopDaemon();
-      }
-      await desktop.startDaemon();
+      await desktop.restartDaemon();
       await refresh();
     } catch (err) {
       const message = errorMessage(err) || t('daemon.restartFailedFallback');

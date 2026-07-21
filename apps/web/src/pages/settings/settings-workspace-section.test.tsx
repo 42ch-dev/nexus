@@ -35,6 +35,7 @@ function makeDesktopCapabilities(): DesktopCapabilities {
       Promise.resolve({ creator_id: 'creator-a', already_bootstrapped: true }),
     ),
     switchActiveCreator: vi.fn(() => Promise.resolve('/tmp/nexus')),
+    restartDaemon: vi.fn(() => Promise.resolve()),
   };
 }
 
