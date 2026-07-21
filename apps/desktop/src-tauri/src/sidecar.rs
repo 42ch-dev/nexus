@@ -36,6 +36,9 @@ const RESTART_BACKOFF_BASE: Duration = Duration::from_millis(500);
 const RESTART_BACKOFF_MAX: Duration = Duration::from_secs(8);
 const MAX_RESTART_ATTEMPTS: u32 = 5;
 const STOP_GRACEFUL_TIMEOUT: Duration = Duration::from_secs(5);
+/// Maximum time to wait for the port to become free after stopping the daemon
+/// before spawning a replacement (prevents false "port in use" from dying sockets).
+const PORT_FREE_POLL_TIMEOUT: Duration = Duration::from_secs(3);
 const HEALTH_PROBE_TIMEOUT: Duration = Duration::from_secs(2);
 /// Tight gate for the optimistic `probe_port_state` TCP connect. Loopback
 /// connects normally resolve in <10 ms; the gate prevents a hung port from
@@ -112,6 +115,8 @@ struct SidecarInner {
     /// Set when the user/app explicitly requests stop, so crash monitors do not
     /// restart the process.
     stop_requested: bool,
+    /// True while a restart_daemon operation is in flight (single-flight guard).
+    restart_in_progress: bool,
     /// Number of consecutive crash-restart attempts since the last healthy run.
     restart_count: u32,
     /// App handle used to emit lifecycle state events to the SPA. `None` in
@@ -139,6 +144,7 @@ impl SidecarManager {
             owned: false,
             child: None,
             stop_requested: false,
+            restart_in_progress: false,
             restart_count: 0,
             app_handle: None,
             stderr_tail: None,
@@ -525,6 +531,82 @@ impl SidecarManager {
         drop(inner);
         self.notify().await;
         Ok(())
+    }
+
+    /// Restart the daemon — stop the current process (owned or attached) and
+    /// start a fresh one.
+    ///
+    /// Single-flight: concurrent calls return `Ok(())` (join) instead of racing.
+    pub async fn restart_daemon<R: tauri::Runtime>(
+        &self,
+        app: &tauri::AppHandle<R>,
+    ) -> Result<(), String> {
+        // Single-flight guard.
+        {
+            let mut inner = self.0.lock().await;
+            if inner.restart_in_progress {
+                return Ok(());
+            }
+            inner.restart_in_progress = true;
+            inner.stop_requested = true;
+            inner.state = DaemonState::Starting;
+            inner.version = None;
+            inner.detail = None;
+        }
+        self.notify().await;
+
+        let (owned, port) = {
+            let inner = self.0.lock().await;
+            (inner.owned, inner.port)
+        };
+
+        if owned {
+            if let Err(e) = self.stop().await {
+                self.0.lock().await.restart_in_progress = false;
+                return Err(e);
+            }
+        } else {
+            if let Some(health) = probe_health(port).await {
+                if health.status == "ok" || health.status == "healthy" {
+                    let pid = listener_pid(port);
+                    if let Some(pid) = pid {
+                        sleep(Duration::from_millis(200)).await;
+                        let pid2 = listener_pid(port);
+                        if pid2 == Some(pid) {
+                            stop_external_daemon(port, pid).await;
+                        } else {
+                            self.0.lock().await.restart_in_progress = false;
+                            return Err(
+                                "daemon PID changed during restart — possible handoff race"
+                                    .to_string(),
+                            );
+                        }
+                    }
+                }
+            }
+            let mut inner = self.0.lock().await;
+            inner.owned = false;
+            inner.child = None;
+            if inner.state != DaemonState::Error {
+                inner.state = DaemonState::Stopped;
+            }
+            inner.version = None;
+            drop(inner);
+            self.notify().await;
+        }
+
+        // Wait for the port to become free (up to 3 s).
+        let port = self.port().await;
+        let deadline = Instant::now() + PORT_FREE_POLL_TIMEOUT;
+        while Instant::now() < deadline {
+            if probe_port_state(port).await == PortState::Free {
+                break;
+            }
+            sleep(Duration::from_millis(100)).await;
+        }
+
+        self.0.lock().await.restart_in_progress = false;
+        self.start_with_budget(app, true).await
     }
 
     /// Monitor task: waits for the owned sidecar to exit, then restarts it with
