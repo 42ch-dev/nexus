@@ -186,6 +186,16 @@
     "agent": "Agent",
     "unassigned": "Unassigned",
     "rename": "Rename",
-    "renameFailed": "Failed to rename. Please try again."
+    "renameFailed": "Failed to rename. Please try again.",
+    "delete": "Delete",
+    "deleteFailed": "Failed to delete. Please try again.",
+    "deleteDialog": {
+      "workTitle": "Delete \"{{name}}\"",
+      "worldTitle": "Delete \"{{name}}\"",
+      "workBody": "This will permanently remove this Work and all of its manuscripts, outlines, and timeline entries. This cannot be undone.",
+      "worldBody": "This will permanently remove this World and its knowledge base entries. Works referencing this World will remain but will no longer be associated with it. This cannot be undone.",
+      "cancel": "Cancel",
+      "confirm": "Delete"
+    }
   }
 }

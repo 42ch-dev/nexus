@@ -11,6 +11,7 @@ import {
   ListChecks,
   Pencil,
   Sparkles,
+  Trash2,
   User,
 } from 'lucide-react';
 
@@ -19,6 +20,7 @@ import { NexusLogo } from '@/components/brand/nexus-logo';
 import { useCreatorEntitySelection } from '@/components/layout/creator-entity-selection-context';
 import { FooterProfiles } from '@/components/layout/footer-profiles';
 import { useAgentPickerDialog } from '@/components/layout/use-agent-picker-dialog';
+import { useDeleteEntityDialog } from '@/components/layout/use-delete-entity-dialog';
 import {
   ShellSidebarChrome,
   type ShellNavGroup,
@@ -74,6 +76,7 @@ export function Sidebar() {
   const worlds = useMemo(() => worldsQuery.data ?? [], [worldsQuery.data]);
   const patchWork = usePatchWork();
   const agentDialog = useAgentPickerDialog();
+  const deleteDialog = useDeleteEntityDialog();
   const { setSelectedEntity, clearSelectedEntity } = useCreatorEntitySelection();
 
   const [renamingItem, setRenamingItem] = useState<string | null>(null);
@@ -287,6 +290,33 @@ export function Sidebar() {
                         close();
                       },
                     },
+                    // V1.129 P2 (R-V1126P0-T2-001) — hard-delete via confirm dialog.
+                    // Title and body name the item + cascade + irreversibility
+                    // per architect lock (Seat 2).
+                    {
+                      id: 'delete',
+                      label: t('submenu.delete'),
+                      icon: Trash2,
+                      variant: 'danger' as const,
+                      onSelect: () => {
+                        const workId = extractWorkId(item);
+                        const worldId = extractWorldId(item);
+                        if (workId) {
+                          deleteDialog.openDelete({
+                            kind: 'work',
+                            id: workId,
+                            label: item.label,
+                          });
+                        } else if (worldId) {
+                          deleteDialog.openDelete({
+                            kind: 'world',
+                            id: worldId,
+                            label: item.label,
+                          });
+                        }
+                        close();
+                      },
+                    },
                   ]
                 : []),
             ]}
@@ -294,7 +324,7 @@ export function Sidebar() {
         </>
       );
     },
-    [t, navigate, agentDialog],
+    [t, navigate, agentDialog, deleteDialog],
   );
 
   return (
@@ -374,6 +404,7 @@ export function Sidebar() {
         }}
       />
       {agentDialog.dialog}
+      {deleteDialog.dialog}
     </nav>
   );
 }

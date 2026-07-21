@@ -311,6 +311,49 @@ export function usePatchWork() {
 }
 
 /**
+ * Hard-delete a Work (V1.129 P2 — R-V1126P0-T2-001).
+ *
+ * Cascade is server-side (SQLite FK `ON DELETE CASCADE` on chapters, findings,
+ * pool entries, reading progress/annotations; SET NULL on inspiration items
+ * and lineage_from_work_id). The mutation invalidates the works list on
+ * success; transport errors route through the shared error-toast classifier
+ * (which surfaces `<TransportErrorBlock>` copy for known kinds).
+ */
+export function useDeleteWork() {
+  const client = useNexusClient();
+  const qc = useQueryClient();
+  const errorToast = useErrorToast();
+  return useMutation({
+    mutationFn: (workId: string) => client.deleteWork(workId),
+    onSuccess: (_data, workId) => {
+      void qc.invalidateQueries({ queryKey: queryKeys.works.lists() });
+      void qc.removeQueries({ queryKey: queryKeys.works.detail(workId) });
+    },
+    onError: (error) => errorToast(error, 'error.couldNotDeleteWork'),
+  });
+}
+
+/**
+ * Hard-delete a World (V1.129 P2 — R-V1126P0-T2-001).
+ *
+ * Cascade is server-side: KB + timelines drop via FK CASCADE; Works are
+ * preserved with `world_id = NULL` (architect lock). The mutation invalidates
+ * the narrative world list on success.
+ */
+export function useDeleteWorld() {
+  const client = useNexusClient();
+  const qc = useQueryClient();
+  const errorToast = useErrorToast();
+  return useMutation({
+    mutationFn: (worldId: string) => client.deleteWorld(worldId),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: queryKeys.memory.worlds() });
+    },
+    onError: (error) => errorToast(error, 'error.couldNotDeleteWorld'),
+  });
+}
+
+/**
  * Update a finding (V1.77 findings-remediation). Optimistically patches the
  * finding in the cached findings list before the server responds, rolls back on
  * error, and refetches the list + detail on settle. Last-writer-wins (D1b — no

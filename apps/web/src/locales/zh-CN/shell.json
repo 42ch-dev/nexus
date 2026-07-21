@@ -186,6 +186,16 @@
     "agent": "智能体",
     "unassigned": "未分配",
     "rename": "重命名",
-    "renameFailed": "重命名失败，请重试。"
+    "renameFailed": "重命名失败，请重试。",
+    "delete": "删除",
+    "deleteFailed": "删除失败，请重试。",
+    "deleteDialog": {
+      "workTitle": "删除“{{name}}”",
+      "worldTitle": "删除“{{name}}”",
+      "workBody": "此操作将永久删除该作品及其全部手稿、大纲和时间线条目。此操作无法撤销。",
+      "worldBody": "此操作将永久删除该世界及其知识库条目。引用该世界的作品会保留，但不再与之关联。此操作无法撤销。",
+      "cancel": "取消",
+      "confirm": "删除"
+    }
   }
 }
