@@ -144,5 +144,10 @@
   },
   "dialog": {
     "close": "关闭对话框"
+  },
+  "transportCta": {
+    "retry": "重试",
+    "openConnectionSettings": "打开连接设置",
+    "useDesktopApp": "使用桌面应用"
   }
 }

@@ -4,7 +4,7 @@
   "plans": [
     {
       "plan_id": "2026-07-21-v1.129-p0-profile-create-reliability",
-      "status": "Todo",
+      "status": "Done",
       "type": "feature",
       "metadata": {
         "primary_spec": ".mstar/iterations/v1.129/specs/profile-create-reliability.md",
@@ -18,8 +18,11 @@
         "spec_integration_branch": "iteration/v1.129",
         "working_branch": "plan/v1.129-p0-profile-create-reliability",
         "merge_target": "iteration/v1.129",
-        "wire_contracts_changed": "pending-architect-lock",
-        "iteration_id": "V1.129"
+        "wire_contracts_changed": true,
+        "iteration_id": "V1.129",
+        "head_sha": "f5a82ba2",
+        "qa_gate": "mandatory",
+        "qa_verdict": "Pass with residuals"
       }
     },
     {
@@ -483,6 +486,74 @@
         "title": "Creator hub integration tests cover Work selection only (no World row)",
         "lifecycle": "open",
         "tracking_link": ".mstar/plans/2026-07-20-v1.128-p2-creator-create-controller-shell.md#Review Gate Summary"
+      }
+    ],
+    "2026-07-21-v1.129-p0-profile-create-reliability": [
+      {
+        "id": "R-V1129P0-QC1-M-001",
+        "severity": "nit",
+        "title": "Inline ctr_local… id-gen duplicates nexus-creator::local_identity::generate_local_id pattern",
+        "lifecycle": "open",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "post-V1.129",
+        "tracking_link": ".mstar/sdd/2026-07-21-v1.129-p0-profile-create-reliability/review/qc-consolidated.md",
+        "note": "Boundary isolation defensible — daemon-runtime does not depend on the private helper. Flag if the helper ever becomes public."
+      },
+      {
+        "id": "R-V1129P0-QC1-M-002",
+        "severity": "nit",
+        "title": "TLS substring list is a maintenance footprint",
+        "lifecycle": "open",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "post-V1.129",
+        "tracking_link": ".mstar/sdd/2026-07-21-v1.129-p0-profile-create-reliability/review/qc-consolidated.md",
+        "note": "Best-effort by design per spec TLS fail-open. Extend list when Chrome/Firefox error wording drifts."
+      },
+      {
+        "id": "R-V1129P0-QC1-M-003",
+        "severity": "nit",
+        "title": "Retry submits live displayName state, not a captured payload snapshot",
+        "lifecycle": "open",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.129",
+        "tracking_link": ".mstar/sdd/2026-07-21-v1.129-p0-profile-create-reliability/review/qc-consolidated.md",
+        "note": "YAGNI for V1.129. If dogfooders report confusion after editing the name field post-failure, revisit with TanStack v5 context capture-on-submit."
+      },
+      {
+        "id": "R-V1129P0-QC1-M-004",
+        "severity": "nit",
+        "title": "Classifier branch ordering differs from spec literal (TypeError collapsed into network default)",
+        "lifecycle": "open",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "post-V1.129",
+        "tracking_link": ".mstar/sdd/2026-07-21-v1.129-p0-profile-create-reliability/review/qc-consolidated.md",
+        "note": "Observable output matches spec for every documented fetch-throw shape. Spec literal ordering can be reconciled in a doc-only update."
+      },
+      {
+        "id": "R-V1129P0-QC2-M-001",
+        "severity": "low",
+        "title": "No XSS mitigation for display_name rendering",
+        "lifecycle": "open",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.129",
+        "tracking_link": ".mstar/sdd/2026-07-21-v1.129-p0-profile-create-reliability/review/qc-consolidated.md",
+        "note": "Local-only daemon, acceptable exposure. Revisit if exposure model changes (e.g., shared remote daemon)."
+      },
+      {
+        "id": "R-V1129P0-QC3-M-002",
+        "severity": "nit",
+        "title": "http_fallback Content-Type check runs on every 2xx response",
+        "lifecycle": "open",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "post-V1.129",
+        "tracking_link": ".mstar/sdd/2026-07-21-v1.129-p0-profile-create-reliability/review/qc-consolidated.md",
+        "note": "Sub-microsecond cost. Runs before !response.ok check; not on the success JSON-parse path."
       }
     ]
   }

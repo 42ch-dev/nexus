@@ -8,7 +8,7 @@
  * → thrown NexusClientError chain.
  */
 import { http, HttpResponse } from 'msw';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { BrowserClient, NexusClientError } from '@/lib/nexus';
 import { useHandlers } from '@/test/msw-server';
@@ -492,5 +492,128 @@ describe('BrowserClient compute module + KeyBlock state wiring (V1.114 P2)', () 
     expect(res.state).toEqual({ hp: 42, buffs: ['shield'] });
     expect(res.is_computable).toBe(true);
     expect(res.version).toBe(7);
+  });
+});
+
+// ── Transport classification matrix (V1.129 P0 T3) ─────────────────────────
+//
+// The classifier is a pure function of `(baseUrl, cause)` plus the
+// `http_fallback` response detector. Each kind is exercised once with the
+// minimal signal shape so a regression in the classifier ordering surfaces
+// immediately. See `.mstar/iterations/v1.129/specs/profile-create-reliability.md`
+// § Classification algorithm for the locked ordering.
+describe('BrowserClient transport classification (V1.129 P0)', () => {
+  /** Build a client with a fetchImpl stub that rejects with the given cause. */
+  function clientThrowing(cause: unknown, baseUrl?: string): BrowserClient {
+    const fetchImpl = vi.fn<typeof globalThis.fetch>().mockRejectedValue(cause);
+    return new BrowserClient({
+      baseUrl,
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+  }
+
+  /** Build a client with a fetchImpl stub that resolves with the given Response. */
+  function clientResponding(response: Response, baseUrl?: string): BrowserClient {
+    const fetchImpl = vi.fn<typeof globalThis.fetch>().mockResolvedValue(response);
+    return new BrowserClient({
+      baseUrl,
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+  }
+
+  it('classifies `daemon_down` when baseUrl is empty (local mode, fetch throws)', async () => {
+    const client = clientThrowing(new TypeError('Failed to fetch'));
+    const err = await client.listWorks().catch((e) => e);
+    expect(err).toBeInstanceOf(NexusClientError);
+    expect(err.code).toBe('transport_unreachable');
+    expect(err.kind).toBe('daemon_down');
+    // Backwards-compat: the legacy multi-cause `message` is still attached so
+    // existing toast tests keep passing during the P1 sweep.
+    expect(err.message).toContain('nexus42 daemon start');
+  });
+
+  it('classifies `network` for a TypeError "Failed to fetch" with a remote baseUrl', async () => {
+    const client = clientThrowing(
+      new TypeError('Failed to fetch'),
+      'https://remote.example:8420',
+    );
+    const err = await client.listWorks().catch((e) => e);
+    expect(err.kind).toBe('network');
+    expect(err.code).toBe('transport_unreachable');
+  });
+
+  it('classifies `timeout` for an AbortError (explicit user / signal abort)', async () => {
+    const client = clientThrowing(
+      new DOMException('The user aborted a request', 'AbortError'),
+      'https://remote.example:8420',
+    );
+    const err = await client.listWorks().catch((e) => e);
+    expect(err.kind).toBe('timeout');
+  });
+
+  it('classifies `tls` when the cause message carries a TLS signal', async () => {
+    // Browsers do not surface the real cert failure to JS — the classifier
+    // matches common signal substrings best-effort.
+    const client = clientThrowing(
+      new TypeError('ERR_CERT_AUTHORITY_INVALID'),
+      'https://remote.example:8420',
+    );
+    const err = await client.listWorks().catch((e) => e);
+    expect(err.kind).toBe('tls');
+  });
+
+  it('falls open to `network` when the throw carries no TLS signal (TLS fail-open)', async () => {
+    // Locked by spec: when in doubt, `network` — do not over-claim cert rejection.
+    const client = clientThrowing(
+      new TypeError('Failed to fetch'),
+      'https://remote.example:8420',
+    );
+    const err = await client.listWorks().catch((e) => e);
+    expect(err.kind).toBe('network');
+  });
+
+  it('classifies `http_fallback` when the daemon returns 200 + text/html (release SPA fallback)', async () => {
+    // Release-mode unrouted paths fall through to the embedded SPA shell, which
+    // serves text/html with HTTP 200. The classifier must intercept this BEFORE
+    // `response.json()` would throw a raw SyntaxError (legacy V1.128 behavior).
+    const response = new Response('<!doctype html><html>…</html>', {
+      status: 200,
+      headers: { 'content-type': 'text/html; charset=utf-8' },
+    });
+    const client = clientResponding(response);
+    const err = await client.listWorks().catch((e) => e);
+    expect(err).toBeInstanceOf(NexusClientError);
+    expect(err.kind).toBe('http_fallback');
+    expect(err.code).toBe('transport_unreachable');
+    expect(err.details).toEqual({ status: 200, content_type: 'text/html; charset=utf-8' });
+  });
+
+  it('keeps the legacy transport_unreachable code for backwards-compat with toast routing', async () => {
+    // Existing tests across the suite assert on `code === 'transport_unreachable'`.
+    // The new `kind` field layers on top — it does not rename the legacy code.
+    const client = clientThrowing(new TypeError('Failed to fetch'), 'https://remote.example:8420');
+    const err = await client.listWorks().catch((e) => e);
+    expect(err.code).toBe('transport_unreachable');
+    expect(err.kind).toBe('network');
+  });
+
+  it('still routes HTTP errors through fromBody (kind stays undefined for HTTP errors)', async () => {
+    // HTTP error responses are NOT transport-class errors — they have a real
+    // status and a parseable body. `kind` must remain undefined so HTTP-error
+    // UX (driven by `code`/`details`) does not get mis-routed into the dialog's
+    // transport-recovery CTA path.
+    useHandlers(
+      http.get('/v1/daemon/works', () =>
+        HttpResponse.json(
+          { success: false, error: { code: 'validation_failed', message: 'bad' } },
+          { status: 400 },
+        ),
+      ),
+    );
+    const client = new BrowserClient();
+    const err = await client.listWorks().catch((e) => e);
+    expect(err.status).toBe(400);
+    expect(err.code).toBe('validation_failed');
+    expect(err.kind).toBeUndefined();
   });
 });

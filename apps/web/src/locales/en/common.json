@@ -144,5 +144,10 @@
   },
   "dialog": {
     "close": "Close dialog"
+  },
+  "transportCta": {
+    "retry": "Retry",
+    "openConnectionSettings": "Open Connection Settings",
+    "useDesktopApp": "Use Desktop App"
   }
 }

@@ -100,7 +100,7 @@ import type {
   WorldKbPromoteCandidateResponse,
 } from '@42ch/nexus-contracts';
 
-import { NexusClientError } from './errors';
+import { NexusClientError, type TransportErrorKind } from './errors';
 import type { DaemonHealth, NexusClient } from './types';
 
 export interface BrowserClientOptions {
@@ -612,14 +612,35 @@ export class BrowserClient implements NexusClient {
     try {
       response = await this.fetchImpl(url, init);
     } catch (cause) {
-      // Network/transport failure (daemon down, CORS, DNS). The toast layer
-      // surfaces `message`; `code` distinguishes it from an HTTP error.
-      const message = this.baseUrl
-        ? 'Cannot reach the daemon at this address. This usually means the URL or port is wrong, the daemon is not running, or the browser blocked a self-signed certificate. For remote daemons using self-signed certificates, use the Nexus desktop app — it can trust the certificate and store it in the OS keychain.'
-        : 'Cannot reach the local daemon. Is `nexus42 daemon start` running?';
-      throw new NexusClientError(0, 'transport_unreachable', message, {
-        cause: String(cause),
-      });
+      // Network/transport failure (daemon down, CORS, DNS, TLS, abort). The
+      // legacy `transport_unreachable` `code` stays for backwards-compat with
+      // tests and toast routing; `kind` carries the V1.129 P0 sub-classification
+      // the dialog branches on. Classifier ordering is locked by the spec
+      // (profile-create-reliability.md § Interfaces).
+      throw new NexusClientError(
+        0,
+        'transport_unreachable',
+        BrowserClient.transportMessage(this.baseUrl),
+        { cause: String(cause) },
+        BrowserClient.classifyTransportError(this.baseUrl, cause),
+      );
+    }
+
+    // `http_fallback` (V1.129 P0): the daemon returned `text/html` with HTTP
+    // 200 — the release-mode SPA fallback for an unrouted path. Treat this as
+    // transport-class and re-classify before `!response.ok` would accept it as
+    // a successful empty body. The body is HTML, so `response.json()` would
+    // throw an unhandled SyntaxError; intercepting here keeps the failure
+    // inside the NexusClientError model.
+    const contentType = response.headers.get('content-type') ?? '';
+    if (response.status === 200 && contentType.includes('text/html')) {
+      throw new NexusClientError(
+        0,
+        'transport_unreachable',
+        BrowserClient.transportMessage(this.baseUrl),
+        { status: response.status, content_type: contentType },
+        'http_fallback',
+      );
     }
 
     if (!response.ok) {
@@ -637,5 +658,70 @@ export class BrowserClient implements NexusClient {
       return undefined as T;
     }
     return (await response.json()) as T;
+  }
+
+  // ── Transport classification helpers (V1.129 P0) ───────────────────────────
+
+  /**
+   * Legacy multi-cause transport message kept for toast-level backwards compat.
+   * The dialog no longer renders this string directly — it branches on
+   * `NexusClientError.kind` for honest per-kind copy + CTAs.
+   */
+  private static transportMessage(baseUrl: string): string {
+    return baseUrl
+      ? 'Cannot reach the daemon at this address. This usually means the URL or port is wrong, the daemon is not running, or the browser blocked a self-signed certificate. For remote daemons using self-signed certificates, use the Nexus desktop app — it can trust the certificate and store it in the OS keychain.'
+      : 'Cannot reach the local daemon. Is `nexus42 daemon start` running?';
+  }
+
+  /**
+   * Classify a `fetch` throw into a {@link TransportErrorKind}. Pure function
+   * of `(baseUrl, cause)` so the unit-test matrix can drive each kind without a
+   * running daemon.
+   *
+   * Locked ordering (profile-create-reliability.md § Classification algorithm):
+   * 1. `baseUrl === ''` → `daemon_down`
+   * 2. AbortError / AbortSignal timeout → `timeout`
+   * 3. Best-effort TLS substring match → `tls` (browser hides the precise reason)
+   * 4. anything else (TypeError 'Failed to fetch', unknown) → `network`
+   *
+   * `http_fallback` and `unknown` are not reachable from a `fetch` throw —
+   * `http_fallback` requires a successful response and is detected in
+   * `request()`; `unknown` is the response-path fallback when no classifier
+   * matches.
+   */
+  private static classifyTransportError(baseUrl: string, cause: unknown): TransportErrorKind {
+    // (1) Local-mode client with no remote URL configured. The fetch itself may
+    // still throw a TypeError in practice; the `baseUrl` signal is the honest
+    // classification regardless.
+    if (!baseUrl) {
+      return 'daemon_down';
+    }
+
+    // (2) Abort / timeout: explicit user abort or AbortSignal.timeout fires a
+    // DOMException with name 'AbortError'.
+    if (cause instanceof DOMException && cause.name === 'AbortError') {
+      return 'timeout';
+    }
+
+    // (3) TLS best-effort: browsers do not expose the precise cert failure to
+    // JS. Match common signal substrings; if none are present, fall through to
+    // `network` rather than over-claiming cert rejection (spec TLS fail-open).
+    const message =
+      cause instanceof Error
+        ? `${cause.name} ${cause.message}`.toLowerCase()
+        : String(cause ?? '').toLowerCase();
+    const TLS_SIGNALS = [
+      'err_cert_authority_invalid',
+      'err_cert',
+      'ssl',
+      'tls',
+      'certificate',
+    ];
+    if (TLS_SIGNALS.some((signal) => message.includes(signal))) {
+      return 'tls';
+    }
+
+    // (4) Default: TypeError 'Failed to fetch' or anything we cannot classify.
+    return 'network';
   }
 }

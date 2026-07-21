@@ -80,7 +80,34 @@
     "creating": "Creating…",
     "switchedTitle": "Profile switched",
     "switchedDescription": "Restart or reload the app so the daemon uses the new workspace path.",
-    "switchBrowserOnly": "Switching Profiles is available in the Nexus desktop app only."
+    "switchBrowserOnly": "Switching Profiles is available in the Nexus desktop app only.",
+    "createError": {
+      "regionAria": "Create profile error",
+      "daemon_down": {
+        "headline": "Local daemon is not running",
+        "body": "Start it with `nexus42 daemon start`, then try again."
+      },
+      "network": {
+        "headline": "Could not connect to the daemon at this address",
+        "body": "Check the URL and port in Connection settings, or confirm the network can reach that host."
+      },
+      "tls": {
+        "headline": "This browser rejected the daemon certificate",
+        "body": "The web app cannot trust a remote self-signed certificate. The Nexus desktop app can store trust in the OS keychain."
+      },
+      "http_fallback": {
+        "headline": "The app could not complete this request",
+        "body": "The daemon answered with a page instead of an API response. Retry once; if it keeps happening, check the daemon status."
+      },
+      "timeout": {
+        "headline": "The daemon took too long to respond",
+        "body": "The connection stalled or the daemon is busy. Retry in a moment."
+      },
+      "unknown": {
+        "headline": "Could not reach the daemon",
+        "body": "Something went wrong before a response arrived. Retry, or check Connection settings if it continues."
+      }
+    }
   },
   "health": {
     "checking": "Checking daemon…",
