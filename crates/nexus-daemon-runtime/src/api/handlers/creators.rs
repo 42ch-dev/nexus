@@ -8,6 +8,7 @@
 use crate::api::errors::NexusApiError;
 use crate::workspace::WorkspaceState;
 use axum::extract::{Path, Query, State};
+use axum::http::StatusCode;
 use axum::Json;
 use nexus_contracts::PaginationInfo;
 use nexus_home_layout::validate_creator_id_safe;
@@ -65,6 +66,16 @@ pub struct SetActiveCreatorRequest {
 pub struct PatchCreatorRequest {
     /// New display name for the creator.
     pub display_name: Option<String>,
+}
+
+/// `POST /v1/daemon/creators` request body (V1.129 P0).
+///
+/// `display_name` is the only author-supplied field; the daemon generates the
+/// `creator_id`, seeds the SQL row, and returns a `CreatorDetail` per the
+/// architect lock (spec § Interfaces — `POST /v1/daemon/creators`).
+#[derive(Debug, Deserialize)]
+pub struct CreateCreatorRequest {
+    pub display_name: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -403,6 +414,102 @@ pub async fn list(
             next_cursor,
         },
     }))
+}
+
+/// `POST /v1/daemon/creators` — create a new local creator profile (V1.129 P0).
+///
+/// Generates a `ctr_local…` id (matching the `CreatorId` pattern), validates the
+/// `display_name`, lazily attaches the creator pool when `active_creator_id` is
+/// present in config but the pool is not yet open (mirrors `patch_creator`'s
+/// V1.119 pool-attach pattern at `creators.rs:533-541`), INSERTs the row, and
+/// returns a `CreatorDetail`-shaped 201 response.
+///
+/// Tier-1 (API key) only — do not gate on active creator (architect lock #2).
+/// The handler reuses the canonical `NexusApiError` envelope for all failures.
+pub async fn create_creator(
+    State(state): State<WorkspaceState>,
+    Json(req): Json<CreateCreatorRequest>,
+) -> Result<(StatusCode, Json<CreatorDetail>), NexusApiError> {
+    info!("Handling create creator request");
+
+    // Validate display_name: non-empty (after trim) and ≤ 256 chars (by char count,
+    // mirroring `patch_creator`'s rule so CJK / emoji are counted once).
+    let display_name = req.display_name.trim().to_string();
+    if display_name.is_empty() {
+        return Err(NexusApiError::InvalidInput {
+            field: "display_name".to_string(),
+            reason: "display_name cannot be empty".to_string(),
+        });
+    }
+    if display_name.chars().count() > 256 {
+        return Err(NexusApiError::InvalidInput {
+            field: "display_name".to_string(),
+            reason: "display_name must be 256 characters or fewer".to_string(),
+        });
+    }
+
+    // Generate a creator id matching the `^ctr_[a-zA-Z0-9]+$` pattern used by
+    // `nexus-creator::local_identity::generate_local_id`. Inline copy here so
+    // the daemon-runtime crate does not depend on a private helper that may
+    // change shape; the pattern itself is the public contract.
+    let random: String = uuid::Uuid::new_v4()
+        .to_string()
+        .replace('-', "")
+        .chars()
+        .take(12)
+        .collect();
+    let creator_id = format!("ctr_local{random}");
+    // Defensive: the generated id always matches the safe-id check, but run it
+    // anyway so future id-shape changes cannot bypass the path-traversal guard.
+    validate_creator_id_safe(&creator_id).map_err(|reason| NexusApiError::Internal {
+        code: "CREATOR_ID_GENERATION_ERROR".into(),
+        message: reason,
+    })?;
+
+    // Lazily attach the creator pool when `active_creator_id` is present in
+    // config but the pool is not yet open (mirrors `patch_creator` V1.119 fix).
+    // When no creator is active in config at all, the pool may be absent — we
+    // still attempt the insert and surface a descriptive `Internal` if the
+    // schema is missing (architect lock #3).
+    if state.pool().is_none() && read_active_creator_id(state.nexus_home()).is_some() {
+        state
+            .ensure_creator_pool()
+            .await
+            .map_err(|e| NexusApiError::Internal {
+                code: "DATABASE_ERROR".into(),
+                message: e.to_string(),
+            })?;
+    }
+
+    let pool = state.pool_or_uninit()?;
+    let now = chrono::Utc::now().to_rfc3339();
+    sqlx::query!(
+        "INSERT INTO creators (creator_id, display_name, status, cached_at, data) VALUES (?, ?, 'active', ?, '{}')",
+        creator_id,
+        display_name,
+        now
+    )
+    .execute(pool)
+    .await
+    .map_err(|e| NexusApiError::Internal {
+        code: "DATABASE_ERROR".into(),
+        message: e.to_string(),
+    })?;
+
+    debug!(creator_id = %creator_id, display_name = %display_name, "Creator created");
+    info!(creator_id = %creator_id, "Create creator completed");
+
+    Ok((
+        StatusCode::CREATED,
+        Json(CreatorDetail {
+            creator_id,
+            handle: None,
+            display_name: Some(display_name),
+            has_api_key: false,
+            has_cached_token: false,
+            is_active: false,
+        }),
+    ))
 }
 
 /// `GET /v1/daemon/creators/{creator_id}` — creator status/detail

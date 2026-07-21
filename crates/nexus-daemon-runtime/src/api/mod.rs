@@ -566,7 +566,10 @@ pub fn create_router(state: WorkspaceState, auth_config: DaemonApiConfig) -> Rou
         .merge(workspace_routes())
         .merge(creator_routes())
         .merge(preset_routes())
-        .route("/v1/daemon/creators", get(handlers::creators::list))
+        .route(
+            "/v1/daemon/creators",
+            get(handlers::creators::list).post(handlers::creators::create_creator),
+        )
         .route(
             "/v1/daemon/agent-host/internal/tool-executions",
             post(handlers::acp::tool_execute),
