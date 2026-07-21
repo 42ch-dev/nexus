@@ -318,6 +318,10 @@ export function usePatchWork() {
  * and lineage_from_work_id). The mutation invalidates the works list on
  * success; transport errors route through the shared error-toast classifier
  * (which surfaces `<TransportErrorBlock>` copy for known kinds).
+ *
+ * No timeline.invalidation here: `TimelineOverviewResponse.worlds` is World-
+ * centric (per-World era/event counts) and carries no Work rows, so deleting a
+ * Work cannot stale the timeline overview cache. (Checked V1.129 P5.)
  */
 export function useDeleteWork() {
   const client = useNexusClient();
@@ -348,6 +352,15 @@ export function useDeleteWorld() {
     mutationFn: (worldId: string) => client.deleteWorld(worldId),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: queryKeys.memory.worlds() });
+      // V1.129 P5 (Greptile P1): the Global Timeline overview is World-centric
+      // — `TimelineOverviewResponse.worlds` lists each World with its era/event
+      // counts, so a deleted World must be evicted from the overview cache or
+      // it keeps rendering until the next manual refetch. Invalidating
+      // `timeline.all` covers every cached cursor page (overview is the only
+      // timeline sub-key today, and the `overview(cursor)` key is parameterized
+      // by cursor, so a single `overview()` invalidation would miss non-first
+      // pages).
+      void qc.invalidateQueries({ queryKey: queryKeys.timeline.all });
     },
     onError: (error) => errorToast(error, 'error.couldNotDeleteWorld'),
   });

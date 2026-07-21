@@ -137,13 +137,27 @@ pub async fn delete_world(
     //    (architect lock). The creator_id scope is defensive; in practice the
     //    local-first model guarantees single-creator state.
     //
+    // All three steps run inside ONE transaction so a later failure (e.g. the
+    // parent World DELETE) rolls back the manual cleanup. Without this, a
+    // successful kb_extract_jobs DELETE or works UPDATE followed by a failed
+    // World DELETE would leave orphaned state committed — a caller retry would
+    // then find the World still present but with its job queue already drained
+    // and Works already detached. (V1.129 P5 — Greptile P1; also closes the
+    // deferred QC3-W-001 / QC2-M-001 from P2's QC tri.)
+    //
     // SAFETY: DELETE / UPDATE match kb_extract_jobs DDL in 20260527 and works
     // DDL in 20260604. Runtime sqlx::query keeps the world-removal step
     // cohesive in one handler rather than scattering fragments across
-    // .sqlx/ entries.
+    // .sqlx/ entries. On any early `return Err(...)` below the `tx` is
+    // dropped, which sqlx turns into an automatic ROLLBACK.
+    let mut tx = pool.begin().await.map_err(|e| NexusApiError::Internal {
+        code: "DATABASE_ERROR".to_string(),
+        message: format!("delete_world: begin tx failed: {e}"),
+    })?;
+
     if let Err(e) = sqlx::query("DELETE FROM kb_extract_jobs WHERE world_id = ?")
         .bind(&world_id)
-        .execute(pool)
+        .execute(&mut *tx)
         .await
     {
         return Err(NexusApiError::Internal {
@@ -159,7 +173,7 @@ pub async fn delete_world(
     .bind(chrono::Utc::now().to_rfc3339())
     .bind(&world_id)
     .bind(&creator_id)
-    .execute(pool)
+    .execute(&mut *tx)
     .await
     {
         return Err(NexusApiError::Internal {
@@ -176,7 +190,7 @@ pub async fn delete_world(
     )
     .bind(&world_id)
     .bind(&creator_id)
-    .execute(pool)
+    .execute(&mut *tx)
     .await
     {
         Ok(res) => res.rows_affected(),
@@ -189,11 +203,18 @@ pub async fn delete_world(
     };
 
     if deleted == 0 {
-        // Concurrent delete raced; treat as 404 — row is gone.
+        // Concurrent delete raced; treat as 404 — row is gone. The tx rolls
+        // back on Drop, discarding the no-op manual cleanup above (each step
+        // matched zero rows since the other caller already cascaded them).
         return Err(NexusApiError::NotFound(format!(
             "World {world_id} not found"
         )));
     }
+
+    tx.commit().await.map_err(|e| NexusApiError::Internal {
+        code: "DATABASE_ERROR".to_string(),
+        message: format!("delete_world: commit failed: {e}"),
+    })?;
 
     tracing::info!(
         target: "worlds.delete",
