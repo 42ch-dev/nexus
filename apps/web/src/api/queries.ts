@@ -23,6 +23,7 @@ import type {
   ChapterSummary,
   CountPendingReviewsResponse,
   CreateWorkRequest,
+  CreateWorldRequest,
   FindingDetailResponse,
   ListCapabilitiesQuery,
   ListChaptersQuery,
@@ -292,6 +293,19 @@ export function useCreateWork() {
       void qc.invalidateQueries({ queryKey: queryKeys.works.lists() });
     },
     onError: (error) => errorToast(error, 'error.couldNotCreateWork'),
+  });
+}
+
+export function useCreateWorld() {
+  const client = useNexusClient();
+  const qc = useQueryClient();
+  const errorToast = useErrorToast();
+  return useMutation({
+    mutationFn: (request: CreateWorldRequest) => client.createWorld(request),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: queryKeys.memory.worlds() });
+    },
+    onError: (error) => errorToast(error, 'error.couldNotCreateWorld'),
   });
 }
 

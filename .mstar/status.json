@@ -52,7 +52,7 @@
     },
     {
       "plan_id": "2026-07-22-v1.130-p1-shell-frame",
-      "status": "Todo",
+      "status": "Done",
       "type": "feature",
       "metadata": {
         "primary_spec": ".mstar/iterations/v1.130/specs/shell-frame-dual-pane.md",
@@ -308,6 +308,38 @@
         "owner": "@frontend-dev",
         "target": "post-V1.130",
         "note": "Dark theme intentionally uses cyan-derived alphas for warmth on dark surfaces. Pre-existing design decision, not introduced by P4."
+      }
+    ],
+    "2026-07-22-v1.130-p1-shell-frame": [
+      {
+        "id": "R-V1130P1-QC1-C-002",
+        "severity": "low",
+        "title": "Default-profile auto-select simplified (no pagination, no desktop switchActiveCreator IPC)",
+        "lifecycle": "open",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "post-V1.130",
+        "note": "Current implementation reads first page only. Full spec compliance needs pagination loop + desktop active-creator switch IPC."
+      },
+      {
+        "id": "R-V1130P1-QC1-W-003",
+        "severity": "low",
+        "title": "SettingsModalHost created but not wired into header/titlebar",
+        "lifecycle": "open",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.130",
+        "note": "Component exists at settings-modal-host.tsx but header gear still links to /settings. Wire in polish pass."
+      },
+      {
+        "id": "R-V1130P1-QC1-S-001",
+        "severity": "nit",
+        "title": "Studio fixtures (T1) deferred",
+        "lifecycle": "open",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.130",
+        "note": "Studio dual-pane/titlebar/modal fixtures not created. Add in polish pass."
       }
     ],
     "2026-07-12-v1.112-i18n-ui-migration": [],

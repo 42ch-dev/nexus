@@ -163,6 +163,8 @@ export * from './daemon-api/workspace/ListWorkspacesResponse';
 export * from './daemon-api/workspace/SetActiveWorkspaceRequest';
 export * from './daemon-api/workspace/SetActiveWorkspaceResponse';
 export * from './daemon-api/workspace/WorkspaceSummary';
+export * from './daemon-api/worlds/CreateWorldRequest';
+export * from './daemon-api/worlds/CreateWorldResponse';
 export * from './domain/Creator';
 export * from './domain/ForkBranch';
 export * from './domain/KeyBlock';
@@ -369,6 +371,8 @@ export const SCHEMA_VERSIONS: Record<string, number> = {
   SetActiveWorkspaceRequest: 1,
   SetActiveWorkspaceResponse: 1,
   WorkspaceSummary: 1,
+  CreateWorldRequest: 1,
+  CreateWorldResponse: 1,
   Creator: 1,
   ForkBranch: 1,
   KeyBlock: 1,
