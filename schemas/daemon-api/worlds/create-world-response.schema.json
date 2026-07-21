@@ -1,0 +1,21 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/daemon-api/worlds/create-world-response.schema.json",
+  "schema_version": 1,
+  "title": "Nexus CreateWorldResponse",
+  "description": "Response body for POST /v1/daemon/worlds (201 Created).",
+  "type": "object",
+  "required": ["world_id", "status"],
+  "properties": {
+    "world_id": {
+      "type": "string",
+      "description": "The newly created World identifier."
+    },
+    "status": {
+      "type": "string",
+      "description": "World lifecycle status (default: active).",
+      "enum": ["active", "archived"]
+    }
+  },
+  "additionalProperties": false
+}
