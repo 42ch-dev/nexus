@@ -314,6 +314,11 @@ impl SidecarManager {
                     return Ok(());
                 }
             } else if port_state == PortState::Occupied {
+                // RCA: stop/start race false positive - after stop() kills the
+                // owned child, the dying socket can still report Occupied here
+                // (no port-free wait between stop and start). This returns a
+                // false "port already in use" for our own just-killed process.
+                // See t1-rca-matrix.md Scenario A, finding 2.
                 // The port accepted a TCP connect but does not look like our
                 // daemon. Treat it as a conflict rather than spawning a second
                 // process that will lose the port race.
@@ -440,6 +445,9 @@ impl SidecarManager {
     pub async fn stop(&self) -> Result<(), String> {
         let child = {
             let mut inner = self.0.lock().await;
+            // RCA: attached-restart no-op — !owned returns Ok(()) here, so the
+            // web-composed stopDaemon()+startDaemon() does nothing for attached
+            // daemons. See t1-rca-matrix.md Scenario B.
             if !inner.owned {
                 return Ok(());
             }
@@ -501,6 +509,10 @@ impl SidecarManager {
             return self.stop().await;
         }
         let port = self.port().await;
+        // RCA: foreign-port fail-closed gap - listener_pid returns ANY lsof
+        // PID without verifying it is a Nexus daemon. A foreign process would
+        // be killed. T2 must add health + PID re-check before signal.
+        // See t1-rca-matrix.md Scenario C, finding 3.
         if let Some(pid) = listener_pid(port) {
             stop_external_daemon(port, pid).await;
         }
@@ -590,6 +602,11 @@ impl SidecarManager {
             let _ = self.start(app).await;
         } else {
             let mut inner = self.0.lock().await;
+            // RCA: monitor race - this else branch reads *current* shared
+            // state and clobbers Starting->Stopped, racing a concurrent user
+            // restart's in-flight start. T2 must add a restart-in-progress
+            // flag so the old monitor does not act during user restart.
+            // See t1-rca-matrix.md Scenario D, finding 4.
             if inner.state == DaemonState::Running || inner.state == DaemonState::Starting {
                 inner.state = DaemonState::Stopped;
             }
