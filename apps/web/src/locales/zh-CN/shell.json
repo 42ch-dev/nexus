@@ -123,6 +123,9 @@
       "offline": "守护进程离线 — 前往连接设置"
     }
   },
+  "settings": {
+    "title": "设置"
+  },
   "scaffoldPreset": {
     "title": "生成预设模板",
     "description": "从名称创建一个新的用户预设。",
