@@ -70,7 +70,7 @@
     "didNotStartDescription": "Nexus 无法启动其后台服务。请检查日志或尝试重启。"
   },
   "profile": {
-    "sectionLabel": "配置文件",
+    "sectionLabel": "工作区",
     "addButtonLabel": "添加创作者",
     "addDialogTitle": "添加创作者",
     "addDialogDescription": "创建一个新的本地创作者配置文件。",

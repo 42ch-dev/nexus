@@ -5,7 +5,6 @@ import {
   BookOpen,
   BrainCircuit,
   CalendarClock,
-  Cpu,
   Globe,
   Layers,
   ListChecks,
@@ -212,12 +211,7 @@ export function Sidebar() {
           { to: '/schedule', label: t('nav.schedule'), icon: CalendarClock },
         ],
       },
-      {
-        id: 'compute',
-        label: t('nav.compute'),
-        items: [{ to: '/modules', label: t('nav.modules'), icon: Cpu }],
-      },
-    ],
+      ],
     [t],
   );
 

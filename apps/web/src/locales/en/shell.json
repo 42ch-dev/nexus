@@ -70,7 +70,7 @@
     "didNotStartDescription": "Nexus could not start its background service. Check the logs or try restarting."
   },
   "profile": {
-    "sectionLabel": "Profiles",
+    "sectionLabel": "Workspace",
     "addButtonLabel": "Add creator",
     "addDialogTitle": "Add Creator",
     "addDialogDescription": "Create a new local creator profile.",
