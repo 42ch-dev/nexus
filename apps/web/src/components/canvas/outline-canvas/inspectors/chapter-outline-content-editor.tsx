@@ -18,6 +18,7 @@
  * behavior so authors do not lose rich-text capability in the pivot.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   Bold,
   Heading1,
@@ -79,6 +80,7 @@ export function ChapterOutlineContentEditor({
   isConflicting,
   contentVersion,
 }: ChapterOutlineContentEditorProps) {
+  const { t } = useTranslation('canvas');
   const volumeQuery = useMemo(
     () => (volume !== undefined && volume > 0 ? { volume } : undefined),
     [volume],
@@ -179,7 +181,7 @@ export function ChapterOutlineContentEditor({
   if (outline.isLoading) {
     return (
       <div className="rounded-card border border-gray-alpha-400 bg-background-100 p-4 text-copy-14 text-gray-700">
-        Loading outline content…
+        {t('chapterOutlineContentEditor.loading')}
       </div>
     );
   }
@@ -187,7 +189,7 @@ export function ChapterOutlineContentEditor({
   if (outline.isError) {
     return (
       <div className="rounded-card border border-amber-700/30 bg-[color-mix(in_srgb,var(--color-amber-700)_8%,transparent)] p-4 text-copy-14 text-amber-1000">
-        Could not load this chapter&rsquo;s outline content. Saving is disabled until the read succeeds.
+        {t('chapterOutlineContentEditor.loadError')}
       </div>
     );
   }
@@ -195,7 +197,9 @@ export function ChapterOutlineContentEditor({
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between">
-        <span className="text-copy-13 font-medium text-gray-700">Outline content</span>
+        <span className="text-copy-13 font-medium text-gray-700">
+          {t('chapterOutlineContentEditor.outlineContentLabel')}
+        </span>
         <SaveStateIndicator state={saveState} />
       </div>
       <div className="overflow-hidden rounded-card border border-gray-alpha-400 bg-background-100 focus-within:border-blue-700 focus-within:ring-2 focus-within:ring-blue-700/20">
@@ -203,7 +207,9 @@ export function ChapterOutlineContentEditor({
         <div
           className="min-h-[240px] p-4"
           role="region"
-          aria-label={`Chapter ${chapterNumber} outline content editor`}
+          aria-label={t('chapterOutlineContentEditor.editorAriaLabel', {
+            chapter: chapterNumber,
+          })}
         >
           <EditorContent
             editor={editor}
@@ -218,7 +224,7 @@ export function ChapterOutlineContentEditor({
             onClick={handleReset}
             disabled={disabled || saveState === 'clean' || saveState === 'saving'}
           >
-            <RotateCcw className="h-4 w-4" aria-hidden /> Reset
+            <RotateCcw className="h-4 w-4" aria-hidden /> {t('chapterOutlineContentEditor.reset')}
           </Button>
           <Button
             type="button"
@@ -228,7 +234,7 @@ export function ChapterOutlineContentEditor({
             disabled={disabled || saveState === 'saving' || saveState !== 'dirty'}
           >
             {saveState === 'saving' && <Loader2 className="h-4 w-4 animate-spin" aria-hidden />}
-            Save content
+            {t('chapterOutlineContentEditor.saveContent')}
           </Button>
         </div>
       </div>
@@ -241,25 +247,29 @@ function getMarkdown(editor: Editor): string {
 }
 
 function SaveStateIndicator({ state }: { state: SaveState }) {
-  const config: Record<SaveState, { dot: string; label: string }> = {
-    clean: { dot: 'bg-green-700', label: 'Saved' },
-    dirty: { dot: 'bg-amber-700', label: 'Unsaved changes' },
-    saving: { dot: 'bg-amber-700', label: 'Saving…' },
+  const { t } = useTranslation('canvas');
+  const config: Record<SaveState, { dot: string; labelKey: 'clean' | 'dirty' | 'saving' }> = {
+    clean: { dot: 'bg-green-700', labelKey: 'clean' },
+    dirty: { dot: 'bg-amber-700', labelKey: 'dirty' },
+    saving: { dot: 'bg-amber-700', labelKey: 'saving' },
   };
-  const { dot, label } = config[state];
+  const { dot, labelKey } = config[state];
   return (
     <div
       className="flex items-center gap-1.5 text-label-12 text-gray-900"
       aria-live="polite"
-      aria-label="Outline content save state"
+      aria-label={t('chapterOutlineContentEditor.saveStateAriaLabel')}
     >
       <span className={`h-2 w-2 rounded-pill ${dot}`} aria-hidden />
-      <span className="max-w-[180px] truncate">{label}</span>
+      <span className="max-w-[180px] truncate">
+        {t(`chapterOutlineContentEditor.saveState.${labelKey}`)}
+      </span>
     </div>
   );
 }
 
 function EditorToolbar({ editor, disabled }: { editor: Editor | null; disabled: boolean }) {
+  const { t } = useTranslation('canvas');
   if (!editor) return null;
   const toggle = (name: string) => {
     if (disabled) return;
@@ -278,57 +288,80 @@ function EditorToolbar({ editor, disabled }: { editor: Editor | null; disabled: 
     name,
     active,
     children,
-    title,
+    titleKey,
   }: {
     name: string;
     active: boolean;
     children: React.ReactNode;
-    title: string;
-  }) => (
-    <button
-      type="button"
-      onClick={() => toggle(name)}
-      title={title}
-      aria-label={title}
-      aria-pressed={active}
-      disabled={disabled}
-      className={`flex h-8 w-8 items-center justify-center rounded-control text-gray-1000 transition-colors duration-state ease-standard disabled:cursor-not-allowed disabled:opacity-disabled ${
-        active ? 'bg-gray-alpha-200' : 'hover:bg-gray-alpha-100'
-      }`}
-    >
-      {children}
-    </button>
-  );
+    titleKey: 'heading1' | 'heading2' | 'heading3' | 'bold' | 'italic' | 'bulletList' | 'numberedList' | 'quote';
+  }) => {
+    const title = t(`chapterOutlineContentEditor.toolbar.${titleKey}`);
+    return (
+      <button
+        type="button"
+        onClick={() => toggle(name)}
+        title={title}
+        aria-label={title}
+        aria-pressed={active}
+        disabled={disabled}
+        className={`flex h-8 w-8 items-center justify-center rounded-control text-gray-1000 transition-colors duration-state ease-standard disabled:cursor-not-allowed disabled:opacity-disabled ${
+          active ? 'bg-gray-alpha-200' : 'hover:bg-gray-alpha-100'
+        }`}
+      >
+        {children}
+      </button>
+    );
+  };
   return (
     <div
       className="flex flex-wrap items-center gap-1 border-b border-gray-alpha-400 bg-background-200 px-2 py-1"
       role="toolbar"
-      aria-label="Outline content formatting"
+      aria-label={t('chapterOutlineContentEditor.formattingAriaLabel')}
     >
-      <ToolbarButton name="heading1" active={editor.isActive('heading', { level: 1 })} title="Heading 1">
+      <ToolbarButton
+        name="heading1"
+        active={editor.isActive('heading', { level: 1 })}
+        titleKey="heading1"
+      >
         <Heading1 className="h-4 w-4" aria-hidden />
       </ToolbarButton>
-      <ToolbarButton name="heading2" active={editor.isActive('heading', { level: 2 })} title="Heading 2">
+      <ToolbarButton
+        name="heading2"
+        active={editor.isActive('heading', { level: 2 })}
+        titleKey="heading2"
+      >
         <Heading2 className="h-4 w-4" aria-hidden />
       </ToolbarButton>
-      <ToolbarButton name="heading3" active={editor.isActive('heading', { level: 3 })} title="Heading 3">
+      <ToolbarButton
+        name="heading3"
+        active={editor.isActive('heading', { level: 3 })}
+        titleKey="heading3"
+      >
         <Heading3 className="h-4 w-4" aria-hidden />
       </ToolbarButton>
       <span className="mx-1 h-5 w-px bg-gray-alpha-400" aria-hidden />
-      <ToolbarButton name="bold" active={editor.isActive('bold')} title="Bold">
+      <ToolbarButton name="bold" active={editor.isActive('bold')} titleKey="bold">
         <Bold className="h-4 w-4" aria-hidden />
       </ToolbarButton>
-      <ToolbarButton name="italic" active={editor.isActive('italic')} title="Italic">
+      <ToolbarButton name="italic" active={editor.isActive('italic')} titleKey="italic">
         <Italic className="h-4 w-4" aria-hidden />
       </ToolbarButton>
       <span className="mx-1 h-5 w-px bg-gray-alpha-400" aria-hidden />
-      <ToolbarButton name="bulletList" active={editor.isActive('bulletList')} title="Bullet list">
+      <ToolbarButton
+        name="bulletList"
+        active={editor.isActive('bulletList')}
+        titleKey="bulletList"
+      >
         <List className="h-4 w-4" aria-hidden />
       </ToolbarButton>
-      <ToolbarButton name="orderedList" active={editor.isActive('orderedList')} title="Numbered list">
+      <ToolbarButton
+        name="orderedList"
+        active={editor.isActive('orderedList')}
+        titleKey="numberedList"
+      >
         <ListOrdered className="h-4 w-4" aria-hidden />
       </ToolbarButton>
-      <ToolbarButton name="blockquote" active={editor.isActive('blockquote')} title="Quote">
+      <ToolbarButton name="blockquote" active={editor.isActive('blockquote')} titleKey="quote">
         <Quote className="h-4 w-4" aria-hidden />
       </ToolbarButton>
     </div>
