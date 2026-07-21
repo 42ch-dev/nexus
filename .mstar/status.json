@@ -136,43 +136,50 @@
         "id": "R-V1126P0-QC-S-001",
         "severity": "nit",
         "title": "Two-source identity in handleOpenSubmenu",
-        "lifecycle": "open"
+        "lifecycle": "open",
+        "notes": "qc1 S-1; V1.127+ polish."
       },
       {
         "id": "R-V1126P0-QC-S-002",
         "severity": "nit",
         "title": "No popover resize listener",
-        "lifecycle": "open"
+        "lifecycle": "open",
+        "notes": "qc1 S-2 / qc3 S-7; V1.127+ polish."
       },
       {
         "id": "R-V1126P0-QC-S-003",
         "severity": "nit",
         "title": "Stale renamingItem state on pathname change",
-        "lifecycle": "open"
+        "lifecycle": "open",
+        "notes": "qc1 S-3 / qc3 S-9; qc2 verified row-scoped. Edge case in rapid route changes."
       },
       {
         "id": "R-V1126P0-QC-S-004",
         "severity": "nit",
         "title": "Outside-click vs dialog portal interaction",
-        "lifecycle": "open"
+        "lifecycle": "open",
+        "notes": "qc1 S-4; V1.127+ polish."
       },
       {
         "id": "R-V1126P0-QC-S-005",
         "severity": "nit",
         "title": "URL regex over typed workId field",
-        "lifecycle": "open"
+        "lifecycle": "open",
+        "notes": "qc1 S-5; V1.127+ polish."
       },
       {
         "id": "R-V1126P0-QC-S-006",
         "severity": "nit",
         "title": "Memo gap on NavItemLi",
-        "lifecycle": "open"
+        "lifecycle": "open",
+        "notes": "qc3 S-6; V1.127+ polish."
       },
       {
         "id": "R-V1126P0-QC-S-007",
         "severity": "nit",
         "title": "Unused anchorEl dep in outside-click effect",
-        "lifecycle": "open"
+        "lifecycle": "open",
+        "notes": "qc3 S-8 / QC2-S-001; V1.127+ polish."
       }
     ],
     "2026-07-20-v1.126-p1-canvas-directed-axis": [
@@ -180,31 +187,36 @@
         "id": "R-V1126P1-QC-S-001",
         "severity": "nit",
         "title": "Extraction alias exploration",
-        "lifecycle": "open"
+        "lifecycle": "open",
+        "notes": "qc1 S-1; V1.127+ polish."
       },
       {
         "id": "R-V1126P1-QC-S-002",
         "severity": "nit",
         "title": "Future layer extensibility",
-        "lifecycle": "open"
+        "lifecycle": "open",
+        "notes": "qc1 S-2; V1.127+ polish."
       },
       {
         "id": "R-V1126P1-QC-S-003",
         "severity": "nit",
         "title": "Runtime shape validation",
-        "lifecycle": "open"
+        "lifecycle": "open",
+        "notes": "qc2 S-1; V1.127+ polish."
       },
       {
         "id": "R-V1126P1-QC-S-004",
         "severity": "nit",
         "title": "Studio fixture tick positioning divergence doc",
-        "lifecycle": "open"
+        "lifecycle": "open",
+        "notes": "qc2 S-2; V1.127+ polish."
       },
       {
         "id": "R-V1126P1-QC-S-005",
         "severity": "nit",
         "title": "Scale-stress tests for spine geometry",
-        "lifecycle": "open"
+        "lifecycle": "open",
+        "notes": "qc3 S-1; V1.127+ polish; 1000-event stress test."
       }
     ],
     "2026-07-20-v1.126-p2-composite-timeline-endpoint": [
@@ -226,55 +238,64 @@
         "id": "R-V1126P2-QC-S-001",
         "severity": "nit",
         "title": "Schema cursor not in required array",
-        "lifecycle": "open"
+        "lifecycle": "open",
+        "notes": "qc1 S-1; spec drift; V1.127+ polish."
       },
       {
         "id": "R-V1126P2-QC-S-002",
         "severity": "nit",
         "title": "Aggregation bypasses NarrativeGateway",
-        "lifecycle": "open"
+        "lifecycle": "open",
+        "notes": "qc1 S-2; V1.127+ polish."
       },
       {
         "id": "R-V1126P2-QC-S-003",
         "severity": "nit",
         "title": "No explicit one-network-call assertion",
-        "lifecycle": "open"
+        "lifecycle": "open",
+        "notes": "qc1 S-5; V1.127+ polish."
       },
       {
         "id": "R-V1126P2-QC-S-004",
         "severity": "nit",
         "title": "No dedicated worlds-page.test.tsx",
-        "lifecycle": "open"
+        "lifecycle": "open",
+        "notes": "qc1 S-6; V1.127+ polish."
       },
       {
         "id": "R-V1126P2-QC-S-005",
         "severity": "nit",
         "title": "Cursor malformed 'tl:' prefix test",
-        "lifecycle": "open"
+        "lifecycle": "open",
+        "notes": "qc2 S-7; V1.127+ polish."
       },
       {
         "id": "R-V1126P2-QC-S-006",
         "severity": "nit",
         "title": "No cursor pagination UI for >20 worlds",
-        "lifecycle": "open"
+        "lifecycle": "open",
+        "notes": "qc3 S-1; V1.127+ polish."
       },
       {
         "id": "R-V1126P2-QC-S-007",
         "severity": "nit",
         "title": "No explicit N+1 assertion",
-        "lifecycle": "open"
+        "lifecycle": "open",
+        "notes": "qc3 S-2; V1.127+ polish."
       },
       {
         "id": "R-V1126P2-QC-S-008",
         "severity": "nit",
         "title": "WorldsPage overview fetch no error state",
-        "lifecycle": "open"
+        "lifecycle": "open",
+        "notes": "qc3 S-3; V1.127+ polish."
       },
       {
         "id": "R-V1126P2-QC-S-009",
         "severity": "nit",
         "title": "Dynamic SQL prevents prepared statement caching",
-        "lifecycle": "open"
+        "lifecycle": "open",
+        "notes": "qc3 S-4; V1.127+ polish."
       }
     ],
     "2026-07-20-v1.126-p3-status-compaction-residual-cleanup": [
@@ -282,25 +303,29 @@
         "id": "R-V1126P3-QC-W-001",
         "severity": "low",
         "title": "Pre-existing duplicate entries in legacy archive files (qc2 W-001); future hygiene with jq unique_by(.id)",
-        "lifecycle": "open"
+        "lifecycle": "open",
+        "note": "Run jq unique_by(.id) on archived/residuals/*.json in a future hygiene pass."
       },
       {
         "id": "R-V1126P3-QC-S-001",
         "severity": "nit",
         "title": "Wrapper shape drift in archived/residuals/",
-        "lifecycle": "open"
+        "lifecycle": "open",
+        "note": "Normalize archived row wrapper shape when next residual is archived."
       },
       {
         "id": "R-V1126P3-QC-S-002",
         "severity": "nit",
         "title": "plans-done.json Unicode normalization in legacy entries",
-        "lifecycle": "open"
+        "lifecycle": "open",
+        "note": "Normalize unicode in legacy plans-done.json entries during next closeout."
       },
       {
         "id": "R-V1126P3-QC-S-003",
         "severity": "nit",
         "title": "latest_ship staleness",
-        "lifecycle": "open"
+        "lifecycle": "open",
+        "note": "Refresh metadata.latest_ship on every ship; automate in CI."
       }
     ],
     "2026-07-20-v1.127-p0-control-room-author-loop-fixes": [
@@ -308,49 +333,57 @@
         "id": "R-V1127P0-QC-S-001",
         "severity": "nit",
         "title": "T1 EmptyCreateCard disabled-extension instead of inlined button (qc1 S-001 + qc3 S-002)",
-        "lifecycle": "open"
+        "lifecycle": "open",
+        "notes": "V1.128+ polish. apps/web/src/pages/worlds-page.tsx:99-114."
       },
       {
         "id": "R-V1127P0-QC-S-002",
         "severity": "nit",
         "title": "T2 has_more documentation drift — plan/spec/briefs/compass all reference has_more but schema has only cursor",
-        "lifecycle": "open"
+        "lifecycle": "open",
+        "notes": "V1.128+ polish. Spec/plan/compass docs need has_more references corrected to cursor-only."
       },
       {
         "id": "R-V1127P0-QC-S-003",
         "severity": "nit",
         "title": "T2 worlds-page Load More is activity-enrichment not list pagination — label may mislead",
-        "lifecycle": "open"
+        "lifecycle": "open",
+        "notes": "V1.128+ polish. apps/web/src/pages/worlds-page.tsx:194-209."
       },
       {
         "id": "R-V1127P0-QC-S-004",
         "severity": "nit",
         "title": "T2 queryKeys.timeline.overview vestigial cursor parameter (qc1 S-004 + qc3 S-003)",
-        "lifecycle": "open"
+        "lifecycle": "open",
+        "notes": "V1.128+ polish. apps/web/src/lib/nexus/query-keys.ts:128-131."
       },
       {
         "id": "R-V1127P0-QC-S-005",
         "severity": "nit",
         "title": "T2 flattenOverviewWorlds defeats useMemo in worlds-page.tsx",
-        "lifecycle": "open"
+        "lifecycle": "open",
+        "notes": "V1.128+ polish. Negligible at <=100 worlds. apps/web/src/pages/worlds-page.tsx:25,34."
       },
       {
         "id": "R-V1127P0-QC-S-006",
         "severity": "nit",
         "title": "T2 empty-string cursor vs null cursor contract clarification",
-        "lifecycle": "open"
+        "lifecycle": "open",
+        "notes": "V1.128+ polish. apps/web/src/api/queries.ts:232-233."
       },
       {
         "id": "R-V1127P0-QC-S-007",
         "severity": "nit",
         "title": "T3 banner may flash on initial-load to error transition",
-        "lifecycle": "open"
+        "lifecycle": "open",
+        "notes": "V1.128+ polish. Add !isInitialLoading guard if observed in dogfood. apps/web/src/pages/worlds-page.tsx:134-141."
       },
       {
         "id": "R-V1127P0-QC-S-008",
         "severity": "nit",
         "title": "T4/T5/T6 documentation comments — capture-phase trade-off, history-replaceState, residual lifecycle notes (qc2 S-004/S-005/S-006)",
-        "lifecycle": "open"
+        "lifecycle": "open",
+        "notes": "V1.128+ polish. selection-submenu.tsx:121-126 + sidebar.tsx:103-112 + archived residual file."
       }
     ],
     "2026-07-20-v1.127-p1-native-agent-provider-registration": [],
@@ -371,7 +404,8 @@
         "severity": "nit",
         "title": "Creator hub integration tests cover Work selection only (no World row)",
         "lifecycle": "open",
-        "tracking_link": ".mstar/plans/2026-07-20-v1.128-p2-creator-create-controller-shell.md#Review Gate Summary"
+        "tracking_link": ".mstar/plans/2026-07-20-v1.128-p2-creator-create-controller-shell.md#Review Gate Summary",
+        "note": "Add World row coverage to creator hub integration tests in a follow-up."
       }
     ],
     "2026-07-21-v1.129-p0-profile-create-reliability": [
