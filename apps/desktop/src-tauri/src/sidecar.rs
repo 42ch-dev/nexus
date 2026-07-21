@@ -605,8 +605,9 @@ impl SidecarManager {
             sleep(Duration::from_millis(100)).await;
         }
 
+        let result = self.start_with_budget(app, true).await;
         self.0.lock().await.restart_in_progress = false;
-        self.start_with_budget(app, true).await
+        result
     }
 
     /// Monitor task: waits for the owned sidecar to exit, then restarts it with
@@ -632,7 +633,10 @@ impl SidecarManager {
         let (should_restart, attempts) = {
             let inner = self.0.lock().await;
             (
-                inner.owned && !inner.stop_requested && inner.state == DaemonState::Running,
+                inner.owned
+                    && !inner.stop_requested
+                    && !inner.restart_in_progress
+                    && inner.state == DaemonState::Running,
                 inner.restart_count,
             )
         };
@@ -684,11 +688,11 @@ impl SidecarManager {
             let _ = self.start(app).await;
         } else {
             let mut inner = self.0.lock().await;
-            // RCA: monitor race - this else branch reads *current* shared
-            // state and clobbers Starting->Stopped, racing a concurrent user
-            // restart's in-flight start. T2 must add a restart-in-progress
-            // flag so the old monitor does not act during user restart.
-            // See t1-rca-matrix.md Scenario D, finding 4.
+            // If a user-initiated restart is in progress, do not clobber
+            // state — restart_daemon owns the lifecycle transition.
+            if inner.restart_in_progress {
+                return;
+            }
             if inner.state == DaemonState::Running || inner.state == DaemonState::Starting {
                 inner.state = DaemonState::Stopped;
             }
