@@ -1,7 +1,8 @@
 ---
 iteration_id: V1.130
 start_date: 2026-07-22
-status: locked
+end_date: 2026-07-22
+status: completed
 iteration_base_branch: main
 spec_integration_branch: iteration/v1.130
 target_branch: main
@@ -47,12 +48,12 @@ Spec points (user-value anchored):
 
 | Wave slot | plan_id | Name | Status | blocked_by | Wave |
 |-----------|---------|------|--------|------------|------|
-| W1a | `2026-07-22-v1.130-p0-daemon-restart` | Daemon Restart reliability | Todo | — | 1 |
-| W1b | `2026-07-22-v1.130-p4-vi-atmosphere` | VI Chronos lock | Todo | — | 1∥ |
-| W2 | `2026-07-22-v1.130-p1-shell-frame` | Shell frame | Todo | P4 tokens (hard); P0 soft | 2 |
-| W3a | `2026-07-22-v1.130-p2-creator-dual-state` | 创作 dual-state | Todo | P1 | 3∥ |
-| W3b | `2026-07-22-v1.130-p3-orch-load-repair` | 编排 load repair | Todo | P1 (hard for implementation) | 3∥ |
-| W4 | `2026-07-22-v1.130-p3-orch-settings-rehome` | Settings rehome | Todo | P1 + P3a load green | 4 |
+| W1a | `2026-07-22-v1.130-p0-daemon-restart` | Daemon Restart reliability | Done | — | 1 |
+| W1b | `2026-07-22-v1.130-p4-vi-atmosphere` | VI Chronos lock | Done | — | 1∥ |
+| W2 | `2026-07-22-v1.130-p1-shell-frame` | Shell frame | Done | P4 tokens (hard); P0 soft | 2 |
+| W3a | `2026-07-22-v1.130-p2-creator-dual-state` | 创作 dual-state | Done | P1 | 3∥ |
+| W3b | `2026-07-22-v1.130-p3-orch-load-repair` | 编排 load repair | Done | P1 (hard for implementation) | 3∥ |
+| W4 | `2026-07-22-v1.130-p3-orch-settings-rehome` | Settings rehome | Done | P1 + P3a load green | 4 |
 
 > **Slot vs nickname:** W3a/W3b are parallel Wave-3 *slots*. Plan nicknames P3a (load repair, slot W3b) and P3b (settings rehome, slot W4) come from the `p3-` plan_id prefix — do not conflate slot `3a` with plan `P3a`.
 
@@ -164,8 +165,8 @@ Six handoff items below were open entering Seat 2; all are now locked in Seat 2:
 
 ## Roadmap Position
 
-- **Current (V1.130):** Shell entry rewrite + Restart + orch load/Settings rehome + VI Chronos Must
-- **Next (V1.131):** Deepen Creator entity Agent Chat; Orchestrator 功能区 beyond menu; optional Umbra/Aurora VI tune — trigger: V1.130 ship + author demand. Owner: product-manager
+- **Current (V1.130):** Shell entry rewrite + Restart + orch load/Settings rehome + VI Chronos Must — **delivered**
+- **Next (V1.131):** Deepen Creator entity Agent Chat; Orchestrator 功能区 beyond menu; optional Umbra/Aurora VI tune; Create World slug collision suffixes; Settings modal full-page→modal adapter — trigger: V1.130 ship + author demand. Owner: product-manager
 - **Final goal:** Author opens app → Default profile → Create World or continue Work → edit timeline without transport/restart/office-navy friction
 
 ## Delivery Branch Policy
@@ -232,12 +233,26 @@ No `.mstar/knowledge/` additions. No architect lock weakening.
 
 ### Compound candidates
 
-_(fill at iteration-close)_
+- Serialized daemon restart pattern (single-flight mutex + PID verification + port-free wait) — reusable for future lifecycle operations
+- Design token re-hue methodology (find-replace across DESIGN.md → nexus-ui → design-tokens → Studio chain)
+- Orchestration engine-unavailable classification pattern (503 canonical → UnavailableState; non-engine errors remain distinct)
 
 ### What shipped
 
-_(fill at iteration-close)_
+- **P0:** Atomic/repeatable footer Restart (serialized `restart_daemon` with single-flight, PID verification, port-free wait, monitor race fix)
+- **P4:** VI Chronos lock (brand-deep-blue re-hued from `#1E3A5F` office navy to `#0D2B3E` petrol-teal; cyan `#25D1E0` preserved; token chain fully updated)
+- **P1:** Shell dual-pane IA (创作|编排 tabs moved to footer; Settings modal host ≥80vw; Default profile auto-select)
+- **P2:** Create World wire path (`POST /v1/daemon/worlds` schema + codegen + daemon route + client + UI dialog)
+- **P3a:** Orchestration load error classification verified (503 engine-unavailable → UnavailableState; regression test added)
+- **P3b:** Settings rehome (Compute removed from 编排; Profiles renamed Workspace/工作区)
 
 ### Follow-ups
 
-_(fill at iteration-close)_
+- Create World slug collision suffixes (deterministic `-2`, `-3`, …)
+- Settings modal full-page → modal compatibility adapter (deep links)
+- Default profile auto-select full spec compliance (pagination, desktop switchActiveCreator IPC)
+- Studio fixtures for dual-pane/titlebar/modal (Studio-first policy)
+- Entity Chat slot + action buttons (P2 T4)
+- Continue World → Create Work binding (P2 T3)
+- WCAG contrast table recomputation for Chronos values
+- Daemon-side RCA for orchestration load failures (requires running daemon)
