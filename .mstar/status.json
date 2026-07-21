@@ -28,7 +28,7 @@
     },
     {
       "plan_id": "2026-07-22-v1.130-p4-vi-atmosphere",
-      "status": "Todo",
+      "status": "Done",
       "type": "feature",
       "metadata": {
         "primary_spec": ".mstar/iterations/v1.130/specs/vi-atmosphere-chronos.md",
@@ -276,6 +276,38 @@
         "owner": "@fullstack-dev",
         "target": "post-V1.130",
         "note": "If health probe hangs, restart_in_progress stays true. Wrap with HEALTH_START_TIMEOUT + 1s deadline."
+      }
+    ],
+    "2026-07-22-v1.130-p4-vi-atmosphere": [
+      {
+        "id": "R-V1130P4-QC1-S-001",
+        "severity": "nit",
+        "title": "WCAG contrast table ratios not recomputed for new Chronos hex values",
+        "lifecycle": "open",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.130",
+        "note": "Contrast table in DESIGN.md still shows old ratios. New #0D2B3E is darker → ratios are equal or better. Recompute in polish pass."
+      },
+      {
+        "id": "R-V1130P4-QC1-S-002",
+        "severity": "nit",
+        "title": "Studio T1-T3 comparison fixture not created",
+        "lifecycle": "open",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.130",
+        "note": "Chronos is compile-time default; T2/T3 swatches deferred. Studio fixture can be added in polish."
+      },
+      {
+        "id": "R-V1130P4-QC2-S-001",
+        "severity": "nit",
+        "title": "Dark theme brand-deep-blue-alpha uses cyan RGB (intentional pre-existing design)",
+        "lifecycle": "open",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.130",
+        "note": "Dark theme intentionally uses cyan-derived alphas for warmth on dark surfaces. Pre-existing design decision, not introduced by P4."
       }
     ],
     "2026-07-12-v1.112-i18n-ui-migration": [],

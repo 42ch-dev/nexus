@@ -136,30 +136,7 @@ export function ShellSidebarChrome({
     >
       <div className="flex h-12 items-center px-3">{logo}</div>
 
-      {drillInItems ? null : (
-        <>
-          <div
-            className="grid grid-cols-2 gap-1 rounded-card bg-gray-alpha-100 p-1"
-            role="tablist"
-            aria-label={primaryNavigationAriaLabel}
-          >
-            <TabButton
-              id="creator"
-              label={creatorTabLabel}
-              active={activeTab === 'creator'}
-              onClick={() => onTabChange('creator')}
-            />
-            <TabButton
-              id="orchestrator"
-              label={orchestratorTabLabel}
-              active={activeTab === 'orchestrator'}
-              onClick={() => onTabChange('orchestrator')}
-            />
-          </div>
-
-          <div className="my-1 h-px bg-gray-alpha-400" role="separator" />
-        </>
-      )}
+      {/* V1.130: tab switch moved to footer (功能区 footer) */}
 
       {drillInItems ? (
         <ul className="flex flex-1 flex-col gap-0.5 overflow-auto py-1">
@@ -203,11 +180,32 @@ export function ShellSidebarChrome({
         ? renderSubmenu(submenuItem, closeSubmenu, submenuAnchor)
         : null}
 
-      {footer ? (
-        <div className="mt-auto flex flex-col gap-2 border-t border-gray-alpha-400 pt-3">
-          {footer}
+      {/* V1.130: 创作|编排 mode switch on 功能区 footer */}
+      <div className="mt-auto border-t border-gray-alpha-400 pt-2">
+        <div
+          className="grid grid-cols-2 gap-1 rounded-card bg-gray-alpha-100 p-1"
+          role="tablist"
+          aria-label={primaryNavigationAriaLabel}
+        >
+          <TabButton
+            id="creator"
+            label={creatorTabLabel}
+            active={activeTab === 'creator'}
+            onClick={() => onTabChange('creator')}
+          />
+          <TabButton
+            id="orchestrator"
+            label={orchestratorTabLabel}
+            active={activeTab === 'orchestrator'}
+            onClick={() => onTabChange('orchestrator')}
+          />
         </div>
-      ) : null}
+        {footer ? (
+          <div className="mt-2 flex flex-col gap-2">
+            {footer}
+          </div>
+        ) : null}
+      </div>
     </div>
   );
 }
