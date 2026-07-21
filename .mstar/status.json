@@ -50,7 +50,7 @@
     },
     {
       "plan_id": "2026-07-21-v1.129-p2-dogfood-nit-closeout",
-      "status": "InReview",
+      "status": "Done",
       "type": "feature",
       "metadata": {
         "primary_spec": ".mstar/iterations/v1.129/specs/dogfood-nit-closeout.md",
@@ -65,8 +65,12 @@
         "working_branch": "plan/v1.129-p2-dogfood-nit-closeout",
         "merge_target": "iteration/v1.129",
         "wire_contracts_changed": true,
-        "iteration_id": "V1.129"
+        "iteration_id": "V1.129",
+        "head_sha": "80034bb1",
+        "qa_gate": "mandatory",
+        "qa_verdict": "Pass"
       }
+    }
     }
   ],
   "metadata": {
