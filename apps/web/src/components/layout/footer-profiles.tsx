@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 
 import { Button } from '@/components/ui/button';
@@ -10,6 +11,7 @@ import { useActiveCreatorId, useSetActiveCreatorId } from '@/lib/active-creator-
 import { useDesktopCapabilities } from '@/lib/client-context';
 import { useToast } from '@/lib/use-toast';
 import { errorMessage } from '@/lib/error-message';
+import { NexusClientError, type TransportErrorKind } from '@/lib/nexus';
 import { FooterProfilesChrome } from './presentational/footer-profiles-chrome';
 
 /**
@@ -174,22 +176,67 @@ function CreateCreatorDialog({
   onOpenChange: (open: boolean) => void;
 }) {
   const { t } = useTranslation('shell');
+  const { t: commonT } = useTranslation('common');
+  const navigate = useNavigate();
   const create = useCreateCreator();
   const [displayName, setDisplayName] = useState('');
+
+  // Reset the form + mutation state whenever the dialog opens so a stale
+  // transport error from a previous attempt does not haunt the next visit.
+  useEffect(() => {
+    if (open) {
+      setDisplayName('');
+      create.reset();
+    }
+    // `create.reset` identity is stable (TanStack v5); `open` is the only
+    // reactive trigger we want here.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
+  // Classified transport error (V1.129 P0): when the last mutation failed with
+  // a NexusClientError carrying a `kind`, surface the per-kind headline + body
+  // + CTA from the spec table. HTTP errors (no `kind`) are left to the global
+  // toast via `useCreateCreator.onError` — the dialog only owns transport UX.
+  const transportKind: TransportErrorKind | null =
+    create.error instanceof NexusClientError && create.error.kind
+      ? create.error.kind
+      : null;
 
   function submit(e: React.FormEvent) {
     e.preventDefault();
     if (!displayName.trim()) return;
-    create.mutate(
-      { display_name: displayName.trim() },
-      {
-        onSuccess: () => {
-          setDisplayName('');
-          onOpenChange(false);
-        },
-      },
-    );
+    void mutate({ display_name: displayName.trim() });
   }
+
+  // Shared mutation entry-point so Retry can re-submit the same payload without
+  // forcing the user to retype the name.
+  function mutate(payload: { display_name: string }) {
+    create.mutate(payload, {
+      onSuccess: () => {
+        setDisplayName('');
+        onOpenChange(false);
+      },
+    });
+  }
+
+  function handleRetry() {
+    // The `displayName` state is not cleared on transport failure, so it still
+    // holds the payload the user originally submitted — retry re-sends the
+    // same value (spec AC-V1129-P0-3).
+    const name = displayName.trim();
+    if (!name) return;
+    void mutate({ display_name: name });
+  }
+
+  function handleOpenConnectionSettings() {
+    onOpenChange(false);
+    navigate('/settings/advanced#connection');
+  }
+
+  // CTA visibility per spec table — primary action always visible, secondary
+  // only on the kinds the spec lists.
+  const primaryCta = primaryCtaForKind(transportKind ?? 'unknown');
+  const secondaryCta = secondaryCtaForKind(transportKind ?? 'unknown');
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -198,6 +245,48 @@ function CreateCreatorDialog({
         title={t('profile.addDialogTitle')}
         description={t('profile.addDialogDescription')}
       >
+        {transportKind && (
+          <section
+            role="alert"
+            aria-label={t('profile.createError.regionAria')}
+            data-testid="create-creator-transport-error"
+            data-kind={transportKind}
+            className="mb-4 rounded-control border border-red-300 bg-red-50 p-3 dark:border-red-800 dark:bg-red-950"
+          >
+            <p className="text-copy-14 font-medium text-red-900 dark:text-red-100">
+              {t(`profile.createError.${transportKind}.headline`)}
+            </p>
+            <p className="text-copy-13 mt-1 text-red-800 dark:text-red-200">
+              {t(`profile.createError.${transportKind}.body`)}
+            </p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <Button
+                type="button"
+                variant="primary"
+                onClick={handleRetry}
+                disabled={create.isPending}
+                data-testid="create-creator-error-primary"
+              >
+                {commonT(ctaKey(primaryCta))}
+              </Button>
+              {secondaryCta && (
+                <Button
+                  type="button"
+                  variant="tertiary"
+                  onClick={
+                    secondaryCta === 'openConnectionSettings'
+                      ? handleOpenConnectionSettings
+                      : undefined
+                  }
+                  disabled={create.isPending}
+                  data-testid="create-creator-error-secondary"
+                >
+                  {commonT(ctaKey(secondaryCta))}
+                </Button>
+              )}
+            </div>
+          </section>
+        )}
         <form onSubmit={submit}>
           <div className="grid gap-4 py-4">
             <div className="grid gap-2">
@@ -228,4 +317,50 @@ function CreateCreatorDialog({
       </DialogContent>
     </Dialog>
   );
+}
+
+/**
+ * CTA table (locked by spec § Dialog UX contract). Primary CTA is always
+ * present; secondary is `null` when the spec table lists only one CTA.
+ */
+type CreateCreatorCta = 'retry' | 'openConnectionSettings' | 'useDesktopApp';
+
+function primaryCtaForKind(kind: TransportErrorKind): CreateCreatorCta {
+  switch (kind) {
+    case 'network':
+      return 'openConnectionSettings';
+    case 'tls':
+      return 'useDesktopApp';
+    // daemon_down, http_fallback, timeout, unknown
+    default:
+      return 'retry';
+  }
+}
+
+function secondaryCtaForKind(kind: TransportErrorKind): CreateCreatorCta | null {
+  switch (kind) {
+    case 'daemon_down':
+    case 'http_fallback':
+      return null;
+    case 'network':
+      return 'retry';
+    case 'tls':
+    case 'timeout':
+    case 'unknown':
+      return 'openConnectionSettings';
+    default:
+      return null;
+  }
+}
+
+/** Map a CTA enum to its `common.transportCta.*` locale key. */
+function ctaKey(cta: CreateCreatorCta): string {
+  switch (cta) {
+    case 'retry':
+      return 'transportCta.retry';
+    case 'openConnectionSettings':
+      return 'transportCta.openConnectionSettings';
+    case 'useDesktopApp':
+      return 'transportCta.useDesktopApp';
+  }
 }
