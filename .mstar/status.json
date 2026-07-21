@@ -1,21 +1,82 @@
 {
   "version": 1,
-  "updated_at": "2026-07-20",
-  "plans": [],
+  "updated_at": "2026-07-21",
+  "plans": [
+    {
+      "plan_id": "2026-07-21-v1.129-p0-profile-create-reliability",
+      "status": "Todo",
+      "type": "feature",
+      "metadata": {
+        "primary_spec": ".mstar/iterations/v1.129/specs/profile-create-reliability.md",
+        "spec_refs": [
+          ".mstar/iterations/v1.129/specs/profile-create-reliability.md"
+        ],
+        "iteration_refs": [
+          ".mstar/iterations/v1.129/delivery-compass.md"
+        ],
+        "iteration_compass": "v1.129/delivery-compass.md",
+        "spec_integration_branch": "iteration/v1.129",
+        "working_branch": "plan/v1.129-p0-profile-create-reliability",
+        "merge_target": "iteration/v1.129",
+        "wire_contracts_changed": "pending-architect-lock",
+        "iteration_id": "V1.129"
+      }
+    },
+    {
+      "plan_id": "2026-07-21-v1.129-p1-transport-error-ux",
+      "status": "Todo",
+      "type": "feature",
+      "metadata": {
+        "primary_spec": ".mstar/iterations/v1.129/specs/transport-error-ux.md",
+        "spec_refs": [
+          ".mstar/iterations/v1.129/specs/transport-error-ux.md"
+        ],
+        "iteration_refs": [
+          ".mstar/iterations/v1.129/delivery-compass.md"
+        ],
+        "iteration_compass": "v1.129/delivery-compass.md",
+        "spec_integration_branch": "iteration/v1.129",
+        "working_branch": "plan/v1.129-p1-transport-error-ux",
+        "merge_target": "iteration/v1.129",
+        "wire_contracts_changed": "pending-architect-lock",
+        "iteration_id": "V1.129"
+      }
+    },
+    {
+      "plan_id": "2026-07-21-v1.129-p2-dogfood-nit-closeout",
+      "status": "Todo",
+      "type": "feature",
+      "metadata": {
+        "primary_spec": ".mstar/iterations/v1.129/specs/dogfood-nit-closeout.md",
+        "spec_refs": [
+          ".mstar/iterations/v1.129/specs/dogfood-nit-closeout.md"
+        ],
+        "iteration_refs": [
+          ".mstar/iterations/v1.129/delivery-compass.md"
+        ],
+        "iteration_compass": "v1.129/delivery-compass.md",
+        "spec_integration_branch": "iteration/v1.129",
+        "working_branch": "plan/v1.129-p2-dogfood-nit-closeout",
+        "merge_target": "iteration/v1.129",
+        "wire_contracts_changed": "pending-architect-lock",
+        "iteration_id": "V1.129"
+      }
+    }
+  ],
   "metadata": {
     "integration_branch_retired": false,
     "iteration_base_branch": "main",
-    "latest_active_compass": "v1.128/delivery-compass.md",
-    "latest_active_iteration": "V1.128 (completed)",
+    "latest_active_compass": "v1.129/delivery-compass.md",
+    "latest_active_iteration": "V1.129 (active)",
     "latest_ship": {
-      "iteration": "V1.127",
-      "compass": "v1.127/delivery-compass.md",
+      "iteration": "V1.128",
+      "compass": "v1.128/delivery-compass.md",
       "shipped_at": "2026-07-20",
-      "pr": "https://github.com/42ch-dev/nexus/pull/161",
-      "merge_commit": "5b0a3518c2db95f6dd51a0540a7c3a4b41ab62f3"
+      "pr": "https://github.com/42ch-dev/nexus/pull/162",
+      "merge_commit": "d59311de"
     },
     "platform_integration": "paused \u2014 local-only until further notice",
-    "spec_integration_branch": "iteration/v1.128",
+    "spec_integration_branch": "iteration/v1.129",
     "spec_refs_index": ".mstar/specs/README.md",
     "target_branch": "main",
     "tech_debt_summary": {
