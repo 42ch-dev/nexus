@@ -2,6 +2,20 @@
 
 Publishable npm workspace package for Nexus brand assets, design tokens, theme CSS, **React brand components** (`<NexusLogo>`, `<NexusMark>`), and V1.99-approved pure presentational primitives. V1.83 shipped the assets/tokens/theme foundation; V1.87 promoted the package to a React component library (adds `react` / `react-dom` as peer deps); V1.99 may promote a small UI primitive batch under the component-promotion boundary.
 
+## Promotion list (per-plan audit trail)
+
+Every primitive promoted into this package is recorded here with: component name, the plan/spec that approved the promotion, and the date. New promotions append a row; existing rows are not rewritten unless the API breaks.
+
+| Component | Plan / Spec | Date | Notes |
+|-----------|-------------|------|-------|
+| `<Button>`, `<Badge>`, `<Card>` (+ sub-primitives) | V1.99 P0 | 2025-04 | First presentational batch. CVA + token-driven. |
+| `<Input>`, `<Label>`, `<Textarea>` | V1.100 P2 | 2025-04 | Form-field presentational slice. |
+| `<Select>` | V1.101 P2 | 2025-05 | Native Select presentational. |
+| `<Toast>` (`ToastProvider` / `Toaster` / `useToast`) | V1.106 P0 | 2025-05 | Studio Surfaces fixtures. |
+| `<TransportErrorBlock>` | V1.129 P1 — `transport-error-ux.md` | 2026-07-21 | Pure presentational transport-failure block. Props: `kind`, `onRetry?`, `onOpenSettings?`, `detail?`, `title?`. No `react-i18next` import; CTA matrix driven by `kind`. |
+
+A promotion entry alone is not sufficient — the workflow in root `AGENTS.md` (UI Component Policy) must be followed: Studio fixture first → package promotion → app wiring.
+
 ## Purpose
 
 - Canonical SVG logo variants and PNG source provenance (LFS)
