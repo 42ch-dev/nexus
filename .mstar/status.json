@@ -104,7 +104,7 @@
     },
     {
       "plan_id": "2026-07-22-v1.130-p3-orch-load-repair",
-      "status": "Todo",
+      "status": "Done",
       "type": "feature",
       "metadata": {
         "primary_spec": ".mstar/iterations/v1.130/specs/orch-load-repair.md",
