@@ -23,6 +23,7 @@ import {
 } from '@/lib/nexus/use-resume-fingerprint-gate';
 import { Button } from '@/components/ui/button';
 import { LoadingState, ErrorState } from '@/components/ui/states';
+import { TransportErrorBlock } from '@42ch/nexus-ui';
 
 /**
  * Provides the active {@link NexusClient} (and, in desktop mode, a
@@ -138,18 +139,36 @@ function FingerprintGate({
   if (!isConnectRoute && state.status === 'fetch-failed') {
     return (
       <div className="flex min-h-screen items-center justify-center p-6">
-        <div className="w-full max-w-md">
-          <ErrorState
-            title="Could not verify daemon identity"
-            description={state.message}
-            onRetry={() => void verify()}
-            retryLabel="Try again"
-          />
-          <div className="mt-4 flex justify-center">
-            <Button variant="secondary" onClick={() => navigate('/settings/advanced#connection')}>
-              Reconnect
-            </Button>
-          </div>
+        <div className="w-full max-w-md space-y-4">
+          {state.kind ? (
+            <TransportErrorBlock
+              kind={state.kind}
+              // The gate owns retry (re-run verification) and the deep-link
+              // to Connection settings (re-pin / re-enter endpoint).
+              onRetry={() => void verify()}
+              onOpenSettings={() => navigate('/settings/advanced#connection')}
+              // `state.message` carries the classifier's diagnostic message
+              // (e.g., the long-form "Cannot reach the daemon at this
+              // address…" string). Surfaced as the block's detail line so
+              // the primitive owns headline+body+CTAs (single voice) and the
+              // diagnostic stays accessible below.
+              detail={state.message}
+            />
+          ) : (
+            <>
+              <ErrorState
+                title="Could not verify daemon identity"
+                description={state.message}
+                onRetry={() => void verify()}
+                retryLabel="Try again"
+              />
+              <div className="mt-4 flex justify-center">
+                <Button variant="secondary" onClick={() => navigate('/settings/advanced#connection')}>
+                  Reconnect
+                </Button>
+              </div>
+            </>
+          )}
         </div>
       </div>
     );
