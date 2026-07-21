@@ -2,6 +2,7 @@ import { http, HttpResponse } from 'msw';
 import { describe, expect, it, vi } from 'vitest';
 import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { Route, Routes } from 'react-router-dom';
 
 import { FooterProfiles } from './footer-profiles';
 import { renderInApp } from '@/test/test-providers';
@@ -425,5 +426,110 @@ describe('CreateCreatorDialog classified transport error UX', () => {
     await waitFor(() =>
       expect(screen.queryByTestId('create-creator-transport-error')).not.toBeInTheDocument(),
     );
+  });
+
+  // ── QC3-F-001 regression: primary CTA onClick must branch per kind ──────────
+  //
+  // The primary CTA's label varies per `primaryCtaForKind`, so its click handler
+  // must vary the same way: `openConnectionSettings` navigates, `useDesktopApp`
+  // is informational (no-op), `retry` re-submits. These tests pin the contract
+  // for each branch so a future regression that re-hardcodes `handleRetry` is
+  // caught immediately.
+
+  /**
+   * Render FooterProfiles alongside a Routes tracker that surfaces a marker when
+   * the router lands on `/settings/advanced`. The dialog's
+   * `handleOpenConnectionSettings` calls `navigate('/settings/advanced#connection')`,
+   * which this marker verifies.
+   */
+  function renderWithSettingsTracker(client: NexusClient) {
+    return renderInApp(
+      <>
+        <FooterProfiles />
+        <Routes>
+          <Route
+            path="/settings/advanced"
+            element={<div data-testid="nav-settings-advanced" />}
+          />
+        </Routes>
+      </>,
+      {
+        client,
+        activeCreatorId: 'creator-a',
+        initialRouterEntries: ['/'],
+      },
+    );
+  }
+
+  it('network primary CTA navigates to /settings/advanced and does NOT retry (QC3-F-001)', async () => {
+    const user = userEvent.setup();
+    useHandlers(creatorsListHandler);
+    const client = makeRejectingClient('network');
+    renderWithSettingsTracker(client);
+
+    await openCreateDialogAndSubmit();
+
+    const region = await screen.findByTestId('create-creator-transport-error');
+    // The initial form submit already triggered one createCreator call.
+    expect(client.createCreator).toHaveBeenCalledTimes(1);
+
+    // Click the PRIMARY CTA by testid so the assertion is surgical — it
+    // targets the button whose onClick the QC3-F-001 fix branched, regardless
+    // of label collisions with the secondary CTA on other kinds.
+    await user.click(within(region).getByTestId('create-creator-error-primary'));
+
+    // Navigation must have happened.
+    await waitFor(() =>
+      expect(screen.getByTestId('nav-settings-advanced')).toBeInTheDocument(),
+    );
+    // The dialog closes as part of handleOpenConnectionSettings.
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    // Regression guard: createCreator was NOT invoked a second time.
+    expect(client.createCreator).toHaveBeenCalledTimes(1);
+  });
+
+  it('tls primary CTA is informational — no retry, no navigation (QC3-F-001)', async () => {
+    const user = userEvent.setup();
+    useHandlers(creatorsListHandler);
+    const client = makeRejectingClient('tls');
+    renderWithSettingsTracker(client);
+
+    await openCreateDialogAndSubmit();
+
+    const region = await screen.findByTestId('create-creator-transport-error');
+    expect(client.createCreator).toHaveBeenCalledTimes(1);
+
+    // Click the primary CTA ("Use Desktop App") — should be a true no-op.
+    await user.click(within(region).getByTestId('create-creator-error-primary'));
+
+    // No second mutate call.
+    expect(client.createCreator).toHaveBeenCalledTimes(1);
+    // No navigation — the settings marker must not appear.
+    expect(screen.queryByTestId('nav-settings-advanced')).not.toBeInTheDocument();
+    // The dialog stays open (onOpenChange was never called).
+    expect(screen.getByTestId('create-creator-transport-error')).toBeInTheDocument();
+  });
+
+  it('regression guard: retry-default kinds still re-submit via the primary CTA (QC3-F-001)', async () => {
+    // For `daemon_down`, primaryCtaForKind returns 'retry'. The primary CTA's
+    // onClick must still call mutate (regression guard against accidentally
+    // breaking the retry branch while adding the openConnectionSettings /
+    // useDesktopApp branches).
+    const user = userEvent.setup();
+    useHandlers(creatorsListHandler);
+    const client = makeRejectingClient('daemon_down');
+    renderWithSettingsTracker(client);
+
+    await openCreateDialogAndSubmit();
+
+    const region = await screen.findByTestId('create-creator-transport-error');
+    expect(client.createCreator).toHaveBeenCalledTimes(1);
+
+    await user.click(within(region).getByTestId('create-creator-error-primary'));
+
+    await waitFor(() => expect(client.createCreator).toHaveBeenCalledTimes(2));
+    expect(client.createCreator).toHaveBeenNthCalledWith(2, { display_name: 'Carol' });
+    // No navigation — retry keeps the user in the dialog.
+    expect(screen.queryByTestId('nav-settings-advanced')).not.toBeInTheDocument();
   });
 });

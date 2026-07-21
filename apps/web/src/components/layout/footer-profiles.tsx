@@ -263,7 +263,18 @@ function CreateCreatorDialog({
               <Button
                 type="button"
                 variant="primary"
-                onClick={handleRetry}
+                // Primary CTA branches per kind (QC3-F-001): the label and the
+                // click handler must agree. `openConnectionSettings` navigates,
+                // `useDesktopApp` is informational (no-op — body copy carries
+                // the instruction), `retry` re-submits. Mirror of the secondary
+                // CTA branching below.
+                onClick={
+                  primaryCta === 'openConnectionSettings'
+                    ? handleOpenConnectionSettings
+                    : primaryCta === 'useDesktopApp'
+                      ? undefined
+                      : handleRetry
+                }
                 disabled={create.isPending}
                 data-testid="create-creator-error-primary"
               >
