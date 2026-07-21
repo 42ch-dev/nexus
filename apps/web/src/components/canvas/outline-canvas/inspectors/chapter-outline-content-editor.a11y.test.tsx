@@ -11,6 +11,7 @@
  */
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
+import { i18n } from '@/lib/i18n/config';
 
 // Mock the outline read so the editor mounts without a daemon round-trip.
 vi.mock('@/api/queries', () => {
@@ -125,5 +126,22 @@ describe('ChapterOutlineContentEditor — WCAG 2.1 AA toolbar contract (V1.75 A8
     renderEditor(true);
     const bold = screen.getByRole('button', { name: 'Bold' });
     expect(bold).toBeDisabled();
+  });
+});
+
+describe('ChapterOutlineContentEditor — i18n (V1.129 P2 — R-P1-001)', () => {
+  it('renders toolbar labels from the canvas namespace under zh-CN', async () => {
+    await i18n.changeLanguage('zh-CN');
+    renderEditor();
+
+    // Sample: toolbar labels now resolve from canvas.chapterOutlineContentEditor.toolbar.*.
+    expect(screen.getByRole('button', { name: '粗体' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '标题 1' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '引用' })).toBeInTheDocument();
+    expect(
+      screen.getByRole('region', { name: /第 1 章大纲内容编辑器/i }),
+    ).toBeInTheDocument();
+
+    await i18n.changeLanguage('en');
   });
 });

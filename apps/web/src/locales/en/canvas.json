@@ -842,5 +842,30 @@
       "brief": "Brief",
       "narrative": "Narrative"
     }
+  },
+  "chapterOutlineContentEditor": {
+    "loading": "Loading outline content…",
+    "loadError": "Could not load this chapter's outline content. Saving is disabled until the read succeeds.",
+    "outlineContentLabel": "Outline content",
+    "reset": "Reset",
+    "saveContent": "Save content",
+    "editorAriaLabel": "Chapter {{chapter}} outline content editor",
+    "saveStateAriaLabel": "Outline content save state",
+    "formattingAriaLabel": "Outline content formatting",
+    "saveState": {
+      "clean": "Saved",
+      "dirty": "Unsaved changes",
+      "saving": "Saving…"
+    },
+    "toolbar": {
+      "heading1": "Heading 1",
+      "heading2": "Heading 2",
+      "heading3": "Heading 3",
+      "bold": "Bold",
+      "italic": "Italic",
+      "bulletList": "Bullet list",
+      "numberedList": "Numbered list",
+      "quote": "Quote"
+    }
   }
 }

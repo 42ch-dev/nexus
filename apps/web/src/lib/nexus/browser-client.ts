@@ -197,6 +197,9 @@ export class BrowserClient implements NexusClient {
       request,
     );
   }
+  deleteWork(workId: string): Promise<void> {
+    return this.delete<void>(`/v1/daemon/works/${encodeURIComponent(workId)}`);
+  }
 
   // ── Orchestration sessions ─────────────────────────────────────────────────
   listSessions(query?: ListSessionsQuery): Promise<ListSessionsResponse> {
@@ -483,6 +486,9 @@ export class BrowserClient implements NexusClient {
   async listNarrativeWorlds(): Promise<World[]> {
     const res = await this.get<{ worlds: World[] }>('/v1/daemon/narrative/worlds');
     return res.worlds;
+  }
+  deleteWorld(worldId: string): Promise<void> {
+    return this.delete<void>(`/v1/daemon/worlds/${encodeURIComponent(worldId)}`);
   }
   getTimelineOverview(cursor?: string): Promise<TimelineOverviewResponse> {
     const params = cursor ? `?cursor=${encodeURIComponent(cursor)}` : '';
