@@ -273,8 +273,24 @@ describe('ClientProvider resume-time fingerprint gate', () => {
     };
     renderWithGate(config, fetchImpl);
 
-    expect(await screen.findByText('Could not verify daemon identity')).toBeInTheDocument();
+    // V1.129 P1: fetch-failed now renders the promoted <TransportErrorBlock>
+    // for kind=network (the classifier's catch-all for undifferentiated fetch
+    // throws). The block owns headline + body + CTAs; the diagnostic message
+    // rides the `detail` line.
+    const block = await screen.findByTestId('transport-error-block');
+    expect(block).toHaveAttribute('data-kind', 'network');
+    expect(block).toHaveTextContent('Could not connect to the daemon at this address');
+    // Diagnostic detail (classifier long-form message) still surfaces.
     expect(screen.getByText(/Cannot reach the daemon at this address/)).toBeInTheDocument();
+    // CTA matrix for network: Open Connection Settings primary, Retry secondary.
+    expect(screen.getByTestId('transport-error-primary')).toHaveAttribute(
+      'data-cta',
+      'openConnectionSettings',
+    );
+    expect(screen.getByTestId('transport-error-secondary')).toHaveAttribute(
+      'data-cta',
+      'retry',
+    );
     expect(screen.queryByTestId('child')).not.toBeInTheDocument();
 
     expect(fetchImpl).toHaveBeenCalledTimes(1);
@@ -293,10 +309,14 @@ describe('ClientProvider resume-time fingerprint gate', () => {
     };
     renderWithGate(config, fetchImpl);
 
-    expect(await screen.findByText('Could not verify daemon identity')).toBeInTheDocument();
+    expect(await screen.findByTestId('transport-error-block')).toHaveAttribute(
+      'data-kind',
+      'network',
+    );
     expect(fetchImpl).toHaveBeenCalledTimes(1);
 
-    screen.getByText('Try again').click();
+    // Retry CTA is the secondary button for kind=network.
+    screen.getByTestId('transport-error-secondary').click();
 
     expect(await screen.findByTestId('child')).toBeInTheDocument();
     expect(screen.getByTestId('gate-status')).toHaveTextContent('verified');

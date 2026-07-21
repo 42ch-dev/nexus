@@ -10,7 +10,7 @@
  * @see {@link ./desktop-capabilities.ts} for the V1.66 desktop-only surface.
  */
 export { BrowserClient, type BrowserClientOptions } from './browser-client';
-export { NexusClientError, type NexusErrorBody } from './errors';
+export { NexusClientError, type NexusErrorBody, type TransportErrorKind } from './errors';
 export { TauriClient, resolveDesktopPort, type TauriClientOptions } from './tauri-client';
 export {
   TauriDesktopCapabilities,

@@ -8,13 +8,19 @@
  * `useQueryErrorToast`). These tests pin the notification hook itself and the
  * error→toast architectural path: a `NexusClientError` parsed from a canonical
  * F-E1 envelope surfaces its stable `message` as the toast description.
+ *
+ * V1.129 P1: extended to cover the classified transport-error bridge in
+ * `useErrorToast` — when an error carries a `kind`, the toast body comes from
+ * the shared `shell.profile.createError.<kind>.body` catalog; legacy
+ * non-transport errors still render their full useful message.
  */
 import { act, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ReactNode } from 'react';
 
-import { NexusClientError } from '@/lib/nexus';
+import { NexusClientError, type TransportErrorKind } from '@/lib/nexus';
 import { ToastProvider, Toaster, useToast } from '@/lib/use-toast';
+import { useErrorToast } from '@/api/queries';
 
 /** Drive the toast API from inside the provider tree. */
 function ToastControls({
@@ -222,5 +228,93 @@ describe('error-envelope → toast path (W-1 end-to-end)', () => {
     );
 
     expect(screen.getByText('Cannot reach the local daemon.')).toBeInTheDocument();
+  });
+});
+
+describe('useErrorToast classified transport body (V1.129 P1)', () => {
+  /**
+   * Drive `useErrorToast` from inside the toast provider tree so the rendered
+   * toast queue reflects the bridge's actual output.
+   */
+  function ErrorToastProbe({
+    onReady,
+  }: {
+    onReady: (fire: (error: unknown, key: string) => void) => void;
+  }) {
+    const fire = useErrorToast();
+    return <>{(onReady(fire), null)}</>;
+  }
+
+  function renderErrorToastBridge(onReady: (fire: (error: unknown, key: string) => void) => void) {
+    return render(
+      <ToastProvider>
+        <ErrorToastProbe onReady={onReady} />
+        <Toaster />
+      </ToastProvider>,
+    );
+  }
+
+  it.each([
+    ['daemon_down', 'Start it with `nexus42 daemon start`, then try again.'] as [TransportErrorKind, string],
+    ['network', 'Check the URL and port in Connection settings, or confirm the network can reach that host.'] as [TransportErrorKind, string],
+    ['timeout', 'The connection stalled or the daemon is busy. Retry in a moment.'] as [TransportErrorKind, string],
+  ])(
+    'renders the shared shell.profile.createError.<kind>.body when kind=%s',
+    (kind, expectedBody) => {
+      const error = new NexusClientError(
+        0,
+        'transport_unreachable',
+        'Cannot reach the daemon.',
+        undefined,
+        kind,
+      );
+      let fire!: (error: unknown, key: string) => void;
+      renderErrorToastBridge((f) => (fire = f));
+
+      act(() => fire(error, 'error.couldNotCreateWork'));
+
+      // Title stays the caller-supplied action context (common namespace).
+      expect(screen.getByText('Could not create Work')).toBeInTheDocument();
+      // Description comes from the shared single-source body catalog.
+      expect(screen.getByText(expectedBody)).toBeInTheDocument();
+    },
+  );
+
+  it('falls back to error.message for non-transport NexusClientError (no kind)', () => {
+    // HTTP 4xx/5xx — status !== 0, no `kind`. Legacy bridge behavior.
+    const error = NexusClientError.fromBody(400, {
+      success: false,
+      error: { code: 'validation_failed', message: 'Title is required.' },
+    });
+    expect(error instanceof NexusClientError && error.kind).toBeUndefined();
+
+    let fire!: (error: unknown, key: string) => void;
+    renderErrorToastBridge((f) => (fire = f));
+
+    act(() => fire(error, 'error.couldNotCreateWork'));
+
+    expect(screen.getByText('Could not create Work')).toBeInTheDocument();
+    expect(screen.getByText('Title is required.')).toBeInTheDocument();
+  });
+
+  it('falls back to error.message for non-NexusClientError throws', () => {
+    const error = new Error('Unexpected runtime failure');
+    let fire!: (error: unknown, key: string) => void;
+    renderErrorToastBridge((f) => (fire = f));
+
+    act(() => fire(error, 'error.couldNotUpdateWork'));
+
+    expect(screen.getByText('Could not update Work')).toBeInTheDocument();
+    expect(screen.getByText('Unexpected runtime failure')).toBeInTheDocument();
+  });
+
+  it('falls back to common.error.unexpected for non-Error throws', () => {
+    let fire!: (error: unknown, key: string) => void;
+    renderErrorToastBridge((f) => (fire = f));
+
+    act(() => fire('just a string', 'error.couldNotCreateWork'));
+
+    expect(screen.getByText('Could not create Work')).toBeInTheDocument();
+    expect(screen.getByText('Unexpected error.')).toBeInTheDocument();
   });
 });

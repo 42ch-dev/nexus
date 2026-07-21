@@ -1459,6 +1459,139 @@ pub async fn release_completion_lock_handler(
     Ok(Json(WorkApiDto::from(updated)))
 }
 
+// ─── Delete Work (V1.129 P2 — R-V1126P0-T2-001) ─────────────────────────────
+
+/// `DELETE /v1/daemon/works/{work_id}` — hard-delete a Work and cascade its
+/// children.
+///
+/// Per architect lock (Seat 2, 2026-07-21): **hard delete**, not soft. The
+/// confirm dialog in the web UI is the safety net; there is no undo.
+///
+/// # Cascade
+///
+/// Most children cascade via `SQLite` `ON DELETE CASCADE` FKs:
+/// - `work_chapters`, `work_chapter_volumes` → CASCADE
+/// - `findings` → CASCADE
+/// - `novel_pool_entries` (`work_id`) → CASCADE
+/// - `reading_progress`, `reading_annotations` → CASCADE
+/// - `inspiration_items.promoted_work_id` → SET NULL (preserves the row)
+/// - `works.lineage_from_work_id` → SET NULL on descendant Works
+///
+/// The handler additionally invalidates the on-disk Manuscript / Outline
+/// directory under the workspace path (best-effort). On-disk orphan files do
+/// not corrupt the DB SSOT — they are dead weight only.
+///
+/// # Errors
+///
+/// - `401 AuthRequired` if no active creator is configured.
+/// - `404 NotFound` if the work id is unknown for the active creator.
+/// - `409 Conflict` if the Work holds the runtime lock or is completion-locked
+///   (callers must release those first).
+/// - `500 Internal` on database error.
+pub async fn delete_work(
+    State(state): State<WorkspaceState>,
+    Path(work_id): Path<String>,
+) -> Result<StatusCode, NexusApiError> {
+    let pool = state.pool_or_uninit()?;
+    let creator_id =
+        read_active_creator_id(state.nexus_home()).ok_or(NexusApiError::AuthRequired)?;
+
+    // Rule 1: existence check BEFORE lock acquire (V1.42.1 hotfix rule).
+    let work = works::get_work(pool, &creator_id, &work_id)
+        .await
+        .map_err(|e| NexusApiError::Internal {
+            code: "DATABASE_ERROR".to_string(),
+            message: e.to_string(),
+        })?
+        .ok_or_else(|| NexusApiError::NotFound(format!("work {work_id}")))?;
+
+    // Reject while completion-locked or actively locked — author must release
+    // those first. Cascading a delete under either state would silently drop
+    // an in-flight authoring session.
+    if work.completion_locked_at.is_some() {
+        return Err(NexusApiError::Conflict(format!(
+            "work {work_id} is completion-locked since {}; use 'creator works completion-lock release' first",
+            work.completion_locked_at.as_deref().unwrap_or("?")
+        )));
+    }
+    if let Some(ref holder) = work.runtime_lock_holder {
+        let ttl = nexus_local_db::ttl_from_env();
+        if !nexus_local_db::is_lock_stale(&work, ttl) {
+            return Err(NexusApiError::Locked {
+                resource: "work".to_string(),
+                reason: format!(
+                    "work {work_id} is locked by '{holder}'; wait for release or check 'creator works status'"
+                ),
+            });
+        }
+    }
+
+    // Acquire the runtime lock for this mutating operation.
+    let lock = RuntimeLockGuard::acquire(pool, &creator_id, &work_id).await?;
+
+    // Hard-delete the Work row. SQLite FK cascades drop the children:
+    // work_chapters / work_chapter_volumes / findings / novel_pool_entries /
+    // reading_progress / reading_annotations. inspiration_items.promoted_work_id
+    // and works.lineage_from_work_id cascade SET NULL.
+    //
+    // SAFETY: DELETE matches works DDL in 20260604_works_table.sql; runtime
+    // sqlx::query is acceptable per the narrative_write.rs precedent for
+    // schema-mutable writes and avoids regenerating the .sqlx/ cache.
+    let deleted = match sqlx::query("DELETE FROM works WHERE work_id = ? AND creator_id = ?")
+        .bind(&work_id)
+        .bind(&creator_id)
+        .execute(pool)
+        .await
+    {
+        Ok(res) => res.rows_affected(),
+        Err(e) => {
+            lock.release().await;
+            return Err(NexusApiError::Internal {
+                code: "DATABASE_ERROR".to_string(),
+                message: format!("delete_work failed: {e}"),
+            });
+        }
+    };
+
+    lock.release().await;
+
+    if deleted == 0 {
+        // Concurrent delete raced between get_work and DELETE. Treat as 404 —
+        // the row is gone regardless of who removed it.
+        return Err(NexusApiError::NotFound(format!("work {work_id}")));
+    }
+
+    // Best-effort on-disk cleanup: remove the Work directory (Manuscripts +
+    // Outlines). DB is SSOT — orphan files here do not corrupt state.
+    if let Some(ref work_ref) = work.work_ref {
+        let workspace_path = state.workspace_path().unwrap_or_default();
+        if !workspace_path.is_empty() {
+            let workspace_dir = std::path::Path::new(&workspace_path);
+            let works_dir = workspace_dir.join("Works").join(work_ref);
+            if works_dir.exists() {
+                if let Err(e) = std::fs::remove_dir_all(&works_dir) {
+                    tracing::warn!(
+                        work_id = %work_id,
+                        work_ref = %work_ref,
+                        path = %works_dir.display(),
+                        error = %e,
+                        "Work directory deletion failed (non-fatal; DB is SSOT)"
+                    );
+                }
+            }
+        }
+    }
+
+    tracing::info!(
+        target: "works.delete",
+        work_id = %work_id,
+        creator_id = %creator_id,
+        "Work hard-deleted (cascade via FK)"
+    );
+
+    Ok(StatusCode::NO_CONTENT)
+}
+
 // ─── Helpers ───────────────────────────────────────────────────────────────
 
 /// Validate `stage_status` transitions to terminal states (R-CURSOR-PR42-03).

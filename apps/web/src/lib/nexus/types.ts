@@ -179,6 +179,12 @@ export interface NexusClient {
   createWork(request: CreateWorkRequest): Promise<CreateWorkResponse>;
   /** `PATCH /v1/daemon/works/{work_id}` — status/stage/archive (free-string status). */
   patchWork(workId: string, request: PatchWorkRequest): Promise<WorkDetailResponse>;
+  /**
+   * `DELETE /v1/daemon/works/{work_id}` — hard-delete a Work and cascade its
+   * children (chapters, findings, pool entries, etc.). V1.129 P2
+   * (R-V1126P0-T2-001). Returns 204 No Content on success.
+   */
+  deleteWork(workId: string): Promise<void>;
 
   // ── Orchestration sessions ────────────────────────────────────────────────
   /** `GET /v1/daemon/orchestration/sessions` — cursor list (F-P3/F-F1; canonical `items` key). */
@@ -369,6 +375,13 @@ export interface NexusClient {
    * shape is promoted to a generated list response once P0 lands the schema.
    */
   listNarrativeWorlds(): Promise<World[]>;
+  /**
+   * `DELETE /v1/daemon/worlds/{world_id}` — hard-delete a World and cascade its
+   * KB + timelines (FK `ON DELETE CASCADE`). Works that referenced the World
+   * are preserved with `world_id = NULL` (architect lock — V1.129 P2).
+   * Returns 204 No Content on success.
+   */
+  deleteWorld(worldId: string): Promise<void>;
   /**
    * `GET /v1/daemon/timeline/overview` — cursor-paginated overview of visible
    * Worlds with per-World era/event counts and last activity timestamp.

@@ -80,7 +80,34 @@
     "creating": "正在创建…",
     "switchedTitle": "配置文件已切换",
     "switchedDescription": "请重启或重新加载应用，以使守护进程使用新的工作区路径。",
-    "switchBrowserOnly": "切换配置文件仅在 Nexus 桌面应用中可用。"
+    "switchBrowserOnly": "切换配置文件仅在 Nexus 桌面应用中可用。",
+    "createError": {
+      "regionAria": "创建配置文件错误",
+      "daemon_down": {
+        "headline": "本地守护进程未运行",
+        "body": "请使用 `nexus42 daemon start` 启动后再重试。"
+      },
+      "network": {
+        "headline": "无法连接到该地址的守护进程",
+        "body": "请在连接设置中检查 URL 和端口，或确认网络能够访问该主机。"
+      },
+      "tls": {
+        "headline": "此浏览器拒绝了守护进程证书",
+        "body": "Web 应用无法信任远程自签名证书。Nexus 桌面应用可在系统钥匙串中保存信任。"
+      },
+      "http_fallback": {
+        "headline": "应用无法完成此请求",
+        "body": "守护进程以页面而非 API 响应作答。请重试一次；若持续发生，请检查守护进程状态。"
+      },
+      "timeout": {
+        "headline": "守护进程响应超时",
+        "body": "连接停滞或守护进程正忙。请稍后重试。"
+      },
+      "unknown": {
+        "headline": "无法连接到守护进程",
+        "body": "在收到响应前出现了问题。请重试；若持续发生，请检查连接设置。"
+      }
+    }
   },
   "health": {
     "checking": "正在检查守护进程…",
@@ -159,6 +186,16 @@
     "agent": "智能体",
     "unassigned": "未分配",
     "rename": "重命名",
-    "renameFailed": "重命名失败，请重试。"
+    "renameFailed": "重命名失败，请重试。",
+    "delete": "删除",
+    "deleteFailed": "删除失败，请重试。",
+    "deleteDialog": {
+      "workTitle": "删除“{{name}}”",
+      "worldTitle": "删除“{{name}}”",
+      "workBody": "此操作将永久删除该作品及其全部手稿、大纲和时间线条目。此操作无法撤销。",
+      "worldBody": "此操作将永久删除该世界及其知识库条目。引用该世界的作品会保留，但不再与之关联。此操作无法撤销。",
+      "cancel": "取消",
+      "confirm": "删除"
+    }
   }
 }

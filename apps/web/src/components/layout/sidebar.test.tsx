@@ -1071,3 +1071,106 @@ describe('Sidebar — rename clear on navigation (V1.127 P0 T5)', () => {
     );
   });
 });
+
+describe('Sidebar — Delete on selection submenu (V1.129 P2 — R-V1126P0-T2-001)', () => {
+  beforeEach(async () => {
+    window.localStorage.clear();
+    await i18n.changeLanguage('en');
+  });
+
+  function renderWithWork() {
+    useHandlers(
+      http.get('/v1/daemon/creators', () =>
+        HttpResponse.json({
+          items: [{ creator_id: 'creator-a', display_name: 'Alice' }],
+          pagination: { limit: 20, has_more: false },
+        }),
+      ),
+      worksList([
+        {
+          work_id: 'work-alpha',
+          title: 'Alpha Novel',
+          status: 'active',
+          intake_status: 'ready',
+          primary_preset_id: 'preset-1',
+          updated_at: '2026-01-01T00:00:00Z',
+        },
+      ]),
+      http.post('/v1/daemon/agent-host/scan', () => HttpResponse.json({ agents: [] })),
+    );
+    renderInApp(<Sidebar />, { client: makeClient(), activeCreatorId: 'creator-a' });
+  }
+
+  it('renders the Delete menuitem on the Work submenu', async () => {
+    const user = userEvent.setup();
+    renderWithWork();
+
+    await waitFor(() =>
+      expect(screen.getByRole('link', { name: 'Alpha Novel' })).toBeInTheDocument(),
+    );
+
+    const menuBtn = screen.getByRole('button', { name: /Open menu for Alpha Novel/i });
+    await user.click(menuBtn);
+
+    await waitFor(() => {
+      expect(screen.getByRole('menuitem', { name: /^Delete$/i })).toBeInTheDocument();
+    });
+  });
+
+  it('opens the confirm dialog when Delete is clicked and names the Work + cascade', async () => {
+    const user = userEvent.setup();
+    renderWithWork();
+
+    await waitFor(() =>
+      expect(screen.getByRole('link', { name: 'Alpha Novel' })).toBeInTheDocument(),
+    );
+
+    const menuBtn = screen.getByRole('button', { name: /Open menu for Alpha Novel/i });
+    await user.click(menuBtn);
+
+    const deleteItem = await screen.findByRole('menuitem', { name: /^Delete$/i });
+    await user.click(deleteItem);
+
+    // Dialog title names the Work; body names cascaded items + irreversibility
+    // per architect lock.
+    await waitFor(() => {
+      expect(screen.getByText(/Delete "Alpha Novel"/i)).toBeInTheDocument();
+      expect(
+        screen.getByText(/permanently remove this Work and all of its manuscripts/i),
+      ).toBeInTheDocument();
+      expect(screen.getByText(/cannot be undone/i)).toBeInTheDocument();
+    });
+
+    // Both CTAs present.
+    expect(screen.getByRole('button', { name: /^Delete$/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^Cancel$/i })).toBeInTheDocument();
+  });
+
+  it('sends DELETE /v1/daemon/works/{id} on confirm', async () => {
+    let deleteCalled = false;
+    useHandlers(
+      http.delete('/v1/daemon/works/:workId', ({ params }) => {
+        if (params.workId === 'work-alpha') deleteCalled = true;
+        return new HttpResponse(null, { status: 204 });
+      }),
+    );
+
+    const user = userEvent.setup();
+    renderWithWork();
+
+    await waitFor(() =>
+      expect(screen.getByRole('link', { name: 'Alpha Novel' })).toBeInTheDocument(),
+    );
+
+    const menuBtn = screen.getByRole('button', { name: /Open menu for Alpha Novel/i });
+    await user.click(menuBtn);
+
+    const deleteItem = await screen.findByRole('menuitem', { name: /^Delete$/i });
+    await user.click(deleteItem);
+
+    const confirmBtn = await screen.findByRole('button', { name: /^Delete$/i });
+    await user.click(confirmBtn);
+
+    await waitFor(() => expect(deleteCalled).toBe(true));
+  });
+});

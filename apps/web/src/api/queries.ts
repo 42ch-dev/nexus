@@ -245,18 +245,40 @@ export function flattenOverviewWorlds(
 
 // ── Mutations (Setup writes) ─────────────────────────────────────────────────
 
-/** Surface a NexusClientError as a toast; callers may still read the result. */
-function useErrorToast() {
+/**
+ * Surface a NexusClientError as a toast; callers may still read the result.
+ *
+ * V1.129 P1: when the error carries a `kind` (transport-classified, status=0),
+ * the toast description becomes the shared single-source body copy from
+ * `shell.profile.createError.<kind>.body` — same locale keys the
+ * create-creator dialog and FingerprintGate use. The caller-supplied `key`
+ * stays the toast title (the action context, e.g.
+ * `error.couldNotCreateWork`). Non-transport errors (HTTP 4xx/5xx, generic
+ * throws) keep the legacy `errorMessage(error)` description so actionable
+ * text from the daemon still surfaces.
+ *
+ * Toast CTA limitation: the current `useToast` API (`@42ch/nexus-ui` Toast)
+ * has no action slot — only `title` + `description` + variant/duration. The
+ * CTAs available on the full-page `<TransportErrorBlock>` (Retry, Open
+ * Connection Settings) therefore cannot surface in the toast. Per the V1.129
+ * P1 architect lock, the toast gets headline + body only; CTAs stay on
+ * full-page / inline error blocks. Adding an action slot to the toast
+ * component is out of P1 scope.
+ */
+export function useErrorToast() {
   const { toast } = useToast();
-  const { t } = useTranslation('common');
+  const { t: commonT } = useTranslation('common');
+  const { t: shellT } = useTranslation('shell');
   return (error: unknown, key: string) => {
-    const description =
-      error instanceof NexusClientError
+    const title = commonT(key, { defaultValue: key });
+    const kind =
+      error instanceof NexusClientError && error.kind ? error.kind : null;
+    const description = kind
+      ? shellT(`profile.createError.${kind}.body`)
+      : error instanceof Error
         ? error.message
-        : error instanceof Error
-          ? error.message
-          : t('error.unexpected');
-    toast({ variant: 'error', title: t(key, { defaultValue: key }), description });
+        : commonT('error.unexpected');
+    toast({ variant: 'error', title, description });
   };
 }
 
@@ -285,6 +307,62 @@ export function usePatchWork() {
       void qc.invalidateQueries({ queryKey: queryKeys.works.detail(vars.workId) });
     },
     onError: (error) => errorToast(error, 'error.couldNotUpdateWork'),
+  });
+}
+
+/**
+ * Hard-delete a Work (V1.129 P2 — R-V1126P0-T2-001).
+ *
+ * Cascade is server-side (SQLite FK `ON DELETE CASCADE` on chapters, findings,
+ * pool entries, reading progress/annotations; SET NULL on inspiration items
+ * and lineage_from_work_id). The mutation invalidates the works list on
+ * success; transport errors route through the shared error-toast classifier
+ * (which surfaces `<TransportErrorBlock>` copy for known kinds).
+ *
+ * No timeline.invalidation here: `TimelineOverviewResponse.worlds` is World-
+ * centric (per-World era/event counts) and carries no Work rows, so deleting a
+ * Work cannot stale the timeline overview cache. (Checked V1.129 P5.)
+ */
+export function useDeleteWork() {
+  const client = useNexusClient();
+  const qc = useQueryClient();
+  const errorToast = useErrorToast();
+  return useMutation({
+    mutationFn: (workId: string) => client.deleteWork(workId),
+    onSuccess: (_data, workId) => {
+      void qc.invalidateQueries({ queryKey: queryKeys.works.lists() });
+      void qc.removeQueries({ queryKey: queryKeys.works.detail(workId) });
+    },
+    onError: (error) => errorToast(error, 'error.couldNotDeleteWork'),
+  });
+}
+
+/**
+ * Hard-delete a World (V1.129 P2 — R-V1126P0-T2-001).
+ *
+ * Cascade is server-side: KB + timelines drop via FK CASCADE; Works are
+ * preserved with `world_id = NULL` (architect lock). The mutation invalidates
+ * the narrative world list on success.
+ */
+export function useDeleteWorld() {
+  const client = useNexusClient();
+  const qc = useQueryClient();
+  const errorToast = useErrorToast();
+  return useMutation({
+    mutationFn: (worldId: string) => client.deleteWorld(worldId),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: queryKeys.memory.worlds() });
+      // V1.129 P5 (Greptile P1): the Global Timeline overview is World-centric
+      // — `TimelineOverviewResponse.worlds` lists each World with its era/event
+      // counts, so a deleted World must be evicted from the overview cache or
+      // it keeps rendering until the next manual refetch. Invalidating
+      // `timeline.all` covers every cached cursor page (overview is the only
+      // timeline sub-key today, and the `overview(cursor)` key is parameterized
+      // by cursor, so a single `overview()` invalidation would miss non-first
+      // pages).
+      void qc.invalidateQueries({ queryKey: queryKeys.timeline.all });
+    },
+    onError: (error) => errorToast(error, 'error.couldNotDeleteWorld'),
   });
 }
 

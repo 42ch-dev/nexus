@@ -63,6 +63,8 @@
     "requestFailed": "Request failed",
     "couldNotCreateWork": "Could not create Work",
     "couldNotUpdateWork": "Could not update Work",
+    "couldNotDeleteWork": "Could not delete Work",
+    "couldNotDeleteWorld": "Could not delete World",
     "couldNotUpdateFinding": "Could not update finding",
     "couldNotUpdateFindings": "Could not update findings",
     "couldNotScaffoldPreset": "Could not scaffold preset",
@@ -144,5 +146,10 @@
   },
   "dialog": {
     "close": "Close dialog"
+  },
+  "transportCta": {
+    "retry": "Retry",
+    "openConnectionSettings": "Open Connection Settings",
+    "useDesktopApp": "Use Desktop App"
   }
 }

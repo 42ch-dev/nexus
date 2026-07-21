@@ -3,13 +3,26 @@ import { useCallback, useState } from 'react';
 import type { CertFingerprintResponse } from '@42ch/nexus-contracts';
 
 import { BrowserClient } from '@/lib/nexus/browser-client';
-import { NexusClientError } from '@/lib/nexus/errors';
+import { NexusClientError, type TransportErrorKind } from '@/lib/nexus/errors';
 
 export type FingerprintState =
   | { status: 'idle' }
   | { status: 'loading' }
   | { status: 'success'; response: CertFingerprintResponse }
-  | { status: 'error'; message: string; code?: string };
+  | {
+      status: 'error';
+      message: string;
+      code?: string;
+      /**
+       * Transport-failure sub-classification (V1.129 P1). Present when the
+       * throw was a `NexusClientError` produced by the browser-client
+       * classifier (status=0 transport failures); absent for HTTP errors
+       * (4xx/5xx — recovery is daemon-side, not transport). Drives the
+       * Connection form's choice between `<TransportErrorBlock>` and the
+       * legacy inline error region.
+       */
+      kind?: TransportErrorKind;
+    };
 
 export interface UseFingerprintOptions {
   fetchImpl?: typeof fetch;
@@ -45,6 +58,7 @@ export function useFingerprint(options: UseFingerprintOptions = {}) {
           status: 'error',
           message,
           code: error instanceof NexusClientError ? error.code : undefined,
+          kind: error instanceof NexusClientError ? error.kind : undefined,
         };
         setState(next);
         return null;

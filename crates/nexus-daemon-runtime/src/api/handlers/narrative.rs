@@ -14,8 +14,10 @@
 #![allow(clippy::missing_errors_doc)]
 
 use crate::api::errors::NexusApiError;
+use crate::api::handlers::works::read_active_creator_id;
 use crate::workspace::WorkspaceState;
 use axum::extract::{Path, State};
+use axum::http::StatusCode;
 use axum::Json;
 use nexus_narrative::{NarrativeGateway, WorldState};
 use serde::Serialize;
@@ -80,6 +82,148 @@ pub async fn get_world(
             },
         })?;
     Ok(Json(GetWorldResponse { world }))
+}
+
+/// `DELETE /v1/daemon/worlds/{world_id}` — hard-delete a World (V1.129 P2).
+///
+/// Per architect lock (Seat 2, 2026-07-21 — R-V1126P0-T2-001): **hard delete**,
+/// not soft. Confirm dialog in the web UI is the safety net.
+///
+/// # Cascade (per lock)
+///
+/// - `narrative_worlds` row is deleted; `SQLite` FKs cascade:
+///   - `narrative_timeline_events` → `ON DELETE CASCADE`
+///   - `kb_key_blocks` → `ON DELETE CASCADE` (and `kb_source_anchors` via
+///     its FK on `kb_key_blocks`)
+///   - `kb_relationships` → `ON DELETE CASCADE`
+/// - `kb_extract_jobs.world_id` has no FK; manual cascade runs first.
+/// - `works.world_id` has no FK; the handler sets it to NULL **on Works owned
+///   by the active creator** so those Works survive the World's removal
+///   (architect lock: preserve Works).
+///
+/// # Errors
+///
+/// - `401 AuthRequired` if no active creator is configured.
+/// - `404 NotFound` if the world id is unknown or not owned by the caller.
+/// - `500 Internal` on database error.
+pub async fn delete_world(
+    State(state): State<WorkspaceState>,
+    Path(world_id): Path<String>,
+) -> Result<StatusCode, NexusApiError> {
+    let pool = state.pool_or_uninit()?;
+    let creator_id =
+        read_active_creator_id(state.nexus_home()).ok_or(NexusApiError::AuthRequired)?;
+
+    // Existence + ownership check using the shared narrative_write admission
+    // gate. This is the only precondition before mutation; worlds have no
+    // runtime lock analogue.
+    let owned = nexus_local_db::narrative_write::is_world_owned(pool, &creator_id, &world_id)
+        .await
+        .map_err(|e| NexusApiError::Internal {
+            code: "DATABASE_ERROR".to_string(),
+            message: e.to_string(),
+        })?;
+    if !owned {
+        return Err(NexusApiError::NotFound(format!(
+            "World {world_id} not found"
+        )));
+    }
+
+    // Manual cascade for tables without an FK on narrative_worlds.world_id:
+    //
+    // 1. kb_extract_jobs — job queue rows that reference this World. Deleting
+    //    the World would otherwise orphan them in `queued`/`running` state.
+    // 2. works.world_id — set to NULL so Works survive the World's removal
+    //    (architect lock). The creator_id scope is defensive; in practice the
+    //    local-first model guarantees single-creator state.
+    //
+    // All three steps run inside ONE transaction so a later failure (e.g. the
+    // parent World DELETE) rolls back the manual cleanup. Without this, a
+    // successful kb_extract_jobs DELETE or works UPDATE followed by a failed
+    // World DELETE would leave orphaned state committed — a caller retry would
+    // then find the World still present but with its job queue already drained
+    // and Works already detached. (V1.129 P5 — Greptile P1; also closes the
+    // deferred QC3-W-001 / QC2-M-001 from P2's QC tri.)
+    //
+    // SAFETY: DELETE / UPDATE match kb_extract_jobs DDL in 20260527 and works
+    // DDL in 20260604. Runtime sqlx::query keeps the world-removal step
+    // cohesive in one handler rather than scattering fragments across
+    // .sqlx/ entries. On any early `return Err(...)` below the `tx` is
+    // dropped, which sqlx turns into an automatic ROLLBACK.
+    let mut tx = pool.begin().await.map_err(|e| NexusApiError::Internal {
+        code: "DATABASE_ERROR".to_string(),
+        message: format!("delete_world: begin tx failed: {e}"),
+    })?;
+
+    if let Err(e) = sqlx::query("DELETE FROM kb_extract_jobs WHERE world_id = ?")
+        .bind(&world_id)
+        .execute(&mut *tx)
+        .await
+    {
+        return Err(NexusApiError::Internal {
+            code: "DATABASE_ERROR".to_string(),
+            message: format!("delete_world: kb_extract_jobs cleanup failed: {e}"),
+        });
+    }
+
+    if let Err(e) = sqlx::query(
+        "UPDATE works SET world_id = NULL, updated_at = ? \
+         WHERE world_id = ? AND creator_id = ?",
+    )
+    .bind(chrono::Utc::now().to_rfc3339())
+    .bind(&world_id)
+    .bind(&creator_id)
+    .execute(&mut *tx)
+    .await
+    {
+        return Err(NexusApiError::Internal {
+            code: "DATABASE_ERROR".to_string(),
+            message: format!("delete_world: works.world_id clear failed: {e}"),
+        });
+    }
+
+    // Delete the World row. FK cascades handle:
+    //   narrative_timeline_events, kb_key_blocks (+ kb_source_anchors),
+    //   kb_relationships.
+    let deleted = match sqlx::query(
+        "DELETE FROM narrative_worlds WHERE world_id = ? AND owner_creator_id = ?",
+    )
+    .bind(&world_id)
+    .bind(&creator_id)
+    .execute(&mut *tx)
+    .await
+    {
+        Ok(res) => res.rows_affected(),
+        Err(e) => {
+            return Err(NexusApiError::Internal {
+                code: "DATABASE_ERROR".to_string(),
+                message: format!("delete_world failed: {e}"),
+            });
+        }
+    };
+
+    if deleted == 0 {
+        // Concurrent delete raced; treat as 404 — row is gone. The tx rolls
+        // back on Drop, discarding the no-op manual cleanup above (each step
+        // matched zero rows since the other caller already cascaded them).
+        return Err(NexusApiError::NotFound(format!(
+            "World {world_id} not found"
+        )));
+    }
+
+    tx.commit().await.map_err(|e| NexusApiError::Internal {
+        code: "DATABASE_ERROR".to_string(),
+        message: format!("delete_world: commit failed: {e}"),
+    })?;
+
+    tracing::info!(
+        target: "worlds.delete",
+        world_id = %world_id,
+        creator_id = %creator_id,
+        "World hard-deleted (KB + timelines cascaded; Works preserved with world_id=NULL)"
+    );
+
+    Ok(StatusCode::NO_CONTENT)
 }
 
 // ─── Tests ─────────────────────────────────────────────────────────────────

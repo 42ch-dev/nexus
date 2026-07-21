@@ -716,11 +716,16 @@ describe('Surfaces page — launch splash fixtures', () => {
   });
 
   it('covers waiting, error+retry, and reset-local-database variants', () => {
+    // V1.129 P1: error states now render the promoted <TransportErrorBlock>.
     expect(screen.getByText('Starting daemon…')).toBeInTheDocument();
-    expect(screen.getAllByText('Daemon not ready').length).toBeGreaterThanOrEqual(2);
-    expect(
-      screen.getAllByRole('button', { name: 'Restart' }).length,
-    ).toBeGreaterThanOrEqual(2);
+    // Two error splashes render the primitive — daemon_down + timeout kinds.
+    const blocks = screen.getAllByTestId('transport-error-block');
+    expect(blocks).toHaveLength(2);
+    expect(screen.getByText('Local daemon is not running')).toBeInTheDocument();
+    expect(screen.getByText('The daemon took too long to respond')).toBeInTheDocument();
+    // Each primitive renders a Retry CTA; reset-local-DB is composed alongside
+    // only on the third splash (timeout).
+    expect(screen.getAllByRole('button', { name: 'Retry' }).length).toBeGreaterThanOrEqual(2);
     expect(screen.getByText('Reset')).toBeInTheDocument();
   });
 });

@@ -831,5 +831,30 @@
       "brief": "简介",
       "narrative": "叙事"
     }
+  },
+  "chapterOutlineContentEditor": {
+    "loading": "正在加载大纲内容…",
+    "loadError": "无法加载该章节的大纲内容。在读取成功之前，保存功能已禁用。",
+    "outlineContentLabel": "大纲内容",
+    "reset": "重置",
+    "saveContent": "保存内容",
+    "editorAriaLabel": "第 {{chapter}} 章大纲内容编辑器",
+    "saveStateAriaLabel": "大纲内容保存状态",
+    "formattingAriaLabel": "大纲内容格式",
+    "saveState": {
+      "clean": "已保存",
+      "dirty": "有未保存的更改",
+      "saving": "正在保存…"
+    },
+    "toolbar": {
+      "heading1": "标题 1",
+      "heading2": "标题 2",
+      "heading3": "标题 3",
+      "bold": "粗体",
+      "italic": "斜体",
+      "bulletList": "无序列表",
+      "numberedList": "有序列表",
+      "quote": "引用"
+    }
   }
 }
