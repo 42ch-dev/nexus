@@ -555,9 +555,9 @@
   /* Background — DESIGN.dark.md §Colors/Background (V1.121 v0.4 ink
      atmosphere: deep-blue cast derived from brand-deep-blue-1000 at matched
      lightness; AA table recomputed — DESIGN.md §Contrast (AA, recomputed)). */
-  --color-background-100: #0a1320;
-  --color-background-200: #0f1a2a;
-  --color-background-300: #152438;
+  --color-background-100: #08141c;
+  --color-background-200: #0d1b26;
+  --color-background-300: #132635;
 
   /* Gray (solid) — gray-100…300 join the ink cast (V1.121 v0.4). */
   --color-gray-100: #141f2e;
