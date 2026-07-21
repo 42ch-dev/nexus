@@ -314,18 +314,18 @@ describe('ConnectDaemonForm', () => {
     await userEvent.type(screen.getByTestId('daemon-url-input'), 'https://remote.example:8420');
     await userEvent.click(screen.getByTestId('fetch-fingerprint-button'));
 
+    // V1.129 P1: transport-classified failures (HttpResponse.error → kind=
+    // network) render the promoted <TransportErrorBlock>. The classifier's
+    // long-form diagnostic rides the primitive's detail line so actionable
+    // text ("use the Nexus desktop app") survives.
     await waitFor(() => {
-      expect(screen.getByTestId('fingerprint-error')).toBeInTheDocument();
-      expect(screen.getByTestId('fingerprint-error')).toHaveTextContent('Trust On First Use');
-      expect(screen.getByTestId('fingerprint-error')).toHaveTextContent('desktop app');
+      const block = screen.getByTestId('transport-error-block');
+      expect(block).toHaveAttribute('data-kind', 'network');
+      expect(block).toHaveTextContent('Could not connect to the daemon at this address');
+      expect(block).toHaveTextContent('desktop app');
     });
-    // V1.121 P2: error surface consumes the P1 error-surface tokens with the
-    // ErrorState text recipe (red-1000 title / red-900 helper).
-    const errorRegion = screen.getByTestId('fingerprint-error');
-    expect(errorRegion).toHaveClass('bg-error-surface');
-    expect(errorRegion).toHaveClass('border-error-surface-border');
-    expect(errorRegion.querySelector('.text-red-1000')).not.toBeNull();
-    expect(errorRegion.querySelector('.text-red-900')).not.toBeNull();
+    // Legacy inline error region is hidden when kind is present.
+    expect(screen.queryByTestId('fingerprint-error')).not.toBeInTheDocument();
   });
 
   it('shows an error when the fingerprint endpoint returns 500', async () => {
@@ -349,9 +349,13 @@ describe('ConnectDaemonForm', () => {
     await userEvent.type(screen.getByTestId('daemon-url-input'), 'https://remote.example:8420');
     await userEvent.click(screen.getByTestId('fetch-fingerprint-button'));
 
+    // V1.129 P1: HTTP 4xx/5xx errors carry no `kind` (transport classifier
+    // only fires on status=0). Legacy inline region renders with the
+    // daemon's error.message; the primitive is NOT mounted.
     await waitFor(() => {
       expect(screen.getByTestId('fingerprint-error')).toHaveTextContent('Fingerprint lookup failed.');
     });
+    expect(screen.queryByTestId('transport-error-block')).not.toBeInTheDocument();
   });
 
   it('renders locked form card description and field helpers', () => {

@@ -24,6 +24,7 @@ import {
 } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { TransportErrorBlock } from '@42ch/nexus-ui';
 import { useToast } from '@/lib/use-toast';
 import { errorMessage } from '@/lib/error-message';
 import {
@@ -327,7 +328,21 @@ export function ConnectDaemonForm() {
           </div>
         </div>
 
-        {fpState.status === 'error' && (
+        {fpState.status === 'error' && fpState.kind ? (
+          // V1.129 P1: transport-classified failures (kind present) render
+          // the promoted <TransportErrorBlock>. CTAs are intentionally
+          // omitted — the author is already on the Connection settings page
+          // (so "Open Connection Settings" is redundant), and the existing
+          // Fetch Fingerprint button below serves as the retry affordance.
+          // The classifier's long-form diagnostic rides the detail line so
+          // the actionable text (e.g. "use the Nexus desktop app") survives.
+          <TransportErrorBlock
+            kind={fpState.kind}
+            detail={fpState.message}
+          />
+        ) : fpState.status === 'error' ? (
+          // HTTP errors (no kind) keep the legacy inline region — their
+          // recovery is daemon-side (fix the 4xx/5xx), not transport.
           <div
             className="rounded-card border border-error-surface-border bg-error-surface p-4"
             role="alert"
@@ -341,7 +356,7 @@ export function ConnectDaemonForm() {
               </div>
             </div>
           </div>
-        )}
+        ) : null}
 
         {renderFingerprintBlock()}
         {renderMismatchWarning()}
