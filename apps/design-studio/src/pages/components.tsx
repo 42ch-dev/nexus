@@ -17,6 +17,7 @@ import {
 import { Dialog, DialogTrigger, DialogContent } from '@web-ui/dialog'; // transitional — keep-web (Radix portal/focus-trap beyond presentational scope)
 import { Spinner, LoadingState, EmptyState, ErrorState } from '@web-ui/states'; // transitional — keep-web (lucide-react asset boundary; product copy & app-composition callbacks)
 import { ToastFixtures } from '@/fixtures/toast-fixtures';
+import { TransportErrorBlockFixtures } from '@/fixtures/transport-error-block';
 import {
   Table,
   TableHeader,
@@ -97,6 +98,7 @@ function SubNav() {
     { label: 'Textarea', href: '#comp-textarea' },
     { label: 'Form Field', href: '#comp-form-field' },
     { label: 'Toast', href: '#comp-toast' },
+    { label: 'Transport Error', href: '#comp-transport-error-block' },
   ];
 
   return (
@@ -1130,6 +1132,32 @@ function ToastSection() {
 }
 
 /* ------------------------------------------------------------------ */
+/*  14. TransportErrorBlock                                            */
+/* ------------------------------------------------------------------ */
+
+function TransportErrorBlockSection() {
+  return (
+    <section>
+      <SectionHeading id="comp-transport-error-block">Transport Error Block</SectionHeading>
+      <p className="text-copy-16 text-gray-700 mb-6">
+        Promoted{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+          @42ch/nexus-ui
+        </code>{' '}
+        primitive for transport-failure UX (V1.129 P1). Renders the per-kind
+        headline + body + CTA matrix for all six{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+          TransportErrorKind
+        </code>{' '}
+        values, the callback-omission (toast) variant, and a caller-supplied
+        detail line. Toggle the theme to verify light + dark contrast.
+      </p>
+      <TransportErrorBlockFixtures />
+    </section>
+  );
+}
+
+/* ------------------------------------------------------------------ */
 /*  Page                                                                */
 /* ------------------------------------------------------------------ */
 
@@ -1166,10 +1194,12 @@ export function ComponentsPage() {
       <TextareaSection />
       <FormFieldSection />
       <ToastSection />
+      <TransportErrorBlockSection />
 
       <p className="text-copy-13 text-gray-500 mt-12 pt-8 border-t border-gray-alpha-200">
-        8 promoted (Badge, Button, Card, Input, Label, Textarea, Select, Toast)
-        + 4 transitional (Dialog, States, Table, Tabs) rendered live via{' '}
+        9 promoted (Badge, Button, Card, Input, Label, Textarea, Select, Toast,
+        TransportErrorBlock) + 4 transitional (Dialog, States, Table, Tabs)
+        rendered live via{' '}
         <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">@42ch/nexus-ui</code>{' '}
         (promoted) and{' '}
         <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">@web-ui/*</code>{' '}

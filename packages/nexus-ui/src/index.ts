@@ -5,6 +5,8 @@
  * V1.99 P0 ships: `<Button>`, `<Badge>`, `<Card>` (+ sub-primitives).
  * V1.100 P2 ships: `<Input>`, `<Label>`, `<Textarea>`.
  * V1.101 P2 ships: `<Select>`.
+ * V1.106 P0 ships: `<Toast>` (+ ToastProvider / Toaster / useToast).
+ * V1.129 P1 ships: `<TransportErrorBlock>`.
  */
 
 // Class-merge utility — the V1.100 SSOT for cn / extendTailwindMerge.
@@ -54,3 +56,11 @@ export {
   type Toast,
   type ToastVariant,
 } from './components/toast';
+
+// V1.129 P1 — promoted transport-error presentational primitive
+// (Studio fixture → app wiring across gates + toasts + settings).
+export {
+  TransportErrorBlock,
+  type TransportErrorBlockProps,
+  type TransportErrorKind,
+} from './components/transport-error-block';
