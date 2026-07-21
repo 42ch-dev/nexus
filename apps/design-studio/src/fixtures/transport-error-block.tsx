@@ -18,7 +18,10 @@ const KIND_MATRIX: Array<{
   { kind: 'daemon_down', ctaNote: 'Retry primary · no secondary' },
   { kind: 'http_fallback', ctaNote: 'Retry primary · no secondary' },
   { kind: 'network', ctaNote: 'Open Connection Settings primary · Retry secondary' },
-  { kind: 'tls', ctaNote: 'Use Desktop App primary (informational) · Open Settings secondary' },
+  {
+    kind: 'tls',
+    ctaNote: 'No primary (body carries the desktop-app note) · Open Settings secondary',
+  },
   { kind: 'timeout', ctaNote: 'Retry primary · Open Settings secondary' },
   { kind: 'unknown', ctaNote: 'Retry primary · Open Settings secondary' },
 ];
@@ -58,9 +61,9 @@ export function TransportErrorBlockFixtures() {
         <p className="text-copy-13 text-gray-700">
           When the caller omits both <code className="text-copy-13-mono">onRetry</code> and{' '}
           <code className="text-copy-13-mono">onOpenSettings</code>, only headline + body render.
-          The <code className="text-copy-13-mono">tls</code> kind still renders its
-          informational <em>Use Desktop App</em> primary because the matrix lists it without a
-          callback.
+          The <code className="text-copy-13-mono">tls</code> kind never renders a primary button —
+          its <em>Use Desktop App</em> instruction is informational and is carried by the body copy
+          (QC1-F-002).
         </p>
         <div
           data-testid="transport-error-block-no-callbacks"

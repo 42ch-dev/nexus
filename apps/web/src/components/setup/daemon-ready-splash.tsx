@@ -20,6 +20,28 @@ interface DaemonReadySplashProps {
 }
 
 /**
+ * Primary CTA locale key (`common.transportCta.*`) for a transport-error kind.
+ *
+ * Self-contained mirror of the primitive's CTA matrix — `daemon-ready-splash`
+ * is a Studio-shared presentational extract (`@web-setup/*`) and must not
+ * import from `@/lib/nexus/*` (Studio resolves `@/*` to its own `src/`). The
+ * secondary CTA is omitted because the launch gate never supplies
+ * `onOpenSettings` (it runs before the router mounts), so the secondary
+ * button never renders here.
+ */
+function primaryCtaLocaleKey(kind: TransportErrorKind): string {
+  switch (kind) {
+    case 'network':
+      return 'transportCta.openConnectionSettings';
+    case 'tls':
+      return 'transportCta.useDesktopApp';
+    // daemon_down, http_fallback, timeout, unknown
+    default:
+      return 'transportCta.retry';
+  }
+}
+
+/**
  * Full-screen splash while waiting for the daemon on every desktop launch.
  * Owns wait chrome + diagnostic affordances (retry / reset local database).
  * Avoids the main UI shell so the author never sees a "starting" pill inside
@@ -39,6 +61,8 @@ export function DaemonReadySplash({
   resetBusy = false,
 }: DaemonReadySplashProps) {
   const { t } = useTranslation('setup');
+  const { t: tShell } = useTranslation('shell');
+  const { t: tCommon } = useTranslation('common');
   return (
     <div className="flex min-h-screen flex-col items-center justify-center gap-6 bg-background-100 p-6 text-center">
       <div className="flex max-w-md flex-col items-center gap-4">
@@ -46,6 +70,12 @@ export function DaemonReadySplash({
           <>
             <TransportErrorBlock
               kind={errorKind}
+              // QC1-F-001: caller-owned localized copy (primitive defaults are
+              // an English fallback for Studio). Self-contained here because
+              // this extract is Studio-shared via @web-setup/*.
+              title={tShell(`profile.createError.${errorKind}.headline`)}
+              body={tShell(`profile.createError.${errorKind}.body`)}
+              primaryCtaLabel={tCommon(primaryCtaLocaleKey(errorKind))}
               onRetry={onRetry}
               // Desktop launch gate runs before the router mounts — no settings
               // route is available, so onOpenSettings is intentionally omitted

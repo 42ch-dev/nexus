@@ -32,12 +32,14 @@ import {
   endpointLabel,
   type ConnectionConfig,
 } from '@/lib/nexus/connection-storage';
+import { transportErrorCopyFor } from '@/lib/nexus/transport-error-cta';
 import { useConnectionConfig, useSetConnectionConfig } from '@/lib/client-context';
 import { useFingerprint } from '@/lib/nexus/use-fingerprint';
 
 export function ConnectDaemonForm() {
   const { t } = useTranslation('settings');
   const { t: commonT } = useTranslation('common');
+  const { t: shellT } = useTranslation('shell');
   const { toast } = useToast();
   const savedConfig = useConnectionConfig();
   const setConfig = useSetConnectionConfig();
@@ -336,8 +338,11 @@ export function ConnectDaemonForm() {
           // Fetch Fingerprint button below serves as the retry affordance.
           // The classifier's long-form diagnostic rides the detail line so
           // the actionable text (e.g. "use the Nexus desktop app") survives.
+          // QC1-F-001: caller-owned localized copy (primitive defaults are an
+          // English fallback for Studio).
           <TransportErrorBlock
             kind={fpState.kind}
+            {...transportErrorCopyFor(fpState.kind, shellT, commonT)}
             detail={fpState.message}
           />
         ) : fpState.status === 'error' ? (

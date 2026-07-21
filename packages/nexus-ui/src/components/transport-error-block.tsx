@@ -68,14 +68,13 @@ const SECONDARY_CTA: Partial<Record<TransportErrorKind, TransportCtaKind>> = {
 /**
  * Built-in English copy table (V1.129 ship baseline).
  *
- * Boundary (locked): the primitive does NOT import `react-i18next`. App
- * surfaces override `title` for locale-specific headlines when needed; the
- * body and CTA labels stay package-owned for V1.129 ship. Localization of
- * body/CTA copy is a follow-up — extend with `body?` / `ctaLabel?` props or
- * extract to an i18n-free constants module when needed. The V1.129 P0 spec
- * locked these strings as the shared single source (mirrors the
+ * Boundary: the primitive does NOT import `react-i18next`. These constants
+ * are the **fallback** copy — Studio (English-only) renders them directly.
+ * App surfaces pass caller-owned localized copy via the `title?` / `body?` /
+ * `primaryCtaLabel?` / `secondaryCtaLabel?` override props so `zh-CN` users
+ * see fully localized copy (QC1-F-001). The defaults mirror the
  * `profile.createError.<kind>.*` keys in `apps/web/src/locales/{en,zh-CN}/
- * shell.json`).
+ * shell.json` and the `transportCta.*` keys in `common.json`.
  */
 const HEADLINE_COPY: Record<TransportErrorKind, string> = {
   daemon_down: 'Local daemon is not running',
@@ -90,8 +89,10 @@ const BODY_COPY: Record<TransportErrorKind, string> = {
   daemon_down: 'Start it with `nexus42 daemon start`, then try again.',
   network:
     'Check the URL and port in Connection settings, or confirm the network can reach that host.',
+  // `tls` has no callback-driven primary CTA — the desktop-app instruction
+  // is informational and lives in the body copy (QC1-F-002: no no-op button).
   tls:
-    'The web app cannot trust a remote self-signed certificate. The Nexus desktop app can store trust in the OS keychain.',
+    'The web app cannot trust a remote self-signed certificate. Use the Nexus desktop app — it can store trust in the OS keychain.',
   http_fallback:
     'The daemon answered with a page instead of an API response. Retry once; if it keeps happening, check the daemon status.',
   timeout: 'The connection stalled or the daemon is busy. Retry in a moment.',
@@ -120,6 +121,23 @@ export interface TransportErrorBlockProps
   detail?: string;
   /** Optional headline override (rare; defaults to per-kind headline). */
   title?: string;
+  /**
+   * Optional caller-supplied body copy. Falls back to the package's per-kind
+   * default (used by the English-only Studio fixture). App surfaces pass a
+   * localized `t()` string here (QC1-F-001).
+   */
+  body?: string;
+  /**
+   * Optional caller-supplied primary CTA label. Falls back to the package's
+   * per-kind default. App surfaces pass a localized `t()` string here.
+   */
+  primaryCtaLabel?: string;
+  /**
+   * Optional caller-supplied secondary CTA label. Falls back to the package's
+   * per-kind default. App surfaces pass a localized `t()` string here.
+   * `undefined` is equivalent to "use the default".
+   */
+  secondaryCtaLabel?: string;
 }
 
 /**
@@ -132,12 +150,13 @@ export interface TransportErrorBlockProps
  * layout (full-page ErrorState vs inline region vs toast adaptation).
  *
  * CTA visibility rule (spec lock — "omit to hide Retry" / "omit to hide Open
- * Connection Settings"): a CTA renders iff (a) the matrix lists it for the
- * given `kind` AND (b) the caller supplied the matching callback. The
- * exception is `useDesktopApp`, which is informational and always renders
- * when the matrix lists it. So a caller that supplies neither callback gets
- * headline + body only (the toast case); a caller that supplies both gets
- * the full matrix.
+ * Connection Settings"): a callback-driven CTA renders iff (a) the matrix
+ * lists it for the given `kind` AND (b) the caller supplied the matching
+ * callback. The `useDesktopApp` CTA is **informational** — it never renders
+ * as a button; the body copy carries the desktop-app instruction (QC1-F-002).
+ * So a caller that supplies neither callback gets headline + body only (the
+ * toast case); a caller that supplies the matching callbacks gets the full
+ * matrix.
  *
  * Boundary: presentational only — no daemon calls, no routing, no product
  * state, no `react-i18next` import. See `transport-error-ux.md` § Interfaces.
@@ -151,11 +170,22 @@ export interface TransportErrorBlockProps
  */
 export const TransportErrorBlock = forwardRef<HTMLDivElement, TransportErrorBlockProps>(
   function TransportErrorBlock(
-    { kind, onRetry, onOpenSettings, detail, title, className, ...rest },
+    {
+      kind,
+      onRetry,
+      onOpenSettings,
+      detail,
+      title,
+      body,
+      primaryCtaLabel,
+      secondaryCtaLabel,
+      className,
+      ...rest
+    },
     ref,
   ) {
     const headline = title ?? HEADLINE_COPY[kind];
-    const body = BODY_COPY[kind];
+    const bodyText = body ?? BODY_COPY[kind];
     const primary = PRIMARY_CTA[kind];
     const secondary = SECONDARY_CTA[kind];
 
@@ -183,7 +213,7 @@ export const TransportErrorBlock = forwardRef<HTMLDivElement, TransportErrorBloc
           />
           <div className="min-w-0 flex-1 space-y-1">
             <p className="text-copy-14 font-medium text-red-900 dark:text-red-100">{headline}</p>
-            <p className="text-copy-13 text-red-800 dark:text-red-200">{body}</p>
+            <p className="text-copy-13 text-red-800 dark:text-red-200">{bodyText}</p>
             {detail ? (
               <p className="break-words text-copy-13 text-red-800/80 dark:text-red-200/80">
                 {detail}
@@ -197,14 +227,11 @@ export const TransportErrorBlock = forwardRef<HTMLDivElement, TransportErrorBloc
               <Button
                 type="button"
                 variant="primary"
-                // `useDesktopApp` is informational only (spec lock) — the
-                // button renders so the matrix is visually complete, but no
-                // callback is wired. The body copy carries the instruction.
                 onClick={ctaOnClick(primary, onRetry, onOpenSettings)}
                 data-testid="transport-error-primary"
                 data-cta={primary}
               >
-                {CTA_LABEL[primary]}
+                {primaryCtaLabel ?? CTA_LABEL[primary]}
               </Button>
             )}
             {secondaryVisible && secondary && (
@@ -215,7 +242,7 @@ export const TransportErrorBlock = forwardRef<HTMLDivElement, TransportErrorBloc
                 data-testid="transport-error-secondary"
                 data-cta={secondary}
               >
-                {CTA_LABEL[secondary]}
+                {secondaryCtaLabel ?? CTA_LABEL[secondary]}
               </Button>
             )}
           </div>
@@ -226,8 +253,8 @@ export const TransportErrorBlock = forwardRef<HTMLDivElement, TransportErrorBloc
 );
 
 /**
- * Resolve a CTA's `onClick`. Returns `undefined` for `useDesktopApp`
- * (informational only — the button renders but does nothing).
+ * Resolve a callback-driven CTA's `onClick`. `useDesktopApp` has no callback
+ * (informational) and is never rendered as a button — see {@link isCtaVisible}.
  */
 function ctaOnClick(
   cta: TransportCtaKind,
@@ -240,16 +267,19 @@ function ctaOnClick(
 }
 
 /**
- * A CTA is visible iff (a) the matrix lists it AND (b) the caller supplied
- * the matching callback — except `useDesktopApp`, which is informational and
- * always visible when listed.
+ * A callback-driven CTA is visible iff (a) the matrix lists it AND (b) the
+ * caller supplied the matching callback. `useDesktopApp` is informational —
+ * it never renders as a button (QC1-F-002: a keyboard-focusable no-op button
+ * is misleading and inaccessible). The desktop-app instruction is carried by
+ * the body copy instead. The CTA stays in {@link PRIMARY_CTA} so the matrix
+ * records the kind's recovery intent.
  */
 function isCtaVisible(
   cta: TransportCtaKind,
   onRetry: (() => void) | undefined,
   onOpenSettings: (() => void) | undefined,
 ): boolean {
-  if (cta === 'useDesktopApp') return true;
+  if (cta === 'useDesktopApp') return false;
   if (cta === 'retry') return Boolean(onRetry);
   return Boolean(onOpenSettings);
 }

@@ -107,7 +107,7 @@ describe('TransportErrorBlock', () => {
       expect(onRetry).toHaveBeenCalledTimes(1);
     });
 
-    it('tls: Use Desktop App primary (informational, no callback), Open Settings secondary', () => {
+    it('tls: no primary button (informational body carries the desktop-app instruction), Open Settings secondary', () => {
       const onRetry = vi.fn();
       const onOpenSettings = vi.fn();
       render(
@@ -118,18 +118,20 @@ describe('TransportErrorBlock', () => {
         />,
       );
 
-      const primary = screen.getByTestId('transport-error-primary');
-      expect(primary).toHaveAttribute('data-cta', 'useDesktopApp');
-      expect(primary).toHaveTextContent('Use Desktop App');
-      // Informational — clicking does not invoke either callback.
-      fireEvent.click(primary);
-      expect(onRetry).not.toHaveBeenCalled();
-      expect(onOpenSettings).not.toHaveBeenCalled();
+      const region = screen.getByTestId('transport-error-block');
+      // QC1-F-002: `useDesktopApp` is informational — it must NOT render as a
+      // keyboard-focusable button. The desktop-app instruction rides the body.
+      expect(screen.queryByTestId('transport-error-primary')).not.toBeInTheDocument();
+      expect(region.textContent).toMatch(/desktop app/i);
 
+      // Secondary (Open Connection Settings) still renders when its callback
+      // is supplied.
       const secondary = screen.getByTestId('transport-error-secondary');
       expect(secondary).toHaveAttribute('data-cta', 'openConnectionSettings');
       fireEvent.click(secondary);
       expect(onOpenSettings).toHaveBeenCalledTimes(1);
+      // No primary button → no path to fire either callback via a primary click.
+      expect(onRetry).not.toHaveBeenCalled();
     });
 
     it('timeout / unknown: Retry primary, Open Settings secondary', () => {
@@ -213,12 +215,64 @@ describe('TransportErrorBlock', () => {
       expect(screen.queryByTestId('transport-error-secondary')).not.toBeInTheDocument();
     });
 
-    it('still renders Use Desktop App when both callbacks are omitted (tls informational)', () => {
+    it('tls with no callbacks renders headline + body only (no Use Desktop App button)', () => {
+      // QC1-F-002: `useDesktopApp` is informational and never renders a button.
+      // The body copy carries the desktop-app instruction.
       render(<TransportErrorBlock kind="tls" />);
-      const primary = screen.getByTestId('transport-error-primary');
-      expect(primary).toHaveAttribute('data-cta', 'useDesktopApp');
-      // Secondary is Open Settings per matrix; omitted callback hides it.
+      const region = screen.getByTestId('transport-error-block');
+      expect(region).toBeInTheDocument();
+      expect(screen.queryByTestId('transport-error-primary')).not.toBeInTheDocument();
       expect(screen.queryByTestId('transport-error-secondary')).not.toBeInTheDocument();
+      expect(region.textContent).toMatch(/desktop app/i);
+    });
+  });
+
+  describe('caller-owned copy overrides (QC1-F-001)', () => {
+    it('uses the caller-supplied body when provided', () => {
+      render(
+        <TransportErrorBlock
+          kind="daemon_down"
+          body="Caller-supplied body text."
+          onRetry={() => {}}
+        />,
+      );
+      expect(screen.getByText('Caller-supplied body text.')).toBeInTheDocument();
+    });
+
+    it('uses the caller-supplied primary CTA label when provided', () => {
+      render(
+        <TransportErrorBlock
+          kind="daemon_down"
+          primaryCtaLabel="Reintentar"
+          onRetry={() => {}}
+        />,
+      );
+      const primary = screen.getByTestId('transport-error-primary');
+      expect(primary).toHaveTextContent('Reintentar');
+    });
+
+    it('uses the caller-supplied secondary CTA label when provided', () => {
+      render(
+        <TransportErrorBlock
+          kind="timeout"
+          primaryCtaLabel="Reintentar"
+          secondaryCtaLabel="Abrir ajustes"
+          onRetry={() => {}}
+          onOpenSettings={() => {}}
+        />,
+      );
+      expect(screen.getByTestId('transport-error-primary')).toHaveTextContent('Reintentar');
+      expect(screen.getByTestId('transport-error-secondary')).toHaveTextContent('Abrir ajustes');
+    });
+
+    it('falls back to package defaults when overrides are omitted (Studio case)', () => {
+      render(<TransportErrorBlock kind="daemon_down" onRetry={() => {}} />);
+      // Package default body for daemon_down.
+      expect(
+        screen.getByText('Start it with `nexus42 daemon start`, then try again.'),
+      ).toBeInTheDocument();
+      // Package default Retry label.
+      expect(screen.getByTestId('transport-error-primary')).toHaveTextContent('Retry');
     });
   });
 

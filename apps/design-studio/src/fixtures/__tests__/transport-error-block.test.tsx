@@ -67,13 +67,13 @@ describe('TransportErrorBlockFixtures', () => {
     expect(daemon).toBeDefined();
     expect(daemon && within(daemon).queryByTestId('transport-error-primary')).not.toBeInTheDocument();
 
-    // tls with no callbacks → Use Desktop App primary still renders (informational).
+    // tls with no callbacks → no primary button (QC1-F-002: `useDesktopApp`
+    // is informational — the body copy carries the desktop-app instruction,
+    // never a keyboard-focusable no-op button).
     const tls = blocks.find((b) => b.getAttribute('data-kind') === 'tls');
     expect(tls).toBeDefined();
-    expect(tls && within(tls).getByTestId('transport-error-primary')).toHaveAttribute(
-      'data-cta',
-      'useDesktopApp',
-    );
+    expect(tls && within(tls).queryByTestId('transport-error-primary')).not.toBeInTheDocument();
+    expect(tls && tls.textContent).toMatch(/desktop app/i);
   });
 
   it('renders the detail-line variant', () => {
