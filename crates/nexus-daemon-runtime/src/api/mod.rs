@@ -350,8 +350,15 @@ fn canvas_outline_routes() -> Router<WorkspaceState> {
 /// World KB routes under `/v1/daemon/worlds/{world_id}/kb/*`. Per-row OCC on
 /// `kb_key_blocks.revision` (entity edits), `kb_extract_jobs.version`
 /// (promotion), and `kb_relationships.revision` (relationship edits).
+///
+/// Also hosts the V1.129 P2 `DELETE /v1/daemon/worlds/{world_id}` hard-delete
+/// route (R-V1126P0-T2-001) — it shares the `{world_id}` path prefix.
 fn world_kb_routes() -> Router<WorkspaceState> {
     Router::new()
+        .route(
+            "/v1/daemon/worlds/{world_id}",
+            delete(handlers::narrative::delete_world),
+        )
         .route(
             "/v1/daemon/worlds/{world_id}/kb/patch-entity",
             post(handlers::world_kb::patch_entity),
@@ -417,7 +424,9 @@ fn works_routes() -> Router<WorkspaceState> {
         )
         .route(
             "/v1/daemon/works/{work_id}",
-            get(handlers::works::get_work).patch(handlers::works::patch_work),
+            get(handlers::works::get_work)
+                .patch(handlers::works::patch_work)
+                .delete(handlers::works::delete_work),
         )
         // ── Canvas Outline+Timeline routes (V1.72) ─────────────────────────
         .merge(canvas_outline_routes())
