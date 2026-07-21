@@ -4,7 +4,8 @@ import { useTranslation } from 'react-i18next';
 
 import { DaemonReadySplash } from '@/components/setup/daemon-ready-splash';
 import { useDesktopCapabilities, useNexusClient } from '@/lib/client-context';
-import { errorMessage } from '@/lib/error-message';
+import { errorMessage as toErrorMessage } from '@/lib/error-message';
+import type { TransportErrorKind } from '@/lib/nexus';
 import type { DaemonStatus } from '@/lib/nexus/desktop-capabilities';
 
 interface DaemonLaunchGateProps {
@@ -14,6 +15,31 @@ interface DaemonLaunchGateProps {
 const WAIT_TIMEOUT_MS = 25_000;
 /** Secondary health poll cadence while waiting for `running` (V1.125). */
 const HEALTH_POLL_MS = 1_500;
+
+/**
+ * Map a desktop daemon status failure to a transport-error kind (V1.129 P1).
+ *
+ * The desktop launch gate does NOT consume the browser-client classifier —
+ * its failures come from Tauri IPC `getDaemonStatus` / wait timeout. The kind
+ * is therefore inferred from the path the gate took, not from a thrown
+ * `NexusClientError`. This keeps the recovery UX consistent across surfaces
+ * (same primitive, same copy table) without inventing a new error path.
+ *
+ * - `state: 'error'` → `daemon_down` (the local daemon is not reaching
+ *   `running`; recovery copy points the user to start it / reset local DB).
+ * - timeout → `timeout` (25s elapsed without `running`).
+ * - status IPC unavailable → `unknown` (cannot classify; recovery generic).
+ */
+function kindForErrorState(errorState: 'daemon-error' | 'timeout' | 'unknown'): TransportErrorKind {
+  switch (errorState) {
+    case 'daemon-error':
+      return 'daemon_down';
+    case 'timeout':
+      return 'timeout';
+    case 'unknown':
+      return 'unknown';
+  }
+}
 
 /**
  * Outer application launch gate (V1.105 P0, V1.125 tightened).
@@ -31,7 +57,8 @@ export function DaemonLaunchGate({ children }: DaemonLaunchGateProps) {
   const desktop = useDesktopCapabilities();
   const client = useNexusClient();
   const [daemonReady, setDaemonReady] = useState(() => !desktop);
-  const [error, setError] = useState<string | null>(null);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [errorKind, setErrorKind] = useState<TransportErrorKind | null>(null);
   const [resetBusy, setResetBusy] = useState(false);
 
   useEffect(() => {
@@ -58,7 +85,8 @@ export function DaemonLaunchGate({ children }: DaemonLaunchGateProps) {
       if (cancelled) return;
       ready = true;
       setDaemonReady(true);
-      setError(null);
+      setErrorMessage(null);
+      setErrorKind(null);
       clearWaitTimeout();
     }
 
@@ -69,10 +97,12 @@ export function DaemonLaunchGate({ children }: DaemonLaunchGateProps) {
       } else if (status.state === 'starting' || status.state === 'stopped') {
         // D2: Tauri `.setup()` owns start — keep waiting; do not call startDaemon.
         setDaemonReady(false);
-        setError(null);
+        setErrorMessage(null);
+        setErrorKind(null);
       } else if (status.state === 'error') {
         setDaemonReady(false);
-        setError(status.detail ?? t('error.daemonNotResponding'));
+        setErrorMessage(status.detail ?? t('error.daemonNotResponding'));
+        setErrorKind(kindForErrorState('daemon-error'));
       }
     }
 
@@ -161,18 +191,19 @@ export function DaemonLaunchGate({ children }: DaemonLaunchGateProps) {
           }
           if (status.state === 'error') {
             setDaemonReady(false);
-            setError(status.detail ?? t('error.daemonNotResponding'));
+            setErrorMessage(status.detail ?? t('error.daemonNotResponding'));
+            setErrorKind(kindForErrorState('daemon-error'));
             return;
           }
           setDaemonReady(false);
-          setError(
-            t('error.daemonSlowStart'),
-          );
+          setErrorMessage(t('error.daemonSlowStart'));
+          setErrorKind(kindForErrorState('timeout'));
         })
         .catch(() => {
           if (cancelled || ready) return;
           setDaemonReady(false);
-          setError(t('error.daemonStatusUnknown'));
+          setErrorMessage(t('error.daemonStatusUnknown'));
+          setErrorKind(kindForErrorState('unknown'));
         });
     }, WAIT_TIMEOUT_MS);
 
@@ -193,7 +224,8 @@ export function DaemonLaunchGate({ children }: DaemonLaunchGateProps) {
   async function resetLocalDatabase() {
     if (!desktop) return;
     setResetBusy(true);
-    setError(null);
+    setErrorMessage(null);
+    setErrorKind(null);
     try {
       await desktop.resetLocalDatabase();
       // Explicit D2 decision: do NOT call startDaemon after reset — reload
@@ -203,14 +235,16 @@ export function DaemonLaunchGate({ children }: DaemonLaunchGateProps) {
       setResetBusy(false);
       // Keep the error until Restart (reload). Do not re-subscribe here —
       // that would re-run applyStatus and clear the reset-failure message.
-      setError(errorMessage(err) || t('error.resetDatabaseFailed'));
+      setErrorMessage(toErrorMessage(err) || t('error.resetDatabaseFailed'));
+      setErrorKind(kindForErrorState('unknown'));
     }
   }
 
   if (!daemonReady) {
     return (
       <DaemonReadySplash
-        error={error}
+        errorKind={errorKind}
+        errorMessage={errorMessage ?? undefined}
         onRetry={retry}
         onResetLocalDatabase={desktop ? () => void resetLocalDatabase() : undefined}
         resetBusy={resetBusy}

@@ -210,9 +210,22 @@ describe('DaemonLaunchGate', () => {
       await vi.advanceTimersByTimeAsync(25_000);
     });
 
-    await waitFor(() => expect(screen.getByText('Daemon not ready')).toBeInTheDocument());
+    // V1.129 P1: the timeout path now renders the promoted
+    // <TransportErrorBlock> for kind=timeout. Headline + body come from the
+    // primitive; the diagnostic message rides the detail line.
+    const block = await screen.findByTestId('transport-error-block');
+    expect(block).toHaveAttribute('data-kind', 'timeout');
+    expect(block).toHaveTextContent('The daemon took too long to respond');
+    // Diagnostic detail (the existing setup-locale string) still surfaces.
     expect(screen.getByText(/taking longer than expected/i)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /^Restart$/i })).toBeInTheDocument();
+    // Retry CTA from the primitive (no Open Settings — desktop launch gate
+    // runs before the router mounts).
+    expect(screen.getByTestId('transport-error-primary')).toHaveAttribute(
+      'data-cta',
+      'retry',
+    );
+    expect(screen.queryByTestId('transport-error-secondary')).not.toBeInTheDocument();
+    // Reset Local Database stays composed alongside the primitive.
     expect(screen.getByRole('button', { name: /^Reset$/i })).toBeInTheDocument();
     expect(startDaemon).not.toHaveBeenCalled();
   });
@@ -243,11 +256,13 @@ describe('DaemonLaunchGate', () => {
       await vi.advanceTimersByTimeAsync(25_000);
     });
 
-    await waitFor(() =>
-      expect(screen.getByRole('button', { name: /^Restart$/i })).toBeInTheDocument(),
+    // Retry CTA is the primitive's primary button for kind=timeout.
+    const retryButton = await waitFor(() =>
+      screen.getByTestId('transport-error-primary'),
     );
+    expect(retryButton).toHaveAttribute('data-cta', 'retry');
 
-    await user.click(screen.getByRole('button', { name: /^Restart$/i }));
+    await user.click(retryButton);
     expect(reloadSpy).toHaveBeenCalled();
   });
 
@@ -276,7 +291,10 @@ describe('DaemonLaunchGate', () => {
       }),
     });
 
-    await waitFor(() => expect(screen.getByText('Daemon not ready')).toBeInTheDocument());
+    // V1.129 P1: daemon-error path renders kind=daemon_down.
+    const block = await screen.findByTestId('transport-error-block');
+    expect(block).toHaveAttribute('data-kind', 'daemon_down');
+    // The daemon's last detail string rides the primitive's detail line.
     expect(screen.getByText('sidecar crashed')).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: /^Reset$/i }));
@@ -308,7 +326,8 @@ describe('DaemonLaunchGate', () => {
       }),
     });
 
-    await waitFor(() => expect(screen.getByText('Daemon not ready')).toBeInTheDocument());
+    const block = await screen.findByTestId('transport-error-block');
+    expect(block).toHaveAttribute('data-kind', 'daemon_down');
     expect(screen.getByText('sidecar crashed')).toBeInTheDocument();
     const subscribeCallsBefore = onDaemonStatusChanged.mock.calls.length;
 
@@ -319,6 +338,10 @@ describe('DaemonLaunchGate', () => {
     // Failure must not re-run the wait effect (which would clear the error via applyStatus).
     expect(onDaemonStatusChanged.mock.calls.length).toBe(subscribeCallsBefore);
     expect(startDaemon).not.toHaveBeenCalled();
-    expect(screen.getByRole('button', { name: /^Restart$/i })).toBeInTheDocument();
+    // Primitive's Retry CTA still present alongside the failed reset state.
+    expect(screen.getByTestId('transport-error-primary')).toHaveAttribute(
+      'data-cta',
+      'retry',
+    );
   });
 });
