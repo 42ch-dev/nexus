@@ -55,14 +55,13 @@ describe('MainBanner daemon failure surfaces', () => {
     await waitFor(() => expect(container.firstChild).toBeNull());
   });
 
-  it('stopped daemon shows detail and starts the daemon', async () => {
-    const startDaemon = vi.fn().mockResolvedValue(undefined);
-    const stopDaemon = vi.fn().mockResolvedValue(undefined);
+  it('stopped daemon shows detail and restarts the daemon', async () => {
+    const restartDaemon = vi.fn().mockResolvedValue(undefined);
 
     renderInApp(<MainBanner />, {
       desktop: makeDesktop(
         { state: 'stopped', detail: 'Restart the daemon to use local workspace features.' },
-        { startDaemon, stopDaemon },
+        { restartDaemon },
       ),
     });
 
@@ -72,36 +71,31 @@ describe('MainBanner daemon failure surfaces', () => {
 
     await userEvent.click(screen.getByRole('button', { name: /^Restart$/i }));
 
-    expect(stopDaemon).not.toHaveBeenCalled();
-    expect(startDaemon).toHaveBeenCalled();
+    expect(restartDaemon).toHaveBeenCalled();
   });
 
-  it('error daemon restarts with stop then start', async () => {
-    const startDaemon = vi.fn().mockResolvedValue(undefined);
-    const stopDaemon = vi.fn().mockResolvedValue(undefined);
+  it('error daemon restarts with restartDaemon', async () => {
+    const restartDaemon = vi.fn().mockResolvedValue(undefined);
 
     renderInApp(<MainBanner />, {
-      desktop: makeDesktop({ state: 'error', detail: 'Daemon crashed.' }, { startDaemon, stopDaemon }),
+      desktop: makeDesktop({ state: 'error', detail: 'Daemon crashed.' }, { restartDaemon }),
     });
 
     await userEvent.click(await screen.findByRole('button', { name: /^Restart$/i }));
 
-    expect(stopDaemon).toHaveBeenCalled();
-    expect(startDaemon).toHaveBeenCalled();
+    expect(restartDaemon).toHaveBeenCalled();
   });
 
-  it('degraded daemon restarts with stop then start', async () => {
-    const startDaemon = vi.fn().mockResolvedValue(undefined);
-    const stopDaemon = vi.fn().mockResolvedValue(undefined);
+  it('degraded daemon restarts with restartDaemon', async () => {
+    const restartDaemon = vi.fn().mockResolvedValue(undefined);
 
     renderInApp(<MainBanner />, {
-      desktop: makeDesktop({ state: 'degraded' }, { startDaemon, stopDaemon }),
+      desktop: makeDesktop({ state: 'degraded' }, { restartDaemon }),
     });
 
     await userEvent.click(await screen.findByRole('button', { name: /^Restart$/i }));
 
-    expect(stopDaemon).toHaveBeenCalled();
-    expect(startDaemon).toHaveBeenCalled();
+    expect(restartDaemon).toHaveBeenCalled();
   });
 
   it('updates when the Rust side emits a running event', async () => {

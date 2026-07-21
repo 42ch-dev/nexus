@@ -65,20 +65,20 @@ describe('Sidebar', () => {
     expect(screen.getByRole('link', { name: 'Schedule' })).toBeInTheDocument();
     // AC-P2-2: Capabilities is soft-removed from the Orchestration sidebar.
     expect(screen.queryByRole('link', { name: 'Capabilities' })).not.toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Modules' })).toBeInTheDocument();
+    // V1.130: Compute/Modules removed from the Orchestrator sidebar.
+    expect(screen.queryByRole('link', { name: 'Modules' })).not.toBeInTheDocument();
 
     expect(screen.queryByRole('link', { name: 'All Works' })).not.toBeInTheDocument();
   });
 
-  it('exposes the Modules nav link under the Orchestrator tab with a valid route', async () => {
+  it('does not expose Modules in the Orchestrator tab (V1.130: Compute/Modules removed)', async () => {
     const user = userEvent.setup();
     useSidebarHandlers();
 
     renderInApp(<Sidebar />, { client: makeClient(), activeCreatorId: 'creator-a' });
 
     await user.click(screen.getByRole('tab', { name: 'Orchestrator' }));
-    const modulesLink = screen.getByRole('link', { name: 'Modules' });
-    expect(modulesLink).toHaveAttribute('href', '/modules');
+    expect(screen.queryByRole('link', { name: 'Modules' })).not.toBeInTheDocument();
   });
 
   // V1.125 P2 — Timeline peer groups removed from Creator sidebar; routes
@@ -164,7 +164,7 @@ describe('Sidebar', () => {
     renderInApp(<Sidebar />, { client: makeClient(), activeCreatorId: 'creator-a' });
 
     await waitFor(() =>
-      expect(screen.getByRole('toolbar', { name: 'Profiles' })).toBeInTheDocument(),
+      expect(screen.getByRole('toolbar', { name: 'Workspace' })).toBeInTheDocument(),
     );
   });
 
@@ -191,8 +191,9 @@ describe('Sidebar', () => {
 
     await user.click(screen.getByRole('tab', { name: '编排' }));
     expect(screen.getByRole('link', { name: '记忆' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '计算' })).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: '模块' })).toBeInTheDocument();
+    // V1.130: Compute/Modules removed from the Orchestrator sidebar.
+    expect(screen.queryByRole('button', { name: '计算' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: '模块' })).not.toBeInTheDocument();
   });
 
   it('keeps parent groups as quiet labels and selected leaf with soft fill + thin bar', async () => {
@@ -319,7 +320,7 @@ describe('Sidebar', () => {
     expect(screen.getByRole('link', { name: 'Worlds' })).toHaveAttribute('href', '/worlds');
   });
 
-  it('orders Orchestrator groups Memory → Strategies → Runtime → Compute (V1.125 P1)', async () => {
+  it('orders Orchestrator groups Memory → Strategies → Runtime (V1.130: Compute removed)', async () => {
     const user = userEvent.setup();
     useSidebarHandlers();
 
@@ -328,12 +329,11 @@ describe('Sidebar', () => {
 
     const groupButtons = screen
       .getAllByRole('button')
-      .filter((el) => ['Memory', 'Strategies', 'Runtime', 'Compute'].includes(el.textContent ?? ''));
+      .filter((el) => ['Memory', 'Strategies', 'Runtime'].includes(el.textContent ?? ''));
     expect(groupButtons.map((el) => el.textContent)).toEqual([
       'Memory',
       'Strategies',
       'Runtime',
-      'Compute',
     ]);
   });
 
@@ -424,10 +424,10 @@ describe('Sidebar — layout structure (AD-P2-2 T1)', () => {
     expect(tabpanel).toHaveClass('flex-1');
 
     await waitFor(() =>
-      expect(screen.getByRole('toolbar', { name: 'Profiles' })).toBeInTheDocument(),
+      expect(screen.getByRole('toolbar', { name: 'Workspace' })).toBeInTheDocument(),
     );
 
-    const toolbar = screen.getByRole('toolbar', { name: 'Profiles' });
+    const toolbar = screen.getByRole('toolbar', { name: 'Workspace' });
     expect(tabpanel.contains(toolbar)).toBe(false);
     expect(toolbar.closest('.border-t')).not.toBeNull();
   });
@@ -438,10 +438,10 @@ describe('Sidebar — layout structure (AD-P2-2 T1)', () => {
 
     // Wait for the footer profile switcher to mount.
     await waitFor(() =>
-      expect(screen.getByRole('toolbar', { name: 'Profiles' })).toBeInTheDocument(),
+      expect(screen.getByRole('toolbar', { name: 'Workspace' })).toBeInTheDocument(),
     );
 
-    const toolbar = screen.getByRole('toolbar', { name: 'Profiles' });
+    const toolbar = screen.getByRole('toolbar', { name: 'Workspace' });
     const tabpanel = screen.getByRole('tabpanel');
 
     expect(tabpanel.contains(toolbar)).toBe(false);

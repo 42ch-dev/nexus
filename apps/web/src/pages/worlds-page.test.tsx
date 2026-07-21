@@ -130,6 +130,11 @@ describe('WorldsPage', () => {
 
   it('renders a card-sized Work-create CTA when no worlds exist (V1.125 P2)', async () => {
     const user = userEvent.setup();
+    // V1.130: BrowserClient has createWorld; override with undefined to test
+    // the fallback path where the bridge lacks createWorld.
+    const clientWithoutCreateWorld = new BrowserClient();
+    clientWithoutCreateWorld.createWorld = undefined as unknown as BrowserClient['createWorld'];
+
     useHandlers(
       http.get('/v1/daemon/narrative/worlds', () => HttpResponse.json({ worlds: [] })),
       http.get('/v1/daemon/works', () =>
@@ -137,7 +142,7 @@ describe('WorldsPage', () => {
       ),
     );
 
-    renderWorlds();
+    renderInApp(<WorldsPage />, { client: clientWithoutCreateWorld });
 
     const cta = await screen.findByTestId('worlds-empty-create-work');
     expect(cta).toHaveTextContent('Create a Work to get started');
@@ -164,34 +169,31 @@ describe('WorldsPage', () => {
     expect(screen.queryByTestId('worlds-empty-create-work')).not.toBeInTheDocument();
   });
 
-  it('disables the Create World card with a desktop-only tooltip when the bridge lacks createWorld (V1.127 P0 T1)', async () => {
-    // BrowserClient has no createWorld — every current bridge hits this path
-    // (architect seat 2 confirmed createWorld is absent on all bridges).
+  it('shows an active Create World card when the client exposes createWorld (V1.130)', async () => {
     useHandlers(
       http.get('/v1/daemon/narrative/worlds', () => HttpResponse.json({ worlds: [] })),
     );
 
+    // V1.130: BrowserClient has createWorld, so the card is active (not disabled).
     renderWorlds();
 
     const card = await screen.findByTestId('worlds-empty-create-world');
-    // AC-V1127-1: card renders disabled with a desktop-only tooltip, not a
-    // silent no-op. `disabled` suppresses click activation (click is a no-op
-    // by construction) and removes the card from the tab order.
-    expect(card).toBeDisabled();
-    expect(card).toHaveAttribute('title', 'Open in the desktop app to create a World');
-    // The Create Work peer affordance stays available as the active path so
-    // the browser tester can still reach the Works → Worlds flow.
-    expect(screen.getByTestId('worlds-empty-create-work')).toBeInTheDocument();
+    expect(card).not.toBeDisabled();
+    expect(screen.queryByTestId('worlds-empty-create-work')).not.toBeInTheDocument();
   });
 
   it('renders the honest empty state when no worlds exist', async () => {
     useHandlers(
       http.get('/v1/daemon/narrative/worlds', () => HttpResponse.json({ worlds: [] })),
+      // V1.130: CreateWorldDialog is always mounted; provide a stub so the
+      // createWorld mutation does not error on mount.
+      http.post('/v1/daemon/worlds', () => HttpResponse.json({ world_id: 'w-new' })),
     );
 
     renderWorlds();
 
-    expect(await screen.findByTestId('worlds-empty-create-work')).toBeInTheDocument();
+    // V1.130: BrowserClient has createWorld, so the Create World card renders.
+    expect(await screen.findByTestId('worlds-empty-create-world')).toBeInTheDocument();
   });
 
   it('renders the loading state before data resolves', async () => {
