@@ -402,6 +402,15 @@ async fn stop_daemon(manager: State<'_, sidecar::SidecarManager>) -> Result<(), 
     manager.stop().await
 }
 
+/// `restart_daemon` — atomic restart of the sidecar (owned or attached).
+#[tauri::command]
+async fn restart_daemon(
+    manager: State<'_, sidecar::SidecarManager>,
+    app: AppHandle,
+) -> Result<(), String> {
+    manager.restart_daemon(&app).await
+}
+
 /// Read `~/.nexus42/config.toml` and return the `setup_completed` marker.
 /// Missing field is treated as `false` (first-launch semantics).
 #[tauri::command]
@@ -988,6 +997,7 @@ pub fn run() {
             get_daemon_status,
             start_daemon,
             stop_daemon,
+            restart_daemon,
             reset_local_database,
             pick_directory,
             set_workspace_path,

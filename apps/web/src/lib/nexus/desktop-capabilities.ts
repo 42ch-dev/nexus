@@ -72,6 +72,8 @@ export interface DesktopCapabilities {
   startDaemon(): Promise<void>;
   /** Stop the owned sidecar. */
   stopDaemon(): Promise<void>;
+  /** Restart the sidecar atomically (owned or attached). */
+  restartDaemon(): Promise<void>;
   /**
    * Wipe the daemon's local state database(s) under `~/.nexus42/` so the daemon
    * can boot fresh. Creative files in the workspace are untouched.
@@ -222,6 +224,14 @@ export class TauriDesktopCapabilities implements DesktopCapabilities {
   async stopDaemon(): Promise<void> {
     try {
       await tauriInvoke().core.invoke<void>('stop_daemon', undefined);
+    } catch (err) {
+      throw asDesktopError(err);
+    }
+  }
+
+  async restartDaemon(): Promise<void> {
+    try {
+      await tauriInvoke().core.invoke<void>('restart_daemon', undefined);
     } catch (err) {
       throw asDesktopError(err);
     }

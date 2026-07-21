@@ -34,6 +34,7 @@ function makeDesktop(overrides: Partial<DesktopCapabilities> = {}): DesktopCapab
     ensureSetupBootstrap: () =>
       Promise.resolve({ creator_id: 'ctr_local1234567890ab', already_bootstrapped: false }),
     switchActiveCreator: () => Promise.resolve('/tmp/nexus'),
+    restartDaemon: () => Promise.resolve(),
     ...overrides,
   };
 }

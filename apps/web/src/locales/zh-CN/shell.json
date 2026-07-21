@@ -55,6 +55,7 @@
     "restartConfirm": "重启守护进程将中断任何正在运行的编排。是否继续？",
     "restartFailed": "守护进程重启失败",
     "restartFailedFallback": "守护进程重启失败。",
+    "restartPortConflict": "另一个进程占用了守护进程端口。请退出其他 Nexus 实例或更改端口。",
     "starting": "守护进程启动中…",
     "reconnecting": "守护进程重新连接中",
     "stopped": "守护进程已停止",
