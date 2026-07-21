@@ -4,7 +4,7 @@
   "plans": [
     {
       "plan_id": "2026-07-22-v1.130-p0-daemon-restart",
-      "status": "Todo",
+      "status": "Done",
       "type": "feature",
       "metadata": {
         "primary_spec": ".mstar/iterations/v1.130/specs/daemon-restart-reliability.md",
@@ -214,6 +214,68 @@
         "lifecycle": "open",
         "tracking_link": "https://github.com/42ch-dev/nexus/pull/120#pullrequestreview-4632744387",
         "note": "Desktop Tauri cert pinning — defer to V1.96."
+      }
+    ],
+    "2026-07-22-v1.130-p0-daemon-restart": [
+      {
+        "id": "R-V1130P0-QC1-W-001",
+        "severity": "nit",
+        "title": "Single-flight test does not exercise the guard (asserts field, not behavior)",
+        "lifecycle": "open",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "post-V1.130",
+        "note": "T4 test checks restart_in_progress field is true, not that concurrent calls join. Add behavioral test when test infrastructure allows."
+      },
+      {
+        "id": "R-V1130P0-QC1-W-002",
+        "severity": "low",
+        "title": "Foreign-port kill gap remains in stop_listening_daemon (quit path) — pre-existing",
+        "lifecycle": "open",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "post-V1.130",
+        "note": "stop_listening_daemon still kills any lsof PID on app quit. P0 fixed restart_daemon only. Separate fix for quit path."
+      },
+      {
+        "id": "R-V1130P0-QC1-W-003",
+        "severity": "nit",
+        "title": "restart_in_progress not RAII-guarded against panic",
+        "lifecycle": "open",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "post-V1.130",
+        "note": "If restart_daemon panics between set and clear, flag stays true. Use Drop guard in future hardening."
+      },
+      {
+        "id": "R-V1130P0-QC1-W-004",
+        "severity": "nit",
+        "title": "TS port-conflict string-match duplicated in daemon-status-bar and main-banner",
+        "lifecycle": "open",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.130",
+        "note": "Extract isPortConflict helper to shared module in future polish."
+      },
+      {
+        "id": "R-V1130P0-QC1-W-005",
+        "severity": "nit",
+        "title": "Narrow race between handle_crash post-backoff and restart_daemon",
+        "lifecycle": "open",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "post-V1.130",
+        "note": "Currently masked by stop_requested re-check. Edge case in rapid restart+crash scenarios."
+      },
+      {
+        "id": "R-V1130P0-QC3-W-001",
+        "severity": "low",
+        "title": "No total timeout around start_with_budget in restart_daemon",
+        "lifecycle": "open",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "post-V1.130",
+        "note": "If health probe hangs, restart_in_progress stays true. Wrap with HEALTH_START_TIMEOUT + 1s deadline."
       }
     ],
     "2026-07-12-v1.112-i18n-ui-migration": [],

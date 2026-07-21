@@ -5,14 +5,14 @@ description: "Unified design contract — dark theme. Same token names as DESIGN
 
 colors:
   # ── Brand core (VI palette — unchanged; usage shifts on dark surfaces) ──
-  brand-deep-blue: "#1E3A5F"
+  brand-deep-blue: "#0D2B3E"
   brand-cyan: "#25D1E0"
   brand-white: "#FFFFFF"
 
   # ── Brand extended (dark-tuned interaction steps) ──
-  brand-deep-blue-800: "#254A75"
-  brand-deep-blue-900: "#2E5A8F"
-  brand-deep-blue-1000: "#3D6A94"
+  brand-deep-blue-800: "#1A4A5E"
+  brand-deep-blue-900: "#2A5A70"
+  brand-deep-blue-1000: "#3A6A80"
   brand-cyan-800: "#3DD9E6"
   brand-cyan-900: "#5DE0EB"
   brand-cyan-1000: "#7FE8F0"
@@ -22,12 +22,12 @@ colors:
   brand-cyan-alpha-200: "rgba(37,209,224,0.22)"
 
   # ── Neutral surfaces (dark — ink atmosphere, V1.121 v0.4) ──
-  # Deep-blue cast derived from brand-deep-blue-1000 (#0C1A2B): "ink chamber",
+  # Deep-blue cast derived from brand-deep-blue-1000 (#04121C): "ink chamber",
   # not "dark gray app". Lightness matched to the pre-v0.4 neutrals; full AA
   # contrast table recomputed (DESIGN.md §Contrast (AA, recomputed)).
-  background-100: "#0A1320"
-  background-200: "#0F1A2A"
-  background-300: "#152438"
+  background-100: "#08141C"
+  background-200: "#0D1B26"
+  background-300: "#132635"
   gray-100: "#141F2E"
   gray-200: "#1E2A3D"
   gray-300: "#283749"

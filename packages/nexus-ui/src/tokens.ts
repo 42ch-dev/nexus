@@ -5,7 +5,7 @@
  */
 
 export const brandColors = {
-  deepBlue: '#1E3A5F',
+  deepBlue: '#0D2B3E',
   cyan: '#25D1E0',
   white: '#FFFFFF',
 } as const;

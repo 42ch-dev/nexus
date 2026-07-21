@@ -84,7 +84,7 @@ interface ThemeCssSwatch {
 const THEME_CSS_SWATCHES: ThemeCssSwatch[] = [
   {
     varName: '--nexus-brand-deep-blue',
-    hex: '#1E3A5F',
+    hex: '#0D2B3E',
     description: 'Primary brand, actions, links, focus rings.',
   },
   {
