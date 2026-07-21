@@ -8,6 +8,7 @@ import {
   type ReactNode,
 } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 
 import { BrowserClient, type NexusClient } from '@/lib/nexus';
 import { TauriClient } from '@/lib/nexus/tauri-client';
@@ -21,8 +22,10 @@ import {
   useResumeFingerprintGate,
   type ResumeFingerprintGateState,
 } from '@/lib/nexus/use-resume-fingerprint-gate';
+import { transportErrorCopyFor } from '@/lib/nexus/transport-error-cta';
 import { Button } from '@/components/ui/button';
 import { LoadingState, ErrorState } from '@/components/ui/states';
+import { TransportErrorBlock } from '@42ch/nexus-ui';
 
 /**
  * Provides the active {@link NexusClient} (and, in desktop mode, a
@@ -107,6 +110,8 @@ function FingerprintGate({
   const { state, verify } = useResumeFingerprintGate(config, { fetchImpl });
   const navigate = useNavigate();
   const location = useLocation();
+  const { t: shellT } = useTranslation('shell');
+  const { t: commonT } = useTranslation('common');
 
   // Connection re-pin lives under Settings (V1.106). Allow the recovery path
   // (and legacy `/connect` / `/settings/connection` while they redirect) to
@@ -138,18 +143,40 @@ function FingerprintGate({
   if (!isConnectRoute && state.status === 'fetch-failed') {
     return (
       <div className="flex min-h-screen items-center justify-center p-6">
-        <div className="w-full max-w-md">
-          <ErrorState
-            title="Could not verify daemon identity"
-            description={state.message}
-            onRetry={() => void verify()}
-            retryLabel="Try again"
-          />
-          <div className="mt-4 flex justify-center">
-            <Button variant="secondary" onClick={() => navigate('/settings/advanced#connection')}>
-              Reconnect
-            </Button>
-          </div>
+        <div className="w-full max-w-md space-y-4">
+          {state.kind ? (
+            <TransportErrorBlock
+              kind={state.kind}
+              // QC1-F-001: pass caller-owned localized copy so zh-CN users
+              // see fully localized transport-failure UX (the primitive's
+              // built-in copy is an English fallback for Studio).
+              {...transportErrorCopyFor(state.kind, shellT, commonT)}
+              // The gate owns retry (re-run verification) and the deep-link
+              // to Connection settings (re-pin / re-enter endpoint).
+              onRetry={() => void verify()}
+              onOpenSettings={() => navigate('/settings/advanced#connection')}
+              // `state.message` carries the classifier's diagnostic message
+              // (e.g., the long-form "Cannot reach the daemon at this
+              // address…" string). Surfaced as the block's detail line so
+              // the primitive owns headline+body+CTAs (single voice) and the
+              // diagnostic stays accessible below.
+              detail={state.message}
+            />
+          ) : (
+            <>
+              <ErrorState
+                title="Could not verify daemon identity"
+                description={state.message}
+                onRetry={() => void verify()}
+                retryLabel="Try again"
+              />
+              <div className="mt-4 flex justify-center">
+                <Button variant="secondary" onClick={() => navigate('/settings/advanced#connection')}>
+                  Reconnect
+                </Button>
+              </div>
+            </>
+          )}
         </div>
       </div>
     );

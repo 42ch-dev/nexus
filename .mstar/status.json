@@ -27,7 +27,7 @@
     },
     {
       "plan_id": "2026-07-21-v1.129-p1-transport-error-ux",
-      "status": "Todo",
+      "status": "Done",
       "type": "feature",
       "metadata": {
         "primary_spec": ".mstar/iterations/v1.129/specs/transport-error-ux.md",
@@ -41,8 +41,11 @@
         "spec_integration_branch": "iteration/v1.129",
         "working_branch": "plan/v1.129-p1-transport-error-ux",
         "merge_target": "iteration/v1.129",
-        "wire_contracts_changed": "pending-architect-lock",
-        "iteration_id": "V1.129"
+        "wire_contracts_changed": false,
+        "iteration_id": "V1.129",
+        "head_sha": "e95d8983",
+        "qa_gate": "mandatory",
+        "qa_verdict": "Pass with residuals"
       }
     },
     {
@@ -554,6 +557,74 @@
         "target": "post-V1.129",
         "tracking_link": ".mstar/sdd/2026-07-21-v1.129-p0-profile-create-reliability/review/qc-consolidated.md",
         "note": "Sub-microsecond cost. Runs before !response.ok check; not on the success JSON-parse path."
+      }
+    ],
+    "2026-07-21-v1.129-p1-transport-error-ux": [
+      {
+        "id": "R-V1129P1-QC1-M-004",
+        "severity": "nit",
+        "title": "App integration tests do not cover the full kind matrix (tls/http_fallback/unknown not asserted at every surface)",
+        "lifecycle": "open",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.129",
+        "tracking_link": ".mstar/sdd/2026-07-21-v1.129-p1-transport-error-ux/review/qc-consolidated.md",
+        "note": "Coverage gap, not a runtime failure. Package CTA matrix is tested."
+      },
+      {
+        "id": "R-V1129P1-QC1-M-005",
+        "severity": "nit",
+        "title": "Mirrored TransportErrorKind union + broad HTMLAttributes inheritance have no drift guard",
+        "lifecycle": "open",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.129",
+        "tracking_link": ".mstar/sdd/2026-07-21-v1.129-p1-transport-error-ux/review/qc-consolidated.md",
+        "note": "Add compile-time parity test in a follow-up. Currently structurally compatible."
+      },
+      {
+        "id": "R-V1129P1-QC2-W-001",
+        "severity": "nit",
+        "title": "Type mirror risk for TransportErrorKind (same theme as QC1-M-005)",
+        "lifecycle": "open",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.129",
+        "tracking_link": ".mstar/sdd/2026-07-21-v1.129-p1-transport-error-ux/review/qc-consolidated.md",
+        "note": "Folds under QC1-M-005 parity-drift theme."
+      },
+      {
+        "id": "R-V1129P1-QC2-S-001",
+        "severity": "nit",
+        "title": "Consider React warning for pre-router navigation (DaemonLaunchGate)",
+        "lifecycle": "open",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.129",
+        "tracking_link": ".mstar/sdd/2026-07-21-v1.129-p1-transport-error-ux/review/qc-consolidated.md",
+        "note": "No observed warning today. Defensive future hardening."
+      },
+      {
+        "id": "R-V1129P1-QC1-PROC-001",
+        "severity": "nit",
+        "title": "T1/T2 did not honor literal Studio-first promotion order (primitive created in package on T1; T2 added promotion-list entry only)",
+        "lifecycle": "open",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.129",
+        "tracking_link": ".mstar/sdd/2026-07-21-v1.129-p1-transport-error-ux/review/qc-consolidated.md",
+        "note": "PM exception recorded — end-state satisfies policy intent; replay would discard working code. Future plan-writing: consider 'Studio-fixture may import the package under promotion' clause."
+      },
+      {
+        "id": "R-V1129P1-QC1-M-006",
+        "severity": "nit",
+        "title": "Post-fix en locale copy drift between BODY_COPY.tls and shell.json tls.body",
+        "lifecycle": "open",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.129",
+        "tracking_link": ".mstar/sdd/2026-07-21-v1.129-p1-transport-error-ux/review/qc1-re-review.md",
+        "note": "Folds under QC1-M-005 parity-drift theme."
       }
     ]
   }

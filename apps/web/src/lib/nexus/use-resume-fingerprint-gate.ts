@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 
 import { BrowserClient } from '@/lib/nexus/browser-client';
-import { NexusClientError } from '@/lib/nexus/errors';
+import { NexusClientError, type TransportErrorKind } from '@/lib/nexus/errors';
 import type { ConnectionConfig } from '@/lib/nexus/connection-storage';
 
 export type ResumeFingerprintGateState =
@@ -9,7 +9,17 @@ export type ResumeFingerprintGateState =
   | { status: 'verifying' }
   | { status: 'verified' }
   | { status: 'mismatch'; served: string | null }
-  | { status: 'fetch-failed'; message: string };
+  | {
+      status: 'fetch-failed';
+      message: string;
+      /**
+       * Transport-failure sub-classification (V1.129 P1). Present when the
+       * throw was a {@link NexusClientError} produced by the browser-client
+       * classifier; absent for unexpected non-transport errors. Drives the
+       * gate's per-kind recovery UX via `<TransportErrorBlock>`.
+       */
+      kind?: TransportErrorKind;
+    };
 
 export interface UseResumeFingerprintGateOptions {
   fetchImpl?: typeof fetch;
@@ -86,7 +96,8 @@ export function useResumeFingerprintGate(
         error instanceof NexusClientError
           ? error.message
           : 'Could not verify the daemon certificate. Check the connection and try again.';
-      setState({ status: 'fetch-failed', message });
+      const kind = error instanceof NexusClientError ? error.kind : undefined;
+      setState({ status: 'fetch-failed', message, kind });
     }
   }, [config, options.fetchImpl]);
 

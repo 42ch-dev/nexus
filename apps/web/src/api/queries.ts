@@ -245,18 +245,40 @@ export function flattenOverviewWorlds(
 
 // ── Mutations (Setup writes) ─────────────────────────────────────────────────
 
-/** Surface a NexusClientError as a toast; callers may still read the result. */
-function useErrorToast() {
+/**
+ * Surface a NexusClientError as a toast; callers may still read the result.
+ *
+ * V1.129 P1: when the error carries a `kind` (transport-classified, status=0),
+ * the toast description becomes the shared single-source body copy from
+ * `shell.profile.createError.<kind>.body` — same locale keys the
+ * create-creator dialog and FingerprintGate use. The caller-supplied `key`
+ * stays the toast title (the action context, e.g.
+ * `error.couldNotCreateWork`). Non-transport errors (HTTP 4xx/5xx, generic
+ * throws) keep the legacy `errorMessage(error)` description so actionable
+ * text from the daemon still surfaces.
+ *
+ * Toast CTA limitation: the current `useToast` API (`@42ch/nexus-ui` Toast)
+ * has no action slot — only `title` + `description` + variant/duration. The
+ * CTAs available on the full-page `<TransportErrorBlock>` (Retry, Open
+ * Connection Settings) therefore cannot surface in the toast. Per the V1.129
+ * P1 architect lock, the toast gets headline + body only; CTAs stay on
+ * full-page / inline error blocks. Adding an action slot to the toast
+ * component is out of P1 scope.
+ */
+export function useErrorToast() {
   const { toast } = useToast();
-  const { t } = useTranslation('common');
+  const { t: commonT } = useTranslation('common');
+  const { t: shellT } = useTranslation('shell');
   return (error: unknown, key: string) => {
-    const description =
-      error instanceof NexusClientError
+    const title = commonT(key, { defaultValue: key });
+    const kind =
+      error instanceof NexusClientError && error.kind ? error.kind : null;
+    const description = kind
+      ? shellT(`profile.createError.${kind}.body`)
+      : error instanceof Error
         ? error.message
-        : error instanceof Error
-          ? error.message
-          : t('error.unexpected');
-    toast({ variant: 'error', title: t(key, { defaultValue: key }), description });
+        : commonT('error.unexpected');
+    toast({ variant: 'error', title, description });
   };
 }
 
