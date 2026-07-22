@@ -2,23 +2,22 @@
  * Single app-level Settings modal host — V1.131 P2.
  *
  * Owns the Radix dialog, ≥80vw×80vh desktop sizing, section frame, dirty
- * discard confirmation, and section content via the typed registry. Routes and
- * the Chronos titlebar gear share this host — no second Settings dialog.
+ * discard confirmation, and section content via the typed descriptor registry.
+ * Routes and the Chronos titlebar gear share this host — no second Settings dialog.
  */
 
 import { useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { useSettingsModal } from '@/components/layout/settings-modal-context';
-import type { SettingsSectionId } from '@/components/layout/settings-section-registry';
+import {
+  DEFAULT_SETTINGS_SECTION,
+  SETTINGS_SECTION_BY_ID,
+  type SettingsSectionId,
+} from '@/components/layout/settings-section-registry';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
-import { SettingsAgentSection } from '@/pages/settings/settings-agent-section';
-import { SettingsAdvancedSection } from '@/pages/settings/settings-advanced-section';
-import { SettingsAppearanceSection } from '@/pages/settings/settings-appearance-section';
-import { SettingsModulesSection } from '@/pages/settings/settings-modules-section';
 import { SettingsSectionFrame } from '@/pages/settings/settings-section-frame';
-import { SettingsWorkspaceSection } from '@/pages/settings/settings-workspace-section';
 
 function SettingsSectionBody({
   section,
@@ -37,20 +36,11 @@ function SettingsSectionBody({
     return () => cancelAnimationFrame(frame);
   }, [section, sectionHash]);
 
-  switch (section) {
-    case 'agent':
-      return <SettingsAgentSection />;
-    case 'workspace':
-      return <SettingsWorkspaceSection />;
-    case 'appearance':
-      return <SettingsAppearanceSection />;
-    case 'modules':
-      return <SettingsModulesSection />;
-    case 'advanced':
-      return <SettingsAdvancedSection />;
-    default:
-      return <SettingsAgentSection />;
-  }
+  const Content =
+    SETTINGS_SECTION_BY_ID[section]?.Content ??
+    SETTINGS_SECTION_BY_ID[DEFAULT_SETTINGS_SECTION].Content;
+
+  return <Content />;
 }
 
 export function SettingsModalHost() {

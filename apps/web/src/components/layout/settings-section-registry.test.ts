@@ -5,12 +5,35 @@ import { describe, expect, it } from 'vitest';
 
 import {
   DEFAULT_SETTINGS_SECTION,
+  SETTINGS_SECTION_BY_ID,
+  SETTINGS_SECTION_DESCRIPTORS,
+  SETTINGS_SECTION_IDS,
   isSettingsDrivenPath,
   resolveSettingsLocation,
   settingsPathFor,
 } from './settings-section-registry';
 
 describe('settings-section-registry', () => {
+  it('exposes an ordered descriptor SSOT with id, labelKey, icon, Content', () => {
+    expect(SETTINGS_SECTION_IDS).toEqual([
+      'agent',
+      'workspace',
+      'appearance',
+      'modules',
+      'advanced',
+    ]);
+    expect(SETTINGS_SECTION_DESCRIPTORS.map((d) => d.id)).toEqual([
+      ...SETTINGS_SECTION_IDS,
+    ]);
+
+    for (const descriptor of SETTINGS_SECTION_DESCRIPTORS) {
+      expect(descriptor.labelKey).toBe(`nav.${descriptor.id}`);
+      expect(descriptor.icon).toBeTruthy();
+      expect(descriptor.Content).toBeTypeOf('function');
+      expect(SETTINGS_SECTION_BY_ID[descriptor.id]).toBe(descriptor);
+    }
+  });
+
   it('treats /settings/* and /modules as settings-driven', () => {
     expect(isSettingsDrivenPath('/settings')).toBe(true);
     expect(isSettingsDrivenPath('/settings/agent')).toBe(true);

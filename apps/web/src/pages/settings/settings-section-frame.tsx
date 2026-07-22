@@ -1,34 +1,19 @@
 /**
  * Settings section frame — modal-primary chrome (V1.131 P2).
  *
- * Presentational section nav + outlet region. Host supplies active section and
+ * Presentational section nav + outlet region driven by
+ * {@link SETTINGS_SECTION_DESCRIPTORS}. Host supplies active section and
  * selection; section bodies remain content-only (no Dialog ownership).
  */
 
-import {
-  Bot,
-  Cpu,
-  FolderOpen,
-  Palette,
-  Settings,
-  type LucideIcon,
-} from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { ReactNode } from 'react';
 
 import {
-  SETTINGS_SECTION_IDS,
+  SETTINGS_SECTION_DESCRIPTORS,
   type SettingsSectionId,
 } from '@/components/layout/settings-section-registry';
 import { cn } from '@/lib/utils';
-
-const SECTION_ICONS: Record<SettingsSectionId, LucideIcon> = {
-  agent: Bot,
-  workspace: FolderOpen,
-  appearance: Palette,
-  modules: Cpu,
-  advanced: Settings,
-};
 
 export interface SettingsSectionFrameProps {
   activeSection: SettingsSectionId;
@@ -66,8 +51,7 @@ export function SettingsSectionFrame({
           className="flex w-44 shrink-0 flex-col gap-0.5 border-r border-gray-alpha-200 px-3 py-2"
           data-testid="settings-section-nav"
         >
-          {SETTINGS_SECTION_IDS.map((id) => {
-            const Icon = SECTION_ICONS[id];
+          {SETTINGS_SECTION_DESCRIPTORS.map(({ id, labelKey, icon: Icon }) => {
             const active = activeSection === id;
             return (
               <button
@@ -85,7 +69,7 @@ export function SettingsSectionFrame({
                 )}
               >
                 <Icon className="size-4 shrink-0" aria-hidden="true" />
-                <span>{t(`nav.${id}`)}</span>
+                <span>{t(labelKey)}</span>
               </button>
             );
           })}
