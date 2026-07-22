@@ -1,7 +1,8 @@
 ---
 iteration_id: V1.133
 start_date: 2026-07-23
-status: locked
+end_date: 2026-07-23
+status: completed
 iteration_base_branch: main
 target_branch: main
 spec_integration_branch: iteration/v1.133
@@ -99,8 +100,8 @@ Explicit and defensible for this M-scale iteration:
 
 ## Roadmap Position
 
-- **Current (V1.133):** Legacy false-Done repair + residual burn-down — restore ID-scoped product surfaces and make residual debt actionable again.
-- **Next:** Deeper Creator entity Chat; Orchestrator 功能区 beyond interim menu; opportunistic DF-70/71; open human smokes.
+- **Current (V1.133):** **delivered** - brace-param route sweep (34 routes fixed) + legacy residual burn-down (5 closed, 2 superseded archived, 3 fix-now code fixes).
+- **Next:** Deeper Creator entity Chat; Orchestrator 功能区 beyond interim menu; opportunistic DF-70/71; open human smokes (`R-VI-003` Dock, titlebar Overlay guide); remaining 62 open residuals (mostly nits).
 - **Prior:** V1.132 dogfood load blocker + titlebar drag + VI retune + Create-only hub (#170).
 
 ## Delivery Branch Policy
@@ -119,3 +120,31 @@ Explicit and defensible for this M-scale iteration:
 | Residual burn-down scope creep | Med | Med | PM triage before implement; fix-now list frozen at plan lock |
 | P0 and P1 touch overlapping code | Low | Low | P0 is daemon-only; P1 is web+daemon; coordinate at integration |
 | “Fixed” residual still fails for users (wrong root cause) | Med | High | Prefer user-repro or automated path with real ID; stale-close only with code evidence |
+
+
+## Quality Gate Summary
+
+| Plan | QC | QA | Merge |
+|------|----|----|-------|
+| P0 brace-param-route-sweep | Pass (tri; fix wave for regression tests) | Pass | Done |
+| P1 legacy-residual-burndown | Pass (tri; all suggestions) | Pass | Done |
+
+## Compound Round Summary
+
+**Package inventory (`v1.133/`):**
+
+| Artifact | Disposition |
+|----------|-------------|
+| `specs/brace-param-route-sweep.md` | **Keep snapshot** (normative iteration spec; knowledge already in `daemon-matchit-colon-capture.md`) |
+| `specs/legacy-residual-burndown.md` | **Keep snapshot** (iteration-specific triage; not reusable) |
+
+**Knowledge doc updated:** `knowledge/architecture-patterns/daemon-matchit-colon-capture.md` - updated with V1.133 P0 full sweep findings (34 routes, `:cancel` edge case, regression test approach, false-Done history).
+
+**No new knowledge docs created** - the brace-param sweep updates an existing doc (Q5=Yes, high overlap). The residual burn-down was standard triage (Q1-Q8 score <=2, skip).
+
+## Iteration Retrospective (minimal)
+
+- **What worked:** Code-first research caught the massive brace-param false-Done (31 routes beyond V1.132 P0's 4); SDD per-task review + QC tri caught the missing regression test coverage; PM-thread triage efficiently closed stale residuals.
+- **Friction:** status.json grew to 37KB (over 20KB cap) - Profile B compaction needed at close; tech_debt_summary manual refresh missed by_target/by_plan fields initially.
+- **Carry:** 62 open residuals (mostly nits); human-verification smokes (Dock, Overlay); handler doc comments retain brace form notation.
+

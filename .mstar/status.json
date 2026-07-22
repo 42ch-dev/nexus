@@ -1,275 +1,16 @@
 {
   "version": 1,
   "updated_at": "2026-07-23",
-  "plans": [
-    {
-      "id": "2026-07-23-v1.133-p0-brace-param-route-sweep",
-      "status": "Done",
-      "file": ".mstar/plans/2026-07-23-v1.133-p0-brace-param-route-sweep.md",
-      "metadata": {
-        "primary_spec": ".mstar/iterations/v1.133/specs/brace-param-route-sweep.md",
-        "description": "Sweep all remaining {param} brace-form daemon routes to :param matchit 0.7 syntax",
-        "iteration_id": "V1.133",
-        "iteration_compass": "v1.133/delivery-compass.md",
-        "spec_integration_branch": "iteration/v1.133",
-        "working_branch": "plan/v1.133-p0-brace-param-route-sweep",
-        "merge_target": "iteration/v1.133",
-        "wire_contracts_changed": false,
-        "wave": "1",
-        "seq": "0",
-        "merge_commit": "1e6ed0cc",
-        "qa_verdict": "Pass",
-        "merged_at": "2026-07-23T18:15:00Z"
-      },
-      "task_commits": [
-        {
-          "task": 1,
-          "base": "21027c2ce60963696b85ff31dcc6e6b69b2faae4",
-          "head": "b97a8cee",
-          "status": "complete",
-          "notes": "Brace->colon sweep + cancel edge case; review approved"
-        },
-        {
-          "task": "fix",
-          "base": "b97a8cee",
-          "head": "284b6f09",
-          "status": "complete",
-          "notes": "QC fix: 8 router-level regression tests + matchit comment"
-        }
-      ]
-    },
-    {
-      "id": "2026-07-23-v1.133-p1-legacy-residual-burndown",
-      "status": "Done",
-      "file": ".mstar/plans/2026-07-23-v1.133-p1-legacy-residual-burndown.md",
-      "metadata": {
-        "primary_spec": ".mstar/iterations/v1.133/specs/legacy-residual-burndown.md",
-        "description": "Triage and close high-impact open residuals from V1.126-V1.132",
-        "iteration_id": "V1.133",
-        "iteration_compass": "v1.133/delivery-compass.md",
-        "spec_integration_branch": "iteration/v1.133",
-        "working_branch": "plan/v1.133-p1-legacy-residual-burndown",
-        "merge_target": "iteration/v1.133",
-        "wire_contracts_changed": false,
-        "wave": "1",
-        "seq": "1",
-        "qa_verdict": "Pass"
-      },
-      "task_commits": [
-        {
-          "task": 1,
-          "base": "1e6ed0ccfce8ec38679885776bc0c94bd21e3b4d",
-          "head": "f4f8e8d4",
-          "status": "complete",
-          "notes": "3 fix-now residuals: port-conflict helper, RAII guard, restart timeout; review approved"
-        },
-        {
-          "task": "pm-triage",
-          "base": "f4f8e8d4",
-          "head": "baf245be",
-          "status": "complete",
-          "notes": "PM triage: 5 closed (3 fixed + 2 stale), 2 superseded archived"
-        }
-      ]
-    },
-    {
-      "id": "2026-07-22-v1.132-p0-orch-load-404",
-      "status": "Done",
-      "file": ".mstar/plans/2026-07-22-v1.132-p0-orch-load-404.md",
-      "metadata": {
-        "primary_spec": ".mstar/iterations/v1.132/specs/orch-load-404.md",
-        "description": "Fix Strategy/Sessions/Modules 404 load on healthy daemon",
-        "iteration_id": "V1.132",
-        "iteration_compass": "v1.132/delivery-compass.md",
-        "spec_integration_branch": "iteration/v1.132",
-        "working_branch": "plan/v1.132-p0-orch-load-404",
-        "merge_target": "iteration/v1.132",
-        "wire_contracts_changed": false,
-        "wave": "1",
-        "seq": "0"
-      },
-      "task_commits": [
-        {
-          "task": 1,
-          "base": "4c875e8670a4ecac8daea3fe6f0ed7a83371cf65",
-          "head": "1fb302c00cedcedc87e0b5c74fc246364bc328fb",
-          "status": "complete",
-          "notes": "Network residual → T5"
-        },
-        {
-          "task": 2,
-          "base": "1fb302c00cedcedc87e0b5c74fc246364bc328fb",
-          "head": "c0a42aafde624a98197f9eade161d896c024f877",
-          "status": "complete"
-        },
-        {
-          "task": 3,
-          "base": "a03464a8df4412284441fd149e04d8d60e757dea",
-          "head": "b64c5cb39d061e31bbf65de2b5f9892b65d46219",
-          "status": "complete"
-        },
-        {
-          "task": 4,
-          "base": "c64cea8369b1e184fd3dc795ded57dda1603d335",
-          "head": "23b730b788d9cee51155f89c04ffc6d9bd3e66f8",
-          "status": "complete"
-        },
-        {
-          "task": 5,
-          "base": "3028319a5897ccc6e4ee87a22353e9b93c65459a",
-          "head": "c4947c54ea563c99231da9da3197076af29998e6",
-          "status": "complete",
-          "notes": "Network residual → QA"
-        }
-      ]
-    },
-    {
-      "id": "2026-07-22-v1.132-p1-titlebar-window-drag",
-      "status": "Done",
-      "file": ".mstar/plans/2026-07-22-v1.132-p1-titlebar-window-drag.md",
-      "metadata": {
-        "primary_spec": ".mstar/iterations/v1.132/specs/titlebar-window-drag.md",
-        "description": "Restore Chronos titlebar window drag including logo/title paint",
-        "iteration_id": "V1.132",
-        "iteration_compass": "v1.132/delivery-compass.md",
-        "spec_integration_branch": "iteration/v1.132",
-        "working_branch": "plan/v1.132-p1-titlebar-window-drag",
-        "merge_target": "iteration/v1.132",
-        "wire_contracts_changed": false,
-        "wave": "1",
-        "seq": "1"
-      },
-      "task_commits": [
-        {
-          "task": 1,
-          "base": "4c875e8670a4ecac8daea3fe6f0ed7a83371cf65",
-          "head": "9582ed49be74c610732a3097d06dd1101e982da4",
-          "status": "complete"
-        },
-        {
-          "task": 2,
-          "base": "0215076b78c01a44f26f2108c98a5e638d53f69d",
-          "head": "be00ef1123aeee24e62edd51238bd55bcc898306",
-          "status": "complete"
-        },
-        {
-          "task": 3,
-          "base": "a7d4ccdf5ec734db3b7dd397297d1eee1a21c0a1",
-          "head": "3c8c50bf8fc11faec2bd163f37fc0e71b71e140d",
-          "status": "complete"
-        }
-      ]
-    },
-    {
-      "id": "2026-07-22-v1.132-p2-vi-aesthetic-retune",
-      "status": "Done",
-      "file": ".mstar/plans/2026-07-22-v1.132-p2-vi-aesthetic-retune.md",
-      "metadata": {
-        "primary_spec": ".mstar/iterations/v1.132/specs/vi-aesthetic-retune.md",
-        "description": "VI retune: logo square split, compact mark, Button theme-split, Setup select",
-        "iteration_id": "V1.132",
-        "iteration_compass": "v1.132/delivery-compass.md",
-        "spec_integration_branch": "iteration/v1.132",
-        "working_branch": "plan/v1.132-p2-vi-aesthetic-retune",
-        "merge_target": "iteration/v1.132",
-        "wire_contracts_changed": false,
-        "wave": "2",
-        "seq": "2",
-        "merge_commit": "9e4039452450fd1b2ebd09660e6fd0dcf261919c",
-        "merged_at": "2026-07-22T15:15:39Z",
-        "qa_verdict": "Pass"
-      },
-      "task_commits": [
-        {
-          "task": 1,
-          "base": "c273f1b2ee85d50886a44c937c8a2d8aad095e71",
-          "head": "524c5eed0423cf380823dc05bb811e9d92619549",
-          "status": "complete"
-        },
-        {
-          "task": 2,
-          "base": "603f662551af5d8bfa28b42608da96dd5a9aee68",
-          "head": "8bd81ca33ad2075361b8c5e1a98d65e64c79ea30",
-          "status": "complete"
-        },
-        {
-          "task": 3,
-          "base": "f034058f553f3bfdcf9c700dcadaae84e362cbc9",
-          "head": "4e1feb3a30e308b41d8bcabe09f7afe67fa06b54",
-          "status": "complete"
-        },
-        {
-          "task": 4,
-          "base": "96bf7db8008a090085211c161a26a087791292f1",
-          "head": "df8ae1831bf212fe483607156e05fec88f6cc9c8",
-          "status": "complete"
-        },
-        {
-          "task": 5,
-          "base": "df8ae1831bf212fe483607156e05fec88f6cc9c8",
-          "head": "d33a64ce873e099911a13d3a969f1ed39aa39c7d",
-          "status": "complete"
-        }
-      ]
-    },
-    {
-      "id": "2026-07-22-v1.132-p3-creator-orch-gongnengqu-ia",
-      "status": "Done",
-      "file": ".mstar/plans/2026-07-22-v1.132-p3-creator-orch-gongnengqu-ia.md",
-      "metadata": {
-        "primary_spec": ".mstar/iterations/v1.132/specs/creator-orch-gongnengqu-ia.md",
-        "description": "创作 Create-only left + 工作区 persistent footer",
-        "iteration_id": "V1.132",
-        "iteration_compass": "v1.132/delivery-compass.md",
-        "spec_integration_branch": "iteration/v1.132",
-        "working_branch": "plan/v1.132-p3-creator-orch-gongnengqu-ia",
-        "merge_target": "iteration/v1.132",
-        "wire_contracts_changed": false,
-        "wave": "3",
-        "seq": "3",
-        "merge_commit": "30f817b38106d5a94d73edd19aeb20290f51f1fb",
-        "merged_at": "2026-07-22T16:00:15Z",
-        "qa_verdict": "Pass"
-      },
-      "task_commits": [
-        {
-          "task": 1,
-          "base": "935c59070ccba15e4f3bf241e82a46c175bbf403",
-          "head": "d8f30657b59b7c243a3acfe7ce0a59a9a3f708d3",
-          "status": "complete"
-        },
-        {
-          "task": 2,
-          "base": "d8f30657b59b7c243a3acfe7ce0a59a9a3f708d3",
-          "head": "978578a6e1c2aec7f3d420f3e39c16452e3c6204",
-          "status": "complete"
-        },
-        {
-          "task": 3,
-          "base": "176ca8df43b85ce0fe418b0335b55a7466d8be91",
-          "head": "8d9919a3631edaad174d4e96b8a84925b9a98fff",
-          "status": "complete"
-        },
-        {
-          "task": 4,
-          "base": "5f2a1d1a2fc0a885c79cd95cea61eb0469a6225e",
-          "head": "c48c23e5546b0c35b6ba08a4a0ca22e70626e42e",
-          "status": "complete"
-        }
-      ]
-    }
-  ],
+  "plans": [],
   "metadata": {
     "integration_branch_retired": false,
     "iteration_base_branch": "main",
     "latest_active_compass": "v1.133/delivery-compass.md",
     "latest_active_iteration": "V1.133",
     "latest_ship": {
-      "iteration": "V1.128",
-      "compass": "v1.128/delivery-compass.md",
-      "shipped_at": "2026-07-20",
-      "pr": "https://github.com/42ch-dev/nexus/pull/162",
-      "merge_commit": "d59311de"
+      "iteration": "V1.133",
+      "compass": "v1.133/delivery-compass.md",
+      "shipped_at": "2026-07-23"
     },
     "platform_integration": "paused — local-only until further notice",
     "spec_integration_branch": "iteration/v1.133",
@@ -285,41 +26,6 @@
         "low": 9,
         "nit": 51,
         "info": 0
-      },
-      "by_target": {
-        "V1.96": 1,
-        "post-V1.130": 6,
-        "unspecified": 37,
-        "post-V1.129": 11,
-        "post-ship": 2,
-        "manual": 1,
-        "V1.132 dogfood / PR merge-ready": 1,
-        "post-V1.132": 2,
-        "post-V1.133": 1
-      },
-      "by_plan": {
-        "2026-07-05-v1.92-closure": 1,
-        "2026-07-22-v1.130-p0-daemon-restart": 3,
-        "2026-07-22-v1.130-p4-vi-atmosphere": 3,
-        "2026-07-22-v1.130-p1-shell-frame": 0,
-        "2026-07-12-v1.112-i18n-ui-migration": 0,
-        "2026-07-13-v1.116-agent-detection-codex-native": 0,
-        "2026-07-20-v1.126-p0-shell-selection-submenu": 7,
-        "2026-07-20-v1.126-p1-canvas-directed-axis": 5,
-        "2026-07-20-v1.126-p2-composite-timeline-endpoint": 11,
-        "2026-07-20-v1.126-p3-status-compaction-residual-cleanup": 4,
-        "2026-07-20-v1.127-p0-control-room-author-loop-fixes": 8,
-        "2026-07-20-v1.127-p1-native-agent-provider-registration": 0,
-        "2026-07-20-v1.128-p0-surfaces-chrome-ia": 0,
-        "2026-07-20-v1.128-p1-nle-timeline-canvas": 1,
-        "2026-07-20-v1.128-p2-creator-create-controller-shell": 1,
-        "2026-07-21-v1.129-p0-profile-create-reliability": 5,
-        "2026-07-21-v1.129-p1-transport-error-ux": 6,
-        "2026-07-22-vi-logo-upgrade": 3,
-        "2026-07-22-v1.131-p0-chronos-titlebar": 1,
-        "2026-07-22-v1.132-p0-orch-load-404": 2,
-        "2026-07-22-v1.132-p3-creator-orch-gongnengqu-ia": 0,
-        "2026-07-23-v1.133-p0-brace-param-route-sweep": 1
       }
     },
     "updated_at": "2026-07-23",
@@ -335,7 +41,6 @@
         "owner": "@fullstack-dev + @frontend-dev",
         "target": "V1.96",
         "lifecycle": "open",
-        "tracking_link": "https://github.com/42ch-dev/nexus/pull/120#pullrequestreview-4632744387",
         "note": "Desktop Tauri cert pinning — defer to V1.96."
       }
     ],
@@ -347,8 +52,7 @@
         "lifecycle": "open",
         "decision": "defer",
         "owner": "@fullstack-dev",
-        "target": "post-V1.130",
-        "note": "T4 test checks restart_in_progress field is true, not that concurrent calls join. Add behavioral test when test infrastructure allows. P3 V1.131 slate (2026-07-22): not closed — no owning-plan touch this iteration. Owner: @fullstack-dev. Trigger: add behavioral single-flight test that concurrent restart_daemon calls join when test infrastructure allows."
+        "target": "post-V1.130"
       },
       {
         "id": "R-V1130P0-QC1-W-002",
@@ -358,7 +62,7 @@
         "decision": "defer",
         "owner": "@fullstack-dev",
         "target": "post-V1.130",
-        "note": "stop_listening_daemon still kills any lsof PID on app quit. P0 fixed restart_daemon only. Separate fix for quit path. P3 V1.131 slate (2026-07-22): not closed — no owning-plan touch this iteration. Owner: @fullstack-dev. Trigger: scope quit-path foreign-port kill fix in stop_listening_daemon (separate from restart_daemon)."
+        "note": "stop_listening_daemon still kills any lsof PID on app quit. P0 fixed restart_daemon only. Separat..."
       },
       {
         "id": "R-V1130P0-QC1-W-005",
@@ -367,8 +71,7 @@
         "lifecycle": "open",
         "decision": "defer",
         "owner": "@fullstack-dev",
-        "target": "post-V1.130",
-        "note": "Currently masked by stop_requested re-check. Edge case in rapid restart+crash scenarios. P3 V1.131 slate (2026-07-22): not closed — no owning-plan touch this iteration. Owner: @fullstack-dev. Trigger: harden handle_crash vs restart_daemon race beyond stop_requested re-check."
+        "target": "post-V1.130"
       }
     ],
     "2026-07-22-v1.130-p4-vi-atmosphere": [
@@ -379,8 +82,7 @@
         "lifecycle": "open",
         "decision": "defer",
         "owner": "@frontend-dev",
-        "target": "post-V1.130",
-        "note": "Contrast table in DESIGN.md still shows old ratios. New #0D2B3E is darker → ratios are equal or better. Recompute in polish pass. P3 V1.131 slate (2026-07-22): not closed — no owning-plan touch this iteration. Owner: @frontend-dev. Trigger: recompute WCAG contrast table ratios in DESIGN.md for Chronos #0D2B3E hex values."
+        "target": "post-V1.130"
       },
       {
         "id": "R-V1130P4-QC1-S-002",
@@ -389,8 +91,7 @@
         "lifecycle": "open",
         "decision": "defer",
         "owner": "@frontend-dev",
-        "target": "post-V1.130",
-        "note": "Chronos is compile-time default; T2/T3 swatches deferred. Studio fixture can be added in polish. P3 V1.131 slate (2026-07-22): not closed — no owning-plan touch this iteration. Owner: @frontend-dev. Trigger: add Studio T1–T3 atmosphere comparison fixture (Chronos default vs deferred T2/T3 swatches)."
+        "target": "post-V1.130"
       },
       {
         "id": "R-V1130P4-QC2-S-001",
@@ -399,62 +100,51 @@
         "lifecycle": "open",
         "decision": "defer",
         "owner": "@frontend-dev",
-        "target": "post-V1.130",
-        "note": "Dark theme intentionally uses cyan-derived alphas for warmth on dark surfaces. Pre-existing design decision, not introduced by P4. P3 V1.131 slate (2026-07-22): not closed — no owning-plan touch this iteration. Owner: @frontend-dev. Trigger: document or revise dark brand-deep-blue-alpha cyan-RGB choice if product revisits warmth-on-ink alphas."
+        "target": "post-V1.130"
       }
     ],
-    "2026-07-22-v1.130-p1-shell-frame": [],
-    "2026-07-12-v1.112-i18n-ui-migration": [],
-    "2026-07-13-v1.116-agent-detection-codex-native": [],
     "2026-07-20-v1.126-p0-shell-selection-submenu": [
       {
         "id": "R-V1126P0-QC-S-001",
         "severity": "nit",
         "title": "Two-source identity in handleOpenSubmenu",
-        "lifecycle": "open",
-        "notes": "qc1 S-1; V1.127+ polish."
+        "lifecycle": "open"
       },
       {
         "id": "R-V1126P0-QC-S-002",
         "severity": "nit",
         "title": "No popover resize listener",
-        "lifecycle": "open",
-        "notes": "qc1 S-2 / qc3 S-7; V1.127+ polish."
+        "lifecycle": "open"
       },
       {
         "id": "R-V1126P0-QC-S-003",
         "severity": "nit",
         "title": "Stale renamingItem state on pathname change",
-        "lifecycle": "open",
-        "notes": "qc1 S-3 / qc3 S-9; qc2 verified row-scoped. Edge case in rapid route changes."
+        "lifecycle": "open"
       },
       {
         "id": "R-V1126P0-QC-S-004",
         "severity": "nit",
         "title": "Outside-click vs dialog portal interaction",
-        "lifecycle": "open",
-        "notes": "qc1 S-4; V1.127+ polish."
+        "lifecycle": "open"
       },
       {
         "id": "R-V1126P0-QC-S-005",
         "severity": "nit",
         "title": "URL regex over typed workId field",
-        "lifecycle": "open",
-        "notes": "qc1 S-5; V1.127+ polish."
+        "lifecycle": "open"
       },
       {
         "id": "R-V1126P0-QC-S-006",
         "severity": "nit",
         "title": "Memo gap on NavItemLi",
-        "lifecycle": "open",
-        "notes": "qc3 S-6; V1.127+ polish."
+        "lifecycle": "open"
       },
       {
         "id": "R-V1126P0-QC-S-007",
         "severity": "nit",
         "title": "Unused anchorEl dep in outside-click effect",
-        "lifecycle": "open",
-        "notes": "qc3 S-8 / QC2-S-001; V1.127+ polish."
+        "lifecycle": "open"
       }
     ],
     "2026-07-20-v1.126-p1-canvas-directed-axis": [
@@ -462,36 +152,31 @@
         "id": "R-V1126P1-QC-S-001",
         "severity": "nit",
         "title": "Extraction alias exploration",
-        "lifecycle": "open",
-        "notes": "qc1 S-1; V1.127+ polish."
+        "lifecycle": "open"
       },
       {
         "id": "R-V1126P1-QC-S-002",
         "severity": "nit",
         "title": "Future layer extensibility",
-        "lifecycle": "open",
-        "notes": "qc1 S-2; V1.127+ polish."
+        "lifecycle": "open"
       },
       {
         "id": "R-V1126P1-QC-S-003",
         "severity": "nit",
         "title": "Runtime shape validation",
-        "lifecycle": "open",
-        "notes": "qc2 S-1; V1.127+ polish."
+        "lifecycle": "open"
       },
       {
         "id": "R-V1126P1-QC-S-004",
         "severity": "nit",
         "title": "Studio fixture tick positioning divergence doc",
-        "lifecycle": "open",
-        "notes": "qc2 S-2; V1.127+ polish."
+        "lifecycle": "open"
       },
       {
         "id": "R-V1126P1-QC-S-005",
         "severity": "nit",
         "title": "Scale-stress tests for spine geometry",
-        "lifecycle": "open",
-        "notes": "qc3 S-1; V1.127+ polish; 1000-event stress test."
+        "lifecycle": "open"
       }
     ],
     "2026-07-20-v1.126-p2-composite-timeline-endpoint": [
@@ -513,64 +198,55 @@
         "id": "R-V1126P2-QC-S-001",
         "severity": "nit",
         "title": "Schema cursor not in required array",
-        "lifecycle": "open",
-        "notes": "qc1 S-1; spec drift; V1.127+ polish."
+        "lifecycle": "open"
       },
       {
         "id": "R-V1126P2-QC-S-002",
         "severity": "nit",
         "title": "Aggregation bypasses NarrativeGateway",
-        "lifecycle": "open",
-        "notes": "qc1 S-2; V1.127+ polish."
+        "lifecycle": "open"
       },
       {
         "id": "R-V1126P2-QC-S-003",
         "severity": "nit",
         "title": "No explicit one-network-call assertion",
-        "lifecycle": "open",
-        "notes": "qc1 S-5; V1.127+ polish."
+        "lifecycle": "open"
       },
       {
         "id": "R-V1126P2-QC-S-004",
         "severity": "nit",
         "title": "No dedicated worlds-page.test.tsx",
-        "lifecycle": "open",
-        "notes": "qc1 S-6; V1.127+ polish."
+        "lifecycle": "open"
       },
       {
         "id": "R-V1126P2-QC-S-005",
         "severity": "nit",
         "title": "Cursor malformed 'tl:' prefix test",
-        "lifecycle": "open",
-        "notes": "qc2 S-7; V1.127+ polish."
+        "lifecycle": "open"
       },
       {
         "id": "R-V1126P2-QC-S-006",
         "severity": "nit",
         "title": "No cursor pagination UI for >20 worlds",
-        "lifecycle": "open",
-        "notes": "qc3 S-1; V1.127+ polish."
+        "lifecycle": "open"
       },
       {
         "id": "R-V1126P2-QC-S-007",
         "severity": "nit",
         "title": "No explicit N+1 assertion",
-        "lifecycle": "open",
-        "notes": "qc3 S-2; V1.127+ polish."
+        "lifecycle": "open"
       },
       {
         "id": "R-V1126P2-QC-S-008",
         "severity": "nit",
         "title": "WorldsPage overview fetch no error state",
-        "lifecycle": "open",
-        "notes": "qc3 S-3; V1.127+ polish."
+        "lifecycle": "open"
       },
       {
         "id": "R-V1126P2-QC-S-009",
         "severity": "nit",
         "title": "Dynamic SQL prevents prepared statement caching",
-        "lifecycle": "open",
-        "notes": "qc3 S-4; V1.127+ polish."
+        "lifecycle": "open"
       }
     ],
     "2026-07-20-v1.126-p3-status-compaction-residual-cleanup": [
@@ -585,22 +261,19 @@
         "id": "R-V1126P3-QC-S-001",
         "severity": "nit",
         "title": "Wrapper shape drift in archived/residuals/",
-        "lifecycle": "open",
-        "note": "Normalize archived row wrapper shape when next residual is archived."
+        "lifecycle": "open"
       },
       {
         "id": "R-V1126P3-QC-S-002",
         "severity": "nit",
         "title": "plans-done.json Unicode normalization in legacy entries",
-        "lifecycle": "open",
-        "note": "Normalize unicode in legacy plans-done.json entries during next closeout."
+        "lifecycle": "open"
       },
       {
         "id": "R-V1126P3-QC-S-003",
         "severity": "nit",
         "title": "latest_ship staleness",
-        "lifecycle": "open",
-        "note": "Refresh metadata.latest_ship on every ship; automate in CI."
+        "lifecycle": "open"
       }
     ],
     "2026-07-20-v1.127-p0-control-room-author-loop-fixes": [
@@ -608,68 +281,57 @@
         "id": "R-V1127P0-QC-S-001",
         "severity": "nit",
         "title": "T1 EmptyCreateCard disabled-extension instead of inlined button (qc1 S-001 + qc3 S-002)",
-        "lifecycle": "open",
-        "notes": "V1.128+ polish. apps/web/src/pages/worlds-page.tsx:99-114."
+        "lifecycle": "open"
       },
       {
         "id": "R-V1127P0-QC-S-002",
         "severity": "nit",
         "title": "T2 has_more documentation drift — plan/spec/briefs/compass all reference has_more but schema has only cursor",
-        "lifecycle": "open",
-        "notes": "V1.128+ polish. Spec/plan/compass docs need has_more references corrected to cursor-only."
+        "lifecycle": "open"
       },
       {
         "id": "R-V1127P0-QC-S-003",
         "severity": "nit",
         "title": "T2 worlds-page Load More is activity-enrichment not list pagination — label may mislead",
-        "lifecycle": "open",
-        "notes": "V1.128+ polish. apps/web/src/pages/worlds-page.tsx:194-209."
+        "lifecycle": "open"
       },
       {
         "id": "R-V1127P0-QC-S-004",
         "severity": "nit",
         "title": "T2 queryKeys.timeline.overview vestigial cursor parameter (qc1 S-004 + qc3 S-003)",
-        "lifecycle": "open",
-        "notes": "V1.128+ polish. apps/web/src/lib/nexus/query-keys.ts:128-131."
+        "lifecycle": "open"
       },
       {
         "id": "R-V1127P0-QC-S-005",
         "severity": "nit",
         "title": "T2 flattenOverviewWorlds defeats useMemo in worlds-page.tsx",
-        "lifecycle": "open",
-        "notes": "V1.128+ polish. Negligible at <=100 worlds. apps/web/src/pages/worlds-page.tsx:25,34."
+        "lifecycle": "open"
       },
       {
         "id": "R-V1127P0-QC-S-006",
         "severity": "nit",
         "title": "T2 empty-string cursor vs null cursor contract clarification",
-        "lifecycle": "open",
-        "notes": "V1.128+ polish. apps/web/src/api/queries.ts:232-233."
+        "lifecycle": "open"
       },
       {
         "id": "R-V1127P0-QC-S-007",
         "severity": "nit",
         "title": "T3 banner may flash on initial-load to error transition",
-        "lifecycle": "open",
-        "notes": "V1.128+ polish. Add !isInitialLoading guard if observed in dogfood. apps/web/src/pages/worlds-page.tsx:134-141."
+        "lifecycle": "open"
       },
       {
         "id": "R-V1127P0-QC-S-008",
         "severity": "nit",
         "title": "T4/T5/T6 documentation comments — capture-phase trade-off, history-replaceState, residual lifecycle notes (qc2 S-004/S-005/S-006)",
-        "lifecycle": "open",
-        "notes": "V1.128+ polish. selection-submenu.tsx:121-126 + sidebar.tsx:103-112 + archived residual file."
+        "lifecycle": "open"
       }
     ],
-    "2026-07-20-v1.127-p1-native-agent-provider-registration": [],
-    "2026-07-20-v1.128-p0-surfaces-chrome-ia": [],
     "2026-07-20-v1.128-p1-nle-timeline-canvas": [
       {
         "id": "R-V1128P1-001",
         "severity": "low",
         "title": "Work Timeline lacks host-level NLE overlay test",
         "lifecycle": "open",
-        "tracking_link": ".mstar/plans/2026-07-20-v1.128-p1-nle-timeline-canvas.md#Review Gate Summary",
         "notes": "Work Timeline host-level NLE overlay test missing — defer."
       }
     ],
@@ -678,9 +340,7 @@
         "id": "R-V1128P2-001",
         "severity": "nit",
         "title": "Creator hub integration tests cover Work selection only (no World row)",
-        "lifecycle": "open",
-        "tracking_link": ".mstar/plans/2026-07-20-v1.128-p2-creator-create-controller-shell.md#Review Gate Summary",
-        "note": "Add World row coverage to creator hub integration tests in a follow-up."
+        "lifecycle": "open"
       }
     ],
     "2026-07-21-v1.129-p0-profile-create-reliability": [
@@ -691,8 +351,7 @@
         "lifecycle": "open",
         "decision": "defer",
         "owner": "@fullstack-dev",
-        "target": "post-V1.129",
-        "note": "Boundary-isolated duplicate; refactor to shared helper if ctr_local becomes public."
+        "target": "post-V1.129"
       },
       {
         "id": "R-V1129P0-QC1-M-002",
@@ -701,8 +360,7 @@
         "lifecycle": "open",
         "decision": "defer",
         "owner": "@fullstack-dev",
-        "target": "post-V1.129",
-        "note": "Best-effort TLS substrings by design; replace with structured classifier if list grows."
+        "target": "post-V1.129"
       },
       {
         "id": "R-V1129P0-QC1-M-003",
@@ -711,8 +369,7 @@
         "lifecycle": "open",
         "decision": "defer",
         "owner": "@frontend-dev",
-        "target": "post-V1.129",
-        "note": "Capture snapshot at submit if dogfooders report retry-state confusion."
+        "target": "post-V1.129"
       },
       {
         "id": "R-V1129P0-QC1-M-004",
@@ -721,8 +378,7 @@
         "lifecycle": "open",
         "decision": "defer",
         "owner": "@fullstack-dev",
-        "target": "post-V1.129",
-        "note": "Output matches spec for documented inputs; restore TypeError branch if new input class appears."
+        "target": "post-V1.129"
       },
       {
         "id": "R-V1129P0-QC3-M-002",
@@ -731,8 +387,7 @@
         "lifecycle": "open",
         "decision": "defer",
         "owner": "@fullstack-dev",
-        "target": "post-V1.129",
-        "note": "Sub-microsecond check; gate behind JSON-parse failure path if perf becomes measurable."
+        "target": "post-V1.129"
       }
     ],
     "2026-07-21-v1.129-p1-transport-error-ux": [
@@ -743,8 +398,7 @@
         "lifecycle": "open",
         "decision": "defer",
         "owner": "@frontend-dev",
-        "target": "post-V1.129",
-        "note": "Coverage gap, no runtime failure; add per-kind surface assertions in a follow-up test pass."
+        "target": "post-V1.129"
       },
       {
         "id": "R-V1129P1-QC1-M-005",
@@ -753,8 +407,7 @@
         "lifecycle": "open",
         "decision": "defer",
         "owner": "@frontend-dev",
-        "target": "post-V1.129",
-        "note": "No drift guard; add compile-time parity test between mirror and source union."
+        "target": "post-V1.129"
       },
       {
         "id": "R-V1129P1-QC2-W-001",
@@ -763,8 +416,7 @@
         "lifecycle": "open",
         "decision": "defer",
         "owner": "@frontend-dev",
-        "target": "post-V1.129",
-        "note": "Same drift theme as QC1-M-005; close via the same parity-test follow-up."
+        "target": "post-V1.129"
       },
       {
         "id": "R-V1129P1-QC2-S-001",
@@ -773,8 +425,7 @@
         "lifecycle": "open",
         "decision": "defer",
         "owner": "@frontend-dev",
-        "target": "post-V1.129",
-        "note": "No observed warning; add pre-router nav guard if React warns in dogfooding."
+        "target": "post-V1.129"
       },
       {
         "id": "R-V1129P1-QC1-PROC-001",
@@ -783,8 +434,7 @@
         "lifecycle": "open",
         "decision": "defer",
         "owner": "@frontend-dev",
-        "target": "post-V1.129",
-        "note": "PM-accepted process exception; revisit only if Studio-first clause is amended."
+        "target": "post-V1.129"
       },
       {
         "id": "R-V1129P1-QC1-M-006",
@@ -793,8 +443,7 @@
         "lifecycle": "open",
         "decision": "defer",
         "owner": "@frontend-dev",
-        "target": "post-V1.129",
-        "note": "EN locale copy drift; sync en/zh-CN shell.json tls.body with BODY_COPY.tls in follow-up."
+        "target": "post-V1.129"
       }
     ],
     "2026-07-22-vi-logo-upgrade": [
@@ -802,37 +451,31 @@
         "id": "R-VI-002",
         "title": "No dedicated Chronos notes on Setup/Settings surface fixture pages",
         "severity": "low",
-        "source": "QA qa.md",
-        "scope": "apps/design-studio setup/settings fixtures",
         "decision": "defer",
         "owner": "@frontend-dev",
         "target": "post-ship",
         "lifecycle": "open",
-        "note": "P3 verify 2026-07-22: gallery pages have *-chronos-note (home/tokens/button/brand/surfaces) but no dedicated setup/settings chronos-note fixtures. Owner @frontend-dev; trigger: add setup-chronos-note / settings-chronos-note when gallery intros for Setup/Settings surfaces expand."
+        "note": "P3 verify 2026-07-22: gallery pages have *-chronos-note (home/tokens/button/brand/surfaces) but n..."
       },
       {
         "id": "R-VI-003",
         "title": "macOS Dock runtime visual smoke not verified (compose + preview only)",
         "severity": "low",
-        "source": "QA qa.md",
-        "scope": "apps/desktop icons Dock",
         "decision": "defer",
         "owner": "@ops-engineer / @qa-engineer",
         "target": "manual",
         "lifecycle": "open",
-        "note": "Criteria in apps/desktop/src-tauri/icons/README.md. V1.132 P2 T4 inset compose landed (~12% transparent margins). Current hashes: source-1024.png dca7d5787ff3eb305a64a255c105bef4c18f84629f3c44d70a1411ac008a7982 / app-icon-preview-256.png 6223d10ca458182ef425a5f6d287090d7c820e426aaa15454811c1db66751661. Prior QA 2026-07-22 Dock tile visual FAIL-to-verify (screencapture TCC). Owner: @ops-engineer / @qa-engineer / human. Trigger: human Dock tile confirm Chronos primary plate mark after quit/rebuild-or-reinstall/killall Dock/relaunch (+ stale-bundle removal if needed)."
+        "note": "Criteria in apps/desktop/src-tauri/icons/README.md. V1.132 P2 T4 inset compose landed (~12% trans..."
       },
       {
         "id": "R-VI-004",
         "title": "Wordmark visual polish — no human visual sign-off on logo-text.svg",
         "severity": "low",
-        "source": "QA qa.md",
-        "scope": "packages/nexus-ui/assets/logos/logo-text.svg",
         "decision": "defer",
         "owner": "@frontend-dev",
         "target": "post-ship",
         "lifecycle": "open",
-        "note": "P1 T2 resized wordmark in Studio (925cbee4) but human cap-height ≥60% sign-off not recorded (jsdom cannot measure SVG painted bounds; P1 QA notes → P3). Owner @frontend-dev; trigger: human Studio measure/screenshot confirming painted cap-height ≥60% of mark height."
+        "note": "P1 T2 resized wordmark in Studio (925cbee4) but human cap-height ≥60% sign-off not recorded (jsdo..."
       }
     ],
     "2026-07-22-v1.131-p0-chronos-titlebar": [
@@ -840,14 +483,11 @@
         "id": "R-V1131P0-QC2-W-001",
         "title": "macOS Overlay titlebar live smoke — logo/title drag H2–H6/D1–D3 still unverified",
         "severity": "medium",
-        "source": "QC2 F-002; V1.132 titlebar-window-drag-overlay-smoke.md; V1.131 carry-forward",
-        "scope": "apps/desktop Overlay titlebar; Chronos logo/title drag (V1.132 P1 supersedes empty-paint-only)",
         "decision": "defer",
         "owner": "human / @qa-engineer",
         "target": "V1.132 dogfood / PR merge-ready",
         "lifecycle": "open",
-        "note": "V1.132 P1 re-target (2026-07-22): durable protocol → .mstar/iterations/v1.132/guides/titlebar-window-drag-overlay-smoke.md. Human Overlay matrix H2–H6 + D1–D3 required before archive (agent TCC cannot grant Screen Recording/Accessibility). Product chrome+Studio+unit tests may ship with residual open (Profile B).",
-        "tracking_link": ".mstar/iterations/v1.132/guides/titlebar-window-drag-overlay-smoke.md"
+        "note": "V1.132 P1 re-target (2026-07-22): durable protocol → .mstar/iterations/v1.132/guides/titlebar-win..."
       }
     ],
     "2026-07-22-v1.132-p0-orch-load-404": [
@@ -859,8 +499,7 @@
         "decision": "defer",
         "owner": "@fullstack-dev",
         "target": "post-V1.132",
-        "note": "QC2 F-001: schedules/kb/works/worlds etc. still use {param}; P0 fixed presets/sessions/modules/strategy. Follow-up brace sweep.",
-        "tracking_link": ".mstar/plans/2026-07-22-v1.132-p0-orch-load-404.md#Review-Gate-Summary"
+        "note": "QC2 F-001: schedules/kb/works/worlds etc. still use {param}; P0 fixed presets/sessions/modules/st..."
       },
       {
         "id": "R-V1132P0-QA-S-001",
@@ -869,12 +508,9 @@
         "lifecycle": "open",
         "decision": "defer",
         "owner": "@fullstack-dev",
-        "target": "post-V1.132",
-        "note": "T5/QA: curl+TestServer complete; Vite Network not captured. Optional human Network attach.",
-        "tracking_link": ".mstar/iterations/v1.132/guides/p0-orch-load-404-dogfood.md"
+        "target": "post-V1.132"
       }
     ],
-    "2026-07-22-v1.132-p3-creator-orch-gongnengqu-ia": [],
     "2026-07-23-v1.133-p0-brace-param-route-sweep": [
       {
         "id": "R-V1133P0-QC1-S-001",
@@ -883,8 +519,7 @@
         "lifecycle": "open",
         "decision": "defer",
         "owner": "@fullstack-dev",
-        "target": "post-V1.133",
-        "note": "Pre-existing convention; doc comments in handler files still use {param} notation. Not a route path issue."
+        "target": "post-V1.133"
       }
     ],
     "2026-07-23-v1.133-p1-legacy-residual-burndown": [
@@ -895,8 +530,7 @@
         "lifecycle": "open",
         "decision": "defer",
         "owner": "@frontend-dev",
-        "target": "post-V1.133",
-        "note": "QC1 F-002: messageFor uses stricter already-in-use match vs isPortConflictError port+in-use. Different behavior, not a simple dedup."
+        "target": "post-V1.133"
       },
       {
         "id": "R-V1133P1-QC1-S-002",
@@ -905,8 +539,7 @@
         "lifecycle": "open",
         "decision": "defer",
         "owner": "@fullstack-dev",
-        "target": "post-V1.133",
-        "note": "QC1 F-003: If concurrent panic + join waiter holds mutex, try_lock fails. Pattern for full closure: Arc<AtomicBool> outside mutex (see nexus-acp-host)."
+        "target": "post-V1.133"
       },
       {
         "id": "R-V1133P1-QC1-S-003",
@@ -915,8 +548,7 @@
         "lifecycle": "open",
         "decision": "defer",
         "owner": "@fullstack-dev",
-        "target": "post-V1.133",
-        "note": "QC1 F-004: Duration::from_secs(1) should be named RESTART_BUDGET_SLACK constant."
+        "target": "post-V1.133"
       }
     ]
   }
