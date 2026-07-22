@@ -164,7 +164,15 @@
         "worktree_path": "/Users/bibi/workspace/organizations/42ch/nexus/.worktrees/v1.132-p3-creator-orch-gongnengqu-ia",
         "working_branch": "plan/v1.132-p3-creator-orch-gongnengqu-ia",
         "session_label": "v1.132-phase2-wave3"
-      }
+      },
+      "task_commits": [
+        {
+          "task": 1,
+          "base": "935c59070ccba15e4f3bf241e82a46c175bbf403",
+          "head": "d8f30657b59b7c243a3acfe7ce0a59a9a3f708d3",
+          "status": "complete"
+        }
+      ]
     }
   ],
   "metadata": {
