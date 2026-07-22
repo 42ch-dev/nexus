@@ -155,7 +155,7 @@ Public `logoVariants` keys stay `primary | color | white | mono`; add `text` for
 
 ### Task 2: Package brand components + tokens
 
-- [ ] **T2 · Must**
+- [x] **T2 · Must**
   **Files:** `packages/nexus-ui/src/tokens.ts`, `nexus-logo.tsx`, `nexus-mark.tsx` (+ tests), `index.ts`, package README/AGENTS promotion row for any new variant component.
   **Interfaces:** `logoVariants` includes `text`; `NexusMark` renders timeline mark; optional `NexusLogoVariant` for theme specimens (palette props, no asset import).
   **DoD:** unit tests pass; Mark is wide aspect (`w-auto` friendly); variants render in isolation without SVG files.
