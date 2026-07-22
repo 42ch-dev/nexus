@@ -169,7 +169,7 @@ Public `logoVariants` keys stay `primary | color | white | mono`; add `text` for
 
 ### Task 4: DESIGN dual-role + interactive token flip
 
-- [ ] **T4 · Must**
+- [x] **T4 · Must**
   **Files:** `DESIGN.md`, `DESIGN.dark.md` (button primary, focus-ring, semantic mapping, cyan usage rule, contrast tables); `tooling/design-tokens/src/tokens.css` light `blue-*` scale; package `theme.css` if mirrored.
   **Interfaces:** light `blue-700…1000` = cyan signal scale (same role as dark); light primary button = cyan fill + deep text; document link = `brand-deep-blue` on light / cyan on dark.
   **DoD:** DESIGN prose states Chronos dual-role; light primary button tokens match dark; AA tables updated; no `#1E3A5F`; cyan remains `#25D1E0`.
