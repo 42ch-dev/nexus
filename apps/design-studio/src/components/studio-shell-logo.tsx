@@ -1,8 +1,8 @@
 /**
  * Shell lockup for Design Studio fixtures.
  * Mirrors apps/web `components/brand/nexus-logo.tsx`: default `logo-primary`
- * (deep-blue plate) for both themes. Use `logo-white-bg` only when a light
- * plate is required.
+ * square plate lockup (deep-blue plate) for both themes. Use `logo-white-bg`
+ * only when a light plate is required.
  *
  * Reads the document `.dark` class (kept in sync by Studio ThemeProvider) so
  * fixtures stay theme-aware even though the primary lockup does not switch.

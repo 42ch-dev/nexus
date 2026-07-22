@@ -37,9 +37,9 @@ export const logoMarkAspectRatio = logoMarkViewBoxWidth / logoMarkViewBoxHeight;
 export const logoMinSizePx = 24;
 
 /**
- * Shell chrome mark height in px (sidebar header, presentational shell fixtures).
- * Timeline mark is ~10.14:1 wide; 24px height ≈ 243px width and clips in a
- * 248px sidebar with horizontal padding — 20px (h-5) fits (~203px).
+ * Shell chrome lockup height in px (sidebar header, presentational shell fixtures).
+ * Default shell uses the square `primary` plate (viewBox 284×284); at 20px height
+ * the lockup fits typical sidebar chrome without clipping.
  */
 export const logoShellHeightPx = 20;
 
