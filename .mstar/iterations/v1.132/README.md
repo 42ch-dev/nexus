@@ -2,7 +2,7 @@
 
 Control Room dogfood + orch load blocker: 404 fix, titlebar drag, VI retune, 创作 Create-only hub + persistent 工作区.
 
-**Compass status:** `locked` (Phase 1 Review & Edit complete 2026-07-22). Next: Phase 2 on `iteration/v1.132`.
+**Compass status:** `completed` (end_date 2026-07-22). Integration branch `iteration/v1.132` ready for PR → `main`.
 
 | Artifact | Path |
 |----------|------|

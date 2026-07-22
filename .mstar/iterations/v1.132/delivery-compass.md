@@ -1,7 +1,8 @@
 ---
 iteration_id: V1.132
 start_date: 2026-07-22
-status: locked
+status: completed
+end_date: 2026-07-22
 iteration_base_branch: main
 spec_integration_branch: iteration/v1.132
 target_branch: main
@@ -70,10 +71,10 @@ All four plans are presentation/runtime boundary work and retain `wire_contracts
 
 | Wave | plan_id | Name | Status | blocked_by |
 |------|---------|------|--------|------------|
-| 1 | [`2026-07-22-v1.132-p0-orch-load-404`](../../plans/2026-07-22-v1.132-p0-orch-load-404.md) | Orch Strategy/Sessions/Modules 404 | Todo | — |
-| 1∥ | [`2026-07-22-v1.132-p1-titlebar-window-drag`](../../plans/2026-07-22-v1.132-p1-titlebar-window-drag.md) | Titlebar window-drag restore | Todo | — |
-| 2 | [`2026-07-22-v1.132-p2-vi-aesthetic-retune`](../../plans/2026-07-22-v1.132-p2-vi-aesthetic-retune.md) | VI aesthetic retune | Todo | — |
-| 3 | [`2026-07-22-v1.132-p3-creator-orch-gongnengqu-ia`](../../plans/2026-07-22-v1.132-p3-creator-orch-gongnengqu-ia.md) | 创作 Create hub + 工作区 persistent | Todo | P1 soft (shell chrome) |
+| 1 | [`2026-07-22-v1.132-p0-orch-load-404`](../../plans/2026-07-22-v1.132-p0-orch-load-404.md) | Orch Strategy/Sessions/Modules 404 | **Done** | — |
+| 1∥ | [`2026-07-22-v1.132-p1-titlebar-window-drag`](../../plans/2026-07-22-v1.132-p1-titlebar-window-drag.md) | Titlebar window-drag restore | **Done** | — |
+| 2 | [`2026-07-22-v1.132-p2-vi-aesthetic-retune`](../../plans/2026-07-22-v1.132-p2-vi-aesthetic-retune.md) | VI aesthetic retune | **Done** | — |
+| 3 | [`2026-07-22-v1.132-p3-creator-orch-gongnengqu-ia`](../../plans/2026-07-22-v1.132-p3-creator-orch-gongnengqu-ia.md) | 创作 Create hub + 工作区 persistent | **Done** | — |
 
 **Scale budget:** L → **4** business plans (cap).
 
@@ -82,10 +83,10 @@ All four plans are presentation/runtime boundary work and retain `wire_contracts
 | Milestone | Target date | Status |
 |-----------|-------------|--------|
 | Spec freeze (Review & Edit lock) | 2026-07-22 | **done** |
-| Wave 1 (P0 ∥ P1) | TBD | pending |
-| Wave 2 (P2 VI) | TBD | pending |
-| Wave 3 (P3 功能区) | TBD | pending |
-| Iteration close | TBD | pending |
+| Wave 1 (P0 ∥ P1) | 2026-07-22 | **done** |
+| Wave 2 (P2 VI) | 2026-07-22 | **done** |
+| Wave 3 (P3 功能区) | 2026-07-22 | **done** |
+| Iteration close | 2026-07-22 | **done** |
 
 ## Acceptance Criteria
 
@@ -136,8 +137,8 @@ All four plans are presentation/runtime boundary work and retain `wire_contracts
 
 ## Roadmap Position
 
-- **Current (V1.132):** Dogfood load blocker + shell/VI/功能区 unfinished from V1.130–V1.131.
-- **Next:** Deeper Creator entity Chat; Orchestrator 功能区 beyond interim menu; opportunistic DF-70/71.
+- **Current (V1.132):** **delivered** — orch load 404 fix, titlebar window-drag, VI aesthetic retune, Create-only hub + persistent 工作区.
+- **Next:** Deeper Creator entity Chat; Orchestrator 功能区 beyond interim menu; opportunistic DF-70/71; open human smokes (`R-VI-003` Dock, titlebar Overlay guide).
 - **Prior:** V1.131 Chronos titlebar + DF-V1130 IA + desktop icons (#169).
 
 ## Delivery Branch Policy
@@ -172,3 +173,37 @@ All four plans are presentation/runtime boundary work and retain `wire_contracts
 
 - Feedback-driven Plan mode + deferred grill Q1 → **A** (创作 left Create-only; Worlds/Works right lists; no Menu mode).
 - Branch policy: `main` → `iteration/v1.132` → `main`.
+
+
+## Quality Gate Summary
+
+| Plan | QC | QA | Merge |
+|------|----|----|-------|
+| P0 orch-load-404 | Pass (tri) | Pass | Done |
+| P1 titlebar-window-drag | Pass (tri) | Pass | Done |
+| P2 vi-aesthetic-retune | Pass (tri; F-001 fix + QC2 reval) | Pass | Done |
+| P3 creator-orch-gongnengqu-ia | Pass (tri) | Pass | Done |
+
+Open carry (accepted defer): `R-VI-003` Dock human smoke; `R-V1131P0-QC2-W-001` Overlay guide human steps; brace-param sweep residual from P0 QC.
+
+
+## Compound Round Summary
+
+**Package inventory (`v1.132/`):**
+
+| Artifact | Disposition |
+|----------|-------------|
+| `guides/p0-orch-load-404-rca.md` + dogfood | **Promoted** → `knowledge/architecture-patterns/daemon-matchit-colon-capture.md` |
+| `guides/titlebar-window-drag-overlay-smoke.md` | **Retain** in package (human Overlay smoke SSOT) |
+| `specs/*` (4) | **Retain** (normative iteration specs; supersession already in compass) |
+| P2 brand/token learnings | **Updated** `nexus-brand-token-hierarchy.md` (ink hover tokens) |
+| P3 shell IA | **Promoted** → `workspace-parent-shell-ia.md` |
+
+**Q1–Q8 (P0 matchit):** Yes≥4 → crystallize. **P3 IA:** Yes≥4 → crystallize. **P1 drag:** covered by guide + residual; skip new doc. **P2:** update existing brand doc (Q5 overlap).
+
+
+## Iteration Retrospective (minimal)
+
+- **What worked:** RCA-first P0 (empty-body 404 → matchit); Studio-first P2/P3; explicit supersession tables for false-Done priors.
+- **Friction:** Feature/control `status.json` merge conflicts during lease/InReview sync; light primary Button briefly locked cyan hover until QC2.
+- **Carry:** Human Dock/Overlay smokes; remaining brace-param daemon routes; optional Studio legacy footer fixture cleanup.
