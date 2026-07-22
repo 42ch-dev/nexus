@@ -855,6 +855,14 @@ describe('Surfaces page — app shell fixture', () => {
     ).toBeInTheDocument();
   });
 
+  it('renders Creator / Orchestrator 功能区 IA fixtures (V1.132 P3 T1)', () => {
+    expect(screen.getByTestId('surfaces-creator-orch-gongnengqu-ia')).toBeInTheDocument();
+    expect(screen.getByTestId('creator-orch-gongnengqu-ia-fixtures')).toBeInTheDocument();
+    expect(screen.getByTestId('gongnengqu-ia-fixture-creator-hub')).toBeInTheDocument();
+    expect(screen.getByTestId('gongnengqu-ia-creator-hub-themes-light')).toBeInTheDocument();
+    expect(screen.getByTestId('gongnengqu-ia-creator-hub-themes-dark')).toBeInTheDocument();
+  });
+
   it('renders Creator shell Create vs Controller fixtures (V1.128 P2 T1)', () => {
     expect(screen.getByTestId('surfaces-creator-shell')).toBeInTheDocument();
     expect(screen.getByTestId('creator-shell-fixtures')).toBeInTheDocument();

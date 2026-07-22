@@ -3,6 +3,8 @@
 **plan_id:** `2026-07-22-v1.131-p2-shell-ia-finish`  
 **Status:** specify+clarify+plan locked (architect Seat 2)
 
+> **Superseded (partial, 2026-07-22):** **AC-4** / `DF-V1130-WORKSPACE-UNDER-ORCH` (orchestrator-only 工作区) shipped in V1.131 but is **no longer current truth**. Superseded by V1.132 P3 workspace-parent IA — see [creator-orch-gongnengqu-ia.md](../../v1.132/specs/creator-orch-gongnengqu-ia.md) (compass AC-6, AC-7). AC-1..AC-3, AC-5, AC-6 remain historical V1.131 delivery unless separately amended.
+
 ## Problem
 
 V1.130 plans were marked Done and merged (#165), but dogfood left incomplete shell/Settings IA. Tracker rows `DF-V1130-*` must **ship in V1.131**, not remain open-ended deferrals.
@@ -30,7 +32,7 @@ V1.130 plans were marked Done and merged (#165), but dogfood left incomplete she
 - **AC-1:** No top 创作|编排 switch; the existing **功能区 footer** switch is the only primary mode control and is covered in both themes.
 - **AC-2:** Gear / Settings entry opens the single **Settings modal** ≥80vw×80vh (desktop); ESC, backdrop, close button, and route-close all call the same dirty-aware `requestClose`.
 - **AC-3:** `/settings` and `/settings/:section` resolve through one section registry and open over the last safe non-settings route; direct loads use `/works`, unknown sections use the default, and close restores the saved route. No full-page Settings shell is primary.
-- **AC-4:** The Profile selector labeled 工作区 appears only under 编排 功能区. Global workspace-path/daemon configuration may remain a Settings section, but it does not duplicate the Profile selector.
+- **AC-4:** ~~The Profile selector labeled 工作区 appears only under 编排 功能区.~~ **Superseded by V1.132 P3** — 工作区 footer is always visible; workspace is the parent shell and 创作/编排 are modes under it ([creator-orch-gongnengqu-ia.md](../../v1.132/specs/creator-orch-gongnengqu-ia.md)). Historical V1.131 delivery: Profile selector was orchestrator-only; global workspace-path/daemon configuration may remain a Settings section without duplicating the Profile selector.
 - **AC-5:** Compute/Modules reuses the existing list/detail body inside the shared **Settings modal** with no nested Settings dialog; `/modules` is a compatibility entry and 编排 exposes no Compute item after the section is green.
 - **AC-6:** Profile create/list still SSOT-backed (no regression).
 
