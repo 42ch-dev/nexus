@@ -43,7 +43,7 @@
     },
     {
       "id": "2026-07-22-v1.132-p1-titlebar-window-drag",
-      "status": "InProgress",
+      "status": "InReview",
       "file": ".mstar/plans/2026-07-22-v1.132-p1-titlebar-window-drag.md",
       "metadata": {
         "primary_spec": ".mstar/iterations/v1.132/specs/titlebar-window-drag.md",
@@ -75,6 +75,12 @@
           "task": 2,
           "base": "0215076b78c01a44f26f2108c98a5e638d53f69d",
           "head": "be00ef1123aeee24e62edd51238bd55bcc898306",
+          "status": "complete"
+        },
+        {
+          "task": 3,
+          "base": "a7d4ccdf5ec734db3b7dd397297d1eee1a21c0a1",
+          "head": "3c8c50bf8fc11faec2bd163f37fc0e71b71e140d",
           "status": "complete"
         }
       ]
@@ -740,12 +746,13 @@
         "title": "macOS Overlay titlebar live smoke — native H2–H4/D2 still unverified",
         "severity": "medium",
         "source": "QC2 F-002; macos-overlay-smoke.md; QA revalidation qa.md",
-        "scope": "apps/desktop Overlay titlebar; Chronos empty-paint drag/double-click",
+        "scope": "apps/desktop Overlay titlebar; Chronos logo/title drag (V1.132 P1 supersedes empty-paint-only)",
         "decision": "defer",
         "owner": "human / @qa-engineer",
-        "target": "V1.131 dogfood / PR merge-ready",
+        "target": "V1.132 dogfood / PR merge-ready",
         "lifecycle": "open",
-        "note": "P3 2026-07-22: still not archivable — human Overlay H2–H4/D2 smoke required (agent TCC cannot grant Screen Recording/Accessibility). Product code+compile+H1/D1/H5/H6 Pass (9e33ed00). Protocol: .mstar/sdd/2026-07-22-v1.131-p0-chronos-titlebar/review/macos-overlay-smoke.md"
+        "note": "P3 2026-07-22: still not archivable — human Overlay H2–H4/D2 smoke required (agent TCC cannot grant Screen Recording/Accessibility). Product code+compile+H1/D1/H5/H6 Pass (9e33ed00). Protocol: .mstar/sdd/2026-07-22-v1.131-p0-chronos-titlebar/review/macos-overlay-smoke.md V1.132 P1 re-target (2026-07-22): logo/title drag; protocol → .mstar/iterations/v1.132/guides/titlebar-window-drag-overlay-smoke.md; human Overlay H2–H6/D1–D3 still required before archive.",
+        "tracking_link": ".mstar/iterations/v1.132/guides/titlebar-window-drag-overlay-smoke.md"
       }
     ]
   }
