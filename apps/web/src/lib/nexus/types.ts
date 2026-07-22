@@ -108,6 +108,7 @@ import type {
   UpdatePresetResponse,
   ValidatePresetRequest,
   ValidatePresetResponse,
+  ActiveCreatorResponse,
   WorkDetailResponse,
   WorkOutline,
   World,
@@ -166,7 +167,9 @@ export interface NexusClient {
    * {@link CreatorDetail}. No new generated request type.
    */
   updateCreator(creatorId: string, request: { display_name: string }): Promise<CreatorDetail>;
-  /** `POST /v1/daemon/creators/active` — switch the daemon's active creator. */
+  /** `GET /v1/daemon/creators/active` — daemon's active creator (config.toml). */
+  getActiveCreator(): Promise<ActiveCreatorResponse>;
+  /** `PUT /v1/daemon/creators/active` — switch the daemon's active creator. */
   setActiveCreator(request: SetActiveCreatorRequest): Promise<SetActiveCreatorResponse>;
 
   // ── Agent host (V1.94 P1) ──────────────────────────────────────────────────
@@ -493,6 +496,7 @@ export type {
   ReviewResponse,
   ScanRequest,
   ScanResponse,
+  ActiveCreatorResponse,
   SetActiveCreatorRequest,
   SetActiveCreatorResponse,
   SoulNarrativeRequest,

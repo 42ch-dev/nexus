@@ -10,6 +10,7 @@
  * so this client sends no credentials.
  */
 import type {
+  ActiveCreatorResponse,
   AddScheduleRequest,
   AddScheduleResponse,
   BatchUpdateFindingsRequest,
@@ -177,7 +178,10 @@ export class BrowserClient implements NexusClient {
     );
   }
   setActiveCreator(request: SetActiveCreatorRequest): Promise<SetActiveCreatorResponse> {
-    return this.post<SetActiveCreatorResponse>('/v1/daemon/creators/active', request);
+    return this.put<SetActiveCreatorResponse>('/v1/daemon/creators/active', request);
+  }
+  getActiveCreator(): Promise<ActiveCreatorResponse> {
+    return this.get<ActiveCreatorResponse>('/v1/daemon/creators/active');
   }
   scanAgents(request?: ScanRequest): Promise<ScanResponse> {
     return this.post<ScanResponse>('/v1/daemon/agent-host/scan', request);

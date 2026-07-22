@@ -9,6 +9,7 @@ import {
 } from 'react';
 
 import { useCreators } from '@/api/queries';
+import { useNexusClient } from '@/lib/client-context';
 
 const STORAGE_KEY = 'nexus:activeCreatorId';
 
@@ -90,6 +91,7 @@ export function useDefaultProfileAutoSelect(
   activeCreatorId: string | null,
   setActiveCreatorId: (id: string | null) => void,
 ) {
+  const client = useNexusClient();
   const creatorsQuery = useCreators({ limit: 100 });
   const items = creatorsQuery.data?.items;
   const resolved = useRef(false);
@@ -101,15 +103,36 @@ export function useDefaultProfileAutoSelect(
       resolved.current = true;
       return;
     }
-    const defaults = items
-      .filter((c) => (c.display_name ?? '').trim().toLowerCase() === 'default')
-      .sort((a, b) => a.creator_id.localeCompare(b.creator_id));
-    const selected = defaults[0] ?? items[0];
-    if (selected) {
-      setActiveCreatorId(selected.creator_id);
-    }
-    resolved.current = true;
-  }, [items, activeCreatorId, setActiveCreatorId]);
+
+    let cancelled = false;
+    void (async () => {
+      // Prefer the daemon's active creator so 工作区 highlight matches config.toml.
+      try {
+        const active = await client.getActiveCreator();
+        if (cancelled) return;
+        if (active.creator_id && ids.has(active.creator_id)) {
+          setActiveCreatorId(active.creator_id);
+          resolved.current = true;
+          return;
+        }
+      } catch {
+        // No active creator on daemon — fall through to Default / first Profile.
+      }
+      if (cancelled) return;
+      const defaults = items
+        .filter((c) => (c.display_name ?? '').trim().toLowerCase() === 'default')
+        .sort((a, b) => a.creator_id.localeCompare(b.creator_id));
+      const selected = defaults[0] ?? items[0];
+      if (selected) {
+        setActiveCreatorId(selected.creator_id);
+      }
+      resolved.current = true;
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [items, activeCreatorId, setActiveCreatorId, client]);
 }
 
 /**
