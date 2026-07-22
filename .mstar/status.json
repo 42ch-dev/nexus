@@ -46,17 +46,18 @@
     "target_branch": "main",
     "tech_debt_summary": {
       "updated_at": "2026-07-22",
-      "total_open": 63,
+      "total_open": 64,
       "by_severity": {
         "critical": 0,
         "high": 0,
         "medium": 2,
-        "low": 10,
+        "low": 11,
         "nit": 51
       },
       "by_target": {
         "V1.131 dogfood / PR merge-ready": 1,
         "V1.96": 1,
+        "manual": 1,
         "post-V1.129": 12,
         "post-V1.130": 10,
         "post-ship": 2,
@@ -77,7 +78,7 @@
         "2026-07-22-v1.130-p1-shell-frame": 1,
         "2026-07-22-v1.130-p4-vi-atmosphere": 3,
         "2026-07-22-v1.131-p0-chronos-titlebar": 1,
-        "2026-07-22-vi-logo-upgrade": 2
+        "2026-07-22-vi-logo-upgrade": 3
       }
     },
     "updated_at": "2026-07-22"
@@ -105,7 +106,7 @@
         "decision": "defer",
         "owner": "@fullstack-dev",
         "target": "post-V1.130",
-        "note": "T4 test checks restart_in_progress field is true, not that concurrent calls join. Add behavioral test when test infrastructure allows."
+        "note": "T4 test checks restart_in_progress field is true, not that concurrent calls join. Add behavioral test when test infrastructure allows. P3 V1.131 slate (2026-07-22): not closed — no owning-plan touch this iteration. Owner: @fullstack-dev. Trigger: add behavioral single-flight test that concurrent restart_daemon calls join when test infrastructure allows."
       },
       {
         "id": "R-V1130P0-QC1-W-002",
@@ -115,7 +116,7 @@
         "decision": "defer",
         "owner": "@fullstack-dev",
         "target": "post-V1.130",
-        "note": "stop_listening_daemon still kills any lsof PID on app quit. P0 fixed restart_daemon only. Separate fix for quit path."
+        "note": "stop_listening_daemon still kills any lsof PID on app quit. P0 fixed restart_daemon only. Separate fix for quit path. P3 V1.131 slate (2026-07-22): not closed — no owning-plan touch this iteration. Owner: @fullstack-dev. Trigger: scope quit-path foreign-port kill fix in stop_listening_daemon (separate from restart_daemon)."
       },
       {
         "id": "R-V1130P0-QC1-W-003",
@@ -125,7 +126,7 @@
         "decision": "defer",
         "owner": "@fullstack-dev",
         "target": "post-V1.130",
-        "note": "If restart_daemon panics between set and clear, flag stays true. Use Drop guard in future hardening."
+        "note": "If restart_daemon panics between set and clear, flag stays true. Use Drop guard in future hardening. P3 V1.131 slate (2026-07-22): not closed — no owning-plan touch this iteration. Owner: @fullstack-dev. Trigger: RAII/Drop-guard restart_in_progress so panic between set and clear clears the flag."
       },
       {
         "id": "R-V1130P0-QC1-W-004",
@@ -135,7 +136,7 @@
         "decision": "defer",
         "owner": "@frontend-dev",
         "target": "post-V1.130",
-        "note": "Extract isPortConflict helper to shared module in future polish."
+        "note": "Extract isPortConflict helper to shared module in future polish. P3 V1.131 slate (2026-07-22): not closed — no owning-plan touch this iteration. Owner: @frontend-dev. Trigger: extract isPortConflict helper to shared module (daemon-status-bar + main-banner)."
       },
       {
         "id": "R-V1130P0-QC1-W-005",
@@ -145,7 +146,7 @@
         "decision": "defer",
         "owner": "@fullstack-dev",
         "target": "post-V1.130",
-        "note": "Currently masked by stop_requested re-check. Edge case in rapid restart+crash scenarios."
+        "note": "Currently masked by stop_requested re-check. Edge case in rapid restart+crash scenarios. P3 V1.131 slate (2026-07-22): not closed — no owning-plan touch this iteration. Owner: @fullstack-dev. Trigger: harden handle_crash vs restart_daemon race beyond stop_requested re-check."
       },
       {
         "id": "R-V1130P0-QC3-W-001",
@@ -155,7 +156,7 @@
         "decision": "defer",
         "owner": "@fullstack-dev",
         "target": "post-V1.130",
-        "note": "If health probe hangs, restart_in_progress stays true. Wrap with HEALTH_START_TIMEOUT + 1s deadline."
+        "note": "If health probe hangs, restart_in_progress stays true. Wrap with HEALTH_START_TIMEOUT + 1s deadline. P3 V1.131 slate (2026-07-22): not closed — no owning-plan touch this iteration. Owner: @fullstack-dev. Trigger: wrap start_with_budget in restart_daemon with HEALTH_START_TIMEOUT + 1s deadline."
       }
     ],
     "2026-07-22-v1.130-p4-vi-atmosphere": [
@@ -167,7 +168,7 @@
         "decision": "defer",
         "owner": "@frontend-dev",
         "target": "post-V1.130",
-        "note": "Contrast table in DESIGN.md still shows old ratios. New #0D2B3E is darker → ratios are equal or better. Recompute in polish pass."
+        "note": "Contrast table in DESIGN.md still shows old ratios. New #0D2B3E is darker → ratios are equal or better. Recompute in polish pass. P3 V1.131 slate (2026-07-22): not closed — no owning-plan touch this iteration. Owner: @frontend-dev. Trigger: recompute WCAG contrast table ratios in DESIGN.md for Chronos #0D2B3E hex values."
       },
       {
         "id": "R-V1130P4-QC1-S-002",
@@ -177,7 +178,7 @@
         "decision": "defer",
         "owner": "@frontend-dev",
         "target": "post-V1.130",
-        "note": "Chronos is compile-time default; T2/T3 swatches deferred. Studio fixture can be added in polish."
+        "note": "Chronos is compile-time default; T2/T3 swatches deferred. Studio fixture can be added in polish. P3 V1.131 slate (2026-07-22): not closed — no owning-plan touch this iteration. Owner: @frontend-dev. Trigger: add Studio T1–T3 atmosphere comparison fixture (Chronos default vs deferred T2/T3 swatches)."
       },
       {
         "id": "R-V1130P4-QC2-S-001",
@@ -187,7 +188,7 @@
         "decision": "defer",
         "owner": "@frontend-dev",
         "target": "post-V1.130",
-        "note": "Dark theme intentionally uses cyan-derived alphas for warmth on dark surfaces. Pre-existing design decision, not introduced by P4."
+        "note": "Dark theme intentionally uses cyan-derived alphas for warmth on dark surfaces. Pre-existing design decision, not introduced by P4. P3 V1.131 slate (2026-07-22): not closed — no owning-plan touch this iteration. Owner: @frontend-dev. Trigger: document or revise dark brand-deep-blue-alpha cyan-RGB choice if product revisits warmth-on-ink alphas."
       }
     ],
     "2026-07-22-v1.130-p1-shell-frame": [
@@ -199,7 +200,7 @@
         "decision": "defer",
         "owner": "@fullstack-dev",
         "target": "post-V1.130",
-        "note": "Current implementation reads first page only. Full spec compliance needs pagination loop + desktop active-creator switch IPC."
+        "note": "Current implementation reads first page only. Full spec compliance needs pagination loop + desktop active-creator switch IPC. P3 V1.131 slate (2026-07-22): not closed — no owning-plan touch this iteration. Owner: @fullstack-dev. Trigger: implement pagination loop + desktop switchActiveCreator IPC for default-profile auto-select."
       }
     ],
     "2026-07-12-v1.112-i18n-ui-migration": [],
@@ -617,6 +618,18 @@
         "target": "post-ship",
         "lifecycle": "open",
         "note": "P3 verify 2026-07-22: gallery pages have *-chronos-note (home/tokens/button/brand/surfaces) but no dedicated setup/settings chronos-note fixtures. Owner @frontend-dev; trigger: add setup-chronos-note / settings-chronos-note when gallery intros for Setup/Settings surfaces expand."
+      },
+      {
+        "id": "R-VI-003",
+        "title": "macOS Dock runtime visual smoke not verified (compose + preview only)",
+        "severity": "low",
+        "source": "QA qa.md",
+        "scope": "apps/desktop icons Dock",
+        "decision": "defer",
+        "owner": "@ops-engineer / @qa-engineer",
+        "target": "manual",
+        "lifecycle": "open",
+        "note": "Criteria in apps/desktop/src-tauri/icons/README.md; run Dock smoke before release packaging. Compose+README done (hashes source-1024.png c3be7c369ddb51ccb9cdcd436e22bf09996342074be48907bfc5238c23a7e724 / app-icon-preview-256.png da273c62a7927505d4f27d3fea6aeae0fd923f784b26c2c4f1900be3d516be8d). Trigger: mandatory QA rebuilt `.app` Dock live smoke after cache invalidation per README (quit/rebuild/killall Dock/relaunch + stale-bundle removal)."
       },
       {
         "id": "R-VI-004",

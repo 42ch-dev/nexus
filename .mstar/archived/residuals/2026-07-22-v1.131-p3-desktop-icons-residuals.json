@@ -10,6 +10,8 @@
     "note": "Component exists at settings-modal-host.tsx but header gear still links to /settings. Wire in polish pass.",
     "closure_note": "P0 T3 closed Settings gear \u2192 SettingsModalHost. Evidence: plan 2026-07-22-v1.131-p0-chronos-titlebar Done (T3 [x]); commits d08075c2 (titlebar+gear), chronos-titlebar.test.tsx opens SettingsModalHost; QA Pass with notes on iteration/v1.131 @ 9e33ed00. P3 archives only \u2014 no rewiring.",
     "archived_at": "2026-07-22T12:19:21Z",
+    "closed_at": "2026-07-22T12:19:21Z",
+    "closure_evidence": "d08075c2; plan 2026-07-22-v1.131-p0-chronos-titlebar T3; QA Pass @ 9e33ed00",
     "archived_by_plan": "2026-07-22-v1.131-p3-desktop-icons-residuals"
   },
   {
@@ -23,21 +25,8 @@
     "note": "Studio dual-pane/titlebar/modal fixtures not created. Add in polish pass.",
     "closure_note": "P0 T2 shipped Studio chronos-titlebar fixtures (light+dark). Evidence: plan 2026-07-22-v1.131-p0-chronos-titlebar T2 [x]; fixtures chronos-titlebar-fixtures.tsx + chronos-titlebar-fixtures.test.tsx; commit d08075c2 on iteration/v1.131. P3 archives only.",
     "archived_at": "2026-07-22T12:19:21Z",
-    "archived_by_plan": "2026-07-22-v1.131-p3-desktop-icons-residuals"
-  },
-  {
-    "id": "R-VI-003",
-    "title": "macOS Dock runtime visual smoke not verified (compose + preview only)",
-    "severity": "low",
-    "source": "QA qa.md",
-    "scope": "apps/desktop icons Dock",
-    "decision": "accept",
-    "owner": "@ops-engineer",
-    "target": "manual",
-    "lifecycle": "resolved",
-    "note": "Criteria in apps/desktop/src-tauri/icons/README.md; run Dock smoke before release packaging.",
-    "closure_note": "P3 T1: icons:compose + icons:generate exit 0; compose source packages/nexus-ui/assets/logos/logo-primary.svg; source-1024.png + app-icon-preview-256.png SHA-256 unchanged (c3be7c369ddb51ccb9cdcd436e22bf09996342074be48907bfc5238c23a7e724 / da273c62a7927505d4f27d3fea6aeae0fd923f784b26c2c4f1900be3d516be8d). README Cache invalidation section documents quit/rebuild/killall Dock/relaunch + stale-bundle removal. Dock live visual smoke remains QA mandatory.",
-    "archived_at": "2026-07-22T12:19:21Z",
+    "closed_at": "2026-07-22T12:19:21Z",
+    "closure_evidence": "d08075c2; chronos-titlebar-fixtures.tsx + tests",
     "archived_by_plan": "2026-07-22-v1.131-p3-desktop-icons-residuals"
   },
   {
@@ -51,8 +40,10 @@
     "target": "post-ship",
     "lifecycle": "resolved",
     "note": "mockMatchMedia light-biased; add dark-only class assertions on primary button / token swatches.",
-    "closure_note": "P3 T3: design-studio Chronos gallery tests add dark mockMatchMedia assertions for primary Button (bg-brand-cyan + text-brand-deep-blue) and tokens blue-700 swatch under .dark. Closes light-biased gap without UI rewrite.",
+    "closure_note": "P3 T3 + QC2 F-003 fix: dark Chronos gallery tests use only mockMatchMediaFull({ dark: true }) so ThemeProvider applies `.dark` (no manual documentElement.classList.add). Asserts provider-applied `.dark`, primary Button cyan/deep classes, and ColorSwatch blue-700 rAF-resolved paint rgb(37, 209, 224)/#25d1e0 gated on matchMedia-driven `.dark` (jsdom getComputedStyle harness — vitest css:false).",
     "archived_at": "2026-07-22T12:19:21Z",
+    "closed_at": "2026-07-22T12:19:21Z",
+    "closure_evidence": "apps/design-studio/src/App.test.tsx Chronos gallery dark tests (matchMedia-driven .dark)",
     "archived_by_plan": "2026-07-22-v1.131-p3-desktop-icons-residuals"
   },
   {
@@ -69,6 +60,8 @@
     "note": "Header comment says primary|color|white|mono; runtime logoVariants is primary|whiteBg|white|mono|text.",
     "closure_note": "P1 T4 fixed nexus-logo.tsx JSDoc to primary|whiteBg|white|mono|text (commit cd392429). P3 archives ledger row.",
     "archived_at": "2026-07-22T12:19:21Z",
+    "closed_at": "2026-07-22T12:19:21Z",
+    "closure_evidence": "cd392429",
     "archived_by_plan": "2026-07-22-v1.131-p3-desktop-icons-residuals"
   },
   {
@@ -85,6 +78,8 @@
     "note": "Comment drift after shell became theme-stable primary-only.",
     "closure_note": "P1 T4 fixed StudioShellLogo comment drift (theme-stable primary; no .dark read) \u2014 commit cd392429. P3 archives ledger row.",
     "archived_at": "2026-07-22T12:19:21Z",
+    "closed_at": "2026-07-22T12:19:21Z",
+    "closure_evidence": "cd392429",
     "archived_by_plan": "2026-07-22-v1.131-p3-desktop-icons-residuals"
   },
   {
@@ -101,6 +96,8 @@
     "note": "Comment cites ~10.14:1 width; shell uses logo-primary plate viewBox 284x284.",
     "closure_note": "P1 T4 corrected logoShellHeightPx comment for square primary plate viewBox 284\u00d7284 \u2014 commit cd392429. P3 archives ledger row.",
     "archived_at": "2026-07-22T12:19:21Z",
+    "closed_at": "2026-07-22T12:19:21Z",
+    "closure_evidence": "cd392429",
     "archived_by_plan": "2026-07-22-v1.131-p3-desktop-icons-residuals"
   },
   {
@@ -117,6 +114,8 @@
     "note": "isDark ? 'bg-brand-deep-blue' : 'bg-brand-deep-blue' leftover from theme-split attempt.",
     "closure_note": "P1 T3 removed dead identical isDark ternary in ChronosShellMini (commit 925cbee4). P3 archives ledger row.",
     "archived_at": "2026-07-22T12:19:21Z",
+    "closed_at": "2026-07-22T12:19:21Z",
+    "closure_evidence": "925cbee4",
     "archived_by_plan": "2026-07-22-v1.131-p3-desktop-icons-residuals"
   },
   {
@@ -133,6 +132,8 @@
     "note": "Package exposes five keys (primary|whiteBg|white|mono|text); checklist says four.",
     "closure_note": "P1 T4 updated design-studio spec checklist to five logoVariants \u2014 commit cd392429. P3 archives ledger row.",
     "archived_at": "2026-07-22T12:19:21Z",
+    "closed_at": "2026-07-22T12:19:21Z",
+    "closure_evidence": "cd392429",
     "archived_by_plan": "2026-07-22-v1.131-p3-desktop-icons-residuals"
   }
 ]
