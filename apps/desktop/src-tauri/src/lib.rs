@@ -804,14 +804,13 @@ fn switch_active_creator_at(path: &Path, creator_id: &str) -> anyhow::Result<Str
     doc["active_creator_id"] = toml_edit::value(creator_id);
     doc["workspace_path"] = toml_edit::value(&target_path);
 
-    // Clear any stale workspace slug for the target creator so the Tauri path
-    // matches the daemon's `set_active_creator` invariant (QC1-F-004 parity).
-    if let Some(slugs) = doc
-        .get_mut("active_workspace_slug_by_creator")
-        .and_then(|item| item.as_table_mut())
-    {
-        slugs.remove(creator_id);
+    // Reset workspace slug to `"default"` (parity with daemon `set_active_creator`).
+    // Profile switch must not leave a stale non-default slug, and must not leave
+    // the entry absent for older read paths that lack the default fallback.
+    if doc.get("active_workspace_slug_by_creator").is_none() {
+        doc["active_workspace_slug_by_creator"] = toml_edit::Item::Table(toml_edit::Table::new());
     }
+    doc["active_workspace_slug_by_creator"][creator_id] = toml_edit::value("default");
 
     atomic_write(path, &doc.to_string())?;
     Ok(target_path)
@@ -2131,7 +2130,7 @@ command = "claude"
     }
 
     #[test]
-    fn switch_active_creator_clears_target_workspace_slug() {
+    fn switch_active_creator_resets_target_workspace_slug_to_default() {
         let tmp = tempfile::tempdir().expect("temp dir");
         let config_path = tmp.path().join("config.toml");
         std::fs::write(
@@ -2153,6 +2152,10 @@ command = "claude"
         assert!(
             !text.contains("old-slug"),
             "stale workspace slug for target creator should be cleared"
+        );
+        assert!(
+            text.contains("profile_b = \"default\"") || text.contains("profile_b = 'default'"),
+            "target creator should be reset to the default workspace slug, got:\n{text}"
         );
     }
 

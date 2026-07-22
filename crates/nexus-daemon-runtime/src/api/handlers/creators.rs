@@ -705,12 +705,24 @@ pub async fn set_active_creator(
 
     set_active_creator_id(state.nexus_home(), &req.creator_id)?;
 
-    // Clear workspace slug for this creator in config (reset to default)
+    // Reset workspace slug for this creator to the default. Profile switch
+    // previously *removed* the entry and relied on read-path fallback; write
+    // `"default"` explicitly so config stays self-describing and older
+    // read paths that lack the fallback do not surface AuthRequired.
     let mut config = read_cli_config(state.nexus_home())?;
     if let Some(table) = config.as_table_mut() {
+        if table.get("active_workspace_slug_by_creator").is_none() {
+            table.insert(
+                "active_workspace_slug_by_creator".to_string(),
+                toml::Value::Table(toml::map::Map::new()),
+            );
+        }
         if let Some(slug_table) = table.get_mut("active_workspace_slug_by_creator") {
             if let Some(slugs) = slug_table.as_table_mut() {
-                slugs.remove(&req.creator_id);
+                slugs.insert(
+                    req.creator_id.clone(),
+                    toml::Value::String("default".to_string()),
+                );
             }
         }
         write_cli_config(state.nexus_home(), &config)?;

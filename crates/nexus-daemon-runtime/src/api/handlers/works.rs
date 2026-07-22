@@ -1659,18 +1659,21 @@ pub fn read_active_creator_id(nexus_home: &std::path::Path) -> Option<String> {
 }
 
 /// Read active workspace slug from CLI config.
+///
+/// Missing or empty slug entries fall back to `"default"` — the same contract as
+/// [`crate::config::CliConfigSnapshot::workspace_slug_for_creator`] and
+/// `resolve_state_db_path`. Profile switch intentionally clears a stale slug
+/// (`set_active_creator` / desktop `switch_active_creator`) and relies on this
+/// default; returning `None` here surfaces a misleading `Authentication required`.
 pub fn read_active_workspace_slug(
     nexus_home: &std::path::Path,
     creator_id: &str,
 ) -> Option<String> {
-    let config_path = nexus_home.join("config.toml");
-    let content = std::fs::read_to_string(&config_path).ok()?;
-    let config: toml::Value = toml::from_str(&content).ok()?;
-    config
-        .get("active_workspace_slug_by_creator")
-        .and_then(|v| v.get(creator_id))
-        .and_then(|v| v.as_str())
-        .map(std::string::ToString::to_string)
+    Some(
+        crate::config::CliConfigSnapshot::load(nexus_home)
+            .unwrap_or_default()
+            .workspace_slug_for_creator(creator_id),
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -2694,5 +2697,37 @@ mod tests_fix_d {
                 "adversarial world_id '{bad_id}' should produce invalid_world_id, got: {msg}"
             );
         }
+    }
+
+    #[test]
+    fn read_active_workspace_slug_defaults_when_entry_missing() {
+        let tmp = tempfile::tempdir().expect("tmpdir");
+        let nexus_home = tmp.path();
+        std::fs::write(
+            nexus_home.join("config.toml"),
+            "active_creator_id = \"ctr_test\"\n[active_workspace_slug_by_creator]\n",
+        )
+        .expect("write config");
+
+        let slug = read_active_workspace_slug(nexus_home, "ctr_test");
+        assert_eq!(
+            slug.as_deref(),
+            Some("default"),
+            "missing slug entry must fall back to default (profile-switch contract)"
+        );
+    }
+
+    #[test]
+    fn read_active_workspace_slug_preserves_explicit_entry() {
+        let tmp = tempfile::tempdir().expect("tmpdir");
+        let nexus_home = tmp.path();
+        std::fs::write(
+            nexus_home.join("config.toml"),
+            "active_creator_id = \"ctr_test\"\n[active_workspace_slug_by_creator]\nctr_test = \"ws_custom\"\n",
+        )
+        .expect("write config");
+
+        let slug = read_active_workspace_slug(nexus_home, "ctr_test");
+        assert_eq!(slug.as_deref(), Some("ws_custom"));
     }
 }
