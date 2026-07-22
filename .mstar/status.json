@@ -92,7 +92,7 @@
     },
     {
       "id": "2026-07-22-v1.132-p2-vi-aesthetic-retune",
-      "status": "InProgress",
+      "status": "InReview",
       "file": ".mstar/plans/2026-07-22-v1.132-p2-vi-aesthetic-retune.md",
       "metadata": {
         "primary_spec": ".mstar/iterations/v1.132/specs/vi-aesthetic-retune.md",
@@ -136,6 +136,12 @@
           "task": 4,
           "base": "96bf7db8008a090085211c161a26a087791292f1",
           "head": "df8ae1831bf212fe483607156e05fec88f6cc9c8",
+          "status": "complete"
+        },
+        {
+          "task": 5,
+          "base": "df8ae1831bf212fe483607156e05fec88f6cc9c8",
+          "head": "d33a64ce873e099911a13d3a969f1ed39aa39c7d",
           "status": "complete"
         }
       ]
