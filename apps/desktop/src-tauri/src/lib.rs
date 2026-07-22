@@ -944,11 +944,16 @@ fn ensure_setup_bootstrap() -> Result<BootstrapResult, String> {
 
 /// Toggle the main webview window between maximized and restored. Wired from the
 /// Chronos titlebar empty-paint double-click handler (Overlay titlebar AC-5).
+///
+/// Tauri v2 `WebviewWindow` exposes `is_maximized` / `maximize` / `unmaximize`
+/// (no `toggle_maximize` method).
 #[tauri::command]
 fn toggle_maximize_window(window: tauri::WebviewWindow) -> Result<(), String> {
-    window
-        .toggle_maximize()
-        .map_err(|e| e.to_string())
+    if window.is_maximized().map_err(|e| e.to_string())? {
+        window.unmaximize().map_err(|e| e.to_string())
+    } else {
+        window.maximize().map_err(|e| e.to_string())
+    }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
