@@ -3,6 +3,11 @@
   "updated_at": "2026-07-22",
   "entries": [
     {
+      "at": "2026-07-22 (V1.131 P3 InReview)",
+      "message": "P3 implement merged to iteration/v1.131: T1 icons compose/generate match (no asset commit), Dock cache README; T2 archived 9 residuals (W-003/S-001/R-VI-001/003/007-011), deferred R-VI-002/004 + R-V1131P0-QC2-W-001; T3 dark Chronos tests. tech_debt 71→63. QC tri next.",
+      "plan_id": "2026-07-22-v1.131-p3-desktop-icons-residuals"
+    },
+    {
       "at": "2026-07-22 (V1.131 P3 start)",
       "message": "P2 Done; P3 desktop-icons-residuals InProgress. Worktree .worktrees/v1.131-p3-desktop-icons on plan/v1.131-p3-desktop-icons-residuals. T1 icons compose/generate + Dock cache README; T2 residual archive/re-defer; T3 optional dark gallery tests.",
       "plan_id": "2026-07-22-v1.131-p3-desktop-icons-residuals"
