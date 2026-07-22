@@ -26,7 +26,7 @@ describe('NexusLogo', () => {
     expect(img).toHaveStyle({ width: 'auto', height: '32px' });
   });
 
-  it('honors custom label, className, and size', () => {
+  it('honors custom label, className, size, and draggable', () => {
     render(
       <NexusLogo
         variant="white"
@@ -34,6 +34,7 @@ describe('NexusLogo', () => {
         label="Nexus local"
         className="brand-logo"
         size={48}
+        draggable={false}
       />,
     );
 
@@ -41,6 +42,7 @@ describe('NexusLogo', () => {
     expect(img).toHaveClass('brand-logo');
     expect(img).toHaveAttribute('height', '48');
     expect(img).toHaveAttribute('src', '/mock/logo-white.svg');
+    expect(img).toHaveAttribute('draggable', 'false');
   });
 
   it('supports the text wordmark variant', () => {

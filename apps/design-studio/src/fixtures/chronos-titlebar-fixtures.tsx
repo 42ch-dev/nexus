@@ -24,6 +24,7 @@ function InkLogo() {
       src={logoWhite}
       label="Nexus"
       size={logoShellHeightPx}
+      draggable={false}
       className="h-5 w-auto max-w-full shrink-0"
     />
   );

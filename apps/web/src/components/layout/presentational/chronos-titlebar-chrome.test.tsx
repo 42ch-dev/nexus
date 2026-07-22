@@ -52,12 +52,34 @@ describe('ChronosTitlebarChrome', () => {
     expect(screen.getByTestId('chronos-titlebar-title')).toHaveAttribute(
       'data-tauri-drag-region',
     );
+    expect(screen.getByTestId('chronos-titlebar-title')).toHaveClass('select-none');
+    expect(screen.getByTestId('chronos-titlebar-controls')).toHaveAttribute(
+      'data-tauri-drag-region',
+      'false',
+    );
     expect(screen.getByRole('button', { name: 'Logo' })).not.toHaveAttribute(
       'data-tauri-drag-region',
     );
     expect(screen.getByRole('button', { name: 'Gear' })).not.toHaveAttribute(
       'data-tauri-drag-region',
     );
+    expect(screen.getByRole('button', { name: 'Theme' })).not.toHaveAttribute(
+      'data-tauri-drag-region',
+    );
+    expect(screen.getByText('Health')).not.toHaveAttribute('data-tauri-drag-region');
+  });
+
+  it('prevents native image drag in logo slot via draggable={false}', () => {
+    render(
+      <ChronosTitlebarChrome
+        title="Works"
+        isDark={false}
+        desktopSafeInset
+        logo={<img src="/logo.svg" alt="Nexus" draggable={false} />}
+      />,
+    );
+
+    expect(screen.getByRole('img', { name: 'Nexus' })).toHaveAttribute('draggable', 'false');
   });
 
   it('omits drag regions in browser mode', () => {
@@ -78,6 +100,9 @@ describe('ChronosTitlebarChrome', () => {
       'data-tauri-drag-region',
     );
     expect(screen.getByTestId('chronos-titlebar-title')).not.toHaveAttribute(
+      'data-tauri-drag-region',
+    );
+    expect(screen.getByTestId('chronos-titlebar-controls')).not.toHaveAttribute(
       'data-tauri-drag-region',
     );
   });

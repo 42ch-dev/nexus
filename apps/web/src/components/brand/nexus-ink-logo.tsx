@@ -20,6 +20,7 @@ export function NexusInkLogo({ label = 'Nexus', className }: NexusInkLogoProps) 
       src={logoWhite}
       label={label}
       size={logoShellHeightPx}
+      draggable={false}
       className={cn('h-5 w-auto max-w-full shrink-0', className)}
     />
   );

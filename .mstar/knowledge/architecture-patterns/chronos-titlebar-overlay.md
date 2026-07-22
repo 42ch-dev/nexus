@@ -28,7 +28,7 @@ Dogfood after the VI logo upgrade required a **titlebar-first** Chronos chrome: 
 | Decorations | **on** (native traffic lights) |
 | `trafficLightPosition` | Align native controls with the Chronos bar height/inset |
 
-The **web** titlebar paints the ink plane under the native chrome. Only **non-interactive** empty regions use `data-tauri-drag-region`. Logo, gear, theme, health, and navigation controls are **never** drag regions.
+The **web** titlebar paints the ink plane under the native chrome. Logo/title paint and empty spacer use `data-tauri-drag-region`; gear, theme, and health controls are explicit **no-drag** interactive islands.
 
 ### 2. Layout ownership
 
