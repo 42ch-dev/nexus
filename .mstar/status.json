@@ -144,7 +144,7 @@
     },
     {
       "id": "2026-07-22-v1.132-p3-creator-orch-gongnengqu-ia",
-      "status": "Todo",
+      "status": "InProgress",
       "file": ".mstar/plans/2026-07-22-v1.132-p3-creator-orch-gongnengqu-ia.md",
       "metadata": {
         "primary_spec": ".mstar/iterations/v1.132/specs/creator-orch-gongnengqu-ia.md",
@@ -157,7 +157,22 @@
         "wire_contracts_changed": false,
         "wave": "3",
         "seq": "3"
-      }
+      },
+      "execution_lease": {
+        "holder": "pm-v1.132-btwoods-MBP",
+        "claimed_at": "2026-07-22T15:16:27Z",
+        "worktree_path": "/Users/bibi/workspace/organizations/42ch/nexus/.worktrees/v1.132-p3-creator-orch-gongnengqu-ia",
+        "working_branch": "plan/v1.132-p3-creator-orch-gongnengqu-ia",
+        "session_label": "v1.132-phase2-wave3"
+      },
+      "task_commits": [
+        {
+          "task": 1,
+          "base": "935c59070ccba15e4f3bf241e82a46c175bbf403",
+          "head": "d8f30657b59b7c243a3acfe7ce0a59a9a3f708d3",
+          "status": "complete"
+        }
+      ]
     }
   ],
   "metadata": {
