@@ -177,6 +177,18 @@
           "base": "d8f30657b59b7c243a3acfe7ce0a59a9a3f708d3",
           "head": "978578a6e1c2aec7f3d420f3e39c16452e3c6204",
           "status": "complete"
+        },
+        {
+          "task": 3,
+          "base": "978578a6e1c2aec7f3d420f3e39c16452e3c6204",
+          "head": "8d9919a3631edaad174d4e96b8a84925b9a98fff",
+          "status": "complete"
+        },
+        {
+          "task": 4,
+          "base": "5f2a1d1a2fc0a885c79cd95cea61eb0469a6225e",
+          "head": "b88934a7a2106234626c1ffbde060b213a3fe035",
+          "status": "complete"
         }
       ]
     }
@@ -811,6 +823,34 @@
         "lifecycle": "open",
         "note": "V1.132 P1 re-target (2026-07-22): durable protocol → .mstar/iterations/v1.132/guides/titlebar-window-drag-overlay-smoke.md. Human Overlay matrix H2–H6 + D1–D3 required before archive (agent TCC cannot grant Screen Recording/Accessibility). Product chrome+Studio+unit tests may ship with residual open (Profile B).",
         "tracking_link": ".mstar/iterations/v1.132/guides/titlebar-window-drag-overlay-smoke.md"
+      }
+    ],
+    "2026-07-22-v1.132-p3-creator-orch-gongnengqu-ia": [
+      {
+        "id": "R-V1132P3-SUP-001",
+        "title": "V1.131 shell-ia-finish AC-4 / DF-V1130-WORKSPACE-UNDER-ORCH — orchestrator-only 工作区",
+        "severity": "nit",
+        "lifecycle": "superseded",
+        "decision": "supersede",
+        "owner": "@writing-specialist",
+        "target": "V1.132 P3",
+        "note": "Shipped V1.131 (plan 2026-07-22-v1.131-p2-shell-ia-finish T3) but product model changed: 工作区 is parent shell; 创作/编排 = modes under it; footer always visible. Superseded by compass AC-6, AC-7 and creator-orch-gongnengqu-ia spec. T4 2026-07-22.",
+        "tracking_link": ".mstar/iterations/v1.132/specs/creator-orch-gongnengqu-ia.md",
+        "superseded_by": "2026-07-22-v1.132-p3-creator-orch-gongnengqu-ia",
+        "closed_at": "2026-07-22"
+      },
+      {
+        "id": "R-V1132P3-SUP-002",
+        "title": "V1.130 P2 创作-left-Menu false-Done (creator-dual-state hub IA)",
+        "severity": "nit",
+        "lifecycle": "superseded",
+        "decision": "supersede",
+        "owner": "@writing-specialist",
+        "target": "V1.132 P3",
+        "note": "Plan 2026-07-22-v1.130-p2-creator-dual-state marked Done but dogfood still showed left Menu (世界/作品) instead of Create hub. Superseded by compass AC-8 and creator-orch-gongnengqu-ia spec (grill A: Create-only left). T4 2026-07-22.",
+        "tracking_link": ".mstar/iterations/v1.132/specs/creator-orch-gongnengqu-ia.md",
+        "superseded_by": "2026-07-22-v1.132-p3-creator-orch-gongnengqu-ia",
+        "closed_at": "2026-07-22"
       }
     ],
     "2026-07-22-v1.132-p0-orch-load-404": [
