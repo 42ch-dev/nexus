@@ -239,4 +239,27 @@ Public `logoVariants` keys stay `primary | color | white | mono`; add `text` for
 
 1. Spec coverage: canvas MiniShell + author Button lock + full DS/Studio gap matrix map to T1–T8.
 2. Placeholder scan: no TBD.
-3. Type consistency: logo variants `primary|color|white|mono|text`; theme variant ids `elegant|nature|parchment|scifi`; dual-role Ink vs Cyan.
+3. Type consistency: logo variants `primary|whiteBg|white|mono|text` (no `color`); theme variant ids `elegant|nature|parchment|scifi`; dual-role Ink vs Cyan.
+
+## Review Gate Summary
+
+> Raw reports: `.mstar/sdd/2026-07-22-vi-logo-upgrade/review/qc1.md` … `qc3.md` + `qc-consolidated.md` + `qc2.md` Revalidation. Open residuals in `.mstar/status.json`.
+
+| gate | verdict | date | notes |
+|------|---------|------|-------|
+| QC1 | **Approve** | 2026-07-22 | 0 Critical / 0 Warning |
+| QC2 | **Request Changes** → **Approve** | 2026-07-22 | W-001 connection-setup security notes used cyan `blue-700` washes; fixed `492b5b8e` to deep-ink `brand-deep-blue`; targeted revalidation Approve |
+| QC3 | **Approve** | 2026-07-22 | 0 Critical / 0 Warning |
+| Consolidated | **Approve** | 2026-07-22 | Post-range logo corrections (primary plate, remove `logo-color`, shell primary-only, wordmark refit) on branch through `492b5b8e` |
+
+## QA Gate Summary
+
+> Raw report: `.mstar/sdd/2026-07-22-vi-logo-upgrade/review/qa.md`.
+
+| gate | verdict | date | notes |
+|------|---------|------|-------|
+| QA (mandatory — brand / Chronos / Studio / desktop compose) | **Accept with residuals** | 2026-07-22 | Must DoD themes pass; 216 scoped tests + `icons:compose`; Dock runtime smoke deferred |
+
+**Residuals (6 open, all low — non-blocking):** `residual_findings["2026-07-22-vi-logo-upgrade"]` — R-VI-001 … R-VI-006 (dark-theme test gap, Setup/Settings Chronos notes, Dock smoke, wordmark polish, stale knowledge + `packages/nexus-ui/AGENTS.md`).
+
+**Plan verdict: Done.** Ready for PR `plan/vi-logo-upgrade` → `main` (squash).

@@ -46,8 +46,8 @@
         "iteration_id": "V1.130",
         "blocked_by": [],
         "wave": "1",
-        "seq": "1\u2225",
-        "description": "VI Chronos lock \u2014 kill office navy, keep cyan"
+        "seq": "1∥",
+        "description": "VI Chronos lock — kill office navy, keep cyan"
       }
     },
     {
@@ -99,7 +99,7 @@
         ],
         "wave": "3",
         "seq": "3a",
-        "description": "Create World + continue World\u2192Work; entity Chat slot + action buttons"
+        "description": "Create World + continue World→Work; entity Chat slot + action buttons"
       }
     },
     {
@@ -152,23 +152,7 @@
         ],
         "wave": "4",
         "seq": "4",
-        "description": "Compute\u2192Settings modal; Profiles\u2192\u5de5\u4f5c\u533a under \u7f16\u6392"
-      }
-    },
-    {
-      "plan_id": "2026-07-22-vi-logo-upgrade",
-      "status": "InReview",
-      "type": "feature",
-      "file": ".mstar/plans/2026-07-22-vi-logo-upgrade.md",
-      "metadata": {
-        "primary_spec": null,
-        "spec_refs": [],
-        "vi_canvas_ref": "v1-130-vi-atmosphere-palettes.canvas.tsx",
-        "working_branch": "plan/vi-logo-upgrade",
-        "merge_target": "main",
-        "wire_contracts_changed": false,
-        "blocked_by": [],
-        "description": "Chronos VI confirm + new timeline logo SVG/adoption"
+        "description": "Compute→Settings modal; Profiles→工作区 under 编排"
       }
     }
   ],
@@ -184,23 +168,27 @@
       "pr": "https://github.com/42ch-dev/nexus/pull/162",
       "merge_commit": "d59311de"
     },
-    "platform_integration": "paused \u2014 local-only until further notice",
+    "platform_integration": "paused — local-only until further notice",
     "spec_integration_branch": "iteration/v1.130",
     "spec_refs_index": ".mstar/specs/README.md",
     "target_branch": "main",
     "tech_debt_summary": {
-      "updated_at": "2026-07-21",
-      "total_open": 50,
+      "updated_at": "2026-07-22",
+      "total_open": 68,
       "by_severity": {
         "critical": 0,
         "high": 0,
         "medium": 1,
-        "low": 5,
-        "nit": 44
+        "low": 15,
+        "nit": 52
       },
       "by_target": {
         "V1.96": 1,
+        "compound": 1,
+        "manual": 1,
         "post-V1.129": 12,
+        "post-V1.130": 12,
+        "post-ship": 4,
         "unspecified": 37
       },
       "by_plan": {
@@ -213,10 +201,14 @@
         "2026-07-20-v1.128-p1-nle-timeline-canvas": 1,
         "2026-07-20-v1.128-p2-creator-create-controller-shell": 1,
         "2026-07-21-v1.129-p0-profile-create-reliability": 6,
-        "2026-07-21-v1.129-p1-transport-error-ux": 6
+        "2026-07-21-v1.129-p1-transport-error-ux": 6,
+        "2026-07-22-v1.130-p0-daemon-restart": 6,
+        "2026-07-22-v1.130-p1-shell-frame": 3,
+        "2026-07-22-v1.130-p4-vi-atmosphere": 3,
+        "2026-07-22-vi-logo-upgrade": 6
       }
     },
-    "updated_at": "2026-07-21"
+    "updated_at": "2026-07-22"
   },
   "residual_findings": {
     "2026-07-05-v1.92-closure": [
@@ -229,7 +221,7 @@
         "target": "V1.96",
         "lifecycle": "open",
         "tracking_link": "https://github.com/42ch-dev/nexus/pull/120#pullrequestreview-4632744387",
-        "note": "Desktop Tauri cert pinning \u2014 defer to V1.96."
+        "note": "Desktop Tauri cert pinning — defer to V1.96."
       }
     ],
     "2026-07-22-v1.130-p0-daemon-restart": [
@@ -246,7 +238,7 @@
       {
         "id": "R-V1130P0-QC1-W-002",
         "severity": "low",
-        "title": "Foreign-port kill gap remains in stop_listening_daemon (quit path) \u2014 pre-existing",
+        "title": "Foreign-port kill gap remains in stop_listening_daemon (quit path) — pre-existing",
         "lifecycle": "open",
         "decision": "defer",
         "owner": "@fullstack-dev",
@@ -303,7 +295,7 @@
         "decision": "defer",
         "owner": "@frontend-dev",
         "target": "post-V1.130",
-        "note": "Contrast table in DESIGN.md still shows old ratios. New #0D2B3E is darker \u2192 ratios are equal or better. Recompute in polish pass."
+        "note": "Contrast table in DESIGN.md still shows old ratios. New #0D2B3E is darker → ratios are equal or better. Recompute in polish pass."
       },
       {
         "id": "R-V1130P4-QC1-S-002",
@@ -454,14 +446,14 @@
         "severity": "low",
         "title": "Single-commit policy: 4 commits instead of 1",
         "lifecycle": "open",
-        "notes": "Single-commit policy \u2014 resolves at PR squash-merge."
+        "notes": "Single-commit policy — resolves at PR squash-merge."
       },
       {
         "id": "R-V1126P2-QC-W-005",
         "severity": "low",
         "title": "total_worlds re-counted per page",
         "lifecycle": "open",
-        "notes": "total_worlds re-counted per page \u2014 V1.127+ polish."
+        "notes": "total_worlds re-counted per page — V1.127+ polish."
       },
       {
         "id": "R-V1126P2-QC-S-001",
@@ -568,14 +560,14 @@
       {
         "id": "R-V1127P0-QC-S-002",
         "severity": "nit",
-        "title": "T2 has_more documentation drift \u2014 plan/spec/briefs/compass all reference has_more but schema has only cursor",
+        "title": "T2 has_more documentation drift — plan/spec/briefs/compass all reference has_more but schema has only cursor",
         "lifecycle": "open",
         "notes": "V1.128+ polish. Spec/plan/compass docs need has_more references corrected to cursor-only."
       },
       {
         "id": "R-V1127P0-QC-S-003",
         "severity": "nit",
-        "title": "T2 worlds-page Load More is activity-enrichment not list pagination \u2014 label may mislead",
+        "title": "T2 worlds-page Load More is activity-enrichment not list pagination — label may mislead",
         "lifecycle": "open",
         "notes": "V1.128+ polish. apps/web/src/pages/worlds-page.tsx:194-209."
       },
@@ -610,7 +602,7 @@
       {
         "id": "R-V1127P0-QC-S-008",
         "severity": "nit",
-        "title": "T4/T5/T6 documentation comments \u2014 capture-phase trade-off, history-replaceState, residual lifecycle notes (qc2 S-004/S-005/S-006)",
+        "title": "T4/T5/T6 documentation comments — capture-phase trade-off, history-replaceState, residual lifecycle notes (qc2 S-004/S-005/S-006)",
         "lifecycle": "open",
         "notes": "V1.128+ polish. selection-submenu.tsx:121-126 + sidebar.tsx:103-112 + archived residual file."
       }
@@ -624,7 +616,7 @@
         "title": "Work Timeline lacks host-level NLE overlay test",
         "lifecycle": "open",
         "tracking_link": ".mstar/plans/2026-07-20-v1.128-p1-nle-timeline-canvas.md#Review Gate Summary",
-        "notes": "Work Timeline host-level NLE overlay test missing \u2014 defer."
+        "notes": "Work Timeline host-level NLE overlay test missing — defer."
       }
     ],
     "2026-07-20-v1.128-p2-creator-create-controller-shell": [
@@ -641,7 +633,7 @@
       {
         "id": "R-V1129P0-QC1-M-001",
         "severity": "nit",
-        "title": "Inline ctr_local\u2026 id-gen duplicates nexus-creator::local_identity::generate_local_id pattern",
+        "title": "Inline ctr_local… id-gen duplicates nexus-creator::local_identity::generate_local_id pattern",
         "lifecycle": "open",
         "decision": "defer",
         "owner": "@fullstack-dev",
@@ -686,7 +678,7 @@
         "decision": "defer",
         "owner": "@frontend-dev",
         "target": "post-V1.129",
-        "note": "No XSS mitigation for display_name \u2014 local-only exposure."
+        "note": "No XSS mitigation for display_name — local-only exposure."
       },
       {
         "id": "R-V1129P0-QC3-M-002",
@@ -759,6 +751,80 @@
         "owner": "@frontend-dev",
         "target": "post-V1.129",
         "note": "EN locale copy drift; sync en/zh-CN shell.json tls.body with BODY_COPY.tls in follow-up."
+      }
+    ],
+    "2026-07-22-vi-logo-upgrade": [
+      {
+        "id": "R-VI-001",
+        "title": "Chronos gallery acceptance tests are light-biased (no explicit dark-theme toggle assertions)",
+        "severity": "low",
+        "source": "QA qa.md",
+        "scope": "apps/design-studio Chronos gallery acceptance tests",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-ship",
+        "lifecycle": "open",
+        "note": "mockMatchMedia light-biased; add dark-only class assertions on primary button / token swatches."
+      },
+      {
+        "id": "R-VI-002",
+        "title": "No dedicated Chronos notes on Setup/Settings surface fixture pages",
+        "severity": "low",
+        "source": "QA qa.md",
+        "scope": "apps/design-studio setup/settings fixtures",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-ship",
+        "lifecycle": "open",
+        "note": "Surfaces index mentions setup in prose only; add *-chronos-note fixtures if gallery intros expand."
+      },
+      {
+        "id": "R-VI-003",
+        "title": "macOS Dock runtime visual smoke not verified (compose + preview only)",
+        "severity": "low",
+        "source": "QA qa.md",
+        "scope": "apps/desktop icons Dock",
+        "decision": "defer",
+        "owner": "@ops-engineer",
+        "target": "manual",
+        "lifecycle": "open",
+        "note": "Criteria in apps/desktop/src-tauri/icons/README.md; run Dock smoke before release packaging."
+      },
+      {
+        "id": "R-VI-004",
+        "title": "Wordmark visual polish — no human visual sign-off on logo-text.svg",
+        "severity": "low",
+        "source": "QA qa.md",
+        "scope": "packages/nexus-ui/assets/logos/logo-text.svg",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-ship",
+        "lifecycle": "open",
+        "note": "Potrace-fitted wordmark; optional design review for stroke fidelity."
+      },
+      {
+        "id": "R-VI-005",
+        "title": "Stale knowledge doc still references logo-color.svg web wrapper",
+        "severity": "low",
+        "source": "QA qa.md",
+        "scope": ".mstar/knowledge/architecture-patterns/nexus-brand-token-hierarchy.md",
+        "decision": "defer",
+        "owner": "@writing-specialist",
+        "target": "compound",
+        "lifecycle": "open",
+        "note": "Update brand hierarchy doc to primary / whiteBg / white / mono / text; drop logo-color."
+      },
+      {
+        "id": "R-VI-006",
+        "title": "packages/nexus-ui/AGENTS.md still lists logo variant color",
+        "severity": "low",
+        "source": "QA qa.md",
+        "scope": "packages/nexus-ui/AGENTS.md",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-ship",
+        "lifecycle": "open",
+        "note": "Doc drift after logo-color removal; align export strategy with logoVariants keys."
       }
     ]
   }

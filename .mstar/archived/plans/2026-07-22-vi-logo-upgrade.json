@@ -1,0 +1,21 @@
+{
+  "plan_id": "2026-07-22-vi-logo-upgrade",
+  "status": "Done",
+  "type": "feature",
+  "file": ".mstar/plans/2026-07-22-vi-logo-upgrade.md",
+  "metadata": {
+    "primary_spec": null,
+    "spec_refs": [],
+    "vi_canvas_ref": "v1-130-vi-atmosphere-palettes.canvas.tsx",
+    "working_branch": "plan/vi-logo-upgrade",
+    "merge_target": "main",
+    "wire_contracts_changed": false,
+    "blocked_by": [],
+    "description": "Chronos VI confirm + new timeline logo SVG/adoption",
+    "head_sha": "492b5b8e",
+    "qa_gate": "mandatory",
+    "qa_verdict": "Accept with residuals",
+    "qc_verdict": "Approve"
+  },
+  "done_at": "2026-07-22"
+}
