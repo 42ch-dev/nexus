@@ -22,7 +22,7 @@ const buttonVariants = cva(
       variant: {
         // primary: ink fill in light; cyan CTA in dark (VI-002 / AC-5b)
         primary:
-          'bg-brand-deep-blue text-brand-white hover:bg-blue-900 active:bg-blue-950 dark:bg-brand-cyan dark:text-brand-deep-blue dark:hover:bg-blue-800 dark:active:bg-blue-900',
+          'bg-brand-deep-blue text-brand-white hover:bg-brand-deep-blue-800 active:bg-brand-deep-blue-900 dark:bg-brand-cyan dark:text-brand-deep-blue dark:hover:bg-blue-800 dark:active:bg-blue-900',
         // secondary: background-100 bg, gray-1000 text, gray-alpha-400 border
         secondary:
           'bg-background-100 text-gray-1000 border border-gray-alpha-400 hover:bg-background-200 hover:border-gray-alpha-500',

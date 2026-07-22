@@ -18,7 +18,14 @@ under this directory (except `source/`) are **generated at build/dev time** via
   of the dock/taskbar appearance.
 
 Do **not** reference legacy `logo_light.png` / `logo_dark.png` / `logo_white.png`
-(N-network era). Canonical marks live as SVG under `@42ch/nexus-ui` `logoVariants`.
+(N-network era). Canonical marks live as SVG under `@42ch/nexus-ui`:
+
+- **Plain wide marks** — `logoVariants` (`logo-primary.svg`, `logo-white.svg`, …)
+- **Square plate lockups** — `logoSquareVariants` (`logo-primary-square.svg`,
+  `logo-white-bg-square.svg`, …)
+
+Desktop compose uses the **square primary plate** (`logo-primary-square.svg`), not
+plain wide marks. Do not substitute `*-square.svg` plates for plain marks or vice versa.
 
 ## Composing the source PNG
 

@@ -94,6 +94,8 @@
 
   /* Brand — DESIGN.md + @42ch/nexus-ui/theme.css */
   --color-brand-deep-blue: var(--nexus-brand-deep-blue);
+  --color-brand-deep-blue-800: var(--nexus-brand-deep-blue-800);
+  --color-brand-deep-blue-900: var(--nexus-brand-deep-blue-900);
   --color-brand-cyan: var(--nexus-brand-cyan);
   --color-brand-white: var(--nexus-brand-white);
 

@@ -12,8 +12,8 @@ describe('Button', () => {
     const btn = screen.getByRole('button', { name: 'Save' });
     expect(btn).toHaveClass('bg-brand-deep-blue');
     expect(btn).toHaveClass('text-brand-white');
-    expect(btn).toHaveClass('hover:bg-blue-900');
-    expect(btn).toHaveClass('active:bg-blue-950');
+    expect(btn).toHaveClass('hover:bg-brand-deep-blue-800');
+    expect(btn).toHaveClass('active:bg-brand-deep-blue-900');
     expect(btn).toHaveClass('dark:bg-brand-cyan');
     expect(btn).toHaveClass('dark:text-brand-deep-blue');
     expect(btn).toHaveClass('dark:hover:bg-blue-800');
