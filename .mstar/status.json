@@ -125,6 +125,12 @@
           "base": "603f662551af5d8bfa28b42608da96dd5a9aee68",
           "head": "8bd81ca33ad2075361b8c5e1a98d65e64c79ea30",
           "status": "complete"
+        },
+        {
+          "task": 3,
+          "base": "f034058f553f3bfdcf9c700dcadaae84e362cbc9",
+          "head": "4e1feb3a30e308b41d8bcabe09f7afe67fa06b54",
+          "status": "complete"
         }
       ]
     },
