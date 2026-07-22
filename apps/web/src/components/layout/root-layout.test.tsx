@@ -14,7 +14,7 @@
  */
 import { http, HttpResponse } from 'msw';
 import { describe, expect, it, vi, beforeEach } from 'vitest';
-import { within } from '@testing-library/react';
+import { screen, within } from '@testing-library/react';
 import { Route, Routes } from 'react-router-dom';
 
 import { RootLayout } from './root-layout';
@@ -122,6 +122,27 @@ describe('RootLayout — scroll split (AD-P2-2)', () => {
 
     const root = container.firstElementChild as HTMLElement;
     expect(root.querySelector('[data-testid="chronos-titlebar"]')).not.toBeNull();
+  });
+});
+
+describe('RootLayout — route title (V1.132 Bugbot)', () => {
+  beforeEach(async () => {
+    window.localStorage.clear();
+    await i18n.changeLanguage('en');
+  });
+
+  it('shows Worlds in the titlebar on /worlds', () => {
+    useCreatorHandler();
+    renderInApp(
+      <Routes>
+        <Route element={<RootLayout />}>
+          <Route path="/worlds" element={<div data-testid="outlet-content">Worlds hub</div>} />
+        </Route>
+      </Routes>,
+      { client: makeClient(), activeCreatorId: 'creator-a', initialRouterEntries: ['/worlds'] },
+    );
+
+    expect(screen.getByTestId('chronos-titlebar')).toHaveTextContent('Worlds');
   });
 });
 

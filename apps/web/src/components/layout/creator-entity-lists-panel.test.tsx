@@ -135,4 +135,61 @@ describe('CreatorEntityListsPanel (V1.132 P3 AC-8)', () => {
       });
     });
   });
+
+  it('does not expose Rename for World rows until world PATCH API exists', async () => {
+    useHandlers(
+      http.get('/v1/daemon/creators', () =>
+        HttpResponse.json({
+          items: [{ creator_id: 'creator-a', display_name: 'Alice' }],
+          pagination: { limit: 20, has_more: false },
+        }),
+      ),
+      worksList([
+        {
+          work_id: 'work-alpha',
+          title: 'Alpha Novel',
+          status: 'active',
+          intake_status: 'ready',
+          primary_preset_id: 'preset-1',
+          updated_at: '2026-01-01T00:00:00Z',
+        },
+      ]),
+      http.get('/v1/daemon/narrative/worlds', () =>
+        HttpResponse.json({
+          worlds: [
+            {
+              world_id: 'world-alpha',
+              title: 'Alpha World',
+              slug: 'alpha-world',
+              status: 'active',
+              visibility: 'private',
+              updated_at: '2026-01-01T00:00:00Z',
+            },
+          ],
+        }),
+      ),
+      http.post('/v1/daemon/agent-host/scan', () => HttpResponse.json({ agents: [] })),
+    );
+
+    const user = userEvent.setup();
+    renderInApp(<CreatorEntityListsPanel />, {
+      client: makeClient(),
+      activeCreatorId: 'creator-a',
+      initialRouterEntries: ['/works'],
+    });
+
+    await waitFor(() =>
+      expect(
+        screen.getByTestId('creator-hub-entity-lists-worlds-row-world-alpha'),
+      ).toBeInTheDocument(),
+    );
+
+    const menuBtn = screen.getByRole('button', { name: /Open menu for Alpha World/i });
+    await user.click(menuBtn);
+
+    await waitFor(() =>
+      expect(screen.getByRole('menu', { name: 'Row actions' })).toBeInTheDocument(),
+    );
+    expect(screen.queryByRole('menuitem', { name: /Rename/i })).not.toBeInTheDocument();
+  });
 });

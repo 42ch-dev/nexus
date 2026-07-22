@@ -163,16 +163,21 @@ export function CreatorEntityListsPanel() {
                 closeSubmenu();
               },
             },
-            {
-              id: 'rename',
-              label: t('submenu.rename'),
-              icon: Pencil,
-              onSelect: () => {
-                setRenamingTarget({ kind: item.kind, id: item.id });
-                setRenameValue(item.label);
-                closeSubmenu();
-              },
-            },
+            // World rename is hidden until a narrative-world PATCH API exists.
+            ...(isWorld
+              ? []
+              : [
+                  {
+                    id: 'rename',
+                    label: t('submenu.rename'),
+                    icon: Pencil,
+                    onSelect: () => {
+                      setRenamingTarget({ kind: item.kind, id: item.id });
+                      setRenameValue(item.label);
+                      closeSubmenu();
+                    },
+                  },
+                ]),
             {
               id: 'delete',
               label: t('submenu.delete'),

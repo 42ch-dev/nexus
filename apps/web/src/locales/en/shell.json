@@ -6,6 +6,7 @@
   },
   "route": {
     "works": "Works",
+    "worlds": "Worlds",
     "sessions": "Sessions",
     "schedule": "Schedule",
     "capabilities": "Capabilities",

@@ -2,7 +2,7 @@ import { http, HttpResponse } from 'msw';
 import { describe, expect, it, beforeEach, vi } from 'vitest';
 import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { Route, Routes } from 'react-router-dom';
+import { Route, Routes, useLocation } from 'react-router-dom';
 
 import { Sidebar } from './sidebar';
 import { renderInApp } from '@/test/test-providers';
@@ -233,6 +233,74 @@ describe('Sidebar', () => {
       'href',
       '/strategies',
     );
+  });
+
+  it('navigates to /works when switching to Creator from an orchestrator route', async () => {
+    const user = userEvent.setup();
+    useSidebarHandlers();
+
+    function LocationProbe() {
+      const { pathname } = useLocation();
+      return <div data-testid="location">{pathname}</div>;
+    }
+
+    renderInApp(
+      <Routes>
+        <Route
+          path="*"
+          element={
+            <>
+              <Sidebar />
+              <LocationProbe />
+            </>
+          }
+        />
+      </Routes>,
+      {
+        client: makeClient(),
+        activeCreatorId: 'creator-a',
+        initialRouterEntries: ['/strategies/user%2Ffoo'],
+      },
+    );
+
+    await user.click(screen.getByRole('tab', { name: 'Creator' }));
+
+    expect(screen.getByTestId('location')).toHaveTextContent('/works');
+    expect(screen.getByRole('tab', { name: 'Creator', selected: true })).toBeInTheDocument();
+  });
+
+  it('navigates to /strategies when switching to Orchestrator from a creator route', async () => {
+    const user = userEvent.setup();
+    useSidebarHandlers();
+
+    function LocationProbe() {
+      const { pathname } = useLocation();
+      return <div data-testid="location">{pathname}</div>;
+    }
+
+    renderInApp(
+      <Routes>
+        <Route
+          path="*"
+          element={
+            <>
+              <Sidebar />
+              <LocationProbe />
+            </>
+          }
+        />
+      </Routes>,
+      {
+        client: makeClient(),
+        activeCreatorId: 'creator-a',
+        initialRouterEntries: ['/works'],
+      },
+    );
+
+    await user.click(screen.getByRole('tab', { name: 'Orchestrator' }));
+
+    expect(screen.getByTestId('location')).toHaveTextContent('/strategies');
+    expect(screen.getByRole('tab', { name: 'Orchestrator', selected: true })).toBeInTheDocument();
   });
 });
 

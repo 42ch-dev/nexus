@@ -83,14 +83,26 @@ function CreatorCreatePanel() {
   );
 }
 
+const CREATOR_HUB_PATH = '/works';
+const ORCHESTRATOR_HUB_PATH = '/strategies';
+
 export function Sidebar() {
   const { t } = useTranslation('shell');
   const { pathname } = useLocation();
+  const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState<ShellSidebarTab>(() => tabFromPathname(pathname));
 
   useEffect(() => {
     setActiveTab(tabFromPathname(pathname));
   }, [pathname]);
+
+  function handleTabChange(tab: ShellSidebarTab) {
+    const routeTab = tabFromPathname(pathname);
+    if (tab !== routeTab) {
+      navigate(tab === 'creator' ? CREATOR_HUB_PATH : ORCHESTRATOR_HUB_PATH);
+    }
+    setActiveTab(tab);
+  }
 
   const orchestratorGroups: ShellNavGroup[] = useMemo(
     () => [
@@ -125,7 +137,7 @@ export function Sidebar() {
         activeRoute={pathname}
         navGroups={activeTab === 'orchestrator' ? orchestratorGroups : []}
         panelContent={creatorPanel}
-        onTabChange={setActiveTab}
+        onTabChange={handleTabChange}
         footer={<FooterProfiles />}
         creatorTabLabel={t('nav.creator')}
         orchestratorTabLabel={t('nav.orchestrator')}
