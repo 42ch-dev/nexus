@@ -304,6 +304,10 @@ export function useCreateWorld() {
     mutationFn: (request: CreateWorldRequest) => client.createWorld(request),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: queryKeys.memory.worlds() });
+      // Mirror useDeleteWorld: Timeline overview is World-centric (era/event
+      // counts per World). A newly created World must appear in overview
+      // caches, not only the narrative worlds list.
+      void qc.invalidateQueries({ queryKey: queryKeys.timeline.all });
     },
     onError: (error) => errorToast(error, 'error.couldNotCreateWorld'),
   });

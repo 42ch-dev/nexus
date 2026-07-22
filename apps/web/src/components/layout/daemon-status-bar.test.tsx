@@ -3,9 +3,9 @@
  *
  * V1.117 P2 (T3): single-line footer with left status dot + "Daemon running"
  * label + lowercase `running` tag, and right clickable agent badge (name+version
- * or placeholder → `/settings/agent`) + Restart. Renders only when the daemon
- * is running; non-running states are surfaced by the top-of-main-content
- * {@link MainBanner}.
+ * or placeholder → `/settings/agent`) + Restart. Renders when the daemon is
+ * running or mid-restart (`starting`); other non-running states are surfaced
+ * by the top-of-main-content {@link MainBanner}.
  */
 import { http, HttpResponse } from 'msw';
 import { describe, expect, it, vi, afterEach } from 'vitest';
@@ -110,7 +110,7 @@ describe('DaemonStatusBar lifecycle action', () => {
     confirmSpy.mockRestore();
   });
 
-  it('does not render for non-running daemon states', () => {
+  it('does not render for degraded/stopped/error daemon states', () => {
     const { container: degraded } = renderInApp(<DaemonStatusBar />, {
       desktop: makeDesktop({ state: 'degraded' }),
     });
@@ -125,6 +125,16 @@ describe('DaemonStatusBar lifecycle action', () => {
       desktop: makeDesktop({ state: 'error' }),
     });
     expect(error.firstChild).toBeNull();
+  });
+
+  it('stays mounted during starting with Restart pending copy', async () => {
+    renderInApp(<DaemonStatusBar />, {
+      desktop: makeDesktop({ state: 'starting' }),
+    });
+
+    const bar = await screen.findByTestId('daemon-status-bar');
+    expect(bar).toHaveTextContent('Restarting…');
+    expect(screen.getByRole('button', { name: /Restart daemon/i })).toBeDisabled();
   });
 
   it('updates status when the Rust side emits a status event', async () => {

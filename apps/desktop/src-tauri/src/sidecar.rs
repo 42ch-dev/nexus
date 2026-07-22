@@ -536,16 +536,30 @@ impl SidecarManager {
     /// Restart the daemon — stop the current process (owned or attached) and
     /// start a fresh one.
     ///
-    /// Single-flight: concurrent calls return `Ok(())` (join) instead of racing.
+    /// Single-flight: concurrent callers wait for the in-flight restart to
+    /// finish, then return its outcome (join, not a silent no-op success).
     pub async fn restart_daemon<R: tauri::Runtime>(
         &self,
         app: &tauri::AppHandle<R>,
     ) -> Result<(), String> {
-        // Single-flight guard.
+        // Single-flight guard — join waiters until the active restart settles.
         {
             let mut inner = self.0.lock().await;
             if inner.restart_in_progress {
-                return Ok(());
+                drop(inner);
+                loop {
+                    sleep(Duration::from_millis(50)).await;
+                    let inner = self.0.lock().await;
+                    if !inner.restart_in_progress {
+                        return match inner.state {
+                            DaemonState::Running => Ok(()),
+                            DaemonState::Error => Err(inner.detail.clone().unwrap_or_else(|| {
+                                "Daemon restart failed.".to_string()
+                            })),
+                            _ => Err("Daemon restart did not complete.".to_string()),
+                        };
+                    }
+                }
             }
             inner.restart_in_progress = true;
             inner.stop_requested = true;
@@ -569,18 +583,26 @@ impl SidecarManager {
             if let Some(health) = probe_health(port).await {
                 if health.status == "ok" || health.status == "healthy" {
                     let pid = listener_pid(port);
-                    if let Some(pid) = pid {
-                        sleep(Duration::from_millis(200)).await;
-                        let pid2 = listener_pid(port);
-                        if pid2 == Some(pid) {
-                            stop_external_daemon(port, pid).await;
-                        } else {
-                            self.0.lock().await.restart_in_progress = false;
-                            return Err(
-                                "daemon PID changed during restart — possible handoff race"
-                                    .to_string(),
-                            );
-                        }
+                    let Some(pid) = pid else {
+                        // Healthy listener but unverifiable PID — never fall
+                        // through to start_with_budget attach (silent no-op).
+                        self.0.lock().await.restart_in_progress = false;
+                        return Err(
+                            "Nexus couldn't restart — could not verify the daemon process \
+                             identity. Quit the other Nexus instance, or set a different port."
+                                .to_string(),
+                        );
+                    };
+                    sleep(Duration::from_millis(200)).await;
+                    let pid2 = listener_pid(port);
+                    if pid2 == Some(pid) {
+                        stop_external_daemon(port, pid).await;
+                    } else {
+                        self.0.lock().await.restart_in_progress = false;
+                        return Err(
+                            "daemon PID changed during restart — possible handoff race"
+                                .to_string(),
+                        );
                     }
                 }
             }
@@ -1874,8 +1896,8 @@ mod tests {
         })
     }
 
-    /// T4 (P0): Single-flight guard — concurrent restart_daemon calls return
-    /// Ok(()) when a restart is already in progress (join, not race).
+    /// T4 (P0): Single-flight guard — concurrent restart_daemon callers wait
+    /// for the in-flight restart (join), rather than racing a second stop/start.
     #[tokio::test(flavor = "current_thread")]
     async fn restart_daemon_single_flight_returns_ok_when_in_progress() {
         let manager = crate::sidecar::SidecarManager::new(63338);
@@ -1886,11 +1908,11 @@ mod tests {
             inner.restart_in_progress = true;
         }
 
-        // A concurrent call while restart_in_progress is true must join (Ok),
-        // not race into a second stop/start sequence.
-        // We cannot call restart_daemon directly here because it would try to
-        // spawn a real sidecar. Instead, verify the guard logic: the field
-        // prevents the body from executing.
+        // A concurrent call while restart_in_progress is true must join the
+        // in-flight work (poll until the flag clears), not race into a second
+        // stop/start sequence. We cannot call restart_daemon directly here
+        // because it would try to spawn a real sidecar. Instead, verify the
+        // guard field that gates the body.
         let inner = manager.0.lock().await;
         assert!(
             inner.restart_in_progress,
