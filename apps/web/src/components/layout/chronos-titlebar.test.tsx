@@ -120,6 +120,23 @@ describe('ChronosTitlebar', () => {
     expect(gear).toHaveFocus();
   });
 
+  it('marks logo and title as draggable chrome with no-drag controls in desktop mode', () => {
+    renderTitlebar(makeDesktop());
+
+    expect(screen.getByTestId('chronos-titlebar-logo-slot')).toHaveAttribute(
+      'data-tauri-drag-region',
+    );
+    expect(screen.getByTestId('chronos-titlebar-title')).toHaveAttribute('data-tauri-drag-region');
+    expect(screen.getByTestId('chronos-titlebar-title')).toHaveClass('select-none');
+    expect(screen.getByTestId('chronos-titlebar-controls')).toHaveAttribute(
+      'data-tauri-drag-region',
+      'false',
+    );
+    expect(screen.getByTestId('chronos-titlebar-settings-gear')).not.toHaveAttribute(
+      'data-tauri-drag-region',
+    );
+  });
+
   it('double-clicking empty titlebar paint toggles maximize in desktop mode', async () => {
     const user = userEvent.setup();
     const toggleMaximizeWindow = vi.fn().mockResolvedValue(undefined);

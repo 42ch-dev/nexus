@@ -25,7 +25,7 @@ pnpm add @42ch/nexus-ui --workspace
 
 | Component | Import | Variants | Notes |
 |-----------|--------|----------|-------|
-| `NexusLogo` | `import { NexusLogo } from '@42ch/nexus-ui'` | `variant` (`primary`, `whiteBg`, `white`, `mono`, `text`) + consumer `src` | Bundler-agnostic `<img>`; plate lockups + wide marks + wordmark |
+| `NexusLogo` | `import { NexusLogo } from '@42ch/nexus-ui'` | `variant`, `src`, `size?`, `label?`, `className?`, `draggable?` | Bundler-agnostic `<img>`; plate lockups + wide marks + wordmark; set `draggable={false}` in titlebar chrome to avoid native image ghost-drag |
 | `NexusMark` | `import { NexusMark } from '@42ch/nexus-ui'` | `size`, `label`, `className` | Inline timeline mark; `currentColor`; height-driven / `w-auto` |
 | `NexusLogoVariant` | `import { NexusLogoVariant } from '@42ch/nexus-ui'` | `theme` (`elegant`, `nature`, `parchment`, `scifi`) + optional `palette` | Studio-only specimens; no assets; not a product theme switcher |
 | `Button` | `import { Button } from '@42ch/nexus-ui'` | `variant` (`primary`, `secondary`, `tertiary`, `destructive`) + `size` (`small`, `default`, `large`) + `asChild` | Presentational only; no daemon or routing state |
@@ -140,6 +140,11 @@ import logoText from '@42ch/nexus-ui/assets/logos/logo-text.svg';
 function AppShell() {
   // Default product lockup — deep-blue plate. Pass the resolved URL as `src`.
   return <NexusLogo variant="primary" src={logoPrimary} size={24} />;
+}
+
+// Titlebar chrome: opt out of native browser image drag so Tauri drag-region wins.
+function TitlebarLogo() {
+  return <NexusLogo variant="primary" src={logoPrimary} size={24} draggable={false} />;
 }
 
 // Wordmark (currentColor — set color on parent for light/dark):

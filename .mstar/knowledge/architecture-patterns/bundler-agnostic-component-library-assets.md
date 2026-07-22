@@ -68,7 +68,7 @@ When promoting an assets-only package to a React component library:
 
 ## Examples
 
-- **`<NexusLogo variant src label? className? size?>`** (`packages/nexus-ui/src/components/nexus-logo.tsx`) — accepts the consumer-resolved SVG URL via `src`; renders `<img>`. `logoVariants`: `primary | whiteBg | white | mono | text` (no `color`).
+- **`<NexusLogo variant src label? className? size? draggable?>`** (`packages/nexus-ui/src/components/nexus-logo.tsx`) — accepts the consumer-resolved SVG URL via `src`; renders `<img>`. `logoVariants`: `primary | whiteBg | white | mono | text` (no `color`). `draggable={false}` opts out of native image drag (titlebar chrome).
 - **`<NexusMark label? className? size?>`** (`packages/nexus-ui/src/components/nexus-mark.tsx`) — hand-authored wide timeline SVG JSX; `currentColor` inheritance; no asset import.
 - **Thin wrapper** (`apps/web/src/components/brand/nexus-logo.tsx`) — imports `logo-primary.svg` via Vite, passes `src` + `variant="primary"` to the package `<NexusLogo>`. Studio shell does the same. Call sites stay zero-prop.
 - **White plate exception:** import `logo-white-bg.svg` only when the surface must be a light/white plate (not default chrome).
