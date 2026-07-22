@@ -3,6 +3,11 @@
   "updated_at": "2026-07-22",
   "entries": [
     {
+      "at": "2026-07-22 (V1.131 P1 QA Done)",
+      "message": "P1 logo-gallery-lockup Done (Pass with notes). AC-1/2 plates fill + BG match + alt Nexus; AC-4 Chronos mini titlebar; AC-5 R-VI-007…011 code/comment fixes; wordmark contract bc2ce2ba. AC-3 h-[26px] automated; human ≥60% cap-height → P3/R-VI-004. Vitest 10 passed. Profile B archived.",
+      "plan_id": "2026-07-22-v1.131-p1-logo-gallery-lockup"
+    },
+    {
       "at": "2026-07-22 (V1.131 scope: DF-V1130 must-ship)",
       "message": "User clarified: related DF-V1130-* and VI dogfood problems must be solved in V1.131, not listed as further deferrals. Expanded to L/4 plans: P0 titlebar, P1 logo gallery, P2 shell IA finish (MODE-SWITCH, SETTINGS-MODAL, WORKSPACE, COMPUTE, PROFILE-SSOT hold), P3 desktop icons+residuals. Tracker rows marked in-flight must-ship; DF-V1131-* titlebar/gallery/desktop added.",
       "plan_id": null
