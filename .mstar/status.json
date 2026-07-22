@@ -805,15 +805,15 @@
     "2026-07-22-v1.131-p0-chronos-titlebar": [
       {
         "id": "R-V1131P0-QC2-W-001",
-        "title": "macOS Overlay titlebar live smoke (HMR + dist-load) not yet run",
+        "title": "macOS Overlay titlebar live smoke \u2014 native H2\u2013H4/D2 still unverified",
         "severity": "medium",
-        "source": "QC2 F-002; macos-overlay-smoke.md",
+        "source": "QC2 F-002; macos-overlay-smoke.md; QA revalidation qa.md",
         "scope": "apps/desktop Overlay titlebar; Chronos empty-paint drag/double-click",
         "decision": "defer",
         "owner": "@qa-engineer",
         "target": "V1.131 P0 mandatory QA",
         "lifecycle": "open",
-        "note": "Protocol at .mstar/sdd/2026-07-22-v1.131-p0-chronos-titlebar/review/macos-overlay-smoke.md (agent blocked on sidecar). Live H1\u2013H6 / D1\u2013D2 must pass before T4/plan Done."
+        "note": "2026-07-22 revalidation @ 9e33ed00: cargo check Pass; H1 Pass; D1 Pass (Nexus.app+dmg); H5/H6 Pass on Vite. H2\u2013H4/D2 Blocked in agent (Screen Recording+Accessibility TCC). Human Overlay interaction required before close. Protocol: .mstar/sdd/2026-07-22-v1.131-p0-chronos-titlebar/review/macos-overlay-smoke.md"
       }
     ]
   }
