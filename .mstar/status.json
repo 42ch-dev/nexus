@@ -154,6 +154,22 @@
         "seq": "4",
         "description": "Compute→Settings modal; Profiles→工作区 under 编排"
       }
+    },
+    {
+      "plan_id": "2026-07-22-vi-logo-upgrade",
+      "status": "InProgress",
+      "type": "feature",
+      "file": ".mstar/plans/2026-07-22-vi-logo-upgrade.md",
+      "metadata": {
+        "primary_spec": null,
+        "spec_refs": [],
+        "vi_canvas_ref": "v1-130-vi-atmosphere-palettes.canvas.tsx",
+        "working_branch": "plan/vi-logo-upgrade",
+        "merge_target": "main",
+        "wire_contracts_changed": false,
+        "blocked_by": [],
+        "description": "Chronos VI confirm + new timeline logo SVG/adoption"
+      }
     }
   ],
   "metadata": {
