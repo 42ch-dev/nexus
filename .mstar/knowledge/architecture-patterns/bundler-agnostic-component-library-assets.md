@@ -7,7 +7,7 @@ severity: medium
 plan_id: 2026-07-03-v1.87-nexus-ui-component-library (compound of V1.87); 2026-07-22-vi-logo-upgrade (shell primary-only)
 tags: [nexus-ui, react-component-library, tsup, esbuild, bundler-agnostic, svg, vite, peer-deps, presentational-component, logo-system]
 applies_when: adding an asset-consuming React component to a publishable workspace package built with tsup/esbuild, or promoting an assets-only package to a component library
-last_updated: 2026-07-22 (shell uses logo-primary only; drop theme-split logo-color wrapper)
+last_updated: 2026-07-22 (V1.132: shell plate uses logo-primary-square; titlebar uses plain logo-white at logoCompactMarkHeightPx)
 ---
 
 # Bundler-Agnostic Component Library Assets
@@ -28,7 +28,7 @@ The **bundler-agnostic** resolution is to invert the asset-resolution responsibi
 
 1. **The library component does NOT import the asset.** It accepts the resolved asset URL as a **prop** (`src: string`). It remains a pure presentational component — no bundler-specific loader, no asset coupling.
 2. **The consumer resolves the asset** through its own application bundler. `apps/web` uses Vite, which natively resolves `.svg` imports to URL strings. The consumer imports the asset via the package's public `exports` map (e.g. `@42ch/nexus-ui/assets/logos/logo-primary.svg`) and passes the URL to the component.
-3. **A thin app-local wrapper preserves call-site ergonomics.** The consumer keeps a tiny wrapper (e.g. `apps/web/src/components/brand/nexus-logo.tsx`) that imports the chosen SVG via Vite and passes `src` to the package component. Call sites stay zero-prop (`<NexusLogo />`). **Chronos shell policy:** import **`logo-primary.svg` only** (theme-stable deep-blue plate). Do not theme-split shell lockups (`primary` vs `color` / `whiteBg` by `useTheme()`).
+3. **A thin app-local wrapper preserves call-site ergonomics.** The consumer keeps a tiny wrapper (e.g. `apps/web/src/components/brand/nexus-logo.tsx`) that imports the chosen SVG via Vite and passes `src` to the package component. Call sites stay zero-prop (`<NexusLogo />`). **Chronos shell policy (V1.132):** sidebar plate imports **`logo-primary-square.svg`** at `logoShellHeightPx`; ink titlebar imports plain **`logo-white.svg`** at `logoCompactMarkHeightPx` (`NexusInkLogo`). Plain wide marks (`logo-primary.svg`) are not plate lockups — do not use them for sidebar/header plates.
 
 For inline-SVG marks (no `<img>`), hand-author the path data as JSX inside the library component. This is bundler-agnostic (no asset import at all) and enables `currentColor` inheritance. Only do this when the SVG is small and stable (the Nexus mark is ~22 source lines); for large/changing artwork, prefer the `src`-prop pattern with the consumer resolving the asset.
 
@@ -56,7 +56,8 @@ When promoting an assets-only package to a React component library:
 
 - **Importing `.svg` directly in the package component source.** tsup/esbuild cannot resolve `.svg` to a URL string the way Vite does. The V1.87 iteration-start draft assumed this would work (mirroring apps/web's existing imports); the architect's Review & Edit pass caught it before implementation. If it had reached the build, `pnpm --filter @42ch/nexus-ui run build` would have failed or produced a wrong (base64-inlined) output.
 - **Shipping a theme context inside the library.** Considered and rejected: the app's theme infra (localStorage / `.dark` class / Tailwind strategy) is generic, not brand-specific, and putting it in a brand-named package is a naming mismatch. The `src`-prop design sidesteps this entirely — the library component is theme-agnostic; the app wrapper owns asset selection.
-- **Theme-split shell logos.** Pre-Chronos wrappers switched `logo-primary` / `logo-color` by light/dark. Chronos primary is a **deep plate** lockup that reads on both shells; theme-split is unnecessary and drifts from DESIGN logo tables.
+- **Theme-split shell logos by light/dark.** Pre-Chronos wrappers switched `logo-primary` / `logo-color` by `useTheme()`. V1.132 uses stable assets per surface (square plate for sidebar; plain white mark for ink titlebar) — not runtime theme-split imports.
+- **Swapping plain marks for square plates.** `logo-primary.svg` is a wide mark without a plate; plate lockups live in `logo-primary-square.svg`. Using the wrong asset breaks compose and sidebar chrome.
 
 ## Do NOT
 
@@ -68,10 +69,11 @@ When promoting an assets-only package to a React component library:
 
 ## Examples
 
-- **`<NexusLogo variant src label? className? size? draggable?>`** (`packages/nexus-ui/src/components/nexus-logo.tsx`) — accepts the consumer-resolved SVG URL via `src`; renders `<img>`. `logoVariants`: `primary | whiteBg | white | mono | text` (no `color`). `draggable={false}` opts out of native image drag (titlebar chrome).
+- **`<NexusLogo variant src label? className? size? draggable?>`** (`packages/nexus-ui/src/components/nexus-logo.tsx`) — accepts the consumer-resolved SVG URL via `src`; renders `<img>`. `logoVariants` / `logoSquareVariants`: plain wide marks vs `*-square.svg` plates. `draggable={false}` opts out of native image drag (titlebar chrome).
 - **`<NexusMark label? className? size?>`** (`packages/nexus-ui/src/components/nexus-mark.tsx`) — hand-authored wide timeline SVG JSX; `currentColor` inheritance; no asset import.
-- **Thin wrapper** (`apps/web/src/components/brand/nexus-logo.tsx`) — imports `logo-primary.svg` via Vite, passes `src` + `variant="primary"` to the package `<NexusLogo>`. Studio shell does the same. Call sites stay zero-prop.
-- **White plate exception:** import `logo-white-bg.svg` only when the surface must be a light/white plate (not default chrome).
+- **Plate wrapper** (`apps/web/src/components/brand/nexus-logo.tsx`) — imports `logo-primary-square.svg` via Vite, passes `src` + `variant="primary"` at `logoShellHeightPx`. Studio shell does the same.
+- **Ink titlebar wrapper** (`apps/web/src/components/brand/nexus-ink-logo.tsx`) — imports `logo-white.svg` at `logoCompactMarkHeightPx`.
+- **White plate exception:** import `logo-white-bg-square.svg` only when the surface must be a light/white plate (not default chrome).
 
 ## Related
 

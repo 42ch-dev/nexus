@@ -6,7 +6,7 @@
 import type { ReactNode } from 'react';
 
 import logoWhite from '@42ch/nexus-ui/assets/logos/logo-white.svg';
-import { NexusLogo, logoShellHeightPx } from '@42ch/nexus-ui';
+import { NexusLogo, logoCompactMarkHeightPx } from '@42ch/nexus-ui';
 import { Moon, Settings, Sun } from 'lucide-react';
 
 import {
@@ -23,9 +23,9 @@ function InkLogo() {
       variant="white"
       src={logoWhite}
       label="Nexus"
-      size={logoShellHeightPx}
+      size={logoCompactMarkHeightPx}
       draggable={false}
-      className="h-5 w-auto max-w-full shrink-0"
+      className="h-3.5 w-auto max-w-full shrink-0"
     />
   );
 }

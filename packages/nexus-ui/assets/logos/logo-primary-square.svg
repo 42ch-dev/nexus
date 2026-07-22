@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 284 284" role="img" aria-labelledby="nexus-logo-title nexus-logo-desc" fill="none">
+  <title id="nexus-logo-title">Nexus</title>
+  <desc id="nexus-logo-desc">Nexus primary square lockup — timeline mark on brand deep-blue plate (matches logo-primary.png)</desc>
+  <!-- Brand deep-blue plate (not transparent) -->
+  <rect width="284" height="284" fill="#0D2B3E"/>
+  <defs>
+    <linearGradient id="nexus-timeline-primary" x1="0" y1="14" x2="284" y2="14" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#026FB1"/>
+      <stop offset="25%" stop-color="#09B1D3"/>
+      <stop offset="50%" stop-color="#11DDE9"/>
+      <stop offset="75%" stop-color="#16D9E2"/>
+      <stop offset="100%" stop-color="#19DBE1"/>
+    </linearGradient>
+  </defs>
+  <g transform="translate(63.048 134.216) scale(0.556000)">
+    <g stroke="url(#nexus-timeline-primary)" stroke-linecap="butt">
+      <path stroke-width="3.5" d="M28 14 H64 M92 14 H128 M156 14 H192 M220 14 H256"/>
+      <circle cx="14" cy="14" r="12.125" stroke-width="3.75"/>
+      <circle cx="78" cy="14" r="12.125" stroke-width="3.75"/>
+      <circle cx="206" cy="14" r="12.125" stroke-width="3.75"/>
+      <circle cx="270" cy="14" r="12.125" stroke-width="3.75"/>
+    </g>
+    <circle cx="142" cy="14" r="14" fill="url(#nexus-timeline-primary)"/>
+  </g>
+</svg>

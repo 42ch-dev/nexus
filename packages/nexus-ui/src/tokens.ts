@@ -13,9 +13,9 @@ export const brandColors = {
 export type BrandColorName = keyof typeof brandColors;
 
 export const logoVariants = {
-  /** Primary lockup — bright mark on brand deep-blue plate (default; matches `logo-primary.png`) */
+  /** Plain primary timeline mark — bright cyan gradient, no plate (`logo-primary.png` mark geometry) */
   primary: 'logo-primary.svg',
-  /** Lockup on white plate — only when a light/white surface is required (`logo-white-bg.png`) */
+  /** Plain white-bg gradient mark — no plate; use on light surfaces when a plate is wrong */
   whiteBg: 'logo-white-bg.svg',
   /** Timeline mark — dark-gray→white gradient for dark heroes / high-contrast panels */
   white: 'logo-white.svg',
@@ -27,6 +27,16 @@ export const logoVariants = {
 
 export type LogoVariantName = keyof typeof logoVariants;
 
+/** Square plate lockups — separate asset contract from plain wide marks. */
+export const logoSquareVariants = {
+  /** Primary lockup — bright mark on brand deep-blue plate (matches `logo-primary.png`) */
+  primary: 'logo-primary-square.svg',
+  /** Lockup on white plate — only when a light/white surface is required (`logo-white-bg.png`) */
+  whiteBg: 'logo-white-bg-square.svg',
+} as const;
+
+export type LogoSquareVariantName = keyof typeof logoSquareVariants;
+
 /** Timeline mark viewBox (matches `assets/logos/logo-*.svg` marks) */
 export const logoMarkViewBoxWidth = 284;
 export const logoMarkViewBoxHeight = 28;
@@ -37,11 +47,16 @@ export const logoMarkAspectRatio = logoMarkViewBoxWidth / logoMarkViewBoxHeight;
 export const logoMinSizePx = 24;
 
 /**
- * Shell chrome lockup height in px (sidebar header, presentational shell fixtures).
- * Default shell uses the square `primary` plate (viewBox 284×284); at 20px height
- * the lockup fits typical sidebar chrome without clipping.
+ * Legacy shell chrome lockup height in px (pre-compact baseline for gallery comparison).
+ * Plate lockups use square assets (`logoSquareVariants`); timeline marks are wide.
  */
 export const logoShellHeightPx = 20;
+
+/**
+ * Compact timeline mark height in px — shared SSOT for titlebar, Brand hero, and app icon.
+ * −30% from {@link logoShellHeightPx}; wide marks size by height only.
+ */
+export const logoCompactMarkHeightPx = Math.round(logoShellHeightPx * 0.7);
 
 /** Recommended clear space around the mark (multiple of logo height) */
 export const logoClearSpaceRatio = 0.25;

@@ -6,8 +6,9 @@
  * (e.g. Vite) and pass the resulting URL as `src`.
  *
  * Variant groups:
- * - Square plate lockups: `primary`, `whiteBg` (width-fill in gallery fixtures).
- * - Timeline marks: `white`, `mono` (wide aspect — size by height only).
+ * - Plain wide marks: `primary`, `whiteBg`, `white`, `mono` (size by height only).
+ * - Square plate lockups: import `logoSquareVariants` assets (`*-square.svg`) for gallery
+ *   width-fill and desktop icon compose — not the plain `logoVariants` filenames.
  * - Wordmark: `text` — always pair with consumer-resolved `logo-text.svg`.
  *
  * When UI needs the Nexus **logo text** (lowercase wordmark), use `variant="text"`

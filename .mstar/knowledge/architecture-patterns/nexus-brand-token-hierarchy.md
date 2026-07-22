@@ -4,10 +4,10 @@ date: 2026-07-06
 problem_type: architecture-pattern
 category: architecture-patterns
 severity: medium
-plan_id: V1.83-P-last (compound of brand UI foundation iteration); V1.94-P-last (contrast rule correction); V1.98-P0 (DESIGN SSOT unification + shared token pipeline + design-studio); V1.121-P0 (v0.4 Literary Engine); 2026-07-22-vi-logo-upgrade (Chronos dual-role + timeline logo system)
+plan_id: V1.83-P-last (compound of brand UI foundation iteration); V1.94-P-last (contrast rule correction); V1.98-P0 (DESIGN SSOT unification + shared token pipeline + design-studio); V1.121-P0 (v0.4 Literary Engine); 2026-07-22-vi-logo-upgrade (Chronos dual-role + timeline logo system); 2026-07-22-v1.132-p2-vi-aesthetic-retune (plain vs square split, compact mark, theme-split primary)
 tags: [brand, design-tokens, nexus-ui, design-md, git-lfs, svg, npm-package, button-contrast, dark-theme, design-studio, tailwind-preset, ssot-unification, literary-engine, ink-atmosphere, display-typography, motion-recipes, structural-namespace, chronos, dual-role, logo-system]
 applies_when: adding or consuming cross-application Nexus brand/design tokens (new product surface, platform package, Web shell refresh, or a new app consuming the design system); also when defining any button background/text colour combination, adding a display typography tier, tuning surface atmosphere, extending elevation/motion, or registering a structural (non-color) CSS variable family; also when choosing ink vs cyan roles or logo lockup variants
-last_updated: 2026-07-22 (Chronos dual-role ink vs cyan signal; timeline logo variants; supersedes V1.94 light primary deep+white)
+last_updated: 2026-07-22 (V1.132 P2: plain vs *-square assets, logoCompactMarkHeightPx, theme-split primary Button; supersedes uniform cyan primary in both themes)
 ---
 
 # Nexus Brand & Design Token Hierarchy
@@ -40,10 +40,14 @@ Token consumption follows these layers, top to bottom (post-V1.98):
 
 **Enduring rule**: the **background** color decides label text — not the theme mode. Bright fills (including cyan `#25D1E0`) take **deep ink** labels; dark/saturated fills take light labels. Cyan fails AA as **body / paragraph text** on white (~1.9:1) and must never be used that way.
 
-**Primary Button (Chronos — `2026-07-22-vi-logo-upgrade`)**: light and dark share one recipe — `bg-brand-cyan` + `text-brand-deep-blue`. There is **no** light-theme `bg-blue-700 text-white` / deep-fill primary CTA, and **no** `dark:` fork on primary fill/text. V1.83/V1.94 guidance that light primary used deep fill + white text is **superseded**.
+**Primary Button (V1.132 P2 theme-split — supersedes `2026-07-22-vi-logo-upgrade` uniform cyan recipe):**
+
+- **Light shell:** `bg-brand-deep-blue` + `text-brand-white` (ink fill — not neon cyan + deep ink on light surfaces; VI-002).
+- **Dark shell:** `bg-brand-cyan` + `text-brand-deep-blue` (strong cyan CTA).
+- Implemented in `@42ch/nexus-ui` `Button`; `TransportErrorBlock` Retry and Setup CTAs consume the primitive — no local overrides.
 
 Practical application:
-- Primary (both themes): `bg-brand-cyan text-brand-deep-blue` (package + app Button tests pin this).
+- Primary: theme-split per shell (package + app Button tests pin both recipes).
 - Light **text links / retry links**: `text-brand-deep-blue` (not `text-blue-700` — after Chronos, light `blue-700` is cyan).
 - Dark text links: cyan signal (`dark:text-blue-700` / `dark:text-brand-cyan`).
 - Secondary/tertiary/destructive: existing token mapping preserved.
@@ -86,15 +90,15 @@ Apps that consume `@42ch/nexus-ui` should run `pnpm --filter @42ch/nexus-ui run 
 - Use cyan `#25D1E0` as primary body text on white backgrounds.
 - Treat light `blue-700` as "deep structure" (it is **cyan signal** under Chronos).
 - Use `text-blue-700` for light-theme text links (migrate to `text-brand-deep-blue`).
-- Reintroduce light primary CTAs as deep fill + white text.
-- Default the product shell to `logo-color` / theme-split lockups, or invent a new logo variant without updating `logoVariants` + DESIGN logo tables.
+- Reintroduce light primary CTAs as neon cyan fill + deep ink label on light shells.
+- Swap plain wide marks (`logoVariants`) for square plate lockups (`logoSquareVariants`) or vice versa.
 
 ## Examples
 
 - Root SSOT: `DESIGN.md`, `DESIGN.dark.md` (sole full-token pair, post-V1.98)
 - Shared pipeline: `tooling/design-tokens` — `@nexus/design-tokens` exports `tailwind.preset.ts` + `src/tokens.css`; both `apps/web` and `apps/design-studio` import `@nexus/design-tokens/tokens.css` + use the preset.
-- Brand package: `packages/nexus-ui` — `@42ch/nexus-ui` exports `theme.css`, `tokens` (`logoVariants`), logo SVGs, `<NexusLogo>` / `<NexusMark>` / Studio `<NexusLogoVariant>`.
-- Web implementation: `apps/web` consumes `@nexus/design-tokens` + `@42ch/nexus-ui`; shell `NexusLogo` wrapper always imports `logo-primary.svg` and passes it as `src` (theme-stable plate).
+- Brand package: `packages/nexus-ui` — `@42ch/nexus-ui` exports `theme.css`, `tokens` (`logoVariants`, `logoSquareVariants`, `logoCompactMarkHeightPx`), logo SVGs, `<NexusLogo>` / `<NexusMark>` / Studio `<NexusLogoVariant>`.
+- Web implementation: `apps/web` consumes `@nexus/design-tokens` + `@42ch/nexus-ui`; shell `NexusLogo` wrapper imports `logo-primary-square.svg` at `logoShellHeightPx`; ink titlebar uses `NexusInkLogo` with `logo-white.svg` at `logoCompactMarkHeightPx`.
 - Gallery consumer: `apps/design-studio` — read-only Vite SPA visualizing every token scale + brand VI + all `apps/web` ui primitives (via `@web-ui/*` transitional alias) + Voice/Surface fixtures; runs without the daemon; not embedded in `nexus42`.
 
 ---
@@ -118,28 +122,33 @@ After the light `blue-700` → cyan flip, surfaces that still meant **deep struc
 
 **Heuristic:** if DESIGN or a component token names ink/structure/security-note/titlebar/link-on-light, use `brand-deep-blue` — never assume `blue-700` still means deep.
 
-### Timeline logo system
+### Timeline logo system (V1.132 plain vs square split)
 
-| Variant key (`logoVariants`) | Asset | Role |
-| --- | --- | --- |
-| `primary` | `logo-primary.svg` | **Default** lockup — bright mark on brand deep-blue **plate** (square). App shell + Studio shell + desktop `icons:compose` source. |
-| `whiteBg` | `logo-white-bg.svg` | White plate lockup **only** when a light/white surface is required. |
-| `white` | `logo-white.svg` | Dark-gray→white gradient mark for dark heroes (no plate). |
-| `mono` | `logo-mono.svg` | Light-gray→black gradient static mark; tintable UI uses `<NexusMark>` (`currentColor`). |
-| `text` | `logo-text.svg` | Wordmark (`currentColor`); path geometry fitted from PNG provenance. |
+| Contract | Package key | Asset | Role |
+| --- | --- | --- | --- |
+| Plain primary mark | `logoVariants.primary` | `logo-primary.svg` | Wide timeline mark (no plate) |
+| Plain white-bg mark | `logoVariants.whiteBg` | `logo-white-bg.svg` | Wide mark for light surfaces (no plate) |
+| Square primary plate | `logoSquareVariants.primary` | `logo-primary-square.svg` | Sidebar/header plate; desktop `icons:compose` source |
+| Square white-bg plate | `logoSquareVariants.whiteBg` | `logo-white-bg-square.svg` | White plate lockup only |
+| White mark | `logoVariants.white` | `logo-white.svg` | Ink titlebar + dark heroes |
+| Mono mark | `logoVariants.mono` | `logo-mono.svg` | Static grayscale; tintable UI uses `<NexusMark>` |
+| Text | `logoVariants.text` | `logo-text.svg` | Wordmark (`currentColor`) |
 
-**Removed:** `logo-color.svg` / `logoVariants.color` — redundant with primary plate; do not resurrect.
+**Compact scale:** `logoCompactMarkHeightPx` = 14px (−30% from `logoShellHeightPx` 20px) — titlebar, Brand hero mini, app-icon inner scale.
 
-**Shell rule:** product and Studio chrome use **primary only** (theme-stable). Do not theme-split shell logos (`primary` light / `whiteBg` or `color` dark). Theme specimens (`elegant` / `nature` / `parchment` / `scifi`) are Studio-only via `<NexusLogoVariant>` (hand-authored JSX palettes, not runtime assets).
+**Removed:** `logo-color.svg` / `logoVariants.color` — redundant; do not resurrect.
 
-**Geometry:** plate lockups (`primary`, `whiteBg`) are square; transparent marks and `<NexusMark>` are wide (~10:1) — prefer `height` + `width: auto`.
+**Shell rule:** sidebar plate uses `logo-primary-square.svg` at `logoShellHeightPx`; ink titlebar uses plain `logo-white.svg` at `logoCompactMarkHeightPx`. Do not theme-split shell lockups by light/dark.
 
-### Audit pattern additions (Chronos)
+**Geometry:** square plate lockups (`*-square.svg`) are square; plain marks and `<NexusMark>` are wide (~10:1) — prefer `height` + `width: auto`.
 
-- Button: assert `bg-brand-cyan` + `text-brand-deep-blue` in **both** themes; assert absence of light deep-fill primary and of `dark:bg-brand-cyan` forks that imply a split recipe.
+### Audit pattern additions (Chronos + V1.132)
+
+- Button: assert light primary `bg-brand-deep-blue text-brand-white`; dark primary `bg-brand-cyan text-brand-deep-blue`; assert absence of neon cyan primary on light shell.
 - Links: light retry/list links assert `text-brand-deep-blue`; grepping light `text-blue-700` on link-like roles is a smell.
 - Security / structure washes: assert `brand-deep-blue` alpha classes and **no** `blue-700` on those nodes.
-- Logos: `logoVariants` keys are `primary | whiteBg | white | mono | text` only; shell wrappers import `logo-primary.svg` only.
+- Logos: `logoVariants` + `logoSquareVariants` keys match DESIGN; shell plate imports `*-square.svg`; titlebar imports plain `logo-white.svg` at compact height.
+- AgentPicker (VI-001): selected installed card uses single `border-blue-700` ring — no competing tint or status dot.
 
 ---
 

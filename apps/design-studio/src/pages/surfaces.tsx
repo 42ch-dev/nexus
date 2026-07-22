@@ -660,7 +660,8 @@ export function SurfacesAgentPickerPage() {
           @42ch/nexus-ui
         </code>
         ). Props-driven fixtures: loading, installed grid, mixed, empty, error,
-        selected. No contracts, no daemon client.
+        selected, plus VI-001 target selected affordance (light+dark). No contracts, no daemon
+        client.
       </p>
       <AgentPickerFixtures />
     </section>

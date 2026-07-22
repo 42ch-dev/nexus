@@ -4,15 +4,15 @@ import { render, screen } from '@testing-library/react';
 import { Button } from './button';
 
 describe('Button', () => {
-  it('encodes the Chronos primary recipe (cyan fill + deep text, both themes)', () => {
-    // Button is a thin re-export from @42ch/nexus-ui. Primary is pixel-same in
-    // light and dark — no fill/text fork.
+  it('encodes the Chronos theme-split primary recipe', () => {
+    // Button is a thin re-export from @42ch/nexus-ui. Light: ink fill + white label;
+    // dark: cyan CTA + deep ink label.
     render(<Button variant="primary" size="default">Continue</Button>);
     const btn = screen.getByRole('button', { name: 'Continue' });
-    expect(btn.className).toMatch(/\bbg-brand-cyan\b/);
-    expect(btn.className).toMatch(/\btext-brand-deep-blue\b/);
-    expect(btn.className).not.toMatch(/\btext-white\b/);
-    expect(btn.className).not.toMatch(/\bdark:bg-brand-cyan\b/);
+    expect(btn.className).toMatch(/\bbg-brand-deep-blue\b/);
+    expect(btn.className).toMatch(/\btext-brand-white\b/);
+    expect(btn.className).toMatch(/\bdark:bg-brand-cyan\b/);
+    expect(btn.className).toMatch(/\bdark:text-brand-deep-blue\b/);
   });
 
   it('matches the primary variant snapshot in light mode', () => {

@@ -164,7 +164,7 @@ motion:
 components:
   # ── button: apps/web superset (tertiary + destructive + sizes + disabled) wins ──
   button:
-    primary: { backgroundColor: "{colors.brand-cyan}", textColor: "{colors.brand-deep-blue}", borderColor: "none", rounded: "{rounded.control}", height: "40px", typography: "{typography.button-14}", hoverBackgroundColor: "{colors.blue-800}", hoverTextColor: "{colors.brand-deep-blue}", activeBackgroundColor: "{colors.blue-900}", activeTextColor: "{colors.brand-deep-blue}" }
+    primary: { backgroundColor: "{colors.brand-deep-blue}", textColor: "{colors.brand-white}", borderColor: "none", rounded: "{rounded.control}", height: "40px", typography: "{typography.button-14}", hoverBackgroundColor: "{colors.brand-deep-blue-800}", hoverTextColor: "{colors.brand-white}", activeBackgroundColor: "{colors.brand-deep-blue-900}", activeTextColor: "{colors.brand-white}" }
     secondary: { backgroundColor: "{colors.background-100}", textColor: "{colors.gray-1000}", borderColor: "{colors.gray-alpha-400}", rounded: "{rounded.control}", height: "40px", typography: "{typography.button-14}", hoverBackgroundColor: "{colors.background-200}", hoverBorderColor: "{colors.gray-alpha-500}" }
     tertiary: { backgroundColor: "transparent", textColor: "{colors.gray-1000}", borderColor: "none", rounded: "{rounded.control}", height: "40px", typography: "{typography.button-14}", hoverBackgroundColor: "{colors.gray-alpha-100}" }
     destructive: { backgroundColor: "{colors.red-800}", textColor: "#ffffff", borderColor: "none", rounded: "{rounded.control}", height: "40px", typography: "{typography.button-14}", hoverBackgroundColor: "{colors.red-700}", activeBackgroundColor: "{colors.red-900}" }
@@ -397,8 +397,9 @@ components:
 
   # ── shell-nav: root (brand navigation tokens) ──
   shell-nav:
-    logo-variant: "logo-primary.svg"
-    logo-min-height: "24px"
+    logo-plate-variant: "logo-primary-square.svg"
+    logo-compact-mark-height-px: "14"
+    logo-shell-height-px: "20"
     logo-clear-space-ratio: "0.25"
     active-bar-color: "{colors.blue-700}"
     brand-mark-on-light: "{colors.brand-deep-blue}"
@@ -407,6 +408,8 @@ components:
   # ── logo: root ──
   logo:
     min-size-px: "24"
+    compact-mark-height-px: "14"
+    shell-height-px: "20"
     clear-space-ratio: "0.25"
     alt-text: "Nexus"
 
@@ -871,14 +874,14 @@ VI palette (frozen names) under **Chronos dual-role**:
 
 | Role | Token | Hex | Light | Dark |
 | --- | --- | --- | --- | --- |
-| **Ink structure** | `brand-deep-blue` | `#0D2B3E` | Titlebar fill, **text links**, logo structure on light | Titlebar fill; primary button **label** on cyan; never deep fills on dark chrome |
-| **Cyan signal** | `brand-cyan` / `blue-700` | `#25D1E0` | Primary CTA fill, active bars, focus-ring outer, selection, timeline accents | Same signal roles (shared) |
+| **Ink structure** | `brand-deep-blue` | `#0D2B3E` | Titlebar fill, **text links**, logo plate structure on light | Titlebar fill; primary button **label** on cyan (dark); **fill** on light primary CTA |
+| **Cyan signal** | `brand-cyan` / `blue-700` | `#25D1E0` | Focus ring, active bars, selection strokes, timeline accents | Primary CTA **fill** (dark shell), focus ring, active chrome |
 | Surface white | `brand-white` | `#FFFFFF` | Text on deep panels; logo on dark heroes | Logo on deepest panels |
 
 | Token | Hex | Role |
 | --- | --- | --- |
-| `brand-deep-blue` | `#0D2B3E` | Ink structure — light **text links**, titlebar, primary button label on cyan fill |
-| `brand-cyan` | `#25D1E0` | Shared brand **signal** — primary button fill, focus ring, active chrome (light and dark) |
+| `brand-deep-blue` | `#0D2B3E` | Ink structure — light **text links**, titlebar, **light primary CTA fill** |
+| `brand-cyan` | `#25D1E0` | Cyan signal — **dark primary CTA fill**, focus ring, active chrome |
 | `brand-white` | `#FFFFFF` | Text on deep-blue panels, logo on dark hero surfaces |
 
 Extended brand steps (`brand-deep-blue-800` … `brand-cyan-1000`, `brand-deep-blue-alpha-*`, `brand-cyan-alpha-*`) support hover, active, and low-opacity washes without raw VI drift. Light `blue-800/900/1000` alias the cyan darker steps (`#1FB8C6` / `#1896A2` / `#117480`); dark `blue-800/900/1000` alias the cyan brighter steps.
@@ -887,15 +890,15 @@ Extended brand steps (`brand-deep-blue-800` … `brand-cyan-1000`, `brand-deep-b
 
 | Pairing | Ratio | Intended usage | Verdict |
 | --- | --- | --- | --- |
-| `brand-deep-blue` on `background-100` | 11.5:1 | Headings, **text links**, body / UI on light | **Pass** — body text OK |
-| `brand-deep-blue` on `brand-cyan` | 6.2:1 | Primary button label (light = dark recipe) | **Pass** |
-| `brand-white` on `brand-deep-blue` | 11.5:1 | Text on deep titlebar / brand panels | **Pass** |
+| `brand-deep-blue` on `background-100` | 11.5:1 | Headings, **text links**, body / UI on light; **light primary CTA fill** | **Pass** — body text OK |
+| `brand-white` on `brand-deep-blue` | 11.5:1 | **Light primary CTA label**; text on deep titlebar / brand panels | **Pass** |
+| `brand-deep-blue` on `brand-cyan` | 6.2:1 | **Dark primary** button label on cyan fill | **Pass** |
 | `brand-cyan` / `blue-700` on `background-100` | 1.9:1 | — | **Fail** — signal/icon/active only; **never body or link text on white** |
 | `brand-cyan` on `brand-deep-blue` | 6.2:1 | Accent chips on brand panels | **Pass** |
 | `gray-1000` on `background-100` | 18.9:1 | Primary UI text | **Pass** |
 | `gray-700` on `background-100` | 5.7:1 | Secondary/helper text | **Pass** |
 
-**Cyan usage rule:** `brand-cyan` (and light `blue-700`, which aliases it) is the shared **signal** token for interactive chrome — primary CTA fill, focus-ring outer, active bars, selection strokes, timeline accents, graphical brand icons. It is **not** paragraph text or default **text links** on white/light gray (AA fail ~1.9:1). Light textual links use `brand-deep-blue` (11.5:1); dark textual links use `brand-cyan` / `blue-700` (10.0:1 on ink).
+**Cyan usage rule:** `brand-cyan` (and light `blue-700`, which aliases it) is the **signal** token for interactive chrome on dark shells — **dark primary CTA fill**, focus-ring outer, active bars, selection strokes, timeline accents, graphical brand icons. On light shells, primary CTAs use `brand-deep-blue` fill instead (VI-002). Cyan is **not** paragraph text or default **text links** on white/light gray (AA fail ~1.9:1). Light textual links use `brand-deep-blue` (11.5:1); dark textual links use `brand-cyan` / `blue-700` (10.0:1 on ink).
 
 ### Background-driven contrast invariant
 
@@ -916,7 +919,8 @@ Color values live in frontmatter `colors:`. Color tokens follow the Geist-style 
 
 | Meaning | Token |
 | --- | --- |
-| Primary action / focus / active chrome (signal) | `blue-700` → `brand-cyan` in **both** light and dark |
+| Primary action (dark shell) / focus / active chrome (signal) | `blue-700` → `brand-cyan` |
+| Primary action (light shell) | `brand-deep-blue` fill + `brand-white` label (theme-split — not cyan) |
 | Text link / retry text on light surfaces (ink) | `brand-deep-blue` (not `blue-700` / cyan) |
 | Text link on dark surfaces | `blue-700` / `brand-cyan` |
 | Brand accent icons / marks (graphical) | `brand-cyan` or cyan on deep panel |
@@ -992,9 +996,9 @@ Full WCAG 2.1 AA recomputation for the v0.4 ink (dark) and warm-paper (light) su
 | `purple-700` `#7c3aed` | 5.7 **P** | 5.4 **P** | 5.1 **P** | 5.2 **P** | 4.9 **P** | 4.3 **G** | 4.7 **P** | 2.0 **F** |
 | `pink-700` `#db2777` | 4.6 **P** | 4.3 **G** | 4.1 **G** | 4.2 **G** | 4.0 **G** | 3.5 **G** | 3.8 **G** | 1.6 **F** |
 
-**Usage rules confirmed by the tables (Chronos dual-role — VI logo upgrade):**
+**Usage rules confirmed by the tables (Chronos dual-role + V1.132 theme-split primary):**
 
-- **Primary button (both themes):** `brand-deep-blue` on `brand-cyan` = 6.2:1 **P** — cyan fill + deep label. Light no longer uses deep fill + white text for primary CTAs.
+- **Primary button (theme-split):** light shell uses `brand-deep-blue` fill + `brand-white` label (11.5:1 **P**); dark shell uses `brand-cyan` fill + `brand-deep-blue` label (6.2:1 **P**). Light shell must **not** use neon cyan fill + deep ink label (VI-002 / AC-5b).
 - `brand-deep-blue` on dark chrome stays **Fail** — never deep-blue fills on dark surfaces; deep blue appears on cyan fills (6.2:1 **P**) or as text/links on light surfaces (11.5:1 **P**).
 - `brand-cyan` / light `blue-700` on light surfaces stays **Fail** as body/link text — signal chrome, icons, active indicators, and primary **fills** only; never paragraph or default link text on white (§Brand Colors cyan rule). Light links → `brand-deep-blue`.
 - `gray-500` is graphical/decorative (edges, separators, tick marks) — not body text; dark values pass graphical (3.0+) except on `gray-300`, where it must not appear (same restriction as pre-v0.4).
@@ -1138,32 +1142,44 @@ On brand-filled surfaces (cyan primary button), invert the inner ring to `brand-
 
 Canonical SVG assets ship from `@42ch/nexus-ui/assets/logos/`. PNG sources are provenance-only (Git LFS). Runtime marks use the **timeline** geometry: horizontal five-node axis (ring · ring · **solid center** · ring · ring) on a wide viewBox — not the legacy N-network square.
 
-| Variant | File | Surface |
-| --- | --- | --- |
-| Primary lockup (default) | `logo-primary.svg` | Product shell and most surfaces — bright mark on **brand deep-blue** plate (matches `logo-primary.png`) |
-| White-bg lockup | `logo-white-bg.svg` | Only when a light/white plate is required (matches `logo-white-bg.png`) |
-| White mark (dark-gray→white gradient) | `logo-white.svg` | Dark hero, photography overlays, high-contrast panels (transparent mark) |
-| Mono mark (light-gray→black gradient) | `logo-mono.svg` | Static grayscale lockup on light surfaces |
-| Wordmark | `logo-text.svg` via `<NexusLogo variant="text">` (apps/web: `NexusTextLogo`) | Lowercase `nexus` lockup; `currentColor` (white on dark heroes; `brand-deep-blue` on light) |
-| Tintable mark | `<NexusMark>` | Inline chrome (buttons, badges, list rows); `currentColor` |
+### Plain marks vs square plate lockups (V1.132)
+
+Plain wide marks and square plated lockups are **separate assets** — do not swap them ad hoc. Package SSOT: `logoVariants` (plain) and `logoSquareVariants` (`*-square.svg`).
+
+| Contract | Package key | File | Geometry | Use |
+| --- | --- | --- | --- | --- |
+| Plain primary mark | `logoVariants.primary` | `logo-primary.svg` | Wide (~10:1) | Inline timeline usage; titlebar compact mark (with `logo-white.svg` on ink) |
+| Plain white-bg mark | `logoVariants.whiteBg` | `logo-white-bg.svg` | Wide | Light surfaces when a plate is wrong |
+| Square primary plate | `logoSquareVariants.primary` | `logo-primary-square.svg` | Square | Sidebar/header plate lockup; desktop `icons:compose` source |
+| Square white-bg plate | `logoSquareVariants.whiteBg` | `logo-white-bg-square.svg` | Square | Light/white plate lockups only |
+| White mark | `logoVariants.white` | `logo-white.svg` | Wide | Dark hero, ink titlebar (`NexusInkLogo`), high-contrast panels |
+| Mono mark | `logoVariants.mono` | `logo-mono.svg` | Wide | Static grayscale; tintable UI uses `<NexusMark>` |
+| Wordmark | `logoVariants.text` | `logo-text.svg` | Wide | Lowercase `nexus`; `currentColor` |
+| Tintable mark | — | `<NexusMark>` | Wide | Inline chrome; `currentColor` |
+
+### Compact timeline mark scale (V1.132 / VI-003)
+
+Shared SSOT: `logoCompactMarkHeightPx` = **14px** (−30% from legacy `logoShellHeightPx` **20px**). Apply to titlebar (`NexusInkLogo`), Brand hero mini marks, and app-icon compose inner scale. Plate lockups in sidebar chrome stay at `logoShellHeightPx` (20px) using square assets.
 
 **Placement:**
 
-- Shell sidebar/header: **primary lockup** (`logo-primary.svg`) on light and dark — theme-stable deep-blue plate.
-- Light/white marketing or docs plates that must not show deep-blue: `logo-white-bg.svg` only.
+- Shell sidebar: **square primary plate** (`logo-primary-square.svg`) at `logoShellHeightPx` (20px).
+- Ink titlebar: **plain white mark** (`logo-white.svg`) at `logoCompactMarkHeightPx` (14px) — not the deep plate lockup.
+- Light/white marketing or docs plates that must not show deep-blue: `logo-white-bg-square.svg` or plain `logo-white-bg.svg` as appropriate.
 - Dark heroes / deepest panels: `logo-white.svg` mark; optional **wordmark** via `logo-text.svg` with `color: #FFFFFF` (or `currentColor` set to white).
-- Lockups (Studio Brand, marketing): plate lockup + optional `logo-text.svg` with shared clear-space; do not stretch either asset.
+- Lockups (Studio Brand, marketing): square plate + optional `logo-text.svg` with shared clear-space; do not stretch either asset.
 - Inline chrome (buttons, badges, list rows): `<NexusMark>` only — set `color` on the parent. Prefer the static `logo-mono.svg` asset when the baked grayscale gradient is required.
+- Desktop app icon: compose `logo-primary-square.svg` with transparent inset margins (~12% per side); consumers must not crop the plate in product code.
 
 **Rules:**
 
 - **Wordmark contract:** whenever UI needs the Nexus **logo text** (brand wordmark), render `logo-text.svg` through `<NexusLogo variant="text" src={…logo-text…}>` — in apps/web prefer the thin `NexusTextLogo` wrapper. Do **not** typeset `nexus` / `Nexus` with heading or UI fonts as a brand substitute (glyph metrics and weight drift). Ordinary product copy, route titles, and nav labels remain typography; this rule applies only to **logo identity** text.
-- Minimum rendered height: **24px** (`logoMinSizePx`) for the mark; wordmark follows the same min height for the glyph box.
-- Clear space: **≥ 25%** of logo height on all sides.
-- Aspect: `logo-primary.svg` and `logo-white-bg.svg` are **square plate lockups**. Transparent marks (`white`, `mono`) and `<NexusMark>` are **wide** (`viewBox` ~10:1) — prefer `height` + `width: auto`.
+- Minimum rendered height: **24px** (`logoMinSizePx`) for general UI marks; compact chrome may use `logoCompactMarkHeightPx` (14px) where listed above.
+- Clear space: **≥ 25%** of logo height on all sides (`logoClearSpaceRatio`).
+- Aspect: square plate lockups (`*-square.svg`) are **square**; plain marks (`logo-primary.svg`, `logo-white.svg`, `logo-mono.svg`) and `<NexusMark>` are **wide** — prefer `height` + `width: auto`.
 - Alt text: `Nexus` on `<img>`; inline SVGs include `<title>` and `<desc>`.
-- Do not recolor baked-gradient SVG fills (`primary`, `whiteBg`, `white`, `mono`); only `<NexusMark>` and `logo-text.svg` inherit via `currentColor`.
-- Prefer `logo-primary.svg` by default. Reach for `logo-white-bg.svg` only when the surface must be a light/white plate.
+- Do not recolor baked-gradient SVG fills; only `<NexusMark>` and `logo-text.svg` inherit via `currentColor`.
+- Prefer square `logo-primary-square.svg` for plate lockups; plain `logo-primary.svg` for wide timeline marks — never substitute one for the other.
 
 ---
 
@@ -1193,7 +1209,9 @@ Canonical SVG assets ship from `@42ch/nexus-ui/assets/logos/`. PNG sources are p
 | `brand-deep-blue` | `brandColors.deepBlue` | `--nexus-brand-deep-blue` |
 | `brand-cyan` | `brandColors.cyan` | `--nexus-brand-cyan` |
 | `brand-white` | `brandColors.white` | `--nexus-brand-white` |
-| Logo variants | `logoVariants.*` | Import SVG path from package exports |
+| Logo plain marks | `logoVariants.*` | Import SVG path from package exports |
+| Logo square plates | `logoSquareVariants.*` | `logo-primary-square.svg`, `logo-white-bg-square.svg` |
+| Compact mark height | `logoCompactMarkHeightPx` | 14px (−30% from `logoShellHeightPx` 20px) |
 
 **Import paths (stable public API):**
 
@@ -1212,7 +1230,7 @@ Component token values live in frontmatter `components:`. All components must ex
 
 Variants and sizes: see frontmatter `components.button`. The preset `Validate` action uses `primary` when it is the main form action, or `secondary` with a `blue-700` leading icon when paired with a separate save action.
 
-#### Button Contrast Invariant (Chronos dual-role)
+#### Button Contrast Invariant (Chronos dual-role + V1.132 theme-split)
 
 > **Background decides text color, independent of light/dark mode.**
 >
@@ -1220,10 +1238,10 @@ Variants and sizes: see frontmatter `components.button`. The preset `Validate` a
 > - **Light/bright background** (cyan, light gray, pastels) → **dark text**.
 >
 > Practical applications:
-> - **Primary button (light and dark are identical):** `bg-brand-cyan` / `bg-blue-700` (bright) → `text-brand-deep-blue` (dark). No light/dark fill fork for primary.
+> - **Primary button (theme-split — VI-002 / AC-5b):** light shell → `bg-brand-deep-blue` + `text-brand-white` (ink fill, not neon cyan). Dark shell → `bg-brand-cyan` + `text-brand-deep-blue` (strong cyan CTA). Implemented in `@42ch/nexus-ui` `Button`; consumers (`TransportErrorBlock` Retry, Setup CTAs) must not add local overrides.
 > - Destructive `bg-red-800` (dark) → `text-white` (light) on light theme; dark theme may use deep text on bright red — see `DESIGN.dark.md`.
 
-**Primary recipe (locked):** cyan fill (`brand-cyan` / `blue-700`) + deep label (`brand-deep-blue`) in **both** shells. Former light recipe (deep fill + white text) is retired.
+**Primary recipe (locked):** theme-split per shell — light uses deep ink fill + white label; dark uses cyan fill + deep label. The former uniform cyan-fill recipe in both themes is retired (V1.132 P2).
 
 ### Input / Select / Textarea
 

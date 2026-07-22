@@ -182,26 +182,26 @@ describe('Chronos gallery acceptance', () => {
     expect(swatch).toHaveTextContent('blue-700');
   });
 
-  it('components primary Button uses cyan fill + deep text (no light/dark fork)', () => {
+  it('components primary Button uses ink fill in light shell', () => {
     mockMatchMediaFull();
     renderStudio('/components');
-    expect(screen.getByTestId('button-chronos-note')).toHaveTextContent(/pixel-same/i);
+    expect(screen.getByTestId('button-chronos-note')).toHaveTextContent(/theme-split/i);
     const primary = screen.getByTestId('button-primary-default');
-    expect(primary.className).toMatch(/\bbg-brand-cyan\b/);
-    expect(primary.className).toMatch(/\btext-brand-deep-blue\b/);
-    expect(primary.className).not.toMatch(/\btext-white\b/);
-    expect(primary.className).not.toMatch(/\bdark:bg-brand-cyan\b/);
+    expect(primary.className).toMatch(/\bbg-brand-deep-blue\b/);
+    expect(primary.className).toMatch(/\btext-brand-white\b/);
+    expect(primary.className).toMatch(/\bdark:bg-brand-cyan\b/);
+    expect(primary.className).toMatch(/\bdark:text-brand-deep-blue\b/);
   });
 
-  it('dark theme keeps primary Button cyan fill + deep text (no light/dark fork)', () => {
+  it('dark theme keeps primary Button cyan CTA + deep ink label', () => {
     // ThemeProvider must apply `.dark` from matchMedia — do not inject the class.
     mockMatchMediaFull({ dark: true });
     renderStudio('/components');
     expect(document.documentElement.classList.contains('dark')).toBe(true);
     const primary = screen.getByTestId('button-primary-default');
-    expect(primary.className).toMatch(/\bbg-brand-cyan\b/);
-    expect(primary.className).toMatch(/\btext-brand-deep-blue\b/);
-    expect(primary.className).not.toMatch(/\bdark:bg-brand-cyan\b/);
+    expect(primary.className).toMatch(/\bbg-brand-deep-blue\b/);
+    expect(primary.className).toMatch(/\bdark:bg-brand-cyan\b/);
+    expect(primary.className).toMatch(/\bdark:text-brand-deep-blue\b/);
   });
 
   it('dark theme keeps token blue-700 swatch on cyan signal scale', async () => {
@@ -245,7 +245,7 @@ describe('Chronos gallery acceptance', () => {
   it('brand page states Chronos identity without N-network lockup copy', () => {
     mockMatchMedia(false);
     renderStudio('/brand');
-    expect(screen.getByTestId('brand-chronos-note')).toHaveTextContent(/timeline mark/i);
+    expect(screen.getByTestId('brand-chronos-note')).toHaveTextContent(/compact bright mark/i);
     expect(screen.getByText(/no N-network lockup/i)).toBeInTheDocument();
   });
 
@@ -265,34 +265,53 @@ describe('Brand logo gallery lockup', () => {
     renderStudio('/brand');
   });
 
-  it('primary plate card uses deep-blue panel and width-fill img', () => {
+  it('primary plain mark card uses deep-blue panel and NexusLogo', () => {
     const panel = screen.getByTestId('logo-card-panel-primary');
     expect(panel.className).toMatch(/\bbg-brand-deep-blue\b/);
     expect(panel.className).not.toMatch(/\bbg-gray-alpha/);
 
-    const img = screen.getByTestId('logo-card-plate-img-primary');
-    expect(img).toHaveClass('block', 'w-full', 'h-auto', 'object-contain');
-    expect(img).toHaveAttribute('src');
-    expect(img).toHaveAccessibleName('Nexus');
+    const logo = within(panel).getByRole('img', { name: 'Nexus' });
+    expect(logo).toHaveAttribute('src');
+    expect(logo).toHaveAttribute('height', '32');
   });
 
-  it('whiteBg plate card uses white panel and width-fill img', () => {
+  it('primary square plate card uses deep-blue panel and width-fill img', () => {
+    const panel = screen.getByTestId('logo-card-panel-primary-square');
+    expect(panel.className).toMatch(/\bbg-brand-deep-blue\b/);
+
+    const img = screen.getByTestId('logo-card-plate-img-primary-square');
+    expect(img).toHaveClass('block', 'w-full', 'h-auto', 'object-contain');
+    expect(img).toHaveAccessibleName('Nexus');
+    expect(img.getAttribute('src')).toMatch(/viewBox='0%200%20284%20284'/);
+  });
+
+  it('whiteBg plain mark card uses white panel and NexusLogo', () => {
     const panel = screen.getByTestId('logo-card-panel-whiteBg');
     expect(panel.className).toMatch(/\bbg-white\b/);
     expect(panel.className).not.toMatch(/\bbg-gray-alpha/);
 
-    const img = screen.getByTestId('logo-card-plate-img-whiteBg');
-    expect(img).toHaveClass('block', 'w-full', 'h-auto', 'object-contain');
-    expect(img).toHaveAccessibleName('Nexus');
+    const logo = within(panel).getByRole('img', { name: 'Nexus' });
+    expect(logo).toHaveAttribute('height', '32');
   });
 
-  it('Chronos mini renders logo inside the deep titlebar row', () => {
+  it('whiteBg square plate card uses white panel and width-fill img', () => {
+    const panel = screen.getByTestId('logo-card-panel-white-bg-square');
+    expect(panel.className).toMatch(/\bbg-white\b/);
+
+    const img = screen.getByTestId('logo-card-plate-img-white-bg-square');
+    expect(img).toHaveClass('block', 'w-full', 'h-auto', 'object-contain');
+    expect(img).toHaveAccessibleName('Nexus');
+    expect(img.getAttribute('src')).toMatch(/viewBox='0%200%20284%20284'/);
+  });
+
+  it('Chronos mini renders compact logo inside the deep titlebar row', () => {
     for (const mode of ['light', 'dark'] as const) {
       const titlebar = screen.getByTestId(`chronos-mini-titlebar-${mode}`);
       expect(titlebar.className).toMatch(/\bbg-brand-deep-blue\b/);
       const logo = within(titlebar).getByRole('img', { name: 'Nexus' });
       expect(logo).toBeInTheDocument();
-      expect(logo.className).toMatch(/\bh-5\b/);
+      expect(logo.className).toMatch(/\bh-3\.5\b/);
+      expect(logo).toHaveAttribute('height', '14');
     }
   });
 

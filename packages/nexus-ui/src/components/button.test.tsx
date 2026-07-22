@@ -7,15 +7,17 @@ import { Button } from './button';
 describe('Button', () => {
   // --- variant rendering ---
 
-  it('renders the primary variant with cyan fill and deep text (both themes)', () => {
+  it('renders the primary variant with ink fill in light and cyan CTA in dark', () => {
     render(<Button variant="primary">Save</Button>);
     const btn = screen.getByRole('button', { name: 'Save' });
-    expect(btn).toHaveClass('bg-brand-cyan');
-    expect(btn).toHaveClass('text-brand-deep-blue');
-    expect(btn).toHaveClass('hover:bg-blue-800');
-    expect(btn).toHaveClass('active:bg-blue-900');
-    expect(btn.className).not.toMatch(/\bdark:bg-brand-cyan\b/);
-    expect(btn.className).not.toMatch(/\btext-white\b/);
+    expect(btn).toHaveClass('bg-brand-deep-blue');
+    expect(btn).toHaveClass('text-brand-white');
+    expect(btn).toHaveClass('hover:bg-brand-deep-blue-800');
+    expect(btn).toHaveClass('active:bg-brand-deep-blue-900');
+    expect(btn).toHaveClass('dark:bg-brand-cyan');
+    expect(btn).toHaveClass('dark:text-brand-deep-blue');
+    expect(btn).toHaveClass('dark:hover:bg-blue-800');
+    expect(btn).toHaveClass('dark:active:bg-blue-900');
   });
 
   it('renders the secondary variant (default)', () => {
@@ -109,8 +111,8 @@ describe('Button', () => {
     );
     const btn = screen.getByRole('button', { name: 'Styled' });
     expect(btn).toHaveClass('custom-extra');
-    expect(btn).toHaveClass('bg-brand-cyan');
-    expect(btn).toHaveClass('text-brand-deep-blue');
+    expect(btn).toHaveClass('bg-brand-deep-blue');
+    expect(btn).toHaveClass('text-brand-white');
   });
 
   // --- base structural classes ---

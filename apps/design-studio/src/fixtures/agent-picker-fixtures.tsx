@@ -14,6 +14,8 @@ import {
   type AgentVerifyStatus,
 } from '@web-setup/agent-picker';
 
+import { ViAgentPickerAcceptanceFixtures } from '@/fixtures/vi-aesthetic-retune-fixtures';
+
 const INSTALLED_ONLY: AgentPickerItem[] = [
   {
     id: 'claude-native',
@@ -177,7 +179,7 @@ export function AgentPickerFixtures() {
 
       <FixtureFrame
         title="Selected"
-        description="Installed agent selected (aria-pressed + status-dot ring)."
+        description="Installed agent selected (2px ring affordance + aria-pressed)."
       >
         <InteractiveSelectedFixture />
       </FixtureFrame>
@@ -233,6 +235,8 @@ export function AgentPickerFixtures() {
           verifyStatus={'error' satisfies AgentVerifyStatus}
         />
       </FixtureFrame>
+
+      <ViAgentPickerAcceptanceFixtures />
     </div>
   );
 }
