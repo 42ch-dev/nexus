@@ -11,18 +11,18 @@ import { cn } from '../lib/cn';
  * destructive); sizes map to the small/default/large heights. The two-layer
  * focus ring is applied globally in src/index.css.
  *
- * Primary uses Chronos cyan signal + deep ink label in **both** themes (no
- * light/dark fill fork). Hover/active steps follow `blue-800/900` (theme-tuned
- * cyan scale in tokens.css).
+ * Primary is theme-split: light shell uses deep-ink fill + white label; dark
+ * shell keeps the strong cyan CTA + deep ink label. Hover/active steps follow
+ * the ink scale in light mode and the cyan scale in dark mode (tokens.css).
  */
 const buttonVariants = cva(
   'inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-control font-button transition-colors duration-state ease-standard disabled:pointer-events-none disabled:bg-gray-100 disabled:text-gray-700 dark:disabled:bg-gray-100 dark:disabled:text-gray-700 focus-visible:outline-none',
   {
     variants: {
       variant: {
-        // primary: cyan fill + deep text (light === dark per Chronos dual-role)
+        // primary: ink fill in light; cyan CTA in dark (VI-002 / AC-5b)
         primary:
-          'bg-brand-cyan text-brand-deep-blue hover:bg-blue-800 active:bg-blue-900',
+          'bg-brand-deep-blue text-brand-white hover:bg-blue-900 active:bg-blue-950 dark:bg-brand-cyan dark:text-brand-deep-blue dark:hover:bg-blue-800 dark:active:bg-blue-900',
         // secondary: background-100 bg, gray-1000 text, gray-alpha-400 border
         secondary:
           'bg-background-100 text-gray-1000 border border-gray-alpha-400 hover:bg-background-200 hover:border-gray-alpha-500',

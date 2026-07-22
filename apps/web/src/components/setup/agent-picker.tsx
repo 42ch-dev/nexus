@@ -206,13 +206,9 @@ export function AgentPicker({
               <p className="text-copy-14 text-red-900">{errorDescription}</p>
             ) : null}
             {onRetry ? (
-              <button
-                type="button"
-                onClick={onRetry}
-                className="self-start text-label-14 font-medium text-brand-deep-blue transition-colors duration-state ease-standard hover:opacity-80 dark:text-blue-700 dark:hover:text-blue-800 dark:hover:opacity-100"
-              >
+              <Button type="button" variant="primary" size="small" onClick={onRetry} className="self-start">
                 {t('agentPicker.tryAgain')}
-              </button>
+              </Button>
             ) : null}
           </div>
         ) : null}
@@ -326,12 +322,11 @@ const AgentCard = memo(function AgentCard({
       data-testid={`agent-card-${agent.id}`}
       data-installed={selectable ? 'true' : 'false'}
       className={cn(
-        'flex w-full flex-col rounded-control border border-gray-alpha-400 bg-background-100 transition-colors duration-state ease-standard',
+        'flex w-full flex-col rounded-control bg-background-100 transition-colors duration-state ease-standard',
         compact ? 'p-2' : 'p-3',
-        // V1.108 FB-UI-007: hover paints the entire outer card surface.
-        selectable && selected && 'border-blue-700 bg-blue-700/8',
-        selectable && !selected && 'hover:bg-gray-alpha-100',
-        !selectable && 'bg-background-200',
+        selectable
+          ? cn('border-2', selected ? 'border-blue-700' : 'border-gray-alpha-400 hover:bg-gray-alpha-100')
+          : 'border border-gray-alpha-400 bg-background-200',
       )}
     >
       {selectable ? (
@@ -345,11 +340,11 @@ const AgentCard = memo(function AgentCard({
             'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-700',
           )}
         >
-          <AgentCardIdentity agent={agent} selected={selected} />
+          <AgentCardIdentity agent={agent} />
         </button>
       ) : (
         <div className="flex w-full items-start justify-between gap-2">
-          <AgentCardIdentity agent={agent} selected={selected} />
+          <AgentCardIdentity agent={agent} />
         </div>
       )}
 
@@ -382,13 +377,7 @@ const AgentCard = memo(function AgentCard({
   );
 });
 
-function AgentCardIdentity({
-  agent,
-  selected,
-}: {
-  agent: AgentPickerItem;
-  selected: boolean;
-}) {
+function AgentCardIdentity({ agent }: { agent: AgentPickerItem }) {
   const { t } = useTranslation('setup');
   const [iconError, setIconError] = useState(false);
   const label = agent.displayName || agent.name;
@@ -446,55 +435,7 @@ function AgentCardIdentity({
           </span>
         ) : null}
       </div>
-      <StatusDot installed={agent.installed} selected={selected} />
     </>
-  );
-}
-
-/**
- * Selection affordance: hollow gray outline when installed-unselected; filled
- * green when selected; muted solid gray when not installed (non-selectable).
- *
- * V1.108 FB-UI-006: unselected installed agents show hollow **gray** (not
- * green) so they do not imply validity before selection.
- */
-function StatusDot({
-  installed,
-  selected,
-}: {
-  installed: boolean;
-  selected: boolean;
-}) {
-  const { t } = useTranslation('setup');
-  const label = installed
-    ? selected
-      ? t('agentPicker.status.selected')
-      : t('agentPicker.status.installed')
-    : t('agentPicker.status.notInstalled');
-
-  return (
-    <span
-      className="relative mt-0.5 inline-flex h-2.5 w-2.5 shrink-0"
-      title={label}
-      aria-hidden
-      data-testid="agent-status-dot"
-      data-dot={
-        !installed ? 'muted' : selected ? 'lit' : 'hollow'
-      }
-    >
-      <span
-        className={cn(
-          'absolute inset-0 rounded-full',
-          !installed && 'bg-gray-500',
-          installed &&
-            selected &&
-            'bg-green-700',
-          installed &&
-            !selected &&
-            'border-[1.5px] border-gray-500 bg-transparent',
-        )}
-      />
-    </span>
   );
 }
 

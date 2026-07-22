@@ -1,8 +1,7 @@
 /**
  * Studio fixtures for V1.132 P2 VI aesthetic retune — visual acceptance targets.
  *
- * Proves VI-001..VI-005 target states in light + dark before App wiring (T3+).
- * Fixture-local target styling only; wire and package primitives unchanged in T1.
+ * Proves VI-001..VI-005 acceptance states in light + dark (T3+ wires real primitives).
  */
 
 import type { ReactNode } from 'react';
@@ -390,69 +389,25 @@ export function ViBrandAcceptanceFixtures() {
 /*  VI-002 — theme-aware primary Button (Components)                    */
 /* ------------------------------------------------------------------ */
 
-/** Target light-shell primary — ink fill, not neon cyan + deep ink label. */
-function TargetPrimaryButton({ children }: { children: ReactNode }) {
-  return (
-    <button
-      type="button"
-      data-testid="vi-002-target-primary-button"
-      className="inline-flex h-10 items-center justify-center rounded-control bg-brand-deep-blue px-4 text-button-14 font-button text-brand-white transition-colors duration-state ease-standard hover:bg-blue-900 active:bg-blue-950"
-    >
-      {children}
-    </button>
-  );
-}
-
-/** Target dark-shell primary — strong cyan CTA (matches current dark intent). */
-function TargetDarkPrimaryButton({ children }: { children: ReactNode }) {
-  return (
-    <button
-      type="button"
-      data-testid="vi-002-target-dark-primary-button"
-      className="inline-flex h-10 items-center justify-center rounded-control bg-brand-cyan px-4 text-button-14 font-button text-brand-deep-blue transition-colors duration-state ease-standard hover:bg-blue-800 active:bg-blue-900"
-    >
-      {children}
-    </button>
-  );
-}
-
 export function ViButtonAcceptanceFixtures() {
   return (
     <ViSection
       id="vi-002-primary-button"
       ledgerId="VI-002"
       title="Theme-aware primary Button"
-      description="Target (T3): light-shell primary uses ink-structure fill — not neon cyan on deep ink label. Dark shell keeps the strong cyan CTA. TransportError Retry consumes the same Button variant."
+      description="Light-shell primary uses deep-ink fill + white label; dark shell keeps the strong cyan CTA. TransportError Retry consumes the same Button variant."
     >
       <ThemePair
         testId="vi-002-primary-button"
         light={
-          <div className="space-y-4">
-            <div>
-              <p className="mb-2 text-copy-13 text-gray-600">Current (package)</p>
-              <Button variant="primary" data-testid="vi-002-current-primary-light">
-                Retry
-              </Button>
-            </div>
-            <div>
-              <p className="mb-2 text-copy-13 text-gray-600">Target (fixture)</p>
-              <TargetPrimaryButton>Retry</TargetPrimaryButton>
-            </div>
-          </div>
+          <Button variant="primary" data-testid="vi-002-primary-light">
+            Retry
+          </Button>
         }
         dark={
-          <div className="space-y-4">
-            <div>
-              <p className="mb-2 text-copy-13 text-gray-300">Current (package)</p>
-              <Button variant="primary" data-testid="vi-002-current-primary-dark">
-                Retry
-              </Button>
-            </div>
-            <div>
-              <p className="mb-2 text-copy-13 text-gray-300">Target (fixture)</p>
-              <TargetDarkPrimaryButton>Retry</TargetDarkPrimaryButton>
-            </div>
-          </div>
+          <Button variant="primary" data-testid="vi-002-primary-dark">
+            Retry
+          </Button>
         }
       />
     </ViSection>
@@ -474,28 +429,12 @@ export function ViTransportErrorAcceptanceFixtures() {
       ledgerId="VI-002"
       sectionTestId="vi-section-vi-002-transport"
       title="TransportError Retry inherits Button"
-      description="Target: daemon_down Retry uses the theme-aware primary Button — no one-off error-block styling."
+      description="daemon_down Retry uses the theme-aware primary Button — no one-off error-block styling."
     >
       <ThemePair
         testId="vi-002-transport-error"
-        light={
-          <div className="space-y-4">
-            <TransportErrorBlock kind="daemon_down" onRetry={noop} />
-            <div className="rounded-card border border-dashed border-brand-cyan/40 p-3">
-              <p className="mb-2 text-copy-13 text-gray-600">Target Retry styling (fixture)</p>
-              <TargetPrimaryButton>Retry</TargetPrimaryButton>
-            </div>
-          </div>
-        }
-        dark={
-          <div className="space-y-4">
-            <TransportErrorBlock kind="daemon_down" onRetry={noop} />
-            <div className="rounded-card border border-dashed border-brand-cyan/30 p-3">
-              <p className="mb-2 text-copy-13 text-gray-300">Target Retry styling (fixture)</p>
-              <TargetDarkPrimaryButton>Retry</TargetDarkPrimaryButton>
-            </div>
-          </div>
-        }
+        light={<TransportErrorBlock kind="daemon_down" onRetry={noop} />}
+        dark={<TransportErrorBlock kind="daemon_down" onRetry={noop} />}
       />
     </ViSection>
   );
@@ -526,91 +465,35 @@ const VI_AGENT_GRID: AgentPickerItem[] = [
   },
 ];
 
-/**
- * Target card mock — single ring affordance; no competing bg tint + status-dot fill.
- * Fixture-only; T3 retunes the shared AgentPicker primitive.
- */
-function TargetSelectedAgentCard({ isDark }: { isDark: boolean }) {
-  const shellClass = isDark ? 'bg-[#0D1B26]' : 'bg-background-100';
-  const textClass = isDark ? 'text-gray-100' : 'text-gray-1000';
-  const mutedClass = isDark ? 'text-gray-400' : 'text-gray-700';
-
-  return (
-    <div
-      data-testid={isDark ? 'vi-001-target-card-dark' : 'vi-001-target-card-light'}
-      className={`w-full max-w-sm rounded-control border-2 border-blue-700 ${shellClass} p-3`}
-    >
-      <div className="flex items-start justify-between gap-2">
-        <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-          <div className="flex min-w-0 items-center gap-2">
-            <span
-              aria-hidden
-              className="h-2 w-2 shrink-0 rounded-full border border-gray-500 bg-transparent"
-            />
-            <span className={`truncate text-copy-14 font-medium ${textClass}`}>
-              claude (native CLI)
-            </span>
-          </div>
-          <span className={`text-copy-13 ${mutedClass}`}>v1.0.42</span>
-        </div>
-        <span className="shrink-0 rounded-pill bg-green-700/15 px-2 py-0.5 text-label-12 text-green-700 dark:text-green-400">
-          Installed
-        </span>
-      </div>
-      <p className={`mt-2 text-copy-13 ${mutedClass}`}>
-        Single affordance: 2px selection ring only — no card fill tint, no lit status dot.
-      </p>
-    </div>
-  );
-}
-
 export function ViAgentPickerAcceptanceFixtures() {
   return (
     <ViSection
       id="vi-001-agent-picker"
       ledgerId="VI-001"
       title="Setup agent selection — one affordance"
-      description="Target (T3): selected installed agent shows one clear affordance — not competing border tint, status-dot fill, and ring signals."
+      description="Selected installed agent shows one clear affordance — a 2px selection ring only (no fill tint, no lit status dot)."
     >
       <ThemePair
         testId="vi-001-agent-picker"
         light={
-          <div className="space-y-6">
-            <div>
-              <p className="mb-2 text-copy-13 text-gray-600">Current (package)</p>
-              <AgentPicker
-                status="ready"
-                defaultGrid={VI_AGENT_GRID}
-                selectedId="claude-native"
-                onSelect={() => undefined}
-                customLaunchValue=""
-                onCustomLaunchChange={() => undefined}
-              />
-            </div>
-            <div>
-              <p className="mb-2 text-copy-13 text-gray-600">Target (fixture)</p>
-              <TargetSelectedAgentCard isDark={false} />
-            </div>
-          </div>
+          <AgentPicker
+            status="ready"
+            defaultGrid={VI_AGENT_GRID}
+            selectedId="claude-native"
+            onSelect={() => undefined}
+            customLaunchValue=""
+            onCustomLaunchChange={() => undefined}
+          />
         }
         dark={
-          <div className="space-y-6">
-            <div>
-              <p className="mb-2 text-copy-13 text-gray-300">Current (package)</p>
-              <AgentPicker
-                status="ready"
-                defaultGrid={VI_AGENT_GRID}
-                selectedId="claude-native"
-                onSelect={() => undefined}
-                customLaunchValue=""
-                onCustomLaunchChange={() => undefined}
-              />
-            </div>
-            <div>
-              <p className="mb-2 text-copy-13 text-gray-300">Target (fixture)</p>
-              <TargetSelectedAgentCard isDark />
-            </div>
-          </div>
+          <AgentPicker
+            status="ready"
+            defaultGrid={VI_AGENT_GRID}
+            selectedId="claude-native"
+            onSelect={() => undefined}
+            customLaunchValue=""
+            onCustomLaunchChange={() => undefined}
+          />
         }
       />
     </ViSection>

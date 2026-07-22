@@ -179,7 +179,7 @@ export function AgentPickerFixtures() {
 
       <FixtureFrame
         title="Selected"
-        description="Installed agent selected (aria-pressed + status-dot ring)."
+        description="Installed agent selected (2px ring affordance + aria-pressed)."
       >
         <InteractiveSelectedFixture />
       </FixtureFrame>

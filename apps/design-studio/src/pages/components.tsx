@@ -385,12 +385,16 @@ function ButtonSection() {
         data-testid="button-chronos-note"
         className="text-copy-14 text-gray-700 mb-4 max-w-prose"
       >
-        Chronos primary is pixel-same in light and dark:{' '}
+        Chronos primary is theme-split: light shell uses{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">bg-brand-deep-blue</code>{' '}
+        +{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">text-brand-white</code>;
+        dark shell keeps{' '}
         <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">bg-brand-cyan</code> +{' '}
         <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
           text-brand-deep-blue
         </code>
-        . No light/dark fill fork — toggle the theme to confirm.
+        . Toggle the theme to confirm both shells.
       </p>
 
       <p className="text-label-14 text-gray-900 mb-4">
@@ -1228,9 +1232,8 @@ export function ComponentsPage() {
           data-testid="comp-vi-acceptance-note"
           className="text-copy-16 text-gray-700 mb-6"
         >
-          Target states for VI-002 — theme-aware primary Button and TransportError Retry in light +
-          dark shells. Current package primitives render above each target mock. Toggle the theme
-          to verify both shells.
+          Theme-aware primary Button and TransportError Retry in light + dark shells.
+          Toggle the theme to verify both shells.
         </p>
         <ViButtonAcceptanceFixtures />
         <ViTransportErrorAcceptanceFixtures />

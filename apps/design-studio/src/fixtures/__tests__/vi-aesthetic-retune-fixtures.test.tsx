@@ -33,20 +33,19 @@ describe('ViBrandAcceptanceFixtures', () => {
 });
 
 describe('ViButtonAcceptanceFixtures', () => {
-  it('renders current and target primary buttons in light+dark', () => {
+  it('renders theme-aware primary buttons in light+dark', () => {
     render(<ViButtonAcceptanceFixtures />);
 
     expect(screen.getByTestId('vi-section-vi-002')).toBeInTheDocument();
     expect(screen.getByTestId('vi-002-primary-button-light')).toBeInTheDocument();
     expect(screen.getByTestId('vi-002-primary-button-dark')).toBeInTheDocument();
-    expect(screen.getByTestId('vi-002-current-primary-light')).toBeInTheDocument();
-    expect(screen.getByTestId('vi-002-target-primary-button')).toBeInTheDocument();
-    expect(screen.getByTestId('vi-002-target-dark-primary-button')).toBeInTheDocument();
+    expect(screen.getByTestId('vi-002-primary-light')).toBeInTheDocument();
+    expect(screen.getByTestId('vi-002-primary-dark')).toBeInTheDocument();
   });
 });
 
 describe('ViTransportErrorAcceptanceFixtures', () => {
-  it('renders TransportError with target Retry mocks in light+dark', () => {
+  it('renders TransportError with Button Retry in light+dark', () => {
     render(<ViTransportErrorAcceptanceFixtures />);
 
     expect(screen.getByTestId('vi-002-transport-error-light')).toBeInTheDocument();
@@ -56,14 +55,13 @@ describe('ViTransportErrorAcceptanceFixtures', () => {
 });
 
 describe('ViAgentPickerAcceptanceFixtures', () => {
-  it('renders current AgentPicker and target card mocks in light+dark', () => {
+  it('renders AgentPicker with single-ring selection in light+dark', () => {
     render(<ViAgentPickerAcceptanceFixtures />);
 
     expect(screen.getByTestId('vi-section-vi-001')).toBeInTheDocument();
     expect(screen.getByTestId('vi-001-agent-picker-light')).toBeInTheDocument();
     expect(screen.getByTestId('vi-001-agent-picker-dark')).toBeInTheDocument();
-    expect(screen.getByTestId('vi-001-target-card-light')).toBeInTheDocument();
-    expect(screen.getByTestId('vi-001-target-card-dark')).toBeInTheDocument();
     expect(screen.getAllByTestId('agent-picker').length).toBeGreaterThanOrEqual(2);
+    expect(screen.getAllByTestId('agent-card-claude-native').length).toBeGreaterThanOrEqual(2);
   });
 });

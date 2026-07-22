@@ -182,26 +182,26 @@ describe('Chronos gallery acceptance', () => {
     expect(swatch).toHaveTextContent('blue-700');
   });
 
-  it('components primary Button uses cyan fill + deep text (no light/dark fork)', () => {
+  it('components primary Button uses ink fill in light shell', () => {
     mockMatchMediaFull();
     renderStudio('/components');
-    expect(screen.getByTestId('button-chronos-note')).toHaveTextContent(/pixel-same/i);
+    expect(screen.getByTestId('button-chronos-note')).toHaveTextContent(/theme-split/i);
     const primary = screen.getByTestId('button-primary-default');
-    expect(primary.className).toMatch(/\bbg-brand-cyan\b/);
-    expect(primary.className).toMatch(/\btext-brand-deep-blue\b/);
-    expect(primary.className).not.toMatch(/\btext-white\b/);
-    expect(primary.className).not.toMatch(/\bdark:bg-brand-cyan\b/);
+    expect(primary.className).toMatch(/\bbg-brand-deep-blue\b/);
+    expect(primary.className).toMatch(/\btext-brand-white\b/);
+    expect(primary.className).toMatch(/\bdark:bg-brand-cyan\b/);
+    expect(primary.className).toMatch(/\bdark:text-brand-deep-blue\b/);
   });
 
-  it('dark theme keeps primary Button cyan fill + deep text (no light/dark fork)', () => {
+  it('dark theme keeps primary Button cyan CTA + deep ink label', () => {
     // ThemeProvider must apply `.dark` from matchMedia — do not inject the class.
     mockMatchMediaFull({ dark: true });
     renderStudio('/components');
     expect(document.documentElement.classList.contains('dark')).toBe(true);
     const primary = screen.getByTestId('button-primary-default');
-    expect(primary.className).toMatch(/\bbg-brand-cyan\b/);
-    expect(primary.className).toMatch(/\btext-brand-deep-blue\b/);
-    expect(primary.className).not.toMatch(/\bdark:bg-brand-cyan\b/);
+    expect(primary.className).toMatch(/\bbg-brand-deep-blue\b/);
+    expect(primary.className).toMatch(/\bdark:bg-brand-cyan\b/);
+    expect(primary.className).toMatch(/\bdark:text-brand-deep-blue\b/);
   });
 
   it('dark theme keeps token blue-700 swatch on cyan signal scale', async () => {
