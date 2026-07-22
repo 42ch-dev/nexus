@@ -878,20 +878,19 @@ async fn promote_reject_cas_miss_conflict_carries_bumped_version() {
 /// the candidate CAS again — a two-round-trip conflict loop with misleading
 /// modal text.
 ///
-/// We force the target-CAS-miss deterministically by firing two concurrent
-/// `merge` actions on the same confirmed target (two distinct pending
-/// candidates). On the current-thread `tokio::test` runtime, `tokio::join!`
-/// interleaves both futures at their await points, so BOTH target reads see
-/// revision V before EITHER target CAS UPDATE runs; SQLite then serializes the
-/// writes — the first target CAS wins (V → V+1) and the second affects 0 rows
-/// (the bug path). The losing 409 must carry `conflicting_path = "merge_target"`
-/// and `entity_id = <target_id>`, not the candidate's `"version"`.
-#[tokio::test]
+/// Deterministic setup (same spirit as `promote_reject_cas_miss_*`): hold a
+/// RESERVED write lock with `BEGIN IMMEDIATE`, let `promote_merge` read the
+/// target at revision V and block on its in-tx CAS, then bump the target
+/// revision and commit. The promote CAS then affects 0 rows — the bug path —
+/// without relying on `tokio::join!` scheduler interleaving (which can fully
+/// serialize on CI and let both merges succeed).
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn promote_merge_target_cas_miss_marks_target_conflict() {
     let (_tmp, state) = fresh_state().await;
+    let pool = state.pool().unwrap();
     // Confirmed merge target at revision 0.
     seed_key_block(
-        state.pool().unwrap(),
+        pool,
         "kb_target",
         "wld_test_world",
         "character",
@@ -901,10 +900,8 @@ async fn promote_merge_target_cas_miss_marks_target_conflict() {
         None,
     )
     .await;
-    // Two distinct pending candidates targeting the same entity. Both start at
-    // version 0 so each merge's outer OCC precondition passes independently.
     seed_pending_candidate(
-        state.pool().unwrap(),
+        pool,
         "xj_merge_c1",
         "Racea1",
         "wld_test_world",
@@ -912,18 +909,9 @@ async fn promote_merge_target_cas_miss_marks_target_conflict() {
         "Racea",
     )
     .await;
-    seed_pending_candidate(
-        state.pool().unwrap(),
-        "xj_merge_c2",
-        "Racea2",
-        "wld_test_world",
-        "character",
-        "Racea",
-    )
-    .await;
 
-    let mk_req = |job_id: &str| WorldKbPromoteCandidateRequest {
-        job_id: job_id.to_string(),
+    let req = WorldKbPromoteCandidateRequest {
+        job_id: "xj_merge_c1".to_string(),
         candidate_id: "kb_cand".to_string(),
         action: "merge".to_string(),
         expected_version: 0,
@@ -932,34 +920,59 @@ async fn promote_merge_target_cas_miss_marks_target_conflict() {
         ..Default::default()
     };
 
-    // Two concurrent merges against the same target. `join!` interleaves at
-    // await points on the current-thread runtime, so both target reads observe
-    // revision 0 before either target CAS commits.
-    let (res_a, res_b) = tokio::join!(
-        promote_candidate(
-            State(state.clone()),
-            Path("wld_test_world".to_string()),
-            Json(mk_req("xj_merge_c1")),
-        ),
-        promote_candidate(
-            State(state.clone()),
-            Path("wld_test_world".to_string()),
-            Json(mk_req("xj_merge_c2")),
-        ),
-    );
+    // Hold RESERVED so the promote's CAS write blocks after its target read.
+    let mut lock_conn = pool.acquire().await.expect("acquire lock connection");
+    // SAFETY: test-only lock; no schema validation needed.
+    sqlx::query("BEGIN IMMEDIATE")
+        .execute(&mut *lock_conn)
+        .await
+        .expect("BEGIN IMMEDIATE");
 
-    // Exactly one target CAS wins; the other hits the target-CAS-miss branch.
-    let loser = match (res_a, res_b) {
-        (Ok(_), Err(e)) | (Err(e), Ok(_)) => e,
-        (Ok(_), Ok(_)) => panic!(
-            "both merges won the target CAS — race did not serialize; \
-             expected one winner + one target-conflict 409"
-        ),
-        (Err(a), Err(b)) => panic!(
-            "both merges failed; neither reached the target-CAS-miss path. \
-             errors: a={a:?} b={b:?}"
-        ),
-    };
+    let state_for_promote = state.clone();
+    let promote = tokio::spawn(async move {
+        promote_candidate(
+            State(state_for_promote),
+            Path("wld_test_world".to_string()),
+            Json(req),
+        )
+        .await
+    });
+
+    // Promote must reach the blocked CAS write (cannot finish while we hold
+    // the lock). Wait until it is clearly in-flight, then bump the target.
+    let started = std::time::Instant::now();
+    loop {
+        assert!(
+            !promote.is_finished(),
+            "promote finished while RESERVED lock held — cannot force target CAS miss"
+        );
+        if started.elapsed() >= std::time::Duration::from_millis(100) {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+
+    // Simulate the concurrent writer that wins the target CAS.
+    // SAFETY: test-only revision bump; compile-time macro not applicable.
+    sqlx::query(
+        "UPDATE kb_key_blocks \
+         SET revision = COALESCE(revision, 0) + 1, updated_at = datetime('now') \
+         WHERE key_block_id = ?",
+    )
+    .bind("kb_target")
+    .execute(&mut *lock_conn)
+    .await
+    .expect("bump target revision");
+    sqlx::query("COMMIT")
+        .execute(&mut *lock_conn)
+        .await
+        .expect("COMMIT");
+    drop(lock_conn);
+
+    let loser = promote
+        .await
+        .expect("promote task join")
+        .expect_err("stale target revision must produce merge_target 409");
 
     assert_eq!(loser.status_code(), axum::http::StatusCode::CONFLICT);
     assert_eq!(loser.error_code(), "world_kb_conflict");
