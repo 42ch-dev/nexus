@@ -24,7 +24,16 @@
         "worktree_path": "/Users/bibi/workspace/organizations/42ch/nexus/.worktrees/v1.132-p0-orch-load-404",
         "working_branch": "plan/v1.132-p0-orch-load-404",
         "session_label": "v1.132-phase2-wave1"
-      }
+      },
+      "task_commits": [
+        {
+          "task": 1,
+          "base": "4c875e8670a4ecac8daea3fe6f0ed7a83371cf65",
+          "head": "1fb302c00cedcedc87e0b5c74fc246364bc328fb",
+          "status": "complete",
+          "notes": "Network residual → T5"
+        }
+      ]
     },
     {
       "id": "2026-07-22-v1.132-p1-titlebar-window-drag",
