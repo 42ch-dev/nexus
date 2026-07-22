@@ -26,7 +26,7 @@ describe('ChronosTitlebarChrome', () => {
     expect(screen.getByTestId('chronos-titlebar-title')).toHaveClass('text-brand-cyan');
   });
 
-  it('reserves desktop traffic-light inset without marking interactive slots draggable', () => {
+  it('marks logo/title chrome and empty paint draggable on desktop without tagging controls', () => {
     render(
       <ChronosTitlebarChrome
         title="Works"
@@ -46,8 +46,16 @@ describe('ChronosTitlebarChrome', () => {
     expect(screen.getByTestId('chronos-titlebar-drag-spacer')).toHaveAttribute(
       'data-tauri-drag-region',
     );
-    expect(screen.getByTestId('chronos-titlebar-title')).not.toHaveAttribute(
+    expect(screen.getByTestId('chronos-titlebar-logo-slot')).toHaveAttribute(
       'data-tauri-drag-region',
+    );
+    expect(screen.getByTestId('chronos-titlebar-title')).toHaveAttribute(
+      'data-tauri-drag-region',
+    );
+    expect(screen.getByTestId('chronos-titlebar-title')).toHaveClass('select-none');
+    expect(screen.getByTestId('chronos-titlebar-controls')).toHaveAttribute(
+      'data-tauri-drag-region',
+      'false',
     );
     expect(screen.getByRole('button', { name: 'Logo' })).not.toHaveAttribute(
       'data-tauri-drag-region',
@@ -55,6 +63,23 @@ describe('ChronosTitlebarChrome', () => {
     expect(screen.getByRole('button', { name: 'Gear' })).not.toHaveAttribute(
       'data-tauri-drag-region',
     );
+    expect(screen.getByRole('button', { name: 'Theme' })).not.toHaveAttribute(
+      'data-tauri-drag-region',
+    );
+    expect(screen.getByText('Health')).not.toHaveAttribute('data-tauri-drag-region');
+  });
+
+  it('prevents native image drag in logo slot via draggable={false}', () => {
+    render(
+      <ChronosTitlebarChrome
+        title="Works"
+        isDark={false}
+        desktopSafeInset
+        logo={<img src="/logo.svg" alt="Nexus" draggable={false} />}
+      />,
+    );
+
+    expect(screen.getByRole('img', { name: 'Nexus' })).toHaveAttribute('draggable', 'false');
   });
 
   it('omits drag regions in browser mode', () => {
@@ -63,11 +88,21 @@ describe('ChronosTitlebarChrome', () => {
         title="Works"
         isDark={false}
         desktopSafeInset={false}
+        logo={<span>Logo</span>}
       />,
     );
 
     expect(screen.queryByTestId('chronos-titlebar-desktop-inset')).toBeNull();
     expect(screen.getByTestId('chronos-titlebar-drag-spacer')).not.toHaveAttribute(
+      'data-tauri-drag-region',
+    );
+    expect(screen.getByTestId('chronos-titlebar-logo-slot')).not.toHaveAttribute(
+      'data-tauri-drag-region',
+    );
+    expect(screen.getByTestId('chronos-titlebar-title')).not.toHaveAttribute(
+      'data-tauri-drag-region',
+    );
+    expect(screen.getByTestId('chronos-titlebar-controls')).not.toHaveAttribute(
       'data-tauri-drag-region',
     );
   });

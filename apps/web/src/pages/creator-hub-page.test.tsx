@@ -36,7 +36,8 @@ function renderCreatorHubFlow() {
         updated_at: '2026-01-01T00:00:00Z',
       },
     ]),
-    http.get('/v1/daemon/narrative/worlds', () => HttpResponse.json([])),
+    http.get('/v1/daemon/narrative/worlds', () => HttpResponse.json({ worlds: [] })),
+    http.post('/v1/daemon/agent-host/scan', () => HttpResponse.json({ agents: [] })),
   );
 
   renderInApp(
@@ -51,13 +52,22 @@ function renderCreatorHubFlow() {
   );
 }
 
-describe('CreatorHubPage + selection context (V1.128 P2 T2)', () => {
-  it('shows Create page CTAs when no entity is selected', async () => {
+describe('CreatorHubPage + selection context (V1.132 P3 AC-8)', () => {
+  it('shows Worlds/Works lists on the right when no entity is selected', async () => {
     renderCreatorHubFlow();
 
-    expect(await screen.findByTestId('creator-hub-create')).toBeInTheDocument();
+    expect(await screen.findByTestId('creator-hub-entity-lists')).toBeInTheDocument();
+    expect(
+      await screen.findByTestId('creator-hub-entity-lists-works-row-work-42'),
+    ).toBeInTheDocument();
+    expect(screen.queryByTestId('creator-hub-create')).not.toBeInTheDocument();
+  });
+
+  it('shows Create CTAs in the left sidebar, not in hub content', async () => {
+    renderCreatorHubFlow();
+
+    expect(await screen.findByTestId('sidebar-create-panel')).toBeInTheDocument();
     expect(screen.getByTestId('creator-create-work')).toBeInTheDocument();
-    // BrowserClient exposes createWorld (V1.130 wire) — Create World is enabled.
     expect(screen.getByTestId('creator-create-world')).toBeEnabled();
   });
 
@@ -73,13 +83,17 @@ describe('CreatorHubPage + selection context (V1.128 P2 T2)', () => {
         }),
       ),
       worksList([]),
-      http.get('/v1/daemon/narrative/worlds', () => HttpResponse.json([])),
+      http.get('/v1/daemon/narrative/worlds', () => HttpResponse.json({ worlds: [] })),
+    http.post('/v1/daemon/agent-host/scan', () => HttpResponse.json({ agents: [] })),
     );
 
     renderInApp(
-      <Routes>
-        <Route path="works" element={<CreatorHubPage />} />
-      </Routes>,
+      <>
+        <Sidebar />
+        <Routes>
+          <Route path="works" element={<CreatorHubPage />} />
+        </Routes>
+      </>,
       {
         client: clientWithCreateWorld,
         activeCreatorId: 'creator-a',
@@ -91,11 +105,11 @@ describe('CreatorHubPage + selection context (V1.128 P2 T2)', () => {
     expect(card).toBeEnabled();
   });
 
-  it('selecting a Work row shows Controller stub; Back returns to Create page', async () => {
+  it('selecting a Work row shows Controller stub; Back returns to entity lists', async () => {
     renderCreatorHubFlow();
 
-    const workLink = await screen.findByRole('link', { name: 'Drill Novel' });
-    fireEvent.click(workLink);
+    const workRow = await screen.findByTestId('creator-hub-entity-lists-works-row-work-42');
+    fireEvent.click(workRow);
 
     await waitFor(() => {
       expect(screen.getByTestId('creator-hub-controller')).toBeInTheDocument();
@@ -106,7 +120,7 @@ describe('CreatorHubPage + selection context (V1.128 P2 T2)', () => {
     fireEvent.click(screen.getByTestId('creator-controller-back'));
 
     await waitFor(() => {
-      expect(screen.getByTestId('creator-hub-create')).toBeInTheDocument();
+      expect(screen.getByTestId('creator-hub-entity-lists')).toBeInTheDocument();
     });
   });
 });

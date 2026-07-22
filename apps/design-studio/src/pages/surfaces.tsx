@@ -26,6 +26,7 @@ import {
 import { SettingsHostFixtures } from '@/fixtures/settings-host-fixtures';
 import { SetupWizardChromeFixtures } from '@/fixtures/setup-wizard-chrome-fixtures';
 import { ConflictModalFixtures } from '@/fixtures/conflict-modal-fixtures';
+import { CreatorOrchGongnengquIaFixtures } from '@/fixtures/creator-orch-gongnengqu-ia-fixtures';
 import { CreatorShellFixtures } from '@/fixtures/creator-shell-fixtures';
 import { ChronosTitlebarFixtures } from '@/fixtures/chronos-titlebar-fixtures';
 import { GlobalTimelineFixtures } from '@/fixtures/global-timeline-fixtures';
@@ -547,6 +548,25 @@ export function SurfacesShellPage() {
         <ShellSidebarFixture />
       </section>
 
+      <section className="mt-10" data-testid="surfaces-creator-orch-gongnengqu-ia">
+        <SurfaceHeading>Creator / Orchestrator 功能区 IA (P3)</SurfaceHeading>
+        <SurfaceSourceBadges
+          importPaths={[
+            '@web-layout/creator-shell-content',
+            '@web-layout/shell-sidebar-chrome',
+            '@web-layout/footer-profiles-chrome',
+            '@42ch/nexus-ui',
+          ]}
+        />
+        <p className="text-copy-14 text-gray-700 mb-6">
+          V1.132 P3 grill A — 创作 hub left = Create-only (创建 World / 延续 Work);
+          Worlds/Works appear as right-side content lists; 工作区 footer is visible
+          under both 创作 and 编排. Light + dark acceptance targets for AC-9. No App
+          routing, no daemon client.
+        </p>
+        <CreatorOrchGongnengquIaFixtures />
+      </section>
+
       <section className="mt-10" data-testid="surfaces-creator-shell">
         <SurfaceHeading>Creator shell — Create vs Controller</SurfaceHeading>
         <SurfaceSourceBadges
@@ -660,7 +680,8 @@ export function SurfacesAgentPickerPage() {
           @42ch/nexus-ui
         </code>
         ). Props-driven fixtures: loading, installed grid, mixed, empty, error,
-        selected. No contracts, no daemon client.
+        selected, plus VI-001 target selected affordance (light+dark). No contracts, no daemon
+        client.
       </p>
       <AgentPickerFixtures />
     </section>

@@ -14,6 +14,7 @@ import { cn } from '@/lib/utils';
 
 const ROUTE_KEYS: Record<string, string> = {
   '/works': 'works',
+  '/worlds': 'worlds',
   '/sessions': 'sessions',
   '/schedule': 'schedule',
   '/findings': 'findings',

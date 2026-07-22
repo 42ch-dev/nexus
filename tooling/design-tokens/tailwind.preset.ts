@@ -147,6 +147,8 @@ const preset: Partial<Config> = {
         // Brand primitives — DESIGN.md + @42ch/nexus-ui/theme.css.
         brand: {
           'deep-blue': cv('brand-deep-blue'),
+          'deep-blue-800': cv('brand-deep-blue-800'),
+          'deep-blue-900': cv('brand-deep-blue-900'),
           cyan: cv('brand-cyan'),
           white: cv('brand-white'),
         },

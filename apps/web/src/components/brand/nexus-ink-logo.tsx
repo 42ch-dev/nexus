@@ -1,5 +1,5 @@
 import logoWhite from '@42ch/nexus-ui/assets/logos/logo-white.svg';
-import { NexusLogo as NexusLogoComponent, logoShellHeightPx } from '@42ch/nexus-ui';
+import { NexusLogo as NexusLogoComponent, logoCompactMarkHeightPx } from '@42ch/nexus-ui';
 
 import { cn } from '@/lib/utils';
 
@@ -19,8 +19,9 @@ export function NexusInkLogo({ label = 'Nexus', className }: NexusInkLogoProps) 
       variant="white"
       src={logoWhite}
       label={label}
-      size={logoShellHeightPx}
-      className={cn('h-5 w-auto max-w-full shrink-0', className)}
+      size={logoCompactMarkHeightPx}
+      draggable={false}
+      className={cn('h-3.5 w-auto max-w-full shrink-0', className)}
     />
   );
 }

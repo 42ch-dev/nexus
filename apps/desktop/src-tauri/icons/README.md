@@ -9,7 +9,7 @@ under this directory (except `source/`) are **generated at build/dev time** via
 ## Source assets (committed)
 
 - `source/compose-app-icon.mjs` — reproducible composition script: rasterizes the
-  Chronos **primary lockup** (`packages/nexus-ui/assets/logos/logo-primary.svg`
+  Chronos **primary square lockup** (`packages/nexus-ui/assets/logos/logo-primary-square.svg`
   — bright timeline mark on opaque **Chronos deep** plate) to the raster outputs
   below.
 - `source/source-1024.png` — composed 1024×1024 RGBA PNG used as the input
@@ -18,7 +18,14 @@ under this directory (except `source/`) are **generated at build/dev time** via
   of the dock/taskbar appearance.
 
 Do **not** reference legacy `logo_light.png` / `logo_dark.png` / `logo_white.png`
-(N-network era). Canonical marks live as SVG under `@42ch/nexus-ui` `logoVariants`.
+(N-network era). Canonical marks live as SVG under `@42ch/nexus-ui`:
+
+- **Plain wide marks** — `logoVariants` (`logo-primary.svg`, `logo-white.svg`, …)
+- **Square plate lockups** — `logoSquareVariants` (`logo-primary-square.svg`,
+  `logo-white-bg-square.svg`, …)
+
+Desktop compose uses the **square primary plate** (`logo-primary-square.svg`), not
+plain wide marks. Do not substitute `*-square.svg` plates for plain marks or vice versa.
 
 ## Composing the source PNG
 
@@ -28,9 +35,11 @@ From the repo root (requires `sharp` in `apps/desktop` devDependencies):
 pnpm --filter desktop run icons:compose
 ```
 
-This rasterizes `logo-primary.svg` (bright mark on brand deep-blue plate) to
-`source-1024.png` + `app-icon-preview-256.png`. macOS applies the system
-squircle mask to the bundled asset; the plate is intentional brand fill.
+This rasterizes `logo-primary-square.svg` (bright mark on brand deep-blue plate) to
+`source-1024.png` + `app-icon-preview-256.png`, with **~12% transparent inset
+margins** on each side so the plate sits inside the macOS squircle without a
+light rectangular halo at the plate edges. macOS applies the system squircle mask
+to the bundled asset; compose owns the inset — consumers use the composed PNGs.
 
 ## Generating desktop icon formats
 
@@ -70,7 +79,7 @@ and reviewed in GitHub/GitLab.
 
 ## Aesthetic sign-off
 
-Composition: **primary lockup** (`logo-primary.svg` — Chronos deep plate + bright
+Composition: **primary square lockup** (`logo-primary-square.svg` — Chronos deep plate + bright
 timeline mark). Review `source/app-icon-preview-256.png` at QA/PR time.
 
 ## macOS Dock visual smoke

@@ -370,14 +370,17 @@ components:
 
   # ── shell-nav / logo: root dark ──
   shell-nav:
-    logo-variant: "logo-primary.svg"
-    logo-min-height: "24px"
+    logo-plate-variant: "logo-primary-square.svg"
+    logo-compact-mark-height-px: "14"
+    logo-shell-height-px: "20"
     logo-clear-space-ratio: "0.25"
     active-bar-color: "{colors.brand-cyan}"
     brand-mark-on-dark: "{colors.brand-cyan}"
     brand-accent-on-dark: "{colors.brand-cyan-800}"
   logo:
     min-size-px: "24"
+    compact-mark-height-px: "14"
+    shell-height-px: "20"
     clear-space-ratio: "0.25"
     alt-text: "Nexus"
 
@@ -794,7 +797,7 @@ Dark-theme companion to [`DESIGN.md`](DESIGN.md). Same token names; values tuned
 | `brand-deep-blue` on `background-100` | 1.6:1 | — | **Fail** — do not use deep blue fills on dark chrome; use cyan accent instead |
 | `gray-700` on `background-100` | 7.4:1 | Secondary/helper text | **Pass** |
 
-**Primary button (both themes):** cyan fill (`brand-cyan`) + deep blue label (`brand-deep-blue`) — passes AA for button text (6.2:1). Light and dark share this recipe (Chronos dual-role). Deep blue filled buttons on dark chrome fail surface contrast; reserve deep blue for text on cyan or light surfaces (links, titlebar labels on light).
+**Primary button (dark shell):** cyan fill (`brand-cyan`) + deep blue label (`brand-deep-blue`) — passes AA for button text (6.2:1). Light shell uses the inverse recipe (deep fill + white label) — see `DESIGN.md` §Button (V1.132 theme-split). Deep blue filled buttons on dark chrome fail surface contrast; reserve deep blue for text on cyan or light surfaces (links, titlebar labels on light).
 
 **Background-driven contrast invariant:** Text color on any filled element is decided by the **perceived lightness of that element's background**, not by the active light/dark mode. In the dark theme, bright accent fills (e.g. `brand-cyan`, `red-800`, `green-700`) become light/bright surfaces and must use dark text (`brand-deep-blue`) instead of white.
 
@@ -809,7 +812,7 @@ Dark-theme companion to [`DESIGN.md`](DESIGN.md). Same token names; values tuned
 | `brand-deep-blue` | `brand-deep-blue` | Logo text; primary button text on cyan fill |
 | `brand-white` | `brand-white` | Logo on deepest panels |
 
-Dark and light primary buttons use **cyan fill + deep-blue text** (Chronos dual-role; light no longer uses deep fill + white). `blue-*` names preserved for existing `{colors.blue-700}` consumers — both themes map `blue-700` to cyan signal.
+Dark primary buttons use **cyan fill + deep-blue text** (Chronos dual-role). Light primary uses **deep fill + white text** (theme-split — V1.132 P2). `blue-*` names preserved for existing `{colors.blue-700}` consumers — both themes map `blue-700` to cyan signal.
 
 ### V1.106 component parity (Tabs, States, Launch & daemon)
 
@@ -819,22 +822,24 @@ Canvas/SOUL/World-KB brand-blue tokens resolve through `var(--color-blue-700)` a
 
 ## Logo Usage
 
-Canonical assets: `@42ch/nexus-ui/assets/logos/`. Geometry is the **timeline** mark (wide five-node axis: ring · ring · **solid center** · ring · ring). Shared rules (min height, clear space, alt text, transparent backgrounds) live in [`DESIGN.md`](DESIGN.md) § Logo Usage.
+Canonical assets: `@42ch/nexus-ui/assets/logos/`. Geometry is the **timeline** mark (wide five-node axis: ring · ring · **solid center** · ring · ring). Shared rules (min height, clear space, alt text, plain vs `*-square` split, compact mark scale) live in [`DESIGN.md`](DESIGN.md) § Logo Usage.
 
-| Variant | File | Dark surface |
+| Contract | File | Dark surface |
 | --- | --- | --- |
-| Primary lockup (default) | `logo-primary.svg` | Product shell — deep-blue plate + bright mark (theme-stable) |
-| White mark (dark-gray→white gradient) | `logo-white.svg` | Dark hero, photography, deepest panels |
+| Square primary plate | `logo-primary-square.svg` | Sidebar/header plate lockup at `logoShellHeightPx` (20px) |
+| Plain white mark | `logo-white.svg` | Ink titlebar compact mark at `logoCompactMarkHeightPx` (14px); dark heroes |
 | Tintable mark | `<NexusMark>` | Inline UI; set `color` to cyan or white as needed |
 | Wordmark | `logo-text.svg` | Lockups; `currentColor` → white on heroes / dark panels |
-| White-bg lockup | `logo-white-bg.svg` | Only when a light/white plate is required — avoid on ink chrome |
+| White-bg square plate | `logo-white-bg-square.svg` | Only when a light/white plate is required — avoid on ink chrome |
+| Plain white-bg mark | `logo-white-bg.svg` | Wide mark without plate |
 | Mono mark (light-gray→black) | `logo-mono.svg` | Prefer on light plates only |
 
 **Dark placement:**
 
-- Shell sidebar/header: **primary lockup** — `logo-primary.svg`.
+- Shell sidebar: **square primary plate** — `logo-primary-square.svg` at `logoShellHeightPx`.
+- Ink titlebar: **plain white mark** — `logo-white.svg` at `logoCompactMarkHeightPx`.
 - Heroes / deepest panels: `logo-white.svg`; optional `logo-text.svg` with white `currentColor`.
-- Do not use `logo-white-bg.svg` on ink/dark surfaces.
-- Plate lockups (`primary`, `whiteBg`) are square; transparent marks are wide — size by height (`width: auto`).
+- Do not use white-bg plates on ink/dark surfaces.
+- Square plate lockups (`*-square.svg`) are square; plain marks are wide — size by height (`width: auto`).
 
 This file intentionally preserves the same token names and frontmatter structure with dark values. Rule-type documentation, component behavior, voice/content guidance, and implementation mapping live in `DESIGN.md` and apply to both themes.

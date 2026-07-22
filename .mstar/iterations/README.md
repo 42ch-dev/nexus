@@ -150,3 +150,4 @@ Implementation-detail SSOT that is not iteration-scoped stays in [`.mstar/knowle
 | V1.129 | [v1.129/](v1.129/) | completed | Usability bug-sweep — Profile create reliability + transport-error UX + visible nit closeout (3 plans, 3 specs)
 | V1.130 | [v1.130/](v1.130/) | completed | Control Room shell rewrite + Restart + VI Chronos (6 plans, 6 specs) — merged #165 |
 | V1.131 | [v1.131/](v1.131/) | completed | Chronos titlebar + logo gallery + DF-V1130 IA finish + desktop icons (4 plans) |
+| V1.132 | [v1.132/](v1.132/) | completed | Dogfood load blocker + titlebar drag + VI retune + 创建/工作区 IA (4 plans) |

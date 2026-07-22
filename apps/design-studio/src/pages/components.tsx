@@ -19,6 +19,10 @@ import { Spinner, LoadingState, EmptyState, ErrorState } from '@web-ui/states'; 
 import { ToastFixtures } from '@/fixtures/toast-fixtures';
 import { TransportErrorBlockFixtures } from '@/fixtures/transport-error-block';
 import {
+  ViButtonAcceptanceFixtures,
+  ViTransportErrorAcceptanceFixtures,
+} from '@/fixtures/vi-aesthetic-retune-fixtures';
+import {
   Table,
   TableHeader,
   TableBody,
@@ -104,6 +108,7 @@ function SubNav() {
     { label: 'Form Field', href: '#comp-form-field' },
     { label: 'Toast', href: '#comp-toast' },
     { label: 'Transport Error', href: '#comp-transport-error-block' },
+    { label: 'VI acceptance', href: '#comp-vi-acceptance' },
   ];
 
   return (
@@ -380,12 +385,16 @@ function ButtonSection() {
         data-testid="button-chronos-note"
         className="text-copy-14 text-gray-700 mb-4 max-w-prose"
       >
-        Chronos primary is pixel-same in light and dark:{' '}
+        Chronos primary is theme-split: light shell uses{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">bg-brand-deep-blue</code>{' '}
+        +{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">text-brand-white</code>;
+        dark shell keeps{' '}
         <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">bg-brand-cyan</code> +{' '}
         <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
           text-brand-deep-blue
         </code>
-        . No light/dark fill fork — toggle the theme to confirm.
+        . Toggle the theme to confirm both shells.
       </p>
 
       <p className="text-label-14 text-gray-900 mb-4">
@@ -1216,6 +1225,19 @@ export function ComponentsPage() {
       <FormFieldSection />
       <ToastSection />
       <TransportErrorBlockSection />
+
+      <section id="comp-vi-acceptance" data-testid="comp-vi-acceptance" className="scroll-mt-16">
+        <SectionHeading id="comp-vi-acceptance-heading">VI acceptance (P2)</SectionHeading>
+        <p
+          data-testid="comp-vi-acceptance-note"
+          className="text-copy-16 text-gray-700 mb-6"
+        >
+          Theme-aware primary Button and TransportError Retry in light + dark shells.
+          Toggle the theme to verify both shells.
+        </p>
+        <ViButtonAcceptanceFixtures />
+        <ViTransportErrorAcceptanceFixtures />
+      </section>
 
       <p className="text-copy-13 text-gray-500 mt-12 pt-8 border-t border-gray-alpha-200">
         9 promoted (Badge, Button, Card, Input, Label, Textarea, Select, Toast,

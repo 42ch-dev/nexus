@@ -12,12 +12,14 @@ pnpm add @42ch/nexus-ui --workspace
 
 | Entry | Description |
 |-------|-------------|
-| `@42ch/nexus-ui` | Brand token constants (`brandColors`, `logoVariants`, sizing guidance) + React components (`<NexusLogo>`, `<NexusMark>`, `<NexusLogoVariant>`, promoted UI primitives, `cn`) |
+| `@42ch/nexus-ui` | Brand token constants (`brandColors`, `logoVariants`, `logoSquareVariants`, `logoCompactMarkHeightPx`, sizing guidance) + React components (`<NexusLogo>`, `<NexusMark>`, `<NexusLogoVariant>`, promoted UI primitives, `cn`) |
 | `@42ch/nexus-ui/tokens` | Same token module (direct import) |
 | `@42ch/nexus-ui/theme.css` | Brand CSS custom properties (`--nexus-brand-*`) |
-| `@42ch/nexus-ui/assets/logos/logo-primary.svg` | Default lockup — bright mark on brand deep-blue plate (`logo-primary.png`) |
-| `@42ch/nexus-ui/assets/logos/logo-white-bg.svg` | Lockup on white plate — only when a light surface is required (`logo-white-bg.png`) |
-| `@42ch/nexus-ui/assets/logos/logo-white.svg` | Timeline mark — dark-gray→white gradient for dark heroes |
+| `@42ch/nexus-ui/assets/logos/logo-primary.svg` | Plain wide primary timeline mark (no plate) |
+| `@42ch/nexus-ui/assets/logos/logo-white-bg.svg` | Plain wide mark for light surfaces (no plate) |
+| `@42ch/nexus-ui/assets/logos/logo-primary-square.svg` | Square deep-blue plate lockup (sidebar, compose source) |
+| `@42ch/nexus-ui/assets/logos/logo-white-bg-square.svg` | Square white plate lockup |
+| `@42ch/nexus-ui/assets/logos/logo-white.svg` | Timeline mark — dark-gray→white gradient for dark heroes / ink titlebar |
 | `@42ch/nexus-ui/assets/logos/logo-mono.svg` | Timeline mark — light-gray→black gradient (static) |
 | `@42ch/nexus-ui/assets/logos/logo-text.svg` | Wordmark — lowercase `nexus` (`currentColor`) |
 
@@ -25,10 +27,10 @@ pnpm add @42ch/nexus-ui --workspace
 
 | Component | Import | Variants | Notes |
 |-----------|--------|----------|-------|
-| `NexusLogo` | `import { NexusLogo } from '@42ch/nexus-ui'` | `variant` (`primary`, `whiteBg`, `white`, `mono`, `text`) + consumer `src` | Bundler-agnostic `<img>`; plate lockups + wide marks + wordmark |
+| `NexusLogo` | `import { NexusLogo } from '@42ch/nexus-ui'` | `variant`, `src`, `size?`, `label?`, `className?`, `draggable?` | Bundler-agnostic `<img>`; plate lockups + wide marks + wordmark; set `draggable={false}` in titlebar chrome to avoid native image ghost-drag |
 | `NexusMark` | `import { NexusMark } from '@42ch/nexus-ui'` | `size`, `label`, `className` | Inline timeline mark; `currentColor`; height-driven / `w-auto` |
 | `NexusLogoVariant` | `import { NexusLogoVariant } from '@42ch/nexus-ui'` | `theme` (`elegant`, `nature`, `parchment`, `scifi`) + optional `palette` | Studio-only specimens; no assets; not a product theme switcher |
-| `Button` | `import { Button } from '@42ch/nexus-ui'` | `variant` (`primary`, `secondary`, `tertiary`, `destructive`) + `size` (`small`, `default`, `large`) + `asChild` | Presentational only; no daemon or routing state |
+| `Button` | `import { Button } from '@42ch/nexus-ui'` | `variant` (`primary`, `secondary`, `tertiary`, `destructive`) + `size` (`small`, `default`, `large`) + `asChild` | Presentational only; **primary is theme-split** — light shell: deep ink fill + white label; dark shell: cyan fill + deep label (VI-002) |
 | `Badge` | `import { Badge } from '@42ch/nexus-ui'` | `variant` (`neutral`, `running`, `queued`, `warning`, `error`, `preset`) + `tone` (`soft`, `solid`; default `soft`) | 24px status pill; soft = tinted fill + strengthened border; solid = semantic fill + high-contrast text (opt-in) |
 | `Card` | `import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@42ch/nexus-ui'` | Five related sub-primitives; no variant axis | `Card` wraps content with border + shadow; `CardHeader`/`CardContent` layout helpers |
 | `Input` | `import { Input } from '@42ch/nexus-ui'` | `invalid?: boolean` + native input attrs | V1.100 form-field contract; app owns id/describedby/copy |
@@ -46,24 +48,31 @@ PNG provenance (`logo-primary.png`, `logo-white-bg.png`, `logo-mono.png`, `logo-
 
 ## Logo variant selection
 
-Plate lockups (`primary`, `whiteBg`) are **square**. Transparent marks (`white`, `mono`) and `<NexusMark>` are **wide** (`viewBox` 284×28) — size by **height**; width is auto.
+**Plain vs square:** `logoVariants` maps to **wide plain marks** (no plate). `logoSquareVariants` maps to **square plate lockups** (`*-square.svg`). Do not substitute plain marks for plate lockups or vice versa.
+
+Plate lockups (`logoSquareVariants`) are **square**. Plain marks (`logoVariants`) and `<NexusMark>` are **wide** (`viewBox` 284×28) — size by **height**; width is auto.
+
+**Compact mark scale:** `logoCompactMarkHeightPx` (14px) is the shared SSOT for titlebar, Brand hero mini marks, and app-icon inner scale (−30% from `logoShellHeightPx` 20px). Sidebar plate lockups use `logoShellHeightPx`.
 
 | Surface | Variant | File | Notes |
 |---------|---------|------|-------|
-| Product shell / default | Primary | `logo-primary.svg` | Bright mark on brand deep-blue plate (square) |
-| Light/white plate only | White-bg | `logo-white-bg.svg` | Same mark on white plate — use only when deep-blue plate is wrong |
-| Dark hero / photography / high-contrast panel | White | `logo-white.svg` | Dark-gray→white gradient on deep or busy backgrounds |
-| Static grayscale lockup | Mono | `logo-mono.svg` | Light-gray→black gradient (baked) |
+| Sidebar / header plate | Square primary | `logo-primary-square.svg` | Deep-blue plate at `logoShellHeightPx` (20px) |
+| Ink titlebar compact mark | Plain white | `logo-white.svg` | At `logoCompactMarkHeightPx` (14px) — not the plate lockup |
+| Light/white plate only | Square white-bg | `logo-white-bg-square.svg` | Square plate when deep-blue is wrong |
+| Plain timeline mark | Plain primary | `logo-primary.svg` | Wide mark without plate |
+| Dark hero / photography | Plain white | `logo-white.svg` | Dark-gray→white gradient |
+| Static grayscale lockup | Plain mono | `logo-mono.svg` | Baked gradient |
 | Inline UI (buttons, badges, list rows) | Tintable | `<NexusMark>` | Set `color` on parent; inherits via `currentColor` |
-| Wordmark lockup | Text | `logo-text.svg` | Lowercase `nexus`; `currentColor` (white on dark heroes) |
+| Wordmark lockup | Text | `logo-text.svg` | Lowercase `nexus`; `currentColor` |
 | Studio theme specimens only | — | `<NexusLogoVariant>` | Palette props; not a product theme switcher |
+| Desktop app icon compose | Square primary | `logo-primary-square.svg` | Compose with ~12% transparent inset per side |
 
 ### Accessibility
 
 - **Alt text**: use `alt="Nexus"` on `<img>`; inline SVGs include `<title>` for screen readers.
 - **Minimum size**: 24px height (`logoMinSizePx` in tokens). Below this, node detail may be lost.
 - **Clear space**: keep padding ≥ 25% of logo height on all sides.
-- **Contrast**: prefer `logo-primary` by default. Use `logo-white-bg` only on light/white plates; `logo-white` on dark heroes.
+- **Contrast**: square `logo-primary-square` for plate lockups; plain marks for wide timeline usage. Use `logo-white-bg-square` only on light/white plates; `logo-white` on dark heroes and ink titlebar.
 
 ## Runtime dependencies
 
@@ -82,9 +91,10 @@ The package carries its own runtime dependencies for class composition and primi
 ### TypeScript tokens
 
 ```ts
-import { brandColors, logoVariants } from '@42ch/nexus-ui';
+import { brandColors, logoVariants, logoSquareVariants, logoCompactMarkHeightPx } from '@42ch/nexus-ui';
 
-const navLogo = logoVariants.primary;
+const plateLockup = logoSquareVariants.primary;
+const titlebarMarkHeight = logoCompactMarkHeightPx;
 const accent = brandColors.cyan;
 ```
 
@@ -103,8 +113,8 @@ const accent = brandColors.cyan;
 ```tsx
 import { Button, Badge, Card, CardHeader, CardTitle, CardDescription, CardContent } from '@42ch/nexus-ui';
 
-// Button with variant + size + asChild
-<Button variant="primary" size="large">Create Work</Button>
+// Button with theme-split primary (light: ink fill; dark: cyan fill)
+<Button variant="primary" size="large">Create</Button>
 <Button variant="tertiary" asChild>
   <a href="/settings">Settings</a>
 </Button>
@@ -134,12 +144,27 @@ import { NexusLogo, NexusMark, NexusLogoVariant } from '@42ch/nexus-ui';
 
 // The consumer resolves the SVG URL through its own bundler.
 // In a Vite project, importing an SVG yields a URL string:
-import logoPrimary from '@42ch/nexus-ui/assets/logos/logo-primary.svg';
+import logoPrimarySquare from '@42ch/nexus-ui/assets/logos/logo-primary-square.svg';
 import logoText from '@42ch/nexus-ui/assets/logos/logo-text.svg';
 
 function AppShell() {
-  // Default product lockup — deep-blue plate. Pass the resolved URL as `src`.
-  return <NexusLogo variant="primary" src={logoPrimary} size={24} />;
+  // Sidebar plate lockup — square asset at logoShellHeightPx.
+  return <NexusLogo variant="primary" src={logoPrimarySquare} size={20} />;
+}
+
+// Titlebar chrome: compact plain mark on ink (apps/web: NexusInkLogo wrapper).
+import logoWhite from '@42ch/nexus-ui/assets/logos/logo-white.svg';
+import { logoCompactMarkHeightPx } from '@42ch/nexus-ui';
+
+function TitlebarLogo() {
+  return (
+    <NexusLogo
+      variant="white"
+      src={logoWhite}
+      size={logoCompactMarkHeightPx}
+      draggable={false}
+    />
+  );
 }
 
 // Wordmark (currentColor — set color on parent for light/dark):
@@ -173,9 +198,9 @@ function Specimen() {
 If you want the logo asset without the component wrapper — for example, a plain `<img>` in a non-React surface — import the SVG directly:
 
 ```ts
-import nexusLogo from '@42ch/nexus-ui/assets/logos/logo-primary.svg';
+import nexusPlate from '@42ch/nexus-ui/assets/logos/logo-primary-square.svg';
 
-// <img src={nexusLogo} alt="Nexus" height={24} style={{ width: 'auto' }} />
+// <img src={nexusPlate} alt="Nexus" height={20} style={{ width: 'auto' }} />
 ```
 
 ## Cross-surface compatibility

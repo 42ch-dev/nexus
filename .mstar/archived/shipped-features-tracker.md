@@ -138,7 +138,7 @@ Archived from [deferred-features-cross-version-tracker.md](../knowledge/deferred
 | DF-V1123-COMPOSITE-ENDPOINT | `GET /v1/daemon/timeline/overview` composite endpoint (overview slice) | V1.126 P2 | V1.123 compass-named; implicitly registered via `status.json` tracking_links; closed by V1.126 P2 without an open-row phase. Plan: `2026-07-20-v1.126-p2-composite-timeline-endpoint`. |
 | DF-V1130-SETTINGS-MODAL | Settings primary = modal (≥80vw×80vh); `/settings/*` deep links; one `SettingsModalHost` | V1.131 | P0 gear + P2 modal primary/sections/dirty/route-leave. Plans: `…-p0-chronos-titlebar`, `…-p2-shell-ia-finish`. |
 | DF-V1130-MODE-SWITCH-FOOTER | 创作\|编排 on 功能区 footer only | V1.131 | Plan `…-p2-shell-ia-finish` T1. |
-| DF-V1130-WORKSPACE-UNDER-ORCH | **工作区** under 编排 功能区 only | V1.131 | Plan `…-p2-shell-ia-finish` T3. |
+| DF-V1130-WORKSPACE-UNDER-ORCH | **工作区** under 编排 功能区 only | V1.131 | Plan `…-p2-shell-ia-finish` T3. **Superseded V1.132 P3** — workspace-parent IA (compass AC-6, AC-7); see `creator-orch-gongnengqu-ia.md`. |
 | DF-V1130-COMPUTE-IN-SETTINGS | Modules/Compute as Settings section; no Compute in 编排 nav | V1.131 | Plan `…-p2-shell-ia-finish` T4. |
 | DF-V1130-PROFILE-SSOT | Profile membership SSOT hold (regression green) | V1.131 | Plan `…-p2-shell-ia-finish` T5 — held invariant, no open UI gap. |
 | DF-V1131-CHRONOS-TITLEBAR | Full-width Chronos ink titlebar + Tauri Overlay | V1.131 | Plan `…-p0-chronos-titlebar`. Open human Overlay smoke: `R-V1131P0-QC2-W-001`. |

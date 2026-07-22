@@ -1,12 +1,199 @@
 {
   "version": 1,
   "updated_at": "2026-07-22",
-  "plans": [],
+  "plans": [
+    {
+      "id": "2026-07-22-v1.132-p0-orch-load-404",
+      "status": "Done",
+      "file": ".mstar/plans/2026-07-22-v1.132-p0-orch-load-404.md",
+      "metadata": {
+        "primary_spec": ".mstar/iterations/v1.132/specs/orch-load-404.md",
+        "description": "Fix Strategy/Sessions/Modules 404 load on healthy daemon",
+        "iteration_id": "V1.132",
+        "iteration_compass": "v1.132/delivery-compass.md",
+        "spec_integration_branch": "iteration/v1.132",
+        "working_branch": "plan/v1.132-p0-orch-load-404",
+        "merge_target": "iteration/v1.132",
+        "wire_contracts_changed": false,
+        "wave": "1",
+        "seq": "0"
+      },
+      "task_commits": [
+        {
+          "task": 1,
+          "base": "4c875e8670a4ecac8daea3fe6f0ed7a83371cf65",
+          "head": "1fb302c00cedcedc87e0b5c74fc246364bc328fb",
+          "status": "complete",
+          "notes": "Network residual → T5"
+        },
+        {
+          "task": 2,
+          "base": "1fb302c00cedcedc87e0b5c74fc246364bc328fb",
+          "head": "c0a42aafde624a98197f9eade161d896c024f877",
+          "status": "complete"
+        },
+        {
+          "task": 3,
+          "base": "a03464a8df4412284441fd149e04d8d60e757dea",
+          "head": "b64c5cb39d061e31bbf65de2b5f9892b65d46219",
+          "status": "complete"
+        },
+        {
+          "task": 4,
+          "base": "c64cea8369b1e184fd3dc795ded57dda1603d335",
+          "head": "23b730b788d9cee51155f89c04ffc6d9bd3e66f8",
+          "status": "complete"
+        },
+        {
+          "task": 5,
+          "base": "3028319a5897ccc6e4ee87a22353e9b93c65459a",
+          "head": "c4947c54ea563c99231da9da3197076af29998e6",
+          "status": "complete",
+          "notes": "Network residual → QA"
+        }
+      ]
+    },
+    {
+      "id": "2026-07-22-v1.132-p1-titlebar-window-drag",
+      "status": "Done",
+      "file": ".mstar/plans/2026-07-22-v1.132-p1-titlebar-window-drag.md",
+      "metadata": {
+        "primary_spec": ".mstar/iterations/v1.132/specs/titlebar-window-drag.md",
+        "description": "Restore Chronos titlebar window drag including logo/title paint",
+        "iteration_id": "V1.132",
+        "iteration_compass": "v1.132/delivery-compass.md",
+        "spec_integration_branch": "iteration/v1.132",
+        "working_branch": "plan/v1.132-p1-titlebar-window-drag",
+        "merge_target": "iteration/v1.132",
+        "wire_contracts_changed": false,
+        "wave": "1",
+        "seq": "1"
+      },
+      "task_commits": [
+        {
+          "task": 1,
+          "base": "4c875e8670a4ecac8daea3fe6f0ed7a83371cf65",
+          "head": "9582ed49be74c610732a3097d06dd1101e982da4",
+          "status": "complete"
+        },
+        {
+          "task": 2,
+          "base": "0215076b78c01a44f26f2108c98a5e638d53f69d",
+          "head": "be00ef1123aeee24e62edd51238bd55bcc898306",
+          "status": "complete"
+        },
+        {
+          "task": 3,
+          "base": "a7d4ccdf5ec734db3b7dd397297d1eee1a21c0a1",
+          "head": "3c8c50bf8fc11faec2bd163f37fc0e71b71e140d",
+          "status": "complete"
+        }
+      ]
+    },
+    {
+      "id": "2026-07-22-v1.132-p2-vi-aesthetic-retune",
+      "status": "Done",
+      "file": ".mstar/plans/2026-07-22-v1.132-p2-vi-aesthetic-retune.md",
+      "metadata": {
+        "primary_spec": ".mstar/iterations/v1.132/specs/vi-aesthetic-retune.md",
+        "description": "VI retune: logo square split, compact mark, Button theme-split, Setup select",
+        "iteration_id": "V1.132",
+        "iteration_compass": "v1.132/delivery-compass.md",
+        "spec_integration_branch": "iteration/v1.132",
+        "working_branch": "plan/v1.132-p2-vi-aesthetic-retune",
+        "merge_target": "iteration/v1.132",
+        "wire_contracts_changed": false,
+        "wave": "2",
+        "seq": "2",
+        "merge_commit": "9e4039452450fd1b2ebd09660e6fd0dcf261919c",
+        "merged_at": "2026-07-22T15:15:39Z",
+        "qa_verdict": "Pass"
+      },
+      "task_commits": [
+        {
+          "task": 1,
+          "base": "c273f1b2ee85d50886a44c937c8a2d8aad095e71",
+          "head": "524c5eed0423cf380823dc05bb811e9d92619549",
+          "status": "complete"
+        },
+        {
+          "task": 2,
+          "base": "603f662551af5d8bfa28b42608da96dd5a9aee68",
+          "head": "8bd81ca33ad2075361b8c5e1a98d65e64c79ea30",
+          "status": "complete"
+        },
+        {
+          "task": 3,
+          "base": "f034058f553f3bfdcf9c700dcadaae84e362cbc9",
+          "head": "4e1feb3a30e308b41d8bcabe09f7afe67fa06b54",
+          "status": "complete"
+        },
+        {
+          "task": 4,
+          "base": "96bf7db8008a090085211c161a26a087791292f1",
+          "head": "df8ae1831bf212fe483607156e05fec88f6cc9c8",
+          "status": "complete"
+        },
+        {
+          "task": 5,
+          "base": "df8ae1831bf212fe483607156e05fec88f6cc9c8",
+          "head": "d33a64ce873e099911a13d3a969f1ed39aa39c7d",
+          "status": "complete"
+        }
+      ]
+    },
+    {
+      "id": "2026-07-22-v1.132-p3-creator-orch-gongnengqu-ia",
+      "status": "Done",
+      "file": ".mstar/plans/2026-07-22-v1.132-p3-creator-orch-gongnengqu-ia.md",
+      "metadata": {
+        "primary_spec": ".mstar/iterations/v1.132/specs/creator-orch-gongnengqu-ia.md",
+        "description": "创作 Create-only left + 工作区 persistent footer",
+        "iteration_id": "V1.132",
+        "iteration_compass": "v1.132/delivery-compass.md",
+        "spec_integration_branch": "iteration/v1.132",
+        "working_branch": "plan/v1.132-p3-creator-orch-gongnengqu-ia",
+        "merge_target": "iteration/v1.132",
+        "wire_contracts_changed": false,
+        "wave": "3",
+        "seq": "3",
+        "merge_commit": "30f817b38106d5a94d73edd19aeb20290f51f1fb",
+        "merged_at": "2026-07-22T16:00:15Z",
+        "qa_verdict": "Pass"
+      },
+      "task_commits": [
+        {
+          "task": 1,
+          "base": "935c59070ccba15e4f3bf241e82a46c175bbf403",
+          "head": "d8f30657b59b7c243a3acfe7ce0a59a9a3f708d3",
+          "status": "complete"
+        },
+        {
+          "task": 2,
+          "base": "d8f30657b59b7c243a3acfe7ce0a59a9a3f708d3",
+          "head": "978578a6e1c2aec7f3d420f3e39c16452e3c6204",
+          "status": "complete"
+        },
+        {
+          "task": 3,
+          "base": "176ca8df43b85ce0fe418b0335b55a7466d8be91",
+          "head": "8d9919a3631edaad174d4e96b8a84925b9a98fff",
+          "status": "complete"
+        },
+        {
+          "task": 4,
+          "base": "5f2a1d1a2fc0a885c79cd95cea61eb0469a6225e",
+          "head": "c48c23e5546b0c35b6ba08a4a0ca22e70626e42e",
+          "status": "complete"
+        }
+      ]
+    }
+  ],
   "metadata": {
     "integration_branch_retired": false,
     "iteration_base_branch": "main",
-    "latest_active_compass": "v1.131/delivery-compass.md",
-    "latest_active_iteration": "V1.131",
+    "latest_active_compass": "v1.132/delivery-compass.md",
+    "latest_active_iteration": "V1.132",
     "latest_ship": {
       "iteration": "V1.128",
       "compass": "v1.128/delivery-compass.md",
@@ -15,7 +202,7 @@
       "merge_commit": "d59311de"
     },
     "platform_integration": "paused — local-only until further notice",
-    "spec_integration_branch": "iteration/v1.131",
+    "spec_integration_branch": "iteration/v1.132",
     "spec_refs_index": ".mstar/specs/README.md",
     "target_branch": "main",
     "tech_debt_summary": {
@@ -55,7 +242,8 @@
         "2026-07-22-vi-logo-upgrade": 3
       }
     },
-    "updated_at": "2026-07-22"
+    "updated_at": "2026-07-22",
+    "control_worktree_path": "/Users/bibi/workspace/organizations/42ch/nexus"
   },
   "residual_findings": {
     "2026-07-05-v1.92-closure": [
@@ -603,7 +791,7 @@
         "owner": "@ops-engineer / @qa-engineer",
         "target": "manual",
         "lifecycle": "open",
-        "note": "Criteria in apps/desktop/src-tauri/icons/README.md. Compose+README done (hashes source-1024.png c3be7c369ddb51ccb9cdcd436e22bf09996342074be48907bfc5238c23a7e724 / app-icon-preview-256.png da273c62a7927505d4f27d3fea6aeae0fd923f784b26c2c4f1900be3d516be8d). QA 2026-07-22 attempt: refreshed Nexus.app Resources/Nexus.icns to match generated icon.icns (SHA-256 85272d78b62e5e4597c7d3426ea5cd166e8cc692361876e23006f7916d494c8b), killall Dock, open release .app succeeded (nexus-desktop pid observed). Dock tile visual FAIL-to-verify: screencapture TCC blocked ('could not create image from display'). Owner: @ops-engineer / @qa-engineer / human. Trigger: human Dock tile confirm Chronos primary plate mark after quit/rebuild-or-reinstall/killall Dock/relaunch (+ stale-bundle removal if needed)."
+        "note": "Criteria in apps/desktop/src-tauri/icons/README.md. V1.132 P2 T4 inset compose landed (~12% transparent margins). Current hashes: source-1024.png dca7d5787ff3eb305a64a255c105bef4c18f84629f3c44d70a1411ac008a7982 / app-icon-preview-256.png 6223d10ca458182ef425a5f6d287090d7c820e426aaa15454811c1db66751661. Prior QA 2026-07-22 Dock tile visual FAIL-to-verify (screencapture TCC). Owner: @ops-engineer / @qa-engineer / human. Trigger: human Dock tile confirm Chronos primary plate mark after quit/rebuild-or-reinstall/killall Dock/relaunch (+ stale-bundle removal if needed)."
       },
       {
         "id": "R-VI-004",
@@ -621,15 +809,62 @@
     "2026-07-22-v1.131-p0-chronos-titlebar": [
       {
         "id": "R-V1131P0-QC2-W-001",
-        "title": "macOS Overlay titlebar live smoke — native H2–H4/D2 still unverified",
+        "title": "macOS Overlay titlebar live smoke — logo/title drag H2–H6/D1–D3 still unverified",
         "severity": "medium",
-        "source": "QC2 F-002; macos-overlay-smoke.md; QA revalidation qa.md",
-        "scope": "apps/desktop Overlay titlebar; Chronos empty-paint drag/double-click",
+        "source": "QC2 F-002; V1.132 titlebar-window-drag-overlay-smoke.md; V1.131 carry-forward",
+        "scope": "apps/desktop Overlay titlebar; Chronos logo/title drag (V1.132 P1 supersedes empty-paint-only)",
         "decision": "defer",
         "owner": "human / @qa-engineer",
-        "target": "V1.131 dogfood / PR merge-ready",
+        "target": "V1.132 dogfood / PR merge-ready",
         "lifecycle": "open",
-        "note": "P3 2026-07-22: still not archivable — human Overlay H2–H4/D2 smoke required (agent TCC cannot grant Screen Recording/Accessibility). Product code+compile+H1/D1/H5/H6 Pass (9e33ed00). Protocol: .mstar/sdd/2026-07-22-v1.131-p0-chronos-titlebar/review/macos-overlay-smoke.md"
+        "note": "V1.132 P1 re-target (2026-07-22): durable protocol → .mstar/iterations/v1.132/guides/titlebar-window-drag-overlay-smoke.md. Human Overlay matrix H2–H6 + D1–D3 required before archive (agent TCC cannot grant Screen Recording/Accessibility). Product chrome+Studio+unit tests may ship with residual open (Profile B).",
+        "tracking_link": ".mstar/iterations/v1.132/guides/titlebar-window-drag-overlay-smoke.md"
+      }
+    ],
+    "2026-07-22-v1.132-p0-orch-load-404": [
+      {
+        "id": "R-V1132P0-QC2-S-001",
+        "title": "Remaining daemon brace-param routes outside P0 surfaces",
+        "severity": "low",
+        "lifecycle": "open",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "post-V1.132",
+        "note": "QC2 F-001: schedules/kb/works/worlds etc. still use {param}; P0 fixed presets/sessions/modules/strategy. Follow-up brace sweep.",
+        "tracking_link": ".mstar/plans/2026-07-22-v1.132-p0-orch-load-404.md#Review-Gate-Summary"
+      },
+      {
+        "id": "R-V1132P0-QA-S-001",
+        "title": "Browser Network evidence deferred for orch-load-404 dogfood",
+        "severity": "nit",
+        "lifecycle": "open",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "post-V1.132",
+        "note": "T5/QA: curl+TestServer complete; Vite Network not captured. Optional human Network attach.",
+        "tracking_link": ".mstar/iterations/v1.132/guides/p0-orch-load-404-dogfood.md"
+      }
+    ],
+    "2026-07-22-v1.132-p3-creator-orch-gongnengqu-ia": [
+      {
+        "id": "R-V1132P3-SUP-001",
+        "title": "V1.131 AC-4 / DF-V1130-WORKSPACE-UNDER-ORCH superseded by P3 AC-6/AC-7",
+        "severity": "info",
+        "source": "P3 T4",
+        "lifecycle": "superseded",
+        "decision": "supersede",
+        "owner": "@project-manager",
+        "note": "Superseded by 2026-07-22-v1.132-p3-creator-orch-gongnengqu-ia AC-6/AC-7; see compass supersession table."
+      },
+      {
+        "id": "R-V1132P3-SUP-002",
+        "title": "V1.130 P2 创作-left-Menu false-Done superseded by P3 AC-8",
+        "severity": "info",
+        "source": "P3 T4",
+        "lifecycle": "superseded",
+        "decision": "supersede",
+        "owner": "@project-manager",
+        "note": "Superseded by P3 AC-8 Create-only left hub."
       }
     ]
   }
