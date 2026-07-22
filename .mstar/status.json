@@ -48,7 +48,15 @@
         "worktree_path": "/Users/bibi/workspace/organizations/42ch/nexus/.worktrees/v1.132-p1-titlebar-window-drag",
         "working_branch": "plan/v1.132-p1-titlebar-window-drag",
         "session_label": "v1.132-phase2-wave1"
-      }
+      },
+      "task_commits": [
+        {
+          "task": 1,
+          "base": "4c875e8670a4ecac8daea3fe6f0ed7a83371cf65",
+          "head": "9582ed49be74c610732a3097d06dd1101e982da4",
+          "status": "complete"
+        }
+      ]
     },
     {
       "id": "2026-07-22-v1.132-p2-vi-aesthetic-retune",
