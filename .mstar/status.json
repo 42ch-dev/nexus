@@ -693,15 +693,16 @@
     "2026-07-22-v1.131-p0-chronos-titlebar": [
       {
         "id": "R-V1131P0-QC2-W-001",
-        "title": "macOS Overlay titlebar live smoke — native H2–H4/D2 still unverified",
+        "title": "macOS Overlay titlebar live smoke — logo/title drag H2–H6/D1–D3 still unverified",
         "severity": "medium",
-        "source": "QC2 F-002; macos-overlay-smoke.md; QA revalidation qa.md",
-        "scope": "apps/desktop Overlay titlebar; Chronos empty-paint drag/double-click",
+        "source": "QC2 F-002; V1.132 titlebar-window-drag-overlay-smoke.md; V1.131 carry-forward",
+        "scope": "apps/desktop Overlay titlebar; Chronos logo/title drag (V1.132 P1 supersedes empty-paint-only)",
         "decision": "defer",
         "owner": "human / @qa-engineer",
-        "target": "V1.131 dogfood / PR merge-ready",
+        "target": "V1.132 dogfood / PR merge-ready",
         "lifecycle": "open",
-        "note": "P3 2026-07-22: still not archivable — human Overlay H2–H4/D2 smoke required (agent TCC cannot grant Screen Recording/Accessibility). Product code+compile+H1/D1/H5/H6 Pass (9e33ed00). Protocol: .mstar/sdd/2026-07-22-v1.131-p0-chronos-titlebar/review/macos-overlay-smoke.md"
+        "note": "V1.132 P1 re-target (2026-07-22): durable protocol → .mstar/iterations/v1.132/guides/titlebar-window-drag-overlay-smoke.md. Human Overlay matrix H2–H6 + D1–D3 required before archive (agent TCC cannot grant Screen Recording/Accessibility). Product chrome+Studio+unit tests may ship with residual open (Profile B).",
+        "tracking_link": ".mstar/iterations/v1.132/guides/titlebar-window-drag-overlay-smoke.md"
       }
     ]
   }
