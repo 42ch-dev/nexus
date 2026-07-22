@@ -36,6 +36,8 @@ export interface NexusLogoProps {
    * marks and the wordmark preserve their intrinsic ratios.
    */
   size?: number;
+  /** When false, prevents native browser image drag (e.g. titlebar chrome). */
+  draggable?: boolean;
 }
 
 export function NexusLogo({
@@ -44,6 +46,7 @@ export function NexusLogo({
   label = 'Nexus',
   className,
   size = 32,
+  draggable,
 }: NexusLogoProps) {
   // `variant` is part of the public contract (documents which asset `src` resolves)
   // and is intentionally unused at render time — the consumer supplies `src`.
@@ -55,6 +58,7 @@ export function NexusLogo({
       alt={label}
       height={size}
       decoding="async"
+      draggable={draggable}
       className={className}
       style={{ width: 'auto', height: size }}
     />

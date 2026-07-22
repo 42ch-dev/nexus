@@ -8,4 +8,8 @@ Exploration and process notes for this iteration. **Normative contracts** live i
 | Compass | [../delivery-compass.md](../delivery-compass.md) |
 | Specs | [../specs/](../specs/) |
 
-No standalone guides yet. Add iteration-scoped process notes here — not under `knowledge/` or `specs/`.
+| Guide | Purpose |
+| --- | --- |
+| [titlebar-window-drag-overlay-smoke.md](titlebar-window-drag-overlay-smoke.md) | macOS Overlay human smoke for logo/title window-drag (V1.132 P1); re-target for `R-V1131P0-QC2-W-001` |
+
+Add iteration-scoped process notes here — not under `knowledge/` or `specs/`.
