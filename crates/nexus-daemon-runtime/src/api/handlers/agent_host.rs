@@ -431,6 +431,9 @@ pub async fn cancel_operation(
     State(state): State<WorkspaceState>,
     Path(segment): Path<String>,
 ) -> Result<Json<CancelOperationResponse>, NexusApiError> {
+    // matchit 0.7 rejects consecutive captures like `:operation_id:cancel`.
+    // Workaround: capture the full segment as `:operation_id` and strip
+    // `:cancel` in the handler (mirrors `logout_creator`).
     let operation_id = segment
         .strip_suffix(":cancel")
         .ok_or_else(|| NexusApiError::NotFound(format!("Operation route '{segment}' not found")))?
