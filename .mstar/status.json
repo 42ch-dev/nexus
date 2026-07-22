@@ -40,7 +40,7 @@
     },
     {
       "id": "2026-07-23-v1.133-p1-legacy-residual-burndown",
-      "status": "Todo",
+      "status": "Done",
       "file": ".mstar/plans/2026-07-23-v1.133-p1-legacy-residual-burndown.md",
       "metadata": {
         "primary_spec": ".mstar/iterations/v1.133/specs/legacy-residual-burndown.md",
@@ -52,8 +52,25 @@
         "merge_target": "iteration/v1.133",
         "wire_contracts_changed": false,
         "wave": "1",
-        "seq": "1"
-      }
+        "seq": "1",
+        "qa_verdict": "Pass"
+      },
+      "task_commits": [
+        {
+          "task": 1,
+          "base": "1e6ed0ccfce8ec38679885776bc0c94bd21e3b4d",
+          "head": "f4f8e8d4",
+          "status": "complete",
+          "notes": "3 fix-now residuals: port-conflict helper, RAII guard, restart timeout; review approved"
+        },
+        {
+          "task": "pm-triage",
+          "base": "f4f8e8d4",
+          "head": "baf245be",
+          "status": "complete",
+          "notes": "PM triage: 5 closed (3 fixed + 2 stale), 2 superseded archived"
+        }
+      ]
     },
     {
       "id": "2026-07-22-v1.132-p0-orch-load-404",
@@ -268,6 +285,41 @@
         "low": 9,
         "nit": 51,
         "info": 0
+      },
+      "by_target": {
+        "V1.96": 1,
+        "post-V1.130": 6,
+        "unspecified": 37,
+        "post-V1.129": 11,
+        "post-ship": 2,
+        "manual": 1,
+        "V1.132 dogfood / PR merge-ready": 1,
+        "post-V1.132": 2,
+        "post-V1.133": 1
+      },
+      "by_plan": {
+        "2026-07-05-v1.92-closure": 1,
+        "2026-07-22-v1.130-p0-daemon-restart": 3,
+        "2026-07-22-v1.130-p4-vi-atmosphere": 3,
+        "2026-07-22-v1.130-p1-shell-frame": 0,
+        "2026-07-12-v1.112-i18n-ui-migration": 0,
+        "2026-07-13-v1.116-agent-detection-codex-native": 0,
+        "2026-07-20-v1.126-p0-shell-selection-submenu": 7,
+        "2026-07-20-v1.126-p1-canvas-directed-axis": 5,
+        "2026-07-20-v1.126-p2-composite-timeline-endpoint": 11,
+        "2026-07-20-v1.126-p3-status-compaction-residual-cleanup": 4,
+        "2026-07-20-v1.127-p0-control-room-author-loop-fixes": 8,
+        "2026-07-20-v1.127-p1-native-agent-provider-registration": 0,
+        "2026-07-20-v1.128-p0-surfaces-chrome-ia": 0,
+        "2026-07-20-v1.128-p1-nle-timeline-canvas": 1,
+        "2026-07-20-v1.128-p2-creator-create-controller-shell": 1,
+        "2026-07-21-v1.129-p0-profile-create-reliability": 5,
+        "2026-07-21-v1.129-p1-transport-error-ux": 6,
+        "2026-07-22-vi-logo-upgrade": 3,
+        "2026-07-22-v1.131-p0-chronos-titlebar": 1,
+        "2026-07-22-v1.132-p0-orch-load-404": 2,
+        "2026-07-22-v1.132-p3-creator-orch-gongnengqu-ia": 0,
+        "2026-07-23-v1.133-p0-brace-param-route-sweep": 1
       }
     },
     "updated_at": "2026-07-23",
@@ -833,6 +885,38 @@
         "owner": "@fullstack-dev",
         "target": "post-V1.133",
         "note": "Pre-existing convention; doc comments in handler files still use {param} notation. Not a route path issue."
+      }
+    ],
+    "2026-07-23-v1.133-p1-legacy-residual-burndown": [
+      {
+        "id": "R-V1133P1-QC1-S-001",
+        "severity": "nit",
+        "title": "MainBanner.messageFor retains third inline port-conflict check (different pattern)",
+        "lifecycle": "open",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.133",
+        "note": "QC1 F-002: messageFor uses stricter already-in-use match vs isPortConflictError port+in-use. Different behavior, not a simple dedup."
+      },
+      {
+        "id": "R-V1133P1-QC1-S-002",
+        "severity": "nit",
+        "title": "RestartGuard try_lock fallback has narrow wedge window",
+        "lifecycle": "open",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "post-V1.133",
+        "note": "QC1 F-003: If concurrent panic + join waiter holds mutex, try_lock fails. Pattern for full closure: Arc<AtomicBool> outside mutex (see nexus-acp-host)."
+      },
+      {
+        "id": "R-V1133P1-QC1-S-003",
+        "severity": "nit",
+        "title": "1-second timeout slack is a magic literal",
+        "lifecycle": "open",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "post-V1.133",
+        "note": "QC1 F-004: Duration::from_secs(1) should be named RESTART_BUDGET_SLACK constant."
       }
     ]
   }
