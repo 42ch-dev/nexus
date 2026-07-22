@@ -222,7 +222,7 @@ Public `logoVariants` keys stay `primary | color | white | mono`; add `text` for
 | T7 | frontend-dev | Must | T3, T5, T6 |
 | T8 | frontend-dev | Should | T1 |
 
-**Route:** Medium visual feature · `frontend-dev` (SDD sticky) → QC tri → `qa-engineer` (mandatory, UI)
+**Route:** Medium visual feature · `frontend-dev` (SDD sticky, **model: Grok 4.5 / `cursor-grok-4.5-high`**) → QC tri → `qa-engineer` (mandatory, UI)
 
 **Branch policy:**
 
