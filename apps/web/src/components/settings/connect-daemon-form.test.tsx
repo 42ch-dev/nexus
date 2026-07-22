@@ -93,6 +93,14 @@ describe('ConnectDaemonForm', () => {
     await waitFor(() => {
       expect(screen.getByTestId('fingerprint-match-hint')).toBeInTheDocument();
     });
+    // Security-note washes must stay deep ink (DESIGN connection-setup), not cyan signal.
+    expect(screen.getByTestId('fingerprint-match-hint').className).toMatch(
+      /\bborder-brand-deep-blue\/20\b/,
+    );
+    expect(screen.getByTestId('fingerprint-match-hint').className).toMatch(
+      /\bbg-brand-deep-blue\/10\b/,
+    );
+    expect(screen.getByTestId('fingerprint-match-hint').className).not.toMatch(/\bblue-700\b/);
     expect(screen.getByTestId('trust-connect-button')).toHaveTextContent(
       'Reconnect With These Settings',
     );

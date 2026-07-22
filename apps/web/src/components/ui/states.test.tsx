@@ -61,4 +61,12 @@ describe('ErrorState (error-surface tokens)', () => {
     expect(title.className).toMatch(/\btext-red-1000\b/);
     expect(description.className).toMatch(/\btext-red-900\b/);
   });
+
+  it('retry control uses deep ink on light and cyan on dark', () => {
+    render(<ErrorState title="Could not load this view" onRetry={() => undefined} retryLabel="Retry" />);
+    const retry = screen.getByRole('button', { name: 'Retry' });
+    expect(retry.className).toMatch(/\btext-brand-deep-blue\b/);
+    expect(retry.className).toMatch(/\bdark:text-blue-700\b/);
+    expect(retry.className).not.toMatch(/(?<!dark:)text-blue-700\b/);
+  });
 });

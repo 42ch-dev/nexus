@@ -108,7 +108,7 @@ export function StrategyAltView({ parsed, statusByState }: StrategyAltViewProps)
                   {t('strategy.altView.join', { strategy: state.converge.strategy ?? 'wait_for_all' })}
                 </span>
               ) : null}
-              {status ? <span className="text-label-12 text-blue-700">{status}</span> : null}
+              {status ? <span className="text-label-12 text-brand-deep-blue dark:text-blue-700">{status}</span> : null}
             </li>
           );
         })}

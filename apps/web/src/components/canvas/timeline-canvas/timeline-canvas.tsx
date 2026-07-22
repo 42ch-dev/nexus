@@ -891,7 +891,7 @@ function BriefEmptyState({
             type="button"
             data-testid="timeline-brief-empty-cta"
             onClick={onSwitchToNarrative}
-            className="rounded-control bg-blue-700 px-4 py-2 text-button-14 font-semibold text-white-100 shadow-elevation-2 hover:bg-blue-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-700 focus-visible:ring-offset-2"
+            className="rounded-control bg-brand-cyan px-4 py-2 text-button-14 font-semibold text-brand-deep-blue shadow-elevation-2 hover:bg-blue-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-700 focus-visible:ring-offset-2"
           >
             {t('timeline.brief.emptyState.cta')}
           </button>

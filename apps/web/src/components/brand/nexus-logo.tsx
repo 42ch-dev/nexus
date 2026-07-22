@@ -1,8 +1,6 @@
-import logoColor from '@42ch/nexus-ui/assets/logos/logo-color.svg';
 import logoPrimary from '@42ch/nexus-ui/assets/logos/logo-primary.svg';
-import { NexusLogo as NexusLogoComponent } from '@42ch/nexus-ui';
+import { NexusLogo as NexusLogoComponent, logoShellHeightPx } from '@42ch/nexus-ui';
 
-import { useTheme } from '@/components/theme-provider';
 import { cn } from '@/lib/utils';
 
 export interface NexusLogoProps {
@@ -12,24 +10,21 @@ export interface NexusLogoProps {
 }
 
 /**
- * Theme-aware Nexus wordmark — thin wrapper around `@42ch/nexus-ui`.
+ * Product-shell Nexus lockup — thin wrapper around `@42ch/nexus-ui`.
  *
- * Resolves the SVG asset via Vite and maps the current theme to the canonical
- * package variant, preserving the zero-prop call-site ergonomics in
- * `sidebar.tsx` and `header.tsx`.
+ * Default brand asset is `logo-primary.svg` (bright mark on brand deep-blue
+ * plate) for both themes. Use `logo-white-bg.svg` only on surfaces that must
+ * sit on a light/white plate. Resolves the SVG via Vite and preserves
+ * zero-prop call sites in `sidebar.tsx` / `header.tsx`.
  */
 export function NexusLogo({ label = 'Nexus', className }: NexusLogoProps) {
-  const { resolvedTheme } = useTheme();
-  const variant = resolvedTheme === 'dark' ? 'color' : 'primary';
-  const src = variant === 'color' ? logoColor : logoPrimary;
-
   return (
     <NexusLogoComponent
-      variant={variant}
-      src={src}
+      variant="primary"
+      src={logoPrimary}
       label={label}
-      size={32}
-      className={cn('h-8 w-auto shrink-0', className)}
+      size={logoShellHeightPx}
+      className={cn('h-5 w-auto max-w-full shrink-0', className)}
     />
   );
 }

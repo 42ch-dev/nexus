@@ -162,19 +162,19 @@ export function ConnectDaemonForm() {
         >
           {fpState.response.fingerprint}
         </div>
-        <div className="rounded-card border border-blue-700/20 bg-blue-700/10 p-4 text-gray-900">
+        <div className="rounded-card border border-brand-deep-blue/20 bg-brand-deep-blue/10 p-4 text-gray-900">
           <div className="flex items-start gap-3">
-            <Shield className="mt-0.5 h-5 w-5 flex-shrink-0 text-blue-700" aria-hidden />
+            <Shield className="mt-0.5 h-5 w-5 flex-shrink-0 text-brand-deep-blue" aria-hidden />
             <p className="text-copy-14">{t('connection.fingerprintTrustDescription')}</p>
           </div>
         </div>
         {reconnectWithMatch && (
           <div
-            className="rounded-card border border-blue-700/20 bg-blue-700/10 p-4 text-gray-900"
+            className="rounded-card border border-brand-deep-blue/20 bg-brand-deep-blue/10 p-4 text-gray-900"
             data-testid="fingerprint-match-hint"
           >
             <div className="flex items-start gap-3">
-              <CheckCircle className="mt-0.5 h-5 w-5 flex-shrink-0 text-blue-700" aria-hidden />
+              <CheckCircle className="mt-0.5 h-5 w-5 flex-shrink-0 text-brand-deep-blue" aria-hidden />
               <p className="text-copy-14">{t('connection.fingerprintMatch')}</p>
             </div>
           </div>

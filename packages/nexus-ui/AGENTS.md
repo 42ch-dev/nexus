@@ -1,6 +1,6 @@
 # @42ch/nexus-ui — AGENTS.md
 
-Publishable npm workspace package for Nexus brand assets, design tokens, theme CSS, **React brand components** (`<NexusLogo>`, `<NexusMark>`), and V1.99-approved pure presentational primitives. V1.83 shipped the assets/tokens/theme foundation; V1.87 promoted the package to a React component library (adds `react` / `react-dom` as peer deps); V1.99 may promote a small UI primitive batch under the component-promotion boundary.
+Publishable npm workspace package for Nexus brand assets, design tokens, theme CSS, **React brand components** (`<NexusLogo>`, `<NexusMark>`, Studio-only `<NexusLogoVariant>`), and V1.99-approved pure presentational primitives. V1.83 shipped the assets/tokens/theme foundation; V1.87 promoted the package to a React component library (adds `react` / `react-dom` as peer deps); V1.99 may promote a small UI primitive batch under the component-promotion boundary.
 
 ## Promotion list (per-plan audit trail)
 
@@ -8,6 +8,7 @@ Every primitive promoted into this package is recorded here with: component name
 
 | Component | Plan / Spec | Date | Notes |
 |-----------|-------------|------|-------|
+| `<NexusLogoVariant>` | `2026-07-22-vi-logo-upgrade` T2 | 2026-07-22 | Studio-only timeline specimens (`elegant` \| `nature` \| `parchment` \| `scifi`). Palette props / `logoVariantPalettes` defaults; no SVG assets; not a runtime theme switcher. |
 | `<Button>`, `<Badge>`, `<Card>` (+ sub-primitives) | V1.99 P0 | 2025-04 | First presentational batch. CVA + token-driven. |
 | `<Input>`, `<Label>`, `<Textarea>` | V1.100 P2 | 2025-04 | Form-field presentational slice. |
 | `<Select>` | V1.101 P2 | 2025-05 | Native Select presentational. |
@@ -21,7 +22,7 @@ A promotion entry alone is not sufficient — the workflow in root `AGENTS.md` (
 - Canonical SVG logo variants and PNG source provenance (LFS)
 - Machine-consumable brand token constants (`src/tokens.ts`)
 - Optional CSS custom properties (`theme.css`)
-- React brand primitive components (`<NexusLogo>`, `<NexusMark>`) — presentational only, no theme context
+- React brand primitive components (`<NexusLogo>`, `<NexusMark>`, Studio-only `<NexusLogoVariant>`) — presentational only, no theme context / atmosphere switcher
 - Approved React UI primitives that are pure presentational, token-driven, and reusable across `apps/design-studio` and `apps/web`
 
 ## Boundaries
@@ -75,8 +76,9 @@ Documented in `package.json` `exports` and `README.md`. Do not rely on undocumen
 
 ### Component export strategy
 
-- **`<NexusLogo>`**: bundler-agnostic — accepts `src` prop (consumer resolves SVG URL through their bundler, e.g. Vite). Does not import `.svg` files.
-- **`<NexusMark>`**: hand-authored inline SVG JSX (no asset import) — inherits color via `currentColor`.
+- **`<NexusLogo>`**: bundler-agnostic — accepts `src` prop (consumer resolves SVG URL through their bundler, e.g. Vite). Does not import `.svg` files. Variants: `primary` \| `whiteBg` \| `white` \| `mono` \| `text` (no `color`; default shell uses `primary`).
+- **`<NexusMark>`**: hand-authored wide timeline SVG JSX (no asset import) — inherits color via `currentColor`; height-driven / `w-auto` friendly.
+- **`<NexusLogoVariant>`**: hand-authored timeline specimens with palette props (Studio Brand only). No asset import; not wired as a product theme preference.
 
 ## Pre-release
 

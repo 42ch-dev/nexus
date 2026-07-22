@@ -23,6 +23,13 @@ export function HomePage() {
         </code>{' '}
         SSOT — edit there, refresh here.
       </p>
+      <p
+        data-testid="home-chronos-note"
+        className="text-copy-14 text-gray-700 mb-8 max-w-prose"
+      >
+        Chronos Light / Dark: cyan is the shared signal (buttons, active chrome, focus); deep blue
+        is ink structure and light-theme links. Toggle the theme control to review both shells.
+      </p>
       <p className="text-copy-14 text-gray-600 mb-8">
         No daemon required. Use the navigation above to browse each section.
       </p>

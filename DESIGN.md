@@ -49,12 +49,13 @@ colors:
   # flips to near-white in dark → light wash instead of a dimming scrim).
   scrim: "rgba(0,0,0,0.40)"
 
-  # ── Primary interactive scale (light; maps to brand-deep-blue steps) ──
-  # blue-* keys preserved as web aliases for backward compatibility.
-  blue-700: "#0D2B3E"
-  blue-800: "#0A2333"
-  blue-900: "#071A28"
-  blue-1000: "#04121C"
+  # ── Primary interactive scale (light; Chronos cyan signal — same role as dark) ──
+  # blue-* keys preserved as web aliases; map to brand-cyan steps (darker on hover).
+  # Ink structure (links, titlebar) uses brand-deep-blue explicitly — not this scale.
+  blue-700: "#25D1E0"
+  blue-800: "#1FB8C6"
+  blue-900: "#1896A2"
+  blue-1000: "#117480"
 
   # ── Semantic accent scales (apps/web parity — four-step, shipped) ──
   red-700: "#e5484d"
@@ -163,7 +164,7 @@ motion:
 components:
   # ── button: apps/web superset (tertiary + destructive + sizes + disabled) wins ──
   button:
-    primary: { backgroundColor: "{colors.blue-700}", textColor: "#ffffff", borderColor: "none", rounded: "{rounded.control}", height: "40px", typography: "{typography.button-14}", hoverBackgroundColor: "{colors.blue-800}", activeBackgroundColor: "{colors.blue-900}" }
+    primary: { backgroundColor: "{colors.brand-cyan}", textColor: "{colors.brand-deep-blue}", borderColor: "none", rounded: "{rounded.control}", height: "40px", typography: "{typography.button-14}", hoverBackgroundColor: "{colors.blue-800}", hoverTextColor: "{colors.brand-deep-blue}", activeBackgroundColor: "{colors.blue-900}", activeTextColor: "{colors.brand-deep-blue}" }
     secondary: { backgroundColor: "{colors.background-100}", textColor: "{colors.gray-1000}", borderColor: "{colors.gray-alpha-400}", rounded: "{rounded.control}", height: "40px", typography: "{typography.button-14}", hoverBackgroundColor: "{colors.background-200}", hoverBorderColor: "{colors.gray-alpha-500}" }
     tertiary: { backgroundColor: "transparent", textColor: "{colors.gray-1000}", borderColor: "none", rounded: "{rounded.control}", height: "40px", typography: "{typography.button-14}", hoverBackgroundColor: "{colors.gray-alpha-100}" }
     destructive: { backgroundColor: "{colors.red-800}", textColor: "#ffffff", borderColor: "none", rounded: "{rounded.control}", height: "40px", typography: "{typography.button-14}", hoverBackgroundColor: "{colors.red-700}", activeBackgroundColor: "{colors.red-900}" }
@@ -284,7 +285,7 @@ components:
       rounded: "{rounded.card}"
       padding: "{spacing.space-4}"
       retryTypography: "{typography.label-14}"
-      retryColor: "{colors.blue-700}"
+      retryColor: "{colors.brand-deep-blue}"
 
     # Status surface family (V1.121 P2 T4). Parallel tinted fills + borders for
     # inline status cards (preset validation results, canvas live-session
@@ -765,7 +766,7 @@ components:
     avatar-bg-hover: "{colors.gray-alpha-200}"
     avatar-bg-active: "{colors.blue-700}"
     avatar-text: "{colors.gray-1000}"
-    avatar-text-active: "#ffffff"
+    avatar-text-active: "{colors.brand-deep-blue}"
     avatar-fallback-bg: "{colors.gray-alpha-200}"
     avatar-fallback-text: "{colors.gray-700}"
     add-button-bg: "transparent"
@@ -781,7 +782,7 @@ components:
     step-row-height: "40px"
     step-circle-size: "32px"
     step-circle-active-bg: "{colors.blue-700}"
-    step-circle-active-text: "#ffffff"
+    step-circle-active-text: "{colors.brand-deep-blue}"
     step-circle-complete-bg: "{colors.green-700}"
     step-circle-complete-text: "#ffffff"
     step-circle-pending-bg: "{colors.gray-alpha-100}"
@@ -866,28 +867,35 @@ Rules that keep the concept premium rather than themed:
 
 ## Brand Colors
 
-VI palette (frozen names):
+VI palette (frozen names) under **Chronos dual-role**:
+
+| Role | Token | Hex | Light | Dark |
+| --- | --- | --- | --- | --- |
+| **Ink structure** | `brand-deep-blue` | `#0D2B3E` | Titlebar fill, **text links**, logo structure on light | Titlebar fill; primary button **label** on cyan; never deep fills on dark chrome |
+| **Cyan signal** | `brand-cyan` / `blue-700` | `#25D1E0` | Primary CTA fill, active bars, focus-ring outer, selection, timeline accents | Same signal roles (shared) |
+| Surface white | `brand-white` | `#FFFFFF` | Text on deep panels; logo on dark heroes | Logo on deepest panels |
 
 | Token | Hex | Role |
 | --- | --- | --- |
-| `brand-deep-blue` | `#0D2B3E` | Primary brand, primary actions on light surfaces, links, focus rings |
-| `brand-cyan` | `#25D1E0` | Accent — icons, active indicators, dark-theme interactive emphasis |
-| `brand-white` | `#FFFFFF` | Text on deep blue fills, logo on dark hero surfaces |
+| `brand-deep-blue` | `#0D2B3E` | Ink structure — light **text links**, titlebar, primary button label on cyan fill |
+| `brand-cyan` | `#25D1E0` | Shared brand **signal** — primary button fill, focus ring, active chrome (light and dark) |
+| `brand-white` | `#FFFFFF` | Text on deep-blue panels, logo on dark hero surfaces |
 
-Extended brand steps (`brand-deep-blue-800` … `brand-cyan-1000`, `brand-deep-blue-alpha-*`, `brand-cyan-alpha-*`) support hover, active, and low-opacity washes without raw VI drift.
+Extended brand steps (`brand-deep-blue-800` … `brand-cyan-1000`, `brand-deep-blue-alpha-*`, `brand-cyan-alpha-*`) support hover, active, and low-opacity washes without raw VI drift. Light `blue-800/900/1000` alias the cyan darker steps (`#1FB8C6` / `#1896A2` / `#117480`); dark `blue-800/900/1000` alias the cyan brighter steps.
 
 ### Contrast review (WCAG 2.1 AA — light theme)
 
 | Pairing | Ratio | Intended usage | Verdict |
 | --- | --- | --- | --- |
-| `brand-deep-blue` on `background-100` | 11.5:1 | Headings, links, primary button label context | **Pass** — body text OK |
-| `brand-white` on `brand-deep-blue` | 11.5:1 | Primary button label | **Pass** |
-| `brand-cyan` on `background-100` | 1.9:1 | — | **Fail** — accent/icon/active indicator only; **never body text on white** |
+| `brand-deep-blue` on `background-100` | 11.5:1 | Headings, **text links**, body / UI on light | **Pass** — body text OK |
+| `brand-deep-blue` on `brand-cyan` | 6.2:1 | Primary button label (light = dark recipe) | **Pass** |
+| `brand-white` on `brand-deep-blue` | 11.5:1 | Text on deep titlebar / brand panels | **Pass** |
+| `brand-cyan` / `blue-700` on `background-100` | 1.9:1 | — | **Fail** — signal/icon/active only; **never body or link text on white** |
 | `brand-cyan` on `brand-deep-blue` | 6.2:1 | Accent chips on brand panels | **Pass** |
 | `gray-1000` on `background-100` | 18.9:1 | Primary UI text | **Pass** |
 | `gray-700` on `background-100` | 5.7:1 | Secondary/helper text | **Pass** |
 
-**Cyan usage rule:** `brand-cyan` is an accent token. Use it for marks, borders, icons, progress fills, and dark-theme interactive emphasis — not for paragraph text on white or light gray.
+**Cyan usage rule:** `brand-cyan` (and light `blue-700`, which aliases it) is the shared **signal** token for interactive chrome — primary CTA fill, focus-ring outer, active bars, selection strokes, timeline accents, graphical brand icons. It is **not** paragraph text or default **text links** on white/light gray (AA fail ~1.9:1). Light textual links use `brand-deep-blue` (11.5:1); dark textual links use `brand-cyan` / `blue-700` (10.0:1 on ink).
 
 ### Background-driven contrast invariant
 
@@ -908,8 +916,10 @@ Color values live in frontmatter `colors:`. Color tokens follow the Geist-style 
 
 | Meaning | Token |
 | --- | --- |
-| Primary action/focus/link | `blue-700` → maps to `brand-deep-blue` in light |
-| Brand accent (icons, dark nav; not body text on white) | `brand-cyan` |
+| Primary action / focus / active chrome (signal) | `blue-700` → `brand-cyan` in **both** light and dark |
+| Text link / retry text on light surfaces (ink) | `brand-deep-blue` (not `blue-700` / cyan) |
+| Text link on dark surfaces | `blue-700` / `brand-cyan` |
+| Brand accent icons / marks (graphical) | `brand-cyan` or cyan on deep panel |
 | Running/healthy/completed | `green-700` |
 | Warning/stale/needs review | `amber-700` |
 | Failed/error/destructive | `red-700` / `red-800` |
@@ -920,14 +930,15 @@ Color values live in frontmatter `colors:`. Color tokens follow the Geist-style 
 
 | Root token | Web frontmatter key | CSS variable |
 | --- | --- | --- |
-| `brand-deep-blue` | `brand-deep-blue`, `blue-700` | `--color-brand-deep-blue`, `--color-blue-700` |
-| `brand-deep-blue-800` | `blue-800` | `--color-blue-800` |
-| `brand-deep-blue-900` | `blue-900` | `--color-blue-900` |
-| `brand-cyan` | `brand-cyan` | `--color-brand-cyan` |
+| `brand-cyan` | `brand-cyan`, `blue-700` | `--color-brand-cyan`, `--color-blue-700` |
+| `brand-cyan-800` | `blue-800` | `--color-blue-800` |
+| `brand-cyan-900` | `blue-900` | `--color-blue-900` |
+| `brand-cyan-1000` | `blue-1000` | `--color-blue-1000` |
+| `brand-deep-blue` | `brand-deep-blue` | `--color-brand-deep-blue` |
 | `brand-white` | `brand-white` | `--color-brand-white` |
-| Package mirror | — | `--nexus-brand-deep-blue` via `@42ch/nexus-ui/theme.css` |
+| Package mirror | — | `--nexus-brand-*` via `@42ch/nexus-ui/theme.css` |
 
-`blue-*` keys are **preserved aliases** so existing component tokens (`{colors.blue-700}`) continue to resolve without renames.
+`blue-*` keys are **preserved aliases** for the **cyan signal** scale so existing component tokens (`{colors.blue-700}`) resolve to Chronos signal chrome in both themes. Light **text links** must use `brand-deep-blue` / `text-brand-deep-blue` — do **not** rely on `text-blue-700` after this flip (that class becomes cyan and fails AA on white).
 
 ---
 
@@ -971,7 +982,8 @@ Full WCAG 2.1 AA recomputation for the v0.4 ink (dark) and warm-paper (light) su
 | `gray-900` `#333333` | 12.6 **P** | 11.9 **P** | 11.3 **P** | 11.6 **P** | 10.9 **P** | 9.6 **P** | 10.4 **P** | 4.4 **G** |
 | `gray-700` `#666666` | 5.7 **P** | 5.4 **P** | 5.1 **P** | 5.3 **P** | 5.0 **P** | 4.4 **G** | 4.7 **P** | 2.0 **F** |
 | `gray-500` `#a3a3a3` | 2.5 **F** | 2.4 **F** | 2.3 **F** | 2.3 **F** | 2.2 **F** | 1.9 **F** | 2.1 **F** | 1.1 **F** |
-| `blue-700` = `brand-deep-blue` `#0D2B3E` | 11.5 **P** | 10.8 **P** | 10.3 **P** | 10.6 **P** | 9.9 **P** | 8.7 **P** | 9.5 **P** | 4.0 **G** |
+| `blue-700` = `brand-cyan` `#25D1E0` | 1.9 **F** | 1.8 **F** | 1.7 **F** | 1.7 **F** | 1.6 **F** | 1.4 **F** | 1.5 **F** | 1.5 **F** |
+| `brand-deep-blue` `#0D2B3E` | 11.5 **P** | 10.8 **P** | 10.3 **P** | 10.6 **P** | 9.9 **P** | 8.7 **P** | 9.5 **P** | 4.0 **G** |
 | `brand-cyan` `#25D1E0` | 1.9 **F** | 1.8 **F** | 1.7 **F** | 1.7 **F** | 1.6 **F** | 1.4 **F** | 1.5 **F** | 1.5 **F** |
 | `red-700` `#e5484d` | 3.9 **G** | 3.7 **G** | 3.5 **G** | 3.6 **G** | 3.4 **G** | 3.0 **G** | 3.2 **G** | 1.4 **F** |
 | `amber-700` `#b76e00` | 4.0 **G** | 3.8 **G** | 3.6 **G** | 3.7 **G** | 3.5 **G** | 3.0 **G** | 3.3 **G** | 1.4 **F** |
@@ -980,10 +992,11 @@ Full WCAG 2.1 AA recomputation for the v0.4 ink (dark) and warm-paper (light) su
 | `purple-700` `#7c3aed` | 5.7 **P** | 5.4 **P** | 5.1 **P** | 5.2 **P** | 4.9 **P** | 4.3 **G** | 4.7 **P** | 2.0 **F** |
 | `pink-700` `#db2777` | 4.6 **P** | 4.3 **G** | 4.1 **G** | 4.2 **G** | 4.0 **G** | 3.5 **G** | 3.8 **G** | 1.6 **F** |
 
-**Usage rules confirmed by the tables (unchanged in intent, re-verified on v0.4 surfaces):**
+**Usage rules confirmed by the tables (Chronos dual-role — VI logo upgrade):**
 
-- `brand-deep-blue` on dark chrome stays **Fail** — never deep-blue fills on dark surfaces; deep blue appears on cyan fills (6.2:1 **P**) or light surfaces only.
-- `brand-cyan` on light surfaces stays **Fail** — accent/icons/active indicators only, never body text on white or light gray (§Brand Colors cyan rule).
+- **Primary button (both themes):** `brand-deep-blue` on `brand-cyan` = 6.2:1 **P** — cyan fill + deep label. Light no longer uses deep fill + white text for primary CTAs.
+- `brand-deep-blue` on dark chrome stays **Fail** — never deep-blue fills on dark surfaces; deep blue appears on cyan fills (6.2:1 **P**) or as text/links on light surfaces (11.5:1 **P**).
+- `brand-cyan` / light `blue-700` on light surfaces stays **Fail** as body/link text — signal chrome, icons, active indicators, and primary **fills** only; never paragraph or default link text on white (§Brand Colors cyan rule). Light links → `brand-deep-blue`.
 - `gray-500` is graphical/decorative (edges, separators, tick marks) — not body text; dark values pass graphical (3.0+) except on `gray-300`, where it must not appear (same restriction as pre-v0.4).
 - Light semantic `*-700` accents on white-family surfaces are markers, large text, or status dots — body-copy status text uses the `*-1000` step on its tinted fill (badge soft variants), which is unchanged by v0.4.
 - **Scrim rule:** no text is set directly on the scrim — overlay surfaces (dialog, palette, popover) are opaque `background-100` above it. Light scrim effective `#999999` fails most text pairings by design; dark scrim effective `#04080D` passes all (18.4:1 primary text).
@@ -1109,7 +1122,7 @@ Radius values live in frontmatter `rounded:`. Radii stay tight and utility-orien
 
 ## Focus
 
-All interactive elements expose `:focus-visible` using the two-layer ring defined in `components.focus-ring`:
+All interactive elements expose `:focus-visible` using the two-layer ring defined in `components.focus-ring`. Outer ring uses `blue-700` (**cyan signal** in both themes after Chronos dual-role lock):
 
 ```css
 box-shadow:
@@ -1117,28 +1130,39 @@ box-shadow:
   0 0 0 4px var(--color-blue-700);
 ```
 
-On brand-filled surfaces (deep blue button), invert the inner ring to `brand-white` or use `brand-cyan` outer ring only when contrast remains ≥ 3:1.
+On brand-filled surfaces (cyan primary button), invert the inner ring to `brand-white` or use `brand-deep-blue` / `brand-white` so the ring stays visible against the fill (outer may remain cyan when contrast remains ≥ 3:1 on the surrounding surface).
 
 ---
 
 ## Logo Usage
 
-Canonical SVG assets ship from `@42ch/nexus-ui/assets/logos/`. PNG sources are provenance-only (Git LFS).
+Canonical SVG assets ship from `@42ch/nexus-ui/assets/logos/`. PNG sources are provenance-only (Git LFS). Runtime marks use the **timeline** geometry: horizontal five-node axis (ring · ring · **solid center** · ring · ring) on a wide viewBox — not the legacy N-network square.
 
 | Variant | File | Surface |
 | --- | --- | --- |
-| Deep blue mark | `logo-primary.svg` | Light nav, sidebar, light shell header |
-| Cyan mark | `logo-color.svg` | Dark nav, dark shell header |
-| White mark | `logo-white.svg` | Dark hero, photography overlays, high-contrast panels |
-| Monotone mark | `logo-mono.svg` | Inline UI; inherits `color` via `currentColor` |
+| Primary lockup (default) | `logo-primary.svg` | Product shell and most surfaces — bright mark on **brand deep-blue** plate (matches `logo-primary.png`) |
+| White-bg lockup | `logo-white-bg.svg` | Only when a light/white plate is required (matches `logo-white-bg.png`) |
+| White mark (dark-gray→white gradient) | `logo-white.svg` | Dark hero, photography overlays, high-contrast panels (transparent mark) |
+| Mono mark (light-gray→black gradient) | `logo-mono.svg` | Static grayscale lockup on light surfaces |
+| Wordmark | `logo-text.svg` | Lowercase `nexus` lockup; `currentColor` (white on dark heroes; `brand-deep-blue` on light) |
+| Tintable mark | `<NexusMark>` | Inline chrome (buttons, badges, list rows); `currentColor` |
+
+**Placement:**
+
+- Shell sidebar/header: **primary lockup** (`logo-primary.svg`) on light and dark — theme-stable deep-blue plate.
+- Light/white marketing or docs plates that must not show deep-blue: `logo-white-bg.svg` only.
+- Dark heroes / deepest panels: `logo-white.svg` mark; optional `logo-text.svg` wordmark with `color: #FFFFFF` (or `currentColor` set to white).
+- Lockups (Studio Brand, marketing): plate lockup + optional `logo-text.svg` with shared clear-space; do not stretch either asset.
+- Inline chrome (buttons, badges, list rows): `<NexusMark>` only — set `color` on the parent. Prefer the static `logo-mono.svg` asset when the baked grayscale gradient is required.
 
 **Rules:**
 
-- Minimum rendered height: **24px** (`logoMinSizePx`).
+- Minimum rendered height: **24px** (`logoMinSizePx`) for the mark; wordmark follows the same min height for the glyph box.
 - Clear space: **≥ 25%** of logo height on all sides.
+- Aspect: `logo-primary.svg` and `logo-white-bg.svg` are **square plate lockups**. Transparent marks (`white`, `mono`) and `<NexusMark>` are **wide** (`viewBox` ~10:1) — prefer `height` + `width: auto`.
 - Alt text: `Nexus` on `<img>`; inline SVGs include `<title>` and `<desc>`.
-- Do not recolor SVG fills outside the mono variant.
-- Do not place cyan mark on white/light gray without a contrast check — prefer `logo-primary.svg` on light surfaces.
+- Do not recolor baked-gradient SVG fills (`primary`, `whiteBg`, `white`, `mono`); only `<NexusMark>` and `logo-text.svg` inherit via `currentColor`.
+- Prefer `logo-primary.svg` by default. Reach for `logo-white-bg.svg` only when the surface must be a light/white plate.
 
 ---
 
@@ -1187,19 +1211,18 @@ Component token values live in frontmatter `components:`. All components must ex
 
 Variants and sizes: see frontmatter `components.button`. The preset `Validate` action uses `primary` when it is the main form action, or `secondary` with a `blue-700` leading icon when paired with a separate save action.
 
-#### Button Contrast Invariant (V1.94 corrected)
+#### Button Contrast Invariant (Chronos dual-role)
 
 > **Background decides text color, independent of light/dark mode.**
 >
-> - **Dark background** (deep blue, red, dark gray, saturated dark colors) → **light/white text**.
+> - **Dark background** (deep blue panels, red, dark gray, saturated dark colors) → **light/white text**.
 > - **Light/bright background** (cyan, light gray, pastels) → **dark text**.
 >
 > Practical applications:
-> - Light mode primary `bg-blue-700` (dark) → `text-white` (light).
-> - Dark mode primary `dark:bg-brand-cyan` (light/bright) → `dark:text-brand-deep-blue` (dark).
-> - Destructive `bg-red-800` (dark) → `text-white` (light), unchanged across modes.
+> - **Primary button (light and dark are identical):** `bg-brand-cyan` / `bg-blue-700` (bright) → `text-brand-deep-blue` (dark). No light/dark fill fork for primary.
+> - Destructive `bg-red-800` (dark) → `text-white` (light) on light theme; dark theme may use deep text on bright red — see `DESIGN.dark.md`.
 
-**Dark primary token fix (V1.94):** `dark:bg-brand-cyan dark:text-brand-deep-blue` (was `dark:text-white`).
+**Primary recipe (locked):** cyan fill (`brand-cyan` / `blue-700`) + deep label (`brand-deep-blue`) in **both** shells. Former light recipe (deep fill + white text) is retired.
 
 ### Input / Select / Textarea
 
@@ -1275,7 +1298,7 @@ Token values: see frontmatter `components.states`.
 | `Spinner` | `components.states.spinner` — size `16px`, color `blue-700` | Icon-only; pair with text in `LoadingState` |
 | `LoadingState` | `components.states.loading` — `copy-14` at `gray-700`, `space-2` gap, `space-6` vertical padding | *Scanning for local ACP agents…* (sentence case, present participle + ellipsis) |
 | `EmptyState` | `components.states.empty` — title `display-24` content voice (serif, V1.121 v0.4)/`gray-1000`, description `copy-14`/`gray-900`, `space-2` gap, `space-16` vertical padding | Title: **No agents found on PATH**; helper: *Install an agent or add a custom launch command below.*; host-owned `action` slot |
-| `ErrorState` | `components.states.error` — title `heading-16`/`red-1000`, description `copy-14`/`red-900`, tinted background/border (`error-surface` / `error-surface-border` tokens, V1.121), `rounded-card`, `space-4` padding; retry `label-14`/`blue-700` | Title: **Could not load this view**; helper: sentence-case transport or plain-language reason; action: **Try again** |
+| `ErrorState` | `components.states.error` — title `heading-16`/`red-1000`, description `copy-14`/`red-900`, tinted background/border (`error-surface` / `error-surface-border` tokens, V1.121), `rounded-card`, `space-4` padding; retry `label-14`/`brand-deep-blue` (ink link; not cyan signal) | Title: **Could not load this view**; helper: sentence-case transport or plain-language reason; action: **Try again** |
 
 `EmptyState` accepts an optional `action` ReactNode — the host renders the first-step CTA (Verb-only, e.g. **Create**); the primitive does not embed routing.
 
@@ -1453,7 +1476,7 @@ CSS variable tokens are projected from the frontmatter into `tooling/design-toke
 - Tailwind preset: `tooling/design-tokens/tailwind.preset.ts`
 - Brand package: `@42ch/nexus-ui/theme.css`
 
-**Blue-* alias policy:** `blue-700` remains the web primary interactive token name in light theme (maps to `brand-deep-blue`). In dark theme, `blue-700` maps to `brand-cyan`. Component tokens using `{colors.blue-700}` continue to resolve correctly in both themes. Do **not** rename `blue-*` to `brand-deep-blue` in CSS vars.
+**Blue-* alias policy (Chronos dual-role):** `blue-700`…`blue-1000` are the web **cyan signal** interactive scale in **both** light and dark themes (`#25D1E0` and theme-tuned cyan steps). Light hover/active steps use darker cyan (`brand-cyan-800/900/1000`); dark hover/active steps use brighter cyan. Component tokens using `{colors.blue-700}` (focus ring, active bars, primary chrome) resolve to cyan in both themes. **Ink structure** (light text links, titlebar fill, primary button label) uses `brand-deep-blue` explicitly — do **not** use `text-blue-700` for light-theme links after this lock (T6 migrates call sites). Do **not** rename `blue-*` keys in CSS vars.
 
 ---
 
@@ -1472,7 +1495,7 @@ Every Tailwind-palette leftover in `components.canvas.*` was remapped **hue-pres
 | Token | v0.3 light | v0.4 light | v0.3 dark | v0.4 dark | Hue family |
 | --- | --- | --- | --- | --- | --- |
 | `canvas-outline-chapter-card-status-pending` | `#94A3B8` | `gray-500` `#a3a3a3` | `#64748B` | `gray-500` `#737373` | slate → neutral gray |
-| `canvas-outline-chapter-card-status-drafted` | `#3B82F6` | `blue-700` | `#60A5FA` | `blue-700` | blue → brand blue (dark: brand-cyan) |
+| `canvas-outline-chapter-card-status-drafted` | `#3B82F6` | `blue-700` | `#60A5FA` | `blue-700` | blue → brand-cyan signal (both themes) |
 | `canvas-outline-chapter-card-status-completed` | `#10B981` | `green-700` | `#34D399` | `green-700` | emerald → green |
 | `canvas-outline-timeline-event-pin` | `#F59E0B` | `amber-700` | `#FBBF24` | `amber-700` | amber |
 | `canvas-outline-foreshadow-edge` | `#A78BFA` | `purple-700` | `#C4B5FD` | `purple-700` | violet → purple |
@@ -1496,7 +1519,7 @@ Every Tailwind-palette leftover in `components.canvas.*` was remapped **hue-pres
 | `canvas-worldkb-relationship-confidence-low` | `#E5484D` | `red-700` (exact value) | `#FF6B6B` | `red-700` (exact value) | red |
 | `canvas-worldkb-relationship-confidence-mid` | `#B76E00` | `amber-700` (exact value) | `#FFC043` | `amber-700` (exact value) | amber |
 | `canvas-worldkb-relationship-confidence-high` | `#1F8F4D` | `green-700` (exact value) | `#54D58A` | `green-700` (exact value) | green |
-| `canvas-worldkb-relationship-grounded-badge` | `rgba(0,107,255,0.12)` | `color-mix(blue-700 12%)` | `rgba(82,168,255,0.14)` | `color-mix(blue-700 14%)` | blue → brand blue scale (drift alignment — matches the value `tokens.css` already shipped) |
-| `canvas-worldkb-entity-card-fill-selected` | `#EBF2FF` (unchanged) | `#EBF2FF` | `rgba(82,168,255,0.14)` | `color-mix(blue-700 14%)` | blue → brand blue scale (dark drift alignment) |
+| `canvas-worldkb-relationship-grounded-badge` | `rgba(0,107,255,0.12)` | `color-mix(blue-700 12%)` | `rgba(82,168,255,0.14)` | `color-mix(blue-700 14%)` | blue → brand-cyan signal (drift alignment — matches the value `tokens.css` already shipped) |
+| `canvas-worldkb-entity-card-fill-selected` | `#EBF2FF` (unchanged) | `#EBF2FF` | `rgba(82,168,255,0.14)` | `color-mix(blue-700 14%)` | blue → brand-cyan signal (dark drift alignment) |
 
 **Ambient alignment (same pass):** `canvas-surface` `#ebebeb` → `#EBE9E5` warm paper (light) / `#141414` → `#101D2E` ink (dark); `canvas-node-fill` dark `#1a1a1a` → `background-300`; `canvas-node-fill-hover` `#f5f5f5` → `background-300` (light) / `#2a2a2a` → `gray-200` (dark); `canvas-worldkb-entity-card-fill-default/hover` and `canvas-worldkb-relationship-inspector-fill` (dark) likewise resolve onto the ink scale (`background-300` / `gray-200`). New ambient keys: `canvas-grid-gap` `20px`, `canvas-grid-dot-size` `1.5px`, and the `components.canvas.node-width.*` family (see §Canvas Surface).

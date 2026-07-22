@@ -97,7 +97,7 @@ export function WorldsPage() {
                     data-testid="worlds-empty-create-world"
                     className="flex w-full min-h-[7.5rem] flex-col items-center justify-center gap-2 rounded-card border border-dashed border-gray-alpha-400 p-6 text-center opacity-60 motion-reduce:transition-none"
                   >
-                    <Globe className="h-8 w-8 shrink-0 text-blue-700" aria-hidden />
+                    <Globe className="h-8 w-8 shrink-0 text-brand-deep-blue dark:text-blue-700" aria-hidden />
                     <span className="font-display text-display-20 tracking-tight text-gray-1000">
                       {t('emptyCreateWorldTitle')}
                     </span>

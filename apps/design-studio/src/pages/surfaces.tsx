@@ -1,8 +1,9 @@
 import { useRef, useState, type ReactNode } from 'react';
 import { NavLink, Outlet } from 'react-router-dom';
 
-import logoPrimary from '@42ch/nexus-ui/assets/logos/logo-primary.svg';
-import { NexusLogo, cn, Badge, Button } from '@42ch/nexus-ui';
+import { cn, Badge, Button } from '@42ch/nexus-ui';
+
+import { StudioShellLogo } from '@/components/studio-shell-logo';
 
 import {
   ShellSidebarChrome,
@@ -162,6 +163,13 @@ export function SurfacesLayout() {
         </code>
         ). Studio-only deep links — not App Settings IA.
       </p>
+      <p
+        data-testid="surfaces-chronos-note"
+        className="text-copy-14 text-gray-700 mb-4 max-w-prose"
+      >
+        Chronos chrome: cyan active affordances (sidebar bar, mode pills, setup step, focus rings)
+        on warm-paper (light) and ink (dark) surfaces — tokens drive both themes.
+      </p>
       <SurfaceSourceLegend />
 
       <div className="flex gap-8 items-start">
@@ -272,15 +280,7 @@ function ShellSidebarFixture() {
           activeRoute="#works"
           navGroups={groups}
           onTabChange={setActiveTab}
-          logo={
-            <NexusLogo
-              variant="primary"
-              src={logoPrimary}
-              label="Nexus"
-              size={32}
-              className="h-8 w-auto shrink-0"
-            />
-          }
+          logo={<StudioShellLogo />}
           footer={<FixtureFooterProfiles />}
         />
       </div>
@@ -498,7 +498,8 @@ export function SurfacesShellPage() {
           <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
             @web-layout/shell-sidebar-chrome
           </code>{' '}
-          extract. No live routing, no{' '}
+          extract. Active nav bar and mode pills use cyan signal; surfaces are
+          warm-paper / ink via background tokens. No live routing, no{' '}
           <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
             NexusClient
           </code>

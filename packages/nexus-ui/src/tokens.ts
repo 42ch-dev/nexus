@@ -13,20 +13,55 @@ export const brandColors = {
 export type BrandColorName = keyof typeof brandColors;
 
 export const logoVariants = {
-  /** Deep blue mark (flat primary color) — navigation and light-background shells */
+  /** Primary lockup — bright mark on brand deep-blue plate (default; matches `logo-primary.png`) */
   primary: 'logo-primary.svg',
-  /** Cyan mark — bright logo for dark backgrounds / dark chrome */
-  color: 'logo-color.svg',
-  /** White mark — dark hero, photography overlays, high-contrast panels */
+  /** Lockup on white plate — only when a light/white surface is required (`logo-white-bg.png`) */
+  whiteBg: 'logo-white-bg.svg',
+  /** Timeline mark — dark-gray→white gradient for dark heroes / high-contrast panels */
   white: 'logo-white.svg',
-  /** Monotone mark — inline UI; inherits `color` via currentColor */
+  /** Timeline mark — light-gray→black gradient (static asset; tintable form is `<NexusMark>`) */
   mono: 'logo-mono.svg',
+  /** Wordmark — lowercase `nexus`; inherits via currentColor */
+  text: 'logo-text.svg',
 } as const;
 
 export type LogoVariantName = keyof typeof logoVariants;
 
-/** Minimum rendered logo height in px for legibility */
+/** Timeline mark viewBox (matches `assets/logos/logo-*.svg` marks) */
+export const logoMarkViewBoxWidth = 284;
+export const logoMarkViewBoxHeight = 28;
+/** Width / height of the timeline mark viewBox (~10.14:1) */
+export const logoMarkAspectRatio = logoMarkViewBoxWidth / logoMarkViewBoxHeight;
+
+/** Minimum rendered logo height in px for legibility (gallery / general UI) */
 export const logoMinSizePx = 24;
+
+/**
+ * Shell chrome mark height in px (sidebar header, presentational shell fixtures).
+ * Timeline mark is ~10.14:1 wide; 24px height ≈ 243px width and clips in a
+ * 248px sidebar with horizontal padding — 20px (h-5) fits (~203px).
+ */
+export const logoShellHeightPx = 20;
 
 /** Recommended clear space around the mark (multiple of logo height) */
 export const logoClearSpaceRatio = 0.25;
+
+/** Studio-only theme specimen ids (not a runtime theme switcher) */
+export type LogoVariantTheme = 'elegant' | 'nature' | 'parchment' | 'scifi';
+
+/** Left→right gradient stops for theme specimen marks */
+export interface LogoVariantPalette {
+  start: string;
+  end: string;
+}
+
+/**
+ * Default palettes for `<NexusLogoVariant>` — mood-derived from provenance
+ * `logo-variants-*.png`. Override via `palette` prop; no asset import.
+ */
+export const logoVariantPalettes: Record<LogoVariantTheme, LogoVariantPalette> = {
+  elegant: { start: '#8B7355', end: '#E8C36A' },
+  nature: { start: '#1B4332', end: '#52B788' },
+  parchment: { start: '#5C4033', end: '#D4B896' },
+  scifi: { start: '#3B1F6E', end: '#25D1E0' },
+};

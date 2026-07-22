@@ -199,7 +199,7 @@ function AgentDialogPanel({ onClose }: { onClose: () => void }) {
             type="button"
             className="flex w-full items-center gap-3 rounded-control border border-gray-alpha-300 bg-background-100 px-4 py-3 text-left text-copy-14 text-gray-700 hover:bg-gray-alpha-100"
           >
-            <span className="flex h-8 w-8 items-center justify-center rounded-full bg-blue-100 text-label-14 text-blue-700">
+            <span className="flex h-8 w-8 items-center justify-center rounded-full bg-blue-100 text-label-14 text-brand-deep-blue dark:text-blue-700">
               C
             </span>
             <div className="flex-1">
@@ -230,7 +230,7 @@ function AgentDialogPanel({ onClose }: { onClose: () => void }) {
           </button>
           <button
             type="button"
-            className="rounded-control bg-blue-700 px-4 py-2 text-label-14 text-white hover:bg-blue-800"
+            className="rounded-control bg-brand-cyan px-4 py-2 text-label-14 text-brand-deep-blue hover:bg-blue-800"
             onClick={onClose}
           >
             Assign

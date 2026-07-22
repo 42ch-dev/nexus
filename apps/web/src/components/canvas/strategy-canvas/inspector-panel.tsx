@@ -107,7 +107,7 @@ function ReadOnlyDetails({ d, selectedState }: { d: StrategyNodeData; selectedSt
       {d.status ? (
         <div className="flex justify-between">
           <dt className="text-gray-700">{t('strategy.inspector.status')}</dt>
-          <dd className="text-blue-700">{d.status}</dd>
+          <dd className="text-brand-deep-blue dark:text-blue-700">{d.status}</dd>
         </div>
       ) : null}
       {selectedState.description ? <p className="mt-2 text-gray-900">{selectedState.description}</p> : null}

@@ -209,7 +209,7 @@ export function AgentPicker({
               <button
                 type="button"
                 onClick={onRetry}
-                className="self-start text-label-14 font-medium text-blue-700 transition-colors duration-state ease-standard hover:text-blue-800"
+                className="self-start text-label-14 font-medium text-brand-deep-blue transition-colors duration-state ease-standard hover:opacity-80 dark:text-blue-700 dark:hover:text-blue-800 dark:hover:opacity-100"
               >
                 {t('agentPicker.tryAgain')}
               </button>
@@ -247,7 +247,7 @@ export function AgentPicker({
                 aria-expanded={showRest}
                 aria-controls="agent-picker-rest"
                 data-testid="agent-picker-more"
-                className="self-start rounded-control text-label-14 font-medium text-blue-700 transition-colors duration-state ease-standard hover:text-blue-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-700"
+                className="self-start rounded-control text-label-14 font-medium text-brand-deep-blue transition-colors duration-state ease-standard hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-700 dark:text-blue-700 dark:hover:text-blue-800 dark:hover:opacity-100"
               >
                 {showRest ? t('agentPicker.fewer') : t('agentPicker.more')}
               </button>
@@ -541,7 +541,7 @@ function OutboundLink({
       onClick={routeThroughOpener}
       onAuxClick={isDesktop ? routeThroughOpener : undefined}
       aria-label={label}
-      className="inline-flex items-center gap-1 text-label-14 font-medium leading-none text-blue-700 transition-colors hover:text-blue-800"
+      className="inline-flex items-center gap-1 text-label-14 font-medium leading-none text-brand-deep-blue transition-colors hover:opacity-80 dark:text-blue-700 dark:hover:text-blue-800 dark:hover:opacity-100"
     >
       {label}
       <ArrowUpRight className="h-3 w-3" aria-hidden />

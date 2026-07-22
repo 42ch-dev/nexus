@@ -725,7 +725,7 @@ function StrategyInspectorSample() {
         <div className="text-purple-700">Initial state</div>
         <div className="flex justify-between">
           <dt className="text-gray-700">Status</dt>
-          <dd className="text-blue-700">current</dd>
+          <dd className="text-brand-deep-blue dark:text-blue-700">current</dd>
         </div>
         <p className="mt-2 text-gray-900">Author writes the first draft of the chapter.</p>
         <p className="mt-2 text-gray-700">
