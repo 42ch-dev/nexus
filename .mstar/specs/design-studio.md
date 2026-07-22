@@ -43,7 +43,7 @@ Design Studio is a **standalone Vite + React SPA** (`apps/design-studio`) that m
 | --- | --- | --- |
 | **Contributors** (design-minded maintainers) | Tune colors, typography, spacing, and component tokens with confidence | Side-by-side token tables + live primitives + light/dark toggle |
 | **Frontend developers** | Pick correct variant/state when building screens | Component matrix with interactive states; surface slices as composition reference |
-| **Brand / VI reviewers** | Confirm logo usage, clear space, and theme.css alignment | Brand VI section with all four `@42ch/nexus-ui` logo variants + `NexusMark` |
+| **Brand / VI reviewers** | Confirm logo usage, clear space, and theme.css alignment | Brand VI section with all five `@42ch/nexus-ui` logo variants + `NexusMark` |
 | **Authors** (local Web UI users) | — | **Not in scope** — authors never see design-studio; it is not bundled in `nexus42` |
 
 ---
@@ -201,7 +201,7 @@ Register Launch in `SURFACES_SECTIONS` alongside existing Setup / Shell / AgentP
 - [ ] Studio starts without daemon on documented dev command
 - [ ] Light/dark toggle reflects root DESIGN pair (spot-check ≥3 semantic tokens per theme)
 - [ ] Every primitive in `components/ui/*.tsx` (excluding tests) appears in Components gallery with ≥1 interactive state
-- [ ] All four `logoVariants` from `@42ch/nexus-ui` render with clear-space guidance visible
+- [ ] All five `logoVariants` from `@42ch/nexus-ui` render with clear-space guidance visible
 - [ ] Voice & Content section shows ≥3 labeled specimens matching IA guide §4.4 fixture strings
 - [ ] Surface slices: Setup step card + App shell chrome per IA guide §4.5 — identifiable without live routing
 - [ ] `wire_contracts_changed: false`

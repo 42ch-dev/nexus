@@ -158,14 +158,30 @@ describe('Sidebar', () => {
     expect(screen.getByRole('tabpanel')).toHaveAttribute('aria-labelledby', 'creator');
   });
 
-  it('mounts the footer profile switcher', async () => {
+  it('mounts the footer profile switcher only under Orchestrator (工作区)', async () => {
+    const user = userEvent.setup();
     useSidebarHandlers();
 
     renderInApp(<Sidebar />, { client: makeClient(), activeCreatorId: 'creator-a' });
 
+    expect(screen.queryByRole('toolbar', { name: 'Workspace' })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('tab', { name: 'Orchestrator' }));
+
     await waitFor(() =>
       expect(screen.getByRole('toolbar', { name: 'Workspace' })).toBeInTheDocument(),
     );
+  });
+
+  it('keeps the footer mode switch as the only primary Creator|Orchestrator control', () => {
+    useSidebarHandlers();
+
+    renderInApp(<Sidebar />, { client: makeClient(), activeCreatorId: 'creator-a' });
+
+    expect(screen.getByTestId('shell-mode-switch')).toBeInTheDocument();
+    const tablists = screen.getAllByRole('tablist');
+    expect(tablists).toHaveLength(1);
+    expect(tablists[0]).toHaveAttribute('data-testid', 'shell-mode-switch');
   });
 
   it('does not expose a Settings row in the sidebar footer (V1.125 P2)', async () => {
@@ -191,6 +207,7 @@ describe('Sidebar', () => {
 
     await user.click(screen.getByRole('tab', { name: '编排' }));
     expect(screen.getByRole('link', { name: '记忆' })).toBeInTheDocument();
+    expect(screen.getByRole('toolbar', { name: '工作区' })).toBeInTheDocument();
     // V1.130: Compute/Modules removed from the Orchestrator sidebar.
     expect(screen.queryByRole('button', { name: '计算' })).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: '模块' })).not.toBeInTheDocument();
@@ -415,6 +432,7 @@ describe('Sidebar — layout structure (AD-P2-2 T1)', () => {
   });
 
   it('scrolls nav internally (tabpanel overflow-auto) while the footer block stays pinned', async () => {
+    const user = userEvent.setup();
     useSidebarHandlers();
     renderInApp(<Sidebar />, { client: makeClient(), activeCreatorId: 'creator-a' });
 
@@ -422,6 +440,8 @@ describe('Sidebar — layout structure (AD-P2-2 T1)', () => {
     const tabpanel = screen.getByRole('tabpanel');
     expect(tabpanel).toHaveClass('overflow-auto');
     expect(tabpanel).toHaveClass('flex-1');
+
+    await user.click(screen.getByRole('tab', { name: 'Orchestrator' }));
 
     await waitFor(() =>
       expect(screen.getByRole('toolbar', { name: 'Workspace' })).toBeInTheDocument(),
@@ -432,9 +452,12 @@ describe('Sidebar — layout structure (AD-P2-2 T1)', () => {
     expect(toolbar.closest('.border-t')).not.toBeNull();
   });
 
-  it('places Profiles in a bottom-aligned footer block', async () => {
+  it('places Workspace profiles in a bottom-aligned footer block under Orchestrator', async () => {
+    const user = userEvent.setup();
     useSidebarHandlers();
     renderInApp(<Sidebar />, { client: makeClient(), activeCreatorId: 'creator-a' });
+
+    await user.click(screen.getByRole('tab', { name: 'Orchestrator' }));
 
     // Wait for the footer profile switcher to mount.
     await waitFor(() =>

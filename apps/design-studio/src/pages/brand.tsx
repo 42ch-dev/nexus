@@ -44,6 +44,11 @@ interface LogoDisplay {
   /** Recommended surface per DESIGN.md §Logo Usage. */
   panelBgClass: string;
   /**
+   * Square plate lockups (`primary`, `whiteBg`) fill card width via native
+   * `<img>` — not the fixed-height `<NexusLogo>` runtime API.
+   */
+  plateFill?: boolean;
+  /**
    * When true, invert the img so currentColor wordmarks/marks read as white
    * on dark hero panels (img-embedded `currentColor` resolves to black).
    */
@@ -57,7 +62,8 @@ const LOGO_DISPLAYS: LogoDisplay[] = [
     fileName: logoVariants.primary,
     description:
       'Default lockup — bright mark on brand deep-blue plate (matches logo-primary.png). Use in product shell and most surfaces.',
-    panelBgClass: 'bg-background-100',
+    panelBgClass: 'bg-brand-deep-blue',
+    plateFill: true,
   },
   {
     variant: 'whiteBg',
@@ -65,7 +71,8 @@ const LOGO_DISPLAYS: LogoDisplay[] = [
     fileName: logoVariants.whiteBg,
     description:
       'Lockup on white plate — only when a light/white surface is required (matches logo-white-bg.png).',
-    panelBgClass: 'bg-gray-alpha-100',
+    panelBgClass: 'bg-white',
+    plateFill: true,
   },
   {
     variant: 'white',
@@ -88,7 +95,7 @@ const LOGO_DISPLAYS: LogoDisplay[] = [
     label: 'Text',
     fileName: logoVariants.text,
     description:
-      'Wordmark — lowercase nexus (currentColor). On dark heroes set color to white (inline) or invert img.',
+      'Wordmark (logo-text.svg) — the only approved Nexus logo text. Always render via <NexusLogo variant="text"> (apps/web: NexusTextLogo). Never typeset "nexus"/"Nexus" with UI fonts as a brand substitute. On dark heroes set color to white (inline) or invert img.',
     panelBgClass: 'bg-brand-deep-blue',
     invertForDark: true,
   },
@@ -170,16 +177,30 @@ function LogoCard({ display }: { display: LogoDisplay }) {
   const src = LOGO_SOURCES[display.variant];
 
   return (
-    <div className="border border-gray-alpha-300 rounded-card bg-background-100 overflow-hidden">
+    <div
+      className="border border-gray-alpha-300 rounded-card bg-background-100 overflow-hidden"
+      data-testid={`logo-card-${display.variant}`}
+    >
       <div
         className={`${display.panelBgClass} p-8 flex items-center justify-center min-h-[100px]`}
+        data-testid={`logo-card-panel-${display.variant}`}
       >
-        <NexusLogo
-          variant={display.variant}
-          src={src}
-          size={display.variant === 'text' ? 28 : 32}
-          className={display.invertForDark ? 'brightness-0 invert' : undefined}
-        />
+        {display.plateFill ? (
+          <img
+            src={src}
+            alt="Nexus"
+            decoding="async"
+            data-testid={`logo-card-plate-img-${display.variant}`}
+            className="block w-full h-auto object-contain"
+          />
+        ) : (
+          <NexusLogo
+            variant={display.variant}
+            src={src}
+            size={display.variant === 'text' ? 28 : 32}
+            className={display.invertForDark ? 'brightness-0 invert' : undefined}
+          />
+        )}
       </div>
       <div className="p-4 border-t border-gray-alpha-200">
         <div className="flex items-center justify-between mb-1 gap-2">
@@ -196,11 +217,27 @@ function LogoGrid() {
   return (
     <section>
       <SectionHeading id="brand-logos">Logo variants</SectionHeading>
-      <p className="text-copy-16 text-gray-700 mb-6">
+      <p className="text-copy-16 text-gray-700 mb-4">
         All five <code className="font-mono bg-gray-alpha-100 px-1 rounded">logoVariants</code> from{' '}
         <code className="font-mono bg-gray-alpha-100 px-1 rounded">@42ch/nexus-ui</code>
-        — timeline marks (wide aspect) plus wordmark — on their recommended surfaces per DESIGN.md §
-        Logo Usage.
+        — square plate lockups, timeline marks (wide aspect), plus wordmark — on their recommended
+        surfaces per DESIGN.md § Logo Usage.
+      </p>
+      <p
+        data-testid="brand-wordmark-contract"
+        className="text-copy-16 text-gray-700 mb-6"
+      >
+        <strong className="font-medium text-gray-1000">Wordmark contract:</strong> whenever UI needs
+        Nexus <em>logo text</em>, render{' '}
+        <code className="font-mono bg-gray-alpha-100 px-1 rounded">logo-text.svg</code> through{' '}
+        <code className="font-mono bg-gray-alpha-100 px-1 rounded">
+          &lt;NexusLogo variant=&quot;text&quot;&gt;
+        </code>{' '}
+        (apps/web:{' '}
+        <code className="font-mono bg-gray-alpha-100 px-1 rounded">NexusTextLogo</code>). Do not
+        typeset <code className="font-mono bg-gray-alpha-100 px-1 rounded">nexus</code> /{' '}
+        <code className="font-mono bg-gray-alpha-100 px-1 rounded">Nexus</code> with UI fonts as a
+        brand substitute. Route titles and nav labels stay ordinary typography.
       </p>
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
         {LOGO_DISPLAYS.map((d) => (
@@ -215,10 +252,10 @@ function LogoGrid() {
 
 function ChronosShellMini({
   mode,
-  children,
+  logo,
 }: {
   mode: 'light' | 'dark';
-  children: ReactNode;
+  logo: ReactNode;
 }) {
   const isDark = mode === 'dark';
   return (
@@ -229,9 +266,8 @@ function ChronosShellMini({
       data-testid={`chronos-mini-${mode}`}
     >
       <div
-        className={`flex h-10 items-center px-3 ${
-          isDark ? 'bg-brand-deep-blue' : 'bg-brand-deep-blue'
-        }`}
+        className="flex h-10 items-center justify-between gap-3 px-3 bg-brand-deep-blue"
+        data-testid={`chronos-mini-titlebar-${mode}`}
       >
         <span
           className={`text-label-14 font-medium ${
@@ -240,15 +276,7 @@ function ChronosShellMini({
         >
           {isDark ? 'Chronos Dark' : 'Chronos Light'}
         </span>
-      </div>
-      <div
-        className={`flex h-12 items-center px-3 border-b ${
-          isDark
-            ? 'border-white/10 bg-[#0D1B26]'
-            : 'border-gray-alpha-200 bg-background-200'
-        }`}
-      >
-        {children}
+        {logo}
       </div>
       <div
         className={`min-h-[72px] p-4 ${
@@ -289,26 +317,35 @@ function ChronosContextSection() {
       </p>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
-        <ChronosShellMini mode="light">
-          <NexusLogo
-            variant="primary"
-            src={logoPrimarySrc}
-            size={logoShellHeightPx}
-            className="h-5 w-auto max-w-full shrink-0"
-          />
-        </ChronosShellMini>
-        <ChronosShellMini mode="dark">
-          <NexusLogo
-            variant="primary"
-            src={logoPrimarySrc}
-            size={logoShellHeightPx}
-            className="h-5 w-auto max-w-full shrink-0"
-          />
-        </ChronosShellMini>
+        <ChronosShellMini
+          mode="light"
+          logo={
+            <NexusLogo
+              variant="primary"
+              src={logoPrimarySrc}
+              size={logoShellHeightPx}
+              className="h-5 w-auto max-w-full shrink-0"
+            />
+          }
+        />
+        <ChronosShellMini
+          mode="dark"
+          logo={
+            <NexusLogo
+              variant="primary"
+              src={logoPrimarySrc}
+              size={logoShellHeightPx}
+              className="h-5 w-auto max-w-full shrink-0"
+            />
+          }
+        />
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        <div className="border border-gray-alpha-300 rounded-card overflow-hidden bg-brand-deep-blue">
+        <div
+          className="border border-gray-alpha-300 rounded-card overflow-hidden bg-brand-deep-blue"
+          data-testid="dark-hero-lockup"
+        >
           <div className="p-6 flex flex-col items-center gap-4 min-h-[120px] justify-center">
             <NexusLogo
               variant="white"
@@ -319,13 +356,13 @@ function ChronosContextSection() {
             <NexusLogo
               variant="text"
               src={logoTextSrc}
-              size={22}
-              className="h-[22px] w-auto brightness-0 invert"
+              size={26}
+              className="h-[26px] w-auto brightness-0 invert"
             />
           </div>
           <div className="px-4 py-2 border-t border-white/10 bg-brand-deep-blue/80">
             <span className="text-label-14 text-white/80">
-              Dark hero lockup — white mark + wordmark
+              Dark hero lockup — white mark + logo-text wordmark (not UI typography)
             </span>
           </div>
         </div>

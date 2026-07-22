@@ -1,12 +1,13 @@
 /**
- * Compute Modules view (Control Room — READ) — V1.114 P2 T4.
+ * Compute Modules body (Control Room — READ) — V1.114 P2 T4 / V1.131 P2.
  *
- * Lists every installed compute module and shows a read-only manifest detail
- * panel when the author selects one. No invocation, install, or uninstall UI.
+ * List/detail/query/error live here once. Settings modal mounts the body as
+ * the `modules` section; `/modules` is a compatibility redirect only.
  */
 import { Cpu, RefreshCw } from 'lucide-react';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { Navigate } from 'react-router-dom';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -16,13 +17,19 @@ import { useComputeModule, useComputeModules } from '@/api/queries';
 import { isOrchestrationEngineUnavailable } from '@/lib/nexus/errors';
 import { cn } from '@/lib/utils';
 
+/** Compatibility adapter — product entry is Settings modal `modules` section. */
 export function ModulesPage() {
+  return <Navigate to="/settings/modules" replace />;
+}
+
+/** Shared list/detail body — reused by SettingsModulesSection (no duplicate hooks). */
+export function ModulesPageBody() {
   const { t } = useTranslation('modules');
   const modules = useComputeModules();
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
   return (
-    <Card className="shadow-card">
+    <Card className="shadow-card" data-testid="modules-page-body">
       <CardHeader>
         <div className="flex items-center justify-between gap-2">
           <div>

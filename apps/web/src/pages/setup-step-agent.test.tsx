@@ -66,6 +66,7 @@ function makeDesktop(
       Promise.resolve({ creator_id: 'ctr_local', already_bootstrapped: true }),
     switchActiveCreator: () => Promise.resolve('/tmp/nexus'),
     restartDaemon: () => Promise.resolve(),
+    toggleMaximizeWindow: () => Promise.resolve(),
     ...overrides,
   };
 }

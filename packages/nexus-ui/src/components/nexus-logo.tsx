@@ -5,8 +5,14 @@
  * files in its source. Consumers resolve the asset through their own bundler
  * (e.g. Vite) and pass the resulting URL as `src`.
  *
- * Variants include timeline marks (`primary` | `color` | `white` | `mono`) and
- * the `text` wordmark. All are wide-aspect assets — size by height only.
+ * Variant groups:
+ * - Square plate lockups: `primary`, `whiteBg` (width-fill in gallery fixtures).
+ * - Timeline marks: `white`, `mono` (wide aspect — size by height only).
+ * - Wordmark: `text` — always pair with consumer-resolved `logo-text.svg`.
+ *
+ * When UI needs the Nexus **logo text** (lowercase wordmark), use `variant="text"`
+ * with `logo-text.svg`. Do not typeset "nexus" / "Nexus" with UI fonts as a brand
+ * substitute. Apps/web exposes this as `NexusTextLogo`.
  */
 
 import { logoVariants, type LogoVariantName } from '../tokens';

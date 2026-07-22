@@ -6,7 +6,7 @@
 **Location**: Top-level harness archive (`.mstar/archived/`) — not under `archived/knowledge/` (implementation knowledge supersession).  
 **Split from**: [deferred-features-cross-version-tracker.md](../knowledge/deferred-features-cross-version-tracker.md) §4–§5 (2026-05-30 restructure)  
 **Created**: 2026-05-30  
-**Last updated**: 2026-07-20 (V1.126 P3 closure: archived DF-V1123-STATUS-COMPACT, DF-V1123-RESIDUAL-CLEANUP, DF-V1122-STATUS-COMPACT)
+**Last updated**: 2026-07-22 (V1.131 close: DF-V1130-* shell IA + DF-V1131-* Chronos chrome/icons shipped)
 
 **Last updated (V1.55 history)**: 2026-06-22 (V1.55 closeout: 7 plans all Done — P-1 prepare + P0 DF-43 SQLite persistence / crate-model alignment (closed) + P1 DF-31 workspace interface skeleton + P2 game-bible Depth 3.5 (design-writing + design 五问 rubric + section completion detection + KB extraction; Master spec) + P3 Script profile scaffold (V1.54-style parity + additive BlockType dialogue/beat/act + script_category + ScaffoldTransaction closure on BOTH non-novel scaffolds) + P-mid QC rhythm + P-last closeout (Profile B compaction + spec promotion + tracker ship snapshot + tech-debt rollup); R-V154P1-W001 + R-V154P1-S002 + DF-43 + DF-31 all closed; 1 new R-V155P2-F002 → V1.56+; wire contracts unchanged)
 
@@ -136,6 +136,14 @@ Archived from [deferred-features-cross-version-tracker.md](../knowledge/deferred
 | REL-01 | POST /memory/review synchronous whole-queue pipeline — add bound/timeout/cancellation/concurrency | Shipped V1.80 | Bounded/serialized/deadline-aware rewrite (REVIEW_BATCH_LIMIT=50 + per-creator mutex + 5s partial-progress + has_more/processed drain). `R-V178P0-QC3-003` resolved. |
 | DF-49 | Standalone MCP server for Nexus capabilities | Cancelled V1.79 | Conflicts with ACP-client product direction (`STRATEGY.md`: CLI is an ACP client, not a server) + circular-invocation risk. |
 | DF-V1123-COMPOSITE-ENDPOINT | `GET /v1/daemon/timeline/overview` composite endpoint (overview slice) | V1.126 P2 | V1.123 compass-named; implicitly registered via `status.json` tracking_links; closed by V1.126 P2 without an open-row phase. Plan: `2026-07-20-v1.126-p2-composite-timeline-endpoint`. |
+| DF-V1130-SETTINGS-MODAL | Settings primary = modal (≥80vw×80vh); `/settings/*` deep links; one `SettingsModalHost` | V1.131 | P0 gear + P2 modal primary/sections/dirty/route-leave. Plans: `…-p0-chronos-titlebar`, `…-p2-shell-ia-finish`. |
+| DF-V1130-MODE-SWITCH-FOOTER | 创作\|编排 on 功能区 footer only | V1.131 | Plan `…-p2-shell-ia-finish` T1. |
+| DF-V1130-WORKSPACE-UNDER-ORCH | **工作区** under 编排 功能区 only | V1.131 | Plan `…-p2-shell-ia-finish` T3. |
+| DF-V1130-COMPUTE-IN-SETTINGS | Modules/Compute as Settings section; no Compute in 编排 nav | V1.131 | Plan `…-p2-shell-ia-finish` T4. |
+| DF-V1130-PROFILE-SSOT | Profile membership SSOT hold (regression green) | V1.131 | Plan `…-p2-shell-ia-finish` T5 — held invariant, no open UI gap. |
+| DF-V1131-CHRONOS-TITLEBAR | Full-width Chronos ink titlebar + Tauri Overlay | V1.131 | Plan `…-p0-chronos-titlebar`. Open human Overlay smoke: `R-V1131P0-QC2-W-001`. |
+| DF-V1131-LOGO-GALLERY-LOCKUP | Studio plate fill + wordmark + Chronos mini on ink | V1.131 | Plan `…-p1-logo-gallery-lockup`. Open human wordmark measure: `R-VI-004`. |
+| DF-V1131-DESKTOP-ICON | Desktop Chronos plate icon compose/generate + Dock cache README | V1.131 | Plan `…-p3-desktop-icons-residuals`. Open human Dock tile: `R-VI-003`. |
 
 ---
 
@@ -834,4 +842,18 @@ Archived from [deferred-features-cross-version-tracker.md](../knowledge/deferred
 | Closed tracker items | DF-V1123-STATUS-COMPACT, DF-V1123-RESIDUAL-CLEANUP, DF-V1122-STATUS-COMPACT |
 | Wire contracts | None (harness hygiene only) |
 | Highlights | status.json compacted from 145KB to 17KB; 244 low/nit residuals archived; 43 open residuals remain (1 high, 3 medium, 10 low, 29 nit); plans-done.json 487→504 |
+
+### V1.131 delivery snapshot (Shipped — PR pending)
+
+| Category | Position |
+|----------|----------|
+| Delivery SSOT | [v1.131/delivery-compass.md](../iterations/v1.131/delivery-compass.md) |
+| Shipped at | 2026-07-22 (iteration-close; PR to `main` follows) |
+| Branch | `iteration/v1.131` |
+| Scope | Chronos titlebar Overlay + logo gallery lockup + DF-V1130 shell IA finish + desktop icons + residual slate |
+| Plans | P0 `…-p0-chronos-titlebar`, P1 `…-p1-logo-gallery-lockup`, P2 `…-p2-shell-ia-finish`, P3 `…-p3-desktop-icons-residuals` (all Profile B Done) |
+| Closed tracker items | DF-V1130-SETTINGS-MODAL, MODE-SWITCH-FOOTER, WORKSPACE-UNDER-ORCH, COMPUTE-IN-SETTINGS, PROFILE-SSOT (hold); DF-V1131-CHRONOS-TITLEBAR, LOGO-GALLERY-LOCKUP, DESKTOP-ICON |
+| Wire contracts | Unchanged (`wire_contracts_changed: false` all plans) |
+| Compound docs | `settings-modal-primary-host.md`, `chronos-titlebar-overlay.md`; residual archival anti-pattern update |
+| Open at close (human) | `R-VI-003` Dock live, `R-V1131P0-QC2-W-001` Overlay H2–H4, `R-VI-002` / `R-VI-004` gallery notes / wordmark sign-off |
 

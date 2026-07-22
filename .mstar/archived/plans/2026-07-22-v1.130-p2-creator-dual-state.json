@@ -1,0 +1,26 @@
+{
+  "plan_id": "2026-07-22-v1.130-p2-creator-dual-state",
+  "status": "Done",
+  "type": "feature",
+  "metadata": {
+    "primary_spec": ".mstar/iterations/v1.130/specs/creator-dual-state-entry.md",
+    "spec_refs": [
+      ".mstar/iterations/v1.130/specs/creator-dual-state-entry.md"
+    ],
+    "iteration_refs": [
+      ".mstar/iterations/v1.130/delivery-compass.md"
+    ],
+    "iteration_compass": "v1.130/delivery-compass.md",
+    "spec_integration_branch": "iteration/v1.130",
+    "working_branch": "plan/v1.130-p2-creator-dual-state",
+    "merge_target": "iteration/v1.130",
+    "wire_contracts_changed": true,
+    "iteration_id": "V1.130",
+    "blocked_by": [
+      "2026-07-22-v1.130-p1-shell-frame"
+    ],
+    "wave": "3",
+    "seq": "3a",
+    "description": "Create World + continue World→Work; entity Chat slot + action buttons"
+  }
+}

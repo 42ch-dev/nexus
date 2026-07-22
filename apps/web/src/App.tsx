@@ -7,6 +7,11 @@ import {
 } from '@/lib/active-creator-context';
 import { SetupCompletedProvider } from '@/lib/setup-completed-context';
 import { RootLayout } from '@/components/layout/root-layout';
+import { SettingsModalHost } from '@/components/layout/settings-modal-host';
+import {
+  SettingsModalProvider,
+  useSettingsModal,
+} from '@/components/layout/settings-modal-context';
 import { DaemonLaunchGate } from '@/components/setup/daemon-launch-gate';
 import { SetupGate } from '@/components/setup/setup-gate';
 import { ChapterPage } from '@/pages/chapter-page';
@@ -18,11 +23,6 @@ import { ModulesPage } from '@/pages/modules-page';
 import { NotFoundPage } from '@/pages/not-found-page';
 import { SchedulePage } from '@/pages/schedule-page';
 import { SessionsPage } from '@/pages/sessions-page';
-import { SettingsAgentSection } from '@/pages/settings/settings-agent-section';
-import { SettingsAdvancedSection } from '@/pages/settings/settings-advanced-section';
-import { SettingsAppearanceSection } from '@/pages/settings/settings-appearance-section';
-import { SettingsShellLayout } from '@/pages/settings/settings-shell-layout';
-import { SettingsWorkspaceSection } from '@/pages/settings/settings-workspace-section';
 import { WorkShellLayout } from '@/components/layout/work-shell-layout';
 import { CreatorHubPage } from '@/pages/creator-hub-page';
 import { SetupWizardPage } from '@/pages/setup-wizard-page';
@@ -82,9 +82,17 @@ function StrategyRedirect() {
   return <Navigate to={{ pathname: '/strategies', search }} replace />;
 }
 
+/**
+ * Product routes render against the last safe non-settings location while the
+ * browser URL is `/settings/*` or `/modules` (modal-primary, V1.131 P2).
+ */
 function AppRoutes() {
+  const location = useLocation();
+  const { open, backgroundLocation } = useSettingsModal();
+  const routesLocation = open ? backgroundLocation : location;
+
   return (
-    <Routes>
+    <Routes location={routesLocation}>
       <Route path="setup" element={<SetupWizardPage />} />
       <Route element={<SetupGate><RootLayout /></SetupGate>}>
         <Route index element={<Navigate to="/works" replace />} />
@@ -155,24 +163,10 @@ function AppRoutes() {
         <Route path="sessions" element={<SessionsPage />} />
         <Route path="schedule" element={<SchedulePage />} />
         <Route path="capabilities" element={<Navigate to="/sessions" replace />} />
+        {/* Compatibility only — Settings modal owns Modules (V1.131 P2). */}
         <Route path="modules" element={<ModulesPage />} />
         <Route path="findings" element={<FindingsPage />} />
         <Route path="memory" element={<MemoryPage />} />
-        <Route path="settings" element={<SettingsShellLayout />}>
-          <Route index element={<Navigate to="agent" replace />} />
-          <Route path="agent" element={<SettingsAgentSection />} />
-          <Route path="advanced" element={<SettingsAdvancedSection />} />
-          <Route path="workspace" element={<SettingsWorkspaceSection />} />
-          <Route path="appearance" element={<SettingsAppearanceSection />} />
-          <Route
-            path="connection"
-            element={<Navigate to="/settings/advanced#connection" replace />}
-          />
-          <Route
-            path="setup"
-            element={<Navigate to="/settings/advanced#setup" replace />}
-          />
-        </Route>
         <Route path="strategies" element={<StrategiesPage />} />
         <Route
           path="strategies/:presetId"
@@ -201,7 +195,10 @@ export function App() {
       <DefaultProfileCoordinator />
       <SetupCompletedProvider>
         <DaemonLaunchGate>
-          <AppRoutes />
+          <SettingsModalProvider>
+            <AppRoutes />
+            <SettingsModalHost />
+          </SettingsModalProvider>
         </DaemonLaunchGate>
       </SetupCompletedProvider>
     </ActiveCreatorProvider>

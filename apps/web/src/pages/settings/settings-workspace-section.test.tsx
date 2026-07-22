@@ -36,6 +36,7 @@ function makeDesktopCapabilities(): DesktopCapabilities {
     ),
     switchActiveCreator: vi.fn(() => Promise.resolve('/tmp/nexus')),
     restartDaemon: vi.fn(() => Promise.resolve()),
+    toggleMaximizeWindow: vi.fn(() => Promise.resolve()),
   };
 }
 

@@ -1,46 +1,24 @@
 /**
- * Settings shell layout — V1.103 P0 (settings-shell-ia.md) + V1.104 W2.
+ * Settings shell layout — demoted / test-only (V1.131 P2).
  *
- * Owns page title/helper, secondary section nav, and `<Outlet />`.
- * Section bodies live in sibling route modules. Workspace nav added in V1.104.
+ * Full-page Settings is no longer the product primary. The App mounts
+ * {@link SettingsModalHost} with {@link SettingsSectionFrame}. This layout
+ * remains for isolated section unit tests that still compose an Outlet tree.
+ * Nav entries are generated from {@link SETTINGS_SECTION_DESCRIPTORS} so the
+ * test shell cannot drift from the modal registry SSOT.
  */
 
-import { Bot, FolderOpen, Palette, Settings, type LucideIcon } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { NavLink, Outlet } from 'react-router-dom';
 
+import {
+  SETTINGS_SECTION_DESCRIPTORS,
+  settingsPathFor,
+} from '@/components/layout/settings-section-registry';
 import { cn } from '@/lib/utils';
 
 export function SettingsShellLayout() {
   const { t } = useTranslation('settings');
-
-  /** V1.112 P0 four-tab nav — Agent / Workspace / Appearance / Advanced. */
-  const SETTINGS_SECTIONS: {
-    id: 'agent' | 'workspace' | 'appearance' | 'advanced';
-    label: string;
-    to: string;
-    icon: LucideIcon;
-  }[] = [
-    { id: 'agent', label: t('nav.agent'), to: '/settings/agent', icon: Bot },
-    {
-      id: 'workspace',
-      label: t('nav.workspace'),
-      to: '/settings/workspace',
-      icon: FolderOpen,
-    },
-    {
-      id: 'appearance',
-      label: t('nav.appearance'),
-      to: '/settings/appearance',
-      icon: Palette,
-    },
-    {
-      id: 'advanced',
-      label: t('nav.advanced'),
-      to: '/settings/advanced',
-      icon: Settings,
-    },
-  ];
 
   return (
     <div
@@ -58,10 +36,10 @@ export function SettingsShellLayout() {
         className="flex flex-wrap gap-1 border-b border-gray-alpha-200 pb-px"
         data-testid="settings-section-nav"
       >
-        {SETTINGS_SECTIONS.map(({ id, label, to, icon: Icon }) => (
+        {SETTINGS_SECTION_DESCRIPTORS.map(({ id, labelKey, icon: Icon }) => (
           <NavLink
             key={id}
-            to={to}
+            to={settingsPathFor(id)}
             data-testid={`settings-section-nav-${id}`}
             className={({ isActive }) =>
               cn(
@@ -74,7 +52,7 @@ export function SettingsShellLayout() {
             }
           >
             <Icon className="size-4 shrink-0" aria-hidden="true" />
-            <span>{label}</span>
+            <span>{t(labelKey)}</span>
           </NavLink>
         ))}
       </nav>

@@ -942,6 +942,20 @@ fn ensure_setup_bootstrap() -> Result<BootstrapResult, String> {
     ensure_setup_bootstrap_at(&config_path).map_err(|e| format!("bootstrap failed: {e}"))
 }
 
+/// Toggle the main webview window between maximized and restored. Wired from the
+/// Chronos titlebar empty-paint double-click handler (Overlay titlebar AC-5).
+///
+/// Tauri v2 `WebviewWindow` exposes `is_maximized` / `maximize` / `unmaximize`
+/// (no `toggle_maximize` method).
+#[tauri::command]
+fn toggle_maximize_window(window: tauri::WebviewWindow) -> Result<(), String> {
+    if window.is_maximized().map_err(|e| e.to_string())? {
+        window.unmaximize().map_err(|e| e.to_string())
+    } else {
+        window.maximize().map_err(|e| e.to_string())
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // The workspace root is captured once at startup and stored as managed
@@ -1006,6 +1020,7 @@ pub fn run() {
             set_agent_profile,
             get_agent_profile,
             ensure_setup_bootstrap,
+            toggle_maximize_window,
             connection_config::get_connection_config,
             connection_config::set_connection_config,
             connection_config::delete_connection_config,

@@ -4,8 +4,8 @@ import { useTranslation } from 'react-i18next';
 import { CanvasNavCommands } from '@/components/canvas/canvas-nav-commands';
 import { CommandPalette, openPalette } from '@/components/command-palette';
 import { CreatorEntitySelectionProvider } from '@/components/layout/creator-entity-selection-context';
+import { ChronosTitlebar } from '@/components/layout/chronos-titlebar';
 import { DaemonStatusBar } from '@/components/layout/daemon-status-bar';
-import { Header } from '@/components/layout/header';
 import { Sidebar } from '@/components/layout/sidebar';
 import { useHotkey } from '@/lib/use-hotkey';
 import { useTimelineShortcut } from '@/lib/keyboard-shortcuts';
@@ -46,8 +46,8 @@ function useRouteTitle(): string {
  * The root is locked to the viewport (`h-screen overflow-hidden`): the sidebar
  * is a full-height rail that never scrolls at the top level, and the main
  * column constrains its children with `min-h-0` so only `<main>` (the content
- * region) scrolls. The header, banner, and {@link DaemonStatusBar} are fixed
- * flex children that stay on screen.
+ * region) scrolls. The full-width {@link ChronosTitlebar}, mobile nav, and
+ * {@link DaemonStatusBar} are fixed flex children that stay on screen.
  *
  * Fixed 248px sidebar at `lg` and above; collapses to a horizontal top nav
  * below `lg`. Main content max-width 1200px with 24px desktop / 16px mobile
@@ -76,12 +76,15 @@ export function RootLayout() {
 
   return (
     <CreatorEntitySelectionProvider>
-    <div className="flex h-screen overflow-hidden bg-background-100 text-gray-1000">
-      {/* Desktop sidebar — full-height rail (AD-P2-2): h-screen + overflow-hidden
+    <div className="flex h-screen flex-col overflow-hidden bg-background-100 text-gray-1000">
+      <ChronosTitlebar title={title} />
+
+      <div className="flex min-h-0 flex-1 overflow-hidden">
+      {/* Desktop sidebar — full-height rail (AD-P2-2): h-full + overflow-hidden
           so the sidebar chrome manages its own internal scroll (nav scrolls in
           the middle; the Profiles footer block is pinned at the bottom).
           Width consumes the DESIGN.md sidebar-nav.width token (w-sidebar-nav-width). */}
-      <aside className="hidden h-screen w-sidebar-nav-width shrink-0 flex-col overflow-hidden lg:flex">
+      <aside className="hidden h-full w-sidebar-nav-width shrink-0 flex-col overflow-hidden lg:flex">
         <Sidebar />
       </aside>
 
@@ -110,8 +113,6 @@ export function RootLayout() {
           ))}
         </nav>
 
-        <Header title={title} />
-
         {/* Content region — the ONLY scroll region (AD-P2-2). min-h-0 allows
             the flex child to shrink within the column so overflow scrolls here
             instead of growing the column past the viewport. */}
@@ -130,6 +131,7 @@ export function RootLayout() {
         </main>
 
         <DaemonStatusBar />
+      </div>
       </div>
 
       {/* V1.111 P0 T4 — registers canvas nav commands into the palette.

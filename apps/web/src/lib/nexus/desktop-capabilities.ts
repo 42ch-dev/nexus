@@ -113,6 +113,8 @@ export interface DesktopCapabilities {
   switchActiveCreator(creatorId: string): Promise<string>;
   /** Resolve the default workspace root path (desktop only). */
   getWorkspaceRoot(): Promise<string>;
+  /** Toggle the main window between maximized and restored (desktop titlebar double-click). */
+  toggleMaximizeWindow(): Promise<void>;
   /**
    * Bootstrap local creator/workspace state before daemon start.
    * Idempotent: if a creator ID already exists, returns it without overwriting.
@@ -318,6 +320,14 @@ export class TauriDesktopCapabilities implements DesktopCapabilities {
   async getWorkspaceRoot(): Promise<string> {
     try {
       return await tauriInvoke().core.invoke<string>('get_workspace_root');
+    } catch (err) {
+      throw asDesktopError(err);
+    }
+  }
+
+  async toggleMaximizeWindow(): Promise<void> {
+    try {
+      await tauriInvoke().core.invoke<void>('toggle_maximize_window', undefined);
     } catch (err) {
       throw asDesktopError(err);
     }

@@ -37,12 +37,10 @@ vi.mock('@/components/command-palette', () => ({
 vi.mock('@/components/brand/nexus-logo', () => ({
   NexusLogo: () => <div data-testid="nexus-logo">Nexus</div>,
 }));
-// Header also uses useTheme(); mock to a simple semantic element so the
-// layout structure (root / aside / main column) is queryable without a
-// ThemeProvider.
-vi.mock('@/components/layout/header', () => ({
-  Header: ({ title }: { title: string }) => (
-    <header data-testid="app-header">{title}</header>
+// ChronosTitlebar uses useTheme() and settings context; mock to keep DOM structural.
+vi.mock('@/components/layout/chronos-titlebar', () => ({
+  ChronosTitlebar: ({ title }: { title: string }) => (
+    <header data-testid="chronos-titlebar">{title}</header>
   ),
 }));
 
@@ -88,13 +86,13 @@ describe('RootLayout — scroll split (AD-P2-2)', () => {
     expect(root).toHaveClass('overflow-hidden');
   });
 
-  it('establishes the sidebar as a full-height rail (h-screen + overflow-hidden + flex-col)', () => {
+  it('establishes the sidebar as a full-height rail (h-full + overflow-hidden + flex-col)', () => {
     useCreatorHandler();
     const { container } = renderLayout();
 
     const aside = container.querySelector('aside');
     expect(aside).not.toBeNull();
-    expect(aside).toHaveClass('h-screen');
+    expect(aside).toHaveClass('h-full');
     expect(aside).toHaveClass('overflow-hidden');
     expect(aside).toHaveClass('flex-col');
   });
@@ -118,19 +116,12 @@ describe('RootLayout — scroll split (AD-P2-2)', () => {
     expect(main).toHaveClass('min-h-0');
   });
 
-  it('renders the sidebar nav and DaemonStatusBar slot inside the main column', () => {
+  it('renders the Chronos titlebar above the sidebar/content row', () => {
     useCreatorHandler();
     const { container } = renderLayout();
 
-    // The aside contains the sidebar (nav element from Sidebar).
-    const aside = container.querySelector('aside');
-    expect(aside?.querySelector('nav')).not.toBeNull();
-
-    // The main column contains the content region and ends with DaemonStatusBar
-    // (returns null in browser build, so no status-bar DOM — the slot is
-    // established by position, not by a rendered element).
-    const main = container.querySelector('main');
-    expect(main?.querySelector('[data-testid="outlet-content"]')).not.toBeNull();
+    const root = container.firstElementChild as HTMLElement;
+    expect(root.querySelector('[data-testid="chronos-titlebar"]')).not.toBeNull();
   });
 });
 

@@ -101,3 +101,11 @@ Engineering reference for the Nexus OSS harness **knowledge** tree.
 | --- | --- |
 | [architecture-patterns/creator-shell-content-mode-pattern.md](architecture-patterns/creator-shell-content-mode-pattern.md) | Creator shell content mode — `CreatorEntitySelectionContext` SSOT for Create page vs Controller stub; `@web-layout/creator-shell-content` presentational extract; Back clears selection; orthogonal to canvas routes (V1.128 P2 distilled; compound V1.128) |
 | [architecture-patterns/ui-component-promotion-workflow.md](architecture-patterns/ui-component-promotion-workflow.md) | **Updated** — V1.128 two-tier Studio import model (`@web-*` extracts vs `@42ch/nexus-ui` promoted primitives vs `@web-ui/*` transitional); Surfaces badge convention; RF-free `@web-canvas/*` NLE overlay adoption pattern (V1.128 P3 + P1 distilled) |
+
+### V1.131 additions
+
+| Document | Description |
+| --- | --- |
+| [architecture-patterns/settings-modal-primary-host.md](architecture-patterns/settings-modal-primary-host.md) | Settings modal primary host — one `SettingsModalHost`, section-descriptor SSOT, deep links over safe background, BrowserRouter dirty leave (restore URL + host confirm), Studio chrome fixtures (V1.131 P0+P2 distilled) |
+| [architecture-patterns/chronos-titlebar-overlay.md](architecture-patterns/chronos-titlebar-overlay.md) | Chronos titlebar Overlay — Tauri v2 `titleBarStyle: Overlay` + native traffic lights, web ink bar, non-interactive drag regions only, maximize IPC, human Overlay smoke gate (V1.131 P0 distilled) |
+| [conventions/profile-b-residual-archival-procedure.md](conventions/profile-b-residual-archival-procedure.md) | **Updated** — anti-pattern: do not archive live-smoke residuals (Dock / Overlay) before QA Pass evidence (V1.131 P3 QC2 F-001) |

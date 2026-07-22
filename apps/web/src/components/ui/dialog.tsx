@@ -21,11 +21,14 @@ export const DialogClose = DialogPrimitive.Close;
 export function DialogContent({
   children,
   className,
+  bodyClassName,
   title,
   description,
 }: {
   children: ReactNode;
   className?: string;
+  /** Optional override for the scrollable body wrapper (e.g. full-height modal frames). */
+  bodyClassName?: string;
   title: string;
   description?: string;
 }) {
@@ -39,7 +42,7 @@ export function DialogContent({
           className,
         )}
       >
-        <div className="flex items-start justify-between gap-4 p-6 pb-4">
+        <div className="flex shrink-0 items-start justify-between gap-4 p-6 pb-4">
           <div className="flex flex-col gap-1">
             <DialogPrimitive.Title className="text-heading-20 font-heading tracking-tight text-gray-1000">
               {title}
@@ -57,7 +60,7 @@ export function DialogContent({
             <X className="h-4 w-4" aria-hidden />
           </DialogPrimitive.Close>
         </div>
-        <div className="overflow-y-auto px-6 pb-6">{children}</div>
+        <div className={cn('overflow-y-auto px-6 pb-6', bodyClassName)}>{children}</div>
       </DialogPrimitive.Content>
     </DialogPrimitive.Portal>
   );

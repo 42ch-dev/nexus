@@ -12,7 +12,7 @@
  * swatch or component variant. Follow apps/web conventions: vitest + jsdom +
  * @testing-library/react.
  */
-import { act, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -193,6 +193,55 @@ describe('Chronos gallery acceptance', () => {
     expect(primary.className).not.toMatch(/\bdark:bg-brand-cyan\b/);
   });
 
+  it('dark theme keeps primary Button cyan fill + deep text (no light/dark fork)', () => {
+    // ThemeProvider must apply `.dark` from matchMedia — do not inject the class.
+    mockMatchMediaFull({ dark: true });
+    renderStudio('/components');
+    expect(document.documentElement.classList.contains('dark')).toBe(true);
+    const primary = screen.getByTestId('button-primary-default');
+    expect(primary.className).toMatch(/\bbg-brand-cyan\b/);
+    expect(primary.className).toMatch(/\btext-brand-deep-blue\b/);
+    expect(primary.className).not.toMatch(/\bdark:bg-brand-cyan\b/);
+  });
+
+  it('dark theme keeps token blue-700 swatch on cyan signal scale', async () => {
+    // jsdom does not resolve CSS custom properties (vitest `css: false`).
+    // Harness: only return Chronos cyan paint when ThemeProvider applied `.dark`
+    // (matchMedia-driven — no manual classList.add).
+    const realGetComputedStyle = window.getComputedStyle.bind(window);
+    vi.spyOn(window, 'getComputedStyle').mockImplementation((elt, pseudo) => {
+      const style = realGetComputedStyle(elt, pseudo);
+      const bg =
+        elt instanceof HTMLElement ? elt.style.backgroundColor : '';
+      if (bg === 'var(--color-blue-700)') {
+        const paint = document.documentElement.classList.contains('dark')
+          ? 'rgb(37, 209, 224)'
+          : 'rgb(1, 1, 1)';
+        return new Proxy(style, {
+          get(target, prop, receiver) {
+            if (prop === 'backgroundColor') return paint;
+            const value = Reflect.get(target, prop, receiver);
+            return typeof value === 'function' ? value.bind(target) : value;
+          },
+        });
+      }
+      return style;
+    });
+
+    mockMatchMediaFull({ dark: true });
+    renderStudio('/tokens');
+    expect(document.documentElement.classList.contains('dark')).toBe(true);
+    expect(screen.getByTestId('tokens-chronos-note')).toHaveTextContent(/cyan signal/i);
+    const swatch = screen.getByTestId('color-swatch-blue-700');
+    const fill = swatch.querySelector('[style*="--color-blue-700"]');
+    expect(fill).not.toBeNull();
+    expect(swatch).toHaveTextContent('blue-700');
+    // Chronos blue-700 under .dark ≡ #25d1e0 / rgb(37, 209, 224)
+    await waitFor(() => {
+      expect(swatch.textContent).toMatch(/rgb\(\s*37\s*,\s*209\s*,\s*224\s*\)|#25d1e0/i);
+    });
+  });
+
   it('brand page states Chronos identity without N-network lockup copy', () => {
     mockMatchMedia(false);
     renderStudio('/brand');
@@ -205,6 +254,63 @@ describe('Chronos gallery acceptance', () => {
     renderStudio('/surfaces');
     expect(screen.getByTestId('surfaces-chronos-note')).toHaveTextContent(/cyan active affordances/i);
     expect(screen.getByTestId('surfaces-chronos-note')).toHaveTextContent(/warm-paper/i);
+  });
+});
+
+/* ---- Brand logo gallery lockup (V1.131 P1) ----------------------------- */
+
+describe('Brand logo gallery lockup', () => {
+  beforeEach(() => {
+    mockMatchMedia(false);
+    renderStudio('/brand');
+  });
+
+  it('primary plate card uses deep-blue panel and width-fill img', () => {
+    const panel = screen.getByTestId('logo-card-panel-primary');
+    expect(panel.className).toMatch(/\bbg-brand-deep-blue\b/);
+    expect(panel.className).not.toMatch(/\bbg-gray-alpha/);
+
+    const img = screen.getByTestId('logo-card-plate-img-primary');
+    expect(img).toHaveClass('block', 'w-full', 'h-auto', 'object-contain');
+    expect(img).toHaveAttribute('src');
+    expect(img).toHaveAccessibleName('Nexus');
+  });
+
+  it('whiteBg plate card uses white panel and width-fill img', () => {
+    const panel = screen.getByTestId('logo-card-panel-whiteBg');
+    expect(panel.className).toMatch(/\bbg-white\b/);
+    expect(panel.className).not.toMatch(/\bbg-gray-alpha/);
+
+    const img = screen.getByTestId('logo-card-plate-img-whiteBg');
+    expect(img).toHaveClass('block', 'w-full', 'h-auto', 'object-contain');
+    expect(img).toHaveAccessibleName('Nexus');
+  });
+
+  it('Chronos mini renders logo inside the deep titlebar row', () => {
+    for (const mode of ['light', 'dark'] as const) {
+      const titlebar = screen.getByTestId(`chronos-mini-titlebar-${mode}`);
+      expect(titlebar.className).toMatch(/\bbg-brand-deep-blue\b/);
+      const logo = within(titlebar).getByRole('img', { name: 'Nexus' });
+      expect(logo).toBeInTheDocument();
+      expect(logo.className).toMatch(/\bh-5\b/);
+    }
+  });
+
+  it('dark hero lockup wordmark renders larger than V1.130 caption scale', () => {
+    const hero = screen.getByTestId('dark-hero-lockup');
+    const wordmark = within(hero)
+      .getAllByRole('img')
+      .find((img) => img.className.includes('h-[26px]'));
+    expect(wordmark).toBeDefined();
+    expect(wordmark?.getAttribute('src')).toMatch(/logo-text/);
+    expect(wordmark).toHaveAccessibleName('Nexus');
+  });
+
+  it('documents the logo-text wordmark contract on Brand', () => {
+    const note = screen.getByTestId('brand-wordmark-contract');
+    expect(note).toHaveTextContent(/logo-text\.svg/);
+    expect(note).toHaveTextContent(/NexusTextLogo/);
+    expect(note).toHaveTextContent(/variant="text"/);
   });
 });
 
@@ -670,36 +776,37 @@ describe('Surfaces page — app shell fixture', () => {
     expect(screen.getAllByText('Orchestrator').length).toBeGreaterThanOrEqual(1);
   });
 
-  it('renders Worlds-first nav and Create content placeholder', () => {
+  it('renders Worlds-first nav and Creator mode content placeholder', () => {
     expect(screen.getAllByText('Worlds').length).toBeGreaterThanOrEqual(1);
-    expect(screen.getByTestId('app-shell-content-create')).toBeInTheDocument();
+    expect(screen.getByTestId('app-shell-fixture-light-content')).toBeInTheDocument();
   });
 
   it('renders Settings fixture sidebar with SSOT segmented pill tabs (FB-UI-002)', () => {
     // The Settings fixture consumes ShellSidebarChrome — segmented pill
-    // tablist, not stale underline tabs.
+    // tablist, not stale underline tabs. Default tab is Orchestrator so the
+    // Workspace profile selector is visible (V1.131 P2).
     const settingsShell = screen.getByTestId('settings-shell-chrome');
     const tablist = within(settingsShell).getByRole('tablist', {
       name: 'Primary navigation',
     });
     expect(
       within(tablist).getByRole('tab', { name: 'Creator' }),
-    ).toHaveAttribute('aria-selected', 'true');
+    ).toHaveAttribute('aria-selected', 'false');
     expect(
       within(tablist).getByRole('tab', { name: 'Orchestrator' }),
-    ).toHaveAttribute('aria-selected', 'false');
+    ).toHaveAttribute('aria-selected', 'true');
   });
 
   it('renders Settings fixture sidebar with sectioned icon nav (FB-UI-003)', () => {
     const settingsShell = screen.getByTestId('settings-shell-chrome');
-    // Creator nav groups render as section headers + icon+label items (V1.128 Worlds-first).
-    expect(within(settingsShell).getAllByText('Worlds').length).toBeGreaterThanOrEqual(1);
+    // Orchestrator groups (Memory / Runtime / Strategies) when 工作区 is shown.
+    expect(within(settingsShell).getAllByText('Memory').length).toBeGreaterThanOrEqual(1);
   });
 
-  it('renders Settings fixture profiles as icon-only (FB-UI-001)', () => {
+  it('renders Settings fixture Workspace profiles as icon-only under Orchestrator (FB-UI-001)', () => {
     const settingsShell = screen.getByTestId('settings-shell-chrome');
     const toolbar = within(settingsShell).getByRole('toolbar', {
-      name: 'Profiles',
+      name: 'Workspace',
     });
     expect(toolbar).toBeInTheDocument();
     // Icon-only — no display name text visible in the settings shell.
@@ -708,14 +815,24 @@ describe('Surfaces page — app shell fixture', () => {
     ).not.toBeInTheDocument();
   });
 
-  it('renders the profile footer with creator name', () => {
+  it('renders the profile footer with creator name in the standalone profiles gallery', () => {
     expect(screen.getAllByText('Local Creator').length).toBeGreaterThanOrEqual(1);
   });
 
-  it('renders add-profile button with accessible label', () => {
-    const appShell = screen.getByTestId('app-shell-fixture');
+  it('renders add-profile button under Orchestrator mode switch (dark fixture)', () => {
+    const appShell = screen.getByTestId('app-shell-fixture-dark');
     expect(
       within(appShell).getByRole('button', { name: 'Add profile' }),
+    ).toBeInTheDocument();
+    expect(within(appShell).getByTestId('shell-mode-switch')).toBeInTheDocument();
+  });
+
+  it('renders footer mode switch in both light and dark app-shell fixtures', () => {
+    expect(
+      within(screen.getByTestId('app-shell-fixture-light')).getByTestId('shell-mode-switch'),
+    ).toBeInTheDocument();
+    expect(
+      within(screen.getByTestId('app-shell-fixture-dark')).getByTestId('shell-mode-switch'),
     ).toBeInTheDocument();
   });
 
@@ -1003,7 +1120,7 @@ describe('Surfaces page — Settings shell chrome fixtures', () => {
     ).not.toBeInTheDocument();
   });
 
-  it('renders section nav with Agent, Workspace, Advanced', () => {
+  it('renders section nav with Agent, Workspace, Appearance, Modules, Advanced', () => {
     const hostRoot = screen.getByTestId('settings-host-fixtures');
     const sectionNav = within(hostRoot).getByTestId('settings-section-nav');
     expect(
@@ -1012,6 +1129,12 @@ describe('Surfaces page — Settings shell chrome fixtures', () => {
     expect(
       within(sectionNav).getByTestId('settings-section-nav-workspace'),
     ).toHaveTextContent('Workspace');
+    expect(
+      within(sectionNav).getByTestId('settings-section-nav-appearance'),
+    ).toHaveTextContent('Appearance');
+    expect(
+      within(sectionNav).getByTestId('settings-section-nav-modules'),
+    ).toHaveTextContent('Modules');
     expect(
       within(sectionNav).getByTestId('settings-section-nav-advanced'),
     ).toHaveTextContent('Advanced');
@@ -1078,7 +1201,7 @@ describe('Surfaces page — Settings shell chrome fixtures', () => {
     ).not.toBeInTheDocument();
   });
 
-  it('renders static empty frames for all four Must sections', () => {
+  it('renders static empty frames for registry section bodies', () => {
     const framesRoot = screen.getByTestId(
       'settings-host-fixture-section-frames',
     );
@@ -1093,6 +1216,12 @@ describe('Surfaces page — Settings shell chrome fixtures', () => {
     ).toBeInTheDocument();
     expect(
       within(framesRoot).getByTestId('settings-section-frame-workspace'),
+    ).toBeInTheDocument();
+    expect(
+      within(framesRoot).getByTestId('settings-section-frame-appearance'),
+    ).toBeInTheDocument();
+    expect(
+      within(framesRoot).getByTestId('settings-section-frame-modules'),
     ).toBeInTheDocument();
   });
 

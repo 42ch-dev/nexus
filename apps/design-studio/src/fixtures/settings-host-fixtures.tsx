@@ -23,7 +23,9 @@ import { useState, type ReactNode } from 'react';
 
 import {
   Bot,
+  Cpu,
   FolderOpen,
+  Palette,
   RotateCcw,
   Settings,
   Wifi,
@@ -63,11 +65,25 @@ import {
   ORCHESTRATOR_NAV,
 } from '@/fixtures/shell-nav-data';
 
-/** Three-tab top nav — Agent / Workspace / Advanced (V1.106 P2). */
-export type SettingsNavSectionId = 'agent' | 'workspace' | 'advanced';
+/**
+ * Five-section Settings registry chrome — matches apps/web
+ * SETTINGS_SECTION_IDS (V1.131 P2): agent, workspace, appearance, modules, advanced.
+ */
+export type SettingsNavSectionId =
+  | 'agent'
+  | 'workspace'
+  | 'appearance'
+  | 'modules'
+  | 'advanced';
 
 /** Section body IDs for chrome fixtures; Connection and Setup live inside Advanced. */
-export type SettingsBodySectionId = 'agent' | 'connection' | 'setup' | 'workspace';
+export type SettingsBodySectionId =
+  | 'agent'
+  | 'connection'
+  | 'setup'
+  | 'workspace'
+  | 'appearance'
+  | 'modules';
 
 const SETTINGS_NAV_SECTIONS: {
   id: SettingsNavSectionId;
@@ -76,6 +92,8 @@ const SETTINGS_NAV_SECTIONS: {
 }[] = [
   { id: 'agent', label: 'Agent', icon: Bot },
   { id: 'workspace', label: 'Workspace', icon: FolderOpen },
+  { id: 'appearance', label: 'Appearance', icon: Palette },
+  { id: 'modules', label: 'Modules', icon: Cpu },
   { id: 'advanced', label: 'Advanced', icon: Settings },
 ];
 
@@ -111,6 +129,20 @@ const SETTINGS_SECTIONS: {
     icon: FolderOpen,
     emptyHint:
       'Workspace section body mounts in the shell outlet (see Workspace section fixture).',
+  },
+  {
+    id: 'appearance',
+    label: 'Appearance',
+    icon: Palette,
+    emptyHint:
+      'Appearance section body mounts in the shell outlet (see Appearance section fixture).',
+  },
+  {
+    id: 'modules',
+    label: 'Modules',
+    icon: Cpu,
+    emptyHint:
+      'Modules section body mounts in the shell outlet (see Modules section fixture).',
   },
 ];
 
@@ -185,7 +217,7 @@ const FIXTURE_AGENTS: AgentPickerItem[] = [
 /**
  * Secondary section nav inside Settings page chrome.
  * Not Creator/Orchestrator tabs; not a second app-wide sidebar.
- * V1.106 P2: three tabs — Agent / Workspace / Advanced.
+ * V1.131 P2: five sections — Agent / Workspace / Appearance / Modules / Advanced.
  */
 function SettingsSectionNav({
   active,
@@ -555,6 +587,54 @@ function SettingsAdvancedSectionChrome() {
   );
 }
 
+/** Appearance section body chrome — language control placeholder (V1.131 P2). */
+function SettingsAppearanceSectionChrome() {
+  return (
+    <div className="flex flex-col gap-6" data-testid="settings-appearance-section">
+      <div className="flex flex-col gap-2">
+        <h3 className="text-heading-16 font-heading text-gray-1000">Appearance</h3>
+        <p className="text-copy-14 text-gray-900">
+          Choose language and display preferences for this device.
+        </p>
+      </div>
+      <Card className="shadow-card">
+        <CardHeader>
+          <CardTitle>Language</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <p className="text-copy-13 text-gray-700">
+            Presentational chrome — App wires locale preference here.
+          </p>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+/** Modules section body chrome — compute modules list placeholder (V1.131 P2). */
+function SettingsModulesSectionChrome() {
+  return (
+    <div className="flex flex-col gap-6" data-testid="settings-modules-section">
+      <div className="flex flex-col gap-2">
+        <h3 className="text-heading-16 font-heading text-gray-1000">Modules</h3>
+        <p className="text-copy-14 text-gray-900">
+          Browse installed compute modules available to this workspace.
+        </p>
+      </div>
+      <Card className="shadow-card">
+        <CardHeader>
+          <CardTitle>Installed modules</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <p className="text-copy-13 text-gray-700">
+            Presentational chrome — App mounts the Modules list here.
+          </p>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
 function InteractiveSettingsShellPage() {
   const [active, setActive] = useState<SettingsNavSectionId>('agent');
   return (
@@ -566,6 +646,10 @@ function InteractiveSettingsShellPage() {
         <SettingsAgentSectionChrome />
       ) : active === 'workspace' ? (
         <SettingsWorkspaceSectionChrome />
+      ) : active === 'appearance' ? (
+        <SettingsAppearanceSectionChrome />
+      ) : active === 'modules' ? (
+        <SettingsModulesSectionChrome />
       ) : (
         <SettingsAdvancedSectionChrome />
       )}
@@ -581,7 +665,7 @@ function InteractiveSettingsShellPage() {
 function SettingsFooterProfiles() {
   return (
     <FooterProfilesChrome
-      sectionLabel="Profiles"
+      sectionLabel="Workspace"
       addButtonLabel="Add profile"
       profiles={[
         { id: 'local-creator', displayName: 'Local Creator', active: true },
@@ -598,13 +682,12 @@ function SettingsFooterProfiles() {
 }
 
 /**
- * App shell slice with Settings footer utility active — uses ShellSidebarChrome
- * + FooterProfilesChrome SSOT (V1.108 FB-UI-001..003, 005), not stale inline
- * underline/plain-nav/profile-name markup. Same component tree as the App
- * shell and surfaces.tsx ShellSidebarFixture.
+ * App shell slice with Settings modal frame in the main panel — uses
+ * ShellSidebarChrome + footer mode switch; Workspace profiles only under
+ * Orchestrator (V1.131 P2).
  */
 function SettingsShellChromeFixture() {
-  const [activeTab, setActiveTab] = useState<ShellSidebarTab>('creator');
+  const [activeTab, setActiveTab] = useState<ShellSidebarTab>('orchestrator');
   const groups = activeTab === 'creator' ? CREATOR_NAV : ORCHESTRATOR_NAV;
 
   return (
@@ -619,12 +702,27 @@ function SettingsShellChromeFixture() {
           navGroups={groups}
           onTabChange={setActiveTab}
           logo={<StudioShellLogo />}
-          footer={<SettingsFooterProfiles />}
+          footer={activeTab === 'orchestrator' ? <SettingsFooterProfiles /> : null}
         />
       </div>
 
       <div className="flex-1 bg-background-200 flex flex-col min-w-0 p-8 overflow-auto">
-        <InteractiveSettingsShellPage />
+        <div
+          className="flex min-h-[80vh] min-w-[80vw] h-[80vh] w-[80vw] max-w-full flex-col overflow-hidden rounded-popover border border-gray-alpha-400 bg-background-100 shadow-elevation-4"
+          data-testid="settings-modal-fixture"
+        >
+          <div className="flex shrink-0 items-start justify-between gap-4 border-b border-gray-alpha-200 p-6 pb-4">
+            <div className="flex flex-col gap-1">
+              <h3 className="text-heading-20 font-heading tracking-tight text-gray-1000">
+                Settings
+              </h3>
+              <p className="text-copy-14 text-gray-900">{SHELL_HELPER}</p>
+            </div>
+          </div>
+          <div className="min-h-0 flex-1 overflow-hidden" data-testid="settings-modal-body">
+            <InteractiveSettingsShellPage />
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -632,8 +730,8 @@ function SettingsShellChromeFixture() {
 
 /**
  * Settings shell chrome + empty section frames for Studio visual acceptance.
- * V1.106 P2: section nav shows Agent / Workspace / Advanced; Connection and
- * Setup live inside Advanced.
+ * V1.131 P2: section nav shows Agent / Workspace / Appearance / Modules /
+ * Advanced; Connection and Setup live inside Advanced.
  */
 export function SettingsHostFixtures() {
   return (
@@ -643,14 +741,13 @@ export function SettingsHostFixtures() {
         data-testid="settings-host-fixture-shell"
       >
         <h4 className="text-heading-16 font-heading text-gray-1000 mb-1">
-          Shell + section nav
+          Shell + Settings modal (≥80vw×80vh)
         </h4>
         <p className="text-copy-13 text-gray-700 mb-4">
-          Footer utility Settings (lucide) above profiles; main panel is the
-          Settings shell — title, helper, section nav (Agent / Workspace /
-          Advanced). Default Agent outlet shows the preselected Agent section
-          body; Advanced outlet shows Connection and Setup stacked, and the
-          Workspace outlet shows the Workspace section chrome.
+          Footer mode switch is the only primary Creator|Orchestrator control.
+          Workspace profiles sit under Orchestrator only. The main panel is the
+          Settings modal frame — section nav (Agent / Workspace / Appearance /
+          Modules / Advanced) with representative clean section bodies.
         </p>
         <SettingsShellChromeFixture />
       </div>
@@ -820,9 +917,9 @@ export function SettingsHostFixtures() {
           Empty section frames
         </h4>
         <p className="text-copy-13 text-gray-700 mb-4">
-          Static empty outlet frames for Agent / Connection / Setup / Workspace
-          placeholders. Shell outlet mounts Agent, Connection, Setup, and
-          Workspace bodies; empty frames remain as visual reference.
+          Static empty outlet frames for Agent / Connection / Setup / Workspace /
+          Appearance / Modules placeholders. Shell outlet mounts the five-section
+          registry bodies; empty frames remain as visual reference.
         </p>
         <div className="grid grid-cols-1 gap-4">
           {SETTINGS_SECTIONS.map(({ id }) => (

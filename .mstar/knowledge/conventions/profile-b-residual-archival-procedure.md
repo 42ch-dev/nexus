@@ -25,6 +25,17 @@ A `residual_findings[<plan-id>]` array is eligible for archival when **all three
 2. Every entry in the array is `severity: nit` or `severity: low` (no `medium` / `high` / `critical`).
 3. The plan is from a prior iteration (not the currently-closing iteration — current-iteration plan residuals stay open so their QC findings remain visible during plan QC + QA).
 
+### Anti-pattern: archive before live-smoke QA (V1.131)
+
+**Never** set `lifecycle: resolved` on a residual whose acceptance is a **runtime visual smoke** (Dock tile, native Overlay traffic lights/drag/maximize) while the closure note still says “QA mandatory” or “human smoke required.”
+
+| Correct | Incorrect |
+| --- | --- |
+| Keep row **open** with owner + trigger (e.g. mandatory QA Dock smoke after `killall Dock`) | Archive after compose/README/docs only |
+| Archive **after** QA records Pass with concrete evidence | Archive in implement/T2 because “criteria are documented” |
+
+V1.131 P3 QC2 F-001: `R-VI-003` was archived with a note that Dock live smoke remained QA-mandatory — ledger undercounted open risk until the fix wave restored it open. Docs + hash verify are necessary but not sufficient for Dock/Overlay residuals.
+
 ### Mixed-severity handling
 
 If a Done plan has e.g. 9 low + 1 medium residuals: archive only the 9 low; keep the medium with the plan_id key in `status.json::residual_findings`. The plan_id key is preserved as a "stub" so the medium entry remains discoverable. Do **not** drop the plan_id key when splitting.

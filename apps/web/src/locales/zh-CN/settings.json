@@ -8,7 +8,14 @@
     "agent": "智能体",
     "workspace": "Profiles",
     "appearance": "外观",
+    "modules": "模块",
     "advanced": "高级"
+  },
+  "discard": {
+    "title": "放弃未保存的更改？",
+    "body": "设置中有未保存的更改。关闭设置并放弃这些更改？",
+    "cancel": "继续编辑",
+    "confirm": "放弃"
   },
   "appearance": {
     "title": "外观",
