@@ -679,9 +679,9 @@ export class BrowserClient implements NexusClient {
    * `NexusClientError.kind` for honest per-kind copy + CTAs.
    */
   private static transportMessage(baseUrl: string): string {
-    // Desktop `TauriClient` always sets a loopback `baseUrl`
-    // (`http://127.0.0.1:<port>`). Treat loopback as local so failures do not
-    // render the remote multi-cause blob (wrong URL / self-signed cert).
+    // Desktop `TauriClient` uses loopback (`http://localhost:<port>`) or an
+    // empty baseUrl (Vite `:5173` same-origin proxy). Treat both as local so
+    // failures do not render the remote multi-cause blob.
     if (!baseUrl || BrowserClient.isLoopbackBaseUrl(baseUrl)) {
       return 'Cannot reach the local daemon. Is `nexus42 daemon start` running?';
     }

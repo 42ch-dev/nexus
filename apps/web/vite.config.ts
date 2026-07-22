@@ -9,9 +9,24 @@ import react from '@vitejs/plugin-react';
 // default — see crates/nexus-daemon-runtime/src/boot.rs). Override the target
 // with VITE_DAEMON_URL, e.g. VITE_DAEMON_URL=http://127.0.0.1:9000 pnpm dev.
 //
+// Preview (`vite preview`, used by `pnpm dev:desktop`): same proxy — without
+// it, relative `/v1/daemon/*` hits the SPA fallback HTML and surfaces a false
+// "Cannot reach the local daemon" transport error.
+//
 // Release: the built dist/ is embedded into the nexus42 binary (plan P3,
-// rust-embed); no Node runtime ships. The proxy is dev-only.
+// rust-embed); no Node runtime ships. The proxy is dev/preview-only.
 const daemonUrl = process.env.VITE_DAEMON_URL ?? 'http://127.0.0.1:8420';
+
+/** Shared Daemon API proxy for `vite dev` and `vite preview`. */
+const daemonProxy = {
+  // Daemon API — keyless on loopback (V1.20 model). BrowserClient is
+  // same-origin against this proxy in dev/preview; in release it is
+  // same-origin against the daemon port that serves the embedded SPA.
+  '/v1/daemon': {
+    target: daemonUrl,
+    changeOrigin: false,
+  },
+} as const;
 
 // https://vitejs.dev/config/
 export default defineConfig({
@@ -78,17 +93,10 @@ export default defineConfig({
   preview: {
     port: 5173,
     strictPort: true,
+    proxy: { ...daemonProxy },
   },
   server: {
     port: 5173,
-    proxy: {
-      // Daemon API — keyless on loopback (V1.20 model). BrowserClient is
-      // same-origin against this proxy in dev; in release it is same-origin
-      // against the daemon port that serves the embedded SPA.
-      '/v1/daemon': {
-        target: daemonUrl,
-        changeOrigin: false,
-      },
-    },
+    proxy: { ...daemonProxy },
   },
 });
