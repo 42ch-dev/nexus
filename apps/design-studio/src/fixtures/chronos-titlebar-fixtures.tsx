@@ -183,7 +183,7 @@ export function ChronosTitlebarFixtures() {
 
       <FixtureFrame
         title="Dark dual-pane with desktop inset"
-        description="Cyan title labels on ink with the same inset + interactive-slot separation."
+        description={`Native traffic-light inset with drag on logo/title paint and empty spacer; interactive controls remain clickable. Sidebar has no logo row.`}
         testId="chronos-titlebar-fixture-dark-dual-pane"
       >
         <div className="dark">
