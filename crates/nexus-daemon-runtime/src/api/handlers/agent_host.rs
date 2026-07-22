@@ -420,13 +420,25 @@ pub async fn execute_operation(
     }))
 }
 
-/// POST /v1/daemon/agent-host/operations/{operation_id}:cancel
+/// `POST /v1/daemon/agent-host/operations/{operation_id}:cancel` — cancel in-flight operation.
 ///
-/// Cancel an in-flight operation.
+/// Routed as `POST /v1/daemon/agent-host/operations/:operation_id` because
+/// matchit 0.7 cannot register `:operation_id:cancel` as a separate pattern
+/// (`:a:b` is rejected). The path segment must end with `:cancel`; otherwise
+/// this returns 404 (plain POST without the verb is not a cancel). Mirrors
+/// `logout_creator`. Residual: R-HOTFIX-404-PARAM-SYNTAX.
 pub async fn cancel_operation(
     State(state): State<WorkspaceState>,
-    Path(operation_id): Path<String>,
+    Path(segment): Path<String>,
 ) -> Result<Json<CancelOperationResponse>, NexusApiError> {
+    // matchit 0.7 rejects consecutive captures like `:operation_id:cancel`.
+    // Workaround: capture the full segment as `:operation_id` and strip
+    // `:cancel` in the handler (mirrors `logout_creator`).
+    let operation_id = segment
+        .strip_suffix(":cancel")
+        .ok_or_else(|| NexusApiError::NotFound(format!("Operation route '{segment}' not found")))?
+        .to_string();
+
     let uuid = parse_operation_id(&operation_id)?;
     let host = get_host(&state)?;
 
@@ -875,11 +887,31 @@ mod tests {
     #[tokio::test]
     async fn cancel_operation_rejects_invalid_op_uuid() {
         let state = state_with_host().await;
-        let result = cancel_operation(State(state), Path("bad-uuid".to_string())).await;
+        // Route shares `:operation_id` with the `:cancel` verb (mirrors
+        // `logout_creator`); include the suffix so the stripped value reaches
+        // UUID parsing and is rejected as 400.
+        let result = cancel_operation(State(state), Path("bad-uuid:cancel".to_string())).await;
         assert!(result.is_err());
         assert_eq!(
             result.unwrap_err().status_code(),
             axum::http::StatusCode::BAD_REQUEST
+        );
+    }
+
+    #[tokio::test]
+    async fn cancel_operation_rejects_missing_cancel_verb() {
+        let state = state_with_host().await;
+        // A plain operation id without the trailing `:cancel` verb is not a
+        // cancel request and must 404 (mirrors `logout_creator`).
+        let result = cancel_operation(
+            State(state),
+            Path("550e8400-e29b-41d4-a716-446655440000".to_string()),
+        )
+        .await;
+        assert!(result.is_err());
+        assert_eq!(
+            result.unwrap_err().status_code(),
+            axum::http::StatusCode::NOT_FOUND
         );
     }
 
