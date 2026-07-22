@@ -4,7 +4,7 @@
   "plans": [
     {
       "id": "2026-07-22-v1.132-p0-orch-load-404",
-      "status": "InReview",
+      "status": "Done",
       "file": ".mstar/plans/2026-07-22-v1.132-p0-orch-load-404.md",
       "metadata": {
         "primary_spec": ".mstar/iterations/v1.132/specs/orch-load-404.md",
@@ -17,13 +17,6 @@
         "wire_contracts_changed": false,
         "wave": "1",
         "seq": "0"
-      },
-      "execution_lease": {
-        "holder": "pm-v1.132-btwoods-MBP",
-        "claimed_at": "2026-07-22T14:12:11Z",
-        "worktree_path": "/Users/bibi/workspace/organizations/42ch/nexus/.worktrees/v1.132-p0-orch-load-404",
-        "working_branch": "plan/v1.132-p0-orch-load-404",
-        "session_label": "v1.132-phase2-wave1"
       },
       "task_commits": [
         {
@@ -204,15 +197,7 @@
       }
     },
     "updated_at": "2026-07-22",
-    "control_worktree_path": "/Users/bibi/workspace/organizations/42ch/nexus",
-    "integration_merge_lease": {
-      "holder": "pm-v1.132-btwoods-MBP",
-      "claimed_at": "2026-07-22T14:48:02Z",
-      "plan_id": "2026-07-22-v1.132-p0-orch-load-404",
-      "source_branch": "plan/v1.132-p0-orch-load-404",
-      "target_branch": "iteration/v1.132",
-      "session_label": "v1.132-p0-merge"
-    }
+    "control_worktree_path": "/Users/bibi/workspace/organizations/42ch/nexus"
   },
   "residual_findings": {
     "2026-07-05-v1.92-closure": [
