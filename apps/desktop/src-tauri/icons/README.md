@@ -9,7 +9,7 @@ under this directory (except `source/`) are **generated at build/dev time** via
 ## Source assets (committed)
 
 - `source/compose-app-icon.mjs` — reproducible composition script: rasterizes the
-  Chronos **primary lockup** (`packages/nexus-ui/assets/logos/logo-primary.svg`
+  Chronos **primary square lockup** (`packages/nexus-ui/assets/logos/logo-primary-square.svg`
   — bright timeline mark on opaque **Chronos deep** plate) to the raster outputs
   below.
 - `source/source-1024.png` — composed 1024×1024 RGBA PNG used as the input
@@ -28,7 +28,7 @@ From the repo root (requires `sharp` in `apps/desktop` devDependencies):
 pnpm --filter desktop run icons:compose
 ```
 
-This rasterizes `logo-primary.svg` (bright mark on brand deep-blue plate) to
+This rasterizes `logo-primary-square.svg` (bright mark on brand deep-blue plate) to
 `source-1024.png` + `app-icon-preview-256.png`. macOS applies the system
 squircle mask to the bundled asset; the plate is intentional brand fill.
 
@@ -70,7 +70,7 @@ and reviewed in GitHub/GitLab.
 
 ## Aesthetic sign-off
 
-Composition: **primary lockup** (`logo-primary.svg` — Chronos deep plate + bright
+Composition: **primary square lockup** (`logo-primary-square.svg` — Chronos deep plate + bright
 timeline mark). Review `source/app-icon-preview-256.png` at QA/PR time.
 
 ## macOS Dock visual smoke

@@ -12,13 +12,17 @@ import {
   NexusLogo,
   NexusMark,
   TransportErrorBlock,
+  logoCompactMarkHeightPx,
   logoMarkAspectRatio,
   logoShellHeightPx,
+  logoSquareVariants,
+  logoVariants,
 } from '@42ch/nexus-ui';
 
 import logoMonoSrc from '@42ch/nexus-ui/assets/logos/logo-mono.svg';
 import logoPrimarySrc from '@42ch/nexus-ui/assets/logos/logo-primary.svg';
-import logoWhiteBgSrc from '@42ch/nexus-ui/assets/logos/logo-white-bg.svg';
+import logoPrimarySquareSrc from '@42ch/nexus-ui/assets/logos/logo-primary-square.svg';
+import logoWhiteBgSquareSrc from '@42ch/nexus-ui/assets/logos/logo-white-bg-square.svg';
 import logoWhiteSrc from '@42ch/nexus-ui/assets/logos/logo-white.svg';
 
 import {
@@ -33,8 +37,8 @@ import {
 const VI_IDS = ['VI-001', 'VI-002', 'VI-003', 'VI-004', 'VI-005'] as const;
 export type ViLedgerId = (typeof VI_IDS)[number];
 
-/** Compact timeline mark SSOT target (−30% from 20px shell height). */
-export const VI_COMPACT_MARK_HEIGHT_PX = Math.round(logoShellHeightPx * 0.7);
+/** Compact timeline mark SSOT (−30% from legacy shell height). */
+export const VI_COMPACT_MARK_HEIGHT_PX = logoCompactMarkHeightPx;
 
 function ViLedgerBadge({ id }: { id: ViLedgerId }) {
   return (
@@ -84,18 +88,21 @@ function ViSection({
   ledgerId,
   title,
   description,
+  sectionTestId,
   children,
 }: {
   id: string;
   ledgerId: ViLedgerId;
   title: string;
   description: string;
+  /** Override when multiple sections share one ledger id (e.g. VI-002 button vs transport). */
+  sectionTestId?: string;
   children: ReactNode;
 }) {
   return (
     <section
       id={id}
-      data-testid={`vi-section-${ledgerId.toLowerCase()}`}
+      data-testid={sectionTestId ?? `vi-section-${ledgerId.toLowerCase()}`}
       className="scroll-mt-16 border-t border-gray-alpha-200 pt-8 first:border-t-0 first:pt-0"
     >
       <div className="mb-4 flex flex-wrap items-center gap-2">
@@ -144,60 +151,81 @@ export function ViBrandAssetSplitFixture() {
       id="vi-005-asset-split"
       ledgerId="VI-005"
       title="Plain mark vs square plate"
-      description="Target asset contract (T2): wide timeline marks are plain (no plate); plated lockups use the *-square.svg suffix. Consumers must not swap plain and square assets ad hoc."
+      description="Plain wide marks (`logoVariants`) vs plated lockups (`logoSquareVariants` / *-square.svg). Consumers must not swap plain and square assets ad hoc."
     >
-      <div
-        data-testid="vi-005-asset-split-grid"
-        className="grid grid-cols-1 gap-4 lg:grid-cols-2"
-      >
-        <AssetSplitPanel
-          label="Plain timeline mark"
-          fileName="logo-primary.svg (target: wide, no plate)"
-          panelClassName="bg-background-100"
-        >
-          <NexusLogo
-            variant="mono"
-            src={logoMonoSrc}
-            size={32}
-            className="h-8 w-auto text-brand-deep-blue"
-          />
-        </AssetSplitPanel>
+      <ThemePair
+        testId="vi-005-asset-split"
+        light={
+          <div
+            data-testid="vi-005-asset-split-grid"
+            className="grid grid-cols-1 gap-4"
+          >
+            <AssetSplitPanel
+              label="Plain primary mark"
+              fileName={logoVariants.primary}
+              panelClassName="bg-brand-deep-blue"
+            >
+              <NexusLogo
+                variant="primary"
+                src={logoPrimarySrc}
+                size={32}
+                className="h-8 w-auto"
+              />
+            </AssetSplitPanel>
 
-        <AssetSplitPanel
-          label="Square plate lockup"
-          fileName="logo-primary-square.svg (target)"
-          panelClassName="bg-brand-deep-blue"
-        >
-          <img
-            src={logoPrimarySrc}
-            alt="Nexus square plate"
-            decoding="async"
-            data-testid="vi-005-square-plate"
-            className="block h-24 w-24 object-contain"
-          />
-        </AssetSplitPanel>
+            <AssetSplitPanel
+              label="Square plate lockup"
+              fileName={logoSquareVariants.primary}
+              panelClassName="bg-brand-deep-blue"
+            >
+              <img
+                src={logoPrimarySquareSrc}
+                alt="Nexus square plate"
+                decoding="async"
+                data-testid="vi-005-square-plate"
+                className="block h-24 w-24 object-contain"
+              />
+            </AssetSplitPanel>
 
-        <AssetSplitPanel
-          label="White plate (light surfaces)"
-          fileName="logo-white-bg-square.svg (target)"
-          panelClassName="bg-white"
-        >
-          <img
-            src={logoWhiteBgSrc}
-            alt="Nexus white plate"
-            decoding="async"
-            className="block h-24 w-24 object-contain"
-          />
-        </AssetSplitPanel>
+            <AssetSplitPanel
+              label="White plate (light surfaces)"
+              fileName={logoSquareVariants.whiteBg}
+              panelClassName="bg-white"
+            >
+              <img
+                src={logoWhiteBgSquareSrc}
+                alt="Nexus white plate"
+                decoding="async"
+                className="block h-24 w-24 object-contain"
+              />
+            </AssetSplitPanel>
+          </div>
+        }
+        dark={
+          <div className="grid grid-cols-1 gap-4">
+            <AssetSplitPanel
+              label="Inline mark (currentColor)"
+              fileName="logo-white.svg / &lt;NexusMark&gt;"
+              panelClassName="bg-brand-deep-blue"
+            >
+              <NexusMark size={28} className="w-auto text-brand-cyan" />
+            </AssetSplitPanel>
 
-        <AssetSplitPanel
-          label="Inline mark (currentColor)"
-          fileName="logo-white.svg / &lt;NexusMark&gt;"
-          panelClassName="bg-brand-deep-blue"
-        >
-          <NexusMark size={28} className="w-auto text-brand-cyan" />
-        </AssetSplitPanel>
-      </div>
+            <AssetSplitPanel
+              label="Plain mono mark"
+              fileName={logoVariants.mono}
+              panelClassName="bg-background-100"
+            >
+              <NexusLogo
+                variant="mono"
+                src={logoMonoSrc}
+                size={32}
+                className="h-8 w-auto text-brand-deep-blue"
+              />
+            </AssetSplitPanel>
+          </div>
+        }
+      />
     </ViSection>
   );
 }
@@ -230,28 +258,28 @@ function TitlebarMarkRow({
 }
 
 export function ViBrandCompactMarkFixture() {
-  const currentHeight = logoShellHeightPx;
-  const targetHeight = VI_COMPACT_MARK_HEIGHT_PX;
+  const legacyHeight = logoShellHeightPx;
+  const compactHeight = logoCompactMarkHeightPx;
 
   return (
     <ViSection
       id="vi-003-compact-mark"
       ledgerId="VI-003"
       title="Compact timeline mark (−30%–50%)"
-      description={`Target SSOT scale: titlebar, Brand hero, and app icon share a compact mark height (${targetHeight}px, −30% from ${currentHeight}px shell SSOT). Wordmark scale stays separate.`}
+      description={`SSOT compact mark height: ${compactHeight}px (−30% from legacy ${legacyHeight}px shell baseline). Titlebar, Brand hero, and app icon share this scale. Wordmark scale stays separate.`}
     >
       <ThemePair
         testId="vi-003-compact-mark"
         light={
           <div className="space-y-3">
-            <TitlebarMarkRow markHeightPx={currentHeight} label={`Current — ${currentHeight}px`} />
-            <TitlebarMarkRow markHeightPx={targetHeight} label={`Target — ${targetHeight}px`} />
+            <TitlebarMarkRow markHeightPx={legacyHeight} label={`Legacy — ${legacyHeight}px`} />
+            <TitlebarMarkRow markHeightPx={compactHeight} label={`SSOT — ${compactHeight}px`} />
           </div>
         }
         dark={
           <div className="space-y-3">
-            <TitlebarMarkRow markHeightPx={currentHeight} label={`Current — ${currentHeight}px`} />
-            <TitlebarMarkRow markHeightPx={targetHeight} label={`Target — ${targetHeight}px`} />
+            <TitlebarMarkRow markHeightPx={legacyHeight} label={`Legacy — ${legacyHeight}px`} />
+            <TitlebarMarkRow markHeightPx={compactHeight} label={`SSOT — ${compactHeight}px`} />
           </div>
         }
       />
@@ -284,7 +312,7 @@ function SquircleFrame({
         style={{ boxShadow: insetPx === 0 ? '0 0 0 2px rgba(255,255,255,0.35)' : undefined }}
       >
         <img
-          src={logoPrimarySrc}
+          src={logoPrimarySquareSrc}
           alt=""
           decoding="async"
           className="object-contain"
@@ -305,23 +333,42 @@ export function ViBrandAppIconFixture() {
       id="vi-004-app-icon"
       ledgerId="VI-004"
       title="App icon inset compose"
-      description="Target compose (T4): square source with transparent inset margins inside the macOS squircle. No light rectangular halo at plate edges."
+      description="Square plate source (`logo-primary-square.svg`) with transparent inset margins inside the macOS squircle (T4 compose). No light rectangular halo at plate edges."
     >
-      <div
-        data-testid="vi-004-app-icon-compare"
-        className="flex flex-wrap items-start justify-center gap-8 rounded-card border border-gray-alpha-300 bg-background-100 p-6"
-      >
-        <SquircleFrame
-          insetPx={0}
-          label="Current — edge-to-edge (halo risk)"
-          testId="vi-004-app-icon-current"
-        />
-        <SquircleFrame
-          insetPx={12}
-          label="Target — ~12% inset margin"
-          testId="vi-004-app-icon-target"
-        />
-      </div>
+      <ThemePair
+        testId="vi-004-app-icon"
+        light={
+          <div
+            data-testid="vi-004-app-icon-compare"
+            className="flex flex-wrap items-start justify-center gap-8 rounded-card border border-gray-alpha-300 bg-background-100 p-6"
+          >
+            <SquircleFrame
+              insetPx={0}
+              label="Current — edge-to-edge (halo risk)"
+              testId="vi-004-app-icon-current"
+            />
+            <SquircleFrame
+              insetPx={12}
+              label="Target — ~12% inset margin"
+              testId="vi-004-app-icon-target"
+            />
+          </div>
+        }
+        dark={
+          <div className="flex flex-wrap items-start justify-center gap-8 rounded-card border border-gray-alpha-300 bg-[#08141C] p-6">
+            <SquircleFrame
+              insetPx={0}
+              label="Current — edge-to-edge (halo risk)"
+              testId="vi-004-app-icon-current-dark"
+            />
+            <SquircleFrame
+              insetPx={12}
+              label="Target — ~12% inset margin"
+              testId="vi-004-app-icon-target-dark"
+            />
+          </div>
+        }
+      />
       <p className="mt-4 text-copy-13 text-gray-600">
         Compose layer owns inset — consumers use the composed asset, not ad-hoc padding.
       </p>
@@ -425,6 +472,7 @@ export function ViTransportErrorAcceptanceFixtures() {
     <ViSection
       id="vi-002-transport-error"
       ledgerId="VI-002"
+      sectionTestId="vi-section-vi-002-transport"
       title="TransportError Retry inherits Button"
       description="Target: daemon_down Retry uses the theme-aware primary Button — no one-off error-block styling."
     >

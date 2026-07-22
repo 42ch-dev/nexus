@@ -6,7 +6,7 @@ import sharp from 'sharp';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, '../../../../..');
 /** Primary lockup already includes the Chronos deep plate + bright mark. */
-const logoPath = path.join(repoRoot, 'packages/nexus-ui/assets/logos/logo-primary.svg');
+const logoPath = path.join(repoRoot, 'packages/nexus-ui/assets/logos/logo-primary-square.svg');
 const out1024 = path.join(__dirname, 'source-1024.png');
 const out256 = path.join(__dirname, 'app-icon-preview-256.png');
 

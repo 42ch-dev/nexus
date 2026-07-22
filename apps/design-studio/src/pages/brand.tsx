@@ -5,8 +5,9 @@ import {
   NexusMark,
   NexusLogoVariant,
   logoVariants,
+  logoSquareVariants,
   logoMinSizePx,
-  logoShellHeightPx,
+  logoCompactMarkHeightPx,
   logoClearSpaceRatio,
   logoMarkAspectRatio,
   logoVariantPalettes,
@@ -17,7 +18,9 @@ import {
 /* Consumer-resolved SVG assets — Vite processes these workspace-package imports
  * exactly as apps/web/src/components/brand/nexus-logo.tsx does. */
 import logoPrimarySrc from '@42ch/nexus-ui/assets/logos/logo-primary.svg';
+import logoPrimarySquareSrc from '@42ch/nexus-ui/assets/logos/logo-primary-square.svg';
 import logoWhiteBgSrc from '@42ch/nexus-ui/assets/logos/logo-white-bg.svg';
+import logoWhiteBgSquareSrc from '@42ch/nexus-ui/assets/logos/logo-white-bg-square.svg';
 import logoWhiteSrc from '@42ch/nexus-ui/assets/logos/logo-white.svg';
 import logoMonoSrc from '@42ch/nexus-ui/assets/logos/logo-mono.svg';
 import logoTextSrc from '@42ch/nexus-ui/assets/logos/logo-text.svg';
@@ -45,11 +48,6 @@ interface LogoDisplay {
   /** Recommended surface per DESIGN.md §Logo Usage. */
   panelBgClass: string;
   /**
-   * Square plate lockups (`primary`, `whiteBg`) fill card width via native
-   * `<img>` — not the fixed-height `<NexusLogo>` runtime API.
-   */
-  plateFill?: boolean;
-  /**
    * When true, invert the img so currentColor wordmarks/marks read as white
    * on dark hero panels (img-embedded `currentColor` resolves to black).
    */
@@ -59,21 +57,19 @@ interface LogoDisplay {
 const LOGO_DISPLAYS: LogoDisplay[] = [
   {
     variant: 'primary',
-    label: 'Primary',
+    label: 'Primary (plain)',
     fileName: logoVariants.primary,
     description:
-      'Default lockup — bright mark on brand deep-blue plate (matches logo-primary.png). Use in product shell and most surfaces.',
+      'Plain timeline mark — bright cyan gradient, no plate. Use inline on ink or paired with structure; square plate lockups use logo-primary-square.svg.',
     panelBgClass: 'bg-brand-deep-blue',
-    plateFill: true,
   },
   {
     variant: 'whiteBg',
-    label: 'White-bg',
+    label: 'White-bg (plain)',
     fileName: logoVariants.whiteBg,
     description:
-      'Lockup on white plate — only when a light/white surface is required (matches logo-white-bg.png).',
+      'Plain deep→cyan gradient mark for light surfaces. Plated lockups use logo-white-bg-square.svg.',
     panelBgClass: 'bg-white',
-    plateFill: true,
   },
   {
     variant: 'white',
@@ -101,6 +97,26 @@ const LOGO_DISPLAYS: LogoDisplay[] = [
     invertForDark: true,
   },
 ];
+
+const LOGO_SQUARE_DISPLAYS = [
+  {
+    key: 'primary-square',
+    label: 'Primary plate',
+    fileName: logoSquareVariants.primary,
+    description:
+      'Square deep-blue plate lockup — sidebar shell, desktop icon compose source. Width-fill in gallery.',
+    panelBgClass: 'bg-brand-deep-blue',
+    src: logoPrimarySquareSrc,
+  },
+  {
+    key: 'white-bg-square',
+    label: 'White-bg plate',
+    fileName: logoSquareVariants.whiteBg,
+    description: 'Square white plate lockup — only when a light/white surface is required.',
+    panelBgClass: 'bg-white',
+    src: logoWhiteBgSquareSrc,
+  },
+] as const;
 
 const VARIANT_THEMES: LogoVariantTheme[] = [
   'elegant',
@@ -187,22 +203,45 @@ function LogoCard({ display }: { display: LogoDisplay }) {
         className={`${display.panelBgClass} p-8 flex items-center justify-center min-h-[100px]`}
         data-testid={`logo-card-panel-${display.variant}`}
       >
-        {display.plateFill ? (
-          <img
-            src={src}
-            alt="Nexus"
-            decoding="async"
-            data-testid={`logo-card-plate-img-${display.variant}`}
-            className="block w-full h-auto object-contain"
-          />
-        ) : (
-          <NexusLogo
-            variant={display.variant}
-            src={src}
-            size={display.variant === 'text' ? 28 : 32}
-            className={display.invertForDark ? 'brightness-0 invert' : undefined}
-          />
-        )}
+        <NexusLogo
+          variant={display.variant}
+          src={src}
+          size={display.variant === 'text' ? 28 : 32}
+          className={display.invertForDark ? 'brightness-0 invert' : undefined}
+        />
+      </div>
+      <div className="p-4 border-t border-gray-alpha-200">
+        <div className="flex items-center justify-between mb-1 gap-2">
+          <span className="text-label-14 font-medium text-gray-1000">{display.label}</span>
+          <code className="text-copy-13-mono text-gray-600 truncate">{display.fileName}</code>
+        </div>
+        <p className="text-copy-13 text-gray-600">{display.description}</p>
+      </div>
+    </div>
+  );
+}
+
+function SquarePlateCard({
+  display,
+}: {
+  display: (typeof LOGO_SQUARE_DISPLAYS)[number];
+}) {
+  return (
+    <div
+      className="border border-gray-alpha-300 rounded-card bg-background-100 overflow-hidden"
+      data-testid={`logo-card-${display.key}`}
+    >
+      <div
+        className={`${display.panelBgClass} p-8 flex items-center justify-center min-h-[100px]`}
+        data-testid={`logo-card-panel-${display.key}`}
+      >
+        <img
+          src={display.src}
+          alt="Nexus"
+          decoding="async"
+          data-testid={`logo-card-plate-img-${display.key}`}
+          className="block w-full h-auto object-contain"
+        />
       </div>
       <div className="p-4 border-t border-gray-alpha-200">
         <div className="flex items-center justify-between mb-1 gap-2">
@@ -222,8 +261,8 @@ function LogoGrid() {
       <p className="text-copy-16 text-gray-700 mb-4">
         All five <code className="font-mono bg-gray-alpha-100 px-1 rounded">logoVariants</code> from{' '}
         <code className="font-mono bg-gray-alpha-100 px-1 rounded">@42ch/nexus-ui</code>
-        — square plate lockups, timeline marks (wide aspect), plus wordmark — on their recommended
-        surfaces per DESIGN.md § Logo Usage.
+        — plain wide marks, square plate lockups (<code className="font-mono bg-gray-alpha-100 px-1 rounded">logoSquareVariants</code>
+        ), plus wordmark — on their recommended surfaces per DESIGN.md § Logo Usage.
       </p>
       <p
         data-testid="brand-wordmark-contract"
@@ -244,6 +283,17 @@ function LogoGrid() {
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
         {LOGO_DISPLAYS.map((d) => (
           <LogoCard key={d.variant} display={d} />
+        ))}
+      </div>
+
+      <h4 className="text-heading-16 font-heading text-gray-1000 mt-8 mb-4">Square plate lockups</h4>
+      <p className="text-copy-16 text-gray-700 mb-4">
+        Plated assets use the <code className="font-mono bg-gray-alpha-100 px-1 rounded">*-square.svg</code>{' '}
+        suffix — separate from plain wide marks above.
+      </p>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        {LOGO_SQUARE_DISPLAYS.map((d) => (
+          <SquarePlateCard key={d.key} display={d} />
         ))}
       </div>
     </section>
@@ -305,17 +355,18 @@ function ChronosContextSection() {
         data-testid="brand-chronos-note"
         className="text-copy-16 text-gray-700 mb-4"
       >
-        Chronos identity: default <code className="font-mono bg-gray-alpha-100 px-1 rounded">primary</code>{' '}
-        timeline mark lockup (deep-blue plate) in product shell, titlebar label white on light / cyan on
-        dark, cyan signal chrome, deep ink structure. Use{' '}
-        <code className="font-mono bg-gray-alpha-100 px-1 rounded">whiteBg</code> only on surfaces
-        that must sit on a light/white plate. Product shell uses the plate lockup — no wordmark in
-        nav.
+        Chronos identity: ink titlebar uses the compact bright mark (
+        <code className="font-mono bg-gray-alpha-100 px-1 rounded">logo-white.svg</code> at{' '}
+        <code className="font-mono bg-gray-alpha-100 px-1 rounded">logoCompactMarkHeightPx</code>
+        ), label white on light / cyan on dark. Sidebar shell uses the square primary plate (
+        <code className="font-mono bg-gray-alpha-100 px-1 rounded">logo-primary-square.svg</code>
+        ). Use{' '}
+        <code className="font-mono bg-gray-alpha-100 px-1 rounded">logo-white-bg-square.svg</code>{' '}
+        only on surfaces that must sit on a light/white plate.
       </p>
       <p className="text-copy-16 text-gray-700 mb-6">
-        Shell placement is theme-stable:{' '}
-        <code className="font-mono bg-gray-alpha-100 px-1 rounded">primary</code> on light and dark
-        mini shells below.
+        Shell placement: titlebar mini uses compact bright mark; sidebar plate lockup is theme-stable
+        below.
       </p>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
@@ -323,10 +374,11 @@ function ChronosContextSection() {
           mode="light"
           logo={
             <NexusLogo
-              variant="primary"
-              src={logoPrimarySrc}
-              size={logoShellHeightPx}
-              className="h-5 w-auto max-w-full shrink-0"
+              variant="white"
+              src={logoWhiteSrc}
+              size={logoCompactMarkHeightPx}
+              draggable={false}
+              className="h-3.5 w-auto max-w-full shrink-0"
             />
           }
         />
@@ -334,10 +386,11 @@ function ChronosContextSection() {
           mode="dark"
           logo={
             <NexusLogo
-              variant="primary"
-              src={logoPrimarySrc}
-              size={logoShellHeightPx}
-              className="h-5 w-auto max-w-full shrink-0"
+              variant="white"
+              src={logoWhiteSrc}
+              size={logoCompactMarkHeightPx}
+              draggable={false}
+              className="h-3.5 w-auto max-w-full shrink-0"
             />
           }
         />
@@ -352,8 +405,8 @@ function ChronosContextSection() {
             <NexusLogo
               variant="white"
               src={logoWhiteSrc}
-              size={28}
-              className="h-7 w-auto"
+              size={logoCompactMarkHeightPx}
+              className="h-3.5 w-auto"
             />
             <NexusLogo
               variant="text"

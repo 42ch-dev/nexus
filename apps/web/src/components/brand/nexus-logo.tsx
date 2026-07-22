@@ -1,4 +1,4 @@
-import logoPrimary from '@42ch/nexus-ui/assets/logos/logo-primary.svg';
+import logoPrimarySquare from '@42ch/nexus-ui/assets/logos/logo-primary-square.svg';
 import { NexusLogo as NexusLogoComponent, logoShellHeightPx } from '@42ch/nexus-ui';
 
 import { cn } from '@/lib/utils';
@@ -12,16 +12,15 @@ export interface NexusLogoProps {
 /**
  * Product-shell Nexus lockup — thin wrapper around `@42ch/nexus-ui`.
  *
- * Default brand asset is `logo-primary.svg` (bright mark on brand deep-blue
- * plate) for both themes. Use `logo-white-bg.svg` only on surfaces that must
- * sit on a light/white plate. Resolves the SVG via Vite and preserves
- * zero-prop call sites in `sidebar.tsx` / `header.tsx`.
+ * Shell chrome uses the square primary plate (`logo-primary-square.svg`) at
+ * {@link logoShellHeightPx}. Plain wide marks (`logo-primary.svg`) are for
+ * inline timeline usage — not the default sidebar/header plate lockup.
  */
 export function NexusLogo({ label = 'Nexus', className }: NexusLogoProps) {
   return (
     <NexusLogoComponent
       variant="primary"
-      src={logoPrimary}
+      src={logoPrimarySquare}
       label={label}
       size={logoShellHeightPx}
       className={cn('h-5 w-auto max-w-full shrink-0', className)}
