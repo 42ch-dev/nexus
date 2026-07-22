@@ -1,10 +1,10 @@
 # Deferred Features — Cross-Version Tracker v2
 
-**Quick status**: **V1.130 shipped (partial)** — dogfood carried incomplete shell/Settings IA to V1.131 (`DF-V1130-*`). V1.129 Shipped (usability bug-sweep). Platform **paused**.
+**Quick status**: **V1.131 active (in-flight)** — Chronos titlebar + logo gallery + **must-ship** V1.130 dogfood IA (`DF-V1130-*`) + desktop icons/residuals. V1.130 shipped partial (#165); VI logo (#167). Platform **paused**.
 
 **Purpose**: Single source of truth for **open** and **backlog** features deferred from delivery compasses. Closed/shipped history lives in shipped archive.
 **Scope**: `nexus` OSS repository only.
-**Created**: 2026-04-21 · **Last updated**: 2026-07-22 (V1.130 dogfood — DF-V1130 shell/Settings IA + Profile SSOT)
+**Created**: 2026-04-21 · **Last updated**: 2026-07-22 (V1.131 — DF-V1130-* bound to in-iteration delivery, not further deferral)
 
 ---
 
@@ -67,11 +67,14 @@
 | DF-V1123-CROSS-SURFACE-BINDING | Canvas | Cross-surface Timeline event binding (Work Timeline Moment ↔ World Timeline Narrative) — data link + UX | V1.123 | V1.124+ | S | V1.123 | P3 ships UX hints for cross-surface navigation but no formal data binding between Work events and World events. Track for V1.124+ data-binding iteration. QC1 R-V1123P0QC1-M001. |
 | DF-V1127-COMPOSITE-PERF | Cross-cutting | Composite-endpoint performance round: `total_worlds` cleanup, dynamic-SQL → static refactor, N+1 assertion, sqlx prepared-statement caching (scan items 7–8 + V1.126 P2 residual cluster) | V1.127 | V1.128+ | M | V1.127 | [V1.127 compass](../iterations/v1.127/delivery-compass.md) Roadmap Position (e). Pure-scale perf; manual tester with <100 worlds never sees the symptom. **Owner:** architect. **Trigger:** V1.127 dogfood shipped + user's manual testing review feedback. |
 | DF-V1127-NIT-CLOSEOUT | Cross-cutting | V1.126 nit residual close-out (22 nits beyond the 2 absorbed by V1.127 P0: R-V1126P0-QC-S-002, R-V1126P0-QC-S-003) | V1.127 | V1.128+ | S | V1.127 | [V1.127 compass](../iterations/v1.127/delivery-compass.md) Roadmap Position (f). Nits are polish, not test-blockers. **Owner:** frontend-dev. **Trigger:** capacity after V1.127 dogfood. |
-| DF-V1130-SETTINGS-MODAL | Cross-cutting | Settings primary = modal (≥80vw×80vh); `/settings/*` deep links open modal section; demote full-page Settings | V1.130 | **V1.131** | M | V1.130 | [V1.130 compass](../iterations/v1.130/delivery-compass.md) Roadmap Position. `SettingsModalHost` unwired; `SettingsShellLayout` still primary. **Owner:** frontend-dev. **Trigger:** V1.130 dogfood (2026-07-22). |
-| DF-V1130-MODE-SWITCH-FOOTER | Cross-cutting | 创作\|编排 switch on 功能区 footer (retire sidebar top tabs) | V1.130 | **V1.131** | S | V1.130 | P1 AC incomplete. **Owner:** frontend-dev. **Trigger:** V1.130 dogfood. |
-| DF-V1130-WORKSPACE-UNDER-ORCH | Cross-cutting | Profiles → **工作区** under **编排 功能区 only** (not both tabs / global Settings) | V1.130 | **V1.131** | S | V1.130 | Label renamed; placement incomplete. **Owner:** frontend-dev. **Trigger:** V1.130 dogfood. |
-| DF-V1130-COMPUTE-IN-SETTINGS | Harness | Compute/Modules content inside Settings modal; remove from 编排 only after modal section green | V1.130 | **V1.131** | M | V1.130 | P3b T1 incomplete. **Owner:** frontend-dev. **Trigger:** V1.130 dogfood. |
-| DF-V1130-PROFILE-SSOT | Cross-cutting | Profile membership SSOT = `~/.nexus42/creators/<id>/`; SQL + identity cache only enrich; create/bootstrap always write SSOT | V1.130 | **V1.131** (invariant hold) | S | V1.130 | Post-ship hotfix establishes SSOT list/create; keep heal-from-SSOT only. **Owner:** fullstack-dev. **Trigger:** any further Profile work. |
+| DF-V1130-SETTINGS-MODAL | Cross-cutting | Settings primary = modal (≥80vw×80vh); `/settings/*` deep links open modal section; demote full-page Settings | V1.130 | **V1.131 in-flight — must ship** | M | V1.130→V1.131 | **Not optional deferral.** P0: titlebar gear → `SettingsModalHost`. P2: modal primary, sections, deep links. Plans: `2026-07-22-v1.131-p0-chronos-titlebar`, `…-p2-shell-ia-finish`. Spec: [shell-ia-finish.md](../iterations/v1.131/specs/shell-ia-finish.md). Residual `R-V1130P1-QC1-W-003`. **Owner:** frontend-dev. **Close:** move to shipped archive at V1.131 iteration-close. |
+| DF-V1130-MODE-SWITCH-FOOTER | Cross-cutting | 创作\|编排 switch on 功能区 footer (retire sidebar top tabs) | V1.130 | **V1.131 in-flight — must ship** | S | V1.130→V1.131 | **Not optional deferral.** Plan `…-p2-shell-ia-finish` T1. **Owner:** frontend-dev. |
+| DF-V1130-WORKSPACE-UNDER-ORCH | Cross-cutting | Profiles → **工作区** under **编排 功能区 only** (not both tabs / global Settings) | V1.130 | **V1.131 in-flight — must ship** | S | V1.130→V1.131 | **Not optional deferral.** Plan `…-p2-shell-ia-finish` T3. **Owner:** frontend-dev. |
+| DF-V1130-COMPUTE-IN-SETTINGS | Harness | Compute/Modules content inside Settings modal; remove from 编排 only after modal section green | V1.130 | **V1.131 in-flight — must ship** | M | V1.130→V1.131 | **Not optional deferral.** Plan `…-p2-shell-ia-finish` T4 (after T2 modal primary). **Owner:** frontend-dev. |
+| DF-V1130-PROFILE-SSOT | Cross-cutting | Profile membership SSOT = `~/.nexus42/creators/<id>/`; SQL + identity cache only enrich; create/bootstrap always write SSOT | V1.130 | **V1.131 in-flight — hold** | S | V1.130→V1.131 | Plan `…-p2-shell-ia-finish` T5 regression guard. Keep heal-from-SSOT only. **Owner:** fullstack-dev. After green: archive as held/shipped invariant (no open UI gap). |
+| DF-V1131-CHRONOS-TITLEBAR | Cross-cutting | Full-width Chronos deep-blue **titlebar** (web + Tauri v2 macOS Overlay); logo/mark on ink-matching surface | V1.131 dogfood | **V1.131 in-flight — must ship** | M | V1.131 | User fig3/fig4. Plan `…-p0-chronos-titlebar`. Tauri Overlay with native traffic lights ships with the web ink bar; **no native-titlebar deferral**. **Owner:** frontend-dev. |
+| DF-V1131-LOGO-GALLERY-LOCKUP | Cross-cutting | Studio plate logos fill preview on matching BG; hero wordmark larger; Chronos mini logo on ink titlebar | V1.131 dogfood | **V1.131 in-flight — must ship** | S | V1.131 | User fig1/fig2. Plan `…-p1-logo-gallery-lockup`. **Owner:** frontend-dev. |
+| DF-V1131-DESKTOP-ICON | Cross-cutting | Desktop app icon Chronos primary plate (compose/generate + Dock cache notes) | V1.131 dogfood | **V1.131 in-flight — must ship** | S | V1.131 | Plan `…-p3-desktop-icons-residuals` T1; residual `R-VI-003`. **Owner:** frontend-dev / ops. |
 
 ### 2.4 Backlog (no committed target)
 
@@ -99,9 +102,9 @@ Non-feature reliability work routed out of feature iterations; picked up by a de
 
 ## 3) Residuals (SSOT pointer)
 
-Residual findings are tracked in [`status.json`](../status.json) → `residual_findings` + `metadata.tech_debt_summary`. The tracker does **not** mirror residual rows — `status.json` is authoritative. Current state: 43 open residuals tracked in [`status.json`](../status.json) via `metadata.tech_debt_summary` (updated 2026-07-20). Closed/historical: `.mstar/archived/residuals/<plan-id>.json`.
+Residual findings are tracked in [`status.json`](../status.json) → `residual_findings` + `metadata.tech_debt_summary`. The tracker does **not** mirror residual rows — `status.json` is authoritative. Current rollup: see `metadata.tech_debt_summary` (updated 2026-07-22). Closed/historical: `.mstar/archived/residuals/<plan-id>.json`.
 
-**Notable in-flight residual:** `R-V1116P0QA-001` (CodexNativeProvider gap — native agents not registered in daemon HostManager) — in-flight V1.127 P1 (`native-agent-provider-registration`). Not closed until P1 ships.
+**V1.131 residual slate (archive in P3, do not invent DF rows for these):** `R-VI-001`…`004`, `R-VI-007`…`011`, `R-V1130P1-QC1-W-003` (Settings gear — P0 wire), `R-V1130P1-QC1-S-001` (Studio fixtures — P0), plus other V1.130 low/nit items listed in [desktop-icons-residuals.md](../iterations/v1.131/specs/desktop-icons-residuals.md).
 
 ---
 
@@ -109,15 +112,16 @@ Residual findings are tracked in [`status.json`](../status.json) → `residual_f
 
 - **Shipped rows**: Move from §2.3 to [shipped archive](../archived/shipped-features-tracker.md) §1; add per-version snapshot to archive §2 when an iteration closes.
 - **Compass authority**: Active compass controls scope even if this tracker lists a different target.
+- **In-flight “must ship”**: Rows marked **V1.131 in-flight — must ship** are **committed delivery** for the active compass; do not re-target to V1.132 without PM scope change.
 - **Effort estimates**: XS/S/M/L/XL agent-session scale. Guidance only.
 
 ---
 
 ## 5) Quick index
 
-**Active iteration**: [V1.127](../iterations/v1.127/delivery-compass.md) (**active** — Dogfood-readiness sweep: Control Room author-loop fixes + native agent provider registration; `iteration/v1.127`).
+**Active iteration**: [V1.131](../iterations/v1.131/delivery-compass.md) (**active** — Chronos titlebar + logo gallery + DF-V1130 IA finish + desktop icons; `iteration/v1.131`).
 
-**Latest shipped**: [V1.126](../iterations/v1.126/delivery-compass.md) (Shell + Canvas deepening + Tech-debt gate; 2026-07-20).
+**Latest shipped**: [V1.130](../iterations/v1.130/delivery-compass.md) (partial shell rewrite, #165) + VI logo upgrade (#167).
 
 **Full iteration index**: [iterations/README.md](../iterations/README.md)
 

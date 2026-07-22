@@ -1,0 +1,24 @@
+{
+  "plan_id": "2026-07-22-v1.130-p0-daemon-restart",
+  "status": "Done",
+  "type": "feature",
+  "metadata": {
+    "primary_spec": ".mstar/iterations/v1.130/specs/daemon-restart-reliability.md",
+    "spec_refs": [
+      ".mstar/iterations/v1.130/specs/daemon-restart-reliability.md"
+    ],
+    "iteration_refs": [
+      ".mstar/iterations/v1.130/delivery-compass.md"
+    ],
+    "iteration_compass": "v1.130/delivery-compass.md",
+    "spec_integration_branch": "iteration/v1.130",
+    "working_branch": "plan/v1.130-p0-daemon-restart",
+    "merge_target": "iteration/v1.130",
+    "wire_contracts_changed": false,
+    "iteration_id": "V1.130",
+    "blocked_by": [],
+    "wave": "1",
+    "seq": "1",
+    "description": "Atomic daemon restart + attach matrix + mid-session UX"
+  }
+}

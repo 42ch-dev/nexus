@@ -3,6 +3,16 @@
   "updated_at": "2026-07-22",
   "entries": [
     {
+      "at": "2026-07-22 (V1.131 scope: DF-V1130 must-ship)",
+      "message": "User clarified: related DF-V1130-* and VI dogfood problems must be solved in V1.131, not listed as further deferrals. Expanded to L/4 plans: P0 titlebar, P1 logo gallery, P2 shell IA finish (MODE-SWITCH, SETTINGS-MODAL, WORKSPACE, COMPUTE, PROFILE-SSOT hold), P3 desktop icons+residuals. Tracker rows marked in-flight must-ship; DF-V1131-* titlebar/gallery/desktop added.",
+      "plan_id": null
+    },
+    {
+      "at": "2026-07-22 (V1.131 Phase 1 start)",
+      "message": "V1.131 autonomous lock (iteration-loop): Chronos titlebar-first chrome + BG-matched logos + Studio gallery fill/wordmark + desktop icon verify + V1.130/VI residual slate. Scale auto→L, 3 business plans. Profile B archived six V1.130 Done hot rows. Integration iteration/v1.131 from main.",
+      "plan_id": null
+    },
+    {
       "at": "2026-07-22 (PR #167 reviews)",
       "message": "PR #167 reviews: Security automation no findings; Bugbot Approve with 5 nit-only findings registered R-VI-007..011 (stale JSDoc/comments, dead ChronosShellMini ternary, design-studio logoVariants count). Cursor approval agents APPROVED. Merging squash to main.",
       "plan_id": "2026-07-22-vi-logo-upgrade"

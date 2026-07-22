@@ -3,164 +3,124 @@
   "updated_at": "2026-07-22",
   "plans": [
     {
-      "plan_id": "2026-07-22-v1.130-p0-daemon-restart",
-      "status": "Done",
+      "plan_id": "2026-07-22-v1.131-p0-chronos-titlebar",
+      "status": "Todo",
       "type": "feature",
+      "file": ".mstar/plans/2026-07-22-v1.131-p0-chronos-titlebar.md",
       "metadata": {
-        "primary_spec": ".mstar/iterations/v1.130/specs/daemon-restart-reliability.md",
+        "primary_spec": ".mstar/iterations/v1.131/specs/chronos-titlebar-chrome.md",
         "spec_refs": [
-          ".mstar/iterations/v1.130/specs/daemon-restart-reliability.md"
+          ".mstar/iterations/v1.131/specs/chronos-titlebar-chrome.md"
         ],
         "iteration_refs": [
-          ".mstar/iterations/v1.130/delivery-compass.md"
+          ".mstar/iterations/v1.131/delivery-compass.md"
         ],
-        "iteration_compass": "v1.130/delivery-compass.md",
-        "spec_integration_branch": "iteration/v1.130",
-        "working_branch": "plan/v1.130-p0-daemon-restart",
-        "merge_target": "iteration/v1.130",
+        "iteration_compass": "v1.131/delivery-compass.md",
+        "spec_integration_branch": "iteration/v1.131",
+        "working_branch": "plan/v1.131-p0-chronos-titlebar",
+        "merge_target": "iteration/v1.131",
         "wire_contracts_changed": false,
-        "iteration_id": "V1.130",
+        "iteration_id": "V1.131",
         "blocked_by": [],
         "wave": "1",
         "seq": "1",
-        "description": "Atomic daemon restart + attach matrix + mid-session UX"
+        "description": "Chronos deep-blue titlebar + plate logo on matching ink"
       }
     },
     {
-      "plan_id": "2026-07-22-v1.130-p4-vi-atmosphere",
-      "status": "Done",
+      "plan_id": "2026-07-22-v1.131-p1-logo-gallery-lockup",
+      "status": "Todo",
       "type": "feature",
+      "file": ".mstar/plans/2026-07-22-v1.131-p1-logo-gallery-lockup.md",
       "metadata": {
-        "primary_spec": ".mstar/iterations/v1.130/specs/vi-atmosphere-chronos.md",
+        "primary_spec": ".mstar/iterations/v1.131/specs/logo-gallery-lockup.md",
         "spec_refs": [
-          ".mstar/iterations/v1.130/specs/vi-atmosphere-chronos.md"
+          ".mstar/iterations/v1.131/specs/logo-gallery-lockup.md"
         ],
         "iteration_refs": [
-          ".mstar/iterations/v1.130/delivery-compass.md"
+          ".mstar/iterations/v1.131/delivery-compass.md"
         ],
-        "iteration_compass": "v1.130/delivery-compass.md",
-        "spec_integration_branch": "iteration/v1.130",
-        "working_branch": "plan/v1.130-p4-vi-atmosphere",
-        "merge_target": "iteration/v1.130",
+        "iteration_compass": "v1.131/delivery-compass.md",
+        "spec_integration_branch": "iteration/v1.131",
+        "working_branch": "plan/v1.131-p1-logo-gallery-lockup",
+        "merge_target": "iteration/v1.131",
         "wire_contracts_changed": false,
-        "iteration_id": "V1.130",
+        "iteration_id": "V1.131",
         "blocked_by": [],
         "wave": "1",
         "seq": "1∥",
-        "description": "VI Chronos lock — kill office navy, keep cyan"
+        "description": "Studio logo cards fill preview; wordmark scale; BG-matched specimens"
       }
     },
     {
-      "plan_id": "2026-07-22-v1.130-p1-shell-frame",
-      "status": "Done",
+      "plan_id": "2026-07-22-v1.131-p2-shell-ia-finish",
+      "status": "Todo",
       "type": "feature",
+      "file": ".mstar/plans/2026-07-22-v1.131-p2-shell-ia-finish.md",
       "metadata": {
-        "primary_spec": ".mstar/iterations/v1.130/specs/shell-frame-dual-pane.md",
+        "primary_spec": ".mstar/iterations/v1.131/specs/shell-ia-finish.md",
         "spec_refs": [
-          ".mstar/iterations/v1.130/specs/shell-frame-dual-pane.md"
+          ".mstar/iterations/v1.131/specs/shell-ia-finish.md"
         ],
         "iteration_refs": [
-          ".mstar/iterations/v1.130/delivery-compass.md"
+          ".mstar/iterations/v1.131/delivery-compass.md"
         ],
-        "iteration_compass": "v1.130/delivery-compass.md",
-        "spec_integration_branch": "iteration/v1.130",
-        "working_branch": "plan/v1.130-p1-shell-frame",
-        "merge_target": "iteration/v1.130",
+        "iteration_compass": "v1.131/delivery-compass.md",
+        "spec_integration_branch": "iteration/v1.131",
+        "working_branch": "plan/v1.131-p2-shell-ia-finish",
+        "merge_target": "iteration/v1.131",
         "wire_contracts_changed": false,
-        "iteration_id": "V1.130",
+        "iteration_id": "V1.131",
         "blocked_by": [
-          "2026-07-22-v1.130-p4-vi-atmosphere"
+          "2026-07-22-v1.131-p0-chronos-titlebar"
         ],
         "wave": "2",
         "seq": "2",
-        "description": "Dual-pane shell + titlebar + footer switch + settings modal chrome + default profile"
+        "description": "Finish V1.130 DF-V1130 shell/Settings IA (footer, modal, 工作区, Compute)",
+        "tracker_ids": [
+          "DF-V1130-MODE-SWITCH-FOOTER",
+          "DF-V1130-SETTINGS-MODAL",
+          "DF-V1130-WORKSPACE-UNDER-ORCH",
+          "DF-V1130-COMPUTE-IN-SETTINGS",
+          "DF-V1130-PROFILE-SSOT"
+        ]
       }
     },
     {
-      "plan_id": "2026-07-22-v1.130-p2-creator-dual-state",
-      "status": "Done",
+      "plan_id": "2026-07-22-v1.131-p3-desktop-icons-residuals",
+      "status": "Todo",
       "type": "feature",
+      "file": ".mstar/plans/2026-07-22-v1.131-p3-desktop-icons-residuals.md",
       "metadata": {
-        "primary_spec": ".mstar/iterations/v1.130/specs/creator-dual-state-entry.md",
+        "primary_spec": ".mstar/iterations/v1.131/specs/desktop-icons-residuals.md",
         "spec_refs": [
-          ".mstar/iterations/v1.130/specs/creator-dual-state-entry.md"
+          ".mstar/iterations/v1.131/specs/desktop-icons-residuals.md"
         ],
         "iteration_refs": [
-          ".mstar/iterations/v1.130/delivery-compass.md"
+          ".mstar/iterations/v1.131/delivery-compass.md"
         ],
-        "iteration_compass": "v1.130/delivery-compass.md",
-        "spec_integration_branch": "iteration/v1.130",
-        "working_branch": "plan/v1.130-p2-creator-dual-state",
-        "merge_target": "iteration/v1.130",
-        "wire_contracts_changed": true,
-        "iteration_id": "V1.130",
+        "iteration_compass": "v1.131/delivery-compass.md",
+        "spec_integration_branch": "iteration/v1.131",
+        "working_branch": "plan/v1.131-p3-desktop-icons-residuals",
+        "merge_target": "iteration/v1.131",
+        "wire_contracts_changed": false,
+        "iteration_id": "V1.131",
         "blocked_by": [
-          "2026-07-22-v1.130-p1-shell-frame"
+          "2026-07-22-v1.131-p0-chronos-titlebar",
+          "2026-07-22-v1.131-p1-logo-gallery-lockup",
+          "2026-07-22-v1.131-p2-shell-ia-finish"
         ],
         "wave": "3",
-        "seq": "3a",
-        "description": "Create World + continue World→Work; entity Chat slot + action buttons"
-      }
-    },
-    {
-      "plan_id": "2026-07-22-v1.130-p3-orch-load-repair",
-      "status": "Done",
-      "type": "feature",
-      "metadata": {
-        "primary_spec": ".mstar/iterations/v1.130/specs/orch-load-repair.md",
-        "spec_refs": [
-          ".mstar/iterations/v1.130/specs/orch-load-repair.md"
-        ],
-        "iteration_refs": [
-          ".mstar/iterations/v1.130/delivery-compass.md"
-        ],
-        "iteration_compass": "v1.130/delivery-compass.md",
-        "spec_integration_branch": "iteration/v1.130",
-        "working_branch": "plan/v1.130-p3-orch-load-repair",
-        "merge_target": "iteration/v1.130",
-        "wire_contracts_changed": false,
-        "iteration_id": "V1.130",
-        "blocked_by": [
-          "2026-07-22-v1.130-p1-shell-frame"
-        ],
-        "wave": "3",
-        "seq": "3b",
-        "description": "Fix Strategy/Sessions/Modules detail load failures"
-      }
-    },
-    {
-      "plan_id": "2026-07-22-v1.130-p3-orch-settings-rehome",
-      "status": "Done",
-      "type": "feature",
-      "metadata": {
-        "primary_spec": ".mstar/iterations/v1.130/specs/orch-settings-rehome.md",
-        "spec_refs": [
-          ".mstar/iterations/v1.130/specs/orch-settings-rehome.md"
-        ],
-        "iteration_refs": [
-          ".mstar/iterations/v1.130/delivery-compass.md"
-        ],
-        "iteration_compass": "v1.130/delivery-compass.md",
-        "spec_integration_branch": "iteration/v1.130",
-        "working_branch": "plan/v1.130-p3-orch-settings-rehome",
-        "merge_target": "iteration/v1.130",
-        "wire_contracts_changed": false,
-        "iteration_id": "V1.130",
-        "blocked_by": [
-          "2026-07-22-v1.130-p1-shell-frame",
-          "2026-07-22-v1.130-p3-orch-load-repair"
-        ],
-        "wave": "4",
-        "seq": "4",
-        "description": "Compute→Settings modal; Profiles→工作区 under 编排"
+        "seq": "3",
+        "description": "Desktop icon verify + residual slate-clear"
       }
     }
   ],
   "metadata": {
     "integration_branch_retired": false,
     "iteration_base_branch": "main",
-    "latest_active_compass": "v1.130/delivery-compass.md",
-    "latest_active_iteration": "V1.130",
+    "latest_active_compass": "v1.131/delivery-compass.md",
+    "latest_active_iteration": "V1.131",
     "latest_ship": {
       "iteration": "V1.128",
       "compass": "v1.128/delivery-compass.md",
@@ -169,7 +129,7 @@
       "merge_commit": "d59311de"
     },
     "platform_integration": "paused — local-only until further notice",
-    "spec_integration_branch": "iteration/v1.130",
+    "spec_integration_branch": "iteration/v1.131",
     "spec_refs_index": ".mstar/specs/README.md",
     "target_branch": "main",
     "tech_debt_summary": {
