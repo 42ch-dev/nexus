@@ -253,6 +253,15 @@ describe('Brand logo gallery lockup', () => {
       .getAllByRole('img')
       .find((img) => img.className.includes('h-[26px]'));
     expect(wordmark).toBeDefined();
+    expect(wordmark?.getAttribute('src')).toMatch(/logo-text/);
+    expect(wordmark).toHaveAccessibleName('Nexus');
+  });
+
+  it('documents the logo-text wordmark contract on Brand', () => {
+    const note = screen.getByTestId('brand-wordmark-contract');
+    expect(note).toHaveTextContent(/logo-text\.svg/);
+    expect(note).toHaveTextContent(/NexusTextLogo/);
+    expect(note).toHaveTextContent(/variant="text"/);
   });
 });
 

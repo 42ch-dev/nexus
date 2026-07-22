@@ -1144,19 +1144,20 @@ Canonical SVG assets ship from `@42ch/nexus-ui/assets/logos/`. PNG sources are p
 | White-bg lockup | `logo-white-bg.svg` | Only when a light/white plate is required (matches `logo-white-bg.png`) |
 | White mark (dark-gray→white gradient) | `logo-white.svg` | Dark hero, photography overlays, high-contrast panels (transparent mark) |
 | Mono mark (light-gray→black gradient) | `logo-mono.svg` | Static grayscale lockup on light surfaces |
-| Wordmark | `logo-text.svg` | Lowercase `nexus` lockup; `currentColor` (white on dark heroes; `brand-deep-blue` on light) |
+| Wordmark | `logo-text.svg` via `<NexusLogo variant="text">` (apps/web: `NexusTextLogo`) | Lowercase `nexus` lockup; `currentColor` (white on dark heroes; `brand-deep-blue` on light) |
 | Tintable mark | `<NexusMark>` | Inline chrome (buttons, badges, list rows); `currentColor` |
 
 **Placement:**
 
 - Shell sidebar/header: **primary lockup** (`logo-primary.svg`) on light and dark — theme-stable deep-blue plate.
 - Light/white marketing or docs plates that must not show deep-blue: `logo-white-bg.svg` only.
-- Dark heroes / deepest panels: `logo-white.svg` mark; optional `logo-text.svg` wordmark with `color: #FFFFFF` (or `currentColor` set to white).
+- Dark heroes / deepest panels: `logo-white.svg` mark; optional **wordmark** via `logo-text.svg` with `color: #FFFFFF` (or `currentColor` set to white).
 - Lockups (Studio Brand, marketing): plate lockup + optional `logo-text.svg` with shared clear-space; do not stretch either asset.
 - Inline chrome (buttons, badges, list rows): `<NexusMark>` only — set `color` on the parent. Prefer the static `logo-mono.svg` asset when the baked grayscale gradient is required.
 
 **Rules:**
 
+- **Wordmark contract:** whenever UI needs the Nexus **logo text** (brand wordmark), render `logo-text.svg` through `<NexusLogo variant="text" src={…logo-text…}>` — in apps/web prefer the thin `NexusTextLogo` wrapper. Do **not** typeset `nexus` / `Nexus` with heading or UI fonts as a brand substitute (glyph metrics and weight drift). Ordinary product copy, route titles, and nav labels remain typography; this rule applies only to **logo identity** text.
 - Minimum rendered height: **24px** (`logoMinSizePx`) for the mark; wordmark follows the same min height for the glyph box.
 - Clear space: **≥ 25%** of logo height on all sides.
 - Aspect: `logo-primary.svg` and `logo-white-bg.svg` are **square plate lockups**. Transparent marks (`white`, `mono`) and `<NexusMark>` are **wide** (`viewBox` ~10:1) — prefer `height` + `width: auto`.
