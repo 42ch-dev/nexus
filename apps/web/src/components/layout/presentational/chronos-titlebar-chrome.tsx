@@ -24,8 +24,8 @@ export interface ChronosTitlebarChromeProps {
  * Presentational Chronos titlebar — full-width ink strip (DESIGN.md §desktop-window-chrome).
  *
  * Props-driven slots only: no routing, theme hooks, or daemon clients.
- * `data-tauri-drag-region` is applied only to empty paint (safe inset + flex spacer),
- * never to interactive logo, title, gear, theme, or health controls.
+ * `data-tauri-drag-region` covers non-interactive chrome (safe inset, logo/title paint,
+ * flex spacer). Gear, theme, and health controls remain outside the drag marker.
  */
 export function ChronosTitlebarChrome({
   title,
@@ -59,6 +59,7 @@ export function ChronosTitlebarChrome({
       {logo ? (
         <div
           className="flex shrink-0 items-center px-3"
+          data-tauri-drag-region={desktopSafeInset ? true : undefined}
           data-testid="chronos-titlebar-logo-slot"
         >
           {logo}
@@ -70,6 +71,7 @@ export function ChronosTitlebarChrome({
           'shrink-0 truncate px-2 text-heading-20 font-heading tracking-tight',
           labelClass,
         )}
+        data-tauri-drag-region={desktopSafeInset ? true : undefined}
         data-testid="chronos-titlebar-title"
       >
         {title}
