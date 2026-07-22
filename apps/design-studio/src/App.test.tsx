@@ -193,6 +193,29 @@ describe('Chronos gallery acceptance', () => {
     expect(primary.className).not.toMatch(/\bdark:bg-brand-cyan\b/);
   });
 
+  it('dark theme keeps primary Button cyan fill + deep text (no light/dark fork)', () => {
+    mockMatchMediaFull({ dark: true });
+    document.documentElement.classList.add('dark');
+    renderStudio('/components');
+    expect(document.documentElement.classList.contains('dark')).toBe(true);
+    const primary = screen.getByTestId('button-primary-default');
+    expect(primary.className).toMatch(/\bbg-brand-cyan\b/);
+    expect(primary.className).toMatch(/\btext-brand-deep-blue\b/);
+    expect(primary.className).not.toMatch(/\bdark:bg-brand-cyan\b/);
+  });
+
+  it('dark theme keeps token blue-700 swatch on cyan signal scale', () => {
+    mockMatchMediaFull({ dark: true });
+    document.documentElement.classList.add('dark');
+    renderStudio('/tokens');
+    expect(document.documentElement.classList.contains('dark')).toBe(true);
+    expect(screen.getByTestId('tokens-chronos-note')).toHaveTextContent(/cyan signal/i);
+    const swatch = screen.getByTestId('color-swatch-blue-700');
+    const fill = swatch.querySelector('[style*="--color-blue-700"]');
+    expect(fill).not.toBeNull();
+    expect(swatch).toHaveTextContent('blue-700');
+  });
+
   it('brand page states Chronos identity without N-network lockup copy', () => {
     mockMatchMedia(false);
     renderStudio('/brand');
