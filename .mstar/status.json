@@ -119,7 +119,15 @@
         "worktree_path": "/Users/bibi/workspace/organizations/42ch/nexus/.worktrees/v1.132-p2-vi-aesthetic-retune",
         "working_branch": "plan/v1.132-p2-vi-aesthetic-retune",
         "session_label": "v1.132-phase2-wave2"
-      }
+      },
+      "task_commits": [
+        {
+          "task": 1,
+          "base": "c273f1b2ee85d50886a44c937c8a2d8aad095e71",
+          "head": "524c5eed0423cf380823dc05bb811e9d92619549",
+          "status": "complete"
+        }
+      ]
     },
     {
       "id": "2026-07-22-v1.132-p3-creator-orch-gongnengqu-ia",
