@@ -55,7 +55,7 @@
     },
     {
       "id": "2026-07-22-v1.132-p1-titlebar-window-drag",
-      "status": "InReview",
+      "status": "Done",
       "file": ".mstar/plans/2026-07-22-v1.132-p1-titlebar-window-drag.md",
       "metadata": {
         "primary_spec": ".mstar/iterations/v1.132/specs/titlebar-window-drag.md",
@@ -68,13 +68,6 @@
         "wire_contracts_changed": false,
         "wave": "1",
         "seq": "1"
-      },
-      "execution_lease": {
-        "holder": "pm-v1.132-btwoods-MBP",
-        "claimed_at": "2026-07-22T14:12:11Z",
-        "worktree_path": "/Users/bibi/workspace/organizations/42ch/nexus/.worktrees/v1.132-p1-titlebar-window-drag",
-        "working_branch": "plan/v1.132-p1-titlebar-window-drag",
-        "session_label": "v1.132-phase2-wave1"
       },
       "task_commits": [
         {
