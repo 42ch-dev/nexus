@@ -13,12 +13,10 @@ export const brandColors = {
 export type BrandColorName = keyof typeof brandColors;
 
 export const logoVariants = {
-  /** Primary lockup — bright mark on brand deep-blue plate (matches `logo-primary.png`) */
+  /** Primary lockup — bright mark on brand deep-blue plate (default; matches `logo-primary.png`) */
   primary: 'logo-primary.svg',
-  /** Timeline mark — color on white/light plates; matches `logo-white-bg.png` (light shell) */
+  /** Lockup on white plate — only when a light/white surface is required (`logo-white-bg.png`) */
   whiteBg: 'logo-white-bg.svg',
-  /** Timeline mark — bright gradient for dark nav / dark shells (no plate) */
-  color: 'logo-color.svg',
   /** Timeline mark — dark-gray→white gradient for dark heroes / high-contrast panels */
   white: 'logo-white.svg',
   /** Timeline mark — light-gray→black gradient (static asset; tintable form is `<NexusMark>`) */

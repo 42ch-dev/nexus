@@ -8,10 +8,10 @@ under this directory (except `source/`) are **generated at build/dev time** via
 
 ## Source assets (committed)
 
-- `source/compose-app-icon.mjs` — reproducible composition script: centers the
-  Chronos **timeline mark** (`packages/nexus-ui/assets/logos/logo-color.svg`) on
-  an opaque **Chronos deep** plate (`brand-deep-blue` / `#0D2B3E`) with ~10%
-  padding and a soft drop shadow, then writes the raster outputs below.
+- `source/compose-app-icon.mjs` — reproducible composition script: rasterizes the
+  Chronos **primary lockup** (`packages/nexus-ui/assets/logos/logo-primary.svg`
+  — bright timeline mark on opaque **Chronos deep** plate) to the raster outputs
+  below.
 - `source/source-1024.png` — composed 1024×1024 RGBA PNG used as the input
   for `tauri icon`. Tracked by Git LFS.
 - `source/app-icon-preview-256.png` — 256×256 preview render for QA/PR review
@@ -28,15 +28,9 @@ From the repo root (requires `sharp` in `apps/desktop` devDependencies):
 pnpm --filter desktop run icons:compose
 ```
 
-This rasterizes `logo-color.svg` (bright timeline gradient — cyan signal on
-deep ink), centers it on a **full-bleed Chronos deep plate** (`brand-deep-blue`,
-`#0D2B3E`), and adds a soft `brand-deep-blue-1000` drop shadow (opacity `0.28`)
-for depth. macOS applies the system squircle mask to the bundled asset; the
-plate is intentional brand fill (not transparent). Then regenerates
-`source-1024.png` + `app-icon-preview-256.png`.
-
-Plate and shadow hex values are read live from root `DESIGN.md` `colors:` so
-they stay aligned with the SSOT.
+This rasterizes `logo-primary.svg` (bright mark on brand deep-blue plate) to
+`source-1024.png` + `app-icon-preview-256.png`. macOS applies the system
+squircle mask to the bundled asset; the plate is intentional brand fill.
 
 ## Generating desktop icon formats
 
@@ -76,8 +70,8 @@ and reviewed in GitHub/GitLab.
 
 ## Aesthetic sign-off
 
-Composition: **timeline mark** (`logo-color.svg`) on **Chronos deep** plate
-(`brand-deep-blue`). Review `source/app-icon-preview-256.png` at QA/PR time.
+Composition: **primary lockup** (`logo-primary.svg` — Chronos deep plate + bright
+timeline mark). Review `source/app-icon-preview-256.png` at QA/PR time.
 
 ## macOS Dock visual smoke
 

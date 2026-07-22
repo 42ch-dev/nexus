@@ -55,7 +55,6 @@ describe('NexusLogo', () => {
     expect(VARIANT_FILENAMES).toEqual({
       primary: 'logo-primary.svg',
       whiteBg: 'logo-white-bg.svg',
-      color: 'logo-color.svg',
       white: 'logo-white.svg',
       mono: 'logo-mono.svg',
       text: 'logo-text.svg',

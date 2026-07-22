@@ -18,7 +18,6 @@ import {
  * exactly as apps/web/src/components/brand/nexus-logo.tsx does. */
 import logoPrimarySrc from '@42ch/nexus-ui/assets/logos/logo-primary.svg';
 import logoWhiteBgSrc from '@42ch/nexus-ui/assets/logos/logo-white-bg.svg';
-import logoColorSrc from '@42ch/nexus-ui/assets/logos/logo-color.svg';
 import logoWhiteSrc from '@42ch/nexus-ui/assets/logos/logo-white.svg';
 import logoMonoSrc from '@42ch/nexus-ui/assets/logos/logo-mono.svg';
 import logoTextSrc from '@42ch/nexus-ui/assets/logos/logo-text.svg';
@@ -32,7 +31,6 @@ import { StudioShellLogo } from '@/components/studio-shell-logo';
 const LOGO_SOURCES: Record<LogoVariantName, string> = {
   primary: logoPrimarySrc,
   whiteBg: logoWhiteBgSrc,
-  color: logoColorSrc,
   white: logoWhiteSrc,
   mono: logoMonoSrc,
   text: logoTextSrc,
@@ -58,7 +56,7 @@ const LOGO_DISPLAYS: LogoDisplay[] = [
     label: 'Primary',
     fileName: logoVariants.primary,
     description:
-      'Primary lockup — bright mark on brand deep-blue plate (matches logo-primary.png). Not for light chrome.',
+      'Default lockup — bright mark on brand deep-blue plate (matches logo-primary.png). Use in product shell and most surfaces.',
     panelBgClass: 'bg-background-100',
   },
   {
@@ -66,15 +64,8 @@ const LOGO_DISPLAYS: LogoDisplay[] = [
     label: 'White-bg',
     fileName: logoVariants.whiteBg,
     description:
-      'Color mark on transparent plate — light nav / light shells (matches logo-white-bg.png).',
-    panelBgClass: 'bg-white',
-  },
-  {
-    variant: 'color',
-    label: 'Color',
-    fileName: logoVariants.color,
-    description: 'Timeline mark — bright gradient for dark nav / dark shells.',
-    panelBgClass: 'bg-[#08141C]',
+      'Lockup on white plate — only when a light/white surface is required (matches logo-white-bg.png).',
+    panelBgClass: 'bg-gray-alpha-100',
   },
   {
     variant: 'white',
@@ -206,7 +197,7 @@ function LogoGrid() {
     <section>
       <SectionHeading id="brand-logos">Logo variants</SectionHeading>
       <p className="text-copy-16 text-gray-700 mb-6">
-        All six <code className="font-mono bg-gray-alpha-100 px-1 rounded">logoVariants</code> from{' '}
+        All five <code className="font-mono bg-gray-alpha-100 px-1 rounded">logoVariants</code> from{' '}
         <code className="font-mono bg-gray-alpha-100 px-1 rounded">@42ch/nexus-ui</code>
         — timeline marks (wide aspect) plus wordmark — on their recommended surfaces per DESIGN.md §
         Logo Usage.
@@ -284,31 +275,32 @@ function ChronosContextSection() {
         data-testid="brand-chronos-note"
         className="text-copy-16 text-gray-700 mb-4"
       >
-        Chronos identity: timeline mark (whiteBg on light, color on dark), titlebar label white on
-        light / cyan on dark, cyan signal chrome, deep ink structure. Product shell uses{' '}
-        <strong>mark only</strong> — no wordmark in nav. The primary plate lockup is for brand
-        surfaces, not chrome.
+        Chronos identity: default <code className="font-mono bg-gray-alpha-100 px-1 rounded">primary</code>{' '}
+        timeline mark lockup (deep-blue plate) in product shell, titlebar label white on light / cyan on
+        dark, cyan signal chrome, deep ink structure. Use{' '}
+        <code className="font-mono bg-gray-alpha-100 px-1 rounded">whiteBg</code> only on surfaces
+        that must sit on a light/white plate. Product shell uses the plate lockup — no wordmark in
+        nav.
       </p>
       <p className="text-copy-16 text-gray-700 mb-6">
-        Theme-aware placement:{' '}
-        <code className="font-mono bg-gray-alpha-100 px-1 rounded">whiteBg</code> on light,{' '}
-        <code className="font-mono bg-gray-alpha-100 px-1 rounded">color</code> on dark. Toggle the
-        Studio theme to verify live fixtures; the mini shells below show both placements at once.
+        Shell placement is theme-stable:{' '}
+        <code className="font-mono bg-gray-alpha-100 px-1 rounded">primary</code> on light and dark
+        mini shells below.
       </p>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
         <ChronosShellMini mode="light">
           <NexusLogo
-            variant="whiteBg"
-            src={logoWhiteBgSrc}
+            variant="primary"
+            src={logoPrimarySrc}
             size={logoShellHeightPx}
             className="h-5 w-auto max-w-full shrink-0"
           />
         </ChronosShellMini>
         <ChronosShellMini mode="dark">
           <NexusLogo
-            variant="color"
-            src={logoColorSrc}
+            variant="primary"
+            src={logoPrimarySrc}
             size={logoShellHeightPx}
             className="h-5 w-auto max-w-full shrink-0"
           />

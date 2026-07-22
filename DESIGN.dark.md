@@ -370,7 +370,7 @@ components:
 
   # ── shell-nav / logo: root dark ──
   shell-nav:
-    logo-variant: "logo-color.svg"
+    logo-variant: "logo-primary.svg"
     logo-min-height: "24px"
     logo-clear-space-ratio: "0.25"
     active-bar-color: "{colors.brand-cyan}"
@@ -823,19 +823,18 @@ Canonical assets: `@42ch/nexus-ui/assets/logos/`. Geometry is the **timeline** m
 
 | Variant | File | Dark surface |
 | --- | --- | --- |
-| Color mark (bright gradient) | `logo-color.svg` | Dark nav, sidebar, dark shell header |
+| Primary lockup (default) | `logo-primary.svg` | Product shell — deep-blue plate + bright mark (theme-stable) |
 | White mark (dark-gray→white gradient) | `logo-white.svg` | Dark hero, photography, deepest panels |
 | Tintable mark | `<NexusMark>` | Inline UI; set `color` to cyan or white as needed |
 | Wordmark | `logo-text.svg` | Lockups; `currentColor` → white on heroes / dark panels |
-| Primary plate lockup | `logo-primary.svg` | Brand plate (deep-blue fill + bright mark) — ok on brand surfaces; do not use as chrome mark on arbitrary ink |
-| White-bg mark | `logo-white-bg.svg` | **Avoid on dark chrome** — deep end of gradient lacks contrast |
+| White-bg lockup | `logo-white-bg.svg` | Only when a light/white plate is required — avoid on ink chrome |
 | Mono mark (light-gray→black) | `logo-mono.svg` | Prefer on light plates only |
 
 **Dark placement:**
 
-- Shell sidebar/header: **mark only** — `logo-color.svg`.
+- Shell sidebar/header: **primary lockup** — `logo-primary.svg`.
 - Heroes / deepest panels: `logo-white.svg`; optional `logo-text.svg` with white `currentColor`.
 - Do not use `logo-white-bg.svg` on ink/dark surfaces.
-- Wide aspect for transparent marks — size by height (`width: auto`), not a 1:1 box. `logo-primary.svg` is square (plate).
+- Plate lockups (`primary`, `whiteBg`) are square; transparent marks are wide — size by height (`width: auto`).
 
 This file intentionally preserves the same token names and frontmatter structure with dark values. Rule-type documentation, component behavior, voice/content guidance, and implementation mapping live in `DESIGN.md` and apply to both themes.
