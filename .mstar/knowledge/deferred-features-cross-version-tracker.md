@@ -103,16 +103,16 @@ Residual findings are tracked in [`status.json`](../status.json) → `residual_f
 
 - **Shipped rows**: Move from §2.3 to [shipped archive](../archived/shipped-features-tracker.md) §1; add per-version snapshot to archive §2 when an iteration closes.
 - **Compass authority**: Active compass controls scope even if this tracker lists a different target.
-- **In-flight “must ship”**: Rows marked **V1.131 in-flight — must ship** are **committed delivery** for the active compass; do not re-target to V1.132 without PM scope change.
+- **In-flight “must ship”**: Rows marked **V1.132 in-flight — must ship** are **committed delivery** for the active compass; do not re-target without PM scope change.
 - **Effort estimates**: XS/S/M/L/XL agent-session scale. Guidance only.
 
 ---
 
 ## 5) Quick index
 
-**Active iteration**: [V1.131](../iterations/v1.131/delivery-compass.md) (**active** — Chronos titlebar + logo gallery + DF-V1130 IA finish + desktop icons; `iteration/v1.131`).
+**Active iteration**: [V1.132](../iterations/v1.132/delivery-compass.md) (**active** — dogfood load blocker + titlebar drag + VI retune + 创作/工作区 IA; `iteration/v1.132`).
 
-**Latest shipped**: [V1.130](../iterations/v1.130/delivery-compass.md) (partial shell rewrite, #165) + VI logo upgrade (#167).
+**Latest shipped**: [V1.131](../iterations/v1.131/delivery-compass.md) (Chronos titlebar + logo gallery + DF-V1130 IA finish + desktop icons; merged #169).
 
 **Full iteration index**: [iterations/README.md](../iterations/README.md)
 
