@@ -88,3 +88,25 @@ To verify the asset renders as a Chronos plate with the timeline mark:
 
 The 256×256 preview PNG (`source/app-icon-preview-256.png`) uses the same
 composition; Dock smoke remains authoritative for the OS squircle mask.
+
+## Cache invalidation (stale Dock icon)
+
+macOS / LaunchServices often keep a previous Dock tile after icon assets change.
+If the Dock still shows a pre-Chronos or otherwise stale icon after a rebuild:
+
+1. **Quit all Nexus instances** (every window / process — not just close the
+   window).
+2. **Rebuild and reinstall** the `.app` (e.g. `pnpm dev:desktop` or a release
+   bundle install that replaces the prior app path).
+3. **Restart Dock** so it reloads the bundle icon:
+   ```bash
+   killall Dock
+   ```
+   (macOS relaunches Dock automatically.)
+4. **Relaunch Nexus** and re-check the Dock tile against the smoke criteria above.
+
+If LaunchServices still serves the old icon after steps 1–4, **remove the stale
+app bundle** from the previous install location (and empty Trash if applicable),
+then rebuild/reinstall and repeat the Dock restart. Preview PNG review alone is
+not sufficient — the rebuilt `.app` Dock tile after invalidation is the runtime
+acceptance surface.
