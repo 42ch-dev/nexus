@@ -44,6 +44,12 @@
           "base": "a03464a8df4412284441fd149e04d8d60e757dea",
           "head": "b64c5cb39d061e31bbf65de2b5f9892b65d46219",
           "status": "complete"
+        },
+        {
+          "task": 4,
+          "base": "c64cea8369b1e184fd3dc795ded57dda1603d335",
+          "head": "23b730b788d9cee51155f89c04ffc6d9bd3e66f8",
+          "status": "complete"
         }
       ]
     },
