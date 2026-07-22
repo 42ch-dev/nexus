@@ -4,7 +4,7 @@
   "plans": [
     {
       "plan_id": "2026-07-22-v1.131-p0-chronos-titlebar",
-      "status": "Todo",
+      "status": "InReview",
       "type": "feature",
       "file": ".mstar/plans/2026-07-22-v1.131-p0-chronos-titlebar.md",
       "metadata": {
@@ -29,7 +29,7 @@
     },
     {
       "plan_id": "2026-07-22-v1.131-p1-logo-gallery-lockup",
-      "status": "Todo",
+      "status": "InReview",
       "type": "feature",
       "file": ".mstar/plans/2026-07-22-v1.131-p1-logo-gallery-lockup.md",
       "metadata": {
