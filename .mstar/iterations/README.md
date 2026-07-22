@@ -151,3 +151,4 @@ Implementation-detail SSOT that is not iteration-scoped stays in [`.mstar/knowle
 | V1.130 | [v1.130/](v1.130/) | completed | Control Room shell rewrite + Restart + VI Chronos (6 plans, 6 specs) — merged #165 |
 | V1.131 | [v1.131/](v1.131/) | completed | Chronos titlebar + logo gallery + DF-V1130 IA finish + desktop icons (4 plans) |
 | V1.132 | [v1.132/](v1.132/) | completed | Dogfood load blocker + titlebar drag + VI retune + 创建/工作区 IA (4 plans) |
+| V1.133 | [v1.133/](v1.133/) | active | Legacy false-Done repair + residual burn-down (2 plans) |
