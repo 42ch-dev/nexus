@@ -6,7 +6,25 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { resolveDesktopPort, TauriClient } from '@/lib/nexus/tauri-client';
+import {
+  resolveDesktopBaseUrl,
+  resolveDesktopPort,
+  TauriClient,
+} from '@/lib/nexus/tauri-client';
+
+/** Pin `window.location` for origin-sensitive desktop base URL resolution. */
+function stubLocation(partial: { hostname?: string; port?: string; protocol?: string }) {
+  const current = window.location;
+  Object.defineProperty(window, 'location', {
+    configurable: true,
+    value: {
+      ...current,
+      hostname: partial.hostname ?? current.hostname,
+      port: partial.port ?? current.port,
+      protocol: partial.protocol ?? current.protocol,
+    },
+  });
+}
 
 describe('resolveDesktopPort', () => {
   beforeEach(() => {
@@ -52,13 +70,42 @@ describe('resolveDesktopPort', () => {
   });
 });
 
+describe('resolveDesktopBaseUrl', () => {
+  const originalLocation = window.location;
+
+  afterEach(() => {
+    Object.defineProperty(window, 'location', {
+      configurable: true,
+      value: originalLocation,
+    });
+  });
+
+  it('uses localhost loopback outside the Vite origin', () => {
+    stubLocation({ hostname: 'localhost', port: '', protocol: 'http:' });
+    expect(resolveDesktopBaseUrl(8420)).toBe('http://localhost:8420');
+  });
+
+  it('uses same-origin (empty baseUrl) on the Vite :5173 origin', () => {
+    stubLocation({ hostname: 'localhost', port: '5173', protocol: 'http:' });
+    expect(resolveDesktopBaseUrl(8420)).toBe('');
+  });
+});
+
 describe('TauriClient', () => {
+  const originalLocation = window.location;
+
   beforeEach(() => {
     delete (window as unknown as { __NEXUS_DAEMON_PORT__?: number }).__NEXUS_DAEMON_PORT__;
+    // Packaged / non-Vite origin — absolute localhost loopback.
+    stubLocation({ hostname: 'localhost', port: '', protocol: 'http:' });
   });
 
   afterEach(() => {
     delete (window as unknown as { __NEXUS_DAEMON_PORT__?: number }).__NEXUS_DAEMON_PORT__;
+    Object.defineProperty(window, 'location', {
+      configurable: true,
+      value: originalLocation,
+    });
   });
 
   it('fixes the base URL to the resolved desktop loopback port', () => {
@@ -75,7 +122,7 @@ describe('TauriClient', () => {
     expect(client.port).toBe(9420);
     await client.health();
     expect(fetchImpl).toHaveBeenCalledWith(
-      'http://127.0.0.1:9420/v1/daemon/runtime/health',
+      'http://localhost:9420/v1/daemon/runtime/health',
       expect.objectContaining({ method: 'GET' }),
     );
   });
@@ -88,7 +135,21 @@ describe('TauriClient', () => {
     const health = await client.health();
     expect(health).toMatchObject({ status: 'ok', version: '1.0.0' });
     expect(fetchImpl).toHaveBeenCalledWith(
-      'http://127.0.0.1:8420/v1/daemon/runtime/health',
+      'http://localhost:8420/v1/daemon/runtime/health',
+      expect.objectContaining({ method: 'GET' }),
+    );
+  });
+
+  it('uses relative daemon paths when served from Vite :5173', async () => {
+    stubLocation({ hostname: 'localhost', port: '5173', protocol: 'http:' });
+    const fetchImpl = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ status: 'ok', version: '1.0.0' }), { status: 200 }),
+    );
+    const client = new TauriClient({ port: 8420, fetchImpl });
+    expect(client.port).toBe(8420);
+    await client.health();
+    expect(fetchImpl).toHaveBeenCalledWith(
+      '/v1/daemon/runtime/health',
       expect.objectContaining({ method: 'GET' }),
     );
   });

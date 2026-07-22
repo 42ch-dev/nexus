@@ -4,10 +4,11 @@
  * Spec: [desktop-shell.md](../../../../../.mstar/specs/desktop-shell.md)
  * §5; compass §5 #1 LOCKED. Architecture: **thin desktop-augmentation over
  * `BrowserClient`** — the `NexusClient` data methods reuse the identical HTTP
- * transport to the localhost daemon (`http://127.0.0.1:<resolvedPort>/v1/daemon/*`),
- * exactly as `BrowserClient` does in the browser-tab flow. The Tauri webview can
- * `fetch` loopback directly (compass §5 #4 — no `http` plugin), so no Tauri
- * `invoke` is needed for data access.
+ * transport to the localhost daemon (`http://localhost:<resolvedPort>/v1/daemon/*`,
+ * or same-origin via the Vite proxy when the SPA is on `:5173`), exactly as
+ * `BrowserClient` does in the browser-tab flow. The Tauri webview can `fetch`
+ * loopback directly (compass §5 #4 — no `http` plugin), so no Tauri `invoke` is
+ * needed for data access.
  *
  * Method count: see the `NexusClient` interface (`types.ts`) for the canonical
  * count — it grows as daemon surfaces are promoted, so a literal number here
@@ -60,11 +61,42 @@ export function resolveDesktopPort(explicit?: number | string): number {
   return 8420;
 }
 
+/**
+ * True when the SPA is served from the Vite dev/preview origin (`:5173`).
+ *
+ * `pnpm run dev:desktop` loads the built SPA via `vite preview` on
+ * `http://localhost:5173`. Relative `/v1/daemon/*` must stay same-origin so the
+ * preview proxy (see `vite.config.ts`) can forward to the daemon — direct
+ * `fetch` to `http://127.0.0.1:<port>` is a cross-origin call that WebKit can
+ * fail even when `curl` against the daemon succeeds.
+ */
+export function isViteDevOrigin(): boolean {
+  if (typeof window === 'undefined') return false;
+  const { protocol, hostname, port } = window.location;
+  if (protocol !== 'http:' && protocol !== 'https:') return false;
+  if (hostname !== 'localhost' && hostname !== '127.0.0.1') return false;
+  return port === '5173';
+}
+
+/**
+ * Default desktop transport origin.
+ *
+ * - Vite `:5173` → empty string (same-origin + preview/dev proxy).
+ * - Packaged / embedded SPA → `http://localhost:<port>` (prefer `localhost`
+ *   over `127.0.0.1` so the host matches the daemon allowlist family and avoids
+ *   localhost↔127.0.0.1 cross-host quirks in WKWebView).
+ */
+export function resolveDesktopBaseUrl(port: number): string {
+  if (isViteDevOrigin()) return '';
+  return `http://localhost:${port}`;
+}
+
 export interface TauriClientOptions {
   /**
    * Override the daemon origin. When omitted the client targets the resolved
-   * local loopback port (`http://127.0.0.1:<port>`). Set this to connect a
-   * desktop build to a remote daemon (V1.92 P1).
+   * local loopback port (`http://localhost:<port>`), or same-origin when the
+   * SPA is on the Vite `:5173` origin. Set this to connect a desktop build to
+   * a remote daemon (V1.92 P1).
    */
   baseUrl?: string;
   /**
@@ -91,7 +123,8 @@ export class TauriClient extends BrowserClient {
   constructor(options: TauriClientOptions = {}) {
     const port = options.baseUrl ? undefined : resolveDesktopPort(options.port);
     const browserOptions: BrowserClientOptions = {
-      baseUrl: options.baseUrl ?? (port === undefined ? undefined : `http://127.0.0.1:${port}`),
+      baseUrl:
+        options.baseUrl ?? (port === undefined ? undefined : resolveDesktopBaseUrl(port)),
       apiKey: options.apiKey,
     };
     if (options.fetchImpl) browserOptions.fetchImpl = options.fetchImpl;

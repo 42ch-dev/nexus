@@ -17,7 +17,7 @@
  *    `BrowserClient`: the 24 `NexusClient` methods reuse the identical HTTP
  *    transport to the resolved desktop loopback origin. This pins that contract
  *    — every data method hits the same `/v1/daemon/*` path as `BrowserClient`,
- *    just against `http://127.0.0.1:<port>`.
+ *    just against `http://localhost:<port>`.
  *
  * 3. **Adapter contract enforcement.** The success/envelope/network paths are
  *    covered in browser-client.test.ts; here we pin the *contract* edges those
@@ -102,8 +102,9 @@ describe('TauriClient transport parity (thin-over-BrowserClient)', () => {
     expect(client.port).toBe(8421);
     await client.health();
     // The desktop origin is the resolved loopback — NOT same-origin (the
-    // browser-tab BrowserClient uses relative `/v1/daemon/*`).
-    expect(captured.url).toBe('http://127.0.0.1:8421/v1/daemon/runtime/health');
+    // browser-tab BrowserClient uses relative `/v1/daemon/*`). Vite `:5173`
+    // is the exception (same-origin + preview proxy); tests use a non-Vite origin.
+    expect(captured.url).toBe('http://localhost:8421/v1/daemon/runtime/health');
   });
 
   it('delegates every NexusClient data method to the same /v1/daemon/* path as BrowserClient', async () => {

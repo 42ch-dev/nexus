@@ -165,9 +165,21 @@ Six handoff items below were open entering Seat 2; all are now locked in Seat 2:
 
 ## Roadmap Position
 
-- **Current (V1.130):** Shell entry rewrite + Restart + orch load/Settings rehome + VI Chronos Must — **delivered**
-- **Next (V1.131):** Deepen Creator entity Agent Chat; Orchestrator 功能区 beyond menu; optional Umbra/Aurora VI tune; Create World slug collision suffixes; Settings modal full-page→modal adapter — trigger: V1.130 ship + author demand. Owner: product-manager
+- **Current (V1.130):** Shell entry rewrite + Restart + orch load + VI Chronos — **partially delivered** (dogfood-found incomplete IA; see deferred rows below)
+- **Next (V1.131):** Complete V1.130 shell/Settings IA debt (below) + deepen Creator entity Agent Chat; Orchestrator 功能区 beyond menu; optional Umbra/Aurora VI tune. Owner: product-manager. **Trigger:** V1.130 dogfood feedback (2026-07-22).
 - **Final goal:** Author opens app → Default profile → Create World or continue Work → edit timeline without transport/restart/office-navy friction
+
+### Deferred from V1.130 dogfood (must land V1.131)
+
+| ID | Item | Source plan / AC | Notes |
+|----|------|------------------|-------|
+| DF-V1130-SETTINGS-MODAL | Settings primary = modal (≥80vw×80vh); `/settings/*` deep links open modal section; no full-page Settings primary path | P1 + P3b | `SettingsModalHost` exists but is unwired; routes still full-page `SettingsShellLayout` |
+| DF-V1130-MODE-SWITCH-FOOTER | 创作\|编排 switch on **功能区 footer** (not sidebar top tabs) | P1 AC Shell/IA | Top tabs remain in `ShellSidebarChrome` |
+| DF-V1130-WORKSPACE-UNDER-ORCH | Profiles renamed **工作区**, mounted **only under 编排 功能区** | P3b T2 | Label renamed to 工作区; still footer on both tabs |
+| DF-V1130-COMPUTE-IN-SETTINGS | Compute/Modules content in Settings modal; removed from 编排 only after modal section green | P3b T1 | Modules route remains; not registered in Settings modal |
+| DF-V1130-PROFILE-SSOT | Profile membership SSOT = `~/.nexus42/creators/<id>/`; SQL/identity cache only enrich; create/bootstrap always write SSOT | Dogfood 2026-07-22 | List/create fixed in post-ship hotfix; keep invariant in future Profile work |
+
+Tracker SSOT for open rows: [deferred-features-cross-version-tracker.md](../../knowledge/deferred-features-cross-version-tracker.md) `DF-V1130-*`.
 
 ## Delivery Branch Policy
 

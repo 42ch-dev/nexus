@@ -364,6 +364,86 @@ fn clear_creator_credentials(creator_id: &str) -> Result<bool, NexusApiError> {
 
 // ── Handlers ────────────────────────────────────────────────────────
 
+/// Profile membership SSOT: directories under `~/.nexus42/creators/<id>/`.
+///
+/// The active workspace `creators` SQL table and `creator_identity_cache.json`
+/// are **enrichment only** — they never expand membership. Orphan SQL/cache
+/// rows (dirty test data) stay invisible until a matching Profile home exists
+/// on disk (or is created via `POST /creators`).
+fn list_profile_ids_ssot(nexus_home: &std::path::Path) -> Vec<String> {
+    let creators_dir = nexus_home.join("creators");
+    let Ok(entries) = std::fs::read_dir(&creators_dir) else {
+        return Vec::new();
+    };
+    let mut ids = Vec::new();
+    for entry in entries.flatten() {
+        let Ok(file_type) = entry.file_type() else {
+            continue;
+        };
+        if !file_type.is_dir() {
+            continue;
+        }
+        let name = entry.file_name();
+        let Some(id) = name.to_str() else {
+            continue;
+        };
+        if validate_creator_id_safe(id).is_err() {
+            continue;
+        }
+        ids.push(id.to_string());
+    }
+    ids.sort();
+    ids
+}
+
+/// Ensure a Profile home exists on disk (membership SSOT write).
+fn ensure_profile_home_ssot(
+    nexus_home: &std::path::Path,
+    creator_id: &str,
+) -> Result<(), NexusApiError> {
+    validate_creator_id_safe(creator_id).map_err(|reason| NexusApiError::InvalidInput {
+        field: "creator_id".to_string(),
+        reason,
+    })?;
+    let profile_home = nexus_home.join("creators").join(creator_id);
+    std::fs::create_dir_all(profile_home.join("workspaces").join("default")).map_err(|e| {
+        NexusApiError::Internal {
+            code: "PROFILE_HOME_ERROR".into(),
+            message: e.to_string(),
+        }
+    })?;
+    Ok(())
+}
+
+/// Enrich a SSOT Profile id with display metadata from secondary sources.
+///
+/// Priority: active-pool SQL row → identity cache → creator id fallback.
+/// Never invents membership.
+fn enrich_profile(
+    creator_id: &str,
+    sql_by_id: &std::collections::HashMap<String, CreatorInfo>,
+    identity_cache: &serde_json::Value,
+) -> CreatorInfo {
+    if let Some(row) = sql_by_id.get(creator_id) {
+        return CreatorInfo {
+            creator_id: creator_id.to_string(),
+            display_name: row.display_name.clone(),
+            status: row.status.clone(),
+            cached_at: row.cached_at.clone(),
+        };
+    }
+    let display_name = get_identity_entry(identity_cache, creator_id)
+        .and_then(|entry| entry.display_name)
+        .filter(|name| !name.trim().is_empty())
+        .unwrap_or_else(|| creator_id.to_string());
+    CreatorInfo {
+        creator_id: creator_id.to_string(),
+        display_name,
+        status: "active".to_string(),
+        cached_at: None,
+    }
+}
+
 /// GET /v1/daemon/creators
 pub async fn list(
     State(state): State<WorkspaceState>,
@@ -372,8 +452,17 @@ pub async fn list(
     info!("Handling list creators request");
 
     let limit = params.limit.clamp(1, MAX_LIMIT);
-    let all_creators = if let Some(pool) = state.pool() {
-        sqlx::query_as!(
+
+    // Membership SSOT: on-disk Profile homes only.
+    let ssot_ids = list_profile_ids_ssot(state.nexus_home());
+
+    // Secondary enrichment map (may contain dirty/orphan rows — ignored unless
+    // the id is in the SSOT set).
+    let identity_cache = load_identity_cache();
+    let mut sql_by_id: std::collections::HashMap<String, CreatorInfo> =
+        std::collections::HashMap::new();
+    if let Some(pool) = state.pool() {
+        let sql_creators = sqlx::query_as!(
             CreatorInfo,
             r#"SELECT creator_id as "creator_id!", display_name, status, cached_at FROM creators ORDER BY cached_at DESC"#
         )
@@ -382,12 +471,31 @@ pub async fn list(
         .map_err(|e| NexusApiError::Internal {
             code: "DATABASE_ERROR".into(),
             message: e.to_string(),
-        })?
-    } else {
-        Vec::new()
-    };
+        })?;
+        for creator in sql_creators {
+            sql_by_id.insert(creator.creator_id.clone(), creator);
+        }
 
-    let mut items = all_creators;
+        // Complete the active-pool cache from SSOT (never the reverse).
+        for creator_id in &ssot_ids {
+            if sql_by_id.contains_key(creator_id) {
+                continue;
+            }
+            let enriched = enrich_profile(creator_id, &sql_by_id, &identity_cache);
+            upsert_creator_display_name(pool, creator_id, &enriched.display_name).await?;
+            sql_by_id.insert(creator_id.clone(), enriched);
+        }
+    }
+
+    let mut items: Vec<CreatorInfo> = ssot_ids
+        .iter()
+        .map(|id| enrich_profile(id, &sql_by_id, &identity_cache))
+        .collect();
+    items.sort_by(|a, b| {
+        b.cached_at
+            .cmp(&a.cached_at)
+            .then_with(|| a.creator_id.cmp(&b.creator_id))
+    });
 
     // Apply cursor-based pagination (cursor = creator_id)
     if let Some(ref cursor) = params.cursor {
@@ -465,6 +573,9 @@ pub async fn create_creator(
         code: "CREATOR_ID_GENERATION_ERROR".into(),
         message: reason,
     })?;
+
+    // Membership SSOT write — Profile is real only when the home dir exists.
+    ensure_profile_home_ssot(state.nexus_home(), &creator_id)?;
 
     // Lazily attach the creator pool when `active_creator_id` is present in
     // config but the pool is not yet open (mirrors `patch_creator` V1.119 fix).
@@ -562,6 +673,10 @@ pub async fn patch_creator(
         field: "creator_id".to_string(),
         reason,
     })?;
+
+    // Author-facing PATCH materializes membership SSOT when missing (enrichment
+    // targets only exist for Profiles that have a home on disk).
+    ensure_profile_home_ssot(state.nexus_home(), &creator_id)?;
 
     if let Some(ref display_name) = req.display_name {
         if display_name.is_empty() {
@@ -705,12 +820,24 @@ pub async fn set_active_creator(
 
     set_active_creator_id(state.nexus_home(), &req.creator_id)?;
 
-    // Clear workspace slug for this creator in config (reset to default)
+    // Reset workspace slug for this creator to the default. Profile switch
+    // previously *removed* the entry and relied on read-path fallback; write
+    // `"default"` explicitly so config stays self-describing and older
+    // read paths that lack the fallback do not surface AuthRequired.
     let mut config = read_cli_config(state.nexus_home())?;
     if let Some(table) = config.as_table_mut() {
+        if table.get("active_workspace_slug_by_creator").is_none() {
+            table.insert(
+                "active_workspace_slug_by_creator".to_string(),
+                toml::Value::Table(toml::map::Map::new()),
+            );
+        }
         if let Some(slug_table) = table.get_mut("active_workspace_slug_by_creator") {
             if let Some(slugs) = slug_table.as_table_mut() {
-                slugs.remove(&req.creator_id);
+                slugs.insert(
+                    req.creator_id.clone(),
+                    toml::Value::String("default".to_string()),
+                );
             }
         }
         write_cli_config(state.nexus_home(), &config)?;
@@ -875,6 +1002,116 @@ mod tests {
 
         let body = result.expect("list should succeed without pool, not return 409");
         assert!(body.0.items.is_empty());
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn list_includes_filesystem_profiles_when_sql_is_empty() {
+        let tmp = tempfile::TempDir::new().expect("temp dir");
+        let user_home = tmp.path();
+        let nexus_home = user_home.join(".nexus42");
+        nexus_home_layout::ensure_system_layout(&nexus_home).expect("system layout");
+
+        let creator_a = "ctr_localaaaaaaaa";
+        let creator_b = "ctr_localbbbbbbbb";
+        std::fs::create_dir_all(nexus_home.join("creators").join(creator_a)).expect("mkdir a");
+        std::fs::create_dir_all(nexus_home.join("creators").join(creator_b)).expect("mkdir b");
+        std::fs::write(
+            nexus_home.join("config.toml"),
+            format!("active_creator_id = \"{creator_a}\"\n"),
+        )
+        .expect("write config");
+
+        let _home_override = HomeOverride::set(user_home);
+
+        let state = crate::workspace::WorkspaceState::initialize()
+            .await
+            .expect("initialize");
+
+        let body = list(
+            State(state),
+            Query(ListCreatorsQuery {
+                limit: 50,
+                cursor: None,
+            }),
+        )
+        .await
+        .expect("list should succeed")
+        .0;
+
+        let ids: Vec<&str> = body.items.iter().map(|c| c.creator_id.as_str()).collect();
+        assert!(
+            ids.contains(&creator_a) && ids.contains(&creator_b),
+            "SSOT Profile homes must appear even when SQL creators is empty, got {ids:?}"
+        );
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn list_ignores_sql_only_orphan_profiles() {
+        let tmp = tempfile::TempDir::new().expect("temp dir");
+        let user_home = tmp.path();
+        let nexus_home = user_home.join(".nexus42");
+        nexus_home_layout::ensure_system_layout(&nexus_home).expect("system layout");
+
+        let on_disk = "ctr_localondisk0001";
+        let orphan_sql = "ctr_localorphan0001";
+        std::fs::create_dir_all(
+            nexus_home
+                .join("creators")
+                .join(on_disk)
+                .join("workspaces")
+                .join("default"),
+        )
+        .expect("mkdir");
+        std::fs::write(
+            nexus_home.join("config.toml"),
+            format!(
+                "active_creator_id = \"{on_disk}\"\n\
+                 [active_workspace_slug_by_creator]\n\
+                 \"{on_disk}\" = \"default\"\n"
+            ),
+        )
+        .expect("write config");
+
+        let _home_override = HomeOverride::set(user_home);
+        let state = crate::workspace::WorkspaceState::initialize()
+            .await
+            .expect("initialize");
+
+        // Seed an orphan SQL row that has no Profile home (dirty secondary data).
+        let pool = state
+            .pool()
+            .expect("pool should open for on-disk active profile");
+        let now = chrono::Utc::now().to_rfc3339();
+        sqlx::query!(
+            "INSERT INTO creators (creator_id, display_name, status, cached_at, data) VALUES (?, ?, 'active', ?, '{}')",
+            orphan_sql,
+            "Orphan",
+            now
+        )
+        .execute(pool)
+        .await
+        .expect("insert orphan");
+
+        let body = list(
+            State(state),
+            Query(ListCreatorsQuery {
+                limit: 50,
+                cursor: None,
+            }),
+        )
+        .await
+        .expect("list should succeed")
+        .0;
+
+        let ids: Vec<&str> = body.items.iter().map(|c| c.creator_id.as_str()).collect();
+        assert_eq!(
+            ids,
+            vec![on_disk],
+            "list membership is SSOT-only, got {ids:?}"
+        );
+        assert!(!ids.contains(&orphan_sql));
     }
 
     #[tokio::test]
@@ -1090,7 +1327,7 @@ mod tests {
             .items
             .into_iter()
             .find(|i| i.creator_id == "crt_sql")
-            .expect("creator should be present in SQL list");
+            .expect("creator should be present after PATCH materializes SSOT home");
         assert_eq!(item.display_name, "Renamed Profile");
     }
 

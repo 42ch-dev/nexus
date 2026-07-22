@@ -1,10 +1,10 @@
 # Deferred Features — Cross-Version Tracker v2
 
-**Quick status**: **V1.127 active** — Dogfood-readiness sweep: Control Room author-loop fixes + native agent provider registration. V1.126 Shipped (Shell + Canvas deepening + Tech-debt gate). Platform **paused**.
+**Quick status**: **V1.130 shipped (partial)** — dogfood carried incomplete shell/Settings IA to V1.131 (`DF-V1130-*`). V1.129 Shipped (usability bug-sweep). Platform **paused**.
 
 **Purpose**: Single source of truth for **open** and **backlog** features deferred from delivery compasses. Closed/shipped history lives in shipped archive.
 **Scope**: `nexus` OSS repository only.
-**Created**: 2026-04-21 · **Last updated**: 2026-07-20 (V1.127 Phase 1 writing-specialist seat 3 — hygiene pass: DF-V1127-* rows, quick status, R-V1116P0QA-001 note)
+**Created**: 2026-04-21 · **Last updated**: 2026-07-22 (V1.130 dogfood — DF-V1130 shell/Settings IA + Profile SSOT)
 
 ---
 
@@ -67,6 +67,11 @@
 | DF-V1123-CROSS-SURFACE-BINDING | Canvas | Cross-surface Timeline event binding (Work Timeline Moment ↔ World Timeline Narrative) — data link + UX | V1.123 | V1.124+ | S | V1.123 | P3 ships UX hints for cross-surface navigation but no formal data binding between Work events and World events. Track for V1.124+ data-binding iteration. QC1 R-V1123P0QC1-M001. |
 | DF-V1127-COMPOSITE-PERF | Cross-cutting | Composite-endpoint performance round: `total_worlds` cleanup, dynamic-SQL → static refactor, N+1 assertion, sqlx prepared-statement caching (scan items 7–8 + V1.126 P2 residual cluster) | V1.127 | V1.128+ | M | V1.127 | [V1.127 compass](../iterations/v1.127/delivery-compass.md) Roadmap Position (e). Pure-scale perf; manual tester with <100 worlds never sees the symptom. **Owner:** architect. **Trigger:** V1.127 dogfood shipped + user's manual testing review feedback. |
 | DF-V1127-NIT-CLOSEOUT | Cross-cutting | V1.126 nit residual close-out (22 nits beyond the 2 absorbed by V1.127 P0: R-V1126P0-QC-S-002, R-V1126P0-QC-S-003) | V1.127 | V1.128+ | S | V1.127 | [V1.127 compass](../iterations/v1.127/delivery-compass.md) Roadmap Position (f). Nits are polish, not test-blockers. **Owner:** frontend-dev. **Trigger:** capacity after V1.127 dogfood. |
+| DF-V1130-SETTINGS-MODAL | Cross-cutting | Settings primary = modal (≥80vw×80vh); `/settings/*` deep links open modal section; demote full-page Settings | V1.130 | **V1.131** | M | V1.130 | [V1.130 compass](../iterations/v1.130/delivery-compass.md) Roadmap Position. `SettingsModalHost` unwired; `SettingsShellLayout` still primary. **Owner:** frontend-dev. **Trigger:** V1.130 dogfood (2026-07-22). |
+| DF-V1130-MODE-SWITCH-FOOTER | Cross-cutting | 创作\|编排 switch on 功能区 footer (retire sidebar top tabs) | V1.130 | **V1.131** | S | V1.130 | P1 AC incomplete. **Owner:** frontend-dev. **Trigger:** V1.130 dogfood. |
+| DF-V1130-WORKSPACE-UNDER-ORCH | Cross-cutting | Profiles → **工作区** under **编排 功能区 only** (not both tabs / global Settings) | V1.130 | **V1.131** | S | V1.130 | Label renamed; placement incomplete. **Owner:** frontend-dev. **Trigger:** V1.130 dogfood. |
+| DF-V1130-COMPUTE-IN-SETTINGS | Harness | Compute/Modules content inside Settings modal; remove from 编排 only after modal section green | V1.130 | **V1.131** | M | V1.130 | P3b T1 incomplete. **Owner:** frontend-dev. **Trigger:** V1.130 dogfood. |
+| DF-V1130-PROFILE-SSOT | Cross-cutting | Profile membership SSOT = `~/.nexus42/creators/<id>/`; SQL + identity cache only enrich; create/bootstrap always write SSOT | V1.130 | **V1.131** (invariant hold) | S | V1.130 | Post-ship hotfix establishes SSOT list/create; keep heal-from-SSOT only. **Owner:** fullstack-dev. **Trigger:** any further Profile work. |
 
 ### 2.4 Backlog (no committed target)
 

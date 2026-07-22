@@ -69,6 +69,9 @@ impl DaemonApiConfig {
             "tauri://localhost",
             "http://tauri.localhost",
             "http://localhost:5173",
+            // Vite may be opened as 127.0.0.1; the preview/dev proxy forwards
+            // the browser Origin header to the daemon.
+            "http://127.0.0.1:5173",
         ] {
             origins.push(hardcoded.to_string());
             sources.push((hardcoded.to_string(), "hardcoded".to_string()));

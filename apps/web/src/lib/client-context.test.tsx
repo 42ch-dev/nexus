@@ -134,6 +134,45 @@ describe('ClientProvider resume-time fingerprint gate', () => {
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
+  it('stays on local transport when a saved config lacks explicit active: true', async () => {
+    // Poisoned / partial configs (e.g. unit-test fallback files with only
+    // endpointUrl + apiKey) must not redirect the client off loopback.
+    vi.mocked(isDesktopBuild).mockReturnValue(true);
+
+    const poison: ConnectionConfig = {
+      endpointUrl: 'https://x',
+      apiKey: 'k',
+      // active intentionally omitted
+    };
+
+    function Probe() {
+      const client = useNexusClient();
+      // TauriClient exposes `port` only for loopback mode; remote overrides
+      // leave it undefined.
+      const port = 'port' in client ? (client as { port?: number }).port : undefined;
+      return (
+        <div data-testid="probe">
+          <span data-testid="client-type">{client.constructor.name}</span>
+          <span data-testid="client-port">{port ?? 'none'}</span>
+        </div>
+      );
+    }
+
+    render(
+      <QueryClientProvider client={makeQueryClient()}>
+        <MemoryRouter>
+          <ClientProvider connectionConfig={poison}>
+            <Probe />
+          </ClientProvider>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    expect(await screen.findByTestId('client-type')).toHaveTextContent('TauriClient');
+    // Loopback default port — not undefined remote-override mode.
+    expect(screen.getByTestId('client-port')).toHaveTextContent('8420');
+  });
+
   it('bypasses the gate when the saved config has no pinned fingerprint', async () => {
     const fetchImpl = makeFetchImpl({ fingerprint: 'abc' });
     const config: ConnectionConfig = {
