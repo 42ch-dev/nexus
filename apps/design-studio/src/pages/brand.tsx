@@ -17,6 +17,7 @@ import {
 /* Consumer-resolved SVG assets — Vite processes these workspace-package imports
  * exactly as apps/web/src/components/brand/nexus-logo.tsx does. */
 import logoPrimarySrc from '@42ch/nexus-ui/assets/logos/logo-primary.svg';
+import logoWhiteBgSrc from '@42ch/nexus-ui/assets/logos/logo-white-bg.svg';
 import logoColorSrc from '@42ch/nexus-ui/assets/logos/logo-color.svg';
 import logoWhiteSrc from '@42ch/nexus-ui/assets/logos/logo-white.svg';
 import logoMonoSrc from '@42ch/nexus-ui/assets/logos/logo-mono.svg';
@@ -30,6 +31,7 @@ import { StudioShellLogo } from '@/components/studio-shell-logo';
 
 const LOGO_SOURCES: Record<LogoVariantName, string> = {
   primary: logoPrimarySrc,
+  whiteBg: logoWhiteBgSrc,
   color: logoColorSrc,
   white: logoWhiteSrc,
   mono: logoMonoSrc,
@@ -55,8 +57,17 @@ const LOGO_DISPLAYS: LogoDisplay[] = [
     variant: 'primary',
     label: 'Primary',
     fileName: logoVariants.primary,
-    description: 'Timeline mark — deep→cyan gradient for light nav / light shells.',
+    description:
+      'Timeline mark — deep→cyan gradient for light nav / light shells (same plate as White-bg).',
     panelBgClass: 'bg-background-100',
+  },
+  {
+    variant: 'whiteBg',
+    label: 'White-bg',
+    fileName: logoVariants.whiteBg,
+    description:
+      'Color mark on white/light plates — matches logo-white-bg.png (deep→cyan multi-stop).',
+    panelBgClass: 'bg-white',
   },
   {
     variant: 'color',
@@ -69,14 +80,16 @@ const LOGO_DISPLAYS: LogoDisplay[] = [
     variant: 'white',
     label: 'White',
     fileName: logoVariants.white,
-    description: 'White monochrome mark — dark heroes, photography, high-contrast panels.',
+    description:
+      'Dark-gray→white gradient mark — dark heroes, photography, high-contrast panels.',
     panelBgClass: 'bg-brand-deep-blue',
   },
   {
     variant: 'mono',
     label: 'Mono',
     fileName: logoVariants.mono,
-    description: 'Monotone mark — inline UI; prefers <NexusMark> for currentColor inheritance.',
+    description:
+      'Light-gray→black gradient mark (static). For tintable inline UI use <NexusMark>.',
     panelBgClass: 'bg-background-100',
   },
   {
@@ -193,7 +206,7 @@ function LogoGrid() {
     <section>
       <SectionHeading id="brand-logos">Logo variants</SectionHeading>
       <p className="text-copy-16 text-gray-700 mb-6">
-        All five <code className="font-mono bg-gray-alpha-100 px-1 rounded">logoVariants</code> from{' '}
+        All six <code className="font-mono bg-gray-alpha-100 px-1 rounded">logoVariants</code> from{' '}
         <code className="font-mono bg-gray-alpha-100 px-1 rounded">@42ch/nexus-ui</code>
         — timeline marks (wide aspect) plus wordmark — on their recommended surfaces per DESIGN.md §
         Logo Usage.

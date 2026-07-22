@@ -1140,18 +1140,20 @@ Canonical SVG assets ship from `@42ch/nexus-ui/assets/logos/`. PNG sources are p
 
 | Variant | File | Surface |
 | --- | --- | --- |
-| Primary mark (deep→cyan gradient) | `logo-primary.svg` | Light nav, sidebar, light shell header |
+| Primary mark (deep→cyan gradient) | `logo-primary.svg` | Light nav, sidebar, light shell header (alias of white-bg plate) |
+| White-bg color mark | `logo-white-bg.svg` | Explicit color-on-white/light plate; matches `logo-white-bg.png` |
 | Color mark (bright gradient) | `logo-color.svg` | Dark nav, dark shell header |
-| White mark | `logo-white.svg` | Dark hero, photography overlays, high-contrast panels |
-| Monotone mark | `logo-mono.svg` | Inline UI; inherits `color` via `currentColor` |
+| White mark (dark-gray→white gradient) | `logo-white.svg` | Dark hero, photography overlays, high-contrast panels |
+| Mono mark (light-gray→black gradient) | `logo-mono.svg` | Static grayscale lockup on light surfaces |
 | Wordmark | `logo-text.svg` | Lowercase `nexus` lockup; `currentColor` (white on dark heroes; `brand-deep-blue` on light) |
+| Tintable mark | `<NexusMark>` | Inline chrome (buttons, badges, list rows); `currentColor` |
 
 **Placement:**
 
-- Shell sidebar/header: **mark only**, theme-aware (`logo-primary.svg` on light / `logo-color.svg` on dark).
+- Shell sidebar/header: **mark only**, theme-aware (`logo-primary.svg` / `logo-white-bg.svg` on light / `logo-color.svg` on dark).
 - Dark heroes / deepest panels: `logo-white.svg` mark; optional `logo-text.svg` wordmark with `color: #FFFFFF` (or `currentColor` set to white).
 - Lockups (Studio Brand, marketing): mark + `logo-text.svg` with shared clear-space; do not stretch either asset.
-- Inline chrome (buttons, badges, list rows): `logo-mono.svg` only — set `color` on the parent.
+- Inline chrome (buttons, badges, list rows): `<NexusMark>` only — set `color` on the parent. Prefer the static `logo-mono.svg` asset when the baked grayscale gradient is required.
 
 **Rules:**
 
@@ -1159,8 +1161,8 @@ Canonical SVG assets ship from `@42ch/nexus-ui/assets/logos/`. PNG sources are p
 - Clear space: **≥ 25%** of logo height on all sides.
 - Aspect: marks are **wide** (`viewBox` ~10:1). Prefer `height` + `width: auto` (or equivalent) — do not force a 1:1 box.
 - Alt text: `Nexus` on `<img>`; inline SVGs include `<title>` and `<desc>`.
-- Do not recolor gradient/white SVG fills; only `logo-mono.svg` and `logo-text.svg` inherit via `currentColor`.
-- Do not place `logo-color.svg` on white/light gray without a contrast check — prefer `logo-primary.svg` on light surfaces.
+- Do not recolor baking gradient SVG fills (`primary`, `whiteBg`, `color`, `white`, `mono`); only `<NexusMark>` and `logo-text.svg` inherit via `currentColor`.
+- Do not place `logo-color.svg` on white/light gray without a contrast check — prefer `logo-primary.svg` / `logo-white-bg.svg` on light surfaces.
 - Transparent backgrounds only — the shell/surface provides fill.
 
 ---

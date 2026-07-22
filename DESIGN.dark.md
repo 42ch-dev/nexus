@@ -824,16 +824,17 @@ Canonical assets: `@42ch/nexus-ui/assets/logos/`. Geometry is the **timeline** m
 | Variant | File | Dark surface |
 | --- | --- | --- |
 | Color mark (bright gradient) | `logo-color.svg` | Dark nav, sidebar, dark shell header |
-| White mark | `logo-white.svg` | Dark hero, photography, deepest panels |
-| Monotone mark | `logo-mono.svg` | Inline UI; set `color` to cyan or white as needed |
+| White mark (dark-gray→white gradient) | `logo-white.svg` | Dark hero, photography, deepest panels |
+| Tintable mark | `<NexusMark>` | Inline UI; set `color` to cyan or white as needed |
 | Wordmark | `logo-text.svg` | Lockups; `currentColor` → white on heroes / dark panels |
-| Primary mark | `logo-primary.svg` | **Avoid on dark chrome** — deep end of gradient lacks contrast |
+| Primary / white-bg mark | `logo-primary.svg` / `logo-white-bg.svg` | **Avoid on dark chrome** — deep end of gradient lacks contrast |
+| Mono mark (light-gray→black) | `logo-mono.svg` | Prefer on light plates only |
 
 **Dark placement:**
 
 - Shell sidebar/header: **mark only** — `logo-color.svg`.
 - Heroes / deepest panels: `logo-white.svg`; optional `logo-text.svg` with white `currentColor`.
-- Do not use `logo-primary.svg` on ink/dark surfaces.
+- Do not use `logo-primary.svg` / `logo-white-bg.svg` on ink/dark surfaces.
 - Wide aspect — size by height (`width: auto`), not a 1:1 box.
 
 This file intentionally preserves the same token names and frontmatter structure with dark values. Rule-type documentation, component behavior, voice/content guidance, and implementation mapping live in `DESIGN.md` and apply to both themes.

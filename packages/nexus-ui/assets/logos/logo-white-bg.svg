@@ -1,10 +1,10 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 284 28" role="img" aria-labelledby="nexus-logo-title nexus-logo-desc" fill="none">
   <title id="nexus-logo-title">Nexus</title>
-  <desc id="nexus-logo-desc">Nexus timeline mark — five-node axis with solid center (deep to cyan gradient for light shells; same plate as logo-white-bg.svg)</desc>
+  <desc id="nexus-logo-desc">Nexus timeline mark  five-node axis with solid center (deep to cyan gradient for light / white surfaces; matches logo-white-bg.png)</desc>
   <defs>
-    <!-- Same stops as logo-white-bg.svg / logo-white-bg.png — primary is the light-shell alias -->
-    <linearGradient id="nexus-timeline-primary" x1="0" y1="14" x2="284" y2="14" gradientUnits="userSpaceOnUse">
+    <!-- Stops sampled from logo-white-bg.png node centers (left � right) -->
+    <linearGradient id="nexus-timeline-white-bg" x1="0" y1="14" x2="284" y2="14" gradientUnits="userSpaceOnUse">
       <stop offset="0%" stop-color="#032B3C"/>
       <stop offset="25%" stop-color="#01586C"/>
       <stop offset="50%" stop-color="#059CB3"/>
@@ -12,7 +12,7 @@
       <stop offset="100%" stop-color="#0ECED6"/>
     </linearGradient>
   </defs>
-  <g stroke="url(#nexus-timeline-primary)" stroke-linecap="butt">
+  <g stroke="url(#nexus-timeline-white-bg)" stroke-linecap="butt">
     <!-- Axis segments between node outer edges -->
     <path stroke-width="3.5" d="M28 14 H64 M92 14 H128 M156 14 H192 M220 14 H256"/>
     <!-- Ring nodes (left pair + right pair) -->
@@ -22,5 +22,5 @@
     <circle cx="270" cy="14" r="12.125" stroke-width="3.75"/>
   </g>
   <!-- Solid center node -->
-  <circle cx="142" cy="14" r="14" fill="url(#nexus-timeline-primary)"/>
+  <circle cx="142" cy="14" r="14" fill="url(#nexus-timeline-white-bg)"/>
 </svg>

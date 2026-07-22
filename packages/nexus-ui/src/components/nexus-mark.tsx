@@ -1,8 +1,10 @@
 /**
- * Inline mono Nexus mark — hand-authored JSX derived from `logo-mono.svg`.
+ * Inline tintable Nexus mark — timeline geometry shared with `logo-mono.svg`.
  *
- * Wide timeline geometry (viewBox 0 0 284 28). Does not import any asset file;
- * color is inherited via `currentColor`. Height-driven sizing is `w-auto` friendly.
+ * `logo-mono.svg` bakes the provenance grayscale gradient (light→black). This
+ * component keeps a flat `currentColor` stroke/fill so buttons, badges, and
+ * list rows can tint the mark. Wide timeline geometry (viewBox 0 0 284 28);
+ * height-driven sizing is `w-auto` friendly.
  */
 
 import { memo, useId } from 'react';

@@ -13,13 +13,15 @@ export const brandColors = {
 export type BrandColorName = keyof typeof brandColors;
 
 export const logoVariants = {
-  /** Timeline mark — deep→cyan gradient for light nav / light shells */
+  /** Timeline mark — deep→cyan gradient for light nav / light shells (alias of whiteBg) */
   primary: 'logo-primary.svg',
+  /** Timeline mark — color on white/light plates; matches `logo-white-bg.png` */
+  whiteBg: 'logo-white-bg.svg',
   /** Timeline mark — bright gradient for dark nav / dark shells */
   color: 'logo-color.svg',
-  /** Timeline mark — white monochrome for dark heroes / high-contrast panels */
+  /** Timeline mark — dark-gray→white gradient for dark heroes / high-contrast panels */
   white: 'logo-white.svg',
-  /** Timeline mark — inline UI; inherits `color` via currentColor */
+  /** Timeline mark — light-gray→black gradient (static asset; tintable form is `<NexusMark>`) */
   mono: 'logo-mono.svg',
   /** Wordmark — lowercase `nexus`; inherits via currentColor */
   text: 'logo-text.svg',

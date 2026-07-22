@@ -15,17 +15,18 @@ pnpm add @42ch/nexus-ui --workspace
 | `@42ch/nexus-ui` | Brand token constants (`brandColors`, `logoVariants`, sizing guidance) + React components (`<NexusLogo>`, `<NexusMark>`, `<NexusLogoVariant>`, promoted UI primitives, `cn`) |
 | `@42ch/nexus-ui/tokens` | Same token module (direct import) |
 | `@42ch/nexus-ui/theme.css` | Brand CSS custom properties (`--nexus-brand-*`) |
-| `@42ch/nexus-ui/assets/logos/logo-primary.svg` | Timeline mark — deep→cyan gradient for light shells |
+| `@42ch/nexus-ui/assets/logos/logo-primary.svg` | Timeline mark — deep→cyan gradient for light shells (alias of white-bg) |
+| `@42ch/nexus-ui/assets/logos/logo-white-bg.svg` | Timeline mark — color on white/light plates (`logo-white-bg.png`) |
 | `@42ch/nexus-ui/assets/logos/logo-color.svg` | Timeline mark — bright gradient for dark shells |
-| `@42ch/nexus-ui/assets/logos/logo-white.svg` | Timeline mark — white monochrome for dark heroes |
-| `@42ch/nexus-ui/assets/logos/logo-mono.svg` | Timeline mark — `currentColor` monochrome |
+| `@42ch/nexus-ui/assets/logos/logo-white.svg` | Timeline mark — dark-gray→white gradient for dark heroes |
+| `@42ch/nexus-ui/assets/logos/logo-mono.svg` | Timeline mark — light-gray→black gradient (static) |
 | `@42ch/nexus-ui/assets/logos/logo-text.svg` | Wordmark — lowercase `nexus` (`currentColor`) |
 
 ### Promoted primitives
 
 | Component | Import | Variants | Notes |
 |-----------|--------|----------|-------|
-| `NexusLogo` | `import { NexusLogo } from '@42ch/nexus-ui'` | `variant` (`primary`, `color`, `white`, `mono`, `text`) + consumer `src` | Bundler-agnostic `<img>`; wide timeline marks + wordmark |
+| `NexusLogo` | `import { NexusLogo } from '@42ch/nexus-ui'` | `variant` (`primary`, `whiteBg`, `color`, `white`, `mono`, `text`) + consumer `src` | Bundler-agnostic `<img>`; wide timeline marks + wordmark |
 | `NexusMark` | `import { NexusMark } from '@42ch/nexus-ui'` | `size`, `label`, `className` | Inline timeline mark; `currentColor`; height-driven / `w-auto` |
 | `NexusLogoVariant` | `import { NexusLogoVariant } from '@42ch/nexus-ui'` | `theme` (`elegant`, `nature`, `parchment`, `scifi`) + optional `palette` | Studio-only specimens; no assets; not a product theme switcher |
 | `Button` | `import { Button } from '@42ch/nexus-ui'` | `variant` (`primary`, `secondary`, `tertiary`, `destructive`) + `size` (`small`, `default`, `large`) + `asChild` | Presentational only; no daemon or routing state |
@@ -51,9 +52,11 @@ Timeline marks are **wide** (`viewBox` 284×28). Size by **height**; width is au
 | Surface | Variant | File | Notes |
 |---------|---------|------|-------|
 | Light nav / sidebar (light theme) | Primary | `logo-primary.svg` | Deep→cyan gradient on light shells |
+| Marketing / color-on-white lockup | White-bg | `logo-white-bg.svg` | Same plate as primary; matches `logo-white-bg.png` |
 | Dark nav / sidebar (dark theme) | Color | `logo-color.svg` | Bright gradient on dark chrome |
-| Dark hero / photography / high-contrast panel | White | `logo-white.svg` | Maximum contrast on deep or busy backgrounds |
-| Inline UI (buttons, badges, list rows) | Monotone | `logo-mono.svg` / `<NexusMark>` | Set `color` on parent; inherits via `currentColor` |
+| Dark hero / photography / high-contrast panel | White | `logo-white.svg` | Dark-gray→white gradient on deep or busy backgrounds |
+| Static grayscale lockup | Mono | `logo-mono.svg` | Light-gray→black gradient (baked) |
+| Inline UI (buttons, badges, list rows) | Tintable | `<NexusMark>` | Set `color` on parent; inherits via `currentColor` |
 | Wordmark lockup | Text | `logo-text.svg` | Lowercase `nexus`; `currentColor` (white on dark heroes) |
 | Studio theme specimens only | — | `<NexusLogoVariant>` | Palette props; not a product theme switcher |
 
