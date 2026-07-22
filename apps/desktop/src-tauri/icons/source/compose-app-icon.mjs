@@ -7,22 +7,27 @@ import sharp from 'sharp';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, '../../../../..');
 const designPath = path.join(repoRoot, 'DESIGN.md');
-const logoPath = path.join(repoRoot, 'packages/nexus-ui/assets/logos/logo_light.png');
+/** Timeline mark — bright gradient for Chronos deep plate (cyan acceptable on deep). */
+const logoPath = path.join(repoRoot, 'packages/nexus-ui/assets/logos/logo-color.svg');
 const out1024 = path.join(__dirname, 'source-1024.png');
 const out256 = path.join(__dirname, 'app-icon-preview-256.png');
 
 const CANVAS = 1024;
 const PADDING_RATIO = 0.1;
+/** Timeline mark viewBox aspect (284×28). */
+const MARK_ASPECT = 284 / 28;
+/** Plate fill — DESIGN.md `colors.brand-deep-blue` (Chronos ink). */
+const PLATE_TOKEN = 'brand-deep-blue';
 
-/** Drop shadow tuned for a 1024px app-icon canvas. */
+/** Drop shadow tuned for a 1024px app-icon canvas on Chronos deep plate. */
 const SHADOW = {
   offsetXRatio: 0,
   offsetYRatio: 0.018,
   blurSigmaRatio: 0.008,
-  opacity: 0.12,
+  opacity: 0.28,
   /** Gaussian spread padding (× blur sigma) so blur is not clipped at mark edges. */
   padSigmaFactor: 3,
-  /** Darker than the mark fill so the halo reads on the system squircle, not same as logo mid-tones. */
+  /** Darker than plate so the halo reads against brand-deep-blue. */
   tintToken: 'brand-deep-blue-1000',
 };
 
@@ -89,22 +94,22 @@ async function buildShadowLayer(markBuffer, markWidth, markHeight, tint, config)
   return { buffer, pad };
 }
 
-// logo_light.png is the deep-blue mark for light surfaces.
-// Canvas background is fully transparent (alpha: 0) — macOS applies the system
-// squircle mask, so an opaque fill would render as a white square in the Dock.
+// Chronos app icon: timeline mark (logo-color.svg) on brand-deep-blue plate.
+// Plate is opaque Chronos ink (#0D2B3E). macOS applies the system squircle mask.
+const plate = hexToRgba(designColor(PLATE_TOKEN));
 const shadowTint = hexToRgba(designColor(SHADOW.tintToken));
 
-const trimmed = await sharp(logoPath).trim().toBuffer();
-const { width, height } = await sharp(trimmed).metadata();
-if (!width || !height) {
-  throw new Error(`Could not read logo dimensions from ${logoPath}`);
-}
-
 const inner = Math.round(CANVAS * (1 - 2 * PADDING_RATIO));
-const scale = Math.min(inner / width, inner / height);
-const markWidth = Math.round(width * scale);
-const markHeight = Math.round(height * scale);
-const mark = await sharp(trimmed).resize(markWidth, markHeight).toBuffer();
+// Fit wide timeline mark inside the padded square (width-limited).
+const markWidth = inner;
+const markHeight = Math.round(markWidth / MARK_ASPECT);
+
+// Rasterize SVG at 2× then downscale for clean edges.
+const mark = await sharp(logoPath, { density: 384 })
+  .resize(markWidth, markHeight, { fit: 'fill' })
+  .png()
+  .toBuffer();
+
 const { buffer: shadow, pad: shadowPad } = await buildShadowLayer(
   mark,
   markWidth,
@@ -123,7 +128,7 @@ const composed = await sharp({
     width: CANVAS,
     height: CANVAS,
     channels: 4,
-    background: { r: 0, g: 0, b: 0, alpha: 0 },
+    background: plate,
   },
 })
   .composite([
@@ -137,5 +142,5 @@ await sharp(composed).toFile(out1024);
 await sharp(composed).resize(256, 256).png().toFile(out256);
 
 console.log(
-  `Composed ${out1024} and ${out256} from ${logoPath} on transparent canvas (alpha: 0) with ${SHADOW.tintToken} shadow (opacity ${SHADOW.opacity})`,
+  `Composed ${out1024} and ${out256} from ${path.relative(repoRoot, logoPath)} on ${PLATE_TOKEN} plate with ${SHADOW.tintToken} shadow (opacity ${SHADOW.opacity})`,
 );

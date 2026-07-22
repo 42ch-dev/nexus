@@ -1,6 +1,6 @@
 # `apps/desktop/src-tauri/icons/`
 
-Nexus-branded **desktop-only** app icons for the Tauri bundle.
+Nexus-branded **desktop-only** app icons for the Tauri bundle (Chronos VI).
 
 Only `source/` and this README are tracked in git. All platform icon formats
 under this directory (except `source/`) are **generated at build/dev time** via
@@ -8,14 +8,17 @@ under this directory (except `source/`) are **generated at build/dev time** via
 
 ## Source assets (committed)
 
-- `source/compose-app-icon.mjs` — reproducible composition script: centers
-  `packages/nexus-ui/assets/logos/logo_light.png` on a **transparent canvas**
-  (`alpha: 0`) with ~10% padding and a soft drop shadow, then writes the raster
-  outputs below.
+- `source/compose-app-icon.mjs` — reproducible composition script: centers the
+  Chronos **timeline mark** (`packages/nexus-ui/assets/logos/logo-color.svg`) on
+  an opaque **Chronos deep** plate (`brand-deep-blue` / `#0D2B3E`) with ~10%
+  padding and a soft drop shadow, then writes the raster outputs below.
 - `source/source-1024.png` — composed 1024×1024 RGBA PNG used as the input
   for `tauri icon`. Tracked by Git LFS.
 - `source/app-icon-preview-256.png` — 256×256 preview render for QA/PR review
   of the dock/taskbar appearance.
+
+Do **not** reference legacy `logo_light.png` / `logo_dark.png` / `logo_white.png`
+(N-network era). Canonical marks live as SVG under `@42ch/nexus-ui` `logoVariants`.
 
 ## Composing the source PNG
 
@@ -25,13 +28,15 @@ From the repo root (requires `sharp` in `apps/desktop` devDependencies):
 pnpm --filter desktop run icons:compose
 ```
 
-This reads `logo_light.png` (deep-blue 3D mark for light surfaces), composes it
-on a **fully transparent canvas** (`alpha: 0`), and adds a soft
-`brand-deep-blue-1000` drop shadow (opacity `0.12`) for depth. macOS applies the
-system squircle mask to the bundled asset; the composed PNG therefore provides
-only the logo + shadow — **no opaque full-bleed fill** (an opaque fill would
-render as a white square in the Dock). It then regenerates `source-1024.png` +
-`app-icon-preview-256.png`.
+This rasterizes `logo-color.svg` (bright timeline gradient — cyan signal on
+deep ink), centers it on a **full-bleed Chronos deep plate** (`brand-deep-blue`,
+`#0D2B3E`), and adds a soft `brand-deep-blue-1000` drop shadow (opacity `0.28`)
+for depth. macOS applies the system squircle mask to the bundled asset; the
+plate is intentional brand fill (not transparent). Then regenerates
+`source-1024.png` + `app-icon-preview-256.png`.
+
+Plate and shadow hex values are read live from root `DESIGN.md` `colors:` so
+they stay aligned with the SSOT.
 
 ## Generating desktop icon formats
 
@@ -71,28 +76,21 @@ and reviewed in GitHub/GitLab.
 
 ## Aesthetic sign-off
 
-User aesthetic sign-off was deferred per the V1.85 compass. The current
-composition uses `logo_light.png` on a **transparent canvas** with a soft
-`brand-deep-blue-1000` drop shadow (opacity `0.12`). As of V1.117 P3 the opaque
-`background-200` fill that caused a white Dock square was removed; macOS supplies
-the squircle plate. Review `source/app-icon-preview-256.png` at QA/PR time.
+Composition: **timeline mark** (`logo-color.svg`) on **Chronos deep** plate
+(`brand-deep-blue`). Review `source/app-icon-preview-256.png` at QA/PR time.
 
 ## macOS Dock visual smoke
 
-AC-P3-3 requires a Dock visual smoke check before iteration close. To verify the
-asset renders as a logo on the system squircle (and **not** a full-bleed white
-square):
+To verify the asset renders as a Chronos plate with the timeline mark:
 
 1. Build/run the desktop shell locally —
    `pnpm dev:desktop` (dist-load mode) or `pnpm dev:desktop:web` (HMR mode).
 2. Once the app window is open, inspect the **macOS Dock** entry for Nexus.
-3. **Pass:** the Dock tile shows the Nexus logo on the system squircle shape,
-   with the surrounding Dock wallpaper visible behind the transparent corners —
-   no opaque white/off-white plate around the mark.
-4. **Fail:** the Dock tile appears as a sharp-edged white/off-white square
-   containing the logo (indicates an opaque fill leaked back into the compose
-   step — re-check `compose-app-icon.mjs` canvas `alpha: 0`).
+3. **Pass:** the Dock tile shows the cyan-gradient timeline mark on a Chronos
+   deep (`#0D2B3E`) plate, shaped by the system squircle — **not** a white /
+   off-white plate and **not** the legacy N-network mark.
+4. **Fail:** white/off-white full-bleed plate, or a mark that still resembles
+   the retired `logo_light.png` N-network asset.
 
 The 256×256 preview PNG (`source/app-icon-preview-256.png`) uses the same
-transparent composition, but the Dock smoke is authoritative because the OS
-applies the squircle mask at runtime.
+composition; Dock smoke remains authoritative for the OS squircle mask.

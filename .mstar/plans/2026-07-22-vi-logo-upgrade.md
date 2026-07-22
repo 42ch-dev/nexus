@@ -197,7 +197,7 @@ Public `logoVariants` keys stay `primary | color | white | mono`; add `text` for
 
 ### Task 8: Desktop icon source refresh
 
-- [ ] **T8 · Should**
+- [x] **T8 · Should**
   **Files:** `apps/desktop` icon source assets if they still embed the old N mark.
   **DoD:** desktop icon source uses new timeline mark on Chronos deep; regenerated icons if pipeline requires, or source SVG updated with note for raster regen.
 
