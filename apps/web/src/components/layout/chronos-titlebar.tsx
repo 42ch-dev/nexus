@@ -37,11 +37,16 @@ export function ChronosTitlebar({ title }: ChronosTitlebarProps) {
       : 'text-white hover:bg-white/10',
   );
 
+  const handleEmptyPaintDoubleClick = () => {
+    void desktop?.toggleMaximizeWindow();
+  };
+
   return (
     <ChronosTitlebarChrome
       title={title}
       isDark={isDark}
       desktopSafeInset={desktop !== null}
+      onEmptyPaintDoubleClick={desktop ? handleEmptyPaintDoubleClick : undefined}
       logo={<NexusInkLogo />}
       healthIndicator={desktop ? null : <DaemonHealthIndicator />}
       settingsControl={

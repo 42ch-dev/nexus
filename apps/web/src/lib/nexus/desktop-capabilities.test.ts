@@ -227,4 +227,12 @@ describe('TauriDesktopCapabilities', () => {
     const caps = new TauriDesktopCapabilities();
     await expect(caps.openWith('x')).rejects.toMatchObject({ code: 'invoke_failed' });
   });
+
+  it('toggleMaximizeWindow invokes toggle_maximize_window', async () => {
+    const { invoke } = mockTauri(() => Promise.resolve(undefined));
+    const caps = new TauriDesktopCapabilities();
+    await caps.toggleMaximizeWindow();
+    expect(invoke).toHaveBeenCalledWith('toggle_maximize_window', undefined);
+    restoreTauri();
+  });
 });
