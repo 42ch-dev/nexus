@@ -769,7 +769,7 @@
         "owner": "@ops-engineer / @qa-engineer",
         "target": "manual",
         "lifecycle": "open",
-        "note": "Criteria in apps/desktop/src-tauri/icons/README.md. Compose+README done (hashes source-1024.png c3be7c369ddb51ccb9cdcd436e22bf09996342074be48907bfc5238c23a7e724 / app-icon-preview-256.png da273c62a7927505d4f27d3fea6aeae0fd923f784b26c2c4f1900be3d516be8d). QA 2026-07-22 attempt: refreshed Nexus.app Resources/Nexus.icns to match generated icon.icns (SHA-256 85272d78b62e5e4597c7d3426ea5cd166e8cc692361876e23006f7916d494c8b), killall Dock, open release .app succeeded (nexus-desktop pid observed). Dock tile visual FAIL-to-verify: screencapture TCC blocked ('could not create image from display'). Owner: @ops-engineer / @qa-engineer / human. Trigger: human Dock tile confirm Chronos primary plate mark after quit/rebuild-or-reinstall/killall Dock/relaunch (+ stale-bundle removal if needed)."
+        "note": "Criteria in apps/desktop/src-tauri/icons/README.md. V1.132 P2 T4 inset compose landed (~12% transparent margins). Current hashes: source-1024.png dca7d5787ff3eb305a64a255c105bef4c18f84629f3c44d70a1411ac008a7982 / app-icon-preview-256.png 6223d10ca458182ef425a5f6d287090d7c820e426aaa15454811c1db66751661. Prior QA 2026-07-22 Dock tile visual FAIL-to-verify (screencapture TCC). Owner: @ops-engineer / @qa-engineer / human. Trigger: human Dock tile confirm Chronos primary plate mark after quit/rebuild-or-reinstall/killall Dock/relaunch (+ stale-bundle removal if needed)."
       },
       {
         "id": "R-VI-004",
@@ -821,6 +821,20 @@
         "target": "post-V1.132",
         "note": "T5/QA: curl+TestServer complete; Vite Network not captured. Optional human Network attach.",
         "tracking_link": ".mstar/iterations/v1.132/guides/p0-orch-load-404-dogfood.md"
+      }
+    ],
+    "2026-07-22-v1.132-p2-vi-aesthetic-retune": [
+      {
+        "id": "R-V1132P2-QC2-C-001",
+        "title": "Light primary Button hover/active use cyan blue-900 (VI-002 incomplete)",
+        "severity": "critical",
+        "source": "QC qc2.md F-001",
+        "scope": "packages/nexus-ui Button + design-tokens brand-deep-blue-800/900",
+        "decision": "fix-now",
+        "owner": "@frontend-dev",
+        "target": "this-plan",
+        "lifecycle": "open",
+        "note": "Light hover:bg-blue-900 is cyan #1896A2; active:bg-blue-950 invalid. Wire brand-deep-blue-800/900 (#0A2333/#071A28) and map Button; update tests; amend VI-002 evidence. See qc-consolidated.md."
       }
     ]
   }
