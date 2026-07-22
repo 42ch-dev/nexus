@@ -33,6 +33,9 @@ const HEALTH_POLL_INTERVAL_FAST: Duration = Duration::from_millis(100);
 /// Duration of the fast-poll window at the start of `wait_for_first_health`.
 const FAST_POLL_WINDOW: Duration = Duration::from_secs(1);
 const HEALTH_START_TIMEOUT: Duration = Duration::from_secs(15);
+/// Extra slack added to [`HEALTH_START_TIMEOUT`] for `restart_daemon`'s outer
+/// timeout budget — covers sidecar spawn plus the port-free probe window.
+const RESTART_START_BUDGET_SLACK: Duration = Duration::from_secs(1);
 const RESTART_BACKOFF_BASE: Duration = Duration::from_millis(500);
 const RESTART_BACKOFF_MAX: Duration = Duration::from_secs(8);
 const MAX_RESTART_ATTEMPTS: u32 = 5;
@@ -668,10 +671,10 @@ impl SidecarManager {
         // Bound the final start so a hung health probe can't hold
         // `restart_in_progress` open indefinitely (R-V1130P0-QC3-W-001). The
         // `_restart_guard` clears the flag on drop regardless of outcome. The
-        // 1s slack over `HEALTH_START_TIMEOUT` covers spawn + the port probe;
-        // computed at runtime because `Duration + Duration` is not yet
-        // const-stable.
-        let restart_budget = HEALTH_START_TIMEOUT + Duration::from_secs(1);
+        // `RESTART_START_BUDGET_SLACK` over `HEALTH_START_TIMEOUT` covers spawn
+        // + the port probe; computed at runtime because `Duration + Duration`
+        // is not yet const-stable.
+        let restart_budget = HEALTH_START_TIMEOUT + RESTART_START_BUDGET_SLACK;
         match tokio::time::timeout(restart_budget, self.start_with_budget(app, true)).await {
             Ok(result) => result,
             Err(_elapsed) => {
