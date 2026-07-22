@@ -70,7 +70,13 @@ interface ResolvedClients {
 }
 
 function buildClient(config: ConnectionConfig | null, desktop: boolean): NexusClient {
-  if (!config || config.active === false) {
+  // Remote mode requires an explicit `active: true` (same rule as
+  // `daemon-health-indicator`). A saved-but-inactive config, a partial
+  // config, or a leaked test fallback without `active` must not redirect
+  // the desktop client off loopback (V1.130 dogfood: poison
+  // `connection_config.json` with only `endpointUrl`/`apiKey` produced the
+  // remote transport blob against `https://x`).
+  if (!config || config.active !== true) {
     return desktop ? new TauriClient() : new BrowserClient();
   }
   return desktop

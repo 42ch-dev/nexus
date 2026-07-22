@@ -679,9 +679,23 @@ export class BrowserClient implements NexusClient {
    * `NexusClientError.kind` for honest per-kind copy + CTAs.
    */
   private static transportMessage(baseUrl: string): string {
-    return baseUrl
-      ? 'Cannot reach the daemon at this address. This usually means the URL or port is wrong, the daemon is not running, or the browser blocked a self-signed certificate. For remote daemons using self-signed certificates, use the Nexus desktop app — it can trust the certificate and store it in the OS keychain.'
-      : 'Cannot reach the local daemon. Is `nexus42 daemon start` running?';
+    // Desktop `TauriClient` always sets a loopback `baseUrl`
+    // (`http://127.0.0.1:<port>`). Treat loopback as local so failures do not
+    // render the remote multi-cause blob (wrong URL / self-signed cert).
+    if (!baseUrl || BrowserClient.isLoopbackBaseUrl(baseUrl)) {
+      return 'Cannot reach the local daemon. Is `nexus42 daemon start` running?';
+    }
+    return 'Cannot reach the daemon at this address. This usually means the URL or port is wrong, the daemon is not running, or the browser blocked a self-signed certificate. For remote daemons using self-signed certificates, use the Nexus desktop app — it can trust the certificate and store it in the OS keychain.';
+  }
+
+  /** True when `baseUrl` targets loopback (desktop local daemon). */
+  private static isLoopbackBaseUrl(baseUrl: string): boolean {
+    try {
+      const host = new URL(baseUrl).hostname.toLowerCase();
+      return host === '127.0.0.1' || host === 'localhost' || host === '::1' || host === '[::1]';
+    } catch {
+      return false;
+    }
   }
 
   /**
@@ -701,10 +715,11 @@ export class BrowserClient implements NexusClient {
    * matches.
    */
   private static classifyTransportError(baseUrl: string, cause: unknown): TransportErrorKind {
-    // (1) Local-mode client with no remote URL configured. The fetch itself may
-    // still throw a TypeError in practice; the `baseUrl` signal is the honest
-    // classification regardless.
-    if (!baseUrl) {
+    // (1) Local-mode client with no remote URL configured, or desktop loopback
+    // transport. The fetch itself may still throw a TypeError in practice; the
+    // loopback / empty-baseUrl signal is the honest classification so recovery
+    // CTAs point at the local daemon rather than Connection settings.
+    if (!baseUrl || BrowserClient.isLoopbackBaseUrl(baseUrl)) {
       return 'daemon_down';
     }
 

@@ -298,6 +298,10 @@ mod tests {
         assert!(store.value.lock().expect("lock").is_none());
         let fallback_value = read_fallback(&app).expect("fallback should exist");
         assert_eq!(fallback_value, config);
+        // Always remove the fallback — mock_app app_data_dir can resolve to the
+        // real Application Support root, and a leaked `https://x` config poisons
+        // local desktop dogfood when keychain has no entry.
+        cleanup_fallback(&app);
     }
 
     #[test]

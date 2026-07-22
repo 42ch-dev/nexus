@@ -27,7 +27,8 @@ export interface UseResumeFingerprintGateOptions {
 
 function shouldVerify(config: ConnectionConfig | null): boolean {
   if (!config) return false;
-  if (config.active === false) return false;
+  // Must match `buildClient`: only explicit `active: true` is remote mode.
+  if (config.active !== true) return false;
   if (!config.endpointUrl) return false;
   // Local same-origin default has no baseUrl and no pin — skip.
   // Remote configs without a pinned fingerprint should not happen post-setup,

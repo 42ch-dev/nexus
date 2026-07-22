@@ -532,6 +532,18 @@ describe('BrowserClient transport classification (V1.129 P0)', () => {
     expect(err.message).toContain('nexus42 daemon start');
   });
 
+  it('classifies `daemon_down` for a TypeError against a loopback baseUrl (desktop local)', async () => {
+    const client = clientThrowing(
+      new TypeError('Failed to fetch'),
+      'http://127.0.0.1:8420',
+    );
+    const err = await client.listWorks().catch((e) => e);
+    expect(err.kind).toBe('daemon_down');
+    expect(err.code).toBe('transport_unreachable');
+    expect(err.message).toContain('nexus42 daemon start');
+    expect(err.message).not.toContain('self-signed certificate');
+  });
+
   it('classifies `network` for a TypeError "Failed to fetch" with a remote baseUrl', async () => {
     const client = clientThrowing(
       new TypeError('Failed to fetch'),
