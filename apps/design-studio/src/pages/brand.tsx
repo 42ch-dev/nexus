@@ -484,7 +484,7 @@ function ClearSpaceSection() {
           href="https://github.com/42ch/nexus/blob/main/DESIGN.md#logo-usage"
           target="_blank"
           rel="noopener noreferrer"
-          className="text-blue-700 underline hover:opacity-80"
+          className="text-brand-deep-blue underline hover:opacity-80 dark:text-blue-700"
         >
           root DESIGN.md § Logo Usage
         </a>

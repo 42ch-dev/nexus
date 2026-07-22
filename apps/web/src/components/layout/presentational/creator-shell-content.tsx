@@ -58,7 +58,7 @@ function CreateCardButton({
           : 'transition-colors duration-state ease-standard hover:bg-gray-alpha-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-700 focus-visible:ring-offset-2',
       )}
     >
-      <Icon className="h-8 w-8 shrink-0 text-blue-700" aria-hidden />
+      <Icon className="h-8 w-8 shrink-0 text-brand-deep-blue dark:text-blue-700" aria-hidden />
       <span className="font-display text-display-20 tracking-tight text-gray-1000">{title}</span>
       <span className="max-w-sm text-copy-14 text-gray-700">{description}</span>
     </button>

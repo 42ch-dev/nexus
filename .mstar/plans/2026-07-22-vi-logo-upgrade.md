@@ -183,7 +183,7 @@ Public `logoVariants` keys stay `primary | color | white | mono`; add `text` for
 
 ### Task 6: Text-link migration + ad-hoc CTA cleanup
 
-- [ ] **T6 · Must**
+- [x] **T6 · Must**
   **Files:** App/Studio call sites using `text-blue-700` for **links/retry** (lists, states, agent-picker, global-timeline, etc.); ad-hoc `bg-blue-700 text-white` CTAs (timeline canvases) → primary Button or cyan+deep.
   **Interfaces:** light links → `text-brand-deep-blue` (+ dark cyan/blue-700); do not leave body links on cyan.
   **DoD:** grep for light-theme link contrast violations; no light primary CTA still using deep fill + white text.

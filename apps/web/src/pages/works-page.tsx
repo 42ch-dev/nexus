@@ -120,7 +120,7 @@ export function WorksPage() {
                       <TableCell>
                         <Link
                           to={`/works/${encodeURIComponent(w.work_id)}/outline`}
-                          className="font-medium text-blue-700 hover:text-blue-800 hover:underline"
+                          className="font-medium text-brand-deep-blue hover:underline dark:text-blue-700 dark:hover:text-blue-800"
                         >
                           {w.title || t('untitled')}
                         </Link>
@@ -142,7 +142,7 @@ export function WorksPage() {
                           to={`/works/${encodeURIComponent(w.work_id)}/timeline`}
                           data-testid={`work-timeline-link-${w.work_id}`}
                           aria-label={t('viewTimelineAria', { workId: w.work_id })}
-                          className="inline-flex items-center gap-1 text-blue-700 hover:text-blue-800 hover:underline"
+                          className="inline-flex items-center gap-1 text-brand-deep-blue hover:underline dark:text-blue-700 dark:hover:text-blue-800"
                         >
                           {t('viewTimeline')}
                         </Link>

@@ -191,7 +191,7 @@ export function VoicePage() {
           href="https://github.com/42ch/nexus/blob/main/DESIGN.md#voice--content"
           target="_blank"
           rel="noopener noreferrer"
-          className="text-blue-700 underline hover:opacity-80"
+          className="text-brand-deep-blue underline hover:opacity-80 dark:text-blue-700"
         >
           root DESIGN.md § Voice &amp; Content
         </a>

@@ -185,7 +185,7 @@ export function ChaptersPage() {
                         <TableCell>
                           <Link
                             to={`/works/${encodeURIComponent(workId)}/chapters/${row.chapter}?volume=${row.volume ?? 1}`}
-                            className="font-medium text-blue-700 hover:text-blue-800 hover:underline"
+                            className="font-medium text-brand-deep-blue hover:underline dark:text-blue-700 dark:hover:text-blue-800"
                           >
                             {row.title || t('chapters.fallbackTitle', { chapter: row.chapter })}
                           </Link>

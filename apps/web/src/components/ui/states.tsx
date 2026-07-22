@@ -92,7 +92,7 @@ export function UnavailableState({
             <button
               type="button"
               onClick={onRetry}
-              className="text-label-14 font-medium text-blue-700 transition-colors duration-state ease-standard hover:text-blue-800"
+              className="text-label-14 font-medium text-brand-deep-blue transition-colors duration-state ease-standard hover:opacity-80 dark:text-blue-700 dark:hover:text-blue-800 dark:hover:opacity-100"
             >
               {retryLabel ?? t('error.retry')}
             </button>
@@ -132,7 +132,7 @@ export function ErrorState({
         <button
           type="button"
           onClick={onRetry}
-          className="self-start text-label-14 font-medium text-blue-700 transition-colors duration-state ease-standard hover:text-blue-800"
+          className="self-start text-label-14 font-medium text-brand-deep-blue transition-colors duration-state ease-standard hover:opacity-80 dark:text-blue-700 dark:hover:text-blue-800 dark:hover:opacity-100"
         >
           {retryLabel ?? t('error.retry')}
         </button>
