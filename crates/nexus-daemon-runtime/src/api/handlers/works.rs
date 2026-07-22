@@ -1665,6 +1665,7 @@ pub fn read_active_creator_id(nexus_home: &std::path::Path) -> Option<String> {
 /// `resolve_state_db_path`. Profile switch intentionally clears a stale slug
 /// (`set_active_creator` / desktop `switch_active_creator`) and relies on this
 /// default; returning `None` here surfaces a misleading `Authentication required`.
+#[must_use]
 pub fn read_active_workspace_slug(
     nexus_home: &std::path::Path,
     creator_id: &str,

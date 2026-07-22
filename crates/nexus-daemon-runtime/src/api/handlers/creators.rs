@@ -1080,7 +1080,9 @@ mod tests {
             .expect("initialize");
 
         // Seed an orphan SQL row that has no Profile home (dirty secondary data).
-        let pool = state.pool().expect("pool should open for on-disk active profile");
+        let pool = state
+            .pool()
+            .expect("pool should open for on-disk active profile");
         let now = chrono::Utc::now().to_rfc3339();
         sqlx::query!(
             "INSERT INTO creators (creator_id, display_name, status, cached_at, data) VALUES (?, ?, 'active', ?, '{}')",
@@ -1104,7 +1106,11 @@ mod tests {
         .0;
 
         let ids: Vec<&str> = body.items.iter().map(|c| c.creator_id.as_str()).collect();
-        assert_eq!(ids, vec![on_disk], "list membership is SSOT-only, got {ids:?}");
+        assert_eq!(
+            ids,
+            vec![on_disk],
+            "list membership is SSOT-only, got {ids:?}"
+        );
         assert!(!ids.contains(&orphan_sql));
     }
 
