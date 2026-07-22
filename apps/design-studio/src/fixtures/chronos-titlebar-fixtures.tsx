@@ -147,8 +147,31 @@ export function ChronosTitlebarFixtures() {
       </FixtureFrame>
 
       <FixtureFrame
+        title="Desktop drag contract (light + dark)"
+        description={`Logo/title paint, safe inset (${CHRONOS_TITLEBAR_DESKTOP_INSET_PX}px), and flex spacer carry data-tauri-drag-region; gear/theme/health cluster opts out (no-drag). Mark uses draggable={false}; title uses select-none.`}
+        testId="chronos-titlebar-fixture-drag-contract"
+      >
+        <div className="grid gap-4">
+          <div className="rounded-card border border-gray-alpha-200 overflow-hidden">
+            <TitlebarSpecimen
+              isDark={false}
+              desktopSafeInset
+              testId="chronos-titlebar-drag-contract-light"
+            />
+          </div>
+          <div className="dark rounded-card border border-gray-alpha-200 overflow-hidden">
+            <TitlebarSpecimen
+              isDark
+              desktopSafeInset
+              testId="chronos-titlebar-drag-contract-dark"
+            />
+          </div>
+        </div>
+      </FixtureFrame>
+
+      <FixtureFrame
         title="Desktop safe inset + dual-pane shell"
-        description={`Native traffic-light inset (${CHRONOS_TITLEBAR_DESKTOP_INSET_PX}px) with drag region on empty paint only; sidebar has no logo row.`}
+        description={`Native traffic-light inset with drag on logo/title paint and empty spacer; interactive controls remain clickable. Sidebar has no logo row.`}
         testId="chronos-titlebar-fixture-desktop-inset"
       >
         <DualPaneShellFixture
