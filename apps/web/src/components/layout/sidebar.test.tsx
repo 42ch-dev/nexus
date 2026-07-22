@@ -99,19 +99,35 @@ describe('Sidebar', () => {
     expect(screen.getByTestId('shell-sidebar-panel')).toHaveAttribute('aria-labelledby', 'creator');
   });
 
-  it('mounts the footer profile switcher only under Orchestrator (工作区)', async () => {
+  it('mounts the 工作区 footer profile switcher on both Creator and Orchestrator (V1.132 P3 AC-6)', async () => {
     const user = userEvent.setup();
     useSidebarHandlers();
 
     renderInApp(<Sidebar />, { client: makeClient(), activeCreatorId: 'creator-a' });
 
-    expect(screen.queryByRole('toolbar', { name: 'Workspace' })).not.toBeInTheDocument();
-
-    await user.click(screen.getByRole('tab', { name: 'Orchestrator' }));
-
     await waitFor(() =>
       expect(screen.getByRole('toolbar', { name: 'Workspace' })).toBeInTheDocument(),
     );
+
+    await user.click(screen.getByRole('tab', { name: 'Orchestrator' }));
+
+    expect(screen.getByRole('toolbar', { name: 'Workspace' })).toBeInTheDocument();
+  });
+
+  it('keeps the active workspace identity when switching Creator ↔ Orchestrator (V1.132 P3 AC-7)', async () => {
+    const user = userEvent.setup();
+    useSidebarHandlers();
+
+    renderInApp(<Sidebar />, { client: makeClient(), activeCreatorId: 'creator-a' });
+
+    const alice = await screen.findByTitle('Alice');
+    expect(alice).toHaveAttribute('aria-pressed', 'true');
+
+    await user.click(screen.getByRole('tab', { name: 'Orchestrator' }));
+    expect(screen.getByTitle('Alice')).toHaveAttribute('aria-pressed', 'true');
+
+    await user.click(screen.getByRole('tab', { name: 'Creator' }));
+    expect(screen.getByTitle('Alice')).toHaveAttribute('aria-pressed', 'true');
   });
 
   it('keeps the footer mode switch as the only primary Creator|Orchestrator control', () => {
@@ -145,6 +161,9 @@ describe('Sidebar', () => {
     expect(screen.queryByRole('link', { name: '全部作品' })).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: '世界' })).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: '记忆' })).not.toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.getByRole('toolbar', { name: '工作区' })).toBeInTheDocument(),
+    );
 
     await user.click(screen.getByRole('tab', { name: '编排' }));
     expect(screen.getByRole('link', { name: '记忆' })).toBeInTheDocument();
@@ -240,15 +259,12 @@ describe('Sidebar — layout structure (AD-P2-2 T1)', () => {
   });
 
   it('scrolls creator panel internally while the footer block stays pinned', async () => {
-    const user = userEvent.setup();
     useSidebarHandlers();
     renderInApp(<Sidebar />, { client: makeClient(), activeCreatorId: 'creator-a' });
 
     const panel = screen.getByTestId('shell-sidebar-panel');
     expect(panel).toHaveClass('overflow-auto');
     expect(panel).toHaveClass('flex-1');
-
-    await user.click(screen.getByRole('tab', { name: 'Orchestrator' }));
 
     await waitFor(() =>
       expect(screen.getByRole('toolbar', { name: 'Workspace' })).toBeInTheDocument(),
