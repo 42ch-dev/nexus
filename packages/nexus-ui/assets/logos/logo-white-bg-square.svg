@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 284 284" role="img" aria-labelledby="nexus-logo-title nexus-logo-desc" fill="none">
   <title id="nexus-logo-title">Nexus</title>
-  <desc id="nexus-logo-desc">Nexus square lockup on white plate  timeline mark with deep to cyan gradient (matches logo-white-bg.png)</desc>
+  <desc id="nexus-logo-desc">Nexus square lockup on white plate — timeline mark with deep to cyan gradient (matches logo-white-bg.png)</desc>
   <!-- Opaque white plate so the asset previews and reads on light surfaces -->
   <rect width="284" height="284" fill="#FFFFFF"/>
   <defs>

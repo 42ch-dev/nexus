@@ -29,8 +29,10 @@ pnpm --filter desktop run icons:compose
 ```
 
 This rasterizes `logo-primary-square.svg` (bright mark on brand deep-blue plate) to
-`source-1024.png` + `app-icon-preview-256.png`. macOS applies the system
-squircle mask to the bundled asset; the plate is intentional brand fill.
+`source-1024.png` + `app-icon-preview-256.png`, with **~12% transparent inset
+margins** on each side so the plate sits inside the macOS squircle without a
+light rectangular halo at the plate edges. macOS applies the system squircle mask
+to the bundled asset; compose owns the inset — consumers use the composed PNGs.
 
 ## Generating desktop icon formats
 
