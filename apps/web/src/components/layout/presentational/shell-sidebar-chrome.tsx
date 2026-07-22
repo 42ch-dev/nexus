@@ -38,6 +38,11 @@ export interface ShellSidebarChromeProps {
   logo?: ReactNode;
   /** Optional footer slot rendered below the Settings utility (e.g. profile switcher). */
   footer?: ReactNode;
+  /**
+   * Optional panel slot replacing nav groups in the scrollable region (e.g.
+   * Create-only 创作 hub). When set, `navGroups` are not rendered.
+   */
+  panelContent?: ReactNode;
   renderNavItem?: RenderNavItem;
   /** Optional per-item active-state override. When provided, the chrome calls it
    * for every item INSTEAD of the built-in `activeRoute === item.to ||
@@ -94,6 +99,7 @@ export function ShellSidebarChrome({
   onTabChange,
   logo,
   footer,
+  panelContent,
   renderNavItem = defaultRenderNavItem,
   isActiveItem,
   drillInItems,
@@ -158,6 +164,15 @@ export function ShellSidebarChrome({
             />
           ))}
         </ul>
+      ) : panelContent ? (
+        <div
+          className="flex flex-1 flex-col overflow-auto py-2"
+          role="tabpanel"
+          aria-labelledby={activeTab}
+          data-testid="shell-sidebar-panel"
+        >
+          {panelContent}
+        </div>
       ) : (
         <ul
           className="flex flex-1 flex-col gap-4 overflow-auto py-1"
