@@ -208,6 +208,52 @@ describe('Chronos gallery acceptance', () => {
   });
 });
 
+/* ---- Brand logo gallery lockup (V1.131 P1) ----------------------------- */
+
+describe('Brand logo gallery lockup', () => {
+  beforeEach(() => {
+    mockMatchMedia(false);
+    renderStudio('/brand');
+  });
+
+  it('primary plate card uses deep-blue panel and width-fill img', () => {
+    const panel = screen.getByTestId('logo-card-panel-primary');
+    expect(panel.className).toMatch(/\bbg-brand-deep-blue\b/);
+    expect(panel.className).not.toMatch(/\bbg-gray-alpha/);
+
+    const img = screen.getByTestId('logo-card-plate-img-primary');
+    expect(img).toHaveClass('block', 'w-full', 'h-auto', 'object-contain');
+    expect(img).toHaveAttribute('src');
+  });
+
+  it('whiteBg plate card uses white panel and width-fill img', () => {
+    const panel = screen.getByTestId('logo-card-panel-whiteBg');
+    expect(panel.className).toMatch(/\bbg-white\b/);
+    expect(panel.className).not.toMatch(/\bbg-gray-alpha/);
+
+    const img = screen.getByTestId('logo-card-plate-img-whiteBg');
+    expect(img).toHaveClass('block', 'w-full', 'h-auto', 'object-contain');
+  });
+
+  it('Chronos mini renders logo inside the deep titlebar row', () => {
+    for (const mode of ['light', 'dark'] as const) {
+      const titlebar = screen.getByTestId(`chronos-mini-titlebar-${mode}`);
+      expect(titlebar.className).toMatch(/\bbg-brand-deep-blue\b/);
+      const logo = within(titlebar).getByRole('img', { name: 'Nexus' });
+      expect(logo).toBeInTheDocument();
+      expect(logo.className).toMatch(/\bh-5\b/);
+    }
+  });
+
+  it('dark hero lockup wordmark renders larger than V1.130 caption scale', () => {
+    const hero = screen.getByTestId('dark-hero-lockup');
+    const wordmark = within(hero)
+      .getAllByRole('img')
+      .find((img) => img.className.includes('h-[26px]'));
+    expect(wordmark).toBeDefined();
+  });
+});
+
 describe('Tokens page — typography gallery (display tier)', () => {
   beforeEach(() => {
     mockMatchMediaFull();
