@@ -69,7 +69,9 @@ async fn get_preset_by_id_hits_handler_not_framework_404() {
 #[serial]
 async fn get_preset_unknown_returns_handler_json_404_not_empty_body() {
     let (_tmp, server) = test_server().await;
-    let resp = server.get("/v1/daemon/presets/definitely-missing-preset-id").await;
+    let resp = server
+        .get("/v1/daemon/presets/definitely-missing-preset-id")
+        .await;
     assert_eq!(resp.status_code(), 404);
     let body: Value = resp.json();
     assert_eq!(body["success"], false);
@@ -80,9 +82,7 @@ async fn get_preset_unknown_returns_handler_json_404_not_empty_body() {
 #[serial]
 async fn reload_preset_by_id_hits_handler_not_framework_404() {
     let (_tmp, server) = test_server().await;
-    let resp = server
-        .post("/v1/daemon/presets/novel-writing:reload")
-        .await;
+    let resp = server.post("/v1/daemon/presets/novel-writing:reload").await;
     assert_ne!(
         resp.status_code(),
         404,

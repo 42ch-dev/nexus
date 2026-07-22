@@ -36,10 +36,7 @@ async fn test_server_with_engine() -> EngineCtx {
     let auth_config = DaemonApiConfig::keyless();
     let app = api::create_router(state, auth_config);
     let server = TestServer::new(app).expect("failed to create test server");
-    EngineCtx {
-        _tmp: tmp,
-        server,
-    }
+    EngineCtx { _tmp: tmp, server }
 }
 
 async fn create_session(server: &TestServer, creator_id: &str, preset_id: &str) -> String {
@@ -85,9 +82,7 @@ async fn get_session_by_id_hits_handler_not_framework_404() {
 
     let resp = ctx
         .server
-        .get(&format!(
-            "/v1/daemon/orchestration/sessions/{session_id}"
-        ))
+        .get(&format!("/v1/daemon/orchestration/sessions/{session_id}"))
         .await;
     assert_ne!(
         resp.status_code(),
