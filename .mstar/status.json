@@ -32,6 +32,12 @@
           "head": "1fb302c00cedcedc87e0b5c74fc246364bc328fb",
           "status": "complete",
           "notes": "Network residual → T5"
+        },
+        {
+          "task": 2,
+          "base": "1fb302c00cedcedc87e0b5c74fc246364bc328fb",
+          "head": "c0a42aafde624a98197f9eade161d896c024f877",
+          "status": "complete"
         }
       ]
     },
