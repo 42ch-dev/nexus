@@ -27,6 +27,7 @@ import { SettingsHostFixtures } from '@/fixtures/settings-host-fixtures';
 import { SetupWizardChromeFixtures } from '@/fixtures/setup-wizard-chrome-fixtures';
 import { ConflictModalFixtures } from '@/fixtures/conflict-modal-fixtures';
 import { CreatorShellFixtures } from '@/fixtures/creator-shell-fixtures';
+import { ChronosTitlebarFixtures } from '@/fixtures/chronos-titlebar-fixtures';
 import { GlobalTimelineFixtures } from '@/fixtures/global-timeline-fixtures';
 import { LayerBreadcrumbFixtures } from '@/fixtures/layer-breadcrumb-fixtures';
 import { SelectionSubmenuStubFixtures } from '@/fixtures/selection-submenu-fixtures';
@@ -484,7 +485,24 @@ export function SurfacesSetupPage() {
 export function SurfacesShellPage() {
   return (
     <div data-testid="surfaces-shell">
-      <section>
+      <section data-testid="surfaces-chronos-titlebar">
+        <SurfaceHeading>Chronos titlebar</SurfaceHeading>
+        <SurfaceSourceBadges
+          importPaths={['@web-layout/chronos-titlebar-chrome', '@42ch/nexus-ui']}
+        />
+        <p className="text-copy-14 text-gray-700 mb-6">
+          Full-width ink titlebar with bright mark on ink, theme-aware labels,
+          gear/settings slot, and optional macOS traffic-light safe inset —
+          presentational extract via{' '}
+          <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+            @web-layout/chronos-titlebar-chrome
+          </code>
+          .
+        </p>
+        <ChronosTitlebarFixtures />
+      </section>
+
+      <section className="mt-10">
         <SurfaceHeading>App shell chrome</SurfaceHeading>
         <SurfaceSourceBadges
           importPaths={[

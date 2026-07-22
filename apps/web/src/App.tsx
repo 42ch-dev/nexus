@@ -7,6 +7,8 @@ import {
 } from '@/lib/active-creator-context';
 import { SetupCompletedProvider } from '@/lib/setup-completed-context';
 import { RootLayout } from '@/components/layout/root-layout';
+import { SettingsModalHost } from '@/components/layout/settings-modal-host';
+import { SettingsModalProvider } from '@/components/layout/settings-modal-context';
 import { DaemonLaunchGate } from '@/components/setup/daemon-launch-gate';
 import { SetupGate } from '@/components/setup/setup-gate';
 import { ChapterPage } from '@/pages/chapter-page';
@@ -201,7 +203,12 @@ export function App() {
       <DefaultProfileCoordinator />
       <SetupCompletedProvider>
         <DaemonLaunchGate>
-          <AppRoutes />
+          <SettingsModalProvider>
+            <AppRoutes />
+            <SettingsModalHost>
+              {/* P2 mounts the section registry and route-aware outlet here. */}
+            </SettingsModalHost>
+          </SettingsModalProvider>
         </DaemonLaunchGate>
       </SetupCompletedProvider>
     </ActiveCreatorProvider>

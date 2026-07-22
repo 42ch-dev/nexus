@@ -15,7 +15,6 @@ import {
 } from 'lucide-react';
 
 import { flattenPages, usePatchWork, useWorks, useNarrativeWorlds } from '@/api/queries';
-import { NexusLogo } from '@/components/brand/nexus-logo';
 import { useCreatorEntitySelection } from '@/components/layout/creator-entity-selection-context';
 import { FooterProfiles } from '@/components/layout/footer-profiles';
 import { useAgentPickerDialog } from '@/components/layout/use-agent-picker-dialog';
@@ -328,7 +327,6 @@ export function Sidebar() {
         activeRoute={pathname}
         navGroups={groups}
         onTabChange={setActiveTab}
-        logo={<NexusLogo />}
         footer={<FooterProfiles />}
         creatorTabLabel={t('nav.creator')}
         orchestratorTabLabel={t('nav.orchestrator')}

@@ -134,7 +134,11 @@ export function ShellSidebarChrome({
       className="flex h-full w-full flex-col gap-2 border-r border-gray-alpha-400 bg-background-100 p-3"
       data-testid={dataTestId}
     >
-      <div className="flex h-12 items-center px-3">{logo}</div>
+      {logo ? (
+        <div className="flex h-12 items-center px-3" data-testid="shell-sidebar-logo-row">
+          {logo}
+        </div>
+      ) : null}
 
       {/* V1.130: tab switch moved to footer (功能区 footer) */}
 

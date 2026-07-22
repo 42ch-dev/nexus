@@ -47,13 +47,9 @@ beforeEach(async () => {
   );
 });
 
-describe('Header (V1.125 P2)', () => {
-  it('exposes Settings beside the theme toggle', () => {
+describe('Header (legacy content header)', () => {
+  it('exposes the theme toggle', () => {
     renderHeader();
-
-    const settings = screen.getByTestId('header-settings-link');
-    expect(settings).toHaveAttribute('href', '/settings');
-    expect(settings).toHaveAttribute('aria-label', 'Settings');
     expect(screen.getByRole('button', { name: 'Switch to dark theme' })).toBeInTheDocument();
   });
 });

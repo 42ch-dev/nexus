@@ -13,6 +13,8 @@ import { SettingsShellLayout } from '@/pages/settings/settings-shell-layout';
 import { SettingsAppearanceSection } from '@/pages/settings/settings-appearance-section';
 import { SettingsWorkspaceSection } from '@/pages/settings/settings-workspace-section';
 import { RootLayout } from '@/components/layout/root-layout';
+import { SettingsModalProvider } from '@/components/layout/settings-modal-context';
+import { SettingsModalHost } from '@/components/layout/settings-modal-host';
 import { ThemeProvider } from '@/components/theme-provider';
 import { renderInApp } from '@/test/test-providers';
 import { useHandlers } from '@/test/msw-server';
@@ -37,11 +39,14 @@ function mockMatchMedia(prefersDark = false) {
   vi.spyOn(window, 'matchMedia').mockReturnValue(media as unknown as MediaQueryList);
 }
 
-/** RootLayout → Header needs ThemeProvider (not in default renderInApp stack). */
+/** RootLayout → ChronosTitlebar needs ThemeProvider + SettingsModalProvider. */
 function LayoutWithTheme() {
   return (
     <ThemeProvider>
-      <RootLayout />
+      <SettingsModalProvider>
+        <RootLayout />
+        <SettingsModalHost />
+      </SettingsModalProvider>
     </ThemeProvider>
   );
 }
@@ -386,7 +391,7 @@ describe('Settings shell routes', () => {
     expect(screen.getByTestId('location-hash')).toHaveTextContent('#setup');
   });
 
-  it('exposes Settings in the header and opens Agent via /settings (V1.125 P2)', async () => {
+  it('exposes Settings on the Chronos titlebar gear (V1.131 P0)', async () => {
     const user = userEvent.setup();
     useHandlers(scanHandler(), creatorsHandler(), healthHandler());
 
@@ -405,21 +410,14 @@ describe('Settings shell routes', () => {
       },
     );
 
-    const settingsLink = await screen.findByTestId('header-settings-link');
-    expect(settingsLink).toHaveAttribute('href', '/settings');
-    expect(settingsLink).toHaveAttribute('aria-label', 'Settings');
+    const settingsGear = await screen.findByTestId('chronos-titlebar-settings-gear');
+    expect(settingsGear).toHaveAttribute('aria-label', 'Settings');
 
-    await user.click(settingsLink);
+    await user.click(settingsGear);
 
     await waitFor(() =>
-      expect(screen.getByTestId('settings-agent-section')).toBeInTheDocument(),
+      expect(screen.getByTestId('settings-modal-body')).toBeInTheDocument(),
     );
-    expect(
-      within(screen.getByTestId('settings-shell')).getByRole('heading', {
-        name: 'Settings',
-        level: 2,
-      }),
-    ).toBeInTheDocument();
   });
 
   it('includes Settings in mobile nav', () => {
