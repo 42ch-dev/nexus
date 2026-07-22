@@ -847,13 +847,13 @@ mod tests {
         }
     }
 
-    /// Integration test: GET /v1/daemon/creators when no workspace → returns empty list.
+    /// Integration test: GET /v1/daemon/creators lists filesystem SSOT Profile
+    /// homes even when the active-pool SQL `creators` table is empty.
     ///
-    /// The workspace initialization guard is enforced by middleware (`require_workspace`),
-    /// not by the handler itself. Calling the handler directly without middleware
-    /// simply queries the database and returns results.
+    /// The workspace initialization guard is enforced by middleware
+    /// (`require_workspace`), not by the handler itself.
     #[tokio::test]
-    async fn creators_without_workspace_returns_empty_list() {
+    async fn creators_lists_ssot_profile_homes_without_sql_rows() {
         use crate::api::handlers::creators::list;
         use crate::api::handlers::creators::ListCreatorsQuery;
         use crate::test_utils::create_test_workspace;
@@ -873,7 +873,10 @@ mod tests {
             "Handler should succeed when called directly (no middleware)"
         );
         let body = result.expect("result should be Ok");
-        assert!(body.items.is_empty());
+        // `create_test_workspace` seeds `creators/test_creator/` — membership
+        // SSOT — even though the SQL `creators` table has no rows yet.
+        assert_eq!(body.items.len(), 1);
+        assert_eq!(body.items[0].creator_id, "test_creator");
     }
 
     /// Integration test: GET /v1/daemon/references when no workspace → returns empty list.
