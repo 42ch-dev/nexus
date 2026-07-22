@@ -37,8 +37,8 @@ describe('NexusLogo', () => {
     render(<NexusLogo />);
     const logo = screen.getByRole('img', { name: 'Nexus' });
     expect(logo.getAttribute('src')).toContain('logo-primary.svg');
-    expect(logo).toHaveClass('h-6', 'w-auto', 'shrink-0');
-    expect(logo).toHaveAttribute('height', '24');
+    expect(logo).toHaveClass('h-5', 'w-auto', 'max-w-full', 'shrink-0');
+    expect(logo).toHaveAttribute('height', '20');
   });
 
   it('renders the color timeline mark in dark theme', () => {

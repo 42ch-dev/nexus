@@ -10,15 +10,19 @@ import { cn } from '../lib/cn';
  * Variants map to the design-system token table (primary/secondary/tertiary/
  * destructive); sizes map to the small/default/large heights. The two-layer
  * focus ring is applied globally in src/index.css.
+ *
+ * Primary uses Chronos cyan signal + deep ink label in **both** themes (no
+ * light/dark fill fork). Hover/active steps follow `blue-800/900` (theme-tuned
+ * cyan scale in tokens.css).
  */
 const buttonVariants = cva(
   'inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-control font-button transition-colors duration-state ease-standard disabled:pointer-events-none disabled:bg-gray-100 disabled:text-gray-700 dark:disabled:bg-gray-100 dark:disabled:text-gray-700 focus-visible:outline-none',
   {
     variants: {
       variant: {
-        // primary: brand deep blue (light) / brand cyan (dark) per DESIGN*.md
+        // primary: cyan fill + deep text (light === dark per Chronos dual-role)
         primary:
-          'bg-blue-700 text-white hover:bg-blue-800 active:bg-blue-900 dark:bg-brand-cyan dark:text-brand-deep-blue dark:hover:bg-blue-800 dark:active:bg-blue-900',
+          'bg-brand-cyan text-brand-deep-blue hover:bg-blue-800 active:bg-blue-900',
         // secondary: background-100 bg, gray-1000 text, gray-alpha-400 border
         secondary:
           'bg-background-100 text-gray-1000 border border-gray-alpha-400 hover:bg-background-200 hover:border-gray-alpha-500',

@@ -1,6 +1,6 @@
 import logoColor from '@42ch/nexus-ui/assets/logos/logo-color.svg';
 import logoPrimary from '@42ch/nexus-ui/assets/logos/logo-primary.svg';
-import { NexusLogo as NexusLogoComponent, logoMinSizePx } from '@42ch/nexus-ui';
+import { NexusLogo as NexusLogoComponent, logoShellHeightPx } from '@42ch/nexus-ui';
 
 import { useTheme } from '@/components/theme-provider';
 import { cn } from '@/lib/utils';
@@ -28,8 +28,8 @@ export function NexusLogo({ label = 'Nexus', className }: NexusLogoProps) {
       variant={variant}
       src={src}
       label={label}
-      size={logoMinSizePx}
-      className={cn('h-6 w-auto shrink-0', className)}
+      size={logoShellHeightPx}
+      className={cn('h-5 w-auto max-w-full shrink-0', className)}
     />
   );
 }

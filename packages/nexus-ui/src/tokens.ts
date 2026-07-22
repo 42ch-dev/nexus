@@ -33,8 +33,15 @@ export const logoMarkViewBoxHeight = 28;
 /** Width / height of the timeline mark viewBox (~10.14:1) */
 export const logoMarkAspectRatio = logoMarkViewBoxWidth / logoMarkViewBoxHeight;
 
-/** Minimum rendered logo height in px for legibility */
+/** Minimum rendered logo height in px for legibility (gallery / general UI) */
 export const logoMinSizePx = 24;
+
+/**
+ * Shell chrome mark height in px (sidebar header, presentational shell fixtures).
+ * Timeline mark is ~10.14:1 wide; 24px height ≈ 243px width and clips in a
+ * 248px sidebar with horizontal padding — 20px (h-5) fits (~203px).
+ */
+export const logoShellHeightPx = 20;
 
 /** Recommended clear space around the mark (multiple of logo height) */
 export const logoClearSpaceRatio = 0.25;

@@ -6,6 +6,7 @@ import {
   NexusLogoVariant,
   logoVariants,
   logoMinSizePx,
+  logoShellHeightPx,
   logoClearSpaceRatio,
   logoMarkAspectRatio,
   logoVariantPalettes,
@@ -278,16 +279,16 @@ function ChronosContextSection() {
           <NexusLogo
             variant="primary"
             src={logoPrimarySrc}
-            size={logoMinSizePx}
-            className="h-6 w-auto shrink-0"
+            size={logoShellHeightPx}
+            className="h-5 w-auto max-w-full shrink-0"
           />
         </ChronosShellMini>
         <ChronosShellMini mode="dark">
           <NexusLogo
             variant="color"
             src={logoColorSrc}
-            size={logoMinSizePx}
-            className="h-6 w-auto shrink-0"
+            size={logoShellHeightPx}
+            className="h-5 w-auto max-w-full shrink-0"
           />
         </ChronosShellMini>
       </div>

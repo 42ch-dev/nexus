@@ -120,7 +120,7 @@ function VoiceCard({
                   key={idx}
                   className={cn(
                     'inline-flex items-center rounded-control border border-gray-alpha-300',
-                    'bg-blue-700 text-white px-4 h-10 text-button-14 font-button',
+                    'bg-brand-cyan text-brand-deep-blue px-4 h-10 text-button-14 font-button',
                   )}
                 >
                   {part}

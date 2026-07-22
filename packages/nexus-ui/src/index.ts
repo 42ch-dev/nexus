@@ -23,6 +23,7 @@ export {
   logoMarkViewBoxHeight,
   logoMarkViewBoxWidth,
   logoMinSizePx,
+  logoShellHeightPx,
   logoVariantPalettes,
   logoVariants,
   type BrandColorName,

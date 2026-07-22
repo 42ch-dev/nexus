@@ -176,7 +176,7 @@ Public `logoVariants` keys stay `primary | color | white | mono`; add `text` for
 
 ### Task 5: Primitives + shell chrome signal unification
 
-- [ ] **T5 · Must**
+- [x] **T5 · Must**
   **Files:** `packages/nexus-ui` Button (+ tests); shell sidebar active bar; focus ring CSS; spinner/states; setup wizard active step; footer profiles / mode switch; any presentational titlebar.
   **Interfaces:** consume unified tokens; primary Button has no light/dark fill fork.
   **DoD:** Light and Dark primary buttons pixel-same recipe; active bars/focus/spinners use cyan signal; titlebar label rule (white light / cyan dark) if chrome present; unit tests updated.

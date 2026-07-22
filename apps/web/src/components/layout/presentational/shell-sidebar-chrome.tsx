@@ -243,7 +243,7 @@ function TabButton({
       className={cn(
         'rounded-control px-2 py-1.5 text-button-14 font-button transition-colors duration-state ease-standard motion-reduce:transition-none',
         active
-          ? 'bg-background-100 text-gray-1000 shadow-card'
+          ? 'bg-brand-cyan text-brand-deep-blue shadow-card'
           : 'text-gray-700 hover:bg-gray-alpha-200 hover:text-gray-1000',
       )}
     >

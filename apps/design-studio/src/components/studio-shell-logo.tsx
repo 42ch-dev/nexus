@@ -9,7 +9,7 @@
 
 import logoColor from '@42ch/nexus-ui/assets/logos/logo-color.svg';
 import logoPrimary from '@42ch/nexus-ui/assets/logos/logo-primary.svg';
-import { NexusLogo, logoMinSizePx } from '@42ch/nexus-ui';
+import { NexusLogo, logoShellHeightPx } from '@42ch/nexus-ui';
 import { useSyncExternalStore } from 'react';
 
 function subscribeHtmlDark(onStoreChange: () => void) {
@@ -35,8 +35,8 @@ export function StudioShellLogo({ className }: { className?: string } = {}) {
       variant={isDark ? 'color' : 'primary'}
       src={isDark ? logoColor : logoPrimary}
       label="Nexus"
-      size={logoMinSizePx}
-      className={className ?? 'h-6 w-auto shrink-0'}
+      size={logoShellHeightPx}
+      className={className ?? 'h-5 w-auto max-w-full shrink-0'}
     />
   );
 }
