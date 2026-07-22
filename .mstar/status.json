@@ -119,6 +119,12 @@
           "base": "c273f1b2ee85d50886a44c937c8a2d8aad095e71",
           "head": "524c5eed0423cf380823dc05bb811e9d92619549",
           "status": "complete"
+        },
+        {
+          "task": 2,
+          "base": "603f662551af5d8bfa28b42608da96dd5a9aee68",
+          "head": "8bd81ca33ad2075361b8c5e1a98d65e64c79ea30",
+          "status": "complete"
         }
       ]
     },
