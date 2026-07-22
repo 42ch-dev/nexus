@@ -454,14 +454,23 @@ impl ValidatePresetResponse {
     }
 }
 
-/// `POST /v1/daemon/presets/{id}:reload` — reload preset (T37)
+/// `POST /v1/daemon/presets/:id` — reload preset (T37)
+///
+/// Routed as `POST /v1/daemon/presets/:id` because matchit 0.7 cannot register
+/// `:id:reload` as a separate pattern. The path segment must end with
+/// `:reload`; otherwise this returns 404.
 ///
 /// Reloads a user or system preset. For embedded presets, refreshes
 /// the cached source hash.
 pub async fn reload_preset(
     State(state): State<WorkspaceState>,
-    Path(preset_id): Path<String>,
+    Path(segment): Path<String>,
 ) -> Result<Json<ReloadPresetResponse>, NexusApiError> {
+    let preset_id = segment
+        .strip_suffix(":reload")
+        .ok_or_else(|| NexusApiError::NotFound(format!("Preset route '{segment}' not found")))?
+        .to_string();
+
     info!(preset_id = %preset_id, "Reloading preset");
 
     // Try loading from embedded/system first
@@ -1284,7 +1293,7 @@ states:
         nexus_orchestration::system_preset_dir::ensure_maintenance_preset(state.nexus_home())
             .expect("ensure maintenance preset");
 
-        let resp = reload_preset(State(state), Path("_system.maintenance".to_string()))
+        let resp = reload_preset(State(state), Path("_system.maintenance:reload".to_string()))
             .await
             .expect("reload system preset")
             .0;

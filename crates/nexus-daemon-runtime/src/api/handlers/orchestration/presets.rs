@@ -27,10 +27,14 @@ pub async fn list_presets(
     (StatusCode::OK, Json(ListPresetsResponse { presets }))
 }
 
-/// `POST /v1/daemon/orchestration/presets/{id}:reload`
+/// `POST /v1/daemon/orchestration/presets/:id`
 ///
 /// Invalidate loader cache for the given preset ID and reload from embedded
 /// storage. Returns the new source hash.
+///
+/// Routed as `POST /v1/daemon/orchestration/presets/:id` because matchit 0.7
+/// cannot register `:id:reload` as a separate pattern. The path segment must
+/// end with `:reload`; otherwise this returns 404.
 ///
 /// Running sessions continue on the previous graph (snapshot semantics);
 /// new sessions pick up the new graph.
@@ -43,8 +47,13 @@ pub async fn list_presets(
 ///
 /// Does not panic; the `write_fmt` call is infallible for `String`.
 pub async fn reload_preset(
-    Path(preset_id): Path<String>,
+    Path(segment): Path<String>,
 ) -> Result<(StatusCode, Json<ReloadPresetResponse>), NexusApiError> {
+    let preset_id = segment
+        .strip_suffix(":reload")
+        .ok_or_else(|| NexusApiError::NotFound(format!("Preset route '{segment}' not found")))?
+        .to_string();
+
     // Validate the preset exists by attempting to load it.
     let caps = nexus_orchestration::CapabilityRegistry::with_builtins();
     let loaded = nexus_orchestration::preset::load_embedded_preset(&preset_id, &caps)
@@ -100,7 +109,7 @@ mod tests {
 
     #[tokio::test]
     async fn reload_novel_writing_returns_200() {
-        let path = Path("novel-writing".to_string());
+        let path = Path("novel-writing:reload".to_string());
         let result = reload_preset(path).await;
         assert!(result.is_ok());
         let (status, Json(resp)) =
@@ -114,7 +123,7 @@ mod tests {
 
     #[tokio::test]
     async fn reload_unknown_preset_returns_404() {
-        let path = Path("nonexistent-preset".to_string());
+        let path = Path("nonexistent-preset:reload".to_string());
         let result = reload_preset(path).await;
         assert!(result.is_err());
         let err = result.expect_err("reload_preset should fail for nonexistent preset");

@@ -4,7 +4,7 @@
   "plans": [
     {
       "id": "2026-07-22-v1.132-p0-orch-load-404",
-      "status": "InProgress",
+      "status": "Done",
       "file": ".mstar/plans/2026-07-22-v1.132-p0-orch-load-404.md",
       "metadata": {
         "primary_spec": ".mstar/iterations/v1.132/specs/orch-load-404.md",
@@ -17,13 +17,6 @@
         "wire_contracts_changed": false,
         "wave": "1",
         "seq": "0"
-      },
-      "execution_lease": {
-        "holder": "pm-v1.132-btwoods-MBP",
-        "claimed_at": "2026-07-22T14:12:11Z",
-        "worktree_path": "/Users/bibi/workspace/organizations/42ch/nexus/.worktrees/v1.132-p0-orch-load-404",
-        "working_branch": "plan/v1.132-p0-orch-load-404",
-        "session_label": "v1.132-phase2-wave1"
       },
       "task_commits": [
         {
@@ -50,6 +43,13 @@
           "base": "c64cea8369b1e184fd3dc795ded57dda1603d335",
           "head": "23b730b788d9cee51155f89c04ffc6d9bd3e66f8",
           "status": "complete"
+        },
+        {
+          "task": 5,
+          "base": "3028319a5897ccc6e4ee87a22353e9b93c65459a",
+          "head": "c4947c54ea563c99231da9da3197076af29998e6",
+          "status": "complete",
+          "notes": "Network residual → QA"
         }
       ]
     },
@@ -92,7 +92,7 @@
     },
     {
       "id": "2026-07-22-v1.132-p2-vi-aesthetic-retune",
-      "status": "Todo",
+      "status": "InReview",
       "file": ".mstar/plans/2026-07-22-v1.132-p2-vi-aesthetic-retune.md",
       "metadata": {
         "primary_spec": ".mstar/iterations/v1.132/specs/vi-aesthetic-retune.md",
@@ -105,7 +105,46 @@
         "wire_contracts_changed": false,
         "wave": "2",
         "seq": "2"
-      }
+      },
+      "execution_lease": {
+        "holder": "pm-v1.132-btwoods-MBP",
+        "claimed_at": "2026-07-22T14:38:25Z",
+        "worktree_path": "/Users/bibi/workspace/organizations/42ch/nexus/.worktrees/v1.132-p2-vi-aesthetic-retune",
+        "working_branch": "plan/v1.132-p2-vi-aesthetic-retune",
+        "session_label": "v1.132-phase2-wave2"
+      },
+      "task_commits": [
+        {
+          "task": 1,
+          "base": "c273f1b2ee85d50886a44c937c8a2d8aad095e71",
+          "head": "524c5eed0423cf380823dc05bb811e9d92619549",
+          "status": "complete"
+        },
+        {
+          "task": 2,
+          "base": "603f662551af5d8bfa28b42608da96dd5a9aee68",
+          "head": "8bd81ca33ad2075361b8c5e1a98d65e64c79ea30",
+          "status": "complete"
+        },
+        {
+          "task": 3,
+          "base": "f034058f553f3bfdcf9c700dcadaae84e362cbc9",
+          "head": "4e1feb3a30e308b41d8bcabe09f7afe67fa06b54",
+          "status": "complete"
+        },
+        {
+          "task": 4,
+          "base": "96bf7db8008a090085211c161a26a087791292f1",
+          "head": "df8ae1831bf212fe483607156e05fec88f6cc9c8",
+          "status": "complete"
+        },
+        {
+          "task": 5,
+          "base": "df8ae1831bf212fe483607156e05fec88f6cc9c8",
+          "head": "d33a64ce873e099911a13d3a969f1ed39aa39c7d",
+          "status": "complete"
+        }
+      ]
     },
     {
       "id": "2026-07-22-v1.132-p3-creator-orch-gongnengqu-ia",
@@ -730,7 +769,7 @@
         "owner": "@ops-engineer / @qa-engineer",
         "target": "manual",
         "lifecycle": "open",
-        "note": "Criteria in apps/desktop/src-tauri/icons/README.md. Compose+README done (hashes source-1024.png c3be7c369ddb51ccb9cdcd436e22bf09996342074be48907bfc5238c23a7e724 / app-icon-preview-256.png da273c62a7927505d4f27d3fea6aeae0fd923f784b26c2c4f1900be3d516be8d). QA 2026-07-22 attempt: refreshed Nexus.app Resources/Nexus.icns to match generated icon.icns (SHA-256 85272d78b62e5e4597c7d3426ea5cd166e8cc692361876e23006f7916d494c8b), killall Dock, open release .app succeeded (nexus-desktop pid observed). Dock tile visual FAIL-to-verify: screencapture TCC blocked ('could not create image from display'). Owner: @ops-engineer / @qa-engineer / human. Trigger: human Dock tile confirm Chronos primary plate mark after quit/rebuild-or-reinstall/killall Dock/relaunch (+ stale-bundle removal if needed)."
+        "note": "Criteria in apps/desktop/src-tauri/icons/README.md. V1.132 P2 T4 inset compose landed (~12% transparent margins). Current hashes: source-1024.png dca7d5787ff3eb305a64a255c105bef4c18f84629f3c44d70a1411ac008a7982 / app-icon-preview-256.png 6223d10ca458182ef425a5f6d287090d7c820e426aaa15454811c1db66751661. Prior QA 2026-07-22 Dock tile visual FAIL-to-verify (screencapture TCC). Owner: @ops-engineer / @qa-engineer / human. Trigger: human Dock tile confirm Chronos primary plate mark after quit/rebuild-or-reinstall/killall Dock/relaunch (+ stale-bundle removal if needed)."
       },
       {
         "id": "R-VI-004",
@@ -758,6 +797,30 @@
         "lifecycle": "open",
         "note": "V1.132 P1 re-target (2026-07-22): durable protocol → .mstar/iterations/v1.132/guides/titlebar-window-drag-overlay-smoke.md. Human Overlay matrix H2–H6 + D1–D3 required before archive (agent TCC cannot grant Screen Recording/Accessibility). Product chrome+Studio+unit tests may ship with residual open (Profile B).",
         "tracking_link": ".mstar/iterations/v1.132/guides/titlebar-window-drag-overlay-smoke.md"
+      }
+    ],
+    "2026-07-22-v1.132-p0-orch-load-404": [
+      {
+        "id": "R-V1132P0-QC2-S-001",
+        "title": "Remaining daemon brace-param routes outside P0 surfaces",
+        "severity": "low",
+        "lifecycle": "open",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "post-V1.132",
+        "note": "QC2 F-001: schedules/kb/works/worlds etc. still use {param}; P0 fixed presets/sessions/modules/strategy. Follow-up brace sweep.",
+        "tracking_link": ".mstar/plans/2026-07-22-v1.132-p0-orch-load-404.md#Review-Gate-Summary"
+      },
+      {
+        "id": "R-V1132P0-QA-S-001",
+        "title": "Browser Network evidence deferred for orch-load-404 dogfood",
+        "severity": "nit",
+        "lifecycle": "open",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "post-V1.132",
+        "note": "T5/QA: curl+TestServer complete; Vite Network not captured. Optional human Network attach.",
+        "tracking_link": ".mstar/iterations/v1.132/guides/p0-orch-load-404-dogfood.md"
       }
     ]
   }
