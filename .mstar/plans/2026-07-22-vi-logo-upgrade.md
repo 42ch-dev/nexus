@@ -148,7 +148,7 @@ Public `logoVariants` keys stay `primary | color | white | mono`; add `text` for
 
 ### Task 1: Canonical SVGs + DESIGN logo section
 
-- [ ] **T1 · Must**
+- [x] **T1 · Must**
   **Files:** `packages/nexus-ui/assets/logos/{logo-primary,logo-color,logo-white,logo-mono,logo-text}.svg`; `packages/nexus-ui/package.json` exports; `DESIGN.md` / `DESIGN.dark.md` Logo Usage; remove obsolete `logo_*` PNGs from tree if still present.
   **Interfaces:** transparent wide-viewBox SVGs; public asset paths unchanged for existing keys + new `logo-text.svg`.
   **DoD:** SVGs match new geometry; no old N-network paths remain in logo SVG files; DESIGN documents Light/Dark placement + wordmark rules; package exports `logo-text.svg`.
@@ -222,7 +222,7 @@ Public `logoVariants` keys stay `primary | color | white | mono`; add `text` for
 | T7 | frontend-dev | Must | T3, T5, T6 |
 | T8 | frontend-dev | Should | T1 |
 
-**Route:** Medium visual feature · `frontend-dev` (SDD sticky, **model: Grok 4.5 / `cursor-grok-4.5-high`**) → QC tri → `qa-engineer` (mandatory, UI)
+**Route:** Medium visual feature · `frontend-dev` (SDD sticky, **implementer: Grok 4.5 / `cursor-grok-4.5-high`**; **reviewers: composer-2.5**) → QC tri (composer-2.5) → `qa-engineer` (mandatory, UI)
 
 **Branch policy:**
 
