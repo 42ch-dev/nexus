@@ -822,20 +822,6 @@
         "note": "T5/QA: curl+TestServer complete; Vite Network not captured. Optional human Network attach.",
         "tracking_link": ".mstar/iterations/v1.132/guides/p0-orch-load-404-dogfood.md"
       }
-    ],
-    "2026-07-22-v1.132-p2-vi-aesthetic-retune": [
-      {
-        "id": "R-V1132P2-QC2-C-001",
-        "title": "Light primary Button hover/active use cyan blue-900 (VI-002 incomplete)",
-        "severity": "critical",
-        "source": "QC qc2.md F-001",
-        "scope": "packages/nexus-ui Button + design-tokens brand-deep-blue-800/900",
-        "decision": "fix-now",
-        "owner": "@frontend-dev",
-        "target": "this-plan",
-        "lifecycle": "open",
-        "note": "Light hover:bg-blue-900 is cyan #1896A2; active:bg-blue-950 invalid. Wire brand-deep-blue-800/900 (#0A2333/#071A28) and map Button; update tests; amend VI-002 evidence. See qc-consolidated.md."
-      }
     ]
   }
 }
