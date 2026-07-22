@@ -174,6 +174,8 @@ pub const SCHEMA_VERSIONS: &[(&str, u32)] = &[
     ("SetActiveWorkspaceRequest", 1),
     ("SetActiveWorkspaceResponse", 1),
     ("WorkspaceSummary", 1),
+    ("CreateWorldRequest", 1),
+    ("CreateWorldResponse", 1),
     ("Creator", 1),
     ("ForkBranch", 1),
     ("KeyBlock", 1),

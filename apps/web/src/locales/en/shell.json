@@ -55,6 +55,7 @@
     "restartConfirm": "Restarting the daemon will interrupt any running orchestration. Continue?",
     "restartFailed": "Daemon restart failed",
     "restartFailedFallback": "Daemon restart failed.",
+    "restartPortConflict": "Another process is using the daemon port. Quit the other Nexus instance or change the port.",
     "starting": "Daemon starting…",
     "reconnecting": "Daemon reconnecting",
     "stopped": "Daemon stopped",
@@ -69,7 +70,7 @@
     "didNotStartDescription": "Nexus could not start its background service. Check the logs or try restarting."
   },
   "profile": {
-    "sectionLabel": "Profiles",
+    "sectionLabel": "Workspace",
     "addButtonLabel": "Add creator",
     "addDialogTitle": "Add Creator",
     "addDialogDescription": "Create a new local creator profile.",
@@ -122,6 +123,9 @@
       "offline": "Daemon offline — go to connection settings"
     }
   },
+  "settings": {
+    "title": "Settings"
+  },
   "scaffoldPreset": {
     "title": "Scaffold Preset",
     "description": "Create a new user preset from a name.",
@@ -155,6 +159,15 @@
     "creating": "Creating Work…",
     "create": "Create",
     "toastCreated": "Work created"
+  },
+  "worldCreate": {
+    "title": "Create World",
+    "description": "Start a new World in the local runtime.",
+    "titleLabel": "Title",
+    "titlePlaceholder": "The World's name",
+    "validationError": "Title is required.",
+    "creating": "Creating World…",
+    "create": "Create"
   },
   "workShell": {
     "railTitle": "Works",

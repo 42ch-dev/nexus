@@ -148,3 +148,4 @@ Implementation-detail SSOT that is not iteration-scoped stays in [`.mstar/knowle
 | V1.127 | [v1.127/](v1.127/) | completed | Dogfood-readiness sweep — Control Room author-loop fixes + native agent provider registration |
 | V1.128 | [v1.128/](v1.128/) | completed | Design Studio + UI dogfood feedback (4 plans, 4 specs)
 | V1.129 | [v1.129/](v1.129/) | completed | Usability bug-sweep — Profile create reliability + transport-error UX + visible nit closeout (3 plans, 3 specs)
+| V1.130 | [v1.130/](v1.130/) | locked | Control Room shell rewrite + Restart + VI Chronos (6 plans, 6 specs)

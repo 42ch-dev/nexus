@@ -19,6 +19,7 @@ use crate::workspace::WorkspaceState;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::Json;
+use nexus_contracts::daemon_api::{CreateWorldRequest, CreateWorldResponse};
 use nexus_narrative::{NarrativeGateway, WorldState};
 use serde::Serialize;
 
@@ -106,6 +107,84 @@ pub async fn get_world(
 /// - `401 AuthRequired` if no active creator is configured.
 /// - `404 NotFound` if the world id is unknown or not owned by the caller.
 /// - `500 Internal` on database error.
+///
+/// `POST /v1/daemon/worlds` - create a new World (V1.130 P2).
+///
+/// The daemon resolves the active creator from `nexus_home/config.toml`;
+/// clients never send ownership. The title is validated (1-200 chars after
+/// trim), an ASCII kebab slug is derived, and the world is persisted via
+/// `nexus_local_db::narrative_write::create_world`.
+///
+/// # Errors
+///
+/// - `400 BadRequest` if title is empty or exceeds 200 chars after trim.
+/// - `401 AuthRequired` if no active creator is configured.
+/// - `500 Internal` on database error.
+pub async fn create_world(
+    State(state): State<WorkspaceState>,
+    Json(req): Json<CreateWorldRequest>,
+) -> Result<(StatusCode, Json<CreateWorldResponse>), NexusApiError> {
+    let pool = state.pool_or_uninit()?;
+    let creator_id =
+        read_active_creator_id(state.nexus_home()).ok_or(NexusApiError::AuthRequired)?;
+
+    // Validate title: 1-200 chars after trim.
+    let title = req.title.trim();
+    if title.is_empty() || title.chars().count() > 200 {
+        return Err(NexusApiError::BadRequest {
+            code: "invalid_title".to_string(),
+            message: "title must be 1-200 characters after trimming whitespace".to_string(),
+        });
+    }
+
+    // Derive ASCII kebab slug from title; fall back to "world" when
+    // normalization yields empty (e.g. CJK-only titles).
+    let slug = derive_world_slug(title);
+
+    let result = nexus_local_db::narrative_write::create_world(
+        pool,
+        &creator_id,
+        title,
+        &slug,
+        "private",
+        "manual",
+    )
+    .await
+    .map_err(|e| NexusApiError::Internal {
+        code: "DATABASE_ERROR".to_string(),
+        message: e.to_string(),
+    })?;
+
+    tracing::info!(
+        target: "worlds.create",
+        world_id = %result.world_id,
+        creator_id = %creator_id,
+        "World created"
+    );
+
+    Ok((
+        StatusCode::CREATED,
+        Json(CreateWorldResponse {
+            world_id: result.world_id,
+            status: "active".into(),
+        }),
+    ))
+}
+
+/// Derive an ASCII kebab-case slug from a title.
+///
+/// Reuses `nexus_local_db::inspiration_items::title_to_slug` which handles
+/// lowercasing, hyphen collapsing, truncation, and CJK fallback. When the
+/// result is empty, returns `"world"` as the default slug.
+fn derive_world_slug(title: &str) -> String {
+    let slug = nexus_local_db::inspiration_items::title_to_slug(title);
+    if slug.is_empty() {
+        "world".to_string()
+    } else {
+        slug
+    }
+}
+
 pub async fn delete_world(
     State(state): State<WorkspaceState>,
     Path(world_id): Path<String>,

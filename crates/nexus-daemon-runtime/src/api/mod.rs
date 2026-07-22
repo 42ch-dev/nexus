@@ -355,6 +355,7 @@ fn canvas_outline_routes() -> Router<WorkspaceState> {
 /// route (R-V1126P0-T2-001) — it shares the `{world_id}` path prefix.
 fn world_kb_routes() -> Router<WorkspaceState> {
     Router::new()
+        .route("/v1/daemon/worlds", post(handlers::narrative::create_world))
         .route(
             "/v1/daemon/worlds/{world_id}",
             delete(handlers::narrative::delete_world),

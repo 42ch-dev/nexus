@@ -57,11 +57,12 @@ describe('CreatorHubPage + selection context (V1.128 P2 T2)', () => {
 
     expect(await screen.findByTestId('creator-hub-create')).toBeInTheDocument();
     expect(screen.getByTestId('creator-create-work')).toBeInTheDocument();
-    expect(screen.getByTestId('creator-create-world')).toBeDisabled();
+    // BrowserClient exposes createWorld (V1.130 wire) — Create World is enabled.
+    expect(screen.getByTestId('creator-create-world')).toBeEnabled();
   });
 
-  it('keeps Create World disabled even when client exposes createWorld (no typed contract yet)', async () => {
-    const createWorld = vi.fn().mockResolvedValue({ world_id: 'w-new' });
+  it('enables Create World when the client exposes createWorld', async () => {
+    const createWorld = vi.fn().mockResolvedValue({ world_id: 'w-new', status: 'active' });
     const clientWithCreateWorld = Object.assign(new BrowserClient(), { createWorld });
 
     useHandlers(
@@ -87,8 +88,7 @@ describe('CreatorHubPage + selection context (V1.128 P2 T2)', () => {
     );
 
     const card = await screen.findByTestId('creator-create-world');
-    expect(card).toBeDisabled();
-    expect(createWorld).not.toHaveBeenCalled();
+    expect(card).toBeEnabled();
   });
 
   it('selecting a Work row shows Controller stub; Back returns to Create page', async () => {

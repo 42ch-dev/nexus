@@ -37,6 +37,7 @@ function makeDesktop(overrides: Partial<DesktopCapabilities> = {}): DesktopCapab
       already_bootstrapped: true,
     }),
     switchActiveCreator: vi.fn().mockResolvedValue('/cached/root'),
+    restartDaemon: vi.fn().mockResolvedValue(undefined),
     ...overrides,
   };
 }

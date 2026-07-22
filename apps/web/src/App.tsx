@@ -1,7 +1,10 @@
 import { lazy, Suspense } from 'react';
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
 
-import { ActiveCreatorProvider } from '@/lib/active-creator-context';
+import {
+  ActiveCreatorProvider,
+  DefaultProfileCoordinator,
+} from '@/lib/active-creator-context';
 import { SetupCompletedProvider } from '@/lib/setup-completed-context';
 import { RootLayout } from '@/components/layout/root-layout';
 import { DaemonLaunchGate } from '@/components/setup/daemon-launch-gate';
@@ -193,6 +196,9 @@ function AppRoutes() {
 export function App() {
   return (
     <ActiveCreatorProvider>
+      {/* V1.130: auto-select Default profile once creators are loaded. Requires
+          ActiveCreatorProvider + QueryClientProvider (outer AppProviders). */}
+      <DefaultProfileCoordinator />
       <SetupCompletedProvider>
         <DaemonLaunchGate>
           <AppRoutes />

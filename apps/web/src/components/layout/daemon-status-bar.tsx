@@ -6,6 +6,9 @@
  * or placeholder, navigates to `/settings/agent`) + Restart control. Pre-ready
  * blocking is owned by {@link DaemonLaunchGate}; mid-session restart lives here.
  *
+ * V1.130 P0: remains mounted while state is `starting` so Restart shows inline
+ * pending copy; degraded/stopped/error stay on {@link MainBanner}.
+ *
  * Browser build: returns `null`.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -125,8 +128,15 @@ export function DaemonStatusBar() {
 
   if (!desktop) return null;
 
-  const state = status?.state ?? 'starting';
-  if (state !== 'running') return null;
+  // Wait for the first status sample so a null → default-'starting' does not
+  // flash the footer before we know the daemon is mid-session.
+  if (!status) return null;
+
+  const state = status.state;
+  // Keep the footer mounted during mid-session restart (`starting`) so the
+  // Restart control can show inline pending state (V1.130 P0). Other
+  // non-running states stay on {@link MainBanner}.
+  if (state !== 'running' && state !== 'starting') return null;
 
   const handleRestart = async () => {
     if (!desktop) return;
@@ -134,12 +144,14 @@ export function DaemonStatusBar() {
     if (!confirmed) return;
     setIsLoading(true);
     try {
-      await desktop.stopDaemon();
-      await desktop.startDaemon();
+      await desktop.restartDaemon();
       await refresh();
     } catch (err) {
-      const message = errorMessage(err) || t('daemon.restartFailedFallback');
-      toast({ variant: 'error', title: t('daemon.restartFailed'), description: message });
+      const raw = errorMessage(err) || '';
+      const isPortConflict = raw.toLowerCase().includes('port') && raw.toLowerCase().includes('in use');
+      const title = isPortConflict ? t('daemon.restartPortConflict') : t('daemon.restartFailed');
+      const description = isPortConflict ? raw : (raw || t('daemon.restartFailedFallback'));
+      toast({ variant: 'error', title, description });
     } finally {
       setIsLoading(false);
     }
@@ -152,17 +164,26 @@ export function DaemonStatusBar() {
       : badge.displayName
     : t('daemon.agentBadge.empty');
 
+  const isRestarting = state === 'starting' || isLoading;
+
   return (
     <div
       className="flex items-center justify-between gap-3 border-t border-gray-alpha-400 bg-background-100 px-4 py-2 md:px-6"
       data-testid="daemon-status-bar"
     >
       <div className="flex min-w-0 items-center gap-2">
-        <span className="h-2 w-2 shrink-0 rounded-full bg-green-700" aria-hidden />
-        <span className="truncate text-label-14 text-gray-1000">{t('daemon.running')}</span>
-        <Badge variant="running" tone="soft">
-          {t('daemon.runningTag')}
-        </Badge>
+        <span
+          className={`h-2 w-2 shrink-0 rounded-full ${isRestarting ? 'bg-amber-700' : 'bg-green-700'}`}
+          aria-hidden
+        />
+        <span className="truncate text-label-14 text-gray-1000">
+          {isRestarting ? t('daemon.restarting') : t('daemon.running')}
+        </span>
+        {!isRestarting && (
+          <Badge variant="running" tone="soft">
+            {t('daemon.runningTag')}
+          </Badge>
+        )}
       </div>
       <div className="flex min-w-0 items-center gap-1">
         <button
@@ -179,11 +200,11 @@ export function DaemonStatusBar() {
           variant="tertiary"
           size="small"
           onClick={handleRestart}
-          disabled={isLoading}
+          disabled={isRestarting}
           aria-label={t('daemon.restart')}
           title={t('daemon.restart')}
         >
-          <RefreshCw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} aria-hidden />
+          <RefreshCw className={`h-4 w-4 ${isRestarting ? 'animate-spin' : ''}`} aria-hidden />
         </Button>
       </div>
     </div>

@@ -6,6 +6,7 @@ import { Globe, Plus, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { EmptyCreateCard } from '@/components/ui/empty-create-card';
+import { CreateWorldDialog } from '@/components/worlds/create-world-dialog';
 import { ErrorState, LoadingState } from '@/components/ui/states';
 import { useNarrativeWorlds, useTimelineOverview, flattenOverviewWorlds } from '@/api/queries';
 import { useNexusClient } from '@/lib/client-context';
@@ -19,6 +20,7 @@ export function WorldsPage() {
   const navigate = useNavigate();
   const client = useNexusClient();
   const canCreateWorld = useMemo(() => hasCreateWorldClient(client), [client]);
+  const [createWorldOpen, setCreateWorldOpen] = useState(false);
   const [createWorkOpen, setCreateWorkOpen] = useState(false);
   const worlds = useNarrativeWorlds();
   const overview = useTimelineOverview();
@@ -34,16 +36,7 @@ export function WorldsPage() {
   }, [overviewWorlds]);
 
   function handleCreateWorldClick() {
-    // Defensive: a future bridge may expose client.createWorld (V1.125 P2
-    // stub). Architect seat 2 (V1.127 P0) confirmed createWorld is absent on
-    // every current bridge, so this handler is unreachable today — when
-    // createWorld is absent the card below renders disabled-with-tooltip, so
-    // the false branch never fires either. Wiring (call createWorld, navigate
-    // to /worlds/<id>/timeline) is deferred to V1.128+ — adding create_world
-    // Tauri command + NexusClient.createWorld is a wire-contract change (NG-16).
-    if (hasCreateWorldClient(client)) {
-      return;
-    }
+    setCreateWorldOpen(true);
   }
 
   return (
@@ -219,6 +212,7 @@ export function WorldsPage() {
           navigate(`/works/${encodeURIComponent(workId)}/outline`);
         }}
       />
+    <CreateWorldDialog open={createWorldOpen} onOpenChange={setCreateWorldOpen} />
     </div>
   );
 }

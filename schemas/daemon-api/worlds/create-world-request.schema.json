@@ -1,0 +1,18 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/daemon-api/worlds/create-world-request.schema.json",
+  "schema_version": 1,
+  "title": "Nexus CreateWorldRequest",
+  "description": "Request body for POST /v1/daemon/worlds. The daemon resolves the active creator; clients never send ownership.",
+  "type": "object",
+  "required": ["title"],
+  "properties": {
+    "title": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200,
+      "description": "Human-readable World title. Trimmed and validated server-side (1-200 chars after trim)."
+    }
+  },
+  "additionalProperties": false
+}

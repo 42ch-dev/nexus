@@ -55,6 +55,7 @@
     "restartConfirm": "重启守护进程将中断任何正在运行的编排。是否继续？",
     "restartFailed": "守护进程重启失败",
     "restartFailedFallback": "守护进程重启失败。",
+    "restartPortConflict": "另一个进程占用了守护进程端口。请退出其他 Nexus 实例或更改端口。",
     "starting": "守护进程启动中…",
     "reconnecting": "守护进程重新连接中",
     "stopped": "守护进程已停止",
@@ -69,7 +70,7 @@
     "didNotStartDescription": "Nexus 无法启动其后台服务。请检查日志或尝试重启。"
   },
   "profile": {
-    "sectionLabel": "配置文件",
+    "sectionLabel": "工作区",
     "addButtonLabel": "添加创作者",
     "addDialogTitle": "添加创作者",
     "addDialogDescription": "创建一个新的本地创作者配置文件。",
@@ -122,6 +123,9 @@
       "offline": "守护进程离线 — 前往连接设置"
     }
   },
+  "settings": {
+    "title": "设置"
+  },
   "scaffoldPreset": {
     "title": "生成预设模板",
     "description": "从名称创建一个新的用户预设。",
@@ -155,6 +159,15 @@
     "creating": "正在创建作品…",
     "create": "创建",
     "toastCreated": "作品已创建"
+  },
+  "worldCreate": {
+    "title": "创建世界",
+    "description": "在本地运行时中启动一个新世界。",
+    "titleLabel": "标题",
+    "titlePlaceholder": "世界名称",
+    "validationError": "标题为必填项。",
+    "creating": "正在创建世界…",
+    "create": "创建"
   },
   "workShell": {
     "railTitle": "作品",

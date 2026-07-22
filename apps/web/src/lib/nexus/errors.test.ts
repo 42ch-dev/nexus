@@ -107,4 +107,14 @@ describe('isOrchestrationEngineUnavailable', () => {
     expect(isOrchestrationEngineUnavailable(new Error('nope'))).toBe(false);
     expect(isOrchestrationEngineUnavailable(null)).toBe(false);
   });
+
+  it('returns false for 401 unauthorized', () => {
+    const error = new NexusClientError(401, 'unauthorized', 'Not authenticated');
+    expect(isOrchestrationEngineUnavailable(error)).toBe(false);
+  });
+
+  it('returns false for network error (status 0)', () => {
+    const error = new NexusClientError(0, 'network', 'Failed to fetch');
+    expect(isOrchestrationEngineUnavailable(error)).toBe(false);
+  });
 });

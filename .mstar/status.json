@@ -1,83 +1,166 @@
 {
   "version": 1,
-  "updated_at": "2026-07-21",
+  "updated_at": "2026-07-22",
   "plans": [
     {
-      "plan_id": "2026-07-21-v1.129-p0-profile-create-reliability",
+      "plan_id": "2026-07-22-v1.130-p0-daemon-restart",
       "status": "Done",
       "type": "feature",
       "metadata": {
-        "primary_spec": ".mstar/iterations/v1.129/specs/profile-create-reliability.md",
+        "primary_spec": ".mstar/iterations/v1.130/specs/daemon-restart-reliability.md",
         "spec_refs": [
-          ".mstar/iterations/v1.129/specs/profile-create-reliability.md"
+          ".mstar/iterations/v1.130/specs/daemon-restart-reliability.md"
         ],
         "iteration_refs": [
-          ".mstar/iterations/v1.129/delivery-compass.md"
+          ".mstar/iterations/v1.130/delivery-compass.md"
         ],
-        "iteration_compass": "v1.129/delivery-compass.md",
-        "spec_integration_branch": "iteration/v1.129",
-        "working_branch": "plan/v1.129-p0-profile-create-reliability",
-        "merge_target": "iteration/v1.129",
-        "wire_contracts_changed": true,
-        "iteration_id": "V1.129",
-        "head_sha": "f5a82ba2",
-        "qa_gate": "mandatory",
-        "qa_verdict": "Pass with residuals"
-      }
-    },
-    {
-      "plan_id": "2026-07-21-v1.129-p1-transport-error-ux",
-      "status": "Done",
-      "type": "feature",
-      "metadata": {
-        "primary_spec": ".mstar/iterations/v1.129/specs/transport-error-ux.md",
-        "spec_refs": [
-          ".mstar/iterations/v1.129/specs/transport-error-ux.md"
-        ],
-        "iteration_refs": [
-          ".mstar/iterations/v1.129/delivery-compass.md"
-        ],
-        "iteration_compass": "v1.129/delivery-compass.md",
-        "spec_integration_branch": "iteration/v1.129",
-        "working_branch": "plan/v1.129-p1-transport-error-ux",
-        "merge_target": "iteration/v1.129",
+        "iteration_compass": "v1.130/delivery-compass.md",
+        "spec_integration_branch": "iteration/v1.130",
+        "working_branch": "plan/v1.130-p0-daemon-restart",
+        "merge_target": "iteration/v1.130",
         "wire_contracts_changed": false,
-        "iteration_id": "V1.129",
-        "head_sha": "e95d8983",
-        "qa_gate": "mandatory",
-        "qa_verdict": "Pass with residuals"
+        "iteration_id": "V1.130",
+        "blocked_by": [],
+        "wave": "1",
+        "seq": "1",
+        "description": "Atomic daemon restart + attach matrix + mid-session UX"
       }
     },
     {
-      "plan_id": "2026-07-21-v1.129-p2-dogfood-nit-closeout",
+      "plan_id": "2026-07-22-v1.130-p4-vi-atmosphere",
       "status": "Done",
       "type": "feature",
       "metadata": {
-        "primary_spec": ".mstar/iterations/v1.129/specs/dogfood-nit-closeout.md",
+        "primary_spec": ".mstar/iterations/v1.130/specs/vi-atmosphere-chronos.md",
         "spec_refs": [
-          ".mstar/iterations/v1.129/specs/dogfood-nit-closeout.md"
+          ".mstar/iterations/v1.130/specs/vi-atmosphere-chronos.md"
         ],
         "iteration_refs": [
-          ".mstar/iterations/v1.129/delivery-compass.md"
+          ".mstar/iterations/v1.130/delivery-compass.md"
         ],
-        "iteration_compass": "v1.129/delivery-compass.md",
-        "spec_integration_branch": "iteration/v1.129",
-        "working_branch": "plan/v1.129-p2-dogfood-nit-closeout",
-        "merge_target": "iteration/v1.129",
-        "wire_contracts_changed": true,
-        "iteration_id": "V1.129",
-        "head_sha": "80034bb1",
-        "qa_gate": "mandatory",
-        "qa_verdict": "Pass"
+        "iteration_compass": "v1.130/delivery-compass.md",
+        "spec_integration_branch": "iteration/v1.130",
+        "working_branch": "plan/v1.130-p4-vi-atmosphere",
+        "merge_target": "iteration/v1.130",
+        "wire_contracts_changed": false,
+        "iteration_id": "V1.130",
+        "blocked_by": [],
+        "wave": "1",
+        "seq": "1∥",
+        "description": "VI Chronos lock — kill office navy, keep cyan"
       }
-    }
+    },
+    {
+      "plan_id": "2026-07-22-v1.130-p1-shell-frame",
+      "status": "Done",
+      "type": "feature",
+      "metadata": {
+        "primary_spec": ".mstar/iterations/v1.130/specs/shell-frame-dual-pane.md",
+        "spec_refs": [
+          ".mstar/iterations/v1.130/specs/shell-frame-dual-pane.md"
+        ],
+        "iteration_refs": [
+          ".mstar/iterations/v1.130/delivery-compass.md"
+        ],
+        "iteration_compass": "v1.130/delivery-compass.md",
+        "spec_integration_branch": "iteration/v1.130",
+        "working_branch": "plan/v1.130-p1-shell-frame",
+        "merge_target": "iteration/v1.130",
+        "wire_contracts_changed": false,
+        "iteration_id": "V1.130",
+        "blocked_by": [
+          "2026-07-22-v1.130-p4-vi-atmosphere"
+        ],
+        "wave": "2",
+        "seq": "2",
+        "description": "Dual-pane shell + titlebar + footer switch + settings modal chrome + default profile"
+      }
+    },
+    {
+      "plan_id": "2026-07-22-v1.130-p2-creator-dual-state",
+      "status": "Done",
+      "type": "feature",
+      "metadata": {
+        "primary_spec": ".mstar/iterations/v1.130/specs/creator-dual-state-entry.md",
+        "spec_refs": [
+          ".mstar/iterations/v1.130/specs/creator-dual-state-entry.md"
+        ],
+        "iteration_refs": [
+          ".mstar/iterations/v1.130/delivery-compass.md"
+        ],
+        "iteration_compass": "v1.130/delivery-compass.md",
+        "spec_integration_branch": "iteration/v1.130",
+        "working_branch": "plan/v1.130-p2-creator-dual-state",
+        "merge_target": "iteration/v1.130",
+        "wire_contracts_changed": true,
+        "iteration_id": "V1.130",
+        "blocked_by": [
+          "2026-07-22-v1.130-p1-shell-frame"
+        ],
+        "wave": "3",
+        "seq": "3a",
+        "description": "Create World + continue World→Work; entity Chat slot + action buttons"
+      }
+    },
+    {
+      "plan_id": "2026-07-22-v1.130-p3-orch-load-repair",
+      "status": "Done",
+      "type": "feature",
+      "metadata": {
+        "primary_spec": ".mstar/iterations/v1.130/specs/orch-load-repair.md",
+        "spec_refs": [
+          ".mstar/iterations/v1.130/specs/orch-load-repair.md"
+        ],
+        "iteration_refs": [
+          ".mstar/iterations/v1.130/delivery-compass.md"
+        ],
+        "iteration_compass": "v1.130/delivery-compass.md",
+        "spec_integration_branch": "iteration/v1.130",
+        "working_branch": "plan/v1.130-p3-orch-load-repair",
+        "merge_target": "iteration/v1.130",
+        "wire_contracts_changed": false,
+        "iteration_id": "V1.130",
+        "blocked_by": [
+          "2026-07-22-v1.130-p1-shell-frame"
+        ],
+        "wave": "3",
+        "seq": "3b",
+        "description": "Fix Strategy/Sessions/Modules detail load failures"
+      }
+    },
+    {
+      "plan_id": "2026-07-22-v1.130-p3-orch-settings-rehome",
+      "status": "Done",
+      "type": "feature",
+      "metadata": {
+        "primary_spec": ".mstar/iterations/v1.130/specs/orch-settings-rehome.md",
+        "spec_refs": [
+          ".mstar/iterations/v1.130/specs/orch-settings-rehome.md"
+        ],
+        "iteration_refs": [
+          ".mstar/iterations/v1.130/delivery-compass.md"
+        ],
+        "iteration_compass": "v1.130/delivery-compass.md",
+        "spec_integration_branch": "iteration/v1.130",
+        "working_branch": "plan/v1.130-p3-orch-settings-rehome",
+        "merge_target": "iteration/v1.130",
+        "wire_contracts_changed": false,
+        "iteration_id": "V1.130",
+        "blocked_by": [
+          "2026-07-22-v1.130-p1-shell-frame",
+          "2026-07-22-v1.130-p3-orch-load-repair"
+        ],
+        "wave": "4",
+        "seq": "4",
+        "description": "Compute→Settings modal; Profiles→工作区 under 编排"
+      }
     }
   ],
   "metadata": {
     "integration_branch_retired": false,
     "iteration_base_branch": "main",
-    "latest_active_compass": "v1.129/delivery-compass.md",
-    "latest_active_iteration": "V1.129 (completed)",
+    "latest_active_compass": "v1.130/delivery-compass.md",
+    "latest_active_iteration": "V1.130",
     "latest_ship": {
       "iteration": "V1.128",
       "compass": "v1.128/delivery-compass.md",
@@ -86,7 +169,7 @@
       "merge_commit": "d59311de"
     },
     "platform_integration": "paused — local-only until further notice",
-    "spec_integration_branch": "iteration/v1.129",
+    "spec_integration_branch": "iteration/v1.130",
     "spec_refs_index": ".mstar/specs/README.md",
     "target_branch": "main",
     "tech_debt_summary": {
@@ -131,6 +214,132 @@
         "lifecycle": "open",
         "tracking_link": "https://github.com/42ch-dev/nexus/pull/120#pullrequestreview-4632744387",
         "note": "Desktop Tauri cert pinning — defer to V1.96."
+      }
+    ],
+    "2026-07-22-v1.130-p0-daemon-restart": [
+      {
+        "id": "R-V1130P0-QC1-W-001",
+        "severity": "nit",
+        "title": "Single-flight test does not exercise the guard (asserts field, not behavior)",
+        "lifecycle": "open",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "post-V1.130",
+        "note": "T4 test checks restart_in_progress field is true, not that concurrent calls join. Add behavioral test when test infrastructure allows."
+      },
+      {
+        "id": "R-V1130P0-QC1-W-002",
+        "severity": "low",
+        "title": "Foreign-port kill gap remains in stop_listening_daemon (quit path) — pre-existing",
+        "lifecycle": "open",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "post-V1.130",
+        "note": "stop_listening_daemon still kills any lsof PID on app quit. P0 fixed restart_daemon only. Separate fix for quit path."
+      },
+      {
+        "id": "R-V1130P0-QC1-W-003",
+        "severity": "nit",
+        "title": "restart_in_progress not RAII-guarded against panic",
+        "lifecycle": "open",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "post-V1.130",
+        "note": "If restart_daemon panics between set and clear, flag stays true. Use Drop guard in future hardening."
+      },
+      {
+        "id": "R-V1130P0-QC1-W-004",
+        "severity": "nit",
+        "title": "TS port-conflict string-match duplicated in daemon-status-bar and main-banner",
+        "lifecycle": "open",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.130",
+        "note": "Extract isPortConflict helper to shared module in future polish."
+      },
+      {
+        "id": "R-V1130P0-QC1-W-005",
+        "severity": "nit",
+        "title": "Narrow race between handle_crash post-backoff and restart_daemon",
+        "lifecycle": "open",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "post-V1.130",
+        "note": "Currently masked by stop_requested re-check. Edge case in rapid restart+crash scenarios."
+      },
+      {
+        "id": "R-V1130P0-QC3-W-001",
+        "severity": "low",
+        "title": "No total timeout around start_with_budget in restart_daemon",
+        "lifecycle": "open",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "post-V1.130",
+        "note": "If health probe hangs, restart_in_progress stays true. Wrap with HEALTH_START_TIMEOUT + 1s deadline."
+      }
+    ],
+    "2026-07-22-v1.130-p4-vi-atmosphere": [
+      {
+        "id": "R-V1130P4-QC1-S-001",
+        "severity": "nit",
+        "title": "WCAG contrast table ratios not recomputed for new Chronos hex values",
+        "lifecycle": "open",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.130",
+        "note": "Contrast table in DESIGN.md still shows old ratios. New #0D2B3E is darker → ratios are equal or better. Recompute in polish pass."
+      },
+      {
+        "id": "R-V1130P4-QC1-S-002",
+        "severity": "nit",
+        "title": "Studio T1-T3 comparison fixture not created",
+        "lifecycle": "open",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.130",
+        "note": "Chronos is compile-time default; T2/T3 swatches deferred. Studio fixture can be added in polish."
+      },
+      {
+        "id": "R-V1130P4-QC2-S-001",
+        "severity": "nit",
+        "title": "Dark theme brand-deep-blue-alpha uses cyan RGB (intentional pre-existing design)",
+        "lifecycle": "open",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.130",
+        "note": "Dark theme intentionally uses cyan-derived alphas for warmth on dark surfaces. Pre-existing design decision, not introduced by P4."
+      }
+    ],
+    "2026-07-22-v1.130-p1-shell-frame": [
+      {
+        "id": "R-V1130P1-QC1-C-002",
+        "severity": "low",
+        "title": "Default-profile auto-select simplified (no pagination, no desktop switchActiveCreator IPC)",
+        "lifecycle": "open",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "post-V1.130",
+        "note": "Current implementation reads first page only. Full spec compliance needs pagination loop + desktop active-creator switch IPC."
+      },
+      {
+        "id": "R-V1130P1-QC1-W-003",
+        "severity": "low",
+        "title": "SettingsModalHost created but not wired into header/titlebar",
+        "lifecycle": "open",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.130",
+        "note": "Component exists at settings-modal-host.tsx but header gear still links to /settings. Wire in polish pass."
+      },
+      {
+        "id": "R-V1130P1-QC1-S-001",
+        "severity": "nit",
+        "title": "Studio fixtures (T1) deferred",
+        "lifecycle": "open",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.130",
+        "note": "Studio dual-pane/titlebar/modal fixtures not created. Add in polish pass."
       }
     ],
     "2026-07-12-v1.112-i18n-ui-migration": [],

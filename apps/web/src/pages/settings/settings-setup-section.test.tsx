@@ -47,6 +47,7 @@ function makeDesktop(
         already_bootstrapped: true,
       }),
     switchActiveCreator: () => Promise.resolve('/tmp/nexus'),
+    restartDaemon: () => Promise.resolve(),
     ...overrides,
   };
 }

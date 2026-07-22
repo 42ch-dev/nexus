@@ -14,6 +14,7 @@ pub mod schedule;
 pub mod timeline;
 pub mod works;
 pub mod workspace;
+pub mod worlds;
 
 pub use agent_host::*;
 pub use canvas::*;
@@ -31,3 +32,4 @@ pub use schedule::*;
 pub use timeline::*;
 pub use works::*;
 pub use workspace::*;
+pub use worlds::*;

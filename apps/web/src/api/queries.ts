@@ -23,6 +23,7 @@ import type {
   ChapterSummary,
   CountPendingReviewsResponse,
   CreateWorkRequest,
+  CreateWorldRequest,
   FindingDetailResponse,
   ListCapabilitiesQuery,
   ListChaptersQuery,
@@ -292,6 +293,23 @@ export function useCreateWork() {
       void qc.invalidateQueries({ queryKey: queryKeys.works.lists() });
     },
     onError: (error) => errorToast(error, 'error.couldNotCreateWork'),
+  });
+}
+
+export function useCreateWorld() {
+  const client = useNexusClient();
+  const qc = useQueryClient();
+  const errorToast = useErrorToast();
+  return useMutation({
+    mutationFn: (request: CreateWorldRequest) => client.createWorld(request),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: queryKeys.memory.worlds() });
+      // Mirror useDeleteWorld: Timeline overview is World-centric (era/event
+      // counts per World). A newly created World must appear in overview
+      // caches, not only the narrative worlds list.
+      void qc.invalidateQueries({ queryKey: queryKeys.timeline.all });
+    },
+    onError: (error) => errorToast(error, 'error.couldNotCreateWorld'),
   });
 }
 

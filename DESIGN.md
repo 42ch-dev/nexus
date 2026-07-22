@@ -5,19 +5,19 @@ description: "Unified design contract for all Nexus product surfaces — light/d
 
 colors:
   # ── Brand core (VI palette — do not rename) ──
-  brand-deep-blue: "#1E3A5F"
+  brand-deep-blue: "#0D2B3E"
   brand-cyan: "#25D1E0"
   brand-white: "#FFFFFF"
 
   # ── Brand extended (hover/active/surface tints derived from VI) ──
-  brand-deep-blue-800: "#182F4D"
-  brand-deep-blue-900: "#12243B"
-  brand-deep-blue-1000: "#0C1A2B"
+  brand-deep-blue-800: "#0A2333"
+  brand-deep-blue-900: "#071A28"
+  brand-deep-blue-1000: "#04121C"
   brand-cyan-800: "#1FB8C6"
   brand-cyan-900: "#1896A2"
   brand-cyan-1000: "#117480"
-  brand-deep-blue-alpha-100: "rgba(30,58,95,0.08)"
-  brand-deep-blue-alpha-200: "rgba(30,58,95,0.14)"
+  brand-deep-blue-alpha-100: "rgba(13,43,62,0.08)"
+  brand-deep-blue-alpha-200: "rgba(13,43,62,0.14)"
   brand-cyan-alpha-100: "rgba(37,209,224,0.12)"
   brand-cyan-alpha-200: "rgba(37,209,224,0.20)"
 
@@ -51,10 +51,10 @@ colors:
 
   # ── Primary interactive scale (light; maps to brand-deep-blue steps) ──
   # blue-* keys preserved as web aliases for backward compatibility.
-  blue-700: "#1E3A5F"
-  blue-800: "#182F4D"
-  blue-900: "#12243B"
-  blue-1000: "#0C1A2B"
+  blue-700: "#0D2B3E"
+  blue-800: "#0A2333"
+  blue-900: "#071A28"
+  blue-1000: "#04121C"
 
   # ── Semantic accent scales (apps/web parity — four-step, shipped) ──
   red-700: "#e5484d"
@@ -870,7 +870,7 @@ VI palette (frozen names):
 
 | Token | Hex | Role |
 | --- | --- | --- |
-| `brand-deep-blue` | `#1E3A5F` | Primary brand, primary actions on light surfaces, links, focus rings |
+| `brand-deep-blue` | `#0D2B3E` | Primary brand, primary actions on light surfaces, links, focus rings |
 | `brand-cyan` | `#25D1E0` | Accent — icons, active indicators, dark-theme interactive emphasis |
 | `brand-white` | `#FFFFFF` | Text on deep blue fills, logo on dark hero surfaces |
 
@@ -954,7 +954,7 @@ Full WCAG 2.1 AA recomputation for the v0.4 ink (dark) and warm-paper (light) su
 | `gray-700` `#a3a3a3` | 7.4 **P** | 6.9 **P** | 6.2 **P** | 6.6 **P** | 5.7 **P** | 4.8 **P** | 6.7 **P** | 8.0 **P** |
 | `gray-500` `#737373` | 3.9 **G** | 3.7 **G** | 3.3 **G** | 3.5 **G** | 3.1 **G** | 2.6 **F** | 3.6 **G** | 4.2 **G** |
 | `brand-cyan` = `blue-700` `#25D1E0` | 10.0 **P** | 9.4 **P** | 8.4 **P** | 8.9 **P** | 7.8 **P** | 6.5 **P** | 9.1 **P** | 10.8 **P** |
-| `brand-deep-blue` `#1E3A5F` | 1.6 **F** | 1.5 **F** | 1.4 **F** | 1.4 **F** | 1.3 **F** | 1.1 **F** | 1.5 **F** | 1.8 **F** |
+| `brand-deep-blue` `#0D2B3E` | 1.6 **F** | 1.5 **F** | 1.4 **F** | 1.4 **F** | 1.3 **F** | 1.1 **F** | 1.5 **F** | 1.8 **F** |
 | `red-700` `#ff6b6b` | 6.7 **P** | 6.3 **P** | 5.6 **P** | 6.0 **P** | 5.2 **P** | 4.4 **G** | 6.1 **P** | 7.2 **P** |
 | `amber-700` `#ffc043` | 11.4 **P** | 10.7 **P** | 9.6 **P** | 10.2 **P** | 8.9 **P** | 7.4 **P** | 10.4 **P** | 12.3 **P** |
 | `green-700` `#54d58a` | 10.0 **P** | 9.4 **P** | 8.4 **P** | 8.9 **P** | 7.8 **P** | 6.5 **P** | 9.1 **P** | 10.8 **P** |
@@ -971,7 +971,7 @@ Full WCAG 2.1 AA recomputation for the v0.4 ink (dark) and warm-paper (light) su
 | `gray-900` `#333333` | 12.6 **P** | 11.9 **P** | 11.3 **P** | 11.6 **P** | 10.9 **P** | 9.6 **P** | 10.4 **P** | 4.4 **G** |
 | `gray-700` `#666666` | 5.7 **P** | 5.4 **P** | 5.1 **P** | 5.3 **P** | 5.0 **P** | 4.4 **G** | 4.7 **P** | 2.0 **F** |
 | `gray-500` `#a3a3a3` | 2.5 **F** | 2.4 **F** | 2.3 **F** | 2.3 **F** | 2.2 **F** | 1.9 **F** | 2.1 **F** | 1.1 **F** |
-| `blue-700` = `brand-deep-blue` `#1E3A5F` | 11.5 **P** | 10.8 **P** | 10.3 **P** | 10.6 **P** | 9.9 **P** | 8.7 **P** | 9.5 **P** | 4.0 **G** |
+| `blue-700` = `brand-deep-blue` `#0D2B3E` | 11.5 **P** | 10.8 **P** | 10.3 **P** | 10.6 **P** | 9.9 **P** | 8.7 **P** | 9.5 **P** | 4.0 **G** |
 | `brand-cyan` `#25D1E0` | 1.9 **F** | 1.8 **F** | 1.7 **F** | 1.7 **F** | 1.6 **F** | 1.4 **F** | 1.5 **F** | 1.5 **F** |
 | `red-700` `#e5484d` | 3.9 **G** | 3.7 **G** | 3.5 **G** | 3.6 **G** | 3.4 **G** | 3.0 **G** | 3.2 **G** | 1.4 **F** |
 | `amber-700` `#b76e00` | 4.0 **G** | 3.8 **G** | 3.6 **G** | 3.7 **G** | 3.5 **G** | 3.0 **G** | 3.3 **G** | 1.4 **F** |

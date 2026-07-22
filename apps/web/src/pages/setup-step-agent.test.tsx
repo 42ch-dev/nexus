@@ -65,6 +65,7 @@ function makeDesktop(
     ensureSetupBootstrap: () =>
       Promise.resolve({ creator_id: 'ctr_local', already_bootstrapped: true }),
     switchActiveCreator: () => Promise.resolve('/tmp/nexus'),
+    restartDaemon: () => Promise.resolve(),
     ...overrides,
   };
 }
