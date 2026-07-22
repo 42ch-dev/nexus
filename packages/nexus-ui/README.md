@@ -12,13 +12,14 @@ pnpm add @42ch/nexus-ui --workspace
 
 | Entry | Description |
 |-------|-------------|
-| `@42ch/nexus-ui` | Brand token constants (`brandColors`, `logoVariants`, sizing guidance) + React components (`<NexusLogo>`, `<NexusMark>`, promoted UI primitives, `cn`) |
+| `@42ch/nexus-ui` | Brand token constants (`brandColors`, `logoVariants`, sizing guidance) + React components (`<NexusLogo>`, `<NexusMark>`, `<NexusLogoVariant>`, promoted UI primitives, `cn`) |
 | `@42ch/nexus-ui/tokens` | Same token module (direct import) |
 | `@42ch/nexus-ui/theme.css` | Brand CSS custom properties (`--nexus-brand-*`) |
-| `@42ch/nexus-ui/assets/logos/logo-primary.svg` | Deep blue mark (`#1E3A5F`, flat primary) for light backgrounds |
-| `@42ch/nexus-ui/assets/logos/logo-color.svg` | Cyan mark (`#25D1E0`) — bright logo for dark backgrounds |
-| `@42ch/nexus-ui/assets/logos/logo-white.svg` | White mark (`#FFFFFF`) |
-| `@42ch/nexus-ui/assets/logos/logo-mono.svg` | Monotone mark (`currentColor`) |
+| `@42ch/nexus-ui/assets/logos/logo-primary.svg` | Timeline mark — deep→cyan gradient for light shells |
+| `@42ch/nexus-ui/assets/logos/logo-color.svg` | Timeline mark — bright gradient for dark shells |
+| `@42ch/nexus-ui/assets/logos/logo-white.svg` | Timeline mark — white monochrome for dark heroes |
+| `@42ch/nexus-ui/assets/logos/logo-mono.svg` | Timeline mark — `currentColor` monochrome |
+| `@42ch/nexus-ui/assets/logos/logo-text.svg` | Wordmark — lowercase `nexus` (`currentColor`) |
 
 ### Promoted primitives
 
@@ -38,24 +39,27 @@ All primitives are named root exports — no deep subpath imports. Variant helpe
 
 Components that have NOT been promoted to `@42ch/nexus-ui` remain in `apps/web/src/components/ui/` and can be imported through the project-local `@/components/ui` alias or the `@web-ui/*` barrel. Components classified `keep-web` (`Dialog`, `Tabs`, `Table`, `States`) stay app-owned until a future promotion plan locks their contract.
 
-PNG source references (`logo_dark.png`, `logo_light.png`, `logo_white.png`) live under `assets/logos/` for provenance and are tracked via Git LFS. **Consumers should use SVG variants**, not PNGs, in product UI.
+PNG provenance (`logo-primary.png`, `logo-white-bg.png`, `logo-mono.png`, `logo-text.png`, `logo-variants-*.png`) lives under `assets/logos/` (Git LFS). **Consumers should use SVG variants**, not PNGs, in product UI.
 
 ## Logo variant selection
 
+Timeline marks are **wide** (`viewBox` 284×28). Size by **height**; width is auto.
+
 | Surface | Variant | File | Notes |
 |---------|---------|------|-------|
-| Light nav / sidebar (light theme) | Deep blue | `logo-primary.svg` | Default shell mark on white/light gray backgrounds |
-| Dark nav / sidebar (dark theme) | Cyan | `logo-color.svg` | Bright mark on dark chrome |
+| Light nav / sidebar (light theme) | Primary | `logo-primary.svg` | Deep→cyan gradient on light shells |
+| Dark nav / sidebar (dark theme) | Color | `logo-color.svg` | Bright gradient on dark chrome |
 | Dark hero / photography / high-contrast panel | White | `logo-white.svg` | Maximum contrast on deep or busy backgrounds |
-| Inline UI (buttons, badges, list rows) | Monotone | `logo-mono.svg` | Set `color` on parent; inherits via `currentColor` |
-| Favicon / small chrome (optional) | Deep blue or mono | `logo-primary.svg` or `logo-mono.svg` | Prefer mono when tinting |
+| Inline UI (buttons, badges, list rows) | Monotone | `logo-mono.svg` / `<NexusMark>` | Set `color` on parent; inherits via `currentColor` |
+| Wordmark lockup | Text | `logo-text.svg` | Lowercase `nexus`; `currentColor` (white on dark heroes) |
+| Studio theme specimens only | — | `<NexusLogoVariant>` | Palette props; not a product theme switcher |
 
 ### Accessibility
 
-- **Alt text**: use `alt="Nexus"` on `<img>`; inline SVGs include `<title>` and `<desc>` for screen readers.
+- **Alt text**: use `alt="Nexus"` on `<img>`; inline SVGs include `<title>` for screen readers.
 - **Minimum size**: 24px height (`logoMinSizePx` in tokens). Below this, node detail may be lost.
 - **Clear space**: keep padding ≥ 25% of logo height on all sides.
-- **Contrast**: pick white or cyan on dark backgrounds; deep blue or white on light backgrounds. Do not place cyan on light gray without a contrast check.
+- **Contrast**: prefer `logo-primary` on light; `logo-color` or `logo-white` on dark. Do not place `logo-primary` on ink/dark chrome.
 
 ## Runtime dependencies
 
@@ -122,28 +126,44 @@ import { Button, Badge, Card, CardHeader, CardTitle, CardDescription, CardConten
 ### Brand components
 
 ```tsx
-import { NexusLogo, NexusMark } from '@42ch/nexus-ui';
+import { NexusLogo, NexusMark, NexusLogoVariant } from '@42ch/nexus-ui';
 
 // The consumer resolves the SVG URL through its own bundler.
 // In a Vite project, importing an SVG yields a URL string:
 import logoPrimary from '@42ch/nexus-ui/assets/logos/logo-primary.svg';
+import logoText from '@42ch/nexus-ui/assets/logos/logo-text.svg';
 
 function AppShell() {
   // Pass the resolved URL as `src`. `variant` documents which mark is being rendered.
-  return <NexusLogo variant="primary" src={logoPrimary} size={32} />;
+  // Marks are wide — size by height; width is auto.
+  return <NexusLogo variant="primary" src={logoPrimary} size={24} />;
 }
 
-// Inline mono mark — inherits color via `currentColor` (no SVG asset needed):
-function Badge() {
+// Wordmark (currentColor — set color on parent for light/dark):
+function Wordmark() {
   return (
-    <span style={{ color: '#1E3A5F' }}>
-      <NexusMark size={24} />
+    <span style={{ color: '#FFFFFF' }}>
+      <NexusLogo variant="text" src={logoText} size={28} />
     </span>
   );
 }
+
+// Inline mono timeline mark — inherits color via `currentColor` (no SVG asset needed):
+function Badge() {
+  return (
+    <span style={{ color: '#0D2B3E' }}>
+      <NexusMark size={24} className="w-auto" />
+    </span>
+  );
+}
+
+// Studio Brand specimens only (palette props; not a product theme switcher):
+function Specimen() {
+  return <NexusLogoVariant theme="elegant" size={32} />;
+}
 ```
 
-**Why `<NexusLogo>` takes a `src` prop.** The package itself cannot bundle SVG assets — its build tool (`tsup` / `esbuild`) does not resolve `.svg` imports. Making SVG resolution the *consumer's* responsibility keeps the package bundler-agnostic: any consumer (Vite, webpack, Rollup, etc.) imports the SVG file through its own loader and passes the resulting URL. `<NexusMark>` sidesteps this by inlining the mono mark's path data as hand-authored JSX, so it needs no asset resolution at all. See `AGENTS.md` § *Component export strategy*.
+**Why `<NexusLogo>` takes a `src` prop.** The package itself cannot bundle SVG assets — its build tool (`tsup` / `esbuild`) does not resolve `.svg` imports. Making SVG resolution the *consumer's* responsibility keeps the package bundler-agnostic: any consumer (Vite, webpack, Rollup, etc.) imports the SVG file through its own loader and passes the resulting URL. `<NexusMark>` / `<NexusLogoVariant>` sidestep this by inlining timeline geometry as hand-authored JSX. See `AGENTS.md` § *Component export strategy*.
 
 ### Raw SVG URL (without the React component)
 
@@ -152,7 +172,7 @@ If you want the logo asset without the component wrapper — for example, a plai
 ```ts
 import nexusLogo from '@42ch/nexus-ui/assets/logos/logo-primary.svg';
 
-// <img src={nexusLogo} alt="Nexus" width={32} height={32} />
+// <img src={nexusLogo} alt="Nexus" height={24} style={{ width: 'auto' }} />
 ```
 
 ## Cross-surface compatibility

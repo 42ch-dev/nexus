@@ -7,6 +7,8 @@
  * V1.101 P2 ships: `<Select>`.
  * V1.106 P0 ships: `<Toast>` (+ ToastProvider / Toaster / useToast).
  * V1.129 P1 ships: `<TransportErrorBlock>`.
+ * VI logo upgrade ships: timeline `<NexusMark>`, `logoVariants.text`,
+ * Studio-only `<NexusLogoVariant>` specimens.
  */
 
 // Class-merge utility — the V1.100 SSOT for cn / extendTailwindMerge.
@@ -17,14 +19,24 @@ export { cn } from './lib/cn';
 export {
   brandColors,
   logoClearSpaceRatio,
+  logoMarkAspectRatio,
+  logoMarkViewBoxHeight,
+  logoMarkViewBoxWidth,
   logoMinSizePx,
+  logoVariantPalettes,
   logoVariants,
   type BrandColorName,
   type LogoVariantName,
+  type LogoVariantPalette,
+  type LogoVariantTheme,
 } from './tokens';
 
 export { NexusLogo, VARIANT_FILENAMES, type Variant, type NexusLogoProps } from './components/nexus-logo';
 export { NexusMark, type NexusMarkProps } from './components/nexus-mark';
+export {
+  NexusLogoVariant,
+  type NexusLogoVariantProps,
+} from './components/nexus-logo-variant';
 
 // V1.99 P0 — promoted presentational primitives
 export { Button, type ButtonProps } from './components/button';

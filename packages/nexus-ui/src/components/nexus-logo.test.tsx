@@ -23,6 +23,7 @@ describe('NexusLogo', () => {
     expect(img).toHaveAttribute('src', '/mock/logo-primary.svg');
     expect(img).toHaveAttribute('height', '32');
     expect(img).toHaveAttribute('decoding', 'async');
+    expect(img).toHaveStyle({ width: 'auto', height: '32px' });
   });
 
   it('honors custom label, className, and size', () => {
@@ -42,12 +43,21 @@ describe('NexusLogo', () => {
     expect(img).toHaveAttribute('src', '/mock/logo-white.svg');
   });
 
+  it('supports the text wordmark variant', () => {
+    render(<NexusLogo variant="text" src="/mock/logo-text.svg" size={28} />);
+
+    const img = screen.getByRole('img', { name: 'Nexus' });
+    expect(img).toHaveAttribute('src', '/mock/logo-text.svg');
+    expect(img).toHaveAttribute('height', '28');
+  });
+
   it('maps every variant to its canonical filename', () => {
     expect(VARIANT_FILENAMES).toEqual({
       primary: 'logo-primary.svg',
       color: 'logo-color.svg',
       white: 'logo-white.svg',
       mono: 'logo-mono.svg',
+      text: 'logo-text.svg',
     });
   });
 });
