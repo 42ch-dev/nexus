@@ -77,7 +77,7 @@ export function SettingsModalHost() {
         <DialogContent
           title={t('title')}
           description={t('helper')}
-          className="!h-[min(80vh,900px)] !max-h-[80vh] !w-[min(80vw,1200px)] !max-w-[80vw]"
+          className="h-[80vh] min-h-[80vh] max-h-none w-[80vw] min-w-[80vw] max-w-none"
           bodyClassName="flex min-h-0 flex-1 flex-col overflow-hidden px-0 pb-0"
         >
           <div

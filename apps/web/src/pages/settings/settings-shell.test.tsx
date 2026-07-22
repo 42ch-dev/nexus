@@ -3,10 +3,10 @@
  */
 import { http, HttpResponse } from 'msw';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { screen, waitFor, within } from '@testing-library/react';
+import { screen, waitFor, within, act } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useEffect } from 'react';
-import { Route, Routes, useLocation } from 'react-router-dom';
+import { Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 
 import { RootLayout } from '@/components/layout/root-layout';
 import {
@@ -369,6 +369,80 @@ describe('Settings modal primary', () => {
       expect(screen.queryByTestId('settings-modal-body')).not.toBeInTheDocument(),
     );
     expect(screen.getByTestId('location-probe')).toHaveTextContent('/works');
+  });
+
+  it('blocks dirty route leave to a non-settings path until discard confirms', async () => {
+    const user = userEvent.setup();
+    useHandlers(scanHandler(), creatorsHandler(), healthHandler());
+
+    let navigateAway: (() => void) | undefined;
+
+    function DirtySourceHost() {
+      const { registerDirtySource, open } = useSettingsModal();
+      useEffect(() => {
+        registerDirtySource('test-dirty-route', open);
+        return () => registerDirtySource('test-dirty-route', false);
+      }, [open, registerDirtySource]);
+      return null;
+    }
+
+    function LeaveSettingsBridge() {
+      const navigate = useNavigate();
+      useEffect(() => {
+        navigateAway = () => {
+          navigate('/sessions');
+        };
+        return () => {
+          navigateAway = undefined;
+        };
+      }, [navigate]);
+      return null;
+    }
+
+    renderInApp(
+      <ThemeProvider>
+        <SettingsModalProvider>
+          <ModalAppRoutes />
+          <DirtySourceHost />
+          <LeaveSettingsBridge />
+          <SettingsModalHost />
+          <LocationProbe />
+        </SettingsModalProvider>
+      </ThemeProvider>,
+      {
+        client: makeClient(),
+        activeCreatorId: 'creator-a',
+        setupCompleted: true,
+        initialRouterEntries: ['/works'],
+      },
+    );
+
+    const gear = await screen.findByTestId('chronos-titlebar-settings-gear');
+    await user.click(gear);
+
+    await waitFor(() =>
+      expect(screen.getByTestId('settings-modal-body')).toBeInTheDocument(),
+    );
+    expect(screen.getByTestId('location-probe')).toHaveTextContent('/settings/agent');
+
+    expect(navigateAway).toBeTypeOf('function');
+    act(() => {
+      navigateAway!();
+    });
+
+    await waitFor(() =>
+      expect(screen.getByTestId('settings-discard-confirm')).toBeInTheDocument(),
+    );
+    expect(screen.getByTestId('settings-modal-body')).toBeInTheDocument();
+    expect(screen.getByTestId('location-probe')).toHaveTextContent('/settings/agent');
+
+    await user.click(screen.getByTestId('settings-discard-confirm-button'));
+
+    await waitFor(() =>
+      expect(screen.queryByTestId('settings-modal-body')).not.toBeInTheDocument(),
+    );
+    expect(screen.getByTestId('location-probe')).toHaveTextContent('/sessions');
+    expect(screen.getByTestId('sessions-stub')).toBeInTheDocument();
   });
 
   it('exposes Settings on the Chronos titlebar gear (V1.131 P0/P2)', async () => {

@@ -4,6 +4,11 @@
  * URL is the open-state SSOT for `/settings/*` and `/modules`. The provider
  * owns last-safe-background, section selection, dirty-source registry, and
  * every close vector via `requestClose`.
+ *
+ * Route leave while Settings is open is dirty-aware: leaving a settings-driven
+ * path with dirty sources opens the host discard confirm and restores the
+ * Settings URL until the user confirms (BrowserRouter-compatible equivalent of
+ * `useBlocker`; data-router migration is tracked separately).
  */
 
 import {
@@ -11,6 +16,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -78,6 +84,13 @@ function defaultBackgroundLocation(): Location {
   };
 }
 
+function isDirtyMap(map: Map<string, boolean>): boolean {
+  for (const dirty of map.values()) {
+    if (dirty) return true;
+  }
+  return false;
+}
+
 export function SettingsModalProvider({ children }: { children: ReactNode }) {
   const location = useLocation();
   const navigate = useNavigate();
@@ -90,6 +103,12 @@ export function SettingsModalProvider({ children }: { children: ReactNode }) {
   );
   // Seed background from the first non-settings location once per session.
   const backgroundSeededRef = useRef(false);
+  /** Canonical Settings URL while the modal was last open. */
+  const settingsPathWhileOpenRef = useRef<string | null>(null);
+  /** Destination blocked by dirty route-leave (NavLink / Back / navigate). */
+  const pendingLeaveRef = useRef<Location | null>(null);
+  /** Skip background updates while restoring a blocked leave. */
+  const suppressingBackgroundUpdateRef = useRef(false);
 
   const resolved = resolveSettingsLocation(location.pathname, location.hash);
   const open = resolved !== null;
@@ -114,6 +133,10 @@ export function SettingsModalProvider({ children }: { children: ReactNode }) {
       if (!backgroundSeededRef.current) {
         backgroundSeededRef.current = true;
       }
+      suppressingBackgroundUpdateRef.current = false;
+      return;
+    }
+    if (suppressingBackgroundUpdateRef.current) {
       return;
     }
     backgroundSeededRef.current = true;
@@ -121,10 +144,7 @@ export function SettingsModalProvider({ children }: { children: ReactNode }) {
   }, [location]);
 
   const isDirty = useCallback(() => {
-    for (const dirty of dirtyMapRef.current.values()) {
-      if (dirty) return true;
-    }
-    return false;
+    return isDirtyMap(dirtyMapRef.current);
   }, [dirtyEpoch]);
 
   const clearDirtySources = useCallback(() => {
@@ -132,9 +152,43 @@ export function SettingsModalProvider({ children }: { children: ReactNode }) {
     setDirtyEpoch((epoch) => epoch + 1);
   }, []);
 
+  // Remember the Settings URL while open so dirty leave can restore it.
+  useEffect(() => {
+    if (resolved) {
+      settingsPathWhileOpenRef.current = settingsLocationKey(resolved);
+    }
+  }, [resolved]);
+
+  // Dirty-aware route leave (BrowserRouter-compatible useBlocker equivalent).
+  useLayoutEffect(() => {
+    if (resolved) {
+      return;
+    }
+
+    const settingsPath = settingsPathWhileOpenRef.current;
+    if (!settingsPath) {
+      return;
+    }
+
+    if (isDirtyMap(dirtyMapRef.current)) {
+      pendingLeaveRef.current = location;
+      suppressingBackgroundUpdateRef.current = true;
+      setDiscardConfirmOpen(true);
+      navigate(settingsPath, { replace: true });
+      return;
+    }
+
+    // Clean leave — modal closes via open=false.
+    settingsPathWhileOpenRef.current = null;
+    pendingLeaveRef.current = null;
+  }, [location, navigate, resolved]);
+
   const performClose = useCallback(() => {
     setDiscardConfirmOpen(false);
     clearDirtySources();
+    pendingLeaveRef.current = null;
+    settingsPathWhileOpenRef.current = null;
+    suppressingBackgroundUpdateRef.current = false;
     const target = backgroundLocation;
     const invoker = invokerRef.current;
     invokerRef.current = null;
@@ -196,10 +250,34 @@ export function SettingsModalProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const confirmDiscard = useCallback(() => {
+    const pending = pendingLeaveRef.current;
+    pendingLeaveRef.current = null;
+    settingsPathWhileOpenRef.current = null;
+    suppressingBackgroundUpdateRef.current = false;
+
+    if (pending) {
+      setDiscardConfirmOpen(false);
+      clearDirtySources();
+      const invoker = invokerRef.current;
+      invokerRef.current = null;
+      navigate(
+        {
+          pathname: pending.pathname,
+          search: pending.search,
+          hash: pending.hash,
+        },
+        { replace: true, state: pending.state },
+      );
+      queueMicrotask(() => invoker?.focus());
+      return;
+    }
+
     performClose();
-  }, [performClose]);
+  }, [clearDirtySources, navigate, performClose]);
 
   const cancelDiscard = useCallback(() => {
+    pendingLeaveRef.current = null;
+    suppressingBackgroundUpdateRef.current = false;
     setDiscardConfirmOpen(false);
   }, []);
 

@@ -1071,7 +1071,7 @@ describe('Surfaces page — Settings shell chrome fixtures', () => {
     ).not.toBeInTheDocument();
   });
 
-  it('renders section nav with Agent, Workspace, Advanced', () => {
+  it('renders section nav with Agent, Workspace, Appearance, Modules, Advanced', () => {
     const hostRoot = screen.getByTestId('settings-host-fixtures');
     const sectionNav = within(hostRoot).getByTestId('settings-section-nav');
     expect(
@@ -1080,6 +1080,12 @@ describe('Surfaces page — Settings shell chrome fixtures', () => {
     expect(
       within(sectionNav).getByTestId('settings-section-nav-workspace'),
     ).toHaveTextContent('Workspace');
+    expect(
+      within(sectionNav).getByTestId('settings-section-nav-appearance'),
+    ).toHaveTextContent('Appearance');
+    expect(
+      within(sectionNav).getByTestId('settings-section-nav-modules'),
+    ).toHaveTextContent('Modules');
     expect(
       within(sectionNav).getByTestId('settings-section-nav-advanced'),
     ).toHaveTextContent('Advanced');
@@ -1146,7 +1152,7 @@ describe('Surfaces page — Settings shell chrome fixtures', () => {
     ).not.toBeInTheDocument();
   });
 
-  it('renders static empty frames for all four Must sections', () => {
+  it('renders static empty frames for registry section bodies', () => {
     const framesRoot = screen.getByTestId(
       'settings-host-fixture-section-frames',
     );
@@ -1161,6 +1167,12 @@ describe('Surfaces page — Settings shell chrome fixtures', () => {
     ).toBeInTheDocument();
     expect(
       within(framesRoot).getByTestId('settings-section-frame-workspace'),
+    ).toBeInTheDocument();
+    expect(
+      within(framesRoot).getByTestId('settings-section-frame-appearance'),
+    ).toBeInTheDocument();
+    expect(
+      within(framesRoot).getByTestId('settings-section-frame-modules'),
     ).toBeInTheDocument();
   });
 
