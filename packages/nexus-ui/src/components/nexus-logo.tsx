@@ -5,9 +5,10 @@
  * files in its source. Consumers resolve the asset through their own bundler
  * (e.g. Vite) and pass the resulting URL as `src`.
  *
- * Variants include timeline marks (`primary` | `whiteBg` | `white` | `mono`) and
- * the `text` wordmark. Wide-aspect marks size by height only; square plate
- * lockups (`primary`, `whiteBg`) use width-fill `<img>` in gallery fixtures.
+ * Variant groups:
+ * - Square plate lockups: `primary`, `whiteBg` (width-fill in gallery fixtures).
+ * - Timeline marks: `white`, `mono` (wide aspect — size by height only).
+ * - Wordmark: `text`.
  */
 
 import { logoVariants, type LogoVariantName } from '../tokens';

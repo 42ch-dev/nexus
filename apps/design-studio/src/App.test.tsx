@@ -224,6 +224,7 @@ describe('Brand logo gallery lockup', () => {
     const img = screen.getByTestId('logo-card-plate-img-primary');
     expect(img).toHaveClass('block', 'w-full', 'h-auto', 'object-contain');
     expect(img).toHaveAttribute('src');
+    expect(img).toHaveAccessibleName('Nexus');
   });
 
   it('whiteBg plate card uses white panel and width-fill img', () => {
@@ -233,6 +234,7 @@ describe('Brand logo gallery lockup', () => {
 
     const img = screen.getByTestId('logo-card-plate-img-whiteBg');
     expect(img).toHaveClass('block', 'w-full', 'h-auto', 'object-contain');
+    expect(img).toHaveAccessibleName('Nexus');
   });
 
   it('Chronos mini renders logo inside the deep titlebar row', () => {

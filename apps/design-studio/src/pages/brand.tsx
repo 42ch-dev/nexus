@@ -188,7 +188,7 @@ function LogoCard({ display }: { display: LogoDisplay }) {
         {display.plateFill ? (
           <img
             src={src}
-            alt={display.label}
+            alt="Nexus"
             decoding="async"
             data-testid={`logo-card-plate-img-${display.variant}`}
             className="block w-full h-auto object-contain"
