@@ -88,11 +88,11 @@ fn orchestration_routes() -> Router<WorkspaceState> {
                 .post(handlers::orchestration::sessions::create_session),
         )
         .route(
-            "/v1/daemon/orchestration/sessions/{session_id}",
+            "/v1/daemon/orchestration/sessions/:session_id",
             get(handlers::orchestration::sessions::get_session),
         )
         .route(
-            "/v1/daemon/orchestration/sessions/{session_id}/signal",
+            "/v1/daemon/orchestration/sessions/:session_id/signal",
             post(handlers::orchestration::sessions::signal_session),
         )
         .route(
@@ -104,7 +104,7 @@ fn orchestration_routes() -> Router<WorkspaceState> {
             get(handlers::orchestration::presets::list_presets),
         )
         .route(
-            "/v1/daemon/orchestration/presets/{id}:reload",
+            "/v1/daemon/orchestration/presets/:id",
             post(handlers::orchestration::presets::reload_preset),
         )
         // Schedule management routes (WS7)
@@ -169,14 +169,11 @@ fn preset_routes() -> Router<WorkspaceState> {
             post(handlers::preset_management::validate_preset),
         )
         .route(
-            "/v1/daemon/presets/{id}:reload",
-            post(handlers::preset_management::reload_preset),
-        )
-        .route(
-            "/v1/daemon/presets/{id}",
+            "/v1/daemon/presets/:id",
             get(handlers::preset_management::get_preset)
                 .patch(handlers::preset_management::update_preset)
-                .delete(handlers::preset_management::delete_preset),
+                .delete(handlers::preset_management::delete_preset)
+                .post(handlers::preset_management::reload_preset),
         )
 }
 
@@ -251,15 +248,15 @@ fn narrative_routes() -> Router<WorkspaceState> {
 fn strategy_routes() -> Router<WorkspaceState> {
     Router::new()
         .route(
-            "/v1/daemon/strategies/{strategy_id}/states/{state_id}/patch",
+            "/v1/daemon/strategies/:strategy_id/states/:state_id/patch",
             post(handlers::strategy::patch_state),
         )
         .route(
-            "/v1/daemon/strategies/{strategy_id}/transitions/patch",
+            "/v1/daemon/strategies/:strategy_id/transitions/patch",
             post(handlers::strategy::patch_transition),
         )
         .route(
-            "/v1/daemon/strategies/{strategy_id}/states/{state_id}/prompt/patch",
+            "/v1/daemon/strategies/:strategy_id/states/:state_id/prompt/patch",
             post(handlers::strategy::patch_prompt_template),
         )
 }
@@ -505,7 +502,7 @@ fn compute_routes() -> Router<WorkspaceState> {
             get(handlers::compute_modules::list_modules),
         )
         .route(
-            "/v1/daemon/compute/modules/{module_id}",
+            "/v1/daemon/compute/modules/:module_id",
             get(handlers::compute_modules::get_module),
         )
 }
