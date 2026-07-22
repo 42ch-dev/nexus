@@ -190,7 +190,7 @@ Public `logoVariants` keys stay `primary | color | white | mono`; add `text` for
 
 ### Task 7: Design Studio full Chronos review pass
 
-- [ ] **T7 · Must**
+- [x] **T7 · Must**
   **Files:** `apps/design-studio/src/pages/{tokens,components,brand,surfaces,home}.tsx`; shell/settings/setup fixtures; canvas surface fixtures as needed for selection/timeline accents.
   **Interfaces:** gallery is the acceptance surface for dual-role + logo.
   **DoD:** Tokens show cyan interactive scale on light; Components Button matrix shows identical primary light/dark; Brand shows new logos + Chronos note; Surfaces/shell fixtures show cyan active affordances + warm-paper/ink surfaces; light+dark toggle smoke green.

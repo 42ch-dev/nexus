@@ -267,8 +267,16 @@ function ChronosContextSection() {
   return (
     <section>
       <SectionHeading id="brand-chronos">Chronos shell placement</SectionHeading>
+      <p
+        data-testid="brand-chronos-note"
+        className="text-copy-16 text-gray-700 mb-4"
+      >
+        Chronos identity: timeline mark (primary on light, color on dark), titlebar label white on
+        light / cyan on dark, cyan signal chrome, deep ink structure. Product shell uses{' '}
+        <strong>mark only</strong> — no wordmark in nav.
+      </p>
       <p className="text-copy-16 text-gray-700 mb-6">
-        Product shell uses <strong>mark only</strong>, theme-aware:{' '}
+        Theme-aware placement:{' '}
         <code className="font-mono bg-gray-alpha-100 px-1 rounded">primary</code> on light,{' '}
         <code className="font-mono bg-gray-alpha-100 px-1 rounded">color</code> on dark. Toggle the
         Studio theme to verify live fixtures; the mini shells below show both placements at once.
@@ -533,8 +541,9 @@ export function BrandPage() {
       <h2 className="text-heading-24 font-semibold text-gray-1000 mb-2">Brand</h2>
       <p className="text-copy-16 text-gray-700 mb-6">
         <code className="font-mono bg-gray-alpha-100 px-1 rounded">@42ch/nexus-ui</code> VI —
-        Chronos timeline logo system, shell placement, theme specimens, and clear-space guidance.
-        Toggle light/dark to verify theme-aware shell fixtures.
+        Chronos timeline logo system (wide mark, no N-network lockup), shell placement, theme
+        specimens, and clear-space guidance. Cyan is signal; deep blue is ink structure. Toggle
+        light/dark to verify theme-aware shell fixtures.
       </p>
       <SubNav />
 

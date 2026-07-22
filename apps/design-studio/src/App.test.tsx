@@ -160,6 +160,54 @@ function mockMatchMediaFull({
   );
 }
 
+/* ---- Chronos Light / Dark gallery acceptance (VI logo upgrade T7) ------- */
+
+describe('Chronos gallery acceptance', () => {
+  it('home surfaces a Chronos identity note', () => {
+    mockMatchMedia(false);
+    renderStudio('/');
+    expect(screen.getByTestId('home-chronos-note')).toHaveTextContent(/cyan is the shared signal/i);
+  });
+
+  it('tokens page documents dual-role and shows blue-* as cyan signal scale', () => {
+    mockMatchMediaFull();
+    renderStudio('/tokens');
+    expect(screen.getByTestId('tokens-chronos-note')).toHaveTextContent(/cyan signal/i);
+    expect(screen.getByTestId('color-group-blue')).toHaveTextContent(/Interactive cyan signal/i);
+    expect(screen.getByTestId('color-group-blue')).toHaveTextContent(/blue-700 ≡ brand-cyan/i);
+
+    const swatch = screen.getByTestId('color-swatch-blue-700');
+    const fill = swatch.querySelector('[style*="--color-blue-700"]');
+    expect(fill).not.toBeNull();
+    expect(swatch).toHaveTextContent('blue-700');
+  });
+
+  it('components primary Button uses cyan fill + deep text (no light/dark fork)', () => {
+    mockMatchMediaFull();
+    renderStudio('/components');
+    expect(screen.getByTestId('button-chronos-note')).toHaveTextContent(/pixel-same/i);
+    const primary = screen.getByTestId('button-primary-default');
+    expect(primary.className).toMatch(/\bbg-brand-cyan\b/);
+    expect(primary.className).toMatch(/\btext-brand-deep-blue\b/);
+    expect(primary.className).not.toMatch(/\btext-white\b/);
+    expect(primary.className).not.toMatch(/\bdark:bg-brand-cyan\b/);
+  });
+
+  it('brand page states Chronos identity without N-network lockup copy', () => {
+    mockMatchMedia(false);
+    renderStudio('/brand');
+    expect(screen.getByTestId('brand-chronos-note')).toHaveTextContent(/timeline mark/i);
+    expect(screen.getByText(/no N-network lockup/i)).toBeInTheDocument();
+  });
+
+  it('surfaces index notes cyan active chrome on warm-paper / ink', () => {
+    mockMatchMedia(false);
+    renderStudio('/surfaces');
+    expect(screen.getByTestId('surfaces-chronos-note')).toHaveTextContent(/cyan active affordances/i);
+    expect(screen.getByTestId('surfaces-chronos-note')).toHaveTextContent(/warm-paper/i);
+  });
+});
+
 describe('Tokens page — typography gallery (display tier)', () => {
   beforeEach(() => {
     mockMatchMediaFull();

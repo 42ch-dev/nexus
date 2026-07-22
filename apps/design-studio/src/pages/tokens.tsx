@@ -12,12 +12,16 @@ interface ColorToken {
 
 interface TokenGroup {
   title: string;
+  /** Optional Chronos / usage note rendered under the group title. */
+  hint?: string;
   tokens: ColorToken[];
 }
 
 const COLOR_GROUPS: TokenGroup[] = [
   {
     title: 'Brand',
+    hint:
+      'Chronos dual-role anchors: deep-blue is ink structure (titlebar, light text links); cyan is shared signal (primary fill, active bars, focus).',
     tokens: [
       { label: 'brand-deep-blue', varName: '--color-brand-deep-blue' },
       { label: 'brand-cyan', varName: '--color-brand-cyan' },
@@ -26,6 +30,8 @@ const COLOR_GROUPS: TokenGroup[] = [
   },
   {
     title: 'Background',
+    hint:
+      'Warm paper on light (background-200/300 parchment tint); ink surfaces on dark. Shell chrome reads from these tokens.',
     tokens: [
       { label: 'background-100', varName: '--color-background-100' },
       { label: 'background-200', varName: '--color-background-200' },
@@ -60,6 +66,8 @@ const COLOR_GROUPS: TokenGroup[] = [
   },
   {
     title: 'Blue',
+    hint:
+      'Interactive cyan signal scale (light and dark). blue-700 ≡ brand-cyan (#25D1E0) — active bars, focus rings, spinners. Not body-link ink on light (use brand-deep-blue).',
     tokens: ['700', '800', '900', '1000'].map((s) => ({
       label: `blue-${s}`,
       varName: `--color-blue-${s}`,
@@ -311,7 +319,7 @@ const CANVAS_TOKEN_GROUPS: CanvasTokenGroup[] = [
   {
     title: 'Canvas — Timeline accent spine',
     hint:
-      'Surface-level Timeline identity (blue-700). Distinct from per-layer accents.',
+      'Surface-level Timeline identity — cyan signal (blue-700 ≡ brand-cyan). Distinct from per-layer accents.',
     tokens: [
       { label: 'canvas-timeline-accent', varName: '--color-canvas-timeline-accent' },
     ],
@@ -469,7 +477,7 @@ function ColorSwatch({ token }: { token: ColorToken }) {
   }, [resolvedTheme, token.varName]);
 
   return (
-    <div className="flex flex-col gap-2">
+    <div className="flex flex-col gap-2" data-testid={`color-swatch-${token.label}`}>
       <div
         className="w-full aspect-[3/2] rounded-card border border-gray-alpha-400"
         style={{ backgroundColor: `var(${token.varName})` }}
@@ -955,11 +963,30 @@ function SubNav() {
 
 function ColorsSection() {
   return (
-    <section>
+    <section data-testid="tokens-colors">
       <SectionHeading id="tokens-colors">Colors</SectionHeading>
+      <p
+        data-testid="tokens-chronos-note"
+        className="text-copy-14 text-gray-700 mb-6 max-w-prose"
+      >
+        Chronos dual-role: <strong className="font-medium text-gray-1000">cyan signal</strong>{' '}
+        (<code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">blue-700</code> /{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">brand-cyan</code>) for
+        interactive affordances in both themes;{' '}
+        <strong className="font-medium text-gray-1000">deep ink</strong> (
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">brand-deep-blue</code>) for
+        structure and light-theme body links. Toggle light/dark — blue-* stays cyan on light.
+      </p>
       {COLOR_GROUPS.map((group) => (
-        <div key={group.title} className="mb-8">
-          <h4 className="text-heading-16 font-semibold text-gray-900 mb-4">{group.title}</h4>
+        <div
+          key={group.title}
+          className="mb-8"
+          data-testid={`color-group-${group.title.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`}
+        >
+          <h4 className="text-heading-16 font-semibold text-gray-900 mb-2">{group.title}</h4>
+          {group.hint ? (
+            <p className="text-copy-13 text-gray-600 mb-4 max-w-prose">{group.hint}</p>
+          ) : null}
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
             {group.tokens.map((t) => (
               <ColorSwatch key={t.varName} token={t} />
@@ -1181,7 +1208,9 @@ export function TokensPage() {
       <p className="text-copy-16 text-gray-700 mb-6">
         All scalar design scales from the DESIGN SSOT — colors, typography (incl. the display tier),
         spacing, radius, elevation, and motion. Values are read live from CSS custom properties and
-        rendered utility classes, and update when the theme toggles.
+        rendered utility classes, and update when the theme toggles. Chronos projects light{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">blue-*</code> as the cyan
+        interactive scale — see Colors for the ink-vs-signal split.
       </p>
       <SubNav />
 

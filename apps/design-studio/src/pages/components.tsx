@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react';
+import { useState, type HTMLAttributes, type ReactNode } from 'react';
 
 import {
   cn,
@@ -49,13 +49,18 @@ function SectionHeading({
   );
 }
 
-function MatrixCard({ children, className }: { children: ReactNode; className?: string }) {
+function MatrixCard({
+  children,
+  className,
+  ...rest
+}: { children: ReactNode; className?: string } & HTMLAttributes<HTMLDivElement>) {
   return (
     <div
       className={cn(
         'border border-gray-alpha-300 rounded-card bg-background-100 p-6',
         className,
       )}
+      {...rest}
     >
       {children}
     </div>
@@ -371,17 +376,33 @@ function ButtonSection() {
         4 variants × 3 sizes = 12 combinations, plus disabled and focus-visible
         states per DESIGN.md § Button.
       </p>
+      <p
+        data-testid="button-chronos-note"
+        className="text-copy-14 text-gray-700 mb-4 max-w-prose"
+      >
+        Chronos primary is pixel-same in light and dark:{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">bg-brand-cyan</code> +{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+          text-brand-deep-blue
+        </code>
+        . No light/dark fill fork — toggle the theme to confirm.
+      </p>
 
       <p className="text-label-14 text-gray-900 mb-4">
         Variant × Size matrix
       </p>
-      <MatrixCard className="mb-6">
+      <MatrixCard className="mb-6" data-testid="button-variant-matrix">
         <div className="space-y-4">
           {variants.map(({ variant }) => (
             <div key={variant} className="flex flex-wrap items-center gap-4">
               <VariantLabel label={variant} />
               {sizes.map(({ size, label }) => (
-                <Button key={size} variant={variant} size={size}>
+                <Button
+                  key={size}
+                  variant={variant}
+                  size={size}
+                  data-testid={variant === 'primary' ? `button-primary-${size}` : undefined}
+                >
                   {label}
                 </Button>
               ))}
