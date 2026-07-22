@@ -162,7 +162,7 @@ Public `logoVariants` keys stay `primary | color | white | mono`; add `text` for
 
 ### Task 3: Logo adoption (App + Studio Brand)
 
-- [ ] **T3 · Must**
+- [x] **T3 · Must**
   **Files:** `apps/web/src/components/brand/nexus-logo.tsx` (+ tests); Studio `brand.tsx` / fixtures using logos; any remaining old-asset imports.
   **Interfaces:** theme-aware mark in shell; Brand page shows primary/color/white/mono/text + Chronos Light/Dark mini context + theme variants gallery.
   **DoD:** no references to deleted `logo_*` PNGs; shell uses new mark; Studio Brand gallery complete light+dark.
