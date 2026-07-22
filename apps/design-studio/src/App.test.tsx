@@ -12,7 +12,7 @@
  * swatch or component variant. Follow apps/web conventions: vitest + jsdom +
  * @testing-library/react.
  */
-import { act, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -194,8 +194,8 @@ describe('Chronos gallery acceptance', () => {
   });
 
   it('dark theme keeps primary Button cyan fill + deep text (no light/dark fork)', () => {
+    // ThemeProvider must apply `.dark` from matchMedia — do not inject the class.
     mockMatchMediaFull({ dark: true });
-    document.documentElement.classList.add('dark');
     renderStudio('/components');
     expect(document.documentElement.classList.contains('dark')).toBe(true);
     const primary = screen.getByTestId('button-primary-default');
@@ -204,9 +204,31 @@ describe('Chronos gallery acceptance', () => {
     expect(primary.className).not.toMatch(/\bdark:bg-brand-cyan\b/);
   });
 
-  it('dark theme keeps token blue-700 swatch on cyan signal scale', () => {
+  it('dark theme keeps token blue-700 swatch on cyan signal scale', async () => {
+    // jsdom does not resolve CSS custom properties (vitest `css: false`).
+    // Harness: only return Chronos cyan paint when ThemeProvider applied `.dark`
+    // (matchMedia-driven — no manual classList.add).
+    const realGetComputedStyle = window.getComputedStyle.bind(window);
+    vi.spyOn(window, 'getComputedStyle').mockImplementation((elt, pseudo) => {
+      const style = realGetComputedStyle(elt, pseudo);
+      const bg =
+        elt instanceof HTMLElement ? elt.style.backgroundColor : '';
+      if (bg === 'var(--color-blue-700)') {
+        const paint = document.documentElement.classList.contains('dark')
+          ? 'rgb(37, 209, 224)'
+          : 'rgb(1, 1, 1)';
+        return new Proxy(style, {
+          get(target, prop, receiver) {
+            if (prop === 'backgroundColor') return paint;
+            const value = Reflect.get(target, prop, receiver);
+            return typeof value === 'function' ? value.bind(target) : value;
+          },
+        });
+      }
+      return style;
+    });
+
     mockMatchMediaFull({ dark: true });
-    document.documentElement.classList.add('dark');
     renderStudio('/tokens');
     expect(document.documentElement.classList.contains('dark')).toBe(true);
     expect(screen.getByTestId('tokens-chronos-note')).toHaveTextContent(/cyan signal/i);
@@ -214,6 +236,10 @@ describe('Chronos gallery acceptance', () => {
     const fill = swatch.querySelector('[style*="--color-blue-700"]');
     expect(fill).not.toBeNull();
     expect(swatch).toHaveTextContent('blue-700');
+    // Chronos blue-700 under .dark ≡ #25d1e0 / rgb(37, 209, 224)
+    await waitFor(() => {
+      expect(swatch.textContent).toMatch(/rgb\(\s*37\s*,\s*209\s*,\s*224\s*\)|#25d1e0/i);
+    });
   });
 
   it('brand page states Chronos identity without N-network lockup copy', () => {
