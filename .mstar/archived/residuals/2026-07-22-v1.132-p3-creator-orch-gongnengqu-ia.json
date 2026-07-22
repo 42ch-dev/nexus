@@ -1,0 +1,22 @@
+[
+  {
+    "id": "R-V1132P3-SUP-001",
+    "title": "V1.131 AC-4 / DF-V1130-WORKSPACE-UNDER-ORCH superseded by P3 AC-6/AC-7",
+    "severity": "info",
+    "source": "P3 T4",
+    "lifecycle": "superseded",
+    "decision": "supersede",
+    "owner": "@project-manager",
+    "note": "Superseded by 2026-07-22-v1.132-p3-creator-orch-gongnengqu-ia AC-6/AC-7; see compass supersession table."
+  },
+  {
+    "id": "R-V1132P3-SUP-002",
+    "title": "V1.130 P2 创作-left-Menu false-Done superseded by P3 AC-8",
+    "severity": "info",
+    "source": "P3 T4",
+    "lifecycle": "superseded",
+    "decision": "supersede",
+    "owner": "@project-manager",
+    "note": "Superseded by P3 AC-8 Create-only left hub."
+  }
+]
