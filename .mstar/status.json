@@ -247,7 +247,15 @@
       }
     },
     "updated_at": "2026-07-22",
-    "control_worktree_path": "/Users/bibi/workspace/organizations/42ch/nexus"
+    "control_worktree_path": "/Users/bibi/workspace/organizations/42ch/nexus",
+    "integration_merge_lease": {
+      "holder": "pm-v1.132-btwoods-MBP",
+      "claimed_at": "2026-07-22T16:00:15Z",
+      "plan_id": "2026-07-22-v1.132-p3-creator-orch-gongnengqu-ia",
+      "source_branch": "plan/v1.132-p3-creator-orch-gongnengqu-ia",
+      "target_branch": "iteration/v1.132",
+      "session_label": "v1.132-p3-merge"
+    }
   },
   "residual_findings": {
     "2026-07-05-v1.92-closure": [
