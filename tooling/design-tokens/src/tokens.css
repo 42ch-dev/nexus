@@ -142,11 +142,11 @@
   --color-info-surface: color-mix(in srgb, var(--color-blue-700) 6%, transparent);
   --color-info-surface-border: color-mix(in srgb, var(--color-blue-700) 30%, transparent);
 
-  /* Accent scales — DESIGN.md §Colors/Accent Scales (blue → brand-deep-blue) */
-  --color-blue-700: #0d2b3e;
-  --color-blue-800: #0a2333;
-  --color-blue-900: #071a28;
-  --color-blue-1000: #04121c;
+  /* Accent scales — Chronos cyan signal (DESIGN.md §Brand Colors dual-role) */
+  --color-blue-700: #25d1e0;
+  --color-blue-800: #1fb8c6;
+  --color-blue-900: #1896a2;
+  --color-blue-1000: #117480;
 
   --color-red-700: #e5484d;
   --color-red-800: #d11f2a;

@@ -794,7 +794,7 @@ Dark-theme companion to [`DESIGN.md`](DESIGN.md). Same token names; values tuned
 | `brand-deep-blue` on `background-100` | 1.6:1 | — | **Fail** — do not use deep blue fills on dark chrome; use cyan accent instead |
 | `gray-700` on `background-100` | 7.4:1 | Secondary/helper text | **Pass** |
 
-**Dark primary button:** cyan fill (`brand-cyan`) + deep blue label (`brand-deep-blue`) — passes AA for button text. Deep blue filled buttons on dark chrome fail surface contrast; reserve deep blue for text on cyan or white-on-brand panels only.
+**Primary button (both themes):** cyan fill (`brand-cyan`) + deep blue label (`brand-deep-blue`) — passes AA for button text (6.2:1). Light and dark share this recipe (Chronos dual-role). Deep blue filled buttons on dark chrome fail surface contrast; reserve deep blue for text on cyan or light surfaces (links, titlebar labels on light).
 
 **Background-driven contrast invariant:** Text color on any filled element is decided by the **perceived lightness of that element's background**, not by the active light/dark mode. In the dark theme, bright accent fills (e.g. `brand-cyan`, `red-800`, `green-700`) become light/bright surfaces and must use dark text (`brand-deep-blue`) instead of white.
 
@@ -809,13 +809,13 @@ Dark-theme companion to [`DESIGN.md`](DESIGN.md). Same token names; values tuned
 | `brand-deep-blue` | `brand-deep-blue` | Logo text; primary button text on cyan fill |
 | `brand-white` | `brand-white` | Logo on deepest panels |
 
-Dark primary button uses **cyan fill + deep-blue text** (V1.94 contrast correction; was white-on-cyan). `blue-*` names preserved for existing `{colors.blue-700}` consumers.
+Dark and light primary buttons use **cyan fill + deep-blue text** (Chronos dual-role; light no longer uses deep fill + white). `blue-*` names preserved for existing `{colors.blue-700}` consumers — both themes map `blue-700` to cyan signal.
 
 ### V1.106 component parity (Tabs, States, Launch & daemon)
 
 Behavior, keyboard, and Voice & Content tables live in [`DESIGN.md`](DESIGN.md) §Component Primitives (`### Tabs`, `### States`, `### Form Field (composition)`, `### Launch & daemon status`). Dark-tuned token values for `components.tabs`, `components.states`, and `components.launch-daemon` are in this file's frontmatter; `components.daemon-status-indicator` uses the dark semantic fills above.
 
-Canvas/SOUL/World-KB brand-blue tokens resolve through `var(--color-blue-700)` and `color-mix(in srgb, var(--color-blue-700) N%, transparent)`. In the dark theme `--color-blue-700: #25d1e0` (brand-cyan). See `DESIGN.md` § Implementation Mapping.
+Canvas/SOUL/World-KB brand-blue tokens resolve through `var(--color-blue-700)` and `color-mix(in srgb, var(--color-blue-700) N%, transparent)`. Both themes set `--color-blue-700: #25d1e0` (brand-cyan signal). See `DESIGN.md` § Implementation Mapping.
 
 ## Logo Usage
 
