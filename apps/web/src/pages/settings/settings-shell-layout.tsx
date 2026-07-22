@@ -1,8 +1,9 @@
 /**
- * Settings shell layout — V1.103 P0 (settings-shell-ia.md) + V1.104 W2.
+ * Settings shell layout — demoted (V1.131 P2).
  *
- * Owns page title/helper, secondary section nav, and `<Outlet />`.
- * Section bodies live in sibling route modules. Workspace nav added in V1.104.
+ * Full-page Settings is no longer the product primary. The App mounts
+ * {@link SettingsModalHost} with {@link SettingsSectionFrame}. This layout
+ * remains for isolated section unit tests that still compose an Outlet tree.
  */
 
 import { Bot, FolderOpen, Palette, Settings, type LucideIcon } from 'lucide-react';

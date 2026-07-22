@@ -190,6 +190,7 @@ export function ShellSidebarChrome({
           className="grid grid-cols-2 gap-1 rounded-card bg-gray-alpha-100 p-1"
           role="tablist"
           aria-label={primaryNavigationAriaLabel}
+          data-testid="shell-mode-switch"
         >
           <TabButton
             id="creator"

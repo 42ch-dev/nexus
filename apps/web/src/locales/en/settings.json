@@ -8,7 +8,14 @@
     "agent": "Agent",
     "workspace": "Profiles",
     "appearance": "Appearance",
+    "modules": "Modules",
     "advanced": "Advanced"
+  },
+  "discard": {
+    "title": "Discard unsaved changes?",
+    "body": "You have unsaved settings changes. Close Settings and discard them?",
+    "cancel": "Keep editing",
+    "confirm": "Discard"
   },
   "appearance": {
     "title": "Appearance",

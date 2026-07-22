@@ -50,16 +50,18 @@ export function SettingsSetupSection() {
 
   return (
     <>
-      <SettingsSetupSectionChrome
-        data-testid="settings-setup-section"
-        desktopAvailable={Boolean(desktop)}
-        onReRunSetup={() => setConfirmOpen(true)}
-        title={t('setup.title')}
-        helper={t('setup.helper')}
-        rerunLabel={t('setup.rerun')}
-        browserOnlyHelper={t('setup.browserOnly')}
-        browserTooltip={t('setup.browserTooltip')}
-      />
+      <div id="setup">
+        <SettingsSetupSectionChrome
+          data-testid="settings-setup-section"
+          desktopAvailable={Boolean(desktop)}
+          onReRunSetup={() => setConfirmOpen(true)}
+          title={t('setup.title')}
+          helper={t('setup.helper')}
+          rerunLabel={t('setup.rerun')}
+          browserOnlyHelper={t('setup.browserOnly')}
+          browserTooltip={t('setup.browserTooltip')}
+        />
+      </div>
 
       <Dialog
         open={confirmOpen}

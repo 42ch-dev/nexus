@@ -727,36 +727,37 @@ describe('Surfaces page — app shell fixture', () => {
     expect(screen.getAllByText('Orchestrator').length).toBeGreaterThanOrEqual(1);
   });
 
-  it('renders Worlds-first nav and Create content placeholder', () => {
+  it('renders Worlds-first nav and Creator mode content placeholder', () => {
     expect(screen.getAllByText('Worlds').length).toBeGreaterThanOrEqual(1);
-    expect(screen.getByTestId('app-shell-content-create')).toBeInTheDocument();
+    expect(screen.getByTestId('app-shell-fixture-light-content')).toBeInTheDocument();
   });
 
   it('renders Settings fixture sidebar with SSOT segmented pill tabs (FB-UI-002)', () => {
     // The Settings fixture consumes ShellSidebarChrome — segmented pill
-    // tablist, not stale underline tabs.
+    // tablist, not stale underline tabs. Default tab is Orchestrator so the
+    // Workspace profile selector is visible (V1.131 P2).
     const settingsShell = screen.getByTestId('settings-shell-chrome');
     const tablist = within(settingsShell).getByRole('tablist', {
       name: 'Primary navigation',
     });
     expect(
       within(tablist).getByRole('tab', { name: 'Creator' }),
-    ).toHaveAttribute('aria-selected', 'true');
+    ).toHaveAttribute('aria-selected', 'false');
     expect(
       within(tablist).getByRole('tab', { name: 'Orchestrator' }),
-    ).toHaveAttribute('aria-selected', 'false');
+    ).toHaveAttribute('aria-selected', 'true');
   });
 
   it('renders Settings fixture sidebar with sectioned icon nav (FB-UI-003)', () => {
     const settingsShell = screen.getByTestId('settings-shell-chrome');
-    // Creator nav groups render as section headers + icon+label items (V1.128 Worlds-first).
-    expect(within(settingsShell).getAllByText('Worlds').length).toBeGreaterThanOrEqual(1);
+    // Orchestrator groups (Memory / Runtime / Strategies) when 工作区 is shown.
+    expect(within(settingsShell).getAllByText('Memory').length).toBeGreaterThanOrEqual(1);
   });
 
-  it('renders Settings fixture profiles as icon-only (FB-UI-001)', () => {
+  it('renders Settings fixture Workspace profiles as icon-only under Orchestrator (FB-UI-001)', () => {
     const settingsShell = screen.getByTestId('settings-shell-chrome');
     const toolbar = within(settingsShell).getByRole('toolbar', {
-      name: 'Profiles',
+      name: 'Workspace',
     });
     expect(toolbar).toBeInTheDocument();
     // Icon-only — no display name text visible in the settings shell.
@@ -765,14 +766,24 @@ describe('Surfaces page — app shell fixture', () => {
     ).not.toBeInTheDocument();
   });
 
-  it('renders the profile footer with creator name', () => {
+  it('renders the profile footer with creator name in the standalone profiles gallery', () => {
     expect(screen.getAllByText('Local Creator').length).toBeGreaterThanOrEqual(1);
   });
 
-  it('renders add-profile button with accessible label', () => {
-    const appShell = screen.getByTestId('app-shell-fixture');
+  it('renders add-profile button under Orchestrator mode switch (dark fixture)', () => {
+    const appShell = screen.getByTestId('app-shell-fixture-dark');
     expect(
       within(appShell).getByRole('button', { name: 'Add profile' }),
+    ).toBeInTheDocument();
+    expect(within(appShell).getByTestId('shell-mode-switch')).toBeInTheDocument();
+  });
+
+  it('renders footer mode switch in both light and dark app-shell fixtures', () => {
+    expect(
+      within(screen.getByTestId('app-shell-fixture-light')).getByTestId('shell-mode-switch'),
+    ).toBeInTheDocument();
+    expect(
+      within(screen.getByTestId('app-shell-fixture-dark')).getByTestId('shell-mode-switch'),
     ).toBeInTheDocument();
   });
 

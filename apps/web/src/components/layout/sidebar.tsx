@@ -327,7 +327,7 @@ export function Sidebar() {
         activeRoute={pathname}
         navGroups={groups}
         onTabChange={setActiveTab}
-        footer={<FooterProfiles />}
+        footer={activeTab === 'orchestrator' ? <FooterProfiles /> : null}
         creatorTabLabel={t('nav.creator')}
         orchestratorTabLabel={t('nav.orchestrator')}
         primaryNavigationAriaLabel={t('aria.primaryNavigation')}

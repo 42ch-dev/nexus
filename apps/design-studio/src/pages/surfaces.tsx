@@ -247,10 +247,9 @@ function FixtureFooterProfiles() {
 
   return (
     <FooterProfilesChrome
-      sectionLabel="Profiles"
+      sectionLabel="Workspace"
       addButtonLabel="Add profile"
       profiles={profiles}
-      activeDisplayName="Local Creator"
       focusIndex={focusIndex}
       onSelect={setActiveId}
       onAdd={() => {}}
@@ -266,14 +265,20 @@ function FixtureFooterProfiles() {
   );
 }
 
-function ShellSidebarFixture() {
-  const [activeTab, setActiveTab] = useState<ShellSidebarTab>('creator');
+function ShellSidebarFrame({
+  activeTab: initialTab = 'creator',
+  testId,
+}: {
+  activeTab?: ShellSidebarTab;
+  testId: string;
+}) {
+  const [activeTab, setActiveTab] = useState<ShellSidebarTab>(initialTab);
   const groups = activeTab === 'creator' ? CREATOR_NAV : ORCHESTRATOR_NAV;
 
   return (
     <div
       className="flex min-h-[440px] border border-gray-alpha-300 rounded-card bg-background-100 overflow-hidden"
-      data-testid="app-shell-fixture"
+      data-testid={testId}
     >
       <div className="w-sidebar-nav-width shrink-0">
         <ShellSidebarChrome
@@ -282,22 +287,37 @@ function ShellSidebarFixture() {
           navGroups={groups}
           onTabChange={setActiveTab}
           logo={<StudioShellLogo />}
-          footer={<FixtureFooterProfiles />}
+          footer={activeTab === 'orchestrator' ? <FixtureFooterProfiles /> : null}
+          creatorTabLabel="Creator"
+          orchestratorTabLabel="Orchestrator"
+          primaryNavigationAriaLabel="Primary navigation"
         />
       </div>
 
-      {/* Main content area — V1.128 P2 shows Create page when no entity selected */}
       <div className="flex-1 bg-background-200 flex flex-col items-center justify-center min-w-0 p-8">
         <div
           className="w-full max-w-lg rounded-card border border-gray-alpha-300 bg-background-100 p-6"
-          data-testid="app-shell-content-create"
+          data-testid={`${testId}-content`}
         >
-          <p className="text-label-14 text-gray-900 mb-4">Create page (empty selection)</p>
-          <p className="text-copy-13 text-gray-700 mb-4">
-            Card CTAs for World / Work — see Creator shell fixtures below for
-            Controller stub + interactive toggle.
+          <p className="text-label-14 text-gray-900 mb-4">
+            {activeTab === 'creator' ? 'Creator mode' : 'Orchestrator mode'}
+          </p>
+          <p className="text-copy-13 text-gray-700">
+            Footer mode switch is the only primary Creator|Orchestrator control.
+            Workspace profile selector appears under Orchestrator only.
           </p>
         </div>
+      </div>
+    </div>
+  );
+}
+
+function ShellSidebarFixture() {
+  return (
+    <div className="space-y-4" data-testid="app-shell-fixture-themes">
+      <ShellSidebarFrame activeTab="creator" testId="app-shell-fixture-light" />
+      <div className="dark">
+        <ShellSidebarFrame activeTab="orchestrator" testId="app-shell-fixture-dark" />
       </div>
     </div>
   );
@@ -334,6 +354,7 @@ function FooterProfilesFixture() {
             sectionLabel="Profiles"
             addButtonLabel="Add profile"
             profiles={profiles}
+            activeDisplayName={profiles.find((p) => p.active)?.displayName}
             focusIndex={0}
             onSelect={() => {}}
             onAdd={() => {}}

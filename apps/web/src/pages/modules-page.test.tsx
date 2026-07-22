@@ -13,12 +13,12 @@ import { renderInApp } from '@/test/test-providers';
 import { useHandlers } from '@/test/msw-server';
 import { BrowserClient } from '@/lib/nexus';
 import { i18n } from '@/lib/i18n/config';
-import { ModulesPage } from '@/pages/modules-page';
+import { ModulesPageBody } from '@/pages/modules-page';
 
 const client = () => new BrowserClient();
 
 function renderModules() {
-  return renderInApp(<ModulesPage />, { client: client() });
+  return renderInApp(<ModulesPageBody />, { client: client() });
 }
 
 beforeEach(async () => {

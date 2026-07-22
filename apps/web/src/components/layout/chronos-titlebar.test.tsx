@@ -1,12 +1,14 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { http, HttpResponse } from 'msw';
 
 import { ChronosTitlebar } from '@/components/layout/chronos-titlebar';
 import { SettingsModalProvider } from '@/components/layout/settings-modal-context';
 import { SettingsModalHost } from '@/components/layout/settings-modal-host';
 import { ThemeProvider } from '@/components/theme-provider';
 import { renderInApp } from '@/test/test-providers';
+import { useHandlers } from '@/test/msw-server';
 import { BrowserClient } from '@/lib/nexus';
 import type { DesktopCapabilities } from '@/lib/nexus/desktop-capabilities';
 import { i18n } from '@/lib/i18n/config';
@@ -38,9 +40,7 @@ function renderTitlebar(desktop: DesktopCapabilities | null = null) {
     <ThemeProvider>
       <SettingsModalProvider>
         <ChronosTitlebar title="Works" />
-        <SettingsModalHost>
-          <p data-testid="settings-modal-placeholder">Settings body</p>
-        </SettingsModalHost>
+        <SettingsModalHost />
       </SettingsModalProvider>
     </ThemeProvider>,
     { client: new BrowserClient(), desktop },
@@ -78,6 +78,27 @@ describe('ChronosTitlebar', () => {
     window.localStorage.clear();
     mockMatchMedia(false);
     await i18n.changeLanguage('en');
+    useHandlers(
+      http.post('/v1/daemon/agent-host/scan', () =>
+        HttpResponse.json({
+          agents: [
+            {
+              name: 'codex',
+              registry_agent_id: 'codex-native',
+              launch_command: 'codex',
+              installed: true,
+              version: '1.0.0',
+            },
+          ],
+        }),
+      ),
+      http.get('/v1/daemon/creators', () =>
+        HttpResponse.json({
+          items: [{ creator_id: 'creator-a', display_name: 'Alice' }],
+          pagination: { limit: 20, has_more: false },
+        }),
+      ),
+    );
   });
 
   it('opens SettingsModalHost when the gear is clicked and restores focus on close', async () => {

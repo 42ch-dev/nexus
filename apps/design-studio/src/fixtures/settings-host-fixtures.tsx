@@ -581,7 +581,7 @@ function InteractiveSettingsShellPage() {
 function SettingsFooterProfiles() {
   return (
     <FooterProfilesChrome
-      sectionLabel="Profiles"
+      sectionLabel="Workspace"
       addButtonLabel="Add profile"
       profiles={[
         { id: 'local-creator', displayName: 'Local Creator', active: true },
@@ -598,13 +598,12 @@ function SettingsFooterProfiles() {
 }
 
 /**
- * App shell slice with Settings footer utility active — uses ShellSidebarChrome
- * + FooterProfilesChrome SSOT (V1.108 FB-UI-001..003, 005), not stale inline
- * underline/plain-nav/profile-name markup. Same component tree as the App
- * shell and surfaces.tsx ShellSidebarFixture.
+ * App shell slice with Settings modal frame in the main panel — uses
+ * ShellSidebarChrome + footer mode switch; Workspace profiles only under
+ * Orchestrator (V1.131 P2).
  */
 function SettingsShellChromeFixture() {
-  const [activeTab, setActiveTab] = useState<ShellSidebarTab>('creator');
+  const [activeTab, setActiveTab] = useState<ShellSidebarTab>('orchestrator');
   const groups = activeTab === 'creator' ? CREATOR_NAV : ORCHESTRATOR_NAV;
 
   return (
@@ -619,12 +618,28 @@ function SettingsShellChromeFixture() {
           navGroups={groups}
           onTabChange={setActiveTab}
           logo={<StudioShellLogo />}
-          footer={<SettingsFooterProfiles />}
+          footer={activeTab === 'orchestrator' ? <SettingsFooterProfiles /> : null}
         />
       </div>
 
       <div className="flex-1 bg-background-200 flex flex-col min-w-0 p-8 overflow-auto">
-        <InteractiveSettingsShellPage />
+        <div
+          className="flex min-h-[360px] flex-col overflow-hidden rounded-popover border border-gray-alpha-400 bg-background-100 shadow-elevation-4"
+          data-testid="settings-modal-fixture"
+          style={{ width: 'min(80vw, 960px)', height: 'min(80vh, 640px)', maxWidth: '100%' }}
+        >
+          <div className="flex shrink-0 items-start justify-between gap-4 border-b border-gray-alpha-200 p-6 pb-4">
+            <div className="flex flex-col gap-1">
+              <h3 className="text-heading-20 font-heading tracking-tight text-gray-1000">
+                Settings
+              </h3>
+              <p className="text-copy-14 text-gray-900">{SHELL_HELPER}</p>
+            </div>
+          </div>
+          <div className="min-h-0 flex-1 overflow-hidden" data-testid="settings-modal-body">
+            <InteractiveSettingsShellPage />
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -643,14 +658,13 @@ export function SettingsHostFixtures() {
         data-testid="settings-host-fixture-shell"
       >
         <h4 className="text-heading-16 font-heading text-gray-1000 mb-1">
-          Shell + section nav
+          Shell + Settings modal (≥80vw×80vh)
         </h4>
         <p className="text-copy-13 text-gray-700 mb-4">
-          Footer utility Settings (lucide) above profiles; main panel is the
-          Settings shell — title, helper, section nav (Agent / Workspace /
-          Advanced). Default Agent outlet shows the preselected Agent section
-          body; Advanced outlet shows Connection and Setup stacked, and the
-          Workspace outlet shows the Workspace section chrome.
+          Footer mode switch is the only primary Creator|Orchestrator control.
+          Workspace profiles sit under Orchestrator only. The main panel is the
+          Settings modal frame — section nav (Agent / Profiles / Appearance /
+          Modules / Advanced) with representative clean section bodies.
         </p>
         <SettingsShellChromeFixture />
       </div>
