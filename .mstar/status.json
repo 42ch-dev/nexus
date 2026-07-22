@@ -92,7 +92,7 @@
     },
     {
       "id": "2026-07-22-v1.132-p2-vi-aesthetic-retune",
-      "status": "InReview",
+      "status": "Done",
       "file": ".mstar/plans/2026-07-22-v1.132-p2-vi-aesthetic-retune.md",
       "metadata": {
         "primary_spec": ".mstar/iterations/v1.132/specs/vi-aesthetic-retune.md",
@@ -104,14 +104,10 @@
         "merge_target": "iteration/v1.132",
         "wire_contracts_changed": false,
         "wave": "2",
-        "seq": "2"
-      },
-      "execution_lease": {
-        "holder": "pm-v1.132-btwoods-MBP",
-        "claimed_at": "2026-07-22T14:38:25Z",
-        "worktree_path": "/Users/bibi/workspace/organizations/42ch/nexus/.worktrees/v1.132-p2-vi-aesthetic-retune",
-        "working_branch": "plan/v1.132-p2-vi-aesthetic-retune",
-        "session_label": "v1.132-phase2-wave2"
+        "seq": "2",
+        "merge_commit": "9e4039452450fd1b2ebd09660e6fd0dcf261919c",
+        "merged_at": "2026-07-22T15:15:39Z",
+        "qa_verdict": "Pass"
       },
       "task_commits": [
         {
@@ -160,10 +156,7 @@
         "merge_target": "iteration/v1.132",
         "wire_contracts_changed": false,
         "wave": "3",
-        "seq": "3",
-        "blocked_by": [
-          "2026-07-22-v1.132-p1-titlebar-window-drag"
-        ]
+        "seq": "3"
       }
     }
   ],
@@ -221,15 +214,7 @@
       }
     },
     "updated_at": "2026-07-22",
-    "control_worktree_path": "/Users/bibi/workspace/organizations/42ch/nexus",
-    "integration_merge_lease": {
-      "holder": "pm-v1.132-btwoods-MBP",
-      "claimed_at": "2026-07-22T15:15:13Z",
-      "plan_id": "2026-07-22-v1.132-p2-vi-aesthetic-retune",
-      "source_branch": "plan/v1.132-p2-vi-aesthetic-retune",
-      "target_branch": "iteration/v1.132",
-      "session_label": "v1.132-p2-merge"
-    }
+    "control_worktree_path": "/Users/bibi/workspace/organizations/42ch/nexus"
   },
   "residual_findings": {
     "2026-07-05-v1.92-closure": [
