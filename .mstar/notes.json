@@ -3,6 +3,11 @@
   "updated_at": "2026-07-22",
   "entries": [
     {
+      "at": "2026-07-22 (V1.131 iteration-close)",
+      "message": "Phase 3 close: P0–P3 Done. Compound: settings-modal-primary-host, chronos-titlebar-overlay, residual archival live-smoke anti-pattern. DF-V1130-* + DF-V1131-* moved to shipped archive. Open human: R-VI-003 Dock, R-V1131P0-QC2-W-001 Overlay, R-VI-002/004. Compass status completed. status.json ~27KB (open residuals + P3 note refresh); full prior-iteration low/nit compact deferred to next hygiene slice.",
+      "plan_id": null
+    },
+    {
       "at": "2026-07-22 (V1.131 P3 QA Done)",
       "message": "P3 desktop-icons-residuals Done (Pass with notes). AC-1 compose/generate exit 0 + hashes match c3be7c36…/da273c62…; AC-2 Dock cache README; AC-3 ledger determinate (8 archived ND-A2; R-VI-002/003/004 + Overlay open with owner+trigger; 10 V1.130 slate notes refreshed); AC-4 W-003/S-001 P0-only archive; AC-5 tech_debt 64 consistent. Dock live tile human-blocked (screencapture TCC) — R-VI-003 kept open. design-studio Chronos dark 2 tests Pass. Profile B archived.",
       "plan_id": "2026-07-22-v1.131-p3-desktop-icons-residuals"

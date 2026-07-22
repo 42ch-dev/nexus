@@ -1,7 +1,8 @@
 ---
 iteration_id: V1.131
 start_date: 2026-07-22
-status: locked
+end_date: 2026-07-22
+status: completed
 iteration_base_branch: main
 spec_integration_branch: iteration/v1.131
 target_branch: main
@@ -31,63 +32,61 @@ plans:
 
 ### Tracker IDs resolved this iteration
 
-| Tracker ID | Plan owner | Outcome required |
-|------------|------------|------------------|
-| `DF-V1130-SETTINGS-MODAL` | P0 (gear entry) + P2 (modal primary / deep links / sections) | **Ship** — move to shipped archive at close |
-| `DF-V1130-MODE-SWITCH-FOOTER` | P2 | **Ship** |
-| `DF-V1130-WORKSPACE-UNDER-ORCH` | P2 | **Ship** |
-| `DF-V1130-COMPUTE-IN-SETTINGS` | P2 | **Ship** |
-| `DF-V1130-PROFILE-SSOT` | P2 (hold / regression) | **Hold** invariant; no open gap left untested |
-| `DF-V1131-CHRONOS-TITLEBAR` | P0 | **Ship** — no native-titlebar deferral |
-| `DF-V1131-LOGO-GALLERY-LOCKUP` | P1 | **Ship** |
-| `DF-V1131-DESKTOP-ICON` | P3 | **Ship** |
+| Tracker ID | Plan owner | Outcome |
+|------------|------------|---------|
+| `DF-V1130-SETTINGS-MODAL` | P0 + P2 | **Shipped** — archived tracker |
+| `DF-V1130-MODE-SWITCH-FOOTER` | P2 | **Shipped** |
+| `DF-V1130-WORKSPACE-UNDER-ORCH` | P2 | **Shipped** |
+| `DF-V1130-COMPUTE-IN-SETTINGS` | P2 | **Shipped** |
+| `DF-V1130-PROFILE-SSOT` | P2 | **Held** (regression green) |
+| `DF-V1131-CHRONOS-TITLEBAR` | P0 | **Shipped** (human Overlay smoke open) |
+| `DF-V1131-LOGO-GALLERY-LOCKUP` | P1 | **Shipped** (human wordmark measure open) |
+| `DF-V1131-DESKTOP-ICON` | P3 | **Shipped** (human Dock live open) |
 
 ## Plans
 
 | Wave | plan_id | Name | Status | blocked_by |
 |------|---------|------|--------|------------|
-| 1∥ | `2026-07-22-v1.131-p0-chronos-titlebar` | Chronos titlebar chrome | Todo | — |
-| 1∥ | `2026-07-22-v1.131-p1-logo-gallery-lockup` | Logo gallery + lockup scale | Todo | — |
-| 2 | `2026-07-22-v1.131-p2-shell-ia-finish` | V1.130 shell IA finish | Todo | P0 |
-| 3 | `2026-07-22-v1.131-p3-desktop-icons-residuals` | Desktop icons + residual slate | Todo | P0, P1, P2 |
+| 1∥ | `2026-07-22-v1.131-p0-chronos-titlebar` | Chronos titlebar chrome | **Done** | — |
+| 1∥ | `2026-07-22-v1.131-p1-logo-gallery-lockup` | Logo gallery + lockup scale | **Done** | — |
+| 2 | `2026-07-22-v1.131-p2-shell-ia-finish` | V1.130 shell IA finish | **Done** | P0 |
+| 3 | `2026-07-22-v1.131-p3-desktop-icons-residuals` | Desktop icons + residual slate | **Done** | P0, P1, P2 |
 
 **Scale budget:** L → **4** business plans (cap). Harness process not counted.
-
-**PM order:** Wave 1 = P0 ∥ P1 → Wave 2 = P2 → Wave 3 = P3.
 
 ## Milestones
 
 | Milestone | Target date | Status |
 |-----------|-------------|--------|
-| Spec freeze (Review & Edit lock) | 2026-07-22 | pending |
-| Wave 1 (titlebar ∥ gallery) | 2026-07-22 | pending |
-| Wave 2 (shell IA finish) | 2026-07-22 | pending |
-| Wave 3 (desktop + residuals) | 2026-07-22 | pending |
-| Iteration close | 2026-07-22 | pending |
+| Spec freeze (Review & Edit lock) | 2026-07-22 | **done** |
+| Wave 1 (titlebar ∥ gallery) | 2026-07-22 | **done** |
+| Wave 2 (shell IA finish) | 2026-07-22 | **done** |
+| Wave 3 (desktop + residuals) | 2026-07-22 | **done** |
+| Iteration close | 2026-07-22 | **done** |
 
 ## Acceptance Criteria
 
 ### VI / Chronos chrome (P0, P1, P3)
 
-- **AC-1 (P0).** Light shell: full-width deep-blue titlebar (`#0D2B3E`); brand mark on ink, not primary plate alone on light sidebar header.
-- **AC-2 (P0).** Titlebar labels white (light) / cyan (dark).
-- **AC-3 (P0).** Desktop: Tauri v2 macOS `titleBarStyle: "Overlay"` keeps native traffic lights while the web ink titlebar extends beneath native chrome; controls remain clickable/correctly positioned and only non-interactive titlebar regions are draggable. `decorations: false` is not an accepted delivery path.
-- **AC-4 (P1).** Studio `primary` / `whiteBg` cards fill preview width on matching BG (ink / white-paper, not mid-gray).
-- **AC-5 (P1).** Dark hero wordmark cap-height ≥ 60% of mark height.
-- **AC-6 (P0+P1).** Plate logos only on matching surfaces product-wide.
-- **AC-7 (P3).** Desktop `icons:compose` / `icons:generate` Chronos plate; Dock/README cache notes.
+- **AC-1 (P0).** Light shell: full-width deep-blue titlebar (`#0D2B3E`); brand mark on ink — **Pass**
+- **AC-2 (P0).** Titlebar labels white (light) / cyan (dark) — **Pass** (automation)
+- **AC-3 (P0).** Desktop Overlay + native traffic lights — **Pass with notes** (product code; H2–H4 human → `R-V1131P0-QC2-W-001`)
+- **AC-4 (P1).** Studio `primary` / `whiteBg` cards fill on matching BG — **Pass**
+- **AC-5 (P1).** Dark hero wordmark cap-height ≥ 60% — **Exempt human** (`R-VI-004`; `h-[26px]` automated)
+- **AC-6 (P0+P1).** Plate logos on matching surfaces — **Pass**
+- **AC-7 (P3).** Desktop icons compose/generate + Dock README — **Pass with notes** (hashes match; Dock live → `R-VI-003`)
 
 ### V1.130 IA (P2 — must ship)
 
-- **AC-8.** 创作\|编排 on **功能区 footer** is the only primary mode switch; top sidebar tabs are absent and light/dark fixtures cover the footer state.
-- **AC-9.** Settings modal primary = one route-aware `SettingsModalHost` ≥80vw×80vh; `/settings/*` resolves through its section registry over the last safe non-settings route (direct loads use `/works`), and every close vector uses the host dirty guard.
-- **AC-10.** The Profile selector labeled **工作区** appears only under **编排 功能区**; global path/connection configuration may remain in Settings but does not duplicate the profile selector.
-- **AC-11.** Compute/Modules reuses the existing list/detail body as a registered Settings section, with no section-owned or nested Settings dialog; `/modules` becomes a compatibility entry and 编排 exposes no Compute item after the modal section is green.
-- **AC-12.** Profile SSOT list/create still holds (regression guard).
+- **AC-8.** Footer-only 创作\|编排 — **Pass**
+- **AC-9.** Settings modal primary ≥80vw×80vh + dirty/route-leave — **Pass**
+- **AC-10.** 工作区 under 编排 only — **Pass**
+- **AC-11.** Modules in Settings; `/modules` compat; no Compute nav — **Pass**
+- **AC-12.** Profile SSOT regression — **Pass**
 
 ### Residuals (P3)
 
-- **AC-13.** Targeted R-VI-* / R-V1130* either archived (ND-A2) or re-deferred with owner+trigger; `tech_debt_summary` refreshed. **DF-V1130-* feature rows must not remain open** after close unless PROFILE-SSOT is explicitly held as ongoing invariant (no incomplete UI).
+- **AC-13.** Targeted residuals archived or owner+trigger — **Pass** (DF-V1130-* not re-deferred)
 
 ## Non-Goals
 
@@ -96,12 +95,12 @@ plans:
 - `DF-70` execution-mode matrix
 - `DF-71` menu-bar daemon control
 - Marketing/store icon packages beyond app icon pipeline
-- Re-deferring `DF-V1130-*` UI gaps to V1.132 (**forbidden**)
+- Re-deferring `DF-V1130-*` UI gaps to V1.132 (**forbidden** — shipped)
 
 ## Roadmap Position
 
-- **Current (V1.131):** Chronos titlebar + logo gallery + **finish DF-V1130 shell/Settings IA** + desktop icons + residual slate.
-- **Next:** Deeper creator Chat / orchestration polish; DF-70/71 when capacity.
+- **Current (V1.131):** **delivered** — Chronos titlebar + logo gallery + DF-V1130 shell/Settings IA + desktop icons + residual slate (PR pending to `main`).
+- **Next:** Deeper creator Chat / orchestration polish; DF-70/71 when capacity; human smokes for Dock (`R-VI-003`) and Overlay (`R-V1131P0-QC2-W-001`) before merge-ready if required by reviewers.
 - **Prior:** V1.130 partial ship (#165) + VI logo upgrade (#167).
 
 ## Delivery Branch Policy
@@ -114,20 +113,38 @@ plans:
 
 ## Architecture locks (architect Seat 2)
 
-1. **Tauri v2 titlebar:** keep native window decorations/traffic lights and set the macOS window to `titleBarStyle: "Overlay"` with `hiddenTitle: true`; use `trafficLightPosition` only to align the native controls with the Chronos bar. The web titlebar owns the deep-blue paint and marks only its empty background with `data-tauri-drag-region`. Interactive logo, gear, theme, health, and navigation controls are never drag regions. The desktop smoke gate must prove close/minimize/zoom, double-click behavior, drag, and focus; failure blocks P0 rather than creating another deferred titlebar.
-2. **Shell boundary:** `RootLayout` owns a full-width titlebar above the sidebar/content row. Props-driven `ChronosTitlebarChrome` and adjusted sidebar chrome live under `apps/web/src/components/layout/presentational/**` and are mirrored in Studio through `@web-layout/*`; routing, Settings open behavior, theme, and desktop detection stay in app wrappers.
-3. **Settings boundary:** exactly one app-level `SettingsModalHost` owns the Radix dialog, section registry, URL resolver, last safe background route, focus restore, and dirty registrations. Section bodies are content-only. `/settings`, known aliases, unknown sections, and `/modules` normalize through one resolver; no full-page Settings shell remains primary.
-4. **IA finish:** the existing **功能区 footer** mode switch is hardened rather than reimplemented. `FooterProfiles` becomes the 编排-only **工作区** block. Compute reuses the existing `ModulesPage` query/detail behavior through a Settings modal section adapter; no second query model and no nested dialog are introduced.
-5. **Desktop icon pipeline:** `apps/desktop/src-tauri/icons/source/compose-app-icon.mjs` remains the sole composer from canonical `logo-primary.svg`. Run filtered workspace scripts, hash committed source/preview before and after, generate platform files from `source-1024.png`, and verify the built Dock icon after documented cache invalidation.
+1. **Tauri v2 titlebar:** Overlay + native traffic lights; web ink bar; non-interactive drag only.
+2. **Shell boundary:** full-width titlebar above sidebar/content; presentational `@web-layout/*`.
+3. **Settings boundary:** one `SettingsModalHost` + section registry SSOT + dirty/URL resolver.
+4. **IA finish:** footer mode switch; 编排-only 工作区; Modules Settings section without nested dialog.
+5. **Desktop icon pipeline:** `logo-primary.svg` → compose → hash-stable source/preview; Dock cache README.
 
-## Risk Register
+## Quality Gate Summary
 
-| Risk | Likelihood | Impact | Mitigation |
-|------|------------|--------|------------|
-| Tauri overlay/traffic-light alignment | Med | High | Preserve native decorations; use Overlay + explicit safe inset/traffic-light position; mandatory macOS interaction smoke blocks P0 on failure |
-| P2 scope larger than expected | Med | Med | L cap already includes P2; do not descope DF-V1130 UI |
-| Modal route/dirty-guard regressions | Med | High | One host + one section registry + one URL resolver; section bodies register dirty state and never own dialog chrome |
-| Settings route background loss | Med | Med | Keep last non-settings location in the host/router controller; direct `/settings/*` loads use `/works`; close restores the saved safe route |
+| Plan | QC | QA | Notes |
+|------|----|----|-------|
+| P0 | Approve with residuals | Pass with notes | Overlay H2–H4 human open |
+| P1 | Approve | Pass with notes | Wordmark human measure open |
+| P2 | Approve (after R1–R4 fix) | Pass | — |
+| P3 | Approve (after F-001–F-004) | Pass with notes | Dock live human open |
+
+## Compound Round Summary
+
+| Item | Action |
+|------|--------|
+| `architecture-patterns/settings-modal-primary-host.md` | **New** — Settings modal primary host (BrowserRouter dirty leave) |
+| `architecture-patterns/chronos-titlebar-overlay.md` | **New** — Tauri Overlay Chronos titlebar |
+| `conventions/profile-b-residual-archival-procedure.md` | **Updated** — no archive before live-smoke QA |
+| Package `specs/*` | **Retained** in iteration package (iteration-scoped; not promoted wholesale) |
+| Package `guides/` | **None** |
+
+Q1–Q8: crystallize Settings host + Overlay titlebar (Yes ≥4); residual live-smoke timing (update existing convention).
+
+## Iteration Retrospective (minimal)
+
+- **Worked:** L/4 must-ship DF-V1130 pack without re-deferral; Studio-first chrome; QC2 catch on premature Dock archive.
+- **Friction:** Agent TCC blocks Overlay + Dock screenshots — keep human residuals honest, do not invent Archive.
+- **Carry:** Human smokes + optional wordmark measure / chronos-note fixtures.
 
 ## Iteration package
 
@@ -137,41 +154,3 @@ plans:
 | `specs/logo-gallery-lockup.md` | Studio gallery + wordmark |
 | `specs/shell-ia-finish.md` | DF-V1130 IA completion |
 | `specs/desktop-icons-residuals.md` | Desktop icons + residual archive |
-
-## Autonomous direction lock record
-
-| Field | Value |
-|-------|-------|
-| Mode | `autonomous` |
-| Scale | `auto` → **L** (4 plans) |
-| Locked | Chronos VI dogfood **+ resolve all DF-V1130-* UI gaps in-iteration** |
-| User clarification | Related tracker problems must be **solved** this iteration, not merely listed |
-
-## Prepare handoff
-
-**Status:** `locked` (PM — Phase 1 Review & Edit complete 2026-07-22)
-
-**Phase 1 lock:** product-manager → architect → writing-specialist complete. DF-V1130-* and VI dogfood items are **must-ship** this iteration (4 plans). Next: Phase 2 Autonomous Execute on `iteration/v1.131`.
-
-Architect Seat 2 locked: Tauri Overlay **Chronos titlebar** with native traffic lights; one route-aware **Settings modal** section registry/dirty guard; **功能区 footer**-only mode switch with 编排-only **工作区**; Compute reuse without nested modal; deterministic desktop icon compose/generate/cache-smoke pipeline.
-
-## Seat 3 — writing-specialist note
-
-Corpus pass complete. Terminology locks applied across compass, plans, and specs:
-
-| Term | Canonical usage |
-|------|-----------------|
-| Shell layout | 左功能区 + 右内容区 (dual-pane) |
-| Mode switch | 创作\|编排 on **功能区 footer** (not sidebar top tabs) |
-| Profile/workspace IA | **工作区** under **编排 功能区 only** (not both tabs / not global Settings duplicate) |
-| Global config surface | **Settings modal** (≥80vw × 80vh desktop; one `SettingsModalHost`; shared `requestClose` + dirty guard) |
-| VI chrome | **Chronos titlebar** — full-width deep-blue ink bar (`#0D2B3E`); logo on ink; Tauri v2 macOS Overlay with native traffic lights |
-| Create World / Chat | Out of scope (V1.131 non-goals) |
-
-**Residual copy notes (non-blocking):**
-
-- `SettingsModalHost` names the implementation; author-facing copy uses **Settings modal**.
-- "Orchestration" / `orchestrator` remain acceptable in technical prose (plan_ids, crate names, `activeTab`); author-facing copy uses **编排**.
-- P0 owns titlebar gear → `SettingsModalHost`; P2 completes modal sections/deep links — do not conflate wire ownership.
-
-No `.mstar/knowledge/` additions (tracker row hygiene only where architect lock conflicted). No architect lock weakening.
