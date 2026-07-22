@@ -4,7 +4,7 @@
   "plans": [
     {
       "id": "2026-07-22-v1.132-p0-orch-load-404",
-      "status": "InProgress",
+      "status": "InReview",
       "file": ".mstar/plans/2026-07-22-v1.132-p0-orch-load-404.md",
       "metadata": {
         "primary_spec": ".mstar/iterations/v1.132/specs/orch-load-404.md",
@@ -50,6 +50,13 @@
           "base": "c64cea8369b1e184fd3dc795ded57dda1603d335",
           "head": "23b730b788d9cee51155f89c04ffc6d9bd3e66f8",
           "status": "complete"
+        },
+        {
+          "task": 5,
+          "base": "3028319a5897ccc6e4ee87a22353e9b93c65459a",
+          "head": "c4947c54ea563c99231da9da3197076af29998e6",
+          "status": "complete",
+          "notes": "Network residual → QA"
         }
       ]
     },
