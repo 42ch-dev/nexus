@@ -827,14 +827,15 @@ Canonical assets: `@42ch/nexus-ui/assets/logos/`. Geometry is the **timeline** m
 | White mark (dark-gray→white gradient) | `logo-white.svg` | Dark hero, photography, deepest panels |
 | Tintable mark | `<NexusMark>` | Inline UI; set `color` to cyan or white as needed |
 | Wordmark | `logo-text.svg` | Lockups; `currentColor` → white on heroes / dark panels |
-| Primary / white-bg mark | `logo-primary.svg` / `logo-white-bg.svg` | **Avoid on dark chrome** — deep end of gradient lacks contrast |
+| Primary plate lockup | `logo-primary.svg` | Brand plate (deep-blue fill + bright mark) — ok on brand surfaces; do not use as chrome mark on arbitrary ink |
+| White-bg mark | `logo-white-bg.svg` | **Avoid on dark chrome** — deep end of gradient lacks contrast |
 | Mono mark (light-gray→black) | `logo-mono.svg` | Prefer on light plates only |
 
 **Dark placement:**
 
 - Shell sidebar/header: **mark only** — `logo-color.svg`.
 - Heroes / deepest panels: `logo-white.svg`; optional `logo-text.svg` with white `currentColor`.
-- Do not use `logo-primary.svg` / `logo-white-bg.svg` on ink/dark surfaces.
-- Wide aspect — size by height (`width: auto`), not a 1:1 box.
+- Do not use `logo-white-bg.svg` on ink/dark surfaces.
+- Wide aspect for transparent marks — size by height (`width: auto`), not a 1:1 box. `logo-primary.svg` is square (plate).
 
 This file intentionally preserves the same token names and frontmatter structure with dark values. Rule-type documentation, component behavior, voice/content guidance, and implementation mapping live in `DESIGN.md` and apply to both themes.

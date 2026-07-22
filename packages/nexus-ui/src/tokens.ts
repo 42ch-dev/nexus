@@ -13,11 +13,11 @@ export const brandColors = {
 export type BrandColorName = keyof typeof brandColors;
 
 export const logoVariants = {
-  /** Timeline mark — deep→cyan gradient for light nav / light shells (alias of whiteBg) */
+  /** Primary lockup — bright mark on brand deep-blue plate (matches `logo-primary.png`) */
   primary: 'logo-primary.svg',
-  /** Timeline mark — color on white/light plates; matches `logo-white-bg.png` */
+  /** Timeline mark — color on white/light plates; matches `logo-white-bg.png` (light shell) */
   whiteBg: 'logo-white-bg.svg',
-  /** Timeline mark — bright gradient for dark nav / dark shells */
+  /** Timeline mark — bright gradient for dark nav / dark shells (no plate) */
   color: 'logo-color.svg',
   /** Timeline mark — dark-gray→white gradient for dark heroes / high-contrast panels */
   white: 'logo-white.svg',

@@ -15,9 +15,9 @@ pnpm add @42ch/nexus-ui --workspace
 | `@42ch/nexus-ui` | Brand token constants (`brandColors`, `logoVariants`, sizing guidance) + React components (`<NexusLogo>`, `<NexusMark>`, `<NexusLogoVariant>`, promoted UI primitives, `cn`) |
 | `@42ch/nexus-ui/tokens` | Same token module (direct import) |
 | `@42ch/nexus-ui/theme.css` | Brand CSS custom properties (`--nexus-brand-*`) |
-| `@42ch/nexus-ui/assets/logos/logo-primary.svg` | Timeline mark — deep→cyan gradient for light shells (alias of white-bg) |
-| `@42ch/nexus-ui/assets/logos/logo-white-bg.svg` | Timeline mark — color on white/light plates (`logo-white-bg.png`) |
-| `@42ch/nexus-ui/assets/logos/logo-color.svg` | Timeline mark — bright gradient for dark shells |
+| `@42ch/nexus-ui/assets/logos/logo-primary.svg` | Primary lockup — bright mark on brand deep-blue plate (`logo-primary.png`) |
+| `@42ch/nexus-ui/assets/logos/logo-white-bg.svg` | Timeline mark — color on transparent for light shells (`logo-white-bg.png`) |
+| `@42ch/nexus-ui/assets/logos/logo-color.svg` | Timeline mark — bright gradient for dark shells (no plate) |
 | `@42ch/nexus-ui/assets/logos/logo-white.svg` | Timeline mark — dark-gray→white gradient for dark heroes |
 | `@42ch/nexus-ui/assets/logos/logo-mono.svg` | Timeline mark — light-gray→black gradient (static) |
 | `@42ch/nexus-ui/assets/logos/logo-text.svg` | Wordmark — lowercase `nexus` (`currentColor`) |
@@ -51,8 +51,8 @@ Timeline marks are **wide** (`viewBox` 284×28). Size by **height**; width is au
 
 | Surface | Variant | File | Notes |
 |---------|---------|------|-------|
-| Light nav / sidebar (light theme) | Primary | `logo-primary.svg` | Deep→cyan gradient on light shells |
-| Marketing / color-on-white lockup | White-bg | `logo-white-bg.svg` | Same plate as primary; matches `logo-white-bg.png` |
+| Brand plate lockup | Primary | `logo-primary.svg` | Bright mark on brand deep-blue plate (square; matches `logo-primary.png`) |
+| Light nav / sidebar (light theme) | White-bg | `logo-white-bg.svg` | Deep→cyan gradient, transparent |
 | Dark nav / sidebar (dark theme) | Color | `logo-color.svg` | Bright gradient on dark chrome |
 | Dark hero / photography / high-contrast panel | White | `logo-white.svg` | Dark-gray→white gradient on deep or busy backgrounds |
 | Static grayscale lockup | Mono | `logo-mono.svg` | Light-gray→black gradient (baked) |
@@ -65,7 +65,7 @@ Timeline marks are **wide** (`viewBox` 284×28). Size by **height**; width is au
 - **Alt text**: use `alt="Nexus"` on `<img>`; inline SVGs include `<title>` for screen readers.
 - **Minimum size**: 24px height (`logoMinSizePx` in tokens). Below this, node detail may be lost.
 - **Clear space**: keep padding ≥ 25% of logo height on all sides.
-- **Contrast**: prefer `logo-primary` on light; `logo-color` or `logo-white` on dark. Do not place `logo-primary` on ink/dark chrome.
+- **Contrast**: prefer `logo-white-bg` on light chrome; `logo-color` or `logo-white` on dark. Use `logo-primary` only where the deep-blue plate is intentional.
 
 ## Runtime dependencies
 
@@ -136,13 +136,13 @@ import { NexusLogo, NexusMark, NexusLogoVariant } from '@42ch/nexus-ui';
 
 // The consumer resolves the SVG URL through its own bundler.
 // In a Vite project, importing an SVG yields a URL string:
-import logoPrimary from '@42ch/nexus-ui/assets/logos/logo-primary.svg';
+import logoWhiteBg from '@42ch/nexus-ui/assets/logos/logo-white-bg.svg';
 import logoText from '@42ch/nexus-ui/assets/logos/logo-text.svg';
 
 function AppShell() {
   // Pass the resolved URL as `src`. `variant` documents which mark is being rendered.
-  // Marks are wide — size by height; width is auto.
-  return <NexusLogo variant="primary" src={logoPrimary} size={24} />;
+  // Light chrome uses whiteBg (transparent). Marks are wide — size by height; width is auto.
+  return <NexusLogo variant="whiteBg" src={logoWhiteBg} size={24} />;
 }
 
 // Wordmark (currentColor — set color on parent for light/dark):
@@ -176,7 +176,7 @@ function Specimen() {
 If you want the logo asset without the component wrapper — for example, a plain `<img>` in a non-React surface — import the SVG directly:
 
 ```ts
-import nexusLogo from '@42ch/nexus-ui/assets/logos/logo-primary.svg';
+import nexusLogo from '@42ch/nexus-ui/assets/logos/logo-white-bg.svg';
 
 // <img src={nexusLogo} alt="Nexus" height={24} style={{ width: 'auto' }} />
 ```

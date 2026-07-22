@@ -7,8 +7,8 @@ import { useTheme } from '@/components/theme-provider';
 vi.mock('@42ch/nexus-ui/assets/logos/logo-color.svg', () => ({
   default: '/mock/logo-color.svg',
 }));
-vi.mock('@42ch/nexus-ui/assets/logos/logo-primary.svg', () => ({
-  default: '/mock/logo-primary.svg',
+vi.mock('@42ch/nexus-ui/assets/logos/logo-white-bg.svg', () => ({
+  default: '/mock/logo-white-bg.svg',
 }));
 
 vi.mock('@/components/theme-provider', () => ({
@@ -27,7 +27,7 @@ describe('NexusLogo', () => {
     });
   });
 
-  it('renders the primary timeline mark in light theme', () => {
+  it('renders the white-bg timeline mark in light theme', () => {
     mockedUseTheme.mockReturnValue({
       theme: 'light',
       resolvedTheme: 'light',
@@ -36,7 +36,7 @@ describe('NexusLogo', () => {
     });
     render(<NexusLogo />);
     const logo = screen.getByRole('img', { name: 'Nexus' });
-    expect(logo.getAttribute('src')).toContain('logo-primary.svg');
+    expect(logo.getAttribute('src')).toContain('logo-white-bg.svg');
     expect(logo).toHaveClass('h-5', 'w-auto', 'max-w-full', 'shrink-0');
     expect(logo).toHaveAttribute('height', '20');
   });

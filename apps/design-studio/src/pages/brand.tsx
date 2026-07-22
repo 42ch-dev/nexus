@@ -58,7 +58,7 @@ const LOGO_DISPLAYS: LogoDisplay[] = [
     label: 'Primary',
     fileName: logoVariants.primary,
     description:
-      'Timeline mark — deep→cyan gradient for light nav / light shells (same plate as White-bg).',
+      'Primary lockup — bright mark on brand deep-blue plate (matches logo-primary.png). Not for light chrome.',
     panelBgClass: 'bg-background-100',
   },
   {
@@ -66,7 +66,7 @@ const LOGO_DISPLAYS: LogoDisplay[] = [
     label: 'White-bg',
     fileName: logoVariants.whiteBg,
     description:
-      'Color mark on white/light plates — matches logo-white-bg.png (deep→cyan multi-stop).',
+      'Color mark on transparent plate — light nav / light shells (matches logo-white-bg.png).',
     panelBgClass: 'bg-white',
   },
   {
@@ -284,13 +284,14 @@ function ChronosContextSection() {
         data-testid="brand-chronos-note"
         className="text-copy-16 text-gray-700 mb-4"
       >
-        Chronos identity: timeline mark (primary on light, color on dark), titlebar label white on
+        Chronos identity: timeline mark (whiteBg on light, color on dark), titlebar label white on
         light / cyan on dark, cyan signal chrome, deep ink structure. Product shell uses{' '}
-        <strong>mark only</strong> — no wordmark in nav.
+        <strong>mark only</strong> — no wordmark in nav. The primary plate lockup is for brand
+        surfaces, not chrome.
       </p>
       <p className="text-copy-16 text-gray-700 mb-6">
         Theme-aware placement:{' '}
-        <code className="font-mono bg-gray-alpha-100 px-1 rounded">primary</code> on light,{' '}
+        <code className="font-mono bg-gray-alpha-100 px-1 rounded">whiteBg</code> on light,{' '}
         <code className="font-mono bg-gray-alpha-100 px-1 rounded">color</code> on dark. Toggle the
         Studio theme to verify live fixtures; the mini shells below show both placements at once.
       </p>
@@ -298,8 +299,8 @@ function ChronosContextSection() {
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
         <ChronosShellMini mode="light">
           <NexusLogo
-            variant="primary"
-            src={logoPrimarySrc}
+            variant="whiteBg"
+            src={logoWhiteBgSrc}
             size={logoShellHeightPx}
             className="h-5 w-auto max-w-full shrink-0"
           />

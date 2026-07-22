@@ -397,7 +397,7 @@ components:
 
   # ── shell-nav: root (brand navigation tokens) ──
   shell-nav:
-    logo-variant: "logo-primary.svg"
+    logo-variant: "logo-white-bg.svg"
     logo-min-height: "24px"
     logo-clear-space-ratio: "0.25"
     active-bar-color: "{colors.blue-700}"
@@ -1140,9 +1140,9 @@ Canonical SVG assets ship from `@42ch/nexus-ui/assets/logos/`. PNG sources are p
 
 | Variant | File | Surface |
 | --- | --- | --- |
-| Primary mark (deep→cyan gradient) | `logo-primary.svg` | Light nav, sidebar, light shell header (alias of white-bg plate) |
-| White-bg color mark | `logo-white-bg.svg` | Explicit color-on-white/light plate; matches `logo-white-bg.png` |
-| Color mark (bright gradient) | `logo-color.svg` | Dark nav, dark shell header |
+| Primary lockup (plate) | `logo-primary.svg` | Brand surfaces — bright mark on **brand deep-blue** plate (matches `logo-primary.png`; not transparent) |
+| White-bg color mark | `logo-white-bg.svg` | Light nav, sidebar, light shell header (transparent; matches `logo-white-bg.png`) |
+| Color mark (bright gradient) | `logo-color.svg` | Dark nav, dark shell header (transparent; same mark as primary without plate) |
 | White mark (dark-gray→white gradient) | `logo-white.svg` | Dark hero, photography overlays, high-contrast panels |
 | Mono mark (light-gray→black gradient) | `logo-mono.svg` | Static grayscale lockup on light surfaces |
 | Wordmark | `logo-text.svg` | Lowercase `nexus` lockup; `currentColor` (white on dark heroes; `brand-deep-blue` on light) |
@@ -1150,7 +1150,8 @@ Canonical SVG assets ship from `@42ch/nexus-ui/assets/logos/`. PNG sources are p
 
 **Placement:**
 
-- Shell sidebar/header: **mark only**, theme-aware (`logo-primary.svg` / `logo-white-bg.svg` on light / `logo-color.svg` on dark).
+- Shell sidebar/header: **mark only**, theme-aware (`logo-white-bg.svg` on light / `logo-color.svg` on dark). Do **not** use `logo-primary.svg` in chrome — it includes the deep-blue plate.
+- Brand / marketing lockups on product color: `logo-primary.svg` (opaque deep-blue plate).
 - Dark heroes / deepest panels: `logo-white.svg` mark; optional `logo-text.svg` wordmark with `color: #FFFFFF` (or `currentColor` set to white).
 - Lockups (Studio Brand, marketing): mark + `logo-text.svg` with shared clear-space; do not stretch either asset.
 - Inline chrome (buttons, badges, list rows): `<NexusMark>` only — set `color` on the parent. Prefer the static `logo-mono.svg` asset when the baked grayscale gradient is required.
@@ -1159,11 +1160,11 @@ Canonical SVG assets ship from `@42ch/nexus-ui/assets/logos/`. PNG sources are p
 
 - Minimum rendered height: **24px** (`logoMinSizePx`) for the mark; wordmark follows the same min height for the glyph box.
 - Clear space: **≥ 25%** of logo height on all sides.
-- Aspect: marks are **wide** (`viewBox` ~10:1). Prefer `height` + `width: auto` (or equivalent) — do not force a 1:1 box.
+- Aspect: timeline marks are **wide** (`viewBox` ~10:1) except `logo-primary.svg` (square plate lockup). Prefer `height` + `width: auto` (or equivalent) — do not force a 1:1 box on transparent marks.
 - Alt text: `Nexus` on `<img>`; inline SVGs include `<title>` and `<desc>`.
-- Do not recolor baking gradient SVG fills (`primary`, `whiteBg`, `color`, `white`, `mono`); only `<NexusMark>` and `logo-text.svg` inherit via `currentColor`.
-- Do not place `logo-color.svg` on white/light gray without a contrast check — prefer `logo-primary.svg` / `logo-white-bg.svg` on light surfaces.
-- Transparent backgrounds only — the shell/surface provides fill.
+- Do not recolor baked-gradient SVG fills (`primary`, `whiteBg`, `color`, `white`, `mono`); only `<NexusMark>` and `logo-text.svg` inherit via `currentColor`.
+- Do not place `logo-color.svg` on white/light gray without a contrast check — prefer `logo-white-bg.svg` on light surfaces.
+- Transparent backgrounds on mark variants except `logo-primary.svg`, which fills brand deep-blue.
 
 ---
 

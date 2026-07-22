@@ -1,14 +1,15 @@
 /**
  * Theme-aware shell mark for Design Studio fixtures.
  * Mirrors apps/web `components/brand/nexus-logo.tsx` placement rules:
- * primary on light, color on dark; mark only; wide aspect (`h-* w-auto`).
+ * whiteBg on light, color on dark; mark only (no brand plate); wide aspect
+ * (`h-* w-auto`).
  *
  * Reads the document `.dark` class (kept in sync by Studio ThemeProvider).
  * Works in live Studio and in unit fixtures that do not mount ThemeProvider.
  */
 
 import logoColor from '@42ch/nexus-ui/assets/logos/logo-color.svg';
-import logoPrimary from '@42ch/nexus-ui/assets/logos/logo-primary.svg';
+import logoWhiteBg from '@42ch/nexus-ui/assets/logos/logo-white-bg.svg';
 import { NexusLogo, logoShellHeightPx } from '@42ch/nexus-ui';
 import { useSyncExternalStore } from 'react';
 
@@ -32,8 +33,8 @@ export function StudioShellLogo({ className }: { className?: string } = {}) {
 
   return (
     <NexusLogo
-      variant={isDark ? 'color' : 'primary'}
-      src={isDark ? logoColor : logoPrimary}
+      variant={isDark ? 'color' : 'whiteBg'}
+      src={isDark ? logoColor : logoWhiteBg}
       label="Nexus"
       size={logoShellHeightPx}
       className={className ?? 'h-5 w-auto max-w-full shrink-0'}
