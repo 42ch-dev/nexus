@@ -131,6 +131,12 @@
           "base": "f034058f553f3bfdcf9c700dcadaae84e362cbc9",
           "head": "4e1feb3a30e308b41d8bcabe09f7afe67fa06b54",
           "status": "complete"
+        },
+        {
+          "task": 4,
+          "base": "96bf7db8008a090085211c161a26a087791292f1",
+          "head": "df8ae1831bf212fe483607156e05fec88f6cc9c8",
+          "status": "complete"
         }
       ]
     },
