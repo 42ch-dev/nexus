@@ -1123,22 +1123,32 @@ On brand-filled surfaces (deep blue button), invert the inner ring to `brand-whi
 
 ## Logo Usage
 
-Canonical SVG assets ship from `@42ch/nexus-ui/assets/logos/`. PNG sources are provenance-only (Git LFS).
+Canonical SVG assets ship from `@42ch/nexus-ui/assets/logos/`. PNG sources are provenance-only (Git LFS). Runtime marks use the **timeline** geometry: horizontal five-node axis (ring · ring · **solid center** · ring · ring) on a wide viewBox — not the legacy N-network square.
 
 | Variant | File | Surface |
 | --- | --- | --- |
-| Deep blue mark | `logo-primary.svg` | Light nav, sidebar, light shell header |
-| Cyan mark | `logo-color.svg` | Dark nav, dark shell header |
+| Primary mark (deep→cyan gradient) | `logo-primary.svg` | Light nav, sidebar, light shell header |
+| Color mark (bright gradient) | `logo-color.svg` | Dark nav, dark shell header |
 | White mark | `logo-white.svg` | Dark hero, photography overlays, high-contrast panels |
 | Monotone mark | `logo-mono.svg` | Inline UI; inherits `color` via `currentColor` |
+| Wordmark | `logo-text.svg` | Lowercase `nexus` lockup; `currentColor` (white on dark heroes; `brand-deep-blue` on light) |
+
+**Placement:**
+
+- Shell sidebar/header: **mark only**, theme-aware (`logo-primary.svg` on light / `logo-color.svg` on dark).
+- Dark heroes / deepest panels: `logo-white.svg` mark; optional `logo-text.svg` wordmark with `color: #FFFFFF` (or `currentColor` set to white).
+- Lockups (Studio Brand, marketing): mark + `logo-text.svg` with shared clear-space; do not stretch either asset.
+- Inline chrome (buttons, badges, list rows): `logo-mono.svg` only — set `color` on the parent.
 
 **Rules:**
 
-- Minimum rendered height: **24px** (`logoMinSizePx`).
+- Minimum rendered height: **24px** (`logoMinSizePx`) for the mark; wordmark follows the same min height for the glyph box.
 - Clear space: **≥ 25%** of logo height on all sides.
+- Aspect: marks are **wide** (`viewBox` ~10:1). Prefer `height` + `width: auto` (or equivalent) — do not force a 1:1 box.
 - Alt text: `Nexus` on `<img>`; inline SVGs include `<title>` and `<desc>`.
-- Do not recolor SVG fills outside the mono variant.
-- Do not place cyan mark on white/light gray without a contrast check — prefer `logo-primary.svg` on light surfaces.
+- Do not recolor gradient/white SVG fills; only `logo-mono.svg` and `logo-text.svg` inherit via `currentColor`.
+- Do not place `logo-color.svg` on white/light gray without a contrast check — prefer `logo-primary.svg` on light surfaces.
+- Transparent backgrounds only — the shell/surface provides fill.
 
 ---
 

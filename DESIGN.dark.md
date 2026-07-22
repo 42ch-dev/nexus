@@ -798,7 +798,7 @@ Dark-theme companion to [`DESIGN.md`](DESIGN.md). Same token names; values tuned
 
 **Background-driven contrast invariant:** Text color on any filled element is decided by the **perceived lightness of that element's background**, not by the active light/dark mode. In the dark theme, bright accent fills (e.g. `brand-cyan`, `red-800`, `green-700`) become light/bright surfaces and must use dark text (`brand-deep-blue`) instead of white.
 
-**Logo:** use `logo-color.svg` (cyan) in dark nav/sidebar; `logo-white.svg` on photography or deepest panels.
+**Logo:** timeline mark — see [§ Logo Usage](#logo-usage) below (dark placement).
 
 ### Brand → Web alias map (dark)
 
@@ -816,5 +816,24 @@ Dark primary button uses **cyan fill + deep-blue text** (V1.94 contrast correcti
 Behavior, keyboard, and Voice & Content tables live in [`DESIGN.md`](DESIGN.md) §Component Primitives (`### Tabs`, `### States`, `### Form Field (composition)`, `### Launch & daemon status`). Dark-tuned token values for `components.tabs`, `components.states`, and `components.launch-daemon` are in this file's frontmatter; `components.daemon-status-indicator` uses the dark semantic fills above.
 
 Canvas/SOUL/World-KB brand-blue tokens resolve through `var(--color-blue-700)` and `color-mix(in srgb, var(--color-blue-700) N%, transparent)`. In the dark theme `--color-blue-700: #25d1e0` (brand-cyan). See `DESIGN.md` § Implementation Mapping.
+
+## Logo Usage
+
+Canonical assets: `@42ch/nexus-ui/assets/logos/`. Geometry is the **timeline** mark (wide five-node axis: ring · ring · **solid center** · ring · ring). Shared rules (min height, clear space, alt text, transparent backgrounds) live in [`DESIGN.md`](DESIGN.md) § Logo Usage.
+
+| Variant | File | Dark surface |
+| --- | --- | --- |
+| Color mark (bright gradient) | `logo-color.svg` | Dark nav, sidebar, dark shell header |
+| White mark | `logo-white.svg` | Dark hero, photography, deepest panels |
+| Monotone mark | `logo-mono.svg` | Inline UI; set `color` to cyan or white as needed |
+| Wordmark | `logo-text.svg` | Lockups; `currentColor` → white on heroes / dark panels |
+| Primary mark | `logo-primary.svg` | **Avoid on dark chrome** — deep end of gradient lacks contrast |
+
+**Dark placement:**
+
+- Shell sidebar/header: **mark only** — `logo-color.svg`.
+- Heroes / deepest panels: `logo-white.svg`; optional `logo-text.svg` with white `currentColor`.
+- Do not use `logo-primary.svg` on ink/dark surfaces.
+- Wide aspect — size by height (`width: auto`), not a 1:1 box.
 
 This file intentionally preserves the same token names and frontmatter structure with dark values. Rule-type documentation, component behavior, voice/content guidance, and implementation mapping live in `DESIGN.md` and apply to both themes.
