@@ -248,7 +248,6 @@ function TitlebarMarkRow({
           src={logoWhiteSrc}
           size={markHeightPx}
           className="w-auto shrink-0"
-          style={{ height: `${markHeightPx}px` }}
         />
         <span className="text-label-14 text-white">{label}</span>
       </div>
