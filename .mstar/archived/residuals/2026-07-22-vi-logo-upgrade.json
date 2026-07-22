@@ -1,0 +1,30 @@
+[
+  {
+    "id": "R-VI-005",
+    "title": "Stale knowledge doc still references logo-color.svg web wrapper",
+    "severity": "low",
+    "source": "QA qa.md",
+    "scope": ".mstar/knowledge/architecture-patterns/nexus-brand-token-hierarchy.md",
+    "decision": "accept",
+    "owner": "@writing-specialist",
+    "target": "compound",
+    "lifecycle": "resolved",
+    "note": "Update brand hierarchy doc to primary / whiteBg / white / mono / text; drop logo-color.",
+    "closure_note": "Fixed by 2026-07-22-vi-logo-upgrade compound (knowledge + AGENTS.md)",
+    "archived_at": "2026-07-22T09:38:48Z"
+  },
+  {
+    "id": "R-VI-006",
+    "title": "packages/nexus-ui/AGENTS.md still lists logo variant color",
+    "severity": "low",
+    "source": "QA qa.md",
+    "scope": "packages/nexus-ui/AGENTS.md",
+    "decision": "accept",
+    "owner": "@frontend-dev",
+    "target": "post-ship",
+    "lifecycle": "resolved",
+    "note": "Doc drift after logo-color removal; align export strategy with logoVariants keys.",
+    "closure_note": "Fixed by 2026-07-22-vi-logo-upgrade compound (knowledge + AGENTS.md)",
+    "archived_at": "2026-07-22T09:38:48Z"
+  }
+]

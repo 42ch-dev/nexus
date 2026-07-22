@@ -4,10 +4,10 @@ date: 2026-07-06
 problem_type: architecture-pattern
 category: architecture-patterns
 severity: medium
-plan_id: V1.83-P-last (compound of brand UI foundation iteration); V1.94-P-last (contrast rule correction); V1.98-P0 (DESIGN SSOT unification + shared token pipeline + design-studio); V1.121-P0 (v0.4 Literary Engine: display typography, ink atmosphere, elevation scale, motion recipes, canvas chromatic hygiene, structural namespace)
-tags: [brand, design-tokens, nexus-ui, design-md, git-lfs, svg, npm-package, button-contrast, dark-theme, design-studio, tailwind-preset, ssot-unification, literary-engine, ink-atmosphere, display-typography, motion-recipes, structural-namespace]
-applies_when: adding or consuming cross-application Nexus brand/design tokens (new product surface, platform package, Web shell refresh, or a new app consuming the design system); also when defining any button background/text colour combination, adding a display typography tier, tuning surface atmosphere, extending elevation/motion, or registering a structural (non-color) CSS variable family
-last_updated: 2026-07-18 (V1.121 v0.4 Literary Engine: display typography tier, ink atmosphere, elevation scale, motion recipes, canvas chromatic hygiene, structural vs color namespace distinction, real build gate, twMerge registry hardening, self-hosted font)
+plan_id: V1.83-P-last (compound of brand UI foundation iteration); V1.94-P-last (contrast rule correction); V1.98-P0 (DESIGN SSOT unification + shared token pipeline + design-studio); V1.121-P0 (v0.4 Literary Engine); 2026-07-22-vi-logo-upgrade (Chronos dual-role + timeline logo system)
+tags: [brand, design-tokens, nexus-ui, design-md, git-lfs, svg, npm-package, button-contrast, dark-theme, design-studio, tailwind-preset, ssot-unification, literary-engine, ink-atmosphere, display-typography, motion-recipes, structural-namespace, chronos, dual-role, logo-system]
+applies_when: adding or consuming cross-application Nexus brand/design tokens (new product surface, platform package, Web shell refresh, or a new app consuming the design system); also when defining any button background/text colour combination, adding a display typography tier, tuning surface atmosphere, extending elevation/motion, or registering a structural (non-color) CSS variable family; also when choosing ink vs cyan roles or logo lockup variants
+last_updated: 2026-07-22 (Chronos dual-role ink vs cyan signal; timeline logo variants; supersedes V1.94 light primary deep+white)
 ---
 
 # Nexus Brand & Design Token Hierarchy
@@ -22,7 +22,7 @@ Before V1.83, `apps/web/DESIGN.md` held both app-specific canvas/SOUL/findings t
 
 Token consumption follows these layers, top to bottom (post-V1.98):
 
-1. **Root token SSOT** — repo-root `DESIGN.md` / `DESIGN.dark.md` own canonical token names, VI palette values (`#1E3A5F`, `#25D1E0`, `#FFFFFF`), logo usage rules, all color/typography/spacing/rounded/elevation scales, and accessibility intent. These files are normative for **all** shared design semantics (brand + app tokens). *(Pre-V1.98, apps/web/DESIGN.md held a parallel app mapping layer — retired in V1.98.)*
+1. **Root token SSOT** — repo-root `DESIGN.md` / `DESIGN.dark.md` own canonical token names, VI palette values (`#0D2B3E` ink / `#25D1E0` cyan / `#FFFFFF`), logo usage rules, all color/typography/spacing/rounded/elevation scales, and accessibility intent. These files are normative for **all** shared design semantics (brand + app tokens). *(Pre-V1.98, apps/web/DESIGN.md held a parallel app mapping layer — retired in V1.98.)*
 2. **`@nexus/design-tokens` shared pipeline** — `tooling/design-tokens` workspace package exports a Tailwind **preset** (`tailwind.preset.ts`) + generated **`tokens.css`** (CSS custom properties) derived from the root SSOT. Every app imports `@nexus/design-tokens/tokens.css` and uses the preset; **no app defines its own `theme.extend` token block** that the preset already owns. This is the single CSS/Tailwind pipeline layer (introduced V1.98).
 3. **`@42ch/nexus-ui` package** — owns reusable **brand** artifacts derived from the root contract: Git LFS–tracked PNG provenance, canonical SVG logo variants (regular-git text), token data (`tokens.ts`), CSS theme entry (`theme.css`), and React brand components (`<NexusLogo>`, `<NexusMark>` — V1.87). Brand-layer only; do NOT migrate shadcn primitives here.
 4. **App implementation** — shells/base primitives consume `@nexus/design-tokens` (preset + tokens.css), public `@42ch/nexus-ui` brand exports, and (transitionally) the `@web-ui/*` alias to `apps/web/src/components/ui/*`. No deep imports into `packages/nexus-ui/src/**`; use declared `package.json` `exports` only.
@@ -36,17 +36,18 @@ Token consumption follows these layers, top to bottom (post-V1.98):
 | Token/theme (shared pipeline) | `tooling/design-tokens/src/tokens.css` + `tailwind.preset.ts` | Imported by apps via `@nexus/design-tokens` |
 | Brand theme slice | `packages/nexus-ui/theme.css`, `tokens.ts` | Imported by apps via public `@42ch/nexus-ui` exports |
 
-### Contrast rule (V1.94 clarification — background-driven)
+### Contrast rule (background-driven; Chronos primary lock)
 
-**V1.83 locked rule (still normative)**: "Cyan `#25D1E0` is accent-only on white (~1.9:1 — fails AA as body text). Primary actions on light surfaces use deep blue `#1E3A5F`. Dark mode primary button: **cyan fill + deep blue text.**"
+**Enduring rule**: the **background** color decides label text — not the theme mode. Bright fills (including cyan `#25D1E0`) take **deep ink** labels; dark/saturated fills take light labels. Cyan fails AA as **body / paragraph text** on white (~1.9:1) and must never be used that way.
 
-**V1.94 clarification**: The contrast rule is **mode-independent** — the background color decides the text color, not the theme. Dark/primary/saturated backgrounds → light/white text; light/bright backgrounds → dark text. Cyan `#25D1E0` is a light/bright background, so the dark-mode primary button correctly uses deep-blue text.
+**Primary Button (Chronos — `2026-07-22-vi-logo-upgrade`)**: light and dark share one recipe — `bg-brand-cyan` + `text-brand-deep-blue`. There is **no** light-theme `bg-blue-700 text-white` / deep-fill primary CTA, and **no** `dark:` fork on primary fill/text. V1.83/V1.94 guidance that light primary used deep fill + white text is **superseded**.
 
 Practical application:
-- Light mode primary: `bg-blue-700 text-white` (unchanged since V1.83).
-- Dark mode primary: `dark:bg-brand-cyan dark:text-brand-deep-blue` (V1.94 correction; was `dark:text-white`).
+- Primary (both themes): `bg-brand-cyan text-brand-deep-blue` (package + app Button tests pin this).
+- Light **text links / retry links**: `text-brand-deep-blue` (not `text-blue-700` — after Chronos, light `blue-700` is cyan).
+- Dark text links: cyan signal (`dark:text-blue-700` / `dark:text-brand-cyan`).
 - Secondary/tertiary/destructive: existing token mapping preserved.
-- Cyan as accent-only-on-white rule for **body text** still holds (cyan ~1.9:1 on white fails AA for body copy). The V1.94 correction narrows the V1.83 rule to body text only; **button labels** follow the background-driven contrast rule.
+- Cyan body-text ban on light surfaces still holds.
 
 ### Registered-scale-only rule (V1.98 lesson — qc1 W001)
 
@@ -83,14 +84,62 @@ Apps that consume `@42ch/nexus-ui` should run `pnpm --filter @42ch/nexus-ui run 
 - Export React components from `@42ch/nexus-ui` without following the bundler-agnostic asset convention (consumer resolves the SVG URL via its own bundler and passes it as a `src` prop — do NOT import `.svg` in package source; see [bundler-agnostic-component-library-assets.md](bundler-agnostic-component-library-assets.md)). *(V1.83's "no React components without a dedicated component-library plan" guard was satisfied by V1.87.)*
 - Commit runtime SVG logos through Git LFS (breaks text diffs and bundler inlining).
 - Use cyan `#25D1E0` as primary body text on white backgrounds.
+- Treat light `blue-700` as "deep structure" (it is **cyan signal** under Chronos).
+- Use `text-blue-700` for light-theme text links (migrate to `text-brand-deep-blue`).
+- Reintroduce light primary CTAs as deep fill + white text.
+- Default the product shell to `logo-color` / theme-split lockups, or invent a new logo variant without updating `logoVariants` + DESIGN logo tables.
 
 ## Examples
 
 - Root SSOT: `DESIGN.md`, `DESIGN.dark.md` (sole full-token pair, post-V1.98)
 - Shared pipeline: `tooling/design-tokens` — `@nexus/design-tokens` exports `tailwind.preset.ts` + `src/tokens.css`; both `apps/web` and `apps/design-studio` import `@nexus/design-tokens/tokens.css` + use the preset.
-- Brand package: `packages/nexus-ui` — `@42ch/nexus-ui` exports `theme.css`, `tokens`, logo SVGs, `<NexusLogo>`/`<NexusMark>` (V1.87).
-- Web implementation: `apps/web` consumes `@nexus/design-tokens` + `@42ch/nexus-ui`; `NexusLogo` thin wrapper imports `@42ch/nexus-ui/assets/logos/logo-color.svg` and passes the resolved URL to the package's `<NexusLogo variant src>`.
+- Brand package: `packages/nexus-ui` — `@42ch/nexus-ui` exports `theme.css`, `tokens` (`logoVariants`), logo SVGs, `<NexusLogo>` / `<NexusMark>` / Studio `<NexusLogoVariant>`.
+- Web implementation: `apps/web` consumes `@nexus/design-tokens` + `@42ch/nexus-ui`; shell `NexusLogo` wrapper always imports `logo-primary.svg` and passes it as `src` (theme-stable plate).
 - Gallery consumer: `apps/design-studio` — read-only Vite SPA visualizing every token scale + brand VI + all `apps/web` ui primitives (via `@web-ui/*` transitional alias) + Voice/Surface fixtures; runs without the daemon; not embedded in `nexus42`.
+
+---
+
+## Chronos dual-role + timeline logo (`2026-07-22-vi-logo-upgrade`)
+
+Chronos Light/Dark shells share one brand language via an explicit **dual-role** model. Normative tables live in root `DESIGN.md`; this section is the agent-facing operational summary.
+
+### Ink structure vs cyan signal
+
+| Role | Token(s) | Hex | Use for | Do **not** use for |
+| --- | --- | --- | --- | --- |
+| **Ink structure** | `brand-deep-blue` | `#0D2B3E` | Titlebar fill, light **text links**, primary **label** on cyan CTAs, connection-setup **security-note** washes, logo plate structure | Light interactive fills; dark chrome fills (guard only) |
+| **Cyan signal** | `brand-cyan` / light+dark `blue-700`…`blue-1000` | `#25D1E0` (+ tuned steps) | Primary Button fill, active nav bar, focus-ring outer, selection, timeline accents, checked chrome, graphical signal icons | Body/paragraph text on light; "deep structure" washes |
+
+**Token strategy:** light interactive `blue-700/800/900/1000` was flipped to the **cyan** scale (mirroring dark). Component tokens that already referenced `{colors.blue-700}` become cyan in **both** themes without renaming CSS keys. Ink structure must use **`brand-deep-blue` explicitly**.
+
+### Failure mode that cost a QC fix-wave (W-001)
+
+After the light `blue-700` → cyan flip, surfaces that still meant **deep structure** but used `border-blue-700/20 bg-blue-700/10 text-blue-700` rendered as **cyan washes**. Fingerprint trust/match cards on connection-setup violated `DESIGN.md` `connection-setup.security-note`. Fix: deep-ink classes (`border-brand-deep-blue/20`, `bg-brand-deep-blue/10`, `text-brand-deep-blue`) + regression assertions that **exclude** `blue-700` on those nodes.
+
+**Heuristic:** if DESIGN or a component token names ink/structure/security-note/titlebar/link-on-light, use `brand-deep-blue` — never assume `blue-700` still means deep.
+
+### Timeline logo system
+
+| Variant key (`logoVariants`) | Asset | Role |
+| --- | --- | --- |
+| `primary` | `logo-primary.svg` | **Default** lockup — bright mark on brand deep-blue **plate** (square). App shell + Studio shell + desktop `icons:compose` source. |
+| `whiteBg` | `logo-white-bg.svg` | White plate lockup **only** when a light/white surface is required. |
+| `white` | `logo-white.svg` | Dark-gray→white gradient mark for dark heroes (no plate). |
+| `mono` | `logo-mono.svg` | Light-gray→black gradient static mark; tintable UI uses `<NexusMark>` (`currentColor`). |
+| `text` | `logo-text.svg` | Wordmark (`currentColor`); path geometry fitted from PNG provenance. |
+
+**Removed:** `logo-color.svg` / `logoVariants.color` — redundant with primary plate; do not resurrect.
+
+**Shell rule:** product and Studio chrome use **primary only** (theme-stable). Do not theme-split shell logos (`primary` light / `whiteBg` or `color` dark). Theme specimens (`elegant` / `nature` / `parchment` / `scifi`) are Studio-only via `<NexusLogoVariant>` (hand-authored JSX palettes, not runtime assets).
+
+**Geometry:** plate lockups (`primary`, `whiteBg`) are square; transparent marks and `<NexusMark>` are wide (~10:1) — prefer `height` + `width: auto`.
+
+### Audit pattern additions (Chronos)
+
+- Button: assert `bg-brand-cyan` + `text-brand-deep-blue` in **both** themes; assert absence of light deep-fill primary and of `dark:bg-brand-cyan` forks that imply a split recipe.
+- Links: light retry/list links assert `text-brand-deep-blue`; grepping light `text-blue-700` on link-like roles is a smell.
+- Security / structure washes: assert `brand-deep-blue` alpha classes and **no** `blue-700` on those nodes.
+- Logos: `logoVariants` keys are `primary | whiteBg | white | mono | text` only; shell wrappers import `logo-primary.svg` only.
 
 ---
 

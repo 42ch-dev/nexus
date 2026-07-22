@@ -76,7 +76,7 @@ Documented in `package.json` `exports` and `README.md`. Do not rely on undocumen
 
 ### Component export strategy
 
-- **`<NexusLogo>`**: bundler-agnostic — accepts `src` prop (consumer resolves SVG URL through their bundler, e.g. Vite). Does not import `.svg` files. Variants: `primary` \| `color` \| `white` \| `mono` \| `text`.
+- **`<NexusLogo>`**: bundler-agnostic — accepts `src` prop (consumer resolves SVG URL through their bundler, e.g. Vite). Does not import `.svg` files. Variants: `primary` \| `whiteBg` \| `white` \| `mono` \| `text` (no `color`; default shell uses `primary`).
 - **`<NexusMark>`**: hand-authored wide timeline SVG JSX (no asset import) — inherits color via `currentColor`; height-driven / `w-auto` friendly.
 - **`<NexusLogoVariant>`**: hand-authored timeline specimens with palette props (Studio Brand only). No asset import; not wired as a product theme preference.
 

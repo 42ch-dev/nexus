@@ -260,6 +260,6 @@ Public `logoVariants` keys stay `primary | color | white | mono`; add `text` for
 |------|---------|------|-------|
 | QA (mandatory — brand / Chronos / Studio / desktop compose) | **Accept with residuals** | 2026-07-22 | Must DoD themes pass; 216 scoped tests + `icons:compose`; Dock runtime smoke deferred |
 
-**Residuals (6 open, all low — non-blocking):** `residual_findings["2026-07-22-vi-logo-upgrade"]` — R-VI-001 … R-VI-006 (dark-theme test gap, Setup/Settings Chronos notes, Dock smoke, wordmark polish, stale knowledge + `packages/nexus-ui/AGENTS.md`).
+**Residuals (4 open, all low — non-blocking):** `residual_findings["2026-07-22-vi-logo-upgrade"]` — R-VI-001 … R-VI-004 (dark-theme test gap, Setup/Settings Chronos notes, Dock smoke, wordmark polish). **Closed in compound:** R-VI-005 (knowledge doc), R-VI-006 (`packages/nexus-ui/AGENTS.md`) → `.mstar/archived/residuals/2026-07-22-vi-logo-upgrade.json`.
 
 **Plan verdict: Done.** Ready for PR `plan/vi-logo-upgrade` → `main` (squash).
