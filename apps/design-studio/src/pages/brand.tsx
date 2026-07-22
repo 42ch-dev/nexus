@@ -23,6 +23,7 @@ import logoMonoSrc from '@42ch/nexus-ui/assets/logos/logo-mono.svg';
 import logoTextSrc from '@42ch/nexus-ui/assets/logos/logo-text.svg';
 
 import { StudioShellLogo } from '@/components/studio-shell-logo';
+import { ViBrandAcceptanceFixtures } from '@/fixtures/vi-aesthetic-retune-fixtures';
 
 /* ------------------------------------------------------------------ */
 /*  Static data                                                         */
@@ -146,6 +147,7 @@ function SubNav() {
     { label: 'Specimens', href: '#brand-specimens' },
     { label: 'Theme CSS', href: '#brand-theme-css' },
     { label: 'Clear space', href: '#brand-clear-space' },
+    { label: 'VI acceptance', href: '#brand-vi-acceptance' },
   ];
 
   return (
@@ -596,6 +598,22 @@ export function BrandPage() {
       <SpecimensSection />
       <ThemeCssSwatches />
       <ClearSpaceSection />
+
+      <section id="brand-vi-acceptance" className="scroll-mt-16">
+        <h3 className="text-heading-20 font-semibold text-gray-1000 mb-2 pt-8">
+          VI acceptance (P2)
+        </h3>
+        <p
+          data-testid="brand-vi-acceptance-note"
+          className="text-copy-16 text-gray-700 mb-6"
+        >
+          Target states for VI-003, VI-004, and VI-005 — compact timeline mark scale, app icon
+          inset compose, and plain vs{' '}
+          <code className="font-mono bg-gray-alpha-100 px-1 rounded">*-square</code> asset split.
+          Toggle light/dark in the chrome. App wiring follows Studio acceptance (T3+).
+        </p>
+        <ViBrandAcceptanceFixtures />
+      </section>
 
       <p className="text-copy-13 text-gray-500 mt-12 pt-8 border-t border-gray-alpha-200">
         Assets from <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">@42ch/nexus-ui</code>

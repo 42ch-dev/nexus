@@ -19,6 +19,10 @@ import { Spinner, LoadingState, EmptyState, ErrorState } from '@web-ui/states'; 
 import { ToastFixtures } from '@/fixtures/toast-fixtures';
 import { TransportErrorBlockFixtures } from '@/fixtures/transport-error-block';
 import {
+  ViButtonAcceptanceFixtures,
+  ViTransportErrorAcceptanceFixtures,
+} from '@/fixtures/vi-aesthetic-retune-fixtures';
+import {
   Table,
   TableHeader,
   TableBody,
@@ -104,6 +108,7 @@ function SubNav() {
     { label: 'Form Field', href: '#comp-form-field' },
     { label: 'Toast', href: '#comp-toast' },
     { label: 'Transport Error', href: '#comp-transport-error-block' },
+    { label: 'VI acceptance', href: '#comp-vi-acceptance' },
   ];
 
   return (
@@ -1216,6 +1221,20 @@ export function ComponentsPage() {
       <FormFieldSection />
       <ToastSection />
       <TransportErrorBlockSection />
+
+      <section id="comp-vi-acceptance" data-testid="comp-vi-acceptance" className="scroll-mt-16">
+        <SectionHeading id="comp-vi-acceptance-heading">VI acceptance (P2)</SectionHeading>
+        <p
+          data-testid="comp-vi-acceptance-note"
+          className="text-copy-16 text-gray-700 mb-6"
+        >
+          Target states for VI-002 — theme-aware primary Button and TransportError Retry in light +
+          dark shells. Current package primitives render above each target mock. Toggle the theme
+          to verify both shells.
+        </p>
+        <ViButtonAcceptanceFixtures />
+        <ViTransportErrorAcceptanceFixtures />
+      </section>
 
       <p className="text-copy-13 text-gray-500 mt-12 pt-8 border-t border-gray-alpha-200">
         9 promoted (Badge, Button, Card, Input, Label, Textarea, Select, Toast,
