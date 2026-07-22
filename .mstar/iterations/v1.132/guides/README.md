@@ -8,4 +8,7 @@ Exploration and process notes for this iteration. **Normative contracts** live i
 | Compass | [../delivery-compass.md](../delivery-compass.md) |
 | Specs | [../specs/](../specs/) |
 
-No standalone guides yet. Add iteration-scoped process notes here — not under `knowledge/` or `specs/`.
+| Guide | Path |
+|-------|------|
+| P0 orch-load-404 RCA (T1) | [p0-orch-load-404-rca.md](./p0-orch-load-404-rca.md) |
+| P0 orch-load-404 dogfood (T5) | [p0-orch-load-404-dogfood.md](./p0-orch-load-404-dogfood.md) |
