@@ -144,7 +144,7 @@
     },
     {
       "id": "2026-07-22-v1.132-p3-creator-orch-gongnengqu-ia",
-      "status": "InReview",
+      "status": "Done",
       "file": ".mstar/plans/2026-07-22-v1.132-p3-creator-orch-gongnengqu-ia.md",
       "metadata": {
         "primary_spec": ".mstar/iterations/v1.132/specs/creator-orch-gongnengqu-ia.md",
@@ -156,14 +156,10 @@
         "merge_target": "iteration/v1.132",
         "wire_contracts_changed": false,
         "wave": "3",
-        "seq": "3"
-      },
-      "execution_lease": {
-        "holder": "pm-v1.132-btwoods-MBP",
-        "claimed_at": "2026-07-22T15:16:27Z",
-        "worktree_path": "/Users/bibi/workspace/organizations/42ch/nexus/.worktrees/v1.132-p3-creator-orch-gongnengqu-ia",
-        "working_branch": "plan/v1.132-p3-creator-orch-gongnengqu-ia",
-        "session_label": "v1.132-phase2-wave3"
+        "seq": "3",
+        "merge_commit": "30f817b38106d5a94d73edd19aeb20290f51f1fb",
+        "merged_at": "2026-07-22T16:00:15Z",
+        "qa_verdict": "Pass"
       },
       "task_commits": [
         {
@@ -247,15 +243,7 @@
       }
     },
     "updated_at": "2026-07-22",
-    "control_worktree_path": "/Users/bibi/workspace/organizations/42ch/nexus",
-    "integration_merge_lease": {
-      "holder": "pm-v1.132-btwoods-MBP",
-      "claimed_at": "2026-07-22T16:00:15Z",
-      "plan_id": "2026-07-22-v1.132-p3-creator-orch-gongnengqu-ia",
-      "source_branch": "plan/v1.132-p3-creator-orch-gongnengqu-ia",
-      "target_branch": "iteration/v1.132",
-      "session_label": "v1.132-p3-merge"
-    }
+    "control_worktree_path": "/Users/bibi/workspace/organizations/42ch/nexus"
   },
   "residual_findings": {
     "2026-07-05-v1.92-closure": [
