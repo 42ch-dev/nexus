@@ -1,33 +1,7 @@
 {
   "version": 1,
   "updated_at": "2026-07-22",
-  "plans": [
-    {
-      "plan_id": "2026-07-22-v1.131-p3-desktop-icons-residuals",
-      "status": "InReview",
-      "type": "feature",
-      "file": ".mstar/plans/2026-07-22-v1.131-p3-desktop-icons-residuals.md",
-      "metadata": {
-        "primary_spec": ".mstar/iterations/v1.131/specs/desktop-icons-residuals.md",
-        "spec_refs": [
-          ".mstar/iterations/v1.131/specs/desktop-icons-residuals.md"
-        ],
-        "iteration_refs": [
-          ".mstar/iterations/v1.131/delivery-compass.md"
-        ],
-        "iteration_compass": "v1.131/delivery-compass.md",
-        "spec_integration_branch": "iteration/v1.131",
-        "working_branch": "plan/v1.131-p3-desktop-icons-residuals",
-        "merge_target": "iteration/v1.131",
-        "wire_contracts_changed": false,
-        "iteration_id": "V1.131",
-        "blocked_by": [],
-        "wave": "3",
-        "seq": "3",
-        "description": "Desktop icon verify + residual slate-clear"
-      }
-    }
-  ],
+  "plans": [],
   "metadata": {
     "integration_branch_retired": false,
     "iteration_base_branch": "main",
@@ -629,7 +603,7 @@
         "owner": "@ops-engineer / @qa-engineer",
         "target": "manual",
         "lifecycle": "open",
-        "note": "Criteria in apps/desktop/src-tauri/icons/README.md; run Dock smoke before release packaging. Compose+README done (hashes source-1024.png c3be7c369ddb51ccb9cdcd436e22bf09996342074be48907bfc5238c23a7e724 / app-icon-preview-256.png da273c62a7927505d4f27d3fea6aeae0fd923f784b26c2c4f1900be3d516be8d). Trigger: mandatory QA rebuilt `.app` Dock live smoke after cache invalidation per README (quit/rebuild/killall Dock/relaunch + stale-bundle removal)."
+        "note": "Criteria in apps/desktop/src-tauri/icons/README.md. Compose+README done (hashes source-1024.png c3be7c369ddb51ccb9cdcd436e22bf09996342074be48907bfc5238c23a7e724 / app-icon-preview-256.png da273c62a7927505d4f27d3fea6aeae0fd923f784b26c2c4f1900be3d516be8d). QA 2026-07-22 attempt: refreshed Nexus.app Resources/Nexus.icns to match generated icon.icns (SHA-256 85272d78b62e5e4597c7d3426ea5cd166e8cc692361876e23006f7916d494c8b), killall Dock, open release .app succeeded (nexus-desktop pid observed). Dock tile visual FAIL-to-verify: screencapture TCC blocked ('could not create image from display'). Owner: @ops-engineer / @qa-engineer / human. Trigger: human Dock tile confirm Chronos primary plate mark after quit/rebuild-or-reinstall/killall Dock/relaunch (+ stale-bundle removal if needed)."
       },
       {
         "id": "R-VI-004",
