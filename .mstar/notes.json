@@ -3,6 +3,11 @@
   "updated_at": "2026-07-22",
   "entries": [
     {
+      "at": "2026-07-22 (PR #167 reviews)",
+      "message": "PR #167 reviews: Security automation no findings; Bugbot Approve with 5 nit-only findings registered R-VI-007..011 (stale JSDoc/comments, dead ChronosShellMini ternary, design-studio logoVariants count). Cursor approval agents APPROVED. Merging squash to main.",
+      "plan_id": "2026-07-22-vi-logo-upgrade"
+    },
+    {
       "at": "2026-07-22 (VI logo compound)",
       "message": "Compound for 2026-07-22-vi-logo-upgrade: updated nexus-brand-token-hierarchy.md (Chronos dual-role ink vs cyan, primary Button lock, timeline logo table, W-001 blue-700-as-structure trap) + bundler-agnostic-component-library-assets.md (shell primary-only) + packages/nexus-ui/AGENTS.md logo variants. Closed R-VI-005/R-VI-006. Open remain R-VI-001..004.",
       "plan_id": "2026-07-22-vi-logo-upgrade"

@@ -251,6 +251,8 @@ Public `logoVariants` keys stay `primary | color | white | mono`; add `text` for
 | QC2 | **Request Changes** → **Approve** | 2026-07-22 | W-001 connection-setup security notes used cyan `blue-700` washes; fixed `492b5b8e` to deep-ink `brand-deep-blue`; targeted revalidation Approve |
 | QC3 | **Approve** | 2026-07-22 | 0 Critical / 0 Warning |
 | Consolidated | **Approve** | 2026-07-22 | Post-range logo corrections (primary plate, remove `logo-color`, shell primary-only, wordmark refit) on branch through `492b5b8e` |
+| PR security automation | **No findings** | 2026-07-22 | PR #167 — no medium/high/critical |
+| PR Bugbot | **Approve** (nits only) | 2026-07-22 | PR #167 @ `342476ea` — R-VI-007…011 registered |
 
 ## QA Gate Summary
 
@@ -260,6 +262,6 @@ Public `logoVariants` keys stay `primary | color | white | mono`; add `text` for
 |------|---------|------|-------|
 | QA (mandatory — brand / Chronos / Studio / desktop compose) | **Accept with residuals** | 2026-07-22 | Must DoD themes pass; 216 scoped tests + `icons:compose`; Dock runtime smoke deferred |
 
-**Residuals (4 open, all low — non-blocking):** `residual_findings["2026-07-22-vi-logo-upgrade"]` — R-VI-001 … R-VI-004 (dark-theme test gap, Setup/Settings Chronos notes, Dock smoke, wordmark polish). **Closed in compound:** R-VI-005 (knowledge doc), R-VI-006 (`packages/nexus-ui/AGENTS.md`) → `.mstar/archived/residuals/2026-07-22-vi-logo-upgrade.json`.
+**Residuals (open):** R-VI-001…004 (QA, low) + R-VI-007…011 (Bugbot PR #167, nit — stale JSDoc/comments, dead ternary, design-studio logoVariants count). **Closed in compound:** R-VI-005/006 → `.mstar/archived/residuals/2026-07-22-vi-logo-upgrade.json`.
 
-**Plan verdict: Done.** Ready for PR `plan/vi-logo-upgrade` → `main` (squash).
+**Plan verdict: Done.** Squash-merged via PR #167 → `main`.
