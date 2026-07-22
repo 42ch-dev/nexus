@@ -40,26 +40,26 @@
       "pr": "https://github.com/42ch-dev/nexus/pull/162",
       "merge_commit": "d59311de"
     },
-    "platform_integration": "paused — local-only until further notice",
+    "platform_integration": "paused \u2014 local-only until further notice",
     "spec_integration_branch": "iteration/v1.131",
     "spec_refs_index": ".mstar/specs/README.md",
     "target_branch": "main",
     "tech_debt_summary": {
       "updated_at": "2026-07-22",
-      "total_open": 71,
+      "total_open": 63,
       "by_severity": {
         "critical": 0,
         "high": 0,
-        "medium": 1,
-        "low": 13,
-        "nit": 57
+        "medium": 2,
+        "low": 10,
+        "nit": 51
       },
       "by_target": {
+        "V1.131 dogfood / PR merge-ready": 1,
         "V1.96": 1,
-        "manual": 1,
         "post-V1.129": 12,
-        "post-V1.130": 12,
-        "post-ship": 8,
+        "post-V1.130": 10,
+        "post-ship": 2,
         "unspecified": 37
       },
       "by_plan": {
@@ -74,9 +74,10 @@
         "2026-07-21-v1.129-p0-profile-create-reliability": 6,
         "2026-07-21-v1.129-p1-transport-error-ux": 6,
         "2026-07-22-v1.130-p0-daemon-restart": 6,
-        "2026-07-22-v1.130-p1-shell-frame": 3,
+        "2026-07-22-v1.130-p1-shell-frame": 1,
         "2026-07-22-v1.130-p4-vi-atmosphere": 3,
-        "2026-07-22-vi-logo-upgrade": 9
+        "2026-07-22-v1.131-p0-chronos-titlebar": 1,
+        "2026-07-22-vi-logo-upgrade": 2
       }
     },
     "updated_at": "2026-07-22"
@@ -92,7 +93,7 @@
         "target": "V1.96",
         "lifecycle": "open",
         "tracking_link": "https://github.com/42ch-dev/nexus/pull/120#pullrequestreview-4632744387",
-        "note": "Desktop Tauri cert pinning — defer to V1.96."
+        "note": "Desktop Tauri cert pinning \u2014 defer to V1.96."
       }
     ],
     "2026-07-22-v1.130-p0-daemon-restart": [
@@ -109,7 +110,7 @@
       {
         "id": "R-V1130P0-QC1-W-002",
         "severity": "low",
-        "title": "Foreign-port kill gap remains in stop_listening_daemon (quit path) — pre-existing",
+        "title": "Foreign-port kill gap remains in stop_listening_daemon (quit path) \u2014 pre-existing",
         "lifecycle": "open",
         "decision": "defer",
         "owner": "@fullstack-dev",
@@ -166,7 +167,7 @@
         "decision": "defer",
         "owner": "@frontend-dev",
         "target": "post-V1.130",
-        "note": "Contrast table in DESIGN.md still shows old ratios. New #0D2B3E is darker → ratios are equal or better. Recompute in polish pass."
+        "note": "Contrast table in DESIGN.md still shows old ratios. New #0D2B3E is darker \u2192 ratios are equal or better. Recompute in polish pass."
       },
       {
         "id": "R-V1130P4-QC1-S-002",
@@ -199,26 +200,6 @@
         "owner": "@fullstack-dev",
         "target": "post-V1.130",
         "note": "Current implementation reads first page only. Full spec compliance needs pagination loop + desktop active-creator switch IPC."
-      },
-      {
-        "id": "R-V1130P1-QC1-W-003",
-        "severity": "low",
-        "title": "SettingsModalHost created but not wired into header/titlebar",
-        "lifecycle": "open",
-        "decision": "defer",
-        "owner": "@frontend-dev",
-        "target": "post-V1.130",
-        "note": "Component exists at settings-modal-host.tsx but header gear still links to /settings. Wire in polish pass."
-      },
-      {
-        "id": "R-V1130P1-QC1-S-001",
-        "severity": "nit",
-        "title": "Studio fixtures (T1) deferred",
-        "lifecycle": "open",
-        "decision": "defer",
-        "owner": "@frontend-dev",
-        "target": "post-V1.130",
-        "note": "Studio dual-pane/titlebar/modal fixtures not created. Add in polish pass."
       }
     ],
     "2026-07-12-v1.112-i18n-ui-migration": [],
@@ -317,14 +298,14 @@
         "severity": "low",
         "title": "Single-commit policy: 4 commits instead of 1",
         "lifecycle": "open",
-        "notes": "Single-commit policy — resolves at PR squash-merge."
+        "notes": "Single-commit policy \u2014 resolves at PR squash-merge."
       },
       {
         "id": "R-V1126P2-QC-W-005",
         "severity": "low",
         "title": "total_worlds re-counted per page",
         "lifecycle": "open",
-        "notes": "total_worlds re-counted per page — V1.127+ polish."
+        "notes": "total_worlds re-counted per page \u2014 V1.127+ polish."
       },
       {
         "id": "R-V1126P2-QC-S-001",
@@ -431,14 +412,14 @@
       {
         "id": "R-V1127P0-QC-S-002",
         "severity": "nit",
-        "title": "T2 has_more documentation drift — plan/spec/briefs/compass all reference has_more but schema has only cursor",
+        "title": "T2 has_more documentation drift \u2014 plan/spec/briefs/compass all reference has_more but schema has only cursor",
         "lifecycle": "open",
         "notes": "V1.128+ polish. Spec/plan/compass docs need has_more references corrected to cursor-only."
       },
       {
         "id": "R-V1127P0-QC-S-003",
         "severity": "nit",
-        "title": "T2 worlds-page Load More is activity-enrichment not list pagination — label may mislead",
+        "title": "T2 worlds-page Load More is activity-enrichment not list pagination \u2014 label may mislead",
         "lifecycle": "open",
         "notes": "V1.128+ polish. apps/web/src/pages/worlds-page.tsx:194-209."
       },
@@ -473,7 +454,7 @@
       {
         "id": "R-V1127P0-QC-S-008",
         "severity": "nit",
-        "title": "T4/T5/T6 documentation comments — capture-phase trade-off, history-replaceState, residual lifecycle notes (qc2 S-004/S-005/S-006)",
+        "title": "T4/T5/T6 documentation comments \u2014 capture-phase trade-off, history-replaceState, residual lifecycle notes (qc2 S-004/S-005/S-006)",
         "lifecycle": "open",
         "notes": "V1.128+ polish. selection-submenu.tsx:121-126 + sidebar.tsx:103-112 + archived residual file."
       }
@@ -487,7 +468,7 @@
         "title": "Work Timeline lacks host-level NLE overlay test",
         "lifecycle": "open",
         "tracking_link": ".mstar/plans/2026-07-20-v1.128-p1-nle-timeline-canvas.md#Review Gate Summary",
-        "notes": "Work Timeline host-level NLE overlay test missing — defer."
+        "notes": "Work Timeline host-level NLE overlay test missing \u2014 defer."
       }
     ],
     "2026-07-20-v1.128-p2-creator-create-controller-shell": [
@@ -504,7 +485,7 @@
       {
         "id": "R-V1129P0-QC1-M-001",
         "severity": "nit",
-        "title": "Inline ctr_local… id-gen duplicates nexus-creator::local_identity::generate_local_id pattern",
+        "title": "Inline ctr_local\u2026 id-gen duplicates nexus-creator::local_identity::generate_local_id pattern",
         "lifecycle": "open",
         "decision": "defer",
         "owner": "@fullstack-dev",
@@ -549,7 +530,7 @@
         "decision": "defer",
         "owner": "@frontend-dev",
         "target": "post-V1.129",
-        "note": "No XSS mitigation for display_name — local-only exposure."
+        "note": "No XSS mitigation for display_name \u2014 local-only exposure."
       },
       {
         "id": "R-V1129P0-QC3-M-002",
@@ -626,18 +607,6 @@
     ],
     "2026-07-22-vi-logo-upgrade": [
       {
-        "id": "R-VI-001",
-        "title": "Chronos gallery acceptance tests are light-biased (no explicit dark-theme toggle assertions)",
-        "severity": "low",
-        "source": "QA qa.md",
-        "scope": "apps/design-studio Chronos gallery acceptance tests",
-        "decision": "defer",
-        "owner": "@frontend-dev",
-        "target": "post-ship",
-        "lifecycle": "open",
-        "note": "mockMatchMedia light-biased; add dark-only class assertions on primary button / token swatches."
-      },
-      {
         "id": "R-VI-002",
         "title": "No dedicated Chronos notes on Setup/Settings surface fixture pages",
         "severity": "low",
@@ -647,23 +616,11 @@
         "owner": "@frontend-dev",
         "target": "post-ship",
         "lifecycle": "open",
-        "note": "Surfaces index mentions setup in prose only; add *-chronos-note fixtures if gallery intros expand."
-      },
-      {
-        "id": "R-VI-003",
-        "title": "macOS Dock runtime visual smoke not verified (compose + preview only)",
-        "severity": "low",
-        "source": "QA qa.md",
-        "scope": "apps/desktop icons Dock",
-        "decision": "defer",
-        "owner": "@ops-engineer",
-        "target": "manual",
-        "lifecycle": "open",
-        "note": "Criteria in apps/desktop/src-tauri/icons/README.md; run Dock smoke before release packaging."
+        "note": "P3 verify 2026-07-22: gallery pages have *-chronos-note (home/tokens/button/brand/surfaces) but no dedicated setup/settings chronos-note fixtures. Owner @frontend-dev; trigger: add setup-chronos-note / settings-chronos-note when gallery intros for Setup/Settings surfaces expand."
       },
       {
         "id": "R-VI-004",
-        "title": "Wordmark visual polish — no human visual sign-off on logo-text.svg",
+        "title": "Wordmark visual polish \u2014 no human visual sign-off on logo-text.svg",
         "severity": "low",
         "source": "QA qa.md",
         "scope": "packages/nexus-ui/assets/logos/logo-text.svg",
@@ -671,78 +628,13 @@
         "owner": "@frontend-dev",
         "target": "post-ship",
         "lifecycle": "open",
-        "note": "Potrace-fitted wordmark; optional design review for stroke fidelity."
-      },
-      {
-        "id": "R-VI-007",
-        "title": "nexus-logo.tsx JSDoc still lists removed color variant",
-        "severity": "nit",
-        "source": "Bugbot PR #167 @ 342476ea",
-        "scope": "packages/nexus-ui/src/components/nexus-logo.tsx",
-        "decision": "defer",
-        "owner": "@frontend-dev",
-        "target": "post-ship",
-        "lifecycle": "open",
-        "tracking_link": "https://github.com/42ch-dev/nexus/pull/167",
-        "note": "Header comment says primary|color|white|mono; runtime logoVariants is primary|whiteBg|white|mono|text."
-      },
-      {
-        "id": "R-VI-008",
-        "title": "StudioShellLogo comment claims .dark theme read it does not implement",
-        "severity": "nit",
-        "source": "Bugbot PR #167 @ 342476ea",
-        "scope": "apps/design-studio/src/components/studio-shell-logo.tsx",
-        "decision": "defer",
-        "owner": "@frontend-dev",
-        "target": "post-ship",
-        "lifecycle": "open",
-        "tracking_link": "https://github.com/42ch-dev/nexus/pull/167",
-        "note": "Comment drift after shell became theme-stable primary-only."
-      },
-      {
-        "id": "R-VI-009",
-        "title": "logoShellHeightPx comment assumes wide mark; primary plate is square",
-        "severity": "nit",
-        "source": "Bugbot PR #167 @ 342476ea",
-        "scope": "packages/nexus-ui/src/tokens.ts",
-        "decision": "defer",
-        "owner": "@frontend-dev",
-        "target": "post-ship",
-        "lifecycle": "open",
-        "tracking_link": "https://github.com/42ch-dev/nexus/pull/167",
-        "note": "Comment cites ~10.14:1 width; shell uses logo-primary plate viewBox 284x284."
-      },
-      {
-        "id": "R-VI-010",
-        "title": "Dead identical ternary in ChronosShellMini titlebar",
-        "severity": "nit",
-        "source": "Bugbot PR #167 @ 342476ea",
-        "scope": "apps/design-studio/src/pages/brand.tsx",
-        "decision": "defer",
-        "owner": "@frontend-dev",
-        "target": "post-ship",
-        "lifecycle": "open",
-        "tracking_link": "https://github.com/42ch-dev/nexus/pull/167",
-        "note": "isDark ? 'bg-brand-deep-blue' : 'bg-brand-deep-blue' leftover from theme-split attempt."
-      },
-      {
-        "id": "R-VI-011",
-        "title": "design-studio spec checklist still says four logoVariants",
-        "severity": "nit",
-        "source": "Bugbot PR #167 @ 342476ea",
-        "scope": ".mstar/specs/design-studio.md",
-        "decision": "defer",
-        "owner": "@writing-specialist",
-        "target": "post-ship",
-        "lifecycle": "open",
-        "tracking_link": "https://github.com/42ch-dev/nexus/pull/167",
-        "note": "Package exposes five keys (primary|whiteBg|white|mono|text); checklist says four."
+        "note": "P1 T2 resized wordmark in Studio (925cbee4) but human cap-height \u226560% sign-off not recorded (jsdom cannot measure SVG painted bounds; P1 QA notes \u2192 P3). Owner @frontend-dev; trigger: human Studio measure/screenshot confirming painted cap-height \u226560% of mark height."
       }
     ],
     "2026-07-22-v1.131-p0-chronos-titlebar": [
       {
         "id": "R-V1131P0-QC2-W-001",
-        "title": "macOS Overlay titlebar live smoke — native H2–H4/D2 still unverified",
+        "title": "macOS Overlay titlebar live smoke \u2014 native H2\u2013H4/D2 still unverified",
         "severity": "medium",
         "source": "QC2 F-002; macos-overlay-smoke.md; QA revalidation qa.md",
         "scope": "apps/desktop Overlay titlebar; Chronos empty-paint drag/double-click",
@@ -750,7 +642,7 @@
         "owner": "human / @qa-engineer",
         "target": "V1.131 dogfood / PR merge-ready",
         "lifecycle": "open",
-        "note": "PM Done disposition 2026-07-22: product code+compile+H1/D1/H5/H6 Pass (9e33ed00). Agent cannot grant Screen Recording+Accessibility TCC for H2–H4/D2. Human Overlay smoke still required before residual close. Protocol: .mstar/sdd/2026-07-22-v1.131-p0-chronos-titlebar/review/macos-overlay-smoke.md"
+        "note": "P3 2026-07-22: still not archivable \u2014 human Overlay H2\u2013H4/D2 smoke required (agent TCC cannot grant Screen Recording/Accessibility). Product code+compile+H1/D1/H5/H6 Pass (9e33ed00). Protocol: .mstar/sdd/2026-07-22-v1.131-p0-chronos-titlebar/review/macos-overlay-smoke.md"
       }
     ]
   }
