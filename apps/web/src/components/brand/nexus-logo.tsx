@@ -1,6 +1,6 @@
 import logoColor from '@42ch/nexus-ui/assets/logos/logo-color.svg';
 import logoPrimary from '@42ch/nexus-ui/assets/logos/logo-primary.svg';
-import { NexusLogo as NexusLogoComponent } from '@42ch/nexus-ui';
+import { NexusLogo as NexusLogoComponent, logoMinSizePx } from '@42ch/nexus-ui';
 
 import { useTheme } from '@/components/theme-provider';
 import { cn } from '@/lib/utils';
@@ -12,11 +12,11 @@ export interface NexusLogoProps {
 }
 
 /**
- * Theme-aware Nexus wordmark — thin wrapper around `@42ch/nexus-ui`.
+ * Theme-aware Nexus timeline mark — thin wrapper around `@42ch/nexus-ui`.
  *
- * Resolves the SVG asset via Vite and maps the current theme to the canonical
- * package variant, preserving the zero-prop call-site ergonomics in
- * `sidebar.tsx` and `header.tsx`.
+ * Shell placement is **mark only** (no wordmark): `primary` on light, `color`
+ * on dark. Resolves SVG assets via Vite and preserves zero-prop call sites in
+ * `sidebar.tsx` / `header.tsx`. Wide aspect — size by height (`h-* w-auto`).
  */
 export function NexusLogo({ label = 'Nexus', className }: NexusLogoProps) {
   const { resolvedTheme } = useTheme();
@@ -28,8 +28,8 @@ export function NexusLogo({ label = 'Nexus', className }: NexusLogoProps) {
       variant={variant}
       src={src}
       label={label}
-      size={32}
-      className={cn('h-8 w-auto shrink-0', className)}
+      size={logoMinSizePx}
+      className={cn('h-6 w-auto shrink-0', className)}
     />
   );
 }

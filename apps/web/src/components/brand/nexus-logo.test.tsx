@@ -27,7 +27,7 @@ describe('NexusLogo', () => {
     });
   });
 
-  it('renders the deep-blue mark in light theme', () => {
+  it('renders the primary timeline mark in light theme', () => {
     mockedUseTheme.mockReturnValue({
       theme: 'light',
       resolvedTheme: 'light',
@@ -37,9 +37,11 @@ describe('NexusLogo', () => {
     render(<NexusLogo />);
     const logo = screen.getByRole('img', { name: 'Nexus' });
     expect(logo.getAttribute('src')).toContain('logo-primary.svg');
+    expect(logo).toHaveClass('h-6', 'w-auto', 'shrink-0');
+    expect(logo).toHaveAttribute('height', '24');
   });
 
-  it('renders the cyan mark in dark theme', () => {
+  it('renders the color timeline mark in dark theme', () => {
     mockedUseTheme.mockReturnValue({
       theme: 'dark',
       resolvedTheme: 'dark',
@@ -49,10 +51,17 @@ describe('NexusLogo', () => {
     render(<NexusLogo />);
     const logo = screen.getByRole('img', { name: 'Nexus' });
     expect(logo.getAttribute('src')).toContain('logo-color.svg');
+    expect(logo).toHaveClass('w-auto');
   });
 
   it('honors a custom accessible label', () => {
     render(<NexusLogo label="Nexus local workspace" />);
     expect(screen.getByRole('img', { name: 'Nexus local workspace' })).toBeInTheDocument();
+  });
+
+  it('allows className to override height while keeping w-auto', () => {
+    render(<NexusLogo className="h-7" />);
+    const logo = screen.getByRole('img', { name: 'Nexus' });
+    expect(logo).toHaveClass('h-7', 'w-auto');
   });
 });

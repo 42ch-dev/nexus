@@ -1,6 +1,6 @@
 # @42ch/nexus-ui — AGENTS.md
 
-Publishable npm workspace package for Nexus brand assets, design tokens, theme CSS, **React brand components** (`<NexusLogo>`, `<NexusMark>`), and V1.99-approved pure presentational primitives. V1.83 shipped the assets/tokens/theme foundation; V1.87 promoted the package to a React component library (adds `react` / `react-dom` as peer deps); V1.99 may promote a small UI primitive batch under the component-promotion boundary.
+Publishable npm workspace package for Nexus brand assets, design tokens, theme CSS, **React brand components** (`<NexusLogo>`, `<NexusMark>`, Studio-only `<NexusLogoVariant>`), and V1.99-approved pure presentational primitives. V1.83 shipped the assets/tokens/theme foundation; V1.87 promoted the package to a React component library (adds `react` / `react-dom` as peer deps); V1.99 may promote a small UI primitive batch under the component-promotion boundary.
 
 ## Promotion list (per-plan audit trail)
 

@@ -25,6 +25,9 @@ pnpm add @42ch/nexus-ui --workspace
 
 | Component | Import | Variants | Notes |
 |-----------|--------|----------|-------|
+| `NexusLogo` | `import { NexusLogo } from '@42ch/nexus-ui'` | `variant` (`primary`, `color`, `white`, `mono`, `text`) + consumer `src` | Bundler-agnostic `<img>`; wide timeline marks + wordmark |
+| `NexusMark` | `import { NexusMark } from '@42ch/nexus-ui'` | `size`, `label`, `className` | Inline timeline mark; `currentColor`; height-driven / `w-auto` |
+| `NexusLogoVariant` | `import { NexusLogoVariant } from '@42ch/nexus-ui'` | `theme` (`elegant`, `nature`, `parchment`, `scifi`) + optional `palette` | Studio-only specimens; no assets; not a product theme switcher |
 | `Button` | `import { Button } from '@42ch/nexus-ui'` | `variant` (`primary`, `secondary`, `tertiary`, `destructive`) + `size` (`small`, `default`, `large`) + `asChild` | Presentational only; no daemon or routing state |
 | `Badge` | `import { Badge } from '@42ch/nexus-ui'` | `variant` (`neutral`, `running`, `queued`, `warning`, `error`, `preset`) + `tone` (`soft`, `solid`; default `soft`) | 24px status pill; soft = tinted fill + strengthened border; solid = semantic fill + high-contrast text (opt-in) |
 | `Card` | `import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@42ch/nexus-ui'` | Five related sub-primitives; no variant axis | `Card` wraps content with border + shadow; `CardHeader`/`CardContent` layout helpers |

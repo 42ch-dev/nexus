@@ -1,8 +1,9 @@
 import { useRef, useState, type ReactNode } from 'react';
 import { NavLink, Outlet } from 'react-router-dom';
 
-import logoPrimary from '@42ch/nexus-ui/assets/logos/logo-primary.svg';
-import { NexusLogo, cn, Badge, Button } from '@42ch/nexus-ui';
+import { cn, Badge, Button } from '@42ch/nexus-ui';
+
+import { StudioShellLogo } from '@/components/studio-shell-logo';
 
 import {
   ShellSidebarChrome,
@@ -272,15 +273,7 @@ function ShellSidebarFixture() {
           activeRoute="#works"
           navGroups={groups}
           onTabChange={setActiveTab}
-          logo={
-            <NexusLogo
-              variant="primary"
-              src={logoPrimary}
-              label="Nexus"
-              size={32}
-              className="h-8 w-auto shrink-0"
-            />
-          }
+          logo={<StudioShellLogo />}
           footer={<FixtureFooterProfiles />}
         />
       </div>

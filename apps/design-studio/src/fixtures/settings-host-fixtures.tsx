@@ -29,7 +29,6 @@ import {
   Wifi,
   type LucideIcon,
 } from 'lucide-react';
-import logoPrimary from '@42ch/nexus-ui/assets/logos/logo-primary.svg';
 import {
   Button,
   Card,
@@ -37,8 +36,9 @@ import {
   CardHeader,
   CardTitle,
   cn,
-  NexusLogo,
 } from '@42ch/nexus-ui';
+
+import { StudioShellLogo } from '@/components/studio-shell-logo';
 
 import { Dialog, DialogContent } from '@web-ui/dialog'; // transitional — keep-web (Radix portal/focus-trap beyond presentational scope)
 
@@ -618,15 +618,7 @@ function SettingsShellChromeFixture() {
           activeRoute="#works"
           navGroups={groups}
           onTabChange={setActiveTab}
-          logo={
-            <NexusLogo
-              variant="primary"
-              src={logoPrimary}
-              label="Nexus"
-              size={32}
-              className="h-8 w-auto shrink-0"
-            />
-          }
+          logo={<StudioShellLogo />}
           footer={<SettingsFooterProfiles />}
         />
       </div>

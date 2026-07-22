@@ -34,7 +34,7 @@ export interface ShellSidebarChromeProps {
   activeRoute: string;
   navGroups: ShellNavGroup[];
   onTabChange: (tab: ShellSidebarTab) => void;
-  /** Optional logo slot — apps should pass their theme-aware wordmark. */
+  /** Optional logo slot — apps should pass their theme-aware timeline mark. */
   logo?: ReactNode;
   /** Optional footer slot rendered below the Settings utility (e.g. profile switcher). */
   footer?: ReactNode;

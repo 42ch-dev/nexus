@@ -6,8 +6,7 @@
  */
 import { useState, type ReactNode } from 'react';
 
-import logoPrimary from '@42ch/nexus-ui/assets/logos/logo-primary.svg';
-import { NexusLogo } from '@42ch/nexus-ui';
+import { StudioShellLogo } from '@/components/studio-shell-logo';
 
 import {
   CreatorShellContent,
@@ -97,15 +96,7 @@ function ShellWithContent({
           activeRoute={activeRoute}
           navGroups={CREATOR_NAV}
           onTabChange={setActiveTab}
-          logo={
-            <NexusLogo
-              variant="primary"
-              src={logoPrimary}
-              label="Nexus"
-              size={32}
-              className="h-8 w-auto shrink-0"
-            />
-          }
+          logo={<StudioShellLogo />}
         />
       </div>
       <div className="flex flex-1 flex-col justify-center bg-background-200 min-w-0 p-8">
