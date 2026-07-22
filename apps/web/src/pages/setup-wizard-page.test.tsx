@@ -39,6 +39,7 @@ function makeDesktop(overrides: Partial<DesktopCapabilities> = {}): DesktopCapab
       Promise.resolve({ creator_id: 'ctr_local1234567890ab', already_bootstrapped: false }),
     switchActiveCreator: () => Promise.resolve('/tmp/nexus'),
     restartDaemon: () => Promise.resolve(),
+    toggleMaximizeWindow: () => Promise.resolve(),
     ...overrides,
   };
 }

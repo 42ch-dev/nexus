@@ -1,5 +1,6 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 
 import {
   CHRONOS_TITLEBAR_DESKTOP_INSET_PX,
@@ -69,5 +70,33 @@ describe('ChronosTitlebarChrome', () => {
     expect(screen.getByTestId('chronos-titlebar-drag-spacer')).not.toHaveAttribute(
       'data-tauri-drag-region',
     );
+  });
+
+  it('fires onEmptyPaintDoubleClick from safe inset and drag spacer only', async () => {
+    const user = userEvent.setup();
+    const onEmptyPaintDoubleClick = vi.fn();
+
+    render(
+      <ChronosTitlebarChrome
+        title="Works"
+        isDark={false}
+        desktopSafeInset
+        onEmptyPaintDoubleClick={onEmptyPaintDoubleClick}
+        logo={<button type="button">Logo</button>}
+        settingsControl={<button type="button">Gear</button>}
+        themeToggle={<button type="button">Theme</button>}
+      />,
+    );
+
+    await user.dblClick(screen.getByTestId('chronos-titlebar-desktop-inset'));
+    await user.dblClick(screen.getByTestId('chronos-titlebar-drag-spacer'));
+    expect(onEmptyPaintDoubleClick).toHaveBeenCalledTimes(2);
+
+    onEmptyPaintDoubleClick.mockClear();
+    await user.dblClick(screen.getByRole('button', { name: 'Logo' }));
+    await user.dblClick(screen.getByRole('button', { name: 'Gear' }));
+    await user.dblClick(screen.getByRole('button', { name: 'Theme' }));
+    await user.dblClick(screen.getByTestId('chronos-titlebar-title'));
+    expect(onEmptyPaintDoubleClick).not.toHaveBeenCalled();
   });
 });

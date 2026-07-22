@@ -38,6 +38,7 @@ function makeDesktop(overrides: Partial<DesktopCapabilities> = {}): DesktopCapab
     }),
     switchActiveCreator: vi.fn().mockResolvedValue('/cached/root'),
     restartDaemon: vi.fn().mockResolvedValue(undefined),
+    toggleMaximizeWindow: vi.fn().mockResolvedValue(undefined),
     ...overrides,
   };
 }

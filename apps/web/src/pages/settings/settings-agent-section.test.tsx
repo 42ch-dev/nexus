@@ -48,6 +48,7 @@ function makeDesktop(
       }),
     switchActiveCreator: () => Promise.resolve('/tmp/nexus'),
     restartDaemon: () => Promise.resolve(),
+    toggleMaximizeWindow: () => Promise.resolve(),
     ...overrides,
   };
 }

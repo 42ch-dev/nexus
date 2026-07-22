@@ -15,6 +15,8 @@ export interface ChronosTitlebarChromeProps {
   settingsControl?: ReactNode;
   themeToggle?: ReactNode;
   healthIndicator?: ReactNode;
+  /** Desktop overlay: double-click empty paint (safe inset + drag spacer) to maximize. */
+  onEmptyPaintDoubleClick?: () => void;
   'data-testid'?: string;
 }
 
@@ -33,6 +35,7 @@ export function ChronosTitlebarChrome({
   settingsControl,
   themeToggle,
   healthIndicator,
+  onEmptyPaintDoubleClick,
   'data-testid': dataTestId = 'chronos-titlebar',
 }: ChronosTitlebarChromeProps) {
   const labelClass = isDark ? 'text-brand-cyan' : 'text-white';
@@ -48,6 +51,7 @@ export function ChronosTitlebarChrome({
           style={{ width: CHRONOS_TITLEBAR_DESKTOP_INSET_PX }}
           data-tauri-drag-region
           data-testid="chronos-titlebar-desktop-inset"
+          onDoubleClick={onEmptyPaintDoubleClick}
           aria-hidden
         />
       ) : null}
@@ -75,6 +79,7 @@ export function ChronosTitlebarChrome({
         className="min-w-4 flex-1"
         data-tauri-drag-region={desktopSafeInset ? true : undefined}
         data-testid="chronos-titlebar-drag-spacer"
+        onDoubleClick={onEmptyPaintDoubleClick}
         aria-hidden
       />
 
