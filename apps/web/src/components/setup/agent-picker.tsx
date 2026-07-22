@@ -9,7 +9,10 @@
  * without importing setup wizard pages.
  *
  * V1.102 chrome: soft Installed Badge, ArrowUpRight outbound icons at label
- * cap-height, hollow/lit selection dots, muted not-installed cards.
+ * cap-height, muted not-installed cards.
+ *
+ * V1.132 P2 (VI-001): installed+selected uses a single 2px `border-blue-700` ring
+ * only — no competing tint wash or right-side status dot.
  *
  * V1.117 P1 T3: defaultGrid + moreAgents split; icon + displayName from catalog.
  */

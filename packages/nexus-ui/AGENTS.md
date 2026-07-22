@@ -76,7 +76,7 @@ Documented in `package.json` `exports` and `README.md`. Do not rely on undocumen
 
 ### Component export strategy
 
-- **`<NexusLogo>`**: bundler-agnostic — accepts `src` prop (consumer resolves SVG URL through their bundler, e.g. Vite). Does not import `.svg` files. Variants: `primary` \| `whiteBg` \| `white` \| `mono` \| `text` (no `color`; default shell uses `primary`). **Wordmark rule:** when the UI needs Nexus logo text, always use `variant="text"` + `logo-text.svg` (apps/web: `NexusTextLogo`) — never UI-font typesetting as a brand substitute.
+- **`<NexusLogo>`**: bundler-agnostic — accepts `src` prop (consumer resolves SVG URL through their bundler, e.g. Vite). Does not import `.svg` files. Variants: `primary` \| `whiteBg` \| `white` \| `mono` \| `text`. **Asset split:** plain marks (`logoVariants`) vs square plates (`logoSquareVariants` / `*-square.svg`). Sidebar plate → `logo-primary-square.svg`; ink titlebar → plain `logo-white.svg` at `logoCompactMarkHeightPx`. **Wordmark rule:** when the UI needs Nexus logo text, always use `variant="text"` + `logo-text.svg` (apps/web: `NexusTextLogo`) — never UI-font typesetting as a brand substitute.
 - **`<NexusMark>`**: hand-authored wide timeline SVG JSX (no asset import) — inherits color via `currentColor`; height-driven / `w-auto` friendly.
 - **`<NexusLogoVariant>`**: hand-authored timeline specimens with palette props (Studio Brand only). No asset import; not wired as a product theme preference.
 
