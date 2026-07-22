@@ -285,7 +285,7 @@ components:
       rounded: "{rounded.card}"
       padding: "{spacing.space-4}"
       retryTypography: "{typography.label-14}"
-      retryColor: "{colors.blue-700}"
+      retryColor: "{colors.brand-deep-blue}"
 
     # Status surface family (V1.121 P2 T4). Parallel tinted fills + borders for
     # inline status cards (preset validation results, canvas live-session
@@ -1297,7 +1297,7 @@ Token values: see frontmatter `components.states`.
 | `Spinner` | `components.states.spinner` — size `16px`, color `blue-700` | Icon-only; pair with text in `LoadingState` |
 | `LoadingState` | `components.states.loading` — `copy-14` at `gray-700`, `space-2` gap, `space-6` vertical padding | *Scanning for local ACP agents…* (sentence case, present participle + ellipsis) |
 | `EmptyState` | `components.states.empty` — title `display-24` content voice (serif, V1.121 v0.4)/`gray-1000`, description `copy-14`/`gray-900`, `space-2` gap, `space-16` vertical padding | Title: **No agents found on PATH**; helper: *Install an agent or add a custom launch command below.*; host-owned `action` slot |
-| `ErrorState` | `components.states.error` — title `heading-16`/`red-1000`, description `copy-14`/`red-900`, tinted background/border (`error-surface` / `error-surface-border` tokens, V1.121), `rounded-card`, `space-4` padding; retry `label-14`/`blue-700` | Title: **Could not load this view**; helper: sentence-case transport or plain-language reason; action: **Try again** |
+| `ErrorState` | `components.states.error` — title `heading-16`/`red-1000`, description `copy-14`/`red-900`, tinted background/border (`error-surface` / `error-surface-border` tokens, V1.121), `rounded-card`, `space-4` padding; retry `label-14`/`brand-deep-blue` (ink link; not cyan signal) | Title: **Could not load this view**; helper: sentence-case transport or plain-language reason; action: **Try again** |
 
 `EmptyState` accepts an optional `action` ReactNode — the host renders the first-step CTA (Verb-only, e.g. **Create**); the primitive does not embed routing.
 
