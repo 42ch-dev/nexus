@@ -2,14 +2,13 @@ import { useCallback, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 
-import { flattenPages, useNarrativeWorlds, useWorks } from '@/api/queries';
+import { flattenPages, useCreateWork, useCreateWorld, useNarrativeWorlds, useWorks } from '@/api/queries';
 import { HubDualPaneChrome } from '@/components/layout/presentational/hub-dual-pane-chrome';
 import type { HubCardListItem } from '@/components/layout/presentational/hub-card-list-pane';
 import type { HubTab } from '@/components/layout/presentational/hub-tab-bar';
-import { CreateWorldDialog } from '@/components/worlds/create-world-dialog';
 import { useNexusClient } from '@/lib/client-context';
 import { hasCreateWorldClient } from '@/lib/nexus/create-world';
-import { CreateWorkDialog } from '@/pages/dialogs/create-work-dialog';
+import { useToast } from '@/lib/use-toast';
 
 export function resolveInitialHubTab(worldCount: number, workCount: number): HubTab {
   if (worldCount > 0) return 'world';
@@ -18,13 +17,16 @@ export function resolveInitialHubTab(worldCount: number, workCount: number): Hub
 }
 
 /**
- * Wired Creator Hub dual-pane — shared tab SSOT, queries, and canvas navigation (V1.134 P3).
+ * Wired Creator Hub dual-pane — shared tab SSOT, inline create, canvas navigation (V1.134 P3).
  */
 export function CreatorHubDualPane() {
   const { t } = useTranslation(['shell', 'worlds']);
   const navigate = useNavigate();
+  const { toast } = useToast();
   const client = useNexusClient();
   const canCreateWorld = useMemo(() => hasCreateWorldClient(client), [client]);
+  const createWork = useCreateWork();
+  const createWorld = useCreateWorld();
 
   const worksQuery = useWorks({ limit: 12 });
   const works = useMemo(() => flattenPages(worksQuery.data), [worksQuery.data]);
@@ -52,8 +54,11 @@ export function CreatorHubDualPane() {
   const [activeTab, setActiveTab] = useState<HubTab>(() =>
     resolveInitialHubTab(worldItems.length, workItems.length),
   );
-  const [createWorkOpen, setCreateWorkOpen] = useState(false);
-  const [createWorldOpen, setCreateWorldOpen] = useState(false);
+  const [forceExpandedCreate, setForceExpandedCreate] = useState(false);
+
+  const activeItems = activeTab === 'world' ? worldItems : workItems;
+  const createExpanded = forceExpandedCreate || activeItems.length === 0;
+  const isCreateSubmitting = createWork.isPending || createWorld.isPending;
 
   const labels = useMemo(
     () => ({
@@ -71,6 +76,7 @@ export function CreatorHubDualPane() {
         titleLabel: t('shell:workCreate.titleLabel'),
         titlePlaceholder: t('shell:workCreate.titlePlaceholder'),
         submitLabel: t('shell:workCreate.create'),
+        submittingLabel: t('shell:workCreate.creating'),
       },
       cardList: {
         emptyWorlds: t('shell:hub.empty.worlds'),
@@ -80,15 +86,45 @@ export function CreatorHubDualPane() {
     [t],
   );
 
-  const openCreateDialog = useCallback(() => {
-    if (activeTab === 'world') {
-      if (canCreateWorld) {
-        setCreateWorldOpen(true);
+  const handleTabChange = useCallback((tab: HubTab) => {
+    setActiveTab(tab);
+    setForceExpandedCreate(false);
+  }, []);
+
+  const handleCreateSubmit = useCallback(
+    async (title: string) => {
+      const trimmed = title.trim();
+      if (!trimmed) return;
+
+      if (activeTab === 'world') {
+        if (!canCreateWorld) return;
+        try {
+          await createWorld.mutateAsync({ title: trimmed });
+          setForceExpandedCreate(false);
+        } catch {
+          // Error toast handled by mutation onError.
+        }
+        return;
       }
-      return;
-    }
-    setCreateWorkOpen(true);
-  }, [activeTab, canCreateWorld]);
+
+      try {
+        // V1.134 inline minimum: title-only UX; required wire fields seeded from title.
+        await createWork.mutateAsync({
+          title: trimmed,
+          long_term_goal: trimmed,
+          initial_idea: trimmed,
+        });
+        toast({
+          variant: 'success',
+          title: t('shell:workCreate.toastCreated'),
+        });
+        setForceExpandedCreate(false);
+      } catch {
+        // Error toast handled by mutation onError.
+      }
+    },
+    [activeTab, canCreateWorld, createWorld, createWork, toast, t],
+  );
 
   const handleSelectCard = useCallback(
     (id: string) => {
@@ -102,28 +138,24 @@ export function CreatorHubDualPane() {
   );
 
   return (
-    <>
-      <HubDualPaneChrome
-        className="h-full min-h-0 rounded-none border-0"
-        activeTab={activeTab}
-        onTabChange={setActiveTab}
-        worlds={worldItems}
-        works={workItems}
-        labels={labels}
-        onCreateSubmit={() => openCreateDialog()}
-        onExpandCreate={openCreateDialog}
-        onSelectCard={handleSelectCard}
-        tabBarAriaLabel={t('shell:hub.tabs.ariaLabel')}
-        data-testid="creator-hub-dual-pane"
-      />
-      <CreateWorldDialog open={createWorldOpen} onOpenChange={setCreateWorldOpen} />
-      <CreateWorkDialog
-        open={createWorkOpen}
-        onOpenChange={setCreateWorkOpen}
-        onCreated={(workId) => {
-          navigate(`/works/${encodeURIComponent(workId)}/outline`);
-        }}
-      />
-    </>
+    <HubDualPaneChrome
+      className="h-full min-h-0 rounded-none border-0"
+      activeTab={activeTab}
+      onTabChange={handleTabChange}
+      worlds={worldItems}
+      works={workItems}
+      labels={labels}
+      createExpanded={createExpanded}
+      onCreateSubmit={(title) => {
+        void handleCreateSubmit(title);
+      }}
+      onExpandCreate={() => setForceExpandedCreate(true)}
+      isCreateSubmitting={isCreateSubmitting}
+      canCreateWorld={canCreateWorld}
+      createWorldDisabledTitle={t('worlds:create.desktop-only')}
+      onSelectCard={handleSelectCard}
+      tabBarAriaLabel={t('shell:hub.tabs.ariaLabel')}
+      data-testid="creator-hub-dual-pane"
+    />
   );
 }

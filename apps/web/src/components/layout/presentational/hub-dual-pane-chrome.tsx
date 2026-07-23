@@ -31,6 +31,10 @@ export type HubDualPaneChromeProps = {
   tabBarAriaLabel?: string;
   /** When omitted, derived from active tab item count (expanded when zero). */
   createExpanded?: boolean;
+  isCreateSubmitting?: boolean;
+  createErrorMessage?: string | null;
+  canCreateWorld?: boolean;
+  createWorldDisabledTitle?: string;
   header?: ReactNode;
   className?: string;
   'data-testid'?: string;
@@ -54,6 +58,10 @@ export function HubDualPaneChrome({
   onSelectCard,
   tabBarAriaLabel,
   createExpanded,
+  isCreateSubmitting,
+  createErrorMessage,
+  canCreateWorld,
+  createWorldDisabledTitle,
   header,
   className,
   'data-testid': testId = 'hub-dual-pane-chrome',
@@ -95,6 +103,10 @@ export function HubDualPaneChrome({
             createExpanded={expanded}
             onSubmit={onCreateSubmit}
             onExpandCreate={onExpandCreate}
+            isSubmitting={isCreateSubmitting}
+            errorMessage={createErrorMessage}
+            canCreateWorld={canCreateWorld}
+            createWorldDisabledTitle={createWorldDisabledTitle}
             data-testid={`${testId}-workspace-pane`}
           />
         </div>

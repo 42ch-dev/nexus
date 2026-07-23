@@ -142,8 +142,65 @@ describe('CreatorHubPage dual-pane IA (V1.134 P3)', () => {
     expect(screen.queryByTestId('creator-hub-controller')).not.toBeInTheDocument();
   });
 
-  it('opens create dialog from inline workspace affordance (Task 4 wires full inline submit)', async () => {
-    const createWorld = vi.fn().mockResolvedValue({ world_id: 'w-new', status: 'active' });
+  it('creates a Work inline without opening a dialog', async () => {
+    const works: Array<Record<string, unknown>> = [];
+
+    useHandlers(
+      http.get('/v1/daemon/creators', () =>
+        HttpResponse.json({
+          items: [{ creator_id: 'creator-a', display_name: 'Alice' }],
+          pagination: { limit: 20, has_more: false },
+        }),
+      ),
+      http.get('/v1/daemon/works', () =>
+        HttpResponse.json({
+          items: works,
+          pagination: { limit: 20, has_more: false },
+        }),
+      ),
+      http.post('/v1/daemon/works', async ({ request }) => {
+        const body = (await request.json()) as { title?: string };
+        works.push({
+          work_id: 'work-new',
+          title: body.title ?? 'New Work',
+          status: 'active',
+          intake_status: 'ready',
+          primary_preset_id: 'preset-1',
+          updated_at: '2026-01-01T00:00:00Z',
+        });
+        return HttpResponse.json({ work_id: 'work-new', status: 'draft' }, { status: 201 });
+      }),
+      http.get('/v1/daemon/narrative/worlds', () => HttpResponse.json({ worlds: [] })),
+      http.post('/v1/daemon/agent-host/scan', () => HttpResponse.json({ agents: [] })),
+    );
+
+    renderInApp(
+      <Routes>
+        <Route path="/works" element={<CreatorHubPage />} />
+      </Routes>,
+      {
+        client: makeClient(),
+        activeCreatorId: 'creator-a',
+        initialRouterEntries: ['/works'],
+      },
+    );
+
+    fireEvent.click(await screen.findByTestId('creator-hub-dual-pane-tab-bar-work'));
+    const titleInput = await screen.findByTestId('creator-hub-dual-pane-workspace-pane-title-input');
+    fireEvent.change(titleInput, { target: { value: 'Fresh Novel' } });
+    fireEvent.click(screen.getByTestId('creator-hub-dual-pane-workspace-pane-submit'));
+
+    await waitFor(() => {
+      expect(
+        screen.getByTestId('creator-hub-dual-pane-card-list-pane-work-card-work-new'),
+      ).toBeInTheDocument();
+    });
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(screen.getByTestId('creator-hub-dual-pane')).toBeInTheDocument();
+  });
+
+  it('creates a World inline when client exposes createWorld', async () => {
+    const createWorld = vi.fn().mockResolvedValue({ world_id: 'world-new', status: 'active' });
     const clientWithCreateWorld = Object.assign(new BrowserClient(), { createWorld });
 
     useHandlers(
@@ -174,7 +231,8 @@ describe('CreatorHubPage dual-pane IA (V1.134 P3)', () => {
     fireEvent.click(screen.getByTestId('creator-hub-dual-pane-workspace-pane-submit'));
 
     await waitFor(() => {
-      expect(screen.getByRole('dialog')).toBeInTheDocument();
+      expect(createWorld).toHaveBeenCalledWith({ title: 'New Realm' });
     });
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 });
