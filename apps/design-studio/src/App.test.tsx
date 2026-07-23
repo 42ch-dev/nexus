@@ -193,6 +193,15 @@ describe('Chronos gallery acceptance', () => {
     expect(primary.className).toMatch(/\bdark:text-brand-deep-blue\b/);
   });
 
+  it('components Button matrix includes tiny size (24px)', () => {
+    mockMatchMediaFull();
+    renderStudio('/components');
+    const tiny = screen.getByTestId('button-primary-tiny');
+    expect(tiny.className).toMatch(/\bh-6\b/);
+    expect(tiny.className).toMatch(/\bpx-2\b/);
+    expect(tiny.className).toMatch(/\btext-button-12\b/);
+  });
+
   it('dark theme keeps primary Button cyan CTA + deep ink label', () => {
     // ThemeProvider must apply `.dark` from matchMedia — do not inject the class.
     mockMatchMediaFull({ dark: true });
