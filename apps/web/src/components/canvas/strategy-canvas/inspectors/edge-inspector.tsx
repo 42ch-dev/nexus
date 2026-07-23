@@ -150,7 +150,7 @@ export function EdgeInspector({
           type="text"
           value={form.nextTarget}
           onChange={(e) => onChange('nextTarget', e.target.value)}
-          className="rounded-control border border-gray-alpha-400 bg-background-100 px-2 py-1 text-gray-1000 focus:border-blue-700"
+          className="rounded-control border border-gray-alpha-400 bg-background-100 px-2 py-1 text-gray-1000 focus:border-blue-1000 dark:focus:border-blue-700"
         />
       </label>
       {saveStatus ? (
@@ -257,7 +257,7 @@ export function DraftEdgeInspector({
           value={condition}
           onChange={(e) => setCondition(e.target.value)}
           placeholder={t('strategy.edgeCreate.conditionPlaceholder')}
-          className="rounded-control border border-gray-alpha-400 bg-background-100 px-2 py-1 text-gray-1000 focus:border-blue-700"
+          className="rounded-control border border-gray-alpha-400 bg-background-100 px-2 py-1 text-gray-1000 focus:border-blue-1000 dark:focus:border-blue-700"
         />
       </label>
     </section>

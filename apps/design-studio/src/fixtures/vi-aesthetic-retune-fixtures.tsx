@@ -50,6 +50,26 @@ function ViLedgerBadge({ id }: { id: ViLedgerId }) {
   );
 }
 
+function ThemeFollowSpecimen({
+  testId,
+  children,
+}: {
+  testId: string;
+  children: ReactNode;
+}) {
+  return (
+    <div
+      data-testid={testId}
+      className="rounded-card border border-gray-alpha-300 bg-background-100 p-4"
+    >
+      <p className="mb-3 text-label-14 font-medium text-gray-600">
+        Theme-aware — toggle light/dark in the chrome
+      </p>
+      {children}
+    </div>
+  );
+}
+
 function ThemePair({
   testId,
   light,
@@ -394,21 +414,13 @@ export function ViButtonAcceptanceFixtures() {
       id="vi-002-primary-button"
       ledgerId="VI-002"
       title="Theme-aware primary Button"
-      description="Light-shell primary uses deep-ink fill + white label; dark shell keeps the strong cyan CTA. TransportError Retry consumes the same Button variant."
+      description="Light-shell primary uses mid-teal cyan-1000 fill + white label; dark shell keeps the strong cyan CTA."
     >
-      <ThemePair
-        testId="vi-002-primary-button"
-        light={
-          <Button variant="primary" data-testid="vi-002-primary-light">
-            Retry
-          </Button>
-        }
-        dark={
-          <Button variant="primary" data-testid="vi-002-primary-dark">
-            Retry
-          </Button>
-        }
-      />
+      <ThemeFollowSpecimen testId="vi-002-primary-button">
+        <Button variant="primary" data-testid="vi-002-primary">
+          Retry
+        </Button>
+      </ThemeFollowSpecimen>
     </ViSection>
   );
 }
@@ -427,14 +439,12 @@ export function ViTransportErrorAcceptanceFixtures() {
       id="vi-002-transport-error"
       ledgerId="VI-002"
       sectionTestId="vi-section-vi-002-transport"
-      title="TransportError Retry inherits Button"
-      description="daemon_down Retry uses the theme-aware primary Button — no one-off error-block styling."
+      title="TransportError compact link CTAs"
+      description="daemon_down Retry uses compact text links (ErrorState-aligned) — no filled Button inside the alert block."
     >
-      <ThemePair
-        testId="vi-002-transport-error"
-        light={<TransportErrorBlock kind="daemon_down" onRetry={noop} />}
-        dark={<TransportErrorBlock kind="daemon_down" onRetry={noop} />}
-      />
+      <ThemeFollowSpecimen testId="vi-002-transport-error">
+        <TransportErrorBlock kind="daemon_down" onRetry={noop} />
+      </ThemeFollowSpecimen>
     </ViSection>
   );
 }
@@ -472,29 +482,16 @@ export function ViAgentPickerAcceptanceFixtures() {
       title="Setup agent selection — one affordance (V1.132 — superseded)"
       description="Historical V1.132 target: 2px selection ring only. Superseded by V1.134 P2 StatusDot restore — see agent-picker-vi-retune fixtures below."
     >
-      <ThemePair
-        testId="vi-001-agent-picker"
-        light={
-          <AgentPicker
-            status="ready"
-            defaultGrid={VI_AGENT_GRID}
-            selectedId="claude-native"
-            onSelect={() => undefined}
-            customLaunchValue=""
-            onCustomLaunchChange={() => undefined}
-          />
-        }
-        dark={
-          <AgentPicker
-            status="ready"
-            defaultGrid={VI_AGENT_GRID}
-            selectedId="claude-native"
-            onSelect={() => undefined}
-            customLaunchValue=""
-            onCustomLaunchChange={() => undefined}
-          />
-        }
-      />
+      <ThemeFollowSpecimen testId="vi-001-agent-picker">
+        <AgentPicker
+          status="ready"
+          defaultGrid={VI_AGENT_GRID}
+          selectedId="claude-native"
+          onSelect={() => undefined}
+          customLaunchValue=""
+          onCustomLaunchChange={() => undefined}
+        />
+      </ThemeFollowSpecimen>
     </ViSection>
   );
 }

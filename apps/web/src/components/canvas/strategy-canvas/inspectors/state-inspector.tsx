@@ -149,7 +149,7 @@ export function StateInspector({
           type="text"
           value={form.label}
           onChange={(e) => onChange('label', e.target.value)}
-          className="rounded-control border border-gray-alpha-400 bg-background-100 px-2 py-1 text-gray-1000 focus:border-blue-700"
+          className="rounded-control border border-gray-alpha-400 bg-background-100 px-2 py-1 text-gray-1000 focus:border-blue-1000 dark:focus:border-blue-700"
         />
       </label>
       <label className="flex flex-col gap-1 text-copy-13">
@@ -158,7 +158,7 @@ export function StateInspector({
           value={form.description}
           onChange={(e) => onChange('description', e.target.value)}
           rows={3}
-          className="rounded-control border border-gray-alpha-400 bg-background-100 px-2 py-1 text-gray-1000 focus:border-blue-700"
+          className="rounded-control border border-gray-alpha-400 bg-background-100 px-2 py-1 text-gray-1000 focus:border-blue-1000 dark:focus:border-blue-700"
         />
       </label>
       {saveStatus ? (

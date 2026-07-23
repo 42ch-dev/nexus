@@ -32,7 +32,7 @@ export function SettingsAppearanceSection() {
       <Card className="shadow-card" data-testid="settings-appearance-card">
         <CardHeader>
           <div className="flex items-center gap-2">
-            <Languages className="h-5 w-5 text-blue-700" aria-hidden="true" />
+            <Languages className="h-5 w-5 text-blue-1000 dark:text-blue-700" aria-hidden="true" />
             <CardTitle>{t('appearance.language.label')}</CardTitle>
           </div>
         </CardHeader>

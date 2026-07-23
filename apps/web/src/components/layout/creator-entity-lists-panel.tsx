@@ -258,7 +258,7 @@ export function CreatorEntityListsPanel() {
           }
         }}
         onBlur={() => handleRenameSubmit()}
-        className="w-full rounded-control border border-blue-700 bg-background-100 px-2 py-0.5 text-label-14 text-gray-1000 outline-none"
+        className="w-full rounded-control border border-blue-1000 bg-background-100 px-2 py-0.5 text-label-14 text-gray-1000 outline-none dark:border-blue-700"
         onClick={(e) => e.stopPropagation()}
         data-testid="creator-entity-rename-input"
       />

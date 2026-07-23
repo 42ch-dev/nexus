@@ -187,7 +187,7 @@ describe('Sidebar', () => {
     expect(memory).toHaveClass('bg-gray-alpha-100', 'text-gray-1000');
     expect(memory.querySelector('[data-testid="sidebar-active-bar"]')).toHaveClass(
       'w-[2px]',
-      'bg-blue-700',
+      'bg-blue-1000',
     );
   });
 

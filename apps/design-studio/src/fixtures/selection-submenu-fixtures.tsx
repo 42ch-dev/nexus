@@ -132,7 +132,7 @@ function RenameInProgressFixture() {
       <input
         type="text"
         defaultValue="My Fantasy World"
-        className="h-7 flex-1 rounded-control border border-blue-700 bg-background-100 px-2 text-copy-14 text-gray-1000 outline-none ring-1 ring-blue-700/40"
+        className="h-7 flex-1 rounded-control border border-blue-1000 bg-background-100 px-2 text-copy-14 text-gray-1000 outline-none ring-1 ring-blue-1000/40 dark:border-blue-700 dark:ring-blue-700/40"
         aria-label="Rename entity"
         autoFocus
       />
@@ -230,7 +230,7 @@ function AgentDialogPanel({ onClose }: { onClose: () => void }) {
           </button>
           <button
             type="button"
-            className="rounded-control bg-brand-cyan px-4 py-2 text-label-14 text-brand-deep-blue hover:bg-blue-800"
+            className="rounded-control bg-brand-cyan-1000 px-4 py-2 text-label-14 text-brand-white hover:bg-blue-900 dark:bg-brand-cyan dark:text-brand-deep-blue dark:hover:bg-blue-800"
             onClick={onClose}
           >
             Assign

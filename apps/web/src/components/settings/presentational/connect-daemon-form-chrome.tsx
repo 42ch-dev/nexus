@@ -106,7 +106,7 @@ export function ConnectDaemonFormChrome({
       <CardHeader>
         <div className="flex items-center gap-2">
           <Wifi
-            className={cn('h-5 w-5', isMismatch ? 'text-warning-700' : 'text-blue-700')}
+            className={cn('h-5 w-5', isMismatch ? 'text-warning-700' : 'text-blue-1000 dark:text-blue-700')}
             aria-hidden="true"
           />
           <CardTitle>Connect to Daemon</CardTitle>

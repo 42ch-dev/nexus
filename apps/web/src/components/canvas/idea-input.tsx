@@ -93,7 +93,7 @@ export function IdeaInput({ presetId, creatorId, scheduleId, onArtifact }: IdeaI
       </label>
       <textarea
         id="idea-input"
-        className="min-h-[64px] w-full resize-y rounded-control border border-gray-alpha-400 bg-background-100 px-3 py-2 text-copy-14 text-gray-1000 placeholder:text-gray-700 focus:border-blue-700 focus:outline-none"
+        className="min-h-[64px] w-full resize-y rounded-control border border-gray-alpha-400 bg-background-100 px-3 py-2 text-copy-14 text-gray-1000 placeholder:text-gray-700 focus:border-blue-1000 focus:outline-none dark:focus:border-blue-700"
         placeholder={t('ideaInput.placeholder')}
         value={text}
         onChange={(e) => setText(e.target.value)}

@@ -66,7 +66,7 @@ function RowContent({ row }: { row: GlobalTimelineListRow }) {
   return (
     <>
       <CalendarRange
-        className="h-5 w-5 shrink-0 text-blue-700"
+        className="h-5 w-5 shrink-0 text-blue-1000 dark:text-blue-700"
         aria-hidden
       />
       <span className="min-w-0 flex-1">
@@ -155,7 +155,7 @@ export function GlobalTimelineListChrome({
       <div data-testid="global-timeline-loading">
         <div className="flex items-center gap-2 py-6 text-copy-14 text-gray-700">
           <Loader2
-            className="h-4 w-4 animate-spin text-blue-700"
+            className="h-4 w-4 animate-spin text-blue-1000 dark:text-blue-700"
             aria-hidden
           />
           <span>{loadingLabel}</span>

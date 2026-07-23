@@ -281,7 +281,7 @@ function ChapterRow({ chapter, outline, selected, onSelect, t }: ChapterRowProps
       className={[
         'flex flex-1 items-center justify-between rounded-control border px-3 py-2 text-left transition-colors duration-state ease-standard',
         selected
-          ? 'border-blue-700 bg-blue-700/5'
+          ? 'border-blue-1000 bg-blue-1000/5 dark:border-blue-700 dark:bg-blue-700/5'
           : 'border-gray-alpha-300 bg-background-100 hover:bg-background-200',
       ].join(' ')}
     >

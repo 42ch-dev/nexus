@@ -88,7 +88,7 @@ export function ModulesPageBody() {
                       className={cn(
                         'flex w-full flex-col gap-2 rounded-card border p-4 text-left transition-colors duration-state ease-standard focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-700 focus-visible:ring-offset-2 focus-visible:ring-offset-background-100',
                         selectedId === m.module_id
-                          ? 'border-blue-700 bg-gray-alpha-100'
+                          ? 'border-blue-1000 bg-gray-alpha-100 dark:border-blue-700'
                           : 'border-gray-alpha-400 bg-background-100 hover:bg-background-200',
                       )}
                     >

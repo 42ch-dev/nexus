@@ -223,7 +223,7 @@ export function FindingsPage() {
 
         {selectedIds.size > 0 && (
           <div
-            className="mb-4 flex flex-wrap items-center gap-3 rounded-control border border-blue-700 bg-blue-700/10 p-3"
+            className="mb-4 flex flex-wrap items-center gap-3 rounded-control border border-blue-1000 bg-blue-1000/10 p-3 dark:border-blue-700 dark:bg-blue-700/10"
             data-testid="findings-bulk-bar"
           >
             <span className="text-copy-14 font-medium text-gray-1000">
