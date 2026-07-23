@@ -1,8 +1,14 @@
 import { forwardRef, type HTMLAttributes } from 'react';
 import { AlertCircle } from 'lucide-react';
 
-import { Button } from './button';
 import { cn } from '../lib/cn';
+
+/**
+ * Compact text-link CTA styling (V1.136 P2 — ErrorState-aligned).
+ * Both primary and secondary actions use this recipe — not filled `Button`.
+ */
+const CTA_LINK_CLASS =
+  'text-label-14 font-medium text-brand-deep-blue transition-colors duration-state ease-standard hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-700 dark:text-blue-700 dark:hover:text-blue-800 dark:hover:opacity-100';
 
 /**
  * Transport-failure sub-classification mirror of the apps/web
@@ -222,28 +228,28 @@ export const TransportErrorBlock = forwardRef<HTMLDivElement, TransportErrorBloc
           </div>
         </div>
         {primaryVisible || secondaryVisible ? (
-          <div className="mt-3 flex flex-wrap gap-2">
+          <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1">
             {primaryVisible && (
-              <Button
+              <button
                 type="button"
-                variant="primary"
+                className={CTA_LINK_CLASS}
                 onClick={ctaOnClick(primary, onRetry, onOpenSettings)}
                 data-testid="transport-error-primary"
                 data-cta={primary}
               >
                 {primaryCtaLabel ?? CTA_LABEL[primary]}
-              </Button>
+              </button>
             )}
             {secondaryVisible && secondary && (
-              <Button
+              <button
                 type="button"
-                variant="tertiary"
+                className={CTA_LINK_CLASS}
                 onClick={ctaOnClick(secondary, onRetry, onOpenSettings)}
                 data-testid="transport-error-secondary"
                 data-cta={secondary}
               >
                 {secondaryCtaLabel ?? CTA_LABEL[secondary]}
-              </Button>
+              </button>
             )}
           </div>
         ) : null}

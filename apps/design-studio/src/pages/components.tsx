@@ -1174,8 +1174,9 @@ function TransportErrorBlockSection() {
         <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
           @42ch/nexus-ui
         </code>{' '}
-        primitive for transport-failure UX (V1.129 P1). Renders the per-kind
-        headline + body + CTA matrix for all six{' '}
+        primitive for transport-failure UX (V1.129 P1). V1.136 P2: primary and
+        secondary CTAs are compact text links (ErrorState-aligned), not filled
+        buttons. Renders the per-kind headline + body + CTA matrix for all six{' '}
         <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
           TransportErrorKind
         </code>{' '}

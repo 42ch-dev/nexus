@@ -42,6 +42,19 @@ describe('TransportErrorBlockFixtures', () => {
     );
   });
 
+  it('renders link-styled CTAs (not filled buttons) when callbacks are supplied', () => {
+    render(<TransportErrorBlockFixtures />);
+    const networkRow = screen.getByTestId('transport-error-block-row-network');
+    const primary = within(networkRow).getByTestId('transport-error-primary');
+    const secondary = within(networkRow).getByTestId('transport-error-secondary');
+
+    expect(primary).toHaveClass('text-label-14');
+    expect(primary).toHaveClass('text-brand-deep-blue');
+    expect(primary).not.toHaveClass('h-10');
+    expect(secondary).toHaveClass('text-label-14');
+    expect(secondary).not.toHaveClass('bg-brand-cyan-1000');
+  });
+
   it('renders both primary and secondary CTAs when callbacks are supplied', () => {
     render(<TransportErrorBlockFixtures />);
     const networkRow = screen.getByTestId('transport-error-block-row-network');

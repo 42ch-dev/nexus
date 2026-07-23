@@ -44,7 +44,7 @@ Token consumption follows these layers, top to bottom (post-V1.98):
 
 - **Light shell:** `bg-brand-deep-blue` + `text-brand-white` (ink fill — not neon cyan + deep ink on light surfaces; VI-002). Light **hover/active** use ink steps `brand-deep-blue-800` / `brand-deep-blue-900` (wired in `theme.css` + tokens preset) — **never** light `blue-900` (cyan alias).
 - **Dark shell:** `bg-brand-cyan` + `text-brand-deep-blue` (strong cyan CTA); dark hover stays on the cyan `blue-*` signal scale.
-- Implemented in `@42ch/nexus-ui` `Button`; `TransportErrorBlock` Retry and Setup CTAs consume the primitive — no local overrides.
+- Implemented in `@42ch/nexus-ui` `Button`; `TransportErrorBlock` uses compact text-link CTAs (V1.136 P2), not `Button`.
 
 Practical application:
 - Primary: theme-split per shell (package + app Button tests pin both recipes).

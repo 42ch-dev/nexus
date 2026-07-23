@@ -276,6 +276,52 @@ describe('TransportErrorBlock', () => {
     });
   });
 
+  describe('CTA presentation (V1.136 P2 — compact text links)', () => {
+    it('renders primary and secondary as text-link buttons, not filled Button', () => {
+      render(
+        <TransportErrorBlock
+          kind="network"
+          onRetry={() => {}}
+          onOpenSettings={() => {}}
+        />,
+      );
+
+      const primary = screen.getByTestId('transport-error-primary');
+      const secondary = screen.getByTestId('transport-error-secondary');
+
+      expect(primary.tagName).toBe('BUTTON');
+      expect(secondary.tagName).toBe('BUTTON');
+      expect(primary).toHaveAttribute('type', 'button');
+      expect(secondary).toHaveAttribute('type', 'button');
+
+      for (const cta of [primary, secondary]) {
+        expect(cta).toHaveClass('text-label-14');
+        expect(cta).toHaveClass('font-medium');
+        expect(cta).toHaveClass('text-brand-deep-blue');
+        expect(cta).toHaveClass('dark:text-blue-700');
+        expect(cta).not.toHaveClass('h-10');
+        expect(cta).not.toHaveClass('bg-brand-cyan-1000');
+      }
+    });
+
+    it('places CTAs in a compact row under the message', () => {
+      render(
+        <TransportErrorBlock
+          kind="daemon_down"
+          onRetry={() => {}}
+        />,
+      );
+
+      const primary = screen.getByTestId('transport-error-primary');
+      const row = primary.parentElement;
+      expect(row).toHaveClass('mt-2');
+      expect(row).toHaveClass('flex');
+      expect(row).toHaveClass('flex-wrap');
+      expect(row).toHaveClass('gap-x-4');
+      expect(row).toHaveClass('gap-y-1');
+    });
+  });
+
   describe('custom className composition', () => {
     it('appends a custom className without dropping the locked surface classes', () => {
       render(

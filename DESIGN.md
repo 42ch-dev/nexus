@@ -1249,10 +1249,22 @@ Variants and sizes: see frontmatter `components.button`. The preset `Validate` a
 > - **Light/bright background** (cyan, light gray, pastels) → **dark text**.
 >
 > Practical applications:
-> - **Primary button (theme-split — VI-002 / AC-5b):** light shell → `bg-brand-cyan-1000` + `text-brand-white` (mid-teal fill, not neon cyan or ink). Dark shell → `bg-brand-cyan` + `text-brand-deep-blue` (strong cyan CTA). Implemented in `@42ch/nexus-ui` `Button`; consumers (`TransportErrorBlock` Retry, Setup CTAs) must not add local overrides.
+> - **Primary button (theme-split — VI-002 / AC-5b):** light shell → `bg-brand-cyan-1000` + `text-brand-white` (mid-teal fill, not neon cyan or ink). Dark shell → `bg-brand-cyan` + `text-brand-deep-blue` (strong cyan CTA). Implemented in `@42ch/nexus-ui` `Button`; consumers (Setup CTAs, canvas actions) must not add local overrides.
 > - Destructive `bg-red-800` (dark) → `text-white` (light) on light theme; dark theme may use deep text on bright red — see `DESIGN.dark.md`.
 
 **Primary recipe (locked):** theme-split per shell — light uses mid-teal (`brand-cyan-1000`) fill + white label; dark uses cyan fill + deep label. The former uniform cyan-fill and deep-ink light-primary recipes are retired (V1.136 P2).
+
+### TransportErrorBlock (V1.136 P2 — compact link CTAs)
+
+Transport-failure alert primitive (`@42ch/nexus-ui` `TransportErrorBlock`). CTAs are **compact text links** — ErrorState-aligned — not filled `Button` variants inside the red alert.
+
+| Field | Value |
+|-------|-------|
+| **Control** | `<button type="button">` styled as text link |
+| **Typography** | `text-label-14 font-medium` |
+| **Colors** | light: `text-brand-deep-blue`; dark: `text-blue-700` (+ hover opacity / `blue-800`) |
+| **Layout** | `mt-2 flex flex-wrap gap-x-4 gap-y-1` under message — must not dominate the alert |
+| **testids** | `transport-error-primary`, `transport-error-secondary` with `data-cta` matrix |
 
 ### Input / Select / Textarea
 
