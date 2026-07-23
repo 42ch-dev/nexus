@@ -16,7 +16,7 @@
     },
     {
       "plan_id": "2026-07-23-v1.134-p1-app-icon-full-bleed",
-      "status": "Todo",
+      "status": "Done",
       "metadata": {
         "spec_integration_branch": "iteration/v1.134",
         "merge_target": "iteration/v1.134",
@@ -29,7 +29,7 @@
     },
     {
       "plan_id": "2026-07-23-v1.134-p2-agent-picker-vi-retune",
-      "status": "Todo",
+      "status": "Done",
       "metadata": {
         "spec_integration_branch": "iteration/v1.134",
         "merge_target": "iteration/v1.134",
@@ -43,7 +43,7 @@
     },
     {
       "plan_id": "2026-07-23-v1.134-p3-creator-hub-dual-pane-ia",
-      "status": "Todo",
+      "status": "InReview",
       "metadata": {
         "spec_integration_branch": "iteration/v1.134",
         "merge_target": "iteration/v1.134",
@@ -54,6 +54,13 @@
           ".mstar/specs/desktop-shell.md",
           "DESIGN.md"
         ]
+      },
+      "execution_lease": {
+        "holder": "pm-iteration-drive-v1.134",
+        "claimed_at": "2026-07-23T06:32:20Z",
+        "worktree_path": "/Users/bibi/workspace/organizations/42ch/nexus/.worktrees/v1.134-p3-creator-hub-dual-pane-ia",
+        "working_branch": "plan/v1.134-p3-creator-hub-dual-pane-ia",
+        "session_label": "wave2 v1.134-p3-creator-hub-dual-pane-ia"
       }
     }
   ],
@@ -672,6 +679,73 @@
         "decision": "defer",
         "owner": "@frontend-dev",
         "target": "post-V1.134"
+      }
+    ],
+    "2026-07-23-v1.134-p2-agent-picker-vi-retune": [
+      {
+        "id": "R-V1134P2-001",
+        "severity": "nit",
+        "title": "Author Studio visual accept for AgentPicker fixture",
+        "lifecycle": "open",
+        "decision": "defer",
+        "owner": "@author",
+        "target": "V1.134"
+      },
+      {
+        "id": "R-V1134P2-002",
+        "severity": "nit",
+        "title": "Negative tests: no status dot on loading/empty/error",
+        "lifecycle": "open",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.134"
+      },
+      {
+        "id": "R-V1134P2-003",
+        "severity": "nit",
+        "title": "Collapse remaining ViTargetStatusDot doc strip if desired",
+        "lifecycle": "open",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.134"
+      }
+    ],
+    "2026-07-23-v1.134-p1-app-icon-full-bleed": [
+      {
+        "id": "R-V1134P1-001",
+        "severity": "low",
+        "title": "Author Dock squircle confirm (AC-5)",
+        "lifecycle": "open",
+        "decision": "defer",
+        "owner": "@author",
+        "target": "V1.134"
+      },
+      {
+        "id": "R-V1134P1-002",
+        "severity": "low",
+        "title": "Author Studio VI-004 sign-off (AC-6)",
+        "lifecycle": "open",
+        "decision": "defer",
+        "owner": "@author",
+        "target": "V1.134"
+      },
+      {
+        "id": "R-V1134P1-003",
+        "severity": "nit",
+        "title": "Optional compose opacity CI guard",
+        "lifecycle": "open",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.134"
+      },
+      {
+        "id": "R-V1134P1-004",
+        "severity": "nit",
+        "title": "Stale Review Gate Branch HEAD pin",
+        "lifecycle": "open",
+        "decision": "accept",
+        "owner": "@project-manager",
+        "target": "V1.134-p1"
       }
     ]
   }

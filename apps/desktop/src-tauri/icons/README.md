@@ -12,7 +12,7 @@ under this directory (except `source/`) are **generated at build/dev time** via
   Chronos **primary square lockup** (`packages/nexus-ui/assets/logos/logo-primary-square.svg`
   — bright timeline mark on opaque **Chronos deep** plate) to the raster outputs
   below.
-- `source/source-1024.png` — composed 1024×1024 RGBA PNG used as the input
+- `source/source-1024.png` — composed 1024×1024 **opaque** RGB PNG used as the input
   for `tauri icon`. Tracked by Git LFS.
 - `source/app-icon-preview-256.png` — 256×256 preview render for QA/PR review
   of the dock/taskbar appearance.
@@ -36,10 +36,14 @@ pnpm --filter desktop run icons:compose
 ```
 
 This rasterizes `logo-primary-square.svg` (bright mark on brand deep-blue plate) to
-`source-1024.png` + `app-icon-preview-256.png`, with **~12% transparent inset
-margins** on each side so the plate sits inside the macOS squircle without a
-light rectangular halo at the plate edges. macOS applies the system squircle mask
-to the bundled asset; compose owns the inset — consumers use the composed PNGs.
+`source-1024.png` + `app-icon-preview-256.png` as an **opaque full-bleed 1024×1024**
+square — the plate fills the canvas edge-to-edge with no transparent margins.
+
+**Opaque-full-bleed rule:** macOS Big Sur+ applies the system squircle mask only to
+opaque icons that fill the canvas. Transparent alpha borders defeat the mask and
+yield a flat un-rounded square Dock tile (the prior ~12% inset bug). Compose owns
+full-bleed opacity; consumers use the composed PNGs as-is — do not add inset padding
+or crop the plate in product code.
 
 ## Generating desktop icon formats
 
@@ -79,8 +83,10 @@ and reviewed in GitHub/GitLab.
 
 ## Aesthetic sign-off
 
-Composition: **primary square lockup** (`logo-primary-square.svg` — Chronos deep plate + bright
-timeline mark). Review `source/app-icon-preview-256.png` at QA/PR time.
+Composition: **opaque full-bleed primary square lockup** (`logo-primary-square.svg` —
+Chronos deep plate + bright timeline mark at native proportion, no transparent
+margins). Review `source/app-icon-preview-256.png` at QA/PR time; Dock smoke
+(after cache invalidation below) confirms macOS squircle masking.
 
 ## macOS Dock visual smoke
 
@@ -90,10 +96,12 @@ To verify the asset renders as a Chronos plate with the timeline mark:
    `pnpm dev:desktop` (dist-load mode) or `pnpm dev:desktop:web` (HMR mode).
 2. Once the app window is open, inspect the **macOS Dock** entry for Nexus.
 3. **Pass:** the Dock tile shows the cyan-gradient timeline mark on a Chronos
-   deep (`#0D2B3E`) plate, shaped by the system squircle — **not** a white /
-   off-white plate and **not** the legacy N-network mark.
-4. **Fail:** white/off-white full-bleed plate, or a mark that still resembles
-   the retired `logo_light.png` N-network asset.
+   deep (`#0D2B3E`) plate, shaped by the **system squircle** (rounded corners) —
+   **not** a flat un-rounded square, white/off-white plate, or the legacy
+   N-network mark.
+4. **Fail:** flat un-rounded square (transparent alpha defeated the mask), white/off-white
+   full-bleed plate, or a mark that still resembles the retired `logo_light.png`
+   N-network asset.
 
 The 256×256 preview PNG (`source/app-icon-preview-256.png`) uses the same
 composition; Dock smoke remains authoritative for the OS squircle mask.

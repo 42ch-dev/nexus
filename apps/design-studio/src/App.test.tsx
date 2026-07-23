@@ -1066,10 +1066,10 @@ describe('Surfaces page — AgentPicker fixtures', () => {
   });
 
   it('covers loading, empty, and error states', () => {
-    expect(screen.getByText('Scanning for local agents…')).toBeInTheDocument();
+    expect(screen.getAllByText('Scanning for local agents…').length).toBeGreaterThanOrEqual(1);
     // Multiple empty-status fixtures (Empty + Verify matrix) render this title.
     expect(screen.getAllByText('No agents found on PATH').length).toBeGreaterThanOrEqual(1);
-    expect(screen.getByText('Could not scan for agents')).toBeInTheDocument();
+    expect(screen.getAllByText('Could not scan for agents').length).toBeGreaterThanOrEqual(1);
   });
 
   it('shows custom launch on empty and error', () => {

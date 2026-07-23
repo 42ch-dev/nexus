@@ -40,13 +40,13 @@ Chronos VI reads as intentional across light and dark shells: compact timeline m
 
 - `@42ch/nexus-ui` owns the theme-split `Button` SSOT and shared token values. Light-shell primary actions use the light treatment; dark-shell primary actions retain the strong cyan CTA. `TransportErrorBlock` consumes the Button and must not add a one-off Retry style.
 - `apps/design-studio` owns visual proving fixtures and the Tokens/Brand gallery in both themes. `apps/web` consumes accepted primitives and composes product states; `apps/desktop` consumes the square asset for platform icon composition.
-- Plain marks and plated marks are separate asset contracts: `logo-primary.svg` is the plain no-plate mark and plated lockups use the `*-square.svg` naming. The square source is composed with transparent inset margins for the Dock squircle; the compose layer owns the inset, not consumers.
+- Plain marks and plated marks are separate asset contracts: `logo-primary.svg` is the plain no-plate mark and plated lockups use the `*-square.svg` naming. The square source is composed as an **opaque full-bleed 1024×1024** for the Dock squircle (macOS masks opaque full-canvas icons; transparent margins defeat the mask — corrected V1.134 P1); the compose layer owns full-bleed opacity, not consumers.
 - Compact timeline marks are a shared presentation scale decision applied consistently to Brand hero, titlebar, and app icon usage. Setup selection is a single selected-state affordance owned by the AgentPicker/card primitive.
 
 ### Failure modes and rollback
 
 - If a light-shell primary still renders neon cyan on deep ink, fix the shared Button variant before touching error-block consumers; rollback is to the prior Button token mapping, not a local class.
-- If a plate halo or crop appears in Dock/preview, revert the compose output and adjust the square asset's transparent inset; do not switch plain and square assets ad hoc.
+- If a plate halo or crop appears in Dock/preview, verify compose is opaque full-bleed (no transparent alpha border); do not switch plain and square assets ad hoc.
 - If Studio and App diverge, Studio remains the acceptance authority and App wiring is held until the primitive/token fixture matches. Untriaged VI notes remain in the ledger rather than being silently dropped.
 
 ## Wire
@@ -61,7 +61,7 @@ Maps to compass AC-3, AC-4, AC-5, AC-5b, AC-5c, AC-5d.
 
 - Plain vs `*-square` asset split shipped; Studio Brand fixture matches.
 - Timeline mark compact (−30%–50% SSOT scale); Brand hero + titlebar + app icon match AC-4.
-- App icon inset compose; no light rectangular halo.
+- App icon opaque full-bleed compose; macOS squircle mask applied (no transparent inset).
 - Setup agent card has one clear selected affordance (no competing signals).
 - Primary Button theme-aware: light shell ≠ neon cyan + deep ink (including TransportErrorBlock Retry); dark keeps strong cyan CTA.
 - VI ledger populated with Must/Should triage; no silent drop of further notes.

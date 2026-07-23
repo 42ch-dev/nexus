@@ -290,34 +290,31 @@ export function ViBrandCompactMarkFixture() {
 }
 
 /* ------------------------------------------------------------------ */
-/*  VI-004 — app icon inset compose (Brand)                             */
+/*  VI-004 — app icon opaque full-bleed compose (Brand)                 */
 /* ------------------------------------------------------------------ */
 
-function SquircleFrame({
-  insetPx,
+function SquircleIconFrame({
+  variant,
   label,
   testId,
 }: {
-  insetPx: number;
+  variant: 'full-bleed' | 'inset-deprecated';
   label: string;
   testId: string;
 }) {
+  const insetPx = variant === 'inset-deprecated' ? 12 : 0;
   const innerSize = 96 - insetPx * 2;
+  const isFullBleed = variant === 'full-bleed';
+
   return (
     <div className="flex flex-col items-center gap-2" data-testid={testId}>
-      <div
-        className="relative flex h-24 w-24 items-center justify-center overflow-hidden rounded-[22%] bg-[#1a1a1a] shadow-elevation-2"
-        style={{ boxShadow: insetPx === 0 ? '0 0 0 2px rgba(255,255,255,0.35)' : undefined }}
-      >
+      <div className="relative flex h-24 w-24 items-center justify-center overflow-hidden rounded-[22%] bg-[#1a1a1a] shadow-elevation-2">
         <img
           src={logoPrimarySquareSrc}
           alt=""
           decoding="async"
-          className="object-contain"
-          style={{
-            width: innerSize,
-            height: innerSize,
-          }}
+          className={isFullBleed ? 'h-full w-full object-fill' : 'object-contain'}
+          style={isFullBleed ? undefined : { width: innerSize, height: innerSize }}
         />
       </div>
       <span className="text-center text-copy-13 text-gray-700">{label}</span>
@@ -330,8 +327,8 @@ export function ViBrandAppIconFixture() {
     <ViSection
       id="vi-004-app-icon"
       ledgerId="VI-004"
-      title="App icon inset compose"
-      description="Square plate source (`logo-primary-square.svg`) with transparent inset margins inside the macOS squircle (T4 compose). No light rectangular halo at plate edges."
+      title="App icon opaque full-bleed compose"
+      description="Square plate source (`logo-primary-square.svg`) rasterized opaque edge-to-edge at 1024×1024. macOS Big Sur+ applies the squircle mask to opaque full-canvas icons; transparent alpha borders defeat the mask (the prior ~12% inset bug)."
     >
       <ThemePair
         testId="vi-004-app-icon"
@@ -340,35 +337,38 @@ export function ViBrandAppIconFixture() {
             data-testid="vi-004-app-icon-compare"
             className="flex flex-wrap items-start justify-center gap-8 rounded-card border border-gray-alpha-300 bg-background-100 p-6"
           >
-            <SquircleFrame
-              insetPx={0}
-              label="Current — edge-to-edge (halo risk)"
-              testId="vi-004-app-icon-current"
-            />
-            <SquircleFrame
-              insetPx={12}
-              label="Target — ~12% inset margin"
+            <SquircleIconFrame
+              variant="full-bleed"
+              label="Target — opaque full-bleed (macOS squircle)"
               testId="vi-004-app-icon-target"
+            />
+            <SquircleIconFrame
+              variant="inset-deprecated"
+              label="Deprecated — ~12% transparent inset"
+              testId="vi-004-app-icon-deprecated"
             />
           </div>
         }
         dark={
           <div className="flex flex-wrap items-start justify-center gap-8 rounded-card border border-gray-alpha-300 bg-[#08141C] p-6">
-            <SquircleFrame
-              insetPx={0}
-              label="Current — edge-to-edge (halo risk)"
-              testId="vi-004-app-icon-current-dark"
-            />
-            <SquircleFrame
-              insetPx={12}
-              label="Target — ~12% inset margin"
+            <SquircleIconFrame
+              variant="full-bleed"
+              label="Target — opaque full-bleed (macOS squircle)"
               testId="vi-004-app-icon-target-dark"
+            />
+            <SquircleIconFrame
+              variant="inset-deprecated"
+              label="Deprecated — ~12% transparent inset"
+              testId="vi-004-app-icon-deprecated-dark"
             />
           </div>
         }
       />
       <p className="mt-4 text-copy-13 text-gray-600">
-        Compose layer owns inset — consumers use the composed asset, not ad-hoc padding.
+        Compose owns opaque full-bleed — consumers use the composed asset as-is; do not add
+        inset padding or crop the plate. Dock smoke after rebuild +{' '}
+        <code className="font-mono bg-gray-alpha-100 px-1 rounded">killall Dock</code> is the
+        runtime acceptance gate (see icons README).
       </p>
     </ViSection>
   );
@@ -469,8 +469,8 @@ export function ViAgentPickerAcceptanceFixtures() {
     <ViSection
       id="vi-001-agent-picker"
       ledgerId="VI-001"
-      title="Setup agent selection — one affordance"
-      description="Selected installed agent shows one clear affordance — a 2px selection ring only (no fill tint, no lit status dot)."
+      title="Setup agent selection — one affordance (V1.132 — superseded)"
+      description="Historical V1.132 target: 2px selection ring only. Superseded by V1.134 P2 StatusDot restore — see agent-picker-vi-retune fixtures below."
     >
       <ThemePair
         testId="vi-001-agent-picker"

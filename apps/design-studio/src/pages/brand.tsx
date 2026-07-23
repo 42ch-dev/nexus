@@ -661,7 +661,7 @@ export function BrandPage() {
           className="text-copy-16 text-gray-700 mb-6"
         >
           Target states for VI-003, VI-004, and VI-005 — compact timeline mark scale, app icon
-          inset compose, and plain vs{' '}
+          opaque full-bleed compose, and plain vs{' '}
           <code className="font-mono bg-gray-alpha-100 px-1 rounded">*-square</code> asset split.
           Toggle light/dark in the chrome. App wiring follows Studio acceptance (T3+).
         </p>

@@ -65,7 +65,7 @@ Plate lockups (`logoSquareVariants`) are **square**. Plain marks (`logoVariants`
 | Inline UI (buttons, badges, list rows) | Tintable | `<NexusMark>` | Set `color` on parent; inherits via `currentColor` |
 | Wordmark lockup | Text | `logo-text.svg` | Lowercase `nexus`; `currentColor` |
 | Studio theme specimens only | — | `<NexusLogoVariant>` | Palette props; not a product theme switcher |
-| Desktop app icon compose | Square primary | `logo-primary-square.svg` | Compose with ~12% transparent inset per side |
+| Desktop app icon compose | Square primary | `logo-primary-square.svg` | Opaque full-bleed 1024×1024 — macOS applies squircle mask; no transparent inset |
 
 ### Accessibility
 
