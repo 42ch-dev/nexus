@@ -250,7 +250,7 @@ components:
   # Sheet — end-aligned drawer (work-shell right rail). Overlay uses colors.scrim (V1.121 scrim convergence).
   sheet: { backgroundColor: "{colors.background-100}", borderColor: "{colors.gray-alpha-400}", shadow: "shadow-modal", width: "min(100vw, 280px)" }
 
-  # ── tabs: apps/web keep-web (V1.106) ──
+  # ── tabs: promoted @42ch/nexus-ui (V1.137 P2) ──
   tabs:
     list: { backgroundColor: "{colors.background-200}", borderColor: "{colors.gray-alpha-400}", rounded: "{rounded.card}", padding: "4px", gap: "4px" }
     trigger:
@@ -1327,7 +1327,7 @@ Dialog/popover values: see frontmatter `components.dialog` and `components.popov
 
 ### Tabs
 
-**Classification (V1.106):** keep-web — owner `apps/web/src/components/ui/tabs.tsx`. Studio may reference via transitional `@web-ui/tabs` only; not package-promoted this iteration.
+**Classification (V1.137 P2):** promoted — owner `@42ch/nexus-ui` (`Tabs` / `TabsList` / `TabsTrigger` / `TabsContent`). `apps/web/src/components/ui/tabs.tsx` is a thin re-export. Studio imports from `@42ch/nexus-ui` (not `@web-ui/tabs`).
 
 Token values: see frontmatter `components.tabs`.
 
