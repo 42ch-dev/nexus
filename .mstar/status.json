@@ -3,29 +3,6 @@
   "updated_at": "2026-07-23",
   "plans": [
     {
-      "plan_id": "2026-07-23-v1.135-p0-sidebar-menu-create-ia",
-      "status": "InReview",
-      "metadata": {
-        "spec_integration_branch": "iteration/v1.135",
-        "merge_target": "iteration/v1.135",
-        "working_branch": "plan/v1.135-p0-sidebar-menu-create-ia",
-        "iteration_refs": "V1.135",
-        "primary_spec": ".mstar/iterations/v1.135/specs/p0-sidebar-menu-create-ia.md",
-        "spec_refs": [
-          ".mstar/specs/web-ui.md",
-          ".mstar/specs/desktop-shell.md",
-          "DESIGN.md"
-        ]
-      },
-      "execution_lease": {
-        "holder": "pm-v1.135-p0",
-        "claimed_at": "2026-07-23T09:05:57Z",
-        "worktree_path": "/Users/bibi/workspace/organizations/42ch/nexus/.worktrees/v1.135-p0-sidebar-menu-create",
-        "working_branch": "plan/v1.135-p0-sidebar-menu-create-ia",
-        "session_label": "P0 sidebar create"
-      }
-    },
-    {
       "plan_id": "2026-07-23-v1.135-p1-dock-icon-squircle-rca",
       "status": "InProgress",
       "metadata": {
