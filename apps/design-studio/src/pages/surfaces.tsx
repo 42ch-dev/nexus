@@ -550,24 +550,27 @@ export function SurfacesShellPage() {
       </section>
 
       <section className="mt-10" data-testid="surfaces-creator-hub-dual-pane-ia">
-        <SurfaceHeading>Creator Hub — dual-pane IA (V1.134 P3)</SurfaceHeading>
+        <SurfaceHeading>Creator Hub — sidebar create IA (V1.135 P0)</SurfaceHeading>
         <SurfaceSourceBadges
           importPaths={[
-            '@web-layout/hub-dual-pane-chrome',
+            '@web-layout/shell-sidebar-chrome',
+            '@web-layout/creator-shell-content',
             '@web-layout/hub-tab-bar',
-            '@web-layout/hub-workspace-pane',
             '@web-layout/hub-card-list-pane',
             '@42ch/nexus-ui',
           ]}
         />
         <p className="text-copy-14 text-gray-700 mb-6">
-          V1.134 P3 — stable dual-pane hub: shared World/Work tab bar above both panes;
-          left workspace with inline create; right single-kind card list or empty state (
+          V1.135 P0 — create in shell sidebar menu slot (
+          <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">shell-sidebar-panel</code>
+          {' / '}
+          <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">sidebar-create-panel</code>
+          ); content is browse-only: World/Work tabs + card list or empty (
           <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">hub.empty.worlds</code>
           {' / '}
           <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">hub.empty.works</code>
-          ). Eight-variant matrix (tab × content × theme). Author visual acceptance required
-          before App wiring (Task 3). No routing, no daemon client.
+          ). Eight-variant matrix (tab × content × theme). No content-left create form. No routing,
+          no daemon client.
         </p>
         <CreatorHubDualPaneIaFixtures />
       </section>
@@ -578,15 +581,16 @@ export function SurfacesShellPage() {
           importPaths={[
             '@web-layout/creator-shell-content',
             '@web-layout/shell-sidebar-chrome',
+            '@web-layout/hub-tab-bar',
+            '@web-layout/hub-card-list-pane',
             '@web-layout/footer-profiles-chrome',
             '@42ch/nexus-ui',
           ]}
         />
         <p className="text-copy-14 text-gray-700 mb-6">
-          V1.132 P3 grill A — 创作 hub left = Create-only (创建 World / 延续 Work);
-          Worlds/Works appear as right-side content lists; 工作区 footer is visible
-          under both 创作 and 编排. Light + dark acceptance targets for AC-9. No App
-          routing, no daemon client.
+          V1.135 P0 aligned — 创作 hub sidebar panelContent = Create-only (sidebar-create-panel);
+          content = World/Work tab bar + card list (browse-only); 工作区 footer visible under
+          both 创作 and 编排. Light + dark acceptance targets. No App routing, no daemon client.
         </p>
         <CreatorOrchGongnengquIaFixtures />
       </section>
