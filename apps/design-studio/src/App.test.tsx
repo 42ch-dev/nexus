@@ -855,6 +855,15 @@ describe('Surfaces page — app shell fixture', () => {
     ).toBeInTheDocument();
   });
 
+  it('renders Creator Hub dual-pane IA fixtures (V1.134 P3 T2)', () => {
+    expect(screen.getByTestId('surfaces-creator-hub-dual-pane-ia')).toBeInTheDocument();
+    expect(screen.getByTestId('creator-hub-dual-pane-ia-fixtures')).toBeInTheDocument();
+    expect(screen.getByTestId('creator-hub-dual-pane-ia-fixture-world-tab')).toBeInTheDocument();
+    expect(screen.getByTestId('creator-hub-dual-pane-ia-world-empty-themes-light')).toBeInTheDocument();
+    expect(screen.getByTestId('creator-hub-dual-pane-ia-world-empty-themes-dark')).toBeInTheDocument();
+    expect(screen.getByTestId('creator-hub-dual-pane-ia-variant-matrix')).toBeInTheDocument();
+  });
+
   it('renders Creator / Orchestrator 功能区 IA fixtures (V1.132 P3 T1)', () => {
     expect(screen.getByTestId('surfaces-creator-orch-gongnengqu-ia')).toBeInTheDocument();
     expect(screen.getByTestId('creator-orch-gongnengqu-ia-fixtures')).toBeInTheDocument();
