@@ -50,7 +50,7 @@ Surfaces pages label each section with badges (`surface-source-badge-*` test ids
 | `@web-global-timeline/*` | `../web/src/components/global-timeline/presentational/*` | Global Timeline list chrome extract (`global-timeline-list-chrome`, V1.124 P2) — props-driven rows / empty / loading / error frames; no daemon, no contracts, no router, no `useTranslation` |
 | `@web-shell/selection-submenu` | `../web/src/components/selection-submenu/` | V1.126 P0 — selection submenu presentational (transitional alias to apps/web/src/components/selection-submenu/) |
 | `@web-lib/utils` | `../web/src/lib/utils.ts` | `cn()` only |
-| `@42ch/nexus-ui` | workspace package | Brand VI plus promoted presentational primitives (Button, Badge, Card, Input, Label, Textarea, Select, Toast) through public exports |
+| `@42ch/nexus-ui` | workspace package | Brand VI plus promoted presentational primitives (Button, Badge, Card, Input, Label, Textarea, Select, Tabs, Toast, TransportErrorBlock) through public exports |
 | `@nexus/design-tokens` | `tooling/design-tokens` | Shared CSS + Tailwind preset |
 
 ### Forbidden
@@ -64,7 +64,7 @@ Surfaces pages label each section with badges (`surface-source-badge-*` test ids
 - `@42ch/nexus-contracts` — no wire DTOs
 - `@42ch/nexus-ui/src/*` — deep import; use public package API only
 - `@tauri-apps/*` — desktop-only; studio is a browser SPA
-- `@web-ui/button`, `@web-ui/badge`, `@web-ui/card`, `@web-ui/input`, `@web-ui/label`, `@web-ui/textarea`, `@web-ui/select` — already-promoted; import from `@42ch/nexus-ui`
+- `@web-ui/button`, `@web-ui/badge`, `@web-ui/card`, `@web-ui/input`, `@web-ui/label`, `@web-ui/textarea`, `@web-ui/select`, `@web-ui/tabs` — already-promoted; import from `@42ch/nexus-ui`
 - Inventing design tokens not in root DESIGN pair
 - **Any `@web-ui/*` import without a transitional annotation** (`// transitional — …` or `// @web-ui/<name> — transitional …`)
 
@@ -74,8 +74,8 @@ Surfaces pages label each section with badges (`surface-source-badge-*` test ids
 
 Gallery **displays** shadcn primitives from `apps/web/src/components/ui/*` without migrating them to `@42ch/nexus-ui`. This coupling is **intentional and transitional**:
 
-- Import only presentational primitives (`button`, `dialog`, `tabs`, …)
-- `tabs` barrel export landed in P0 T1 (commit `55dd06cc`); use `@web-ui/<module>` direct imports or barrel as needed
+- Import only presentational primitives (`button`, `dialog`, `table`, …)
+- Promoted primitives (`tabs` since V1.137 P2) import from `@42ch/nexus-ui`, not `@web-ui/*`
 - Declare matching Radix/CVA peer versions in `package.json` (same majors as `apps/web`)
 - Decoupling rule: once a primitive is promoted into `@42ch/nexus-ui`, Studio must import it from `@42ch/nexus-ui`, not `@web-ui/*`
 - Unpromoted primitives may remain on `@web-ui/*` until a later promotion or explicit keep-studio/keep-web decision
