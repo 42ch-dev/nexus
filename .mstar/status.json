@@ -4,7 +4,7 @@
   "plans": [
     {
       "plan_id": "2026-07-23-v1.135-p0-sidebar-menu-create-ia",
-      "status": "Todo",
+      "status": "InProgress",
       "metadata": {
         "spec_integration_branch": "iteration/v1.135",
         "merge_target": "iteration/v1.135",
@@ -16,11 +16,18 @@
           ".mstar/specs/desktop-shell.md",
           "DESIGN.md"
         ]
+      },
+      "execution_lease": {
+        "holder": "pm-v1.135-p0",
+        "claimed_at": "2026-07-23T09:05:57Z",
+        "worktree_path": "/Users/bibi/workspace/organizations/42ch/nexus/.worktrees/v1.135-p0-sidebar-menu-create",
+        "working_branch": "plan/v1.135-p0-sidebar-menu-create-ia",
+        "session_label": "P0 sidebar create"
       }
     },
     {
       "plan_id": "2026-07-23-v1.135-p1-dock-icon-squircle-rca",
-      "status": "Todo",
+      "status": "InProgress",
       "metadata": {
         "spec_integration_branch": "iteration/v1.135",
         "merge_target": "iteration/v1.135",
@@ -31,6 +38,13 @@
           ".mstar/specs/desktop-shell.md",
           "DESIGN.md"
         ]
+      },
+      "execution_lease": {
+        "holder": "pm-v1.135-p1",
+        "claimed_at": "2026-07-23T09:05:57Z",
+        "worktree_path": "/Users/bibi/workspace/organizations/42ch/nexus/.worktrees/v1.135-p1-dock-icon-squircle",
+        "working_branch": "plan/v1.135-p1-dock-icon-squircle-rca",
+        "session_label": "P1 dock icon"
       }
     }
   ],
