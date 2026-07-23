@@ -3,54 +3,31 @@
   "updated_at": "2026-07-23",
   "plans": [
     {
-      "plan_id": "2026-07-23-v1.134-p0-desktop-startup-500",
-      "status": "Done",
+      "plan_id": "2026-07-23-v1.135-p0-sidebar-menu-create-ia",
+      "status": "Todo",
       "metadata": {
-        "spec_integration_branch": "iteration/v1.134",
-        "merge_target": "iteration/v1.134",
-        "iteration_refs": "V1.134",
+        "spec_integration_branch": "iteration/v1.135",
+        "merge_target": "iteration/v1.135",
+        "working_branch": "plan/v1.135-p0-sidebar-menu-create-ia",
+        "iteration_refs": "V1.135",
+        "primary_spec": ".mstar/iterations/v1.135/specs/p0-sidebar-menu-create-ia.md",
         "spec_refs": [
-          ".mstar/specs/desktop-shell.md"
-        ]
-      }
-    },
-    {
-      "plan_id": "2026-07-23-v1.134-p1-app-icon-full-bleed",
-      "status": "Done",
-      "metadata": {
-        "spec_integration_branch": "iteration/v1.134",
-        "merge_target": "iteration/v1.134",
-        "iteration_refs": "V1.134",
-        "spec_refs": [
+          ".mstar/specs/web-ui.md",
           ".mstar/specs/desktop-shell.md",
           "DESIGN.md"
         ]
       }
     },
     {
-      "plan_id": "2026-07-23-v1.134-p2-agent-picker-vi-retune",
-      "status": "Done",
+      "plan_id": "2026-07-23-v1.135-p1-dock-icon-squircle-rca",
+      "status": "Todo",
       "metadata": {
-        "spec_integration_branch": "iteration/v1.134",
-        "merge_target": "iteration/v1.134",
-        "iteration_refs": "V1.134",
+        "spec_integration_branch": "iteration/v1.135",
+        "merge_target": "iteration/v1.135",
+        "working_branch": "plan/v1.135-p1-dock-icon-squircle-rca",
+        "iteration_refs": "V1.135",
+        "primary_spec": ".mstar/iterations/v1.135/specs/p1-dock-icon-pipeline.md",
         "spec_refs": [
-          "DESIGN.md",
-          "DESIGN.dark.md",
-          ".mstar/specs/web-ui.md"
-        ]
-      }
-    },
-    {
-      "plan_id": "2026-07-23-v1.134-p3-creator-hub-dual-pane-ia",
-      "status": "Done",
-      "metadata": {
-        "spec_integration_branch": "iteration/v1.134",
-        "merge_target": "iteration/v1.134",
-        "iteration_refs": "V1.134",
-        "primary_spec": ".mstar/iterations/v1.134/specs/p3-creator-hub-dual-pane-ia.md",
-        "spec_refs": [
-          ".mstar/specs/web-ui.md",
           ".mstar/specs/desktop-shell.md",
           "DESIGN.md"
         ]
@@ -60,17 +37,17 @@
   "metadata": {
     "integration_branch_retired": false,
     "iteration_base_branch": "main",
-    "latest_active_compass": "v1.134/delivery-compass.md",
-    "latest_active_iteration": "V1.134",
+    "latest_active_compass": "v1.135/delivery-compass.md",
+    "latest_active_iteration": "V1.135",
     "latest_ship": {
-      "iteration": "V1.133",
-      "compass": "v1.133/delivery-compass.md",
+      "iteration": "V1.134",
+      "compass": "v1.134/delivery-compass.md",
       "shipped_at": "2026-07-23",
-      "pr": "https://github.com/42ch-dev/nexus/pull/171",
-      "merge_commit": "pending"
+      "pr": "https://github.com/42ch-dev/nexus/pull/172",
+      "merge_commit": "b7b80cd9"
     },
     "platform_integration": "paused — local-only until further notice",
-    "spec_integration_branch": "iteration/v1.134",
+    "spec_integration_branch": "iteration/v1.135",
     "spec_refs_index": ".mstar/specs/README.md",
     "target_branch": "main",
     "tech_debt_summary": {
@@ -707,20 +684,20 @@
       {
         "id": "R-V1134P1-001",
         "severity": "low",
-        "title": "Author Dock squircle confirm (AC-5)",
+        "title": "Author Dock squircle confirm (AC-5) → superseded by V1.135 P1",
         "lifecycle": "open",
         "decision": "defer",
         "owner": "@author",
-        "target": "V1.134"
+        "target": "V1.135"
       },
       {
         "id": "R-V1134P1-002",
         "severity": "low",
-        "title": "Author Studio VI-004 sign-off (AC-6)",
+        "title": "Author Studio VI-004 sign-off (AC-6) → superseded by V1.135 P1",
         "lifecycle": "open",
         "decision": "defer",
         "owner": "@author",
-        "target": "V1.134"
+        "target": "V1.135"
       },
       {
         "id": "R-V1134P1-003",
@@ -745,11 +722,11 @@
       {
         "id": "R-V1134P3-001",
         "severity": "low",
-        "title": "Author Studio AC-15 dual-pane visual accept",
+        "title": "Author Studio AC-15 dual-pane visual accept → superseded by V1.135 P0 (sidebar create, not content dual-pane)",
         "lifecycle": "open",
         "decision": "defer",
         "owner": "@author",
-        "target": "V1.134"
+        "target": "V1.135"
       },
       {
         "id": "R-V1134P3-002",
