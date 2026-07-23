@@ -134,9 +134,14 @@ After the light `blue-700` → cyan flip, surfaces that still meant **deep struc
 | Mono mark | `logoVariants.mono` | `logo-mono.svg` | Static grayscale; tintable UI uses `<NexusMark>` |
 | Text | `logoVariants.text` | `logo-text.svg` | Wordmark (`currentColor`) |
 
-**Compact scale:** `logoCompactMarkHeightPx` = 14px (−30% from `logoShellHeightPx` 20px) — titlebar, Brand hero mini. **Desktop app icon** does **not** inset/shrink the plate for “safe margin.”
+**Compact scale:** `logoCompactMarkHeightPx` = 14px (−30% from `logoShellHeightPx` 20px) — titlebar, Brand hero mini.
 
-**macOS app icon (V1.134 P1):** `compose-app-icon.mjs` must rasterize `logo-primary-square.svg` as an **opaque full-bleed 1024×1024** (flatten onto plate color; no transparent canvas margin). macOS Big Sur+ applies the squircle mask only to opaque full-canvas icons — a transparent alpha border defeats the mask and renders a flat square. Do not reintroduce inset/`INSET_RATIO` “anti-halo” composites.
+**macOS app icon (V1.135 P1 — supersedes V1.134 full-bleed-only):**
+
+1. **H1 (retain):** Canvas must stay **fully opaque RGB** (`hasAlpha: false`) — never transparent margins/`INSET_RATIO` alpha that defeat the macOS squircle mask.
+2. **H6 (V1.135):** Bake a **visible squircle plate** in `compose-app-icon.mjs` — opaque plate-color canvas + ~6% **opaque** inset + ~22% corner radius clip (margin pixels remain plate color, not alpha). Full-bleed square plate alone can still *read* as a sharp Dock tile even when the OS mask applies.
+3. **H7:** `pnpm dev:desktop` must run `icons:generate` before `tauri dev` so dogfood picks up regenerated icons.
+4. **Done gate:** Author live Dock squircle confirm — Studio VI-004 / PNG opacity alone are **not** Dock-done.
 
 **Removed:** `logo-color.svg` / `logoVariants.color` — redundant; do not resurrect.
 
@@ -149,7 +154,7 @@ After the light `blue-700` → cyan flip, surfaces that still meant **deep struc
 - Button: assert light primary `bg-brand-deep-blue text-brand-white`; dark primary `bg-brand-cyan text-brand-deep-blue`; assert absence of neon cyan primary on light shell.
 - Links: light retry/list links assert `text-brand-deep-blue`; grepping light `text-blue-700` on link-like roles is a smell.
 - Security / structure washes: assert `brand-deep-blue` alpha classes and **no** `blue-700` on those nodes.
-- Logos: `logoVariants` + `logoSquareVariants` keys match DESIGN; shell plate imports `*-square.svg`; titlebar imports plain `logo-white.svg` at compact height; desktop compose = opaque full-bleed.
+- Logos: `logoVariants` + `logoSquareVariants` keys match DESIGN; shell plate imports `*-square.svg`; titlebar imports plain `logo-white.svg` at compact height; desktop compose = opaque RGB + baked squircle plate (V1.135).
 - AgentPicker (V1.134 P2): top-right `StatusDot` (lit/hollow/muted) + 2px `border-blue-700` selection ring; Light = cyan accent-only (no fill wash); do **not** strip status dots again.
 ---
 

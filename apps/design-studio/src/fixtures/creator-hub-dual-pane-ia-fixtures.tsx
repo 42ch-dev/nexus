@@ -1,59 +1,71 @@
 /**
- * Studio fixtures for V1.134 P3 Creator Hub dual-pane IA.
+ * Studio fixtures for V1.135 P0 Creator Hub sidebar-create IA.
  *
- * Proves IA contract §7 acceptance matrix:
- * - World / Work tabs × empty / populated × light / dark (8 variants)
- * - Shared tab bar above both panes; inline create in left; card list / empty in right
- * - Empty-state i18n copy (en + zh-CN keys visible in fixture labels)
+ * Proves PAC-5 acceptance matrix:
+ * - Create in shell sidebar menu slot (`ShellSidebarChrome.panelContent`)
+ * - Content = World / Work tabs + card list / empty only — no content-left create
+ * - World / Work × empty / populated × light / dark (8 variants)
  *
- * Composes `@web-layout/hub-dual-pane-chrome` without App providers or daemon hooks.
+ * Composes `@web-layout/shell-sidebar-chrome`, `@web-layout/creator-shell-content`,
+ * `@web-layout/hub-tab-bar`, and `@web-layout/hub-card-list-pane` without App providers.
  */
 import { useState, type ReactNode } from 'react';
 
-import {
-  HubDualPaneChrome,
-  type HubDualPaneChromeLabels,
-} from '@web-layout/hub-dual-pane-chrome';
-import type { HubCardListItem } from '@web-layout/hub-card-list-pane';
-import type { HubTab } from '@web-layout/hub-tab-bar';
+import { StudioShellLogo } from '@/components/studio-shell-logo';
 
-const HUB_LABELS_EN: HubDualPaneChromeLabels = {
+import {
+  CreatorShellContent,
+  type CreatorShellCreateLabels,
+} from '@web-layout/creator-shell-content';
+import {
+  HubCardListPane,
+  type HubCardListItem,
+  type HubCardListPaneLabels,
+} from '@web-layout/hub-card-list-pane';
+import { HubTabBar, type HubTab, type HubTabBarLabels } from '@web-layout/hub-tab-bar';
+import {
+  ShellSidebarChrome,
+  type ShellSidebarTab,
+} from '@web-layout/shell-sidebar-chrome';
+
+import { FixtureWorkspaceFooter } from '@/fixtures/hub-sidebar-fixture-chrome';
+
+const CREATE_LABELS_EN = {
+  createWorldTitle: 'Create World',
+  createWorldDescription: 'Start a new World in the local runtime.',
+  createWorkTitle: 'Create Work',
+  createWorkDescription: 'Create a Work to get started — Worlds are created from your Works.',
+  createWorldDisabledTitle: 'Create World is available on the Nexus desktop app only.',
+} satisfies CreatorShellCreateLabels;
+
+const CREATE_LABELS_ZH = {
+  createWorldTitle: '创建 World',
+  createWorldDescription: '在本地运行时中启动一个新世界。',
+  createWorkTitle: '延续 Work',
+  createWorkDescription: '创建一部作品以开始创作——世界将从你的作品中诞生。',
+  createWorldDisabledTitle: '创建 World 仅在 Nexus 桌面应用中可用。',
+} satisfies CreatorShellCreateLabels;
+
+type HubBrowseLabels = {
+  tabs: HubTabBarLabels;
+  cardList: HubCardListPaneLabels;
+};
+
+const HUB_LABELS_EN: HubBrowseLabels = {
   tabs: { world: 'Worlds', work: 'Works' },
-  workspace: {
-    createWorldTitle: 'Create World',
-    createWorldDescription: 'Start a new World in the local runtime.',
-    createWorkTitle: 'Create Work',
-    createWorkDescription: 'Create a Work to get started — Worlds are created from your Works.',
-    createWorldCompact: 'Create new World…',
-    createWorkCompact: 'Create new Work…',
-    titleLabel: 'Title',
-    titlePlaceholder: 'Enter a title',
-    submitLabel: 'Create',
-  },
   cardList: {
-    emptyWorlds: 'No Worlds yet — create one from the left',
-    emptyWorks: 'No Works yet — create one from the left',
+    emptyWorlds: 'No Worlds yet — create one from the sidebar',
+    emptyWorks: 'No Works yet — create one from the sidebar',
     emptyWorldsKey: 'hub.empty.worlds',
     emptyWorksKey: 'hub.empty.works',
   },
 };
 
-const HUB_LABELS_ZH: HubDualPaneChromeLabels = {
+const HUB_LABELS_ZH: HubBrowseLabels = {
   tabs: { world: '世界', work: '作品' },
-  workspace: {
-    createWorldTitle: '创建 World',
-    createWorldDescription: '在本地运行时中启动一个新世界。',
-    createWorkTitle: '延续 Work',
-    createWorkDescription: '创建一部作品以开始创作——世界将从你的作品中诞生。',
-    createWorldCompact: '创建新世界…',
-    createWorkCompact: '创建新作品…',
-    titleLabel: '标题',
-    titlePlaceholder: '输入标题',
-    submitLabel: '创建',
-  },
   cardList: {
-    emptyWorlds: '暂无世界，从左边创建',
-    emptyWorks: '暂无作品，从左边创建',
+    emptyWorlds: '暂无世界，从侧边栏创建',
+    emptyWorks: '暂无作品，从侧边栏创建',
     emptyWorldsKey: 'hub.empty.worlds',
     emptyWorksKey: 'hub.empty.works',
   },
@@ -158,52 +170,107 @@ function ThemePair({
   );
 }
 
-function HubDualPaneFrame({
+function HubSidebarBrowseFrame({
   activeTab: initialTab,
   worlds,
   works,
   labels,
+  createLabels,
   testId,
   interactive = false,
 }: {
   activeTab: HubTab;
   worlds: HubCardListItem[];
   works: HubCardListItem[];
-  labels: HubDualPaneChromeLabels;
+  labels: HubBrowseLabels;
+  createLabels: CreatorShellCreateLabels;
   testId: string;
   interactive?: boolean;
 }) {
+  const [shellTab, setShellTab] = useState<ShellSidebarTab>('creator');
   const [activeTab, setActiveTab] = useState<HubTab>(initialTab);
   const [worldItems, setWorldItems] = useState(worlds);
   const [workItems, setWorkItems] = useState(works);
 
-  return (
-    <HubDualPaneChrome
-      activeTab={activeTab}
-      onTabChange={setActiveTab}
-      worlds={worldItems}
-      works={workItems}
-      labels={labels}
-      tabBarAriaLabel="Creator hub entity kind"
-      onCreateSubmit={
-        interactive
-          ? (title) => {
-              if (activeTab === 'world') {
-                setWorldItems((items) => [
-                  ...items,
-                  { id: `world-${Date.now()}`, label: title },
-                ]);
-              } else {
-                setWorkItems((items) => [
-                  ...items,
-                  { id: `work-${Date.now()}`, label: title },
-                ]);
-              }
-            }
-          : undefined
-      }
-      data-testid={testId}
+  const panelContent = (
+    <CreatorShellContent
+      mode="create"
+      canCreateWorld={false}
+      labels={createLabels}
+      onCreateWork={() => {}}
+      onCreateWorld={() => {}}
+      data-testid="sidebar-create-panel"
     />
+  );
+
+  return (
+    <div
+      className="flex min-h-[480px] overflow-hidden rounded-card border border-gray-alpha-300 bg-background-100"
+      data-testid={testId}
+    >
+      <div className="flex w-sidebar-nav-width shrink-0 flex-col">
+        <ShellSidebarChrome
+          activeTab={shellTab}
+          activeRoute="/works"
+          navGroups={[]}
+          onTabChange={setShellTab}
+          logo={<StudioShellLogo />}
+          panelContent={shellTab === 'creator' ? panelContent : undefined}
+          footer={<FixtureWorkspaceFooter testId={`${testId}-workspace-footer`} />}
+          creatorTabLabel="创作"
+          orchestratorTabLabel="编排"
+          primaryNavigationAriaLabel="主导航"
+          data-testid={`${testId}-sidebar`}
+        />
+      </div>
+
+      <div
+        className="flex min-w-0 flex-1 flex-col bg-background-200"
+        data-testid={`${testId}-hub-browse`}
+      >
+        <HubTabBar
+          activeTab={activeTab}
+          onTabChange={setActiveTab}
+          labels={labels.tabs}
+          ariaLabel="Creator hub entity kind"
+          data-testid={`${testId}-tab-bar`}
+        />
+        <div
+          id="hub-tabpanel"
+          role="tabpanel"
+          aria-labelledby={`hub-tab-${activeTab}`}
+          className="min-h-0 flex-1"
+          data-testid={`${testId}-tabpanel`}
+        >
+          <HubCardListPane
+            activeTab={activeTab}
+            worlds={worldItems}
+            works={workItems}
+            labels={labels.cardList}
+            onSelectCard={
+              interactive
+                ? (id) => {
+                    if (activeTab === 'world') {
+                      setWorldItems((items) =>
+                        items.map((item) =>
+                          item.id === id ? { ...item, label: `${item.label} ✓` } : item,
+                        ),
+                      );
+                    } else {
+                      setWorkItems((items) =>
+                        items.map((item) =>
+                          item.id === id ? { ...item, label: `${item.label} ✓` } : item,
+                        ),
+                      );
+                    }
+                  }
+                : undefined
+            }
+            data-testid={`${testId}-card-list-pane`}
+          />
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -211,10 +278,12 @@ function VariantMatrixCell({
   state,
   theme,
   labels,
+  createLabels,
 }: {
   state: VariantState;
   theme: 'light' | 'dark';
-  labels: HubDualPaneChromeLabels;
+  labels: HubBrowseLabels;
+  createLabels: CreatorShellCreateLabels;
 }) {
   const slug = state.label.toLowerCase().replace(/[^a-z0-9]+/g, '-');
   const testId = `creator-hub-dual-pane-ia-matrix-${slug}-${theme}`;
@@ -227,11 +296,12 @@ function VariantMatrixCell({
       <p className="mb-2 px-2 pt-2 text-label-12 font-medium text-gray-700">
         {state.label} · {theme}
       </p>
-      <HubDualPaneFrame
+      <HubSidebarBrowseFrame
         activeTab={state.activeTab}
         worlds={state.worlds}
         works={state.works}
         labels={labels}
+        createLabels={createLabels}
         testId={`${testId}-frame`}
       />
     </div>
@@ -242,8 +312,8 @@ export function CreatorHubDualPaneIaFixtures() {
   return (
     <div data-testid="creator-hub-dual-pane-ia-fixtures">
       <FixtureFrame
-        title="Dual-pane hub — World tab × empty / populated (light / dark)"
-        description="Shared tab bar spans both panes. Left = inline create affordance; right = World cards or empty state with hub.empty.worlds copy (en + zh-CN keys below)."
+        title="Hub IA — sidebar create + content browse (World tab)"
+        description="V1.135 P0: create cards live in shell-sidebar-panel (sidebar menu slot). Content is browse-only: World/Work tab bar + card list or empty — no content-left create form."
         testId="creator-hub-dual-pane-ia-fixture-world-tab"
       >
         <div className="mb-6 flex flex-col gap-6">
@@ -254,20 +324,22 @@ export function CreatorHubDualPaneIaFixtures() {
             <ThemePair
               testId="creator-hub-dual-pane-ia-world-empty-themes"
               light={
-                <HubDualPaneFrame
+                <HubSidebarBrowseFrame
                   activeTab="world"
                   worlds={[]}
                   works={[]}
                   labels={HUB_LABELS_EN}
+                  createLabels={CREATE_LABELS_EN}
                   testId="creator-hub-dual-pane-ia-world-empty-light"
                 />
               }
               dark={
-                <HubDualPaneFrame
+                <HubSidebarBrowseFrame
                   activeTab="world"
                   worlds={[]}
                   works={[]}
                   labels={HUB_LABELS_EN}
+                  createLabels={CREATE_LABELS_EN}
                   testId="creator-hub-dual-pane-ia-world-empty-dark"
                 />
               }
@@ -280,20 +352,22 @@ export function CreatorHubDualPaneIaFixtures() {
             <ThemePair
               testId="creator-hub-dual-pane-ia-world-populated-themes"
               light={
-                <HubDualPaneFrame
+                <HubSidebarBrowseFrame
                   activeTab="world"
                   worlds={SAMPLE_WORLDS}
                   works={SAMPLE_WORKS}
                   labels={HUB_LABELS_ZH}
+                  createLabels={CREATE_LABELS_ZH}
                   testId="creator-hub-dual-pane-ia-world-populated-light"
                 />
               }
               dark={
-                <HubDualPaneFrame
+                <HubSidebarBrowseFrame
                   activeTab="world"
                   worlds={SAMPLE_WORLDS}
                   works={SAMPLE_WORKS}
                   labels={HUB_LABELS_ZH}
+                  createLabels={CREATE_LABELS_ZH}
                   testId="creator-hub-dual-pane-ia-world-populated-dark"
                 />
               }
@@ -303,8 +377,8 @@ export function CreatorHubDualPaneIaFixtures() {
       </FixtureFrame>
 
       <FixtureFrame
-        title="Dual-pane hub — Work tab × empty / populated (light / dark)"
-        description="Work tab active: left inline create targets Work; right shows Work cards only (World cards hidden). Empty copy uses hub.empty.works."
+        title="Hub IA — sidebar create + content browse (Work tab)"
+        description="Work tab active: sidebar still hosts create; content shows Work cards only (World cards hidden). Empty copy uses hub.empty.works and points to sidebar create."
         testId="creator-hub-dual-pane-ia-fixture-work-tab"
       >
         <div className="mb-6 flex flex-col gap-6">
@@ -315,20 +389,22 @@ export function CreatorHubDualPaneIaFixtures() {
             <ThemePair
               testId="creator-hub-dual-pane-ia-work-empty-themes"
               light={
-                <HubDualPaneFrame
+                <HubSidebarBrowseFrame
                   activeTab="work"
                   worlds={SAMPLE_WORLDS}
                   works={[]}
                   labels={HUB_LABELS_ZH}
+                  createLabels={CREATE_LABELS_ZH}
                   testId="creator-hub-dual-pane-ia-work-empty-light"
                 />
               }
               dark={
-                <HubDualPaneFrame
+                <HubSidebarBrowseFrame
                   activeTab="work"
                   worlds={SAMPLE_WORLDS}
                   works={[]}
                   labels={HUB_LABELS_ZH}
+                  createLabels={CREATE_LABELS_ZH}
                   testId="creator-hub-dual-pane-ia-work-empty-dark"
                 />
               }
@@ -341,20 +417,22 @@ export function CreatorHubDualPaneIaFixtures() {
             <ThemePair
               testId="creator-hub-dual-pane-ia-work-populated-themes"
               light={
-                <HubDualPaneFrame
+                <HubSidebarBrowseFrame
                   activeTab="work"
                   worlds={SAMPLE_WORLDS}
                   works={SAMPLE_WORKS}
                   labels={HUB_LABELS_EN}
+                  createLabels={CREATE_LABELS_EN}
                   testId="creator-hub-dual-pane-ia-work-populated-light"
                 />
               }
               dark={
-                <HubDualPaneFrame
+                <HubSidebarBrowseFrame
                   activeTab="work"
                   worlds={SAMPLE_WORLDS}
                   works={SAMPLE_WORKS}
                   labels={HUB_LABELS_EN}
+                  createLabels={CREATE_LABELS_EN}
                   testId="creator-hub-dual-pane-ia-work-populated-dark"
                 />
               }
@@ -365,7 +443,7 @@ export function CreatorHubDualPaneIaFixtures() {
 
       <FixtureFrame
         title="8-variant acceptance matrix (2 tabs × 2 content × 2 themes)"
-        description="Minimum IA contract §7 matrix. Each cell is a static dual-pane frame — author reviews layout density, tab indicator, inline create, and empty-state cue."
+        description="PAC-5 minimum matrix. Each cell: populated shell-sidebar-panel with sidebar-create-panel; browse-only content; no workspace-pane-inline-form."
         testId="creator-hub-dual-pane-ia-fixture-matrix"
       >
         <div
@@ -378,27 +456,30 @@ export function CreatorHubDualPaneIaFixtures() {
               state={state}
               theme="light"
               labels={HUB_LABELS_EN}
+              createLabels={CREATE_LABELS_EN}
             />,
             <VariantMatrixCell
               key={`${state.label}-dark`}
               state={state}
               theme="dark"
               labels={HUB_LABELS_EN}
+              createLabels={CREATE_LABELS_EN}
             />,
           ])}
         </div>
       </FixtureFrame>
 
       <FixtureFrame
-        title="Interactive — linked tabs + inline create"
-        description="Tab switches update both panes. Inline create on empty tab adds a card to the right list without leaving dual-pane chrome."
+        title="Interactive — tab switch + card select"
+        description="Tab switches update browse content only. Sidebar create remains in panelContent. Card click marks selection in browse list."
         testId="creator-hub-dual-pane-ia-fixture-interactive"
       >
-        <HubDualPaneFrame
+        <HubSidebarBrowseFrame
           activeTab="world"
-          worlds={[]}
-          works={[]}
+          worlds={SAMPLE_WORLDS}
+          works={SAMPLE_WORKS}
           labels={HUB_LABELS_ZH}
+          createLabels={CREATE_LABELS_ZH}
           interactive
           testId="creator-hub-dual-pane-ia-interactive"
         />
