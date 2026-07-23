@@ -88,6 +88,117 @@ describe('HubWorkspacePane', () => {
 
     expect(screen.getByTestId('workspace-compact-create')).toHaveTextContent('Create new Work…');
   });
+
+  it('keeps title during submit and clears after success', () => {
+    const onSubmit = vi.fn();
+    const { rerender } = render(
+      <HubWorkspacePane
+        activeTab="world"
+        labels={LABELS.workspace}
+        createExpanded
+        onSubmit={onSubmit}
+        isSubmitting={false}
+        data-testid="workspace"
+      />,
+    );
+
+    const input = screen.getByTestId('workspace-title-input') as HTMLInputElement;
+    fireEvent.change(input, { target: { value: 'My World' } });
+    fireEvent.submit(screen.getByTestId('workspace-inline-form'));
+
+    expect(onSubmit).toHaveBeenCalledWith('My World');
+    expect(input.value).toBe('My World');
+
+    rerender(
+      <HubWorkspacePane
+        activeTab="world"
+        labels={LABELS.workspace}
+        createExpanded
+        onSubmit={onSubmit}
+        isSubmitting
+        data-testid="workspace"
+      />,
+    );
+    expect((screen.getByTestId('workspace-title-input') as HTMLInputElement).value).toBe('My World');
+
+    rerender(
+      <HubWorkspacePane
+        activeTab="world"
+        labels={LABELS.workspace}
+        createExpanded
+        onSubmit={onSubmit}
+        isSubmitting={false}
+        data-testid="workspace"
+      />,
+    );
+    expect((screen.getByTestId('workspace-title-input') as HTMLInputElement).value).toBe('');
+  });
+
+  it('keeps title when submit fails with error', () => {
+    const onSubmit = vi.fn();
+    const { rerender } = render(
+      <HubWorkspacePane
+        activeTab="world"
+        labels={LABELS.workspace}
+        createExpanded
+        onSubmit={onSubmit}
+        data-testid="workspace"
+      />,
+    );
+
+    const input = screen.getByTestId('workspace-title-input') as HTMLInputElement;
+    fireEvent.change(input, { target: { value: 'My World' } });
+    fireEvent.submit(screen.getByTestId('workspace-inline-form'));
+
+    rerender(
+      <HubWorkspacePane
+        activeTab="world"
+        labels={LABELS.workspace}
+        createExpanded
+        onSubmit={onSubmit}
+        isSubmitting
+        data-testid="workspace"
+      />,
+    );
+
+    rerender(
+      <HubWorkspacePane
+        activeTab="world"
+        labels={LABELS.workspace}
+        createExpanded
+        onSubmit={onSubmit}
+        isSubmitting={false}
+        errorMessage="Already exists"
+        data-testid="workspace"
+      />,
+    );
+    expect((screen.getByTestId('workspace-title-input') as HTMLInputElement).value).toBe('My World');
+  });
+
+  it('resets title when activeTab changes', () => {
+    const { rerender } = render(
+      <HubWorkspacePane
+        activeTab="world"
+        labels={LABELS.workspace}
+        createExpanded
+        data-testid="workspace"
+      />,
+    );
+
+    const input = screen.getByTestId('workspace-title-input') as HTMLInputElement;
+    fireEvent.change(input, { target: { value: 'Draft' } });
+    expect(input.value).toBe('Draft');
+
+    rerender(
+      <HubWorkspacePane
+        activeTab="work"
+        labels={LABELS.workspace}
+        createExpanded
+        data-testid="workspace"
+      />,
+    );
+    expect((screen.getByTestId('workspace-title-input') as HTMLInputElement).value).toBe('');
+  });
 });
 
 describe('HubCardListPane', () => {

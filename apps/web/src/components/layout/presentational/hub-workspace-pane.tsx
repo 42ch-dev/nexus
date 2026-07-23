@@ -1,5 +1,5 @@
 import { Globe, Plus } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -55,6 +55,28 @@ function InlineCreateForm({
   testId: string;
 }) {
   const [title, setTitle] = useState('');
+  const [submitted, setSubmitted] = useState(false);
+  const wasSubmittingRef = useRef(false);
+
+  useEffect(() => {
+    setTitle('');
+    setSubmitted(false);
+    wasSubmittingRef.current = false;
+  }, [activeTab]);
+
+  useEffect(() => {
+    if (isSubmitting) {
+      wasSubmittingRef.current = true;
+      return;
+    }
+    if (!submitted || !wasSubmittingRef.current) return;
+    wasSubmittingRef.current = false;
+    setSubmitted(false);
+    if (!errorMessage) {
+      setTitle('');
+    }
+  }, [submitted, isSubmitting, errorMessage]);
+
   const isWorld = activeTab === 'world';
   const Icon = isWorld ? Globe : Plus;
   const heading = isWorld ? labels.createWorldTitle : labels.createWorkTitle;
@@ -71,7 +93,7 @@ function InlineCreateForm({
         const trimmed = title.trim();
         if (!trimmed) return;
         onSubmit?.(trimmed);
-        setTitle('');
+        setSubmitted(true);
       }}
     >
       <div className="flex flex-col gap-2">
