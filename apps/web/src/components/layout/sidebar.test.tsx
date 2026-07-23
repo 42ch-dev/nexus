@@ -519,4 +519,28 @@ describe('Sidebar — inline create (V1.136 P1)', () => {
     );
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
+
+  it('retains inline world form fields when POST /v1/daemon/worlds fails', async () => {
+    useHandlers(
+      http.get('/v1/daemon/creators', () =>
+        HttpResponse.json({
+          items: [{ creator_id: 'creator-a', display_name: 'Alice' }],
+          pagination: { limit: 20, has_more: false },
+        }),
+      ),
+      worksList([]),
+      http.get('/v1/daemon/narrative/worlds', () => HttpResponse.json({ worlds: [] })),
+      http.post('/v1/daemon/worlds', () => HttpResponse.json({ message: 'server error' }, { status: 500 })),
+    );
+
+    renderInApp(<Sidebar />, { client: makeClient(), activeCreatorId: 'creator-a' });
+
+    const titleInput = screen.getByLabelText('Title');
+    fireEvent.change(titleInput, { target: { value: 'Aurora' } });
+    fireEvent.click(screen.getByTestId('sidebar-create-submit-world'));
+
+    await waitFor(() => {
+      expect(titleInput).toHaveValue('Aurora');
+    });
+  });
 });

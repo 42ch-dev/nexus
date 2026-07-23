@@ -1,9 +1,14 @@
-import { useState, type FormEvent } from 'react';
+import { useState, type ChangeEvent, type FormEvent } from 'react';
 import { Globe, Plus, type LucideIcon } from 'lucide-react';
 
-import { Input, Label, Select, Textarea } from '@/components/ui';
-import { Button } from '@/components/ui/button';
-import { cn } from '@/lib/utils';
+import {
+  Button,
+  cn,
+  Input,
+  Label,
+  Select,
+  Textarea,
+} from '@42ch/nexus-ui';
 
 import { HubTabBar, type HubTab, type HubTabBarLabels } from './hub-tab-bar';
 
@@ -136,7 +141,7 @@ function InlineWorldForm({
         <Input
           id="sidebar-create-world-title"
           value={title}
-          onChange={(event) => setTitle(event.target.value)}
+          onChange={(event: ChangeEvent<HTMLInputElement>) => setTitle(event.target.value)}
           placeholder={labels.titlePlaceholder}
           disabled={!canCreateWorld || isPending}
         />
@@ -207,7 +212,7 @@ function InlineWorkForm({
         <Input
           id="sidebar-create-work-title"
           value={title}
-          onChange={(event) => setTitle(event.target.value)}
+          onChange={(event: ChangeEvent<HTMLInputElement>) => setTitle(event.target.value)}
           placeholder={labels.titlePlaceholder}
           disabled={isPending}
         />
@@ -217,7 +222,9 @@ function InlineWorkForm({
         <Textarea
           id="sidebar-create-work-goal"
           value={longTermGoal}
-          onChange={(event) => setLongTermGoal(event.target.value)}
+          onChange={(event: ChangeEvent<HTMLTextAreaElement>) =>
+            setLongTermGoal(event.target.value)
+          }
           placeholder={labels.goalPlaceholder}
           disabled={isPending}
         />
@@ -227,7 +234,9 @@ function InlineWorkForm({
         <Textarea
           id="sidebar-create-work-idea"
           value={initialIdea}
-          onChange={(event) => setInitialIdea(event.target.value)}
+          onChange={(event: ChangeEvent<HTMLTextAreaElement>) =>
+            setInitialIdea(event.target.value)
+          }
           placeholder={labels.ideaPlaceholder}
           disabled={isPending}
         />
@@ -238,7 +247,7 @@ function InlineWorkForm({
           id="sidebar-create-work-profile"
           value={workProfile}
           disabled={isPending}
-          onChange={(event) => {
+          onChange={(event: ChangeEvent<HTMLSelectElement>) => {
             setWorkProfile(event.target.value);
             setWorkProfileTouched(true);
           }}

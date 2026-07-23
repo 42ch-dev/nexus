@@ -93,29 +93,21 @@ function CreatorCreatePanel() {
   );
 
   async function handleWorldSubmit(title: string) {
-    try {
-      const res = await createWorld.mutateAsync({ title });
-      navigate(`/worlds/${encodeURIComponent(res.world_id)}/timeline`);
-    } catch {
-      // Error toast already fired by the mutation's onError callback.
-    }
+    const res = await createWorld.mutateAsync({ title });
+    navigate(`/worlds/${encodeURIComponent(res.world_id)}/timeline`);
   }
 
   async function handleWorkSubmit(payload: CreatorShellInlineWorkSubmit) {
-    try {
-      const res = await createWork.mutateAsync({
-        title: payload.title,
-        long_term_goal: payload.longTermGoal,
-        initial_idea: payload.initialIdea,
-        ...(payload.workProfile && isWorkProfile(payload.workProfile)
-          ? { work_profile: payload.workProfile }
-          : {}),
-      });
-      toast({ variant: 'success', title: tShell('workCreate.toastCreated'), description: res.work_id });
-      navigate(`/works/${encodeURIComponent(res.work_id)}/outline`);
-    } catch {
-      // Error toast already fired by the mutation's onError callback.
-    }
+    const res = await createWork.mutateAsync({
+      title: payload.title,
+      long_term_goal: payload.longTermGoal,
+      initial_idea: payload.initialIdea,
+      ...(payload.workProfile && isWorkProfile(payload.workProfile)
+        ? { work_profile: payload.workProfile }
+        : {}),
+    });
+    toast({ variant: 'success', title: tShell('workCreate.toastCreated'), description: res.work_id });
+    navigate(`/works/${encodeURIComponent(res.work_id)}/outline`);
   }
 
   return (
