@@ -133,6 +133,8 @@ describe('SetupWizardPage', () => {
     const circle = screen.getByText('1').closest('span');
     expect(circle).toHaveClass('h-setup-wizard-step-circle-size');
     expect(circle).toHaveClass('w-setup-wizard-step-circle-size');
+    expect(circle).toHaveClass('bg-setup-wizard-step-circle-active-bg');
+    expect(circle).toHaveClass('text-setup-wizard-step-circle-active-text');
     // V1.121 P2: step indicator state changes ride the v0.4 motion recipe.
     expect(circle).toHaveClass('duration-state');
     expect(circle).toHaveClass('ease-standard');
