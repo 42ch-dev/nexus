@@ -88,18 +88,23 @@
     "target_branch": "main",
     "tech_debt_summary": {
       "updated_at": "2026-07-23",
-      "total_open": 62,
+      "total_open": 68,
       "by_severity": {
         "critical": 0,
         "high": 0,
         "medium": 2,
-        "low": 9,
-        "nit": 51,
+        "low": 10,
+        "nit": 56,
         "info": 0
       }
     },
     "updated_at": "2026-07-23",
-    "control_worktree_path": "/Users/bibi/workspace/organizations/42ch/nexus"
+    "control_worktree_path": "/Users/bibi/workspace/organizations/42ch/nexus",
+    "integration_merge_lease": {
+      "holder": "cursor-pm-v1136-drive",
+      "claimed_at": "2026-07-23T11:29:54.346Z",
+      "purpose": "merge-p1-then-p2"
+    }
   },
   "residual_findings": {
     "2026-07-05-v1.92-closure": [
@@ -904,6 +909,64 @@
         "decision": "defer",
         "owner": "@author",
         "target": "V1.136"
+      }
+    ],
+    "2026-07-23-v1.136-p1-sidebar-inline-create-tabs": [
+      {
+        "id": "R-V1136P1-001",
+        "title": "Form-field extract files deferred (§5.2 DRY)",
+        "severity": "nit",
+        "lifecycle": "open",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "follow-up"
+      },
+      {
+        "id": "R-V1136P1-002",
+        "title": "Inline validation / profile-guard parity vs dialogs",
+        "severity": "nit",
+        "lifecycle": "open",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "follow-up"
+      },
+      {
+        "id": "R-V1136P1-003",
+        "title": "Secondary Studio matrix still Light|Dark",
+        "severity": "nit",
+        "lifecycle": "open",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "non-goal"
+      }
+    ],
+    "2026-07-23-v1.136-p2-light-mode-chrome-harmony": [
+      {
+        "id": "R-V1136P2-001",
+        "title": "Form primitives light focus still neon (Input/Select/Textarea/Toast)",
+        "severity": "low",
+        "lifecycle": "open",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "follow-up"
+      },
+      {
+        "id": "R-V1136P2-002",
+        "title": "Light primary active fill equals default (DESIGN.md)",
+        "severity": "nit",
+        "lifecycle": "open",
+        "decision": "defer",
+        "owner": "@design",
+        "target": "follow-up"
+      },
+      {
+        "id": "R-V1136P2-003",
+        "title": "Studio selection-submenu Assign inline primary classes",
+        "severity": "nit",
+        "lifecycle": "open",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "studio-local"
       }
     ]
   }

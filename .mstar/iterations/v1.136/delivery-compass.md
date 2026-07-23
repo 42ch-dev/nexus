@@ -74,9 +74,9 @@ Implementer rules: change once at SSOT; reuse before invent; drift is a defect; 
 
 | plan_id | Name | Priority | Wave | Status | Notes |
 |---------|------|----------|------|--------|-------|
-| `2026-07-23-v1.136-p0-dock-icon-squircle-followup` | Dock icon squircle — continued RCA/fix | **Must** | 1 | Todo | 【图1】; carries `R-V1135P1-001` |
-| `2026-07-23-v1.136-p1-sidebar-inline-create-tabs` | Sidebar inline create + World/Work tabs | **Must** | 1 | Todo | 【图2】/【图3】IA; supersedes card-button hub UX |
-| `2026-07-23-v1.136-p2-light-mode-chrome-harmony` | Light interactive = cyan-1000 + Button SSOT | **Must** | 2 | Todo | VI + TransportError links; prefer after token lock if shared with P1 |
+| `2026-07-23-v1.136-p0-dock-icon-squircle-followup` | Dock icon squircle — continued RCA/fix | **Must** | 1 | Done | 【图1】; carries `R-V1135P1-001` |
+| `2026-07-23-v1.136-p1-sidebar-inline-create-tabs` | Sidebar inline create + World/Work tabs | **Must** | 1 | Done | Inline create; residuals `R-V1136P1-*` |
+| `2026-07-23-v1.136-p2-light-mode-chrome-harmony` | Light interactive = cyan-1000 + Button SSOT | **Must** | 2 | Done | VI + TransportError links; residuals `R-V1136P2-*` |
 
 Status values: `Todo` | `InProgress` | `InReview` | `Done` | `Blocked`
 
