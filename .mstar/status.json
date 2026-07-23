@@ -23,7 +23,7 @@
     },
     {
       "id": "2026-07-23-v1.136-p1-sidebar-inline-create-tabs",
-      "status": "InProgress",
+      "status": "Done",
       "file": ".mstar/plans/2026-07-23-v1.136-p1-sidebar-inline-create-tabs.md",
       "metadata": {
         "primary_spec": ".mstar/iterations/v1.136/specs/p1-sidebar-inline-create-tabs.md",
@@ -35,19 +35,14 @@
         "merge_target": "iteration/v1.136",
         "wire_contracts_changed": false,
         "wave": "1",
-        "seq": "1"
-      },
-      "execution_lease": {
-        "holder": "cursor-pm-v1136-drive",
-        "claimed_at": "2026-07-23T10:40:20.636Z",
-        "worktree_path": "/Users/bibi/workspace/organizations/42ch/nexus/.worktrees/v1.136-p1",
-        "working_branch": "plan/v1.136-p1-sidebar-inline-create-tabs",
-        "session_label": "iteration-drive-wave1-p1"
+        "seq": "1",
+        "merged_at": "2026-07-23T11:30:21.953Z",
+        "qa_verdict": "pm-acceptance"
       }
     },
     {
       "id": "2026-07-23-v1.136-p2-light-mode-chrome-harmony",
-      "status": "InProgress",
+      "status": "Done",
       "file": ".mstar/plans/2026-07-23-v1.136-p2-light-mode-chrome-harmony.md",
       "metadata": {
         "primary_spec": ".mstar/iterations/v1.136/specs/p2-light-mode-interactive-vi.md",
@@ -59,14 +54,9 @@
         "merge_target": "iteration/v1.136",
         "wire_contracts_changed": false,
         "wave": "2",
-        "seq": "2"
-      },
-      "execution_lease": {
-        "holder": "cursor-pm-v1136-drive",
-        "claimed_at": "2026-07-23T10:45:17.230Z",
-        "worktree_path": "/Users/bibi/workspace/organizations/42ch/nexus/.worktrees/v1.136-p2",
-        "working_branch": "plan/v1.136-p2-light-mode-chrome-harmony",
-        "session_label": "iteration-drive-wave2-p2"
+        "seq": "2",
+        "merged_at": "2026-07-23T11:30:21.953Z",
+        "qa_verdict": "pm-acceptance"
       }
     }
   ],
@@ -99,12 +89,7 @@
       }
     },
     "updated_at": "2026-07-23",
-    "control_worktree_path": "/Users/bibi/workspace/organizations/42ch/nexus",
-    "integration_merge_lease": {
-      "holder": "cursor-pm-v1136-drive",
-      "claimed_at": "2026-07-23T11:29:54.346Z",
-      "purpose": "merge-p1-then-p2"
-    }
+    "control_worktree_path": "/Users/bibi/workspace/organizations/42ch/nexus"
   },
   "residual_findings": {
     "2026-07-05-v1.92-closure": [
