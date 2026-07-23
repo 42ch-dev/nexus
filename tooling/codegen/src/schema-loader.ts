@@ -174,22 +174,6 @@ function assertUniqueTypeNames(schemas: LoadedSchema[]): void {
 }
 
 /**
- * Validate schema has required top-level fields.
- */
-export function validateSchemaStructure(schema: LoadedSchema): boolean {
-  const requiredFields = ['$schema', '$id', 'schema_version', 'title', 'type'];
-
-  for (const field of requiredFields) {
-    if (!(field in schema.schemaContent)) {
-      logger.error(`Schema ${schema.fileName} missing required field: ${field}`);
-      return false;
-    }
-  }
-
-  return true;
-}
-
-/**
  * Resolve a $ref URI to a definition name.
  * Handles both local refs (#/definitions/X) and full URIs.
  */
@@ -231,29 +215,5 @@ export function resolveRef(ref: string): string | null {
 export function isCommonEnum(defName: string): boolean {
   const def = COMMON_DEFINITIONS.get(defName);
   return !!def && !!def.enum;
-}
-
-/**
- * Get enum values for a common definition.
- */
-export function getCommonEnumValues(defName: string): string[] {
-  const def = COMMON_DEFINITIONS.get(defName);
-  return def?.enum || [];
-}
-
-/**
- * Get the base type for a common definition.
- */
-export function getCommonBaseType(defName: string): string {
-  const def = COMMON_DEFINITIONS.get(defName);
-  if (!def) return 'string';
-  if (def.enum) return defName; // It's an enum, use the name
-  switch (def.type) {
-    case 'integer':
-      if (defName === 'SchemaVersion') return 'number'; // u32 in Rust
-      return 'number';
-    default:
-      return 'string';
-  }
 }
 
