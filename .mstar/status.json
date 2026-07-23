@@ -4,7 +4,7 @@
   "plans": [
     {
       "plan_id": "2026-07-23-v1.135-p0-sidebar-menu-create-ia",
-      "status": "InProgress",
+      "status": "InReview",
       "metadata": {
         "spec_integration_branch": "iteration/v1.135",
         "merge_target": "iteration/v1.135",
@@ -768,6 +768,53 @@
         "decision": "defer",
         "owner": "@frontend-dev",
         "target": "post-V1.134"
+      }
+    ],
+    "2026-07-23-v1.135-p0-sidebar-menu-create-ia": [
+      {
+        "id": "R-V1135P0-001",
+        "severity": "low",
+        "title": "Author visual confirm PAC-1–5 (closes R-V1134P3-001)",
+        "lifecycle": "open",
+        "decision": "defer",
+        "owner": "@author",
+        "target": "V1.135"
+      },
+      {
+        "id": "R-V1135P0-002",
+        "severity": "low",
+        "title": "zh-CN hub empty-state CI assertion (PAC-4)",
+        "lifecycle": "open",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.135"
+      },
+      {
+        "id": "R-V1135P0-003",
+        "severity": "low",
+        "title": "Below-lg sidebar hidden: hub create may be unreachable",
+        "lifecycle": "open",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.135"
+      },
+      {
+        "id": "R-V1135P0-004",
+        "severity": "nit",
+        "title": "Stale dual-pane naming/docs (CreatorHubDualPane, stubs)",
+        "lifecycle": "open",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.135"
+      },
+      {
+        "id": "R-V1135P0-005",
+        "severity": "nit",
+        "title": "Optional HubBrowseChrome extract / hub E2E create",
+        "lifecycle": "open",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.135"
       }
     ]
   }
