@@ -11,27 +11,16 @@ const out1024 = path.join(__dirname, 'source-1024.png');
 const out256 = path.join(__dirname, 'app-icon-preview-256.png');
 
 const CANVAS = 1024;
-/** Transparent inset per side (~12% of canvas; matches Studio VI-004 squircle fixture). */
-const INSET_RATIO = 12 / 96;
-const insetPx = Math.round(CANVAS * INSET_RATIO);
-const innerSize = CANVAS - insetPx * 2;
+/** Chronos deep plate — matches logo-primary-square.svg rect fill. */
+const PLATE_COLOR = '#0D2B3E';
 
-// Rasterize the primary plate lockup smaller, then pad with transparent margins so
-// macOS squircle masking does not clip plate corners into a light rectangular halo.
-const plateRaster = await sharp(logoPath, { density: 384 })
-  .resize(innerSize, innerSize, { fit: 'fill' })
-  .png()
-  .toBuffer();
-
-const composed = await sharp({
-  create: {
-    width: CANVAS,
-    height: CANVAS,
-    channels: 4,
-    background: { r: 0, g: 0, b: 0, alpha: 0 },
-  },
-})
-  .composite([{ input: plateRaster, top: insetPx, left: insetPx }])
+// Opaque full-bleed rule: rasterize the plate lockup edge-to-edge on a 1024×1024
+// canvas with no transparent margins. macOS applies its squircle mask to opaque
+// full-canvas icons; transparent alpha borders defeat the mask and yield a flat
+// square Dock tile instead of the system-rounded squircle.
+const composed = await sharp(logoPath, { density: 384 })
+  .resize(CANVAS, CANVAS, { fit: 'fill' })
+  .flatten({ background: PLATE_COLOR })
   .png()
   .toBuffer();
 
