@@ -125,22 +125,48 @@ if (!darkBlock) {
   process.exit(1);
 }
 
-/** V1.137 P0: light saturated fill → white label (wizard active circle). */
-const setupWizardLightActiveText =
-  '--color-setup-wizard-step-circle-active-text: var(--color-brand-white)';
-const setupWizardDarkActiveText =
-  '--color-setup-wizard-step-circle-active-text: var(--color-brand-deep-blue)';
-if (!lightBlock.includes(setupWizardLightActiveText)) {
-  console.error(
-    'FAIL tokens :root: light setup wizard active text must be brand-white on blue-1000 fill',
-  );
-  process.exit(1);
+/** V1.137 P0: light semantic *-active* pairs on opaque blue-1000 → brand-white label. */
+const lightBlue1000ActivePairs = [
+  {
+    label: 'setup wizard step circle',
+    bg: '--color-setup-wizard-step-circle-active-bg: var(--color-blue-1000)',
+    text: '--color-setup-wizard-step-circle-active-text: var(--color-brand-white)',
+  },
+  {
+    label: 'footer profile avatar',
+    bg: '--color-footer-profile-avatar-bg-active: var(--color-blue-1000)',
+    text: '--color-footer-profile-avatar-text-active: var(--color-brand-white)',
+  },
+];
+for (const { label, bg, text } of lightBlue1000ActivePairs) {
+  if (!lightBlock.includes(bg) || !lightBlock.includes(text)) {
+    console.error(
+      `FAIL tokens :root: light ${label} active pair must be blue-1000 fill + brand-white text`,
+    );
+    process.exit(1);
+  }
 }
-if (!darkBlock.includes(setupWizardDarkActiveText)) {
-  console.error(
-    'FAIL tokens .dark: setup wizard active text must stay brand-deep-blue on blue-700 fill',
-  );
-  process.exit(1);
+
+/** V1.137 P0: dark active pairs on blue-700 keep brand-deep-blue label (Q2). */
+const darkBlue700ActivePairs = [
+  {
+    label: 'setup wizard step circle',
+    bg: '--color-setup-wizard-step-circle-active-bg: var(--color-blue-700)',
+    text: '--color-setup-wizard-step-circle-active-text: var(--color-brand-deep-blue)',
+  },
+  {
+    label: 'footer profile avatar',
+    bg: '--color-footer-profile-avatar-bg-active: var(--color-blue-700)',
+    text: '--color-footer-profile-avatar-text-active: var(--color-brand-deep-blue)',
+  },
+];
+for (const { label, bg, text } of darkBlue700ActivePairs) {
+  if (!darkBlock.includes(bg) || !darkBlock.includes(text)) {
+    console.error(
+      `FAIL tokens .dark: ${label} active pair must stay blue-700 fill + brand-deep-blue text`,
+    );
+    process.exit(1);
+  }
 }
 for (const needle of ['--color-background-100:', '--color-gray-100:', '--shadow-elevation-1:', '--color-finding-status-open-bg:', '--color-memory-task-kind-brainstorm-bg:', '--color-reading-maturation-kb-density-bg:']) {
   if (!darkBlock.includes(needle)) {
