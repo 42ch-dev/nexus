@@ -8,7 +8,7 @@ import { cn } from '../lib/cn';
  * Button — DESIGN.md §Component Primitives/Button.
  *
  * Variants map to the design-system token table (primary/secondary/tertiary/
- * destructive); sizes map to the small/default/large heights. The two-layer
+ * destructive); sizes map to the tiny/small/default/large heights. The two-layer
  * focus ring is applied globally in src/index.css.
  *
  * Primary is theme-split: light shell uses mid-teal fill + white label; dark
@@ -35,6 +35,8 @@ const buttonVariants = cva(
           'bg-red-800 text-white hover:bg-red-700 active:bg-red-900 dark:text-brand-deep-blue',
       },
       size: {
+        // tiny: 24px height + button-12 (Badge-density)
+        tiny: 'h-6 px-2 text-button-12',
         // small: 32px height + button-12
         small: 'h-8 px-3 text-button-12',
         // default: 40px height + button-14

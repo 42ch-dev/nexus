@@ -169,6 +169,7 @@ components:
     tertiary: { backgroundColor: "transparent", textColor: "{colors.gray-1000}", borderColor: "none", rounded: "{rounded.control}", height: "40px", typography: "{typography.button-14}", hoverBackgroundColor: "{colors.gray-alpha-100}" }
     destructive: { backgroundColor: "{colors.red-800}", textColor: "#ffffff", borderColor: "none", rounded: "{rounded.control}", height: "40px", typography: "{typography.button-14}", hoverBackgroundColor: "{colors.red-700}", activeBackgroundColor: "{colors.red-900}" }
     sizes:
+      tiny: { height: "24px", typography: "{typography.button-12}" }
       small: { height: "32px", typography: "{typography.button-12}" }
       default: { height: "40px", typography: "{typography.button-14}" }
       large: { height: "48px", typography: "{typography.button-14}" }
