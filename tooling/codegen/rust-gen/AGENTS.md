@@ -46,8 +46,12 @@ requires.
 - **T4:** clippy tuning (derives / allows).
 - **T5:** reconcile `crates/nexus-contracts/tests/schema_drift_detection.rs`.
 
-Known T1 divergence (expected, to be reconciled in T5): `typify` derives type
-names from the schema `title` (e.g. `"Nexus World Entity"` → `NexusWorldEntity`),
-whereas the current hand-tuned generator names from the file name (`World`).
+Naming: `typify` derives root type names from the schema `title`, but Nexus
+titles carry a `"Nexus <Name>"` product prefix (e.g. `"Nexus World Entity"`).
+`main.rs` overrides the in-memory `metadata.title` to the basename-derived
+PascalCase name (mirroring `tooling/codegen/src/utils.ts` `schemaToTypeName`)
+before `add_root_schema`, so the emitted root struct/enum matches the TS contract
+and the drift-test `entry!` registrations (`World`, `WorkSummary`, `KeyBlock`, …).
+Only the in-memory title is touched; source schema files are never mutated.
 
 See [`../AGENTS.md`](../AGENTS.md) for the codegen pipeline and drift detection.

@@ -72,6 +72,36 @@ fn to_rust_module_name(segment: &str) -> String {
     segment.replace('-', "_")
 }
 
+/// Derive the canonical contract type name from a schema file name, mirroring the
+/// TypeScript generator's `schemaToTypeName` (`tooling/codegen/src/utils.ts`) so
+/// Rust and TypeScript agree on type names regardless of how the schema `title`
+/// is phrased (Nexus titles carry a `"Nexus <Name>"` product prefix).
+///
+/// Rule (must match the TS side exactly): strip the trailing `.schema.json`, split
+/// on `-`, capitalize the **first** character of each word (leaving the rest
+/// unchanged), join. E.g. `work-summary.schema.json` → `WorkSummary`,
+/// `key-block.schema.json` → `KeyBlock`, `world-membership.schema.json` →
+/// `WorldMembership`, `context-assembly-v1.schema.json` → `ContextAssemblyV1`.
+///
+/// `typify` derives the root type name from the schema `title` (via `convert_case`'s
+/// `to_pascal_case`, which is idempotent on these already-PascalCase names), so
+/// overriding the title to this basename-derived name — before `add_root_schema` —
+/// makes the emitted Rust struct/enum match the TS contract and the drift-test
+/// `entry!` registrations. Scoped: only the in-memory schema passed to `typify`;
+/// source schema files are never mutated.
+fn schema_type_name(file_name: &str) -> String {
+    let base = file_name.strip_suffix(".schema.json").unwrap_or(file_name);
+    base.split('-')
+        .map(|word| {
+            let mut chars = word.chars();
+            match chars.next() {
+                Some(first) => first.to_ascii_uppercase().to_string() + chars.as_str(),
+                None => String::new(),
+            }
+        })
+        .collect()
+}
+
 /// Build the output `.rs` path for a schema, mirroring its tree position with
 /// Rust module naming. E.g. `daemon-api/canvas/outline/work-outline.schema.json`
 /// → `…/daemon_api/canvas/outline/work_outline.rs`.
@@ -117,8 +147,26 @@ fn rel_posix(path: &Path) -> String {
 fn generate_schema_rust(schema_path: &Path, rel: &Path, out_path: &Path) -> Result<(), String> {
     let content = fs::read_to_string(schema_path)
         .map_err(|err| format!("failed to read {}: {err}", schema_path.display()))?;
-    let schema: RootSchema = serde_json::from_str(&content)
+    let mut schema: RootSchema = serde_json::from_str(&content)
         .map_err(|err| format!("invalid JSON Schema in {}: {err}", schema_path.display()))?;
+
+    // Override the schema `title` to the basename-derived PascalCase name BEFORE
+    // handing it to `typify`. Without this, `typify` names the root type from the
+    // raw title (e.g. `"Nexus World Entity"` → `NexusWorldEntity`, `"Nexus KeyBlock"`
+    // → `NexusKeyBlock`) or emits no root type at all when the title is absent
+    // (e.g. `work-summary`). Overriding aligns the emitted name with the TS contract
+    // (`schemaToTypeName`) and the drift-test `entry!` registrations (`World`,
+    // `WorkSummary`, `KeyBlock`, …). Only the in-memory `metadata.title` is touched;
+    // other metadata (description, $id, …) is preserved.
+    let file_name = rel
+        .file_name()
+        .and_then(|s| s.to_str())
+        .expect("schema rel path has a file name");
+    let type_name = schema_type_name(file_name);
+    {
+        let metadata = schema.schema.metadata.get_or_insert_with(Box::default);
+        metadata.title = Some(type_name);
+    }
 
     let mut settings = TypeSpaceSettings::default();
     // Mirror the proven spoke setting; T4 may tune derives if clippy requires.
