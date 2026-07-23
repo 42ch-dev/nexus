@@ -35,25 +35,31 @@ describe('CreatorOrchGongnengquIaFixtures', () => {
     expect(screen.getByTestId('gongnengqu-ia-orchestrator-themes-dark')).toBeInTheDocument();
   });
 
-  it('shows Create-only left hub (not Menu nav) with Worlds/Works lists on the right', () => {
+  it('shows sidebar create panel with browse-only hub content on the right', () => {
     renderFixtures();
 
     const creatorFrame = screen.getByTestId('gongnengqu-ia-creator-hub-light');
-    const createLeft = within(creatorFrame).getByTestId('gongnengqu-ia-creator-hub-light-create-left');
-    const createContent = within(createLeft).getByTestId('gongnengqu-ia-creator-hub-light-create-content');
+    const sidebar = within(creatorFrame).getByTestId('gongnengqu-ia-creator-hub-light-sidebar');
 
-    expect(createContent).toHaveAttribute('data-mode', 'create');
-    expect(within(createContent).getByTestId('creator-create-world')).toBeInTheDocument();
-    expect(within(createContent).getByTestId('creator-create-work')).toBeInTheDocument();
+    expect(within(sidebar).getByTestId('shell-sidebar-panel')).toBeInTheDocument();
+    expect(within(sidebar).getByTestId('sidebar-create-panel')).toBeInTheDocument();
+    expect(within(sidebar).getByTestId('creator-create-world')).toBeInTheDocument();
+    expect(within(sidebar).getByTestId('creator-create-work')).toBeInTheDocument();
 
     expect(querySidebarWorldsMenu(creatorFrame)).not.toBeInTheDocument();
     expect(within(creatorFrame).queryByText('All Works')).not.toBeInTheDocument();
+    expect(
+      within(creatorFrame).queryByTestId(/workspace-pane-inline-form/),
+    ).not.toBeInTheDocument();
 
-    const lists = within(creatorFrame).getByTestId('gongnengqu-ia-creator-hub-light-entity-lists');
-    expect(within(lists).getByTestId('gongnengqu-ia-creator-hub-light-entity-lists-worlds')).toBeInTheDocument();
-    expect(within(lists).getByTestId('gongnengqu-ia-creator-hub-light-entity-lists-works')).toBeInTheDocument();
-    expect(within(lists).getByText('奇幻大陆')).toBeInTheDocument();
-    expect(within(lists).getByText('漫漫长路')).toBeInTheDocument();
+    const browse = within(creatorFrame).getByTestId('gongnengqu-ia-creator-hub-light-hub-browse');
+    expect(within(browse).getByTestId('gongnengqu-ia-creator-hub-light-hub-browse-tab-bar')).toBeInTheDocument();
+    expect(
+      within(browse).getByTestId('gongnengqu-ia-creator-hub-light-hub-browse-card-list-pane-world-card-world-fantasy'),
+    ).toBeInTheDocument();
+    expect(
+      within(browse).queryByTestId('gongnengqu-ia-creator-hub-light-hub-browse-card-list-pane-work-card-work-novel'),
+    ).not.toBeInTheDocument();
   });
 
   it('shows 工作区 footer in both 创作 and 编排 presentations', () => {
@@ -70,14 +76,14 @@ describe('CreatorOrchGongnengquIaFixtures', () => {
     ).toBeInTheDocument();
   });
 
-  it('interactive fixture enters entity mode from a right-side list row', () => {
+  it('interactive fixture enters entity mode from a browse card', () => {
     renderFixtures();
 
     const interactive = screen.getByTestId('gongnengqu-ia-interactive');
-    const lists = within(interactive).getByTestId('gongnengqu-ia-interactive-entity-lists');
+    const browse = within(interactive).getByTestId('gongnengqu-ia-interactive-hub-browse');
 
     fireEvent.click(
-      within(lists).getByTestId('gongnengqu-ia-interactive-entity-lists-worlds-row-world-fantasy'),
+      within(browse).getByTestId('gongnengqu-ia-interactive-hub-browse-card-list-pane-world-card-world-fantasy'),
     );
 
     const controller = within(interactive).getByTestId('gongnengqu-ia-interactive-controller-content');
@@ -86,7 +92,7 @@ describe('CreatorOrchGongnengquIaFixtures', () => {
 
     fireEvent.click(within(controller).getByTestId('creator-controller-back'));
     expect(
-      within(interactive).getByTestId('gongnengqu-ia-interactive-entity-lists'),
+      within(interactive).getByTestId('gongnengqu-ia-interactive-hub-browse'),
     ).toBeInTheDocument();
   });
 

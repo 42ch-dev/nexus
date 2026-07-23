@@ -1,10 +1,15 @@
 import { render, screen, within } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
 import { describe, expect, it } from 'vitest';
 
 import { CreatorHubDualPaneIaFixtures } from '@/fixtures/creator-hub-dual-pane-ia-fixtures';
 
 function renderFixtures() {
-  return render(<CreatorHubDualPaneIaFixtures />);
+  return render(
+    <MemoryRouter>
+      <CreatorHubDualPaneIaFixtures />
+    </MemoryRouter>,
+  );
 }
 
 describe('CreatorHubDualPaneIaFixtures', () => {
@@ -25,27 +30,37 @@ describe('CreatorHubDualPaneIaFixtures', () => {
     expect(screen.getByTestId('creator-hub-dual-pane-ia-world-empty-themes-dark')).toBeInTheDocument();
   });
 
-  it('shows inline create and empty-state copy on world empty light frame', () => {
+  it('shows sidebar create and browse-only content on world empty light frame', () => {
     renderFixtures();
 
     const frame = screen.getByTestId('creator-hub-dual-pane-ia-world-empty-light');
+    const sidebar = within(frame).getByTestId('creator-hub-dual-pane-ia-world-empty-light-sidebar');
+
+    expect(within(sidebar).getByTestId('shell-sidebar-panel')).toBeInTheDocument();
+    expect(within(sidebar).getByTestId('sidebar-create-panel')).toBeInTheDocument();
+    expect(within(sidebar).getByTestId('creator-create-world')).toBeInTheDocument();
+    expect(within(sidebar).getByTestId('creator-create-work')).toBeInTheDocument();
+
     expect(
-      within(frame).getByTestId('creator-hub-dual-pane-ia-world-empty-light-workspace-pane-inline-form'),
-    ).toBeInTheDocument();
+      within(frame).queryByTestId(/workspace-pane-inline-form/),
+    ).not.toBeInTheDocument();
     expect(
       within(frame).getByTestId('creator-hub-dual-pane-ia-world-empty-light-card-list-pane-empty-i18n-key'),
     ).toHaveTextContent('hub.empty.worlds');
   });
 
-  it('shows compact create on populated world frame', () => {
+  it('shows card list without content-left create on populated world frame', () => {
     renderFixtures();
 
     const frame = screen.getByTestId('creator-hub-dual-pane-ia-world-populated-light');
+    expect(within(frame).getByTestId('sidebar-create-panel')).toBeInTheDocument();
     expect(
-      within(frame).getByTestId('creator-hub-dual-pane-ia-world-populated-light-workspace-pane-compact-create'),
-    ).toBeInTheDocument();
+      within(frame).queryByTestId(/workspace-pane-inline-form|workspace-pane-compact-create/),
+    ).not.toBeInTheDocument();
     expect(
-      within(frame).getByTestId('creator-hub-dual-pane-ia-world-populated-light-card-list-pane-world-card-world-fantasy'),
+      within(frame).getByTestId(
+        'creator-hub-dual-pane-ia-world-populated-light-card-list-pane-world-card-world-fantasy',
+      ),
     ).toBeInTheDocument();
   });
 

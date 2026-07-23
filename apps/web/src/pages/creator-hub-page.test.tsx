@@ -3,6 +3,7 @@ import { http, HttpResponse } from 'msw';
 import { describe, expect, it, vi } from 'vitest';
 import { Route, Routes } from 'react-router-dom';
 
+import { Sidebar } from '@/components/layout/sidebar';
 import { CreatorHubPage } from '@/pages/creator-hub-page';
 import { renderInApp } from '@/test/test-providers';
 import { useHandlers } from '@/test/msw-server';
@@ -21,6 +22,7 @@ function renderCreatorHubFlow(options?: {
   works?: Parameters<typeof worksList>[0];
   worlds?: { world_id: string; title: string }[];
   initialEntry?: string;
+  withSidebar?: boolean;
 }) {
   const works = options?.works ?? [
     {
@@ -46,24 +48,41 @@ function renderCreatorHubFlow(options?: {
     http.post('/v1/daemon/agent-host/scan', () => HttpResponse.json({ agents: [] })),
   );
 
-  renderInApp(
-  <Routes>
-    <Route path="/" element={<CreatorHubPage />} />
-    <Route path="works" element={<CreatorHubPage />} />
-    <Route path="works/:workId/outline" element={<div data-testid="work-outline-canvas" />} />
-    <Route path="worlds" element={<CreatorHubPage />} />
-    <Route path="worlds/:worldId/timeline" element={<div data-testid="world-timeline-canvas" />} />
-  </Routes>,
-    {
-      client: makeClient(),
-      activeCreatorId: 'creator-a',
-      initialRouterEntries: [options?.initialEntry ?? '/works'],
-    },
+  const hubRoutes = (
+    <Routes>
+      <Route path="/" element={<CreatorHubPage />} />
+      <Route path="works" element={<CreatorHubPage />} />
+      <Route path="works/:workId/outline" element={<div data-testid="work-outline-canvas" />} />
+      <Route path="worlds" element={<CreatorHubPage />} />
+      <Route path="worlds/:worldId/timeline" element={<div data-testid="world-timeline-canvas" />} />
+    </Routes>
   );
+
+  const routes = options?.withSidebar ? (
+    <Routes>
+      <Route
+        path="/works"
+        element={
+          <div className="flex h-full min-h-0">
+            <Sidebar />
+            <CreatorHubPage />
+          </div>
+        }
+      />
+    </Routes>
+  ) : (
+    hubRoutes
+  );
+
+  renderInApp(routes, {
+    client: makeClient(),
+    activeCreatorId: 'creator-a',
+    initialRouterEntries: [options?.initialEntry ?? '/works'],
+  });
 }
 
-describe('CreatorHubPage dual-pane IA (V1.134 P3)', () => {
-  it('renders stable dual-pane chrome with shared tab bar', async () => {
+describe('CreatorHubPage browse IA (V1.135 P0)', () => {
+  it('renders browse chrome with shared tab bar', async () => {
     renderCreatorHubFlow();
 
     expect(await screen.findByTestId('creator-hub-dual-pane')).toBeInTheDocument();
@@ -71,9 +90,22 @@ describe('CreatorHubPage dual-pane IA (V1.134 P3)', () => {
     expect(screen.getByTestId('creator-hub-dual-pane-tab-bar-work')).toBeInTheDocument();
     expect(screen.getByTestId('creator-hub-dual-pane-tabpanel')).toBeInTheDocument();
     expect(screen.queryByTestId('creator-hub-controller')).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId('creator-hub-dual-pane-workspace-pane-inline-form'),
+    ).not.toBeInTheDocument();
   });
 
-  it('shows Work cards on the right when Work tab is active', async () => {
+  it('shows sidebar create panel when hub mounts beside Sidebar', async () => {
+    renderCreatorHubFlow({ works: [], worlds: [], withSidebar: true });
+
+    expect(await screen.findByTestId('sidebar-create-panel')).toBeInTheDocument();
+    expect(screen.getByTestId('shell-sidebar-panel')).toBeInTheDocument();
+    expect(
+      screen.queryByTestId('creator-hub-dual-pane-workspace-pane-inline-form'),
+    ).not.toBeInTheDocument();
+  });
+
+  it('shows Work cards when Work tab is active', async () => {
     renderCreatorHubFlow();
 
     await waitFor(() => {
@@ -92,16 +124,19 @@ describe('CreatorHubPage dual-pane IA (V1.134 P3)', () => {
   });
 
   it('selects Work tab after hydrate when only works exist (IA §1.2)', async () => {
-    renderCreatorHubFlow({ works: [
-      {
-        work_id: 'work-42',
-        title: 'Drill Novel',
-        status: 'active',
-        intake_status: 'ready',
-        primary_preset_id: 'preset-1',
-        updated_at: '2026-01-01T00:00:00Z',
-      },
-    ], worlds: [] });
+    renderCreatorHubFlow({
+      works: [
+        {
+          work_id: 'work-42',
+          title: 'Drill Novel',
+          status: 'active',
+          intake_status: 'ready',
+          primary_preset_id: 'preset-1',
+          updated_at: '2026-01-01T00:00:00Z',
+        },
+      ],
+      worlds: [],
+    });
 
     await waitFor(() => {
       expect(screen.getByTestId('creator-hub-dual-pane-tab-bar-work')).toHaveAttribute(
@@ -114,7 +149,7 @@ describe('CreatorHubPage dual-pane IA (V1.134 P3)', () => {
     ).toBeInTheDocument();
   });
 
-  it('does not show empty state or expanded create while lists are loading', async () => {
+  it('does not show empty state while lists are loading', async () => {
     let resolveWorks: (() => void) | undefined;
     const worksGate = new Promise<void>((resolve) => {
       resolveWorks = resolve;
@@ -194,21 +229,21 @@ describe('CreatorHubPage dual-pane IA (V1.134 P3)', () => {
     ).toBeInTheDocument();
   });
 
-  it('shows empty-state copy when the active tab has no items', async () => {
+  it('shows empty-state copy pointing to sidebar create', async () => {
     renderCreatorHubFlow({ works: [], worlds: [] });
 
     expect(
       await screen.findByTestId('creator-hub-dual-pane-card-list-pane-empty'),
     ).toBeInTheDocument();
     expect(
-      screen.getByText('No Worlds yet — create one from the left'),
+      screen.getByText('No Worlds yet — create one from the sidebar'),
     ).toBeInTheDocument();
     expect(
-      screen.getByTestId('creator-hub-dual-pane-workspace-pane-inline-form'),
-    ).toBeInTheDocument();
+      screen.queryByTestId('creator-hub-dual-pane-workspace-pane-inline-form'),
+    ).not.toBeInTheDocument();
   });
 
-  it('links tab switches across both panes', async () => {
+  it('links tab switches across browse content only', async () => {
     renderCreatorHubFlow({
       works: [],
       worlds: [{ world_id: 'world-1', title: 'Fantasy Realm' }],
@@ -218,12 +253,12 @@ describe('CreatorHubPage dual-pane IA (V1.134 P3)', () => {
 
     await waitFor(() => {
       expect(
-        screen.getByText('No Works yet — create one from the left'),
+        screen.getByText('No Works yet — create one from the sidebar'),
       ).toBeInTheDocument();
     });
     expect(
-      screen.getByTestId('creator-hub-dual-pane-workspace-pane-inline-form'),
-    ).toBeInTheDocument();
+      screen.queryByTestId('creator-hub-dual-pane-workspace-pane-inline-form'),
+    ).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByTestId('creator-hub-dual-pane-tab-bar-world'));
 
@@ -252,104 +287,5 @@ describe('CreatorHubPage dual-pane IA (V1.134 P3)', () => {
       expect(screen.getByTestId('work-outline-canvas')).toBeInTheDocument();
     });
     expect(screen.queryByTestId('creator-hub-controller')).not.toBeInTheDocument();
-  });
-
-  it('creates a Work inline without opening a dialog', async () => {
-    const works: Array<Record<string, unknown>> = [];
-
-    useHandlers(
-      http.get('/v1/daemon/creators', () =>
-        HttpResponse.json({
-          items: [{ creator_id: 'creator-a', display_name: 'Alice' }],
-          pagination: { limit: 20, has_more: false },
-        }),
-      ),
-      http.get('/v1/daemon/works', () =>
-        HttpResponse.json({
-          items: works,
-          pagination: { limit: 20, has_more: false },
-        }),
-      ),
-      http.post('/v1/daemon/works', async ({ request }) => {
-        const body = (await request.json()) as { title?: string };
-        works.push({
-          work_id: 'work-new',
-          title: body.title ?? 'New Work',
-          status: 'active',
-          intake_status: 'ready',
-          primary_preset_id: 'preset-1',
-          updated_at: '2026-01-01T00:00:00Z',
-        });
-        return HttpResponse.json({ work_id: 'work-new', status: 'draft' }, { status: 201 });
-      }),
-      http.get('/v1/daemon/narrative/worlds', () => HttpResponse.json({ worlds: [] })),
-      http.post('/v1/daemon/agent-host/scan', () => HttpResponse.json({ agents: [] })),
-    );
-
-    renderInApp(
-      <Routes>
-        <Route path="/works" element={<CreatorHubPage />} />
-      </Routes>,
-      {
-        client: makeClient(),
-        activeCreatorId: 'creator-a',
-        initialRouterEntries: ['/works'],
-      },
-    );
-
-    await waitFor(() => {
-      expect(screen.getByTestId('creator-hub-dual-pane')).toBeInTheDocument();
-    });
-
-    fireEvent.click(screen.getByTestId('creator-hub-dual-pane-tab-bar-work'));
-
-    const titleInput = await screen.findByTestId('creator-hub-dual-pane-workspace-pane-title-input');
-    fireEvent.change(titleInput, { target: { value: 'Fresh Novel' } });
-    fireEvent.click(screen.getByTestId('creator-hub-dual-pane-workspace-pane-submit'));
-
-    await waitFor(() => {
-      expect(
-        screen.getByTestId('creator-hub-dual-pane-card-list-pane-work-card-work-new'),
-      ).toBeInTheDocument();
-    });
-    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
-    expect(screen.getByTestId('creator-hub-dual-pane')).toBeInTheDocument();
-  });
-
-  it('creates a World inline when client exposes createWorld', async () => {
-    const createWorld = vi.fn().mockResolvedValue({ world_id: 'world-new', status: 'active' });
-    const clientWithCreateWorld = Object.assign(new BrowserClient(), { createWorld });
-
-    useHandlers(
-      http.get('/v1/daemon/creators', () =>
-        HttpResponse.json({
-          items: [{ creator_id: 'creator-a', display_name: 'Alice' }],
-          pagination: { limit: 20, has_more: false },
-        }),
-      ),
-      worksList([]),
-      http.get('/v1/daemon/narrative/worlds', () => HttpResponse.json({ worlds: [] })),
-      http.post('/v1/daemon/agent-host/scan', () => HttpResponse.json({ agents: [] })),
-    );
-
-    renderInApp(
-      <Routes>
-        <Route path="/works" element={<CreatorHubPage />} />
-      </Routes>,
-      {
-        client: clientWithCreateWorld,
-        activeCreatorId: 'creator-a',
-        initialRouterEntries: ['/works'],
-      },
-    );
-
-    const titleInput = await screen.findByTestId('creator-hub-dual-pane-workspace-pane-title-input');
-    fireEvent.change(titleInput, { target: { value: 'New Realm' } });
-    fireEvent.click(screen.getByTestId('creator-hub-dual-pane-workspace-pane-submit'));
-
-    await waitFor(() => {
-      expect(createWorld).toHaveBeenCalledWith({ title: 'New Realm' });
-    });
-    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 });

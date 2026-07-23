@@ -1,20 +1,14 @@
 /**
  * Studio fixtures for V1.132 P3 Creator / Orchestrator 功能区 IA (AC-9).
- *
- * Proves grill A composition in light + dark:
- * - 创作 hub left = Create-only (创建 World / 延续 Work) — not Menu nav (世界/作品)
- * - Worlds / Works = right-side content lists
- * - 工作区 footer visible under both 创作 and 编排
+ * V1.135 P0 alignment: creator hub uses ShellSidebarChrome.panelContent for create;
+ * content area uses World/Work tab bar + card list (browse-only).
  *
  * Prop-driven frames compose `@web-layout/creator-shell-content`,
- * `@web-layout/shell-sidebar-chrome`, and `@web-layout/footer-profiles-chrome`
+ * `@web-layout/shell-sidebar-chrome`, `@web-layout/hub-tab-bar`,
+ * `@web-layout/hub-card-list-pane`, and `@web-layout/footer-profiles-chrome`
  * without App layout providers or daemon hooks.
  */
-import { useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
-
-import { Globe, Layers, type LucideIcon } from 'lucide-react';
-
-import { cn } from '@42ch/nexus-ui';
+import { useState, type ReactNode } from 'react';
 
 import { StudioShellLogo } from '@/components/studio-shell-logo';
 
@@ -23,14 +17,17 @@ import {
   type CreatorEntityRef,
 } from '@web-layout/creator-shell-content';
 import {
-  FooterProfilesChrome,
-  type FooterProfile,
-} from '@web-layout/footer-profiles-chrome';
+  HubCardListPane,
+  type HubCardListItem,
+  type HubCardListPaneLabels,
+} from '@web-layout/hub-card-list-pane';
+import { HubTabBar, type HubTab, type HubTabBarLabels } from '@web-layout/hub-tab-bar';
 import {
   ShellSidebarChrome,
   type ShellSidebarTab,
 } from '@web-layout/shell-sidebar-chrome';
 
+import { FixtureWorkspaceFooter } from '@/fixtures/hub-sidebar-fixture-chrome';
 import { ORCHESTRATOR_NAV } from '@/fixtures/shell-nav-data';
 
 const CREATE_LABELS = {
@@ -41,12 +38,22 @@ const CREATE_LABELS = {
   createWorldDisabledTitle: '创建 World 仅在 Nexus 桌面应用中可用。',
 } as const;
 
-const SAMPLE_WORLDS: { id: string; label: string }[] = [
+const HUB_BROWSE_LABELS = {
+  tabs: { world: '世界', work: '作品' } satisfies HubTabBarLabels,
+  cardList: {
+    emptyWorlds: '暂无世界，从侧边栏创建',
+    emptyWorks: '暂无作品，从侧边栏创建',
+    emptyWorldsKey: 'hub.empty.worlds',
+    emptyWorksKey: 'hub.empty.works',
+  } satisfies HubCardListPaneLabels,
+};
+
+const SAMPLE_WORLDS: HubCardListItem[] = [
   { id: 'world-fantasy', label: '奇幻大陆' },
   { id: 'world-scifi', label: '近未来都市' },
 ];
 
-const SAMPLE_WORKS: { id: string; label: string }[] = [
+const SAMPLE_WORKS: HubCardListItem[] = [
   { id: 'work-novel', label: '漫漫长路' },
   { id: 'work-essay', label: '随笔集' },
 ];
@@ -120,208 +127,46 @@ function FixtureFrame({
   );
 }
 
-function GongnengquIaModeSwitch({
+function HubBrowseContent({
   activeTab,
   onTabChange,
-  footer,
+  worlds,
+  works,
+  onSelectCard,
   testId,
 }: {
-  activeTab: ShellSidebarTab;
-  onTabChange: (tab: ShellSidebarTab) => void;
-  footer: ReactNode;
-  testId?: string;
-}) {
-  return (
-    <div
-      className="mt-auto border-t border-gray-alpha-400 pt-2"
-      data-testid={testId ?? 'gongnengqu-ia-mode-switch'}
-    >
-      <div
-        className="grid grid-cols-2 gap-1 rounded-card bg-gray-alpha-100 p-1"
-        role="tablist"
-        aria-label="主导航"
-        data-testid="shell-mode-switch"
-      >
-        {(['creator', 'orchestrator'] as const).map((tab) => {
-          const label = tab === 'creator' ? '创作' : '编排';
-          const active = activeTab === tab;
-          return (
-            <button
-              key={tab}
-              type="button"
-              id={tab}
-              role="tab"
-              aria-selected={active}
-              onClick={() => onTabChange(tab)}
-              className={cn(
-                'rounded-control px-2 py-1.5 text-button-14 font-button transition-colors duration-state ease-standard motion-reduce:transition-none',
-                active
-                  ? 'bg-brand-cyan text-brand-deep-blue shadow-card'
-                  : 'text-gray-700 hover:bg-gray-alpha-200 hover:text-gray-1000',
-              )}
-            >
-              {label}
-            </button>
-          );
-        })}
-      </div>
-      <div className="mt-2 flex flex-col gap-2">{footer}</div>
-    </div>
-  );
-}
-
-function FixtureWorkspaceFooter({ testId }: { testId?: string }) {
-  const [activeId, setActiveId] = useState('local-creator');
-  const [focusIndex, setFocusIndex] = useState(0);
-  const itemRefs = useRef<(HTMLButtonElement | null)[]>([]);
-  const addRef = useRef<HTMLButtonElement | null>(null);
-
-  const profiles: FooterProfile[] = [
-    {
-      id: 'local-creator',
-      displayName: '本地创作者',
-      active: activeId === 'local-creator',
-    },
-  ];
-  const total = profiles.length + 1;
-
-  function focusAt(index: number) {
-    const next = Math.max(0, Math.min(total - 1, index));
-    const el = next === profiles.length ? addRef.current : itemRefs.current[next];
-    el?.focus();
-    setFocusIndex(next);
-  }
-
-  function handleKeyDown(event: KeyboardEvent<HTMLDivElement>) {
-    switch (event.key) {
-      case 'ArrowRight':
-        event.preventDefault();
-        focusAt(focusIndex + 1);
-        break;
-      case 'ArrowLeft':
-        event.preventDefault();
-        focusAt(focusIndex - 1);
-        break;
-      case 'Home':
-        event.preventDefault();
-        focusAt(0);
-        break;
-      case 'End':
-        event.preventDefault();
-        focusAt(total - 1);
-        break;
-      default:
-        break;
-    }
-  }
-
-  return (
-    <div data-testid={testId ?? 'gongnengqu-ia-workspace-footer'}>
-      <FooterProfilesChrome
-        sectionLabel="工作区"
-        addButtonLabel="添加创作者"
-        profiles={profiles}
-        focusIndex={focusIndex}
-        onSelect={setActiveId}
-        onAdd={() => {}}
-        onFocus={setFocusIndex}
-        onKeyDown={handleKeyDown}
-        onItemRef={(index, el) => {
-          itemRefs.current[index] = el;
-        }}
-        onAddRef={(el) => {
-          addRef.current = el;
-        }}
-      />
-    </div>
-  );
-}
-
-function EntityListSection({
-  title,
-  icon: Icon,
-  items,
-  selectedId,
-  onSelect,
-  testId,
-}: {
-  title: string;
-  icon: LucideIcon;
-  items: { id: string; label: string }[];
-  selectedId?: string | null;
-  onSelect?: (id: string) => void;
+  activeTab: HubTab;
+  onTabChange: (tab: HubTab) => void;
+  worlds: HubCardListItem[];
+  works: HubCardListItem[];
+  onSelectCard?: (id: string) => void;
   testId: string;
 }) {
   return (
-    <section data-testid={testId} className="flex flex-col gap-2">
-      <h3 className="flex items-center gap-2 px-1 text-label-12 font-medium uppercase tracking-wide text-gray-600">
-        <Icon className="h-3.5 w-3.5" aria-hidden />
-        {title}
-      </h3>
-      <ul className="flex flex-col gap-1" role="list">
-        {items.map((item) => {
-          const selected = selectedId === item.id;
-          return (
-            <li key={item.id}>
-              <button
-                type="button"
-                data-testid={`${testId}-row-${item.id}`}
-                aria-pressed={selected}
-                onClick={() => onSelect?.(item.id)}
-                className={cn(
-                  'flex w-full items-center rounded-control px-3 py-2 text-left text-label-14 transition-colors duration-state ease-standard motion-reduce:transition-none',
-                  selected
-                    ? 'bg-gray-alpha-100 text-gray-1000'
-                    : 'text-gray-700 hover:bg-gray-alpha-100 hover:text-gray-1000',
-                )}
-              >
-                {item.label}
-              </button>
-            </li>
-          );
-        })}
-      </ul>
-    </section>
-  );
-}
-
-function EntityListsPanel({
-  selectedEntity,
-  onSelectWorld,
-  onSelectWork,
-  testId = 'gongnengqu-ia-entity-lists',
-}: {
-  selectedEntity?: CreatorEntityRef | null;
-  onSelectWorld?: (id: string) => void;
-  onSelectWork?: (id: string) => void;
-  testId?: string;
-}) {
-  const selectedWorldId =
-    selectedEntity?.kind === 'world' ? selectedEntity.id : null;
-  const selectedWorkId =
-    selectedEntity?.kind === 'work' ? selectedEntity.id : null;
-
-  return (
-    <div
-      data-testid={testId}
-      className="flex h-full w-full flex-col gap-6 overflow-auto p-6"
-    >
-      <EntityListSection
-        title="世界"
-        icon={Globe}
-        items={SAMPLE_WORLDS}
-        selectedId={selectedWorldId}
-        onSelect={onSelectWorld}
-        testId={`${testId}-worlds`}
+    <div className="flex min-h-0 flex-1 flex-col bg-background-200" data-testid={testId}>
+      <HubTabBar
+        activeTab={activeTab}
+        onTabChange={onTabChange}
+        labels={HUB_BROWSE_LABELS.tabs}
+        ariaLabel="Creator hub entity kind"
+        data-testid={`${testId}-tab-bar`}
       />
-      <EntityListSection
-        title="作品"
-        icon={Layers}
-        items={SAMPLE_WORKS}
-        selectedId={selectedWorkId}
-        onSelect={onSelectWork}
-        testId={`${testId}-works`}
-      />
+      <div
+        id="hub-tabpanel"
+        role="tabpanel"
+        aria-labelledby={`hub-tab-${activeTab}`}
+        className="min-h-0 flex-1"
+        data-testid={`${testId}-tabpanel`}
+      >
+        <HubCardListPane
+          activeTab={activeTab}
+          worlds={worlds}
+          works={works}
+          labels={HUB_BROWSE_LABELS.cardList}
+          onSelectCard={onSelectCard}
+          data-testid={`${testId}-card-list-pane`}
+        />
+      </div>
     </div>
   );
 }
@@ -336,23 +181,34 @@ function GongnengquIaShellFrame({
   interactive?: boolean;
 }) {
   const [activeTab, setActiveTab] = useState<ShellSidebarTab>(initialTab);
+  const [hubTab, setHubTab] = useState<HubTab>('world');
   const [selectedEntity, setSelectedEntity] = useState<CreatorEntityRef | null>(null);
 
-  const footer = <FixtureWorkspaceFooter />;
+  const footer = <FixtureWorkspaceFooter testId={`${testId}-workspace-footer`} />;
 
-  function handleSelectWorld(id: string) {
-    if (!interactive) return;
-    const world = SAMPLE_WORLDS.find((item) => item.id === id);
-    if (world) {
-      setSelectedEntity({ kind: 'world', id: world.id, label: world.label });
-    }
-  }
+  const createPanel = (
+    <CreatorShellContent
+      mode="create"
+      canCreateWorld={false}
+      labels={CREATE_LABELS}
+      onCreateWork={() => {}}
+      onCreateWorld={() => {}}
+      data-testid="sidebar-create-panel"
+    />
+  );
 
-  function handleSelectWork(id: string) {
+  function handleSelectCard(id: string) {
     if (!interactive) return;
-    const work = SAMPLE_WORKS.find((item) => item.id === id);
-    if (work) {
-      setSelectedEntity({ kind: 'work', id: work.id, label: work.label });
+    if (hubTab === 'world') {
+      const world = SAMPLE_WORLDS.find((item) => item.id === id);
+      if (world) {
+        setSelectedEntity({ kind: 'world', id: world.id, label: world.label });
+      }
+    } else {
+      const work = SAMPLE_WORKS.find((item) => item.id === id);
+      if (work) {
+        setSelectedEntity({ kind: 'work', id: work.id, label: work.label });
+      }
     }
   }
 
@@ -367,11 +223,13 @@ function GongnengquIaShellFrame({
           data-testid={`${testId}-controller-content`}
         />
       ) : (
-        <EntityListsPanel
-          selectedEntity={selectedEntity}
-          onSelectWorld={handleSelectWorld}
-          onSelectWork={handleSelectWork}
-          testId={`${testId}-entity-lists`}
+        <HubBrowseContent
+          activeTab={hubTab}
+          onTabChange={setHubTab}
+          worlds={SAMPLE_WORLDS}
+          works={SAMPLE_WORKS}
+          onSelectCard={handleSelectCard}
+          testId={`${testId}-hub-browse`}
         />
       )
     ) : (
@@ -392,47 +250,19 @@ function GongnengquIaShellFrame({
       data-testid={testId}
     >
       <div className="flex w-sidebar-nav-width shrink-0 flex-col">
-        {activeTab === 'creator' ? (
-          <div
-            className="flex h-full min-h-0 flex-col border-r border-gray-alpha-400 bg-background-100 p-3"
-            data-testid={`${testId}-creator-sidebar`}
-          >
-            <div className="flex h-12 items-center px-3">
-              <StudioShellLogo />
-            </div>
-            <div
-              className="flex flex-1 flex-col overflow-auto py-2"
-              data-testid={`${testId}-create-left`}
-            >
-              <CreatorShellContent
-                mode="create"
-                canCreateWorld={false}
-                labels={CREATE_LABELS}
-                onCreateWork={() => {}}
-                data-testid={`${testId}-create-content`}
-              />
-            </div>
-            <GongnengquIaModeSwitch
-              activeTab={activeTab}
-              onTabChange={setActiveTab}
-              footer={footer}
-              testId={`${testId}-mode-switch`}
-            />
-          </div>
-        ) : (
-          <ShellSidebarChrome
-            activeTab={activeTab}
-            activeRoute="#memory"
-            navGroups={ORCHESTRATOR_NAV}
-            onTabChange={setActiveTab}
-            logo={<StudioShellLogo />}
-            footer={footer}
-            creatorTabLabel="创作"
-            orchestratorTabLabel="编排"
-            primaryNavigationAriaLabel="主导航"
-            data-testid={`${testId}-orchestrator-sidebar`}
-          />
-        )}
+        <ShellSidebarChrome
+          activeTab={activeTab}
+          activeRoute={activeTab === 'orchestrator' ? '#memory' : '/works'}
+          navGroups={activeTab === 'orchestrator' ? ORCHESTRATOR_NAV : []}
+          onTabChange={setActiveTab}
+          logo={<StudioShellLogo />}
+          panelContent={activeTab === 'creator' ? createPanel : undefined}
+          footer={footer}
+          creatorTabLabel="创作"
+          orchestratorTabLabel="编排"
+          primaryNavigationAriaLabel="主导航"
+          data-testid={`${testId}-sidebar`}
+        />
       </div>
 
       <div className="flex min-w-0 flex-1 flex-col bg-background-200">{mainContent}</div>
@@ -444,8 +274,8 @@ export function CreatorOrchGongnengquIaFixtures() {
   return (
     <div data-testid="creator-orch-gongnengqu-ia-fixtures">
       <FixtureFrame
-        title="创作 hub — Create left + lists right (light / dark)"
-        description="Grill A: 创作左侧仅 创建 World / 延续 Work；世界与作品列表在右侧内容区。无左侧 Menu 导航（世界/作品）。"
+        title="创作 hub — sidebar create + browse content (light / dark)"
+        description="V1.135 P0: 创作 sidebar panelContent = 创建 World / 延续 Work (sidebar-create-panel). 内容区 = World/Work 标签 + 卡片列表 — 无双栏左侧创建表单。"
         testId="gongnengqu-ia-fixture-creator-hub"
       >
         <ThemePair
@@ -488,8 +318,8 @@ export function CreatorOrchGongnengquIaFixtures() {
       </FixtureFrame>
 
       <FixtureFrame
-        title="Interactive — list row → entity mode; 工作区 across modes"
-        description="选择右侧列表行进入实体模式（Controller stub + 返回）；切换 创作/编排 时工作区 footer 保持可见。"
+        title="Interactive — card select → entity mode; 工作区 across modes"
+        description="选择内容区卡片进入实体模式（Controller stub + 返回）；切换 创作/编排 时工作区 footer 保持可见。"
         testId="gongnengqu-ia-fixture-interactive"
       >
         <GongnengquIaShellFrame
