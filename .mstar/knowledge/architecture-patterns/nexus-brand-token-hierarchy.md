@@ -7,7 +7,7 @@ severity: medium
 plan_id: V1.83-P-last (compound of brand UI foundation iteration); V1.94-P-last (contrast rule correction); V1.98-P0 (DESIGN SSOT unification + shared token pipeline + design-studio); V1.121-P0 (v0.4 Literary Engine); 2026-07-22-vi-logo-upgrade (Chronos dual-role + timeline logo system); 2026-07-22-v1.132-p2-vi-aesthetic-retune (plain vs square split, compact mark, theme-split primary)
 tags: [brand, design-tokens, nexus-ui, design-md, git-lfs, svg, npm-package, button-contrast, dark-theme, design-studio, tailwind-preset, ssot-unification, literary-engine, ink-atmosphere, display-typography, motion-recipes, structural-namespace, chronos, dual-role, logo-system]
 applies_when: adding or consuming cross-application Nexus brand/design tokens (new product surface, platform package, Web shell refresh, or a new app consuming the design system); also when defining any button background/text colour combination, adding a display typography tier, tuning surface atmosphere, extending elevation/motion, or registering a structural (non-color) CSS variable family; also when choosing ink vs cyan roles or logo lockup variants
-last_updated: 2026-07-22 (V1.132 P2: plain vs *-square assets, logoCompactMarkHeightPx, theme-split primary Button; supersedes uniform cyan primary in both themes)
+last_updated: 2026-07-23 (V1.136 P2: light primary = brand-cyan-1000 + white label; theme-split focus rings blue-1000 / dark blue-700 on shell chrome)
 ---
 
 # Nexus Brand & Design Token Hierarchy
@@ -40,10 +40,10 @@ Token consumption follows these layers, top to bottom (post-V1.98):
 
 **Enduring rule**: the **background** color decides label text — not the theme mode. Bright fills (including cyan `#25D1E0`) take **deep ink** labels; dark/saturated fills take light labels. Cyan fails AA as **body / paragraph text** on white (~1.9:1) and must never be used that way.
 
-**Primary Button (V1.132 P2 theme-split — supersedes `2026-07-22-vi-logo-upgrade` uniform cyan recipe):**
+**Primary Button (V1.136 P2 theme-split — supersedes V1.132 ink-fill light primary):**
 
-- **Light shell:** `bg-brand-deep-blue` + `text-brand-white` (ink fill — not neon cyan + deep ink on light surfaces; VI-002). Light **hover/active** use ink steps `brand-deep-blue-800` / `brand-deep-blue-900` (wired in `theme.css` + tokens preset) — **never** light `blue-900` (cyan alias).
-- **Dark shell:** `bg-brand-cyan` + `text-brand-deep-blue` (strong cyan CTA); dark hover stays on the cyan `blue-*` signal scale.
+- **Light shell:** `bg-brand-cyan-1000` + `text-brand-white` (mid-teal fill — not neon cyan or ink deep-blue on light surfaces; VI-002). Light **hover/active** use cyan scale steps `blue-900` / `blue-1000` (aliases of `brand-cyan-900` / `brand-cyan-1000` in `tokens.css`).
+- **Dark shell:** `bg-brand-cyan` + `text-brand-deep-blue` (strong cyan CTA); dark hover stays on the cyan `blue-*` signal scale (`blue-800` / `blue-900`).
 - Implemented in `@42ch/nexus-ui` `Button`; `TransportErrorBlock` uses compact text-link CTAs (V1.136 P2), not `Button`.
 
 Practical application:
@@ -112,7 +112,7 @@ Chronos Light/Dark shells share one brand language via an explicit **dual-role**
 | Role | Token(s) | Hex | Use for | Do **not** use for |
 | --- | --- | --- | --- | --- |
 | **Ink structure** | `brand-deep-blue` | `#0D2B3E` | Titlebar fill, light **text links**, primary **label** on cyan CTAs, connection-setup **security-note** washes, logo plate structure | Light interactive fills; dark chrome fills (guard only) |
-| **Cyan signal** | `brand-cyan` / light+dark `blue-700`…`blue-1000` | `#25D1E0` (+ tuned steps) | Primary Button fill, active nav bar, focus-ring outer, selection, timeline accents, checked chrome, graphical signal icons | Body/paragraph text on light; "deep structure" washes |
+| **Cyan signal** | `brand-cyan` / `brand-cyan-1000` / light+dark `blue-700`…`blue-1000` | `#25D1E0` (neon) / `#117480` (mid-teal) (+ tuned steps) | Light primary CTA fill (`brand-cyan-1000`), dark primary CTA fill (`brand-cyan`), active nav bar, focus-ring outer, selection, timeline accents, checked chrome, graphical signal icons | Body/paragraph text on light; "deep structure" washes |
 
 **Token strategy:** light interactive `blue-700/800/900/1000` was flipped to the **cyan** scale (mirroring dark). Component tokens that already referenced `{colors.blue-700}` become cyan in **both** themes without renaming CSS keys. Ink structure must use **`brand-deep-blue` explicitly**.
 
@@ -151,7 +151,8 @@ After the light `blue-700` → cyan flip, surfaces that still meant **deep struc
 
 ### Audit pattern additions (Chronos + V1.132 + V1.134)
 
-- Button: assert light primary `bg-brand-deep-blue text-brand-white`; dark primary `bg-brand-cyan text-brand-deep-blue`; assert absence of neon cyan primary on light shell.
+- Button: assert light primary `bg-brand-cyan-1000 text-brand-white`; dark primary `bg-brand-cyan text-brand-deep-blue`; assert absence of neon cyan primary fill and ink deep-blue primary fill on light shell.
+- Focus rings (shell chrome): light `ring-blue-1000` / dark `ring-blue-700` theme-split — not bare `ring-blue-700` in both themes.
 - Links: light retry/list links assert `text-brand-deep-blue`; grepping light `text-blue-700` on link-like roles is a smell.
 - Security / structure washes: assert `brand-deep-blue` alpha classes and **no** `blue-700` on those nodes.
 - Logos: `logoVariants` + `logoSquareVariants` keys match DESIGN; shell plate imports `*-square.svg`; titlebar imports plain `logo-white.svg` at compact height; desktop compose = opaque RGB + baked squircle plate (V1.135).

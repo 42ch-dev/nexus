@@ -60,7 +60,7 @@ export interface GlobalTimelineListChromeProps {
 }
 
 const ROW_CLASS_NAME =
-  'flex w-full items-center gap-3 rounded-card border border-gray-alpha-400 p-3 text-left transition-colors duration-state ease-standard hover:bg-gray-alpha-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-700 focus-visible:ring-offset-2';
+  'flex w-full items-center gap-3 rounded-card border border-gray-alpha-400 p-3 text-left transition-colors duration-state ease-standard hover:bg-gray-alpha-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-1000 dark:focus-visible:ring-blue-700 focus-visible:ring-offset-2';
 
 function RowContent({ row }: { row: GlobalTimelineListRow }) {
   return (

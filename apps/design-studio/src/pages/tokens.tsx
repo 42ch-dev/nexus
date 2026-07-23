@@ -21,10 +21,11 @@ const COLOR_GROUPS: TokenGroup[] = [
   {
     title: 'Brand',
     hint:
-      'Chronos dual-role anchors: deep-blue is ink structure (titlebar, light text links); cyan is shared signal (primary fill, active bars, focus).',
+      'Chronos dual-role anchors: deep-blue is ink structure (titlebar, light text links); mid-teal brand-cyan-1000 is light interactive fill (primary CTA, active bars); neon brand-cyan is dark primary + shared signal.',
     tokens: [
       { label: 'brand-deep-blue', varName: '--color-brand-deep-blue' },
       { label: 'brand-cyan', varName: '--color-brand-cyan' },
+      { label: 'brand-cyan-1000', varName: '--color-brand-cyan-1000' },
       { label: 'brand-white', varName: '--color-brand-white' },
     ],
   },
@@ -67,7 +68,7 @@ const COLOR_GROUPS: TokenGroup[] = [
   {
     title: 'Blue',
     hint:
-      'Interactive cyan signal scale (light and dark). blue-700 ≡ brand-cyan (#25D1E0) — active bars, focus rings, spinners. Not body-link ink on light (use brand-deep-blue).',
+      'Interactive cyan signal scale (light and dark). Light primary/active chrome uses blue-1000 ≡ brand-cyan-1000 (#117480); dark neon CTA uses blue-700 ≡ brand-cyan (#25D1E0). Focus rings: blue-1000 light / blue-700 dark. Not body-link ink on light (use brand-deep-blue).',
     tokens: ['700', '800', '900', '1000'].map((s) => ({
       label: `blue-${s}`,
       varName: `--color-blue-${s}`,
@@ -970,9 +971,11 @@ function ColorsSection() {
         className="text-copy-14 text-gray-700 mb-6 max-w-prose"
       >
         Chronos dual-role: <strong className="font-medium text-gray-1000">cyan signal</strong>{' '}
-        (<code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">blue-700</code> /{' '}
-        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">brand-cyan</code>) for
-        interactive affordances in both themes;{' '}
+        (<code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">blue-1000</code> /{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">brand-cyan-1000</code> on
+        light fills; <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">blue-700</code> /{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">brand-cyan</code> on dark){' '}
+        for interactive affordances;{' '}
         <strong className="font-medium text-gray-1000">deep ink</strong> (
         <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">brand-deep-blue</code>) for
         structure and light-theme body links. Toggle light/dark — blue-* stays cyan on light.

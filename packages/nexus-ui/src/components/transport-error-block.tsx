@@ -8,7 +8,7 @@ import { cn } from '../lib/cn';
  * Both primary and secondary actions use this recipe — not filled `Button`.
  */
 const CTA_LINK_CLASS =
-  'text-label-14 font-medium text-brand-deep-blue transition-colors duration-state ease-standard hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-700 dark:text-blue-700 dark:hover:text-blue-800 dark:hover:opacity-100';
+  'text-label-14 font-medium text-brand-deep-blue transition-colors duration-state ease-standard hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-1000 dark:text-blue-700 dark:focus-visible:ring-blue-700 dark:hover:text-blue-800 dark:hover:opacity-100';
 
 /**
  * Transport-failure sub-classification mirror of the apps/web
