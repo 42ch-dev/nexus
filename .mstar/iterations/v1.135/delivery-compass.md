@@ -1,7 +1,8 @@
 ---
 iteration_id: V1.135
 start_date: 2026-07-23
-status: locked
+end_date: 2026-07-23
+status: completed
 iteration_base_branch: main
 target_branch: main
 spec_integration_branch: iteration/v1.135
@@ -96,9 +97,9 @@ Status values: `Todo` | `InProgress` | `InReview` | `Done` | `Blocked`
 
 ## Roadmap Position
 
-- **Current (V1.135):** Correct author dogfood on sidebar create placement + Dock icon
-- **Next:** Resume broader Control Room polish only after these two author-visible gates close
-- **Done definition:** Author creates from the left menu zone; Dock icon looks like a normal macOS app
+- **Current iteration（V1.135）— delivered:** Sidebar menu-area create IA + Dock icon baked-squircle compose / RCA (author Dock confirm residual open)
+- **Next iteration:** Author closes `R-V1135P0-001` / `R-V1135P1-001` visual gates; then resume Control Room polish / below-`lg` create affordance (`R-V1135P0-003`) / VI-004 wording (`R-V1135P1-003`)
+- **最终目标：** Author-visible dogfood matches intent — create in shell sidebar; Dock looks like a normal macOS app
 
 ## Delivery Branch Policy
 
@@ -168,13 +169,26 @@ Status values: `Todo` | `InProgress` | `InReview` | `Done` | `Blocked`
 
 ## Quality Gate Summary
 
-> Filled at iteration-close.
-
 | plan_id | QC decision | QA gate | Residuals | Durable summary |
 |---------|-------------|---------|-----------|-----------------|
-| `2026-07-23-v1.135-p0-sidebar-menu-create-ia` | — | mandatory | — | — |
-| `2026-07-23-v1.135-p1-dock-icon-squircle-rca` | — | mandatory | — | — |
+| `2026-07-23-v1.135-p0-sidebar-menu-create-ia` | Approve with residuals | Pass with residuals | R-V1135P0-001..005 | plan `## Review Gate Summary` / `## QA Gate Summary` |
+| `2026-07-23-v1.135-p1-dock-icon-squircle-rca` | Approve with residuals | Pass with residuals | R-V1135P1-001..005 | plan `## Review Gate Summary` / `## QA Gate Summary` |
+
+**Iteration AC notes:** AC-I1/I2/I4 met in code. AC-I3 (author Dock squircle) **explicitly deferred** to `R-V1135P1-001` / `@author` — not forged Done.
 
 ## Compound Round Summary
 
-> Filled at iteration-close.
+| Candidate | Action | Notes |
+|-----------|--------|-------|
+| `workspace-parent-shell-ia.md` | **Updated in P0 Task 4** | Sidebar `panelContent` create; V1.134 dual-pane create superseded |
+| `nexus-brand-token-hierarchy.md` | **Updated at close** | V1.135 H1+H6+H7 Dock compose rules; closes knowledge contradiction vs baked squircle |
+| `guides/p1-dock-icon-rca.md` | **Retain in iteration package** | Author ritual + H1–H7 evidence; not promoted wholesale (pipeline SSOT = iteration spec + AGENTS/README) |
+| `specs/p0-*`, `specs/p1-*` | **Retain in iteration package** | Normative for this ship; durable patterns already in knowledge |
+
+No new knowledge slug created. README index rows refreshed for both updated patterns.
+
+## Iteration Retrospective (minimal)
+
+- **What worked:** Parallel lease-gated P0/P1; clear terminology lock stopped content-left misread; deep RCA beyond opacity.
+- **What failed before:** V1.134 treated dual-pane content create + opaque PNG as Done without matching author intent / Dock proof.
+- **Carry forward:** Author visual gates stay open residuals; do not close dogfood UI on Studio/metadata alone.
