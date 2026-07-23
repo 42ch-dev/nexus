@@ -8,14 +8,17 @@ Behavioral rules for the harness **knowledge** tree. **Do not** duplicate file i
 
 ## What belongs where
 
-**Principle:** separate **durable normative truth** (specs) from **cross-cutting policy** (knowledge root) from **time-boxed delivery** (iterations) from **machine state** (`status.json`).
+**Principle:** separate **durable normative truth** (tracked `specs/`) from **cross-cutting policy** (tracked `knowledge/`) from **local time-boxed delivery** (gitignored `iterations/`, `plans/`, `status.json`).
 
 | Kind of content | Where | Must not |
 | --- | --- | --- |
-| CLI / daemon / ACP / orchestration **behavior contracts** | [`../specs/`](../specs/) (`{SPECS_DIR}`) | Live in knowledge root or compass long-term |
-| Schema ↔ contracts boundary, crate policy, trackers | `knowledge/` root | Restate normative command/API detail |
-| Iteration scope, grill decisions, audit evidence | `iterations/` | Become permanent spec without P5 merge |
-| Open plans, residuals, branch names | `status.json` | Drift from compass without explicit update |
+| CLI / daemon / ACP / orchestration **behavior contracts** | [`../specs/`](../specs/) (`{SPECS_DIR}`, **tracked**) | Live in knowledge root or local compass long-term |
+| Schema ↔ contracts boundary, crate policy, trackers | `knowledge/` root (**tracked**) | Restate normative command/API detail |
+| Iteration scope, grill decisions, audit evidence | `iterations/` (**local / ignored**) | Become permanent spec without promotion into `{SPECS_DIR}` |
+| Open plans, residuals, branch names | local `status.json` (**ignored**) | Be treated as clone SSOT |
+
+Active deferred tracker: [`deferred-features-cross-version-tracker.md`](deferred-features-cross-version-tracker.md).  
+Shipped / cancelled archive (shared): [`shipped-features-tracker.md`](shipped-features-tracker.md).
 
 End-user docs stay in repo-root `docs/`.
 
@@ -25,7 +28,7 @@ End-user docs stay in repo-root `docs/`.
 
 Normative OSS specs live in **[`../specs/`](../specs/)** — not under `knowledge/`. Rules: [`../specs/AGENTS.md`](../specs/AGENTS.md).
 
-When implementing runtime behavior, read the active iteration compass (or `metadata.latest_ship.compass` between iterations), [`../specs/README.md`](../specs/README.md), then the cited spec bodies.
+When implementing runtime behavior, read the active **local** iteration compass (if present), [`../specs/README.md`](../specs/README.md), then the cited spec bodies.
 
 **Do not silently diverge** from a cited spec; record change via spec revision, plan residual, or ADR.
 
@@ -41,12 +44,13 @@ When implementing runtime behavior, read the active iteration compass (or `metad
 2. **Closing** — remove row from active; append same id to archive with version, plan, and brief note.
 3. **Iteration close** — add delivery snapshot to archive; refresh active quick-status line; hygiene plan merges **last**.
 4. **Re-defer** — keep row active; update target and history; archive only on ship or cancel.
-5. **Conflicts** — active delivery compass wins on scope; `status.json` `residual_findings` wins over tracker mirror for machine-state residuals.
+5. **Conflicts** — active delivery compass wins on scope; local `status.json` `residual_findings` wins over tracker mirror for machine-state residuals.
 
 ### Shipped archive — maintenance discipline
 
 1. **Append-only** — never delete closed rows or snapshots.
 2. **No open backlog** — new deferrals go to active tracker only.
+3. **Path** — [`shipped-features-tracker.md`](shipped-features-tracker.md) under `{KNOWLEDGE_DIR}` (tracked result).
 
 Spec supersession uses the archiving rules below — independent from feature-tracker lifecycle.
 
@@ -56,8 +60,8 @@ Spec supersession uses the archiving rules below — independent from feature-tr
 
 When any knowledge or spec document is superseded:
 
-1. Move to `.mstar/archived/knowledge/` (or appropriate archived subtree).
-2. Leave a **pointer stub** at the old path or fix all in-repo links in the same change.
+1. Move to local `.mstar/archived/knowledge/` (gitignored process archive), **or** leave a short stub in tracked `knowledge/` pointing at the replacement.
+2. Fix all **tracked** in-repo links in the same change.
 3. Update **README indexes only** — not AGENTS files.
 
 Do not archive while an active plan, compass, or crate AGENTS still treats the path as normative authority.

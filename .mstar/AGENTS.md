@@ -1,92 +1,132 @@
-# Nexus OSS — Harness Directory (`{HARNESS_DIR}`)
+# Nexus OSS — Harness Directory (`.mstar/`)
 
-> Project rules: root [`AGENTS.md`](../AGENTS.md). Runtime harness: upstream `mstar-*` skills.
+> Project identity & tech stack: root [`AGENTS.md`](../AGENTS.md).  
+> Runtime lifecycle: upstream Morning Star `mstar-*` skills (not duplicated here).
 
-## Conflict resolution priority
+This file is the **harness-layer SSOT** for path layout, git visibility, and write boundaries in Nexus.
 
-On conflicts (user has not overridden): **1** current instruction → **2** root `AGENTS.md` → **3** this file → **4** `mstar-*` skills. Higher number yields to lower.
+## Conflict resolution
 
-**Read order (not precedence):** load `mstar-harness-core` first for harness context; then other `mstar-*` on demand per its role matrix.
+On conflicts (unless the user overrides):
 
-## Concepts (path symbols)
+1. Current user instruction  
+2. Root [`AGENTS.md`](../AGENTS.md)  
+3. **This file**  
+4. Upstream `mstar-*` skills  
 
-| Symbol | Path (this repo) |
-|--------|------------------|
-| `{HARNESS_DIR}` | `.mstar/` |
-| `{PLAN_DIR}` | `plans/` |
-| `{SDD_DIR}` | `sdd/<plan-id>/` — **ephemeral scratch** (gitignored; not handoff) |
-| `{ITERATION_DIR}` | `iterations/` |
-| `{KNOWLEDGE_DIR}` | `knowledge/` — cross-cutting patterns, conventions, compound output |
-| `{SPECS_DIR}` | **`specs/`** — frozen normative specs / ADR (upstream default). Wire contracts: repo-root `schemas/` |
+**Read order (not precedence):** `mstar-harness-core` first; then other `mstar-*` on demand.
+
+## Principle — process vs results
+
+**Process stays out of git. Results are shared with the team.**
+
+| Class | Meaning | Git |
+|-------|---------|-----|
+| **Results** | Normative or reusable artifacts others must clone | **tracked** |
+| **Process** | Local orchestration, scratch, coordination state | **ignored** |
+
+| Path (under `.mstar/`) | Class | Purpose |
+|------------------------|-------|---------|
+| `AGENTS.md` | Result | This harness contract |
+| `specs/` | Result | Frozen normative OSS specs / ADRs |
+| `knowledge/` | Result | Compounded cross-iteration knowledge + shared trackers |
+| `plans/` | Process | Main plans, checkboxes, gate summaries |
+| `iterations/` | Process | Compass, guides, iteration packages |
+| `sdd/` | Process | SDD scratch + QC/QA raw review bundles |
+| `archived/` | Process | Local / archived process snapshots (plans-done, residuals, legacy knowledge dumps) |
+| `status.json` | Process | Plan/residual coordination state |
+| `notes.json` | Process | Local narrative timeline |
+
+**Rules:**
+
+- Agents **may** read/write process paths locally for orchestration.
+- Do **not** `git add -f` ignored paths unless the user explicitly overrides for a one-off handoff.
+- Root [`.gitignore`](../.gitignore) and [`.mstar/.gitignore`](.gitignore) encode the ignore list — keep them in sync with this table.
+- Fresh clone: recreate process files from `mstar-plan-conventions` / `mstar-plan-artifacts` templates as needed. Process paths are **not** clone-shared SSOT.
+- Prefer **result-only commits** under `knowledge/` / `specs/` (and product trees). Do not mix process paths into those commits.
+
+Wire/schema **code** SSOT remains repo-root `schemas/` (outside `.mstar/`). Language packages are under `packages/` and `crates/`.
+
+## Path symbols
+
+| Symbol | Resolves to (this repo) | Git |
+|--------|-------------------------|-----|
+| `{HARNESS_DIR}` | `.mstar/` | mixed — see table above |
+| `{SPECS_DIR}` | `.mstar/specs/` | tracked |
+| `{KNOWLEDGE_DIR}` | `.mstar/knowledge/` | tracked |
+| `{PLAN_DIR}` | `.mstar/plans/` | ignored |
+| `{ITERATION_DIR}` | `.mstar/iterations/` | ignored |
+| `{SDD_DIR}` | `.mstar/sdd/<plan-id>/` | ignored |
+
+Plan `metadata.primary_spec` / `spec_refs` should point at paths under `{SPECS_DIR}` when the contract is team-shared. Iteration-scoped drafts under `{ITERATION_DIR}/…/specs/` are **local process** until promoted into `{SPECS_DIR}`.
 
 ## Layout & write boundaries
 
-**Plans:** one `.md` file per plan under `plans/` — never `plans/<plan-id>/` as a directory. Layout details → `mstar-plan-artifacts/references/plan-files-and-reports.md`.
+| Path | Typical writers | Notes |
+|------|-----------------|-------|
+| `{SPECS_DIR}` | product-manager, architect, writing-specialist | Long-lived normative text only — not iteration scratch |
+| `{KNOWLEDGE_DIR}` | `mstar-compound` (iteration-close), writing-specialist (hygiene) | Patterns / conventions / shared trackers — **not** a second specs tree |
+| `{PLAN_DIR}` | PM, implementers (checkboxes) | One `.md` per plan; never `plans/<plan-id>/` as a directory |
+| `{ITERATION_DIR}` | PM, Phase 1 specialists | Compass + guides; local process |
+| `{SDD_DIR}` | implementers, QC, QA | Ephemeral; durable QC/QA conclusions summarize into the main plan (locally) |
 
-| Path | Writers | Purpose |
-|------|---------|---------|
-| `{SDD_DIR}` | Implementers (SDD default), PM | Session-local briefs, per-task reports, `progress.md`, review diffs — **not** clone handoff |
-| `{SDD_DIR}/review/` | `qc-specialist*`, PM, QA | QC/QA **raw process reports** (gitignored review bundle) |
-| `plans/<plan-id>-*.md` | Implementers (checkboxes), PM | Main plan — durable gate summaries live here |
-| `specs/` | product-manager, architect, writing-specialist | Long-lived normative specs; plan `primary_spec` / `spec_refs` |
-| `knowledge/` | `mstar-compound`, writing-specialist | Cross-iteration patterns — **not** normative product contracts |
+**Do not** put plan progress, residual prose, or QC narratives in root `AGENTS.md`.
 
-**SDD default:** implementors and QC/QA write `{SDD_DIR}` (including `review/`). Inline/hotfix: no `{SDD_DIR}` unless Assignment says otherwise.
+**Do not** treat ignored process files as team handoff — share **results** (`specs/`, `knowledge/`) and product trees (`schemas/`, apps, crates) via git.
 
-**Reachability:** git-tracked harness handoff (`plans/`, `specs/`, `status.json`, compasses, archived snapshots, etc.) must survive a fresh `git clone`. **`{SDD_DIR}` is excluded** — ephemeral working space; durable QC decisions are summarized on the main plan (`## Review Gate Summary` / `## QA Gate Summary`) and in `status.json` `residual_findings`.
+**Content:** `docs/` = human contributor docs; `{KNOWLEDGE_DIR}` layout → [`knowledge/AGENTS.md`](knowledge/AGENTS.md); `{SPECS_DIR}` layout → [`specs/AGENTS.md`](specs/AGENTS.md).
 
-**Legacy:** `plans/reports/` was the pre-V1.99 tracked QC path. It is **retired** — do not create new files there. Historical raw reports may exist locally under `.mstar/sdd/<plan-id>/review/` after migration.
+## Local process conventions (still apply on disk)
 
-**Content:** `docs/` = human contributor docs; `{ITERATION_DIR}` = compasses + per-iteration workspace; `{KNOWLEDGE_DIR}` layout → [`knowledge/AGENTS.md`](knowledge/AGENTS.md); `{SPECS_DIR}` layout → [`specs/AGENTS.md`](specs/AGENTS.md).
-
-## Pre-merge checklist
-
-1. `status.json` + `notes.json` (narrative timeline)
-2. `pnpm run codegen` if `schemas/` changed
-3. `nexus-platform` `roadmap.md` if plan `Done`
-4. Profile B closeout → `mstar-plan-artifacts/references/done-compaction.md`
-5. `wc -c .mstar/status.json` < 20_000; archive resolved residuals
-6. Refresh `metadata.tech_debt_summary` via `mstar-plan-artifacts/scripts/tech-debt-rollup.sh` (counts only — narrative in `notes.json`)
-
-Git hygiene → root [`AGENTS.md`](../AGENTS.md) § Git & repository hygiene.
-
-## Project deviations
+These govern **local** harness files. They are **not** clone SSOT.
 
 ### `status.json` — structured metadata only
 
-Narrative (ship stories, QC summaries, refresh rationales) → **`notes.json`**, commits, or compass — not `metadata` prose.
+Narrative (ship stories, QC summaries) → **`notes.json`**, commits, or compass — not `metadata` prose.
 
 **Rule:** if a `metadata` value is a sentence or paragraph, it is forbidden. Counts, enums, dates, paths, and short IDs are OK.
 
-**`tech_debt_summary`:** optional rollup per `mstar-plan-artifacts/references/status-and-residuals.md` — `total_open`, `by_severity`, `by_target`, `by_plan`, `updated_at` only. Refresh with `tech-debt-rollup.sh`; do **not** add `refreshed_reason`, `*_ship_note`, or similar prose fields.
+**`tech_debt_summary`:** optional rollup per `mstar-plan-artifacts/references/status-and-residuals.md` — counts only. Refresh with `tech-debt-rollup.sh`.
 
-**Branch metadata:** upstream canonical fields only (`iteration_base_branch`, `spec_integration_branch`, `target_branch`; per-plan `working_branch`, `merge_target`) — see `mstar-iteration` §2.3, `mstar-plan-artifacts/references/status-and-residuals.md`. Branch names and Git workflow → `mstar-branch-worktree`, `mstar-plan-conventions`.
+**Branch metadata:** upstream canonical fields only (`iteration_base_branch`, `spec_integration_branch`, `target_branch`; per-plan `working_branch`, `merge_target`).
 
-**Legacy keys (`integration_branch`, `integration_merge_target`):** tolerated in archived JSON; **do not write on new iterations**.
+### Profile B compaction (local)
+
+Hot `plans[]` = non-`Done` only; snapshots under `archived/plans/` locally. Delivery snapshots for the team → [`knowledge/shipped-features-tracker.md`](knowledge/shipped-features-tracker.md) (tracked) or compound into `{KNOWLEDGE_DIR}` patterns.
+
+### Residual detail (local)
+
+Open QC residual rows live under root `residual_findings` in local `status.json`. Closed rows may archive under `archived/residuals/` locally. Prefer `tracking_link` to durable **tracked** surfaces (`{SPECS_DIR}`, `{KNOWLEDGE_DIR}`) when sharing with the team.
+
+### Pre-merge checklist (PM)
+
+1. Local `status.json` + `notes.json` coherent for the session  
+2. `pnpm run codegen` if `schemas/` changed  
+3. Share **results** only: `{SPECS_DIR}`, `{KNOWLEDGE_DIR}`, product code — not process paths  
+4. Profile B closeout locally as needed  
+5. Optional: `wc -c .mstar/status.json` hygiene for local file size  
+
+Git hygiene → root [`AGENTS.md`](../AGENTS.md).
 
 ### Git & PR merge policy
 
-All landings on the protected branch (`target_branch`, usually `main`) via **GitHub PR with squash merge** — iteration integration, plan topics (via integration), and hotfixes. Branch naming → upstream (`mstar-iteration`, `mstar-branch-worktree`); PM assigns explicit names in Assignment.
-
-### Profile B compaction
-
-Adopted (`mstar-plan-artifacts/references/done-compaction.md` Template B): hot `plans[]` = non-`Done` only; `archived/plans/<plan-id>.json` = snapshot; `archived/plans-done.json` → `{ "plans": ["<id>", ...] }` strings only.
-
-**Nexus legacy:** `plans-done.json` may still carry `iteration_summaries` from older closeouts — **do not extend**; new delivery snapshots → [`archived/shipped-features-tracker.md`](archived/shipped-features-tracker.md) or `notes.json`.
-
-### Residual detail prose (optional)
-
-`plans/residuals/<plan-id>/<finding-id>-<label>.md` supplements root `residual_findings`. Archive closed rows → `archived/residuals/<plan-id>.json`.
-
-**`tracking_link`:** point to durable surfaces — `.mstar/plans/<plan-id>.md` (gate summary) or `.mstar/status.json` `residual_findings[<plan-id>]` — not gitignored `{SDD_DIR}/review/` paths.
+All landings on the protected branch (`target_branch`, usually `main`) via **GitHub PR with squash merge**. Branch naming → upstream (`mstar-iteration`, `mstar-branch-worktree`).
 
 ### Post-merge hotfix
 
-1. Register `residual_findings` before branching.
-2. `fix/*` from current `main` HEAD (PM-named per `mstar-branch-worktree`).
-3. Surgical fix + regression test; verify per root `AGENTS.md` Development Policy.
-4. Squash-merge PR to `main`; update `status.json`. Prepare compression → `mstar-phase-gates`.
+1. Register residuals in local `status.json` before branching.  
+2. `fix/*` from current `main` HEAD.  
+3. Surgical fix + regression test.  
+4. Squash-merge PR to `main`; update local `status.json`.  
 
 ### Pre-existing failure claims (PM override)
 
-Before accepting “pre-existing” to waive a test/QC finding: reproduce against **current** `origin/<target_branch>` HEAD. Passes there → not pre-existing. Fails there → document base SHA + repro. Flaky → fixed seed or measured rate.
+Before accepting “pre-existing” to waive a test/QC finding: reproduce against **current** `origin/<target_branch>` HEAD.
+
+## Anti-patterns
+
+- Committing `status.json`, `notes.json`, `plans/`, `iterations/`, `archived/`, or `sdd/`
+- Using `{KNOWLEDGE_DIR}` as a dumping ground for unfinished specs
+- Duplicating wire contracts under `{SPECS_DIR}` that belong in root `schemas/`
+- Force-adding ignored harness paths “for convenience”
+- Mixing process paths into commits whose intent is `knowledge/` / `specs/` sharing

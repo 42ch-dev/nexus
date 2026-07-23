@@ -1,2 +1,13 @@
-# ---- Local files ----
+# Morning Star harness — local process vs shared results
+# Principle: process stays local; results (AGENTS.md, knowledge/, specs/) are shared.
+#
+# Ignored (process / coordination — agents may still read/write locally):
+archived/
+iterations/
+plans/
+sdd/
+notes.json
+status.json
 local-paths.json
+#
+# Tracked (results): AGENTS.md, knowledge/, specs/
