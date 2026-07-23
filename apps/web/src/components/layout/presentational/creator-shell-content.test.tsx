@@ -18,7 +18,80 @@ const CONTROLLER_LABELS = {
   back: 'Back',
 } as const;
 
+const INLINE_CREATE_LABELS = {
+  tabs: { world: 'World', work: 'Work' },
+  world: {
+    titleLabel: 'World title',
+    titlePlaceholder: 'Enter a world name',
+    submit: 'Create World',
+    disabledTitle: 'Desktop only',
+  },
+  work: {
+    titleLabel: 'Work title',
+    titlePlaceholder: 'Enter a work name',
+    goalLabel: 'Long-term goal',
+    goalPlaceholder: 'What should this work achieve?',
+    ideaLabel: 'Initial idea',
+    ideaPlaceholder: 'Start from a scene or concept…',
+    profileLabel: 'Work profile (optional)',
+    profileOptions: [{ value: 'novel', label: 'Novel' }],
+    submit: 'Create Work',
+  },
+} as const;
+
 describe('CreatorShellContent', () => {
+  it('renders create-inline with world form and tab bar testids', () => {
+    render(
+      <CreatorShellContent
+        mode="create-inline"
+        canCreateWorld={false}
+        labels={INLINE_CREATE_LABELS}
+        onWorldSubmit={() => {}}
+        onWorkSubmit={() => {}}
+        data-testid="sidebar-create-panel"
+      />,
+    );
+
+    const root = screen.getByTestId('sidebar-create-panel');
+    expect(root).toHaveAttribute('data-mode', 'create-inline');
+    expect(screen.getByTestId('sidebar-create-tab-bar')).toBeInTheDocument();
+    expect(screen.getByTestId('sidebar-create-tab-world')).toBeInTheDocument();
+    expect(screen.getByTestId('sidebar-create-tab-work')).toBeInTheDocument();
+    expect(screen.getByTestId('sidebar-create-form-world')).toBeInTheDocument();
+    expect(screen.getByTestId('sidebar-create-submit-world')).toBeDisabled();
+    expect(screen.queryByTestId('creator-create-world')).not.toBeInTheDocument();
+  });
+
+  it('fires inline submit callbacks from create-inline forms', () => {
+    const onWorldSubmit = vi.fn();
+    const onWorkSubmit = vi.fn();
+
+    render(
+      <CreatorShellContent
+        mode="create-inline"
+        canCreateWorld
+        labels={INLINE_CREATE_LABELS}
+        onWorldSubmit={onWorldSubmit}
+        onWorkSubmit={onWorkSubmit}
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText('World title'), { target: { value: 'Ashen Gate' } });
+    fireEvent.click(screen.getByTestId('sidebar-create-submit-world'));
+    expect(onWorldSubmit).toHaveBeenCalledWith('Ashen Gate');
+
+    fireEvent.click(screen.getByTestId('sidebar-create-tab-work'));
+    fireEvent.change(screen.getByLabelText('Work title'), { target: { value: 'Novel' } });
+    fireEvent.change(screen.getByLabelText('Long-term goal'), { target: { value: 'Finish draft' } });
+    fireEvent.change(screen.getByLabelText('Initial idea'), { target: { value: 'A long road' } });
+    fireEvent.click(screen.getByTestId('sidebar-create-submit-work'));
+    expect(onWorkSubmit).toHaveBeenCalledWith({
+      title: 'Novel',
+      longTermGoal: 'Finish draft',
+      initialIdea: 'A long road',
+    });
+  });
+
   it('renders honest Work fallback when createWorld is absent', () => {
     render(
       <CreatorShellContent

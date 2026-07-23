@@ -868,8 +868,9 @@ describe('Surfaces page — app shell fixture', () => {
     expect(screen.getByTestId('surfaces-creator-orch-gongnengqu-ia')).toBeInTheDocument();
     expect(screen.getByTestId('creator-orch-gongnengqu-ia-fixtures')).toBeInTheDocument();
     expect(screen.getByTestId('gongnengqu-ia-fixture-creator-hub')).toBeInTheDocument();
-    expect(screen.getByTestId('gongnengqu-ia-creator-hub-themes-light')).toBeInTheDocument();
-    expect(screen.getByTestId('gongnengqu-ia-creator-hub-themes-dark')).toBeInTheDocument();
+    expect(screen.getByTestId('gongnengqu-ia-creator-hub')).toBeInTheDocument();
+    expect(screen.getByTestId('gongnengqu-ia-theme-caption')).toBeInTheDocument();
+    expect(screen.queryByTestId('gongnengqu-ia-creator-hub-themes-light')).not.toBeInTheDocument();
   });
 
   it('renders Creator shell Create vs Controller fixtures (V1.128 P2 T1)', () => {

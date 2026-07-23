@@ -14,6 +14,10 @@ export type HubTabBarProps = {
   onTabChange: (tab: HubTab) => void;
   labels: HubTabBarLabels;
   ariaLabel?: string;
+  /** Prefix for tab button `id` / `aria-controls` targets (default `hub-tab`). */
+  tabIdPrefix?: string;
+  /** `aria-controls` target id for the active tab panel (default `hub-tabpanel`). */
+  tabPanelId?: string;
   'data-testid'?: string;
 };
 
@@ -34,6 +38,8 @@ export function HubTabBar({
   onTabChange,
   labels,
   ariaLabel = 'Creator hub entity kind',
+  tabIdPrefix = 'hub-tab',
+  tabPanelId = 'hub-tabpanel',
   'data-testid': testId = 'hub-tab-bar',
 }: HubTabBarProps) {
   const tabRefs = useRef<Partial<Record<HubTab, HTMLButtonElement | null>>>({});
@@ -98,9 +104,9 @@ export function HubTabBar({
               }}
               type="button"
               role="tab"
-              id={`hub-tab-${tab}`}
+              id={`${tabIdPrefix}-${tab}`}
               aria-selected={active}
-              aria-controls="hub-tabpanel"
+              aria-controls={tabPanelId}
               tabIndex={tabIndex(activeTab, tab)}
               data-testid={`${testId}-${tab}`}
               onClick={() => onTabChange(tab)}
