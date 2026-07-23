@@ -8,6 +8,29 @@
 //! Scope submodule names can collide (e.g. `domain::memory` vs `daemon_api::memory`);
 //! the flat TYPE re-exports are all unique, so the module-name ambiguity is benign.
 #![allow(ambiguous_glob_reexports)]
+// Clippy: typify-generated code is machine output. The allows below are the
+// complete set that fires on typify 0.3 output under this workspace's pedantic +
+// nursery groups (plan v1.138 T4, architect Q4 lock). They are not hand-tunable
+// without forking typify. Scoped to this `generated` subtree ONLY — hand-written
+// code under `src/local/` and `src/enum_conversions.rs` is NOT covered. Mirrors
+// the `.rustfmt.toml` `ignore` precedent that exempts generated code.
+#![allow(
+    clippy::clone_on_copy,
+    clippy::default_trait_access,
+    clippy::derivable_impls,
+    clippy::doc_markdown,
+    clippy::len_zero,
+    clippy::missing_const_for_fn,
+    clippy::must_use_candidate,
+    clippy::possible_missing_else,
+    clippy::return_self_not_must_use,
+    clippy::struct_excessive_bools,
+    clippy::struct_field_names,
+    clippy::too_long_first_doc_paragraph,
+    clippy::uninlined_format_args,
+    clippy::unreadable_literal,
+    clippy::use_self,
+)]
 
 pub mod common;
 pub mod daemon_api;

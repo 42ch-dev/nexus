@@ -13,6 +13,10 @@ workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
+# V1.138 T4: typify-generated types under `src/generated/` reference these.
+# `"format": "date-time"` → `chrono::DateTime`; `"format": "regex"` → `regress::Regex`.
+chrono.workspace = true
+regress.workspace = true
 
 [dev-dependencies]
 serde_yaml.workspace = true

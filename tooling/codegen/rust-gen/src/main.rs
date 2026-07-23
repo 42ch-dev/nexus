@@ -301,6 +301,32 @@ fn write_mod_rs(
             "//! Scope submodule names can collide (e.g. `domain::memory` vs `daemon_api::memory`);".into(),
             "//! the flat TYPE re-exports are all unique, so the module-name ambiguity is benign.".into(),
             "#![allow(ambiguous_glob_reexports)]".into(),
+            // The clippy allows below are emitted into the generated file as
+            // `//` *string* lines (not Rust comments here) so the justification
+            // travels with the generated code. See plan v1.138 T4 (architect Q4).
+            "// Clippy: typify-generated code is machine output. The allows below are the".into(),
+            "// complete set that fires on typify 0.3 output under this workspace's pedantic +".into(),
+            "// nursery groups (plan v1.138 T4, architect Q4 lock). They are not hand-tunable".into(),
+            "// without forking typify. Scoped to this `generated` subtree ONLY — hand-written".into(),
+            "// code under `src/local/` and `src/enum_conversions.rs` is NOT covered. Mirrors".into(),
+            "// the `.rustfmt.toml` `ignore` precedent that exempts generated code.".into(),
+            "#![allow(".into(),
+            "    clippy::clone_on_copy,".into(),
+            "    clippy::default_trait_access,".into(),
+            "    clippy::derivable_impls,".into(),
+            "    clippy::doc_markdown,".into(),
+            "    clippy::len_zero,".into(),
+            "    clippy::missing_const_for_fn,".into(),
+            "    clippy::must_use_candidate,".into(),
+            "    clippy::possible_missing_else,".into(),
+            "    clippy::return_self_not_must_use,".into(),
+            "    clippy::struct_excessive_bools,".into(),
+            "    clippy::struct_field_names,".into(),
+            "    clippy::too_long_first_doc_paragraph,".into(),
+            "    clippy::uninlined_format_args,".into(),
+            "    clippy::unreadable_literal,".into(),
+            "    clippy::use_self,".into(),
+            ")]".into(),
             String::new(),
         ]);
     } else {
