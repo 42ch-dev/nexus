@@ -121,29 +121,24 @@ The 256×256 preview PNG (`source/app-icon-preview-256.png`) uses the same
 composition. **Dock smoke remains authoritative** — Studio VI-004 and PNG opacity
 metadata alone do not close P1G-1 (`R-V1134P1-001`).
 
-## Author verify ritual (P1G-1)
+## Author verify ritual (P1G-1 / AC-4)
 
-Before judging Dock shape, follow this sequence (record the exact build command in
-`.mstar/iterations/v1.135/guides/p1-dock-icon-rca.md` when signing off):
+> **Author Dock confirm: PENDING** — `R-V1134P1-001` stays open until `@author`
+> records Pass in [`.mstar/iterations/v1.135/guides/p1-dock-icon-rca.md`](../../../../.mstar/iterations/v1.135/guides/p1-dock-icon-rca.md).
+> Agents must not forge sign-off. Studio VI-004 and PNG opacity metadata are **not**
+> sufficient for closure.
 
-1. **Quit all Nexus instances** (every window / process — not just close the window).
-2. **Regenerate icons:**
-   ```bash
-   pnpm --filter desktop run icons:generate
-   ```
-3. **Rebuild/reinstall** the `.app` under test — e.g.
-   `pnpm --filter desktop run build` then open
-   `apps/desktop/src-tauri/target/release/bundle/macos/Nexus.app`, or
-   `pnpm dev:desktop` after the H7 `icons:generate` hook.
-4. **Restart Dock** so it reloads the bundle icon:
-   ```bash
-   killall Dock
-   ```
-   (macOS relaunches Dock automatically.)
-5. **Relaunch Nexus** and inspect the Dock tile at normal size.
-6. **Pass:** squircle rounding visible on the outer tile boundary. **Fail:** sharp
-   90° square outline — plan stays open; do not close on Studio VI-004 or PNG opacity
-   metadata alone.
+Before judging Dock shape, follow this sequence **in order** (record the exact build
+command in the RCA guide when signing off):
+
+| Step | Action |
+|------|--------|
+| 1 | **Quit all Nexus instances** (every window / process — not just close the window). |
+| 2 | **Regenerate icons:** `pnpm --filter desktop run icons:generate` |
+| 3 | **Rebuild/reinstall** the `.app` under test — e.g. `pnpm --filter desktop run build` then open `apps/desktop/src-tauri/target/release/bundle/macos/Nexus.app`, or `pnpm dev:desktop` (runs `icons:generate` first). **Record the exact command** in the RCA guide. |
+| 4 | **Restart Dock:** `killall Dock` (macOS relaunches Dock automatically). |
+| 5 | **Relaunch Nexus**; inspect Dock tile at normal size. Confirm tooltip/process is Nexus desktop (`nexus-desktop`). |
+| 6 | **Pass:** squircle rounding visible on outer tile boundary (like Safari/Settings). **Fail:** sharp 90° square outline — plan stays open; do not close on Studio VI-004 or PNG opacity alone. |
 
 ## Cache invalidation (stale Dock icon)
 

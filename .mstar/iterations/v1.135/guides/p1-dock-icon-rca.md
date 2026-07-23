@@ -76,14 +76,16 @@ plutil -p Nexus.app/Contents/Info.plist | rg -i icon
 # → CFBundleIconFile => Nexus.icns
 ```
 
-### H6 geometry
+### H6 geometry (pre–Task 2 compose — falsification evidence)
+
+Captured **before** Task 2 baked squircle rounding into compose:
 
 ```bash
 # Corner plate-color check (node/sharp): all corners 25/25 #0D2B3E
 # Border non-plate pixels: 0/4092
 ```
 
-Corner RGB sample: `(13, 43, 62)` = `#0D2B3E` at all four corners; center mark RGB `(17, 221, 233)`.
+Corner RGB sample: `(13, 43, 62)` = `#0D2B3E` at all four corners; center mark RGB `(17, 221, 233)`. Post–Task 2 compose uses a pre-rounded squircle plate — **author Dock confirm still required** to validate live appearance.
 
 ### H7 dev-path gap (fixed Task 2)
 
@@ -114,29 +116,39 @@ The pipeline is technically correct post-V1.134 (H1 baseline, valid icns, bundle
 
 ---
 
-## Author Dock confirm block (P1G-1 / P1G-5)
+## Author Dock confirm block (AC-4 / P1G-1 / P1G-5)
 
-**Status: PENDING — do not close plan or `R-V1134P1-001`**
+> **Author Dock confirm: PENDING** — do **not** mark plan Done, close **AC-4**, or close `R-V1134P1-001` until `@author` records Pass below. Agents must not forge sign-off.
 
 | Field | Value |
 |-------|-------|
-| Date | _@author_ |
-| Build command | _Record exact command — e.g._ `pnpm dev:desktop` _(dist-load; runs `icons:generate` first)_ _or_ `pnpm --filter desktop run icons:generate && pnpm --filter desktop run build` _then open_ `apps/desktop/src-tauri/target/release/bundle/macos/Nexus.app` |
-| Cache ritual | Quit all Nexus → rebuild → `killall Dock` → relaunch |
-| Outcome | _Pass (squircle) / Fail (still square)_ |
+| **Gate status** | **PENDING** (`R-V1134P1-001` **open**) |
+| Date | _@author — fill on confirm_ |
+| Build command | _Record exact command used — e.g._ `pnpm dev:desktop` _(dist-load; runs `icons:generate` first)_ _or_ `pnpm --filter desktop run icons:generate && pnpm --filter desktop run build` _then open_ `apps/desktop/src-tauri/target/release/bundle/macos/Nexus.app` |
+| Cache ritual completed | _yes / no — quit → rebuild → `killall Dock` → relaunch_ |
+| Outcome | _Pass (squircle) / Fail (still square) — **not recorded**_ |
 | Recorded by | _@author_ |
 
-### Author checklist
+### Author verify checklist (mandatory before judging)
 
-1. Quit **all** Nexus / `nexus-desktop` instances.
-2. `pnpm --filter desktop run icons:generate`
-3. **Rebuild/reinstall** the `.app` under test — e.g.
-   `pnpm dev:desktop` (runs `icons:generate` first) or
-   `pnpm --filter desktop run build` then open
-   `apps/desktop/src-tauri/target/release/bundle/macos/Nexus.app`.
-4. `killall Dock`
-5. Relaunch Nexus; inspect Dock tile at normal size.
-6. **Pass:** macOS squircle rounding visible on outer tile boundary (like Safari/Settings). **Fail:** sharp 90° square outline → plan stays open; record outcome and escalate.
+Follow **in order**. Do not judge Dock shape from Studio VI-004, preview PNG, or opacity metadata alone.
+
+| Step | Action |
+|------|--------|
+| 1 | Quit **all** Nexus / `nexus-desktop` instances (every process — not just close the window). |
+| 2 | Regenerate icons: `pnpm --filter desktop run icons:generate` |
+| 3 | **Rebuild/reinstall** the `.app` under test — record the exact command in the table above. Examples: `pnpm dev:desktop` (runs `icons:generate` first) **or** `pnpm --filter desktop run build` then open `apps/desktop/src-tauri/target/release/bundle/macos/Nexus.app`. |
+| 4 | Restart Dock: `killall Dock` (macOS relaunches Dock automatically). |
+| 5 | Relaunch Nexus; inspect Dock tile at normal size. Confirm tooltip/process is **Nexus desktop** (`nexus-desktop`, `io.nexus42.desktop`) — P1G-2. |
+| 6 | **Pass (P1G-1):** macOS squircle rounding visible on outer tile boundary (like Safari/Settings). **Fail:** sharp 90° square outline — plan stays open; record outcome; escalate or name next candidate (H8+). |
+
+### Outcome routing (fill when author confirms)
+
+| Outcome | Next action |
+|---------|-------------|
+| **Pass** — squircle visible | Record date + build command above; close `R-V1134P1-001`; AC-4 / P1G-1 satisfied; plan may proceed to Done (subject to QC/QA). |
+| **Fail** — still square | Leave `R-V1134P1-001` open; plan **not** Done; continue RCA or mark **Blocked** with exhausted H1–H7 + next candidate named. |
+| **Pending** (current) | Checklist delivered (Task 4); awaiting `@author` eyeball — **no agent sign-off**. |
 
 ## Anti-patterns confirmed this iteration
 
