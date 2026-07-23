@@ -29,7 +29,7 @@ import { ReadingProgress } from '@/components/reading/reading-progress';
 import { ReadingProse } from '@/components/reading/reading-prose';
 import { useChapterNeighbors } from '@/components/reading/reading-hooks';
 import { useTextSelection } from '@/components/reading/use-text-selection';
-import type { ReadingAnnotationColor } from '@42ch/nexus-contracts';
+import type { ReadingAnnotation } from '@42ch/nexus-contracts';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { ErrorState, LoadingState } from '@/components/ui/states';
@@ -44,6 +44,9 @@ import {
   useWork,
 } from '@/api/queries';
 import { formatRelative } from '@/lib/format';
+
+// V1.138 codegen inlines the color enum; derive it from the canonical type.
+type ReadingAnnotationColor = ReadingAnnotation['color'];
 
 export function ChapterPage() {
   const { t } = useTranslation('reading');

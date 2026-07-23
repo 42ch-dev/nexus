@@ -119,7 +119,9 @@ export function FindingsPage() {
       {
         workId,
         request: {
-          finding_ids: Array.from(selectedIds),
+          // V1.138 codegen emits `finding_ids` as a non-empty tuple (schema
+          // minItems: 1); the guard above ensures selectedIds is non-empty.
+          finding_ids: Array.from(selectedIds) as [string, ...string[]],
           patch: { status: statusValue },
         },
       },
@@ -133,7 +135,9 @@ export function FindingsPage() {
       {
         workId,
         request: {
-          finding_ids: Array.from(selectedIds),
+          // V1.138 codegen emits `finding_ids` as a non-empty tuple (schema
+          // minItems: 1); the guard above ensures selectedIds is non-empty.
+          finding_ids: Array.from(selectedIds) as [string, ...string[]],
           patch: { target_executor: targetExecutor },
         },
       },
