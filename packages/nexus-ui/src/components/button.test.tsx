@@ -45,6 +45,14 @@ describe('Button', () => {
 
   // --- size rendering ---
 
+  it('renders with tiny size (24px height)', () => {
+    render(<Button size="tiny">Go</Button>);
+    const btn = screen.getByRole('button', { name: 'Go' });
+    expect(btn).toHaveClass('h-6');
+    expect(btn).toHaveClass('px-2');
+    expect(btn).toHaveClass('text-button-12');
+  });
+
   it('renders with small size (32px height)', () => {
     render(<Button size="small">Go</Button>);
     const btn = screen.getByRole('button', { name: 'Go' });

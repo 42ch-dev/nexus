@@ -48,10 +48,14 @@ describe('TransportErrorBlockFixtures', () => {
     const primary = within(networkRow).getByTestId('transport-error-primary');
     const secondary = within(networkRow).getByTestId('transport-error-secondary');
 
-    expect(primary).toHaveClass('text-label-14');
+    expect(primary).toHaveClass('text-label-12');
+    expect(primary).toHaveClass('font-normal');
     expect(primary).toHaveClass('text-brand-deep-blue');
+    expect(primary).not.toHaveClass('text-label-14');
+    expect(primary).not.toHaveClass('font-medium');
     expect(primary).not.toHaveClass('h-10');
-    expect(secondary).toHaveClass('text-label-14');
+    expect(secondary).toHaveClass('text-label-12');
+    expect(secondary).not.toHaveClass('text-label-14');
     expect(secondary).not.toHaveClass('bg-brand-cyan-1000');
   });
 

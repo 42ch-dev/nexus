@@ -369,6 +369,7 @@ function ButtonSection() {
   ];
 
   const sizes = [
+    { size: 'tiny' as const, label: 'tiny (h-6)' },
     { size: 'small' as const, label: 'small (h-8)' },
     { size: 'default' as const, label: 'default (h-10)' },
     { size: 'large' as const, label: 'large (h-12)' },
@@ -378,7 +379,7 @@ function ButtonSection() {
     <section>
       <SectionHeading id="comp-button">Button</SectionHeading>
       <p className="text-copy-16 text-gray-700 mb-2">
-        4 variants × 3 sizes = 12 combinations, plus disabled and focus-visible
+        4 variants × 4 sizes = 16 combinations, plus disabled and focus-visible
         states per DESIGN.md § Button.
       </p>
       <p

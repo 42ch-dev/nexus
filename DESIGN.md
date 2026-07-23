@@ -169,6 +169,7 @@ components:
     tertiary: { backgroundColor: "transparent", textColor: "{colors.gray-1000}", borderColor: "none", rounded: "{rounded.control}", height: "40px", typography: "{typography.button-14}", hoverBackgroundColor: "{colors.gray-alpha-100}" }
     destructive: { backgroundColor: "{colors.red-800}", textColor: "#ffffff", borderColor: "none", rounded: "{rounded.control}", height: "40px", typography: "{typography.button-14}", hoverBackgroundColor: "{colors.red-700}", activeBackgroundColor: "{colors.red-900}" }
     sizes:
+      tiny: { height: "24px", typography: "{typography.button-12}" }
       small: { height: "32px", typography: "{typography.button-12}" }
       default: { height: "40px", typography: "{typography.button-14}" }
       large: { height: "48px", typography: "{typography.button-14}" }
@@ -1241,6 +1242,17 @@ Component token values live in frontmatter `components:`. All components must ex
 
 Variants and sizes: see frontmatter `components.button`. The preset `Validate` action uses `primary` when it is the main form action, or `secondary` with a `blue-700` leading icon when paired with a separate save action.
 
+#### Button sizes (V1.137 — includes `tiny`)
+
+| Size | Height | Typography | Notes |
+|------|--------|------------|-------|
+| `tiny` | 24px (`h-6`) | `text-button-12 font-button` | Badge-density height; Button `button-*` scale — not Badge `text-label-12` |
+| `small` | 32px (`h-8`) | `text-button-12` | Compact chrome |
+| `default` | 40px (`h-10`) | `text-button-14` | Default CTA / form actions |
+| `large` | 48px (`h-12`) | `text-button-14` | Emphasized primary |
+
+`tiny` is additive — `defaultVariants.size` remains `default`. CVA: `h-6 px-2 text-button-12` (`@42ch/nexus-ui` `Button`).
+
 #### Button Contrast Invariant (Chronos dual-role + V1.132 theme-split)
 
 > **Background decides text color, independent of light/dark mode.**
@@ -1254,17 +1266,19 @@ Variants and sizes: see frontmatter `components.button`. The preset `Validate` a
 
 **Primary recipe (locked):** theme-split per shell — light uses mid-teal (`brand-cyan-1000`) fill + white label; dark uses cyan fill + deep label. The former uniform cyan-fill and deep-ink light-primary recipes are retired (V1.136 P2).
 
-### TransportErrorBlock (V1.136 P2 — compact link CTAs)
+### TransportErrorBlock (V1.136 P2 — compact link CTAs; V1.137 L2 quiet)
 
-Transport-failure alert primitive (`@42ch/nexus-ui` `TransportErrorBlock`). CTAs are **compact text links** — ErrorState-aligned — not filled `Button` variants inside the red alert.
+Transport-failure alert primitive (`@42ch/nexus-ui` `TransportErrorBlock`). CTAs are **quiet compact text links** — ErrorState-aligned — not filled `Button` variants inside the red alert.
 
 | Field | Value |
 |-------|-------|
 | **Control** | `<button type="button">` styled as text link |
-| **Typography** | `text-label-14 font-medium` |
+| **Typography** | `text-label-12 font-normal` (V1.137 L2 — supersedes V1.136 `text-label-14 font-medium`) |
 | **Colors** | light: `text-brand-deep-blue`; dark: `text-blue-700` (+ hover opacity / `blue-800`) |
+| **Focus** | `focus-visible:ring-2 focus-visible:ring-blue-1000` (dark: `blue-700`) |
 | **Layout** | `mt-2 flex flex-wrap gap-x-4 gap-y-1` under message — must not dominate the alert |
 | **testids** | `transport-error-primary`, `transport-error-secondary` with `data-cta` matrix |
+| **Owner** | `CTA_LINK_CLASS` in `transport-error-block.tsx` — apps must not duplicate |
 
 ### Input / Select / Textarea
 
