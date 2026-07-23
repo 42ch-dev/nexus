@@ -43,7 +43,7 @@
     },
     {
       "plan_id": "2026-07-23-v1.134-p3-creator-hub-dual-pane-ia",
-      "status": "InReview",
+      "status": "Done",
       "metadata": {
         "spec_integration_branch": "iteration/v1.134",
         "merge_target": "iteration/v1.134",
@@ -54,13 +54,6 @@
           ".mstar/specs/desktop-shell.md",
           "DESIGN.md"
         ]
-      },
-      "execution_lease": {
-        "holder": "pm-iteration-drive-v1.134",
-        "claimed_at": "2026-07-23T06:32:20Z",
-        "worktree_path": "/Users/bibi/workspace/organizations/42ch/nexus/.worktrees/v1.134-p3-creator-hub-dual-pane-ia",
-        "working_branch": "plan/v1.134-p3-creator-hub-dual-pane-ia",
-        "session_label": "wave2 v1.134-p3-creator-hub-dual-pane-ia"
       }
     }
   ],
@@ -746,6 +739,44 @@
         "decision": "accept",
         "owner": "@project-manager",
         "target": "V1.134-p1"
+      }
+    ],
+    "2026-07-23-v1.134-p3-creator-hub-dual-pane-ia": [
+      {
+        "id": "R-V1134P3-001",
+        "severity": "low",
+        "title": "Author Studio AC-15 dual-pane visual accept",
+        "lifecycle": "open",
+        "decision": "defer",
+        "owner": "@author",
+        "target": "V1.134"
+      },
+      {
+        "id": "R-V1134P3-002",
+        "severity": "nit",
+        "title": "Wire createErrorMessage to inline create UI",
+        "lifecycle": "open",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.134"
+      },
+      {
+        "id": "R-V1134P3-003",
+        "severity": "nit",
+        "title": "Clear inline title across tab switches",
+        "lifecycle": "open",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.134"
+      },
+      {
+        "id": "R-V1134P3-004",
+        "severity": "nit",
+        "title": "Studio multi-instance a11y ID uniqueness",
+        "lifecycle": "open",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.134"
       }
     ]
   }
