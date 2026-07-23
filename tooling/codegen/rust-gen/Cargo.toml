@@ -1,0 +1,21 @@
+[package]
+name = "nexus-rust-gen"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# External workspace: keeps `typify` / `schemars` out of the main workspace's
+# dependency graph (mirrors the sibling spoke repo's `rust-gen` layout). This
+# crate is NOT a member of the root `[workspace]` and is therefore excluded from
+# `cargo build --all` / `cargo clippy --all`.
+[workspace]
+
+[[bin]]
+name = "nexus-rust-gen"
+path = "src/main.rs"
+
+[dependencies]
+glob = "0.3"
+typify = "0.3"
+serde_json = "1"
+schemars = "0.8"
