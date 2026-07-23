@@ -4,7 +4,7 @@
   "plans": [
     {
       "id": "2026-07-23-v1.136-p0-dock-icon-squircle-followup",
-      "status": "Todo",
+      "status": "Done",
       "file": ".mstar/plans/2026-07-23-v1.136-p0-dock-icon-squircle-followup.md",
       "metadata": {
         "primary_spec": ".mstar/iterations/v1.136/specs/p0-dock-icon-squircle-followup.md",
@@ -16,12 +16,14 @@
         "merge_target": "iteration/v1.136",
         "wire_contracts_changed": false,
         "wave": "1",
-        "seq": "0"
+        "seq": "0",
+        "merged_at": "2026-07-23T11:14:27.079Z",
+        "qa_verdict": "pm-acceptance"
       }
     },
     {
       "id": "2026-07-23-v1.136-p1-sidebar-inline-create-tabs",
-      "status": "Todo",
+      "status": "InProgress",
       "file": ".mstar/plans/2026-07-23-v1.136-p1-sidebar-inline-create-tabs.md",
       "metadata": {
         "primary_spec": ".mstar/iterations/v1.136/specs/p1-sidebar-inline-create-tabs.md",
@@ -34,11 +36,18 @@
         "wire_contracts_changed": false,
         "wave": "1",
         "seq": "1"
+      },
+      "execution_lease": {
+        "holder": "cursor-pm-v1136-drive",
+        "claimed_at": "2026-07-23T10:40:20.636Z",
+        "worktree_path": "/Users/bibi/workspace/organizations/42ch/nexus/.worktrees/v1.136-p1",
+        "working_branch": "plan/v1.136-p1-sidebar-inline-create-tabs",
+        "session_label": "iteration-drive-wave1-p1"
       }
     },
     {
       "id": "2026-07-23-v1.136-p2-light-mode-chrome-harmony",
-      "status": "Todo",
+      "status": "InProgress",
       "file": ".mstar/plans/2026-07-23-v1.136-p2-light-mode-chrome-harmony.md",
       "metadata": {
         "primary_spec": ".mstar/iterations/v1.136/specs/p2-light-mode-interactive-vi.md",
@@ -51,6 +60,13 @@
         "wire_contracts_changed": false,
         "wave": "2",
         "seq": "2"
+      },
+      "execution_lease": {
+        "holder": "cursor-pm-v1136-drive",
+        "claimed_at": "2026-07-23T10:45:17.230Z",
+        "worktree_path": "/Users/bibi/workspace/organizations/42ch/nexus/.worktrees/v1.136-p2",
+        "working_branch": "plan/v1.136-p2-light-mode-chrome-harmony",
+        "session_label": "iteration-drive-wave2-p2"
       }
     }
   ],
@@ -868,6 +884,26 @@
         "decision": "defer",
         "owner": "@author",
         "target": "V1.135"
+      }
+    ],
+    "2026-07-23-v1.136-p0-dock-icon-squircle-followup": [
+      {
+        "id": "R-V1135P1-001",
+        "title": "Author Dock squircle confirm after rebuild ritual",
+        "severity": "high",
+        "lifecycle": "open",
+        "decision": "defer",
+        "owner": "@author",
+        "target": "V1.136"
+      },
+      {
+        "id": "R-V1135P1-005",
+        "title": "H6 contrast-margin author confirm / H5 cache if still square",
+        "severity": "medium",
+        "lifecycle": "open",
+        "decision": "defer",
+        "owner": "@author",
+        "target": "V1.136"
       }
     ]
   }
