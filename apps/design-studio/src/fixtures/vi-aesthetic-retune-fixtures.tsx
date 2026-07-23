@@ -469,8 +469,8 @@ export function ViAgentPickerAcceptanceFixtures() {
     <ViSection
       id="vi-001-agent-picker"
       ledgerId="VI-001"
-      title="Setup agent selection — one affordance"
-      description="Selected installed agent shows one clear affordance — a 2px selection ring only (no fill tint, no lit status dot)."
+      title="Setup agent selection — one affordance (V1.132 — superseded)"
+      description="Historical V1.132 target: 2px selection ring only. Superseded by V1.134 P2 StatusDot restore — see agent-picker-vi-retune fixtures below."
     >
       <ThemePair
         testId="vi-001-agent-picker"

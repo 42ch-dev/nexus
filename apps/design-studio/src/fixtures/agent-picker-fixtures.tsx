@@ -15,6 +15,7 @@ import {
 } from '@web-setup/agent-picker';
 
 import { ViAgentPickerAcceptanceFixtures } from '@/fixtures/vi-aesthetic-retune-fixtures';
+import { AgentPickerViRetuneFixtures } from '@/fixtures/agent-picker-vi-retune-fixtures';
 
 const INSTALLED_ONLY: AgentPickerItem[] = [
   {
@@ -237,6 +238,8 @@ export function AgentPickerFixtures() {
       </FixtureFrame>
 
       <ViAgentPickerAcceptanceFixtures />
+
+      <AgentPickerViRetuneFixtures />
     </div>
   );
 }
