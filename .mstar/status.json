@@ -1,30 +1,7 @@
 {
   "version": 1,
   "updated_at": "2026-07-23",
-  "plans": [
-    {
-      "plan_id": "2026-07-23-v1.135-p1-dock-icon-squircle-rca",
-      "status": "InReview",
-      "metadata": {
-        "spec_integration_branch": "iteration/v1.135",
-        "merge_target": "iteration/v1.135",
-        "working_branch": "plan/v1.135-p1-dock-icon-squircle-rca",
-        "iteration_refs": "V1.135",
-        "primary_spec": ".mstar/iterations/v1.135/specs/p1-dock-icon-pipeline.md",
-        "spec_refs": [
-          ".mstar/specs/desktop-shell.md",
-          "DESIGN.md"
-        ]
-      },
-      "execution_lease": {
-        "holder": "pm-v1.135-p1",
-        "claimed_at": "2026-07-23T09:05:57Z",
-        "worktree_path": "/Users/bibi/workspace/organizations/42ch/nexus/.worktrees/v1.135-p1-dock-icon-squircle",
-        "working_branch": "plan/v1.135-p1-dock-icon-squircle-rca",
-        "session_label": "P1 dock icon"
-      }
-    }
-  ],
+  "plans": [],
   "metadata": {
     "integration_branch_retired": false,
     "iteration_base_branch": "main",

@@ -54,7 +54,7 @@ Fix two **author-visible dogfood regressions** that V1.134 claimed to address bu
 | plan_id | Name | Status | Notes |
 |---------|------|--------|-------|
 | `2026-07-23-v1.135-p0-sidebar-menu-create-ia` | Sidebar menu-area create IA | Done | Must — corrects V1.134 P3 misplacement (`R-V1134P3-001`) |
-| `2026-07-23-v1.135-p1-dock-icon-squircle-rca` | Dock icon macOS squircle RCA | Todo | Must — deep pipeline beyond opaque PNG (`R-V1134P1-001`) |
+| `2026-07-23-v1.135-p1-dock-icon-squircle-rca` | Dock icon macOS squircle RCA | Done | Must — deep pipeline beyond opaque PNG (`R-V1134P1-001`) |
 
 Status values: `Todo` | `InProgress` | `InReview` | `Done` | `Blocked`
 
