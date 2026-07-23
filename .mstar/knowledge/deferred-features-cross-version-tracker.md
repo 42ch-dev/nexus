@@ -13,9 +13,9 @@
 - **Product decisions**: §2.1 (PD-*)
 - **Future product lines**: §2.2 (FL-*)
 - **Planning a new version**: Scan §2.3 Open features for items targeting that version or "Any future"
-- **Closing an item**: Remove its row from §2.3; append to [shipped archive](../archived/shipped-features-tracker.md)
+- **Closing an item**: Remove its row from §2.3; append to [shipped archive](shipped-features-tracker.md)
 - **Deferring again**: Update `Target` column; keep the row. Add a note.
-- **Shipped/cancelled history**: [shipped archive](../archived/shipped-features-tracker.md)
+- **Shipped/cancelled history**: [shipped archive](shipped-features-tracker.md)
 - **Tech-debt residuals**: [`status.json`](../status.json) `residual_findings` — SSOT. Do not mirror here.
 - **Conflict**: Compass wins over tracker; `status.json` wins over tracker for machine-state residuals.
 
@@ -95,13 +95,13 @@ Non-feature reliability work routed out of feature iterations; picked up by a de
 
 Residual findings are tracked in [`status.json`](../status.json) → `residual_findings` + `metadata.tech_debt_summary`. The tracker does **not** mirror residual rows — `status.json` is authoritative. Current rollup: see `metadata.tech_debt_summary` (updated 2026-07-22). Closed/historical: `.mstar/archived/residuals/<plan-id>.json`.
 
-**V1.131 residual slate (closed at iteration-close):** DF-V1130-* / DF-V1131-* shipped (see [shipped archive](../archived/shipped-features-tracker.md)). Open human smokes remain in `status.json`: `R-VI-003` (Dock live), `R-VI-002` / `R-VI-004` (gallery notes / wordmark sign-off), `R-V1131P0-QC2-W-001` (Overlay H2–H4).
+**V1.131 residual slate (closed at iteration-close):** DF-V1130-* / DF-V1131-* shipped (see [shipped archive](shipped-features-tracker.md)). Open human smokes remain in `status.json`: `R-VI-003` (Dock live), `R-VI-002` / `R-VI-004` (gallery notes / wordmark sign-off), `R-V1131P0-QC2-W-001` (Overlay H2–H4).
 
 ---
 
 ## 4) Change control
 
-- **Shipped rows**: Move from §2.3 to [shipped archive](../archived/shipped-features-tracker.md) §1; add per-version snapshot to archive §2 when an iteration closes.
+- **Shipped rows**: Move from §2.3 to [shipped archive](shipped-features-tracker.md) §1; add per-version snapshot to archive §2 when an iteration closes.
 - **Compass authority**: Active compass controls scope even if this tracker lists a different target.
 - **In-flight “must ship”**: Rows marked **V1.132 in-flight — must ship** are **committed delivery** for the active compass; do not re-target without PM scope change.
 - **Effort estimates**: XS/S/M/L/XL agent-session scale. Guidance only.
@@ -116,6 +116,6 @@ Residual findings are tracked in [`status.json`](../status.json) → `residual_f
 
 **Full iteration index**: [iterations/README.md](../iterations/README.md)
 
-**Shipped archive**: [shipped-features-tracker.md](../archived/shipped-features-tracker.md)
+**Shipped archive**: [shipped-features-tracker.md](shipped-features-tracker.md)
 
 **Machine state**: [`status.json`](../status.json)

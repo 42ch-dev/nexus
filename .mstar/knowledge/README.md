@@ -51,7 +51,8 @@ Engineering reference for the Nexus OSS harness **knowledge** tree.
 
 **All OSS feature specs:** [`../specs/README.md`](../specs/README.md) (full index by domain).
 
-**Archived:** [`.mstar/archived/knowledge/`](../archived/knowledge/README.md) · [shipped-features-tracker](../archived/shipped-features-tracker.md)
+**Shipped archive (shared):** [shipped-features-tracker.md](shipped-features-tracker.md) — closed deferred-feature rows / delivery snapshots.  
+**Local process archive:** `.mstar/archived/` (gitignored — plan snapshots, legacy knowledge dumps; not clone SSOT).
 
 ### V1.119 additions
 

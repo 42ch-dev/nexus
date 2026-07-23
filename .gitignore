@@ -178,6 +178,15 @@ target
 .gitnexus
 .gh-user
 
-# Morning Star harness — SDD scratch + review bundles (ephemeral; not clone handoff)
+# Morning Star harness (.mstar/)
+# Principle: process stays local; results are shared with the team.
+# Ignored (process / coordination):
+.mstar/archived/
+.mstar/iterations/
+.mstar/plans/
 .mstar/sdd/
+.mstar/notes.json
+.mstar/status.json
+# Tracked (results): .mstar/AGENTS.md, .mstar/knowledge/, .mstar/specs/
+# Keep in sync with `.mstar/.gitignore` and `.mstar/AGENTS.md`.
 .agents/sdd/
