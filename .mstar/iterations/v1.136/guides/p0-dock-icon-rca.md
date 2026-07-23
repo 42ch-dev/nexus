@@ -12,12 +12,12 @@
 
 | Field | Value |
 |-------|-------|
-| **Status** | **RCA evidence captured (H4/H5/H6) — author Dock confirm PENDING** (`R-V1135P1-001`, `R-V1135P1-005` **open**) |
-| **Primary cause (V1.136)** | **H6 — squircle bake is visually invisible** because margin canvas, clipped-corner fill, and plate are all `#0D2B3E`; border scan shows **0/4092** non-plate pixels |
+| **Status** | **RCA evidence captured (H4/H5/H6) — Attempt 2 contrast bake landed; author Dock confirm PENDING** (`R-V1135P1-001`, `R-V1135P1-005` **open**) |
+| **Primary cause (V1.136)** | **H6 — squircle bake was visually invisible** (Attempt 1: 0/4092 non-plate). **T2 fix:** contrasting `MARGIN_COLOR` `#1A4A66` vs plate `#0D2B3E` — Attempt 2 border scan **4092/4092** non-plate |
 | **Contributing risk (H4)** | Only LaunchServices-indexed `Nexus.app` is the **main-checkout release bundle** (2026-07-22); worktree freshly generated `icon.icns` (2026-07-23) **differs** — author may eyeball a stale install |
 | **H5** | **INCONCLUSIVE** — agent cannot complete quit → rebuild → `killall Dock` → relaunch on behalf of `@author` |
 | **H7** | **Verified retained** — `pnpm dev:desktop` still runs `icons:generate` before `exec tauri dev` |
-| **Next work (T2)** | Contrast ≠ plate bake in `compose-app-icon.mjs` (see § H6 T2 strategy); full regenerate + author ritual after |
+| **Next work (T2)** | ~~Contrast ≠ plate bake in `compose-app-icon.mjs`~~ **Done (Attempt 2)** — author ritual + P0G-1 eyeball still required |
 
 V1.135 landed a squircle clip + 6% inset in compose (Task 2) and wired `icons:generate` into `dev:desktop` (H7). V1.136 **re-verifies** H4/H5/H6 per architect template. **H6 re-falsification:** the V1.135 geometry change does not produce any visible margin or corner contrast — the composed raster is indistinguishable from a full-bleed square plate. **Do not claim Dock Done** from this evidence alone.
 
@@ -52,6 +52,20 @@ V1.135 landed a squircle clip + 6% inset in compose (Task 2) and wired `icons:ge
 | **H6 geometry** | Corner 5×5 samples: TL/TR/BL/BR **25/25 `#0D2B3E`** each. `marginMid` (inset/2, h/2) = `#0D2B3E`. `plateEdge` (inset,inset) = `#0D2B3E`. `innerCorner` = `#0D2B3E`. Center mark RGB `(17, 221, 233)`. Border scan: **0/4092** non-plate pixels. **margin≠plate: no**. Compose params unchanged from V1.135 (`PLATE_INSET_RATIO=0.06`, `SQUIRCLE_RADIUS_RATIO=0.22`, `PLATE_COLOR=#0D2B3E`, canvas background same). |
 | **Author outcome** | **Pending** — `@author` squircle eyeball not recorded |
 | **Next candidate** | **T2:** contrast ≠ plate bake (§ H6 T2 strategy). If author still sees square after T2 + ritual → **H8** asset-catalog / `@2x` scaling / macOS template rendering |
+
+---
+
+## Attempt 2 — 2026-07-23 (T2 contrast-margin bake)
+
+| Field | Value |
+|-------|-------|
+| **Hypothesis** | H6 fix — contrasting opaque margin (Strategy A) |
+| **Compose change** | `MARGIN_COLOR = '#1A4A66'` for canvas background + squircle clip flatten; `PLATE_COLOR = '#0D2B3E'` retained for inner plate raster |
+| **Build command** | `pnpm --filter desktop run icons:compose` then `pnpm --filter desktop run icons:generate` |
+| **Compose params** | `PLATE_INSET_RATIO=0.06`, `SQUIRCLE_RADIUS_RATIO=0.22`, `PLATE_COLOR=#0D2B3E`, `MARGIN_COLOR=#1A4A66` |
+| **H6 geometry** | Corner 5×5 samples: TL/TR/BL/BR **25/25 `#1A4A66`** each. `marginMid` (inset/2, h/2) = `#1A4A66`. `plateInterior` (inset+200, inset+200) = `#0D2B3E`. `plateTopMid` (mid-x, inset+5) = `#0D2B3E`. Center mark RGB `(17, 221, 233)`. Border scan: **4092/4092** non-plate pixels. **margin≠plate: yes**. |
+| **Author outcome** | **Pending** — `@author` squircle eyeball not recorded |
+| **Next candidate** | Author ritual on **rebuilt** `.app` (§ Author Dock confirm). If fail persists → H5 extended `lsregister`, then **H8** |
 
 ---
 
@@ -135,7 +149,9 @@ node -e "
 | Center mark | (17, 221, 233) | cyan mark | no |
 | Border scan (perimeter) | — | **0/4092** non-plate | — |
 
-**Root issue:** compose uses `PLATE_COLOR` (`#0D2B3E`) for (a) canvas `background`, (b) `flatten({ background: PLATE_COLOR })` on the clipped plate, and (c) the SVG plate fill. The 6% “margin” and squircle-clipped corners are **the same color** as the plate — **margin≠plate: no**. The raster is visually identical to a full-bleed square plate; macOS squircle mask cannot reveal geometry that does not exist in pixel contrast.
+**Root issue (Attempt 1):** compose used `PLATE_COLOR` (`#0D2B3E`) for (a) canvas `background`, (b) `flatten({ background: PLATE_COLOR })` on the clipped plate, and (c) the SVG plate fill. The 6% “margin” and squircle-clipped corners were **the same color** as the plate — **margin≠plate: no**. The raster was visually identical to a full-bleed square plate.
+
+**T2 fix (Attempt 2):** `MARGIN_COLOR` `#1A4A66` now fills canvas background and squircle-clipped corners; inner plate raster retains `#0D2B3E`. Automated samples: **margin≠plate: yes**; border scan **4092/4092** non-plate. Author Dock confirm still **PENDING**.
 
 This matches spec anti-pattern §2: **same-color margin “fix”** — invisible to author.
 

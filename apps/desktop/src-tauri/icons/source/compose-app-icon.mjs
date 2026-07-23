@@ -14,6 +14,11 @@ const CANVAS = 1024;
 /** Chronos deep plate — matches logo-primary-square.svg rect fill. */
 const PLATE_COLOR = '#0D2B3E';
 /**
+ * Contrasting opaque margin — MUST differ from plate so squircle bake is visible
+ * on the raster (H6: same-color margin is invisible to macOS Dock mask).
+ */
+const MARGIN_COLOR = '#1A4A66';
+/**
  * Opaque margin between canvas edge and the rounded plate (not alpha).
  * Peer Dock icons keep artwork inset; full-bleed square plates read as sharp squares.
  */
@@ -39,20 +44,20 @@ const squircleMaskSvg = Buffer.from(
 const squircleMaskPng = await sharp(squircleMaskSvg).png().toBuffer();
 
 // Bake visible squircle rounding: clip the plate to a rounded rect, then flatten
-// clipped pixels back to plate color so the output stays fully opaque (H1 baseline).
+// clipped pixels to margin color so corners contrast with the inner plate (H6 fix).
 const roundedPlate = await sharp(plateRaster)
   .composite([{ input: squircleMaskPng, blend: 'dest-in' }])
-  .flatten({ background: PLATE_COLOR })
+  .flatten({ background: MARGIN_COLOR })
   .png()
   .toBuffer();
 
-// Center the pre-rounded plate on an opaque full-canvas plate background.
+// Center the pre-rounded plate on an opaque full-canvas margin background.
 const composed = await sharp({
   create: {
     width: CANVAS,
     height: CANVAS,
     channels: 3,
-    background: PLATE_COLOR,
+    background: MARGIN_COLOR,
   },
 })
   .composite([{ input: roundedPlate, left: inset, top: inset }])
