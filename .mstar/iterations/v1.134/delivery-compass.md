@@ -1,7 +1,8 @@
 ---
 iteration_id: V1.134
 start_date: 2026-07-23
-status: locked
+end_date: 2026-07-23
+status: completed
 iteration_base_branch: main
 target_branch: main
 spec_integration_branch: iteration/v1.134
@@ -121,10 +122,10 @@ A daemon route in `crates/nexus-daemon-runtime/` returns `INTERNAL_SERVER_ERROR`
 
 | Milestone | Target date | Status |
 |-----------|-------------|--------|
-| Spec freeze (Review & Edit lock) | 2026-07-23 | pending |
-| Wave 1 — P0 RCA + fix | 2026-07-23 | pending |
-| Wave 2 — P1–P3 frontend track | 2026-07-23 | pending |
-| Iteration close | 2026-07-24 | pending |
+| Spec freeze (Review & Edit lock) | 2026-07-23 | done |
+| Wave 1 — P0 RCA + fix | 2026-07-23 | done |
+| Wave 2 — P1–P3 frontend track | 2026-07-23 | done |
+| Iteration close | 2026-07-23 | done |
 
 ## Acceptance Criteria
 
@@ -176,9 +177,9 @@ Explicit and defensible for this L-scale usability-hardening iteration:
 
 ## Roadmap Position
 
-- **Current (V1.134):** dogfood-usability hardening — desktop startup 500 + app icon opaque full-bleed + AgentPicker VI retune + Creator Hub dual-pane IA.
+- **Current (V1.134):** **delivered** — dogfood-usability hardening (desktop startup 500 + app icon opaque full-bleed + AgentPicker VI retune + Creator Hub dual-pane IA).
 - **Prior:** V1.133 legacy false-Done repair + residual burn-down (#171).
-- **Next:** deeper Creator entity Chat; Orchestrator 功能区 beyond the hub; opportunistic DF-70/71; remaining open residuals. The recurring VI/IA surfaces should now be stable enough to stop re-litigating each iteration. Trigger: next dogfood pass. Owner: PM + frontend.
+- **Next:** deeper Creator entity Chat; Orchestrator 功能区 beyond the hub; opportunistic DF-70/71; remaining open residuals including **author visual confirm** for P1 Dock/Studio and P2/P3 Studio fixtures. Trigger: next dogfood pass. Owner: PM + frontend + author.
 - **最终目标:** a Control Room whose primary creation surface matches the author's mental model, with a visually correct, HIG-conformant desktop shell and no spurious startup errors — so iteration velocity stops being consumed by re-fixing the same four things.
 
 ## Delivery Branch Policy
@@ -236,16 +237,27 @@ Explicit and defensible for this L-scale usability-hardening iteration:
 
 ## Quality Gate Summary
 
-> Filled at iteration-close. Human summary only; per-plan gate details stay in each main plan, and open residual SSOT stays in `{HARNESS_DIR}/status.json`.
-
 | plan_id | QC decision | QA gate | Residuals | Durable summary |
 |---------|-------------|---------|-----------|-----------------|
-| _pending — filled at close_ | | | | |
+| `…-p0-desktop-startup-500` | Approve w/ residuals | mandatory Pass | R-V1134P0-001…007 | Vite proxy ECONNREFUSED→503 + gate DefaultProfileCoordinator |
+| `…-p1-app-icon-full-bleed` | Approve w/ residuals | mandatory Pass | R-V1134P1-001…004 (author Dock/Studio) | Opaque full-bleed compose + docs + VI-004 |
+| `…-p2-agent-picker-vi-retune` | Approve | mandatory Pass | R-V1134P2-001…003 | StatusDot restore + cyan discipline + Studio live AgentPicker |
+| `…-p3-creator-hub-dual-pane-ia` | Approve | mandatory Pass | R-V1134P3-001…004 (author Studio) | Dual-pane hub + inline create + tab hydrate fix |
 
 ## Compound Round Summary
 
-> Filled at iteration-close.
+| Package item | Triage | Action |
+|--------------|--------|--------|
+| `guides/p0-startup-500-rca.md` | Promote | → `knowledge/architecture-patterns/vite-daemon-proxy-boot-window.md` |
+| `guides/p1-app-icon-rca.md` | Promote (rule) | → opaque full-bleed rule in `nexus-brand-token-hierarchy.md` |
+| `guides/p2-agent-picker-vi-rca.md` | Keep snapshot | History for StatusDot restore; brand hierarchy audit line updated |
+| `specs/p3-creator-hub-dual-pane-ia.md` | Keep snapshot + promote IA | Dual-pane invariants → `workspace-parent-shell-ia.md` |
+| `specs/p3-creator-hub-product-brief.md` | Keep snapshot | Product intent already folded into IA contract |
+
+New knowledge index rows registered in `{KNOWLEDGE_DIR}/README.md`.
 
 ## Iteration Retrospective (minimal)
 
-> Filled at iteration-close.
+- **What worked:** RCA-first P0 avoided a false daemon-handler fix; lease-gated parallel frontend wave (P1∥P2∥P3) with serial integration merges.
+- **Friction:** Author visual gates (Dock/Studio) remain open residuals — agents cannot close AC-5/6/10/15.
+- **Carry forward:** Prefer Vite proxy + query-gate for boot-window 500s; never strip AgentPicker status dots; hub dual-pane is stable chrome.

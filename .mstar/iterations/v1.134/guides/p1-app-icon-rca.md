@@ -1,5 +1,7 @@
 # P1 app icon full-bleed — RCA (T1)
 
+> Promoted to: see Compound Round Summary in delivery-compass.md
+
 **plan_id:** `2026-07-23-v1.134-p1-app-icon-full-bleed`  
 **worktree:** `plan/v1.134-p1-app-icon-full-bleed`  
 **captured:** 2026-07-23  

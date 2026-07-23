@@ -134,7 +134,9 @@ After the light `blue-700` → cyan flip, surfaces that still meant **deep struc
 | Mono mark | `logoVariants.mono` | `logo-mono.svg` | Static grayscale; tintable UI uses `<NexusMark>` |
 | Text | `logoVariants.text` | `logo-text.svg` | Wordmark (`currentColor`) |
 
-**Compact scale:** `logoCompactMarkHeightPx` = 14px (−30% from `logoShellHeightPx` 20px) — titlebar, Brand hero mini, app-icon inner scale.
+**Compact scale:** `logoCompactMarkHeightPx` = 14px (−30% from `logoShellHeightPx` 20px) — titlebar, Brand hero mini. **Desktop app icon** does **not** inset/shrink the plate for “safe margin.”
+
+**macOS app icon (V1.134 P1):** `compose-app-icon.mjs` must rasterize `logo-primary-square.svg` as an **opaque full-bleed 1024×1024** (flatten onto plate color; no transparent canvas margin). macOS Big Sur+ applies the squircle mask only to opaque full-canvas icons — a transparent alpha border defeats the mask and renders a flat square. Do not reintroduce inset/`INSET_RATIO` “anti-halo” composites.
 
 **Removed:** `logo-color.svg` / `logoVariants.color` — redundant; do not resurrect.
 
@@ -142,14 +144,13 @@ After the light `blue-700` → cyan flip, surfaces that still meant **deep struc
 
 **Geometry:** square plate lockups (`*-square.svg`) are square; plain marks and `<NexusMark>` are wide (~10:1) — prefer `height` + `width: auto`.
 
-### Audit pattern additions (Chronos + V1.132)
+### Audit pattern additions (Chronos + V1.132 + V1.134)
 
 - Button: assert light primary `bg-brand-deep-blue text-brand-white`; dark primary `bg-brand-cyan text-brand-deep-blue`; assert absence of neon cyan primary on light shell.
 - Links: light retry/list links assert `text-brand-deep-blue`; grepping light `text-blue-700` on link-like roles is a smell.
 - Security / structure washes: assert `brand-deep-blue` alpha classes and **no** `blue-700` on those nodes.
-- Logos: `logoVariants` + `logoSquareVariants` keys match DESIGN; shell plate imports `*-square.svg`; titlebar imports plain `logo-white.svg` at compact height.
-- AgentPicker (VI-001): selected installed card uses single `border-blue-700` ring — no competing tint or status dot.
-
+- Logos: `logoVariants` + `logoSquareVariants` keys match DESIGN; shell plate imports `*-square.svg`; titlebar imports plain `logo-white.svg` at compact height; desktop compose = opaque full-bleed.
+- AgentPicker (V1.134 P2): top-right `StatusDot` (lit/hollow/muted) + 2px `border-blue-700` selection ring; Light = cyan accent-only (no fill wash); do **not** strip status dots again.
 ---
 
 ## V1.121 v0.4 "Literary Engine" Additions

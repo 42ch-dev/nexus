@@ -1,5 +1,7 @@
 # P0 desktop startup 500 — RCA (T1)
 
+> Promoted to: see Compound Round Summary in delivery-compass.md
+
 **plan_id:** `2026-07-23-v1.134-p0-desktop-startup-500`  
 **worktree:** `plan/v1.134-p0-desktop-startup-500`  
 **captured:** 2026-07-23 (local dogfood host)  
