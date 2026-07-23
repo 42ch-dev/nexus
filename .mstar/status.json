@@ -1,12 +1,54 @@
 {
   "version": 1,
   "updated_at": "2026-07-23",
-  "plans": [],
+  "plans": [
+    {
+      "plan_id": "2026-07-23-v1.134-p0-desktop-startup-500",
+      "status": "Todo",
+      "metadata": {
+        "spec_integration_branch": "iteration/v1.134",
+        "merge_target": "iteration/v1.134",
+        "iteration_refs": "V1.134",
+        "spec_refs": [".mstar/specs/desktop-shell.md"]
+      }
+    },
+    {
+      "plan_id": "2026-07-23-v1.134-p1-app-icon-full-bleed",
+      "status": "Todo",
+      "metadata": {
+        "spec_integration_branch": "iteration/v1.134",
+        "merge_target": "iteration/v1.134",
+        "iteration_refs": "V1.134",
+        "spec_refs": [".mstar/specs/desktop-shell.md", "DESIGN.md"]
+      }
+    },
+    {
+      "plan_id": "2026-07-23-v1.134-p2-agent-picker-vi-retune",
+      "status": "Todo",
+      "metadata": {
+        "spec_integration_branch": "iteration/v1.134",
+        "merge_target": "iteration/v1.134",
+        "iteration_refs": "V1.134",
+        "spec_refs": ["DESIGN.md", "DESIGN.dark.md", ".mstar/specs/web-ui.md"]
+      }
+    },
+    {
+      "plan_id": "2026-07-23-v1.134-p3-creator-hub-dual-pane-ia",
+      "status": "Todo",
+      "metadata": {
+        "spec_integration_branch": "iteration/v1.134",
+        "merge_target": "iteration/v1.134",
+        "iteration_refs": "V1.134",
+        "primary_spec": ".mstar/iterations/v1.134/specs/p3-creator-hub-dual-pane-ia.md",
+        "spec_refs": [".mstar/specs/web-ui.md", ".mstar/specs/desktop-shell.md", "DESIGN.md"]
+      }
+    }
+  ],
   "metadata": {
     "integration_branch_retired": false,
     "iteration_base_branch": "main",
-    "latest_active_compass": "v1.133/delivery-compass.md",
-    "latest_active_iteration": "V1.133",
+    "latest_active_compass": "v1.134/delivery-compass.md",
+    "latest_active_iteration": "V1.134",
     "latest_ship": {
       "iteration": "V1.133",
       "compass": "v1.133/delivery-compass.md",
@@ -15,7 +57,7 @@
       "merge_commit": "pending"
     },
     "platform_integration": "paused — local-only until further notice",
-    "spec_integration_branch": "iteration/v1.133",
+    "spec_integration_branch": "iteration/v1.134",
     "spec_refs_index": ".mstar/specs/README.md",
     "target_branch": "main",
     "tech_debt_summary": {
