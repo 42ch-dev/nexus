@@ -1,6 +1,6 @@
 # @42ch/nexus-ui
 
-Nexus brand assets, design tokens, theme helpers, **React brand components** (`<NexusLogo>`, `<NexusMark>`), and **presentational UI primitives** (`<Button>`, `<Badge>`, `<Card>`, `<Input>`, `<Label>`, `<Textarea>`, `<Select>`). Ships as a workspace package consumed by `apps/web` and `apps/design-studio`.
+Nexus brand assets, design tokens, theme helpers, **React brand components** (`<NexusLogo>`, `<NexusMark>`), and **presentational UI primitives** (`<Button>`, `<Badge>`, `<Card>`, `<Input>`, `<Label>`, `<Textarea>`, `<Select>`, `<Tabs>`). Ships as a workspace package consumed by `apps/web` and `apps/design-studio`.
 
 ## Install (workspace)
 
@@ -37,12 +37,13 @@ pnpm add @42ch/nexus-ui --workspace
 | `Label` | `import { Label } from '@42ch/nexus-ui'` | Native label attrs (`htmlFor`) | Presentational `<label>`; app owns association IDs |
 | `Textarea` | `import { Textarea } from '@42ch/nexus-ui'` | `invalid?: boolean` + native textarea attrs | Same invalid/`aria-invalid` pattern as Input |
 | `Select` | `import { Select } from '@42ch/nexus-ui'` | `invalid?: boolean` + native select attrs | V1.101 native `<select>`; app owns `<option>` children; no Radix compound parts |
+| `Tabs` | `import { Tabs, TabsList, TabsTrigger, TabsContent } from '@42ch/nexus-ui'` | Controlled (`value` + `onValueChange`) or uncontrolled (`defaultValue`) compound | V1.137 React context tabs; a11y roles on list/trigger/panel |
 
 All primitives are named root exports — no deep subpath imports. Variant helpers (`buttonVariants`, `badgeVariants`) are internal implementation details; do not import them from the package.
 
 ### Transitional policy for unpromoted primitives
 
-Components that have NOT been promoted to `@42ch/nexus-ui` remain in `apps/web/src/components/ui/` and can be imported through the project-local `@/components/ui` alias or the `@web-ui/*` barrel. Components classified `keep-web` (`Dialog`, `Tabs`, `Table`, `States`) stay app-owned until a future promotion plan locks their contract.
+Components that have NOT been promoted to `@42ch/nexus-ui` remain in `apps/web/src/components/ui/` and can be imported through the project-local `@/components/ui` alias or the `@web-ui/*` barrel. Components classified `keep-web` (`Dialog`, `Table`, `States`) stay app-owned until a future promotion plan locks their contract.
 
 PNG provenance (`logo-primary.png`, `logo-white-bg.png`, `logo-mono.png`, `logo-text.png`, `logo-variants-*.png`) lives under `assets/logos/` (Git LFS). **Consumers should use SVG variants**, not PNGs, in product UI.
 
@@ -221,7 +222,7 @@ pnpm --filter @42ch/nexus-ui run typecheck
 ### Current API (0.2.0)
 
 - **React brand components**: `<NexusLogo variant="..." src="...">` (presentational, explicit variant, `<img>`-based) and `<NexusMark>` (inline mono SVG, `currentColor`). React 18+ peer deps.
-- **UI primitives**: `<Button>`, `<Badge>`, `<Card>`, `<Input>`, `<Label>`, `<Textarea>`, `<Select>` — pure presentational, token-driven, compatible with both `apps/web` and `apps/design-studio`. Variant helpers stay internal; no deep subpath exports.
+- **UI primitives**: `<Button>`, `<Badge>`, `<Card>`, `<Input>`, `<Label>`, `<Textarea>`, `<Select>`, `<Tabs>` — pure presentational, token-driven, compatible with both `apps/web` and `apps/design-studio`. Variant helpers stay internal; no deep subpath exports.
 - **Class composition**: package-local `cn` helper with DESIGN.md token class-group extension via `tailwind-merge` (public `cn` export).
 
 ### Deferred
