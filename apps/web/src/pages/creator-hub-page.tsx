@@ -1,10 +1,10 @@
 import { CreatorHubDualPane } from '@/components/layout/creator-hub-dual-pane';
 
 /**
- * Creator hub content — stable dual-pane shell (V1.134 P3).
+ * Creator hub content — browse-only shell (V1.135 P0).
  *
- * Shared World/Work tab bar spans both panes; left workspace shows inline
- * create affordance; right pane shows single-kind cards or empty state.
+ * World/Work tab bar + card list or empty state. Create lives in the sidebar
+ * menu slot ({@link Sidebar} `panelContent`), not in this content column.
  * Card selection navigates to canvas routes — no controller-stub replace.
  * Canvas routes under `/works/:workId/*` and `/worlds/:worldId/*` stay orthogonal.
  */

@@ -153,8 +153,8 @@
       "ariaLabel": "Creator hub — World or Work workspace"
     },
     "empty": {
-      "worlds": "No Worlds yet — create one from the left",
-      "works": "No Works yet — create one from the left"
+      "worlds": "No Worlds yet — create one from the sidebar",
+      "works": "No Works yet — create one from the sidebar"
     },
     "workspace": {
       "createWorldCompact": "Create new World…",

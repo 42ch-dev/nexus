@@ -153,8 +153,8 @@
       "ariaLabel": "创作中心 — 世界或作品工作区"
     },
     "empty": {
-      "worlds": "暂无世界，从左边创建",
-      "works": "暂无作品，从左边创建"
+      "worlds": "暂无世界，从侧边栏创建",
+      "works": "暂无作品，从侧边栏创建"
     },
     "workspace": {
       "createWorldCompact": "创建新世界…",

@@ -391,11 +391,19 @@ describe('Sidebar — work routes (V1.132 P3 AC-8)', () => {
     expect(screen.queryByRole('link', { name: 'Drill Novel' })).not.toBeInTheDocument();
   });
 
-  it('hides sidebar create panel on hub /works surface (V1.134 P3)', async () => {
+  it('shows sidebar create panel on hub /works surface (V1.135 P0)', async () => {
     renderSidebarAtRoute('/works');
 
     expect(screen.getByRole('tab', { name: 'Creator' })).toBeInTheDocument();
-    expect(screen.queryByTestId('sidebar-create-panel')).not.toBeInTheDocument();
+    expect(screen.getByTestId('sidebar-create-panel')).toBeInTheDocument();
+    expect(screen.getByTestId('shell-sidebar-panel')).toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'All Works' })).not.toBeInTheDocument();
+  });
+
+  it('shows sidebar create panel on hub /worlds surface (V1.135 P0)', async () => {
+    renderSidebarAtRoute('/worlds');
+
+    expect(screen.getByRole('tab', { name: 'Creator' })).toBeInTheDocument();
+    expect(screen.getByTestId('sidebar-create-panel')).toBeInTheDocument();
   });
 });

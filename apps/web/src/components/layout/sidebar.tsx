@@ -23,9 +23,9 @@ import { CreateWorkDialog } from '@/pages/dialogs/create-work-dialog';
 /**
  * Sidebar nav — V1.94 two-tab IA (Creator | Orchestrator).
  *
- * V1.134 P3: inline create lives in the hub dual-pane workspace; the sidebar
- * Create panel is hidden on `/works` and `/worlds` hub surfaces but remains on
- * canvas sub-routes for authors who need a modal create path off-hub.
+ * V1.135 P0: hub create lives in {@link CreatorCreatePanel} as
+ * `panelContent` on every creator-tab surface, including `/works` and `/worlds`.
+ * Hub content is browse-only (tabs + card list).
  *
  * Thin wrapper around {@link ShellSidebarChrome}: owns the active creator
  * profile, route-derived tab state, and Create dialog orchestration.
@@ -85,10 +85,6 @@ function CreatorCreatePanel() {
 const CREATOR_HUB_PATH = '/works';
 const ORCHESTRATOR_HUB_PATH = '/strategies';
 
-function isCreatorHubSurface(pathname: string): boolean {
-  return pathname === '/works' || pathname === '/worlds';
-}
-
 export function Sidebar() {
   const { t } = useTranslation('shell');
   const { pathname } = useLocation();
@@ -131,8 +127,7 @@ export function Sidebar() {
     [t],
   );
 
-  const creatorPanel =
-    activeTab === 'creator' && !isCreatorHubSurface(pathname) ? <CreatorCreatePanel /> : undefined;
+  const creatorPanel = activeTab === 'creator' ? <CreatorCreatePanel /> : undefined;
 
   return (
     <nav aria-label={t('aria.primary')} className="min-h-0 flex-1">
