@@ -1,6 +1,6 @@
+import { fireEvent, screen, waitFor } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 import { describe, expect, it, beforeEach, vi } from 'vitest';
-import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Route, Routes, useLocation } from 'react-router-dom';
 
@@ -38,15 +38,17 @@ describe('Sidebar', () => {
     await i18n.changeLanguage('en');
   });
 
-  it('renders the Creator tab with Create-only left panel (V1.132 P3 AC-8)', async () => {
+  it('renders the Creator tab with inline create panel (V1.136 P1)', async () => {
     useSidebarHandlers();
 
     renderInApp(<Sidebar />, { client: makeClient(), activeCreatorId: 'creator-a' });
 
     expect(screen.getByRole('tab', { name: 'Creator', selected: true })).toBeInTheDocument();
     expect(screen.getByTestId('sidebar-create-panel')).toBeInTheDocument();
-    expect(screen.getByTestId('creator-create-world')).toBeInTheDocument();
-    expect(screen.getByTestId('creator-create-work')).toBeInTheDocument();
+    expect(screen.getByTestId('sidebar-create-tab-bar')).toBeInTheDocument();
+    expect(screen.getByTestId('sidebar-create-form-world')).toBeInTheDocument();
+    expect(screen.queryByTestId('creator-create-world')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('creator-create-work')).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'All Works' })).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Worlds' })).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Memories' })).not.toBeInTheDocument();
@@ -137,8 +139,9 @@ describe('Sidebar', () => {
 
     expect(screen.getByTestId('shell-mode-switch')).toBeInTheDocument();
     const tablists = screen.getAllByRole('tablist');
-    expect(tablists).toHaveLength(1);
-    expect(tablists[0]).toHaveAttribute('data-testid', 'shell-mode-switch');
+    expect(tablists).toHaveLength(2);
+    expect(tablists.some((el) => el.getAttribute('data-testid') === 'shell-mode-switch')).toBe(true);
+    expect(screen.getByTestId('sidebar-create-tab-bar').querySelector('[role="tablist"]')).toBeInTheDocument();
   });
 
   it('does not expose a Settings row in the sidebar footer (V1.125 P2)', async () => {
@@ -339,7 +342,7 @@ describe('Sidebar — layout structure (AD-P2-2 T1)', () => {
     );
 
     const toolbar = screen.getByRole('toolbar', { name: 'Workspace' });
-    const tabpanel = screen.getByRole('tabpanel');
+    const tabpanel = screen.getByTestId('shell-sidebar-panel');
     expect(tabpanel.contains(toolbar)).toBe(false);
     expect(toolbar.closest('.border-t')).not.toBeNull();
   });
@@ -405,5 +408,111 @@ describe('Sidebar — work routes (V1.132 P3 AC-8)', () => {
 
     expect(screen.getByRole('tab', { name: 'Creator' })).toBeInTheDocument();
     expect(screen.getByTestId('sidebar-create-panel')).toBeInTheDocument();
+  });
+});
+
+describe('Sidebar — inline create (V1.136 P1)', () => {
+  beforeEach(async () => {
+    window.localStorage.clear();
+    await i18n.changeLanguage('en');
+  });
+
+  function LocationProbe() {
+    const { pathname } = useLocation();
+    return <div data-testid="location">{pathname}</div>;
+  }
+
+  it('submits inline World create via POST /v1/daemon/worlds without a dialog', async () => {
+    let postedBody: unknown = null;
+    useHandlers(
+      http.get('/v1/daemon/creators', () =>
+        HttpResponse.json({
+          items: [{ creator_id: 'creator-a', display_name: 'Alice' }],
+          pagination: { limit: 20, has_more: false },
+        }),
+      ),
+      worksList([]),
+      http.get('/v1/daemon/narrative/worlds', () => HttpResponse.json({ worlds: [] })),
+      http.post('/v1/daemon/worlds', async ({ request }) => {
+        postedBody = await request.json();
+        return HttpResponse.json({ world_id: 'w-new' });
+      }),
+    );
+
+    renderInApp(
+      <Routes>
+        <Route
+          path="*"
+          element={
+            <>
+              <Sidebar />
+              <LocationProbe />
+            </>
+          }
+        />
+      </Routes>,
+      { client: makeClient(), activeCreatorId: 'creator-a', initialRouterEntries: ['/works'] },
+    );
+
+    fireEvent.change(screen.getByLabelText('Title'), { target: { value: 'Aurora' } });
+    fireEvent.click(screen.getByTestId('sidebar-create-submit-world'));
+
+    await waitFor(() => expect(postedBody).toEqual({ title: 'Aurora' }));
+    await waitFor(() =>
+      expect(screen.getByTestId('location')).toHaveTextContent('/worlds/w-new/timeline'),
+    );
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
+  it('submits inline Work create via POST /v1/daemon/works without a dialog', async () => {
+    const user = userEvent.setup();
+    let postedBody: unknown = null;
+    useHandlers(
+      http.get('/v1/daemon/creators', () =>
+        HttpResponse.json({
+          items: [{ creator_id: 'creator-a', display_name: 'Alice' }],
+          pagination: { limit: 20, has_more: false },
+        }),
+      ),
+      worksList([]),
+      http.get('/v1/daemon/narrative/worlds', () => HttpResponse.json({ worlds: [] })),
+      http.post('/v1/daemon/works', async ({ request }) => {
+        postedBody = await request.json();
+        return HttpResponse.json({ work_id: 'work-new', status: 'draft' });
+      }),
+    );
+
+    renderInApp(
+      <Routes>
+        <Route
+          path="*"
+          element={
+            <>
+              <Sidebar />
+              <LocationProbe />
+            </>
+          }
+        />
+      </Routes>,
+      { client: makeClient(), activeCreatorId: 'creator-a', initialRouterEntries: ['/works'] },
+    );
+
+    await user.click(screen.getByTestId('sidebar-create-tab-work'));
+    await user.type(screen.getByLabelText('Title'), 'Drill Novel');
+    await user.type(screen.getByLabelText('Long-term goal'), 'Finish arc one');
+    await user.type(screen.getByLabelText('Initial idea'), 'A heist in the sky');
+    await user.click(screen.getByTestId('sidebar-create-submit-work'));
+
+    await waitFor(() =>
+      expect(postedBody).toEqual({
+        title: 'Drill Novel',
+        long_term_goal: 'Finish arc one',
+        initial_idea: 'A heist in the sky',
+      }),
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId('location')).toHaveTextContent('/works/work-new/outline'),
+    );
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 });
