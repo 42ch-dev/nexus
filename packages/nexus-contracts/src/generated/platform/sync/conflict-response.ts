@@ -21,70 +21,37 @@ export interface ConflictResponse {
    *
    * @minItems 1
    */
-  conflicts: [
-    {
-      /**
-       * Machine-readable conflict code (e.g., 'revision_outdated', 'delta_sequence_gap').
-       */
-      code: string;
-      /**
-       * Human-readable conflict description.
-       */
-      message: string;
-      /**
-       * Index into the conflicting deltas[] array, if applicable.
-       */
-      delta_index?: number;
-      /**
-       * Expected value that caused the conflict.
-       */
-      expected?: {
-        [k: string]: unknown | undefined;
-      };
-      /**
-       * Actual value received.
-       */
-      actual?: {
-        [k: string]: unknown | undefined;
-      };
-      /**
-       * Suggested resolution strategy.
-       */
-      resolution_hint?: "auto_accept" | "auto_reject" | "manual_review";
+  conflicts: {
+    /**
+     * Machine-readable conflict code (e.g., 'revision_outdated', 'delta_sequence_gap').
+     */
+    code: string;
+    /**
+     * Human-readable conflict description.
+     */
+    message: string;
+    /**
+     * Index into the conflicting deltas[] array, if applicable.
+     */
+    delta_index?: number;
+    /**
+     * Expected value that caused the conflict.
+     */
+    expected?: {
       [k: string]: unknown | undefined;
-    },
-    ...{
-      /**
-       * Machine-readable conflict code (e.g., 'revision_outdated', 'delta_sequence_gap').
-       */
-      code: string;
-      /**
-       * Human-readable conflict description.
-       */
-      message: string;
-      /**
-       * Index into the conflicting deltas[] array, if applicable.
-       */
-      delta_index?: number;
-      /**
-       * Expected value that caused the conflict.
-       */
-      expected?: {
-        [k: string]: unknown | undefined;
-      };
-      /**
-       * Actual value received.
-       */
-      actual?: {
-        [k: string]: unknown | undefined;
-      };
-      /**
-       * Suggested resolution strategy.
-       */
-      resolution_hint?: "auto_accept" | "auto_reject" | "manual_review";
+    };
+    /**
+     * Actual value received.
+     */
+    actual?: {
       [k: string]: unknown | undefined;
-    }[]
-  ];
+    };
+    /**
+     * Suggested resolution strategy.
+     */
+    resolution_hint?: "auto_accept" | "auto_reject" | "manual_review";
+    [k: string]: unknown | undefined;
+  }[];
   /**
    * Current world revision on the server.
    */

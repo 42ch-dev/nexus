@@ -37,7 +37,7 @@ export interface PublishStoryRequest {
    *
    * @minItems 1
    */
-  chapter_ids: [string, ...string[]];
+  chapter_ids: string[];
   /**
    * Client-supplied idempotency token for safe retries
    */

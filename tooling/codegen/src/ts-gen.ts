@@ -68,13 +68,23 @@ const SKIP_LIST = new Set<string>([
   'platform/sync/bundle-refinement.schema.json',
 ]);
 
-/** Compile options — mirrors the sibling spoke codegen (run.mjs generateTypeScript). */
+/**
+ * Compile options — mirrors the sibling spoke codegen (run.mjs generateTypeScript).
+ *
+ * `ignoreMinAndMaxItems`: collapses `minItems`/`maxItems` tuple unions back to
+ * plain `T[]`. json-schema-to-typescript otherwise expands bounded arrays into
+ * pathological fixed-length tuple unions (e.g. `worlds` maxItems:20 → a 1738-line
+ * union of 0..20-element tuples). Runtime validation (AJV/zod/etc.) already
+ * enforces these bounds at the wire layer — TS tuple structural enforcement is
+ * redundant here and explodes the generated `.d.ts` bundle size (~18%).
+ */
 const COMPILE_OPTS = {
   bannerComment: '',
   unreachableDefinitions: true,
   enableConstEnums: true,
   strictIndexSignatures: true,
   declareExternallyReferenced: true,
+  ignoreMinAndMaxItems: true,
 };
 
 /** POSIX-relative schema paths (relative to the localized tree root). */

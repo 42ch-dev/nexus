@@ -239,9 +239,7 @@ export function useTimelineOverview() {
 /** Flatten the infinite overview pages into one worlds array. */
 export function flattenOverviewWorlds(
   data: { pages: TimelineOverviewResponse[] } | undefined,
-): Array<TimelineOverviewResponse['worlds'][number]> {
-  // V1.138 codegen expands `worlds` (schema maxItems: 20) into a fixed-length
-  // tuple union; a flattened result is a plain element array, not that union.
+): TimelineOverviewResponse['worlds'] {
   if (!data) return [];
   return data.pages.flatMap((p) => p.worlds);
 }

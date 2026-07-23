@@ -14,7 +14,7 @@ export interface BatchUpdateFindingsRequest {
    * @minItems 1
    * @maxItems 100
    */
-  finding_ids: [string, ...string[]];
+  finding_ids: string[];
   patch: NexusFindingBatchPatch;
 }
 /**

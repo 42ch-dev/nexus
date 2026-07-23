@@ -108,7 +108,7 @@ export interface NexusDeltaBundleEnvelope {
    *
    * @minItems 1
    */
-  deltas: [NexusDelta, ...NexusDelta[]];
+  deltas: NexusDelta[];
   /**
    * Server-side write-back: bundle-level apply result
    */

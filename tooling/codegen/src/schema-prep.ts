@@ -146,10 +146,10 @@ export async function buildDereferencedSchemaTree(
   fs.rmSync(derefSchemasDir, { recursive: true, force: true });
   for (const relSchema of schemaPaths) {
     const inputPath = path.join(localizedDir, relSchema);
-    const bundled = await $RefParser.dereference(inputPath);
+    const dereferenced = await $RefParser.dereference(inputPath);
     const outPath = path.join(derefSchemasDir, relSchema);
     fs.mkdirSync(path.dirname(outPath), { recursive: true });
-    fs.writeFileSync(outPath, JSON.stringify(bundled, null, 2));
+    fs.writeFileSync(outPath, JSON.stringify(dereferenced, null, 2));
   }
 }
 
