@@ -196,7 +196,7 @@ export function ChaptersPage() {
                               type="text"
                               value={edits.slug ?? ''}
                               onChange={(e) => setEdits((s) => ({ ...s, slug: e.target.value }))}
-                              className="h-8 w-full rounded-control border border-blue-700 bg-background-100 px-2 text-copy-14"
+                              className="h-8 w-full rounded-control border border-blue-1000 bg-background-100 px-2 text-copy-14 dark:border-blue-700"
                               aria-label={t('chapters.slugLabel')}
                             />
                           ) : (
@@ -214,7 +214,7 @@ export function ChaptersPage() {
                                   planned_word_count: e.target.value === '' ? undefined : Number(e.target.value),
                                 }))
                               }
-                              className="h-8 w-24 rounded-control border border-blue-700 bg-background-100 px-2 text-right text-copy-14 tabular-nums"
+                              className="h-8 w-24 rounded-control border border-blue-1000 bg-background-100 px-2 text-right text-copy-14 tabular-nums dark:border-blue-700"
                               aria-label={t('chapters.plannedWordCountLabel')}
                             />
                           ) : (
@@ -232,7 +232,7 @@ export function ChaptersPage() {
                                   volume: e.target.value === '' ? undefined : Number(e.target.value),
                                 }))
                               }
-                              className="h-8 w-16 rounded-control border border-blue-700 bg-background-100 px-2 text-right text-copy-14 tabular-nums"
+                              className="h-8 w-16 rounded-control border border-blue-1000 bg-background-100 px-2 text-right text-copy-14 tabular-nums dark:border-blue-700"
                               aria-label={t('chapters.volumeLabel')}
                             />
                           ) : (

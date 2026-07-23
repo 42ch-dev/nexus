@@ -182,12 +182,12 @@ describe('Chronos gallery acceptance', () => {
     expect(swatch).toHaveTextContent('blue-700');
   });
 
-  it('components primary Button uses ink fill in light shell', () => {
+  it('components primary Button uses mid-teal fill in light shell', () => {
     mockMatchMediaFull();
     renderStudio('/components');
     expect(screen.getByTestId('button-chronos-note')).toHaveTextContent(/theme-split/i);
     const primary = screen.getByTestId('button-primary-default');
-    expect(primary.className).toMatch(/\bbg-brand-deep-blue\b/);
+    expect(primary.className).toMatch(/\bbg-brand-cyan-1000\b/);
     expect(primary.className).toMatch(/\btext-brand-white\b/);
     expect(primary.className).toMatch(/\bdark:bg-brand-cyan\b/);
     expect(primary.className).toMatch(/\bdark:text-brand-deep-blue\b/);
@@ -199,7 +199,7 @@ describe('Chronos gallery acceptance', () => {
     renderStudio('/components');
     expect(document.documentElement.classList.contains('dark')).toBe(true);
     const primary = screen.getByTestId('button-primary-default');
-    expect(primary.className).toMatch(/\bbg-brand-deep-blue\b/);
+    expect(primary.className).toMatch(/\bbg-brand-cyan-1000\b/);
     expect(primary.className).toMatch(/\bdark:bg-brand-cyan\b/);
     expect(primary.className).toMatch(/\bdark:text-brand-deep-blue\b/);
   });

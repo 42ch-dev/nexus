@@ -202,7 +202,7 @@ export function TimelinePanel({
                             [event.event_id]: e.target.value,
                           }))
                         }
-                        className="min-w-0 flex-1 rounded-control border border-gray-alpha-400 bg-background-100 px-2 py-1 text-label-12 text-gray-1000 focus:border-blue-700"
+                        className="min-w-0 flex-1 rounded-control border border-gray-alpha-400 bg-background-100 px-2 py-1 text-label-12 text-gray-1000 focus:border-blue-1000 dark:focus:border-blue-700"
                         aria-label={t('eventInspector.targetAria', { title: event.title })}
                       >
                         <option value="">{t('eventInspector.targetPlaceholder')}</option>
@@ -240,14 +240,14 @@ export function TimelinePanel({
             value={newTitle}
             onChange={(e) => setNewTitle(e.target.value)}
             placeholder={t('eventInspector.titlePlaceholder')}
-            className="w-full rounded-control border border-gray-alpha-400 bg-background-100 px-3 py-2 text-gray-1000 focus:border-blue-700"
+            className="w-full rounded-control border border-gray-alpha-400 bg-background-100 px-3 py-2 text-gray-1000 focus:border-blue-1000 dark:focus:border-blue-700"
           />
           <textarea
             value={newDescription}
             onChange={(e) => setNewDescription(e.target.value)}
             placeholder={t('eventInspector.descriptionPlaceholder')}
             rows={2}
-            className="w-full rounded-control border border-gray-alpha-400 bg-background-100 px-3 py-2 text-gray-1000 focus:border-blue-700"
+            className="w-full rounded-control border border-gray-alpha-400 bg-background-100 px-3 py-2 text-gray-1000 focus:border-blue-1000 dark:focus:border-blue-700"
           />
           <Button variant="secondary" size="small" onClick={addEvent} disabled={!newTitle.trim()}>
             <ArrowRight className="h-4 w-4" aria-hidden /> {t('eventInspector.addButton')}

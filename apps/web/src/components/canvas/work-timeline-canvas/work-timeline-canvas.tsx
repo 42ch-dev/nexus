@@ -45,6 +45,7 @@ import { SemanticZoomBridge } from '@/components/canvas/use-semantic-zoom';
 import { useWorkOutline } from '@/lib/canvas/use-outline-data';
 import { useWork } from '@/api/queries';
 import { LoadingState, ErrorState, EmptyState } from '@/components/ui/states';
+import { Button } from '@42ch/nexus-ui';
 import type { SceneBeatFixturePayload } from '../outline-canvas/graph-projection';
 
 import {
@@ -548,16 +549,16 @@ function MomentEmptyState({
             'Moment is scene-precise and manuscript-anchored. Add scenes and beats in Outline, or switch to Narrative for events.',
         })}
         action={
-          <button
+          <Button
             type="button"
+            variant="primary"
             data-testid="work-timeline-moment-empty-cta"
             onClick={onSwitchToNarrative}
-            className="rounded-control bg-brand-cyan px-4 py-2 text-button-14 font-semibold text-brand-deep-blue shadow-elevation-2 hover:bg-blue-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-700 focus-visible:ring-offset-2"
           >
             {t('workTimeline.moment.emptyState.cta', {
               defaultValue: 'Switch to Narrative',
             })}
-          </button>
+          </Button>
         }
       />
     </div>

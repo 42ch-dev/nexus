@@ -28,7 +28,7 @@ export interface AnnotationInspectorProps {
 
 const SWATCH_CLASS: Record<ReadingAnnotationColor, string> = {
   yellow: 'bg-[var(--color-reading-annotation-highlight-yellow-background)] border-amber-700/30',
-  blue: 'bg-[var(--color-reading-annotation-highlight-blue-background)] border-blue-700/30',
+  blue: 'bg-[var(--color-reading-annotation-highlight-blue-background)] border-blue-1000/30 dark:border-blue-700/30',
   green: 'bg-[var(--color-reading-annotation-highlight-green-background)] border-green-700/30',
   pink: 'bg-[var(--color-reading-annotation-highlight-pink-background)] border-pink-700/30',
 };

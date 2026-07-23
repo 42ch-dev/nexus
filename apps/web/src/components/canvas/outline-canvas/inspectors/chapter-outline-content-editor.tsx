@@ -202,7 +202,7 @@ export function ChapterOutlineContentEditor({
         </span>
         <SaveStateIndicator state={saveState} />
       </div>
-      <div className="overflow-hidden rounded-card border border-gray-alpha-400 bg-background-100 focus-within:border-blue-700 focus-within:ring-2 focus-within:ring-blue-700/20">
+      <div className="overflow-hidden rounded-card border border-gray-alpha-400 bg-background-100 focus-within:border-blue-1000 focus-within:ring-2 focus-within:ring-blue-1000/20 dark:focus-within:border-blue-700 dark:focus-within:ring-blue-700/20">
         <EditorToolbar editor={editor} disabled={disabled} />
         <div
           className="min-h-[240px] p-4"

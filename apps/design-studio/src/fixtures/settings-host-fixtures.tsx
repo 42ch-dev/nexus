@@ -245,7 +245,7 @@ function SettingsSectionNav({
               'inline-flex items-center gap-2 px-3 py-2 text-label-14 font-medium',
               'border-b-2 -mb-px transition-colors',
               selected
-                ? 'text-gray-1000 border-blue-700'
+                ? 'text-gray-1000 border-blue-1000 dark:border-blue-700'
                 : 'text-gray-700 border-transparent hover:text-gray-1000 hover:border-gray-alpha-400',
             )}
           >
@@ -481,7 +481,7 @@ function SettingsWorkspaceSectionChrome({
         <CardHeader>
           <div className="flex items-center gap-2">
             <FolderOpen
-              className="h-5 w-5 text-blue-700"
+              className="h-5 w-5 text-blue-1000 dark:text-blue-700"
               aria-hidden="true"
             />
             <CardTitle>Workspace folder</CardTitle>

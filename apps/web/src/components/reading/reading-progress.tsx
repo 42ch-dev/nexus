@@ -84,7 +84,7 @@ export function ReadingProgress() {
     >
       <div className="h-1.5 flex-1 overflow-hidden rounded-pill bg-gray-alpha-200">
         <div
-          className="h-full rounded-pill bg-blue-700 transition-[width] duration-state ease-standard motion-reduce:transition-none"
+          className="h-full rounded-pill bg-blue-1000 transition-[width] duration-state ease-standard motion-reduce:transition-none dark:bg-blue-700"
           style={{ width: `${pct}%` }}
         />
       </div>

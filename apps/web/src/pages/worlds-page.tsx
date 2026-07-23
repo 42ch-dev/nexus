@@ -155,9 +155,9 @@ export function WorldsPage() {
                         type="button"
                         onClick={() => navigate(`/worlds/${encodeURIComponent(world.world_id)}/timeline`)}
                         aria-label={t('openTimeline')}
-                        className="flex w-full items-center gap-3 rounded-card border border-gray-alpha-400 p-3 text-left transition-colors duration-state ease-standard hover:bg-gray-alpha-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-700 focus-visible:ring-offset-2"
+                        className="flex w-full items-center gap-3 rounded-card border border-gray-alpha-400 p-3 text-left transition-colors duration-state ease-standard hover:bg-gray-alpha-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-1000 dark:focus-visible:ring-blue-700 focus-visible:ring-offset-2"
                       >
-                        <Globe className="h-5 w-5 shrink-0 text-blue-700" aria-hidden />
+                        <Globe className="h-5 w-5 shrink-0 text-blue-1000 dark:text-blue-700" aria-hidden />
                         <span className="min-w-0 flex-1">
                           <span className="block truncate font-display text-display-20 tracking-tight text-gray-1000">
                             {label}

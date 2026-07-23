@@ -255,7 +255,7 @@ export function ConnectDaemonForm() {
     <Card className="shadow-card" data-testid="connect-daemon-form">
       <CardHeader>
         <div className="flex items-center gap-2">
-          <Wifi className="h-5 w-5 text-blue-700" aria-hidden />
+          <Wifi className="h-5 w-5 text-blue-1000 dark:text-blue-700" aria-hidden />
           <CardTitle>{t('connection.title')}</CardTitle>
         </div>
         <CardDescription>{t('connection.description')}</CardDescription>

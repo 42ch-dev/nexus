@@ -85,31 +85,22 @@ function ViTargetStatusDot({
   );
 }
 
-function ThemePair({
+function ThemeFollowSpecimen({
   testId,
-  light,
-  dark,
+  children,
 }: {
   testId: string;
-  light: ReactNode;
-  dark: ReactNode;
+  children: ReactNode;
 }) {
   return (
-    <div data-testid={testId} className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-      <div
-        data-testid={`${testId}-light`}
-        className="rounded-card border border-gray-alpha-300 bg-background-100 p-3"
-      >
-        <p className="mb-3 text-label-14 font-medium text-gray-1000">Light shell</p>
-        {light}
-      </div>
-      <div
-        data-testid={`${testId}-dark`}
-        className="dark rounded-card border border-gray-alpha-300 bg-[#08141C] p-3"
-      >
-        <p className="mb-3 text-label-14 font-medium text-brand-cyan">Dark shell</p>
-        {dark}
-      </div>
+    <div
+      data-testid={testId}
+      className="rounded-card border border-gray-alpha-300 bg-background-100 p-3"
+    >
+      <p className="mb-3 text-label-14 font-medium text-gray-600">
+        Theme-aware — toggle light/dark in the chrome
+      </p>
+      {children}
     </div>
   );
 }
@@ -218,11 +209,9 @@ export function AgentPickerViRetuneFixtures() {
         description="Lit green when selected; hollow gray when installed-unselected; muted gray when not installed. Documentation strip only — ready grids below use live AgentPicker."
         testId="vi-retune-fixture-dot-matrix"
       >
-        <ThemePair
-          testId="vi-retune-dot-matrix"
-          light={<DotStateMatrix />}
-          dark={<DotStateMatrix />}
-        />
+        <ThemeFollowSpecimen testId="vi-retune-dot-matrix">
+          <DotStateMatrix />
+        </ThemeFollowSpecimen>
       </FixtureFrame>
 
       <FixtureFrame
@@ -230,11 +219,9 @@ export function AgentPickerViRetuneFixtures() {
         description="Live `@web-setup/agent-picker`: 2px cyan selection ring + top-right StatusDot. Light: no bg-blue-700/8 wash."
         testId="vi-retune-fixture-ready-selected"
       >
-        <ThemePair
-          testId="vi-retune-ready-selected"
-          light={<LiveReadyPicker selectedId="claude-native" />}
-          dark={<LiveReadyPicker selectedId="claude-native" />}
-        />
+        <ThemeFollowSpecimen testId="vi-retune-ready-selected">
+          <LiveReadyPicker selectedId="claude-native" />
+        </ThemeFollowSpecimen>
       </FixtureFrame>
 
       <FixtureFrame
@@ -242,11 +229,9 @@ export function AgentPickerViRetuneFixtures() {
         description="Live AgentPicker — hollow dots on installed cards; muted dot on not-installed card."
         testId="vi-retune-fixture-ready-unselected"
       >
-        <ThemePair
-          testId="vi-retune-ready-unselected"
-          light={<LiveReadyPicker selectedId={null} />}
-          dark={<LiveReadyPicker selectedId={null} />}
-        />
+        <ThemeFollowSpecimen testId="vi-retune-ready-unselected">
+          <LiveReadyPicker selectedId={null} />
+        </ThemeFollowSpecimen>
       </FixtureFrame>
 
       <FixtureFrame
@@ -262,55 +247,29 @@ export function AgentPickerViRetuneFixtures() {
         description="No per-card dots for non-ready statuses. Loading spinner uses cyan accent (DESIGN.md)."
         testId="vi-retune-fixture-statuses"
       >
-        <ThemePair
-          testId="vi-retune-status-loading"
-          light={<AgentPicker status={'loading' satisfies AgentPickerStatus} />}
-          dark={<AgentPicker status={'loading' satisfies AgentPickerStatus} />}
-        />
+        <ThemeFollowSpecimen testId="vi-retune-status-loading">
+          <AgentPicker status={'loading' satisfies AgentPickerStatus} />
+        </ThemeFollowSpecimen>
         <div className="mt-4" />
-        <ThemePair
-          testId="vi-retune-status-empty"
-          light={
-            <AgentPicker
-              status="empty"
-              customLaunchValue=""
-              onCustomLaunchChange={() => undefined}
-              onVerify={() => undefined}
-              verifyStatus={'idle' satisfies AgentVerifyStatus}
-            />
-          }
-          dark={
-            <AgentPicker
-              status="empty"
-              customLaunchValue=""
-              onCustomLaunchChange={() => undefined}
-              onVerify={() => undefined}
-              verifyStatus={'idle' satisfies AgentVerifyStatus}
-            />
-          }
-        />
+        <ThemeFollowSpecimen testId="vi-retune-status-empty">
+          <AgentPicker
+            status="empty"
+            customLaunchValue=""
+            onCustomLaunchChange={() => undefined}
+            onVerify={() => undefined}
+            verifyStatus={'idle' satisfies AgentVerifyStatus}
+          />
+        </ThemeFollowSpecimen>
         <div className="mt-4" />
-        <ThemePair
-          testId="vi-retune-status-error"
-          light={
-            <AgentPicker
-              status="error"
-              errorDescription="The daemon did not respond to the agent scan request."
-              onRetry={() => undefined}
-              customLaunchValue=""
-              onCustomLaunchChange={() => undefined}
-            />
-          }
-          dark={
-            <AgentPicker
-              status="error"
-              errorDescription="The daemon did not respond to the agent scan request."
-              onRetry={() => undefined}
-              customLaunchValue=""
-              onCustomLaunchChange={() => undefined}
-            />
-          }
-        />
+        <ThemeFollowSpecimen testId="vi-retune-status-error">
+          <AgentPicker
+            status="error"
+            errorDescription="The daemon did not respond to the agent scan request."
+            onRetry={() => undefined}
+            customLaunchValue=""
+            onCustomLaunchChange={() => undefined}
+          />
+        </ThemeFollowSpecimen>
       </FixtureFrame>
     </div>
   );
