@@ -708,6 +708,15 @@ describe('Surfaces page — setup wizard chrome fixtures', () => {
     );
   });
 
+  it('uses semantic active circle text token on the workspace-active step', () => {
+    const card = screen.getByTestId('wizard-chrome-card-workspace');
+    const activeCircle = card.querySelector(
+      '[data-step-id="workspace"] span.rounded-full',
+    );
+    expect(activeCircle).toHaveClass('bg-setup-wizard-step-circle-active-bg');
+    expect(activeCircle).toHaveClass('text-setup-wizard-step-circle-active-text');
+  });
+
   it('shows numbered step circles (1–3) on the agent fixture', () => {
     const card = screen.getByTestId('wizard-chrome-card-agent');
     const circles = card.querySelectorAll('[data-step-id] span.rounded-full');

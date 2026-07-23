@@ -118,10 +118,28 @@ const forbidden = [
   { label: 'preset: sheet width must not use the color-var helper', haystack: preset, needle: BANNED_SHEET_WIDTH_HELPER },
 ];
 
-/** Dark block must exist and carry the ink-atmosphere overrides. */
-const darkBlock = tokens.split(/\n\.dark \{/)[1];
+/** Light (:root) and dark blocks — theme-split assertions below. */
+const [lightBlock, darkBlock] = tokens.split(/\n\.dark \{/);
 if (!darkBlock) {
   console.error('FAIL tokens: no .dark block found');
+  process.exit(1);
+}
+
+/** V1.137 P0: light saturated fill → white label (wizard active circle). */
+const setupWizardLightActiveText =
+  '--color-setup-wizard-step-circle-active-text: var(--color-brand-white)';
+const setupWizardDarkActiveText =
+  '--color-setup-wizard-step-circle-active-text: var(--color-brand-deep-blue)';
+if (!lightBlock.includes(setupWizardLightActiveText)) {
+  console.error(
+    'FAIL tokens :root: light setup wizard active text must be brand-white on blue-1000 fill',
+  );
+  process.exit(1);
+}
+if (!darkBlock.includes(setupWizardDarkActiveText)) {
+  console.error(
+    'FAIL tokens .dark: setup wizard active text must stay brand-deep-blue on blue-700 fill',
+  );
   process.exit(1);
 }
 for (const needle of ['--color-background-100:', '--color-gray-100:', '--shadow-elevation-1:', '--color-finding-status-open-bg:', '--color-memory-task-kind-brainstorm-bg:', '--color-reading-maturation-kb-density-bg:']) {
