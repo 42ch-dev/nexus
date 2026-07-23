@@ -1,5 +1,6 @@
 # P0 Dock icon squircle follow-up — RCA (V1.136 T1)
 
+> **Promoted to:** `.mstar/knowledge/architecture-patterns/nexus-brand-token-hierarchy.md` (H6 contrast-margin rule); iteration guide kept as evidence snapshot  
 > **plan_id:** `2026-07-23-v1.136-p0-dock-icon-squircle-followup`  
 > **worktree:** `.worktrees/v1.136-p0`  
 > **branch:** `plan/v1.136-p0-dock-icon-squircle-followup`  

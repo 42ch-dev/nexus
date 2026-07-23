@@ -140,8 +140,9 @@ After the light `blue-700` → cyan flip, surfaces that still meant **deep struc
 
 1. **H1 (retain):** Canvas must stay **fully opaque RGB** (`hasAlpha: false`) — never transparent margins/`INSET_RATIO` alpha that defeat the macOS squircle mask.
 2. **H6 (V1.135):** Bake a **visible squircle plate** in `compose-app-icon.mjs` — opaque plate-color canvas + ~6% **opaque** inset + ~22% corner radius clip (margin pixels remain plate color, not alpha). Full-bleed square plate alone can still *read* as a sharp Dock tile even when the OS mask applies.
-3. **H7:** `pnpm dev:desktop` must run `icons:generate` before `tauri dev` so dogfood picks up regenerated icons.
-4. **Done gate:** Author live Dock squircle confirm — Studio VI-004 / PNG opacity alone are **not** Dock-done.
+3. **H6 contrast (V1.136):** Margin/plate **must not share the same hex**. Same-color bake (`MARGIN_COLOR === PLATE_COLOR`, e.g. both `#0D2B3E`) yields **0 non-plate border pixels** — geometry exists but is invisible. Use a contrasting margin (e.g. `#1A4A66` vs plate `#0D2B3E`) and verify with a border-pixel scan before claiming compose success.
+4. **H7:** `pnpm dev:desktop` must run `icons:generate` before `tauri dev` so dogfood picks up regenerated icons.
+5. **Done gate:** Author live Dock squircle confirm — Studio VI-004 / PNG opacity alone are **not** Dock-done.
 
 **Removed:** `logo-color.svg` / `logoVariants.color` — redundant; do not resurrect.
 

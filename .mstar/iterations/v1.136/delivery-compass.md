@@ -1,7 +1,8 @@
 ---
 iteration_id: V1.136
 start_date: 2026-07-23
-status: locked
+end_date: 2026-07-23
+status: completed
 iteration_base_branch: main
 target_branch: main
 spec_integration_branch: iteration/v1.136
@@ -133,8 +134,8 @@ Status values: `Todo` | `InProgress` | `InReview` | `Done` | `Blocked`
 
 ## Roadmap Position
 
-- **Current iteration（V1.136）:** Dock squircle follow-up; sidebar inline create tabs; Light interactive cyan-1000 + TransportError link CTAs + Studio SSOT reuse
-- **Next iteration:** Author closes any remaining Dock/sidebar visual residuals; resume Control Room polish / below-`lg` create affordance (`R-V1135P0-003`) as needed
+- **Current iteration（V1.136）— delivered:** Dock contrast-margin squircle compose; sidebar inline World\|Work create; Light interactive `brand-cyan-1000` + TransportError link CTAs + Studio SSOT reuse (author Dock/`R-V1135P1-*` eyeball residuals remain open)
+- **Next iteration:** Author closes Dock + sidebar visual residuals (`R-V1135P1-001`/`005`, `R-V1135P0-001` / `R-V1134P3-001`); form-primitive light focus rings (`R-V1136P2-001`); below-`lg` create (`R-V1135P0-003`) / Control Room polish as needed
 - **最终目标:** Author-visible dogfood matches intent — Dock looks native; create is inline in sidebar; Light VI is harmonious Chronos teal without office ink or neon cyan
 
 ## Delivery Branch Policy
@@ -190,18 +191,29 @@ Status values: `Todo` | `InProgress` | `InReview` | `Done` | `Blocked`
 
 ## Quality Gate Summary
 
-> Filled at iteration-close.
-
 | plan_id | QC decision | QA gate | Residuals | Durable summary |
 |---------|-------------|---------|-----------|-----------------|
-| `2026-07-23-v1.136-p0-dock-icon-squircle-followup` | pending | pending | — | — |
-| `2026-07-23-v1.136-p1-sidebar-inline-create-tabs` | pending | pending | — | — |
-| `2026-07-23-v1.136-p2-light-mode-chrome-harmony` | pending | pending | — | — |
+| `2026-07-23-v1.136-p0-dock-icon-squircle-followup` | Approve with residuals | pm-acceptance | `R-V1135P1-001`, `R-V1135P1-005` (author Dock) | Contrast-margin compose; RCA guide |
+| `2026-07-23-v1.136-p1-sidebar-inline-create-tabs` | Approve with residuals | pm-acceptance | `R-V1136P1-001`–`003` | Inline create + QC hooks/pending fix |
+| `2026-07-23-v1.136-p2-light-mode-chrome-harmony` | Approve with residuals | pm-acceptance | `R-V1136P2-001`–`003` | cyan-1000 Button + TransportError links |
+
+**Iteration AC notes:** AC-I1 author Dock eyeball **explicitly waived to residual** (code+docs landed; `@author` ritual pending). AC-I2–I8 met via Studio fixtures + package tests on integration.
 
 ## Compound Round Summary
 
-> Filled at iteration-close.
+**Self-check (batch):** Q1 Yes (H6 same-color bake RCA) · Q2 Yes · Q3 Yes · Q4 Yes · Q5 Yes (update existing brand + shell IA docs) · Q6 Yes · Q7 Yes · Q8 Yes → update-in-place, no new slug.
+
+| Package path | Triage | Action |
+|--------------|--------|--------|
+| `guides/p0-dock-icon-rca.md` | Promote insight | H6 contrast-margin rule → `nexus-brand-token-hierarchy.md`; guide kept as evidence snapshot |
+| `specs/p0-*.md` / `p1-*.md` / `p2-*.md` | Keep snapshot | Iteration-scoped gates; not copied wholesale |
+| (implement) `workspace-parent-shell-ia.md` | Updated in P1 | Inline-tab create normative section |
+| (implement) `nexus-brand-token-hierarchy.md` | Updated in P2 + close | Light cyan-1000 primary + H6 contrast |
+
+**New knowledge files:** 0 (overlap → update existing). **README index:** blurbs refreshed for V1.136.
 
 ## Iteration Retrospective (minimal)
 
-> Filled at iteration-close.
+- **Worked:** Lease-gated parallel P1/P2 + serial merge; SDD + QC fix waves caught hooks/pending and SSOT drift before merge.
+- **Pain:** `task-brief` script mismatched plan checkbox format; P0 Done-before-merge once; status.json still >20KB hygiene target.
+- **Carry:** Author Dock ritual still blocks residual closure; form-focus neon deferral (`R-V1136P2-001`) for a follow-up slice.
