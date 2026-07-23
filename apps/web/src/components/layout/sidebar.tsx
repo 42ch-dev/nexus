@@ -123,8 +123,10 @@ function CreatorCreatePanel() {
       mode="create-inline"
       canCreateWorld={canCreateWorld}
       labels={inlineLabels}
-      onWorldSubmit={(title) => void handleWorldSubmit(title)}
-      onWorkSubmit={(payload) => void handleWorkSubmit(payload)}
+      worldIsPending={createWorld.isPending}
+      workIsPending={createWork.isPending}
+      onWorldSubmit={(title) => handleWorldSubmit(title)}
+      onWorkSubmit={(payload) => handleWorkSubmit(payload)}
       data-testid="sidebar-create-panel"
     />
   );

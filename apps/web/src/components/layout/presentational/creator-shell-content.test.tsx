@@ -93,6 +93,85 @@ describe('CreatorShellContent', () => {
     });
   });
 
+  it('disables inline submit while world or work mutation is pending', () => {
+    const { rerender } = render(
+      <CreatorShellContent
+        mode="create-inline"
+        canCreateWorld
+        labels={INLINE_CREATE_LABELS}
+        worldIsPending
+        onWorldSubmit={() => {}}
+        onWorkSubmit={() => {}}
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText('World title'), { target: { value: 'Ashen Gate' } });
+    expect(screen.getByTestId('sidebar-create-submit-world')).toBeDisabled();
+
+    rerender(
+      <CreatorShellContent
+        mode="create-inline"
+        canCreateWorld
+        labels={INLINE_CREATE_LABELS}
+        workIsPending
+        onWorldSubmit={() => {}}
+        onWorkSubmit={() => {}}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId('sidebar-create-tab-work'));
+    fireEvent.change(screen.getByLabelText('Work title'), { target: { value: 'Novel' } });
+    fireEvent.change(screen.getByLabelText('Long-term goal'), { target: { value: 'Goal' } });
+    fireEvent.change(screen.getByLabelText('Initial idea'), { target: { value: 'Idea' } });
+    expect(screen.getByTestId('sidebar-create-submit-work')).toBeDisabled();
+  });
+
+  it('clears inline world form only after successful submit', async () => {
+    const onWorldSubmit = vi.fn().mockResolvedValue(undefined);
+
+    render(
+      <CreatorShellContent
+        mode="create-inline"
+        canCreateWorld
+        labels={INLINE_CREATE_LABELS}
+        onWorldSubmit={onWorldSubmit}
+        onWorkSubmit={() => {}}
+      />,
+    );
+
+    const titleInput = screen.getByLabelText('World title');
+    fireEvent.change(titleInput, { target: { value: 'Ashen Gate' } });
+    fireEvent.click(screen.getByTestId('sidebar-create-submit-world'));
+
+    await vi.waitFor(() => {
+      expect(onWorldSubmit).toHaveBeenCalled();
+      expect(titleInput).toHaveValue('');
+    });
+  });
+
+  it('retains inline world form fields when submit rejects', async () => {
+    const onWorldSubmit = vi.fn().mockRejectedValue(new Error('network'));
+
+    render(
+      <CreatorShellContent
+        mode="create-inline"
+        canCreateWorld
+        labels={INLINE_CREATE_LABELS}
+        onWorldSubmit={onWorldSubmit}
+        onWorkSubmit={() => {}}
+      />,
+    );
+
+    const titleInput = screen.getByLabelText('World title');
+    fireEvent.change(titleInput, { target: { value: 'Ashen Gate' } });
+    fireEvent.click(screen.getByTestId('sidebar-create-submit-world'));
+
+    await vi.waitFor(() => {
+      expect(onWorldSubmit).toHaveBeenCalled();
+    });
+    expect(titleInput).toHaveValue('Ashen Gate');
+  });
+
   it('renders honest Work fallback when createWorld is absent', () => {
     render(
       <CreatorShellContent

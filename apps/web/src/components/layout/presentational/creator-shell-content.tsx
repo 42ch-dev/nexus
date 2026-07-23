@@ -101,20 +101,27 @@ function CreateCardButton({
 function InlineWorldForm({
   labels,
   canCreateWorld,
+  isPending = false,
   onSubmit,
 }: {
   labels: CreatorShellInlineCreateLabels['world'];
   canCreateWorld: boolean;
-  onSubmit?: (title: string) => void;
+  isPending?: boolean;
+  onSubmit?: (title: string) => void | Promise<void>;
 }) {
   const [title, setTitle] = useState('');
   const valid = title.trim().length > 0;
 
-  function handleSubmit(event: FormEvent) {
+  async function handleSubmit(event: FormEvent) {
     event.preventDefault();
-    if (!canCreateWorld || !valid) return;
-    onSubmit?.(title.trim());
-    setTitle('');
+    if (!canCreateWorld || !valid || isPending) return;
+    const trimmed = title.trim();
+    try {
+      await onSubmit?.(trimmed);
+      setTitle('');
+    } catch {
+      // Parent handles errors; keep form state for retry.
+    }
   }
 
   return (
@@ -131,14 +138,14 @@ function InlineWorldForm({
           value={title}
           onChange={(event) => setTitle(event.target.value)}
           placeholder={labels.titlePlaceholder}
-          disabled={!canCreateWorld}
+          disabled={!canCreateWorld || isPending}
         />
       </div>
       <Button
         type="submit"
         variant="primary"
         size="small"
-        disabled={!canCreateWorld || !valid}
+        disabled={!canCreateWorld || !valid || isPending}
         data-testid="sidebar-create-submit-world"
       >
         {labels.submit}
@@ -149,10 +156,12 @@ function InlineWorldForm({
 
 function InlineWorkForm({
   labels,
+  isPending = false,
   onSubmit,
 }: {
   labels: CreatorShellInlineCreateLabels['work'];
-  onSubmit?: (payload: CreatorShellInlineWorkSubmit) => void;
+  isPending?: boolean;
+  onSubmit?: (payload: CreatorShellInlineWorkSubmit) => void | Promise<void>;
 }) {
   const [title, setTitle] = useState('');
   const [longTermGoal, setLongTermGoal] = useState('');
@@ -166,20 +175,25 @@ function InlineWorkForm({
     longTermGoal.trim().length > 0 &&
     initialIdea.trim().length > 0;
 
-  function handleSubmit(event: FormEvent) {
+  async function handleSubmit(event: FormEvent) {
     event.preventDefault();
-    if (!valid) return;
-    onSubmit?.({
+    if (!valid || isPending) return;
+    const payload: CreatorShellInlineWorkSubmit = {
       title: title.trim(),
       longTermGoal: longTermGoal.trim(),
       initialIdea: initialIdea.trim(),
       ...(workProfileTouched ? { workProfile } : {}),
-    });
-    setTitle('');
-    setLongTermGoal('');
-    setInitialIdea('');
-    setWorkProfile(defaultProfile);
-    setWorkProfileTouched(false);
+    };
+    try {
+      await onSubmit?.(payload);
+      setTitle('');
+      setLongTermGoal('');
+      setInitialIdea('');
+      setWorkProfile(defaultProfile);
+      setWorkProfileTouched(false);
+    } catch {
+      // Parent handles errors; keep form state for retry.
+    }
   }
 
   return (
@@ -195,6 +209,7 @@ function InlineWorkForm({
           value={title}
           onChange={(event) => setTitle(event.target.value)}
           placeholder={labels.titlePlaceholder}
+          disabled={isPending}
         />
       </div>
       <div className="flex flex-col gap-1.5">
@@ -204,6 +219,7 @@ function InlineWorkForm({
           value={longTermGoal}
           onChange={(event) => setLongTermGoal(event.target.value)}
           placeholder={labels.goalPlaceholder}
+          disabled={isPending}
         />
       </div>
       <div className="flex flex-col gap-1.5">
@@ -213,6 +229,7 @@ function InlineWorkForm({
           value={initialIdea}
           onChange={(event) => setInitialIdea(event.target.value)}
           placeholder={labels.ideaPlaceholder}
+          disabled={isPending}
         />
       </div>
       <div className="flex flex-col gap-1.5">
@@ -220,6 +237,7 @@ function InlineWorkForm({
         <Select
           id="sidebar-create-work-profile"
           value={workProfile}
+          disabled={isPending}
           onChange={(event) => {
             setWorkProfile(event.target.value);
             setWorkProfileTouched(true);
@@ -236,7 +254,7 @@ function InlineWorkForm({
         type="submit"
         variant="primary"
         size="small"
-        disabled={!valid}
+        disabled={!valid || isPending}
         data-testid="sidebar-create-submit-work"
       >
         {labels.submit}
@@ -258,8 +276,10 @@ export type CreatorShellContentProps =
       mode: 'create-inline';
       canCreateWorld: boolean;
       labels: CreatorShellInlineCreateLabels;
-      onWorldSubmit?: (title: string) => void;
-      onWorkSubmit?: (payload: CreatorShellInlineWorkSubmit) => void;
+      worldIsPending?: boolean;
+      workIsPending?: boolean;
+      onWorldSubmit?: (title: string) => void | Promise<void>;
+      onWorkSubmit?: (payload: CreatorShellInlineWorkSubmit) => void | Promise<void>;
       'data-testid'?: string;
     }
   | {
@@ -269,6 +289,71 @@ export type CreatorShellContentProps =
       onBack: () => void;
       'data-testid'?: string;
     };
+
+/**
+ * Inline create zone — tab bar + world/work forms. Owns tab state so hooks stay
+ * outside the mode-switching parent.
+ */
+function CreatorShellInlineCreate({
+  testId,
+  canCreateWorld,
+  labels,
+  worldIsPending = false,
+  workIsPending = false,
+  onWorldSubmit,
+  onWorkSubmit,
+}: {
+  testId: string;
+  canCreateWorld: boolean;
+  labels: CreatorShellInlineCreateLabels;
+  worldIsPending?: boolean;
+  workIsPending?: boolean;
+  onWorldSubmit?: (title: string) => void | Promise<void>;
+  onWorkSubmit?: (payload: CreatorShellInlineWorkSubmit) => void | Promise<void>;
+}) {
+  const [createTab, setCreateTab] = useState<HubTab>('world');
+
+  return (
+    <div
+      className="flex w-full flex-col gap-3"
+      data-testid={testId}
+      data-mode="create-inline"
+    >
+      <div data-testid="sidebar-create-tab-bar">
+        <HubTabBar
+          activeTab={createTab}
+          onTabChange={setCreateTab}
+          labels={labels.tabs}
+          ariaLabel={labels.tabsAriaLabel}
+          tabIdPrefix="sidebar-create-tab"
+          tabPanelId="sidebar-create-tabpanel"
+          data-testid="sidebar-create-tab"
+        />
+      </div>
+      <div
+        id="sidebar-create-tabpanel"
+        role="tabpanel"
+        aria-labelledby={`sidebar-create-tab-${createTab}`}
+        className="px-1"
+      >
+        {createTab === 'world' ? (
+          <InlineWorldForm
+            labels={labels.world}
+            canCreateWorld={canCreateWorld}
+            isPending={worldIsPending}
+            onSubmit={onWorldSubmit}
+          />
+        ) : (
+          <InlineWorkForm
+            labels={labels.work}
+            isPending={workIsPending}
+            onSubmit={onWorkSubmit}
+          />
+        )}
+      </div>
+    </div>
+  );
+}
 
 /**
  * Creator shell content region — Create page vs Controller Panel stub (V1.128 P2).
@@ -281,43 +366,25 @@ export function CreatorShellContent(props: CreatorShellContentProps) {
   const testId = props['data-testid'] ?? 'creator-shell-content';
 
   if (props.mode === 'create-inline') {
-    const { canCreateWorld, labels, onWorldSubmit, onWorkSubmit } = props;
-    const [createTab, setCreateTab] = useState<HubTab>('world');
+    const {
+      canCreateWorld,
+      labels,
+      worldIsPending,
+      workIsPending,
+      onWorldSubmit,
+      onWorkSubmit,
+    } = props;
 
     return (
-      <div
-        className="flex w-full flex-col gap-3"
-        data-testid={testId}
-        data-mode="create-inline"
-      >
-        <div data-testid="sidebar-create-tab-bar">
-          <HubTabBar
-            activeTab={createTab}
-            onTabChange={setCreateTab}
-            labels={labels.tabs}
-            ariaLabel={labels.tabsAriaLabel}
-            tabIdPrefix="sidebar-create-tab"
-            tabPanelId="sidebar-create-tabpanel"
-            data-testid="sidebar-create-tab"
-          />
-        </div>
-        <div
-          id="sidebar-create-tabpanel"
-          role="tabpanel"
-          aria-labelledby={`sidebar-create-tab-${createTab}`}
-          className="px-1"
-        >
-          {createTab === 'world' ? (
-            <InlineWorldForm
-              labels={labels.world}
-              canCreateWorld={canCreateWorld}
-              onSubmit={onWorldSubmit}
-            />
-          ) : (
-            <InlineWorkForm labels={labels.work} onSubmit={onWorkSubmit} />
-          )}
-        </div>
-      </div>
+      <CreatorShellInlineCreate
+        testId={testId}
+        canCreateWorld={canCreateWorld}
+        labels={labels}
+        worldIsPending={worldIsPending}
+        workIsPending={workIsPending}
+        onWorldSubmit={onWorldSubmit}
+        onWorkSubmit={onWorkSubmit}
+      />
     );
   }
 
