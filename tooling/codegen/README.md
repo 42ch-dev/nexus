@@ -35,13 +35,39 @@ cd tooling/codegen && npm run build
 
 There is no `apps/web/src/api-types/` directory. The web app imports all wire DTOs from the generated `@42ch/nexus-contracts` package.
 
+## Architecture
+
+The pipeline is a port of the sibling spoke repo's codegen orchestrator (spoke base URI →
+`nexus42.invalid`). Three stages run in sequence (orchestrator: `src/index.ts`):
+
+| Stage | Module | Engine | Output |
+|-------|--------|--------|--------|
+| 1. prep | `schema-prep.ts` | `@apidevtools/json-schema-ref-parser` | localized + dereferenced schema trees |
+| 2. ts-gen | `ts-gen.ts` | `json-schema-to-typescript` | `packages/nexus-contracts/src/generated/` |
+| 3. rust-gen | `rust-generator.ts` | bespoke (hand-tuned) | `crates/nexus-contracts/src/generated/` |
+
+**TypeScript is library-driven** (`json-schema-to-typescript`). Stage 1 rewrites each
+schema's base-URI `$id`/`$ref` into POSIX-relative paths under `.schemas-localized/`; stage 2
+then compiles each non-skip schema via the library with the `title` overridden to the
+basename-derived PascalCase type name, emitting a nested tree that mirrors `schemas/`.
+
+**Rust is still bespoke** (`rust-generator.ts`, hand-tuned) and consumes `loadAllSchemas()`
+directly. It will be superseded by a `typify`-based generator over the dereferenced tree
+(`.schemas-dereferenced/`, produced by stage 1) — tracked as **P1**.
+
 ## Workflow
 
-1. **Load schemas** from `schemas/**/*.schema.json`
-2. **Validate** each schema has required fields (`$schema`, `$id`, `schema_version`, `title`, `type`)
-3. **Parse common types** from `schemas/common/common.schema.json` definitions
-4. **Generate TypeScript** interfaces in `packages/nexus-contracts/src/generated/`
-5. **Generate Rust** structs in `crates/nexus-contracts/src/generated/`
+1. **prep** — localize every schema's base-URI `$id`/`$ref` to POSIX-relative paths
+   (`.schemas-localized/`), then dereference cross-file `$ref` via `json-schema-ref-parser`
+   (`.schemas-dereferenced/`). Shared by TS generation and the future typify-based Rust path.
+2. **ts-gen** — compile each non-skip schema with `json-schema-to-typescript` (title
+   overridden to the basename-derived PascalCase name) → nested tree under
+   `packages/nexus-contracts/src/generated/`, plus the `SCHEMA_VERSIONS` / `LATEST_SCHEMA_VERSION` stamp.
+3. **rust-gen** — bespoke hand-tuned generator over `loadAllSchemas()` → nested module tree
+   under `crates/nexus-contracts/src/generated/`. *(P1: replace with typify over the deref tree.)*
+
+Schema validation is a separate concern: run `pnpm run validate-schemas` (not part of the
+codegen pipeline itself).
 
 ## Schema Handling
 
@@ -73,22 +99,27 @@ There is no `apps/web/src/api-types/` directory. The web app imports all wire DT
 ### TypeScript
 ```
 packages/nexus-contracts/src/generated/
-├── index.ts              # Re-exports all types + SCHEMA_VERSIONS
-├── CommonTypes.ts        # Shared types (type aliases, enums, SourceAnchor)
-├── Bundle.ts             # DeltaBundle envelope
-├── Creator.ts            # Creator entity
-├── World.ts              # World entity
-├── KeyBlock.ts           # KeyBlock entity
-├── TimelineEvent.ts      # TimelineEvent entity
-├── Memory.ts             # MemoryItem entity
-├── SyncCommand.ts        # SyncCommand entity
-├── OutboxEntry.ts        # OutboxEntry entity
-├── WorldMembership.ts    # WorldMembership entity
-├── Pairing.ts            # Pairing entity
-├── StoryManifest.ts      # StoryManifest entity
-├── VersionRef.ts         # VersionRef value object
-└── Meta.ts               # Meta schema
+├── index.ts                  # export * from each subdir + SCHEMA_VERSIONS / LATEST_SCHEMA_VERSION
+├── common/
+│   ├── index.ts              # named re-exports
+│   ├── CommonTypes.ts        # common.schema.json + source-anchor.schema.json (skip-listed but referenced)
+│   └── version-ref.ts
+├── domain/                   # one <base>.ts per schema + a subdir index.ts barrel
+│   ├── index.ts
+│   ├── world.ts
+│   ├── creator.ts
+│   └── …
+├── platform/
+│   ├── http-bff/             # index.ts + <base>.ts …
+│   └── sync/                 # index.ts + <base>.ts …
+└── daemon-api/               # nested canvas/ works/ worlds/ … each with its own index.ts
 ```
+
+The tree mirrors the consumer-scope `schemas/` layout (folder names preserved as written,
+e.g. `http-bff`). Each consumer-scope subdir gets an `index.ts` barrel of **named** root
+exports (one per file, `export type { TypeName } from './<base>'`) so inline
+`declareExternallyReferenced` declarations do not collide when barrel-re-exported. The root
+`index.ts` does `export * from './<subdir>'` for each subdir, keeping the package public API flat.
 
 ### Rust
 ```
