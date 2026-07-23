@@ -2,6 +2,9 @@
 
 Nexus-branded **desktop-only** app icons for the Tauri bundle (Chronos VI).
 
+**Normative spec:** [`.mstar/iterations/v1.135/specs/p1-dock-icon-pipeline.md`](../../../../.mstar/iterations/v1.135/specs/p1-dock-icon-pipeline.md).
+**RCA + author confirm:** [`.mstar/iterations/v1.135/guides/p1-dock-icon-rca.md`](../../../../.mstar/iterations/v1.135/guides/p1-dock-icon-rca.md).
+
 Only `source/` and this README are tracked in git. All platform icon formats
 under this directory (except `source/`) are **generated at build/dev time** via
 `pnpm --filter desktop run icons:generate`.
@@ -115,7 +118,8 @@ To verify the asset renders as a Chronos plate with the timeline mark:
    N-network asset.
 
 The 256×256 preview PNG (`source/app-icon-preview-256.png`) uses the same
-composition; Dock smoke remains authoritative for the OS squircle appearance.
+composition. **Dock smoke remains authoritative** — Studio VI-004 and PNG opacity
+metadata alone do not close P1G-1 (`R-V1134P1-001`).
 
 ## Author verify ritual (P1G-1)
 

@@ -11,11 +11,11 @@
 
 | Field | Value |
 |-------|-------|
-| **Status** | **RCA complete — author Dock confirm pending** (`R-V1134P1-001` open) |
+| **Status** | **RCA complete — H6/H7 fixes landed (Task 2); author Dock confirm pending** (`R-V1134P1-001` open) |
 | **Primary root cause** | **H6 — square plate geometry reads as sharp square under macOS mask** |
-| **Contributing factor** | **H7 — `pnpm dev:desktop` bypasses `predev` / `icons:generate`** |
+| **Contributing factor** | **H7 — `pnpm dev:desktop` bypassed `predev` / `icons:generate`** — **fixed (Task 2)** |
 | **H1 baseline** | Retained and verified — opaque full-bleed holds; **not sufficient for closure** |
-| **Recommended fix (Task 2)** | Bake visible squircle rounding into compose (pre-rounded plate on opaque canvas) + wire `icons:generate` into `dev:desktop` path |
+| **Fix applied (Task 2)** | Baked visible squircle rounding into compose (pre-rounded plate on opaque canvas) + wired `icons:generate` into `dev:desktop` path |
 
 V1.134 correctly fixed transparent-margin mask defeat (H1) but the author still reports a sharp square Dock tile. This RCA falsifies H1–H3 as the ongoing primary cause: the compose → `tauri icon` → bundle pipeline ships a valid, opaque `.icns` identical between freshly generated artifacts and the release `.app`. The remaining best explanation is **H6**: `logo-primary-square.svg` rasterizes to a **full-bleed square `#0D2B3E` plate** edge-to-edge; even when macOS applies its squircle clip, the uniform dark square reads as a sharp-edged square plate (unlike peer apps whose artwork has internal padding or pre-rounded corners). **H7** is a secondary risk: the default `pnpm dev:desktop` entry path calls `exec tauri dev` and **does not** run the `predev` `icons:generate` hook.
 
@@ -31,7 +31,7 @@ V1.134 correctly fixed transparent-margin mask defeat (H1) but the author still 
 | **H4** | Dock shows wrong binary (duplicate / stale install) | **INCONCLUSIVE** | `mdfind kMDItemCFBundleIdentifier == 'io.nexus42.desktop'` → single bundle: `…/target/release/bundle/macos/Nexus.app`. No `nexus-desktop` process running at RCA time. Author test command not recorded. |
 | **H5** | LaunchServices cache beyond `killall Dock` | **INCONCLUSIVE** | Cannot falsify without author running quit → rebuild → `killall Dock` → relaunch ritual on documented path. Extended cache steps documented for Task 4. |
 | **H6** | Square plate geometry vs true mask failure | **CONFIRMED (primary)** | All four 5×5 corner samples = `#0D2B3E` plate (25/25 each). Border scan: 0/4092 non-plate pixels. SVG is 284×284 square rect fill. Dock peer apps use padded/rounded artwork; our full-bleed square plate dominates visual even if OS clip applies. |
-| **H7** | `tauri dev` / debug bundle icon path mismatch | **PARTIALLY CONFIRMED (contributing)** | No `target/debug/bundle/macos/Nexus.app` on disk. `pnpm dev:desktop` uses `desktop exec tauri dev` → **bypasses** `predev: icons:generate`. Only `pnpm dev:desktop:web` (`desktop run dev`) triggers icon regen. Release bundle path verified; dev path undocumented for author. |
+| **H7** | `tauri dev` / debug bundle icon path mismatch | **FIXED (Task 2)** | Root `pnpm dev:desktop` now runs `icons:generate` before `exec tauri dev`. `pnpm dev:desktop:web` still triggers `predev` as before. Release bundle path verified. |
 
 ---
 
@@ -41,7 +41,7 @@ V1.134 correctly fixed transparent-margin mask defeat (H1) but the author still 
 
 | Stage | Path / command | Finding |
 |-------|----------------|---------|
-| Compose | `apps/desktop/src-tauri/icons/source/compose-app-icon.mjs` | Full-bleed `sharp` resize + `.flatten({ background: '#0D2B3E' })` — no inset |
+| Compose | `apps/desktop/src-tauri/icons/source/compose-app-icon.mjs` | Pre-rounded squircle plate (6% opaque inset, 22% corner radius) on opaque `#0D2B3E` canvas — H6 fix (Task 2) |
 | Generate | `pnpm --filter desktop run icons:generate` | Exit 0; produces `icon.icns`, `32x32.png`, `128x128.png`, `128x128@2x.png` |
 | Bundle config | `tauri.conf.json` `bundle.icon[]` | `["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png"]` |
 | Built plist | `Nexus.app/Contents/Info.plist` | `CFBundleIconFile` = `Nexus.icns`; `CFBundleExecutable` = `nexus-desktop`; `CFBundleIdentifier` = `io.nexus42.desktop` |
@@ -85,14 +85,14 @@ plutil -p Nexus.app/Contents/Info.plist | rg -i icon
 
 Corner RGB sample: `(13, 43, 62)` = `#0D2B3E` at all four corners; center mark RGB `(17, 221, 233)`.
 
-### H7 dev-path gap
+### H7 dev-path gap (fixed Task 2)
 
 ```text
-root dev:desktop → pnpm --filter desktop exec tauri dev   # NO predev
+root dev:desktop → sidecar:dev + web build + icons:generate + exec tauri dev   # H7 fix
 root dev:desktop:web → pnpm --filter desktop run dev      # runs predev → icons:generate
 ```
 
-`beforeBuildCommand` in `tauri.conf.json` includes `icons:generate` for **release builds only**, not for `exec tauri dev`.
+`beforeBuildCommand` in `tauri.conf.json` includes `icons:generate` for **release builds**; root `dev:desktop` now also runs `icons:generate` explicitly because `exec tauri dev` bypasses `predev`.
 
 ---
 
@@ -102,15 +102,15 @@ root dev:desktop:web → pnpm --filter desktop run dev      # runs predev → ic
 
 The pipeline is technically correct post-V1.134 (H1 baseline, valid icns, bundle wiring). The composed asset is intentionally a **square plate filling 100% of the 1024×1024 canvas** (`logo-primary-square.svg` → opaque `#0D2B3E` rect). macOS squircle masking clips the outer boundary, but on a uniform dark square the clipped corners are indistinguishable from a “sharp square” plate — especially compared to peer Dock icons whose artwork includes internal margin or pre-rounded shape. Studio VI-004 simulates squircle via CSS `rounded-[22%]` on a preview frame; that simulation **does not prove** live Dock appearance and may have contributed to the V1.134 false-confidence closure.
 
-**Contributing factor (H7):** Authors using `pnpm dev:desktop` (documented default) may run against icons that were never regenerated in that session because `predev` is bypassed. This does not explain the release-bundle square (H3 falsified for release path) but must be fixed to make author verify reproducible.
+**Contributing factor (H7 — fixed Task 2):** Authors using `pnpm dev:desktop` previously ran against icons that were never regenerated in that session because `predev` was bypassed. Root `package.json` now runs `icons:generate` before `exec tauri dev`.
 
 ---
 
-## Recommended fix direction (Task 2 — not implemented this turn)
+## Fix applied (Task 2)
 
-1. **Compose (H6):** Rasterize the plate with **visible corner rounding baked in** (opaque squircle-shaped plate on `#0D2B3E` canvas — not a transparent inset). Alternative: scale plate inset with **opaque** margin (same plate color, not alpha). Goal: Dock tile reads as squircle like peer apps without relying on invisible OS clip alone.
-2. **Dev path (H7):** Add `icons:generate` to `dev:desktop` (root `package.json`) or document mandatory `icons:generate` before `dev:desktop`.
-3. **Regenerate:** `pnpm --filter desktop run icons:generate` → rebuild release `.app` → author ritual below.
+1. **Compose (H6):** `compose-app-icon.mjs` rasterizes the plate with **visible corner rounding baked in** — opaque squircle-shaped plate (22% corner radius) centered on `#0D2B3E` canvas with 6% opaque margin (not alpha).
+2. **Dev path (H7):** Root `pnpm dev:desktop` runs `icons:generate` before `exec tauri dev`.
+3. **Regenerate:** `pnpm --filter desktop run icons:generate` → rebuild `.app` → author ritual below.
 
 ---
 
@@ -121,7 +121,7 @@ The pipeline is technically correct post-V1.134 (H1 baseline, valid icns, bundle
 | Field | Value |
 |-------|-------|
 | Date | _@author_ |
-| Build command | _Record exact command — recommend:_ `pnpm --filter desktop run icons:generate && pnpm --filter desktop run build` _then open_ `apps/desktop/src-tauri/target/release/bundle/macos/Nexus.app` |
+| Build command | _Record exact command — e.g._ `pnpm dev:desktop` _(dist-load; runs `icons:generate` first)_ _or_ `pnpm --filter desktop run icons:generate && pnpm --filter desktop run build` _then open_ `apps/desktop/src-tauri/target/release/bundle/macos/Nexus.app` |
 | Cache ritual | Quit all Nexus → rebuild → `killall Dock` → relaunch |
 | Outcome | _Pass (squircle) / Fail (still square)_ |
 | Recorded by | _@author_ |
@@ -130,13 +130,13 @@ The pipeline is technically correct post-V1.134 (H1 baseline, valid icns, bundle
 
 1. Quit **all** Nexus / `nexus-desktop` instances.
 2. `pnpm --filter desktop run icons:generate`
-3. `pnpm --filter desktop run build` (or documented install path).
-4. Open `apps/desktop/src-tauri/target/release/bundle/macos/Nexus.app` (not `dev:desktop` until H7 fix lands).
-5. `killall Dock`
-6. Relaunch Nexus; inspect Dock tile at normal size.
-7. **Pass:** macOS squircle rounding visible on outer tile boundary (like Safari/Settings). **Fail:** sharp 90° square outline → plan stays open; apply Task 2 compose fix and repeat.
-
----
+3. **Rebuild/reinstall** the `.app` under test — e.g.
+   `pnpm dev:desktop` (runs `icons:generate` first) or
+   `pnpm --filter desktop run build` then open
+   `apps/desktop/src-tauri/target/release/bundle/macos/Nexus.app`.
+4. `killall Dock`
+5. Relaunch Nexus; inspect Dock tile at normal size.
+6. **Pass:** macOS squircle rounding visible on outer tile boundary (like Safari/Settings). **Fail:** sharp 90° square outline → plan stays open; record outcome and escalate.
 
 ## Anti-patterns confirmed this iteration
 

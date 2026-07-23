@@ -48,7 +48,8 @@ The desktop shell can be run in two dev modes, controlled from the root
 
 - `pnpm dev:desktop` — **dist-load mode** (production-like, no HMR). Runs
   `sidecar:dev` (debug `nexus42` → `src-tauri/binaries/`), builds `apps/web`,
-  then starts Tauri with `src-tauri/tauri.dev.dist.conf.json`, which overrides
+  **`icons:generate`** (H7 fix — `exec tauri dev` bypasses `predev`), then starts
+  Tauri with `src-tauri/tauri.dev.dist.conf.json`, which overrides
   `beforeDevCommand` to `vite preview` on port 5173 (serving `web/dist`). Use
   this when you want to verify the desktop shell against a static
   production-like web bundle with a freshly built sidecar CLI.
@@ -63,6 +64,20 @@ The desktop shell can be run in two dev modes, controlled from the root
 
 On quit, the shell asks whether to **Stop Daemon & Quit**, **Keep Daemon & Quit**,
 or **Cancel**. Prefer Keep when iterating so Setup/agent scan keep a warm daemon.
+
+## macOS Dock icon (V1.135)
+
+**Authority:** [`.mstar/iterations/v1.135/specs/p1-dock-icon-pipeline.md`](../../.mstar/iterations/v1.135/specs/p1-dock-icon-pipeline.md)
+(normative pipeline contract). **RCA:** [`.mstar/iterations/v1.135/guides/p1-dock-icon-rca.md`](../../.mstar/iterations/v1.135/guides/p1-dock-icon-rca.md).
+**Author ritual:** [`src-tauri/icons/README.md`](src-tauri/icons/README.md) § Author verify ritual (P1G-1).
+
+- Compose bakes a **pre-rounded squircle plate** on an opaque `#0D2B3E` canvas (6%
+  inset, 22% corner radius) — not a transparent inset and not opacity-only full-bleed.
+- **Dock-done ≠ Studio VI-004 or PNG opacity metadata.** Live macOS Dock squircle
+  (P1G-1) is the product surface; `R-V1134P1-001` stays open until author confirms.
+- Regenerate: `pnpm --filter desktop run icons:generate`. Root `pnpm dev:desktop`
+  runs this before `tauri dev`; `dev:desktop:web` uses `predev`.
+- Before judging Dock shape: quit all instances → rebuild → `killall Dock` → relaunch.
 
 ## SSOT & authority
 
