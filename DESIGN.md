@@ -261,7 +261,8 @@ components:
 
   # ── states: apps/web keep-web (V1.106) ──
   states:
-    spinner: { size: "16px", color: "{colors.blue-700}" }
+    # Theme-split (V1.136 P2): light spinner = blue-1000; dark = blue-700 (utility classes in states.tsx).
+    spinner: { size: "16px", color: "{colors.blue-1000}" }
     loading: { typography: "{typography.copy-14}", textColor: "{colors.gray-700}", gap: "{spacing.space-2}", paddingBlock: "{spacing.space-6}" }
     empty:
       # V1.121 v0.4: EmptyState headline is content voice (serif display tier —
@@ -579,7 +580,9 @@ components:
     canvas-node-fill: "#ffffff"
     canvas-node-fill-hover: "{colors.background-300}"
     canvas-node-border: "rgba(0,0,0,0.14)"
-    canvas-node-border-selected: "{colors.blue-700}"
+    # Theme-split (V1.136 P2): light selection stroke = mid-teal blue-1000;
+    # dark keeps neon cyan blue-700 via tokens.css `.dark` block.
+    canvas-node-border-selected: "{colors.blue-1000}"
     canvas-edge: "{colors.gray-500}"
     canvas-edge-hover: "{colors.gray-800}"
     canvas-port: "{colors.gray-700}"
@@ -592,8 +595,9 @@ components:
     canvas-worldkb-accent: "{colors.teal-700}"
     # V1.123 P3 T2: Timeline accent spine. Timeline is the central instrument
     # (iterations/v1.123/specs/three-layer-product-spec.md); brand-blue per the
-    # Canvas/SOUL invariant. Mirror the per-surface pattern.
-    canvas-timeline-accent: "{colors.blue-700}"
+    # Canvas/SOUL theme-split invariant (light blue-1000, dark blue-700).
+    # Mirror the per-surface pattern.
+    canvas-timeline-accent: "{colors.blue-1000}"
     # V1.123 P4 Task 2: per-layer feel accents (layer-feel-differentiation.md
     # §6.1 — three-layer feel contract for AC-V1123-20 "three feels
     # perceptibly different"). Brief=gold-bronze age tone (amber-700 alias —
@@ -605,7 +609,8 @@ components:
     # canvas). No new palette color invented; tuning later is a token-only
     # edit, not a node-component sweep.
     canvas-layer-brief-accent: "{colors.amber-700}"
-    canvas-layer-narrative-accent: "{colors.blue-700}"
+    # Narrative aliases Timeline accent — theme-split light blue-1000 / dark blue-700.
+    canvas-layer-narrative-accent: "{colors.blue-1000}"
     canvas-layer-moment-accent: "{colors.gray-900}"
     canvas-write-dirty: "{colors.amber-700}"
     canvas-write-conflict: "{colors.red-700}"
@@ -767,7 +772,8 @@ components:
     avatar-rounded: "{rounded.pill}"
     avatar-bg: "{colors.gray-alpha-100}"
     avatar-bg-hover: "{colors.gray-alpha-200}"
-    avatar-bg-active: "{colors.blue-700}"
+    # Theme-split (V1.136 P2): light active avatar = blue-1000; dark = blue-700.
+    avatar-bg-active: "{colors.blue-1000}"
     avatar-text: "{colors.gray-1000}"
     avatar-text-active: "{colors.brand-deep-blue}"
     avatar-fallback-bg: "{colors.gray-alpha-200}"
@@ -784,7 +790,8 @@ components:
   setup-wizard-step:
     step-row-height: "40px"
     step-circle-size: "32px"
-    step-circle-active-bg: "{colors.blue-700}"
+    # Theme-split (V1.136 P2): light active step = blue-1000; dark = blue-700.
+    step-circle-active-bg: "{colors.blue-1000}"
     step-circle-active-text: "{colors.brand-deep-blue}"
     step-circle-complete-bg: "{colors.green-700}"
     step-circle-complete-text: "#ffffff"
@@ -819,7 +826,8 @@ components:
     input-row-padding-y: "{spacing.space-3}"
     input-row-label-color: "{colors.gray-700}"
     input-row-path-color: "{colors.gray-1000}"
-    input-row-icon-color: "{colors.blue-700}"
+    # Theme-split (V1.136 P2): light icon accent = blue-1000; dark = blue-700.
+    input-row-icon-color: "{colors.blue-1000}"
     cta-primary-max-width: "400px"
     cta-container-gap: "{spacing.space-4}"
     step-transition-duration: "duration-state"

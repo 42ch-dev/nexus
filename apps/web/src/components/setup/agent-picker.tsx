@@ -11,8 +11,8 @@
  * V1.102 chrome: soft Installed Badge, ArrowUpRight outbound icons at label
  * cap-height, hollow/lit StatusDot (top-right), muted not-installed cards.
  *
- * V1.132 P2 (VI-001): installed+selected uses a 2px `border-blue-700` ring
- * without cyan fill wash (Light accent-only).
+ * V1.132 P2 (VI-001): installed+selected uses a 2px `border-blue-1000` ring
+ * (light) / `border-blue-700` (dark) without cyan fill wash (accent-only).
  *
  * V1.134 P2: restore StatusDot alongside the selection ring (FB-UI-006).
  *
@@ -196,7 +196,7 @@ export function AgentPicker({
             role="status"
             aria-live="polite"
           >
-            <Loader2 className="h-5 w-5 animate-spin text-blue-700" aria-hidden />
+            <Loader2 className="h-5 w-5 animate-spin text-blue-1000 dark:text-blue-700" aria-hidden />
             <span className="text-copy-14 text-gray-900">{effectiveLoadingLabel}</span>
           </div>
         ) : null}
@@ -330,7 +330,10 @@ const AgentCard = memo(function AgentCard({
         'flex w-full flex-col rounded-control bg-background-100 transition-colors duration-state ease-standard',
         compact ? 'p-2' : 'p-3',
         selectable
-          ? cn('border-2', selected ? 'border-blue-700' : 'border-gray-alpha-400 hover:bg-gray-alpha-100')
+          ? cn(
+              'border-2',
+              selected ? 'border-blue-1000 dark:border-blue-700' : 'border-gray-alpha-400 hover:bg-gray-alpha-100',
+            )
           : 'border border-gray-alpha-400 bg-background-200',
       )}
     >
@@ -342,7 +345,7 @@ const AgentCard = memo(function AgentCard({
           data-testid={`agent-card-select-${agent.id}`}
           className={cn(
             'flex w-full items-start justify-between gap-2 rounded-sm text-left',
-            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-700',
+            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-1000 dark:focus-visible:ring-blue-700',
           )}
         >
           <AgentCardIdentity agent={agent} selected={selected} />

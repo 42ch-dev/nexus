@@ -108,7 +108,7 @@ export function HubTabBar({
                 'relative px-4 py-3 text-label-14 font-medium transition-colors duration-state ease-standard motion-reduce:transition-none',
                 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-700 focus-visible:ring-offset-2',
                 active
-                  ? 'text-gray-1000 after:absolute after:inset-x-0 after:bottom-0 after:h-0.5 after:bg-brand-cyan after:content-[""]'
+                  ? 'text-gray-1000 after:absolute after:inset-x-0 after:bottom-0 after:h-0.5 after:bg-brand-cyan-1000 after:content-[""] dark:after:bg-brand-cyan'
                   : 'text-gray-700 hover:text-gray-1000',
               )}
             >

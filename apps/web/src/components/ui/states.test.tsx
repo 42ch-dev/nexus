@@ -13,13 +13,14 @@ import { EmptyState, ErrorState, LoadingState, Spinner } from './states';
  * - Spinner/LoadingState stay on the components.states tokens.
  */
 describe('Spinner / LoadingState', () => {
-  it('spinner uses the blue-700 token at 16px', () => {
+  it('spinner uses blue-1000 on light and blue-700 on dark at 16px', () => {
     const { container } = render(<Spinner />);
     const icon = container.querySelector('svg');
     expect(icon).not.toBeNull();
     expect(icon!.getAttribute('class')).toMatch(/\bh-4\b/);
     expect(icon!.getAttribute('class')).toMatch(/\bw-4\b/);
-    expect(icon!.getAttribute('class')).toMatch(/\btext-blue-700\b/);
+    expect(icon!.getAttribute('class')).toMatch(/\btext-blue-1000\b/);
+    expect(icon!.getAttribute('class')).toMatch(/\bdark:text-blue-700\b/);
   });
 
   it('loading state pairs the spinner with copy-14 gray-700 text', () => {

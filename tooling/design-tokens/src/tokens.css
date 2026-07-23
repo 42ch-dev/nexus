@@ -236,8 +236,9 @@
   /* Canvas surface — DESIGN.md §Canvas Surface (V1.70; V1.121 v0.4 chromatic
      hygiene: every status/marker/edge color resolves to the brand semantic
      scales — see DESIGN.md §Appendix: Canvas Chromatic Hygiene Mapping).
-     Canvas/SOUL brand-blue tokens must reference var(--color-blue-700);
-     do not parallel a hardcoded blue scale (W005). */
+     Canvas/SOUL brand-blue tokens: light interactive accents reference
+     var(--color-blue-1000) (mid-teal); dark keeps var(--color-blue-700)
+     (neon cyan). Do not parallel a hardcoded blue scale (W005). */
   --color-canvas-surface: #ebe9e5;
   --color-canvas-grid: rgba(0, 0, 0, 0.05);
   --color-canvas-grid-gap: 20px;
@@ -245,7 +246,7 @@
   --color-canvas-node-fill: #ffffff;
   --color-canvas-node-fill-hover: var(--color-background-300);
   --color-canvas-node-border: rgba(0, 0, 0, 0.14);
-  --color-canvas-node-border-selected: var(--color-blue-700);
+  --color-canvas-node-border-selected: var(--color-blue-1000);
   --color-canvas-edge: var(--color-gray-500);
   --color-canvas-edge-hover: var(--color-gray-800);
   --color-canvas-port: var(--color-gray-700);
@@ -259,11 +260,11 @@
   --color-canvas-worldkb-accent: var(--color-teal-700);
   /* V1.123 P3 T2: Timeline accent spine. Timeline is the central instrument
      per `iterations/v1.123/specs/three-layer-product-spec.md`; the brand-blue
-     per the "Canvas/SOUL brand-blue tokens must reference var(--color-blue-700)"
-     invariant (see comment at the head of this Canvas surface block). The
+     per the Canvas/SOUL theme-split invariant (light blue-1000, dark
+     blue-700 — see comment at the head of this Canvas surface block). The
      value reuses the existing brand scale — no new color invented, only a
      per-surface tuning knob mirroring the strategy/outline/worldkb pattern. */
-  --color-canvas-timeline-accent: var(--color-blue-700);
+  --color-canvas-timeline-accent: var(--color-blue-1000);
   /* V1.123 P4 Task 2: per-layer feel accent tokens (layer-feel-
      differentiation.md §6.1). Three-layer feel contract — Brief / Narrative
      / Moment each carry a dedicated accent so a screenshot reads each as a
@@ -289,7 +290,7 @@
      accent triple later (e.g. to a custom sepia Moment tone) only needs a
      token edit, not a node-component sweep. */
   --color-canvas-layer-brief-accent: var(--color-amber-700);
-  --color-canvas-layer-narrative-accent: var(--color-blue-700);
+  --color-canvas-layer-narrative-accent: var(--color-blue-1000);
   --color-canvas-layer-moment-accent: var(--color-gray-900);
   --color-canvas-write-dirty: var(--color-amber-700);
   --color-canvas-write-conflict: var(--color-red-700);
@@ -403,7 +404,7 @@
   --color-footer-profile-avatar-rounded: 9999px;
   --color-footer-profile-avatar-bg: var(--color-gray-alpha-100);
   --color-footer-profile-avatar-bg-hover: var(--color-gray-alpha-200);
-  --color-footer-profile-avatar-bg-active: var(--color-blue-700);
+  --color-footer-profile-avatar-bg-active: var(--color-blue-1000);
   --color-footer-profile-avatar-text: var(--color-gray-1000);
   --color-footer-profile-avatar-text-active: var(--color-brand-deep-blue);
   --color-footer-profile-avatar-fallback-bg: var(--color-gray-alpha-200);
@@ -418,7 +419,7 @@
 
   /* V1.94 Setup Wizard Step Chrome */
   --color-setup-wizard-step-circle-size: 32px;
-  --color-setup-wizard-step-circle-active-bg: var(--color-blue-700);
+  --color-setup-wizard-step-circle-active-bg: var(--color-blue-1000);
   --color-setup-wizard-step-circle-active-text: var(--color-brand-deep-blue);
   --color-setup-wizard-step-circle-complete-bg: var(--color-green-700);
   --color-setup-wizard-step-circle-complete-text: #ffffff;
@@ -450,7 +451,7 @@
   --color-setup-wizard-surface-input-row-padding-y: 12px;
   --color-setup-wizard-surface-input-row-label-color: var(--color-gray-700);
   --color-setup-wizard-surface-input-row-path-color: var(--color-gray-1000);
-  --color-setup-wizard-surface-input-row-icon-color: var(--color-blue-700);
+  --color-setup-wizard-surface-input-row-icon-color: var(--color-blue-1000);
   --color-setup-wizard-surface-input-row-rounded: 6px;
   --color-setup-wizard-surface-cta-primary-max-width: 400px;
   --color-setup-wizard-surface-cta-container-gap: 16px;

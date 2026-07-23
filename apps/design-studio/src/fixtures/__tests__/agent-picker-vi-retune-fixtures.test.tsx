@@ -42,7 +42,7 @@ describe('AgentPickerViRetuneFixtures', () => {
     const picker = within(selectedFrame).getByTestId('agent-picker');
     const selectedCard = within(picker).getByTestId('agent-card-claude-native');
 
-    expect(selectedCard).toHaveClass('border-2', 'border-blue-700');
+    expect(selectedCard).toHaveClass('border-2', 'border-blue-1000');
     expect(selectedCard).not.toHaveClass('bg-blue-700/8');
     expect(within(selectedCard).getByTestId('agent-status-dot')).toHaveAttribute('data-dot', 'lit');
   });

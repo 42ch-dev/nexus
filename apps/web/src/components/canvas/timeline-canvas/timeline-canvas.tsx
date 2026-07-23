@@ -63,6 +63,7 @@ import { useWorldKbGraph, usePatchWorldKbEntity } from '@/lib/canvas/use-world-k
 import { flattenPages, useWorks } from '@/api/queries';
 import { useNexusClient } from '@/lib/client-context';
 import { LoadingState, ErrorState, EmptyState } from '@/components/ui/states';
+import { Button } from '@42ch/nexus-ui';
 import type {
   WorkDetailResponse,
   WorkSummary,
@@ -887,14 +888,14 @@ function BriefEmptyState({
         title={t('timeline.brief.emptyState.title')}
         description={t('timeline.brief.emptyState.message')}
         action={
-          <button
+          <Button
             type="button"
+            variant="primary"
             data-testid="timeline-brief-empty-cta"
             onClick={onSwitchToNarrative}
-            className="rounded-control bg-brand-cyan px-4 py-2 text-button-14 font-semibold text-brand-deep-blue shadow-elevation-2 hover:bg-blue-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-700 focus-visible:ring-offset-2"
           >
             {t('timeline.brief.emptyState.cta')}
-          </button>
+          </Button>
         }
       />
     </div>

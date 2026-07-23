@@ -99,7 +99,7 @@ export function DaemonReadySplash({
           </>
         ) : (
           <>
-            <Loader2 className="h-8 w-8 animate-spin text-blue-700" aria-hidden />
+            <Loader2 className="h-8 w-8 animate-spin text-blue-1000 dark:text-blue-700" aria-hidden />
             <h1 className="text-heading-24 font-heading text-gray-1000">{t('daemon.starting.title')}</h1>
             <p className="text-copy-14 text-gray-900">{t('daemon.starting.description')}</p>
           </>

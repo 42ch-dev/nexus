@@ -167,7 +167,7 @@ describe('AgentPicker', () => {
     );
     const selectedCard = screen.getByTestId('agent-card-claude-native');
     expect(selectedCard).toHaveClass('border-2');
-    expect(selectedCard).toHaveClass('border-blue-700');
+    expect(selectedCard).toHaveClass('border-blue-1000');
     expect(selectedCard).not.toHaveClass('bg-blue-700/8');
     expect(selectedCard.querySelector('[data-testid="agent-status-dot"]')).toHaveAttribute(
       'data-dot',
@@ -189,7 +189,7 @@ describe('AgentPicker', () => {
     const unselectedCard = screen.getByTestId('agent-card-claude-native');
     expect(unselectedCard).toHaveClass('border-2');
     expect(unselectedCard).toHaveClass('border-gray-alpha-400');
-    expect(unselectedCard).not.toHaveClass('border-blue-700');
+    expect(unselectedCard).not.toHaveClass('border-blue-1000');
     expect(unselectedCard.querySelector('[data-testid="agent-status-dot"]')).toHaveAttribute(
       'data-dot',
       'hollow',
