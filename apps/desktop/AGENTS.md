@@ -65,19 +65,23 @@ The desktop shell can be run in two dev modes, controlled from the root
 On quit, the shell asks whether to **Stop Daemon & Quit**, **Keep Daemon & Quit**,
 or **Cancel**. Prefer Keep when iterating so Setup/agent scan keep a warm daemon.
 
-## macOS Dock icon (V1.135)
+## macOS Dock icon (V1.135 + V1.136 follow-up)
 
 **Authority:** [`.mstar/iterations/v1.135/specs/p1-dock-icon-pipeline.md`](../../.mstar/iterations/v1.135/specs/p1-dock-icon-pipeline.md)
-(normative pipeline contract). **RCA:** [`.mstar/iterations/v1.135/guides/p1-dock-icon-rca.md`](../../.mstar/iterations/v1.135/guides/p1-dock-icon-rca.md).
-**Author ritual:** [`src-tauri/icons/README.md`](src-tauri/icons/README.md) § Author verify ritual (P1G-1).
+(normative pipeline contract). **V1.136 RCA:** [`.mstar/iterations/v1.136/guides/p0-dock-icon-rca.md`](../../.mstar/iterations/v1.136/guides/p0-dock-icon-rca.md).
+**Author ritual:** [`src-tauri/icons/README.md`](src-tauri/icons/README.md) § Author verify ritual (P0G-1).
 
-- Compose bakes a **pre-rounded squircle plate** on an opaque `#0D2B3E` canvas (6%
-  inset, 22% corner radius) — not a transparent inset and not opacity-only full-bleed.
+- Compose bakes a **pre-rounded squircle plate** on an opaque canvas (6% inset,
+  22% corner radius): inner plate `#0D2B3E`, contrasting margin `#1A4A66` (V1.136 H6
+  T2 — same-color margin was invisible). Not a transparent inset and not opacity-only
+  full-bleed.
 - **Dock-done ≠ Studio VI-004 or PNG opacity metadata.** Live macOS Dock squircle
-  (P1G-1) is the product surface; `R-V1134P1-001` stays open until author confirms.
+  (P0G-1) is the product surface; `R-V1135P1-001` / `R-V1135P1-005` stay open until
+  `@author` confirms (Attempt 2 contrast bake ready for eyeball).
 - Regenerate: `pnpm --filter desktop run icons:generate`. Root `pnpm dev:desktop`
   runs this before `tauri dev`; `dev:desktop:web` uses `predev`.
-- Before judging Dock shape: quit all instances → rebuild → `killall Dock` → relaunch.
+- Before judging Dock shape: quit all instances → `icons:generate` → rebuild →
+  `killall Dock` → relaunch (record bundle path — H4 stale-install risk).
 
 ## SSOT & authority
 
