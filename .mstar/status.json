@@ -16,7 +16,7 @@
     },
     {
       "plan_id": "2026-07-23-v1.134-p1-app-icon-full-bleed",
-      "status": "InReview",
+      "status": "Done",
       "metadata": {
         "spec_integration_branch": "iteration/v1.134",
         "merge_target": "iteration/v1.134",
@@ -25,13 +25,6 @@
           ".mstar/specs/desktop-shell.md",
           "DESIGN.md"
         ]
-      },
-      "execution_lease": {
-        "holder": "pm-iteration-drive-v1.134",
-        "claimed_at": "2026-07-23T06:32:20Z",
-        "worktree_path": "/Users/bibi/workspace/organizations/42ch/nexus/.worktrees/v1.134-p1-app-icon-full-bleed",
-        "working_branch": "plan/v1.134-p1-app-icon-full-bleed",
-        "session_label": "wave2 v1.134-p1-app-icon-full-bleed"
       }
     },
     {
@@ -715,6 +708,44 @@
         "decision": "defer",
         "owner": "@frontend-dev",
         "target": "post-V1.134"
+      }
+    ],
+    "2026-07-23-v1.134-p1-app-icon-full-bleed": [
+      {
+        "id": "R-V1134P1-001",
+        "severity": "low",
+        "title": "Author Dock squircle confirm (AC-5)",
+        "lifecycle": "open",
+        "decision": "defer",
+        "owner": "@author",
+        "target": "V1.134"
+      },
+      {
+        "id": "R-V1134P1-002",
+        "severity": "low",
+        "title": "Author Studio VI-004 sign-off (AC-6)",
+        "lifecycle": "open",
+        "decision": "defer",
+        "owner": "@author",
+        "target": "V1.134"
+      },
+      {
+        "id": "R-V1134P1-003",
+        "severity": "nit",
+        "title": "Optional compose opacity CI guard",
+        "lifecycle": "open",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.134"
+      },
+      {
+        "id": "R-V1134P1-004",
+        "severity": "nit",
+        "title": "Stale Review Gate Branch HEAD pin",
+        "lifecycle": "open",
+        "decision": "accept",
+        "owner": "@project-manager",
+        "target": "V1.134-p1"
       }
     ]
   }

@@ -111,7 +111,7 @@ A daemon route in `crates/nexus-daemon-runtime/` returns `INTERNAL_SERVER_ERROR`
 | Wave | plan_id | Name | Priority | Status | blocked_by |
 |------|---------|------|----------|--------|------------|
 | 1 | `2026-07-23-v1.134-p0-desktop-startup-500` | Desktop startup 500 RCA + fix | **Must** | Done | - |
-| 2 | `2026-07-23-v1.134-p1-app-icon-full-bleed` | App icon opaque full-bleed | **Must** | InProgress | - |
+| 2 | `2026-07-23-v1.134-p1-app-icon-full-bleed` | App icon opaque full-bleed | **Must** | Done | - |
 | 2 | `2026-07-23-v1.134-p2-agent-picker-vi-retune` | AgentPicker VI retune | **Must** | Done | - |
 | 2 | `2026-07-23-v1.134-p3-creator-hub-dual-pane-ia` | Creator Hub dual-pane IA | **Must** (critical path) | InProgress | - |
 
