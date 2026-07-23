@@ -9,10 +9,12 @@
  * without importing setup wizard pages.
  *
  * V1.102 chrome: soft Installed Badge, ArrowUpRight outbound icons at label
- * cap-height, muted not-installed cards.
+ * cap-height, hollow/lit StatusDot (top-right), muted not-installed cards.
  *
- * V1.132 P2 (VI-001): installed+selected uses a single 2px `border-blue-700` ring
- * only — no competing tint wash or right-side status dot.
+ * V1.132 P2 (VI-001): installed+selected uses a 2px `border-blue-700` ring
+ * without cyan fill wash (Light accent-only).
+ *
+ * V1.134 P2: restore StatusDot alongside the selection ring (FB-UI-006).
  *
  * V1.117 P1 T3: defaultGrid + moreAgents split; icon + displayName from catalog.
  */
@@ -343,11 +345,11 @@ const AgentCard = memo(function AgentCard({
             'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-700',
           )}
         >
-          <AgentCardIdentity agent={agent} />
+          <AgentCardIdentity agent={agent} selected={selected} />
         </button>
       ) : (
         <div className="flex w-full items-start justify-between gap-2">
-          <AgentCardIdentity agent={agent} />
+          <AgentCardIdentity agent={agent} selected={selected} />
         </div>
       )}
 
@@ -380,7 +382,13 @@ const AgentCard = memo(function AgentCard({
   );
 });
 
-function AgentCardIdentity({ agent }: { agent: AgentPickerItem }) {
+function AgentCardIdentity({
+  agent,
+  selected,
+}: {
+  agent: AgentPickerItem;
+  selected: boolean;
+}) {
   const { t } = useTranslation('setup');
   const [iconError, setIconError] = useState(false);
   const label = agent.displayName || agent.name;
@@ -438,7 +446,49 @@ function AgentCardIdentity({ agent }: { agent: AgentPickerItem }) {
           </span>
         ) : null}
       </div>
+      <StatusDot installed={agent.installed} selected={selected} />
     </>
+  );
+}
+
+/**
+ * Selection affordance: hollow gray outline when installed-unselected; filled
+ * green when selected; muted solid gray when not installed (non-selectable).
+ *
+ * V1.108 FB-UI-006: unselected installed agents show hollow **gray** (not
+ * green) so they do not imply validity before selection.
+ */
+function StatusDot({
+  installed,
+  selected,
+}: {
+  installed: boolean;
+  selected: boolean;
+}) {
+  const { t } = useTranslation('setup');
+  const label = installed
+    ? selected
+      ? t('agentPicker.status.selected')
+      : t('agentPicker.status.installed')
+    : t('agentPicker.status.notInstalled');
+
+  return (
+    <span
+      className="relative mt-0.5 inline-flex h-2.5 w-2.5 shrink-0"
+      title={label}
+      aria-hidden
+      data-testid="agent-status-dot"
+      data-dot={!installed ? 'muted' : selected ? 'lit' : 'hollow'}
+    >
+      <span
+        className={cn(
+          'absolute inset-0 rounded-full',
+          !installed && 'bg-gray-500',
+          installed && selected && 'bg-green-700',
+          installed && !selected && 'border-[1.5px] border-gray-500 bg-transparent',
+        )}
+      />
+    </span>
   );
 }
 

@@ -136,9 +136,9 @@ export function useDefaultProfileAutoSelect(
 }
 
 /**
- * V1.130 T4: Render this inside the app tree where both ActiveCreatorProvider
- * and QueryClientProvider are available. It auto-selects the Default profile.
- * In tests without QueryClient, simply don't render this component.
+ * V1.130 T4 / V1.134 P0: Render inside {@link DaemonLaunchGate} children so
+ * creator probes run only after daemon ready. Requires ActiveCreatorProvider +
+ * QueryClientProvider (outer AppProviders). In tests without QueryClient, omit.
  */
 export function DefaultProfileCoordinator() {
   const activeCreatorId = useActiveCreatorId();

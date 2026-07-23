@@ -1,12 +1,67 @@
 {
   "version": 1,
   "updated_at": "2026-07-23",
-  "plans": [],
+  "plans": [
+    {
+      "plan_id": "2026-07-23-v1.134-p0-desktop-startup-500",
+      "status": "Done",
+      "metadata": {
+        "spec_integration_branch": "iteration/v1.134",
+        "merge_target": "iteration/v1.134",
+        "iteration_refs": "V1.134",
+        "spec_refs": [
+          ".mstar/specs/desktop-shell.md"
+        ]
+      }
+    },
+    {
+      "plan_id": "2026-07-23-v1.134-p1-app-icon-full-bleed",
+      "status": "Done",
+      "metadata": {
+        "spec_integration_branch": "iteration/v1.134",
+        "merge_target": "iteration/v1.134",
+        "iteration_refs": "V1.134",
+        "spec_refs": [
+          ".mstar/specs/desktop-shell.md",
+          "DESIGN.md"
+        ]
+      }
+    },
+    {
+      "plan_id": "2026-07-23-v1.134-p2-agent-picker-vi-retune",
+      "status": "Done",
+      "metadata": {
+        "spec_integration_branch": "iteration/v1.134",
+        "merge_target": "iteration/v1.134",
+        "iteration_refs": "V1.134",
+        "spec_refs": [
+          "DESIGN.md",
+          "DESIGN.dark.md",
+          ".mstar/specs/web-ui.md"
+        ]
+      }
+    },
+    {
+      "plan_id": "2026-07-23-v1.134-p3-creator-hub-dual-pane-ia",
+      "status": "Done",
+      "metadata": {
+        "spec_integration_branch": "iteration/v1.134",
+        "merge_target": "iteration/v1.134",
+        "iteration_refs": "V1.134",
+        "primary_spec": ".mstar/iterations/v1.134/specs/p3-creator-hub-dual-pane-ia.md",
+        "spec_refs": [
+          ".mstar/specs/web-ui.md",
+          ".mstar/specs/desktop-shell.md",
+          "DESIGN.md"
+        ]
+      }
+    }
+  ],
   "metadata": {
     "integration_branch_retired": false,
     "iteration_base_branch": "main",
-    "latest_active_compass": "v1.133/delivery-compass.md",
-    "latest_active_iteration": "V1.133",
+    "latest_active_compass": "v1.134/delivery-compass.md",
+    "latest_active_iteration": "V1.134",
     "latest_ship": {
       "iteration": "V1.133",
       "compass": "v1.133/delivery-compass.md",
@@ -15,7 +70,7 @@
       "merge_commit": "pending"
     },
     "platform_integration": "paused — local-only until further notice",
-    "spec_integration_branch": "iteration/v1.133",
+    "spec_integration_branch": "iteration/v1.134",
     "spec_refs_index": ".mstar/specs/README.md",
     "target_branch": "main",
     "tech_debt_summary": {
@@ -551,6 +606,177 @@
         "decision": "defer",
         "owner": "@fullstack-dev",
         "target": "post-V1.133"
+      }
+    ],
+    "2026-07-23-v1.134-p0-desktop-startup-500": [
+      {
+        "id": "R-V1134P0-001",
+        "severity": "nit",
+        "title": "Move daemon-proxy helper out of SPA src/",
+        "lifecycle": "open",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.134"
+      },
+      {
+        "id": "R-V1134P0-002",
+        "severity": "nit",
+        "title": "Refresh Review Gate Summary Branch HEAD pin",
+        "lifecycle": "open",
+        "decision": "accept",
+        "owner": "@project-manager",
+        "target": "V1.134-p0",
+        "note": "Reviewed tip 69725103; summary cites AC-0 commit 6aa25d0c"
+      },
+      {
+        "id": "R-V1134P0-003",
+        "severity": "nit",
+        "title": "Extend proxy tests for configure + 502 branch",
+        "lifecycle": "open",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.134"
+      },
+      {
+        "id": "R-V1134P0-004",
+        "severity": "low",
+        "title": "Attach-race toast after gate unlock on HTTP lag",
+        "lifecycle": "open",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.134"
+      },
+      {
+        "id": "R-V1134P0-005",
+        "severity": "nit",
+        "title": "App mount-order gating regression test",
+        "lifecycle": "open",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.134"
+      },
+      {
+        "id": "R-V1134P0-006",
+        "severity": "nit",
+        "title": "Narrow CONNECT_ERROR_CODES to ECONNREFUSED",
+        "lifecycle": "open",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.134"
+      },
+      {
+        "id": "R-V1134P0-007",
+        "severity": "nit",
+        "title": "Vite stderr proxy-error noise during boot",
+        "lifecycle": "open",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.134"
+      }
+    ],
+    "2026-07-23-v1.134-p2-agent-picker-vi-retune": [
+      {
+        "id": "R-V1134P2-001",
+        "severity": "nit",
+        "title": "Author Studio visual accept for AgentPicker fixture",
+        "lifecycle": "open",
+        "decision": "defer",
+        "owner": "@author",
+        "target": "V1.134"
+      },
+      {
+        "id": "R-V1134P2-002",
+        "severity": "nit",
+        "title": "Negative tests: no status dot on loading/empty/error",
+        "lifecycle": "open",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.134"
+      },
+      {
+        "id": "R-V1134P2-003",
+        "severity": "nit",
+        "title": "Collapse remaining ViTargetStatusDot doc strip if desired",
+        "lifecycle": "open",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.134"
+      }
+    ],
+    "2026-07-23-v1.134-p1-app-icon-full-bleed": [
+      {
+        "id": "R-V1134P1-001",
+        "severity": "low",
+        "title": "Author Dock squircle confirm (AC-5)",
+        "lifecycle": "open",
+        "decision": "defer",
+        "owner": "@author",
+        "target": "V1.134"
+      },
+      {
+        "id": "R-V1134P1-002",
+        "severity": "low",
+        "title": "Author Studio VI-004 sign-off (AC-6)",
+        "lifecycle": "open",
+        "decision": "defer",
+        "owner": "@author",
+        "target": "V1.134"
+      },
+      {
+        "id": "R-V1134P1-003",
+        "severity": "nit",
+        "title": "Optional compose opacity CI guard",
+        "lifecycle": "open",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.134"
+      },
+      {
+        "id": "R-V1134P1-004",
+        "severity": "nit",
+        "title": "Stale Review Gate Branch HEAD pin",
+        "lifecycle": "open",
+        "decision": "accept",
+        "owner": "@project-manager",
+        "target": "V1.134-p1"
+      }
+    ],
+    "2026-07-23-v1.134-p3-creator-hub-dual-pane-ia": [
+      {
+        "id": "R-V1134P3-001",
+        "severity": "low",
+        "title": "Author Studio AC-15 dual-pane visual accept",
+        "lifecycle": "open",
+        "decision": "defer",
+        "owner": "@author",
+        "target": "V1.134"
+      },
+      {
+        "id": "R-V1134P3-002",
+        "severity": "nit",
+        "title": "Wire createErrorMessage to inline create UI",
+        "lifecycle": "open",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.134"
+      },
+      {
+        "id": "R-V1134P3-003",
+        "severity": "nit",
+        "title": "Clear inline title across tab switches",
+        "lifecycle": "open",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.134"
+      },
+      {
+        "id": "R-V1134P3-004",
+        "severity": "nit",
+        "title": "Studio multi-instance a11y ID uniqueness",
+        "lifecycle": "open",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.134"
       }
     ]
   }

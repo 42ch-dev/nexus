@@ -22,8 +22,8 @@ describe('ViBrandAcceptanceFixtures', () => {
 
     expect(screen.getByTestId('vi-003-compact-mark-light')).toBeInTheDocument();
     expect(screen.getByTestId('vi-003-compact-mark-dark')).toBeInTheDocument();
-    expect(screen.getByTestId('vi-004-app-icon-current')).toBeInTheDocument();
     expect(screen.getByTestId('vi-004-app-icon-target')).toBeInTheDocument();
+    expect(screen.getByTestId('vi-004-app-icon-deprecated')).toBeInTheDocument();
     expect(screen.getByTestId('vi-005-square-plate')).toBeInTheDocument();
   });
 
