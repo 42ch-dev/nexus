@@ -386,7 +386,7 @@ function ButtonSection() {
         className="text-copy-14 text-gray-700 mb-4 max-w-prose"
       >
         Chronos primary is theme-split: light shell uses{' '}
-        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">bg-brand-deep-blue</code>{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">bg-brand-cyan-1000</code>{' '}
         +{' '}
         <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">text-brand-white</code>;
         dark shell keeps{' '}

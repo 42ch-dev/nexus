@@ -2,7 +2,7 @@
 
 exports[`Button > matches the primary variant snapshot in light mode 1`] = `
 <button
-  class="inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-control font-button transition-colors duration-state ease-standard disabled:pointer-events-none disabled:bg-gray-100 disabled:text-gray-700 dark:disabled:bg-gray-100 dark:disabled:text-gray-700 focus-visible:outline-none bg-brand-deep-blue text-brand-white hover:bg-brand-deep-blue-800 active:bg-brand-deep-blue-900 dark:bg-brand-cyan dark:text-brand-deep-blue dark:hover:bg-blue-800 dark:active:bg-blue-900 h-10 px-4 text-button-14"
+  class="inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-control font-button transition-colors duration-state ease-standard disabled:pointer-events-none disabled:bg-gray-100 disabled:text-gray-700 dark:disabled:bg-gray-100 dark:disabled:text-gray-700 focus-visible:outline-none bg-brand-cyan-1000 text-brand-white hover:bg-blue-900 active:bg-blue-1000 dark:bg-brand-cyan dark:text-brand-deep-blue dark:hover:bg-blue-800 dark:active:bg-blue-900 h-10 px-4 text-button-14"
 >
   Continue
 </button>

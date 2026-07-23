@@ -5,11 +5,11 @@ import { Button } from './button';
 
 describe('Button', () => {
   it('encodes the Chronos theme-split primary recipe', () => {
-    // Button is a thin re-export from @42ch/nexus-ui. Light: ink fill + white label;
+    // Button is a thin re-export from @42ch/nexus-ui. Light: mid-teal fill + white label;
     // dark: cyan CTA + deep ink label.
     render(<Button variant="primary" size="default">Continue</Button>);
     const btn = screen.getByRole('button', { name: 'Continue' });
-    expect(btn.className).toMatch(/\bbg-brand-deep-blue\b/);
+    expect(btn.className).toMatch(/\bbg-brand-cyan-1000\b/);
     expect(btn.className).toMatch(/\btext-brand-white\b/);
     expect(btn.className).toMatch(/\bdark:bg-brand-cyan\b/);
     expect(btn.className).toMatch(/\bdark:text-brand-deep-blue\b/);

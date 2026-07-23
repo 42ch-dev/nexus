@@ -164,7 +164,7 @@ motion:
 components:
   # ── button: apps/web superset (tertiary + destructive + sizes + disabled) wins ──
   button:
-    primary: { backgroundColor: "{colors.brand-deep-blue}", textColor: "{colors.brand-white}", borderColor: "none", rounded: "{rounded.control}", height: "40px", typography: "{typography.button-14}", hoverBackgroundColor: "{colors.brand-deep-blue-800}", hoverTextColor: "{colors.brand-white}", activeBackgroundColor: "{colors.brand-deep-blue-900}", activeTextColor: "{colors.brand-white}" }
+    primary: { backgroundColor: "{colors.brand-cyan-1000}", textColor: "{colors.brand-white}", borderColor: "none", rounded: "{rounded.control}", height: "40px", typography: "{typography.button-14}", hoverBackgroundColor: "{colors.blue-900}", hoverTextColor: "{colors.brand-white}", activeBackgroundColor: "{colors.blue-1000}", activeTextColor: "{colors.brand-white}" }
     secondary: { backgroundColor: "{colors.background-100}", textColor: "{colors.gray-1000}", borderColor: "{colors.gray-alpha-400}", rounded: "{rounded.control}", height: "40px", typography: "{typography.button-14}", hoverBackgroundColor: "{colors.background-200}", hoverBorderColor: "{colors.gray-alpha-500}" }
     tertiary: { backgroundColor: "transparent", textColor: "{colors.gray-1000}", borderColor: "none", rounded: "{rounded.control}", height: "40px", typography: "{typography.button-14}", hoverBackgroundColor: "{colors.gray-alpha-100}" }
     destructive: { backgroundColor: "{colors.red-800}", textColor: "#ffffff", borderColor: "none", rounded: "{rounded.control}", height: "40px", typography: "{typography.button-14}", hoverBackgroundColor: "{colors.red-700}", activeBackgroundColor: "{colors.red-900}" }
@@ -874,13 +874,15 @@ VI palette (frozen names) under **Chronos dual-role**:
 
 | Role | Token | Hex | Light | Dark |
 | --- | --- | --- | --- | --- |
-| **Ink structure** | `brand-deep-blue` | `#0D2B3E` | Titlebar fill, **text links**, logo plate structure on light | Titlebar fill; primary button **label** on cyan (dark); **fill** on light primary CTA |
+| **Ink structure** | `brand-deep-blue` | `#0D2B3E` | Titlebar fill, **text links**, logo plate structure on light | Titlebar fill; primary button **label** on cyan (dark) |
 | **Cyan signal** | `brand-cyan` / `blue-700` | `#25D1E0` | Focus ring, active bars, selection strokes, timeline accents | Primary CTA **fill** (dark shell), focus ring, active chrome |
+| **Mid-teal interactive** | `brand-cyan-1000` / `blue-1000` | `#117480` | Primary CTA **fill** (light shell) + white label | — |
 | Surface white | `brand-white` | `#FFFFFF` | Text on deep panels; logo on dark heroes | Logo on deepest panels |
 
 | Token | Hex | Role |
 | --- | --- | --- |
-| `brand-deep-blue` | `#0D2B3E` | Ink structure — light **text links**, titlebar, **light primary CTA fill** |
+| `brand-deep-blue` | `#0D2B3E` | Ink structure — light **text links**, titlebar |
+| `brand-cyan-1000` | `#117480` | Mid-teal interactive — **light primary CTA fill** + white label |
 | `brand-cyan` | `#25D1E0` | Cyan signal — **dark primary CTA fill**, focus ring, active chrome |
 | `brand-white` | `#FFFFFF` | Text on deep-blue panels, logo on dark hero surfaces |
 
@@ -890,15 +892,16 @@ Extended brand steps (`brand-deep-blue-800` … `brand-cyan-1000`, `brand-deep-b
 
 | Pairing | Ratio | Intended usage | Verdict |
 | --- | --- | --- | --- |
-| `brand-deep-blue` on `background-100` | 11.5:1 | Headings, **text links**, body / UI on light; **light primary CTA fill** | **Pass** — body text OK |
-| `brand-white` on `brand-deep-blue` | 11.5:1 | **Light primary CTA label**; text on deep titlebar / brand panels | **Pass** |
+| `brand-deep-blue` on `background-100` | 11.5:1 | Headings, **text links**, body / UI on light | **Pass** — body text OK |
+| `brand-white` on `brand-cyan-1000` | 4.6:1 | **Light primary CTA label** on mid-teal fill | **Pass** |
+| `brand-white` on `brand-deep-blue` | 11.5:1 | Text on deep titlebar / brand panels | **Pass** |
 | `brand-deep-blue` on `brand-cyan` | 6.2:1 | **Dark primary** button label on cyan fill | **Pass** |
 | `brand-cyan` / `blue-700` on `background-100` | 1.9:1 | — | **Fail** — signal/icon/active only; **never body or link text on white** |
 | `brand-cyan` on `brand-deep-blue` | 6.2:1 | Accent chips on brand panels | **Pass** |
 | `gray-1000` on `background-100` | 18.9:1 | Primary UI text | **Pass** |
 | `gray-700` on `background-100` | 5.7:1 | Secondary/helper text | **Pass** |
 
-**Cyan usage rule:** `brand-cyan` (and light `blue-700`, which aliases it) is the **signal** token for interactive chrome on dark shells — **dark primary CTA fill**, focus-ring outer, active bars, selection strokes, timeline accents, graphical brand icons. On light shells, primary CTAs use `brand-deep-blue` fill instead (VI-002). Cyan is **not** paragraph text or default **text links** on white/light gray (AA fail ~1.9:1). Light textual links use `brand-deep-blue` (11.5:1); dark textual links use `brand-cyan` / `blue-700` (10.0:1 on ink).
+**Cyan usage rule:** `brand-cyan` (and light `blue-700`, which aliases it) is the **signal** token for interactive chrome on dark shells — **dark primary CTA fill**, focus-ring outer, active bars, selection strokes, timeline accents, graphical brand icons. On light shells, primary CTAs use `brand-cyan-1000` fill + `brand-white` label instead (VI-002). Neon cyan is **not** the light primary fill. Cyan is **not** paragraph text or default **text links** on white/light gray (AA fail ~1.9:1). Light textual links use `brand-deep-blue` (11.5:1); dark textual links use `brand-cyan` / `blue-700` (10.0:1 on ink).
 
 ### Background-driven contrast invariant
 
@@ -920,7 +923,7 @@ Color values live in frontmatter `colors:`. Color tokens follow the Geist-style 
 | Meaning | Token |
 | --- | --- |
 | Primary action (dark shell) / focus / active chrome (signal) | `blue-700` → `brand-cyan` |
-| Primary action (light shell) | `brand-deep-blue` fill + `brand-white` label (theme-split — not cyan) |
+| Primary action (light shell) | `brand-cyan-1000` fill + `brand-white` label (theme-split — mid-teal, not neon cyan or ink) |
 | Text link / retry text on light surfaces (ink) | `brand-deep-blue` (not `blue-700` / cyan) |
 | Text link on dark surfaces | `blue-700` / `brand-cyan` |
 | Brand accent icons / marks (graphical) | `brand-cyan` or cyan on deep panel |
@@ -998,7 +1001,7 @@ Full WCAG 2.1 AA recomputation for the v0.4 ink (dark) and warm-paper (light) su
 
 **Usage rules confirmed by the tables (Chronos dual-role + V1.132 theme-split primary):**
 
-- **Primary button (theme-split):** light shell uses `brand-deep-blue` fill + `brand-white` label (11.5:1 **P**); dark shell uses `brand-cyan` fill + `brand-deep-blue` label (6.2:1 **P**). Light shell must **not** use neon cyan fill + deep ink label (VI-002 / AC-5b).
+- **Primary button (theme-split):** light shell uses `brand-cyan-1000` fill + `brand-white` label (4.6:1 **P**); dark shell uses `brand-cyan` fill + `brand-deep-blue` label (6.2:1 **P**). Light shell must **not** use neon cyan fill (VI-002 / AC-5b).
 - `brand-deep-blue` on dark chrome stays **Fail** — never deep-blue fills on dark surfaces; deep blue appears on cyan fills (6.2:1 **P**) or as text/links on light surfaces (11.5:1 **P**).
 - `brand-cyan` / light `blue-700` on light surfaces stays **Fail** as body/link text — signal chrome, icons, active indicators, and primary **fills** only; never paragraph or default link text on white (§Brand Colors cyan rule). Light links → `brand-deep-blue`.
 - `gray-500` is graphical/decorative (edges, separators, tick marks) — not body text; dark values pass graphical (3.0+) except on `gray-300`, where it must not appear (same restriction as pre-v0.4).
@@ -1238,10 +1241,10 @@ Variants and sizes: see frontmatter `components.button`. The preset `Validate` a
 > - **Light/bright background** (cyan, light gray, pastels) → **dark text**.
 >
 > Practical applications:
-> - **Primary button (theme-split — VI-002 / AC-5b):** light shell → `bg-brand-deep-blue` + `text-brand-white` (ink fill, not neon cyan). Dark shell → `bg-brand-cyan` + `text-brand-deep-blue` (strong cyan CTA). Implemented in `@42ch/nexus-ui` `Button`; consumers (`TransportErrorBlock` Retry, Setup CTAs) must not add local overrides.
+> - **Primary button (theme-split — VI-002 / AC-5b):** light shell → `bg-brand-cyan-1000` + `text-brand-white` (mid-teal fill, not neon cyan or ink). Dark shell → `bg-brand-cyan` + `text-brand-deep-blue` (strong cyan CTA). Implemented in `@42ch/nexus-ui` `Button`; consumers (`TransportErrorBlock` Retry, Setup CTAs) must not add local overrides.
 > - Destructive `bg-red-800` (dark) → `text-white` (light) on light theme; dark theme may use deep text on bright red — see `DESIGN.dark.md`.
 
-**Primary recipe (locked):** theme-split per shell — light uses deep ink fill + white label; dark uses cyan fill + deep label. The former uniform cyan-fill recipe in both themes is retired (V1.132 P2).
+**Primary recipe (locked):** theme-split per shell — light uses mid-teal (`brand-cyan-1000`) fill + white label; dark uses cyan fill + deep label. The former uniform cyan-fill and deep-ink light-primary recipes are retired (V1.136 P2).
 
 ### Input / Select / Textarea
 
@@ -1495,7 +1498,7 @@ CSS variable tokens are projected from the frontmatter into `tooling/design-toke
 - Tailwind preset: `tooling/design-tokens/tailwind.preset.ts`
 - Brand package: `@42ch/nexus-ui/theme.css`
 
-**Blue-* alias policy (Chronos dual-role):** `blue-700`…`blue-1000` are the web **cyan signal** interactive scale in **both** light and dark themes (`#25D1E0` and theme-tuned cyan steps). Light hover/active steps use darker cyan (`brand-cyan-800/900/1000`); dark hover/active steps use brighter cyan. Component tokens using `{colors.blue-700}` (focus ring, active bars, primary chrome) resolve to cyan in both themes. **Ink structure** (light text links, titlebar fill, primary button label) uses `brand-deep-blue` explicitly — do **not** use `text-blue-700` for light-theme links after this lock (T6 migrates call sites). Do **not** rename `blue-*` keys in CSS vars.
+**Blue-* alias policy (Chronos dual-role):** `blue-700`…`blue-1000` are the web **cyan signal** interactive scale in **both** light and dark themes (`#25D1E0` and theme-tuned cyan steps). Light hover/active steps use darker cyan (`brand-cyan-800/900/1000`); dark hover/active steps use brighter cyan. Component tokens using `{colors.blue-700}` (focus ring, active bars, primary chrome) resolve to cyan in both themes. **Ink structure** (light text links, titlebar fill) uses `brand-deep-blue` explicitly — do **not** use `text-blue-700` for light-theme links after this lock (T6 migrates call sites). Light primary CTA fill uses `brand-cyan-1000` — do **not** rename `blue-*` keys in CSS vars.
 
 ---
 

@@ -97,6 +97,9 @@
   --color-brand-deep-blue-800: var(--nexus-brand-deep-blue-800);
   --color-brand-deep-blue-900: var(--nexus-brand-deep-blue-900);
   --color-brand-cyan: var(--nexus-brand-cyan);
+  --color-brand-cyan-800: var(--nexus-brand-cyan-800);
+  --color-brand-cyan-900: var(--nexus-brand-cyan-900);
+  --color-brand-cyan-1000: var(--nexus-brand-cyan-1000);
   --color-brand-white: var(--nexus-brand-white);
 
   /* Background — DESIGN.md §Colors/Background.
