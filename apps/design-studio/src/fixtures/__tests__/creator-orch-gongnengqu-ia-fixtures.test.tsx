@@ -1,14 +1,31 @@
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { ThemeProvider } from '@/components/theme-provider';
 import { CreatorOrchGongnengquIaFixtures } from '@/fixtures/creator-orch-gongnengqu-ia-fixtures';
+
+function mockMatchMedia(prefersDark: boolean) {
+  const media = {
+    matches: prefersDark,
+    media: '(prefers-color-scheme: dark)',
+    onchange: null,
+    addListener: vi.fn(),
+    removeListener: vi.fn(),
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+    dispatchEvent: vi.fn(),
+  };
+  vi.spyOn(window, 'matchMedia').mockReturnValue(media as unknown as MediaQueryList);
+}
 
 function renderFixtures() {
   return render(
-    <MemoryRouter>
-      <CreatorOrchGongnengquIaFixtures />
-    </MemoryRouter>,
+    <ThemeProvider>
+      <MemoryRouter>
+        <CreatorOrchGongnengquIaFixtures />
+      </MemoryRouter>
+    </ThemeProvider>,
   );
 }
 
@@ -17,6 +34,10 @@ function querySidebarWorldsMenu(container: HTMLElement) {
 }
 
 describe('CreatorOrchGongnengquIaFixtures', () => {
+  beforeEach(() => {
+    mockMatchMedia(false);
+  });
+
   it('mounts creator hub and orchestrator fixture frames', () => {
     renderFixtures();
 
@@ -26,25 +47,32 @@ describe('CreatorOrchGongnengquIaFixtures', () => {
     expect(screen.getByTestId('gongnengqu-ia-fixture-interactive')).toBeInTheDocument();
   });
 
-  it('renders light and dark theme pairs for creator hub and orchestrator', () => {
+  it('renders a single theme-aware frame per fixture (no light/dark matrix)', () => {
     renderFixtures();
 
-    expect(screen.getByTestId('gongnengqu-ia-creator-hub-themes-light')).toBeInTheDocument();
-    expect(screen.getByTestId('gongnengqu-ia-creator-hub-themes-dark')).toBeInTheDocument();
-    expect(screen.getByTestId('gongnengqu-ia-orchestrator-themes-light')).toBeInTheDocument();
-    expect(screen.getByTestId('gongnengqu-ia-orchestrator-themes-dark')).toBeInTheDocument();
+    expect(screen.getAllByTestId('gongnengqu-ia-theme-caption')).toHaveLength(3);
+    expect(screen.getByTestId('gongnengqu-ia-creator-hub')).toBeInTheDocument();
+    expect(screen.getByTestId('gongnengqu-ia-orchestrator')).toBeInTheDocument();
+    expect(screen.queryByTestId('gongnengqu-ia-creator-hub-themes-light')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('gongnengqu-ia-creator-hub-themes-dark')).not.toBeInTheDocument();
   });
 
-  it('shows sidebar create panel with browse-only hub content on the right', () => {
+  it('shows sidebar inline create panel with browse-only hub content on the right', () => {
     renderFixtures();
 
-    const creatorFrame = screen.getByTestId('gongnengqu-ia-creator-hub-light');
-    const sidebar = within(creatorFrame).getByTestId('gongnengqu-ia-creator-hub-light-sidebar');
+    const creatorFrame = screen.getByTestId('gongnengqu-ia-creator-hub');
+    const sidebar = within(creatorFrame).getByTestId('gongnengqu-ia-creator-hub-sidebar');
+    const createPanel = within(sidebar).getByTestId('sidebar-create-panel');
 
     expect(within(sidebar).getByTestId('shell-sidebar-panel')).toBeInTheDocument();
-    expect(within(sidebar).getByTestId('sidebar-create-panel')).toBeInTheDocument();
-    expect(within(sidebar).getByTestId('creator-create-world')).toBeInTheDocument();
-    expect(within(sidebar).getByTestId('creator-create-work')).toBeInTheDocument();
+    expect(createPanel).toHaveAttribute('data-mode', 'create-inline');
+    expect(within(createPanel).getByTestId('sidebar-create-tab-bar')).toBeInTheDocument();
+    expect(within(createPanel).getByTestId('sidebar-create-tab-world')).toBeInTheDocument();
+    expect(within(createPanel).getByTestId('sidebar-create-tab-work')).toBeInTheDocument();
+    expect(within(createPanel).getByTestId('sidebar-create-form-world')).toBeInTheDocument();
+    expect(within(createPanel).getByTestId('sidebar-create-submit-world')).toBeInTheDocument();
+    expect(within(createPanel).queryByTestId('creator-create-world')).not.toBeInTheDocument();
+    expect(within(createPanel).queryByTestId('creator-create-work')).not.toBeInTheDocument();
 
     expect(querySidebarWorldsMenu(creatorFrame)).not.toBeInTheDocument();
     expect(within(creatorFrame).queryByText('All Works')).not.toBeInTheDocument();
@@ -52,21 +80,38 @@ describe('CreatorOrchGongnengquIaFixtures', () => {
       within(creatorFrame).queryByTestId(/workspace-pane-inline-form/),
     ).not.toBeInTheDocument();
 
-    const browse = within(creatorFrame).getByTestId('gongnengqu-ia-creator-hub-light-hub-browse');
-    expect(within(browse).getByTestId('gongnengqu-ia-creator-hub-light-hub-browse-tab-bar')).toBeInTheDocument();
+    const browse = within(creatorFrame).getByTestId('gongnengqu-ia-creator-hub-hub-browse');
+    expect(within(browse).getByTestId('gongnengqu-ia-creator-hub-hub-browse-tab-bar')).toBeInTheDocument();
     expect(
-      within(browse).getByTestId('gongnengqu-ia-creator-hub-light-hub-browse-card-list-pane-world-card-world-fantasy'),
+      within(browse).getByTestId('gongnengqu-ia-creator-hub-hub-browse-card-list-pane-world-card-world-fantasy'),
     ).toBeInTheDocument();
     expect(
-      within(browse).queryByTestId('gongnengqu-ia-creator-hub-light-hub-browse-card-list-pane-work-card-work-novel'),
+      within(browse).queryByTestId('gongnengqu-ia-creator-hub-hub-browse-card-list-pane-work-card-work-novel'),
     ).not.toBeInTheDocument();
+  });
+
+  it('switches create-zone tabs between world and work inline forms', () => {
+    renderFixtures();
+
+    const createPanel = within(
+      screen.getByTestId('gongnengqu-ia-creator-hub-sidebar'),
+    ).getByTestId('sidebar-create-panel');
+
+    expect(within(createPanel).getByTestId('sidebar-create-form-world')).toBeInTheDocument();
+    expect(within(createPanel).queryByTestId('sidebar-create-form-work')).not.toBeInTheDocument();
+
+    fireEvent.click(within(createPanel).getByTestId('sidebar-create-tab-work'));
+
+    expect(within(createPanel).getByTestId('sidebar-create-form-work')).toBeInTheDocument();
+    expect(within(createPanel).getByTestId('sidebar-create-submit-work')).toBeInTheDocument();
+    expect(within(createPanel).queryByTestId('sidebar-create-form-world')).not.toBeInTheDocument();
   });
 
   it('shows 工作区 footer in both 创作 and 编排 presentations', () => {
     renderFixtures();
 
-    const creatorFrame = screen.getByTestId('gongnengqu-ia-creator-hub-light');
-    const orchestratorFrame = screen.getByTestId('gongnengqu-ia-orchestrator-light');
+    const creatorFrame = screen.getByTestId('gongnengqu-ia-creator-hub');
+    const orchestratorFrame = screen.getByTestId('gongnengqu-ia-orchestrator');
 
     expect(
       within(creatorFrame).getByRole('toolbar', { name: '工作区' }),

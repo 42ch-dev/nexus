@@ -156,6 +156,11 @@
       "worlds": "No Worlds yet — create one from the sidebar",
       "works": "No Works yet — create one from the sidebar"
     },
+    "create": {
+      "tabs": {
+        "ariaLabel": "Sidebar create — World or Work"
+      }
+    },
     "workspace": {
       "createWorldCompact": "Create new World…",
       "createWorkCompact": "Create new Work…"

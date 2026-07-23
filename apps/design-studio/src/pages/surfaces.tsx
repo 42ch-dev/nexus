@@ -588,9 +588,10 @@ export function SurfacesShellPage() {
           ]}
         />
         <p className="text-copy-14 text-gray-700 mb-6">
-          V1.135 P0 aligned — 创作 hub sidebar panelContent = Create-only (sidebar-create-panel);
-          content = World/Work tab bar + card list (browse-only); 工作区 footer visible under
-          both 创作 and 编排. Light + dark acceptance targets. No App routing, no daemon client.
+          V1.136 P1 — 创作 hub sidebar panelContent = inline create (World|Work tabs + title +
+          submit, <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">sidebar-create-panel</code>
+          ); content = World/Work tab bar + card list (browse-only); 工作区 footer visible under
+          both 创作 and 编排. Single frame follows Studio theme toggle. No App routing, no daemon client.
         </p>
         <CreatorOrchGongnengquIaFixtures />
       </section>

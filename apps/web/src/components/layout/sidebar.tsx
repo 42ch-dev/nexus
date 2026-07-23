@@ -8,17 +8,21 @@ import {
   Sparkles,
 } from 'lucide-react';
 
+import { useCreateWork, useCreateWorld } from '@/api/queries';
 import { FooterProfiles } from '@/components/layout/footer-profiles';
-import { CreatorShellContent } from '@/components/layout/presentational/creator-shell-content';
+import {
+  CreatorShellContent,
+  type CreatorShellInlineWorkSubmit,
+} from '@/components/layout/presentational/creator-shell-content';
 import {
   ShellSidebarChrome,
   type ShellNavGroup,
   type ShellSidebarTab,
 } from '@/components/layout/presentational/shell-sidebar-chrome';
-import { CreateWorldDialog } from '@/components/worlds/create-world-dialog';
 import { useNexusClient } from '@/lib/client-context';
 import { hasCreateWorldClient } from '@/lib/nexus/create-world';
-import { CreateWorkDialog } from '@/pages/dialogs/create-work-dialog';
+import { useToast } from '@/lib/use-toast';
+import { isWorkProfile, WORK_PROFILES } from '@/lib/work-profiles';
 
 /**
  * Sidebar nav — V1.94 two-tab IA (Creator | Orchestrator).
@@ -28,7 +32,7 @@ import { CreateWorkDialog } from '@/pages/dialogs/create-work-dialog';
  * Hub content is browse-only (tabs + card list).
  *
  * Thin wrapper around {@link ShellSidebarChrome}: owns the active creator
- * profile, route-derived tab state, and Create dialog orchestration.
+ * profile, route-derived tab state, and inline create mutations (V1.136 P1).
  */
 const ORCHESTRATOR_ROUTE_PREFIXES = [
   '/memory',
@@ -47,38 +51,84 @@ function tabFromPathname(pathname: string): ShellSidebarTab {
 }
 
 function CreatorCreatePanel() {
+  const { t: tShell } = useTranslation('shell');
   const { t: tWorlds } = useTranslation('worlds');
+  const { t: tCommon } = useTranslation('common');
   const navigate = useNavigate();
+  const { toast } = useToast();
   const client = useNexusClient();
   const canCreateWorld = useMemo(() => hasCreateWorldClient(client), [client]);
-  const [createWorkOpen, setCreateWorkOpen] = useState(false);
-  const [createWorldOpen, setCreateWorldOpen] = useState(false);
+  const createWorld = useCreateWorld();
+  const createWork = useCreateWork();
+
+  const inlineLabels = useMemo(
+    () => ({
+      tabs: {
+        world: tShell('hub.tabs.world'),
+        work: tShell('hub.tabs.work'),
+      },
+      tabsAriaLabel: tShell('hub.create.tabs.ariaLabel'),
+      world: {
+        titleLabel: tShell('worldCreate.titleLabel'),
+        titlePlaceholder: tShell('worldCreate.titlePlaceholder'),
+        submit: createWorld.isPending ? tShell('worldCreate.creating') : tShell('worldCreate.create'),
+        disabledTitle: tWorlds('create.desktop-only'),
+      },
+      work: {
+        titleLabel: tShell('workCreate.titleLabel'),
+        titlePlaceholder: tShell('workCreate.titlePlaceholder'),
+        goalLabel: tShell('workCreate.goalLabel'),
+        goalPlaceholder: tShell('workCreate.goalPlaceholder'),
+        ideaLabel: tShell('workCreate.ideaLabel'),
+        ideaPlaceholder: tShell('workCreate.ideaPlaceholder'),
+        profileLabel: tShell('workCreate.profileLabel'),
+        profileOptions: WORK_PROFILES.map((profile) => ({
+          value: profile.value,
+          label: tCommon(`status.${profile.value}`),
+        })),
+        submit: createWork.isPending ? tShell('workCreate.creating') : tShell('workCreate.create'),
+      },
+    }),
+    [createWork.isPending, createWorld.isPending, tCommon, tShell, tWorlds],
+  );
+
+  async function handleWorldSubmit(title: string) {
+    try {
+      const res = await createWorld.mutateAsync({ title });
+      navigate(`/worlds/${encodeURIComponent(res.world_id)}/timeline`);
+    } catch {
+      // Error toast already fired by the mutation's onError callback.
+    }
+  }
+
+  async function handleWorkSubmit(payload: CreatorShellInlineWorkSubmit) {
+    try {
+      const res = await createWork.mutateAsync({
+        title: payload.title,
+        long_term_goal: payload.longTermGoal,
+        initial_idea: payload.initialIdea,
+        ...(payload.workProfile && isWorkProfile(payload.workProfile)
+          ? { work_profile: payload.workProfile }
+          : {}),
+      });
+      toast({ variant: 'success', title: tShell('workCreate.toastCreated'), description: res.work_id });
+      navigate(`/works/${encodeURIComponent(res.work_id)}/outline`);
+    } catch {
+      // Error toast already fired by the mutation's onError callback.
+    }
+  }
 
   return (
-    <>
-      <CreatorShellContent
-        mode="create"
-        canCreateWorld={canCreateWorld}
-        labels={{
-          createWorldTitle: tWorlds('emptyCreateWorldTitle'),
-          createWorldDescription: tWorlds('emptyCreateWorldDescription'),
-          createWorkTitle: tWorlds('emptyCreateWorkTitle'),
-          createWorkDescription: tWorlds('emptyCreateWorkDescription'),
-          createWorldDisabledTitle: tWorlds('create.desktop-only'),
-        }}
-        onCreateWorld={() => setCreateWorldOpen(true)}
-        onCreateWork={() => setCreateWorkOpen(true)}
-        data-testid="sidebar-create-panel"
-      />
-      <CreateWorldDialog open={createWorldOpen} onOpenChange={setCreateWorldOpen} />
-      <CreateWorkDialog
-        open={createWorkOpen}
-        onOpenChange={setCreateWorkOpen}
-        onCreated={(workId) => {
-          navigate(`/works/${encodeURIComponent(workId)}/outline`);
-        }}
-      />
-    </>
+    <CreatorShellContent
+      mode="create-inline"
+      canCreateWorld={canCreateWorld}
+      labels={inlineLabels}
+      worldIsPending={createWorld.isPending}
+      workIsPending={createWork.isPending}
+      onWorldSubmit={(title) => handleWorldSubmit(title)}
+      onWorkSubmit={(payload) => handleWorkSubmit(payload)}
+      data-testid="sidebar-create-panel"
+    />
   );
 }
 
