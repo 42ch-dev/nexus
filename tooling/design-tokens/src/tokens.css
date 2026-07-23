@@ -406,7 +406,7 @@
   --color-footer-profile-avatar-bg-hover: var(--color-gray-alpha-200);
   --color-footer-profile-avatar-bg-active: var(--color-blue-1000);
   --color-footer-profile-avatar-text: var(--color-gray-1000);
-  --color-footer-profile-avatar-text-active: var(--color-brand-deep-blue);
+  --color-footer-profile-avatar-text-active: var(--color-brand-white);
   --color-footer-profile-avatar-fallback-bg: var(--color-gray-alpha-200);
   --color-footer-profile-avatar-fallback-text: var(--color-gray-700);
   --color-footer-profile-add-button-bg: transparent;
@@ -420,7 +420,7 @@
   /* V1.94 Setup Wizard Step Chrome */
   --color-setup-wizard-step-circle-size: 32px;
   --color-setup-wizard-step-circle-active-bg: var(--color-blue-1000);
-  --color-setup-wizard-step-circle-active-text: var(--color-brand-deep-blue);
+  --color-setup-wizard-step-circle-active-text: var(--color-brand-white);
   --color-setup-wizard-step-circle-complete-bg: var(--color-green-700);
   --color-setup-wizard-step-circle-complete-text: #ffffff;
   --color-setup-wizard-step-circle-pending-bg: var(--color-gray-alpha-100);

@@ -78,6 +78,10 @@ describe('FooterProfiles', () => {
 
     await waitFor(() => expect(screen.getByTitle('Bob')).toHaveAttribute('aria-pressed', 'true'));
     expect(screen.getByTitle('Alice')).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.getByTitle('Bob')).toHaveClass(
+      'bg-footer-profile-avatar-bg-active',
+      'text-footer-profile-avatar-text-active',
+    );
   });
 
   it('switches the active creator via switch_active_creator on desktop', async () => {
