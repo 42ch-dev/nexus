@@ -39,7 +39,7 @@
     "sidecar:dev": "SIDECAR_PROFILE=debug bash scripts/fetch-sidecar.sh",
     "dev:design-studio": "pnpm -F design-studio dev",
     "dev:web": "pnpm -F web dev",
-    "dev:desktop": "pnpm run sidecar:dev && pnpm --filter web build && pnpm --filter desktop exec tauri dev --config src-tauri/tauri.dev.dist.conf.json",
+    "dev:desktop": "pnpm run sidecar:dev && pnpm --filter web build && pnpm --filter desktop run icons:generate && pnpm --filter desktop exec tauri dev --config src-tauri/tauri.dev.dist.conf.json",
     "dev:desktop:web": "pnpm run sidecar:dev && pnpm --filter desktop run dev",
     "build:design-studio": "pnpm -F design-studio build",
     "build:web": "pnpm -F web build",

@@ -1169,7 +1169,7 @@ Shared SSOT: `logoCompactMarkHeightPx` = **14px** (−30% from legacy `logoShell
 - Dark heroes / deepest panels: `logo-white.svg` mark; optional **wordmark** via `logo-text.svg` with `color: #FFFFFF` (or `currentColor` set to white).
 - Lockups (Studio Brand, marketing): square plate + optional `logo-text.svg` with shared clear-space; do not stretch either asset.
 - Inline chrome (buttons, badges, list rows): `<NexusMark>` only — set `color` on the parent. Prefer the static `logo-mono.svg` asset when the baked grayscale gradient is required.
-- Desktop app icon: compose `logo-primary-square.svg` as an **opaque full-bleed 1024×1024** square (no transparent margins); macOS applies the squircle mask — transparency defeats it. Consumers must not crop the plate or add inset padding in product code.
+- Desktop app icon: compose `logo-primary-square.svg` as an **opaque squircle plate** on a 1024×1024 canvas (6% opaque `#0D2B3E` margin, 22% corner radius on the inner plate — matches Studio VI-004). Transparent alpha borders defeat the macOS mask (V1.134 anti-pattern). Consumers must not add transparent inset padding or crop the plate in product code. Pipeline: `apps/desktop/src-tauri/icons/README.md`.
 
 **Rules:**
 

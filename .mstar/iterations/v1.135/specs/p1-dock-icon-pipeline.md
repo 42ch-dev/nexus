@@ -22,7 +22,8 @@ The macOS Dock tile for **nexus-desktop** still looks like a **sharp square**, n
 | **Source SSOT** | `apps/desktop/src-tauri/icons/source/` + `compose-app-icon.mjs` | Reproducible; LFS tracks `source-1024.png` |
 | **Generation path** | `pnpm --filter desktop run icons:generate` | compose → `tauri icon` → platform outputs |
 | **Bundle wiring** | `tauri.conf.json` → `bundle.icon[]` + Tauri-generated `Info.plist` → `CFBundleIconFile` | Verified: release bundle uses `Nexus.icns` |
-| **V1.134 opacity fix** | Retain as **baseline H1** — necessary, not sufficient | Author still sees square; RCA must continue |
+| **V1.134 opacity fix** | Retain as **baseline H1** — necessary, not sufficient | Author still sees square; RCA continued |
+| **V1.135 H6 compose fix** | Bake pre-rounded squircle plate on opaque canvas (Task 2) | Addresses square-plate geometry; **P1G-1 author Dock confirm still required** |
 | **Wire contracts** | `wire_contracts_changed: false` | Desktop asset pipeline only |
 
 ---
@@ -34,7 +35,7 @@ The macOS Dock tile for **nexus-desktop** still looks like a **sharp square**, n
 ```
 logo-primary-square.svg  (@42ch/nexus-ui assets)
         │
-        ▼  icons:compose (compose-app-icon.mjs)
+        ▼  icons:compose (compose-app-icon.mjs — baked squircle plate)
 source-1024.png ─────────────► app-icon-preview-256.png (QA preview, git)
         │
         ▼  tauri icon source-1024.png  (icons:generate)
@@ -52,9 +53,10 @@ Author-visible squircle tile  ◄── P1G-1 gate
 
 | Script | Entry | Outputs | Invariants |
 |--------|-------|---------|------------|
-| `icons:compose` | `src-tauri/icons/source/compose-app-icon.mjs` | `source/source-1024.png`, `source/app-icon-preview-256.png` | 1024×1024 opaque RGB; `hasAlpha: false`; plate `#0D2B3E` full-bleed; **no transparent margins** |
+| `icons:compose` | `src-tauri/icons/source/compose-app-icon.mjs` | `source/source-1024.png`, `source/app-icon-preview-256.png` | 1024×1024 opaque RGB; `hasAlpha: false`; **pre-rounded squircle plate** centered on canvas (6% opaque `#0D2B3E` margin, 22% corner radius on inner plate — matches Studio VI-004); **no transparent margins** |
 | `icons:generate` | `apps/desktop/package.json` | `icon.icns`, size PNGs under `src-tauri/icons/` | Runs compose first; deletes `ios/`, `android/` |
 | `predev` / `beforeBuildCommand` | `tauri.conf.json` | Regenerates icons before dev/build | Fresh clone must not require committed generated binaries |
+| `dev:desktop` (root) | `package.json` | Runs `icons:generate` before `exec tauri dev` | H7 fix — `exec tauri dev` bypasses `predev`; root script wires generate explicitly |
 
 ### Config contracts
 
@@ -88,8 +90,8 @@ Stop at first **confirmed** primary cause that explains author square **and** pa
 | **3** | **H3** | Bundle does not ship regenerated icon (wrong path, stale `Resources/`) | Inspect built `.app/Contents/Resources/Nexus.icns` hash/mtime vs `src-tauri/icons/icon.icns`; `plutil -p Info.plist` for `CFBundleIconFile` | Fix `bundle.icon` / build hooks; ensure `beforeBuildCommand` runs for author test path |
 | **4** | **H4** | Dock shows **wrong binary** (stale install, duplicate bundle, dev vs release) | Document author test command (`pnpm dev:desktop` vs `tauri build`); `ps aux \| grep -i nexus`; `lsappinfo` / Get Info on running app path; check for second `io.nexus42.desktop` copy | Author reinstall from documented path; remove duplicate `.app` |
 | **5** | **H5** | LaunchServices cache beyond `killall Dock` | After H4 clean install: quit all instances → rebuild → `killall Dock` → relaunch; if fail: remove old `.app` + empty Trash → `touch` bundle → repeat | Document extended cache ritual in README; escalate residual `@author` |
-| **6** | **H6** | Source geometry reads as square plate under mask (full-bleed square `#0D2B3E` to edges) vs true mask failure | Compare Dock peer apps; overlay macOS squircle template on `source-1024.png`; if mask works in Preview but Dock square → points to H2–H5 not geometry | Adjust compose (rounded plate in asset) **only** if H2–H5 falsified and geometry is sole explanation |
-| **7** | **H7** | `tauri dev` / debug bundle uses different icon path than release | Compare `target/debug/bundle` vs `target/release/bundle` Resources; verify `predev` ran | Align dev author test with path that ships correct icns |
+| **6** | **H6** | Source geometry reads as square plate under mask (full-bleed square `#0D2B3E` to edges) vs true mask failure | Compare Dock peer apps; overlay macOS squircle template on `source-1024.png`; if mask works in Preview but Dock square → points to H2–H5 not geometry | **Fixed (Task 2):** bake visible squircle rounding into compose — pre-rounded plate on opaque canvas (6% inset, 22% radius) |
+| **7** | **H7** | `tauri dev` / debug bundle uses different icon path than release | Compare `target/debug/bundle` vs `target/release/bundle` Resources; verify `predev` ran | **Fixed (Task 2):** root `pnpm dev:desktop` runs `icons:generate` before `exec tauri dev` |
 
 **Process rule:** Do not close plan on H1 alone. P1G-4 requires written RCA with **primary** cause selected from falsified/confirmed set.
 
