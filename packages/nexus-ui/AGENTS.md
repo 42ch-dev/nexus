@@ -14,6 +14,7 @@ Every primitive promoted into this package is recorded here with: component name
 | `<Select>` | V1.101 P2 | 2025-05 | Native Select presentational. |
 | `<Toast>` (`ToastProvider` / `Toaster` / `useToast`) | V1.106 P0 | 2025-05 | Studio Surfaces fixtures. |
 | `<TransportErrorBlock>` | V1.129 P1 — `transport-error-ux.md` | 2026-07-21 | Pure presentational transport-failure block. Props: `kind`, `onRetry?`, `onOpenSettings?`, `detail?`, `title?`. No `react-i18next` import; CTA matrix driven by `kind`. |
+| `<Tabs>` (`TabsList` / `TabsTrigger` / `TabsContent`) | V1.137 P2 — `p2-tabs-nexus-ui-promotion` | 2026-07-23 | React context compound; controlled + uncontrolled. Ported from `apps/web/src/components/ui/tabs.tsx`; package `cn` only. HubTabBar out of scope. |
 
 A promotion entry alone is not sufficient — the workflow in root `AGENTS.md` (UI Component Policy) must be followed: Studio fixture first → package promotion → app wiring.
 
@@ -39,7 +40,7 @@ A promotion entry alone is not sufficient — the workflow in root `AGENTS.md` (
 
 **Do not** assume “import everything from nexus-ui.” App shell, canvas chrome, setup compositions, and settings section bodies stay in `apps/web` (surfaced in Studio via `@web-*`) until an explicit promotion decision.
 
-- **Consumer wrappers** under `apps/web/src/components/ui/` that re-export from this package (`button.tsx`, `badge.tsx`, `card.tsx`, `input.tsx`, `label.tsx`, `textarea.tsx`, `select.tsx`) **must not** import `clsx`, `class-variance-authority`, `tailwind-merge`, `@/lib/*`, or deep-import `@42ch/nexus-ui/src/*`. The package is the sole class-merge authority (`cn`). Enforced by `tooling/check-ui-guardrails.sh` (CI job `ui-guardrails`).
+- **Consumer wrappers** under `apps/web/src/components/ui/` that re-export from this package (`button.tsx`, `badge.tsx`, `card.tsx`, `input.tsx`, `label.tsx`, `textarea.tsx`, `select.tsx`, `tabs.tsx`) **must not** import `clsx`, `class-variance-authority`, `tailwind-merge`, `@/lib/*`, or deep-import `@42ch/nexus-ui/src/*`. The package is the sole class-merge authority (`cn`). Enforced by `tooling/check-ui-guardrails.sh` (CI job `ui-guardrails`).
 
 - **Must not** import from `apps/web`, `apps/design-studio`, `nexus-platform`, app aliases, daemon clients, app routing/state, Tauri IPC, or localStorage
 - **Must not** export product screens, layout shells, Web-only primitives, data-aware controls, or app chrome

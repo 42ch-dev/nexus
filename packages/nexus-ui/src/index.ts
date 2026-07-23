@@ -7,6 +7,7 @@
  * V1.101 P2 ships: `<Select>`.
  * V1.106 P0 ships: `<Toast>` (+ ToastProvider / Toaster / useToast).
  * V1.129 P1 ships: `<TransportErrorBlock>`.
+ * V1.137 P2 ships: `<Tabs>` (+ TabsList / TabsTrigger / TabsContent).
  * VI logo upgrade ships: timeline `<NexusMark>`, `logoVariants.text`,
  * Studio-only `<NexusLogoVariant>` specimens.
  */
@@ -80,3 +81,14 @@ export {
   type TransportErrorBlockProps,
   type TransportErrorKind,
 } from './components/transport-error-block';
+
+// V1.137 P2 — promoted Tabs presentational primitive (React context compound).
+export {
+  Tabs,
+  TabsList,
+  TabsTrigger,
+  TabsContent,
+  type TabsProps,
+  type TabsTriggerProps,
+  type TabsContentProps,
+} from './components/tabs';

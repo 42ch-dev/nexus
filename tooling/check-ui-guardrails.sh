@@ -22,7 +22,7 @@ VIOLATIONS=0
 # Single SSOT for promoted UI primitives (R-V1100P1QC1-W002).
 # Drives both wrapper-candidate paths and Studio @web-ui/* bans.
 # When promoting a new primitive: append here only — do not duplicate lists below.
-PROMOTED_PRIMITIVES=(button badge card input label textarea select)
+PROMOTED_PRIMITIVES=(button badge card input label textarea select tabs)
 
 # ── helper: check file(s) for forbidden pattern ──
 # Usage: forbid "label" "pattern" file1 [file2 ...]
