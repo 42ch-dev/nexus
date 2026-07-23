@@ -857,3 +857,16 @@ Archived from [deferred-features-cross-version-tracker.md](deferred-features-cro
 | Compound docs | `settings-modal-primary-host.md`, `chronos-titlebar-overlay.md`; residual archival anti-pattern update |
 | Open at close (human) | `R-VI-003` Dock live, `R-V1131P0-QC2-W-001` Overlay H2–H4, `R-VI-002` / `R-VI-004` gallery notes / wordmark sign-off |
 
+
+### V1.137 delivery snapshot (Shipped — PR pending)
+
+| Category | Position |
+|----------|----------|
+| Delivery SSOT | [v1.137/delivery-compass.md](../iterations/v1.137/delivery-compass.md) |
+| Shipped at | 2026-07-23 (iteration-close; PR to `main` follows) |
+| Branch | `iteration/v1.137` |
+| Scope | Light fill→white contrast (wizard + footer avatar); Button `tiny`; TE quiet `label-12`; Tabs → `@42ch/nexus-ui` |
+| Plans | P0 fill-text contrast, P1 Button tiny + TE CTA, P2 Tabs promotion (all Done) |
+| Wire contracts | Unchanged |
+| Compound | Updated `nexus-brand-token-hierarchy.md` (semantic-token fill audit); DESIGN Tabs classification → promoted |
+| Open residuals | `R-V1137P1-001`–`003`, `R-V1137P2-002` (defer); `R-V1137P2-001` fixed at close |
