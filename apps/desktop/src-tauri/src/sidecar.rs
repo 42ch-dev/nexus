@@ -11,6 +11,7 @@
 //! `.mstar/specs/desktop-shell.md` §7/§8.
 
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
@@ -32,6 +33,9 @@ const HEALTH_POLL_INTERVAL_FAST: Duration = Duration::from_millis(100);
 /// Duration of the fast-poll window at the start of `wait_for_first_health`.
 const FAST_POLL_WINDOW: Duration = Duration::from_secs(1);
 const HEALTH_START_TIMEOUT: Duration = Duration::from_secs(15);
+/// Extra slack added to [`HEALTH_START_TIMEOUT`] for `restart_daemon`'s outer
+/// timeout budget — covers sidecar spawn plus the port-free probe window.
+const RESTART_START_BUDGET_SLACK: Duration = Duration::from_secs(1);
 const RESTART_BACKOFF_BASE: Duration = Duration::from_millis(500);
 const RESTART_BACKOFF_MAX: Duration = Duration::from_secs(8);
 const MAX_RESTART_ATTEMPTS: u32 = 5;
@@ -116,7 +120,12 @@ struct SidecarInner {
     /// restart the process.
     stop_requested: bool,
     /// True while a restart_daemon operation is in flight (single-flight guard).
-    restart_in_progress: bool,
+    ///
+    /// Stored as an `AtomicBool` (R-V1130P0-QC1-W-003) so a [`RestartGuard`]
+    /// can clear it synchronously from `Drop` without awaiting the sidecar
+    /// mutex — guaranteeing the flag is released even if `restart_daemon`
+    /// panics between set and clear.
+    restart_in_progress: AtomicBool,
     /// Number of consecutive crash-restart attempts since the last healthy run.
     restart_count: u32,
     /// App handle used to emit lifecycle state events to the SPA. `None` in
@@ -133,6 +142,33 @@ struct SidecarInner {
 #[derive(Clone)]
 pub struct SidecarManager(Arc<Mutex<SidecarInner>>);
 
+/// RAII guard that clears `restart_in_progress` on drop
+/// (R-V1130P0-QC1-W-003).
+///
+/// Created in `restart_daemon` immediately after the flag is set. Because
+/// `Drop` cannot await, the guard reaches the flag via the sidecar mutex's
+/// non-blocking `try_lock`: at every drop site (normal return, early error,
+/// or panic unwind) the mutex is uncontended in practice, so the flag is
+/// reliably released. If the lock is briefly contended during a rare unwind,
+/// the flag is left for the next `restart_daemon` attempt to observe —
+/// strictly better than the previous unconditional wedge, and rare enough
+/// that the warn log is sufficient.
+struct RestartGuard {
+    inner: Arc<Mutex<SidecarInner>>,
+}
+
+impl Drop for RestartGuard {
+    fn drop(&mut self) {
+        match self.inner.try_lock() {
+            Ok(inner) => inner.restart_in_progress.store(false, Ordering::SeqCst),
+            Err(_) => tracing::warn!(
+                "could not acquire sidecar lock to clear restart_in_progress on drop; \
+                 a concurrent caller may observe a stale single-flight flag"
+            ),
+        }
+    }
+}
+
 impl SidecarManager {
     /// Create a manager for the resolved loopback port.
     pub fn new(port: u16) -> Self {
@@ -144,7 +180,7 @@ impl SidecarManager {
             owned: false,
             child: None,
             stop_requested: false,
-            restart_in_progress: false,
+            restart_in_progress: AtomicBool::new(false),
             restart_count: 0,
             app_handle: None,
             stderr_tail: None,
@@ -545,23 +581,24 @@ impl SidecarManager {
         // Single-flight guard — join waiters until the active restart settles.
         {
             let mut inner = self.0.lock().await;
-            if inner.restart_in_progress {
+            if inner.restart_in_progress.load(Ordering::SeqCst) {
                 drop(inner);
                 loop {
                     sleep(Duration::from_millis(50)).await;
                     let inner = self.0.lock().await;
-                    if !inner.restart_in_progress {
+                    if !inner.restart_in_progress.load(Ordering::SeqCst) {
                         return match inner.state {
                             DaemonState::Running => Ok(()),
-                            DaemonState::Error => Err(inner.detail.clone().unwrap_or_else(|| {
-                                "Daemon restart failed.".to_string()
-                            })),
+                            DaemonState::Error => Err(inner
+                                .detail
+                                .clone()
+                                .unwrap_or_else(|| "Daemon restart failed.".to_string())),
                             _ => Err("Daemon restart did not complete.".to_string()),
                         };
                     }
                 }
             }
-            inner.restart_in_progress = true;
+            inner.restart_in_progress.store(true, Ordering::SeqCst);
             inner.stop_requested = true;
             inner.state = DaemonState::Starting;
             inner.version = None;
@@ -569,16 +606,23 @@ impl SidecarManager {
         }
         self.notify().await;
 
+        // RAII panic-safety net (R-V1130P0-QC1-W-003). Clearing
+        // `restart_in_progress` is now owned by this guard's Drop, which runs
+        // on every exit path — normal return, early `return Err`, or panic
+        // unwind — so a panic between set and clear can no longer wedge the
+        // single-flight gate forever. The manual clears that used to be
+        // scattered through this method have been removed in favor of it.
+        let _restart_guard = RestartGuard {
+            inner: self.0.clone(),
+        };
+
         let (owned, port) = {
             let inner = self.0.lock().await;
             (inner.owned, inner.port)
         };
 
         if owned {
-            if let Err(e) = self.stop().await {
-                self.0.lock().await.restart_in_progress = false;
-                return Err(e);
-            }
+            self.stop().await?;
         } else {
             if let Some(health) = probe_health(port).await {
                 if health.status == "ok" || health.status == "healthy" {
@@ -586,7 +630,6 @@ impl SidecarManager {
                     let Some(pid) = pid else {
                         // Healthy listener but unverifiable PID — never fall
                         // through to start_with_budget attach (silent no-op).
-                        self.0.lock().await.restart_in_progress = false;
                         return Err(
                             "Nexus couldn't restart — could not verify the daemon process \
                              identity. Quit the other Nexus instance, or set a different port."
@@ -598,10 +641,8 @@ impl SidecarManager {
                     if pid2 == Some(pid) {
                         stop_external_daemon(port, pid).await;
                     } else {
-                        self.0.lock().await.restart_in_progress = false;
                         return Err(
-                            "daemon PID changed during restart — possible handoff race"
-                                .to_string(),
+                            "daemon PID changed during restart — possible handoff race".to_string()
                         );
                     }
                 }
@@ -617,7 +658,7 @@ impl SidecarManager {
             self.notify().await;
         }
 
-        // Wait for the port to become free (up to 3 s).
+        // Wait for the port to become free (up to 3 s).
         let port = self.port().await;
         let deadline = Instant::now() + PORT_FREE_POLL_TIMEOUT;
         while Instant::now() < deadline {
@@ -627,9 +668,26 @@ impl SidecarManager {
             sleep(Duration::from_millis(100)).await;
         }
 
-        let result = self.start_with_budget(app, true).await;
-        self.0.lock().await.restart_in_progress = false;
-        result
+        // Bound the final start so a hung health probe can't hold
+        // `restart_in_progress` open indefinitely (R-V1130P0-QC3-W-001). The
+        // `_restart_guard` clears the flag on drop regardless of outcome. The
+        // `RESTART_START_BUDGET_SLACK` over `HEALTH_START_TIMEOUT` covers spawn
+        // + the port probe; computed at runtime because `Duration + Duration`
+        // is not yet const-stable.
+        let restart_budget = HEALTH_START_TIMEOUT + RESTART_START_BUDGET_SLACK;
+        match tokio::time::timeout(restart_budget, self.start_with_budget(app, true)).await {
+            Ok(result) => result,
+            Err(_elapsed) => {
+                tracing::error!(
+                    budget_ms = restart_budget.as_millis() as u64,
+                    "restart_daemon start_with_budget exceeded its budget; aborting"
+                );
+                Err(format!(
+                    "Daemon restart did not complete within {:?}.",
+                    restart_budget
+                ))
+            }
+        }
     }
 
     /// Monitor task: waits for the owned sidecar to exit, then restarts it with
@@ -657,7 +715,7 @@ impl SidecarManager {
             (
                 inner.owned
                     && !inner.stop_requested
-                    && !inner.restart_in_progress
+                    && !inner.restart_in_progress.load(Ordering::SeqCst)
                     && inner.state == DaemonState::Running,
                 inner.restart_count,
             )
@@ -712,7 +770,7 @@ impl SidecarManager {
             let mut inner = self.0.lock().await;
             // If a user-initiated restart is in progress, do not clobber
             // state — restart_daemon owns the lifecycle transition.
-            if inner.restart_in_progress {
+            if inner.restart_in_progress.load(Ordering::SeqCst) {
                 return;
             }
             if inner.state == DaemonState::Running || inner.state == DaemonState::Starting {
@@ -1098,6 +1156,7 @@ mod tests {
         trim_stderr_tail, DaemonState, PortState, HEALTH_PROBE_TIMEOUT, HEALTH_START_TIMEOUT,
         MAX_RESTART_ATTEMPTS, PORT_FREE_POLL_TIMEOUT, STDERR_TAIL_MAX_BYTES,
     };
+    use std::sync::atomic::Ordering;
     use std::sync::Arc;
     use std::time::Duration;
 
@@ -1905,7 +1964,7 @@ mod tests {
             let mut inner = manager.0.lock().await;
             inner.state = DaemonState::Running;
             inner.owned = true;
-            inner.restart_in_progress = true;
+            inner.restart_in_progress.store(true, Ordering::SeqCst);
         }
 
         // A concurrent call while restart_in_progress is true must join the
@@ -1915,7 +1974,7 @@ mod tests {
         // guard field that gates the body.
         let inner = manager.0.lock().await;
         assert!(
-            inner.restart_in_progress,
+            inner.restart_in_progress.load(Ordering::SeqCst),
             "restart_in_progress should be true"
         );
     }
@@ -1933,7 +1992,7 @@ mod tests {
             // set Starting + restart_in_progress. The old crash monitor fires.
             inner.state = DaemonState::Starting;
             inner.owned = false;
-            inner.restart_in_progress = true;
+            inner.restart_in_progress.store(true, Ordering::SeqCst);
             inner.stop_requested = true;
             inner.child = None;
         }
@@ -1944,7 +2003,7 @@ mod tests {
 
         let inner = manager.0.lock().await;
         assert!(
-            inner.restart_in_progress,
+            inner.restart_in_progress.load(Ordering::SeqCst),
             "restart_in_progress must still be true — handle_crash should not touch it"
         );
         assert_eq!(

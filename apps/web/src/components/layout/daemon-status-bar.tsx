@@ -21,6 +21,7 @@ import { Button } from '@/components/ui/button';
 import { useDesktopCapabilities } from '@/lib/client-context';
 import { errorMessage } from '@/lib/error-message';
 import type { DaemonStatus } from '@/lib/nexus/desktop-capabilities';
+import { isPortConflictError } from '@/lib/nexus/port-conflict';
 import { useToast } from '@/lib/use-toast';
 import { launchCommandMatches, useAgentProfile, useScanAgents } from '@/api/queries';
 import { resolveCatalogItem } from '@/lib/agent-catalog';
@@ -148,9 +149,9 @@ export function DaemonStatusBar() {
       await refresh();
     } catch (err) {
       const raw = errorMessage(err) || '';
-      const isPortConflict = raw.toLowerCase().includes('port') && raw.toLowerCase().includes('in use');
-      const title = isPortConflict ? t('daemon.restartPortConflict') : t('daemon.restartFailed');
-      const description = isPortConflict ? raw : (raw || t('daemon.restartFailedFallback'));
+      const portConflict = isPortConflictError(raw);
+      const title = portConflict ? t('daemon.restartPortConflict') : t('daemon.restartFailed');
+      const description = portConflict ? raw : (raw || t('daemon.restartFailedFallback'));
       toast({ variant: 'error', title, description });
     } finally {
       setIsLoading(false);

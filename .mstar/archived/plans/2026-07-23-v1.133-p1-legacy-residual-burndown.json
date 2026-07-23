@@ -1,0 +1,36 @@
+{
+  "id": "2026-07-23-v1.133-p1-legacy-residual-burndown",
+  "status": "Done",
+  "file": ".mstar/plans/2026-07-23-v1.133-p1-legacy-residual-burndown.md",
+  "metadata": {
+    "primary_spec": ".mstar/iterations/v1.133/specs/legacy-residual-burndown.md",
+    "description": "Triage and close high-impact open residuals from V1.126-V1.132",
+    "iteration_id": "V1.133",
+    "iteration_compass": "v1.133/delivery-compass.md",
+    "spec_integration_branch": "iteration/v1.133",
+    "working_branch": "plan/v1.133-p1-legacy-residual-burndown",
+    "merge_target": "iteration/v1.133",
+    "wire_contracts_changed": false,
+    "wave": "1",
+    "seq": "1",
+    "qa_verdict": "Pass",
+    "merge_commit": "0c4b3f41",
+    "merged_at": "2026-07-23T19:00:00Z"
+  },
+  "task_commits": [
+    {
+      "task": 1,
+      "base": "1e6ed0ccfce8ec38679885776bc0c94bd21e3b4d",
+      "head": "f4f8e8d4",
+      "status": "complete",
+      "notes": "3 fix-now residuals: port-conflict helper, RAII guard, restart timeout; review approved"
+    },
+    {
+      "task": "pm-triage",
+      "base": "f4f8e8d4",
+      "head": "baf245be",
+      "status": "complete",
+      "notes": "PM triage: 5 closed (3 fixed + 2 stale), 2 superseded archived"
+    }
+  ]
+}
