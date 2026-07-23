@@ -2,6 +2,8 @@ import path from 'node:path';
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 
+import { createDaemonProxyRoute } from './src/lib/nexus/daemon-proxy';
+
 // Vite config for the Nexus local Web UI.
 //
 // Dev: the SPA runs on the Vite dev server and proxies Daemon API requests to
@@ -22,10 +24,7 @@ const daemonProxy = {
   // Daemon API — keyless on loopback (V1.20 model). BrowserClient is
   // same-origin against this proxy in dev/preview; in release it is
   // same-origin against the daemon port that serves the embedded SPA.
-  '/v1/daemon': {
-    target: daemonUrl,
-    changeOrigin: false,
-  },
+  '/v1/daemon': createDaemonProxyRoute(daemonUrl),
 } as const;
 
 // https://vitejs.dev/config/

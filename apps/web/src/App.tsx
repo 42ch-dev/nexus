@@ -190,11 +190,11 @@ function AppRoutes() {
 export function App() {
   return (
     <ActiveCreatorProvider>
-      {/* V1.130: auto-select Default profile once creators are loaded. Requires
-          ActiveCreatorProvider + QueryClientProvider (outer AppProviders). */}
-      <DefaultProfileCoordinator />
       <SetupCompletedProvider>
         <DaemonLaunchGate>
+          {/* V1.134 P0: gate creator probes until daemon ready — avoids
+              pre-boot `/v1/daemon/creators*` traffic during dist-load startup. */}
+          <DefaultProfileCoordinator />
           <SettingsModalProvider>
             <AppRoutes />
             <SettingsModalHost />
