@@ -154,6 +154,7 @@ describe('Sidebar', () => {
 
   it('renders localized labels when locale is zh-CN', async () => {
     window.localStorage.setItem('nexus-web-locale', 'zh-CN');
+    await i18n.changeLanguage('zh-CN');
     const user = userEvent.setup();
     useSidebarHandlers();
 
@@ -161,6 +162,9 @@ describe('Sidebar', () => {
 
     expect(screen.getByRole('tab', { name: '创作', selected: true })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: '编排' })).toBeInTheDocument();
+    expect(screen.getByTestId('sidebar-create-tab-world')).toHaveTextContent('世界');
+    expect(screen.getByTestId('sidebar-create-tab-work')).toHaveTextContent('作品');
+    expect(screen.getByLabelText('标题')).toBeInTheDocument();
     expect(screen.queryByRole('link', { name: '全部作品' })).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: '世界' })).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: '记忆' })).not.toBeInTheDocument();

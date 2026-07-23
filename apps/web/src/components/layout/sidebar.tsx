@@ -53,6 +53,7 @@ function tabFromPathname(pathname: string): ShellSidebarTab {
 function CreatorCreatePanel() {
   const { t: tShell } = useTranslation('shell');
   const { t: tWorlds } = useTranslation('worlds');
+  const { t: tCommon } = useTranslation('common');
   const navigate = useNavigate();
   const { toast } = useToast();
   const client = useNexusClient();
@@ -66,6 +67,7 @@ function CreatorCreatePanel() {
         world: tShell('hub.tabs.world'),
         work: tShell('hub.tabs.work'),
       },
+      tabsAriaLabel: tShell('hub.create.tabs.ariaLabel'),
       world: {
         titleLabel: tShell('worldCreate.titleLabel'),
         titlePlaceholder: tShell('worldCreate.titlePlaceholder'),
@@ -80,11 +82,14 @@ function CreatorCreatePanel() {
         ideaLabel: tShell('workCreate.ideaLabel'),
         ideaPlaceholder: tShell('workCreate.ideaPlaceholder'),
         profileLabel: tShell('workCreate.profileLabel'),
-        profileOptions: WORK_PROFILES,
+        profileOptions: WORK_PROFILES.map((profile) => ({
+          value: profile.value,
+          label: tCommon(`status.${profile.value}`),
+        })),
         submit: createWork.isPending ? tShell('workCreate.creating') : tShell('workCreate.create'),
       },
     }),
-    [createWork.isPending, createWorld.isPending, tShell, tWorlds],
+    [createWork.isPending, createWorld.isPending, tCommon, tShell, tWorlds],
   );
 
   async function handleWorldSubmit(title: string) {

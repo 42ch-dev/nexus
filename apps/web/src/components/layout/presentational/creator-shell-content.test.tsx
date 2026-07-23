@@ -20,6 +20,7 @@ const CONTROLLER_LABELS = {
 
 const INLINE_CREATE_LABELS = {
   tabs: { world: 'World', work: 'Work' },
+  tabsAriaLabel: 'Sidebar create — World or Work',
   world: {
     titleLabel: 'World title',
     titlePlaceholder: 'Enter a world name',

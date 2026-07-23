@@ -22,6 +22,7 @@ export type CreatorShellCreateLabels = {
 
 export type CreatorShellInlineCreateLabels = {
   tabs: HubTabBarLabels;
+  tabsAriaLabel: string;
   world: {
     titleLabel: string;
     titlePlaceholder: string;
@@ -294,7 +295,7 @@ export function CreatorShellContent(props: CreatorShellContentProps) {
             activeTab={createTab}
             onTabChange={setCreateTab}
             labels={labels.tabs}
-            ariaLabel="Sidebar create entity kind"
+            ariaLabel={labels.tabsAriaLabel}
             tabIdPrefix="sidebar-create-tab"
             tabPanelId="sidebar-create-tabpanel"
             data-testid="sidebar-create-tab"

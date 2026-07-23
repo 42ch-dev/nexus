@@ -35,6 +35,7 @@ import { ORCHESTRATOR_NAV } from '@/fixtures/shell-nav-data';
 
 const INLINE_CREATE_LABELS = {
   tabs: { world: '世界', work: '作品' } satisfies HubTabBarLabels,
+  tabsAriaLabel: '侧边栏创建 — 世界或作品',
   world: {
     titleLabel: '世界标题',
     titlePlaceholder: '输入世界名称',
