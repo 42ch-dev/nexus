@@ -4,12 +4,14 @@
   "plans": [
     {
       "plan_id": "2026-07-23-v1.134-p0-desktop-startup-500",
-      "status": "Todo",
+      "status": "Done",
       "metadata": {
         "spec_integration_branch": "iteration/v1.134",
         "merge_target": "iteration/v1.134",
         "iteration_refs": "V1.134",
-        "spec_refs": [".mstar/specs/desktop-shell.md"]
+        "spec_refs": [
+          ".mstar/specs/desktop-shell.md"
+        ]
       }
     },
     {
@@ -19,7 +21,10 @@
         "spec_integration_branch": "iteration/v1.134",
         "merge_target": "iteration/v1.134",
         "iteration_refs": "V1.134",
-        "spec_refs": [".mstar/specs/desktop-shell.md", "DESIGN.md"]
+        "spec_refs": [
+          ".mstar/specs/desktop-shell.md",
+          "DESIGN.md"
+        ]
       }
     },
     {
@@ -29,7 +34,11 @@
         "spec_integration_branch": "iteration/v1.134",
         "merge_target": "iteration/v1.134",
         "iteration_refs": "V1.134",
-        "spec_refs": ["DESIGN.md", "DESIGN.dark.md", ".mstar/specs/web-ui.md"]
+        "spec_refs": [
+          "DESIGN.md",
+          "DESIGN.dark.md",
+          ".mstar/specs/web-ui.md"
+        ]
       }
     },
     {
@@ -40,7 +49,11 @@
         "merge_target": "iteration/v1.134",
         "iteration_refs": "V1.134",
         "primary_spec": ".mstar/iterations/v1.134/specs/p3-creator-hub-dual-pane-ia.md",
-        "spec_refs": [".mstar/specs/web-ui.md", ".mstar/specs/desktop-shell.md", "DESIGN.md"]
+        "spec_refs": [
+          ".mstar/specs/web-ui.md",
+          ".mstar/specs/desktop-shell.md",
+          "DESIGN.md"
+        ]
       }
     }
   ],
@@ -593,6 +606,72 @@
         "decision": "defer",
         "owner": "@fullstack-dev",
         "target": "post-V1.133"
+      }
+    ],
+    "2026-07-23-v1.134-p0-desktop-startup-500": [
+      {
+        "id": "R-V1134P0-001",
+        "severity": "nit",
+        "title": "Move daemon-proxy helper out of SPA src/",
+        "lifecycle": "open",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.134"
+      },
+      {
+        "id": "R-V1134P0-002",
+        "severity": "nit",
+        "title": "Refresh Review Gate Summary Branch HEAD pin",
+        "lifecycle": "open",
+        "decision": "accept",
+        "owner": "@project-manager",
+        "target": "V1.134-p0",
+        "note": "Reviewed tip 69725103; summary cites AC-0 commit 6aa25d0c"
+      },
+      {
+        "id": "R-V1134P0-003",
+        "severity": "nit",
+        "title": "Extend proxy tests for configure + 502 branch",
+        "lifecycle": "open",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.134"
+      },
+      {
+        "id": "R-V1134P0-004",
+        "severity": "low",
+        "title": "Attach-race toast after gate unlock on HTTP lag",
+        "lifecycle": "open",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.134"
+      },
+      {
+        "id": "R-V1134P0-005",
+        "severity": "nit",
+        "title": "App mount-order gating regression test",
+        "lifecycle": "open",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.134"
+      },
+      {
+        "id": "R-V1134P0-006",
+        "severity": "nit",
+        "title": "Narrow CONNECT_ERROR_CODES to ECONNREFUSED",
+        "lifecycle": "open",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.134"
+      },
+      {
+        "id": "R-V1134P0-007",
+        "severity": "nit",
+        "title": "Vite stderr proxy-error noise during boot",
+        "lifecycle": "open",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.134"
       }
     ]
   }
