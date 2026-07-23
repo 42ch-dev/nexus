@@ -111,9 +111,6 @@ export function HubCardListPane({
         className="flex h-full min-h-0 flex-col overflow-auto bg-background-200"
         data-testid={testId}
         data-active-tab={activeTab}
-        role="tabpanel"
-        id={`hub-tabpanel-${activeTab}-list`}
-        aria-labelledby={`hub-tab-${activeTab}`}
       >
         <HubEmptyState
           copy={emptyCopy}
@@ -129,9 +126,6 @@ export function HubCardListPane({
       className="flex h-full min-h-0 flex-col overflow-auto bg-background-200 p-6"
       data-testid={testId}
       data-active-tab={activeTab}
-      role="tabpanel"
-      id={`hub-tabpanel-${activeTab}-list`}
-      aria-labelledby={`hub-tab-${activeTab}`}
     >
       <ul
         className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3"

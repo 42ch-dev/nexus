@@ -1,5 +1,7 @@
 import type { ReactNode } from 'react';
 
+import { cn } from '@/lib/utils';
+
 import {
   HubCardListPane,
   type HubCardListItem,
@@ -30,6 +32,7 @@ export type HubDualPaneChromeProps = {
   /** When omitted, derived from active tab item count (expanded when zero). */
   createExpanded?: boolean;
   header?: ReactNode;
+  className?: string;
   'data-testid'?: string;
 };
 
@@ -52,6 +55,7 @@ export function HubDualPaneChrome({
   tabBarAriaLabel,
   createExpanded,
   header,
+  className,
   'data-testid': testId = 'hub-dual-pane-chrome',
 }: HubDualPaneChromeProps) {
   const activeItems = activeTab === 'world' ? worlds : works;
@@ -59,7 +63,10 @@ export function HubDualPaneChrome({
 
   return (
     <div
-      className="flex min-h-[420px] flex-col overflow-hidden rounded-card border border-gray-alpha-300 bg-background-100"
+      className={cn(
+        'flex min-h-[420px] flex-col overflow-hidden rounded-card border border-gray-alpha-300 bg-background-100',
+        className,
+      )}
       data-testid={testId}
       data-active-tab={activeTab}
     >
@@ -71,7 +78,13 @@ export function HubDualPaneChrome({
         ariaLabel={tabBarAriaLabel}
         data-testid={`${testId}-tab-bar`}
       />
-      <div className="flex min-h-0 flex-1">
+      <div
+        id="hub-tabpanel"
+        role="tabpanel"
+        aria-labelledby={`hub-tab-${activeTab}`}
+        className="flex min-h-0 flex-1"
+        data-testid={`${testId}-tabpanel`}
+      >
         <div
           className="w-full max-w-[22rem] shrink-0 border-r border-gray-alpha-400 bg-background-100"
           data-testid={`${testId}-workspace`}
@@ -85,7 +98,10 @@ export function HubDualPaneChrome({
             data-testid={`${testId}-workspace-pane`}
           />
         </div>
-        <div className="min-w-0 flex-1" data-testid={`${testId}-card-list`}>
+        <div
+          className="min-w-0 flex-1"
+          data-testid={`${testId}-card-list`}
+        >
           <HubCardListPane
             activeTab={activeTab}
             worlds={worlds}

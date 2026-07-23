@@ -140,9 +140,6 @@ export function HubWorkspacePane({
       className="flex h-full min-h-0 flex-col overflow-auto p-6"
       data-testid={testId}
       data-active-tab={activeTab}
-      role="tabpanel"
-      id={`hub-tabpanel-${activeTab}`}
-      aria-labelledby={`hub-tab-${activeTab}`}
     >
       {createExpanded ? (
         <InlineCreateForm

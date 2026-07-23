@@ -1,45 +1,17 @@
-import { useTranslation } from 'react-i18next';
-
-import { CreatorEntityListsPanel } from '@/components/layout/creator-entity-lists-panel';
-import { CreatorShellContent } from '@/components/layout/presentational/creator-shell-content';
-import { useCreatorEntitySelection } from '@/components/layout/creator-entity-selection-context';
+import { CreatorHubDualPane } from '@/components/layout/creator-hub-dual-pane';
 
 /**
- * Creator hub content — right-side Worlds/Works lists vs Controller stub on
- * `/worlds` and `/works`.
+ * Creator hub content — stable dual-pane shell (V1.134 P3).
  *
- * Create actions live in the left {@link Sidebar} Create-only panel (V1.132 P3).
- * Selection SSOT is {@link useCreatorEntitySelection}; canvas routes under
- * `/works/:workId/*` and `/worlds/:worldId/*` remain orthogonal per spec.
+ * Shared World/Work tab bar spans both panes; left workspace shows inline
+ * create affordance; right pane shows single-kind cards or empty state.
+ * Card selection navigates to canvas routes — no controller-stub replace.
+ * Canvas routes under `/works/:workId/*` and `/worlds/:worldId/*` stay orthogonal.
  */
 export function CreatorHubPage() {
-  const { t: tShell } = useTranslation('shell');
-  const { selectedEntity, clearSelectedEntity } = useCreatorEntitySelection();
-
-  if (selectedEntity) {
-    const kindLabel =
-      selectedEntity.kind === 'world'
-        ? tShell('creator.entityKind.world')
-        : tShell('creator.entityKind.work');
-
-    return (
-      <CreatorShellContent
-        mode="controller"
-        selectedEntity={selectedEntity}
-        labels={{
-          title: tShell('creator.controllerTitle'),
-          description: tShell('creator.controllerDescription'),
-          selectedSummary: tShell('creator.controllerSelected', {
-            kind: kindLabel,
-            label: selectedEntity.label,
-          }),
-          back: tShell('creator.controllerBack'),
-        }}
-        onBack={clearSelectedEntity}
-        data-testid="creator-hub-controller"
-      />
-    );
-  }
-
-  return <CreatorEntityListsPanel />;
+  return (
+    <div className="flex h-full min-h-0 flex-col" data-testid="creator-hub-page">
+      <CreatorHubDualPane />
+    </div>
+  );
 }

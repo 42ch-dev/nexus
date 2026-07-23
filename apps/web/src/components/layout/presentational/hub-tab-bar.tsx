@@ -1,3 +1,5 @@
+import { useRef, type KeyboardEvent } from 'react';
+
 import { cn } from '@/lib/utils';
 
 export type HubTab = 'world' | 'work';
@@ -17,6 +19,10 @@ export type HubTabBarProps = {
 
 const TABS: HubTab[] = ['world', 'work'];
 
+function tabIndex(activeTab: HubTab, tab: HubTab): number {
+  return activeTab === tab ? 0 : -1;
+}
+
 /**
  * Shared World / Work tab bar for Creator Hub dual-pane IA (V1.134 P3).
  *
@@ -30,6 +36,45 @@ export function HubTabBar({
   ariaLabel = 'Creator hub entity kind',
   'data-testid': testId = 'hub-tab-bar',
 }: HubTabBarProps) {
+  const tabRefs = useRef<Partial<Record<HubTab, HTMLButtonElement | null>>>({});
+
+  function focusTab(tab: HubTab) {
+    tabRefs.current[tab]?.focus();
+  }
+
+  function handleKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    const currentIndex = TABS.indexOf(activeTab);
+    let nextTab: HubTab | null = null;
+
+    switch (event.key) {
+      case 'ArrowRight':
+      case 'ArrowDown':
+        event.preventDefault();
+        nextTab = TABS[(currentIndex + 1) % TABS.length];
+        break;
+      case 'ArrowLeft':
+      case 'ArrowUp':
+        event.preventDefault();
+        nextTab = TABS[(currentIndex - 1 + TABS.length) % TABS.length];
+        break;
+      case 'Home':
+        event.preventDefault();
+        nextTab = TABS[0];
+        break;
+      case 'End':
+        event.preventDefault();
+        nextTab = TABS[TABS.length - 1];
+        break;
+      default:
+        break;
+    }
+
+    if (nextTab && nextTab !== activeTab) {
+      onTabChange(nextTab);
+      focusTab(nextTab);
+    }
+  }
+
   return (
     <div
       className="border-b border-gray-alpha-400 px-4"
@@ -39,6 +84,7 @@ export function HubTabBar({
         className="flex gap-1"
         role="tablist"
         aria-label={ariaLabel}
+        onKeyDown={handleKeyDown}
       >
         {TABS.map((tab) => {
           const active = activeTab === tab;
@@ -47,11 +93,15 @@ export function HubTabBar({
           return (
             <button
               key={tab}
+              ref={(element) => {
+                tabRefs.current[tab] = element;
+              }}
               type="button"
               role="tab"
               id={`hub-tab-${tab}`}
               aria-selected={active}
-              aria-controls={`hub-tabpanel-${tab}`}
+              aria-controls="hub-tabpanel"
+              tabIndex={tabIndex(activeTab, tab)}
               data-testid={`${testId}-${tab}`}
               onClick={() => onTabChange(tab)}
               className={cn(

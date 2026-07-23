@@ -146,6 +146,21 @@
       "work": "作品"
     }
   },
+  "hub": {
+    "tabs": {
+      "world": "世界",
+      "work": "作品",
+      "ariaLabel": "创作中心 — 世界或作品工作区"
+    },
+    "empty": {
+      "worlds": "暂无世界，从左边创建",
+      "works": "暂无作品，从左边创建"
+    },
+    "workspace": {
+      "createWorldCompact": "创建新世界…",
+      "createWorkCompact": "创建新作品…"
+    }
+  },
   "workCreate": {
     "title": "创建作品",
     "description": "在本地运行时中启动一个新的创作作品。",

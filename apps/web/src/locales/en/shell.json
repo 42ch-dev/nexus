@@ -146,6 +146,21 @@
       "work": "Work"
     }
   },
+  "hub": {
+    "tabs": {
+      "world": "Worlds",
+      "work": "Works",
+      "ariaLabel": "Creator hub — World or Work workspace"
+    },
+    "empty": {
+      "worlds": "No Worlds yet — create one from the left",
+      "works": "No Works yet — create one from the left"
+    },
+    "workspace": {
+      "createWorldCompact": "Create new World…",
+      "createWorkCompact": "Create new Work…"
+    }
+  },
   "workCreate": {
     "title": "Create Work",
     "description": "Start a new creative Work in the local runtime.",

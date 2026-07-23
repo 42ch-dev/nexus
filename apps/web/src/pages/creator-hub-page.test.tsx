@@ -3,7 +3,6 @@ import { http, HttpResponse } from 'msw';
 import { describe, expect, it, vi } from 'vitest';
 import { Route, Routes } from 'react-router-dom';
 
-import { Sidebar } from '@/components/layout/sidebar';
 import { CreatorHubPage } from '@/pages/creator-hub-page';
 import { renderInApp } from '@/test/test-providers';
 import { useHandlers } from '@/test/msw-server';
@@ -18,7 +17,23 @@ function makeClient() {
   return new BrowserClient();
 }
 
-function renderCreatorHubFlow() {
+function renderCreatorHubFlow(options?: {
+  works?: Parameters<typeof worksList>[0];
+  worlds?: { world_id: string; title: string }[];
+  initialEntry?: string;
+}) {
+  const works = options?.works ?? [
+    {
+      work_id: 'work-42',
+      title: 'Drill Novel',
+      status: 'active',
+      intake_status: 'ready',
+      primary_preset_id: 'preset-1',
+      updated_at: '2026-01-01T00:00:00Z',
+    },
+  ];
+  const worlds = options?.worlds ?? [];
+
   useHandlers(
     http.get('/v1/daemon/creators', () =>
       HttpResponse.json({
@@ -26,52 +41,108 @@ function renderCreatorHubFlow() {
         pagination: { limit: 20, has_more: false },
       }),
     ),
-    worksList([
-      {
-        work_id: 'work-42',
-        title: 'Drill Novel',
-        status: 'active',
-        intake_status: 'ready',
-        primary_preset_id: 'preset-1',
-        updated_at: '2026-01-01T00:00:00Z',
-      },
-    ]),
-    http.get('/v1/daemon/narrative/worlds', () => HttpResponse.json({ worlds: [] })),
+    worksList(works),
+    http.get('/v1/daemon/narrative/worlds', () => HttpResponse.json({ worlds })),
     http.post('/v1/daemon/agent-host/scan', () => HttpResponse.json({ agents: [] })),
   );
 
   renderInApp(
-    <>
-      <Sidebar />
-      <Routes>
-        <Route path="works" element={<CreatorHubPage />} />
-        <Route path="worlds" element={<CreatorHubPage />} />
-      </Routes>
-    </>,
-    { client: makeClient(), activeCreatorId: 'creator-a', initialRouterEntries: ['/works'] },
+  <Routes>
+    <Route path="/" element={<CreatorHubPage />} />
+    <Route path="works" element={<CreatorHubPage />} />
+    <Route path="works/:workId/outline" element={<div data-testid="work-outline-canvas" />} />
+    <Route path="worlds" element={<CreatorHubPage />} />
+    <Route path="worlds/:worldId/timeline" element={<div data-testid="world-timeline-canvas" />} />
+  </Routes>,
+    {
+      client: makeClient(),
+      activeCreatorId: 'creator-a',
+      initialRouterEntries: [options?.initialEntry ?? '/works'],
+    },
   );
 }
 
-describe('CreatorHubPage + selection context (V1.132 P3 AC-8)', () => {
-  it('shows Worlds/Works lists on the right when no entity is selected', async () => {
+describe('CreatorHubPage dual-pane IA (V1.134 P3)', () => {
+  it('renders stable dual-pane chrome with shared tab bar', async () => {
     renderCreatorHubFlow();
 
-    expect(await screen.findByTestId('creator-hub-entity-lists')).toBeInTheDocument();
+    expect(await screen.findByTestId('creator-hub-dual-pane')).toBeInTheDocument();
+    expect(screen.getByTestId('creator-hub-dual-pane-tab-bar-world')).toBeInTheDocument();
+    expect(screen.getByTestId('creator-hub-dual-pane-tab-bar-work')).toBeInTheDocument();
+    expect(screen.getByTestId('creator-hub-dual-pane-tabpanel')).toBeInTheDocument();
+    expect(screen.queryByTestId('creator-hub-controller')).not.toBeInTheDocument();
+  });
+
+  it('shows Work cards on the right when Work tab is active', async () => {
+    renderCreatorHubFlow();
+
+    fireEvent.click(await screen.findByTestId('creator-hub-dual-pane-tab-bar-work'));
+
+    await waitFor(() => {
+      expect(
+        screen.getByTestId('creator-hub-dual-pane-card-list-pane-work-card-work-42'),
+      ).toBeInTheDocument();
+    });
     expect(
-      await screen.findByTestId('creator-hub-entity-lists-works-row-work-42'),
-    ).toBeInTheDocument();
-    expect(screen.queryByTestId('creator-hub-create')).not.toBeInTheDocument();
+      screen.queryByTestId('creator-hub-dual-pane-card-list-pane-world'),
+    ).not.toBeInTheDocument();
   });
 
-  it('shows Create CTAs in the left sidebar, not in hub content', async () => {
+  it('shows empty-state copy when the active tab has no items', async () => {
+    renderCreatorHubFlow({ works: [], worlds: [] });
+
+    expect(
+      await screen.findByTestId('creator-hub-dual-pane-card-list-pane-empty'),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText('No Worlds yet — create one from the left'),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByTestId('creator-hub-dual-pane-workspace-pane-inline-form'),
+    ).toBeInTheDocument();
+  });
+
+  it('links tab switches across both panes', async () => {
+    renderCreatorHubFlow({
+      works: [],
+      worlds: [{ world_id: 'world-1', title: 'Fantasy Realm' }],
+    });
+
+    fireEvent.click(await screen.findByTestId('creator-hub-dual-pane-tab-bar-work'));
+
+    await waitFor(() => {
+      expect(
+        screen.getByText('No Works yet — create one from the left'),
+      ).toBeInTheDocument();
+    });
+    expect(
+      screen.getByTestId('creator-hub-dual-pane-workspace-pane-inline-form'),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('creator-hub-dual-pane-tab-bar-world'));
+
+    await waitFor(() => {
+      expect(
+        screen.getByTestId('creator-hub-dual-pane-card-list-pane-world-card-world-1'),
+      ).toBeInTheDocument();
+    });
+  });
+
+  it('navigates to canvas when a card is clicked (no controller stub)', async () => {
     renderCreatorHubFlow();
 
-    expect(await screen.findByTestId('sidebar-create-panel')).toBeInTheDocument();
-    expect(screen.getByTestId('creator-create-work')).toBeInTheDocument();
-    expect(screen.getByTestId('creator-create-world')).toBeEnabled();
+    fireEvent.click(await screen.findByTestId('creator-hub-dual-pane-tab-bar-work'));
+    fireEvent.click(
+      await screen.findByTestId('creator-hub-dual-pane-card-list-pane-work-card-work-42'),
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('work-outline-canvas')).toBeInTheDocument();
+    });
+    expect(screen.queryByTestId('creator-hub-controller')).not.toBeInTheDocument();
   });
 
-  it('enables Create World when the client exposes createWorld', async () => {
+  it('opens create dialog from inline workspace affordance (Task 4 wires full inline submit)', async () => {
     const createWorld = vi.fn().mockResolvedValue({ world_id: 'w-new', status: 'active' });
     const clientWithCreateWorld = Object.assign(new BrowserClient(), { createWorld });
 
@@ -84,16 +155,13 @@ describe('CreatorHubPage + selection context (V1.132 P3 AC-8)', () => {
       ),
       worksList([]),
       http.get('/v1/daemon/narrative/worlds', () => HttpResponse.json({ worlds: [] })),
-    http.post('/v1/daemon/agent-host/scan', () => HttpResponse.json({ agents: [] })),
+      http.post('/v1/daemon/agent-host/scan', () => HttpResponse.json({ agents: [] })),
     );
 
     renderInApp(
-      <>
-        <Sidebar />
-        <Routes>
-          <Route path="works" element={<CreatorHubPage />} />
-        </Routes>
-      </>,
+      <Routes>
+        <Route path="/works" element={<CreatorHubPage />} />
+      </Routes>,
       {
         client: clientWithCreateWorld,
         activeCreatorId: 'creator-a',
@@ -101,26 +169,12 @@ describe('CreatorHubPage + selection context (V1.132 P3 AC-8)', () => {
       },
     );
 
-    const card = await screen.findByTestId('creator-create-world');
-    expect(card).toBeEnabled();
-  });
-
-  it('selecting a Work row shows Controller stub; Back returns to entity lists', async () => {
-    renderCreatorHubFlow();
-
-    const workRow = await screen.findByTestId('creator-hub-entity-lists-works-row-work-42');
-    fireEvent.click(workRow);
+    const titleInput = await screen.findByTestId('creator-hub-dual-pane-workspace-pane-title-input');
+    fireEvent.change(titleInput, { target: { value: 'New Realm' } });
+    fireEvent.click(screen.getByTestId('creator-hub-dual-pane-workspace-pane-submit'));
 
     await waitFor(() => {
-      expect(screen.getByTestId('creator-hub-controller')).toBeInTheDocument();
-    });
-    expect(screen.getByText('Controller Panel — coming soon')).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /Delete/i })).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByTestId('creator-controller-back'));
-
-    await waitFor(() => {
-      expect(screen.getByTestId('creator-hub-entity-lists')).toBeInTheDocument();
+      expect(screen.getByRole('dialog')).toBeInTheDocument();
     });
   });
 });

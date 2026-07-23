@@ -43,6 +43,22 @@ describe('HubTabBar', () => {
     fireEvent.click(screen.getByTestId('hub-tabs-work'));
     expect(onTabChange).toHaveBeenCalledWith('work');
   });
+
+  it('switches tabs via arrow keys', () => {
+    const onTabChange = vi.fn();
+
+    render(
+      <HubTabBar
+        activeTab="world"
+        onTabChange={onTabChange}
+        labels={LABELS.tabs}
+        data-testid="hub-tabs"
+      />,
+    );
+
+    fireEvent.keyDown(screen.getByRole('tablist'), { key: 'ArrowRight' });
+    expect(onTabChange).toHaveBeenCalledWith('work');
+  });
 });
 
 describe('HubWorkspacePane', () => {
@@ -123,6 +139,7 @@ describe('HubDualPaneChrome', () => {
 
     expect(screen.getByTestId('hub-workspace-pane-inline-form')).toBeInTheDocument();
     expect(screen.getByTestId('hub-card-list-pane-empty')).toBeInTheDocument();
+    expect(screen.getByTestId('hub-tabpanel')).toBeInTheDocument();
 
     fireEvent.click(screen.getByTestId('hub-tab-bar-work'));
     expect(onTabChange).toHaveBeenCalledWith('work');
