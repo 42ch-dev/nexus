@@ -23,10 +23,9 @@ import { CreateWorkDialog } from '@/pages/dialogs/create-work-dialog';
 /**
  * Sidebar nav — V1.94 two-tab IA (Creator | Orchestrator).
  *
- * V1.132 P3 (AC-8): 创作 hub left is Create-only (创建 World / 延续 Work);
- * Worlds/Works lists live in the right content region via
- * {@link CreatorEntityListsPanel}. Orchestrator tab keeps Memory / Runtime /
- * Strategies nav groups.
+ * V1.134 P3: inline create lives in the hub dual-pane workspace; the sidebar
+ * Create panel is hidden on `/works` and `/worlds` hub surfaces but remains on
+ * canvas sub-routes for authors who need a modal create path off-hub.
  *
  * Thin wrapper around {@link ShellSidebarChrome}: owns the active creator
  * profile, route-derived tab state, and Create dialog orchestration.
@@ -86,6 +85,10 @@ function CreatorCreatePanel() {
 const CREATOR_HUB_PATH = '/works';
 const ORCHESTRATOR_HUB_PATH = '/strategies';
 
+function isCreatorHubSurface(pathname: string): boolean {
+  return pathname === '/works' || pathname === '/worlds';
+}
+
 export function Sidebar() {
   const { t } = useTranslation('shell');
   const { pathname } = useLocation();
@@ -128,7 +131,8 @@ export function Sidebar() {
     [t],
   );
 
-  const creatorPanel = activeTab === 'creator' ? <CreatorCreatePanel /> : undefined;
+  const creatorPanel =
+    activeTab === 'creator' && !isCreatorHubSurface(pathname) ? <CreatorCreatePanel /> : undefined;
 
   return (
     <nav aria-label={t('aria.primary')} className="min-h-0 flex-1">

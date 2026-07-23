@@ -26,6 +26,7 @@ import {
 import { SettingsHostFixtures } from '@/fixtures/settings-host-fixtures';
 import { SetupWizardChromeFixtures } from '@/fixtures/setup-wizard-chrome-fixtures';
 import { ConflictModalFixtures } from '@/fixtures/conflict-modal-fixtures';
+import { CreatorHubDualPaneIaFixtures } from '@/fixtures/creator-hub-dual-pane-ia-fixtures';
 import { CreatorOrchGongnengquIaFixtures } from '@/fixtures/creator-orch-gongnengqu-ia-fixtures';
 import { CreatorShellFixtures } from '@/fixtures/creator-shell-fixtures';
 import { ChronosTitlebarFixtures } from '@/fixtures/chronos-titlebar-fixtures';
@@ -546,6 +547,29 @@ export function SurfacesShellPage() {
           , and no direct layout component imports.
         </p>
         <ShellSidebarFixture />
+      </section>
+
+      <section className="mt-10" data-testid="surfaces-creator-hub-dual-pane-ia">
+        <SurfaceHeading>Creator Hub — dual-pane IA (V1.134 P3)</SurfaceHeading>
+        <SurfaceSourceBadges
+          importPaths={[
+            '@web-layout/hub-dual-pane-chrome',
+            '@web-layout/hub-tab-bar',
+            '@web-layout/hub-workspace-pane',
+            '@web-layout/hub-card-list-pane',
+            '@42ch/nexus-ui',
+          ]}
+        />
+        <p className="text-copy-14 text-gray-700 mb-6">
+          V1.134 P3 — stable dual-pane hub: shared World/Work tab bar above both panes;
+          left workspace with inline create; right single-kind card list or empty state (
+          <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">hub.empty.worlds</code>
+          {' / '}
+          <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">hub.empty.works</code>
+          ). Eight-variant matrix (tab × content × theme). Author visual acceptance required
+          before App wiring (Task 3). No routing, no daemon client.
+        </p>
+        <CreatorHubDualPaneIaFixtures />
       </section>
 
       <section className="mt-10" data-testid="surfaces-creator-orch-gongnengqu-ia">
