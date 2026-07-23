@@ -1,16 +1,15 @@
 /**
- * V1.134 P2 T2 — AgentPicker VI retune target fixtures (studio-local).
+ * V1.134 P2 — AgentPicker VI retune Studio acceptance fixtures.
  *
- * Proves the restored StatusDot + cyan discipline in light + dark before Task 3
- * wires the same markup into `@web-setup/agent-picker`.
+ * Dot-state matrix (documentation strip) + live `@web-setup/agent-picker` for
+ * ready/interactive frames (AC-10 validates shipped component post-T3).
  *
  * SSOT: `.mstar/iterations/v1.134/guides/p2-agent-picker-vi-rca.md`
  */
 
-import { Loader2, User } from 'lucide-react';
 import { useState, type ReactNode } from 'react';
 
-import { Badge, cn } from '@42ch/nexus-ui';
+import { cn } from '@42ch/nexus-ui';
 
 import {
   AgentPicker,
@@ -51,7 +50,7 @@ const TARGET_AGENTS: AgentPickerItem[] = [
 
 type DotState = 'lit' | 'hollow' | 'muted';
 
-/** Target StatusDot — mirrors pre-V1.132 FB-UI-006 semantics (RCA §Target VI). */
+/** Documentation strip — RCA dot semantics reference (not a component fork). */
 function ViTargetStatusDot({
   installed,
   selected,
@@ -83,85 +82,6 @@ function ViTargetStatusDot({
         )}
       />
     </span>
-  );
-}
-
-function ViTargetAgentCard({
-  agent,
-  selected,
-}: {
-  agent: AgentPickerItem;
-  selected: boolean;
-}) {
-  const selectable = agent.installed;
-  const label = agent.displayName || agent.name;
-
-  return (
-    <div
-      data-testid={`vi-target-agent-card-${agent.id}`}
-      data-installed={selectable ? 'true' : 'false'}
-      className={cn(
-        'flex w-full flex-col rounded-control bg-background-100 p-3 transition-colors duration-state ease-standard',
-        selectable
-          ? cn(
-              'border-2',
-              selected ? 'border-blue-700' : 'border-gray-alpha-400 hover:bg-gray-alpha-100',
-            )
-          : 'border border-gray-alpha-400 bg-background-200',
-      )}
-    >
-      <div className="flex w-full items-start justify-between gap-2">
-        <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-          <div className="flex min-w-0 items-center gap-2">
-            <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-sm bg-gray-alpha-200">
-              <User className="h-3 w-3 text-gray-500" aria-hidden />
-            </span>
-            <span
-              className={cn(
-                'truncate text-copy-14 font-medium',
-                agent.installed ? 'text-gray-1000' : 'text-gray-700',
-              )}
-            >
-              {label}
-            </span>
-            <Badge variant={agent.installed ? 'running' : 'neutral'} tone="soft" className="shrink-0">
-              {agent.installed ? 'Installed' : 'Not installed'}
-            </Badge>
-          </div>
-          {agent.version ? (
-            <span className="text-copy-13 text-gray-700">v{agent.version}</span>
-          ) : null}
-          {agent.description ? (
-            <span className="line-clamp-2 text-copy-13 text-gray-700">{agent.description}</span>
-          ) : null}
-        </div>
-        <ViTargetStatusDot installed={agent.installed} selected={selected} />
-      </div>
-    </div>
-  );
-}
-
-function ViTargetReadyGrid({
-  agents,
-  selectedId,
-}: {
-  agents: AgentPickerItem[];
-  selectedId: string | null;
-}) {
-  return (
-    <div
-      className="flex flex-col gap-3 rounded-card border border-gray-alpha-400 bg-background-200 p-4"
-      data-testid="vi-target-agent-picker-ready"
-      data-status="ready"
-    >
-      <ul className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-        {agents.map((agent) => (
-          <li key={agent.id}>
-            <ViTargetAgentCard agent={agent} selected={selectedId === agent.id} />
-          </li>
-        ))}
-      </ul>
-    </div>
   );
 }
 
@@ -236,12 +156,32 @@ function DotStateMatrix() {
   );
 }
 
-function InteractiveViTargetReady() {
+function LiveReadyPicker({
+  selectedId,
+  onSelect,
+}: {
+  selectedId: string | null;
+  onSelect?: (id: string) => void;
+}) {
+  const [custom, setCustom] = useState('');
+  return (
+    <AgentPicker
+      status="ready"
+      defaultGrid={TARGET_AGENTS}
+      selectedId={selectedId}
+      onSelect={onSelect}
+      customLaunchValue={custom}
+      onCustomLaunchChange={setCustom}
+    />
+  );
+}
+
+function InteractiveAgentPickerReady() {
   const [selectedId, setSelectedId] = useState<string | null>('claude-native');
 
   return (
-    <div className="flex flex-col gap-2">
-      <ViTargetReadyGrid agents={TARGET_AGENTS} selectedId={selectedId} />
+    <div className="flex flex-col gap-2" data-testid="vi-retune-interactive-root">
+      <LiveReadyPicker selectedId={selectedId} onSelect={setSelectedId} />
       <div className="flex flex-wrap gap-2">
         {TARGET_AGENTS.filter((a) => a.installed).map((agent) => (
           <button
@@ -249,7 +189,7 @@ function InteractiveViTargetReady() {
             type="button"
             className="rounded-control border border-gray-alpha-400 px-2 py-1 text-label-14 text-gray-1000 hover:bg-gray-alpha-100"
             onClick={() => setSelectedId(agent.id)}
-            data-testid={`vi-target-select-${agent.id}`}
+            data-testid={`vi-retune-select-${agent.id}`}
           >
             Select {agent.name}
           </button>
@@ -258,7 +198,7 @@ function InteractiveViTargetReady() {
           type="button"
           className="rounded-control border border-gray-alpha-400 px-2 py-1 text-label-14 text-gray-700 hover:bg-gray-alpha-100"
           onClick={() => setSelectedId(null)}
-          data-testid="vi-target-select-none"
+          data-testid="vi-retune-select-none"
         >
           Clear selection
         </button>
@@ -269,14 +209,13 @@ function InteractiveViTargetReady() {
 
 /**
  * V1.134 P2 visual acceptance — StatusDot restored + cyan discipline.
- * Author sign-off gate before Task 3 App wiring.
  */
 export function AgentPickerViRetuneFixtures() {
   return (
     <div data-testid="agent-picker-vi-retune-fixtures">
       <FixtureFrame
-        title="V1.134 — StatusDot matrix (target)"
-        description="Lit green when selected; hollow gray when installed-unselected; muted gray when not installed. Cyan reserved for selection ring only (no card fill wash in Light)."
+        title="V1.134 — StatusDot matrix (reference)"
+        description="Lit green when selected; hollow gray when installed-unselected; muted gray when not installed. Documentation strip only — ready grids below use live AgentPicker."
         testId="vi-retune-fixture-dot-matrix"
       >
         <ThemePair
@@ -287,39 +226,39 @@ export function AgentPickerViRetuneFixtures() {
       </FixtureFrame>
 
       <FixtureFrame
-        title="V1.134 — Ready grid with dots (target)"
-        description="2px cyan selection ring + top-right StatusDot. Light: no bg-blue-700/8 wash. Dark: cyan ring liberal per DESIGN.md."
+        title="V1.134 — Ready grid with dots (live)"
+        description="Live `@web-setup/agent-picker`: 2px cyan selection ring + top-right StatusDot. Light: no bg-blue-700/8 wash."
         testId="vi-retune-fixture-ready-selected"
       >
         <ThemePair
           testId="vi-retune-ready-selected"
-          light={<ViTargetReadyGrid agents={TARGET_AGENTS} selectedId="claude-native" />}
-          dark={<ViTargetReadyGrid agents={TARGET_AGENTS} selectedId="claude-native" />}
+          light={<LiveReadyPicker selectedId="claude-native" />}
+          dark={<LiveReadyPicker selectedId="claude-native" />}
         />
       </FixtureFrame>
 
       <FixtureFrame
-        title="V1.134 — Ready unselected + mixed (target)"
-        description="Hollow dots on installed cards; muted dot on not-installed card."
+        title="V1.134 — Ready unselected + mixed (live)"
+        description="Live AgentPicker — hollow dots on installed cards; muted dot on not-installed card."
         testId="vi-retune-fixture-ready-unselected"
       >
         <ThemePair
           testId="vi-retune-ready-unselected"
-          light={<ViTargetReadyGrid agents={TARGET_AGENTS} selectedId={null} />}
-          dark={<ViTargetReadyGrid agents={TARGET_AGENTS} selectedId={null} />}
+          light={<LiveReadyPicker selectedId={null} />}
+          dark={<LiveReadyPicker selectedId={null} />}
         />
       </FixtureFrame>
 
       <FixtureFrame
-        title="V1.134 — Interactive selection (target)"
-        description="Toggle selection to verify lit ↔ hollow dot transition alongside ring."
+        title="V1.134 — Interactive selection (live)"
+        description="Live AgentPicker — toggle selection to verify lit ↔ hollow dot transition alongside ring."
         testId="vi-retune-fixture-interactive"
       >
-        <InteractiveViTargetReady />
+        <InteractiveAgentPickerReady />
       </FixtureFrame>
 
       <FixtureFrame
-        title="AgentPickerStatus — loading / empty / error (current component)"
+        title="AgentPickerStatus — loading / empty / error"
         description="No per-card dots for non-ready statuses. Loading spinner uses cyan accent (DESIGN.md)."
         testId="vi-retune-fixture-statuses"
       >

@@ -24,7 +24,7 @@ describe('AgentPickerViRetuneFixtures', () => {
     }
   });
 
-  it('shows lit, hollow, and muted StatusDot states in the matrix', () => {
+  it('shows lit, hollow, and muted StatusDot states in the reference matrix', () => {
     render(<AgentPickerViRetuneFixtures />);
 
     const matrix = screen.getByTestId('vi-retune-dot-matrix-light');
@@ -35,36 +35,36 @@ describe('AgentPickerViRetuneFixtures', () => {
     expect(matrix.querySelector('[data-dot="muted"]')).not.toBeNull();
   });
 
-  it('renders target ready grid with selection ring and status dots', () => {
+  it('renders live ready grid with selection ring and status dots', () => {
     render(<AgentPickerViRetuneFixtures />);
 
     const selectedFrame = screen.getByTestId('vi-retune-ready-selected-light');
-    const grid = within(selectedFrame).getByTestId('vi-target-agent-picker-ready');
-    const selectedCard = within(grid).getByTestId('vi-target-agent-card-claude-native');
+    const picker = within(selectedFrame).getByTestId('agent-picker');
+    const selectedCard = within(picker).getByTestId('agent-card-claude-native');
 
     expect(selectedCard).toHaveClass('border-2', 'border-blue-700');
     expect(selectedCard).not.toHaveClass('bg-blue-700/8');
     expect(within(selectedCard).getByTestId('agent-status-dot')).toHaveAttribute('data-dot', 'lit');
   });
 
-  it('toggles dot state in the interactive fixture', () => {
+  it('toggles dot state in the interactive live fixture', () => {
     render(<AgentPickerViRetuneFixtures />);
 
     const interactive = screen.getByTestId('vi-retune-fixture-interactive');
-    const grid = within(interactive).getByTestId('vi-target-agent-picker-ready');
-    const claudeCard = within(grid).getByTestId('vi-target-agent-card-claude-native');
+    const picker = within(interactive).getByTestId('agent-picker');
+    const claudeCard = within(picker).getByTestId('agent-card-claude-native');
 
     expect(within(claudeCard).getByTestId('agent-status-dot')).toHaveAttribute('data-dot', 'lit');
 
-    fireEvent.click(within(interactive).getByTestId('vi-target-select-none'));
+    fireEvent.click(within(interactive).getByTestId('vi-retune-select-none'));
 
     expect(within(claudeCard).getByTestId('agent-status-dot')).toHaveAttribute('data-dot', 'hollow');
   });
 
-  it('renders loading, empty, and error via shared AgentPicker', () => {
+  it('renders loading, empty, error, and live ready via AgentPicker', () => {
     render(<AgentPickerViRetuneFixtures />);
 
-    expect(screen.getAllByTestId('agent-picker').length).toBeGreaterThanOrEqual(6);
-    expect(screen.getAllByTestId('vi-target-agent-picker-ready').length).toBeGreaterThanOrEqual(4);
+    // 5 live ready (2 selected + 2 unselected + 1 interactive) + 6 status pairs
+    expect(screen.getAllByTestId('agent-picker').length).toBeGreaterThanOrEqual(11);
   });
 });
