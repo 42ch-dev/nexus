@@ -15,6 +15,7 @@ import { StudioShellLogo } from '@/components/studio-shell-logo';
 
 import {
   CreatorShellContent,
+  type CreatorShellCreateLabels,
 } from '@web-layout/creator-shell-content';
 import {
   HubCardListPane,
@@ -35,7 +36,7 @@ const CREATE_LABELS_EN = {
   createWorkTitle: 'Create Work',
   createWorkDescription: 'Create a Work to get started — Worlds are created from your Works.',
   createWorldDisabledTitle: 'Create World is available on the Nexus desktop app only.',
-} as const;
+} satisfies CreatorShellCreateLabels;
 
 const CREATE_LABELS_ZH = {
   createWorldTitle: '创建 World',
@@ -43,7 +44,7 @@ const CREATE_LABELS_ZH = {
   createWorkTitle: '延续 Work',
   createWorkDescription: '创建一部作品以开始创作——世界将从你的作品中诞生。',
   createWorldDisabledTitle: '创建 World 仅在 Nexus 桌面应用中可用。',
-} as const;
+} satisfies CreatorShellCreateLabels;
 
 type HubBrowseLabels = {
   tabs: HubTabBarLabels;
@@ -182,7 +183,7 @@ function HubSidebarBrowseFrame({
   worlds: HubCardListItem[];
   works: HubCardListItem[];
   labels: HubBrowseLabels;
-  createLabels: typeof CREATE_LABELS_EN;
+  createLabels: CreatorShellCreateLabels;
   testId: string;
   interactive?: boolean;
 }) {
@@ -282,7 +283,7 @@ function VariantMatrixCell({
   state: VariantState;
   theme: 'light' | 'dark';
   labels: HubBrowseLabels;
-  createLabels: typeof CREATE_LABELS_EN;
+  createLabels: CreatorShellCreateLabels;
 }) {
   const slug = state.label.toLowerCase().replace(/[^a-z0-9]+/g, '-');
   const testId = `creator-hub-dual-pane-ia-matrix-${slug}-${theme}`;

@@ -15,6 +15,7 @@ import { StudioShellLogo } from '@/components/studio-shell-logo';
 import {
   CreatorShellContent,
   type CreatorEntityRef,
+  type CreatorShellCreateLabels,
 } from '@web-layout/creator-shell-content';
 import {
   HubCardListPane,
@@ -36,7 +37,7 @@ const CREATE_LABELS = {
   createWorkTitle: '延续 Work',
   createWorkDescription: '创建一部作品以开始创作——世界将从你的作品中诞生。',
   createWorldDisabledTitle: '创建 World 仅在 Nexus 桌面应用中可用。',
-} as const;
+} satisfies CreatorShellCreateLabels;
 
 const HUB_BROWSE_LABELS = {
   tabs: { world: '世界', work: '作品' } satisfies HubTabBarLabels,
