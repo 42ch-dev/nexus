@@ -111,9 +111,9 @@ A daemon route in `crates/nexus-daemon-runtime/` returns `INTERNAL_SERVER_ERROR`
 | Wave | plan_id | Name | Priority | Status | blocked_by |
 |------|---------|------|----------|--------|------------|
 | 1 | `2026-07-23-v1.134-p0-desktop-startup-500` | Desktop startup 500 RCA + fix | **Must** | Done | - |
-| 2 | `2026-07-23-v1.134-p1-app-icon-full-bleed` | App icon opaque full-bleed | **Must** | Todo | - |
-| 2 | `2026-07-23-v1.134-p2-agent-picker-vi-retune` | AgentPicker VI retune | **Must** | Todo | - |
-| 2 | `2026-07-23-v1.134-p3-creator-hub-dual-pane-ia` | Creator Hub dual-pane IA | **Must** (critical path) | Todo | - |
+| 2 | `2026-07-23-v1.134-p1-app-icon-full-bleed` | App icon opaque full-bleed | **Must** | InProgress | - |
+| 2 | `2026-07-23-v1.134-p2-agent-picker-vi-retune` | AgentPicker VI retune | **Must** | Done | - |
+| 2 | `2026-07-23-v1.134-p3-creator-hub-dual-pane-ia` | Creator Hub dual-pane IA | **Must** (critical path) | InProgress | - |
 
 **Scale budget:** L → **4** business plans. Wave 1 = P0 (backend, isolated); Wave 2 = P1 ∥ P2 ∥ P3 (frontend track; P3 critical path, P1/P2 disjoint from P3 and from each other → parallel-frontend-safe per worktree isolation). **No Stretch plans.**
 
