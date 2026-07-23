@@ -5,22 +5,18 @@ import { useNavigate } from 'react-router-dom';
 import { flattenPages, useCreateWork, useCreateWorld, useNarrativeWorlds, useWorks } from '@/api/queries';
 import { HubDualPaneChrome } from '@/components/layout/presentational/hub-dual-pane-chrome';
 import type { HubCardListItem } from '@/components/layout/presentational/hub-card-list-pane';
-import type { HubTab } from '@/components/layout/presentational/hub-tab-bar';
+import { useHubTabState } from '@/components/layout/use-hub-tab-state';
 import { useNexusClient } from '@/lib/client-context';
 import { hasCreateWorldClient } from '@/lib/nexus/create-world';
 import { useToast } from '@/lib/use-toast';
 
-export function resolveInitialHubTab(worldCount: number, workCount: number): HubTab {
-  if (worldCount > 0) return 'world';
-  if (workCount > 0) return 'work';
-  return 'world';
-}
+export { resolveInitialHubTab } from '@/components/layout/use-hub-tab-state';
 
 /**
  * Wired Creator Hub dual-pane — shared tab SSOT, inline create, canvas navigation (V1.134 P3).
  */
 export function CreatorHubDualPane() {
-  const { t } = useTranslation(['shell', 'worlds']);
+  const { t } = useTranslation(['shell', 'worlds', 'common']);
   const navigate = useNavigate();
   const { toast } = useToast();
   const client = useNexusClient();
@@ -32,6 +28,7 @@ export function CreatorHubDualPane() {
   const works = useMemo(() => flattenPages(worksQuery.data), [worksQuery.data]);
   const worldsQuery = useNarrativeWorlds({ limit: 12 });
   const worlds = useMemo(() => worldsQuery.data ?? [], [worldsQuery.data]);
+  const isListsLoading = worksQuery.isPending || worldsQuery.isPending;
 
   const worldItems: HubCardListItem[] = useMemo(
     () =>
@@ -51,13 +48,16 @@ export function CreatorHubDualPane() {
     [works],
   );
 
-  const [activeTab, setActiveTab] = useState<HubTab>(() =>
-    resolveInitialHubTab(worldItems.length, workItems.length),
+  const { activeTab, onTabChange: handleTabChange } = useHubTabState(
+    worldItems.length,
+    workItems.length,
+    isListsLoading,
   );
   const [forceExpandedCreate, setForceExpandedCreate] = useState(false);
 
   const activeItems = activeTab === 'world' ? worldItems : workItems;
-  const createExpanded = forceExpandedCreate || activeItems.length === 0;
+  const createExpanded =
+    !isListsLoading && (forceExpandedCreate || activeItems.length === 0);
   const isCreateSubmitting = createWork.isPending || createWorld.isPending;
 
   const labels = useMemo(
@@ -86,10 +86,13 @@ export function CreatorHubDualPane() {
     [t],
   );
 
-  const handleTabChange = useCallback((tab: HubTab) => {
-    setActiveTab(tab);
-    setForceExpandedCreate(false);
-  }, []);
+  const onTabChange = useCallback(
+    (tab: Parameters<typeof handleTabChange>[0]) => {
+      handleTabChange(tab);
+      setForceExpandedCreate(false);
+    },
+    [handleTabChange],
+  );
 
   const handleCreateSubmit = useCallback(
     async (title: string) => {
@@ -141,11 +144,13 @@ export function CreatorHubDualPane() {
     <HubDualPaneChrome
       className="h-full min-h-0 rounded-none border-0"
       activeTab={activeTab}
-      onTabChange={handleTabChange}
+      onTabChange={onTabChange}
       worlds={worldItems}
       works={workItems}
       labels={labels}
       createExpanded={createExpanded}
+      isListLoading={isListsLoading}
+      listLoadingLabel={t('common:status.loading')}
       onCreateSubmit={(title) => {
         void handleCreateSubmit(title);
       }}

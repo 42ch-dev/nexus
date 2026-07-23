@@ -76,16 +76,122 @@ describe('CreatorHubPage dual-pane IA (V1.134 P3)', () => {
   it('shows Work cards on the right when Work tab is active', async () => {
     renderCreatorHubFlow();
 
-    fireEvent.click(await screen.findByTestId('creator-hub-dual-pane-tab-bar-work'));
-
     await waitFor(() => {
-      expect(
-        screen.getByTestId('creator-hub-dual-pane-card-list-pane-work-card-work-42'),
-      ).toBeInTheDocument();
+      expect(screen.getByTestId('creator-hub-dual-pane-tab-bar-work')).toHaveAttribute(
+        'aria-selected',
+        'true',
+      );
     });
+
+    expect(
+      await screen.findByTestId('creator-hub-dual-pane-card-list-pane-work-card-work-42'),
+    ).toBeInTheDocument();
     expect(
       screen.queryByTestId('creator-hub-dual-pane-card-list-pane-world'),
     ).not.toBeInTheDocument();
+  });
+
+  it('selects Work tab after hydrate when only works exist (IA §1.2)', async () => {
+    renderCreatorHubFlow({ works: [
+      {
+        work_id: 'work-42',
+        title: 'Drill Novel',
+        status: 'active',
+        intake_status: 'ready',
+        primary_preset_id: 'preset-1',
+        updated_at: '2026-01-01T00:00:00Z',
+      },
+    ], worlds: [] });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('creator-hub-dual-pane-tab-bar-work')).toHaveAttribute(
+        'aria-selected',
+        'true',
+      );
+    });
+    expect(
+      screen.getByTestId('creator-hub-dual-pane-card-list-pane-work-card-work-42'),
+    ).toBeInTheDocument();
+  });
+
+  it('does not show empty state or expanded create while lists are loading', async () => {
+    let resolveWorks: (() => void) | undefined;
+    const worksGate = new Promise<void>((resolve) => {
+      resolveWorks = resolve;
+    });
+
+    useHandlers(
+      http.get('/v1/daemon/creators', () =>
+        HttpResponse.json({
+          items: [{ creator_id: 'creator-a', display_name: 'Alice' }],
+          pagination: { limit: 20, has_more: false },
+        }),
+      ),
+      http.get('/v1/daemon/works', async () => {
+        await worksGate;
+        return HttpResponse.json({
+          items: [],
+          pagination: { limit: 20, has_more: false },
+        });
+      }),
+      http.get('/v1/daemon/narrative/worlds', async () => {
+        await worksGate;
+        return HttpResponse.json({ worlds: [] });
+      }),
+      http.post('/v1/daemon/agent-host/scan', () => HttpResponse.json({ agents: [] })),
+    );
+
+    renderInApp(
+      <Routes>
+        <Route path="/works" element={<CreatorHubPage />} />
+      </Routes>,
+      {
+        client: makeClient(),
+        activeCreatorId: 'creator-a',
+        initialRouterEntries: ['/works'],
+      },
+    );
+
+    expect(await screen.findByTestId('creator-hub-dual-pane')).toBeInTheDocument();
+    expect(screen.getByTestId('creator-hub-dual-pane-card-list-pane-loading')).toBeInTheDocument();
+    expect(screen.queryByTestId('creator-hub-dual-pane-card-list-pane-empty')).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId('creator-hub-dual-pane-workspace-pane-inline-form'),
+    ).not.toBeInTheDocument();
+
+    resolveWorks?.();
+
+    expect(
+      await screen.findByTestId('creator-hub-dual-pane-card-list-pane-empty'),
+    ).toBeInTheDocument();
+  });
+
+  it('keeps manual tab choice after lists hydrate', async () => {
+    renderCreatorHubFlow({
+      works: [
+        {
+          work_id: 'work-42',
+          title: 'Drill Novel',
+          status: 'active',
+          intake_status: 'ready',
+          primary_preset_id: 'preset-1',
+          updated_at: '2026-01-01T00:00:00Z',
+        },
+      ],
+      worlds: [],
+    });
+
+    fireEvent.click(await screen.findByTestId('creator-hub-dual-pane-tab-bar-world'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('creator-hub-dual-pane-tab-bar-world')).toHaveAttribute(
+        'aria-selected',
+        'true',
+      );
+    });
+    expect(
+      screen.getByTestId('creator-hub-dual-pane-card-list-pane-empty'),
+    ).toBeInTheDocument();
   });
 
   it('shows empty-state copy when the active tab has no items', async () => {
@@ -131,7 +237,13 @@ describe('CreatorHubPage dual-pane IA (V1.134 P3)', () => {
   it('navigates to canvas when a card is clicked (no controller stub)', async () => {
     renderCreatorHubFlow();
 
-    fireEvent.click(await screen.findByTestId('creator-hub-dual-pane-tab-bar-work'));
+    await waitFor(() => {
+      expect(screen.getByTestId('creator-hub-dual-pane-tab-bar-work')).toHaveAttribute(
+        'aria-selected',
+        'true',
+      );
+    });
+
     fireEvent.click(
       await screen.findByTestId('creator-hub-dual-pane-card-list-pane-work-card-work-42'),
     );
@@ -185,7 +297,12 @@ describe('CreatorHubPage dual-pane IA (V1.134 P3)', () => {
       },
     );
 
-    fireEvent.click(await screen.findByTestId('creator-hub-dual-pane-tab-bar-work'));
+    await waitFor(() => {
+      expect(screen.getByTestId('creator-hub-dual-pane')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('creator-hub-dual-pane-tab-bar-work'));
+
     const titleInput = await screen.findByTestId('creator-hub-dual-pane-workspace-pane-title-input');
     fireEvent.change(titleInput, { target: { value: 'Fresh Novel' } });
     fireEvent.click(screen.getByTestId('creator-hub-dual-pane-workspace-pane-submit'));

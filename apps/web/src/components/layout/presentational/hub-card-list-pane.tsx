@@ -24,6 +24,8 @@ export type HubCardListPaneProps = {
   works: HubCardListItem[];
   labels: HubCardListPaneLabels;
   onSelectCard?: (id: string) => void;
+  isListLoading?: boolean;
+  loadingLabel?: string;
   'data-testid'?: string;
 };
 
@@ -96,6 +98,8 @@ export function HubCardListPane({
   works,
   labels,
   onSelectCard,
+  isListLoading = false,
+  loadingLabel = 'Loading…',
   'data-testid': testId = 'hub-card-list-pane',
 }: HubCardListPaneProps) {
   const isWorld = activeTab === 'world';
@@ -104,6 +108,21 @@ export function HubCardListPane({
   const emptyCopy = isWorld ? labels.emptyWorlds : labels.emptyWorks;
   const emptyKey = isWorld ? labels.emptyWorldsKey : labels.emptyWorksKey;
   const listTestId = `${testId}-${activeTab}`;
+
+  if (isListLoading) {
+    return (
+      <div
+        className="flex h-full min-h-0 flex-col items-center justify-center bg-background-200 px-6 py-12"
+        data-testid={testId}
+        data-active-tab={activeTab}
+        data-list-state="loading"
+      >
+        <p className="text-copy-14 text-gray-700" data-testid={`${testId}-loading`}>
+          {loadingLabel}
+        </p>
+      </div>
+    );
+  }
 
   if (items.length === 0) {
     return (

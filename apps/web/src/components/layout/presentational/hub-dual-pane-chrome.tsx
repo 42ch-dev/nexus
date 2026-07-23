@@ -31,6 +31,8 @@ export type HubDualPaneChromeProps = {
   tabBarAriaLabel?: string;
   /** When omitted, derived from active tab item count (expanded when zero). */
   createExpanded?: boolean;
+  isListLoading?: boolean;
+  listLoadingLabel?: string;
   isCreateSubmitting?: boolean;
   createErrorMessage?: string | null;
   canCreateWorld?: boolean;
@@ -58,6 +60,8 @@ export function HubDualPaneChrome({
   onSelectCard,
   tabBarAriaLabel,
   createExpanded,
+  isListLoading,
+  listLoadingLabel,
   isCreateSubmitting,
   createErrorMessage,
   canCreateWorld,
@@ -67,7 +71,8 @@ export function HubDualPaneChrome({
   'data-testid': testId = 'hub-dual-pane-chrome',
 }: HubDualPaneChromeProps) {
   const activeItems = activeTab === 'world' ? worlds : works;
-  const expanded = createExpanded ?? activeItems.length === 0;
+  const expanded =
+    createExpanded ?? (!isListLoading && activeItems.length === 0);
 
   return (
     <div
@@ -120,6 +125,8 @@ export function HubDualPaneChrome({
             works={works}
             labels={labels.cardList}
             onSelectCard={onSelectCard}
+            isListLoading={isListLoading}
+            loadingLabel={listLoadingLabel}
             data-testid={`${testId}-card-list-pane`}
           />
         </div>
