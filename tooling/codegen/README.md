@@ -44,16 +44,18 @@ The pipeline is a port of the sibling spoke repo's codegen orchestrator (spoke b
 |-------|--------|--------|--------|
 | 1. prep | `schema-prep.ts` | `@apidevtools/json-schema-ref-parser` | localized + dereferenced schema trees |
 | 2. ts-gen | `ts-gen.ts` | `json-schema-to-typescript` | `packages/nexus-contracts/src/generated/` |
-| 3. rust-gen | `rust-generator.ts` | bespoke (hand-tuned) | `crates/nexus-contracts/src/generated/` |
+| 3. rust-gen | `rust-gen/` (binary) | [`typify`](https://crates.io/crates/typify) | `crates/nexus-contracts/src/generated/` |
 
 **TypeScript is library-driven** (`json-schema-to-typescript`). Stage 1 rewrites each
 schema's base-URI `$id`/`$ref` into POSIX-relative paths under `.schemas-localized/`; stage 2
 then compiles each non-skip schema via the library with the `title` overridden to the
 basename-derived PascalCase type name, emitting a nested tree that mirrors `schemas/`.
 
-**Rust is still bespoke** (`rust-generator.ts`, hand-tuned) and consumes `loadAllSchemas()`
-directly. It will be superseded by a `typify`-based generator over the dereferenced tree
-(`.schemas-dereferenced/`, produced by stage 1) — tracked as **P1**.
+**Rust is library-driven** (`typify`). Stage 3 invokes the external `nexus-rust-gen` binary
+(an isolated workspace under `rust-gen/`, excluded from the root `[workspace]`) over the
+dereferenced tree produced by stage 1 (`.schemas-dereferenced/`). The orchestrator
+(`src/index.ts`) shells out via `cargo run --release`, passing the prep-resolved paths as
+env vars (`NEXUS_REPO_ROOT`, `NEXUS_DEREF_SCHEMAS_DIR`, `NEXUS_SRC_SCHEMAS_DIR`).
 
 ## Workflow
 
@@ -63,8 +65,9 @@ directly. It will be superseded by a `typify`-based generator over the dereferen
 2. **ts-gen** — compile each non-skip schema with `json-schema-to-typescript` (title
    overridden to the basename-derived PascalCase name) → nested tree under
    `packages/nexus-contracts/src/generated/`, plus the `SCHEMA_VERSIONS` / `LATEST_SCHEMA_VERSION` stamp.
-3. **rust-gen** — bespoke hand-tuned generator over `loadAllSchemas()` → nested module tree
-   under `crates/nexus-contracts/src/generated/`. *(P1: replace with typify over the deref tree.)*
+3. **rust-gen** — invoke the `nexus-rust-gen` binary (typify) over the dereferenced tree
+   (`.schemas-dereferenced/`) → nested module tree under
+   `crates/nexus-contracts/src/generated/`, plus the `SCHEMA_VERSIONS` / `LATEST_SCHEMA_VERSION` stamp.
 
 Schema validation is a separate concern: run `pnpm run validate-schemas` (not part of the
 codegen pipeline itself).
