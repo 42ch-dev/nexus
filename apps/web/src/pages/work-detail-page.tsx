@@ -101,7 +101,7 @@ export function WorkDetailPage() {
                 <div className="mt-2 flex items-center gap-3">
                   <div className="h-2 flex-1 overflow-hidden rounded-pill bg-gray-alpha-300">
                     <div
-                      className="h-full rounded-pill bg-blue-700"
+                      className="h-full rounded-pill bg-blue-1000 dark:bg-blue-700"
                       style={{ width: `${completionPct}%` }}
                       role="progressbar"
                       aria-valuenow={completionPct ?? 0}

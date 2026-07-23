@@ -30,16 +30,19 @@ describe('CreatorHubDualPaneIaFixtures', () => {
     expect(screen.getByTestId('creator-hub-dual-pane-ia-world-empty-themes-dark')).toBeInTheDocument();
   });
 
-  it('shows sidebar create and browse-only content on world empty light frame', () => {
+  it('shows sidebar inline create and browse-only content on world empty light frame', () => {
     renderFixtures();
 
     const frame = screen.getByTestId('creator-hub-dual-pane-ia-world-empty-light');
     const sidebar = within(frame).getByTestId('creator-hub-dual-pane-ia-world-empty-light-sidebar');
 
     expect(within(sidebar).getByTestId('shell-sidebar-panel')).toBeInTheDocument();
-    expect(within(sidebar).getByTestId('sidebar-create-panel')).toBeInTheDocument();
-    expect(within(sidebar).getByTestId('creator-create-world')).toBeInTheDocument();
-    expect(within(sidebar).getByTestId('creator-create-work')).toBeInTheDocument();
+    const createPanel = within(sidebar).getByTestId('sidebar-create-panel');
+    expect(createPanel).toHaveAttribute('data-mode', 'create-inline');
+    expect(within(createPanel).getByTestId('sidebar-create-tab-bar')).toBeInTheDocument();
+    expect(within(createPanel).getByTestId('sidebar-create-form-world')).toBeInTheDocument();
+    expect(within(createPanel).getByTestId('sidebar-create-submit-world')).toBeInTheDocument();
+    expect(within(createPanel).queryByTestId('creator-create-world')).not.toBeInTheDocument();
 
     expect(
       within(frame).queryByTestId(/workspace-pane-inline-form/),
@@ -53,7 +56,8 @@ describe('CreatorHubDualPaneIaFixtures', () => {
     renderFixtures();
 
     const frame = screen.getByTestId('creator-hub-dual-pane-ia-world-populated-light');
-    expect(within(frame).getByTestId('sidebar-create-panel')).toBeInTheDocument();
+    const createPanel = within(frame).getByTestId('sidebar-create-panel');
+    expect(createPanel).toHaveAttribute('data-mode', 'create-inline');
     expect(
       within(frame).queryByTestId(/workspace-pane-inline-form|workspace-pane-compact-create/),
     ).not.toBeInTheDocument();

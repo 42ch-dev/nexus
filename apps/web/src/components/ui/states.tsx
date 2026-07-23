@@ -11,7 +11,7 @@ import { cn } from '@/lib/utils';
 export function Spinner({ className }: { className?: string }) {
   return (
     <Loader2
-      className={cn('h-4 w-4 animate-spin text-blue-700', className)}
+      className={cn('h-4 w-4 animate-spin text-blue-1000 dark:text-blue-700', className)}
       aria-hidden
     />
   );

@@ -3,7 +3,7 @@
 Nexus-branded **desktop-only** app icons for the Tauri bundle (Chronos VI).
 
 **Normative spec:** [`.mstar/iterations/v1.135/specs/p1-dock-icon-pipeline.md`](../../../../.mstar/iterations/v1.135/specs/p1-dock-icon-pipeline.md).
-**RCA + author confirm:** [`.mstar/iterations/v1.135/guides/p1-dock-icon-rca.md`](../../../../.mstar/iterations/v1.135/guides/p1-dock-icon-rca.md).
+**V1.136 RCA + author confirm:** [`.mstar/iterations/v1.136/guides/p0-dock-icon-rca.md`](../../../../.mstar/iterations/v1.136/guides/p0-dock-icon-rca.md) (carries V1.135 [p1-dock-icon-rca.md](../../../../.mstar/iterations/v1.135/guides/p1-dock-icon-rca.md)).
 
 Only `source/` and this README are tracked in git. All platform icon formats
 under this directory (except `source/`) are **generated at build/dev time** via
@@ -42,6 +42,13 @@ This rasterizes `logo-primary-square.svg` (bright mark on brand deep-blue plate)
 `source-1024.png` + `app-icon-preview-256.png` as an **opaque 1024×1024** icon with a
 **pre-rounded squircle plate** centered on the canvas (6% opaque margin, 22% corner
 radius on the inner plate — matches Studio VI-004). No transparent margins.
+
+**Contrast-margin compose (V1.136 H6 T2):** canvas background and squircle-clipped
+corners use **`MARGIN_COLOR` `#1A4A66`**; the inner plate raster retains
+**`PLATE_COLOR` `#0D2B3E`**. Margin and plate **must** differ — V1.135 used the same
+hex for both, which made the squircle bake invisible on the raster and likely on the
+Dock (see Attempt 1 vs Attempt 2 in the V1.136 RCA guide). Tune margin contrast in
+Studio VI-004 before changing compose constants.
 
 **Opaque + baked squircle rule (V1.135 H6):** macOS Big Sur+ applies the system
 squircle mask to opaque full-canvas icons, but a full-bleed square plate reads as a
@@ -93,9 +100,10 @@ and reviewed in GitHub/GitLab.
 ## Aesthetic sign-off
 
 Composition: **opaque squircle plate lockup** (`logo-primary-square.svg` —
-Chronos deep plate + bright timeline mark, pre-rounded at 22% corner radius with
-6% opaque canvas margin). Review `source/app-icon-preview-256.png` at QA/PR time;
-Dock smoke (after cache invalidation below) confirms macOS squircle appearance.
+Chronos deep plate `#0D2B3E` + bright timeline mark, pre-rounded at 22% corner radius
+with 6% contrasting margin `#1A4A66`). Review `source/app-icon-preview-256.png` at
+QA/PR time; **Dock smoke after the author ritual below** confirms macOS squircle
+appearance — preview PNG alone does not close `R-V1135P1-001`.
 
 ## macOS Dock visual smoke
 
@@ -119,42 +127,46 @@ To verify the asset renders as a Chronos plate with the timeline mark:
 
 The 256×256 preview PNG (`source/app-icon-preview-256.png`) uses the same
 composition. **Dock smoke remains authoritative** — Studio VI-004 and PNG opacity
-metadata alone do not close P1G-1 (`R-V1134P1-001`).
+metadata alone do not close `R-V1135P1-001` (carries `R-V1134P1-001`).
 
-## Author verify ritual (P1G-1 / AC-4)
+## Author verify ritual (P0G-1 / P0G-4)
 
-> **Author Dock confirm: PENDING** — `R-V1134P1-001` stays open until `@author`
-> records Pass in [`.mstar/iterations/v1.135/guides/p1-dock-icon-rca.md`](../../../../.mstar/iterations/v1.135/guides/p1-dock-icon-rca.md).
-> Agents must not forge sign-off. Studio VI-004 and PNG opacity metadata are **not**
-> sufficient for closure.
+> **Author Dock confirm: PENDING** — `R-V1135P1-001` and `R-V1135P1-005` stay **open**
+> until `@author` records Pass in
+> [`.mstar/iterations/v1.136/guides/p0-dock-icon-rca.md`](../../../../.mstar/iterations/v1.136/guides/p0-dock-icon-rca.md)
+> § Author Dock confirm block (closes `R-V1134P1-001` when P0G-1 passes). **Attempt 2**
+> contrast-margin compose (`MARGIN_COLOR` `#1A4A66`) is landed — ready for author
+> eyeball after the ritual below. Agents must not forge sign-off. Studio VI-004 and
+> PNG opacity metadata are **not** sufficient for closure.
 
 Before judging Dock shape, follow this sequence **in order** (record the exact build
-command in the RCA guide when signing off):
+command and **absolute bundle path** in the V1.136 RCA guide when signing off):
 
 | Step | Action |
 |------|--------|
-| 1 | **Quit all Nexus instances** (every window / process — not just close the window). |
+| 1 | **Quit all Nexus instances** (every window / `nexus-desktop` process — not just close the window). |
 | 2 | **Regenerate icons:** `pnpm --filter desktop run icons:generate` |
-| 3 | **Rebuild/reinstall** the `.app` under test — e.g. `pnpm --filter desktop run build` then open `apps/desktop/src-tauri/target/release/bundle/macos/Nexus.app`, or `pnpm dev:desktop` (runs `icons:generate` first). **Record the exact command** in the RCA guide. |
+| 3 | **Rebuild/reinstall** the `.app` under test — e.g. `pnpm --filter desktop run build` then open the release bundle, or `pnpm dev:desktop` (runs `icons:generate` first). **Record the exact command and absolute `.app` path** — do not assume `mdfind` points at the build you just made (H4 stale-bundle risk). |
 | 4 | **Restart Dock:** `killall Dock` (macOS relaunches Dock automatically). |
-| 5 | **Relaunch Nexus**; inspect Dock tile at normal size. Confirm tooltip/process is Nexus desktop (`nexus-desktop`). |
-| 6 | **Pass:** squircle rounding visible on outer tile boundary (like Safari/Settings). **Fail:** sharp 90° square outline — plan stays open; do not close on Studio VI-004 or PNG opacity alone. |
+| 5 | **Relaunch Nexus**; inspect Dock tile at normal size. Confirm tooltip/process is Nexus desktop (`nexus-desktop` / `io.nexus42.desktop`). |
+| 6 | **Pass (P0G-1):** squircle rounding visible on outer tile boundary (like Safari/Settings). **Fail:** sharp 90° square outline — residuals stay open; if fail persists after rebuild, see H5 extended steps in the V1.136 RCA guide. |
 
 ## Cache invalidation (stale Dock icon)
 
 macOS / LaunchServices often keep a previous Dock tile after icon assets change.
-If the Dock still shows a pre-Chronos or otherwise stale icon after a rebuild:
+If the Dock still shows a pre-Chronos or otherwise stale icon after a rebuild,
+use the **same ordered ritual** as § Author verify ritual:
 
-1. **Quit all Nexus instances** (every window / process — not just close the
-   window).
-2. **Rebuild and reinstall** the `.app` (e.g. `pnpm dev:desktop` — includes
+1. **Quit all Nexus instances** (every window / `nexus-desktop` process).
+2. **`pnpm --filter desktop run icons:generate`**
+3. **Rebuild and reinstall** the `.app` (e.g. `pnpm dev:desktop` — includes
    `icons:generate` — or a release bundle install that replaces the prior app path).
-3. **Restart Dock** so it reloads the bundle icon:
+4. **Restart Dock** so it reloads the bundle icon:
    ```bash
    killall Dock
    ```
    (macOS relaunches Dock automatically.)
-4. **Relaunch Nexus** and re-check the Dock tile against the smoke criteria above.
+5. **Relaunch Nexus** and re-check the Dock tile against the smoke criteria above.
 
 If LaunchServices still serves the old icon after steps 1–4, **remove the stale
 app bundle** from the previous install location (and empty Trash if applicable),

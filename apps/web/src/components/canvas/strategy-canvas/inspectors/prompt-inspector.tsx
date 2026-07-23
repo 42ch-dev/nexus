@@ -143,7 +143,7 @@ export function PromptInspector({
         onChange={(e) => onChange('promptBody', e.target.value)}
         rows={4}
         placeholder={t('strategy.inspector.prompt.placeholder')}
-        className="rounded-control border border-gray-alpha-400 bg-background-100 px-2 py-1 text-gray-1000 focus:border-blue-700"
+        className="rounded-control border border-gray-alpha-400 bg-background-100 px-2 py-1 text-gray-1000 focus:border-blue-1000 dark:focus:border-blue-700"
       />
       {saveStatus ? (
         <p

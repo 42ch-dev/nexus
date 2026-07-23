@@ -150,6 +150,9 @@ const preset: Partial<Config> = {
           'deep-blue-800': cv('brand-deep-blue-800'),
           'deep-blue-900': cv('brand-deep-blue-900'),
           cyan: cv('brand-cyan'),
+          'cyan-800': cv('brand-cyan-800'),
+          'cyan-900': cv('brand-cyan-900'),
+          'cyan-1000': cv('brand-cyan-1000'),
           white: cv('brand-white'),
         },
         // V1.94 Footer Profile Switcher + Setup Wizard Step Chrome tokens.

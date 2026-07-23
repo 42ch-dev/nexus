@@ -156,6 +156,11 @@
       "worlds": "暂无世界，从侧边栏创建",
       "works": "暂无作品，从侧边栏创建"
     },
+    "create": {
+      "tabs": {
+        "ariaLabel": "侧边栏创建 — 世界或作品"
+      }
+    },
     "workspace": {
       "createWorldCompact": "创建新世界…",
       "createWorkCompact": "创建新作品…"

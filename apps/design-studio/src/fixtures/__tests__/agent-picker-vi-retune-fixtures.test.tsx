@@ -15,19 +15,20 @@ describe('AgentPickerViRetuneFixtures', () => {
     expect(screen.getByTestId('vi-retune-fixture-statuses')).toBeInTheDocument();
   });
 
-  it('renders light+dark theme pairs for dot matrix and ready grids', () => {
+  it('renders single theme-follow specimens (no light/dark matrix)', () => {
     render(<AgentPickerViRetuneFixtures />);
 
     for (const base of ['vi-retune-dot-matrix', 'vi-retune-ready-selected', 'vi-retune-ready-unselected'] as const) {
-      expect(screen.getByTestId(`${base}-light`)).toBeInTheDocument();
-      expect(screen.getByTestId(`${base}-dark`)).toBeInTheDocument();
+      expect(screen.getByTestId(base)).toBeInTheDocument();
+      expect(screen.queryByTestId(`${base}-light`)).not.toBeInTheDocument();
+      expect(screen.queryByTestId(`${base}-dark`)).not.toBeInTheDocument();
     }
   });
 
   it('shows lit, hollow, and muted StatusDot states in the reference matrix', () => {
     render(<AgentPickerViRetuneFixtures />);
 
-    const matrix = screen.getByTestId('vi-retune-dot-matrix-light');
+    const matrix = screen.getByTestId('vi-retune-dot-matrix');
     expect(within(matrix).getByTestId('vi-target-dot-matrix')).toBeInTheDocument();
     expect(within(matrix).queryAllByTestId('agent-status-dot')).toHaveLength(3);
     expect(matrix.querySelector('[data-dot="lit"]')).not.toBeNull();
@@ -38,11 +39,11 @@ describe('AgentPickerViRetuneFixtures', () => {
   it('renders live ready grid with selection ring and status dots', () => {
     render(<AgentPickerViRetuneFixtures />);
 
-    const selectedFrame = screen.getByTestId('vi-retune-ready-selected-light');
+    const selectedFrame = screen.getByTestId('vi-retune-ready-selected');
     const picker = within(selectedFrame).getByTestId('agent-picker');
     const selectedCard = within(picker).getByTestId('agent-card-claude-native');
 
-    expect(selectedCard).toHaveClass('border-2', 'border-blue-700');
+    expect(selectedCard).toHaveClass('border-2', 'border-blue-1000');
     expect(selectedCard).not.toHaveClass('bg-blue-700/8');
     expect(within(selectedCard).getByTestId('agent-status-dot')).toHaveAttribute('data-dot', 'lit');
   });
@@ -64,7 +65,7 @@ describe('AgentPickerViRetuneFixtures', () => {
   it('renders loading, empty, error, and live ready via AgentPicker', () => {
     render(<AgentPickerViRetuneFixtures />);
 
-    // 5 live ready (2 selected + 2 unselected + 1 interactive) + 6 status pairs
-    expect(screen.getAllByTestId('agent-picker').length).toBeGreaterThanOrEqual(11);
+    // 3 live ready (selected + unselected + interactive) + 3 status specimens
+    expect(screen.getAllByTestId('agent-picker').length).toBeGreaterThanOrEqual(6);
   });
 });

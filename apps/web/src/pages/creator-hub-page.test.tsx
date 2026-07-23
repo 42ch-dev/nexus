@@ -1,6 +1,6 @@
 import { fireEvent, screen, waitFor } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { Route, Routes } from 'react-router-dom';
 
 import { Sidebar } from '@/components/layout/sidebar';
@@ -9,6 +9,7 @@ import { renderInApp } from '@/test/test-providers';
 import { useHandlers } from '@/test/msw-server';
 import { worksList } from '@/test/handlers';
 import { BrowserClient } from '@/lib/nexus';
+import { i18n } from '@/lib/i18n/config';
 
 vi.mock('@/components/brand/nexus-logo', () => ({
   NexusLogo: () => <div data-testid="nexus-logo">Nexus</div>,
@@ -82,6 +83,11 @@ function renderCreatorHubFlow(options?: {
 }
 
 describe('CreatorHubPage browse IA (V1.135 P0)', () => {
+  beforeEach(async () => {
+    window.localStorage.clear();
+    await i18n.changeLanguage('en');
+  });
+
   it('renders browse chrome with shared tab bar', async () => {
     renderCreatorHubFlow();
 
@@ -99,6 +105,8 @@ describe('CreatorHubPage browse IA (V1.135 P0)', () => {
     renderCreatorHubFlow({ works: [], worlds: [], withSidebar: true });
 
     expect(await screen.findByTestId('sidebar-create-panel')).toBeInTheDocument();
+    expect(screen.getByTestId('sidebar-create-panel')).toHaveAttribute('data-mode', 'create-inline');
+    expect(screen.getByTestId('sidebar-create-tab-bar')).toBeInTheDocument();
     expect(screen.getByTestId('shell-sidebar-panel')).toBeInTheDocument();
     expect(
       screen.queryByTestId('creator-hub-dual-pane-workspace-pane-inline-form'),
@@ -241,6 +249,17 @@ describe('CreatorHubPage browse IA (V1.135 P0)', () => {
     expect(
       screen.queryByTestId('creator-hub-dual-pane-workspace-pane-inline-form'),
     ).not.toBeInTheDocument();
+  });
+
+  it('shows zh-CN empty-state copy pointing to sidebar create (V1.136 P1)', async () => {
+    window.localStorage.setItem('nexus-web-locale', 'zh-CN');
+    await i18n.changeLanguage('zh-CN');
+    renderCreatorHubFlow({ works: [], worlds: [] });
+
+    expect(
+      await screen.findByTestId('creator-hub-dual-pane-card-list-pane-empty'),
+    ).toBeInTheDocument();
+    expect(screen.getByText('暂无世界，从侧边栏创建')).toBeInTheDocument();
   });
 
   it('links tab switches across browse content only', async () => {

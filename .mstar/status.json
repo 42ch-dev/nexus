@@ -1,12 +1,70 @@
 {
   "version": 1,
   "updated_at": "2026-07-23",
-  "plans": [],
+  "plans": [
+    {
+      "id": "2026-07-23-v1.136-p0-dock-icon-squircle-followup",
+      "status": "Done",
+      "file": ".mstar/plans/2026-07-23-v1.136-p0-dock-icon-squircle-followup.md",
+      "metadata": {
+        "primary_spec": ".mstar/iterations/v1.136/specs/p0-dock-icon-squircle-followup.md",
+        "description": "Dock icon squircle continued RCA/fix",
+        "iteration_id": "V1.136",
+        "iteration_compass": "v1.136/delivery-compass.md",
+        "spec_integration_branch": "iteration/v1.136",
+        "working_branch": "plan/v1.136-p0-dock-icon-squircle-followup",
+        "merge_target": "iteration/v1.136",
+        "wire_contracts_changed": false,
+        "wave": "1",
+        "seq": "0",
+        "merged_at": "2026-07-23T11:14:27.079Z",
+        "qa_verdict": "pm-acceptance"
+      }
+    },
+    {
+      "id": "2026-07-23-v1.136-p1-sidebar-inline-create-tabs",
+      "status": "Done",
+      "file": ".mstar/plans/2026-07-23-v1.136-p1-sidebar-inline-create-tabs.md",
+      "metadata": {
+        "primary_spec": ".mstar/iterations/v1.136/specs/p1-sidebar-inline-create-tabs.md",
+        "description": "Sidebar inline create + World/Work tabs",
+        "iteration_id": "V1.136",
+        "iteration_compass": "v1.136/delivery-compass.md",
+        "spec_integration_branch": "iteration/v1.136",
+        "working_branch": "plan/v1.136-p1-sidebar-inline-create-tabs",
+        "merge_target": "iteration/v1.136",
+        "wire_contracts_changed": false,
+        "wave": "1",
+        "seq": "1",
+        "merged_at": "2026-07-23T11:30:21.953Z",
+        "qa_verdict": "pm-acceptance"
+      }
+    },
+    {
+      "id": "2026-07-23-v1.136-p2-light-mode-chrome-harmony",
+      "status": "Done",
+      "file": ".mstar/plans/2026-07-23-v1.136-p2-light-mode-chrome-harmony.md",
+      "metadata": {
+        "primary_spec": ".mstar/iterations/v1.136/specs/p2-light-mode-interactive-vi.md",
+        "description": "Light interactive cyan-1000 + TransportError link CTAs + Button SSOT",
+        "iteration_id": "V1.136",
+        "iteration_compass": "v1.136/delivery-compass.md",
+        "spec_integration_branch": "iteration/v1.136",
+        "working_branch": "plan/v1.136-p2-light-mode-chrome-harmony",
+        "merge_target": "iteration/v1.136",
+        "wire_contracts_changed": false,
+        "wave": "2",
+        "seq": "2",
+        "merged_at": "2026-07-23T11:30:21.953Z",
+        "qa_verdict": "pm-acceptance"
+      }
+    }
+  ],
   "metadata": {
     "integration_branch_retired": false,
     "iteration_base_branch": "main",
-    "latest_active_compass": "v1.135/delivery-compass.md",
-    "latest_active_iteration": "V1.135",
+    "latest_active_compass": "v1.136/delivery-compass.md",
+    "latest_active_iteration": "V1.136",
     "latest_ship": {
       "iteration": "V1.135",
       "compass": "v1.135/delivery-compass.md",
@@ -15,18 +73,18 @@
       "merge_commit": "pending"
     },
     "platform_integration": "paused — local-only until further notice",
-    "spec_integration_branch": "iteration/v1.135",
+    "spec_integration_branch": "iteration/v1.136",
     "spec_refs_index": ".mstar/specs/README.md",
     "target_branch": "main",
     "tech_debt_summary": {
       "updated_at": "2026-07-23",
-      "total_open": 62,
+      "total_open": 68,
       "by_severity": {
         "critical": 0,
         "high": 0,
         "medium": 2,
-        "low": 9,
-        "nit": 51,
+        "low": 10,
+        "nit": 56,
         "info": 0
       }
     },
@@ -816,6 +874,84 @@
         "decision": "defer",
         "owner": "@author",
         "target": "V1.135"
+      }
+    ],
+    "2026-07-23-v1.136-p0-dock-icon-squircle-followup": [
+      {
+        "id": "R-V1135P1-001",
+        "title": "Author Dock squircle confirm after rebuild ritual",
+        "severity": "high",
+        "lifecycle": "open",
+        "decision": "defer",
+        "owner": "@author",
+        "target": "V1.136"
+      },
+      {
+        "id": "R-V1135P1-005",
+        "title": "H6 contrast-margin author confirm / H5 cache if still square",
+        "severity": "medium",
+        "lifecycle": "open",
+        "decision": "defer",
+        "owner": "@author",
+        "target": "V1.136"
+      }
+    ],
+    "2026-07-23-v1.136-p1-sidebar-inline-create-tabs": [
+      {
+        "id": "R-V1136P1-001",
+        "title": "Form-field extract files deferred (§5.2 DRY)",
+        "severity": "nit",
+        "lifecycle": "open",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "follow-up"
+      },
+      {
+        "id": "R-V1136P1-002",
+        "title": "Inline validation / profile-guard parity vs dialogs",
+        "severity": "nit",
+        "lifecycle": "open",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "follow-up"
+      },
+      {
+        "id": "R-V1136P1-003",
+        "title": "Secondary Studio matrix still Light|Dark",
+        "severity": "nit",
+        "lifecycle": "open",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "non-goal"
+      }
+    ],
+    "2026-07-23-v1.136-p2-light-mode-chrome-harmony": [
+      {
+        "id": "R-V1136P2-001",
+        "title": "Form primitives light focus still neon (Input/Select/Textarea/Toast)",
+        "severity": "low",
+        "lifecycle": "open",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "follow-up"
+      },
+      {
+        "id": "R-V1136P2-002",
+        "title": "Light primary active fill equals default (DESIGN.md)",
+        "severity": "nit",
+        "lifecycle": "open",
+        "decision": "defer",
+        "owner": "@design",
+        "target": "follow-up"
+      },
+      {
+        "id": "R-V1136P2-003",
+        "title": "Studio selection-submenu Assign inline primary classes",
+        "severity": "nit",
+        "lifecycle": "open",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "studio-local"
       }
     ]
   }

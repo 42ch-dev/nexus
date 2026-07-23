@@ -60,13 +60,13 @@ export interface GlobalTimelineListChromeProps {
 }
 
 const ROW_CLASS_NAME =
-  'flex w-full items-center gap-3 rounded-card border border-gray-alpha-400 p-3 text-left transition-colors duration-state ease-standard hover:bg-gray-alpha-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-700 focus-visible:ring-offset-2';
+  'flex w-full items-center gap-3 rounded-card border border-gray-alpha-400 p-3 text-left transition-colors duration-state ease-standard hover:bg-gray-alpha-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-1000 dark:focus-visible:ring-blue-700 focus-visible:ring-offset-2';
 
 function RowContent({ row }: { row: GlobalTimelineListRow }) {
   return (
     <>
       <CalendarRange
-        className="h-5 w-5 shrink-0 text-blue-700"
+        className="h-5 w-5 shrink-0 text-blue-1000 dark:text-blue-700"
         aria-hidden
       />
       <span className="min-w-0 flex-1">
@@ -155,7 +155,7 @@ export function GlobalTimelineListChrome({
       <div data-testid="global-timeline-loading">
         <div className="flex items-center gap-2 py-6 text-copy-14 text-gray-700">
           <Loader2
-            className="h-4 w-4 animate-spin text-blue-700"
+            className="h-4 w-4 animate-spin text-blue-1000 dark:text-blue-700"
             aria-hidden
           />
           <span>{loadingLabel}</span>

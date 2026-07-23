@@ -52,7 +52,7 @@ export type NodeStatus = 'current' | 'running' | 'waiting' | 'error' | 'complete
 
 /** Status → selection ring class (semantic colors per Draft §3.6). */
 export const NODE_STATUS_RING: Record<NodeStatus, string> = {
-  current: 'ring-2 ring-blue-700',
+  current: 'ring-2 ring-blue-1000 dark:ring-blue-700',
   running: 'ring-2 ring-green-700',
   waiting: 'ring-2 ring-amber-700',
   error: 'ring-2 ring-red-700',
@@ -61,7 +61,7 @@ export const NODE_STATUS_RING: Record<NodeStatus, string> = {
 
 /** Status → status-dot fill class (pairs with the ring; Draft §3.6). */
 export const NODE_STATUS_DOT: Record<NodeStatus, string> = {
-  current: 'bg-blue-700',
+  current: 'bg-blue-1000 dark:bg-blue-700',
   running: 'bg-green-700',
   waiting: 'bg-amber-700',
   error: 'bg-red-700',
