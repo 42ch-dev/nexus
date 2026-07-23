@@ -13,6 +13,10 @@ import {
   Label,
   Textarea,
   Select,
+  Tabs,
+  TabsList,
+  TabsTrigger,
+  TabsContent,
 } from '@42ch/nexus-ui';
 import { Dialog, DialogTrigger, DialogContent } from '@web-ui/dialog'; // transitional — keep-web (Radix portal/focus-trap beyond presentational scope)
 import { Spinner, LoadingState, EmptyState, ErrorState } from '@web-ui/states'; // transitional — keep-web (lucide-react asset boundary; product copy & app-composition callbacks)
@@ -30,7 +34,6 @@ import {
   TableHead,
   TableCell,
 } from '@web-ui/table'; // transitional — keep-web (responsive overflow wrapper; not in V1.99 first batch)
-import { Tabs, TabsList, TabsTrigger, TabsContent } from '@web-ui/tabs'; // transitional — keep-web (compound component owns selection state; not purely presentational)
 
 /* ------------------------------------------------------------------ */
 /*  Shared helpers                                                      */
@@ -960,13 +963,16 @@ function TabsSection() {
   const [tab, setTab] = useState('tab1');
 
   return (
-    <section>
+    <section data-testid="tabs-fixtures">
       <SectionHeading id="comp-tabs">Tabs</SectionHeading>
       <p className="text-copy-16 text-gray-700 mb-6">
-        Tab set — interactive, two panels. Added to barrel by P0 T1 (
-        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">55dd06cc</code>
-        ). Active tab uses background-100 + shadow-card; inactive tabs are
-        hover-responsive.
+        Tab set — interactive, two panels. V1.137 P2 promotion: imported from{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">@42ch/nexus-ui</code>
+        ; web keeps a thin re-export under{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+          apps/web/src/components/ui/tabs.tsx
+        </code>
+        . Active tab uses background-100 + shadow-card; inactive tabs are hover-responsive.
       </p>
       <MatrixCard>
         <Tabs value={tab} onValueChange={setTab}>
@@ -1205,8 +1211,8 @@ export function ComponentsPage() {
         <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">@42ch/nexus-ui</code>
         ; transitional primitives remain on{' '}
         <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">@web-ui/*</code>{' '}
-        until their promotion slice lands. Interactive controls (Dialog, Tabs)
-        are functional. Every matrix cell renders a real component — hover,
+        until their promotion slice lands. Dialog remains transitional; Tabs is
+        promoted. Every matrix cell renders a real component — hover,
         focus-visible, disabled, and loading states are live; toggle the theme
         to verify both light and dark (V1.121 states matrix).
       </p>
@@ -1242,8 +1248,8 @@ export function ComponentsPage() {
       </section>
 
       <p className="text-copy-13 text-gray-500 mt-12 pt-8 border-t border-gray-alpha-200">
-        9 promoted (Badge, Button, Card, Input, Label, Textarea, Select, Toast,
-        TransportErrorBlock) + 4 transitional (Dialog, States, Table, Tabs)
+        10 promoted (Badge, Button, Card, Input, Label, Textarea, Select, Toast,
+        TransportErrorBlock, Tabs) + 3 transitional (Dialog, States, Table)
         rendered live via{' '}
         <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">@42ch/nexus-ui</code>{' '}
         (promoted) and{' '}
