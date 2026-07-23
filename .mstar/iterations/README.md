@@ -154,3 +154,5 @@ Implementation-detail SSOT that is not iteration-scoped stays in [`.mstar/knowle
 | V1.133 | [v1.133/](v1.133/) | completed | Legacy false-Done repair + residual burn-down (2 plans)
 | V1.134 | [v1.134/](v1.134/) | completed | Dogfood usability hardening — desktop 500 + app icon opaque full-bleed + AgentPicker VI + Creator Hub dual-pane IA (4 plans) |
 | V1.135 | [v1.135/](v1.135/) | completed | Dogfood correction — sidebar menu-area create + Dock icon deep RCA (2 Must plans, 2 specs) |
+| V1.136 | [v1.136/](v1.136/) | locked | Dogfood — Dock squircle follow-up + sidebar inline create tabs + Light interactive cyan-1000 / TransportError links (3 Must) |
+
