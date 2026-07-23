@@ -10,7 +10,9 @@
     "latest_ship": {
       "iteration": "V1.133",
       "compass": "v1.133/delivery-compass.md",
-      "shipped_at": "2026-07-23"
+      "shipped_at": "2026-07-23",
+      "pr": "https://github.com/42ch-dev/nexus/pull/171",
+      "merge_commit": "pending"
     },
     "platform_integration": "paused — local-only until further notice",
     "spec_integration_branch": "iteration/v1.133",
