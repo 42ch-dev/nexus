@@ -154,7 +154,7 @@ describe('AgentPicker', () => {
     expect(screen.getAllByText('Not installed').length).toBe(2);
   });
 
-  it('uses a 2px selection ring when installed and selected (VI-001)', () => {
+  it('uses a 2px selection ring and lit StatusDot when installed and selected (V1.134)', () => {
     render(
       <AgentPicker
         status="ready"
@@ -169,10 +169,13 @@ describe('AgentPicker', () => {
     expect(selectedCard).toHaveClass('border-2');
     expect(selectedCard).toHaveClass('border-blue-700');
     expect(selectedCard).not.toHaveClass('bg-blue-700/8');
-    expect(selectedCard.querySelector('[data-testid="agent-status-dot"]')).toBeNull();
+    expect(selectedCard.querySelector('[data-testid="agent-status-dot"]')).toHaveAttribute(
+      'data-dot',
+      'lit',
+    );
   });
 
-  it('uses neutral border when installed-unselected (VI-001)', () => {
+  it('uses neutral border and hollow StatusDot when installed-unselected (V1.134)', () => {
     render(
       <AgentPicker
         status="ready"
@@ -187,7 +190,82 @@ describe('AgentPicker', () => {
     expect(unselectedCard).toHaveClass('border-2');
     expect(unselectedCard).toHaveClass('border-gray-alpha-400');
     expect(unselectedCard).not.toHaveClass('border-blue-700');
-    expect(unselectedCard.querySelector('[data-testid="agent-status-dot"]')).toBeNull();
+    expect(unselectedCard.querySelector('[data-testid="agent-status-dot"]')).toHaveAttribute(
+      'data-dot',
+      'hollow',
+    );
+  });
+
+  it('uses hollow dot when installed-unselected and lit when selected', async () => {
+    const user = userEvent.setup();
+    const { rerender } = render(
+      <AgentPicker
+        status="ready"
+        defaultGrid={DEFAULT_GRID}
+        moreAgents={MORE_AGENTS}
+        selectedId={null}
+        onSelect={() => undefined}
+        customLaunchValue=""
+        onCustomLaunchChange={() => undefined}
+      />,
+    );
+    const installedCard = screen.getByTestId('agent-card-claude-native');
+    expect(installedCard.querySelector('[data-dot="hollow"]')).not.toBeNull();
+
+    await user.click(screen.getByTestId('agent-picker-more'));
+
+    rerender(
+      <AgentPicker
+        status="ready"
+        defaultGrid={DEFAULT_GRID}
+        moreAgents={MORE_AGENTS}
+        selectedId="claude-native"
+        onSelect={() => undefined}
+        customLaunchValue=""
+        onCustomLaunchChange={() => undefined}
+      />,
+    );
+    expect(
+      screen.getByTestId('agent-card-claude-native').querySelector('[data-dot="lit"]'),
+    ).not.toBeNull();
+    expect(
+      screen.getByTestId('agent-card-missing').querySelector('[data-dot="muted"]'),
+    ).not.toBeNull();
+  });
+
+  it('uses hollow GRAY border for unselected installed dot (FB-UI-006)', () => {
+    render(
+      <AgentPicker
+        status="ready"
+        defaultGrid={DEFAULT_GRID}
+        selectedId={null}
+        onSelect={() => undefined}
+        customLaunchValue=""
+        onCustomLaunchChange={() => undefined}
+      />,
+    );
+    const unselectedDot = screen
+      .getByTestId('agent-card-claude-native')
+      .querySelector('[data-dot="hollow"] span');
+    expect(unselectedDot).toHaveClass('border-gray-500');
+    expect(unselectedDot).not.toHaveClass('border-green-700');
+  });
+
+  it('uses filled GREEN when selected (FB-UI-006)', () => {
+    render(
+      <AgentPicker
+        status="ready"
+        defaultGrid={DEFAULT_GRID}
+        selectedId="claude-native"
+        onSelect={() => undefined}
+        customLaunchValue=""
+        onCustomLaunchChange={() => undefined}
+      />,
+    );
+    const selectedDot = screen
+      .getByTestId('agent-card-claude-native')
+      .querySelector('[data-dot="lit"] span');
+    expect(selectedDot).toHaveClass('bg-green-700');
   });
 
   it('renders an ArrowUpRight icon inside outbound links', () => {
