@@ -276,7 +276,7 @@ describe('TransportErrorBlock', () => {
     });
   });
 
-  describe('CTA presentation (V1.136 P2 — compact text links)', () => {
+  describe('CTA presentation (V1.136 P2 — compact text links; V1.137 L2 quiet)', () => {
     it('renders primary and secondary as text-link buttons, not filled Button', () => {
       render(
         <TransportErrorBlock
@@ -295,10 +295,12 @@ describe('TransportErrorBlock', () => {
       expect(secondary).toHaveAttribute('type', 'button');
 
       for (const cta of [primary, secondary]) {
-        expect(cta).toHaveClass('text-label-14');
-        expect(cta).toHaveClass('font-medium');
+        expect(cta).toHaveClass('text-label-12');
+        expect(cta).toHaveClass('font-normal');
         expect(cta).toHaveClass('text-brand-deep-blue');
         expect(cta).toHaveClass('dark:text-blue-700');
+        expect(cta).not.toHaveClass('text-label-14');
+        expect(cta).not.toHaveClass('font-medium');
         expect(cta).not.toHaveClass('h-10');
         expect(cta).not.toHaveClass('bg-brand-cyan-1000');
       }
