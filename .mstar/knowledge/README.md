@@ -119,3 +119,9 @@ Engineering reference for the Nexus OSS harness **knowledge** tree.
 | Document | Description |
 | --- | --- |
 | [architecture-patterns/nexus-brand-token-hierarchy.md](architecture-patterns/nexus-brand-token-hierarchy.md) | **Updated** — V1.137 P0 white-on-teal fill audit (semantic active-bg pairs); Button `tiny`; TransportError quiet `label-12`; Tabs promoted to `@42ch/nexus-ui` (compound V1.137) |
+
+### V1.138 additions
+
+| Document | Description |
+| --- | --- |
+| [architecture-patterns/third-party-codegen-adoption.md](architecture-patterns/third-party-codegen-adoption.md) | Third-party codegen adoption — jstt + typify replace bespoke generators; schemas frozen; hand-maintained `common_types`; typify consumer adaptation (newtypes / DateTime / NonZeroU64 / prefixed enums); drift + clippy gates, not byte-identical output (V1.138 P0+P1 distilled; compound V1.138) |

@@ -870,3 +870,15 @@ Archived from [deferred-features-cross-version-tracker.md](deferred-features-cro
 | Wire contracts | Unchanged |
 | Compound | Updated `nexus-brand-token-hierarchy.md` (semantic-token fill audit); DESIGN Tabs classification → promoted |
 | Open residuals | `R-V1137P1-001`–`003`, `R-V1137P2-002` (defer); `R-V1137P2-001` fixed at close |
+
+
+## V1.138 — Third-party codegen (jstt + typify) — 2026-07-24
+
+| Field | Value |
+|-------|-------|
+| **Iteration** | V1.138 |
+| **Integration** | `iteration/v1.138` |
+| **Plans** | P0 TS → `json-schema-to-typescript`; P1 Rust → `typify` |
+| **Outcome** | Bespoke `ts-generator`/`rust-generator` retired; `pnpm run codegen` library-driven; drift + workspace gates green |
+| **Open follow-ups** | R-V1138P0-*; R-V1138P1-001 canonical-hash spec sync; schema-loader orphan cleanup |
+
