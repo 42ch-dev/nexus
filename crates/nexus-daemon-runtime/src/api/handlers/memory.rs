@@ -1,5 +1,5 @@
 //! HTTP handlers have consistent error patterns.
-#![allow(clippy::missing_errors_doc)]
+#![allow(clippy::missing_errors_doc, clippy::missing_panics_doc)]
 //! Memory pending review handlers — session-end capture for review pipeline.
 //!
 //! V1.78 P0 (Batch 1): every request/response/query/item DTO is now the
@@ -245,12 +245,12 @@ pub async fn list_pending_reviews(
     debug!(count = items.len(), "Pending reviews retrieved");
 
     Ok(Json(ListPendingReviewsResponse {
-        items,
-        pagination: PaginationInfo {
+        items: super::wire_cast(items),
+        pagination: super::wire_cast(PaginationInfo {
             limit: i64::try_from(limit).unwrap_or(i64::MAX),
             has_more: next_cursor.is_some(),
             next_cursor,
-        },
+        }),
     }))
 }
 
@@ -1079,7 +1079,7 @@ pub async fn fragments(
             fragment_id: r.fragment_id,
             summary: r.summary,
             world_id: r.world_id,
-            keywords: Some(decode_fragment_keywords(&r.keywords)),
+            keywords: decode_fragment_keywords(&r.keywords),
             created_at: Some(r.created_at),
         })
         .collect();
@@ -1087,7 +1087,7 @@ pub async fn fragments(
     debug!(count = fragments_list.len(), "Fragments retrieved");
 
     Ok(Json(ListMemoryFragmentsResponse {
-        fragments: fragments_list,
+        fragments: super::wire_cast(fragments_list),
     }))
 }
 
@@ -1191,7 +1191,7 @@ pub async fn reflect_soul(
     info!(
         creator_id = %active_creator,
         world_id = ?world_id,
-        force_regenerate = req.force_regenerate.unwrap_or(false),
+        force_regenerate = req.force_regenerate,
         "Reflecting on SOUL narrative"
     );
 
@@ -1207,7 +1207,7 @@ pub async fn reflect_soul(
         message: format!("failed to compute fragment stats: {e}"),
     })?;
 
-    let force = req.force_regenerate.unwrap_or(false);
+    let force = req.force_regenerate;
 
     // 2. Insufficient-data gate (before any ACP call).
     let min_distinct = usize::try_from(MIN_SOUL_NARRATIVE_DISTINCT_KEYWORDS).unwrap_or(usize::MAX);
@@ -1217,7 +1217,7 @@ pub async fn reflect_soul(
     if insufficient {
         return Ok(Json(SoulNarrativeResponse {
             creator_id: active_creator,
-            state: "insufficient_data".to_string(),
+            state: "insufficient_data".parse().expect("valid state constant"),
             narrative: None,
             generated_at: None,
             stale: false,
@@ -1249,7 +1249,7 @@ pub async fn reflect_soul(
             if !has_narrative {
                 return Ok(Json(SoulNarrativeResponse {
                     creator_id: active_creator,
-                    state: "ungenerated".to_string(),
+                    state: "ungenerated".parse().expect("valid state constant"),
                     narrative: None,
                     generated_at: None,
                     stale: false,
@@ -1268,7 +1268,7 @@ pub async fn reflect_soul(
             if stale {
                 return Ok(Json(SoulNarrativeResponse {
                     creator_id: active_creator,
-                    state: "stale".to_string(),
+                    state: "stale".parse().expect("valid state constant"),
                     narrative: c.narrative.clone(),
                     generated_at: c.generated_at.clone(),
                     stale: true,
@@ -1291,7 +1291,7 @@ pub async fn reflect_soul(
             // Not stale → current.
             return Ok(Json(SoulNarrativeResponse {
                 creator_id: active_creator,
-                state: "current".to_string(),
+                state: "current".parse().expect("valid state constant"),
                 narrative: c.narrative.clone(),
                 generated_at: c.generated_at.clone(),
                 stale: false,
@@ -1314,7 +1314,7 @@ pub async fn reflect_soul(
         // Populate current_* counts from fragment_stats; narrative/generated_at = None.
         return Ok(Json(SoulNarrativeResponse {
             creator_id: active_creator,
-            state: "ungenerated".to_string(),
+            state: "ungenerated".parse().expect("valid state constant"),
             narrative: None,
             generated_at: None,
             stale: false,
@@ -1399,7 +1399,7 @@ pub async fn reflect_soul(
 
     Ok(Json(SoulNarrativeResponse {
         creator_id: active_creator,
-        state: "current".to_string(),
+        state: "current".parse().expect("valid state constant"),
         narrative: Some(narrative),
         generated_at: record.generated_at,
         stale: false,

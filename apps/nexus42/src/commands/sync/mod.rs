@@ -228,8 +228,8 @@ pub async fn run(cmd: SyncCommand, config: &CliConfig) -> Result<()> {
             let auth_token = crate::auth::user_auth::ensure_valid_token(config).await?;
 
             let request = nexus_contracts::SyncPullRequest {
-                schema_version: 1,
-                world_id,
+                schema_version: std::num::NonZeroU64::MIN,
+                world_id: world_id.try_into().expect("valid world id"),
                 after_confirmed_delta_sequence: after_sequence,
             };
 

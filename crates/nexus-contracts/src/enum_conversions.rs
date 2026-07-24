@@ -886,6 +886,172 @@ impl FromStr for ScanStatus {
     }
 }
 
+// ── as_str() for daemon-api request/response enums (plan v1.138 P1) ─────────
+// Consumers call `.as_str()` at contract↔domain boundaries. Same pattern as
+// the domain enums above: typify emits `Display`+`FromStr` but not `as_str()`.
+// All written against fully-qualified generated paths.
+
+impl crate::generated::daemon_api::works::chapters::patch_chapter_request::NexusChapterStatus {
+    #[must_use]
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::NotStarted => "not_started",
+            Self::Outlined => "outlined",
+            Self::Draft => "draft",
+            Self::Finalized => "finalized",
+            Self::Published => "published",
+        }
+    }
+}
+
+impl crate::generated::daemon_api::works::chapters::list_chapters_query::NexusChapterStatus {
+    #[must_use]
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::NotStarted => "not_started",
+            Self::Outlined => "outlined",
+            Self::Draft => "draft",
+            Self::Finalized => "finalized",
+            Self::Published => "published",
+        }
+    }
+}
+
+impl crate::generated::daemon_api::canvas::world_kb::world_kb_patch_entity_request::NexusWorldKbEntityPatchBlockType {
+    #[must_use]
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Character => "character",
+            Self::Ability => "ability",
+            Self::Scene => "scene",
+            Self::Organization => "organization",
+            Self::Item => "item",
+            Self::Conflict => "conflict",
+            Self::InfoPoint => "info_point",
+            Self::Event => "event",
+            Self::Species => "species",
+            Self::Faction => "faction",
+            Self::MagicSystem => "magic_system",
+            Self::Technology => "technology",
+            Self::Deity => "deity",
+            Self::Level => "level",
+            Self::EconomyTier => "economy_tier",
+            Self::Dialogue => "dialogue",
+            Self::Beat => "beat",
+            Self::Act => "act",
+            Self::Era => "era",
+        }
+    }
+}
+
+impl crate::generated::daemon_api::canvas::world_kb::world_kb_promote_candidate_request::WorldKbPromoteCandidateRequestAction {
+    #[must_use]
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Adopt => "adopt",
+            Self::Reject => "reject",
+            Self::Merge => "merge",
+        }
+    }
+}
+
+impl crate::generated::daemon_api::canvas::world_kb::world_kb_patch_relationship_request::WorldKbPatchRelationshipRequestAction {
+    #[must_use]
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Add => "add",
+            Self::Update => "update",
+            Self::Remove => "remove",
+        }
+    }
+}
+
+impl crate::generated::daemon_api::canvas::world_kb::world_kb_relationship_input::NexusWorldKbRelationshipKind {
+    #[must_use]
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::AlliedWith => "allied_with",
+            Self::Opposes => "opposes",
+            Self::ParentOf => "parent_of",
+            Self::ChildOf => "child_of",
+            Self::MemberOf => "member_of",
+            Self::LocatedIn => "located_in",
+            Self::RulesOver => "rules_over",
+            Self::References => "references",
+            Self::Serves => "serves",
+            Self::RivalOf => "rival_of",
+            Self::MentorOf => "mentor_of",
+            Self::Custom => "custom",
+        }
+    }
+}
+
+impl crate::generated::daemon_api::canvas::world_kb::world_kb_patch_relationship_request::NexusWorldKbRelationshipKind {
+    #[must_use]
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::AlliedWith => "allied_with",
+            Self::Opposes => "opposes",
+            Self::ParentOf => "parent_of",
+            Self::ChildOf => "child_of",
+            Self::MemberOf => "member_of",
+            Self::LocatedIn => "located_in",
+            Self::RulesOver => "rules_over",
+            Self::References => "references",
+            Self::Serves => "serves",
+            Self::RivalOf => "rival_of",
+            Self::MentorOf => "mentor_of",
+            Self::Custom => "custom",
+        }
+    }
+}
+
+impl crate::generated::daemon_api::canvas::outline::outline_patch_structure_request::OutlinePatchStructureRequestOperation {
+    #[must_use]
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::MoveChapter => "move_chapter",
+            Self::LinkEvent => "link_event",
+            Self::AttachToVolume => "attach_to_volume",
+        }
+    }
+}
+
+impl crate::generated::daemon_api::canvas::outline::timeline_patch_event_request::TimelinePatchEventRequestOperation {
+    #[must_use]
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::AddEvent => "add_event",
+            Self::RemoveEvent => "remove_event",
+            Self::AttachEventToChapter => "attach_event_to_chapter",
+            Self::LinkForeshadow => "link_foreshadow",
+            Self::UnlinkForeshadow => "unlink_foreshadow",
+        }
+    }
+}
+
+// ── as_str() for strategy patch request enums (plan v1.138 P1) ─────────────
+impl crate::generated::daemon_api::canvas::strategy::strategy_patch_transition_request::StrategyPatchTransitionRequestTransitionKind {
+    #[must_use]
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Next => "next",
+            Self::Branch => "branch",
+            Self::Default => "default",
+        }
+    }
+}
+
+impl crate::generated::daemon_api::canvas::strategy::strategy_patch_transition_request::StrategyPatchTransitionRequestOp {
+    #[must_use]
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Create => "create",
+            Self::Update => "update",
+        }
+    }
+}
+
 // `DeliveryState` is common_types-only (the outbox stores it as a stringified
 // enum column) and consumers rebuild it from strings.
 impl FromStr for DeliveryState {

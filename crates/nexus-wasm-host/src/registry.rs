@@ -102,7 +102,7 @@ mod tests {
             .iter()
             .find(|m| m.module_id == "basic-combat")
             .expect("basic-combat should be present");
-        assert_eq!(basic_combat.status, "ok");
+        assert_eq!(basic_combat.status.to_string(), "ok");
     }
 
     #[test]
@@ -112,7 +112,7 @@ mod tests {
         assert_eq!(summary.name, "broken-module");
         assert_eq!(summary.version, "unknown");
         assert!(summary.required_key_block_types.is_empty());
-        assert_eq!(summary.status, "broken");
+        assert_eq!(summary.status.to_string(), "broken");
     }
 
     #[test]
@@ -135,7 +135,7 @@ mod tests {
             max_wall_time_ms: None,
         };
         let summary = manifest_to_summary(&manifest);
-        assert_eq!(summary.status, "ok");
+        assert_eq!(summary.status.to_string(), "ok");
     }
 
     #[test]

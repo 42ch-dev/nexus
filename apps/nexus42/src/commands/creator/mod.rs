@@ -1593,11 +1593,13 @@ async fn cache_creator_locally(creator: &Creator) -> Result<()> {
     let cached_at = chrono::Utc::now().to_rfc3339();
     let data = serde_json::to_string(creator)?;
     let status_str = creator.status.as_str();
+    let creator_id = &*creator.creator_id;
+    let display_name = &*creator.display_name;
     sqlx::query!(
         "INSERT OR REPLACE INTO creators (creator_id, display_name, status, cached_at, data)
          VALUES (?, ?, ?, ?, ?)",
-        creator.creator_id,
-        creator.display_name,
+        creator_id,
+        display_name,
         status_str,
         cached_at,
         data

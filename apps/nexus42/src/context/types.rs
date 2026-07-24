@@ -9,8 +9,8 @@
 //! assembly runs CLI in-process via `nexus-moment-context-assembly`.
 
 // Re-export generated types from nexus-contracts
-pub use nexus_contracts::generated::ContextAssembleRequestV1;
-pub use nexus_contracts::generated::ContextAssembleResponseV1;
+pub use nexus_contracts::generated::platform::http_bff::context_assembly_v1::ContextAssembleRequestV1;
+pub use nexus_contracts::generated::platform::http_bff::context_assembly_v1::ContextAssembleResponseV1;
 
 // Re-export MemoryKind from domain for CLI use
 #[cfg(test)]

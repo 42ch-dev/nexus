@@ -592,7 +592,7 @@ pub async fn get_preset(
 
     Ok(Json(GetPresetResponse {
         id: preset_id,
-        source,
+        source: super::wire_cast(source),
         path: path.map(|p| p.display().to_string()),
         yaml,
     }))

@@ -510,12 +510,12 @@ pub async fn list_works(
         .collect();
 
     Ok(Json(ListWorksResponse {
-        items,
-        pagination: PaginationInfo {
+        items: super::wire_cast(items),
+        pagination: super::wire_cast(PaginationInfo {
             limit: i64::from(limit),
             next_cursor,
             has_more,
-        },
+        }),
     }))
 }
 

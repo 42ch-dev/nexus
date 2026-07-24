@@ -132,20 +132,21 @@ pub async fn get_timeline_overview(
     Ok(Json(TimelineOverviewResponse {
         worlds: worlds
             .into_iter()
-            .map(|w| {
-                #[allow(clippy::cast_sign_loss)]
-                nexus_contracts::TimelineOverviewResponseWorld {
-                    world_id: w.world_id,
-                    title: Some(w.title),
-                    era_count: w.era_count as u64,
-                    event_count: w.event_count as u64,
-                    last_event_at: w.last_event_at,
-                }
+            .map(|w| nexus_contracts::TimelineOverviewResponseWorldsItem {
+                world_id: w.world_id,
+                title: Some(w.title),
+                era_count: u64::try_from(w.era_count).unwrap_or(0),
+                event_count: u64::try_from(w.event_count).unwrap_or(0),
+                last_event_at: w.last_event_at.and_then(|s| {
+                    chrono::DateTime::parse_from_rfc3339(&s)
+                        .ok()
+                        .map(|dt| dt.with_timezone(&chrono::Utc))
+                }),
             })
             .collect(),
         cursor,
         #[allow(clippy::cast_sign_loss)]
-        total_worlds: total_worlds as u64,
+        total_worlds: u64::try_from(total_worlds).unwrap_or(0),
     }))
 }
 

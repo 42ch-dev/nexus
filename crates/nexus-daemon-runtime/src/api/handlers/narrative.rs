@@ -11,7 +11,7 @@
 //! These are **narrative state** routes, distinct from the work-scope
 //! `/v1/daemon/kb/*` file-index routes.
 
-#![allow(clippy::missing_errors_doc)]
+#![allow(clippy::missing_errors_doc, clippy::missing_panics_doc)]
 
 use crate::api::errors::NexusApiError;
 use crate::api::handlers::works::read_active_creator_id;
@@ -166,7 +166,7 @@ pub async fn create_world(
         StatusCode::CREATED,
         Json(CreateWorldResponse {
             world_id: result.world_id,
-            status: "active".into(),
+            status: "active".parse().expect("valid status constant"),
         }),
     ))
 }

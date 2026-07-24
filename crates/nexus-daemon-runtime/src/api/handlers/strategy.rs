@@ -633,7 +633,9 @@ fn patch_state_inner(
         ));
     }
 
-    let set = parse_state_set(&req.set)?;
+    let set = parse_state_set(
+        &serde_json::to_value(&req.set).expect("serializing StrategyPatchStateRequestSet"),
+    )?;
 
     let states = yaml_value
         .get_mut("states")
@@ -689,9 +691,11 @@ fn patch_state_inner(
     write_preset_yaml(&bundle_dir, &mut yaml_value, new_revision)?;
 
     Ok(StrategyPatchResponse {
-        new_revision: i64::try_from(new_revision).unwrap_or(i64::MAX),
-        validation_summary: serde_json::json!({ "errors": [], "warnings": warnings }),
-        side_effects: Some(side_effects),
+        new_revision: std::num::NonZeroU64::new(new_revision).unwrap_or(std::num::NonZeroU64::MIN),
+        validation_summary: super::wire_cast(
+            serde_json::json!({ "errors": [], "warnings": warnings }),
+        ),
+        side_effects,
     })
 }
 
@@ -933,7 +937,11 @@ fn resolved_create_transition_kind<'a>(
     req: &'a StrategyPatchTransitionRequest,
     next: &serde_yaml::Value,
 ) -> Result<&'a str, NexusApiError> {
-    match req.transition_kind.as_deref() {
+    match req
+        .transition_kind
+        .as_ref()
+        .map(nexus_contracts::StrategyPatchTransitionRequestTransitionKind::as_str)
+    {
         Some(kind) => {
             validate_transition_kind(kind)?;
             Ok(kind)
@@ -1067,9 +1075,7 @@ fn patch_transition_inner(
 ) -> Result<StrategyPatchResponse, NexusApiError> {
     // Reject unknown `op` values early so raw clients cannot send e.g. `op: "delete"`
     // and silently fall through to the update path (Greptile Issue 5).
-    if let Some(op) = &req.op {
-        validate_transition_op(op)?;
-    }
+    validate_transition_op(req.op.as_str())?;
 
     let bundle_dir = user_preset_bundle_dir(nexus_home, strategy_id);
     let _guard = acquire_strategy_lock(&bundle_dir)?;
@@ -1114,7 +1120,7 @@ fn patch_transition_inner(
             message: "state index disappeared during transition patch".to_string(),
         })?;
 
-    let op = req.op.as_deref().unwrap_or("update");
+    let op = req.op.as_str();
 
     let side_effects = if op == "create" {
         let new_target = req
@@ -1183,9 +1189,11 @@ fn patch_transition_inner(
     write_preset_yaml(&bundle_dir, &mut yaml_value, new_revision)?;
 
     Ok(StrategyPatchResponse {
-        new_revision: i64::try_from(new_revision).unwrap_or(i64::MAX),
-        validation_summary: serde_json::json!({ "errors": [], "warnings": warnings }),
-        side_effects: Some(side_effects),
+        new_revision: std::num::NonZeroU64::new(new_revision).unwrap_or(std::num::NonZeroU64::MIN),
+        validation_summary: super::wire_cast(
+            serde_json::json!({ "errors": [], "warnings": warnings }),
+        ),
+        side_effects,
     })
 }
 
@@ -1307,15 +1315,7 @@ fn patch_prompt_template_inner_with_writer(
         })?;
     }
 
-    let body = req
-        .set
-        .get("body")
-        .and_then(|v| v.as_str())
-        .map(std::string::ToString::to_string)
-        .ok_or_else(|| NexusApiError::InvalidInput {
-            field: "set.body".to_string(),
-            reason: "prompt body is required".to_string(),
-        })?;
+    let body = req.set.body.clone();
 
     // Stage the new template with a request-unique temp file, then rename it
     // into place before validating the manifest. If validation fails we roll
@@ -1361,9 +1361,11 @@ fn patch_prompt_template_inner_with_writer(
     side_effects.push(format!("wrote prompt template '{}'", req.template_ref));
 
     Ok(StrategyPatchResponse {
-        new_revision: i64::try_from(new_revision).unwrap_or(i64::MAX),
-        validation_summary: serde_json::json!({ "errors": [], "warnings": warnings }),
-        side_effects: Some(side_effects),
+        new_revision: std::num::NonZeroU64::new(new_revision).unwrap_or(std::num::NonZeroU64::MIN),
+        validation_summary: super::wire_cast(
+            serde_json::json!({ "errors": [], "warnings": warnings }),
+        ),
+        side_effects,
     })
 }
 

@@ -306,8 +306,12 @@ mod tests {
         assert_eq!(detail.description.as_deref(), Some("A test module"));
         assert_eq!(detail.author.as_deref(), Some("tester"));
         assert_eq!(
-            detail.host_functions.as_deref(),
-            Some(&["kb_read".to_string(), "narrative_query".to_string()][..])
+            detail
+                .host_functions
+                .iter()
+                .map(|h| h.to_string())
+                .collect::<Vec<_>>(),
+            vec!["kb_read".to_string(), "narrative_query".to_string()]
         );
         assert!(detail.schemas.is_some());
         assert_eq!(detail.battle_report_kind.as_deref(), Some("combat"));
