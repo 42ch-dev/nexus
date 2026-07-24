@@ -8,7 +8,7 @@
   "types": "dist/index.d.ts",
   "scripts": {
     "build": "tsup src/index.ts --format cjs,esm && tsc --emitDeclarationOnly",
-    "dev": "tsup src/index.ts --format cjs,esm --dts --watch",
+    "dev": "tsc --emitDeclarationOnly --watch & tsup src/index.ts --format cjs,esm --watch & wait",
     "codegen": "node dist/index.js",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",

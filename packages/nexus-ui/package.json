@@ -52,7 +52,7 @@
   "scripts": {
     "prepare": "pnpm run build",
     "build": "tsup src/index.ts src/tokens.ts --format cjs,esm && tsc --emitDeclarationOnly",
-    "dev": "tsup src/index.ts src/tokens.ts --format cjs,esm --watch",
+    "dev": "tsc --emitDeclarationOnly --watch & tsup src/index.ts src/tokens.ts --format cjs,esm --watch & wait",
     "clean": "rm -rf dist",
     "typecheck": "tsc --noEmit",
     "lint": "oxlint .",
