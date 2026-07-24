@@ -241,8 +241,8 @@ mod tests {
 
         let cmd = variant.to_sync_command("cmd_001", "wrk_001", "local_user");
         assert_eq!(cmd.command_type, CommandType::AdvanceWorld);
-        assert_eq!(cmd.world_id, "wld_test");
-        assert_eq!(cmd.creator_id, "ctr_test");
+        assert_eq!(cmd.world_id.to_string(), "wld_test");
+        assert_eq!(cmd.creator_id.to_string(), "ctr_test");
         assert_eq!(cmd.origin, WireCommandOrigin::LocalUser);
 
         let recovered = SyncCommandVariant::from_sync_command(&cmd).expect("should convert");

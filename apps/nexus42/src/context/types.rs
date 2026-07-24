@@ -55,16 +55,7 @@ mod tests {
 
     #[test]
     fn request_serializes_to_valid_json() {
-        let req = ContextAssembleRequestV1 {
-            request_id: "req_test".to_string(),
-            workspace_id: "wrk_001".to_string(),
-            creator_id: "ctr_001".to_string(),
-            world_id: "wld_001".to_string(),
-            include_memory: Some(true),
-            include_timeline: Some(true),
-            include_story_summaries: Some(true),
-            ..Default::default()
-        };
+        let req: ContextAssembleRequestV1 = serde_json::from_value(serde_json::json!({"request_id": "req_test", "workspace_id": "wrk_001", "creator_id": "ctr_001", "world_id": "wld_001", "include_memory": true, "include_timeline": true, "include_story_summaries": true})).unwrap();
         let json = serde_json::to_string(&req).expect("serialization should succeed");
         let parsed: serde_json::Value = serde_json::from_str(&json).expect("json should be valid");
         assert_eq!(parsed["request_id"], "req_test");
@@ -86,13 +77,15 @@ mod tests {
         }"#;
         let req: ContextAssembleRequestV1 =
             serde_json::from_str(json).expect("deserialization should succeed");
-        // Optional fields that were omitted
-        assert_eq!(req.include_memory, None);
-        assert_eq!(req.include_timeline, None);
-        assert_eq!(req.include_story_summaries, None);
-        assert_eq!(req.memory_kinds, None);
+        // Schema defaults: include_* flags default to true; memory_kinds has a non-empty default.
+        assert!(req.include_memory);
+        assert!(req.include_timeline);
+        assert!(req.include_story_summaries);
+        assert_eq!(req.memory_kinds.len(), 3);
         assert_eq!(req.max_timeline_events, None);
         assert_eq!(req.max_story_summaries, None);
+        assert_eq!(req.key_block_limit, 100);
+        assert_eq!(req.timeline_limit, 50);
     }
 
     #[test]
@@ -107,99 +100,90 @@ mod tests {
         }"#;
         let req: ContextAssembleRequestV1 =
             serde_json::from_str(json).expect("deserialization should succeed");
-        assert_eq!(req.include_memory, Some(false));
+        assert!(!req.include_memory);
         assert_eq!(req.max_timeline_events, Some(10));
     }
 
     #[test]
     fn response_success_roundtrip() {
-        let resp = ContextAssembleResponseV1 {
-            request_id: "req_1".to_string(),
-            success: true,
-            error_code: None,
-            error_message: None,
-            world_id: "wld_001".to_string(),
-            assembled_at: "2025-04-05T12:00:00Z".to_string(),
-            data_freshness_hint: Some("bdl_abc123".to_string()),
-            key_blocks: Some(vec![]),
-            timeline_events: Some(vec![]),
-            story_summaries: Some(vec![]),
-            memory_items: Some(vec![]),
-        };
+        let resp: ContextAssembleResponseV1 = serde_json::from_value(serde_json::json!({
+            "request_id": "req_test",
+            "success": true,
+            "world_id": "wld_001",
+            "assembled_at": "2025-04-05T12:00:00Z",
+            "key_blocks": [],
+            "timeline_events": [],
+            "story_summaries": [],
+            "memory_items": []
+        }))
+        .unwrap();
         let json = serde_json::to_string(&resp).expect("serialization should succeed");
         let deserialized: ContextAssembleResponseV1 =
             serde_json::from_str(&json).expect("deserialization should succeed");
-        assert_eq!(deserialized, resp);
+        assert_eq!(
+            serde_json::to_value(&deserialized).unwrap(),
+            serde_json::to_value(&resp).unwrap()
+        );
         assert!(!is_error(&deserialized));
     }
 
     #[test]
     fn response_error_roundtrip() {
-        let resp = ContextAssembleResponseV1 {
-            request_id: "req_2".to_string(),
-            success: false,
-            error_code: Some("world_not_found".to_string()),
-            error_message: Some("World does not exist".to_string()),
-            world_id: "wld_999".to_string(),
-            assembled_at: "2025-04-05T12:00:00Z".to_string(),
-            data_freshness_hint: None,
-            key_blocks: Some(vec![]),
-            timeline_events: Some(vec![]),
-            story_summaries: Some(vec![]),
-            memory_items: Some(vec![]),
-        };
+        let resp: ContextAssembleResponseV1 = serde_json::from_value(serde_json::json!({
+            "request_id": "req_test",
+            "success": false,
+            "error_code": "world_not_found",
+            "error_message": "World not found",
+            "world_id": "wld_999",
+            "assembled_at": "2025-04-05T12:00:00Z",
+            "key_blocks": [],
+            "timeline_events": [],
+            "story_summaries": [],
+            "memory_items": []
+        }))
+        .unwrap();
         assert!(is_error(&resp));
         assert_eq!(error_code(&resp), Some("world_not_found"));
     }
 
     #[test]
     fn response_with_data_roundtrip() {
-        let resp = ContextAssembleResponseV1 {
-            request_id: "req_3".to_string(),
-            success: true,
-            error_code: None,
-            error_message: None,
-            world_id: "wld_001".to_string(),
-            assembled_at: "2025-04-05T12:00:00Z".to_string(),
-            data_freshness_hint: None,
-            key_blocks: Some(vec![
-                nexus_contracts::generated::ContextAssembleResponseV1KeyBlock {
-                    key_block_id: "kb_001".to_string(),
-                    block_type: "character".to_string(),
-                    name: "Hero".to_string(),
-                    summary: "The protagonist".to_string(),
-                },
-            ]),
-            timeline_events: Some(vec![
-                nexus_contracts::generated::ContextAssembleResponseV1TimelineEvent {
-                    event_id: "evt_001".to_string(),
-                    event_type: "plot_point".to_string(),
-                    description: "Discovery".to_string(),
-                    occurred_at: "2025-04-01T00:00:00Z".to_string(),
-                },
-            ]),
-            story_summaries: Some(vec![
-                nexus_contracts::generated::ContextAssembleResponseV1StorySummary {
-                    story_manifest_id: "stm_001".to_string(),
-                    title: "Chapter 1".to_string(),
-                    summary_text: "The beginning".to_string(),
-                    manifest_type: "chapter".to_string(),
-                },
-            ]),
-            memory_items: Some(vec![
-                nexus_contracts::generated::ContextAssembleResponseV1MemoryItem {
-                    memory_id: "mem_001".to_string(),
-                    memory_kind: MemoryKind::StorySummary.to_string(),
-                    content: "Important detail".to_string(),
-                },
-            ]),
-        };
+        let resp: ContextAssembleResponseV1 = serde_json::from_value(serde_json::json!({
+            "request_id": "req_test",
+            "success": true,
+            "world_id": "wld_001",
+            "assembled_at": "2025-04-05T12:00:00Z",
+            "key_blocks": [{
+                "key_block_id": "kb_001",
+                "name": "Alice",
+                "summary": "Protagonist",
+                "block_type": "character"
+            }],
+            "timeline_events": [{
+                "event_id": "evt_001",
+                "event_type": "plot_point",
+                "description": "Discovery",
+                "occurred_at": "2025-04-01T00:00:00Z"
+            }],
+            "story_summaries": [{
+                "story_manifest_id": "stm_001",
+                "title": "Chapter 1",
+                "summary_text": "The beginning",
+                "manifest_type": "chapter"
+            }],
+            "memory_items": [{
+                "memory_id": "mem_001",
+                "memory_kind": "story_summary",
+                "content": "Important detail"
+            }]
+        }))
+        .unwrap();
         let json = serde_json::to_string(&resp).expect("serialization should succeed");
         let deserialized: ContextAssembleResponseV1 =
             serde_json::from_str(&json).expect("deserialization should succeed");
-        assert_eq!(deserialized.key_blocks.as_ref().unwrap().len(), 1);
-        assert_eq!(deserialized.timeline_events.as_ref().unwrap().len(), 1);
-        assert_eq!(deserialized.story_summaries.as_ref().unwrap().len(), 1);
-        assert_eq!(deserialized.memory_items.as_ref().unwrap().len(), 1);
+        assert_eq!(deserialized.key_blocks.len(), 1);
+        assert_eq!(deserialized.timeline_events.len(), 1);
+        assert_eq!(deserialized.story_summaries.len(), 1);
+        assert_eq!(deserialized.memory_items.len(), 1);
     }
 }

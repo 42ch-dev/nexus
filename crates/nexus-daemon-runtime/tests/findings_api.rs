@@ -15,7 +15,7 @@
 
 use axum::extract::{Path, Query, State};
 use axum::Json;
-use nexus_contracts::{BatchUpdateFindingsRequest, FindingBatchPatch};
+use nexus_contracts::BatchUpdateFindingsRequest;
 use nexus_daemon_runtime::api::handlers::findings::{
     batch_update_findings_handler, create_finding_handler, create_from_review_handler,
     delete_finding_handler, get_finding_handler, list_findings_handler, prune_findings_handler,
@@ -999,18 +999,15 @@ async fn findings_batch_update_status_happy_path() {
                 f2.finding_id.clone(),
                 f3.finding_id.clone(),
             ],
-            patch: FindingBatchPatch {
-                status: Some("triaged".to_string()),
-                target_executor: None,
-            },
+            patch: serde_json::from_value(serde_json::json!({"status": "triaged"})).unwrap(),
         }),
     )
     .await
     .unwrap();
 
     assert_eq!(res.updated, 3);
-    assert!(res.not_found.is_none());
-    assert!(res.conflict.is_none());
+    assert!(res.not_found.is_empty());
+    assert!(res.conflict.is_empty());
 
     // Verify each row advanced to triaged.
     for finding_id in [&f1.finding_id, &f2.finding_id, &f3.finding_id] {
@@ -1038,10 +1035,7 @@ async fn findings_batch_update_assign_executor() {
         State(state.clone()),
         batch_request_value(BatchUpdateFindingsRequest {
             finding_ids: vec![f1.finding_id.clone(), f2.finding_id.clone()],
-            patch: FindingBatchPatch {
-                status: None,
-                target_executor: Some("write".to_string()),
-            },
+            patch: serde_json::from_value(serde_json::json!({"target_executor": "write"})).unwrap(),
         }),
     )
     .await
@@ -1073,21 +1067,15 @@ async fn findings_batch_update_not_found_collected() {
         State(state.clone()),
         batch_request_value(BatchUpdateFindingsRequest {
             finding_ids: vec![f1.finding_id.clone(), missing.clone()],
-            patch: FindingBatchPatch {
-                status: Some("triaged".to_string()),
-                target_executor: None,
-            },
+            patch: serde_json::from_value(serde_json::json!({"status": "triaged"})).unwrap(),
         }),
     )
     .await
     .unwrap();
 
     assert_eq!(res.updated, 1);
-    assert_eq!(
-        res.not_found.as_ref().map(Vec::as_slice),
-        Some(&[missing][..])
-    );
-    assert!(res.conflict.is_none());
+    assert_eq!(res.not_found.as_slice(), &[missing][..]);
+    assert!(res.conflict.is_empty());
 
     let got = get_finding_handler(
         State(state.clone()),
@@ -1143,20 +1131,17 @@ async fn findings_batch_update_conflict_collected() {
         State(state.clone()),
         batch_request_value(BatchUpdateFindingsRequest {
             finding_ids: vec![open_f.finding_id.clone(), resolved_f.finding_id.clone()],
-            patch: FindingBatchPatch {
-                status: Some("triaged".to_string()),
-                target_executor: None,
-            },
+            patch: serde_json::from_value(serde_json::json!({"status": "triaged"})).unwrap(),
         }),
     )
     .await
     .unwrap();
 
     assert_eq!(res.updated, 1);
-    assert!(res.not_found.is_none());
+    assert!(res.not_found.is_empty());
     assert_eq!(
-        res.conflict.as_ref().map(Vec::as_slice),
-        Some(&[resolved_f.finding_id.clone()][..])
+        res.conflict.as_slice(),
+        &[resolved_f.finding_id.clone()][..]
     );
 
     // The legal transition still applied.
@@ -1180,10 +1165,7 @@ async fn findings_batch_update_cap_rejected_with_422() {
         State(state.clone()),
         batch_request_value(BatchUpdateFindingsRequest {
             finding_ids: ids,
-            patch: FindingBatchPatch {
-                status: Some("triaged".to_string()),
-                target_executor: None,
-            },
+            patch: serde_json::from_value(serde_json::json!({"status": "triaged"})).unwrap(),
         }),
     )
     .await
@@ -1232,10 +1214,7 @@ async fn findings_batch_update_mid_batch_dao_error_preserves_prior_updates() {
                 f2.finding_id.clone(),
                 f3.finding_id.clone(),
             ],
-            patch: FindingBatchPatch {
-                status: Some("triaged".to_string()),
-                target_executor: None,
-            },
+            patch: serde_json::from_value(serde_json::json!({"status": "triaged"})).unwrap(),
         }),
     )
     .await
@@ -1290,10 +1269,7 @@ async fn findings_batch_rejects_empty_finding_ids() {
         State(state.clone()),
         batch_request_value(BatchUpdateFindingsRequest {
             finding_ids: vec![],
-            patch: FindingBatchPatch {
-                status: Some("triaged".to_string()),
-                target_executor: None,
-            },
+            patch: serde_json::from_value(serde_json::json!({"status": "triaged"})).unwrap(),
         }),
     )
     .await
@@ -1317,18 +1293,15 @@ async fn findings_batch_empty_patch_returns_zero_updated() {
         State(state.clone()),
         batch_request_value(BatchUpdateFindingsRequest {
             finding_ids: vec![f1.finding_id.clone()],
-            patch: FindingBatchPatch {
-                status: None,
-                target_executor: None,
-            },
+            patch: serde_json::from_value(serde_json::json!({})).unwrap(),
         }),
     )
     .await
     .expect("empty patch should succeed with 0 updates");
 
     assert_eq!(res.updated, 0);
-    assert!(res.not_found.is_none());
-    assert!(res.conflict.is_none());
+    assert!(res.not_found.is_empty());
+    assert!(res.conflict.is_empty());
 
     // Row must be unchanged.
     let got = get_finding_handler(
@@ -1376,10 +1349,7 @@ async fn findings_batch_rejects_duplicate_finding_ids() {
         State(state.clone()),
         batch_request_value(BatchUpdateFindingsRequest {
             finding_ids: vec![f1.finding_id.clone(), f1.finding_id.clone()],
-            patch: FindingBatchPatch {
-                status: Some("triaged".to_string()),
-                target_executor: None,
-            },
+            patch: serde_json::from_value(serde_json::json!({"status": "triaged"})).unwrap(),
         }),
     )
     .await

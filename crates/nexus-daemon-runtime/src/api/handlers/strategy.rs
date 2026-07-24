@@ -1462,7 +1462,10 @@ states:
             strategy_id: "test-strategy".to_string(),
             state_id: "start".to_string(),
             base_revision: 1,
-            set: serde_json::json!({ "label": "begin", "description": "Begin here." }),
+            set: serde_json::from_value(
+                serde_json::json!({ "label": "begin", "description": "Begin here." }),
+            )
+            .unwrap(),
         };
         let res = patch_state(
             State(state),
@@ -1472,13 +1475,8 @@ states:
         .await
         .expect("patch_state should succeed");
 
-        assert_eq!(res.new_revision, 2);
-        assert!(res
-            .side_effects
-            .as_ref()
-            .unwrap()
-            .iter()
-            .any(|s| s.contains("begin")));
+        assert_eq!(res.new_revision, std::num::NonZeroU64::new(2).unwrap());
+        assert!(res.side_effects.iter().any(|s| s.contains("begin")));
 
         let yaml = std::fs::read_to_string(
             nexus_home_layout::user_preset_bundle_dir(&nexus_home, "test-strategy")
@@ -1504,7 +1502,8 @@ states:
             strategy_id: "test-strategy".to_string(),
             state_id: "start".to_string(),
             base_revision: 0, // stale
-            set: serde_json::json!({ "description": "Stale edit." }),
+            set: serde_json::from_value(serde_json::json!({ "description": "Stale edit." }))
+                .unwrap(),
         };
         let err = patch_state(
             State(state),
@@ -1535,14 +1534,14 @@ states:
             old_target: Some("end".to_string()),
             new_target: Some("end".to_string()),
             condition: None,
-            transition_kind: Some("next".to_string()),
-            op: None,
+            transition_kind: Some("next".parse().unwrap()),
+            op: "update".parse().unwrap(),
         };
         // Sanity: rewriting to the same target is a no-op but should succeed.
         let res = patch_transition(State(state), Path("test-strategy".to_string()), Json(req))
             .await
             .expect("patch_transition should succeed");
-        assert_eq!(res.new_revision, 2);
+        assert_eq!(res.new_revision, std::num::NonZeroU64::new(2).unwrap());
     }
 
     #[tokio::test]
@@ -1560,7 +1559,7 @@ states:
             state_id: "start".to_string(),
             base_revision: 1,
             template_ref: "prompts/start.md".to_string(),
-            set: serde_json::json!({ "body": "# Hello\n" }),
+            set: serde_json::from_value(serde_json::json!({ "body": "# Hello\n" })).unwrap(),
         };
         let res = patch_prompt_template(
             State(state),
@@ -1570,7 +1569,7 @@ states:
         .await
         .expect("patch_prompt_template should succeed");
 
-        assert_eq!(res.new_revision, 2);
+        assert_eq!(res.new_revision, std::num::NonZeroU64::new(2).unwrap());
         let body = std::fs::read_to_string(bundle_dir.join("prompts/start.md")).unwrap();
         assert_eq!(body, "# Hello\n");
     }
@@ -1593,7 +1592,7 @@ states:
             new_target: None,
             condition: Some("not a valid expression @#$".to_string()),
             transition_kind: None,
-            op: None,
+            op: "update".parse().unwrap(),
         };
         let err = patch_transition(State(state), Path("test-strategy".to_string()), Json(req))
             .await
@@ -1655,7 +1654,7 @@ states:
             state_id: "start".to_string(),
             base_revision: 1,
             template_ref: "prompts/other.md".to_string(),
-            set: serde_json::json!({ "body": "new content" }),
+            set: serde_json::from_value(serde_json::json!({ "body": "new content" })).unwrap(),
         };
         let err = patch_prompt_template(
             State(state),
@@ -1690,13 +1689,13 @@ states:
             strategy_id: "test-strategy".to_string(),
             state_id: "start".to_string(),
             base_revision: 1,
-            set: serde_json::json!({ "description": "A" }),
+            set: serde_json::from_value(serde_json::json!({ "description": "A" })).unwrap(),
         };
         let req_b = StrategyPatchStateRequest {
             strategy_id: "test-strategy".to_string(),
             state_id: "start".to_string(),
             base_revision: 1,
-            set: serde_json::json!({ "description": "B" }),
+            set: serde_json::from_value(serde_json::json!({ "description": "B" })).unwrap(),
         };
 
         let state_a = state.clone();
@@ -1803,7 +1802,7 @@ states:
             state_id: "start".to_string(),
             base_revision: 1,
             template_ref: "prompts/original.md".to_string(),
-            set: serde_json::json!({ "body": "new content" }),
+            set: serde_json::from_value(serde_json::json!({ "body": "new content" })).unwrap(),
         };
 
         let err = patch_prompt_template_inner_with_writer(
@@ -1883,7 +1882,7 @@ states:
             new_target: None,
             condition: None,
             transition_kind: None,
-            op: None,
+            op: "update".parse().unwrap(),
         };
         append_conditional_rule(&mut map, &req, "b").expect("first unconditional rule");
         let err = append_conditional_rule(&mut map, &req, "b")
@@ -1907,7 +1906,7 @@ states:
             new_target: None,
             condition: Some("_context.ready".to_string()),
             transition_kind: None,
-            op: None,
+            op: "update".parse().unwrap(),
         };
         append_conditional_rule(&mut map, &req, "b").expect("first conditioned rule");
         let err = append_conditional_rule(&mut map, &req, "b")
@@ -1931,7 +1930,7 @@ states:
             new_target: None,
             condition: Some("_context.ready".to_string()),
             transition_kind: None,
-            op: None,
+            op: "update".parse().unwrap(),
         };
         append_conditional_rule(&mut map, &req_a, "b").expect("first conditioned rule");
         let req_b = StrategyPatchTransitionRequest {
@@ -1942,7 +1941,7 @@ states:
             new_target: None,
             condition: Some("_context.alt".to_string()),
             transition_kind: None,
-            op: None,
+            op: "update".parse().unwrap(),
         };
         append_conditional_rule(&mut map, &req_b, "b")
             .expect("different condition should be allowed");

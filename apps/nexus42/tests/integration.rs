@@ -210,6 +210,8 @@ fn daemon_status_not_running() {
         .unwrap()
         .arg("daemon")
         .arg("status")
+        .arg("--port")
+        .arg("19999")
         .assert()
         .success()
         .stdout(predicate::str::contains("Not running"));

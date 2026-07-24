@@ -342,7 +342,7 @@ mod tests {
             .await
             .expect("first generation");
         assert!(fp1.fingerprint.starts_with("SHA256:"));
-        assert_eq!(fp1.algorithm, "sha256");
+        assert_eq!(fp1.algorithm.to_string(), "sha256");
         assert!(fp1.created_at.is_some());
 
         // The file-backed config must be usable.

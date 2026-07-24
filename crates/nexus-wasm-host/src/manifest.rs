@@ -32,7 +32,7 @@
 use std::collections::HashMap;
 
 use nexus_contracts::generated::daemon_api::compute::module_detail::{
-    ModuleDetail, ModuleDetailHostFunctionsItem,
+    ModuleDetail, ModuleDetailHostFunctionsItem, ModuleDetailSchemas,
 };
 use serde::{Deserialize, Serialize};
 
@@ -110,6 +110,39 @@ impl ModuleManifest {
     }
 }
 
+fn json_object_to_map(value: serde_json::Value) -> serde_json::Map<String, serde_json::Value> {
+    value.as_object().cloned().unwrap_or_default()
+}
+
+fn schema_fragment_maps_to_detail(
+    src: Option<&HashMap<String, serde_json::Value>>,
+) -> HashMap<String, serde_json::Map<String, serde_json::Value>> {
+    src.map(|fragments| {
+        fragments
+            .iter()
+            .map(|(k, v)| (k.clone(), json_object_to_map(v.clone())))
+            .collect()
+    })
+    .unwrap_or_default()
+}
+
+fn module_schemas_to_detail(schemas: &ModuleSchemas) -> ModuleDetailSchemas {
+    ModuleDetailSchemas {
+        key_block_attributes: schema_fragment_maps_to_detail(schemas.key_block_attributes.as_ref()),
+        key_block_state: schema_fragment_maps_to_detail(schemas.key_block_state.as_ref()),
+        invocation: schemas
+            .invocation
+            .as_ref()
+            .map(|v| json_object_to_map(v.clone()))
+            .unwrap_or_default(),
+        battle_report: schemas
+            .battle_report
+            .as_ref()
+            .map(|v| json_object_to_map(v.clone()))
+            .unwrap_or_default(),
+    }
+}
+
 impl From<&ModuleManifest> for ModuleDetail {
     /// Typed conversion from the runtime manifest to the generated wire detail.
     ///
@@ -148,10 +181,7 @@ impl From<&ModuleManifest> for ModuleDetail {
                     HostFunction::NarrativeQuery => ModuleDetailHostFunctionsItem::NarrativeQuery,
                 })
                 .collect(),
-            schemas: manifest.schemas.as_ref().map(|s| {
-                serde_json::from_value(serde_json::to_value(s).expect("ModuleSchemas serializes"))
-                    .expect("ModuleSchemas round-trips to ModuleDetailSchemas")
-            }),
+            schemas: manifest.schemas.as_ref().map(module_schemas_to_detail),
             battle_report_kind: manifest.battle_report_kind.clone(),
             max_fuel: manifest
                 .max_fuel

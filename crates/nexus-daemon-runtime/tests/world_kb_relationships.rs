@@ -6,10 +6,17 @@
 use axum::extract::{Path, Query, State};
 use axum::Json;
 use nexus_contracts::{
-    WorldKbPatchRelationshipRequest, WorldKbRelationshipInput, WorldKbRelationshipKind,
+    world_kb_patch_relationship_request::{
+        NexusWorldKbRelationshipInput, NexusWorldKbRelationshipKind,
+    },
+    WorldKbPatchRelationshipRequest, WorldKbRelationshipKind,
 };
 use nexus_daemon_runtime::api::handlers::world_kb::{get_graph, patch_relationship, GraphQuery};
 use nexus_daemon_runtime::workspace::WorkspaceState;
+
+fn relation_type_to_nexus(kind: WorldKbRelationshipKind) -> NexusWorldKbRelationshipKind {
+    kind.as_str().parse().expect("wire enum parity")
+}
 
 async fn seed_key_block(
     pool: &sqlx::SqlitePool,
@@ -97,17 +104,17 @@ fn add_request(
 ) -> WorldKbPatchRelationshipRequest {
     WorldKbPatchRelationshipRequest {
         relationship_id: None,
-        action: "add".to_string(),
+        action: "add".parse().unwrap(),
         expected_version: Some(0),
-        relationship: Some(WorldKbRelationshipInput {
+        relationship: Some(NexusWorldKbRelationshipInput {
             source_entity_id: source.to_string(),
             target_entity_id: target.to_string(),
-            relation_type,
+            relation_type: relation_type_to_nexus(relation_type),
             custom_label: None,
             symmetric: false,
             confidence: None,
-            source_anchor_ids: None,
-            metadata: None,
+            source_anchor_ids: Vec::new(),
+            metadata: Default::default(),
             needs_review: None,
         }),
     }
@@ -148,7 +155,7 @@ async fn add_relationship_returns_projected_row() {
     let rel = resp.relationship.expect("response includes relationship");
     assert_eq!(rel.source_entity_id, "kb_a");
     assert_eq!(rel.target_entity_id, "kb_b");
-    assert_eq!(rel.relation_type, WorldKbRelationshipKind::AlliedWith);
+    assert_eq!(rel.relation_type.to_string(), "allied_with");
 }
 
 #[tokio::test]
@@ -188,17 +195,17 @@ async fn update_relationship_returns_bumped_version_and_projected_row() {
 
     let req = WorldKbPatchRelationshipRequest {
         relationship_id: Some(rel_id.clone()),
-        action: "update".to_string(),
+        action: "update".parse().unwrap(),
         expected_version: Some(0),
-        relationship: Some(WorldKbRelationshipInput {
+        relationship: Some(NexusWorldKbRelationshipInput {
             source_entity_id: "kb_a".to_string(),
             target_entity_id: "kb_b".to_string(),
-            relation_type: WorldKbRelationshipKind::MentorOf,
+            relation_type: relation_type_to_nexus(WorldKbRelationshipKind::MentorOf),
             custom_label: None,
             symmetric: true,
             confidence: Some(0.75),
-            source_anchor_ids: None,
-            metadata: None,
+            source_anchor_ids: Vec::new(),
+            metadata: Default::default(),
             needs_review: None,
         }),
     };
@@ -213,7 +220,7 @@ async fn update_relationship_returns_bumped_version_and_projected_row() {
     assert_eq!(resp.version, 1);
     let rel = resp.relationship.unwrap();
     assert_eq!(rel.relationship_id, rel_id);
-    assert_eq!(rel.relation_type, WorldKbRelationshipKind::MentorOf);
+    assert_eq!(rel.relation_type.to_string(), "mentor_of");
     assert!(rel.symmetric);
     assert_eq!(rel.confidence.unwrap(), 0.75);
 }
@@ -255,7 +262,7 @@ async fn remove_relationship_returns_null_projection() {
 
     let req = WorldKbPatchRelationshipRequest {
         relationship_id: Some(rel_id),
-        action: "remove".to_string(),
+        action: "remove".parse().unwrap(),
         expected_version: Some(0),
         relationship: None,
     };
@@ -410,17 +417,17 @@ async fn update_stale_version_returns_409() {
 
     let req = WorldKbPatchRelationshipRequest {
         relationship_id: Some(rel_id),
-        action: "update".to_string(),
+        action: "update".parse().unwrap(),
         expected_version: Some(99),
-        relationship: Some(WorldKbRelationshipInput {
+        relationship: Some(NexusWorldKbRelationshipInput {
             source_entity_id: "kb_a".to_string(),
             target_entity_id: "kb_b".to_string(),
-            relation_type: WorldKbRelationshipKind::MentorOf,
+            relation_type: relation_type_to_nexus(WorldKbRelationshipKind::MentorOf),
             custom_label: None,
-            symmetric: false,
-            confidence: None,
-            source_anchor_ids: None,
-            metadata: None,
+            symmetric: true,
+            confidence: Some(0.75),
+            source_anchor_ids: Vec::new(),
+            metadata: Default::default(),
             needs_review: None,
         }),
     };
@@ -486,12 +493,12 @@ async fn get_graph_includes_symmetric_reverse_projection() {
     let stored = graph
         .relationships
         .iter()
-        .find(|r| r.projection_direction == "stored")
+        .find(|r| r.projection_direction.to_string() == "stored")
         .expect("stored projection");
     let reverse = graph
         .relationships
         .iter()
-        .find(|r| r.projection_direction == "symmetric_reverse")
+        .find(|r| r.projection_direction.to_string() == "symmetric_reverse")
         .expect("reverse projection");
     assert_eq!(stored.relationship_id, reverse.relationship_id);
     assert_eq!(stored.source_entity_id, reverse.target_entity_id);
@@ -522,7 +529,7 @@ async fn add_with_valid_anchor_succeeds() {
     seed_source_anchor(state.pool().unwrap(), "kb_a", 1).await;
 
     let mut req = add_request("kb_a", "kb_b", WorldKbRelationshipKind::AlliedWith);
-    req.relationship.as_mut().unwrap().source_anchor_ids = Some(vec!["sa_kb_a".to_string()]);
+    req.relationship.as_mut().unwrap().source_anchor_ids = vec!["sa_kb_a".to_string()];
     let Json(resp) = patch_relationship(
         State(state.clone()),
         Path("wld_test_world".to_string()),
@@ -557,7 +564,7 @@ async fn add_with_invalid_anchor_rejects_422() {
     .await;
 
     let mut req = add_request("kb_a", "kb_b", WorldKbRelationshipKind::AlliedWith);
-    req.relationship.as_mut().unwrap().source_anchor_ids = Some(vec!["sa_missing".to_string()]);
+    req.relationship.as_mut().unwrap().source_anchor_ids = vec!["sa_missing".to_string()];
     let err = patch_relationship(
         State(state.clone()),
         Path("wld_test_world".to_string()),
@@ -714,17 +721,17 @@ async fn update_cross_world_relationship_returns_403() {
 
     let req = WorldKbPatchRelationshipRequest {
         relationship_id: Some(rel_id),
-        action: "update".to_string(),
+        action: "update".parse().unwrap(),
         expected_version: Some(0),
-        relationship: Some(WorldKbRelationshipInput {
+        relationship: Some(NexusWorldKbRelationshipInput {
             source_entity_id: "kb_a".to_string(),
             target_entity_id: "kb_b".to_string(),
-            relation_type: WorldKbRelationshipKind::MentorOf,
+            relation_type: relation_type_to_nexus(WorldKbRelationshipKind::MentorOf),
             custom_label: None,
-            symmetric: false,
-            confidence: None,
-            source_anchor_ids: None,
-            metadata: None,
+            symmetric: true,
+            confidence: Some(0.75),
+            source_anchor_ids: Vec::new(),
+            metadata: Default::default(),
             needs_review: None,
         }),
     };
@@ -746,7 +753,7 @@ async fn remove_cross_world_relationship_returns_403() {
 
     let req = WorldKbPatchRelationshipRequest {
         relationship_id: Some(rel_id),
-        action: "remove".to_string(),
+        action: "remove".parse().unwrap(),
         expected_version: Some(0),
         relationship: None,
     };
@@ -875,7 +882,7 @@ async fn get_graph_hides_needs_review_by_default() {
         .iter()
         .find(|r| r.needs_review)
         .expect("suggestion present with include_suggested");
-    assert_eq!(suggestion.source, "extraction");
+    assert_eq!(suggestion.source.to_string(), "extraction");
     assert!(suggestion.needs_review);
 }
 
@@ -914,17 +921,17 @@ async fn promote_suggestion_clears_needs_review() {
     // Promote: update with needs_review=false clears the gate.
     let req = WorldKbPatchRelationshipRequest {
         relationship_id: Some(rel_id.clone()),
-        action: "update".to_string(),
+        action: "update".parse().unwrap(),
         expected_version: Some(0),
-        relationship: Some(WorldKbRelationshipInput {
+        relationship: Some(NexusWorldKbRelationshipInput {
             source_entity_id: "kb_a".to_string(),
             target_entity_id: "kb_b".to_string(),
-            relation_type: WorldKbRelationshipKind::AlliedWith,
+            relation_type: relation_type_to_nexus(WorldKbRelationshipKind::AlliedWith),
             custom_label: None,
             symmetric: true,
             confidence: Some(0.75),
-            source_anchor_ids: None,
-            metadata: None,
+            source_anchor_ids: Vec::new(),
+            metadata: Default::default(),
             needs_review: Some(false),
         }),
     };
@@ -940,7 +947,11 @@ async fn promote_suggestion_clears_needs_review() {
         !promoted.needs_review,
         "promotion clears the needs_review gate"
     );
-    assert_eq!(promoted.source, "extraction", "source provenance preserved");
+    assert_eq!(
+        promoted.source.to_string(),
+        "extraction",
+        "source provenance preserved"
+    );
 
     // After promotion the suggestion shows in the default graph.
     let Json(graph) = get_graph(
@@ -996,17 +1007,17 @@ async fn update_preserves_needs_review_when_omitted() {
     // A routine edit that omits needs_review must NOT accidentally promote.
     let req = WorldKbPatchRelationshipRequest {
         relationship_id: Some(rel_id),
-        action: "update".to_string(),
+        action: "update".parse().unwrap(),
         expected_version: Some(0),
-        relationship: Some(WorldKbRelationshipInput {
+        relationship: Some(NexusWorldKbRelationshipInput {
             source_entity_id: "kb_a".to_string(),
             target_entity_id: "kb_b".to_string(),
-            relation_type: WorldKbRelationshipKind::MentorOf,
+            relation_type: relation_type_to_nexus(WorldKbRelationshipKind::MentorOf),
             custom_label: None,
-            symmetric: false,
-            confidence: None,
-            source_anchor_ids: None,
-            metadata: None,
+            symmetric: true,
+            confidence: Some(0.75),
+            source_anchor_ids: Vec::new(),
+            metadata: Default::default(),
             needs_review: None,
         }),
     };

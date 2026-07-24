@@ -18,6 +18,10 @@ pub struct PullApplySummary {
 ///
 /// # Errors
 /// Returns the specific error type if the operation fails.
+///
+/// # Panics
+/// Panics if a pull-response bundle envelope fails to round-trip through `Bundle`
+/// (drift-gate-proven equivalent; should never happen for well-formed platform responses).
 pub async fn apply_pull_response_to_outbox(
     outbox: &Outbox,
     response: &SyncPullResponse,

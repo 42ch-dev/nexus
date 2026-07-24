@@ -66,6 +66,15 @@ const BATTLE_REPORT_MAX_BYTES: usize = 64 * 1024;
 /// Valid `state_delta.op` variants recognized by `apply_state_delta`.
 const VALID_OPS: &[&str] = &["add", "sub", "set"];
 
+fn state_delta_op_wire(op: &nexus_contracts::ComputeOutputStateDeltaItemOp) -> &'static str {
+    use nexus_contracts::ComputeOutputStateDeltaItemOp;
+    match op {
+        ComputeOutputStateDeltaItemOp::Add => "add",
+        ComputeOutputStateDeltaItemOp::Sub => "sub",
+        ComputeOutputStateDeltaItemOp::Set => "set",
+    }
+}
+
 /// Input for `narrative.compute`.
 #[derive(Debug, Deserialize)]
 struct NarrativeComputeInput {
@@ -235,7 +244,7 @@ impl Capability for NarrativeCompute {
         let narrative_state = json!({
             "world_id": parsed.world_id,
             "branch_id": branch_id,
-            "timeline_position": 0, // V1.61: default to start of timeline
+            "timeline_position": "0", // V1.61: default to start of timeline
         });
 
         // 3. Build ComputeInput envelope and invoke WASM.
@@ -423,10 +432,11 @@ async fn apply_state_delta(
 
     for delta in deltas {
         // Validate op.
-        if !VALID_OPS.contains(&delta.op.as_str()) {
+        let op_wire = state_delta_op_wire(&delta.op);
+        if !VALID_OPS.contains(&op_wire) {
             return Err(CapabilityError::InputInvalid(format!(
                 "unknown state_delta op '{}' (expected one of: {})",
-                delta.op,
+                op_wire,
                 VALID_OPS.join(", ")
             )));
         }
@@ -476,13 +486,7 @@ async fn apply_state_delta(
         let rest_path: Vec<&str> = path_segments[1..].to_vec();
 
         // Apply the delta to the state JSON.
-        apply_json_delta(
-            &mut state,
-            state_key,
-            &rest_path,
-            delta.op.as_str(),
-            &delta.value,
-        )?;
+        apply_json_delta(&mut state, state_key, &rest_path, op_wire, &delta.value)?;
 
         // Write back.
         body.state = Some(state);
@@ -758,6 +762,23 @@ mod tests {
         (pool, dir)
     }
 
+    fn test_contract_key_block(
+        key_block_id: &str,
+        world_id: &str,
+        canonical_name: &str,
+    ) -> nexus_contracts::KeyBlock {
+        serde_json::from_value(json!({
+            "schema_version": 1,
+            "key_block_id": key_block_id,
+            "world_id": world_id,
+            "block_type": "character",
+            "canonical_name": canonical_name,
+            "status": "confirmed",
+            "created_at": "2026-01-01T00:00:00Z",
+        }))
+        .expect("minimal KeyBlock wire fixture")
+    }
+
     async fn seed_creator(pool: &sqlx::SqlitePool, creator_id: &str) {
         sqlx::query(
             "INSERT OR IGNORE INTO creators (creator_id, display_name, status, cached_at, data) \
@@ -965,12 +986,7 @@ mod tests {
     #[tokio::test]
     async fn create_new_key_blocks_rejects_cross_world_injection() {
         let (pool, _dir) = fresh_pool().await;
-        let hostile = nexus_contracts::KeyBlock {
-            key_block_id: "kb_hostile".to_string(),
-            world_id: "wld_OTHER".to_string(),
-            block_type: nexus_contracts::BlockType::Character,
-            ..Default::default()
-        };
+        let hostile = test_contract_key_block("kb_hostile", "wld_OTHER", "Hostile");
         let err = create_new_key_blocks(&pool, "wld_admitted", std::slice::from_ref(&hostile))
             .await
             .unwrap_err();
@@ -985,13 +1001,7 @@ mod tests {
         let (pool, _dir) = fresh_pool().await;
         seed_creator(&pool, "ctr_kb").await;
         seed_world(&pool, "ctr_kb", "wld_admitted").await;
-        let kb = nexus_contracts::KeyBlock {
-            key_block_id: "kb_ok".to_string(),
-            world_id: "wld_admitted".to_string(),
-            block_type: nexus_contracts::BlockType::Character,
-            canonical_name: "Ok".to_string(),
-            ..Default::default()
-        };
+        let kb = test_contract_key_block("kb_ok", "wld_admitted", "Ok");
         let n = create_new_key_blocks(&pool, "wld_admitted", std::slice::from_ref(&kb))
             .await
             .unwrap();

@@ -890,8 +890,8 @@ mod tests {
         )
         .await
         .expect("get chapter");
-        assert_eq!(resp.chapter, 1);
-        assert_eq!(resp.volume, 1);
+        assert_eq!(resp.chapter, std::num::NonZeroU64::new(1).unwrap());
+        assert_eq!(resp.volume, std::num::NonZeroU64::new(1).unwrap());
         assert!(resp.slug.as_deref().is_some_and(|s| s.starts_with("ch01")));
     }
 
@@ -933,7 +933,7 @@ mod tests {
         let (state, _tmp, work_id) = setup_chapter_work().await;
         let req = PatchChapterRequest {
             title: None,
-            slug: Some("new-slug".to_string()),
+            slug: Some("new-slug".parse().unwrap()),
             planned_word_count: None,
             volume: None,
             status: None,
@@ -963,7 +963,7 @@ mod tests {
             title: None,
             slug: None,
             planned_word_count: None,
-            volume: Some(2),
+            volume: Some(std::num::NonZeroU64::new(2).unwrap()),
             status: None,
             confirm_structural_edit: None,
             transition_reason: None,
@@ -976,7 +976,7 @@ mod tests {
         )
         .await
         .expect("patch with volume change must not 404 after the write");
-        assert_eq!(resp.volume, 2);
+        assert_eq!(resp.volume, std::num::NonZeroU64::new(2).unwrap());
     }
 
     /// Regression: writing `title` must return BadRequest (HTTP 400,

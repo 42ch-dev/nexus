@@ -1944,13 +1944,13 @@ mod tests {
         let req = SoulNarrativeRequest {
             creator_id: creator_id.to_string(),
             world_id: None,
-            force_regenerate: Some(false),
+            force_regenerate: false,
         };
         let resp = reflect_soul(axum::extract::State(state.clone()), axum::Json(req))
             .await
             .expect("should succeed for force=false + ungenerated");
 
-        assert_eq!(resp.state, "ungenerated");
+        assert_eq!(resp.state.to_string(), "ungenerated");
         assert!(resp.narrative.is_none());
         assert!(resp.generated_at.is_none());
         assert!(!resp.stale);
@@ -1970,7 +1970,7 @@ mod tests {
         let req2 = SoulNarrativeRequest {
             creator_id: creator_id.to_string(),
             world_id: None,
-            force_regenerate: Some(true),
+            force_regenerate: true,
         };
         let err = reflect_soul(axum::extract::State(state.clone()), axum::Json(req2))
             .await
@@ -2060,13 +2060,13 @@ mod tests {
         let req = SoulNarrativeRequest {
             creator_id: creator_id.to_string(),
             world_id: None,
-            force_regenerate: Some(false),
+            force_regenerate: false,
         };
         let resp = reflect_soul(axum::extract::State(state), axum::Json(req))
             .await
             .expect("should succeed for force=false + cached current");
 
-        assert_eq!(resp.state, "current");
+        assert_eq!(resp.state.to_string(), "current");
         assert_eq!(resp.narrative.as_deref(), Some("A test narrative."));
         assert!(!resp.stale);
         assert_eq!(resp.current_fragment_count, 25);
@@ -2134,18 +2134,18 @@ mod tests {
         let req = SoulNarrativeRequest {
             creator_id: creator_id.to_string(),
             world_id: Some(owned_world.to_string()),
-            force_regenerate: Some(false),
+            force_regenerate: false,
         };
         let resp = reflect_soul(axum::extract::State(state.clone()), axum::Json(req))
             .await
             .expect("owned world should be accepted");
-        assert_eq!(resp.state, "insufficient_data");
+        assert_eq!(resp.state.to_string(), "insufficient_data");
 
         // Non-owned world → 403 Forbidden.
         let req = SoulNarrativeRequest {
             creator_id: creator_id.to_string(),
             world_id: Some(other_world.to_string()),
-            force_regenerate: Some(false),
+            force_regenerate: false,
         };
         let err = reflect_soul(axum::extract::State(state.clone()), axum::Json(req))
             .await
@@ -2161,7 +2161,7 @@ mod tests {
         let req = SoulNarrativeRequest {
             creator_id: creator_id.to_string(),
             world_id: Some(missing_world.to_string()),
-            force_regenerate: Some(false),
+            force_regenerate: false,
         };
         let err = reflect_soul(axum::extract::State(state.clone()), axum::Json(req))
             .await
@@ -2227,13 +2227,13 @@ mod tests {
         let req = SoulNarrativeRequest {
             creator_id: creator_id.to_string(),
             world_id: Some(world_id.to_string()),
-            force_regenerate: Some(false),
+            force_regenerate: false,
         };
         let resp = reflect_soul(axum::extract::State(state.clone()), axum::Json(req))
             .await
             .expect("should succeed for force=false + ungenerated world");
 
-        assert_eq!(resp.state, "ungenerated");
+        assert_eq!(resp.state.to_string(), "ungenerated");
         assert!(resp.narrative.is_none());
         assert_eq!(resp.current_fragment_count, 25);
         // Threshold-saturated count: 25 distinct reports as 20.
@@ -2243,7 +2243,7 @@ mod tests {
         let req2 = SoulNarrativeRequest {
             creator_id: creator_id.to_string(),
             world_id: Some(world_id.to_string()),
-            force_regenerate: Some(true),
+            force_regenerate: true,
         };
         let err = reflect_soul(axum::extract::State(state.clone()), axum::Json(req2))
             .await
@@ -2327,12 +2327,12 @@ mod tests {
         let req = SoulNarrativeRequest {
             creator_id: creator_id.to_string(),
             world_id: Some(world_id.to_string()),
-            force_regenerate: Some(false),
+            force_regenerate: false,
         };
         let resp = reflect_soul(axum::extract::State(state.clone()), axum::Json(req))
             .await
             .expect("owned world poll should succeed");
-        assert_eq!(resp.state, "ungenerated");
+        assert_eq!(resp.state.to_string(), "ungenerated");
         assert_eq!(resp.current_fragment_count, 25);
         assert_eq!(resp.current_distinct_keyword_count, 20);
 
@@ -2343,12 +2343,12 @@ mod tests {
         let req = SoulNarrativeRequest {
             creator_id: creator_id.to_string(),
             world_id: None,
-            force_regenerate: Some(false),
+            force_regenerate: false,
         };
         let resp = reflect_soul(axum::extract::State(state.clone()), axum::Json(req))
             .await
             .expect("creator-level poll should succeed");
-        assert_eq!(resp.state, "ungenerated");
+        assert_eq!(resp.state.to_string(), "ungenerated");
         assert_eq!(resp.current_fragment_count, 35);
         assert_eq!(resp.current_distinct_keyword_count, 20);
 

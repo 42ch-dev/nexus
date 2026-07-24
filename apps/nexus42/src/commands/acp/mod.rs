@@ -1440,9 +1440,12 @@ mod tests {
 
     #[tokio::test]
     async fn acp_status_non_running() {
-        // This will fail to connect but should be an error, not panic
-        let result = cmd_status().await;
-        // Status fails when daemon not running — that's expected
-        assert!(result.is_err());
+        // Probe an unused port so the test is independent of a live local daemon.
+        let client = crate::api::DaemonClient::new("http://127.0.0.1:19999");
+        let result = client.get_runtime_status().await;
+        assert!(
+            result.is_err(),
+            "runtime status should fail when no daemon listens on the port"
+        );
     }
 }

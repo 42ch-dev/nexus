@@ -1699,13 +1699,13 @@ mod tests {
                     event_id: "evt_a".to_string(),
                     title: "Plant".to_string(),
                     description: None,
-                    realizes_chapter_id: Some(1),
+                    realizes_chapter_id: Some(std::num::NonZeroU64::new(1).unwrap()),
                 },
                 WorkOutlineTimelineEventsItem {
                     event_id: "evt_b".to_string(),
                     title: "Payoff".to_string(),
                     description: None,
-                    realizes_chapter_id: Some(2),
+                    realizes_chapter_id: Some(std::num::NonZeroU64::new(2).unwrap()),
                 },
             ],
             foreshadows: vec![WorkOutlineForeshadowsItem {
@@ -1723,10 +1723,13 @@ mod tests {
         let req = TimelinePatchEventRequest {
             work_id: "wk_test".to_string(),
             base_revision: 1,
-            operation: "unlink_foreshadow".to_string(),
+            operation: "unlink_foreshadow".parse().unwrap(),
             event_id: Some("evt_a".to_string()),
             foreshadows_event_id: Some("evt_b".to_string()),
-            ..Default::default()
+            description: None,
+            realizes_chapter_id: None,
+            target_chapter_id: None,
+            title: None,
         };
         assert_eq!(fm.foreshadows.len(), 1);
         timeline_unlink_foreshadow(&req, &mut fm).expect("unlink should succeed");
@@ -1739,10 +1742,13 @@ mod tests {
         let req = TimelinePatchEventRequest {
             work_id: "wk_test".to_string(),
             base_revision: 1,
-            operation: "unlink_foreshadow".to_string(),
+            operation: "unlink_foreshadow".parse().unwrap(),
             event_id: Some("evt_b".to_string()), // reversed direction — does not exist
             foreshadows_event_id: Some("evt_a".to_string()),
-            ..Default::default()
+            description: None,
+            realizes_chapter_id: None,
+            target_chapter_id: None,
+            title: None,
         };
         let result = timeline_unlink_foreshadow(&req, &mut fm);
         assert!(result.is_err(), "non-existent edge must error");
@@ -1759,9 +1765,13 @@ mod tests {
         let no_source = TimelinePatchEventRequest {
             work_id: "wk_test".to_string(),
             base_revision: 1,
-            operation: "unlink_foreshadow".to_string(),
+            operation: "unlink_foreshadow".parse().unwrap(),
             foreshadows_event_id: Some("evt_b".to_string()),
-            ..Default::default()
+            event_id: None,
+            description: None,
+            realizes_chapter_id: None,
+            target_chapter_id: None,
+            title: None,
         };
         assert!(timeline_unlink_foreshadow(&no_source, &mut fm).is_err());
 
@@ -1769,9 +1779,13 @@ mod tests {
         let no_target = TimelinePatchEventRequest {
             work_id: "wk_test".to_string(),
             base_revision: 1,
-            operation: "unlink_foreshadow".to_string(),
+            operation: "unlink_foreshadow".parse().unwrap(),
             event_id: Some("evt_a".to_string()),
-            ..Default::default()
+            foreshadows_event_id: None,
+            description: None,
+            realizes_chapter_id: None,
+            target_chapter_id: None,
+            title: None,
         };
         assert!(timeline_unlink_foreshadow(&no_target, &mut fm).is_err());
     }
@@ -1782,10 +1796,13 @@ mod tests {
         let req = TimelinePatchEventRequest {
             work_id: "wk_test".to_string(),
             base_revision: 1,
-            operation: "unlink_foreshadow".to_string(),
+            operation: "unlink_foreshadow".parse().unwrap(),
             event_id: Some("evt_a".to_string()),
             foreshadows_event_id: Some("evt_b".to_string()),
-            ..Default::default()
+            description: None,
+            realizes_chapter_id: None,
+            target_chapter_id: None,
+            title: None,
         };
         // apply_timeline_patch routes to the correct handler by operation string.
         apply_timeline_patch(&req, &mut fm, &[]).expect("dispatch should succeed");
@@ -1808,10 +1825,13 @@ mod tests {
         let link_req = TimelinePatchEventRequest {
             work_id: "wk_test".to_string(),
             base_revision: 1,
-            operation: "link_foreshadow".to_string(),
+            operation: "link_foreshadow".parse().unwrap(),
             event_id: Some("evt_a".to_string()),
             foreshadows_event_id: Some("evt_b".to_string()),
-            ..Default::default()
+            description: None,
+            realizes_chapter_id: None,
+            target_chapter_id: None,
+            title: None,
         };
         apply_timeline_patch(&link_req, &mut fm, &[]).expect("link should succeed");
         assert_eq!(fm.foreshadows.len(), 1);
@@ -1819,10 +1839,13 @@ mod tests {
         let unlink_req = TimelinePatchEventRequest {
             work_id: "wk_test".to_string(),
             base_revision: 1,
-            operation: "unlink_foreshadow".to_string(),
+            operation: "unlink_foreshadow".parse().unwrap(),
             event_id: Some("evt_a".to_string()),
             foreshadows_event_id: Some("evt_b".to_string()),
-            ..Default::default()
+            description: None,
+            realizes_chapter_id: None,
+            target_chapter_id: None,
+            title: None,
         };
         apply_timeline_patch(&unlink_req, &mut fm, &[]).expect("unlink should succeed");
         assert!(fm.foreshadows.is_empty());
@@ -1838,10 +1861,13 @@ mod tests {
         let req = TimelinePatchEventRequest {
             work_id: "wk_test".to_string(),
             base_revision: 1,
-            operation: "link_foreshadow".to_string(),
+            operation: "link_foreshadow".parse().unwrap(),
             event_id: Some("evt_a".to_string()),
             foreshadows_event_id: Some("evt_a".to_string()),
-            ..Default::default()
+            description: None,
+            realizes_chapter_id: None,
+            target_chapter_id: None,
+            title: None,
         };
         let result = timeline_link_foreshadow(&req, &mut fm);
         match result {
@@ -1878,7 +1904,7 @@ mod tests {
                 event_id: "evt_b".to_string(),
                 title: "Payoff".to_string(),
                 description: None,
-                realizes_chapter_id: Some(2),
+                realizes_chapter_id: Some(std::num::NonZeroU64::new(2).unwrap()),
             }],
             // The edge evt_a → evt_b is still present, but evt_a no longer exists.
             foreshadows: vec![WorkOutlineForeshadowsItem {
@@ -1891,10 +1917,13 @@ mod tests {
         let req = TimelinePatchEventRequest {
             work_id: "wk_test".to_string(),
             base_revision: 1,
-            operation: "unlink_foreshadow".to_string(),
+            operation: "unlink_foreshadow".parse().unwrap(),
             event_id: Some("evt_a".to_string()),
             foreshadows_event_id: Some("evt_b".to_string()),
-            ..Default::default()
+            description: None,
+            realizes_chapter_id: None,
+            target_chapter_id: None,
+            title: None,
         };
         let result = timeline_unlink_foreshadow(&req, &mut fm);
         assert!(
@@ -1916,7 +1945,7 @@ mod tests {
                 event_id: "evt_a".to_string(),
                 title: "Plant".to_string(),
                 description: None,
-                realizes_chapter_id: Some(1),
+                realizes_chapter_id: Some(std::num::NonZeroU64::new(1).unwrap()),
             }],
             foreshadows: vec![WorkOutlineForeshadowsItem {
                 source_event_id: "evt_a".to_string(),
@@ -2033,10 +2062,13 @@ mod tests {
         let stale_req = TimelinePatchEventRequest {
             work_id: work_id.clone(),
             base_revision: 3, // stale — outline is at revision 5
-            operation: "unlink_foreshadow".to_string(),
+            operation: "unlink_foreshadow".parse().unwrap(),
             event_id: Some("evt_a".to_string()),
             foreshadows_event_id: Some("evt_b".to_string()),
-            ..Default::default()
+            description: None,
+            realizes_chapter_id: None,
+            target_chapter_id: None,
+            title: None,
         };
         let result = patch_timeline_event(
             axum::extract::State(state.clone()),

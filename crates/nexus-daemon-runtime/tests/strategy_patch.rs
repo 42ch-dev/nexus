@@ -8,10 +8,14 @@
 
 #![allow(clippy::unwrap_used)]
 
+use std::num::NonZeroU64;
+
 use axum::extract::{Path, State};
 use axum::Json;
 use nexus_contracts::{
-    StrategyPatchPromptTemplateRequest, StrategyPatchStateRequest, StrategyPatchTransitionRequest,
+    StrategyPatchPromptTemplateRequest, StrategyPatchPromptTemplateRequestSet,
+    StrategyPatchStateRequest, StrategyPatchStateRequestSet, StrategyPatchTransitionRequest,
+    StrategyPatchTransitionRequestOp,
 };
 use nexus_daemon_runtime::api::errors::NexusApiError;
 use nexus_daemon_runtime::api::handlers::strategy::{
@@ -82,7 +86,10 @@ async fn patch_state_renames_state_and_bumps_revision() {
         strategy_id: "test-strategy".to_string(),
         state_id: "start".to_string(),
         base_revision: 1,
-        set: serde_json::json!({ "label": "begin", "description": "Begin here." }),
+        set: StrategyPatchStateRequestSet {
+            label: Some("begin".to_string()),
+            description: Some("Begin here.".to_string()),
+        },
     };
 
     let res = patch_state(
@@ -93,7 +100,7 @@ async fn patch_state_renames_state_and_bumps_revision() {
     .await
     .expect("patch_state should succeed");
 
-    assert_eq!(res.new_revision, 2);
+    assert_eq!(res.new_revision, NonZeroU64::new(2).unwrap());
 
     let yaml = std::fs::read_to_string(
         nexus_home_layout::user_preset_bundle_dir(&nexus_home, "test-strategy").join("preset.yaml"),
@@ -113,7 +120,10 @@ async fn patch_state_rejects_stale_revision() {
         strategy_id: "test-strategy".to_string(),
         state_id: "start".to_string(),
         base_revision: 0,
-        set: serde_json::json!({ "description": "Stale." }),
+        set: StrategyPatchStateRequestSet {
+            description: Some("Stale.".to_string()),
+            label: None,
+        },
     };
 
     let err = patch_state(
@@ -161,13 +171,13 @@ states:
         new_target: Some("end".to_string()),
         condition: None,
         transition_kind: None,
-        op: Some("create".to_string()),
+        op: StrategyPatchTransitionRequestOp::Create,
     };
 
     let res = patch_transition(State(state), Path("test-strategy".to_string()), Json(req))
         .await
         .expect("create transition should succeed");
-    assert_eq!(res.new_revision, 2);
+    assert_eq!(res.new_revision, NonZeroU64::new(2).unwrap());
 
     let yaml = std::fs::read_to_string(
         nexus_home_layout::user_preset_bundle_dir(&nexus_home, "test-strategy").join("preset.yaml"),
@@ -218,13 +228,13 @@ states:
         new_target: Some("alt".to_string()),
         condition: Some("_context.branch_b".to_string()),
         transition_kind: None,
-        op: Some("create".to_string()),
+        op: StrategyPatchTransitionRequestOp::Create,
     };
 
     let res = patch_transition(State(state), Path("test-strategy".to_string()), Json(req))
         .await
         .expect("create transition should succeed");
-    assert_eq!(res.new_revision, 2);
+    assert_eq!(res.new_revision, NonZeroU64::new(2).unwrap());
 
     let updated = std::fs::read_to_string(
         nexus_home_layout::user_preset_bundle_dir(&nexus_home, "test-strategy").join("preset.yaml"),
@@ -277,7 +287,7 @@ states:
         new_target: Some("alt".to_string()),
         condition: Some("_context.branch_b".to_string()),
         transition_kind: None,
-        op: Some("create".to_string()),
+        op: StrategyPatchTransitionRequestOp::Create,
     };
 
     let err = patch_transition(State(state), Path("test-strategy".to_string()), Json(req))
@@ -330,7 +340,7 @@ states:
         new_target: Some("start".to_string()),
         condition: None,
         transition_kind: None,
-        op: Some("create".to_string()),
+        op: StrategyPatchTransitionRequestOp::Create,
     };
 
     let err = patch_transition(State(state), Path("test-strategy".to_string()), Json(req))
@@ -390,14 +400,14 @@ states:
         old_target: None,
         new_target: Some("alt".to_string()),
         condition: None,
-        transition_kind: Some("default".to_string()),
-        op: Some("create".to_string()),
+        transition_kind: Some("default".parse().unwrap()),
+        op: StrategyPatchTransitionRequestOp::Create,
     };
 
     let res = patch_transition(State(state), Path("test-strategy".to_string()), Json(req))
         .await
         .expect("create default transition should succeed");
-    assert_eq!(res.new_revision, 2);
+    assert_eq!(res.new_revision, NonZeroU64::new(2).unwrap());
 
     let updated = std::fs::read_to_string(
         nexus_home_layout::user_preset_bundle_dir(&nexus_home, "test-strategy").join("preset.yaml"),
@@ -439,14 +449,14 @@ states:
         old_target: None,
         new_target: Some("end".to_string()),
         condition: Some("_context.ready".to_string()),
-        transition_kind: Some("branch".to_string()),
-        op: Some("create".to_string()),
+        transition_kind: Some("branch".parse().unwrap()),
+        op: StrategyPatchTransitionRequestOp::Create,
     };
 
     let res = patch_transition(State(state), Path("test-strategy".to_string()), Json(req))
         .await
         .expect("create branch transition should succeed");
-    assert_eq!(res.new_revision, 2);
+    assert_eq!(res.new_revision, NonZeroU64::new(2).unwrap());
 
     let updated = std::fs::read_to_string(
         nexus_home_layout::user_preset_bundle_dir(&nexus_home, "test-strategy").join("preset.yaml"),
@@ -498,8 +508,8 @@ states:
         old_target: None,
         new_target: Some("alt".to_string()),
         condition: None,
-        transition_kind: Some("next".to_string()),
-        op: Some("create".to_string()),
+        transition_kind: Some("next".parse().unwrap()),
+        op: StrategyPatchTransitionRequestOp::Create,
     };
 
     let err = patch_transition(State(state), Path("test-strategy".to_string()), Json(req))
@@ -529,7 +539,7 @@ async fn patch_transition_default_op_preserves_update_semantics() {
         new_target: Some("alt".to_string()),
         condition: None,
         transition_kind: None,
-        op: None,
+        op: StrategyPatchTransitionRequestOp::Update,
     };
 
     // Create the alt state so validation passes after rewiring.
@@ -544,7 +554,7 @@ async fn patch_transition_default_op_preserves_update_semantics() {
     let res = patch_transition(State(state), Path("test-strategy".to_string()), Json(req))
         .await
         .expect("default op=update should rewire");
-    assert_eq!(res.new_revision, 2);
+    assert_eq!(res.new_revision, NonZeroU64::new(2).unwrap());
 
     let updated = std::fs::read_to_string(bundle_dir.join("preset.yaml")).unwrap();
     assert!(updated.contains("next: alt"));
@@ -564,7 +574,7 @@ async fn patch_transition_rejects_create_without_new_target() {
         new_target: None,
         condition: None,
         transition_kind: None,
-        op: Some("create".to_string()),
+        op: StrategyPatchTransitionRequestOp::Create,
     };
 
     let err = patch_transition(State(state), Path("test-strategy".to_string()), Json(req))
@@ -594,7 +604,7 @@ async fn patch_transition_rejects_update_without_old_target() {
         new_target: Some("alt".to_string()),
         condition: None,
         transition_kind: None,
-        op: Some("update".to_string()),
+        op: StrategyPatchTransitionRequestOp::Update,
     };
 
     let err = patch_transition(State(state), Path("test-strategy".to_string()), Json(req))
@@ -624,7 +634,7 @@ async fn patch_transition_rejects_invalid_condition() {
         new_target: None,
         condition: Some("not a valid condition @#$".to_string()),
         transition_kind: None,
-        op: None,
+        op: StrategyPatchTransitionRequestOp::Update,
     };
 
     let err = patch_transition(State(state), Path("test-strategy".to_string()), Json(req))
@@ -681,7 +691,9 @@ states:
         state_id: "start".to_string(),
         base_revision: 1,
         template_ref: "prompts/other.md".to_string(),
-        set: serde_json::json!({ "body": "new content" }),
+        set: StrategyPatchPromptTemplateRequestSet {
+            body: "new content".to_string(),
+        },
     };
 
     let err = patch_prompt_template(
@@ -713,13 +725,19 @@ async fn concurrent_patch_state_serializes_and_one_writer_gets_conflict() {
         strategy_id: "test-strategy".to_string(),
         state_id: "start".to_string(),
         base_revision: 1,
-        set: serde_json::json!({ "description": "A" }),
+        set: StrategyPatchStateRequestSet {
+            description: Some("A".to_string()),
+            label: None,
+        },
     };
     let req_b = StrategyPatchStateRequest {
         strategy_id: "test-strategy".to_string(),
         state_id: "start".to_string(),
         base_revision: 1,
-        set: serde_json::json!({ "description": "B" }),
+        set: StrategyPatchStateRequestSet {
+            description: Some("B".to_string()),
+            label: None,
+        },
     };
 
     let state_a = state.clone();
@@ -762,30 +780,8 @@ async fn concurrent_patch_state_serializes_and_one_writer_gets_conflict() {
     );
 }
 
-#[tokio::test]
-async fn patch_transition_rejects_unknown_op_with_422() {
-    let (tmp, nexus_home, db_path) = test_utils::create_test_workspace().await;
-    seed_test_bundle(&nexus_home);
-    let state = test_state(tmp, nexus_home, db_path).await;
-
-    let req = StrategyPatchTransitionRequest {
-        strategy_id: "test-strategy".to_string(),
-        base_revision: 1,
-        source_state_id: "start".to_string(),
-        old_target: None,
-        new_target: Some("end".to_string()),
-        condition: None,
-        transition_kind: None,
-        op: Some("delete".to_string()),
-    };
-
-    let err = patch_transition(State(state), Path("test-strategy".to_string()), Json(req))
-        .await
-        .expect_err("unknown op should fail");
-
-    assert_eq!(
-        err.status_code(),
-        axum::http::StatusCode::UNPROCESSABLE_ENTITY
-    );
-    assert_eq!(err.error_code(), "invalid_input");
-}
+// NOTE: `patch_transition_rejects_unknown_op_with_422` was removed.
+// With the typify-generated typed enum `StrategyPatchTransitionRequestOp`
+// (variants: Create, Update only), an invalid op like "delete" is rejected
+// at JSON deserialization time — the handler can never receive it. The
+// type system now enforces what this test previously verified at runtime.

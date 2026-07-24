@@ -59,16 +59,7 @@ impl WasmEngine {
 
         let sandbox = self.resolve_sandbox(manifest);
         let input_bytes = serde_json::to_vec(input)?;
-        let output = self.run_invocation(module, manifest, &input_bytes, sandbox)?;
-
-        // --- Post-invocation battle_report validation (V1.62) -------------
-        if let Some(schemas) = &manifest.schemas {
-            if let Some(ref battle_report_schema) = schemas.battle_report {
-                validate_battle_report(&output, battle_report_schema)?;
-            }
-        }
-
-        Ok(output)
+        self.run_invocation(module, manifest, &input_bytes, sandbox)
     }
 
     /// Resolve the effective sandbox limits: manifest overrides take precedence,
@@ -182,15 +173,23 @@ impl WasmEngine {
             return Err(ComputeError::OutputBufferTooSmall(written));
         }
 
-        // Read + deserialize the 4-part envelope.
+        // Read + deserialize the 4-part envelope. Validate `battle_report`
+        // against the manifest schema from the raw JSON first — typify's typed
+        // `ComputeOutputBattleReport` only materializes declared properties
+        // (`kind`); module-specific fields live in additionalProperties.
         let mut out_bytes = vec![0u8; written];
         memory.read(&*store, out_ptr as usize, &mut out_bytes)?;
-        let output: ComputeOutput = serde_json::from_slice(&out_bytes)
+        let raw: Value = serde_json::from_slice(&out_bytes)
             .map_err(|e| ComputeError::InvalidOutput(e.to_string()))?;
-        // `battle_report` is a required typed struct on `ComputeOutput`, so a
-        // module emitting JSON `null` for it fails deserialization above. The
-        // prior hand-rolled `validate_output_shape` no-op was removed because
-        // the type system now enforces the shape.
+        if let Some(schemas) = &manifest.schemas {
+            if let Some(ref battle_report_schema) = schemas.battle_report {
+                if let Some(report) = raw.get("battle_report") {
+                    validate_battle_report_value(report, battle_report_schema)?;
+                }
+            }
+        }
+        let output: ComputeOutput =
+            serde_json::from_value(raw).map_err(|e| ComputeError::InvalidOutput(e.to_string()))?;
         Ok(output)
     }
 }
@@ -277,17 +276,10 @@ fn validate_compute_input(input: &Value, schemas: &ModuleSchemas) -> Result<()> 
     Ok(())
 }
 
-/// Validate `ComputeOutput.battle_report` against the manifest-declared schema.
-fn validate_battle_report(output: &ComputeOutput, schema: &Value) -> Result<()> {
-    // `battle_report` is now a typed struct; serialize it back to a JSON Value
-    // so the hand-rolled schema validator can walk it.
-    let report = serde_json::to_value(&output.battle_report).unwrap_or_default();
-    // Let validate_against_schema derive the correct error from the schema's
-    // own `type` constraint rather than short-circuiting with a hardcoded
-    // message. An empty schema `{}` accepts null per JSON-Schema semantics;
-    // an `"type": "array"` schema should reject null with its own message.
+/// Validate a module-emitted `battle_report` object against the manifest schema.
+fn validate_battle_report_value(report: &Value, schema: &Value) -> Result<()> {
     validate_against_schema(
-        &report,
+        report,
         "battle_report",
         schema,
         "battle_report",

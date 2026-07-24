@@ -102,6 +102,19 @@ fn read_input(in_ptr: u32, in_len: u32) -> Result<Value, ()> {
     serde_json::from_slice(slice).map_err(|_| ())
 }
 
+/// Emit a wire-valid `evt_*` timeline id (alphanumeric suffix only).
+fn wire_timeline_event_id(attacker_id: &str, defender_id: &str) -> String {
+    let a: String = attacker_id
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric())
+        .collect();
+    let d: String = defender_id
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric())
+        .collect();
+    format!("evt_combat{a}{d}")
+}
+
 /// Resolve a single attack between two characters and build the output envelope.
 fn run_combat(input: &Value) -> Result<Value, ()> {
     let key_blocks = input
@@ -181,7 +194,7 @@ fn run_combat(input: &Value) -> Result<Value, ()> {
     );
     let timeline_events = vec![json!({
         "schema_version": 1,
-        "timeline_event_id": format!("tl-basic-combat-{attacker_id}-{defender_id}"),
+        "timeline_event_id": wire_timeline_event_id(&attacker_id, &defender_id),
         "world_id": world_id,
         "branch_id": branch_id,
         "event_type": "state_update",

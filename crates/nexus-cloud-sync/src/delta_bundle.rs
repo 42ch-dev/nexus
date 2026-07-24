@@ -418,10 +418,10 @@ mod tests {
         // Bundle uses schema_version=1 (sync wire contract, separate from local API schemas)
         // LATEST_SCHEMA_VERSION may be higher due to local schemas like daemon-status-v2
         assert_eq!(bundle.schema_version, 1);
-        assert_eq!(bundle.workspace_id, "wrk_001");
-        assert_eq!(bundle.world_id, "wld_001");
-        assert_eq!(bundle.creator_id, "ctr_001");
-        assert_eq!(bundle.submitting_creator_id, "ctr_001");
+        assert_eq!(bundle.workspace_id.to_string(), "wrk_001");
+        assert_eq!(bundle.world_id.to_string(), "wld_001");
+        assert_eq!(bundle.creator_id.to_string(), "ctr_001");
+        assert_eq!(bundle.submitting_creator_id.to_string(), "ctr_001");
         assert_eq!(bundle.deltas.len(), 1);
         assert!(bundle.bundle_id.starts_with("bdl_"));
         assert!(bundle.command_id.starts_with("cmd_"));
@@ -440,10 +440,16 @@ mod tests {
             .build()
             .expect("should build");
 
-        assert_eq!(bundle.manuscript_phase, Some(ManuscriptPhase::Draft));
+        assert_eq!(
+            bundle.manuscript_phase.as_ref().map(|v| v.to_string()),
+            Some("draft".to_string())
+        );
         assert_eq!(bundle.output_manuscript, Some(true));
         assert_eq!(bundle.last_confirmed_delta_sequence, Some(10));
-        assert_eq!(bundle.base_versions["world_revision"], json!(5));
+        assert_eq!(
+            serde_json::to_value(&bundle.base_versions).unwrap()["world_revision"],
+            json!(5)
+        );
     }
 
     #[test]
@@ -459,7 +465,7 @@ mod tests {
         assert_eq!(bundle.deltas.len(), 1);
         let delta = &bundle.deltas[0];
         assert_eq!(delta.delta_type, DeltaType::StoryManifest);
-        assert_eq!(delta.operation, DeltaOperation::Upsert);
+        assert_eq!(delta.operation.to_string(), "upsert");
     }
 
     #[test]
@@ -508,7 +514,10 @@ mod tests {
 
         let json_str = serde_json::to_string(&bundle).expect("serialize");
         let recovered: Bundle = serde_json::from_str(&json_str).expect("deserialize");
-        assert_eq!(bundle, recovered);
+        assert_eq!(
+            serde_json::to_value(&bundle).unwrap(),
+            serde_json::to_value(&recovered).unwrap()
+        );
     }
 
     #[test]
@@ -519,8 +528,8 @@ mod tests {
 
     #[test]
     fn delta_operation_as_str() {
-        assert_eq!(DeltaOperation::Create.as_str(), "create");
-        assert_eq!(DeltaOperation::Upsert.as_str(), "upsert");
+        assert_eq!(DeltaOperation::Create.to_string(), "create");
+        assert_eq!(DeltaOperation::Upsert.to_string(), "upsert");
     }
 
     #[test]
