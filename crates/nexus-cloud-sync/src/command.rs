@@ -176,9 +176,7 @@ impl SyncCommandVariant {
             creator_id: self.creator_id().parse().unwrap(),
             command_type: CommandType::from_str(self.command_type_str()).unwrap(),
             origin: ContractCommandOrigin::from_str(origin).unwrap(),
-            output_manuscript: matches!(self, Self::PublishStory { .. })
-                .then_some(true)
-                .unwrap_or(false),
+            output_manuscript: true,
             status: CommandStatus::Pending,
             requested_by: match self {
                 Self::ForkWorld {

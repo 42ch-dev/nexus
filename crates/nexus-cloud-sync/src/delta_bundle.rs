@@ -45,6 +45,15 @@ impl From<BundleValidationError> for SyncError {
     }
 }
 
+fn parse_bundle_field<T: std::str::FromStr>(field: &str, value: &str) -> SyncResult<T>
+where
+    T::Err: std::fmt::Display,
+{
+    value
+        .parse()
+        .map_err(|e| SyncError::BundleValidation(format!("invalid bundle {field} '{value}': {e}")))
+}
+
 /// Delta operation within a bundle (builder helper).
 ///
 /// Uses contract enum types directly. The `source_anchor` field uses `Value`
@@ -278,8 +287,8 @@ impl BundleBuilder {
     /// Returns the specific error type if the operation fails.
     /// # Panics
     /// Panics if a delta or manuscript phase fails to round-trip through its
-    /// generated contract type, or if a generated ID fails to parse. Both
-    /// indicate a programmer error (malformed input), not a runtime condition.
+    /// generated contract type. That indicates a programmer error (malformed
+    /// input), not a runtime condition.
     pub fn build(self) -> SyncResult<Bundle> {
         // Validate required fields
         if self.deltas.is_empty() {
@@ -306,7 +315,10 @@ impl BundleBuilder {
         // Build base_versions (generated struct with typed fields).
         let base_versions = nexus_contracts::BundleBaseVersions {
             world_revision: self.base_world_revision,
-            timeline_head_id: self.base_timeline_head_id.map(|s| s.parse().unwrap()),
+            timeline_head_id: match &self.base_timeline_head_id {
+                None => None,
+                Some(id) => Some(parse_bundle_field("timeline_head_id", id)?),
+            },
             canon_revision: self.base_canon_revision,
         };
 
@@ -327,19 +339,22 @@ impl BundleBuilder {
 
         let bundle = Bundle {
             schema_version: 1,
-            bundle_id: bundle_id.parse().unwrap(),
-            command_id: command_id.parse().unwrap(),
-            workspace_id: self.workspace_id.parse().unwrap(),
-            world_id: self.world_id.parse().unwrap(),
-            creator_id: self.creator_id.parse().unwrap(),
-            submitting_creator_id: submitting_creator_id.parse().unwrap(),
+            bundle_id: parse_bundle_field("bundle_id", &bundle_id)?,
+            command_id: parse_bundle_field("command_id", &command_id)?,
+            workspace_id: parse_bundle_field("workspace_id", &self.workspace_id)?,
+            world_id: parse_bundle_field("world_id", &self.world_id)?,
+            creator_id: parse_bundle_field("creator_id", &self.creator_id)?,
+            submitting_creator_id: parse_bundle_field(
+                "submitting_creator_id",
+                &submitting_creator_id,
+            )?,
             bundle_type: self.bundle_type,
             manuscript_phase: self.manuscript_phase.map(|p| {
                 serde_json::from_value(serde_json::to_value(p).unwrap_or_default())
                     .expect("ManuscriptPhase round-trips to BundleManuscriptPhase")
             }),
             output_manuscript: self.output_manuscript,
-            idempotency_key: idempotency_key.parse().unwrap(),
+            idempotency_key: parse_bundle_field("idempotency_key", &idempotency_key)?,
             canonical_hash,
             base_versions,
             last_confirmed_delta_sequence: self.last_confirmed_delta_sequence,
@@ -404,6 +419,20 @@ mod tests {
             source_anchor: None,
             local_timestamp: chrono::Utc::now().to_rfc3339(),
         }
+    }
+
+    #[test]
+    fn bundle_build_rejects_invalid_wire_ids() {
+        let delta = make_test_delta();
+        let result = BundleBuilder::new("local", "unknown", "ctr_001")
+            .submitting_creator_id("ctr_001")
+            .add_delta(delta)
+            .build();
+
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(matches!(err, SyncError::BundleValidation(_)));
+        assert!(err.to_string().contains("workspace_id"));
     }
 
     #[test]

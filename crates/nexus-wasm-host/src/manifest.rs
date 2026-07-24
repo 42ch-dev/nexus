@@ -110,7 +110,7 @@ impl ModuleManifest {
     }
 }
 
-fn json_object_to_map(value: serde_json::Value) -> serde_json::Map<String, serde_json::Value> {
+fn json_object_to_map(value: &serde_json::Value) -> serde_json::Map<String, serde_json::Value> {
     value.as_object().cloned().unwrap_or_default()
 }
 
@@ -120,7 +120,7 @@ fn schema_fragment_maps_to_detail(
     src.map(|fragments| {
         fragments
             .iter()
-            .map(|(k, v)| (k.clone(), json_object_to_map(v.clone())))
+            .map(|(k, v)| (k.clone(), json_object_to_map(v)))
             .collect()
     })
     .unwrap_or_default()
@@ -133,12 +133,12 @@ fn module_schemas_to_detail(schemas: &ModuleSchemas) -> ModuleDetailSchemas {
         invocation: schemas
             .invocation
             .as_ref()
-            .map(|v| json_object_to_map(v.clone()))
+            .map(json_object_to_map)
             .unwrap_or_default(),
         battle_report: schemas
             .battle_report
             .as_ref()
-            .map(|v| json_object_to_map(v.clone()))
+            .map(json_object_to_map)
             .unwrap_or_default(),
     }
 }
