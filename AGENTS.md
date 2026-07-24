@@ -119,17 +119,28 @@ UI work in this repo follows a **studio-first** routing rule. The visual proving
 
 **Rust `target/` disk hygiene:** `target/debug` is gitignored but grows without bound on macOS/Linux when the workspace is rebuilt often. Stale `.o` files under `target/debug/deps` and old `target/debug/incremental/*` hashes (e.g. after `pnpm run codegen`, crate renames, or repeated `cargo * --all`) are the usual cause — not a single bug. CI uses ephemeral runners + `rust-cache`; **local developers and agents must not mirror CI’s `--all` cadence during iteration.**
 
+Workspace `Cargo.toml` keeps the `dev` profile lean: `debug = 1` (line-limited) for workspace crates, `debug = false` for non-member dependencies, and `split-debuginfo = "unpacked"`. That reduces **per-artifact** size; it does **not** remove orphan hashes — still use scoped builds + sweep/clean below.
+
 | Phase | Command scope |
 |-------|----------------|
 | **Daily iteration** (default) | `cargo check -p <crate>`, `cargo test -p <crate>`, `cargo clippy -p <crate> -- -D warnings` for the crate you are editing |
 | **Pre-commit / gate** | `cargo clippy --all -- -D warnings`, `cargo test --all` (matches CI) |
 | **After codegen or large contract/workspace graph changes** | Prefer `cargo clean` once, then rebuild scoped or `--all` as needed — avoids piling orphan artifacts (including legacy `nexus42d` names) |
 
-**Cleanup (repo root):**
+**Cleanup (repo root; with direnv, this is `$CARGO_TARGET_DIR` / `~/.cache/nexus-target`):**
 
-- **Reclaim disk immediately:** `cargo clean` (next full build is slow; expected). If it errors on `target/debug/incremental` (“Directory not empty”), remove the heavy subtrees then retry: `rm -rf target/debug/{deps,incremental}` && `cargo clean`.
-- **Periodic maintenance (optional):** `cargo install cargo-sweep` then `cargo sweep -i 14` (remove artifacts unused for 14+ days) when a full clean is too disruptive.
-- **When to clean:** `target/debug` over ~50 GiB, filesystem slowness under `target/`, end of a large plan slice, or after deleting/renaming crates.
+- **Reclaim disk immediately:** `cargo clean` (next full build is slow; expected). If it errors on `target/debug/incremental` (“Directory not empty”), remove the heavy subtrees then retry: `rm -rf target/debug/{deps,incremental}` && `cargo clean` (or the same under `$CARGO_TARGET_DIR`).
+- **Periodic maintenance (recommended every ~5 iterations or monthly):** `cargo install cargo-sweep` once, then from the repo root (direnv on so `CARGO_TARGET_DIR` is set):
+
+```bash
+# Drop artifacts built by toolchains no longer installed via rustup
+cargo sweep --installed
+# Drop artifacts unused for 30+ days (incremental + old dep hashes)
+cargo sweep --time 30
+```
+
+  Optional dry-run: append `-d`. Do **not** use `cargo sweep -i N` for age-based cleanup — `-i` is `--installed` (boolean); age uses `--time` / `-t`.
+- **When to clean:** `target/debug` (or `$CARGO_TARGET_DIR/debug`) over ~50 GiB, filesystem slowness under `target/`, end of a large plan slice, or after deleting/renaming crates.
 
 **Anti-patterns:** Running `cargo test --all` / `cargo clippy --all` on every small edit; skipping cleanup for months while agents run full-workspace builds; treating `target/` bloat as safe to commit (it is always gitignored — clean locally instead).
 
@@ -182,7 +193,8 @@ Harness process paths are **local** (see [`.mstar/AGENTS.md`](.mstar/AGENTS.md))
 ```bash
 git count-objects -vH
 git maintenance run --task=gc --task=incremental-repack
-cargo sweep -i 14   # optional; requires cargo-sweep
+cargo sweep --installed   # requires cargo-sweep; drop uninstalled-toolchain artifacts
+cargo sweep --time 30     # drop artifacts unused for 30+ days
 ```
 
 If `.git` exceeds ~100 MiB or clone slows again: consider `git filter-repo` or an orphan history squash (solo maintainer only; see team before force-push on a shared default branch).

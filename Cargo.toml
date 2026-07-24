@@ -99,3 +99,17 @@ subtle = { version = "2", default-features = false }
 cron = "0.12"
 # V1.50 T-A P0 T2: IANA timezone validation (spec §3.1 `--tz`)
 chrono-tz = "0.10"
+
+# --- Dev profile: keep local `target/` smaller ---
+# Default `debug = true` (full) inflates deps/rlibs and test binaries. Line-limited
+# info is enough for backtraces; turn deps off entirely (workspace members keep
+# the profile.dev setting — `"*"` does not override members).
+# `split-debuginfo = "unpacked"` is already the macOS Cargo default when debuginfo
+# is on; set explicitly so Linux matches and .dwo/.dSYM can be swept separately.
+# Does not shrink existing artifacts — rebuild (or `cargo clean` / cargo-sweep) first.
+[profile.dev]
+debug = 1
+split-debuginfo = "unpacked"
+
+[profile.dev.package."*"]
+debug = false
