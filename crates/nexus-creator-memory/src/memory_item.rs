@@ -281,27 +281,33 @@ impl MemoryItem {
 impl From<nexus_contracts::Memory> for MemoryItem {
     fn from(c: nexus_contracts::Memory) -> Self {
         Self {
-            schema_version: c.schema_version,
-            memory_item_id: c.memory_item_id,
-            creator_id: c.creator_id,
-            world_id: c.world_id,
+            schema_version: u32::try_from(c.schema_version.get())
+                .expect("schema_version exceeds u32 range"),
+            memory_item_id: c.memory_item_id.to_string(),
+            creator_id: c.creator_id.to_string(),
+            world_id: c.world_id.to_string(),
             memory_type: c.memory_type,
             memory_kind: c.memory_kind.map(|k| k.as_str().to_string()),
             status: c.status.as_str().to_string(),
             summary: c.summary,
             embedding_ref: c.embedding_ref,
-            source_refs: c.source_refs.map(|refs| {
-                refs.into_iter()
-                    .map(|r| SourceRef {
-                        kind: r.kind,
-                        id: r.id,
-                    })
-                    .collect()
-            }),
-            last_accessed_at: c.last_accessed_at,
-            last_reinforced_at: c.last_reinforced_at,
-            created_at: c.created_at,
-            updated_at: c.updated_at,
+            source_refs: if c.source_refs.is_empty() {
+                None
+            } else {
+                Some(
+                    c.source_refs
+                        .into_iter()
+                        .map(|r| SourceRef {
+                            kind: r.kind,
+                            id: r.id,
+                        })
+                        .collect(),
+                )
+            },
+            last_accessed_at: c.last_accessed_at.map(|d| d.to_rfc3339()),
+            last_reinforced_at: c.last_reinforced_at.map(|d| d.to_rfc3339()),
+            created_at: c.created_at.to_rfc3339(),
+            updated_at: c.updated_at.map(|d| d.to_rfc3339()),
         }
     }
 }
@@ -310,10 +316,11 @@ impl From<nexus_contracts::Memory> for MemoryItem {
 impl From<MemoryItem> for nexus_contracts::Memory {
     fn from(d: MemoryItem) -> Self {
         Self {
-            schema_version: d.schema_version,
-            memory_item_id: d.memory_item_id,
-            creator_id: d.creator_id,
-            world_id: d.world_id,
+            schema_version: std::num::NonZeroU64::new(u64::from(d.schema_version))
+                .expect("schema_version must be non-zero"),
+            memory_item_id: d.memory_item_id.parse().unwrap(),
+            creator_id: d.creator_id.parse().unwrap(),
+            world_id: d.world_id.parse().unwrap(),
             memory_type: d.memory_type,
             memory_kind: d.memory_kind.as_ref().map(|s| {
                 let wire = if s == "generic" { "custom" } else { s.as_str() };
@@ -322,18 +329,33 @@ impl From<MemoryItem> for nexus_contracts::Memory {
             status: nexus_contracts::MemoryStatus::from_str(&d.status).unwrap(),
             summary: d.summary,
             embedding_ref: d.embedding_ref,
-            source_refs: d.source_refs.map(|refs| {
-                refs.into_iter()
-                    .map(|r| nexus_contracts::MemorySourceRef {
-                        kind: r.kind,
-                        id: r.id,
-                    })
-                    .collect()
+            source_refs: d
+                .source_refs
+                .unwrap_or_default()
+                .into_iter()
+                .map(|r| nexus_contracts::MemorySourceRefsItem {
+                    kind: r.kind,
+                    id: r.id,
+                })
+                .collect(),
+            last_accessed_at: d.last_accessed_at.map(|s| {
+                chrono::DateTime::parse_from_rfc3339(&s)
+                    .unwrap()
+                    .with_timezone(&chrono::Utc)
             }),
-            last_accessed_at: d.last_accessed_at,
-            last_reinforced_at: d.last_reinforced_at,
-            created_at: d.created_at,
-            updated_at: d.updated_at,
+            last_reinforced_at: d.last_reinforced_at.map(|s| {
+                chrono::DateTime::parse_from_rfc3339(&s)
+                    .unwrap()
+                    .with_timezone(&chrono::Utc)
+            }),
+            created_at: chrono::DateTime::parse_from_rfc3339(&d.created_at)
+                .unwrap()
+                .with_timezone(&chrono::Utc),
+            updated_at: d.updated_at.map(|s| {
+                chrono::DateTime::parse_from_rfc3339(&s)
+                    .unwrap()
+                    .with_timezone(&chrono::Utc)
+            }),
         }
     }
 }

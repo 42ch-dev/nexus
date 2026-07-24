@@ -187,7 +187,10 @@ impl WasmEngine {
         memory.read(&*store, out_ptr as usize, &mut out_bytes)?;
         let output: ComputeOutput = serde_json::from_slice(&out_bytes)
             .map_err(|e| ComputeError::InvalidOutput(e.to_string()))?;
-        validate_output_shape(&output)?;
+        // `battle_report` is a required typed struct on `ComputeOutput`, so a
+        // module emitting JSON `null` for it fails deserialization above. The
+        // prior hand-rolled `validate_output_shape` no-op was removed because
+        // the type system now enforces the shape.
         Ok(output)
     }
 }
@@ -276,13 +279,15 @@ fn validate_compute_input(input: &Value, schemas: &ModuleSchemas) -> Result<()> 
 
 /// Validate `ComputeOutput.battle_report` against the manifest-declared schema.
 fn validate_battle_report(output: &ComputeOutput, schema: &Value) -> Result<()> {
-    let report = &output.battle_report;
+    // `battle_report` is now a typed struct; serialize it back to a JSON Value
+    // so the hand-rolled schema validator can walk it.
+    let report = serde_json::to_value(&output.battle_report).unwrap_or_default();
     // Let validate_against_schema derive the correct error from the schema's
     // own `type` constraint rather than short-circuiting with a hardcoded
     // message. An empty schema `{}` accepts null per JSON-Schema semantics;
     // an `"type": "array"` schema should reject null with its own message.
     validate_against_schema(
-        report,
+        &report,
         "battle_report",
         schema,
         "battle_report",
@@ -489,18 +494,6 @@ fn is_memory_trap(e: &wasmtime::Error) -> bool {
     let msg = e.to_string().to_lowercase();
     msg.contains("memory")
         && (msg.contains("grow") || msg.contains("limit") || msg.contains("exceed"))
-}
-
-/// Light-weight post-condition: the required `battle_report` is a real object.
-/// (The generated `ComputeOutput` struct already enforces field types; this
-/// guards against a module emitting JSON `null` for the report.)
-fn validate_output_shape(output: &ComputeOutput) -> Result<()> {
-    if output.battle_report.is_null() {
-        return Err(ComputeError::OutputSchemaMismatch(
-            "battle_report must be an object".into(),
-        ));
-    }
-    Ok(())
 }
 
 fn optional_export<Params, Returns>(

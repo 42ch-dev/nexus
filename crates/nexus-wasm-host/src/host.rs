@@ -78,10 +78,12 @@ impl HostContext {
         for kb in &input.key_blocks {
             // Re-serialize each KeyBlock so the module receives canonical JSON.
             if let Ok(json) = serde_json::to_value(kb) {
-                blocks.insert(kb.key_block_id.clone(), json);
+                blocks.insert(kb.key_block_id.to_string(), json);
             }
         }
-        let narrative_state = input.narrative_state.clone().unwrap_or_default();
+        // `narrative_state` is a generated struct; serialize it back to the
+        // freeform JSON the module's `narrative_query` host import returns.
+        let narrative_state = serde_json::to_value(&input.narrative_state).unwrap_or_default();
         Self {
             key_blocks: blocks,
             narrative_state,

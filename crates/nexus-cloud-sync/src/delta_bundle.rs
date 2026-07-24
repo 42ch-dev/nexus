@@ -14,7 +14,7 @@
 //! V1.0 supports `story_manifest` delta type in the deltas array,
 //! required for context-assembly summary payloads.
 
-use nexus_contracts::generated::{Bundle, Delta, SourceAnchor};
+use nexus_contracts::generated::{Bundle, Delta};
 use nexus_contracts::{BundleType, DeltaOperation, DeltaType, ManuscriptPhase};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -276,6 +276,10 @@ impl BundleBuilder {
     ///
     /// # Errors
     /// Returns the specific error type if the operation fails.
+    /// # Panics
+    /// Panics if a delta or manuscript phase fails to round-trip through its
+    /// generated contract type, or if a generated ID fails to parse. Both
+    /// indicate a programmer error (malformed input), not a runtime condition.
     pub fn build(self) -> SyncResult<Bundle> {
         // Validate required fields
         if self.deltas.is_empty() {
@@ -297,37 +301,25 @@ impl BundleBuilder {
             .unwrap_or_else(|| format!("idk_{}", Uuid::new_v4().simple()));
 
         let bundle_id = format!("bdl_{}", Uuid::new_v4().simple());
-        let now = chrono::Utc::now().to_rfc3339();
+        let now = chrono::Utc::now();
 
-        // Build base_versions object
-        let mut base_versions = json!({});
-        if let Some(rev) = self.base_world_revision {
-            base_versions["world_revision"] = json!(rev);
-        }
-        if let Some(id) = self.base_timeline_head_id {
-            base_versions["timeline_head_id"] = json!(id);
-        }
-        if let Some(rev) = self.base_canon_revision {
-            base_versions["canon_revision"] = json!(rev);
-        }
+        // Build base_versions (generated struct with typed fields).
+        let base_versions = nexus_contracts::BundleBaseVersions {
+            world_revision: self.base_world_revision,
+            timeline_head_id: self.base_timeline_head_id.map(|s| s.parse().unwrap()),
+            canon_revision: self.base_canon_revision,
+        };
 
-        // Convert deltas to Delta (generated contract type)
+        // Convert deltas to Delta (generated contract type). typify inlines a
+        // separate enum copy per schema (`DeltaDeltaType` vs the bundle's
+        // `NexusDeltaDeltaType`); a JSON round-trip bridges them cleanly since
+        // the drift gate proves wire equivalence.
         let delta_values: Vec<Delta> = self
             .deltas
             .into_iter()
             .map(|d| {
-                let source_anchor = d
-                    .source_anchor
-                    .and_then(|v| serde_json::from_value::<SourceAnchor>(v).ok());
-                Delta {
-                    delta_type: d.delta_type,
-                    operation: d.operation,
-                    target_entity_type: d.target_entity_type,
-                    target_entity_id: d.target_entity_id,
-                    payload: d.payload,
-                    source_anchor,
-                    local_timestamp: d.local_timestamp,
-                }
+                serde_json::from_value(serde_json::to_value(&d).unwrap_or_default())
+                    .expect("domain Delta round-trips to contract Delta")
             })
             .collect();
 
@@ -335,22 +327,31 @@ impl BundleBuilder {
 
         let bundle = Bundle {
             schema_version: 1,
-            bundle_id,
-            command_id,
-            workspace_id: self.workspace_id,
-            world_id: self.world_id,
-            creator_id: self.creator_id,
-            submitting_creator_id,
+            bundle_id: bundle_id.parse().unwrap(),
+            command_id: command_id.parse().unwrap(),
+            workspace_id: self.workspace_id.parse().unwrap(),
+            world_id: self.world_id.parse().unwrap(),
+            creator_id: self.creator_id.parse().unwrap(),
+            submitting_creator_id: submitting_creator_id.parse().unwrap(),
             bundle_type: self.bundle_type,
-            manuscript_phase: self.manuscript_phase,
+            manuscript_phase: self.manuscript_phase.map(|p| {
+                serde_json::from_value(serde_json::to_value(p).unwrap_or_default())
+                    .expect("ManuscriptPhase round-trips to BundleManuscriptPhase")
+            }),
             output_manuscript: self.output_manuscript,
-            idempotency_key,
+            idempotency_key: idempotency_key.parse().unwrap(),
             canonical_hash,
             base_versions,
             last_confirmed_delta_sequence: self.last_confirmed_delta_sequence,
-            deltas: delta_values,
+            deltas: delta_values
+                .iter()
+                .map(|d| {
+                    serde_json::from_value(serde_json::to_value(d).unwrap_or_default())
+                        .expect("Delta round-trips to bundle NexusDelta")
+                })
+                .collect(),
             bundle_apply_status: None,
-            delta_results: None,
+            delta_results: vec![],
             created_at: now,
         };
 

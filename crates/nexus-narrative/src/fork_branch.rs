@@ -175,16 +175,17 @@ impl ForkBranch {
 impl From<nexus_contracts::ForkBranch> for ForkBranch {
     fn from(c: nexus_contracts::ForkBranch) -> Self {
         Self {
-            schema_version: c.schema_version,
-            fork_branch_id: c.fork_branch_id,
-            world_id: c.world_id,
-            parent_world_id: c.parent_world_id,
-            parent_branch_id: c.parent_branch_id,
-            forked_from_event_id: c.forked_from_event_id,
+            schema_version: u32::try_from(c.schema_version.get())
+                .expect("schema_version exceeds u32 range"),
+            fork_branch_id: c.fork_branch_id.to_string(),
+            world_id: c.world_id.to_string(),
+            parent_world_id: c.parent_world_id.to_string(),
+            parent_branch_id: c.parent_branch_id.to_string(),
+            forked_from_event_id: c.forked_from_event_id.to_string(),
             status: c.status.as_str().to_string(),
             verification_status: c.verification_status.as_str().to_string(),
-            created_by_creator_id: c.created_by_creator_id,
-            created_at: c.created_at,
+            created_by_creator_id: c.created_by_creator_id.to_string(),
+            created_at: c.created_at.to_rfc3339(),
         }
     }
 }
@@ -193,19 +194,22 @@ impl From<nexus_contracts::ForkBranch> for ForkBranch {
 impl From<ForkBranch> for nexus_contracts::ForkBranch {
     fn from(d: ForkBranch) -> Self {
         Self {
-            schema_version: d.schema_version,
-            fork_branch_id: d.fork_branch_id,
-            world_id: d.world_id,
-            parent_world_id: d.parent_world_id,
-            parent_branch_id: d.parent_branch_id,
-            forked_from_event_id: d.forked_from_event_id,
+            schema_version: std::num::NonZeroU64::new(u64::from(d.schema_version))
+                .expect("schema_version must be non-zero"),
+            fork_branch_id: d.fork_branch_id.parse().unwrap(),
+            world_id: d.world_id.parse().unwrap(),
+            parent_world_id: d.parent_world_id.parse().unwrap(),
+            parent_branch_id: d.parent_branch_id.parse().unwrap(),
+            forked_from_event_id: d.forked_from_event_id.parse().unwrap(),
             status: nexus_contracts::ForkBranchStatus::from_str(&d.status).unwrap(),
             verification_status: nexus_contracts::VerificationStatus::from_str(
                 &d.verification_status,
             )
             .unwrap(),
-            created_by_creator_id: d.created_by_creator_id,
-            created_at: d.created_at,
+            created_by_creator_id: d.created_by_creator_id.parse().unwrap(),
+            created_at: chrono::DateTime::parse_from_rfc3339(&d.created_at)
+                .unwrap()
+                .with_timezone(&chrono::Utc),
         }
     }
 }

@@ -31,7 +31,9 @@
 
 use std::collections::HashMap;
 
-use nexus_contracts::generated::daemon_api::compute::module_detail::ModuleDetail;
+use nexus_contracts::generated::daemon_api::compute::module_detail::{
+    ModuleDetail, ModuleDetailHostFunctionsItem,
+};
 use serde::{Deserialize, Serialize};
 
 /// Whitelisted host functions a module may import (open design item #4).
@@ -138,20 +140,18 @@ impl From<&ModuleManifest> for ModuleDetail {
             init_export: manifest.init_export.clone(),
             description: manifest.description.clone(),
             author: manifest.author.clone(),
-            host_functions: Some(
-                manifest
-                    .host_functions
-                    .iter()
-                    .map(|f| match f {
-                        HostFunction::KbRead => "kb_read".to_string(),
-                        HostFunction::NarrativeQuery => "narrative_query".to_string(),
-                    })
-                    .collect(),
-            ),
-            schemas: manifest
-                .schemas
-                .as_ref()
-                .map(|s| serde_json::to_value(s).expect("ModuleSchemas serializes to JSON")),
+            host_functions: manifest
+                .host_functions
+                .iter()
+                .map(|f| match f {
+                    HostFunction::KbRead => ModuleDetailHostFunctionsItem::KbRead,
+                    HostFunction::NarrativeQuery => ModuleDetailHostFunctionsItem::NarrativeQuery,
+                })
+                .collect(),
+            schemas: manifest.schemas.as_ref().map(|s| {
+                serde_json::from_value(serde_json::to_value(s).expect("ModuleSchemas serializes"))
+                    .expect("ModuleSchemas round-trips to ModuleDetailSchemas")
+            }),
             battle_report_kind: manifest.battle_report_kind.clone(),
             max_fuel: manifest
                 .max_fuel

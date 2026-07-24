@@ -53,5 +53,5 @@ pub use sandbox::SandboxConfig;
 // single crate. These are the generated wire types for `schemas/daemon-api/compute/`.
 pub use nexus_contracts::generated::daemon_api::compute::compute_input::ComputeInput;
 pub use nexus_contracts::generated::daemon_api::compute::compute_output::{
-    ComputeOutput, ComputeOutputStateDelta,
+    ComputeOutput, ComputeOutputStateDeltaItem as ComputeOutputStateDelta,
 };

@@ -93,14 +93,15 @@ impl Pairing {
 impl From<nexus_contracts::Pairing> for Pairing {
     fn from(c: nexus_contracts::Pairing) -> Self {
         Self {
-            schema_version: c.schema_version,
-            pairing_id: c.pairing_id,
-            creator_id: c.creator_id,
-            user_id: c.user_id,
+            schema_version: u32::try_from(c.schema_version.get())
+                .expect("schema_version exceeds u32 range"),
+            pairing_id: c.pairing_id.to_string(),
+            creator_id: c.creator_id.to_string(),
+            user_id: c.user_id.to_string(),
             pairing_source: c.pairing_source.as_str().to_string(),
             status: c.status.as_str().to_string(),
-            created_at: c.created_at,
-            revoked_at: c.revoked_at,
+            created_at: c.created_at.to_rfc3339(),
+            revoked_at: c.revoked_at.map(|d| d.to_rfc3339()),
         }
     }
 }
@@ -109,14 +110,21 @@ impl From<nexus_contracts::Pairing> for Pairing {
 impl From<Pairing> for nexus_contracts::Pairing {
     fn from(d: Pairing) -> Self {
         Self {
-            schema_version: d.schema_version,
-            pairing_id: d.pairing_id,
-            creator_id: d.creator_id,
-            user_id: d.user_id,
+            schema_version: std::num::NonZeroU64::new(u64::from(d.schema_version))
+                .expect("schema_version must be non-zero"),
+            pairing_id: d.pairing_id.parse().unwrap(),
+            creator_id: d.creator_id.parse().unwrap(),
+            user_id: d.user_id.parse().unwrap(),
             pairing_source: nexus_contracts::PairingSource::from_str(&d.pairing_source).unwrap(),
             status: nexus_contracts::PairingStatus::from_str(&d.status).unwrap(),
-            created_at: d.created_at,
-            revoked_at: d.revoked_at,
+            created_at: chrono::DateTime::parse_from_rfc3339(&d.created_at)
+                .unwrap()
+                .with_timezone(&chrono::Utc),
+            revoked_at: d.revoked_at.map(|s| {
+                chrono::DateTime::parse_from_rfc3339(&s)
+                    .unwrap()
+                    .with_timezone(&chrono::Utc)
+            }),
         }
     }
 }

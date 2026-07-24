@@ -225,8 +225,8 @@ impl Outbox {
         let outbox_entry_id = format!("obe_{}", Uuid::new_v4().simple());
         let now = chrono::Utc::now().to_rfc3339();
         let bundle_payload = serde_json::to_string(bundle)?;
-        let bundle_id = bundle.bundle_id.clone();
-        let idempotency_key = bundle.idempotency_key.clone();
+        let bundle_id = bundle.bundle_id.to_string();
+        let idempotency_key = bundle.idempotency_key.to_string();
 
         let mut tx = self.pool.inner().begin().await?;
         sqlx::query!(
@@ -264,8 +264,8 @@ impl Outbox {
         let new_entry_id = format!("obe_{}", Uuid::new_v4().simple());
         let now = chrono::Utc::now().to_rfc3339();
         let bundle_payload = serde_json::to_string(bundle)?;
-        let bundle_id = bundle.bundle_id.clone();
-        let idempotency_key = bundle.idempotency_key.clone();
+        let bundle_id = bundle.bundle_id.to_string();
+        let idempotency_key = bundle.idempotency_key.to_string();
 
         let mut tx = self.pool.inner().begin().await?;
 

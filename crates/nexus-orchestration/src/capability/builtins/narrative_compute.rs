@@ -217,12 +217,8 @@ impl Capability for NarrativeCompute {
             ));
         }
 
-        // Convert domain KeyBlocks to contract KeyBlocks for the compute envelope.
-        let key_blocks: Vec<nexus_contracts::KeyBlock> = computable_blocks
-            .items
-            .into_iter()
-            .map(Into::into)
-            .collect();
+        // Domain KeyBlocks are converted to the compute envelope's inlined
+        // `NexusKeyBlock` (wire-equivalent; drift gate) inline below.
 
         // 2. Read narrative state (timeline position, root branch).
         let gw = nexus_local_db::narrative_gateway::SqliteNarrativeGateway::new((**pool).clone());
@@ -243,12 +239,32 @@ impl Capability for NarrativeCompute {
         });
 
         // 3. Build ComputeInput envelope and invoke WASM.
+        // The compute envelope uses typify-inlined copies (`NexusKeyBlock`,
+        // `ComputeInputNarrativeState`, `ComputeInputWorldRef`) that are
+        // wire-equivalent to the domain contract types; JSON round-trips bridge
+        // them (drift gate proves equivalence).
         let compute_input = ComputeInput {
-            schema_version: 1,
-            world_ref: json!({"world_id": parsed.world_id}),
-            key_blocks,
-            narrative_state: Some(narrative_state),
-            invocation: parsed.invocation_params,
+            schema_version: std::num::NonZeroU64::new(1)
+                .expect("schema_version literal 1 is non-zero"),
+            world_ref: serde_json::from_value(json!({"world_id": parsed.world_id}))
+                .expect("world_ref round-trips"),
+            key_blocks: computable_blocks
+                .items
+                .into_iter()
+                .map(Into::into)
+                .map(|kb: nexus_contracts::KeyBlock| {
+                    serde_json::from_value(serde_json::to_value(&kb).unwrap_or_default())
+                        .expect("KeyBlock round-trips to compute NexusKeyBlock")
+                })
+                .collect(),
+            narrative_state: Some(
+                serde_json::from_value(narrative_state)
+                    .expect("narrative_state round-trips to ComputeInputNarrativeState"),
+            ),
+            invocation: parsed
+                .invocation_params
+                .map(|v| serde_json::from_value(v).expect("invocation round-trips to Map"))
+                .unwrap_or_default(),
         };
 
         // Resolve the compiled module + manifest from the daemon-wide cache
@@ -303,9 +319,20 @@ impl Capability for NarrativeCompute {
         let applied = apply_state_delta(pool, &parsed.world_id, &output.state_delta).await?;
 
         // 6. Create new KeyBlocks from output.
-        let new_kb_count = create_new_key_blocks(pool, &parsed.world_id, &output.new_key_blocks)
-            .await
-            .map_err(|e| CapabilityError::Internal(format!("create new key_blocks: {e}")))?;
+        let new_kb_count = create_new_key_blocks(
+            pool,
+            &parsed.world_id,
+            &output
+                .new_key_blocks
+                .iter()
+                .map(|kb| {
+                    serde_json::from_value(serde_json::to_value(kb).unwrap_or_default())
+                        .expect("NexusKeyBlock round-trips to KeyBlock")
+                })
+                .collect::<Vec<nexus_contracts::KeyBlock>>(),
+        )
+        .await
+        .map_err(|e| CapabilityError::Internal(format!("create new key_blocks: {e}")))?;
 
         // 7. Append timeline events from output.
         let evt_count = append_timeline_events(
@@ -313,7 +340,14 @@ impl Capability for NarrativeCompute {
             &parsed.world_id,
             &parsed.creator_id,
             &branch_id,
-            &output.timeline_events,
+            &output
+                .timeline_events
+                .iter()
+                .map(|evt| {
+                    serde_json::from_value(serde_json::to_value(evt).unwrap_or_default())
+                        .expect("NexusTimelineEvent round-trips to TimelineEvent")
+                })
+                .collect::<Vec<nexus_contracts::TimelineEvent>>(),
         )
         .await
         .map_err(|e| CapabilityError::Internal(format!("append timeline events: {e}")))?;
@@ -397,7 +431,10 @@ async fn apply_state_delta(
             )));
         }
 
-        let target_id = delta.target_key_block_id.as_deref().unwrap_or("");
+        let target_id = delta
+            .target_key_block_id
+            .as_deref()
+            .map_or("", String::as_str);
         if target_id.is_empty() {
             return Err(CapabilityError::InputInvalid(
                 "state_delta entry missing target_key_block_id".to_string(),
@@ -439,7 +476,13 @@ async fn apply_state_delta(
         let rest_path: Vec<&str> = path_segments[1..].to_vec();
 
         // Apply the delta to the state JSON.
-        apply_json_delta(&mut state, state_key, &rest_path, &delta.op, &delta.value)?;
+        apply_json_delta(
+            &mut state,
+            state_key,
+            &rest_path,
+            delta.op.as_str(),
+            &delta.value,
+        )?;
 
         // Write back.
         body.state = Some(state);
@@ -600,7 +643,7 @@ async fn create_new_key_blocks(
     let mut created = 0usize;
 
     for kb_contract in blocks {
-        if kb_contract.world_id != world_id {
+        if kb_contract.world_id.to_string() != world_id {
             return Err(CapabilityError::InputInvalid(format!(
                 "new_key_block '{}' targets world '{}' but admitted world is '{}'; \
                  cross-world block injection rejected",
@@ -640,7 +683,7 @@ async fn append_timeline_events(
             world_id,
             branch_id,
             event_type,
-            evt.title.as_deref(),
+            evt.title.as_deref().map(String::as_str),
             evt.summary.as_deref(),
         )
         .await

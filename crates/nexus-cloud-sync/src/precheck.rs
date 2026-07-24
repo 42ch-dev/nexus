@@ -457,17 +457,15 @@ fn check_sequence_monotonicity(
 }
 
 fn check_world_revision(bundle: &Bundle, local_state: &LocalState, report: &mut PrecheckReport) {
-    if let Some(base) = bundle.base_versions.get("world_revision") {
-        if let Some(bundle_rev) = base.as_u64() {
-            if bundle_rev < local_state.world_revision {
-                report.add_issue(PrecheckIssue::error_with_hint(
-                    &format!(
-                        "world_revision in bundle ({bundle_rev}) is behind local state ({})",
-                        local_state.world_revision
-                    ),
-                    "Pull latest state from server before building the bundle",
-                ));
-            }
+    if let Some(bundle_rev) = bundle.base_versions.world_revision {
+        if bundle_rev < local_state.world_revision {
+            report.add_issue(PrecheckIssue::error_with_hint(
+                &format!(
+                    "world_revision in bundle ({bundle_rev}) is behind local state ({})",
+                    local_state.world_revision
+                ),
+                "Pull latest state from server before building the bundle",
+            ));
         }
     }
 }
@@ -514,7 +512,7 @@ fn check_command_consistency(bundle: &Bundle, report: &mut PrecheckReport) {
         }
 
         // Warn about missing payload
-        let has_payload = delta.payload.is_object();
+        let has_payload = !delta.payload.is_empty();
         if !has_payload {
             report.add_issue(PrecheckIssue::warning(&format!(
                 "delta[{i}] missing payload"
@@ -540,11 +538,8 @@ fn check_schema_compliance(bundle: &Bundle, report: &mut PrecheckReport) {
     }
 
     // Warn if base_versions is empty
-    if bundle
-        .base_versions
-        .as_object()
-        .is_none_or(serde_json::Map::is_empty)
-    {
+    let bv = &bundle.base_versions;
+    if bv.world_revision.is_none() && bv.timeline_head_id.is_none() && bv.canon_revision.is_none() {
         report.add_issue(PrecheckIssue::warning(
             "base_versions is empty (optimistic concurrency baseline missing)",
         ));
@@ -573,7 +568,7 @@ fn check_auth_match(bundle: &Bundle, auth_context: &AuthContext, report: &mut Pr
         return;
     };
 
-    if bundle.submitting_creator_id != *authenticated_id {
+    if bundle.submitting_creator_id.to_string() != *authenticated_id {
         report.add_issue(PrecheckIssue::error_with_hint(
             &format!(
                 "submitting_creator_id '{}' does not match authenticated creator '{}'",

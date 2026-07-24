@@ -21,6 +21,16 @@ use crate::common_types::{
 };
 use crate::generated::daemon_api::canvas::world_kb::world_kb_relationship_kind::WorldKbRelationshipKind;
 use crate::generated::daemon_api::works::chapters::chapter_status::ChapterStatus;
+// Generated enums that consumers call `.as_str()` on at conversion boundaries
+// (plan v1.138 P1). typify emits `Display`+`FromStr` for these but not the
+// `as_str()` inherent method the boundary code relies on. The three whose
+// names collide with `common_types` imports (`KeyBlockStatus`, `PairingStatus`,
+// `CreatorStatus`) are implemented via fully-qualified paths below to avoid
+// ambiguous imports; only the mangled-name enums are imported here.
+use crate::generated::domain::creator::CreatorRegistrationSource;
+use crate::generated::domain::pairing::PairingPairingSource;
+use crate::generated::domain::user::UserAccountStatus;
+use crate::generated::domain::user::UserSubscriptionTier;
 use crate::local::domain::runtime_mode::RuntimeMode;
 use std::fmt;
 use std::str::FromStr;
@@ -499,6 +509,328 @@ impl ChapterStatus {
     }
 }
 
+// ── as_str() for domain generated enums (plan v1.138 P1) ──────────────────
+// Consumers call `.as_str()` on these typify-generated enums at contract↔domain
+// conversion boundaries. The serde-rename values mirror the canonical
+// `common_types` strings; these impls are kept in lock-step with the schema.
+// The first three share names with `common_types` enums imported above, so
+// their impls are written against the fully-qualified generated path.
+
+impl crate::generated::domain::key_block::KeyBlockStatus {
+    #[must_use]
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Provisional => "provisional",
+            Self::Confirmed => "confirmed",
+            Self::Deprecated => "deprecated",
+            Self::Merged => "merged",
+            Self::Deleted => "deleted",
+        }
+    }
+}
+
+impl crate::generated::domain::pairing::PairingStatus {
+    #[must_use]
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Active => "active",
+            Self::Revoked => "revoked",
+        }
+    }
+}
+
+impl crate::generated::domain::creator::CreatorStatus {
+    #[must_use]
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Active => "active",
+            Self::Archived => "archived",
+            Self::Locked => "locked",
+        }
+    }
+}
+
+impl PairingPairingSource {
+    #[must_use]
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::AutoCli => "auto_cli",
+            Self::ManualWeb => "manual_web",
+            Self::PlatformAuto => "platform_auto",
+        }
+    }
+}
+
+impl UserAccountStatus {
+    #[must_use]
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Active => "active",
+            Self::Suspended => "suspended",
+            Self::Deleted => "deleted",
+        }
+    }
+}
+
+impl UserSubscriptionTier {
+    #[must_use]
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Free => "free",
+            Self::Pro => "pro",
+            Self::Studio => "studio",
+            Self::Enterprise => "enterprise",
+        }
+    }
+}
+
+impl CreatorRegistrationSource {
+    #[must_use]
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Cli => "cli",
+            Self::WebAgent => "web_agent",
+            Self::Platform => "platform",
+        }
+    }
+}
+
+// ── as_str() for remaining domain generated enums (plan v1.138 P1) ─────────
+// Same rationale as above: consumers call `.as_str()` at contract↔domain
+// boundaries. All written against fully-qualified generated paths to avoid
+// import-name collisions with the `common_types` enums imported at the top.
+
+impl crate::generated::domain::world::WorldStatus {
+    #[must_use]
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Active => "active",
+            Self::Paused => "paused",
+            Self::Archived => "archived",
+        }
+    }
+}
+
+impl crate::generated::domain::world::WorldTimePolicy {
+    #[must_use]
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Manual => "manual",
+            Self::OwnerDriven => "owner_driven",
+            Self::EventDriven => "event_driven",
+        }
+    }
+}
+
+impl crate::generated::domain::world::WorldVisibility {
+    #[must_use]
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Private => "private",
+            Self::Unlisted => "unlisted",
+            Self::Public => "public",
+        }
+    }
+}
+
+impl crate::generated::domain::world_membership::WorldMembershipRole {
+    #[must_use]
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Owner => "owner",
+            Self::Maintainer => "maintainer",
+            Self::Collaborator => "collaborator",
+            Self::OfficialCreator => "official_creator",
+        }
+    }
+}
+
+impl crate::generated::domain::world_membership::WorldMembershipMembershipStatus {
+    #[must_use]
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Active => "active",
+            Self::Invited => "invited",
+            Self::Suspended => "suspended",
+            Self::Removed => "removed",
+        }
+    }
+}
+
+impl crate::generated::domain::timeline_event::TimelineEventStatus {
+    #[must_use]
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Canon => "canon",
+            Self::Provisional => "provisional",
+            Self::Rejected => "rejected",
+        }
+    }
+}
+
+impl crate::generated::domain::timeline_event::TimelineEventEventType {
+    #[must_use]
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::StoryAdvance => "story_advance",
+            Self::StateUpdate => "state_update",
+            Self::ForkMarker => "fork_marker",
+            Self::OfficialProgression => "official_progression",
+            Self::PublishMarker => "publish_marker",
+        }
+    }
+}
+
+impl crate::generated::domain::story_manifest::StoryManifestStatus {
+    #[must_use]
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::SummaryReady => "summary_ready",
+            Self::StagedForPublish => "staged_for_publish",
+            Self::Published => "published",
+            Self::Archived => "archived",
+        }
+    }
+}
+
+impl crate::generated::domain::story_manifest::StoryManifestManifestType {
+    #[must_use]
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Chapter => "chapter",
+            Self::Arc => "arc",
+            Self::Story => "story",
+            Self::Excerpt => "excerpt",
+        }
+    }
+}
+
+impl crate::generated::domain::story_manifest::StoryManifestManuscriptStorage {
+    #[must_use]
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::LocalWorkspace => "local_workspace",
+            Self::PlatformSandbox => "platform_sandbox",
+        }
+    }
+}
+
+impl crate::generated::domain::memory::MemoryStatus {
+    #[must_use]
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Active => "active",
+            Self::Superseded => "superseded",
+            Self::Archived => "archived",
+        }
+    }
+}
+
+impl crate::generated::domain::memory::MemoryMemoryKind {
+    #[must_use]
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::StorySummary => "story_summary",
+            Self::ResearchMaterial => "research_material",
+            Self::ReviewNote => "review_note",
+            Self::CharacterNote => "character_note",
+            Self::WorldBuilding => "world_building",
+            Self::PlotOutline => "plot_outline",
+            Self::ThemeAnalysis => "theme_analysis",
+            Self::PersonalityCore => "personality_core",
+            Self::Custom => "custom",
+        }
+    }
+}
+
+impl crate::generated::domain::memory::MemoryMemoryType {
+    #[must_use]
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Canon => "canon",
+            Self::Working => "working",
+            Self::Experience => "experience",
+        }
+    }
+}
+
+impl crate::generated::domain::fork_branch::ForkBranchStatus {
+    #[must_use]
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Active => "active",
+            Self::Archived => "archived",
+        }
+    }
+}
+
+impl crate::generated::domain::fork_branch::ForkBranchVerificationStatus {
+    #[must_use]
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Unverified => "unverified",
+            Self::Requested => "requested",
+            Self::Verified => "verified",
+            Self::Rejected => "rejected",
+        }
+    }
+}
+
+// ── as_str() for compute / sync / bundle generated enums (plan v1.138 P1) ──
+impl crate::generated::daemon_api::compute::compute_output::ComputeOutputStateDeltaItemOp {
+    #[must_use]
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Add => "+",
+            Self::Sub => "-",
+            Self::Set => "set",
+        }
+    }
+}
+
+impl crate::generated::platform::sync::bundle::NexusDeltaOperation {
+    #[must_use]
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Create => "create",
+            Self::Update => "update",
+            Self::Upsert => "upsert",
+            Self::Delete => "delete",
+            Self::Append => "append",
+        }
+    }
+}
+
+impl crate::generated::platform::sync::bundle::NexusDeltaDeltaType {
+    #[must_use]
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::World => "world",
+            Self::KeyBlock => "key_block",
+            Self::TimelineEvent => "timeline_event",
+            Self::ForkBranch => "fork_branch",
+            Self::MemoryItem => "memory_item",
+            Self::StoryManifest => "story_manifest",
+        }
+    }
+}
+
+impl crate::generated::platform::sync::sync_command::SyncCommandCommandType {
+    #[must_use]
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::AdvanceWorld => "advance_world",
+            Self::InjectFutureEvent => "inject_future_event",
+            Self::ExtractKb => "extract_kb",
+            Self::SyncPush => "sync_push",
+            Self::SyncPull => "sync_pull",
+            Self::ForkWorld => "fork_world",
+            Self::PublishStory => "publish_story",
+        }
+    }
+}
+
 // ── FromStr implementations ───────────────────────────────────────────────
 // Note: typify generates `FromStr` for all schema string enums (plan v1.138 T5).
 // Only `RuntimeMode` (a local-only type, NOT typify-generated) retains a
@@ -514,6 +846,61 @@ impl FromStr for RuntimeMode {
             "cloud_enhanced" => Ok(Self::CloudEnhanced),
             _ => Err(format!(
                 "unknown runtime mode: '{s}'; expected local_only, local_first, or cloud_enhanced"
+            )),
+        }
+    }
+}
+
+// `ReferenceSourceType` / `ScanStatus` are common_types-only (no typify
+// counterpart at the crate root) yet consumers parse them from strings when
+// rebuilding the local `ReferenceSource` aggregate (plan v1.138 P1).
+impl FromStr for ReferenceSourceType {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "file" => Ok(Self::File),
+            "pdf" => Ok(Self::Pdf),
+            "url" => Ok(Self::Url),
+            "note" => Ok(Self::Note),
+            _ => Err(format!(
+                "unknown reference source type: '{s}'; expected file, pdf, url, or note"
+            )),
+        }
+    }
+}
+
+impl FromStr for ScanStatus {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "pending" => Ok(Self::Pending),
+            "scanned" => Ok(Self::Scanned),
+            "failed" => Ok(Self::Failed),
+            "ignored" => Ok(Self::Ignored),
+            _ => Err(format!(
+                "unknown scan status: '{s}'; expected pending, scanned, failed, or ignored"
+            )),
+        }
+    }
+}
+
+// `DeliveryState` is common_types-only (the outbox stores it as a stringified
+// enum column) and consumers rebuild it from strings.
+impl FromStr for DeliveryState {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "staged" => Ok(Self::Staged),
+            "ready" => Ok(Self::Ready),
+            "sent" => Ok(Self::Sent),
+            "acked" => Ok(Self::Acked),
+            "conflicted" => Ok(Self::Conflicted),
+            "failed" => Ok(Self::Failed),
+            _ => Err(format!(
+                "unknown delivery state: '{s}'; expected staged, ready, sent, acked, conflicted, or failed"
             )),
         }
     }
