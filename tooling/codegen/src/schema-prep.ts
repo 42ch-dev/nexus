@@ -21,10 +21,11 @@
  *
  * Run directly for a smoke check: `tsx tooling/codegen/src/schema-prep.ts`.
  */
-import $RefParser from '@apidevtools/json-schema-ref-parser';
+import $RefParser, { type FileInfo, type ParserOptions } from '@apidevtools/json-schema-ref-parser';
 import { glob } from 'glob';
 import fs from 'fs';
 import path from 'path';
+import { fileURLToPath } from 'node:url';
 import { resolveFromRoot, logger } from './utils';
 
 /**
@@ -132,6 +133,77 @@ export async function buildLocalizedSchemaTree(
   return schemaPaths.sort();
 }
 
+const FILE_PROTOCOL_PATTERN = /^file:/i;
+const NON_FILE_PROTOCOL_PATTERN = /^[a-z][a-z0-9+.-]*:/i;
+
+/**
+ * True when a ref URL is a local filesystem path or `file:` URL (not http/https).
+ */
+export function isLocalFileRefUrl(url: string): boolean {
+  if (FILE_PROTOCOL_PATTERN.test(url)) {
+    return true;
+  }
+  return !NON_FILE_PROTOCOL_PATTERN.test(url);
+}
+
+/**
+ * Convert a ref-parser file URL to an absolute filesystem path (hash/query stripped).
+ */
+export function refUrlToFilePath(url: string): string {
+  const withoutFragment = url.split('#')[0] ?? url;
+  const withoutQuery = withoutFragment.split('?')[0] ?? withoutFragment;
+  if (FILE_PROTOCOL_PATTERN.test(withoutQuery)) {
+    return fileURLToPath(withoutQuery);
+  }
+  return path.resolve(withoutQuery);
+}
+
+/**
+ * Reject resolved paths that escape `confinedRoot` (prefix check after realpath).
+ */
+export function assertPathWithinRoot(confinedRoot: string, candidatePath: string): void {
+  const rootReal = fs.realpathSync.native(path.resolve(confinedRoot));
+  const rootPrefix = rootReal.endsWith(path.sep) ? rootReal : `${rootReal}${path.sep}`;
+
+  let resolved: string;
+  try {
+    resolved = fs.realpathSync.native(candidatePath);
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code !== 'ENOENT') {
+      throw err;
+    }
+    resolved = path.resolve(candidatePath);
+  }
+
+  if (resolved !== rootReal && !resolved.startsWith(rootPrefix)) {
+    throw new Error(
+      `Refusing to dereference $ref outside localized schema tree: ${candidatePath}`,
+    );
+  }
+}
+
+/**
+ * Dereference options that disable HTTP(S) fetch and confine file reads to `localizedDir`.
+ */
+export function createConfinedDereferenceOptions(localizedDir: string): ParserOptions {
+  const confinedRoot = fs.realpathSync.native(path.resolve(localizedDir));
+
+  return {
+    resolve: {
+      http: false,
+      file: {
+        canRead: isLocalFileRefUrl,
+        async read(file: FileInfo) {
+          const filePath = refUrlToFilePath(file.url);
+          assertPathWithinRoot(confinedRoot, filePath);
+          return fs.promises.readFile(filePath);
+        },
+      },
+    },
+  };
+}
+
 /**
  * Build the dereferenced schema tree: for each localized schema, inline every
  * cross-file `$ref` via `@apidevtools/json-schema-ref-parser`, writing self-contained
@@ -144,9 +216,10 @@ export async function buildDereferencedSchemaTree(
   derefSchemasDir: string,
 ): Promise<void> {
   fs.rmSync(derefSchemasDir, { recursive: true, force: true });
+  const derefOptions = createConfinedDereferenceOptions(localizedDir);
   for (const relSchema of schemaPaths) {
     const inputPath = path.join(localizedDir, relSchema);
-    const dereferenced = await $RefParser.dereference(inputPath);
+    const dereferenced = await $RefParser.dereference(inputPath, derefOptions);
     const outPath = path.join(derefSchemasDir, relSchema);
     fs.mkdirSync(path.dirname(outPath), { recursive: true });
     fs.writeFileSync(outPath, JSON.stringify(dereferenced, null, 2));
