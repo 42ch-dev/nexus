@@ -187,7 +187,7 @@ export function ChaptersPage() {
                             to={`/works/${encodeURIComponent(workId)}/chapters/${row.chapter}?volume=${row.volume ?? 1}`}
                             className="font-medium text-brand-deep-blue hover:underline dark:text-blue-700 dark:hover:text-blue-800"
                           >
-                            {row.title || t('chapters.fallbackTitle', { chapter: row.chapter })}
+                            {row.title?.trim() ? row.title : t('chapters.fallbackTitle', { chapter: row.chapter })}
                           </Link>
                         </TableCell>
                         <TableCell>
@@ -200,7 +200,7 @@ export function ChaptersPage() {
                               aria-label={t('chapters.slugLabel')}
                             />
                           ) : (
-                            <span className="text-copy-13-mono text-gray-900">{row.slug || '—'}</span>
+                            <span className="text-copy-13-mono text-gray-900">{row.slug?.trim() ? row.slug : '—'}</span>
                           )}
                         </TableCell>
                         <TableCell className="text-right">

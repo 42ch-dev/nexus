@@ -232,7 +232,7 @@ function writeRootIndex(
 
 // Run if executed directly (tsx / node dist). Runs prep first so ts-gen is independently smoke-testable.
 // eslint-disable-next-line @typescript-eslint/no-require-imports
-if (typeof require !== 'undefined' && require.main === module) {
+if (require.main === module) {
   runPrep()
     .then(() => generateTSTypes())
     .catch((err: Error) => {

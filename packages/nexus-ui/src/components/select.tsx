@@ -34,7 +34,7 @@ export const Select = forwardRef<HTMLSelectElement, SelectProps>(
     <div className="relative">
       <select
         ref={ref}
-        aria-invalid={invalid || undefined}
+        aria-invalid={invalid ? true : undefined}
         className={cn(
           'h-10 w-full appearance-none rounded-control border bg-background-100 ps-3 pe-8 text-copy-14 text-gray-1000 transition-colors duration-state ease-standard',
           'focus-visible:border-blue-700',

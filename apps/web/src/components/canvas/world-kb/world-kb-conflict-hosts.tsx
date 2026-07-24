@@ -52,10 +52,10 @@ export function EntityConflictHost({
     setCurrentVersion(state?.currentVersion ?? 0);
   }, [state?.currentVersion]);
 
-  if (!state || !selection || selection.kind !== 'entity') return null;
+  if (!state || selection?.kind !== 'entity') return null;
 
   function handleReapply() {
-    if (!state || !selection || selection.kind !== 'entity') return;
+    if (!state || selection?.kind !== 'entity') return;
     patchEntity.mutate(
       {
         entity_id: selection.entity.key_block_id,
@@ -187,10 +187,10 @@ export function PromoteConflictHost({
     setCurrentVersion(state?.currentVersion ?? 0);
   }, [state?.currentVersion]);
 
-  if (!state || !selection || selection.kind !== 'candidate') return null;
+  if (!state || selection?.kind !== 'candidate') return null;
 
   function handleReapply() {
-    if (!state || !selection || selection.kind !== 'candidate') return;
+    if (!state || selection?.kind !== 'candidate') return;
     promoteCandidate.mutate(
       {
         job_id: selection.candidate.job_id,

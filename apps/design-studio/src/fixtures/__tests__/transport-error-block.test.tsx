@@ -90,7 +90,7 @@ describe('TransportErrorBlockFixtures', () => {
     const tls = blocks.find((b) => b.getAttribute('data-kind') === 'tls');
     expect(tls).toBeDefined();
     expect(tls && within(tls).queryByTestId('transport-error-primary')).not.toBeInTheDocument();
-    expect(tls && tls.textContent).toMatch(/desktop app/i);
+    expect(tls?.textContent).toMatch(/desktop app/i);
   });
 
   it('renders the detail-line variant', () => {

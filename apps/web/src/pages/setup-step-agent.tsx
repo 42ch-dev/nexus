@@ -50,7 +50,7 @@ function catalogItemToPickerItem(item: AgentCatalogItem): AgentPickerItem {
 
 /** Legacy: picker id for a scan entry. Kept for backward-compat tests. */
 export function agentPickerId(agent: AgentScanEntry): string {
-  return (agent.registry_agent_id?.trim() || agent.name).trim();
+  return (agent.registry_agent_id?.trim() ? agent.registry_agent_id.trim() : agent.name).trim();
 }
 
 /**

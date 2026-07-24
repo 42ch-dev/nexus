@@ -105,7 +105,7 @@ export function ChapterOutlineContentEditor({
 
   // Sync editable when the disabled flag flips after mount.
   useEffect(() => {
-    if (editor && editor.isEditable === disabled) {
+    if (editor?.isEditable === disabled) {
       editor.setEditable(!disabled);
     }
   }, [editor, disabled]);

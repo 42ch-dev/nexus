@@ -26,7 +26,7 @@ export type HeadingProps = NodeProps<
  * spacing tokens) to body copy. Used by every profile so the prose column keeps
  * its book-like rhythm.
  */
-export function ProseParagraph({ node, ...props }: NodeProps<HTMLParagraphElement>) {
+export function ProseParagraph({ node: _node, ...props }: NodeProps<HTMLParagraphElement>) {
   return (
     <p
       style={{
@@ -77,7 +77,7 @@ export function createProfileRenderers(profile: ReadingChromeProfile): Component
 
 /* ── Profile: novel ── */
 
-function NovelChapterTitle({ node, level, ...props }: HeadingProps) {
+function NovelChapterTitle({ node: _node, level: _level, ...props }: HeadingProps) {
   return (
     <h1
       className="reading-chrome-novel-chapter-title"
@@ -87,7 +87,7 @@ function NovelChapterTitle({ node, level, ...props }: HeadingProps) {
   );
 }
 
-function NovelSceneSeparator({ node, ...props }: NodeProps<HTMLHRElement>) {
+function NovelSceneSeparator({ node: _node, ...props }: NodeProps<HTMLHRElement>) {
   return (
     <div
       className="reading-chrome-novel-scene-separator"
@@ -101,7 +101,7 @@ function NovelSceneSeparator({ node, ...props }: NodeProps<HTMLHRElement>) {
   );
 }
 
-function NovelEpigraph({ node, ...props }: NodeProps<HTMLQuoteElement>) {
+function NovelEpigraph({ node: _node, ...props }: NodeProps<HTMLQuoteElement>) {
   return (
     <blockquote
       className="reading-chrome-novel-epigraph"
@@ -113,7 +113,7 @@ function NovelEpigraph({ node, ...props }: NodeProps<HTMLQuoteElement>) {
 
 /* ── Profile: essay ── */
 
-function EssaySectionHeading({ node, level, ...props }: HeadingProps) {
+function EssaySectionHeading({ node: _node, level: _level, ...props }: HeadingProps) {
   return (
     <h2
       className="reading-chrome-essay-section-heading"
@@ -123,7 +123,7 @@ function EssaySectionHeading({ node, level, ...props }: HeadingProps) {
   );
 }
 
-function EssayBlockquote({ node, ...props }: NodeProps<HTMLQuoteElement>) {
+function EssayBlockquote({ node: _node, ...props }: NodeProps<HTMLQuoteElement>) {
   return (
     <blockquote
       className="reading-chrome-essay-blockquote"
@@ -133,7 +133,7 @@ function EssayBlockquote({ node, ...props }: NodeProps<HTMLQuoteElement>) {
   );
 }
 
-function EssayAnchor({ node, ...props }: NodeProps<HTMLAnchorElement>) {
+function EssayAnchor({ node: _node, ...props }: NodeProps<HTMLAnchorElement>) {
   if ('data-footnote-ref' in props && props['data-footnote-ref']) {
     return (
       <a
@@ -148,7 +148,7 @@ function EssayAnchor({ node, ...props }: NodeProps<HTMLAnchorElement>) {
 
 /* ── Profile: game-bible ── */
 
-function GameBibleTermLink({ node, ...props }: NodeProps<HTMLAnchorElement>) {
+function GameBibleTermLink({ node: _node, ...props }: NodeProps<HTMLAnchorElement>) {
   return (
     <a
       className="reading-chrome-game-bible-term-link"
@@ -158,7 +158,7 @@ function GameBibleTermLink({ node, ...props }: NodeProps<HTMLAnchorElement>) {
   );
 }
 
-function GameBibleDefinitionCallout({ node, ...props }: NodeProps<HTMLQuoteElement>) {
+function GameBibleDefinitionCallout({ node: _node, ...props }: NodeProps<HTMLQuoteElement>) {
   return (
     <blockquote
       className="reading-chrome-game-bible-definition-callout"
@@ -173,7 +173,7 @@ function GameBibleDefinitionCallout({ node, ...props }: NodeProps<HTMLQuoteEleme
 
 /* ── Profile: script ── */
 
-function ScriptSceneHeading({ node, level, ...props }: HeadingProps) {
+function ScriptSceneHeading({ node: _node, level: _level, ...props }: HeadingProps) {
   return (
     <h2
       className="reading-chrome-script-scene-heading"
@@ -183,7 +183,7 @@ function ScriptSceneHeading({ node, level, ...props }: HeadingProps) {
   );
 }
 
-function ScriptCharacterName({ node, level, ...props }: HeadingProps) {
+function ScriptCharacterName({ node: _node, level: _level, ...props }: HeadingProps) {
   return (
     <h3
       className="reading-chrome-script-character-name"
@@ -193,7 +193,7 @@ function ScriptCharacterName({ node, level, ...props }: HeadingProps) {
   );
 }
 
-function ScriptParenthetical({ node, ...props }: NodeProps<HTMLQuoteElement>) {
+function ScriptParenthetical({ node: _node, ...props }: NodeProps<HTMLQuoteElement>) {
   return (
     <blockquote
       className="reading-chrome-script-parenthetical"

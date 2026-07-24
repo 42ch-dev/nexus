@@ -65,7 +65,7 @@ export function SchedulePage() {
               {schedules.data.map((s) => (
                 <TableRow key={s.schedule_id}>
                   <TableCell><span className="text-copy-13-mono text-gray-1000">{shortId(s.schedule_id)}</span></TableCell>
-                  <TableCell>{s.label || <span className="text-gray-700">—</span>}</TableCell>
+                  <TableCell>{s.label?.trim() ? s.label : <span className="text-gray-700">—</span>}</TableCell>
                   <TableCell><StatusBadge status={s.status} /></TableCell>
                   <TableCell><span className="text-copy-13-mono text-gray-900">{shortId(s.preset_id)}</span></TableCell>
                   <TableCell>

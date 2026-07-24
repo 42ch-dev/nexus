@@ -13,6 +13,8 @@
     "preview": "vite preview",
     "pretypecheck": "pnpm --filter @42ch/nexus-contracts run build && pnpm --filter @42ch/nexus-ui run build",
     "typecheck": "tsc --noEmit",
+    "lint": "oxlint .",
+    "lint:fix": "oxlint --fix .",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage"
@@ -36,7 +38,7 @@
     "react-dom": "^18.3.1",
     "react-i18next": "^15.0.1",
     "react-markdown": "^9.0.0",
-    "react-router-dom": "^6.28.0",
+    "react-router-dom": "^7.18.0",
     "react-window": "^1.8.11",
     "remark-gfm": "^4.0.0",
     "tailwind-merge": "^2.6.0",
@@ -58,7 +60,9 @@
     "msw": "^2.7.0",
     "postcss": "^8.4.49",
     "tailwindcss": "^3.4.17",
-    "typescript": "^5.6.3",
+    "oxlint": "^1.75.0",
+    "oxlint-tsgolint": "7.0.2001",
+    "typescript": "7.0.2",
     "vite": "^6.4.3",
     "vitest": "^3.2.6"
   },

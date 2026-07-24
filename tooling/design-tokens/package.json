@@ -19,7 +19,9 @@
     "@42ch/nexus-ui": "workspace:*"
   },
   "devDependencies": {
-    "typescript": "^5.6.3"
+    "oxlint": "^1.75.0",
+    "oxlint-tsgolint": "7.0.2001",
+    "typescript": "7.0.2"
   },
   "peerDependencies": {
     "tailwindcss": "^3.4.0"

@@ -422,7 +422,7 @@ function ChapterRow({
         <ol className="ml-8 flex flex-col gap-1 border-l border-gray-alpha-300 pl-2">
           {scenes.map((scene) => {
             const beats = beatsByScene.get(scene.sceneId) ?? [];
-            const sceneTitle = scene.title || t('outlineAltView.untitledScene');
+            const sceneTitle = scene.title?.trim() ? scene.title : t('outlineAltView.untitledScene');
             return (
               <li key={scene.sceneId} className="flex flex-col gap-1">
                 <div className="flex items-center gap-2 rounded-control px-2 py-1 text-copy-14">
@@ -435,7 +435,7 @@ function ChapterRow({
                 {beats.length > 0 ? (
                   <ol className="ml-8 flex flex-col gap-1 border-l border-gray-alpha-300 pl-2">
                     {beats.map((beat) => {
-                      const beatTitle = beat.title || t('outlineAltView.untitledBeat');
+                      const beatTitle = beat.title?.trim() ? beat.title : t('outlineAltView.untitledBeat');
                       return (
                         <li
                           key={beat.beatId}

@@ -248,7 +248,7 @@ export async function runPrep(): Promise<SchemaPrepPaths> {
 
 // Run if executed directly (tsx / node dist). Mirrors index.ts's guard shape.
 // eslint-disable-next-line @typescript-eslint/no-require-imports
-if (typeof require !== 'undefined' && require.main === module) {
+if (require.main === module) {
   runPrep().catch((err: Error) => {
     logger.error(`Schema prep failed: ${err.message}`);
     if (process.env.DEBUG) {
