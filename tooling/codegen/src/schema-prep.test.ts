@@ -5,12 +5,8 @@ import path from 'path';
 import { buildDereferencedSchemaTree } from './schema-prep';
 
 const tempDirs: string[] = [];
-const tempFiles: string[] = [];
 
 afterEach(() => {
-  for (const file of tempFiles.splice(0)) {
-    fs.rmSync(file, { force: true });
-  }
   for (const dir of tempDirs.splice(0)) {
     fs.rmSync(dir, { recursive: true, force: true });
   }
@@ -78,22 +74,22 @@ describe('buildDereferencedSchemaTree', () => {
   it('rejects relative $ref escaping localizedDir', async () => {
     const localizedDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nexus-schema-local-'));
     const derefDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nexus-schema-deref-'));
-    tempDirs.push(localizedDir, derefDir);
+    const outsideDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nexus-schema-out-'));
+    tempDirs.push(localizedDir, derefDir, outsideDir);
 
-    const outsideName = `outside-${process.pid}.schema.json`;
-    const outsideSchema = path.join(path.dirname(localizedDir), outsideName);
+    const outsideSchema = path.join(outsideDir, 'outside.schema.json');
     fs.writeFileSync(outsideSchema, JSON.stringify({ type: 'string' }));
-    tempFiles.push(outsideSchema);
 
     const relSchema = 'nested/escape.schema.json';
     const nestedPath = path.join(localizedDir, relSchema);
     fs.mkdirSync(path.dirname(nestedPath), { recursive: true });
+    const escapeRef = path.relative(path.dirname(nestedPath), outsideSchema).split(path.sep).join('/');
     fs.writeFileSync(
       nestedPath,
       JSON.stringify({
         type: 'object',
         properties: {
-          escaped: { $ref: `../../${outsideName}` },
+          escaped: { $ref: escapeRef },
         },
       }),
     );
@@ -104,9 +100,11 @@ describe('buildDereferencedSchemaTree', () => {
   });
 
   it('rejects absolute file $ref outside localizedDir', async () => {
-    const outsideFile = path.join(os.tmpdir(), `nexus-schema-abs-${process.pid}.json`);
+    // mkdtempSync — avoids CodeQL js/insecure-temporary-file (predictable tmp paths).
+    const outsideDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nexus-schema-abs-'));
+    tempDirs.push(outsideDir);
+    const outsideFile = path.join(outsideDir, 'outside.schema.json');
     fs.writeFileSync(outsideFile, JSON.stringify({ type: 'string' }));
-    tempFiles.push(outsideFile);
 
     const { localizedDir, derefDir, schemaPaths } = makeLocalizedTree({
       'absolute.schema.json': {
