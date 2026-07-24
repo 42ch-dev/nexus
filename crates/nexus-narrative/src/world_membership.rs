@@ -158,16 +158,18 @@ impl WorldMembership {
 impl From<nexus_contracts::WorldMembership> for WorldMembership {
     fn from(c: nexus_contracts::WorldMembership) -> Self {
         Self {
-            schema_version: c.schema_version,
-            membership_id: c.membership_id,
-            world_id: c.world_id,
-            creator_id: c.creator_id,
+            schema_version: u32::try_from(c.schema_version.get())
+                .expect("schema_version exceeds u32 range"),
+            membership_id: c.membership_id.to_string(),
+            world_id: c.world_id.to_string(),
+            creator_id: c.creator_id.to_string(),
             role: c.role.as_str().to_string(),
             membership_status: c.membership_status.as_str().to_string(),
-            joined_at: c.joined_at,
-            permissions: c
-                .permissions
-                .map(|v| serde_json::from_value(v).unwrap_or_default()),
+            joined_at: c.joined_at.to_rfc3339(),
+            permissions: c.permissions.map(|v| {
+                serde_json::from_value(serde_json::to_value(&v).unwrap_or_default())
+                    .unwrap_or_default()
+            }),
         }
     }
 }
@@ -176,17 +178,21 @@ impl From<nexus_contracts::WorldMembership> for WorldMembership {
 impl From<WorldMembership> for nexus_contracts::WorldMembership {
     fn from(d: WorldMembership) -> Self {
         Self {
-            schema_version: d.schema_version,
-            membership_id: d.membership_id,
-            world_id: d.world_id,
-            creator_id: d.creator_id,
+            schema_version: std::num::NonZeroU64::new(u64::from(d.schema_version))
+                .expect("schema_version must be non-zero"),
+            membership_id: d.membership_id.parse().unwrap(),
+            world_id: d.world_id.parse().unwrap(),
+            creator_id: d.creator_id.parse().unwrap(),
             role: nexus_contracts::MembershipRole::from_str(&d.role).unwrap(),
             membership_status: nexus_contracts::MembershipStatus::from_str(&d.membership_status)
                 .unwrap(),
-            joined_at: d.joined_at,
-            permissions: d
-                .permissions
-                .map(|p| serde_json::to_value(p).unwrap_or_default()),
+            joined_at: chrono::DateTime::parse_from_rfc3339(&d.joined_at)
+                .unwrap()
+                .with_timezone(&chrono::Utc),
+            permissions: d.permissions.map(|p| {
+                serde_json::from_value(serde_json::to_value(&p).unwrap_or_default())
+                    .unwrap_or_default()
+            }),
         }
     }
 }

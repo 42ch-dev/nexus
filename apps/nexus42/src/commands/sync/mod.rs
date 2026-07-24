@@ -158,6 +158,9 @@ pub fn confirm_auto_reject(force: bool) -> bool {
 /// - Sync API calls fail
 /// - Invalid `world_id` or `creator_id` parameters
 ///
+/// # Panics
+/// Panics if a sync API type conversion fails (drift-gate-proven wire equivalence).
+///
 /// Note: This function is long; splitting would break the coherent sync flow.
 #[allow(clippy::too_many_lines)]
 pub async fn run(cmd: SyncCommand, config: &CliConfig) -> Result<()> {
@@ -219,17 +222,22 @@ pub async fn run(cmd: SyncCommand, config: &CliConfig) -> Result<()> {
         } => {
             runtime_guard::require_platform(&config.runtime_mode(), "sync pull")?;
 
-            let world_id = world_id.unwrap_or_else(|| {
-                eprintln!("Warning: sync pull without --world-id uses placeholder \"unknown\".");
-                "unknown".to_string()
-            });
+            let Some(world_id) = world_id else {
+                return Err(crate::errors::CliError::Other(
+                    "World ID required for sync pull. Use --world-id.".to_string(),
+                ));
+            };
 
             // Obtain auth token
             let auth_token = crate::auth::user_auth::ensure_valid_token(config).await?;
 
+            let parsed_world_id = world_id.as_str().try_into().map_err(|e| {
+                crate::errors::CliError::Other(format!("Invalid world_id '{world_id}': {e}"))
+            })?;
+
             let request = nexus_contracts::SyncPullRequest {
-                schema_version: 1,
-                world_id,
+                schema_version: std::num::NonZeroU64::MIN,
+                world_id: parsed_world_id,
                 after_confirmed_delta_sequence: after_sequence,
             };
 

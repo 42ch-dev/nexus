@@ -1,5 +1,5 @@
 //! HTTP handlers have consistent error patterns.
-#![allow(clippy::missing_errors_doc)]
+#![allow(clippy::missing_errors_doc, clippy::missing_panics_doc)]
 //! Memory pending review handlers — session-end capture for review pipeline.
 //!
 //! V1.78 P0 (Batch 1): every request/response/query/item DTO is now the
@@ -245,12 +245,12 @@ pub async fn list_pending_reviews(
     debug!(count = items.len(), "Pending reviews retrieved");
 
     Ok(Json(ListPendingReviewsResponse {
-        items,
-        pagination: PaginationInfo {
+        items: super::wire_cast(items),
+        pagination: super::wire_cast(PaginationInfo {
             limit: i64::try_from(limit).unwrap_or(i64::MAX),
             has_more: next_cursor.is_some(),
             next_cursor,
-        },
+        }),
     }))
 }
 
@@ -1079,7 +1079,7 @@ pub async fn fragments(
             fragment_id: r.fragment_id,
             summary: r.summary,
             world_id: r.world_id,
-            keywords: Some(decode_fragment_keywords(&r.keywords)),
+            keywords: decode_fragment_keywords(&r.keywords),
             created_at: Some(r.created_at),
         })
         .collect();
@@ -1087,7 +1087,7 @@ pub async fn fragments(
     debug!(count = fragments_list.len(), "Fragments retrieved");
 
     Ok(Json(ListMemoryFragmentsResponse {
-        fragments: fragments_list,
+        fragments: super::wire_cast(fragments_list),
     }))
 }
 
@@ -1191,7 +1191,7 @@ pub async fn reflect_soul(
     info!(
         creator_id = %active_creator,
         world_id = ?world_id,
-        force_regenerate = req.force_regenerate.unwrap_or(false),
+        force_regenerate = req.force_regenerate,
         "Reflecting on SOUL narrative"
     );
 
@@ -1207,7 +1207,7 @@ pub async fn reflect_soul(
         message: format!("failed to compute fragment stats: {e}"),
     })?;
 
-    let force = req.force_regenerate.unwrap_or(false);
+    let force = req.force_regenerate;
 
     // 2. Insufficient-data gate (before any ACP call).
     let min_distinct = usize::try_from(MIN_SOUL_NARRATIVE_DISTINCT_KEYWORDS).unwrap_or(usize::MAX);
@@ -1217,7 +1217,7 @@ pub async fn reflect_soul(
     if insufficient {
         return Ok(Json(SoulNarrativeResponse {
             creator_id: active_creator,
-            state: "insufficient_data".to_string(),
+            state: "insufficient_data".parse().expect("valid state constant"),
             narrative: None,
             generated_at: None,
             stale: false,
@@ -1249,7 +1249,7 @@ pub async fn reflect_soul(
             if !has_narrative {
                 return Ok(Json(SoulNarrativeResponse {
                     creator_id: active_creator,
-                    state: "ungenerated".to_string(),
+                    state: "ungenerated".parse().expect("valid state constant"),
                     narrative: None,
                     generated_at: None,
                     stale: false,
@@ -1268,7 +1268,7 @@ pub async fn reflect_soul(
             if stale {
                 return Ok(Json(SoulNarrativeResponse {
                     creator_id: active_creator,
-                    state: "stale".to_string(),
+                    state: "stale".parse().expect("valid state constant"),
                     narrative: c.narrative.clone(),
                     generated_at: c.generated_at.clone(),
                     stale: true,
@@ -1291,7 +1291,7 @@ pub async fn reflect_soul(
             // Not stale → current.
             return Ok(Json(SoulNarrativeResponse {
                 creator_id: active_creator,
-                state: "current".to_string(),
+                state: "current".parse().expect("valid state constant"),
                 narrative: c.narrative.clone(),
                 generated_at: c.generated_at.clone(),
                 stale: false,
@@ -1314,7 +1314,7 @@ pub async fn reflect_soul(
         // Populate current_* counts from fragment_stats; narrative/generated_at = None.
         return Ok(Json(SoulNarrativeResponse {
             creator_id: active_creator,
-            state: "ungenerated".to_string(),
+            state: "ungenerated".parse().expect("valid state constant"),
             narrative: None,
             generated_at: None,
             stale: false,
@@ -1399,7 +1399,7 @@ pub async fn reflect_soul(
 
     Ok(Json(SoulNarrativeResponse {
         creator_id: active_creator,
-        state: "current".to_string(),
+        state: "current".parse().expect("valid state constant"),
         narrative: Some(narrative),
         generated_at: record.generated_at,
         stale: false,
@@ -1944,13 +1944,13 @@ mod tests {
         let req = SoulNarrativeRequest {
             creator_id: creator_id.to_string(),
             world_id: None,
-            force_regenerate: Some(false),
+            force_regenerate: false,
         };
         let resp = reflect_soul(axum::extract::State(state.clone()), axum::Json(req))
             .await
             .expect("should succeed for force=false + ungenerated");
 
-        assert_eq!(resp.state, "ungenerated");
+        assert_eq!(resp.state.to_string(), "ungenerated");
         assert!(resp.narrative.is_none());
         assert!(resp.generated_at.is_none());
         assert!(!resp.stale);
@@ -1970,7 +1970,7 @@ mod tests {
         let req2 = SoulNarrativeRequest {
             creator_id: creator_id.to_string(),
             world_id: None,
-            force_regenerate: Some(true),
+            force_regenerate: true,
         };
         let err = reflect_soul(axum::extract::State(state.clone()), axum::Json(req2))
             .await
@@ -2060,13 +2060,13 @@ mod tests {
         let req = SoulNarrativeRequest {
             creator_id: creator_id.to_string(),
             world_id: None,
-            force_regenerate: Some(false),
+            force_regenerate: false,
         };
         let resp = reflect_soul(axum::extract::State(state), axum::Json(req))
             .await
             .expect("should succeed for force=false + cached current");
 
-        assert_eq!(resp.state, "current");
+        assert_eq!(resp.state.to_string(), "current");
         assert_eq!(resp.narrative.as_deref(), Some("A test narrative."));
         assert!(!resp.stale);
         assert_eq!(resp.current_fragment_count, 25);
@@ -2134,18 +2134,18 @@ mod tests {
         let req = SoulNarrativeRequest {
             creator_id: creator_id.to_string(),
             world_id: Some(owned_world.to_string()),
-            force_regenerate: Some(false),
+            force_regenerate: false,
         };
         let resp = reflect_soul(axum::extract::State(state.clone()), axum::Json(req))
             .await
             .expect("owned world should be accepted");
-        assert_eq!(resp.state, "insufficient_data");
+        assert_eq!(resp.state.to_string(), "insufficient_data");
 
         // Non-owned world → 403 Forbidden.
         let req = SoulNarrativeRequest {
             creator_id: creator_id.to_string(),
             world_id: Some(other_world.to_string()),
-            force_regenerate: Some(false),
+            force_regenerate: false,
         };
         let err = reflect_soul(axum::extract::State(state.clone()), axum::Json(req))
             .await
@@ -2161,7 +2161,7 @@ mod tests {
         let req = SoulNarrativeRequest {
             creator_id: creator_id.to_string(),
             world_id: Some(missing_world.to_string()),
-            force_regenerate: Some(false),
+            force_regenerate: false,
         };
         let err = reflect_soul(axum::extract::State(state.clone()), axum::Json(req))
             .await
@@ -2227,13 +2227,13 @@ mod tests {
         let req = SoulNarrativeRequest {
             creator_id: creator_id.to_string(),
             world_id: Some(world_id.to_string()),
-            force_regenerate: Some(false),
+            force_regenerate: false,
         };
         let resp = reflect_soul(axum::extract::State(state.clone()), axum::Json(req))
             .await
             .expect("should succeed for force=false + ungenerated world");
 
-        assert_eq!(resp.state, "ungenerated");
+        assert_eq!(resp.state.to_string(), "ungenerated");
         assert!(resp.narrative.is_none());
         assert_eq!(resp.current_fragment_count, 25);
         // Threshold-saturated count: 25 distinct reports as 20.
@@ -2243,7 +2243,7 @@ mod tests {
         let req2 = SoulNarrativeRequest {
             creator_id: creator_id.to_string(),
             world_id: Some(world_id.to_string()),
-            force_regenerate: Some(true),
+            force_regenerate: true,
         };
         let err = reflect_soul(axum::extract::State(state.clone()), axum::Json(req2))
             .await
@@ -2327,12 +2327,12 @@ mod tests {
         let req = SoulNarrativeRequest {
             creator_id: creator_id.to_string(),
             world_id: Some(world_id.to_string()),
-            force_regenerate: Some(false),
+            force_regenerate: false,
         };
         let resp = reflect_soul(axum::extract::State(state.clone()), axum::Json(req))
             .await
             .expect("owned world poll should succeed");
-        assert_eq!(resp.state, "ungenerated");
+        assert_eq!(resp.state.to_string(), "ungenerated");
         assert_eq!(resp.current_fragment_count, 25);
         assert_eq!(resp.current_distinct_keyword_count, 20);
 
@@ -2343,12 +2343,12 @@ mod tests {
         let req = SoulNarrativeRequest {
             creator_id: creator_id.to_string(),
             world_id: None,
-            force_regenerate: Some(false),
+            force_regenerate: false,
         };
         let resp = reflect_soul(axum::extract::State(state.clone()), axum::Json(req))
             .await
             .expect("creator-level poll should succeed");
-        assert_eq!(resp.state, "ungenerated");
+        assert_eq!(resp.state.to_string(), "ungenerated");
         assert_eq!(resp.current_fragment_count, 35);
         assert_eq!(resp.current_distinct_keyword_count, 20);
 

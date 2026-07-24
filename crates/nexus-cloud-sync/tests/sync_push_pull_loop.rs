@@ -44,8 +44,8 @@ async fn mock_platform_push_then_pull_empty_loop() {
     let client = SyncClient::new(base.trim_end_matches('/'), VALID_TOKEN).expect("client");
 
     let delta = LocalDelta {
-        delta_type: DeltaType::KeyBlock,
-        operation: DeltaOperation::Create,
+        delta_type: "key_block".parse().unwrap(),
+        operation: "create".parse().unwrap(),
         target_entity_type: Some("character".to_string()),
         target_entity_id: None,
         payload: json!({"display_name": "Loop", "block_type": "character"}),
@@ -63,8 +63,8 @@ async fn mock_platform_push_then_pull_empty_loop() {
     assert!(push_resp.success);
 
     let pull_req = SyncPullRequest {
-        schema_version: 1,
-        world_id: "wld_loop".to_string(),
+        schema_version: std::num::NonZeroU64::new(1).unwrap(),
+        world_id: "wld_loop".parse().unwrap(),
         after_confirmed_delta_sequence: None,
     };
     let pull_resp = client.pull_bundles(&pull_req).await.expect("pull");

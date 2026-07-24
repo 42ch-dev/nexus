@@ -29,8 +29,8 @@ async fn pull_bundles_parses_empty_success() {
     let client = SyncClient::new(base.trim_end_matches('/'), VALID_TOKEN).expect("client");
 
     let req = SyncPullRequest {
-        schema_version: 1,
-        world_id: "wld_test".to_string(),
+        schema_version: std::num::NonZeroU64::new(1).unwrap(),
+        world_id: "wld_test".parse().unwrap(),
         after_confirmed_delta_sequence: None,
     };
 
@@ -54,8 +54,8 @@ async fn pull_bundles_maps_404_to_platform_error() {
     let client = SyncClient::new(base.trim_end_matches('/'), VALID_TOKEN).expect("client");
 
     let req = SyncPullRequest {
-        schema_version: 1,
-        world_id: "wld_missing".to_string(),
+        schema_version: std::num::NonZeroU64::new(1).unwrap(),
+        world_id: "wld_missing".parse().unwrap(),
         after_confirmed_delta_sequence: None,
     };
 

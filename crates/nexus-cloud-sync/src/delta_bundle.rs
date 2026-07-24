@@ -14,7 +14,7 @@
 //! V1.0 supports `story_manifest` delta type in the deltas array,
 //! required for context-assembly summary payloads.
 
-use nexus_contracts::generated::{Bundle, Delta, SourceAnchor};
+use nexus_contracts::generated::{Bundle, Delta};
 use nexus_contracts::{BundleType, DeltaOperation, DeltaType, ManuscriptPhase};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -43,6 +43,15 @@ impl From<BundleValidationError> for SyncError {
     fn from(err: BundleValidationError) -> Self {
         Self::BundleValidation(err.to_string())
     }
+}
+
+fn parse_bundle_field<T: std::str::FromStr>(field: &str, value: &str) -> SyncResult<T>
+where
+    T::Err: std::fmt::Display,
+{
+    value
+        .parse()
+        .map_err(|e| SyncError::BundleValidation(format!("invalid bundle {field} '{value}': {e}")))
 }
 
 /// Delta operation within a bundle (builder helper).
@@ -276,6 +285,10 @@ impl BundleBuilder {
     ///
     /// # Errors
     /// Returns the specific error type if the operation fails.
+    /// # Panics
+    /// Panics if a delta or manuscript phase fails to round-trip through its
+    /// generated contract type. That indicates a programmer error (malformed
+    /// input), not a runtime condition.
     pub fn build(self) -> SyncResult<Bundle> {
         // Validate required fields
         if self.deltas.is_empty() {
@@ -297,37 +310,28 @@ impl BundleBuilder {
             .unwrap_or_else(|| format!("idk_{}", Uuid::new_v4().simple()));
 
         let bundle_id = format!("bdl_{}", Uuid::new_v4().simple());
-        let now = chrono::Utc::now().to_rfc3339();
+        let now = chrono::Utc::now();
 
-        // Build base_versions object
-        let mut base_versions = json!({});
-        if let Some(rev) = self.base_world_revision {
-            base_versions["world_revision"] = json!(rev);
-        }
-        if let Some(id) = self.base_timeline_head_id {
-            base_versions["timeline_head_id"] = json!(id);
-        }
-        if let Some(rev) = self.base_canon_revision {
-            base_versions["canon_revision"] = json!(rev);
-        }
+        // Build base_versions (generated struct with typed fields).
+        let base_versions = nexus_contracts::BundleBaseVersions {
+            world_revision: self.base_world_revision,
+            timeline_head_id: match &self.base_timeline_head_id {
+                None => None,
+                Some(id) => Some(parse_bundle_field("timeline_head_id", id)?),
+            },
+            canon_revision: self.base_canon_revision,
+        };
 
-        // Convert deltas to Delta (generated contract type)
+        // Convert deltas to Delta (generated contract type). typify inlines a
+        // separate enum copy per schema (`DeltaDeltaType` vs the bundle's
+        // `NexusDeltaDeltaType`); a JSON round-trip bridges them cleanly since
+        // the drift gate proves wire equivalence.
         let delta_values: Vec<Delta> = self
             .deltas
             .into_iter()
             .map(|d| {
-                let source_anchor = d
-                    .source_anchor
-                    .and_then(|v| serde_json::from_value::<SourceAnchor>(v).ok());
-                Delta {
-                    delta_type: d.delta_type,
-                    operation: d.operation,
-                    target_entity_type: d.target_entity_type,
-                    target_entity_id: d.target_entity_id,
-                    payload: d.payload,
-                    source_anchor,
-                    local_timestamp: d.local_timestamp,
-                }
+                serde_json::from_value(serde_json::to_value(&d).unwrap_or_default())
+                    .expect("domain Delta round-trips to contract Delta")
             })
             .collect();
 
@@ -335,22 +339,34 @@ impl BundleBuilder {
 
         let bundle = Bundle {
             schema_version: 1,
-            bundle_id,
-            command_id,
-            workspace_id: self.workspace_id,
-            world_id: self.world_id,
-            creator_id: self.creator_id,
-            submitting_creator_id,
+            bundle_id: parse_bundle_field("bundle_id", &bundle_id)?,
+            command_id: parse_bundle_field("command_id", &command_id)?,
+            workspace_id: parse_bundle_field("workspace_id", &self.workspace_id)?,
+            world_id: parse_bundle_field("world_id", &self.world_id)?,
+            creator_id: parse_bundle_field("creator_id", &self.creator_id)?,
+            submitting_creator_id: parse_bundle_field(
+                "submitting_creator_id",
+                &submitting_creator_id,
+            )?,
             bundle_type: self.bundle_type,
-            manuscript_phase: self.manuscript_phase,
+            manuscript_phase: self.manuscript_phase.map(|p| {
+                serde_json::from_value(serde_json::to_value(p).unwrap_or_default())
+                    .expect("ManuscriptPhase round-trips to BundleManuscriptPhase")
+            }),
             output_manuscript: self.output_manuscript,
-            idempotency_key,
+            idempotency_key: parse_bundle_field("idempotency_key", &idempotency_key)?,
             canonical_hash,
             base_versions,
             last_confirmed_delta_sequence: self.last_confirmed_delta_sequence,
-            deltas: delta_values,
+            deltas: delta_values
+                .iter()
+                .map(|d| {
+                    serde_json::from_value(serde_json::to_value(d).unwrap_or_default())
+                        .expect("Delta round-trips to bundle NexusDelta")
+                })
+                .collect(),
             bundle_apply_status: None,
-            delta_results: None,
+            delta_results: vec![],
             created_at: now,
         };
 
@@ -406,6 +422,20 @@ mod tests {
     }
 
     #[test]
+    fn bundle_build_rejects_invalid_wire_ids() {
+        let delta = make_test_delta();
+        let result = BundleBuilder::new("local", "unknown", "ctr_001")
+            .submitting_creator_id("ctr_001")
+            .add_delta(delta)
+            .build();
+
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(matches!(err, SyncError::BundleValidation(_)));
+        assert!(err.to_string().contains("workspace_id"));
+    }
+
+    #[test]
     fn bundle_build_minimal() {
         let delta = make_test_delta();
         let bundle = BundleBuilder::new("wrk_001", "wld_001", "ctr_001")
@@ -417,10 +447,10 @@ mod tests {
         // Bundle uses schema_version=1 (sync wire contract, separate from local API schemas)
         // LATEST_SCHEMA_VERSION may be higher due to local schemas like daemon-status-v2
         assert_eq!(bundle.schema_version, 1);
-        assert_eq!(bundle.workspace_id, "wrk_001");
-        assert_eq!(bundle.world_id, "wld_001");
-        assert_eq!(bundle.creator_id, "ctr_001");
-        assert_eq!(bundle.submitting_creator_id, "ctr_001");
+        assert_eq!(bundle.workspace_id.to_string(), "wrk_001");
+        assert_eq!(bundle.world_id.to_string(), "wld_001");
+        assert_eq!(bundle.creator_id.to_string(), "ctr_001");
+        assert_eq!(bundle.submitting_creator_id.to_string(), "ctr_001");
         assert_eq!(bundle.deltas.len(), 1);
         assert!(bundle.bundle_id.starts_with("bdl_"));
         assert!(bundle.command_id.starts_with("cmd_"));
@@ -439,10 +469,16 @@ mod tests {
             .build()
             .expect("should build");
 
-        assert_eq!(bundle.manuscript_phase, Some(ManuscriptPhase::Draft));
+        assert_eq!(
+            bundle.manuscript_phase.as_ref().map(|v| v.to_string()),
+            Some("draft".to_string())
+        );
         assert_eq!(bundle.output_manuscript, Some(true));
         assert_eq!(bundle.last_confirmed_delta_sequence, Some(10));
-        assert_eq!(bundle.base_versions["world_revision"], json!(5));
+        assert_eq!(
+            serde_json::to_value(&bundle.base_versions).unwrap()["world_revision"],
+            json!(5)
+        );
     }
 
     #[test]
@@ -458,7 +494,7 @@ mod tests {
         assert_eq!(bundle.deltas.len(), 1);
         let delta = &bundle.deltas[0];
         assert_eq!(delta.delta_type, DeltaType::StoryManifest);
-        assert_eq!(delta.operation, DeltaOperation::Upsert);
+        assert_eq!(delta.operation.to_string(), "upsert");
     }
 
     #[test]
@@ -507,7 +543,10 @@ mod tests {
 
         let json_str = serde_json::to_string(&bundle).expect("serialize");
         let recovered: Bundle = serde_json::from_str(&json_str).expect("deserialize");
-        assert_eq!(bundle, recovered);
+        assert_eq!(
+            serde_json::to_value(&bundle).unwrap(),
+            serde_json::to_value(&recovered).unwrap()
+        );
     }
 
     #[test]
@@ -518,8 +557,8 @@ mod tests {
 
     #[test]
     fn delta_operation_as_str() {
-        assert_eq!(DeltaOperation::Create.as_str(), "create");
-        assert_eq!(DeltaOperation::Upsert.as_str(), "upsert");
+        assert_eq!(DeltaOperation::Create.to_string(), "create");
+        assert_eq!(DeltaOperation::Upsert.to_string(), "upsert");
     }
 
     #[test]

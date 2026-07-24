@@ -178,6 +178,11 @@ target
 .gitnexus
 .gh-user
 
+# Codegen intermediate schema trees (localization + dereference scratch)
+# Consumed in-tree by the codegen pipeline; never committed.
+tooling/codegen/.schemas-localized/
+tooling/codegen/.schemas-dereferenced/
+
 # Morning Star harness (.mstar/)
 # Principle: process stays local; results are shared with the team.
 # Ignored (process / coordination):

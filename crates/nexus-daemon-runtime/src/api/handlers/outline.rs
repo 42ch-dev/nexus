@@ -8,6 +8,7 @@
 
 #![allow(clippy::missing_errors_doc)]
 
+use super::wire_cast;
 use crate::api::errors::NexusApiError;
 use crate::api::handlers::works::{read_active_creator_id, read_active_workspace_slug};
 use crate::api::path_guard::resolve_guarded_path_async;
@@ -17,8 +18,8 @@ use axum::extract::{Path, State};
 use axum::Json;
 use nexus_contracts::{
     OutlinePatchChapterRequest, OutlinePatchResponse, OutlinePatchStructureRequest,
-    TimelinePatchEventRequest, WorkOutline, WorkOutlineForeshadow, WorkOutlineTimelineEvent,
-    WorkOutlineVolume,
+    TimelinePatchEventRequest, WorkOutline, WorkOutlineForeshadowsItem,
+    WorkOutlineTimelineEventsItem, WorkOutlineVolumesItem,
 };
 use nexus_local_db::work_chapters::{self, PatchChapterParams, WorkChapterRecord};
 use nexus_local_db::works;
@@ -30,13 +31,13 @@ const OUTLINE_FILE_MAX_BYTES: usize = 10 * 1024 * 1024;
 // ─── Internal frontmatter model ─────────────────────────────────────────────
 
 /// In-memory representation of the work outline markdown frontmatter.
-#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 struct OutlineFrontmatter {
     outline_revision: i64,
-    volumes: Vec<WorkOutlineVolume>,
-    timeline_events: Vec<WorkOutlineTimelineEvent>,
-    foreshadows: Vec<WorkOutlineForeshadow>,
+    volumes: Vec<WorkOutlineVolumesItem>,
+    timeline_events: Vec<WorkOutlineTimelineEventsItem>,
+    foreshadows: Vec<WorkOutlineForeshadowsItem>,
     chapter_titles: HashMap<String, String>,
     updated_at: String,
 }
@@ -217,10 +218,16 @@ async fn read_outline_file(
 
 /// Build a default frontmatter from the current `work_chapters` rows.
 fn default_frontmatter(now: &str, chapters: &[WorkChapterRecord]) -> OutlineFrontmatter {
-    let mut ids: Vec<i64> = chapters.iter().map(|r| i64::from(r.chapter)).collect();
+    let mut ids: Vec<std::num::NonZeroU64> = chapters
+        .iter()
+        .map(|r| {
+            std::num::NonZeroU64::new(u64::try_from(r.chapter).unwrap_or(1))
+                .unwrap_or(std::num::NonZeroU64::MIN)
+        })
+        .collect();
     ids.sort_unstable();
-    let volume = WorkOutlineVolume {
-        volume_id: 1,
+    let volume = WorkOutlineVolumesItem {
+        volume_id: std::num::NonZeroU64::MIN,
         label: "Volume 1".to_string(),
         chapter_ids: ids,
     };
@@ -314,12 +321,13 @@ fn validate_status_transition(from: &str, to: &str) -> Result<(), NexusApiError>
 /// Build a successful patch response with optional side effects.
 fn patch_ok(new_revision: i64, side_effects: Vec<String>) -> OutlinePatchResponse {
     OutlinePatchResponse {
-        new_revision,
-        validation_summary: serde_json::json!({
+        new_revision: std::num::NonZeroU64::new(u64::try_from(new_revision).unwrap_or(1))
+            .unwrap_or(std::num::NonZeroU64::MIN),
+        validation_summary: wire_cast(serde_json::json!({
             "errors": Vec::<String>::new(),
             "warnings": Vec::<String>::new(),
-        }),
-        side_effects: Some(side_effects),
+        })),
+        side_effects,
     }
 }
 
@@ -401,7 +409,7 @@ fn validate_volume_target(
     let max_volume = frontmatter
         .volumes
         .iter()
-        .map(|v| v.volume_id)
+        .map(|v| i64::try_from(u64::from(v.volume_id)).unwrap_or(0))
         .max()
         .unwrap_or(0);
     if volume_id > max_volume + 1 {
@@ -589,7 +597,7 @@ pub async fn patch_outline_chapter(
             message: format!("chapter number must be >= 1, got {chapter}"),
         });
     }
-    if req.chapter_id != i64::from(chapter) {
+    if i64::try_from(u64::from(req.chapter_id)).unwrap_or(0) != i64::from(chapter) {
         return Err(NexusApiError::BadRequest {
             code: "chapter_id_mismatch".to_string(),
             message: "request chapter_id must match URL path".to_string(),
@@ -795,14 +803,16 @@ async fn apply_structure_patch(
                 code: "missing_volume_id".to_string(),
                 message: format!("{operation} requires volume_id"),
             })?;
+            let chapter_id_i64 = i64::try_from(u64::from(chapter_id)).unwrap_or(0);
+            let volume_id_i64 = i64::try_from(u64::from(volume_id)).unwrap_or(0);
 
-            ensure_chapter_exists(chapters, chapter_id)?;
+            ensure_chapter_exists(chapters, chapter_id_i64)?;
             // V1.73 B4 — block structural edits to published chapters.
-            ensure_chapter_not_published(chapters, chapter_id)?;
+            ensure_chapter_not_published(chapters, chapter_id_i64)?;
             // V1.73 B2 — reject binding to a non-existent / out-of-range volume.
-            validate_volume_target(frontmatter, volume_id)?;
+            validate_volume_target(frontmatter, volume_id_i64)?;
 
-            let volume_id_i32 = i32::try_from(volume_id).unwrap_or(1);
+            let volume_id_i32 = i32::try_from(volume_id_i64).unwrap_or(1);
 
             // Update the DB volume binding so `work_chapters` stays SSOT.
             let now = chrono::Utc::now().to_rfc3339();
@@ -811,9 +821,9 @@ async fn apply_structure_patch(
                 ..Default::default()
             };
             let chapter_id_i32 =
-                i32::try_from(chapter_id).map_err(|_| NexusApiError::BadRequest {
+                i32::try_from(chapter_id_i64).map_err(|_| NexusApiError::BadRequest {
                     code: "invalid_chapter_id".to_string(),
-                    message: format!("chapter_id {chapter_id} out of range"),
+                    message: format!("chapter_id {chapter_id_i64} out of range"),
                 })?;
             work_chapters::patch_chapter(
                 state.pool_or_uninit()?,
@@ -830,7 +840,7 @@ async fn apply_structure_patch(
             })?;
 
             // Re-sync the outline volume ordering.
-            move_chapter_in_frontmatter(frontmatter, chapter_id, volume_id, chapters);
+            move_chapter_in_frontmatter(frontmatter, chapter_id_i64, volume_id_i64, chapters);
             Ok(())
         }
         "link_event" => {
@@ -847,7 +857,7 @@ async fn apply_structure_patch(
                     code: "missing_target_chapter_id".to_string(),
                     message: "link_event requires target_chapter_id".to_string(),
                 })?;
-            ensure_chapter_exists(chapters, target)?;
+            ensure_chapter_exists(chapters, i64::try_from(u64::from(target)).unwrap_or(0))?;
 
             let event = frontmatter
                 .timeline_events
@@ -870,6 +880,11 @@ fn move_chapter_in_frontmatter(
     volume_id: i64,
     chapters: &[WorkChapterRecord],
 ) {
+    let chapter_id = std::num::NonZeroU64::new(u64::try_from(chapter_id).unwrap_or(1))
+        .unwrap_or(std::num::NonZeroU64::MIN);
+    let volume_id = std::num::NonZeroU64::new(u64::try_from(volume_id).unwrap_or(1))
+        .unwrap_or(std::num::NonZeroU64::MIN);
+    let vol1 = std::num::NonZeroU64::MIN;
     // Remove the chapter from all existing volumes.
     for vol in &mut frontmatter.volumes {
         vol.chapter_ids.retain(|id| *id != chapter_id);
@@ -888,7 +903,7 @@ fn move_chapter_in_frontmatter(
             vol.chapter_ids.push(chapter_id);
         }
     } else {
-        frontmatter.volumes.push(WorkOutlineVolume {
+        frontmatter.volumes.push(WorkOutlineVolumesItem {
             volume_id,
             label: format!("Volume {volume_id}"),
             chapter_ids: vec![chapter_id],
@@ -896,7 +911,7 @@ fn move_chapter_in_frontmatter(
     }
 
     // Ensure every chapter still appears somewhere; missing ones land in volume 1.
-    let mut present: std::collections::HashSet<i64> = frontmatter
+    let mut present: std::collections::HashSet<std::num::NonZeroU64> = frontmatter
         .volumes
         .iter()
         .flat_map(|vol| vol.chapter_ids.clone())
@@ -907,12 +922,12 @@ fn move_chapter_in_frontmatter(
     let vol1_idx = if let Some(idx) = frontmatter
         .volumes
         .iter()
-        .position(|vol| vol.volume_id == 1)
+        .position(|vol| vol.volume_id == vol1)
     {
         idx
     } else {
-        frontmatter.volumes.push(WorkOutlineVolume {
-            volume_id: 1,
+        frontmatter.volumes.push(WorkOutlineVolumesItem {
+            volume_id: vol1,
             label: "Volume 1".to_string(),
             chapter_ids: Vec::new(),
         });
@@ -920,7 +935,8 @@ fn move_chapter_in_frontmatter(
     };
 
     for record in chapters {
-        let id = i64::from(record.chapter);
+        let id = std::num::NonZeroU64::new(u64::try_from(record.chapter).unwrap_or(1))
+            .unwrap_or(std::num::NonZeroU64::MIN);
         if present.insert(id) {
             frontmatter.volumes[vol1_idx].chapter_ids.push(id);
         }
@@ -1043,7 +1059,7 @@ async fn apply_chapter_patch(
     let chapter = record.chapter;
 
     if let Some(ref status) = req.set.status {
-        validate_status_transition(&record.status, status)?;
+        validate_status_transition(&record.status, &status.to_string())?;
     }
 
     // V1.73 B1 — validate slug format + Work-wide uniqueness before writing.
@@ -1052,7 +1068,10 @@ async fn apply_chapter_patch(
     }
     // V1.73 B2 — validate volume binding target before moving the chapter.
     if let Some(volume_id) = req.set.volume {
-        validate_volume_target(frontmatter, volume_id)?;
+        validate_volume_target(
+            frontmatter,
+            i64::try_from(u64::from(volume_id)).unwrap_or(0),
+        )?;
     }
 
     let has_volume_change = req.set.volume.is_some();
@@ -1067,13 +1086,20 @@ async fn apply_chapter_patch(
                 code: "planned_word_count_too_large".to_string(),
                 message: "planned_word_count exceeds i32 range".to_string(),
             })?,
-        volume: req.set.volume.map(i32::try_from).transpose().map_err(|_| {
-            NexusApiError::BadRequest {
+        volume: req
+            .set
+            .volume
+            .map(|v| i32::try_from(u64::from(v)))
+            .transpose()
+            .map_err(|_| NexusApiError::BadRequest {
                 code: "invalid_volume".to_string(),
                 message: "volume exceeds i32 range".to_string(),
-            }
-        })?,
-        status: req.set.status.clone(),
+            })?,
+        status: req
+            .set
+            .status
+            .as_ref()
+            .map(std::string::ToString::to_string),
     };
 
     // Persist slug/wc/volume/status to the chapter SSOT table.
@@ -1101,17 +1127,18 @@ async fn apply_chapter_patch(
 
     // Re-sync volume ordering when the volume binding changed.
     if has_volume_change {
-        let new_volume = req
-            .set
-            .volume
-            .unwrap_or_else(|| i64::from(record.volume.unwrap_or(1)));
+        let new_volume = req.set.volume.unwrap_or_else(|| {
+            std::num::NonZeroU64::new(u64::try_from(record.volume.unwrap_or(1)).unwrap_or(1))
+                .unwrap_or(std::num::NonZeroU64::MIN)
+        });
+        let new_volume_i64 = i64::try_from(u64::from(new_volume)).unwrap_or(1);
         let chapters = work_chapters::list_chapters(state.pool_or_uninit()?, work_id)
             .await
             .map_err(|e| NexusApiError::Internal {
                 code: "DATABASE_ERROR".to_string(),
                 message: e.to_string(),
             })?;
-        move_chapter_in_frontmatter(frontmatter, i64::from(chapter), new_volume, &chapters);
+        move_chapter_in_frontmatter(frontmatter, i64::from(chapter), new_volume_i64, &chapters);
     }
 
     // V1.75 A2 — outline-prose content patch (canvas-pivot parity-close).
@@ -1141,7 +1168,7 @@ async fn apply_chapter_patch(
             work_id,
             work_ref,
             record,
-            content,
+            content.to_string(),
         )
         .await?;
     }
@@ -1177,15 +1204,17 @@ fn timeline_add_event(
         message: "add_event requires title".to_string(),
     })?;
     if let Some(chapter_id) = req.realizes_chapter_id {
-        ensure_chapter_exists(chapters, chapter_id)?;
+        ensure_chapter_exists(chapters, i64::try_from(u64::from(chapter_id)).unwrap_or(0))?;
     }
     let event_id = format!("evt_{}", uuid::Uuid::new_v4());
-    frontmatter.timeline_events.push(WorkOutlineTimelineEvent {
-        event_id,
-        title,
-        description: req.description.clone(),
-        realizes_chapter_id: req.realizes_chapter_id,
-    });
+    frontmatter
+        .timeline_events
+        .push(WorkOutlineTimelineEventsItem {
+            event_id,
+            title,
+            description: req.description.clone(),
+            realizes_chapter_id: req.realizes_chapter_id,
+        });
     Ok(())
 }
 
@@ -1232,7 +1261,7 @@ fn timeline_attach_event_to_chapter(
             code: "missing_target_chapter_id".to_string(),
             message: "attach_event_to_chapter requires target_chapter_id".to_string(),
         })?;
-    ensure_chapter_exists(chapters, target)?;
+    ensure_chapter_exists(chapters, i64::try_from(u64::from(target)).unwrap_or(0))?;
     let event = frontmatter
         .timeline_events
         .iter_mut()
@@ -1318,7 +1347,7 @@ fn timeline_link_foreshadow(
         .iter()
         .any(|edge| edge.source_event_id == source && edge.target_event_id == target)
     {
-        frontmatter.foreshadows.push(WorkOutlineForeshadow {
+        frontmatter.foreshadows.push(WorkOutlineForeshadowsItem {
             source_event_id: source.to_string(),
             target_event_id: target.to_string(),
         });
@@ -1666,20 +1695,20 @@ mod tests {
             outline_revision: 1,
             volumes: Vec::new(),
             timeline_events: vec![
-                WorkOutlineTimelineEvent {
+                WorkOutlineTimelineEventsItem {
                     event_id: "evt_a".to_string(),
                     title: "Plant".to_string(),
                     description: None,
-                    realizes_chapter_id: Some(1),
+                    realizes_chapter_id: Some(std::num::NonZeroU64::new(1).unwrap()),
                 },
-                WorkOutlineTimelineEvent {
+                WorkOutlineTimelineEventsItem {
                     event_id: "evt_b".to_string(),
                     title: "Payoff".to_string(),
                     description: None,
-                    realizes_chapter_id: Some(2),
+                    realizes_chapter_id: Some(std::num::NonZeroU64::new(2).unwrap()),
                 },
             ],
-            foreshadows: vec![WorkOutlineForeshadow {
+            foreshadows: vec![WorkOutlineForeshadowsItem {
                 source_event_id: "evt_a".to_string(),
                 target_event_id: "evt_b".to_string(),
             }],
@@ -1694,10 +1723,13 @@ mod tests {
         let req = TimelinePatchEventRequest {
             work_id: "wk_test".to_string(),
             base_revision: 1,
-            operation: "unlink_foreshadow".to_string(),
+            operation: "unlink_foreshadow".parse().unwrap(),
             event_id: Some("evt_a".to_string()),
             foreshadows_event_id: Some("evt_b".to_string()),
-            ..Default::default()
+            description: None,
+            realizes_chapter_id: None,
+            target_chapter_id: None,
+            title: None,
         };
         assert_eq!(fm.foreshadows.len(), 1);
         timeline_unlink_foreshadow(&req, &mut fm).expect("unlink should succeed");
@@ -1710,10 +1742,13 @@ mod tests {
         let req = TimelinePatchEventRequest {
             work_id: "wk_test".to_string(),
             base_revision: 1,
-            operation: "unlink_foreshadow".to_string(),
+            operation: "unlink_foreshadow".parse().unwrap(),
             event_id: Some("evt_b".to_string()), // reversed direction — does not exist
             foreshadows_event_id: Some("evt_a".to_string()),
-            ..Default::default()
+            description: None,
+            realizes_chapter_id: None,
+            target_chapter_id: None,
+            title: None,
         };
         let result = timeline_unlink_foreshadow(&req, &mut fm);
         assert!(result.is_err(), "non-existent edge must error");
@@ -1730,9 +1765,13 @@ mod tests {
         let no_source = TimelinePatchEventRequest {
             work_id: "wk_test".to_string(),
             base_revision: 1,
-            operation: "unlink_foreshadow".to_string(),
+            operation: "unlink_foreshadow".parse().unwrap(),
             foreshadows_event_id: Some("evt_b".to_string()),
-            ..Default::default()
+            event_id: None,
+            description: None,
+            realizes_chapter_id: None,
+            target_chapter_id: None,
+            title: None,
         };
         assert!(timeline_unlink_foreshadow(&no_source, &mut fm).is_err());
 
@@ -1740,9 +1779,13 @@ mod tests {
         let no_target = TimelinePatchEventRequest {
             work_id: "wk_test".to_string(),
             base_revision: 1,
-            operation: "unlink_foreshadow".to_string(),
+            operation: "unlink_foreshadow".parse().unwrap(),
             event_id: Some("evt_a".to_string()),
-            ..Default::default()
+            foreshadows_event_id: None,
+            description: None,
+            realizes_chapter_id: None,
+            target_chapter_id: None,
+            title: None,
         };
         assert!(timeline_unlink_foreshadow(&no_target, &mut fm).is_err());
     }
@@ -1753,10 +1796,13 @@ mod tests {
         let req = TimelinePatchEventRequest {
             work_id: "wk_test".to_string(),
             base_revision: 1,
-            operation: "unlink_foreshadow".to_string(),
+            operation: "unlink_foreshadow".parse().unwrap(),
             event_id: Some("evt_a".to_string()),
             foreshadows_event_id: Some("evt_b".to_string()),
-            ..Default::default()
+            description: None,
+            realizes_chapter_id: None,
+            target_chapter_id: None,
+            title: None,
         };
         // apply_timeline_patch routes to the correct handler by operation string.
         apply_timeline_patch(&req, &mut fm, &[]).expect("dispatch should succeed");
@@ -1779,10 +1825,13 @@ mod tests {
         let link_req = TimelinePatchEventRequest {
             work_id: "wk_test".to_string(),
             base_revision: 1,
-            operation: "link_foreshadow".to_string(),
+            operation: "link_foreshadow".parse().unwrap(),
             event_id: Some("evt_a".to_string()),
             foreshadows_event_id: Some("evt_b".to_string()),
-            ..Default::default()
+            description: None,
+            realizes_chapter_id: None,
+            target_chapter_id: None,
+            title: None,
         };
         apply_timeline_patch(&link_req, &mut fm, &[]).expect("link should succeed");
         assert_eq!(fm.foreshadows.len(), 1);
@@ -1790,10 +1839,13 @@ mod tests {
         let unlink_req = TimelinePatchEventRequest {
             work_id: "wk_test".to_string(),
             base_revision: 1,
-            operation: "unlink_foreshadow".to_string(),
+            operation: "unlink_foreshadow".parse().unwrap(),
             event_id: Some("evt_a".to_string()),
             foreshadows_event_id: Some("evt_b".to_string()),
-            ..Default::default()
+            description: None,
+            realizes_chapter_id: None,
+            target_chapter_id: None,
+            title: None,
         };
         apply_timeline_patch(&unlink_req, &mut fm, &[]).expect("unlink should succeed");
         assert!(fm.foreshadows.is_empty());
@@ -1809,10 +1861,13 @@ mod tests {
         let req = TimelinePatchEventRequest {
             work_id: "wk_test".to_string(),
             base_revision: 1,
-            operation: "link_foreshadow".to_string(),
+            operation: "link_foreshadow".parse().unwrap(),
             event_id: Some("evt_a".to_string()),
             foreshadows_event_id: Some("evt_a".to_string()),
-            ..Default::default()
+            description: None,
+            realizes_chapter_id: None,
+            target_chapter_id: None,
+            title: None,
         };
         let result = timeline_link_foreshadow(&req, &mut fm);
         match result {
@@ -1845,14 +1900,14 @@ mod tests {
         let mut fm = OutlineFrontmatter {
             outline_revision: 1,
             volumes: Vec::new(),
-            timeline_events: vec![WorkOutlineTimelineEvent {
+            timeline_events: vec![WorkOutlineTimelineEventsItem {
                 event_id: "evt_b".to_string(),
                 title: "Payoff".to_string(),
                 description: None,
-                realizes_chapter_id: Some(2),
+                realizes_chapter_id: Some(std::num::NonZeroU64::new(2).unwrap()),
             }],
             // The edge evt_a → evt_b is still present, but evt_a no longer exists.
-            foreshadows: vec![WorkOutlineForeshadow {
+            foreshadows: vec![WorkOutlineForeshadowsItem {
                 source_event_id: "evt_a".to_string(),
                 target_event_id: "evt_b".to_string(),
             }],
@@ -1862,10 +1917,13 @@ mod tests {
         let req = TimelinePatchEventRequest {
             work_id: "wk_test".to_string(),
             base_revision: 1,
-            operation: "unlink_foreshadow".to_string(),
+            operation: "unlink_foreshadow".parse().unwrap(),
             event_id: Some("evt_a".to_string()),
             foreshadows_event_id: Some("evt_b".to_string()),
-            ..Default::default()
+            description: None,
+            realizes_chapter_id: None,
+            target_chapter_id: None,
+            title: None,
         };
         let result = timeline_unlink_foreshadow(&req, &mut fm);
         assert!(
@@ -1883,13 +1941,13 @@ mod tests {
         let mut fm2 = OutlineFrontmatter {
             outline_revision: 1,
             volumes: Vec::new(),
-            timeline_events: vec![WorkOutlineTimelineEvent {
+            timeline_events: vec![WorkOutlineTimelineEventsItem {
                 event_id: "evt_a".to_string(),
                 title: "Plant".to_string(),
                 description: None,
-                realizes_chapter_id: Some(1),
+                realizes_chapter_id: Some(std::num::NonZeroU64::new(1).unwrap()),
             }],
-            foreshadows: vec![WorkOutlineForeshadow {
+            foreshadows: vec![WorkOutlineForeshadowsItem {
                 source_event_id: "evt_a".to_string(),
                 target_event_id: "evt_b".to_string(),
             }],
@@ -2004,10 +2062,13 @@ mod tests {
         let stale_req = TimelinePatchEventRequest {
             work_id: work_id.clone(),
             base_revision: 3, // stale — outline is at revision 5
-            operation: "unlink_foreshadow".to_string(),
+            operation: "unlink_foreshadow".parse().unwrap(),
             event_id: Some("evt_a".to_string()),
             foreshadows_event_id: Some("evt_b".to_string()),
-            ..Default::default()
+            description: None,
+            realizes_chapter_id: None,
+            target_chapter_id: None,
+            title: None,
         };
         let result = patch_timeline_event(
             axum::extract::State(state.clone()),

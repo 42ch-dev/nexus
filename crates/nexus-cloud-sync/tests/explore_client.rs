@@ -32,14 +32,14 @@ async fn explore_browse_parses_success() {
     let client = SyncClient::new(base.trim_end_matches('/'), VALID_TOKEN).expect("client");
 
     let req = ExploreBrowseRequest {
-        schema_version: 1,
+        schema_version: std::num::NonZeroU64::new(1).unwrap(),
         cursor: None,
         limit: Some(10),
-        scope: Some("worlds".into()),
+        scope: Some("worlds".parse().unwrap()),
     };
 
     let r = client.explore_browse(&req).await.expect("browse");
-    assert_eq!(r.schema_version, 1);
+    assert_eq!(r.schema_version, std::num::NonZeroU64::new(1).unwrap());
     assert_eq!(r.entries.len(), 1);
     assert!(r.has_more);
     assert_eq!(r.next_cursor.as_deref(), Some("cur_next"));
@@ -59,8 +59,8 @@ async fn explore_search_maps_401_to_platform_error() {
     let client = SyncClient::new(base.trim_end_matches('/'), VALID_TOKEN).expect("client");
 
     let req = ExploreSearchRequest {
-        schema_version: 1,
-        query: "hello".into(),
+        schema_version: std::num::NonZeroU64::new(1).unwrap(),
+        query: "hello".parse().unwrap(),
         cursor: None,
         limit: None,
     };
@@ -91,8 +91,8 @@ async fn explore_search_parses_success() {
     let client = SyncClient::new(base.trim_end_matches('/'), VALID_TOKEN).expect("client");
 
     let req = ExploreSearchRequest {
-        schema_version: 1,
-        query: "q".into(),
+        schema_version: std::num::NonZeroU64::new(1).unwrap(),
+        query: "q".parse().unwrap(),
         cursor: None,
         limit: None,
     };

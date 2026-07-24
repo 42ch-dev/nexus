@@ -5,6 +5,7 @@
 
 #![allow(clippy::missing_errors_doc)]
 
+use super::wire_cast;
 use crate::api::errors::NexusApiError;
 use crate::api::handlers::works::{read_active_creator_id, read_active_workspace_slug};
 use crate::workspace::WorkspaceState;
@@ -23,6 +24,11 @@ use uuid::Uuid;
 
 const ANNOTATION_ID_PREFIX: &str = "ann_";
 const VALID_COLORS: [&str; 4] = ["yellow", "blue", "green", "pink"];
+
+/// Convert a `NonZeroU64` chapter number to i64 for local-db calls.
+fn chapter_i64(ch: std::num::NonZeroU64) -> i64 {
+    i64::try_from(u64::from(ch)).unwrap_or(1)
+}
 
 /// Format a `DateTime` as an ISO 8601 string.
 fn format_timestamp(dt: &chrono::DateTime<chrono::Utc>) -> String {
@@ -83,11 +89,12 @@ fn to_annotation_dto(row: &AnnotationRow) -> ReadingAnnotation {
     ReadingAnnotation {
         annotation_id: row.annotation_id.clone(),
         work_id: row.work_id.clone(),
-        chapter: row.chapter,
+        chapter: std::num::NonZeroU64::new(u64::try_from(row.chapter).unwrap_or(1))
+            .unwrap_or(std::num::NonZeroU64::MIN),
         start_offset: u64::try_from(row.start_offset).unwrap_or_default(),
         end_offset: u64::try_from(row.end_offset).unwrap_or_default(),
-        selected_text: row.selected_text.clone(),
-        color: row.color.clone(),
+        selected_text: wire_cast(row.selected_text.clone()),
+        color: wire_cast(row.color.clone()),
         note: row.note.clone(),
         created_at: format_timestamp(&row.created_at),
         updated_at: format_timestamp(&row.updated_at),
@@ -133,14 +140,14 @@ pub async fn get_reading_progress(
         state.pool_or_uninit()?,
         &creator_id,
         &query.work_id,
-        chapter,
+        chapter_i64(chapter),
     )
     .await?;
 
     let response = ReadingProgressResponse {
         work_id: query.work_id,
         chapter,
-        scroll_progress: u64::try_from(scroll_progress).unwrap_or_default(),
+        scroll_progress,
         updated_at: updated_at.map_or_else(
             || format_timestamp(&chrono::Utc::now()),
             |ts| format_timestamp(&ts),
@@ -159,12 +166,12 @@ pub async fn put_reading_progress(
     verify_work_ownership(&state, &creator_id, &body.work_id).await?;
 
     let chapter = body.chapter;
-    let scroll_progress = u64_to_i64(body.scroll_progress, "scroll_progress")?;
+    let scroll_progress = body.scroll_progress;
     let updated_at = reading::upsert_reading_progress(
         state.pool_or_uninit()?,
         &creator_id,
         &body.work_id,
-        chapter,
+        chapter_i64(chapter),
         scroll_progress,
     )
     .await?;
@@ -191,7 +198,7 @@ pub async fn delete_reading_progress(
         state.pool_or_uninit()?,
         &creator_id,
         &query.work_id,
-        query.chapter,
+        chapter_i64(query.chapter),
     )
     .await?;
 
@@ -210,12 +217,14 @@ pub async fn list_annotations(
         state.pool_or_uninit()?,
         &creator_id,
         &query.work_id,
-        query.chapter,
+        chapter_i64(query.chapter),
     )
     .await?;
 
-    let items = rows.iter().map(to_annotation_dto).collect();
-    let response = ReadingAnnotationListResponse { items };
+    let items = rows.iter().map(to_annotation_dto).collect::<Vec<_>>();
+    let response = ReadingAnnotationListResponse {
+        items: wire_cast(items),
+    };
 
     Ok(Json(response))
 }
@@ -228,7 +237,7 @@ pub async fn create_annotation(
     let creator_id = require_active_scope(&state)?;
     verify_work_ownership(&state, &creator_id, &body.work_id).await?;
 
-    validate_color(&body.color)?;
+    validate_color(&body.color.to_string())?;
 
     let start_offset = u64_to_i64(body.start_offset, "start_offset")?;
     let end_offset = u64_to_i64(body.end_offset, "end_offset")?;
@@ -238,12 +247,12 @@ pub async fn create_annotation(
         state.pool_or_uninit()?,
         &creator_id,
         &body.work_id,
-        body.chapter,
+        chapter_i64(body.chapter),
         &annotation_id,
         start_offset,
         end_offset,
-        &body.selected_text,
-        &body.color,
+        &body.selected_text.to_string(),
+        &body.color.to_string(),
         body.note.as_deref(),
     )
     .await?;
@@ -261,7 +270,7 @@ pub async fn patch_annotation(
     let _ = load_annotation_for_creator(&state, &creator_id, &annotation_id).await?;
 
     if let Some(ref color) = body.color {
-        validate_color(color)?;
+        validate_color(&color.to_string())?;
     }
 
     // Translate empty-string note to None (clear note); missing field stays None
@@ -278,7 +287,10 @@ pub async fn patch_annotation(
     let row = reading::update_annotation(
         state.pool_or_uninit()?,
         &annotation_id,
-        body.color.as_deref(),
+        body.color
+            .as_ref()
+            .map(std::string::ToString::to_string)
+            .as_deref(),
         note_change,
     )
     .await?

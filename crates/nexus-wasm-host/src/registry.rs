@@ -4,7 +4,8 @@
 //! discovery endpoints. No compute invocation or state mutation happens here.
 
 use nexus_contracts::generated::daemon_api::compute::{
-    module_detail::ModuleDetail, module_summary::ModuleSummary,
+    module_detail::ModuleDetail,
+    module_summary::{ModuleSummary, ModuleSummaryStatus},
 };
 use tracing::warn;
 
@@ -65,7 +66,7 @@ fn manifest_to_summary(manifest: &ModuleManifest) -> ModuleSummary {
         description: manifest.description.clone(),
         required_key_block_types: manifest.required_key_block_types.clone(),
         battle_report_kind: manifest.battle_report_kind.clone(),
-        status: "ok".to_string(),
+        status: ModuleSummaryStatus::Ok,
     }
 }
 
@@ -77,7 +78,7 @@ fn broken_summary(id: &str) -> ModuleSummary {
         description: None,
         required_key_block_types: vec![],
         battle_report_kind: None,
-        status: "broken".to_string(),
+        status: ModuleSummaryStatus::Broken,
     }
 }
 
@@ -101,7 +102,7 @@ mod tests {
             .iter()
             .find(|m| m.module_id == "basic-combat")
             .expect("basic-combat should be present");
-        assert_eq!(basic_combat.status, "ok");
+        assert_eq!(basic_combat.status.to_string(), "ok");
     }
 
     #[test]
@@ -111,7 +112,7 @@ mod tests {
         assert_eq!(summary.name, "broken-module");
         assert_eq!(summary.version, "unknown");
         assert!(summary.required_key_block_types.is_empty());
-        assert_eq!(summary.status, "broken");
+        assert_eq!(summary.status.to_string(), "broken");
     }
 
     #[test]
@@ -134,7 +135,7 @@ mod tests {
             max_wall_time_ms: None,
         };
         let summary = manifest_to_summary(&manifest);
-        assert_eq!(summary.status, "ok");
+        assert_eq!(summary.status.to_string(), "ok");
     }
 
     #[test]

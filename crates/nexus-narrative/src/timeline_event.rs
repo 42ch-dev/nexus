@@ -252,19 +252,38 @@ impl TimelineEvent {
 impl From<nexus_contracts::TimelineEvent> for TimelineEvent {
     fn from(c: nexus_contracts::TimelineEvent) -> Self {
         Self {
-            schema_version: c.schema_version,
-            timeline_event_id: c.timeline_event_id,
-            world_id: c.world_id,
+            schema_version: u32::try_from(c.schema_version.get())
+                .expect("schema_version exceeds u32 range"),
+            timeline_event_id: c.timeline_event_id.to_string(),
+            world_id: c.world_id.to_string(),
             branch_id: c.branch_id,
             event_type: c.event_type.as_str().to_string(),
             status: c.status.as_str().to_string(),
             sequence_no: c.sequence_no,
-            title: c.title,
+            title: c.title.map(|t| t.to_string()),
             summary: c.summary,
-            caused_by_event_ids: c.caused_by_event_ids,
-            affected_key_block_ids: c.affected_key_block_ids,
-            source_command_id: c.source_command_id,
-            created_at: c.created_at,
+            caused_by_event_ids: if c.caused_by_event_ids.is_empty() {
+                None
+            } else {
+                Some(
+                    c.caused_by_event_ids
+                        .into_iter()
+                        .map(|i| i.to_string())
+                        .collect(),
+                )
+            },
+            affected_key_block_ids: if c.affected_key_block_ids.is_empty() {
+                None
+            } else {
+                Some(
+                    c.affected_key_block_ids
+                        .into_iter()
+                        .map(|i| i.to_string())
+                        .collect(),
+                )
+            },
+            source_command_id: c.source_command_id.map(|id| id.to_string()),
+            created_at: c.created_at.to_rfc3339(),
         }
     }
 }
@@ -273,19 +292,32 @@ impl From<nexus_contracts::TimelineEvent> for TimelineEvent {
 impl From<TimelineEvent> for nexus_contracts::TimelineEvent {
     fn from(d: TimelineEvent) -> Self {
         Self {
-            schema_version: d.schema_version,
-            timeline_event_id: d.timeline_event_id,
-            world_id: d.world_id,
+            schema_version: std::num::NonZeroU64::new(u64::from(d.schema_version))
+                .expect("schema_version must be non-zero"),
+            timeline_event_id: d.timeline_event_id.parse().unwrap(),
+            world_id: d.world_id.parse().unwrap(),
             branch_id: d.branch_id,
             event_type: nexus_contracts::TimelineEventType::from_str(&d.event_type).unwrap(),
             status: nexus_contracts::TimelineEventStatus::from_str(&d.status).unwrap(),
             sequence_no: d.sequence_no,
-            title: d.title,
+            title: d.title.map(|s| s.parse().unwrap()),
             summary: d.summary,
-            caused_by_event_ids: d.caused_by_event_ids,
-            affected_key_block_ids: d.affected_key_block_ids,
-            source_command_id: d.source_command_id,
-            created_at: d.created_at,
+            caused_by_event_ids: d
+                .caused_by_event_ids
+                .unwrap_or_default()
+                .into_iter()
+                .map(|s| s.parse().unwrap())
+                .collect(),
+            affected_key_block_ids: d
+                .affected_key_block_ids
+                .unwrap_or_default()
+                .into_iter()
+                .map(|s| s.parse().unwrap())
+                .collect(),
+            source_command_id: d.source_command_id.map(|s| s.parse().unwrap()),
+            created_at: chrono::DateTime::parse_from_rfc3339(&d.created_at)
+                .unwrap()
+                .with_timezone(&chrono::Utc),
         }
     }
 }

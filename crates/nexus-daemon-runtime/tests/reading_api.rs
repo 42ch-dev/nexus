@@ -5,6 +5,8 @@
 
 #![allow(clippy::unwrap_used)]
 
+use std::num::NonZeroU64;
+
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::Json;
@@ -88,7 +90,7 @@ async fn get_progress_defaults_to_zero() {
         State(state),
         Query(ReadingProgressQuery {
             work_id,
-            chapter: 1,
+            chapter: NonZeroU64::new(1).unwrap(),
         }),
     )
     .await
@@ -106,7 +108,7 @@ async fn put_and_get_progress_round_trip() {
         State(state.clone()),
         Json(ReadingProgressRequest {
             work_id: work_id.clone(),
-            chapter: 1,
+            chapter: NonZeroU64::new(1).unwrap(),
             scroll_progress: 7500,
         }),
     )
@@ -118,7 +120,7 @@ async fn put_and_get_progress_round_trip() {
         State(state),
         Query(ReadingProgressQuery {
             work_id,
-            chapter: 1,
+            chapter: NonZeroU64::new(1).unwrap(),
         }),
     )
     .await
@@ -136,7 +138,7 @@ async fn delete_progress_clears_row() {
         State(state.clone()),
         Json(ReadingProgressRequest {
             work_id: work_id.clone(),
-            chapter: 1,
+            chapter: NonZeroU64::new(1).unwrap(),
             scroll_progress: 5000,
         }),
     )
@@ -147,7 +149,7 @@ async fn delete_progress_clears_row() {
         State(state.clone()),
         Query(ReadingProgressQuery {
             work_id: work_id.clone(),
-            chapter: 1,
+            chapter: NonZeroU64::new(1).unwrap(),
         }),
     )
     .await
@@ -158,7 +160,7 @@ async fn delete_progress_clears_row() {
         State(state),
         Query(ReadingProgressQuery {
             work_id,
-            chapter: 1,
+            chapter: NonZeroU64::new(1).unwrap(),
         }),
     )
     .await
@@ -173,7 +175,7 @@ async fn progress_unknown_work_returns_404() {
         State(state),
         Query(ReadingProgressQuery {
             work_id: "wrk_unknown".to_string(),
-            chapter: 1,
+            chapter: NonZeroU64::new(1).unwrap(),
         }),
     )
     .await
@@ -188,7 +190,7 @@ async fn progress_requires_creator() {
         State(state),
         Query(ReadingProgressQuery {
             work_id: "wrk_any".to_string(),
-            chapter: 1,
+            chapter: NonZeroU64::new(1).unwrap(),
         }),
     )
     .await
@@ -207,11 +209,11 @@ async fn annotation_create_list_patch_delete_round_trip() {
         State(state.clone()),
         Json(ReadingAnnotationCreateRequest {
             work_id: work_id.clone(),
-            chapter: 1,
+            chapter: NonZeroU64::new(1).unwrap(),
             start_offset: 10,
             end_offset: 20,
-            selected_text: "highlighted".to_string(),
-            color: "yellow".to_string(),
+            selected_text: "highlighted".parse().unwrap(),
+            color: "yellow".parse().unwrap(),
             note: Some("note".to_string()),
         }),
     )
@@ -219,14 +221,14 @@ async fn annotation_create_list_patch_delete_round_trip() {
     .expect("create annotation");
     assert_eq!(created.start_offset, 10);
     assert_eq!(created.end_offset, 20);
-    assert_eq!(created.color, "yellow");
+    assert_eq!(created.color.to_string(), "yellow");
     assert_eq!(created.note, Some("note".to_string()));
 
     let Json(list) = reading::list_annotations(
         State(state.clone()),
         Query(ReadingAnnotationListQuery {
             work_id: work_id.clone(),
-            chapter: 1,
+            chapter: NonZeroU64::new(1).unwrap(),
         }),
     )
     .await
@@ -238,13 +240,13 @@ async fn annotation_create_list_patch_delete_round_trip() {
         State(state.clone()),
         Path(created.annotation_id.clone()),
         Json(ReadingAnnotationPatchRequest {
-            color: Some("blue".to_string()),
+            color: Some("blue".parse().unwrap()),
             note: None,
         }),
     )
     .await
     .expect("patch annotation");
-    assert_eq!(updated.color, "blue");
+    assert_eq!(updated.color.to_string(), "blue");
     assert_eq!(updated.note, Some("note".to_string()));
 
     let status = reading::delete_annotation(State(state.clone()), Path(created.annotation_id))
@@ -256,7 +258,7 @@ async fn annotation_create_list_patch_delete_round_trip() {
         State(state),
         Query(ReadingAnnotationListQuery {
             work_id,
-            chapter: 1,
+            chapter: NonZeroU64::new(1).unwrap(),
         }),
     )
     .await
@@ -273,11 +275,11 @@ async fn patch_annotation_can_clear_note() {
         State(state.clone()),
         Json(ReadingAnnotationCreateRequest {
             work_id: work_id.clone(),
-            chapter: 1,
+            chapter: NonZeroU64::new(1).unwrap(),
             start_offset: 0,
             end_offset: 5,
-            selected_text: "word".to_string(),
-            color: "yellow".to_string(),
+            selected_text: "word".parse().unwrap(),
+            color: "yellow".parse().unwrap(),
             note: Some("old note".to_string()),
         }),
     )
@@ -299,25 +301,23 @@ async fn patch_annotation_can_clear_note() {
 
 #[tokio::test]
 async fn create_annotation_rejects_invalid_color() {
-    let (state, _tmp) = handler_state().await;
-    let work_id = create_test_work(&state).await;
-
-    let err = reading::create_annotation(
-        State(state),
-        Json(ReadingAnnotationCreateRequest {
-            work_id,
-            chapter: 1,
-            start_offset: 0,
-            end_offset: 5,
-            selected_text: "word".to_string(),
-            color: "red".to_string(),
-            note: None,
-        }),
-    )
-    .await
-    .expect_err("invalid color should fail");
-    assert_eq!(err.status_code(), StatusCode::UNPROCESSABLE_ENTITY);
-    assert_eq!(bad_request_code(&err), Some("invalid_input"));
+    // typify generates a strict enum for color — invalid values are rejected
+    // at serde deserialization before the handler's invalid_input check.
+    let req = serde_json::json!({
+        "work_id": "work",
+        "chapter": 1,
+        "start_offset": 0,
+        "end_offset": 5,
+        "selected_text": "word",
+        "color": "red",
+    });
+    let err = serde_json::from_value::<ReadingAnnotationCreateRequest>(req)
+        .expect_err("invalid color should be rejected at wire boundary");
+    let err_msg = err.to_string();
+    assert!(
+        err_msg.contains("invalid") || err_msg.contains("unknown variant"),
+        "expected enum wire rejection, got {err_msg}"
+    );
 }
 
 #[tokio::test]
@@ -329,11 +329,11 @@ async fn create_annotation_rejects_invalid_offsets() {
         State(state),
         Json(ReadingAnnotationCreateRequest {
             work_id,
-            chapter: 1,
+            chapter: NonZeroU64::new(1).unwrap(),
             start_offset: 10,
             end_offset: 5,
-            selected_text: "word".to_string(),
-            color: "yellow".to_string(),
+            selected_text: "word".parse().unwrap(),
+            color: "yellow".parse().unwrap(),
             note: None,
         }),
     )
@@ -360,11 +360,11 @@ async fn annotation_cross_creator_returns_403() {
         State(state.clone()),
         Json(ReadingAnnotationCreateRequest {
             work_id: work_id.clone(),
-            chapter: 1,
+            chapter: NonZeroU64::new(1).unwrap(),
             start_offset: 0,
             end_offset: 5,
-            selected_text: "word".to_string(),
-            color: "yellow".to_string(),
+            selected_text: "word".parse().unwrap(),
+            color: "yellow".parse().unwrap(),
             note: None,
         }),
     )
@@ -385,7 +385,7 @@ async fn annotation_cross_creator_returns_403() {
         State(state.clone()),
         Path(created.annotation_id.clone()),
         Json(ReadingAnnotationPatchRequest {
-            color: Some("blue".to_string()),
+            color: Some("blue".parse().unwrap()),
             note: None,
         }),
     )
@@ -406,7 +406,7 @@ async fn annotations_requires_creator() {
         State(state),
         Query(ReadingAnnotationListQuery {
             work_id: "wrk_any".to_string(),
-            chapter: 1,
+            chapter: NonZeroU64::new(1).unwrap(),
         }),
     )
     .await

@@ -5,6 +5,7 @@
 
 #![allow(clippy::missing_errors_doc)]
 
+use super::wire_cast;
 use crate::api::errors::NexusApiError;
 use crate::api::handlers::works::{read_active_creator_id, read_active_workspace_slug};
 use crate::api::path_guard::{resolve_guarded_path, resolve_guarded_path_async};
@@ -128,15 +129,15 @@ async fn load_work(
 fn chapter_protection(status: &str) -> ChapterProtection {
     match status {
         "finalized" => ChapterProtection {
-            level: "confirm_structure_edit".to_string(),
+            level: wire_cast("confirm_structure_edit".to_string()),
             reason: "Chapter is finalized; structural edits require confirmation.".to_string(),
         },
         "published" => ChapterProtection {
-            level: "hard_block_delete".to_string(),
+            level: wire_cast("hard_block_delete".to_string()),
             reason: "Chapter is published; structural edits are blocked.".to_string(),
         },
         _ => ChapterProtection {
-            level: "none".to_string(),
+            level: wire_cast("none".to_string()),
             reason: "No protection.".to_string(),
         },
     }
@@ -146,13 +147,15 @@ fn chapter_protection(status: &str) -> ChapterProtection {
 fn to_summary(r: &WorkChapterRecord) -> ChapterSummary {
     ChapterSummary {
         work_id: r.work_id.clone(),
-        chapter: i64::from(r.chapter),
-        volume: i64::from(r.volume.unwrap_or(1)),
+        chapter: std::num::NonZeroU64::new(u64::try_from(r.chapter).unwrap_or(1))
+            .unwrap_or(std::num::NonZeroU64::MIN),
+        volume: std::num::NonZeroU64::new(u64::try_from(r.volume.unwrap_or(1)).unwrap_or(1))
+            .unwrap_or(std::num::NonZeroU64::MIN),
         title: None,
         slug: r.slug.clone(),
         planned_word_count: u64::try_from(r.planned_word_count).unwrap_or(0),
         actual_word_count: r.actual_word_count.map(|v| u64::try_from(v).unwrap_or(0)),
-        status: r.status.parse().ok().unwrap_or(ChapterStatus::NotStarted),
+        status: wire_cast(r.status.parse().ok().unwrap_or(ChapterStatus::NotStarted)),
         outline_path: r.outline_path.clone(),
         body_path: r.body_path.clone(),
         created_at: r.created_at.clone(),
@@ -176,13 +179,15 @@ fn to_detail(r: &WorkChapterRecord, workspace_root: Option<&StdPath>) -> Chapter
 
     ChapterDetail {
         work_id: r.work_id.clone(),
-        chapter: i64::from(r.chapter),
-        volume: i64::from(r.volume.unwrap_or(1)),
+        chapter: std::num::NonZeroU64::new(u64::try_from(r.chapter).unwrap_or(1))
+            .unwrap_or(std::num::NonZeroU64::MIN),
+        volume: std::num::NonZeroU64::new(u64::try_from(r.volume.unwrap_or(1)).unwrap_or(1))
+            .unwrap_or(std::num::NonZeroU64::MIN),
         title: None,
         slug: r.slug.clone(),
         planned_word_count: u64::try_from(r.planned_word_count).unwrap_or(0),
         actual_word_count: r.actual_word_count.map(|v| u64::try_from(v).unwrap_or(0)),
-        status: r.status.parse().ok().unwrap_or(ChapterStatus::NotStarted),
+        status: wire_cast(r.status.parse().ok().unwrap_or(ChapterStatus::NotStarted)),
         outline_path: r.outline_path.clone(),
         body_path: r.body_path.clone(),
         created_at: r.created_at.clone(),
@@ -190,7 +195,7 @@ fn to_detail(r: &WorkChapterRecord, workspace_root: Option<&StdPath>) -> Chapter
         can_edit_outline,
         can_edit_structure: true,
         body_read_only: true,
-        protection: chapter_protection(&r.status),
+        protection: wire_cast(chapter_protection(&r.status)),
     }
 }
 
@@ -361,7 +366,10 @@ pub async fn list_chapters(
     let limit = u32::try_from(query.limit.unwrap_or(50).clamp(1, 100)).unwrap_or(50);
     let fetch_limit = i64::from(limit.saturating_add(1));
 
-    let status_filter = query.status.as_ref().map(ChapterStatus::as_str);
+    let status_filter = query
+        .status
+        .as_ref()
+        .map(nexus_contracts::list_chapters_query::NexusChapterStatus::as_str);
 
     let records = work_chapters::list_chapters_paginated(
         state.pool_or_uninit()?,
@@ -385,12 +393,12 @@ pub async fn list_chapters(
         .collect();
 
     Ok(Json(ListChaptersResponse {
-        items,
-        pagination: PaginationInfo {
+        items: wire_cast(items),
+        pagination: wire_cast(PaginationInfo {
             limit: i64::from(limit),
             next_cursor,
             has_more,
-        },
+        }),
     }))
 }
 
@@ -407,7 +415,10 @@ pub async fn get_chapter(
 
     let _work = load_work(&state, &creator_id, &work_id).await?;
     let chapter = parse_chapter(&n)?;
-    let volume = i32::try_from(query.volume.unwrap_or(1)).unwrap_or(1);
+    let volume = query
+        .volume
+        .and_then(|v| i32::try_from(u64::from(v)).ok())
+        .unwrap_or(1);
 
     let record = work_chapters::get_chapter(state.pool_or_uninit()?, &work_id, chapter, volume)
         .await
@@ -438,7 +449,10 @@ pub async fn get_chapter_outline(
 
     let _work = load_work(&state, &creator_id, &work_id).await?;
     let chapter = parse_chapter(&n)?;
-    let volume = i32::try_from(query.volume.unwrap_or(1)).unwrap_or(1);
+    let volume = query
+        .volume
+        .and_then(|v| i32::try_from(u64::from(v)).ok())
+        .unwrap_or(1);
 
     let record = work_chapters::get_chapter(state.pool_or_uninit()?, &work_id, chapter, volume)
         .await
@@ -469,8 +483,10 @@ pub async fn get_chapter_outline(
 
     Ok(Json(ChapterOutline {
         work_id: record.work_id,
-        chapter: i64::from(record.chapter),
-        volume: i64::from(record.volume.unwrap_or(1)),
+        chapter: std::num::NonZeroU64::new(u64::try_from(record.chapter).unwrap_or(1))
+            .unwrap_or(std::num::NonZeroU64::MIN),
+        volume: std::num::NonZeroU64::new(u64::try_from(record.volume.unwrap_or(1)).unwrap_or(1))
+            .unwrap_or(std::num::NonZeroU64::MIN),
         outline_path: outline_path.to_string(),
         content,
         updated_at: record.updated_at,
@@ -491,7 +507,10 @@ pub async fn patch_chapter(
 
     let _work = load_work(&state, &creator_id, &work_id).await?;
     let chapter = parse_chapter(&n)?;
-    let volume = i32::try_from(query.volume.unwrap_or(1)).unwrap_or(1);
+    let volume = query
+        .volume
+        .and_then(|v| i32::try_from(u64::from(v)).ok())
+        .unwrap_or(1);
 
     let record = work_chapters::get_chapter(state.pool_or_uninit()?, &work_id, chapter, volume)
         .await
@@ -549,11 +568,11 @@ pub async fn patch_chapter(
 
     let updated: Result<WorkChapterRecord, NexusApiError> = async {
         let patch = PatchChapterParams {
-            slug: req.slug,
+            slug: req.slug.map(|s| s.to_string()),
             planned_word_count: req
                 .planned_word_count
                 .map(|v| i32::try_from(v).unwrap_or(i32::MAX)),
-            volume: req.volume.map(|v| i32::try_from(v).unwrap_or(1)),
+            volume: req.volume.map(|v| i32::try_from(u64::from(v)).unwrap_or(1)),
             status: req.status.as_ref().map(ToString::to_string),
         };
 
@@ -612,7 +631,10 @@ pub async fn get_chapter_body(
 
     let _work = load_work(&state, &creator_id, &work_id).await?;
     let chapter = parse_chapter(&n)?;
-    let volume = i32::try_from(query.volume.unwrap_or(1)).unwrap_or(1);
+    let volume = query
+        .volume
+        .and_then(|v| i32::try_from(u64::from(v)).ok())
+        .unwrap_or(1);
 
     let record = work_chapters::get_chapter(state.pool_or_uninit()?, &work_id, chapter, volume)
         .await
@@ -643,11 +665,13 @@ pub async fn get_chapter_body(
 
     Ok(Json(ChapterBody {
         work_id: record.work_id,
-        chapter: i64::from(record.chapter),
-        volume: i64::from(record.volume.unwrap_or(1)),
+        chapter: std::num::NonZeroU64::new(u64::try_from(record.chapter).unwrap_or(1))
+            .unwrap_or(std::num::NonZeroU64::MIN),
+        volume: std::num::NonZeroU64::new(u64::try_from(record.volume.unwrap_or(1)).unwrap_or(1))
+            .unwrap_or(std::num::NonZeroU64::MIN),
         body_path: body_path.to_string(),
         content,
-        frontmatter: None,
+        frontmatter: serde_json::Map::new(),
         read_only: true,
         updated_at: record.updated_at,
     }))
@@ -866,8 +890,8 @@ mod tests {
         )
         .await
         .expect("get chapter");
-        assert_eq!(resp.chapter, 1);
-        assert_eq!(resp.volume, 1);
+        assert_eq!(resp.chapter, std::num::NonZeroU64::new(1).unwrap());
+        assert_eq!(resp.volume, std::num::NonZeroU64::new(1).unwrap());
         assert!(resp.slug.as_deref().is_some_and(|s| s.starts_with("ch01")));
     }
 
@@ -909,7 +933,7 @@ mod tests {
         let (state, _tmp, work_id) = setup_chapter_work().await;
         let req = PatchChapterRequest {
             title: None,
-            slug: Some("new-slug".to_string()),
+            slug: Some("new-slug".parse().unwrap()),
             planned_word_count: None,
             volume: None,
             status: None,
@@ -939,7 +963,7 @@ mod tests {
             title: None,
             slug: None,
             planned_word_count: None,
-            volume: Some(2),
+            volume: Some(std::num::NonZeroU64::new(2).unwrap()),
             status: None,
             confirm_structural_edit: None,
             transition_reason: None,
@@ -952,7 +976,7 @@ mod tests {
         )
         .await
         .expect("patch with volume change must not 404 after the write");
-        assert_eq!(resp.volume, 2);
+        assert_eq!(resp.volume, std::num::NonZeroU64::new(2).unwrap());
     }
 
     /// Regression: writing `title` must return BadRequest (HTTP 400,

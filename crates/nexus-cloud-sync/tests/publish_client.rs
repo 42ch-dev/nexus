@@ -28,20 +28,20 @@ async fn publish_story_parses_success() {
     let client = SyncClient::new(base.trim_end_matches('/'), VALID_TOKEN).expect("client");
 
     let req = PublishStoryRequest {
-        schema_version: 1,
-        world_id: "wld_x".into(),
-        manuscript_id: Some("mss_y".into()),
-        story_manifest_id: Some("stm_z".into()),
-        title: "T".into(),
+        schema_version: std::num::NonZeroU64::new(1).unwrap(),
+        world_id: "wld_x".parse().unwrap(),
+        manuscript_id: Some("mss_y".parse().unwrap()),
+        story_manifest_id: Some("stm_z".parse().unwrap()),
+        title: "T".parse().unwrap(),
         summary: None,
-        chapter_ids: vec!["chap_1".into()],
-        idempotency_key: "idem_1".into(),
+        chapter_ids: vec!["chap_1".parse().unwrap()],
+        idempotency_key: "idem_1".parse().unwrap(),
         sync_command_id: None,
     };
 
     let r = client.publish_story(&req).await.expect("publish_story");
-    assert_eq!(r.schema_version, 1);
-    assert_eq!(r.outcome.as_str(), "published");
+    assert_eq!(r.schema_version, std::num::NonZeroU64::new(1).unwrap());
+    assert_eq!(r.outcome.to_string(), "published");
     assert_eq!(r.published_artifact_id.as_deref(), Some("art_1"));
 }
 
@@ -62,14 +62,14 @@ async fn publish_story_maps_422_to_platform_error() {
     let client = SyncClient::new(base.trim_end_matches('/'), VALID_TOKEN).expect("client");
 
     let req = PublishStoryRequest {
-        schema_version: 1,
-        world_id: "wld_x".into(),
-        manuscript_id: Some("mss_y".into()),
+        schema_version: std::num::NonZeroU64::new(1).unwrap(),
+        world_id: "wld_x".parse().unwrap(),
+        manuscript_id: Some("mss_y".parse().unwrap()),
         story_manifest_id: None,
-        title: "T".into(),
+        title: "T".parse().unwrap(),
         summary: None,
-        chapter_ids: vec!["c1".into()],
-        idempotency_key: "k".into(),
+        chapter_ids: vec!["c1".parse().unwrap()],
+        idempotency_key: "k".parse().unwrap(),
         sync_command_id: None,
     };
 
@@ -103,9 +103,9 @@ async fn publish_history_parses_success() {
     let client = SyncClient::new(base.trim_end_matches('/'), VALID_TOKEN).expect("client");
 
     let req = PublishHistoryRequest {
-        schema_version: 1,
-        world_id: Some("wld_x".into()),
-        manuscript_id: Some("mss_y".into()),
+        schema_version: std::num::NonZeroU64::new(1).unwrap(),
+        world_id: Some("wld_x".parse().unwrap()),
+        manuscript_id: Some("mss_y".parse().unwrap()),
         artifact_type: None,
         cursor: None,
         limit: Some(10),
@@ -114,5 +114,5 @@ async fn publish_history_parses_success() {
     let r = client.publish_history(&req).await.expect("history");
     assert_eq!(r.entries.len(), 1);
     assert!(!r.has_more);
-    assert_eq!(r.entries[0].outcome.as_str(), "rejected");
+    assert_eq!(r.entries[0].outcome.to_string(), "rejected");
 }

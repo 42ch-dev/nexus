@@ -13,7 +13,11 @@ import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Select } from '@/components/ui/select';
 import { cn } from '@/lib/utils';
-import type { ReadingAnnotation, ReadingAnnotationColor } from '@42ch/nexus-contracts';
+import type { ReadingAnnotation } from '@42ch/nexus-contracts';
+
+// V1.138 codegen inlines the color enum; derive it from the canonical type so
+// it stays in sync with `@42ch/nexus-contracts` rather than being hardcoded.
+type ReadingAnnotationColor = ReadingAnnotation['color'];
 
 const ANNOTATION_COLORS: ReadingAnnotationColor[] = ['yellow', 'blue', 'green', 'pink'];
 

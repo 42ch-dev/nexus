@@ -12,8 +12,11 @@
 import { useLayoutEffect } from 'react';
 
 import { cn } from '@/lib/utils';
-import type { ReadingAnnotation, ReadingAnnotationColor } from '@42ch/nexus-contracts';
+import type { ReadingAnnotation } from '@42ch/nexus-contracts';
 import { rangeFromOffsets } from './use-text-selection';
+
+// V1.138 codegen inlines the color enum; derive it from the canonical type.
+type ReadingAnnotationColor = ReadingAnnotation['color'];
 
 export interface HighlightLayerProps {
   annotations: ReadingAnnotation[];

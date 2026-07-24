@@ -20,7 +20,9 @@ function makeOverview(
   total_worlds?: number,
 ): TimelineOverviewResponse {
   return {
-    worlds,
+    // V1.138 codegen expands `worlds` (schema maxItems: 20) into a fixed-length
+    // tuple union; this fixture builds a variable-length array by construction.
+    worlds: worlds as TimelineOverviewResponse['worlds'],
     cursor: cursor ?? null,
     total_worlds: total_worlds ?? worlds.length,
   };

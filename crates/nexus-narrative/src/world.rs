@@ -157,21 +157,25 @@ impl World {
 impl From<nexus_contracts::World> for World {
     fn from(c: nexus_contracts::World) -> Self {
         Self {
-            schema_version: c.schema_version,
-            world_id: c.world_id,
-            owner_creator_id: c.owner_creator_id,
-            title: c.title,
-            slug: c.slug,
+            schema_version: u32::try_from(c.schema_version.get())
+                .expect("schema_version exceeds u32 range"),
+            world_id: c.world_id.to_string(),
+            owner_creator_id: c.owner_creator_id.to_string(),
+            title: c.title.to_string(),
+            slug: c.slug.to_string(),
             status: c.status.as_str().to_string(),
             visibility: c.visibility,
             time_policy: c.time_policy,
             canon_revision: c.canon_revision,
-            current_timeline_head_id: c.current_timeline_head_id,
-            current_time_pointer: c.current_time_pointer,
+            current_timeline_head_id: c.current_timeline_head_id.map(|id| id.to_string()),
+            current_time_pointer: c.current_time_pointer.map(|id| id.to_string()),
             root_fork_branch_id: c.root_fork_branch_id,
-            world_rules: c.world_rules,
-            created_at: c.created_at,
-            updated_at: c.updated_at,
+            world_rules: c.world_rules.map(|r| {
+                serde_json::from_value(serde_json::to_value(&r).unwrap_or_default())
+                    .unwrap_or_default()
+            }),
+            created_at: c.created_at.to_rfc3339(),
+            updated_at: c.updated_at.map(|d| d.to_rfc3339()),
         }
     }
 }
@@ -180,21 +184,30 @@ impl From<nexus_contracts::World> for World {
 impl From<World> for nexus_contracts::World {
     fn from(d: World) -> Self {
         Self {
-            schema_version: d.schema_version,
-            world_id: d.world_id,
-            owner_creator_id: d.owner_creator_id,
-            title: d.title,
-            slug: d.slug,
+            schema_version: std::num::NonZeroU64::new(u64::from(d.schema_version))
+                .expect("schema_version must be non-zero"),
+            world_id: d.world_id.parse().unwrap(),
+            owner_creator_id: d.owner_creator_id.parse().unwrap(),
+            title: d.title.parse().unwrap(),
+            slug: d.slug.parse().unwrap(),
             status: nexus_contracts::WorldStatus::from_str(&d.status).unwrap(),
             visibility: d.visibility,
             time_policy: d.time_policy,
             canon_revision: d.canon_revision,
-            current_timeline_head_id: d.current_timeline_head_id,
-            current_time_pointer: d.current_time_pointer,
+            current_timeline_head_id: d.current_timeline_head_id.map(|s| s.parse().unwrap()),
+            current_time_pointer: d.current_time_pointer.map(|s| s.parse().unwrap()),
             root_fork_branch_id: d.root_fork_branch_id,
-            world_rules: d.world_rules,
-            created_at: d.created_at,
-            updated_at: d.updated_at,
+            world_rules: d
+                .world_rules
+                .map(|v| serde_json::from_value(v).unwrap_or_default()),
+            created_at: chrono::DateTime::parse_from_rfc3339(&d.created_at)
+                .unwrap()
+                .with_timezone(&chrono::Utc),
+            updated_at: d.updated_at.map(|s| {
+                chrono::DateTime::parse_from_rfc3339(&s)
+                    .unwrap()
+                    .with_timezone(&chrono::Utc)
+            }),
         }
     }
 }

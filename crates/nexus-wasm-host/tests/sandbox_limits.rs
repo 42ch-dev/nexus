@@ -36,8 +36,10 @@ fn manifest() -> ModuleManifest {
 }
 
 fn empty_input() -> ComputeInput {
-    serde_json::from_str(r#"{"schema_version":1,"world_ref":{"world_id":"w"},"key_blocks":[]}"#)
-        .unwrap()
+    serde_json::from_str(
+        r#"{"schema_version":1,"world_ref":{"world_id":"wld_empty"},"key_blocks":[]}"#,
+    )
+    .unwrap()
 }
 
 #[test]

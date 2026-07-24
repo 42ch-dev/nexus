@@ -29,7 +29,7 @@ A surface rename touches schemas, codegen, generated code in two languages, the 
 
 ### 1. Machine-renamable tree
 - [ ] Rename schema folder and update `$id`/`$ref` paths.
-- [ ] Update codegen config (`tooling/codegen/src/schema-loader.ts`, `rust-generator.ts`, `ts-generator.ts`).
+- [ ] Update codegen config (`tooling/codegen/src/schema-prep.ts`, `ts-gen.ts`, `rust-gen/`).
 - [ ] Regenerate Rust and TypeScript outputs; delete the old generated directories.
 - [ ] Update package version if the contract surface is breaking.
 - [ ] Run `pnpm run codegen` and verify `git status` is clean.

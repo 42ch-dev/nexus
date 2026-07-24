@@ -31,7 +31,9 @@
 
 use std::collections::HashMap;
 
-use nexus_contracts::generated::daemon_api::compute::module_detail::ModuleDetail;
+use nexus_contracts::generated::daemon_api::compute::module_detail::{
+    ModuleDetail, ModuleDetailHostFunctionsItem, ModuleDetailSchemas,
+};
 use serde::{Deserialize, Serialize};
 
 /// Whitelisted host functions a module may import (open design item #4).
@@ -108,6 +110,39 @@ impl ModuleManifest {
     }
 }
 
+fn json_object_to_map(value: &serde_json::Value) -> serde_json::Map<String, serde_json::Value> {
+    value.as_object().cloned().unwrap_or_default()
+}
+
+fn schema_fragment_maps_to_detail(
+    src: Option<&HashMap<String, serde_json::Value>>,
+) -> HashMap<String, serde_json::Map<String, serde_json::Value>> {
+    src.map(|fragments| {
+        fragments
+            .iter()
+            .map(|(k, v)| (k.clone(), json_object_to_map(v)))
+            .collect()
+    })
+    .unwrap_or_default()
+}
+
+fn module_schemas_to_detail(schemas: &ModuleSchemas) -> ModuleDetailSchemas {
+    ModuleDetailSchemas {
+        key_block_attributes: schema_fragment_maps_to_detail(schemas.key_block_attributes.as_ref()),
+        key_block_state: schema_fragment_maps_to_detail(schemas.key_block_state.as_ref()),
+        invocation: schemas
+            .invocation
+            .as_ref()
+            .map(json_object_to_map)
+            .unwrap_or_default(),
+        battle_report: schemas
+            .battle_report
+            .as_ref()
+            .map(json_object_to_map)
+            .unwrap_or_default(),
+    }
+}
+
 impl From<&ModuleManifest> for ModuleDetail {
     /// Typed conversion from the runtime manifest to the generated wire detail.
     ///
@@ -138,20 +173,15 @@ impl From<&ModuleManifest> for ModuleDetail {
             init_export: manifest.init_export.clone(),
             description: manifest.description.clone(),
             author: manifest.author.clone(),
-            host_functions: Some(
-                manifest
-                    .host_functions
-                    .iter()
-                    .map(|f| match f {
-                        HostFunction::KbRead => "kb_read".to_string(),
-                        HostFunction::NarrativeQuery => "narrative_query".to_string(),
-                    })
-                    .collect(),
-            ),
-            schemas: manifest
-                .schemas
-                .as_ref()
-                .map(|s| serde_json::to_value(s).expect("ModuleSchemas serializes to JSON")),
+            host_functions: manifest
+                .host_functions
+                .iter()
+                .map(|f| match f {
+                    HostFunction::KbRead => ModuleDetailHostFunctionsItem::KbRead,
+                    HostFunction::NarrativeQuery => ModuleDetailHostFunctionsItem::NarrativeQuery,
+                })
+                .collect(),
+            schemas: manifest.schemas.as_ref().map(module_schemas_to_detail),
             battle_report_kind: manifest.battle_report_kind.clone(),
             max_fuel: manifest
                 .max_fuel
@@ -306,8 +336,12 @@ mod tests {
         assert_eq!(detail.description.as_deref(), Some("A test module"));
         assert_eq!(detail.author.as_deref(), Some("tester"));
         assert_eq!(
-            detail.host_functions.as_deref(),
-            Some(&["kb_read".to_string(), "narrative_query".to_string()][..])
+            detail
+                .host_functions
+                .iter()
+                .map(|h| h.to_string())
+                .collect::<Vec<_>>(),
+            vec!["kb_read".to_string(), "narrative_query".to_string()]
         );
         assert!(detail.schemas.is_some());
         assert_eq!(detail.battle_report_kind.as_deref(), Some("combat"));

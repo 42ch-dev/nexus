@@ -18,6 +18,10 @@ pub struct PullApplySummary {
 ///
 /// # Errors
 /// Returns the specific error type if the operation fails.
+///
+/// # Panics
+/// Panics if a pull-response bundle envelope fails to round-trip through `Bundle`
+/// (drift-gate-proven equivalent; should never happen for well-formed platform responses).
 pub async fn apply_pull_response_to_outbox(
     outbox: &Outbox,
     response: &SyncPullResponse,
@@ -25,8 +29,13 @@ pub async fn apply_pull_response_to_outbox(
     let mut staged_entry_ids = Vec::new();
     let mut skipped_duplicate_bundles = 0usize;
 
-    for bundle in &response.bundles {
-        match outbox.stage_if_absent(bundle).await? {
+    for envelope in &response.bundles {
+        // `SyncPullResponse.bundles` uses typify's inlined `NexusDeltaBundleEnvelope`;
+        // the outbox stores the canonical `Bundle`. Wire-equivalent (drift gate).
+        let bundle: nexus_contracts::Bundle =
+            serde_json::from_value(serde_json::to_value(envelope).unwrap_or_default())
+                .expect("pull envelope round-trips to Bundle");
+        match outbox.stage_if_absent(&bundle).await? {
             Some(id) => staged_entry_ids.push(id),
             None => skipped_duplicate_bundles += 1,
         }

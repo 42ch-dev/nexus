@@ -554,7 +554,7 @@ pub async fn scan(
             message: format!("failed to create registry client: {e}"),
         })?;
 
-    let registry = if req.registry_refresh.unwrap_or(false) {
+    let registry = if req.registry_refresh {
         registry_client.refresh().await
     } else {
         registry_client.get_registry().await
@@ -622,11 +622,13 @@ pub async fn scan(
             .map(|entry| map_native_catalog_entry(entry, &by_binary)),
     );
 
-    if req.filter.as_deref() == Some("installed") {
+    if req.filter == nexus_contracts::ScanRequestFilter::Installed {
         agents.retain(|a| a.installed);
     }
 
-    Ok(Json(ScanResponse { agents }))
+    Ok(Json(ScanResponse {
+        agents: super::wire_cast(agents),
+    }))
 }
 
 /// Build an [`AgentScanEntry`] from a registry agent plus PATH probe results.

@@ -35,8 +35,8 @@ fn user_domain_register_and_lifecycle() {
     // Initial state
     assert_eq!(user.account_status, "active");
     assert_eq!(user.subscription_tier, "free");
-    assert_eq!(user.user_id, "usr_42");
-    assert_eq!(user.username, "alice");
+    assert_eq!(user.user_id.to_string(), "usr_42");
+    assert_eq!(user.username.to_string(), "alice");
 
     // Suspend
     user.suspend().expect("suspend should succeed");
@@ -89,7 +89,7 @@ fn pairing_domain_creation_and_lifecycle() {
 
     assert_eq!(pairing.pairing_id, "pair_1");
     assert_eq!(pairing.creator_id, "ctr_42");
-    assert_eq!(pairing.user_id, "usr_42");
+    assert_eq!(pairing.user_id.to_string(), "usr_42");
     assert_eq!(pairing.pairing_source, "auto_cli");
     assert_eq!(pairing.status, "active");
     assert!(pairing.revoked_at.is_none());
@@ -135,8 +135,8 @@ fn user_contract_roundtrip_via_cloud_sync_context() {
         .try_into()
         .expect("domain → contract conversion");
 
-    assert_eq!(contract_user.user_id, "usr_rt");
-    assert_eq!(contract_user.username, "dave");
+    assert_eq!(contract_user.user_id.to_string(), "usr_rt");
+    assert_eq!(contract_user.username.to_string(), "dave");
 
     // Convert contract → domain
     let back: nexus_cloud_sync::cloud_domain::user::User = contract_user.into();

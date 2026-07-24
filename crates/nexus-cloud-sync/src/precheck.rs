@@ -457,17 +457,15 @@ fn check_sequence_monotonicity(
 }
 
 fn check_world_revision(bundle: &Bundle, local_state: &LocalState, report: &mut PrecheckReport) {
-    if let Some(base) = bundle.base_versions.get("world_revision") {
-        if let Some(bundle_rev) = base.as_u64() {
-            if bundle_rev < local_state.world_revision {
-                report.add_issue(PrecheckIssue::error_with_hint(
-                    &format!(
-                        "world_revision in bundle ({bundle_rev}) is behind local state ({})",
-                        local_state.world_revision
-                    ),
-                    "Pull latest state from server before building the bundle",
-                ));
-            }
+    if let Some(bundle_rev) = bundle.base_versions.world_revision {
+        if bundle_rev < local_state.world_revision {
+            report.add_issue(PrecheckIssue::error_with_hint(
+                &format!(
+                    "world_revision in bundle ({bundle_rev}) is behind local state ({})",
+                    local_state.world_revision
+                ),
+                "Pull latest state from server before building the bundle",
+            ));
         }
     }
 }
@@ -514,7 +512,7 @@ fn check_command_consistency(bundle: &Bundle, report: &mut PrecheckReport) {
         }
 
         // Warn about missing payload
-        let has_payload = delta.payload.is_object();
+        let has_payload = !delta.payload.is_empty();
         if !has_payload {
             report.add_issue(PrecheckIssue::warning(&format!(
                 "delta[{i}] missing payload"
@@ -540,11 +538,8 @@ fn check_schema_compliance(bundle: &Bundle, report: &mut PrecheckReport) {
     }
 
     // Warn if base_versions is empty
-    if bundle
-        .base_versions
-        .as_object()
-        .is_none_or(serde_json::Map::is_empty)
-    {
+    let bv = &bundle.base_versions;
+    if bv.world_revision.is_none() && bv.timeline_head_id.is_none() && bv.canon_revision.is_none() {
         report.add_issue(PrecheckIssue::warning(
             "base_versions is empty (optimistic concurrency baseline missing)",
         ));
@@ -573,7 +568,7 @@ fn check_auth_match(bundle: &Bundle, auth_context: &AuthContext, report: &mut Pr
         return;
     };
 
-    if bundle.submitting_creator_id != *authenticated_id {
+    if bundle.submitting_creator_id.to_string() != *authenticated_id {
         report.add_issue(PrecheckIssue::error_with_hint(
             &format!(
                 "submitting_creator_id '{}' does not match authenticated creator '{}'",
@@ -594,40 +589,37 @@ fn check_auth_match(bundle: &Bundle, auth_context: &AuthContext, report: &mut Pr
 mod tests {
     use super::*;
     use nexus_contracts::generated::Delta;
-    use nexus_contracts::{BundleType, DeltaOperation, DeltaType, ManuscriptPhase};
     use serde_json::json;
 
     fn valid_bundle() -> Bundle {
-        let deltas = vec![Delta {
-            delta_type: DeltaType::KeyBlock,
-            operation: DeltaOperation::Create,
-            target_entity_type: None,
-            target_entity_id: None,
-            payload: serde_json::json!({"display_name": "Test"}),
-            source_anchor: None,
-            local_timestamp: "2025-01-01T00:00:00Z".to_string(),
-        }];
+        let deltas: Vec<Delta> = vec![serde_json::from_value(json!({
+            "delta_type": "key_block",
+            "operation": "create",
+            "payload": {"display_name": "Test"},
+            "local_timestamp": "2025-01-01T00:00:00Z"
+        }))
+        .unwrap()];
         let canonical_hash = crate::canonical_hash::canonical_hash_for_deltas(&deltas).unwrap();
-        Bundle {
-            schema_version: 1,
-            bundle_id: "bdl_test".to_string(),
-            command_id: "cmd_test".to_string(),
-            workspace_id: "wrk_test".to_string(),
-            world_id: "wld_test".to_string(),
-            creator_id: "ctr_test".to_string(),
-            submitting_creator_id: "ctr_test".to_string(),
-            bundle_type: BundleType::WorldSync,
-            manuscript_phase: Some(ManuscriptPhase::Draft),
-            output_manuscript: None,
-            idempotency_key: "idk_test".to_string(),
-            canonical_hash,
-            base_versions: serde_json::json!({"world_revision": 5}),
-            last_confirmed_delta_sequence: Some(10),
-            deltas,
-            bundle_apply_status: None,
-            delta_results: None,
-            created_at: chrono::Utc::now().to_rfc3339(),
-        }
+        serde_json::from_value(json!({
+            "schema_version": 1,
+            "bundle_id": "bdl_test",
+            "command_id": "cmd_test",
+            "workspace_id": "wrk_test",
+            "world_id": "wld_test",
+            "creator_id": "ctr_test",
+            "submitting_creator_id": "ctr_test",
+            "bundle_type": "world_sync",
+            "manuscript_phase": "draft",
+            "output_manuscript": false,
+            "idempotency_key": "idk_test",
+            "canonical_hash": canonical_hash,
+            "base_versions": {"world_revision": 5},
+            "last_confirmed_delta_sequence": 10,
+            "deltas": deltas,
+            "delta_results": [],
+            "created_at": chrono::Utc::now()
+        }))
+        .unwrap()
     }
 
     #[test]
@@ -638,22 +630,13 @@ mod tests {
         assert_eq!(result, PrecheckResult::Valid);
     }
 
-    #[test]
-    fn precheck_empty_bundle_id() {
-        let mut bundle = valid_bundle();
-        bundle.bundle_id = String::new();
-        let local_state = LocalState::new(5);
-
-        let result = precheck_bundle(&bundle, &local_state);
-        assert!(matches!(result, PrecheckResult::Invalid(_)));
-        if let PrecheckResult::Invalid(report) = result {
-            assert!(report.has_errors());
-            assert!(report
-                .issues
-                .iter()
-                .any(|i| i.message.contains("bundle_id")));
-        }
-    }
+    // NOTE: `precheck_empty_bundle_id`, `precheck_invalid_bundle_prefix`, and
+    // `precheck_invalid_creator_prefix` were removed. The typify-generated
+    // newtypes (BundleBundleId with pattern `^bdl_…`, BundleCreatorId with
+    // `^ctr_…`) now enforce these validations at construction time via FromStr.
+    // Invalid values cannot be constructed, making the precheck-level tests
+    // for these cases impossible — the validation is now stronger (type-system
+    // enforced) rather than weaker.
 
     #[test]
     fn precheck_empty_deltas() {
@@ -665,25 +648,9 @@ mod tests {
         assert!(matches!(result, PrecheckResult::Invalid(_)));
     }
 
-    #[test]
-    fn precheck_invalid_bundle_prefix() {
-        let mut bundle = valid_bundle();
-        bundle.bundle_id = "invalid_prefix".to_string();
-        let local_state = LocalState::new(5);
-
-        let result = precheck_bundle(&bundle, &local_state);
-        assert!(matches!(result, PrecheckResult::Invalid(_)));
-    }
-
-    #[test]
-    fn precheck_invalid_creator_prefix() {
-        let mut bundle = valid_bundle();
-        bundle.creator_id = "usr_test".to_string();
-        let local_state = LocalState::new(5);
-
-        let result = precheck_bundle(&bundle, &local_state);
-        assert!(matches!(result, PrecheckResult::Invalid(_)));
-    }
+    // NOTE: `precheck_invalid_bundle_prefix` and `precheck_invalid_creator_prefix`
+    // removed — see comment above. Pattern-validated newtypes enforce these at
+    // construction time.
 
     #[test]
     fn precheck_sequence_not_monotonic() {
@@ -703,7 +670,8 @@ mod tests {
     #[test]
     fn precheck_world_revision_stale() {
         let mut bundle = valid_bundle();
-        bundle.base_versions = serde_json::json!({"world_revision": 3});
+        bundle.base_versions =
+            serde_json::from_value(serde_json::json!({"world_revision": 3})).unwrap();
         let local_state = LocalState::new(5); // local is ahead
 
         let result = precheck_bundle(&bundle, &local_state);
@@ -730,7 +698,8 @@ mod tests {
     #[test]
     fn precheck_empty_base_versions_warning() {
         let mut bundle = valid_bundle();
-        bundle.base_versions = serde_json::json!({});
+        bundle.base_versions =
+            serde_json::from_value(serde_json::Value::Object(serde_json::Map::new())).unwrap();
         let local_state = LocalState::new(5).with_delta_sequence(10);
 
         let result = precheck_bundle(&bundle, &local_state);
@@ -748,15 +717,14 @@ mod tests {
     #[test]
     fn precheck_create_with_target_id_warning() {
         let mut bundle = valid_bundle();
-        bundle.deltas = vec![Delta {
-            delta_type: DeltaType::KeyBlock,
-            operation: DeltaOperation::Create,
-            target_entity_type: None,
-            target_entity_id: Some("kb_existing".to_string()),
-            payload: serde_json::json!({}),
-            source_anchor: None,
-            local_timestamp: "2025-01-01T00:00:00Z".to_string(),
-        }];
+        bundle.deltas = serde_json::from_value(json!([{
+            "delta_type": "key_block",
+            "operation": "create",
+            "target_entity_id": "kb_existing",
+            "payload": {},
+            "local_timestamp": "2025-01-01T00:00:00Z"
+        }]))
+        .unwrap();
         let local_state = LocalState::new(5).with_delta_sequence(10);
 
         let result = precheck_bundle(&bundle, &local_state);
@@ -930,8 +898,7 @@ mod tests {
 
     #[test]
     fn precheck_auth_match_error_supersedes_other_errors() {
-        let mut bundle = valid_bundle();
-        bundle.bundle_id = String::new(); // Also an error
+        let bundle = valid_bundle();
         let local_state = LocalState::new(5).with_delta_sequence(10);
         let auth = AuthContext::multi_creator("ctr_other");
 
@@ -939,11 +906,7 @@ mod tests {
         assert!(matches!(result, PrecheckResult::Invalid(_)));
         if let PrecheckResult::Invalid(report) = result {
             assert!(report.has_errors());
-            // Should have both bundle_id error and auth mismatch
-            assert!(report
-                .issues
-                .iter()
-                .any(|i| i.message.contains("bundle_id")));
+            // Auth mismatch error should be present
             assert!(report
                 .issues
                 .iter()

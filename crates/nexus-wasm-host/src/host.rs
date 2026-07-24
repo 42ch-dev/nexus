@@ -78,10 +78,12 @@ impl HostContext {
         for kb in &input.key_blocks {
             // Re-serialize each KeyBlock so the module receives canonical JSON.
             if let Ok(json) = serde_json::to_value(kb) {
-                blocks.insert(kb.key_block_id.clone(), json);
+                blocks.insert(kb.key_block_id.to_string(), json);
             }
         }
-        let narrative_state = input.narrative_state.clone().unwrap_or_default();
+        // `narrative_state` is a generated struct; serialize it back to the
+        // freeform JSON the module's `narrative_query` host import returns.
+        let narrative_state = serde_json::to_value(&input.narrative_state).unwrap_or_default();
         Self {
             key_blocks: blocks,
             narrative_state,
@@ -213,10 +215,10 @@ mod tests {
     fn ctx_with_two_blocks() -> HostContext {
         let raw = r#"{
             "schema_version": 1,
-            "world_ref": {"world_id": "w1"},
+            "world_ref": {"world_id": "wld_test"},
             "key_blocks": [
-                {"schema_version":1,"key_block_id":"kb-a","world_id":"w1","block_type":"character","canonical_name":"A","status":"confirmed","created_at":"t"},
-                {"schema_version":1,"key_block_id":"kb-b","world_id":"w1","block_type":"character","canonical_name":"B","status":"confirmed","created_at":"t"}
+                {"schema_version":1,"key_block_id":"kb_a","world_id":"wld_test","block_type":"character","canonical_name":"A","status":"confirmed","created_at":"2026-01-01T00:00:00Z"},
+                {"schema_version":1,"key_block_id":"kb_b","world_id":"wld_test","block_type":"character","canonical_name":"B","status":"confirmed","created_at":"2026-01-01T00:00:00Z"}
             ]
         }"#;
         let input: ComputeInput = serde_json::from_str(raw).unwrap();
@@ -226,7 +228,7 @@ mod tests {
     #[test]
     fn kb_read_returns_indexed_block() {
         let ctx = ctx_with_two_blocks();
-        let a = ctx.kb_read("kb-a").expect("kb-a present");
+        let a = ctx.kb_read("kb_a").expect("kb_a present");
         assert_eq!(a["canonical_name"], "A");
         assert!(ctx.kb_read("missing").is_none());
     }
@@ -258,7 +260,7 @@ mod tests {
             (import "nexus" "kb_read"
               (func $kb_read (param i32 i32 i32 i32) (result i64)))
             (memory (export "memory") 1)
-            (data (i32.const 0) "kb-a")
+            (data (i32.const 0) "kb_a")
             (func (export "probe_kb_read")
               (param $out_ptr i32) (param $out_cap i32) (result i64)
               (call $kb_read
@@ -271,10 +273,10 @@ mod tests {
         let input: ComputeInput = serde_json::from_str(
             r#"{
                 "schema_version": 1,
-                "world_ref": {"world_id": "w1"},
+                "world_ref": {"world_id": "wld_test"},
                 "key_blocks": [
-                    {"schema_version":1,"key_block_id":"kb-a","world_id":"w1",
-                     "block_type":"character","canonical_name":"Alice","status":"confirmed","created_at":"t"}
+                    {"schema_version":1,"key_block_id":"kb_a","world_id":"wld_test",
+                     "block_type":"character","canonical_name":"Alice","status":"confirmed","created_at":"2026-01-01T00:00:00Z"}
                 ]
             }"#,
         )
@@ -310,7 +312,7 @@ mod tests {
         let mut buf = vec![0u8; len];
         memory.read(&store, out_ptr as usize, &mut buf).unwrap();
         let fetched: serde_json::Value = serde_json::from_slice(&buf).unwrap();
-        assert_eq!(fetched["key_block_id"], "kb-a");
+        assert_eq!(fetched["key_block_id"], "kb_a");
         assert_eq!(fetched["canonical_name"], "Alice");
     }
 
