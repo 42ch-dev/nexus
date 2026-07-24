@@ -739,7 +739,9 @@ export class BrowserClient implements NexusClient {
     const message =
       cause instanceof Error
         ? `${cause.name} ${cause.message}`.toLowerCase()
-        : String(cause ?? '').toLowerCase();
+        : typeof cause === 'string'
+          ? cause.toLowerCase()
+          : '';
     const TLS_SIGNALS = [
       'err_cert_authority_invalid',
       'err_cert',

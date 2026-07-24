@@ -11,7 +11,9 @@
  */
 
 /** Characters disallowed in a single path segment across POSIX + Windows. */
-const ILLEGAL_SEGMENT_CHARS = /[\\/:*?"<>|\u0000]/g;
+const ILLEGAL_SEGMENT_CHARS = /[\\/:*?"<>|]/g;
+/** NUL byte — stripped separately to avoid control-char regex lint noise. */
+const NUL_CHAR = '\u0000';
 /** Any run of whitespace (incl. NBSP / ideographic space after NFKC). */
 const WHITESPACE_RUN = /\s+/g;
 /** Repeated dashes introduced by whitespace/illegal removal. */
@@ -67,7 +69,7 @@ export function slugProfileSegment(displayName: string): string {
   // 3. Internal whitespace runs → single `-`.
   segment = segment.replace(WHITESPACE_RUN, '-');
   // 4. Strip illegal segment characters.
-  segment = segment.replace(ILLEGAL_SEGMENT_CHARS, '');
+  segment = segment.replace(ILLEGAL_SEGMENT_CHARS, '').split(NUL_CHAR).join('');
   // 5. Collapse + strip dashes.
   segment = trimDashes(segment);
 

@@ -19,7 +19,12 @@ export const CSV_COLUMNS: { key: keyof FindingDetailResponse; label: string; tru
 /** Escape a single CSV field per RFC 4180. */
 export function csvField(value: unknown, truncate?: number): string {
   if (value === undefined || value === null) return '';
-  let str = String(value);
+  let str =
+    typeof value === 'string'
+      ? value
+      : typeof value === 'number' || typeof value === 'boolean' || typeof value === 'bigint'
+        ? String(value)
+        : '';
   if (truncate !== undefined && str.length > truncate) {
     str = `${str.slice(0, truncate)}…`;
   }

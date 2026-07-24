@@ -13,8 +13,6 @@
     "preview": "vite preview",
     "pretypecheck": "pnpm --filter @42ch/nexus-contracts run build && pnpm --filter @42ch/nexus-ui run build",
     "typecheck": "tsc --noEmit",
-    "lint": "oxlint .",
-    "lint:fix": "oxlint --fix .",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage"
@@ -60,8 +58,6 @@
     "msw": "^2.7.0",
     "postcss": "^8.4.49",
     "tailwindcss": "^3.4.17",
-    "oxlint": "^1.75.0",
-    "oxlint-tsgolint": "7.0.2001",
     "typescript": "7.0.2",
     "vite": "^6.4.3",
     "vitest": "^3.2.6"

@@ -12,9 +12,7 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
-    "typecheck": "tsc --noEmit",
-    "lint": "oxlint .",
-    "lint:fix": "oxlint --fix ."
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@42ch/nexus-ui": "workspace:*",
@@ -42,8 +40,6 @@
     "jsdom": "^25.0.1",
     "postcss": "^8.4.49",
     "tailwindcss": "^3.4.17",
-    "oxlint": "^1.75.0",
-    "oxlint-tsgolint": "7.0.2001",
     "typescript": "7.0.2",
     "vite": "^6.4.3",
     "vitest": "^3.2.6"

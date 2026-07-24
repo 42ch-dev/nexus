@@ -90,12 +90,6 @@ importers:
       jsdom:
         specifier: ^25.0.1
         version: 25.0.1
-      oxlint:
-        specifier: ^1.75.0
-        version: 1.75.0(oxlint-tsgolint@7.0.2001)
-      oxlint-tsgolint:
-        specifier: 7.0.2001
-        version: 7.0.2001
       postcss:
         specifier: ^8.4.49
         version: 8.5.15
@@ -232,12 +226,6 @@ importers:
       msw:
         specifier: ^2.7.0
         version: 2.14.6(@types/node@22.20.0)(typescript@7.0.2)
-      oxlint:
-        specifier: ^1.75.0
-        version: 1.75.0(oxlint-tsgolint@7.0.2001)
-      oxlint-tsgolint:
-        specifier: 7.0.2001
-        version: 7.0.2001
       postcss:
         specifier: ^8.4.49
         version: 8.5.15
@@ -256,12 +244,6 @@ importers:
 
   packages/nexus-contracts:
     devDependencies:
-      oxlint:
-        specifier: ^1.75.0
-        version: 1.75.0(oxlint-tsgolint@7.0.2001)
-      oxlint-tsgolint:
-        specifier: 7.0.2001
-        version: 7.0.2001
       tsup:
         specifier: ^8.0.0
         version: 8.5.1(jiti@1.21.7)(postcss@8.5.15)(typescript@7.0.2)(yaml@2.9.0)
@@ -308,12 +290,6 @@ importers:
       jsdom:
         specifier: ^25.0.1
         version: 25.0.1
-      oxlint:
-        specifier: ^1.75.0
-        version: 1.75.0(oxlint-tsgolint@7.0.2001)
-      oxlint-tsgolint:
-        specifier: 7.0.2001
-        version: 7.0.2001
       tsup:
         specifier: ^8.0.0
         version: 8.5.1(jiti@1.21.7)(postcss@8.5.15)(typescript@7.0.2)(yaml@2.9.0)
@@ -339,12 +315,6 @@ importers:
       '@types/node':
         specifier: ^20.10.0
         version: 20.19.39
-      oxlint:
-        specifier: ^1.75.0
-        version: 1.75.0(oxlint-tsgolint@7.0.2001)
-      oxlint-tsgolint:
-        specifier: 7.0.2001
-        version: 7.0.2001
       tsup:
         specifier: ^8.0.0
         version: 8.5.1(jiti@1.21.7)(postcss@8.5.15)(typescript@7.0.2)(yaml@2.9.0)
@@ -364,12 +334,6 @@ importers:
         specifier: ^3.4.0
         version: 3.4.19(yaml@2.9.0)
     devDependencies:
-      oxlint:
-        specifier: ^1.75.0
-        version: 1.75.0(oxlint-tsgolint@7.0.2001)
-      oxlint-tsgolint:
-        specifier: 7.0.2001
-        version: 7.0.2001
       typescript:
         specifier: 7.0.2
         version: 7.0.2

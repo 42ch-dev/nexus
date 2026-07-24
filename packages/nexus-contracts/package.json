@@ -28,19 +28,16 @@
     "src"
   ],
   "scripts": {
+    "prebuild": "pnpm run clean",
     "build": "tsup src/index.ts --format cjs,esm && tsc --emitDeclarationOnly",
     "dev": "tsc --emitDeclarationOnly --watch & tsup src/index.ts --format cjs,esm --watch & wait",
     "clean": "rm -rf dist",
     "typecheck": "tsc --noEmit",
-    "lint": "oxlint .",
-    "lint:fix": "oxlint --fix .",
     "prepublishOnly": "pnpm run build && pnpm run typecheck",
     "publish:dry": "npm publish --dry-run",
     "publish:public": "npm publish --access public"
   },
   "devDependencies": {
-    "oxlint": "^1.75.0",
-    "oxlint-tsgolint": "7.0.2001",
     "typescript": "7.0.2",
     "tsup": "^8.0.0"
   },

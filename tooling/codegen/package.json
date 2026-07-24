@@ -7,13 +7,12 @@
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
+    "prebuild": "pnpm run clean",
     "build": "tsup src/index.ts --format cjs,esm && tsc --emitDeclarationOnly",
     "dev": "tsc --emitDeclarationOnly --watch & tsup src/index.ts --format cjs,esm --watch & wait",
     "codegen": "node dist/index.js",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
-    "lint": "oxlint .",
-    "lint:fix": "oxlint --fix .",
     "clean": "rm -rf dist"
   },
   "dependencies": {
@@ -22,8 +21,6 @@
     "json-schema-to-typescript": "^15.0.0"
   },
   "devDependencies": {
-    "oxlint": "^1.75.0",
-    "oxlint-tsgolint": "7.0.2001",
     "typescript": "7.0.2",
     "tsup": "^8.0.0",
     "@types/node": "^20.10.0",

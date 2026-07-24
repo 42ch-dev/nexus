@@ -117,7 +117,7 @@ UI work in this repo follows a **studio-first** routing rule. The visual proving
 
 **Clippy:** Workspace-level config in root `Cargo.toml` enables `pedantic` + `nursery` as `warn`, inherited by all crates. CI runs `cargo clippy --all -- -D warnings`. When fixing clippy errors, auto-fix first (`cargo clippy --fix --allow-dirty --allow-staged`), then handle residual manually. **Do not suppress** with `#[allow(...)]` without a brief justification comment. **Do not change runtime behavior** when fixing lint errors.
 
-**TypeScript / Oxlint:** Workspace TypeScript packages pin **`typescript@7.0.2`**. Lint SSOT is root **Oxlint** (`.oxlintrc.json`, type-aware via `oxlint-tsgolint`) — run `pnpm lint` locally; CI `typescript-checks` runs it alongside `pnpm run typecheck`. No ESLint in this repo.
+**TypeScript / Oxlint:** Workspace TypeScript packages pin **`typescript@7.0.2`**. Lint SSOT is root **Oxlint** (`.oxlintrc.json`, type-aware via `oxlint-tsgolint`) — run `pnpm lint` locally; CI `typescript-checks` runs it alongside `pnpm run typecheck`. **`pnpm run lint` must exit 0 with zero warnings** (warning-clean is enforced in CI). No ESLint in this repo.
 
 **Rust `target/` disk hygiene:** `target/debug` is gitignored but grows without bound on macOS/Linux when the workspace is rebuilt often. Stale `.o` files under `target/debug/deps` and old `target/debug/incremental/*` hashes (e.g. after `pnpm run codegen`, crate renames, or repeated `cargo * --all`) are the usual cause — not a single bug. CI uses ephemeral runners + `rust-cache`; **local developers and agents must not mirror CI’s `--all` cadence during iteration.**
 

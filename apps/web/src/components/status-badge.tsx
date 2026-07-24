@@ -100,7 +100,7 @@ export function ChapterStatusBadge({ status, className }: ChapterStatusBadgeProp
  * `--color-finding-status-*` CSS vars via @nexus/design-tokens), so they stay
  * correct in both light and dark themes.
  */
-function findingStatusClasses(status: FindingStatus | string | undefined | null): string {
+function findingStatusClasses(status: string | undefined | null): string {
   switch (status as FindingStatus) {
     case 'open':
       // amber — newly raised, needs triage attention.
