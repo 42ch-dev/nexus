@@ -408,7 +408,7 @@ export function TimelineCanvas({ worldId }: TimelineCanvasProps) {
    * just reported. Wired to the conflict modal's "Reapply" action.
    */
   function handleReapply() {
-    if (conflictInfo === null || conflictInfo.kind !== 'conflict') return;
+    if (conflictInfo?.kind !== 'conflict') return;
     if (conflictNode === null) return;
     const draft = conflictInfo.draftPatch;
     if (Object.keys(draft).length === 0) {
@@ -431,7 +431,7 @@ export function TimelineCanvas({ worldId }: TimelineCanvasProps) {
             draftPatch: draft,
             dirtyFields: conflictInfo.dirtyFields,
           });
-          if (next && next.kind === 'conflict') {
+          if (next?.kind === 'conflict') {
             setConflictInfo(next);
             setConflictVersion(next.currentVersion);
             void graph.refetch();

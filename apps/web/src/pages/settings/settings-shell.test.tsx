@@ -378,11 +378,13 @@ describe('Settings modal primary', () => {
     let navigateAway: (() => void) | undefined;
 
     function DirtySourceHost() {
-      const { registerDirtySource, open } = useSettingsModal();
+      const { registerDirtySource } = useSettingsModal();
       useEffect(() => {
-        registerDirtySource('test-dirty-route', open);
+        // Keep dirty asserted across the brief non-settings URL beat while RR7
+        // applies a blocked leave (open flickers false before restore).
+        registerDirtySource('test-dirty-route', true);
         return () => registerDirtySource('test-dirty-route', false);
-      }, [open, registerDirtySource]);
+      }, [registerDirtySource]);
       return null;
     }
 

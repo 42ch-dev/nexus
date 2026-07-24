@@ -205,7 +205,7 @@ function CreateCreatorDialog({
   function submit(e: React.FormEvent) {
     e.preventDefault();
     if (!displayName.trim()) return;
-    void mutate({ display_name: displayName.trim() });
+     mutate({ display_name: displayName.trim() });
   }
 
   // Shared mutation entry-point so Retry can re-submit the same payload without
@@ -225,7 +225,7 @@ function CreateCreatorDialog({
     // same value (spec AC-V1129-P0-3).
     const name = displayName.trim();
     if (!name) return;
-    void mutate({ display_name: name });
+     mutate({ display_name: name });
   }
 
   function handleOpenConnectionSettings() {

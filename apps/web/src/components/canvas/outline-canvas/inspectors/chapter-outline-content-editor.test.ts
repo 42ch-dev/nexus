@@ -32,9 +32,7 @@ beforeAll(() => {
   }
   // Range is used by ProseMirror's text-offset resolution.
   const rangeProto = Range.prototype as unknown as { getClientRects?: unknown };
-  if (!rangeProto.getClientRects) {
-    rangeProto.getClientRects = () => [noopRect as DOMRect];
-  }
+  rangeProto.getClientRects ??= () => [noopRect as DOMRect];
 });
 
 function makeEditor(initial: string): Editor {

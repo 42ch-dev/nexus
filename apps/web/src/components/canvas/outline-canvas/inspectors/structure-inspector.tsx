@@ -147,7 +147,11 @@ function VolumeRow({ index, style, data }: ListChildComponentProps<VolumeListDat
   const chapter = chapters.find((c) => c.chapter === id);
   if (!chapter) return null;
   const nextVolume = outline.volumes.find((v) => v.volume_id === volume.volume_id + 1);
-  const nextVolumeLabel = nextVolume?.label || (nextVolume ? t('chapter.volume', { volume: nextVolume.volume_id }) : '');
+  const nextVolumeLabel = nextVolume?.label?.trim()
+    ? nextVolume.label
+    : nextVolume
+      ? t('chapter.volume', { volume: nextVolume.volume_id })
+      : '';
   return (
     <li key={id} style={style} className="flex items-center gap-2">
       <ChapterRow

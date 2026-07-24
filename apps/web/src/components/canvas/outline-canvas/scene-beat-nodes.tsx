@@ -66,7 +66,7 @@ export const OutlineSceneNode = memo(function OutlineSceneNode({
 }: NodeProps) {
   const { t } = useTranslation('canvas');
   const d = data as OutlineSceneNodeData;
-  const title = d.title || t('outlineAltView.untitledScene');
+  const title = d.title?.trim() ? d.title : t('outlineAltView.untitledScene');
   return (
     <NodeChromeShell
       selected={!!selected}
@@ -117,7 +117,7 @@ export const OutlineBeatNode = memo(function OutlineBeatNode({
 }: NodeProps) {
   const { t } = useTranslation('canvas');
   const d = data as OutlineBeatNodeData;
-  const title = d.title || t('outlineAltView.untitledBeat');
+  const title = d.title?.trim() ? d.title : t('outlineAltView.untitledBeat');
   return (
     <NodeChromeShell
       selected={!!selected}

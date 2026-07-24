@@ -46,7 +46,7 @@ export async function runCodegen(): Promise<void> {
 
 // Run if executed directly
 // eslint-disable-next-line @typescript-eslint/no-require-imports
-if (typeof require !== 'undefined' && require.main === module) {
+if (require.main === module) {
   runCodegen().catch((err: Error) => {
     logger.error(`Codegen failed: ${err.message}`);
     if (process.env.DEBUG) {

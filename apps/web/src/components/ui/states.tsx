@@ -86,7 +86,7 @@ export function UnavailableState({
     >
       <p className="font-display text-display-24 text-gray-1000">{title}</p>
       {description && <p className="max-w-sm text-copy-14 text-gray-900">{description}</p>}
-      {(onRetry || action) && (
+      {(onRetry ?? action) && (
         <div className="mt-2 flex flex-wrap items-center justify-center gap-2">
           {onRetry && (
             <button

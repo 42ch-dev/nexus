@@ -19,7 +19,7 @@
         "default": "./dist/index.js"
       },
       "require": {
-        "types": "./dist/index.d.cts",
+        "types": "./dist/index.d.ts",
         "default": "./dist/index.cjs"
       }
     },
@@ -29,7 +29,7 @@
         "default": "./dist/tokens.js"
       },
       "require": {
-        "types": "./dist/tokens.d.cts",
+        "types": "./dist/tokens.d.ts",
         "default": "./dist/tokens.cjs"
       }
     },
@@ -51,8 +51,9 @@
   ],
   "scripts": {
     "prepare": "pnpm run build",
-    "build": "tsup src/index.ts src/tokens.ts --format cjs,esm --dts",
-    "dev": "tsup src/index.ts src/tokens.ts --format cjs,esm --dts --watch",
+    "prebuild": "pnpm run clean",
+    "build": "tsup src/index.ts src/tokens.ts --format cjs,esm && tsc --emitDeclarationOnly",
+    "dev": "tsc --emitDeclarationOnly --watch & tsup src/index.ts src/tokens.ts --format cjs,esm --watch & wait",
     "clean": "rm -rf dist",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
@@ -76,7 +77,7 @@
     "@types/react-dom": "^18.3.1",
     "jsdom": "^25.0.1",
     "tsup": "^8.0.0",
-    "typescript": "^5.3.0",
+    "typescript": "7.0.2",
     "vitest": "^3.2.6"
   },
   "keywords": [

@@ -36,7 +36,7 @@ export function SoulNarrativeCard({
   onReflect,
   scope = 'creator',
 }: {
-  narrative: SoulNarrativeResponse | undefined;
+  narrative?: SoulNarrativeResponse;
   isLoading: boolean;
   isReflecting: boolean;
   onReflect: () => void;

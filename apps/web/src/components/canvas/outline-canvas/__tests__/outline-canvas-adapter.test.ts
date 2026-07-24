@@ -250,7 +250,8 @@ describe('OutlineCanvasAdapter.projectGraph — projection equivalence', () => {
     });
 
     const chapterNode = result.nodes.find((n) => n.id === chapterNodeId(1));
-    expect((chapterNode?.data as { title: string }).title).toContain('Kapitel');
+    expect(chapterNode).toBeDefined();
+    expect((chapterNode!.data as { title: string }).title).toContain('Kapitel');
   });
 });
 

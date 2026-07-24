@@ -44,7 +44,7 @@ export function SceneInspector({ scene, parentChapterTitle }: SceneInspectorProp
     );
   }
 
-  const title = scene.title || t('outlineAltView.untitledScene');
+  const title = scene.title?.trim() ? scene.title : t('outlineAltView.untitledScene');
 
   return (
     <Card>

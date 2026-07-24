@@ -44,7 +44,7 @@ export function BeatInspector({ beat, parentSceneTitle }: BeatInspectorProps) {
     );
   }
 
-  const title = beat.title || t('outlineAltView.untitledBeat');
+  const title = beat.title?.trim() ? beat.title : t('outlineAltView.untitledBeat');
 
   return (
     <Card>

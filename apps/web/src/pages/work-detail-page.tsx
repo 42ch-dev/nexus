@@ -89,7 +89,7 @@ export function WorkDetailPage() {
             <Detail label={t('workDetail.labels.profile')}>{w.work_profile ? humanizeStatus(w.work_profile) : '—'}</Detail>
             <Detail label={t('workDetail.labels.primaryPreset')}><span className="text-copy-13-mono">{shortId(w.primary_preset_id)}</span></Detail>
             <Detail label={t('workDetail.labels.world')}><span className="text-copy-13-mono">{shortId(w.world_id)}</span></Detail>
-            <Detail label={t('workDetail.labels.storyRef')}>{w.story_ref || '—'}</Detail>
+            <Detail label={t('workDetail.labels.storyRef')}>{w.story_ref?.trim() ? w.story_ref : '—'}</Detail>
             <Detail label={t('workDetail.labels.created')}>{formatDateTime(w.created_at)}</Detail>
             <Detail label={t('workDetail.labels.updated')}>{formatRelative(w.updated_at)}</Detail>
           </dl>

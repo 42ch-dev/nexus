@@ -81,7 +81,7 @@ export function GlobalTimelineView() {
   }
 
   const rows: GlobalTimelineListRow[] = worlds.map((world) => {
-    const label = world.title || world.world_id;
+    const label = world.title?.trim() ? world.title : world.world_id;
     const layer = world.era_count > 0 ? 'brief' : 'narrative';
     const activityText = t('globalTimeline.activitySummary', {
       layer: t(`globalTimeline.layer.${layer}`),

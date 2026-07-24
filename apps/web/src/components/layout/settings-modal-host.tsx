@@ -60,8 +60,9 @@ export function SettingsModalHost() {
     <>
       <Dialog
         open={open}
+        modal={!discardConfirmOpen}
         onOpenChange={(next) => {
-          if (!next) requestClose('escape');
+          if (!next && !discardConfirmOpen) requestClose('escape');
         }}
       >
         <DialogContent

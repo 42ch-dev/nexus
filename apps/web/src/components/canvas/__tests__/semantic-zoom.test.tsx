@@ -227,7 +227,7 @@ describe('useSemanticZoom — React hook (P4 Task 3)', () => {
     // Stronger regression guard: a Brief surface mounting at zoom 1.0
     // (which exceeds the 0.70 zoom-in threshold) MUST NOT immediately
     // swap to Narrative. The hook records the mount zoom as baseline.
-    let zoom = 1.0;
+    const zoom = 1.0;
     const onLayerChange = vi.fn();
     renderHook(
       () =>
@@ -322,7 +322,7 @@ describe('useSemanticZoom — React hook (P4 Task 3)', () => {
     // change in the orchestrator), the hook's effect may re-run with the
     // same zoom value. The hook MUST no-op in that case so unrelated
     // orchestrator re-renders do not trigger phantom layer swaps.
-    let zoom = 0.4;
+    const zoom = 0.4;
     const onLayerChange = vi.fn();
     const { rerender } = renderHook(
       () =>

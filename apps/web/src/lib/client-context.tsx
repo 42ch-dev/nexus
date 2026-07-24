@@ -76,7 +76,7 @@ function buildClient(config: ConnectionConfig | null, desktop: boolean): NexusCl
   // the desktop client off loopback (V1.130 dogfood: poison
   // `connection_config.json` with only `endpointUrl`/`apiKey` produced the
   // remote transport blob against `https://x`).
-  if (!config || config.active !== true) {
+  if (config?.active !== true) {
     return desktop ? new TauriClient() : new BrowserClient();
   }
   return desktop

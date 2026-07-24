@@ -394,7 +394,7 @@ function AgentCardIdentity({
 }) {
   const { t } = useTranslation('setup');
   const [iconError, setIconError] = useState(false);
-  const label = agent.displayName || agent.name;
+  const label = agent.displayName?.trim() ? agent.displayName : agent.name;
   const showIcon = !!(agent.iconUrl && !iconError);
   return (
     <>

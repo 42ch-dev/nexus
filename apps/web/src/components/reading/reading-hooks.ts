@@ -73,7 +73,7 @@ export function useChapterNeighbors(
   chapter: number | undefined,
   volume: number | undefined,
 ): ChapterNeighbors {
-  const chapters = useChapters(workId || undefined, { limit: NEIGHBOR_PAGE_LIMIT });
+  const chapters = useChapters(workId ?? undefined, { limit: NEIGHBOR_PAGE_LIMIT });
   const rows = useMemo(() => flattenPages(chapters.data), [chapters.data]);
 
   // Cursor-walk every page when the server paginates. Guarded by `hasNextPage`
@@ -132,7 +132,7 @@ export function useOpenFindingsCount(
   workId: string | undefined,
   chapter: number | undefined,
 ): { count: number; isLoading: boolean; truncated: boolean } {
-  const findings = useFindings(workId || undefined, {
+  const findings = useFindings(workId ?? undefined, {
     status: OPEN_FINDING_STATUSES,
     chapter,
     limit: NEIGHBOR_PAGE_LIMIT,

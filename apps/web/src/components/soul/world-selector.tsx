@@ -42,7 +42,7 @@ export function WorldSelector({
       <select
         value={selectedWorld ?? ''}
         onChange={(e) => onSelect(e.target.value === '' ? ALL_WORLDS : e.target.value)}
-        disabled={disabled || sortedWorlds.length === 0}
+        disabled={disabled === true || sortedWorlds.length === 0}
         className="h-9 max-w-[16rem] rounded-control border border-gray-alpha-400 bg-background-100 px-2 text-copy-14 text-gray-1000 focus-visible:outline-none disabled:cursor-not-allowed disabled:bg-background-200 disabled:text-gray-700"
         data-testid="soul-world-selector"
       >

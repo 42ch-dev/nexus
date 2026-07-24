@@ -43,7 +43,7 @@ export function PendingReviewsSection({ creatorId }: { creatorId: string }) {
   const pendingCount = count.data?.count;
   const hasPending = typeof pendingCount === 'number' ? pendingCount > 0 : rows.length > 0;
 
-  const selected: PendingReviewInfo | null = useMemo(
+  const selected = useMemo(
     () => rows.find((r) => r.pending_id === selectedId) ?? null,
     [rows, selectedId],
   );

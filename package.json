@@ -30,6 +30,8 @@
     "build": "pnpm -r --filter '!desktop' run build",
     "test": "pnpm -r run test",
     "typecheck": "pnpm -r run typecheck",
+    "lint": "oxlint .",
+    "lint:fix": "oxlint --fix .",
     "clean": "pnpm -r run clean",
     "validate-schemas": "pnpm -F nexus-schema-validator validate",
     "codegen": "pnpm -F nexus-codegen build && pnpm -F nexus-codegen codegen && pnpm -F @42ch/nexus-contracts build",
@@ -48,5 +50,10 @@
     "test:web": "pnpm -F web test",
     "build:cli": "cargo build -p nexus42",
     "build:cli:release": "cargo build -p nexus42 --release"
+  },
+  "devDependencies": {
+    "oxlint": "^1.75.0",
+    "oxlint-tsgolint": "7.0.2001",
+    "typescript": "7.0.2"
   }
 }

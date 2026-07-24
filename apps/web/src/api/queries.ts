@@ -349,7 +349,7 @@ export function useDeleteWork() {
     mutationFn: (workId: string) => client.deleteWork(workId),
     onSuccess: (_data, workId) => {
       void qc.invalidateQueries({ queryKey: queryKeys.works.lists() });
-      void qc.removeQueries({ queryKey: queryKeys.works.detail(workId) });
+       qc.removeQueries({ queryKey: queryKeys.works.detail(workId) });
     },
     onError: (error) => errorToast(error, 'error.couldNotDeleteWork'),
   });
