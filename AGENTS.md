@@ -119,6 +119,17 @@ UI work in this repo follows a **studio-first** routing rule. The visual proving
 
 **Rust `target/` disk hygiene:** `target/debug` is gitignored but grows without bound on macOS/Linux when the workspace is rebuilt often. Stale `.o` files under `target/debug/deps` and old `target/debug/incremental/*` hashes (e.g. after `pnpm run codegen`, crate renames, or repeated `cargo * --all`) are the usual cause — not a single bug. CI uses ephemeral runners + `rust-cache`; **local developers and agents must not mirror CI’s `--all` cadence during iteration.**
 
+**Preferred layout — repo [`.envrc`](.envrc) + [direnv](https://direnv.net/):** this is the supported way to relocate and share the Rust build cache. It exports `CARGO_TARGET_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/nexus-target"` **only inside this repository**, so the main checkout and every `.worktrees/*` worktree reuse one cache instead of each growing a local `target/`.
+
+```bash
+# After clone or `git worktree add` (once per checkout root):
+direnv allow
+# Confirm cargo sees the shared dir (should print under ~/.cache/nexus-target):
+cargo metadata --no-deps --format-version 1 | jq -r .target_directory
+```
+
+Without direnv, export the same variable for the shell session. **Do not** set `build.target-dir` in root `Cargo.toml` (not a valid package/workspace key), project `.cargo/config.toml` (cannot expand `$HOME` / XDG; absolute paths are not portable for this OSS repo), or user-level `~/.cargo/config.toml` (pollutes every Rust project on the machine). Env (`CARGO_TARGET_DIR`) already overrides config when both are set — keep the single SSOT in [`.envrc`](.envrc).
+
 Workspace `Cargo.toml` keeps the `dev` profile lean: `debug = 1` (line-limited) for workspace crates, `debug = false` for non-member dependencies, and `split-debuginfo = "unpacked"`. That reduces **per-artifact** size; it does **not** remove orphan hashes — still use scoped builds + sweep/clean below.
 
 | Phase | Command scope |
@@ -127,9 +138,9 @@ Workspace `Cargo.toml` keeps the `dev` profile lean: `debug = 1` (line-limited) 
 | **Pre-commit / gate** | `cargo clippy --all -- -D warnings`, `cargo test --all` (matches CI) |
 | **After codegen or large contract/workspace graph changes** | Prefer `cargo clean` once, then rebuild scoped or `--all` as needed — avoids piling orphan artifacts (including legacy `nexus42d` names) |
 
-**Cleanup (repo root; with direnv, this is `$CARGO_TARGET_DIR` / `~/.cache/nexus-target`):**
+**Cleanup (repo root; with direnv this is `$CARGO_TARGET_DIR` → `~/.cache/nexus-target`):**
 
-- **Reclaim disk immediately:** `cargo clean` (next full build is slow; expected). If it errors on `target/debug/incremental` (“Directory not empty”), remove the heavy subtrees then retry: `rm -rf target/debug/{deps,incremental}` && `cargo clean` (or the same under `$CARGO_TARGET_DIR`).
+- **Reclaim disk immediately:** `cargo clean` (next full build is slow; expected). If it errors on `target/debug/incremental` (“Directory not empty”), remove the heavy subtrees then retry: `rm -rf "$CARGO_TARGET_DIR"/debug/{deps,incremental}` && `cargo clean` (fallback: `target/debug/...` only if direnv/`CARGO_TARGET_DIR` is unset).
 - **Periodic maintenance (recommended every ~5 iterations or monthly):** `cargo install cargo-sweep` once, then from the repo root (direnv on so `CARGO_TARGET_DIR` is set):
 
 ```bash
@@ -140,11 +151,9 @@ cargo sweep --time 30
 ```
 
   Optional dry-run: append `-d`. Do **not** use `cargo sweep -i N` for age-based cleanup — `-i` is `--installed` (boolean); age uses `--time` / `-t`.
-- **When to clean:** `target/debug` (or `$CARGO_TARGET_DIR/debug`) over ~50 GiB, filesystem slowness under `target/`, end of a large plan slice, or after deleting/renaming crates.
+- **When to clean:** `$CARGO_TARGET_DIR/debug` (or local `target/debug` if unset) over ~50 GiB, filesystem slowness under the target dir, end of a large plan slice, or after deleting/renaming crates.
 
-**Anti-patterns:** Running `cargo test --all` / `cargo clippy --all` on every small edit; skipping cleanup for months while agents run full-workspace builds; treating `target/` bloat as safe to commit (it is always gitignored — clean locally instead).
-
-**Shared build artifacts (worktrees):** Use the repo-root [`.envrc`](.envrc) ( [direnv](https://direnv.net/) ) so `CARGO_TARGET_DIR` points at `~/.cache/nexus-target` **only while you are in this repository** — main checkout and every `.worktrees/*` worktree share one cache. After clone or `git worktree add`, run `direnv allow` once in that checkout root. Without direnv, set the same variable in your shell for the session: `export CARGO_TARGET_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/nexus-target"`. **Do not** put `target-dir` in user-level `~/.cargo/config.toml`; that applies to every Rust crate on the machine. This relocates growth; the hygiene rules above still apply.
+**Anti-patterns:** Building without `CARGO_TARGET_DIR` / direnv (fills a per-checkout `target/` and breaks worktree sharing); running `cargo test --all` / `cargo clippy --all` on every small edit; skipping cleanup for months while agents run full-workspace builds; treating `target/` bloat as safe to commit (it is always gitignored — clean locally instead).
 
 ### Git & repository hygiene
 
