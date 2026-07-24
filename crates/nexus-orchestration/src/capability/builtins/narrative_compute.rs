@@ -66,7 +66,7 @@ const BATTLE_REPORT_MAX_BYTES: usize = 64 * 1024;
 /// Valid `state_delta.op` variants recognized by `apply_state_delta`.
 const VALID_OPS: &[&str] = &["add", "sub", "set"];
 
-fn state_delta_op_wire(op: &nexus_contracts::ComputeOutputStateDeltaItemOp) -> &'static str {
+const fn state_delta_op_wire(op: nexus_contracts::ComputeOutputStateDeltaItemOp) -> &'static str {
     use nexus_contracts::ComputeOutputStateDeltaItemOp;
     match op {
         ComputeOutputStateDeltaItemOp::Add => "add",
@@ -432,7 +432,7 @@ async fn apply_state_delta(
 
     for delta in deltas {
         // Validate op.
-        let op_wire = state_delta_op_wire(&delta.op);
+        let op_wire = state_delta_op_wire(delta.op);
         if !VALID_OPS.contains(&op_wire) {
             return Err(CapabilityError::InputInvalid(format!(
                 "unknown state_delta op '{}' (expected one of: {})",
