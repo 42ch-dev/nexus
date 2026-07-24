@@ -23,7 +23,7 @@ pub async fn list_modules(
     (
         StatusCode::OK,
         Json(ListModulesResponse {
-            items,
+            items: super::wire_cast(items),
             has_more: false,
         }),
     )

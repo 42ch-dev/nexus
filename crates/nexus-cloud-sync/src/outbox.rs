@@ -187,7 +187,7 @@ impl Outbox {
         let outbox_entry_id = format!("obe_{}", Uuid::new_v4().simple());
         let bundle_id = format!("bdl_{}", Uuid::new_v4().simple());
         let idempotency_key = format!("idk_{}", Uuid::new_v4().simple());
-        let now = chrono::Utc::now().to_rfc3339();
+        let now = chrono::Utc::now();
         let command_payload = serde_json::to_string(command)?;
 
         let mut tx = self.pool.inner().begin().await?;
@@ -223,10 +223,10 @@ impl Outbox {
     /// Returns the specific error type if the operation fails.
     pub async fn stage(&self, bundle: &Bundle) -> SyncResult<String> {
         let outbox_entry_id = format!("obe_{}", Uuid::new_v4().simple());
-        let now = chrono::Utc::now().to_rfc3339();
+        let now = chrono::Utc::now();
         let bundle_payload = serde_json::to_string(bundle)?;
-        let bundle_id = bundle.bundle_id.clone();
-        let idempotency_key = bundle.idempotency_key.clone();
+        let bundle_id = bundle.bundle_id.to_string();
+        let idempotency_key = bundle.idempotency_key.to_string();
 
         let mut tx = self.pool.inner().begin().await?;
         sqlx::query!(
@@ -262,10 +262,10 @@ impl Outbox {
     /// Returns the specific error type if the operation fails.
     pub async fn stage_if_absent(&self, bundle: &Bundle) -> SyncResult<Option<String>> {
         let new_entry_id = format!("obe_{}", Uuid::new_v4().simple());
-        let now = chrono::Utc::now().to_rfc3339();
+        let now = chrono::Utc::now();
         let bundle_payload = serde_json::to_string(bundle)?;
-        let bundle_id = bundle.bundle_id.clone();
-        let idempotency_key = bundle.idempotency_key.clone();
+        let bundle_id = bundle.bundle_id.to_string();
+        let idempotency_key = bundle.idempotency_key.to_string();
 
         let mut tx = self.pool.inner().begin().await?;
 
@@ -315,7 +315,7 @@ impl Outbox {
     /// # Errors
     /// Returns the specific error type if the operation fails.
     pub async fn mark_sent(&self, outbox_entry_id: &str) -> SyncResult<()> {
-        let now = chrono::Utc::now().to_rfc3339();
+        let now = chrono::Utc::now();
 
         let result = sqlx::query!(
             "UPDATE outbox_entries
@@ -342,7 +342,7 @@ impl Outbox {
     /// # Errors
     /// Returns the specific error type if the operation fails.
     pub async fn mark_acked(&self, outbox_entry_id: &str) -> SyncResult<()> {
-        let now = chrono::Utc::now().to_rfc3339();
+        let now = chrono::Utc::now();
 
         let result = sqlx::query!(
             "UPDATE outbox_entries
@@ -460,7 +460,7 @@ impl Outbox {
 
         if retry_count >= MAX_RETRIES {
             // Permanently mark as failed without retry
-            let now = chrono::Utc::now().to_rfc3339();
+            let now = chrono::Utc::now();
             sqlx::query!(
                 "UPDATE outbox_entries
                  SET delivery_state = 'failed', last_error = ?, updated_at = ?,
@@ -486,7 +486,7 @@ impl Outbox {
         // i64::MAX ~= 292 years in seconds, so any realistic delay fits in i64 without wrapping.
         #[allow(clippy::cast_possible_wrap)]
         let next_retry = chrono::Utc::now() + chrono::Duration::seconds(delay_secs as i64);
-        let now = chrono::Utc::now().to_rfc3339();
+        let now = chrono::Utc::now();
 
         let next_retry_str = next_retry.to_rfc3339();
         sqlx::query!(
@@ -525,7 +525,7 @@ impl Outbox {
     /// # Errors
     /// Returns the specific error type if the operation fails.
     pub async fn replay(&self) -> SyncResult<Vec<OutboxEntry>> {
-        let now = chrono::Utc::now().to_rfc3339();
+        let now = chrono::Utc::now();
 
         // sqlx R2: Uses module-level OutboxRow struct.
         let rows = sqlx::query_as!(
@@ -668,7 +668,7 @@ impl Outbox {
         state: &crate::partial_apply::PartialApplyState,
     ) -> SyncResult<()> {
         let state_json = serde_json::to_string(state)?;
-        let now = chrono::Utc::now().to_rfc3339();
+        let now = chrono::Utc::now();
         let retry_count = state.retry_count;
 
         sqlx::query!(
@@ -785,19 +785,19 @@ mod tests {
 
     fn make_test_command() -> SyncCommand {
         SyncCommand {
-            schema_version: 1,
-            command_id: "cmd_test".to_string(),
-            workspace_id: "wrk_test".to_string(),
-            world_id: "wld_test".to_string(),
-            creator_id: "ctr_test".to_string(),
+            schema_version: std::num::NonZeroU64::new(1).unwrap(),
+            command_id: "cmd_test".parse().unwrap(),
+            workspace_id: "wrk_test".parse().unwrap(),
+            world_id: "wld_test".parse().unwrap(),
+            creator_id: "ctr_test".parse().unwrap(),
             command_type: CommandType::SyncPush,
             origin: CommandOrigin::LocalUser,
-            output_manuscript: None,
+            output_manuscript: false,
             status: CommandStatus::Pending,
             requested_by: None,
             started_at: None,
             completed_at: None,
-            created_at: chrono::Utc::now().to_rfc3339(),
+            created_at: chrono::Utc::now(),
         }
     }
 
@@ -916,34 +916,23 @@ mod tests {
     async fn outbox_stage_bundle() {
         let outbox = Outbox::new_in_memory().await.expect("create outbox");
 
-        let bundle = Bundle {
-            schema_version: 1,
-            bundle_id: "bdl_test".to_string(),
-            command_id: "cmd_test".to_string(),
-            workspace_id: "wrk_test".to_string(),
-            world_id: "wld_test".to_string(),
-            creator_id: "ctr_test".to_string(),
-            submitting_creator_id: "ctr_test".to_string(),
-            bundle_type: nexus_contracts::BundleType::WorldSync,
-            manuscript_phase: None,
-            output_manuscript: None,
-            idempotency_key: "idk_test".to_string(),
-            canonical_hash: String::new(),
-            base_versions: serde_json::json!({"world_revision": 1}),
-            last_confirmed_delta_sequence: None,
-            deltas: vec![Delta {
-                delta_type: DeltaType::World,
-                operation: DeltaOperation::Create,
-                target_entity_type: None,
-                target_entity_id: None,
-                payload: serde_json::json!({}),
-                source_anchor: None,
-                local_timestamp: "2025-01-01T00:00:00Z".to_string(),
-            }],
-            bundle_apply_status: None,
-            delta_results: None,
-            created_at: chrono::Utc::now().to_rfc3339(),
-        };
+        let bundle: Bundle = serde_json::from_value(serde_json::json!({
+            "schema_version": 1,
+            "bundle_id": "bdl_test",
+            "command_id": "cmd_test",
+            "workspace_id": "wrk_test",
+            "world_id": "wld_test",
+            "creator_id": "ctr_test",
+            "submitting_creator_id": "ctr_test",
+            "bundle_type": "world_sync",
+            "output_manuscript": false,
+            "idempotency_key": "idk_test",
+            "canonical_hash": "",
+            "base_versions": {"world_revision": 1},
+            "deltas": [{"delta_type": "world", "operation": "create", "payload": {}, "local_timestamp": "2025-01-01T00:00:00Z"}],
+            "delta_results": [],
+            "created_at": "2025-01-01T00:00:00Z"
+        })).unwrap();
 
         let entry_id = outbox.stage(&bundle).await.expect("stage");
         let entry = outbox.get(&entry_id).await.expect("get");
@@ -955,34 +944,23 @@ mod tests {
     async fn outbox_stage_if_absent_idempotent() {
         let outbox = Outbox::new_in_memory().await.expect("create outbox");
 
-        let bundle = Bundle {
-            schema_version: 1,
-            bundle_id: "bdl_pull_once".to_string(),
-            command_id: "cmd_pull".to_string(),
-            workspace_id: "wrk_test".to_string(),
-            world_id: "wld_test".to_string(),
-            creator_id: "ctr_test".to_string(),
-            submitting_creator_id: "ctr_test".to_string(),
-            bundle_type: nexus_contracts::BundleType::WorldSync,
-            manuscript_phase: None,
-            output_manuscript: None,
-            idempotency_key: "idk_pull".to_string(),
-            canonical_hash: "a".repeat(64),
-            base_versions: serde_json::json!({"world_revision": 1}),
-            last_confirmed_delta_sequence: None,
-            deltas: vec![Delta {
-                delta_type: DeltaType::World,
-                operation: DeltaOperation::Create,
-                target_entity_type: None,
-                target_entity_id: None,
-                payload: serde_json::json!({}),
-                source_anchor: None,
-                local_timestamp: "2025-01-01T00:00:00Z".to_string(),
-            }],
-            bundle_apply_status: None,
-            delta_results: None,
-            created_at: chrono::Utc::now().to_rfc3339(),
-        };
+        let bundle: Bundle = serde_json::from_value(serde_json::json!({
+            "schema_version": 1,
+            "bundle_id": "bdl_pullonce",
+            "command_id": "cmd_pull",
+            "workspace_id": "wrk_test",
+            "world_id": "wld_test",
+            "creator_id": "ctr_test",
+            "submitting_creator_id": "ctr_test",
+            "bundle_type": "world_sync",
+            "output_manuscript": false,
+            "idempotency_key": "idk_pull",
+            "canonical_hash": "a".repeat(64),
+            "base_versions": {"world_revision": 1},
+            "deltas": [{"delta_type": "world", "operation": "create", "payload": {}, "local_timestamp": "2025-01-01T00:00:00Z"}],
+            "delta_results": [],
+            "created_at": "2025-01-01T00:00:00Z"
+        })).unwrap();
 
         let first = outbox
             .stage_if_absent(&bundle)
@@ -992,7 +970,7 @@ mod tests {
         let second = outbox.stage_if_absent(&bundle).await.expect("stage second");
         assert!(second.is_none());
         let entry = outbox.get(&first).await.expect("get");
-        assert_eq!(entry.bundle_id, "bdl_pull_once");
+        assert_eq!(entry.bundle_id, "bdl_pullonce");
     }
 
     #[tokio::test]
@@ -1546,34 +1524,24 @@ mod tests {
         let outbox = Outbox::new_in_memory().await.expect("create outbox");
 
         // Create a bundle with specific content
-        let bundle = Bundle {
-            schema_version: 1,
-            bundle_id: "bdl_test".to_string(),
-            command_id: "cmd_test".to_string(),
-            workspace_id: "wrk_test".to_string(),
-            world_id: "wld_test".to_string(),
-            creator_id: "ctr_test".to_string(),
-            submitting_creator_id: "ctr_test".to_string(),
-            bundle_type: nexus_contracts::BundleType::WorldSync,
-            manuscript_phase: None,
-            output_manuscript: None,
-            idempotency_key: "idk_test".to_string(),
-            canonical_hash: "hash123".to_string(),
-            base_versions: serde_json::json!({"world_revision": 5}),
-            last_confirmed_delta_sequence: Some(10),
-            deltas: vec![Delta {
-                delta_type: DeltaType::KeyBlock,
-                operation: DeltaOperation::Update,
-                target_entity_type: Some("key_block".to_string()),
-                target_entity_id: Some("char_001".to_string()),
-                payload: serde_json::json!({"name": "Alice"}),
-                source_anchor: None,
-                local_timestamp: chrono::Utc::now().to_rfc3339(),
-            }],
-            bundle_apply_status: None,
-            delta_results: None,
-            created_at: chrono::Utc::now().to_rfc3339(),
-        };
+        let bundle: Bundle = serde_json::from_value(serde_json::json!({
+            "schema_version": 1,
+            "bundle_id": "bdl_test",
+            "command_id": "cmd_test",
+            "workspace_id": "wrk_test",
+            "world_id": "wld_test",
+            "creator_id": "ctr_test",
+            "submitting_creator_id": "ctr_test",
+            "bundle_type": "world_sync",
+            "output_manuscript": false,
+            "idempotency_key": "idk_test",
+            "canonical_hash": "hash123",
+            "base_versions": {"world_revision": 5},
+            "last_confirmed_delta_sequence": 10,
+            "deltas": [{"delta_type": "key_block", "operation": "update", "target_entity_type": "key_block", "target_entity_id": "char_001", "payload": {"name": "Alice"}, "local_timestamp": "2025-01-01T00:00:00Z"}],
+            "delta_results": [],
+            "created_at": "2025-01-01T00:00:00Z"
+        })).unwrap();
 
         let entry_id = outbox.stage(&bundle).await.expect("stage");
 

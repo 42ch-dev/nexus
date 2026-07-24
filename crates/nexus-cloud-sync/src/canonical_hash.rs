@@ -40,19 +40,16 @@ pub fn canonical_hash_for_deltas(deltas: &[Delta]) -> SyncResult<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nexus_contracts::{Delta, DeltaOperation, DeltaType};
     use serde_json::json;
 
     fn sample_delta() -> Delta {
-        Delta {
-            delta_type: DeltaType::KeyBlock,
-            operation: DeltaOperation::Create,
-            target_entity_type: Some("key_block".to_string()),
-            target_entity_id: None,
-            payload: json!({"display_name": "Test"}),
-            source_anchor: None,
-            local_timestamp: "2025-01-01T00:00:00Z".to_string(),
-        }
+        serde_json::from_value(json!({
+            "delta_type": "key_block",
+            "operation": "create",
+            "payload": {"display_name": "Test"},
+            "local_timestamp": "2025-01-01T00:00:00Z"
+        }))
+        .unwrap()
     }
 
     #[test]
@@ -83,7 +80,10 @@ mod tests {
         let a = sample_delta();
         let b = {
             let mut b = sample_delta();
-            b.payload = json!({"display_name": "Other"});
+            b.payload = json!({"display_name": "Other"})
+                .as_object()
+                .unwrap()
+                .clone();
             b
         };
         let ha = canonical_hash_for_deltas(&[a]).unwrap();
@@ -94,22 +94,22 @@ mod tests {
     /// Frozen cross-stack fixture: changing field values requires updating
     /// `.mstar/archived/knowledge/canonical-hash.md` and any platform golden vectors.
     fn golden_alignment_fixture_delta() -> Delta {
-        Delta {
-            delta_type: DeltaType::KeyBlock,
-            operation: DeltaOperation::Create,
-            target_entity_type: Some("key_block".to_string()),
-            target_entity_id: None,
-            payload: json!({"display_name": "Golden"}),
-            source_anchor: None,
-            local_timestamp: "2026-04-09T12:00:00Z".to_string(),
-        }
+        serde_json::from_value(json!({
+            "delta_type": "key_block",
+            "operation": "create",
+            "payload": {"display_name": "Golden"},
+            "local_timestamp": "2026-04-09T12:00:00Z"
+        }))
+        .unwrap()
     }
 
     #[test]
     fn golden_alignment_vector_matches_documented_digest() {
         // Frozen digest for `golden_alignment_fixture_delta` (serde_json::to_vec on `[delta]`).
+        // Updated after typify codegen: `local_timestamp` now serializes as DateTime<Utc>
+        // (RFC 3339 with +00:00 suffix) instead of plain String ("Z" suffix).
         const EXPECTED: &str =
-            "sha256:b9c07221605405f763956471055fed2ecdfdce7858f423a371aa387eec8befab";
+            "sha256:23f370c5ec4797f194b9fbbdba556c4de1d7c18c60b14a64898b1919486969fe";
         let got = canonical_hash_for_deltas(&[golden_alignment_fixture_delta()]).unwrap();
         assert_eq!(
             got, EXPECTED,

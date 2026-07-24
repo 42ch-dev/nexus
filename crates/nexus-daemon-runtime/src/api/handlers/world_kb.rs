@@ -23,18 +23,22 @@
 
 #![allow(clippy::missing_errors_doc)]
 
+use super::wire_cast;
 use crate::api::errors::NexusApiError;
 use crate::api::handlers::works::{read_active_creator_id, read_active_workspace_slug};
 use crate::workspace::WorkspaceState;
 use axum::extract::{Path, Query, State};
 use axum::Json;
 use nexus_contracts::{
-    PaginationInfo, WorldKbCandidateProjection, WorldKbCandidatesResponse, WorldKbEntityPatch,
-    WorldKbEntityProjection, WorldKbExtractJobProjection, WorldKbGraphResponse,
-    WorldKbKeyBlockStateResponse, WorldKbPatchEntityRequest, WorldKbPatchEntityResponse,
-    WorldKbPatchRelationshipRequest, WorldKbPatchRelationshipResponse,
-    WorldKbPromoteCandidateRequest, WorldKbPromoteCandidateResponse, WorldKbRelationshipInput,
-    WorldKbRelationshipKind, WorldKbRelationshipProjection, WorldKbSourceAnchorProjection,
+    world_kb_patch_entity_request::NexusWorldKbEntityPatch,
+    world_kb_patch_relationship_request::{
+        NexusWorldKbRelationshipInput, NexusWorldKbRelationshipKind,
+    },
+    PaginationInfo, WorldKbCandidateProjection, WorldKbCandidatesResponse, WorldKbEntityProjection,
+    WorldKbExtractJobProjection, WorldKbGraphResponse, WorldKbKeyBlockStateResponse,
+    WorldKbPatchEntityRequest, WorldKbPatchEntityResponse, WorldKbPatchRelationshipRequest,
+    WorldKbPatchRelationshipResponse, WorldKbPromoteCandidateRequest,
+    WorldKbPromoteCandidateResponse, WorldKbRelationshipProjection, WorldKbSourceAnchorProjection,
 };
 use nexus_kb::key_block::{KeyBlock, KeyBlockBody};
 use nexus_kb::validation::{validate_body, validate_canonical_name, ValidationMode};
@@ -182,12 +186,14 @@ fn project_entity(kb: &KeyBlock) -> WorldKbEntityProjection {
     WorldKbEntityProjection {
         key_block_id: kb.key_block_id.clone(),
         world_id: kb.world_id.clone(),
-        block_type: kb.block_type,
-        canonical_name: kb.canonical_name.clone(),
+        block_type: wire_cast(kb.block_type),
+        canonical_name: wire_cast(kb.canonical_name.clone()),
         status: kb.status.clone(),
         version: kb.revision.unwrap_or(0),
-        body: body_value,
-        aliases,
+        body: body_value
+            .and_then(|v| v.as_object().cloned())
+            .unwrap_or_default(),
+        aliases: aliases.unwrap_or_default(),
         source_anchor_count: Some(source_anchor_count),
         updated_at: kb.updated_at.clone(),
     }
@@ -204,7 +210,9 @@ fn project_candidate(c: &KbExtractPromotion) -> WorldKbCandidateProjection {
         candidate_id: c.job_id.clone(),
         job_id: c.job_id.clone(),
         world_id: c.world_id.clone(),
-        block_type: parse_block_type(c.block_type_guess.as_deref().unwrap_or("character")),
+        block_type: wire_cast(parse_block_type(
+            c.block_type_guess.as_deref().unwrap_or("character"),
+        )),
         canonical_name: c.canonical_name_guess.clone().unwrap_or_default(),
         status: Some(c.promotion_status.clone()),
         version: u64::try_from(c.version).unwrap_or(0),
@@ -220,7 +228,7 @@ fn project_job(c: &KbExtractPromotion) -> WorldKbExtractJobProjection {
         world_id: c.world_id.clone(),
         status: c.promotion_status.clone(),
         version: u64::try_from(c.version).unwrap_or(0),
-        candidate_ids: Some(vec![]),
+        candidate_ids: vec![],
         updated_at: c.auto_promoted_at.clone(),
     }
 }
@@ -331,7 +339,7 @@ pub async fn patch_entity(
     }
 
     // Compute new field values + validate.
-    let new_name = req.patch.title.clone();
+    let new_name = req.patch.title.as_ref().map(|t| t.to_string());
     let new_block_type = req.patch.block_type;
     let (body_json_str, body_for_validation) = compute_body(&kb, &req.patch)?;
 
@@ -339,7 +347,8 @@ pub async fn patch_entity(
         validate_canonical_name(name)
             .map_err(|e| NexusApiError::world_kb_validation_failed(&[e.to_string()], &[]))?;
     }
-    let validation_block_type = new_block_type.unwrap_or(kb.block_type);
+    let validation_block_type =
+        new_block_type.map_or(kb.block_type, wire_cast::<nexus_contracts::BlockType, _>);
     if let Some(ref body) = body_for_validation {
         validate_body(validation_block_type, Some(body), ValidationMode::Novel)
             .map_err(|e| NexusApiError::world_kb_validation_failed(&[e.to_string()], &[]))?;
@@ -372,17 +381,17 @@ pub async fn patch_entity(
             })?;
 
     Ok(Json(WorldKbPatchEntityResponse {
-        entity: project_entity(&updated),
+        entity: wire_cast(project_entity(&updated)),
         version: new_version,
-        validation_summary: validation_summary(&[], &[]),
+        validation_summary: wire_cast(validation_summary(&[], &[])),
     }))
 }
 
 /// `true` when the patch carries no editable field.
-const fn patch_is_empty(patch: &WorldKbEntityPatch) -> bool {
+fn patch_is_empty(patch: &NexusWorldKbEntityPatch) -> bool {
     patch.title.is_none()
-        && patch.body.is_none()
-        && patch.aliases.is_none()
+        && patch.body.is_empty()
+        && patch.aliases.is_empty()
         && patch.block_type.is_none()
 }
 
@@ -391,22 +400,21 @@ const fn patch_is_empty(patch: &WorldKbEntityPatch) -> bool {
 /// `body.attributes.aliases`.
 fn compute_body(
     kb: &KeyBlock,
-    patch: &WorldKbEntityPatch,
+    patch: &NexusWorldKbEntityPatch,
 ) -> Result<(Option<String>, Option<KeyBlockBody>), NexusApiError> {
-    if patch.body.is_none() && patch.aliases.is_none() {
+    if patch.body.is_empty() && patch.aliases.is_empty() {
         return Ok((None, None));
     }
     // Start from the patch body, else the current body, else an empty body.
-    let mut value = patch
-        .body
-        .clone()
-        .or_else(|| {
-            kb.body
-                .as_ref()
-                .map(|b| serde_json::to_value(b).unwrap_or_default())
-        })
-        .unwrap_or_else(|| serde_json::json!({}));
-    if let Some(ref aliases) = patch.aliases {
+    let mut value = if patch.body.is_empty() {
+        kb.body.as_ref().map_or_else(
+            || serde_json::json!({}),
+            |b| serde_json::to_value(b).unwrap_or_default(),
+        )
+    } else {
+        serde_json::Value::Object(patch.body.clone())
+    };
+    if !patch.aliases.is_empty() {
         let obj = value
             .as_object_mut()
             .ok_or_else(|| NexusApiError::InvalidInput {
@@ -417,7 +425,8 @@ fn compute_body(
             .entry("attributes")
             .or_insert_with(|| serde_json::json!({}));
         attrs["aliases"] = serde_json::Value::Array(
-            aliases
+            patch
+                .aliases
                 .iter()
                 .map(|a| serde_json::Value::String(a.clone()))
                 .collect(),
@@ -511,17 +520,14 @@ fn build_adopt_plan(
         code: "KB_PAYLOAD_INVALID".to_string(),
         message: format!("proposed_payload is not a valid KeyBlockBody: {e}"),
     })?;
-    let block_type = req
-        .patch
-        .as_ref()
-        .and_then(|p| p.block_type)
-        .unwrap_or_else(|| {
-            parse_block_type(candidate.block_type_guess.as_deref().unwrap_or("character"))
-        });
+    let block_type = req.patch.as_ref().and_then(|p| p.block_type).map_or_else(
+        || parse_block_type(candidate.block_type_guess.as_deref().unwrap_or("character")),
+        wire_cast::<nexus_contracts::BlockType, _>,
+    );
     let canonical_name = req
         .patch
         .as_ref()
-        .and_then(|p| p.title.clone())
+        .and_then(|p| p.title.as_ref().map(|t| t.to_string()))
         .or_else(|| candidate.canonical_name_guess.clone())
         .ok_or_else(|| {
             NexusApiError::world_kb_validation_failed(
@@ -530,14 +536,17 @@ fn build_adopt_plan(
             )
         })?;
     if let Some(ref p) = req.patch {
-        if let Some(ref b) = p.body {
-            body = serde_json::from_value(b.clone()).map_err(|e| NexusApiError::InvalidInput {
-                field: "patch.body".to_string(),
-                reason: format!("not a valid KeyBlockBody: {e}"),
-            })?;
+        if !p.body.is_empty() {
+            body =
+                serde_json::from_value(serde_json::Value::Object(p.body.clone())).map_err(|e| {
+                    NexusApiError::InvalidInput {
+                        field: "patch.body".to_string(),
+                        reason: format!("not a valid KeyBlockBody: {e}"),
+                    }
+                })?;
         }
-        if let Some(ref aliases) = p.aliases {
-            merge_aliases_into_body(&mut body, aliases);
+        if !p.aliases.is_empty() {
+            merge_aliases_into_body(&mut body, &p.aliases);
         }
     }
     Ok(AdoptPlan {
@@ -641,10 +650,10 @@ async fn promote_adopt(
     let new_version = u64::try_from(job.version).unwrap_or(0);
 
     Ok(Json(WorldKbPromoteCandidateResponse {
-        entity: Some(project_entity(&updated_kb)),
-        job: project_job(&job),
+        entity: Some(wire_cast(project_entity(&updated_kb))),
+        job: wire_cast(project_job(&job)),
         version: new_version,
-        validation_summary: validation_summary(&[], &[]),
+        validation_summary: wire_cast(validation_summary(&[], &[])),
     }))
 }
 
@@ -686,9 +695,9 @@ async fn promote_reject(
     let new_version = u64::try_from(job.version).unwrap_or(0);
     Ok(Json(WorldKbPromoteCandidateResponse {
         entity: None,
-        job: project_job(&job),
+        job: wire_cast(project_job(&job)),
         version: new_version,
-        validation_summary: validation_summary(&[], &[]),
+        validation_summary: wire_cast(validation_summary(&[], &[])),
     }))
 }
 
@@ -809,10 +818,10 @@ async fn promote_merge(
     let new_version = u64::try_from(job.version).unwrap_or(0);
 
     Ok(Json(WorldKbPromoteCandidateResponse {
-        entity: Some(project_entity(&updated_target)),
-        job: project_job(&job),
+        entity: Some(wire_cast(project_entity(&updated_target))),
+        job: wire_cast(project_job(&job)),
         version: new_version,
-        validation_summary: validation_summary(&[], &[]),
+        validation_summary: wire_cast(validation_summary(&[], &[])),
     }))
 }
 
@@ -904,14 +913,16 @@ pub async fn get_graph(
     // `wire_contracts_changed: FALSE` polish pass; the cap is the interim
     // safety bound (qc1 F-003 / `R-V176QC1-S002`).
     Ok(Json(WorldKbGraphResponse {
-        entities,
-        source_anchors,
-        relationships: project_relationships_for_world(
-            state.pool_or_uninit()?,
-            &world_id,
-            query.include_suggested.unwrap_or(false),
-        )
-        .await?,
+        entities: wire_cast(entities),
+        source_anchors: wire_cast(source_anchors),
+        relationships: wire_cast(
+            project_relationships_for_world(
+                state.pool_or_uninit()?,
+                &world_id,
+                query.include_suggested.unwrap_or(false),
+            )
+            .await?,
+        ),
     }))
 }
 
@@ -962,7 +973,7 @@ pub async fn get_key_block_state(
     };
 
     Ok(Json(WorldKbKeyBlockStateResponse {
-        state,
+        state: state.as_object().cloned(),
         is_computable,
         version: kb.revision.unwrap_or(0),
     }))
@@ -1148,12 +1159,12 @@ pub async fn get_candidates(
         .collect();
 
     Ok(Json(WorldKbCandidatesResponse {
-        items,
-        pagination: PaginationInfo {
+        items: wire_cast(items),
+        pagination: wire_cast(PaginationInfo {
             limit,
             has_more,
             next_cursor,
-        },
+        }),
     }))
 }
 
@@ -1204,7 +1215,7 @@ pub async fn patch_relationship(
 async fn patch_relationship_add(
     pool: &sqlx::SqlitePool,
     world_id: &str,
-    input: Option<WorldKbRelationshipInput>,
+    input: Option<NexusWorldKbRelationshipInput>,
     now: &str,
 ) -> Result<Json<WorldKbPatchRelationshipResponse>, NexusApiError> {
     let input = input.ok_or_else(|| NexusApiError::InvalidInput {
@@ -1219,7 +1230,7 @@ async fn patch_relationship_add(
         &input.target_entity_id,
     )
     .await?;
-    require_valid_source_anchors(pool, world_id, input.source_anchor_ids.as_deref()).await?;
+    require_valid_source_anchors(pool, world_id, Some(input.source_anchor_ids.as_slice())).await?;
 
     let relationship_id = generate_relationship_id();
     let mut tx = pool.begin().await.map_err(NexusApiError::from)?;
@@ -1231,11 +1242,11 @@ async fn patch_relationship_add(
             source_entity_id: input.source_entity_id.clone(),
             target_entity_id: input.target_entity_id.clone(),
             relation_type: input.relation_type.as_str().to_string(),
-            custom_label: input.custom_label.clone(),
+            custom_label: input.custom_label.as_ref().map(|c| c.to_string()),
             symmetric: input.symmetric,
             confidence: input.confidence,
-            source_anchor_ids: input.source_anchor_ids.clone().unwrap_or_default(),
-            metadata: input.metadata.clone(),
+            source_anchor_ids: input.source_anchor_ids.clone(),
+            metadata: Some(serde_json::Value::Object(input.metadata.clone())),
             created_at: now.to_string(),
             updated_at: now.to_string(),
             // V1.76: author adds default to confirmed (needs_review = the
@@ -1253,9 +1264,9 @@ async fn patch_relationship_add(
     tx.commit().await.map_err(NexusApiError::from)?;
 
     Ok(Json(WorldKbPatchRelationshipResponse {
-        relationship: Some(project_relationship(&row, "stored")),
+        relationship: Some(wire_cast(project_relationship(&row, "stored"))),
         version: u64::try_from(row.revision).unwrap_or(0),
-        validation_summary: validation_summary(&[], &[]),
+        validation_summary: wire_cast(validation_summary(&[], &[])),
     }))
 }
 
@@ -1264,7 +1275,7 @@ async fn patch_relationship_update(
     world_id: &str,
     relationship_id: Option<&str>,
     expected_version: Option<u64>,
-    input: Option<WorldKbRelationshipInput>,
+    input: Option<NexusWorldKbRelationshipInput>,
     now: &str,
 ) -> Result<Json<WorldKbPatchRelationshipResponse>, NexusApiError> {
     let relationship_id = relationship_id.ok_or_else(|| NexusApiError::InvalidInput {
@@ -1288,7 +1299,7 @@ async fn patch_relationship_update(
         &input.target_entity_id,
     )
     .await?;
-    require_valid_source_anchors(pool, world_id, input.source_anchor_ids.as_deref()).await?;
+    require_valid_source_anchors(pool, world_id, Some(input.source_anchor_ids.as_slice())).await?;
 
     // Scope check: the row must belong to this world.
     let existing = get_relationship(pool, relationship_id)
@@ -1318,11 +1329,11 @@ async fn patch_relationship_update(
         relationship_id,
         &UpdateRelationshipParams {
             relation_type: input.relation_type.as_str().to_string(),
-            custom_label: input.custom_label,
+            custom_label: input.custom_label.as_ref().map(|c| c.to_string()),
             symmetric: input.symmetric,
             confidence: input.confidence,
-            source_anchor_ids: input.source_anchor_ids.unwrap_or_default(),
-            metadata: input.metadata,
+            source_anchor_ids: input.source_anchor_ids.clone(),
+            metadata: Some(serde_json::Value::Object(input.metadata.clone())),
             updated_at: now.to_string(),
             // V1.76: promotion clears the needs_review gate. When the input
             // omits needs_review, preserve the existing flag so a routine
@@ -1339,9 +1350,9 @@ async fn patch_relationship_update(
     tx.commit().await.map_err(NexusApiError::from)?;
 
     Ok(Json(WorldKbPatchRelationshipResponse {
-        relationship: Some(project_relationship(&row, "stored")),
+        relationship: Some(wire_cast(project_relationship(&row, "stored"))),
         version: u64::try_from(row.revision).unwrap_or(0),
-        validation_summary: validation_summary(&[], &[]),
+        validation_summary: wire_cast(validation_summary(&[], &[])),
     }))
 }
 
@@ -1395,19 +1406,19 @@ async fn patch_relationship_remove(
     Ok(Json(WorldKbPatchRelationshipResponse {
         relationship: None,
         version: expected_version,
-        validation_summary: validation_summary(&[], &[]),
+        validation_summary: wire_cast(validation_summary(&[], &[])),
     }))
 }
 
 /// Domain validation for a relationship payload.
-fn validate_relationship_input(input: &WorldKbRelationshipInput) -> Result<(), NexusApiError> {
+fn validate_relationship_input(input: &NexusWorldKbRelationshipInput) -> Result<(), NexusApiError> {
     if input.source_entity_id == input.target_entity_id {
         return Err(NexusApiError::world_kb_validation_failed(
             &["source_entity_id and target_entity_id must be different".to_string()],
             &[],
         ));
     }
-    if input.relation_type == WorldKbRelationshipKind::Custom && input.custom_label.is_none() {
+    if input.relation_type == NexusWorldKbRelationshipKind::Custom && input.custom_label.is_none() {
         return Err(NexusApiError::world_kb_validation_failed(
             &["custom relation_type requires custom_label".to_string()],
             &[],
@@ -1576,33 +1587,36 @@ fn project_relationship(row: &KbRelationshipRow, direction: &str) -> WorldKbRela
         .as_deref()
         .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok());
 
-    let relation_type: WorldKbRelationshipKind = row.relation_type.parse().unwrap_or_else(|_| {
-        warn!(
-            metric = "world_kb_relation_type_coercion",
-            relationship_id = row.relationship_id,
-            world_id = row.world_id,
-            relation_type = row.relation_type,
-            %direction,
-            "unknown relation_type stored in kb_relationships; projecting as Custom"
-        );
-        WorldKbRelationshipKind::Custom
-    });
+    let relation_type: nexus_contracts::WorldKbRelationshipKind =
+        row.relation_type.parse().unwrap_or_else(|_| {
+            warn!(
+                metric = "world_kb_relation_type_coercion",
+                relationship_id = row.relationship_id,
+                world_id = row.world_id,
+                relation_type = row.relation_type,
+                %direction,
+                "unknown relation_type stored in kb_relationships; projecting as Custom"
+            );
+            nexus_contracts::WorldKbRelationshipKind::Custom
+        });
 
     WorldKbRelationshipProjection {
         relationship_id: row.relationship_id.clone(),
         world_id: row.world_id.clone(),
         source_entity_id: row.source_entity_id.clone(),
         target_entity_id: row.target_entity_id.clone(),
-        relation_type,
+        relation_type: wire_cast(relation_type),
         custom_label: row.custom_label.clone(),
         symmetric: row.symmetric != 0,
         confidence: row.confidence,
         source_anchor_ids,
-        metadata,
+        metadata: metadata
+            .and_then(|v| v.as_object().cloned())
+            .unwrap_or_default(),
         needs_review: row.needs_review != 0,
-        source: row.source.clone(),
+        source: wire_cast(row.source.clone()),
         version: u64::try_from(row.revision).unwrap_or(0),
         updated_at: row.updated_at.clone(),
-        projection_direction: direction.to_string(),
+        projection_direction: wire_cast(direction.to_string()),
     }
 }

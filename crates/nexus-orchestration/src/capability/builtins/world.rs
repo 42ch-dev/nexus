@@ -646,7 +646,7 @@ impl Capability for WorldDeltaApply {
                         .and_then(|v| {
                             serde_json::from_value::<nexus_contracts::BlockType>(v.clone()).ok()
                         })
-                        .unwrap_or_default();
+                        .unwrap_or(nexus_contracts::BlockType::Character);
                     let mut kb =
                         nexus_kb::key_block::KeyBlock::new(&world_id, block_type, canonical);
                     if let Some(body) = ch.new_value.get("body_json").and_then(|v| {

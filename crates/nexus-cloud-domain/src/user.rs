@@ -133,15 +133,16 @@ impl User {
 impl From<nexus_contracts::User> for User {
     fn from(c: nexus_contracts::User) -> Self {
         Self {
-            schema_version: c.schema_version,
-            user_id: c.user_id,
-            username: c.username,
+            schema_version: u32::try_from(c.schema_version.get())
+                .expect("schema_version exceeds u32 range"),
+            user_id: c.user_id.to_string(),
+            username: c.username.to_string(),
             email: c.email,
-            display_name: c.display_name,
+            display_name: c.display_name.to_string(),
             account_status: c.account_status.as_str().to_string(),
             subscription_tier: c.subscription_tier.as_str().to_string(),
-            created_at: c.created_at,
-            updated_at: c.updated_at,
+            created_at: c.created_at.to_rfc3339(),
+            updated_at: c.updated_at.map(|d| d.to_rfc3339()),
         }
     }
 }
@@ -165,15 +166,22 @@ impl TryFrom<User> for nexus_contracts::User {
             ))
         })?;
         Ok(Self {
-            schema_version: d.schema_version,
-            user_id: d.user_id,
-            username: d.username,
+            schema_version: std::num::NonZeroU64::new(u64::from(d.schema_version))
+                .expect("schema_version must be non-zero"),
+            user_id: d.user_id.parse().unwrap(),
+            username: d.username.parse().unwrap(),
             email: d.email,
-            display_name: d.display_name,
+            display_name: d.display_name.parse().unwrap(),
             account_status,
             subscription_tier,
-            created_at: d.created_at,
-            updated_at: d.updated_at,
+            created_at: chrono::DateTime::parse_from_rfc3339(&d.created_at)
+                .unwrap()
+                .with_timezone(&chrono::Utc),
+            updated_at: d.updated_at.map(|s| {
+                chrono::DateTime::parse_from_rfc3339(&s)
+                    .unwrap()
+                    .with_timezone(&chrono::Utc)
+            }),
         })
     }
 }

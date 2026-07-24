@@ -514,8 +514,8 @@ pub async fn batch_update_findings_handler(
     if patch.status.is_none() && patch.target_executor.is_none() {
         return Ok(Json(BatchUpdateFindingsResponse {
             updated: 0,
-            not_found: None,
-            conflict: None,
+            not_found: Vec::new(),
+            conflict: Vec::new(),
         }));
     }
 
@@ -563,16 +563,8 @@ pub async fn batch_update_findings_handler(
 
     Ok(Json(BatchUpdateFindingsResponse {
         updated,
-        not_found: if not_found.is_empty() {
-            None
-        } else {
-            Some(not_found)
-        },
-        conflict: if conflict.is_empty() {
-            None
-        } else {
-            Some(conflict)
-        },
+        not_found,
+        conflict,
     }))
 }
 

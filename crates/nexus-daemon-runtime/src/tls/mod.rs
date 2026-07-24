@@ -102,8 +102,12 @@ async fn try_load_existing(
         config,
         CertFingerprintResponse {
             fingerprint,
-            algorithm: "sha256".to_string(),
-            created_at,
+            algorithm: "sha256".parse().expect("valid algorithm constant"),
+            created_at: created_at.and_then(|s| {
+                chrono::DateTime::parse_from_rfc3339(&s)
+                    .ok()
+                    .map(|dt| dt.with_timezone(&chrono::Utc))
+            }),
         },
     ))
 }
@@ -156,11 +160,11 @@ async fn generate_and_persist(
         .context("write key.pem")?;
 
     let fingerprint = fingerprint_from_der(cert.der());
-    let created_at = Some(chrono::Utc::now().to_rfc3339());
+    let created_at = chrono::Utc::now();
     let response = CertFingerprintResponse {
         fingerprint: fingerprint.clone(),
-        algorithm: "sha256".to_string(),
-        created_at,
+        algorithm: "sha256".parse().expect("valid algorithm constant"),
+        created_at: Some(created_at),
     };
 
     info!(
@@ -338,7 +342,7 @@ mod tests {
             .await
             .expect("first generation");
         assert!(fp1.fingerprint.starts_with("SHA256:"));
-        assert_eq!(fp1.algorithm, "sha256");
+        assert_eq!(fp1.algorithm.to_string(), "sha256");
         assert!(fp1.created_at.is_some());
 
         // The file-backed config must be usable.

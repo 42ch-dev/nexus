@@ -103,37 +103,66 @@ impl SourceAnchor {
 }
 
 // ── Conversion: Domain ↔ Contract ──────────────────────────────────────
+//
+// The generated `KeyBlock.source_anchor` field is typify's inlined
+// `NexusSourceAnchor` (not the `common_types::SourceAnchor` alias). Its
+// `story_summary_refs` is a `Vec<…>` (default-empty) rather than an
+// `Option<Vec<…>>`; the mapping preserves that distinction.
 
-impl From<nexus_contracts::SourceAnchor> for SourceAnchor {
-    fn from(c: nexus_contracts::SourceAnchor) -> Self {
+use nexus_contracts::domain::{NexusSourceAnchor, NexusSourceAnchorStorySummaryRefsItem};
+
+impl From<NexusSourceAnchorStorySummaryRefsItem> for SourceSummaryRef {
+    fn from(c: NexusSourceAnchorStorySummaryRefsItem) -> Self {
         Self {
-            story_summary_refs: c.story_summary_refs.map(|refs| {
-                refs.into_iter()
-                    .map(|r| SourceSummaryRef {
-                        story_manifest_id: r.story_manifest_id,
-                        summary_unit_id: r.summary_unit_id,
-                        unit_kind: r.unit_kind,
-                    })
-                    .collect()
+            story_manifest_id: c.story_manifest_id.to_string(),
+            summary_unit_id: c.summary_unit_id.to_string(),
+            unit_kind: c.unit_kind,
+        }
+    }
+}
+
+impl From<SourceSummaryRef> for NexusSourceAnchorStorySummaryRefsItem {
+    fn from(d: SourceSummaryRef) -> Self {
+        Self {
+            story_manifest_id: d.story_manifest_id.parse().unwrap_or_else(|e| {
+                panic!("invalid story_manifest_id during domain→contract conversion: {e}")
             }),
+            summary_unit_id: d.summary_unit_id.parse().unwrap_or_else(|e| {
+                panic!("invalid summary_unit_id during domain→contract conversion: {e}")
+            }),
+            unit_kind: d.unit_kind,
+        }
+    }
+}
+
+impl From<NexusSourceAnchor> for SourceAnchor {
+    fn from(c: NexusSourceAnchor) -> Self {
+        Self {
+            story_summary_refs: if c.story_summary_refs.is_empty() {
+                None
+            } else {
+                Some(
+                    c.story_summary_refs
+                        .into_iter()
+                        .map(SourceSummaryRef::from)
+                        .collect(),
+                )
+            },
             excerpt: c.excerpt,
             summary: c.summary,
         }
     }
 }
 
-impl From<SourceAnchor> for nexus_contracts::SourceAnchor {
+impl From<SourceAnchor> for NexusSourceAnchor {
     fn from(d: SourceAnchor) -> Self {
         Self {
-            story_summary_refs: d.story_summary_refs.map(|refs| {
-                refs.into_iter()
-                    .map(|r| nexus_contracts::SourceSummaryRef {
-                        story_manifest_id: r.story_manifest_id,
-                        summary_unit_id: r.summary_unit_id,
-                        unit_kind: r.unit_kind,
-                    })
-                    .collect()
-            }),
+            story_summary_refs: d
+                .story_summary_refs
+                .unwrap_or_default()
+                .into_iter()
+                .map(NexusSourceAnchorStorySummaryRefsItem::from)
+                .collect(),
             excerpt: d.excerpt,
             summary: d.summary,
         }

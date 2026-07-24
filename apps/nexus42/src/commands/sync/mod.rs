@@ -158,6 +158,9 @@ pub fn confirm_auto_reject(force: bool) -> bool {
 /// - Sync API calls fail
 /// - Invalid `world_id` or `creator_id` parameters
 ///
+/// # Panics
+/// Panics if a sync API type conversion fails (drift-gate-proven wire equivalence).
+///
 /// Note: This function is long; splitting would break the coherent sync flow.
 #[allow(clippy::too_many_lines)]
 pub async fn run(cmd: SyncCommand, config: &CliConfig) -> Result<()> {
@@ -228,8 +231,8 @@ pub async fn run(cmd: SyncCommand, config: &CliConfig) -> Result<()> {
             let auth_token = crate::auth::user_auth::ensure_valid_token(config).await?;
 
             let request = nexus_contracts::SyncPullRequest {
-                schema_version: 1,
-                world_id,
+                schema_version: std::num::NonZeroU64::MIN,
+                world_id: world_id.try_into().expect("valid world id"),
                 after_confirmed_delta_sequence: after_sequence,
             };
 

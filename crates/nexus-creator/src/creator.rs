@@ -238,25 +238,28 @@ impl Creator {
 impl From<nexus_contracts::Creator> for Creator {
     fn from(c: nexus_contracts::Creator) -> Self {
         Self {
-            schema_version: c.schema_version,
-            creator_id: c.creator_id,
-            user_id: c.user_id,
-            display_name: c.display_name,
+            schema_version: u32::try_from(c.schema_version.get())
+                .expect("schema_version exceeds u32 range"),
+            creator_id: c.creator_id.to_string(),
+            user_id: c.user_id.map(|u| u.to_string()),
+            display_name: c.display_name.to_string(),
             status: c.status.as_str().to_string(),
-            is_platform_owned: c.is_platform_owned,
+            is_platform_owned: Some(c.is_platform_owned),
             api_key_ref: c.api_key_ref,
             registration_source: c.registration_source.as_str().to_string(),
-            persona_summary: c.persona_summary,
+            persona_summary: c.persona_summary.map(|p| p.to_string()),
             style_profile: c.style_profile.map(|v| {
-                serde_json::from_value(v).unwrap_or(StyleProfile {
-                    tone: None,
-                    narrative_preferences: None,
-                    forbidden_patterns: None,
-                })
+                serde_json::from_value(serde_json::to_value(&v).unwrap_or_default()).unwrap_or(
+                    StyleProfile {
+                        tone: None,
+                        narrative_preferences: None,
+                        forbidden_patterns: None,
+                    },
+                )
             }),
-            experience_revision: c.experience_revision,
-            created_at: c.created_at,
-            updated_at: c.updated_at,
+            experience_revision: Some(c.experience_revision),
+            created_at: c.created_at.to_rfc3339(),
+            updated_at: c.updated_at.map(|d| d.to_rfc3339()),
         }
     }
 }
@@ -267,14 +270,15 @@ impl std::convert::TryFrom<Creator> for nexus_contracts::Creator {
     fn try_from(d: Creator) -> Result<Self, Self::Error> {
         use std::str::FromStr;
         Ok(Self {
-            schema_version: d.schema_version,
-            creator_id: d.creator_id,
-            user_id: d.user_id,
-            display_name: d.display_name,
+            schema_version: std::num::NonZeroU64::new(u64::from(d.schema_version))
+                .expect("schema_version must be non-zero"),
+            creator_id: d.creator_id.parse().unwrap(),
+            user_id: d.user_id.map(|u| u.parse().unwrap()),
+            display_name: d.display_name.parse().unwrap(),
             status: nexus_contracts::CreatorStatus::from_str(&d.status).map_err(|_| {
                 CreatorError::ValidationError(format!("invalid status: {}", d.status))
             })?,
-            is_platform_owned: d.is_platform_owned,
+            is_platform_owned: d.is_platform_owned.unwrap_or(false),
             api_key_ref: d.api_key_ref,
             registration_source: nexus_contracts::RegistrationSource::from_str(
                 &d.registration_source,
@@ -285,18 +289,27 @@ impl std::convert::TryFrom<Creator> for nexus_contracts::Creator {
                     d.registration_source
                 ))
             })?,
-            persona_summary: d.persona_summary,
+            persona_summary: d.persona_summary.map(|s| s.parse().unwrap()),
             style_profile: d.style_profile.map(|sp| {
-                serde_json::to_value(&StyleProfileJson {
-                    tone: sp.tone,
-                    narrative_preferences: sp.narrative_preferences,
-                    forbidden_patterns: sp.forbidden_patterns,
-                })
+                serde_json::from_value(
+                    serde_json::to_value(&StyleProfileJson {
+                        tone: sp.tone,
+                        narrative_preferences: sp.narrative_preferences,
+                        forbidden_patterns: sp.forbidden_patterns,
+                    })
+                    .unwrap_or_default(),
+                )
                 .unwrap_or_default()
             }),
-            experience_revision: d.experience_revision,
-            created_at: d.created_at,
-            updated_at: d.updated_at,
+            experience_revision: d.experience_revision.unwrap_or(0),
+            created_at: chrono::DateTime::parse_from_rfc3339(&d.created_at)
+                .unwrap()
+                .with_timezone(&chrono::Utc),
+            updated_at: d.updated_at.map(|s| {
+                chrono::DateTime::parse_from_rfc3339(&s)
+                    .unwrap()
+                    .with_timezone(&chrono::Utc)
+            }),
         })
     }
 }

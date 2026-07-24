@@ -37,8 +37,8 @@ async fn push_handles_version_mismatch_conflict() {
     let client = SyncClient::new(base.trim_end_matches('/'), VALID_TOKEN).expect("client");
 
     let delta = LocalDelta {
-        delta_type: DeltaType::KeyBlock,
-        operation: DeltaOperation::Create,
+        delta_type: "key_block".parse().unwrap(),
+        operation: "create".parse().unwrap(),
         target_entity_type: Some("character".to_string()),
         target_entity_id: None,
         payload: json!({"display_name": "ConflictTest", "block_type": "character"}),
@@ -76,8 +76,7 @@ async fn push_partial_success() {
         "bundle_apply_status": "partial_success",
         "applied_deltas": ["delta_001", "delta_002"],
         "rejected_deltas": [{
-            "delta_id": "delta_003",
-            "reason": "entity_locked",
+                        "reason": "entity_locked",
             "locked_by_creator_id": "ctr_other"
         }],
         "world_revision": 5u64,
@@ -93,8 +92,8 @@ async fn push_partial_success() {
     let client = SyncClient::new(base.trim_end_matches('/'), VALID_TOKEN).expect("client");
 
     let delta = LocalDelta {
-        delta_type: DeltaType::KeyBlock,
-        operation: DeltaOperation::Update,
+        delta_type: "key_block".parse().unwrap(),
+        operation: "update".parse().unwrap(),
         target_entity_type: Some("character".to_string()),
         target_entity_id: Some("ent_abc".to_string()),
         payload: json!({"display_name": "Updated"}),
@@ -125,10 +124,10 @@ async fn pull_with_incoming_bundles() {
         "bundles": [
             {
                 "schema_version": 1,
-                "bundle_id": "bnd_001",
+                "bundle_id": "bdl_001",
                 "command_id": "cmd_001",
                 "workspace_id": "wrk_remote",
-                "world_id": "wld_merge_test",
+                "world_id": "wld_mergetest",
                 "creator_id": "ctr_other",
                 "submitting_creator_id": "ctr_other",
                 "bundle_type": "world_sync",
@@ -137,9 +136,7 @@ async fn pull_with_incoming_bundles() {
                 "base_versions": {},
                 "deltas": [
                     {
-                        "schema_version": 1,
-                        "delta_id": "delta_remote_1",
-                        "delta_type": "key_block",
+                                                                        "delta_type": "key_block",
                         "operation": "create",
                         "target_entity_type": "character",
                         "payload": {"display_name": "RemoteChar"},
@@ -161,8 +158,8 @@ async fn pull_with_incoming_bundles() {
     let client = SyncClient::new(base.trim_end_matches('/'), VALID_TOKEN).expect("client");
 
     let req = SyncPullRequest {
-        schema_version: 1,
-        world_id: "wld_merge_test".to_string(),
+        schema_version: std::num::NonZeroU64::new(1).unwrap(),
+        world_id: "wld_mergetest".parse().unwrap(),
         after_confirmed_delta_sequence: Some(99),
     };
 
@@ -171,7 +168,7 @@ async fn pull_with_incoming_bundles() {
     assert_eq!(resp.confirmed_delta_sequence, 100);
     assert!(!resp.bundles.is_empty(), "Expected incoming bundles");
     assert_eq!(resp.bundles.len(), 1);
-    assert_eq!(resp.bundles[0].bundle_id.as_str(), "bnd_001");
+    assert_eq!(resp.bundles[0].bundle_id.to_string(), "bdl_001");
 }
 
 /// Test sync pull with empty response (already up to date).
@@ -196,8 +193,8 @@ async fn pull_empty_when_up_to_date() {
     let client = SyncClient::new(base.trim_end_matches('/'), VALID_TOKEN).expect("client");
 
     let req = SyncPullRequest {
-        schema_version: 1,
-        world_id: "wld_uptodate".to_string(),
+        schema_version: std::num::NonZeroU64::new(1).unwrap(),
+        world_id: "wld_uptodate".parse().unwrap(),
         after_confirmed_delta_sequence: Some(42),
     };
 
@@ -233,8 +230,8 @@ async fn bidirectional_push_then_pull() {
         "bundles": [
             {
                 "schema_version": 1,
-                "bundle_id": "bnd_remote_001",
-                "command_id": "cmd_remote_001",
+                "bundle_id": "bdl_remote001",
+                "command_id": "cmd_remote001",
                 "workspace_id": "wrk_other",
                 "world_id": "wld_bidir",
                 "creator_id": "ctr_other",
@@ -245,9 +242,7 @@ async fn bidirectional_push_then_pull() {
                 "base_versions": {},
                 "deltas": [
                     {
-                        "schema_version": 1,
-                        "delta_id": "delta_from_remote",
-                        "delta_type": "key_block",
+                                                                        "delta_type": "key_block",
                         "operation": "create",
                         "target_entity_type": "location",
                         "payload": {"display_name": "RemoteLocation"},
@@ -270,8 +265,8 @@ async fn bidirectional_push_then_pull() {
 
     // Push local delta
     let local_delta = LocalDelta {
-        delta_type: DeltaType::KeyBlock,
-        operation: DeltaOperation::Create,
+        delta_type: "key_block".parse().unwrap(),
+        operation: "create".parse().unwrap(),
         target_entity_type: Some("character".to_string()),
         target_entity_id: None,
         payload: json!({"display_name": "LocalChar"}),
@@ -291,15 +286,15 @@ async fn bidirectional_push_then_pull() {
 
     // Pull to get remote changes
     let pull_req = SyncPullRequest {
-        schema_version: 1,
-        world_id: "wld_bidir".to_string(),
+        schema_version: std::num::NonZeroU64::new(1).unwrap(),
+        world_id: "wld_bidir".parse().unwrap(),
         after_confirmed_delta_sequence: Some(50),
     };
 
     let pull_resp = client.pull_bundles(&pull_req).await.expect("pull");
     assert_eq!(pull_resp.confirmed_delta_sequence, 51);
     assert!(!pull_resp.bundles.is_empty());
-    assert_eq!(pull_resp.bundles[0].bundle_id.as_str(), "bnd_remote_001");
+    assert_eq!(pull_resp.bundles[0].bundle_id.to_string(), "bdl_remote001");
 }
 
 /// Test sync push rejected due to version mismatch conflict (409 status).
@@ -324,8 +319,8 @@ async fn push_rejected_with_version_mismatch_409() {
     let client = SyncClient::new(base.trim_end_matches('/'), VALID_TOKEN).expect("client");
 
     let delta = LocalDelta {
-        delta_type: DeltaType::KeyBlock,
-        operation: DeltaOperation::Update,
+        delta_type: "key_block".parse().unwrap(),
+        operation: "update".parse().unwrap(),
         target_entity_type: Some("character".to_string()),
         target_entity_id: Some("ent_stale".to_string()),
         payload: json!({"display_name": "StaleUpdate"}),
@@ -372,8 +367,8 @@ async fn pull_after_rejection_refreshes_state() {
     let client = SyncClient::new(base.trim_end_matches('/'), VALID_TOKEN).expect("client");
 
     let req = SyncPullRequest {
-        schema_version: 1,
-        world_id: "wld_refresh".to_string(),
+        schema_version: std::num::NonZeroU64::new(1).unwrap(),
+        world_id: "wld_refresh".parse().unwrap(),
         after_confirmed_delta_sequence: None, // Full sync after rejection
     };
 
@@ -407,8 +402,8 @@ async fn sequential_pushes_maintain_sequence() {
 
     for i in 0..3 {
         let delta = LocalDelta {
-            delta_type: DeltaType::KeyBlock,
-            operation: DeltaOperation::Create,
+            delta_type: "key_block".parse().unwrap(),
+            operation: "create".parse().unwrap(),
             target_entity_type: Some("character".to_string()),
             target_entity_id: None,
             payload: json!({"display_name": format!("Char{}", i)}),
@@ -440,7 +435,7 @@ async fn pull_response_indicates_more_bundles() {
         "bundles": [
             {
                 "schema_version": 1,
-                "bundle_id": "bnd_page1",
+                "bundle_id": "bdl_page1",
                 "command_id": "cmd_page1",
                 "workspace_id": "wrk_p1",
                 "world_id": "wld_paginate",
@@ -466,8 +461,8 @@ async fn pull_response_indicates_more_bundles() {
     let client = SyncClient::new(base.trim_end_matches('/'), VALID_TOKEN).expect("client");
 
     let req = SyncPullRequest {
-        schema_version: 1,
-        world_id: "wld_paginate".to_string(),
+        schema_version: std::num::NonZeroU64::new(1).unwrap(),
+        world_id: "wld_paginate".parse().unwrap(),
         after_confirmed_delta_sequence: None,
     };
 
@@ -498,8 +493,8 @@ async fn push_all_success_response() {
     let client = SyncClient::new(base.trim_end_matches('/'), VALID_TOKEN).expect("client");
 
     let delta = LocalDelta {
-        delta_type: DeltaType::KeyBlock,
-        operation: DeltaOperation::Create,
+        delta_type: "key_block".parse().unwrap(),
+        operation: "create".parse().unwrap(),
         target_entity_type: Some("character".to_string()),
         target_entity_id: None,
         payload: json!({"display_name": "SuccessChar"}),

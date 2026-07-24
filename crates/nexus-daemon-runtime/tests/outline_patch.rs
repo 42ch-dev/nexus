@@ -13,6 +13,8 @@
 
 #![allow(clippy::unwrap_used)]
 
+use std::num::NonZeroU64;
+
 use axum::extract::{Path, State};
 use axum::Json;
 use nexus_daemon_runtime::api::errors::NexusApiError;
@@ -167,7 +169,7 @@ async fn b1_valid_kebab_slug_passes() {
     )
     .await
     .expect("valid kebab slug should pass");
-    assert_eq!(resp.new_revision, 1);
+    assert_eq!(resp.new_revision, NonZeroU64::new(1).unwrap());
 }
 
 #[tokio::test]
@@ -284,7 +286,7 @@ async fn b1_allows_unchanged_slug_on_same_chapter() {
     )
     .await
     .expect("re-asserting the same chapter's slug should pass");
-    assert_eq!(resp.new_revision, 1);
+    assert_eq!(resp.new_revision, NonZeroU64::new(1).unwrap());
 }
 
 // ─── B2: volume existence / pre-creation ────────────────────────────────────
@@ -309,7 +311,7 @@ async fn b2_attach_to_existing_volume_passes() {
     )
     .await
     .expect("attach to existing volume should pass");
-    assert_eq!(resp.new_revision, 1);
+    assert_eq!(resp.new_revision, NonZeroU64::new(1).unwrap());
 }
 
 #[tokio::test]
@@ -333,7 +335,7 @@ async fn b2_move_to_next_sequential_volume_passes() {
     )
     .await
     .expect("move to the next sequential volume should pass");
-    assert_eq!(resp.new_revision, 1);
+    assert_eq!(resp.new_revision, NonZeroU64::new(1).unwrap());
 }
 
 #[tokio::test]
@@ -390,9 +392,9 @@ async fn b2_rejects_arbitrary_nonexistent_volume_via_chapter_patch() {
 async fn timeline_patch(
     state: &WorkspaceState,
     work_id: &str,
-    base_revision: i64,
+    base_revision: u64,
     body: Value,
-) -> Result<i64, NexusApiError> {
+) -> Result<u64, NexusApiError> {
     let mut req = body;
     req["work_id"] = json!(work_id);
     req["base_revision"] = json!(base_revision);
@@ -402,7 +404,7 @@ async fn timeline_patch(
         Json(serde_json::from_value(req).unwrap()),
     )
     .await
-    .map(|Json(resp)| resp.new_revision)
+    .map(|Json(resp)| resp.new_revision.get())
 }
 
 #[tokio::test]
@@ -595,7 +597,7 @@ async fn b4_allows_move_chapter_on_draft_chapter() {
     )
     .await
     .expect("moving a draft chapter should pass");
-    assert_eq!(resp.new_revision, 1);
+    assert_eq!(resp.new_revision, NonZeroU64::new(1).unwrap());
 }
 
 // ─── V1.75 A2: outline-prose content patch (canvas-pivot parity-close) ───────
@@ -610,9 +612,9 @@ async fn chapter_patch(
     state: &WorkspaceState,
     work_id: &str,
     chapter: &str,
-    base_revision: i64,
+    base_revision: u64,
     set: Value,
-) -> Result<i64, NexusApiError> {
+) -> Result<u64, NexusApiError> {
     let req = json!({
         "work_id": work_id,
         "chapter_id": chapter.parse::<i64>().unwrap_or(0),
@@ -625,7 +627,7 @@ async fn chapter_patch(
         Json(serde_json::from_value(req).unwrap()),
     )
     .await
-    .map(|Json(resp)| resp.new_revision)
+    .map(|Json(resp)| resp.new_revision.get())
 }
 
 /// Read a chapter row to inspect its `outline_path` / `body_path` columns.
@@ -867,26 +869,21 @@ async fn v175_content_patch_does_not_touch_body_path() {
 
 #[tokio::test]
 async fn v175_content_patch_rejects_oversized_content() {
-    let ctx = test_ctx().await;
-    let work_id = setup_work(&ctx.state).await;
-    seed_chapter(ctx.state.pool().unwrap(), &work_id, 1).await;
-
-    // 10 MiB + 1 byte exceeds the OUTLINE_FILE_MAX_BYTES cap.
+    // 10 MiB + 1 byte exceeds the schema maxLength (OUTLINE_FILE_MAX_BYTES).
+    // typify enforces maxLength at serde deserialization — rejection happens
+    // before the handler's chapter_outline_content_too_large check.
     let oversized = "x".repeat((10 * 1024 * 1024) + 1);
-    let err = chapter_patch(
-        &ctx.state,
-        &work_id,
-        "1",
-        0,
-        json!({ "content": oversized }),
-    )
-    .await
-    .expect_err("oversized content should be rejected");
+    let req = json!({
+        "work_id": "work",
+        "chapter_id": 1,
+        "base_revision": 0,
+        "set": { "content": oversized },
+    });
+    let err = serde_json::from_value::<nexus_contracts::OutlinePatchChapterRequest>(req)
+        .expect_err("oversized content should be rejected at wire boundary");
+    let err_msg = err.to_string();
     assert!(
-        matches!(
-            err,
-            NexusApiError::BadRequest { ref code, .. } if code == "chapter_outline_content_too_large"
-        ),
-        "expected BadRequest(chapter_outline_content_too_large), got {err:?}"
+        err_msg.contains("longer than 10485760"),
+        "expected maxLength wire rejection, got {err_msg}"
     );
 }

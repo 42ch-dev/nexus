@@ -125,13 +125,7 @@ async fn patch_entity_title_bumps_version() {
     let req = WorldKbPatchEntityRequest {
         entity_id: "kb_hero".to_string(),
         expected_version: 0,
-        patch: WorldKbEntityPatch {
-            title: Some("Aria Stormwind".to_string()),
-            body: None,
-            aliases: None,
-            block_type: None,
-        },
-        ..Default::default()
+        patch: serde_json::from_value(serde_json::json!({"title": "Aria Stormwind"})).unwrap(),
     };
     let Json(resp) = patch_entity(
         State(state.clone()),
@@ -142,7 +136,7 @@ async fn patch_entity_title_bumps_version() {
     .expect("patch should succeed");
 
     assert_eq!(resp.version, 1, "NULL revision should bump to 1");
-    assert_eq!(resp.entity.canonical_name, "Aria Stormwind");
+    assert_eq!(resp.entity.canonical_name.to_string(), "Aria Stormwind");
     assert_eq!(resp.entity.status, "confirmed");
 }
 
@@ -164,13 +158,7 @@ async fn patch_entity_stale_version_returns_409() {
     let req = WorldKbPatchEntityRequest {
         entity_id: "kb_hero".to_string(),
         expected_version: 2, // stale
-        patch: WorldKbEntityPatch {
-            title: Some("Aria v2".to_string()),
-            body: None,
-            aliases: None,
-            block_type: None,
-        },
-        ..Default::default()
+        patch: serde_json::from_value(serde_json::json!({"title": "Aria v2"})).unwrap(),
     };
     let err = patch_entity(
         State(state.clone()),
@@ -204,13 +192,7 @@ async fn patch_entity_deleted_entity_rejected_422() {
     let req = WorldKbPatchEntityRequest {
         entity_id: "kb_dead".to_string(),
         expected_version: 0,
-        patch: WorldKbEntityPatch {
-            title: Some("Ghost Renamed".to_string()),
-            body: None,
-            aliases: None,
-            block_type: None,
-        },
-        ..Default::default()
+        patch: serde_json::from_value(serde_json::json!({"title": "Ghost Renamed"})).unwrap(),
     };
     let err = patch_entity(
         State(state.clone()),
@@ -263,13 +245,7 @@ async fn patch_entity_cross_author_forbidden() {
     let req = WorldKbPatchEntityRequest {
         entity_id: "kb_other".to_string(),
         expected_version: 0,
-        patch: WorldKbEntityPatch {
-            title: Some("Villain v2".to_string()),
-            body: None,
-            aliases: None,
-            block_type: None,
-        },
-        ..Default::default()
+        patch: serde_json::from_value(serde_json::json!({"title": "Villain v2"})).unwrap(),
     };
     let err = patch_entity(
         State(state.clone()),
@@ -337,13 +313,7 @@ async fn patch_entity_cross_author_does_not_leak_existence() {
     let req = WorldKbPatchEntityRequest {
         entity_id: "kb_mine".to_string(),
         expected_version: 0,
-        patch: WorldKbEntityPatch {
-            title: Some("Whatever".to_string()),
-            body: None,
-            aliases: None,
-            block_type: None,
-        },
-        ..Default::default()
+        patch: serde_json::from_value(serde_json::json!({"title": "Whatever"})).unwrap(),
     };
     let err = patch_entity(
         State(state.clone()),
@@ -384,11 +354,10 @@ async fn promote_adopt_confirms_candidate() {
     let req = WorldKbPromoteCandidateRequest {
         job_id: candidate.job_id.clone(),
         candidate_id: "kb_cand".to_string(),
-        action: "adopt".to_string(),
+        action: "adopt".parse().unwrap(),
         expected_version: u64::try_from(candidate.version).unwrap_or(0),
         merge_target_id: None,
         patch: None,
-        ..Default::default()
     };
     let Json(resp) = promote_candidate(
         State(state.clone()),
@@ -400,7 +369,7 @@ async fn promote_adopt_confirms_candidate() {
 
     let entity = resp.entity.expect("adopt returns a confirmed entity");
     assert_eq!(entity.status, "confirmed");
-    assert_eq!(entity.canonical_name, "Kael");
+    assert_eq!(entity.canonical_name.to_string(), "Kael");
     assert_eq!(resp.job.status, "confirmed");
 }
 
@@ -424,11 +393,10 @@ async fn promote_reject_dismisses_candidate() {
     let req = WorldKbPromoteCandidateRequest {
         job_id: candidate.job_id.clone(),
         candidate_id: "kb_cand".to_string(),
-        action: "reject".to_string(),
+        action: "reject".parse().unwrap(),
         expected_version: u64::try_from(candidate.version).unwrap_or(0),
         merge_target_id: None,
         patch: None,
-        ..Default::default()
     };
     let Json(resp) = promote_candidate(
         State(state.clone()),
@@ -462,11 +430,10 @@ async fn promote_stale_version_returns_409() {
     let req = WorldKbPromoteCandidateRequest {
         job_id: candidate.job_id.clone(),
         candidate_id: "kb_cand".to_string(),
-        action: "adopt".to_string(),
+        action: "adopt".parse().unwrap(),
         expected_version: u64::try_from(candidate.version).unwrap_or(0) + 100, // stale
         merge_target_id: None,
         patch: None,
-        ..Default::default()
     };
     let err = promote_candidate(
         State(state.clone()),
@@ -553,10 +520,7 @@ async fn get_candidates_returns_pending() {
     .expect("candidates should succeed");
     assert_eq!(resp.items.len(), 1);
     assert_eq!(resp.items[0].canonical_name, "Cand One");
-    assert_eq!(
-        resp.items[0].block_type,
-        nexus_contracts::BlockType::Character
-    );
+    assert_eq!(resp.items[0].block_type, "character".parse().unwrap());
 }
 
 /// Regression for V1.73 qc3 W-01: cursor pagination must reach every pending
@@ -816,11 +780,10 @@ async fn promote_reject_cas_miss_conflict_carries_bumped_version() {
     let mk_req = || WorldKbPromoteCandidateRequest {
         job_id: candidate.job_id.clone(),
         candidate_id: "kb_cand".to_string(),
-        action: "reject".to_string(),
+        action: "reject".parse().unwrap(),
         expected_version: stale_expected,
         merge_target_id: None,
         patch: None,
-        ..Default::default()
     };
 
     // Deterministically create the CAS-miss scenario: bump the candidate's
@@ -913,11 +876,10 @@ async fn promote_merge_target_cas_miss_marks_target_conflict() {
     let req = WorldKbPromoteCandidateRequest {
         job_id: "xj_merge_c1".to_string(),
         candidate_id: "kb_cand".to_string(),
-        action: "merge".to_string(),
+        action: "merge".parse().unwrap(),
         expected_version: 0,
         merge_target_id: Some("kb_target".to_string()),
         patch: None,
-        ..Default::default()
     };
 
     // Hold RESERVED so the promote's CAS write blocks after its target read.
@@ -1030,11 +992,19 @@ async fn get_key_block_state_computable_returns_state() {
     .expect("state read should succeed");
 
     let expected = WorldKbKeyBlockStateResponse {
-        state: serde_json::json!({"character": {"current_hp": 85, "status_effects": ["poisoned"]}}),
+        state: Some(
+            serde_json::json!({"character": {"current_hp": 85, "status_effects": ["poisoned"]}})
+                .as_object()
+                .unwrap()
+                .clone(),
+        ),
         is_computable: true,
         version: 7,
     };
-    assert_eq!(resp, expected);
+    assert_eq!(
+        serde_json::to_value(&resp).unwrap(),
+        serde_json::to_value(&expected).unwrap()
+    );
 }
 
 #[tokio::test]
@@ -1065,7 +1035,7 @@ async fn get_key_block_state_non_computable_returns_null_state() {
     .await
     .expect("state read should succeed");
 
-    assert_eq!(resp.state, serde_json::Value::Null);
+    assert!(resp.state.is_none());
     assert!(!resp.is_computable);
     assert_eq!(resp.version, 3);
 }

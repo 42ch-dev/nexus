@@ -39,5 +39,8 @@ fn pagination_info_round_trips_through_json() {
     };
     let json = serde_json::to_string(&info).expect("serialize");
     let decoded: PaginationInfo = serde_json::from_str(&json).expect("deserialize");
-    assert_eq!(decoded, info);
+    assert_eq!(
+        serde_json::to_value(&decoded).unwrap(),
+        serde_json::to_value(&info).unwrap()
+    );
 }

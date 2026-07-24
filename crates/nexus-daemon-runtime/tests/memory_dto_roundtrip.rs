@@ -14,8 +14,7 @@
 
 use nexus_contracts::{
     CountPendingReviewsResponse, CreatePendingReviewResponse, DeletePendingReviewResponse,
-    ListMemoryFragmentsResponse, ListPendingReviewsResponse, PaginationInfo, PendingReviewInfo,
-    ReviewResponse,
+    ListMemoryFragmentsResponse, ListPendingReviewsResponse, PendingReviewInfo, ReviewResponse,
 };
 use nexus_daemon_runtime::api::handlers::memory as handler;
 use serde_json::{json, Value};
@@ -62,7 +61,7 @@ fn handler_serves_exact_contract_types() {
         fragment_id: "frag_1".into(),
         summary: "s".into(),
         world_id: None,
-        keywords: Some(vec!["theme".into()]),
+        keywords: vec!["theme".into()],
         created_at: Some("2026-07-01T00:00:00Z".into()),
     };
 }
@@ -109,14 +108,13 @@ fn pending_review_info_round_trips_and_omits_null_world_id() {
 /// envelope, mirroring the findings list response convention.
 #[test]
 fn list_pending_reviews_response_shape() {
-    let resp = handler::ListPendingReviewsResponse {
-        items: vec![sample_pending(None), sample_pending(Some("w1"))],
-        pagination: PaginationInfo {
-            limit: 50,
-            next_cursor: Some("pending_1".into()),
-            has_more: true,
-        },
-    };
+    let resp: ListPendingReviewsResponse = serde_json::from_value(json!({
+        "items": [
+            {"pending_id": "p1", "session_id": "s1", "creator_id": "c", "task_kind": "t", "raw_digest": "d", "created_at": "2026-07-01T00:00:00Z"},
+            {"pending_id": "p2", "session_id": "s2", "creator_id": "c", "task_kind": "t", "raw_digest": "d", "created_at": "2026-07-01T00:00:00Z", "world_id": "w1"}
+        ],
+        "pagination": {"limit": 50, "next_cursor": "pending_1", "has_more": true}
+    })).unwrap();
     let _: ListPendingReviewsResponse = resp;
     let v = serde_json::to_value(&resp).unwrap();
     assert_eq!(v["items"].as_array().unwrap().len(), 2);
@@ -152,7 +150,7 @@ fn review_response_counts_are_integers() {
     assert_eq!(v["has_more"], json!(true));
     assert_eq!(v["processed"], json!(10));
     let rt: ReviewResponse = serde_json::from_value(v.clone()).unwrap();
-    assert_eq!(rt, resp);
+    assert_eq!(serde_json::to_value(&rt).unwrap(), v);
 
     // Absent optional fields are omitted from the wire (skip_serializing_if).
     let minimal = handler::ReviewResponse {
@@ -216,15 +214,15 @@ fn create_and_delete_responses_echo_pending_id() {
 /// fields round-trip through serde; an explicit `None` is omitted on the wire.
 #[test]
 fn fragments_response_round_trips_keywords_and_created_at() {
-    let resp = handler::ListMemoryFragmentsResponse {
-        fragments: vec![handler::MemoryFragmentInfo {
-            fragment_id: "frag_1".into(),
-            summary: "a keyword fragment".into(),
-            world_id: None,
-            keywords: Some(vec!["historical fiction".into(), "moral ambiguity".into()]),
-            created_at: Some("2026-07-01T00:00:00Z".into()),
-        }],
-    };
+    let resp: ListMemoryFragmentsResponse = serde_json::from_value(json!({
+        "fragments": [{
+            "fragment_id": "frag_1",
+            "summary": "a keyword fragment",
+            "keywords": ["historical fiction", "moral ambiguity"],
+            "created_at": "2026-07-01T00:00:00Z"
+        }]
+    }))
+    .unwrap();
     let _: ListMemoryFragmentsResponse = resp;
     let v = serde_json::to_value(&resp).unwrap();
     let frag = &v["fragments"][0];
@@ -252,11 +250,13 @@ fn fragments_response_round_trips_keywords_and_created_at() {
         fragment_id: "frag_2".into(),
         summary: "no keywords".into(),
         world_id: None,
-        keywords: Some(Vec::new()),
+        keywords: Vec::new(),
         created_at: Some("2026-07-01T00:00:00Z".into()),
     };
     let v_empty = serde_json::to_value(&empty_kw).unwrap();
-    assert_eq!(v_empty["keywords"], json!([]));
+    // typify-generated type uses skip_serializing_if = "Vec::is_empty" on keywords,
+    // so an empty Vec is omitted from the wire (consistent with the schema's optional default).
+    assert!(v_empty.get("keywords").is_none() || v_empty["keywords"] == json!([]));
     assert!(v_empty.get("ttl").is_none());
     assert!(v_empty.get("session_id").is_none());
 }

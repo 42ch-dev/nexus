@@ -12,7 +12,7 @@
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::Json;
-use nexus_contracts::{ChapterContentQuery, ChapterStatus, ListChaptersQuery, PatchChapterRequest};
+use nexus_contracts::{ChapterContentQuery, ListChaptersQuery, PatchChapterRequest};
 use nexus_daemon_runtime::api::errors::NexusApiError;
 use nexus_daemon_runtime::api::handlers::chapters;
 use nexus_daemon_runtime::api::handlers::works::{create_work, CreateWorkRequest};
@@ -214,13 +214,13 @@ async fn patch_chapter_status_not_started_to_outlined_succeeds() {
         Path((work_id, "1".to_string())),
         Query(ChapterContentQuery { volume: None }),
         Json(PatchChapterRequest {
-            status: Some(ChapterStatus::Outlined),
+            status: Some("outlined".parse().unwrap()),
             ..Default::default()
         }),
     )
     .await
     .expect("patch to outlined");
-    assert_eq!(resp.status, ChapterStatus::Outlined);
+    assert_eq!(resp.status, "outlined".parse().unwrap());
 }
 
 #[tokio::test]
@@ -233,7 +233,7 @@ async fn patch_chapter_reverse_transition_is_rejected() {
         Path((work_id.clone(), "1".to_string())),
         Query(ChapterContentQuery { volume: None }),
         Json(PatchChapterRequest {
-            status: Some(ChapterStatus::Outlined),
+            status: Some("outlined".parse().unwrap()),
             ..Default::default()
         }),
     )
@@ -245,7 +245,7 @@ async fn patch_chapter_reverse_transition_is_rejected() {
         Path((work_id, "1".to_string())),
         Query(ChapterContentQuery { volume: None }),
         Json(PatchChapterRequest {
-            status: Some(ChapterStatus::NotStarted),
+            status: Some("not_started".parse().unwrap()),
             ..Default::default()
         }),
     )
@@ -280,7 +280,7 @@ async fn patch_published_chapter_structure_is_hard_blocked() {
         Path((work_id, "1".to_string())),
         Query(ChapterContentQuery { volume: None }),
         Json(PatchChapterRequest {
-            slug: Some("new-slug".to_string()),
+            slug: Some("new-slug".parse().unwrap()),
             ..Default::default()
         }),
     )
@@ -315,7 +315,7 @@ async fn patch_finalized_chapter_structure_requires_confirmation() {
         Path((work_id.clone(), "1".to_string())),
         Query(ChapterContentQuery { volume: None }),
         Json(PatchChapterRequest {
-            slug: Some("new-slug".to_string()),
+            slug: Some("new-slug".parse().unwrap()),
             ..Default::default()
         }),
     )
@@ -332,7 +332,7 @@ async fn patch_finalized_chapter_structure_requires_confirmation() {
         Path((work_id, "1".to_string())),
         Query(ChapterContentQuery { volume: None }),
         Json(PatchChapterRequest {
-            slug: Some("new-slug".to_string()),
+            slug: Some("new-slug".parse().unwrap()),
             confirm_structural_edit: Some(true),
             ..Default::default()
         }),

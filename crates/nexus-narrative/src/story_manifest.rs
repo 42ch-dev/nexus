@@ -260,23 +260,24 @@ impl StoryManifest {
 impl From<nexus_contracts::StoryManifest> for StoryManifest {
     fn from(c: nexus_contracts::StoryManifest) -> Self {
         Self {
-            schema_version: c.schema_version,
-            story_manifest_id: c.story_manifest_id,
-            world_id: c.world_id,
-            creator_id: c.creator_id,
+            schema_version: u32::try_from(c.schema_version.get())
+                .expect("schema_version exceeds u32 range"),
+            story_manifest_id: c.story_manifest_id.to_string(),
+            world_id: c.world_id.to_string(),
+            creator_id: c.creator_id.to_string(),
             manifest_type: c.manifest_type.as_str().to_string(),
             status: c.status.as_str().to_string(),
-            title: c.title,
-            summary_unit_id: c.summary_unit_id,
+            title: c.title.to_string(),
+            summary_unit_id: c.summary_unit_id.to_string(),
             summary_text: c.summary_text,
-            output_manuscript: c.output_manuscript,
+            output_manuscript: Some(c.output_manuscript),
             manuscript_storage: c.manuscript_storage.map(|s| s.as_str().to_string()),
             local_path: c.local_path,
             sandbox_path: c.sandbox_path,
             content_hash: c.content_hash,
             published_artifact_id: c.published_artifact_id,
-            created_at: c.created_at,
-            updated_at: c.updated_at,
+            created_at: c.created_at.to_rfc3339(),
+            updated_at: c.updated_at.map(|d| d.to_rfc3339()),
         }
     }
 }
@@ -285,16 +286,17 @@ impl From<nexus_contracts::StoryManifest> for StoryManifest {
 impl From<StoryManifest> for nexus_contracts::StoryManifest {
     fn from(d: StoryManifest) -> Self {
         Self {
-            schema_version: d.schema_version,
-            story_manifest_id: d.story_manifest_id,
-            world_id: d.world_id,
-            creator_id: d.creator_id,
+            schema_version: std::num::NonZeroU64::new(u64::from(d.schema_version))
+                .expect("schema_version must be non-zero"),
+            story_manifest_id: d.story_manifest_id.parse().unwrap(),
+            world_id: d.world_id.parse().unwrap(),
+            creator_id: d.creator_id.parse().unwrap(),
             manifest_type: nexus_contracts::ManifestType::from_str(&d.manifest_type).unwrap(),
             status: nexus_contracts::StoryManifestStatus::from_str(&d.status).unwrap(),
-            title: d.title,
-            summary_unit_id: d.summary_unit_id,
+            title: d.title.parse().unwrap(),
+            summary_unit_id: d.summary_unit_id.parse().unwrap(),
             summary_text: d.summary_text,
-            output_manuscript: d.output_manuscript,
+            output_manuscript: d.output_manuscript.unwrap_or(false),
             manuscript_storage: d
                 .manuscript_storage
                 .map(|s| nexus_contracts::ManuscriptStorage::from_str(&s).unwrap()),
@@ -302,8 +304,14 @@ impl From<StoryManifest> for nexus_contracts::StoryManifest {
             sandbox_path: d.sandbox_path,
             content_hash: d.content_hash,
             published_artifact_id: d.published_artifact_id,
-            created_at: d.created_at,
-            updated_at: d.updated_at,
+            created_at: chrono::DateTime::parse_from_rfc3339(&d.created_at)
+                .unwrap()
+                .with_timezone(&chrono::Utc),
+            updated_at: d.updated_at.map(|s| {
+                chrono::DateTime::parse_from_rfc3339(&s)
+                    .unwrap()
+                    .with_timezone(&chrono::Utc)
+            }),
         }
     }
 }

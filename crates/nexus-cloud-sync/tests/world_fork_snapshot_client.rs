@@ -37,18 +37,18 @@ async fn fork_world_parses_success() {
     let client = SyncClient::new(base.trim_end_matches('/'), VALID_TOKEN).expect("client");
 
     let req = WorldForkRequest {
-        schema_version: 1,
-        parent_world_id: Some("wld_parent".into()),
-        child_world_id: Some("wld_child".into()),
-        forked_from_event_id: Some("evt_fork01".into()),
-        created_by_creator_id: Some("ctr_test".into()),
+        schema_version: std::num::NonZeroU64::new(1).unwrap(),
+        parent_world_id: Some("wld_parent".parse().unwrap()),
+        child_world_id: Some("wld_child".parse().unwrap()),
+        forked_from_event_id: Some("evt_fork01".parse().unwrap()),
+        created_by_creator_id: Some("ctr_test".parse().unwrap()),
         fork_title: None,
     };
 
     let r = client.fork_world(&req).await.expect("fork");
-    assert_eq!(r.schema_version, 1);
-    assert_eq!(r.fork_branch.fork_branch_id, "fbk_child01");
-    assert_eq!(r.fork_branch.world_id, "wld_child");
+    assert_eq!(r.schema_version, std::num::NonZeroU64::new(1).unwrap());
+    assert_eq!(r.fork_branch.fork_branch_id.to_string(), "fbk_child01");
+    assert_eq!(r.fork_branch.world_id.to_string(), "wld_child");
 }
 
 #[tokio::test]
@@ -65,11 +65,11 @@ async fn fork_world_maps_400_to_platform_error() {
     let client = SyncClient::new(base.trim_end_matches('/'), VALID_TOKEN).expect("client");
 
     let req = WorldForkRequest {
-        schema_version: 1,
-        parent_world_id: Some("wld_parent".into()),
-        child_world_id: Some("wld_child".into()),
-        forked_from_event_id: Some("evt_fork01".into()),
-        created_by_creator_id: Some("ctr_test".into()),
+        schema_version: std::num::NonZeroU64::new(1).unwrap(),
+        parent_world_id: Some("wld_parent".parse().unwrap()),
+        child_world_id: Some("wld_child".parse().unwrap()),
+        forked_from_event_id: Some("evt_fork01".parse().unwrap()),
+        created_by_creator_id: Some("ctr_test".parse().unwrap()),
         fork_title: None,
     };
 
@@ -101,8 +101,8 @@ async fn snapshot_world_parses_success() {
     let client = SyncClient::new(base.trim_end_matches('/'), VALID_TOKEN).expect("client");
 
     let req = WorldSnapshotRequest {
-        schema_version: 1,
-        world_id: "wld_test".into(),
+        schema_version: std::num::NonZeroU64::new(1).unwrap(),
+        world_id: "wld_test".parse().unwrap(),
         at_event_id: None,
         branch_id: None,
         key_block_limit: None,
@@ -111,5 +111,5 @@ async fn snapshot_world_parses_success() {
 
     let r = client.snapshot_world(&req).await.expect("snapshot");
     assert_eq!(r.world_revision, 42);
-    assert_eq!(r.at_event_id.as_deref(), Some("evt_head"));
+    assert_eq!(r.at_event_id.as_ref().map(|s| s.as_str()), Some("evt_head"));
 }

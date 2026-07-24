@@ -592,7 +592,7 @@ pub async fn get_preset(
 
     Ok(Json(GetPresetResponse {
         id: preset_id,
-        source,
+        source: super::wire_cast(source),
         path: path.map(|p| p.display().to_string()),
         yaml,
     }))
@@ -1217,7 +1217,7 @@ states:
             .expect("get preset")
             .0;
         assert_eq!(resp.id, "crud-test");
-        assert_eq!(resp.source, "user");
+        assert_eq!(resp.source.to_string(), "user");
         assert!(resp.yaml.contains("crud-test"));
     }
 
@@ -1240,7 +1240,7 @@ states:
             .expect("get embedded preset")
             .0;
         assert_eq!(resp.id, "novel-writing");
-        assert_eq!(resp.source, "embedded");
+        assert_eq!(resp.source.to_string(), "embedded");
         assert!(resp.yaml.contains("novel-writing"));
         assert!(resp.path.is_none());
     }
@@ -1270,7 +1270,7 @@ states:
             .expect("get system preset")
             .0;
         assert_eq!(resp.id, "_system.maintenance");
-        assert_eq!(resp.source, "system");
+        assert_eq!(resp.source.to_string(), "system");
         assert!(resp.path.is_some());
         assert!(resp.yaml.contains("maintenance"));
     }

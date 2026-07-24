@@ -103,9 +103,9 @@ impl SyncCommandVariant {
     /// # Errors
     /// Returns the specific error type if the operation fails.
     pub fn from_sync_command(cmd: &SyncCommand) -> SyncResult<Self> {
-        let _workspace_id = cmd.workspace_id.clone();
-        let creator_id = cmd.creator_id.clone();
-        let world_id = cmd.world_id.clone();
+        let _workspace_id = cmd.workspace_id.to_string();
+        let creator_id = cmd.creator_id.to_string();
+        let world_id = cmd.world_id.to_string();
 
         match cmd.command_type.as_str() {
             "advance_world" => Ok(Self::AdvanceWorld {
@@ -130,11 +130,15 @@ impl SyncCommandVariant {
             }),
             "fork_world" => {
                 // Fork world requires target_world_id — check requested_by for V1.0
-                let target_world_id = cmd.requested_by.clone().ok_or_else(|| {
-                    SyncError::BundleValidation(
-                        "fork_world command missing target_world_id".to_string(),
-                    )
-                })?;
+                let target_world_id = cmd
+                    .requested_by
+                    .as_ref()
+                    .map(std::string::ToString::to_string)
+                    .ok_or_else(|| {
+                        SyncError::BundleValidation(
+                            "fork_world command missing target_world_id".to_string(),
+                        )
+                    })?;
                 Ok(Self::ForkWorld {
                     world_id,
                     creator_id,
@@ -162,21 +166,24 @@ impl SyncCommandVariant {
         workspace_id: &str,
         origin: &str,
     ) -> SyncCommand {
-        let now = chrono::Utc::now().to_rfc3339();
+        let now = chrono::Utc::now();
         SyncCommand {
-            schema_version: 1,
-            command_id: command_id.to_string(),
-            workspace_id: workspace_id.to_string(),
-            world_id: self.world_id().to_string(),
-            creator_id: self.creator_id().to_string(),
+            schema_version: std::num::NonZeroU64::new(1)
+                .expect("schema_version literal 1 is non-zero"),
+            command_id: command_id.parse().unwrap(),
+            workspace_id: workspace_id.parse().unwrap(),
+            world_id: self.world_id().parse().unwrap(),
+            creator_id: self.creator_id().parse().unwrap(),
             command_type: CommandType::from_str(self.command_type_str()).unwrap(),
             origin: ContractCommandOrigin::from_str(origin).unwrap(),
-            output_manuscript: matches!(self, Self::PublishStory { .. }).then_some(true),
+            output_manuscript: matches!(self, Self::PublishStory { .. })
+                .then_some(true)
+                .unwrap_or(false),
             status: CommandStatus::Pending,
             requested_by: match self {
                 Self::ForkWorld {
                     target_world_id, ..
-                } => Some(target_world_id.clone()),
+                } => Some(target_world_id.parse().unwrap()),
                 _ => None,
             },
             started_at: None,
@@ -234,8 +241,8 @@ mod tests {
 
         let cmd = variant.to_sync_command("cmd_001", "wrk_001", "local_user");
         assert_eq!(cmd.command_type, CommandType::AdvanceWorld);
-        assert_eq!(cmd.world_id, "wld_test");
-        assert_eq!(cmd.creator_id, "ctr_test");
+        assert_eq!(cmd.world_id.to_string(), "wld_test");
+        assert_eq!(cmd.creator_id.to_string(), "ctr_test");
         assert_eq!(cmd.origin, WireCommandOrigin::LocalUser);
 
         let recovered = SyncCommandVariant::from_sync_command(&cmd).expect("should convert");

@@ -1,5 +1,5 @@
 //! HTTP handlers have consistent error patterns.
-#![allow(clippy::missing_errors_doc)]
+#![allow(clippy::missing_errors_doc, clippy::missing_panics_doc)]
 //! Runtime handlers — health check and status
 
 use crate::workspace::WorkspaceState;
@@ -187,7 +187,7 @@ pub async fn cert_fingerprint(
         || {
             Json(CertFingerprintResponse {
                 fingerprint: String::new(),
-                algorithm: "sha256".to_string(),
+                algorithm: "sha256".parse().expect("valid algorithm constant"),
                 created_at: None,
             })
         },

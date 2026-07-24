@@ -6,6 +6,7 @@
 
 use crate::errors::KbError;
 use crate::source_anchor::SourceAnchor;
+use nexus_contracts::domain::NexusSourceAnchor;
 use nexus_contracts::BlockType;
 use nexus_contracts::KeyBlockStatus;
 use serde::{Deserialize, Serialize};
@@ -303,20 +304,22 @@ impl KeyBlock {
 impl From<nexus_contracts::KeyBlock> for KeyBlock {
     fn from(c: nexus_contracts::KeyBlock) -> Self {
         Self {
-            schema_version: c.schema_version,
-            key_block_id: c.key_block_id,
-            world_id: c.world_id,
+            schema_version: u32::try_from(c.schema_version.get())
+                .expect("schema_version exceeds u32 range"),
+            key_block_id: c.key_block_id.to_string(),
+            world_id: c.world_id.to_string(),
             block_type: c.block_type,
-            canonical_name: c.canonical_name,
+            canonical_name: c.canonical_name.to_string(),
             status: c.status.as_str().to_string(),
             revision: c.revision,
-            body: c
-                .body
-                .map(|v| serde_json::from_value(v).unwrap_or_else(|_| KeyBlockBody::default())),
+            body: c.body.map(|b| {
+                serde_json::from_value(serde_json::to_value(b).unwrap_or_default())
+                    .unwrap_or_default()
+            }),
             source_anchor: c.source_anchor.map(SourceAnchor::from),
-            created_from_command_id: c.created_from_command_id,
-            created_at: c.created_at,
-            updated_at: c.updated_at,
+            created_from_command_id: c.created_from_command_id.map(|id| id.to_string()),
+            created_at: c.created_at.to_rfc3339(),
+            updated_at: c.updated_at.map(|d| d.to_rfc3339()),
             // V1.52 T-A P2: provenance fields not yet on wire contract; default None
             source_work_id: None,
             source_chapter: None,
@@ -329,18 +332,28 @@ impl From<nexus_contracts::KeyBlock> for KeyBlock {
 impl From<KeyBlock> for nexus_contracts::KeyBlock {
     fn from(d: KeyBlock) -> Self {
         Self {
-            schema_version: d.schema_version,
-            key_block_id: d.key_block_id,
-            world_id: d.world_id,
+            schema_version: std::num::NonZeroU64::new(u64::from(d.schema_version))
+                .expect("schema_version must be non-zero"),
+            key_block_id: d.key_block_id.parse().unwrap(),
+            world_id: d.world_id.parse().unwrap(),
             block_type: d.block_type,
-            canonical_name: d.canonical_name,
+            canonical_name: d.canonical_name.parse().unwrap(),
             status: KeyBlockStatus::from_str(&d.status).unwrap(),
             revision: d.revision,
-            body: d.body.map(|b| serde_json::to_value(b).unwrap_or_default()),
-            source_anchor: d.source_anchor.map(nexus_contracts::SourceAnchor::from),
-            created_from_command_id: d.created_from_command_id,
-            created_at: d.created_at,
-            updated_at: d.updated_at,
+            body: d.body.map(|b| {
+                serde_json::from_value(serde_json::to_value(&b).unwrap_or_default())
+                    .unwrap_or_default()
+            }),
+            source_anchor: d.source_anchor.map(NexusSourceAnchor::from),
+            created_from_command_id: d.created_from_command_id.map(|id| id.parse().unwrap()),
+            created_at: chrono::DateTime::parse_from_rfc3339(&d.created_at)
+                .unwrap()
+                .with_timezone(&chrono::Utc),
+            updated_at: d.updated_at.map(|s| {
+                chrono::DateTime::parse_from_rfc3339(&s)
+                    .unwrap()
+                    .with_timezone(&chrono::Utc)
+            }),
         }
     }
 }

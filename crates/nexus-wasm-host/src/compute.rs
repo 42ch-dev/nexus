@@ -59,16 +59,7 @@ impl WasmEngine {
 
         let sandbox = self.resolve_sandbox(manifest);
         let input_bytes = serde_json::to_vec(input)?;
-        let output = self.run_invocation(module, manifest, &input_bytes, sandbox)?;
-
-        // --- Post-invocation battle_report validation (V1.62) -------------
-        if let Some(schemas) = &manifest.schemas {
-            if let Some(ref battle_report_schema) = schemas.battle_report {
-                validate_battle_report(&output, battle_report_schema)?;
-            }
-        }
-
-        Ok(output)
+        self.run_invocation(module, manifest, &input_bytes, sandbox)
     }
 
     /// Resolve the effective sandbox limits: manifest overrides take precedence,
@@ -182,12 +173,23 @@ impl WasmEngine {
             return Err(ComputeError::OutputBufferTooSmall(written));
         }
 
-        // Read + deserialize the 4-part envelope.
+        // Read + deserialize the 4-part envelope. Validate `battle_report`
+        // against the manifest schema from the raw JSON first — typify's typed
+        // `ComputeOutputBattleReport` only materializes declared properties
+        // (`kind`); module-specific fields live in additionalProperties.
         let mut out_bytes = vec![0u8; written];
         memory.read(&*store, out_ptr as usize, &mut out_bytes)?;
-        let output: ComputeOutput = serde_json::from_slice(&out_bytes)
+        let raw: Value = serde_json::from_slice(&out_bytes)
             .map_err(|e| ComputeError::InvalidOutput(e.to_string()))?;
-        validate_output_shape(&output)?;
+        if let Some(schemas) = &manifest.schemas {
+            if let Some(ref battle_report_schema) = schemas.battle_report {
+                if let Some(report) = raw.get("battle_report") {
+                    validate_battle_report_value(report, battle_report_schema)?;
+                }
+            }
+        }
+        let output: ComputeOutput =
+            serde_json::from_value(raw).map_err(|e| ComputeError::InvalidOutput(e.to_string()))?;
         Ok(output)
     }
 }
@@ -274,13 +276,8 @@ fn validate_compute_input(input: &Value, schemas: &ModuleSchemas) -> Result<()> 
     Ok(())
 }
 
-/// Validate `ComputeOutput.battle_report` against the manifest-declared schema.
-fn validate_battle_report(output: &ComputeOutput, schema: &Value) -> Result<()> {
-    let report = &output.battle_report;
-    // Let validate_against_schema derive the correct error from the schema's
-    // own `type` constraint rather than short-circuiting with a hardcoded
-    // message. An empty schema `{}` accepts null per JSON-Schema semantics;
-    // an `"type": "array"` schema should reject null with its own message.
+/// Validate a module-emitted `battle_report` object against the manifest schema.
+fn validate_battle_report_value(report: &Value, schema: &Value) -> Result<()> {
     validate_against_schema(
         report,
         "battle_report",
@@ -489,18 +486,6 @@ fn is_memory_trap(e: &wasmtime::Error) -> bool {
     let msg = e.to_string().to_lowercase();
     msg.contains("memory")
         && (msg.contains("grow") || msg.contains("limit") || msg.contains("exceed"))
-}
-
-/// Light-weight post-condition: the required `battle_report` is a real object.
-/// (The generated `ComputeOutput` struct already enforces field types; this
-/// guards against a module emitting JSON `null` for the report.)
-fn validate_output_shape(output: &ComputeOutput) -> Result<()> {
-    if output.battle_report.is_null() {
-        return Err(ComputeError::OutputSchemaMismatch(
-            "battle_report must be an object".into(),
-        ));
-    }
-    Ok(())
 }
 
 fn optional_export<Params, Returns>(
