@@ -31,9 +31,9 @@
     "key_blocks": {
       "type": "array",
       "items": {
-        "$ref": "https://nexus42.invalid/schemas/domain/key-block.schema.json"
+        "$ref": "https://spoke42.invalid/schemas/data/knowledge-entry.schema.json"
       },
-      "description": "Snapshot of KeyBlocks relevant to this invocation. Each KeyBlock carries its body including state (for computable blocks) and attributes (immutable compute params). The host selects which blocks to pass based on the module manifest and the capability context."
+      "description": "Snapshot of KnowledgeEntry records relevant to this invocation. Each entry carries its body including computable state and attributes (immutable compute params). The host selects which entries to pass based on the module manifest and the capability context."
     },
     "narrative_state": {
       "type": "object",
