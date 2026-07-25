@@ -1,0 +1,3 @@
+[build]
+# Align with CARGO_TARGET_DIR in .envrc to avoid writing another ~/.cargo/build/<hash>
+build-dir = "target" # Relative to workspace; it will actually be taken by the CARGO_TARGET_DIR system
