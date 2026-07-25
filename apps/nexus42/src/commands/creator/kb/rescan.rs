@@ -16,7 +16,7 @@
 //! 5. Idempotently upsert pending `kb_extract_jobs` candidates (keyed on
 //!    `(creator, world, canonical_name)` per the V1.50 P1 DB uniqueness) and
 //!    remove stale pending candidates sourced from this chapter.
-//! 6. Refresh confirmed `KeyBlock` bodies via `nexus_kb::diff_and_apply` so KB
+//! 6. Refresh confirmed `KeyBlock` bodies via `nexus_knowledge::world_kb::diff_and_apply` so KB
 //!    rows reflect the current text (inserts/deletes stay with adopt/edit/delete
 //!    per §5.5).
 //!
@@ -28,9 +28,9 @@
 
 use crate::config::CliConfig;
 use crate::errors::{CliError, Result};
-use nexus_kb::key_block::{KeyBlock, KeyBlockBody};
-use nexus_kb::validation::ValidationMode;
-use nexus_kb::{compute_kb_diff, diff_and_apply, KbStore};
+use nexus_knowledge::world_kb::key_block::{KeyBlock, KeyBlockBody};
+use nexus_knowledge::world_kb::validation::ValidationMode;
+use nexus_knowledge::world_kb::{compute_kb_diff, diff_and_apply, KbStore};
 use nexus_local_db::kb_extract_job::{
     delete_pending_for_chapter, list_for_chapter, upsert_pending_candidate, UpsertOutcome,
 };
@@ -652,7 +652,7 @@ async fn delete_pending_for_chapter_work(
 /// Refresh confirmed `KeyBlock` bodies from the cross-chapter aggregates
 /// (same §5.5 invariant as the chapter-scoped path; inserts/deletes stay with
 /// adopt/edit/delete). Pure half (`compute_kb_diff`) in dry mode; non-dry
-/// applies via [`nexus_kb::diff_and_apply`].
+/// applies via [`nexus_knowledge::world_kb::diff_and_apply`].
 // CLI helper — single-threaded tokio; Send not required.
 #[allow(clippy::future_not_send)]
 async fn sync_work_kb_rows(
@@ -858,7 +858,7 @@ async fn sync_candidates(
 /// Refresh confirmed `KeyBlock` bodies via the nexus-kb delta.
 ///
 /// Fills `report.kb_*`. In `dry_run` mode the diff is computed (pure) but not
-/// applied; otherwise [`nexus_kb::diff_and_apply`] refreshes matching rows.
+/// applied; otherwise [`nexus_knowledge::world_kb::diff_and_apply`] refreshes matching rows.
 // CLI helper — single-threaded tokio; Send not required.
 #[allow(clippy::future_not_send)]
 async fn sync_kb_rows(
@@ -876,7 +876,7 @@ async fn sync_kb_rows(
         .map_err(|e| CliError::Other(format!("Failed to list world KeyBlocks: {e}")))?;
 
     let diff = if dry_run {
-        nexus_kb::compute_kb_diff(&old_kb_rows, &new_bodies)
+        nexus_knowledge::world_kb::compute_kb_diff(&old_kb_rows, &new_bodies)
     } else {
         diff_and_apply(&store, world_id, &old_kb_rows, &new_bodies)
             .await
@@ -1070,8 +1070,8 @@ fn parse_candidate_bodies(candidates: &[KbCandidate]) -> Result<Vec<(String, Key
 }
 
 /// Map a KB sync store error to a user-facing `CliError`.
-fn map_kb_sync_error(e: nexus_kb::KbStoreError) -> CliError {
-    use nexus_kb::KbStoreError as E;
+fn map_kb_sync_error(e: nexus_knowledge::world_kb::KbStoreError) -> CliError {
+    use nexus_knowledge::world_kb::KbStoreError as E;
     match e {
         E::Validation(ve) => CliError::Other(format!("ValidationError refreshing KB rows: {ve}")),
         E::ValidationLegacy(msg) => {

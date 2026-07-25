@@ -30,7 +30,7 @@ thiserror = { workspace = true }
 tracing = { workspace = true }
 nexus-contracts = { path = "../nexus-contracts" }
 nexus-home-layout = { path = "../nexus-home-layout" }
-nexus-kb = { path = "../nexus-kb" }
+nexus-knowledge = { path = "../nexus-knowledge" }
 nexus-local-db = { path = "../nexus-local-db" }
 # V1.60 P0: DF-46 — world.state.query uses the NarrativeGateway trait for
 # world/timeline reads via SqliteNarrativeGateway.

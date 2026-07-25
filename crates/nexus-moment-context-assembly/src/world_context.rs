@@ -18,7 +18,7 @@
 #![allow(clippy::doc_markdown)]
 
 use nexus_contracts::BlockType;
-use nexus_kb::{KbQuery, KbStore};
+use nexus_knowledge::world_kb::{KbQuery, KbStore};
 
 /// Default token budget for the World context block (~1500 tokens ≈ 6000 chars).
 pub const DEFAULT_WORLD_CONTEXT_TOKEN_BUDGET: usize = 1500;
@@ -194,7 +194,7 @@ impl<'a> WorldKbQueryBuilder<'a> {
 ///
 /// Returns `None` if the body or attributes are missing, or if `novel_category`
 /// is not a string.
-fn extract_novel_category(kb: &nexus_kb::key_block::KeyBlock) -> Option<String> {
+fn extract_novel_category(kb: &nexus_knowledge::world_kb::key_block::KeyBlock) -> Option<String> {
     kb.body
         .as_ref()
         .and_then(|b| b.attributes.as_ref())
@@ -204,7 +204,7 @@ fn extract_novel_category(kb: &nexus_kb::key_block::KeyBlock) -> Option<String> 
 }
 
 /// Convert a KeyBlock to a WorldContextItem.
-fn kb_to_item(kb: nexus_kb::key_block::KeyBlock) -> WorldContextItem {
+fn kb_to_item(kb: nexus_knowledge::world_kb::key_block::KeyBlock) -> WorldContextItem {
     let descriptor = kb
         .body
         .as_ref()
@@ -257,7 +257,7 @@ fn kb_to_item(kb: nexus_kb::key_block::KeyBlock) -> WorldContextItem {
 pub async fn build_chapter_kb_block<K: KbStore>(
     store: &K,
     params: &ChapterKbBlockParams,
-) -> Result<Option<WorldContextBlock>, nexus_kb::KbStoreError> {
+) -> Result<Option<WorldContextBlock>, nexus_knowledge::world_kb::KbStoreError> {
     let builder = WorldKbQueryBuilder::new(&params.world_id);
     let max_tokens = params
         .max_tokens
@@ -353,7 +353,7 @@ async fn resolve_items_by_refs<K: KbStore>(
     builder: &WorldKbQueryBuilder<'_>,
     world_refs: &[String],
     block_type: BlockType,
-) -> Result<Vec<WorldContextItem>, nexus_kb::KbStoreError> {
+) -> Result<Vec<WorldContextItem>, nexus_knowledge::world_kb::KbStoreError> {
     let mut items = Vec::new();
     for r#ref in world_refs {
         let query = builder
@@ -374,7 +374,7 @@ async fn resolve_items_by_refs<K: KbStore>(
 async fn resolve_active_rules<K: KbStore>(
     store: &K,
     builder: &WorldKbQueryBuilder<'_>,
-) -> Result<Vec<WorldContextItem>, nexus_kb::KbStoreError> {
+) -> Result<Vec<WorldContextItem>, nexus_knowledge::world_kb::KbStoreError> {
     let query = builder.query_all();
     let result = store.query(&query).await?;
     let items: Vec<WorldContextItem> = result
@@ -441,7 +441,7 @@ fn apply_token_budget(block: &mut WorldContextBlock, max_chars: usize) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nexus_kb::key_block::KeyBlockBody;
+    use nexus_knowledge::world_kb::key_block::KeyBlockBody;
 
     /// Helper: create a novel-profile KeyBlock.
     fn make_novel_block(
@@ -449,8 +449,8 @@ mod tests {
         block_type: BlockType,
         name: &str,
         novel_category: &str,
-    ) -> nexus_kb::key_block::KeyBlock {
-        let mut kb = nexus_kb::key_block::KeyBlock::new(world_id, block_type, name);
+    ) -> nexus_knowledge::world_kb::key_block::KeyBlock {
+        let mut kb = nexus_knowledge::world_kb::key_block::KeyBlock::new(world_id, block_type, name);
         kb.set_body(KeyBlockBody {
             summary: Some(format!("{novel_category}: {name} summary")),
             attributes: Some(serde_json::json!({
@@ -478,7 +478,7 @@ mod tests {
     // AC1: World-bound Work + populated World KB → block present with required fields.
     #[tokio::test]
     async fn world_bound_populated_kb_produces_block() {
-        let store = nexus_kb::InMemoryKbStore::new();
+        let store = nexus_knowledge::world_kb::InMemoryKbStore::new();
 
         let char_kb = make_novel_block("wld_1", BlockType::Character, "char_lin_xia", "character");
         let loc_kb = make_novel_block("wld_1", BlockType::Scene, "loc_neon_city", "location");
@@ -539,7 +539,7 @@ mod tests {
     // AC2: World-bound Work + empty World KB → block present but with empty sections.
     #[tokio::test]
     async fn world_bound_empty_kb_produces_empty_block() {
-        let store = nexus_kb::InMemoryKbStore::new();
+        let store = nexus_knowledge::world_kb::InMemoryKbStore::new();
 
         let params = make_params("wld_empty", &[]);
         let block = build_chapter_kb_block(&store, &params)
@@ -560,7 +560,7 @@ mod tests {
     // AC3: world_refs populated → characters/locations use world_refs.
     #[tokio::test]
     async fn world_refs_filter_characters_and_locations() {
-        let store = nexus_kb::InMemoryKbStore::new();
+        let store = nexus_knowledge::world_kb::InMemoryKbStore::new();
 
         let char1 = make_novel_block("wld_1", BlockType::Character, "char_a", "character");
         let char2 = make_novel_block("wld_1", BlockType::Character, "char_b", "character");
@@ -593,7 +593,7 @@ mod tests {
     // AC4: world_refs empty → fall back to all characters/locations.
     #[tokio::test]
     async fn world_refs_empty_falls_back_to_all() {
-        let store = nexus_kb::InMemoryKbStore::new();
+        let store = nexus_knowledge::world_kb::InMemoryKbStore::new();
 
         let char1 = make_novel_block("wld_1", BlockType::Character, "char_a", "character");
         let char2 = make_novel_block("wld_1", BlockType::Character, "char_b", "character");
@@ -623,7 +623,7 @@ mod tests {
     // QC1-W002 fix: chapter_text heuristic narrows fallback when world_refs is empty.
     #[tokio::test]
     async fn chapter_text_heuristic_narrows_fallback() {
-        let store = nexus_kb::InMemoryKbStore::new();
+        let store = nexus_knowledge::world_kb::InMemoryKbStore::new();
 
         let char1 = make_novel_block("wld_1", BlockType::Character, "alice", "character");
         let char2 = make_novel_block("wld_1", BlockType::Character, "bob", "character");
@@ -683,7 +683,7 @@ mod tests {
     // Without chapter_text, fallback returns all items (no narrowing).
     #[tokio::test]
     async fn no_chapter_text_returns_all_in_fallback() {
-        let store = nexus_kb::InMemoryKbStore::new();
+        let store = nexus_knowledge::world_kb::InMemoryKbStore::new();
 
         let char1 = make_novel_block("wld_1", BlockType::Character, "alice", "character");
         let char2 = make_novel_block("wld_1", BlockType::Character, "bob", "character");
@@ -723,7 +723,7 @@ mod tests {
     // AC6: Missing world_id in query → store returns empty, block has empty sections.
     #[tokio::test]
     async fn missing_world_id_returns_empty_block() {
-        let store = nexus_kb::InMemoryKbStore::new();
+        let store = nexus_knowledge::world_kb::InMemoryKbStore::new();
 
         // Insert block in different world
         let char1 = make_novel_block("wld_other", BlockType::Character, "char_x", "character");
@@ -744,11 +744,11 @@ mod tests {
     // AC7: Token budget exceeded → truncate gracefully with marker.
     #[tokio::test]
     async fn token_budget_truncates_gracefully() {
-        let store = nexus_kb::InMemoryKbStore::new();
+        let store = nexus_knowledge::world_kb::InMemoryKbStore::new();
 
         // Create many characters with long summaries
         for i in 0..20 {
-            let mut kb = nexus_kb::key_block::KeyBlock::new(
+            let mut kb = nexus_knowledge::world_kb::key_block::KeyBlock::new(
                 "wld_1",
                 BlockType::Character,
                 &format!("char_{i:02}"),
@@ -834,8 +834,8 @@ mod tests {
     // QC3-W4 fix: output is deterministic regardless of insertion order.
     #[tokio::test]
     async fn output_is_deterministic_regardless_of_insertion_order() {
-        let store1 = nexus_kb::InMemoryKbStore::new();
-        let store2 = nexus_kb::InMemoryKbStore::new();
+        let store1 = nexus_knowledge::world_kb::InMemoryKbStore::new();
+        let store2 = nexus_knowledge::world_kb::InMemoryKbStore::new();
 
         // Insert in opposite orders
         let char_a = make_novel_block("wld_1", BlockType::Character, "alpha", "character");

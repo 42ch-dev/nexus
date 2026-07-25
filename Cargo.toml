@@ -7,7 +7,6 @@ members = [
     "crates/nexus-creator-memory",
     "crates/nexus-daemon-runtime",
     "crates/nexus-home-layout",
-    "crates/nexus-kb",
     "crates/nexus-knowledge",
     "crates/nexus-moment-context-assembly",
     "crates/nexus-narrative",

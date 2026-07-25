@@ -5,7 +5,7 @@
 
 use crate::errors::NarrativeError;
 use crate::timeline_event::TimelineEvent;
-use nexus_kb::key_block::KeyBlock;
+use nexus_knowledge::world_kb::key_block::KeyBlock;
 
 /// Maximum excerpt length per G6.
 pub const MAX_EXCERPT_LENGTH: usize = 1024;

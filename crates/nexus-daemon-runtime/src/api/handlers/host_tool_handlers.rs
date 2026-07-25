@@ -11,7 +11,7 @@ use crate::api::handlers::works::{read_active_creator_id, read_active_workspace_
 use crate::api::path_guard::resolve_guarded_path_async;
 use crate::capability_registry::host_tool_registry;
 use crate::workspace::WorkspaceState;
-use nexus_kb::KbStore;
+use nexus_knowledge::world_kb::KbStore;
 use nexus_local_db::works;
 use nexus_narrative::NarrativeGateway;
 use std::future::Future;
@@ -947,7 +947,7 @@ async fn execute_kb_snapshot_read(
         kb_store
             .list_by_world(world_id)
             .await
-            .map_err(|e: nexus_kb::store::KbStoreError| NexusApiError::Internal {
+            .map_err(|e: nexus_knowledge::world_kb::store::KbStoreError| NexusApiError::Internal {
                 code: "KB_STORE_ERROR".to_string(),
                 message: e.to_string(),
             })?;
@@ -1268,7 +1268,7 @@ async fn execute_kb_snapshot_write(
     })?;
 
     for block_val in blocks {
-        let kb: nexus_kb::key_block::KeyBlock =
+        let kb: nexus_knowledge::world_kb::key_block::KeyBlock =
             serde_json::from_value(block_val.clone()).map_err(|e| NexusApiError::InvalidInput {
                 field: "parameters.blocks[]".into(),
                 reason: format!("invalid key block: {e}"),

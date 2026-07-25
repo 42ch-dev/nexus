@@ -7,7 +7,7 @@
 //! 2. **Narrative** (`nexus-narrative`): world state, timeline position, event snapshot
 //!    (via [`NarrativeGateway`](nexus_narrative::NarrativeGateway)).
 //! 3. **Knowledge Base** (`nexus-kb`): World-scoped KB assets / key blocks
-//!    (via [`KbStore`](nexus_kb::KbStore)).
+//!    (via [`KbStore`](nexus_knowledge::world_kb::KbStore)).
 //! 4. **Knowledge** (`nexus-knowledge`): User-scoped knowledge entries
 //!    (via [`KnowledgeStore`](nexus_knowledge::KnowledgeStore)).
 //!
@@ -24,7 +24,7 @@
 use crate::stage0::{Stage0Assembly, STAGE0_PERSONALITY_END, STAGE0_PERSONALITY_START};
 use crate::world_context::WorldKbQueryBuilder;
 use nexus_contracts::BlockType;
-use nexus_kb::KbStore;
+use nexus_knowledge::world_kb::KbStore;
 use nexus_knowledge::KnowledgeStore;
 use nexus_narrative::NarrativeGateway;
 
@@ -429,7 +429,7 @@ async fn fetch_world_kb<K: KbStore>(
     kb_store: &K,
     world_id: &str,
     request: &MomentRequest,
-) -> Result<Option<String>, nexus_kb::KbStoreError> {
+) -> Result<Option<String>, nexus_knowledge::world_kb::KbStoreError> {
     let builder = WorldKbQueryBuilder::new(world_id);
     let mut query = builder.query_all();
     if let Some(limit) = request.kb_limit {
@@ -535,7 +535,7 @@ fn format_timeline(events: &[nexus_narrative::timeline_event::TimelineEvent]) ->
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nexus_kb::InMemoryKbStore;
+    use nexus_knowledge::world_kb::InMemoryKbStore;
     use nexus_knowledge::InMemoryKnowledgeStore;
     use nexus_narrative::InMemoryNarrativeGateway;
 
@@ -670,7 +670,7 @@ mod tests {
         stores.narrative.insert_event(event);
 
         // Set up KB
-        let kb = nexus_kb::key_block::KeyBlock::new(
+        let kb = nexus_knowledge::world_kb::key_block::KeyBlock::new(
             "wld_1",
             nexus_contracts::BlockType::Character,
             "Hero",
@@ -739,12 +739,12 @@ mod tests {
         let stores = TestStores::new();
 
         // Seed two KB blocks
-        let kb1 = nexus_kb::key_block::KeyBlock::new(
+        let kb1 = nexus_knowledge::world_kb::key_block::KeyBlock::new(
             "wld_1",
             nexus_contracts::BlockType::Character,
             "Hero",
         );
-        let kb2 = nexus_kb::key_block::KeyBlock::new(
+        let kb2 = nexus_knowledge::world_kb::key_block::KeyBlock::new(
             "wld_1",
             nexus_contracts::BlockType::Scene,
             "Castle",
@@ -782,12 +782,12 @@ mod tests {
     async fn kb_query_respects_text_search() {
         let stores = TestStores::new();
 
-        let kb1 = nexus_kb::key_block::KeyBlock::new(
+        let kb1 = nexus_knowledge::world_kb::key_block::KeyBlock::new(
             "wld_1",
             nexus_contracts::BlockType::Character,
             "Hero",
         );
-        let kb2 = nexus_kb::key_block::KeyBlock::new(
+        let kb2 = nexus_knowledge::world_kb::key_block::KeyBlock::new(
             "wld_1",
             nexus_contracts::BlockType::Scene,
             "Castle",
@@ -827,7 +827,7 @@ mod tests {
         stores.narrative.insert_world(world);
 
         // Set up KB
-        let kb = nexus_kb::key_block::KeyBlock::new(
+        let kb = nexus_knowledge::world_kb::key_block::KeyBlock::new(
             "wld_1",
             nexus_contracts::BlockType::Character,
             "Hero with a long description",

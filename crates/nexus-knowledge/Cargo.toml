@@ -11,11 +11,18 @@ workspace = true
 
 [dependencies]
 nexus-contracts = { path = "../nexus-contracts" }
+# V1.139 P1 T1: nexus-spoke-adapter + spoke-schemas brought in via the
+# nexus-kb → nexus-knowledge merger. The relocated `world_kb` modules will
+# migrate onto spoke `KnowledgeEntry` types in T2/T3.
+nexus-spoke-adapter = { path = "../nexus-spoke-adapter" }
+spoke-schemas.workspace = true
 async-trait.workspace = true
 chrono = { version = "0.4", features = ["serde"] }
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
+# tracing was a dep of the former nexus-kb; relocated world_kb modules use it.
+tracing.workspace = true
 tokio.workspace = true
 uuid = { version = "1", features = ["v4"] }
 

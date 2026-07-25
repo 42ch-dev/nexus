@@ -13,7 +13,7 @@
 
 #![allow(clippy::manual_string_new, clippy::doc_markdown)]
 
-use nexus_kb::{InMemoryKbStore, KbStore};
+use nexus_knowledge::world_kb::{InMemoryKbStore, KbStore};
 use nexus_knowledge::{InMemoryKnowledgeStore, KnowledgeStore};
 use nexus_moment_context_assembly::{assemble_moment, MomentRequest, Stage0Assembly};
 use nexus_narrative::InMemoryNarrativeGateway;
@@ -71,7 +71,7 @@ fn seed_demo_stores(
 /// Helper: seed KB block (async, call before assembly).
 async fn seed_kb(kb: &InMemoryKbStore, world_id: &str) {
     use nexus_contracts::BlockType;
-    use nexus_kb::key_block::KeyBlock;
+    use nexus_knowledge::world_kb::key_block::KeyBlock;
     let block = KeyBlock::new(world_id, BlockType::Character, "Demo Hero");
     kb.insert_key_block(block).await.unwrap();
 }

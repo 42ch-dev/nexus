@@ -24,7 +24,7 @@
 use nexus42::commands::creator::kb::rescan::kb_rescan_work_hermetic;
 use nexus42::db::Schema;
 use nexus42::errors::CliError;
-use nexus_kb::KbStore;
+use nexus_knowledge::world_kb::KbStore;
 use nexus_local_db::kb_extract_job::list_pending_for_world;
 use nexus_local_db::kb_store::SqliteKbStore;
 use std::path::Path;

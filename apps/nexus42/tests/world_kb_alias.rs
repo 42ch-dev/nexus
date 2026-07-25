@@ -19,8 +19,8 @@ use assert_cmd::Command;
 use nexus42::commands::creator::world::kb::{kb_delete, kb_list, kb_show};
 use nexus42::db::Schema;
 use nexus_contracts::BlockType;
-use nexus_kb::key_block::{KeyBlock, KeyBlockBody};
-use nexus_kb::KbStore;
+use nexus_knowledge::world_kb::key_block::{KeyBlock, KeyBlockBody};
+use nexus_knowledge::world_kb::KbStore;
 use nexus_local_db::kb_store::SqliteKbStore;
 
 const OWNER: &str = "ctr_alias_test";
@@ -228,12 +228,12 @@ active_workspace_slug_by_creator = { ctr_alias_test = "default" }
         )
         .await;
         let store = nexus_local_db::kb_store::SqliteKbStore::new(pool.clone());
-        let mut kb = nexus_kb::key_block::KeyBlock::new(
+        let mut kb = nexus_knowledge::world_kb::key_block::KeyBlock::new(
             "wld_alias_cmd",
             nexus_contracts::BlockType::Character,
             "char_alias_cmd",
         );
-        kb.body = Some(nexus_kb::key_block::KeyBlockBody {
+        kb.body = Some(nexus_knowledge::world_kb::key_block::KeyBlockBody {
             summary: Some("Alias command test summary".to_string()),
             attributes: Some(serde_json::json!({"novel_category": "character"})),
             tags: Some(vec!["alias-test".to_string()]),

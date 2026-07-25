@@ -1,13 +1,16 @@
-//! Nexus KB — World-scoped narrative KB graph: `KeyBlock` + `SourceAnchor`.
+//! World KB — World-scoped narrative KB graph: `KeyBlock` + `SourceAnchor`.
 //!
-//! This crate owns the `KeyBlock` aggregate (structured knowledge units in
+//! This module owns the `KeyBlock` aggregate (structured knowledge units in
 //! world timelines), the `SourceAnchor` value object, and the `KbStore` trait
 //! for World-scoped KB graph insertion and query.
 //!
-//! # Crate scope
+//! # Module scope
 //!
-//! Per the entity scope model, `nexus-kb` owns narrative knowledge assets
-//! under a **World** entity — not generic Creator or User knowledge.
+//! Per the entity scope model, this module owns narrative knowledge assets
+//! under a **World** entity — not generic Creator or User knowledge. It was
+//! relocated (V1.139 P1 T1) from the former `nexus-kb` crate, which has been
+//! merged into `nexus-knowledge` alongside the existing User-scoped knowledge
+//! and reference-source domains.
 //!
 //! # Uniqueness constraint
 //!

@@ -13,8 +13,8 @@
 
 #![allow(clippy::unwrap_used)]
 
-use nexus_kb::key_block::KeyBlock;
-use nexus_kb::KbStore;
+use nexus_knowledge::world_kb::key_block::KeyBlock;
+use nexus_knowledge::world_kb::KbStore;
 use nexus_local_db::kb_extract_job::list_pending_for_world;
 use nexus_local_db::kb_store::SqliteKbStore;
 use nexus_local_db::works::{self, WorkRecord};

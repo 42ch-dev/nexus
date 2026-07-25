@@ -7,7 +7,7 @@
 //! # Validation
 //!
 //! `SqliteKbStore` runs body validation on insert and update when a
-//! [`ValidationMode`](nexus_kb::validation::ValidationMode) is configured.
+//! [`ValidationMode`](nexus_knowledge::world_kb::validation::ValidationMode) is configured.
 //! The default mode is `Generic` (no novel-specific checks). Set
 //! `validation_mode` to [`ValidationMode::Novel`] to enforce
 //! `body.attributes.novel_category` requirements per entity-scope-model.md §5.1.1.
@@ -18,13 +18,13 @@
 //! (key blocks, source anchors) into the database for integration tests.
 
 use nexus_contracts::BlockType;
-use nexus_kb::errors::ValidationError;
-use nexus_kb::key_block::{KeyBlock, KeyBlockBody};
-use nexus_kb::query::{KbInsertResult, KbQuery, KbQueryResult};
-use nexus_kb::source_anchor::SourceAnchor;
-use nexus_kb::store::KbStoreError;
-use nexus_kb::validation::{validate_body, validate_canonical_name, ValidationMode};
-use nexus_kb::KbStore;
+use nexus_knowledge::world_kb::errors::ValidationError;
+use nexus_knowledge::world_kb::key_block::{KeyBlock, KeyBlockBody};
+use nexus_knowledge::world_kb::query::{KbInsertResult, KbQuery, KbQueryResult};
+use nexus_knowledge::world_kb::source_anchor::SourceAnchor;
+use nexus_knowledge::world_kb::store::KbStoreError;
+use nexus_knowledge::world_kb::validation::{validate_body, validate_canonical_name, ValidationMode};
+use nexus_knowledge::world_kb::KbStore;
 use sqlx::SqlitePool;
 use std::sync::Arc;
 
@@ -316,16 +316,16 @@ fn db_err(err: &sqlx::Error) -> KbStoreError {
 }
 
 /// Convert a `KbError` from validation into a `KbStoreError`.
-fn validation_err(e: nexus_kb::KbError) -> KbStoreError {
+fn validation_err(e: nexus_knowledge::world_kb::KbError) -> KbStoreError {
     match e {
-        nexus_kb::KbError::Validation(ve) => KbStoreError::Validation(ve),
-        nexus_kb::KbError::ValidationError(msg) => KbStoreError::Validation(ValidationError {
-            kind: nexus_kb::ValidationKind::MissingBody,
+        nexus_knowledge::world_kb::KbError::Validation(ve) => KbStoreError::Validation(ve),
+        nexus_knowledge::world_kb::KbError::ValidationError(msg) => KbStoreError::Validation(ValidationError {
+            kind: nexus_knowledge::world_kb::ValidationKind::MissingBody,
             field: None,
             message: msg,
         }),
         other => KbStoreError::Validation(ValidationError {
-            kind: nexus_kb::ValidationKind::MissingBody,
+            kind: nexus_knowledge::world_kb::ValidationKind::MissingBody,
             field: None,
             message: other.to_string(),
         }),

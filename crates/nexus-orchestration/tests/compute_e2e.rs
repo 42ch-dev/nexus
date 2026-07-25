@@ -22,8 +22,8 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use nexus_contracts::BlockType;
-use nexus_kb::key_block::{KeyBlock, KeyBlockBody};
-use nexus_kb::{KbQuery, KbStore};
+use nexus_knowledge::world_kb::key_block::{KeyBlock, KeyBlockBody};
+use nexus_knowledge::world_kb::{KbQuery, KbStore};
 use nexus_local_db::kb_store::SqliteKbStore;
 use nexus_local_db::{narrative_write, open_pool, run_migrations};
 use nexus_orchestration::capability::CapabilityRegistry;

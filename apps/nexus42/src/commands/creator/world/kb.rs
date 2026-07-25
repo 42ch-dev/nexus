@@ -28,10 +28,10 @@
 use crate::config::CliConfig;
 use crate::errors::{CliError, Result};
 use clap::Subcommand;
-use nexus_kb::key_block::{KeyBlock, KeyBlockBody};
-use nexus_kb::store::KbStoreError;
-use nexus_kb::validation::ValidationMode;
-use nexus_kb::KbStore;
+use nexus_knowledge::world_kb::key_block::{KeyBlock, KeyBlockBody};
+use nexus_knowledge::world_kb::store::KbStoreError;
+use nexus_knowledge::world_kb::validation::ValidationMode;
+use nexus_knowledge::world_kb::KbStore;
 use nexus_local_db::kb_extract_job::{
     get_promotion, list_pending_for_world, mark_auto_promoted_in_tx_with_cas,
     mark_confirmed_in_tx_with_cas, mark_rejected, KbExtractPromotion,

@@ -342,17 +342,17 @@ impl Capability for KbExtractWork {
             .and_then(|v| v.as_str())
             .unwrap_or("generic");
         let validation_mode = if profile_hint == "novel" {
-            nexus_kb::ValidationMode::Novel
+            nexus_knowledge::world_kb::ValidationMode::Novel
         } else {
-            nexus_kb::ValidationMode::Generic
+            nexus_knowledge::world_kb::ValidationMode::Generic
         };
 
         // Build body from LLM response.
-        let body: nexus_kb::key_block::KeyBlockBody =
+        let body: nexus_knowledge::world_kb::key_block::KeyBlockBody =
             if let Ok(parsed) = serde_json::from_str(&extract.body) {
                 parsed
             } else {
-                nexus_kb::key_block::KeyBlockBody {
+                nexus_knowledge::world_kb::key_block::KeyBlockBody {
                     summary: Some(extract.body.clone()),
                     attributes: None,
                     tags: None,
@@ -366,14 +366,14 @@ impl Capability for KbExtractWork {
             .and_then(|v| v.as_str())
             .unwrap_or("");
         let source_anchor = if source_locator.is_empty() {
-            nexus_kb::source_anchor::SourceAnchor::from_excerpt(
+            nexus_knowledge::world_kb::source_anchor::SourceAnchor::from_excerpt(
                 &extract.body.chars().take(256).collect::<String>(),
             )
         } else {
-            nexus_kb::source_anchor::SourceAnchor::from_excerpt(source_locator)
+            nexus_knowledge::world_kb::source_anchor::SourceAnchor::from_excerpt(source_locator)
         };
 
-        let finalize_input = nexus_kb::ExtractFinalizeInput {
+        let finalize_input = nexus_knowledge::world_kb::ExtractFinalizeInput {
             world_id: world_id.clone(),
             block_type,
             canonical_name: extract.canonical_name.clone(),
@@ -387,7 +387,7 @@ impl Capability for KbExtractWork {
         // mark the job as failed so the preset state machine can surface
         // or retry. This prevents "done job with no KeyBlock" data loss.
         let store = nexus_local_db::kb_store::SqliteKbStore::new(pool.as_ref().clone());
-        let insert_result = match nexus_kb::finalize_extract(&store, finalize_input).await {
+        let insert_result = match nexus_knowledge::world_kb::finalize_extract(&store, finalize_input).await {
             Ok(r) => r,
             Err(e) => {
                 // Mark job as failed so the content loss window is closed.

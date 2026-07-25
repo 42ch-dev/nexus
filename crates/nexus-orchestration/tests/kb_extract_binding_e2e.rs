@@ -4,12 +4,12 @@
 //! Uses in-memory stores for KB and `SQLite` for job lifecycle.
 
 use nexus_contracts::BlockType;
-use nexus_kb::extract_finalize::{finalize_extract, ExtractFinalizeInput};
-use nexus_kb::key_block::KeyBlockBody;
-use nexus_kb::source_anchor::SourceAnchor;
-use nexus_kb::store::InMemoryKbStore;
-use nexus_kb::validation::ValidationMode;
-use nexus_kb::KbStore;
+use nexus_knowledge::world_kb::extract_finalize::{finalize_extract, ExtractFinalizeInput};
+use nexus_knowledge::world_kb::key_block::KeyBlockBody;
+use nexus_knowledge::world_kb::source_anchor::SourceAnchor;
+use nexus_knowledge::world_kb::store::InMemoryKbStore;
+use nexus_knowledge::world_kb::validation::ValidationMode;
+use nexus_knowledge::world_kb::KbStore;
 use nexus_local_db::kb_store::seed;
 use nexus_local_db::{enqueue_extract_job_with_artifact, open_pool, run_migrations};
 

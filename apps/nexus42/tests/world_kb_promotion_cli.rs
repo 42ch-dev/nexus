@@ -22,9 +22,9 @@ use nexus42::commands::creator::world::kb::{
 };
 use nexus42::db::Schema;
 use nexus42::errors::CliError;
-use nexus_kb::key_block::{KeyBlock, KeyBlockBody};
-use nexus_kb::validation::ValidationMode;
-use nexus_kb::KbStore;
+use nexus_knowledge::world_kb::key_block::{KeyBlock, KeyBlockBody};
+use nexus_knowledge::world_kb::validation::ValidationMode;
+use nexus_knowledge::world_kb::KbStore;
 use nexus_local_db::kb_extract_job::{
     get_promotion, insert_pending, mark_confirmed, mark_confirmed_in_tx,
 };

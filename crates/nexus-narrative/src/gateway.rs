@@ -14,7 +14,7 @@ use crate::narrative_context::{EventSnapshot, NarrativeContext, TimelinePosition
 use crate::narrative_query::NarrativeQuery;
 use crate::timeline_event::TimelineEvent;
 use crate::world::World;
-use nexus_kb::KbStore;
+use nexus_knowledge::world_kb::KbStore;
 use std::collections::HashMap;
 use std::sync::RwLock;
 
@@ -382,7 +382,7 @@ mod tests {
     // T1: get_world_state returns projected world state
     #[tokio::test]
     async fn test_get_world_state() {
-        let gw = InMemoryNarrativeGateway::new(nexus_kb::InMemoryKbStore::new());
+        let gw = InMemoryNarrativeGateway::new(nexus_knowledge::world_kb::InMemoryKbStore::new());
         let world = make_world("wld_1", "Test World");
         gw.insert_world(world);
 
@@ -396,7 +396,7 @@ mod tests {
     // T2: get_world_state returns error for missing world
     #[tokio::test]
     async fn test_get_world_state_not_found() {
-        let gw = InMemoryNarrativeGateway::new(nexus_kb::InMemoryKbStore::new());
+        let gw = InMemoryNarrativeGateway::new(nexus_knowledge::world_kb::InMemoryKbStore::new());
         let result = gw.get_world_state("wld_missing").await;
         assert!(result.is_err());
         assert!(
@@ -407,7 +407,7 @@ mod tests {
     // T3: get_timeline returns events sorted by sequence
     #[tokio::test]
     async fn test_get_timeline_sorted() {
-        let gw = InMemoryNarrativeGateway::new(nexus_kb::InMemoryKbStore::new());
+        let gw = InMemoryNarrativeGateway::new(nexus_knowledge::world_kb::InMemoryKbStore::new());
         gw.insert_event(make_event("wld_1", "fbk_root", 3));
         gw.insert_event(make_event("wld_1", "fbk_root", 1));
         gw.insert_event(make_event("wld_1", "fbk_root", 2));
@@ -422,7 +422,7 @@ mod tests {
     // T4: get_timeline filters by branch
     #[tokio::test]
     async fn test_get_timeline_branch_filter() {
-        let gw = InMemoryNarrativeGateway::new(nexus_kb::InMemoryKbStore::new());
+        let gw = InMemoryNarrativeGateway::new(nexus_knowledge::world_kb::InMemoryKbStore::new());
         gw.insert_event(make_event("wld_1", "fbk_root", 1));
         gw.insert_event(make_event("wld_1", "fbk_fork", 1));
 
@@ -437,7 +437,7 @@ mod tests {
     // T5: get_event returns single event
     #[tokio::test]
     async fn test_get_event() {
-        let gw = InMemoryNarrativeGateway::new(nexus_kb::InMemoryKbStore::new());
+        let gw = InMemoryNarrativeGateway::new(nexus_knowledge::world_kb::InMemoryKbStore::new());
         let event = make_event("wld_1", "fbk_root", 1);
         let id = event.timeline_event_id.clone();
         gw.insert_event(event);
@@ -450,7 +450,7 @@ mod tests {
     // T6: get_event returns error for missing event
     #[tokio::test]
     async fn test_get_event_not_found() {
-        let gw = InMemoryNarrativeGateway::new(nexus_kb::InMemoryKbStore::new());
+        let gw = InMemoryNarrativeGateway::new(nexus_knowledge::world_kb::InMemoryKbStore::new());
         let result = gw.get_event("evt_missing").await;
         assert!(result.is_err());
     }
@@ -458,7 +458,7 @@ mod tests {
     // T7: list_worlds returns all stored worlds
     #[tokio::test]
     async fn test_list_worlds() {
-        let gw = InMemoryNarrativeGateway::new(nexus_kb::InMemoryKbStore::new());
+        let gw = InMemoryNarrativeGateway::new(nexus_knowledge::world_kb::InMemoryKbStore::new());
         gw.insert_world(make_world("wld_1", "World One"));
         gw.insert_world(make_world("wld_2", "World Two"));
 
@@ -469,7 +469,7 @@ mod tests {
     // T8: get_narrative_context assembles world + timeline + event
     #[tokio::test]
     async fn test_get_narrative_context_full() {
-        let gw = InMemoryNarrativeGateway::new(nexus_kb::InMemoryKbStore::new());
+        let gw = InMemoryNarrativeGateway::new(nexus_knowledge::world_kb::InMemoryKbStore::new());
         let mut world = make_world("wld_1", "Test World");
         let event = make_event("wld_1", "fbk_root", 1);
         world.current_timeline_head_id = Some(event.timeline_event_id.clone());
@@ -493,7 +493,7 @@ mod tests {
     // T9: get_narrative_context with only world_id returns world state
     #[tokio::test]
     async fn test_get_narrative_context_world_only() {
-        let gw = InMemoryNarrativeGateway::new(nexus_kb::InMemoryKbStore::new());
+        let gw = InMemoryNarrativeGateway::new(nexus_knowledge::world_kb::InMemoryKbStore::new());
         gw.insert_world(make_world("wld_1", "Test World"));
 
         let query = NarrativeQuery::new("wld_1");
@@ -506,7 +506,7 @@ mod tests {
     // T10: get_narrative_context includes fork info when requested
     #[tokio::test]
     async fn test_get_narrative_context_with_fork_info() {
-        let gw = InMemoryNarrativeGateway::new(nexus_kb::InMemoryKbStore::new());
+        let gw = InMemoryNarrativeGateway::new(nexus_knowledge::world_kb::InMemoryKbStore::new());
 
         // Create parent world
         gw.insert_world(make_world("wld_parent", "Parent World"));
@@ -531,7 +531,7 @@ mod tests {
     // T11: TimelinePosition correctly identifies fork branches
     #[tokio::test]
     async fn test_timeline_position_fork_detection() {
-        let gw = InMemoryNarrativeGateway::new(nexus_kb::InMemoryKbStore::new());
+        let gw = InMemoryNarrativeGateway::new(nexus_knowledge::world_kb::InMemoryKbStore::new());
 
         gw.insert_world(make_world("wld_parent", "Parent World"));
         let parent = {
@@ -559,7 +559,7 @@ mod tests {
     // T12: get_narrative_context returns error for missing world
     #[tokio::test]
     async fn test_get_narrative_context_missing_world() {
-        let gw = InMemoryNarrativeGateway::new(nexus_kb::InMemoryKbStore::new());
+        let gw = InMemoryNarrativeGateway::new(nexus_knowledge::world_kb::InMemoryKbStore::new());
         let query = NarrativeQuery::new("wld_missing");
         let result = gw.get_narrative_context(&query).await;
         assert!(result.is_err());
@@ -568,7 +568,7 @@ mod tests {
     // T13: World state projection preserves key fields
     #[tokio::test]
     async fn test_world_state_projection_fields() {
-        let gw = InMemoryNarrativeGateway::new(nexus_kb::InMemoryKbStore::new());
+        let gw = InMemoryNarrativeGateway::new(nexus_knowledge::world_kb::InMemoryKbStore::new());
         let mut world = make_world("wld_1", "Detailed World");
         world.canon_revision = Some(5);
         world.current_time_pointer = Some("evt_42".to_string());
@@ -583,7 +583,7 @@ mod tests {
     // T14: Event snapshot projection preserves key fields
     #[tokio::test]
     async fn test_event_snapshot_projection() {
-        let gw = InMemoryNarrativeGateway::new(nexus_kb::InMemoryKbStore::new());
+        let gw = InMemoryNarrativeGateway::new(nexus_knowledge::world_kb::InMemoryKbStore::new());
         let mut event = make_event("wld_1", "fbk_root", 7);
         event.title = Some("The Battle".to_string());
         event.summary = Some("A great battle occurred".to_string());

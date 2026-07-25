@@ -23,8 +23,9 @@ const _: () = {
     use nexus_narrative::narrative_context::WorldState;
     const _WS_SIZE: usize = std::mem::size_of::<WorldState>();
 
-    // nexus-kb
-    use nexus_kb::key_block::KeyBlock;
+    // nexus-knowledge — world_kb (formerly the standalone nexus-kb crate,
+    // merged into nexus-knowledge in V1.139 P1 T1)
+    use nexus_knowledge::world_kb::key_block::KeyBlock;
     const _KB_SIZE: usize = std::mem::size_of::<KeyBlock>();
 
     // nexus-knowledge
@@ -47,7 +48,6 @@ const FORBIDDEN_DEPS: &[&str] = &["nexus-cloud-sync", "nexus-cloud-domain"];
 /// Required product dependency names that must be present.
 const REQUIRED_DEPS: &[&str] = &[
     "nexus-narrative",
-    "nexus-kb",
     "nexus-knowledge",
     "nexus-creator-memory",
     "nexus-moment-context-assembly",

@@ -52,7 +52,7 @@
 use crate::capability::builtins::world::ensure_world_owned;
 use crate::capability::{Capability, CapabilityError};
 use async_trait::async_trait;
-use nexus_kb::KbStore;
+use nexus_knowledge::world_kb::KbStore;
 use nexus_narrative::NarrativeGateway;
 use nexus_wasm_host::{ComputeInput, ComputeOutputStateDelta, ModuleCache, WasmEngine};
 use serde::Deserialize;
@@ -214,7 +214,7 @@ impl Capability for NarrativeCompute {
 
         // 1. Read computable KeyBlocks from the KB store.
         let kb_store = nexus_local_db::kb_store::SqliteKbStore::new((**pool).clone());
-        let q = nexus_kb::KbQuery::new(&parsed.world_id).with_computable(Some(true));
+        let q = nexus_knowledge::world_kb::KbQuery::new(&parsed.world_id).with_computable(Some(true));
         let computable_blocks = kb_store
             .query(&q)
             .await
@@ -391,7 +391,7 @@ impl Capability for NarrativeCompute {
 /// The `path` uses dot-notation: `character.current_hp` maps to
 /// `body.state.character.current_hp` in the target `KeyBlock`. The first
 /// segment (e.g. `character`) is the per-`block_type` state key (compass Q5),
-/// validated against `nexus_kb::block_type_state_key()`.
+/// validated against `nexus_knowledge::world_kb::block_type_state_key()`.
 ///
 /// - `set` replaces the value at `path` (numeric, string, bool, object).
 /// - `+` adds `value` (must be numeric) to the current value at `path`.
@@ -474,7 +474,7 @@ async fn apply_state_delta(
         }
 
         // Validate the first segment against the block_type's expected state key.
-        let expected_state_key = nexus_kb::block_type_state_key(kb.block_type).unwrap_or("unknown");
+        let expected_state_key = nexus_knowledge::world_kb::block_type_state_key(kb.block_type).unwrap_or("unknown");
         let state_key = path_segments[0];
         if expected_state_key != "unknown" && state_key != expected_state_key {
             return Err(CapabilityError::InputInvalid(format!(
@@ -654,7 +654,7 @@ async fn create_new_key_blocks(
                 kb_contract.key_block_id, kb_contract.world_id, world_id
             )));
         }
-        let kb = nexus_kb::key_block::KeyBlock::from(kb_contract.clone());
+        let kb = nexus_knowledge::world_kb::key_block::KeyBlock::from(kb_contract.clone());
         kb_store
             .insert_key_block(kb)
             .await
@@ -750,8 +750,8 @@ async fn handle_compute_error(
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
-    use nexus_kb::key_block::{KeyBlock, KeyBlockBody};
-    use nexus_kb::KbStore;
+    use nexus_knowledge::world_kb::key_block::{KeyBlock, KeyBlockBody};
+    use nexus_knowledge::world_kb::KbStore;
     use nexus_local_db::{open_pool, run_migrations};
 
     async fn fresh_pool() -> (sqlx::SqlitePool, tempfile::TempDir) {
@@ -817,7 +817,7 @@ mod tests {
         max_hp: i64,
         current_hp: i64,
     ) -> KeyBlock {
-        let kb = nexus_kb::key_block::KeyBlock {
+        let kb = nexus_knowledge::world_kb::key_block::KeyBlock {
             world_id: world_id.to_string(),
             block_type: nexus_contracts::BlockType::Character,
             canonical_name: canonical_name.to_string(),

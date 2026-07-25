@@ -37,7 +37,7 @@ use clap::{Args, Subcommand};
 use memory::MemoryCommand;
 use nexus_cloud_sync::platform_client::{PlatformClient, VerifyStatus};
 use nexus_contracts::Creator;
-use nexus_kb::KbStore;
+use nexus_knowledge::world_kb::KbStore;
 use nexus_knowledge::KnowledgeStore;
 use serde::Deserialize;
 use soul::SoulCommand;
@@ -804,12 +804,12 @@ async fn run_demo_seed(config: &CliConfig, force: bool) -> Result<()> {
     println!("✓ Demo event: {}", event.event_id);
 
     // 3. Create demo KB block
-    let mut kb = nexus_kb::key_block::KeyBlock::new(
+    let mut kb = nexus_knowledge::world_kb::key_block::KeyBlock::new(
         &world.world_id,
         nexus_contracts::BlockType::Character,
         "Hero",
     );
-    kb.body = Some(nexus_kb::key_block::KeyBlockBody {
+    kb.body = Some(nexus_knowledge::world_kb::key_block::KeyBlockBody {
         summary: Some("The protagonist of the demo world.".to_string()),
         attributes: None,
         tags: Some(vec!["protagonist".to_string(), "demo".to_string()]),

@@ -22,8 +22,8 @@ use nexus42::commands::creator::kb::rescan::{kb_rescan_hermetic, WORLD_KB_FORBID
 use nexus42::commands::creator::world::kb::kb_adopt;
 use nexus42::db::Schema;
 use nexus42::errors::CliError;
-use nexus_kb::key_block::KeyBlockBody;
-use nexus_kb::KbStore;
+use nexus_knowledge::world_kb::key_block::KeyBlockBody;
+use nexus_knowledge::world_kb::KbStore;
 use nexus_local_db::kb_extract_job::{insert_pending, list_pending_for_world};
 use nexus_local_db::kb_store::SqliteKbStore;
 use std::path::Path;

@@ -20,7 +20,7 @@
 
 use crate::capability::{Capability, CapabilityError};
 use async_trait::async_trait;
-use nexus_kb::KbStore;
+use nexus_knowledge::world_kb::KbStore;
 use nexus_narrative::NarrativeGateway;
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -381,7 +381,7 @@ impl Capability for WorldDeltaPropose {
 }
 
 /// Extract a serializable field value from a `KeyBlock` for the lost-update guard.
-fn field_of(kb: &nexus_kb::key_block::KeyBlock, field: &str) -> Value {
+fn field_of(kb: &nexus_knowledge::world_kb::key_block::KeyBlock, field: &str) -> Value {
     match field {
         "canonical_name" => json!(kb.canonical_name),
         "status" => json!(kb.status),
@@ -648,9 +648,9 @@ impl Capability for WorldDeltaApply {
                         })
                         .unwrap_or(nexus_contracts::BlockType::Character);
                     let mut kb =
-                        nexus_kb::key_block::KeyBlock::new(&world_id, block_type, canonical);
+                        nexus_knowledge::world_kb::key_block::KeyBlock::new(&world_id, block_type, canonical);
                     if let Some(body) = ch.new_value.get("body_json").and_then(|v| {
-                        serde_json::from_value::<nexus_kb::key_block::KeyBlockBody>(v.clone()).ok()
+                        serde_json::from_value::<nexus_knowledge::world_kb::key_block::KeyBlockBody>(v.clone()).ok()
                     }) {
                         kb.body = Some(body);
                     }
@@ -660,8 +660,8 @@ impl Capability for WorldDeltaApply {
                         .insert_key_block_in_tx(&mut tx, kb)
                         .await
                         .map_err(|e| match e {
-                            nexus_kb::store::KbStoreError::Validation(_)
-                            | nexus_kb::store::KbStoreError::ValidationLegacy(_) => {
+                            nexus_knowledge::world_kb::store::KbStoreError::Validation(_)
+                            | nexus_knowledge::world_kb::store::KbStoreError::ValidationLegacy(_) => {
                                 CapabilityError::InputInvalid(format!("kb insert: {e}"))
                             }
                             other => CapabilityError::Internal(format!("kb insert: {other}")),

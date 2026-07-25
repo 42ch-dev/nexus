@@ -40,9 +40,9 @@ use nexus_contracts::{
     WorldKbPatchRelationshipResponse, WorldKbPromoteCandidateRequest,
     WorldKbPromoteCandidateResponse, WorldKbRelationshipProjection, WorldKbSourceAnchorProjection,
 };
-use nexus_kb::key_block::{KeyBlock, KeyBlockBody};
-use nexus_kb::validation::{validate_body, validate_canonical_name, ValidationMode};
-use nexus_kb::KbStore;
+use nexus_knowledge::world_kb::key_block::{KeyBlock, KeyBlockBody};
+use nexus_knowledge::world_kb::validation::{validate_body, validate_canonical_name, ValidationMode};
+use nexus_knowledge::world_kb::KbStore;
 use nexus_local_db::kb_extract_job::{
     get_promotion, list_pending_for_world_after, mark_confirmed_in_tx_with_cas, KbExtractPromotion,
 };
@@ -825,8 +825,8 @@ async fn promote_merge(
     }))
 }
 
-fn map_kb_store_err(e: &nexus_kb::store::KbStoreError, job_id: &str) -> NexusApiError {
-    use nexus_kb::store::KbStoreError;
+fn map_kb_store_err(e: &nexus_knowledge::world_kb::store::KbStoreError, job_id: &str) -> NexusApiError {
+    use nexus_knowledge::world_kb::store::KbStoreError;
     match e {
         KbStoreError::Validation(_) | KbStoreError::ValidationLegacy(_) => {
             NexusApiError::world_kb_validation_failed(&[e.to_string()], &[])
@@ -945,7 +945,7 @@ pub async fn get_key_block_state(
         .get_key_block(&key_block_id)
         .await
         .map_err(|e| match e {
-            nexus_kb::store::KbStoreError::NotFound(_) => {
+            nexus_knowledge::world_kb::store::KbStoreError::NotFound(_) => {
                 NexusApiError::NotFound(format!("key block {key_block_id} in world {world_id}"))
             }
             other => NexusApiError::Internal {

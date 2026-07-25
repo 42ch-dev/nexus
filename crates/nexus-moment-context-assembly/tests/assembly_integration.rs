@@ -13,7 +13,7 @@
 #![allow(clippy::manual_string_new, clippy::doc_markdown)]
 
 use nexus_contracts::{BlockType, TimePolicy, Visibility};
-use nexus_kb::{InMemoryKbStore, KbStore};
+use nexus_knowledge::world_kb::{InMemoryKbStore, KbStore};
 use nexus_knowledge::{InMemoryKnowledgeStore, KnowledgeStore};
 use nexus_moment_context_assembly::stage0::Stage0Assembly;
 use nexus_moment_context_assembly::{assemble_moment, MomentContext, MomentRequest};
@@ -86,7 +86,7 @@ fn seed_event(
 
 /// Seed a KB key block.
 async fn seed_kb_block(stores: &FixtureStores, world_id: &str, block_type: BlockType, name: &str) {
-    let kb = nexus_kb::key_block::KeyBlock::new(world_id, block_type, name);
+    let kb = nexus_knowledge::world_kb::key_block::KeyBlock::new(world_id, block_type, name);
     stores
         .kb
         .insert_key_block(kb)

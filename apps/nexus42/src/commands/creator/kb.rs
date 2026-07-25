@@ -13,7 +13,7 @@
 use crate::config::CliConfig;
 use crate::errors::{CliError, Result};
 use crate::paths;
-use nexus_kb::KbStore;
+use nexus_knowledge::world_kb::KbStore;
 use sqlx::SqlitePool;
 use std::path::PathBuf;
 
@@ -532,7 +532,7 @@ async fn kb_search(
         let wid = require_world_id(world_id)?;
         deprecation_notice_legacy_world_kb("search");
         let store = open_world_kb_store(config).await?;
-        let kb_query = nexus_kb::KbQuery::new(&wid).with_text_search(query);
+        let kb_query = nexus_knowledge::world_kb::KbQuery::new(&wid).with_text_search(query);
         let result = store
             .query(&kb_query)
             .await
@@ -689,7 +689,7 @@ async fn kb_add(
             .unwrap_or_else(|| "untitled".to_string());
 
         let store = open_world_kb_store(config).await?;
-        let mut kb = nexus_kb::key_block::KeyBlock::new(&wid, bt, &entry_title);
+        let mut kb = nexus_knowledge::world_kb::key_block::KeyBlock::new(&wid, bt, &entry_title);
 
         // Read file content as summary if provided
         if file.exists() {
@@ -699,7 +699,7 @@ async fn kb_add(
             } else {
                 content
             };
-            kb.body = Some(nexus_kb::key_block::KeyBlockBody {
+            kb.body = Some(nexus_knowledge::world_kb::key_block::KeyBlockBody {
                 summary: Some(summary),
                 attributes: None,
                 tags: None,
@@ -1179,8 +1179,8 @@ mod tests {
     async fn legacy_kb_scope_world_list_exercises_forward_path() {
         use crate::db::Schema;
         use nexus_contracts::BlockType;
-        use nexus_kb::key_block::{KeyBlock, KeyBlockBody};
-        use nexus_kb::KbStore;
+        use nexus_knowledge::world_kb::key_block::{KeyBlock, KeyBlockBody};
+        use nexus_knowledge::world_kb::KbStore;
         use nexus_local_db::kb_store::SqliteKbStore;
 
         let dir = tempfile::tempdir().unwrap();
@@ -1220,8 +1220,8 @@ mod tests {
     async fn legacy_kb_scope_world_show_exercises_forward_path() {
         use crate::db::Schema;
         use nexus_contracts::BlockType;
-        use nexus_kb::key_block::{KeyBlock, KeyBlockBody};
-        use nexus_kb::KbStore;
+        use nexus_knowledge::world_kb::key_block::{KeyBlock, KeyBlockBody};
+        use nexus_knowledge::world_kb::KbStore;
         use nexus_local_db::kb_store::SqliteKbStore;
 
         let dir = tempfile::tempdir().unwrap();
@@ -1265,8 +1265,8 @@ mod tests {
     async fn legacy_kb_scope_world_remove_exercises_forward_path() {
         use crate::db::Schema;
         use nexus_contracts::BlockType;
-        use nexus_kb::key_block::{KeyBlock, KeyBlockBody};
-        use nexus_kb::KbStore;
+        use nexus_knowledge::world_kb::key_block::{KeyBlock, KeyBlockBody};
+        use nexus_knowledge::world_kb::KbStore;
         use nexus_local_db::kb_store::SqliteKbStore;
 
         let dir = tempfile::tempdir().unwrap();

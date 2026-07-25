@@ -16,7 +16,7 @@
 
 use nexus42::commands::creator::world::kb::kb_adopt;
 use nexus42::db::Schema;
-use nexus_kb::KbStore;
+use nexus_knowledge::world_kb::KbStore;
 use nexus_local_db::kb_extract_job::{get_promotion, insert_pending_with_llm};
 use nexus_local_db::kb_store::SqliteKbStore;
 
