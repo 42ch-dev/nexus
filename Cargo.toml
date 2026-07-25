@@ -12,6 +12,7 @@ members = [
     "crates/nexus-moment-context-assembly",
     "crates/nexus-narrative",
     "crates/nexus-orchestration",
+    "crates/nexus-spoke-adapter",
     "crates/nexus-wasm-host",
     "apps/nexus42",
     "crates/nexus-cloud-sync",
