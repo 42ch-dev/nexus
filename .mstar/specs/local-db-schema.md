@@ -4,7 +4,8 @@
 **Document class**: Master  
 **V1.40 Shipped amendments:** §4.1.2 `kb_key_blocks` validation intent — application-layer validation in `nexus-kb::validation` module (ValidationMode::Novel enforces `body.attributes.novel_category`); `narrative_worlds` rows via `creator world create` (V1.40 P0); `kb_extract_jobs` artifact locator columns (`source_kind`, `source_locator`, `profile_hint`, `work_id`) added V1.40 P3.  
 **V1.42 Draft amendment:** `work_chapters` PK migration — composite primary key `(work_id, volume, chapter)` with `volume INTEGER NOT NULL DEFAULT 1`; backfill existing rows `volume = 1`; drop legacy `(work_id, chapter)` PK. Normative detail: [novel-writing/workflow-profile.md §4.5.4](novel-writing/workflow-profile.md). Plan: [2026-06-11-v1.42-multi-volume.md](../../plans/2026-06-11-v1.42-multi-volume.md).  
-**Last updated**: 2026-06-22 — V1.56 P0 workspace_sessions  
+**V1.139 architect §5.2 amendment:** §4.1.2 `kb_key_blocks` — `extensions_nexus_json TEXT` column (additive migration) for spoke `extensions.nexus` round-trip preservation. Existing columns (`world_id`, `created_from_command_id`, `source_work_id`, `source_chapter`, `source_provenance_kind`) retained for query efficiency. Full contract: [`spoke-adapter-architecture.md`](spoke-adapter-architecture.md) §2.3.  
+**Last updated**: 2026-07-26 — V1.139 architect §5.2: extensions.nexus storage shape amendment.  
 
 ## 0. 文档定位
 
@@ -179,6 +180,12 @@ CREATE TABLE IF NOT EXISTS kb_key_blocks (
     created_from_command_id TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT,
+    -- V1.52 provenance columns (V1.139 V1.52 amendment: retained for query efficiency)
+    source_work_id TEXT,
+    source_chapter INTEGER,
+    source_provenance_kind TEXT,
+    -- V1.139: spoke extensions.nexus round-trip preservation (see spoke-adapter-architecture.md §2.3)
+    extensions_nexus_json TEXT,
     FOREIGN KEY (world_id) REFERENCES narrative_worlds (world_id) ON DELETE CASCADE
 );
 
@@ -247,6 +254,10 @@ Column notes:
 - `narrative_timeline_events` is required by `NarrativeGateway::get_timeline`, `get_event`, and `get_narrative_context`.
 - `kb_source_anchors` is required because `KbStore::attach_source_anchor` permits multiple anchors per KeyBlock; `kb_key_blocks.source_anchor_json` remains the optional embedded `KeyBlock.source_anchor` value.
 - The partial unique index on `kb_key_blocks` implements the existing active uniqueness rule: one active `(world_id, canonical_name, block_type)` tuple, while `deleted`, `merged`, and `deprecated` rows no longer block replacement.
+
+**V1.139 architect §5.2 amendment — `extensions_nexus_json` column:**
+
+The `extensions_nexus_json TEXT` column is additive (V1.139 migration adds it via `ALTER TABLE`). It stores the full `extensions.nexus` JSON payload from spoke `KnowledgeEntry.extensions.nexus` for round-trip preservation of unknown keys. Known nexus-local fields (`world_id`, `created_from_command_id`, `source_work_id`, `source_chapter`, `source_provenance_kind`) are kept as typed SQLite columns — this preserves query efficiency (e.g., `list_by_world` filters on the indexed `world_id` column without JSON extraction). The `nexus-spoke-adapter` constructs `extensions.nexus` from typed columns + `extensions_nexus_json` (merged) when reading, and extracts known fields into typed columns + serializes the full `extensions.nexus` into `extensions_nexus_json` when writing. See [`spoke-adapter-architecture.md`](spoke-adapter-architecture.md) §2.3 for the full storage contract.
 
 #### 4.1.4 `works` lifecycle lock columns (V1.41 Draft — DF-60)
 

@@ -1,14 +1,14 @@
 # World KB Runtime Architecture
 
-**Status**: Normative — V1.74 Shipped (§2 `kb_relationships` store + symmetric read projection; prior V1.51 §5.5 LLM pathway + §6 OCC extension)
+**Status**: Normative — V1.74 Shipped (§2 `kb_relationships` store + symmetric read projection; prior V1.51 §5.5 LLM pathway + §6 OCC extension). **V1.139 SPOKE alignment**: crate `nexus-kb` merged INTO `nexus-knowledge`; `KeyBlock` → `KnowledgeEntry` (technical wire name). Crate table §2 updated to reflect current topology. Full terminology sweep deferred to P3.  
 **Authority**: Implementation SSOT below normative specs. Does not override [entity-scope-model.md](../specs/entity-scope-model.md) or [novel-writing/workflow-profile.md](../specs/novel-writing/workflow-profile.md).  
-**Iteration**: [v1.40/delivery-compass.md](../iterations/v1.40/delivery-compass.md)
+**Iteration**: [v1.40/delivery-compass.md](../iterations/v1.40/delivery-compass.md) · [v1.139/delivery-compass.md](../iterations/v1.139/delivery-compass.md) (SPOKE alignment)
 
 ---
 
 ## 1. Problem
 
-World KB concerns were split across `nexus-kb`, `nexus-moment-context-assembly`, `nexus-orchestration` presets (`kb-extract`), and Layer 1 rules (now at `embedded-rules/writing-craft.md`). Taxonomy in spec (§5.1.1) diverged from `kb-extract` prompts (`Character`/`Ability`/…). V1.40 closes DF-63 with a single runtime layering model.
+World KB concerns were split across `nexus-knowledge` (formerly `nexus-kb`, merged V1.139), `nexus-moment-context-assembly`, `nexus-orchestration` presets (`kb-extract`), and Layer 1 rules (now at `embedded-rules/writing-craft.md`). Taxonomy in spec (§5.1.1) diverged from `kb-extract` prompts (`Character`/`Ability`/…). V1.40 closes DF-63 with a single runtime layering model.
 
 ---
 
@@ -16,10 +16,10 @@ World KB concerns were split across `nexus-kb`, `nexus-moment-context-assembly`,
 
 | Layer | Crate | Responsibility |
 | --- | --- | --- |
-| **Domain (local)** | `nexus-kb` | KeyBlocks, SourceAnchors, taxonomy validation, `ingest_from_artifact()`, `KbStore` CRUD/query |
+| **Domain (local)** | `nexus-knowledge` (V1.139: `nexus-kb` merged in) | KnowledgeEntry, SourceAnchors, taxonomy validation, `ingest_from_artifact()`, `KbStore` CRUD/query |
 | **Domain (narrative)** | `nexus-narrative` | World entity, timeline binding |
 | **Read SSOT** | `nexus-moment-context-assembly` | `WorldKbQueryBuilder` — shared filter/taxonomy logic; `assemble_moment` (wide session snapshot) and `build_chapter_kb_block` (narrow prompt slice) |
-| **User knowledge** | `nexus-knowledge` | User-scoped global knowledge — **not** World KB |
+| **User knowledge** | `nexus-knowledge` | User-scoped global knowledge — **also owns World KB after V1.139 merger** |
 | **Execution** | `nexus-orchestration` | Presets + capabilities; LLM inner graphs; schedule/job lifecycle — **no** KB domain rules |
 | **Persistence mechanics** | `nexus-local-db` | SQLite migrations, `kb_extract_jobs`, `kb_key_blocks` tables |
 
@@ -43,7 +43,7 @@ reflection-loop → findings → novel-brainstorm / novel-review-master
 ### 3.2 Knowledge loop (V1.40 P3)
 
 ```text
-persist → kb-extract (schedule) → World KB KeyBlocks + SourceAnchors
+persist → kb-extract (schedule) → World KB KnowledgeEntries + SourceAnchors
 ```
 
 - Optional: `novel-review-master` **child schedule** waits for `kb-extract` when `preset.input.refresh_kb` (World-bound) so review sees freshly promoted KB.
@@ -83,7 +83,7 @@ Domain path (extend existing stack — grill-me #13):
 ```text
 kb-extract preset (LLM inner_graph)
   → capability kb.extract_work (extended input)
-  → nexus-kb validation + KeyBlock upsert + SourceAnchor
+  → nexus-knowledge validation + KnowledgeEntry upsert + SourceAnchor
 ```
 
 Retire work-entry-only job semantics in V1.40; keep wire `BlockType` from contracts (grill-me #10).
@@ -139,9 +139,9 @@ nexus.llm.extract → { candidates, relationships? }
 `LlmExtractTask` remains a pure parser/invoker (it does not persist). Entity
 candidates continue through `quality_loop::persist_candidates` /
 `kb_extract_jobs`; `extract_finalize` remains the `kb.extract_work` direct
-KeyBlock insert helper (not the suggestion path). Relationship persistence runs
+KnowledgeEntry insert helper (not the suggestion path). Relationship persistence runs
 **after** endpoint resolution and writes idempotent suggestions only when both
-endpoints already exist as non-deleted KeyBlocks (entity-scope-model §5.6.7).
+endpoints already exist as non-deleted KnowledgeEntries (entity-scope-model §5.6.7).
 The `needs_review` gate + GET graph default-filter + confidence-weighting UX
 complete the γ surface; see entity-scope-model §5.6.7 + llm-extract.md §5.2.
 
@@ -169,7 +169,7 @@ creator kb rescan --work <work_ref>  (V1.51 T-A P1)
   → upsert_pending_candidate ONCE per aggregate   (DB uniqueness collapses
        (creator, canonical_name, world) → 1 row; source_chapter_id = lowest;
        proposed_payload carries source_chapters array)
-  → diff_and_apply refreshes confirmed KeyBlock bodies (§5.5 unchanged)
+  → diff_and_apply refreshes confirmed KnowledgeEntry bodies (§5.5 unchanged)
 ```
 
 **Reconciliation rules (entity-scope-model §5.5.2 invariant preserved):**
@@ -183,7 +183,7 @@ creator kb rescan --work <work_ref>  (V1.51 T-A P1)
   `source_chapters` array (e.g. `[3,5,7]`) recording every chapter that
   referenced the entity.
 - A `confirmed` row is terminal (§5.5.2): the rescan never mutates a promoted
-  `KeyBlock`'s origin candidate; it only refreshes the confirmed `KeyBlock`
+  `KnowledgeEntry`'s origin candidate; it only refreshes the confirmed `KnowledgeEntry`
   **body** via `diff_and_apply` (same as the chapter-scoped path).
 - A `pending` row whose canonical_name matches an aggregate is `Updated`
   (payload + `source_chapter_id` refreshed); a brand-new aggregate is
@@ -193,7 +193,7 @@ creator kb rescan --work <work_ref>  (V1.51 T-A P1)
 
 **`--dry-run` cross-chapter reuse summary.** Before any DB write, the dry
 path groups aggregates and reports, per canonical_name, the chapter list and
-whether an active `KeyBlock` already exists for that name (advisory "no new
+whether an active `KnowledgeEntry` already exists for that name (advisory "no new
 candidate needed" when the entity is already confirmed). Example line:
 `Entity 'Aelin' referenced in chapters 3, 5, 7; existing KB row found → no
 new candidate`. The dry path acquires **no** advisory lock (it is read-only).
@@ -238,7 +238,7 @@ TOCTOU window between promotion-row reads and `mark_confirmed` writes in the
 `creator world kb adopt` path. The adopt flow must:
 
 1. Read the promotion row — capture `version = V`.
-2. Validate and create the `KeyBlock`.
+2. Validate and create the `KnowledgeEntry`.
 3. Call `mark_confirmed_in_tx_with_cas(tx, job_id, V)` — the UPDATE includes
    `AND version = V`.
 4. On `VersionMismatch` (rows_affected == 0, version changed), surface
@@ -254,9 +254,9 @@ Cross-chapter rescan (T-A P1) and missing-KB detection (T-A P2) also write to
 │ creator world kb adopt <extract_job_id>        │
 ├────────────────────────────────────────────────┤
 │ 1. load_pending_candidate() → version = 0     │
-│ 2. validate → KeyBlock                         │
+│ 2. validate → KnowledgeEntry                   │
 │ 3. BEGIN TRANSACTION                           │
-│ 4. insert KeyBlock                             │
+│ 4. insert KnowledgeEntry                       │
 │ 5. mark_confirmed_in_tx_with_cas(version=0)    │
 │    ┌─ UPDATE ... SET version=version+1         │
 │    │  WHERE job_id=? AND status='pending'      │
@@ -278,7 +278,7 @@ The CAS is applied **inside** the file-lock scope (concurrency.md §2.4): file l
 ```text
 novel-writing outline/draft
   → refactor of fetch_world_kb → format_chapter_kb_block (moment-context-assembly)
-  → KbStore::query (nexus-kb)
+  → KbStore::query (nexus-knowledge)
   → compact YAML block in preset template vars
 
 platform context assemble-moment
@@ -295,7 +295,7 @@ Do **not** implement a second query implementation inside `nexus-orchestration`.
 | Slice | Architecture touch |
 | --- | --- |
 | P0.5 | `embedded-rules/` migration; this document |
-| P1 | Wire `BlockType` + novel `body` validation in `nexus-kb` |
+| P1 | Wire `BlockType` + novel `body` validation in `nexus-knowledge` |
 | P2 | Refactor `fetch_world_kb` + `format_chapter_kb_block` |
 | P3 | Extend `kb.extract_work` + artifact jobs + `WorkFields.world_id` |
 | P3 (tail) | `schedule.enqueue_child` + review-master `sync_world_kb` |

@@ -4,11 +4,11 @@
 
 | Attribute | Value |
 | --- | --- |
-| **Status** | Normative — entity scope hierarchy, uniqueness, crate ownership. **V1.40 Shipped**: §5.1.1 narrative taxonomy (`BlockType` + `novel_category` + `canonical_name` grammar). **V1.50 Shipped**: §5.5 World KB promotion state machine. **V1.51 Shipped**: §5.5.6 LLM pathway subsection. **V1.54 Shipped**: §5.1.1 game-bible taxonomy. **V1.55 P3**: §5.1.1 script taxonomy. **V1.62 Shipped**: §5.5.9 computable-flag semantics + structured validation mode (closes `R-V161P1-LOW-001`). **V1.74 Shipped β**: §5.6 World KB relationship semantics. |
+| **Status** | Normative — entity scope hierarchy, uniqueness, crate ownership. **V1.40 Shipped**: §5.1.1 narrative taxonomy (`BlockType` + `novel_category` + `canonical_name` grammar). **V1.50 Shipped**: §5.5 World KB promotion state machine. **V1.51 Shipped**: §5.5.6 LLM pathway subsection. **V1.54 Shipped**: §5.1.1 game-bible taxonomy. **V1.55 P3**: §5.1.1 script taxonomy. **V1.62 Shipped**: §5.5.9 computable-flag semantics + structured validation mode (closes `R-V161P1-LOW-001`). **V1.74 Shipped β**: §5.6 World KB relationship semantics. **V1.139 architect §5.2**: §2 (crate table: `nexus-kb`→`nexus-knowledge`, KeyBlock→KnowledgeEntry in architecture-bearing prose). Remaining KeyBlock in historical/implementation sections (e.g. SQLite table name `kb_key_blocks`) is stable — table rename is a separate migration concern. Full V1.139 SPOKE alignment tracked in [`spoke-adapter-architecture.md`](spoke-adapter-architecture.md). |
 | **Document class** | Master |
 | **Scope** | Global/User/Creator/World/Timeline/Event/Moment hierarchy; entity ownership; `kb`/`knowledge` naming boundaries; scope transition rules |
-| **Last updated** | 2026-06-23 — V1.62 P2 §5.5.9 computable-flag semantics + structured validation mode |
-| **Related** | [local-cloud-crate-architecture.md](./local-cloud-crate-architecture.md), [cli-spec.md](./cli-spec.md), [daemon-runtime.md](./daemon-runtime.md), [orchestration-engine.md](./orchestration-engine.md), [compute-module-abi.md](./compute-module-abi.md), [wasm-host.md](./wasm-host.md), [local-db-schema.md](./local-db-schema.md), [`docs/ARCHITECTURE.md`](../../../docs/ARCHITECTURE.md) |
+| **Last updated** | 2026-07-26 — V1.139 architect §5.2: crate table update + status note. |
+| **Related** | [local-cloud-crate-architecture.md](./local-cloud-crate-architecture.md), [cli-spec.md](./cli-spec.md), [daemon-runtime.md](./daemon-runtime.md), [orchestration-engine.md](./orchestration-engine.md), [compute-module-abi.md](./compute-module-abi.md), [wasm-host.md](./wasm-host.md), [local-db-schema.md](./local-db-schema.md), [spoke-adapter-architecture.md](./spoke-adapter-architecture.md), [`docs/ARCHITECTURE.md`](../../../docs/ARCHITECTURE.md) |
 
 This file is normative for V1.23 crate wiring and naming alignment. When this file
 overlaps older wording in prior specs, keep the locked decisions here and update the
@@ -141,7 +141,7 @@ No new scope-ownership rule. No new uniqueness constraint. No new transition rul
 | `Global` | Schema bundle identity, contract schema versions, product-wide command/capability names, global daemon/runtime constants | `nexus-contracts`; `nexus42` for CLI surface; `nexus-daemon-runtime` for local runtime process constants |
 | `User` | User account/profile, platform session, Pairing records, user-level knowledge index, user-global reference corpus | `nexus-cloud-domain` for User/Pairing invariants; `nexus-cloud-sync` for HTTP transport; `nexus-knowledge` for user-scoped knowledge/reference index |
 | `Creator` | Creator aggregate, Creator credentials/cache records, active Creator selection, workspace registrations, SOUL, long-term memory, review queue/personality I/O | `nexus-creator`; `nexus-creator-memory`; `nexus-home-layout`; `nexus-local-db` for local persistence mechanics |
-| `World` | World aggregate, world membership, fork branches, story manifests, manuscript state/projections, narrative KB graph, KeyBlocks, SourceAnchors | `nexus-narrative`; `nexus-kb` for KB graph insertion/query and KeyBlock/SourceAnchor logic |
+| `World` | World aggregate, world membership, fork branches, story manifests, manuscript state/projections, narrative KB graph, KnowledgeEntries, SourceAnchors | `nexus-narrative`; `nexus-knowledge` for KB graph insertion/query and KnowledgeEntry/SourceAnchor logic |
 | `Timeline` | Timeline branches/ordered history, timeline events, fork positions, recent timeline query projections | `nexus-narrative` |
 | `Event` | Timeline event records, event-level deltas, event source references, event-to-moment anchors | `nexus-narrative`; `nexus-kb` when an event produces or references narrative KB assets |
 | `Moment` | Session-start context assembly request/response, assembled prompt context, selected memory/knowledge/narrative slices, token-budgeted snapshot | `nexus-moment-context-assembly` |
@@ -204,7 +204,8 @@ explicitly declares uniqueness.
 | `nexus-creator-memory` | `Creator` memory subdomain | Owns SOUL, long-term memory, review, and personality/experience I/O under Creator scope. |
 | `nexus-knowledge` | `User` knowledge | Owns user-scoped global knowledge/reference indexing and storage. It is not Creator-scoped and does not own narrative KeyBlocks. It provides material that moment assembly may pull into a Moment. |
 | `nexus-narrative` | `World`, `Timeline`, `Event` | Owns creative-work narrative state: current work background, world state, forks, timelines, events, story/manuscript projections, and narrative consistency. |
-| `nexus-kb` | World-scoped narrative KB graph | Owns narrative knowledge assets under `World`: KeyBlocks, SourceAnchors, graph insertion/query, and narrative KB lifecycle. KB scope belongs under a World/narrative entity, not directly under Creator. |
+| `nexus-knowledge` | World-scoped narrative KB graph | Owns narrative knowledge assets under `World`: KnowledgeEntries, SourceAnchors, graph insertion/query, and narrative KB lifecycle. KB scope belongs under a World/narrative entity, not directly under Creator. Holds spoke `KnowledgeEntry` natively; `extensions.nexus` typed accessors via `nexus-spoke-adapter`. |
+| `nexus-spoke-adapter` | SPOKE consumption boundary | Constructs spoke standard objects with `extensions.nexus` populated; delegates standard lifecycle ops to `spoke-operations`. Enforces the spoke-operations call-boundary invariant (spoke-standard operands only). The sole crate that directly depends on `spoke-operations`. |
 | `nexus-moment-context-assembly` | `Moment` | Owns session-start moment context aggregation. It runs before a session begins and aggregates relevant local domains: Creator memory, narrative state, World KB assets, and User knowledge. Optional `cloud-stage` may merge platform context, but daemon default remains local Stage-0. |
 | `nexus-daemon-runtime` | Runtime host, not entity owner | Hosts local APIs, DB handles, orchestration, and agent-host. It MUST NOT own cloud transport or platform User/Pairing invariants. |
 | `nexus-orchestration` | Execution sessions/schedules, not hierarchy owner | Owns presets, schedules, workers, and capability registry. It carries `creator_id`/workspace/world references as execution context, but it does not redefine entity ownership. |
@@ -351,13 +352,14 @@ replacement is `manifest.json` `schemas` as documented in
 
 ## 5. Naming clarifications
 
-### 5.1 `nexus-kb` — World-scoped narrative KB
+### 5.1 `nexus-knowledge` — World-scoped narrative KB
 
-`nexus-kb` means narrative knowledge inside a `World`:
+`nexus-knowledge` means narrative knowledge inside a `World`:
 
-- KeyBlocks and SourceAnchors belong to the World/narrative graph.
+- KnowledgeEntries and SourceAnchors belong to the World/narrative graph.
 - KB graph insertion/query is a `World` concern and is coordinated with `nexus-narrative`.
-- `nexus-kb` MUST NOT be treated as generic Creator knowledge or User knowledge.
+- `nexus-knowledge` MUST NOT be treated as generic Creator knowledge or User knowledge.
+- Holds spoke `KnowledgeEntry` natively (consumed from `spoke-schemas`); `extensions.nexus` accessors via `nexus-spoke-adapter`. See [`spoke-adapter-architecture.md`](spoke-adapter-architecture.md) §2 for the `extensions.nexus` field contract.
 
 #### 5.1.1 Narrative World KB item taxonomy (V1.40 grill-me locked — **Shipped V1.40 P1**)
 

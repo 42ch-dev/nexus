@@ -1,0 +1,353 @@
+# Spoke Adapter Architecture
+
+> **Status:** Normative (v0.1 — V1.139 SPOKE adoption baseline)
+> **Document class:** Master
+> **Scope:** The `nexus-spoke-adapter` crate boundary, `extensions.nexus` namespace contract, spoke-operations delegation rules, daemon-api envelope strategy, drift detection adaptation, and the `/kb/` HTTP route stability decision.
+> **Related:** [entity-scope-model.md](entity-scope-model.md), [local-db-schema.md](local-db-schema.md), [schemas-directory-layout.md](schemas-directory-layout.md), spoke `CONCEPTS.md`, spoke `.mstar/specs/spoke-data-model.md`, spoke `.mstar/specs/spoke-operations.md`
+
+## 0. Document Position
+
+This spec is the durable, tracked architectural SSOT for the SPOKE consumption boundary in nexus. It records locked architecture facts — not iteration archaeology, delivery history, or grill-me dialog. The upstream locked decisions (Q1–Q6, Q11) are restated as architecture invariants; Q7–Q10 + Q12 are the architect's resolved decisions.
+
+## 1. Architecture Facts (Q1–Q6 restated as invariants)
+
+These are the architecture bedrock — do not re-litigate.
+
+### 1.1 Consume spoke packages directly
+
+nexus depends on spoke's published packages directly:
+- **Rust:** `spoke-schemas` + `spoke-operations` (crates.io, lockstep **`0.1.1`** exact pin)
+- **TypeScript:** `@42ch/spoke-schemas` + `@42ch/spoke-operations` (npm, lockstep **`0.1.1`** exact pin)
+
+The bespoke `schemas/domain/key-block.schema.json` is deleted. No nexus-local copy of spoke schemas exists. The atomic KB wire type is `KnowledgeEntry` from spoke.
+
+### 1.2 Prefer spoke; minimal nexus customization
+
+Where spoke already provides a type, field, op, or lifecycle invariant, nexus uses it directly. The discipline applies across the iteration:
+
+- **Lean `extensions.nexus`** — carry only fields that spoke genuinely has no equivalent for (e.g. `world_id`, `created_from_command_id`). Before adding a nexus-local extension, verify spoke has no parallel concept (e.g. prefer spoke `SourceAnchor` over nexus-local `source_*` fields where they overlap).
+- **Thin adapter** — `nexus-spoke-adapter` is a delegation facade (re-export / pass-through), not a thick mapping layer. No parallel nexus types where spoke already provides them.
+- **Direct TS imports** — apps import `KnowledgeEntry` and helpers directly from `@42ch/spoke-schemas` / `@42ch/spoke-operations`; no nexus wrapper package on the TS side.
+
+### 1.3 Full terminology rename
+
+`KeyBlock` is retired across the codebase, schemas, specs, and docs. The wire type is `KnowledgeEntry` from spoke. The `nexus-platform` private repo's consumer concerns are out of scope for this OSS repo.
+
+### 1.4 Crate topology
+
+- **New:** `crates/nexus-spoke-adapter/` — the only boundary that constructs spoke objects with a **lean** `extensions.nexus` populated and delegates lifecycle ops to `spoke-operations`. Thin facade (Q13).
+- **Merge:** `crates/nexus-kb/` is merged INTO the **existing** `crates/nexus-knowledge/` (which today owns User-scoped global knowledge + reference sources). After merger, `nexus-knowledge` consolidates three knowledge tiers in one crate:
+  1. **World KnowledgeEntry** (formerly `nexus-kb`'s domain — narrative KB entries tied to a World)
+  2. **User knowledge** (existing — tag-driven global knowledge entries indexed per `user_id`)
+  3. **reference sources** (existing — local-only research/reference registration)
+  
+  `crates/nexus-kb/` is deleted after merger. spoke-provided standard lifecycle invariants live in `nexus-spoke-adapter`, **not** in the merged `nexus-knowledge`. The merged crate's AGENTS.md is rewritten to reflect the expanded scope (the current AGENTS.md line "does not own World/narrative KeyBlocks" is inverted).
+
+### 1.5 Full operations delegation
+
+All standard lifecycle invariants (promote gate, status transitions, AssemblePacket builder, extension merge) are delegated to `spoke-operations`. **Every spoke-operations invocation takes only spoke standard objects** (`KnowledgeEntry`, `Finding`, `Scope`, `PromoteRequest`, `AssemblePacket`). Nexus wrapper types never reach a `spoke-operations` function signature. The `nexus-spoke-adapter` is the sole boundary that crosses this line.
+
+### 1.6 Author-facing product label (Q11)
+
+| Surface | Term |
+|---------|------|
+| Wire / code / schemas / specs (technical identifiers) | `KnowledgeEntry` |
+| EN author-visible copy | **Knowledge entry** / **Knowledge entries** (sentence case); **Knowledge Entry** only where DESIGN.md Title Case applies |
+| zh-CN author-visible copy | **知识条目** |
+| Never in author-visible UI | camelCase `KnowledgeEntry`, legacy `KeyBlock`, bare "key block(s)" |
+
+## 2. `extensions.nexus` Namespace Contract (Q7)
+
+### 2.1 Field inventory
+
+The `extensions.nexus` namespace carries all nexus-local fields that spoke deliberately keeps out of its core `KnowledgeEntry` schema. The namespace key is `"nexus"` (lowercase, matches spoke `^[a-z][a-z0-9_-]*$` namespace convention).
+
+| Field | JSON type | Required | Semantics | Source in current `KeyBlock` |
+|-------|-----------|----------|-----------|------------------------------|
+| `world_id` | string | yes | World this entry belongs to. Prefix `wld_`. | `KeyBlock.world_id` |
+| `created_from_command_id` | string | no | SyncCommand that originated this entry. Prefix `cmd_`. | `KeyBlock.created_from_command_id` |
+| `source_work_id` | string | no | Work that produced this entry (V1.52 provenance). Prefix `wrk_`. | `KeyBlock.source_work_id` |
+| `source_chapter` | integer | no | Chapter number where the entry was extracted. | `KeyBlock.source_chapter` |
+| `source_provenance_kind` | string | no | How the entry entered the KB graph. Values: `manual`, `review_time_extract`, `finalize_time_extract`, `cross_chapter_rescan`, `author_explicit`. | `KeyBlock.source_provenance_kind` |
+
+**Wire example:**
+```json
+{
+  "extensions": {
+    "nexus": {
+      "world_id": "wld_abc",
+      "created_from_command_id": "cmd_xyz",
+      "source_work_id": "wrk_def",
+      "source_chapter": 3,
+      "source_provenance_kind": "review_time_extract"
+    }
+  }
+}
+```
+
+### 2.2 Round-trip preservation rules
+
+1. **Unknown namespaces** in `extensions` are preserved verbatim on read→modify→write cycles.
+2. **Unknown keys** inside `extensions.nexus` are preserved verbatim.
+3. **Empty `extensions.nexus`** (`{}`) is valid and is not dropped.
+4. Nexus never writes to namespaces other than `"nexus"`; it preserves all others.
+5. The adapter's typed accessors (`get_world_id()`, `set_world_id()`, etc.) operate only on known keys within `extensions.nexus` — they silently pass through unknown keys.
+
+### 2.3 SQLite storage shape
+
+**Decision: keep existing columns (additive migration).**
+
+The SQLite `kb_key_blocks` table retains its current columns (`world_id`, `created_from_command_id`, `source_work_id`, `source_chapter`, `source_provenance_kind`) as-is. The `nexus-spoke-adapter` populates `extensions.nexus` from these columns when constructing a spoke `KnowledgeEntry`, and extracts them back when persisting.
+
+| Rationale | Detail |
+|-----------|--------|
+| Query efficiency | `list_by_world(world_id)` filters on the indexed `world_id` column directly — no JSON extraction at query time |
+| Migration safety | Additive-only: no DDL changes to existing columns; new rows populate existing columns |
+| Round-trip fidelity | Known fields have typed columns; unknown extensions.nexus keys are serialized into a `extensions_nexus_json TEXT` column (additive, added by migration) for round-trip preservation |
+
+**Migration path:**
+
+1. **Add column:** `ALTER TABLE kb_key_blocks ADD COLUMN extensions_nexus_json TEXT;` — stores the full `extensions.nexus` JSON for round-trip preservation of unknown keys.
+2. **Backfill:** for existing rows, `extensions_nexus_json` is populated from the existing columns on next read/write cycle.
+3. **Read:** `KeyBlockRow` → adapter constructs `extensions.nexus` from typed columns + parses `extensions_nexus_json` for unknown keys (merged), then populates `KnowledgeEntry.extensions`.
+4. **Write:** adapter extracts known fields from `extensions.nexus` into typed columns; serializes the full `extensions.nexus` into `extensions_nexus_json` for the round-trip guarantee.
+
+The `world_id` column is **retained as a required SQLite column** (FK to `narrative_worlds`). This preserves the active unique index `idx_kb_key_blocks_active_unique (world_id, block_type, canonical_name)` without rewriting the uniqueness constraint.
+
+**Adaptive migration note:** pre-1.0 allows DB wipes. If the additive migration causes issues, a clean migration (rename table, recreate, re-insert) is acceptable — but additive is preferred.
+
+## 3. Daemon-API Envelope Strategy (Q8)
+
+### 3.1 Decision: `$ref` spoke schema URIs
+
+Daemon-api envelope schemas reference spoke types via their published `$id` URIs. The spoke `knowledge-entry.schema.json` declares `"$id": "https://spoke42.invalid/schemas/data/knowledge-entry.schema.json"`. Nexus daemon-api schemas use:
+
+```json
+{
+  "properties": {
+    "knowledge_entry": {
+      "$ref": "https://spoke42.invalid/schemas/data/knowledge-entry.schema.json"
+    }
+  }
+}
+```
+
+### 3.2 Codegen resolution
+
+The codegen tooling (`json-schema-to-typescript` + `typify`) resolves `$ref` URIs by loading schema files from a known filesystem path. The spoke-schemas package (npm: `@42ch/spoke-schemas`, cargo: `spoke-schemas`) ships its `schemas/` directory. The codegen schema loader is configured with a resolver that maps `https://spoke42.invalid/schemas/` → the spoke package's `schemas/` directory on disk.
+
+### 3.3 Schema migration impact
+
+| File | Before | After |
+|------|--------|-------|
+| `schemas/domain/key-block.schema.json` | Exists; owns `KeyBlock` type | **Deleted** |
+| `schemas/common/common.schema.json` | Defines `KeyBlockId`, `BlockType`, `KeyBlockStatus` | `KeyBlockId` removed (spoke uses `entry_id`); `BlockType` and `KeyBlockStatus` **retained** as nexus-local definitions for daemon-api envelope fields and query parameters that still carry the legacy enum values (status transition maps to spoke core vocab internally) |
+| `schemas/daemon-api/canvas/world-kb/world-kb-graph-response.schema.json` | References `KeyBlock` from `key-block.schema.json` | References `KnowledgeEntry` from spoke via `$ref` |
+| `schemas/daemon-api/compute/compute-input.schema.json` | Carries `KeyBlock` in `key_blocks` array | Carries `KnowledgeEntry` from spoke via `$ref` |
+| `schemas/daemon-api/compute/compute-output.schema.json` | References `KeyBlock` in state_delta target | References `KnowledgeEntry` from spoke |
+
+### 3.4 Fallback path
+
+If the codegen tooling cannot resolve external `$ref` URIs for spoke schemas within the P0 slice, the daemon-api schemas annotate the spoke type dependency in their `description` field, and the generated types import spoke types as external crate/package imports. This is treated as a temporary bridge — the target state is `$ref`-based resolution.
+
+## 4. `nexus-contracts` Package Boundary (Q9)
+
+### 4.1 Decision: reference only — no re-export
+
+`@42ch/nexus-contracts` (npm) and `nexus-contracts` (Rust, monorepo-internal) do **not** re-export spoke types. Consumers import `KnowledgeEntry` directly from the spoke packages.
+
+| Package | Contains |
+|---------|----------|
+| `@42ch/spoke-schemas` | `KnowledgeEntry`, `Relation`, `SourceAnchor`, `Finding`, `Scope`, `AssemblePacket`, `Rule`, `TimelineEvent` — all spoke data types |
+| `@42ch/spoke-operations` | Lifecycle helpers (`validatePromoteRequest`, `transitionKnowledgeEntryStatus`, `buildAssemblePacket`, …) |
+| `@42ch/nexus-contracts` | Nexus-specific daemon-api envelopes (route DTOs), compute ABI types, common nexus identifiers |
+
+### 4.2 App import pattern
+
+```typescript
+// KB entry data type — from spoke
+import { KnowledgeEntry } from "@42ch/spoke-schemas";
+
+// Nexus-specific route DTO — from nexus-contracts
+import { WorldKbGraphResponse, PatchEntityRequest } from "@42ch/nexus-contracts";
+
+// Lifecycle helpers — from spoke-operations
+import { validatePromoteRequest } from "@42ch/spoke-operations";
+```
+
+### 4.3 SemVer bump
+
+`@42ch/nexus-contracts` bumps to the next minor in the pre-1.0 series (e.g., `0.8.0` → `0.9.0`). The package no longer exports `KeyBlock` — this is a breaking change per pre-1.0 SemVer; a minor bump is sufficient (not a major to 1.0, since the package is pre-1.0 and the spire speaks 0.x).
+
+## 5. Drift Detection Adaptation (Q10)
+
+### 5.1 Decision: remove local drift for spoke-sourced types; add spoke version conformance
+
+The `schema_drift_detection.rs` `build_schema_map()` removes the `key-block.schema.json` entry:
+
+```rust
+// REMOVED (was line 117):
+// entry!("schemas/domain/key-block.schema.json", Strict, KeyBlock),
+```
+
+### 5.2 Spoke conformance: lightweight version check
+
+`check-wire-drift.sh` gains a new spoke-conformance step (P0 T4):
+
+1. Verify `spoke-schemas` crate version matches pinned **`0.1.1`** in `Cargo.toml`.
+2. Verify `@42ch/spoke-schemas` npm version matches pinned **`0.1.1`** in `package.json`.
+3. Construct a `KnowledgeEntry` from spoke fixture JSON, deserialize via nexus's serde path, serialize back — verify structural round-trip. This catches type-mapping regressions without requiring a local schema.
+
+### 5.3 Daemon-api envelopes that `$ref` spoke types
+
+Schemas in `schemas/daemon-api/**` that `$ref` spoke types continue to have local drift detection for their **own** fields (the envelope wrapper). The spoke fields that come from `$ref` are validated by the codegen tool at generation time — if the `$ref` resolution fails, codegen fails, which CI's `verify-codegen` gate catches.
+
+## 6. HTTP Route Path Stability (Q12)
+
+### 6.1 Decision: keep `/kb/` and `/kb/key-blocks/`
+
+The daemon API HTTP route paths under `/v1/daemon/.../kb/` are **not renamed** in V1.139. Rationale:
+
+| Reason | Detail |
+|--------|--------|
+| Path stability | `kb` = knowledge base — semantically accurate. Changing it breaks other consuming clients unnecessarily. |
+| Deferred concern | Route path renaming is a separate CLI-IA concern, not a data-model refactor. A holistic route-path review across all surfaces belongs in a dedicated iteration. |
+| Product alignment | The `nexus42 kb ...` CLI subcommand already stays as `kb` — consistent with the daemon path. |
+| Client impact | The daemon API is consumed by the bundled web UI (same repo) and potentially by the Tauri desktop shell. Renaming paths would cascade into client-side URL builders for no data-model benefit. |
+
+**Affected paths (keep as-is):**
+
+| Current path | V1.139 behavior |
+|--------------|-----------------|
+| `/v1/daemon/kb/entries` | Keep |
+| `/v1/daemon/kb/entries/:entry_id` | Keep |
+| `/v1/daemon/worlds/:world_id/kb/patch-entity` | Keep |
+| `/v1/daemon/worlds/:world_id/kb/patch-relationship` | Keep |
+| `/v1/daemon/worlds/:world_id/kb/promote-candidate` | Keep |
+| `/v1/daemon/worlds/:world_id/kb/graph` | Keep |
+| `/v1/daemon/worlds/:world_id/kb/candidates` | Keep |
+| `/v1/daemon/worlds/:world_id/kb/key-blocks/:key_block_id/state` | Keep |
+
+DTO shapes, handler type signatures, and generated code update to `KnowledgeEntry` — only URL path segments remain stable.
+
+## 7. Spoke-Operations Call-Boundary Invariant (HARD)
+
+This is the single most important architectural rule in this spec. It is restated from Q4 and must be visible in every implementer's dispatch.
+
+> **Every call to a `spoke-operations` function takes only spoke standard objects** (`KnowledgeEntry`, `Finding`, `Scope`, `PromoteRequest`, `AssemblePacket`, `Relation`, `Rule`, `TimelineEvent`). Nexus domain types are never passed as operands to `spoke-operations`.
+
+### 7.1 Enforcement
+
+| Layer | Enforcement mechanism |
+|-------|----------------------|
+| **`nexus-spoke-adapter`** | All public functions accept/return spoke types only. The adapter's internal mapping layer converts nexus DB rows ↔ spoke objects — but the public API surface is spoke-only. |
+| **Rust type system** | `spoke-operations` functions take `spoke_schemas::KnowledgeEntry`, not `nexus_knowledge::KnowledgeEntry`. The adapter constructs the spoke type before calling spoke-operations. |
+| **Code review** | P1 implement AC-P1-3: static check (grep) confirms no spoke-operations call site passes a nexus-wrapper type. |
+
+### 7.2 Adapter public API surface
+
+The `nexus-spoke-adapter` crate exports:
+
+```rust
+// ── Extensions accessors ──────────────────────────────────────────────
+
+/// Read `extensions.nexus.world_id` from a KnowledgeEntry.
+pub fn get_world_id(entry: &KnowledgeEntry) -> Option<&str>;
+
+/// Set `extensions.nexus.world_id` on a KnowledgeEntry (mutates in place,
+/// preserves unknown keys in extensions.nexus).
+pub fn set_world_id(entry: &mut KnowledgeEntry, world_id: String);
+
+/// Read `extensions.nexus.created_from_command_id`.
+pub fn get_created_from_command_id(entry: &KnowledgeEntry) -> Option<&str>;
+
+/// Set `extensions.nexus.created_from_command_id`.
+pub fn set_created_from_command_id(entry: &mut KnowledgeEntry, command_id: String);
+
+/// Read provenance fields: (source_work_id, source_chapter, source_provenance_kind).
+pub fn get_provenance(entry: &KnowledgeEntry)
+    -> (Option<&str>, Option<i64>, Option<&str>);
+
+/// Set provenance fields.
+pub fn set_provenance(
+    entry: &mut KnowledgeEntry,
+    source_work_id: Option<String>,
+    source_chapter: Option<i64>,
+    source_provenance_kind: Option<String>,
+);
+
+/// Build `extensions.nexus` from typed nexus fields. Preserves any unknown
+/// keys already present in extensions.nexus. Returns the full ExtensionMap
+/// value for the "nexus" namespace key.
+pub fn build_extensions_nexus(
+    world_id: &str,
+    created_from_command_id: Option<&str>,
+    source_work_id: Option<&str>,
+    source_chapter: Option<i64>,
+    source_provenance_kind: Option<&str>,
+    existing_extensions: &ExtensionMap,
+) -> serde_json::Value;
+
+// ── Ops delegation wrappers (spoke-operations pass-through) ────────────
+
+/// Delegate to `spoke_operations::validate_promote_request`.
+/// Operand: spoke `PromoteRequest` only.
+pub fn validate_promote(request: &PromoteRequest) -> SpokeResult<()>;
+
+/// Delegate to `spoke_operations::apply_promote_acceptance`.
+/// Operand: spoke `PromoteRequest` only. Returns promoted `KnowledgeEntry`.
+pub fn apply_promote(request: &PromoteRequest) -> SpokeResult<KnowledgeEntry>;
+
+/// Delegate to `spoke_operations::transition_knowledge_entry_status`.
+/// Operand: spoke `KnowledgeEntry` only.
+pub fn transition_status(
+    entry: &KnowledgeEntry,
+    to: &str,
+) -> SpokeResult<KnowledgeEntry>;
+
+/// Delegate to `spoke_operations::transition_finding_status`.
+/// Operand: spoke `Finding` only.
+pub fn transition_finding_status(
+    finding: &Finding,
+    to: &str,
+) -> SpokeResult<Finding>;
+
+/// Delegate to `spoke_operations::build_assemble_packet`.
+/// Operands: spoke `KnowledgeEntry` slice only.
+pub fn build_assemble_packet(
+    packet_id: &str,
+    entries: &[KnowledgeEntry],
+    max_entries: Option<usize>,
+) -> SpokeResult<AssemblePacket>;
+
+/// Delegate to `spoke_operations::merge_extension_maps`.
+/// Operands: spoke `ExtensionMap` only.
+pub fn merge_extensions(
+    base: &ExtensionMap,
+    overlay: &ExtensionMap,
+) -> ExtensionMap;
+
+/// Delegate to `spoke_operations::assert_revision_match`.
+pub fn assert_revision(expected: u64, actual: u64) -> SpokeResult<()>;
+```
+
+All delegation wrappers are thin — they enforce the boundary that operands must already be spoke types at the call site. They do not transform types internally.
+
+## 8. Crate Dependency Graph
+
+```
+nexus-knowledge
+  ├── nexus-spoke-adapter ──┐
+  │   ├── spoke-schemas     │ (spoke types)
+  │   └── spoke-operations  │ (lifecycle helpers)
+  ├── spoke-schemas         │ (native KnowledgeEntry type)
+  └── nexus-contracts       │ (local DTOs)
+```
+
+`nexus-local-db`, `nexus-daemon-runtime`, `nexus-orchestration`, `nexus-moment-context-assembly`, `nexus-cloud-sync`, `nexus-wasm-host`, and `apps/nexus42` depend on `nexus-knowledge` (and transitively on `nexus-spoke-adapter` for ops delegation). No crate other than `nexus-spoke-adapter` directly depends on `spoke-operations`.
+
+## 9. Migration Summary
+
+| P0 | P1 | P2 | P3 |
+|----|----|----|-----|
+| Add spoke deps; create adapter crate; delete `key-block.schema.json`; repoint daemon-api envelope `$ref`; regenerate codegen; update drift detection; create this tracked spec | Rename `nexus-kb` → `nexus-knowledge`; migrate types to spoke `KnowledgeEntry`; route lifecycle ops through adapter; migrate SQLite storage; migrate all Rust consumers | Rename daemon-api DTOs; bump `@42ch/nexus-contracts`; migrate TS apps (import from `@42ch/spoke-schemas`); update UI strings to Q11 product label | Sweep specs/docs/knowledge/CLI/fixtures for terminology; add pattern doc via compound at iteration-close |

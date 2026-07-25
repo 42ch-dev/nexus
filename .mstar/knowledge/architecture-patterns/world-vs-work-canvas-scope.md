@@ -22,7 +22,7 @@ The Nexus domain model divides the creative container into two scopes:
 
 | Scope | Core concept | Examples | Surface kinds |
 |-------|-------------|----------|---------------|
-| **World** | Narrative universe — the spine | KeyBlocks, relationships, events, Forks, timeline | `world-kb`, `timeline` |
+| **World** | Narrative universe — the spine | KnowledgeEntries, relationships, events, Forks, timeline | `world-kb`, `timeline` |
 | **Work** | Projection of a World into a writing plan | Outline chapters/scenes, manuscript, chapter-relative events | `work-outline-timeline`, `strategy` |
 
 During V1.122, the architect decided whether the Timeline hero surface should compose Work-scoped data (chapter-relative timeline events from `timeline.patch_event`). The answer was **no**, establishing the scope discipline documented here.

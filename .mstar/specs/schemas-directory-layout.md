@@ -4,11 +4,11 @@
 
 | Attribute | Value |
 | --- | --- |
-| **Status** | Normative — V1.65 Prepare amendment (chapter-content `local-api/works/chapters/` subtree + preset CRUD completion target) |
+| **Status** | Normative — V1.65 Prepare amendment (chapter-content `local-api/works/chapters/` subtree + preset CRUD completion target). **V1.139 architect §5.2**: §3.3 domain/ table — `key-block.schema.json` **deleted** (V1.139 SPOKE adoption; KB entry type now sourced from spoke `knowledge-entry.schema.json`). §7 inventory — domain/ file count reduced by 1. |
 | **Document class** | Master |
 | **Scope** | Folder names, consumer-scope mapping, README rules, rename policy; **not** field-level DTO definitions (those stay in platform `v1-spec` + `data-model-v1`) |
-| **Last updated** | 2026-06-25 — V1.65 Prepare (chapter-content subtree + preset CRUD completion target) |
-| **Related** | [schemas-external-consumer-boundary.md](../knowledge/schemas-external-consumer-boundary.md), [local-cloud-crate-architecture.md](./local-cloud-crate-architecture.md), [compute-module-abi.md](./compute-module-abi.md) §4–§5, [wasm-host.md](./wasm-host.md) §6–§7, [schemas/AGENTS.md](../../../schemas/AGENTS.md), [tooling/AGENTS.md](../../../tooling/AGENTS.md) |
+| **Last updated** | 2026-07-26 — V1.139 architect §5.2: domain/ key-block.schema.json deleted; spoke-sourced KB type. |
+| **Related** | [schemas-external-consumer-boundary.md](../knowledge/schemas-external-consumer-boundary.md), [local-cloud-crate-architecture.md](./local-cloud-crate-architecture.md), [compute-module-abi.md](./compute-module-abi.md) §4–§5, [wasm-host.md](./wasm-host.md) §6–§7, [spoke-adapter-architecture.md](./spoke-adapter-architecture.md), [schemas/AGENTS.md](../../../schemas/AGENTS.md), [tooling/AGENTS.md](../../../tooling/AGENTS.md) |
 
 **Do not confuse:**
 
@@ -108,7 +108,8 @@ Wire entities aligned with platform `data-model-v1` §5–§10. Current inventor
 | `creator.schema.json` | Creator wire shape | `nexus-creator` (logic), not duplicated in app |
 | `user.schema.json`, `pairing.schema.json` | Account bridge | `nexus-cloud-domain` (logic) |
 | `world.schema.json`, `world-membership.schema.json`, `fork-branch.schema.json` | Narrative graph | `nexus-narrative` / bundles |
-| `key-block.schema.json`, `timeline-event.schema.json` | Narrative KB on wire | `nexus-kb` + sync bundles |
+| `timeline-event.schema.json` | Narrative Timeline on wire | `nexus-narrative` + sync bundles |
+| `key-block.schema.json` | **DELETED (V1.139).** Replaced by spoke `knowledge-entry.schema.json` — nexus consumes `KnowledgeEntry` from `@42ch/spoke-schemas` / `spoke-schemas`. See [`spoke-adapter-architecture.md`](spoke-adapter-architecture.md) §3. | Nexus KB type now sourced from spoke |
 | `memory.schema.json` | Memory on wire | `nexus-creator-memory` |
 | `story-manifest.schema.json` | Story summary on wire | `nexus-narrative`, novel-writing sync |
 
@@ -221,7 +222,7 @@ Authoritative count: run `pnpm run validate-schemas` after materializing V1.64 s
 | Directory | Files | Notes |
 | --- | --- | --- |
 | `common/` | 3 | `common`, `source-anchor`, `version-ref` |
-| `domain/` | 10 | Wire entities (see §3.3 table) |
+| `domain/` | 10 → **9** (V1.139: `key-block.schema.json` deleted) | Wire entities (see §3.3 table) |
 | `platform/http-bff/` | 34 | Platform HTTP bodies (flat; prefix grouping in [http-bff/README.md](../../../schemas/platform/http-bff/README.md)) |
 | `platform/sync/` | 7 | `bundle`, `bundle-refinement` (codegen-skipped), `delta`, `sync-command`, `sync-pull-request`, `sync-pull-response`, `conflict-response` |
 | `local-api/common/` | 1 | `error-response` (V1.64 F-E1) |
