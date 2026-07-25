@@ -9,7 +9,7 @@
 | Directory | Files (approx.) | Purpose |
 | --- | --- | --- |
 | [common/](common/) | 3 | Shared IDs, enums, `SourceAnchor`, `VersionRef` |
-| [domain/](domain/) | 10 | Wire entities (Creator, World, KeyBlock, …) |
+| [domain/](domain/) | 9 | Wire entities (Creator, World, TimelineEvent, …) |
 | [platform/http-bff/](platform/http-bff/) | 34 | Platform HTTP request/response bodies |
 | [platform/sync/](platform/sync/) | 7 | CLI ↔ platform sync protocol (bundle, delta, pull, conflict) |
 | [daemon-api/common/](daemon-api/common/) | 1 | Shared Daemon API envelopes — `ErrorResponse` (F-E1, V1.64) |

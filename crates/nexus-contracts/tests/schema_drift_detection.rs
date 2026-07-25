@@ -114,7 +114,9 @@ fn build_schema_map() -> Vec<SchemaEntry> {
         entry!("schemas/domain/memory.schema.json", Strict, Memory),
         entry!("schemas/domain/creator.schema.json", Strict, Creator),
         entry!("schemas/domain/fork-branch.schema.json", Strict, ForkBranch),
-        entry!("schemas/domain/key-block.schema.json", Strict, KeyBlock),
+        // V1.139 P0 T4 (spoke-adapter-architecture spec §5.1): `key-block.schema.json`
+        // was deleted — KnowledgeEntry is now the atomic KB type, sourced from spoke.
+        // No local drift entry; spoke version conformance is checked by check-wire-drift.sh.
         entry!("schemas/domain/pairing.schema.json", Strict, Pairing),
         entry!(
             "schemas/domain/story-manifest.schema.json",

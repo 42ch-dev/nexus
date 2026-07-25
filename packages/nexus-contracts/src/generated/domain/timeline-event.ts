@@ -49,7 +49,7 @@ export interface TimelineEvent {
    */
   caused_by_event_ids?: string[];
   /**
-   * KeyBlocks affected by this event
+   * Knowledge entries affected by this event
    */
   affected_key_block_ids?: string[];
   /**

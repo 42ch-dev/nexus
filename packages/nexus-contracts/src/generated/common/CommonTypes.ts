@@ -47,13 +47,6 @@ export type AccountStatus = "active" | "suspended" | "deleted";
  */
 export type SubscriptionTier = "free" | "pro" | "studio" | "enterprise";
 /**
- * KeyBlock ID (prefix: 'kb_')
- *
- * This interface was referenced by `CommonTypes`'s JSON-Schema
- * via the `definition` "KeyBlockId".
- */
-export type KeyBlockId = string;
-/**
  * TimelineEvent ID (prefix: 'evt_')
  *
  * This interface was referenced by `CommonTypes`'s JSON-Schema

@@ -2889,6 +2889,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "nexus-spoke-adapter"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "spoke-operations",
+ "spoke-schemas",
+]
+
+[[package]]
 name = "nexus-wasm-host"
 version = "0.1.0"
 dependencies = [
@@ -4461,6 +4471,30 @@ checksum = "d91ed6c858b01f942cd56b37a94b3e0a1798290327d1236e4d9cf4eaca44d29d"
 dependencies = [
  "base64ct",
  "der",
+]
+
+[[package]]
+name = "spoke-operations"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1f76548575fca694c4d0b379d47963b17bb52410cdf5f65f5ba7ad79aa9b1816"
+dependencies = [
+ "chrono",
+ "serde",
+ "serde_json",
+ "spoke-schemas",
+]
+
+[[package]]
+name = "spoke-schemas"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "91813db5c226a5047af6984a25020068275b9e941e9b8869edbdac789f08538e"
+dependencies = [
+ "chrono",
+ "regress",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

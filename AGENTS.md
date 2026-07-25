@@ -60,6 +60,7 @@ See linked AGENTS.md files for per-directory decision rules and invariants:
 | `crates/nexus-home-layout/` | `~/.nexus42/` path layout | [`crates/nexus-home-layout/AGENTS.md`](crates/nexus-home-layout/AGENTS.md) |
 | `crates/nexus-local-db/` | Local database layer | [`crates/nexus-local-db/AGENTS.md`](crates/nexus-local-db/AGENTS.md) |
 | `crates/nexus-orchestration/` | Orchestration engine | [`crates/nexus-orchestration/AGENTS.md`](crates/nexus-orchestration/AGENTS.md) |
+| `crates/nexus-spoke-adapter/` | SPOKE boundary — extensions.nexus accessors + spoke-operations delegation | [`crates/nexus-spoke-adapter/AGENTS.md`](crates/nexus-spoke-adapter/AGENTS.md) |
 | `crates/nexus-cloud-sync/` | Cloud sync transport | [`crates/nexus-cloud-sync/AGENTS.md`](crates/nexus-cloud-sync/AGENTS.md) |
 | `crates/nexus-creator/` | Creator aggregate + local identity | [`crates/nexus-creator/AGENTS.md`](crates/nexus-creator/AGENTS.md) |
 | `crates/nexus-creator-memory/` | Memory pipeline, SOUL I/O | [`crates/nexus-creator-memory/AGENTS.md`](crates/nexus-creator-memory/AGENTS.md) |
