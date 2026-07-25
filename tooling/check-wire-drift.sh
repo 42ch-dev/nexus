@@ -5,7 +5,8 @@
 # Two gates:
 #   1. Spoke version conformance — the lockstep spoke pin (spoke-adapter-
 #      architecture spec §1.1/§5.2) is honored in both the Rust workspace
-#      Cargo.toml and the root npm package.json.
+#      Cargo.toml and the root npm package.json, for BOTH spoke packages
+#      (spoke-schemas + spoke-operations). All four pins must match.
 #   2. Schema drift detection — the integration test that validates JSON Schema
 #      wire contracts match their corresponding Rust struct definitions.
 #
@@ -26,38 +27,44 @@ echo "=== Spoke Version Conformance ==="
 echo "Expected lockstep pin: ${SPOKE_PIN}"
 echo ""
 
-# ── Gate 1a: Rust crate pin (workspace Cargo.toml) ──────────────────────────
-# The workspace [workspace.dependencies] declares `spoke-schemas = "=0.1.1"`.
+# ── Gate 1a: Rust crate pins (workspace Cargo.toml) ─────────────────────────
+# The workspace [workspace.dependencies] declares exact pins for both crates:
+#   spoke-schemas    = "=0.1.1"
+#   spoke-operations = "=0.1.1"
 CARGO_TOML="${PROJECT_ROOT}/Cargo.toml"
-cargo_spoke_raw=$(grep -E '^[[:space:]]*spoke-schemas[[:space:]]*=' "$CARGO_TOML" | head -1)
-# Strip to the version token inside the quotes, dropping the leading `=` (exact pin).
-cargo_spoke=$(printf '%s' "$cargo_spoke_raw" | sed -E 's/.*"=?([^"]*)".*/\1/')
+for crate in spoke-schemas spoke-operations; do
+  cargo_spoke_raw=$(grep -E "^[[:space:]]*${crate}[[:space:]]*=" "$CARGO_TOML" | head -1)
+  # Strip to the version token inside the quotes, dropping the leading `=` (exact pin).
+  cargo_spoke=$(printf '%s' "$cargo_spoke_raw" | sed -E 's/.*"=?([^"]*)".*/\1/')
 
-if [ -z "$cargo_spoke" ]; then
-  echo "FAIL: spoke-schemas not found in ${CARGO_TOML}"
-  exit 1
-fi
-if [ "$cargo_spoke" != "$SPOKE_PIN" ]; then
-  echo "FAIL: Cargo.toml spoke-schemas='${cargo_spoke}' != pin '${SPOKE_PIN}'"
-  exit 1
-fi
-echo "OK: Cargo.toml spoke-schemas = ${cargo_spoke}"
+  if [ -z "$cargo_spoke" ]; then
+    echo "FAIL: ${crate} not found in ${CARGO_TOML}"
+    exit 1
+  fi
+  if [ "$cargo_spoke" != "$SPOKE_PIN" ]; then
+    echo "FAIL: Cargo.toml ${crate}='${cargo_spoke}' != pin '${SPOKE_PIN}'"
+    exit 1
+  fi
+  echo "OK: Cargo.toml ${crate} = ${cargo_spoke}"
+done
 
-# ── Gate 1b: npm package pin (root package.json) ────────────────────────────
+# ── Gate 1b: npm package pins (root package.json) ───────────────────────────
 PKG_JSON="${PROJECT_ROOT}/package.json"
-npm_spoke=$(node -e \
-  "const d=require('${PKG_JSON}').dependencies||{}; const v=d['@42ch/spoke-schemas']; process.stdout.write(typeof v==='string'?v:'');" \
-  2>/dev/null || true)
+for pkg in @42ch/spoke-schemas @42ch/spoke-operations; do
+  npm_spoke=$(node -e \
+    "const d=require('${PKG_JSON}').dependencies||{}; const v=d['${pkg}']; process.stdout.write(typeof v==='string'?v:'');" \
+    2>/dev/null || true)
 
-if [ -z "$npm_spoke" ]; then
-  echo "FAIL: @42ch/spoke-schemas not found in ${PKG_JSON} dependencies"
-  exit 1
-fi
-if [ "$npm_spoke" != "$SPOKE_PIN" ]; then
-  echo "FAIL: package.json @42ch/spoke-schemas='${npm_spoke}' != pin '${SPOKE_PIN}'"
-  exit 1
-fi
-echo "OK: package.json @42ch/spoke-schemas = ${npm_spoke}"
+  if [ -z "$npm_spoke" ]; then
+    echo "FAIL: ${pkg} not found in ${PKG_JSON} dependencies"
+    exit 1
+  fi
+  if [ "$npm_spoke" != "$SPOKE_PIN" ]; then
+    echo "FAIL: package.json ${pkg}='${npm_spoke}' != pin '${SPOKE_PIN}'"
+    exit 1
+  fi
+  echo "OK: package.json ${pkg} = ${npm_spoke}"
+done
 echo ""
 
 echo "=== Wire Schema Drift Detection ==="
