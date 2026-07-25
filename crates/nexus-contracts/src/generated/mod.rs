@@ -201,7 +201,6 @@ pub const SCHEMA_VERSIONS: &[(&str, u32)] = &[
     ("CreateWorldResponse", 1),
     ("Creator", 1),
     ("ForkBranch", 1),
-    ("KeyBlock", 1),
     ("Memory", 1),
     ("Pairing", 1),
     ("StoryManifest", 1),

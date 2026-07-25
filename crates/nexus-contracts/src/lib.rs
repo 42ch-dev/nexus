@@ -31,7 +31,6 @@ pub use common_types::SourceAnchor;
 // non-colliding with `generated::*`).
 pub use generated::domain::creator::CreatorRegistrationSource as RegistrationSource;
 pub use generated::domain::fork_branch::ForkBranchVerificationStatus as VerificationStatus;
-pub use generated::domain::key_block::KeyBlockBlockType as BlockType;
 pub use generated::domain::memory::MemoryMemoryKind as MemoryKind;
 pub use generated::domain::memory::MemoryMemoryType as MemoryType;
 pub use generated::domain::pairing::PairingPairingSource as PairingSource;
@@ -50,10 +49,17 @@ pub use generated::domain::world_membership::WorldMembershipRole as MembershipRo
 // emit them because the schema is definitions-only). These are the
 // canonical, hand-maintained copies from `common_types` (with `as_str()`
 // via `enum_conversions` and `FromStr` where consumers need it).
+//
+// V1.139 P0 T4: `BlockType` and `KeyBlockStatus` are now re-exported from here.
+// `key-block.schema.json` was deleted (spoke KnowledgeEntry is the atomic KB type);
+// the typify-generated `KeyBlockBlockType` / domain `KeyBlockStatus` it carried are
+// gone, so the crate-root aliases point at the canonical `common_types` enums
+// (spoke-adapter-architecture spec §3.3 retains them as nexus-local enums for
+// daemon-api envelope fields / query parameters).
 pub use common_types::{
-    BundleId, CommandId, CreatorId, DeliveryState, DeltaSequence, KeyBlockId, ManuscriptId,
-    ManuscriptPhase, ReferenceSourceType, ScanStatus, SchemaVersion, SourceSummaryRef,
-    StoryManifestId, TimelineEventId, Timestamp, UserId, WorkspaceId, WorldId,
+    BlockType, BundleId, CommandId, CreatorId, DeliveryState, DeltaSequence, KeyBlockId,
+    KeyBlockStatus, ManuscriptId, ManuscriptPhase, ReferenceSourceType, ScanStatus, SchemaVersion,
+    SourceSummaryRef, StoryManifestId, TimelineEventId, Timestamp, UserId, WorkspaceId, WorldId,
 };
 
 // Sync / bundle / publish enums: typify mangles these per-schema, so alias the
@@ -106,8 +112,8 @@ macro_rules! impl_display_via_deref {
     };
 }
 impl_display_via_deref! {
-    generated::domain::key_block::KeyBlockKeyBlockId,
-    generated::domain::key_block::KeyBlockWorldId,
+    // V1.139 P0 T4: `KeyBlockKeyBlockId` and `KeyBlockWorldId` (from the deleted
+    // `key-block.schema.json`) removed — their newtypes no longer exist.
     generated::domain::world::WorldWorldId,
     generated::domain::creator::CreatorCreatorId,
     generated::platform::sync::bundle::BundleBundleId,

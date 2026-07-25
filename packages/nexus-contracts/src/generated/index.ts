@@ -189,7 +189,6 @@ export const SCHEMA_VERSIONS: Record<string, number> = {
   CreateWorldResponse: 1,
   Creator: 1,
   ForkBranch: 1,
-  KeyBlock: 1,
   Memory: 1,
   Pairing: 1,
   StoryManifest: 1,
