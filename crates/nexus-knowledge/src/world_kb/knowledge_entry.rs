@@ -439,22 +439,25 @@ impl From<SpokeKnowledgeEntry> for WorldKbEntry {
 
         // Reverse body: spoke typed body → nexus state. summary/attributes/tags
         // cannot be recovered (forward direction dropped them); they default to None.
+        // Computable flag: preserve the signal (non-empty spoke computable map → true).
         let SpokeKnowledgeEntryBody {
             computable, state, ..
         } = s.body;
-        let body = if state.is_empty() && computable.is_empty() {
+        let has_computable = !computable.is_empty();
+        let has_state = !state.is_empty();
+        let body = if !has_state && !has_computable {
             None
         } else {
             Some(WorldKbBody {
                 summary: None,
                 attributes: None,
                 tags: None,
-                state: if state.is_empty() {
-                    None
-                } else {
+                state: if has_state {
                     Some(Value::Object(state))
+                } else {
+                    None
                 },
-                computable: None,
+                computable: if has_computable { Some(true) } else { None },
             })
         };
 
