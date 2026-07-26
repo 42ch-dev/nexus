@@ -29,7 +29,7 @@ describe('MaturationIndicators (reading-maturation-badge tokens)', () => {
   it('KB density badge consumes reading-maturation-kb-density tokens', () => {
     setup(0);
     render(<MaturationIndicators workId="w1" chapter={1} status="draft" />);
-    const kb = screen.getByLabelText(/key blocks/i);
+    const kb = screen.getByLabelText(/knowledge entries/i);
     expect(kb.className).toMatch(/\bbg-reading-maturation-kb-density-bg\b/);
     expect(kb.className).toMatch(/\btext-reading-maturation-kb-density-text\b/);
     expect(kb.className).toMatch(/\bborder-reading-maturation-kb-density-border\b/);

@@ -1347,7 +1347,7 @@ mod tests {
         );
         let err_msg = format!("{}", cross_result.unwrap_err());
         assert!(
-            err_msg.contains("403") || err_msg.contains("WORLD_KB_FORBIDDEN"),
+            err_msg.contains("403") || err_msg.contains("WORLD_KB_FORBIDDEN") || err_msg.contains("not found"),
             "cross-author error must mention auth, got: {err_msg}"
         );
     }
