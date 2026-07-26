@@ -3,7 +3,7 @@
 //! Acceptance criteria:
 //! 1. Two concurrent mutating operations on same Work → second fails with holder hint.
 //! 2. Crashed CLI holder cleared after TTL (configurable).
-//! 3. Auto-chain skips Works with foreign runtime_lock_holder.
+//! 3. Auto-chain skips Works with foreign `runtime_lock_holder`.
 
 #![allow(clippy::unwrap_used)]
 
@@ -35,7 +35,7 @@ async fn test_ctx() -> TestCtx {
     TestCtx { _tmp, state }
 }
 
-/// Create a Work via handler and return its work_id.
+/// Create a Work via handler and return its `work_id`.
 async fn create_test_work(state: &WorkspaceState) -> String {
     let (_, resp) = create_work(
         State(state.clone()),

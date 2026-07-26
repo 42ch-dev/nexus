@@ -516,19 +516,6 @@ impl ChapterStatus {
 // The first three share names with `common_types` enums imported above, so
 // their impls are written against the fully-qualified generated path.
 
-impl crate::generated::domain::key_block::KeyBlockStatus {
-    #[must_use]
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            Self::Provisional => "provisional",
-            Self::Confirmed => "confirmed",
-            Self::Deprecated => "deprecated",
-            Self::Merged => "merged",
-            Self::Deleted => "deleted",
-        }
-    }
-}
-
 impl crate::generated::domain::pairing::PairingStatus {
     #[must_use]
     pub const fn as_str(&self) -> &'static str {

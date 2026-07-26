@@ -11,7 +11,7 @@ use crate::api::handlers::works::{read_active_creator_id, read_active_workspace_
 use crate::api::path_guard::resolve_guarded_path_async;
 use crate::capability_registry::host_tool_registry;
 use crate::workspace::WorkspaceState;
-use nexus_kb::KbStore;
+use nexus_knowledge::world_kb::KbStore;
 use nexus_local_db::works;
 use nexus_narrative::NarrativeGateway;
 use std::future::Future;
@@ -943,14 +943,12 @@ async fn execute_kb_snapshot_read(
     ensure_world_accessible_for_creator(pool, creator_id, world_id).await?;
 
     let kb_store = nexus_local_db::kb_store::SqliteKbStore::new(pool.clone());
-    let blocks =
-        kb_store
-            .list_by_world(world_id)
-            .await
-            .map_err(|e: nexus_kb::store::KbStoreError| NexusApiError::Internal {
-                code: "KB_STORE_ERROR".to_string(),
-                message: e.to_string(),
-            })?;
+    let blocks = kb_store.list_by_world(world_id).await.map_err(
+        |e: nexus_knowledge::world_kb::store::KbStoreError| NexusApiError::Internal {
+            code: "KB_STORE_ERROR".to_string(),
+            message: e.to_string(),
+        },
+    )?;
 
     Ok(serde_json::to_value(&blocks).unwrap_or_else(|_| serde_json::json!([])))
 }
@@ -1268,7 +1266,7 @@ async fn execute_kb_snapshot_write(
     })?;
 
     for block_val in blocks {
-        let kb: nexus_kb::key_block::KeyBlock =
+        let kb: nexus_knowledge::world_kb::knowledge_entry::WorldKbEntry =
             serde_json::from_value(block_val.clone()).map_err(|e| NexusApiError::InvalidInput {
                 field: "parameters.blocks[]".into(),
                 reason: format!("invalid key block: {e}"),
@@ -1277,10 +1275,10 @@ async fn execute_kb_snapshot_write(
         // request-level world_id (prevents cross-world block payload bypass).
         if kb.world_id != world_id {
             return Err(NexusApiError::Forbidden {
-                resource: "key_block.world_id".to_string(),
+                resource: "knowledge_entry.world_id".to_string(),
                 reason: format!(
                     "block {} targets world '{}' but request targets world '{}'",
-                    kb.key_block_id, kb.world_id, world_id
+                    kb.entry_id, kb.world_id, world_id
                 ),
             });
         }
@@ -2743,7 +2741,7 @@ mod tests {
         (state, tmp)
     }
 
-    /// V1.88 T3 (R-V187-QC3-P001): fs/write_text_file resolves an in-bounds
+    /// V1.88 T3 (R-V187-QC3-P001): `fs/write_text_file` resolves an in-bounds
     /// path asynchronously and writes the file.
     #[tokio::test]
     async fn execute_write_file_accepts_in_bounds_path() {
@@ -2762,7 +2760,7 @@ mod tests {
         assert!(result.is_ok(), "in-bounds write should succeed: {result:?}");
     }
 
-    /// V1.88 T3 (R-V187-QC3-P001): fs/write_text_file rejects a relative path
+    /// V1.88 T3 (R-V187-QC3-P001): `fs/write_text_file` rejects a relative path
     /// that escapes the workspace root before any FS access.
     #[tokio::test]
     async fn execute_write_file_rejects_escape_path() {
@@ -2788,7 +2786,7 @@ mod tests {
         }
     }
 
-    /// V1.88 T3 (R-V187-QC3-P001): fs/read_text_file resolves an in-bounds
+    /// V1.88 T3 (R-V187-QC3-P001): `fs/read_text_file` resolves an in-bounds
     /// path asynchronously and returns the file content.
     #[tokio::test]
     async fn execute_read_file_accepts_in_bounds_path() {
@@ -2811,7 +2809,7 @@ mod tests {
         assert_eq!(value["content"], "file content");
     }
 
-    /// V1.88 T3 (R-V187-QC3-P001): fs/read_text_file rejects a relative path
+    /// V1.88 T3 (R-V187-QC3-P001): `fs/read_text_file` rejects a relative path
     /// that escapes the workspace root before any FS access.
     #[tokio::test]
     async fn execute_read_file_rejects_escape_path() {

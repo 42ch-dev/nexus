@@ -8,7 +8,7 @@ V1.62 (2026-06-23) moved these from `schemas/compute/` into `schemas/daemon-api/
 
 | File | Role |
 | --- | --- |
-| `compute-input.schema.json` | `ComputeInput` envelope — KeyBlock snapshot + world ref + narrative state + module invocation params |
+| `compute-input.schema.json` | `ComputeInput` envelope — KnowledgeEntry snapshot + world ref + narrative state + module invocation params |
 | `compute-output.schema.json` | `ComputeOutput` 4-part envelope — `state_delta`, `timeline_events`, `new_key_blocks`, `battle_report` |
 
 ## Related

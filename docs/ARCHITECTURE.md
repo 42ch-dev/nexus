@@ -75,7 +75,7 @@ Guiding rules:
 
 1. Every scoped entity has **exactly one** owning scope and primary owner crate.
 2. **World history is immutable** — change via Fork, not in-place rewrite.
-3. **`nexus-kb`** owns World-scoped KeyBlocks / SourceAnchors; **`nexus-knowledge`** owns User-scoped knowledge. Do not conflate either with the CLI/daemon **work file index** under work-scope `kb` routes.
+3. **`nexus-knowledge`** owns World-scoped KnowledgeEntries / SourceAnchors (merged from former `nexus-kb` in V1.139) and User-scoped knowledge. Do not conflate either with the CLI/daemon **work file index** under work-scope `kb` routes.
 4. **`nexus-narrative`** coordinates World / Timeline / Event state; forks are platform-oriented where the entity model says so.
 5. **`nexus-moment-context-assembly`** owns session-start context assembly (`assemble_moment` is the assembly SSOT).
 6. A local `workspace_slug` is a **storage partition** under Creator, not a new entity scope.
@@ -136,7 +136,7 @@ Breaking changes to API shapes, CLI flags, config, and on-disk layout are **allo
 Guidance for contributors:
 
 - Treat `~/.nexus42/` and workspace-local state as **working copies**, not a stable public storage API.
-- Domain semantics belong in owner crates (`nexus-local-db`, `nexus-creator-memory`, `nexus-kb`, …). File caches in the CLI composition root are conveniences, not long-term SSOT.
+- Domain semantics belong in owner crates (`nexus-local-db`, `nexus-creator-memory`, `nexus-knowledge`, …). File caches in the CLI composition root are conveniences, not long-term SSOT.
 - Prefer structured deltas/bundles for sync — not full manuscript upload by default.
 - Document intentional wipe/reset UX when a change invalidates local DBs (authors should not need to reverse-engineer migrations).
 

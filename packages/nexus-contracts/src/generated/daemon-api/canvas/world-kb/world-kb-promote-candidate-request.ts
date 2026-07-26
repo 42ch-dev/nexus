@@ -13,7 +13,7 @@ export interface WorldKbPromoteCandidateRequest {
    */
   job_id: string;
   /**
-   * Pending KeyBlock id (key_block_id).
+   * Pending KnowledgeEntry id (key_block_id).
    */
   candidate_id: string;
   /**
@@ -25,7 +25,7 @@ export interface WorldKbPromoteCandidateRequest {
    */
   expected_version: number;
   /**
-   * Confirmed KeyBlock id to merge into. Required when action=merge.
+   * Confirmed KnowledgeEntry id to merge into. Required when action=merge.
    */
   merge_target_id?: string;
   patch?: NexusWorldKbEntityPatch;
@@ -39,7 +39,7 @@ export interface NexusWorldKbEntityPatch {
    */
   title?: string;
   /**
-   * Replacement KeyBlock body JSON (summary/attributes/tags/state/computable).
+   * Replacement KnowledgeEntry body JSON (summary/attributes/tags/state/computable).
    */
   body?: {
     [k: string]: unknown | undefined;

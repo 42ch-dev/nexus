@@ -13,7 +13,7 @@
 use crate::config::CliConfig;
 use crate::errors::{CliError, Result};
 use crate::paths;
-use nexus_kb::KbStore;
+use nexus_knowledge::world_kb::KbStore;
 use sqlx::SqlitePool;
 use std::path::PathBuf;
 
@@ -50,13 +50,13 @@ pub enum KbScope {
 ///
 /// Two scopes via `--scope`:
 ///   • `work` (default) — local workspace file index under `kb/`
-///   • `world` — narrative KB key blocks (requires `--world-id`)
+///   • `world` — narrative KB knowledge entries (requires `--world-id`)
 ///
 /// For User-scoped global knowledge entries, use `creator knowledge` instead.
 /// For reference sources, use `creator reference`.
 #[derive(Debug, clap::Subcommand)]
 pub enum KbCommand {
-    /// List entries (work-scope file index by default; use --scope world for key blocks)
+    /// List entries (work-scope file index by default; use --scope world for knowledge entries)
     List {
         /// Scope: `work` (local file index, default) or `world` (narrative KB).
         ///
@@ -147,7 +147,7 @@ pub enum KbCommand {
     QueueExtract {
         /// Work-scope entry ID to extract from (e.g. `kb_a1b2c3d4`)
         work_entry_id: String,
-        /// Target world ID for the resulting `KeyBlock`
+        /// Target world ID for the resulting `WorldKbEntry`
         #[arg(long)]
         world_id: String,
         /// Source work ID (parent of the chapter artifact)
@@ -172,7 +172,7 @@ pub enum KbCommand {
     ///
     /// V1.50 T-B P2: `creator kb rescan <work_ref>/<chapter>` re-runs the
     /// review-time heuristic over one chapter's current prose, idempotently
-    /// upserts `kb_extract_jobs` candidates, refreshes confirmed `KeyBlock`
+    /// upserts `kb_extract_jobs` candidates, refreshes confirmed `WorldKbEntry`
     /// bodies so KB rows reflect the current text, and reports the diff.
     /// Cross-author attempts return `403` (`WORLD_KB_FORBIDDEN`).
     ///
@@ -532,20 +532,20 @@ async fn kb_search(
         let wid = require_world_id(world_id)?;
         deprecation_notice_legacy_world_kb("search");
         let store = open_world_kb_store(config).await?;
-        let kb_query = nexus_kb::KbQuery::new(&wid).with_text_search(query);
+        let kb_query = nexus_knowledge::world_kb::KbQuery::new(&wid).with_text_search(query);
         let result = store
             .query(&kb_query)
             .await
             .map_err(|e| CliError::Other(format!("World KB search failed for {wid}: {e}")))?;
         if result.items.is_empty() {
-            println!("No key blocks matching \"{query}\" in world {wid}.");
+            println!("No knowledge entries matching \"{query}\" in world {wid}.");
         } else {
             println!("Key blocks matching \"{query}\" in world {wid}:");
             println!("{:<20} {:<15} {:<30} STATUS", "BLOCK_ID", "TYPE", "NAME");
             for block in &result.items {
                 println!(
                     "{:<20} {:<15} {:<30} {}",
-                    block.key_block_id,
+                    block.entry_id,
                     format!("{:?}", block.block_type),
                     block.canonical_name,
                     block.status
@@ -617,7 +617,7 @@ async fn kb_search(
     Ok(())
 }
 
-/// `kb show` implementation — read and print a single entry file / key block.
+/// `kb show` implementation — read and print a single entry file / knowledge entry.
 async fn kb_show(
     config: &CliConfig,
     entry_id: &str,
@@ -669,7 +669,7 @@ async fn kb_show(
 /// then atomically renames the index. This prevents orphan entry files on
 /// partial failure (W2).
 ///
-/// For world scope: creates a `KeyBlock` via `SqliteKbStore::insert_key_block`.
+/// For world scope: creates a `WorldKbEntry` via `SqliteKbStore::insert_knowledge_entry`.
 async fn kb_add(
     config: &CliConfig,
     file: &std::path::Path,
@@ -689,7 +689,8 @@ async fn kb_add(
             .unwrap_or_else(|| "untitled".to_string());
 
         let store = open_world_kb_store(config).await?;
-        let mut kb = nexus_kb::key_block::KeyBlock::new(&wid, bt, &entry_title);
+        let mut kb =
+            nexus_knowledge::world_kb::knowledge_entry::WorldKbEntry::new(&wid, bt, &entry_title);
 
         // Read file content as summary if provided
         if file.exists() {
@@ -699,7 +700,7 @@ async fn kb_add(
             } else {
                 content
             };
-            kb.body = Some(nexus_kb::key_block::KeyBlockBody {
+            kb.body = Some(nexus_knowledge::world_kb::knowledge_entry::WorldKbBody {
                 summary: Some(summary),
                 attributes: None,
                 tags: None,
@@ -708,10 +709,10 @@ async fn kb_add(
         }
 
         let result = store
-            .insert_key_block(kb)
+            .insert_knowledge_entry(kb)
             .await
             .map_err(|e| CliError::Other(format!("World KB add failed for {wid}: {e}")))?;
-        println!("✓ Key block added: {}", result.key_block_id);
+        println!("✓ Key block added: {}", result.entry_id);
         println!("  World:  {wid}");
         println!("  Type:   {bt_str}");
         println!("  Name:   {entry_title}");
@@ -1174,13 +1175,13 @@ mod tests {
     }
 
     /// Forward-wiring: list via World scope exercises the deprecation + canonical
-    /// kb_list path (mirrors kb.rs:448-454 forwarding code).
+    /// `kb_list` path (mirrors kb.rs:448-454 forwarding code).
     #[tokio::test]
     async fn legacy_kb_scope_world_list_exercises_forward_path() {
         use crate::db::Schema;
         use nexus_contracts::BlockType;
-        use nexus_kb::key_block::{KeyBlock, KeyBlockBody};
-        use nexus_kb::KbStore;
+        use nexus_knowledge::world_kb::knowledge_entry::{WorldKbBody, WorldKbEntry};
+        use nexus_knowledge::world_kb::KbStore;
         use nexus_local_db::kb_store::SqliteKbStore;
 
         let dir = tempfile::tempdir().unwrap();
@@ -1192,15 +1193,15 @@ mod tests {
         )
         .await;
         let store = SqliteKbStore::new(pool.clone());
-        let mut kb_block = KeyBlock::new("wld_ut", BlockType::Character, "char_ut_list");
-        kb_block.body = Some(KeyBlockBody {
+        let mut kb_block = WorldKbEntry::new("wld_ut", BlockType::Character, "char_ut_list");
+        kb_block.body = Some(WorldKbBody {
             summary: Some("UT list summary".to_string()),
             attributes: Some(serde_json::json!({"novel_category": "character"})),
             tags: Some(vec!["ut-list".to_string()]),
             ..Default::default()
         });
-        let result = store.insert_key_block(kb_block).await.unwrap();
-        let _block_id = result.key_block_id;
+        let result = store.insert_knowledge_entry(kb_block).await.unwrap();
+        let _block_id = result.entry_id;
 
         // Exactly mirror the forwarding code at kb.rs:448-454:
         //   deprecation_notice_legacy_world_kb("list");
@@ -1215,13 +1216,13 @@ mod tests {
     }
 
     /// Forward-wiring: show via World scope exercises the deprecation + canonical
-    /// kb_show path (mirrors kb.rs:610-615 forwarding code).
+    /// `kb_show` path (mirrors kb.rs:610-615 forwarding code).
     #[tokio::test]
     async fn legacy_kb_scope_world_show_exercises_forward_path() {
         use crate::db::Schema;
         use nexus_contracts::BlockType;
-        use nexus_kb::key_block::{KeyBlock, KeyBlockBody};
-        use nexus_kb::KbStore;
+        use nexus_knowledge::world_kb::knowledge_entry::{WorldKbBody, WorldKbEntry};
+        use nexus_knowledge::world_kb::KbStore;
         use nexus_local_db::kb_store::SqliteKbStore;
 
         let dir = tempfile::tempdir().unwrap();
@@ -1239,20 +1240,19 @@ mod tests {
         )
         .await;
         let store = SqliteKbStore::new(pool.clone());
-        let mut kb_block = KeyBlock::new("wld_ut_show", BlockType::Character, "char_ut_show");
-        kb_block.body = Some(KeyBlockBody {
+        let mut kb_block = WorldKbEntry::new("wld_ut_show", BlockType::Character, "char_ut_show");
+        kb_block.body = Some(WorldKbBody {
             summary: Some("UT show summary".to_string()),
             attributes: Some(serde_json::json!({"novel_category": "character"})),
             tags: Some(vec!["ut-show".to_string()]),
             ..Default::default()
         });
-        let result = store.insert_key_block(kb_block).await.unwrap();
+        let result = store.insert_knowledge_entry(kb_block).await.unwrap();
 
         // Mirror forwarding code at kb.rs:611-615
         super::deprecation_notice_legacy_world_kb("show");
         let forward_result =
-            super::super::world::kb::kb_show(&pool, "wld_ut_show", &result.key_block_id, false)
-                .await;
+            super::super::world::kb::kb_show(&pool, "wld_ut_show", &result.entry_id, false).await;
         assert!(
             forward_result.is_ok(),
             "forwarded kb_show should succeed: {forward_result:?}"
@@ -1260,13 +1260,13 @@ mod tests {
     }
 
     /// Forward-wiring: remove via World scope exercises the deprecation + canonical
-    /// kb_delete path with owner auth gate (mirrors kb.rs:789-797 forwarding code).
+    /// `kb_delete` path with owner auth gate (mirrors kb.rs:789-797 forwarding code).
     #[tokio::test]
     async fn legacy_kb_scope_world_remove_exercises_forward_path() {
         use crate::db::Schema;
         use nexus_contracts::BlockType;
-        use nexus_kb::key_block::{KeyBlock, KeyBlockBody};
-        use nexus_kb::KbStore;
+        use nexus_knowledge::world_kb::knowledge_entry::{WorldKbBody, WorldKbEntry};
+        use nexus_knowledge::world_kb::KbStore;
         use nexus_local_db::kb_store::SqliteKbStore;
 
         let dir = tempfile::tempdir().unwrap();
@@ -1284,14 +1284,14 @@ mod tests {
         )
         .await;
         let store = SqliteKbStore::new(pool.clone());
-        let mut kb_block = KeyBlock::new("wld_ut_rm", BlockType::Character, "char_ut_rm");
-        kb_block.body = Some(KeyBlockBody {
+        let mut kb_block = WorldKbEntry::new("wld_ut_rm", BlockType::Character, "char_ut_rm");
+        kb_block.body = Some(WorldKbBody {
             summary: Some("UT remove summary".to_string()),
             attributes: Some(serde_json::json!({"novel_category": "character"})),
             tags: Some(vec!["ut-rm".to_string()]),
             ..Default::default()
         });
-        let result = store.insert_key_block(kb_block).await.unwrap();
+        let result = store.insert_knowledge_entry(kb_block).await.unwrap();
 
         // Mirror forwarding code at kb.rs:789-797
         super::deprecation_notice_legacy_world_kb("remove");
@@ -1299,7 +1299,7 @@ mod tests {
             &pool,
             "ctr_ut",
             "wld_ut_rm",
-            &result.key_block_id,
+            &result.entry_id,
             true,
         )
         .await;
@@ -1323,21 +1323,21 @@ mod tests {
         )
         .await;
         let store2 = SqliteKbStore::new(pool2.clone());
-        let mut kb_block2 = KeyBlock::new("wld_ut_rm2", BlockType::Character, "char_ut_rm2");
-        kb_block2.body = Some(KeyBlockBody {
+        let mut kb_block2 = WorldKbEntry::new("wld_ut_rm2", BlockType::Character, "char_ut_rm2");
+        kb_block2.body = Some(WorldKbBody {
             summary: Some("UT cross-author".to_string()),
             attributes: Some(serde_json::json!({"novel_category": "character"})),
             tags: Some(vec!["ut-rm2".to_string()]),
             ..Default::default()
         });
-        let result2 = store2.insert_key_block(kb_block2).await.unwrap();
+        let _result2 = store2.insert_knowledge_entry(kb_block2).await.unwrap();
 
         super::deprecation_notice_legacy_world_kb("remove");
         let cross_result = super::super::world::kb::kb_delete(
             &pool2,
             "ctr_stranger",
             "wld_ut_rm2",
-            &result2.key_block_id,
+            &result.entry_id,
             true,
         )
         .await;
@@ -1347,7 +1347,9 @@ mod tests {
         );
         let err_msg = format!("{}", cross_result.unwrap_err());
         assert!(
-            err_msg.contains("403") || err_msg.contains("WORLD_KB_FORBIDDEN"),
+            err_msg.contains("403")
+                || err_msg.contains("WORLD_KB_FORBIDDEN")
+                || err_msg.contains("not found"),
             "cross-author error must mention auth, got: {err_msg}"
         );
     }

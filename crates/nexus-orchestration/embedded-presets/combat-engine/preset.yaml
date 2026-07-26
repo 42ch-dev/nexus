@@ -2,14 +2,14 @@
 #
 # V1.61 P3: First compute-enabled preset (compass Q7).
 # Runs a WASM compute module (default: basic-combat) against a world's computable
-# KeyBlocks to resolve combat, apply state deltas to character HP/status, and
+# KnowledgeEntries to resolve combat, apply state deltas to character HP/status, and
 # advance the narrative timeline with battle events.
 #
 # State machine: load_world → compute → apply_delta → advance_timeline → done
 #
 # Architectural note (R-V161P3-ARCH-001): load_world's `enter` capability
 # call to `narrative.compute` performs the full cycle (read computable
-# KeyBlocks, invoke WASM module, apply state deltas, append timeline events)
+# KnowledgeEntries, invoke WASM module, apply state deltas, append timeline events)
 # in a single invocation. The downstream states `apply_delta` and
 # `advance_timeline` are structural markers reserved for future per-stage
 # capability splits (e.g. a separate `narrative.apply_delta` capability
@@ -51,7 +51,7 @@ preset:
 
 states:
   - id: load_world
-    description: "Read computable KeyBlocks and narrative position from the world"
+    description: "Read computable KnowledgeEntries and narrative position from the world"
     enter:
       - kind: capability
         name: narrative.compute

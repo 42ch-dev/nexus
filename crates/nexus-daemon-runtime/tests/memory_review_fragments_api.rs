@@ -1,8 +1,8 @@
 //! Memory Review + Fragments API contract tests (V1.33 P4).
 //!
 //! Covers the two new daemon endpoints:
-//! - `POST /v1/daemon/memory/review` → 200 (review processed), 400 (invalid creator_id)
-//! - `GET  /v1/daemon/memory/fragments` → 200 (list), 400 (invalid creator_id)
+//! - `POST /v1/daemon/memory/review` → 200 (review processed), 400 (invalid `creator_id`)
+//! - `GET  /v1/daemon/memory/fragments` → 200 (list), 400 (invalid `creator_id`)
 //!
 //! Also verifies that `pending-review` CRUD routes are not regressed.
 
@@ -310,7 +310,7 @@ async fn fragments_returns_409_without_creator() {
     assert_uninitialized_response(resp);
 }
 
-/// Review returns 403 when request creator_id does not match active creator.
+/// Review returns 403 when request `creator_id` does not match active creator.
 #[tokio::test]
 async fn review_returns_403_on_creator_id_mismatch() {
     let ctx = test_ctx_with_active_creator("ctr_alice").await;
@@ -324,7 +324,7 @@ async fn review_returns_403_on_creator_id_mismatch() {
     resp.assert_status(axum::http::StatusCode::FORBIDDEN);
 }
 
-/// Fragments returns 403 when request creator_id does not match active creator.
+/// Fragments returns 403 when request `creator_id` does not match active creator.
 #[tokio::test]
 async fn fragments_returns_403_on_creator_id_mismatch() {
     let ctx = test_ctx_with_active_creator("ctr_alice").await;
@@ -362,7 +362,7 @@ async fn cross_creator_isolation_review_other_creator_returns_403() {
 
 // ─── R-V133P4-07: Pending-review CRUD auth enforcement ─────────────────────
 
-/// Helper: create TestCtx without active creator (no config.toml).
+/// Helper: create `TestCtx` without active creator (no config.toml).
 async fn test_ctx_without_creator() -> TestCtx {
     let (tmp, nexus_home, db_path) = test_utils::create_test_workspace().await;
     // Remove config.toml → no active creator.
@@ -422,7 +422,7 @@ async fn pending_review_count_returns_409_without_creator() {
 /// Pending review delete returns 401 when no active creator is configured.
 ///
 /// Uses direct handler invocation (bypasses axum-test routing issue with
-/// `{id}` path segments for DELETE — same pattern as works_api tests).
+/// `{id}` path segments for DELETE — same pattern as `works_api` tests).
 #[tokio::test]
 async fn pending_review_delete_returns_401_without_creator() {
     let (tmp, nexus_home, db_path) = test_utils::create_test_workspace().await;
@@ -456,7 +456,7 @@ async fn pending_review_delete_returns_401_without_creator() {
     drop(tmp);
 }
 
-/// Pending review create returns 403 when body creator_id does not match active creator.
+/// Pending review create returns 403 when body `creator_id` does not match active creator.
 #[tokio::test]
 async fn pending_review_create_returns_403_on_creator_id_mismatch() {
     let ctx = test_ctx_with_active_creator("ctr_alice").await;
@@ -474,7 +474,7 @@ async fn pending_review_create_returns_403_on_creator_id_mismatch() {
     resp.assert_status(axum::http::StatusCode::FORBIDDEN);
 }
 
-/// Pending review list returns 403 when query creator_id does not match active creator.
+/// Pending review list returns 403 when query `creator_id` does not match active creator.
 #[tokio::test]
 async fn pending_review_list_returns_403_on_creator_id_mismatch() {
     let ctx = test_ctx_with_active_creator("ctr_alice").await;
@@ -489,7 +489,7 @@ async fn pending_review_list_returns_403_on_creator_id_mismatch() {
 
 /// Seed `count` pending-review rows directly via SQL for the same creator.
 /// Each row carries a research-task digest long enough to classify as
-/// FragmentOnly (predictable, creates a DB record that is easy to count for
+/// `FragmentOnly` (predictable, creates a DB record that is easy to count for
 /// the concurrency no-duplicate assertion).
 async fn seed_n_pending_reviews_raw(pool: &sqlx::SqlitePool, creator_id: &str, count: usize) {
     // Distinct created_at timestamps keep the (created_at DESC, pending_id DESC)
@@ -516,7 +516,7 @@ async fn seed_n_pending_reviews_raw(pool: &sqlx::SqlitePool, creator_id: &str, c
 }
 
 /// Bounded drain walk: seeding >50 rows, a single review call processes at
-/// most REVIEW_BATCH_LIMIT (50) rows and reports `has_more = true`. A second
+/// most `REVIEW_BATCH_LIMIT` (50) rows and reports `has_more = true`. A second
 /// call drains the remainder and reports `has_more = false`. No row is lost.
 #[tokio::test]
 async fn review_bounded_drain_walk_more_than_batch_limit() {
@@ -717,7 +717,7 @@ async fn review_populates_has_more_and_processed_fields() {
 // `classify_pending_review` → real `process_single_review_row` end to end.
 
 /// Pre-insert a `memory_fragments` row with `fragment_id = frag_{pending_id}` so
-/// a later FragmentOnly action for that pending row collides on the PRIMARY KEY
+/// a later `FragmentOnly` action for that pending row collides on the PRIMARY KEY
 /// and deterministically fails, leaving the pending row in place (not deleted)
 /// with zero action counts.
 async fn block_fragment_creation(pool: &sqlx::SqlitePool, pending_id: &str) {
@@ -905,7 +905,7 @@ async fn review_perpetually_failing_row_keeps_has_more_true_across_calls() {
 
 // ─── R-V181P0-QC1-W001: world_id propagation through review → fragments ─────
 
-/// Seed a pending review entry WITH a world_id via the daemon API.
+/// Seed a pending review entry WITH a `world_id` via the daemon API.
 async fn seed_pending_review_with_world(ctx: &TestCtx, pending_id: &str, world_id: &str) {
     let body = json!({
         "pending_id": pending_id,
@@ -923,9 +923,9 @@ async fn seed_pending_review_with_world(ctx: &TestCtx, pending_id: &str, world_i
     resp.assert_status(axum::http::StatusCode::OK);
 }
 
-/// R-V181P0-QC1-W001: when a pending review is created with world_id="wld_x",
-/// the FragmentOnly path propagates world_id to the created fragment, and the
-/// fragment is filterable by that world_id via the fragments endpoint.
+/// R-V181P0-QC1-W001: when a pending review is created with `world_id="wld_x`",
+/// the `FragmentOnly` path propagates `world_id` to the created fragment, and the
+/// fragment is filterable by that `world_id` via the fragments endpoint.
 #[tokio::test]
 async fn world_id_propagation_from_review_to_fragments() {
     let ctx = test_ctx().await;
@@ -996,9 +996,9 @@ async fn world_id_propagation_from_review_to_fragments() {
     );
 }
 
-/// R-V181P0-QC1-W001: mirror — a pending review with world_id=None produces a
-/// fragment with world_id=None, visible in unfiltered queries but not when
-/// filtered by a specific world_id.
+/// R-V181P0-QC1-W001: mirror — a pending review with `world_id=None` produces a
+/// fragment with `world_id=None`, visible in unfiltered queries but not when
+/// filtered by a specific `world_id`.
 #[tokio::test]
 async fn world_id_none_core_only_fragment() {
     let ctx = test_ctx().await;

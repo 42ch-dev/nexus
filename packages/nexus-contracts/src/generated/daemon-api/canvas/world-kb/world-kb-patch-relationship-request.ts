@@ -44,11 +44,11 @@ export interface WorldKbPatchRelationshipRequest {
  */
 export interface NexusWorldKbRelationshipInput {
   /**
-   * Source KeyBlock id. Must be a non-deleted entity in the same world.
+   * Source KnowledgeEntry id. Must be a non-deleted entity in the same world.
    */
   source_entity_id: string;
   /**
-   * Target KeyBlock id. Must be a non-deleted entity in the same world and different from source_entity_id.
+   * Target KnowledgeEntry id. Must be a non-deleted entity in the same world and different from source_entity_id.
    */
   target_entity_id: string;
   relation_type: NexusWorldKbRelationshipKind;

@@ -13,6 +13,13 @@ overrides:
 importers:
 
   .:
+    dependencies:
+      '@42ch/spoke-operations':
+        specifier: 0.2.0
+        version: 0.2.0
+      '@42ch/spoke-schemas':
+        specifier: 0.2.0
+        version: 0.2.0
     devDependencies:
       oxlint:
         specifier: ^1.75.0
@@ -348,6 +355,12 @@ importers:
         version: 2.1.1(ajv@8.18.0)
 
 packages:
+
+  '@42ch/spoke-operations@0.2.0':
+    resolution: {integrity: sha512-/Ncomz7c8fzEOsbLfmei4kI3o4Sv8LIJ3NZHEo3S2yamwVj7mtxiX8xSBanP2Af7I2nwbPidKeYWATSWbl3irg==}
+
+  '@42ch/spoke-schemas@0.2.0':
+    resolution: {integrity: sha512-ZNr8ZXm+8GR1e+dUJFgrx1RMZAPGN7rdWBV+AYlF7E0AEdVjfkh9v6JujMG8Vr7EeffUDxD3t1VIZAikF8Pd7Q==}
 
   '@adobe/css-tools@4.5.0':
     resolution: {integrity: sha512-6OzddxPio9UiWTCemp4N8cYLV2ZN1ncRnV1cVGtve7dhPOtRkleRyx32GQCYSwDYgaHU3USMm84tNsvKzRCa1Q==}
@@ -3845,6 +3858,12 @@ packages:
     resolution: {integrity: sha512-bXE4cR/kVZhKZX/RjPEflHaKVhUVl85noU3v6b8apfQEc1x4A+zBxjZ4lN8LqGd6WZ3dl98pY4o717VFmoPp+A==}
 
 snapshots:
+
+  '@42ch/spoke-operations@0.2.0':
+    dependencies:
+      '@42ch/spoke-schemas': 0.2.0
+
+  '@42ch/spoke-schemas@0.2.0': {}
 
   '@adobe/css-tools@4.5.0': {}
 

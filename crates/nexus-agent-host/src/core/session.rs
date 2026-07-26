@@ -498,7 +498,7 @@ mod tests {
         registry.transition_to_ready(&id).unwrap();
 
         let op_id = HostOperationId::new();
-        registry.transition_to_busy(&id, op_id.clone()).unwrap();
+        registry.transition_to_busy(&id, op_id).unwrap();
         assert!(matches!(
             registry.get(&id).unwrap().state,
             SessionState::Busy(_)

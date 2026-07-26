@@ -1,4 +1,4 @@
-//! Tests for host_tool_executor — extracted from host_tool_executor.rs (V1.57 P1)
+//! Tests for `host_tool_executor` — extracted from `host_tool_executor.rs` (V1.57 P1)
 
 use super::*;
 use crate::test_utils::create_initialized_test_workspace;
@@ -814,7 +814,7 @@ async fn world_snapshot_get_returns_world_state() {
     drop(tmp);
 }
 
-/// Failure test: `nexus.world.snapshot.get` with missing world_id returns error.
+/// Failure test: `nexus.world.snapshot.get` with missing `world_id` returns error.
 #[tokio::test]
 async fn world_snapshot_get_rejects_missing_world_id() {
     let (_tmp, nexus_home, db_path) = create_test_workspace().await;
@@ -903,7 +903,7 @@ async fn kb_snapshot_read_returns_key_blocks() {
         "manual",
     )
     .await;
-    nexus_local_db::kb_store::seed::key_block(
+    nexus_local_db::kb_store::seed::knowledge_entry(
         &pool,
         "kb_1",
         "wld_kb",
@@ -1209,7 +1209,7 @@ async fn registry_dispatch_returns_same_as_legacy_context_assemble() {
 // ─── V1.53 P1: Cross-creator/world isolation tests (R-V153P1QC1-001) ──
 
 /// Helper: overwrite the active creator in config.toml and return a new
-/// WorkspaceState (same db) with that identity.
+/// `WorkspaceState` (same db) with that identity.
 async fn switch_active_creator(
     nexus_home: &std::path::Path,
     db_path: &std::path::Path,
@@ -1494,7 +1494,7 @@ async fn kb_snapshot_write_upserts_key_blocks() {
             "world_id": "wld_test_world",
             "blocks": [{
                 "schema_version": 1,
-                "key_block_id": "kb_write_1",
+                "entry_id": "kb_write_1",
                 "world_id": "wld_test_world",
                 "block_type": "character",
                 "canonical_name": "test_character",
@@ -1552,7 +1552,7 @@ async fn kb_snapshot_write_rejects_unknown_tool_variant() {
     assert_eq!(result.unwrap_err().error_code(), "not_supported");
 }
 
-/// C-001 regression: same-creator, block with wrong world_id → rejection.
+/// C-001 regression: same-creator, block with wrong `world_id` → rejection.
 #[tokio::test]
 async fn kb_snapshot_write_rejects_cross_world_block_same_creator() {
     let (tmp, nexus_home, db_path) = create_test_workspace().await;
@@ -1577,7 +1577,7 @@ async fn kb_snapshot_write_rejects_cross_world_block_same_creator() {
             "world_id": "wld_test_world",
             "blocks": [{
                 "schema_version": 1,
-                "key_block_id": "kb_cross_world_block",
+                "entry_id": "kb_cross_world_block",
                 "world_id": "wld_other_world",  // mismatched!
                 "block_type": "character",
                 "canonical_name": "cross_world_char",
@@ -1631,7 +1631,7 @@ async fn kb_snapshot_write_rejects_cross_creator_world_block() {
             "world_id": "wld_test_world",
             "blocks": [{
                 "schema_version": 1,
-                "key_block_id": "kb_cross_creator_block",
+                "entry_id": "kb_cross_creator_block",
                 "world_id": "wld_other_creator_world",  // different creator's world
                 "block_type": "character",
                 "canonical_name": "cross_creator_char",
@@ -2060,7 +2060,7 @@ async fn finding_resolve_marks_resolved() {
     assert_eq!(val["resolved"], true);
 }
 
-/// W-002: nonexistent finding IDs must return NOT_FOUND, not success.
+/// W-002: nonexistent finding IDs must return `NOT_FOUND`, not success.
 #[tokio::test]
 async fn finding_resolve_nonexistent_returns_not_found() {
     let (_tmp, nexus_home, db_path) = create_test_workspace().await;
@@ -2517,7 +2517,7 @@ async fn test_http_tool_execute_dispatches_through_registry() {
     assert_eq!(val["creator_id"], "test_creator");
 }
 
-/// Dispatch equivalence: same tool_id + input → same output across all 3 paths.
+/// Dispatch equivalence: same `tool_id` + input → same output across all 3 paths.
 #[tokio::test]
 async fn test_dispatch_equivalence_all_three_paths() {
     let (_tmp, nexus_home, db_path) = create_test_workspace().await;
@@ -2633,7 +2633,7 @@ async fn test_worker_dispatches_all_registered_nexus_tools() {
     }
 }
 
-/// V1.57 P3: Unknown tool IDs return NOT_SUPPORTED via worker IPC.
+/// V1.57 P3: Unknown tool IDs return `NOT_SUPPORTED` via worker IPC.
 ///
 /// Confirms admission gate equivalence: an unknown ID is rejected the
 /// same way on the worker path as on CLI/HTTP.
@@ -2844,7 +2844,7 @@ async fn manuscript_read_range_rejects_missing_chapter() {
     assert_eq!(result.unwrap_err().error_code(), "invalid_input");
 }
 
-/// V1.87 P1: `nexus.manuscript.read_range` rejects a sibling-escape body_path
+/// V1.87 P1: `nexus.manuscript.read_range` rejects a sibling-escape `body_path`
 /// that would pass a naive string-prefix check (R-V186-QC1-S005).
 #[tokio::test]
 async fn manuscript_read_range_rejects_sibling_escape_body_path() {
@@ -3272,7 +3272,7 @@ async fn research_query_returns_reference_sources() {
     assert_eq!(val["count"], results.len());
 }
 
-/// T7 failure: `nexus.research.query` rejects unknown reference_source_id with NOT_FOUND.
+/// T7 failure: `nexus.research.query` rejects unknown `reference_source_id` with `NOT_FOUND`.
 #[tokio::test]
 async fn research_query_rejects_unknown_reference_id() {
     let (_tmp, nexus_home, db_path) = create_test_workspace().await;

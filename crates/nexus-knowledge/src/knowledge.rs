@@ -1,8 +1,10 @@
 //! Core domain types for User-scoped global knowledge.
 //!
-//! `nexus-knowledge` owns User-scoped knowledge entries: tag-driven items
-//! that may be pulled into Moment context assembly. This is NOT Creator-scoped
-//! and does NOT own narrative `KeyBlocks` (those live in `nexus-kb`).
+//! This module owns User-scoped knowledge entries (`UserKnowledgeEntry`,
+//! renamed in V1.139 P1 T2 to avoid collision with the spoke standard
+//! `spoke_schemas::KnowledgeEntry`): tag-driven items that may be pulled into
+//! Moment context assembly. This is NOT Creator-scoped and does NOT own
+//! narrative World KB entries (those live in the `world_kb` module).
 
 use serde::{Deserialize, Serialize};
 
@@ -11,7 +13,7 @@ use serde::{Deserialize, Serialize};
 /// Each entry belongs to exactly one `user_id` (User scope per entity-scope-model §5.2).
 /// Tags drive classification and lookup; content is inline text or a reference URI.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct KnowledgeEntry {
+pub struct UserKnowledgeEntry {
     /// Unique entry identifier (UUID v4, prefixed `kno_`).
     pub id: String,
     /// Owning user scope — all operations are scoped by this field.
@@ -29,7 +31,7 @@ pub struct KnowledgeEntry {
     pub updated_at: String,
 }
 
-impl KnowledgeEntry {
+impl UserKnowledgeEntry {
     /// Create a new knowledge entry for the given user.
     ///
     /// Generates a UUID-based ID and sets timestamps to now.
@@ -169,7 +171,7 @@ impl KnowledgeQuery {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct KnowledgeResult {
     /// Matching entries for the current page.
-    pub entries: Vec<KnowledgeEntry>,
+    pub entries: Vec<UserKnowledgeEntry>,
     /// Total number of matching entries (across all pages).
     pub total_count: u32,
     /// The limit used for this query.
@@ -182,7 +184,7 @@ impl KnowledgeResult {
     /// Create a result from matched entries and total count.
     #[must_use]
     pub const fn new(
-        entries: Vec<KnowledgeEntry>,
+        entries: Vec<UserKnowledgeEntry>,
         total_count: u32,
         limit: u32,
         offset: u32,
@@ -209,7 +211,7 @@ mod tests {
 
     #[test]
     fn knowledge_entry_new_generates_id_and_timestamps() {
-        let entry = KnowledgeEntry::new(
+        let entry = UserKnowledgeEntry::new(
             "user_abc",
             vec![KnowledgeTag::new("rust"), KnowledgeTag::new("tutorial")],
             "Rust ownership model basics",
@@ -225,7 +227,7 @@ mod tests {
 
     #[test]
     fn knowledge_entry_has_all_tags() {
-        let entry = KnowledgeEntry::new(
+        let entry = UserKnowledgeEntry::new(
             "user_1",
             vec![KnowledgeTag::new("a"), KnowledgeTag::new("b")],
             "content",
@@ -238,7 +240,7 @@ mod tests {
 
     #[test]
     fn knowledge_entry_content_contains_case_insensitive() {
-        let entry = KnowledgeEntry::new("user_1", vec![], "Hello World");
+        let entry = UserKnowledgeEntry::new("user_1", vec![], "Hello World");
         assert!(entry.content_contains("hello"));
         assert!(entry.content_contains("WORLD"));
         assert!(entry.content_contains("lo wo"));
@@ -247,7 +249,7 @@ mod tests {
 
     #[test]
     fn knowledge_entry_with_reference_uri() {
-        let mut entry = KnowledgeEntry::new("user_1", vec![], "content");
+        let mut entry = UserKnowledgeEntry::new("user_1", vec![], "content");
         entry.with_reference_uri("https://example.com".to_string());
         assert_eq!(entry.reference_uri, Some("https://example.com".to_string()));
     }
@@ -260,7 +262,7 @@ mod tests {
             .with_limit(10)
             .with_offset(20);
         assert_eq!(query.user_id, "user_1");
-        assert_eq!(query.tags.as_ref().map(|t| t.len()), Some(1));
+        assert_eq!(query.tags.as_ref().map(std::vec::Vec::len), Some(1));
         assert_eq!(query.text.as_deref(), Some("ownership"));
         assert_eq!(query.effective_limit(), 10);
         assert_eq!(query.effective_offset(), 20);
@@ -275,14 +277,14 @@ mod tests {
 
     #[test]
     fn knowledge_result_has_more() {
-        let entries = vec![KnowledgeEntry::new("u1", vec![], "a")];
+        let entries = vec![UserKnowledgeEntry::new("u1", vec![], "a")];
         let result = KnowledgeResult::new(entries, 10, 1, 0);
         assert!(result.has_more());
     }
 
     #[test]
     fn knowledge_result_no_more() {
-        let entries = vec![KnowledgeEntry::new("u1", vec![], "a")];
+        let entries = vec![UserKnowledgeEntry::new("u1", vec![], "a")];
         let result = KnowledgeResult::new(entries, 1, 50, 0);
         assert!(!result.has_more());
     }
@@ -296,9 +298,10 @@ mod tests {
 
     #[test]
     fn serialize_roundtrip() {
-        let entry = KnowledgeEntry::new("user_1", vec![KnowledgeTag::new("rust")], "Some content");
+        let entry =
+            UserKnowledgeEntry::new("user_1", vec![KnowledgeTag::new("rust")], "Some content");
         let json = serde_json::to_string(&entry).unwrap();
-        let deserialized: KnowledgeEntry = serde_json::from_str(&json).unwrap();
+        let deserialized: UserKnowledgeEntry = serde_json::from_str(&json).unwrap();
         assert_eq!(entry, deserialized);
     }
 }

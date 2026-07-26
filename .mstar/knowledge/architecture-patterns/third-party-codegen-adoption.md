@@ -96,7 +96,7 @@ Typify maps `format: date-time` to `chrono::DateTime<…>`. Serde's default seri
 
 Typify inlines a distinct struct copy for every schema that references a shared definition (e.g. each daemon-api response gets its own `NexusSourceAnchor` copy, not `common_types::SourceAnchor`). Adapting consumers requires JSON round-trip bridges (`handlers/mod.rs` `wire_convert`), `NonZeroU64::new(…).unwrap()` at boundaries, and `DateTime::parse_from_rfc3339` in domain mappers.
 
-**Rule:** land drift green first, then schedule a fix wave across `nexus-daemon-runtime`, `nexus-narrative`, `nexus-kb`, `nexus-orchestration`, and integration tests. Do not block codegen merge on every call-site polish if drift + clippy are green.
+**Rule:** land drift green first, then schedule a fix wave across `nexus-daemon-runtime`, `nexus-narrative`, `nexus-knowledge` (merged from `nexus-kb` V1.139), `nexus-orchestration`, and integration tests. Do not block codegen merge on every call-site polish if drift + clippy are green.
 
 ## Anti-patterns
 

@@ -807,7 +807,7 @@ mod tests {
         assert_eq!(id, "kb_test_1");
     }
 
-    /// Work-scope invariant: resolve_kb_paths always uses the local workspace file
+    /// Work-scope invariant: `resolve_kb_paths` always uses the local workspace file
     /// index path under `~/.nexus42/creators/<id>/workspaces/<slug>/kb/`.
     /// This test verifies the path structure matches the work-scope file index layout,
     /// NOT the World KB (`nexus-kb`) or User knowledge (`nexus-knowledge`) paths.

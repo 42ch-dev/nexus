@@ -877,7 +877,7 @@ mod tests {
 
     // ── DF-43 adapter tests ───────────────────────────────────────────
 
-    /// Round-trip: register → get_by_id → convert to domain model.
+    /// Round-trip: register → `get_by_id` → convert to domain model.
     #[tokio::test]
     async fn df43_roundtrip_row_to_domain_model() {
         let (pool, dir) = fresh_pool().await;
@@ -929,7 +929,7 @@ mod tests {
 
     /// Verify no duplicate persistence: the domain model's tags are
     /// Vec<String>, while the DB row stores them as a serialized string.
-    /// The adapter is the only conversion path — no second SQLite truth.
+    /// The adapter is the only conversion path — no second `SQLite` truth.
     #[tokio::test]
     async fn df43_no_duplicate_truth_tags_are_serialized_in_db() {
         let (pool, dir) = fresh_pool().await;
@@ -968,7 +968,7 @@ mod tests {
         );
     }
 
-    /// Source mutability and content_path are DB-only fields —
+    /// Source mutability and `content_path` are DB-only fields —
     /// not present in the domain model. Verify they are not leaked.
     #[tokio::test]
     async fn df43_db_only_fields_not_in_domain_model() {
@@ -1010,7 +1010,7 @@ mod tests {
     }
 
     /// Verify the adapter handles invalid enum values gracefully.
-    /// The domain model uses String for source_type/scan_status so
+    /// The domain model uses String for `source_type/scan_status` so
     /// unknown DB values pass through without panic.
     #[tokio::test]
     async fn df43_unknown_enum_values_passthrough() {
@@ -1086,7 +1086,7 @@ mod tests {
         let domain: nexus_knowledge::reference_source::ReferenceSource = fetched.into();
 
         // Empty string → Some(vec![]) after filtering empty tokens
-        assert_eq!(domain.tags.as_deref(), Some(&vec![] as &[String]));
+        assert_eq!(domain.tags.as_deref(), Some(&[] as &[String]));
     }
 
     /// Whitespace-only tags should produce empty Vec.
@@ -1123,7 +1123,7 @@ mod tests {
         let fetched = get_by_id(&pool, &id).await.unwrap().unwrap();
         let domain: nexus_knowledge::reference_source::ReferenceSource = fetched.into();
 
-        assert_eq!(domain.tags.as_deref(), Some(&vec![] as &[String]));
+        assert_eq!(domain.tags.as_deref(), Some(&[] as &[String]));
     }
 
     /// Null tags in DB should produce None in domain model.

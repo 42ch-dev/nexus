@@ -1192,10 +1192,7 @@ mod tests {
     async fn scan_local_installations_handles_timeout() {
         let tmp = tempfile::tempdir().expect("temp dir");
         let sleep_secs = SCAN_VERSION_TIMEOUT.as_secs() + 2;
-        let script = format!(
-            "#!/bin/sh\n/bin/sleep {}\necho \"slow-agent 1.0.0\"\n",
-            sleep_secs
-        );
+        let script = format!("#!/bin/sh\n/bin/sleep {sleep_secs}\necho \"slow-agent 1.0.0\"\n");
         make_shim(&tmp, "slow-agent", &script);
 
         let registry = registry_with_binary("slow-agent");
@@ -1214,8 +1211,7 @@ mod tests {
         );
         assert!(
             elapsed < std::time::Duration::from_secs(sleep_secs),
-            "scan should return before the slow binary finishes sleeping (elapsed {:?})",
-            elapsed
+            "scan should return before the slow binary finishes sleeping (elapsed {elapsed:?})"
         );
     }
 

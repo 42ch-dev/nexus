@@ -1,8 +1,8 @@
 //! E2E hermetic test for V1.42 P3 agent tool production wiring (DF-47).
 //!
 //! Proves:
-//! 1. HostToolCallTask invokes nexus.orchestration.schedule_status through
-//!    DaemonToolDispatchAdapter end-to-end (request/response round-trip).
+//! 1. `HostToolCallTask` invokes `nexus.orchestration.schedule_status` through
+//!    `DaemonToolDispatchAdapter` end-to-end (request/response round-trip).
 //! 2. Schedule-initiated dispatch uses Schedule caller kind (audit diff).
 //! 3. Read-only tool respects completion-lock when present.
 
@@ -76,7 +76,7 @@ async fn seed_work(state: &WorkspaceState) -> String {
     work_id
 }
 
-/// Seed a work record and then lock it via patch (completion_lock).
+/// Seed a work record and then lock it via patch (`completion_lock`).
 async fn seed_work_completion_locked(state: &WorkspaceState) -> String {
     let work_id = seed_work(state).await;
 
@@ -241,10 +241,7 @@ async fn agent_tool_e2e_cross_creator_forbidden_via_adapter() {
             );
         }
         other => {
-            panic!(
-                "expected CapabilityError::Forbidden, got: {:?} ({})",
-                other, other
-            );
+            panic!("expected CapabilityError::Forbidden, got: {other:?} ({other})");
         }
     }
 }

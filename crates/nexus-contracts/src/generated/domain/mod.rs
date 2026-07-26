@@ -3,7 +3,6 @@
 
 pub mod creator;
 pub mod fork_branch;
-pub mod key_block;
 pub mod memory;
 pub mod pairing;
 pub mod story_manifest;
@@ -14,7 +13,6 @@ pub mod world_membership;
 
 pub use creator::*;
 pub use fork_branch::*;
-pub use key_block::*;
 pub use memory::*;
 pub use pairing::*;
 pub use story_manifest::*;

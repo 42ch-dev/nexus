@@ -268,7 +268,7 @@ mod tests {
         pool
     }
 
-    /// Helper: insert a test entry with given state and optional updated_at.
+    /// Helper: insert a test entry with given state and optional `updated_at`.
     async fn insert_entry(
         pool: &sqlx::SqlitePool,
         entry_id: &str,

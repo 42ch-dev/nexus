@@ -112,7 +112,7 @@ disambiguate), carries a `WorldKbRelationshipKind`-typed `relation_type`
 and a verbatim `source_quote`. Relationship parsing is best-effort like entity
 parsing: a malformed or missing `relationships` array means no relationship
 candidates, not a capability failure. The review-time hook resolves endpoints to
-existing non-deleted KeyBlocks before persisting suggestions (see §5.2).
+existing non-deleted KnowledgeEntries before persisting suggestions (see §5.2).
 
 ### 1.3 Worker invocation
 
@@ -260,10 +260,10 @@ candidates into `kb_relationships` as **suggestions** (`needs_review = 1`,
 split extended from entity candidates to relationships.
 
 **Entity-existence prerequisite** (architect lock): a relationship candidate
-whose source or target endpoint cannot resolve to a non-deleted KeyBlock in the
+whose source or target endpoint cannot resolve to a non-deleted KnowledgeEntry in the
 same world is **skipped + logged**. Endpoints resolve by `(world_id, block_type,
 canonical_name)` when `*_block_type` is provided, or case-insensitively by
-`(world_id, canonical_name)` only when exactly one non-deleted KeyBlock matches.
+`(world_id, canonical_name)` only when exactly one non-deleted KnowledgeEntry matches.
 Review-time extraction does NOT confirm entity candidates in the same pass, so
 relationships involving newly suggested entities appear only after the author
 promotes entities and reruns/rescans extraction.

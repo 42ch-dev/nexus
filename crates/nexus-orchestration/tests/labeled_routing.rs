@@ -2,7 +2,7 @@
 //!
 //! Tests:
 //! - Full preset with Labeled edges loads + executes
-//! - Hybrid GoNogo + Labeled state
+//! - Hybrid `GoNogo` + Labeled state
 //! - Orphan label detection (validator catches at load time)
 //! - All embedded presets still parse (regression)
 //! - No-match does NOT stall the session (deterministic fail)
@@ -58,7 +58,7 @@ states:
     )
 }
 
-/// Build a preset YAML with hybrid GoNogo + Labeled states.
+/// Build a preset YAML with hybrid `GoNogo` + Labeled states.
 fn hybrid_preset_yaml() -> String {
     r#"
 preset:
@@ -163,7 +163,7 @@ fn labeled_preset_loads_and_validates() {
     );
 }
 
-/// Hybrid GoNogo + Labeled state preset loads and validates.
+/// Hybrid `GoNogo` + Labeled state preset loads and validates.
 #[test]
 fn hybrid_gonogo_labeled_preset_loads_and_validates() {
     let yaml = hybrid_preset_yaml();

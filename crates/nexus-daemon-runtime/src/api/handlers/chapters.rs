@@ -979,9 +979,9 @@ mod tests {
         assert_eq!(resp.volume, std::num::NonZeroU64::new(2).unwrap());
     }
 
-    /// Regression: writing `title` must return BadRequest (HTTP 400,
+    /// Regression: writing `title` must return `BadRequest` (HTTP 400,
     /// `bad_request`) with code `chapter_title_unsupported`. This is field
-    /// validation, not a preset gate, so PresetGatesFailed (HTTP 422,
+    /// validation, not a preset gate, so `PresetGatesFailed` (HTTP 422,
     /// `preset_gates_failed`) would be both semantically wrong and an
     /// observable contract change.
     #[tokio::test]

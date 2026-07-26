@@ -6,17 +6,17 @@
 //! # Validation
 //!
 //! `InMemoryKbStore` runs body validation on insert and update when a
-//! [`ValidationMode`](crate::validation::ValidationMode) is configured.
+//! [`ValidationMode`](crate::world_kb::validation::ValidationMode) is configured.
 //! The default mode is `Generic` (no novel-specific checks). Set `validation_mode`
-//! to [`ValidationMode::Novel`](crate::validation::ValidationMode::Novel) to
+//! to [`ValidationMode::Novel`](crate::world_kb::validation::ValidationMode::Novel) to
 //! enforce `body.attributes.novel_category` requirements per
 //! entity-scope-model.md §5.1.1.
 
-use crate::errors::ValidationError;
-use crate::key_block::KeyBlock;
-use crate::query::{KbInsertResult, KbQuery, KbQueryResult};
-use crate::source_anchor::SourceAnchor;
-use crate::validation::{validate_body, validate_canonical_name, ValidationMode};
+use crate::world_kb::errors::ValidationError;
+use crate::world_kb::knowledge_entry::WorldKbEntry;
+use crate::world_kb::query::{KbInsertResult, KbQuery, KbQueryResult};
+use crate::world_kb::source_anchor::SourceAnchor;
+use crate::world_kb::validation::{validate_body, validate_canonical_name, ValidationMode};
 use nexus_contracts::BlockType;
 use std::collections::HashMap;
 use std::sync::RwLock;
@@ -26,7 +26,7 @@ use std::sync::RwLock;
 /// Error type for KB store operations.
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
 pub enum KbStoreError {
-    /// Uniqueness constraint violation — an active `KeyBlock` with the same
+    /// Uniqueness constraint violation — an active `WorldKbEntry` with the same
     /// `(canonical_name, block_type)` already exists in this world.
     #[error(
         "duplicate: canonical_name={name}, block_type={block_type:?} \
@@ -41,7 +41,7 @@ pub enum KbStoreError {
         block_type: BlockType,
     },
 
-    /// `KeyBlock` not found.
+    /// `WorldKbEntry` not found.
     #[error("key block not found: {0}")]
     NotFound(String),
 
@@ -67,7 +67,7 @@ pub enum KbStoreError {
 ///
 /// # Uniqueness Constraint
 ///
-/// Under the same `world_id`, at most one **active** `KeyBlock` may exist
+/// Under the same `world_id`, at most one **active** `WorldKbEntry` may exist
 /// for a given `(canonical_name, block_type)` pair. Active means status
 /// is not `deleted`, `merged`, or `deprecated`.
 ///
@@ -82,45 +82,48 @@ pub enum KbStoreError {
 /// callers can use `impl Future<Output = T> + Send` explicitly.
 #[allow(async_fn_in_trait)]
 pub trait KbStore {
-    /// Insert a new `KeyBlock`.
+    /// Insert a new `WorldKbEntry`.
     ///
     /// Returns [`KbInsertResult`] on success.
-    /// Returns [`KbStoreError::Duplicate`] if an active `KeyBlock` with the
+    /// Returns [`KbStoreError::Duplicate`] if an active `WorldKbEntry` with the
     /// same `(canonical_name, block_type)` already exists in the same world.
-    async fn insert_key_block(&self, kb: KeyBlock) -> Result<KbInsertResult, KbStoreError>;
+    async fn insert_knowledge_entry(
+        &self,
+        kb: WorldKbEntry,
+    ) -> Result<KbInsertResult, KbStoreError>;
 
-    /// Get a `KeyBlock` by its ID.
-    async fn get_key_block(&self, key_block_id: &str) -> Result<KeyBlock, KbStoreError>;
+    /// Get a `WorldKbEntry` by its ID.
+    async fn get_knowledge_entry(&self, entry_id: &str) -> Result<WorldKbEntry, KbStoreError>;
 
     /// List all active `KeyBlocks` in a world.
-    async fn list_by_world(&self, world_id: &str) -> Result<Vec<KeyBlock>, KbStoreError>;
+    async fn list_by_world(&self, world_id: &str) -> Result<Vec<WorldKbEntry>, KbStoreError>;
 
     /// Query `KeyBlocks` with filters.
     async fn query(&self, query: &KbQuery) -> Result<KbQueryResult, KbStoreError>;
 
-    /// Attach a [`SourceAnchor`] to a `KeyBlock`.
+    /// Attach a [`SourceAnchor`] to a `WorldKbEntry`.
     ///
-    /// Multiple anchors can be attached to the same `KeyBlock`.
+    /// Multiple anchors can be attached to the same `WorldKbEntry`.
     async fn attach_source_anchor(
         &self,
-        key_block_id: &str,
+        entry_id: &str,
         anchor: SourceAnchor,
     ) -> Result<(), KbStoreError>;
 
-    /// Get all [`SourceAnchor`] instances attached to a `KeyBlock`.
-    async fn get_anchors(&self, key_block_id: &str) -> Result<Vec<SourceAnchor>, KbStoreError>;
+    /// Get all [`SourceAnchor`] instances attached to a `WorldKbEntry`.
+    async fn get_anchors(&self, entry_id: &str) -> Result<Vec<SourceAnchor>, KbStoreError>;
 
-    /// Update an existing `KeyBlock` in place.
+    /// Update an existing `WorldKbEntry` in place.
     ///
-    /// Returns [`KbStoreError::NotFound`] if the `KeyBlock` does not exist.
+    /// Returns [`KbStoreError::NotFound`] if the `WorldKbEntry` does not exist.
     /// Returns [`KbStoreError::Duplicate`] if the update would violate
     /// the uniqueness constraint.
-    async fn update_key_block(&self, kb: KeyBlock) -> Result<(), KbStoreError>;
+    async fn update_knowledge_entry(&self, kb: WorldKbEntry) -> Result<(), KbStoreError>;
 
-    /// Soft-delete a `KeyBlock` by ID.
+    /// Soft-delete a `WorldKbEntry` by ID.
     ///
     /// Sets status to `deleted`. The record is retained.
-    async fn delete_key_block(&self, key_block_id: &str) -> Result<(), KbStoreError>;
+    async fn delete_knowledge_entry(&self, entry_id: &str) -> Result<(), KbStoreError>;
 }
 
 // ── In-Memory Implementation ────────────────────────────────────────
@@ -130,7 +133,7 @@ pub trait KbStore {
 /// Thread-safe via interior mutability (`std::sync::RwLock`).
 /// Suitable for unit tests; not intended for production use.
 pub struct InMemoryKbStore {
-    blocks: RwLock<HashMap<String, KeyBlock>>,
+    blocks: RwLock<HashMap<String, WorldKbEntry>>,
     anchors: RwLock<HashMap<String, Vec<SourceAnchor>>>,
     validation_mode: ValidationMode,
 }
@@ -156,17 +159,17 @@ impl InMemoryKbStore {
         }
     }
 
-    /// Check if a `KeyBlock` is "active" (not deleted, merged, or deprecated).
-    fn is_active(kb: &KeyBlock) -> bool {
+    /// Check if a `WorldKbEntry` is "active" (not deleted, merged, or deprecated).
+    fn is_active(kb: &WorldKbEntry) -> bool {
         !matches!(kb.status.as_str(), "deleted" | "merged" | "deprecated")
     }
 
     /// Check the uniqueness constraint for `(world_id, canonical_name, block_type)`.
     ///
-    /// If `exclude_id` is provided, that `KeyBlock` is excluded from the check
+    /// If `exclude_id` is provided, that `WorldKbEntry` is excluded from the check
     /// (used during updates where the block keeps its own ID).
     fn check_uniqueness(
-        blocks: &HashMap<String, KeyBlock>,
+        blocks: &HashMap<String, WorldKbEntry>,
         world_id: &str,
         canonical_name: &str,
         block_type: BlockType,
@@ -177,7 +180,7 @@ impl InMemoryKbStore {
                 && kb.canonical_name == canonical_name
                 && kb.block_type == block_type
                 && Self::is_active(kb)
-                && exclude_id != Some(kb.key_block_id.as_str())
+                && exclude_id != Some(kb.entry_id.as_str())
             {
                 return Err(KbStoreError::Duplicate {
                     world_id: world_id.to_string(),
@@ -192,7 +195,7 @@ impl InMemoryKbStore {
     /// Acquire a read lock on the blocks map.
     fn read_blocks(
         &self,
-    ) -> Result<std::sync::RwLockReadGuard<'_, HashMap<String, KeyBlock>>, KbStoreError> {
+    ) -> Result<std::sync::RwLockReadGuard<'_, HashMap<String, WorldKbEntry>>, KbStoreError> {
         self.blocks
             .read()
             .map_err(|e| KbStoreError::Storage(e.to_string()))
@@ -201,7 +204,7 @@ impl InMemoryKbStore {
     /// Acquire a write lock on the blocks map.
     fn write_blocks(
         &self,
-    ) -> Result<std::sync::RwLockWriteGuard<'_, HashMap<String, KeyBlock>>, KbStoreError> {
+    ) -> Result<std::sync::RwLockWriteGuard<'_, HashMap<String, WorldKbEntry>>, KbStoreError> {
         self.blocks
             .write()
             .map_err(|e| KbStoreError::Storage(e.to_string()))
@@ -215,24 +218,31 @@ impl Default for InMemoryKbStore {
 }
 
 impl KbStore for InMemoryKbStore {
-    async fn insert_key_block(&self, kb: KeyBlock) -> Result<KbInsertResult, KbStoreError> {
+    async fn insert_knowledge_entry(
+        &self,
+        kb: WorldKbEntry,
+    ) -> Result<KbInsertResult, KbStoreError> {
         // Validate canonical_name format/safety
         validate_canonical_name(&kb.canonical_name).map_err(|e| match e {
-            crate::errors::KbError::Validation(ve) => KbStoreError::Validation(ve),
-            crate::errors::KbError::ValidationError(msg) => KbStoreError::ValidationLegacy(msg),
+            crate::world_kb::errors::KbError::Validation(ve) => KbStoreError::Validation(ve),
+            crate::world_kb::errors::KbError::ValidationError(msg) => {
+                KbStoreError::ValidationLegacy(msg)
+            }
             other => KbStoreError::ValidationLegacy(other.to_string()),
         })?;
 
         // Validate body semantics before persisting
         validate_body(kb.block_type, kb.body.as_ref(), self.validation_mode).map_err(
             |e| match e {
-                crate::errors::KbError::Validation(ve) => KbStoreError::Validation(ve),
-                crate::errors::KbError::ValidationError(msg) => KbStoreError::ValidationLegacy(msg),
+                crate::world_kb::errors::KbError::Validation(ve) => KbStoreError::Validation(ve),
+                crate::world_kb::errors::KbError::ValidationError(msg) => {
+                    KbStoreError::ValidationLegacy(msg)
+                }
                 other => KbStoreError::ValidationLegacy(other.to_string()),
             },
         )?;
 
-        let key_block_id = kb.key_block_id.clone();
+        let entry_id = kb.entry_id.clone();
         let world_id = kb.world_id.clone();
         let created_at = kb.created_at.clone();
 
@@ -248,26 +258,26 @@ impl KbStore for InMemoryKbStore {
                 kb.block_type,
                 None,
             )?;
-            blocks.insert(key_block_id.clone(), kb);
+            blocks.insert(entry_id.clone(), kb);
         }
 
         Ok(KbInsertResult {
-            key_block_id,
+            entry_id,
             world_id,
             created_at,
         })
     }
 
-    async fn get_key_block(&self, key_block_id: &str) -> Result<KeyBlock, KbStoreError> {
+    async fn get_knowledge_entry(&self, entry_id: &str) -> Result<WorldKbEntry, KbStoreError> {
         let blocks = self.read_blocks()?;
         blocks
-            .get(key_block_id)
+            .get(entry_id)
             .cloned()
-            .ok_or_else(|| KbStoreError::NotFound(key_block_id.to_string()))
+            .ok_or_else(|| KbStoreError::NotFound(entry_id.to_string()))
     }
 
-    async fn list_by_world(&self, world_id: &str) -> Result<Vec<KeyBlock>, KbStoreError> {
-        let items: Vec<KeyBlock> = self
+    async fn list_by_world(&self, world_id: &str) -> Result<Vec<WorldKbEntry>, KbStoreError> {
+        let items: Vec<WorldKbEntry> = self
             .read_blocks()?
             .values()
             .filter(|kb| kb.world_id == world_id && Self::is_active(kb))
@@ -280,7 +290,7 @@ impl KbStore for InMemoryKbStore {
         let (matches, total_count, has_more) = {
             let blocks = self.read_blocks()?;
 
-            let mut matches: Vec<KeyBlock> =
+            let mut matches: Vec<WorldKbEntry> =
                 blocks
                     .values()
                     .filter(|kb| {
@@ -348,13 +358,13 @@ impl KbStore for InMemoryKbStore {
 
     async fn attach_source_anchor(
         &self,
-        key_block_id: &str,
+        entry_id: &str,
         anchor: SourceAnchor,
     ) -> Result<(), KbStoreError> {
         {
             let blocks = self.read_blocks()?;
-            if !blocks.contains_key(key_block_id) {
-                return Err(KbStoreError::NotFound(key_block_id.to_string()));
+            if !blocks.contains_key(entry_id) {
+                return Err(KbStoreError::NotFound(entry_id.to_string()));
             }
         }
 
@@ -364,7 +374,7 @@ impl KbStore for InMemoryKbStore {
                 .write()
                 .map_err(|e| KbStoreError::Storage(e.to_string()))?;
             anchors
-                .entry(key_block_id.to_string())
+                .entry(entry_id.to_string())
                 .or_default()
                 .push(anchor);
         }
@@ -372,27 +382,31 @@ impl KbStore for InMemoryKbStore {
         Ok(())
     }
 
-    async fn get_anchors(&self, key_block_id: &str) -> Result<Vec<SourceAnchor>, KbStoreError> {
+    async fn get_anchors(&self, entry_id: &str) -> Result<Vec<SourceAnchor>, KbStoreError> {
         let anchors = self
             .anchors
             .read()
             .map_err(|e| KbStoreError::Storage(e.to_string()))?;
-        Ok(anchors.get(key_block_id).cloned().unwrap_or_default())
+        Ok(anchors.get(entry_id).cloned().unwrap_or_default())
     }
 
-    async fn update_key_block(&self, kb: KeyBlock) -> Result<(), KbStoreError> {
+    async fn update_knowledge_entry(&self, kb: WorldKbEntry) -> Result<(), KbStoreError> {
         // Validate canonical_name format/safety
         validate_canonical_name(&kb.canonical_name).map_err(|e| match e {
-            crate::errors::KbError::Validation(ve) => KbStoreError::Validation(ve),
-            crate::errors::KbError::ValidationError(msg) => KbStoreError::ValidationLegacy(msg),
+            crate::world_kb::errors::KbError::Validation(ve) => KbStoreError::Validation(ve),
+            crate::world_kb::errors::KbError::ValidationError(msg) => {
+                KbStoreError::ValidationLegacy(msg)
+            }
             other => KbStoreError::ValidationLegacy(other.to_string()),
         })?;
 
         // Validate body semantics before persisting
         validate_body(kb.block_type, kb.body.as_ref(), self.validation_mode).map_err(
             |e| match e {
-                crate::errors::KbError::Validation(ve) => KbStoreError::Validation(ve),
-                crate::errors::KbError::ValidationError(msg) => KbStoreError::ValidationLegacy(msg),
+                crate::world_kb::errors::KbError::Validation(ve) => KbStoreError::Validation(ve),
+                crate::world_kb::errors::KbError::ValidationError(msg) => {
+                    KbStoreError::ValidationLegacy(msg)
+                }
                 other => KbStoreError::ValidationLegacy(other.to_string()),
             },
         )?;
@@ -401,8 +415,8 @@ impl KbStore for InMemoryKbStore {
             let mut blocks = self.write_blocks()?;
 
             let existing = blocks
-                .get(&kb.key_block_id)
-                .ok_or_else(|| KbStoreError::NotFound(kb.key_block_id.clone()))?;
+                .get(&kb.entry_id)
+                .ok_or_else(|| KbStoreError::NotFound(kb.entry_id.clone()))?;
 
             // Re-check uniqueness if name or type changed
             if existing.canonical_name != kb.canonical_name || existing.block_type != kb.block_type
@@ -412,20 +426,20 @@ impl KbStore for InMemoryKbStore {
                     &kb.world_id,
                     &kb.canonical_name,
                     kb.block_type,
-                    Some(&kb.key_block_id),
+                    Some(&kb.entry_id),
                 )?;
             }
 
-            blocks.insert(kb.key_block_id.clone(), kb);
+            blocks.insert(kb.entry_id.clone(), kb);
         }
         Ok(())
     }
 
-    async fn delete_key_block(&self, key_block_id: &str) -> Result<(), KbStoreError> {
+    async fn delete_knowledge_entry(&self, entry_id: &str) -> Result<(), KbStoreError> {
         let mut blocks = self.write_blocks()?;
         let kb = blocks
-            .get_mut(key_block_id)
-            .ok_or_else(|| KbStoreError::NotFound(key_block_id.to_string()))?;
+            .get_mut(entry_id)
+            .ok_or_else(|| KbStoreError::NotFound(entry_id.to_string()))?;
         kb.status = "deleted".to_string();
         kb.updated_at = Some(chrono::Utc::now().to_rfc3339());
         drop(blocks);
@@ -438,32 +452,32 @@ impl KbStore for InMemoryKbStore {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::key_block::KeyBlockBody;
+    use crate::world_kb::knowledge_entry::WorldKbBody;
 
-    fn make_block(world_id: &str, block_type: BlockType, name: &str) -> KeyBlock {
-        KeyBlock::new(world_id, block_type, name)
+    fn make_block(world_id: &str, block_type: BlockType, name: &str) -> WorldKbEntry {
+        WorldKbEntry::new(world_id, block_type, name)
     }
 
-    // T1: Insert and retrieve a KeyBlock
+    // T1: Insert and retrieve a WorldKbEntry
     #[tokio::test]
     async fn test_insert_and_get() {
         let store = InMemoryKbStore::new();
         let kb = make_block("wld_1", BlockType::Character, "Hero");
 
-        let result = store.insert_key_block(kb.clone()).await.unwrap();
-        assert_eq!(result.key_block_id, kb.key_block_id);
+        let result = store.insert_knowledge_entry(kb.clone()).await.unwrap();
+        assert_eq!(result.entry_id, kb.entry_id);
         assert_eq!(result.world_id, "wld_1");
 
-        let fetched = store.get_key_block(&kb.key_block_id).await.unwrap();
+        let fetched = store.get_knowledge_entry(&kb.entry_id).await.unwrap();
         assert_eq!(fetched.canonical_name, "Hero");
         assert_eq!(fetched.world_id, "wld_1");
     }
 
-    // T2: Get non-existent KeyBlock returns NotFound
+    // T2: Get non-existent WorldKbEntry returns NotFound
     #[tokio::test]
     async fn test_get_not_found() {
         let store = InMemoryKbStore::new();
-        let err = store.get_key_block("nonexistent").await.unwrap_err();
+        let err = store.get_knowledge_entry("nonexistent").await.unwrap_err();
         assert!(matches!(err, KbStoreError::NotFound(ref s) if s == "nonexistent"));
     }
 
@@ -475,9 +489,9 @@ mod tests {
         let kb2 = make_block("wld_1", BlockType::Scene, "Forest");
         let kb3 = make_block("wld_2", BlockType::Character, "Villain");
 
-        store.insert_key_block(kb1).await.unwrap();
-        store.insert_key_block(kb2).await.unwrap();
-        store.insert_key_block(kb3).await.unwrap();
+        store.insert_knowledge_entry(kb1).await.unwrap();
+        store.insert_knowledge_entry(kb2).await.unwrap();
+        store.insert_knowledge_entry(kb3).await.unwrap();
 
         let w1 = store.list_by_world("wld_1").await.unwrap();
         assert_eq!(w1.len(), 2);
@@ -492,10 +506,10 @@ mod tests {
     async fn test_uniqueness_rejects_duplicate() {
         let store = InMemoryKbStore::new();
         let kb1 = make_block("wld_1", BlockType::Character, "Hero");
-        store.insert_key_block(kb1).await.unwrap();
+        store.insert_knowledge_entry(kb1).await.unwrap();
 
         let kb2 = make_block("wld_1", BlockType::Character, "Hero");
-        let err = store.insert_key_block(kb2).await.unwrap_err();
+        let err = store.insert_knowledge_entry(kb2).await.unwrap_err();
         assert!(
             matches!(err, KbStoreError::Duplicate { ref world_id, ref name, .. }
                 if world_id == "wld_1" && name == "Hero")
@@ -507,10 +521,10 @@ mod tests {
     async fn test_uniqueness_allows_different_type() {
         let store = InMemoryKbStore::new();
         let kb1 = make_block("wld_1", BlockType::Character, "Dragon");
-        store.insert_key_block(kb1).await.unwrap();
+        store.insert_knowledge_entry(kb1).await.unwrap();
 
         let kb2 = make_block("wld_1", BlockType::Event, "Dragon");
-        assert!(store.insert_key_block(kb2).await.is_ok());
+        assert!(store.insert_knowledge_entry(kb2).await.is_ok());
     }
 
     // T6: Same canonical_name + type in different worlds is allowed
@@ -518,10 +532,10 @@ mod tests {
     async fn test_uniqueness_allows_different_world() {
         let store = InMemoryKbStore::new();
         let kb1 = make_block("wld_1", BlockType::Character, "Hero");
-        store.insert_key_block(kb1).await.unwrap();
+        store.insert_knowledge_entry(kb1).await.unwrap();
 
         let kb2 = make_block("wld_2", BlockType::Character, "Hero");
-        assert!(store.insert_key_block(kb2).await.is_ok());
+        assert!(store.insert_knowledge_entry(kb2).await.is_ok());
     }
 
     // T7: Soft-deleted block does not block uniqueness re-insertion
@@ -529,14 +543,14 @@ mod tests {
     async fn test_deleted_allows_reinsertion() {
         let store = InMemoryKbStore::new();
         let kb = make_block("wld_1", BlockType::Character, "Hero");
-        let id = kb.key_block_id.clone();
-        store.insert_key_block(kb).await.unwrap();
+        let id = kb.entry_id.clone();
+        store.insert_knowledge_entry(kb).await.unwrap();
 
-        store.delete_key_block(&id).await.unwrap();
+        store.delete_knowledge_entry(&id).await.unwrap();
 
         // Re-insert with same canonical_name + type should succeed
         let kb2 = make_block("wld_1", BlockType::Character, "Hero");
-        assert!(store.insert_key_block(kb2).await.is_ok());
+        assert!(store.insert_knowledge_entry(kb2).await.is_ok());
     }
 
     // T8: Query with block_type filter
@@ -544,15 +558,15 @@ mod tests {
     async fn test_query_by_block_type() {
         let store = InMemoryKbStore::new();
         store
-            .insert_key_block(make_block("wld_1", BlockType::Character, "Hero"))
+            .insert_knowledge_entry(make_block("wld_1", BlockType::Character, "Hero"))
             .await
             .unwrap();
         store
-            .insert_key_block(make_block("wld_1", BlockType::Scene, "Forest"))
+            .insert_knowledge_entry(make_block("wld_1", BlockType::Scene, "Forest"))
             .await
             .unwrap();
         store
-            .insert_key_block(make_block("wld_1", BlockType::Character, "Villain"))
+            .insert_knowledge_entry(make_block("wld_1", BlockType::Character, "Villain"))
             .await
             .unwrap();
 
@@ -569,11 +583,11 @@ mod tests {
     async fn test_query_by_canonical_name() {
         let store = InMemoryKbStore::new();
         store
-            .insert_key_block(make_block("wld_1", BlockType::Character, "Hero"))
+            .insert_knowledge_entry(make_block("wld_1", BlockType::Character, "Hero"))
             .await
             .unwrap();
         store
-            .insert_key_block(make_block("wld_1", BlockType::Character, "Villain"))
+            .insert_knowledge_entry(make_block("wld_1", BlockType::Character, "Villain"))
             .await
             .unwrap();
 
@@ -591,24 +605,24 @@ mod tests {
         let store = InMemoryKbStore::new();
 
         let mut kb1 = make_block("wld_1", BlockType::Character, "Dark Knight");
-        kb1.set_body(KeyBlockBody {
+        kb1.set_body(WorldKbBody {
             summary: Some("A brooding hero".to_string()),
             attributes: None,
             tags: Some(vec!["gothic".to_string()]),
             ..Default::default()
         })
         .unwrap();
-        store.insert_key_block(kb1).await.unwrap();
+        store.insert_knowledge_entry(kb1).await.unwrap();
 
         let mut kb2 = make_block("wld_1", BlockType::Scene, "Enchanted Forest");
-        kb2.set_body(KeyBlockBody {
+        kb2.set_body(WorldKbBody {
             summary: Some("A magical woodland".to_string()),
             attributes: None,
             tags: Some(vec!["fantasy".to_string()]),
             ..Default::default()
         })
         .unwrap();
-        store.insert_key_block(kb2).await.unwrap();
+        store.insert_knowledge_entry(kb2).await.unwrap();
 
         // Search by canonical_name substring
         let r = store
@@ -645,7 +659,7 @@ mod tests {
         let store = InMemoryKbStore::new();
         for i in 0..5 {
             store
-                .insert_key_block(make_block(
+                .insert_knowledge_entry(make_block(
                     "wld_1",
                     BlockType::Character,
                     &format!("Char_{i}"),
@@ -678,8 +692,8 @@ mod tests {
     async fn test_attach_and_get_anchors() {
         let store = InMemoryKbStore::new();
         let kb = make_block("wld_1", BlockType::Character, "Hero");
-        let id = kb.key_block_id.clone();
-        store.insert_key_block(kb).await.unwrap();
+        let id = kb.entry_id.clone();
+        store.insert_knowledge_entry(kb).await.unwrap();
 
         let anchor1 = SourceAnchor::new("stm_1", "sum_1", Some("chapter"));
         let anchor2 = SourceAnchor::new("stm_2", "sum_2", None);
@@ -687,11 +701,11 @@ mod tests {
         store.attach_source_anchor(&id, anchor1).await.unwrap();
         store.attach_source_anchor(&id, anchor2).await.unwrap();
 
-        let anchors = store.get_anchors(&id).await.unwrap();
-        assert_eq!(anchors.len(), 2);
+        let fetched = store.get_anchors(&id).await.unwrap();
+        assert_eq!(fetched.len(), 2);
     }
 
-    // T13: Attach anchor to non-existent KeyBlock fails
+    // T13: Attach anchor to non-existent WorldKbEntry fails
     #[tokio::test]
     async fn test_attach_anchor_not_found() {
         let store = InMemoryKbStore::new();
@@ -708,25 +722,25 @@ mod tests {
     async fn test_get_anchors_empty() {
         let store = InMemoryKbStore::new();
         let kb = make_block("wld_1", BlockType::Character, "Hero");
-        let id = kb.key_block_id.clone();
-        store.insert_key_block(kb).await.unwrap();
+        let id = kb.entry_id.clone();
+        store.insert_knowledge_entry(kb).await.unwrap();
 
         let anchors = store.get_anchors(&id).await.unwrap();
         assert!(anchors.is_empty());
     }
 
-    // T15: Update a KeyBlock
+    // T15: Update a WorldKbEntry
     #[tokio::test]
-    async fn test_update_key_block() {
+    async fn test_update_knowledge_entry() {
         let store = InMemoryKbStore::new();
         let mut kb = make_block("wld_1", BlockType::Character, "Hero");
-        let id = kb.key_block_id.clone();
-        store.insert_key_block(kb.clone()).await.unwrap();
+        let id = kb.entry_id.clone();
+        store.insert_knowledge_entry(kb.clone()).await.unwrap();
 
         kb.canonical_name = "Superhero".to_string();
-        store.update_key_block(kb).await.unwrap();
+        store.update_knowledge_entry(kb).await.unwrap();
 
-        let fetched = store.get_key_block(&id).await.unwrap();
+        let fetched = store.get_knowledge_entry(&id).await.unwrap();
         assert_eq!(fetched.canonical_name, "Superhero");
     }
 
@@ -735,38 +749,38 @@ mod tests {
     async fn test_update_conflict() {
         let store = InMemoryKbStore::new();
         let kb1 = make_block("wld_1", BlockType::Character, "Hero");
-        store.insert_key_block(kb1).await.unwrap();
+        store.insert_knowledge_entry(kb1).await.unwrap();
 
         let mut kb2 = make_block("wld_1", BlockType::Character, "Villain");
-        store.insert_key_block(kb2.clone()).await.unwrap();
+        store.insert_knowledge_entry(kb2.clone()).await.unwrap();
 
         // Rename kb2 to "Hero" — should conflict with kb1
         kb2.canonical_name = "Hero".to_string();
-        let err = store.update_key_block(kb2).await.unwrap_err();
+        let err = store.update_knowledge_entry(kb2).await.unwrap_err();
         assert!(matches!(err, KbStoreError::Duplicate { .. }));
     }
 
-    // T17: Update non-existent KeyBlock fails
+    // T17: Update non-existent WorldKbEntry fails
     #[tokio::test]
     async fn test_update_not_found() {
         let store = InMemoryKbStore::new();
         let kb = make_block("wld_1", BlockType::Character, "Ghost");
-        let err = store.update_key_block(kb).await.unwrap_err();
+        let err = store.update_knowledge_entry(kb).await.unwrap_err();
         assert!(matches!(err, KbStoreError::NotFound(_)));
     }
 
-    // T18: Delete a KeyBlock (soft delete)
+    // T18: Delete a WorldKbEntry (soft delete)
     #[tokio::test]
-    async fn test_delete_key_block() {
+    async fn test_delete_knowledge_entry() {
         let store = InMemoryKbStore::new();
         let kb = make_block("wld_1", BlockType::Character, "Hero");
-        let id = kb.key_block_id.clone();
-        store.insert_key_block(kb).await.unwrap();
+        let id = kb.entry_id.clone();
+        store.insert_knowledge_entry(kb).await.unwrap();
 
-        store.delete_key_block(&id).await.unwrap();
+        store.delete_knowledge_entry(&id).await.unwrap();
 
         // Block still exists but is marked deleted
-        let fetched = store.get_key_block(&id).await.unwrap();
+        let fetched = store.get_knowledge_entry(&id).await.unwrap();
         assert_eq!(fetched.status, "deleted");
 
         // list_by_world excludes deleted
@@ -774,11 +788,11 @@ mod tests {
         assert!(listed.is_empty());
     }
 
-    // T19: Delete non-existent KeyBlock fails
+    // T19: Delete non-existent WorldKbEntry fails
     #[tokio::test]
     async fn test_delete_not_found() {
         let store = InMemoryKbStore::new();
-        let err = store.delete_key_block("ghost").await.unwrap_err();
+        let err = store.delete_knowledge_entry("ghost").await.unwrap_err();
         assert!(matches!(err, KbStoreError::NotFound(_)));
     }
 
@@ -787,7 +801,7 @@ mod tests {
     async fn test_query_world_isolation() {
         let store = InMemoryKbStore::new();
         store
-            .insert_key_block(make_block("wld_1", BlockType::Character, "Hero"))
+            .insert_knowledge_entry(make_block("wld_1", BlockType::Character, "Hero"))
             .await
             .unwrap();
 
@@ -800,14 +814,14 @@ mod tests {
     async fn test_deprecated_allows_reinsertion() {
         let store = InMemoryKbStore::new();
         let mut kb = make_block("wld_1", BlockType::Character, "Hero");
-        store.insert_key_block(kb.clone()).await.unwrap();
+        store.insert_knowledge_entry(kb.clone()).await.unwrap();
 
         kb.deprecate(None).unwrap();
-        store.update_key_block(kb).await.unwrap();
+        store.update_knowledge_entry(kb).await.unwrap();
 
         // Re-insert with same name + type should succeed
         let kb2 = make_block("wld_1", BlockType::Character, "Hero");
-        assert!(store.insert_key_block(kb2).await.is_ok());
+        assert!(store.insert_knowledge_entry(kb2).await.is_ok());
     }
 
     // T22: Merged block does not block uniqueness
@@ -815,13 +829,13 @@ mod tests {
     async fn test_merged_allows_reinsertion() {
         let store = InMemoryKbStore::new();
         let mut kb = make_block("wld_1", BlockType::Character, "Hero");
-        store.insert_key_block(kb.clone()).await.unwrap();
+        store.insert_knowledge_entry(kb.clone()).await.unwrap();
 
         kb.merge_into("kb_other").unwrap();
-        store.update_key_block(kb).await.unwrap();
+        store.update_knowledge_entry(kb).await.unwrap();
 
         let kb2 = make_block("wld_1", BlockType::Character, "Hero");
-        assert!(store.insert_key_block(kb2).await.is_ok());
+        assert!(store.insert_knowledge_entry(kb2).await.is_ok());
     }
 
     // ── P1 taxonomy tests (plan 2026-06-10-v1.40-world-kb-taxonomy T5) ──
@@ -832,9 +846,9 @@ mod tests {
         block_type: BlockType,
         name: &str,
         novel_category: &str,
-    ) -> KeyBlock {
-        let mut kb = KeyBlock::new(world_id, block_type, name);
-        kb.set_body(KeyBlockBody {
+    ) -> WorldKbEntry {
+        let mut kb = WorldKbEntry::new(world_id, block_type, name);
+        kb.set_body(WorldKbBody {
             summary: Some(format!("{novel_category}: {name}")),
             attributes: Some(serde_json::json!({
                 "novel_category": novel_category,
@@ -873,11 +887,11 @@ mod tests {
 
         // character → character
         let kb = make_novel_block("wld_1", BlockType::Character, "char_lin_xia", "character");
-        assert!(store.insert_key_block(kb).await.is_ok());
+        assert!(store.insert_knowledge_entry(kb).await.is_ok());
 
         // scene → location
         let kb = make_novel_block("wld_1", BlockType::Scene, "loc_neon_city", "location");
-        assert!(store.insert_key_block(kb).await.is_ok());
+        assert!(store.insert_knowledge_entry(kb).await.is_ok());
 
         // organization → society
         let kb = make_novel_block(
@@ -886,35 +900,35 @@ mod tests {
             "org_solar_cult",
             "society",
         );
-        assert!(store.insert_key_block(kb).await.is_ok());
+        assert!(store.insert_knowledge_entry(kb).await.is_ok());
 
         // conflict → rules
         let kb = make_novel_block("wld_1", BlockType::Conflict, "rule_magic_cost", "rules");
-        assert!(store.insert_key_block(kb).await.is_ok());
+        assert!(store.insert_knowledge_entry(kb).await.is_ok());
 
         // item → economy
         let kb = make_novel_block("wld_1", BlockType::Item, "item_memory_crystal", "economy");
-        assert!(store.insert_key_block(kb).await.is_ok());
+        assert!(store.insert_knowledge_entry(kb).await.is_ok());
 
         // info_point → foundation
         let kb = make_novel_block("wld_1", BlockType::InfoPoint, "fnd_cosmology", "foundation");
-        assert!(store.insert_key_block(kb).await.is_ok());
+        assert!(store.insert_knowledge_entry(kb).await.is_ok());
 
         // event → background
         let kb = make_novel_block("wld_1", BlockType::Event, "evt_great_fire", "background");
-        assert!(store.insert_key_block(kb).await.is_ok());
+        assert!(store.insert_knowledge_entry(kb).await.is_ok());
 
         // ability (no novel_category mapping, but novel mode allows any valid category)
         let kb = make_novel_block("wld_1", BlockType::Ability, "abl_shadow_walk", "character");
-        assert!(store.insert_key_block(kb).await.is_ok());
+        assert!(store.insert_knowledge_entry(kb).await.is_ok());
     }
 
     // AC2 negative: Missing novel_category on character block fails in Novel mode.
     #[tokio::test]
     async fn test_novel_missing_category_rejected() {
         let store = InMemoryKbStore::with_validation_mode(ValidationMode::Novel);
-        let mut kb = KeyBlock::new("wld_1", BlockType::Character, "char_no_cat");
-        kb.set_body(KeyBlockBody {
+        let mut kb = WorldKbEntry::new("wld_1", BlockType::Character, "char_no_cat");
+        kb.set_body(WorldKbBody {
             summary: Some("A character without category".to_string()),
             attributes: Some(serde_json::json!({"aliases": ["NoCat"]})),
             tags: Some(vec!["novel".to_string()]),
@@ -922,7 +936,7 @@ mod tests {
         })
         .unwrap();
 
-        let err = store.insert_key_block(kb).await.unwrap_err();
+        let err = store.insert_knowledge_entry(kb).await.unwrap_err();
         assert!(
             matches!(err, KbStoreError::Validation(ref ve) if ve.message.contains("novel_category is required"))
         );
@@ -935,10 +949,10 @@ mod tests {
         let store = InMemoryKbStore::with_validation_mode(ValidationMode::Novel);
 
         let kb1 = make_novel_block("wld_1", BlockType::Character, "char_lin_xia", "character");
-        store.insert_key_block(kb1).await.unwrap();
+        store.insert_knowledge_entry(kb1).await.unwrap();
 
         let kb2 = make_novel_block("wld_1", BlockType::Character, "char_lin_xia", "character");
-        let err = store.insert_key_block(kb2).await.unwrap_err();
+        let err = store.insert_knowledge_entry(kb2).await.unwrap_err();
         assert!(matches!(err, KbStoreError::Duplicate { ref name, .. } if name == "char_lin_xia"));
     }
 
@@ -949,10 +963,10 @@ mod tests {
         let store = InMemoryKbStore::with_validation_mode(ValidationMode::Novel);
 
         let kb_char = make_novel_block("wld_1", BlockType::Character, "char_lin_xia", "character");
-        store.insert_key_block(kb_char).await.unwrap();
+        store.insert_knowledge_entry(kb_char).await.unwrap();
 
         let kb_loc = make_novel_block("wld_1", BlockType::Scene, "loc_neon_city", "location");
-        store.insert_key_block(kb_loc).await.unwrap();
+        store.insert_knowledge_entry(kb_loc).await.unwrap();
 
         // Resolve "char_lin_xia"
         let result = store
@@ -1005,7 +1019,7 @@ mod tests {
         assert_eq!(bt, BlockType::Character);
 
         // Verify body passes novel validation
-        let body: KeyBlockBody = serde_json::from_value(value["body"].clone()).unwrap();
+        let body: WorldKbBody = serde_json::from_value(value["body"].clone()).unwrap();
         assert!(validate_body(bt, Some(&body), ValidationMode::Novel).is_ok());
     }
 
@@ -1013,8 +1027,8 @@ mod tests {
     #[tokio::test]
     async fn test_generic_store_accepts_body_without_novel_category() {
         let store = InMemoryKbStore::new(); // Generic mode by default
-        let mut kb = KeyBlock::new("wld_1", BlockType::Character, "char_generic");
-        kb.set_body(KeyBlockBody {
+        let mut kb = WorldKbEntry::new("wld_1", BlockType::Character, "char_generic");
+        kb.set_body(WorldKbBody {
             summary: Some("A generic character".to_string()),
             attributes: None,
             tags: None,
@@ -1022,7 +1036,7 @@ mod tests {
         })
         .unwrap();
 
-        assert!(store.insert_key_block(kb).await.is_ok());
+        assert!(store.insert_knowledge_entry(kb).await.is_ok());
     }
 
     // Novel mode update also validates body.
@@ -1030,10 +1044,10 @@ mod tests {
     async fn test_novel_update_validates_body() {
         let store = InMemoryKbStore::with_validation_mode(ValidationMode::Novel);
         let mut kb = make_novel_block("wld_1", BlockType::Character, "char_hero", "character");
-        store.insert_key_block(kb.clone()).await.unwrap();
+        store.insert_knowledge_entry(kb.clone()).await.unwrap();
 
         // Update to body missing novel_category should fail
-        kb.set_body(KeyBlockBody {
+        kb.set_body(WorldKbBody {
             summary: Some("updated".to_string()),
             attributes: Some(serde_json::json!({"traits": ["old"]})),
             tags: None,
@@ -1041,7 +1055,7 @@ mod tests {
         })
         .unwrap();
 
-        let err = store.update_key_block(kb).await.unwrap_err();
+        let err = store.update_knowledge_entry(kb).await.unwrap_err();
         assert!(
             matches!(err, KbStoreError::Validation(ref ve) if ve.message.contains("novel_category is required"))
         );
@@ -1049,9 +1063,9 @@ mod tests {
 
     // ── Computable query filter (V1.61 P1) ─────────────────────────
 
-    fn make_computable_block(world_id: &str, name: &str, computable: bool) -> KeyBlock {
-        let mut kb = KeyBlock::new(world_id, BlockType::Character, name);
-        kb.set_body(KeyBlockBody {
+    fn make_computable_block(world_id: &str, name: &str, computable: bool) -> WorldKbEntry {
+        let mut kb = WorldKbEntry::new(world_id, BlockType::Character, name);
+        kb.set_body(WorldKbBody {
             summary: Some(format!("{name} summary")),
             attributes: if computable {
                 Some(serde_json::json!({"max_hp": 100}))
@@ -1074,15 +1088,15 @@ mod tests {
     async fn query_computable_true_filters_only_computable_blocks() {
         let store = InMemoryKbStore::new();
         store
-            .insert_key_block(make_computable_block("wld_1", "Hero", true))
+            .insert_knowledge_entry(make_computable_block("wld_1", "Hero", true))
             .await
             .unwrap();
         store
-            .insert_key_block(make_computable_block("wld_1", "NPC", false))
+            .insert_knowledge_entry(make_computable_block("wld_1", "NPC", false))
             .await
             .unwrap();
         store
-            .insert_key_block(make_computable_block("wld_1", "Place", false))
+            .insert_knowledge_entry(make_computable_block("wld_1", "Place", false))
             .await
             .unwrap();
 
@@ -1096,11 +1110,11 @@ mod tests {
     async fn query_computable_false_filters_only_non_computable() {
         let store = InMemoryKbStore::new();
         store
-            .insert_key_block(make_computable_block("wld_1", "Hero", true))
+            .insert_knowledge_entry(make_computable_block("wld_1", "Hero", true))
             .await
             .unwrap();
         store
-            .insert_key_block(make_computable_block("wld_1", "NPC", false))
+            .insert_knowledge_entry(make_computable_block("wld_1", "NPC", false))
             .await
             .unwrap();
 
@@ -1114,11 +1128,11 @@ mod tests {
     async fn query_computable_none_returns_all() {
         let store = InMemoryKbStore::new();
         store
-            .insert_key_block(make_computable_block("wld_1", "Hero", true))
+            .insert_knowledge_entry(make_computable_block("wld_1", "Hero", true))
             .await
             .unwrap();
         store
-            .insert_key_block(make_computable_block("wld_1", "NPC", false))
+            .insert_knowledge_entry(make_computable_block("wld_1", "NPC", false))
             .await
             .unwrap();
 
@@ -1131,15 +1145,15 @@ mod tests {
     async fn query_computable_with_computable_absent_in_body() {
         let store = InMemoryKbStore::new();
         // Insert a block with no computable field at all (legacy block)
-        let mut kb = KeyBlock::new("wld_1", BlockType::Character, "Legacy");
-        kb.set_body(KeyBlockBody {
+        let mut kb = WorldKbEntry::new("wld_1", BlockType::Character, "Legacy");
+        kb.set_body(WorldKbBody {
             summary: Some("legacy".to_string()),
             attributes: None,
             tags: None,
             ..Default::default()
         })
         .unwrap();
-        store.insert_key_block(kb).await.unwrap();
+        store.insert_knowledge_entry(kb).await.unwrap();
 
         // Filtering for computable=true should exclude the legacy block
         let q = KbQuery::new("wld_1").with_computable(Some(true));

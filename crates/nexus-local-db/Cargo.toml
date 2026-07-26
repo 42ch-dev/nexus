@@ -22,8 +22,9 @@ tracing = { workspace = true }
 nexus-contracts = { path = "../nexus-contracts" }
 nexus-home-layout = { path = "../nexus-home-layout" }
 nexus-narrative = { path = "../nexus-narrative" }
-nexus-kb = { path = "../nexus-kb" }
 nexus-knowledge = { path = "../nexus-knowledge" }
+# V1.139 P1 T4 — extensions.nexus round-trip helpers (build_extensions_nexus).
+nexus-spoke-adapter = { path = "../nexus-spoke-adapter" }
 async-trait.workspace = true
 futures-util = { workspace = true }
 

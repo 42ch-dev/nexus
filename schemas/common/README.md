@@ -8,7 +8,6 @@ Reusable type definitions imported by domain schemas. All enums aligned with dat
 - `WorldId`: World ID (`wld_xxx`)
 - `CreatorId`: Creator ID (`ctr_xxx`)
 - `UserId`: User ID (`usr_xxx`)
-- `KeyBlockId`: KeyBlock ID (`kb_xxx`)
 - `TimelineEventId`: TimelineEvent ID (`evt_xxx`)
 - `BundleId`: DeltaBundle ID (`bdl_xxx`)
 - `CommandId`: SyncCommand ID (`cmd_xxx`)

@@ -409,7 +409,7 @@ mod tests {
             ManifestType::Excerpt,
         ];
         for mt in types {
-            let sm = StoryManifest::new("wld_test", "ctr_author", mt.clone(), "Test", "sum_1");
+            let sm = StoryManifest::new("wld_test", "ctr_author", mt, "Test", "sum_1");
             let json = serde_json::to_string(&sm).unwrap();
             let deserialized: StoryManifest = serde_json::from_str(&json).unwrap();
             assert_eq!(deserialized.manifest_type, mt.as_str());

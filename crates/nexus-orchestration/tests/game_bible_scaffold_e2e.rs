@@ -1,15 +1,15 @@
-//! Hermetic end-to-end tests for game_bible.project_scaffold (V1.54 P1 W-004).
+//! Hermetic end-to-end tests for `game_bible.project_scaffold` (V1.54 P1 W-004).
 //!
 //! Covers:
-//! - bootstrap_game_bible_creates_design_tree: 12 template files + README +
+//! - `bootstrap_game_bible_creates_design_tree`: 12 template files + README +
 //!   Logs directories created, works row updated.
-//! - bootstrap_game_bible_idempotent: re-running scaffold does not overwrite
+//! - `bootstrap_game_bible_idempotent`: re-running scaffold does not overwrite
 //!   existing files.
-//! - game_bible_work_status_json: works row PATCHed with
-//!   work_profile = 'game_bible'.
+//! - `game_bible_work_status_json`: works row `PATCHed` with
+//!   `work_profile` = '`game_bible`'.
 //!
 //! All tests use `tempfile::TempDir` for hermetic workspace and in-memory
-//! SQLite (via `nexus_local_db::open_pool`) for DB operations.
+//! `SQLite` (via `nexus_local_db::open_pool`) for DB operations.
 
 use sqlx::Row;
 
@@ -20,7 +20,7 @@ use nexus_orchestration::capability::Capability;
 // Helpers
 // ---------------------------------------------------------------------------
 
-/// Create a fresh SQLite pool with all migrations applied.
+/// Create a fresh `SQLite` pool with all migrations applied.
 async fn fresh_pool() -> (sqlx::SqlitePool, tempfile::TempDir) {
     let dir = tempfile::tempdir().expect("tmpdir");
     let db_path = dir.path().join("test.db");
@@ -147,7 +147,7 @@ async fn bootstrap_game_bible_creates_design_tree() {
     ];
     for ef in &expected_design_files {
         assert!(
-            files.contains(&ef),
+            files.contains(ef),
             "expected file '{ef}' in files_created: {files:?}"
         );
     }

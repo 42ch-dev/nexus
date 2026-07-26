@@ -1,13 +1,13 @@
-//! `kb.extract_work` capability — extract a `KeyBlock` from a work-scope KB entry.
+//! `kb.extract_work` capability — extract a `WorldKbEntry` from a work-scope KB entry.
 //!
 //! Full e2e pipeline (R16):
 //! 1. When `job_id` present: load job row; reject wrong status.
 //! 2. When `job_id` omitted: call `claim_job` for `creator_id`.
 //! 3. Mark running → load work content → build extraction prompt → parse
-//!    LLM response → mark done → insert `KeyBlock` via `SqliteKbStore`.
+//!    LLM response → mark done → insert `WorldKbEntry` via `SqliteKbStore`.
 //!
 //! The capability is stateful: it holds an `Option<SqlitePool>` for job
-//! lifecycle management and `KeyBlock` insertion. Without a pool it returns
+//! lifecycle management and `WorldKbEntry` insertion. Without a pool it returns
 //! `WorkerUnavailable`.
 //!
 //! Design: plan `2026-05-26-v1.30-kb-extract-lifecycle-hardening.md` §K4.
@@ -51,7 +51,7 @@ fn deserialize_body<'de, D: serde::Deserializer<'de>>(de: D) -> Result<String, D
 
 /// The `kb.extract_work` capability.
 ///
-/// Holds an optional `SqlitePool` for job lifecycle management and `KeyBlock`
+/// Holds an optional `SqlitePool` for job lifecycle management and `WorldKbEntry`
 /// insertion. When `pool` is `None`, returns `WorkerUnavailable`.
 ///
 /// Input schema:
@@ -68,7 +68,7 @@ fn deserialize_body<'de, D: serde::Deserializer<'de>>(de: D) -> Result<String, D
 ///
 /// Output schema depends on the phase:
 /// - **Prompt phase** (no `llm_response`): returns extraction prompt + job data
-/// - **Finalize phase** (with `llm_response`): returns `KeyBlock` insert result
+/// - **Finalize phase** (with `llm_response`): returns `WorldKbEntry` insert result
 pub struct KbExtractWork {
     pool: Option<Arc<sqlx::SqlitePool>>,
 }
@@ -164,7 +164,7 @@ impl Capability for KbExtractWork {
             "properties": {
                 "job_id": { "type": "string", "description": "Existing extract job ID" },
                 "work_entry_id": { "type": "string", "description": "Work-scope KB entry ID to extract" },
-                "world_id": { "type": "string", "description": "Target world ID for the resulting KeyBlock" },
+                "world_id": { "type": "string", "description": "Target world ID for the resulting WorldKbEntry" },
                 "work_id": { "type": "string", "description": "Source work ID (parent of the chapter)" },
                 "work_content": { "type": "string", "description": "Pre-loaded work content" },
                 "creator_id": { "type": "string", "description": "Creator ID" },
@@ -308,7 +308,7 @@ impl Capability for KbExtractWork {
             }));
         };
 
-        // ── Phase 4: Parse LLM response → KeyBlock insert ───────────
+        // ── Phase 4: Parse LLM response → WorldKbEntry insert ───────────
         let extract = match parse_extraction_response(response_text) {
             Ok(resp) => resp,
             Err(e) => {
@@ -342,17 +342,17 @@ impl Capability for KbExtractWork {
             .and_then(|v| v.as_str())
             .unwrap_or("generic");
         let validation_mode = if profile_hint == "novel" {
-            nexus_kb::ValidationMode::Novel
+            nexus_knowledge::world_kb::ValidationMode::Novel
         } else {
-            nexus_kb::ValidationMode::Generic
+            nexus_knowledge::world_kb::ValidationMode::Generic
         };
 
         // Build body from LLM response.
-        let body: nexus_kb::key_block::KeyBlockBody =
+        let body: nexus_knowledge::world_kb::knowledge_entry::WorldKbBody =
             if let Ok(parsed) = serde_json::from_str(&extract.body) {
                 parsed
             } else {
-                nexus_kb::key_block::KeyBlockBody {
+                nexus_knowledge::world_kb::knowledge_entry::WorldKbBody {
                     summary: Some(extract.body.clone()),
                     attributes: None,
                     tags: None,
@@ -366,14 +366,14 @@ impl Capability for KbExtractWork {
             .and_then(|v| v.as_str())
             .unwrap_or("");
         let source_anchor = if source_locator.is_empty() {
-            nexus_kb::source_anchor::SourceAnchor::from_excerpt(
+            nexus_knowledge::world_kb::source_anchor::SourceAnchor::from_excerpt(
                 &extract.body.chars().take(256).collect::<String>(),
             )
         } else {
-            nexus_kb::source_anchor::SourceAnchor::from_excerpt(source_locator)
+            nexus_knowledge::world_kb::source_anchor::SourceAnchor::from_excerpt(source_locator)
         };
 
-        let finalize_input = nexus_kb::ExtractFinalizeInput {
+        let finalize_input = nexus_knowledge::world_kb::ExtractFinalizeInput {
             world_id: world_id.clone(),
             block_type,
             canonical_name: extract.canonical_name.clone(),
@@ -382,28 +382,29 @@ impl Capability for KbExtractWork {
             validation_mode,
         };
 
-        // ── Phase 4b: Insert KeyBlock BEFORE marking job done ──────────
+        // ── Phase 4b: Insert WorldKbEntry BEFORE marking job done ──────────
         // Insert first; only mark done on success. On insert failure,
         // mark the job as failed so the preset state machine can surface
-        // or retry. This prevents "done job with no KeyBlock" data loss.
+        // or retry. This prevents "done job with no WorldKbEntry" data loss.
         let store = nexus_local_db::kb_store::SqliteKbStore::new(pool.as_ref().clone());
-        let insert_result = match nexus_kb::finalize_extract(&store, finalize_input).await {
-            Ok(r) => r,
-            Err(e) => {
-                // Mark job as failed so the content loss window is closed.
-                let _ = nexus_local_db::mark_extract_job_failed(
-                    pool,
-                    &job_id,
-                    &format!("KeyBlock insert failed: {e}"),
-                )
-                .await;
-                return Err(CapabilityError::Internal(format!(
-                    "KeyBlock insert failed: {e}"
-                )));
-            }
-        };
+        let insert_result =
+            match nexus_knowledge::world_kb::finalize_extract(&store, finalize_input).await {
+                Ok(r) => r,
+                Err(e) => {
+                    // Mark job as failed so the content loss window is closed.
+                    let _ = nexus_local_db::mark_extract_job_failed(
+                        pool,
+                        &job_id,
+                        &format!("WorldKbEntry insert failed: {e}"),
+                    )
+                    .await;
+                    return Err(CapabilityError::Internal(format!(
+                        "WorldKbEntry insert failed: {e}"
+                    )));
+                }
+            };
 
-        // Mark done only after the KeyBlock was successfully inserted.
+        // Mark done only after the WorldKbEntry was successfully inserted.
         nexus_local_db::mark_extract_job_done(pool, &job_id)
             .await
             .map_err(|e| CapabilityError::Internal(format!("Failed to mark job done: {e}")))?;
@@ -411,7 +412,7 @@ impl Capability for KbExtractWork {
         Ok(json!({
             "job_id": job_id,
             "status": "done",
-            "key_block_id": insert_result.key_block_id,
+            "key_block_id": insert_result.entry_id,
             "world_id": insert_result.world_id,
             "block_type": extract.block_type,
             "canonical_name": extract.canonical_name,

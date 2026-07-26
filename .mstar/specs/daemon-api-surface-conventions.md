@@ -427,7 +427,7 @@ World KB request semantics:
 | Field / rule | Requirement |
 | --- | --- |
 | Path-authoritative `world_id` | The `world_id` path segment is authoritative for World ownership and workspace scoping. Request bodies MUST NOT override it; any repeated/mismatched identifier is a 400 path/body mismatch under the canonical error envelope. |
-| Row identifiers | `WorldKbPatchEntityRequest.entity_id` identifies the KeyBlock row under the path `world_id`; `WorldKbPromoteCandidateRequest.job_id` + `candidate_id` identify the pending extraction job/candidate row under the path `world_id`. |
+| Row identifiers | `WorldKbPatchEntityRequest.entity_id` identifies the KnowledgeEntry row under the path `world_id`; `WorldKbPromoteCandidateRequest.job_id` + `candidate_id` identify the pending extraction job/candidate row under the path `world_id`. |
 | `expected_version` | Required on both mutating requests. It is the row version observed on the last canonical read: `kb_key_blocks.revision` for entity patches and `kb_extract_jobs.version` for candidate promotion (NULL/absent normalized to `0` where applicable). |
 | Response `version` | Mutating success responses return the committed row `version` after persistence. Clients MUST update their local projection from the response or refetch before issuing the next patch. |
 | Patch payload | `WorldKbPatchEntityRequest.patch` edits entity fields such as title/body/aliases/block_type. `WorldKbPromoteCandidateRequest.action` is `adopt` / `reject` / `merge`; `merge` requires `merge_target_id`; optional `patch` may refine fields during adoption. |
@@ -606,11 +606,11 @@ Both endpoints reuse the existing `manifest.json` shape from
 parallel module DTO. `ListModulesResponse` follows the §2 cursor-list convention
 (`items`, `has_more`).
 
-### 12.2 Computable KeyBlock state read
+### 12.2 Computable KnowledgeEntry state read
 
 | Use | Route | Response DTO |
 | --- | --- | --- |
-| Read a computable KeyBlock's runtime state | `GET /v1/daemon/worlds/{world_id}/kb/key-blocks/{key_block_id}/state` | `WorldKbKeyBlockStateResponse` |
+| Read a computable KnowledgeEntry's runtime state | `GET /v1/daemon/worlds/{world_id}/kb/key-blocks/{key_block_id}/state` | `WorldKbKeyBlockStateResponse` |
 
 Response semantics:
 

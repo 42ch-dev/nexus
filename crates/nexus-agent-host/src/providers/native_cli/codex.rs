@@ -1026,8 +1026,7 @@ mod tests {
 
         // Mock script: records argv to a file, then emits JSONL with session ID.
         let script = format!(
-            r#"printf '%s\n' "$@" >> "{}"; printf '%s\n' '{{"type":"session_start","session_id":"sess_test_123"}}' '{{"type":"message_delta","delta":"hello"}}' '{{"type":"finish","reason":"end_turn"}}'"#,
-            args_file_path
+            r#"printf '%s\n' "$@" >> "{args_file_path}"; printf '%s\n' '{{"type":"session_start","session_id":"sess_test_123"}}' '{{"type":"message_delta","delta":"hello"}}' '{{"type":"finish","reason":"end_turn"}}'"#
         );
         let script_path = write_mock_codex_script(&temp_dir, &script);
 
@@ -1110,8 +1109,7 @@ mod tests {
         // First execute should have recorded the base args once.
         assert!(
             args_lines.contains(&"exec"),
-            "execute should pass 'exec' subcommand; args: {:?}",
-            args_lines
+            "execute should pass 'exec' subcommand; args: {args_lines:?}"
         );
         // Second execute should have recorded resume and the captured session ID.
         let resume_positions: Vec<usize> = args_lines
@@ -1121,14 +1119,12 @@ mod tests {
             .collect();
         assert!(
             !resume_positions.is_empty(),
-            "second execute should pass 'resume' subcommand; args: {:?}",
-            args_lines
+            "second execute should pass 'resume' subcommand; args: {args_lines:?}"
         );
         let resume_pos = resume_positions[0];
         assert!(
             resume_pos + 1 < args_lines.len() && args_lines[resume_pos + 1] == "sess_test_123",
-            "second execute should pass captured session ID after 'resume'; args: {:?}",
-            args_lines
+            "second execute should pass captured session ID after 'resume'; args: {args_lines:?}"
         );
     }
 
@@ -1136,7 +1132,7 @@ mod tests {
     #[tokio::test]
     async fn execute_fallback_to_plain_text_when_jsonl_parse_fails() {
         let temp_dir = tempfile::tempdir().expect("temp dir");
-        let script = r#"printf 'plain text line\nanother line\n'"#;
+        let script = r"printf 'plain text line\nanother line\n'";
         let script_path = write_mock_codex_script(&temp_dir, script);
 
         let provider = CodexNativeProvider::new(
@@ -1199,7 +1195,7 @@ mod tests {
     #[cfg(unix)]
     fn write_mock_codex_script(temp_dir: &tempfile::TempDir, body: &str) -> std::path::PathBuf {
         let script_path = temp_dir.path().join("mock_codex.sh");
-        let script = format!("#!/bin/sh\n{}\n", body);
+        let script = format!("#!/bin/sh\n{body}\n");
         std::fs::write(&script_path, &script).expect("write script");
         use std::os::unix::fs::PermissionsExt;
         let mut perms = std::fs::metadata(&script_path).unwrap().permissions();
@@ -1274,6 +1270,6 @@ mod tests {
         assert_eq!(
             extract_delta_text(Some(&text_delta)),
             Some("foo".to_string())
-        )
+        );
     }
 }

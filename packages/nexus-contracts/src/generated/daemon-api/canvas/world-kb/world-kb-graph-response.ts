@@ -26,7 +26,7 @@ export type NexusWorldKbRelationshipKind =
  */
 export interface WorldKbGraphResponse {
   /**
-   * All non-deleted KeyBlock entities in the World (confirmed + pending + manual).
+   * All non-deleted KnowledgeEntry entities in the World (confirmed + pending + manual).
    */
   entities: NexusWorldKbEntityProjection[];
   /**
@@ -39,11 +39,11 @@ export interface WorldKbGraphResponse {
   relationships: NexusWorldKbRelationshipProjection[];
 }
 /**
- * Flat wire projection of a World KB KeyBlock entity for canvas graph + inspector surfaces (V1.73). `version` maps to the SQLite per-row OCC column (kb_key_blocks.revision, NULL-normalized to 0).
+ * Flat wire projection of a World KB KnowledgeEntry entity for canvas graph + inspector surfaces (V1.73). `version` maps to the SQLite per-row OCC column (kb_key_blocks.revision, NULL-normalized to 0).
  */
 export interface NexusWorldKbEntityProjection {
   /**
-   * KeyBlock identifier.
+   * KnowledgeEntry identifier.
    */
   key_block_id: string;
   /**
@@ -86,7 +86,7 @@ export interface NexusWorldKbEntityProjection {
    */
   version: number;
   /**
-   * KeyBlock body JSON (summary/attributes/tags/state/computable) when present.
+   * KnowledgeEntry body JSON (summary/attributes/tags/state/computable) when present.
    */
   body?: {
     [k: string]: unknown | undefined;
@@ -113,7 +113,7 @@ export interface NexusWorldKbSourceAnchorProjection {
    */
   source_anchor_id: string;
   /**
-   * KeyBlock the anchor attaches to.
+   * KnowledgeEntry the anchor attaches to.
    */
   key_block_id: string;
   /**
@@ -142,11 +142,11 @@ export interface NexusWorldKbRelationshipProjection {
    */
   world_id: string;
   /**
-   * Source KeyBlock id.
+   * Source KnowledgeEntry id.
    */
   source_entity_id: string;
   /**
-   * Target KeyBlock id.
+   * Target KnowledgeEntry id.
    */
   target_entity_id: string;
   relation_type: NexusWorldKbRelationshipKind;

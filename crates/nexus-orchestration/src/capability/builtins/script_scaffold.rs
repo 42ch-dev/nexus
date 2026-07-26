@@ -496,7 +496,7 @@ mod tests {
 
         let mut tx = ScaffoldTransaction::new();
         tx.created_files.push(file_path.clone());
-        tx.created_dirs.push(work_dir.clone());
+        tx.created_dirs.push(work_dir);
         tx.commit(); // committed → Drop is no-op
 
         drop(tx);

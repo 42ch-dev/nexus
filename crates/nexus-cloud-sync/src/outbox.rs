@@ -777,10 +777,8 @@ impl Outbox {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nexus_contracts::generated::{Delta, SyncCommand};
-    use nexus_contracts::{
-        CommandOrigin, CommandStatus, CommandType, DeliveryState, DeltaOperation, DeltaType,
-    };
+    use nexus_contracts::generated::SyncCommand;
+    use nexus_contracts::{CommandOrigin, CommandStatus, CommandType, DeliveryState};
     use std::str::FromStr;
 
     fn make_test_command() -> SyncCommand {

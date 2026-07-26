@@ -22,8 +22,8 @@
   "properties": {
     "relationship_id": { "type": "string", "description": "Storage row identifier." },
     "world_id": { "type": "string", "description": "Owning World identifier." },
-    "source_entity_id": { "type": "string", "description": "Source KeyBlock id." },
-    "target_entity_id": { "type": "string", "description": "Target KeyBlock id." },
+    "source_entity_id": { "type": "string", "description": "Source KnowledgeEntry id." },
+    "target_entity_id": { "type": "string", "description": "Target KnowledgeEntry id." },
     "relation_type": { "$ref": "world-kb-relationship-kind.schema.json" },
     "custom_label": { "type": "string", "description": "Narrative label when relation_type is `custom`." },
     "symmetric": { "type": "boolean", "description": "True when the stored row is meant to project in both directions." },

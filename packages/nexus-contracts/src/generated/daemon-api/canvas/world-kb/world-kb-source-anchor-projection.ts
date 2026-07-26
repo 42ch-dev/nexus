@@ -13,7 +13,7 @@ export interface WorldKbSourceAnchorProjection {
    */
   source_anchor_id: string;
   /**
-   * KeyBlock the anchor attaches to.
+   * KnowledgeEntry the anchor attaches to.
    */
   key_block_id: string;
   /**

@@ -7,7 +7,7 @@
 //!
 //! Verifies the full chain that T-A P2 wires:
 //! 1. The daemon cron evaluator fires the per-Work `review` role at a matching
-//!    minute and enqueues a `novel-review-master` schedule (preset_id is the
+//!    minute and enqueues a `novel-review-master` schedule (`preset_id` is the
 //!    T-B P1 hook trigger).
 //! 2. The cron-enqueued schedule carries the `cron:review:` provenance label
 //!    (Option A: one uniform `enqueue_cron_schedule` path for all three roles).
@@ -22,7 +22,7 @@
 //! previously only fired for the V1.39 stale-findings / manual `creator run`
 //! paths, now also fires for cron-launched review schedules.
 //!
-//! Run with: cargo test -p nexus-orchestration --test review_cron_e2e
+//! Run with: cargo test -p nexus-orchestration --test `review_cron_e2e`
 
 #![allow(clippy::unwrap_used)]
 

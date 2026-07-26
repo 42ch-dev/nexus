@@ -18,7 +18,7 @@
 //!   the same `(work_id, canonical_name_guess)`; re-running review extraction
 //!   does not duplicate pending rows (acceptance §6).
 //!
-//! Run with: cargo test -p nexus-local-db --test kb_extract_jobs_migration
+//! Run with: cargo test -p nexus-local-db --test `kb_extract_jobs_migration`
 
 use sqlx::Row;
 
@@ -278,7 +278,7 @@ async fn pending_index_supports_filtered_list() {
 /// `idx_kb_extract_jobs_promotion_status_work` index (which covered the wrong
 /// column and was functionally unused for this path).
 ///
-/// Uses `EXPLAIN QUERY PLAN` (hermetic, deterministic on SQLite's planner).
+/// Uses `EXPLAIN QUERY PLAN` (hermetic, deterministic on `SQLite`'s planner).
 #[tokio::test]
 async fn pending_list_uses_world_id_covering_index() {
     let (pool, _dir) = fresh_pool().await;

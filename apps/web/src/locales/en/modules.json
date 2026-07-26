@@ -29,12 +29,12 @@
     "maxFuel": "Max fuel",
     "maxMemory": "Max memory (MiB)",
     "maxWallTime": "Max wall time (ms)",
-    "requiredKeyBlockTypes": "Required KeyBlock types",
+    "requiredKeyBlockTypes": "Required knowledge entry types",
     "hostFunctions": "Host functions",
     "battleReportKind": "Battle report kind",
     "schemas": "Schemas",
-    "keyBlockAttributes": "KeyBlock attributes",
-    "keyBlockState": "KeyBlock state",
+    "keyBlockAttributes": "Knowledge entry attributes",
+    "keyBlockState": "Knowledge entry state",
     "invocation": "Invocation",
     "battleReport": "Battle report"
   }

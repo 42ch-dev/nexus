@@ -11,7 +11,7 @@
 //! - Exhaustion: all retry attempts fail (version keeps changing),
 //!   returns the `VersionMismatch` error unmodified.
 //!
-//! Run with: cargo test -p nexus-daemon-runtime --test cron_cas_retry
+//! Run with: cargo test -p nexus-daemon-runtime --test `cron_cas_retry`
 
 #![allow(clippy::unwrap_used)]
 

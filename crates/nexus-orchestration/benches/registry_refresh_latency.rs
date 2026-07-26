@@ -22,7 +22,7 @@
 //! | Path                             | Target  | Notes                                              |
 //! |----------------------------------|---------|----------------------------------------------------|
 //! | `synthetic_warm_run`             | < 1 ms  | Steady-state `run()`; snapshot + metrics + tracing |
-//! | `synthetic_cold_construct_and_run` | < 5 ms | Adds capability allocation + LazyLock init         |
+//! | `synthetic_cold_construct_and_run` | < 5 ms | Adds capability allocation + `LazyLock` init         |
 //! | `fallback_warm_run`              | < 5 ms  | Adds `CdnError` construction + blocked-IP guard    |
 //!
 //! The actual CDN/network happy path is intentionally NOT benchmarked here

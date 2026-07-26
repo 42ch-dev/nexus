@@ -6,7 +6,7 @@
 
 - Creator → `nexus-creator`
 - User / Pairing → `nexus-cloud-domain`
-- Narrative / KB on wire → `nexus-narrative`, `nexus-kb`, etc.
+- Narrative / KB on wire → `nexus-narrative`, `nexus-knowledge`, etc.
 
 **Layout:** [schemas-directory-layout.md](../../.mstar/specs/schemas-directory-layout.md) §3.3.
 
@@ -27,11 +27,8 @@ Narrative universe with time_policy (manual/owner_driven/event_driven), visibili
 ### WorldMembership (`world-membership.schema.json`)
 Creator-World bridge with role, permissions, and membership status. §5.4
 
-### KeyBlock (`key-block.schema.json`)
-Structured knowledge unit with block_type (character/ability/scene/etc.), status, and source anchor. §5.5
-
 ### TimelineEvent (`timeline-event.schema.json`)
-Canonical timeline event with causality, sequence, and affected KeyBlocks. §5.6
+Canonical timeline event with causality, sequence, and affected knowledge entries. §5.6
 
 ### MemoryItem (`memory.schema.json`)
 Structured memory item (canon/working/experience) with embedding and source refs. §5.8
@@ -52,7 +49,7 @@ Outbox queue rows are **not** in `schemas/`; type `OutboxEntry` lives in `crates
 ## Common Types
 
 All domain schemas import reusable types from `schemas/common/common.schema.json`:
-- Identifiers (WorldId, CreatorId, UserId, KeyBlockId, TimelineEventId, BundleId, CommandId, WorkspaceId)
+- Identifiers (WorldId, CreatorId, UserId, TimelineEventId, BundleId, CommandId, WorkspaceId)
 - Enums (ManuscriptPhase, TimePolicy, Visibility, BlockType, MemoryType, BundleType) — all aligned with data-model-v1.md §7
 - Timestamps (ISO 8601 / RFC 3339 UTC)
 

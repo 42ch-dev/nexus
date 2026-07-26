@@ -14,7 +14,7 @@
     },
     "entity_id": {
       "type": "string",
-      "description": "Identifier of the key_block or candidate involved in the conflict."
+      "description": "Identifier of the knowledge entry or candidate involved in the conflict."
     },
     "conflicting_path": {
       "type": "string",

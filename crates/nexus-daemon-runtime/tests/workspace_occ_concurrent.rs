@@ -72,14 +72,14 @@ async fn concurrent_consume_single_winner() {
     let r2 = h2.await.unwrap();
 
     // Exactly one must succeed, the other must get AlreadyCommitted.
-    let wins = matches!(r1, Ok(_)) as u32 + matches!(r2, Ok(_)) as u32;
+    let wins = u32::from(r1.is_ok()) + u32::from(r2.is_ok());
     assert_eq!(
         wins, 1,
         "exactly one consumer must win; got r1={r1:?} r2={r2:?}"
     );
 
-    let conflicts = matches!(r1, Err(SessionError::AlreadyCommitted(_))) as u32
-        + matches!(r2, Err(SessionError::AlreadyCommitted(_))) as u32;
+    let conflicts = u32::from(matches!(r1, Err(SessionError::AlreadyCommitted(_))))
+        + u32::from(matches!(r2, Err(SessionError::AlreadyCommitted(_))));
     assert_eq!(
         conflicts, 1,
         "exactly one consumer must get AlreadyCommitted"
@@ -126,7 +126,7 @@ async fn concurrent_commit_session_single_winner() {
     let r1 = h1.await.unwrap();
     let r2 = h2.await.unwrap();
 
-    let wins = matches!(r1, Ok(_)) as u32 + matches!(r2, Ok(_)) as u32;
+    let wins = u32::from(r1.is_ok()) + u32::from(r2.is_ok());
     assert_eq!(
         wins, 1,
         "commit_session: exactly one writer must win; got r1={r1:?} r2={r2:?}"
@@ -134,8 +134,8 @@ async fn concurrent_commit_session_single_winner() {
 
     // The loser must surface a stable OCC error (AlreadyCommitted or Expired —
     // both are Conflict-class). AlreadyCommitted is the expected race outcome.
-    let occ_conflicts = matches!(r1, Err(SessionError::AlreadyCommitted(_))) as u32
-        + matches!(r2, Err(SessionError::AlreadyCommitted(_))) as u32;
+    let occ_conflicts = u32::from(matches!(r1, Err(SessionError::AlreadyCommitted(_))))
+        + u32::from(matches!(r2, Err(SessionError::AlreadyCommitted(_))));
     assert_eq!(
         occ_conflicts, 1,
         "commit_session: loser must get AlreadyCommitted"
@@ -143,7 +143,7 @@ async fn concurrent_commit_session_single_winner() {
 
     let after = occ_conflict_total();
     assert!(
-        after >= before + 1,
+        after > before,
         "OCC conflict counter must increment; before={before} after={after}"
     );
 }

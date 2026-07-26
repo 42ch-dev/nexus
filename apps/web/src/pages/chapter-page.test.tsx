@@ -523,7 +523,7 @@ describe('ChapterPage (V1.79 reading surface)', () => {
     // KB density count renders the entity count; open-findings renders the
     // non-terminal finding count. Both resolve async (counts load after the
     // container) so use async queries. Interpretable without tooltips.
-    expect(await screen.findByLabelText('5 key blocks')).toBeInTheDocument();
+    expect(await screen.findByLabelText('5 knowledge entries')).toBeInTheDocument();
     expect(await screen.findByLabelText('2 open findings')).toBeInTheDocument();
   });
 

@@ -7,11 +7,11 @@ members = [
     "crates/nexus-creator-memory",
     "crates/nexus-daemon-runtime",
     "crates/nexus-home-layout",
-    "crates/nexus-kb",
     "crates/nexus-knowledge",
     "crates/nexus-moment-context-assembly",
     "crates/nexus-narrative",
     "crates/nexus-orchestration",
+    "crates/nexus-spoke-adapter",
     "crates/nexus-wasm-host",
     "apps/nexus42",
     "crates/nexus-cloud-sync",
@@ -105,6 +105,13 @@ chrono-tz = "0.10"
 # cross-repo consistency. Referenced as `regress.workspace = true` by
 # `crates/nexus-contracts` (generated code only).
 regress = "0.10"
+# V1.139 T1: SPOKE foundation deps. Lockstep exact pin at 0.2.0 across both
+# Rust crates and both npm packages (compass Q14). The `=` prefix forces an
+# exact resolution (no caret/tilde range). Published on crates.io at 0.2.0.
+# Consumers (the upcoming spoke-adapter crate + nexus-contracts generated
+# types) will reference these via `spoke-schemas.workspace = true`.
+spoke-schemas = "=0.2.0"
+spoke-operations = "=0.2.0"
 
 # --- Dev profile: keep local `target/` smaller ---
 # Default `debug = true` (full) inflates deps/rlibs and test binaries. Line-limited

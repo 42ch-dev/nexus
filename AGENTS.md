@@ -60,11 +60,11 @@ See linked AGENTS.md files for per-directory decision rules and invariants:
 | `crates/nexus-home-layout/` | `~/.nexus42/` path layout | [`crates/nexus-home-layout/AGENTS.md`](crates/nexus-home-layout/AGENTS.md) |
 | `crates/nexus-local-db/` | Local database layer | [`crates/nexus-local-db/AGENTS.md`](crates/nexus-local-db/AGENTS.md) |
 | `crates/nexus-orchestration/` | Orchestration engine | [`crates/nexus-orchestration/AGENTS.md`](crates/nexus-orchestration/AGENTS.md) |
+| `crates/nexus-spoke-adapter/` | SPOKE boundary — extensions.nexus accessors + spoke-operations delegation | [`crates/nexus-spoke-adapter/AGENTS.md`](crates/nexus-spoke-adapter/AGENTS.md) |
 | `crates/nexus-cloud-sync/` | Cloud sync transport | [`crates/nexus-cloud-sync/AGENTS.md`](crates/nexus-cloud-sync/AGENTS.md) |
 | `crates/nexus-creator/` | Creator aggregate + local identity | [`crates/nexus-creator/AGENTS.md`](crates/nexus-creator/AGENTS.md) |
 | `crates/nexus-creator-memory/` | Memory pipeline, SOUL I/O | [`crates/nexus-creator-memory/AGENTS.md`](crates/nexus-creator-memory/AGENTS.md) |
-| `crates/nexus-kb/` | Key blocks + source anchors | [`crates/nexus-kb/AGENTS.md`](crates/nexus-kb/AGENTS.md) |
-| `crates/nexus-knowledge/` | Reference sources | [`crates/nexus-knowledge/AGENTS.md`](crates/nexus-knowledge/AGENTS.md) |
+| `crates/nexus-knowledge/` | Knowledge entries (World KB + User) + reference sources | [`crates/nexus-knowledge/AGENTS.md`](crates/nexus-knowledge/AGENTS.md) |
 | `crates/nexus-narrative/` | Worlds, forks, timelines, manuscripts | [`crates/nexus-narrative/AGENTS.md`](crates/nexus-narrative/AGENTS.md) |
 | `crates/nexus-cloud-domain/` | User + pairing (cloud sync domain) | [`crates/nexus-cloud-domain/AGENTS.md`](crates/nexus-cloud-domain/AGENTS.md) |
 | `crates/nexus-moment-context-assembly/` | Per-moment context assembly | [`crates/nexus-moment-context-assembly/AGENTS.md`](crates/nexus-moment-context-assembly/AGENTS.md) |

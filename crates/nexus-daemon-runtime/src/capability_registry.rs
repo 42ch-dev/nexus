@@ -514,7 +514,7 @@ pub fn build_registry() -> CapabilityRegistry {
         handler: hte::registry_kb_snapshot_read,
         acp_wire: AcpWire {
             request_schema_ref: r#"{"world_id":"string"}"#,
-            response_schema_ref: "[KeyBlock]",
+            response_schema_ref: "[WorldKbEntry]",
             error_schema_ref: r#"{"code":"forbidden|invalid_input|not_supported"}"#,
         },
         failure_mode: FailureMode::InvalidInput,
@@ -569,7 +569,7 @@ pub fn build_registry() -> CapabilityRegistry {
         admission: ADMISSION_WRITE_WORLD,
         handler: hte::registry_kb_snapshot_write,
         acp_wire: AcpWire {
-            request_schema_ref: r#"{"world_id":"string","blocks":"[KeyBlock]"}"#,
+            request_schema_ref: r#"{"world_id":"string","blocks":"[WorldKbEntry]"}"#,
             response_schema_ref: r#"{"written":"int","world_id":"string"}"#,
             error_schema_ref: r#"{"code":"forbidden|invalid_input|not_found|not_supported"}"#,
         },
@@ -1126,7 +1126,7 @@ mod tests {
     /// `host_tool_registry()` iff Status=`shipped` AND Registry row
     /// ref=`host_tool`. Orchestration-scope shipped ids (e.g.
     /// `nexus.reference.refresh`, the 5 DF-46 capabilities) are correctly
-    /// excluded from the host_tool direction — no manual list to maintain.
+    /// excluded from the `host_tool` direction — no manual list to maintain.
     #[test]
     fn catalog_registry_invariant_all_ids_present() {
         use std::collections::HashSet;
@@ -1177,7 +1177,7 @@ mod tests {
                 continue;
             }
             let cols: Vec<&str> = trimmed.split('|').map(str::trim).collect();
-            if !cols.iter().any(|c| *c == "Capability ID") {
+            if !cols.contains(&"Capability ID") {
                 continue;
             }
             let mut idx = ColumnIndex::default();

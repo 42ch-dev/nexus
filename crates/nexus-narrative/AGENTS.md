@@ -9,9 +9,9 @@ manuscript state, and consistency checking.
   hand-write duplicate World, Timeline, Story, or Manuscript DTOs.
 - World history is **immutable** — changes go through Fork, not in-place
   mutation.
-- Depends on `nexus-kb` for key blocks and source anchors.
+- Depends on `nexus-knowledge` for knowledge entries and source anchors.
 
 ## Dependencies
 
 - `nexus-contracts` (generated types)
-- `nexus-kb` (key blocks, source anchors)
+- `nexus-knowledge` (knowledge entries, source anchors)

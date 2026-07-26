@@ -1,4 +1,4 @@
-//! Criterion benchmark: CapabilityRegistry dispatch latency (V1.54 P0 T6).
+//! Criterion benchmark: `CapabilityRegistry` dispatch latency (V1.54 P0 T6).
 //!
 //! Measures:
 //! - `registry_lookup_cold` — fresh registry construction + 19 lookups
@@ -50,7 +50,7 @@ fn bench_registry_lookup_cold(c: &mut Criterion) {
             ] {
                 let _row = black_box(reg.lookup(tool_id));
             }
-        })
+        });
     });
 }
 
@@ -84,7 +84,7 @@ fn bench_registry_lookup_warm(c: &mut Criterion) {
             ] {
                 let _row = black_box(reg.lookup(tool_id));
             }
-        })
+        });
     });
 }
 
@@ -93,7 +93,7 @@ fn bench_registry_len(c: &mut Criterion) {
         b.iter(|| {
             let reg = host_tool_registry();
             black_box(reg.len())
-        })
+        });
     });
 }
 

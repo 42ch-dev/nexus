@@ -148,7 +148,7 @@ Because the extraction is additive-frontend-only, verify `wire_contracts_changed
 |---------|-----------------|
 | Additive enum | `"timeline"` added to `CanvasSurfaceKind` |
 | Single graph source | `WorldKbGraphResponse` (V1.73) |
-| Projection mapping | `block_type=event` → `TimelineEventNode` (layoutHint='event'); other entities → `TimelineKeyBlockNode` (layoutHint='context') |
+| Projection mapping | `block_type=event` → `TimelineEventNode` (layoutHint='event'); other entities → `TimelineKnowledgeEntryNode` (layoutHint='context') |
 | Write-boundary reuse | `kb.patch_entity` only (V1.73 shipped) |
 | Conflict reuse | `WorldKbConflictError` (409) + `WorldKbValidationError` (422) |
 | Temporal honesty | `body.attributes.occurred_at` only; no fabricated chronology |

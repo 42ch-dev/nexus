@@ -1,7 +1,7 @@
 //! World KB key-block author surface — `creator world kb list/show/edit/delete`.
 //!
 //! V1.50 T-B P0. This is the canonical author CLI for inspecting and editing
-//! World-scoped `KeyBlock` rows (per entity-scope-model.md §5.5), distinct from
+//! World-scoped `WorldKbEntry` rows (per entity-scope-model.md §5.5), distinct from
 //! the legacy ingest path `creator kb --scope world`.
 //!
 //! V1.50 T-B P1 adds the review-time promotion surface:
@@ -11,7 +11,7 @@
 //!
 //! # Author identity
 //!
-//! `KeyBlock`s are World-scoped (entity-scope-model §1.2/§5.1). The only
+//! `WorldKbEntry`s are World-scoped (entity-scope-model §1.2/§5.1). The only
 //! ownership field available on a World KB row is `narrative_worlds.owner_creator_id`
 //! (there is no direct `works.creator_id` linkage on `kb_key_blocks`). Therefore
 //! `edit`/`delete` gate on the **world owner** matching the active creator;
@@ -20,7 +20,7 @@
 //! # Validation
 //!
 //! `edit` constructs a `SqliteKbStore` with `ValidationMode::Novel` so that
-//! `update_key_block` re-runs the V1.40 P1 novel-profile validation
+//! `update_knowledge_entry` re-runs the V1.40 P1 novel-profile validation
 //! (`body.attributes.novel_category` requirements, per entity-scope-model §5.1.1).
 //!
 //! Read paths (`list`/`show`) are local-first and do not perform an owner gate.
@@ -28,10 +28,10 @@
 use crate::config::CliConfig;
 use crate::errors::{CliError, Result};
 use clap::Subcommand;
-use nexus_kb::key_block::{KeyBlock, KeyBlockBody};
-use nexus_kb::store::KbStoreError;
-use nexus_kb::validation::ValidationMode;
-use nexus_kb::KbStore;
+use nexus_knowledge::world_kb::knowledge_entry::{WorldKbBody, WorldKbEntry};
+use nexus_knowledge::world_kb::store::KbStoreError;
+use nexus_knowledge::world_kb::validation::ValidationMode;
+use nexus_knowledge::world_kb::KbStore;
 use nexus_local_db::kb_extract_job::{
     get_promotion, list_pending_for_world, mark_auto_promoted_in_tx_with_cas,
     mark_confirmed_in_tx_with_cas, mark_rejected, KbExtractPromotion,
@@ -45,7 +45,7 @@ pub const WORLD_KB_FORBIDDEN_CODE: &str = "WORLD_KB_FORBIDDEN";
 /// `creator world kb` subcommands.
 #[derive(Debug, Subcommand)]
 pub enum WorldKbCommand {
-    /// List all `KeyBlocks` in a world (id / `canonical_name` / `block_type` / status)
+    /// List all `KnowledgeEntries` in a world (id / `canonical_name` / `block_type` / status)
     List {
         /// World reference — the world ID (e.g. `wld_abc123`)
         world_ref: String,
@@ -54,22 +54,22 @@ pub enum WorldKbCommand {
         json: bool,
     },
 
-    /// Show full body + provenance + status for a single `KeyBlock`
+    /// Show full body + provenance + status for a single `WorldKbEntry`
     Show {
         /// World reference — the world ID (e.g. `wld_abc123`)
         world_ref: String,
-        /// `KeyBlock` ID (e.g. `kb_...`)
+        /// `WorldKbEntry` ID (e.g. `kb_...`)
         block_id: String,
         /// Emit machine-readable JSON
         #[arg(long)]
         json: bool,
     },
 
-    /// Edit a `KeyBlock` body in place (re-runs `ValidationMode::Novel`)
+    /// Edit a `WorldKbEntry` body in place (re-runs `ValidationMode::Novel`)
     Edit {
         /// World reference — the world ID (e.g. `wld_abc123`)
         world_ref: String,
-        /// `KeyBlock` ID (e.g. `kb_...`)
+        /// `WorldKbEntry` ID (e.g. `kb_...`)
         block_id: String,
         /// New body as JSON (`{"summary":...,"attributes":...,"tags":...}`)
         #[arg(long)]
@@ -79,11 +79,11 @@ pub enum WorldKbCommand {
         json: bool,
     },
 
-    /// Delete a `KeyBlock` (soft-delete; prompts unless `--yes`)
+    /// Delete a `WorldKbEntry` (soft-delete; prompts unless `--yes`)
     Delete {
         /// World reference — the world ID (e.g. `wld_abc123`)
         world_ref: String,
-        /// `KeyBlock` ID (e.g. `kb_...`)
+        /// `WorldKbEntry` ID (e.g. `kb_...`)
         block_id: String,
         /// Skip the interactive confirmation prompt
         #[arg(long, short = 'y')]
@@ -108,7 +108,7 @@ pub enum WorldKbCommand {
         missing_only: bool,
     },
 
-    /// Confirm a review-time KB candidate → promote to a `confirmed` `KeyBlock`
+    /// Confirm a review-time KB candidate → promote to a `confirmed` `WorldKbEntry`
     ///
     /// Without `--auto`, requires an `extract_job_id`. With `--auto --world-ref`,
     /// promotes all high-confidence pending candidates in that world.
@@ -220,7 +220,7 @@ pub async fn run(cmd: WorldKbCommand, config: &CliConfig) -> Result<()> {
 // the `run` entrypoint above remains the only caller that resolves the pool
 // from `CliConfig`.
 
-/// `creator world kb list` — list all active `KeyBlocks` in a world.
+/// `creator world kb list` — list all active `KnowledgeEntries` in a world.
 ///
 /// # Errors
 ///
@@ -239,7 +239,7 @@ pub async fn kb_list(pool: &SqlitePool, world_id: &str, json: bool) -> Result<()
     }
 
     if blocks.is_empty() {
-        println!("No key blocks in world {world_id}.");
+        println!("No knowledge entries in world {world_id}.");
         return Ok(());
     }
 
@@ -248,7 +248,7 @@ pub async fn kb_list(pool: &SqlitePool, world_id: &str, json: bool) -> Result<()
     for block in &blocks {
         println!(
             "{:<20} {:<15} {:<30} {}",
-            block.key_block_id,
+            block.entry_id,
             format!("{:?}", block.block_type),
             block.canonical_name,
             block.status
@@ -266,7 +266,7 @@ pub async fn kb_list(pool: &SqlitePool, world_id: &str, json: bool) -> Result<()
 pub async fn kb_show(pool: &SqlitePool, world_id: &str, block_id: &str, json: bool) -> Result<()> {
     let store = SqliteKbStore::new(pool.clone());
     let block = store
-        .get_key_block(block_id)
+        .get_knowledge_entry(block_id)
         .await
         .map_err(|e| map_kb_store_error("show", block_id, world_id, e))?;
     require_block_in_world(&block, world_id, block_id)?;
@@ -276,7 +276,7 @@ pub async fn kb_show(pool: &SqlitePool, world_id: &str, block_id: &str, json: bo
         return Ok(());
     }
 
-    println!("Key Block: {}", block.key_block_id);
+    println!("Key Block: {}", block.entry_id);
     println!("  World:      {}", block.world_id);
     println!("  Name:       {}", block.canonical_name);
     println!("  Type:       {:?}", block.block_type);
@@ -318,11 +318,11 @@ pub async fn kb_edit(
     body_str: &str,
     json: bool,
 ) -> Result<()> {
-    // Novel-mode store so update_key_block re-runs V1.40 P1 validation (§5.1.1).
+    // Novel-mode store so update_knowledge_entry re-runs V1.40 P1 validation (§5.1.1).
     let store = SqliteKbStore::with_validation_mode(pool.clone(), ValidationMode::Novel);
 
     let mut block = store
-        .get_key_block(block_id)
+        .get_knowledge_entry(block_id)
         .await
         .map_err(|e| map_kb_store_error("load", block_id, world_id, e))?;
     require_block_in_world(&block, world_id, block_id)?;
@@ -333,10 +333,10 @@ pub async fn kb_edit(
     require_world_or_work_owner(pool, world_id, creator_id, block.source_work_id.as_deref())
         .await?;
 
-    let new_body: KeyBlockBody = serde_json::from_str(body_str).map_err(|e| {
+    let new_body: WorldKbBody = serde_json::from_str(body_str).map_err(|e| {
         CliError::Other(format!(
             "Invalid --body JSON: {e}. \
-             Expected a KeyBlockBody object: {{\"summary\":..., \"attributes\":..., \"tags\":...}}"
+             Expected a WorldKbBody object: {{\"summary\":..., \"attributes\":..., \"tags\":...}}"
         ))
     })?;
 
@@ -344,7 +344,7 @@ pub async fn kb_edit(
     block.updated_at = Some(chrono::Utc::now().to_rfc3339());
 
     store
-        .update_key_block(block.clone())
+        .update_knowledge_entry(block.clone())
         .await
         .map_err(|e| map_kb_store_error("update", block_id, world_id, e))?;
 
@@ -352,7 +352,7 @@ pub async fn kb_edit(
         let value = serde_json::to_value(&block)?;
         println!("{}", serde_json::to_string_pretty(&value)?);
     } else {
-        println!("✓ Key block updated: {}", block.key_block_id);
+        println!("✓ Key block updated: {}", block.entry_id);
         println!("  World:  {}", block.world_id);
         println!("  Name:   {}", block.canonical_name);
         println!("  Status: {}", block.status);
@@ -378,7 +378,7 @@ pub async fn kb_delete(
 
     // Pre-check existence + world binding for a clean error before prompting.
     let block = store
-        .get_key_block(block_id)
+        .get_knowledge_entry(block_id)
         .await
         .map_err(|e| map_kb_store_error("load", block_id, world_id, e))?;
     require_block_in_world(&block, world_id, block_id)?;
@@ -395,7 +395,7 @@ pub async fn kb_delete(
     }
 
     store
-        .delete_key_block(block_id)
+        .delete_knowledge_entry(block_id)
         .await
         .map_err(|e| map_kb_store_error("delete", block_id, world_id, e))?;
 
@@ -666,19 +666,19 @@ struct MissingKbEntry {
     candidate: MissingKbLogCandidate,
 }
 
-/// `creator world kb adopt` — confirm a candidate into a `confirmed` `KeyBlock`.
+/// `creator world kb adopt` — confirm a candidate into a `confirmed` `WorldKbEntry`.
 ///
 /// Steps (entity-scope-model.md §5.5.3 promotion gate):
 /// 1. Load the promotion row; require it is in `pending` state.
 /// 2. Author identity gate: the active creator must own the candidate's world.
-/// 3. Parse `proposed_payload` into a `KeyBlockBody`; parse `block_type_guess`
+/// 3. Parse `proposed_payload` into a `WorldKbBody`; parse `block_type_guess`
 ///    into a wire `BlockType`.
-/// 4. Build a `KeyBlock` with `status="confirmed"`.
-/// 5. **Atomic promotion (R-V150KBED-03)**: wrap `insert_key_block` +
+/// 4. Build a `WorldKbEntry` with `status="confirmed"`.
+/// 5. **Atomic promotion (R-V150KBED-03)**: wrap `insert_knowledge_entry` +
 ///    `mark_confirmed` in a single `SQLite` transaction. If the validation,
 ///    insert, or promotion flip fails (or the flip returns `Ok(false)` because
 ///    a concurrent writer raced us), the transaction rolls back and **no orphan
-///    `KeyBlock` is persisted**. The candidate row is left in its pre-adopt
+///    `WorldKbEntry` is persisted**. The candidate row is left in its pre-adopt
 ///    state.
 /// 6. Validation uses `SqliteKbStore::with_validation_mode(Novel)` so V1.40 P1
 ///    validation re-runs (entity-scope-model §5.5.5).
@@ -747,7 +747,7 @@ pub async fn kb_adopt(
         };
 
     // Parse proposed body.
-    let body: KeyBlockBody =
+    let body: WorldKbBody =
         serde_json::from_str(candidate.proposed_payload.as_deref().unwrap_or("{}"))
             .map_err(|e| CliError::Other(format!("Invalid proposed_payload JSON: {e}")))?;
 
@@ -764,13 +764,13 @@ pub async fn kb_adopt(
     // Novel-mode store so insert re-runs V1.40 P1 validation (§5.1.1).
     let store = SqliteKbStore::with_validation_mode(pool.clone(), ValidationMode::Novel);
 
-    let mut kb = KeyBlock::new(world_id, block_type, &canonical_name);
+    let mut kb = WorldKbEntry::new(world_id, block_type, &canonical_name);
     kb.body = Some(body);
-    // §5.5.1: adopt transitions to `confirmed` (terminal KeyBlock status).
+    // §5.5.1: adopt transitions to `confirmed` (terminal WorldKbEntry status).
     kb.status = "confirmed".to_string();
     kb.created_at = chrono::Utc::now().to_rfc3339();
 
-    // V1.52 T-A P2: Work→KeyBlock provenance linkage (entity-scope-model.md §5.5.7).
+    // V1.52 T-A P2: Work→WorldKbEntry provenance linkage (entity-scope-model.md §5.5.7).
     // Populate source_work_id and source_chapter from the extract job context.
     // provenance_kind is inferred: LLM extraction → review_time_extract,
     // heuristic/no LLM → manual.
@@ -786,10 +786,10 @@ pub async fn kb_adopt(
         Some("manual".to_string())
     };
 
-    // R-V150KBED-03: atomic promotion. The KeyBlock insert and the promotion
+    // R-V150KBED-03: atomic promotion. The WorldKbEntry insert and the promotion
     // row flip share a single transaction; any failure (validation, insert,
     // flip error, or `Ok(false)` race) rolls the whole thing back so no orphan
-    // KeyBlock is persisted.
+    // WorldKbEntry is persisted.
     let mut tx = pool
         .begin()
         .await
@@ -822,7 +822,7 @@ pub async fn kb_adopt(
 
     if !flipped {
         // Race: the row was confirmed/rejected between `load_pending_candidate`
-        // and this flip. Explicit rollback so the orphan KeyBlock insert is
+        // and this flip. Explicit rollback so the orphan WorldKbEntry insert is
         // undone before we surface the error. Best-effort: a rollback failure
         // is logged but the row was never committed so no orphan persists.
         if let Err(e) = tx.rollback().await {
@@ -852,7 +852,7 @@ pub async fn kb_adopt(
             "{}",
             serde_json::to_string_pretty(&serde_json::json!({
                 "extract_job_id": extract_job_id,
-                "key_block_id": insert_result.key_block_id,
+                "key_block_id": insert_result.entry_id,
                 "world_id": insert_result.world_id,
                 "status": "confirmed",
                 "llm_confidence": confidence,
@@ -861,7 +861,7 @@ pub async fn kb_adopt(
         );
     } else {
         println!("✓ KB candidate adopted: {extract_job_id}");
-        println!("  Key block:   {}", insert_result.key_block_id);
+        println!("  Key block:   {}", insert_result.entry_id);
         println!("  World:       {}", insert_result.world_id);
         println!("  Status:      confirmed");
         // Confidence is shown as 2-decimal or '-' for heuristic rows; source
@@ -898,7 +898,7 @@ pub async fn kb_adopt(
 /// - adopt-time `ValidationMode::Novel` passes (`validation_clean`)
 /// - no duplicate `canonical_name` in the world
 ///
-/// Each promoted candidate is inserted as a confirmed `KeyBlock` in a dedicated
+/// Each promoted candidate is inserted as a confirmed `WorldKbEntry` in a dedicated
 /// transaction, the promotion row is flipped with `auto_promoted_*` audit
 /// columns, and an audit log is written under
 /// `Works/<work_ref>/Logs/kb/auto-promoted/`. Candidates that do not qualify
@@ -909,7 +909,7 @@ pub async fn kb_adopt(
 /// This function iterates all pending `kb_extract_jobs` rows for a World with
 /// no upper bound on N. Each promoted candidate incurs:
 ///
-/// - A dedicated DB transaction (INSERT `KeyBlock` + CAS flip promotion row)
+/// - A dedicated DB transaction (INSERT `WorldKbEntry` + CAS flip promotion row)
 /// - A best-effort audit log write under `Works/<work_ref>/Logs/kb/auto-promoted/`
 /// - Full `ValidationMode::Novel` re-validation
 ///
@@ -1010,19 +1010,19 @@ pub async fn kb_adopt_auto(
             continue;
         }
 
-        // ── Build KeyBlock ─────────────────────────────────────────────────
-        let body: KeyBlockBody =
+        // ── Build WorldKbEntry ─────────────────────────────────────────────────
+        let body: WorldKbBody =
             serde_json::from_str(candidate.proposed_payload.as_deref().unwrap_or("{}"))
                 .map_err(|e| CliError::Other(format!("Invalid proposed_payload JSON: {e}")))?;
         let block_type_str = candidate.block_type_guess.as_deref().unwrap_or("character");
         let block_type = parse_block_type_cli(block_type_str)?;
 
-        let mut kb = KeyBlock::new(world_id, block_type, canonical_name);
+        let mut kb = WorldKbEntry::new(world_id, block_type, canonical_name);
         kb.body = Some(body);
         kb.status = "confirmed".to_string();
         kb.created_at = chrono::Utc::now().to_rfc3339();
 
-        // V1.52 T-A P2: Work→KeyBlock provenance linkage.
+        // V1.52 T-A P2: Work→WorldKbEntry provenance linkage.
         // Auto-adopt sets author_explicit provenance; source from extract job.
         kb.source_work_id = candidate.work_id.clone();
         kb.source_chapter = candidate.source_chapter_id;
@@ -1048,7 +1048,7 @@ pub async fn kb_adopt_auto(
                 tx.rollback().await.ok();
                 skipped.push(SkippedRecord {
                     extract_job_id: candidate.job_id.clone(),
-                    reason: format!("KeyBlock validation/insert failed: {e}"),
+                    reason: format!("WorldKbEntry validation/insert failed: {e}"),
                 });
                 continue;
             }
@@ -1095,7 +1095,7 @@ pub async fn kb_adopt_auto(
             workspace_dir,
             &candidate,
             canonical_name,
-            &insert_result.key_block_id,
+            &insert_result.entry_id,
             &reason,
             &actor,
         )
@@ -1110,7 +1110,7 @@ pub async fn kb_adopt_auto(
 
         promoted.push(PromotedRecord {
             extract_job_id: candidate.job_id.clone(),
-            key_block_id: insert_result.key_block_id,
+            key_block_id: insert_result.entry_id,
             canonical_name: canonical_name.clone(),
             confidence,
         });
@@ -1314,8 +1314,8 @@ pub async fn kb_reject(
 
 // ── Helpers ───────────────────────────────────────────────────────────
 
-/// Verify the referenced `KeyBlock` actually belongs to the requested world.
-fn require_block_in_world(block: &KeyBlock, world_id: &str, block_id: &str) -> Result<()> {
+/// Verify the referenced `WorldKbEntry` actually belongs to the requested world.
+fn require_block_in_world(block: &WorldKbEntry, world_id: &str, block_id: &str) -> Result<()> {
     if block.world_id != world_id {
         return Err(CliError::Other(format!(
             "Key block '{block_id}' does not belong to world '{world_id}' \
@@ -1326,7 +1326,7 @@ fn require_block_in_world(block: &KeyBlock, world_id: &str, block_id: &str) -> R
     Ok(())
 }
 
-/// Author identity gate with Work→KeyBlock provenance support (§5.5.7).
+/// Author identity gate with Work→WorldKbEntry provenance support (§5.5.7).
 ///
 /// When `source_work_id` is set (R-V150KBED-02 resolution), the authorisation
 /// gate accepts EITHER the World owner OR the source Work's creator — a KB row
@@ -1369,7 +1369,7 @@ async fn require_world_or_work_owner(
 /// Author identity gate. Reads `narrative_worlds.owner_creator_id` and requires
 /// it to match `creator_id`. Returns `403 WORLD_KB_FORBIDDEN` on mismatch.
 ///
-/// Per entity-scope-model §1.2/§5.1, `KeyBlock`s are World-scoped and the
+/// Per entity-scope-model §1.2/§5.1, `WorldKbEntry`s are World-scoped and the
 /// canonical ownership is the world's `owner_creator_id` (there is no direct
 /// `works.creator_id` linkage on `kb_key_blocks`).
 async fn require_world_owner(pool: &SqlitePool, world_id: &str, creator_id: &str) -> Result<()> {
@@ -1404,7 +1404,7 @@ async fn require_world_owner(pool: &SqlitePool, world_id: &str, creator_id: &str
 fn confirm_delete(block_id: &str, world_id: &str) -> bool {
     dialoguer::Confirm::new()
         .with_prompt(format!(
-            "Delete key block '{block_id}' in world '{world_id}'?"
+            "Delete knowledge entry '{block_id}' in world '{world_id}'?"
         ))
         .default(false)
         .interact()
@@ -1419,20 +1419,20 @@ fn confirm_delete(block_id: &str, world_id: &str) -> bool {
 fn map_kb_store_error(verb: &str, block_id: &str, world_id: &str, e: KbStoreError) -> CliError {
     match e {
         KbStoreError::NotFound(_) => CliError::Other(format!(
-            "Key block '{block_id}' not found in world '{world_id}'."
+            "Knowledge entry '{block_id}' not found in world '{world_id}'."
         )),
         KbStoreError::Validation(ve) => CliError::Other(format!("ValidationError: {ve}")),
         KbStoreError::ValidationLegacy(msg) => CliError::Other(format!("ValidationError: {msg}")),
         other => CliError::Other(format!(
-            "Failed to {verb} key block '{block_id}' in world '{world_id}': {other}"
+            "Failed to {verb} knowledge entry '{block_id}' in world '{world_id}': {other}"
         )),
     }
 }
 
 /// Build the JSON summary object for `--json` list output.
-fn block_summary_json(block: &KeyBlock) -> serde_json::Value {
+fn block_summary_json(block: &WorldKbEntry) -> serde_json::Value {
     serde_json::json!({
-        "key_block_id": block.key_block_id,
+        "key_block_id": block.entry_id,
         "canonical_name": block.canonical_name,
         "block_type": serde_json::to_value(block.block_type)
             .unwrap_or_else(|_| serde_json::json!(format!("{:?}", block.block_type))),

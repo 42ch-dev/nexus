@@ -2722,7 +2722,6 @@ dependencies = [
  "nexus-creator",
  "nexus-creator-memory",
  "nexus-home-layout",
- "nexus-kb",
  "nexus-knowledge",
  "nexus-local-db",
  "nexus-moment-context-assembly",
@@ -2764,30 +2763,19 @@ name = "nexus-home-layout"
 version = "0.1.0"
 
 [[package]]
-name = "nexus-kb"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "nexus-contracts",
- "serde",
- "serde_json",
- "thiserror 1.0.69",
- "tokio",
- "tracing",
- "uuid",
-]
-
-[[package]]
 name = "nexus-knowledge"
 version = "0.1.0"
 dependencies = [
  "async-trait",
  "chrono",
  "nexus-contracts",
+ "nexus-spoke-adapter",
  "serde",
  "serde_json",
+ "spoke-schemas",
  "thiserror 1.0.69",
  "tokio",
+ "tracing",
  "uuid",
 ]
 
@@ -2801,9 +2789,9 @@ dependencies = [
  "futures-util",
  "nexus-contracts",
  "nexus-home-layout",
- "nexus-kb",
  "nexus-knowledge",
  "nexus-narrative",
+ "nexus-spoke-adapter",
  "nix 0.28.0",
  "serde",
  "serde_json",
@@ -2824,7 +2812,6 @@ dependencies = [
  "nexus-cloud-sync",
  "nexus-contracts",
  "nexus-creator-memory",
- "nexus-kb",
  "nexus-knowledge",
  "nexus-narrative",
  "serde",
@@ -2838,7 +2825,7 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "nexus-contracts",
- "nexus-kb",
+ "nexus-knowledge",
  "serde",
  "serde_json",
  "strum 0.26.3",
@@ -2866,7 +2853,7 @@ dependencies = [
  "nexus-contracts",
  "nexus-creator-memory",
  "nexus-home-layout",
- "nexus-kb",
+ "nexus-knowledge",
  "nexus-local-db",
  "nexus-narrative",
  "nexus-wasm-host",
@@ -2886,6 +2873,16 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "uuid",
+]
+
+[[package]]
+name = "nexus-spoke-adapter"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "spoke-operations",
+ "spoke-schemas",
 ]
 
 [[package]]
@@ -2925,7 +2922,6 @@ dependencies = [
  "nexus-creator-memory",
  "nexus-daemon-runtime",
  "nexus-home-layout",
- "nexus-kb",
  "nexus-knowledge",
  "nexus-local-db",
  "nexus-moment-context-assembly",
@@ -4461,6 +4457,30 @@ checksum = "d91ed6c858b01f942cd56b37a94b3e0a1798290327d1236e4d9cf4eaca44d29d"
 dependencies = [
  "base64ct",
  "der",
+]
+
+[[package]]
+name = "spoke-operations"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bd28bdd7e382bdb4d1fba7b2a483776e5bd9cb8cb7638b08889fd6a3d38b2f43"
+dependencies = [
+ "chrono",
+ "serde",
+ "serde_json",
+ "spoke-schemas",
+]
+
+[[package]]
+name = "spoke-schemas"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3ca8a06372f91ac59e2cb58def1be06919539e8091b84f4966577a1c52306e40"
+dependencies = [
+ "chrono",
+ "regress",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

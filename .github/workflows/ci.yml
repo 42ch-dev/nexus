@@ -270,7 +270,7 @@ jobs:
               -p nexus-cloud-sync
           - group: orchestration-knowledge
             packages: >-
-              -p nexus-kb
+              -p nexus-knowledge
               -p nexus-knowledge
               -p nexus-narrative
               -p nexus-moment-context-assembly

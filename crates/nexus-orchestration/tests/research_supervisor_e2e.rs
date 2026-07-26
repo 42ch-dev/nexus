@@ -118,7 +118,7 @@ async fn seed_work(pool: &SqlitePool, work: &WorkRecord) {
 ///
 /// R-V146P3-QC3-S1: extracted from a positional-arg helper into a typed
 /// `ResearchScheduleFixture` so the `creator_schedules` column list +
-/// preset_version constant live in **one** place within this test file. The
+/// `preset_version` constant live in **one** place within this test file. The
 /// raw INSERT is intentional (we bypass `insert_pending` validation to
 /// control `work_id` + `status` precisely); the trade-off is documented
 /// here. Schema source of truth:

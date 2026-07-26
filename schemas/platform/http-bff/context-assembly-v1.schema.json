@@ -61,7 +61,7 @@
           "minimum": 1,
           "maximum": 500,
           "default": 100,
-          "description": "Max key blocks to return"
+          "description": "Max knowledge entries to return"
         },
         "memory_kinds": {
           "type": "array",
@@ -101,7 +101,7 @@
           "type": ["string", "null"],
           "format": "date-time",
           "default": null,
-          "description": "ISO-8601 instant for historical read-only context cut. When present, timeline events and key blocks are assembled as if the authoritative graph/state were evaluated at or before this timestamp. Optional per ADR-009. Vector retrieval on the as_of path is optional (fallback to non-vector paths per ADR-007)."
+          "description": "ISO-8601 instant for historical read-only context cut. When present, timeline events and knowledge entries are assembled as if the authoritative graph/state were evaluated at or before this timestamp. Optional per ADR-009. Vector retrieval on the as_of path is optional (fallback to non-vector paths per ADR-007)."
         }
       },
       "additionalProperties": false
@@ -150,7 +150,7 @@
             },
             "additionalProperties": false
           },
-          "description": "Confirmed KeyBlocks relevant to the world"
+          "description": "Confirmed KnowledgeEntries relevant to the world"
         },
         "timeline_events": {
           "type": "array",

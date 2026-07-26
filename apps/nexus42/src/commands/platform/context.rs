@@ -134,7 +134,7 @@ pub enum ContextCommand {
         #[arg(long)]
         hint: Option<String>,
 
-        /// Maximum number of KB key blocks to return
+        /// Maximum number of KB knowledge entries to return
         #[arg(long)]
         kb_limit: Option<usize>,
 
@@ -777,7 +777,7 @@ mod tests {
         .await;
 
         // Seed KB block (no need to call kb_seed::world — world already seeded above)
-        kb_seed::key_block(
+        kb_seed::knowledge_entry(
             &pool,
             "kb_hero",
             "wld_test",
@@ -891,7 +891,7 @@ mod tests {
     /// are present (world state, timeline, world KB, user knowledge).
     #[tokio::test]
     async fn assemble_moment_persistent_four_domains() {
-        use nexus_knowledge::{KnowledgeEntry, KnowledgeStore, KnowledgeTag};
+        use nexus_knowledge::{KnowledgeStore, KnowledgeTag, UserKnowledgeEntry};
 
         // Create fresh SQLite DB
         let dir = tempfile::tempdir().unwrap();
@@ -920,7 +920,7 @@ mod tests {
             0,
         )
         .await;
-        nexus_local_db::kb_store::seed::key_block(
+        nexus_local_db::kb_store::seed::knowledge_entry(
             &pool,
             "kb_demo_hero",
             "wld_demo",
@@ -932,7 +932,7 @@ mod tests {
 
         // Seed knowledge entry (persistent)
         let knowledge_store = nexus_local_db::SqliteKnowledgeStore::new(pool.clone());
-        let entry = KnowledgeEntry::new(
+        let entry = UserKnowledgeEntry::new(
             "user_default",
             vec![
                 KnowledgeTag::new("demo"),
@@ -1015,7 +1015,7 @@ mod tests {
     /// simulating a process restart. Verifies knowledge persists.
     #[tokio::test]
     async fn assemble_moment_restart_sees_same_knowledge() {
-        use nexus_knowledge::{KnowledgeEntry, KnowledgeStore, KnowledgeTag};
+        use nexus_knowledge::{KnowledgeStore, KnowledgeTag, UserKnowledgeEntry};
 
         let dir = tempfile::tempdir().unwrap();
         let db_path = dir.path().join("test.db");
@@ -1025,7 +1025,7 @@ mod tests {
 
         // Process 1: seed knowledge
         let store1 = nexus_local_db::SqliteKnowledgeStore::new(pool);
-        let entry = KnowledgeEntry::new(
+        let entry = UserKnowledgeEntry::new(
             "user_default",
             vec![KnowledgeTag::new("restart-test")],
             "Knowledge that survives restart.",

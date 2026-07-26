@@ -729,7 +729,7 @@ mod tests {
         assert_eq!(body["creator_id"], CREATOR_ID);
     }
 
-    /// Regression: PATCH display_name on `/v1/daemon/creators/:creator_id` (Setup Continue path).
+    /// Regression: PATCH `display_name` on `/v1/daemon/creators/:creator_id` (Setup Continue path).
     #[tokio::test]
     #[serial_test::serial]
     async fn tier1_patch_creator_by_id_hits_handler() {

@@ -180,6 +180,7 @@ fn find_command(path_dirs: &[PathBuf], command: &str) -> Option<PathBuf> {
 /// crate's `which_in` API (or manual fallback) against the provided
 /// directories, allowing deterministic tests.
 #[cfg(test)]
+#[must_use]
 pub fn scan_custom_path(
     custom_path_dirs: &[PathBuf],
     suppressed_ids: &[ProviderId],
@@ -303,7 +304,7 @@ mod tests {
     /// RAII guard that replaces `PATH` with a single directory on construction
     /// and restores the previous value on drop. Ensures the test genuinely
     /// depends on the stub binaries — without this, `find_command`'s
-    /// `which::which(command)` fallback (path_scan.rs:140) could discover a
+    /// `which::which(command)` fallback (`path_scan.rs:140`) could discover a
     /// real `codex`/`claude` binary on the host's PATH and the test would pass
     /// even if the stubs were absent (qc1 W-002).
     struct PathGuard {

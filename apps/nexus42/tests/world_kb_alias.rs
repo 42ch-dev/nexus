@@ -5,13 +5,13 @@
 //! These tests verify that the legacy World KB path forwards to the canonical
 //! `world::kb` functions and emits a deprecation warning. Two families:
 //!
-//! 1. **CLI surface** (assert_cmd) — `creator world kb adopt --help` documents
+//! 1. **CLI surface** (`assert_cmd`) — `creator world kb adopt --help` documents
 //!    the `--auto` flag; `creator kb list --help` documents `--scope world`.
 //! 2. **Hermetic forwarding** — drives the canonical `world::kb` logic functions
 //!    directly against a fresh temp DB to verify they still work correctly after
 //!    the alias wiring (output parity between legacy alias and canonical path).
 //!
-//! Run with: cargo test -p nexus42 --test world_kb_alias
+//! Run with: cargo test -p nexus42 --test `world_kb_alias`
 
 #![allow(clippy::unwrap_used)]
 
@@ -19,15 +19,15 @@ use assert_cmd::Command;
 use nexus42::commands::creator::world::kb::{kb_delete, kb_list, kb_show};
 use nexus42::db::Schema;
 use nexus_contracts::BlockType;
-use nexus_kb::key_block::{KeyBlock, KeyBlockBody};
-use nexus_kb::KbStore;
+use nexus_knowledge::world_kb::knowledge_entry::{WorldKbBody, WorldKbEntry};
+use nexus_knowledge::world_kb::KbStore;
 use nexus_local_db::kb_store::SqliteKbStore;
 
 const OWNER: &str = "ctr_alias_test";
 const WORLD: &str = "wld_alias_test";
 const CANON_NAME: &str = "char_test_alias";
 
-/// Build a fresh migrated pool + seed a world and a single `KeyBlock`.
+/// Build a fresh migrated pool + seed a world and a single `WorldKbEntry`.
 async fn fresh_pool_with_block() -> (sqlx::SqlitePool, String, tempfile::TempDir) {
     let dir = tempfile::tempdir().unwrap();
     let db_path = dir.path().join("state.db");
@@ -45,15 +45,15 @@ async fn fresh_pool_with_block() -> (sqlx::SqlitePool, String, tempfile::TempDir
     .await;
 
     let store = SqliteKbStore::new(pool.clone());
-    let mut kb = KeyBlock::new(WORLD, BlockType::Character, CANON_NAME);
-    kb.body = Some(KeyBlockBody {
+    let mut kb = WorldKbEntry::new(WORLD, BlockType::Character, CANON_NAME);
+    kb.body = Some(WorldKbBody {
         summary: Some("Alias test summary".to_string()),
         attributes: Some(serde_json::json!({"novel_category": "character"})),
         tags: Some(vec!["test".to_string()]),
         ..Default::default()
     });
-    let result = store.insert_key_block(kb).await.unwrap();
-    (pool, result.key_block_id, dir)
+    let result = store.insert_knowledge_entry(kb).await.unwrap();
+    (pool, result.entry_id, dir)
 }
 
 // =============================================================================
@@ -155,7 +155,7 @@ async fn canonical_kb_delete_soft_deletes_block() {
 
     // Verify the block is soft-deleted (status = "deleted")
     let store = SqliteKbStore::new(pool.clone());
-    let block = store.get_key_block(&key_block_id).await.unwrap();
+    let block = store.get_knowledge_entry(&key_block_id).await.unwrap();
     assert_eq!(block.status, "deleted", "block should be soft-deleted");
 }
 
@@ -228,24 +228,24 @@ active_workspace_slug_by_creator = { ctr_alias_test = "default" }
         )
         .await;
         let store = nexus_local_db::kb_store::SqliteKbStore::new(pool.clone());
-        let mut kb = nexus_kb::key_block::KeyBlock::new(
+        let mut kb = nexus_knowledge::world_kb::knowledge_entry::WorldKbEntry::new(
             "wld_alias_cmd",
             nexus_contracts::BlockType::Character,
             "char_alias_cmd",
         );
-        kb.body = Some(nexus_kb::key_block::KeyBlockBody {
+        kb.body = Some(nexus_knowledge::world_kb::knowledge_entry::WorldKbBody {
             summary: Some("Alias command test summary".to_string()),
             attributes: Some(serde_json::json!({"novel_category": "character"})),
             tags: Some(vec!["alias-test".to_string()]),
             ..Default::default()
         });
-        let _result = store.insert_key_block(kb).await.unwrap();
+        let _result = store.insert_knowledge_entry(kb).await.unwrap();
     });
 
     (dir, "wld_alias_cmd".to_string())
 }
 
-/// Build an assert_cmd Command with HOME set to the temp directory.
+/// Build an `assert_cmd` Command with HOME set to the temp directory.
 fn cmd_with_home(home: &std::path::Path) -> assert_cmd::Command {
     let mut cmd = assert_cmd::Command::cargo_bin("nexus42").unwrap();
     cmd.env("HOME", home);

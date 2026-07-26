@@ -5,11 +5,11 @@
  */
 
 /**
- * Flat wire projection of a World KB KeyBlock entity for canvas graph + inspector surfaces (V1.73). `version` maps to the SQLite per-row OCC column (kb_key_blocks.revision, NULL-normalized to 0).
+ * Flat wire projection of a World KB KnowledgeEntry entity for canvas graph + inspector surfaces (V1.73). `version` maps to the SQLite per-row OCC column (kb_key_blocks.revision, NULL-normalized to 0).
  */
 export interface WorldKbEntityProjection {
   /**
-   * KeyBlock identifier.
+   * KnowledgeEntry identifier.
    */
   key_block_id: string;
   /**
@@ -52,7 +52,7 @@ export interface WorldKbEntityProjection {
    */
   version: number;
   /**
-   * KeyBlock body JSON (summary/attributes/tags/state/computable) when present.
+   * KnowledgeEntry body JSON (summary/attributes/tags/state/computable) when present.
    */
   body?: {
     [k: string]: unknown | undefined;

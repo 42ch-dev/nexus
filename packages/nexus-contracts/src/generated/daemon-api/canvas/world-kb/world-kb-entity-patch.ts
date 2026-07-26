@@ -13,7 +13,7 @@ export interface WorldKbEntityPatch {
    */
   title?: string;
   /**
-   * Replacement KeyBlock body JSON (summary/attributes/tags/state/computable).
+   * Replacement KnowledgeEntry body JSON (summary/attributes/tags/state/computable).
    */
   body?: {
     [k: string]: unknown | undefined;

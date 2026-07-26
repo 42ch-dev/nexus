@@ -35,8 +35,8 @@ fn user_domain_register_and_lifecycle() {
     // Initial state
     assert_eq!(user.account_status, "active");
     assert_eq!(user.subscription_tier, "free");
-    assert_eq!(user.user_id.to_string(), "usr_42");
-    assert_eq!(user.username.to_string(), "alice");
+    assert_eq!(user.user_id.clone(), "usr_42");
+    assert_eq!(user.username.clone(), "alice");
 
     // Suspend
     user.suspend().expect("suspend should succeed");
@@ -89,7 +89,7 @@ fn pairing_domain_creation_and_lifecycle() {
 
     assert_eq!(pairing.pairing_id, "pair_1");
     assert_eq!(pairing.creator_id, "ctr_42");
-    assert_eq!(pairing.user_id.to_string(), "usr_42");
+    assert_eq!(pairing.user_id, "usr_42");
     assert_eq!(pairing.pairing_source, "auto_cli");
     assert_eq!(pairing.status, "active");
     assert!(pairing.revoked_at.is_none());

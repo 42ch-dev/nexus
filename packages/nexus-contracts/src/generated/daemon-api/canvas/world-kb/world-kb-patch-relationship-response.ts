@@ -48,11 +48,11 @@ export interface NexusWorldKbRelationshipProjection {
    */
   world_id: string;
   /**
-   * Source KeyBlock id.
+   * Source KnowledgeEntry id.
    */
   source_entity_id: string;
   /**
-   * Target KeyBlock id.
+   * Target KnowledgeEntry id.
    */
   target_entity_id: string;
   relation_type: NexusWorldKbRelationshipKind;

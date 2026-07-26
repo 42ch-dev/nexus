@@ -4,8 +4,8 @@
 //! This is a compile-proof, not a full integration test. It verifies:
 //! 1. rcgen generates an Ed25519 self-signed cert + key pair
 //! 2. rustls-pemfile can parse the PEM output
-//! 3. RustlsConfig::from_pem accepts raw PEM bytes
-//! 4. axum_server::bind_rustls type-checks against a RustlsConfig
+//! 3. `RustlsConfig::from_pem` accepts raw PEM bytes
+//! 4. `axum_server::bind_rustls` type-checks against a `RustlsConfig`
 //!
 //! A full handshake test (client-with-pinned-cert → bound server) is
 //! deferred to P0 T2 integration tests because it requires tokio runtime

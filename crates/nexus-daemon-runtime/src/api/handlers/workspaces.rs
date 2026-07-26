@@ -743,7 +743,7 @@ mod tests {
 
         let req = CreateWorkspaceRequest {
             creator_id: "test".to_string(),
-            workspace_slug: "".to_string(),
+            workspace_slug: String::new(),
             creative_root: None,
             display_name: None,
         };

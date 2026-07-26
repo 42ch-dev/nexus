@@ -4,7 +4,7 @@
 ///
 /// Simulates running the raw DDL on an already-migrated DB by:
 /// 1. Running migrations normally (creates the new schema).
-/// 2. Inserting some data into work_chapters.
+/// 2. Inserting some data into `work_chapters`.
 /// 3. Running the V1.42 migration DDL manually (simulating a re-run).
 /// 4. Asserting data is preserved and no error occurs.
 #[tokio::test]
@@ -113,7 +113,7 @@ async fn w01_v142_migration_idempotent() {
 /// The index `(work_id, status, volume, chapter)` is designed to serve the
 /// `next_chapter_volume_aware` query: `WHERE work_id = ? AND status IN (...)
 /// ORDER BY volume, chapter LIMIT 1`. This test verifies the index exists
-/// and that SQLite can use it (or an equivalent covering index) for the query.
+/// and that `SQLite` can use it (or an equivalent covering index) for the query.
 #[tokio::test]
 async fn w02_volume_aware_index_coverage() {
     let tmp = tempfile::NamedTempFile::new().unwrap();

@@ -360,7 +360,7 @@ mod tests {
         assert_eq!(fb, deserialized);
     }
 
-    /// Current aggregate does not forbid world_id == parent_world_id (self-loop); callers must
+    /// Current aggregate does not forbid `world_id` == `parent_world_id` (self-loop); callers must
     /// enforce lineage invariants if needed (DM-R3 — cycle / lineage edge case).
     #[test]
     fn fork_from_allows_child_world_equal_to_parent_world_id() {

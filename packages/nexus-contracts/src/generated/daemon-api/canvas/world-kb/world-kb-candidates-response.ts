@@ -12,11 +12,11 @@ export interface WorldKbCandidatesResponse {
   pagination: NexusPaginationInfo;
 }
 /**
- * Pending promotion candidate projection for the World KB promotion inspector (V1.73). Backed by kb_extract_jobs + the pending KeyBlock row.
+ * Pending promotion candidate projection for the World KB promotion inspector (V1.73). Backed by kb_extract_jobs + the pending KnowledgeEntry row.
  */
 export interface NexusWorldKbCandidateProjection {
   /**
-   * Pending KeyBlock id (key_block_id).
+   * Pending KnowledgeEntry id (key_block_id).
    */
   candidate_id: string;
   /**
@@ -28,7 +28,7 @@ export interface NexusWorldKbCandidateProjection {
    */
   world_id: string;
   /**
-   * KeyBlock content type (data-model-v1.md §5.5). V1.54 P1: added game-bible variants (species, faction, magic_system, technology, deity, level, economy_tier). V1.55 P3: added script variants (dialogue, beat, act). V1.123 P1: added era (cross-profile world-shape marker for Brief layer).
+   * KnowledgeEntry content type (data-model-v1.md §5.5). V1.54 P1: added game-bible variants (species, faction, magic_system, technology, deity, level, economy_tier). V1.55 P3: added script variants (dialogue, beat, act). V1.123 P1: added era (cross-profile world-shape marker for Brief layer).
    */
   block_type:
     | "character"

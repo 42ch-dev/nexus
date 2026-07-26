@@ -7,7 +7,7 @@
   "type": "object",
   "properties": {
     "title": { "type": "string", "minLength": 1, "maxLength": 200, "description": "New canonical_name (display title)." },
-    "body": { "type": "object", "description": "Replacement KeyBlock body JSON (summary/attributes/tags/state/computable)." },
+    "body": { "type": "object", "description": "Replacement KnowledgeEntry body JSON (summary/attributes/tags/state/computable)." },
     "aliases": { "type": "array", "items": { "type": "string" }, "description": "Replacement alias list." },
     "block_type": {
       "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/BlockType",

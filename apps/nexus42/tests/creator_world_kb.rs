@@ -6,7 +6,7 @@
 //! Drives `nexus42::commands::creator::world::kb::kb_pending` directly against a
 //! fresh temp DB + workspace directory.
 //!
-//! Run with: cargo test -p nexus42 --test creator_world_kb
+//! Run with: cargo test -p nexus42 --test `creator_world_kb`
 
 #![allow(clippy::unwrap_used)]
 
@@ -166,7 +166,7 @@ async fn adopt_auto_promote() {
         .await
         .unwrap();
 
-    // One high-confidence candidate becomes a confirmed KeyBlock.
+    // One high-confidence candidate becomes a confirmed WorldKbEntry.
     let kb_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM kb_key_blocks WHERE world_id = ?")
         .bind(WORLD)
         .fetch_one(&pool)

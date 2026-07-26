@@ -22,8 +22,8 @@ The carrier choices are architect-locked per iteration (`iterations/v1.123/specs
 
 | Layer | Carrier (V1.123 LOCK) | Rationale |
 |-------|----------------------|-----------|
-| Brief | Brief-on-KeyBlock via `BlockType = "era"` (additive wire enum) | Lowest wire-contract churn; reuses V1.73 `kb.patch_entity` + World KB conflict DTOs |
-| Narrative | `block_type=event` KeyBlocks (World) + V1.72 outline `timeline_events` (Work) | V1.122 baseline preserved; shared between World and Work |
+| Brief | Brief-on-KnowledgeEntry via `BlockType = "era"` (additive wire enum) | Lowest wire-contract churn; reuses V1.73 `kb.patch_entity` + World KB conflict DTOs |
+| Narrative | `block_type=event` KnowledgeEntries (World) + V1.72 outline `timeline_events` (Work) | V1.122 baseline preserved; shared between World and Work |
 | Moment | Moment-on-Outline (frontend-only projection; V1.108 `OutlineSceneNodeData`/`OutlineBeatNodeData`) | Zero wire-contract churn for Moment; V1.72 WorkOutline wire has no scene/beat data today (DF-V1123-MOMENT-WIRE deferred to V1.124+) |
 
 ## Guidance
@@ -62,7 +62,7 @@ When extending a Canvas surface with multi-layer projection:
 
 The three-layer projection pattern lets an author see the **same Timeline at three scales** (world shape / events / scenes) without inventing three separate Canvas surfaces. It also encodes the **domain-differentiated layer use** (World leads from Brief; Work leads from Moment) as a product thesis, not just a UX accident.
 
-The carrier choices (Brief-on-KeyBlock, Moment-on-Outline) prove that **additive wire-contract changes** can unlock rich multi-layer UX: only one wire enum value (`era` in `BlockType`) was added in V1.123; P2/P3/P4 added zero wire diff.
+The carrier choices (Brief-on-KnowledgeEntry, Moment-on-Outline) prove that **additive wire-contract changes** can unlock rich multi-layer UX: only one wire enum value (`era` in `BlockType`) was added in V1.123; P2/P3/P4 added zero wire diff.
 
 ## When to Apply
 

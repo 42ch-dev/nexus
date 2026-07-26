@@ -465,7 +465,7 @@ mod tests {
             "stripped PATH must not resolve the probe binary"
         );
 
-        let enriched = merge_path(env::var_os("PATH").as_deref(), vec![bin_dir.clone()]).unwrap();
+        let enriched = merge_path(env::var_os("PATH").as_deref(), vec![bin_dir]).unwrap();
         env::set_var("PATH", &enriched);
         let found = which::which("nexus-path-probe-agent");
         assert!(

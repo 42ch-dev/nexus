@@ -435,7 +435,7 @@ pub async fn list_relationships_for_world(
 ///   against non-deleted `KeyBlocks`. Returns `None` when no row matches.
 /// - `block_type = None`: resolve case-insensitively by
 ///   `(world_id, canonical_name)` and require **exactly one** non-deleted
-///   `KeyBlock` to match. Returns `None` when zero or more than one match
+///   `WorldKbEntry` to match. Returns `None` when zero or more than one match
 ///   (ambiguous → skip + log, per the architect lock).
 ///
 /// `canonical_name` is matched case-insensitively in both branches so the LLM

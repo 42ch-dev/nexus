@@ -710,7 +710,7 @@ mod tests {
     use crate::core::session::SessionState;
     use crate::HostFacade;
 
-    /// A minimal mock provider for testing the HostManager.
+    /// A minimal mock provider for testing the `HostManager`.
     struct MockProvider {
         provider_id: ProviderId,
     }
@@ -1102,7 +1102,7 @@ mod tests {
         assert!(result.unwrap_err().to_string().contains("not started"));
     }
 
-    /// Verify that shutdown calls ProviderAdapter::shutdown() for every active session.
+    /// Verify that shutdown calls `ProviderAdapter::shutdown()` for every active session.
     #[tokio::test]
     async fn shutdown_calls_provider_adapter_for_each_session() {
         let provider = Arc::new(TrackingMockProvider::new(ProviderId::new("mock")));
@@ -1232,7 +1232,7 @@ mod tests {
         assert_eq!(health.active_sessions, 0);
     }
 
-    /// Verify shutdown uses actual negotiated capabilities, not acp_full() fallback (QC2 F-004).
+    /// Verify shutdown uses actual negotiated capabilities, not `acp_full()` fallback (QC2 F-004).
     #[tokio::test]
     async fn shutdown_uses_negotiated_capabilities_not_acp_full() {
         // Use custom capabilities that differ from acp_full()
@@ -1297,7 +1297,7 @@ mod tests {
 
     // ── Admission policy enforcement tests ──────────────────────────────
 
-    /// Verify that a provider denied by admission policy returns PolicyDenied.
+    /// Verify that a provider denied by admission policy returns `PolicyDenied`.
     #[tokio::test]
     async fn create_session_denied_provider_returns_policy_denied() {
         // Build a strict admission policy with no known providers.
@@ -1385,7 +1385,7 @@ mod tests {
         );
     }
 
-    /// Verify that ops-per-session limit is enforced by admission policy in exec().
+    /// Verify that ops-per-session limit is enforced by admission policy in `exec()`.
     #[tokio::test]
     async fn exec_enforces_ops_per_session_limit() {
         // Build admission with max_ops_per_session = 0 (zero → any exec denied).
@@ -1489,7 +1489,7 @@ mod tests {
         assert!(result.is_ok(), "exec should succeed within ops limit");
     }
 
-    /// Verify that create_session rejects a cwd outside the workspace boundary (QC2 F-002).
+    /// Verify that `create_session` rejects a cwd outside the workspace boundary (QC2 F-002).
     #[tokio::test]
     async fn create_session_rejects_cwd_outside_workspace_boundary() {
         let temp_dir = tempfile::tempdir().expect("temp dir");
@@ -1602,7 +1602,7 @@ mod tests {
     }
 
     /// Verify that `create_session()` enforces the `session_ms` timeout (DF-21).
-    /// A provider with a slow launch should trigger an OperationTimeout error.
+    /// A provider with a slow launch should trigger an `OperationTimeout` error.
     #[tokio::test]
     async fn create_session_enforces_session_timeout() {
         let temp_dir = tempfile::tempdir().expect("temp dir");

@@ -127,7 +127,7 @@ async fn cron_list_across_workspace() {
     assert!(rendered.contains("0 3,9,15,21 * * *"));
 }
 
-/// AC #4: a fresh Work (NULL schedule_json) shows defaults on `show`.
+/// AC #4: a fresh Work (NULL `schedule_json`) shows defaults on `show`.
 #[tokio::test]
 async fn cron_show_on_unset_work_uses_defaults() {
     let pool = fresh_seeded_pool().await;
@@ -287,7 +287,7 @@ async fn fresh_seeded_pool() -> sqlx::SqlitePool {
     pool
 }
 
-/// Build a minimal WorkRecord mirroring `works.rs::sample_work_for_test`.
+/// Build a minimal `WorkRecord` mirroring `works.rs::sample_work_for_test`.
 fn sample_work_record(work_id: &str, work_ref: &str) -> nexus_local_db::works::WorkRecord {
     use nexus_local_db::works::WorkRecord;
     WorkRecord {

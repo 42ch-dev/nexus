@@ -1,7 +1,7 @@
 //! `creator knowledge` subcommand — User-scoped global knowledge entries.
 //!
 //! Manages unstructured knowledge entries scoped to the User (not Creator).
-//! For Work-scope file index or World narrative KB key blocks, use `creator kb`.
+//! For Work-scope file index or World narrative KB knowledge entries, use `creator kb`.
 //! See entity-scope-model §5.3–5.4 for the three KB namespaces.
 //!
 //! Product write path for User knowledge. Writes go through
@@ -13,7 +13,7 @@
 use crate::config::CliConfig;
 use crate::errors::Result;
 use clap::Subcommand;
-use nexus_knowledge::{KnowledgeEntry, KnowledgeQuery, KnowledgeStore, KnowledgeTag};
+use nexus_knowledge::{KnowledgeQuery, KnowledgeStore, KnowledgeTag, UserKnowledgeEntry};
 
 /// Default user ID for local CLI usage (until platform usr_* mapping).
 const DEFAULT_USER_ID: &str = "user_default";
@@ -21,7 +21,7 @@ const DEFAULT_USER_ID: &str = "user_default";
 /// Knowledge subcommands (User-scoped global knowledge; NOT Work-scope or World KB).
 ///
 /// For Work-scope file index, use `creator kb`.
-/// For World narrative key blocks, use `creator kb --scope world`.
+/// For World narrative knowledge entries, use `creator kb --scope world`.
 #[derive(Debug, Subcommand)]
 pub enum KnowledgeCommand {
     /// Add a new User-scoped knowledge entry
@@ -118,7 +118,7 @@ async fn run_add(
         .into_iter()
         .map(|s| KnowledgeTag::new(&s))
         .collect();
-    let entry = KnowledgeEntry::new(user_id, tag_list, content);
+    let entry = UserKnowledgeEntry::new(user_id, tag_list, content);
     let id = entry.id.clone();
 
     let stored = store.store(entry).await.map_err(|e| {

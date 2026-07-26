@@ -1963,7 +1963,7 @@ mod stage_tests {
 
     #[test]
     fn merge_node_valid_all_with_2_incoming() {
-        let yaml = r#"
+        let yaml = r"
 preset:
   id: merge-valid
   version: 1
@@ -1993,7 +1993,7 @@ states:
     next: done
   - id: done
     terminal: true
-"#;
+";
         let manifest: PresetManifest = serde_yaml::from_str(yaml).unwrap();
         let caps = CapabilityRegistry::with_builtins();
         let result = validate_preset_semantic(&manifest, &caps);
@@ -2008,7 +2008,7 @@ states:
 
     #[test]
     fn merge_node_too_few_incoming_errors() {
-        let yaml = r#"
+        let yaml = r"
 preset:
   id: merge-few
   version: 1
@@ -2032,7 +2032,7 @@ states:
     next: done
   - id: done
     terminal: true
-"#;
+";
         let manifest: PresetManifest = serde_yaml::from_str(yaml).unwrap();
         let caps = CapabilityRegistry::with_builtins();
         let result = validate_preset_semantic(&manifest, &caps);
@@ -2047,7 +2047,7 @@ states:
 
     #[test]
     fn quorum_n_exceeds_m_errors() {
-        let yaml = r#"
+        let yaml = r"
 preset:
   id: merge-bad-quorum
   version: 1
@@ -2077,7 +2077,7 @@ states:
     next: done
   - id: done
     terminal: true
-"#;
+";
         let manifest: PresetManifest = serde_yaml::from_str(yaml).unwrap();
         let caps = CapabilityRegistry::with_builtins();
         let result = validate_preset_semantic(&manifest, &caps);
@@ -2093,7 +2093,7 @@ states:
 
     #[test]
     fn quorum_n_zero_errors() {
-        let yaml = r#"
+        let yaml = r"
 preset:
   id: merge-zero-n
   version: 1
@@ -2121,7 +2121,7 @@ states:
     next: done
   - id: done
     terminal: true
-"#;
+";
         let manifest: PresetManifest = serde_yaml::from_str(yaml).unwrap();
         let caps = CapabilityRegistry::with_builtins();
         let result = validate_preset_semantic(&manifest, &caps);
@@ -2139,7 +2139,7 @@ states:
 
     #[test]
     fn cross_state_label_duplicate_errors() {
-        let yaml = r#"
+        let yaml = r"
 preset:
   id: cross-label-dup
   version: 1
@@ -2169,7 +2169,7 @@ states:
     next: done
   - id: done
     terminal: true
-"#;
+";
         let manifest: PresetManifest = serde_yaml::from_str(yaml).unwrap();
         let caps = CapabilityRegistry::with_builtins();
         let result = validate_preset_semantic(&manifest, &caps);
@@ -2186,7 +2186,7 @@ states:
 
     #[test]
     fn quorum_m_mismatch_errors() {
-        let yaml = r#"
+        let yaml = r"
 preset:
   id: merge-m-mismatch
   version: 1
@@ -2216,7 +2216,7 @@ states:
     next: done
   - id: done
     terminal: true
-"#;
+";
         let manifest: PresetManifest = serde_yaml::from_str(yaml).unwrap();
         let caps = CapabilityRegistry::with_builtins();
         let result = validate_preset_semantic(&manifest, &caps);

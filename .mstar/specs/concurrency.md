@@ -261,14 +261,14 @@ The `creator world kb adopt` path is the primary CAS consumer:
 
 ```
 1. Read promotion row → version = V
-2. Validate canonical_name + block_type → KeyBlock
+2. Validate canonical_name + block_type → KnowledgeEntry
 3. Call mark_confirmed_in_tx_with_cas(tx, job_id, V)
    - UPDATE ... SET promotion_status='confirmed', version=version+1
      WHERE job_id = ? AND promotion_status='pending' AND version = V
 4. rows_affected == 0 → check cause:
    - Row is confirmed/rejected → Ok(false) (already handled)
    - Version mismatch → Err(VersionMismatch) → E_VERSION exit 76
-5. On success → commit KeyBlock + flip atomically
+5. On success → commit KnowledgeEntry + flip atomically
 ```
 
 `upsert_pending_candidate` (V1.50 T-B P2) refreshes `proposed_payload` for an existing `pending` row. T-A P1 (cross-chapter rescan) and T-A P2 (missing-KB detection) **must** pass the version from their preimage read through this path to close the TOCTOU window.

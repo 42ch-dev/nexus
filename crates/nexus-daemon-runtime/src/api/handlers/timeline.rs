@@ -309,7 +309,7 @@ mod tests {
         let pool = state.pool().expect("pool");
         crate::test_utils::seed_test_creator_and_world(pool).await;
         for i in 0..25 {
-            let wld = format!("wld_{:03}", i);
+            let wld = format!("wld_{i:03}");
             seed_world(pool, &wld, &format!("World {i}")).await;
         }
 

@@ -8,14 +8,14 @@
 //! world owner can still edit/delete. Drives `kb_edit`/`kb_delete` directly
 //! against a fresh temp DB (no `$HOME`, no daemon).
 //!
-//! Run with: cargo test -p nexus42 --test world_kb_authz
+//! Run with: cargo test -p nexus42 --test `world_kb_authz`
 
 use nexus42::commands::creator::world::kb::{kb_delete, kb_edit, WORLD_KB_FORBIDDEN_CODE};
 use nexus42::db::Schema;
 use nexus42::errors::CliError;
 use nexus_contracts::BlockType;
-use nexus_kb::key_block::{KeyBlock, KeyBlockBody};
-use nexus_kb::KbStore;
+use nexus_knowledge::world_kb::knowledge_entry::{WorldKbBody, WorldKbEntry};
+use nexus_knowledge::world_kb::KbStore;
 use nexus_local_db::kb_store::SqliteKbStore;
 
 const OWNER: &str = "ctr_owner";
@@ -26,7 +26,7 @@ const CANON_NAME: &str = "char_hero";
 const VALID_BODY: &str =
     r#"{"summary":"updated","attributes":{"novel_category":"character"},"tags":["novel"]}"#;
 
-/// Fresh pool + world owned by [`OWNER`] + one novel-valid KeyBlock.
+/// Fresh pool + world owned by [`OWNER`] + one novel-valid `WorldKbEntry`.
 async fn fresh_pool_with_block() -> (sqlx::SqlitePool, String, tempfile::TempDir) {
     let dir = tempfile::tempdir().unwrap();
     let db_path = dir.path().join("state.db");
@@ -44,15 +44,15 @@ async fn fresh_pool_with_block() -> (sqlx::SqlitePool, String, tempfile::TempDir
     .await;
 
     let store = SqliteKbStore::new(pool.clone());
-    let mut kb = KeyBlock::new(WORLD, BlockType::Character, CANON_NAME);
-    kb.body = Some(KeyBlockBody {
+    let mut kb = WorldKbEntry::new(WORLD, BlockType::Character, CANON_NAME);
+    kb.body = Some(WorldKbBody {
         summary: Some("Original summary".to_string()),
         attributes: Some(serde_json::json!({"novel_category": "character"})),
         tags: Some(vec!["novel".to_string()]),
         ..Default::default()
     });
-    let result = store.insert_key_block(kb).await.unwrap();
-    (pool, result.key_block_id, dir)
+    let result = store.insert_knowledge_entry(kb).await.unwrap();
+    (pool, result.entry_id, dir)
 }
 
 /// Cross-author `kb_edit` returns `403 WORLD_KB_FORBIDDEN` and does not mutate the row.
@@ -81,7 +81,7 @@ async fn cross_author_edit_returns_403() {
 
     // Row must be unchanged.
     let block = SqliteKbStore::new(pool)
-        .get_key_block(&block_id)
+        .get_knowledge_entry(&block_id)
         .await
         .unwrap();
     assert_eq!(

@@ -7,8 +7,8 @@
   "type": "object",
   "required": ["source_entity_id", "target_entity_id", "relation_type", "symmetric"],
   "properties": {
-    "source_entity_id": { "type": "string", "description": "Source KeyBlock id. Must be a non-deleted entity in the same world." },
-    "target_entity_id": { "type": "string", "description": "Target KeyBlock id. Must be a non-deleted entity in the same world and different from source_entity_id." },
+    "source_entity_id": { "type": "string", "description": "Source KnowledgeEntry id. Must be a non-deleted entity in the same world." },
+    "target_entity_id": { "type": "string", "description": "Target KnowledgeEntry id. Must be a non-deleted entity in the same world and different from source_entity_id." },
     "relation_type": { "$ref": "world-kb-relationship-kind.schema.json", "description": "Core taxonomy value; `custom` requires `custom_label`." },
     "custom_label": { "type": "string", "minLength": 1, "description": "Required narrative label when relation_type is `custom`; ignored for core enum values." },
     "symmetric": { "type": "boolean", "description": "When true, the graph read emits a derived reverse projection sharing the same relationship_id." },

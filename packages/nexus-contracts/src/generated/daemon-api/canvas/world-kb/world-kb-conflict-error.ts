@@ -13,7 +13,7 @@ export interface WorldKbConflictError {
    */
   current_version: number;
   /**
-   * Identifier of the key_block or candidate involved in the conflict.
+   * Identifier of the knowledge entry or candidate involved in the conflict.
    */
   entity_id: string;
   /**

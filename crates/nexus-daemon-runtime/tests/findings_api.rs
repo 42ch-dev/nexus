@@ -2,8 +2,8 @@
 //!
 //! Covers:
 //! - (a) Creator isolation: cross-creator gets 404
-//! - (b) List filter by work_id
-//! - (c) Update + close transitions (resolved, wont_fix)
+//! - (b) List filter by `work_id`
+//! - (c) Update + close transitions (resolved, `wont_fix`)
 //! - (d) Supervisor-side auto-create on review stage completion (from-review endpoint)
 //! - (e) Routing hints for all executor types
 //!
@@ -30,7 +30,7 @@ use serde_json::json;
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
 
-/// Build a fresh WorkspaceState for handler-level testing.
+/// Build a fresh `WorkspaceState` for handler-level testing.
 async fn handler_state() -> (WorkspaceState, TestTempRoot) {
     let (tmp, nexus_home, db_path) = test_utils::create_test_workspace().await;
     let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
@@ -38,7 +38,7 @@ async fn handler_state() -> (WorkspaceState, TestTempRoot) {
     (state, tmp)
 }
 
-/// Create a Work via handler, return its work_id.
+/// Create a Work via handler, return its `work_id`.
 ///
 /// Uses the pre-seeded test world (seeded by `seed_test_creator_and_world`
 /// in `handler_state`).
@@ -755,7 +755,7 @@ async fn findings_lifecycle_rejects_unknown_status_with_invalid_input() {
 
 /// Helper: build an all-`None` patch request, ready for a single field
 /// override. Keeps the W-1 distinction test readable.
-fn empty_patch() -> UpdateFindingRequest {
+const fn empty_patch() -> UpdateFindingRequest {
     UpdateFindingRequest {
         severity: None,
         status: None,
@@ -845,8 +845,7 @@ async fn findings_lifecycle_distinguishes_invalid_transition_from_invalid_enum()
     assert_eq!(err.error_code(), "invalid_input");
     assert!(
         err.to_string().contains("status"),
-        "message should name the field: {}",
-        err
+        "message should name the field: {err}"
     );
 
     // (4) Illegal transition (resolved → open) → 422 INVALID_TRANSITION;
@@ -1022,7 +1021,7 @@ async fn findings_batch_update_status_happy_path() {
     }
 }
 
-/// V1.91 P1 — bulk PATCH helper: assign target_executor to selected findings.
+/// V1.91 P1 — bulk PATCH helper: assign `target_executor` to selected findings.
 #[tokio::test]
 async fn findings_batch_update_assign_executor() {
     let (state, _tmp) = handler_state().await;

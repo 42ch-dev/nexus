@@ -12,7 +12,7 @@
 use async_trait::async_trait;
 
 use crate::errors::KnowledgeError;
-use crate::knowledge::{KnowledgeEntry, KnowledgeQuery, KnowledgeResult, KnowledgeTag};
+use crate::knowledge::{KnowledgeQuery, KnowledgeResult, KnowledgeTag, UserKnowledgeEntry};
 
 /// Storage trait for User-scoped knowledge entries.
 ///
@@ -25,7 +25,7 @@ pub trait KnowledgeStore: Send + Sync {
     /// # Errors
     ///
     /// Returns `KnowledgeError` if validation fails or storage encounters an error.
-    async fn store(&self, entry: KnowledgeEntry) -> Result<KnowledgeEntry, KnowledgeError>;
+    async fn store(&self, entry: UserKnowledgeEntry) -> Result<UserKnowledgeEntry, KnowledgeError>;
 
     /// Retrieve a single knowledge entry by ID, scoped to `user_id`.
     ///
@@ -34,7 +34,7 @@ pub trait KnowledgeStore: Send + Sync {
         &self,
         user_id: &str,
         entry_id: &str,
-    ) -> Result<Option<KnowledgeEntry>, KnowledgeError>;
+    ) -> Result<Option<UserKnowledgeEntry>, KnowledgeError>;
 
     /// List knowledge entries for a user, with optional tag filtering and pagination.
     ///
@@ -67,7 +67,7 @@ pub trait KnowledgeStore: Send + Sync {
         user_id: &str,
         entry_id: &str,
         new_tags: Vec<KnowledgeTag>,
-    ) -> Result<Option<KnowledgeEntry>, KnowledgeError>;
+    ) -> Result<Option<UserKnowledgeEntry>, KnowledgeError>;
 }
 
 // ── In-memory implementation ─────────────────────────────────────────────
@@ -82,7 +82,7 @@ use tokio::sync::RwLock;
 /// Suitable for unit tests, integration tests, and single-process prototyping.
 /// Not suitable for production persistence (data is lost on process exit).
 pub struct InMemoryKnowledgeStore {
-    entries: Arc<RwLock<HashMap<String, KnowledgeEntry>>>,
+    entries: Arc<RwLock<HashMap<String, UserKnowledgeEntry>>>,
 }
 
 impl InMemoryKnowledgeStore {
@@ -108,7 +108,7 @@ impl Default for InMemoryKnowledgeStore {
 
 #[async_trait]
 impl KnowledgeStore for InMemoryKnowledgeStore {
-    async fn store(&self, entry: KnowledgeEntry) -> Result<KnowledgeEntry, KnowledgeError> {
+    async fn store(&self, entry: UserKnowledgeEntry) -> Result<UserKnowledgeEntry, KnowledgeError> {
         if entry.user_id.trim().is_empty() {
             return Err(KnowledgeError::ValidationError(
                 "user_id must not be empty".to_string(),
@@ -129,7 +129,7 @@ impl KnowledgeStore for InMemoryKnowledgeStore {
         &self,
         user_id: &str,
         entry_id: &str,
-    ) -> Result<Option<KnowledgeEntry>, KnowledgeError> {
+    ) -> Result<Option<UserKnowledgeEntry>, KnowledgeError> {
         let key = Self::key(user_id, entry_id);
         let map = self.entries.read().await;
         Ok(map.get(&key).cloned())
@@ -140,7 +140,7 @@ impl KnowledgeStore for InMemoryKnowledgeStore {
         let offset = query.effective_offset();
 
         // Scope the read guard to release before creating the result
-        let matched: Vec<KnowledgeEntry> = {
+        let matched: Vec<UserKnowledgeEntry> = {
             let map = self.entries.read().await;
             map.values()
                 .filter(|e| e.user_id == query.user_id)
@@ -160,7 +160,7 @@ impl KnowledgeStore for InMemoryKnowledgeStore {
         matched.sort_by(|a, b| b.created_at.cmp(&a.created_at));
 
         let total_count: u32 = matched.len().try_into().unwrap_or(u32::MAX);
-        let paginated: Vec<KnowledgeEntry> = matched
+        let paginated: Vec<UserKnowledgeEntry> = matched
             .into_iter()
             .skip(offset as usize)
             .take(limit as usize)
@@ -198,7 +198,7 @@ impl KnowledgeStore for InMemoryKnowledgeStore {
         user_id: &str,
         entry_id: &str,
         new_tags: Vec<KnowledgeTag>,
-    ) -> Result<Option<KnowledgeEntry>, KnowledgeError> {
+    ) -> Result<Option<UserKnowledgeEntry>, KnowledgeError> {
         let key = Self::key(user_id, entry_id);
         let mut map = self.entries.write().await;
         if let Some(entry) = map.get_mut(&key) {
@@ -219,22 +219,22 @@ mod tests {
     async fn seeded_store() -> InMemoryKnowledgeStore {
         let store = InMemoryKnowledgeStore::new();
         let entries = vec![
-            KnowledgeEntry::new(
+            UserKnowledgeEntry::new(
                 "user_1",
                 vec![KnowledgeTag::new("rust"), KnowledgeTag::new("tutorial")],
                 "Rust ownership and borrowing",
             ),
-            KnowledgeEntry::new(
+            UserKnowledgeEntry::new(
                 "user_1",
                 vec![KnowledgeTag::new("rust"), KnowledgeTag::new("async")],
                 "Tokio async runtime overview",
             ),
-            KnowledgeEntry::new(
+            UserKnowledgeEntry::new(
                 "user_1",
                 vec![KnowledgeTag::new("design")],
                 "System design patterns for microservices",
             ),
-            KnowledgeEntry::new(
+            UserKnowledgeEntry::new(
                 "user_2",
                 vec![KnowledgeTag::new("rust")],
                 "Another user's Rust notes",
@@ -249,7 +249,8 @@ mod tests {
     #[tokio::test]
     async fn store_and_get() {
         let store = InMemoryKnowledgeStore::new();
-        let entry = KnowledgeEntry::new("user_1", vec![KnowledgeTag::new("test")], "Test content");
+        let entry =
+            UserKnowledgeEntry::new("user_1", vec![KnowledgeTag::new("test")], "Test content");
         let id = entry.id.clone();
         let stored = store.store(entry).await.unwrap();
         assert_eq!(stored.id, id);
@@ -452,7 +453,7 @@ mod tests {
     #[tokio::test]
     async fn store_validates_user_id() {
         let store = InMemoryKnowledgeStore::new();
-        let mut entry = KnowledgeEntry::new("", vec![], "content");
+        let mut entry = UserKnowledgeEntry::new("", vec![], "content");
         entry.user_id = String::new();
         let result = store.store(entry).await;
         assert!(result.is_err());
@@ -461,7 +462,7 @@ mod tests {
     #[tokio::test]
     async fn store_validates_content() {
         let store = InMemoryKnowledgeStore::new();
-        let mut entry = KnowledgeEntry::new("user_1", vec![], "");
+        let mut entry = UserKnowledgeEntry::new("user_1", vec![], "");
         entry.content = String::new();
         let result = store.store(entry).await;
         assert!(result.is_err());

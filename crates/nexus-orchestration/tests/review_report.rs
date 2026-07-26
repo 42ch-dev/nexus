@@ -16,7 +16,7 @@
 //!   a parse problem).
 //!
 //! Companion file: `tests/review_findings.rs` covers the V1.47 baseline
-//! (workspace_dir=None → placeholder only) and remains unchanged.
+//! (`workspace_dir=None` → placeholder only) and remains unchanged.
 
 #![allow(clippy::unwrap_used)]
 
@@ -463,7 +463,7 @@ async fn large_report_falls_back_to_placeholder() {
 }
 
 /// AC (W-2, qc3): the parsed-report path persists all findings inside a
-/// single SQLite transaction. This regression guard verifies the two
+/// single `SQLite` transaction. This regression guard verifies the two
 /// observable invariants of that change:
 ///
 /// 1. **Commit semantics**: a parsed report with N findings yields exactly
@@ -550,7 +550,7 @@ async fn workspace_none_uses_placeholder_path_without_filesystem() {
 }
 
 /// AC4 (non-review preset no-op): a `novel-writing` schedule must never
-/// enter the parsing path, even with a workspace_dir provided.
+/// enter the parsing path, even with a `workspace_dir` provided.
 #[serial_test::serial]
 #[tokio::test]
 async fn non_review_preset_is_noop_with_workspace_dir() {

@@ -6,7 +6,6 @@
 
 export type { Creator } from './creator';
 export type { ForkBranch } from './fork-branch';
-export type { KeyBlock } from './key-block';
 export type { Memory } from './memory';
 export type { Pairing } from './pairing';
 export type { StoryManifest } from './story-manifest';

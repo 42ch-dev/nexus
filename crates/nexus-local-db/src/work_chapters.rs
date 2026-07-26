@@ -2652,7 +2652,7 @@ mod tests {
     // V1.38 P0 (T10): Multi-chapter selection and completion hermetic tests
     // =======================================================================
 
-    /// Helper: set up a work with total_planned_chapters and intake_status.
+    /// Helper: set up a work with `total_planned_chapters` and `intake_status`.
     async fn setup_work_for_selection(pool: &SqlitePool, work_id: &str, total: i32) {
         // SAFETY: UPDATE against works — runtime query.
         sqlx::query(
@@ -3750,7 +3750,7 @@ mod tests {
     /// per §4.5.2.
     ///
     /// Exercises the full §4.5.2 selection algorithm in one flow:
-    /// not_started → outlined → draft → finalized exclusion. Verifies that the
+    /// `not_started` → outlined → draft → finalized exclusion. Verifies that the
     /// lowest-numbered active chapter wins at each step.
     #[tokio::test]
     async fn spec_4_5_7_chapter_selection_returns_lowest_eligible() {

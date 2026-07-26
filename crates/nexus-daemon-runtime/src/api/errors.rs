@@ -438,7 +438,7 @@ impl NexusApiError {
     /// Build a `world_kb_conflict` error with structured recovery details.
     ///
     /// `current_version` is the per-row OCC version observed at conflict time
-    /// (NULL-normalized to 0); `entity_id` is the `key_block/candidate` id.
+    /// (NULL-normalized to 0); `entity_id` is the `knowledge_entry/candidate` id.
     #[must_use]
     pub fn world_kb_conflict(
         current_version: u64,

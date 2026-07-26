@@ -142,7 +142,7 @@ describe('TimelineCanvasFixtures render', () => {
     );
     expect(
       within(brief).getByText(
-        'Founding myths and the first KeyBlock lineages of the World.',
+        'Founding myths and the first knowledge entry lineages of the World.',
       ),
     ).toBeInTheDocument();
   });

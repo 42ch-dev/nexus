@@ -1655,7 +1655,7 @@ mod tests {
     // ── C-1 fix: index presence (existing) ──────────────────────────────────
 
     /// C-1 fix: Verify the spec-required composite index on
-    /// (work_id, chapter, status) exists after migration.
+    /// (`work_id`, chapter, status) exists after migration.
     /// Per novel-writing/quality-loop.md §2.1: chapter-scoped finding lookups
     /// (the review-stage hook's hot path) must use this index.
     #[tokio::test]
@@ -1714,7 +1714,7 @@ mod tests {
 
     /// V1.48 P1 T4 — `list_open_findings_for_chapter` filters by chapter AND
     /// work-level (chapter IS NULL) and orders per overlay §2.1
-    /// (severity DESC, then created_at ASC). Closed/resolved rows and
+    /// (severity DESC, then `created_at` ASC). Closed/resolved rows and
     /// other-chapter rows are excluded.
     #[tokio::test]
     async fn list_open_findings_for_chapter_filters_by_chapter_and_work_level() {
@@ -1867,10 +1867,10 @@ mod tests {
     /// `open` and `wont_fix` rows are never touched.
     ///
     /// Seeds:
-    ///  - `old_resolved`   — resolved, updated_at well past the cutoff   ← purged
-    ///  - `old_open`       — open,     created_at same vintage           ← kept (open)
-    ///  - `old_wont_fix`   — wont_fix, updated_at same vintage           ← kept (wont_fix)
-    ///  - `recent_resolved`— resolved, updated_at inside the window      ← kept (recent)
+    ///  - `old_resolved`   — resolved, `updated_at` well past the cutoff   ← purged
+    ///  - `old_open`       — open,     `created_at` same vintage           ← kept (open)
+    ///  - `old_wont_fix`   — `wont_fix`, `updated_at` same vintage           ← kept (`wont_fix`)
+    ///  - `recent_resolved`— resolved, `updated_at` inside the window      ← kept (recent)
     #[tokio::test]
     async fn findings_retention_removes_old_resolved_rows() {
         let (pool, _dir) = fresh_pool().await;
@@ -2149,7 +2149,7 @@ mod tests {
 
     // ── V1.48 P3 T3: FindingPatch tri-state rule_suggestion (R-V147P0-03) ───
 
-    /// Helper: build a FindingPatch with only `rule_suggestion` set.
+    /// Helper: build a `FindingPatch` with only `rule_suggestion` set.
     fn patch_rule_suggestion(v: Option<Option<String>>) -> FindingPatch {
         FindingPatch {
             rule_suggestion: v,
@@ -2692,7 +2692,7 @@ mod tests {
             ("duplicate", 6_000),
         ];
         for (idx, (status, ts)) in statuses.iter().enumerate() {
-            let id = format!("ac{}", idx);
+            let id = format!("ac{idx}");
             // Bypass create_finding's create-time validator by writing
             // directly so non-`open` seed rows exist for the SELECT.
             // SAFETY: test-only — direct INSERT to seed lifecycle states

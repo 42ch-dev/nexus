@@ -132,7 +132,7 @@ crates/nexus-contracts/src/generated/
 ├── bundle.rs             # DeltaBundle envelope struct
 ├── creator.rs            # Creator entity struct
 ├── world.rs              # World entity struct
-├── key_block.rs          # KeyBlock entity struct
+├── key_block.rs          # KnowledgeEntry entity struct (generated from schema)
 ├── timeline_event.rs     # TimelineEvent entity struct
 ├── memory.rs             # MemoryItem entity struct
 ├── sync_command.rs       # SyncCommand entity struct

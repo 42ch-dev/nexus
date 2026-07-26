@@ -1217,8 +1217,7 @@ mod tests {
         let result = parse(&expr);
         assert!(
             matches!(result, Err(ExprError::DepthExceeded(_))),
-            "depth 33 should fail with DepthExceeded, got: {:?}",
-            result
+            "depth 33 should fail with DepthExceeded, got: {result:?}"
         );
     }
 

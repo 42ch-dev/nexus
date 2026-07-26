@@ -16,7 +16,7 @@
 //! - **Stale cleanup**: `delete_pending_for_chapter` removes only pending rows;
 //!   confirmed/rejected are left intact.
 //!
-//! Run with: cargo test -p nexus-local-db --test kb_extract_jobs_upsert
+//! Run with: cargo test -p nexus-local-db --test `kb_extract_jobs_upsert`
 
 #![allow(clippy::unwrap_used)]
 

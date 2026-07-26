@@ -39,7 +39,7 @@ fn criterion_config() -> Criterion {
         .sample_size(100)
 }
 
-/// Build a representative evaluation context (camelCase + snake_case keys,
+/// Build a representative evaluation context (camelCase + `snake_case` keys,
 /// nested objects, mixed types — mirrors real `_context` shape after
 /// `build_context_json`).
 fn sample_context() -> serde_json::Value {

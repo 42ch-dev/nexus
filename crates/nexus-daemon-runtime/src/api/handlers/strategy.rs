@@ -1403,7 +1403,7 @@ mod tests {
     #[test]
     fn rename_state_references_updates_next_and_initial() {
         let mut root = serde_yaml::from_str::<serde_yaml::Value>(
-            r#"
+            r"
 preset:
   initial: a
   terminal: b
@@ -1412,7 +1412,7 @@ states:
     next: b
   - id: b
     terminal: true
-"#,
+",
         )
         .unwrap();
         let effects = rename_state_references(&mut root, "a", "start").unwrap();

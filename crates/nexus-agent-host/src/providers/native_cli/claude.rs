@@ -1197,7 +1197,7 @@ mod tests {
         )
     }
 
-    /// Helper: fully consume a HostEventStream and return all unwrapped events.
+    /// Helper: fully consume a `HostEventStream` and return all unwrapped events.
     /// Collects `Result<HostEvent, HostError>` items, unwrapping Oks and
     /// failing the test on any error.
     async fn collect_events(stream: HostEventStream) -> Vec<HostEvent> {

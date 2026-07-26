@@ -742,7 +742,7 @@ mod tests {
     }
 
     /// R-V181P0-QC1-W001: `write_memory` standalone path always uses
-    /// `world_id: None`. The review pipeline is the world_id propagation
+    /// `world_id: None`. The review pipeline is the `world_id` propagation
     /// path; standalone writes (e.g. from an ACP session without an active
     /// world context) have no world binding.
     #[tokio::test]

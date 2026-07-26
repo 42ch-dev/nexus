@@ -1,7 +1,7 @@
 //! V1.73 P0 World KB patch-route integration tests.
 //!
 //! Exercises the four World KB Daemon API handlers directly against a
-//! canonical daemon `WorkspaceState` with a seeded creator/world/KeyBlock:
+//! canonical daemon `WorkspaceState` with a seeded creator/world/WorldKbEntry:
 //! - `patch_entity` happy path + per-row OCC 409 conflict + 422 validation.
 //! - `promote_candidate` adopt + reject (entity-scope-model §5.5.2 state machine).
 //! - `get_graph` + `get_candidates` read projections.
@@ -13,8 +13,7 @@
 use axum::extract::{Path, Query, State};
 use axum::Json;
 use nexus_contracts::{
-    WorldKbEntityPatch, WorldKbKeyBlockStateResponse, WorldKbPatchEntityRequest,
-    WorldKbPromoteCandidateRequest,
+    WorldKbKeyBlockStateResponse, WorldKbPatchEntityRequest, WorldKbPromoteCandidateRequest,
 };
 use nexus_daemon_runtime::api::handlers::world_kb::{
     get_candidates, get_graph, get_key_block_state, patch_entity, promote_candidate,
@@ -257,7 +256,7 @@ async fn patch_entity_cross_author_forbidden() {
     assert_eq!(err.status_code(), axum::http::StatusCode::FORBIDDEN);
 }
 
-/// Regression for V1.73 greploop issue 3: `patch_entity` read the KeyBlock (and
+/// Regression for V1.73 greploop issue 3: `patch_entity` read the `WorldKbEntry` (and
 /// ran the cross-world scope check) BEFORE `require_world_owner`. An
 /// unauthenticated-but-locally-active creator could therefore distinguish
 /// `NotFound` ("entity not in this world") from `Forbidden` ("not your world"),
@@ -265,7 +264,7 @@ async fn patch_entity_cross_author_forbidden() {
 ///
 /// Discriminating case: the active creator does NOT own the path world, and the
 /// entity they quote exists in their OWN world (so `kb.world_id != path world`).
-/// Under the buggy order this returned 404 NotFound; the fix runs
+/// Under the buggy order this returned 404 `NotFound`; the fix runs
 /// `require_world_owner` first (mirroring `promote_candidate` + the read
 /// endpoints), so every cross-author request collapses to 403 regardless of
 /// whether the entity exists in the path world.
@@ -960,7 +959,7 @@ async fn promote_merge_target_cas_miss_marks_target_conflict() {
     );
 }
 
-// ─── computable KeyBlock state read (V1.114 P2) ───────────────────────────────
+// ─── computable WorldKbEntry state read (V1.114 P2) ───────────────────────────────
 
 #[tokio::test]
 async fn get_key_block_state_computable_returns_state() {

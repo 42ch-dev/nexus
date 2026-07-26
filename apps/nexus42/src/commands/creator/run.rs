@@ -1217,7 +1217,7 @@ mod tests {
     // V1.45 B1 (QC1 W-2): parse_preset_cli_args --flag=value support
     // -----------------------------------------------------------------------
 
-    /// Helper: build a PresetCliArg with sensible defaults.
+    /// Helper: build a `PresetCliArg` with sensible defaults.
     fn make_arg(name: &str, ty: PresetCliArgType) -> PresetCliArg {
         PresetCliArg {
             name: name.to_string(),

@@ -7,7 +7,7 @@
 //! promotion row's version changed between the read preimage and the
 //! CAS confirmation write.
 //!
-//! Run with: cargo test -p nexus42 --test kb_adopt_cas
+//! Run with: cargo test -p nexus42 --test `kb_adopt_cas`
 
 #![allow(clippy::unwrap_used)]
 
