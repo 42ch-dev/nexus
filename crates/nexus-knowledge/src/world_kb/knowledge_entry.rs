@@ -161,9 +161,11 @@ impl WorldKbEntry {
             ));
         }
 
-        // Gate 2: Version match
+        // Gate 2: Version match — delegate the standard revision invariant to
+        // spoke-operations (via the adapter). Map the reject back to nexus's
+        // `RevisionMismatch` to preserve observable behavior.
         let current_rev = self.revision.unwrap_or(0);
-        if current_rev != base_revision {
+        if matches!(assert_revision(base_revision, current_rev), SpokeResult::Reject(_)) {
             return Err(KbError::RevisionMismatch {
                 expected: base_revision,
                 actual: current_rev,
@@ -196,10 +198,15 @@ impl WorldKbEntry {
             ));
         }
 
-        // Transition
-        self.status = KeyBlockStatus::Confirmed.as_str().to_string();
+        // Transition: route the provisional→confirmed transition through
+        // spoke-operations (via the adapter). `transition_status` enforces the
+        // cross-product transition table (spec §1.5). The revision bump follows
+        // the nexus convention (transition_status does not bump revision; that is
+        // the promote-specific `apply_promote` path, not used here because the
+        // spoke codegen inlines a distinct `PromoteRequest.candidate` type that
+        // is not the data `KnowledgeEntry` — see T3 report).
+        self.apply_spoke_status_transition(KeyBlockStatus::Confirmed.as_str())?;
         self.revision = Some(current_rev + 1);
-        self.updated_at = Some(chrono::Utc::now().to_rfc3339());
         Ok(())
     }
     ///
@@ -210,9 +217,7 @@ impl WorldKbEntry {
         if self.status == KeyBlockStatus::Deprecated.as_str() {
             return Err(KbError::AlreadyInState("deprecated".to_string()));
         }
-        self.status = KeyBlockStatus::Deprecated.as_str().to_string();
-        self.updated_at = Some(chrono::Utc::now().to_rfc3339());
-        Ok(())
+        self.apply_spoke_status_transition(KeyBlockStatus::Deprecated.as_str())
     }
 
     /// Merge this `WorldKbEntry` into another.
@@ -220,9 +225,7 @@ impl WorldKbEntry {
         if self.status == KeyBlockStatus::Merged.as_str() {
             return Err(KbError::AlreadyInState("merged".to_string()));
         }
-        self.status = KeyBlockStatus::Merged.as_str().to_string();
-        self.updated_at = Some(chrono::Utc::now().to_rfc3339());
-        Ok(())
+        self.apply_spoke_status_transition(KeyBlockStatus::Merged.as_str())
     }
     ///
     /// # Errors
@@ -232,7 +235,20 @@ impl WorldKbEntry {
         if self.status == KeyBlockStatus::Deleted.as_str() {
             return Err(KbError::AlreadyInState("deleted".to_string()));
         }
-        self.status = KeyBlockStatus::Deleted.as_str().to_string();
+        self.apply_spoke_status_transition(KeyBlockStatus::Deleted.as_str())
+    }
+
+    /// Route a status transition through spoke-operations (via the adapter).
+    /// Converts `self` to the spoke type, delegates the transition validity
+    /// check + canonical status to `transition_status`, then applies only the
+    /// status back to `self` (body / identity are preserved on the domain type;
+    /// the spoke round-trip drops body content per the T2 conversion seam, so we
+    /// do not write the spoke result back wholesale). `updated_at` follows the
+    /// nexus timestamp convention.
+    fn apply_spoke_status_transition(&mut self, to: &str) -> Result<(), KbError> {
+        let spoke: SpokeKnowledgeEntry = self.clone().into();
+        let result = map_spoke_reject(transition_status(&spoke, to))?;
+        self.status = result.status;
         self.updated_at = Some(chrono::Utc::now().to_rfc3339());
         Ok(())
     }
@@ -320,6 +336,10 @@ use nexus_spoke_adapter::extensions::{
     get_created_from_command_id, get_provenance, get_world_id,
     set_created_from_command_id, set_provenance, set_world_id,
 };
+// V1.139 P1 T3 — lifecycle invariants are delegated to spoke-operations via the
+// adapter (spec §1.5 / §7). nexus-knowledge never calls spoke-operations directly.
+use nexus_spoke_adapter::ops::{assert_revision, transition_status};
+use nexus_spoke_adapter::{SpokeReject, SpokeResult};
 use serde_json::{Map, Value};
 use spoke_schemas::knowledge_entry::{
     KnowledgeEntry as SpokeKnowledgeEntry, KnowledgeEntryBody as SpokeKnowledgeEntryBody,
@@ -471,6 +491,18 @@ fn spoke_anchor_to_nexus(a: &SpokeSourceAnchor) -> SourceAnchor {
         excerpt: None,
         summary: None,
     })
+}
+
+/// Map a spoke-operations `SpokeResult` into a nexus `Result`, folding a
+/// [`SpokeReject`] into `KbError::ValidationError` carrying the spoke code +
+/// message. Used by the lifecycle routing (`confirm` / status transitions).
+fn map_spoke_reject<T>(r: SpokeResult<T>) -> Result<T, KbError> {
+    match r {
+        SpokeResult::Ok(v) => Ok(v),
+        SpokeResult::Reject(SpokeReject { code, message, .. }) => {
+            Err(KbError::ValidationError(format!("{}: {}", code.as_str(), message)))
+        }
+    }
 }
 
 
