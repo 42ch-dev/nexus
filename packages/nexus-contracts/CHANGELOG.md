@@ -5,6 +5,18 @@ All notable changes to the `@42ch/nexus-contracts` package will be documented in
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.25.0] - 2026-07-26
+
+### Changed
+
+- **Vocabulary migration (KeyBlock → KnowledgeEntry):** updated human-readable JSON Schema `description` prose across `common`, `daemon-api/canvas/world-kb/*`, `daemon-api/compute/*`, and `platform/http-bff/*` to refer to the entity concept as **KnowledgeEntry** / "knowledge entries" instead of the legacy "KeyBlock".
+- **Frozen identifiers retained (intentional, per V1.139 compass Q8/Q9):** type names (`BlockType`, `KeyBlockStatus`, `Nexus WorldKbKeyBlockStateResponse`), field names (`key_block_id`, `key_blocks`, `new_key_blocks`, `target_key_block_id`, `required_key_block_types`, `affected_key_block_ids`, `key_block_limit`, `key_block_attributes`, `key_block_state`), the `DeltaType` enum value `"key_block"`, HTTP route `/kb/key-blocks/{key_block_id}/state`, file names, `$id` URIs, and SQLite column references (`kb_key_blocks.*`) are **unchanged** — only description text was edited.
+
+### Consumer Impact
+
+- **No wire-type changes.** Generated TypeScript (and Rust) types are byte-identical to 0.24.0; JSON Schema `description` strings are not emitted into generated types. Consumers upgrading from 0.24.0 need no code changes.
+- The minor bump (0.24.0 → 0.25.0) reflects the coordinated V1.139 vocabulary rename under pre-1.0 breaking-change discipline, not a wire-format break.
+
 ## [0.19.0] - 2026-07-05
 
 ### Changed

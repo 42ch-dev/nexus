@@ -124,7 +124,7 @@ export type TimePolicy = "manual" | "owner_driven" | "event_driven";
  */
 export type Visibility = "private" | "unlisted" | "public";
 /**
- * KeyBlock content type (data-model-v1.md §5.5). V1.54 P1: added game-bible variants (species, faction, magic_system, technology, deity, level, economy_tier). V1.55 P3: added script variants (dialogue, beat, act). V1.123 P1: added era (cross-profile world-shape marker for Brief layer).
+ * KnowledgeEntry content type (data-model-v1.md §5.5). V1.54 P1: added game-bible variants (species, faction, magic_system, technology, deity, level, economy_tier). V1.55 P3: added script variants (dialogue, beat, act). V1.123 P1: added era (cross-profile world-shape marker for Brief layer).
  *
  * This interface was referenced by `CommonTypes`'s JSON-Schema
  * via the `definition` "BlockType".
@@ -220,7 +220,7 @@ export type PairingSource = "auto_cli" | "manual_web" | "platform_auto";
  */
 export type PairingStatus = "active" | "revoked";
 /**
- * KeyBlock status (data-model-v1.md §5.5)
+ * KnowledgeEntry status (data-model-v1.md §5.5)
  *
  * This interface was referenced by `CommonTypes`'s JSON-Schema
  * via the `definition` "KeyBlockStatus".

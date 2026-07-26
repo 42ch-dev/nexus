@@ -39,7 +39,7 @@
   },
   "maturation": {
     "ariaLabel": "章节成熟度指标",
-    "keyBlocks": "关键块",
+    "keyBlocks": "知识条目",
     "openFindings": "待处理发现"
   },
   "progress": {

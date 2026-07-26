@@ -488,7 +488,7 @@
       "action": {
         "adopt": {
           "label": "采纳候选",
-          "help": "提升为新的已确认 KeyBlock"
+          "help": "提升为新的已确认知识条目"
         },
         "reject": {
           "label": "拒绝候选",

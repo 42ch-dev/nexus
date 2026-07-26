@@ -10,7 +10,7 @@
     "entities": {
       "type": "array",
       "items": { "$ref": "world-kb-entity-projection.schema.json" },
-      "description": "All non-deleted KeyBlock entities in the World (confirmed + pending + manual)."
+      "description": "All non-deleted KnowledgeEntry entities in the World (confirmed + pending + manual)."
     },
     "source_anchors": {
       "type": "array",

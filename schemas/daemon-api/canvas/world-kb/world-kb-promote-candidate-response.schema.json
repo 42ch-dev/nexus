@@ -3,11 +3,11 @@
   "$id": "https://nexus42.invalid/schemas/daemon-api/canvas/world-kb/world-kb-promote-candidate-response.schema.json",
   "schema_version": 1,
   "title": "Nexus WorldKbPromoteCandidateResponse",
-  "description": "Success response for POST /v1/daemon/worlds/{world_id}/kb/promote-candidate (V1.73). `entity` is the resulting (or null for reject) KeyBlock; `job` is the updated extract-job projection; `version` is the new per-row version.",
+  "description": "Success response for POST /v1/daemon/worlds/{world_id}/kb/promote-candidate (V1.73). `entity` is the resulting (or null for reject) KnowledgeEntry; `job` is the updated extract-job projection; `version` is the new per-row version.",
   "type": "object",
   "required": ["job", "version", "validation_summary"],
   "properties": {
-    "entity": { "$ref": "world-kb-entity-projection.schema.json", "description": "Resulting confirmed/merged KeyBlock. Omitted for reject." },
+    "entity": { "$ref": "world-kb-entity-projection.schema.json", "description": "Resulting confirmed/merged KnowledgeEntry. Omitted for reject." },
     "job": { "$ref": "world-kb-extract-job-projection.schema.json" },
     "version": { "type": "integer", "minimum": 0, "description": "New per-row version after the promotion was persisted." },
     "validation_summary": {

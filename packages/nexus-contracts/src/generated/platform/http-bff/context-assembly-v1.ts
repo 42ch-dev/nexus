@@ -58,7 +58,7 @@ export interface ContextAssembleRequestV1 {
    */
   timeline_limit?: number;
   /**
-   * Max key blocks to return
+   * Max knowledge entries to return
    */
   key_block_limit?: number;
   /**
@@ -87,7 +87,7 @@ export interface ContextAssembleRequestV1 {
    */
   max_story_summaries?: number | null;
   /**
-   * ISO-8601 instant for historical read-only context cut. When present, timeline events and key blocks are assembled as if the authoritative graph/state were evaluated at or before this timestamp. Optional per ADR-009. Vector retrieval on the as_of path is optional (fallback to non-vector paths per ADR-007).
+   * ISO-8601 instant for historical read-only context cut. When present, timeline events and knowledge entries are assembled as if the authoritative graph/state were evaluated at or before this timestamp. Optional per ADR-009. Vector retrieval on the as_of path is optional (fallback to non-vector paths per ADR-007).
    */
   as_of?: string | null;
 }
@@ -127,7 +127,7 @@ export interface ContextAssembleResponseV1 {
    */
   data_freshness_hint?: string | null;
   /**
-   * Confirmed KeyBlocks relevant to the world
+   * Confirmed KnowledgeEntries relevant to the world
    */
   key_blocks?: {
     key_block_id: string;

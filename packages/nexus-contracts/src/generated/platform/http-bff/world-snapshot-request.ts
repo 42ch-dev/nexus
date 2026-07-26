@@ -25,7 +25,7 @@ export interface WorldSnapshotRequest {
    */
   branch_id?: string;
   /**
-   * Optional cap on key blocks included in snapshot payload shaping
+   * Optional cap on knowledge entries included in snapshot payload shaping
    */
   key_block_limit?: number;
   /**
