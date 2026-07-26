@@ -25,7 +25,7 @@ V1.39–V1.43 shipped inline finalize `llm_judge`, FL-E `reflection-loop`, `nove
 
 V1.44 P0 implements **DF-69**: a dual-mode embedded preset (or preset pair) plus CLI entry.
 
-V1.79's manuscript reading surface is distinct from this on-demand audit line: reading is a read-only consumption surface for authors, while manuscript audit remains an out-of-band quality/extract tool that may create reports, findings, or KeyBlocks.
+V1.79's manuscript reading surface is distinct from this on-demand audit line: reading is a read-only consumption surface for authors, while manuscript audit remains an out-of-band quality/extract tool that may create reports, findings, or KnowledgeEntries.
 
 ---
 
@@ -76,10 +76,10 @@ V1.79's manuscript reading surface is distinct from this on-demand audit line: r
 **Behavior**:
 
 1. Read chapter body from resolved path.
-2. Invoke `kb.extract_work` capability for promoted KeyBlocks **without** `kb_extract_jobs` queue ceremony.
+2. Invoke `kb.extract_work` capability for promoted KnowledgeEntries **without** `kb_extract_jobs` queue ceremony.
 3. Do not create a FL-E driver schedule.
 
-**Output**: KeyBlocks upserted per World KB rules; optional summary line in CLI stdout.
+**Output**: KnowledgeEntries upserted per World KB rules; optional summary line in CLI stdout.
 
 ---
 
@@ -120,7 +120,7 @@ Minimum preset surface:
 ## 6. Acceptance (spec-level)
 
 1. Hermetic test: review mode writes report file under `Logs/review/`.
-2. Hermetic test: extract mode on World-bound Work promotes at least one KeyBlock path (mock LLM acceptable).
+2. Hermetic test: extract mode on World-bound Work promotes at least one KnowledgeEntry path (mock LLM acceptable).
 3. Hermetic test: extract on worldless Work fails closed with documented error.
 4. No regression: auto-chain driver invariants unchanged (one active FL-E driver per Work).
 5. CLI help cites [docs/novel-writing-quickstart.md](../../../docs/novel-writing-quickstart.md) §5 after P1 merge.

@@ -291,7 +291,7 @@ fn validate_novel_body(block_type: BlockType, body: Option<&WorldKbBody>) -> Res
         KbError::Validation(ValidationError {
             kind: ValidationKind::MissingBody,
             field: Some("body".to_string()),
-            message: "body is required for novel-profile KeyBlocks".to_string(),
+            message: "body is required for novel-profile knowledge entries".to_string(),
         })
     })?;
 
@@ -299,7 +299,7 @@ fn validate_novel_body(block_type: BlockType, body: Option<&WorldKbBody>) -> Res
         KbError::Validation(ValidationError {
             kind: ValidationKind::MissingAttributes,
             field: Some("body.attributes".to_string()),
-            message: "body.attributes is required for novel-profile KeyBlocks".to_string(),
+            message: "body.attributes is required for novel-profile knowledge entries".to_string(),
         })
     })?;
 
@@ -307,7 +307,7 @@ fn validate_novel_body(block_type: BlockType, body: Option<&WorldKbBody>) -> Res
         KbError::Validation(ValidationError {
             kind: ValidationKind::MissingNovelCategory,
             field: Some("body.attributes.novel_category".to_string()),
-            message: "body.attributes.novel_category is required for novel-profile KeyBlocks"
+            message: "body.attributes.novel_category is required for novel-profile knowledge entries"
                 .to_string(),
         })
     })?;
@@ -362,7 +362,7 @@ fn validate_game_bible_body(
         KbError::Validation(ValidationError {
             kind: ValidationKind::MissingBody,
             field: Some("body".to_string()),
-            message: "body is required for game-bible-profile KeyBlocks".to_string(),
+            message: "body is required for game-bible-profile knowledge entries".to_string(),
         })
     })?;
 
@@ -370,7 +370,7 @@ fn validate_game_bible_body(
         KbError::Validation(ValidationError {
             kind: ValidationKind::MissingAttributes,
             field: Some("body.attributes".to_string()),
-            message: "body.attributes is required for game-bible-profile KeyBlocks".to_string(),
+            message: "body.attributes is required for game-bible-profile knowledge entries".to_string(),
         })
     })?;
 
@@ -379,7 +379,7 @@ fn validate_game_bible_body(
         return Err(KbError::Validation(ValidationError {
             kind: ValidationKind::InvalidNovelCategory,
             field: Some("body.attributes.novel_category".to_string()),
-            message: "body.attributes.novel_category is not valid for game-bible-profile KeyBlocks"
+            message: "body.attributes.novel_category is not valid for game-bible-profile knowledge entries"
                 .to_string(),
         }));
     }
@@ -389,7 +389,7 @@ fn validate_game_bible_body(
             kind: ValidationKind::MissingGameBibleCategory,
             field: Some("body.attributes.game_bible_category".to_string()),
             message:
-                "body.attributes.game_bible_category is required for game-bible-profile KeyBlocks"
+                "body.attributes.game_bible_category is required for game-bible-profile knowledge entries"
                     .to_string(),
         })
     })?;
@@ -442,7 +442,7 @@ fn validate_script_body(block_type: BlockType, body: Option<&WorldKbBody>) -> Re
         KbError::Validation(ValidationError {
             kind: ValidationKind::MissingBody,
             field: Some("body".to_string()),
-            message: "body is required for script-profile KeyBlocks".to_string(),
+            message: "body is required for script-profile knowledge entries".to_string(),
         })
     })?;
 
@@ -450,7 +450,7 @@ fn validate_script_body(block_type: BlockType, body: Option<&WorldKbBody>) -> Re
         KbError::Validation(ValidationError {
             kind: ValidationKind::MissingAttributes,
             field: Some("body.attributes".to_string()),
-            message: "body.attributes is required for script-profile KeyBlocks".to_string(),
+            message: "body.attributes is required for script-profile knowledge entries".to_string(),
         })
     })?;
 
@@ -459,7 +459,7 @@ fn validate_script_body(block_type: BlockType, body: Option<&WorldKbBody>) -> Re
         return Err(KbError::Validation(ValidationError {
             kind: ValidationKind::InvalidNovelCategory,
             field: Some("body.attributes.novel_category".to_string()),
-            message: "body.attributes.novel_category is not valid for script-profile KeyBlocks"
+            message: "body.attributes.novel_category is not valid for script-profile knowledge entries"
                 .to_string(),
         }));
     }
@@ -468,7 +468,7 @@ fn validate_script_body(block_type: BlockType, body: Option<&WorldKbBody>) -> Re
             kind: ValidationKind::InvalidGameBibleCategory,
             field: Some("body.attributes.game_bible_category".to_string()),
             message:
-                "body.attributes.game_bible_category is not valid for script-profile KeyBlocks"
+                "body.attributes.game_bible_category is not valid for script-profile knowledge entries"
                     .to_string(),
         }));
     }
@@ -477,7 +477,7 @@ fn validate_script_body(block_type: BlockType, body: Option<&WorldKbBody>) -> Re
         KbError::Validation(ValidationError {
             kind: ValidationKind::MissingScriptCategory,
             field: Some("body.attributes.script_category".to_string()),
-            message: "body.attributes.script_category is required for script-profile KeyBlocks"
+            message: "body.attributes.script_category is required for script-profile knowledge entries"
                 .to_string(),
         })
     })?;
@@ -558,7 +558,7 @@ fn validate_structured_body(
             kind: ValidationKind::MissingStructuredAttributes,
             field: Some("body.attributes".to_string()),
             message:
-                "body.attributes is required for computable KeyBlocks (holds immutable compute params)"
+                "body.attributes is required for computable knowledge entries (holds immutable compute params)"
                     .to_string(),
         })
     })?;
@@ -569,7 +569,7 @@ fn validate_structured_body(
             kind: ValidationKind::MissingStructuredState,
             field: Some("body.state".to_string()),
             message:
-                "body.state is required for computable KeyBlocks (holds dynamic runtime state)"
+                "body.state is required for computable knowledge entries (holds dynamic runtime state)"
                     .to_string(),
         })
     })?;
@@ -578,7 +578,7 @@ fn validate_structured_body(
         KbError::Validation(ValidationError {
             kind: ValidationKind::NonObjectStructuredState,
             field: Some("body.state".to_string()),
-            message: "body.state must be a JSON object for computable KeyBlocks".to_string(),
+            message: "body.state must be a JSON object for computable knowledge entries".to_string(),
         })
     })?;
 
@@ -591,7 +591,7 @@ fn validate_structured_body(
                 field: Some(format!("body.state.{expected_key}")),
                 message: format!(
                     "body.state must contain the per-block_type key '{expected_key}' \
-                     for computable KeyBlocks (compass Q5: state.{expected_key}.field_name)"
+                     for computable knowledge entries (compass Q5: state.{expected_key}.field_name)"
                 ),
             }));
         }

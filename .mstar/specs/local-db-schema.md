@@ -74,7 +74,7 @@ V1 规范中，禁止继续引入语义模糊的统一键名（例如单一 `sch
 | `reference_sources` | 参考资料扫描索引与状态 | Shared |
 | `narrative_worlds` | Workspace-local World projections for narrative read paths | `nexus-narrative` domain; `nexus-local-db` migrations/storage mechanics |
 | `narrative_timeline_events` | Workspace-local timeline event projections used by `NarrativeGateway` | `nexus-narrative` domain; `nexus-local-db` migrations/storage mechanics |
-| `kb_key_blocks` | World-scoped narrative KB KeyBlocks persisted in workspace `state.db` | `nexus-kb` domain; `nexus-local-db` migrations/storage mechanics |
+| `kb_key_blocks` | World-scoped narrative KB KnowledgeEntries persisted in workspace `state.db` | `nexus-knowledge` domain; `nexus-local-db` migrations/storage mechanics |
 | `kb_source_anchors` | Multi-anchor rows attached to `kb_key_blocks` for `KbStore::attach_source_anchor` / `get_anchors` | `nexus-kb` domain; `nexus-local-db` migrations/storage mechanics |
 | `knowledge_entries` | User-scoped knowledge entries for Moment context assembly (V1.27) | `nexus-knowledge` domain; `nexus-local-db` migrations/storage mechanics |
 

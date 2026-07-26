@@ -222,7 +222,7 @@ impl Capability for NarrativeCompute {
 
         if computable_blocks.items.is_empty() {
             return Err(CapabilityError::InputInvalid(
-                "no computable KeyBlocks found in world".to_string(),
+                "no computable knowledge entries found in world".to_string(),
             ));
         }
 

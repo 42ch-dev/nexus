@@ -202,9 +202,8 @@ explicitly declares uniqueness.
 | `nexus-cloud-sync` | Cloud transport for User/Pairing and sync bundles | Owns platform HTTP and sync transport. It MUST use `nexus-cloud-domain` for User/Pairing invariants instead of reimplementing or bypassing them; current Cargo wiring includes this dependency. |
 | `nexus-creator` | `Creator` | Owns Creator aggregate logic, credential/cache hooks, active Creator local state, and conversions over contract types. No platform HTTP. |
 | `nexus-creator-memory` | `Creator` memory subdomain | Owns SOUL, long-term memory, review, and personality/experience I/O under Creator scope. |
-| `nexus-knowledge` | `User` knowledge | Owns user-scoped global knowledge/reference indexing and storage. It is not Creator-scoped and does not own narrative KeyBlocks. It provides material that moment assembly may pull into a Moment. |
+| `nexus-knowledge` | `World` (narrative KB) + `User` (global knowledge) | Two-tier knowledge crate merged in V1.139 (former `nexus-kb`). World-scoped: narrative KnowledgeEntries, SourceAnchors, graph insertion/query, narrative KB lifecycle; holds spoke `KnowledgeEntry` natively with `extensions.nexus` accessors via `nexus-spoke-adapter`. User-scoped: global knowledge/reference indexing and storage; tag-driven, may be pulled into Moment context assembly. Does not own Creator memory semantics. |
 | `nexus-narrative` | `World`, `Timeline`, `Event` | Owns creative-work narrative state: current work background, world state, forks, timelines, events, story/manuscript projections, and narrative consistency. |
-| `nexus-knowledge` | World-scoped narrative KB graph | Owns narrative knowledge assets under `World`: KnowledgeEntries, SourceAnchors, graph insertion/query, and narrative KB lifecycle. KB scope belongs under a World/narrative entity, not directly under Creator. Holds spoke `KnowledgeEntry` natively; `extensions.nexus` typed accessors via `nexus-spoke-adapter`. |
 | `nexus-spoke-adapter` | SPOKE consumption boundary | Constructs spoke standard objects with `extensions.nexus` populated; delegates standard lifecycle ops to `spoke-operations`. Enforces the spoke-operations call-boundary invariant (spoke-standard operands only). The sole crate that directly depends on `spoke-operations`. |
 | `nexus-moment-context-assembly` | `Moment` | Owns session-start moment context aggregation. It runs before a session begins and aggregates relevant local domains: Creator memory, narrative state, World KB assets, and User knowledge. Optional `cloud-stage` may merge platform context, but daemon default remains local Stage-0. |
 | `nexus-daemon-runtime` | Runtime host, not entity owner | Hosts local APIs, DB handles, orchestration, and agent-host. It MUST NOT own cloud transport or platform User/Pairing invariants. |
@@ -532,13 +531,12 @@ Minimum common `body` shape for script items:
 }
 ```
 
-### 5.2 `nexus-knowledge` — User-scoped global knowledge
+### 5.2 `nexus-knowledge` — two-tier knowledge (World + User)
 
-`nexus-knowledge` means user-level global knowledge/reference material:
+`nexus-knowledge` is the two-tier knowledge crate merged in V1.139 (former `nexus-kb`):
 
-- Its canonical scope is `User`.
-- It is tag-driven and may be pulled into Moment context assembly.
-- It is not Creator-scoped and does not own World KeyBlocks.
+- **`nexus-knowledge` (World-scoped):** Narrative KB graph assets (KnowledgeEntries, SourceAnchors, graph insertion/query, narrative KB lifecycle) coordinated with `nexus-narrative`. Holds spoke `KnowledgeEntry` natively; `extensions.nexus` typed accessors via `nexus-spoke-adapter`. Formerly the separate `nexus-kb` crate.
+- **`nexus-knowledge` (User-scoped):** Global knowledge/reference material. Tag-driven, may be pulled into Moment context assembly. Not Creator-scoped; does not own Creator memory semantics.
 
 ### 5.3 CLI `creator kb` — local work-scope file index
 
