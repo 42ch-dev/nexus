@@ -89,12 +89,12 @@ impl KbQuery {
     }
 }
 
-/// Result of inserting a `KeyBlock`.
+/// Result of inserting a `WorldKbEntry`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct KbInsertResult {
-    /// ID of the created `KeyBlock`.
-    pub key_block_id: String,
-    /// World the `KeyBlock` belongs to.
+    /// ID of the created `WorldKbEntry`.
+    pub entry_id: String,
+    /// World the `WorldKbEntry` belongs to.
     pub world_id: String,
     /// Creation timestamp.
     pub created_at: String,
@@ -104,7 +104,7 @@ pub struct KbInsertResult {
 #[derive(Debug, Clone)]
 pub struct KbQueryResult {
     /// Matching `KeyBlocks` (after pagination).
-    pub items: Vec<crate::key_block::KeyBlock>,
+    pub items: Vec<crate::world_kb::knowledge_entry::WorldKbEntry>,
     /// Total number of matching items (ignoring limit/offset).
     pub total_count: usize,
     /// Whether more results exist beyond the current page.

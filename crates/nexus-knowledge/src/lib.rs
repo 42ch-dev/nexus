@@ -3,9 +3,12 @@
 //! This crate consolidates three knowledge tiers in one crate (V1.139 P1 T1
 //! merger of the former `nexus-kb` into `nexus-knowledge`):
 //!
-//! - **World KnowledgeEntry** (`world_kb` module): the former `nexus-kb`'s
-//!   domain — narrative KB entries (`KeyBlock` + `SourceAnchor`, `KbStore`)
-//!   tied to a World entity. Relocated here from the deleted `nexus-kb` crate.
+//! - **World KB** (`world_kb` module): the former `nexus-kb`'s domain —
+//!   narrative KB entries (`WorldKbEntry` + `SourceAnchor`, `KbStore`) tied to
+//!   a World entity. Relocated here from the deleted `nexus-kb` crate.
+//!   `WorldKbEntry` converts to/from the spoke standard `KnowledgeEntry` at the
+//!   wire boundary (V1.139 P1 T2); User-scoped entries are a separate domain
+//!   (`UserKnowledgeEntry` in the `knowledge` module).
 //!
 //! - **User-scoped knowledge** (`knowledge` module): tag-driven global knowledge
 //!   entries indexed per `user_id`. These may be pulled into Moment context
@@ -36,5 +39,5 @@ pub mod store;
 pub mod world_kb;
 
 pub use errors::KnowledgeError;
-pub use knowledge::{KnowledgeEntry, KnowledgeQuery, KnowledgeResult, KnowledgeTag};
+pub use knowledge::{UserKnowledgeEntry, KnowledgeQuery, KnowledgeResult, KnowledgeTag};
 pub use store::{InMemoryKnowledgeStore, KnowledgeStore};

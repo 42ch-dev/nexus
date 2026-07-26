@@ -1,23 +1,21 @@
-//! `KeyBlock` aggregate — structured knowledge unit in a world timeline.
+//! `WorldKbEntry` aggregate — structured knowledge unit in a world timeline.
 //!
-//! `KeyBlock` is the primary knowledge container in Nexus. Each KB has a lifecycle
+//! `WorldKbEntry` is the primary knowledge container in Nexus. Each KB has a lifecycle
 //! from provisional → confirmed (with possible deprecation/merge/deletion).
 //! See data-model-v1.md §5.5, consistency-rules-v1.md §3.2.
 
-use crate::errors::KbError;
-use crate::source_anchor::SourceAnchor;
-use nexus_contracts::domain::NexusSourceAnchor;
+use crate::world_kb::errors::KbError;
+use crate::world_kb::source_anchor::SourceAnchor;
 use nexus_contracts::BlockType;
 use nexus_contracts::KeyBlockStatus;
 use serde::{Deserialize, Serialize};
-use std::str::FromStr;
 
-/// `KeyBlock` body content.
+/// `WorldKbEntry` body content.
 ///
 /// # V1.61 Structured Compute Layer
 ///
 /// The [`state`] and [`computable`] fields are additive (optional) for the WASM
-/// compute pipeline (compass Q4). Existing `KeyBlock`s without them remain valid.
+/// compute pipeline (compass Q4). Existing `WorldKbEntry`s without them remain valid.
 ///
 /// ## Computable `BlockType` set
 ///
@@ -33,7 +31,7 @@ use std::str::FromStr;
 /// dynamic `state` (mutable runtime data, nested by `block_type` per
 /// compass Q5: `state.character.current_hp`).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
-pub struct KeyBlockBody {
+pub struct WorldKbBody {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub summary: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -47,7 +45,7 @@ pub struct KeyBlockBody {
     /// Only meaningful when [`computable`](Self::computable) is `Some(true)`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub state: Option<serde_json::Value>,
-    /// Marks this `KeyBlock` as participating in WASM compute (V1.61, compass Q4).
+    /// Marks this `WorldKbEntry` as participating in WASM compute (V1.61, compass Q4).
     /// When `Some(true)`, `state` holds mutable runtime state and `attributes`
     /// hold immutable compute params. Stored inside `body_json` (no DB column)
     /// for additive, migration-free rollout.
@@ -87,11 +85,11 @@ pub struct MembershipPermissionCheck {
     pub can_sync_kb: bool,
 }
 
-/// `KeyBlock` aggregate — a structured knowledge unit in a world timeline.
+/// `WorldKbEntry` aggregate — a structured knowledge unit in a world timeline.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct KeyBlock {
+pub struct WorldKbEntry {
     pub schema_version: u32,
-    pub key_block_id: String,
+    pub entry_id: String,
     pub world_id: String,
     pub block_type: BlockType,
     pub canonical_name: String,
@@ -99,7 +97,7 @@ pub struct KeyBlock {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub revision: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub body: Option<KeyBlockBody>,
+    pub body: Option<WorldKbBody>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source_anchor: Option<SourceAnchor>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -107,7 +105,7 @@ pub struct KeyBlock {
     pub created_at: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub updated_at: Option<String>,
-    // V1.52 T-A P2: Work→KeyBlock provenance (entity-scope-model.md §5.5.7)
+    // V1.52 T-A P2: Work→WorldKbEntry provenance (entity-scope-model.md §5.5.7)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source_work_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -116,15 +114,15 @@ pub struct KeyBlock {
     pub source_provenance_kind: Option<String>,
 }
 
-impl KeyBlock {
-    /// Create a new provisional `KeyBlock`.
+impl WorldKbEntry {
+    /// Create a new provisional `WorldKbEntry`.
     /// Precondition: caller must have `WorldMembership` with `can_sync_kb=true`.
     #[must_use]
     pub fn new(world_id: &str, block_type: BlockType, canonical_name: &str) -> Self {
-        let key_block_id = format!("kb_{}", uuid::Uuid::new_v4().to_string().replace('-', ""));
+        let entry_id = format!("kb_{}", uuid::Uuid::new_v4().to_string().replace('-', ""));
         Self {
             schema_version: 1,
-            key_block_id,
+            entry_id,
             world_id: world_id.to_string(),
             block_type,
             canonical_name: canonical_name.to_string(),
@@ -207,7 +205,7 @@ impl KeyBlock {
     ///
     /// # Errors
     /// Returns `Err(KbError::...)` if validation fails.
-    /// Deprecate this `KeyBlock` (mark as superseded).
+    /// Deprecate this `WorldKbEntry` (mark as superseded).
     pub fn deprecate(&mut self, _replacement_kb_id: Option<&str>) -> Result<(), KbError> {
         if self.status == KeyBlockStatus::Deprecated.as_str() {
             return Err(KbError::AlreadyInState("deprecated".to_string()));
@@ -217,7 +215,7 @@ impl KeyBlock {
         Ok(())
     }
 
-    /// Merge this `KeyBlock` into another.
+    /// Merge this `WorldKbEntry` into another.
     pub fn merge_into(&mut self, _target_kb_id: &str) -> Result<(), KbError> {
         if self.status == KeyBlockStatus::Merged.as_str() {
             return Err(KbError::AlreadyInState("merged".to_string()));
@@ -229,7 +227,7 @@ impl KeyBlock {
     ///
     /// # Errors
     /// Returns `Err(KbError::...)` if validation fails.
-    /// Soft-delete this `KeyBlock`.
+    /// Soft-delete this `WorldKbEntry`.
     pub fn delete(&mut self) -> Result<(), KbError> {
         if self.status == KeyBlockStatus::Deleted.as_str() {
             return Err(KbError::AlreadyInState("deleted".to_string()));
@@ -274,7 +272,7 @@ impl KeyBlock {
     /// # Errors
     /// Returns `Err(KbError::...)` if validation fails.
     /// Set body content (only allowed for provisional KBs).
-    pub fn set_body(&mut self, body: KeyBlockBody) -> Result<(), KbError> {
+    pub fn set_body(&mut self, body: WorldKbBody) -> Result<(), KbError> {
         if !self.can_modify_body() {
             return Err(KbError::ImmutableConfirmedState);
         }
@@ -299,64 +297,182 @@ impl KeyBlock {
     }
 }
 
-// ── Conversion: Domain ↔ Contract ──────────────────────────────────────
+// ── Wire boundary: WorldKbEntry ↔ spoke KnowledgeEntry (conversion seam) ─
+//
+// V1.139 P1 T2: the legacy `nexus_contracts::KeyBlock` contract type was
+// deleted in P0 (`key-block.schema.json` removed). The spoke standard type
+// `spoke_schemas::KnowledgeEntry` is now the wire boundary. `WorldKbEntry` is
+// the nexus domain aggregate; these `From` impls are the **sole conversion
+// seam** (spec `spoke-adapter-architecture.md` §7.1 — the adapter constructs
+// the spoke type before calling spoke-operations).
+//
+// Body fidelity: spoke's `KnowledgeEntryBody` exposes only `computable`/`state`
+// typed maps; nexus's `summary`/`attributes`/`tags` have no typed spoke slot
+// today (typify drops `additionalProperties`). The forward direction maps what
+// spoke carries (state); the rest is preserved on the nexus domain type and is
+// NOT relied upon by spoke-operations. When spoke later declares body fields,
+// extend ONLY these two impls — validation/consumers are unaffected.
 
-impl From<nexus_contracts::KeyBlock> for KeyBlock {
-    fn from(c: nexus_contracts::KeyBlock) -> Self {
-        Self {
-            schema_version: u32::try_from(c.schema_version.get())
-                .expect("schema_version exceeds u32 range"),
-            key_block_id: c.key_block_id.to_string(),
-            world_id: c.world_id.to_string(),
-            block_type: c.block_type,
-            canonical_name: c.canonical_name.to_string(),
-            status: c.status.as_str().to_string(),
-            revision: c.revision,
-            body: c.body.map(|b| {
-                serde_json::from_value(serde_json::to_value(b).unwrap_or_default())
-                    .unwrap_or_default()
+use std::collections::HashMap;
+use std::num::NonZeroU64;
+
+use nexus_spoke_adapter::extensions::{
+    get_created_from_command_id, get_provenance, get_world_id,
+    set_created_from_command_id, set_provenance, set_world_id,
+};
+use serde_json::{Map, Value};
+use spoke_schemas::knowledge_entry::{
+    KnowledgeEntry as SpokeKnowledgeEntry, KnowledgeEntryBody as SpokeKnowledgeEntryBody,
+    KnowledgeEntryCanonicalName, SourceAnchor as SpokeSourceAnchor,
+};
+
+/// Convert a nexus `BlockType` to spoke's open-string `entry_type`.
+fn block_type_to_entry_type(bt: BlockType) -> String {
+    serde_json::to_value(bt)
+        .ok()
+        .and_then(|v| v.as_str().map(std::string::ToString::to_string))
+        .unwrap_or_else(|| "character".to_string())
+}
+
+/// Parse spoke `entry_type` back to nexus `BlockType` (unknown values → default).
+fn entry_type_to_block_type(s: &str) -> BlockType {
+    serde_json::from_value(Value::String(s.to_string())).unwrap_or_default()
+}
+
+impl From<WorldKbEntry> for SpokeKnowledgeEntry {
+    fn from(d: WorldKbEntry) -> Self {
+        // Body: carry only what spoke's typed body models (state). nexus
+        // summary/attributes/tags stay on the domain type; spoke-operations
+        // does not consume them.
+        let state_map = d
+            .body
+            .as_ref()
+            .and_then(|b| b.state.clone())
+            .and_then(|v| match v {
+                Value::Object(map) => Some(map),
+                _ => None,
+            })
+            .unwrap_or_default();
+        let spoke_body = SpokeKnowledgeEntryBody {
+            computable: Map::new(),
+            state: state_map,
+        };
+
+        let mut entry = Self {
+            body: spoke_body,
+            canonical_name: KnowledgeEntryCanonicalName::try_from(d.canonical_name.as_str())
+                .expect("canonical_name is non-empty (validated)"),
+            created_at: chrono::DateTime::parse_from_rfc3339(&d.created_at)
+                .ok()
+                .map(|dt| dt.with_timezone(&chrono::Utc)),
+            entry_id: d.entry_id,
+            entry_type: block_type_to_entry_type(d.block_type),
+            extensions: HashMap::new(),
+            revision: d.revision,
+            schema_version: NonZeroU64::new(u64::from(d.schema_version))
+                .expect("schema_version >= 1"),
+            source_anchor: d.source_anchor.as_ref().map(nexus_anchor_to_spoke),
+            status: d.status,
+            updated_at: d.updated_at.and_then(|s| {
+                chrono::DateTime::parse_from_rfc3339(&s)
+                    .ok()
+                    .map(|dt| dt.with_timezone(&chrono::Utc))
             }),
-            source_anchor: c.source_anchor.map(SourceAnchor::from),
-            created_from_command_id: c.created_from_command_id.map(|id| id.to_string()),
-            created_at: c.created_at.to_rfc3339(),
-            updated_at: c.updated_at.map(|d| d.to_rfc3339()),
-            // V1.52 T-A P2: provenance fields not yet on wire contract; default None
-            source_work_id: None,
-            source_chapter: None,
-            source_provenance_kind: None,
-        }
+        };
+
+        // Identity fields → extensions.nexus (via adapter accessors; preserves
+        // unknown keys per spec §2.2).
+        set_world_id(&mut entry, d.world_id);
+        set_created_from_command_id(&mut entry, d.created_from_command_id);
+        set_provenance(
+            &mut entry,
+            d.source_work_id,
+            d.source_chapter,
+            d.source_provenance_kind,
+        );
+        entry
     }
 }
 
 #[allow(clippy::fallible_impl_from)]
-impl From<KeyBlock> for nexus_contracts::KeyBlock {
-    fn from(d: KeyBlock) -> Self {
+impl From<SpokeKnowledgeEntry> for WorldKbEntry {
+    fn from(s: SpokeKnowledgeEntry) -> Self {
+        // Extract borrowed accessor data into owned values FIRST, so subsequent
+        // field moves out of `s` are not blocked by outstanding borrows.
+        let world_id = get_world_id(&s).unwrap_or_default().to_string();
+        let created_from_command_id = get_created_from_command_id(&s).map(String::from);
+        let (source_work_id, source_chapter, source_provenance_kind) = get_provenance(&s);
+        let source_work_id = source_work_id.map(String::from);
+        let source_provenance_kind = source_provenance_kind.map(String::from);
+        let entry_type = s.entry_type.clone();
+        let canonical_name = s.canonical_name.to_string();
+        let schema_version = u32::try_from(s.schema_version.get()).unwrap_or(1);
+
+        // Reverse body: spoke typed body → nexus state. summary/attributes/tags
+        // cannot be recovered (forward direction dropped them); they default to None.
+        let SpokeKnowledgeEntryBody { computable, state } = s.body;
+        let body = if state.is_empty() && computable.is_empty() {
+            None
+        } else {
+            Some(WorldKbBody {
+                summary: None,
+                attributes: None,
+                tags: None,
+                state: if state.is_empty() {
+                    None
+                } else {
+                    Some(Value::Object(state))
+                },
+                computable: None,
+            })
+        };
+
         Self {
-            schema_version: std::num::NonZeroU64::new(u64::from(d.schema_version))
-                .expect("schema_version must be non-zero"),
-            key_block_id: d.key_block_id.parse().unwrap(),
-            world_id: d.world_id.parse().unwrap(),
-            block_type: d.block_type,
-            canonical_name: d.canonical_name.parse().unwrap(),
-            status: KeyBlockStatus::from_str(&d.status).unwrap(),
-            revision: d.revision,
-            body: d.body.map(|b| {
-                serde_json::from_value(serde_json::to_value(&b).unwrap_or_default())
-                    .unwrap_or_default()
-            }),
-            source_anchor: d.source_anchor.map(NexusSourceAnchor::from),
-            created_from_command_id: d.created_from_command_id.map(|id| id.parse().unwrap()),
-            created_at: chrono::DateTime::parse_from_rfc3339(&d.created_at)
-                .unwrap()
-                .with_timezone(&chrono::Utc),
-            updated_at: d.updated_at.map(|s| {
-                chrono::DateTime::parse_from_rfc3339(&s)
-                    .unwrap()
-                    .with_timezone(&chrono::Utc)
-            }),
+            schema_version,
+            entry_id: s.entry_id,
+            world_id,
+            block_type: entry_type_to_block_type(&entry_type),
+            canonical_name,
+            status: s.status,
+            revision: s.revision,
+            body,
+            source_anchor: s.source_anchor.as_ref().map(spoke_anchor_to_nexus),
+            created_from_command_id,
+            created_at: s.created_at.map_or_else(
+                || chrono::Utc::now().to_rfc3339(),
+                |dt| dt.to_rfc3339(),
+            ),
+            updated_at: s.updated_at.map(|dt| dt.to_rfc3339()),
+            source_work_id,
+            source_chapter,
+            source_provenance_kind,
         }
     }
 }
+
+/// Forward: encode the nexus `SourceAnchor` as JSON inside the spoke anchor's
+/// `source_id`. Round-trippable placeholder mapping — refines when the spoke
+/// anchor model aligns with nexus provenance (T3).
+fn nexus_anchor_to_spoke(a: &SourceAnchor) -> SpokeSourceAnchor {
+    SpokeSourceAnchor {
+        schema_version: NonZeroU64::new(1).expect("1 is non-zero"),
+        source_id: serde_json::to_string(a).unwrap_or_else(|_| "{}".to_string()),
+        extensions: HashMap::new(),
+        label: None,
+        mime_type: None,
+        span: None,
+    }
+}
+
+/// Reverse of [`nexus_anchor_to_spoke`].
+fn spoke_anchor_to_nexus(a: &SpokeSourceAnchor) -> SourceAnchor {
+    serde_json::from_str(&a.source_id).unwrap_or(SourceAnchor {
+        story_summary_refs: None,
+        excerpt: None,
+        summary: None,
+    })
+}
+
 
 #[cfg(test)]
 mod tests {
@@ -382,17 +498,17 @@ mod tests {
 
     #[test]
     fn test_create_provisional_keyblock() {
-        let kb = KeyBlock::new("wld_test123", BlockType::Character, "Test Character");
+        let kb = WorldKbEntry::new("wld_test123", BlockType::Character, "Test Character");
         assert_eq!(kb.status, "provisional");
         assert_eq!(kb.revision, None);
         assert_eq!(kb.schema_version, 1);
         assert_eq!(kb.world_id, "wld_test123");
-        assert!(kb.key_block_id.starts_with("kb_"));
+        assert!(kb.entry_id.starts_with("kb_"));
     }
 
     #[test]
     fn test_confirm_with_permission() {
-        let mut kb = KeyBlock::new("wld_test", BlockType::Character, "Hero");
+        let mut kb = WorldKbEntry::new("wld_test", BlockType::Character, "Hero");
         kb.confirm(&owner_membership(), 0, &no_conflicts(), &[])
             .unwrap();
         assert_eq!(kb.status, "confirmed");
@@ -401,14 +517,14 @@ mod tests {
 
     #[test]
     fn test_confirm_without_permission() {
-        let mut kb = KeyBlock::new("wld_test", BlockType::Character, "Hero");
+        let mut kb = WorldKbEntry::new("wld_test", BlockType::Character, "Hero");
         let result = kb.confirm(&collaborator_membership(), 0, &no_conflicts(), &[]);
         assert!(matches!(result, Err(KbError::PermissionDenied(_))));
     }
 
     #[test]
     fn test_confirm_with_conflict() {
-        let mut kb = KeyBlock::new("wld_test", BlockType::Character, "Hero");
+        let mut kb = WorldKbEntry::new("wld_test", BlockType::Character, "Hero");
         let conflict = ConflictCheckResult::hard_conflict("conflicting KB entry");
         let result = kb.confirm(&owner_membership(), 0, &conflict, &[]);
         assert!(matches!(result, Err(KbError::UnresolvedConflict(_))));
@@ -416,7 +532,7 @@ mod tests {
 
     #[test]
     fn test_confirm_with_revision_mismatch() {
-        let mut kb = KeyBlock::new("wld_test", BlockType::Event, "Battle");
+        let mut kb = WorldKbEntry::new("wld_test", BlockType::Event, "Battle");
         // kb.revision is None (i.e., 0 internally), but base_revision is 1
         let result = kb.confirm(&owner_membership(), 1, &no_conflicts(), &[]);
         assert!(matches!(result, Err(KbError::RevisionMismatch { .. })));
@@ -424,10 +540,10 @@ mod tests {
 
     #[test]
     fn test_modify_confirmed_body_rejected() {
-        let mut kb = KeyBlock::new("wld_test", BlockType::Scene, "Forest");
+        let mut kb = WorldKbEntry::new("wld_test", BlockType::Scene, "Forest");
         kb.confirm(&owner_membership(), 0, &no_conflicts(), &[])
             .unwrap();
-        let result = kb.set_body(KeyBlockBody {
+        let result = kb.set_body(WorldKbBody {
             summary: Some("new summary".to_string()),
             attributes: None,
             tags: None,
@@ -438,8 +554,8 @@ mod tests {
 
     #[test]
     fn test_modify_provisional_body_allowed() {
-        let mut kb = KeyBlock::new("wld_test", BlockType::Scene, "Forest");
-        kb.set_body(KeyBlockBody {
+        let mut kb = WorldKbEntry::new("wld_test", BlockType::Scene, "Forest");
+        kb.set_body(WorldKbBody {
             summary: Some("A dark forest".to_string()),
             attributes: None,
             tags: Some(vec!["location".to_string()]),
@@ -467,16 +583,16 @@ mod tests {
         ];
 
         for bt in &types {
-            let kb = KeyBlock::new("wld_test", *bt, "Test");
+            let kb = WorldKbEntry::new("wld_test", *bt, "Test");
             let json = serde_json::to_string(&kb).unwrap();
-            let deserialized: KeyBlock = serde_json::from_str(&json).unwrap();
+            let deserialized: WorldKbEntry = serde_json::from_str(&json).unwrap();
             assert_eq!(deserialized.block_type, *bt);
         }
     }
 
     #[test]
     fn test_deprecate_keyblock() {
-        let mut kb = KeyBlock::new("wld_test", BlockType::Item, "Old Sword");
+        let mut kb = WorldKbEntry::new("wld_test", BlockType::Item, "Old Sword");
         kb.confirm(&owner_membership(), 0, &no_conflicts(), &[])
             .unwrap();
         kb.deprecate(Some("kb_new_sword")).unwrap();
@@ -485,7 +601,7 @@ mod tests {
 
     #[test]
     fn test_merge_keyblock() {
-        let mut kb = KeyBlock::new("wld_test", BlockType::Character, "Hero v1");
+        let mut kb = WorldKbEntry::new("wld_test", BlockType::Character, "Hero v1");
         kb.confirm(&owner_membership(), 0, &no_conflicts(), &[])
             .unwrap();
         kb.merge_into("kb_hero_v2").unwrap();
@@ -494,14 +610,14 @@ mod tests {
 
     #[test]
     fn test_delete_keyblock() {
-        let mut kb = KeyBlock::new("wld_test", BlockType::Character, "Temp");
+        let mut kb = WorldKbEntry::new("wld_test", BlockType::Character, "Temp");
         kb.delete().unwrap();
         assert_eq!(kb.status, "deleted");
     }
 
     #[test]
     fn test_is_confirmed() {
-        let mut kb = KeyBlock::new("wld_test", BlockType::Character, "Hero");
+        let mut kb = WorldKbEntry::new("wld_test", BlockType::Character, "Hero");
         assert!(!kb.is_confirmed());
         kb.confirm(&owner_membership(), 0, &no_conflicts(), &[])
             .unwrap();
@@ -510,7 +626,7 @@ mod tests {
 
     #[test]
     fn test_source_anchor_traceability() {
-        let mut kb = KeyBlock::new("wld_test", BlockType::Character, "Hero");
+        let mut kb = WorldKbEntry::new("wld_test", BlockType::Character, "Hero");
         let anchor = SourceAnchor::new("stm_visible1", "sum_1", Some("chapter_summary"));
         kb.set_source_anchor(anchor).unwrap();
         assert!(kb
@@ -520,7 +636,7 @@ mod tests {
 
     #[test]
     fn test_source_anchor_invalid_ref() {
-        let mut kb = KeyBlock::new("wld_test", BlockType::Character, "Hero");
+        let mut kb = WorldKbEntry::new("wld_test", BlockType::Character, "Hero");
         let anchor = SourceAnchor::new("stm_hidden", "sum_1", None);
         kb.set_source_anchor(anchor).unwrap();
         assert!(kb
@@ -532,7 +648,7 @@ mod tests {
     /// When source_anchor references a non-visible manifest, confirm() should fail.
     #[test]
     fn test_confirm_without_valid_source_anchor_fails() {
-        let mut kb = KeyBlock::new("wld_test", BlockType::Character, "Hero");
+        let mut kb = WorldKbEntry::new("wld_test", BlockType::Character, "Hero");
         // Set source_anchor pointing to a non-visible manifest
         let anchor = SourceAnchor::new("stm_hidden", "sum_1", None);
         kb.set_source_anchor(anchor).unwrap();
@@ -547,7 +663,7 @@ mod tests {
     /// C-1: confirm() succeeds when source_anchor references visible manifests.
     #[test]
     fn test_confirm_with_valid_source_anchor_succeeds() {
-        let mut kb = KeyBlock::new("wld_test", BlockType::Character, "Hero");
+        let mut kb = WorldKbEntry::new("wld_test", BlockType::Character, "Hero");
         let anchor = SourceAnchor::new("stm_visible1", "sum_1", None);
         kb.set_source_anchor(anchor).unwrap();
 
@@ -560,7 +676,7 @@ mod tests {
 
     #[test]
     fn test_state_roundtrip_serialize_deserialize_preserves_state() {
-        let body = KeyBlockBody {
+        let body = WorldKbBody {
             summary: Some("Hero character".to_string()),
             attributes: Some(serde_json::json!({"max_hp": 100, "base_atk": 30})),
             tags: Some(vec!["combat".to_string()]),
@@ -576,7 +692,7 @@ mod tests {
         };
 
         let json = serde_json::to_string(&body).unwrap();
-        let deserialized: KeyBlockBody = serde_json::from_str(&json).unwrap();
+        let deserialized: WorldKbBody = serde_json::from_str(&json).unwrap();
 
         assert_eq!(deserialized.computable, Some(true));
         assert_eq!(
@@ -591,8 +707,8 @@ mod tests {
 
     #[test]
     fn test_state_roundtrip_without_state_and_computable() {
-        // Legacy KeyBlock without state/computable should roundtrip correctly
-        let body = KeyBlockBody {
+        // Legacy WorldKbEntry without state/computable should roundtrip correctly
+        let body = WorldKbBody {
             summary: Some("Old block".to_string()),
             attributes: None,
             tags: None,
@@ -600,7 +716,7 @@ mod tests {
         };
 
         let json = serde_json::to_string(&body).unwrap();
-        let deserialized: KeyBlockBody = serde_json::from_str(&json).unwrap();
+        let deserialized: WorldKbBody = serde_json::from_str(&json).unwrap();
 
         assert_eq!(deserialized.summary.as_deref(), Some("Old block"));
         assert_eq!(deserialized.state, None);
@@ -609,7 +725,7 @@ mod tests {
 
     #[test]
     fn test_state_roundtrip_empty_state_object() {
-        let body = KeyBlockBody {
+        let body = WorldKbBody {
             summary: Some("minimal".to_string()),
             attributes: Some(serde_json::json!({"max_hp": 50})),
             tags: None,
@@ -618,7 +734,7 @@ mod tests {
         };
 
         let json = serde_json::to_string(&body).unwrap();
-        let deserialized: KeyBlockBody = serde_json::from_str(&json).unwrap();
+        let deserialized: WorldKbBody = serde_json::from_str(&json).unwrap();
 
         assert_eq!(deserialized.computable, Some(true));
         assert!(deserialized
