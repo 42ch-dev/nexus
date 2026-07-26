@@ -47,6 +47,35 @@ fn main() {
     }
 }
 
+/// Derive an isolated `CARGO_TARGET_DIR` for a module build so the inner
+/// `cargo` invocation never contends with the outer build's `.cargo-lock`.
+///
+/// When `OUT_DIR` is set (i.e. when running as a proper build script), we walk
+/// up from `<target>/<profile>/build/<crate>-<hash>/out` to `<root>/target/`
+/// and create `<root>/target/wasm-cache/<module-id>/`. This keeps the wasm
+/// artifacts under the same top-level target root without sharing its lock.
+///
+/// When `OUT_DIR` is absent (e.g. during a CI pre-build step) we use the
+/// `CARGO_TARGET_WASM_CACHE` env var. This lets CI pre-build steps and
+/// `build.rs` agree on the same isolated directory. Without either fallback we
+/// use `<src_dir>/target` (local-only fallback).
+fn module_target_dir(id: &str, src_dir: &Path) -> PathBuf {
+    std::env::var("OUT_DIR")
+        .ok()
+        .and_then(|out| {
+            let p = PathBuf::from(&out);
+            // ancestor chain: out → build/<hash> → build → <profile> → target
+            let target_root = p.ancestors().nth(4)?;
+            Some(target_root.join("wasm-cache").join(id))
+        })
+        .or_else(|| {
+            std::env::var("CARGO_TARGET_WASM_CACHE")
+                .ok()
+                .map(PathBuf::from)
+        })
+        .unwrap_or_else(|| src_dir.join("target"))
+}
+
 /// Compile one module's `.wasm` from source and stage its manifest, unless the
 /// embedded copy is already up to date.
 fn build_module(id: &str, modules_root: &Path, embedded_root: &Path) {
@@ -78,11 +107,12 @@ fn build_module(id: &str, modules_root: &Path, embedded_root: &Path) {
     copy_or_die(&src_manifest, &dest_manifest, "manifest.json");
 
     if !is_fresh(&dest_wasm, &src_cargo, &src_manifest, &src_code) {
-        compile_module(id, &src_dir);
+        let target_dir = module_target_dir(id, &src_dir);
+        compile_module(id, &src_dir, &target_dir);
         // cdylib artifact names use underscores (crate name `basic-combat` →
         // `basic_combat.wasm`); the embedded id keeps the dash.
-        let artifact = src_dir
-            .join("target/wasm32-unknown-unknown/release")
+        let artifact = target_dir
+            .join("wasm32-unknown-unknown/release")
             .join(format!("{}.wasm", id.replace('-', "_")));
         copy_or_die(&artifact, &dest_wasm, &format!("{id}.wasm"));
     }
@@ -139,13 +169,17 @@ fn dir_contains_newer(dir: &Path, threshold: SystemTime) -> bool {
 
 /// Runs `cargo build --release --target wasm32-unknown-unknown` in the module's
 /// source directory, exiting with a clear message on failure.
-fn compile_module(id: &str, src_dir: &Path) {
-    let output = Command::new("cargo")
+///
+/// `target_dir` is the isolated `CARGO_TARGET_DIR` computed by
+/// [`module_target_dir`]. We capture output once and classify the error from
+/// the captured stderr, avoiding a second build attempt.
+fn compile_module(id: &str, src_dir: &Path, target_dir: &Path) {
+    let output = match Command::new("cargo")
         .args(["build", "--release", "--target", "wasm32-unknown-unknown"])
+        .env("CARGO_TARGET_DIR", target_dir)
         .current_dir(src_dir)
-        .output();
-
-    let output = match output {
+        .output()
+    {
         Ok(o) => o,
         Err(e) => die(&format!(
             "failed to invoke `cargo` to build module `{id}`: {e} — is `cargo` on PATH?"
