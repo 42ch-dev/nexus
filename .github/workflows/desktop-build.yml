@@ -64,6 +64,32 @@ jobs:
           workspaces: |
             .
             apps/desktop/src-tauri
+            modules/basic-combat
+
+      # Free up disk space on the macOS runner before the heavy Rust builds.
+      # The macos-14 runner has ~14 GB free; removing unused Xcode/SDK caches
+      # prevents ENOSPC stalls during concurrent release + wasm builds.
+      - name: Free macOS runner disk space
+        run: |
+          sudo rm -rf /Library/Developer/CoreSimulator 2>/dev/null || true
+          sudo rm -rf /Library/Developer/Xcode/iOS\ DeviceSupport 2>/dev/null || true
+          sudo rm -rf ~/Library/Caches/Google 2>/dev/null || true
+          df -h / | tail -1
+
+      # Pre-build the embedded WASM module so its target dir is cached by
+      # rust-cache above. When nexux-wasm-host/build.rs runs during the main
+      # build, it finds the .wasm already fresh and skips recompilation —
+      # eliminating the recursive cargo resource contention.
+      #
+      # CARGO_TARGET_WASM_CACHE is consumed by module_target_dir() in build.rs
+      # when OUT_DIR is not yet set (build script hasn't started). Both use the
+      # same isolated path under the workspace target root.
+      - name: Pre-build embedded WASM module (prime cache)
+        run: |
+          mkdir -p target/wasm-cache/basic-combat
+          CARGO_TARGET_WASM_CACHE="$PWD/target/wasm-cache/basic-combat" \
+            cargo build --release --target wasm32-unknown-unknown \
+              --manifest-path modules/basic-combat/Cargo.toml
 
       - name: Build contracts package
         run: pnpm --filter @42ch/nexus-contracts run build
@@ -105,6 +131,15 @@ jobs:
           key: served-ui-smoke-macos-aarch64
           workspaces: |
             .
+            modules/basic-combat
+
+      # Pre-build the embedded WASM module so its target dir is cached.
+      - name: Pre-build embedded WASM module (prime cache)
+        run: |
+          mkdir -p target/wasm-cache/basic-combat
+          CARGO_TARGET_WASM_CACHE="$PWD/target/wasm-cache/basic-combat" \
+            cargo build --release --target wasm32-unknown-unknown \
+              --manifest-path modules/basic-combat/Cargo.toml
 
       - name: Build contracts package
         run: pnpm --filter @42ch/nexus-contracts run build
