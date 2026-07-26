@@ -28,3 +28,7 @@ uuid = { version = "1", features = ["v4"] }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt"] }
+# V1.139 P1 T6 — spoke-operations parity tests reference BlockType (nexus-contracts)
+# and call nexus-spoke-adapter ops directly for cross-product conformance.
+nexus-contracts = { path = "../nexus-contracts" }
+nexus-spoke-adapter = { path = "../nexus-spoke-adapter" }
