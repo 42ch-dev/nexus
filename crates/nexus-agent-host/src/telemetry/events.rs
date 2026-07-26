@@ -262,7 +262,7 @@ mod tests {
     fn thought_delta_event() {
         let sid = test_session_id();
         let oid = test_op_id();
-        let event = thought_delta(sid.clone(), oid.clone(), "thinking...".to_string());
+        let event = thought_delta(sid, oid, "thinking...".to_string());
         match event {
             HostEvent::ThoughtDelta(e) => {
                 assert_eq!(e.text, "thinking...");
@@ -275,7 +275,7 @@ mod tests {
     fn message_delta_event() {
         let sid = test_session_id();
         let oid = test_op_id();
-        let event = message_delta(sid.clone(), oid.clone(), "hello".to_string());
+        let event = message_delta(sid, oid, "hello".to_string());
         match event {
             HostEvent::MessageDelta(e) => {
                 assert_eq!(e.text, "hello");
@@ -288,12 +288,7 @@ mod tests {
     fn tool_call_event() {
         let sid = test_session_id();
         let oid = test_op_id();
-        let event = tool_call(
-            sid.clone(),
-            oid.clone(),
-            "tc-1".to_string(),
-            "file_read".to_string(),
-        );
+        let event = tool_call(sid, oid, "tc-1".to_string(), "file_read".to_string());
         match event {
             HostEvent::ToolCall(e) => {
                 assert_eq!(e.tool_call_id, "tc-1");
@@ -307,7 +302,7 @@ mod tests {
     fn op_finished_event() {
         let sid = test_session_id();
         let oid = test_op_id();
-        let event = op_finished(sid.clone(), oid.clone(), FinishReason::EndTurn);
+        let event = op_finished(sid, oid, FinishReason::EndTurn);
         match event {
             HostEvent::OpFinished(e) => {
                 assert_eq!(e.reason, FinishReason::EndTurn);
@@ -321,8 +316,8 @@ mod tests {
         let sid = test_session_id();
         let oid = test_op_id();
         let event = op_failed(
-            sid.clone(),
-            oid.clone(),
+            sid,
+            oid,
             "provider_protocol_error".to_string(),
             "connection reset".to_string(),
         );
@@ -338,7 +333,7 @@ mod tests {
     #[test]
     fn session_stopped_event() {
         let sid = test_session_id();
-        let event = session_stopped(sid.clone(), SessionStopReason::GracefulShutdown);
+        let event = session_stopped(sid, SessionStopReason::GracefulShutdown);
         match event {
             HostEvent::SessionStopped(e) => {
                 assert_eq!(e.reason, SessionStopReason::GracefulShutdown);
@@ -350,11 +345,7 @@ mod tests {
     #[test]
     fn status_event_with_session() {
         let sid = test_session_id();
-        let event = status_event(
-            Some(sid.clone()),
-            StatusLevel::Warning,
-            "slow response".to_string(),
-        );
+        let event = status_event(Some(sid), StatusLevel::Warning, "slow response".to_string());
         match event {
             HostEvent::Status(e) => {
                 assert_eq!(e.level, StatusLevel::Warning);
@@ -395,7 +386,7 @@ mod tests {
             .with_run_id("run-123");
         let sid = test_session_id();
         let oid = test_op_id();
-        let event = op_finished(sid.clone(), oid.clone(), FinishReason::EndTurn);
+        let event = op_finished(sid, oid, FinishReason::EndTurn);
         let enriched = EnrichedEvent::new(ctx, event);
 
         let json = enriched.to_json().expect("should serialize");
@@ -412,7 +403,7 @@ mod tests {
         let ctx = TelemetryContext::new(ProviderId::new("test"), ProtocolKind::NativeCli)
             .with_run_id("run-456");
         let sid = test_session_id();
-        let event = session_created(sid.clone(), ProviderId::new("test"));
+        let event = session_created(sid, ProviderId::new("test"));
         let enriched = EnrichedEvent::new(ctx, event);
 
         let json = enriched.to_json().expect("should serialize");
@@ -426,7 +417,7 @@ mod tests {
         let sid = test_session_id();
         let oid = test_op_id();
 
-        let events = vec![
+        let events = [
             EnrichedEvent::new(
                 ctx.clone(),
                 session_created(sid.clone(), ProviderId::new("test")),

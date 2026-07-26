@@ -98,7 +98,7 @@ fn pending_review_info_round_trips_and_omits_null_world_id() {
     assert_eq!(serde_json::to_value(&rt).unwrap(), v);
     // Null world_id also deserializes to None (open item #6: absent/null accepted).
     let with_null_world: Value = serde_json::to_value(&with_world).unwrap();
-    let mut with_null = with_null_world.clone();
+    let mut with_null = with_null_world;
     with_null["world_id"] = Value::Null;
     let parsed: PendingReviewInfo = serde_json::from_value(with_null).unwrap();
     assert!(parsed.world_id.is_none());

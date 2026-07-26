@@ -11,7 +11,7 @@
 //!   duplicate pending rows.
 //! - Pure heuristic unit tests live in `quality_loop.rs` (`#[cfg(test)]`).
 //!
-//! Run with: cargo test -p nexus-orchestration --test review_time_extraction
+//! Run with: cargo test -p nexus-orchestration --test `review_time_extraction`
 
 #![allow(clippy::unwrap_used)]
 

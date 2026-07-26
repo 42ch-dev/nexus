@@ -8,7 +8,7 @@
 //! world owner can still edit/delete. Drives `kb_edit`/`kb_delete` directly
 //! against a fresh temp DB (no `$HOME`, no daemon).
 //!
-//! Run with: cargo test -p nexus42 --test world_kb_authz
+//! Run with: cargo test -p nexus42 --test `world_kb_authz`
 
 use nexus42::commands::creator::world::kb::{kb_delete, kb_edit, WORLD_KB_FORBIDDEN_CODE};
 use nexus42::db::Schema;
@@ -26,7 +26,7 @@ const CANON_NAME: &str = "char_hero";
 const VALID_BODY: &str =
     r#"{"summary":"updated","attributes":{"novel_category":"character"},"tags":["novel"]}"#;
 
-/// Fresh pool + world owned by [`OWNER`] + one novel-valid WorldKbEntry.
+/// Fresh pool + world owned by [`OWNER`] + one novel-valid `WorldKbEntry`.
 async fn fresh_pool_with_block() -> (sqlx::SqlitePool, String, tempfile::TempDir) {
     let dir = tempfile::tempdir().unwrap();
     let db_path = dir.path().join("state.db");

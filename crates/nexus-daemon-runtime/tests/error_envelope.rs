@@ -3,7 +3,7 @@
 //! Asserts that `NexusApiError::IntoResponse` emits the single canonical
 //! envelope shape for non-2xx responses across two representative variants:
 //! - 503 `service_unavailable` (engine missing)
-//! - 422 `preset_gates_failed` (gated preset without required work_id)
+//! - 422 `preset_gates_failed` (gated preset without required `work_id`)
 
 #![allow(clippy::unwrap_used)]
 

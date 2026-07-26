@@ -74,7 +74,7 @@ async fn test_ctx() -> TestCtx {
     TestCtx { _tmp: tmp, state }
 }
 
-/// Seed a minimal Work record for tests that need a work_id.
+/// Seed a minimal Work record for tests that need a `work_id`.
 async fn seed_work(state: &WorkspaceState) -> String {
     let work_id = format!("wrk_{}", uuid::Uuid::new_v4());
     let now = chrono::Utc::now().to_rfc3339();
@@ -236,10 +236,10 @@ async fn unknown_tool_rejected_on_all_3_paths() {
 /// For every registered `nexus.*` host tool ID, verify the admission-gate
 /// result is equivalent across all 3 caller paths.
 ///
-/// This verifies that the tool IS registered (not NOT_SUPPORTED) through
+/// This verifies that the tool IS registered (not `NOT_SUPPORTED`) through
 /// each path. It does NOT require handler success — many handlers need
 /// seeded DB state. Instead it verifies that the error code (success or
-/// handler-level failure like INVALID_INPUT) is consistent.
+/// handler-level failure like `INVALID_INPUT`) is consistent.
 #[tokio::test]
 async fn all_18_ids_admission_equivalent_across_3_paths() {
     let ctx = test_ctx().await;
@@ -297,12 +297,11 @@ async fn all_18_ids_admission_equivalent_across_3_paths() {
         );
 
         // All 3 paths must produce the same error code (or all success)
-        if http_err != worker_err || http_err != sched_err {
-            panic!(
-                "{tool_id}: dispatch mismatch across 3 paths — \
-                 HTTP={http_err:?}, Worker={worker_err:?}, Schedule={sched_err:?}"
-            );
-        }
+        assert!(
+            !(http_err != worker_err || http_err != sched_err),
+            "{tool_id}: dispatch mismatch across 3 paths — \
+             HTTP={http_err:?}, Worker={worker_err:?}, Schedule={sched_err:?}"
+        );
 
         // If all succeeded, output must be structurally equivalent.
         // Timestamp fields (e.g. context.assemble's `assembled_at`) may differ

@@ -209,7 +209,7 @@ mod tests {
         assert!(block.is_empty(), "empty findings must yield empty block");
     }
 
-    /// Overlay §2.2 count cap: 20 findings → exactly MAX_FINDINGS bullets.
+    /// Overlay §2.2 count cap: 20 findings → exactly `MAX_FINDINGS` bullets.
     #[test]
     fn findings_block_builder_respects_token_cap_count() {
         let findings: Vec<Finding> = (0..20)
@@ -226,7 +226,7 @@ mod tests {
     /// Plan T4 alias — combined token-cap coverage: count cap (20 → ≤8
     /// bullets) AND body truncation (oversize bodies get an ellipsis).
     /// With oversize bodies the total-block cap may also bind (further
-    /// reducing the bullet count below MAX_FINDINGS); the assertion
+    /// reducing the bullet count below `MAX_FINDINGS`); the assertion
     /// accepts either cap binding as long as both invariants hold.
     #[test]
     fn findings_block_builder_respects_token_cap() {

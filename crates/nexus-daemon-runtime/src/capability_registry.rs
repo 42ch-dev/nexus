@@ -1126,7 +1126,7 @@ mod tests {
     /// `host_tool_registry()` iff Status=`shipped` AND Registry row
     /// ref=`host_tool`. Orchestration-scope shipped ids (e.g.
     /// `nexus.reference.refresh`, the 5 DF-46 capabilities) are correctly
-    /// excluded from the host_tool direction — no manual list to maintain.
+    /// excluded from the `host_tool` direction — no manual list to maintain.
     #[test]
     fn catalog_registry_invariant_all_ids_present() {
         use std::collections::HashSet;
@@ -1177,7 +1177,7 @@ mod tests {
                 continue;
             }
             let cols: Vec<&str> = trimmed.split('|').map(str::trim).collect();
-            if !cols.iter().any(|c| *c == "Capability ID") {
+            if !cols.contains(&"Capability ID") {
                 continue;
             }
             let mut idx = ColumnIndex::default();

@@ -8,9 +8,9 @@
 //! `nexus.llm.extract` pathway (carrying `llm_confidence` +
 //! `llm_source_quote`) and that the LLM metadata is preserved on the
 //! promotion row after adopt (so the author's confirmation surface can show
-//! confidence + source_quote per cli-spec §6.2G).
+//! confidence + `source_quote` per cli-spec §6.2G).
 //!
-//! Run with: cargo test -p nexus42 --test creator_world_kb_adopt
+//! Run with: cargo test -p nexus42 --test `creator_world_kb_adopt`
 
 #![allow(clippy::unwrap_used)]
 
@@ -42,8 +42,8 @@ async fn fresh_pool() -> (sqlx::SqlitePool, tempfile::TempDir) {
     (pool, dir)
 }
 
-/// Seed an LLM-extracted pending candidate (block_type=scene, confidence=0.92,
-/// verbatim source_quote) — mirrors what `nexus.llm.extract` produces.
+/// Seed an LLM-extracted pending candidate (`block_type=scene`, confidence=0.92,
+/// verbatim `source_quote`) — mirrors what `nexus.llm.extract` produces.
 async fn seed_llm_pending() -> (sqlx::SqlitePool, tempfile::TempDir, String) {
     let (pool, dir) = fresh_pool().await;
     let payload = serde_json::json!({
@@ -77,8 +77,8 @@ async fn seed_llm_pending() -> (sqlx::SqlitePool, tempfile::TempDir, String) {
 // ── AC4: adopt succeeds on an LLM-extracted candidate ──────────────────────
 
 /// `kb_adopt` accepts a candidate carrying LLM metadata (non-character
-/// block_type + confidence + source_quote), promotes it to a `confirmed`
-/// WorldKbEntry, and leaves the LLM columns intact on the promotion row.
+/// `block_type` + confidence + `source_quote`), promotes it to a `confirmed`
+/// `WorldKbEntry`, and leaves the LLM columns intact on the promotion row.
 #[tokio::test]
 async fn adopt_succeeds_on_llm_extracted_candidate() {
     let (pool, _dir, job_id) = seed_llm_pending().await;

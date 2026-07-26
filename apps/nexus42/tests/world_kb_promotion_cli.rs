@@ -13,7 +13,7 @@
 //! - AC4 (#4): adopt inserts a new `WorldKbEntry` with `status='confirmed'`.
 //! - AC5 (#5): reject writes a log entry; row marked `rejected`.
 //!
-//! Run with: cargo test -p nexus42 --test world_kb_promotion_cli
+//! Run with: cargo test -p nexus42 --test `world_kb_promotion_cli`
 
 #![allow(clippy::unwrap_used)]
 
@@ -62,7 +62,7 @@ async fn fresh_pool() -> (sqlx::SqlitePool, tempfile::TempDir) {
 }
 
 /// Seed a minimal `works` row (`work_id=WORK_ID`, `story_ref=WORK_REF`) so the
-/// R-V150KBED-05 work_ref resolution in `kb_reject` succeeds. `INSERT OR
+/// R-V150KBED-05 `work_ref` resolution in `kb_reject` succeeds. `INSERT OR
 /// IGNORE` makes this safe to call once per pool.
 async fn seed_work_for_log(pool: &sqlx::SqlitePool) {
     // SAFETY: test-only seed helper against the known works table schema
@@ -227,7 +227,7 @@ async fn reject_marks_rejected_and_writes_log() {
         .join("rejected");
     let entries = std::fs::read_dir(&log_path).unwrap();
     let log_files: Vec<_> = entries
-        .filter_map(|e| e.ok())
+        .filter_map(std::result::Result::ok)
         .filter(|e| e.file_name().to_string_lossy().contains(&candidate.job_id))
         .collect();
     assert!(
@@ -418,7 +418,7 @@ async fn kb_reject_writes_log_under_work_ref_path() {
         .join("rejected");
     let ref_entries: Vec<_> = std::fs::read_dir(&work_ref_dir)
         .unwrap_or_else(|e| panic!("work_ref log dir must exist: {work_ref_dir:?}: {e}"))
-        .filter_map(|e| e.ok())
+        .filter_map(std::result::Result::ok)
         .filter(|e| e.file_name().to_string_lossy().contains(&candidate.job_id))
         .collect();
     assert!(

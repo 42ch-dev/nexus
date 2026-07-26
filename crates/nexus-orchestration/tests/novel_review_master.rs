@@ -13,7 +13,7 @@
 //! Also covers the heuristic fallback: when no registry is threaded, the hook
 //! uses the V1.50 heuristic and the LLM columns stay NULL.
 //!
-//! Run with: cargo test -p nexus-orchestration --test novel_review_master
+//! Run with: cargo test -p nexus-orchestration --test `novel_review_master`
 
 #![allow(clippy::unwrap_used)]
 
@@ -145,7 +145,7 @@ fn write_workspace_with_chapter(body_text: &str) -> (tempfile::TempDir, String) 
 }
 
 /// Mock worker that returns a fixed LLM extraction payload with a non-character
-/// block_type (scene/location) so the test proves the LLM pathway — not the
+/// `block_type` (scene/location) so the test proves the LLM pathway — not the
 /// `character`-defaulting heuristic — produced the candidate.
 struct MockLlmExtractWorker;
 

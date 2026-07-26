@@ -129,7 +129,7 @@ fn make_create_body_with_title(title: &str) -> Value {
     })
 }
 
-/// Create a work via HTTP and return its work_id.
+/// Create a work via HTTP and return its `work_id`.
 async fn create_work_with_title(server: &TestServer, title: &str) -> String {
     let resp = server
         .post("/v1/daemon/works")
@@ -140,7 +140,7 @@ async fn create_work_with_title(server: &TestServer, title: &str) -> String {
     body["work_id"].as_str().unwrap().to_string()
 }
 
-/// Build a fresh WorkspaceState for handler-level testing.
+/// Build a fresh `WorkspaceState` for handler-level testing.
 async fn handler_state() -> (WorkspaceState, TestTempRoot) {
     let (tmp, nexus_home, db_path) = test_utils::create_test_workspace().await;
     let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
@@ -1420,7 +1420,7 @@ async fn test_ctx_with_creator_config() -> (TestTempRoot, WorkspaceState) {
     (tmp, state)
 }
 
-/// PATCH with only `stage_status: "complete"` (no current_stage) is rejected.
+/// PATCH with only `stage_status: "complete"` (no `current_stage`) is rejected.
 /// This proves the gate bypass from R-CURSOR-PR42-03 is fixed.
 #[tokio::test]
 async fn patch_stage_status_complete_without_stage_is_rejected() {
@@ -1687,7 +1687,7 @@ async fn handler_get_work_lazy_promotes_completed_then_is_idempotent() {
 
 // ─── PR #53 review: lineage_from_work_id validation ───────────────────────
 
-/// Work B with a valid lineage_from_work_id (pointing to an existing Work A
+/// Work B with a valid `lineage_from_work_id` (pointing to an existing Work A
 /// owned by the same creator) succeeds and persists the lineage reference.
 #[tokio::test]
 async fn create_work_with_valid_lineage_succeeds() {
@@ -1749,7 +1749,7 @@ async fn create_work_with_valid_lineage_succeeds() {
     );
 }
 
-/// Work creation with a nonexistent lineage_from_work_id is rejected with 400.
+/// Work creation with a nonexistent `lineage_from_work_id` is rejected with 400.
 #[tokio::test]
 async fn create_work_with_nonexistent_lineage_returns_400() {
     let (state, _tmp) = handler_state().await;
@@ -1781,8 +1781,8 @@ async fn create_work_with_nonexistent_lineage_returns_400() {
     );
 }
 
-/// Work creation with an empty lineage_from_work_id is rejected with 400
-/// (empty string is not a valid work_id — treated as invalid input).
+/// Work creation with an empty `lineage_from_work_id` is rejected with 400
+/// (empty string is not a valid `work_id` — treated as invalid input).
 #[tokio::test]
 async fn create_work_with_empty_lineage_returns_400() {
     let (state, _tmp) = handler_state().await;

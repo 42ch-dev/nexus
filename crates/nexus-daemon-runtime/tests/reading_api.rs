@@ -291,7 +291,7 @@ async fn patch_annotation_can_clear_note() {
         Path(created.annotation_id),
         Json(ReadingAnnotationPatchRequest {
             color: None,
-            note: Some("".to_string()),
+            note: Some(String::new()),
         }),
     )
     .await

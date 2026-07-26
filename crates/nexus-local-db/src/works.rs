@@ -2274,8 +2274,8 @@ mod tests {
     }
 
     /// Fix E (W-E): Verify the partial index for auto-chain boot resume exists
-    /// after migration. The index covers (auto_chain_enabled, auto_chain_interrupted,
-    /// status) with a partial WHERE clause for auto_chain_enabled = 1.
+    /// after migration. The index covers (`auto_chain_enabled`, `auto_chain_interrupted`,
+    /// status) with a partial WHERE clause for `auto_chain_enabled` = 1.
     #[tokio::test]
     async fn test_auto_chain_resume_index_exists() {
         let (pool, _dir) = fresh_pool().await;

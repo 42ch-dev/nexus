@@ -1,8 +1,8 @@
-//! V1.51 T-B P1: E_VERSION stable CLI code tests.
+//! V1.51 T-B P1: `E_VERSION` stable CLI code tests.
 //!
 //! Verifies:
 //! - `CliError::VersionConflict` maps to exit code 76
-//! - `CliError::VersionConflict` Display output includes "E_VERSION"
+//! - `CliError::VersionConflict` Display output includes "`E_VERSION`"
 //! - Distinct from `CliError::Locked` (exit 75) and `CliError::LockIo` (exit 78)
 
 use nexus42::errors::CliError;

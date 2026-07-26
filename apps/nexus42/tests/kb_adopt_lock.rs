@@ -52,7 +52,7 @@ fn kb_adopt_io_error_maps_to_lock_io_not_locked() {
     );
 }
 
-/// Verifies that the suggestion in LockIo does not imply retry.
+/// Verifies that the suggestion in `LockIo` does not imply retry.
 #[test]
 fn kb_adopt_lock_io_suggestion_no_retry() {
     let io_err = std::io::Error::new(std::io::ErrorKind::PermissionDenied, "read-only fs");

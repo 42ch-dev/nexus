@@ -1878,7 +1878,7 @@ mod tests {
                 );
             }
             Err(other) => panic!("expected BadRequest self_foreshadow_forbidden, got {other:?}"),
-            Ok(_) => panic!("self-referential foreshadow link must be rejected"),
+            Ok(()) => panic!("self-referential foreshadow link must be rejected"),
         }
         // No edge should have been added.
         assert_eq!(

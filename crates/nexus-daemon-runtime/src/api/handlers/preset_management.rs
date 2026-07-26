@@ -761,7 +761,7 @@ mod tests {
         let yaml_path = bundle_dir.join("preset.yaml");
         std::fs::write(
             &yaml_path,
-            r#"preset:
+            r"preset:
   id: test
   version: 1
   kind: creator
@@ -777,7 +777,7 @@ states:
     next: b
   - id: b
     terminal: true
-"#,
+",
         )
         .expect("write");
 
@@ -809,7 +809,7 @@ states:
         bundle_dir
     }
 
-    /// Helper: call validate_preset on a bundle and return the response.
+    /// Helper: call `validate_preset` on a bundle and return the response.
     async fn validate_bundle(bundle_dir: &std::path::Path) -> ValidatePresetResponse {
         let yaml_path = bundle_dir.join("preset.yaml");
         let req = ValidatePresetRequest {
@@ -823,7 +823,7 @@ states:
     #[tokio::test]
     async fn w1_reject_unreachable_terminal() {
         let tmp = tempfile::TempDir::new().expect("temp dir");
-        let yaml = r#"preset:
+        let yaml = r"preset:
   id: unreachable
   version: 1
   kind: creator
@@ -843,7 +843,7 @@ states:
     next: a
   - id: c
     terminal: true
-"#;
+";
         let bundle = create_bundle(&tmp, "unreachable", yaml);
         let resp = validate_bundle(&bundle).await;
         assert!(!resp.valid, "should be invalid: {:?}", resp.errors);
@@ -856,7 +856,7 @@ states:
     #[tokio::test]
     async fn w1_reject_terminal_header_mismatch() {
         let tmp = tempfile::TempDir::new().expect("temp dir");
-        let yaml = r#"preset:
+        let yaml = r"preset:
   id: mismatch
   version: 1
   kind: creator
@@ -873,7 +873,7 @@ states:
   - id: b
     enter: []
     exit_when: { kind: manual }
-"#;
+";
         let bundle = create_bundle(&tmp, "mismatch", yaml);
         let resp = validate_bundle(&bundle).await;
         assert!(!resp.valid, "should be invalid: {:?}", resp.errors);
@@ -883,7 +883,7 @@ states:
     #[tokio::test]
     async fn w1_reject_id_directory_mismatch() {
         let tmp = tempfile::TempDir::new().expect("temp dir");
-        let yaml = r#"preset:
+        let yaml = r"preset:
   id: wrong-name
   version: 1
   kind: creator
@@ -899,7 +899,7 @@ states:
     next: b
   - id: b
     terminal: true
-"#;
+";
         // Directory is "right-name" but manifest says "wrong-name"
         let bundle = create_bundle(&tmp, "right-name", yaml);
         let resp = validate_bundle(&bundle).await;
@@ -913,7 +913,7 @@ states:
     #[tokio::test]
     async fn w1_reject_missing_inner_graph() {
         let tmp = tempfile::TempDir::new().expect("temp dir");
-        let yaml = r#"preset:
+        let yaml = r"preset:
   id: missing-ig
   version: 1
   kind: creator
@@ -931,7 +931,7 @@ states:
     next: b
   - id: b
     terminal: true
-"#;
+";
         let bundle = create_bundle(&tmp, "missing-ig", yaml);
         let resp = validate_bundle(&bundle).await;
         assert!(!resp.valid, "should be invalid: {:?}", resp.errors);
@@ -944,7 +944,7 @@ states:
     #[tokio::test]
     async fn w1_warn_orphan_inner_graph() {
         let tmp = tempfile::TempDir::new().expect("temp dir");
-        let yaml = r#"preset:
+        let yaml = r"preset:
   id: orphan
   version: 1
   kind: creator
@@ -965,7 +965,7 @@ inner_graphs:
     nodes:
       - id: n1
         kind: acp_prompt
-"#;
+";
         let bundle = create_bundle(&tmp, "orphan", yaml);
         let resp = validate_bundle(&bundle).await;
         assert!(
@@ -983,7 +983,7 @@ inner_graphs:
     #[tokio::test]
     async fn w1_reject_missing_template_file_in_bundle() {
         let tmp = tempfile::TempDir::new().expect("temp dir");
-        let yaml = r#"preset:
+        let yaml = r"preset:
   id: missing-file
   version: 1
   kind: creator
@@ -1001,7 +1001,7 @@ states:
     next: b
   - id: b
     terminal: true
-"#;
+";
         let bundle = create_bundle(&tmp, "missing-file", yaml);
         let resp = validate_bundle(&bundle).await;
         assert!(!resp.valid, "should be invalid: {:?}", resp.errors);
@@ -1011,7 +1011,7 @@ states:
     #[tokio::test]
     async fn w1_reject_capability_drift() {
         let tmp = tempfile::TempDir::new().expect("temp dir");
-        let yaml = r#"preset:
+        let yaml = r"preset:
   id: cap-drift
   version: 1
   kind: creator
@@ -1028,7 +1028,7 @@ states:
     next: b
   - id: b
     terminal: true
-"#;
+";
         let bundle = create_bundle(&tmp, "cap-drift", yaml);
         let resp = validate_bundle(&bundle).await;
         assert!(!resp.valid, "should be invalid: {:?}", resp.errors);
@@ -1124,7 +1124,7 @@ states:
         #[cfg(unix)]
         std::os::unix::fs::symlink(&outside, prompts_dir.join("judge.md")).expect("symlink");
 
-        let yaml = r#"preset:
+        let yaml = r"preset:
   id: symlink-escape
   version: 1
   kind: creator
@@ -1142,7 +1142,7 @@ states:
     next: b
   - id: b
     terminal: true
-"#;
+";
         std::fs::write(bundle_dir.join("preset.yaml"), yaml).expect("write");
         let resp = validate_bundle(&bundle_dir).await;
         assert!(
@@ -1161,7 +1161,7 @@ states:
     #[tokio::test]
     async fn c4_accept_matching_id_and_dirname() {
         let tmp = tempfile::TempDir::new().expect("temp dir");
-        let yaml = r#"preset:
+        let yaml = r"preset:
   id: my-preset
   version: 1
   kind: creator
@@ -1177,7 +1177,7 @@ states:
     next: b
   - id: b
     terminal: true
-"#;
+";
         let bundle = create_bundle(&tmp, "my-preset", yaml);
         let resp = validate_bundle(&bundle).await;
         assert!(
@@ -1324,7 +1324,7 @@ states:
         .await
         .expect("scaffold");
 
-        let new_yaml = r#"preset:
+        let new_yaml = r"preset:
   id: update-test
   version: 1
   kind: creator
@@ -1340,7 +1340,7 @@ states:
     next: b
   - id: b
     terminal: true
-"#
+"
         .to_string();
         let resp = update_preset(
             State(state.clone()),

@@ -685,8 +685,8 @@ mod tests {
             .is_err());
     }
 
-    /// C-1: confirm() must enforce Gate 4 — source_anchor traceability.
-    /// When source_anchor references a non-visible manifest, confirm() should fail.
+    /// C-1: `confirm()` must enforce Gate 4 — `source_anchor` traceability.
+    /// When `source_anchor` references a non-visible manifest, `confirm()` should fail.
     #[test]
     fn test_confirm_without_valid_source_anchor_fails() {
         let mut kb = WorldKbEntry::new("wld_test", BlockType::Character, "Hero");
@@ -701,7 +701,7 @@ mod tests {
         assert!(matches!(result.unwrap_err(), KbError::ValidationError(_)));
     }
 
-    /// C-1: confirm() succeeds when source_anchor references visible manifests.
+    /// C-1: `confirm()` succeeds when `source_anchor` references visible manifests.
     #[test]
     fn test_confirm_with_valid_source_anchor_succeeds() {
         let mut kb = WorldKbEntry::new("wld_test", BlockType::Character, "Hero");

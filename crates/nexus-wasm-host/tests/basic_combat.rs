@@ -75,13 +75,7 @@ fn basic_combat_resolves_attack_into_four_part_output() {
     let delta = output
         .state_delta
         .iter()
-        .find(|d| {
-            d.target_key_block_id
-                .as_ref()
-                .map(|id| id.as_str())
-                .as_deref()
-                == Some("kb_def")
-        })
+        .find(|d| d.target_key_block_id.as_deref() == Some("kb_def"))
         .expect("delta targeting defender present");
     assert_eq!(delta.op.as_str(), "-");
     assert_eq!(delta.path.to_string(), "character.current_hp");
@@ -101,7 +95,7 @@ fn basic_combat_resolves_attack_into_four_part_output() {
     assert_eq!(
         ev.affected_key_block_ids
             .iter()
-            .map(|i| i.as_str())
+            .map(std::string::String::as_str)
             .collect::<Vec<_>>(),
         &["kb_atk", "kb_def"]
     );

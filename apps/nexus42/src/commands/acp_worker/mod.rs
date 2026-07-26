@@ -1983,7 +1983,7 @@ mod tests {
 
     // --- R14: SessionCapture lifecycle tests ---
 
-    /// Verify that SessionCapture created at session start accumulates
+    /// Verify that `SessionCapture` created at session start accumulates
     /// non-zero message counts when prompts are simulated.
     #[test]
     fn session_capture_populated_after_prompts() {
@@ -2048,7 +2048,7 @@ mod tests {
         assert_eq!(digest.last_context, "second prompt with tool");
     }
 
-    /// Verify that session capture is removed from the map on agent_stop.
+    /// Verify that session capture is removed from the map on `agent_stop`.
     #[test]
     fn session_capture_removed_on_stop() {
         let state = MultiplexedWorkerState::new(

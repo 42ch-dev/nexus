@@ -1,30 +1,30 @@
 //! Agent Tool API hermetic tests (V1.34 P4 — spec §10, §12.7).
 //!
 //! Tests covering the admission pipeline, tool dispatch, and permission
-//! enforcement for the unified HostToolExecutor registry.
+//! enforcement for the unified `HostToolExecutor` registry.
 //!
 //! Test vectors from spec §10:
 //! - TV-1: Happy path nexus.work.get (active creator, own work)
 //! - TV-2: Cross-creator nexus.work.get → FORBIDDEN
-//! - TV-3: nexus.context.assemble platform-required → POLICY_BLOCKED
+//! - TV-3: nexus.context.assemble platform-required → `POLICY_BLOCKED`
 //!
 //! Additional tests (spec §12.7):
 //! - nexus.context.whoami returns active creator id
 //! - nexus.workspace.info returns workspace slug
-//! - nexus.work.patch happy path (append inspiration_log)
-//! - nexus.work.patch rejects forbidden field (current_stage)
-//! - nexus.orchestration.schedule_status happy path
+//! - nexus.work.patch happy path (append `inspiration_log`)
+//! - nexus.work.patch rejects forbidden field (`current_stage`)
+//! - `nexus.orchestration.schedule_status` happy path
 //!
 //! Fix wave 2 coverage:
-//! - Error code surface (POLICY_BLOCKED, NOT_SUPPORTED, FORBIDDEN, INVALID_INPUT)
+//! - Error code surface (`POLICY_BLOCKED`, `NOT_SUPPORTED`, FORBIDDEN, `INVALID_INPUT`)
 //! - Audit log on every invocation path
-//! - stage_metadata sub-field allowlist
+//! - `stage_metadata` sub-field allowlist
 //! - Worker upcall equivalence (HTTP and worker hit same dispatch)
 
 #![allow(clippy::unwrap_used)]
 
 use nexus_daemon_runtime::api::handlers::host_tool_executor::{
-    HostToolCallerKind, HostToolExecutor, ToolExecuteRequest,
+    HostToolExecutor, ToolExecuteRequest,
 };
 use nexus_daemon_runtime::test_utils;
 use nexus_daemon_runtime::test_utils::TestTempRoot;
@@ -45,7 +45,7 @@ async fn test_ctx() -> TestCtx {
     TestCtx { _tmp: tmp, state }
 }
 
-/// Create a test work record for the active test_creator.
+/// Create a test work record for the active `test_creator`.
 async fn seed_work(state: &WorkspaceState) -> String {
     let work_id = format!("wrk_{}", uuid::Uuid::new_v4());
     let now = chrono::Utc::now().to_rfc3339();
@@ -296,7 +296,7 @@ async fn schedule_status_happy_path() {
 
 // ─── Fix wave 2: Error code surface tests ──────────────────────────────────
 
-/// Helper: count audit log rows for a given tool_name + outcome prefix.
+/// Helper: count audit log rows for a given `tool_name` + outcome prefix.
 async fn count_audit_rows(pool: &sqlx::SqlitePool, tool_name: &str, outcome_prefix: &str) -> i64 {
     // SAFETY: dynamic SQL for test helper; compile-time macro not applicable.
     let row: (i64,) = sqlx::query_as(
@@ -310,7 +310,7 @@ async fn count_audit_rows(pool: &sqlx::SqlitePool, tool_name: &str, outcome_pref
     row.0
 }
 
-/// Helper: get latest audit row outcome for a given tool_name.
+/// Helper: get latest audit row outcome for a given `tool_name`.
 async fn latest_audit_outcome(pool: &sqlx::SqlitePool, tool_name: &str) -> String {
     // SAFETY: dynamic SQL for test helper; compile-time macro not applicable.
     let row: (String,) = sqlx::query_as(

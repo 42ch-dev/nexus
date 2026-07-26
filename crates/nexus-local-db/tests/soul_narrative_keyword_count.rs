@@ -34,7 +34,7 @@ async fn insert_fragment(pool: &sqlx::SqlitePool, creator_id: &str, keywords: &[
 }
 
 /// Creator with ≥20 distinct keywords spread across many fragments
-/// → gate passes (distinct_keyword_count ≥ 20). Above the threshold the
+/// → gate passes (`distinct_keyword_count` ≥ 20). Above the threshold the
 /// returned value is the threshold-saturated count (20), not the exact
 /// total — the gate only needs the `>= 20?` predicate.
 #[tokio::test]

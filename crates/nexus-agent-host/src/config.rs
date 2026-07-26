@@ -554,7 +554,7 @@ mod tests {
         );
         assert_eq!(
             timeouts.prompt_duration(),
-            std::time::Duration::from_secs(180)
+            std::time::Duration::from_mins(3)
         );
         assert_eq!(
             timeouts.shutdown_duration(),

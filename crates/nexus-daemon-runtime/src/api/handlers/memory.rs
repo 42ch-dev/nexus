@@ -1731,10 +1731,7 @@ mod tests {
             .unwrap();
 
         // The result should be capped at MAX_DIGEST_BYTES + header.
-        let body_after_header = result
-            .split_once("\n\n")
-            .map(|(_, body)| body)
-            .unwrap_or("");
+        let body_after_header = result.split_once("\n\n").map_or("", |(_, body)| body);
         assert_eq!(
             body_after_header.len(),
             MAX_DIGEST_BYTES,
@@ -1896,7 +1893,7 @@ mod tests {
 
     /// `force_regenerate=false` + above-gate + no cache → `ungenerated`,
     /// and the synthesizer is NOT called (proved by returning before the
-    /// capability-registry check, which would fail with ServiceUnavailable
+    /// capability-registry check, which would fail with `ServiceUnavailable`
     /// in test mode).
     #[tokio::test]
     async fn reflect_soul_no_force_ungenerated_no_llm_call() {
@@ -2076,7 +2073,7 @@ mod tests {
 
     // ─── V1.82: per-World narrative ownership + gating ─────────────────────
 
-    /// Helper: seed a narrative_worlds row owned by `creator_id`.
+    /// Helper: seed a `narrative_worlds` row owned by `creator_id`.
     async fn seed_owned_world(pool: &sqlx::SqlitePool, creator_id: &str, world_id: &str) {
         // Ensure the creator row exists so the world FK can be inserted.
         // SAFETY: test-only setup.

@@ -1464,7 +1464,7 @@ mod tests {
 
         // Exactly one should succeed (the other gets SQLITE_BUSY → Err, or
         // finds no queued row → None).
-        let claimed_count = r1.is_some() as usize + r2.is_some() as usize;
+        let claimed_count = usize::from(r1.is_some()) + usize::from(r2.is_some());
         assert!(
             claimed_count == 1,
             "expected exactly one claim to succeed, got {claimed_count}"

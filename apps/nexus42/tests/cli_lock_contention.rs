@@ -1,6 +1,6 @@
 //! Integration test: CLI lock contention (V1.51 T-B P0).
 //!
-//! Tests the CliError::Locked error variant and its exit code mapping.
+//! Tests the `CliError::Locked` error variant and its exit code mapping.
 //! Full CLI binary integration testing is deferred to QA.
 
 use nexus42::errors::CliError;

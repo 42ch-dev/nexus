@@ -770,7 +770,7 @@ async fn remove_cross_world_relationship_returns_403() {
 
 // ── V1.76: needs_review gate + extraction suggestions ─────────────────────
 
-/// Seed a needs_review=1/source='extraction' suggestion directly into the DB
+/// Seed a `needs_review=1/source`='extraction' suggestion directly into the DB
 /// (simulating what the extraction pipeline's upsert produces).
 async fn seed_extraction_suggestion(
     pool: &sqlx::SqlitePool,
@@ -1117,5 +1117,5 @@ async fn get_graph_truncates_relationships_at_cap() {
     assert!(!ids.contains("rel_cap_0001"));
     // The newest relationships are retained.
     assert!(ids.contains("rel_cap_0002"));
-    assert!(ids.contains(format!("rel_cap_{:04}", CAP).as_str()));
+    assert!(ids.contains(format!("rel_cap_{CAP:04}").as_str()));
 }

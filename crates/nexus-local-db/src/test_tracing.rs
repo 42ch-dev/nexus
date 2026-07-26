@@ -15,7 +15,7 @@ use std::sync::{Arc, Mutex};
 /// `tracing_subscriber` layer that records every INFO event's fields into a
 /// shared buffer. Clone-safe via `Arc<Mutex<...>>`.
 #[derive(Clone)]
-pub(crate) struct CaptureLayer {
+pub struct CaptureLayer {
     /// Captured INFO-event field renderings (one String per event).
     pub messages: Arc<Mutex<Vec<String>>>,
 }
@@ -51,7 +51,7 @@ impl tracing::field::Visit for CaptureVisitor {
 }
 
 /// Build a fresh capture layer + its shared message buffer.
-pub(crate) fn capture_layer() -> (CaptureLayer, Arc<Mutex<Vec<String>>>) {
+pub fn capture_layer() -> (CaptureLayer, Arc<Mutex<Vec<String>>>) {
     let messages = Arc::new(Mutex::new(Vec::new()));
     (
         CaptureLayer {
@@ -68,9 +68,7 @@ pub(crate) fn capture_layer() -> (CaptureLayer, Arc<Mutex<Vec<String>>>) {
 /// R-V146P4-QC1-S2: uses the idiomatic `registry().with(layer)` builder form
 /// (canonic per `tracing-subscriber` docs) instead of the verbose UFCS
 /// `<Registry as SubscriberExt>::with(Registry::default(), layer)` shape.
-pub(crate) fn subscriber_with(
-    layer: CaptureLayer,
-) -> impl tracing::Subscriber + Send + Sync + 'static {
+pub fn subscriber_with(layer: CaptureLayer) -> impl tracing::Subscriber + Send + Sync + 'static {
     use tracing_subscriber::layer::SubscriberExt;
     tracing_subscriber::registry().with(layer)
 }
@@ -79,7 +77,7 @@ pub(crate) fn subscriber_with(
 ///
 /// Use inside the `set_default` guard scope OR after it (the buffer is shared
 /// and outlives the guard).
-pub(crate) fn assert_info_emitted(messages: &Arc<Mutex<Vec<String>>>, needles: &[&str]) {
+pub fn assert_info_emitted(messages: &Arc<Mutex<Vec<String>>>, needles: &[&str]) {
     let msgs = messages.lock().unwrap();
     assert!(
         msgs.iter().any(|m| needles.iter().all(|n| m.contains(n))),

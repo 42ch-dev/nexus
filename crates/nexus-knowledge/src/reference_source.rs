@@ -204,7 +204,7 @@ mod tests {
             ReferenceSourceType::Note,
         ];
         for st in types {
-            let rs = ReferenceSource::register("wrk_test", st.clone(), "test://uri", "Test");
+            let rs = ReferenceSource::register("wrk_test", st, "test://uri", "Test");
             let json = serde_json::to_string(&rs).unwrap();
             let deserialized: ReferenceSource = serde_json::from_str(&json).unwrap();
             assert_eq!(deserialized.source_type, st.as_str());

@@ -262,7 +262,7 @@ mod tests {
             .with_limit(10)
             .with_offset(20);
         assert_eq!(query.user_id, "user_1");
-        assert_eq!(query.tags.as_ref().map(|t| t.len()), Some(1));
+        assert_eq!(query.tags.as_ref().map(std::vec::Vec::len), Some(1));
         assert_eq!(query.text.as_deref(), Some("ownership"));
         assert_eq!(query.effective_limit(), 10);
         assert_eq!(query.effective_offset(), 20);

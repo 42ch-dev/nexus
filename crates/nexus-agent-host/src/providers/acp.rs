@@ -744,8 +744,8 @@ mod tests {
 
         // Verify descriptor fields are correct
         let expected_descriptor = ProviderDescriptor {
-            provider_id: provider_id.clone(),
-            display_name: display_name.clone(),
+            provider_id: provider_id,
+            display_name: display_name,
             protocol_kind: ProtocolKind::Acp,
             capabilities: CapabilityDescriptor::acp_full(),
         };

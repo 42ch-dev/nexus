@@ -1,6 +1,6 @@
-//! Integration test: works_status_lock_holder (V1.51 T-B P0).
+//! Integration test: `works_status_lock_holder` (V1.51 T-B P0).
 //!
-//! Tests that lock_holder info is correctly read from filesystem.
+//! Tests that `lock_holder` info is correctly read from filesystem.
 //! Full status JSON integration deferred to QA (requires daemon).
 
 use std::path::PathBuf;

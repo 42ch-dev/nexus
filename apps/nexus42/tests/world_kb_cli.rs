@@ -4,14 +4,14 @@
 //!
 //! Two test families live here:
 //!
-//! 1. **CLI surface** (assert_cmd) — `creator world kb --help` lists the
+//! 1. **CLI surface** (`assert_cmd`) — `creator world kb --help` lists the
 //!    `list`/`show`/`edit`/`delete` subcommands and each subcommand exposes the
 //!    expected flags (`--json`, `--body`, `--yes`/`-y`).
 //! 2. **Hermetic round-trip** — drives `nexus42::commands::creator::world::kb`
 //!    logic functions directly against a fresh temp DB (`Schema::init` + public
 //!    seed helpers) to exercise list/show/edit/delete without `$HOME` or a daemon.
 //!
-//! Run with: cargo test -p nexus42 --test world_kb_cli
+//! Run with: cargo test -p nexus42 --test `world_kb_cli`
 
 use assert_cmd::Command;
 use nexus42::commands::creator::world::kb::{kb_delete, kb_edit, kb_list, kb_show};
@@ -85,7 +85,7 @@ fn world_kb_help_lists_subcommands() {
     }
 }
 
-/// `creator world kb list --help` documents the world_ref arg and `--json`.
+/// `creator world kb list --help` documents the `world_ref` arg and `--json`.
 #[test]
 fn world_kb_list_help_shows_expected_text() {
     let output = Command::cargo_bin("nexus42")

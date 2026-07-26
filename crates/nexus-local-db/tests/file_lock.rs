@@ -67,7 +67,7 @@ async fn zombie_lock_overwritten_on_reacquire() {
             .unwrap()
             .as_millis() as u64
             - 120_000; // 2 min ago
-        let stale_body = format!("99999:cli:zombie-stale:{}", stale_ms);
+        let stale_body = format!("99999:cli:zombie-stale:{stale_ms}");
         std::fs::write(&lock_path, &stale_body).unwrap();
     }
     // Guard dropped → flock released. Stale metadata remains.

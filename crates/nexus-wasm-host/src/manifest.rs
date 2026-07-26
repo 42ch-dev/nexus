@@ -339,7 +339,7 @@ mod tests {
             detail
                 .host_functions
                 .iter()
-                .map(|h| h.to_string())
+                .map(std::string::ToString::to_string)
                 .collect::<Vec<_>>(),
             vec!["kb_read".to_string(), "narrative_query".to_string()]
         );

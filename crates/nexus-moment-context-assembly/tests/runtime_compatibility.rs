@@ -1,6 +1,6 @@
 //! T6.11: Two-Stage Assembly Mock Tests
 //!
-//! Integration tests for TwoStageAssembly with mocked platform responses.
+//! Integration tests for `TwoStageAssembly` with mocked platform responses.
 //!
 //! These tests require the `cloud-stage` feature because they import
 //! `cloud_stage` module types that are gated behind `#[cfg(feature = "cloud-stage")]`.
@@ -14,7 +14,7 @@ use nexus_moment_context_assembly::cloud_stage::{
     TwoStageAssembly,
 };
 
-/// Helper to create a LongTermMemory for testing.
+/// Helper to create a `LongTermMemory` for testing.
 fn make_memory(kind: &str, body: &str, updated_at: &str) -> LongTermMemory {
     let mut mem = LongTermMemory::new(kind);
     mem.set_body(body);
@@ -49,7 +49,7 @@ fn two_stage_assembly_with_mock_platform_response() {
         long_term_memories: vec![],
         fragment_keywords: vec!["plot".into()],
         user_prompt: "Write chapter 1".into(),
-        system_prefix: "".into(),
+        system_prefix: String::new(),
         max_tokens: None,
         runtime_mode: AssemblyRuntimeMode::new(RuntimeMode::CloudEnhanced),
     };
@@ -80,7 +80,7 @@ fn two_stage_fallback_empty_response() {
         long_term_memories: vec![make_memory("story_summary", "Local memory", "2026-04-15")],
         fragment_keywords: vec!["keyword".into()],
         user_prompt: "Task".into(),
-        system_prefix: "".into(),
+        system_prefix: String::new(),
         max_tokens: None,
         runtime_mode: AssemblyRuntimeMode::new(RuntimeMode::LocalFirst),
     };
@@ -111,12 +111,12 @@ fn dedup_platform_memory_with_local_priority() {
                 token_count_estimate: None,
             },
         }),
-        personality: "".into(),
-        experience: "".into(),
+        personality: String::new(),
+        experience: String::new(),
         long_term_memories: vec![local_mem],
         fragment_keywords: vec![],
-        user_prompt: "".into(),
-        system_prefix: "".into(),
+        user_prompt: String::new(),
+        system_prefix: String::new(),
         max_tokens: None,
         runtime_mode: AssemblyRuntimeMode::new(RuntimeMode::CloudEnhanced),
     };

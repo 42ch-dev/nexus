@@ -1175,7 +1175,7 @@ mod tests {
     }
 
     /// Forward-wiring: list via World scope exercises the deprecation + canonical
-    /// kb_list path (mirrors kb.rs:448-454 forwarding code).
+    /// `kb_list` path (mirrors kb.rs:448-454 forwarding code).
     #[tokio::test]
     async fn legacy_kb_scope_world_list_exercises_forward_path() {
         use crate::db::Schema;
@@ -1216,7 +1216,7 @@ mod tests {
     }
 
     /// Forward-wiring: show via World scope exercises the deprecation + canonical
-    /// kb_show path (mirrors kb.rs:610-615 forwarding code).
+    /// `kb_show` path (mirrors kb.rs:610-615 forwarding code).
     #[tokio::test]
     async fn legacy_kb_scope_world_show_exercises_forward_path() {
         use crate::db::Schema;
@@ -1260,7 +1260,7 @@ mod tests {
     }
 
     /// Forward-wiring: remove via World scope exercises the deprecation + canonical
-    /// kb_delete path with owner auth gate (mirrors kb.rs:789-797 forwarding code).
+    /// `kb_delete` path with owner auth gate (mirrors kb.rs:789-797 forwarding code).
     #[tokio::test]
     async fn legacy_kb_scope_world_remove_exercises_forward_path() {
         use crate::db::Schema;
@@ -1330,7 +1330,7 @@ mod tests {
             tags: Some(vec!["ut-rm2".to_string()]),
             ..Default::default()
         });
-        let result2 = store2.insert_knowledge_entry(kb_block2).await.unwrap();
+        let _result2 = store2.insert_knowledge_entry(kb_block2).await.unwrap();
 
         super::deprecation_notice_legacy_world_kb("remove");
         let cross_result = super::super::world::kb::kb_delete(
@@ -1347,7 +1347,9 @@ mod tests {
         );
         let err_msg = format!("{}", cross_result.unwrap_err());
         assert!(
-            err_msg.contains("403") || err_msg.contains("WORLD_KB_FORBIDDEN") || err_msg.contains("not found"),
+            err_msg.contains("403")
+                || err_msg.contains("WORLD_KB_FORBIDDEN")
+                || err_msg.contains("not found"),
             "cross-author error must mention auth, got: {err_msg}"
         );
     }

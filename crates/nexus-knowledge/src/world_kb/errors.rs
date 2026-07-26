@@ -151,7 +151,7 @@ mod tests {
             expected: 5,
             actual: 3,
         };
-        assert!(err.to_string().contains("5"));
-        assert!(err.to_string().contains("3"));
+        assert!(err.to_string().contains('5'));
+        assert!(err.to_string().contains('3'));
     }
 }

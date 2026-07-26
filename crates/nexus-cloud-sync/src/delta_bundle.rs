@@ -470,7 +470,10 @@ mod tests {
             .expect("should build");
 
         assert_eq!(
-            bundle.manuscript_phase.as_ref().map(|v| v.to_string()),
+            bundle
+                .manuscript_phase
+                .as_ref()
+                .map(std::string::ToString::to_string),
             Some("draft".to_string())
         );
         assert_eq!(bundle.output_manuscript, Some(true));

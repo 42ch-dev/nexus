@@ -536,7 +536,7 @@ async fn b3_rejects_foreshadow_when_realization_unscheduled() {
     );
 }
 
-/// Read the event_id at `index` from the projected work outline.
+/// Read the `event_id` at `index` from the projected work outline.
 async fn event_id_at(state: &WorkspaceState, work_id: &str, index: usize) -> String {
     let Json(body) = outline::get_work_outline(State(state.clone()), Path(work_id.to_string()))
         .await
@@ -731,7 +731,7 @@ async fn v175_content_patch_seeds_outline_path_when_missing() {
     // No outline_path seeded — the handler must derive the fallback path.
     let before = chapter_row(ctx.state.pool().unwrap(), &work_id, 1).await;
     assert!(
-        before.outline_path.as_deref().map_or(true, str::is_empty),
+        before.outline_path.as_deref().is_none_or(str::is_empty),
         "precondition: chapter has no outline_path"
     );
 

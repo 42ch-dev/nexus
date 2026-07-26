@@ -1,12 +1,12 @@
 //! FL-E schedule API contract tests (R-FL-E-P2-02).
 //!
 //! Hermetic tests that exercise the daemon schedule creation API via
-//! TestServer, verifying that schedule requests are correctly enqueued
+//! `TestServer`, verifying that schedule requests are correctly enqueued
 //! with the right preset, creator, and seed fields.
 //!
 //! Covers:
-//! - Schedule creation with AddScheduleRequest DTO (snake_case fields)
-//! - Work-derived context propagates via seed into core_context
+//! - Schedule creation with `AddScheduleRequest` DTO (`snake_case` fields)
+//! - Work-derived context propagates via seed into `core_context`
 //! - Cross-creator isolation for schedules
 //! - List schedule verification via supervisor's own pool
 //!

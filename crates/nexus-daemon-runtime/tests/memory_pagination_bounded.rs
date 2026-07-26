@@ -24,7 +24,7 @@ const ACTIVE_CREATOR: &str = "ctr_bounded";
 /// Number of rows seeded — intentionally well above any `limit` used below so
 /// the bound is exercised on every page.
 const SEED_COUNT: usize = 60;
-/// Page size used across the pagination walks (divides SEED_COUNT evenly).
+/// Page size used across the pagination walks (divides `SEED_COUNT` evenly).
 const PAGE_SIZE: u64 = 10;
 
 struct TestCtx {
@@ -86,7 +86,7 @@ async fn seed_pending_reviews(ctx: &TestCtx, n: usize) {
     );
 }
 
-/// Seed `n` memory fragments (distinct created_at, DESC-predictable order).
+/// Seed `n` memory fragments (distinct `created_at`, DESC-predictable order).
 async fn seed_fragments(ctx: &TestCtx, n: usize) {
     for i in 0..n {
         // SAFETY: test fixture using runtime query.
@@ -126,8 +126,7 @@ async fn pending_review_list_respects_limit_when_dataset_is_large() {
     assert_eq!(
         items.len(),
         PAGE_SIZE as usize,
-        "first page must return exactly limit items, not the full {}",
-        SEED_COUNT
+        "first page must return exactly limit items, not the full {SEED_COUNT}"
     );
     assert!(
         body["pagination"]["has_more"].as_bool().unwrap(),
@@ -169,8 +168,7 @@ async fn pending_review_full_cursor_walk_returns_all_rows_once() {
         let items = body["items"].as_array().unwrap();
         assert!(
             !items.is_empty(),
-            "page {} returned 0 items mid-walk (gap / premature truncation)",
-            pages
+            "page {pages} returned 0 items mid-walk (gap / premature truncation)"
         );
         for item in items {
             let pid = item["pending_id"].as_str().unwrap().to_string();
@@ -284,8 +282,7 @@ async fn fragments_list_respects_limit_when_dataset_is_large() {
     assert_eq!(
         fragments.len(),
         PAGE_SIZE as usize,
-        "fragments endpoint must return exactly limit items, not the full {}",
-        SEED_COUNT
+        "fragments endpoint must return exactly limit items, not the full {SEED_COUNT}"
     );
     // The fragments endpoint is NOT paginated (no cursor); it returns the
     // top-`limit` slice. The newest-seeded fragments (highest created_at) come

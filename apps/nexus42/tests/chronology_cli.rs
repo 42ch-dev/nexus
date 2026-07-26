@@ -104,7 +104,7 @@ async fn chronology_advance_round_trip() {
 }
 
 /// AC §8 (negative): a second `advance` to the same volume is idempotent
-/// (returns AlreadyAdvanced, does not clobber).
+/// (returns `AlreadyAdvanced`, does not clobber).
 #[tokio::test]
 async fn chronology_advance_idempotent_on_repeat() {
     let pool = fresh_seeded_pool().await;
@@ -249,7 +249,7 @@ async fn fresh_seeded_pool() -> sqlx::SqlitePool {
     pool
 }
 
-/// Build a minimal WorkRecord mirroring `works.rs::sample_work_for_test`.
+/// Build a minimal `WorkRecord` mirroring `works.rs::sample_work_for_test`.
 fn sample_work_record(work_id: &str, work_ref: &str) -> WorkRecord {
     WorkRecord {
         work_id: work_id.to_string(),

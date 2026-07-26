@@ -539,7 +539,7 @@ mod tests {
     use nexus_knowledge::InMemoryKnowledgeStore;
     use nexus_narrative::InMemoryNarrativeGateway;
 
-    /// Helper: create a Stage0Assembly with minimal content.
+    /// Helper: create a `Stage0Assembly` with minimal content.
     fn minimal_stage0() -> Stage0Assembly {
         Stage0Assembly {
             personality: "A creative writer.".to_string(),

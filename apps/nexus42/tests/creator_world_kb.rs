@@ -6,7 +6,7 @@
 //! Drives `nexus42::commands::creator::world::kb::kb_pending` directly against a
 //! fresh temp DB + workspace directory.
 //!
-//! Run with: cargo test -p nexus42 --test creator_world_kb
+//! Run with: cargo test -p nexus42 --test `creator_world_kb`
 
 #![allow(clippy::unwrap_used)]
 

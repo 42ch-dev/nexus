@@ -72,7 +72,7 @@ async fn seed_world(pool: &sqlx::SqlitePool, owner: &str, world_id: &str) {
         .unwrap();
 }
 
-/// Seed a computable character WorldKbEntry with the given combat attributes.
+/// Seed a computable character `WorldKbEntry` with the given combat attributes.
 async fn seed_character(
     pool: &sqlx::SqlitePool,
     world_id: &str,
@@ -158,7 +158,7 @@ async fn combat_engine_preset_loads_and_resolves_capabilities() {
 }
 
 /// Full compute cycle: two computable characters → basic-combat module →
-/// state_delta applied + timeline events + battle_report. Verifies side effects
+/// `state_delta` applied + timeline events + `battle_report`. Verifies side effects
 /// read back from the DB, not just the return value.
 #[tokio::test]
 #[allow(clippy::too_many_lines)]

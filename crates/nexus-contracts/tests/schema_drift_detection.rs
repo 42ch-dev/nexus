@@ -1335,7 +1335,7 @@ fn make_dummy_value(
             // so deserialization succeeds for both u64 and NonZeroU64 fields.
             let min = prop_def
                 .get("minimum")
-                .and_then(|m| m.as_u64())
+                .and_then(serde_json::Value::as_u64)
                 .unwrap_or(0);
             Value::Number(serde_json::Number::from(min.max(1)))
         }

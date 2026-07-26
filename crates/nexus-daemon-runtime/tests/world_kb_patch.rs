@@ -13,8 +13,7 @@
 use axum::extract::{Path, Query, State};
 use axum::Json;
 use nexus_contracts::{
-    WorldKbEntityPatch, WorldKbKeyBlockStateResponse, WorldKbPatchEntityRequest,
-    WorldKbPromoteCandidateRequest,
+    WorldKbKeyBlockStateResponse, WorldKbPatchEntityRequest, WorldKbPromoteCandidateRequest,
 };
 use nexus_daemon_runtime::api::handlers::world_kb::{
     get_candidates, get_graph, get_key_block_state, patch_entity, promote_candidate,
@@ -257,7 +256,7 @@ async fn patch_entity_cross_author_forbidden() {
     assert_eq!(err.status_code(), axum::http::StatusCode::FORBIDDEN);
 }
 
-/// Regression for V1.73 greploop issue 3: `patch_entity` read the WorldKbEntry (and
+/// Regression for V1.73 greploop issue 3: `patch_entity` read the `WorldKbEntry` (and
 /// ran the cross-world scope check) BEFORE `require_world_owner`. An
 /// unauthenticated-but-locally-active creator could therefore distinguish
 /// `NotFound` ("entity not in this world") from `Forbidden` ("not your world"),
@@ -265,7 +264,7 @@ async fn patch_entity_cross_author_forbidden() {
 ///
 /// Discriminating case: the active creator does NOT own the path world, and the
 /// entity they quote exists in their OWN world (so `kb.world_id != path world`).
-/// Under the buggy order this returned 404 NotFound; the fix runs
+/// Under the buggy order this returned 404 `NotFound`; the fix runs
 /// `require_world_owner` first (mirroring `promote_candidate` + the read
 /// endpoints), so every cross-author request collapses to 403 regardless of
 /// whether the entity exists in the path world.

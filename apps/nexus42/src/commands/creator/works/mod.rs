@@ -2219,7 +2219,7 @@ mod tests {
             finding_json("minor", "Typo", "→ none"),
         ];
         let via_helper = capture_findings_output(&findings, "wrk_parity");
-        let result = FindingsResult::Fetched(findings.clone());
+        let result = FindingsResult::Fetched(findings);
         let via_shared = format_findings_summary_lines(&result, "wrk_parity").join("\n");
         assert_eq!(
             via_helper, via_shared,
@@ -2330,12 +2330,12 @@ mod tests {
             .collect();
         let output = capture_findings_output(&findings, "wrk_many");
         assert!(
-            output.contains(&format!("findings: {}+ open", FINDINGS_FETCH_LIMIT)),
+            output.contains(&format!("findings: {FINDINGS_FETCH_LIMIT}+ open")),
             "expected '50+ open' indicator in output: {output}"
         );
         // Should NOT show bare "50 open" (without +).
         assert!(
-            !output.contains(&format!("findings: {} open", FINDINGS_FETCH_LIMIT)),
+            !output.contains(&format!("findings: {FINDINGS_FETCH_LIMIT} open")),
             "should not show exact count without '+' when truncated"
         );
     }
@@ -2387,7 +2387,11 @@ mod tests {
             out.get("title").and_then(|v| v.as_str()),
             Some("Test Novel")
         );
-        assert_eq!(out.get("current_chapter").and_then(|v| v.as_i64()), Some(3));
+        assert_eq!(
+            out.get("current_chapter")
+                .and_then(serde_json::Value::as_i64),
+            Some(3)
+        );
     }
 
     #[test]
@@ -2414,7 +2418,10 @@ mod tests {
         );
         // Pin a handful of the previously-unasserted fields explicitly so a
         // regression message points at the right field.
-        assert_eq!(arr[0].get("chapter").and_then(|v| v.as_i64()), Some(7));
+        assert_eq!(
+            arr[0].get("chapter").and_then(serde_json::Value::as_i64),
+            Some(7)
+        );
         assert_eq!(
             arr[0].get("description").and_then(|v| v.as_str()),
             Some("Character name changes between paragraphs 3 and 9.")
@@ -2428,7 +2435,7 @@ mod tests {
             Some("Track character names per chapter.")
         );
         assert_eq!(
-            arr[0].get("created_at").and_then(|v| v.as_i64()),
+            arr[0].get("created_at").and_then(serde_json::Value::as_i64),
             Some(1_718_000_000)
         );
     }
@@ -2534,7 +2541,9 @@ mod tests {
             .get("findings_stale")
             .expect("findings_stale present when stale_count > 0");
         assert_eq!(
-            stale_out.get("stale_count").and_then(|v| v.as_u64()),
+            stale_out
+                .get("stale_count")
+                .and_then(serde_json::Value::as_u64),
             Some(3)
         );
     }

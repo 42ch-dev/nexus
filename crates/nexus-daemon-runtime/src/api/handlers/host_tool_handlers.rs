@@ -2741,7 +2741,7 @@ mod tests {
         (state, tmp)
     }
 
-    /// V1.88 T3 (R-V187-QC3-P001): fs/write_text_file resolves an in-bounds
+    /// V1.88 T3 (R-V187-QC3-P001): `fs/write_text_file` resolves an in-bounds
     /// path asynchronously and writes the file.
     #[tokio::test]
     async fn execute_write_file_accepts_in_bounds_path() {
@@ -2760,7 +2760,7 @@ mod tests {
         assert!(result.is_ok(), "in-bounds write should succeed: {result:?}");
     }
 
-    /// V1.88 T3 (R-V187-QC3-P001): fs/write_text_file rejects a relative path
+    /// V1.88 T3 (R-V187-QC3-P001): `fs/write_text_file` rejects a relative path
     /// that escapes the workspace root before any FS access.
     #[tokio::test]
     async fn execute_write_file_rejects_escape_path() {
@@ -2786,7 +2786,7 @@ mod tests {
         }
     }
 
-    /// V1.88 T3 (R-V187-QC3-P001): fs/read_text_file resolves an in-bounds
+    /// V1.88 T3 (R-V187-QC3-P001): `fs/read_text_file` resolves an in-bounds
     /// path asynchronously and returns the file content.
     #[tokio::test]
     async fn execute_read_file_accepts_in_bounds_path() {
@@ -2809,7 +2809,7 @@ mod tests {
         assert_eq!(value["content"], "file content");
     }
 
-    /// V1.88 T3 (R-V187-QC3-P001): fs/read_text_file rejects a relative path
+    /// V1.88 T3 (R-V187-QC3-P001): `fs/read_text_file` rejects a relative path
     /// that escapes the workspace root before any FS access.
     #[tokio::test]
     async fn execute_read_file_rejects_escape_path() {

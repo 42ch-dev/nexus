@@ -5,13 +5,13 @@
 //! These tests verify that the legacy World KB path forwards to the canonical
 //! `world::kb` functions and emits a deprecation warning. Two families:
 //!
-//! 1. **CLI surface** (assert_cmd) — `creator world kb adopt --help` documents
+//! 1. **CLI surface** (`assert_cmd`) — `creator world kb adopt --help` documents
 //!    the `--auto` flag; `creator kb list --help` documents `--scope world`.
 //! 2. **Hermetic forwarding** — drives the canonical `world::kb` logic functions
 //!    directly against a fresh temp DB to verify they still work correctly after
 //!    the alias wiring (output parity between legacy alias and canonical path).
 //!
-//! Run with: cargo test -p nexus42 --test world_kb_alias
+//! Run with: cargo test -p nexus42 --test `world_kb_alias`
 
 #![allow(clippy::unwrap_used)]
 
@@ -245,7 +245,7 @@ active_workspace_slug_by_creator = { ctr_alias_test = "default" }
     (dir, "wld_alias_cmd".to_string())
 }
 
-/// Build an assert_cmd Command with HOME set to the temp directory.
+/// Build an `assert_cmd` Command with HOME set to the temp directory.
 fn cmd_with_home(home: &std::path::Path) -> assert_cmd::Command {
     let mut cmd = assert_cmd::Command::cargo_bin("nexus42").unwrap();
     cmd.env("HOME", home);

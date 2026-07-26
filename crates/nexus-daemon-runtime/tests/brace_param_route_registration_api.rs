@@ -34,7 +34,7 @@ struct RouteCtx {
     server: TestServer,
 }
 
-/// Minimal TestServer with the full router — no engine seeded.
+/// Minimal `TestServer` with the full router — no engine seeded.
 /// Route-matching proof does not require handler success, so a bare workspace
 /// state is enough: tier-2 guard or handler-level errors both prove the route
 /// is registered.

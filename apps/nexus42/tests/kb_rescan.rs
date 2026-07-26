@@ -17,7 +17,7 @@
 //! - **AC5**: advisory lock contention → `CliError::Locked` (exit 75);
 //!   I/O failure → `CliError::LockIo` (exit 78).
 //!
-//! Run with: cargo test -p nexus42 --test kb_rescan
+//! Run with: cargo test -p nexus42 --test `kb_rescan`
 
 #![allow(clippy::unwrap_used)]
 

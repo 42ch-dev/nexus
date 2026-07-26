@@ -8,7 +8,7 @@
 //! without requiring a running daemon. Daemon handler tests for pool and
 //! completion-lock behavior are in `nexus-daemon-runtime/tests/works_api.rs`.
 //!
-//! Run with: cargo test -p nexus42 --test creator_works
+//! Run with: cargo test -p nexus42 --test `creator_works`
 
 use assert_cmd::Command;
 
@@ -44,7 +44,7 @@ fn works_use_help_shows_expected_text() {
     );
 }
 
-/// `creator works use` requires a work_id positional argument.
+/// `creator works use` requires a `work_id` positional argument.
 #[test]
 fn works_use_requires_work_id() {
     Command::cargo_bin("nexus42")
@@ -123,7 +123,7 @@ fn works_completion_lock_release_help_shows_expected_text() {
     );
 }
 
-/// `creator works completion-lock release` requires a work_id argument.
+/// `creator works completion-lock release` requires a `work_id` argument.
 #[test]
 fn works_completion_lock_release_requires_work_id() {
     Command::cargo_bin("nexus42")

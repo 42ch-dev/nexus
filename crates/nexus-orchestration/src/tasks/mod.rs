@@ -2980,7 +2980,7 @@ mod tests {
 
     /// V1.55 P2 fix-wave (F-001): production-path coverage — `LlmExtractTask`
     /// with `work_profile = "game_bible"` must produce a game-bible-shaped
-    /// candidate (game_bible_category set, novel_category absent, tags include
+    /// candidate (`game_bible_category` set, `novel_category` absent, tags include
     /// `"game-bible"`). This exercises the full production path through
     /// `LlmExtractTask::evaluate` → `run_llm_extract` →
     /// `candidate_from_llm_json_for_profile`, not a helper-level test.

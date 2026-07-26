@@ -58,7 +58,7 @@ async fn run_daemon_boots_without_active_creator_and_serves_health() {
     let port = reserve_port();
     let handle = tokio::spawn(run_daemon(test_config(port)));
 
-    tokio::time::sleep(std::time::Duration::from_millis(2000)).await;
+    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
 
     let health = http_get("127.0.0.1", port, "/v1/daemon/runtime/health").await;
     assert!(

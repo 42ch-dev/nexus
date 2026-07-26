@@ -1250,7 +1250,7 @@ mod tests {
         let _home_override = HomeOverride::set(home);
 
         let req = PatchCreatorRequest {
-            display_name: Some("".to_string()),
+            display_name: Some(String::new()),
         };
         let result = patch_creator(State(state), Path("crt_abc123".to_string()), Json(req)).await;
         assert!(result.is_err(), "empty display_name should be rejected");

@@ -9,7 +9,7 @@
 //! - AC4: missing candidates are **not** written to `kb_extract_jobs`.
 //! - AC6: existing confirmed `WorldKbEntry` rows filter out known entities.
 //!
-//! Run with: cargo test -p nexus-orchestration --test missing_kb_detection
+//! Run with: cargo test -p nexus-orchestration --test `missing_kb_detection`
 
 #![allow(clippy::unwrap_used)]
 
@@ -174,7 +174,7 @@ async fn ac1_finalize_detection_writes_missing_log() {
     assert!(log_dir.is_dir(), "missing-KB log dir should exist");
     let entries: Vec<_> = std::fs::read_dir(&log_dir)
         .unwrap()
-        .filter_map(|e| e.ok())
+        .filter_map(std::result::Result::ok)
         .collect();
     assert!(!entries.is_empty(), "expected at least one log file");
 
@@ -266,7 +266,7 @@ async fn ac6_existing_key_block_filters_known_entity() {
         .join("missing");
     let body = std::fs::read_dir(&log_dir)
         .unwrap()
-        .filter_map(|e| e.ok())
+        .filter_map(std::result::Result::ok)
         .map(|e| std::fs::read_to_string(e.path()).unwrap())
         .next()
         .unwrap();

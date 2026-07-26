@@ -1,8 +1,8 @@
 //! Hermetic tests for `E_LOCK_IO` error path (V1.51 T-B P0 W-002).
 //!
 //! Verifies that `FileLockError::Io` maps to `CliError::LockIo` with
-//! stable code `E_LOCK_IO` and exit code 78 (EX_CONFIG), **not** exit
-//! code 75 (EX_TEMPFAIL) which is reserved for temporary contention.
+//! stable code `E_LOCK_IO` and exit code 78 (`EX_CONFIG`), **not** exit
+//! code 75 (`EX_TEMPFAIL`) which is reserved for temporary contention.
 
 use nexus42::errors::CliError;
 
@@ -32,7 +32,7 @@ fn lock_io_error_display_contains_e_lock_io() {
 
 #[test]
 fn lock_io_error_matches_for_exit_code_78() {
-    let io_err = std::io::Error::new(std::io::ErrorKind::Other, "disk full");
+    let io_err = std::io::Error::other("disk full");
     let cli_err = CliError::LockIo(io_err);
 
     // Verify the error pattern for exit-code matching in main.rs.

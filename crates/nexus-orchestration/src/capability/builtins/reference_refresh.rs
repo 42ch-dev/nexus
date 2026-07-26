@@ -540,7 +540,7 @@ mod tests {
         assert!(result["bytes_fetched"].as_u64().unwrap() > 0);
     }
 
-    /// Verify that a source with 'not_modified' status is returned when
+    /// Verify that a source with '`not_modified`' status is returned when
     /// the content hash hasn't changed (second fetch of same URL).
     #[tokio::test]
     #[ignore = "requires network access to httpbin.org"]
@@ -574,7 +574,7 @@ mod tests {
 
     // ── Failure tests ──────────────────────────────────────────────────
 
-    /// Offline source must return policy_blocked without any network call.
+    /// Offline source must return `policy_blocked` without any network call.
     #[tokio::test]
     async fn refresh_offline_source_returns_policy_blocked() {
         let (pool, dir) = fresh_pool().await;
@@ -593,7 +593,7 @@ mod tests {
         assert_eq!(result["bytes_fetched"], 0);
     }
 
-    /// Non-existent source must return invalid_input error.
+    /// Non-existent source must return `invalid_input` error.
     #[tokio::test]
     async fn refresh_nonexistent_source_returns_invalid_input() {
         let (pool, _dir) = fresh_pool().await;
@@ -609,7 +609,7 @@ mod tests {
         );
     }
 
-    /// Pool-less capability must return WorkerUnavailable.
+    /// Pool-less capability must return `WorkerUnavailable`.
     #[tokio::test]
     async fn refresh_without_pool_returns_worker_unavailable() {
         let cap = ReferenceRefresh::new();
@@ -717,7 +717,7 @@ mod tests {
 
     #[test]
     fn is_blocked_ip_rejects_loopback_v4() {
-        assert!(is_blocked_ip(&IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1))));
+        assert!(is_blocked_ip(&IpAddr::V4(Ipv4Addr::LOCALHOST)));
     }
 
     #[test]

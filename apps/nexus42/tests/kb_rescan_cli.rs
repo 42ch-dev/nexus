@@ -14,7 +14,7 @@
 //! - **AC3**: `--dry-run` shows the diff without writing.
 //! - **AC4**: cross-author attempt returns `403` (`WORLD_KB_FORBIDDEN`).
 //!
-//! Run with: cargo test -p nexus42 --test kb_rescan_cli
+//! Run with: cargo test -p nexus42 --test `kb_rescan_cli`
 
 #![allow(clippy::unwrap_used)]
 
