@@ -134,7 +134,7 @@ pub enum ContextCommand {
         #[arg(long)]
         hint: Option<String>,
 
-        /// Maximum number of KB key blocks to return
+        /// Maximum number of KB knowledge entries to return
         #[arg(long)]
         kb_limit: Option<usize>,
 

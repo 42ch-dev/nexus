@@ -45,7 +45,7 @@ pub const WORLD_KB_FORBIDDEN_CODE: &str = "WORLD_KB_FORBIDDEN";
 /// `creator world kb` subcommands.
 #[derive(Debug, Subcommand)]
 pub enum WorldKbCommand {
-    /// List all `KeyBlocks` in a world (id / `canonical_name` / `block_type` / status)
+    /// List all `KnowledgeEntries` in a world (id / `canonical_name` / `block_type` / status)
     List {
         /// World reference — the world ID (e.g. `wld_abc123`)
         world_ref: String,
@@ -220,7 +220,7 @@ pub async fn run(cmd: WorldKbCommand, config: &CliConfig) -> Result<()> {
 // the `run` entrypoint above remains the only caller that resolves the pool
 // from `CliConfig`.
 
-/// `creator world kb list` — list all active `KeyBlocks` in a world.
+/// `creator world kb list` — list all active `KnowledgeEntries` in a world.
 ///
 /// # Errors
 ///
@@ -239,7 +239,7 @@ pub async fn kb_list(pool: &SqlitePool, world_id: &str, json: bool) -> Result<()
     }
 
     if blocks.is_empty() {
-        println!("No key blocks in world {world_id}.");
+        println!("No knowledge entries in world {world_id}.");
         return Ok(());
     }
 
@@ -1404,7 +1404,7 @@ async fn require_world_owner(pool: &SqlitePool, world_id: &str, creator_id: &str
 fn confirm_delete(block_id: &str, world_id: &str) -> bool {
     dialoguer::Confirm::new()
         .with_prompt(format!(
-            "Delete key block '{block_id}' in world '{world_id}'?"
+            "Delete knowledge entry '{block_id}' in world '{world_id}'?"
         ))
         .default(false)
         .interact()
@@ -1419,12 +1419,12 @@ fn confirm_delete(block_id: &str, world_id: &str) -> bool {
 fn map_kb_store_error(verb: &str, block_id: &str, world_id: &str, e: KbStoreError) -> CliError {
     match e {
         KbStoreError::NotFound(_) => CliError::Other(format!(
-            "Key block '{block_id}' not found in world '{world_id}'."
+            "Knowledge entry '{block_id}' not found in world '{world_id}'."
         )),
         KbStoreError::Validation(ve) => CliError::Other(format!("ValidationError: {ve}")),
         KbStoreError::ValidationLegacy(msg) => CliError::Other(format!("ValidationError: {msg}")),
         other => CliError::Other(format!(
-            "Failed to {verb} key block '{block_id}' in world '{world_id}': {other}"
+            "Failed to {verb} knowledge entry '{block_id}' in world '{world_id}': {other}"
         )),
     }
 }

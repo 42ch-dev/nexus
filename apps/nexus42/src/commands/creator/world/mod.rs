@@ -1,5 +1,5 @@
 //! `creator world` subcommand — create worlds, add events, list/show worlds,
-//! and manage World KB key blocks.
+//! and manage World KB knowledge entries.
 //!
 //! Product write path for narrative worlds. Writes go through
 //! `nexus_local_db::narrative_write`, NOT through the `NarrativeGateway` trait.

@@ -64,8 +64,8 @@ This subsection is an **additive Draft overlay** — it does not rewrite §1.1 (
 
 | Layer | Granularity | Time span | Primary domain | Carrier (architect seat 2 LOCK) |
 |-------|-------------|-----------|----------------|---------------------------------|
-| **Brief** | World-global | Multi-decade / era / age | **World** (World-global Timeline layer) | `block_type=era` KeyBlock (new wire enum value — see §5.1.1 narrative taxonomy extension + iteration architecture §2) |
-| **Narrative** | Event-level | Human-paced (days/weeks/years) | **Shared** (both World Timeline and Work Timeline) | World scope: `block_type=event` KeyBlock (V1.122 preserved). Work scope: `WorkOutline.timeline_events[]` (V1.72 preserved). |
+| **Brief** | World-global | Multi-decade / era / age | **World** (World-global Timeline layer) | `block_type=era` KnowledgeEntry (new wire enum value — see §5.1.1 narrative taxonomy extension + iteration architecture §2) |
+| **Narrative** | Event-level | Human-paced (days/weeks/years) | **Shared** (both World Timeline and Work Timeline) | World scope: `block_type=event` KnowledgeEntry (V1.122 preserved). Work scope: `WorkOutline.timeline_events[]` (V1.72 preserved). |
 | **Moment** | Scene/beat-precise | Sub-scene (minutes/hours within a scene) | **Work** (Work-scoped Timeline layer) | Frontend-only projection of V1.108 `OutlineSceneNodeData` / `OutlineBeatNodeData` from V1.72 `WorkOutline` (wire extension deferred to V1.124+; honest empty-state until then — see iteration architecture §3) |
 
 #### 1.4.2 Brief canonization
@@ -73,8 +73,8 @@ This subsection is an **additive Draft overlay** — it does not rewrite §1.1 (
 Brief is canonized as a **Timeline-granularity concept at the World-global level**. It is **not** a new top-level scope container and does not modify §1.1's canonical tree. Concretely:
 
 - Brief is a **projection granularity of the World Timeline** — a multi-decade / era sweep visible on the World Timeline Brief layer.
-- The Brief data carrier is a World-scoped KeyBlock with the new wire `block_type=era` (architect seat 2 LOCK — see iteration architecture §2). It is owned by the `World` scope and persisted in the World KB graph alongside `event` / `character` / `scene` / etc. KeyBlocks.
-- No new scope-ownership rule applies. Brief-on-KeyBlock uses the existing `kb.patch_entity` write boundary (V1.73) and the existing `WorldKbConflictError` / `WorldKbValidationError` conflict policy (V1.73).
+- The Brief data carrier is a World-scoped KnowledgeEntry with the new wire `block_type=era` (architect seat 2 LOCK — see iteration architecture §2). It is owned by the `World` scope and persisted in the World KB graph alongside `event` / `character` / `scene` / etc. KnowledgeEntries.
+- No new scope-ownership rule applies. Brief-on-KnowledgeEntry uses the existing `kb.patch_entity` write boundary (V1.73) and the existing `WorldKbConflictError` / `WorldKbValidationError` conflict policy (V1.73).
 
 #### 1.4.3 Moment re-projection
 
@@ -93,8 +93,8 @@ The two meanings of "Moment" are disambiguated by context:
 
 ```
 World Timeline (V1.123):
-  ├── Brief layer (hero)     — `block_type=era` KeyBlock projection (era markers / world shape)
-  ├── Narrative layer (peer) — `block_type=event` KeyBlock projection (V1.122 baseline, reframed)
+  ├── Brief layer (hero)     — `block_type=era` KnowledgeEntry projection (era markers / world shape)
+  ├── Narrative layer (peer) — `block_type=event` KnowledgeEntry projection (V1.122 baseline, reframed)
   └── Moment layer           — NOT composed in V1.123 (DF-V1123-WORLD-MOMENT if ever promoted)
 
 Work Timeline (V1.123):
@@ -143,7 +143,7 @@ No new scope-ownership rule. No new uniqueness constraint. No new transition rul
 | `Creator` | Creator aggregate, Creator credentials/cache records, active Creator selection, workspace registrations, SOUL, long-term memory, review queue/personality I/O | `nexus-creator`; `nexus-creator-memory`; `nexus-home-layout`; `nexus-local-db` for local persistence mechanics |
 | `World` | World aggregate, world membership, fork branches, story manifests, manuscript state/projections, narrative KB graph, KnowledgeEntries, SourceAnchors | `nexus-narrative`; `nexus-knowledge` for KB graph insertion/query and KnowledgeEntry/SourceAnchor logic |
 | `Timeline` | Timeline branches/ordered history, timeline events, fork positions, recent timeline query projections | `nexus-narrative` |
-| `Event` | Timeline event records, event-level deltas, event source references, event-to-moment anchors | `nexus-narrative`; `nexus-kb` when an event produces or references narrative KB assets |
+| `Event` | Timeline event records, event-level deltas, event source references, event-to-moment anchors | `nexus-narrative`; `nexus-knowledge` when an event produces or references narrative KB assets |
 | `Moment` | Session-start context assembly request/response, assembled prompt context, selected memory/knowledge/narrative slices, token-budgeted snapshot | `nexus-moment-context-assembly` |
 
 ### 2.1 Local storage catalog
@@ -363,17 +363,17 @@ replacement is `manifest.json` `schemas` as documented in
 
 #### 5.1.1 Narrative World KB item taxonomy (V1.40 grill-me locked — **Shipped V1.40 P1**)
 
-The generic `nexus-kb` persistence model stores World-scoped KeyBlocks with `block_type`, `canonical_name`, `body`, provenance anchors, and active uniqueness under `(world_id, block_type, canonical_name)` (see [local-db-schema.md](./local-db-schema.md) §4.1.2).
+The `nexus-knowledge` persistence model stores World-scoped KnowledgeEntries with `block_type`, `canonical_name`, `body`, provenance anchors, and active uniqueness under `(world_id, block_type, canonical_name)` (see [local-db-schema.md](./local-db-schema.md) §4.1.2).
 
-**SSOT for `block_type` (wire enum):** `schemas/common/common.schema.json` → `BlockType` → `@42ch/nexus-contracts` / `nexus-contracts`. Shipped values (snake_case on wire): `character`, `ability`, `scene`, `organization`, `item`, `conflict`, `info_point`, `event`. Implementations MUST NOT introduce a parallel `block_type` enum in `nexus-kb` or orchestration presets. `kb-extract`, `SqliteKbStore`, and `assemble_moment` / `fetch_world_kb` already use this vocabulary.
+**SSOT for `block_type` (wire enum):** `schemas/common/common.schema.json` → `BlockType` → `@42ch/nexus-contracts` / `nexus-contracts`. Shipped values (snake_case on wire): `character`, `ability`, `scene`, `organization`, `item`, `conflict`, `info_point`, `event`. Implementations MUST NOT introduce a parallel `block_type` enum in `nexus-knowledge` or orchestration presets. `kb-extract`, `SqliteKbStore`, and `assemble_moment` / `fetch_world_kb` already use this vocabulary.
 
 **Design decision: `environment` NOT in `BlockType` (R-V161P0-INFO-001).** The V1.61 compass initially named `environment` as a potential computable BlockType for environmental context (weather, terrain, lighting). After evaluation, `environment` was intentionally excluded from the wire enum:
 
-1. `environment` is too broad for a single entity BlockType — it spans weather, terrain, celestial, ambient conditions, and multi-entity spatial state, all of which benefit from separate `KeyBlock` instances with different `block_type` values.
+1. `environment` is too broad for a single entity BlockType — it spans weather, terrain, celestial, ambient conditions, and multi-entity spatial state, all of which benefit from separate `KnowledgeEntry` instances with different `block_type` values.
 2. Environmental context is served by existing types: `scene` (spatial descriptions), `event` (ambient occurrences), `info_point` (environmental rules), and `location` (a novel category carried in `body.attributes`, not a wire enum variant).
 3. Future profile-specific environmental modelling (e.g., game-bible `level` carrying terrain grid state, script `scene` carrying lighting cues) uses per-profile `body.attributes` shapes rather than a dedicated wire enum variant.
 
-Module authors should use the `scene` + `info_point` BlockType combination to model environmental KeyBlocks, with per-module shape declarations in `manifest.json` `schemas` (see §5.5.9.3). If a future profile introduces a domain-specific environmental BlockType (e.g. `biome` for game-bible), it should follow the V1.54 game-bible precedent: extend `BlockType` as a new wire variant with a corresponding body-layer category.
+Module authors should use the `scene` + `info_point` BlockType combination to model environmental KnowledgeEntries, with per-module shape declarations in `manifest.json` `schemas` (see §5.5.9.3). If a future profile introduces a domain-specific environmental BlockType (e.g. `biome` for game-bible), it should follow the V1.54 game-bible precedent: extend `BlockType` as a new wire variant with a corresponding body-layer category.
 
 **Novel profile semantics (body layer):** The V1.37 novel "seven categories" (`foundation`, `background`, `character`, `location`, `society`, `rules`, `economy`) are carried in `KeyBlock.body.attributes.novel_category` (string) plus type-specific fields in `body.attributes` / `body.summary`. They do **not** replace wire `block_type`.
 
@@ -545,15 +545,15 @@ Minimum common `body` shape for script items:
 `nexus42 creator kb` is a CLI command group for local knowledge-asset workflows:
 
 - Today, its default `work` scope is a local file/index workflow under the active `creator_id` and `workspace_slug`.
-- Its current implementation is not equivalent to `nexus-kb` or `nexus-knowledge`.
-- Future `--scope world` behavior must route to the World-scoped narrative KB model (`nexus-kb` + `nexus-narrative`).
-- Future user/global knowledge behavior must route to `nexus-knowledge`, not to `nexus-kb`.
+- Its current implementation is not equivalent to the World-scoped narrative KB model.
+- Future `--scope world` behavior must route to the World-scoped narrative KB model (`nexus-knowledge` + `nexus-narrative`).
+- Future user/global knowledge behavior must route to `nexus-knowledge` (User-scoped), not to the World KB model.
 
 ### 5.4 Prohibited shorthand
 
 The term `KB` MUST be qualified in architecture/spec text when ambiguity matters:
 
-- Use **World KB** or **narrative KB** for `nexus-kb`.
+- Use **World KB** or **narrative KB** for `nexus-knowledge` (World-scoped).
 - Use **User knowledge** or **global knowledge index** for `nexus-knowledge`.
 - Use **CLI local work KB index** for `nexus42 creator kb --scope work`.
 

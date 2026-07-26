@@ -26,7 +26,7 @@ schemas/
 ├── AGENTS.md              # codegen + drift rules (mandatory read)
 ├── README.md              # index (this layout + file counts)
 ├── common/                # shared identifiers, enums, value objects ($ref'd by wire + local-api)
-├── domain/                # wire domain entities (Creator, World, KeyBlock, …)
+├── domain/                # wire domain entities (Creator, World, KnowledgeEntry, …)
 ├── platform/              # platform consumer-only
 │   ├── http-bff/          # platform HTTP request/response bodies (BFF contracts)
 │   └── sync/              # CLI ↔ platform sync protocol (bundle, delta, pull, conflict)
@@ -185,7 +185,7 @@ schemas for get/update/delete response surfaces under `local-api/preset-manageme
 | README vs disk | Every `schemas/**/README.md` matches `*.json` in that folder |
 | Stale `acp-runtime` / `cloud-sync` / `compute` references | Remove from active plans/docs; types moved/deleted (see §1 + §5) |
 | `OutboxEntry` | **Local only** — must not reappear in `schemas/domain/` |
-| `key-block` on wire | Stays in `schemas/domain/` if platform/sync bundles carry KeyBlocks; narrative **logic** is `nexus-kb` |
+| `key-block` on wire | Stays in `schemas/domain/` if platform/sync bundles carry KnowledgeEntries; narrative **logic** is `nexus-knowledge` |
 | Per-module entity shapes | **Not** in `schemas/` — declare in `modules/<id>/manifest.json` (V1.62 P1) |
 | Platform grep before delete | `rg <TypeName>` on `nexus-platform` before removing any schema file |
 

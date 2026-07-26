@@ -98,7 +98,7 @@ The Daemon API is the **codegen-ready** internal contract between CLI, daemon, a
 | `GET|POST /v1/local/workspaces`, `GET|PUT /v1/local/workspaces/active` | Active | Workspace list/create and active workspace selection. |
 | `GET /v1/local/creators`, `GET /v1/local/creators/{creator_id}`, `GET|PUT /v1/local/creators/active`, `POST /v1/local/creators/{creator_id}:logout` | Active | Local creator status/selection/logout only; registration remains CLI/cloud-line. |
 | `GET /v1/local/references` | Active | Local reference list via `nexus-local-db`; not `nexus-knowledge` persistence. |
-| `GET|POST /v1/local/kb/entries`, `GET|DELETE /v1/local/kb/entries/{entry_id}` | Active (`scope=work` only) | CLI local work KB file index; not World KB (`nexus-kb`). See audit KCA-003 C2. |
+| `GET|POST /v1/local/kb/entries`, `GET|DELETE /v1/local/kb/entries/{entry_id}` | Active (`scope=work` only) | CLI local work KB file index; not World KB. See audit KCA-003 C2. |
 | `GET|POST /v1/local/memory/pending-review`, `GET /v1/local/memory/pending-review/count`, `DELETE /v1/local/memory/pending-review/{id}` | Active | Creator-memory pending review routes. |
 | `GET|POST /v1/local/presets`, `POST /v1/local/presets:validate`, `POST /v1/local/presets/{id}:reload` | Active | Local preset management. |
 | `/v1/local/orchestration/*` | Active | Sessions, capabilities, presets, schedules, core-context, history, and signal routes registered in `orchestration_routes()`. |

@@ -379,7 +379,7 @@ pub async fn kb_rescan_work_hermetic(
     let old_kb_rows = store
         .list_by_world(&world_id)
         .await
-        .map_err(|e| CliError::Other(format!("Failed to list world KeyBlocks: {e}")))?;
+        .map_err(|e| CliError::Other(format!("Failed to list world KnowledgeEntries: {e}")))?;
     // Mirrors the `kb_key_blocks` partial unique index
     // `WHERE status NOT IN ('deleted', 'merged', 'deprecated')` (nexus-kb
     // extract_sync); replicated here because that helper is crate-private.
@@ -873,7 +873,7 @@ async fn sync_kb_rows(
     let old_kb_rows = store
         .list_by_world(world_id)
         .await
-        .map_err(|e| CliError::Other(format!("Failed to list world KeyBlocks: {e}")))?;
+        .map_err(|e| CliError::Other(format!("Failed to list world KnowledgeEntries: {e}")))?;
 
     let diff = if dry_run {
         nexus_knowledge::world_kb::compute_kb_diff(&old_kb_rows, &new_bodies)

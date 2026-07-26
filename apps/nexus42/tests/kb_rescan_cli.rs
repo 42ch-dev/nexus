@@ -271,7 +271,7 @@ async fn dry_run_shows_diff_without_writing() {
         .list_by_world(WORLD)
         .await
         .unwrap();
-    assert!(blocks.is_empty(), "dry-run must not write KeyBlocks");
+    assert!(blocks.is_empty(), "dry-run must not write KnowledgeEntries");
 }
 
 // ── AC4: cross-author attempt returns 403 ──────────────────────────────────

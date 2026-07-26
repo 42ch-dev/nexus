@@ -901,7 +901,7 @@ export function SurfacesCanvasPage() {
         <NleTimelineCanvasFixtures />
       </section>
 
-      {/* V1.124 P0 T3 — World Timeline node chrome (Brief-era / Event / KeyBlock) */}
+      {/* V1.124 P0 T3 — World Timeline node chrome (Brief-era / Event / KnowledgeEntry) */}
       <section className="mt-10" data-testid="surfaces-world-timeline">
         <SurfaceHeading>World Timeline</SurfaceHeading>
         <SurfaceSourceBadges
@@ -912,7 +912,7 @@ export function SurfacesCanvasPage() {
         />
         <p className="text-copy-14 text-gray-700 mb-6">
           World Timeline node chrome for visual acceptance without the daemon —
-          Brief-era markers, Narrative Events, and KeyBlock Context cluster
+          Brief-era markers, Narrative Events, and KnowledgeEntry Context cluster
           cards. Composes the shared extracts{' '}
           <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
             @web-canvas/node-chrome-shell
