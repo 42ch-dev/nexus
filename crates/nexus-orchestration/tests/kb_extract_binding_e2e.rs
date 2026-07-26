@@ -88,7 +88,7 @@ async fn test_persist_extract_chapter_block_e2e() {
     };
 
     let result = finalize_extract(&store, input).await.unwrap();
-    assert!(result.key_block_id.starts_with("kb_"));
+    assert!(result.entry_id.starts_with("kb_"));
     assert_eq!(result.world_id, world_id);
 
     // Step 4: Verify the KB block is queryable via the store.
@@ -128,7 +128,7 @@ async fn test_worldless_work_skips_world_promotion() {
     };
 
     let result = finalize_extract(&store, input).await.unwrap();
-    assert!(result.key_block_id.starts_with("kb_"));
+    assert!(result.entry_id.starts_with("kb_"));
 
     let blocks = store.list_by_world("wld_no_world").await.unwrap();
     assert_eq!(blocks.len(), 1);

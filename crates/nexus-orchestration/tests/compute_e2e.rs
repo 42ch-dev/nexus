@@ -225,12 +225,12 @@ async fn narrative_compute_e2e_full_cycle_applies_side_effects() {
         output["state_delta_applied"], 1,
         "exactly one state_delta (defender HP sub) expected"
     );
-    let villain_hp_after = read_current_hp(&pool, &villain.key_block_id).await;
+    let villain_hp_after = read_current_hp(&pool, &villain.entry_id).await;
     assert_eq!(
         villain_hp_after, 100,
         "Villain HP must drop 120 → 100 after the state_delta is applied"
     );
-    let hero_hp_after = read_current_hp(&pool, &hero.key_block_id).await;
+    let hero_hp_after = read_current_hp(&pool, &hero.entry_id).await;
     assert_eq!(
         hero_hp_after, 80,
         "attacker (Hero) HP must be unchanged by a single combat resolution"
