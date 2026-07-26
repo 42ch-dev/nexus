@@ -922,7 +922,7 @@ mod tests {
         });
 
         // Forward → spoke, reverse → nexus.
-        let spoke: SpokeKnowledgeEntry = kb.clone().into();
+        let spoke: SpokeKnowledgeEntry = kb.into();
         let roundtripped: WorldKbEntry = spoke.into();
         let body = roundtripped
             .body
@@ -1020,7 +1020,7 @@ mod tests {
         kb.extensions_nexus_extras =
             Some(serde_json::json!({"custom_label": "villain-arc", "priority": 7}));
 
-        let spoke: SpokeKnowledgeEntry = kb.clone().into();
+        let spoke: SpokeKnowledgeEntry = kb.into();
         // The unknown keys land under extensions.nexus on the spoke type.
         let roundtripped: WorldKbEntry = spoke.into();
         let extras = roundtripped

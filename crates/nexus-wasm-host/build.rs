@@ -69,7 +69,9 @@ fn module_target_dir(id: &str, src_dir: &Path) -> PathBuf {
             Some(target_root.join("wasm-cache").join(id))
         })
         .or_else(|| {
-            std::env::var("CARGO_TARGET_WASM_CACHE").ok().map(PathBuf::from)
+            std::env::var("CARGO_TARGET_WASM_CACHE")
+                .ok()
+                .map(PathBuf::from)
         })
         .unwrap_or_else(|| src_dir.join("target"))
 }
@@ -208,7 +210,9 @@ fn compile_module(id: &str, src_dir: &Path, target_dir: &Path) {
             ));
         }
     }
-    die(&format!("failed to compile module `{id}` — see stderr above for details"));
+    die(&format!(
+        "failed to compile module `{id}` — see stderr above for details"
+    ));
 }
 
 /// Detects the rustc/cargo error emitted when the wasm sysroot is absent (the
