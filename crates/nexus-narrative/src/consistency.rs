@@ -5,7 +5,7 @@
 
 use crate::errors::NarrativeError;
 use crate::timeline_event::TimelineEvent;
-use nexus_kb::key_block::KeyBlock;
+use nexus_knowledge::world_kb::knowledge_entry::WorldKbEntry;
 
 /// Maximum excerpt length per G6.
 pub const MAX_EXCERPT_LENGTH: usize = 1024;
@@ -98,9 +98,9 @@ pub const fn validate_excerpt_length(excerpt: &str) -> Result<(), NarrativeError
 ///
 /// # Errors
 /// Returns `Err(NarrativeError::...)` if validation fails.
-/// Validate `KeyBlock` provisional → confirmed gate (consistency-rules-v1.md §3.2).
+/// Validate `WorldKbEntry` provisional → confirmed gate (consistency-rules-v1.md §3.2).
 pub fn validate_kb_confirm_gate(
-    kb: &KeyBlock,
+    kb: &WorldKbEntry,
     has_permission: bool,
     base_revision: u64,
     has_conflicts: bool,
@@ -300,13 +300,13 @@ mod tests {
 
     #[test]
     fn test_validate_kb_confirm_gate() {
-        let kb = KeyBlock::new("wld_test", BlockType::Character, "Hero");
+        let kb = WorldKbEntry::new("wld_test", BlockType::Character, "Hero");
         assert!(validate_kb_confirm_gate(&kb, true, 0, false).is_ok());
     }
 
     #[test]
     fn test_validate_kb_confirm_gate_no_permission() {
-        let kb = KeyBlock::new("wld_test", BlockType::Character, "Hero");
+        let kb = WorldKbEntry::new("wld_test", BlockType::Character, "Hero");
         assert!(validate_kb_confirm_gate(&kb, false, 0, false).is_err());
     }
 

@@ -12,7 +12,7 @@
 //! to a different user.
 
 use nexus_knowledge::errors::KnowledgeError;
-use nexus_knowledge::knowledge::{KnowledgeEntry, KnowledgeQuery, KnowledgeResult, KnowledgeTag};
+use nexus_knowledge::knowledge::{UserKnowledgeEntry, KnowledgeQuery, KnowledgeResult, KnowledgeTag};
 use nexus_knowledge::store::KnowledgeStore;
 use sqlx::SqlitePool;
 use std::sync::Arc;
@@ -49,7 +49,7 @@ impl SqliteKnowledgeStore {
             .collect()
     }
 
-    /// Convert a database row to a `KnowledgeEntry`.
+    /// Convert a database row to a `UserKnowledgeEntry`.
     fn row_to_entry(
         entry_id: String,
         user_id: String,
@@ -58,8 +58,8 @@ impl SqliteKnowledgeStore {
         reference_uri: Option<String>,
         created_at: String,
         updated_at: String,
-    ) -> KnowledgeEntry {
-        KnowledgeEntry {
+    ) -> UserKnowledgeEntry {
+        UserKnowledgeEntry {
             id: entry_id,
             user_id,
             tags: Self::json_to_tags(tags_json),
@@ -73,7 +73,7 @@ impl SqliteKnowledgeStore {
 
 #[async_trait::async_trait]
 impl KnowledgeStore for SqliteKnowledgeStore {
-    async fn store(&self, entry: KnowledgeEntry) -> Result<KnowledgeEntry, KnowledgeError> {
+    async fn store(&self, entry: UserKnowledgeEntry) -> Result<UserKnowledgeEntry, KnowledgeError> {
         if entry.user_id.trim().is_empty() {
             return Err(KnowledgeError::ValidationError(
                 "user_id must not be empty".to_string(),
@@ -111,7 +111,7 @@ impl KnowledgeStore for SqliteKnowledgeStore {
         &self,
         user_id: &str,
         entry_id: &str,
-    ) -> Result<Option<KnowledgeEntry>, KnowledgeError> {
+    ) -> Result<Option<UserKnowledgeEntry>, KnowledgeError> {
         // SAFETY: SELECT against knowledge_entries table with user_id scope
         let row = sqlx::query_as::<
             _,
@@ -218,7 +218,7 @@ impl KnowledgeStore for SqliteKnowledgeStore {
             .await
             .map_err(|e| KnowledgeError::ValidationError(e.to_string()))?;
 
-        let entries: Vec<KnowledgeEntry> = rows
+        let entries: Vec<UserKnowledgeEntry> = rows
             .into_iter()
             .map(|(id, uid, tj, c, ru, ca, ua)| Self::row_to_entry(id, uid, &tj, c, ru, ca, ua))
             .collect();
@@ -262,7 +262,7 @@ impl KnowledgeStore for SqliteKnowledgeStore {
         user_id: &str,
         entry_id: &str,
         new_tags: Vec<KnowledgeTag>,
-    ) -> Result<Option<KnowledgeEntry>, KnowledgeError> {
+    ) -> Result<Option<UserKnowledgeEntry>, KnowledgeError> {
         let tags_json = Self::tags_to_json(&new_tags);
         let now = chrono::Utc::now().to_rfc3339();
 
@@ -311,22 +311,22 @@ mod tests {
         let store = SqliteKnowledgeStore::new(pool);
 
         let entries = vec![
-            KnowledgeEntry::new(
+            UserKnowledgeEntry::new(
                 "user_1",
                 vec![KnowledgeTag::new("rust"), KnowledgeTag::new("tutorial")],
                 "Rust ownership and borrowing",
             ),
-            KnowledgeEntry::new(
+            UserKnowledgeEntry::new(
                 "user_1",
                 vec![KnowledgeTag::new("rust"), KnowledgeTag::new("async")],
                 "Tokio async runtime overview",
             ),
-            KnowledgeEntry::new(
+            UserKnowledgeEntry::new(
                 "user_1",
                 vec![KnowledgeTag::new("design")],
                 "System design patterns for microservices",
             ),
-            KnowledgeEntry::new(
+            UserKnowledgeEntry::new(
                 "user_2",
                 vec![KnowledgeTag::new("rust")],
                 "Another user's Rust notes",
@@ -342,7 +342,7 @@ mod tests {
     async fn store_and_get() {
         let (pool, _dir) = fresh_pool().await;
         let store = SqliteKnowledgeStore::new(pool);
-        let entry = KnowledgeEntry::new("user_1", vec![KnowledgeTag::new("test")], "Test content");
+        let entry = UserKnowledgeEntry::new("user_1", vec![KnowledgeTag::new("test")], "Test content");
         let id = entry.id.clone();
         let stored = store.store(entry).await.unwrap();
         assert_eq!(stored.id, id);
@@ -486,7 +486,7 @@ mod tests {
     async fn store_validates_user_id() {
         let (pool, _dir) = fresh_pool().await;
         let store = SqliteKnowledgeStore::new(pool);
-        let mut entry = KnowledgeEntry::new("", vec![], "content");
+        let mut entry = UserKnowledgeEntry::new("", vec![], "content");
         entry.user_id = String::new();
         let result = store.store(entry).await;
         assert!(result.is_err());
@@ -496,7 +496,7 @@ mod tests {
     async fn store_validates_content() {
         let (pool, _dir) = fresh_pool().await;
         let store = SqliteKnowledgeStore::new(pool);
-        let mut entry = KnowledgeEntry::new("user_1", vec![], "");
+        let mut entry = UserKnowledgeEntry::new("user_1", vec![], "");
         entry.content = String::new();
         let result = store.store(entry).await;
         assert!(result.is_err());
@@ -532,7 +532,7 @@ mod tests {
         run_migrations(&pool1).await.unwrap();
 
         let store1 = SqliteKnowledgeStore::new(pool1);
-        let entry = KnowledgeEntry::new(
+        let entry = UserKnowledgeEntry::new(
             "user_1",
             vec![KnowledgeTag::new("persist")],
             "Persistent data",

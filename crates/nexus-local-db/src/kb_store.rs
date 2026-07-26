@@ -7,7 +7,7 @@
 //! # Validation
 //!
 //! `SqliteKbStore` runs body validation on insert and update when a
-//! [`ValidationMode`](nexus_kb::validation::ValidationMode) is configured.
+//! [`ValidationMode`](nexus_knowledge::world_kb::validation::ValidationMode) is configured.
 //! The default mode is `Generic` (no novel-specific checks). Set
 //! `validation_mode` to [`ValidationMode::Novel`] to enforce
 //! `body.attributes.novel_category` requirements per entity-scope-model.md §5.1.1.
@@ -18,13 +18,16 @@
 //! (key blocks, source anchors) into the database for integration tests.
 
 use nexus_contracts::BlockType;
-use nexus_kb::errors::ValidationError;
-use nexus_kb::key_block::{KeyBlock, KeyBlockBody};
-use nexus_kb::query::{KbInsertResult, KbQuery, KbQueryResult};
-use nexus_kb::source_anchor::SourceAnchor;
-use nexus_kb::store::KbStoreError;
-use nexus_kb::validation::{validate_body, validate_canonical_name, ValidationMode};
-use nexus_kb::KbStore;
+use nexus_knowledge::world_kb::errors::ValidationError;
+use nexus_knowledge::world_kb::knowledge_entry::{WorldKbBody, WorldKbEntry};
+use nexus_knowledge::world_kb::query::{KbInsertResult, KbQuery, KbQueryResult};
+use nexus_knowledge::world_kb::source_anchor::SourceAnchor;
+use nexus_knowledge::world_kb::store::KbStoreError;
+use nexus_knowledge::world_kb::validation::{validate_body, validate_canonical_name, ValidationMode};
+use nexus_knowledge::world_kb::KbStore;
+// V1.139 P1 T4 — extensions.nexus round-trip helper (spec §2.3 / §7.2).
+use nexus_spoke_adapter::extensions::build_extensions_nexus;
+use nexus_spoke_adapter::ExtensionMap;
 use sqlx::SqlitePool;
 use std::sync::Arc;
 
@@ -67,7 +70,7 @@ pub mod seed {
     /// # Panics
     ///
     /// Panics if the database insert fails (e.g., FK violation).
-    pub async fn key_block(
+    pub async fn knowledge_entry(
         pool: &SqlitePool,
         key_block_id: &str,
         world_id: &str,
@@ -127,15 +130,15 @@ impl SqliteKbStore {
         }
     }
 
-    /// Transaction-aware variant of [`KbStore::insert_key_block`] (R-V150KBED-03).
+    /// Transaction-aware variant of [`KbStore::insert_knowledge_entry`] (R-V150KBED-03).
     ///
     /// Runs the same `canonical_name` + body validation as the trait method and
     /// issues the same INSERT, but against a caller-managed transaction so the
     /// `creator world kb adopt` path can wrap insert + promotion flip atomically.
     /// If the caller rolls back the transaction (or drops it without commit),
-    /// neither the `KeyBlock` row nor any sibling writes in the same tx persist.
+    /// neither the `WorldKbEntry` row nor any sibling writes in the same tx persist.
     ///
-    /// **Keep in sync with `KbStore::insert_key_block`** (the trait impl on this
+    /// **Keep in sync with `KbStore::insert_knowledge_entry`** (the trait impl on this
     /// type): validation, serialization, and the INSERT statement must stay
     /// identical. Both paths use `ValidationMode::Novel` for the adopt path.
     ///
@@ -148,7 +151,7 @@ impl SqliteKbStore {
     pub async fn insert_key_block_in_tx(
         &self,
         tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
-        kb: KeyBlock,
+        kb: WorldKbEntry,
     ) -> Result<KbInsertResult, KbStoreError> {
         // Validate canonical_name format/safety (same as trait impl).
         validate_canonical_name(&kb.canonical_name).map_err(validation_err)?;
@@ -157,7 +160,7 @@ impl SqliteKbStore {
         validate_body(kb.block_type, kb.body.as_ref(), self.validation_mode)
             .map_err(validation_err)?;
 
-        let key_block_id = kb.key_block_id.clone();
+        let key_block_id = kb.entry_id.clone();
         let world_id = kb.world_id.clone();
         let created_at = kb.created_at.clone();
 
@@ -183,12 +186,25 @@ impl SqliteKbStore {
         let wld_id = kb.world_id.clone();
         let cname = kb.canonical_name.clone();
         let btype = kb.block_type;
+        // V1.139 P1 T4: serialize the full `extensions.nexus` namespace from the
+        // entry's typed identity fields (spec §2.3 write path). Known fields are
+        // also written to their typed columns (authoritative); this preserves the
+        // namespace verbatim for spoke round-trip of unknown keys.
+        let extensions_nexus_json = serde_json::to_string(&build_extensions_nexus(
+            &kb.world_id,
+            kb.created_from_command_id.as_deref(),
+            kb.source_work_id.as_deref(),
+            kb.source_chapter,
+            kb.source_provenance_kind.as_deref(),
+            &ExtensionMap::default(),
+        ))
+        .unwrap_or_default();
         sqlx::query(
             r"INSERT INTO kb_key_blocks
                 (key_block_id, world_id, block_type, canonical_name, status, revision,
                  body_json, source_anchor_json, created_from_command_id, created_at, updated_at,
-                 source_work_id, source_chapter, source_provenance_kind)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                 source_work_id, source_chapter, source_provenance_kind, extensions_nexus_json)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(&key_block_id)
         .bind(&wld_id)
@@ -204,6 +220,7 @@ impl SqliteKbStore {
         .bind(&kb.source_work_id)
         .bind(kb.source_chapter)
         .bind(&kb.source_provenance_kind)
+        .bind(&extensions_nexus_json)
         .execute(&mut **tx)
         .await
         .map_err(|e| {
@@ -221,7 +238,7 @@ impl SqliteKbStore {
         })?;
 
         Ok(KbInsertResult {
-            key_block_id,
+            entry_id: key_block_id,
             world_id,
             created_at,
         })
@@ -242,27 +259,31 @@ struct KeyBlockRow {
     created_from_command_id: Option<String>,
     created_at: String,
     updated_at: Option<String>,
-    // V1.52 T-A P2: Work→KeyBlock provenance columns
+    // V1.52 T-A P2: Work→WorldKbEntry provenance columns
     source_work_id: Option<String>,
     source_chapter: Option<i64>,
     source_provenance_kind: Option<String>,
+    // V1.139 P1 T4: full serialized `extensions.nexus` namespace (Q7 round-trip).
+    // Known identity fields stay authoritative in their typed columns above; this
+    // column preserves unknown keys when a spoke KnowledgeEntry transits SQLite.
+    extensions_nexus_json: Option<String>,
 }
 
 impl KeyBlockRow {
-    fn to_key_block(&self) -> Result<KeyBlock, KbStoreError> {
+    fn to_key_block(&self) -> Result<WorldKbEntry, KbStoreError> {
         let block_type = parse_block_type(&self.block_type)?;
         let body = self
             .body_json
             .as_ref()
-            .and_then(|s| serde_json::from_str::<KeyBlockBody>(s).ok());
+            .and_then(|s| serde_json::from_str::<WorldKbBody>(s).ok());
         let source_anchor = self
             .source_anchor_json
             .as_ref()
             .and_then(|s| serde_json::from_str::<SourceAnchor>(s).ok());
 
-        Ok(KeyBlock {
+        Ok(WorldKbEntry {
             schema_version: 1,
-            key_block_id: self.key_block_id.clone(),
+            entry_id: self.key_block_id.clone(),
             world_id: self.world_id.clone(),
             block_type,
             canonical_name: self.canonical_name.clone(),
@@ -277,6 +298,35 @@ impl KeyBlockRow {
             source_chapter: self.source_chapter,
             source_provenance_kind: self.source_provenance_kind.clone(),
         })
+    }
+
+    /// Build the merged `extensions.nexus` namespace value (spec §2.3 read path).
+    ///
+    /// The five typed identity columns are authoritative; any *unknown* keys
+    /// carried in [`KeyBlockRow::extensions_nexus_json`] are preserved verbatim
+    /// and merged underneath the `"nexus"` namespace. This is the canonical
+    /// round-trip merge point for the `WorldKbEntry` ↔ spoke `KnowledgeEntry`
+    /// conversion — the `WorldKbEntry` domain type does not yet surface unknown
+    /// namespace keys (mirrors the T2 body-fidelity deferral), so this method is
+    /// forward-looking infrastructure consumed by the spoke boundary in T5+.
+    #[allow(dead_code)]
+    fn build_merged_extensions_nexus(&self) -> serde_json::Value {
+        let mut existing = ExtensionMap::default();
+        if let Some(json) = &self.extensions_nexus_json {
+            if let Ok(map) =
+                serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(json)
+            {
+                existing.insert("nexus".to_string(), map);
+            }
+        }
+        build_extensions_nexus(
+            &self.world_id,
+            self.created_from_command_id.as_deref(),
+            self.source_work_id.as_deref(),
+            self.source_chapter,
+            self.source_provenance_kind.as_deref(),
+            &existing,
+        )
     }
 }
 
@@ -316,16 +366,16 @@ fn db_err(err: &sqlx::Error) -> KbStoreError {
 }
 
 /// Convert a `KbError` from validation into a `KbStoreError`.
-fn validation_err(e: nexus_kb::KbError) -> KbStoreError {
+fn validation_err(e: nexus_knowledge::world_kb::KbError) -> KbStoreError {
     match e {
-        nexus_kb::KbError::Validation(ve) => KbStoreError::Validation(ve),
-        nexus_kb::KbError::ValidationError(msg) => KbStoreError::Validation(ValidationError {
-            kind: nexus_kb::ValidationKind::MissingBody,
+        nexus_knowledge::world_kb::KbError::Validation(ve) => KbStoreError::Validation(ve),
+        nexus_knowledge::world_kb::KbError::ValidationError(msg) => KbStoreError::Validation(ValidationError {
+            kind: nexus_knowledge::world_kb::ValidationKind::MissingBody,
             field: None,
             message: msg,
         }),
         other => KbStoreError::Validation(ValidationError {
-            kind: nexus_kb::ValidationKind::MissingBody,
+            kind: nexus_knowledge::world_kb::ValidationKind::MissingBody,
             field: None,
             message: other.to_string(),
         }),
@@ -336,7 +386,7 @@ fn validation_err(e: nexus_kb::KbError) -> KbStoreError {
 // safe for single-threaded SQLite usage within our tokio runtime.
 #[allow(clippy::future_not_send)]
 impl KbStore for SqliteKbStore {
-    async fn insert_key_block(&self, kb: KeyBlock) -> Result<KbInsertResult, KbStoreError> {
+    async fn insert_knowledge_entry(&self, kb: WorldKbEntry) -> Result<KbInsertResult, KbStoreError> {
         // Validate canonical_name format/safety
         validate_canonical_name(&kb.canonical_name).map_err(validation_err)?;
 
@@ -344,7 +394,7 @@ impl KbStore for SqliteKbStore {
         validate_body(kb.block_type, kb.body.as_ref(), self.validation_mode)
             .map_err(validation_err)?;
 
-        let key_block_id = kb.key_block_id.clone();
+        let key_block_id = kb.entry_id.clone();
         let world_id = kb.world_id.clone();
         let created_at = kb.created_at.clone();
 
@@ -369,12 +419,25 @@ impl KbStore for SqliteKbStore {
         let wld_id = kb.world_id.clone();
         let cname = kb.canonical_name.clone();
         let btype = kb.block_type;
+        // V1.139 P1 T4: serialize the full `extensions.nexus` namespace from the
+        // entry's typed identity fields (spec §2.3 write path). Known fields are
+        // also written to their typed columns (authoritative); this preserves the
+        // namespace verbatim for spoke round-trip of unknown keys.
+        let extensions_nexus_json = serde_json::to_string(&build_extensions_nexus(
+            &kb.world_id,
+            kb.created_from_command_id.as_deref(),
+            kb.source_work_id.as_deref(),
+            kb.source_chapter,
+            kb.source_provenance_kind.as_deref(),
+            &ExtensionMap::default(),
+        ))
+        .unwrap_or_default();
         sqlx::query(
             r"INSERT INTO kb_key_blocks
                 (key_block_id, world_id, block_type, canonical_name, status, revision,
                  body_json, source_anchor_json, created_from_command_id, created_at, updated_at,
-                 source_work_id, source_chapter, source_provenance_kind)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                 source_work_id, source_chapter, source_provenance_kind, extensions_nexus_json)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(&key_block_id)
         .bind(&wld_id)
@@ -390,6 +453,7 @@ impl KbStore for SqliteKbStore {
         .bind(&kb.source_work_id)
         .bind(kb.source_chapter)
         .bind(&kb.source_provenance_kind)
+        .bind(&extensions_nexus_json)
         .execute(&*self.pool)
         .await
         .map_err(|e| {
@@ -407,13 +471,13 @@ impl KbStore for SqliteKbStore {
         })?;
 
         Ok(KbInsertResult {
-            key_block_id,
+            entry_id: key_block_id,
             world_id,
             created_at,
         })
     }
 
-    async fn get_key_block(&self, key_block_id: &str) -> Result<KeyBlock, KbStoreError> {
+    async fn get_knowledge_entry(&self, key_block_id: &str) -> Result<WorldKbEntry, KbStoreError> {
         // SAFETY: runtime query because new provenance columns are unknown
         // to sqlx offline mode until migration 202606190003 is applied.
         let row = sqlx::query_as::<_, KeyBlockRow>(
@@ -421,7 +485,7 @@ impl KbStore for SqliteKbStore {
                 key_block_id, world_id, block_type, canonical_name, status,
                 revision, body_json, source_anchor_json, created_from_command_id,
                 created_at, updated_at, source_work_id, source_chapter,
-                source_provenance_kind
+                source_provenance_kind, extensions_nexus_json
             FROM kb_key_blocks
             WHERE key_block_id = ?",
         )
@@ -434,7 +498,7 @@ impl KbStore for SqliteKbStore {
         row.to_key_block()
     }
 
-    async fn list_by_world(&self, world_id: &str) -> Result<Vec<KeyBlock>, KbStoreError> {
+    async fn list_by_world(&self, world_id: &str) -> Result<Vec<WorldKbEntry>, KbStoreError> {
         // SAFETY: LIMIT is a compile-time constant; dynamic SQL needed because
         // sqlx::query_as! does not support LIMIT as bind param in SQLite offline mode.
         let rows = sqlx::query_as::<_, KeyBlockRow>(&format!(
@@ -452,7 +516,7 @@ impl KbStore for SqliteKbStore {
                 updated_at,
                 source_work_id,
                 source_chapter,
-                source_provenance_kind
+                source_provenance_kind, extensions_nexus_json
             FROM kb_key_blocks
             WHERE world_id = ?
               AND status NOT IN ('deleted', 'merged', 'deprecated')
@@ -481,7 +545,7 @@ impl KbStore for SqliteKbStore {
         // usage over time.
         //
         // The `computable` filter is applied in-memory after `list_by_world`
-        // (consistent with all other query filters). If per-world KeyBlock
+        // (consistent with all other query filters). If per-world WorldKbEntry
         // counts grow to thousands, a SQLite expression index on
         // `json_extract(body_json, '$.computable')` would accelerate the
         // filter at the storage layer:
@@ -497,7 +561,7 @@ impl KbStore for SqliteKbStore {
 
         let text_lower = query.text_search.as_deref().map(str::to_lowercase);
 
-        let filtered: Vec<KeyBlock> = all_active
+        let filtered: Vec<WorldKbEntry> = all_active
             .into_iter()
             .filter(|kb| {
                 if let Some(bt) = query.block_type {
@@ -541,7 +605,7 @@ impl KbStore for SqliteKbStore {
         let total_count = filtered.len();
         let offset = query.offset.unwrap_or(0);
         let limit = query.limit.unwrap_or(usize::MAX);
-        let items: Vec<KeyBlock> = filtered.into_iter().skip(offset).take(limit).collect();
+        let items: Vec<WorldKbEntry> = filtered.into_iter().skip(offset).take(limit).collect();
         let fetched = items.len();
         let has_more = offset + fetched < total_count;
 
@@ -615,7 +679,7 @@ impl KbStore for SqliteKbStore {
             .collect())
     }
 
-    async fn update_key_block(&self, kb: KeyBlock) -> Result<(), KbStoreError> {
+    async fn update_knowledge_entry(&self, kb: WorldKbEntry) -> Result<(), KbStoreError> {
         // Validate canonical_name format/safety
         validate_canonical_name(&kb.canonical_name).map_err(validation_err)?;
 
@@ -624,7 +688,7 @@ impl KbStore for SqliteKbStore {
             .map_err(validation_err)?;
 
         // Verify exists
-        let existing = self.get_key_block(&kb.key_block_id).await?;
+        let existing = self.get_knowledge_entry(&kb.entry_id).await?;
 
         // If name or type changed, check uniqueness
         if existing.canonical_name != kb.canonical_name || existing.block_type != kb.block_type {
@@ -642,7 +706,7 @@ impl KbStore for SqliteKbStore {
                 kb.world_id,
                 block_type_str,
                 kb.canonical_name,
-                kb.key_block_id,
+                kb.entry_id,
             )
             .fetch_one(&*self.pool)
             .await
@@ -688,7 +752,7 @@ impl KbStore for SqliteKbStore {
             body_json,
             source_anchor_json,
             kb.updated_at,
-            kb.key_block_id,
+            kb.entry_id,
         )
         .execute(&*self.pool)
         .await
@@ -697,7 +761,7 @@ impl KbStore for SqliteKbStore {
         Ok(())
     }
 
-    async fn delete_key_block(&self, key_block_id: &str) -> Result<(), KbStoreError> {
+    async fn delete_knowledge_entry(&self, key_block_id: &str) -> Result<(), KbStoreError> {
         let now = chrono::Utc::now().to_rfc3339();
 
         let result = sqlx::query!(
@@ -881,12 +945,12 @@ mod tests {
         seed_world(&pool).await;
 
         let store = SqliteKbStore::new(pool);
-        let kb = KeyBlock::new("wld_1", BlockType::Character, "Hero");
+        let kb = WorldKbEntry::new("wld_1", BlockType::Character, "Hero");
 
-        let result = store.insert_key_block(kb.clone()).await.unwrap();
-        assert_eq!(result.key_block_id, kb.key_block_id);
+        let result = store.insert_knowledge_entry(kb.clone()).await.unwrap();
+        assert_eq!(result.entry_id, kb.entry_id);
 
-        let fetched = store.get_key_block(&kb.key_block_id).await.unwrap();
+        let fetched = store.get_knowledge_entry(&kb.entry_id).await.unwrap();
         assert_eq!(fetched.canonical_name, "Hero");
         assert_eq!(fetched.world_id, "wld_1");
     }
@@ -895,7 +959,7 @@ mod tests {
     async fn test_get_not_found() {
         let (pool, _dir) = fresh_pool().await;
         let store = SqliteKbStore::new(pool);
-        let err = store.get_key_block("kb_nonexistent").await.unwrap_err();
+        let err = store.get_knowledge_entry("kb_nonexistent").await.unwrap_err();
         assert!(matches!(err, KbStoreError::NotFound(ref s) if s == "kb_nonexistent"));
     }
 
@@ -905,10 +969,10 @@ mod tests {
         seed_world(&pool).await;
 
         let store = SqliteKbStore::new(pool);
-        let kb1 = KeyBlock::new("wld_1", BlockType::Character, "Hero");
-        let kb2 = KeyBlock::new("wld_1", BlockType::Scene, "Forest");
-        store.insert_key_block(kb1).await.unwrap();
-        store.insert_key_block(kb2).await.unwrap();
+        let kb1 = WorldKbEntry::new("wld_1", BlockType::Character, "Hero");
+        let kb2 = WorldKbEntry::new("wld_1", BlockType::Scene, "Forest");
+        store.insert_knowledge_entry(kb1).await.unwrap();
+        store.insert_knowledge_entry(kb2).await.unwrap();
 
         let items = store.list_by_world("wld_1").await.unwrap();
         assert_eq!(items.len(), 2);
@@ -920,11 +984,11 @@ mod tests {
         seed_world(&pool).await;
 
         let store = SqliteKbStore::new(pool);
-        let kb = KeyBlock::new("wld_1", BlockType::Character, "Hero");
-        let id = kb.key_block_id.clone();
-        store.insert_key_block(kb).await.unwrap();
+        let kb = WorldKbEntry::new("wld_1", BlockType::Character, "Hero");
+        let id = kb.entry_id.clone();
+        store.insert_knowledge_entry(kb).await.unwrap();
 
-        store.delete_key_block(&id).await.unwrap();
+        store.delete_knowledge_entry(&id).await.unwrap();
 
         let items = store.list_by_world("wld_1").await.unwrap();
         assert!(items.is_empty());
@@ -936,11 +1000,11 @@ mod tests {
         seed_world(&pool).await;
 
         let store = SqliteKbStore::new(pool);
-        let kb1 = KeyBlock::new("wld_1", BlockType::Character, "Hero");
-        store.insert_key_block(kb1).await.unwrap();
+        let kb1 = WorldKbEntry::new("wld_1", BlockType::Character, "Hero");
+        store.insert_knowledge_entry(kb1).await.unwrap();
 
-        let kb2 = KeyBlock::new("wld_1", BlockType::Character, "Hero");
-        let err = store.insert_key_block(kb2).await.unwrap_err();
+        let kb2 = WorldKbEntry::new("wld_1", BlockType::Character, "Hero");
+        let err = store.insert_knowledge_entry(kb2).await.unwrap_err();
         assert!(matches!(err, KbStoreError::Duplicate { .. }));
     }
 
@@ -950,9 +1014,9 @@ mod tests {
         seed_world(&pool).await;
 
         let store = SqliteKbStore::new(pool);
-        let kb = KeyBlock::new("wld_1", BlockType::Character, "Hero");
-        let id = kb.key_block_id.clone();
-        store.insert_key_block(kb).await.unwrap();
+        let kb = WorldKbEntry::new("wld_1", BlockType::Character, "Hero");
+        let id = kb.entry_id.clone();
+        store.insert_knowledge_entry(kb).await.unwrap();
 
         let anchor = SourceAnchor::new("stm_1", "sum_1", None);
         store.attach_source_anchor(&id, anchor).await.unwrap();
@@ -967,15 +1031,15 @@ mod tests {
         seed_world(&pool).await;
 
         let store = SqliteKbStore::new(pool);
-        let mut kb = KeyBlock::new("wld_1", BlockType::Character, "Hero");
-        let id = kb.key_block_id.clone();
-        store.insert_key_block(kb.clone()).await.unwrap();
+        let mut kb = WorldKbEntry::new("wld_1", BlockType::Character, "Hero");
+        let id = kb.entry_id.clone();
+        store.insert_knowledge_entry(kb.clone()).await.unwrap();
 
         kb.canonical_name = "Superhero".to_string();
         kb.updated_at = Some(chrono::Utc::now().to_rfc3339());
-        store.update_key_block(kb).await.unwrap();
+        store.update_knowledge_entry(kb).await.unwrap();
 
-        let fetched = store.get_key_block(&id).await.unwrap();
+        let fetched = store.get_knowledge_entry(&id).await.unwrap();
         assert_eq!(fetched.canonical_name, "Superhero");
     }
 
@@ -985,14 +1049,14 @@ mod tests {
         seed_world(&pool).await;
 
         let store = SqliteKbStore::new(pool);
-        let kb = KeyBlock::new("wld_1", BlockType::Character, "Hero");
-        let id = kb.key_block_id.clone();
-        store.insert_key_block(kb).await.unwrap();
+        let kb = WorldKbEntry::new("wld_1", BlockType::Character, "Hero");
+        let id = kb.entry_id.clone();
+        store.insert_knowledge_entry(kb).await.unwrap();
 
-        store.delete_key_block(&id).await.unwrap();
+        store.delete_knowledge_entry(&id).await.unwrap();
 
         // Block still exists but marked deleted
-        let fetched = store.get_key_block(&id).await.unwrap();
+        let fetched = store.get_knowledge_entry(&id).await.unwrap();
         assert_eq!(fetched.status, "deleted");
     }
 
@@ -1002,15 +1066,15 @@ mod tests {
         seed_world(&pool).await;
 
         let store = SqliteKbStore::new(pool);
-        let kb = KeyBlock::new("wld_1", BlockType::Character, "Hero");
-        let id = kb.key_block_id.clone();
-        store.insert_key_block(kb).await.unwrap();
+        let kb = WorldKbEntry::new("wld_1", BlockType::Character, "Hero");
+        let id = kb.entry_id.clone();
+        store.insert_knowledge_entry(kb).await.unwrap();
 
-        store.delete_key_block(&id).await.unwrap();
+        store.delete_knowledge_entry(&id).await.unwrap();
 
         // Re-insert with same canonical_name + type should succeed
-        let kb2 = KeyBlock::new("wld_1", BlockType::Character, "Hero");
-        assert!(store.insert_key_block(kb2).await.is_ok());
+        let kb2 = WorldKbEntry::new("wld_1", BlockType::Character, "Hero");
+        assert!(store.insert_knowledge_entry(kb2).await.is_ok());
     }
 
     #[tokio::test]
@@ -1020,15 +1084,15 @@ mod tests {
 
         let store = SqliteKbStore::new(pool);
         store
-            .insert_key_block(KeyBlock::new("wld_1", BlockType::Character, "Hero"))
+            .insert_knowledge_entry(WorldKbEntry::new("wld_1", BlockType::Character, "Hero"))
             .await
             .unwrap();
         store
-            .insert_key_block(KeyBlock::new("wld_1", BlockType::Scene, "Forest"))
+            .insert_knowledge_entry(WorldKbEntry::new("wld_1", BlockType::Scene, "Forest"))
             .await
             .unwrap();
         store
-            .insert_key_block(KeyBlock::new("wld_1", BlockType::Character, "Villain"))
+            .insert_knowledge_entry(WorldKbEntry::new("wld_1", BlockType::Character, "Villain"))
             .await
             .unwrap();
 
@@ -1057,7 +1121,7 @@ mod tests {
 
         let store = SqliteKbStore::new(pool);
         store
-            .insert_key_block(KeyBlock::new("wld_1", BlockType::Character, "Hero"))
+            .insert_knowledge_entry(WorldKbEntry::new("wld_1", BlockType::Character, "Hero"))
             .await
             .unwrap();
 
@@ -1072,9 +1136,9 @@ mod tests {
         block_type: BlockType,
         name: &str,
         novel_category: &str,
-    ) -> KeyBlock {
-        let mut kb = KeyBlock::new(world_id, block_type, name);
-        kb.body = Some(KeyBlockBody {
+    ) -> WorldKbEntry {
+        let mut kb = WorldKbEntry::new(world_id, block_type, name);
+        kb.body = Some(WorldKbBody {
             summary: Some(format!("{novel_category}: {name}")),
             attributes: Some(serde_json::json!({
                 "novel_category": novel_category,
@@ -1093,7 +1157,7 @@ mod tests {
 
         let store = SqliteKbStore::with_validation_mode(pool, ValidationMode::Novel);
         let kb = make_novel_block_sql("wld_1", BlockType::Character, "char_lin_xia", "character");
-        let result = store.insert_key_block(kb).await;
+        let result = store.insert_knowledge_entry(kb).await;
         assert!(result.is_ok(), "expected ok, got {:?}", result.unwrap_err());
     }
 
@@ -1103,15 +1167,15 @@ mod tests {
         seed_world(&pool).await;
 
         let store = SqliteKbStore::with_validation_mode(pool, ValidationMode::Novel);
-        let mut kb = KeyBlock::new("wld_1", BlockType::Character, "char_no_cat");
-        kb.body = Some(KeyBlockBody {
+        let mut kb = WorldKbEntry::new("wld_1", BlockType::Character, "char_no_cat");
+        kb.body = Some(WorldKbBody {
             summary: Some("A character without category".to_string()),
             attributes: Some(serde_json::json!({"aliases": ["NoCat"]})),
             tags: Some(vec!["novel".to_string()]),
             ..Default::default()
         });
 
-        let err = store.insert_key_block(kb).await.unwrap_err();
+        let err = store.insert_knowledge_entry(kb).await.unwrap_err();
         match err {
             KbStoreError::Validation(ve) => {
                 assert!(ve.message.contains("novel_category is required"));
@@ -1127,7 +1191,7 @@ mod tests {
 
         let store = SqliteKbStore::with_validation_mode(pool, ValidationMode::Novel);
         let kb = make_novel_block_sql("wld_1", BlockType::Character, "char_bad", "invalid_cat");
-        let err = store.insert_key_block(kb).await.unwrap_err();
+        let err = store.insert_knowledge_entry(kb).await.unwrap_err();
         match err {
             KbStoreError::Validation(ve) => {
                 assert!(ve.message.contains("invalid novel_category"));
@@ -1143,10 +1207,10 @@ mod tests {
 
         let store = SqliteKbStore::with_validation_mode(pool, ValidationMode::Novel);
         let kb1 = make_novel_block_sql("wld_1", BlockType::Character, "char_dupe", "character");
-        store.insert_key_block(kb1).await.unwrap();
+        store.insert_knowledge_entry(kb1).await.unwrap();
 
         let kb2 = make_novel_block_sql("wld_1", BlockType::Character, "char_dupe", "character");
-        let err = store.insert_key_block(kb2).await.unwrap_err();
+        let err = store.insert_knowledge_entry(kb2).await.unwrap_err();
         assert!(matches!(err, KbStoreError::Duplicate { .. }));
     }
 
@@ -1156,8 +1220,8 @@ mod tests {
         seed_world(&pool).await;
 
         let store = SqliteKbStore::new(pool);
-        let kb = KeyBlock::new("wld_1", BlockType::Character, "evil/../path");
-        let err = store.insert_key_block(kb).await.unwrap_err();
+        let kb = WorldKbEntry::new("wld_1", BlockType::Character, "evil/../path");
+        let err = store.insert_knowledge_entry(kb).await.unwrap_err();
         match err {
             KbStoreError::Validation(ve) => {
                 assert!(ve.message.contains("forbidden character"));
@@ -1172,8 +1236,8 @@ mod tests {
         seed_world(&pool).await;
 
         let store = SqliteKbStore::new(pool);
-        let kb = KeyBlock::new("wld_1", BlockType::Character, "evil;rm -rf");
-        let err = store.insert_key_block(kb).await.unwrap_err();
+        let kb = WorldKbEntry::new("wld_1", BlockType::Character, "evil;rm -rf");
+        let err = store.insert_knowledge_entry(kb).await.unwrap_err();
         match err {
             KbStoreError::Validation(ve) => {
                 assert!(ve.message.contains("forbidden character"));
@@ -1188,9 +1252,9 @@ mod tests {
         seed_world(&pool).await;
 
         let store = SqliteKbStore::new(pool);
-        let mut kb = KeyBlock::new("wld_1", BlockType::Character, "temp");
+        let mut kb = WorldKbEntry::new("wld_1", BlockType::Character, "temp");
         kb.canonical_name = String::new();
-        let err = store.insert_key_block(kb).await.unwrap_err();
+        let err = store.insert_knowledge_entry(kb).await.unwrap_err();
         match err {
             KbStoreError::Validation(ve) => {
                 assert!(ve.message.contains("must not be empty"));
@@ -1205,14 +1269,14 @@ mod tests {
         seed_world(&pool).await;
 
         let store = SqliteKbStore::new(pool); // Generic mode by default
-        let mut kb = KeyBlock::new("wld_1", BlockType::Character, "char_generic");
-        kb.body = Some(KeyBlockBody {
+        let mut kb = WorldKbEntry::new("wld_1", BlockType::Character, "char_generic");
+        kb.body = Some(WorldKbBody {
             summary: Some("A generic character".to_string()),
             attributes: None,
             tags: None,
             ..Default::default()
         });
-        assert!(store.insert_key_block(kb).await.is_ok());
+        assert!(store.insert_knowledge_entry(kb).await.is_ok());
     }
 
     #[tokio::test]
@@ -1223,10 +1287,10 @@ mod tests {
         let store = SqliteKbStore::with_validation_mode(pool, ValidationMode::Novel);
         let kb = make_novel_block_sql("wld_1", BlockType::Character, "char_hero", "character");
         let mut kb = kb;
-        store.insert_key_block(kb.clone()).await.unwrap();
+        store.insert_knowledge_entry(kb.clone()).await.unwrap();
 
         // Update to body missing novel_category should fail
-        kb.body = Some(KeyBlockBody {
+        kb.body = Some(WorldKbBody {
             summary: Some("updated".to_string()),
             attributes: Some(serde_json::json!({"traits": ["old"]})),
             tags: None,
@@ -1234,7 +1298,7 @@ mod tests {
         });
         kb.updated_at = Some(chrono::Utc::now().to_rfc3339());
 
-        let err = store.update_key_block(kb).await.unwrap_err();
+        let err = store.update_knowledge_entry(kb).await.unwrap_err();
         match err {
             KbStoreError::Validation(ve) => {
                 assert!(ve.message.contains("novel_category is required"));
@@ -1249,9 +1313,9 @@ mod tests {
         seed_world(&pool).await;
 
         let store = SqliteKbStore::new(pool);
-        let kb = KeyBlock::new("wld_1", BlockType::InfoPoint, "test_block");
-        let id = kb.key_block_id.clone();
-        store.insert_key_block(kb).await.unwrap();
+        let kb = WorldKbEntry::new("wld_1", BlockType::InfoPoint, "test_block");
+        let id = kb.entry_id.clone();
+        store.insert_knowledge_entry(kb).await.unwrap();
 
         // Verify DB contains snake_case "info_point" (not Debug "InfoPoint")
         let row: (String,) =
@@ -1265,9 +1329,9 @@ mod tests {
 
     // ── Computable query filter (V1.61 P1) ─────────────────────────
 
-    fn make_computable_kb(world_id: &str, name: &str, bt: BlockType, computable: bool) -> KeyBlock {
-        let mut kb = KeyBlock::new(world_id, bt, name);
-        kb.body = Some(KeyBlockBody {
+    fn make_computable_kb(world_id: &str, name: &str, bt: BlockType, computable: bool) -> WorldKbEntry {
+        let mut kb = WorldKbEntry::new(world_id, bt, name);
+        kb.body = Some(WorldKbBody {
             summary: Some(format!("{name} summary")),
             attributes: if computable {
                 Some(serde_json::json!({"max_hp": 100}))
@@ -1292,7 +1356,7 @@ mod tests {
 
         let store = SqliteKbStore::new(pool.clone());
         store
-            .insert_key_block(make_computable_kb(
+            .insert_knowledge_entry(make_computable_kb(
                 "wld_1",
                 "Hero",
                 BlockType::Character,
@@ -1301,7 +1365,7 @@ mod tests {
             .await
             .unwrap();
         store
-            .insert_key_block(make_computable_kb(
+            .insert_knowledge_entry(make_computable_kb(
                 "wld_1",
                 "NPC",
                 BlockType::Character,
@@ -1327,7 +1391,7 @@ mod tests {
 
         let store = SqliteKbStore::new(pool.clone());
         store
-            .insert_key_block(make_computable_kb(
+            .insert_knowledge_entry(make_computable_kb(
                 "wld_1",
                 "Hero",
                 BlockType::Character,
@@ -1336,7 +1400,7 @@ mod tests {
             .await
             .unwrap();
         store
-            .insert_key_block(make_computable_kb(
+            .insert_knowledge_entry(make_computable_kb(
                 "wld_1",
                 "NPC",
                 BlockType::Character,
@@ -1358,7 +1422,7 @@ mod tests {
 
         let store = SqliteKbStore::new(pool.clone());
         store
-            .insert_key_block(make_computable_kb(
+            .insert_knowledge_entry(make_computable_kb(
                 "wld_1",
                 "Hero",
                 BlockType::Character,
@@ -1367,7 +1431,7 @@ mod tests {
             .await
             .unwrap();
         store
-            .insert_key_block(make_computable_kb(
+            .insert_knowledge_entry(make_computable_kb(
                 "wld_1",
                 "NPC",
                 BlockType::Character,
@@ -1389,14 +1453,14 @@ mod tests {
 
         let store = SqliteKbStore::new(pool.clone());
         // Legacy block with no computable field
-        let mut kb = KeyBlock::new("wld_1", BlockType::Character, "Legacy");
-        kb.body = Some(KeyBlockBody {
+        let mut kb = WorldKbEntry::new("wld_1", BlockType::Character, "Legacy");
+        kb.body = Some(WorldKbBody {
             summary: Some("legacy".to_string()),
             attributes: None,
             tags: None,
             ..Default::default()
         });
-        store.insert_key_block(kb).await.unwrap();
+        store.insert_knowledge_entry(kb).await.unwrap();
 
         // computable=true should exclude it
         let q = KbQuery::new("wld_1").with_computable(Some(true));

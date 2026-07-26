@@ -13,7 +13,7 @@
 use crate::config::CliConfig;
 use crate::errors::Result;
 use clap::Subcommand;
-use nexus_knowledge::{KnowledgeEntry, KnowledgeQuery, KnowledgeStore, KnowledgeTag};
+use nexus_knowledge::{UserKnowledgeEntry, KnowledgeQuery, KnowledgeStore, KnowledgeTag};
 
 /// Default user ID for local CLI usage (until platform usr_* mapping).
 const DEFAULT_USER_ID: &str = "user_default";
@@ -118,7 +118,7 @@ async fn run_add(
         .into_iter()
         .map(|s| KnowledgeTag::new(&s))
         .collect();
-    let entry = KnowledgeEntry::new(user_id, tag_list, content);
+    let entry = UserKnowledgeEntry::new(user_id, tag_list, content);
     let id = entry.id.clone();
 
     let stored = store.store(entry).await.map_err(|e| {

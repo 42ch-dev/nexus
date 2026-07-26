@@ -23,7 +23,6 @@ nexus-agent-host = { path = "../nexus-agent-host" }
 nexus-acp-host = { path = "../nexus-acp-host" }
 nexus-creator-memory = { path = "../nexus-creator-memory" }
 nexus-narrative = { path = "../nexus-narrative" }
-nexus-kb = { path = "../nexus-kb" }
 nexus-knowledge = { path = "../nexus-knowledge" }
 nexus-moment-context-assembly = { path = "../nexus-moment-context-assembly" }
 graph-flow = "=0.2.3"

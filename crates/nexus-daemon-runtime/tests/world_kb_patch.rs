@@ -1,7 +1,7 @@
 //! V1.73 P0 World KB patch-route integration tests.
 //!
 //! Exercises the four World KB Daemon API handlers directly against a
-//! canonical daemon `WorkspaceState` with a seeded creator/world/KeyBlock:
+//! canonical daemon `WorkspaceState` with a seeded creator/world/WorldKbEntry:
 //! - `patch_entity` happy path + per-row OCC 409 conflict + 422 validation.
 //! - `promote_candidate` adopt + reject (entity-scope-model §5.5.2 state machine).
 //! - `get_graph` + `get_candidates` read projections.
@@ -257,7 +257,7 @@ async fn patch_entity_cross_author_forbidden() {
     assert_eq!(err.status_code(), axum::http::StatusCode::FORBIDDEN);
 }
 
-/// Regression for V1.73 greploop issue 3: `patch_entity` read the KeyBlock (and
+/// Regression for V1.73 greploop issue 3: `patch_entity` read the WorldKbEntry (and
 /// ran the cross-world scope check) BEFORE `require_world_owner`. An
 /// unauthenticated-but-locally-active creator could therefore distinguish
 /// `NotFound` ("entity not in this world") from `Forbidden` ("not your world"),
@@ -960,7 +960,7 @@ async fn promote_merge_target_cas_miss_marks_target_conflict() {
     );
 }
 
-// ─── computable KeyBlock state read (V1.114 P2) ───────────────────────────────
+// ─── computable WorldKbEntry state read (V1.114 P2) ───────────────────────────────
 
 #[tokio::test]
 async fn get_key_block_state_computable_returns_state() {

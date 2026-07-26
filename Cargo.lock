@@ -2722,7 +2722,6 @@ dependencies = [
  "nexus-creator",
  "nexus-creator-memory",
  "nexus-home-layout",
- "nexus-kb",
  "nexus-knowledge",
  "nexus-local-db",
  "nexus-moment-context-assembly",
@@ -2764,30 +2763,19 @@ name = "nexus-home-layout"
 version = "0.1.0"
 
 [[package]]
-name = "nexus-kb"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "nexus-contracts",
- "serde",
- "serde_json",
- "thiserror 1.0.69",
- "tokio",
- "tracing",
- "uuid",
-]
-
-[[package]]
 name = "nexus-knowledge"
 version = "0.1.0"
 dependencies = [
  "async-trait",
  "chrono",
  "nexus-contracts",
+ "nexus-spoke-adapter",
  "serde",
  "serde_json",
+ "spoke-schemas",
  "thiserror 1.0.69",
  "tokio",
+ "tracing",
  "uuid",
 ]
 
@@ -2801,9 +2789,9 @@ dependencies = [
  "futures-util",
  "nexus-contracts",
  "nexus-home-layout",
- "nexus-kb",
  "nexus-knowledge",
  "nexus-narrative",
+ "nexus-spoke-adapter",
  "nix 0.28.0",
  "serde",
  "serde_json",
@@ -2824,7 +2812,6 @@ dependencies = [
  "nexus-cloud-sync",
  "nexus-contracts",
  "nexus-creator-memory",
- "nexus-kb",
  "nexus-knowledge",
  "nexus-narrative",
  "serde",
@@ -2838,7 +2825,7 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "nexus-contracts",
- "nexus-kb",
+ "nexus-knowledge",
  "serde",
  "serde_json",
  "strum 0.26.3",
@@ -2866,7 +2853,7 @@ dependencies = [
  "nexus-contracts",
  "nexus-creator-memory",
  "nexus-home-layout",
- "nexus-kb",
+ "nexus-knowledge",
  "nexus-local-db",
  "nexus-narrative",
  "nexus-wasm-host",
@@ -2935,7 +2922,6 @@ dependencies = [
  "nexus-creator-memory",
  "nexus-daemon-runtime",
  "nexus-home-layout",
- "nexus-kb",
  "nexus-knowledge",
  "nexus-local-db",
  "nexus-moment-context-assembly",

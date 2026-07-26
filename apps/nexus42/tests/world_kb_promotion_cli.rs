@@ -10,7 +10,7 @@
 //! Covers:
 //! - AC3 (#3): CLI commands round-trip; cross-author attempt returns `403`
 //!   with code `WORLD_KB_FORBIDDEN`.
-//! - AC4 (#4): adopt inserts a new `KeyBlock` with `status='confirmed'`.
+//! - AC4 (#4): adopt inserts a new `WorldKbEntry` with `status='confirmed'`.
 //! - AC5 (#5): reject writes a log entry; row marked `rejected`.
 //!
 //! Run with: cargo test -p nexus42 --test world_kb_promotion_cli
@@ -22,9 +22,9 @@ use nexus42::commands::creator::world::kb::{
 };
 use nexus42::db::Schema;
 use nexus42::errors::CliError;
-use nexus_kb::key_block::{KeyBlock, KeyBlockBody};
-use nexus_kb::validation::ValidationMode;
-use nexus_kb::KbStore;
+use nexus_knowledge::world_kb::knowledge_entry::{WorldKbEntry, WorldKbBody};
+use nexus_knowledge::world_kb::validation::ValidationMode;
+use nexus_knowledge::world_kb::KbStore;
 use nexus_local_db::kb_extract_job::{
     get_promotion, insert_pending, mark_confirmed, mark_confirmed_in_tx,
 };
@@ -145,7 +145,7 @@ async fn pending_cross_author_returns_403() {
     }
 }
 
-// ── AC4: adopt creates a confirmed KeyBlock ─────────────────────────────────
+// ── AC4: adopt creates a confirmed WorldKbEntry ─────────────────────────────────
 
 #[tokio::test]
 async fn adopt_creates_confirmed_key_block() {
@@ -164,13 +164,13 @@ async fn adopt_creates_confirmed_key_block() {
         .unwrap();
     assert_eq!(row.promotion_status, "confirmed");
 
-    // A KeyBlock exists in the world with status=confirmed.
+    // A WorldKbEntry exists in the world with status=confirmed.
     let store = SqliteKbStore::new(pool.clone());
     let blocks = store.list_by_world(WORLD).await.unwrap();
     let adopted = blocks
         .iter()
         .find(|b| b.canonical_name == "Aria Stormblade")
-        .unwrap_or_else(|| panic!("no KeyBlock for Aria Stormblade: {blocks:?}"));
+        .unwrap_or_else(|| panic!("no WorldKbEntry for Aria Stormblade: {blocks:?}"));
     assert_eq!(adopted.status, "confirmed");
 }
 
@@ -304,10 +304,10 @@ async fn double_adopt_is_rejected() {
 
 /// Regression for R-V150KBED-03 (qc3 W-001 + qc2 Warning).
 ///
-/// Asserts that when `mark_confirmed` returns `Ok(false)` after the `KeyBlock`
+/// Asserts that when `mark_confirmed` returns `Ok(false)` after the `WorldKbEntry`
 /// insert succeeds (the promotion row was confirmed/rejected by a concurrent
 /// writer between `load_pending_candidate` and the flip), the adopt transaction
-/// rolls back so **no orphan `KeyBlock` is persisted**.
+/// rolls back so **no orphan `WorldKbEntry` is persisted**.
 ///
 /// We simulate the race winner by pre-flipping the candidate to `confirmed`,
 /// then exercise the same `begin → insert_key_block_in_tx → mark_confirmed_in_tx
@@ -328,12 +328,12 @@ async fn kb_adopt_failure_rolls_back_insert() {
 
     // Replicate the kb_adopt tx boundary (entity-scope-model §5.5.3).
     let store = SqliteKbStore::with_validation_mode(pool.clone(), ValidationMode::Novel);
-    let mut kb = KeyBlock::new(
+    let mut kb = WorldKbEntry::new(
         WORLD,
         nexus_contracts::BlockType::Character,
         "Race Candidate",
     );
-    kb.body = Some(KeyBlockBody {
+    kb.body = Some(WorldKbBody {
         summary: Some("Race candidate".to_string()),
         attributes: Some(serde_json::json!({
             "novel_category": "character",
@@ -366,12 +366,12 @@ async fn kb_adopt_failure_rolls_back_insert() {
     // kb_adopt rolls back on !flipped — replicate.
     tx.rollback().await.expect("rollback must succeed");
 
-    // Core invariant: NO orphan KeyBlock in kb_key_blocks.
+    // Core invariant: NO orphan WorldKbEntry in kb_key_blocks.
     let verifier = SqliteKbStore::new(pool.clone());
     let blocks = verifier.list_by_world(WORLD).await.unwrap();
     assert!(
         blocks.iter().all(|b| b.canonical_name != "Race Candidate"),
-        "R-V150KBED-03 regression: orphan KeyBlock 'Race Candidate' MUST NOT \
+        "R-V150KBED-03 regression: orphan WorldKbEntry 'Race Candidate' MUST NOT \
          persist after rollback, got: {blocks:?}"
     );
 

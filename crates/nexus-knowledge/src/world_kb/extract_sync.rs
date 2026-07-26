@@ -4,26 +4,26 @@
 //! V1.50 T-B P2 (plan `2026-06-18-v1.50-kb-refreshable-scan` §5 T3; compass
 //! §0.1 decision 7). The `creator kb rescan` CLI re-runs the review-time
 //! heuristic over the current chapter text and calls into this module to keep
-//! confirmed `KeyBlock` rows in sync with their source chapter.
+//! confirmed `WorldKbEntry` rows in sync with their source chapter.
 //!
 //! # §5.5 invariant (entity-scope-model)
 //!
-//! A `KeyBlock` enters the World only via the promotion state machine
+//! A `WorldKbEntry` enters the World only via the promotion state machine
 //! (`pending → confirmed`, terminal). This module therefore **never inserts
 //! or deletes** `kb_key_blocks` — those operations stay with
 //! `creator world kb adopt|edit|delete`. [`diff_and_apply`] only refreshes the
-//! `body` of active `KeyBlock`s whose `canonical_name` matches a freshly
+//! `body` of active `WorldKbEntry`s whose `canonical_name` matches a freshly
 //! extracted candidate, so "KB rows reflect current chapter text" (compass
 //! flow line 173) without bypassing the author adopt gate.
 //!
 //! [`compute_kb_diff`] is the pure half used by `--dry-run`; [`diff_and_apply`]
 //! is compute + apply.
 
-use crate::key_block::{KeyBlock, KeyBlockBody};
-use crate::store::{KbStore, KbStoreError};
+use crate::world_kb::knowledge_entry::{WorldKbEntry, WorldKbBody};
+use crate::world_kb::store::{KbStore, KbStoreError};
 use serde::Serialize;
 
-/// Whether a `KeyBlock` status counts as "active" for body refresh.
+/// Whether a `WorldKbEntry` status counts as "active" for body refresh.
 ///
 /// Mirrors the `kb_key_blocks` partial unique index
 /// `WHERE status NOT IN ('deleted', 'merged', 'deprecated')`.
@@ -31,11 +31,11 @@ fn is_active_status(status: &str) -> bool {
     !matches!(status, "deleted" | "merged" | "deprecated")
 }
 
-/// A `KeyBlock` body refresh applied by [`diff_and_apply`].
+/// A `WorldKbEntry` body refresh applied by [`diff_and_apply`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct KbSyncUpdate {
-    /// The `KeyBlock` whose body was refreshed.
-    pub key_block_id: String,
+    /// The `WorldKbEntry` whose body was refreshed.
+    pub entry_id: String,
     /// The matched `canonical_name`.
     pub canonical_name: String,
 }
@@ -43,17 +43,17 @@ pub struct KbSyncUpdate {
 /// Computed diff for a refreshable scan against a world's `kb_key_blocks`.
 ///
 /// `inserted` and `removed` are **advisory**: the rescan does not create or
-/// remove `KeyBlock`s (§5.5 reserves those for adopt/edit/delete). They are
+/// remove `WorldKbEntry`s (§5.5 reserves those for adopt/edit/delete). They are
 /// reported so the author knows what changed; `updated` is the only category
 /// actually persisted by [`diff_and_apply`].
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct KbSyncDiff {
     /// Canonical names present in the new extraction but with no matching
-    /// active `KeyBlock`. Promote via `creator world kb adopt`.
+    /// active `WorldKbEntry`. Promote via `creator world kb adopt`.
     pub inserted: Vec<String>,
-    /// Active `KeyBlock`s whose body was refreshed from the new extraction.
+    /// Active `WorldKbEntry`s whose body was refreshed from the new extraction.
     pub updated: Vec<KbSyncUpdate>,
-    /// Active `KeyBlock`s whose `canonical_name` vanished from the new
+    /// Active `WorldKbEntry`s whose `canonical_name` vanished from the new
     /// extraction. Review via `creator world kb edit|delete`.
     pub removed: Vec<String>,
 }
@@ -66,7 +66,7 @@ impl KbSyncDiff {
     }
 }
 
-/// Compute (no I/O) the diff between a world's existing `KeyBlock`s and a
+/// Compute (no I/O) the diff between a world's existing `WorldKbEntry`s and a
 /// freshly-extracted candidate set.
 ///
 /// Matching is by `canonical_name`, case-insensitive. Used by `--dry-run` to
@@ -75,16 +75,16 @@ impl KbSyncDiff {
 ///
 /// # Arguments
 ///
-/// * `old_rows` — the world's current `KeyBlock`s (e.g. from `list_by_world`).
+/// * `old_rows` — the world's current `WorldKbEntry`s (e.g. from `list_by_world`).
 /// * `new_extracted` — `(canonical_name, body)` tuples from the heuristic.
 #[must_use]
 pub fn compute_kb_diff(
-    old_rows: &[KeyBlock],
-    new_extracted: &[(String, KeyBlockBody)],
+    old_rows: &[WorldKbEntry],
+    new_extracted: &[(String, WorldKbBody)],
 ) -> KbSyncDiff {
     // Index active old rows by lowercased canonical_name for O(1) lookup.
     use std::collections::HashMap;
-    let mut active_by_name: HashMap<String, &KeyBlock> = HashMap::new();
+    let mut active_by_name: HashMap<String, &WorldKbEntry> = HashMap::new();
     for kb in old_rows.iter().filter(|kb| is_active_status(&kb.status)) {
         active_by_name
             .entry(kb.canonical_name.to_ascii_lowercase())
@@ -97,15 +97,15 @@ pub fn compute_kb_diff(
     for (name, new_body) in new_extracted {
         let name_lower = name.to_ascii_lowercase();
         let Some(old_kb) = active_by_name.get(&name_lower) else {
-            // No active KeyBlock for this candidate — advisory insert.
+            // No active WorldKbEntry for this candidate — advisory insert.
             diff.inserted.push(name.clone());
             continue;
         };
-        matched_old.insert(old_kb.key_block_id.clone());
+        matched_old.insert(old_kb.entry_id.clone());
         // Body refresh only when the extracted body differs from the row's.
         if old_kb.body.as_ref() != Some(new_body) {
             diff.updated.push(KbSyncUpdate {
-                key_block_id: old_kb.key_block_id.clone(),
+                entry_id: old_kb.entry_id.clone(),
                 canonical_name: old_kb.canonical_name.clone(),
             });
         }
@@ -113,7 +113,7 @@ pub fn compute_kb_diff(
 
     // Active old rows not matched by any new candidate — advisory remove.
     for kb in old_rows.iter().filter(|kb| is_active_status(&kb.status)) {
-        if !matched_old.contains(&kb.key_block_id) {
+        if !matched_old.contains(&kb.entry_id) {
             diff.removed.push(kb.canonical_name.clone());
         }
     }
@@ -122,32 +122,32 @@ pub fn compute_kb_diff(
 }
 
 /// Compute + apply a refreshable-scan diff: refresh the `body` of active
-/// `KeyBlock`s whose `canonical_name` matches a freshly-extracted candidate.
+/// `WorldKbEntry`s whose `canonical_name` matches a freshly-extracted candidate.
 ///
-/// Insert/delete of `KeyBlock`s is **not** performed (entity-scope-model §5.5
+/// Insert/delete of `WorldKbEntry`s is **not** performed (entity-scope-model §5.5
 /// reserves those for adopt/edit/delete); `inserted` and `removed` in the
 /// returned [`KbSyncDiff`] are advisory. Each body refresh is an atomic
-/// per-row `update_key_block` (which re-runs the store's configured
+/// per-row `update_knowledge_entry` (which re-runs the store's configured
 /// `ValidationMode`). A row whose body is unchanged is skipped.
 ///
 /// # Errors
 ///
-/// Returns [`KbStoreError`] if any `update_key_block` fails (the diff is
+/// Returns [`KbStoreError`] if any `update_knowledge_entry` fails (the diff is
 /// applied best-effort up to that row; re-running the rescan retries the
 /// remaining rows idempotently).
 ///
 /// # Arguments
 ///
 /// * `store` — the KB store (caller selects `ValidationMode`).
-/// * `world_id` — the world being rescanned (forwarded to `update_key_block`
-///   via each cloned `KeyBlock`).
-/// * `old_rows` — the world's current `KeyBlock`s.
+/// * `world_id` — the world being rescanned (forwarded to `update_knowledge_entry`
+///   via each cloned `WorldKbEntry`).
+/// * `old_rows` — the world's current `WorldKbEntry`s.
 /// * `new_extracted` — `(canonical_name, body)` tuples from the heuristic.
 pub async fn diff_and_apply<S>(
     store: &S,
     world_id: &str,
-    old_rows: &[KeyBlock],
-    new_extracted: &[(String, KeyBlockBody)],
+    old_rows: &[WorldKbEntry],
+    new_extracted: &[(String, WorldKbBody)],
 ) -> Result<KbSyncDiff, KbStoreError>
 where
     S: KbStore + Sync,
@@ -155,12 +155,12 @@ where
     let mut diff = compute_kb_diff(old_rows, new_extracted);
 
     // Apply only body refreshes. Re-resolve each updated row from old_rows to
-    // build the full KeyBlock (compute_kb_diff only carries ids/names).
+    // build the full WorldKbEntry (compute_kb_diff only carries ids/names).
     let mut applied: Vec<KbSyncUpdate> = Vec::with_capacity(diff.updated.len());
     for update in diff.updated.drain(..) {
         let Some(old_kb) = old_rows
             .iter()
-            .find(|kb| kb.key_block_id == update.key_block_id)
+            .find(|kb| kb.entry_id == update.entry_id)
         else {
             // Row vanished between compute and apply — skip defensively.
             continue;
@@ -179,7 +179,7 @@ where
         refreshed.body = Some(new_body);
         refreshed.updated_at = Some(chrono::Utc::now().to_rfc3339());
 
-        store.update_key_block(refreshed).await?;
+        store.update_knowledge_entry(refreshed).await?;
         applied.push(update);
     }
     diff.updated = applied;
@@ -189,11 +189,11 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::store::InMemoryKbStore;
+    use crate::world_kb::store::InMemoryKbStore;
     use nexus_contracts::BlockType;
 
-    fn body_with(summary: &str) -> KeyBlockBody {
-        KeyBlockBody {
+    fn body_with(summary: &str) -> WorldKbBody {
+        WorldKbBody {
             summary: Some(summary.to_string()),
             attributes: Some(serde_json::json!({"novel_category": "character"})),
             tags: Some(vec!["novel".to_string()]),
@@ -201,8 +201,8 @@ mod tests {
         }
     }
 
-    fn confirmed_block(world_id: &str, name: &str, body: KeyBlockBody) -> KeyBlock {
-        let mut kb = KeyBlock::new(world_id, BlockType::Character, name);
+    fn confirmed_block(world_id: &str, name: &str, body: WorldKbBody) -> WorldKbEntry {
+        let mut kb = WorldKbEntry::new(world_id, BlockType::Character, name);
         kb.status = "confirmed".to_string();
         kb.body = Some(body);
         kb
@@ -219,7 +219,7 @@ mod tests {
         let diff = compute_kb_diff(&old, &new);
         // "Kept" unchanged → not in updated.
         assert!(diff.updated.is_empty());
-        // "Newcomer" has no KeyBlock → advisory insert.
+        // "Newcomer" has no WorldKbEntry → advisory insert.
         assert_eq!(diff.inserted, vec!["Newcomer".to_string()]);
         // No active old row vanished → no removes.
         assert!(diff.removed.is_empty());
@@ -267,7 +267,7 @@ mod tests {
     fn compute_diff_removed_advisory_when_name_vanishes() {
         let world = "wld_1";
         let old = vec![confirmed_block(world, "Gone", body_with("old"))];
-        let new: Vec<(String, KeyBlockBody)> = vec![];
+        let new: Vec<(String, WorldKbBody)> = vec![];
         let diff = compute_kb_diff(&old, &new);
         assert_eq!(diff.removed, vec!["Gone".to_string()]);
     }
@@ -275,10 +275,10 @@ mod tests {
     #[tokio::test]
     async fn diff_and_apply_refreshes_body_via_store() {
         let world = "wld_1";
-        let store = InMemoryKbStore::with_validation_mode(crate::validation::ValidationMode::Novel);
-        // Seed a confirmed KeyBlock the store owns.
+        let store = InMemoryKbStore::with_validation_mode(crate::world_kb::validation::ValidationMode::Novel);
+        // Seed a confirmed WorldKbEntry the store owns.
         let seeded = confirmed_block(world, "Lin Xia", body_with("v1"));
-        store.insert_key_block(seeded.clone()).await.unwrap();
+        store.insert_knowledge_entry(seeded.clone()).await.unwrap();
         let old_rows = store.list_by_world(world).await.unwrap();
 
         let new = vec![("Lin Xia".to_string(), body_with("v2-edited"))];
@@ -298,9 +298,9 @@ mod tests {
     #[tokio::test]
     async fn diff_and_apply_no_op_when_unchanged() {
         let world = "wld_1";
-        let store = InMemoryKbStore::with_validation_mode(crate::validation::ValidationMode::Novel);
+        let store = InMemoryKbStore::with_validation_mode(crate::world_kb::validation::ValidationMode::Novel);
         store
-            .insert_key_block(confirmed_block(world, "Lin Xia", body_with("same")))
+            .insert_knowledge_entry(confirmed_block(world, "Lin Xia", body_with("same")))
             .await
             .unwrap();
         let old_rows = store.list_by_world(world).await.unwrap();

@@ -5,8 +5,8 @@
 //! - Novel "seven categories" are carried in `body.attributes.novel_category`.
 //! - When `ValidationMode::Novel`, certain `BlockType`s require `novel_category`.
 
-use crate::errors::{KbError, ValidationError, ValidationKind};
-use crate::key_block::KeyBlockBody;
+use crate::world_kb::errors::{KbError, ValidationError, ValidationKind};
+use crate::world_kb::knowledge_entry::WorldKbBody;
 use nexus_contracts::BlockType;
 use std::fmt;
 
@@ -114,20 +114,20 @@ pub enum ValidationMode {
     /// Rejects `novel_category` and `game_bible_category` when active.
     Script,
     /// Structured compute validation (V1.61 P1) — validates computable
-    /// `KeyBlock`s carry the structural shape expected by the compute
+    /// `WorldKbEntry`s carry the structural shape expected by the compute
     /// envelope: `attributes` and `state` are JSON objects, with `state`
     /// nested by `block_type` per compass Q5 (e.g. `state.character.current_hp`).
     /// Per-module attribute/state shapes are declared by each compute
     /// module's `manifest.json` `schemas` block (V1.62 — see
     /// `modules/README.md`).
     ///
-    /// When a `KeyBlock` has `computable: true`, this mode checks:
+    /// When a `WorldKbEntry` has `computable: true`, this mode checks:
     /// 1. `attributes` is present and is a JSON object (immutable compute params)
     /// 2. `state` is present and is a JSON object with a block_type-nested key
     ///    (e.g., `state.character.current_hp` per compass Q5)
     ///
     /// Non-computable blocks (computable absent or false) are skipped —
-    /// backward compatible with existing `KeyBlock`s.
+    /// backward compatible with existing `WorldKbEntry`s.
     Structured,
 }
 
@@ -248,7 +248,7 @@ pub fn validate_canonical_name(name: &str) -> Result<(), KbError> {
     Ok(())
 }
 
-/// Validate a `KeyBlockBody` for the given `BlockType` and `ValidationMode`.
+/// Validate a `WorldKbBody` for the given `BlockType` and `ValidationMode`.
 ///
 /// # Errors
 ///
@@ -260,7 +260,7 @@ pub fn validate_canonical_name(name: &str) -> Result<(), KbError> {
 ///   valid values.
 pub fn validate_body(
     block_type: BlockType,
-    body: Option<&KeyBlockBody>,
+    body: Option<&WorldKbBody>,
     mode: ValidationMode,
 ) -> Result<(), KbError> {
     // Structural checks that apply regardless of mode
@@ -286,7 +286,7 @@ pub fn validate_body(
 }
 
 /// Validate novel-profile `body` semantics (V1.40 P1).
-fn validate_novel_body(block_type: BlockType, body: Option<&KeyBlockBody>) -> Result<(), KbError> {
+fn validate_novel_body(block_type: BlockType, body: Option<&WorldKbBody>) -> Result<(), KbError> {
     let b = body.ok_or_else(|| {
         KbError::Validation(ValidationError {
             kind: ValidationKind::MissingBody,
@@ -356,7 +356,7 @@ fn validate_novel_body(block_type: BlockType, body: Option<&KeyBlockBody>) -> Re
 /// against the seven valid values. Rejects `novel_category` if present.
 fn validate_game_bible_body(
     block_type: BlockType,
-    body: Option<&KeyBlockBody>,
+    body: Option<&WorldKbBody>,
 ) -> Result<(), KbError> {
     let b = body.ok_or_else(|| {
         KbError::Validation(ValidationError {
@@ -437,7 +437,7 @@ fn validate_game_bible_body(
 /// Requires `script_category` in `body.attributes` and validates it
 /// against the three valid values. Rejects `novel_category` and
 /// `game_bible_category` if present.
-fn validate_script_body(block_type: BlockType, body: Option<&KeyBlockBody>) -> Result<(), KbError> {
+fn validate_script_body(block_type: BlockType, body: Option<&WorldKbBody>) -> Result<(), KbError> {
     let b = body.ok_or_else(|| {
         KbError::Validation(ValidationError {
             kind: ValidationKind::MissingBody,
@@ -520,7 +520,7 @@ fn validate_script_body(block_type: BlockType, body: Option<&KeyBlockBody>) -> R
     Ok(())
 }
 
-/// Validate computable `KeyBlock` body against per-BlockType structured schema (V1.61 P1).
+/// Validate computable `WorldKbEntry` body against per-BlockType structured schema (V1.61 P1).
 ///
 /// When `body.computable` is `Some(true)`:
 /// 1. `attributes` must be present and a JSON object (immutable compute params, compass Q4).
@@ -540,7 +540,7 @@ fn validate_script_body(block_type: BlockType, body: Option<&KeyBlockBody>) -> R
 /// | `Species`      | `species`     |
 fn validate_structured_body(
     block_type: BlockType,
-    body: Option<&KeyBlockBody>,
+    body: Option<&WorldKbBody>,
 ) -> Result<(), KbError> {
     let Some(b) = body else {
         return Ok(()); // no body → nothing to validate
@@ -645,8 +645,8 @@ pub const fn block_type_state_key(block_type: BlockType) -> Option<&'static str>
 mod tests {
     use super::*;
 
-    fn make_body(novel_category: Option<&str>) -> KeyBlockBody {
-        KeyBlockBody {
+    fn make_body(novel_category: Option<&str>) -> WorldKbBody {
+        WorldKbBody {
             summary: Some("test".to_string()),
             attributes: novel_category.map(|cat| {
                 serde_json::json!({
@@ -659,8 +659,8 @@ mod tests {
         }
     }
 
-    fn make_body_without_category() -> KeyBlockBody {
-        KeyBlockBody {
+    fn make_body_without_category() -> WorldKbBody {
+        WorldKbBody {
             summary: Some("test".to_string()),
             attributes: Some(serde_json::json!({"traits": ["brave"]})),
             tags: None,
@@ -677,7 +677,7 @@ mod tests {
 
     #[test]
     fn generic_mode_accepts_body_without_attributes() {
-        let body = KeyBlockBody {
+        let body = WorldKbBody {
             summary: Some("test".to_string()),
             attributes: None,
             tags: None,
@@ -688,7 +688,7 @@ mod tests {
 
     #[test]
     fn generic_mode_rejects_non_object_attributes() {
-        let body = KeyBlockBody {
+        let body = WorldKbBody {
             summary: None,
             attributes: Some(serde_json::json!("not an object")),
             tags: None,
@@ -734,7 +734,7 @@ mod tests {
 
     #[test]
     fn novel_mode_rejects_missing_attributes() {
-        let body = KeyBlockBody {
+        let body = WorldKbBody {
             summary: Some("test".to_string()),
             attributes: None,
             tags: None,
@@ -766,7 +766,7 @@ mod tests {
 
     #[test]
     fn novel_mode_rejects_non_string_novel_category() {
-        let body = KeyBlockBody {
+        let body = WorldKbBody {
             summary: Some("test".to_string()),
             attributes: Some(serde_json::json!({"novel_category": 42})),
             tags: None,
@@ -822,7 +822,7 @@ mod tests {
 
     #[test]
     fn non_object_attributes_returns_structured_kind() {
-        let body = KeyBlockBody {
+        let body = WorldKbBody {
             summary: None,
             attributes: Some(serde_json::json!("not an object")),
             tags: None,
@@ -840,8 +840,8 @@ mod tests {
 
     // ── Game-Bible mode: happy paths ──────────────────────────────
 
-    fn make_game_bible_body(category: Option<&str>) -> KeyBlockBody {
-        KeyBlockBody {
+    fn make_game_bible_body(category: Option<&str>) -> WorldKbBody {
+        WorldKbBody {
             summary: Some("test".to_string()),
             attributes: category.map(|cat| {
                 serde_json::json!({
@@ -891,7 +891,7 @@ mod tests {
 
     #[test]
     fn game_bible_mode_rejects_missing_game_bible_category() {
-        let body = KeyBlockBody {
+        let body = WorldKbBody {
             summary: Some("test".to_string()),
             attributes: Some(serde_json::json!({"traits": ["ancient"]})),
             tags: None,
@@ -917,7 +917,7 @@ mod tests {
 
     #[test]
     fn game_bible_mode_rejects_non_string_game_bible_category() {
-        let body = KeyBlockBody {
+        let body = WorldKbBody {
             summary: Some("test".to_string()),
             attributes: Some(serde_json::json!({"game_bible_category": 42})),
             tags: None,
@@ -944,7 +944,7 @@ mod tests {
 
     #[test]
     fn game_bible_missing_category_returns_structured_kind() {
-        let body = KeyBlockBody {
+        let body = WorldKbBody {
             summary: Some("test".to_string()),
             attributes: Some(serde_json::json!({"traits": ["ancient"]})),
             tags: None,
@@ -1182,8 +1182,8 @@ mod tests {
 
     // ── Script mode (V1.55 P3 fix-wave: direct unit coverage) ──────
 
-    fn make_script_body(category: Option<&str>) -> KeyBlockBody {
-        KeyBlockBody {
+    fn make_script_body(category: Option<&str>) -> WorldKbBody {
+        WorldKbBody {
             summary: Some("test".to_string()),
             attributes: category.map(|cat| {
                 serde_json::json!({
@@ -1237,7 +1237,7 @@ mod tests {
 
     #[test]
     fn script_mode_rejects_missing_script_category() {
-        let body = KeyBlockBody {
+        let body = WorldKbBody {
             summary: Some("test".to_string()),
             attributes: Some(serde_json::json!({"traits": ["cinematic"]})),
             tags: None,
@@ -1263,7 +1263,7 @@ mod tests {
 
     #[test]
     fn script_mode_rejects_non_string_script_category() {
-        let body = KeyBlockBody {
+        let body = WorldKbBody {
             summary: Some("test".to_string()),
             attributes: Some(serde_json::json!({"script_category": 42})),
             tags: None,
@@ -1285,7 +1285,7 @@ mod tests {
 
     #[test]
     fn script_mode_rejects_missing_attributes() {
-        let body = KeyBlockBody {
+        let body = WorldKbBody {
             summary: Some("test".to_string()),
             attributes: None,
             tags: None,
@@ -1313,7 +1313,7 @@ mod tests {
 
     #[test]
     fn script_missing_category_returns_structured_kind() {
-        let body = KeyBlockBody {
+        let body = WorldKbBody {
             summary: Some("test".to_string()),
             attributes: Some(serde_json::json!({"traits": ["cinematic"]})),
             tags: None,
@@ -1380,9 +1380,9 @@ mod tests {
 
     // ── Structured validation (V1.61 P1) ──────────────────────────
 
-    fn make_computable_body(block_type: BlockType) -> KeyBlockBody {
+    fn make_computable_body(block_type: BlockType) -> WorldKbBody {
         let state_key = block_type_state_key(block_type).unwrap_or("unknown");
-        KeyBlockBody {
+        WorldKbBody {
             summary: Some("computable test".to_string()),
             attributes: Some(serde_json::json!({"max_hp": 100, "base_atk": 30})),
             tags: None,
@@ -1393,8 +1393,8 @@ mod tests {
         }
     }
 
-    fn make_non_computable_body() -> KeyBlockBody {
-        KeyBlockBody {
+    fn make_non_computable_body() -> WorldKbBody {
+        WorldKbBody {
             summary: Some("non-computable".to_string()),
             attributes: None,
             tags: None,
@@ -1402,8 +1402,8 @@ mod tests {
         }
     }
 
-    fn make_computable_no_state_body() -> KeyBlockBody {
-        KeyBlockBody {
+    fn make_computable_no_state_body() -> WorldKbBody {
+        WorldKbBody {
             summary: Some("computable no state".to_string()),
             attributes: Some(serde_json::json!({"max_hp": 100})),
             tags: None,
@@ -1412,8 +1412,8 @@ mod tests {
         }
     }
 
-    fn make_computable_no_attrs_body() -> KeyBlockBody {
-        KeyBlockBody {
+    fn make_computable_no_attrs_body() -> WorldKbBody {
+        WorldKbBody {
             summary: Some("computable no attrs".to_string()),
             attributes: None,
             tags: None,
@@ -1422,8 +1422,8 @@ mod tests {
         }
     }
 
-    fn make_computable_bad_state_key_body() -> KeyBlockBody {
-        KeyBlockBody {
+    fn make_computable_bad_state_key_body() -> WorldKbBody {
+        WorldKbBody {
             summary: Some("bad state key".to_string()),
             attributes: Some(serde_json::json!({"max_hp": 100})),
             tags: None,
@@ -1445,7 +1445,7 @@ mod tests {
 
     #[test]
     fn structured_mode_skips_computable_false() {
-        let body = KeyBlockBody {
+        let body = WorldKbBody {
             computable: Some(false),
             ..make_non_computable_body()
         };
@@ -1553,7 +1553,7 @@ mod tests {
 
     #[test]
     fn structured_mode_rejects_non_object_state() {
-        let body = KeyBlockBody {
+        let body = WorldKbBody {
             computable: Some(true),
             attributes: Some(serde_json::json!({"max_hp": 100})),
             state: Some(serde_json::json!("not an object")),

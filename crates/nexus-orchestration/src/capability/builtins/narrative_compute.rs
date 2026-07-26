@@ -1,7 +1,7 @@
 //! `narrative.compute` capability (V1.61 P3 — compass Q7).
 //!
 //! Orchestration-scope capability that bridges the orchestration engine with
-//! the WASM compute host. Reads computable `KeyBlock`s from the KB layer,
+//! the WASM compute host. Reads computable `WorldKbEntry`s from the KB layer,
 //! passes them to a sandboxed WASM module via [`nexus_wasm_host::WasmEngine`],
 //! and applies the resulting 4-part output envelope (`state_delta`,
 //! `timeline_events`, `new_key_blocks`, `battle_report`).
@@ -23,7 +23,7 @@
 //! | `add/sub` | Non-numeric | Return `CapabilityError::InputInvalid`. |
 //!
 //! Paths use dot-notation (e.g. `character.current_hp`) mapping to the nested
-//! `body.state.<block_type_state_key>.<rest>` in a `KeyBlock`. The first
+//! `body.state.<block_type_state_key>.<rest>` in a `WorldKbEntry`. The first
 //! segment identifies the per-`block_type` state namespace per compass Q5
 //! (e.g. `character` → `state.character.current_hp`).
 //!
@@ -52,7 +52,7 @@
 use crate::capability::builtins::world::ensure_world_owned;
 use crate::capability::{Capability, CapabilityError};
 use async_trait::async_trait;
-use nexus_kb::KbStore;
+use nexus_knowledge::world_kb::KbStore;
 use nexus_narrative::NarrativeGateway;
 use nexus_wasm_host::{ComputeInput, ComputeOutputStateDelta, ModuleCache, WasmEngine};
 use serde::Deserialize;
@@ -95,7 +95,7 @@ fn default_module_id() -> String {
     String::from("basic-combat")
 }
 
-/// Execute a WASM compute module for a world's computable `KeyBlock`s.
+/// Execute a WASM compute module for a world's computable `WorldKbEntry`s.
 #[derive(Clone)]
 pub struct NarrativeCompute {
     pool: Option<Arc<sqlx::SqlitePool>>,
@@ -214,7 +214,7 @@ impl Capability for NarrativeCompute {
 
         // 1. Read computable KeyBlocks from the KB store.
         let kb_store = nexus_local_db::kb_store::SqliteKbStore::new((**pool).clone());
-        let q = nexus_kb::KbQuery::new(&parsed.world_id).with_computable(Some(true));
+        let q = nexus_knowledge::world_kb::KbQuery::new(&parsed.world_id).with_computable(Some(true));
         let computable_blocks = kb_store
             .query(&q)
             .await
@@ -260,10 +260,16 @@ impl Capability for NarrativeCompute {
             key_blocks: computable_blocks
                 .items
                 .into_iter()
-                .map(Into::into)
-                .map(|kb: nexus_contracts::KeyBlock| {
-                    serde_json::from_value(serde_json::to_value(&kb).unwrap_or_default())
-                        .expect("KeyBlock round-trips to compute NexusKeyBlock")
+                .map(|kb: nexus_knowledge::world_kb::knowledge_entry::WorldKbEntry| {
+                    // V1.139 P0: ComputeInput.key_blocks is opaque spoke-
+                    // KnowledgeEntry JSON (the spoke $ref is unresolved at
+                    // codegen). Convert domain WorldKbEntry → spoke
+                    // KnowledgeEntry (T2 seam) → JSON object map.
+                    let spoke: nexus_knowledge::world_kb::KnowledgeEntry = kb.into();
+                    serde_json::to_value(&spoke)
+                        .ok()
+                        .and_then(|v| v.as_object().cloned())
+                        .unwrap_or_default()
                 })
                 .collect(),
             narrative_state: Some(
@@ -331,14 +337,7 @@ impl Capability for NarrativeCompute {
         let new_kb_count = create_new_key_blocks(
             pool,
             &parsed.world_id,
-            &output
-                .new_key_blocks
-                .iter()
-                .map(|kb| {
-                    serde_json::from_value(serde_json::to_value(kb).unwrap_or_default())
-                        .expect("NexusKeyBlock round-trips to KeyBlock")
-                })
-                .collect::<Vec<nexus_contracts::KeyBlock>>(),
+            &output.new_key_blocks,
         )
         .await
         .map_err(|e| CapabilityError::Internal(format!("create new key_blocks: {e}")))?;
@@ -381,17 +380,17 @@ impl Capability for NarrativeCompute {
 
 // ─── State delta merge (open design item #1, compass §5) ─────────────────
 
-/// Apply a list of `ComputeOutputStateDelta` entries to the world's `KeyBlock`
-/// bodies. Each entry targets a specific `KeyBlock` by `target_key_block_id`
+/// Apply a list of `ComputeOutputStateDelta` entries to the world's `WorldKbEntry`
+/// bodies. Each entry targets a specific `WorldKbEntry` by `target_key_block_id`
 /// and applies an `op` (`+`/`-`/`set`) at a dot-separated `path` inside the
 /// block's `body.state` field.
 ///
 /// # Merge semantics
 ///
 /// The `path` uses dot-notation: `character.current_hp` maps to
-/// `body.state.character.current_hp` in the target `KeyBlock`. The first
+/// `body.state.character.current_hp` in the target `WorldKbEntry`. The first
 /// segment (e.g. `character`) is the per-`block_type` state key (compass Q5),
-/// validated against `nexus_kb::block_type_state_key()`.
+/// validated against `nexus_knowledge::world_kb::block_type_state_key()`.
 ///
 /// - `set` replaces the value at `path` (numeric, string, bool, object).
 /// - `+` adds `value` (must be numeric) to the current value at `path`.
@@ -441,18 +440,15 @@ async fn apply_state_delta(
             )));
         }
 
-        let target_id = delta
-            .target_key_block_id
-            .as_deref()
-            .map_or("", String::as_str);
+        let target_id = delta.target_key_block_id.as_deref().unwrap_or("");
         if target_id.is_empty() {
             return Err(CapabilityError::InputInvalid(
                 "state_delta entry missing target_key_block_id".to_string(),
             ));
         }
 
-        // Read current KeyBlock.
-        let mut kb = kb_store.get_key_block(target_id).await.map_err(|e| {
+        // Read current WorldKbEntry.
+        let mut kb = kb_store.get_knowledge_entry(target_id).await.map_err(|e| {
             CapabilityError::InputInvalid(format!(
                 "state_delta target '{target_id}' not found: {e}"
             ))
@@ -474,11 +470,11 @@ async fn apply_state_delta(
         }
 
         // Validate the first segment against the block_type's expected state key.
-        let expected_state_key = nexus_kb::block_type_state_key(kb.block_type).unwrap_or("unknown");
+        let expected_state_key = nexus_knowledge::world_kb::block_type_state_key(kb.block_type).unwrap_or("unknown");
         let state_key = path_segments[0];
         if expected_state_key != "unknown" && state_key != expected_state_key {
             return Err(CapabilityError::InputInvalid(format!(
-                "state_delta path key '{state_key}' does not match block_type '{}' expected key '{expected_state_key}'",
+                "state_delta path key '{state_key}' does not match block_type '{:?}' expected key '{expected_state_key}'",
                 kb.block_type
             )));
         }
@@ -493,7 +489,7 @@ async fn apply_state_delta(
         kb.body = Some(body);
 
         kb_store
-            .update_key_block(kb)
+            .update_knowledge_entry(kb)
             .await
             .map_err(|e| CapabilityError::Internal(format!("kb update state: {e}")))?;
 
@@ -521,7 +517,7 @@ fn apply_json_delta(
 
     let inner = state_obj.get_mut(state_key).ok_or_else(|| {
         CapabilityError::InputInvalid(format!(
-            "state key '{state_key}' not found in target KeyBlock state"
+            "state key '{state_key}' not found in target WorldKbEntry state"
         ))
     })?;
 
@@ -623,9 +619,9 @@ fn apply_op_to_field(
     Ok(())
 }
 
-// ─── New KeyBlock creation ─────────────────────────────────────────────────
+// ─── New WorldKbEntry creation ─────────────────────────────────────────────────
 
-/// Create new `KeyBlock`s emitted by the compute module. Each block is inserted
+/// Create new `WorldKbEntry`s emitted by the compute module. Each block is inserted
 /// with `provisional` status via the KB store.
 ///
 /// # Security: `world_id` re-assertion (R-V161P3-CORR-002)
@@ -641,24 +637,30 @@ fn apply_op_to_field(
 async fn create_new_key_blocks(
     pool: &sqlx::SqlitePool,
     world_id: &str,
-    blocks: &[nexus_contracts::KeyBlock],
+    blocks: &[serde_json::Map<String, serde_json::Value>],
 ) -> Result<usize, CapabilityError> {
     let kb_store = nexus_local_db::kb_store::SqliteKbStore::new(pool.clone());
     let mut created = 0usize;
 
-    for kb_contract in blocks {
-        if kb_contract.world_id.to_string() != world_id {
+    for kb_map in blocks {
+        // V1.139 P0: compute output `new_key_blocks` is opaque spoke-
+        // KnowledgeEntry JSON. Convert Map → spoke KnowledgeEntry → domain
+        // WorldKbEntry (T2 seam) before persisting.
+        let spoke: nexus_knowledge::world_kb::KnowledgeEntry =
+            serde_json::from_value(serde_json::Value::Object(kb_map.clone()))
+                .map_err(|e| CapabilityError::Internal(format!("decode new_key_block: {e}")))?;
+        let kb = nexus_knowledge::world_kb::knowledge_entry::WorldKbEntry::from(spoke);
+        if kb.world_id != world_id {
             return Err(CapabilityError::InputInvalid(format!(
                 "new_key_block '{}' targets world '{}' but admitted world is '{}'; \
                  cross-world block injection rejected",
-                kb_contract.key_block_id, kb_contract.world_id, world_id
+                kb.entry_id, kb.world_id, world_id
             )));
         }
-        let kb = nexus_kb::key_block::KeyBlock::from(kb_contract.clone());
         kb_store
-            .insert_key_block(kb)
+            .insert_knowledge_entry(kb)
             .await
-            .map_err(|e| CapabilityError::Internal(format!("insert new key_block: {e}")))?;
+            .map_err(|e| CapabilityError::Internal(format!("insert new knowledge_entry: {e}")))?;
         created += 1;
     }
 
@@ -750,8 +752,8 @@ async fn handle_compute_error(
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
-    use nexus_kb::key_block::{KeyBlock, KeyBlockBody};
-    use nexus_kb::KbStore;
+    use nexus_knowledge::world_kb::knowledge_entry::{WorldKbEntry, WorldKbBody};
+    use nexus_knowledge::world_kb::KbStore;
     use nexus_local_db::{open_pool, run_migrations};
 
     async fn fresh_pool() -> (sqlx::SqlitePool, tempfile::TempDir) {
@@ -766,17 +768,23 @@ mod tests {
         key_block_id: &str,
         world_id: &str,
         canonical_name: &str,
-    ) -> nexus_contracts::KeyBlock {
+    ) -> serde_json::Map<String, serde_json::Value> {
+        // V1.139 P0: compute wire key_blocks is opaque spoke-KnowledgeEntry
+        // JSON. Fixture carries the spoke field names (entry_id, entry_type,
+        // extensions.nexus.world_id).
         serde_json::from_value(json!({
             "schema_version": 1,
-            "key_block_id": key_block_id,
-            "world_id": world_id,
-            "block_type": "character",
+            "entry_id": key_block_id,
+            "entry_type": "character",
             "canonical_name": canonical_name,
             "status": "confirmed",
+            "body": {},
+            "extensions": {
+                "nexus": { "world_id": world_id }
+            },
             "created_at": "2026-01-01T00:00:00Z",
         }))
-        .expect("minimal KeyBlock wire fixture")
+        .expect("minimal spoke KnowledgeEntry wire fixture")
     }
 
     async fn seed_creator(pool: &sqlx::SqlitePool, creator_id: &str) {
@@ -816,12 +824,12 @@ mod tests {
         canonical_name: &str,
         max_hp: i64,
         current_hp: i64,
-    ) -> KeyBlock {
-        let kb = nexus_kb::key_block::KeyBlock {
+    ) -> WorldKbEntry {
+        let kb = nexus_knowledge::world_kb::knowledge_entry::WorldKbEntry {
             world_id: world_id.to_string(),
             block_type: nexus_contracts::BlockType::Character,
             canonical_name: canonical_name.to_string(),
-            body: Some(KeyBlockBody {
+            body: Some(WorldKbBody {
                 summary: Some(format!("{canonical_name} character")),
                 attributes: Some(json!({"max_hp": max_hp, "base_atk": 20})),
                 computable: Some(true),
@@ -835,14 +843,14 @@ mod tests {
                 })),
                 ..Default::default()
             }),
-            ..KeyBlock::new(
+            ..WorldKbEntry::new(
                 world_id,
                 nexus_contracts::BlockType::Character,
                 canonical_name,
             )
         };
         let kb_store = nexus_local_db::kb_store::SqliteKbStore::new(pool.clone());
-        kb_store.insert_key_block(kb.clone()).await.unwrap();
+        kb_store.insert_knowledge_entry(kb.clone()).await.unwrap();
         kb
     }
 
@@ -993,7 +1001,7 @@ mod tests {
         assert!(matches!(err, CapabilityError::InputInvalid(_)));
         // And nothing was inserted.
         let kb_store = nexus_local_db::kb_store::SqliteKbStore::new(pool.clone());
-        assert!(kb_store.get_key_block("kb_hostile").await.is_err());
+        assert!(kb_store.get_knowledge_entry("kb_hostile").await.is_err());
     }
 
     #[tokio::test]
@@ -1007,7 +1015,7 @@ mod tests {
             .unwrap();
         assert_eq!(n, 1);
         let kb_store = nexus_local_db::kb_store::SqliteKbStore::new(pool.clone());
-        assert!(kb_store.get_key_block("kb_ok").await.is_ok());
+        assert!(kb_store.get_knowledge_entry("kb_ok").await.is_ok());
     }
 
     #[tokio::test]

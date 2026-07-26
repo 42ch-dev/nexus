@@ -16,7 +16,7 @@
 
 use nexus42::commands::creator::world::kb::kb_adopt;
 use nexus42::db::Schema;
-use nexus_kb::KbStore;
+use nexus_knowledge::world_kb::KbStore;
 use nexus_local_db::kb_extract_job::{get_promotion, insert_pending_with_llm};
 use nexus_local_db::kb_store::SqliteKbStore;
 
@@ -78,7 +78,7 @@ async fn seed_llm_pending() -> (sqlx::SqlitePool, tempfile::TempDir, String) {
 
 /// `kb_adopt` accepts a candidate carrying LLM metadata (non-character
 /// block_type + confidence + source_quote), promotes it to a `confirmed`
-/// KeyBlock, and leaves the LLM columns intact on the promotion row.
+/// WorldKbEntry, and leaves the LLM columns intact on the promotion row.
 #[tokio::test]
 async fn adopt_succeeds_on_llm_extracted_candidate() {
     let (pool, _dir, job_id) = seed_llm_pending().await;
@@ -98,13 +98,13 @@ async fn adopt_succeeds_on_llm_extracted_candidate() {
         Some("...the eastern gate groaned open...")
     );
 
-    // A confirmed KeyBlock exists with the LLM-judged block_type.
+    // A confirmed WorldKbEntry exists with the LLM-judged block_type.
     let store = SqliteKbStore::new(pool.clone());
     let blocks = store.list_by_world(WORLD).await.unwrap();
     let adopted = blocks
         .iter()
         .find(|b| b.canonical_name == "Azure Gate")
-        .unwrap_or_else(|| panic!("no KeyBlock for Azure Gate: {blocks:?}"));
+        .unwrap_or_else(|| panic!("no WorldKbEntry for Azure Gate: {blocks:?}"));
     assert_eq!(adopted.status, "confirmed");
     assert_eq!(
         adopted.block_type,

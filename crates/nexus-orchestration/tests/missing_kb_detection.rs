@@ -7,14 +7,14 @@
 //! - AC1: `novel-writing` schedule completion triggers missing-KB detection.
 //! - AC3: `--missing-only` lists missing candidates from the advisory log.
 //! - AC4: missing candidates are **not** written to `kb_extract_jobs`.
-//! - AC6: existing confirmed `KeyBlock` rows filter out known entities.
+//! - AC6: existing confirmed `WorldKbEntry` rows filter out known entities.
 //!
 //! Run with: cargo test -p nexus-orchestration --test missing_kb_detection
 
 #![allow(clippy::unwrap_used)]
 
-use nexus_kb::key_block::KeyBlock;
-use nexus_kb::KbStore;
+use nexus_knowledge::world_kb::knowledge_entry::WorldKbEntry;
+use nexus_knowledge::world_kb::KbStore;
 use nexus_local_db::kb_extract_job::list_pending_for_world;
 use nexus_local_db::kb_store::SqliteKbStore;
 use nexus_local_db::works::{self, WorkRecord};
@@ -223,23 +223,23 @@ async fn ac4_missing_candidates_not_written_to_extract_jobs() {
     );
 }
 
-// ── AC6: existing confirmed KeyBlock filters out known entity ────────────────
+// ── AC6: existing confirmed WorldKbEntry filters out known entity ────────────────
 
 #[tokio::test]
 async fn ac6_existing_key_block_filters_known_entity() {
     let pool = test_pool().await;
     seed_world(&pool).await;
 
-    // Confirm a KeyBlock for "Aria Stormblade" before finalize.
+    // Confirm a WorldKbEntry for "Aria Stormblade" before finalize.
     let store = SqliteKbStore::new(pool.clone());
-    let mut kb = KeyBlock::new(
+    let mut kb = WorldKbEntry::new(
         WORLD,
         nexus_contracts::BlockType::Character,
         "Aria Stormblade",
     );
     kb.status = "confirmed".to_string();
     kb.created_at = chrono::Utc::now().to_rfc3339();
-    store.insert_key_block(kb).await.unwrap();
+    store.insert_knowledge_entry(kb).await.unwrap();
 
     let work = novel_work("wrk_ac6", 2);
     works::create_work(&pool, &work).await.unwrap();

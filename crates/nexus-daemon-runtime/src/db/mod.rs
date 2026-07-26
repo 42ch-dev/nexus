@@ -18,7 +18,7 @@ mod restart_tests {
     //! A "restart" is modelled by closing the connection pool, then reopening
     //! it against the same file and re-applying migrations (idempotent).
 
-    use nexus_kb::KbStore;
+    use nexus_knowledge::world_kb::KbStore;
     use nexus_local_db::{open_pool, run_migrations};
     use nexus_narrative::NarrativeGateway;
 
@@ -50,7 +50,7 @@ mod restart_tests {
         .await;
 
         // Seed a key block for that world via the KB store seed helper.
-        nexus_local_db::kb_store::seed::key_block(
+        nexus_local_db::kb_store::seed::knowledge_entry(
             &pool,
             "kb_char_1",
             "wld_restart",

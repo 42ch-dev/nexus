@@ -195,7 +195,7 @@ impl TimelineEvent {
         }
     }
 
-    /// Add affected `KeyBlock` reference.
+    /// Add affected `WorldKbEntry` reference.
     pub fn add_affected_kb(&mut self, kb_id: &str) {
         let kbs = self.affected_key_block_ids.get_or_insert_with(Vec::new);
         if !kbs.contains(&kb_id.to_string()) {
@@ -275,12 +275,7 @@ impl From<nexus_contracts::TimelineEvent> for TimelineEvent {
             affected_key_block_ids: if c.affected_key_block_ids.is_empty() {
                 None
             } else {
-                Some(
-                    c.affected_key_block_ids
-                        .into_iter()
-                        .map(|i| i.to_string())
-                        .collect(),
-                )
+                Some(c.affected_key_block_ids)
             },
             source_command_id: c.source_command_id.map(|id| id.to_string()),
             created_at: c.created_at.to_rfc3339(),

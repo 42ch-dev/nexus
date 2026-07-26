@@ -20,7 +20,7 @@
 
 use crate::capability::{Capability, CapabilityError};
 use async_trait::async_trait;
-use nexus_kb::KbStore;
+use nexus_knowledge::world_kb::KbStore;
 use nexus_narrative::NarrativeGateway;
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -330,7 +330,7 @@ impl Capability for WorldDeltaPropose {
             // V1.60 supports kb_key_block (create/update) + world_metadata title.
             let old_value = match (ch.entity.as_str(), ch.entity_id.as_deref()) {
                 ("kb_key_block", Some(kid)) => {
-                    let existing = store.get_key_block(kid).await.ok();
+                    let existing = store.get_knowledge_entry(kid).await.ok();
                     existing.and_then(|kb| serde_json::to_value(field_of(&kb, &ch.field)).ok())
                 }
                 ("kb_key_block", None) => {
@@ -380,8 +380,8 @@ impl Capability for WorldDeltaPropose {
     }
 }
 
-/// Extract a serializable field value from a `KeyBlock` for the lost-update guard.
-fn field_of(kb: &nexus_kb::key_block::KeyBlock, field: &str) -> Value {
+/// Extract a serializable field value from a `WorldKbEntry` for the lost-update guard.
+fn field_of(kb: &nexus_knowledge::world_kb::knowledge_entry::WorldKbEntry, field: &str) -> Value {
     match field {
         "canonical_name" => json!(kb.canonical_name),
         "status" => json!(kb.status),
@@ -626,7 +626,7 @@ impl Capability for WorldDeltaApply {
                     // defaulted `block_type` to the invalid literal "concept".
                     // Routing through the DAO issues the correct INSERT, runs
                     // canonical_name + body validation, and reuses the canonical
-                    // `KeyBlock::new` defaults (status = provisional).
+                    // `WorldKbEntry::new` defaults (status = provisional).
                     let canonical = ch
                         .new_value
                         .get("canonical_name")
@@ -648,9 +648,9 @@ impl Capability for WorldDeltaApply {
                         })
                         .unwrap_or(nexus_contracts::BlockType::Character);
                     let mut kb =
-                        nexus_kb::key_block::KeyBlock::new(&world_id, block_type, canonical);
+                        nexus_knowledge::world_kb::knowledge_entry::WorldKbEntry::new(&world_id, block_type, canonical);
                     if let Some(body) = ch.new_value.get("body_json").and_then(|v| {
-                        serde_json::from_value::<nexus_kb::key_block::KeyBlockBody>(v.clone()).ok()
+                        serde_json::from_value::<nexus_knowledge::world_kb::knowledge_entry::WorldKbBody>(v.clone()).ok()
                     }) {
                         kb.body = Some(body);
                     }
@@ -660,8 +660,8 @@ impl Capability for WorldDeltaApply {
                         .insert_key_block_in_tx(&mut tx, kb)
                         .await
                         .map_err(|e| match e {
-                            nexus_kb::store::KbStoreError::Validation(_)
-                            | nexus_kb::store::KbStoreError::ValidationLegacy(_) => {
+                            nexus_knowledge::world_kb::store::KbStoreError::Validation(_)
+                            | nexus_knowledge::world_kb::store::KbStoreError::ValidationLegacy(_) => {
                                 CapabilityError::InputInvalid(format!("kb insert: {e}"))
                             }
                             other => CapabilityError::Internal(format!("kb insert: {other}")),
@@ -669,7 +669,7 @@ impl Capability for WorldDeltaApply {
 
                     results.push(json!({
                         "entity": ch.entity,
-                        "entity_id": insert_result.key_block_id,
+                        "entity_id": insert_result.entry_id,
                         "field": ch.field,
                         "status": "applied",
                         "rationale": rationale,

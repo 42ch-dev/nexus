@@ -17,8 +17,8 @@ use assert_cmd::Command;
 use nexus42::commands::creator::world::kb::{kb_delete, kb_edit, kb_list, kb_show};
 use nexus42::db::Schema;
 use nexus_contracts::BlockType;
-use nexus_kb::key_block::{KeyBlock, KeyBlockBody};
-use nexus_kb::KbStore;
+use nexus_knowledge::world_kb::knowledge_entry::{WorldKbEntry, WorldKbBody};
+use nexus_knowledge::world_kb::KbStore;
 use nexus_local_db::kb_store::SqliteKbStore;
 
 const OWNER: &str = "ctr_owner";
@@ -26,12 +26,12 @@ const WORLD: &str = "wld_test";
 const CANON_NAME: &str = "char_hero";
 
 /// Read the body summary for assertion convenience.
-fn summary_of(block: &KeyBlock) -> Option<&str> {
+fn summary_of(block: &WorldKbEntry) -> Option<&str> {
     block.body.as_ref().and_then(|b| b.summary.as_deref())
 }
 
 /// Build a fresh migrated pool + seed a world owned by [`OWNER`] and a single
-/// provisional `KeyBlock` (with a valid novel body) in [`WORLD`].
+/// provisional `WorldKbEntry` (with a valid novel body) in [`WORLD`].
 async fn fresh_pool_with_block() -> (sqlx::SqlitePool, String, tempfile::TempDir) {
     let dir = tempfile::tempdir().unwrap();
     let db_path = dir.path().join("state.db");
@@ -49,15 +49,15 @@ async fn fresh_pool_with_block() -> (sqlx::SqlitePool, String, tempfile::TempDir
     .await;
 
     let store = SqliteKbStore::new(pool.clone());
-    let mut kb = KeyBlock::new(WORLD, BlockType::Character, CANON_NAME);
-    kb.body = Some(KeyBlockBody {
+    let mut kb = WorldKbEntry::new(WORLD, BlockType::Character, CANON_NAME);
+    kb.body = Some(WorldKbBody {
         summary: Some("Original summary".to_string()),
         attributes: Some(serde_json::json!({"novel_category": "character"})),
         tags: Some(vec!["novel".to_string()]),
         ..Default::default()
     });
-    let result = store.insert_key_block(kb).await.unwrap();
-    (pool, result.key_block_id, dir)
+    let result = store.insert_knowledge_entry(kb).await.unwrap();
+    (pool, result.entry_id, dir)
 }
 
 // =============================================================================
@@ -164,7 +164,7 @@ async fn list_returns_seeded_block() {
 
     let blocks = SqliteKbStore::new(pool).list_by_world(WORLD).await.unwrap();
     assert_eq!(blocks.len(), 1);
-    assert_eq!(blocks[0].key_block_id, block_id);
+    assert_eq!(blocks[0].entry_id, block_id);
     assert_eq!(blocks[0].canonical_name, CANON_NAME);
 }
 
@@ -177,7 +177,7 @@ async fn show_returns_full_block() {
     kb_show(&pool, WORLD, &block_id, true).await.unwrap();
 
     let block = SqliteKbStore::new(pool)
-        .get_key_block(&block_id)
+        .get_knowledge_entry(&block_id)
         .await
         .unwrap();
     assert_eq!(summary_of(&block), Some("Original summary"));
@@ -199,7 +199,7 @@ async fn edit_updates_body_in_place() {
         .unwrap();
 
     let block = SqliteKbStore::new(pool)
-        .get_key_block(&block_id)
+        .get_knowledge_entry(&block_id)
         .await
         .unwrap();
     assert_eq!(summary_of(&block), Some("Updated summary"));
@@ -233,7 +233,7 @@ async fn edit_rejects_body_missing_novel_category() {
     );
 
     let block = SqliteKbStore::new(pool)
-        .get_key_block(&block_id)
+        .get_knowledge_entry(&block_id)
         .await
         .unwrap();
     assert_eq!(summary_of(&block), Some("Original summary"));
@@ -255,7 +255,7 @@ async fn delete_soft_deletes_block() {
     assert!(blocks.is_empty(), "deleted block should not be listed");
 
     let block = SqliteKbStore::new(pool)
-        .get_key_block(&block_id)
+        .get_knowledge_entry(&block_id)
         .await
         .unwrap();
     assert_eq!(block.status, "deleted");

@@ -903,7 +903,7 @@ async fn kb_snapshot_read_returns_key_blocks() {
         "manual",
     )
     .await;
-    nexus_local_db::kb_store::seed::key_block(
+    nexus_local_db::kb_store::seed::knowledge_entry(
         &pool,
         "kb_1",
         "wld_kb",
@@ -1494,7 +1494,7 @@ async fn kb_snapshot_write_upserts_key_blocks() {
             "world_id": "wld_test_world",
             "blocks": [{
                 "schema_version": 1,
-                "key_block_id": "kb_write_1",
+                "entry_id": "kb_write_1",
                 "world_id": "wld_test_world",
                 "block_type": "character",
                 "canonical_name": "test_character",
@@ -1577,7 +1577,7 @@ async fn kb_snapshot_write_rejects_cross_world_block_same_creator() {
             "world_id": "wld_test_world",
             "blocks": [{
                 "schema_version": 1,
-                "key_block_id": "kb_cross_world_block",
+                "entry_id": "kb_cross_world_block",
                 "world_id": "wld_other_world",  // mismatched!
                 "block_type": "character",
                 "canonical_name": "cross_world_char",
@@ -1631,7 +1631,7 @@ async fn kb_snapshot_write_rejects_cross_creator_world_block() {
             "world_id": "wld_test_world",
             "blocks": [{
                 "schema_version": 1,
-                "key_block_id": "kb_cross_creator_block",
+                "entry_id": "kb_cross_creator_block",
                 "world_id": "wld_other_creator_world",  // different creator's world
                 "block_type": "character",
                 "canonical_name": "cross_creator_char",

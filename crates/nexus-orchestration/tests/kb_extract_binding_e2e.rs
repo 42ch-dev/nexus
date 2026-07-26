@@ -4,12 +4,12 @@
 //! Uses in-memory stores for KB and `SQLite` for job lifecycle.
 
 use nexus_contracts::BlockType;
-use nexus_kb::extract_finalize::{finalize_extract, ExtractFinalizeInput};
-use nexus_kb::key_block::KeyBlockBody;
-use nexus_kb::source_anchor::SourceAnchor;
-use nexus_kb::store::InMemoryKbStore;
-use nexus_kb::validation::ValidationMode;
-use nexus_kb::KbStore;
+use nexus_knowledge::world_kb::extract_finalize::{finalize_extract, ExtractFinalizeInput};
+use nexus_knowledge::world_kb::knowledge_entry::WorldKbBody;
+use nexus_knowledge::world_kb::source_anchor::SourceAnchor;
+use nexus_knowledge::world_kb::store::InMemoryKbStore;
+use nexus_knowledge::world_kb::validation::ValidationMode;
+use nexus_knowledge::world_kb::KbStore;
 use nexus_local_db::kb_store::seed;
 use nexus_local_db::{enqueue_extract_job_with_artifact, open_pool, run_migrations};
 
@@ -66,7 +66,7 @@ async fn test_persist_extract_chapter_block_e2e() {
 
     // Step 3: Simulate the extract finalize step (what kb.extract_work does).
     let store = InMemoryKbStore::with_validation_mode(ValidationMode::Novel);
-    let body = KeyBlockBody {
+    let body = WorldKbBody {
         summary: Some("Lin Xia is a brave warrior from the Neon City".to_string()),
         attributes: Some(serde_json::json!({
             "novel_category": "character",
@@ -88,7 +88,7 @@ async fn test_persist_extract_chapter_block_e2e() {
     };
 
     let result = finalize_extract(&store, input).await.unwrap();
-    assert!(result.key_block_id.starts_with("kb_"));
+    assert!(result.entry_id.starts_with("kb_"));
     assert_eq!(result.world_id, world_id);
 
     // Step 4: Verify the KB block is queryable via the store.
@@ -110,7 +110,7 @@ async fn test_worldless_work_skips_world_promotion() {
     // in Generic mode; a dedicated test for truly empty/absent world_id is deferred.
 
     let store = InMemoryKbStore::new();
-    let body = KeyBlockBody {
+    let body = WorldKbBody {
         summary: Some("A generic knowledge item".to_string()),
         attributes: None,
         tags: None,
@@ -128,7 +128,7 @@ async fn test_worldless_work_skips_world_promotion() {
     };
 
     let result = finalize_extract(&store, input).await.unwrap();
-    assert!(result.key_block_id.starts_with("kb_"));
+    assert!(result.entry_id.starts_with("kb_"));
 
     let blocks = store.list_by_world("wld_no_world").await.unwrap();
     assert_eq!(blocks.len(), 1);
@@ -185,7 +185,7 @@ async fn test_extract_idempotent_job() {
 #[tokio::test]
 async fn test_extract_novel_requires_novel_category() {
     let store = InMemoryKbStore::with_validation_mode(ValidationMode::Novel);
-    let body = KeyBlockBody {
+    let body = WorldKbBody {
         summary: Some("Test".to_string()),
         attributes: Some(serde_json::json!({})), // missing novel_category
         tags: None,

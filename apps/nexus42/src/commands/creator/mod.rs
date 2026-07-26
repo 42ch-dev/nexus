@@ -37,7 +37,7 @@ use clap::{Args, Subcommand};
 use memory::MemoryCommand;
 use nexus_cloud_sync::platform_client::{PlatformClient, VerifyStatus};
 use nexus_contracts::Creator;
-use nexus_kb::KbStore;
+use nexus_knowledge::world_kb::KbStore;
 use nexus_knowledge::KnowledgeStore;
 use serde::Deserialize;
 use soul::SoulCommand;
@@ -804,12 +804,12 @@ async fn run_demo_seed(config: &CliConfig, force: bool) -> Result<()> {
     println!("✓ Demo event: {}", event.event_id);
 
     // 3. Create demo KB block
-    let mut kb = nexus_kb::key_block::KeyBlock::new(
+    let mut kb = nexus_knowledge::world_kb::knowledge_entry::WorldKbEntry::new(
         &world.world_id,
         nexus_contracts::BlockType::Character,
         "Hero",
     );
-    kb.body = Some(nexus_kb::key_block::KeyBlockBody {
+    kb.body = Some(nexus_knowledge::world_kb::knowledge_entry::WorldKbBody {
         summary: Some("The protagonist of the demo world.".to_string()),
         attributes: None,
         tags: Some(vec!["protagonist".to_string(), "demo".to_string()]),
@@ -817,14 +817,14 @@ async fn run_demo_seed(config: &CliConfig, force: bool) -> Result<()> {
     });
     let kb_store = nexus_local_db::kb_store::SqliteKbStore::new(pool.clone());
     let kb_result = kb_store
-        .insert_key_block(kb)
+        .insert_knowledge_entry(kb)
         .await
         .map_err(|e| CliError::Other(format!("Failed to create demo KB block: {e}")))?;
-    println!("✓ Demo KB block: {}", kb_result.key_block_id);
+    println!("✓ Demo KB block: {}", kb_result.entry_id);
 
     // 4. Create demo knowledge entry
     let knowledge_store = nexus_local_db::SqliteKnowledgeStore::new(pool);
-    let entry = nexus_knowledge::KnowledgeEntry::new(
+    let entry = nexus_knowledge::UserKnowledgeEntry::new(
         "user_default",
         vec![
             nexus_knowledge::KnowledgeTag::new("demo"),

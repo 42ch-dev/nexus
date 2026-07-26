@@ -11,7 +11,7 @@ workspace = true
 
 [dependencies]
 nexus-contracts = { path = "../nexus-contracts" }
-nexus-kb = { path = "../nexus-kb" }
+nexus-knowledge = { path = "../nexus-knowledge" }
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
