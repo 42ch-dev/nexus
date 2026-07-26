@@ -12,7 +12,9 @@
 //! to a different user.
 
 use nexus_knowledge::errors::KnowledgeError;
-use nexus_knowledge::knowledge::{UserKnowledgeEntry, KnowledgeQuery, KnowledgeResult, KnowledgeTag};
+use nexus_knowledge::knowledge::{
+    KnowledgeQuery, KnowledgeResult, KnowledgeTag, UserKnowledgeEntry,
+};
 use nexus_knowledge::store::KnowledgeStore;
 use sqlx::SqlitePool;
 use std::sync::Arc;
@@ -342,7 +344,8 @@ mod tests {
     async fn store_and_get() {
         let (pool, _dir) = fresh_pool().await;
         let store = SqliteKnowledgeStore::new(pool);
-        let entry = UserKnowledgeEntry::new("user_1", vec![KnowledgeTag::new("test")], "Test content");
+        let entry =
+            UserKnowledgeEntry::new("user_1", vec![KnowledgeTag::new("test")], "Test content");
         let id = entry.id.clone();
         let stored = store.store(entry).await.unwrap();
         assert_eq!(stored.id, id);

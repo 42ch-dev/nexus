@@ -22,7 +22,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use nexus_contracts::BlockType;
-use nexus_knowledge::world_kb::knowledge_entry::{WorldKbEntry, WorldKbBody};
+use nexus_knowledge::world_kb::knowledge_entry::{WorldKbBody, WorldKbEntry};
 use nexus_knowledge::world_kb::{KbQuery, KbStore};
 use nexus_local_db::kb_store::SqliteKbStore;
 use nexus_local_db::{narrative_write, open_pool, run_migrations};

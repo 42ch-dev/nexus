@@ -28,7 +28,7 @@
 
 use crate::config::CliConfig;
 use crate::errors::{CliError, Result};
-use nexus_knowledge::world_kb::knowledge_entry::{WorldKbEntry, WorldKbBody};
+use nexus_knowledge::world_kb::knowledge_entry::{WorldKbBody, WorldKbEntry};
 use nexus_knowledge::world_kb::validation::ValidationMode;
 use nexus_knowledge::world_kb::{compute_kb_diff, diff_and_apply, KbStore};
 use nexus_local_db::kb_extract_job::{

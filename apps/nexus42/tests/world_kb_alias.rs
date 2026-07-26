@@ -19,7 +19,7 @@ use assert_cmd::Command;
 use nexus42::commands::creator::world::kb::{kb_delete, kb_list, kb_show};
 use nexus42::db::Schema;
 use nexus_contracts::BlockType;
-use nexus_knowledge::world_kb::knowledge_entry::{WorldKbEntry, WorldKbBody};
+use nexus_knowledge::world_kb::knowledge_entry::{WorldKbBody, WorldKbEntry};
 use nexus_knowledge::world_kb::KbStore;
 use nexus_local_db::kb_store::SqliteKbStore;
 

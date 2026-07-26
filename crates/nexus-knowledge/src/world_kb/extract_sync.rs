@@ -19,7 +19,7 @@
 //! [`compute_kb_diff`] is the pure half used by `--dry-run`; [`diff_and_apply`]
 //! is compute + apply.
 
-use crate::world_kb::knowledge_entry::{WorldKbEntry, WorldKbBody};
+use crate::world_kb::knowledge_entry::{WorldKbBody, WorldKbEntry};
 use crate::world_kb::store::{KbStore, KbStoreError};
 use serde::Serialize;
 
@@ -158,10 +158,7 @@ where
     // build the full WorldKbEntry (compute_kb_diff only carries ids/names).
     let mut applied: Vec<KbSyncUpdate> = Vec::with_capacity(diff.updated.len());
     for update in diff.updated.drain(..) {
-        let Some(old_kb) = old_rows
-            .iter()
-            .find(|kb| kb.entry_id == update.entry_id)
-        else {
+        let Some(old_kb) = old_rows.iter().find(|kb| kb.entry_id == update.entry_id) else {
             // Row vanished between compute and apply — skip defensively.
             continue;
         };
@@ -275,7 +272,9 @@ mod tests {
     #[tokio::test]
     async fn diff_and_apply_refreshes_body_via_store() {
         let world = "wld_1";
-        let store = InMemoryKbStore::with_validation_mode(crate::world_kb::validation::ValidationMode::Novel);
+        let store = InMemoryKbStore::with_validation_mode(
+            crate::world_kb::validation::ValidationMode::Novel,
+        );
         // Seed a confirmed WorldKbEntry the store owns.
         let seeded = confirmed_block(world, "Lin Xia", body_with("v1"));
         store.insert_knowledge_entry(seeded.clone()).await.unwrap();
@@ -298,7 +297,9 @@ mod tests {
     #[tokio::test]
     async fn diff_and_apply_no_op_when_unchanged() {
         let world = "wld_1";
-        let store = InMemoryKbStore::with_validation_mode(crate::world_kb::validation::ValidationMode::Novel);
+        let store = InMemoryKbStore::with_validation_mode(
+            crate::world_kb::validation::ValidationMode::Novel,
+        );
         store
             .insert_knowledge_entry(confirmed_block(world, "Lin Xia", body_with("same")))
             .await

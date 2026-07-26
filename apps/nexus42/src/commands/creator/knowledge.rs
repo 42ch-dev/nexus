@@ -13,7 +13,7 @@
 use crate::config::CliConfig;
 use crate::errors::Result;
 use clap::Subcommand;
-use nexus_knowledge::{UserKnowledgeEntry, KnowledgeQuery, KnowledgeStore, KnowledgeTag};
+use nexus_knowledge::{KnowledgeQuery, KnowledgeStore, KnowledgeTag, UserKnowledgeEntry};
 
 /// Default user ID for local CLI usage (until platform usr_* mapping).
 const DEFAULT_USER_ID: &str = "user_default";

@@ -12,7 +12,7 @@
 use async_trait::async_trait;
 
 use crate::errors::KnowledgeError;
-use crate::knowledge::{UserKnowledgeEntry, KnowledgeQuery, KnowledgeResult, KnowledgeTag};
+use crate::knowledge::{KnowledgeQuery, KnowledgeResult, KnowledgeTag, UserKnowledgeEntry};
 
 /// Storage trait for User-scoped knowledge entries.
 ///
@@ -249,7 +249,8 @@ mod tests {
     #[tokio::test]
     async fn store_and_get() {
         let store = InMemoryKnowledgeStore::new();
-        let entry = UserKnowledgeEntry::new("user_1", vec![KnowledgeTag::new("test")], "Test content");
+        let entry =
+            UserKnowledgeEntry::new("user_1", vec![KnowledgeTag::new("test")], "Test content");
         let id = entry.id.clone();
         let stored = store.store(entry).await.unwrap();
         assert_eq!(stored.id, id);

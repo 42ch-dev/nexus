@@ -165,7 +165,10 @@ impl WorldKbEntry {
         // spoke-operations (via the adapter). Map the reject back to nexus's
         // `RevisionMismatch` to preserve observable behavior.
         let current_rev = self.revision.unwrap_or(0);
-        if matches!(assert_revision(base_revision, current_rev), SpokeResult::Reject(_)) {
+        if matches!(
+            assert_revision(base_revision, current_rev),
+            SpokeResult::Reject(_)
+        ) {
             return Err(KbError::RevisionMismatch {
                 expected: base_revision,
                 actual: current_rev,
@@ -333,8 +336,8 @@ use std::collections::HashMap;
 use std::num::NonZeroU64;
 
 use nexus_spoke_adapter::extensions::{
-    get_created_from_command_id, get_provenance, get_world_id,
-    set_created_from_command_id, set_provenance, set_world_id,
+    get_created_from_command_id, get_provenance, get_world_id, set_created_from_command_id,
+    set_provenance, set_world_id,
 };
 // V1.139 P1 T3 — lifecycle invariants are delegated to spoke-operations via the
 // adapter (spec §1.5 / §7). nexus-knowledge never calls spoke-operations directly.
@@ -436,7 +439,9 @@ impl From<SpokeKnowledgeEntry> for WorldKbEntry {
 
         // Reverse body: spoke typed body → nexus state. summary/attributes/tags
         // cannot be recovered (forward direction dropped them); they default to None.
-        let SpokeKnowledgeEntryBody { computable, state, .. } = s.body;
+        let SpokeKnowledgeEntryBody {
+            computable, state, ..
+        } = s.body;
         let body = if state.is_empty() && computable.is_empty() {
             None
         } else {
@@ -464,10 +469,9 @@ impl From<SpokeKnowledgeEntry> for WorldKbEntry {
             body,
             source_anchor: s.source_anchor.as_ref().map(spoke_anchor_to_nexus),
             created_from_command_id,
-            created_at: s.created_at.map_or_else(
-                || chrono::Utc::now().to_rfc3339(),
-                |dt| dt.to_rfc3339(),
-            ),
+            created_at: s
+                .created_at
+                .map_or_else(|| chrono::Utc::now().to_rfc3339(), |dt| dt.to_rfc3339()),
             updated_at: s.updated_at.map(|dt| dt.to_rfc3339()),
             source_work_id,
             source_chapter,
@@ -505,12 +509,11 @@ fn spoke_anchor_to_nexus(a: &SpokeSourceAnchor) -> SourceAnchor {
 fn map_spoke_reject<T>(r: SpokeResult<T>) -> Result<T, KbError> {
     match r {
         SpokeResult::Ok(v) => Ok(v),
-        SpokeResult::Reject(SpokeReject { code, message, .. }) => {
-            Err(KbError::ValidationError(format!("{}: {}", code.as_str(), message)))
-        }
+        SpokeResult::Reject(SpokeReject { code, message, .. }) => Err(KbError::ValidationError(
+            format!("{}: {}", code.as_str(), message),
+        )),
     }
 }
-
 
 #[cfg(test)]
 mod tests {

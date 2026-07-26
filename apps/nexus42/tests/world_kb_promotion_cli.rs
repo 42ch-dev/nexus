@@ -22,7 +22,7 @@ use nexus42::commands::creator::world::kb::{
 };
 use nexus42::db::Schema;
 use nexus42::errors::CliError;
-use nexus_knowledge::world_kb::knowledge_entry::{WorldKbEntry, WorldKbBody};
+use nexus_knowledge::world_kb::knowledge_entry::{WorldKbBody, WorldKbEntry};
 use nexus_knowledge::world_kb::validation::ValidationMode;
 use nexus_knowledge::world_kb::KbStore;
 use nexus_local_db::kb_extract_job::{

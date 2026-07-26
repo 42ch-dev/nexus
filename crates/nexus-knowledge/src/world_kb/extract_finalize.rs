@@ -6,7 +6,7 @@
 //!
 //! The caller is responsible for job lifecycle (mark running/done/failed).
 
-use crate::world_kb::knowledge_entry::{WorldKbEntry, WorldKbBody};
+use crate::world_kb::knowledge_entry::{WorldKbBody, WorldKbEntry};
 use crate::world_kb::query::KbInsertResult;
 use crate::world_kb::source_anchor::SourceAnchor;
 use crate::world_kb::store::KbStore;

@@ -298,7 +298,8 @@ mod tests {
 
     #[test]
     fn serialize_roundtrip() {
-        let entry = UserKnowledgeEntry::new("user_1", vec![KnowledgeTag::new("rust")], "Some content");
+        let entry =
+            UserKnowledgeEntry::new("user_1", vec![KnowledgeTag::new("rust")], "Some content");
         let json = serde_json::to_string(&entry).unwrap();
         let deserialized: UserKnowledgeEntry = serde_json::from_str(&json).unwrap();
         assert_eq!(entry, deserialized);

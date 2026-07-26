@@ -23,7 +23,9 @@ use nexus_knowledge::world_kb::knowledge_entry::{WorldKbBody, WorldKbEntry};
 use nexus_knowledge::world_kb::query::{KbInsertResult, KbQuery, KbQueryResult};
 use nexus_knowledge::world_kb::source_anchor::SourceAnchor;
 use nexus_knowledge::world_kb::store::KbStoreError;
-use nexus_knowledge::world_kb::validation::{validate_body, validate_canonical_name, ValidationMode};
+use nexus_knowledge::world_kb::validation::{
+    validate_body, validate_canonical_name, ValidationMode,
+};
 use nexus_knowledge::world_kb::KbStore;
 // V1.139 P1 T4 — extensions.nexus round-trip helper (spec §2.3 / §7.2).
 use nexus_spoke_adapter::extensions::build_extensions_nexus;
@@ -369,11 +371,13 @@ fn db_err(err: &sqlx::Error) -> KbStoreError {
 fn validation_err(e: nexus_knowledge::world_kb::KbError) -> KbStoreError {
     match e {
         nexus_knowledge::world_kb::KbError::Validation(ve) => KbStoreError::Validation(ve),
-        nexus_knowledge::world_kb::KbError::ValidationError(msg) => KbStoreError::Validation(ValidationError {
-            kind: nexus_knowledge::world_kb::ValidationKind::MissingBody,
-            field: None,
-            message: msg,
-        }),
+        nexus_knowledge::world_kb::KbError::ValidationError(msg) => {
+            KbStoreError::Validation(ValidationError {
+                kind: nexus_knowledge::world_kb::ValidationKind::MissingBody,
+                field: None,
+                message: msg,
+            })
+        }
         other => KbStoreError::Validation(ValidationError {
             kind: nexus_knowledge::world_kb::ValidationKind::MissingBody,
             field: None,
@@ -386,7 +390,10 @@ fn validation_err(e: nexus_knowledge::world_kb::KbError) -> KbStoreError {
 // safe for single-threaded SQLite usage within our tokio runtime.
 #[allow(clippy::future_not_send)]
 impl KbStore for SqliteKbStore {
-    async fn insert_knowledge_entry(&self, kb: WorldKbEntry) -> Result<KbInsertResult, KbStoreError> {
+    async fn insert_knowledge_entry(
+        &self,
+        kb: WorldKbEntry,
+    ) -> Result<KbInsertResult, KbStoreError> {
         // Validate canonical_name format/safety
         validate_canonical_name(&kb.canonical_name).map_err(validation_err)?;
 
@@ -959,7 +966,10 @@ mod tests {
     async fn test_get_not_found() {
         let (pool, _dir) = fresh_pool().await;
         let store = SqliteKbStore::new(pool);
-        let err = store.get_knowledge_entry("kb_nonexistent").await.unwrap_err();
+        let err = store
+            .get_knowledge_entry("kb_nonexistent")
+            .await
+            .unwrap_err();
         assert!(matches!(err, KbStoreError::NotFound(ref s) if s == "kb_nonexistent"));
     }
 
@@ -1329,7 +1339,12 @@ mod tests {
 
     // ── Computable query filter (V1.61 P1) ─────────────────────────
 
-    fn make_computable_kb(world_id: &str, name: &str, bt: BlockType, computable: bool) -> WorldKbEntry {
+    fn make_computable_kb(
+        world_id: &str,
+        name: &str,
+        bt: BlockType,
+        computable: bool,
+    ) -> WorldKbEntry {
         let mut kb = WorldKbEntry::new(world_id, bt, name);
         kb.body = Some(WorldKbBody {
             summary: Some(format!("{name} summary")),

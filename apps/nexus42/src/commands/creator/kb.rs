@@ -689,7 +689,8 @@ async fn kb_add(
             .unwrap_or_else(|| "untitled".to_string());
 
         let store = open_world_kb_store(config).await?;
-        let mut kb = nexus_knowledge::world_kb::knowledge_entry::WorldKbEntry::new(&wid, bt, &entry_title);
+        let mut kb =
+            nexus_knowledge::world_kb::knowledge_entry::WorldKbEntry::new(&wid, bt, &entry_title);
 
         // Read file content as summary if provided
         if file.exists() {
@@ -1179,7 +1180,7 @@ mod tests {
     async fn legacy_kb_scope_world_list_exercises_forward_path() {
         use crate::db::Schema;
         use nexus_contracts::BlockType;
-        use nexus_knowledge::world_kb::knowledge_entry::{WorldKbEntry, WorldKbBody};
+        use nexus_knowledge::world_kb::knowledge_entry::{WorldKbBody, WorldKbEntry};
         use nexus_knowledge::world_kb::KbStore;
         use nexus_local_db::kb_store::SqliteKbStore;
 
@@ -1220,7 +1221,7 @@ mod tests {
     async fn legacy_kb_scope_world_show_exercises_forward_path() {
         use crate::db::Schema;
         use nexus_contracts::BlockType;
-        use nexus_knowledge::world_kb::knowledge_entry::{WorldKbEntry, WorldKbBody};
+        use nexus_knowledge::world_kb::knowledge_entry::{WorldKbBody, WorldKbEntry};
         use nexus_knowledge::world_kb::KbStore;
         use nexus_local_db::kb_store::SqliteKbStore;
 
@@ -1251,8 +1252,7 @@ mod tests {
         // Mirror forwarding code at kb.rs:611-615
         super::deprecation_notice_legacy_world_kb("show");
         let forward_result =
-            super::super::world::kb::kb_show(&pool, "wld_ut_show", &result.entry_id, false)
-                .await;
+            super::super::world::kb::kb_show(&pool, "wld_ut_show", &result.entry_id, false).await;
         assert!(
             forward_result.is_ok(),
             "forwarded kb_show should succeed: {forward_result:?}"
@@ -1265,7 +1265,7 @@ mod tests {
     async fn legacy_kb_scope_world_remove_exercises_forward_path() {
         use crate::db::Schema;
         use nexus_contracts::BlockType;
-        use nexus_knowledge::world_kb::knowledge_entry::{WorldKbEntry, WorldKbBody};
+        use nexus_knowledge::world_kb::knowledge_entry::{WorldKbBody, WorldKbEntry};
         use nexus_knowledge::world_kb::KbStore;
         use nexus_local_db::kb_store::SqliteKbStore;
 

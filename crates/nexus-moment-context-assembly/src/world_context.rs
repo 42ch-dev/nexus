@@ -194,7 +194,9 @@ impl<'a> WorldKbQueryBuilder<'a> {
 ///
 /// Returns `None` if the body or attributes are missing, or if `novel_category`
 /// is not a string.
-fn extract_novel_category(kb: &nexus_knowledge::world_kb::knowledge_entry::WorldKbEntry) -> Option<String> {
+fn extract_novel_category(
+    kb: &nexus_knowledge::world_kb::knowledge_entry::WorldKbEntry,
+) -> Option<String> {
     kb.body
         .as_ref()
         .and_then(|b| b.attributes.as_ref())
@@ -450,7 +452,9 @@ mod tests {
         name: &str,
         novel_category: &str,
     ) -> nexus_knowledge::world_kb::knowledge_entry::WorldKbEntry {
-        let mut kb = nexus_knowledge::world_kb::knowledge_entry::WorldKbEntry::new(world_id, block_type, name);
+        let mut kb = nexus_knowledge::world_kb::knowledge_entry::WorldKbEntry::new(
+            world_id, block_type, name,
+        );
         kb.set_body(WorldKbBody {
             summary: Some(format!("{novel_category}: {name} summary")),
             attributes: Some(serde_json::json!({

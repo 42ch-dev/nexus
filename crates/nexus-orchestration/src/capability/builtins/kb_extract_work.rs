@@ -387,21 +387,22 @@ impl Capability for KbExtractWork {
         // mark the job as failed so the preset state machine can surface
         // or retry. This prevents "done job with no WorldKbEntry" data loss.
         let store = nexus_local_db::kb_store::SqliteKbStore::new(pool.as_ref().clone());
-        let insert_result = match nexus_knowledge::world_kb::finalize_extract(&store, finalize_input).await {
-            Ok(r) => r,
-            Err(e) => {
-                // Mark job as failed so the content loss window is closed.
-                let _ = nexus_local_db::mark_extract_job_failed(
-                    pool,
-                    &job_id,
-                    &format!("WorldKbEntry insert failed: {e}"),
-                )
-                .await;
-                return Err(CapabilityError::Internal(format!(
-                    "WorldKbEntry insert failed: {e}"
-                )));
-            }
-        };
+        let insert_result =
+            match nexus_knowledge::world_kb::finalize_extract(&store, finalize_input).await {
+                Ok(r) => r,
+                Err(e) => {
+                    // Mark job as failed so the content loss window is closed.
+                    let _ = nexus_local_db::mark_extract_job_failed(
+                        pool,
+                        &job_id,
+                        &format!("WorldKbEntry insert failed: {e}"),
+                    )
+                    .await;
+                    return Err(CapabilityError::Internal(format!(
+                        "WorldKbEntry insert failed: {e}"
+                    )));
+                }
+            };
 
         // Mark done only after the WorldKbEntry was successfully inserted.
         nexus_local_db::mark_extract_job_done(pool, &job_id)

@@ -87,7 +87,10 @@ pub trait KbStore {
     /// Returns [`KbInsertResult`] on success.
     /// Returns [`KbStoreError::Duplicate`] if an active `WorldKbEntry` with the
     /// same `(canonical_name, block_type)` already exists in the same world.
-    async fn insert_knowledge_entry(&self, kb: WorldKbEntry) -> Result<KbInsertResult, KbStoreError>;
+    async fn insert_knowledge_entry(
+        &self,
+        kb: WorldKbEntry,
+    ) -> Result<KbInsertResult, KbStoreError>;
 
     /// Get a `WorldKbEntry` by its ID.
     async fn get_knowledge_entry(&self, entry_id: &str) -> Result<WorldKbEntry, KbStoreError>;
@@ -215,11 +218,16 @@ impl Default for InMemoryKbStore {
 }
 
 impl KbStore for InMemoryKbStore {
-    async fn insert_knowledge_entry(&self, kb: WorldKbEntry) -> Result<KbInsertResult, KbStoreError> {
+    async fn insert_knowledge_entry(
+        &self,
+        kb: WorldKbEntry,
+    ) -> Result<KbInsertResult, KbStoreError> {
         // Validate canonical_name format/safety
         validate_canonical_name(&kb.canonical_name).map_err(|e| match e {
             crate::world_kb::errors::KbError::Validation(ve) => KbStoreError::Validation(ve),
-            crate::world_kb::errors::KbError::ValidationError(msg) => KbStoreError::ValidationLegacy(msg),
+            crate::world_kb::errors::KbError::ValidationError(msg) => {
+                KbStoreError::ValidationLegacy(msg)
+            }
             other => KbStoreError::ValidationLegacy(other.to_string()),
         })?;
 
@@ -227,7 +235,9 @@ impl KbStore for InMemoryKbStore {
         validate_body(kb.block_type, kb.body.as_ref(), self.validation_mode).map_err(
             |e| match e {
                 crate::world_kb::errors::KbError::Validation(ve) => KbStoreError::Validation(ve),
-                crate::world_kb::errors::KbError::ValidationError(msg) => KbStoreError::ValidationLegacy(msg),
+                crate::world_kb::errors::KbError::ValidationError(msg) => {
+                    KbStoreError::ValidationLegacy(msg)
+                }
                 other => KbStoreError::ValidationLegacy(other.to_string()),
             },
         )?;
@@ -384,7 +394,9 @@ impl KbStore for InMemoryKbStore {
         // Validate canonical_name format/safety
         validate_canonical_name(&kb.canonical_name).map_err(|e| match e {
             crate::world_kb::errors::KbError::Validation(ve) => KbStoreError::Validation(ve),
-            crate::world_kb::errors::KbError::ValidationError(msg) => KbStoreError::ValidationLegacy(msg),
+            crate::world_kb::errors::KbError::ValidationError(msg) => {
+                KbStoreError::ValidationLegacy(msg)
+            }
             other => KbStoreError::ValidationLegacy(other.to_string()),
         })?;
 
@@ -392,7 +404,9 @@ impl KbStore for InMemoryKbStore {
         validate_body(kb.block_type, kb.body.as_ref(), self.validation_mode).map_err(
             |e| match e {
                 crate::world_kb::errors::KbError::Validation(ve) => KbStoreError::Validation(ve),
-                crate::world_kb::errors::KbError::ValidationError(msg) => KbStoreError::ValidationLegacy(msg),
+                crate::world_kb::errors::KbError::ValidationError(msg) => {
+                    KbStoreError::ValidationLegacy(msg)
+                }
                 other => KbStoreError::ValidationLegacy(other.to_string()),
             },
         )?;

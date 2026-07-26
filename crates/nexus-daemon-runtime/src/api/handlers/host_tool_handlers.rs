@@ -943,14 +943,12 @@ async fn execute_kb_snapshot_read(
     ensure_world_accessible_for_creator(pool, creator_id, world_id).await?;
 
     let kb_store = nexus_local_db::kb_store::SqliteKbStore::new(pool.clone());
-    let blocks =
-        kb_store
-            .list_by_world(world_id)
-            .await
-            .map_err(|e: nexus_knowledge::world_kb::store::KbStoreError| NexusApiError::Internal {
-                code: "KB_STORE_ERROR".to_string(),
-                message: e.to_string(),
-            })?;
+    let blocks = kb_store.list_by_world(world_id).await.map_err(
+        |e: nexus_knowledge::world_kb::store::KbStoreError| NexusApiError::Internal {
+            code: "KB_STORE_ERROR".to_string(),
+            message: e.to_string(),
+        },
+    )?;
 
     Ok(serde_json::to_value(&blocks).unwrap_or_else(|_| serde_json::json!([])))
 }

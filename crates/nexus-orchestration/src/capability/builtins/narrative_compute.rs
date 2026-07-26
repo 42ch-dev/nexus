@@ -214,7 +214,8 @@ impl Capability for NarrativeCompute {
 
         // 1. Read computable KeyBlocks from the KB store.
         let kb_store = nexus_local_db::kb_store::SqliteKbStore::new((**pool).clone());
-        let q = nexus_knowledge::world_kb::KbQuery::new(&parsed.world_id).with_computable(Some(true));
+        let q =
+            nexus_knowledge::world_kb::KbQuery::new(&parsed.world_id).with_computable(Some(true));
         let computable_blocks = kb_store
             .query(&q)
             .await
@@ -260,17 +261,19 @@ impl Capability for NarrativeCompute {
             key_blocks: computable_blocks
                 .items
                 .into_iter()
-                .map(|kb: nexus_knowledge::world_kb::knowledge_entry::WorldKbEntry| {
-                    // V1.139 P0: ComputeInput.key_blocks is opaque spoke-
-                    // KnowledgeEntry JSON (the spoke $ref is unresolved at
-                    // codegen). Convert domain WorldKbEntry → spoke
-                    // KnowledgeEntry (T2 seam) → JSON object map.
-                    let spoke: nexus_knowledge::world_kb::KnowledgeEntry = kb.into();
-                    serde_json::to_value(&spoke)
-                        .ok()
-                        .and_then(|v| v.as_object().cloned())
-                        .unwrap_or_default()
-                })
+                .map(
+                    |kb: nexus_knowledge::world_kb::knowledge_entry::WorldKbEntry| {
+                        // V1.139 P0: ComputeInput.key_blocks is opaque spoke-
+                        // KnowledgeEntry JSON (the spoke $ref is unresolved at
+                        // codegen). Convert domain WorldKbEntry → spoke
+                        // KnowledgeEntry (T2 seam) → JSON object map.
+                        let spoke: nexus_knowledge::world_kb::KnowledgeEntry = kb.into();
+                        serde_json::to_value(&spoke)
+                            .ok()
+                            .and_then(|v| v.as_object().cloned())
+                            .unwrap_or_default()
+                    },
+                )
                 .collect(),
             narrative_state: Some(
                 serde_json::from_value(narrative_state)
@@ -334,13 +337,9 @@ impl Capability for NarrativeCompute {
         let applied = apply_state_delta(pool, &parsed.world_id, &output.state_delta).await?;
 
         // 6. Create new KeyBlocks from output.
-        let new_kb_count = create_new_key_blocks(
-            pool,
-            &parsed.world_id,
-            &output.new_key_blocks,
-        )
-        .await
-        .map_err(|e| CapabilityError::Internal(format!("create new key_blocks: {e}")))?;
+        let new_kb_count = create_new_key_blocks(pool, &parsed.world_id, &output.new_key_blocks)
+            .await
+            .map_err(|e| CapabilityError::Internal(format!("create new key_blocks: {e}")))?;
 
         // 7. Append timeline events from output.
         let evt_count = append_timeline_events(
@@ -470,7 +469,8 @@ async fn apply_state_delta(
         }
 
         // Validate the first segment against the block_type's expected state key.
-        let expected_state_key = nexus_knowledge::world_kb::block_type_state_key(kb.block_type).unwrap_or("unknown");
+        let expected_state_key =
+            nexus_knowledge::world_kb::block_type_state_key(kb.block_type).unwrap_or("unknown");
         let state_key = path_segments[0];
         if expected_state_key != "unknown" && state_key != expected_state_key {
             return Err(CapabilityError::InputInvalid(format!(
@@ -752,7 +752,7 @@ async fn handle_compute_error(
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
-    use nexus_knowledge::world_kb::knowledge_entry::{WorldKbEntry, WorldKbBody};
+    use nexus_knowledge::world_kb::knowledge_entry::{WorldKbBody, WorldKbEntry};
     use nexus_knowledge::world_kb::KbStore;
     use nexus_local_db::{open_pool, run_migrations};
 

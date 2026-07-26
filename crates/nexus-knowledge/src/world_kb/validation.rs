@@ -307,8 +307,9 @@ fn validate_novel_body(block_type: BlockType, body: Option<&WorldKbBody>) -> Res
         KbError::Validation(ValidationError {
             kind: ValidationKind::MissingNovelCategory,
             field: Some("body.attributes.novel_category".to_string()),
-            message: "body.attributes.novel_category is required for novel-profile knowledge entries"
-                .to_string(),
+            message:
+                "body.attributes.novel_category is required for novel-profile knowledge entries"
+                    .to_string(),
         })
     })?;
 
@@ -370,7 +371,8 @@ fn validate_game_bible_body(
         KbError::Validation(ValidationError {
             kind: ValidationKind::MissingAttributes,
             field: Some("body.attributes".to_string()),
-            message: "body.attributes is required for game-bible-profile knowledge entries".to_string(),
+            message: "body.attributes is required for game-bible-profile knowledge entries"
+                .to_string(),
         })
     })?;
 
@@ -459,8 +461,9 @@ fn validate_script_body(block_type: BlockType, body: Option<&WorldKbBody>) -> Re
         return Err(KbError::Validation(ValidationError {
             kind: ValidationKind::InvalidNovelCategory,
             field: Some("body.attributes.novel_category".to_string()),
-            message: "body.attributes.novel_category is not valid for script-profile knowledge entries"
-                .to_string(),
+            message:
+                "body.attributes.novel_category is not valid for script-profile knowledge entries"
+                    .to_string(),
         }));
     }
     if attrs.get("game_bible_category").is_some() {
@@ -477,8 +480,9 @@ fn validate_script_body(block_type: BlockType, body: Option<&WorldKbBody>) -> Re
         KbError::Validation(ValidationError {
             kind: ValidationKind::MissingScriptCategory,
             field: Some("body.attributes.script_category".to_string()),
-            message: "body.attributes.script_category is required for script-profile knowledge entries"
-                .to_string(),
+            message:
+                "body.attributes.script_category is required for script-profile knowledge entries"
+                    .to_string(),
         })
     })?;
 
@@ -578,7 +582,8 @@ fn validate_structured_body(
         KbError::Validation(ValidationError {
             kind: ValidationKind::NonObjectStructuredState,
             field: Some("body.state".to_string()),
-            message: "body.state must be a JSON object for computable knowledge entries".to_string(),
+            message: "body.state must be a JSON object for computable knowledge entries"
+                .to_string(),
         })
     })?;
 

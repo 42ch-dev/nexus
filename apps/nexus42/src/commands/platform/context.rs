@@ -891,7 +891,7 @@ mod tests {
     /// are present (world state, timeline, world KB, user knowledge).
     #[tokio::test]
     async fn assemble_moment_persistent_four_domains() {
-        use nexus_knowledge::{UserKnowledgeEntry, KnowledgeStore, KnowledgeTag};
+        use nexus_knowledge::{KnowledgeStore, KnowledgeTag, UserKnowledgeEntry};
 
         // Create fresh SQLite DB
         let dir = tempfile::tempdir().unwrap();
@@ -1015,7 +1015,7 @@ mod tests {
     /// simulating a process restart. Verifies knowledge persists.
     #[tokio::test]
     async fn assemble_moment_restart_sees_same_knowledge() {
-        use nexus_knowledge::{UserKnowledgeEntry, KnowledgeStore, KnowledgeTag};
+        use nexus_knowledge::{KnowledgeStore, KnowledgeTag, UserKnowledgeEntry};
 
         let dir = tempfile::tempdir().unwrap();
         let db_path = dir.path().join("test.db");

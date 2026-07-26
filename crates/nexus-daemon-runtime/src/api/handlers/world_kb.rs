@@ -40,8 +40,10 @@ use nexus_contracts::{
     WorldKbPatchRelationshipResponse, WorldKbPromoteCandidateRequest,
     WorldKbPromoteCandidateResponse, WorldKbRelationshipProjection, WorldKbSourceAnchorProjection,
 };
-use nexus_knowledge::world_kb::knowledge_entry::{WorldKbEntry, WorldKbBody};
-use nexus_knowledge::world_kb::validation::{validate_body, validate_canonical_name, ValidationMode};
+use nexus_knowledge::world_kb::knowledge_entry::{WorldKbBody, WorldKbEntry};
+use nexus_knowledge::world_kb::validation::{
+    validate_body, validate_canonical_name, ValidationMode,
+};
 use nexus_knowledge::world_kb::KbStore;
 use nexus_local_db::kb_extract_job::{
     get_promotion, list_pending_for_world_after, mark_confirmed_in_tx_with_cas, KbExtractPromotion,
@@ -371,14 +373,13 @@ pub async fn patch_entity(
     info!(entity_id = %req.entity_id, new_version, "world_kb.patch_entity committed");
 
     // Re-read canonical post-write state for the response projection.
-    let updated =
-        store
-            .get_knowledge_entry(&req.entity_id)
-            .await
-            .map_err(|e| NexusApiError::Internal {
-                code: "DATABASE_ERROR".to_string(),
-                message: e.to_string(),
-            })?;
+    let updated = store
+        .get_knowledge_entry(&req.entity_id)
+        .await
+        .map_err(|e| NexusApiError::Internal {
+            code: "DATABASE_ERROR".to_string(),
+            message: e.to_string(),
+        })?;
 
     Ok(Json(WorldKbPatchEntityResponse {
         entity: wire_cast(project_entity(&updated)),
@@ -636,13 +637,14 @@ async fn promote_adopt(
     tx.commit().await.map_err(NexusApiError::from)?;
 
     let kb_id = insert.entry_id.clone();
-    let updated_kb = store
-        .get_knowledge_entry(&kb_id)
-        .await
-        .map_err(|e| NexusApiError::Internal {
-            code: "DATABASE_ERROR".to_string(),
-            message: e.to_string(),
-        })?;
+    let updated_kb =
+        store
+            .get_knowledge_entry(&kb_id)
+            .await
+            .map_err(|e| NexusApiError::Internal {
+                code: "DATABASE_ERROR".to_string(),
+                message: e.to_string(),
+            })?;
     let job = get_promotion(pool, &req.job_id)
         .await
         .map_err(NexusApiError::from)?
@@ -722,13 +724,14 @@ async fn promote_merge(
             reason: "merge requires merge_target_id".to_string(),
         })?;
     let store = kb_store::SqliteKbStore::with_validation_mode(pool.clone(), ValidationMode::Novel);
-    let target = store
-        .get_knowledge_entry(target_id)
-        .await
-        .map_err(|e| NexusApiError::Internal {
-            code: "DATABASE_ERROR".to_string(),
-            message: e.to_string(),
-        })?;
+    let target =
+        store
+            .get_knowledge_entry(target_id)
+            .await
+            .map_err(|e| NexusApiError::Internal {
+                code: "DATABASE_ERROR".to_string(),
+                message: e.to_string(),
+            })?;
     if target.world_id != world_id {
         return Err(NexusApiError::NotFound(format!(
             "merge target {target_id} in world {world_id}"
@@ -825,7 +828,10 @@ async fn promote_merge(
     }))
 }
 
-fn map_kb_store_err(e: &nexus_knowledge::world_kb::store::KbStoreError, job_id: &str) -> NexusApiError {
+fn map_kb_store_err(
+    e: &nexus_knowledge::world_kb::store::KbStoreError,
+    job_id: &str,
+) -> NexusApiError {
     use nexus_knowledge::world_kb::store::KbStoreError;
     match e {
         KbStoreError::Validation(_) | KbStoreError::ValidationLegacy(_) => {

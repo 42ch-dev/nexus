@@ -39,5 +39,5 @@ pub mod store;
 pub mod world_kb;
 
 pub use errors::KnowledgeError;
-pub use knowledge::{UserKnowledgeEntry, KnowledgeQuery, KnowledgeResult, KnowledgeTag};
+pub use knowledge::{KnowledgeQuery, KnowledgeResult, KnowledgeTag, UserKnowledgeEntry};
 pub use store::{InMemoryKnowledgeStore, KnowledgeStore};

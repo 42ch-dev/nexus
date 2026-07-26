@@ -647,10 +647,14 @@ impl Capability for WorldDeltaApply {
                             serde_json::from_value::<nexus_contracts::BlockType>(v.clone()).ok()
                         })
                         .unwrap_or(nexus_contracts::BlockType::Character);
-                    let mut kb =
-                        nexus_knowledge::world_kb::knowledge_entry::WorldKbEntry::new(&world_id, block_type, canonical);
+                    let mut kb = nexus_knowledge::world_kb::knowledge_entry::WorldKbEntry::new(
+                        &world_id, block_type, canonical,
+                    );
                     if let Some(body) = ch.new_value.get("body_json").and_then(|v| {
-                        serde_json::from_value::<nexus_knowledge::world_kb::knowledge_entry::WorldKbBody>(v.clone()).ok()
+                        serde_json::from_value::<
+                            nexus_knowledge::world_kb::knowledge_entry::WorldKbBody,
+                        >(v.clone())
+                        .ok()
                     }) {
                         kb.body = Some(body);
                     }

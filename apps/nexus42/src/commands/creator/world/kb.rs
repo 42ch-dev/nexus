@@ -28,7 +28,7 @@
 use crate::config::CliConfig;
 use crate::errors::{CliError, Result};
 use clap::Subcommand;
-use nexus_knowledge::world_kb::knowledge_entry::{WorldKbEntry, WorldKbBody};
+use nexus_knowledge::world_kb::knowledge_entry::{WorldKbBody, WorldKbEntry};
 use nexus_knowledge::world_kb::store::KbStoreError;
 use nexus_knowledge::world_kb::validation::ValidationMode;
 use nexus_knowledge::world_kb::KbStore;

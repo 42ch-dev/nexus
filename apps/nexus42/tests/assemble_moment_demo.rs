@@ -78,7 +78,7 @@ async fn seed_kb(kb: &InMemoryKbStore, world_id: &str) {
 
 /// Helper: seed knowledge entry (async, call before assembly).
 async fn seed_knowledge(knowledge: &InMemoryKnowledgeStore, user_id: &str) {
-    use nexus_knowledge::{UserKnowledgeEntry, KnowledgeTag};
+    use nexus_knowledge::{KnowledgeTag, UserKnowledgeEntry};
     let entry = UserKnowledgeEntry::new(
         user_id,
         vec![KnowledgeTag::new("demo")],

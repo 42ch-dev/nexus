@@ -55,10 +55,19 @@ fn spoke_allows(from: &str, to: &str) -> bool {
 #[test]
 fn spoke_allows_the_six_edges_nexus_uses() {
     // The 6 allowed transitions the prior nexus hand-rolled rules relied on.
-    assert!(spoke_allows("provisional", "confirmed"), "provisional → confirmed");
-    assert!(spoke_allows("confirmed", "deprecated"), "confirmed → deprecated");
+    assert!(
+        spoke_allows("provisional", "confirmed"),
+        "provisional → confirmed"
+    );
+    assert!(
+        spoke_allows("confirmed", "deprecated"),
+        "confirmed → deprecated"
+    );
     assert!(spoke_allows("confirmed", "merged"), "confirmed → merged");
-    assert!(spoke_allows("deprecated", "deleted"), "deprecated → deleted");
+    assert!(
+        spoke_allows("deprecated", "deleted"),
+        "deprecated → deleted"
+    );
     assert!(spoke_allows("confirmed", "deleted"), "confirmed → deleted");
     assert!(
         spoke_allows("deprecated", "confirmed"),
@@ -137,7 +146,9 @@ fn already_in_state_guard_is_preserved_for_self_transition() {
     // nexus keeps the AlreadyInState guard (spoke would self-loop accept); the
     // guard preserves the pre-refactor UX of rejecting a redundant deprecate.
     let mut e = entry_in("deprecated");
-    let err = e.deprecate(None).expect_err("re-deprecate rejected by nexus guard");
+    let err = e
+        .deprecate(None)
+        .expect_err("re-deprecate rejected by nexus guard");
     assert!(matches!(err, KbError::AlreadyInState(_)), "got {err:?}");
     assert_eq!(e.status, "deprecated");
 }
@@ -149,7 +160,9 @@ fn merge_from_deprecated_rejected_by_spoke_exclusion() {
     // accepted this (it had no cross-product) — this is the documented place T3
     // is correctly stricter, and the outcome matches spoke's table.
     let mut e = entry_in("deprecated");
-    let err = e.merge_into("kb_other").expect_err("deprecated → merged rejected");
+    let err = e
+        .merge_into("kb_other")
+        .expect_err("deprecated → merged rejected");
     assert!(matches!(err, KbError::ValidationError(_)), "got {err:?}");
     assert_eq!(e.status, "deprecated", "status unchanged on reject");
 }
@@ -159,7 +172,10 @@ fn delete_from_terminal_rejected_by_spoke() {
     // nexus's AlreadyInState guard passes for delete-from-merged (merged ≠
     // deleted); spoke's terminal rule rejects merged → deleted.
     let mut e = entry_in("merged");
-    assert!(e.delete().is_err(), "merged → deleted rejected by spoke terminal rule");
+    assert!(
+        e.delete().is_err(),
+        "merged → deleted rejected by spoke terminal rule"
+    );
     assert_eq!(e.status, "merged", "status unchanged on reject");
 }
 
@@ -169,8 +185,14 @@ fn delete_from_terminal_rejected_by_spoke() {
 fn assert_revision_matches_the_prior_equality_check() {
     // T3: confirm() gate 2 delegates to spoke's assert_revision, mapping the
     // reject back to KbError::RevisionMismatch. The spoke invariant is equality.
-    assert!(matches!(assert_revision(5, 5), SpokeResult::Ok(())), "equal → ok");
-    assert!(matches!(assert_revision(0, 0), SpokeResult::Ok(())), "zero/zero → ok");
+    assert!(
+        matches!(assert_revision(5, 5), SpokeResult::Ok(())),
+        "equal → ok"
+    );
+    assert!(
+        matches!(assert_revision(0, 0), SpokeResult::Ok(())),
+        "zero/zero → ok"
+    );
     assert!(
         matches!(assert_revision(5, 4), SpokeResult::Reject(_)),
         "mismatch → reject"
@@ -187,7 +209,13 @@ fn confirm_with_revision_mismatch_maps_back_to_revision_mismatch() {
         .confirm(&owner(), 5, &no_conflicts(), &[])
         .expect_err("mismatched base_revision rejected");
     assert!(
-        matches!(err, KbError::RevisionMismatch { expected: 5, actual: 3 }),
+        matches!(
+            err,
+            KbError::RevisionMismatch {
+                expected: 5,
+                actual: 3
+            }
+        ),
         "got {err:?}"
     );
 }
