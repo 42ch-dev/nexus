@@ -2791,6 +2791,7 @@ dependencies = [
  "nexus-home-layout",
  "nexus-knowledge",
  "nexus-narrative",
+ "nexus-spoke-adapter",
  "nix 0.28.0",
  "serde",
  "serde_json",

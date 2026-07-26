@@ -195,7 +195,7 @@ impl TimelineEvent {
         }
     }
 
-    /// Add affected `KeyBlock` reference.
+    /// Add affected `WorldKbEntry` reference.
     pub fn add_affected_kb(&mut self, kb_id: &str) {
         let kbs = self.affected_key_block_ids.get_or_insert_with(Vec::new);
         if !kbs.contains(&kb_id.to_string()) {
