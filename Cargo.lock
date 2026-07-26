@@ -4461,9 +4461,9 @@ dependencies = [
 
 [[package]]
 name = "spoke-operations"
-version = "0.1.1"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1f76548575fca694c4d0b379d47963b17bb52410cdf5f65f5ba7ad79aa9b1816"
+checksum = "bd28bdd7e382bdb4d1fba7b2a483776e5bd9cb8cb7638b08889fd6a3d38b2f43"
 dependencies = [
  "chrono",
  "serde",
@@ -4473,9 +4473,9 @@ dependencies = [
 
 [[package]]
 name = "spoke-schemas"
-version = "0.1.1"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "91813db5c226a5047af6984a25020068275b9e941e9b8869edbdac789f08538e"
+checksum = "3ca8a06372f91ac59e2cb58def1be06919539e8091b84f4966577a1c52306e40"
 dependencies = [
  "chrono",
  "regress",
