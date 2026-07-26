@@ -5,10 +5,10 @@
 # 2. Reads the work-scope KB file content
 # 3. Sends an extraction prompt via acp.prompt
 # 4. Parses the structured JSON response
-# 5. Inserts a KeyBlock into the target world
+# 5. Inserts a KnowledgeEntry into the target world
 #
 # The kb.extract_work capability handles the full lifecycle:
-# claim → mark_running → build prompt → parse LLM response → insert KeyBlock → mark done/failed
+# claim → mark_running → build prompt → parse LLM response → insert KnowledgeEntry → mark done/failed
 #
 # Manual run command:
 #   nexus42 daemon schedule add --preset kb-extract --creator <creator-id>
@@ -17,7 +17,7 @@ preset:
   id: kb-extract
   version: 3  # Bumped for inner graph wiring fix
   kind: creator
-  description: "Extract structured KeyBlocks from work-scope KB entries into world knowledge"
+  description: "Extract structured KnowledgeEntries from work-scope KB entries into world knowledge"
   requires_capabilities:
     - kb.extract_work
     - acp.prompt

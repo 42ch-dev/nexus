@@ -106,7 +106,7 @@ function BriefEraFixtureFrame() {
               timeSpan="Year 0 → Year 412"
               temporalUnknownLabel="Temporal unknown"
               eraId="era-first"
-              worldSummary="Founding myths and the first KeyBlock lineages of the World."
+              worldSummary="Founding myths and the first knowledge entry lineages of the World."
               sourceAnchorLabel="3 source anchors"
               version={2}
             />

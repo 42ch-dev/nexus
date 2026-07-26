@@ -32,12 +32,12 @@ The host whitelists two imported host functions (module namespace `nexus`):
 
 | Import | Signature | Behavior |
 | --- | --- | --- |
-| `nexus::kb_read` | `(id_ptr, id_len, out_ptr, out_cap) -> i64` | Look up a KeyBlock by ID in the invocation's `key_blocks` snapshot; write its JSON to `out`. Returns bytes written, `-1` if not found, `-2` if `out_cap` too small. |
+| `nexus::kb_read` | `(id_ptr, id_len, out_ptr, out_cap) -> i64` | Look up a KnowledgeEntry by ID in the invocation's `key_blocks` snapshot; write its JSON to `out`. Returns bytes written, `-1` if not found, `-2` if `out_cap` too small. |
 | `nexus::narrative_query` | `(q_ptr, q_len, out_ptr, out_cap) -> i64` | Return narrative context JSON (V1: passes through `narrative_state` from the envelope; full query engine is a later iteration). Same return convention. |
 
 ## Key Rules
 
-- **Contracts-first**: `ComputeInput` / `ComputeOutput` / `KeyBlock` / `TimelineEvent`
+- **Contracts-first**: `ComputeInput` / `ComputeOutput` / `KnowledgeEntry` / `TimelineEvent`
   come from `nexus-contracts` (generated). Do not hand-write duplicate DTOs.
 - **No cross-call state**: each `compute()` builds a fresh `Store` + `Instance`.
   Never cache instance state across calls.

@@ -51,7 +51,7 @@ titles carry a `"Nexus <Name>"` product prefix (e.g. `"Nexus World Entity"`).
 `main.rs` overrides the in-memory `metadata.title` to the basename-derived
 PascalCase name (mirroring `tooling/codegen/src/utils.ts` `schemaToTypeName`)
 before `add_root_schema`, so the emitted root struct/enum matches the TS contract
-and the drift-test `entry!` registrations (`World`, `WorkSummary`, `KeyBlock`, …).
+and the drift-test `entry!` registrations (`World`, `WorkSummary`, `KnowledgeEntry`, …).
 Only the in-memory title is touched; source schema files are never mutated.
 
 See [`../AGENTS.md`](../AGENTS.md) for the codegen pipeline and drift detection.

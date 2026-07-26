@@ -528,12 +528,12 @@ pub enum CreatorCommand {
         command: MemoryCommand,
     },
 
-    /// Work-scope file index and World KB key blocks
+    /// Work-scope file index and World KB knowledge entries
     ///
     /// Manages TWO knowledge scopes:
     ///   • `--scope work` (default): local workspace file index — per-creator,
     ///     per-workspace documents stored under `kb/`. NOT the World narrative KB.
-    ///   • `--scope world`: narrative KB key blocks (nexus-kb + nexus-narrative),
+    ///   • `--scope world`: narrative KB knowledge entries (nexus-knowledge + nexus-narrative),
     ///     requires `--world-id`.
     ///
     /// For User-scoped global knowledge, use `creator knowledge` instead.

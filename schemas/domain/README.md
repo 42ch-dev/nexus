@@ -6,7 +6,7 @@
 
 - Creator → `nexus-creator`
 - User / Pairing → `nexus-cloud-domain`
-- Narrative / KB on wire → `nexus-narrative`, `nexus-kb`, etc.
+- Narrative / KB on wire → `nexus-narrative`, `nexus-knowledge`, etc.
 
 **Layout:** [schemas-directory-layout.md](../../.mstar/specs/schemas-directory-layout.md) §3.3.
 

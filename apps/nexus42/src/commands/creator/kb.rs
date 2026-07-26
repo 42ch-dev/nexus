@@ -50,13 +50,13 @@ pub enum KbScope {
 ///
 /// Two scopes via `--scope`:
 ///   • `work` (default) — local workspace file index under `kb/`
-///   • `world` — narrative KB key blocks (requires `--world-id`)
+///   • `world` — narrative KB knowledge entries (requires `--world-id`)
 ///
 /// For User-scoped global knowledge entries, use `creator knowledge` instead.
 /// For reference sources, use `creator reference`.
 #[derive(Debug, clap::Subcommand)]
 pub enum KbCommand {
-    /// List entries (work-scope file index by default; use --scope world for key blocks)
+    /// List entries (work-scope file index by default; use --scope world for knowledge entries)
     List {
         /// Scope: `work` (local file index, default) or `world` (narrative KB).
         ///
@@ -538,7 +538,7 @@ async fn kb_search(
             .await
             .map_err(|e| CliError::Other(format!("World KB search failed for {wid}: {e}")))?;
         if result.items.is_empty() {
-            println!("No key blocks matching \"{query}\" in world {wid}.");
+            println!("No knowledge entries matching \"{query}\" in world {wid}.");
         } else {
             println!("Key blocks matching \"{query}\" in world {wid}:");
             println!("{:<20} {:<15} {:<30} STATUS", "BLOCK_ID", "TYPE", "NAME");
@@ -617,7 +617,7 @@ async fn kb_search(
     Ok(())
 }
 
-/// `kb show` implementation — read and print a single entry file / key block.
+/// `kb show` implementation — read and print a single entry file / knowledge entry.
 async fn kb_show(
     config: &CliConfig,
     entry_id: &str,

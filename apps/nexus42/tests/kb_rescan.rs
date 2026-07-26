@@ -205,7 +205,7 @@ async fn cross_chapter_dry_run_shows_reuse_summary_without_writing() {
         .list_by_world(WORLD)
         .await
         .unwrap();
-    assert!(blocks.is_empty(), "dry-run must not write KeyBlocks");
+    assert!(blocks.is_empty(), "dry-run must not write KnowledgeEntries");
 }
 
 // ── AC4: existing confirmed WorldKbEntry match → body refresh, candidate reuse ─

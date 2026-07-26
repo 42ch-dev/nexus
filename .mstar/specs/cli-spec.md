@@ -307,7 +307,7 @@ V2 命令面按以下顶层执行（pre-release 允许破坏性调整）。**V1.
 `creator kb` scope 约束（对齐 [`entity-scope-model.md`](./entity-scope-model.md) §5.3）：
 
 - **`--scope work`（默认，V1.23 必须保留；V1.24 KCA-003 C2 强化为唯一已实现 scope）**：表示活跃 `creator_id` + 活跃 `workspace_slug` 下的 **CLI local work KB index**。当前实现通过 daemon local API `/v1/local/kb/entries` 优先处理，失败时回退到 `$HOME/.nexus42/creators/<creator_id>/workspaces/<workspace_slug>/...` 下的本地文件 / `index.json` 工作索引。它是工作资料/文件索引，**不是** `nexus-kb` 的 World graph，**也不是** `nexus-knowledge` 的 User/global knowledge index。V1.24 的 daemon handler (`handlers/kb.rs`) 和 CLI (`creator kb`) 均已明确标注为 work-scope only。
-- **`--scope world`（V1.27+ shipped）**：要求可解析的 `world_id`（显式 flag 或当前 workspace binding），并路由到 `nexus-narrative` + `nexus-kb`。该路径查询的是 World-scoped narrative KB assets（KeyBlocks、SourceAnchors、graph/query primitives），不得回退到 `--scope work` 文件索引。
+- **`--scope world`（V1.27+ shipped）**：要求可解析的 `world_id`（显式 flag 或当前 workspace binding），并路由到 `nexus-narrative` + `nexus-knowledge`。该路径查询的是 World-scoped narrative KB assets（KnowledgeEntries、SourceAnchors、graph/query primitives），不得回退到 `--scope work` 文件索引。
 - **User/global knowledge（未来目标）**：不得塞进 `creator kb` 或 `creator kb --scope user`。User-scoped global knowledge/reference material 应通过 `nexus-knowledge` 的 CLI 入口暴露；在六组顶层命令锁定下，推荐入口为 `nexus42 platform knowledge ...`（或等价的 platform/user knowledge 子命令），并由 `nexus-knowledge` 处理存储、标签检索与供 Moment assembly 读取的切片。
 
 命名与行为建议：
@@ -320,7 +320,7 @@ V2 命令面按以下顶层执行（pre-release 允许破坏性调整）。**V1.
 
 在本规格及后续架构 / 实现文档中，`KB` 一词必须按 [`entity-scope-model.md`](./entity-scope-model.md) §5.4 限定语义后使用：
 
-- **World KB** / **narrative KB**：指 `nexus-kb` 所有的 World-scoped narrative KB graph（KeyBlocks、SourceAnchors、graph insertion/query），由 `nexus-narrative` 协调 World/Timeline/Event 语境。
+- **World KB** / **narrative KB**：指 `nexus-knowledge` 所有的 World-scoped narrative KB graph（KnowledgeEntries、SourceAnchors、graph insertion/query），由 `nexus-narrative` 协调 World/Timeline/Event 语境。
 - **User knowledge** / **global knowledge index**：指 `nexus-knowledge` 所有的 User-scoped global knowledge/reference material。
 - **CLI local work KB index** / **local work index**：指 `nexus42 creator kb --scope work` 当前的活跃 Creator + workspace 本地文件索引。
 
@@ -332,8 +332,8 @@ V1.23 结束时，KB / knowledge 相关 CLI 路由目标应固定为：
 
 | User intent | CLI command model | Required scope inputs | Owning crates / modules | Behavior |
 | --- | --- | --- | --- | --- |
-| Manage local work files / notes as workspace assets | `nexus42 creator kb ...` (default `--scope work`); preferred alias candidate `nexus42 creator assets ...` | active `creator_id`, active `workspace_slug` | `nexus42` command router + daemon local API / local workspace storage; later storage may move behind local-domain crates | List/search/show/add/remove local work index entries only. Must not create World KeyBlocks or User knowledge rows. |
-| Manage narrative knowledge inside a World | `nexus42 creator kb ... --scope world --world-id <world_id>` or workspace-bound equivalent | active `creator_id`, `workspace_slug`, explicit/resolved `world_id` | `nexus-narrative` + `nexus-kb` | Route to World-scoped narrative KB graph. Must preserve KeyBlock / SourceAnchor provenance and narrative ownership. No silent fallback to work index. |
+| Manage local work files / notes as workspace assets | `nexus42 creator kb ...` (default `--scope work`); preferred alias candidate `nexus42 creator assets ...` | active `creator_id`, active `workspace_slug` | `nexus42` command router + daemon local API / local workspace storage; later storage may move behind local-domain crates | List/search/show/add/remove local work index entries only. Must not create World KnowledgeEntries or User knowledge rows. |
+| Manage narrative knowledge inside a World | `nexus42 creator kb ... --scope world --world-id <world_id>` or workspace-bound equivalent | active `creator_id`, `workspace_slug`, explicit/resolved `world_id` | `nexus-narrative` + `nexus-knowledge` | Route to World-scoped narrative KB graph. Must preserve KnowledgeEntry / SourceAnchor provenance and narrative ownership. No silent fallback to work index. |
 | Manage User/global reference knowledge | `nexus42 creator knowledge ...` | authenticated User / Pairing context; optional Creator only as acting context, not owner | `nexus-knowledge` | Store/search/list user-scoped global knowledge/reference material. May be pulled into Moment assembly; promotion into World KB is an explicit cross-scope operation. |
 | Create / browse World narrative state | `nexus42 creator world create\|list\|show ...` | active `creator_id`, workspace_slug; `create` requires `--title` (`--name` alias) and narrative kind is implicit in V1.40 | `nexus-narrative` + `nexus-kb` | **V1.40 P0**: `create` returns `world_id` and persists World row. `list`/`show` are read-only. No local fork (PD-01: fork is platform-only). |
 | Seed demo data | `nexus42 creator demo-seed ...` | active `creator_id`, workspace_slug | `nexus-creator` + `nexus-narrative` + `nexus-kb` | Populate demo world + KB entries for testing. |
@@ -511,7 +511,7 @@ be supplied; supplying both (or neither) fails closed with remediation.
 
 | Command | Purpose |
 | --- | --- |
-| `nexus42 creator kb rescan <work_ref>/<chapter> [--dry-run] [--json]` | V1.50 chapter-scoped rescan (unchanged). Re-syncs `kb_extract_jobs` candidates + confirmed `KeyBlock` bodies from one chapter's current text. |
+| `nexus42 creator kb rescan <work_ref>/<chapter> [--dry-run] [--json]` | V1.50 chapter-scoped rescan (unchanged). Re-syncs `kb_extract_jobs` candidates + confirmed KnowledgeEntry bodies from one chapter's current text. |
 | `nexus42 creator kb rescan --work <work_ref> [--dry-run] [--json]` | V1.51 work-scoped rescan. Iterates **all** chapters in `Works/<work_ref>/Stories/`, aggregates candidates by `canonical_name` across chapters, and reconciles so a recurring entity collapses to a single `pending` candidate carrying cross-chapter provenance (e.g. `source_chapters: [3,5,7]`). |
 
 Rules (build on §6.2G V1.40 rules; see also
@@ -529,7 +529,7 @@ Rules (build on §6.2G V1.40 rules; see also
   **once per aggregate**; the merged row's `source_chapter_id` is the lowest
   referencing chapter and its `proposed_payload` records the full
   `source_chapters` array. `confirmed` rows are terminal (§5.5.2); only their
-  `KeyBlock` body is refreshed via `diff_and_apply`.
+  KnowledgeEntry body is refreshed via `diff_and_apply`.
 - **`--dry-run`.** Shows a cross-chapter reuse summary before any DB write,
   e.g. `Entity 'Aelin' referenced in chapters 3, 5, 7; existing KB row found
   → no new candidate`. The dry path is read-only and acquires **no** advisory
@@ -669,7 +669,7 @@ V1.54 adds 6 mutation-capable `nexus.*` host tools to the daemon-level `Capabili
 
 | Host tool (ACP) | CLI surface | Notes |
 |---|---|---|
-| `nexus.kb_snapshot.write` | `creator world kb edit` / `creator world kb adopt` | Write/upsert KeyBlocks into a World KB; admission gate chain: Allowlist → ActiveCreator → RequireWorldOwnership → PermissionPolicy → AuditLog |
+| `nexus.kb_snapshot.write` | `creator world kb edit` / `creator world kb adopt` | Write/upsert KnowledgeEntries into a World KB; admission gate chain: Allowlist → ActiveCreator → RequireWorldOwnership → PermissionPolicy → AuditLog |
 | `nexus.world.configure` | `creator world configure` (future) | Update world metadata (title, visibility, time_policy) |
 | `nexus.manuscript.chapter.update` | (ACP-only; no standalone CLI yet) | Write chapter body content + metadata for a Work; work-scoped admission |
 | `nexus.work.schedule.set` | `creator works cron set` | Link/unlink schedule ids to a Work row |

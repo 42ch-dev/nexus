@@ -9,7 +9,7 @@ This directory contains embedded presets compiled into the `nexus42` binary at b
 | Preset | Pattern | States | Description |
 |--------|---------|--------|-------------|
 | `creative-brief-intake` | Grill-me intake | clarifying → synthesizing → persisting → done | Multi-turn ACP clarification to produce a structured creative brief |
-| `kb-extract` | Knowledge extraction | loading → extracting → done | Extract structured KeyBlocks from work-scope KB entries |
+| `kb-extract` | Knowledge extraction | loading → extracting → done | Extract structured KnowledgeEntries from work-scope KB entries |
 | `memory-augmented` | Memory recall + persist | recall → generate → persist → done | Recall memories, generate content, persist as new memory |
 | `novel-writing` | Chapter-scoped pipeline | outline_chapter → draft_chapter → finalize → done | Single-chapter outline→draft→finalize with llm_judge 五问 gate (V1.36) |
 | `novel-chapter-review` | FL-E review stage (V1.47) | load_chapter → review → done | Novel/work/chapter-aware 五問 review; persists ≥1 finding per pass via the supervisor terminal hook (V1.47 P0; replaces the generic `reflection-loop` demo) |

@@ -30,7 +30,7 @@ Per-moment context assembly for ACP sessions. Three strategies:
 - `nexus-creator-memory` (for `LongTermMemory`)
 - `nexus-contracts` (for `RuntimeMode`, `BlockType`, local types)
 - `nexus-narrative` (for `NarrativeGateway` — world state, timeline, events)
-- `nexus-kb` (for `KbStore`, `KbQuery` — World-scoped key blocks with structured queries)
+- `nexus-knowledge` (for `KbStore`, `KbQuery` — World-scoped knowledge entries with structured queries)
 - `nexus-knowledge` (for `KnowledgeStore` — User-scoped knowledge entries)
 - `nexus-cloud-sync` (optional, behind `cloud-stage` feature)
 

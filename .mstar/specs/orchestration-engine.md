@@ -938,28 +938,28 @@ at daemon boot.
 | --- | --- | --- | --- |
 | `world_ref` | object | yes | World and timeline locator for the compute invocation. |
 | `module_id` | string | yes | ID of the compute module to invoke (e.g., `"basic-combat"`). |
-| `key_block_ids` | array of string | no | Specific KeyBlock IDs to include in `ComputeInput.key_blocks`. When omitted, the capability queries for all computable KeyBlocks matching the module's `required_key_block_types`. |
+| `key_block_ids` | array of string | no | Specific KnowledgeEntry IDs to include in `ComputeInput.key_blocks`. When omitted, the capability queries for all computable KnowledgeEntries matching the module's `required_key_block_types`. |
 | `invocation` | object | no | Module-declared freeform input parameters. Passed through to `ComputeInput.invocation`. |
 
 **Output:**
 
 | Field | Type | Description |
 | --- | --- | --- |
-| `state_delta_applied` | array of `StateDelta` | Deltas applied to computable KeyBlock bodies. |
+| `state_delta_applied` | array of `StateDelta` | Deltas applied to computable KnowledgeEntry bodies. |
 | `timeline_events_appended` | array of `TimelineEvent` | Events appended to the timeline. |
-| `new_key_blocks_upserted` | array of `KeyBlock` | New KeyBlocks created. |
+| `new_key_blocks_upserted` | array of `KeyBlock` | New KnowledgeEntries created. |
 | `battle_report` | object | Module-declared freeform report. |
 
 **Execution flow:**
 
 ```text
 1. Resolve module_id → WasmModule from the host's module cache (wasm-host.md §2.2).
-2. Query computable KeyBlocks from the World KB filtered by module's
+2. Query computable KnowledgeEntries from the World KB filtered by module's
    required_key_block_types (see compute-module-abi.md §7.1).
 3. Build ComputeInput envelope: world_ref + key_blocks snapshot +
    narrative_state + invocation.
 4. Call WasmEngine::compute(module, input) → ComputeOutput.
-5. Apply state_delta to computable KeyBlock bodies (atomic; no partial apply).
+5. Apply state_delta to computable KnowledgeEntry bodies (atomic; no partial apply).
 6. Upsert new_key_blocks into the World KB.
 7. Append timeline_events to the timeline.
 8. Return battle_report to the caller.
@@ -988,8 +988,8 @@ load_world → compute → apply_delta → advance_timeline → done
 | State | Description |
 | --- | --- |
 | `load_world` | Load world context: resolve combatants from the World KB, validate they are computable (`computable: true`), select the `basic-combat` module. |
-| `compute` | Invoke `narrative.compute` capability with `module_id: "basic-combat"` and the selected combatant KeyBlock IDs. |
-| `apply_delta` | The `narrative.compute` capability applies the state delta, upserts new KeyBlocks, and appends timeline events. This state is a no-op in the preset (the capability already performed the side effects); it exists as an explicit checkpoint for observability. |
+| `compute` | Invoke `narrative.compute` capability with `module_id: "basic-combat"` and the selected combatant KnowledgeEntry IDs. |
+| `apply_delta` | The `narrative.compute` capability applies the state delta, upserts new KnowledgeEntries, and appends timeline events. This state is a no-op in the preset (the capability already performed the side effects); it exists as an explicit checkpoint for observability. |
 | `advance_timeline` | Advance the world timeline past the combat outcome. Append a `story_advance` timeline event summarizing the combat result. |
 | `done` | Terminal state. |
 

@@ -136,14 +136,14 @@ from it via codegen.
 | --- | --- | --- | --- |
 | `schema_version` | integer (`1`) | yes | Envelope version. Must be `1` for V1.x. |
 | `world_ref` | object | yes | World and timeline locator: `world_id` (WorldId), `branch_id` (fork branch), `timeline_head_event_id` (current timeline head). |
-| `key_blocks` | array of `KeyBlock` | yes | Snapshot of relevant KeyBlocks for this invocation. Each entry is the full wire `KeyBlock` shape from `schemas/domain/key-block.schema.json`, including `body` (which carries `state` for computable blocks — see [entity-scope-model.md](./entity-scope-model.md) §5.5.9). The host selects which blocks to pass based on the module manifest (`required_key_block_types`) and the capability context. |
+| `key_blocks` | array of `KeyBlock` | yes | Snapshot of relevant KnowledgeEntries for this invocation. Each entry is the full wire `KeyBlock` shape from `schemas/domain/key-block.schema.json`, including `body` (which carries `state` for computable blocks — see [entity-scope-model.md](./entity-scope-model.md) §5.5.9). The host selects which blocks to pass based on the module manifest (`required_key_block_types`) and the capability context. |
 | `narrative_state` | object | no | Narrative position context — `timeline_position`, `current_chapter`, `current_scene`. Freeform; the shape is module-declared. |
 | `invocation` | object | no | Module-defined freeform input parameters. The exact fields are declared in the module's `manifest.json` `schemas.invocation` (V1.62 P1). The host passes them through verbatim. This is the V1 envelope escape hatch for module-specific inputs (e.g., chosen targets, difficulty, dice seed). |
 
 The `key_blocks` array carries the full wire `KeyBlock` type — including the
 `state` and `computable` fields added in V1.61. The `state` field is an optional
 JSON object nested by `block_type` (compass V1.61 Q5: `state.character.current_hp`).
-Only computable KeyBlocks (`computable: true`) participate in WASM compute;
+Only computable KnowledgeEntries (`computable: true`) participate in WASM compute;
 non-computable blocks may still appear in the snapshot for read-only reference.
 
 ---
@@ -174,16 +174,16 @@ top-level keys.
 ### 5.1 `state_delta`
 
 Ordered list of `add` / `sub` / `set` operations on nested state paths of
-computable KeyBlock bodies (compass V1.61 Q5 dotted-path convention).
+computable KnowledgeEntry bodies (compass V1.61 Q5 dotted-path convention).
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | `op` | `"add"` \| `"sub"` \| `"set"` | yes | `add` increments a numeric field; `sub` decrements; `set` replaces any value. |
-| `path` | string (dotted) | yes | Dotted state path within the target KeyBlock body (e.g., `character.current_hp`). |
-| `target_key_block_id` | string | no | KeyBlock the delta applies to. When omitted, the host applies the delta to the KeyBlock implied by the capability context. |
+| `path` | string (dotted) | yes | Dotted state path within the target KnowledgeEntry body (e.g., `character.current_hp`). |
+| `target_key_block_id` | string | no | KnowledgeEntry the delta applies to. When omitted, the host applies the delta to the KnowledgeEntry implied by the capability context. |
 | `value` | any JSON | no | Value for `set`, or numeric delta for `add`/`sub`. Untyped to allow module-declared state shapes. |
 
-The host applies deltas **in order** to the computable KeyBlock bodies. The
+The host applies deltas **in order** to the computable KnowledgeEntry bodies. The
 merge resolution semantics (`+/-/set` on nested JSON) are finalized in the
 `narrative.compute` capability (P3 T3 of V1.61). The ABI guarantees that the
 host applies all deltas atomically: no partial application on error.
@@ -215,13 +215,13 @@ rather than closed to a fixed schema.
 
 The host applies the output in this order:
 
-1. **`state_delta`** — apply `+/-/set` to computable KeyBlock bodies.
-2. **`new_key_blocks`** — upsert new KeyBlocks into the World KB.
+1. **`state_delta`** — apply `+/-/set` to computable KnowledgeEntry bodies.
+2. **`new_key_blocks`** — upsert new KnowledgeEntries into the World KB.
 3. **`timeline_events`** — append events to the timeline.
 4. **`battle_report`** — surface to the caller (the `narrative.compute` capability).
 
 This ordering ensures that timeline events can reference freshly upserted
-KeyBlocks, and that the battle report reflects the post-delta state.
+KnowledgeEntries, and that the battle report reflects the post-delta state.
 
 ---
 
@@ -302,7 +302,7 @@ reference for the contract fields.
 | `name` | string | Human-readable name. |
 | `version` | string | Module SemVer (independent of the Nexus ABI version). |
 | `nexus_abi_version` | integer | Compute envelope ABI version (`1` for V1.x). |
-| `required_key_block_types` | array of string | `BlockType` values the module reads (e.g., `["character"]`). The host uses this to select which KeyBlocks to bundle into `ComputeInput.key_blocks`. |
+| `required_key_block_types` | array of string | `BlockType` values the module reads (e.g., `["character"]`). The host uses this to select which KnowledgeEntries to bundle into `ComputeInput.key_blocks`. |
 | `compute_export` | string | Name of the WASM export implementing `compute` (§2). |
 | `init_export` | string | Name of the WASM export implementing `init` (§2.1). Empty string if none. |
 
@@ -325,8 +325,8 @@ fragments for host-side validation. The block has four optional sub-objects:
 
 | Sub-object | Validated against | When validated |
 | --- | --- | --- |
-| `schemas.key_block_attributes` | `HashMap<BlockType, JSON Schema fragment>` | Before invocation: each KeyBlock in `ComputeInput.key_blocks` is validated against `schemas.key_block_attributes[block_type]` if declared. |
-| `schemas.key_block_state` | `HashMap<BlockType, JSON Schema fragment>` | Before invocation: each KeyBlock's `body.state` is validated against `schemas.key_block_state[block_type]` if declared. |
+| `schemas.key_block_attributes` | `HashMap<BlockType, JSON Schema fragment>` | Before invocation: each KnowledgeEntry in `ComputeInput.key_blocks` is validated against `schemas.key_block_attributes[block_type]` if declared. |
+| `schemas.key_block_state` | `HashMap<BlockType, JSON Schema fragment>` | Before invocation: each KnowledgeEntry's `body.state` is validated against `schemas.key_block_state[block_type]` if declared. |
 | `schemas.invocation` | JSON Schema fragment | Before invocation: `ComputeInput.invocation` is validated against this fragment if declared. |
 | `schemas.battle_report` | JSON Schema fragment | After invocation: `ComputeOutput.battle_report` is validated against this fragment if declared. |
 

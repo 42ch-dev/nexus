@@ -311,7 +311,7 @@ category.
 
 This variant is added by V1.62 P1 (see `compute-module-abi.md` §7.3).
 Validation occurs at three points:
-- **Before invocation**: each KeyBlock in `ComputeInput.key_blocks` is validated
+- **Before invocation**: each KnowledgeEntry in `ComputeInput.key_blocks` is validated
   against `schemas.key_block_attributes[block_type]` and
   `schemas.key_block_state[block_type]` if declared.
   Also validates `ComputeInput.invocation` against `schemas.invocation` if declared.
@@ -342,11 +342,11 @@ Implementation (in `crates/nexus-wasm-host/src/host.rs`):
 2. Parse as UTF-8 → `id_str`.
 3. Look up `id_str` in `InvocationState.ctx.key_blocks` (a `HashMap<String, serde_json::Value>`
    built from the `ComputeInput.key_blocks` array at invocation start).
-4. If found, serialize the `KeyBlock` JSON and write it to
+4. If found, serialize the `KnowledgeEntry` JSON and write it to
    `[out_ptr, out_ptr+written)`; return `written`.
 5. If not found, return `-1`. If `out_cap` too small, return `-2`.
 
-KeyBlocks are indexed by ID at invocation start for O(1) lookup. The snapshot is
+KnowledgeEntries are indexed by ID at invocation start for O(1) lookup. The snapshot is
 immutable for the duration of the call — the host function reads from the
 pre-built `HostContext`, not from a live database.
 

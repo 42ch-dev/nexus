@@ -1,7 +1,7 @@
 //! `creator knowledge` subcommand — User-scoped global knowledge entries.
 //!
 //! Manages unstructured knowledge entries scoped to the User (not Creator).
-//! For Work-scope file index or World narrative KB key blocks, use `creator kb`.
+//! For Work-scope file index or World narrative KB knowledge entries, use `creator kb`.
 //! See entity-scope-model §5.3–5.4 for the three KB namespaces.
 //!
 //! Product write path for User knowledge. Writes go through
@@ -21,7 +21,7 @@ const DEFAULT_USER_ID: &str = "user_default";
 /// Knowledge subcommands (User-scoped global knowledge; NOT Work-scope or World KB).
 ///
 /// For Work-scope file index, use `creator kb`.
-/// For World narrative key blocks, use `creator kb --scope world`.
+/// For World narrative knowledge entries, use `creator kb --scope world`.
 #[derive(Debug, Subcommand)]
 pub enum KnowledgeCommand {
     /// Add a new User-scoped knowledge entry

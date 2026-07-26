@@ -51,10 +51,10 @@ explicit enforcement of the manifest's `host_functions` list.
 
 | Import | Signature | Behavior |
 | --- | --- | --- |
-| `nexus::kb_read` | `(id_ptr, id_len, out_ptr, out_cap) -> i64` | Look up a KeyBlock by ID in the invocation's `key_blocks` snapshot; write its JSON to `out`. Returns bytes written, `-1` if not found, `-2` if `out_cap` too small. |
+| `nexus::kb_read` | `(id_ptr, id_len, out_ptr, out_cap) -> i64` | Look up a KnowledgeEntry by ID in the invocation's `key_blocks` snapshot; write its JSON to `out`. Returns bytes written, `-1` if not found, `-2` if `out_cap` too small. |
 | `nexus::narrative_query` | `(q_ptr, q_len, out_ptr, out_cap) -> i64` | Return narrative context JSON (V1: passes through `narrative_state` from the envelope). Same return convention. |
 
-**Canonical data path:** the host always bundles the relevant KeyBlocks into
+**Canonical data path:** the host always bundles the relevant KnowledgeEntries into
 `ComputeInput.key_blocks` (the schema makes this array required). Most modules —
 including the sample `basic-combat` — read combatants straight from that inline
 snapshot and do not need the host imports at all. Use `kb_read` /
@@ -74,7 +74,7 @@ the required input surface, the export names, and optional sandbox overrides.
 | `name` | string | Human-readable name. |
 | `version` | string | Module SemVer (independent of the Nexus ABI version). |
 | `nexus_abi_version` | integer | Compute envelope ABI version (`1` for V1.61). |
-| `required_key_block_types` | array&lt;string&gt; | BlockTypes the module reads (e.g. `["character"]`). The host uses this to select which KeyBlocks to bundle into `ComputeInput`. |
+| `required_key_block_types` | array&lt;string&gt; | BlockTypes the module reads (e.g. `["character"]`). The host uses this to select which KnowledgeEntries to bundle into `ComputeInput`. |
 | `compute_export` | string | Name of the WASM export implementing `compute`. |
 | `init_export` | string | Name of the WASM export implementing `init` (empty string if none). |
 
@@ -216,7 +216,7 @@ A module's `compute` must emit a JSON object with exactly these top-level keys
 ```
 
 - `state_delta` — ordered `add` / `sub` / `set` operations on nested state paths
-  of computable KeyBlock bodies (compass Q5: `state.character.current_hp`).
+  of computable KnowledgeEntry bodies (compass Q5: `state.character.current_hp`).
 - `timeline_events` — events to append (V1.60 `timeline.event.append`); use
   `event_type: "state_update"`, `status: "canon"` for compute outcomes. Valid
   enum values come from `schemas/domain/`.
