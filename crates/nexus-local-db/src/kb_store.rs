@@ -28,7 +28,7 @@ use nexus_knowledge::world_kb::validation::{
 };
 use nexus_knowledge::world_kb::KbStore;
 // V1.139 P1 T4 — extensions.nexus round-trip helper (spec §2.3 / §7.2).
-use nexus_spoke_adapter::extensions::build_extensions_nexus;
+use nexus_spoke_adapter::extensions::{build_extensions_nexus, is_known_nexus_key};
 use nexus_spoke_adapter::ExtensionMap;
 use sqlx::SqlitePool;
 use std::sync::Arc;
@@ -190,15 +190,16 @@ impl SqliteKbStore {
         let btype = kb.block_type;
         // V1.139 P1 T4: serialize the full `extensions.nexus` namespace from the
         // entry's typed identity fields (spec §2.3 write path). Known fields are
-        // also written to their typed columns (authoritative); this preserves the
-        // namespace verbatim for spoke round-trip of unknown keys.
+        // also written to their typed columns (authoritative); unknown keys ride
+        // on `extensions_nexus_extras` and are merged in so they survive the
+        // read-modify-write cycle verbatim.
         let extensions_nexus_json = serde_json::to_string(&build_extensions_nexus(
             &kb.world_id,
             kb.created_from_command_id.as_deref(),
             kb.source_work_id.as_deref(),
             kb.source_chapter,
             kb.source_provenance_kind.as_deref(),
-            &ExtensionMap::default(),
+            &nexus_extras_extension_map(kb.extensions_nexus_extras.as_ref()),
         ))
         .unwrap_or_default();
         sqlx::query(
@@ -283,6 +284,13 @@ impl KeyBlockRow {
             .as_ref()
             .and_then(|s| serde_json::from_str::<SourceAnchor>(s).ok());
 
+        // V1.139 P1 T4: activate the extensions.nexus round-trip (spec §2.2
+        // rule 2). The 5 typed identity columns below stay authoritative; any
+        // *unknown* keys carried in `extensions_nexus_json` are surfaced on
+        // `WorldKbEntry::extensions_nexus_extras` so they survive the
+        // read-modify-write cycle and the spoke conversion seam.
+        let extensions_nexus_extras = extract_nexus_extras(&self.build_merged_extensions_nexus());
+
         Ok(WorldKbEntry {
             schema_version: 1,
             entry_id: self.key_block_id.clone(),
@@ -299,6 +307,7 @@ impl KeyBlockRow {
             source_work_id: self.source_work_id.clone(),
             source_chapter: self.source_chapter,
             source_provenance_kind: self.source_provenance_kind.clone(),
+            extensions_nexus_extras,
         })
     }
 
@@ -308,10 +317,8 @@ impl KeyBlockRow {
     /// carried in [`KeyBlockRow::extensions_nexus_json`] are preserved verbatim
     /// and merged underneath the `"nexus"` namespace. This is the canonical
     /// round-trip merge point for the `WorldKbEntry` ↔ spoke `KnowledgeEntry`
-    /// conversion — the `WorldKbEntry` domain type does not yet surface unknown
-    /// namespace keys (mirrors the T2 body-fidelity deferral), so this method is
-    /// forward-looking infrastructure consumed by the spoke boundary in T5+.
-    #[allow(dead_code)]
+    /// conversion — [`extract_nexus_extras`] filters the result down to the
+    /// unknown subset that rides on `WorldKbEntry::extensions_nexus_extras`.
     fn build_merged_extensions_nexus(&self) -> serde_json::Value {
         let mut existing = ExtensionMap::default();
         if let Some(json) = &self.extensions_nexus_json {
@@ -330,6 +337,35 @@ impl KeyBlockRow {
             &existing,
         )
     }
+}
+
+/// Filter the merged `extensions.nexus` namespace down to the *unknown* keys
+/// (everything outside the 5 typed identity fields). Returns `None` when no
+/// unknown keys are present. This is the read-side companion to the typed-key
+/// write path in [`build_extensions_nexus`] (spec §2.2 round-trip rule 2).
+fn extract_nexus_extras(merged: &serde_json::Value) -> Option<serde_json::Value> {
+    let map = merged.as_object()?;
+    let extras: serde_json::Map<String, serde_json::Value> = map
+        .iter()
+        .filter(|(k, _)| !is_known_nexus_key(k))
+        .map(|(k, v)| (k.clone(), v.clone()))
+        .collect();
+    (!extras.is_empty()).then_some(serde_json::Value::Object(extras))
+}
+
+/// Build the wire-neutral [`ExtensionMap`] carrying an entry's unknown
+/// `extensions.nexus` keys, ready to pass to [`build_extensions_nexus`] on the
+/// write path (spec §2.3). Empty/absent extras yield an empty map so only the
+/// typed identity keys are serialized. This is the write-side companion to
+/// [`extract_nexus_extras`] and closes the read-modify-write round-trip.
+fn nexus_extras_extension_map(extras: Option<&serde_json::Value>) -> ExtensionMap {
+    let mut map = ExtensionMap::new();
+    if let Some(serde_json::Value::Object(obj)) = extras {
+        if !obj.is_empty() {
+            map.insert("nexus".to_string(), obj.clone());
+        }
+    }
+    map
 }
 
 /// Parse a `block_type` string into `BlockType`.
@@ -428,15 +464,16 @@ impl KbStore for SqliteKbStore {
         let btype = kb.block_type;
         // V1.139 P1 T4: serialize the full `extensions.nexus` namespace from the
         // entry's typed identity fields (spec §2.3 write path). Known fields are
-        // also written to their typed columns (authoritative); this preserves the
-        // namespace verbatim for spoke round-trip of unknown keys.
+        // also written to their typed columns (authoritative); unknown keys ride
+        // on `extensions_nexus_extras` and are merged in so they survive the
+        // read-modify-write cycle verbatim.
         let extensions_nexus_json = serde_json::to_string(&build_extensions_nexus(
             &kb.world_id,
             kb.created_from_command_id.as_deref(),
             kb.source_work_id.as_deref(),
             kb.source_chapter,
             kb.source_provenance_kind.as_deref(),
-            &ExtensionMap::default(),
+            &nexus_extras_extension_map(kb.extensions_nexus_extras.as_ref()),
         ))
         .unwrap_or_default();
         sqlx::query(
@@ -741,26 +778,43 @@ impl KbStore for SqliteKbStore {
             .unwrap_or_else(|_| format!("{:?}", kb.block_type));
         let block_type_str = block_type_str.trim_matches('"').to_string();
         let revision_i64 = kb.revision.map(u64::cast_signed);
+        // V1.139 P1 T4: re-serialize the full `extensions.nexus` namespace on
+        // UPDATE too, so unknown keys survive the read-modify-write cycle
+        // (spec §2.3 write path; mirrors the INSERT path).
+        let extensions_nexus_json = serde_json::to_string(&build_extensions_nexus(
+            &kb.world_id,
+            kb.created_from_command_id.as_deref(),
+            kb.source_work_id.as_deref(),
+            kb.source_chapter,
+            kb.source_provenance_kind.as_deref(),
+            &nexus_extras_extension_map(kb.extensions_nexus_extras.as_ref()),
+        ))
+        .unwrap_or_default();
 
-        sqlx::query!(
-            r#"UPDATE kb_key_blocks SET
+        // SAFETY: runtime query because `extensions_nexus_json` column is
+        // unknown to sqlx offline mode (mirrors the INSERT path). Static SQL
+        // with vetted column names from migration 202606190003.
+        sqlx::query(
+            r"UPDATE kb_key_blocks SET
                 block_type = ?,
                 canonical_name = ?,
                 status = ?,
                 revision = ?,
                 body_json = ?,
                 source_anchor_json = ?,
-                updated_at = ?
-              WHERE key_block_id = ?"#,
-            block_type_str,
-            kb.canonical_name,
-            kb.status,
-            revision_i64,
-            body_json,
-            source_anchor_json,
-            kb.updated_at,
-            kb.entry_id,
+                updated_at = ?,
+                extensions_nexus_json = ?
+              WHERE key_block_id = ?",
         )
+        .bind(&block_type_str)
+        .bind(&kb.canonical_name)
+        .bind(&kb.status)
+        .bind(revision_i64)
+        .bind(&body_json)
+        .bind(&source_anchor_json)
+        .bind(&kb.updated_at)
+        .bind(&extensions_nexus_json)
+        .bind(&kb.entry_id)
         .execute(&*self.pool)
         .await
         .map_err(|e| db_err(&e))?;
@@ -1486,5 +1540,83 @@ mod tests {
         let q = KbQuery::new("wld_1").with_computable(Some(false));
         let result = store.query(&q).await.unwrap();
         assert_eq!(result.total_count, 1);
+    }
+
+    // ── V1.139 P1 T4: extensions.nexus round-trip (Greptile P2) ──────
+    //
+    // Proves unknown `extensions.nexus` keys survive the SQLite
+    // read-modify-write cycle: INSERT writes them into `extensions_nexus_json`,
+    // and GET surfaces them back on `WorldKbEntry.extensions_nexus_extras`.
+    // The 5 typed identity fields stay authoritative in their own columns.
+
+    #[tokio::test]
+    async fn test_sqlite_extensions_nexus_extras_roundtrip_on_insert_and_get() {
+        let (pool, _dir) = fresh_pool().await;
+        seed_world(&pool).await;
+
+        let store = SqliteKbStore::new(pool);
+        let mut kb = WorldKbEntry::new("wld_1", BlockType::Character, "Hero");
+        kb.extensions_nexus_extras =
+            Some(serde_json::json!({"custom_label": "villain-arc", "priority": 7}));
+        let id = kb.entry_id.clone();
+        store.insert_knowledge_entry(kb).await.unwrap();
+
+        let fetched = store.get_knowledge_entry(&id).await.unwrap();
+        let extras = fetched
+            .extensions_nexus_extras
+            .as_ref()
+            .and_then(serde_json::Value::as_object)
+            .expect("unknown extensions.nexus keys survive INSERT→GET");
+        assert_eq!(extras["custom_label"], "villain-arc");
+        assert_eq!(extras["priority"], 7);
+        // Typed identity fields remain authoritative on their own columns.
+        assert_eq!(fetched.world_id, "wld_1");
+    }
+
+    #[tokio::test]
+    async fn test_sqlite_extensions_nexus_extras_survive_update() {
+        let (pool, _dir) = fresh_pool().await;
+        seed_world(&pool).await;
+
+        let store = SqliteKbStore::new(pool);
+        let mut kb = WorldKbEntry::new("wld_1", BlockType::Character, "Hero");
+        kb.extensions_nexus_extras = Some(serde_json::json!({"edition": "alpha"}));
+        let id = kb.entry_id.clone();
+        store.insert_knowledge_entry(kb.clone()).await.unwrap();
+
+        // RMW: read, modify the extras, write back via UPDATE.
+        let mut fetched = store.get_knowledge_entry(&id).await.unwrap();
+        fetched.extensions_nexus_extras =
+            Some(serde_json::json!({"edition": "beta", "reviewer": "qc"}));
+        fetched.updated_at = Some(chrono::Utc::now().to_rfc3339());
+        store.update_knowledge_entry(fetched).await.unwrap();
+
+        let after = store.get_knowledge_entry(&id).await.unwrap();
+        let extras = after
+            .extensions_nexus_extras
+            .as_ref()
+            .and_then(serde_json::Value::as_object)
+            .expect("unknown keys survive the UPDATE write path");
+        assert_eq!(extras["edition"], "beta", "UPDATE re-serializes extras");
+        assert_eq!(extras["reviewer"], "qc");
+    }
+
+    #[tokio::test]
+    async fn test_sqlite_extensions_nexus_extras_none_when_absent() {
+        // An entry inserted without extras has extensions_nexus_extras = None
+        // on read (only the typed keys are serialized; no unknown keys present).
+        let (pool, _dir) = fresh_pool().await;
+        seed_world(&pool).await;
+
+        let store = SqliteKbStore::new(pool);
+        let kb = WorldKbEntry::new("wld_1", BlockType::Character, "Plain");
+        let id = kb.entry_id.clone();
+        store.insert_knowledge_entry(kb).await.unwrap();
+
+        let fetched = store.get_knowledge_entry(&id).await.unwrap();
+        assert!(
+            fetched.extensions_nexus_extras.is_none(),
+            "no unknown keys → extras is None"
+        );
     }
 }

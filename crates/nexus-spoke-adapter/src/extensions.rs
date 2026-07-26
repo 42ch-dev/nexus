@@ -55,6 +55,63 @@ fn nexus_namespace(entry: &KnowledgeEntry) -> Option<&Map<String, Value>> {
     entry.extensions.get(&nexus_key())
 }
 
+/// The 5 typed identity field names managed by the accessors in this module.
+const KNOWN_NEXUS_KEYS: [&str; 5] = [
+    "world_id",
+    "created_from_command_id",
+    "source_work_id",
+    "source_chapter",
+    "source_provenance_kind",
+];
+
+/// Returns `true` if `key` is one of the 5 typed `extensions.nexus` identity
+/// fields managed by the accessors in this module.
+///
+/// This is the single source of truth for the typed/unknown key boundary
+/// (spec §2.2 round-trip rule 2); storage and conversion-seam callers use it
+/// to separate authoritative typed columns from verbatim-carried extras.
+#[must_use]
+pub fn is_known_nexus_key(key: &str) -> bool {
+    KNOWN_NEXUS_KEYS.contains(&key)
+}
+
+/// Read the *unknown* keys under `extensions.nexus` — everything outside the
+/// 5 typed identity fields. Returns an owned map; `None` when no unknown keys
+/// are present (or the namespace is absent).
+///
+/// Used by the conversion seam reverse direction to surface product-local
+/// extras onto the nexus domain type so they survive the spoke round-trip.
+#[must_use]
+pub fn get_nexus_extras(entry: &KnowledgeEntry) -> Option<Map<String, Value>> {
+    let ns = nexus_namespace(entry)?;
+    let extras: Map<String, Value> = ns
+        .iter()
+        .filter(|(k, _)| !is_known_nexus_key(k))
+        .map(|(k, v)| (k.clone(), v.clone()))
+        .collect();
+    (!extras.is_empty()).then_some(extras)
+}
+
+/// Insert unknown keys into `extensions.nexus`, preserving typed keys.
+///
+/// The 5 typed keys (already set authoritatively by [`set_world_id`] /
+/// [`set_provenance`] / [`set_created_from_command_id`]) and any unknown key
+/// already present are preserved; only keys outside the typed set are inserted.
+///
+/// Used by the conversion seam forward direction to carry product-local extras
+/// onto the spoke boundary type.
+pub fn set_nexus_extras(entry: &mut KnowledgeEntry, extras: &Map<String, Value>) {
+    if extras.is_empty() {
+        return;
+    }
+    let ns = entry.extensions.entry(nexus_key()).or_default();
+    for (k, v) in extras {
+        if !is_known_nexus_key(k) {
+            ns.insert(k.clone(), v.clone());
+        }
+    }
+}
+
 /// Read `extensions.nexus.world_id` from a [`KnowledgeEntry`].
 #[must_use]
 pub fn get_world_id(entry: &KnowledgeEntry) -> Option<&str> {

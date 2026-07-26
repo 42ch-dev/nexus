@@ -701,8 +701,8 @@ mod tests {
         store.attach_source_anchor(&id, anchor1).await.unwrap();
         store.attach_source_anchor(&id, anchor2).await.unwrap();
 
-        let anchors = store.get_anchors(&id).await.unwrap();
-        assert_eq!(anchors.len(), 2);
+        let fetched = store.get_anchors(&id).await.unwrap();
+        assert_eq!(fetched.len(), 2);
     }
 
     // T13: Attach anchor to non-existent WorldKbEntry fails

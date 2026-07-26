@@ -112,6 +112,14 @@ pub struct WorldKbEntry {
     pub source_chapter: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source_provenance_kind: Option<String>,
+    /// Unknown keys carried under `extensions.nexus` on the spoke boundary —
+    /// everything outside the 5 typed identity fields (`world_id`,
+    /// `created_from_command_id`, `source_work_id`, `source_chapter`,
+    /// `source_provenance_kind`). Preserved verbatim across the `SQLite`
+    /// read-modify-write cycle and the spoke conversion seam (spec §2.2
+    /// round-trip rule 2). `None` when no unknown keys are present.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub extensions_nexus_extras: Option<serde_json::Value>,
 }
 
 impl WorldKbEntry {
@@ -136,6 +144,7 @@ impl WorldKbEntry {
             source_work_id: None,
             source_chapter: None,
             source_provenance_kind: None,
+            extensions_nexus_extras: None,
         }
     }
 
@@ -245,9 +254,10 @@ impl WorldKbEntry {
     /// Converts `self` to the spoke type, delegates the transition validity
     /// check + canonical status to `transition_status`, then applies only the
     /// status back to `self` (body / identity are preserved on the domain type;
-    /// the spoke round-trip drops body content per the T2 conversion seam, so we
-    /// do not write the spoke result back wholesale). `updated_at` follows the
-    /// nexus timestamp convention.
+    /// the spoke round-trip is body-faithful as of the V1.139 spoke-0.2.0
+    /// alignment, but we still do not write the spoke result back wholesale —
+    /// only the status field, to keep the nexus timestamp/revision convention
+    /// authoritative). `updated_at` follows the nexus timestamp convention.
     fn apply_spoke_status_transition(&mut self, to: &str) -> Result<(), KbError> {
         let spoke: SpokeKnowledgeEntry = self.clone().into();
         let result = map_spoke_reject(transition_status(&spoke, to))?;
@@ -325,19 +335,27 @@ impl WorldKbEntry {
 // seam** (spec `spoke-adapter-architecture.md` §7.1 — the adapter constructs
 // the spoke type before calling spoke-operations).
 //
-// Body fidelity: spoke's `KnowledgeEntryBody` exposes only `computable`/`state`
-// typed maps; nexus's `summary`/`attributes`/`tags` have no typed spoke slot
-// today (typify drops `additionalProperties`). The forward direction maps what
-// spoke carries (state); the rest is preserved on the nexus domain type and is
-// NOT relied upon by spoke-operations. When spoke later declares body fields,
-// extend ONLY these two impls — validation/consumers are unaffected.
+// Body alignment (spoke 0.2.0): spoke's closed `KnowledgeEntryBody` declares
+// all 5 typed body fields (`summary`, `tags`, `state`, `attributes`,
+// `computable`). Both directions map all 5:
+//   • `summary`  — 1:1 `Option<String>`.
+//   • `tags`     — nexus `Option<Vec<String>>` ↔ spoke `Vec<String>` (empty ≡ None).
+//   • `state`    — nexus JSON object ↔ spoke `Map<String, Value>` (1:1).
+//   • `attributes` — nexus flat JSON object `{trait_type: value, ...}` ↔ spoke
+//     `Vec<BodyAttribute>` (ERC721-style). Shape conversion is lossy for
+//     `display_type`/`max_value` (no nexus slot) and duplicate `trait_type`
+//     (nexus object is last-wins); the core `trait_type`+`value` round-trips.
+//   • `computable` — nexus `Option<bool>` ↔ spoke marker `Map<String, Value>`
+//     (`{"_computable": true}` when `Some(true)`, empty ≡ `None`/`Some(false)`).
+// Unknown `extensions.nexus` keys ride as `WorldKbEntry::extensions_nexus_extras`
+// and are preserved verbatim across the seam (spec §2.2).
 
 use std::collections::HashMap;
 use std::num::NonZeroU64;
 
 use nexus_spoke_adapter::extensions::{
-    get_created_from_command_id, get_provenance, get_world_id, set_created_from_command_id,
-    set_provenance, set_world_id,
+    get_created_from_command_id, get_nexus_extras, get_provenance, get_world_id,
+    set_created_from_command_id, set_nexus_extras, set_provenance, set_world_id,
 };
 // V1.139 P1 T3 — lifecycle invariants are delegated to spoke-operations via the
 // adapter (spec §1.5 / §7). nexus-knowledge never calls spoke-operations directly.
@@ -346,7 +364,9 @@ use nexus_spoke_adapter::{SpokeReject, SpokeResult};
 use serde_json::{Map, Value};
 use spoke_schemas::knowledge_entry::{
     KnowledgeEntry as SpokeKnowledgeEntry, KnowledgeEntryBody as SpokeKnowledgeEntryBody,
-    KnowledgeEntryCanonicalName, SourceAnchor as SpokeSourceAnchor,
+    KnowledgeEntryBodyAttributesItem, KnowledgeEntryBodyAttributesItemTraitType,
+    KnowledgeEntryBodyAttributesItemValue, KnowledgeEntryCanonicalName,
+    SourceAnchor as SpokeSourceAnchor,
 };
 
 /// Convert a nexus `BlockType` to spoke's open-string `entry_type`.
@@ -362,29 +382,103 @@ fn entry_type_to_block_type(s: &str) -> BlockType {
     serde_json::from_value(Value::String(s.to_string())).unwrap_or_default()
 }
 
+/// Forward attribute shape: nexus JSON object member → spoke `BodyAttribute`.
+///
+/// Maps `Value::String`/`Number`/`Bool` to the corresponding
+/// `KnowledgeEntryBodyAttributesItemValue` variant; `Null`/array/object values
+/// have no spoke slot and are dropped (returns `None`). `display_type` and
+/// `max_value` have no nexus carrier and are left `None`. Returns `None` if the
+/// `trait_type` fails the spoke newtype's regex validation.
+fn nexus_attr_to_spoke(
+    trait_type: &str,
+    value: &Value,
+) -> Option<KnowledgeEntryBodyAttributesItem> {
+    let spoke_value = match value {
+        Value::String(s) => KnowledgeEntryBodyAttributesItemValue::Variant0(s.clone()),
+        Value::Number(n) => KnowledgeEntryBodyAttributesItemValue::Variant1(n.as_f64()?),
+        Value::Bool(b) => KnowledgeEntryBodyAttributesItemValue::Variant2(*b),
+        // Null / array / object — no spoke BodyAttributeValue slot.
+        _ => return None,
+    };
+    let trait_type = KnowledgeEntryBodyAttributesItemTraitType::try_from(trait_type).ok()?;
+    Some(KnowledgeEntryBodyAttributesItem {
+        display_type: None,
+        max_value: None,
+        trait_type,
+        value: spoke_value,
+    })
+}
+
+/// Reverse attribute shape: spoke `Vec<BodyAttribute>` → nexus JSON object.
+///
+/// Each item's `trait_type` becomes a key; `value` maps back to the matching
+/// JSON variant. `display_type`/`max_value` are dropped (no nexus slot). Returns
+/// `None` for an empty slice. Duplicate `trait_type`s are last-wins (nexus's
+/// object model has unique keys; spoke's Vec model permits duplicates).
+fn spoke_attrs_to_nexus(attrs: &[KnowledgeEntryBodyAttributesItem]) -> Option<Value> {
+    if attrs.is_empty() {
+        return None;
+    }
+    let mut map = Map::new();
+    for attr in attrs {
+        let key = attr.trait_type.to_string();
+        let val = match &attr.value {
+            KnowledgeEntryBodyAttributesItemValue::Variant0(s) => Value::String(s.clone()),
+            KnowledgeEntryBodyAttributesItemValue::Variant1(f) => {
+                serde_json::Number::from_f64(*f).map_or(Value::Null, Value::Number)
+            }
+            KnowledgeEntryBodyAttributesItemValue::Variant2(b) => Value::Bool(*b),
+        };
+        map.insert(key, val);
+    }
+    (!map.is_empty()).then_some(Value::Object(map))
+}
+
 impl From<WorldKbEntry> for SpokeKnowledgeEntry {
     fn from(d: WorldKbEntry) -> Self {
-        // Body: carry only what spoke's typed body models (state). nexus
-        // summary/attributes/tags stay on the domain type; spoke-operations
-        // does not consume them. Spoke 0.2.0 declared `attributes`/`summary`/
-        // `tags` as typed L2 body fields (closed `KnowledgeEntryBody`); they
-        // are emitted empty here — the typed-body ↔ nexus-body alignment is
-        // deferred to the next iteration per the V1.139 spoke-0.2.0 bump.
-        let state_map = d
-            .body
-            .as_ref()
+        // Body: map all 5 typed body fields (spoke 0.2.0 closed body). Each
+        // nexus field maps onto its spoke counterpart; computable bool→map and
+        // attributes object→Vec<BodyAttribute> are shape conversions (see seam
+        // doc above). spoke-operations does not consume body content, but the
+        // round-trip now preserves it for any caller that reads the spoke type.
+        let body = d.body.as_ref();
+        let state_map = body
             .and_then(|b| b.state.clone())
             .and_then(|v| match v {
                 Value::Object(map) => Some(map),
                 _ => None,
             })
             .unwrap_or_default();
+        // computable: nexus Option<bool> → spoke Map<String, Value>.
+        // Some(true) → marker {"_computable": true}; None/Some(false) → empty.
+        let computable_map = match body.and_then(|b| b.computable) {
+            Some(true) => {
+                let mut m = Map::new();
+                m.insert("_computable".to_string(), Value::Bool(true));
+                m
+            }
+            _ => Map::new(),
+        };
+        let summary = body.and_then(|b| b.summary.clone());
+        let tags = body.and_then(|b| b.tags.clone()).unwrap_or_default();
+        // attributes: nexus flat JSON object {trait_type: value, ...} → ERC721
+        // Vec<BodyAttribute>. Null/array/object values have no spoke slot and
+        // are dropped; the trait_type newtype is regex-validated by spoke.
+        let attributes = body
+            .and_then(|b| b.attributes.as_ref())
+            .and_then(Value::as_object)
+            .map(|obj| {
+                obj.iter()
+                    .filter_map(|(k, v)| nexus_attr_to_spoke(k, v))
+                    .collect()
+            })
+            .unwrap_or_default();
         let spoke_body = SpokeKnowledgeEntryBody {
-            attributes: Vec::new(),
-            computable: Map::new(),
+            attributes,
+            computable: computable_map,
             state: state_map,
-            summary: None,
-            tags: Vec::new(),
+            summary,
+            tags,
         };
 
         let mut entry = Self {
@@ -419,6 +513,10 @@ impl From<WorldKbEntry> for SpokeKnowledgeEntry {
             d.source_chapter,
             d.source_provenance_kind,
         );
+        // Unknown extensions.nexus keys → carried verbatim onto the spoke type.
+        if let Some(Value::Object(extras)) = &d.extensions_nexus_extras {
+            set_nexus_extras(&mut entry, extras);
+        }
         entry
     }
 }
@@ -433,31 +531,41 @@ impl From<SpokeKnowledgeEntry> for WorldKbEntry {
         let (source_work_id, source_chapter, source_provenance_kind) = get_provenance(&s);
         let source_work_id = source_work_id.map(String::from);
         let source_provenance_kind = source_provenance_kind.map(String::from);
+        // Unknown extensions.nexus keys → carried verbatim onto the domain type
+        // (owned Map; borrow ends before `s.body` is moved).
+        let extensions_nexus_extras = get_nexus_extras(&s).map(Value::Object);
         let entry_type = s.entry_type.clone();
         let canonical_name = s.canonical_name.to_string();
         let schema_version = u32::try_from(s.schema_version.get()).unwrap_or(1);
 
-        // Reverse body: spoke typed body → nexus state. summary/attributes/tags
-        // cannot be recovered (forward direction dropped them); they default to None.
-        // Computable flag: preserve the signal (non-empty spoke computable map → true).
+        // Reverse body: spoke closed body → nexus body. All 5 fields map back;
+        // body is `None` only when every field is empty/None (matches the
+        // forward direction's emptiness contract).
         let SpokeKnowledgeEntryBody {
-            computable, state, ..
+            attributes,
+            computable,
+            state,
+            summary,
+            tags,
         } = s.body;
         let has_computable = !computable.is_empty();
         let has_state = !state.is_empty();
-        let body = if !has_state && !has_computable {
+        let has_tags = !tags.is_empty();
+        let attributes_opt = spoke_attrs_to_nexus(&attributes);
+        let body = if summary.is_none()
+            && !has_tags
+            && !has_state
+            && !has_computable
+            && attributes_opt.is_none()
+        {
             None
         } else {
             Some(WorldKbBody {
-                summary: None,
-                attributes: None,
-                tags: None,
-                state: if has_state {
-                    Some(Value::Object(state))
-                } else {
-                    None
-                },
-                computable: if has_computable { Some(true) } else { None },
+                summary,
+                attributes: attributes_opt,
+                tags: has_tags.then_some(tags),
+                state: has_state.then_some(Value::Object(state)),
+                computable: has_computable.then_some(true),
             })
         };
 
@@ -479,6 +587,7 @@ impl From<SpokeKnowledgeEntry> for WorldKbEntry {
             source_work_id,
             source_chapter,
             source_provenance_kind,
+            extensions_nexus_extras,
         }
     }
 }
@@ -788,5 +897,138 @@ mod tests {
             .as_object()
             .unwrap()
             .contains_key("character"));
+    }
+
+    // ── V1.139 spoke 0.2.0 full body alignment (Greptile P1+P2) ───────
+    //
+    // Proves the conversion seam (`WorldKbEntry ↔ spoke KnowledgeEntry`)
+    // round-trips ALL 5 typed body fields plus unknown `extensions.nexus`
+    // extras in both directions. Each field that previously dropped
+    // (summary / attributes / tags / computable) now survives.
+
+    #[test]
+    fn spoke_seam_roundtrips_all_five_body_fields() {
+        let mut kb = WorldKbEntry::new("wld_test", BlockType::Character, "Hero");
+        kb.body = Some(WorldKbBody {
+            summary: Some("Protagonist; reluctant cartographer.".to_string()),
+            attributes: Some(serde_json::json!({
+                "role": "protagonist",
+                "age": 28,
+                "is_alive": true,
+            })),
+            tags: Some(vec!["pov".to_string(), "combat".to_string()]),
+            state: Some(serde_json::json!({"character": {"current_hp": 80}})),
+            computable: Some(true),
+        });
+
+        // Forward → spoke, reverse → nexus.
+        let spoke: SpokeKnowledgeEntry = kb.clone().into();
+        let roundtripped: WorldKbEntry = spoke.into();
+        let body = roundtripped
+            .body
+            .as_ref()
+            .expect("body survives the spoke round-trip");
+
+        // summary: 1:1
+        assert_eq!(
+            body.summary.as_deref(),
+            Some("Protagonist; reluctant cartographer.")
+        );
+        // tags: non-empty Vec → Some
+        assert_eq!(
+            body.tags.as_deref(),
+            Some(["pov".to_string(), "combat".to_string()].as_slice())
+        );
+        // state: JSON object ↔ Map<String, Value>
+        assert_eq!(body.state.as_ref().unwrap()["character"]["current_hp"], 80);
+        // computable: Some(true) → marker map → Some(true)
+        assert_eq!(body.computable, Some(true));
+        // attributes: {k:v} → Vec<BodyAttribute> → {k:v}. Numbers are modeled
+        // as f64 in spoke's BodyAttributeValue, so an integer nexus value
+        // round-trips as a float (28 → 28.0); the numeric value is preserved.
+        let attrs = body
+            .attributes
+            .as_ref()
+            .and_then(serde_json::Value::as_object)
+            .expect("attributes round-trip to a JSON object");
+        assert_eq!(attrs["role"], "protagonist");
+        assert_eq!(attrs["age"].as_f64(), Some(28.0));
+        assert_eq!(attrs["is_alive"], true);
+    }
+
+    #[test]
+    fn spoke_seam_drops_null_array_object_attribute_values() {
+        // nexus attributes is a free-form JSON object; spoke's BodyAttributeValue
+        // only models string/number/boolean. Null/array/object members have no
+        // spoke slot and are dropped on the forward direction (documented loss).
+        let mut kb = WorldKbEntry::new("wld_test", BlockType::Item, "Backpack");
+        kb.body = Some(WorldKbBody {
+            attributes: Some(serde_json::json!({
+                "weight": 5,
+                "named": null,
+                "contents": ["sword", "potion"],
+            })),
+            ..Default::default()
+        });
+        let spoke: SpokeKnowledgeEntry = kb.into();
+        let roundtripped: WorldKbEntry = spoke.into();
+        let attrs = roundtripped
+            .body
+            .unwrap()
+            .attributes
+            .unwrap()
+            .as_object()
+            .unwrap()
+            .clone();
+        // Only the number survived; null/array were dropped.
+        assert_eq!(attrs.len(), 1);
+        assert_eq!(attrs["weight"].as_f64(), Some(5.0));
+    }
+
+    #[test]
+    fn spoke_seam_body_none_when_all_fields_empty() {
+        // An entry with no body content round-trips to body = None.
+        let kb = WorldKbEntry::new("wld_test", BlockType::Scene, "Empty");
+        let spoke: SpokeKnowledgeEntry = kb.into();
+        let roundtripped: WorldKbEntry = spoke.into();
+        assert!(roundtripped.body.is_none(), "no body fields → body is None");
+    }
+
+    #[test]
+    fn spoke_seam_summary_only_roundtrips_without_state_or_computable() {
+        // Previously the reverse direction set body=None unless state/computable
+        // were non-empty, dropping a summary-only body. Now summary alone survives.
+        let mut kb = WorldKbEntry::new("wld_test", BlockType::Scene, "Forest");
+        kb.body = Some(WorldKbBody {
+            summary: Some("A dark forest".to_string()),
+            ..Default::default()
+        });
+        let spoke: SpokeKnowledgeEntry = kb.into();
+        let roundtripped: WorldKbEntry = spoke.into();
+        assert_eq!(
+            roundtripped.body.unwrap().summary.as_deref(),
+            Some("A dark forest")
+        );
+    }
+
+    #[test]
+    fn spoke_seam_extensions_nexus_extras_roundtrip() {
+        // Unknown extensions.nexus keys (outside the 5 typed fields) ride on
+        // WorldKbEntry.extensions_nexus_extras and survive the spoke seam both
+        // ways (spec §2.2 round-trip rule 2).
+        let mut kb = WorldKbEntry::new("wld_test", BlockType::Character, "Hero");
+        kb.extensions_nexus_extras =
+            Some(serde_json::json!({"custom_label": "villain-arc", "priority": 7}));
+
+        let spoke: SpokeKnowledgeEntry = kb.clone().into();
+        // The unknown keys land under extensions.nexus on the spoke type.
+        let roundtripped: WorldKbEntry = spoke.into();
+        let extras = roundtripped
+            .extensions_nexus_extras
+            .as_ref()
+            .and_then(serde_json::Value::as_object)
+            .expect("unknown extensions.nexus keys survive the seam");
+        assert_eq!(extras["custom_label"], "villain-arc");
+        assert_eq!(extras["priority"], 7);
     }
 }
