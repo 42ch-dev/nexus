@@ -14,7 +14,7 @@
 //!
 //! Legacy V1.39 worldless Works (`world_id == None`) receive no block.
 
-// Spec terminology (canonical_name, novel_category, KeyBlock, etc.) triggers doc_markdown.
+// Spec terminology (canonical_name, novel_category, WorldKbEntry, etc.) triggers doc_markdown.
 #![allow(clippy::doc_markdown)]
 
 use nexus_contracts::BlockType;
@@ -190,11 +190,11 @@ impl<'a> WorldKbQueryBuilder<'a> {
     }
 }
 
-/// Extract `novel_category` from a KeyBlock's body attributes.
+/// Extract `novel_category` from a WorldKbEntry's body attributes.
 ///
 /// Returns `None` if the body or attributes are missing, or if `novel_category`
 /// is not a string.
-fn extract_novel_category(kb: &nexus_knowledge::world_kb::key_block::KeyBlock) -> Option<String> {
+fn extract_novel_category(kb: &nexus_knowledge::world_kb::knowledge_entry::WorldKbEntry) -> Option<String> {
     kb.body
         .as_ref()
         .and_then(|b| b.attributes.as_ref())
@@ -203,8 +203,8 @@ fn extract_novel_category(kb: &nexus_knowledge::world_kb::key_block::KeyBlock) -
         .map(std::string::ToString::to_string)
 }
 
-/// Convert a KeyBlock to a WorldContextItem.
-fn kb_to_item(kb: nexus_knowledge::world_kb::key_block::KeyBlock) -> WorldContextItem {
+/// Convert a WorldKbEntry to a WorldContextItem.
+fn kb_to_item(kb: nexus_knowledge::world_kb::knowledge_entry::WorldKbEntry) -> WorldContextItem {
     let descriptor = kb
         .body
         .as_ref()
@@ -212,7 +212,7 @@ fn kb_to_item(kb: nexus_knowledge::world_kb::key_block::KeyBlock) -> WorldContex
         .unwrap_or("")
         .to_string();
     WorldContextItem {
-        id: kb.key_block_id,
+        id: kb.entry_id.clone(),
         name: kb.canonical_name,
         descriptor,
     }
@@ -441,17 +441,17 @@ fn apply_token_budget(block: &mut WorldContextBlock, max_chars: usize) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nexus_knowledge::world_kb::key_block::KeyBlockBody;
+    use nexus_knowledge::world_kb::knowledge_entry::WorldKbBody;
 
-    /// Helper: create a novel-profile KeyBlock.
+    /// Helper: create a novel-profile WorldKbEntry.
     fn make_novel_block(
         world_id: &str,
         block_type: BlockType,
         name: &str,
         novel_category: &str,
-    ) -> nexus_knowledge::world_kb::key_block::KeyBlock {
-        let mut kb = nexus_knowledge::world_kb::key_block::KeyBlock::new(world_id, block_type, name);
-        kb.set_body(KeyBlockBody {
+    ) -> nexus_knowledge::world_kb::knowledge_entry::WorldKbEntry {
+        let mut kb = nexus_knowledge::world_kb::knowledge_entry::WorldKbEntry::new(world_id, block_type, name);
+        kb.set_body(WorldKbBody {
             summary: Some(format!("{novel_category}: {name} summary")),
             attributes: Some(serde_json::json!({
                 "novel_category": novel_category,
@@ -485,10 +485,10 @@ mod tests {
         let rule_kb = make_novel_block("wld_1", BlockType::Conflict, "rule_magic_cost", "rules");
         let fnd_kb = make_novel_block("wld_1", BlockType::InfoPoint, "fnd_cosmology", "foundation");
 
-        store.insert_key_block(char_kb.clone()).await.unwrap();
-        store.insert_key_block(loc_kb.clone()).await.unwrap();
-        store.insert_key_block(rule_kb.clone()).await.unwrap();
-        store.insert_key_block(fnd_kb.clone()).await.unwrap();
+        store.insert_knowledge_entry(char_kb.clone()).await.unwrap();
+        store.insert_knowledge_entry(loc_kb.clone()).await.unwrap();
+        store.insert_knowledge_entry(rule_kb.clone()).await.unwrap();
+        store.insert_knowledge_entry(fnd_kb.clone()).await.unwrap();
 
         let params = ChapterKbBlockParams {
             world_id: "wld_1".to_string(),
@@ -566,9 +566,9 @@ mod tests {
         let char2 = make_novel_block("wld_1", BlockType::Character, "char_b", "character");
         let loc1 = make_novel_block("wld_1", BlockType::Scene, "loc_x", "location");
 
-        store.insert_key_block(char1).await.unwrap();
-        store.insert_key_block(char2).await.unwrap();
-        store.insert_key_block(loc1).await.unwrap();
+        store.insert_knowledge_entry(char1).await.unwrap();
+        store.insert_knowledge_entry(char2).await.unwrap();
+        store.insert_knowledge_entry(loc1).await.unwrap();
 
         // Only reference char_a and loc_x
         let params = ChapterKbBlockParams {
@@ -600,10 +600,10 @@ mod tests {
         let loc1 = make_novel_block("wld_1", BlockType::Scene, "loc_x", "location");
         let evt = make_novel_block("wld_1", BlockType::Event, "evt_bg", "background");
 
-        store.insert_key_block(char1).await.unwrap();
-        store.insert_key_block(char2).await.unwrap();
-        store.insert_key_block(loc1).await.unwrap();
-        store.insert_key_block(evt).await.unwrap();
+        store.insert_knowledge_entry(char1).await.unwrap();
+        store.insert_knowledge_entry(char2).await.unwrap();
+        store.insert_knowledge_entry(loc1).await.unwrap();
+        store.insert_knowledge_entry(evt).await.unwrap();
 
         let params = make_params("wld_1", &[]);
         let block = build_chapter_kb_block(&store, &params)
@@ -630,10 +630,10 @@ mod tests {
         let loc1 = make_novel_block("wld_1", BlockType::Scene, "tavern", "location");
         let loc2 = make_novel_block("wld_1", BlockType::Scene, "forest", "location");
 
-        store.insert_key_block(char1).await.unwrap();
-        store.insert_key_block(char2).await.unwrap();
-        store.insert_key_block(loc1).await.unwrap();
-        store.insert_key_block(loc2).await.unwrap();
+        store.insert_knowledge_entry(char1).await.unwrap();
+        store.insert_knowledge_entry(char2).await.unwrap();
+        store.insert_knowledge_entry(loc1).await.unwrap();
+        store.insert_knowledge_entry(loc2).await.unwrap();
 
         // chapter_text mentions Alice and the tavern but not Bob or the forest
         let params = ChapterKbBlockParams {
@@ -687,8 +687,8 @@ mod tests {
 
         let char1 = make_novel_block("wld_1", BlockType::Character, "alice", "character");
         let char2 = make_novel_block("wld_1", BlockType::Character, "bob", "character");
-        store.insert_key_block(char1).await.unwrap();
-        store.insert_key_block(char2).await.unwrap();
+        store.insert_knowledge_entry(char1).await.unwrap();
+        store.insert_knowledge_entry(char2).await.unwrap();
 
         let params = ChapterKbBlockParams {
             chapter_text: None,
@@ -727,7 +727,7 @@ mod tests {
 
         // Insert block in different world
         let char1 = make_novel_block("wld_other", BlockType::Character, "char_x", "character");
-        store.insert_key_block(char1).await.unwrap();
+        store.insert_knowledge_entry(char1).await.unwrap();
 
         let params = make_params("wld_ghost", &[]);
         let block = build_chapter_kb_block(&store, &params)
@@ -748,12 +748,12 @@ mod tests {
 
         // Create many characters with long summaries
         for i in 0..20 {
-            let mut kb = nexus_knowledge::world_kb::key_block::KeyBlock::new(
+            let mut kb = nexus_knowledge::world_kb::knowledge_entry::WorldKbEntry::new(
                 "wld_1",
                 BlockType::Character,
                 &format!("char_{i:02}"),
             );
-            kb.set_body(KeyBlockBody {
+            kb.set_body(WorldKbBody {
                 summary: Some(format!(
                     "Character {i} with a very long descriptor that takes up space"
                 )),
@@ -762,7 +762,7 @@ mod tests {
                 ..Default::default()
             })
             .unwrap();
-            store.insert_key_block(kb).await.unwrap();
+            store.insert_knowledge_entry(kb).await.unwrap();
         }
 
         let params = ChapterKbBlockParams {
@@ -841,11 +841,11 @@ mod tests {
         let char_a = make_novel_block("wld_1", BlockType::Character, "alpha", "character");
         let char_b = make_novel_block("wld_1", BlockType::Character, "beta", "character");
 
-        store1.insert_key_block(char_a.clone()).await.unwrap();
-        store1.insert_key_block(char_b.clone()).await.unwrap();
+        store1.insert_knowledge_entry(char_a.clone()).await.unwrap();
+        store1.insert_knowledge_entry(char_b.clone()).await.unwrap();
 
-        store2.insert_key_block(char_b).await.unwrap();
-        store2.insert_key_block(char_a).await.unwrap();
+        store2.insert_knowledge_entry(char_b).await.unwrap();
+        store2.insert_knowledge_entry(char_a).await.unwrap();
 
         let params = make_params("wld_1", &[]);
 

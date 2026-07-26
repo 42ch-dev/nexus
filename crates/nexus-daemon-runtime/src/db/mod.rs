@@ -50,7 +50,7 @@ mod restart_tests {
         .await;
 
         // Seed a key block for that world via the KB store seed helper.
-        nexus_local_db::kb_store::seed::key_block(
+        nexus_local_db::kb_store::seed::knowledge_entry(
             &pool,
             "kb_char_1",
             "wld_restart",

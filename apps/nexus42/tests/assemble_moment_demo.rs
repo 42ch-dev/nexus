@@ -71,15 +71,15 @@ fn seed_demo_stores(
 /// Helper: seed KB block (async, call before assembly).
 async fn seed_kb(kb: &InMemoryKbStore, world_id: &str) {
     use nexus_contracts::BlockType;
-    use nexus_knowledge::world_kb::key_block::KeyBlock;
-    let block = KeyBlock::new(world_id, BlockType::Character, "Demo Hero");
-    kb.insert_key_block(block).await.unwrap();
+    use nexus_knowledge::world_kb::knowledge_entry::WorldKbEntry;
+    let block = WorldKbEntry::new(world_id, BlockType::Character, "Demo Hero");
+    kb.insert_knowledge_entry(block).await.unwrap();
 }
 
 /// Helper: seed knowledge entry (async, call before assembly).
 async fn seed_knowledge(knowledge: &InMemoryKnowledgeStore, user_id: &str) {
-    use nexus_knowledge::{KnowledgeEntry, KnowledgeTag};
-    let entry = KnowledgeEntry::new(
+    use nexus_knowledge::{UserKnowledgeEntry, KnowledgeTag};
+    let entry = UserKnowledgeEntry::new(
         user_id,
         vec![KnowledgeTag::new("demo")],
         "Demo user knowledge entry for Moment assembly.",

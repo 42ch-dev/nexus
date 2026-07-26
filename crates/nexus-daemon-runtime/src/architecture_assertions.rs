@@ -25,12 +25,13 @@ const _: () = {
 
     // nexus-knowledge — world_kb (formerly the standalone nexus-kb crate,
     // merged into nexus-knowledge in V1.139 P1 T1)
-    use nexus_knowledge::world_kb::key_block::KeyBlock;
-    const _KB_SIZE: usize = std::mem::size_of::<KeyBlock>();
+    use nexus_knowledge::world_kb::knowledge_entry::WorldKbEntry;
+    const _KB_SIZE: usize = std::mem::size_of::<WorldKbEntry>();
 
-    // nexus-knowledge
-    use nexus_knowledge::KnowledgeEntry;
-    const _KE_SIZE: usize = std::mem::size_of::<KnowledgeEntry>();
+    // nexus-knowledge (V1.139 P1 T2: User-scoped entry renamed to avoid
+    // collision with the spoke KnowledgeEntry re-exported from world_kb).
+    use nexus_knowledge::UserKnowledgeEntry;
+    const _KE_SIZE: usize = std::mem::size_of::<UserKnowledgeEntry>();
 
     // nexus-moment-context-assembly
     use nexus_moment_context_assembly::MomentRequest;

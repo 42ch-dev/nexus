@@ -514,7 +514,7 @@ pub fn build_registry() -> CapabilityRegistry {
         handler: hte::registry_kb_snapshot_read,
         acp_wire: AcpWire {
             request_schema_ref: r#"{"world_id":"string"}"#,
-            response_schema_ref: "[KeyBlock]",
+            response_schema_ref: "[WorldKbEntry]",
             error_schema_ref: r#"{"code":"forbidden|invalid_input|not_supported"}"#,
         },
         failure_mode: FailureMode::InvalidInput,
@@ -569,7 +569,7 @@ pub fn build_registry() -> CapabilityRegistry {
         admission: ADMISSION_WRITE_WORLD,
         handler: hte::registry_kb_snapshot_write,
         acp_wire: AcpWire {
-            request_schema_ref: r#"{"world_id":"string","blocks":"[KeyBlock]"}"#,
+            request_schema_ref: r#"{"world_id":"string","blocks":"[WorldKbEntry]"}"#,
             response_schema_ref: r#"{"written":"int","world_id":"string"}"#,
             error_schema_ref: r#"{"code":"forbidden|invalid_input|not_found|not_supported"}"#,
         },

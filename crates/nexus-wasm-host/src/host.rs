@@ -76,9 +76,16 @@ impl HostContext {
     pub fn from_input(input: &crate::ComputeInput) -> Self {
         let mut blocks = HashMap::with_capacity(input.key_blocks.len());
         for kb in &input.key_blocks {
-            // Re-serialize each KeyBlock so the module receives canonical JSON.
+            // Re-serialize each entry so the module receives canonical JSON.
+            // V1.139 P0 fallback: ComputeInput.key_blocks is an opaque JSON-map
+            // Vec (spoke $ref unresolved at codegen), so the id is read from the
+            // serialized spoke KnowledgeEntry's `entry_id` field.
             if let Ok(json) = serde_json::to_value(kb) {
-                blocks.insert(kb.key_block_id.to_string(), json);
+                let id = kb
+                    .get("entry_id")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("");
+                blocks.insert(id.to_string(), json);
             }
         }
         // `narrative_state` is a generated struct; serialize it back to the
@@ -217,8 +224,8 @@ mod tests {
             "schema_version": 1,
             "world_ref": {"world_id": "wld_test"},
             "key_blocks": [
-                {"schema_version":1,"key_block_id":"kb_a","world_id":"wld_test","block_type":"character","canonical_name":"A","status":"confirmed","created_at":"2026-01-01T00:00:00Z"},
-                {"schema_version":1,"key_block_id":"kb_b","world_id":"wld_test","block_type":"character","canonical_name":"B","status":"confirmed","created_at":"2026-01-01T00:00:00Z"}
+                {"schema_version":1,"entry_id":"kb_a","world_id":"wld_test","block_type":"character","canonical_name":"A","status":"confirmed","created_at":"2026-01-01T00:00:00Z"},
+                {"schema_version":1,"entry_id":"kb_b","world_id":"wld_test","block_type":"character","canonical_name":"B","status":"confirmed","created_at":"2026-01-01T00:00:00Z"}
             ]
         }"#;
         let input: ComputeInput = serde_json::from_str(raw).unwrap();
@@ -275,7 +282,7 @@ mod tests {
                 "schema_version": 1,
                 "world_ref": {"world_id": "wld_test"},
                 "key_blocks": [
-                    {"schema_version":1,"key_block_id":"kb_a","world_id":"wld_test",
+                    {"schema_version":1,"entry_id":"kb_a","world_id":"wld_test",
                      "block_type":"character","canonical_name":"Alice","status":"confirmed","created_at":"2026-01-01T00:00:00Z"}
                 ]
             }"#,
@@ -312,7 +319,7 @@ mod tests {
         let mut buf = vec![0u8; len];
         memory.read(&store, out_ptr as usize, &mut buf).unwrap();
         let fetched: serde_json::Value = serde_json::from_slice(&buf).unwrap();
-        assert_eq!(fetched["key_block_id"], "kb_a");
+        assert_eq!(fetched["entry_id"], "kb_a");
         assert_eq!(fetched["canonical_name"], "Alice");
     }
 

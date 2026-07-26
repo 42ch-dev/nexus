@@ -72,7 +72,7 @@ pub enum WorldCommand {
     /// World KB key-block author surface (list/show/edit/delete).
     ///
     /// Per entity-scope-model §5.5, `creator world kb` is the canonical author
-    /// CLI for inspecting and editing World-scoped `KeyBlock` rows. This is a
+    /// CLI for inspecting and editing World-scoped `WorldKbEntry` rows. This is a
     /// separate surface from `creator kb --scope world` (the legacy ingest path).
     Kb {
         #[command(subcommand)]

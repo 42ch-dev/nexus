@@ -670,15 +670,15 @@ mod tests {
         stores.narrative.insert_event(event);
 
         // Set up KB
-        let kb = nexus_knowledge::world_kb::key_block::KeyBlock::new(
+        let kb = nexus_knowledge::world_kb::knowledge_entry::WorldKbEntry::new(
             "wld_1",
             nexus_contracts::BlockType::Character,
             "Hero",
         );
-        stores.kb.insert_key_block(kb).await.unwrap();
+        stores.kb.insert_knowledge_entry(kb).await.unwrap();
 
         // Set up knowledge
-        let entry = nexus_knowledge::KnowledgeEntry::new(
+        let entry = nexus_knowledge::UserKnowledgeEntry::new(
             "user_1",
             vec![nexus_knowledge::KnowledgeTag::new("writing")],
             "Show, don't tell.",
@@ -739,18 +739,18 @@ mod tests {
         let stores = TestStores::new();
 
         // Seed two KB blocks
-        let kb1 = nexus_knowledge::world_kb::key_block::KeyBlock::new(
+        let kb1 = nexus_knowledge::world_kb::knowledge_entry::WorldKbEntry::new(
             "wld_1",
             nexus_contracts::BlockType::Character,
             "Hero",
         );
-        let kb2 = nexus_knowledge::world_kb::key_block::KeyBlock::new(
+        let kb2 = nexus_knowledge::world_kb::knowledge_entry::WorldKbEntry::new(
             "wld_1",
             nexus_contracts::BlockType::Scene,
             "Castle",
         );
-        stores.kb.insert_key_block(kb1).await.unwrap();
-        stores.kb.insert_key_block(kb2).await.unwrap();
+        stores.kb.insert_knowledge_entry(kb1).await.unwrap();
+        stores.kb.insert_knowledge_entry(kb2).await.unwrap();
 
         // Without limit: both blocks
         let request = MomentRequest::new(minimal_stage0()).with_world("wld_1");
@@ -782,18 +782,18 @@ mod tests {
     async fn kb_query_respects_text_search() {
         let stores = TestStores::new();
 
-        let kb1 = nexus_knowledge::world_kb::key_block::KeyBlock::new(
+        let kb1 = nexus_knowledge::world_kb::knowledge_entry::WorldKbEntry::new(
             "wld_1",
             nexus_contracts::BlockType::Character,
             "Hero",
         );
-        let kb2 = nexus_knowledge::world_kb::key_block::KeyBlock::new(
+        let kb2 = nexus_knowledge::world_kb::knowledge_entry::WorldKbEntry::new(
             "wld_1",
             nexus_contracts::BlockType::Scene,
             "Castle",
         );
-        stores.kb.insert_key_block(kb1).await.unwrap();
-        stores.kb.insert_key_block(kb2).await.unwrap();
+        stores.kb.insert_knowledge_entry(kb1).await.unwrap();
+        stores.kb.insert_knowledge_entry(kb2).await.unwrap();
 
         let request = MomentRequest::new(minimal_stage0())
             .with_world("wld_1")
@@ -827,15 +827,15 @@ mod tests {
         stores.narrative.insert_world(world);
 
         // Set up KB
-        let kb = nexus_knowledge::world_kb::key_block::KeyBlock::new(
+        let kb = nexus_knowledge::world_kb::knowledge_entry::WorldKbEntry::new(
             "wld_1",
             nexus_contracts::BlockType::Character,
             "Hero with a long description",
         );
-        stores.kb.insert_key_block(kb).await.unwrap();
+        stores.kb.insert_knowledge_entry(kb).await.unwrap();
 
         // Set up knowledge
-        let entry = nexus_knowledge::KnowledgeEntry::new(
+        let entry = nexus_knowledge::UserKnowledgeEntry::new(
             "user_1",
             vec![nexus_knowledge::KnowledgeTag::new("writing")],
             "A long knowledge entry that should also be truncated when budget is tight.",

@@ -22,7 +22,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use nexus_contracts::BlockType;
-use nexus_knowledge::world_kb::key_block::{KeyBlock, KeyBlockBody};
+use nexus_knowledge::world_kb::knowledge_entry::{WorldKbEntry, WorldKbBody};
 use nexus_knowledge::world_kb::{KbQuery, KbStore};
 use nexus_local_db::kb_store::SqliteKbStore;
 use nexus_local_db::{narrative_write, open_pool, run_migrations};
@@ -72,7 +72,7 @@ async fn seed_world(pool: &sqlx::SqlitePool, owner: &str, world_id: &str) {
         .unwrap();
 }
 
-/// Seed a computable character KeyBlock with the given combat attributes.
+/// Seed a computable character WorldKbEntry with the given combat attributes.
 async fn seed_character(
     pool: &sqlx::SqlitePool,
     world_id: &str,
@@ -81,12 +81,12 @@ async fn seed_character(
     base_def: i64,
     current_hp: i64,
     max_hp: i64,
-) -> KeyBlock {
-    let kb = KeyBlock {
+) -> WorldKbEntry {
+    let kb = WorldKbEntry {
         world_id: world_id.to_string(),
         block_type: BlockType::Character,
         canonical_name: name.to_string(),
-        body: Some(KeyBlockBody {
+        body: Some(WorldKbBody {
             summary: Some(format!("{name} combatant")),
             attributes: Some(json!({
                 "max_hp": max_hp,
@@ -103,10 +103,10 @@ async fn seed_character(
             })),
             ..Default::default()
         }),
-        ..KeyBlock::new(world_id, BlockType::Character, name)
+        ..WorldKbEntry::new(world_id, BlockType::Character, name)
     };
     let kb_store = SqliteKbStore::new(pool.clone());
-    kb_store.insert_key_block(kb.clone()).await.unwrap();
+    kb_store.insert_knowledge_entry(kb.clone()).await.unwrap();
     kb
 }
 
@@ -124,7 +124,7 @@ async fn timeline_event_count(pool: &sqlx::SqlitePool, world_id: &str) -> i64 {
 /// Read back a character's `current_hp` from the KB store.
 async fn read_current_hp(pool: &sqlx::SqlitePool, key_block_id: &str) -> i64 {
     let kb_store = SqliteKbStore::new(pool.clone());
-    let kb = kb_store.get_key_block(key_block_id).await.unwrap();
+    let kb = kb_store.get_knowledge_entry(key_block_id).await.unwrap();
     let body = kb.body.expect("body present");
     let state = body.state.expect("state present");
     state["character"]["current_hp"]

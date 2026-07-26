@@ -1,7 +1,7 @@
 //! Canvas World KB Daemon API handlers (V1.73 P0 Track A).
 //!
 //! Four World KB routes under `/v1/daemon/worlds/{world_id}/kb/*`, exposing
-//! the World-scoped `KeyBlock` graph + promotion state machine
+//! the World-scoped `WorldKbEntry` graph + promotion state machine
 //! (entity-scope-model §5.5) to the canvas. Writes use per-row OCC on
 //! `kb_key_blocks.revision` (entity edits) and `kb_extract_jobs.version`
 //! (promotion), per the architect Phase 2b lock — no new migration.
@@ -40,7 +40,7 @@ use nexus_contracts::{
     WorldKbPatchRelationshipResponse, WorldKbPromoteCandidateRequest,
     WorldKbPromoteCandidateResponse, WorldKbRelationshipProjection, WorldKbSourceAnchorProjection,
 };
-use nexus_knowledge::world_kb::key_block::{KeyBlock, KeyBlockBody};
+use nexus_knowledge::world_kb::knowledge_entry::{WorldKbEntry, WorldKbBody};
 use nexus_knowledge::world_kb::validation::{validate_body, validate_canonical_name, ValidationMode};
 use nexus_knowledge::world_kb::KbStore;
 use nexus_local_db::kb_extract_job::{
@@ -166,8 +166,8 @@ async fn reread_promotion_version(
         .map_or(0, |j| u64::try_from(j.version).unwrap_or(0)))
 }
 
-/// Build the wire projection of a `KeyBlock`.
-fn project_entity(kb: &KeyBlock) -> WorldKbEntityProjection {
+/// Build the wire projection of a `WorldKbEntry`.
+fn project_entity(kb: &WorldKbEntry) -> WorldKbEntityProjection {
     let body_value = kb
         .body
         .as_ref()
@@ -184,7 +184,7 @@ fn project_entity(kb: &KeyBlock) -> WorldKbEntityProjection {
         });
     let source_anchor_count = u64::from(kb.source_work_id.is_some());
     WorldKbEntityProjection {
-        key_block_id: kb.key_block_id.clone(),
+        key_block_id: kb.entry_id.clone(),
         world_id: kb.world_id.clone(),
         block_type: wire_cast(kb.block_type),
         canonical_name: wire_cast(kb.canonical_name.clone()),
@@ -295,7 +295,7 @@ pub async fn patch_entity(
         ValidationMode::Novel,
     );
     let kb = store
-        .get_key_block(&req.entity_id)
+        .get_knowledge_entry(&req.entity_id)
         .await
         .map_err(|e| NexusApiError::Internal {
             code: "DATABASE_ERROR".to_string(),
@@ -373,7 +373,7 @@ pub async fn patch_entity(
     // Re-read canonical post-write state for the response projection.
     let updated =
         store
-            .get_key_block(&req.entity_id)
+            .get_knowledge_entry(&req.entity_id)
             .await
             .map_err(|e| NexusApiError::Internal {
                 code: "DATABASE_ERROR".to_string(),
@@ -395,13 +395,13 @@ fn patch_is_empty(patch: &NexusWorldKbEntityPatch) -> bool {
         && patch.block_type.is_none()
 }
 
-/// Resolve the new `body_json` DB string (and a `KeyBlockBody` for validation)
+/// Resolve the new `body_json` DB string (and a `WorldKbBody` for validation)
 /// from the patch + the current entity body. `aliases` are merged into
 /// `body.attributes.aliases`.
 fn compute_body(
-    kb: &KeyBlock,
+    kb: &WorldKbEntry,
     patch: &NexusWorldKbEntityPatch,
-) -> Result<(Option<String>, Option<KeyBlockBody>), NexusApiError> {
+) -> Result<(Option<String>, Option<WorldKbBody>), NexusApiError> {
     if patch.body.is_empty() && patch.aliases.is_empty() {
         return Ok((None, None));
     }
@@ -432,10 +432,10 @@ fn compute_body(
                 .collect(),
         );
     }
-    let body: KeyBlockBody =
+    let body: WorldKbBody =
         serde_json::from_value(value.clone()).map_err(|e| NexusApiError::InvalidInput {
             field: "body".to_string(),
-            reason: format!("body is not a valid KeyBlockBody: {e}"),
+            reason: format!("body is not a valid WorldKbBody: {e}"),
         })?;
     let json_str = serde_json::to_string(&value).unwrap_or_default();
     Ok((Some(json_str), Some(body)))
@@ -502,7 +502,7 @@ pub async fn promote_candidate(
 
 /// Resolved adopt inputs (parsed payload + optional patch refinements).
 struct AdoptPlan {
-    body: KeyBlockBody,
+    body: WorldKbBody,
     block_type: nexus_contracts::BlockType,
     canonical_name: String,
 }
@@ -513,12 +513,12 @@ fn build_adopt_plan(
     candidate: &KbExtractPromotion,
     req: &WorldKbPromoteCandidateRequest,
 ) -> Result<AdoptPlan, NexusApiError> {
-    let mut body: KeyBlockBody = serde_json::from_str(
+    let mut body: WorldKbBody = serde_json::from_str(
         candidate.proposed_payload.as_deref().unwrap_or("{}"),
     )
     .map_err(|e| NexusApiError::Internal {
         code: "KB_PAYLOAD_INVALID".to_string(),
-        message: format!("proposed_payload is not a valid KeyBlockBody: {e}"),
+        message: format!("proposed_payload is not a valid WorldKbBody: {e}"),
     })?;
     let block_type = req.patch.as_ref().and_then(|p| p.block_type).map_or_else(
         || parse_block_type(candidate.block_type_guess.as_deref().unwrap_or("character")),
@@ -541,7 +541,7 @@ fn build_adopt_plan(
                 serde_json::from_value(serde_json::Value::Object(p.body.clone())).map_err(|e| {
                     NexusApiError::InvalidInput {
                         field: "patch.body".to_string(),
-                        reason: format!("not a valid KeyBlockBody: {e}"),
+                        reason: format!("not a valid WorldKbBody: {e}"),
                     }
                 })?;
         }
@@ -557,7 +557,7 @@ fn build_adopt_plan(
 }
 
 /// Set `body.attributes.aliases` in place.
-fn merge_aliases_into_body(body: &mut KeyBlockBody, aliases: &[String]) {
+fn merge_aliases_into_body(body: &mut WorldKbBody, aliases: &[String]) {
     let mut value = serde_json::to_value(&*body).unwrap_or_default();
     if let Some(obj) = value.as_object_mut() {
         let attrs = obj
@@ -570,12 +570,12 @@ fn merge_aliases_into_body(body: &mut KeyBlockBody, aliases: &[String]) {
                 .collect(),
         );
     }
-    if let Ok(merged) = serde_json::from_value::<KeyBlockBody>(value) {
+    if let Ok(merged) = serde_json::from_value::<WorldKbBody>(value) {
         *body = merged;
     }
 }
 
-/// Adopt: parse `proposed_payload` → confirmed `KeyBlock`; atomic insert + CAS flip.
+/// Adopt: parse `proposed_payload` → confirmed `WorldKbEntry`; atomic insert + CAS flip.
 async fn promote_adopt(
     state: &WorkspaceState,
     world_id: &str,
@@ -596,7 +596,7 @@ async fn promote_adopt(
     validate_body(block_type, Some(&body), ValidationMode::Novel)
         .map_err(|e| NexusApiError::world_kb_validation_failed(&[e.to_string()], &[]))?;
 
-    let mut kb = KeyBlock::new(world_id, block_type, &canonical_name);
+    let mut kb = WorldKbEntry::new(world_id, block_type, &canonical_name);
     kb.body = Some(body);
     kb.status = "confirmed".to_string();
     kb.created_at = chrono::Utc::now().to_rfc3339();
@@ -623,7 +623,7 @@ async fn promote_adopt(
     .map_err(|e| map_cas_err(e, &req.job_id, "version"))?;
     if !flipped {
         // Race: row left pending state between read and flip. Roll back the
-        // orphan KeyBlock insert; surface a validation error (not a conflict).
+        // orphan WorldKbEntry insert; surface a validation error (not a conflict).
         let _ = tx.rollback().await;
         return Err(NexusApiError::world_kb_validation_failed(
             &[
@@ -635,9 +635,9 @@ async fn promote_adopt(
     }
     tx.commit().await.map_err(NexusApiError::from)?;
 
-    let kb_id = insert.key_block_id.clone();
+    let kb_id = insert.entry_id.clone();
     let updated_kb = store
-        .get_key_block(&kb_id)
+        .get_knowledge_entry(&kb_id)
         .await
         .map_err(|e| NexusApiError::Internal {
             code: "DATABASE_ERROR".to_string(),
@@ -703,7 +703,7 @@ async fn promote_reject(
 
 /// Merge: fold the candidate summary into an existing confirmed target, then
 /// dismiss the candidate. `merge_target_id` must reference a confirmed/manual
-/// `KeyBlock` in the same world.
+/// `WorldKbEntry` in the same world.
 // simplify: V1.73 β merge folds the candidate summary into the target body and
 // rejects the candidate job. Full attribute-level merge with conflict surfacing
 // is deferred to V1.74 alongside the relationships surface.
@@ -723,7 +723,7 @@ async fn promote_merge(
         })?;
     let store = kb_store::SqliteKbStore::with_validation_mode(pool.clone(), ValidationMode::Novel);
     let target = store
-        .get_key_block(target_id)
+        .get_knowledge_entry(target_id)
         .await
         .map_err(|e| NexusApiError::Internal {
             code: "DATABASE_ERROR".to_string(),
@@ -748,7 +748,7 @@ async fn promote_merge(
     let candidate_summary = candidate
         .proposed_payload
         .as_deref()
-        .and_then(|p| serde_json::from_str::<KeyBlockBody>(p).ok())
+        .and_then(|p| serde_json::from_str::<WorldKbBody>(p).ok())
         .and_then(|b| b.summary);
     let mut target_body = target.body.clone().unwrap_or_default();
     if let Some(cs) = candidate_summary {
@@ -805,7 +805,7 @@ async fn promote_merge(
 
     let updated_target =
         store
-            .get_key_block(target_id)
+            .get_knowledge_entry(target_id)
             .await
             .map_err(|e| NexusApiError::Internal {
                 code: "DATABASE_ERROR".to_string(),
@@ -833,7 +833,7 @@ fn map_kb_store_err(e: &nexus_knowledge::world_kb::store::KbStoreError, job_id: 
         }
         KbStoreError::Duplicate { .. } => NexusApiError::world_kb_validation_failed(
             &[
-                "an active KeyBlock with the same name/type already exists in this world"
+                "an active WorldKbEntry with the same name/type already exists in this world"
                     .to_string(),
             ],
             &[],
@@ -872,7 +872,7 @@ pub async fn get_graph(
         })?;
 
     // simplify: V1.73 derives source-anchor provenance edges from the
-    // KeyBlock's own source_work_id/source_provenance_kind rather than a
+    // WorldKbEntry's own source_work_id/source_provenance_kind rather than a
     // separate kb_source_anchors join. One edge per entity with provenance.
     let mut entities = Vec::with_capacity(blocks.len().min(GRAPH_ENTITY_CAP));
     let mut source_anchors = Vec::new();
@@ -889,8 +889,8 @@ pub async fn get_graph(
                 None => format!("work:{}", kb.source_work_id.clone().unwrap_or_default()),
             };
             source_anchors.push(WorldKbSourceAnchorProjection {
-                source_anchor_id: format!("sa_{}", kb.key_block_id),
-                key_block_id: kb.key_block_id.clone(),
+                source_anchor_id: format!("sa_{}", kb.entry_id),
+                key_block_id: kb.entry_id.clone(),
                 source_type: kb
                     .source_provenance_kind
                     .clone()
@@ -927,7 +927,7 @@ pub async fn get_graph(
 }
 
 /// `GET /v1/daemon/worlds/{world_id}/kb/key-blocks/{key_block_id}/state` —
-/// computable `KeyBlock` state read.
+/// computable `WorldKbEntry` state read.
 ///
 /// V1.114 P2: dedicated read surface for `body.state` of computable `KeyBlocks`.
 /// Returns `state` when `body.computable` is true; `state: null` and
@@ -942,7 +942,7 @@ pub async fn get_key_block_state(
 
     let store = kb_store::SqliteKbStore::new(state.pool_or_uninit()?.clone());
     let kb = store
-        .get_key_block(&key_block_id)
+        .get_knowledge_entry(&key_block_id)
         .await
         .map_err(|e| match e {
             nexus_knowledge::world_kb::store::KbStoreError::NotFound(_) => {
@@ -954,7 +954,7 @@ pub async fn get_key_block_state(
             },
         })?;
 
-    // Scope check: the KeyBlock must live in the path world. Treat a row
+    // Scope check: the WorldKbEntry must live in the path world. Treat a row
     // belonging to a different world as 404 (same as patch_entity).
     if kb.world_id != world_id {
         return Err(NexusApiError::NotFound(format!(
@@ -1495,7 +1495,7 @@ struct AnchorValidationRow {
     source_work_id: Option<String>,
 }
 
-/// Verify every source-anchor projection id references a `KeyBlock` in the world
+/// Verify every source-anchor projection id references a `WorldKbEntry` in the world
 /// that actually has provenance (`source_work_id IS NOT NULL`). Anchor ids use
 /// the V1.73 graph projection format `sa_<key_block_id>`.
 async fn require_valid_source_anchors(

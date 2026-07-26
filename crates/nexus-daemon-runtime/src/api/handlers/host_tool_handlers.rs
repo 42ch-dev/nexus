@@ -1268,7 +1268,7 @@ async fn execute_kb_snapshot_write(
     })?;
 
     for block_val in blocks {
-        let kb: nexus_knowledge::world_kb::key_block::KeyBlock =
+        let kb: nexus_knowledge::world_kb::knowledge_entry::WorldKbEntry =
             serde_json::from_value(block_val.clone()).map_err(|e| NexusApiError::InvalidInput {
                 field: "parameters.blocks[]".into(),
                 reason: format!("invalid key block: {e}"),
@@ -1277,10 +1277,10 @@ async fn execute_kb_snapshot_write(
         // request-level world_id (prevents cross-world block payload bypass).
         if kb.world_id != world_id {
             return Err(NexusApiError::Forbidden {
-                resource: "key_block.world_id".to_string(),
+                resource: "knowledge_entry.world_id".to_string(),
                 reason: format!(
                     "block {} targets world '{}' but request targets world '{}'",
-                    kb.key_block_id, kb.world_id, world_id
+                    kb.entry_id, kb.world_id, world_id
                 ),
             });
         }

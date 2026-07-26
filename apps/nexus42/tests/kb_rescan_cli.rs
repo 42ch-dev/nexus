@@ -22,7 +22,7 @@ use nexus42::commands::creator::kb::rescan::{kb_rescan_hermetic, WORLD_KB_FORBID
 use nexus42::commands::creator::world::kb::kb_adopt;
 use nexus42::db::Schema;
 use nexus42::errors::CliError;
-use nexus_knowledge::world_kb::key_block::KeyBlockBody;
+use nexus_knowledge::world_kb::knowledge_entry::WorldKbBody;
 use nexus_knowledge::world_kb::KbStore;
 use nexus_local_db::kb_extract_job::{insert_pending, list_pending_for_world};
 use nexus_local_db::kb_store::SqliteKbStore;
@@ -158,7 +158,7 @@ async fn rescan_after_chapter_edit_updates_candidate_rows() {
     );
 
     // KB rows reflect the new extraction: Marcus Vale is advisory-new (no
-    // KeyBlock yet), Lin Xia is advisory-removed (no KeyBlock either, since it
+    // WorldKbEntry yet), Lin Xia is advisory-removed (no WorldKbEntry either, since it
     // was only ever a pending candidate here).
     assert!(after_edit
         .candidates_inserted
@@ -177,7 +177,7 @@ async fn rescan_refreshes_out_of_sync_confirmed_keyblock_body() {
     let (pool, dir) = fresh_pool().await;
     write_chapter_prose(dir.path(), "Lin Xia walked into the tavern.");
 
-    // First scan + adopt → confirmed KeyBlock carrying the heuristic payload.
+    // First scan + adopt → confirmed WorldKbEntry carrying the heuristic payload.
     let scan = kb_rescan_hermetic(&pool, OWNER, Some(dir.path()), &target(), false)
         .await
         .unwrap();
@@ -191,19 +191,19 @@ async fn rescan_refreshes_out_of_sync_confirmed_keyblock_body() {
         .unwrap();
     let _ = scan;
 
-    // Manually drift the confirmed KeyBlock body away from the chapter's
+    // Manually drift the confirmed WorldKbEntry body away from the chapter's
     // extraction (simulates a body that fell out of sync with the source text).
     let store = SqliteKbStore::new(pool.clone());
     let mut blocks = store.list_by_world(WORLD).await.unwrap();
     let mut kb = blocks.remove(0);
-    kb.body = Some(KeyBlockBody {
+    kb.body = Some(WorldKbBody {
         summary: Some("stale hand-edited body".to_string()),
         attributes: Some(serde_json::json!({"novel_category": "character"})),
         tags: None,
         ..Default::default()
     });
     kb.updated_at = Some(chrono::Utc::now().to_rfc3339());
-    store.update_key_block(kb).await.unwrap();
+    store.update_knowledge_entry(kb).await.unwrap();
 
     // Rescan → diff_and_apply refreshes the confirmed body back to the
     // extraction, so KB rows reflect the current chapter text (AC2/AC5).
@@ -212,7 +212,7 @@ async fn rescan_refreshes_out_of_sync_confirmed_keyblock_body() {
         .unwrap();
     assert!(
         rescan.kb_updated.iter().any(|n| n == "Lin Xia"),
-        "rescan should refresh the out-of-sync 'Lin Xia' KeyBlock: {:?}",
+        "rescan should refresh the out-of-sync 'Lin Xia' WorldKbEntry: {:?}",
         rescan.kb_updated
     );
 
@@ -261,7 +261,7 @@ async fn dry_run_shows_diff_without_writing() {
         dry.kb_inserted_advisory
     );
 
-    // Nothing was actually written: no pending candidate, no KeyBlock.
+    // Nothing was actually written: no pending candidate, no WorldKbEntry.
     let pending = list_pending_for_world(&pool, WORLD, None).await.unwrap();
     assert!(
         pending.is_empty(),
