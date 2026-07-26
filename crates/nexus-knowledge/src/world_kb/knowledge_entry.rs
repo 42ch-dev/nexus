@@ -363,7 +363,10 @@ impl From<WorldKbEntry> for SpokeKnowledgeEntry {
     fn from(d: WorldKbEntry) -> Self {
         // Body: carry only what spoke's typed body models (state). nexus
         // summary/attributes/tags stay on the domain type; spoke-operations
-        // does not consume them.
+        // does not consume them. Spoke 0.2.0 declared `attributes`/`summary`/
+        // `tags` as typed L2 body fields (closed `KnowledgeEntryBody`); they
+        // are emitted empty here — the typed-body ↔ nexus-body alignment is
+        // deferred to the next iteration per the V1.139 spoke-0.2.0 bump.
         let state_map = d
             .body
             .as_ref()
@@ -374,8 +377,11 @@ impl From<WorldKbEntry> for SpokeKnowledgeEntry {
             })
             .unwrap_or_default();
         let spoke_body = SpokeKnowledgeEntryBody {
+            attributes: Vec::new(),
             computable: Map::new(),
             state: state_map,
+            summary: None,
+            tags: Vec::new(),
         };
 
         let mut entry = Self {
@@ -430,7 +436,7 @@ impl From<SpokeKnowledgeEntry> for WorldKbEntry {
 
         // Reverse body: spoke typed body → nexus state. summary/attributes/tags
         // cannot be recovered (forward direction dropped them); they default to None.
-        let SpokeKnowledgeEntryBody { computable, state } = s.body;
+        let SpokeKnowledgeEntryBody { computable, state, .. } = s.body;
         let body = if state.is_empty() && computable.is_empty() {
             None
         } else {

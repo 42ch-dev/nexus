@@ -5,7 +5,7 @@
  */
 
 /**
- * Standard input envelope passed into a WASM compute module (V1.61 ABI, compass Q3/Q8). Bundles a read-only KeyBlock snapshot, the narrative position, and module-declared invocation parameters. Modules are stateless pure functions (compass Q6): every call receives a fresh envelope and returns a ComputeOutput.
+ * Standard input envelope passed into a WASM compute module (V1.61 ABI, compass Q3/Q8). Bundles a read-only KnowledgeEntry snapshot, the narrative position, and module-declared invocation parameters. Modules are stateless pure functions (compass Q6): every call receives a fresh envelope and returns a ComputeOutput.
  */
 export interface ComputeInput {
   /**

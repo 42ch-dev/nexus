@@ -5,7 +5,7 @@
  */
 
 /**
- * Standard 4-part output envelope returned by a WASM compute module (V1.61 ABI, compass Q8). Modules emit state deltas to apply, timeline events to append (aligned with V1.60 timeline.event.append), new KeyBlocks to create, and a module-declared freeform report. The host applies these in order: state_delta -> new_key_blocks -> timeline_events, then surfaces battle_report.
+ * Standard 4-part output envelope returned by a WASM compute module (V1.61 ABI, compass Q8). Modules emit state deltas to apply, timeline events to append (aligned with V1.60 timeline.event.append), new KnowledgeEntries to create, and a module-declared freeform report. The host applies these in order: state_delta -> new_key_blocks -> timeline_events, then surfaces battle_report.
  */
 export interface ComputeOutput {
   /**
@@ -13,15 +13,15 @@ export interface ComputeOutput {
    */
   schema_version: number;
   /**
-   * Ordered list of +/-/set state operations to apply to computable KeyBlock bodies.
+   * Ordered list of +/-/set state operations to apply to computable KnowledgeEntry bodies.
    */
   state_delta: {
     /**
-     * Delta operation: add (increment numeric), sub (decrement numeric), set (replace value). Applied to nested state paths on computable KeyBlock bodies (compass Q5, e.g. character.current_hp).
+     * Delta operation: add (increment numeric), sub (decrement numeric), set (replace value). Applied to nested state paths on computable KnowledgeEntry bodies (compass Q5, e.g. character.current_hp).
      */
     op: "add" | "sub" | "set";
     /**
-     * Dotted state path within the target KeyBlock body (e.g. 'character.current_hp'). Resolution semantics are finalized in P3 (state delta merge).
+     * Dotted state path within the target KnowledgeEntry body (e.g. 'character.current_hp'). Resolution semantics are finalized in P3 (state delta merge).
      */
     path: string;
     /**

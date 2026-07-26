@@ -27,7 +27,7 @@
       "type": "integer",
       "minimum": 1,
       "maximum": 500,
-      "description": "Optional cap on key blocks included in snapshot payload shaping"
+      "description": "Optional cap on knowledge entries included in snapshot payload shaping"
     },
     "timeline_event_limit": {
       "type": "integer",

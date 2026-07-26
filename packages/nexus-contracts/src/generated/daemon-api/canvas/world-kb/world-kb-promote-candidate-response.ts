@@ -5,7 +5,7 @@
  */
 
 /**
- * Success response for POST /v1/daemon/worlds/{world_id}/kb/promote-candidate (V1.73). `entity` is the resulting (or null for reject) KeyBlock; `job` is the updated extract-job projection; `version` is the new per-row version.
+ * Success response for POST /v1/daemon/worlds/{world_id}/kb/promote-candidate (V1.73). `entity` is the resulting (or null for reject) KnowledgeEntry; `job` is the updated extract-job projection; `version` is the new per-row version.
  */
 export interface WorldKbPromoteCandidateResponse {
   entity?: NexusWorldKbEntityProjection;
@@ -20,11 +20,11 @@ export interface WorldKbPromoteCandidateResponse {
   };
 }
 /**
- * Resulting confirmed/merged KeyBlock. Omitted for reject.
+ * Resulting confirmed/merged KnowledgeEntry. Omitted for reject.
  */
 export interface NexusWorldKbEntityProjection {
   /**
-   * KeyBlock identifier.
+   * KnowledgeEntry identifier.
    */
   key_block_id: string;
   /**
@@ -67,7 +67,7 @@ export interface NexusWorldKbEntityProjection {
    */
   version: number;
   /**
-   * KeyBlock body JSON (summary/attributes/tags/state/computable) when present.
+   * KnowledgeEntry body JSON (summary/attributes/tags/state/computable) when present.
    */
   body?: {
     [k: string]: unknown | undefined;

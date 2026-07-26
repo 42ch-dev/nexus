@@ -5,11 +5,11 @@
  */
 
 /**
- * Request body for POST /v1/daemon/worlds/{world_id}/kb/patch-entity (V1.73). Edits an entity (KeyBlock) title/body/aliases/block_type with per-row OCC on kb_key_blocks.revision.
+ * Request body for POST /v1/daemon/worlds/{world_id}/kb/patch-entity (V1.73). Edits an entity (KnowledgeEntry) title/body/aliases/block_type with per-row OCC on kb_key_blocks.revision.
  */
 export interface WorldKbPatchEntityRequest {
   /**
-   * KeyBlock id from the URL world scope. Authoritative identifier.
+   * KnowledgeEntry id from the URL world scope. Authoritative identifier.
    */
   entity_id: string;
   /**
@@ -27,7 +27,7 @@ export interface NexusWorldKbEntityPatch {
    */
   title?: string;
   /**
-   * Replacement KeyBlock body JSON (summary/attributes/tags/state/computable).
+   * Replacement KnowledgeEntry body JSON (summary/attributes/tags/state/computable).
    */
   body?: {
     [k: string]: unknown | undefined;

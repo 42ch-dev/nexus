@@ -12,7 +12,7 @@ Two responsibilities, nothing more:
 ## Authority
 
 - Normative spec: [`specs/spoke-adapter-architecture.md`](../../.mstar/specs/spoke-adapter-architecture.md) (tracked). §7.2 is the authoritative public API surface; §2 is the `extensions.nexus` contract.
-- Upstream types: `spoke-schemas` + `spoke-operations` (crates.io, lockstep exact pin `=0.1.1`).
+- Upstream types: `spoke-schemas` + `spoke-operations` (crates.io, lockstep exact pin `=0.2.0`).
 
 ## Key rules
 
@@ -23,7 +23,7 @@ Two responsibilities, nothing more:
 
 ## Dependencies
 
-- `spoke-schemas`, `spoke-operations` (workspace, `=0.1.1`)
+- `spoke-schemas`, `spoke-operations` (workspace, `=0.2.0`)
 - `serde`, `serde_json`
 
 Dev-deps mirror the runtime deps so tests can compare wrapper output against the underlying spoke function directly.

@@ -29,12 +29,12 @@
     "maxFuel": "最大 fuel",
     "maxMemory": "最大内存（MiB）",
     "maxWallTime": "最大运行时间（ms）",
-    "requiredKeyBlockTypes": "所需 KeyBlock 类型",
+    "requiredKeyBlockTypes": "所需知识条目类型",
     "hostFunctions": "宿主函数",
     "battleReportKind": "战报类型",
     "schemas": "模式",
-    "keyBlockAttributes": "KeyBlock 属性",
-    "keyBlockState": "KeyBlock 状态",
+    "keyBlockAttributes": "知识条目属性",
+    "keyBlockState": "知识条目状态",
     "invocation": "调用",
     "battleReport": "战报"
   }

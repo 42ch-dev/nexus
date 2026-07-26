@@ -494,7 +494,7 @@
       "action": {
         "adopt": {
           "label": "Adopt candidate",
-          "help": "promote into a new confirmed KeyBlock"
+          "help": "promote into a new confirmed knowledge entry"
         },
         "reject": {
           "label": "Reject candidate",

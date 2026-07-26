@@ -3,7 +3,7 @@
   "$id": "https://nexus42.invalid/schemas/daemon-api/canvas/world-kb/world-kb-key-block-state-response.schema.json",
   "schema_version": 1,
   "title": "Nexus WorldKbKeyBlockStateResponse",
-  "description": "Read projection for GET /v1/daemon/worlds/{world_id}/kb/key-blocks/{key_block_id}/state (V1.114 P2). Surfaces the mutable runtime state of a computable KeyBlock plus its computability flag and per-row OCC version.",
+  "description": "Read projection for GET /v1/daemon/worlds/{world_id}/kb/key-blocks/{key_block_id}/state (V1.114 P2). Surfaces the mutable runtime state of a computable KnowledgeEntry plus its computability flag and per-row OCC version.",
   "type": "object",
   "required": ["state", "is_computable", "version"],
   "properties": {
@@ -13,7 +13,7 @@
     },
     "is_computable": {
       "type": "boolean",
-      "description": "True when the KeyBlock's body.computable is true."
+      "description": "True when the KnowledgeEntry's body.computable is true."
     },
     "version": {
       "type": "integer",
