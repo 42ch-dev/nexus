@@ -171,48 +171,34 @@ fn dir_contains_newer(dir: &Path, threshold: SystemTime) -> bool {
 /// source directory, exiting with a clear message on failure.
 ///
 /// `target_dir` is the isolated `CARGO_TARGET_DIR` computed by
-/// [`module_target_dir`]. We inherit stdout/stderr so the build log is visible
-/// in CI rather than captured in a silent pipe.
+/// [`module_target_dir`]. We capture output once and classify the error from
+/// the captured stderr, avoiding a second build attempt.
 fn compile_module(id: &str, src_dir: &Path, target_dir: &Path) {
-    let status = Command::new("cargo")
+    let output = match Command::new("cargo")
         .args(["build", "--release", "--target", "wasm32-unknown-unknown"])
         .env("CARGO_TARGET_DIR", target_dir)
         .current_dir(src_dir)
-        .stdout(std::process::Stdio::inherit())
-        .stderr(std::process::Stdio::inherit())
-        .status();
-
-    let status = match status {
-        Ok(s) => s,
+        .output()
+    {
+        Ok(o) => o,
         Err(e) => die(&format!(
             "failed to invoke `cargo` to build module `{id}`: {e} — is `cargo` on PATH?"
         )),
     };
 
-    if status.success() {
+    if output.status.success() {
         return;
     }
 
-    // If the build failed with a missing-target error, provide a clear fix hint.
-    // We re-run with captured output to inspect stderr for the diagnostic.
-    let check = Command::new("cargo")
-        .args(["build", "--release", "--target", "wasm32-unknown-unknown"])
-        .env("CARGO_TARGET_DIR", target_dir)
-        .current_dir(src_dir)
-        .output();
-    if let Ok(out) = check {
-        let stderr = String::from_utf8_lossy(&out.stderr);
-        if is_missing_target_error(&stderr) {
-            die(&format!(
-                "wasm32-unknown-unknown target not installed — required to compile \
-                 embedded module `{id}`.\n\
-                 Fix: rustup target add wasm32-unknown-unknown"
-            ));
-        }
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    if is_missing_target_error(&stderr) {
+        die(&format!(
+            "wasm32-unknown-unknown target not installed — required to compile \
+             embedded module `{id}`.\n\
+             Fix: rustup target add wasm32-unknown-unknown"
+        ));
     }
-    die(&format!(
-        "failed to compile module `{id}` — see stderr above for details"
-    ));
+    die(&format!("failed to compile module `{id}`:\n{stderr}"));
 }
 
 /// Detects the rustc/cargo error emitted when the wasm sysroot is absent (the
