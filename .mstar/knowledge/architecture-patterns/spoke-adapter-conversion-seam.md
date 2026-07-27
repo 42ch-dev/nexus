@@ -5,12 +5,14 @@ problem_type: architecture_pattern
 category: architecture-patterns
 severity: low
 plan_id: 2026-07-26-v1.139-p1-rust-domain-migration
-tags: [spoke, adapter, conversion-seam, extensions, knowledge-entry, wire-boundary]
-last_updated: 2026-07-26
-applies_when: Consuming SPOKE protocol packages in a product that has product-local body content not yet covered by spoke's typed body schema
+tags: [spoke, adapter, conversion-seam, extensions, knowledge-entry, wire-boundary, surface-a]
+last_updated: 2026-07-28
+applies_when: Consuming SPOKE protocol packages in a product that has product-local body content not yet covered by spoke's typed body schema; using SPOKE pure-helper delegates (Surface A) where the caller manages its own storage
 ---
 
-# SPOKE Adapter Conversion-Seam Pattern
+# SPOKE Adapter Conversion-Seam Pattern (Surface A)
+
+> **Companion:** [`spoke-adapter-port-orchestration-adoption.md`](spoke-adapter-port-orchestration-adoption.md) covers **Surface B** (port traits + injection orchestration, spoke ≥ 0.3.0, adopted V1.141). This doc covers **Surface A** (pure-helper delegates, V1.139 baseline). Both surfaces coexist on the same adapter boundary — read both.
 
 ## Context
 

@@ -126,3 +126,10 @@ Engineering reference for the Nexus OSS harness **knowledge** tree.
 | Document | Description |
 | --- | --- |
 | [architecture-patterns/third-party-codegen-adoption.md](architecture-patterns/third-party-codegen-adoption.md) | Third-party codegen adoption — jstt + typify replace bespoke generators; schemas frozen; hand-maintained `common_types`; typify consumer adaptation (newtypes / DateTime / NonZeroU64 / prefixed enums); drift + clippy gates, not byte-identical output (V1.138 P0+P1 distilled; compound V1.138) |
+
+### V1.141 additions
+
+| Document | Description |
+| --- | --- |
+| [architecture-patterns/spoke-adapter-port-orchestration-adoption.md](architecture-patterns/spoke-adapter-port-orchestration-adoption.md) | **New** — SPOKE adapter port + orchestration adoption (Surface B); spoke ≥ 0.3.0 capability-sliced port traits + injection orchestrators; dual-surface decision guide; CAS verification through orchestrators; mock-test pattern; `call_boundary_invariant.rs` static check; ExtensionMap-type-import nuance; production boundary out-of-scope for the boundary crate (V1.141 P0+P1 distilled; compound V1.141) |
+| [architecture-patterns/spoke-adapter-conversion-seam.md](architecture-patterns/spoke-adapter-conversion-seam.md) | **Updated** — cross-link to companion Surface B doc; tags + applies_when clarified (this is Surface A — pure-helper delegates, V1.139 baseline) |
