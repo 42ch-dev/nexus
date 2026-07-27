@@ -13,10 +13,11 @@
 //! ## The four invariants
 //!
 //! 1. **`ops.rs` is a thin-wrapper shape** — no control-flow keyword
-//!    (`match` / `if` / `for` / `while` / `loop`) starts a trimmed
-//!    non-comment line. Wrappers pass operands straight through to the
-//!    underlying `spoke_operations` function; branching on spoke lifecycle
-//!    state belongs in `spoke-operations`, never here.
+//!    (`match` / `if` / `for` / `while` / `loop`) appears anywhere on a
+//!    non-comment line at an identifier word boundary. Wrappers pass
+//!    operands straight through to the underlying `spoke_operations`
+//!    function; branching on spoke lifecycle state belongs in
+//!    `spoke-operations`, never here.
 //! 2. **`extensions.rs` calls no `spoke_operations` lifecycle function** —
 //!    a `spoke_operations::<ident>(` call pattern is forbidden. Wire-type
 //!    imports (`use spoke_operations::ExtensionMap;`) ARE permitted because
@@ -115,50 +116,154 @@ fn count_spoke_operations_calls(text: &str) -> usize {
     count
 }
 
-/// Return `true` when `line` (already trimmed) begins with a Rust
-/// control-flow keyword (`match`, `if`, `for`, `while`, `loop`) followed by
-/// a word boundary — any byte that is neither ASCII alphanumeric nor `_`.
+/// Return `true` when `line` contains a Rust control-flow keyword
+/// (`match`, `if`, `for`, `while`, `loop`) anywhere on the line, provided
+/// the keyword sits at an identifier word boundary on BOTH sides.
 ///
-/// Equivalent to the regex
-/// `^(match|if|for|while|loop)[^A-Za-z0-9_]` evaluated on the trimmed line.
-/// A line that is exactly the bare keyword (nothing after) also counts, so
-/// the matcher does not miss degenerate `loop` / `match` forms.
-fn starts_with_control_flow_keyword(line: &str) -> bool {
+/// A byte counts as part of an identifier when it is ASCII alphanumeric or
+/// `_`. The keyword therefore must be preceded by either the start of the
+/// line or a non-identifier byte, AND followed by either the end of the
+/// line or a non-identifier byte. Conceptually this is the regex
+/// `\b(match|if|for|while|loop)\b`, implemented as manual byte-scanning to
+/// keep the test dependency-free (matching the file's existing style).
+///
+/// Both-side boundary matters: substrings like `matcher`, `formation`,
+/// `loufer`, or `for_each` do NOT trigger the helper because the keyword is
+/// glued to identifier bytes on one side or the other. The forms
+/// `let result = match x { … }`, `return if cond { … }`, or a bare
+/// `loop { … }` all DO trigger it, regardless of where on the line they
+/// sit — which is the whole point of scanning the whole line rather than
+/// only the trimmed start.
+///
+/// # Caveats (acceptable for the current `src/ops.rs`)
+///
+/// This is a regression guard, not a Rust tokenizer. Two simplifications
+/// are intentional and documented here so they are not a surprise:
+///
+/// * **Inline trailing comments** — a `//` comment tail appended to a code
+///   line (e.g. `let x = …; // see match arm`) would false-positive if the
+///   comment text contained a keyword. The current `src/ops.rs` has no
+///   inline trailing comments at all (the wrappers are pure
+///   pass-throughs), so this is a non-issue today.
+/// * **String literals** — a string literal containing one of the keywords
+///   (e.g. `"loop ended"`) would false-positive. The current `src/ops.rs`
+///   contains no such literals.
+///
+/// If a future change introduces either pattern, replace this helper with
+/// a proper Rust tokenizer (e.g. `syn` or `rustc_lexer`) instead of
+/// extending the manual scanner.
+fn contains_control_flow_keyword_at_boundary(line: &str) -> bool {
     const KEYWORDS: [&str; 5] = ["match", "if", "for", "while", "loop"];
+    let bytes = line.as_bytes();
+
+    // Identifier byte test: ASCII alphanumeric or `_`. Inlined (rather than
+    // extracted to a shared helper) to match the existing style in
+    // [`count_spoke_operations_calls`] and keep the matcher self-contained.
+    let is_ident_byte = |b: u8| b.is_ascii_alphanumeric() || b == b'_';
+
     for keyword in KEYWORDS {
-        let Some(rest) = line.strip_prefix(keyword) else {
-            continue;
-        };
-        let at_boundary = match rest.as_bytes().first() {
-            None => true,
-            Some(&c) => !(c.is_ascii_alphanumeric() || c == b'_'),
-        };
-        if at_boundary {
-            return true;
+        let mut from = 0usize;
+        while let Some(relative) = line[from..].find(keyword) {
+            let start = from + relative;
+            let end = start + keyword.len();
+            // Advance the search cursor past this occurrence so progress is
+            // guaranteed (each keyword is non-empty) and overlapping
+            // matches are not double-counted.
+            from = end;
+
+            let left_boundary_ok = start == 0 || !is_ident_byte(bytes[start - 1]);
+            let right_boundary_ok = end == bytes.len() || !is_ident_byte(bytes[end]);
+
+            if left_boundary_ok && right_boundary_ok {
+                return true;
+            }
         }
     }
     false
+}
+
+/// Direct exercise of [`contains_control_flow_keyword_at_boundary`] to pin
+/// its both-side word-boundary semantics. The static-check regression guard
+/// is only useful if the matcher itself is correct, so this proves the
+/// positive cases (keyword anywhere on the line, including mid-statement)
+/// AND the negative cases (keyword glued to identifier bytes) in one
+/// place. A future change that reverts the matcher to start-only checking,
+/// or that drops the left/right boundary test, fails here loudly.
+#[test]
+fn helper_contains_control_flow_keyword_at_boundary_semantics() {
+    // Positive: keyword at the start of the line.
+    assert!(contains_control_flow_keyword_at_boundary(
+        "match x { _ => () }"
+    ));
+    assert!(contains_control_flow_keyword_at_boundary(
+        "if cond { 1 } else { 2 }"
+    ));
+    assert!(contains_control_flow_keyword_at_boundary(
+        "for item in items {}"
+    ));
+    assert!(contains_control_flow_keyword_at_boundary(
+        "while running.len() > 0 {}"
+    ));
+    assert!(contains_control_flow_keyword_at_boundary("loop { break; }"));
+
+    // Positive: keyword ANYWHERE on the line — the case the previous
+    // start-only matcher missed (Greptile P2 on PR #185).
+    assert!(contains_control_flow_keyword_at_boundary(
+        "let result = match x { _ => () };"
+    ));
+    assert!(contains_control_flow_keyword_at_boundary(
+        "return if cond { 1 } else { 2 };"
+    ));
+    assert!(contains_control_flow_keyword_at_boundary(
+        "let x = f(); match x { _ => () }"
+    ));
+
+    // Negative: keyword glued to identifier bytes on one side.
+    assert!(!contains_control_flow_keyword_at_boundary(
+        "let matcher = build();"
+    ));
+    assert!(!contains_control_flow_keyword_at_boundary(
+        "let formation = vec![];"
+    ));
+    assert!(!contains_control_flow_keyword_at_boundary(
+        "let loufer = 42;"
+    ));
+    assert!(!contains_control_flow_keyword_at_boundary(
+        "items.for_each(|i| take(i));"
+    ));
+    // `for_each`: the `.` before `for` passes the left boundary, but the
+    // `_` after `for` is an identifier byte, so the right boundary fails
+    // and the helper correctly does NOT trigger.
+
+    // Negative: keyword absent entirely.
+    assert!(!contains_control_flow_keyword_at_boundary("let x = 1 + 2;"));
+    assert!(!contains_control_flow_keyword_at_boundary(
+        "fn wrapper() { validate(x) }"
+    ));
 }
 
 /// Assert invariant 1: `src/ops.rs` performs no control-flow branching.
 ///
 /// Each public wrapper must be a single-expression pass-through; branching on
 /// spoke lifecycle states (e.g. `match reject.code { SpokeRejectCode::… => … }`)
-/// belongs in `spoke-operations`, not in this adapter.
+/// belongs in `spoke-operations`, not in this adapter. The matcher scans the
+/// whole line (not just the trimmed start) so mid-statement forms like
+/// `let result = match …` or `return if …` are also caught.
 #[test]
 fn assertion_1_ops_rs_has_no_control_flow_branching() {
     let offenders: Vec<&str> = OPS_SRC
         .lines()
         .map(str::trim_start)
         .filter(|line| !line.starts_with("//"))
-        .filter(|line| starts_with_control_flow_keyword(line))
+        .filter(|line| contains_control_flow_keyword_at_boundary(line))
         .collect();
 
     assert!(
         offenders.is_empty(),
         "src/ops.rs must not branch on spoke lifecycle states inside the adapter \
-         (spec §7 call-boundary invariant). Found control-flow keyword(s) starting \
-         these lines: {offenders:?}"
+         (spec §7 call-boundary invariant). Found control-flow keyword(s) on \
+         these lines (matched anywhere on the line at a word boundary): \
+         {offenders:?}"
     );
 }
 
