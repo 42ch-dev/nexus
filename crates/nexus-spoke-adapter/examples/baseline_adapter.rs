@@ -15,6 +15,15 @@
 //! cargo run -p nexus-spoke-adapter --example baseline_adapter
 //! ```
 
+// Fixture helpers and the mock struct below are `pub` so the programmatic
+// test twin (`tests/orchestration_adoption.rs`) can `#[path]`-import this
+// file as a hidden module. In the example binary itself `pub` is a no-op,
+// but it widens clippy's view of these items. These two lints are not
+// meaningful for fixture builders that are always consumed at the call
+// site and whose `.expect(...)` panics are the fixture contract.
+#![allow(clippy::missing_panics_doc)]
+#![allow(clippy::must_use_candidate)]
+
 use std::cell::RefCell;
 use std::collections::HashMap;
 
@@ -44,7 +53,12 @@ use spoke_operations::{spoke_ok, spoke_reject};
 // threaded. A production adapter backs these ports with real storage.
 
 /// In-memory store implementing spoke's six baseline port families.
-struct NexusBaselineMock {
+///
+/// Visibility note: items here are `pub` so the programmatic test twin at
+/// `tests/orchestration_adoption.rs` can `#[path]`-import this file as a
+/// hidden module and reuse the mock without duplication. In the example
+/// binary itself `pub` is a no-op (the binary crate root sees everything).
+pub struct NexusBaselineMock {
     entries: RefCell<HashMap<String, KnowledgeEntry>>,
     relations: RefCell<Vec<Relation>>,
     events: RefCell<Vec<TimelineEvent>>,
@@ -52,6 +66,15 @@ struct NexusBaselineMock {
     findings: RefCell<Vec<Finding>>,
     self_manifest: HostCapabilityManifest,
     peer_manifests: Vec<HostCapabilityManifest>,
+    /// One-shot `get_knowledge_entry` overrides used by the test twin to
+    /// simulate a get/put race (the orchestrator's `orchestrate_upsert`
+    /// derives `expected_base_revision` from the entry returned by get, so
+    /// CAS rejects on upsert require the get snapshot to diverge from the
+    /// actual stored revision). The override is consumed on the next get for
+    /// the given `entry_id`:
+    ///   - `Some(rev)` → return the stored entry with `revision` overwritten by `rev`
+    ///   - `None`      → return `KnowledgeEntryNotFound` even if the entry exists
+    next_get_override: RefCell<HashMap<String, Option<u64>>>,
 }
 
 impl NexusBaselineMock {
@@ -62,7 +85,7 @@ impl NexusBaselineMock {
     /// no parallel revisions map is kept, matching spoke's own
     /// `put_knowledge_entry_with_occ` pattern. Keeping a second map would
     /// duplicate state and risk drift between the two.
-    fn with_seeded_entry(entry: KnowledgeEntry) -> Self {
+    pub fn with_seeded_entry(entry: KnowledgeEntry) -> Self {
         let mut entries = HashMap::new();
         entries.insert(entry.entry_id.clone(), entry);
         Self {
@@ -73,12 +96,56 @@ impl NexusBaselineMock {
             findings: RefCell::new(Vec::new()),
             self_manifest: host_manifest("nexus-baseline-mock", &["nexus"], &["data-store"]),
             peer_manifests: Vec::new(),
+            next_get_override: RefCell::new(HashMap::new()),
         }
+    }
+
+    /// One-shot: the next `get_knowledge_entry(entry_id)` returns
+    /// `KnowledgeEntryNotFound`, simulating a concurrent inserter that has
+    /// stored the entry between the caller's read and write window.
+    pub fn mask_next_get(&self, entry_id: &str) {
+        self.next_get_override
+            .borrow_mut()
+            .insert(entry_id.into(), None);
+    }
+
+    /// One-shot: the next `get_knowledge_entry(entry_id)` returns the stored
+    /// entry with its `revision` overwritten by `revision`, simulating a
+    /// concurrent writer that advanced (or rewound) the store's revision
+    /// between the caller's read and write window. Used to drive the mock's
+    /// CAS reject paths in both directions (`stored > expected` → STALE,
+    /// `stored < expected` → CONFLICT) through `orchestrate_upsert`.
+    pub fn override_next_get_revision(&self, entry_id: &str, revision: u64) {
+        self.next_get_override
+            .borrow_mut()
+            .insert(entry_id.into(), Some(revision));
     }
 }
 
 impl KnowledgeEntryPort for NexusBaselineMock {
     fn get_knowledge_entry(&self, entry_id: &str) -> SpokeResult<KnowledgeEntry> {
+        // Consume a one-shot override first (test-fixture race simulation).
+        if let Some(override_rev) = self.next_get_override.borrow_mut().remove(entry_id) {
+            match override_rev {
+                None => {
+                    let mut details = Map::new();
+                    details.insert("entry_id".into(), json!(entry_id));
+                    return spoke_reject(
+                        SpokeRejectCode::KnowledgeEntryNotFound,
+                        format!("KnowledgeEntry not found (masked): {entry_id}"),
+                        Some(details),
+                    );
+                }
+                Some(rev) => {
+                    if let Some(entry) = self.entries.borrow().get(entry_id).cloned() {
+                        let mut snapshot = entry;
+                        snapshot.revision = Some(rev);
+                        return spoke_ok(snapshot);
+                    }
+                    // entry absent: fall through to the normal NotFound path below
+                }
+            }
+        }
         let entries = self.entries.borrow();
         if let Some(entry) = entries.get(entry_id) {
             return spoke_ok(entry.clone());
@@ -124,18 +191,35 @@ impl KnowledgeEntryPort for NexusBaselineMock {
                 }
                 Some(stored) => {
                     let current = stored.revision.unwrap_or(0);
-                    if current != expected {
+                    if current > expected {
+                        // Store is ahead of the caller's expectation — caller
+                        // read a stale base. Spec §7.3 CAS contract.
                         let mut details = Map::new();
                         details.insert("expectedBaseRevision".into(), json!(expected));
                         details.insert("storeRevision".into(), json!(current));
                         return spoke_reject(
                             SpokeRejectCode::StoredRevisionStale,
                             format!(
-                                "Store revision {current} does not match expected base {expected}"
+                                "Store revision {current} is ahead of expected base {expected}"
                             ),
                             Some(details),
                         );
                     }
+                    if current < expected {
+                        // Caller expects a revision the store has never reached
+                        // — impossible future base. Spec §7.3 CAS contract.
+                        let mut details = Map::new();
+                        details.insert("expectedBaseRevision".into(), json!(expected));
+                        details.insert("storeRevision".into(), json!(current));
+                        return spoke_reject(
+                            SpokeRejectCode::RevisionConflict,
+                            format!(
+                                "Expected base revision {expected} is ahead of store revision {current}"
+                            ),
+                            Some(details),
+                        );
+                    }
+                    // current == expected: accept the write (fall through).
                 }
             },
         }
@@ -205,7 +289,7 @@ impl HostManifestPort for NexusBaselineMock {
 
 // ── Fixture builders ───────────────────────────────────────────────────
 
-fn host_manifest(host_id: &str, namespaces: &[&str], roles: &[&str]) -> HostCapabilityManifest {
+pub fn host_manifest(host_id: &str, namespaces: &[&str], roles: &[&str]) -> HostCapabilityManifest {
     serde_json::from_value(json!({
         "schema_version": 1,
         "host_id": host_id,
@@ -218,7 +302,7 @@ fn host_manifest(host_id: &str, namespaces: &[&str], roles: &[&str]) -> HostCapa
 }
 
 /// Build the wire shape for a provisional character `KnowledgeEntry`.
-fn knowledge_entry_wire(entry_id: &str, revision: u64) -> serde_json::Value {
+pub fn knowledge_entry_wire(entry_id: &str, revision: u64) -> serde_json::Value {
     json!({
         "schema_version": 1,
         "entry_id": entry_id,
@@ -231,17 +315,17 @@ fn knowledge_entry_wire(entry_id: &str, revision: u64) -> serde_json::Value {
     })
 }
 
-fn knowledge_entry(entry_id: &str, revision: u64) -> KnowledgeEntry {
+pub fn knowledge_entry(entry_id: &str, revision: u64) -> KnowledgeEntry {
     serde_json::from_value(knowledge_entry_wire(entry_id, revision))
         .expect("valid KnowledgeEntry fixture")
 }
 
-fn promote_request(entry_id: &str, revision: u64) -> PromoteRequest {
+pub fn promote_request(entry_id: &str, revision: u64) -> PromoteRequest {
     serde_json::from_value(json!({ "candidate": knowledge_entry_wire(entry_id, revision) }))
         .expect("valid PromoteRequest fixture")
 }
 
-fn assemble_request(scope_id: &str, entry_id: &str) -> AssembleRequest {
+pub fn assemble_request(scope_id: &str, entry_id: &str) -> AssembleRequest {
     serde_json::from_value(json!({
         "scope": { "scope_id": scope_id, "entry_ids": [entry_id] },
         "max_entries": 10
