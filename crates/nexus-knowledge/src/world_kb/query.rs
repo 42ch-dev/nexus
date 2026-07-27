@@ -100,10 +100,10 @@ pub struct KbInsertResult {
     pub created_at: String,
 }
 
-/// Result of querying `KeyBlocks`.
+/// Result of querying `WorldKbEntry`s.
 #[derive(Debug, Clone)]
 pub struct KbQueryResult {
-    /// Matching `KeyBlocks` (after pagination).
+    /// Matching `WorldKbEntry`s (after pagination).
     pub items: Vec<crate::world_kb::knowledge_entry::WorldKbEntry>,
     /// Total number of matching items (ignoring limit/offset).
     pub total_count: usize,
