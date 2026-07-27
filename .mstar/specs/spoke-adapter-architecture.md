@@ -1,6 +1,6 @@
 # Spoke Adapter Architecture
 
-> **Status:** Normative (v0.1 — V1.139 SPOKE adoption baseline)
+> **Status:** Normative (v0.2 — V1.141 SPOKE 0.4.0 adapter-port architecture; v0.1 was V1.139 SPOKE adoption baseline)
 > **Document class:** Master
 > **Scope:** The `nexus-spoke-adapter` crate boundary, `extensions.nexus` namespace contract, spoke-operations delegation rules, daemon-api envelope strategy, drift detection adaptation, and the `/kb/` HTTP route stability decision.
 > **Related:** [entity-scope-model.md](entity-scope-model.md), [local-db-schema.md](local-db-schema.md), [schemas-directory-layout.md](schemas-directory-layout.md), spoke `CONCEPTS.md`, spoke `.mstar/specs/spoke-data-model.md`, spoke `.mstar/specs/spoke-operations.md`
@@ -16,8 +16,10 @@ These are the architecture bedrock — do not re-litigate.
 ### 1.1 Consume spoke packages directly
 
 nexus depends on spoke's published packages directly:
-- **Rust:** `spoke-schemas` + `spoke-operations` (crates.io, lockstep **`0.1.1`** exact pin)
-- **TypeScript:** `@42ch/spoke-schemas` + `@42ch/spoke-operations` (npm, lockstep **`0.1.1`** exact pin)
+- **Rust:** `spoke-schemas` + `spoke-operations` (crates.io, lockstep **`0.4.0`** exact pin)
+- **TypeScript:** `@42ch/spoke-schemas` + `@42ch/spoke-operations` (npm, lockstep **`0.4.0`** exact pin)
+
+> **Historical:** V1.139 shipped at `0.1.1`; V1.140 bumped to `0.2.0`. V1.141 jumps to `0.4.0` (covering both the `0.3.0` capability-sliced port architecture and `0.4.0` additive `HostCapabilityManifest` + body helpers + UTF-8 peer sort).
 
 The bespoke `schemas/domain/key-block.schema.json` is deleted. No nexus-local copy of spoke schemas exists. The atomic KB wire type is `KnowledgeEntry` from spoke.
 
@@ -194,8 +196,8 @@ The `schema_drift_detection.rs` `build_schema_map()` removes the `key-block.sche
 
 `check-wire-drift.sh` gains a new spoke-conformance step (P0 T4):
 
-1. Verify `spoke-schemas` crate version matches pinned **`0.1.1`** in `Cargo.toml`.
-2. Verify `@42ch/spoke-schemas` npm version matches pinned **`0.1.1`** in `package.json`.
+1. Verify `spoke-schemas` crate version matches pinned **`0.4.0`** in `Cargo.toml`.
+2. Verify `@42ch/spoke-schemas` npm version matches pinned **`0.4.0`** in `package.json`.
 3. Construct a `KnowledgeEntry` from spoke fixture JSON, deserialize via nexus's serde path, serialize back — verify structural round-trip. This catches type-mapping regressions without requiring a local schema.
 
 ### 5.3 Daemon-api envelopes that `$ref` spoke types
@@ -332,6 +334,83 @@ pub fn assert_revision(expected: u64, actual: u64) -> SpokeResult<()>;
 ```
 
 All delegation wrappers are thin — they enforce the boundary that operands must already be spoke types at the call site. They do not transform types internally.
+
+### 7.3 Adapter port + injection-orchestration surface — Surface B (spoke ≥ 0.3.0)
+
+As of spoke 0.3.0, `spoke-operations` ships a **capability-sliced adapter port** architecture with **injection orchestration**. The `nexus-spoke-adapter` crate re-exports the port traits and orchestration entrypoints so that consumers can participate in spoke's injection-orchestration model through the same boundary crate — without a direct `spoke-operations` dependency.
+
+**What changes:** the adapter crate's public API gains a second surface (Surface B) alongside the existing pure-delegate helpers (Surface A). Consumers that currently call `ops::validate_promote` / `ops::apply_promote` directly (Surface A) can **optionally** adopt the port+orchestrator pattern (Surface B) by implementing spoke port traits and calling `orchestrate_*` entrypoints. Surface A is **frozen and unchanged** — no existing call site must migrate.
+
+#### Surface A — Pure delegates (unchanged)
+
+| Category | Examples | Status |
+|---|---|---|
+| Extensions accessors | `get_world_id`, `set_world_id`, `build_extensions_nexus`, `get_nexus_extras`, `set_nexus_extras` | **Frozen.** No behavior change at any spoke version. |
+| Ops delegation wrappers | `validate_promote`, `apply_promote`, `transition_status`, `build_assemble_packet`, `merge_extensions`, `assert_revision` | **Frozen.** Thin pass-throughs to `spoke-operations` pure helpers. |
+
+Consumers that manage their own storage and only need spoke lifecycle validation should remain on Surface A. Surface A is the **permanent integration surface** for all cases where the consumer wants to control its own persistence transaction boundaries.
+
+#### Surface B — Injection orchestration (new)
+
+Consumers **implement** spoke port traits (at minimum the six `BaselinePorts` families) and **call** `orchestrate_*` entrypoints. The orchestration composes pure helpers with port I/O — consumers supply the ports; spoke supplies the lifecycle sequencing.
+
+**Port traits (capability-sliced):**
+
+| Family | Trait | Required for | Key method |
+|---|---|---|---|
+| Knowledge entry persistence | `KnowledgeEntryPort` | Baseline (all) | `put_knowledge_entry(entry, expected_base_revision: Option<u64>)` → `SpokeResult<KnowledgeEntry>` |
+| Relation persistence | `RelationPort` | Baseline (all) | `put_relation(relation)` → `SpokeResult<Relation>` |
+| Scope query | `ScopeQueryPort` | Baseline (all) | `list_knowledge_entries(scope)`, `list_timeline_events(scope)` |
+| Finding persistence | `FindingPort` | Baseline (all) | `put_findings(findings)` → `SpokeResult<Vec<Finding>>` |
+| Rule query | `RuleQueryPort` | Baseline (all) | `list_rules(rule_refs)` → `SpokeResult<Vec<Rule>>` |
+| Host manifest | `HostManifestPort` | Baseline (all) | `get_host_capability_manifest()`, `list_peer_host_capability_manifests()` |
+| Computable session | `ComputablePort` | Optional (`l2-computable`) | `project(request)`, `compute(request)` |
+| Fork timeline query | `ForkTimelineQueryPort` | Optional (`l5-fork`) | `list_fork_timeline_events(scope)` |
+
+**Composition traits:** `BaselinePorts` (blanket over all six baseline families), `ComputablePorts` (baseline + computable), `ForkPorts` (baseline + fork), `FullPorts` (all three).
+
+**Orchestration entrypoints:**
+
+| Entrypoint | Required ports | Sequence |
+|---|---|---|
+| `orchestrate_upsert` | `KnowledgeEntryPort` | Load update context → `validateUpsertKnowledgeEntry` → status/uniqueness helpers → `putKnowledgeEntry(entry, expectedBaseRevision)` |
+| `orchestrate_promote` | `KnowledgeEntryPort` | Load stored entry → terminal/revision gates → `validatePromoteRequest` → `applyPromoteAcceptance` → `putKnowledgeEntry(promoted, expectedBaseRevision)` |
+| `orchestrate_relate` | `RelationPort` | `validateRelateRequest` → `putRelation` |
+| `orchestrate_check` | `ScopeQueryPort`, `RuleQueryPort`, `FindingPort` | Resolve refs → query scoped entries/events → caller-supplied `runChecker` callback → `putFindings` |
+| `orchestrate_assemble` | `ScopeQueryPort` | Query scoped entries/events → `buildAssemblePacket` |
+| `orchestrate_project` | `ComputablePort` | `validateProjectRequest` → `project` |
+| `orchestrate_compute` | `ComputablePort` | `validateComputeRequest` → `compute` |
+| `orchestrate_fork_check` | `ForkTimelineQueryPort` + baseline check | Validate `scope.fork_id` → fork-aware queries → `runChecker` → `putFindings` |
+| `orchestrate_fork_assemble` | `ForkTimelineQueryPort` + baseline assemble | Validate `scope.fork_id` → fork-aware queries → `buildAssemblePacket` |
+
+The upstream SSOT for trait method contracts, orchestration sequences, and capability matrices is spoke's `.mstar/specs/spoke-operations.md` "Adapter Interfaces" (§Port policy through §TS/Rust parity table) and "Injection Orchestration" (§Injection Orchestration through §Public export and module paths). **This spec cross-links; it does not restate normative port/orchestration behavior.**
+
+#### `put_knowledge_entry` CAS contract
+
+The `KnowledgeEntryPort::put_knowledge_entry(entry, expected_base_revision: Option<u64>)` method carries optimistic concurrency control structurally:
+
+- `expected_base_revision = None` → **create.** The adapter MUST reject if an entry with `entry.entry_id` already exists in the store.
+- `expected_base_revision = Some(rev)` → **conditional update.** The adapter MUST compare `rev` against the store's current revision for `entry.entry_id`. On mismatch:
+  - `actual > expected` → reject with `STORED_REVISION_STALE` (caller read a stale base).
+  - `actual < expected` → reject with `REVISION_CONFLICT` (caller expects an impossible future revision).
+  - `actual == expected` → accept the write and persist the entry.
+
+True concurrent safety requires atomic compare-and-put in the adapter implementation. The `spoke-operations` library stays I/O-free — it only calls the port; the adapter owns locking, transactions, and storage.
+
+#### `CAPABILITY_PORT_MISSING` reject path
+
+When a consumer calls an optional orchestrator (`orchestrate_project`, `orchestrate_compute`, `orchestrate_fork_check`, `orchestrate_fork_assemble`) through a `BaselinePorts`-only adapter that does **not** implement the optional family, the orchestrator returns `SpokeReject { code: "CAPABILITY_PORT_MISSING", ... }` rather than a compile error or panic. This is the dynamic dispatch path for `ComputablePort` / `ForkTimelineQueryPort`.
+
+#### Adoption guide: when to use Surface A vs Surface B
+
+| Surface | When to use | What consumer does |
+|---|---|---|
+| **A — Pure delegates** | Consumer manages its own storage transactions and only needs spoke lifecycle validation or extension accessors. Examples: `nexus-knowledge` V1.139 confirm() path (status transition only); pact CLI `kb entry list` (extension reads only). | Call `ops::transition_status(entry, to)`, `extensions::get_world_id(entry)`, etc. directly. Consumer owns the transaction, the DB row locking, and the before/after invariants. |
+| **B — Injection orchestration** | Consumer wants spoke to compose the full OCC lifecycle — load, validate, apply, persist — in one call. The consumer implements port traits that map to its persistence layer, and spoke executes the sequencing. Examples: future `nexus-knowledge` write path adopters (compass Roadmap item 1–2); multi-host collaboration scenarios where a single OCC authority per `entry_id` is required. | Implement `BaselinePorts` (six families) on a struct that wraps nexus storage. Call `orchestrate_promote(ports, request)` and the orchestrator handles loading, validation, revision bump, and persistence through your ports. |
+
+**General rule:** if the consumer already has a transaction open and the mutation is a single helper call, Surface A is simpler. If the mutation composes multiple helpers across port families and OCC is required, Surface B encapsulates the sequencing.
+
+**Surface B production storage boundary (out of scope for V1.141):** wiring nexus SQLite tables behind the six `BaselinePorts` families is **next-iteration roadmap** (compass Roadmap items 1–2). V1.141 ships the port traits, orchestration re-exports, a reference in-memory mock, and adoption tests — sufficient to prove the boundary works. Production `KnowledgeEntryPort` implementations against `nexus-local-db` ship in a downstream iteration triggered by the first write-path cutover. See iteration compass "Roadmap Position" for the staged cutover plan.
 
 ## 8. Crate Dependency Graph
 

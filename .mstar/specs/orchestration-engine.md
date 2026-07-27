@@ -947,7 +947,7 @@ at daemon boot.
 | --- | --- | --- |
 | `state_delta_applied` | array of `StateDelta` | Deltas applied to computable KnowledgeEntry bodies. |
 | `timeline_events_appended` | array of `TimelineEvent` | Events appended to the timeline. |
-| `new_key_blocks_upserted` | array of `KeyBlock` | New KnowledgeEntries created. |
+| `new_key_blocks_upserted` | array of `KnowledgeEntry` | New KnowledgeEntries created. |
 | `battle_report` | object | Module-declared freeform report. |
 
 **Execution flow:**

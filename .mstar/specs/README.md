@@ -67,7 +67,7 @@ Spec files live **flat** in this directory except **`novel-writing/`** — the n
 | [local-runtime-boundary.md](local-runtime-boundary.md) | Master | Normative |
 | [schemas-directory-layout.md](schemas-directory-layout.md) | Master | Normative — V1.64 Shipped (local-api common + findings list-response) |
 | [local-api-surface-conventions.md](local-api-surface-conventions.md) | Master | Normative — **V1.67 amended** (§3.2 casing ratification, §4 `items` enforcement, §5 sort-param contract; 0.5.0→0.6.0) |
-| [spoke-adapter-architecture.md](spoke-adapter-architecture.md) | Master | **Normative (V1.139)** — spoke-adapter boundary, `extensions.nexus` namespace contract, daemon-api envelope strategy, nexus-contracts package boundary, drift adaptation, HTTP route stability, spoke-operations call-boundary invariant |
+| [spoke-adapter-architecture.md](spoke-adapter-architecture.md) | Master | **Normative (v0.2 — V1.141 SPOKE 0.4.0 adapter-port architecture)** — spoke-adapter boundary, `extensions.nexus` namespace contract, daemon-api envelope strategy, nexus-contracts package boundary, drift adaptation, HTTP route stability, spoke-operations call-boundary invariant, dual-surface adapter API (pure delegates + injection orchestration) |
 
 Also: [schemas-external-consumer-boundary.md](../knowledge/schemas-external-consumer-boundary.md) (knowledge root).
 
