@@ -95,10 +95,10 @@ pub trait KbStore {
     /// Get a `WorldKbEntry` by its ID.
     async fn get_knowledge_entry(&self, entry_id: &str) -> Result<WorldKbEntry, KbStoreError>;
 
-    /// List all active `KeyBlocks` in a world.
+    /// List all active `WorldKbEntry`s in a world.
     async fn list_by_world(&self, world_id: &str) -> Result<Vec<WorldKbEntry>, KbStoreError>;
 
-    /// Query `KeyBlocks` with filters.
+    /// Query `WorldKbEntry`s with filters.
     async fn query(&self, query: &KbQuery) -> Result<KbQueryResult, KbStoreError>;
 
     /// Attach a [`SourceAnchor`] to a `WorldKbEntry`.
