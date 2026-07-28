@@ -1348,6 +1348,10 @@ async fn spoke_reject_to_api_error(
 }
 
 /// Reject: CAS flip pending → rejected (with version guard).
+///
+/// Surface A retention — operates on `kb_extract_jobs.promotion_status`, not `KnowledgeEntry`.
+/// spoke has no reject lifecycle on `PromoteRequest`. Pre-1.0 narrow handler; nothing to delegate.
+/// See plan P2 C3 / R-V1143P2-ACCEPT-01.
 async fn promote_reject(
     pool: &sqlx::SqlitePool,
     candidate: &KbExtractPromotion,
@@ -1394,6 +1398,11 @@ async fn promote_reject(
 /// Merge: fold the candidate summary into an existing confirmed target, then
 /// dismiss the candidate. `merge_target_id` must reference a confirmed/manual
 /// `WorldKbEntry` in the same world.
+///
+/// Surface A retention — compound multi-table TX (CAS-update target `kb_key_blocks` body +
+/// CAS-reject candidate `kb_extract_jobs` in one SQLite transaction). spoke orchestrators map one
+/// port family per call and do not compose cross-family multi-table transactions; splitting would
+/// break atomicity. Pre-1.0 product workflow. See plan P2 C3 / R-V1143P2-ACCEPT-02.
 // simplify: V1.73 β merge folds the candidate summary into the target body and
 // rejects the candidate job. Full attribute-level merge with conflict surfacing
 // is deferred to V1.74 alongside the relationships surface.

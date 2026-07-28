@@ -455,9 +455,11 @@ Each orchestrator adoption on a daemon write path is registered here. The regist
 |---|---|---|---|---|---|
 | `orchestrate_promote` | `promote_adopt()` | `world_kb.rs:608` | `NexusBaselineAdapter` | V1.142 | Shipped |
 | `orchestrate_upsert` | `patch_entity()` | `world_kb.rs:286` | `NexusBaselineAdapter` | V1.143 | Planned |
-| `orchestrate_relate` | `patch_relationship_add()` / `_update()` | `world_kb.rs:1669`/`1727` | `NexusBaselineAdapter` | V1.143 | Planned |
+| `orchestrate_relate` | `patch_relationship_add()` / `_update()` | `world_kb.rs:1669`/`1727` | `NexusBaselineAdapter` | V1.144 | Deferred |
 
 > **Note:** `patch_relationship_remove()` (line 1653) is **not** a cutover candidate — `orchestrate_relate` has no delete path (`RelationPort` exposes only `put_relation`). The `remove` action stays on Surface A via `delete_relationship_in_tx()`.
+
+> **Relate cutover deferred (V1.143 → V1.144):** `orchestrate_relate` adoption is deferred to V1.144 (`R-V1143P2-DEFER-RELATE`). spoke 0.4.1's `Relation` type lacks a `revision` field — there is no OCC mirror for relations, so `RelationPort::put_relation` is insert-only with no CAS guard. Cutover is blocked pending a `RelationPort` adapter-extension plan (add `expected_base_revision` semantics or a relation-level CAS path). Until then `patch_relationship_add()` / `_update()` remain on Surface A direct-DB writes.
 
 **Surface A retention (promote sub-outcomes):** spoke `orchestrate_promote` covers the accept/adopt lifecycle only. The following nexus-specific promote outcomes are retained on Surface A with explicit rationale:
 
