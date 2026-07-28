@@ -10,11 +10,12 @@
 //! The [`seed`] submodule provides async functions to insert test data
 //! (worlds, timeline events) into the database for integration tests.
 
-use nexus_narrative::timeline_event::TimelineEvent;
+use nexus_narrative::timeline_event::{SpokeTimelineEvent, TimelineEvent};
 use nexus_narrative::{
     EventSnapshot, NarrativeContext, NarrativeError, NarrativeGateway, NarrativeQuery,
     TimelinePosition, WorldState,
 };
+use nexus_spoke_adapter::{order_timeline_events_by_ids, SpokeResult};
 use sqlx::SqlitePool;
 use std::sync::Arc;
 
@@ -95,6 +96,70 @@ impl SqliteNarrativeGateway {
     pub fn new(pool: SqlitePool) -> Self {
         Self {
             pool: Arc::new(pool),
+        }
+    }
+
+    /// Get timeline events ordered by an explicit ID list, delegating the
+    /// ordering to the spoke `order_timeline_events_by_ids` beat-assist helper
+    /// (V1.143 P0 T3 — sqlite parity with `InMemoryNarrativeGateway::get_timeline_ordered`).
+    ///
+    /// Events listed in `ordered_ids` come first (in that order); any remaining
+    /// events matching the world/branch filter are appended in `sequence_no`
+    /// order (the stable tail). This is a **different purpose** from
+    /// [`get_timeline`](NarrativeGateway::get_timeline), which sorts purely by
+    /// `sequence_no` — both paths coexist (dual path, not replacement).
+    ///
+    /// This is an inherent method (not on the `NarrativeGateway` trait),
+    /// mirroring the in-memory gateway's T2 design choice to avoid trait
+    /// ripple. Unlike the sync in-memory version, this method is `async`
+    /// (DB I/O); the spoke conversion + ordering inside is synchronous.
+    ///
+    /// Spoke reject cases (duplicate `ordered_ids`, unknown ids, duplicate
+    /// event ids in storage) surface as [`NarrativeError::ValidationError`] —
+    /// the spoke `SpokeReject` payload is included via `Debug` formatting for
+    /// diagnosability. The gateway never panics on a reject.
+    ///
+    /// # Call-boundary invariant §7
+    ///
+    /// The spoke helper receives only the converted spoke wire type
+    /// ([`SpokeTimelineEvent`]); nexus→spoke conversion happens before the
+    /// call, spoke→nexus conversion after. The nexus domain type never
+    /// crosses the boundary.
+    ///
+    /// # Errors
+    ///
+    /// - `Storage` — underlying `get_timeline` DB read failed.
+    /// - `ValidationError` — spoke ordering rejected (unknown/duplicate ids).
+    pub async fn get_timeline_ordered(
+        &self,
+        world_id: &str,
+        branch_id: Option<&str>,
+        ordered_ids: &[String],
+    ) -> Result<Vec<TimelineEvent>, NarrativeError> {
+        // Phase 1: fetch via the existing DB-read path (dual path: the
+        // sequence_no sort in `get_timeline` stays untouched). No limit —
+        // the ordered view needs the full matching set so the spoke helper
+        // can build a correct stable tail.
+        let mut filtered = self.get_timeline(world_id, branch_id, None).await?;
+        // Re-sort purely by sequence_no so the spoke helper's "stable tail"
+        // (un-listed events) is in deterministic sequence order — matching
+        // the in-memory gateway's T2 stable-tail semantics for cross-gateway
+        // parity (sqlite `get_timeline` with no branch groups by branch_id
+        // first; the ordered view's tail is sequence-only).
+        filtered.sort_by_key(|e| e.sequence_no);
+        // Convert nexus → spoke (call-boundary §7).
+        let spoke_events: Vec<SpokeTimelineEvent> = filtered.into_iter().map(Into::into).collect();
+
+        // Phase 2: delegate ordering to the spoke beat-assist helper (pure,
+        // synchronous — no DB I/O inside the helper).
+        match order_timeline_events_by_ids(&spoke_events, ordered_ids) {
+            SpokeResult::Ok(ordered_spoke) => {
+                // Convert spoke → nexus (call-boundary §7).
+                Ok(ordered_spoke.into_iter().map(Into::into).collect())
+            }
+            SpokeResult::Reject(reject) => Err(NarrativeError::ValidationError(format!(
+                "timeline ordering rejected: {reject:?}"
+            ))),
         }
     }
 }
@@ -592,5 +657,109 @@ mod tests {
         assert!(ctx.timeline_position.is_some());
         assert!(ctx.event_snapshot.is_some());
         assert_eq!(ctx.event_snapshot.unwrap().event_id, "evt_1");
+    }
+
+    // ── V1.143 P0 T3: SqliteNarrativeGateway.get_timeline_ordered parity ──
+    //
+    // Mirrors the in-memory T2 suite (test_get_timeline_ordered_*) through the
+    // real SQLite path: DB-read → nexus→spoke conversion → spoke
+    // order_timeline_events_by_ids → spoke→nexus conversion. Proves the
+    // ordered capability is storage-backed, not just in-memory.
+
+    // T3a: explicit ids come first (in requested order), remaining events
+    // appended in sequence_no order (stable tail). Storage is seeded with
+    // shuffled sequence_no assignments to prove ordering is independent of
+    // insertion/storage order.
+    #[tokio::test]
+    async fn test_get_timeline_ordered_explicit_ids_then_sequence_tail() {
+        let (pool, _dir) = fresh_pool().await;
+        seed::world(
+            &pool, "wld_1", "ctr_test", "Test", "test", "private", "manual",
+        )
+        .await;
+        // Shuffled sequence_no assignment (id ↛ sequence):
+        //   evt_1 → seq 3, evt_2 → seq 1, evt_3 → seq 5,
+        //   evt_4 → seq 2, evt_5 → seq 4
+        seed::event(&pool, "evt_1", "wld_1", "fbk_root", "story_advance", 3).await;
+        seed::event(&pool, "evt_2", "wld_1", "fbk_root", "story_advance", 1).await;
+        seed::event(&pool, "evt_3", "wld_1", "fbk_root", "story_advance", 5).await;
+        seed::event(&pool, "evt_4", "wld_1", "fbk_root", "story_advance", 2).await;
+        seed::event(&pool, "evt_5", "wld_1", "fbk_root", "story_advance", 4).await;
+
+        let gw = SqliteNarrativeGateway::new(pool);
+        // Request [evt_3, evt_1, evt_5] explicitly; remaining (evt_2 seq1,
+        // evt_4 seq2) form the stable tail in sequence_no order.
+        let ordered = gw
+            .get_timeline_ordered(
+                "wld_1",
+                Some("fbk_root"),
+                &[
+                    "evt_3".to_string(),
+                    "evt_1".to_string(),
+                    "evt_5".to_string(),
+                ],
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(ordered.len(), 5);
+        assert_eq!(ordered[0].timeline_event_id, "evt_3");
+        assert_eq!(ordered[1].timeline_event_id, "evt_1");
+        assert_eq!(ordered[2].timeline_event_id, "evt_5");
+        // Stable tail: evt_2 (seq 1) then evt_4 (seq 2).
+        assert_eq!(ordered[3].timeline_event_id, "evt_2");
+        assert_eq!(ordered[4].timeline_event_id, "evt_4");
+    }
+
+    // T3b: unknown ordered ids surface as ValidationError (no panic). Mirrors
+    // the in-memory T2b reject contract through the sqlite path.
+    #[tokio::test]
+    async fn test_get_timeline_ordered_rejects_unknown_ids() {
+        let (pool, _dir) = fresh_pool().await;
+        seed::world(
+            &pool, "wld_1", "ctr_test", "Test", "test", "private", "manual",
+        )
+        .await;
+        seed::event(&pool, "evt_1", "wld_1", "fbk_root", "story_advance", 1).await;
+
+        let gw = SqliteNarrativeGateway::new(pool);
+        let result = gw
+            .get_timeline_ordered(
+                "wld_1",
+                Some("fbk_root"),
+                &["evt_1".to_string(), "evt_missing".to_string()],
+            )
+            .await;
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            matches!(err, NarrativeError::ValidationError(ref msg) if msg.contains("rejected")),
+            "expected ValidationError with reject detail, got: {err:?}"
+        );
+    }
+
+    // T3c: dual path intact — get_timeline (sequence_no sort) is unaffected by
+    // the new ordered method; both coexist on the sqlite gateway.
+    #[tokio::test]
+    async fn test_get_timeline_dual_path_sequence_sort_unchanged() {
+        let (pool, _dir) = fresh_pool().await;
+        seed::world(
+            &pool, "wld_1", "ctr_test", "Test", "test", "private", "manual",
+        )
+        .await;
+        seed::event(&pool, "evt_1", "wld_1", "fbk_root", "story_advance", 3).await;
+        seed::event(&pool, "evt_2", "wld_1", "fbk_root", "story_advance", 1).await;
+        seed::event(&pool, "evt_3", "wld_1", "fbk_root", "story_advance", 2).await;
+
+        let gw = SqliteNarrativeGateway::new(pool);
+        // The sequence_no path is the default and must remain unchanged.
+        let by_seq = gw
+            .get_timeline("wld_1", Some("fbk_root"), None)
+            .await
+            .unwrap();
+        assert_eq!(
+            by_seq.iter().map(|e| e.sequence_no).collect::<Vec<_>>(),
+            vec![1, 2, 3]
+        );
     }
 }

@@ -572,6 +572,49 @@ mod tests {
         );
     }
 
+    // T-V1.143-T4a: ordering parity with shuffled storage. 5 representative
+    // events are inserted in shuffled sequence_no order; the ordered path
+    // must place explicit ids first (in requested order) and append the
+    // remaining events in sequence_no order — proving the ordering is
+    // independent of storage/insertion order and driven solely by the
+    // explicit id list + sequence_no stable tail. End-to-end exercise of
+    // the T1 conversion seam through the T2 production adoption path.
+    #[test]
+    fn test_get_timeline_ordered_five_events_shuffled_storage() {
+        let gw = InMemoryNarrativeGateway::new(nexus_knowledge::world_kb::InMemoryKbStore::new());
+        // Build 5 events with sequence_no 1..5, then insert in shuffled order.
+        let e1 = make_event("wld_1", "fbk_root", 1);
+        let e2 = make_event("wld_1", "fbk_root", 2);
+        let e3 = make_event("wld_1", "fbk_root", 3);
+        let e4 = make_event("wld_1", "fbk_root", 4);
+        let e5 = make_event("wld_1", "fbk_root", 5);
+        let id1 = e1.timeline_event_id.clone();
+        let id2 = e2.timeline_event_id.clone();
+        let id3 = e3.timeline_event_id.clone();
+        let id4 = e4.timeline_event_id.clone();
+        let id5 = e5.timeline_event_id.clone();
+        // Shuffled insertion: e3, e1, e5, e2, e4 (not sequence order).
+        gw.insert_event(e3);
+        gw.insert_event(e1);
+        gw.insert_event(e5);
+        gw.insert_event(e2);
+        gw.insert_event(e4);
+
+        // Request [e3, e1, e5] explicitly; remaining (e2 seq2, e4 seq4)
+        // form the stable tail in sequence_no order.
+        let ordered = gw
+            .get_timeline_ordered("wld_1", None, &[id3.clone(), id1.clone(), id5.clone()])
+            .unwrap();
+
+        assert_eq!(ordered.len(), 5);
+        assert_eq!(ordered[0].timeline_event_id, id3);
+        assert_eq!(ordered[1].timeline_event_id, id1);
+        assert_eq!(ordered[2].timeline_event_id, id5);
+        // Stable tail: e2 (seq 2) then e4 (seq 4).
+        assert_eq!(ordered[3].timeline_event_id, id2);
+        assert_eq!(ordered[4].timeline_event_id, id4);
+    }
+
     // T5: get_event returns single event
     #[tokio::test]
     async fn test_get_event() {
