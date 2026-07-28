@@ -240,6 +240,45 @@ fn insert_opt_string(nexus: &mut Map<String, Value>, key: &str, value: Option<&s
     };
 }
 
+/// Reserved `extensions.nexus` key carrying the full nexus `WorldKbBody`
+/// losslessly across the spoke boundary.
+///
+/// Spoke's typed `BodyAttributeValue` only models string/number/bool
+/// attribute values; null/array/object values have no spoke slot (see
+/// `nexus_attr_to_spoke` in `nexus-knowledge`). The forward conversion stashes
+/// the full nexus body here so the persist path (orchestrator → `put_update` →
+/// reverse conversion) recovers it instead of the spoke-truncated body,
+/// preserving full body fidelity. This key is reserved (`_nexus_` prefix); it
+/// is consumed by [`take_nexus_body`] on the reverse path and never reaches the
+/// product-local extras / the `extensions` DB column.
+const NEXUS_BODY_KEY: &str = "_nexus_body";
+
+/// Stash the full nexus body (as JSON) under `extensions.nexus._nexus_body`.
+///
+/// Pass `None` to clear a previously-stashed carrier. Preserves the 5 typed
+/// identity keys and any sibling unknown keys already present.
+pub fn set_nexus_body(entry: &mut KnowledgeEntry, body: Option<&Value>) {
+    let ns = entry.extensions.entry(nexus_key()).or_default();
+    match body {
+        Some(v) => ns.insert(NEXUS_BODY_KEY.into(), v.clone()),
+        None => ns.remove(NEXUS_BODY_KEY),
+    };
+}
+
+/// Remove and return the reserved `_nexus_body` carrier from
+/// `extensions.nexus`, if present.
+///
+/// Used by the conversion seam reverse direction to recover the full nexus
+/// body losslessly. Taking (rather than borrowing) ensures the carrier does
+/// not leak into [`get_nexus_extras`] or the persisted `extensions` column.
+#[must_use]
+pub fn take_nexus_body(entry: &mut KnowledgeEntry) -> Option<Value> {
+    entry
+        .extensions
+        .get_mut(&nexus_key())?
+        .remove(NEXUS_BODY_KEY)
+}
+
 /// Insert an integer field when `Some(value)`, remove it when `None`.
 fn insert_opt_i64(nexus: &mut Map<String, Value>, key: &str, value: Option<i64>) {
     match value {

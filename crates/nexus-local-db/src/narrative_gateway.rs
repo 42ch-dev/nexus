@@ -17,6 +17,7 @@ use nexus_narrative::{
 };
 use nexus_spoke_adapter::{order_timeline_events_by_ids, SpokeReject, SpokeResult};
 use sqlx::SqlitePool;
+use std::collections::HashMap;
 use std::sync::Arc;
 
 /// Test helpers for seeding narrative data into the database.
@@ -154,15 +155,30 @@ impl SqliteNarrativeGateway {
         // parity (sqlite `get_timeline` with no branch groups by branch_id
         // first; the ordered view's tail is sequence-only).
         filtered.sort_by_key(|e| e.sequence_no);
-        // Convert nexus → spoke (call-boundary §7).
-        let spoke_events: Vec<SpokeTimelineEvent> = filtered.into_iter().map(Into::into).collect();
-
         // Phase 2: delegate ordering to the spoke beat-assist helper (pure,
-        // synchronous — no DB I/O inside the helper).
+        // synchronous — no DB I/O inside the helper). The helper only computes
+        // the ORDER — the reverse spoke→nexus `From` is intentionally NOT
+        // applied here, because it synthesizes `title` from `canonical_name`
+        // and rewrites `created_at` (lossy for events with `title = None`).
+        // Instead, extract the helper's id sequence and reorder the ORIGINAL
+        // nexus events so every field is preserved exactly — a read-only
+        // ordering op must not mutate event data.
+        //
+        // Convert COPIES to spoke for the helper call (call-boundary §7).
+        let spoke_events: Vec<SpokeTimelineEvent> =
+            filtered.iter().cloned().map(Into::into).collect();
         match order_timeline_events_by_ids(&spoke_events, ordered_ids) {
             SpokeResult::Ok(ordered_spoke) => {
-                // Convert spoke → nexus (call-boundary §7).
-                Ok(ordered_spoke.into_iter().map(Into::into).collect())
+                let by_id: HashMap<String, TimelineEvent> = filtered
+                    .into_iter()
+                    .map(|e| (e.timeline_event_id.clone(), e))
+                    .collect();
+                let reordered: Vec<TimelineEvent> = ordered_spoke
+                    .iter()
+                    .map(|s| s.timeline_event_id.clone())
+                    .filter_map(|id| by_id.get(&id).cloned())
+                    .collect();
+                Ok(reordered)
             }
             SpokeResult::Reject(SpokeReject { code, message, .. }) => {
                 Err(NarrativeError::ValidationError(format!(
@@ -720,6 +736,53 @@ mod tests {
         // Stable tail: evt_2 (seq 1) then evt_4 (seq 2).
         assert_eq!(ordered[3].timeline_event_id, "evt_2");
         assert_eq!(ordered[4].timeline_event_id, "evt_4");
+    }
+
+    // T3-Phase5 (Greptile P0): get_timeline_ordered must NOT mutate event data.
+    // seed::event leaves title=NULL and created_at=SQLite `datetime('now')`
+    // (NOT RFC3339). The old lossy spoke→nexus reverse would (a) synthesize
+    // title=Some(id) from canonical_name and (b) fail to parse the SQLite
+    // timestamp, synthesizing now() — both differ from the stored row. The
+    // id-reorder fix preserves every field exactly. Compare against the
+    // `get_timeline` baseline (the un-ordered storage read of the same rows).
+    #[tokio::test]
+    async fn test_get_timeline_ordered_preserves_title_none_and_created_at() {
+        let (pool, _dir) = fresh_pool().await;
+        seed::world(
+            &pool, "wld_1", "ctr_test", "Test", "test", "private", "manual",
+        )
+        .await;
+        // evt_1 seeded with title=NULL, summary=NULL, created_at=DB default.
+        seed::event(&pool, "evt_1", "wld_1", "fbk_root", "story_advance", 1).await;
+        seed::event(&pool, "evt_2", "wld_1", "fbk_root", "story_advance", 2).await;
+
+        let gw = SqliteNarrativeGateway::new(pool);
+        // Baseline: the same rows via the un-ordered storage read.
+        let baseline = gw
+            .get_timeline("wld_1", Some("fbk_root"), None)
+            .await
+            .unwrap();
+        let b1 = baseline
+            .iter()
+            .find(|e| e.timeline_event_id == "evt_1")
+            .expect("evt_1 in baseline");
+        assert!(b1.title.is_none(), "baseline evt_1 title must be NULL");
+
+        let ordered = gw
+            .get_timeline_ordered(
+                "wld_1",
+                Some("fbk_root"),
+                &["evt_1".to_string(), "evt_2".to_string()],
+            )
+            .await
+            .unwrap();
+        assert_eq!(ordered.len(), 2);
+        assert_eq!(ordered[0].timeline_event_id, "evt_1");
+        // title stays None (not synthesized from canonical_name) ...
+        assert_eq!(ordered[0].title, None);
+        // ... and created_at is the original stored string, untouched by any
+        // RFC3339 round-trip.
+        assert_eq!(ordered[0].created_at, b1.created_at);
     }
 
     // T3b: unknown ordered ids surface as ValidationError (no panic). Mirrors

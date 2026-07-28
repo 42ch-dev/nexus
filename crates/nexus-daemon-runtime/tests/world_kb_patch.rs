@@ -182,6 +182,63 @@ async fn patch_entity_title_bumps_version() {
     assert_eq!(resp.entity.status, "confirmed");
 }
 
+/// V1.143 Phase5 (Greptile P1): `patch_entity` must preserve the full
+/// `WorldKbBody` through the orchestrator upsert cutover. Spoke's
+/// `BodyAttributeValue` only models string/number/bool; null/array/object
+/// attribute values used to be silently dropped on the persist round-trip
+/// (build_spoke_upsert_request → spoke seam → put_update). The conversion seam
+/// now carries the full body losslessly via a reserved
+/// `extensions.nexus._nexus_body` carrier, so a title-only patch on an entity
+/// whose body carries null/array/object attributes preserves them exactly.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn patch_entity_preserves_null_array_object_body_attributes() {
+    let (_tmp, state) = fresh_state().await;
+    // Seed an entity whose body carries a null, an array, and an object
+    // attribute value — none of which fit spoke's BodyAttributeValue slot.
+    let seeded_body = r#"{"attributes":{"weight":5,"named":null,"contents":["sword","potion"],"metadata":{"rarity":"common"}}}"#;
+    seed_key_block(
+        state.pool().unwrap(),
+        "kb_backpack",
+        "wld_test_world",
+        "item",
+        "Backpack",
+        "confirmed",
+        None,
+        Some(seeded_body),
+    )
+    .await;
+
+    // Title-only patch: the existing body is re-persisted through the
+    // orchestrator (post_patch.body = kb.body), exercising the spoke seam.
+    let req = WorldKbPatchEntityRequest {
+        entity_id: "kb_backpack".to_string(),
+        expected_version: 0,
+        patch: serde_json::from_value(serde_json::json!({"title": "Hero Backpack"})).unwrap(),
+    };
+    let Json(resp) = patch_entity(
+        State(state.clone()),
+        Path("wld_test_world".to_string()),
+        Json(req),
+    )
+    .await
+    .expect("patch should succeed");
+    assert_eq!(resp.version, 1);
+    assert_eq!(resp.entity.canonical_name.to_string(), "Hero Backpack");
+
+    // Every attribute value must survive the orchestrator round-trip —
+    // number, null, array, AND object. (Pre-fix, only `weight` survived; the
+    // rest were dropped by the spoke typed-body conversion.)
+    let attrs = resp
+        .entity
+        .body
+        .get("attributes")
+        .expect("persisted body has attributes");
+    assert_eq!(attrs["weight"].as_f64(), Some(5.0));
+    assert_eq!(attrs["named"], serde_json::Value::Null);
+    assert_eq!(attrs["contents"], serde_json::json!(["sword", "potion"]));
+    assert_eq!(attrs["metadata"], serde_json::json!({"rarity": "common"}));
+}
+
 #[tokio::test]
 async fn patch_entity_stale_version_returns_409() {
     let (_tmp, state) = fresh_state().await;

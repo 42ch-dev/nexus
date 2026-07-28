@@ -62,6 +62,7 @@ use nexus_local_db::LocalDbError;
 // through `orchestrate_upsert(&NexusBaselineAdapter, UpsertRequest)`.
 // These spoke types are re-exported through `nexus_spoke_adapter` (the
 // single boundary that crosses into spoke standard objects; spec §7).
+use nexus_spoke_adapter::extensions::set_nexus_body;
 use nexus_spoke_adapter::{
     orchestrate_promote, orchestrate_upsert, KnowledgeEntry as SpokeKnowledgeEntry, PromoteRequest,
     PromoteResponse, SpokeReject, SpokeRejectCode, SpokeResult, UpsertRequest, UpsertResponse,
@@ -986,7 +987,21 @@ fn build_spoke_promote_request(candidate: &WorldKbEntry) -> PromoteRequest {
 /// orchestrator derives it from its own `get_knowledge_entry` + the candidate's
 /// `revision` (which the caller sets to the current stored revision).
 fn build_spoke_upsert_request(entry: &WorldKbEntry) -> UpsertRequest {
-    let spoke_entry: SpokeKnowledgeEntry = entry.clone().into();
+    let mut spoke_entry: SpokeKnowledgeEntry = entry.clone().into();
+    // Stash the full nexus body losslessly across the spoke boundary. Spoke's
+    // typed BodyAttributeValue only models string/number/bool; null/array/
+    // object attribute values have no spoke slot and would be silently dropped
+    // by the forward conversion. The persist path (`orchestrate_upsert` →
+    // `put_update` → reverse conversion) recovers this carrier instead of the
+    // spoke-truncated body, preserving full body fidelity (V1.143 Greptile P1).
+    // The carrier is scoped to the persist request (not the general `From`),
+    // so it cannot go stale when a caller mutates the spoke typed body after a
+    // forward conversion.
+    let body_value = entry
+        .body
+        .as_ref()
+        .map(|b| serde_json::to_value(b).unwrap_or_default());
+    set_nexus_body(&mut spoke_entry, body_value.as_ref());
     let wire = serde_json::to_value(&spoke_entry).unwrap_or_else(|_| serde_json::json!({}));
     serde_json::from_value(serde_json::json!({ "knowledge_entries": [wire] }))
         .expect("KnowledgeEntry-derived entry fits UpsertRequest.knowledge_entries shape")
@@ -1400,7 +1415,7 @@ async fn promote_reject(
 /// `WorldKbEntry` in the same world.
 ///
 /// Surface A retention — compound multi-table TX (CAS-update target `kb_key_blocks` body +
-/// CAS-reject candidate `kb_extract_jobs` in one SQLite transaction). spoke orchestrators map one
+/// CAS-reject candidate `kb_extract_jobs` in one `SQLite` transaction). spoke orchestrators map one
 /// port family per call and do not compose cross-family multi-table transactions; splitting would
 /// break atomicity. Pre-1.0 product workflow. See plan P2 C3 / R-V1143P2-ACCEPT-02.
 // simplify: V1.73 β merge folds the candidate summary into the target body and

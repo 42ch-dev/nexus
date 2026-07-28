@@ -173,14 +173,29 @@ impl<K: KbStore> InMemoryNarrativeGateway<K> {
         // (un-listed events) is in deterministic sequence order — the
         // same default as the `get_timeline` dual path.
         filtered.sort_by_key(|e| e.sequence_no);
-        // Convert nexus → spoke (call-boundary §7).
-        let spoke_events: Vec<SpokeTimelineEvent> = filtered.into_iter().map(Into::into).collect();
-
         // Phase 2: delegate ordering to the spoke beat-assist helper (pure).
+        // The helper only computes the ORDER — the reverse spoke→nexus `From`
+        // is intentionally NOT applied here, because it synthesizes `title`
+        // from `canonical_name` and rewrites `created_at` (lossy for events
+        // with `title = None`). Instead, extract the helper's id sequence and
+        // reorder the ORIGINAL nexus events so every field is preserved
+        // exactly — a read-only ordering op must not mutate event data.
+        //
+        // Convert COPIES to spoke for the helper call (call-boundary §7).
+        let spoke_events: Vec<SpokeTimelineEvent> =
+            filtered.iter().cloned().map(Into::into).collect();
         match order_timeline_events_by_ids(&spoke_events, ordered_ids) {
             SpokeResult::Ok(ordered_spoke) => {
-                // Convert spoke → nexus (call-boundary §7).
-                Ok(ordered_spoke.into_iter().map(Into::into).collect())
+                let by_id: HashMap<String, TimelineEvent> = filtered
+                    .into_iter()
+                    .map(|e| (e.timeline_event_id.clone(), e))
+                    .collect();
+                let reordered: Vec<TimelineEvent> = ordered_spoke
+                    .iter()
+                    .map(|s| s.timeline_event_id.clone())
+                    .filter_map(|id| by_id.get(&id).cloned())
+                    .collect();
+                Ok(reordered)
             }
             SpokeResult::Reject(SpokeReject { code, message, .. }) => {
                 Err(NarrativeError::ValidationError(format!(
@@ -623,6 +638,44 @@ mod tests {
         // Stable tail: e2 (seq 2) then e4 (seq 4).
         assert_eq!(ordered[3].timeline_event_id, id2);
         assert_eq!(ordered[4].timeline_event_id, id4);
+    }
+
+    // T-V1.143-Phase5 (Greptile P0): get_timeline_ordered must NOT mutate event
+    // data. The reverse spoke→nexus `From` synthesizes `title` from
+    // `canonical_name` and rewrites `created_at`; reordering via id lookup
+    // instead preserves a `title = None` event and its original timestamp
+    // exactly. Regression for timeline_event.rs:499/:520.
+    #[test]
+    fn test_get_timeline_ordered_preserves_title_none_and_created_at() {
+        let gw = InMemoryNarrativeGateway::new(nexus_knowledge::world_kb::InMemoryKbStore::new());
+        // Event with title=None + a summary, so canonical_name falls back to
+        // the summary on the spoke conversion — the exact case the lossy
+        // reverse corrupts into title=Some(summary).
+        let mut e1 = make_event("wld_1", "fbk_root", 1);
+        e1.summary = Some("summary-driven canonical name".to_string());
+        // Pinned, far-from-now timestamp in 'Z' form: any RFC3339 round-trip
+        // (which normalizes 'Z' → '+00:00') is detectable as a change.
+        let pinned_created_at = "2020-01-01T00:00:00Z".to_string();
+        e1.created_at = pinned_created_at.clone();
+        let id1 = e1.timeline_event_id.clone();
+        let e2 = make_event("wld_1", "fbk_root", 2);
+        let id2 = e2.timeline_event_id.clone();
+        gw.insert_event(e1);
+        gw.insert_event(e2);
+
+        let ordered = gw
+            .get_timeline_ordered("wld_1", None, &[id1.clone(), id2])
+            .unwrap();
+        assert_eq!(ordered.len(), 2);
+        assert_eq!(ordered[0].timeline_event_id, id1);
+        // title must stay None (not synthesized from canonical_name) ...
+        assert_eq!(ordered[0].title, None);
+        // ... and created_at must be the original string, untouched.
+        assert_eq!(ordered[0].created_at, pinned_created_at);
+        assert_eq!(
+            ordered[0].summary,
+            Some("summary-driven canonical name".to_string())
+        );
     }
 
     // T5: get_event returns single event
