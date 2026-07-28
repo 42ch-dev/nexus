@@ -795,6 +795,75 @@ async fn promote_adopt_confirmed_job_does_not_recover_unattributed_collision() {
     assert_eq!(active.entry_id, "kb_preexisting_confirmed");
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn promote_adopt_retry_recovers_when_job_confirmed_with_attributed_entry() {
+    let (_tmp, state) = fresh_state().await;
+    let pool = state.pool().unwrap().clone();
+    let job_id = "xj_retry_recover_attributed";
+
+    // Durable success from a prior attempt: confirmed job + attributed active entry.
+    seed_key_block_attributed(
+        &pool,
+        "kb_retry_recover",
+        "wld_test_world",
+        "character",
+        "RetryRecover",
+        "confirmed",
+        Some(1),
+        Some(NOVEL_CHARACTER_BODY),
+        job_id,
+    )
+    .await;
+    seed_pending_candidate(
+        &pool,
+        job_id,
+        "work_retry_recover",
+        "wld_test_world",
+        "character",
+        "RetryRecover",
+    )
+    .await;
+    sqlx::query(
+        "UPDATE kb_extract_jobs \
+         SET promotion_status = 'confirmed', version = 1 \
+         WHERE job_id = ?",
+    )
+    .bind(job_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let resp = promote_candidate(
+        State(state.clone()),
+        Path("wld_test_world".to_string()),
+        Json(WorldKbPromoteCandidateRequest {
+            job_id: job_id.to_string(),
+            candidate_id: "kb_cand".to_string(),
+            action: "adopt".parse().unwrap(),
+            expected_version: 0,
+            merge_target_id: None,
+            patch: None,
+        }),
+    )
+    .await
+    .expect("attributed confirmed-job retry must return 200 (F-001 / QC2)");
+
+    let entity = resp.entity.as_ref().expect("adopt entity");
+    assert_eq!(entity.canonical_name.to_string(), "RetryRecover");
+    assert_eq!(entity.status, "confirmed");
+    assert_eq!(entity.key_block_id, "kb_retry_recover");
+    assert_eq!(resp.job.status, "confirmed");
+    assert_eq!(resp.version, 1);
+
+    let store = SqliteKbStore::new(pool);
+    let active = store
+        .get_active_by_unique_key("wld_test_world", "RetryRecover", BlockType::Character)
+        .await
+        .unwrap()
+        .expect("single active entry");
+    assert_eq!(active.created_from_command_id.as_deref(), Some(job_id));
+}
+
 #[tokio::test]
 async fn promote_reject_dismisses_candidate() {
     let (_tmp, state) = fresh_state().await;
