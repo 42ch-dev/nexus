@@ -361,8 +361,12 @@ use std::num::NonZeroU64;
 
 use nexus_spoke_adapter::extensions::{
     get_created_from_command_id, get_nexus_extras, get_provenance, get_world_id,
-    set_created_from_command_id, set_nexus_extras, set_provenance, set_world_id,
+    set_created_from_command_id, set_nexus_extras, set_provenance, set_world_id, take_nexus_body,
 };
+// Test-only: simulates the persist-path carrier stash in `build_spoke_upsert_
+// request` (production code sets the carrier in nexus-daemon-runtime, not here).
+#[cfg(test)]
+use nexus_spoke_adapter::extensions::set_nexus_body;
 // V1.139 P1 T3 — lifecycle invariants are delegated to spoke-operations via the
 // adapter (spec §1.5 / §7). nexus-knowledge never calls spoke-operations directly.
 use nexus_spoke_adapter::ops::{assert_revision, transition_status};
@@ -529,7 +533,15 @@ impl From<WorldKbEntry> for SpokeKnowledgeEntry {
 
 #[allow(clippy::fallible_impl_from)]
 impl From<SpokeKnowledgeEntry> for WorldKbEntry {
-    fn from(s: SpokeKnowledgeEntry) -> Self {
+    fn from(mut s: SpokeKnowledgeEntry) -> Self {
+        // Extract the lossless body carrier FIRST — a reserved nexus key — so
+        // it never leaks into product-local extras ([`get_nexus_extras`]) or the
+        // persisted `extensions` column. Spoke's typed BodyAttributeValue
+        // drops null/array/object attribute values; this carrier (stashed on
+        // the persist-path upsert request in `build_spoke_upsert_request`) is
+        // the authoritative, lossless nexus body that the persist writes
+        // (V1.143 Greptile P1 — body fidelity).
+        let lossless_body_value = take_nexus_body(&mut s);
         // Extract borrowed accessor data into owned values FIRST, so subsequent
         // field moves out of `s` are not blocked by outstanding borrows.
         let world_id = get_world_id(&s).unwrap_or_default().to_string();
@@ -544,9 +556,10 @@ impl From<SpokeKnowledgeEntry> for WorldKbEntry {
         let canonical_name = s.canonical_name.to_string();
         let schema_version = u32::try_from(s.schema_version.get()).unwrap_or(1);
 
-        // Reverse body: spoke closed body → nexus body. All 5 fields map back;
-        // body is `None` only when every field is empty/None (matches the
-        // forward direction's emptiness contract).
+        // Reverse body (fallback): spoke closed body → nexus body. All 5 fields
+        // map back; body is `None` only when every field is empty/None. Used
+        // only when no lossless carrier is present (e.g. spoke entries that did
+        // not originate from a `WorldKbEntry` forward conversion).
         let SpokeKnowledgeEntryBody {
             attributes,
             computable,
@@ -558,7 +571,7 @@ impl From<SpokeKnowledgeEntry> for WorldKbEntry {
         let has_state = !state.is_empty();
         let has_tags = !tags.is_empty();
         let attributes_opt = spoke_attrs_to_nexus(&attributes);
-        let body = if summary.is_none()
+        let spoke_derived_body = if summary.is_none()
             && !has_tags
             && !has_state
             && !has_computable
@@ -574,6 +587,11 @@ impl From<SpokeKnowledgeEntry> for WorldKbEntry {
                 computable: has_computable.then_some(true),
             })
         };
+        // Prefer the lossless carrier; fall back to the spoke-typed-body
+        // reconstruction when no carrier was stashed.
+        let body = lossless_body_value
+            .and_then(|v| serde_json::from_value::<WorldKbBody>(v).ok())
+            .or(spoke_derived_body);
 
         Self {
             schema_version,
@@ -966,7 +984,11 @@ mod tests {
     fn spoke_seam_drops_null_array_object_attribute_values() {
         // nexus attributes is a free-form JSON object; spoke's BodyAttributeValue
         // only models string/number/boolean. Null/array/object members have no
-        // spoke slot and are dropped on the forward direction (documented loss).
+        // spoke slot and are dropped on the general forward conversion
+        // (documented loss of the spoke typed body). The persist path
+        // (`build_spoke_upsert_request` → orchestrator → `put_update`) carries
+        // the full body losslessly via the `_nexus_body` carrier instead — see
+        // `spoke_seam_carrier_preserves_full_body_on_reverse`.
         let mut kb = WorldKbEntry::new("wld_test", BlockType::Item, "Backpack");
         kb.body = Some(WorldKbBody {
             attributes: Some(serde_json::json!({
@@ -986,9 +1008,51 @@ mod tests {
             .as_object()
             .unwrap()
             .clone();
-        // Only the number survived; null/array were dropped.
+        // General seam (no carrier): only the number survived; null/array dropped.
         assert_eq!(attrs.len(), 1);
         assert_eq!(attrs["weight"].as_f64(), Some(5.0));
+    }
+
+    #[test]
+    fn spoke_seam_carrier_preserves_full_body_on_reverse() {
+        // The persist path stashes the full nexus body in a reserved
+        // `extensions.nexus._nexus_body` carrier (set in `build_spoke_upsert_
+        // request`) so `put_update`'s reverse conversion recovers it losslessly
+        // instead of the spoke-truncated body (V1.143 Greptile P1 — body
+        // fidelity). This proves the recovery: a spoke entry carrying the full
+        // body round-trips null/array/object attribute values that the spoke
+        // typed body alone cannot represent.
+        let full_body = WorldKbBody {
+            summary: Some("Backpack summary".to_string()),
+            attributes: Some(serde_json::json!({
+                "weight": 5,
+                "named": null,
+                "contents": ["sword", "potion"],
+                "metadata": {"rarity": "common"},
+            })),
+            tags: Some(vec!["gear".to_string()]),
+            ..Default::default()
+        };
+        let mut spoke: SpokeKnowledgeEntry =
+            WorldKbEntry::new("wld_test", BlockType::Item, "Backpack").into();
+        // Simulate the persist-path carrier stash (build_spoke_upsert_request).
+        let body_value = serde_json::to_value(&full_body).unwrap_or_default();
+        set_nexus_body(&mut spoke, Some(&body_value));
+
+        let roundtripped: WorldKbEntry = spoke.into();
+        let body = roundtripped.body.expect("carrier recovers the full body");
+        assert_eq!(body.summary.as_deref(), Some("Backpack summary"));
+        assert_eq!(body.tags.as_deref(), Some(["gear".to_string()].as_slice()));
+        let attrs = body
+            .attributes
+            .as_ref()
+            .and_then(Value::as_object)
+            .expect("attributes");
+        assert_eq!(attrs.len(), 4);
+        assert_eq!(attrs["weight"].as_f64(), Some(5.0));
+        assert_eq!(attrs["named"], Value::Null);
+        assert_eq!(attrs["contents"], serde_json::json!(["sword", "potion"]));
+        assert_eq!(attrs["metadata"], serde_json::json!({"rarity": "common"}));
     }
 
     #[test]

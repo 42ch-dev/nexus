@@ -141,7 +141,15 @@ async fn fresh_state() -> (
 
 // ─── patch-entity ───────────────────────────────────────────────────────────
 
-#[tokio::test]
+// V1.143 P1: patch_entity now routes the canonical edit through
+// `orchestrate_upsert` via `NexusBaselineAdapter`, which bridges sync spoke
+// ports to async SQLite via `tokio::task::block_in_place`. That requires a
+// multi-threaded runtime (the production daemon uses one; tests must opt in
+// via `flavor = "multi_thread"` — same rationale as the promote_adopt tests
+// below). The fast-fail patch_entity tests (stale version / deleted /
+// cross-author) short-circuit on pre-orchestrator guards and stay on the
+// default current-thread runtime.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn patch_entity_title_bumps_version() {
     let (_tmp, state) = fresh_state().await;
     seed_key_block(
@@ -172,6 +180,63 @@ async fn patch_entity_title_bumps_version() {
     assert_eq!(resp.version, 1, "NULL revision should bump to 1");
     assert_eq!(resp.entity.canonical_name.to_string(), "Aria Stormwind");
     assert_eq!(resp.entity.status, "confirmed");
+}
+
+/// V1.143 Phase5 (Greptile P1): `patch_entity` must preserve the full
+/// `WorldKbBody` through the orchestrator upsert cutover. Spoke's
+/// `BodyAttributeValue` only models string/number/bool; null/array/object
+/// attribute values used to be silently dropped on the persist round-trip
+/// (build_spoke_upsert_request → spoke seam → put_update). The conversion seam
+/// now carries the full body losslessly via a reserved
+/// `extensions.nexus._nexus_body` carrier, so a title-only patch on an entity
+/// whose body carries null/array/object attributes preserves them exactly.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn patch_entity_preserves_null_array_object_body_attributes() {
+    let (_tmp, state) = fresh_state().await;
+    // Seed an entity whose body carries a null, an array, and an object
+    // attribute value — none of which fit spoke's BodyAttributeValue slot.
+    let seeded_body = r#"{"attributes":{"weight":5,"named":null,"contents":["sword","potion"],"metadata":{"rarity":"common"}}}"#;
+    seed_key_block(
+        state.pool().unwrap(),
+        "kb_backpack",
+        "wld_test_world",
+        "item",
+        "Backpack",
+        "confirmed",
+        None,
+        Some(seeded_body),
+    )
+    .await;
+
+    // Title-only patch: the existing body is re-persisted through the
+    // orchestrator (post_patch.body = kb.body), exercising the spoke seam.
+    let req = WorldKbPatchEntityRequest {
+        entity_id: "kb_backpack".to_string(),
+        expected_version: 0,
+        patch: serde_json::from_value(serde_json::json!({"title": "Hero Backpack"})).unwrap(),
+    };
+    let Json(resp) = patch_entity(
+        State(state.clone()),
+        Path("wld_test_world".to_string()),
+        Json(req),
+    )
+    .await
+    .expect("patch should succeed");
+    assert_eq!(resp.version, 1);
+    assert_eq!(resp.entity.canonical_name.to_string(), "Hero Backpack");
+
+    // Every attribute value must survive the orchestrator round-trip —
+    // number, null, array, AND object. (Pre-fix, only `weight` survived; the
+    // rest were dropped by the spoke typed-body conversion.)
+    let attrs = resp
+        .entity
+        .body
+        .get("attributes")
+        .expect("persisted body has attributes");
+    assert_eq!(attrs["weight"].as_f64(), Some(5.0));
+    assert_eq!(attrs["named"], serde_json::Value::Null);
+    assert_eq!(attrs["contents"], serde_json::json!(["sword", "potion"]));
+    assert_eq!(attrs["metadata"], serde_json::json!({"rarity": "common"}));
 }
 
 #[tokio::test]
@@ -361,6 +426,154 @@ async fn patch_entity_cross_author_does_not_leak_existence() {
         axum::http::StatusCode::FORBIDDEN,
         "cross-author patch-entity must return 403, not leak existence via 404"
     );
+}
+
+/// V1.143 P1 T3: update happy path — prove the orchestrator's
+/// `assert_revision_match` accepts a non-zero `expected_version` and the
+/// revision chains (1 → 2), and that the SECOND edit's fields are reflected
+/// in the post-state (not just the first bump from NULL/0 like
+/// `patch_entity_title_bumps_version`).
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn patch_entity_update_bumps_version_from_existing() {
+    let (_tmp, state) = fresh_state().await;
+    seed_key_block(
+        state.pool().unwrap(),
+        "kb_veteran",
+        "wld_test_world",
+        "character",
+        "Cael",
+        "confirmed",
+        Some(1), // already at revision 1 (a prior edit landed)
+        None,
+    )
+    .await;
+
+    let req = WorldKbPatchEntityRequest {
+        entity_id: "kb_veteran".to_string(),
+        expected_version: 1,
+        patch: serde_json::from_value(serde_json::json!({"title": "Cael the Veteran"})).unwrap(),
+    };
+    let Json(resp) = patch_entity(
+        State(state.clone()),
+        Path("wld_test_world".to_string()),
+        Json(req),
+    )
+    .await
+    .expect("update should succeed");
+
+    assert_eq!(resp.version, 2, "revision must chain 1 → 2");
+    assert_eq!(resp.entity.canonical_name.to_string(), "Cael the Veteran");
+    assert_eq!(resp.entity.status, "confirmed");
+    assert_eq!(resp.entity.version, 2);
+}
+
+/// V1.143 P1 T3: create-on-existing — a client sends `expected_version = 0`
+/// against an entity that already exists at revision 3 (as if it were
+/// creating). The pre-orchestrator OCC guard short-circuits with 409, same as
+/// any stale-version case. Distinct from `patch_entity_stale_version_returns_
+/// 409` (which uses expected=2 vs stored=3): this documents the "client
+/// thinks it's creating" confusion mode (expected=0 vs stored=3).
+///
+/// `wire_contracts_changed: false` — the 409 response shape matches the
+/// pre-cutover behavior (status / `error_code` / details).
+#[tokio::test]
+async fn patch_entity_create_on_existing_returns_409() {
+    let (_tmp, state) = fresh_state().await;
+    seed_key_block(
+        state.pool().unwrap(),
+        "kb_old",
+        "wld_test_world",
+        "character",
+        "Elder",
+        "confirmed",
+        Some(3), // current version is 3
+        None,
+    )
+    .await;
+
+    let req = WorldKbPatchEntityRequest {
+        entity_id: "kb_old".to_string(),
+        expected_version: 0, // client mistakenly thinks this is new
+        patch: serde_json::from_value(serde_json::json!({"title": "Elder v2"})).unwrap(),
+    };
+    let err = patch_entity(
+        State(state.clone()),
+        Path("wld_test_world".to_string()),
+        Json(req),
+    )
+    .await
+    .expect_err("create-on-existing must 409");
+    assert_eq!(err.status_code(), axum::http::StatusCode::CONFLICT);
+    assert_eq!(err.error_code(), "world_kb_conflict");
+    let details = err.error_details().expect("conflict details");
+    assert_eq!(details["current_version"], 3);
+    assert_eq!(details["entity_id"], "kb_old");
+}
+
+/// V1.143 P1 T3 / C1 regression (reviewer-requested): the orchestrator's
+/// `validate_update_path` treats `status = "merged"` as terminal (alongside
+/// `"deleted"`), whereas the pre-cutover `patch_entity` only rejected
+/// `"deleted"` and left `"merged"` editable (the old comment read: "'merged'
+/// entities remain editable to allow post-merge cleanup"). The cutover
+/// tightens this — a merged entity is now rejected by the orchestrator path.
+///
+/// ## Latency honesty note
+///
+/// This difference is **latent in production today**: no daemon write path
+/// hardcodes `kb_key_blocks.status = 'merged'`. The only status-writers are
+/// `delete_knowledge_entry` (→ `"deleted"` only), the generic
+/// `put_knowledge_entry` / `update_key_block_auxiliary_fields_in_tx` (which
+/// echo whatever status the caller passes), and the parameterized
+/// `kb_key_block` capability in `nexus-orchestration` (which accepts any
+/// string from an agent). So `status = "merged"` can only reach storage via
+/// an agent-driven capability call or a direct spoke upsert — not via the
+/// daemon's own canvas-facing handlers. The domain model DOES treat `merged`
+/// as a real lifecycle state (read-filters in `kb_store::list_by_world` and
+/// `extract_sync` exclude it alongside `deleted`/`deprecated`; the in-memory
+/// `KnowledgeEntry` transition table has `merged` as a terminal state), so
+/// the behavioral difference is real even if production traffic has not yet
+/// exercised it.
+///
+/// This test seeds `status = "merged"` directly (bypassing production paths,
+/// since none produce it) and confirms the orchestrator rejects the patch
+/// with 422 — documenting the new, tighter behavior.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn patch_entity_merged_status_rejected_by_orchestrator() {
+    let (_tmp, state) = fresh_state().await;
+    seed_key_block(
+        state.pool().unwrap(),
+        "kb_merged",
+        "wld_test_world",
+        "character",
+        "Absorbed",
+        "merged", // terminal in spoke; editable pre-cutover, rejected now
+        Some(0),
+        None,
+    )
+    .await;
+
+    let req = WorldKbPatchEntityRequest {
+        entity_id: "kb_merged".to_string(),
+        expected_version: 0, // matches stored revision — passes OCC
+        patch: serde_json::from_value(serde_json::json!({"title": "Absorbed Rename"})).unwrap(),
+    };
+    // The pre-orchestrator guard (`if kb.status == "deleted"`) does NOT fire
+    // (status is "merged", not "deleted"), so the request reaches
+    // `orchestrate_upsert`. The orchestrator's `validate_update_path` then
+    // rejects with `KnowledgeEntryTerminalStatus`, which maps to 422
+    // `world_kb_validation_failed`.
+    let err = patch_entity(
+        State(state.clone()),
+        Path("wld_test_world".to_string()),
+        Json(req),
+    )
+    .await
+    .expect_err("merged entity must be rejected as terminal by the orchestrator");
+    assert_eq!(
+        err.status_code(),
+        axum::http::StatusCode::UNPROCESSABLE_ENTITY
+    );
+    assert_eq!(err.error_code(), "world_kb_validation_failed");
 }
 
 // ─── promote-candidate ──────────────────────────────────────────────────────

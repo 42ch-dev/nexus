@@ -167,7 +167,54 @@ The first production orchestrator consumer is `promote_adopt` in `nexus-daemon-r
 
 ### Remaining production boundary work (roadmap)
 
-- Remaining write paths (`upsert`/`relate`/`check`/`assemble`) cut over as product features need them.
-- Stub family upgrades: `RuleQueryPort` (persisted Rules), `HostManifestPort.list_peer` (multi-host collaboration), `ScopeQueryPort.list_timeline_events` (persisted `TimelineEvent` storage; also unblocks T3b full timeline helper migration in nexus-narrative).
+- Remaining write paths cut over as product features need them: **`upsert` shipped V1.143** (P1 — `patch_entity` → `orchestrate_upsert`); `relate` **deferred to V1.144** (spoke `Relation` lacks `revision` — see V1.143 lesson below).
+- Stub family upgrades: `RuleQueryPort` (persisted Rules), `HostManifestPort.list_peer` (multi-host collaboration), `ScopeQueryPort.list_timeline_events` (persisted `TimelineEvent` storage; also unblocks T3b full timeline helper migration in nexus-narrative — **partial progress V1.143** with `get_timeline_ordered()` on both gateways).
 - Transaction-boundary unification for `promote_adopt`: **shipped** (V1.142 P3 — adapter-local TX bind via `NexusBaselineAdapter::with_tx_cell`).
 - TS app orchestrator pattern adoption (separate product surface).
+
+## V1.143 — Deep SPOKE integration (roadmap step 1 of 3)
+
+V1.143 took the V1.141/V1.142 adapter-port foundation and deepened it across three fronts — Timeline wire unification, the second production orchestrator cutover, and Surface A outcome resolution — while discovering a structural constraint that defers the third cutover.
+
+### Production cutover count: 3 paths (2 shipped, 1 deferred)
+
+The orchestrator-cutover-on-write-paths pattern is now proven on the two highest-traffic KB write paths:
+
+| Cutover | Version | Status | Notes |
+|---------|---------|--------|-------|
+| `promote_adopt` → `orchestrate_promote` | V1.142 | **Shipped** | First Surface B production consumer; single-TX adopt flow with retry-safe idempotency |
+| `patch_entity` → `orchestrate_upsert` | V1.143 | **Shipped** | Second production consumer; `with_bound_tx` for transaction binding; C1 merged-terminal behavior-diff (see below) |
+| `relate` → `orchestrate_relate` | V1.144 | **Deferred** | Blocked by structural mismatch (see below) |
+
+### `From`/`Into` conversion-seam pattern generalized
+
+V1.143 applied the same `From`/`Into` conversion-seam pattern that V1.139 established for `WorldKbEntry`↔`KnowledgeEntry` to a second type pair: **`TimelineEvent` (nexus-narrative) ↔ spoke `TimelineEvent`**. This is now a proven reusable pattern:
+
+- Each product domain type that has a spoke counterpart gets a dedicated `From`/`Into` impl pair (one direction, or both as needed).
+- The adapter crate re-exports the spoke wire type; product crates convert at the boundary.
+- The conversion seam is the **sole point of evolution** when the spoke schema changes — product internals are insulated.
+
+**Dual-path design for timeline ordering:** Both `InMemoryNarrativeGateway` and `SqliteNarrativeGateway` now expose an inherent `get_timeline_ordered()` method (adopted from `order_timeline_events_by_ids`, which was test-only in V1.142). The `sequence_no` default sort is retained as the data-collection fallback — the spoke ordering is applied when timeline IDs are available. This allows both gateways to serve ordered timelines without coupling to the spoke ordering API at the call site.
+
+### Structural-mismatch discovery: spoke wire types are NOT uniform (high-value lesson)
+
+This is the most important V1.143 learning for V1.144 planning:
+
+**`KnowledgeEntry` carries `revision: Option<u64>`** — this enables `orchestrate_upsert`'s create-or-update OCC fork: the orchestrator calls `get_knowledge_entry`, reads the stored revision, feeds it as `expected_base_revision` to `put_knowledge_entry`, and the port implementation rejects stale/conflicting writes. This is what makes the V1.142/V1.143 cutovers work.
+
+**`Relation` has NO `revision` field** — spoke's `RelationPort` defines `get_relations()` / `put_relations()` / `remove_relations()` but `Relation` carries no OCC field. The `orchestrate_relate` entrypoint expects the caller to supply an `expected_base_revision` per relation, but there is no stored revision to compare against. The production `RelationPort` in `nexus-local-db` is currently insert-only (no CAS gate).
+
+**Consequence:** the OCC-mirror pattern from `KnowledgeEntry` does **not** transfer to `Relation`. Each port family's orchestrability must be verified against the spoke wire type's actual fields, not assumed. This is why `relate` is deferred to V1.144 — it needs a first-class adapter-extension plan (e.g. nexus-side `revision` column in `kb_relationships`, surfaced through the port impl, not through the spoke `Relation` type itself).
+
+> **Rule:** before cutting over a port family to its orchestrator, check whether the spoke wire type carries a `revision` (or other OCC-relevant field). If it doesn't, the cutover may require nexus-side extension rather than a pure spoke adoption.
+
+### C1 accepted-behavior-diff pattern
+
+When V1.143 cut over `patch_entity` → `orchestrate_upsert`, a latent behavior change surfaced: **spoke's `upsert` marks merged-terminal KnowledgeEntries (e.g. `merged-away`) as `Rejected`** — the orchestrator validates the entry's status against spoke's lifecycle and rejects entries that are in terminal states not eligible for update. The existing nexus `patch_entity` handler did **not** enforce this check for the `merged` status.
+
+The decision was to **accept the behavior diff** (C1 finding: `merged`-terminal entries now return an error when patched, rather than silently updating) because:
+1. The spoke lifecycle is the normative authority — keeping nexus' laxer behavior would be incorrect.
+2. The regression test was updated to assert the new behavior.
+3. The diff was documented in the review bundle and spec note.
+
+**Pattern:** when a cutover adopts spoke lifecycle validation that is stricter than the legacy nexus behavior, decide deliberately whether to accept the diff or add a nexus override. Document + regression-test either way. Do NOT silently change behavior.

@@ -1,6 +1,6 @@
 # Spoke Adapter Architecture
 
-> **Status:** Normative (v0.3 — V1.142 SPOKE 0.4.1 pin + production adapter home + first orchestrator cutover; v0.2 was V1.141 0.4.0 adapter-port architecture; v0.1 was V1.139 SPOKE adoption baseline)
+> **Status:** Normative (v0.4 — V1.143 orchestrator cutover on upsert/relate + timeline wire-type unification + promote-reject/merge resolution; v0.3 was V1.142 SPOKE 0.4.1 pin + production adapter home + first orchestrator cutover; v0.2 was V1.141 0.4.0 adapter-port architecture; v0.1 was V1.139 SPOKE adoption baseline)
 > **Document class:** Master
 > **Scope:** The `nexus-spoke-adapter` crate boundary, `extensions.nexus` namespace contract, spoke-operations delegation rules, daemon-api envelope strategy, drift detection adaptation, and the `/kb/` HTTP route stability decision.
 > **Related:** [entity-scope-model.md](entity-scope-model.md), [local-db-schema.md](local-db-schema.md), [schemas-directory-layout.md](schemas-directory-layout.md), spoke `CONCEPTS.md`, spoke `.mstar/specs/spoke-data-model.md`, spoke `.mstar/specs/spoke-operations.md`
@@ -446,6 +446,56 @@ The adapter converts between nexus storage rows and spoke wire types using the e
 | Entry present + `expected_revision = None` (create on existing) | `KnowledgeEntryAlreadyExists` |
 
 True concurrent safety requires the CAS check to be atomic with the write. The V1.73 `cas_update_key_block_fields` function satisfies this through a `WHERE COALESCE(revision, 0) = ?` guard column inside the caller's SQLite transaction. The adapter does not add a second CAS layer.
+
+#### Orchestrator cutover registry
+
+Each orchestrator adoption on a daemon write path is registered here. The registry records the handler, the orchestrator, the adapter, and the cutover iteration.
+
+| Orchestrator | Handler (symbol) | File | Adapter | Cutover | Status |
+|---|---|---|---|---|---|
+| `orchestrate_promote` | `promote_adopt()` | `world_kb.rs:608` | `NexusBaselineAdapter` | V1.142 | Shipped |
+| `orchestrate_upsert` | `patch_entity()` | `world_kb.rs:286` | `NexusBaselineAdapter` | V1.143 | Planned |
+| `orchestrate_relate` | `patch_relationship_add()` / `_update()` | `world_kb.rs:1669`/`1727` | `NexusBaselineAdapter` | V1.144 | Deferred |
+
+> **Note:** `patch_relationship_remove()` (line 1653) is **not** a cutover candidate — `orchestrate_relate` has no delete path (`RelationPort` exposes only `put_relation`). The `remove` action stays on Surface A via `delete_relationship_in_tx()`.
+
+> **Relate cutover deferred (V1.143 → V1.144):** `orchestrate_relate` adoption is deferred to V1.144 (`R-V1143P2-DEFER-RELATE`). spoke 0.4.1's `Relation` type lacks a `revision` field — there is no OCC mirror for relations, so `RelationPort::put_relation` is insert-only with no CAS guard. Cutover is blocked pending a `RelationPort` adapter-extension plan (add `expected_base_revision` semantics or a relation-level CAS path). Until then `patch_relationship_add()` / `_update()` remain on Surface A direct-DB writes.
+
+**Surface A retention (promote sub-outcomes):** spoke `orchestrate_promote` covers the accept/adopt lifecycle only. The following nexus-specific promote outcomes are retained on Surface A with explicit rationale:
+
+| Outcome | Handler | Rationale |
+|---|---|---|
+| `promote_reject` | `promote_reject()` (line 1134) | Operates on `kb_extract_jobs.promotion_status`, not on `KnowledgeEntry`. spoke has no reject lifecycle on `PromoteRequest`. Handler is 20 lines of CAS UPDATE — no shared lifecycle logic to delegate. |
+| `promote_merge` | `promote_merge()` (line 1183) | Compound multi-table SQLite transaction: CAS-update target `kb_key_blocks` body + CAS-reject candidate `kb_extract_jobs` in one atomic TX. spoke orchestrators compose a single port family per call — splitting merge into two orchestrator calls would break atomicity. |
+
+Both decisions are accepted residuals (`R-V1143P2-ACCEPT-01`, `R-V1143P2-ACCEPT-02`) with rationale; pre-1.0, retaining narrow product-specific handlers on Surface A is acceptable when spoke has no equivalent concept.
+
+#### Timeline wire-type unification (V1.143 P0)
+
+`nexus-narrative::timeline_event::TimelineEvent` and `spoke_schemas::TimelineEvent` are unified via a `From`/`Into` conversion seam (two `From` impls in `nexus-narrative/src/timeline_event.rs`), mirroring the `WorldKbEntry`↔`KnowledgeEntry` pattern (§7.1). The types are structurally divergent (spoke: fork-oriented with 14 fields; nexus: branch/world-oriented with 13 fields including lifecycle state machine) — a type alias is not feasible.
+
+**Conversion seam contract:**
+
+| Nexus field | spoke field | Direction |
+|---|---|---|
+| `timeline_event_id` | `timeline_event_id` | bidirectional |
+| `created_at` | `created_at` (String↔DateTime) | bidirectional |
+| `title` | `canonical_name` | nexus→spoke |
+| `summary` | `description` | bidirectional |
+| `affected_key_block_ids` | `participant_entry_ids` | bidirectional |
+| `caused_by_event_ids` | `extensions.nexus.caused_by_event_ids` | bidirectional |
+| `world_id` | `extensions.nexus.world_id` | bidirectional |
+| `branch_id` | `extensions.nexus.branch_id` | bidirectional |
+| `event_type` | `extensions.nexus.event_type` | bidirectional |
+| `status` | `extensions.nexus.timeline_status` | bidirectional |
+| `sequence_no` | `sort_key` (`sequence_no.to_string()`) | nexus→spoke |
+| `source_command_id` | `extensions.nexus.source_command_id` | bidirectional |
+
+spoke-only fields (`fork_id`, `parent_fork_id`, `timeline_scale`, `source_anchor`, `computable_logs`) are lossily filled (`None`/empty) — nexus does not yet participate in spoke's fork model (V1.145 roadmap).
+
+**Beat-assist helper adoption:** `order_timeline_events_by_ids` is the primary production adoption target (V1.143 P0 T2). The helper operates on `timeline_event_id` alone and requires no peripheral infrastructure. `order_timeline_events_by_precedes` is a stretch target (requires mapping `caused_by_event_ids` → spoke `Relation` objects + `extensions.spoke.timeline_entry_id` on each event).
+
+**`ScopeQueryPort.list_timeline_events`** remains a stub (`Ok(Vec::new())`) — the conversion seam enables future production implementation when a product feature requires persisted timeline events (roadmap V1.145).
 
 ## 8. Crate Dependency Graph
 
