@@ -3,15 +3,15 @@
 //!
 //! # Knowledge entries (production)
 //!
-//! [`ScopeQueryPort::list_knowledge_entries`] routes through the existing
-//! [`SqliteKbStore::list_by_world`] (the production `kb_key_blocks`
-//! query) and reuses the V1.139 `WorldKbEntry → SpokeKnowledgeEntry`
-//! conversion seam (spec §7.1) as the sole wire-type projection. The
-//! world id is taken from `scope.scope_id` (the spoke `Scope` is a
-//! protocol-neutral opaque selector — nexus maps world ids through
-//! that slot). Optional `entry_ids` / `entry_types` filters are
-//! applied at the boundary; this is consistent with how the existing
-//! `KbStore::query` path applies optional filters in-memory.
+//! [`ScopeQueryPort::list_knowledge_entries`] routes through
+//! [`SqliteKbStore::list_by_world_scoped`], applying optional `entry_ids` /
+//! `entry_types` filters in SQL before any safety cap. Filtered scopes are not
+//! subject to the unfiltered `LIST_BY_WORLD_LIMIT` window. Unfiltered full-world
+//! listings reject when the cap is exceeded so orchestrators never receive a
+//! silently incomplete scope.
+//!
+//! Rows are projected through the V1.139 `WorldKbEntry → SpokeKnowledgeEntry`
+//! conversion seam (spec §7.1). The world id is taken from `scope.scope_id`.
 //!
 //! # Timeline events (stub)
 //!
@@ -31,8 +31,6 @@
 
 use super::NexusBaselineAdapter;
 use crate::kb_store::SqliteKbStore;
-use nexus_knowledge::world_kb::store::KbStore;
-use nexus_knowledge::world_kb::WorldKbEntry;
 use nexus_spoke_adapter::{
     KnowledgeEntry, Scope, ScopeQueryPort, SpokeReject, SpokeRejectCode, SpokeResult, TimelineEvent,
 };
@@ -40,18 +38,10 @@ use serde_json::{json, Map, Value};
 impl ScopeQueryPort for NexusBaselineAdapter {
     /// List the active knowledge entries for the scope's world.
     ///
-    /// Routes through [`SqliteKbStore::list_by_world`] (the production
-    /// `kb_key_blocks` query) and projects rows through the V1.139
-    /// `WorldKbEntry → SpokeKnowledgeEntry` conversion seam.
-    ///
-    /// # Known limitation
-    ///
-    /// This method delegates to [`SqliteKbStore::list_by_world`], which imposes
-    /// a compile-time `LIST_BY_WORLD_LIMIT` (currently 500). Worlds with more
-    /// than 500 active knowledge entries will have silently-truncated results.
-    /// This is a pre-existing storage limitation (not introduced by the spoke
-    /// port); raising/removing the limit is a storage-layer decision tracked
-    /// in R-V1142P2-002.
+    /// Routes through [`SqliteKbStore::list_by_world_scoped`] so optional
+    /// `entry_ids` / `entry_types` filters are applied in SQL. Unfiltered
+    /// full-world listings reject when more than `LIST_BY_WORLD_LIMIT` active
+    /// rows exist (no silent truncation).
     fn list_knowledge_entries(&self, scope: &Scope) -> SpokeResult<Vec<KnowledgeEntry>> {
         let pool = self.pool.clone();
         // Clone the filters so the async block is 'static (the sync trait
@@ -62,47 +52,44 @@ impl ScopeQueryPort for NexusBaselineAdapter {
 
         self.block_on(async move {
             let store = SqliteKbStore::new(pool);
-            let world_entries: Vec<WorldKbEntry> = match store.list_by_world(&world_id).await {
+            let scoped = match store
+                .list_by_world_scoped(&world_id, &entry_ids, &entry_types)
+                .await
+            {
                 Ok(rows) => rows,
                 Err(e) => {
                     return reject(
                         SpokeRejectCode::InvalidInput,
-                        format!("storage error on list_by_world: {e}"),
+                        format!("storage error on list_by_world_scoped: {e}"),
                         json!({ "scope_id": world_id }),
                     );
                 }
             };
 
-            // Apply optional boundary filters (entry_ids / entry_types).
-            // Mirrors the KbStore::query in-memory filter pattern — the
-            // world dataset is small enough that fetching all active rows
-            // and projecting is preferable to building dynamic SQL for
-            // every port call.
-            //
-            // Filtering happens AFTER the V1.139 conversion seam so the
-            // `entry_types` matcher compares against the same
-            // `KnowledgeEntry.entry_type` string callers see on the wire
-            // (the conversion seam already projects BlockType →
-            // snake_case `entry_type`; we don't need to duplicate that
-            // mapping here).
-            let filtered: Vec<KnowledgeEntry> = world_entries
+            if scoped.truncated {
+                return reject(
+                    SpokeRejectCode::InvalidInput,
+                    format!(
+                        "world {world_id} has more active knowledge entries than the safety cap; \
+                         narrow the scope with entry_ids or entry_types"
+                    ),
+                    json!({
+                        "scope_id": world_id,
+                        "cap": crate::kb_store::LIST_BY_WORLD_LIMIT,
+                        "truncated": true,
+                    }),
+                );
+            }
+
+            let wire: Vec<KnowledgeEntry> = scoped
+                .entries
                 .into_iter()
-                // Reuse the V1.139 conversion seam — sole boundary
-                // between WorldKbEntry rows and the spoke wire type
-                // (spec §7.1).
+                // Reuse the V1.139 conversion seam — sole boundary between
+                // WorldKbEntry rows and the spoke wire type (spec §7.1).
                 .map(KnowledgeEntry::from)
-                .filter(|entry| {
-                    if !entry_ids.is_empty() && !entry_ids.contains(&entry.entry_id) {
-                        return false;
-                    }
-                    if !entry_types.is_empty() && !entry_types.contains(&entry.entry_type) {
-                        return false;
-                    }
-                    true
-                })
                 .collect();
 
-            SpokeResult::Ok(filtered)
+            SpokeResult::Ok(wire)
         })
     }
 
@@ -141,8 +128,10 @@ fn reject<T>(code: SpokeRejectCode, message: impl Into<String>, details: Value) 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::kb_store::LIST_BY_WORLD_LIMIT;
     use crate::{open_pool, run_migrations};
     use nexus_contracts::BlockType;
+    use nexus_knowledge::world_kb::store::KbStore;
     use nexus_knowledge::world_kb::{WorldKbBody, WorldKbEntry};
     use nexus_spoke_adapter::ScopeQueryPort;
 
@@ -279,6 +268,78 @@ mod tests {
         };
         assert_eq!(entries.len(), 1, "only the character row matches");
         assert_eq!(entries[0].canonical_name.to_string(), "Alice");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn list_knowledge_entries_filtered_target_beyond_list_window() {
+        let (pool, _dir) = fresh_pool().await;
+        let (world_id, seeded) = seed_world_with_entries(&pool).await;
+
+        // Fill the unfiltered list window with filler rows so the seeded
+        // entries would be omitted by the old list_by_world + in-memory filter.
+        let store = SqliteKbStore::new(pool.clone());
+        for i in 0..LIST_BY_WORLD_LIMIT {
+            let mut filler =
+                WorldKbEntry::new(&world_id, BlockType::Item, &format!("Filler_{i:03}"));
+            filler.entry_id = format!("kb_fill_{i:03}");
+            store.insert_knowledge_entry(filler).await.unwrap();
+        }
+
+        let target_id = seeded[0].entry_id.clone();
+        let mut scope = scope_for(&world_id);
+        scope.entry_ids = vec![target_id.clone()];
+
+        let adapter = NexusBaselineAdapter::new(pool);
+        let entries = match adapter.list_knowledge_entries(&scope) {
+            SpokeResult::Ok(v) => v,
+            SpokeResult::Reject(r) => panic!("expected ok, got reject: {r:?}"),
+        };
+        assert_eq!(
+            entries.len(),
+            1,
+            "SQL-scoped filter must find row beyond window"
+        );
+        assert_eq!(entries[0].entry_id, target_id);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn list_knowledge_entries_unfiltered_truncation_rejects() {
+        let (pool, _dir) = fresh_pool().await;
+        sqlx::query(
+            "INSERT OR IGNORE INTO creators (creator_id, display_name, status, cached_at, data) \
+             VALUES ('ctr_test', 'Test', 'active', datetime('now'), '{}')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO narrative_worlds \
+             (world_id, workspace_id, owner_creator_id, title, slug, status, visibility, time_policy, metadata_json) \
+             VALUES ('wld_big', 'wrk_test', 'ctr_test', 'Big', 'big', 'active', 'private', 'manual', '{}')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let store = SqliteKbStore::new(pool.clone());
+        for i in 0..=LIST_BY_WORLD_LIMIT {
+            let mut entry = WorldKbEntry::new("wld_big", BlockType::Item, &format!("Row_{i:03}"));
+            entry.entry_id = format!("kb_big_{i:03}");
+            store.insert_knowledge_entry(entry).await.unwrap();
+        }
+
+        let adapter = NexusBaselineAdapter::new(pool);
+        match adapter.list_knowledge_entries(&scope_for("wld_big")) {
+            SpokeResult::Ok(_) => panic!("unfiltered cap overflow must reject"),
+            SpokeResult::Reject(r) => {
+                assert_eq!(r.code, SpokeRejectCode::InvalidInput);
+                assert!(
+                    r.message.contains("safety cap"),
+                    "reject message should mention cap: {}",
+                    r.message
+                );
+            }
+        }
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

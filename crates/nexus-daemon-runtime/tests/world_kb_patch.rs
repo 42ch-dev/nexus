@@ -12,6 +12,7 @@
 
 use axum::extract::{Path, Query, State};
 use axum::Json;
+use nexus_contracts::BlockType;
 use nexus_contracts::{
     WorldKbKeyBlockStateResponse, WorldKbPatchEntityRequest, WorldKbPromoteCandidateRequest,
 };
@@ -21,6 +22,7 @@ use nexus_daemon_runtime::api::handlers::world_kb::{
 };
 use nexus_daemon_runtime::workspace::WorkspaceState;
 use nexus_local_db::kb_extract_job::insert_pending;
+use nexus_local_db::kb_store::SqliteKbStore;
 
 /// Seed a `kb_key_blocks` row directly (bypassing store validation) with a
 /// controlled `status` and `revision`, returning its id.
@@ -375,6 +377,99 @@ async fn promote_adopt_confirms_candidate() {
     assert_eq!(entity.status, "confirmed");
     assert_eq!(entity.canonical_name.to_string(), "Kael");
     assert_eq!(resp.job.status, "confirmed");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn promote_adopt_compensates_entry_when_job_flip_races() {
+    let (_tmp, state) = fresh_state().await;
+    let pool = state.pool().unwrap().clone();
+    let candidate = insert_pending(
+        &pool,
+        "test_creator",
+        "ws",
+        "wld_test_world",
+        None,
+        None,
+        "character",
+        "CompensateMe",
+        NOVEL_CHARACTER_BODY,
+    )
+    .await
+    .unwrap();
+
+    // Deterministic flip failure: when orchestrate_promote INSERTs the confirmed
+    // row, reject the pending job before mark_confirmed runs.
+    let job_id = candidate.job_id.clone();
+    let trigger_sql = format!(
+        "CREATE TRIGGER trg_reject_on_compensate_insert \
+         AFTER INSERT ON kb_key_blocks \
+         WHEN NEW.canonical_name = 'CompensateMe' \
+         BEGIN \
+           UPDATE kb_extract_jobs \
+           SET promotion_status = 'rejected', version = version + 1 \
+           WHERE job_id = '{job_id}' AND promotion_status = 'pending'; \
+         END"
+    );
+    sqlx::query(&trigger_sql).execute(&pool).await.unwrap();
+
+    let req = WorldKbPromoteCandidateRequest {
+        job_id: candidate.job_id.clone(),
+        candidate_id: "kb_cand".to_string(),
+        action: "adopt".parse().unwrap(),
+        expected_version: u64::try_from(candidate.version).unwrap_or(0),
+        merge_target_id: None,
+        patch: None,
+    };
+    let err = promote_candidate(
+        State(state.clone()),
+        Path("wld_test_world".to_string()),
+        Json(req),
+    )
+    .await
+    .expect_err("flip failure must surface validation error");
+    sqlx::query("DROP TRIGGER IF EXISTS trg_reject_on_compensate_insert")
+        .execute(&pool)
+        .await
+        .ok();
+
+    assert_eq!(
+        err.status_code(),
+        axum::http::StatusCode::UNPROCESSABLE_ENTITY,
+        "flip failure surfaces as validation_failed"
+    );
+
+    let store = SqliteKbStore::new(pool.clone());
+    let active = store
+        .get_active_by_unique_key("wld_test_world", "CompensateMe", BlockType::Character)
+        .await
+        .unwrap();
+    assert!(
+        active.is_none(),
+        "compensation must remove the orphan so unique index does not block retry"
+    );
+
+    seed_pending_candidate(
+        &pool,
+        "xj_compensate_retry",
+        "work_retry_source",
+        "wld_test_world",
+        "character",
+        "CompensateMe",
+    )
+    .await;
+    let req2 = WorldKbPromoteCandidateRequest {
+        job_id: "xj_compensate_retry".to_string(),
+        candidate_id: "kb_cand2".to_string(),
+        action: "adopt".parse().unwrap(),
+        expected_version: 0,
+        merge_target_id: None,
+        patch: None,
+    };
+    let Json(resp2) =
+        promote_candidate(State(state), Path("wld_test_world".to_string()), Json(req2))
+            .await
+            .expect("retry adopt after compensation must succeed");
+    assert_eq!(resp2.job.status, "confirmed");
 }
 
 #[tokio::test]

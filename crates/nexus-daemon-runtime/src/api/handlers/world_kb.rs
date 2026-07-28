@@ -596,25 +596,21 @@ fn merge_aliases_into_body(body: &mut WorldKbBody, aliases: &[String]) {
 /// requires provisional, and `apply_promote_acceptance` transitions it to
 /// `"confirmed"` and bumps the revision.
 ///
-/// # Pre-1.0 known trade-off: transaction boundary split
+/// # Transaction boundary split (with compensation)
 ///
 /// This handler routes through `orchestrate_promote`, which creates the
 /// confirmed `KnowledgeEntry` in its own storage call (its own transaction
 /// inside the adapter's `put_knowledge_entry`). The extract-job flip below
-/// happens in a SEPARATE transaction. If the job flip fails after the entry
-/// is committed, an orphan confirmed entry persists.
+/// happens in a SEPARATE transaction. If the job flip fails after a **new**
+/// entry was committed this attempt, [`compensate_orphan_promote_entry`]
+/// soft-deletes that entry so the unique index does not block a clean retry.
 ///
-/// The retry-safe idempotency pattern mitigates this for the common case: on
-/// retry, the `idx_kb_key_blocks_active_unique(world_id, block_type,
-/// canonical_name)` index collides with the prior partial attempt's orphan,
-/// the orchestrator returns `KnowledgeEntryAlreadyExists`, and
-/// [`map_promote_response`] recovers via the retry-safe branch (catch
-/// `KnowledgeEntryAlreadyExists` on retry → check job status). This does NOT
-/// guarantee cleanup if the caller gives up after the partial attempt — a
-/// confirmed entry then persists with a still-pending job (logged as an orphan
-/// warning; surfaced to the operator as 422 on the next attempt). Full
-/// transaction unification (single tx across orchestrator + job flip) is
-/// roadmap next, tracked in residual R-V1142P2-003.
+/// The retry-safe idempotency pattern still applies when the flip succeeds on
+/// retry after a prior partial attempt left the job confirmed: on retry,
+/// `KnowledgeEntryAlreadyExists` → [`map_promote_response`] recovers via the
+/// existing confirmed entry (no compensation — that entry is authoritative).
+/// Remaining race: concurrent writers between orchestrator commit and flip;
+/// compensation covers the common `!flipped` / CAS-miss-after-create path.
 async fn promote_adopt(
     state: &WorkspaceState,
     world_id: &str,
@@ -648,6 +644,7 @@ async fn promote_adopt(
     } else {
         Some("manual".to_string())
     };
+    let candidate_entry_id = kb.entry_id.clone();
 
     // V1.142 P2: route through `orchestrate_promote`. `NexusBaselineAdapter`
     // bridges the sync spoke port to async SQLite via `block_in_place`;
@@ -671,16 +668,17 @@ async fn promote_adopt(
     .await
     .map_err(|e| map_cas_err(e, &req.job_id, "version"))?;
     if !flipped {
-        // Race: row left pending state between read and flip. The confirmed
-        // entry from the orchestrator is now orphaned (entry committed, job
-        // still pending). Roll back the job-flip tx and surface as
-        // validation_failed; the caller's retry hits the retry-safe branch
-        // in `map_promote_response` via the unique-index collision.
+        // Race: row left pending state between read and flip. When this
+        // attempt created a new confirmed entry, roll it back so the unique
+        // index does not block a clean retry.
         let _ = tx.rollback().await;
+        if knowledge_entry.entry_id == candidate_entry_id {
+            compensate_orphan_promote_entry(pool, &knowledge_entry.entry_id).await?;
+        }
         return Err(NexusApiError::world_kb_validation_failed(
             &[
                 "candidate was no longer pending (already confirmed/rejected); \
-                 rolled back the job flip"
+                 rolled back the job flip and compensated any new entry from this attempt"
                     .to_string(),
             ],
             &[],
@@ -715,6 +713,31 @@ async fn promote_adopt(
 }
 
 // ─── promote-adopt orchestration helpers (V1.142 P2) ────────────────────────
+
+/// Soft-delete a confirmed entry created by a failed job flip in the same
+/// adopt attempt so `idx_kb_key_blocks_active_unique` does not block retry.
+///
+/// No-op when the row is already gone (idempotent for repeated compensation).
+async fn compensate_orphan_promote_entry(
+    pool: &sqlx::SqlitePool,
+    entry_id: &str,
+) -> Result<(), NexusApiError> {
+    let store = kb_store::SqliteKbStore::new(pool.clone());
+    match store.delete_knowledge_entry(entry_id).await {
+        Ok(()) => {
+            warn!(
+                entry_id = %entry_id,
+                "promote_adopt compensated orphan entry after job flip failure"
+            );
+            Ok(())
+        }
+        Err(nexus_knowledge::world_kb::store::KbStoreError::NotFound(_)) => Ok(()),
+        Err(e) => Err(NexusApiError::Internal {
+            code: "DATABASE_ERROR".to_string(),
+            message: format!("failed to compensate orphan promote entry {entry_id}: {e}"),
+        }),
+    }
+}
 
 /// Build a spoke [`PromoteRequest`] from a nexus [`WorldKbEntry`] candidate.
 ///
@@ -778,9 +801,9 @@ fn build_spoke_promote_request(candidate: &WorldKbEntry) -> PromoteRequest {
 /// - **job `confirmed`** → prior partial attempt completed despite returning
 ///   an error; recover the existing entry (looked up via the same unique
 ///   key) and return it as a retry-safe success.
-/// - **job `pending`** → genuine orphan (entry committed, job not flipped);
-///   log a warning and surface as 422 so the operator can refresh the
-///   candidates list and re-apply. Pre-1.0 known trade-off.
+/// - **job `pending`** → prior partial attempt may have left an orphan; flip
+///   failure path now compensates new entries. If this reject fires, the
+///   operator should refresh the candidates list and retry.
 ///
 /// The outer `promote_candidate` handler's `promotion_status == "pending"`
 /// gate plus `mark_confirmed_in_tx_with_cas`'s CAS guard together prevent

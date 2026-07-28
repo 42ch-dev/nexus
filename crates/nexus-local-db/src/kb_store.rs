@@ -100,7 +100,16 @@ pub mod seed {
 ///
 /// Prevents unbounded memory usage on large worlds. The `query()` method applies
 /// its own pagination on top of this.
-const LIST_BY_WORLD_LIMIT: i64 = 500;
+pub const LIST_BY_WORLD_LIMIT: i64 = 500;
+
+/// Result of [`SqliteKbStore::list_by_world_scoped`].
+#[derive(Debug, Clone)]
+pub struct WorldKbScopedList {
+    /// Active entries matching the scope filters.
+    pub entries: Vec<WorldKbEntry>,
+    /// `true` when an unfiltered world listing exceeded [`LIST_BY_WORLD_LIMIT`].
+    pub truncated: bool,
+}
 
 /// SQLite-backed KB store.
 ///
@@ -172,9 +181,93 @@ impl SqliteKbStore {
         .await
         .map_err(|e| db_err(&e))?;
 
-        row.as_ref()
+        row.as_ref().map(KeyBlockRow::to_key_block).transpose()
+    }
+
+    /// List active knowledge entries for a world with optional scope filters
+    /// applied in SQL (V1.142 greploop R-V1142P2-002).
+    ///
+    /// When `entry_ids` and/or `entry_types` are non-empty, filters are
+    /// pushed into the query so matching rows are not dropped by the
+    /// `list_by_world` 500-row window. Unfiltered listings use
+    /// `LIST_BY_WORLD_LIMIT + 1` to detect truncation; callers must reject
+    /// when [`WorldKbScopedList::truncated`] is `true`.
+    ///
+    /// `entry_types` are spoke wire `entry_type` strings (`snake_case`), which
+    /// match the `kb_key_blocks.block_type` column format.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`KbStoreError::Storage`] on database failure.
+    pub async fn list_by_world_scoped(
+        &self,
+        world_id: &str,
+        entry_ids: &[String],
+        entry_types: &[String],
+    ) -> Result<WorldKbScopedList, KbStoreError> {
+        let has_id_filter = !entry_ids.is_empty();
+        let has_type_filter = !entry_types.is_empty();
+        let unfiltered = !has_id_filter && !has_type_filter;
+
+        let mut sql = String::from(
+            r"SELECT
+                key_block_id,
+                world_id,
+                block_type,
+                canonical_name,
+                status,
+                revision,
+                body_json,
+                source_anchor_json,
+                created_from_command_id,
+                created_at,
+                updated_at,
+                source_work_id,
+                source_chapter,
+                source_provenance_kind, extensions_nexus_json
+            FROM kb_key_blocks
+            WHERE world_id = ?
+              AND status NOT IN ('deleted', 'merged', 'deprecated')",
+        );
+
+        if has_id_filter {
+            sql.push_str(" AND key_block_id IN (SELECT value FROM json_each(?))");
+        }
+        if has_type_filter {
+            sql.push_str(" AND block_type IN (SELECT value FROM json_each(?))");
+        }
+        sql.push_str(" ORDER BY created_at ASC");
+        if unfiltered {
+            use std::fmt::Write;
+            let _ = write!(sql, " LIMIT {}", LIST_BY_WORLD_LIMIT + 1);
+        }
+
+        // SAFETY: static column list; dynamic fragments are filter/limit clauses
+        // with bind params only (no user-controlled SQL).
+        let mut q = sqlx::query_as::<_, KeyBlockRow>(&sql).bind(world_id);
+        if has_id_filter {
+            q = q.bind(serde_json::to_string(entry_ids).unwrap_or_else(|_| "[]".to_string()));
+        }
+        if has_type_filter {
+            q = q.bind(serde_json::to_string(entry_types).unwrap_or_else(|_| "[]".to_string()));
+        }
+
+        let rows = q.fetch_all(&*self.pool).await.map_err(|e| db_err(&e))?;
+
+        let truncated =
+            unfiltered && rows.len() > usize::try_from(LIST_BY_WORLD_LIMIT).unwrap_or(500);
+        let kept = if truncated {
+            &rows[..usize::try_from(LIST_BY_WORLD_LIMIT).unwrap_or(500)]
+        } else {
+            rows.as_slice()
+        };
+
+        let entries = kept
+            .iter()
             .map(KeyBlockRow::to_key_block)
-            .transpose()
+            .collect::<Result<Vec<_>, _>>()?;
+
+        Ok(WorldKbScopedList { entries, truncated })
     }
 
     /// Transaction-aware variant of [`KbStore::insert_knowledge_entry`] (R-V150KBED-03).
@@ -415,8 +508,8 @@ fn nexus_extras_extension_map(extras: Option<&serde_json::Value>) -> ExtensionMa
 
 /// Serialize a [`BlockType`] to the `kb_key_blocks.block_type` column format.
 fn block_type_to_sql(block_type: BlockType) -> String {
-    let block_type_str = serde_json::to_string(&block_type)
-        .unwrap_or_else(|_| format!("{block_type:?}"));
+    let block_type_str =
+        serde_json::to_string(&block_type).unwrap_or_else(|_| format!("{block_type:?}"));
     block_type_str.trim_matches('"').to_string()
 }
 
@@ -1142,9 +1235,7 @@ mod tests {
         let listed = store.list_by_world("wld_1").await.unwrap();
         assert_eq!(listed.len(), usize::try_from(LIST_BY_WORLD_LIMIT).unwrap());
         assert!(
-            !listed
-                .iter()
-                .any(|kb| kb.canonical_name == "RetryTarget"),
+            !listed.iter().any(|kb| kb.canonical_name == "RetryTarget"),
             "newest entry must fall outside the list_by_world window"
         );
 
@@ -1154,6 +1245,68 @@ mod tests {
             .unwrap()
             .expect("targeted lookup must find the active row");
         assert_eq!(found.entry_id, "kb_target");
+    }
+
+    #[tokio::test]
+    async fn test_list_by_world_scoped_entry_id_beyond_list_window() {
+        let (pool, _dir) = fresh_pool().await;
+        seed_world(&pool).await;
+
+        for i in 0..LIST_BY_WORLD_LIMIT {
+            seed::knowledge_entry(
+                &pool,
+                &format!("kb_fill_{i:03}"),
+                "wld_1",
+                "item",
+                &format!("Fill_{i:03}"),
+                "confirmed",
+            )
+            .await;
+        }
+        seed::knowledge_entry(
+            &pool,
+            "kb_scoped_target",
+            "wld_1",
+            "character",
+            "ScopedTarget",
+            "confirmed",
+        )
+        .await;
+
+        let store = SqliteKbStore::new(pool);
+        let scoped = store
+            .list_by_world_scoped("wld_1", &["kb_scoped_target".to_string()], &[])
+            .await
+            .unwrap();
+        assert!(!scoped.truncated);
+        assert_eq!(scoped.entries.len(), 1);
+        assert_eq!(scoped.entries[0].entry_id, "kb_scoped_target");
+    }
+
+    #[tokio::test]
+    async fn test_list_by_world_scoped_unfiltered_detects_truncation() {
+        let (pool, _dir) = fresh_pool().await;
+        seed_world(&pool).await;
+
+        for i in 0..=LIST_BY_WORLD_LIMIT {
+            seed::knowledge_entry(
+                &pool,
+                &format!("kb_cap_{i:03}"),
+                "wld_1",
+                "item",
+                &format!("Cap_{i:03}"),
+                "confirmed",
+            )
+            .await;
+        }
+
+        let store = SqliteKbStore::new(pool);
+        let scoped = store.list_by_world_scoped("wld_1", &[], &[]).await.unwrap();
+        assert!(scoped.truncated);
+        assert_eq!(
+            scoped.entries.len(),
+            usize::try_from(LIST_BY_WORLD_LIMIT).unwrap()
+        );
     }
 
     #[tokio::test]
