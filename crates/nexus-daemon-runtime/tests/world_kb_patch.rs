@@ -710,6 +710,91 @@ async fn promote_adopt_retry_does_not_delete_unattributed_collision() {
     assert_eq!(active.entry_id, "kb_preexisting");
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn promote_adopt_confirmed_job_does_not_recover_unattributed_collision() {
+    let (_tmp, state) = fresh_state().await;
+    let pool = state.pool().unwrap().clone();
+    let job_id = "xj_confirmed_unattrib";
+
+    // Independent pre-existing entry (no promotion job stamp).
+    seed_key_block(
+        &pool,
+        "kb_preexisting_confirmed",
+        "wld_test_world",
+        "character",
+        "ConfirmedCollision",
+        "confirmed",
+        Some(1),
+        Some(NOVEL_CHARACTER_BODY),
+    )
+    .await;
+    seed_pending_candidate(
+        &pool,
+        job_id,
+        "work_confirmed_collision",
+        "wld_test_world",
+        "character",
+        "ConfirmedCollision",
+    )
+    .await;
+
+    // Simulate a concurrent flip confirming the job while this adopt attempt
+    // hits the unique-key collision (outer gate still sees pending).
+    let trigger_sql = format!(
+        "CREATE TRIGGER trg_confirm_on_collision_insert \
+         BEFORE INSERT ON kb_key_blocks \
+         WHEN NEW.canonical_name = 'ConfirmedCollision' \
+         BEGIN \
+           UPDATE kb_extract_jobs \
+           SET promotion_status = 'confirmed', version = version + 1 \
+           WHERE job_id = '{job_id}' AND promotion_status = 'pending'; \
+         END"
+    );
+    sqlx::query(&trigger_sql).execute(&pool).await.unwrap();
+
+    let err = promote_candidate(
+        State(state.clone()),
+        Path("wld_test_world".to_string()),
+        Json(WorldKbPromoteCandidateRequest {
+            job_id: job_id.to_string(),
+            candidate_id: "kb_cand".to_string(),
+            action: "adopt".parse().unwrap(),
+            expected_version: 0,
+            merge_target_id: None,
+            patch: None,
+        }),
+    )
+    .await
+    .expect_err("confirmed job must not adopt unrelated active entry");
+    sqlx::query("DROP TRIGGER IF EXISTS trg_confirm_on_collision_insert")
+        .execute(&pool)
+        .await
+        .ok();
+    assert_eq!(
+        err.status_code(),
+        axum::http::StatusCode::UNPROCESSABLE_ENTITY
+    );
+    let details = err.error_details().expect("validation details");
+    let errors = details["validation_summary"]["errors"]
+        .as_array()
+        .expect("errors array");
+    assert!(
+        errors.iter().any(|e| {
+            e.as_str()
+                .is_some_and(|msg| msg.contains("already exists in this world"))
+        }),
+        "must surface collision without adopting unrelated entry: {details:?}"
+    );
+
+    let store = SqliteKbStore::new(pool);
+    let active = store
+        .get_active_by_unique_key("wld_test_world", "ConfirmedCollision", BlockType::Character)
+        .await
+        .unwrap()
+        .expect("pre-existing entry must remain active");
+    assert_eq!(active.entry_id, "kb_preexisting_confirmed");
+}
+
 #[tokio::test]
 async fn promote_reject_dismisses_candidate() {
     let (_tmp, state) = fresh_state().await;

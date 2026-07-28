@@ -986,8 +986,11 @@ fn build_spoke_promote_request(candidate: &WorldKbEntry) -> PromoteRequest {
 /// reject and consults the promotion job:
 ///
 /// - **job `confirmed`** → prior partial attempt completed despite returning
-///   an error; recover the existing entry (looked up via the same unique
-///   key) and return it as a retry-safe success.
+///   an error; recover the existing entry only when its
+///   `created_from_command_id` matches `job_id` (same stamp
+///   [`promote_adopt`] sets before orchestration). Otherwise return 422 —
+///   an independently created active entry must not be reported as this
+///   job's adoption.
 /// - **job `pending`** → uniqueness collision while the job is still pending
 ///   (in-flight adopt, pre-existing entry, or stale orphan). Return 422
 ///   **without** deleting any KB row — only the creating request may
@@ -1077,12 +1080,19 @@ async fn map_promote_reject(
                 )
                 .await?
                 {
-                    tracing::info!(
+                    if existing.created_from_command_id.as_deref() == Some(job_id) {
+                        tracing::info!(
+                            job_id = %job_id,
+                            entry_id = %existing.entry_id,
+                            "promote_adopt retry-safe: returning existing confirmed entry from prior partial attempt"
+                        );
+                        return Ok(existing.into());
+                    }
+                    tracing::warn!(
                         job_id = %job_id,
                         entry_id = %existing.entry_id,
-                        "promote_adopt retry-safe: returning existing confirmed entry from prior partial attempt"
+                        "promote_adopt retry-safe: confirmed job but active entry is not attributed to this job"
                     );
-                    return Ok(existing.into());
                 }
                 // Defensive: unique fired but the active entry isn't found
                 // by the lookup (status drift between INSERT and SELECT).
