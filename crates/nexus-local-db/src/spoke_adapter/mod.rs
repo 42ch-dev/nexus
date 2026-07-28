@@ -40,6 +40,9 @@ use tokio::runtime::Handle;
 /// # Panics
 ///
 /// [`Self::new`] panics if no tokio runtime is running on the current thread.
+/// In debug builds it additionally panics if that runtime is **not**
+/// multi-threaded — the `block_in_place` bridge used by every sync port
+/// method requires a multi-threaded runtime (see [`Self::block_on`]).
 pub struct NexusBaselineAdapter {
     pool: SqlitePool,
     handle: Handle,
@@ -50,15 +53,28 @@ impl NexusBaselineAdapter {
     ///
     /// # Panics
     ///
-    /// Panics if no tokio runtime is running on the current thread. Construct
-    /// this from inside a tokio context (e.g. an async daemon handler or a
+    /// Panics if no tokio runtime is running on the current thread
+    /// ([`Handle::current`]). In debug builds, additionally panics if the
+    /// current runtime is **not** multi-threaded: `block_in_place` (used by
+    /// [`Self::block_on`]) panics under a `current_thread` runtime, so this
+    /// early check surfaces the misuse at construction rather than at the
+    /// first port method call. Construct this from inside a multi-threaded
+    /// tokio context (e.g. an async daemon handler or a
     /// `#[tokio::test(flavor = "multi_thread")]` test).
     #[must_use]
     pub fn new(pool: SqlitePool) -> Self {
-        Self {
-            pool,
-            handle: Handle::current(),
-        }
+        let handle = Handle::current();
+        // W-2 (qc3): `Handle::current()` succeeds even for a `current_thread`
+        // runtime, so the real guard is the flavor check. `block_in_place`
+        // panics under a current-thread runtime; fail fast at construction in
+        // debug builds so the panic points here, not at the first port call.
+        // No-op in release builds.
+        debug_assert!(
+            handle.runtime_flavor() == tokio::runtime::RuntimeFlavor::MultiThread,
+            "NexusBaselineAdapter requires a multi-threaded tokio runtime \
+             (block_in_place panics under a current_thread runtime)"
+        );
+        Self { pool, handle }
     }
 
     /// Bridge a sync trait method → async `SQLite` I/O.

@@ -50,7 +50,8 @@
 //! with `INVALID_INPUT`.
 
 use super::NexusBaselineAdapter;
-use crate::findings::{create_finding, Finding as NexusFinding};
+use crate::error::LocalDbError;
+use crate::findings::{validate_finding_enums, Finding as NexusFinding};
 use nexus_spoke_adapter::{
     Finding as SpokeFinding, FindingExtensionsKey, FindingPort, SpokeReject, SpokeRejectCode,
     SpokeResult,
@@ -62,13 +63,31 @@ impl FindingPort for NexusBaselineAdapter {
         let pool = self.pool.clone();
         self.block_on(async move {
             let mut persisted: Vec<SpokeFinding> = Vec::with_capacity(findings.len());
+
+            // W-1 (qc3): wrap the entire batch in one SQLite transaction so a
+            // mid-batch failure rolls back every earlier insert. Without this,
+            // each insert auto-committed independently and the caller would
+            // receive a Reject while the preceding findings stayed persisted
+            // (a retry would then hit UNIQUE errors on those rows). `tx` drops
+            // uncommitted on any early `return` below → automatic rollback.
+            let mut tx = match pool.begin().await {
+                Ok(tx) => tx,
+                Err(e) => {
+                    return reject(
+                        SpokeRejectCode::InvalidInput,
+                        format!("failed to begin findings batch transaction: {e}"),
+                        json!({}),
+                    );
+                }
+            };
+
             for finding in findings {
                 let nexus_finding = match map_spoke_to_nexus(&finding) {
                     Ok(n) => n,
-                    Err(reject) => return SpokeResult::Reject(reject),
+                    Err(rejection) => return SpokeResult::Reject(rejection),
                 };
                 let finding_id = nexus_finding.finding_id.clone();
-                if let Err(e) = create_finding(&pool, &nexus_finding).await {
+                if let Err(e) = insert_finding_tx(&mut tx, &nexus_finding).await {
                     return reject(
                         SpokeRejectCode::InvalidInput,
                         format!("storage error on finding {finding_id} insert: {e}"),
@@ -77,12 +96,68 @@ impl FindingPort for NexusBaselineAdapter {
                 }
                 persisted.push(finding);
             }
+
+            // All inserts succeeded — commit the batch atomically. Until this
+            // point nothing is durably persisted; a failure here rolls back.
+            if let Err(e) = tx.commit().await {
+                return reject(
+                    SpokeRejectCode::InvalidInput,
+                    format!("failed to commit findings batch transaction: {e}"),
+                    json!({}),
+                );
+            }
+
             SpokeResult::Ok(persisted)
         })
     }
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────
+
+/// Insert a [`NexusFinding`] inside a caller-owned `SQLite` transaction.
+///
+/// Mirrors [`crate::findings::create_finding`]'s INSERT (same column list,
+/// bind order, and `validate_finding_enums` defense-in-depth) but targets a
+/// `&mut Transaction` instead of `&SqlitePool` so the spoke `put_findings`
+/// batch can wrap N inserts in one atomic `BEGIN`/`COMMIT` (W-1, qc3). The
+/// caller owns the transaction boundary and must `commit()` once every row
+/// is inserted.
+///
+/// # Errors
+///
+/// Returns [`LocalDbError`] if enum validation or the insert fails.
+///
+/// SAFETY: runtime query — mirrors the compile-time-checked INSERT in
+/// `create_finding`; the `.sqlx` cache is not warmed for the
+/// transaction-executor shape (see nexus-local-db AGENTS.md waiver
+/// R-V140P0-S3). The column list + bind order match `create_finding`.
+async fn insert_finding_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    f: &NexusFinding,
+) -> Result<(), LocalDbError> {
+    validate_finding_enums(&f.severity, &f.status, &f.target_executor)?;
+    sqlx::query(
+        "INSERT INTO findings (finding_id, work_id, chapter, severity, status, title, \
+         description, target_executor, creator_id, kind, rule_suggestion, created_at, updated_at) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    )
+    .bind(&f.finding_id)
+    .bind(&f.work_id)
+    .bind(f.chapter)
+    .bind(&f.severity)
+    .bind(&f.status)
+    .bind(&f.title)
+    .bind(&f.description)
+    .bind(&f.target_executor)
+    .bind(&f.creator_id)
+    .bind(&f.kind)
+    .bind(&f.rule_suggestion)
+    .bind(f.created_at)
+    .bind(f.updated_at)
+    .execute(&mut **tx)
+    .await?;
+    Ok(())
+}
 
 /// Map a single spoke [`SpokeFinding`] onto a nexus [`NexusFinding`] row
 /// ready for `create_finding`. Extracts nexus-required fields from
@@ -540,5 +615,56 @@ mod tests {
             SpokeResult::Ok(v) => assert!(v.is_empty()),
             SpokeResult::Reject(r) => panic!("empty input must be Ok: {r:?}"),
         }
+    }
+
+    /// Assert no `findings` row exists for `finding_id`.
+    async fn assert_finding_absent(pool: &sqlx::SqlitePool, finding_id: &str) {
+        // SAFETY: test-only static COUNT with a bind param.
+        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM findings WHERE finding_id = ?")
+            .bind(finding_id)
+            .fetch_one(pool)
+            .await
+            .expect("count query succeeds");
+        assert_eq!(
+            count, 0,
+            "finding {finding_id} must NOT be persisted after a rolled-back batch"
+        );
+    }
+
+    /// W-1 (qc3): a mid-batch failure must roll back the ENTIRE batch — no
+    /// partial writes. The batch is `[fnd_rb_first, fnd_rb_dup]` where the
+    /// second item reuses the first's `finding_id`. The first INSERT lands
+    /// inside the (uncommitted) transaction; the second hits the `finding_id`
+    /// UNIQUE/PK constraint and rejects. After the call returns, neither
+    /// finding may be present — proving the earlier insert was rolled back
+    /// rather than left committed.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn put_findings_mid_batch_failure_rolls_back_entire_batch() {
+        let (pool, _dir) = fresh_pool().await;
+        seed_work(&pool).await;
+
+        let adapter = NexusBaselineAdapter::new(pool.clone());
+
+        // First item: valid, would persist on its own.
+        let first = spoke_finding("fnd_rb_first", "info", "open", None, None);
+        // Second item: collides on `finding_id` with the first → mid-batch
+        // UNIQUE violation. Distinct severity so the two fixtures are
+        // clearly separate objects.
+        let second = spoke_finding("fnd_rb_first", "warning", "open", None, None);
+
+        match adapter.put_findings(vec![first, second]) {
+            SpokeResult::Reject(r) => {
+                assert_eq!(
+                    r.code,
+                    SpokeRejectCode::InvalidInput,
+                    "mid-batch collision must reject with INVALID_INPUT"
+                );
+            }
+            SpokeResult::Ok(_) => panic!("expected reject on duplicate finding_id mid-batch"),
+        }
+
+        // Atomicity: the first insert must NOT have leaked through. Before the
+        // W-1 transaction wrap, `fnd_rb_first` would be committed here.
+        assert_finding_absent(&pool, "fnd_rb_first").await;
     }
 }
