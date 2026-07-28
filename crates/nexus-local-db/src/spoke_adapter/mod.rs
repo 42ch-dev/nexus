@@ -1,14 +1,14 @@
 //! Production `BaselinePorts` implementation home (spec §7.4).
 //!
 //! `NexusBaselineAdapter` is the production spoke port impl backing spoke
-//! orchestrators against this crate's SQLite storage. The port-family matrix
+//! orchestrators against this crate's `SQLite` storage. The port-family matrix
 //! (which families are production vs stub) lives in
 //! `.mstar/specs/spoke-adapter-architecture.md` §7.4.
 //!
 //! # Async ↔ sync bridge
 //!
 //! Spoke's port traits are **synchronous** (`fn ... -> SpokeResult<T>`) while
-//! SQLite I/O is async. The adapter captures the current tokio runtime
+//! `SQLite` I/O is async. The adapter captures the current tokio runtime
 //! [`Handle`] at construction and bridges each sync port method to async I/O
 //! via `tokio::task::block_in_place` + `Handle::block_on`. This requires the
 //! calling thread to be inside a tokio **multi-threaded** runtime — which the
@@ -17,19 +17,24 @@
 //! context (e.g. an HTTP handler or a `#[tokio::test(flavor = "multi_thread")]`
 //! test) so a runtime handle is available.
 
+pub mod finding_port;
+pub mod host_manifest_port;
 pub mod knowledge_entry_port;
+pub mod relation_port;
+pub mod rule_query_port;
+pub mod scope_query_port;
 
 use sqlx::SqlitePool;
 use tokio::runtime::Handle;
 
 /// Production `BaselinePorts` impl backing spoke orchestrators against nexus
-/// SQLite storage.
+/// `SQLite` storage.
 ///
 /// See `.mstar/specs/spoke-adapter-architecture.md` §7.4 for the family
 /// matrix (which families are production vs stub). Construct per-request from
 /// a [`SqlitePool`] (cheap handle) **while inside a tokio multi-threaded
 /// runtime**: the adapter captures the current runtime [`Handle`] and bridges
-/// the sync spoke port trait to async SQLite I/O via
+/// the sync spoke port trait to async `SQLite` I/O via
 /// `tokio::task::block_in_place`.
 ///
 /// # Panics
@@ -56,17 +61,56 @@ impl NexusBaselineAdapter {
         }
     }
 
-    /// Bridge a sync trait method → async SQLite I/O.
+    /// Bridge a sync trait method → async `SQLite` I/O.
     ///
     /// Requires the calling thread to be inside a tokio multi-threaded runtime
     /// (the production daemon uses `tokio::runtime::Builder::new_multi_thread`;
     /// see `apps/nexus42/src/main.rs`). `block_in_place` moves the current
-    /// worker out of the scheduler while the SQLite future resolves elsewhere
+    /// worker out of the scheduler while the `SQLite` future resolves elsewhere
     /// on the runtime.
     fn block_on<F, R>(&self, future: F) -> R
     where
         F: std::future::Future<Output = R>,
     {
         tokio::task::block_in_place(|| self.handle.block_on(future))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Compile-time proof that `NexusBaselineAdapter` satisfies the
+    /// `BaselinePorts` blanket impl once all 6 port families are in scope
+    /// (spec §7.4 — production-vs-stub matrix is complete).
+    ///
+    /// Each helper accepts `&dyn <PortFamily>`; passing a
+    /// `&NexusBaselineAdapter` performs the implicit trait-upcast that
+    /// only compiles when the appropriate `impl <PortFamily> for
+    /// NexusBaselineAdapter` block exists. The function body is empty
+    /// — runtime behavior is exercised in the per-port `tests` modules.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn nexus_baseline_adapter_satisfies_baseline_ports_blanket_impl() {
+        fn accepts_baseline_ports(_: &dyn nexus_spoke_adapter::BaselinePorts) {}
+        fn accepts_knowledge_entry_port(_: &dyn nexus_spoke_adapter::KnowledgeEntryPort) {}
+        fn accepts_relation_port(_: &dyn nexus_spoke_adapter::RelationPort) {}
+        fn accepts_scope_query_port(_: &dyn nexus_spoke_adapter::ScopeQueryPort) {}
+        fn accepts_finding_port(_: &dyn nexus_spoke_adapter::FindingPort) {}
+        fn accepts_rule_query_port(_: &dyn nexus_spoke_adapter::RuleQueryPort) {}
+        fn accepts_host_manifest_port(_: &dyn nexus_spoke_adapter::HostManifestPort) {}
+
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("test.db");
+        let pool = crate::open_pool(&db_path).await.unwrap();
+        crate::run_migrations(&pool).await.unwrap();
+        let adapter = NexusBaselineAdapter::new(pool);
+
+        accepts_baseline_ports(&adapter);
+        accepts_knowledge_entry_port(&adapter);
+        accepts_relation_port(&adapter);
+        accepts_scope_query_port(&adapter);
+        accepts_finding_port(&adapter);
+        accepts_rule_query_port(&adapter);
+        accepts_host_manifest_port(&adapter);
     }
 }
