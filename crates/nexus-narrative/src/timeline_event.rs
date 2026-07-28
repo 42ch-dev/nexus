@@ -317,6 +317,211 @@ impl From<TimelineEvent> for nexus_contracts::TimelineEvent {
     }
 }
 
+// ── Conversion: nexus-narrative TimelineEvent ↔ spoke TimelineEvent ──────
+//
+// V1.143 P0 T1: the spoke standard `spoke_schemas::TimelineEvent` is the
+// wire/standard boundary type for the L5 temporal axis (spec
+// `spoke-adapter-architecture.md` §7.1). `TimelineEvent` (this aggregate) is
+// the nexus domain type; these two `From` impls are the **sole conversion
+// seam** — the adapter constructs the spoke type before calling
+// spoke-operations. Call-boundary invariant §7 preserved: spoke helpers
+// receive the converted spoke type only, never the nexus domain type.
+//
+// Field mapping (mapping contract from plan):
+//   • timeline_event_id      — 1:1 String.
+//   • created_at             — nexus RFC3339 String ↔ spoke Option<DateTime<Utc>>.
+//   • title                  — nexus→spoke: canonical_name = first non-empty of
+//                              [title, summary, timeline_event_id] (spoke
+//                              canonical_name is required, minLength 1; the
+//                              fallback chain guarantees it). Reverse reads
+//                              canonical_name back into title.
+//   • summary                — bidirectional ↔ spoke description.
+//   • affected_key_block_ids — bidirectional ↔ spoke participant_entry_ids
+//                              (Option<Vec<String>> ↔ Vec<String>; empty ≡ None).
+//   • schema_version         — u32 ↔ NonZeroU64.
+//   • caused_by_event_ids, world_id, branch_id, event_type, status (as
+//     timeline_status), sequence_no, source_command_id — bidirectional,
+//     carried in extensions.nexus.<field>.
+//   • spoke-only fork fields (fork_id, parent_fork_id, timeline_scale,
+//     source_anchor, computable_logs) — lossy: None/empty on forward, dropped
+//     on reverse (nexus doesn't yet participate in spoke's fork model — V1.145).
+//   • sort_key — forward only: sequence_no.to_string() (ordering hint).
+
+use serde_json::Value;
+use spoke_schemas::timeline_event::{TimelineEventCanonicalName, TimelineEventExtensionsKey};
+
+/// Re-export the spoke standard `TimelineEvent` under a clarifying alias.
+///
+/// `TimelineEvent` exists in both `nexus_narrative` and `spoke_schemas`; use
+/// `SpokeTimelineEvent` at conversion call sites to avoid the collision. Never
+/// glob-import both types into the same scope.
+pub use spoke_schemas::TimelineEvent as SpokeTimelineEvent;
+
+/// The `extensions.nexus` namespace key (lowercase, matches the
+/// `^[a-z][a-z0-9_-]*$` namespace convention — same pattern as
+/// `nexus-spoke-adapter/src/extensions.rs` for `KnowledgeEntry`).
+const NEXUS_NAMESPACE: &str = "nexus";
+
+/// Construct the typed namespace lookup key for the `"nexus"` namespace.
+///
+/// `spoke_schemas::TimelineEvent.extensions` is keyed by the typify-generated
+/// newtype `TimelineEventExtensionsKey` (regex-validated). The literal
+/// `"nexus"` always satisfies the regex, so construction is infallible at
+/// runtime. The type does not implement `Borrow<str>`, so a `HashMap::get`
+/// lookup must construct the key explicitly.
+fn nexus_ext_key() -> TimelineEventExtensionsKey {
+    TimelineEventExtensionsKey::try_from(NEXUS_NAMESPACE)
+        .expect("\"nexus\" matches the ^[a-z][a-z0-9_-]*$ namespace regex")
+}
+
+#[allow(clippy::fallible_impl_from)]
+impl From<TimelineEvent> for SpokeTimelineEvent {
+    fn from(d: TimelineEvent) -> Self {
+        // canonical_name: first non-empty of [title, summary, timeline_event_id].
+        // spoke requires minLength 1; the fallback chain guarantees it.
+        // Scoped so the borrows end before any field moves below.
+        let canonical_name = {
+            let candidate = d
+                .title
+                .as_deref()
+                .filter(|t| !t.is_empty())
+                .or_else(|| d.summary.as_deref().filter(|s| !s.is_empty()))
+                .unwrap_or(&d.timeline_event_id);
+            TimelineEventCanonicalName::try_from(candidate)
+                .expect("canonical_name fallback chain guarantees a non-empty value")
+        };
+
+        // created_at: RFC3339 String → Option<DateTime<Utc>>. Graceful on parse
+        // failure (matches the WorldKbEntry↔KnowledgeEntry seam convention).
+        let created_at = chrono::DateTime::parse_from_rfc3339(&d.created_at)
+            .ok()
+            .map(|dt| dt.with_timezone(&chrono::Utc));
+
+        // Build extensions.nexus carrying the 7 typed nexus fields.
+        let mut extensions: std::collections::HashMap<
+            TimelineEventExtensionsKey,
+            serde_json::Map<String, Value>,
+        > = std::collections::HashMap::new();
+        {
+            let ns = extensions.entry(nexus_ext_key()).or_default();
+            ns.insert("world_id".into(), Value::String(d.world_id.clone()));
+            ns.insert("branch_id".into(), Value::String(d.branch_id.clone()));
+            ns.insert("event_type".into(), Value::String(d.event_type.clone()));
+            // status rides as `timeline_status` (avoids collision with spoke's
+            // own lifecycle status semantics on the spoke type).
+            ns.insert("timeline_status".into(), Value::String(d.status.clone()));
+            ns.insert("sequence_no".into(), Value::Number(d.sequence_no.into()));
+            if let Some(cmd) = d.source_command_id.as_ref() {
+                ns.insert("source_command_id".into(), Value::String(cmd.clone()));
+            }
+            if let Some(causes) = d.caused_by_event_ids.as_ref() {
+                ns.insert(
+                    "caused_by_event_ids".into(),
+                    Value::Array(causes.iter().cloned().map(Value::String).collect()),
+                );
+            }
+        }
+
+        Self {
+            canonical_name,
+            computable_logs: Vec::new(),
+            created_at,
+            description: d.summary,
+            extensions,
+            fork_id: None,
+            occurred_at: None,
+            parent_fork_id: None,
+            participant_entry_ids: d.affected_key_block_ids.unwrap_or_default(),
+            schema_version: std::num::NonZeroU64::new(u64::from(d.schema_version))
+                .expect("schema_version >= 1"),
+            // sort_key: ordering hint derived from sequence_no (nexus doesn't
+            // author free-form sort keys; sequence_no is the canonical order).
+            sort_key: Some(d.sequence_no.to_string()),
+            source_anchor: None,
+            timeline_event_id: d.timeline_event_id,
+            timeline_scale: None,
+            updated_at: None,
+        }
+    }
+}
+
+impl From<SpokeTimelineEvent> for TimelineEvent {
+    fn from(s: SpokeTimelineEvent) -> Self {
+        // Extract borrowed extensions.nexus data into owned values FIRST, so
+        // subsequent field moves out of `s` are not blocked by outstanding
+        // borrows (same ordering convention as WorldKbEntry↔KnowledgeEntry).
+        let (
+            world_id,
+            branch_id,
+            event_type,
+            timeline_status,
+            sequence_no,
+            source_command_id,
+            caused_by_event_ids,
+        ) = {
+            let ns = s.extensions.get(&nexus_ext_key());
+            (
+                ns.and_then(|m| m.get("world_id"))
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_string(),
+                ns.and_then(|m| m.get("branch_id"))
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_string(),
+                ns.and_then(|m| m.get("event_type"))
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_string(),
+                ns.and_then(|m| m.get("timeline_status"))
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_string(),
+                ns.and_then(|m| m.get("sequence_no"))
+                    .and_then(Value::as_u64)
+                    .unwrap_or_default(),
+                ns.and_then(|m| m.get("source_command_id"))
+                    .and_then(Value::as_str)
+                    .map(String::from),
+                ns.and_then(|m| m.get("caused_by_event_ids"))
+                    .and_then(Value::as_array)
+                    .map(|arr| {
+                        arr.iter()
+                            .filter_map(|v| v.as_str().map(String::from))
+                            .collect::<Vec<String>>()
+                    })
+                    .filter(|v| !v.is_empty()),
+            )
+        };
+
+        // canonical_name → title (reverse of the forward fallback chain; the
+        // spoke label is the nexus title carrier).
+        let title = Some(String::from(s.canonical_name));
+
+        Self {
+            schema_version: u32::try_from(s.schema_version.get()).unwrap_or(1),
+            timeline_event_id: s.timeline_event_id,
+            world_id,
+            branch_id,
+            event_type,
+            status: timeline_status,
+            sequence_no,
+            title,
+            summary: s.description,
+            caused_by_event_ids,
+            affected_key_block_ids: if s.participant_entry_ids.is_empty() {
+                None
+            } else {
+                Some(s.participant_entry_ids)
+            },
+            source_command_id,
+            created_at: s
+                .created_at
+                .map_or_else(|| chrono::Utc::now().to_rfc3339(), |dt| dt.to_rfc3339()),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -503,5 +708,111 @@ mod tests {
 
         assert!(result.is_ok());
         assert_eq!(evt.status, "canon");
+    }
+
+    // ── V1.143 P0 T1: spoke seam round-trip ─────────────────────────────
+    //
+    // Proves the conversion seam (`TimelineEvent ↔ spoke TimelineEvent`)
+    // round-trips ALL 13 nexus fields. Mirrors the `WorldKbEntry ↔ spoke
+    // KnowledgeEntry` round-trip suite in nexus-knowledge.
+
+    #[test]
+    fn spoke_seam_roundtrip_preserves_all_nexus_fields() {
+        let mut evt =
+            TimelineEvent::new("wld_test", "fbk_root", TimelineEventType::StoryAdvance, 42);
+        evt.title = Some("The Turning Point".to_string());
+        evt.summary = Some("A pivotal battle shifts the tide.".to_string());
+        evt.add_cause("evt_pred_1");
+        evt.add_cause("evt_pred_2");
+        evt.add_affected_kb("kb_char_mira");
+        evt.add_affected_kb("kb_loc_ashford");
+        evt.source_command_id = Some("cmd_abc123".to_string());
+        evt.status = TimelineEventStatus::Canon.as_str().to_string();
+        // Deterministic RFC3339 in chrono's native `+00:00` format so
+        // `to_rfc3339()` on the reverse path is byte-identical.
+        evt.created_at = "2026-07-28T12:00:00+00:00".to_string();
+
+        // Forward → spoke, reverse → nexus. `evt` is retained for comparison.
+        let spoke: SpokeTimelineEvent = evt.clone().into();
+        let roundtripped: TimelineEvent = spoke.into();
+
+        // All 13 nexus fields survive the seam.
+        assert_eq!(roundtripped.schema_version, evt.schema_version);
+        assert_eq!(roundtripped.timeline_event_id, evt.timeline_event_id);
+        assert_eq!(roundtripped.world_id, evt.world_id);
+        assert_eq!(roundtripped.branch_id, evt.branch_id);
+        assert_eq!(roundtripped.event_type, evt.event_type);
+        assert_eq!(roundtripped.status, evt.status);
+        assert_eq!(roundtripped.sequence_no, evt.sequence_no);
+        assert_eq!(roundtripped.title, evt.title);
+        assert_eq!(roundtripped.summary, evt.summary);
+        assert_eq!(roundtripped.caused_by_event_ids, evt.caused_by_event_ids);
+        assert_eq!(
+            roundtripped.affected_key_block_ids,
+            evt.affected_key_block_ids
+        );
+        assert_eq!(roundtripped.source_command_id, evt.source_command_id);
+        assert_eq!(roundtripped.created_at, evt.created_at);
+    }
+
+    #[test]
+    fn spoke_seam_forward_packs_extensions_nexus_correctly() {
+        // The 7 typed nexus fields ride under extensions.nexus on the spoke
+        // type; title maps to canonical_name (not extensions).
+        let mut evt = TimelineEvent::new("wld_abc", "fbk_main", TimelineEventType::StoryAdvance, 7);
+        evt.title = Some("Treaty Signing".to_string());
+        evt.summary = Some("Peace at last.".to_string());
+        evt.add_cause("evt_prior");
+        evt.source_command_id = Some("cmd_xyz".to_string());
+        evt.status = TimelineEventStatus::Provisional.as_str().to_string();
+
+        let key = super::nexus_ext_key();
+        let spoke: SpokeTimelineEvent = evt.into();
+        let ns = spoke
+            .extensions
+            .get(&key)
+            .expect("extensions.nexus namespace is always present on forward conversion");
+
+        assert_eq!(ns["world_id"], "wld_abc");
+        assert_eq!(ns["branch_id"], "fbk_main");
+        assert_eq!(ns["event_type"], "story_advance");
+        assert_eq!(ns["timeline_status"], "provisional");
+        assert_eq!(ns["sequence_no"], 7);
+        assert_eq!(ns["source_command_id"], "cmd_xyz");
+        assert_eq!(ns["caused_by_event_ids"][0], "evt_prior");
+        // sort_key is derived from sequence_no.
+        assert_eq!(spoke.sort_key.as_deref(), Some("7"));
+        // title → canonical_name (NOT in extensions).
+        assert_eq!(spoke.canonical_name.to_string(), "Treaty Signing");
+        assert!(!ns.contains_key("title"));
+    }
+
+    #[test]
+    fn spoke_seam_canonical_name_falls_back_to_summary_then_id() {
+        // When title is absent, canonical_name falls back to summary; when
+        // summary is also absent, to timeline_event_id. This guarantees the
+        // spoke required field (minLength 1) is always satisfied.
+        let mut evt_no_title =
+            TimelineEvent::new("wld_x", "fbk_y", TimelineEventType::StateUpdate, 1);
+        evt_no_title.summary = Some("Summary-only event".to_string());
+        let spoke: SpokeTimelineEvent = evt_no_title.into();
+        assert_eq!(spoke.canonical_name.to_string(), "Summary-only event");
+
+        let evt_bare = TimelineEvent::new("wld_x", "fbk_y", TimelineEventType::StateUpdate, 1);
+        let id = evt_bare.timeline_event_id.clone();
+        let spoke: SpokeTimelineEvent = evt_bare.into();
+        assert_eq!(spoke.canonical_name.to_string(), id);
+    }
+
+    #[test]
+    fn spoke_seam_empty_vecs_round_trip_to_none() {
+        // nexus Option<Vec<String>> ≡ None maps to spoke empty Vec and back
+        // to None (empty ≡ None contract for caused_by_event_ids and
+        // affected_key_block_ids).
+        let evt = TimelineEvent::new("wld_x", "fbk_y", TimelineEventType::StateUpdate, 1);
+        let spoke: SpokeTimelineEvent = evt.clone().into();
+        let roundtripped: TimelineEvent = spoke.into();
+        assert_eq!(roundtripped.caused_by_event_ids, None);
+        assert_eq!(roundtripped.affected_key_block_ids, None);
     }
 }

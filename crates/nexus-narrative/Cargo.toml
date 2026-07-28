@@ -18,6 +18,10 @@ thiserror.workspace = true
 chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1", features = ["v4"] }
 strum.workspace = true
+# V1.143 P0 T1: spoke standard `TimelineEvent` is the wire boundary type for
+# the L5 temporal axis. The two `From` impls in `timeline_event.rs` are the
+# sole conversion seam (spec spoke-adapter-architecture.md §7.1).
+spoke-schemas.workspace = true
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["rt", "macros"] }

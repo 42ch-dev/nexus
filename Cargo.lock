@@ -2830,6 +2830,7 @@ dependencies = [
  "nexus-spoke-adapter",
  "serde",
  "serde_json",
+ "spoke-schemas",
  "strum 0.26.3",
  "thiserror 1.0.69",
  "tokio",
