@@ -132,4 +132,6 @@ A common mistake (made and corrected during V1.141 P1 T2): collapse both mismatc
 
 ## Production boundary (out of scope for the boundary crate)
 
+> **Update (V1.142):** The production `BaselinePorts` implementation (`NexusBaselineAdapter`) now lives in `nexus-local-db/src/spoke_adapter/`, **not** "downstream in nexus-knowledge" as the V1.141 doc speculated. `nexus-knowledge` is a domain-types-and-traits crate with no SQLite dependency — it cannot be the production port home. The actual dep graph is `nexus-local-db → nexus-knowledge → nexus-spoke-adapter`. See spec [`spoke-adapter-architecture.md`](../../../specs/spoke-adapter-architecture.md) §7.4 for the production-vs-stub matrix and dependency rationale.
+
 Wiring nexus SQLite tables behind all six baseline port families is downstream product work — it ships when each backing surface (Relations / Findings / Rules / `HostCapabilityManifest`) lands. The boundary crate exposes the traits + orchestrators + a reference mock; production impls are owned by the consuming crate. V1.141 shipped mock + tests + spec; production `KnowledgeEntryPort` against `nexus-local-db` is the next-iteration trigger (`R-V1141P1-001`, compass Roadmap item 1).
