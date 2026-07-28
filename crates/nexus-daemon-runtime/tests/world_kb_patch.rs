@@ -141,7 +141,15 @@ async fn fresh_state() -> (
 
 // ─── patch-entity ───────────────────────────────────────────────────────────
 
-#[tokio::test]
+// V1.143 P1: patch_entity now routes the canonical edit through
+// `orchestrate_upsert` via `NexusBaselineAdapter`, which bridges sync spoke
+// ports to async SQLite via `tokio::task::block_in_place`. That requires a
+// multi-threaded runtime (the production daemon uses one; tests must opt in
+// via `flavor = "multi_thread"` — same rationale as the promote_adopt tests
+// below). The fast-fail patch_entity tests (stale version / deleted /
+// cross-author) short-circuit on pre-orchestrator guards and stay on the
+// default current-thread runtime.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn patch_entity_title_bumps_version() {
     let (_tmp, state) = fresh_state().await;
     seed_key_block(

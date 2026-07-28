@@ -58,11 +58,13 @@ use nexus_local_db::spoke_adapter::NexusBaselineAdapter;
 use nexus_local_db::LocalDbError;
 // V1.142 P2: first production orchestrator cutover. `promote_adopt` routes
 // through `orchestrate_promote(&NexusBaselineAdapter, PromoteRequest)`.
+// V1.143 P1: second cutover — `patch_entity` routes the canonical entity edit
+// through `orchestrate_upsert(&NexusBaselineAdapter, UpsertRequest)`.
 // These spoke types are re-exported through `nexus_spoke_adapter` (the
 // single boundary that crosses into spoke standard objects; spec §7).
 use nexus_spoke_adapter::{
-    orchestrate_promote, KnowledgeEntry as SpokeKnowledgeEntry, PromoteRequest, PromoteResponse,
-    SpokeReject, SpokeRejectCode, SpokeResult,
+    orchestrate_promote, orchestrate_upsert, KnowledgeEntry as SpokeKnowledgeEntry, PromoteRequest,
+    PromoteResponse, SpokeReject, SpokeRejectCode, SpokeResult, UpsertRequest, UpsertResponse,
 };
 use serde::Deserialize;
 use std::sync::{Arc, Mutex};
@@ -350,10 +352,14 @@ pub async fn patch_entity(
         });
     }
 
-    // Compute new field values + validate.
+    // Compute new field values + validate. The DB-format `body_json_str`
+    // returned by `compute_body` is no longer needed here: V1.143 routes the
+    // write through `orchestrate_upsert`, and the production adapter serializes
+    // the spoke `KnowledgeEntry` body itself. Only the typed `WorldKbBody` is
+    // needed (validation + building the post-patch entity).
     let new_name = req.patch.title.as_ref().map(|t| t.to_string());
     let new_block_type = req.patch.block_type;
-    let (body_json_str, body_for_validation) = compute_body(&kb, &req.patch)?;
+    let (_body_json_str, body_for_validation) = compute_body(&kb, &req.patch)?;
 
     if let Some(ref name) = new_name {
         validate_canonical_name(name)
@@ -366,23 +372,46 @@ pub async fn patch_entity(
             .map_err(|e| NexusApiError::world_kb_validation_failed(&[e.to_string()], &[]))?;
     }
 
-    // Atomic CAS write.
-    let mut tx = pool.begin().await.map_err(NexusApiError::from)?;
-    let new_version = cas_update_key_block_fields(
-        &mut tx,
-        &req.entity_id,
-        new_name.as_deref(),
-        new_block_type.map(|bt| bt.as_str()),
-        body_json_str.as_deref(),
-        i64::try_from(current_version).unwrap_or(0),
-    )
-    .await
-    .map_err(|e| map_cas_err(e, &req.entity_id, "version"))?;
-    tx.commit().await.map_err(NexusApiError::from)?;
+    // V1.143 P1: route the canonical entity edit through `orchestrate_upsert`
+    // (Surface B). The handler owns validation + pre-orchestrator guards; the
+    // orchestrator owns the spoke lifecycle invariants + the CAS persist (the
+    // production adapter's `put_update` reuses the same `cas_update_key_block_
+    // fields` CAS + revision bump as the previous direct write, preserving
+    // per-row OCC behavior).
+    //
+    // Build the POST-PATCH entity and convert it to the spoke `KnowledgeEntry`
+    // boundary type (sole conversion seam, spec §7.1). The candidate's revision
+    // is the current (pre-bump) revision: the orchestrator's
+    // `assert_revision_match` requires candidate.revision == stored.revision,
+    // and the adapter's `put_update` bumps the revision on the CAS write.
+    let mut post_patch = kb.clone();
+    if let Some(ref name) = new_name {
+        post_patch.canonical_name = name.clone();
+    }
+    if let Some(bt) = new_block_type {
+        post_patch.block_type = wire_cast(bt);
+    }
+    if let Some(ref body) = body_for_validation {
+        post_patch.body = Some(body.clone());
+    }
+    post_patch.revision = Some(current_version);
+
+    let spoke_req = build_spoke_upsert_request(&post_patch);
+    let adapter = NexusBaselineAdapter::new(pool.clone());
+    // `with_bound_tx` is a no-op when the adapter has no shared tx cell
+    // (`put_update` opens + commits its own transaction) — patch_entity has no
+    // sibling write, so the unbound path is behavior-equivalent to the previous
+    // `pool.begin()` → CAS → `commit()` block.
+    let result = adapter.with_bound_tx(|| orchestrate_upsert(&adapter, spoke_req));
+    // Confirm success + extract the bumped revision from the persisted entry.
+    let persisted = map_upsert_response(result, pool, &req.entity_id).await?;
+    let new_version = persisted.revision.unwrap_or(0);
 
     info!(entity_id = %req.entity_id, new_version, "world_kb.patch_entity committed");
 
-    // Re-read canonical post-write state for the response projection.
+    // Re-read canonical post-write state for the response projection (mirrors
+    // the pre-cutover re-read; `cas_update_key_block_fields` sets `updated_at`
+    // server-side, which the orchestrator's returned entry does not carry).
     let updated = store
         .get_knowledge_entry(&req.entity_id)
         .await
@@ -916,6 +945,176 @@ fn build_spoke_promote_request(candidate: &WorldKbEntry) -> PromoteRequest {
     let wire = serde_json::to_value(&spoke_entry).unwrap_or_else(|_| serde_json::json!({}));
     serde_json::from_value(serde_json::json!({ "candidate": wire }))
         .expect("KnowledgeEntry-derived candidate fits PromoteRequest.candidate shape")
+}
+
+// ─── patch-entity orchestration helpers (V1.143 P1) ─────────────────────────
+//
+// `patch_entity`'s reject mapper is intentionally NOT shared with
+// `spoke_reject_to_api_error` (the promote-adopt mapper): promote's conflict
+// path re-reads the promotion JOB version, while patch_entity's conflict path
+// re-reads the KB ENTITY revision. Different lookup targets ⇒ a shared helper
+// would obscure, not simplify (per the brief's "don't over-abstract" guidance).
+
+/// Build a spoke [`UpsertRequest`] carrying a single post-patch
+/// [`WorldKbEntry`] candidate.
+///
+/// Mirrors [`build_spoke_promote_request`]: the entry is converted to the
+/// spoke [`SpokeKnowledgeEntry`] boundary type via the sole `From<WorldKbEntry>`
+/// conversion seam (spec §7.1), then round-tripped through JSON to fit the
+/// `UpsertRequest.knowledge_entries` wire shape (the spoke codegen emits a
+/// distinct struct per wire shape even when the schema is shared).
+///
+/// `expected_base_revision` is NOT a field on [`UpsertRequest`]: the
+/// orchestrator derives it from its own `get_knowledge_entry` + the candidate's
+/// `revision` (which the caller sets to the current stored revision).
+fn build_spoke_upsert_request(entry: &WorldKbEntry) -> UpsertRequest {
+    let spoke_entry: SpokeKnowledgeEntry = entry.clone().into();
+    let wire = serde_json::to_value(&spoke_entry).unwrap_or_else(|_| serde_json::json!({}));
+    serde_json::from_value(serde_json::json!({ "knowledge_entries": [wire] }))
+        .expect("KnowledgeEntry-derived entry fits UpsertRequest.knowledge_entries shape")
+}
+
+/// Map `orchestrate_upsert`'s [`SpokeResult<UpsertResponse>`] to the persisted
+/// [`WorldKbEntry`] on success, or to a [`NexusApiError`] on reject.
+///
+/// `patch_entity` upserts exactly one entry; the orchestrator returns the
+/// persisted entries in request order, so the first (and only) element is the
+/// patched entity with its bumped revision.
+///
+/// # `SpokeRejectCode` → `NexusApiError` mapping (see [`map_upsert_reject`])
+///
+/// | `SpokeRejectCode`                       | `NexusApiError`            |
+/// |-----------------------------------------|----------------------------|
+/// | `StoredRevisionStale` / `RevisionConflict` / `KnowledgeEntryAlreadyExists` | `world_kb_conflict` (409) |
+/// | `KnowledgeEntryTerminalStatus` / `InvalidKnowledgeEntryStatus` / `InvalidKnowledgeEntryStatusTransition` | `world_kb_validation_failed` (422) |
+/// | other / `Variant1` error envelope       | `Internal` (500)           |
+async fn map_upsert_response(
+    result: SpokeResult<UpsertResponse>,
+    pool: &sqlx::SqlitePool,
+    entity_id: &str,
+) -> Result<WorldKbEntry, NexusApiError> {
+    match result {
+        SpokeResult::Ok(UpsertResponse::Variant0 { knowledge_entries, .. }) => {
+            // Single-entry upsert; take the first persisted entry.
+            let persisted_wire = knowledge_entries.into_iter().next().ok_or_else(|| {
+                NexusApiError::Internal {
+                    code: "SPOKE_RESPONSE_DECODE".to_string(),
+                    message: format!(
+                        "orchestrate_upsert returned an empty knowledge_entries list for {entity_id}"
+                    ),
+                }
+            })?;
+            // The codegen emits a DISTINCT `KnowledgeEntry` struct per wire
+            // shape. Round-trip through JSON into the canonical data type that
+            // the `From<SpokeKnowledgeEntry> for WorldKbEntry` seam consumes
+            // (mirrors `map_promote_response`).
+            let wire = serde_json::to_value(&persisted_wire).map_err(|e| NexusApiError::Internal {
+                code: "SPOKE_RESPONSE_DECODE".to_string(),
+                message: format!(
+                    "orchestrate_upsert returned a non-serializable KnowledgeEntry: {e}"
+                ),
+            })?;
+            let spoke_entry: SpokeKnowledgeEntry = serde_json::from_value(wire).map_err(|e| {
+                NexusApiError::Internal {
+                    code: "SPOKE_RESPONSE_DECODE".to_string(),
+                    message: format!(
+                        "orchestrate_upsert response did not match KnowledgeEntry shape: {e}"
+                    ),
+                }
+            })?;
+            Ok(spoke_entry.into())
+        }
+        // Variant1 is the wire error-envelope case. The orchestrator always
+        // surfaces errors via `SpokeResult::Reject` (not Variant1), so this arm
+        // is defensive (mirrors `map_promote_response`).
+        SpokeResult::Ok(UpsertResponse::Variant1 { .. }) => Err(NexusApiError::Internal {
+            code: "SPOKE_ORCHESTRATOR_ERROR_ENVELOPE".to_string(),
+            message: format!(
+                "orchestrate_upsert returned an UpsertResponse::Variant1 error envelope for {entity_id}; \
+                 expected a SpokeResult::Reject (spoke wire-shape drift)"
+            ),
+        }),
+        SpokeResult::Reject(reject) => Err(map_upsert_reject(reject, pool, entity_id).await),
+    }
+}
+
+/// Reject-handling tail of [`map_upsert_response`]. Maps the spoke reject codes
+/// reachable on the patch-entity upsert path to [`NexusApiError`].
+///
+/// The 409 `current_version` is sourced from the reject details
+/// (`actualRevision` from the orchestrator's `assert_revision_match`;
+/// `storeRevision` from the adapter's CAS miss), falling back to an entity
+/// re-read so the client retries against the NEW revision rather than the stale
+/// `expected_version` (same principle as the promote-reject CAS-miss fix).
+async fn map_upsert_reject(
+    reject: SpokeReject,
+    pool: &sqlx::SqlitePool,
+    entity_id: &str,
+) -> NexusApiError {
+    match reject.code {
+        SpokeRejectCode::StoredRevisionStale
+        | SpokeRejectCode::RevisionConflict
+        | SpokeRejectCode::KnowledgeEntryAlreadyExists => {
+            // CAS race: prefer the revision the reject already carries (the
+            // orchestrator / adapter observed it); fall back to a fresh read.
+            let current = match extract_store_revision(&reject) {
+                Some(rev) => rev,
+                None => reread_entity_revision_sync(pool, entity_id).await,
+            };
+            NexusApiError::world_kb_conflict(
+                current,
+                entity_id,
+                "version",
+                "refetch the World KB graph and reapply",
+            )
+        }
+        SpokeRejectCode::KnowledgeEntryTerminalStatus
+        | SpokeRejectCode::InvalidKnowledgeEntryStatus
+        | SpokeRejectCode::InvalidKnowledgeEntryStatusTransition => {
+            NexusApiError::world_kb_validation_failed(&[reject.message], &[])
+        }
+        _ => NexusApiError::Internal {
+            code: "SPOKE_ORCHESTRATOR_REJECT".to_string(),
+            message: format!(
+                "orchestrate_upsert rejected: {}: {}",
+                reject.code, reject.message
+            ),
+        },
+    }
+}
+
+/// Extract the store-side revision a CAS/revision reject observed, from either
+/// detail-key shape the spoke layer emits:
+/// - orchestrator `assert_revision_match` → `actualRevision`
+/// - adapter CAS miss (`map_cas_err`) → `storeRevision`
+///
+/// Returns `None` when neither key is present (caller falls back to a re-read).
+fn extract_store_revision(reject: &SpokeReject) -> Option<u64> {
+    let details = reject.details.as_ref()?;
+    for key in ["actualRevision", "storeRevision"] {
+        if let Some(v) = details.get(key) {
+            if let Some(n) = v.as_u64() {
+                return Some(n);
+            }
+        }
+    }
+    None
+}
+
+/// Re-read the current `kb_key_blocks.revision` for `entity_id` (fallback when
+/// a CAS reject's details omit the store revision). `map_upsert_reject` is
+/// reached only after the synchronous orchestrator call returns (the adapter's
+/// port methods bridge to async `SQLite` via `block_in_place` internally), so
+/// by the time we get here the outer handler is back on its normal async path —
+/// awaiting the store read is safe and avoids a nested `block_in_place`.
+async fn reread_entity_revision_sync(pool: &sqlx::SqlitePool, entity_id: &str) -> u64 {
+    let store = kb_store::SqliteKbStore::new(pool.clone());
+    store
+        .get_knowledge_entry(entity_id)
+        .await
+        .ok()
+        .and_then(|e| e.revision)
+        .unwrap_or(0)
 }
 
 /// Map `orchestrate_promote`'s [`SpokeResult<PromoteResponse>`] to the
