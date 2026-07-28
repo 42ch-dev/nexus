@@ -25,6 +25,12 @@ nexus-creator-memory = { path = "../nexus-creator-memory" }
 nexus-narrative = { path = "../nexus-narrative" }
 nexus-knowledge = { path = "../nexus-knowledge" }
 nexus-moment-context-assembly = { path = "../nexus-moment-context-assembly" }
+# V1.142 P2: first production orchestrator cutover. `promote_adopt` routes
+# through `orchestrate_promote(&NexusBaselineAdapter, PromoteRequest)`; the
+# spoke wire types (`KnowledgeEntry`, `PromoteRequest`, `PromoteResponse`,
+# `SpokeResult`, `SpokeRejectCode`) come from this crate (spec §7 — single
+# boundary that crosses into spoke standard objects).
+nexus-spoke-adapter = { path = "../nexus-spoke-adapter" }
 graph-flow = "=0.2.3"
 tokio = { workspace = true }
 serde = { workspace = true }

@@ -2727,6 +2727,7 @@ dependencies = [
  "nexus-moment-context-assembly",
  "nexus-narrative",
  "nexus-orchestration",
+ "nexus-spoke-adapter",
  "nexus-wasm-host",
  "nix 0.28.0",
  "rcgen",

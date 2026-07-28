@@ -333,8 +333,13 @@ async fn patch_entity_cross_author_does_not_leak_existence() {
 const NOVEL_CHARACTER_BODY: &str =
     r#"{"summary":"A brave hero","attributes":{"novel_category":"character"}}"#;
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn promote_adopt_confirms_candidate() {
+    // V1.142 P2: promote_adopt now routes through `orchestrate_promote` via
+    // `NexusBaselineAdapter`, which bridges sync spoke ports to async SQLite
+    // via `tokio::task::block_in_place`. That requires a multi-threaded
+    // runtime (the production daemon uses one; tests must opt in via
+    // `flavor = "multi_thread"`).
     let (_tmp, state) = fresh_state().await;
     let candidate = insert_pending(
         state.pool().unwrap(),
