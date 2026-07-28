@@ -575,95 +575,10 @@ impl KbStore for SqliteKbStore {
         &self,
         kb: WorldKbEntry,
     ) -> Result<KbInsertResult, KbStoreError> {
-        // Validate canonical_name format/safety
-        validate_canonical_name(&kb.canonical_name).map_err(validation_err)?;
-
-        // Validate body semantics before persisting
-        validate_body(kb.block_type, kb.body.as_ref(), self.validation_mode)
-            .map_err(validation_err)?;
-
-        let key_block_id = kb.entry_id.clone();
-        let world_id = kb.world_id.clone();
-        let created_at = kb.created_at.clone();
-
-        let body_json = kb
-            .body
-            .as_ref()
-            .map(|b| serde_json::to_string(b).unwrap_or_default());
-        let source_anchor_json = kb
-            .source_anchor
-            .as_ref()
-            .map(|a| serde_json::to_string(a).unwrap_or_default());
-        // Stable snake_case serialization matching wire format (not Debug)
-        let block_type_str = serde_json::to_string(&kb.block_type)
-            .unwrap_or_else(|_| format!("{:?}", kb.block_type));
-        // Strip surrounding quotes from serde_json string output
-        let block_type_str = block_type_str.trim_matches('"').to_string();
-        let revision_i64 = kb.revision.map(u64::cast_signed);
-
-        // SAFETY: static SQL with vetted column names from migration
-        // 202606190003_kb_key_blocks_provenance.sql. Runtime query used
-        // because new provenance columns are unknown to sqlx offline mode.
-        let wld_id = kb.world_id.clone();
-        let cname = kb.canonical_name.clone();
-        let btype = kb.block_type;
-        // V1.139 P1 T4: serialize the full `extensions.nexus` namespace from the
-        // entry's typed identity fields (spec §2.3 write path). Known fields are
-        // also written to their typed columns (authoritative); unknown keys ride
-        // on `extensions_nexus_extras` and are merged in so they survive the
-        // read-modify-write cycle verbatim.
-        let extensions_nexus_json = serde_json::to_string(&build_extensions_nexus(
-            &kb.world_id,
-            kb.created_from_command_id.as_deref(),
-            kb.source_work_id.as_deref(),
-            kb.source_chapter,
-            kb.source_provenance_kind.as_deref(),
-            &nexus_extras_extension_map(kb.extensions_nexus_extras.as_ref()),
-        ))
-        .unwrap_or_default();
-        sqlx::query(
-            r"INSERT INTO kb_key_blocks
-                (key_block_id, world_id, block_type, canonical_name, status, revision,
-                 body_json, source_anchor_json, created_from_command_id, created_at, updated_at,
-                 source_work_id, source_chapter, source_provenance_kind, extensions_nexus_json)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        )
-        .bind(&key_block_id)
-        .bind(&wld_id)
-        .bind(&block_type_str)
-        .bind(&cname)
-        .bind(&kb.status)
-        .bind(revision_i64)
-        .bind(&body_json)
-        .bind(&source_anchor_json)
-        .bind(&kb.created_from_command_id)
-        .bind(&kb.created_at)
-        .bind(&kb.updated_at)
-        .bind(&kb.source_work_id)
-        .bind(kb.source_chapter)
-        .bind(&kb.source_provenance_kind)
-        .bind(&extensions_nexus_json)
-        .execute(&*self.pool)
-        .await
-        .map_err(|e| {
-            // SQLite UNIQUE constraint violation
-            if let sqlx::Error::Database(ref db_err_inner) = e {
-                if db_err_inner.code().as_deref() == Some("2067") {
-                    return KbStoreError::Duplicate {
-                        world_id: wld_id,
-                        name: cname,
-                        block_type: btype,
-                    };
-                }
-            }
-            db_err(&e)
-        })?;
-
-        Ok(KbInsertResult {
-            entry_id: key_block_id,
-            world_id,
-            created_at,
-        })
+        let mut tx = self.pool.begin().await.map_err(|e| db_err(&e))?;
+        let result = self.insert_key_block_in_tx(&mut tx, kb).await?;
+        tx.commit().await.map_err(|e| db_err(&e))?;
+        Ok(result)
     }
 
     async fn get_knowledge_entry(&self, key_block_id: &str) -> Result<WorldKbEntry, KbStoreError> {
@@ -1092,6 +1007,41 @@ pub async fn cas_update_key_block_fields(
     })
 }
 
+/// Persist the non-CAS fields of a `kb_key_blocks` row inside a caller-owned
+/// transaction.
+///
+/// Used after [`cas_update_key_block_fields`] on the spoke adapter update path
+/// so `status`, `source_anchor_json`, and `extensions_nexus_json` are written
+/// in the same transaction as the revision bump.
+///
+/// # Errors
+///
+/// Returns [`sqlx::Error`] on database failure.
+pub async fn update_key_block_auxiliary_fields_in_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    key_block_id: &str,
+    status: &str,
+    source_anchor_json: Option<&str>,
+    extensions_nexus_json: &str,
+) -> Result<(), sqlx::Error> {
+    // SAFETY: static SQL with vetted column names from migration
+    // 202606190003_kb_key_blocks_provenance.sql.
+    sqlx::query(
+        r"UPDATE kb_key_blocks SET
+             status = ?,
+             source_anchor_json = ?,
+             extensions_nexus_json = ?
+           WHERE key_block_id = ?",
+    )
+    .bind(status)
+    .bind(source_anchor_json)
+    .bind(extensions_nexus_json)
+    .bind(key_block_id)
+    .execute(&mut **tx)
+    .await
+    .map(|_| ())
+}
+
 /// V1.73 P0: read the per-row OCC version of a `kb_key_blocks` row,
 /// NULL-normalized to 0. Returns `None` when the row does not exist.
 ///
@@ -1159,6 +1109,29 @@ mod tests {
         let fetched = store.get_knowledge_entry(&kb.entry_id).await.unwrap();
         assert_eq!(fetched.canonical_name, "Hero");
         assert_eq!(fetched.world_id, "wld_1");
+    }
+
+    #[tokio::test]
+    async fn insert_key_block_in_tx_rollback_leaves_no_row() {
+        let (pool, _dir) = fresh_pool().await;
+        seed_world(&pool).await;
+
+        let store = SqliteKbStore::new(pool.clone());
+        let kb = WorldKbEntry::new("wld_1", BlockType::Character, "RollbackHero");
+        let entry_id = kb.entry_id.clone();
+
+        let mut tx = pool.begin().await.unwrap();
+        store
+            .insert_key_block_in_tx(&mut tx, kb)
+            .await
+            .expect("insert in tx should succeed");
+        tx.rollback().await.unwrap();
+
+        let err = store.get_knowledge_entry(&entry_id).await.unwrap_err();
+        assert!(
+            matches!(err, KbStoreError::NotFound(ref id) if *id == entry_id),
+            "rolled-back insert must not persist: {err:?}"
+        );
     }
 
     #[tokio::test]
