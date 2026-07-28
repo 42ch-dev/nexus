@@ -304,6 +304,11 @@ pub async fn patch_entity(
     require_world_owner(pool, &world_id, &creator_id).await?;
 
     // ID existence + scope: the entity must live in this world.
+    //
+    // This is the FIRST of two `get_knowledge_entry` reads in this handler:
+    // here for validation + pre-orchestrator guards; the second (post-write)
+    // re-reads the row for the response projection because the server-side
+    // `updated_at` is not carried by the orchestrator's returned entry.
     let store = nexus_local_db::kb_store::SqliteKbStore::with_validation_mode(
         pool.clone(),
         ValidationMode::Novel,
@@ -352,14 +357,12 @@ pub async fn patch_entity(
         });
     }
 
-    // Compute new field values + validate. The DB-format `body_json_str`
-    // returned by `compute_body` is no longer needed here: V1.143 routes the
-    // write through `orchestrate_upsert`, and the production adapter serializes
-    // the spoke `KnowledgeEntry` body itself. Only the typed `WorldKbBody` is
-    // needed (validation + building the post-patch entity).
+    // Compute new field values + validate. Only the typed `WorldKbBody` is
+    // needed: V1.143 routes the write through `orchestrate_upsert`, and the
+    // production adapter serializes the spoke `KnowledgeEntry` body itself.
     let new_name = req.patch.title.as_ref().map(|t| t.to_string());
     let new_block_type = req.patch.block_type;
-    let (_body_json_str, body_for_validation) = compute_body(&kb, &req.patch)?;
+    let body_for_validation = compute_body(&kb, &req.patch)?;
 
     if let Some(ref name) = new_name {
         validate_canonical_name(name)
@@ -435,15 +438,19 @@ fn patch_is_empty(patch: &NexusWorldKbEntityPatch) -> bool {
         && patch.block_type.is_none()
 }
 
-/// Resolve the new `body_json` DB string (and a `WorldKbBody` for validation)
-/// from the patch + the current entity body. `aliases` are merged into
-/// `body.attributes.aliases`.
+/// Resolve the new `WorldKbBody` for validation from the patch + the current
+/// entity body. `aliases` are merged into `body.attributes.aliases`.
+///
+/// V1.143: the DB-format `body_json` string is no longer returned — the write
+/// now routes through `orchestrate_upsert`, and the production adapter
+/// serializes the spoke `KnowledgeEntry` body itself. Only the typed
+/// `WorldKbBody` is needed (validation + building the post-patch entity).
 fn compute_body(
     kb: &WorldKbEntry,
     patch: &NexusWorldKbEntityPatch,
-) -> Result<(Option<String>, Option<WorldKbBody>), NexusApiError> {
+) -> Result<Option<WorldKbBody>, NexusApiError> {
     if patch.body.is_empty() && patch.aliases.is_empty() {
-        return Ok((None, None));
+        return Ok(None);
     }
     // Start from the patch body, else the current body, else an empty body.
     let mut value = if patch.body.is_empty() {
@@ -473,12 +480,11 @@ fn compute_body(
         );
     }
     let body: WorldKbBody =
-        serde_json::from_value(value.clone()).map_err(|e| NexusApiError::InvalidInput {
+        serde_json::from_value(value).map_err(|e| NexusApiError::InvalidInput {
             field: "body".to_string(),
             reason: format!("body is not a valid WorldKbBody: {e}"),
         })?;
-    let json_str = serde_json::to_string(&value).unwrap_or_default();
-    Ok((Some(json_str), Some(body)))
+    Ok(Some(body))
 }
 
 // ─── promote-candidate ──────────────────────────────────────────────────────
