@@ -22,10 +22,12 @@ strum.workspace = true
 # the L5 temporal axis. The two `From` impls in `timeline_event.rs` are the
 # sole conversion seam (spec spoke-adapter-architecture.md §7.1).
 spoke-schemas.workspace = true
+# V1.143 P0 T2: production dependency for the spoke 0.4.1 timeline
+# beat-assist helper `order_timeline_events_by_ids`, called from
+# `InMemoryNarrativeGateway::get_timeline_ordered` (compass AC-I1 production
+# adoption). The adapter is the sole spoke boundary (call-boundary invariant
+# §7); nexus domain types are converted to spoke wire types before the call.
+nexus-spoke-adapter = { path = "../nexus-spoke-adapter" }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["rt", "macros"] }
-# Test-only reachability boundary for spoke 0.4.1 timeline beat-assist helpers
-# (compass AC-I2). Production dependency is deferred to T3b, which unifies
-# nexus-narrative's own TimelineEvent aggregate with the spoke wire type.
-nexus-spoke-adapter = { path = "../nexus-spoke-adapter" }

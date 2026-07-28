@@ -12,9 +12,10 @@ use crate::errors::NarrativeError;
 use crate::fork_branch::ForkBranch;
 use crate::narrative_context::{EventSnapshot, NarrativeContext, TimelinePosition, WorldState};
 use crate::narrative_query::NarrativeQuery;
-use crate::timeline_event::TimelineEvent;
+use crate::timeline_event::{SpokeTimelineEvent, TimelineEvent};
 use crate::world::World;
 use nexus_knowledge::world_kb::KbStore;
+use nexus_spoke_adapter::{order_timeline_events_by_ids, SpokeResult};
 use std::collections::HashMap;
 use std::sync::RwLock;
 
@@ -105,6 +106,80 @@ impl<K: KbStore> InMemoryNarrativeGateway<K> {
         let id = fork.fork_branch_id.clone();
         let mut forks = self.forks.write().expect("forks write lock");
         forks.insert(id, fork);
+    }
+
+    /// Get timeline events ordered by an explicit ID list, delegating the
+    /// ordering to the spoke `order_timeline_events_by_ids` beat-assist helper
+    /// (V1.143 P0 T2 — production adoption, compass AC-I1).
+    ///
+    /// Events listed in `ordered_ids` come first (in that order); any remaining
+    /// events matching the world/branch filter are appended in `sequence_no`
+    /// order (the stable tail). This is a **different purpose** from
+    /// [`get_timeline`](NarrativeGateway::get_timeline), which sorts purely by
+    /// `sequence_no` — both paths coexist (dual path, not replacement).
+    ///
+    /// Spoke reject cases (duplicate `ordered_ids`, unknown ids, duplicate
+    /// event ids in storage) surface as
+    /// [`NarrativeError::ValidationError`] — the spoke `SpokeReject` payload
+    /// (code, message, `unknown_timeline_event_ids` / `duplicate_*` detail
+    /// lists) is included via `Debug` formatting for diagnosability. The
+    /// gateway never panics on a reject.
+    ///
+    /// # Call-boundary invariant §7
+    ///
+    /// The spoke helper receives only the converted spoke wire type
+    /// ([`SpokeTimelineEvent`]); nexus→spoke conversion happens before the
+    /// call, spoke→nexus conversion after. The nexus domain type never
+    /// crosses the boundary.
+    ///
+    /// # Errors
+    ///
+    /// - `ValidationError` — spoke ordering rejected (unknown/duplicate ids)
+    ///   or the events lock is poisoned.
+    pub fn get_timeline_ordered(
+        &self,
+        world_id: &str,
+        branch_id: Option<&str>,
+        ordered_ids: &[String],
+    ) -> Result<Vec<TimelineEvent>, NarrativeError> {
+        // Phase 1: filter under the read lock, then clone out. The guard is
+        // dropped at the end of the tight inner scope (the subsequent sort +
+        // spoke conversion are pure and need no lock).
+        let mut filtered: Vec<TimelineEvent> = {
+            let events = self.read_events()?;
+            events
+                .values()
+                .filter(|e| {
+                    if e.world_id != world_id {
+                        return false;
+                    }
+                    if let Some(bid) = branch_id {
+                        if e.branch_id != bid {
+                            return false;
+                        }
+                    }
+                    true
+                })
+                .cloned()
+                .collect()
+        };
+        // Sort by sequence_no so the spoke helper's "stable tail"
+        // (un-listed events) is in deterministic sequence order — the
+        // same default as the `get_timeline` dual path.
+        filtered.sort_by_key(|e| e.sequence_no);
+        // Convert nexus → spoke (call-boundary §7).
+        let spoke_events: Vec<SpokeTimelineEvent> = filtered.into_iter().map(Into::into).collect();
+
+        // Phase 2: delegate ordering to the spoke beat-assist helper (pure).
+        match order_timeline_events_by_ids(&spoke_events, ordered_ids) {
+            SpokeResult::Ok(ordered_spoke) => {
+                // Convert spoke → nexus (call-boundary §7).
+                Ok(ordered_spoke.into_iter().map(Into::into).collect())
+            }
+            SpokeResult::Reject(reject) => Err(NarrativeError::ValidationError(format!(
+                "timeline ordering rejected: {reject:?}"
+            ))),
+        }
     }
 
     /// Read lock on worlds.
@@ -432,6 +507,69 @@ mod tests {
             .unwrap();
         assert_eq!(root.len(), 1);
         assert_eq!(root[0].branch_id, "fbk_root");
+    }
+
+    // T-V1.143-T2a: get_timeline_ordered puts explicit ids first (in that
+    // order), appends remaining events in sequence_no order (stable tail).
+    // Proves production adoption of the spoke `order_timeline_events_by_ids`
+    // helper through the nexus-spoke-adapter boundary.
+    #[test]
+    fn test_get_timeline_ordered_explicit_ids_then_sequence_tail() {
+        let gw = InMemoryNarrativeGateway::new(nexus_knowledge::world_kb::InMemoryKbStore::new());
+        let e1 = make_event("wld_1", "fbk_root", 1);
+        let e2 = make_event("wld_1", "fbk_root", 2);
+        let e3 = make_event("wld_1", "fbk_root", 3);
+        let id1 = e1.timeline_event_id.clone();
+        let id2 = e2.timeline_event_id.clone();
+        let id3 = e3.timeline_event_id.clone();
+        gw.insert_event(e1);
+        gw.insert_event(e2);
+        gw.insert_event(e3);
+
+        // Request [e3, e1] explicitly; e2 is the stable tail (sequence_no 2).
+        let ordered = gw
+            .get_timeline_ordered("wld_1", None, &[id3.clone(), id1.clone()])
+            .unwrap();
+        assert_eq!(ordered.len(), 3);
+        assert_eq!(ordered[0].timeline_event_id, id3);
+        assert_eq!(ordered[1].timeline_event_id, id1);
+        assert_eq!(ordered[2].timeline_event_id, id2);
+    }
+
+    // T-V1.143-T2b: get_timeline_ordered surfaces unknown ordered ids as a
+    // ValidationError (no panic). Spoke semantics: ids not present in the
+    // filtered event set are rejected with InvalidInput.
+    #[test]
+    fn test_get_timeline_ordered_rejects_unknown_ids() {
+        let gw = InMemoryNarrativeGateway::new(nexus_knowledge::world_kb::InMemoryKbStore::new());
+        let e1 = make_event("wld_1", "fbk_root", 1);
+        let id1 = e1.timeline_event_id.clone();
+        gw.insert_event(e1);
+
+        let result = gw.get_timeline_ordered("wld_1", None, &[id1, "evt_missing".to_string()]);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            matches!(err, NarrativeError::ValidationError(ref msg) if msg.contains("rejected")),
+            "expected ValidationError with reject detail, got: {err:?}"
+        );
+    }
+
+    // T-V1.143-T2c: dual path intact — get_timeline (sequence_no sort) is
+    // unaffected by the new ordered method; both coexist.
+    #[tokio::test]
+    async fn test_get_timeline_dual_path_sequence_sort_unchanged() {
+        let gw = InMemoryNarrativeGateway::new(nexus_knowledge::world_kb::InMemoryKbStore::new());
+        gw.insert_event(make_event("wld_1", "fbk_root", 3));
+        gw.insert_event(make_event("wld_1", "fbk_root", 1));
+        gw.insert_event(make_event("wld_1", "fbk_root", 2));
+
+        // The sequence_no path is the default and must remain unchanged.
+        let by_seq = gw.get_timeline("wld_1", None, None).await.unwrap();
+        assert_eq!(
+            by_seq.iter().map(|e| e.sequence_no).collect::<Vec<_>>(),
+            vec![1, 2, 3]
+        );
     }
 
     // T5: get_event returns single event
