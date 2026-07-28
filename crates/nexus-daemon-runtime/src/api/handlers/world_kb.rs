@@ -614,7 +614,7 @@ fn merge_aliases_into_body(body: &mut WorldKbBody, aliases: &[String]) {
 /// compensates via [`flip_promotion_job_or_compensate`]). Cross-request
 /// soft-delete would race with in-flight adopts. Commit ack errors re-read
 /// the job (with retries): confirmed → success without delete; pending/missing
-/// or re-read failure → compensate.
+/// → compensate; re-read exhaustion → fail without delete (outcome ambiguous).
 async fn promote_adopt(
     state: &WorkspaceState,
     world_id: &str,
@@ -714,8 +714,8 @@ async fn promote_adopt(
 /// **Commit ambiguity:** if `tx.commit()` returns an error, `SQLite` may still
 /// have durably applied the UPDATE. The handler re-reads the job (with retries)
 /// and applies [`resolve_flip_commit_ambiguity_after_reread`] — confirmed →
-/// success without delete; pending/missing → compensate; re-read failure →
-/// compensate; other terminal → fail without delete.
+/// success without delete; pending/missing → compensate; re-read exhaustion →
+/// fail without delete; other terminal → fail without delete.
 async fn flip_promotion_job_or_compensate(
     pool: &sqlx::SqlitePool,
     job_id: &str,
@@ -793,15 +793,15 @@ fn flip_commit_ambiguity_action(job_status: Option<&str>) -> FlipCommitAmbiguity
 enum FlipCommitAmbiguityResolution {
     /// Commit likely landed; do not compensate.
     TreatAsSuccess,
-    /// Flip did not commit (or status unknown); compensate when allowed.
+    /// Flip did not commit; safe to compensate a new entry from this attempt.
     CompensateAndFail,
     /// Job in another terminal state; fail without deleting KB content.
     FailWithoutCompensate,
 }
 
 /// Pure decision after a status re-read (unit-tested). `Err` means all re-read
-/// attempts failed — treat as compensate to avoid leaving an orphan when the
-/// flip likely did not commit.
+/// attempts failed — fail without compensating because the commit outcome is
+/// ambiguous and deleting risks a confirmed job without its adopted entry.
 fn resolve_flip_commit_ambiguity_after_reread(
     reread: Result<Option<&str>, ()>,
 ) -> FlipCommitAmbiguityResolution {
@@ -817,13 +817,13 @@ fn resolve_flip_commit_ambiguity_after_reread(
                 FlipCommitAmbiguityResolution::FailWithoutCompensate
             }
         },
-        Err(()) => FlipCommitAmbiguityResolution::CompensateAndFail,
+        Err(()) => FlipCommitAmbiguityResolution::FailWithoutCompensate,
     }
 }
 
 /// Re-read the promotion job after a commit error and apply
 /// [`resolve_flip_commit_ambiguity_after_reread`]. Retries the status query
-/// up to three times before treating re-read failure as compensate-and-fail.
+/// up to three times before treating re-read exhaustion as fail-without-compensate.
 async fn handle_flip_commit_ambiguity(
     pool: &sqlx::SqlitePool,
     job_id: &str,
@@ -856,14 +856,15 @@ async fn handle_flip_commit_ambiguity(
                 reread.err().as_ref(),
             ))
         }
-        FlipCommitAmbiguityResolution::FailWithoutCompensate => {
-            Err(NexusApiError::from(commit_err))
-        }
+        FlipCommitAmbiguityResolution::FailWithoutCompensate => Err(flip_commit_ambiguity_error(
+            commit_err,
+            reread.err().as_ref(),
+        )),
     }
 }
 
 /// Re-read `kb_extract_jobs.promotion_status` with short retries after commit ack
-/// failures (transient connection errors must not skip compensation).
+/// failures so transient read errors do not force an incorrect compensate/delete.
 async fn reread_promotion_status_with_retry(
     pool: &sqlx::SqlitePool,
     job_id: &str,
@@ -882,7 +883,7 @@ async fn reread_promotion_status_with_retry(
     Err(last_err.unwrap_or_else(|| sqlx::Error::RowNotFound))
 }
 
-/// Combine commit and optional re-read errors for the compensate-and-fail path.
+/// Combine commit and optional re-read errors for ambiguity failure paths.
 fn flip_commit_ambiguity_error(
     commit_err: sqlx::Error,
     reread_err: Option<&sqlx::Error>,
@@ -2182,10 +2183,10 @@ mod flip_commit_ambiguity_tests {
     }
 
     #[test]
-    fn reread_failed_compensates_without_leaving_orphan() {
+    fn reread_failed_fails_without_compensate() {
         assert_eq!(
             resolve_flip_commit_ambiguity_after_reread(Err(())),
-            FlipCommitAmbiguityResolution::CompensateAndFail
+            FlipCommitAmbiguityResolution::FailWithoutCompensate
         );
     }
 }
