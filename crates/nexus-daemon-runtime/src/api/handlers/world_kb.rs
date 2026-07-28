@@ -610,7 +610,9 @@ fn merge_aliases_into_body(body: &mut WorldKbBody, aliases: &[String]) {
 /// `KnowledgeEntryAlreadyExists` → [`map_promote_response`] recovers via the
 /// existing confirmed entry (no compensation — that entry is authoritative).
 /// Remaining race: concurrent writers between orchestrator commit and flip;
-/// compensation covers the common `!flipped` / CAS-miss-after-create path.
+/// compensation covers every job-flip failure after a new entry create
+/// (`begin`, CAS error, `!flipped`, `commit`) plus automatic orphan repair
+/// on retry when the unique index fires with a still-pending job.
 async fn promote_adopt(
     state: &WorkspaceState,
     world_id: &str,
@@ -657,34 +659,16 @@ async fn promote_adopt(
     let knowledge_entry = map_promote_response(result, pool, &req.job_id, &kb).await?;
 
     // Job flip — separate transaction from the orchestrator's entry create
-    // (transaction-boundary split, see function doc). The CAS guard +
-    // outer `promote_candidate` pending-check together prevent double-flip.
-    let mut tx = pool.begin().await.map_err(NexusApiError::from)?;
-    let flipped = mark_confirmed_in_tx_with_cas(
-        &mut tx,
+    // (transaction-boundary split, see function doc). Any failure after a new
+    // entry was persisted this attempt triggers compensation.
+    flip_promotion_job_or_compensate(
+        pool,
         &req.job_id,
         i64::try_from(req.expected_version).unwrap_or(0),
+        &knowledge_entry.entry_id,
+        &candidate_entry_id,
     )
-    .await
-    .map_err(|e| map_cas_err(e, &req.job_id, "version"))?;
-    if !flipped {
-        // Race: row left pending state between read and flip. When this
-        // attempt created a new confirmed entry, roll it back so the unique
-        // index does not block a clean retry.
-        let _ = tx.rollback().await;
-        if knowledge_entry.entry_id == candidate_entry_id {
-            compensate_orphan_promote_entry(pool, &knowledge_entry.entry_id).await?;
-        }
-        return Err(NexusApiError::world_kb_validation_failed(
-            &[
-                "candidate was no longer pending (already confirmed/rejected); \
-                 rolled back the job flip and compensated any new entry from this attempt"
-                    .to_string(),
-            ],
-            &[],
-        ));
-    }
-    tx.commit().await.map_err(NexusApiError::from)?;
+    .await?;
 
     // Build response — re-read the entry to project the post-write state
     // (mirrors the pre-V1.142 direct-create path's get-after-insert).
@@ -714,10 +698,74 @@ async fn promote_adopt(
 
 // ─── promote-adopt orchestration helpers (V1.142 P2) ────────────────────────
 
-/// Soft-delete a confirmed entry created by a failed job flip in the same
-/// adopt attempt so `idx_kb_key_blocks_active_unique` does not block retry.
+/// Flip `kb_extract_jobs` pending → confirmed inside a dedicated transaction.
 ///
-/// No-op when the row is already gone (idempotent for repeated compensation).
+/// When this adopt attempt created a **new** confirmed entry
+/// (`created_entry_id == candidate_entry_id`), any failure in the flip block
+/// (`begin`, CAS execute error, `!flipped`, or `commit`) soft-deletes that
+/// entry via [`compensate_orphan_promote_entry`] before returning the
+/// original error so the unique index does not block a clean retry.
+async fn flip_promotion_job_or_compensate(
+    pool: &sqlx::SqlitePool,
+    job_id: &str,
+    expected_version: i64,
+    created_entry_id: &str,
+    candidate_entry_id: &str,
+) -> Result<(), NexusApiError> {
+    let compensate_if_new = created_entry_id == candidate_entry_id;
+
+    let mut tx = match pool.begin().await {
+        Ok(tx) => tx,
+        Err(e) => {
+            if compensate_if_new {
+                compensate_orphan_promote_entry(pool, created_entry_id).await?;
+            }
+            return Err(NexusApiError::from(e));
+        }
+    };
+
+    match mark_confirmed_in_tx_with_cas(&mut tx, job_id, expected_version).await {
+        Ok(true) => match tx.commit().await {
+            Ok(()) => Ok(()),
+            Err(e) => {
+                if compensate_if_new {
+                    compensate_orphan_promote_entry(pool, created_entry_id).await?;
+                }
+                Err(NexusApiError::from(e))
+            }
+        },
+        Ok(false) => {
+            let _ = tx.rollback().await;
+            if compensate_if_new {
+                compensate_orphan_promote_entry(pool, created_entry_id).await?;
+            }
+            Err(NexusApiError::world_kb_validation_failed(
+                &[
+                    "candidate was no longer pending (already confirmed/rejected); \
+                     rolled back the job flip and compensated any new entry from this attempt"
+                        .to_string(),
+                ],
+                &[],
+            ))
+        }
+        Err(e) => {
+            let _ = tx.rollback().await;
+            let api_err = map_cas_err(e, job_id, "version");
+            if compensate_if_new {
+                compensate_orphan_promote_entry(pool, created_entry_id).await?;
+            }
+            Err(api_err)
+        }
+    }
+}
+
+/// Soft-delete a confirmed entry left behind when the promotion job flip fails
+/// in the same adopt attempt so `idx_kb_key_blocks_active_unique` does not
+/// block retry.
+///
+/// Also used by the retry-repair path in [`map_promote_reject`] to remove
+/// orphans from prior partial attempts. No-op when the row is already gone
+/// (idempotent for repeated compensation).
 async fn compensate_orphan_promote_entry(
     pool: &sqlx::SqlitePool,
     entry_id: &str,
@@ -801,9 +849,9 @@ fn build_spoke_promote_request(candidate: &WorldKbEntry) -> PromoteRequest {
 /// - **job `confirmed`** → prior partial attempt completed despite returning
 ///   an error; recover the existing entry (looked up via the same unique
 ///   key) and return it as a retry-safe success.
-/// - **job `pending`** → prior partial attempt may have left an orphan; flip
-///   failure path now compensates new entries. If this reject fires, the
-///   operator should refresh the candidates list and retry.
+/// - **job `pending`** → prior partial attempt left an orphan (entry committed,
+///   job not flipped). [`map_promote_reject`] auto-deletes the blocking active
+///   entry and returns 422 so the client can retry adopt immediately.
 ///
 /// The outer `promote_candidate` handler's `promotion_status == "pending"`
 /// gate plus `mark_confirmed_in_tx_with_cas`'s CAS guard together prevent
@@ -866,7 +914,9 @@ async fn map_promote_reject(
     job_id: &str,
     candidate_lookup: &WorldKbEntry,
 ) -> Result<SpokeKnowledgeEntry, NexusApiError> {
-    if reject.code == SpokeRejectCode::KnowledgeEntryAlreadyExists {
+    if reject.code == SpokeRejectCode::KnowledgeEntryAlreadyExists
+        || reject.code == SpokeRejectCode::DuplicateActiveKnowledgeEntry
+    {
         // Retry-safe branch: the unique constraint fired — either a genuine
         // duplicate (a confirmed entry with the same world/type/name already
         // exists) or a retry after a partial prior attempt. Disambiguate via
@@ -900,17 +950,38 @@ async fn map_promote_reject(
                     job_id = %job_id,
                     "promote_adopt retry-safe: job is confirmed but no matching active entry found"
                 );
-            } else {
-                tracing::warn!(
-                    job_id = %job_id,
-                    "promote_adopt orphan: prior partial attempt left confirmed entry with pending job; manual cleanup needed"
-                );
+            } else if job.promotion_status == "pending" {
+                // Genuine orphan from a prior partial attempt — remove the
+                // blocking active entry so the client can retry adopt cleanly.
+                if let Some(existing) = find_active_entry_for(
+                    pool,
+                    &candidate_lookup.world_id,
+                    &candidate_lookup.canonical_name,
+                    candidate_lookup.block_type,
+                )
+                .await?
+                {
+                    compensate_orphan_promote_entry(pool, &existing.entry_id).await?;
+                    tracing::info!(
+                        job_id = %job_id,
+                        entry_id = %existing.entry_id,
+                        "promote_adopt retry-repair: removed orphan entry blocking adopt; client should retry"
+                    );
+                }
+                return Err(NexusApiError::world_kb_validation_failed(
+                    &[
+                        "a prior partial promote attempt left an orphan entry that was \
+                         automatically removed; retry adopt with the same candidate"
+                            .to_string(),
+                    ],
+                    &[],
+                ));
             }
         }
         return Err(NexusApiError::world_kb_validation_failed(
             &[
                 "an active WorldKbEntry with the same name/type already exists in this world \
-                 (possible prior partial promote attempt — refresh the candidates list)"
+                 (refresh the candidates list and retry)"
                     .to_string(),
             ],
             &[],

@@ -472,6 +472,158 @@ async fn promote_adopt_compensates_entry_when_job_flip_races() {
     assert_eq!(resp2.job.status, "confirmed");
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn promote_adopt_compensates_entry_when_job_flip_cas_errors() {
+    let (_tmp, state) = fresh_state().await;
+    let pool = state.pool().unwrap().clone();
+    let candidate = insert_pending(
+        &pool,
+        "test_creator",
+        "ws",
+        "wld_test_world",
+        None,
+        None,
+        "character",
+        "CasFailMe",
+        NOVEL_CHARACTER_BODY,
+    )
+    .await
+    .unwrap();
+
+    let job_id = candidate.job_id.clone();
+    let trigger_sql = format!(
+        "CREATE TRIGGER trg_abort_flip_cas \
+         BEFORE UPDATE ON kb_extract_jobs \
+         WHEN OLD.job_id = '{job_id}' AND NEW.promotion_status = 'confirmed' \
+         BEGIN \
+           SELECT RAISE(ABORT, 'simulated flip CAS failure'); \
+         END"
+    );
+    sqlx::query(&trigger_sql).execute(&pool).await.unwrap();
+
+    let req = WorldKbPromoteCandidateRequest {
+        job_id: candidate.job_id.clone(),
+        candidate_id: "kb_cand".to_string(),
+        action: "adopt".parse().unwrap(),
+        expected_version: u64::try_from(candidate.version).unwrap_or(0),
+        merge_target_id: None,
+        patch: None,
+    };
+    let err = promote_candidate(
+        State(state.clone()),
+        Path("wld_test_world".to_string()),
+        Json(req),
+    )
+    .await
+    .expect_err("CAS error during flip must fail");
+    sqlx::query("DROP TRIGGER IF EXISTS trg_abort_flip_cas")
+        .execute(&pool)
+        .await
+        .ok();
+
+    assert_eq!(
+        err.status_code(),
+        axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+        "CAS execute error during flip surfaces as internal after compensation"
+    );
+
+    let store = SqliteKbStore::new(pool.clone());
+    let active = store
+        .get_active_by_unique_key("wld_test_world", "CasFailMe", BlockType::Character)
+        .await
+        .unwrap();
+    assert!(
+        active.is_none(),
+        "CAS-error path must compensate the orphan entry"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn promote_adopt_retry_repair_cleans_orphan_on_already_exists() {
+    let (_tmp, state) = fresh_state().await;
+    let pool = state.pool().unwrap().clone();
+
+    // Simulate a prior partial attempt: confirmed entry persisted, job still pending.
+    seed_key_block(
+        &pool,
+        "kb_orphan_prior",
+        "wld_test_world",
+        "character",
+        "OrphanRetry",
+        "confirmed",
+        Some(1),
+        Some(NOVEL_CHARACTER_BODY),
+    )
+    .await;
+    seed_pending_candidate(
+        &pool,
+        "xj_orphan_retry",
+        "work_orphan_source",
+        "wld_test_world",
+        "character",
+        "OrphanRetry",
+    )
+    .await;
+
+    let req = WorldKbPromoteCandidateRequest {
+        job_id: "xj_orphan_retry".to_string(),
+        candidate_id: "kb_cand".to_string(),
+        action: "adopt".parse().unwrap(),
+        expected_version: 0,
+        merge_target_id: None,
+        patch: None,
+    };
+    let err = promote_candidate(
+        State(state.clone()),
+        Path("wld_test_world".to_string()),
+        Json(req),
+    )
+    .await
+    .expect_err("first adopt must repair orphan and ask for retry");
+    assert_eq!(
+        err.status_code(),
+        axum::http::StatusCode::UNPROCESSABLE_ENTITY
+    );
+    assert_eq!(err.error_code(), "world_kb_validation_failed");
+    let details = err.error_details().expect("validation details");
+    let errors = details["validation_summary"]["errors"]
+        .as_array()
+        .expect("errors array");
+    assert!(
+        errors.iter().any(|e| {
+            e.as_str()
+                .is_some_and(|msg| msg.contains("automatically removed"))
+        }),
+        "repair path should tell client to retry: {details:?}"
+    );
+
+    let store = SqliteKbStore::new(pool.clone());
+    assert!(
+        store
+            .get_active_by_unique_key("wld_test_world", "OrphanRetry", BlockType::Character)
+            .await
+            .unwrap()
+            .is_none(),
+        "retry-repair must delete the orphan"
+    );
+
+    let Json(resp) = promote_candidate(
+        State(state),
+        Path("wld_test_world".to_string()),
+        Json(WorldKbPromoteCandidateRequest {
+            job_id: "xj_orphan_retry".to_string(),
+            candidate_id: "kb_cand".to_string(),
+            action: "adopt".parse().unwrap(),
+            expected_version: 0,
+            merge_target_id: None,
+            patch: None,
+        }),
+    )
+    .await
+    .expect("retry adopt after auto-repair must succeed");
+    assert_eq!(resp.job.status, "confirmed");
+}
+
 #[tokio::test]
 async fn promote_reject_dismisses_candidate() {
     let (_tmp, state) = fresh_state().await;
