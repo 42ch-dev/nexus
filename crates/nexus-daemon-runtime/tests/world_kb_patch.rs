@@ -572,12 +572,12 @@ async fn promote_adopt_compensates_entry_when_job_flip_cas_errors() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn promote_adopt_retry_repair_cleans_orphan_on_already_exists() {
+async fn promote_adopt_pending_collision_does_not_delete_attributed_entry() {
     let (_tmp, state) = fresh_state().await;
     let pool = state.pool().unwrap().clone();
 
-    // Simulate a prior partial attempt: confirmed entry persisted with this
-    // promotion job's stamp, job still pending.
+    // Simulated in-flight / stale partial state: active entry stamped with
+    // this job_id while the job is still pending — retry must not delete.
     seed_key_block_attributed(
         &pool,
         "kb_orphan_prior",
@@ -600,50 +600,8 @@ async fn promote_adopt_retry_repair_cleans_orphan_on_already_exists() {
     )
     .await;
 
-    let req = WorldKbPromoteCandidateRequest {
-        job_id: "xj_orphan_retry".to_string(),
-        candidate_id: "kb_cand".to_string(),
-        action: "adopt".parse().unwrap(),
-        expected_version: 0,
-        merge_target_id: None,
-        patch: None,
-    };
     let err = promote_candidate(
         State(state.clone()),
-        Path("wld_test_world".to_string()),
-        Json(req),
-    )
-    .await
-    .expect_err("first adopt must repair orphan and ask for retry");
-    assert_eq!(
-        err.status_code(),
-        axum::http::StatusCode::UNPROCESSABLE_ENTITY
-    );
-    assert_eq!(err.error_code(), "world_kb_validation_failed");
-    let details = err.error_details().expect("validation details");
-    let errors = details["validation_summary"]["errors"]
-        .as_array()
-        .expect("errors array");
-    assert!(
-        errors.iter().any(|e| {
-            e.as_str()
-                .is_some_and(|msg| msg.contains("automatically removed"))
-        }),
-        "repair path should tell client to retry: {details:?}"
-    );
-
-    let store = SqliteKbStore::new(pool.clone());
-    assert!(
-        store
-            .get_active_by_unique_key("wld_test_world", "OrphanRetry", BlockType::Character)
-            .await
-            .unwrap()
-            .is_none(),
-        "retry-repair must delete the orphan"
-    );
-
-    let Json(resp) = promote_candidate(
-        State(state),
         Path("wld_test_world".to_string()),
         Json(WorldKbPromoteCandidateRequest {
             job_id: "xj_orphan_retry".to_string(),
@@ -655,8 +613,29 @@ async fn promote_adopt_retry_repair_cleans_orphan_on_already_exists() {
         }),
     )
     .await
-    .expect("retry adopt after auto-repair must succeed");
-    assert_eq!(resp.job.status, "confirmed");
+    .expect_err("pending collision must not delete");
+    assert_eq!(
+        err.status_code(),
+        axum::http::StatusCode::UNPROCESSABLE_ENTITY
+    );
+    let details = err.error_details().expect("validation details");
+    let errors = details["validation_summary"]["errors"]
+        .as_array()
+        .expect("errors array");
+    assert!(
+        errors
+            .iter()
+            .any(|e| { e.as_str().is_some_and(|msg| msg.contains("still pending")) }),
+        "must surface pending collision: {details:?}"
+    );
+
+    let store = SqliteKbStore::new(pool);
+    let active = store
+        .get_active_by_unique_key("wld_test_world", "OrphanRetry", BlockType::Character)
+        .await
+        .unwrap()
+        .expect("entry must remain active — retry path never deletes");
+    assert_eq!(active.entry_id, "kb_orphan_prior");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -709,18 +688,17 @@ async fn promote_adopt_retry_does_not_delete_unattributed_collision() {
         .as_array()
         .expect("errors array");
     assert!(
-        errors.iter().any(|e| {
-            e.as_str()
-                .is_some_and(|msg| msg.contains("not attributable to this promotion job"))
-        }),
-        "must surface genuine conflict without repair: {details:?}"
+        errors
+            .iter()
+            .any(|e| { e.as_str().is_some_and(|msg| msg.contains("still pending")) }),
+        "must surface pending collision without delete: {details:?}"
     );
     assert!(
         !errors.iter().any(|e| {
             e.as_str()
                 .is_some_and(|msg| msg.contains("automatically removed"))
         }),
-        "must not claim auto-repair: {details:?}"
+        "retry path must not auto-delete: {details:?}"
     );
 
     let store = SqliteKbStore::new(pool);
