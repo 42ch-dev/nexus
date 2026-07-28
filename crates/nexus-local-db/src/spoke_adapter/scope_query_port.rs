@@ -35,7 +35,7 @@ use nexus_spoke_adapter::{
     KnowledgeEntry, Scope, ScopeQueryPort, SpokeReject, SpokeRejectCode, SpokeResult, TimelineEvent,
 };
 use serde_json::{json, Map, Value};
-impl ScopeQueryPort for NexusBaselineAdapter {
+impl ScopeQueryPort for NexusBaselineAdapter<'_> {
     /// List the active knowledge entries for the scope's world.
     ///
     /// Routes through [`SqliteKbStore::list_by_world_scoped`] so optional

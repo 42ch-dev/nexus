@@ -161,12 +161,13 @@ Stub families are documented per spec §7.4 with roadmap triggers for full versi
 The first production orchestrator consumer is `promote_adopt` in `nexus-daemon-runtime/src/api/handlers/world_kb.rs`, routed through `orchestrate_promote(&NexusBaselineAdapter, PromoteRequest)`. Key patterns:
 
 1. **`orchestrate_promote` handles `stored = None`:** the orchestrator can promote a NEW candidate (not just an existing provisional entry). It skips stored-entry terminal-status checks when `stored = None`, validates `candidate.status == "provisional"`, applies acceptance (`→ confirmed`, revision bump), and calls `put_knowledge_entry(None)` (create path). This means the nexus adopt flow (create + confirm in one step) maps cleanly: build candidate with `status = "provisional"`, let the orchestrator flip it.
-2. **Transaction boundary split:** the orchestrator creates the entry in its own storage call; the extract-job flip happens in a separate transaction. This is a pre-1.0 known trade-off (the old code did both in one atomic transaction). Mitigated with **retry-safe idempotency**: on retry after partial failure, the fresh candidate's INSERT collides on the unique index `(world_id, block_type, canonical_name)` → orchestrator returns `KnowledgeEntryAlreadyExists` → handler checks the job status → returns success if already confirmed.
-3. **SpokeRejectCode → NexusApiError mapping:** OCC codes → 409 with re-read version; validation codes → 422; remaining → 500. Preserve existing error semantics.
+2. **Single-transaction adopt (V1.142 P3):** `promote_adopt` binds a handler-owned `sqlx::Transaction` into `NexusBaselineAdapter` via a shared `Arc<std::sync::Mutex<Option<Transaction>>>` for the synchronous `orchestrate_promote` bridge, then flips the extract job in the same transaction before one `COMMIT`. Rollback on any failure — no greploop soft-delete compensation.
+3. **Retry-safe idempotency:** when a prior attempt committed but returned an error (commit-ack ambiguity), retry hits `KnowledgeEntryAlreadyExists` → handler checks job status → returns success if already confirmed and attributed.
+4. **SpokeRejectCode → NexusApiError mapping:** OCC codes → 409 with re-read version; validation codes → 422; remaining → 500. Preserve existing error semantics.
 
 ### Remaining production boundary work (roadmap)
 
 - Remaining write paths (`upsert`/`relate`/`check`/`assemble`) cut over as product features need them.
 - Stub family upgrades: `RuleQueryPort` (persisted Rules), `HostManifestPort.list_peer` (multi-host collaboration), `ScopeQueryPort.list_timeline_events` (persisted `TimelineEvent` storage; also unblocks T3b full timeline helper migration in nexus-narrative).
-- Transaction-boundary unification: future work to span a single transaction across the orchestrator's storage operations + the handler's side-effects.
+- Transaction-boundary unification for `promote_adopt`: **shipped** (V1.142 P3 — adapter-local TX bind via `NexusBaselineAdapter::with_tx_cell`).
 - TS app orchestrator pattern adoption (separate product surface).

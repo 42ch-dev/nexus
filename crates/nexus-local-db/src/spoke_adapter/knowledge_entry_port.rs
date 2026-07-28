@@ -25,7 +25,9 @@
 //! | Entry present + `expected_revision = None`       | `KNOWLEDGE_ENTRY_ALREADY_EXISTS` |
 
 use super::NexusBaselineAdapter;
-use crate::kb_store::{cas_update_key_block_fields, SqliteKbStore};
+use crate::kb_store::{
+    cas_update_key_block_fields, update_key_block_auxiliary_fields_in_tx, SqliteKbStore,
+};
 use crate::LocalDbError;
 use nexus_knowledge::world_kb::store::{KbStore, KbStoreError};
 use nexus_knowledge::world_kb::WorldKbEntry;
@@ -35,7 +37,7 @@ use nexus_spoke_adapter::{
 };
 use serde_json::{json, Map};
 
-impl NexusBaselineAdapter {
+impl NexusBaselineAdapter<'_> {
     /// Convert a `SQLite` row error into a `KNOWLEDGE_ENTRY_NOT_FOUND` reject
     /// when the underlying store signals absence. Any other storage error
     /// surfaces as `INVALID_INPUT`.
@@ -58,11 +60,7 @@ impl NexusBaselineAdapter {
     /// surfaced from the CAS path) into the spoke reject code dictated by spec
     /// §7.4. `actual = None` (row absent) collapses to `REVISION_CONFLICT`
     /// (caller expects a revision the store has never reached).
-    fn map_cas_err(
-        err: LocalDbError,
-        entry_id: &str,
-        expected: u64,
-    ) -> SpokeResult<KnowledgeEntry> {
+    fn map_cas_err<T>(err: LocalDbError, entry_id: &str, expected: u64) -> SpokeResult<T> {
         match err {
             LocalDbError::VersionMismatch {
                 actual: Some(stored),
@@ -120,7 +118,7 @@ impl NexusBaselineAdapter {
     }
 }
 
-impl KnowledgeEntryPort for NexusBaselineAdapter {
+impl KnowledgeEntryPort for NexusBaselineAdapter<'_> {
     fn get_knowledge_entry(&self, entry_id: &str) -> SpokeResult<KnowledgeEntry> {
         let pool = self.pool.clone();
         let entry_id = entry_id.to_string();
@@ -142,20 +140,23 @@ impl KnowledgeEntryPort for NexusBaselineAdapter {
         expected_base_revision: Option<u64>,
     ) -> SpokeResult<KnowledgeEntry> {
         let pool = self.pool.clone();
-        self.block_on(async move {
+        self.block_on(async {
             match expected_base_revision {
-                None => put_create(&pool, entry).await,
-                Some(expected) => put_update(&pool, entry, expected).await,
+                None => put_create(self, &pool, entry).await,
+                Some(expected) => put_update(self, &pool, entry, expected).await,
             }
         })
     }
 }
 
 /// Create path: `expected_base_revision = None`. Reject if the row already
-/// exists; otherwise insert via [`SqliteKbStore::insert_knowledge_entry`] and
-/// return the entry with its initial post-create revision (`Some(1)`, matching
-/// the V1.73 NULL-normalization rule).
-async fn put_create(pool: &sqlx::SqlitePool, entry: KnowledgeEntry) -> SpokeResult<KnowledgeEntry> {
+/// exists; otherwise insert via [`SqliteKbStore::insert_key_block_in_tx`]
+/// and return the entry with its initial post-create revision (`Some(1)`).
+async fn put_create(
+    adapter: &NexusBaselineAdapter<'_>,
+    pool: &sqlx::SqlitePool,
+    entry: KnowledgeEntry,
+) -> SpokeResult<KnowledgeEntry> {
     let store = SqliteKbStore::new(pool.clone());
     let entry_id = entry.entry_id.clone();
 
@@ -187,7 +188,38 @@ async fn put_create(pool: &sqlx::SqlitePool, entry: KnowledgeEntry) -> SpokeResu
     let mut world_entry: WorldKbEntry = entry.clone().into();
     world_entry.revision = Some(1);
 
-    match store.insert_knowledge_entry(world_entry).await {
+    let insert_result = if adapter.is_bound() {
+        let mut tx = adapter
+            .take_bound_tx()
+            .expect("bound adapter must have tx in cell");
+        let result = store.insert_key_block_in_tx(&mut tx, world_entry).await;
+        adapter.restore_bound_tx(tx);
+        result
+    } else {
+        let mut tx = match pool.begin().await {
+            Ok(tx) => tx,
+            Err(e) => {
+                return reject(
+                    SpokeRejectCode::InvalidInput,
+                    format!("storage error on tx begin: {e}"),
+                    json!({ "entry_id": entry_id }),
+                );
+            }
+        };
+        let result = store.insert_key_block_in_tx(&mut tx, world_entry).await;
+        if result.is_ok() {
+            if let Err(e) = tx.commit().await {
+                return reject(
+                    SpokeRejectCode::InvalidInput,
+                    format!("storage error on tx commit: {e}"),
+                    json!({ "entry_id": entry_id }),
+                );
+            }
+        }
+        result
+    };
+
+    match insert_result {
         Ok(_) => {
             let mut result = entry;
             result.revision = Some(1);
@@ -222,16 +254,47 @@ async fn put_create(pool: &sqlx::SqlitePool, entry: KnowledgeEntry) -> SpokeResu
 /// via a sibling UPDATE so the full row is replaced atomically with the CAS
 /// guard.
 async fn put_update(
+    adapter: &NexusBaselineAdapter<'_>,
+    pool: &sqlx::SqlitePool,
+    entry: KnowledgeEntry,
+    expected: u64,
+) -> SpokeResult<KnowledgeEntry> {
+    if adapter.is_bound() {
+        return put_update_bound(adapter, entry, expected).await;
+    }
+    put_update_unbound(pool, entry, expected).await
+}
+
+async fn put_update_bound(
+    adapter: &NexusBaselineAdapter<'_>,
+    entry: KnowledgeEntry,
+    expected: u64,
+) -> SpokeResult<KnowledgeEntry> {
+    let entry_id = entry.entry_id.clone();
+    let world_entry: WorldKbEntry = entry.clone().into();
+    let mut tx = adapter
+        .take_bound_tx()
+        .expect("bound adapter must have tx in cell");
+    let new_rev = match run_cas_update_in_tx(&mut tx, &entry_id, &world_entry, expected).await {
+        SpokeResult::Ok(rev) => rev,
+        SpokeResult::Reject(r) => {
+            adapter.restore_bound_tx(tx);
+            return SpokeResult::Reject(r);
+        }
+    };
+    adapter.restore_bound_tx(tx);
+    let mut result = entry;
+    result.revision = Some(new_rev);
+    SpokeResult::Ok(result)
+}
+
+async fn put_update_unbound(
     pool: &sqlx::SqlitePool,
     entry: KnowledgeEntry,
     expected: u64,
 ) -> SpokeResult<KnowledgeEntry> {
     let entry_id = entry.entry_id.clone();
-
-    // Reuse the existing `From<SpokeKnowledgeEntry> for WorldKbEntry` impl —
-    // sole conversion seam (spec §7.1).
     let world_entry: WorldKbEntry = entry.clone().into();
-
     let mut tx = match pool.begin().await {
         Ok(tx) => tx,
         Err(e) => {
@@ -242,46 +305,39 @@ async fn put_update(
             );
         }
     };
+    let new_rev = match run_cas_update_in_tx(&mut tx, &entry_id, &world_entry, expected).await {
+        SpokeResult::Ok(rev) => rev,
+        SpokeResult::Reject(r) => return SpokeResult::Reject(r),
+    };
+    if let Err(e) = tx.commit().await {
+        return reject(
+            SpokeRejectCode::InvalidInput,
+            format!("storage error on tx commit: {e}"),
+            json!({ "entry_id": entry_id }),
+        );
+    }
+    let mut result = entry;
+    result.revision = Some(new_rev);
+    SpokeResult::Ok(result)
+}
 
-    // Serialize the fields `cas_update_key_block_fields` consumes.
+async fn run_cas_update_in_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    entry_id: &str,
+    world_entry: &WorldKbEntry,
+    expected: u64,
+) -> SpokeResult<u64> {
     let body_json = world_entry
         .body
         .as_ref()
         .map(|b| serde_json::to_string(b).unwrap_or_default());
-    // Stable snake_case serialization matching wire format (mirrors
-    // SqliteKbStore::insert_knowledge_entry).
     let block_type_str = serde_json::to_string(&world_entry.block_type)
         .unwrap_or_else(|_| format!("{:?}", world_entry.block_type));
     let block_type_str = block_type_str.trim_matches('"').to_string();
-
-    let expected_i64 = expected.cast_signed();
-
-    let new_rev = match cas_update_key_block_fields(
-        &mut tx,
-        &entry_id,
-        Some(&world_entry.canonical_name),
-        Some(&block_type_str),
-        body_json.as_deref(),
-        expected_i64,
-    )
-    .await
-    {
-        Ok(new_rev) => new_rev,
-        Err(e) => return NexusBaselineAdapter::map_cas_err(e, &entry_id, expected),
-    };
-
-    // CAS succeeded; revision was bumped to `new_rev` and name/type/body were
-    // written. Now persist the remaining fields the CAS helper does not touch
-    // (status / source_anchor_json / extensions_nexus_json) inside the same
-    // transaction so the full row is replaced atomically with the guard. No
-    // second CAS layer is added (spec §7.4).
     let source_anchor_json = world_entry
         .source_anchor
         .as_ref()
         .map(|a| serde_json::to_string(a).unwrap_or_default());
-    // V1.139 P1 T4: re-serialize the full `extensions.nexus` namespace on the
-    // update path so unknown keys survive the read-modify-write cycle (spec
-    // §2.3 write path; mirrors SqliteKbStore::update_knowledge_entry).
     let extensions_nexus_json = serde_json::to_string(&build_extensions_nexus(
         &world_entry.world_id,
         world_entry.created_from_command_id.as_deref(),
@@ -292,22 +348,27 @@ async fn put_update(
     ))
     .unwrap_or_default();
 
-    // SAFETY: static SQL with vetted column names from migration
-    // 202606190003_kb_key_blocks_provenance.sql. Runtime query used because
-    // `extensions_nexus_json` column is unknown to sqlx offline mode (mirrors
-    // the existing SqliteKbStore::update_knowledge_entry path).
-    if let Err(e) = sqlx::query(
-        r"UPDATE kb_key_blocks SET
-             status = ?,
-             source_anchor_json = ?,
-             extensions_nexus_json = ?
-           WHERE key_block_id = ?",
+    let new_rev = match cas_update_key_block_fields(
+        tx,
+        entry_id,
+        Some(&world_entry.canonical_name),
+        Some(&block_type_str),
+        body_json.as_deref(),
+        expected.cast_signed(),
     )
-    .bind(&world_entry.status)
-    .bind(&source_anchor_json)
-    .bind(&extensions_nexus_json)
-    .bind(&entry_id)
-    .execute(&mut *tx)
+    .await
+    {
+        Ok(new_rev) => new_rev,
+        Err(e) => return NexusBaselineAdapter::map_cas_err(e, entry_id, expected),
+    };
+
+    if let Err(e) = update_key_block_auxiliary_fields_in_tx(
+        tx,
+        entry_id,
+        &world_entry.status,
+        source_anchor_json.as_deref(),
+        &extensions_nexus_json,
+    )
     .await
     {
         return reject(
@@ -317,17 +378,7 @@ async fn put_update(
         );
     }
 
-    if let Err(e) = tx.commit().await {
-        return reject(
-            SpokeRejectCode::InvalidInput,
-            format!("storage error on tx commit: {e}"),
-            json!({ "entry_id": entry_id }),
-        );
-    }
-
-    let mut result = entry;
-    result.revision = Some(new_rev);
-    SpokeResult::Ok(result)
+    SpokeResult::Ok(new_rev)
 }
 
 /// Build the wire-neutral extension map carrying an entry's unknown
@@ -647,5 +698,64 @@ mod tests {
             }
             SpokeResult::Ok(_) => panic!("expected REVISION_CONFLICT reject"),
         }
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn put_create_unbound_tx_commits_immediately() {
+        let (pool, _dir) = fresh_pool().await;
+        seed_world(&pool).await;
+
+        let adapter = NexusBaselineAdapter::new(pool.clone());
+        let entry = spoke_entry("kb_unbound_create", "UnboundCreate", None);
+
+        match adapter.put_knowledge_entry(entry, None) {
+            SpokeResult::Ok(e) => assert_eq!(e.revision, Some(1)),
+            SpokeResult::Reject(r) => panic!("expected ok, got reject: {r:?}"),
+        }
+
+        let store = SqliteKbStore::new(pool);
+        assert!(
+            store.get_knowledge_entry("kb_unbound_create").await.is_ok(),
+            "unbound put must commit without an outer transaction"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn put_create_bound_tx_not_visible_until_outer_commit() {
+        use std::sync::{Arc, Mutex};
+
+        let (pool, _dir) = fresh_pool().await;
+        seed_world(&pool).await;
+
+        let tx = pool.begin().await.unwrap();
+        let tx_cell = Arc::new(Mutex::new(Some(tx)));
+        let adapter = NexusBaselineAdapter::new(pool.clone()).with_tx_cell(Arc::clone(&tx_cell));
+        let entry = spoke_entry("kb_bound_create", "BoundCreate", None);
+        let entry_id = entry.entry_id.clone();
+
+        let put_result = adapter.with_bound_tx(|| adapter.put_knowledge_entry(entry, None));
+        assert!(
+            matches!(put_result, SpokeResult::Ok(_)),
+            "bound put should succeed in-tx"
+        );
+
+        let store = SqliteKbStore::new(pool.clone());
+        assert!(
+            store.get_knowledge_entry(&entry_id).await.is_err(),
+            "bound put must not be visible before outer commit"
+        );
+
+        tx_cell
+            .lock()
+            .expect("tx mutex")
+            .take()
+            .expect("tx in cell")
+            .commit()
+            .await
+            .unwrap();
+        assert!(
+            store.get_knowledge_entry(&entry_id).await.is_ok(),
+            "bound put must be visible after outer commit"
+        );
     }
 }

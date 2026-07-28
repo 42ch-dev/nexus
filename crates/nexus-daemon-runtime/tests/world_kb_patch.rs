@@ -413,7 +413,7 @@ async fn promote_adopt_confirms_candidate() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn promote_adopt_compensates_entry_when_job_flip_races() {
+async fn promote_adopt_rollbacks_entry_when_job_flip_races() {
     let (_tmp, state) = fresh_state().await;
     let pool = state.pool().unwrap().clone();
     let candidate = insert_pending(
@@ -478,7 +478,7 @@ async fn promote_adopt_compensates_entry_when_job_flip_races() {
         .unwrap();
     assert!(
         active.is_none(),
-        "compensation must remove the orphan so unique index does not block retry"
+        "atomic rollback must leave no active entry when job flip races"
     );
 
     seed_pending_candidate(
@@ -501,12 +501,12 @@ async fn promote_adopt_compensates_entry_when_job_flip_races() {
     let Json(resp2) =
         promote_candidate(State(state), Path("wld_test_world".to_string()), Json(req2))
             .await
-            .expect("retry adopt after compensation must succeed");
+            .expect("retry adopt after rollback must succeed");
     assert_eq!(resp2.job.status, "confirmed");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn promote_adopt_compensates_entry_when_job_flip_cas_errors() {
+async fn promote_adopt_rollbacks_entry_when_job_flip_cas_errors() {
     let (_tmp, state) = fresh_state().await;
     let pool = state.pool().unwrap().clone();
     let candidate = insert_pending(
@@ -557,7 +557,7 @@ async fn promote_adopt_compensates_entry_when_job_flip_cas_errors() {
     assert_eq!(
         err.status_code(),
         axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-        "CAS execute error during flip surfaces as internal after compensation"
+        "CAS execute error during flip surfaces as internal after rollback"
     );
 
     let store = SqliteKbStore::new(pool.clone());
@@ -567,7 +567,7 @@ async fn promote_adopt_compensates_entry_when_job_flip_cas_errors() {
         .unwrap();
     assert!(
         active.is_none(),
-        "CAS-error path must compensate the orphan entry"
+        "CAS-error path must roll back the in-flight entry"
     );
 }
 
@@ -793,6 +793,75 @@ async fn promote_adopt_confirmed_job_does_not_recover_unattributed_collision() {
         .unwrap()
         .expect("pre-existing entry must remain active");
     assert_eq!(active.entry_id, "kb_preexisting_confirmed");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn promote_adopt_retry_recovers_when_job_confirmed_with_attributed_entry() {
+    let (_tmp, state) = fresh_state().await;
+    let pool = state.pool().unwrap().clone();
+    let job_id = "xj_retry_recover_attributed";
+
+    // Durable success from a prior attempt: confirmed job + attributed active entry.
+    seed_key_block_attributed(
+        &pool,
+        "kb_retry_recover",
+        "wld_test_world",
+        "character",
+        "RetryRecover",
+        "confirmed",
+        Some(1),
+        Some(NOVEL_CHARACTER_BODY),
+        job_id,
+    )
+    .await;
+    seed_pending_candidate(
+        &pool,
+        job_id,
+        "work_retry_recover",
+        "wld_test_world",
+        "character",
+        "RetryRecover",
+    )
+    .await;
+    sqlx::query(
+        "UPDATE kb_extract_jobs \
+         SET promotion_status = 'confirmed', version = 1 \
+         WHERE job_id = ?",
+    )
+    .bind(job_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let resp = promote_candidate(
+        State(state.clone()),
+        Path("wld_test_world".to_string()),
+        Json(WorldKbPromoteCandidateRequest {
+            job_id: job_id.to_string(),
+            candidate_id: "kb_cand".to_string(),
+            action: "adopt".parse().unwrap(),
+            expected_version: 0,
+            merge_target_id: None,
+            patch: None,
+        }),
+    )
+    .await
+    .expect("attributed confirmed-job retry must return 200 (F-001 / QC2)");
+
+    let entity = resp.entity.as_ref().expect("adopt entity");
+    assert_eq!(entity.canonical_name.to_string(), "RetryRecover");
+    assert_eq!(entity.status, "confirmed");
+    assert_eq!(entity.key_block_id, "kb_retry_recover");
+    assert_eq!(resp.job.status, "confirmed");
+    assert_eq!(resp.version, 1);
+
+    let store = SqliteKbStore::new(pool);
+    let active = store
+        .get_active_by_unique_key("wld_test_world", "RetryRecover", BlockType::Character)
+        .await
+        .unwrap()
+        .expect("single active entry");
+    assert_eq!(active.created_from_command_id.as_deref(), Some(job_id));
 }
 
 #[tokio::test]

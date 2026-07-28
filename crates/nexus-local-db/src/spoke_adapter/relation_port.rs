@@ -44,7 +44,7 @@ use nexus_spoke_adapter::{
 };
 use serde_json::{json, Map, Value};
 
-impl RelationPort for NexusBaselineAdapter {
+impl RelationPort for NexusBaselineAdapter<'_> {
     fn put_relation(&self, relation: Relation) -> SpokeResult<Relation> {
         let pool = self.pool.clone();
         self.block_on(async move {
