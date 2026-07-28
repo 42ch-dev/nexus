@@ -132,6 +132,51 @@ impl SqliteKbStore {
         }
     }
 
+    /// Fetch the active [`WorldKbEntry`] for a world's unique
+    /// `(block_type, canonical_name)` key.
+    ///
+    /// Uses the `idx_kb_key_blocks_active_unique` partial index directly —
+    /// unlike [`KbStore::list_by_world`], this is not subject to the
+    /// `LIST_BY_WORLD_LIMIT` window.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`KbStoreError::Storage`] on database failure.
+    pub async fn get_active_by_unique_key(
+        &self,
+        world_id: &str,
+        canonical_name: &str,
+        block_type: BlockType,
+    ) -> Result<Option<WorldKbEntry>, KbStoreError> {
+        let block_type_str = block_type_to_sql(block_type);
+        // SAFETY: static SQL with vetted column names from migration
+        // 202606190003_kb_key_blocks_provenance.sql. Runtime query used
+        // because new provenance columns are unknown to sqlx offline mode.
+        let row = sqlx::query_as::<_, KeyBlockRow>(
+            r"SELECT
+                key_block_id, world_id, block_type, canonical_name, status,
+                revision, body_json, source_anchor_json, created_from_command_id,
+                created_at, updated_at, source_work_id, source_chapter,
+                source_provenance_kind, extensions_nexus_json
+            FROM kb_key_blocks
+            WHERE world_id = ?
+              AND block_type = ?
+              AND canonical_name = ?
+              AND status NOT IN ('deleted', 'merged', 'deprecated')
+            LIMIT 1",
+        )
+        .bind(world_id)
+        .bind(&block_type_str)
+        .bind(canonical_name)
+        .fetch_optional(&*self.pool)
+        .await
+        .map_err(|e| db_err(&e))?;
+
+        row.as_ref()
+            .map(KeyBlockRow::to_key_block)
+            .transpose()
+    }
+
     /// Transaction-aware variant of [`KbStore::insert_knowledge_entry`] (R-V150KBED-03).
     ///
     /// Runs the same `canonical_name` + body validation as the trait method and
@@ -366,6 +411,13 @@ fn nexus_extras_extension_map(extras: Option<&serde_json::Value>) -> ExtensionMa
         }
     }
     map
+}
+
+/// Serialize a [`BlockType`] to the `kb_key_blocks.block_type` column format.
+fn block_type_to_sql(block_type: BlockType) -> String {
+    let block_type_str = serde_json::to_string(&block_type)
+        .unwrap_or_else(|_| format!("{block_type:?}"));
+    block_type_str.trim_matches('"').to_string()
 }
 
 /// Parse a `block_type` string into `BlockType`.
@@ -1056,6 +1108,52 @@ mod tests {
 
         let items = store.list_by_world("wld_1").await.unwrap();
         assert!(items.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_get_active_by_unique_key_beyond_list_limit() {
+        let (pool, _dir) = fresh_pool().await;
+        seed_world(&pool).await;
+
+        // Fill the list_by_world window (500 oldest rows) so a newer entry is
+        // absent from the scan — the retry-safe promote path must not rely on it.
+        for i in 0..LIST_BY_WORLD_LIMIT {
+            seed::knowledge_entry(
+                &pool,
+                &format!("kb_fill_{i:03}"),
+                "wld_1",
+                "character",
+                &format!("Fill_{i:03}"),
+                "confirmed",
+            )
+            .await;
+        }
+        seed::knowledge_entry(
+            &pool,
+            "kb_target",
+            "wld_1",
+            "character",
+            "RetryTarget",
+            "confirmed",
+        )
+        .await;
+
+        let store = SqliteKbStore::new(pool);
+        let listed = store.list_by_world("wld_1").await.unwrap();
+        assert_eq!(listed.len(), usize::try_from(LIST_BY_WORLD_LIMIT).unwrap());
+        assert!(
+            !listed
+                .iter()
+                .any(|kb| kb.canonical_name == "RetryTarget"),
+            "newest entry must fall outside the list_by_world window"
+        );
+
+        let found = store
+            .get_active_by_unique_key("wld_1", "RetryTarget", BlockType::Character)
+            .await
+            .unwrap()
+            .expect("targeted lookup must find the active row");
+        assert_eq!(found.entry_id, "kb_target");
     }
 
     #[tokio::test]

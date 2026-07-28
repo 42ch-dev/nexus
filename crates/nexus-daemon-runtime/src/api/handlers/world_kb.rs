@@ -906,18 +906,13 @@ async fn find_active_entry_for(
     block_type: nexus_contracts::BlockType,
 ) -> Result<Option<WorldKbEntry>, NexusApiError> {
     let store = kb_store::SqliteKbStore::new(pool.clone());
-    let entries = store
-        .list_by_world(world_id)
+    store
+        .get_active_by_unique_key(world_id, canonical_name, block_type)
         .await
         .map_err(|e| NexusApiError::Internal {
             code: "DATABASE_ERROR".to_string(),
             message: e.to_string(),
-        })?;
-    Ok(entries.into_iter().find(|kb| {
-        kb.canonical_name == canonical_name
-            && kb.block_type == block_type
-            && !matches!(kb.status.as_str(), "deleted" | "merged" | "deprecated")
-    }))
+        })
 }
 
 /// Map a (non-retry-safe) [`SpokeReject`] to a [`NexusApiError`]. The
