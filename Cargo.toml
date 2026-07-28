@@ -110,8 +110,8 @@ regress = "0.10"
 # exact resolution (no caret/tilde range). Published on crates.io at 0.2.0.
 # Consumers (the upcoming spoke-adapter crate + nexus-contracts generated
 # types) will reference these via `spoke-schemas.workspace = true`.
-spoke-schemas = "=0.4.0"
-spoke-operations = "=0.4.0"
+spoke-schemas = "=0.4.1"
+spoke-operations = "=0.4.1"
 
 # --- Dev profile: keep local `target/` smaller ---
 # Default `debug = true` (full) inflates deps/rlibs and test binaries. Line-limited
