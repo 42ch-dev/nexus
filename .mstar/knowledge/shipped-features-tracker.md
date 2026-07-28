@@ -882,3 +882,17 @@ Archived from [deferred-features-cross-version-tracker.md](deferred-features-cro
 | **Outcome** | Bespoke `ts-generator`/`rust-generator` retired; `pnpm run codegen` library-driven; drift + workspace gates green |
 | **Open follow-ups** | R-V1138P0-*; R-V1138P1-001 canonical-hash spec sync; schema-loader orphan cleanup |
 
+> **Tracker gap (V1.139–V1.142):** the four SPOKE-adoption iterations shipped to `main` but were not snapshotted here (PRs #182/#184/#185/#186). Summary: V1.139 SPOKE foundation + `nexus-kb`→`nexus-knowledge` merge + terminology; V1.140 ops deps + CI; V1.141 spoke `0.2.0→0.4.0` + adapter-port architecture; V1.142 spoke `0.4.1` + production `NexusBaselineAdapter` + first `orchestrate_promote` cutover. See each `iterations/v1.13x–v1.142/delivery-compass.md` + STRATEGY Decision Log.
+
+## V1.143 — Deep SPOKE integration (orchestrator upsert + timeline unification) — 2026-07-28
+
+| Field | Value |
+|-------|-------|
+| **Iteration** | V1.143 (roadmap step 1 of 3 to full SPOKE adoption) |
+| **Integration / PR** | `iteration/v1.143` → `main` (PR [#187](https://github.com/42ch-dev/nexus/pull/187), merge `7abdb132`, MERGED) |
+| **Plans** | P0 timeline wire-type unification + beat-assist production (T3b); P1 `orchestrate_upsert` cutover on `patch_entity`; P2 promote-reject/merge Surface A resolution (relate cutover deferred → V1.144) |
+| **Outcome** | Spoke orchestrators now canonical on 2 of the highest-traffic KB write paths (promote V1.142 + upsert V1.143); nexus-narrative `TimelineEvent` unified onto spoke wire type via `From`/`Into` seam; production `order_timeline_events_by_ids` adoption (T3b). `wire_contracts_changed: false`. |
+| **Key finding** | Spoke wire types are **not uniform** — `KnowledgeEntry` carries `revision` (enables OCC) but `Relation` does **not**; each port family's orchestrability must be verified against the spoke wire type's actual fields. Codified in `architecture-patterns/spoke-adapter-port-orchestration-adoption.md`. |
+| **Open follow-ups** | `R-V1143P0-STRETCH` (T4b precedes → V1.144); `R-V1143P2-DEFER-RELATE` (relate cutover → V1.144 `RelationPort` adapter-extension); `R-V1143P2-ACCEPT-01/02` (promote-reject/merge Surface A, accepted) |
+| **Roadmap** | V1.144 (next): RelationPort extension + remaining orchestrators behind feature owners + first stub-family; V1.145 (next-next): CLI adapter spoke-protocol service interop + remaining stubs (feature-triggered) |
+
