@@ -58,6 +58,39 @@ async fn seed_key_block(
     .unwrap();
 }
 
+/// Like [`seed_key_block`] but sets `created_from_command_id` for promote
+/// attribution tests.
+async fn seed_key_block_attributed(
+    pool: &sqlx::SqlitePool,
+    key_block_id: &str,
+    world_id: &str,
+    block_type: &str,
+    canonical_name: &str,
+    status: &str,
+    revision: Option<i64>,
+    body_json: Option<&str>,
+    created_from_command_id: &str,
+) {
+    // SAFETY: test-only seed against the known kb_key_blocks schema.
+    sqlx::query(
+        "INSERT INTO kb_key_blocks \
+         (key_block_id, world_id, block_type, canonical_name, status, revision, body_json, \
+          created_from_command_id, created_at, updated_at) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))",
+    )
+    .bind(key_block_id)
+    .bind(world_id)
+    .bind(block_type)
+    .bind(canonical_name)
+    .bind(status)
+    .bind(revision)
+    .bind(body_json)
+    .bind(created_from_command_id)
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
 /// Seed a `kb_extract_jobs` promotion-candidate row directly (bypassing the
 /// `insert_pending` helper, which sets `work_entry_id = canonical_name_guess`
 /// and so cannot produce two same-name rows). Lets the test model two distinct
@@ -543,8 +576,9 @@ async fn promote_adopt_retry_repair_cleans_orphan_on_already_exists() {
     let (_tmp, state) = fresh_state().await;
     let pool = state.pool().unwrap().clone();
 
-    // Simulate a prior partial attempt: confirmed entry persisted, job still pending.
-    seed_key_block(
+    // Simulate a prior partial attempt: confirmed entry persisted with this
+    // promotion job's stamp, job still pending.
+    seed_key_block_attributed(
         &pool,
         "kb_orphan_prior",
         "wld_test_world",
@@ -553,6 +587,7 @@ async fn promote_adopt_retry_repair_cleans_orphan_on_already_exists() {
         "confirmed",
         Some(1),
         Some(NOVEL_CHARACTER_BODY),
+        "xj_orphan_retry",
     )
     .await;
     seed_pending_candidate(
@@ -622,6 +657,79 @@ async fn promote_adopt_retry_repair_cleans_orphan_on_already_exists() {
     .await
     .expect("retry adopt after auto-repair must succeed");
     assert_eq!(resp.job.status, "confirmed");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn promote_adopt_retry_does_not_delete_unattributed_collision() {
+    let (_tmp, state) = fresh_state().await;
+    let pool = state.pool().unwrap().clone();
+
+    // Independent pre-existing entry (no promotion job stamp).
+    seed_key_block(
+        &pool,
+        "kb_preexisting",
+        "wld_test_world",
+        "character",
+        "PreExisting",
+        "confirmed",
+        Some(1),
+        Some(NOVEL_CHARACTER_BODY),
+    )
+    .await;
+    seed_pending_candidate(
+        &pool,
+        "xj_unattributed_collision",
+        "work_collision_source",
+        "wld_test_world",
+        "character",
+        "PreExisting",
+    )
+    .await;
+
+    let err = promote_candidate(
+        State(state.clone()),
+        Path("wld_test_world".to_string()),
+        Json(WorldKbPromoteCandidateRequest {
+            job_id: "xj_unattributed_collision".to_string(),
+            candidate_id: "kb_cand".to_string(),
+            action: "adopt".parse().unwrap(),
+            expected_version: 0,
+            merge_target_id: None,
+            patch: None,
+        }),
+    )
+    .await
+    .expect_err("unattributed collision must not auto-delete");
+    assert_eq!(
+        err.status_code(),
+        axum::http::StatusCode::UNPROCESSABLE_ENTITY
+    );
+    let details = err.error_details().expect("validation details");
+    let errors = details["validation_summary"]["errors"]
+        .as_array()
+        .expect("errors array");
+    assert!(
+        errors.iter().any(|e| {
+            e.as_str()
+                .is_some_and(|msg| msg.contains("not attributable to this promotion job"))
+        }),
+        "must surface genuine conflict without repair: {details:?}"
+    );
+    assert!(
+        !errors.iter().any(|e| {
+            e.as_str()
+                .is_some_and(|msg| msg.contains("automatically removed"))
+        }),
+        "must not claim auto-repair: {details:?}"
+    );
+
+    let store = SqliteKbStore::new(pool);
+    let active = store
+        .get_active_by_unique_key("wld_test_world", "PreExisting", BlockType::Character)
+        .await
+        .unwrap()
+        .expect("pre-existing entry must remain active");
+    assert_eq!(active.entry_id, "kb_preexisting");
 }
 
 #[tokio::test]

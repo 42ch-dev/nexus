@@ -612,7 +612,8 @@ fn merge_aliases_into_body(body: &mut WorldKbBody, aliases: &[String]) {
 /// Remaining race: concurrent writers between orchestrator commit and flip;
 /// compensation covers every job-flip failure after a new entry create
 /// (`begin`, CAS error, `!flipped`, `commit`) plus automatic orphan repair
-/// on retry when the unique index fires with a still-pending job.
+/// on retry when the unique index fires with a still-pending job **and** the
+/// blocking entry is stamped with this promotion's `job_id`.
 async fn promote_adopt(
     state: &WorkspaceState,
     world_id: &str,
@@ -646,6 +647,10 @@ async fn promote_adopt(
     } else {
         Some("manual".to_string())
     };
+    // Stamp the candidate with this promotion job so a partial attempt's
+    // confirmed entry is attributable on retry (created_from_command_id
+    // round-trips through the V1.139 WorldKbEntry ↔ SpokeKnowledgeEntry seam).
+    kb.created_from_command_id = Some(req.job_id.clone());
     let candidate_entry_id = kb.entry_id.clone();
 
     // V1.142 P2: route through `orchestrate_promote`. `NexusBaselineAdapter`
@@ -763,9 +768,9 @@ async fn flip_promotion_job_or_compensate(
 /// in the same adopt attempt so `idx_kb_key_blocks_active_unique` does not
 /// block retry.
 ///
-/// Also used by the retry-repair path in [`map_promote_reject`] to remove
-/// orphans from prior partial attempts. No-op when the row is already gone
-/// (idempotent for repeated compensation).
+/// Also used by the retry-repair path in [`map_promote_reject`] when the
+/// blocking entry's `created_from_command_id` matches the promotion `job_id`.
+/// No-op when the row is already gone (idempotent for repeated compensation).
 async fn compensate_orphan_promote_entry(
     pool: &sqlx::SqlitePool,
     entry_id: &str,
@@ -849,9 +854,10 @@ fn build_spoke_promote_request(candidate: &WorldKbEntry) -> PromoteRequest {
 /// - **job `confirmed`** → prior partial attempt completed despite returning
 ///   an error; recover the existing entry (looked up via the same unique
 ///   key) and return it as a retry-safe success.
-/// - **job `pending`** → prior partial attempt left an orphan (entry committed,
-///   job not flipped). [`map_promote_reject`] auto-deletes the blocking active
-///   entry and returns 422 so the client can retry adopt immediately.
+/// - **job `pending`** → if the blocking active entry is stamped with this
+///   promotion's `job_id` (`created_from_command_id`), it is a repairable
+///   orphan from a prior partial attempt and is auto-deleted; otherwise this
+///   is a genuine uniqueness conflict and the entry is left intact (422).
 ///
 /// The outer `promote_candidate` handler's `promotion_status == "pending"`
 /// gate plus `mark_confirmed_in_tx_with_cas`'s CAS guard together prevent
@@ -951,8 +957,6 @@ async fn map_promote_reject(
                     "promote_adopt retry-safe: job is confirmed but no matching active entry found"
                 );
             } else if job.promotion_status == "pending" {
-                // Genuine orphan from a prior partial attempt — remove the
-                // blocking active entry so the client can retry adopt cleanly.
                 if let Some(existing) = find_active_entry_for(
                     pool,
                     &candidate_lookup.world_id,
@@ -961,17 +965,28 @@ async fn map_promote_reject(
                 )
                 .await?
                 {
-                    compensate_orphan_promote_entry(pool, &existing.entry_id).await?;
-                    tracing::info!(
-                        job_id = %job_id,
-                        entry_id = %existing.entry_id,
-                        "promote_adopt retry-repair: removed orphan entry blocking adopt; client should retry"
-                    );
+                    if promote_entry_attributed_to_job(&existing, job_id) {
+                        compensate_orphan_promote_entry(pool, &existing.entry_id).await?;
+                        tracing::info!(
+                            job_id = %job_id,
+                            entry_id = %existing.entry_id,
+                            "promote_adopt retry-repair: removed attributed orphan entry; client should retry"
+                        );
+                        return Err(NexusApiError::world_kb_validation_failed(
+                            &[
+                                "a prior partial promote attempt left an orphan entry that was \
+                                 automatically removed; retry adopt with the same candidate"
+                                    .to_string(),
+                            ],
+                            &[],
+                        ));
+                    }
                 }
                 return Err(NexusApiError::world_kb_validation_failed(
                     &[
-                        "a prior partial promote attempt left an orphan entry that was \
-                         automatically removed; retry adopt with the same candidate"
+                        "an active WorldKbEntry with the same name/type already exists in this \
+                         world and is not attributable to this promotion job (use merge or \
+                         rename the candidate)"
                             .to_string(),
                     ],
                     &[],
@@ -988,6 +1003,15 @@ async fn map_promote_reject(
         ));
     }
     Err(spoke_reject_to_api_error(reject, pool, job_id).await)
+}
+
+/// True when `entry` was persisted by a promote adopt for `job_id`.
+///
+/// Uses `created_from_command_id`, stamped on the provisional candidate in
+/// [`promote_adopt`] before `orchestrate_promote`, so retry repair can
+/// distinguish orphans from independent pre-existing entries.
+fn promote_entry_attributed_to_job(entry: &WorldKbEntry, job_id: &str) -> bool {
+    entry.created_from_command_id.as_deref() == Some(job_id)
 }
 
 /// Look up the active [`WorldKbEntry`] matching the same unique key as the
