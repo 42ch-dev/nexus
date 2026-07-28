@@ -330,7 +330,11 @@ pub async fn patch_entity(
     // Editability invariant: deleted entities are terminal and cannot be
     // patched. (Pending candidates live on kb_extract_jobs, not
     // kb_key_blocks — they are promoted via promote-candidate, not edited
-    // here.) 'merged' entities remain editable to allow post-merge cleanup.
+    // here.) Note (V1.143): 'merged' is now also terminal — this guard
+    // still pre-rejects only 'deleted', but the orchestrator's
+    // `validate_update_path` rejects 'merged' downstream (spoke's
+    // KnowledgeEntry transition table treats it as terminal), so the
+    // pre-cutover 'merged remains editable' allowance no longer applies.
     if kb.status == "deleted" {
         return Err(NexusApiError::world_kb_validation_failed(
             &["deleted entities are terminal and cannot be patched".to_string()],
@@ -405,6 +409,14 @@ pub async fn patch_entity(
     // (`put_update` opens + commits its own transaction) — patch_entity has no
     // sibling write, so the unbound path is behavior-equivalent to the previous
     // `pool.begin()` → CAS → `commit()` block.
+    //
+    // TX lifecycle (unbound path — guides the P2 relate-cutover author):
+    // Ok → adapter commits the CAS write inside `put_update_unbound`;
+    // Reject (orchestrator `validate_update_path`, stale/conflict CAS) → no
+    // commit (tx never opened, or dropped → rolled back); error path on
+    // begin/commit → tx dropped → rolled back, surfaced as Reject. The
+    // handler never holds the tx here, unlike `promote_adopt`'s bound
+    // `tx.commit()`/`rollback()`.
     let result = adapter.with_bound_tx(|| orchestrate_upsert(&adapter, spoke_req));
     // Confirm success + extract the bumped revision from the persisted entry.
     let persisted = map_upsert_response(result, pool, &req.entity_id).await?;
