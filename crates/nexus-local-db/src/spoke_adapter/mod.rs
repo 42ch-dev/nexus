@@ -25,6 +25,7 @@ pub mod rule_query_port;
 pub mod scope_query_port;
 
 use sqlx::SqlitePool;
+use std::sync::{Arc, Mutex};
 use tokio::runtime::Handle;
 
 /// Production `BaselinePorts` impl backing spoke orchestrators against nexus
@@ -32,10 +33,13 @@ use tokio::runtime::Handle;
 ///
 /// See `.mstar/specs/spoke-adapter-architecture.md` §7.4 for the family
 /// matrix (which families are production vs stub). Construct per-request from
-/// a [`SqlitePool`] (cheap handle) **while inside a tokio multi-threaded
+/// a [`SqlitePool`] (cheap handle clone) **while inside a tokio multi-threaded
 /// runtime**: the adapter captures the current runtime [`Handle`] and bridges
 /// the sync spoke port trait to async `SQLite` I/O via
 /// `tokio::task::block_in_place`.
+///
+/// When `with_tx_cell` is used, the lifetime parameter ties the adapter to the
+/// handler-owned `sqlx::Transaction` for the duration of one orchestrate call.
 ///
 /// # Panics
 ///
@@ -43,12 +47,17 @@ use tokio::runtime::Handle;
 /// In debug builds it additionally panics if that runtime is **not**
 /// multi-threaded — the `block_in_place` bridge used by every sync port
 /// method requires a multi-threaded runtime (see [`Self::block_on`]).
-pub struct NexusBaselineAdapter {
+pub struct NexusBaselineAdapter<'a> {
     pool: SqlitePool,
     handle: Handle,
+    /// When set (via [`Self::with_tx_cell`]), `put_knowledge_entry` joins this
+    /// transaction instead of opening its own. The handler moves the
+    /// `sqlx::Transaction` into the shared cell before `orchestrate_promote`
+    /// and takes it back out for sibling writes + `commit()`.
+    bound_tx_cell: Option<Arc<Mutex<Option<sqlx::Transaction<'a, sqlx::Sqlite>>>>>,
 }
 
-impl NexusBaselineAdapter {
+impl NexusBaselineAdapter<'static> {
     /// Construct from the current tokio runtime.
     ///
     /// # Panics
@@ -74,7 +83,61 @@ impl NexusBaselineAdapter {
             "NexusBaselineAdapter requires a multi-threaded tokio runtime \
              (block_in_place panics under a current_thread runtime)"
         );
-        Self { pool, handle }
+        NexusBaselineAdapter {
+            pool,
+            handle,
+            bound_tx_cell: None,
+        }
+    }
+}
+
+#[allow(clippy::elidable_lifetime_names)]
+impl<'a> NexusBaselineAdapter<'a> {
+    /// Attach a shared transaction cell for the duration of one adopt/orchestrate
+    /// call. The handler installs the open `sqlx::Transaction` in the cell before
+    /// calling [`Self::with_bound_tx`], then removes it afterward for job flip +
+    /// `commit()`.
+    #[must_use]
+    pub fn with_tx_cell(
+        self,
+        cell: Arc<Mutex<Option<sqlx::Transaction<'a, sqlx::Sqlite>>>>,
+    ) -> Self {
+        Self {
+            bound_tx_cell: Some(cell),
+            ..self
+        }
+    }
+
+    /// Run `f` while the adapter's bound transaction cell (if any) is active.
+    ///
+    /// `orchestrate_promote` and other sync spoke orchestrators call this from
+    /// async handlers via a short synchronous bridge (`block_in_place` inside
+    /// `put_knowledge_entry`). The handler must keep the [`Arc`] alive and must
+    /// not commit/rollback until after `f` returns.
+    pub fn with_bound_tx<F, R>(&self, f: F) -> R
+    where
+        F: FnOnce() -> R,
+    {
+        f()
+    }
+
+    pub(crate) fn take_bound_tx(&self) -> Option<sqlx::Transaction<'a, sqlx::Sqlite>> {
+        let cell = self.bound_tx_cell.as_ref()?;
+        cell.lock().ok()?.take()
+    }
+
+    pub(crate) fn restore_bound_tx(&self, tx: sqlx::Transaction<'a, sqlx::Sqlite>) {
+        if let Some(cell) = &self.bound_tx_cell {
+            if let Ok(mut guard) = cell.lock() {
+                *guard = Some(tx);
+            }
+        }
+    }
+
+    pub(crate) fn is_bound(&self) -> bool {
+        self.bound_tx_cell
+            .as_ref()
+            .is_some_and(|cell| cell.lock().ok().is_some_and(|guard| guard.is_some()))
     }
 
     /// Bridge a sync trait method → async `SQLite` I/O.

@@ -20,7 +20,7 @@
 use super::NexusBaselineAdapter;
 use nexus_spoke_adapter::{Rule, RuleQueryPort, SpokeResult};
 
-impl RuleQueryPort for NexusBaselineAdapter {
+impl RuleQueryPort for NexusBaselineAdapter<'_> {
     /// Stub — returns the documented empty set (spec §7.4).
     ///
     /// Nexus has no persisted spoke `Rule` rows today; rules come from

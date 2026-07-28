@@ -58,7 +58,7 @@ use nexus_spoke_adapter::{
 };
 use serde_json::{json, Map, Value};
 
-impl FindingPort for NexusBaselineAdapter {
+impl FindingPort for NexusBaselineAdapter<'_> {
     fn put_findings(&self, findings: Vec<SpokeFinding>) -> SpokeResult<Vec<SpokeFinding>> {
         let pool = self.pool.clone();
         self.block_on(async move {

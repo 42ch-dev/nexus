@@ -22,7 +22,7 @@ use serde_json::json;
 /// default host identity for the production adapter).
 const HOST_ID: &str = "nexus-local";
 
-impl HostManifestPort for NexusBaselineAdapter {
+impl HostManifestPort for NexusBaselineAdapter<'_> {
     fn get_host_capability_manifest(&self) -> SpokeResult<HostCapabilityManifest> {
         // Mirror V1.141 mock's `make_manifest` pattern: construct the
         // canonical shape via `serde_json::from_value`, which exercises the
