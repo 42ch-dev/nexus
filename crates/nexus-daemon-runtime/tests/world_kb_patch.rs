@@ -413,7 +413,7 @@ async fn promote_adopt_confirms_candidate() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn promote_adopt_compensates_entry_when_job_flip_races() {
+async fn promote_adopt_rollbacks_entry_when_job_flip_races() {
     let (_tmp, state) = fresh_state().await;
     let pool = state.pool().unwrap().clone();
     let candidate = insert_pending(
@@ -478,7 +478,7 @@ async fn promote_adopt_compensates_entry_when_job_flip_races() {
         .unwrap();
     assert!(
         active.is_none(),
-        "compensation must remove the orphan so unique index does not block retry"
+        "atomic rollback must leave no active entry when job flip races"
     );
 
     seed_pending_candidate(
@@ -501,12 +501,12 @@ async fn promote_adopt_compensates_entry_when_job_flip_races() {
     let Json(resp2) =
         promote_candidate(State(state), Path("wld_test_world".to_string()), Json(req2))
             .await
-            .expect("retry adopt after compensation must succeed");
+            .expect("retry adopt after rollback must succeed");
     assert_eq!(resp2.job.status, "confirmed");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn promote_adopt_compensates_entry_when_job_flip_cas_errors() {
+async fn promote_adopt_rollbacks_entry_when_job_flip_cas_errors() {
     let (_tmp, state) = fresh_state().await;
     let pool = state.pool().unwrap().clone();
     let candidate = insert_pending(
@@ -557,7 +557,7 @@ async fn promote_adopt_compensates_entry_when_job_flip_cas_errors() {
     assert_eq!(
         err.status_code(),
         axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-        "CAS execute error during flip surfaces as internal after compensation"
+        "CAS execute error during flip surfaces as internal after rollback"
     );
 
     let store = SqliteKbStore::new(pool.clone());
@@ -567,7 +567,7 @@ async fn promote_adopt_compensates_entry_when_job_flip_cas_errors() {
         .unwrap();
     assert!(
         active.is_none(),
-        "CAS-error path must compensate the orphan entry"
+        "CAS-error path must roll back the in-flight entry"
     );
 }
 

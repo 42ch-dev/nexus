@@ -65,6 +65,7 @@ use nexus_spoke_adapter::{
     SpokeReject, SpokeRejectCode, SpokeResult,
 };
 use serde::Deserialize;
+use std::sync::{Arc, Mutex};
 use tracing::{info, warn};
 
 /// Maximum entities returned by the graph projection (mirrors `kb_store`
@@ -587,34 +588,13 @@ fn merge_aliases_into_body(body: &mut WorldKbBody, aliases: &[String]) {
 
 /// Adopt: build a provisional candidate, route through `orchestrate_promote`
 /// (which validates → applies promote acceptance → confirmed + bumps revision
-/// → persists via the production adapter), then flip the promotion job in a
-/// separate transaction.
+/// → persists via the production adapter), then flip the promotion job in the
+/// **same** `SQLite` transaction.
 ///
-/// V1.142 P2: first production orchestrator cutover. The candidate is built
-/// with `status = "provisional"` (NOT `"confirmed"` as the pre-V1.142
-/// direct-create path did) — `orchestrate_promote`'s `validate_promote_request`
-/// requires provisional, and `apply_promote_acceptance` transitions it to
-/// `"confirmed"` and bumps the revision.
-///
-/// # Transaction boundary split (with compensation)
-///
-/// This handler routes through `orchestrate_promote`, which creates the
-/// confirmed `KnowledgeEntry` in its own storage call (its own transaction
-/// inside the adapter's `put_knowledge_entry`). The extract-job flip below
-/// happens in a SEPARATE transaction. If the job flip fails after a **new**
-/// entry was committed this attempt, [`compensate_orphan_promote_entry`]
-/// soft-deletes that entry so the unique index does not block a clean retry.
-///
-/// The retry-safe idempotency pattern still applies when the flip succeeds on
-/// retry after a prior partial attempt left the job confirmed: on retry,
-/// `KnowledgeEntryAlreadyExists` → [`map_promote_response`] recovers via the
-/// existing confirmed entry (no compensation — that entry is authoritative).
-/// Remaining race: concurrent adopt requests for the same pending job — the
-/// retry/reject path never deletes KB rows (only the creating request
-/// compensates via [`flip_promotion_job_or_compensate`]). Cross-request
-/// soft-delete would race with in-flight adopts. Commit ack errors re-read
-/// the job (with retries): confirmed → success without delete; pending/missing
-/// → compensate; re-read exhaustion → fail without delete (outcome ambiguous).
+/// V1.142 P3: single `COMMIT` covers both the orchestrator's KB write and
+/// `mark_confirmed_in_tx_with_cas`. The handler owns `BEGIN`/`COMMIT`; the
+/// adapter joins the open transaction via a shared cell for the synchronous
+/// `orchestrate_promote` bridge.
 async fn promote_adopt(
     state: &WorkspaceState,
     world_id: &str,
@@ -635,8 +615,7 @@ async fn promote_adopt(
         .map_err(|e| NexusApiError::world_kb_validation_failed(&[e.to_string()], &[]))?;
 
     // Build the candidate with `status = "provisional"` — the orchestrator
-    // flips it to "confirmed" via `apply_promote_acceptance`. Setting it to
-    // "confirmed" here would reject with `CandidateNotProvisional`.
+    // flips it to "confirmed" via `apply_promote_acceptance`.
     let mut kb = WorldKbEntry::new(world_id, block_type, &canonical_name);
     kb.body = Some(body);
     kb.status = "provisional".to_string();
@@ -648,36 +627,56 @@ async fn promote_adopt(
     } else {
         Some("manual".to_string())
     };
-    // Stamp the candidate with this promotion job for operator attribution
-    // (created_from_command_id round-trips through the V1.139 seam). Not
-    // used for cross-request retry deletes — those are racy.
     kb.created_from_command_id = Some(req.job_id.clone());
-    let candidate_entry_id = kb.entry_id.clone();
 
-    // V1.142 P2: route through `orchestrate_promote`. `NexusBaselineAdapter`
-    // bridges the sync spoke port to async SQLite via `block_in_place`;
-    // construction requires the current thread to be inside a tokio
-    // multi-threaded runtime (the daemon's production runtime satisfies
-    // this; tests use `#[tokio::test(flavor = "multi_thread")]`).
-    let adapter = NexusBaselineAdapter::new(pool.clone());
+    let tx = pool.begin().await.map_err(NexusApiError::from)?;
+    let tx_cell = Arc::new(Mutex::new(Some(tx)));
+    let adapter = NexusBaselineAdapter::new(pool.clone()).with_tx_cell(Arc::clone(&tx_cell));
+
     let spoke_req = build_spoke_promote_request(&kb);
-    let result = orchestrate_promote(&adapter, spoke_req);
-    let knowledge_entry = map_promote_response(result, pool, &req.job_id, &kb).await?;
+    let result = adapter.with_bound_tx(|| orchestrate_promote(&adapter, spoke_req));
+    let knowledge_entry = match map_promote_response(result, pool, &req.job_id, &kb).await {
+        Ok(entry) => entry,
+        Err(e) => {
+            let rollback_tx = tx_cell.lock().ok().and_then(|mut guard| guard.take());
+            if let Some(tx) = rollback_tx {
+                let _ = tx.rollback().await;
+            }
+            return Err(e);
+        }
+    };
 
-    // Job flip — separate transaction from the orchestrator's entry create
-    // (transaction-boundary split, see function doc). Any failure after a new
-    // entry was persisted this attempt triggers compensation.
-    flip_promotion_job_or_compensate(
-        pool,
-        &req.job_id,
-        i64::try_from(req.expected_version).unwrap_or(0),
-        &knowledge_entry.entry_id,
-        &candidate_entry_id,
-    )
-    .await?;
+    let mut tx = tx_cell
+        .lock()
+        .expect("promote_adopt tx mutex poisoned")
+        .take()
+        .expect("promote_adopt tx cell must hold the open transaction");
 
-    // Build response — re-read the entry to project the post-write state
-    // (mirrors the pre-V1.142 direct-create path's get-after-insert).
+    let expected_version = i64::try_from(req.expected_version).unwrap_or(0);
+    match mark_confirmed_in_tx_with_cas(&mut tx, &req.job_id, expected_version).await {
+        Ok(true) => match tx.commit().await {
+            Ok(()) => {}
+            Err(e) => {
+                handle_promote_adopt_commit_ambiguity(pool, &req.job_id, e).await?;
+            }
+        },
+        Ok(false) => {
+            let _ = tx.rollback().await;
+            return Err(NexusApiError::world_kb_validation_failed(
+                &[
+                    "candidate was no longer pending (already confirmed/rejected); \
+                     rolled back the adopt transaction"
+                        .to_string(),
+                ],
+                &[],
+            ));
+        }
+        Err(e) => {
+            let _ = tx.rollback().await;
+            return Err(map_cas_err(e, &req.job_id, "version"));
+        }
+    }
+
     let store = kb_store::SqliteKbStore::new(pool.clone());
     let kb_id = knowledge_entry.entry_id.clone();
     let updated_kb =
@@ -702,137 +701,59 @@ async fn promote_adopt(
     }))
 }
 
-// ─── promote-adopt orchestration helpers (V1.142 P2) ────────────────────────
+// ─── promote-adopt orchestration helpers (V1.142 P2/P3) ─────────────────────
 
-/// Flip `kb_extract_jobs` pending → confirmed inside a dedicated transaction.
-///
-/// When this adopt attempt created a **new** confirmed entry
-/// (`created_entry_id == candidate_entry_id`), unambiguous flip failures
-/// (`begin`, CAS execute error, `!flipped` after rollback) soft-delete that
-/// entry via [`compensate_orphan_promote_entry`].
-///
-/// **Commit ambiguity:** if `tx.commit()` returns an error, `SQLite` may still
-/// have durably applied the UPDATE. The handler re-reads the job (with retries)
-/// and applies [`resolve_flip_commit_ambiguity_after_reread`] — confirmed →
-/// success without delete; pending/missing → compensate; re-read exhaustion →
-/// fail without delete; other terminal → fail without delete.
-async fn flip_promotion_job_or_compensate(
-    pool: &sqlx::SqlitePool,
-    job_id: &str,
-    expected_version: i64,
-    created_entry_id: &str,
-    candidate_entry_id: &str,
-) -> Result<(), NexusApiError> {
-    let compensate_if_new = created_entry_id == candidate_entry_id;
-
-    let mut tx = match pool.begin().await {
-        Ok(tx) => tx,
-        Err(e) => {
-            if compensate_if_new {
-                compensate_orphan_promote_entry(pool, created_entry_id).await?;
-            }
-            return Err(NexusApiError::from(e));
-        }
-    };
-
-    match mark_confirmed_in_tx_with_cas(&mut tx, job_id, expected_version).await {
-        Ok(true) => match tx.commit().await {
-            Ok(()) => Ok(()),
-            Err(e) => {
-                handle_flip_commit_ambiguity(pool, job_id, created_entry_id, compensate_if_new, e)
-                    .await
-            }
-        },
-        Ok(false) => {
-            let _ = tx.rollback().await;
-            if compensate_if_new {
-                compensate_orphan_promote_entry(pool, created_entry_id).await?;
-            }
-            Err(NexusApiError::world_kb_validation_failed(
-                &[
-                    "candidate was no longer pending (already confirmed/rejected); \
-                     rolled back the job flip and compensated any new entry from this attempt"
-                        .to_string(),
-                ],
-                &[],
-            ))
-        }
-        Err(e) => {
-            let _ = tx.rollback().await;
-            let api_err = map_cas_err(e, job_id, "version");
-            if compensate_if_new {
-                compensate_orphan_promote_entry(pool, created_entry_id).await?;
-            }
-            Err(api_err)
-        }
-    }
-}
-
-/// Action to take when `tx.commit()` fails after a successful in-tx job flip.
+/// Action to take when `tx.commit()` fails after a successful in-tx adopt.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum FlipCommitAmbiguityAction {
-    /// Commit likely landed; do not compensate.
+enum PromoteAdoptCommitAmbiguityAction {
+    /// Commit likely landed; treat adopt as success.
     TreatAsSuccess,
-    /// Flip did not commit; safe to compensate a new entry from this attempt.
-    CompensateAndFail,
-    /// Job in another terminal state; fail without deleting KB content.
-    FailWithoutCompensate,
+    /// Commit did not land (or outcome unclear); surface error to caller.
+    Fail,
 }
 
 /// Pure decision table for commit-ack failures (unit-tested).
-fn flip_commit_ambiguity_action(job_status: Option<&str>) -> FlipCommitAmbiguityAction {
+fn promote_adopt_commit_ambiguity_action(
+    job_status: Option<&str>,
+) -> PromoteAdoptCommitAmbiguityAction {
     match job_status {
-        Some("confirmed") => FlipCommitAmbiguityAction::TreatAsSuccess,
-        Some("pending") | None => FlipCommitAmbiguityAction::CompensateAndFail,
-        Some(_) => FlipCommitAmbiguityAction::FailWithoutCompensate,
+        Some("confirmed") => PromoteAdoptCommitAmbiguityAction::TreatAsSuccess,
+        _ => PromoteAdoptCommitAmbiguityAction::Fail,
     }
 }
 
 /// Outcome of resolving a commit-ack failure after re-reading the promotion job.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum FlipCommitAmbiguityResolution {
-    /// Commit likely landed; do not compensate.
+enum PromoteAdoptCommitAmbiguityResolution {
     TreatAsSuccess,
-    /// Flip did not commit; safe to compensate a new entry from this attempt.
-    CompensateAndFail,
-    /// Job in another terminal state; fail without deleting KB content.
-    FailWithoutCompensate,
+    Fail,
 }
 
 /// Pure decision after a status re-read (unit-tested). `Err` means all re-read
-/// attempts failed — fail without compensating because the commit outcome is
-/// ambiguous and deleting risks a confirmed job without its adopted entry.
-fn resolve_flip_commit_ambiguity_after_reread(
+/// attempts failed — fail because the commit outcome is ambiguous.
+fn resolve_promote_adopt_commit_ambiguity_after_reread(
     reread: Result<Option<&str>, ()>,
-) -> FlipCommitAmbiguityResolution {
+) -> PromoteAdoptCommitAmbiguityResolution {
     match reread {
-        Ok(status) => match flip_commit_ambiguity_action(status) {
-            FlipCommitAmbiguityAction::TreatAsSuccess => {
-                FlipCommitAmbiguityResolution::TreatAsSuccess
+        Ok(status) => match promote_adopt_commit_ambiguity_action(status) {
+            PromoteAdoptCommitAmbiguityAction::TreatAsSuccess => {
+                PromoteAdoptCommitAmbiguityResolution::TreatAsSuccess
             }
-            FlipCommitAmbiguityAction::CompensateAndFail => {
-                FlipCommitAmbiguityResolution::CompensateAndFail
-            }
-            FlipCommitAmbiguityAction::FailWithoutCompensate => {
-                FlipCommitAmbiguityResolution::FailWithoutCompensate
-            }
+            PromoteAdoptCommitAmbiguityAction::Fail => PromoteAdoptCommitAmbiguityResolution::Fail,
         },
-        Err(()) => FlipCommitAmbiguityResolution::FailWithoutCompensate,
+        Err(()) => PromoteAdoptCommitAmbiguityResolution::Fail,
     }
 }
 
 /// Re-read the promotion job after a commit error and apply
-/// [`resolve_flip_commit_ambiguity_after_reread`]. Retries the status query
-/// up to three times before treating re-read exhaustion as fail-without-compensate.
-async fn handle_flip_commit_ambiguity(
+/// [`resolve_promote_adopt_commit_ambiguity_after_reread`].
+async fn handle_promote_adopt_commit_ambiguity(
     pool: &sqlx::SqlitePool,
     job_id: &str,
-    created_entry_id: &str,
-    compensate_if_new: bool,
     commit_err: sqlx::Error,
 ) -> Result<(), NexusApiError> {
     let reread = reread_promotion_status_with_retry(pool, job_id).await;
-    let resolution = resolve_flip_commit_ambiguity_after_reread(
+    let resolution = resolve_promote_adopt_commit_ambiguity_after_reread(
         reread
             .as_ref()
             .map(|status| status.as_deref())
@@ -840,23 +761,14 @@ async fn handle_flip_commit_ambiguity(
     );
 
     match resolution {
-        FlipCommitAmbiguityResolution::TreatAsSuccess => {
+        PromoteAdoptCommitAmbiguityResolution::TreatAsSuccess => {
             warn!(
                 job_id = %job_id,
-                "promote_adopt: commit returned error but job is confirmed; treating flip as success"
+                "promote_adopt: commit returned error but job is confirmed; treating adopt as success"
             );
             Ok(())
         }
-        FlipCommitAmbiguityResolution::CompensateAndFail => {
-            if compensate_if_new {
-                compensate_orphan_promote_entry(pool, created_entry_id).await?;
-            }
-            Err(flip_commit_ambiguity_error(
-                commit_err,
-                reread.err().as_ref(),
-            ))
-        }
-        FlipCommitAmbiguityResolution::FailWithoutCompensate => Err(flip_commit_ambiguity_error(
+        PromoteAdoptCommitAmbiguityResolution::Fail => Err(promote_adopt_commit_ambiguity_error(
             commit_err,
             reread.err().as_ref(),
         )),
@@ -864,7 +776,7 @@ async fn handle_flip_commit_ambiguity(
 }
 
 /// Re-read `kb_extract_jobs.promotion_status` with short retries after commit ack
-/// failures so transient read errors do not force an incorrect compensate/delete.
+/// failures so transient read errors do not force an incorrect outcome.
 async fn reread_promotion_status_with_retry(
     pool: &sqlx::SqlitePool,
     job_id: &str,
@@ -884,7 +796,7 @@ async fn reread_promotion_status_with_retry(
 }
 
 /// Combine commit and optional re-read errors for ambiguity failure paths.
-fn flip_commit_ambiguity_error(
+fn promote_adopt_commit_ambiguity_error(
     commit_err: sqlx::Error,
     reread_err: Option<&sqlx::Error>,
 ) -> NexusApiError {
@@ -892,38 +804,10 @@ fn flip_commit_ambiguity_error(
         Some(reread) => NexusApiError::Internal {
             code: "DATABASE_ERROR".to_string(),
             message: format!(
-                "promotion job commit failed ({commit_err}) and status re-read failed ({reread})"
+                "promote_adopt commit failed ({commit_err}) and status re-read failed ({reread})"
             ),
         },
         None => NexusApiError::from(commit_err),
-    }
-}
-
-/// Soft-delete a confirmed entry left behind when the promotion job flip fails
-/// in the same adopt attempt so `idx_kb_key_blocks_active_unique` does not
-/// block retry.
-///
-/// Also used only from [`flip_promotion_job_or_compensate`] for same-attempt
-/// flip failures — never from the retry/reject path. No-op when the row is
-/// already gone (idempotent for repeated compensation).
-async fn compensate_orphan_promote_entry(
-    pool: &sqlx::SqlitePool,
-    entry_id: &str,
-) -> Result<(), NexusApiError> {
-    let store = kb_store::SqliteKbStore::new(pool.clone());
-    match store.delete_knowledge_entry(entry_id).await {
-        Ok(()) => {
-            warn!(
-                entry_id = %entry_id,
-                "promote_adopt compensated orphan entry after job flip failure"
-            );
-            Ok(())
-        }
-        Err(nexus_knowledge::world_kb::store::KbStoreError::NotFound(_)) => Ok(()),
-        Err(e) => Err(NexusApiError::Internal {
-            code: "DATABASE_ERROR".to_string(),
-            message: format!("failed to compensate orphan promote entry {entry_id}: {e}"),
-        }),
     }
 }
 
@@ -973,33 +857,13 @@ fn build_spoke_promote_request(candidate: &WorldKbEntry) -> PromoteRequest {
 /// | `StoredRevisionStale`                   | `world_kb_conflict` (409)          |
 /// | `InvalidInput` / `CapabilityPortMissing` / other | `Internal` (500)         |
 ///
-/// # Retry-safe idempotency (transaction-boundary split)
+/// # Retry-safe idempotency
 ///
-/// V1.142 P2 splits the original single-transaction insert+flip into two
-/// steps: (1) `orchestrate_promote` creates the confirmed `WorldKbEntry`
-/// (its own transaction inside the adapter); (2) the handler flips the
-/// promotion job (separate transaction). If (2) fails after (1) commits,
-/// the caller sees an error and retries. On retry, `promote_adopt` builds a
-/// fresh candidate (new UUID `entry_id`, same content) and calls the
-/// orchestrator again; the new INSERT collides with the prior partial
-/// attempt's orphan on `idx_kb_key_blocks_active_unique` and the orchestrator
-/// returns `KnowledgeEntryAlreadyExists`. This helper catches that specific
-/// reject and consults the promotion job:
-///
-/// - **job `confirmed`** → prior partial attempt completed despite returning
-///   an error; recover the existing entry only when its
-///   `created_from_command_id` matches `job_id` (same stamp
-///   [`promote_adopt`] sets before orchestration). Otherwise return 422 —
-///   an independently created active entry must not be reported as this
-///   job's adoption.
-/// - **job `pending`** → uniqueness collision while the job is still pending
-///   (in-flight adopt, pre-existing entry, or stale orphan). Return 422
-///   **without** deleting any KB row — only the creating request may
-///   compensate via [`flip_promotion_job_or_compensate`].
-///
-/// The outer `promote_candidate` handler's `promotion_status == "pending"`
-/// gate plus `mark_confirmed_in_tx_with_cas`'s CAS guard together prevent
-/// double job-flips; the unique index prevents silent orphan duplicates.
+/// When a prior attempt committed the job but returned an error to the caller
+/// (commit-ack ambiguity), retry hits `KnowledgeEntryAlreadyExists` on the
+/// unique index. This helper recovers the existing entry when the job is
+/// already `confirmed` and the active row is attributed to this `job_id`.
+/// Pending collisions return 422 without deleting any KB row.
 async fn map_promote_response(
     result: SpokeResult<PromoteResponse>,
     pool: &sqlx::SqlitePool,
@@ -2128,65 +1992,65 @@ fn project_relationship(row: &KbRelationshipRow, direction: &str) -> WorldKbRela
 }
 
 #[cfg(test)]
-mod flip_commit_ambiguity_tests {
+mod promote_adopt_commit_ambiguity_tests {
     use super::{
-        flip_commit_ambiguity_action, resolve_flip_commit_ambiguity_after_reread,
-        FlipCommitAmbiguityAction, FlipCommitAmbiguityResolution,
+        promote_adopt_commit_ambiguity_action, resolve_promote_adopt_commit_ambiguity_after_reread,
+        PromoteAdoptCommitAmbiguityAction, PromoteAdoptCommitAmbiguityResolution,
     };
 
     #[test]
     fn confirmed_job_treats_commit_error_as_success() {
         assert_eq!(
-            flip_commit_ambiguity_action(Some("confirmed")),
-            FlipCommitAmbiguityAction::TreatAsSuccess
+            promote_adopt_commit_ambiguity_action(Some("confirmed")),
+            PromoteAdoptCommitAmbiguityAction::TreatAsSuccess
         );
         assert_eq!(
-            resolve_flip_commit_ambiguity_after_reread(Ok(Some("confirmed"))),
-            FlipCommitAmbiguityResolution::TreatAsSuccess
-        );
-    }
-
-    #[test]
-    fn pending_job_compensates_on_commit_error() {
-        assert_eq!(
-            flip_commit_ambiguity_action(Some("pending")),
-            FlipCommitAmbiguityAction::CompensateAndFail
-        );
-        assert_eq!(
-            resolve_flip_commit_ambiguity_after_reread(Ok(Some("pending"))),
-            FlipCommitAmbiguityResolution::CompensateAndFail
+            resolve_promote_adopt_commit_ambiguity_after_reread(Ok(Some("confirmed"))),
+            PromoteAdoptCommitAmbiguityResolution::TreatAsSuccess
         );
     }
 
     #[test]
-    fn missing_job_compensates_on_commit_error() {
+    fn pending_job_fails_on_commit_error() {
         assert_eq!(
-            flip_commit_ambiguity_action(None),
-            FlipCommitAmbiguityAction::CompensateAndFail
+            promote_adopt_commit_ambiguity_action(Some("pending")),
+            PromoteAdoptCommitAmbiguityAction::Fail
         );
         assert_eq!(
-            resolve_flip_commit_ambiguity_after_reread(Ok(None)),
-            FlipCommitAmbiguityResolution::CompensateAndFail
-        );
-    }
-
-    #[test]
-    fn rejected_job_fails_without_compensate() {
-        assert_eq!(
-            flip_commit_ambiguity_action(Some("rejected")),
-            FlipCommitAmbiguityAction::FailWithoutCompensate
-        );
-        assert_eq!(
-            resolve_flip_commit_ambiguity_after_reread(Ok(Some("rejected"))),
-            FlipCommitAmbiguityResolution::FailWithoutCompensate
+            resolve_promote_adopt_commit_ambiguity_after_reread(Ok(Some("pending"))),
+            PromoteAdoptCommitAmbiguityResolution::Fail
         );
     }
 
     #[test]
-    fn reread_failed_fails_without_compensate() {
+    fn missing_job_fails_on_commit_error() {
         assert_eq!(
-            resolve_flip_commit_ambiguity_after_reread(Err(())),
-            FlipCommitAmbiguityResolution::FailWithoutCompensate
+            promote_adopt_commit_ambiguity_action(None),
+            PromoteAdoptCommitAmbiguityAction::Fail
+        );
+        assert_eq!(
+            resolve_promote_adopt_commit_ambiguity_after_reread(Ok(None)),
+            PromoteAdoptCommitAmbiguityResolution::Fail
+        );
+    }
+
+    #[test]
+    fn rejected_job_fails_on_commit_error() {
+        assert_eq!(
+            promote_adopt_commit_ambiguity_action(Some("rejected")),
+            PromoteAdoptCommitAmbiguityAction::Fail
+        );
+        assert_eq!(
+            resolve_promote_adopt_commit_ambiguity_after_reread(Ok(Some("rejected"))),
+            PromoteAdoptCommitAmbiguityResolution::Fail
+        );
+    }
+
+    #[test]
+    fn reread_failed_fails() {
+        assert_eq!(
+            resolve_promote_adopt_commit_ambiguity_after_reread(Err(())),
+            PromoteAdoptCommitAmbiguityResolution::Fail
         );
     }
 }
