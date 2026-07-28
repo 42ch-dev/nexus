@@ -15,7 +15,7 @@ use crate::narrative_query::NarrativeQuery;
 use crate::timeline_event::{SpokeTimelineEvent, TimelineEvent};
 use crate::world::World;
 use nexus_knowledge::world_kb::KbStore;
-use nexus_spoke_adapter::{order_timeline_events_by_ids, SpokeResult};
+use nexus_spoke_adapter::{order_timeline_events_by_ids, SpokeReject, SpokeResult};
 use std::collections::HashMap;
 use std::sync::RwLock;
 
@@ -121,9 +121,9 @@ impl<K: KbStore> InMemoryNarrativeGateway<K> {
     /// Spoke reject cases (duplicate `ordered_ids`, unknown ids, duplicate
     /// event ids in storage) surface as
     /// [`NarrativeError::ValidationError`] — the spoke `SpokeReject` payload
-    /// (code, message, `unknown_timeline_event_ids` / `duplicate_*` detail
-    /// lists) is included via `Debug` formatting for diagnosability. The
-    /// gateway never panics on a reject.
+    /// is surfaced as `{code}: {message}` for diagnosability (consistent with
+    /// the `map_spoke_reject` pattern in `nexus-knowledge`). The gateway never
+    /// panics on a reject.
     ///
     /// # Call-boundary invariant §7
     ///
@@ -131,6 +131,12 @@ impl<K: KbStore> InMemoryNarrativeGateway<K> {
     /// ([`SpokeTimelineEvent`]); nexus→spoke conversion happens before the
     /// call, spoke→nexus conversion after. The nexus domain type never
     /// crosses the boundary.
+    ///
+    /// # Expected first caller
+    ///
+    /// No production call site yet (V1.143 P0). Expected first consumer:
+    /// Moment Context Assembly timeline ordering, or a future
+    /// `ScopeQueryPort`-backed ordered-timeline path.
     ///
     /// # Errors
     ///
@@ -176,9 +182,13 @@ impl<K: KbStore> InMemoryNarrativeGateway<K> {
                 // Convert spoke → nexus (call-boundary §7).
                 Ok(ordered_spoke.into_iter().map(Into::into).collect())
             }
-            SpokeResult::Reject(reject) => Err(NarrativeError::ValidationError(format!(
-                "timeline ordering rejected: {reject:?}"
-            ))),
+            SpokeResult::Reject(SpokeReject { code, message, .. }) => {
+                Err(NarrativeError::ValidationError(format!(
+                    "timeline ordering rejected: {}: {}",
+                    code.as_str(),
+                    message
+                )))
+            }
         }
     }
 

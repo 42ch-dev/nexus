@@ -810,7 +810,7 @@ mod tests {
         // to None (empty ≡ None contract for caused_by_event_ids and
         // affected_key_block_ids).
         let evt = TimelineEvent::new("wld_x", "fbk_y", TimelineEventType::StateUpdate, 1);
-        let spoke: SpokeTimelineEvent = evt.clone().into();
+        let spoke: SpokeTimelineEvent = evt.into();
         let roundtripped: TimelineEvent = spoke.into();
         assert_eq!(roundtripped.caused_by_event_ids, None);
         assert_eq!(roundtripped.affected_key_block_ids, None);
