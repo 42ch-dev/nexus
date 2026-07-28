@@ -612,7 +612,8 @@ fn merge_aliases_into_body(body: &mut WorldKbBody, aliases: &[String]) {
 /// Remaining race: concurrent adopt requests for the same pending job — the
 /// retry/reject path never deletes KB rows (only the creating request
 /// compensates via [`flip_promotion_job_or_compensate`]). Cross-request
-/// soft-delete would race with in-flight adopts.
+/// soft-delete would race with in-flight adopts. Commit ack errors re-read
+/// the job: confirmed → success without delete; pending → compensate.
 async fn promote_adopt(
     state: &WorkspaceState,
     world_id: &str,
@@ -705,10 +706,14 @@ async fn promote_adopt(
 /// Flip `kb_extract_jobs` pending → confirmed inside a dedicated transaction.
 ///
 /// When this adopt attempt created a **new** confirmed entry
-/// (`created_entry_id == candidate_entry_id`), any failure in the flip block
-/// (`begin`, CAS execute error, `!flipped`, or `commit`) soft-deletes that
-/// entry via [`compensate_orphan_promote_entry`] before returning the
-/// original error so the unique index does not block a clean retry.
+/// (`created_entry_id == candidate_entry_id`), unambiguous flip failures
+/// (`begin`, CAS execute error, `!flipped` after rollback) soft-delete that
+/// entry via [`compensate_orphan_promote_entry`].
+///
+/// **Commit ambiguity:** if `tx.commit()` returns an error, `SQLite` may still
+/// have durably applied the UPDATE. The handler re-reads the job and applies
+/// [`flip_commit_ambiguity_action`] — confirmed → success without delete;
+/// pending/missing → compensate; other terminal → fail without delete.
 async fn flip_promotion_job_or_compensate(
     pool: &sqlx::SqlitePool,
     job_id: &str,
@@ -732,10 +737,8 @@ async fn flip_promotion_job_or_compensate(
         Ok(true) => match tx.commit().await {
             Ok(()) => Ok(()),
             Err(e) => {
-                if compensate_if_new {
-                    compensate_orphan_promote_entry(pool, created_entry_id).await?;
-                }
-                Err(NexusApiError::from(e))
+                handle_flip_commit_ambiguity(pool, job_id, created_entry_id, compensate_if_new, e)
+                    .await
             }
         },
         Ok(false) => {
@@ -760,6 +763,57 @@ async fn flip_promotion_job_or_compensate(
             }
             Err(api_err)
         }
+    }
+}
+
+/// Action to take when `tx.commit()` fails after a successful in-tx job flip.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FlipCommitAmbiguityAction {
+    /// Commit likely landed; do not compensate.
+    TreatAsSuccess,
+    /// Flip did not commit; safe to compensate a new entry from this attempt.
+    CompensateAndFail,
+    /// Job in another terminal state; fail without deleting KB content.
+    FailWithoutCompensate,
+}
+
+/// Pure decision table for commit-ack failures (unit-tested).
+fn flip_commit_ambiguity_action(job_status: Option<&str>) -> FlipCommitAmbiguityAction {
+    match job_status {
+        Some("confirmed") => FlipCommitAmbiguityAction::TreatAsSuccess,
+        Some("pending") | None => FlipCommitAmbiguityAction::CompensateAndFail,
+        Some(_) => FlipCommitAmbiguityAction::FailWithoutCompensate,
+    }
+}
+
+/// Re-read the promotion job after a commit error and apply [`flip_commit_ambiguity_action`].
+async fn handle_flip_commit_ambiguity(
+    pool: &sqlx::SqlitePool,
+    job_id: &str,
+    created_entry_id: &str,
+    compensate_if_new: bool,
+    commit_err: sqlx::Error,
+) -> Result<(), NexusApiError> {
+    let job_status = get_promotion(pool, job_id)
+        .await
+        .map_err(NexusApiError::from)?
+        .map(|job| job.promotion_status);
+
+    match flip_commit_ambiguity_action(job_status.as_deref()) {
+        FlipCommitAmbiguityAction::TreatAsSuccess => {
+            warn!(
+                job_id = %job_id,
+                "promote_adopt: commit returned error but job is confirmed; treating flip as success"
+            );
+            Ok(())
+        }
+        FlipCommitAmbiguityAction::CompensateAndFail => {
+            if compensate_if_new {
+                compensate_orphan_promote_entry(pool, created_entry_id).await?;
+            }
+            Err(NexusApiError::from(commit_err))
+        }
+        FlipCommitAmbiguityAction::FailWithoutCompensate => Err(NexusApiError::from(commit_err)),
     }
 }
 
@@ -1978,5 +2032,42 @@ fn project_relationship(row: &KbRelationshipRow, direction: &str) -> WorldKbRela
         version: u64::try_from(row.revision).unwrap_or(0),
         updated_at: row.updated_at.clone(),
         projection_direction: wire_cast(direction.to_string()),
+    }
+}
+
+#[cfg(test)]
+mod flip_commit_ambiguity_tests {
+    use super::{flip_commit_ambiguity_action, FlipCommitAmbiguityAction};
+
+    #[test]
+    fn confirmed_job_treats_commit_error_as_success() {
+        assert_eq!(
+            flip_commit_ambiguity_action(Some("confirmed")),
+            FlipCommitAmbiguityAction::TreatAsSuccess
+        );
+    }
+
+    #[test]
+    fn pending_job_compensates_on_commit_error() {
+        assert_eq!(
+            flip_commit_ambiguity_action(Some("pending")),
+            FlipCommitAmbiguityAction::CompensateAndFail
+        );
+    }
+
+    #[test]
+    fn missing_job_compensates_on_commit_error() {
+        assert_eq!(
+            flip_commit_ambiguity_action(None),
+            FlipCommitAmbiguityAction::CompensateAndFail
+        );
+    }
+
+    #[test]
+    fn rejected_job_fails_without_compensate() {
+        assert_eq!(
+            flip_commit_ambiguity_action(Some("rejected")),
+            FlipCommitAmbiguityAction::FailWithoutCompensate
+        );
     }
 }
