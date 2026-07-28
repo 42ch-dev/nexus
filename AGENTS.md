@@ -191,8 +191,7 @@ git submodule update --init --recursive   # after pull if skill dirs are empty
 
 | Rule | Practice |
 |------|----------|
-| Iteration landing | Squash-merge PR: `spec_integration_branch` → `target_branch` |
-| Hotfix landing | Squash-merge PR: `fix/*` → `target_branch` |
+| Iteration / hotfix landing | GitHub PR → `target_branch` only (never local `git merge` onto the protected branch). **Merge method by PR commit count** (commits on the PR head vs base): **≤30 → merge commit** (`gh pr merge --merge`); **>30 → squash** (`gh pr merge --squash`). Rationale: harness process noise stays local, so most PRs stay small enough for a merge commit; squash only when the history is too long to keep. |
 | Harness **results** | Commit `.mstar/knowledge/`, `.mstar/specs/`, `.mstar/AGENTS.md` when shared; **do not** commit process paths (`plans/`, `iterations/`, `archived/`, `status.json`, `notes.json`, `sdd/`) |
 | Codegen | Schema changes and generated output in the **same commit** (see [`docs/CONTRIBUTING.md`](docs/CONTRIBUTING.md)) |
 | Never commit | `target/`, `.worktrees/`, `node_modules/`, `.mstar` process paths above (gitignored — agents must self-check) |
@@ -212,7 +211,7 @@ If `.git` exceeds ~100 MiB or clone slows again: consider `git filter-repo` or a
 
 **Anti-patterns:** committing `.mstar` process paths (`status.json`, `plans/`, `iterations/`, …); per-worktree `target/` without cleanup; developer clone with `--no-recurse-submodules` and no follow-up `submodule update`; `cargo build --all` inside every worktree during daily iteration.
 
-**Merge discipline:** All PRs to the protected branch (`target_branch`, usually `main`) — iteration integration, hotfixes, etc. — use **squash merge** via GitHub PR; never local `git merge` directly to the protected branch. Branch policy and naming → `.mstar/AGENTS.md` + upstream `mstar-iteration` / `mstar-branch-worktree`.
+**Merge discipline:** All PRs to the protected branch (`target_branch`, usually `main`) — iteration integration, hotfixes, etc. — land via **GitHub PR** only; never local `git merge` directly onto the protected branch. Choose the GitHub merge method by **PR commit count** (head vs base): **≤30 commits → merge commit**; **>30 commits → squash**. Branch policy and naming → `.mstar/AGENTS.md` + upstream `mstar-iteration` / `mstar-branch-worktree`.
 
 ## Versioning Policy
 

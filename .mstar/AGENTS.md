@@ -110,14 +110,14 @@ Git hygiene → root [`AGENTS.md`](../AGENTS.md).
 
 ### Git & PR merge policy
 
-All landings on the protected branch (`target_branch`, usually `main`) via **GitHub PR with squash merge**. Branch naming → upstream (`mstar-iteration`, `mstar-branch-worktree`).
+All landings on the protected branch (`target_branch`, usually `main`) via **GitHub PR** (never local merge onto the protected branch). **Merge method by PR commit count** (commits on the PR head vs base): **≤30 → merge commit**; **>30 → squash**. Detail → root [`AGENTS.md`](../AGENTS.md) Commit / Merge discipline. Branch naming → upstream (`mstar-iteration`, `mstar-branch-worktree`).
 
 ### Post-merge hotfix
 
 1. Register residuals in local `status.json` before branching.  
 2. `fix/*` from current `main` HEAD.  
 3. Surgical fix + regression test.  
-4. Squash-merge PR to `main`; update local `status.json`.  
+4. Open PR to `main` and merge with the commit-count rule above (≤30 merge commit / >30 squash); update local `status.json`.  
 
 ### Pre-existing failure claims (PM override)
 
