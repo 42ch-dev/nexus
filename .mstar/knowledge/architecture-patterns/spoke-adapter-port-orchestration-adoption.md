@@ -1,0 +1,135 @@
+---
+module: nexus-spoke-adapter
+date: 2026-07-28
+problem_type: architecture_pattern
+category: architecture-patterns
+severity: medium
+plan_id: 2026-07-28-v1.141-p1-adapter-port-architecture-adoption
+tags: [spoke, adapter, baseline-ports, orchestration, surface-b, cas, occ, call-boundary-invariant, mock-test-pattern]
+last_updated: 2026-07-28
+applies_when: Consuming SPOKE ≥ 0.3.0 adapter-port + injection-orchestration architecture from a product adapter boundary (Surface B adoption); deciding between pure delegates (Surface A) and port+orchestrator (Surface B); verifying CAS through orchestrators; enforcing call-boundary invariant mechanically
+---
+
+# SPOKE Adapter Port + Orchestration Adoption (Surface B)
+
+Companion to [`spoke-adapter-conversion-seam.md`](spoke-adapter-conversion-seam.md) (Surface A — V1.139). Read both: Surface A and Surface B coexist on the same adapter boundary.
+
+## Context
+
+Spoke `0.3.0` introduced a major architectural layer beyond the pure-helper surface nexus consumed at `0.2.0`: **capability-sliced adapter port traits** (`KnowledgeEntryPort`, `RelationPort`, `ScopeQueryPort`, `FindingPort`, `RuleQueryPort`, `HostManifestPort`; optional `ComputablePort` + `ForkTimelineQueryPort`) and **injection orchestration entrypoints** (`orchestrate_upsert` / `_promote` / `_relate` / `_check` / `_assemble` / `_project` / `_compute` / `_fork_check` / `_fork_assemble`). Orchestrators compose the pure helpers with port I/O — they sequence validate → load stored → apply → put-with-CAS in one call, with the adapter (product) owning persistence behind the port traits.
+
+This creates a **dual public surface** at the adapter boundary (spec `spoke-adapter-architecture.md` §7.3):
+
+- **Surface A — Pure delegates** (`ops::*`, `extensions::*`): stateless pass-throughs. Caller manages its own storage and calls helpers one at a time.
+- **Surface B — Injection orchestration** (`orchestrate_*` + port traits): caller implements the port families once and delegates lifecycle composition to the orchestrators.
+
+The challenge: how does a product adapter boundary (like `nexus-spoke-adapter`) expose both surfaces without (a) reimplementing spoke invariants, (b) widening its dependency footprint, or (c) confusing consumers about when to pick which surface?
+
+## Guidance
+
+### Adapter boundary exposes both surfaces via re-exports
+
+The adapter crate flat-re-exports the full spoke `adapter` module — all port traits, composition aliases (`BaselinePorts` / `ComputablePorts` / `ForkPorts` / `FullPorts`), `BaselineAdapter` / `ComputableAdapter` / `ForkAdapter` / `FullAdapter` marker traits, the 9 `orchestrate_*` entrypoints, `CheckRunInput`, plus the wire types referenced by orchestrators (request/response envelopes, `HostCapabilityManifest`, `Rule`, `TimelineEvent`, `Relation`, `Scope`). Consumers depend on the adapter for both surfaces — no direct `spoke-operations` dep elsewhere.
+
+```rust
+// crates/nexus-spoke-adapter/src/lib.rs (excerpt)
+pub use spoke_operations::{
+    KnowledgeEntryPort, RelationPort, ScopeQueryPort, /* ... 5 more port traits */,
+    BaselinePorts, /* ... 3 more composition traits */,
+    BaselineAdapter, /* ... 3 more adapter aliases */,
+    orchestrate_upsert, /* ... 8 more entrypoints */,
+    CheckRunInput,
+};
+pub use spoke_schemas::{
+    HostCapabilityManifest, UpsertRequest, UpsertResponse, /* ... etc. */,
+};
+```
+
+### When to pick Surface A vs Surface B
+
+| Situation | Pick |
+|-----------|------|
+| Caller already has a transaction open; mutation is a single helper call | **Surface A** (simpler) |
+| Mutation composes multiple helpers across port families + OCC is required | **Surface B** (encapsulates sequencing) |
+| Caller is the storage owner (implements the port traits) and wants lifecycle composition | **Surface B** |
+| Caller just needs a pure check (validate, transition) with no I/O | **Surface A** |
+
+General rule: Surface A is the default for one-shot helpers; Surface B pays off when the mutation sequence is non-trivial or when OCC discipline matters. Both surfaces coexist — adopting B does not require migrating A call sites.
+
+### CAS contract verification through orchestrators (not via the mock directly)
+
+The orchestrators internally call `assert_revision_match` on the `expected_base_revision` derived from `get_knowledge_entry` vs the caller-supplied request. To **prove** the CAS gate is reachable end-to-end from a product adapter, drive the reject path **through the orchestrator** (`orchestrate_upsert` or `orchestrate_promote`), not by calling the mock's `put_knowledge_entry` directly.
+
+```rust
+// In tests/orchestration_adoption.rs
+// Happy create: expected_base_revision = None, entry absent → ok
+// Stale revision: stored > expected → SpokeResult::Reject { code: STORED_REVISION_STALE }
+// Conflict:       stored < expected → SpokeResult::Reject { code: REVISION_CONFLICT }
+```
+
+The mock's own CAS branches are adapter-owned (spec: "adapters own transport, persistence, transactions; library stays I/O-free") — but the test exercises them through the orchestrator path because that is the production caller pattern.
+
+### Mock-test pattern for orchestrator adoption
+
+A reference `BaselinePorts` mock that satisfies all 6 baseline port families lives in `crates/nexus-spoke-adapter/examples/baseline_adapter.rs` (runnable via `cargo run --example baseline_adapter`). The programmatic test twin lives in `tests/orchestration_adoption.rs`. Both reuse the same mock via `#[path = "../examples/baseline_adapter.rs"] mod baseline_adapter;` (compact) or by duplicating (decoupled, more verbose).
+
+The mock is **deliberately thin**: `HashMap`/`Vec`-backed storage; CAS is the only non-trivial logic; each port method body is a few lines. No ranking, retrieval, scoring, or product logic. The mock calls `nexus_spoke_adapter::orchestrate_*` — it does NOT reimplement any spoke invariant (the call-boundary invariant §7 applies to the mock too).
+
+### Optional `ComputablePort` / `ForkTimelineQueryPort` capability-missing path
+
+The orchestrators that require an optional capability (`orchestrate_project` / `orchestrate_compute` require `ComputablePort`; `orchestrate_fork_*` require `ForkTimelineQueryPort`) emit `CAPABILITY_PORT_MISSING` if a baseline-only adapter is passed at a dynamic optional boundary. To verify this in tests, construct a `BaselineOnlyPorts` wrapper that manually impls `ComputablePorts::as_computable() → None`, then call `orchestrate_project` against it — expect `CAPABILITY_PORT_MISSING`.
+
+## Why this matters
+
+- **No second boundary:** the adapter crate is the single import surface for both helpers and orchestrators. Downstream crates (e.g. `nexus-knowledge`) do not pull `spoke-operations` directly.
+- **No invariant reimplementation:** orchestrators call the pure helpers internally — products that adopt Surface B get OCC / promote gate / status transition correctness for free.
+- **CAS discipline:** `put_knowledge_entry(entry, expected_base_revision)` is the OCC contract. Adapters that back this with real compare-and-put (e.g. nexus's V1.73 `kb_key_blocks` SQLite CAS pattern) get true concurrent safety; adapters that ignore `expected_base_revision` are defective.
+
+## When to Apply
+
+- Consuming SPOKE ≥ 0.3.0 from a product adapter boundary
+- Deciding between one-shot pure helpers (Surface A) vs. orchestrator composition (Surface B)
+- Verifying CAS end-to-end through orchestrators (not via mock direct calls)
+- Implementing a baseline port family against product storage (the mock is the reference shape)
+
+## Examples
+
+### Reference layout in `nexus-spoke-adapter`
+
+```
+crates/nexus-spoke-adapter/
+  src/lib.rs                          # Surface A + Surface B re-exports
+  src/ops.rs                          # Surface A pure delegates (frozen)
+  src/extensions.rs                   # extensions.nexus accessors (Surface A)
+  examples/baseline_adapter.rs        # Reference BaselinePorts mock (runnable)
+  tests/adapter_surface.rs            # Parity test (P0 — re-exports reachable)
+  tests/orchestration_adoption.rs     # Adoption test (P1 — 10 scenarios, CAS + capability-missing)
+  tests/call_boundary_invariant.rs    # Static check (P1 — 4 assertions enforcing §7)
+```
+
+### Two CAS reject codes (do not collapse)
+
+```rust
+// In the mock's put_knowledge_entry:
+match (expected_base_revision, stored_revision) {
+    (None, None) => /* create ok */,
+    (None, Some(_)) => /* reject: KnowledgeEntryAlreadyExists */,
+    (Some(expected), Some(stored)) if stored == expected => /* update ok, bump */,
+    (Some(expected), Some(stored)) if stored > expected => /* reject: STORED_REVISION_STALE */,
+    (Some(expected), Some(stored)) if stored < expected => /* reject: REVISION_CONFLICT */,
+    (Some(_), None) => /* reject: stored absent but expected present — version mismatch */,
+}
+```
+
+A common mistake (made and corrected during V1.141 P1 T2): collapse both mismatches into `STORED_REVISION_STALE`. They are distinct codes — spoke's `assert_revision_match` emits them in opposite directions; tests must verify both.
+
+## Common pitfalls
+
+- **Reimplementing spoke invariants in the mock** — violates call-boundary §7. The mock does storage I/O only; orchestrators own lifecycle composition.
+- **T4-style static check too strict** — `assert extensions.rs has zero spoke_operations references` fails because `ExtensionMap` is defined in `spoke-operations` (not `spoke-schemas`) and is a wire type, not a lifecycle operation. The correct static check forbids `spoke_operations::[a-z_][a-z0-9_]*\(` (function-call pattern) while admitting type imports.
+- **Pulling `nexus-local-db` into the adapter crate** to implement a "real" `KnowledgeEntryPort` — violates the dependency graph (spec §8: adapter stays `spoke-schemas` + `spoke-operations` only). Concrete product port impls live downstream (e.g. `nexus-knowledge`, which already depends on both).
+- **Testing CAS by calling the mock directly** — proves the mock's CAS works, not that the orchestrator path works. Drive rejects through `orchestrate_*`.
+
+## Production boundary (out of scope for the boundary crate)
+
+Wiring nexus SQLite tables behind all six baseline port families is downstream product work — it ships when each backing surface (Relations / Findings / Rules / `HostCapabilityManifest`) lands. The boundary crate exposes the traits + orchestrators + a reference mock; production impls are owned by the consuming crate. V1.141 shipped mock + tests + spec; production `KnowledgeEntryPort` against `nexus-local-db` is the next-iteration trigger (`R-V1141P1-001`, compass Roadmap item 1).

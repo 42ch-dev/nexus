@@ -228,7 +228,7 @@ This amendment exists to clarify that DF-56 conditional routing branch inputs ar
 **Status**: Normative — V1.62 Shipped (closes `R-V161P1-LOW-001`).
 
 V1.61 added `computable: Option<bool>` and `state: Option<serde_json::Value>` to
-`KeyBlockBody` (see `schemas/domain/key-block.schema.json`). V1.62 formalizes
+`KeyBlockBody` (carried inside spoke `KnowledgeEntry` — see spoke `knowledge-entry.schema.json`). V1.62 formalizes
 the semantics of these fields and establishes the structured validation mode that
 was deferred from V1.61 P1.
 

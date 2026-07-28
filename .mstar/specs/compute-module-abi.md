@@ -85,7 +85,7 @@ instantiation.
 
 | Import | Signature | Behavior |
 | --- | --- | --- |
-| `nexus::kb_read` | `(id_ptr: u32, id_len: u32, out_ptr: u32, out_cap: u32) -> i64` | Look up a `KeyBlock` by ID in the invocation's `key_blocks` snapshot; write its JSON to `out`. Returns bytes written (`>= 0`), `-1` if not found, `-2` if `out_cap` too small. |
+| `nexus::kb_read` | `(id_ptr: u32, id_len: u32, out_ptr: u32, out_cap: u32) -> i64` | Look up a `KnowledgeEntry` by ID in the invocation's `key_blocks` snapshot; write its JSON to `out`. Returns bytes written (`>= 0`), `-1` if not found, `-2` if `out_cap` too small. |
 | `nexus::narrative_query` | `(q_ptr: u32, q_len: u32, out_ptr: u32, out_cap: u32) -> i64` | Return narrative context JSON. V1 passes through the `narrative_state` from the `ComputeInput` envelope verbatim. Returns bytes written, or sentinels as above. |
 
 Both host functions follow the same memory-buffer convention (see §6 Marshalling).
@@ -119,7 +119,7 @@ from it via codegen.
   },
   "key_blocks": [
     { "key_block_id": "kb-def", "block_type": "character", "canonical_name": "Defender",
-      "status": "confirmed", "created_at": "...", "body": { "...": "KeyBlock body" } }
+      "status": "confirmed", "created_at": "...", "body": { "...": "KnowledgeEntry body" } }
   ],
   "narrative_state": {
     "timeline_position": "chapter_3_scene_2",
@@ -136,15 +136,15 @@ from it via codegen.
 | --- | --- | --- | --- |
 | `schema_version` | integer (`1`) | yes | Envelope version. Must be `1` for V1.x. |
 | `world_ref` | object | yes | World and timeline locator: `world_id` (WorldId), `branch_id` (fork branch), `timeline_head_event_id` (current timeline head). |
-| `key_blocks` | array of `KeyBlock` | yes | Snapshot of relevant KnowledgeEntries for this invocation. Each entry is the full wire `KeyBlock` shape from `schemas/domain/key-block.schema.json`, including `body` (which carries `state` for computable blocks — see [entity-scope-model.md](./entity-scope-model.md) §5.5.9). The host selects which blocks to pass based on the module manifest (`required_key_block_types`) and the capability context. |
+| `key_blocks` | array of `KnowledgeEntry` | yes | Snapshot of relevant KnowledgeEntries for this invocation. Each entry is the full wire `KnowledgeEntry` shape from spoke `knowledge-entry.schema.json` (referenced via `$ref`), including `body` (which carries `state` for computable entries — see [entity-scope-model.md](./entity-scope-model.md) §5.5.9). The host selects which entries to pass based on the module manifest (`required_key_block_types`) and the capability context. |
 | `narrative_state` | object | no | Narrative position context — `timeline_position`, `current_chapter`, `current_scene`. Freeform; the shape is module-declared. |
 | `invocation` | object | no | Module-defined freeform input parameters. The exact fields are declared in the module's `manifest.json` `schemas.invocation` (V1.62 P1). The host passes them through verbatim. This is the V1 envelope escape hatch for module-specific inputs (e.g., chosen targets, difficulty, dice seed). |
 
-The `key_blocks` array carries the full wire `KeyBlock` type — including the
+The `key_blocks` array carries the full wire `KnowledgeEntry` type — including the
 `state` and `computable` fields added in V1.61. The `state` field is an optional
 JSON object nested by `block_type` (compass V1.61 Q5: `state.character.current_hp`).
 Only computable KnowledgeEntries (`computable: true`) participate in WASM compute;
-non-computable blocks may still appear in the snapshot for read-only reference.
+non-computable entries may still appear in the snapshot for read-only reference.
 
 ---
 
@@ -198,7 +198,7 @@ event.
 
 ### 5.3 `new_key_blocks`
 
-Array of new `KeyBlock` objects (from `schemas/domain/key-block.schema.json`)
+Array of new `KnowledgeEntry` objects (from spoke `knowledge-entry.schema.json`, referenced via `$ref`)
 the module creates (e.g., a spawned item, a newly established faction relation).
 These are upserted by the host.
 

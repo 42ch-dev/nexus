@@ -38,7 +38,7 @@ pub struct WorldKbBody {
     pub attributes: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tags: Option<Vec<String>>,
-    /// Dynamic runtime state for computable `KeyBlocks` (V1.61, compass Q4/Q5).
+    /// Dynamic runtime state for computable `KnowledgeEntries` (V1.61, compass Q4/Q5).
     /// Nested by `block_type` to avoid field-name collisions across module
     /// types (e.g. `state.character.current_hp`). Per-module state shapes
     /// are declared in each compute module's `manifest.json` (V1.62).
@@ -254,7 +254,7 @@ impl WorldKbEntry {
     /// Converts `self` to the spoke type, delegates the transition validity
     /// check + canonical status to `transition_status`, then applies only the
     /// status back to `self` (body / identity are preserved on the domain type;
-    /// the spoke round-trip is body-faithful as of the V1.139 spoke-0.2.0
+    /// the spoke round-trip is body-faithful as of the V1.139 spoke-0.4.0
     /// alignment, but we still do not write the spoke result back wholesale —
     /// only the status field, to keep the nexus timestamp/revision convention
     /// authoritative). `updated_at` follows the nexus timestamp convention.
@@ -335,9 +335,15 @@ impl WorldKbEntry {
 // seam** (spec `spoke-adapter-architecture.md` §7.1 — the adapter constructs
 // the spoke type before calling spoke-operations).
 //
-// Body alignment (spoke 0.2.0): spoke's closed `KnowledgeEntryBody` declares
+// Body alignment (spoke 0.4.0): spoke's closed `KnowledgeEntryBody` declares
 // all 5 typed body fields (`summary`, `tags`, `state`, `attributes`,
-// `computable`). Both directions map all 5:
+// `computable`). spoke's `list_body_attributes` / `find_body_attribute`
+// helpers are read accessors over `body.attributes`, not shape mappers between
+// spoke's `Vec<BodyAttribute>` typed array and nexus's flat JSON `attributes`
+// representation; the `spoke_attrs_to_nexus` / `nexus_attr_to_spoke` shims
+// below perform that structural conversion and stay regardless of spoke
+// version until nexus adopts spoke's typed body shape natively (roadmap).
+// Both directions map all 5:
 //   • `summary`  — 1:1 `Option<String>`.
 //   • `tags`     — nexus `Option<Vec<String>>` ↔ spoke `Vec<String>` (empty ≡ None).
 //   • `state`    — nexus JSON object ↔ spoke `Map<String, Value>` (1:1).
@@ -436,7 +442,7 @@ fn spoke_attrs_to_nexus(attrs: &[KnowledgeEntryBodyAttributesItem]) -> Option<Va
 
 impl From<WorldKbEntry> for SpokeKnowledgeEntry {
     fn from(d: WorldKbEntry) -> Self {
-        // Body: map all 5 typed body fields (spoke 0.2.0 closed body). Each
+        // Body: map all 5 typed body fields (spoke 0.4.0 closed body). Each
         // nexus field maps onto its spoke counterpart; computable bool→map and
         // attributes object→Vec<BodyAttribute> are shape conversions (see seam
         // doc above). spoke-operations does not consume body content, but the
@@ -899,7 +905,7 @@ mod tests {
             .contains_key("character"));
     }
 
-    // ── V1.139 spoke 0.2.0 full body alignment (Greptile P1+P2) ───────
+    // ── V1.139 spoke 0.4.0 full body alignment (Greptile P1+P2) ───────
     //
     // Proves the conversion seam (`WorldKbEntry ↔ spoke KnowledgeEntry`)
     // round-trips ALL 5 typed body fields plus unknown `extensions.nexus`

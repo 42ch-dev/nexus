@@ -550,7 +550,7 @@ fn validate_structured_body(
         return Ok(()); // no body → nothing to validate
     };
 
-    // Only validate computable KeyBlocks; non-computable blocks pass through
+    // Only validate computable KnowledgeEntries; non-computable entries pass through
     match b.computable {
         Some(true) => {}
         _ => return Ok(()),
