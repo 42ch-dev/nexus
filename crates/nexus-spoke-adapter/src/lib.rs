@@ -59,6 +59,21 @@ pub use spoke_schemas::{
     Rule, Scope, TimelineEvent, UpsertRequest, UpsertResponse,
 };
 
+// ── Spoke extension-key newtypes (re-export) ─────────────────────────
+//
+// The typify-generated `*ExtensionsKey` newtypes are the only way to
+// look up the `"nexus"` namespace inside a spoke wire type's
+// `extensions` map — the newtypes do not implement `Borrow<str>`, so
+// `HashMap::get("nexus")` does not compile (see `extensions.rs`'s
+// `nexus_key()` helper for the long-form rationale). Re-exporting the
+// key types here lets downstream crates (the production adapter home in
+// `nexus-local-db`) build the same lookup without a direct
+// `spoke-schemas` dependency for relation / finding ports.
+pub use spoke_schemas::{
+    finding::FindingExtensionsKey, knowledge_entry::KnowledgeEntryExtensionsKey,
+    relation::RelationExtensionsKey,
+};
+
 // ── Spoke adapter port + orchestration surface (spoke ≥ 0.3.0) ─────────
 //
 // Surface B in spec §7.3 — consumers implement these port traits and call

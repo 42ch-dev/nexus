@@ -1,0 +1,132 @@
+//! Production `BaselinePorts` implementation home (spec §7.4).
+//!
+//! `NexusBaselineAdapter` is the production spoke port impl backing spoke
+//! orchestrators against this crate's `SQLite` storage. The port-family matrix
+//! (which families are production vs stub) lives in
+//! `.mstar/specs/spoke-adapter-architecture.md` §7.4.
+//!
+//! # Async ↔ sync bridge
+//!
+//! Spoke's port traits are **synchronous** (`fn ... -> SpokeResult<T>`) while
+//! `SQLite` I/O is async. The adapter captures the current tokio runtime
+//! [`Handle`] at construction and bridges each sync port method to async I/O
+//! via `tokio::task::block_in_place` + `Handle::block_on`. This requires the
+//! calling thread to be inside a tokio **multi-threaded** runtime — which the
+//! production daemon uses (`tokio::runtime::Builder::new_multi_thread` in
+//! `apps/nexus42/src/main.rs`). Construct the adapter from inside an async
+//! context (e.g. an HTTP handler or a `#[tokio::test(flavor = "multi_thread")]`
+//! test) so a runtime handle is available.
+
+pub mod finding_port;
+pub mod host_manifest_port;
+pub mod knowledge_entry_port;
+pub mod relation_port;
+pub mod rule_query_port;
+pub mod scope_query_port;
+
+use sqlx::SqlitePool;
+use tokio::runtime::Handle;
+
+/// Production `BaselinePorts` impl backing spoke orchestrators against nexus
+/// `SQLite` storage.
+///
+/// See `.mstar/specs/spoke-adapter-architecture.md` §7.4 for the family
+/// matrix (which families are production vs stub). Construct per-request from
+/// a [`SqlitePool`] (cheap handle) **while inside a tokio multi-threaded
+/// runtime**: the adapter captures the current runtime [`Handle`] and bridges
+/// the sync spoke port trait to async `SQLite` I/O via
+/// `tokio::task::block_in_place`.
+///
+/// # Panics
+///
+/// [`Self::new`] panics if no tokio runtime is running on the current thread.
+/// In debug builds it additionally panics if that runtime is **not**
+/// multi-threaded — the `block_in_place` bridge used by every sync port
+/// method requires a multi-threaded runtime (see [`Self::block_on`]).
+pub struct NexusBaselineAdapter {
+    pool: SqlitePool,
+    handle: Handle,
+}
+
+impl NexusBaselineAdapter {
+    /// Construct from the current tokio runtime.
+    ///
+    /// # Panics
+    ///
+    /// Panics if no tokio runtime is running on the current thread
+    /// ([`Handle::current`]). In debug builds, additionally panics if the
+    /// current runtime is **not** multi-threaded: `block_in_place` (used by
+    /// [`Self::block_on`]) panics under a `current_thread` runtime, so this
+    /// early check surfaces the misuse at construction rather than at the
+    /// first port method call. Construct this from inside a multi-threaded
+    /// tokio context (e.g. an async daemon handler or a
+    /// `#[tokio::test(flavor = "multi_thread")]` test).
+    #[must_use]
+    pub fn new(pool: SqlitePool) -> Self {
+        let handle = Handle::current();
+        // W-2 (qc3): `Handle::current()` succeeds even for a `current_thread`
+        // runtime, so the real guard is the flavor check. `block_in_place`
+        // panics under a current-thread runtime; fail fast at construction in
+        // debug builds so the panic points here, not at the first port call.
+        // No-op in release builds.
+        debug_assert!(
+            handle.runtime_flavor() == tokio::runtime::RuntimeFlavor::MultiThread,
+            "NexusBaselineAdapter requires a multi-threaded tokio runtime \
+             (block_in_place panics under a current_thread runtime)"
+        );
+        Self { pool, handle }
+    }
+
+    /// Bridge a sync trait method → async `SQLite` I/O.
+    ///
+    /// Requires the calling thread to be inside a tokio multi-threaded runtime
+    /// (the production daemon uses `tokio::runtime::Builder::new_multi_thread`;
+    /// see `apps/nexus42/src/main.rs`). `block_in_place` moves the current
+    /// worker out of the scheduler while the `SQLite` future resolves elsewhere
+    /// on the runtime.
+    fn block_on<F, R>(&self, future: F) -> R
+    where
+        F: std::future::Future<Output = R>,
+    {
+        tokio::task::block_in_place(|| self.handle.block_on(future))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Compile-time proof that `NexusBaselineAdapter` satisfies the
+    /// `BaselinePorts` blanket impl once all 6 port families are in scope
+    /// (spec §7.4 — production-vs-stub matrix is complete).
+    ///
+    /// Each helper accepts `&dyn <PortFamily>`; passing a
+    /// `&NexusBaselineAdapter` performs the implicit trait-upcast that
+    /// only compiles when the appropriate `impl <PortFamily> for
+    /// NexusBaselineAdapter` block exists. The function body is empty
+    /// — runtime behavior is exercised in the per-port `tests` modules.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn nexus_baseline_adapter_satisfies_baseline_ports_blanket_impl() {
+        fn accepts_baseline_ports(_: &dyn nexus_spoke_adapter::BaselinePorts) {}
+        fn accepts_knowledge_entry_port(_: &dyn nexus_spoke_adapter::KnowledgeEntryPort) {}
+        fn accepts_relation_port(_: &dyn nexus_spoke_adapter::RelationPort) {}
+        fn accepts_scope_query_port(_: &dyn nexus_spoke_adapter::ScopeQueryPort) {}
+        fn accepts_finding_port(_: &dyn nexus_spoke_adapter::FindingPort) {}
+        fn accepts_rule_query_port(_: &dyn nexus_spoke_adapter::RuleQueryPort) {}
+        fn accepts_host_manifest_port(_: &dyn nexus_spoke_adapter::HostManifestPort) {}
+
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("test.db");
+        let pool = crate::open_pool(&db_path).await.unwrap();
+        crate::run_migrations(&pool).await.unwrap();
+        let adapter = NexusBaselineAdapter::new(pool);
+
+        accepts_baseline_ports(&adapter);
+        accepts_knowledge_entry_port(&adapter);
+        accepts_relation_port(&adapter);
+        accepts_scope_query_port(&adapter);
+        accepts_finding_port(&adapter);
+        accepts_rule_query_port(&adapter);
+        accepts_host_manifest_port(&adapter);
+    }
+}
