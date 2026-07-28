@@ -2826,6 +2826,7 @@ dependencies = [
  "chrono",
  "nexus-contracts",
  "nexus-knowledge",
+ "nexus-spoke-adapter",
  "serde",
  "serde_json",
  "strum 0.26.3",
