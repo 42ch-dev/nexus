@@ -882,7 +882,7 @@ Archived from [deferred-features-cross-version-tracker.md](deferred-features-cro
 | **Outcome** | Bespoke `ts-generator`/`rust-generator` retired; `pnpm run codegen` library-driven; drift + workspace gates green |
 | **Open follow-ups** | R-V1138P0-*; R-V1138P1-001 canonical-hash spec sync; schema-loader orphan cleanup |
 
-> **Tracker gap (V1.139–V1.142):** the four SPOKE-adoption iterations shipped to `main` but were not snapshotted here (PRs #182/#184/#185/#186). Summary: V1.139 SPOKE foundation + `nexus-kb`→`nexus-knowledge` merge + terminology; V1.140 ops deps + CI; V1.141 spoke `0.2.0→0.4.0` + adapter-port architecture; V1.142 spoke `0.4.1` + production `NexusBaselineAdapter` + first `orchestrate_promote` cutover. See each `iterations/v1.13x–v1.142/delivery-compass.md` + STRATEGY Decision Log.
+> **Tracker gap (V1.139–V1.142):** the four SPOKE-adoption iterations shipped to `main` but were not snapshotted here (PRs #182/#184/#185/#186). Summary: V1.139 SPOKE foundation + `nexus-kb`→`nexus-knowledge` merge + terminology; V1.140 ops deps + CI; V1.141 spoke `0.2.0→0.4.0` + adapter-port architecture; V1.142 spoke `0.4.1` + production `NexusBaselineAdapter` + first `orchestrate_promote` cutover. See each iteration's `delivery-compass.md` under `iterations/v1.139/` … `iterations/v1.142/`, and the STRATEGY Decision Log rows.
 
 ## V1.143 — Deep SPOKE integration (orchestrator upsert + timeline unification) — 2026-07-28
 
