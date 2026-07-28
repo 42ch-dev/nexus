@@ -21,3 +21,7 @@ strum.workspace = true
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["rt", "macros"] }
+# Test-only reachability boundary for spoke 0.4.1 timeline beat-assist helpers
+# (compass AC-I2). Production dependency is deferred to T3b, which unifies
+# nexus-narrative's own TimelineEvent aggregate with the spoke wire type.
+nexus-spoke-adapter = { path = "../nexus-spoke-adapter" }

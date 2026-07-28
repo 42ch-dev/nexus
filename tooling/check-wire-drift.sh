@@ -21,7 +21,7 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 # Lockstep spoke pin (spoke-adapter-architecture spec §1.1). Bump this in
 # lockstep across Cargo.toml + package.json when adopting a new spoke release.
-SPOKE_PIN="0.4.0"
+SPOKE_PIN="0.4.1"
 
 echo "=== Spoke Version Conformance ==="
 echo "Expected lockstep pin: ${SPOKE_PIN}"
@@ -29,8 +29,8 @@ echo ""
 
 # ── Gate 1a: Rust crate pins (workspace Cargo.toml) ─────────────────────────
 # The workspace [workspace.dependencies] declares exact pins for both crates:
-#   spoke-schemas    = "=0.4.0"
-#   spoke-operations = "=0.4.0"
+#   spoke-schemas    = "=0.4.1"
+#   spoke-operations = "=0.4.1"
 CARGO_TOML="${PROJECT_ROOT}/Cargo.toml"
 for crate in spoke-schemas spoke-operations; do
   cargo_spoke_raw=$(grep -E "^[[:space:]]*${crate}[[:space:]]*=" "$CARGO_TOML" | head -1)

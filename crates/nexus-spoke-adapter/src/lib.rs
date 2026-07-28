@@ -19,6 +19,12 @@
 //! implement spoke's ports and call spoke's `orchestrate_*` functions through
 //! this single import boundary — still no nexus logic, still pure pass-through.
 //!
+//! Since V1.142 the crate additionally re-exports spoke 0.4.1's timeline
+//! beat-assist pure helpers (Surface A — `filter_timeline_events_by_moment_scale`,
+//! `order_timeline_events_by_ids`, `order_timeline_events_by_precedes`, plus
+//! the `OrderTimelineEventsByPrecedesOptions` operand) — again pure
+//! pass-through, again no nexus logic.
+//!
 //! ## Call-boundary invariant (HARD)
 //!
 //! Every public function in this crate accepts and returns only spoke
@@ -37,6 +43,12 @@ pub mod ops;
 // operand types. These mirror `spoke_operations`' own `pub use spoke_schemas`.
 
 pub use spoke_operations::{ExtensionMap, SpokeReject, SpokeRejectCode, SpokeResult};
+// Spoke 0.4.1 timeline beat-assist pure helpers (Surface A) — pass-through,
+// no nexus logic (call-boundary invariant §7 preserved).
+pub use spoke_operations::{
+    filter_timeline_events_by_moment_scale, order_timeline_events_by_ids,
+    order_timeline_events_by_precedes, OrderTimelineEventsByPrecedesOptions,
+};
 // Surface A operands (existing) + Surface B operands (spoke ≥ 0.3.0):
 // the 4 existing wire types stay listed; the remaining names are the ops
 // envelopes + capability types the orchestrators accept/return.
