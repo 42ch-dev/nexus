@@ -38,6 +38,20 @@ use nexus_spoke_adapter::{
 };
 use serde_json::{json, Map, Value};
 impl ScopeQueryPort for NexusBaselineAdapter {
+    /// List the active knowledge entries for the scope's world.
+    ///
+    /// Routes through [`SqliteKbStore::list_by_world`] (the production
+    /// `kb_key_blocks` query) and projects rows through the V1.139
+    /// `WorldKbEntry → SpokeKnowledgeEntry` conversion seam.
+    ///
+    /// # Known limitation
+    ///
+    /// This method delegates to [`SqliteKbStore::list_by_world`], which imposes
+    /// a compile-time `LIST_BY_WORLD_LIMIT` (currently 500). Worlds with more
+    /// than 500 active knowledge entries will have silently-truncated results.
+    /// This is a pre-existing storage limitation (not introduced by the spoke
+    /// port); raising/removing the limit is a storage-layer decision tracked
+    /// in R-V1142P2-002.
     fn list_knowledge_entries(&self, scope: &Scope) -> SpokeResult<Vec<KnowledgeEntry>> {
         let pool = self.pool.clone();
         // Clone the filters so the async block is 'static (the sync trait

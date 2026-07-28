@@ -13,7 +13,7 @@
 //! # CAS contract (spec §7.4)
 //!
 //! `put_knowledge_entry` routes the update path through the existing V1.73
-//! [`cas_update_key_block_fields`] CAS guard inside a caller-managed SQLite
+//! [`cas_update_key_block_fields`] CAS guard inside a caller-managed `SQLite`
 //! transaction. The CAS outcomes map to spoke reject codes per the spec
 //! table:
 //!
@@ -36,7 +36,7 @@ use nexus_spoke_adapter::{
 use serde_json::{json, Map};
 
 impl NexusBaselineAdapter {
-    /// Convert a SQLite row error into a `KNOWLEDGE_ENTRY_NOT_FOUND` reject
+    /// Convert a `SQLite` row error into a `KNOWLEDGE_ENTRY_NOT_FOUND` reject
     /// when the underlying store signals absence. Any other storage error
     /// surfaces as `INVALID_INPUT`.
     fn map_get_err(err: KbStoreError, entry_id: &str) -> SpokeResult<KnowledgeEntry> {

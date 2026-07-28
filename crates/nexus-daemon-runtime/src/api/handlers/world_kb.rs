@@ -596,16 +596,25 @@ fn merge_aliases_into_body(body: &mut WorldKbBody, aliases: &[String]) {
 /// requires provisional, and `apply_promote_acceptance` transitions it to
 /// `"confirmed"` and bumps the revision.
 ///
-/// **Transaction-boundary split (pre-1.0 known trade-off):** the orchestrator
-/// creates the confirmed entry in its own transaction (inside the adapter's
-/// `put_knowledge_entry`); the job flip below happens in a separate
-/// transaction. If the flip fails after the entry create commits, the caller
-/// sees an error and retries; on retry, the
-/// `idx_kb_key_blocks_active_unique(world_id, block_type, canonical_name)`
-/// index collides with the prior partial attempt's orphan, the orchestrator
-/// returns `KnowledgeEntryAlreadyExists`, and [`map_promote_response`]
-/// recovers via the retry-safe branch. Full transaction unification is a
-/// roadmap item (T3 / post-1.0).
+/// # Pre-1.0 known trade-off: transaction boundary split
+///
+/// This handler routes through `orchestrate_promote`, which creates the
+/// confirmed `KnowledgeEntry` in its own storage call (its own transaction
+/// inside the adapter's `put_knowledge_entry`). The extract-job flip below
+/// happens in a SEPARATE transaction. If the job flip fails after the entry
+/// is committed, an orphan confirmed entry persists.
+///
+/// The retry-safe idempotency pattern mitigates this for the common case: on
+/// retry, the `idx_kb_key_blocks_active_unique(world_id, block_type,
+/// canonical_name)` index collides with the prior partial attempt's orphan,
+/// the orchestrator returns `KnowledgeEntryAlreadyExists`, and
+/// [`map_promote_response`] recovers via the retry-safe branch (catch
+/// `KnowledgeEntryAlreadyExists` on retry → check job status). This does NOT
+/// guarantee cleanup if the caller gives up after the partial attempt — a
+/// confirmed entry then persists with a still-pending job (logged as an orphan
+/// warning; surfaced to the operator as 422 on the next attempt). Full
+/// transaction unification (single tx across orchestrator + job flip) is
+/// roadmap next, tracked in residual R-V1142P2-003.
 async fn promote_adopt(
     state: &WorkspaceState,
     world_id: &str,
@@ -760,7 +769,7 @@ fn build_spoke_promote_request(candidate: &WorldKbEntry) -> PromoteRequest {
 /// (its own transaction inside the adapter); (2) the handler flips the
 /// promotion job (separate transaction). If (2) fails after (1) commits,
 /// the caller sees an error and retries. On retry, `promote_adopt` builds a
-/// fresh candidate (new UUID entry_id, same content) and calls the
+/// fresh candidate (new UUID `entry_id`, same content) and calls the
 /// orchestrator again; the new INSERT collides with the prior partial
 /// attempt's orphan on `idx_kb_key_blocks_active_unique` and the orchestrator
 /// returns `KnowledgeEntryAlreadyExists`. This helper catches that specific
