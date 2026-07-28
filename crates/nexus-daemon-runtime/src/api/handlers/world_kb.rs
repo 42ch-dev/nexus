@@ -54,8 +54,18 @@ use nexus_local_db::kb_relationships::{
     InsertRelationshipParams, KbRelationshipRow, UpdateRelationshipParams,
 };
 use nexus_local_db::kb_store::{self, cas_update_key_block_fields};
+use nexus_local_db::spoke_adapter::NexusBaselineAdapter;
 use nexus_local_db::LocalDbError;
+// V1.142 P2: first production orchestrator cutover. `promote_adopt` routes
+// through `orchestrate_promote(&NexusBaselineAdapter, PromoteRequest)`.
+// These spoke types are re-exported through `nexus_spoke_adapter` (the
+// single boundary that crosses into spoke standard objects; spec §7).
+use nexus_spoke_adapter::{
+    orchestrate_promote, KnowledgeEntry as SpokeKnowledgeEntry, PromoteRequest, PromoteResponse,
+    SpokeReject, SpokeRejectCode, SpokeResult,
+};
 use serde::Deserialize;
+use std::sync::{Arc, Mutex};
 use tracing::{info, warn};
 
 /// Maximum entities returned by the graph projection (mirrors `kb_store`
@@ -467,6 +477,16 @@ pub async fn promote_candidate(
         )));
     }
 
+    // Retry-safe idempotency: a prior adopt may have committed (entry + job
+    // confirmed) while the client saw an error or is replaying the request.
+    if candidate.promotion_status == "confirmed" && req.action.as_str() == "adopt" {
+        if let Some(response) =
+            try_idempotent_confirmed_adopt_response(pool, &candidate, &req).await?
+        {
+            return Ok(response);
+        }
+    }
+
     // Promotion transition validity: candidate must be pending.
     if candidate.promotion_status != "pending" {
         return Err(NexusApiError::world_kb_validation_failed(
@@ -576,7 +596,15 @@ fn merge_aliases_into_body(body: &mut WorldKbBody, aliases: &[String]) {
     }
 }
 
-/// Adopt: parse `proposed_payload` → confirmed `WorldKbEntry`; atomic insert + CAS flip.
+/// Adopt: build a provisional candidate, route through `orchestrate_promote`
+/// (which validates → applies promote acceptance → confirmed + bumps revision
+/// → persists via the production adapter), then flip the promotion job in the
+/// **same** `SQLite` transaction.
+///
+/// V1.142 P3: single `COMMIT` covers both the orchestrator's KB write and
+/// `mark_confirmed_in_tx_with_cas`. The handler owns `BEGIN`/`COMMIT`; the
+/// adapter joins the open transaction via a shared cell for the synchronous
+/// `orchestrate_promote` bridge.
 async fn promote_adopt(
     state: &WorkspaceState,
     world_id: &str,
@@ -584,7 +612,6 @@ async fn promote_adopt(
     req: &WorldKbPromoteCandidateRequest,
 ) -> Result<Json<WorldKbPromoteCandidateResponse>, NexusApiError> {
     let pool = state.pool_or_uninit()?;
-    let store = kb_store::SqliteKbStore::with_validation_mode(pool.clone(), ValidationMode::Novel);
 
     let AdoptPlan {
         body,
@@ -597,9 +624,11 @@ async fn promote_adopt(
     validate_body(block_type, Some(&body), ValidationMode::Novel)
         .map_err(|e| NexusApiError::world_kb_validation_failed(&[e.to_string()], &[]))?;
 
+    // Build the candidate with `status = "provisional"` — the orchestrator
+    // flips it to "confirmed" via `apply_promote_acceptance`.
     let mut kb = WorldKbEntry::new(world_id, block_type, &canonical_name);
     kb.body = Some(body);
-    kb.status = "confirmed".to_string();
+    kb.status = "provisional".to_string();
     kb.created_at = chrono::Utc::now().to_rfc3339();
     kb.source_work_id = candidate.work_id.clone();
     kb.source_chapter = candidate.source_chapter_id;
@@ -608,35 +637,65 @@ async fn promote_adopt(
     } else {
         Some("manual".to_string())
     };
+    kb.created_from_command_id = Some(req.job_id.clone());
 
-    // Atomic promotion: insert + CAS flip in one transaction.
-    let mut tx = pool.begin().await.map_err(NexusApiError::from)?;
-    let insert = store
-        .insert_key_block_in_tx(&mut tx, kb.clone())
-        .await
-        .map_err(|e| map_kb_store_err(&e, &req.job_id))?;
-    let flipped = mark_confirmed_in_tx_with_cas(
-        &mut tx,
-        &req.job_id,
-        i64::try_from(req.expected_version).unwrap_or(0),
-    )
-    .await
-    .map_err(|e| map_cas_err(e, &req.job_id, "version"))?;
-    if !flipped {
-        // Race: row left pending state between read and flip. Roll back the
-        // orphan WorldKbEntry insert; surface a validation error (not a conflict).
-        let _ = tx.rollback().await;
-        return Err(NexusApiError::world_kb_validation_failed(
-            &[
-                "candidate was no longer pending (already confirmed/rejected); rolled back"
-                    .to_string(),
-            ],
-            &[],
-        ));
+    let tx = pool.begin().await.map_err(NexusApiError::from)?;
+    let tx_cell = Arc::new(Mutex::new(Some(tx)));
+    let adapter = NexusBaselineAdapter::new(pool.clone()).with_tx_cell(Arc::clone(&tx_cell));
+
+    let spoke_req = build_spoke_promote_request(&kb);
+    let result = adapter.with_bound_tx(|| orchestrate_promote(&adapter, spoke_req));
+    let knowledge_entry = match map_promote_response(result, pool, &req.job_id, &kb).await {
+        Ok(PromoteAdoptOrchestrateOutcome::RecoveredConfirmed(knowledge_entry)) => {
+            if let Some(tx) = tx_cell.lock().ok().and_then(|mut guard| guard.take()) {
+                let _ = tx.rollback().await;
+            }
+            return build_promote_adopt_response(pool, &knowledge_entry, candidate, &req.job_id)
+                .await;
+        }
+        Ok(PromoteAdoptOrchestrateOutcome::Fresh(entry)) => entry,
+        Err(e) => {
+            let rollback_tx = tx_cell.lock().ok().and_then(|mut guard| guard.take());
+            if let Some(tx) = rollback_tx {
+                let _ = tx.rollback().await;
+            }
+            return Err(e);
+        }
+    };
+
+    let mut tx = tx_cell
+        .lock()
+        .expect("promote_adopt tx mutex poisoned")
+        .take()
+        .expect("promote_adopt tx cell must hold the open transaction");
+
+    let expected_version = i64::try_from(req.expected_version).unwrap_or(0);
+    match mark_confirmed_in_tx_with_cas(&mut tx, &req.job_id, expected_version).await {
+        Ok(true) => match tx.commit().await {
+            Ok(()) => {}
+            Err(e) => {
+                handle_promote_adopt_commit_ambiguity(pool, &req.job_id, e).await?;
+            }
+        },
+        Ok(false) => {
+            let _ = tx.rollback().await;
+            return Err(NexusApiError::world_kb_validation_failed(
+                &[
+                    "candidate was no longer pending (already confirmed/rejected); \
+                     rolled back the adopt transaction"
+                        .to_string(),
+                ],
+                &[],
+            ));
+        }
+        Err(e) => {
+            let _ = tx.rollback().await;
+            return Err(map_cas_err(e, &req.job_id, "version"));
+        }
     }
-    tx.commit().await.map_err(NexusApiError::from)?;
 
-    let kb_id = insert.entry_id.clone();
+    let store = kb_store::SqliteKbStore::new(pool.clone());
+    let kb_id = knowledge_entry.entry_id.clone();
     let updated_kb =
         store
             .get_knowledge_entry(&kb_id)
@@ -645,18 +704,430 @@ async fn promote_adopt(
                 code: "DATABASE_ERROR".to_string(),
                 message: e.to_string(),
             })?;
-    let job = get_promotion(pool, &req.job_id)
+    build_promote_adopt_response_from_kb(pool, &updated_kb, candidate, &req.job_id).await
+}
+
+async fn build_promote_adopt_response(
+    pool: &sqlx::SqlitePool,
+    knowledge_entry: &SpokeKnowledgeEntry,
+    candidate: &KbExtractPromotion,
+    job_id: &str,
+) -> Result<Json<WorldKbPromoteCandidateResponse>, NexusApiError> {
+    let store = kb_store::SqliteKbStore::new(pool.clone());
+    let updated_kb = store
+        .get_knowledge_entry(&knowledge_entry.entry_id)
+        .await
+        .map_err(|e| NexusApiError::Internal {
+            code: "DATABASE_ERROR".to_string(),
+            message: e.to_string(),
+        })?;
+    build_promote_adopt_response_from_kb(pool, &updated_kb, candidate, job_id).await
+}
+
+async fn build_promote_adopt_response_from_kb(
+    pool: &sqlx::SqlitePool,
+    updated_kb: &WorldKbEntry,
+    candidate: &KbExtractPromotion,
+    job_id: &str,
+) -> Result<Json<WorldKbPromoteCandidateResponse>, NexusApiError> {
+    let job = get_promotion(pool, job_id)
         .await
         .map_err(NexusApiError::from)?
         .unwrap_or_else(|| candidate.clone());
     let new_version = u64::try_from(job.version).unwrap_or(0);
 
     Ok(Json(WorldKbPromoteCandidateResponse {
-        entity: Some(wire_cast(project_entity(&updated_kb))),
+        entity: Some(wire_cast(project_entity(updated_kb))),
         job: wire_cast(project_job(&job)),
         version: new_version,
         validation_summary: wire_cast(validation_summary(&[], &[])),
     }))
+}
+
+/// Return the adopt response when the job is already confirmed and the active
+/// entry is attributed to this promotion job (client retry after durable success).
+async fn try_idempotent_confirmed_adopt_response(
+    pool: &sqlx::SqlitePool,
+    candidate: &KbExtractPromotion,
+    req: &WorldKbPromoteCandidateRequest,
+) -> Result<Option<Json<WorldKbPromoteCandidateResponse>>, NexusApiError> {
+    let AdoptPlan {
+        block_type,
+        canonical_name,
+        ..
+    } = build_adopt_plan(candidate, req)?;
+    let Some(existing) =
+        find_active_entry_for(pool, &candidate.world_id, &canonical_name, block_type).await?
+    else {
+        return Ok(None);
+    };
+    if existing.created_from_command_id.as_deref() != Some(req.job_id.as_str()) {
+        return Ok(None);
+    }
+    tracing::info!(
+        job_id = %req.job_id,
+        entry_id = %existing.entry_id,
+        "promote_adopt idempotent retry: job already confirmed with attributed entry"
+    );
+    build_promote_adopt_response_from_kb(pool, &existing, candidate, &req.job_id)
+        .await
+        .map(Some)
+}
+
+// ─── promote-adopt orchestration helpers (V1.142 P2/P3) ─────────────────────
+
+/// Result of routing `orchestrate_promote` inside [`promote_adopt`].
+enum PromoteAdoptOrchestrateOutcome {
+    /// Orchestrator created a new confirmed entry in the bound transaction.
+    Fresh(SpokeKnowledgeEntry),
+    /// Retry-safe recovery: job already confirmed and entry attributed to this job.
+    /// Caller must skip job CAS and roll back the unused outer transaction.
+    RecoveredConfirmed(SpokeKnowledgeEntry),
+}
+
+/// Action to take when `tx.commit()` fails after a successful in-tx adopt.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PromoteAdoptCommitAmbiguityAction {
+    /// Commit likely landed; treat adopt as success.
+    TreatAsSuccess,
+    /// Commit did not land (or outcome unclear); surface error to caller.
+    Fail,
+}
+
+/// Pure decision table for commit-ack failures (unit-tested).
+fn promote_adopt_commit_ambiguity_action(
+    job_status: Option<&str>,
+) -> PromoteAdoptCommitAmbiguityAction {
+    match job_status {
+        Some("confirmed") => PromoteAdoptCommitAmbiguityAction::TreatAsSuccess,
+        _ => PromoteAdoptCommitAmbiguityAction::Fail,
+    }
+}
+
+/// Outcome of resolving a commit-ack failure after re-reading the promotion job.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PromoteAdoptCommitAmbiguityResolution {
+    TreatAsSuccess,
+    Fail,
+}
+
+/// Pure decision after a status re-read (unit-tested). `Err` means all re-read
+/// attempts failed — fail because the commit outcome is ambiguous.
+fn resolve_promote_adopt_commit_ambiguity_after_reread(
+    reread: Result<Option<&str>, ()>,
+) -> PromoteAdoptCommitAmbiguityResolution {
+    match reread {
+        Ok(status) => match promote_adopt_commit_ambiguity_action(status) {
+            PromoteAdoptCommitAmbiguityAction::TreatAsSuccess => {
+                PromoteAdoptCommitAmbiguityResolution::TreatAsSuccess
+            }
+            PromoteAdoptCommitAmbiguityAction::Fail => PromoteAdoptCommitAmbiguityResolution::Fail,
+        },
+        Err(()) => PromoteAdoptCommitAmbiguityResolution::Fail,
+    }
+}
+
+/// Re-read the promotion job after a commit error and apply
+/// [`resolve_promote_adopt_commit_ambiguity_after_reread`].
+async fn handle_promote_adopt_commit_ambiguity(
+    pool: &sqlx::SqlitePool,
+    job_id: &str,
+    commit_err: sqlx::Error,
+) -> Result<(), NexusApiError> {
+    let reread = reread_promotion_status_with_retry(pool, job_id).await;
+    let resolution = resolve_promote_adopt_commit_ambiguity_after_reread(
+        reread
+            .as_ref()
+            .map(|status| status.as_deref())
+            .map_err(|_| ()),
+    );
+
+    match resolution {
+        PromoteAdoptCommitAmbiguityResolution::TreatAsSuccess => {
+            warn!(
+                job_id = %job_id,
+                "promote_adopt: commit returned error but job is confirmed; treating adopt as success"
+            );
+            Ok(())
+        }
+        PromoteAdoptCommitAmbiguityResolution::Fail => Err(promote_adopt_commit_ambiguity_error(
+            commit_err,
+            reread.err().as_ref(),
+        )),
+    }
+}
+
+/// Re-read `kb_extract_jobs.promotion_status` with short retries after commit ack
+/// failures so transient read errors do not force an incorrect outcome.
+async fn reread_promotion_status_with_retry(
+    pool: &sqlx::SqlitePool,
+    job_id: &str,
+) -> Result<Option<String>, sqlx::Error> {
+    const MAX_ATTEMPTS: u32 = 3;
+    let mut last_err = None;
+    for attempt in 0..MAX_ATTEMPTS {
+        if attempt > 0 {
+            tokio::time::sleep(std::time::Duration::from_millis(10 * u64::from(attempt))).await;
+        }
+        match get_promotion(pool, job_id).await {
+            Ok(job) => return Ok(job.map(|j| j.promotion_status)),
+            Err(e) => last_err = Some(e),
+        }
+    }
+    Err(last_err.unwrap_or_else(|| sqlx::Error::RowNotFound))
+}
+
+/// Combine commit and optional re-read errors for ambiguity failure paths.
+fn promote_adopt_commit_ambiguity_error(
+    commit_err: sqlx::Error,
+    reread_err: Option<&sqlx::Error>,
+) -> NexusApiError {
+    match reread_err {
+        Some(reread) => NexusApiError::Internal {
+            code: "DATABASE_ERROR".to_string(),
+            message: format!(
+                "promote_adopt commit failed ({commit_err}) and status re-read failed ({reread})"
+            ),
+        },
+        None => NexusApiError::from(commit_err),
+    }
+}
+
+/// Build a spoke [`PromoteRequest`] from a nexus [`WorldKbEntry`] candidate.
+///
+/// The candidate is converted to the spoke [`SpokeKnowledgeEntry`] boundary
+/// type via the sole `From<WorldKbEntry>` conversion seam (spec §7.1), then
+/// round-tripped through JSON to fit the `PromoteRequest.candidate` wire
+/// shape. The spoke codegen emits a distinct struct per wire shape even
+/// when the schema is shared; the orchestrator's internal
+/// `promote_candidate_as_data` round-trips anyway, so this is the canonical
+/// pattern (mirrors `spoke_orchestrator_integration` test fixtures).
+///
+/// # Panics
+///
+/// Panics if the round-trip fails — the candidate has already been through
+/// nexus validation (`validate_canonical_name`, `validate_body`), so a
+/// serialization/deserialization failure here indicates a wire-shape drift
+/// between `WorldKbEntry` and spoke `KnowledgeEntry`, not a runtime input
+/// error. That class of failure should surface as a panic at the seam,
+/// not a misleading 422 to the caller.
+fn build_spoke_promote_request(candidate: &WorldKbEntry) -> PromoteRequest {
+    let spoke_entry: SpokeKnowledgeEntry = candidate.clone().into();
+    let wire = serde_json::to_value(&spoke_entry).unwrap_or_else(|_| serde_json::json!({}));
+    serde_json::from_value(serde_json::json!({ "candidate": wire }))
+        .expect("KnowledgeEntry-derived candidate fits PromoteRequest.candidate shape")
+}
+
+/// Map `orchestrate_promote`'s [`SpokeResult<PromoteResponse>`] to the
+/// confirmed [`SpokeKnowledgeEntry`] on success, or to a [`NexusApiError`]
+/// on reject.
+///
+/// # `SpokeRejectCode` → `NexusApiError` mapping
+///
+/// | `SpokeRejectCode`                       | `NexusApiError`                    |
+/// |-----------------------------------------|------------------------------------|
+/// | `MissingRequiredField`                  | `world_kb_validation_failed` (422) |
+/// | `EmptyCanonicalName`                    | `world_kb_validation_failed` (422) |
+/// | `CandidateTerminalStatus`               | `world_kb_validation_failed` (422) |
+/// | `CandidateNotProvisional`               | `world_kb_validation_failed` (422) |
+/// | `MergeTargetSelf`                       | `world_kb_validation_failed` (422) |
+/// | `InvalidKnowledgeEntryStatus*`          | `world_kb_validation_failed` (422) |
+/// | `DuplicateActiveKnowledgeEntry`         | `world_kb_validation_failed` (422) |
+/// | `KnowledgeEntryTerminalStatus`          | `world_kb_validation_failed` (422) |
+/// | `KnowledgeEntryAlreadyExists`           | retry-safe check (see below)       |
+/// | `RevisionConflict`                      | `world_kb_conflict` (409)          |
+/// | `StoredRevisionStale`                   | `world_kb_conflict` (409)          |
+/// | `InvalidInput` / `CapabilityPortMissing` / other | `Internal` (500)         |
+///
+/// # Retry-safe idempotency
+///
+/// When a prior attempt committed the job but returned an error to the caller
+/// (commit-ack ambiguity), retry hits `KnowledgeEntryAlreadyExists` on the
+/// unique index. This helper recovers the existing entry when the job is
+/// already `confirmed` and the active row is attributed to this `job_id`.
+/// Pending collisions return 422 without deleting any KB row.
+async fn map_promote_response(
+    result: SpokeResult<PromoteResponse>,
+    pool: &sqlx::SqlitePool,
+    job_id: &str,
+    candidate_lookup: &WorldKbEntry,
+) -> Result<PromoteAdoptOrchestrateOutcome, NexusApiError> {
+    match result {
+        SpokeResult::Ok(PromoteResponse::Variant0 { knowledge_entry, .. }) => {
+            // The codegen emits a DISTINCT `KnowledgeEntry` struct per wire
+            // shape (one in `data::knowledge_entry`, another inlined into
+            // `ops::promote_response`) even though they share the same JSON
+            // schema. Round-trip through JSON to coerce the response-only
+            // type into the canonical data type that downstream nexus code
+            // consumes (mirrors the orchestrator's internal
+            // `promote_candidate_as_data` wire_convert pattern).
+            let wire = serde_json::to_value(&knowledge_entry)
+                .map_err(|e| NexusApiError::Internal {
+                    code: "SPOKE_RESPONSE_DECODE".to_string(),
+                    message: format!(
+                        "orchestrate_promote returned a non-serializable KnowledgeEntry: {e}"
+                    ),
+                })?;
+            serde_json::from_value::<SpokeKnowledgeEntry>(wire)
+                .map(PromoteAdoptOrchestrateOutcome::Fresh)
+                .map_err(|e| NexusApiError::Internal {
+                    code: "SPOKE_RESPONSE_DECODE".to_string(),
+                    message: format!(
+                        "orchestrate_promote response did not match KnowledgeEntry shape: {e}"
+                    ),
+                })
+        }
+        // Variant1 is the wire error-envelope case. The orchestrator always
+        // surfaces errors via `SpokeResult::Reject` (not Variant1), so this
+        // arm is defensive — if a future spoke version starts returning
+        // Variant1 from `orchestrate_promote`, this surfaces it as 500
+        // rather than silently dropping the error envelope.
+        SpokeResult::Ok(PromoteResponse::Variant1 { .. }) => Err(NexusApiError::Internal {
+            code: "SPOKE_ORCHESTRATOR_ERROR_ENVELOPE".to_string(),
+            message: format!(
+                "orchestrate_promote returned a PromoteResponse::Variant1 error envelope for {job_id}; \
+                 expected a SpokeResult::Reject (spoke wire-shape drift)"
+            ),
+        }),
+        SpokeResult::Reject(reject) => {
+            map_promote_reject(reject, pool, job_id, candidate_lookup).await
+        }
+    }
+}
+
+/// Reject-handling tail of [`map_promote_response`]. Separated because the
+/// retry-safe branch is async (re-reads job + entry) and the happy-error
+/// branch is short.
+async fn map_promote_reject(
+    reject: SpokeReject,
+    pool: &sqlx::SqlitePool,
+    job_id: &str,
+    candidate_lookup: &WorldKbEntry,
+) -> Result<PromoteAdoptOrchestrateOutcome, NexusApiError> {
+    if reject.code == SpokeRejectCode::KnowledgeEntryAlreadyExists
+        || reject.code == SpokeRejectCode::DuplicateActiveKnowledgeEntry
+    {
+        // Retry-safe branch: the unique constraint fired — either a genuine
+        // duplicate (a confirmed entry with the same world/type/name already
+        // exists) or a retry after a partial prior attempt. Disambiguate via
+        // the promotion job's status.
+        let job = get_promotion(pool, job_id)
+            .await
+            .map_err(NexusApiError::from)?;
+        if let Some(job) = job {
+            if job.promotion_status == "confirmed" {
+                // Prior partial attempt completed successfully despite
+                // returning an error to the caller. Recover the existing
+                // entry (authoritative via the unique key) and return it.
+                if let Some(existing) = find_active_entry_for(
+                    pool,
+                    &candidate_lookup.world_id,
+                    &candidate_lookup.canonical_name,
+                    candidate_lookup.block_type,
+                )
+                .await?
+                {
+                    if existing.created_from_command_id.as_deref() == Some(job_id) {
+                        tracing::info!(
+                            job_id = %job_id,
+                            entry_id = %existing.entry_id,
+                            "promote_adopt retry-safe: returning existing confirmed entry from prior partial attempt"
+                        );
+                        return Ok(PromoteAdoptOrchestrateOutcome::RecoveredConfirmed(
+                            existing.into(),
+                        ));
+                    }
+                    tracing::warn!(
+                        job_id = %job_id,
+                        entry_id = %existing.entry_id,
+                        "promote_adopt retry-safe: confirmed job but active entry is not attributed to this job"
+                    );
+                }
+                // Defensive: unique fired but the active entry isn't found
+                // by the lookup (status drift between INSERT and SELECT).
+                tracing::warn!(
+                    job_id = %job_id,
+                    "promote_adopt retry-safe: job is confirmed but no matching active entry found"
+                );
+            } else if job.promotion_status == "pending" {
+                return Err(NexusApiError::world_kb_validation_failed(
+                    &[
+                        "an active WorldKbEntry with the same name/type already exists in this \
+                         world while the promotion job is still pending (wait for the in-flight \
+                         adopt to finish, refresh the candidates list, or use merge)"
+                            .to_string(),
+                    ],
+                    &[],
+                ));
+            }
+        }
+        return Err(NexusApiError::world_kb_validation_failed(
+            &[
+                "an active WorldKbEntry with the same name/type already exists in this world \
+                 (refresh the candidates list and retry)"
+                    .to_string(),
+            ],
+            &[],
+        ));
+    }
+    Err(spoke_reject_to_api_error(reject, pool, job_id).await)
+}
+
+/// Look up the active [`WorldKbEntry`] matching the same unique key as the
+/// candidate. Used by the retry-safe branch of [`map_promote_response`] to
+/// recover the existing confirmed entry on retry.
+async fn find_active_entry_for(
+    pool: &sqlx::SqlitePool,
+    world_id: &str,
+    canonical_name: &str,
+    block_type: nexus_contracts::BlockType,
+) -> Result<Option<WorldKbEntry>, NexusApiError> {
+    let store = kb_store::SqliteKbStore::new(pool.clone());
+    store
+        .get_active_by_unique_key(world_id, canonical_name, block_type)
+        .await
+        .map_err(|e| NexusApiError::Internal {
+            code: "DATABASE_ERROR".to_string(),
+            message: e.to_string(),
+        })
+}
+
+/// Map a (non-retry-safe) [`SpokeReject`] to a [`NexusApiError`]. The
+/// mapping table is documented on [`map_promote_response`].
+async fn spoke_reject_to_api_error(
+    reject: SpokeReject,
+    pool: &sqlx::SqlitePool,
+    job_id: &str,
+) -> NexusApiError {
+    match reject.code {
+        SpokeRejectCode::MissingRequiredField
+        | SpokeRejectCode::EmptyCanonicalName
+        | SpokeRejectCode::CandidateTerminalStatus
+        | SpokeRejectCode::CandidateNotProvisional
+        | SpokeRejectCode::MergeTargetSelf
+        | SpokeRejectCode::InvalidKnowledgeEntryStatus
+        | SpokeRejectCode::InvalidKnowledgeEntryStatusTransition
+        | SpokeRejectCode::DuplicateActiveKnowledgeEntry
+        | SpokeRejectCode::KnowledgeEntryTerminalStatus => {
+            NexusApiError::world_kb_validation_failed(&[reject.message], &[])
+        }
+        SpokeRejectCode::RevisionConflict | SpokeRejectCode::StoredRevisionStale => {
+            let current = reread_promotion_version(pool, job_id).await.unwrap_or(0);
+            NexusApiError::world_kb_conflict(
+                current,
+                job_id,
+                "version",
+                "refetch the candidates list and reapply",
+            )
+        }
+        _ => NexusApiError::Internal {
+            code: "SPOKE_ORCHESTRATOR_REJECT".to_string(),
+            message: format!(
+                "orchestrate_promote rejected: {}: {}",
+                reject.code, reject.message
+            ),
+        },
+    }
 }
 
 /// Reject: CAS flip pending → rejected (with version guard).
@@ -826,29 +1297,6 @@ async fn promote_merge(
         version: new_version,
         validation_summary: wire_cast(validation_summary(&[], &[])),
     }))
-}
-
-fn map_kb_store_err(
-    e: &nexus_knowledge::world_kb::store::KbStoreError,
-    job_id: &str,
-) -> NexusApiError {
-    use nexus_knowledge::world_kb::store::KbStoreError;
-    match e {
-        KbStoreError::Validation(_) | KbStoreError::ValidationLegacy(_) => {
-            NexusApiError::world_kb_validation_failed(&[e.to_string()], &[])
-        }
-        KbStoreError::Duplicate { .. } => NexusApiError::world_kb_validation_failed(
-            &[
-                "an active WorldKbEntry with the same name/type already exists in this world"
-                    .to_string(),
-            ],
-            &[],
-        ),
-        _ => NexusApiError::Internal {
-            code: "DATABASE_ERROR".to_string(),
-            message: format!("adopt insert failed for {job_id}: {e}"),
-        },
-    }
 }
 
 // ─── read endpoints ─────────────────────────────────────────────────────────
@@ -1624,5 +2072,69 @@ fn project_relationship(row: &KbRelationshipRow, direction: &str) -> WorldKbRela
         version: u64::try_from(row.revision).unwrap_or(0),
         updated_at: row.updated_at.clone(),
         projection_direction: wire_cast(direction.to_string()),
+    }
+}
+
+#[cfg(test)]
+mod promote_adopt_commit_ambiguity_tests {
+    use super::{
+        promote_adopt_commit_ambiguity_action, resolve_promote_adopt_commit_ambiguity_after_reread,
+        PromoteAdoptCommitAmbiguityAction, PromoteAdoptCommitAmbiguityResolution,
+    };
+
+    #[test]
+    fn confirmed_job_treats_commit_error_as_success() {
+        assert_eq!(
+            promote_adopt_commit_ambiguity_action(Some("confirmed")),
+            PromoteAdoptCommitAmbiguityAction::TreatAsSuccess
+        );
+        assert_eq!(
+            resolve_promote_adopt_commit_ambiguity_after_reread(Ok(Some("confirmed"))),
+            PromoteAdoptCommitAmbiguityResolution::TreatAsSuccess
+        );
+    }
+
+    #[test]
+    fn pending_job_fails_on_commit_error() {
+        assert_eq!(
+            promote_adopt_commit_ambiguity_action(Some("pending")),
+            PromoteAdoptCommitAmbiguityAction::Fail
+        );
+        assert_eq!(
+            resolve_promote_adopt_commit_ambiguity_after_reread(Ok(Some("pending"))),
+            PromoteAdoptCommitAmbiguityResolution::Fail
+        );
+    }
+
+    #[test]
+    fn missing_job_fails_on_commit_error() {
+        assert_eq!(
+            promote_adopt_commit_ambiguity_action(None),
+            PromoteAdoptCommitAmbiguityAction::Fail
+        );
+        assert_eq!(
+            resolve_promote_adopt_commit_ambiguity_after_reread(Ok(None)),
+            PromoteAdoptCommitAmbiguityResolution::Fail
+        );
+    }
+
+    #[test]
+    fn rejected_job_fails_on_commit_error() {
+        assert_eq!(
+            promote_adopt_commit_ambiguity_action(Some("rejected")),
+            PromoteAdoptCommitAmbiguityAction::Fail
+        );
+        assert_eq!(
+            resolve_promote_adopt_commit_ambiguity_after_reread(Ok(Some("rejected"))),
+            PromoteAdoptCommitAmbiguityResolution::Fail
+        );
+    }
+
+    #[test]
+    fn reread_failed_fails() {
+        assert_eq!(
+            resolve_promote_adopt_commit_ambiguity_after_reread(Err(())),
+            PromoteAdoptCommitAmbiguityResolution::Fail
+        );
     }
 }

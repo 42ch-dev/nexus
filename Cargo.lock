@@ -2727,6 +2727,7 @@ dependencies = [
  "nexus-moment-context-assembly",
  "nexus-narrative",
  "nexus-orchestration",
+ "nexus-spoke-adapter",
  "nexus-wasm-host",
  "nix 0.28.0",
  "rcgen",
@@ -2826,6 +2827,7 @@ dependencies = [
  "chrono",
  "nexus-contracts",
  "nexus-knowledge",
+ "nexus-spoke-adapter",
  "serde",
  "serde_json",
  "strum 0.26.3",
@@ -4461,9 +4463,9 @@ dependencies = [
 
 [[package]]
 name = "spoke-operations"
-version = "0.4.0"
+version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5636fd2d4e848c39005632497fb2f7f4323484360e450d66e56c502ac1fd160f"
+checksum = "723e2c8df4b888d6b92e6c06a42f30bef19c06a779f13ed5782da6f32531e0fd"
 dependencies = [
  "chrono",
  "serde",
@@ -4473,9 +4475,9 @@ dependencies = [
 
 [[package]]
 name = "spoke-schemas"
-version = "0.4.0"
+version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ac19167193be2a7df995dee036b37253f35a1d8b105335bfbd729ca85535be99"
+checksum = "27b4cc3b4521c426d4f1b3b03fa5eeb843cb191543bba0cde17b7db337a63473"
 dependencies = [
  "chrono",
  "regress",

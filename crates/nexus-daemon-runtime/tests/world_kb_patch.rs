@@ -12,6 +12,7 @@
 
 use axum::extract::{Path, Query, State};
 use axum::Json;
+use nexus_contracts::BlockType;
 use nexus_contracts::{
     WorldKbKeyBlockStateResponse, WorldKbPatchEntityRequest, WorldKbPromoteCandidateRequest,
 };
@@ -21,6 +22,7 @@ use nexus_daemon_runtime::api::handlers::world_kb::{
 };
 use nexus_daemon_runtime::workspace::WorkspaceState;
 use nexus_local_db::kb_extract_job::insert_pending;
+use nexus_local_db::kb_store::SqliteKbStore;
 
 /// Seed a `kb_key_blocks` row directly (bypassing store validation) with a
 /// controlled `status` and `revision`, returning its id.
@@ -51,6 +53,39 @@ async fn seed_key_block(
     .bind(status)
     .bind(revision)
     .bind(body_json)
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
+/// Like [`seed_key_block`] but sets `created_from_command_id` for promote
+/// attribution tests.
+async fn seed_key_block_attributed(
+    pool: &sqlx::SqlitePool,
+    key_block_id: &str,
+    world_id: &str,
+    block_type: &str,
+    canonical_name: &str,
+    status: &str,
+    revision: Option<i64>,
+    body_json: Option<&str>,
+    created_from_command_id: &str,
+) {
+    // SAFETY: test-only seed against the known kb_key_blocks schema.
+    sqlx::query(
+        "INSERT INTO kb_key_blocks \
+         (key_block_id, world_id, block_type, canonical_name, status, revision, body_json, \
+          created_from_command_id, created_at, updated_at) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))",
+    )
+    .bind(key_block_id)
+    .bind(world_id)
+    .bind(block_type)
+    .bind(canonical_name)
+    .bind(status)
+    .bind(revision)
+    .bind(body_json)
+    .bind(created_from_command_id)
     .execute(pool)
     .await
     .unwrap();
@@ -333,8 +368,13 @@ async fn patch_entity_cross_author_does_not_leak_existence() {
 const NOVEL_CHARACTER_BODY: &str =
     r#"{"summary":"A brave hero","attributes":{"novel_category":"character"}}"#;
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn promote_adopt_confirms_candidate() {
+    // V1.142 P2: promote_adopt now routes through `orchestrate_promote` via
+    // `NexusBaselineAdapter`, which bridges sync spoke ports to async SQLite
+    // via `tokio::task::block_in_place`. That requires a multi-threaded
+    // runtime (the production daemon uses one; tests must opt in via
+    // `flavor = "multi_thread"`).
     let (_tmp, state) = fresh_state().await;
     let candidate = insert_pending(
         state.pool().unwrap(),
@@ -370,6 +410,458 @@ async fn promote_adopt_confirms_candidate() {
     assert_eq!(entity.status, "confirmed");
     assert_eq!(entity.canonical_name.to_string(), "Kael");
     assert_eq!(resp.job.status, "confirmed");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn promote_adopt_rollbacks_entry_when_job_flip_races() {
+    let (_tmp, state) = fresh_state().await;
+    let pool = state.pool().unwrap().clone();
+    let candidate = insert_pending(
+        &pool,
+        "test_creator",
+        "ws",
+        "wld_test_world",
+        None,
+        None,
+        "character",
+        "CompensateMe",
+        NOVEL_CHARACTER_BODY,
+    )
+    .await
+    .unwrap();
+
+    // Deterministic flip failure: when orchestrate_promote INSERTs the confirmed
+    // row, reject the pending job before mark_confirmed runs.
+    let job_id = candidate.job_id.clone();
+    let trigger_sql = format!(
+        "CREATE TRIGGER trg_reject_on_compensate_insert \
+         AFTER INSERT ON kb_key_blocks \
+         WHEN NEW.canonical_name = 'CompensateMe' \
+         BEGIN \
+           UPDATE kb_extract_jobs \
+           SET promotion_status = 'rejected', version = version + 1 \
+           WHERE job_id = '{job_id}' AND promotion_status = 'pending'; \
+         END"
+    );
+    sqlx::query(&trigger_sql).execute(&pool).await.unwrap();
+
+    let req = WorldKbPromoteCandidateRequest {
+        job_id: candidate.job_id.clone(),
+        candidate_id: "kb_cand".to_string(),
+        action: "adopt".parse().unwrap(),
+        expected_version: u64::try_from(candidate.version).unwrap_or(0),
+        merge_target_id: None,
+        patch: None,
+    };
+    let err = promote_candidate(
+        State(state.clone()),
+        Path("wld_test_world".to_string()),
+        Json(req),
+    )
+    .await
+    .expect_err("flip failure must surface validation error");
+    sqlx::query("DROP TRIGGER IF EXISTS trg_reject_on_compensate_insert")
+        .execute(&pool)
+        .await
+        .ok();
+
+    assert_eq!(
+        err.status_code(),
+        axum::http::StatusCode::UNPROCESSABLE_ENTITY,
+        "flip failure surfaces as validation_failed"
+    );
+
+    let store = SqliteKbStore::new(pool.clone());
+    let active = store
+        .get_active_by_unique_key("wld_test_world", "CompensateMe", BlockType::Character)
+        .await
+        .unwrap();
+    assert!(
+        active.is_none(),
+        "atomic rollback must leave no active entry when job flip races"
+    );
+
+    seed_pending_candidate(
+        &pool,
+        "xj_compensate_retry",
+        "work_retry_source",
+        "wld_test_world",
+        "character",
+        "CompensateMe",
+    )
+    .await;
+    let req2 = WorldKbPromoteCandidateRequest {
+        job_id: "xj_compensate_retry".to_string(),
+        candidate_id: "kb_cand2".to_string(),
+        action: "adopt".parse().unwrap(),
+        expected_version: 0,
+        merge_target_id: None,
+        patch: None,
+    };
+    let Json(resp2) =
+        promote_candidate(State(state), Path("wld_test_world".to_string()), Json(req2))
+            .await
+            .expect("retry adopt after rollback must succeed");
+    assert_eq!(resp2.job.status, "confirmed");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn promote_adopt_rollbacks_entry_when_job_flip_cas_errors() {
+    let (_tmp, state) = fresh_state().await;
+    let pool = state.pool().unwrap().clone();
+    let candidate = insert_pending(
+        &pool,
+        "test_creator",
+        "ws",
+        "wld_test_world",
+        None,
+        None,
+        "character",
+        "CasFailMe",
+        NOVEL_CHARACTER_BODY,
+    )
+    .await
+    .unwrap();
+
+    let job_id = candidate.job_id.clone();
+    let trigger_sql = format!(
+        "CREATE TRIGGER trg_abort_flip_cas \
+         BEFORE UPDATE ON kb_extract_jobs \
+         WHEN OLD.job_id = '{job_id}' AND NEW.promotion_status = 'confirmed' \
+         BEGIN \
+           SELECT RAISE(ABORT, 'simulated flip CAS failure'); \
+         END"
+    );
+    sqlx::query(&trigger_sql).execute(&pool).await.unwrap();
+
+    let req = WorldKbPromoteCandidateRequest {
+        job_id: candidate.job_id.clone(),
+        candidate_id: "kb_cand".to_string(),
+        action: "adopt".parse().unwrap(),
+        expected_version: u64::try_from(candidate.version).unwrap_or(0),
+        merge_target_id: None,
+        patch: None,
+    };
+    let err = promote_candidate(
+        State(state.clone()),
+        Path("wld_test_world".to_string()),
+        Json(req),
+    )
+    .await
+    .expect_err("CAS error during flip must fail");
+    sqlx::query("DROP TRIGGER IF EXISTS trg_abort_flip_cas")
+        .execute(&pool)
+        .await
+        .ok();
+
+    assert_eq!(
+        err.status_code(),
+        axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+        "CAS execute error during flip surfaces as internal after rollback"
+    );
+
+    let store = SqliteKbStore::new(pool.clone());
+    let active = store
+        .get_active_by_unique_key("wld_test_world", "CasFailMe", BlockType::Character)
+        .await
+        .unwrap();
+    assert!(
+        active.is_none(),
+        "CAS-error path must roll back the in-flight entry"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn promote_adopt_pending_collision_does_not_delete_attributed_entry() {
+    let (_tmp, state) = fresh_state().await;
+    let pool = state.pool().unwrap().clone();
+
+    // Simulated in-flight / stale partial state: active entry stamped with
+    // this job_id while the job is still pending — retry must not delete.
+    seed_key_block_attributed(
+        &pool,
+        "kb_orphan_prior",
+        "wld_test_world",
+        "character",
+        "OrphanRetry",
+        "confirmed",
+        Some(1),
+        Some(NOVEL_CHARACTER_BODY),
+        "xj_orphan_retry",
+    )
+    .await;
+    seed_pending_candidate(
+        &pool,
+        "xj_orphan_retry",
+        "work_orphan_source",
+        "wld_test_world",
+        "character",
+        "OrphanRetry",
+    )
+    .await;
+
+    let err = promote_candidate(
+        State(state.clone()),
+        Path("wld_test_world".to_string()),
+        Json(WorldKbPromoteCandidateRequest {
+            job_id: "xj_orphan_retry".to_string(),
+            candidate_id: "kb_cand".to_string(),
+            action: "adopt".parse().unwrap(),
+            expected_version: 0,
+            merge_target_id: None,
+            patch: None,
+        }),
+    )
+    .await
+    .expect_err("pending collision must not delete");
+    assert_eq!(
+        err.status_code(),
+        axum::http::StatusCode::UNPROCESSABLE_ENTITY
+    );
+    let details = err.error_details().expect("validation details");
+    let errors = details["validation_summary"]["errors"]
+        .as_array()
+        .expect("errors array");
+    assert!(
+        errors
+            .iter()
+            .any(|e| { e.as_str().is_some_and(|msg| msg.contains("still pending")) }),
+        "must surface pending collision: {details:?}"
+    );
+
+    let store = SqliteKbStore::new(pool);
+    let active = store
+        .get_active_by_unique_key("wld_test_world", "OrphanRetry", BlockType::Character)
+        .await
+        .unwrap()
+        .expect("entry must remain active — retry path never deletes");
+    assert_eq!(active.entry_id, "kb_orphan_prior");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn promote_adopt_retry_does_not_delete_unattributed_collision() {
+    let (_tmp, state) = fresh_state().await;
+    let pool = state.pool().unwrap().clone();
+
+    // Independent pre-existing entry (no promotion job stamp).
+    seed_key_block(
+        &pool,
+        "kb_preexisting",
+        "wld_test_world",
+        "character",
+        "PreExisting",
+        "confirmed",
+        Some(1),
+        Some(NOVEL_CHARACTER_BODY),
+    )
+    .await;
+    seed_pending_candidate(
+        &pool,
+        "xj_unattributed_collision",
+        "work_collision_source",
+        "wld_test_world",
+        "character",
+        "PreExisting",
+    )
+    .await;
+
+    let err = promote_candidate(
+        State(state.clone()),
+        Path("wld_test_world".to_string()),
+        Json(WorldKbPromoteCandidateRequest {
+            job_id: "xj_unattributed_collision".to_string(),
+            candidate_id: "kb_cand".to_string(),
+            action: "adopt".parse().unwrap(),
+            expected_version: 0,
+            merge_target_id: None,
+            patch: None,
+        }),
+    )
+    .await
+    .expect_err("unattributed collision must not auto-delete");
+    assert_eq!(
+        err.status_code(),
+        axum::http::StatusCode::UNPROCESSABLE_ENTITY
+    );
+    let details = err.error_details().expect("validation details");
+    let errors = details["validation_summary"]["errors"]
+        .as_array()
+        .expect("errors array");
+    assert!(
+        errors
+            .iter()
+            .any(|e| { e.as_str().is_some_and(|msg| msg.contains("still pending")) }),
+        "must surface pending collision without delete: {details:?}"
+    );
+    assert!(
+        !errors.iter().any(|e| {
+            e.as_str()
+                .is_some_and(|msg| msg.contains("automatically removed"))
+        }),
+        "retry path must not auto-delete: {details:?}"
+    );
+
+    let store = SqliteKbStore::new(pool);
+    let active = store
+        .get_active_by_unique_key("wld_test_world", "PreExisting", BlockType::Character)
+        .await
+        .unwrap()
+        .expect("pre-existing entry must remain active");
+    assert_eq!(active.entry_id, "kb_preexisting");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn promote_adopt_confirmed_job_does_not_recover_unattributed_collision() {
+    let (_tmp, state) = fresh_state().await;
+    let pool = state.pool().unwrap().clone();
+    let job_id = "xj_confirmed_unattrib";
+
+    // Independent pre-existing entry (no promotion job stamp).
+    seed_key_block(
+        &pool,
+        "kb_preexisting_confirmed",
+        "wld_test_world",
+        "character",
+        "ConfirmedCollision",
+        "confirmed",
+        Some(1),
+        Some(NOVEL_CHARACTER_BODY),
+    )
+    .await;
+    seed_pending_candidate(
+        &pool,
+        job_id,
+        "work_confirmed_collision",
+        "wld_test_world",
+        "character",
+        "ConfirmedCollision",
+    )
+    .await;
+
+    // Simulate a concurrent flip confirming the job while this adopt attempt
+    // hits the unique-key collision (outer gate still sees pending).
+    let trigger_sql = format!(
+        "CREATE TRIGGER trg_confirm_on_collision_insert \
+         BEFORE INSERT ON kb_key_blocks \
+         WHEN NEW.canonical_name = 'ConfirmedCollision' \
+         BEGIN \
+           UPDATE kb_extract_jobs \
+           SET promotion_status = 'confirmed', version = version + 1 \
+           WHERE job_id = '{job_id}' AND promotion_status = 'pending'; \
+         END"
+    );
+    sqlx::query(&trigger_sql).execute(&pool).await.unwrap();
+
+    let err = promote_candidate(
+        State(state.clone()),
+        Path("wld_test_world".to_string()),
+        Json(WorldKbPromoteCandidateRequest {
+            job_id: job_id.to_string(),
+            candidate_id: "kb_cand".to_string(),
+            action: "adopt".parse().unwrap(),
+            expected_version: 0,
+            merge_target_id: None,
+            patch: None,
+        }),
+    )
+    .await
+    .expect_err("confirmed job must not adopt unrelated active entry");
+    sqlx::query("DROP TRIGGER IF EXISTS trg_confirm_on_collision_insert")
+        .execute(&pool)
+        .await
+        .ok();
+    assert_eq!(
+        err.status_code(),
+        axum::http::StatusCode::UNPROCESSABLE_ENTITY
+    );
+    let details = err.error_details().expect("validation details");
+    let errors = details["validation_summary"]["errors"]
+        .as_array()
+        .expect("errors array");
+    assert!(
+        errors.iter().any(|e| {
+            e.as_str()
+                .is_some_and(|msg| msg.contains("already exists in this world"))
+        }),
+        "must surface collision without adopting unrelated entry: {details:?}"
+    );
+
+    let store = SqliteKbStore::new(pool);
+    let active = store
+        .get_active_by_unique_key("wld_test_world", "ConfirmedCollision", BlockType::Character)
+        .await
+        .unwrap()
+        .expect("pre-existing entry must remain active");
+    assert_eq!(active.entry_id, "kb_preexisting_confirmed");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn promote_adopt_retry_recovers_when_job_confirmed_with_attributed_entry() {
+    let (_tmp, state) = fresh_state().await;
+    let pool = state.pool().unwrap().clone();
+    let job_id = "xj_retry_recover_attributed";
+
+    // Durable success from a prior attempt: confirmed job + attributed active entry.
+    seed_key_block_attributed(
+        &pool,
+        "kb_retry_recover",
+        "wld_test_world",
+        "character",
+        "RetryRecover",
+        "confirmed",
+        Some(1),
+        Some(NOVEL_CHARACTER_BODY),
+        job_id,
+    )
+    .await;
+    seed_pending_candidate(
+        &pool,
+        job_id,
+        "work_retry_recover",
+        "wld_test_world",
+        "character",
+        "RetryRecover",
+    )
+    .await;
+    sqlx::query(
+        "UPDATE kb_extract_jobs \
+         SET promotion_status = 'confirmed', version = 1 \
+         WHERE job_id = ?",
+    )
+    .bind(job_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let resp = promote_candidate(
+        State(state.clone()),
+        Path("wld_test_world".to_string()),
+        Json(WorldKbPromoteCandidateRequest {
+            job_id: job_id.to_string(),
+            candidate_id: "kb_cand".to_string(),
+            action: "adopt".parse().unwrap(),
+            expected_version: 0,
+            merge_target_id: None,
+            patch: None,
+        }),
+    )
+    .await
+    .expect("attributed confirmed-job retry must return 200 (F-001 / QC2)");
+
+    let entity = resp.entity.as_ref().expect("adopt entity");
+    assert_eq!(entity.canonical_name.to_string(), "RetryRecover");
+    assert_eq!(entity.status, "confirmed");
+    assert_eq!(entity.key_block_id, "kb_retry_recover");
+    assert_eq!(resp.job.status, "confirmed");
+    assert_eq!(resp.version, 1);
+
+    let store = SqliteKbStore::new(pool);
+    let active = store
+        .get_active_by_unique_key("wld_test_world", "RetryRecover", BlockType::Character)
+        .await
+        .unwrap()
+        .expect("single active entry");
+    assert_eq!(active.created_from_command_id.as_deref(), Some(job_id));
 }
 
 #[tokio::test]

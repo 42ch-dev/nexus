@@ -100,7 +100,16 @@ pub mod seed {
 ///
 /// Prevents unbounded memory usage on large worlds. The `query()` method applies
 /// its own pagination on top of this.
-const LIST_BY_WORLD_LIMIT: i64 = 500;
+pub const LIST_BY_WORLD_LIMIT: i64 = 500;
+
+/// Result of [`SqliteKbStore::list_by_world_scoped`].
+#[derive(Debug, Clone)]
+pub struct WorldKbScopedList {
+    /// Active entries matching the scope filters.
+    pub entries: Vec<WorldKbEntry>,
+    /// `true` when an unfiltered world listing exceeded [`LIST_BY_WORLD_LIMIT`].
+    pub truncated: bool,
+}
 
 /// SQLite-backed KB store.
 ///
@@ -130,6 +139,135 @@ impl SqliteKbStore {
             pool: Arc::new(pool),
             validation_mode: mode,
         }
+    }
+
+    /// Fetch the active [`WorldKbEntry`] for a world's unique
+    /// `(block_type, canonical_name)` key.
+    ///
+    /// Uses the `idx_kb_key_blocks_active_unique` partial index directly —
+    /// unlike [`KbStore::list_by_world`], this is not subject to the
+    /// `LIST_BY_WORLD_LIMIT` window.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`KbStoreError::Storage`] on database failure.
+    pub async fn get_active_by_unique_key(
+        &self,
+        world_id: &str,
+        canonical_name: &str,
+        block_type: BlockType,
+    ) -> Result<Option<WorldKbEntry>, KbStoreError> {
+        let block_type_str = block_type_to_sql(block_type);
+        // SAFETY: static SQL with vetted column names from migration
+        // 202606190003_kb_key_blocks_provenance.sql. Runtime query used
+        // because new provenance columns are unknown to sqlx offline mode.
+        let row = sqlx::query_as::<_, KeyBlockRow>(
+            r"SELECT
+                key_block_id, world_id, block_type, canonical_name, status,
+                revision, body_json, source_anchor_json, created_from_command_id,
+                created_at, updated_at, source_work_id, source_chapter,
+                source_provenance_kind, extensions_nexus_json
+            FROM kb_key_blocks
+            WHERE world_id = ?
+              AND block_type = ?
+              AND canonical_name = ?
+              AND status NOT IN ('deleted', 'merged', 'deprecated')
+            LIMIT 1",
+        )
+        .bind(world_id)
+        .bind(&block_type_str)
+        .bind(canonical_name)
+        .fetch_optional(&*self.pool)
+        .await
+        .map_err(|e| db_err(&e))?;
+
+        row.as_ref().map(KeyBlockRow::to_key_block).transpose()
+    }
+
+    /// List active knowledge entries for a world with optional scope filters
+    /// applied in SQL (V1.142 greploop R-V1142P2-002).
+    ///
+    /// When `entry_ids` and/or `entry_types` are non-empty, filters are
+    /// pushed into the query so matching rows are not dropped by the
+    /// `list_by_world` 500-row window. Unfiltered listings use
+    /// `LIST_BY_WORLD_LIMIT + 1` to detect truncation; callers must reject
+    /// when [`WorldKbScopedList::truncated`] is `true`.
+    ///
+    /// `entry_types` are spoke wire `entry_type` strings (`snake_case`), which
+    /// match the `kb_key_blocks.block_type` column format.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`KbStoreError::Storage`] on database failure.
+    pub async fn list_by_world_scoped(
+        &self,
+        world_id: &str,
+        entry_ids: &[String],
+        entry_types: &[String],
+    ) -> Result<WorldKbScopedList, KbStoreError> {
+        let has_id_filter = !entry_ids.is_empty();
+        let has_type_filter = !entry_types.is_empty();
+        let unfiltered = !has_id_filter && !has_type_filter;
+
+        let mut sql = String::from(
+            r"SELECT
+                key_block_id,
+                world_id,
+                block_type,
+                canonical_name,
+                status,
+                revision,
+                body_json,
+                source_anchor_json,
+                created_from_command_id,
+                created_at,
+                updated_at,
+                source_work_id,
+                source_chapter,
+                source_provenance_kind, extensions_nexus_json
+            FROM kb_key_blocks
+            WHERE world_id = ?
+              AND status NOT IN ('deleted', 'merged', 'deprecated')",
+        );
+
+        if has_id_filter {
+            sql.push_str(" AND key_block_id IN (SELECT value FROM json_each(?))");
+        }
+        if has_type_filter {
+            sql.push_str(" AND block_type IN (SELECT value FROM json_each(?))");
+        }
+        sql.push_str(" ORDER BY created_at ASC");
+        if unfiltered {
+            use std::fmt::Write;
+            let _ = write!(sql, " LIMIT {}", LIST_BY_WORLD_LIMIT + 1);
+        }
+
+        // SAFETY: static column list; dynamic fragments are filter/limit clauses
+        // with bind params only (no user-controlled SQL).
+        let mut q = sqlx::query_as::<_, KeyBlockRow>(&sql).bind(world_id);
+        if has_id_filter {
+            q = q.bind(serde_json::to_string(entry_ids).unwrap_or_else(|_| "[]".to_string()));
+        }
+        if has_type_filter {
+            q = q.bind(serde_json::to_string(entry_types).unwrap_or_else(|_| "[]".to_string()));
+        }
+
+        let rows = q.fetch_all(&*self.pool).await.map_err(|e| db_err(&e))?;
+
+        let truncated =
+            unfiltered && rows.len() > usize::try_from(LIST_BY_WORLD_LIMIT).unwrap_or(500);
+        let kept = if truncated {
+            &rows[..usize::try_from(LIST_BY_WORLD_LIMIT).unwrap_or(500)]
+        } else {
+            rows.as_slice()
+        };
+
+        let entries = kept
+            .iter()
+            .map(KeyBlockRow::to_key_block)
+            .collect::<Result<Vec<_>, _>>()?;
+
+        Ok(WorldKbScopedList { entries, truncated })
     }
 
     /// Transaction-aware variant of [`KbStore::insert_knowledge_entry`] (R-V150KBED-03).
@@ -368,6 +506,13 @@ fn nexus_extras_extension_map(extras: Option<&serde_json::Value>) -> ExtensionMa
     map
 }
 
+/// Serialize a [`BlockType`] to the `kb_key_blocks.block_type` column format.
+fn block_type_to_sql(block_type: BlockType) -> String {
+    let block_type_str =
+        serde_json::to_string(&block_type).unwrap_or_else(|_| format!("{block_type:?}"));
+    block_type_str.trim_matches('"').to_string()
+}
+
 /// Parse a `block_type` string into `BlockType`.
 ///
 /// Accepts both `snake_case` (wire format via serde) and `PascalCase` (legacy DB).
@@ -430,95 +575,10 @@ impl KbStore for SqliteKbStore {
         &self,
         kb: WorldKbEntry,
     ) -> Result<KbInsertResult, KbStoreError> {
-        // Validate canonical_name format/safety
-        validate_canonical_name(&kb.canonical_name).map_err(validation_err)?;
-
-        // Validate body semantics before persisting
-        validate_body(kb.block_type, kb.body.as_ref(), self.validation_mode)
-            .map_err(validation_err)?;
-
-        let key_block_id = kb.entry_id.clone();
-        let world_id = kb.world_id.clone();
-        let created_at = kb.created_at.clone();
-
-        let body_json = kb
-            .body
-            .as_ref()
-            .map(|b| serde_json::to_string(b).unwrap_or_default());
-        let source_anchor_json = kb
-            .source_anchor
-            .as_ref()
-            .map(|a| serde_json::to_string(a).unwrap_or_default());
-        // Stable snake_case serialization matching wire format (not Debug)
-        let block_type_str = serde_json::to_string(&kb.block_type)
-            .unwrap_or_else(|_| format!("{:?}", kb.block_type));
-        // Strip surrounding quotes from serde_json string output
-        let block_type_str = block_type_str.trim_matches('"').to_string();
-        let revision_i64 = kb.revision.map(u64::cast_signed);
-
-        // SAFETY: static SQL with vetted column names from migration
-        // 202606190003_kb_key_blocks_provenance.sql. Runtime query used
-        // because new provenance columns are unknown to sqlx offline mode.
-        let wld_id = kb.world_id.clone();
-        let cname = kb.canonical_name.clone();
-        let btype = kb.block_type;
-        // V1.139 P1 T4: serialize the full `extensions.nexus` namespace from the
-        // entry's typed identity fields (spec §2.3 write path). Known fields are
-        // also written to their typed columns (authoritative); unknown keys ride
-        // on `extensions_nexus_extras` and are merged in so they survive the
-        // read-modify-write cycle verbatim.
-        let extensions_nexus_json = serde_json::to_string(&build_extensions_nexus(
-            &kb.world_id,
-            kb.created_from_command_id.as_deref(),
-            kb.source_work_id.as_deref(),
-            kb.source_chapter,
-            kb.source_provenance_kind.as_deref(),
-            &nexus_extras_extension_map(kb.extensions_nexus_extras.as_ref()),
-        ))
-        .unwrap_or_default();
-        sqlx::query(
-            r"INSERT INTO kb_key_blocks
-                (key_block_id, world_id, block_type, canonical_name, status, revision,
-                 body_json, source_anchor_json, created_from_command_id, created_at, updated_at,
-                 source_work_id, source_chapter, source_provenance_kind, extensions_nexus_json)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        )
-        .bind(&key_block_id)
-        .bind(&wld_id)
-        .bind(&block_type_str)
-        .bind(&cname)
-        .bind(&kb.status)
-        .bind(revision_i64)
-        .bind(&body_json)
-        .bind(&source_anchor_json)
-        .bind(&kb.created_from_command_id)
-        .bind(&kb.created_at)
-        .bind(&kb.updated_at)
-        .bind(&kb.source_work_id)
-        .bind(kb.source_chapter)
-        .bind(&kb.source_provenance_kind)
-        .bind(&extensions_nexus_json)
-        .execute(&*self.pool)
-        .await
-        .map_err(|e| {
-            // SQLite UNIQUE constraint violation
-            if let sqlx::Error::Database(ref db_err_inner) = e {
-                if db_err_inner.code().as_deref() == Some("2067") {
-                    return KbStoreError::Duplicate {
-                        world_id: wld_id,
-                        name: cname,
-                        block_type: btype,
-                    };
-                }
-            }
-            db_err(&e)
-        })?;
-
-        Ok(KbInsertResult {
-            entry_id: key_block_id,
-            world_id,
-            created_at,
-        })
+        let mut tx = self.pool.begin().await.map_err(|e| db_err(&e))?;
+        let result = self.insert_key_block_in_tx(&mut tx, kb).await?;
+        tx.commit().await.map_err(|e| db_err(&e))?;
+        Ok(result)
     }
 
     async fn get_knowledge_entry(&self, key_block_id: &str) -> Result<WorldKbEntry, KbStoreError> {
@@ -947,6 +1007,41 @@ pub async fn cas_update_key_block_fields(
     })
 }
 
+/// Persist the non-CAS fields of a `kb_key_blocks` row inside a caller-owned
+/// transaction.
+///
+/// Used after [`cas_update_key_block_fields`] on the spoke adapter update path
+/// so `status`, `source_anchor_json`, and `extensions_nexus_json` are written
+/// in the same transaction as the revision bump.
+///
+/// # Errors
+///
+/// Returns [`sqlx::Error`] on database failure.
+pub async fn update_key_block_auxiliary_fields_in_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    key_block_id: &str,
+    status: &str,
+    source_anchor_json: Option<&str>,
+    extensions_nexus_json: &str,
+) -> Result<(), sqlx::Error> {
+    // SAFETY: static SQL with vetted column names from migration
+    // 202606190003_kb_key_blocks_provenance.sql.
+    sqlx::query(
+        r"UPDATE kb_key_blocks SET
+             status = ?,
+             source_anchor_json = ?,
+             extensions_nexus_json = ?
+           WHERE key_block_id = ?",
+    )
+    .bind(status)
+    .bind(source_anchor_json)
+    .bind(extensions_nexus_json)
+    .bind(key_block_id)
+    .execute(&mut **tx)
+    .await
+    .map(|_| ())
+}
+
 /// V1.73 P0: read the per-row OCC version of a `kb_key_blocks` row,
 /// NULL-normalized to 0. Returns `None` when the row does not exist.
 ///
@@ -1017,6 +1112,29 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn insert_key_block_in_tx_rollback_leaves_no_row() {
+        let (pool, _dir) = fresh_pool().await;
+        seed_world(&pool).await;
+
+        let store = SqliteKbStore::new(pool.clone());
+        let kb = WorldKbEntry::new("wld_1", BlockType::Character, "RollbackHero");
+        let entry_id = kb.entry_id.clone();
+
+        let mut tx = pool.begin().await.unwrap();
+        store
+            .insert_key_block_in_tx(&mut tx, kb)
+            .await
+            .expect("insert in tx should succeed");
+        tx.rollback().await.unwrap();
+
+        let err = store.get_knowledge_entry(&entry_id).await.unwrap_err();
+        assert!(
+            matches!(err, KbStoreError::NotFound(ref id) if *id == entry_id),
+            "rolled-back insert must not persist: {err:?}"
+        );
+    }
+
+    #[tokio::test]
     async fn test_get_not_found() {
         let (pool, _dir) = fresh_pool().await;
         let store = SqliteKbStore::new(pool);
@@ -1056,6 +1174,112 @@ mod tests {
 
         let items = store.list_by_world("wld_1").await.unwrap();
         assert!(items.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_get_active_by_unique_key_beyond_list_limit() {
+        let (pool, _dir) = fresh_pool().await;
+        seed_world(&pool).await;
+
+        // Fill the list_by_world window (500 oldest rows) so a newer entry is
+        // absent from the scan — the retry-safe promote path must not rely on it.
+        for i in 0..LIST_BY_WORLD_LIMIT {
+            seed::knowledge_entry(
+                &pool,
+                &format!("kb_fill_{i:03}"),
+                "wld_1",
+                "character",
+                &format!("Fill_{i:03}"),
+                "confirmed",
+            )
+            .await;
+        }
+        seed::knowledge_entry(
+            &pool,
+            "kb_target",
+            "wld_1",
+            "character",
+            "RetryTarget",
+            "confirmed",
+        )
+        .await;
+
+        let store = SqliteKbStore::new(pool);
+        let listed = store.list_by_world("wld_1").await.unwrap();
+        assert_eq!(listed.len(), usize::try_from(LIST_BY_WORLD_LIMIT).unwrap());
+        assert!(
+            !listed.iter().any(|kb| kb.canonical_name == "RetryTarget"),
+            "newest entry must fall outside the list_by_world window"
+        );
+
+        let found = store
+            .get_active_by_unique_key("wld_1", "RetryTarget", BlockType::Character)
+            .await
+            .unwrap()
+            .expect("targeted lookup must find the active row");
+        assert_eq!(found.entry_id, "kb_target");
+    }
+
+    #[tokio::test]
+    async fn test_list_by_world_scoped_entry_id_beyond_list_window() {
+        let (pool, _dir) = fresh_pool().await;
+        seed_world(&pool).await;
+
+        for i in 0..LIST_BY_WORLD_LIMIT {
+            seed::knowledge_entry(
+                &pool,
+                &format!("kb_fill_{i:03}"),
+                "wld_1",
+                "item",
+                &format!("Fill_{i:03}"),
+                "confirmed",
+            )
+            .await;
+        }
+        seed::knowledge_entry(
+            &pool,
+            "kb_scoped_target",
+            "wld_1",
+            "character",
+            "ScopedTarget",
+            "confirmed",
+        )
+        .await;
+
+        let store = SqliteKbStore::new(pool);
+        let scoped = store
+            .list_by_world_scoped("wld_1", &["kb_scoped_target".to_string()], &[])
+            .await
+            .unwrap();
+        assert!(!scoped.truncated);
+        assert_eq!(scoped.entries.len(), 1);
+        assert_eq!(scoped.entries[0].entry_id, "kb_scoped_target");
+    }
+
+    #[tokio::test]
+    async fn test_list_by_world_scoped_unfiltered_detects_truncation() {
+        let (pool, _dir) = fresh_pool().await;
+        seed_world(&pool).await;
+
+        for i in 0..=LIST_BY_WORLD_LIMIT {
+            seed::knowledge_entry(
+                &pool,
+                &format!("kb_cap_{i:03}"),
+                "wld_1",
+                "item",
+                &format!("Cap_{i:03}"),
+                "confirmed",
+            )
+            .await;
+        }
+
+        let store = SqliteKbStore::new(pool);
+        let scoped = store.list_by_world_scoped("wld_1", &[], &[]).await.unwrap();
+        assert!(scoped.truncated);
+        assert_eq!(
+            scoped.entries.len(),
+            usize::try_from(LIST_BY_WORLD_LIMIT).unwrap()
+        );
     }
 
     #[tokio::test]

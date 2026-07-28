@@ -130,6 +130,44 @@ A common mistake (made and corrected during V1.141 P1 T2): collapse both mismatc
 - **Pulling `nexus-local-db` into the adapter crate** to implement a "real" `KnowledgeEntryPort` — violates the dependency graph (spec §8: adapter stays `spoke-schemas` + `spoke-operations` only). Concrete product port impls live downstream (e.g. `nexus-knowledge`, which already depends on both).
 - **Testing CAS by calling the mock directly** — proves the mock's CAS works, not that the orchestrator path works. Drive rejects through `orchestrate_*`.
 
-## Production boundary (out of scope for the boundary crate)
+## Production boundary (shipped V1.142)
 
-Wiring nexus SQLite tables behind all six baseline port families is downstream product work — it ships when each backing surface (Relations / Findings / Rules / `HostCapabilityManifest`) lands. The boundary crate exposes the traits + orchestrators + a reference mock; production impls are owned by the consuming crate. V1.141 shipped mock + tests + spec; production `KnowledgeEntryPort` against `nexus-local-db` is the next-iteration trigger (`R-V1141P1-001`, compass Roadmap item 1).
+> **Update (V1.142):** The production `BaselinePorts` implementation (`NexusBaselineAdapter`) now lives in `nexus-local-db/src/spoke_adapter/`, **not** "downstream in nexus-knowledge" as the V1.141 doc speculated. `nexus-knowledge` is a domain-types-and-traits crate with no SQLite dependency — it cannot be the production port home. The actual dep graph is `nexus-local-db → nexus-knowledge → nexus-spoke-adapter`. See spec [`spoke-adapter-architecture.md`](../../../specs/spoke-adapter-architecture.md) §7.4 for the production-vs-stub matrix and dependency rationale.
+
+V1.142 shipped the production `NexusBaselineAdapter` in `nexus-local-db` implementing all 6 baseline port families against existing SQLite storage:
+
+| Family | Status | Backing |
+|--------|--------|---------|
+| `KnowledgeEntryPort` | **Production (CAS)** | `kb_key_blocks` via V1.73 CAS path; both `STORED_REVISION_STALE` + `REVISION_CONFLICT` directions |
+| `RelationPort` | **Production** | `kb_relationships` |
+| `FindingPort` | **Production (batch tx)** | `findings` (V1.142 QC fix: batch wrapped in explicit transaction) |
+| `ScopeQueryPort.list_knowledge_entries` | **Production** | `kb_key_blocks` by `world_id` |
+| `ScopeQueryPort.list_timeline_events` | **Stub (empty)** | no persisted `TimelineEvent` storage; nexus-narrative holds in-memory |
+| `RuleQueryPort` | **Stub (empty)** | no persisted spoke `Rule`; rules come from works config |
+| `HostManifestPort` | **Stub (static self)** | local-first nexus; static self manifest; no peers |
+
+Stub families are documented per spec §7.4 with roadmap triggers for full versions.
+
+### Production adapter patterns (V1.142 learnings)
+
+1. **Wire conversion reuse:** the production `KnowledgeEntryPort` reuses the V1.139 `WorldKbEntry ↔ SpokeKnowledgeEntry` `From` impls (single seam). `Relation` / `Finding` map inline at the boundary (no parallel types) with vocabulary mapping (spoke ↔ nexus severity/status) + `INVALID_INPUT` reject on unknown values.
+2. **CAS mapping per spec §7.4 (6 outcomes):** `stored > expected → STORED_REVISION_STALE`; `stored < expected → REVISION_CONFLICT`; `absent + Some(_) → RevisionConflict` (NOT `StoredRevisionStale` as the V1.141 mock returned — spec production table is authority).
+3. **Async→sync bridge:** `tokio::task::block_in_place` wraps async sqlx behind the sync port trait methods. Requires a multi-threaded tokio runtime; `debug_assert!` on `Handle::runtime_flavor() == MultiThread` at adapter construction catches wrong-flavor early in dev/CI.
+4. **Batch transaction:** `FindingPort.put_findings` wraps the batch loop in an explicit SQLite transaction (`pool.begin() → loop → tx.commit()`) so mid-batch failure rolls back the whole batch.
+5. **Per-request construction:** `NexusBaselineAdapter::new(pool.clone())` is cheap (pool handle clone); construct per request, not per application.
+
+### Orchestrator cutover on write paths (V1.142 P2)
+
+The first production orchestrator consumer is `promote_adopt` in `nexus-daemon-runtime/src/api/handlers/world_kb.rs`, routed through `orchestrate_promote(&NexusBaselineAdapter, PromoteRequest)`. Key patterns:
+
+1. **`orchestrate_promote` handles `stored = None`:** the orchestrator can promote a NEW candidate (not just an existing provisional entry). It skips stored-entry terminal-status checks when `stored = None`, validates `candidate.status == "provisional"`, applies acceptance (`→ confirmed`, revision bump), and calls `put_knowledge_entry(None)` (create path). This means the nexus adopt flow (create + confirm in one step) maps cleanly: build candidate with `status = "provisional"`, let the orchestrator flip it.
+2. **Single-transaction adopt (V1.142 P3):** `promote_adopt` binds a handler-owned `sqlx::Transaction` into `NexusBaselineAdapter` via a shared `Arc<std::sync::Mutex<Option<Transaction>>>` for the synchronous `orchestrate_promote` bridge, then flips the extract job in the same transaction before one `COMMIT`. Rollback on any failure — no greploop soft-delete compensation.
+3. **Retry-safe idempotency:** when a prior attempt committed but returned an error (commit-ack ambiguity), retry hits `KnowledgeEntryAlreadyExists` → handler checks job status → returns success if already confirmed and attributed.
+4. **SpokeRejectCode → NexusApiError mapping:** OCC codes → 409 with re-read version; validation codes → 422; remaining → 500. Preserve existing error semantics.
+
+### Remaining production boundary work (roadmap)
+
+- Remaining write paths (`upsert`/`relate`/`check`/`assemble`) cut over as product features need them.
+- Stub family upgrades: `RuleQueryPort` (persisted Rules), `HostManifestPort.list_peer` (multi-host collaboration), `ScopeQueryPort.list_timeline_events` (persisted `TimelineEvent` storage; also unblocks T3b full timeline helper migration in nexus-narrative).
+- Transaction-boundary unification for `promote_adopt`: **shipped** (V1.142 P3 — adapter-local TX bind via `NexusBaselineAdapter::with_tx_cell`).
+- TS app orchestrator pattern adoption (separate product surface).

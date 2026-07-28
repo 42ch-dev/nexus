@@ -70,6 +70,13 @@ use nexus_spoke_adapter::{
     UpsertResponse,
 };
 
+// Spoke 0.4.1 timeline beat-assist pure helpers (Surface A) — parity: this
+// `use` resolving proves the re-export path exists at the adapter boundary.
+use nexus_spoke_adapter::{
+    filter_timeline_events_by_moment_scale, order_timeline_events_by_ids,
+    order_timeline_events_by_precedes, OrderTimelineEventsByPrecedesOptions,
+};
+
 #[test]
 fn adapter_port_traits_and_wire_types_are_reachable() {
     // Port traits (object-safe surfaces — usable as `&dyn Trait`).
