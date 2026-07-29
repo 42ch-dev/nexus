@@ -229,7 +229,27 @@ impl KnowledgeEntryPort for NexusBaselineMock {
 }
 
 impl RelationPort for NexusBaselineMock {
-    fn put_relation(&self, relation: Relation) -> SpokeResult<Relation> {
+    /// P0 compile-gate stub — production lookup ships in P1 (V1.144).
+    /// This mock is never read via `get_relation` (no `orchestrate_relate`
+    /// call exercises it in the example or parity tests); returns
+    /// `RelationNotFound`.
+    fn get_relation(&self, relation_id: &str) -> SpokeResult<Relation> {
+        let mut details = Map::new();
+        details.insert("relation_id".to_string(), json!(relation_id));
+        spoke_reject(
+            SpokeRejectCode::RelationNotFound,
+            format!("Relation lookup is a P0 compile-gate stub (P1 will implement): {relation_id}"),
+            Some(details),
+        )
+    }
+
+    /// P0 compile-gate — `expected_base_revision` is ignored until P1 CAS
+    /// impl (V1.144). The insert-only store-and-return path is preserved.
+    fn put_relation(
+        &self,
+        relation: Relation,
+        _expected_base_revision: Option<u64>,
+    ) -> SpokeResult<Relation> {
         self.relations.borrow_mut().push(relation.clone());
         spoke_ok(relation)
     }

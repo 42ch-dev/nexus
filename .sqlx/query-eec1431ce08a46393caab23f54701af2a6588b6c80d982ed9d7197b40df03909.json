@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO kb_relationships\n           (relationship_id, world_id, source_entity_id, target_entity_id,\n            relation_type, custom_label, symmetric, confidence,\n            source_anchor_ids, metadata, created_at, updated_at, revision,\n            needs_review, source)\n           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 14
+    },
+    "nullable": []
+  },
+  "hash": "eec1431ce08a46393caab23f54701af2a6588b6c80d982ed9d7197b40df03909"
+}

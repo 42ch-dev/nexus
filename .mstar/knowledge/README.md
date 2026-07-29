@@ -139,3 +139,9 @@ Engineering reference for the Nexus OSS harness **knowledge** tree.
 | Document | Description |
 | --- | --- |
 | [architecture-patterns/spoke-adapter-port-orchestration-adoption.md](architecture-patterns/spoke-adapter-port-orchestration-adoption.md) | **Updated** — V1.143 section: production cutover count (3 paths — promote_adopt shipped V1.142, upsert shipped V1.143, relate deferred V1.144); `From`/`Into` conversion-seam generalized to `TimelineEvent` ↔ spoke `TimelineEvent`; **structural-mismatch discovery** — spoke `Relation` lacks `revision`, OCC-mirror does NOT transfer; C1 accepted-behavior-diff pattern for merged-terminal semantics (compound V1.143) |
+
+### V1.144 additions
+
+| Document | Description |
+| --- | --- |
+| [architecture-patterns/spoke-adapter-port-orchestration-adoption.md](architecture-patterns/spoke-adapter-port-orchestration-adoption.md) | **Updated** — V1.144 section: structural-mismatch resolution (spoke 0.5.0 adds `Relation.revision` → `R-V1143P2-DEFER-RELATE` closed at protocol level); production cutover count now 3/3 shipped (promote V1.142, upsert V1.143, relate V1.144); OCC port-extension pattern (insert-only → OCC-aware via existing `kb_*` revision column + CAS guard + revision-seed=1); known gaps (`extensions.nexus` no round-trip on Relation; no spoke 500-class reject code → 400 misclassification across all 4 ports) (compound V1.144) |

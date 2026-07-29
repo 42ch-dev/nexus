@@ -1,6 +1,6 @@
 # Spoke Adapter Architecture
 
-> **Status:** Normative (v0.4 — V1.143 orchestrator cutover on upsert/relate + timeline wire-type unification + promote-reject/merge resolution; v0.3 was V1.142 SPOKE 0.4.1 pin + production adapter home + first orchestrator cutover; v0.2 was V1.141 0.4.0 adapter-port architecture; v0.1 was V1.139 SPOKE adoption baseline)
+> **Status:** Normative (v0.5 — V1.144 spoke 0.5.0 upgrade + RelationPort OCC extension + orchestrate_relate cutover; v0.4 was V1.143 orchestrator cutover on upsert/relate + timeline wire-type unification + promote-reject/merge resolution; v0.3 was V1.142 SPOKE 0.4.1 pin + production adapter home + first orchestrator cutover)
 > **Document class:** Master
 > **Scope:** The `nexus-spoke-adapter` crate boundary, `extensions.nexus` namespace contract, spoke-operations delegation rules, daemon-api envelope strategy, drift detection adaptation, and the `/kb/` HTTP route stability decision.
 > **Related:** [entity-scope-model.md](entity-scope-model.md), [local-db-schema.md](local-db-schema.md), [schemas-directory-layout.md](schemas-directory-layout.md), spoke `CONCEPTS.md`, spoke `.mstar/specs/spoke-data-model.md`, spoke `.mstar/specs/spoke-operations.md`
@@ -16,10 +16,10 @@ These are the architecture bedrock — do not re-litigate.
 ### 1.1 Consume spoke packages directly
 
 nexus depends on spoke's published packages directly:
-- **Rust:** `spoke-schemas` + `spoke-operations` (crates.io, lockstep **`0.4.1`** exact pin)
-- **TypeScript:** `@42ch/spoke-schemas` + `@42ch/spoke-operations` (npm, lockstep **`0.4.1`** exact pin)
+- **Rust:** `spoke-schemas` + `spoke-operations` (crates.io, lockstep **`0.5.0`** exact pin)
+- **TypeScript:** `@42ch/spoke-schemas` + `@42ch/spoke-operations` (npm, lockstep **`0.5.0`** exact pin)
 
-> **Historical:** V1.139 shipped at `0.1.1`; V1.140 bumped to `0.2.0`. V1.141 jumps to `0.4.0` (covering both the `0.3.0` capability-sliced port architecture and `0.4.0` additive `HostCapabilityManifest` + body helpers + UTF-8 peer sort).
+> **Historical:** V1.139 shipped at `0.1.1`; V1.140 bumped to `0.2.0`. V1.141 jumped to `0.4.0` (covering both the `0.3.0` capability-sliced port architecture and `0.4.0` additive `HostCapabilityManifest` + body helpers + UTF-8 peer sort). V1.144 bumps to `0.5.0` (additive `Relation.revision` + OCC-aware `RelationPort` + `RelationAlreadyExists`/`RelationNotFound` reject codes + relate-gate explicit mode).
 
 The bespoke `schemas/domain/key-block.schema.json` is deleted. No nexus-local copy of spoke schemas exists. The atomic KB wire type is `KnowledgeEntry` from spoke.
 
@@ -196,8 +196,8 @@ The `schema_drift_detection.rs` `build_schema_map()` removes the `key-block.sche
 
 `check-wire-drift.sh` gains a new spoke-conformance step (P0 T4):
 
-1. Verify `spoke-schemas` crate version matches pinned **`0.4.1`** in `Cargo.toml`.
-2. Verify `@42ch/spoke-schemas` npm version matches pinned **`0.4.1`** in `package.json`.
+1. Verify `spoke-schemas` crate version matches pinned **`0.5.0`** in `Cargo.toml`.
+2. Verify `@42ch/spoke-schemas` npm version matches pinned **`0.5.0`** in `package.json`.
 3. Construct a `KnowledgeEntry` from spoke fixture JSON, deserialize via nexus's serde path, serialize back — verify structural round-trip. This catches type-mapping regressions without requiring a local schema.
 
 ### 5.3 Daemon-api envelopes that `$ref` spoke types
@@ -425,7 +425,7 @@ The adapter converts between nexus storage rows and spoke wire types using the e
 | Port family / method | Implementation class | Backing | Rationale |
 |---|---|---|---|
 | `KnowledgeEntryPort` | **Production** | `kb_key_blocks` via V1.73 CAS (`cas_update_key_block_fields`) | Existing storage with OCC |
-| `RelationPort` | **Production** | `kb_relationships` | Existing storage |
+| `RelationPort` | **Production** (OCC-aware, V1.144 P1) | `kb_relationships` via CAS (`WHERE revision = ?`) | Existing storage; OCC added V1.144 P1 per spoke 0.5.0 `RelationPort` trait |
 | `FindingPort` | **Production** | `findings` | Existing storage |
 | `ScopeQueryPort.list_knowledge_entries` | **Production** | `kb_key_blocks` scope-filtered by `extensions.nexus.world_id` | Existing storage |
 | `ScopeQueryPort.list_timeline_events` | **Stub** — `Ok(Vec::new())` | None | No persisted `TimelineEvent` storage; nexus-narrative holds events in-memory |
@@ -447,6 +447,20 @@ The adapter converts between nexus storage rows and spoke wire types using the e
 
 True concurrent safety requires the CAS check to be atomic with the write. The V1.73 `cas_update_key_block_fields` function satisfies this through a `WHERE COALESCE(revision, 0) = ?` guard column inside the caller's SQLite transaction. The adapter does not add a second CAS layer.
 
+`RelationPort::put_relation` routes through the existing V1.74 `update_relationship_in_tx` CAS path in `nexus-local-db::kb_relationships`. The `kb_relationships` table already has a `revision` column (V1.74; verified in `nexus-local-db/src/kb_relationships.rs` line 45), and `update_relationship_in_tx` already implements `WHERE revision = ?` CAS guard + `revision = expected + 1` bump (lines 171–176). The adapter maps CAS outcomes to spoke reject codes:
+
+| CAS outcome (actual vs expected_revision) | Spoke reject code |
+|---|---|
+| `actual > expected` (stored revision is newer) | `STORED_REVISION_STALE` |
+| `actual < expected` (caller expects future revision) | `REVISION_CONFLICT` |
+| Relation absent + `expected_revision = Some(_)` | `STORED_REVISION_STALE` |
+| Relation present + `expected_revision = None` (create on existing) | `RELATION_ALREADY_EXISTS` |
+| Relation absent + `expected_revision = None` (create) | Accept; adapter seeds `revision = 1` (spoke convention) |
+
+On create, the adapter seeds `revision = 1` (spoke convention), not `0` (nexus V1.74 legacy). The spoke `Relation.revision` field is `Option<u64>`, so consumers already handle optionality — no wire break.
+
+`RelationPort::get_relation` reads from `kb_relationships` via the existing `KbRelationshipRow` → spoke `Relation` conversion. On not-found it returns `SpokeRejectCode::RelationNotFound` (available in spoke 0.5.0; verified in `result.rs` line 28). The conversion mapping is identical to the `put_relation` path (see `relation_port.rs` header table, verified for 0.5.0 field names).
+
 #### Orchestrator cutover registry
 
 Each orchestrator adoption on a daemon write path is registered here. The registry records the handler, the orchestrator, the adapter, and the cutover iteration.
@@ -454,12 +468,15 @@ Each orchestrator adoption on a daemon write path is registered here. The regist
 | Orchestrator | Handler (symbol) | File | Adapter | Cutover | Status |
 |---|---|---|---|---|---|
 | `orchestrate_promote` | `promote_adopt()` | `world_kb.rs:608` | `NexusBaselineAdapter` | V1.142 | Shipped |
-| `orchestrate_upsert` | `patch_entity()` | `world_kb.rs:286` | `NexusBaselineAdapter` | V1.143 | Planned |
-| `orchestrate_relate` | `patch_relationship_add()` / `_update()` | `world_kb.rs:1669`/`1727` | `NexusBaselineAdapter` | V1.144 | Deferred |
+| `orchestrate_upsert` | `patch_entity()` | `world_kb.rs:286` | `NexusBaselineAdapter` | V1.143 | Shipped |
+| `orchestrate_relate` | `patch_relationship_add()` / `_update()` | `world_kb.rs:2156`/`2211` | `NexusBaselineAdapter` | V1.144 | Shipped (`e17b9a34`; `remove` stays Surface A) |
 
 > **Note:** `patch_relationship_remove()` (line 1653) is **not** a cutover candidate — `orchestrate_relate` has no delete path (`RelationPort` exposes only `put_relation`). The `remove` action stays on Surface A via `delete_relationship_in_tx()`.
 
-> **Relate cutover deferred (V1.143 → V1.144):** `orchestrate_relate` adoption is deferred to V1.144 (`R-V1143P2-DEFER-RELATE`). spoke 0.4.1's `Relation` type lacks a `revision` field — there is no OCC mirror for relations, so `RelationPort::put_relation` is insert-only with no CAS guard. Cutover is blocked pending a `RelationPort` adapter-extension plan (add `expected_base_revision` semantics or a relation-level CAS path). Until then `patch_relationship_add()` / `_update()` remain on Surface A direct-DB writes.
+> **V1.143 structural mismatch resolved by spoke 0.5.0:** V1.143 `R-V1143P2-DEFER-RELATE` identified that spoke 0.4.1's `Relation` type lacked a `revision` field, making `RelationPort::put_relation` insert-only with no CAS guard. spoke 0.5.0 ships `Relation.revision: Option<u64>` (verified in `../spoke/crates/spoke-schemas/src/generated/data/relation.rs`) + OCC-aware `RelationPort` trait with `get_relation` + `put_relation(relation, expected_base_revision: Option<u64>)` (verified in `../spoke/crates/spoke-operations/src/adapter/ports.rs` lines 30–52) + `orchestrate_relate` deep OCC (verified in `../spoke/crates/spoke-operations/src/adapter/orchestrate.rs` lines 300–338). The nexus `kb_relationships` table already has a `revision` column (V1.74; verified in `nexus-local-db/src/kb_relationships.rs` line 45). The cutover plan now spans three P0→P2 plans in V1.144:
+> - **P0** — Pin to 0.5.0 + compile-gate stubs (`get_relation`/OCC `put_relation` signature).
+> - **P1** — Production `RelationPort` OCC impl (CAS create/update, stale-reject, `RelationAlreadyExists`, `RelationNotFound`).
+> - **P2** — Daemon handler cutover (`patch_relationship_add`/`_update` → `orchestrate_relate`).
 
 **Surface A retention (promote sub-outcomes):** spoke `orchestrate_promote` covers the accept/adopt lifecycle only. The following nexus-specific promote outcomes are retained on Surface A with explicit rationale:
 

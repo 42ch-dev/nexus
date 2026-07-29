@@ -50,8 +50,7 @@ use nexus_local_db::kb_extract_job::{
 };
 use nexus_local_db::kb_relationships::{
     delete_relationship_in_tx, generate_relationship_id, get_relationship,
-    insert_relationship_in_tx, list_relationships_for_world, update_relationship_in_tx,
-    InsertRelationshipParams, KbRelationshipRow, UpdateRelationshipParams,
+    list_relationships_for_world, KbRelationshipRow,
 };
 use nexus_local_db::kb_store::{self, cas_update_key_block_fields};
 use nexus_local_db::spoke_adapter::NexusBaselineAdapter;
@@ -60,14 +59,20 @@ use nexus_local_db::LocalDbError;
 // through `orchestrate_promote(&NexusBaselineAdapter, PromoteRequest)`.
 // V1.143 P1: second cutover — `patch_entity` routes the canonical entity edit
 // through `orchestrate_upsert(&NexusBaselineAdapter, UpsertRequest)`.
+// V1.144 P2: third cutover — `patch_relationship` add/update route through
+// `orchestrate_relate(&NexusBaselineAdapter, RelateRequest)`. `remove` stays
+// on Surface A (spoke `RelationPort` has no delete).
 // These spoke types are re-exported through `nexus_spoke_adapter` (the
 // single boundary that crosses into spoke standard objects; spec §7).
 use nexus_spoke_adapter::extensions::set_nexus_body;
 use nexus_spoke_adapter::{
-    orchestrate_promote, orchestrate_upsert, KnowledgeEntry as SpokeKnowledgeEntry, PromoteRequest,
-    PromoteResponse, SpokeReject, SpokeRejectCode, SpokeResult, UpsertRequest, UpsertResponse,
+    orchestrate_promote, orchestrate_relate, orchestrate_upsert,
+    KnowledgeEntry as SpokeKnowledgeEntry, PromoteRequest, PromoteResponse, RelateRequest,
+    RelateResponse, Relation as SpokeRelation, RelationExtensionsKey, SpokeReject, SpokeRejectCode,
+    SpokeResult, UpsertRequest, UpsertResponse,
 };
 use serde::Deserialize;
+use std::num::NonZeroU64;
 use std::sync::{Arc, Mutex};
 use tracing::{info, warn};
 
@@ -1863,6 +1868,275 @@ pub async fn get_candidates(
     }))
 }
 
+// ─── patch-relationship orchestration helpers (V1.144 P2) ───────────────────
+//
+// `patch_relationship`'s add/update paths route through `orchestrate_relate`.
+// The reject mapper is intentionally inline (not shared with the upsert
+// `map_upsert_reject`): relate's conflict path re-reads the kb_relationships
+// REVISION, while patch_entity's re-reads the kb_key_blocks revision. Different
+// lookup targets ⇒ a shared helper would obscure, not simplify (mirrors the
+// V1.143 rationale).
+
+/// Build a spoke [`SpokeRelation`] from the nexus patch-relationship input.
+///
+/// This is the sole nexus→spoke conversion seam for relations (there is no
+/// `WorldKbEntry ↔ KnowledgeEntry`-style two-way pair — spoke's `Relation`
+/// maps directly onto the nexus row at this boundary, per the P1
+/// `RelationPort` `row_to_relation` reverse seam).
+///
+/// # Field mapping (spoke 0.5.0; verified against P1 `relation_port.rs`)
+///
+/// | Nexus input                  | Spoke `Relation` field          |
+/// |------------------------------|---------------------------------|
+/// | `relationship_id` (arg)      | `relation_id`                   |
+/// | `source_entity_id`           | `from_id`                       |
+/// | `target_entity_id`           | `to_id`                         |
+/// | `relation_type`              | `relation_type`                 |
+/// | `custom_label`               | `label: Option<String>`         |
+/// | `revision` (arg)             | `revision: Option<u64>`         |
+/// | `metadata`                   | `metadata` (JSON Map)           |
+/// | `world_id` + 5 nexus-locals  | `extensions.nexus.*`            |
+///
+/// `created_at` / `updated_at` are left `None`: the P1 `RelationPort` assigns
+/// them (`put_relation_create` seeds both; `put_relation_update` refreshes
+/// `updated_at`), mirroring how the legacy `insert/update_relationship_in_tx`
+/// used the handler-supplied `now`.
+///
+/// `source` provenance: pass `Some("manual")` for the author add route (the
+/// only create path through this handler — extraction goes via upsert, not
+/// here); pass `None` for update so the P1 port preserves the stored row's
+/// provenance (`UpdateRelationshipParams` has no `source` field).
+fn nexus_input_to_spoke_relation(
+    relationship_id: &str,
+    world_id: &str,
+    input: &NexusWorldKbRelationshipInput,
+    revision: Option<u64>,
+    source: Option<&str>,
+) -> SpokeRelation {
+    // Build the extensions.nexus namespace carrying the 6 nexus-locals the
+    // P1 `RelationPort` reads back via `extract_nexus_locals`. Spoke's
+    // `Relation` has no typed slots for these (unlike KnowledgeEntry's 5
+    // identity fields) — they ride the product namespace bag verbatim.
+    let mut nexus_ns = serde_json::Map::new();
+    nexus_ns.insert(
+        "world_id".to_string(),
+        serde_json::Value::String(world_id.to_string()),
+    );
+    nexus_ns.insert(
+        "symmetric".to_string(),
+        serde_json::Value::Bool(input.symmetric),
+    );
+    if let Some(confidence) = input.confidence {
+        if let Some(num) = serde_json::Number::from_f64(confidence) {
+            nexus_ns.insert("confidence".to_string(), serde_json::Value::Number(num));
+        }
+    }
+    nexus_ns.insert(
+        "source_anchor_ids".to_string(),
+        serde_json::Value::Array(
+            input
+                .source_anchor_ids
+                .iter()
+                .cloned()
+                .map(serde_json::Value::String)
+                .collect(),
+        ),
+    );
+    nexus_ns.insert(
+        "needs_review".to_string(),
+        serde_json::Value::Bool(input.needs_review.unwrap_or(false)),
+    );
+    if let Some(src) = source {
+        nexus_ns.insert(
+            "source".to_string(),
+            serde_json::Value::String(src.to_string()),
+        );
+    }
+
+    // `"nexus"` always satisfies the `RelationExtensionsKey` regex
+    // (`^[a-z][a-z0-9_-]*$`) — construction is infallible at runtime (mirrors
+    // the P1 `row_to_relation` seam).
+    let key = RelationExtensionsKey::try_from("nexus")
+        .expect("\"nexus\" matches the extensions-key regex");
+    let mut extensions = std::collections::HashMap::new();
+    extensions.insert(key, nexus_ns);
+
+    SpokeRelation {
+        schema_version: NonZeroU64::new(1).expect("1 is non-zero"),
+        relation_id: relationship_id.to_string(),
+        from_id: input.source_entity_id.clone(),
+        to_id: input.target_entity_id.clone(),
+        relation_type: input.relation_type.as_str().to_string(),
+        label: input.custom_label.as_ref().map(|c| c.to_string()),
+        metadata: input.metadata.clone(),
+        revision,
+        created_at: None,
+        updated_at: None,
+        extensions,
+    }
+}
+
+/// Wrap a spoke [`SpokeRelation`] into a [`RelateRequest`] via JSON round-trip.
+///
+/// Mirrors [`build_spoke_promote_request`] / [`build_spoke_upsert_request`]:
+/// the spoke codegen emits a distinct struct per wire shape, so the relation is
+/// serialized then re-fit into the `RelateRequest.relation` slot. The
+/// top-level `RelateRequest.extensions` bag is left empty — nexus-locals live
+/// on the RELATION's `extensions.nexus`, not the request envelope.
+fn build_spoke_relate_request(relation: &SpokeRelation) -> RelateRequest {
+    let wire = serde_json::to_value(relation).unwrap_or_else(|_| serde_json::json!({}));
+    serde_json::from_value(serde_json::json!({ "relation": wire }))
+        .expect("Relation-derived relation fits RelateRequest.relation shape")
+}
+
+/// Map `orchestrate_relate`'s [`SpokeResult<RelateResponse>`] to the persisted
+/// [`KbRelationshipRow`] on success, or to a [`NexusApiError`] on reject.
+///
+/// On success the orchestrator signals via `RelateResponse::Variant0`; the
+/// handler then re-reads the canonical row for the response projection (mirrors
+/// `patch_entity`'s post-write re-read — the row is the source of truth for
+/// revision + server-side timestamps).
+///
+/// # `SpokeRejectCode` → `NexusApiError` mapping (see [`map_relate_reject`])
+///
+/// | `SpokeRejectCode`                       | `NexusApiError`            |
+/// |-----------------------------------------|----------------------------|
+/// | `RelationAlreadyExists` / `StoredRevisionStale` / `RevisionConflict` | `world_kb_conflict` (409) |
+/// | `InvalidInput`                          | `InvalidInput` (400)       |
+/// | `RelationSelfEdge` / `RelationMissingEndpoint` / `MissingRequiredField` | `world_kb_validation_failed` (422) |
+/// | `RelationNotFound`                      | `NotFound` (404)           |
+/// | other / `Variant1` error envelope       | `Internal` (500)           |
+async fn map_relate_response(
+    result: SpokeResult<RelateResponse>,
+    pool: &sqlx::SqlitePool,
+    relationship_id: &str,
+) -> Result<KbRelationshipRow, NexusApiError> {
+    match result {
+        SpokeResult::Ok(RelateResponse::Variant0 { .. }) => {
+            // Re-read the persisted row (P1 commits before returning). Mirrors
+            // `patch_entity`'s canonical post-write re-read.
+            get_relationship(pool, relationship_id)
+                .await
+                .map_err(|e| match e {
+                    LocalDbError::Sqlx(sqlx::Error::RowNotFound) => NexusApiError::Internal {
+                        code: "SPOKE_RESPONSE_DECODE".to_string(),
+                        message: format!(
+                            "orchestrate_relate returned success but the row for {relationship_id} is absent"
+                        ),
+                    },
+                    other => NexusApiError::Internal {
+                        code: "DATABASE_ERROR".to_string(),
+                        message: other.to_string(),
+                    },
+                })
+        }
+        // Variant1 is the wire error-envelope case. The orchestrator always
+        // surfaces errors via `SpokeResult::Reject` (not Variant1), so this arm
+        // is defensive (mirrors `map_upsert_response` / `map_promote_response`).
+        SpokeResult::Ok(RelateResponse::Variant1 { .. }) => Err(NexusApiError::Internal {
+            code: "SPOKE_ORCHESTRATOR_ERROR_ENVELOPE".to_string(),
+            message: format!(
+                "orchestrate_relate returned a RelateResponse::Variant1 error envelope for {relationship_id}; \
+                 expected a SpokeResult::Reject (spoke wire-shape drift)"
+            ),
+        }),
+        SpokeResult::Reject(reject) => Err(map_relate_reject(reject, pool, relationship_id).await),
+    }
+}
+
+/// Reject-handling tail of [`map_relate_response`]. Maps the spoke reject codes
+/// reachable on the relate add/update path to [`NexusApiError`].
+///
+/// The 409 `current_version` is sourced from the reject details
+/// (`actualRevision` from the orchestrator's `assert_revision_match`;
+/// `storeRevision` from the adapter's CAS miss), falling back to a row re-read
+/// so the client retries against the NEW revision (same principle as
+/// `map_upsert_reject`).
+async fn map_relate_reject(
+    reject: SpokeReject,
+    pool: &sqlx::SqlitePool,
+    relationship_id: &str,
+) -> NexusApiError {
+    match reject.code {
+        SpokeRejectCode::RelationAlreadyExists
+        | SpokeRejectCode::StoredRevisionStale
+        | SpokeRejectCode::RevisionConflict => {
+            // CAS race / duplicate create: prefer the revision the reject
+            // already carries (orchestrator/adapter observed it); fall back to
+            // a fresh read.
+            let current = match extract_store_revision(&reject) {
+                Some(rev) => rev,
+                None => reread_relation_revision_sync(pool, relationship_id).await,
+            };
+            NexusApiError::world_kb_conflict(
+                current,
+                relationship_id,
+                "version",
+                "refetch the World KB graph and reapply",
+            )
+        }
+        // V1.144 P2 known misclassification (low residual — see
+        // task-4-5-report.md §Part B): the production `RelationPort`
+        // (nexus-local-db) raises `InvalidInput` for BOTH genuine validation
+        // failures (e.g. missing `extensions.nexus.world_id`) AND storage
+        // failures (tx begin/commit, insert, pre-read) — see
+        // `relation_port.rs` reject sites. Storage failures are semantically
+        // 500 but surface here as 400.
+        //
+        // Why not fixed in V1.144: `SpokeRejectCode` (spoke-operations 0.5.0)
+        // has NO 500-class variant, and all four production ports (finding /
+        // knowledge_entry / relation / scope_query) share the same
+        // `InvalidInput`-for-storage-errors pattern. A proper fix is
+        // cross-cutting (spoke-level 500-class code + pin bump + 4 ports + 4
+        // handler mappers) — out of scope for a P2 cutover. The V1.142 upsert
+        // path avoids this only by OMITTING the explicit `InvalidInput` arm
+        // (catch-all → 500), an accidental correctness this path does not
+        // replicate.
+        //
+        // Why acceptable pre-1.0: on the production `patch_relationship` path
+        // every validation `InvalidInput` is pre-checked by the handler
+        // (`world_id` always sourced from the path; endpoints + anchors
+        // validated up front), so the only `InvalidInput`s reachable here are
+        // storage failures — rare in local single-writer SQLite, and 400 vs 500
+        // is a minor client-experience difference. Tracked for a spoke-level
+        // fix in a later iteration.
+        SpokeRejectCode::InvalidInput => NexusApiError::InvalidInput {
+            field: "relationship".to_string(),
+            reason: reject.message,
+        },
+        // Defensive: these are pre-checked by the handler
+        // (`validate_relationship_input` / endpoint existence), so they are
+        // unreachable on the production path — but mapping them to 422 (not
+        // 500) keeps the contract honest if a future caller bypasses the guard.
+        SpokeRejectCode::RelationSelfEdge
+        | SpokeRejectCode::RelationMissingEndpoint
+        | SpokeRejectCode::MissingRequiredField => {
+            NexusApiError::world_kb_validation_failed(&[reject.message], &[])
+        }
+        SpokeRejectCode::RelationNotFound => {
+            NexusApiError::NotFound(format!("relationship {relationship_id}"))
+        }
+        _ => NexusApiError::Internal {
+            code: "SPOKE_ORCHESTRATOR_REJECT".to_string(),
+            message: format!(
+                "orchestrate_relate rejected: {}: {}",
+                reject.code, reject.message
+            ),
+        },
+    }
+}
+
+/// Re-read the current `kb_relationships.revision` for `relationship_id`
+/// (fallback when a CAS reject's details omit the store revision). Mirrors
+/// `reread_entity_revision_sync` for the relate path.
+async fn reread_relation_revision_sync(pool: &sqlx::SqlitePool, relationship_id: &str) -> u64 {
+    get_relationship(pool, relationship_id)
+        .await
+        .ok()
+        .and_then(|r| u64::try_from(r.revision).ok())
+        .unwrap_or(0)
+}
+
 // ─── patch-relationship ─────────────────────────────────────────────────────
 
 /// `POST /v1/daemon/worlds/{world_id}/kb/patch-relationship` — add/update/remove a
@@ -1876,10 +2150,8 @@ pub async fn patch_relationship(
     let pool = state.pool_or_uninit()?;
     require_world_owner(pool, &world_id, &creator_id).await?;
 
-    let now = chrono::Utc::now().to_rfc3339();
-
     match req.action.as_str() {
-        "add" => patch_relationship_add(pool, &world_id, req.relationship, &now).await,
+        "add" => patch_relationship_add(pool, &world_id, req.relationship).await,
         "update" => {
             patch_relationship_update(
                 pool,
@@ -1887,7 +2159,6 @@ pub async fn patch_relationship(
                 req.relationship_id.as_deref(),
                 req.expected_version,
                 req.relationship,
-                &now,
             )
             .await
         }
@@ -1911,7 +2182,6 @@ async fn patch_relationship_add(
     pool: &sqlx::SqlitePool,
     world_id: &str,
     input: Option<NexusWorldKbRelationshipInput>,
-    now: &str,
 ) -> Result<Json<WorldKbPatchRelationshipResponse>, NexusApiError> {
     let input = input.ok_or_else(|| NexusApiError::InvalidInput {
         field: "relationship".to_string(),
@@ -1927,36 +2197,34 @@ async fn patch_relationship_add(
     .await?;
     require_valid_source_anchors(pool, world_id, Some(input.source_anchor_ids.as_slice())).await?;
 
+    // V1.144 P2: route the create through `orchestrate_relate` (Surface B). The
+    // handler owns the pre-orchestrator guards (validation, endpoint scope,
+    // anchor validity); the orchestrator owns the spoke lifecycle invariants +
+    // the INSERT (the production `RelationPort`'s `put_relation_create` reuses
+    // the same column mapping as the legacy `insert_relationship_in_tx`, but
+    // seeds `revision = 1` per the spoke convention — NOT the `0` the legacy
+    // fn seeded for this route).
+    //
+    // Create path: candidate `revision = None` (the orchestrator's
+    // `validate_create_revision` accepts absent/Some(0); the P1 port seeds 1).
+    // `source` is always manual for author creates (extraction goes through the
+    // upsert path, not here).
     let relationship_id = generate_relationship_id();
-    let mut tx = pool.begin().await.map_err(NexusApiError::from)?;
-    let row = insert_relationship_in_tx(
-        &mut tx,
-        &InsertRelationshipParams {
-            relationship_id: relationship_id.clone(),
-            world_id: world_id.to_string(),
-            source_entity_id: input.source_entity_id.clone(),
-            target_entity_id: input.target_entity_id.clone(),
-            relation_type: input.relation_type.as_str().to_string(),
-            custom_label: input.custom_label.as_ref().map(|c| c.to_string()),
-            symmetric: input.symmetric,
-            confidence: input.confidence,
-            source_anchor_ids: input.source_anchor_ids.clone(),
-            metadata: Some(serde_json::Value::Object(input.metadata.clone())),
-            created_at: now.to_string(),
-            updated_at: now.to_string(),
-            // V1.76: author adds default to confirmed (needs_review = the
-            // input's value or false); source is always manual for author
-            // creates (extraction goes through the upsert path, not here).
-            needs_review: input.needs_review.unwrap_or(false),
-            source: nexus_local_db::kb_relationships::SOURCE_MANUAL.to_string(),
-        },
-    )
-    .await
-    .map_err(|e| NexusApiError::Internal {
-        code: "DATABASE_ERROR".to_string(),
-        message: e.to_string(),
-    })?;
-    tx.commit().await.map_err(NexusApiError::from)?;
+    let relation = nexus_input_to_spoke_relation(
+        &relationship_id,
+        world_id,
+        &input,
+        None,
+        Some(nexus_local_db::kb_relationships::SOURCE_MANUAL),
+    );
+    let spoke_req = build_spoke_relate_request(&relation);
+    let adapter = NexusBaselineAdapter::new(pool.clone());
+    // `with_bound_tx` is a no-op when the adapter has no shared tx cell
+    // (`put_relation_create` opens + commits its own transaction) — add has no
+    // sibling write, so the unbound path is behavior-equivalent to the previous
+    // `pool.begin()` → INSERT → `commit()` block (mirrors `patch_entity`).
+    let result = adapter.with_bound_tx(|| orchestrate_relate(&adapter, spoke_req));
+    let row = map_relate_response(result, pool, &relationship_id).await?;
 
     Ok(Json(WorldKbPatchRelationshipResponse {
         relationship: Some(wire_cast(project_relationship(&row, "stored"))),
@@ -1971,7 +2239,6 @@ async fn patch_relationship_update(
     relationship_id: Option<&str>,
     expected_version: Option<u64>,
     input: Option<NexusWorldKbRelationshipInput>,
-    now: &str,
 ) -> Result<Json<WorldKbPatchRelationshipResponse>, NexusApiError> {
     let relationship_id = relationship_id.ok_or_else(|| NexusApiError::InvalidInput {
         field: "relationship_id".to_string(),
@@ -1996,7 +2263,9 @@ async fn patch_relationship_update(
     .await?;
     require_valid_source_anchors(pool, world_id, Some(input.source_anchor_ids.as_slice())).await?;
 
-    // Scope check: the row must belong to this world.
+    // Scope check: the row must belong to this world. This MUST run before the
+    // orchestrator (cross-world access returns 403, not a spoke reject) —
+    // preserved verbatim from the pre-cutover handler.
     let existing = get_relationship(pool, relationship_id)
         .await
         .map_err(|e| match e {
@@ -2018,31 +2287,50 @@ async fn patch_relationship_update(
         });
     }
 
-    let mut tx = pool.begin().await.map_err(NexusApiError::from)?;
-    let row = update_relationship_in_tx(
-        &mut tx,
+    // OCC precondition (client view vs current row). The orchestrator's
+    // internal CAS uses the freshly-read `current_revision` (not the client's
+    // `expected_version`), so this explicit precheck is REQUIRED to preserve
+    // the wire contract: a stale `expected_version` must surface as 409 here,
+    // not silently succeed through the orchestrator (mirrors `patch_entity`'s
+    // `expected_version != current_version` guard).
+    let current_revision = u64::try_from(existing.revision).unwrap_or(0);
+    if expected_version != current_revision {
+        return Err(NexusApiError::world_kb_conflict(
+            current_revision,
+            relationship_id,
+            "version",
+            "refetch the World KB graph and reapply",
+        ));
+    }
+
+    // V1.144 P2: route the update through `orchestrate_relate` (Surface B).
+    // Update path: candidate `revision = Some(current_revision)` — the
+    // orchestrator's `validate_update_path` asserts candidate.revision ==
+    // stored.revision (CAS guard against a concurrent write between this read
+    // and the port's CAS), then the P1 port's `put_relation_update` does the
+    // `WHERE revision = expected_base` CAS bump (reusing the same
+    // `update_relationship_in_tx` primitive as the legacy path). `source` is
+    // omitted (None): `UpdateRelationshipParams` has no source field, so the P1
+    // port preserves the stored provenance.
+    //
+    // `needs_review` preservation: when the input omits it, default to the
+    // existing flag so a routine edit does not silently confirm an extraction
+    // suggestion (the client must explicitly set needs_review=false to promote)
+    // — preserved verbatim from the pre-cutover handler's `unwrap_or`.
+    let mut input = input;
+    let needs_review_for_relation = input.needs_review.unwrap_or(existing.needs_review != 0);
+    input.needs_review = Some(needs_review_for_relation);
+    let relation = nexus_input_to_spoke_relation(
         relationship_id,
-        &UpdateRelationshipParams {
-            relation_type: input.relation_type.as_str().to_string(),
-            custom_label: input.custom_label.as_ref().map(|c| c.to_string()),
-            symmetric: input.symmetric,
-            confidence: input.confidence,
-            source_anchor_ids: input.source_anchor_ids.clone(),
-            metadata: Some(serde_json::Value::Object(input.metadata.clone())),
-            updated_at: now.to_string(),
-            // V1.76: promotion clears the needs_review gate. When the input
-            // omits needs_review, preserve the existing flag so a routine
-            // relation_type/symmetric edit does not silently confirm a
-            // suggestion (the client must explicitly set needs_review=false to
-            // promote).
-            needs_review: input.needs_review.unwrap_or(existing.needs_review != 0),
-        },
-        i64::try_from(expected_version).unwrap_or(0),
-        &existing,
-    )
-    .await
-    .map_err(|e| map_relationship_cas_err(e, relationship_id))?;
-    tx.commit().await.map_err(NexusApiError::from)?;
+        world_id,
+        &input,
+        Some(current_revision),
+        None,
+    );
+    let spoke_req = build_spoke_relate_request(&relation);
+    let adapter = NexusBaselineAdapter::new(pool.clone());
+    let result = adapter.with_bound_tx(|| orchestrate_relate(&adapter, spoke_req));
+    let row = map_relate_response(result, pool, relationship_id).await?;
 
     Ok(Json(WorldKbPatchRelationshipResponse {
         relationship: Some(wire_cast(project_relationship(&row, "stored"))),

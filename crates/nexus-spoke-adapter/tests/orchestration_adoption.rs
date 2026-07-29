@@ -323,11 +323,16 @@ impl KnowledgeEntryPort for BaselineOnlyPorts {
 }
 
 impl nexus_spoke_adapter::RelationPort for BaselineOnlyPorts {
+    fn get_relation(&self, relation_id: &str) -> SpokeResult<nexus_spoke_adapter::Relation> {
+        self.0.get_relation(relation_id)
+    }
+
     fn put_relation(
         &self,
         relation: nexus_spoke_adapter::Relation,
+        expected_base_revision: Option<u64>,
     ) -> SpokeResult<nexus_spoke_adapter::Relation> {
-        self.0.put_relation(relation)
+        self.0.put_relation(relation, expected_base_revision)
     }
 }
 

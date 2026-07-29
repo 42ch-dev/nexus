@@ -218,3 +218,45 @@ The decision was to **accept the behavior diff** (C1 finding: `merged`-terminal 
 3. The diff was documented in the review bundle and spec note.
 
 **Pattern:** when a cutover adopts spoke lifecycle validation that is stricter than the legacy nexus behavior, decide deliberately whether to accept the diff or add a nexus override. Document + regression-test either way. Do NOT silently change behavior.
+
+## V1.144 — Deep SPOKE integration (roadmap step 2 of 3)
+
+### Structural-mismatch resolution: spoke 0.5.0 closes the `revision` gap
+
+The V1.143 `R-V1143P2-DEFER-RELATE` finding — spoke 0.4.1's `Relation` type lacked a `revision` field, blocking CAS-based `orchestrate_relate` — is **resolved at the protocol level** by spoke 0.5.0:
+
+- `Relation` now carries `revision: Option<u64>` (additive, optional for backward compat).
+- `RelationPort` gains `get_relation(id) → Option<Relation>` + `put_relation(relation, expected_base_revision: Option<u64>)` — the OCC-aware trait methods that the V1.143 structural-mismatch analysis identified as necessary.
+- `orchestrate_relate` deep OCC uses `expected_base_revision` internally, with `RelationAlreadyExists`/`RelationNotFound` reject codes added.
+- The nexus `kb_relationships` table already had a `revision` column (V1.74) — no migration needed.
+
+**Lesson reinforced:** the V1.143 "verify spoke wire fields before claiming clean mapping" discipline caught the gap before cutover; the upstream fix (0.5.0) unblocked the relate cutover without any nexus-side schema change. The discipline is now a repeatable pre-cutover checklist item.
+
+### Production cutover count: 3 paths, all shipped
+
+The orchestrator-cutover-on-write-paths pattern is now proven across **all three** storage-backed entity write families:
+
+| Cutover | Version | Status | Notes |
+|---------|---------|--------|-------|
+| `promote_adopt` → `orchestrate_promote` | V1.142 | **Shipped** | First Surface B production consumer; single-TX adopt flow with retry-safe idempotency |
+| `patch_entity` → `orchestrate_upsert` | V1.143 | **Shipped** | Second production consumer; C1 merged-terminal behavior-diff accepted and regression-tested |
+| `patch_relationship_add/update` → `orchestrate_relate` | V1.144 | **Shipped** | Third consumer; `remove` stays Surface A; `patch_relationship` handler routes add/update through `orchestrate_relate` |
+
+With three cutovers shipped, the pattern is clearly reproducible. The emerging next-refactor target is reject-mapper DRY — all four ports share the same `SpokeRejectCode → NexusApiError` mapping logic, currently duplicated per port (see `R-V1144P2-INVALIDINPUT-400` below).
+
+### OCC port-extension pattern (insert-only → OCC-aware)
+
+V1.144 P1 upgraded the production `RelationPort` from V1.142's insert-only implementation to OCC-aware, following a repeatable pattern:
+
+1. **Reuse existing column:** `kb_relationships.revision` already existed (V1.74) — no migration needed.
+2. **Spoke convention seeds revision=1:** new relations start at revision 1 (not 0), matching spoke's internal seed convention.
+3. **CAS guard on write:** `UPDATE ... WHERE revision = ?` — if the stored revision doesn't match `expected_base_revision`, the SQLite `changes()` count is 0 → `StoredRevisionStale`.
+4. **Spoke reject codes:** map `RelationAlreadyExists` → 409; `StoredRevisionStale` → 409 with current version in response; `RelationNotFound` → 404.
+5. **Backward compat:** the insert-only code path from V1.142 is preserved for callers that don't supply `expected_base_revision` (legacy Surface A consumers).
+
+This pattern is generic: any `*Port` that starts with insert-only storage and later needs OCC can follow the same steps — verify the spoke wire type now carries a revision field, check an existing `kb_*` revision column (or add one), add the CAS guard, and map reject codes.
+
+### Known gaps
+
+- **`R-V1144P1-001` — `extensions.nexus` keys don't round-trip on Relation:** unknown `extensions.nexus` keys are silently dropped when a Relation is stored and re-read, because there is no `extras` JSON column for `kb_relationships` (unlike `kb_key_blocks` which stores full body fidelity via the V1.143 Greptile P1 fix). The `extras` column pattern from `kb_key_blocks` would be the model for a future fix.
+- **`R-V1144P2-INVALIDINPUT-400` — no spoke 500-class reject code:** storage errors (e.g. SQLite constraint failures) are currently classified as `INVALID_INPUT` (400) because spoke's `RejectCode` enum has no server-error / 500-class variant. This misclassification is shared across all four cutover ports (promote, upsert, relate, remove). Tracked for a future iteration when spoke adds the reject code or nexus implements a local mapping fallback.

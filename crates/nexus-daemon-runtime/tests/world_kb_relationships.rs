@@ -120,7 +120,14 @@ fn add_request(
     }
 }
 
-#[tokio::test]
+// V1.144 P2: add/update now route through `orchestrate_relate` via
+// `NexusBaselineAdapter`, which bridges sync spoke ports to async SQLite via
+// `tokio::task::block_in_place`. That requires a multi-threaded runtime (the
+// production daemon uses one; tests opt in via `flavor = "multi_thread"` —
+// same rationale as the V1.143 patch_entity tests). Pre-orchestrator
+// fast-fail tests (self-loop / bad-label / confidence / cross-world / bad
+// anchor) short-circuit on handler guards and stay on the default runtime.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn add_relationship_returns_projected_row() {
     let (_tmp, state) = fresh_state().await;
     seed_key_block(
@@ -151,14 +158,17 @@ async fn add_relationship_returns_projected_row() {
     .await
     .expect("add should succeed");
 
-    assert_eq!(resp.version, 0);
+    assert_eq!(
+        resp.version, 1,
+        "V1.144: spoke create seeds revision = 1 (not 0)"
+    );
     let rel = resp.relationship.expect("response includes relationship");
     assert_eq!(rel.source_entity_id, "kb_a");
     assert_eq!(rel.target_entity_id, "kb_b");
     assert_eq!(rel.relation_type.to_string(), "allied_with");
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn update_relationship_returns_bumped_version_and_projected_row() {
     let (_tmp, state) = fresh_state().await;
     seed_key_block(
@@ -196,7 +206,9 @@ async fn update_relationship_returns_bumped_version_and_projected_row() {
     let req = WorldKbPatchRelationshipRequest {
         relationship_id: Some(rel_id.clone()),
         action: "update".parse().unwrap(),
-        expected_version: Some(0),
+        // V1.144: add now seeds revision = 1 (spoke convention), so the CAS
+        // base for the first update is 1 (was 0 pre-cutover).
+        expected_version: Some(1),
         relationship: Some(NexusWorldKbRelationshipInput {
             source_entity_id: "kb_a".to_string(),
             target_entity_id: "kb_b".to_string(),
@@ -217,7 +229,7 @@ async fn update_relationship_returns_bumped_version_and_projected_row() {
     .await
     .expect("update should succeed");
 
-    assert_eq!(resp.version, 1);
+    assert_eq!(resp.version, 2, "V1.144: CAS bump 1 -> 2 (was 0 -> 1)");
     let rel = resp.relationship.unwrap();
     assert_eq!(rel.relationship_id, rel_id);
     assert_eq!(rel.relation_type.to_string(), "mentor_of");
@@ -225,7 +237,183 @@ async fn update_relationship_returns_bumped_version_and_projected_row() {
     assert_eq!(rel.confidence.unwrap(), 0.75);
 }
 
-#[tokio::test]
+// ── V1.144 P2 T4: relate-cutover behavior-equivalence (post-state) ──────────
+//
+// These tests prove the `orchestrate_relate` cutover round-trips through
+// SQLite correctly: the spoke-assigned revision is reflected on the create
+// response, and a subsequent `get_graph` re-read confirms the row persisted
+// with the right column mapping (mirrors the V1.143 `patch_entity` re-read
+// discipline). They assert POST-STATE (HTTP body + graph projection), never
+// the call-stack.
+
+/// A.1 — add happy: `patch_relationship(add)` returns the spoke-assigned
+/// revision (1), and a `get_graph` re-read confirms the relationship persisted
+/// with the correct source/target/relation mapping + a `stored` projection.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn add_relationship_reread_via_get_graph_confirms_persisted_mapping() {
+    let (_tmp, state) = fresh_state().await;
+    seed_key_block(
+        state.pool().unwrap(),
+        "kb_a",
+        "wld_test_world",
+        "character",
+        "Aria",
+        "confirmed",
+    )
+    .await;
+    seed_key_block(
+        state.pool().unwrap(),
+        "kb_b",
+        "wld_test_world",
+        "character",
+        "Kael",
+        "confirmed",
+    )
+    .await;
+
+    let Json(resp) = patch_relationship(
+        State(state.clone()),
+        Path("wld_test_world".to_string()),
+        Json(add_request(
+            "kb_a",
+            "kb_b",
+            WorldKbRelationshipKind::AlliedWith,
+        )),
+    )
+    .await
+    .expect("add should succeed");
+    assert_eq!(
+        resp.version, 1,
+        "spoke create seeds revision = 1 (orchestrator path)"
+    );
+    let created_id = resp.relationship.unwrap().relationship_id;
+
+    // Re-read through the public graph projection — proves the orchestrator
+    // INSERT landed and the column mapping survives the spoke round-trip.
+    let Json(graph) = get_graph(
+        State(state.clone()),
+        Path("wld_test_world".to_string()),
+        Query(GraphQuery {
+            include_suggested: None,
+        }),
+    )
+    .await
+    .expect("graph should succeed");
+    let stored = graph
+        .relationships
+        .iter()
+        .find(|r| r.relationship_id == created_id && r.projection_direction.to_string() == "stored")
+        .expect("persisted row visible in graph as a stored projection");
+    assert_eq!(stored.source_entity_id, "kb_a");
+    assert_eq!(stored.target_entity_id, "kb_b");
+    assert_eq!(stored.relation_type.to_string(), "allied_with");
+}
+
+/// A.2 — update happy: `patch_relationship(update)` bumps the revision and a
+/// `get_graph` re-read confirms the mutated fields (relation_type, symmetric,
+/// confidence) persisted — proving the orchestrator CAS update writes through.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn update_then_reread_via_get_graph_confirms_data_persisted() {
+    let (_tmp, state) = fresh_state().await;
+    seed_key_block(
+        state.pool().unwrap(),
+        "kb_a",
+        "wld_test_world",
+        "character",
+        "Aria",
+        "confirmed",
+    )
+    .await;
+    seed_key_block(
+        state.pool().unwrap(),
+        "kb_b",
+        "wld_test_world",
+        "character",
+        "Kael",
+        "confirmed",
+    )
+    .await;
+
+    let Json(created) = patch_relationship(
+        State(state.clone()),
+        Path("wld_test_world".to_string()),
+        Json(add_request(
+            "kb_a",
+            "kb_b",
+            WorldKbRelationshipKind::AlliedWith,
+        )),
+    )
+    .await
+    .unwrap();
+    let rel_id = created.relationship.unwrap().relationship_id;
+
+    let req = WorldKbPatchRelationshipRequest {
+        relationship_id: Some(rel_id.clone()),
+        action: "update".parse().unwrap(),
+        // add seeds revision = 1 (spoke convention) → CAS base for the first
+        // update is 1.
+        expected_version: Some(1),
+        relationship: Some(NexusWorldKbRelationshipInput {
+            source_entity_id: "kb_a".to_string(),
+            target_entity_id: "kb_b".to_string(),
+            relation_type: relation_type_to_nexus(WorldKbRelationshipKind::MentorOf),
+            custom_label: None,
+            symmetric: true,
+            confidence: Some(0.8),
+            source_anchor_ids: Vec::new(),
+            metadata: Default::default(),
+            needs_review: None,
+        }),
+    };
+    let Json(resp) = patch_relationship(
+        State(state.clone()),
+        Path("wld_test_world".to_string()),
+        Json(req),
+    )
+    .await
+    .expect("update should succeed");
+    assert_eq!(resp.version, 2, "CAS bump 1 -> 2");
+
+    // Re-read: the mutated fields must be the persisted ones, not just the
+    // response echo — proves the orchestrator update wrote through to storage.
+    let Json(graph) = get_graph(
+        State(state.clone()),
+        Path("wld_test_world".to_string()),
+        Query(GraphQuery {
+            include_suggested: None,
+        }),
+    )
+    .await
+    .expect("graph should succeed");
+    let stored = graph
+        .relationships
+        .iter()
+        .find(|r| r.relationship_id == rel_id && r.projection_direction.to_string() == "stored")
+        .expect("updated row visible in graph");
+    assert_eq!(stored.relation_type.to_string(), "mentor_of");
+    assert!(stored.symmetric, "symmetric=true persisted");
+    assert_eq!(stored.confidence.unwrap(), 0.8, "confidence=0.8 persisted");
+}
+
+/// A.4 — create-on-existing (`RelationAlreadyExists` → 409) is structurally
+/// unreachable from the HTTP `patch_relationship(add)` path: the handler
+/// generates a fresh `relationship_id` via `generate_relationship_id()` for
+/// every add (world_kb.rs `patch_relationship_add`) and never honors a
+/// client-supplied id, so two adds can never collide on the PK. This was
+/// equally true pre-cutover (the legacy path used the same id generator), so
+/// there is no behavior-equivalence regression to test at the handler layer.
+///
+/// The invariant itself — "storage rejects a duplicate relation PK with
+/// `RelationAlreadyExists`, which `map_relate_reject` maps to 409" — is proven
+/// at the port layer against the real SQLite store by
+/// `put_relation_create_on_existing_rejects_already_exists` in
+/// `nexus-local-db/src/spoke_adapter/relation_port.rs` (real-server, not a
+/// mock). That test drives `RelationPort::put_relation(.., None)` twice with
+/// the same id and asserts the second rejects with
+/// `SpokeRejectCode::RelationAlreadyExists`, the exact code this handler's
+/// `map_relate_reject` routes to `world_kb_conflict` (409).
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn remove_relationship_returns_null_projection() {
     let (_tmp, state) = fresh_state().await;
     seed_key_block(
@@ -263,7 +451,10 @@ async fn remove_relationship_returns_null_projection() {
     let req = WorldKbPatchRelationshipRequest {
         relationship_id: Some(rel_id),
         action: "remove".parse().unwrap(),
-        expected_version: Some(0),
+        // V1.144: remove stays on Surface A (unchanged), but the row was
+        // created via the orchestrator path which seeds revision = 1, so the
+        // CAS base for remove is the created version.
+        expected_version: Some(created.version),
         relationship: None,
     };
     let Json(resp) = patch_relationship(
@@ -380,7 +571,7 @@ async fn add_confidence_out_of_range_rejects_422() {
     assert_eq!(err.error_code(), "world_kb_validation_failed");
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn update_stale_version_returns_409() {
     let (_tmp, state) = fresh_state().await;
     seed_key_block(
@@ -441,10 +632,12 @@ async fn update_stale_version_returns_409() {
     assert_eq!(err.status_code(), axum::http::StatusCode::CONFLICT);
     assert_eq!(err.error_code(), "world_kb_conflict");
     let details = err.error_details().expect("conflict details");
-    assert_eq!(details["current_version"], 0);
+    // V1.144: add seeds revision = 1 (spoke convention), so the stale-precheck
+    // current_version the handler reports is 1 (was 0 pre-cutover).
+    assert_eq!(details["current_version"], 1);
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn get_graph_includes_symmetric_reverse_projection() {
     let (_tmp, state) = fresh_state().await;
     seed_key_block(
@@ -505,7 +698,7 @@ async fn get_graph_includes_symmetric_reverse_projection() {
     assert_eq!(stored.target_entity_id, reverse.source_entity_id);
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn add_with_valid_anchor_succeeds() {
     let (_tmp, state) = fresh_state().await;
     seed_key_block_with_source(
@@ -696,7 +889,7 @@ async fn relationship_in_other_world(state: &WorkspaceState, other_world_id: &st
     created.relationship.unwrap().relationship_id
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn update_cross_world_relationship_returns_403() {
     let (_tmp, state) = fresh_state().await;
     seed_key_block(
@@ -746,7 +939,7 @@ async fn update_cross_world_relationship_returns_403() {
     assert_eq!(err.error_code(), "forbidden");
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn remove_cross_world_relationship_returns_403() {
     let (_tmp, state) = fresh_state().await;
     let rel_id = relationship_in_other_world(&state, "wld_other_remove").await;
@@ -801,7 +994,7 @@ async fn seed_extraction_suggestion(
     rel_id
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn get_graph_hides_needs_review_by_default() {
     let (_tmp, state) = fresh_state().await;
     seed_key_block(
@@ -886,7 +1079,7 @@ async fn get_graph_hides_needs_review_by_default() {
     assert!(suggestion.needs_review);
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn promote_suggestion_clears_needs_review() {
     let (_tmp, state) = fresh_state().await;
     seed_key_block(
@@ -972,7 +1165,7 @@ async fn promote_suggestion_clears_needs_review() {
     );
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn update_preserves_needs_review_when_omitted() {
     let (_tmp, state) = fresh_state().await;
     seed_key_block(
