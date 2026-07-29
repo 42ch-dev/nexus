@@ -5,7 +5,7 @@
 //! # Wire conversion reuse (HARD, spec §7.1)
 //!
 //! The adapter REUSES the sole conversion seam (`world_kb_to_spoke` /
-//! `spoke_to_world_kb` in `nexus_spoke_adapter::conversion`, since V1.145 P1a)
+//! `spoke_to_world_kb` in `crate::conversion`, since V1.145 P1a)
 //! between SQLite-backed [`WorldKbEntry`] rows and spoke [`KnowledgeEntry`]
 //! wire types. No second conversion path is added here.
 //!
@@ -24,17 +24,15 @@
 //! | Entry present + `expected_revision = None`       | `KNOWLEDGE_ENTRY_ALREADY_EXISTS` |
 
 use super::NexusBaselineAdapter;
-use crate::kb_store::{
-    cas_update_key_block_fields, update_key_block_auxiliary_fields_in_tx, SqliteKbStore,
-};
-use crate::LocalDbError;
+use crate::conversion::{spoke_to_world_kb, world_kb_to_spoke};
+use crate::extensions::build_extensions_nexus;
+use crate::{KnowledgeEntry, KnowledgeEntryPort, SpokeReject, SpokeRejectCode, SpokeResult};
 use nexus_knowledge::world_kb::store::{KbStore, KbStoreError};
 use nexus_knowledge::world_kb::WorldKbEntry;
-use nexus_spoke_adapter::conversion::{spoke_to_world_kb, world_kb_to_spoke};
-use nexus_spoke_adapter::extensions::build_extensions_nexus;
-use nexus_spoke_adapter::{
-    KnowledgeEntry, KnowledgeEntryPort, SpokeReject, SpokeRejectCode, SpokeResult,
+use nexus_local_db::kb_store::{
+    cas_update_key_block_fields, update_key_block_auxiliary_fields_in_tx, SqliteKbStore,
 };
+use nexus_local_db::LocalDbError;
 use serde_json::{json, Map};
 
 impl NexusBaselineAdapter<'_> {
@@ -403,10 +401,8 @@ async fn run_cas_update_in_tx(
 /// `extensions.nexus` keys (mirrors the private `nexus_extras_extension_map`
 /// in `kb_store` — duplicated here because the original is private and lives
 /// behind `SqliteKbStore`'s module). Empty/absent extras yield an empty map.
-fn nexus_extras_extension_map(
-    extras: Option<&serde_json::Value>,
-) -> nexus_spoke_adapter::ExtensionMap {
-    let mut map = nexus_spoke_adapter::ExtensionMap::new();
+fn nexus_extras_extension_map(extras: Option<&serde_json::Value>) -> crate::ExtensionMap {
+    let mut map = crate::ExtensionMap::new();
     if let Some(serde_json::Value::Object(obj)) = extras {
         if !obj.is_empty() {
             map.insert("nexus".to_string(), obj.clone());
@@ -444,10 +440,10 @@ fn reject<T>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{open_pool, run_migrations};
+    use crate::KnowledgeEntryPort;
     use nexus_contracts::BlockType;
     use nexus_knowledge::world_kb::{WorldKbBody, WorldKbEntry};
-    use nexus_spoke_adapter::KnowledgeEntryPort;
+    use nexus_local_db::{open_pool, run_migrations};
 
     async fn fresh_pool() -> (sqlx::SqlitePool, tempfile::TempDir) {
         let dir = tempfile::tempdir().unwrap();

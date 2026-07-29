@@ -25,16 +25,35 @@
 //! the `OrderTimelineEventsByPrecedesOptions` operand) — again pure
 //! pass-through, again no nexus logic.
 //!
+//! Since V1.145 P1b the crate also hosts the **production `BaselinePorts`
+//! implementation** (`NexusBaselineAdapter` + 6 port impls in the [`adapter`]
+//! module, spec §7.4). The adapter consumes `nexus-local-db` storage primitives
+//! and bridges spoke's sync port traits to async `SQLite` I/O. This makes
+//! `nexus-spoke-adapter` the capability-aggregation layer, while
+//! `nexus-local-db` is pure storage (no spoke-adapter dep — spec §8 dep-graph
+//! reversal).
+//!
 //! ## Call-boundary invariant (HARD)
 //!
 //! Every public function in this crate accepts and returns only spoke
 //! standard objects (`KnowledgeEntry`, `Finding`, `Scope`, `PromoteRequest`,
 //! `AssemblePacket`, `ExtensionMap`). There are no nexus wrapper types here
 //! — the adapter IS the boundary.
+//!
+//! (The production [`adapter::NexusBaselineAdapter`] is the documented
+//! exception: it necessarily touches nexus storage rows on the *inside* of
+//! its port impls, but its public surface — the spoke port traits — stays
+//! spoke-only.)
 
+pub mod adapter;
 pub mod conversion;
 pub mod extensions;
 pub mod ops;
+
+// V1.145 P1b — production adapter re-export so consumers can construct
+// `NexusBaselineAdapter` through the single spoke-adapter import boundary
+// (spec §7.4 import path: `nexus_spoke_adapter::NexusBaselineAdapter`).
+pub use adapter::NexusBaselineAdapter;
 
 // ── Spoke type re-exports (consumer convenience) ────────────────────────
 //

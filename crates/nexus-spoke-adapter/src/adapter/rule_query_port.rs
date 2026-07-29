@@ -18,7 +18,7 @@
 //! then this stub is the entire impl.
 
 use super::NexusBaselineAdapter;
-use nexus_spoke_adapter::{Rule, RuleQueryPort, SpokeResult};
+use crate::{Rule, RuleQueryPort, SpokeResult};
 
 impl RuleQueryPort for NexusBaselineAdapter<'_> {
     /// Stub — returns the documented empty set (spec §7.4).

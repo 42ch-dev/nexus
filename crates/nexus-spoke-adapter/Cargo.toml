@@ -28,11 +28,21 @@ serde_json.workspace = true
 nexus-knowledge = { path = "../nexus-knowledge" }
 nexus-contracts = { path = "../nexus-contracts" }
 chrono.workspace = true
+# V1.145 P1b — the production `NexusBaselineAdapter` + 6 port impls rehomed
+# here from `nexus-local-db/src/spoke_adapter/` (spec §7.4 / §8 dep-graph
+# reversal). The adapter consumes local-db's storage primitives
+# (`SqliteKbStore`, `open_pool`, `run_migrations`, CAS helpers) and bridges
+# spoke's sync port traits to async SQLite I/O. This edge replaces the
+# former `nexus-local-db → nexus-spoke-adapter` dep (now removed).
+nexus-local-db = { path = "../nexus-local-db" }
+sqlx.workspace = true
+tokio.workspace = true
 
 [dev-dependencies]
 spoke-schemas.workspace = true
 spoke-operations.workspace = true
 serde_json.workspace = true
+tempfile = "3"
 # Integration tests (spoke_parity) reference nexus domain types directly.
 nexus-knowledge = { path = "../nexus-knowledge" }
 nexus-contracts = { path = "../nexus-contracts" }

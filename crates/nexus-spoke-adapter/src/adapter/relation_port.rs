@@ -58,14 +58,14 @@
 //! the update path is "the store moved since the caller's read".
 
 use super::NexusBaselineAdapter;
-use crate::kb_relationships::{
+use crate::{
+    Relation, RelationExtensionsKey, RelationPort, SpokeReject, SpokeRejectCode, SpokeResult,
+};
+use nexus_local_db::kb_relationships::{
     get_relationship, update_relationship_in_tx, KbRelationshipRow, UpdateRelationshipParams,
     SOURCE_MANUAL,
 };
-use crate::LocalDbError;
-use nexus_spoke_adapter::{
-    Relation, RelationExtensionsKey, RelationPort, SpokeReject, SpokeRejectCode, SpokeResult,
-};
+use nexus_local_db::LocalDbError;
 use serde_json::{json, Map, Value};
 use std::num::NonZeroU64;
 
@@ -570,9 +570,9 @@ fn reject<T>(code: SpokeRejectCode, message: impl Into<String>, details: Value) 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::kb_relationships::{get_relationship, list_relationships_for_world};
-    use crate::{open_pool, run_migrations};
-    use nexus_spoke_adapter::RelationPort;
+    use crate::RelationPort;
+    use nexus_local_db::kb_relationships::{get_relationship, list_relationships_for_world};
+    use nexus_local_db::{open_pool, run_migrations};
     use serde_json::json;
 
     async fn fresh_pool() -> (sqlx::SqlitePool, tempfile::TempDir) {

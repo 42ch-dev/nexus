@@ -53,8 +53,12 @@ use nexus_local_db::kb_relationships::{
     list_relationships_for_world, KbRelationshipRow,
 };
 use nexus_local_db::kb_store::{self, cas_update_key_block_fields};
-use nexus_local_db::spoke_adapter::NexusBaselineAdapter;
 use nexus_local_db::LocalDbError;
+// V1.145 P1b — the production `NexusBaselineAdapter` rehomed from
+// `nexus-local-db/src/spoke_adapter/` to `nexus-spoke-adapter/src/adapter/`
+// (spec §7.4 / §8 dep-graph reversal). Construct through the single
+// spoke-adapter import boundary.
+use nexus_spoke_adapter::NexusBaselineAdapter;
 // V1.142 P2: first production orchestrator cutover. `promote_adopt` routes
 // through `orchestrate_promote(&NexusBaselineAdapter, PromoteRequest)`.
 // V1.143 P1: second cutover — `patch_entity` routes the canonical entity edit

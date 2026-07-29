@@ -4,12 +4,20 @@ The **only** crate boundary that crosses between nexus domain concerns and SPOKE
 
 ## Purpose
 
-Two responsibilities, nothing more:
+The **only** crate boundary that crosses between nexus domain concerns and SPOKE standard objects. Since V1.145 P1b it is the **capability aggregation** layer (spec §7.4 / §8):
 
 1. **Typed accessors** over the `extensions.nexus` namespace on a spoke `KnowledgeEntry` (5 fields: `world_id`, `created_from_command_id`, `source_work_id`, `source_chapter`, `source_provenance_kind`). See `src/extensions.rs`.
 2. **Thin delegation** of standard lifecycle invariants to `spoke-operations` (validate/apply promote, status transitions, assemble packet, extension merge, revision assert). See `src/ops.rs`.
+3. **Production adapter home** — `NexusBaselineAdapter` + 6 spoke port impls in `src/adapter/` (V1.145 P1b rehome from `nexus-local-db`). Consumes `nexus-local-db` storage primitives and bridges spoke's sync port traits to async `SQLite` I/O.
 
 Since V1.141 the crate also flat-re-exports spoke 0.4.0's adapter **port traits + `orchestrate_*` entrypoints + operand wire types** (Surface B, spec §7.3) so consumers implement spoke's ports and call spoke's orchestrators through this single import boundary — pure pass-through, no nexus logic.
+
+## Layering (post-V1.145 P1b)
+
+| Crate | Role | Dep edge |
+|-------|------|----------|
+| `nexus-local-db` | **Pure storage** — DB CRUD primitives only; no spoke-adapter dep | ← `nexus-spoke-adapter` depends on it |
+| `nexus-spoke-adapter` | **Capability aggregation** — adapter + 6 ports + Surface A/B | → depends on `nexus-local-db`, `nexus-knowledge`, `spoke-schemas`, `spoke-operations` |
 
 ## Authority
 
@@ -27,8 +35,11 @@ Since V1.141 the crate also flat-re-exports spoke 0.4.0's adapter **port traits 
 
 - `spoke-schemas`, `spoke-operations` (workspace, `=0.5.0`)
 - `serde`, `serde_json`
+- `nexus-knowledge` (domain types + conversion seam, V1.145 P1a)
+- `nexus-local-db` (storage primitives — `SqliteKbStore`, `open_pool`, `run_migrations`, CAS helpers; V1.145 P1b adapter rehome)
+- `sqlx`, `tokio` (adapter async↔sync bridge + SQLite I/O)
 
-Dev-deps mirror the runtime deps so tests can compare wrapper output against the underlying spoke function directly.
+Dev-deps mirror the runtime deps so tests can compare wrapper output against the underlying spoke function directly; `tempfile` for the adapter's `#[cfg(test)]` SQLite fixtures.
 
 ## Known concerns (open at V1.139 P0)
 

@@ -30,11 +30,11 @@
 //! route to SQL vs in-memory session state.
 
 use super::NexusBaselineAdapter;
-use crate::kb_store::SqliteKbStore;
-use nexus_spoke_adapter::conversion::world_kb_to_spoke;
-use nexus_spoke_adapter::{
+use crate::conversion::world_kb_to_spoke;
+use crate::{
     KnowledgeEntry, Scope, ScopeQueryPort, SpokeReject, SpokeRejectCode, SpokeResult, TimelineEvent,
 };
+use nexus_local_db::kb_store::SqliteKbStore;
 use serde_json::{json, Map, Value};
 impl ScopeQueryPort for NexusBaselineAdapter<'_> {
     /// List the active knowledge entries for the scope's world.
@@ -76,7 +76,7 @@ impl ScopeQueryPort for NexusBaselineAdapter<'_> {
                     ),
                     json!({
                         "scope_id": world_id,
-                        "cap": crate::kb_store::LIST_BY_WORLD_LIMIT,
+                        "cap": nexus_local_db::kb_store::LIST_BY_WORLD_LIMIT,
                         "truncated": true,
                     }),
                 );
@@ -130,12 +130,12 @@ fn reject<T>(code: SpokeRejectCode, message: impl Into<String>, details: Value) 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::kb_store::LIST_BY_WORLD_LIMIT;
-    use crate::{open_pool, run_migrations};
+    use crate::ScopeQueryPort;
     use nexus_contracts::BlockType;
     use nexus_knowledge::world_kb::store::KbStore;
     use nexus_knowledge::world_kb::{WorldKbBody, WorldKbEntry};
-    use nexus_spoke_adapter::ScopeQueryPort;
+    use nexus_local_db::kb_store::LIST_BY_WORLD_LIMIT;
+    use nexus_local_db::{open_pool, run_migrations};
 
     async fn fresh_pool() -> (sqlx::SqlitePool, tempfile::TempDir) {
         let dir = tempfile::tempdir().unwrap();

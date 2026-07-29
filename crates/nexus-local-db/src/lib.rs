@@ -32,7 +32,6 @@ pub mod reference_source;
 pub mod runtime_lock;
 pub mod soul_meta;
 pub mod soul_narrative;
-pub mod spoke_adapter;
 pub mod work_chapters;
 pub mod works;
 pub mod workspace_session;

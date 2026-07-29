@@ -15,7 +15,14 @@ use crate::narrative_query::NarrativeQuery;
 use crate::timeline_event::{SpokeTimelineEvent, TimelineEvent};
 use crate::world::World;
 use nexus_knowledge::world_kb::KbStore;
-use nexus_spoke_adapter::{order_timeline_events_by_ids, SpokeReject, SpokeResult};
+// V1.145 P1b — `nexus-narrative` no longer runtime-depends on
+// `nexus-spoke-adapter` (breaks the local-db → narrative → spoke-adapter →
+// local-db cycle created by the P1b adapter rehome). The timeline beat-assist
+// helper comes from `spoke-operations` directly as a temporary P4 dep; once
+// P4 routes `get_timeline_ordered` through the adapter's `ScopeQueryPort`,
+// this import returns to `nexus-spoke-adapter` (the single boundary).
+// Tracked: spec §7.4 P4 read-path adoption.
+use spoke_operations::{order_timeline_events_by_ids, SpokeReject, SpokeResult};
 use std::collections::HashMap;
 use std::sync::RwLock;
 

@@ -50,12 +50,12 @@
 //! with `INVALID_INPUT`.
 
 use super::NexusBaselineAdapter;
-use crate::error::LocalDbError;
-use crate::findings::{validate_finding_enums, Finding as NexusFinding};
-use nexus_spoke_adapter::{
+use crate::{
     Finding as SpokeFinding, FindingExtensionsKey, FindingPort, SpokeReject, SpokeRejectCode,
     SpokeResult,
 };
+use nexus_local_db::findings::{validate_finding_enums, Finding as NexusFinding};
+use nexus_local_db::LocalDbError;
 use serde_json::{json, Map, Value};
 
 impl FindingPort for NexusBaselineAdapter<'_> {
@@ -116,7 +116,7 @@ impl FindingPort for NexusBaselineAdapter<'_> {
 
 /// Insert a [`NexusFinding`] inside a caller-owned `SQLite` transaction.
 ///
-/// Mirrors [`crate::findings::create_finding`]'s INSERT (same column list,
+/// Mirrors [`nexus_local_db::findings::create_finding`]'s INSERT (same column list,
 /// bind order, and `validate_finding_enums` defense-in-depth) but targets a
 /// `&mut Transaction` instead of `&SqlitePool` so the spoke `put_findings`
 /// batch can wrap N inserts in one atomic `BEGIN`/`COMMIT` (W-1, qc3). The
@@ -364,8 +364,8 @@ fn reject<T>(code: SpokeRejectCode, message: impl Into<String>, details: Value) 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{open_pool, run_migrations};
-    use nexus_spoke_adapter::FindingPort;
+    use crate::FindingPort;
+    use nexus_local_db::{open_pool, run_migrations};
     use serde_json::json;
 
     async fn fresh_pool() -> (sqlx::SqlitePool, tempfile::TempDir) {

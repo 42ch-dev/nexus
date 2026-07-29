@@ -15,7 +15,13 @@ use nexus_narrative::{
     EventSnapshot, NarrativeContext, NarrativeError, NarrativeGateway, NarrativeQuery,
     TimelinePosition, WorldState,
 };
-use nexus_spoke_adapter::{order_timeline_events_by_ids, SpokeReject, SpokeResult};
+// V1.145 P1b — `nexus-local-db` no longer depends on `nexus-spoke-adapter`
+// (spec §8 dep-graph reversal). This timeline-ordering helper + the reject
+// types come from `spoke-operations` directly as a **temporary P4 dep**:
+// once P4 routes `get_timeline_ordered` through the adapter's
+// `ScopeQueryPort`, this import moves back to `nexus-spoke-adapter` (the
+// single boundary). Tracked: spec §7.4 P4 read-path adoption.
+use spoke_operations::{order_timeline_events_by_ids, SpokeReject, SpokeResult};
 use sqlx::SqlitePool;
 use std::collections::HashMap;
 use std::sync::Arc;

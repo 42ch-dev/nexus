@@ -27,13 +27,108 @@ use nexus_knowledge::world_kb::validation::{
     validate_body, validate_canonical_name, ValidationMode,
 };
 use nexus_knowledge::world_kb::KbStore;
-// V1.139 P1 T4 — extensions.nexus round-trip helper (spec §2.3 / §7.2).
-use nexus_spoke_adapter::extensions::{build_extensions_nexus, is_known_nexus_key};
-use nexus_spoke_adapter::ExtensionMap;
+// V1.145 P1b — `build_extensions_nexus` + `is_known_nexus_key` inlined as
+// private local fns so `nexus-local-db` no longer depends on
+// `nexus-spoke-adapter` (spec §8 dep-graph reversal). The production adapter
+// (now in `nexus-spoke-adapter`) still calls the spoke-adapter
+// `build_extensions_nexus` on its own write path; this local copy keeps the
+// storage layer's own INSERT/UPDATE legacy wrappers spoke-unaware. The two
+// implementations are behavior-equivalent (same 5 typed keys, same round-trip).
 use sqlx::SqlitePool;
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::LocalDbError;
+
+/// Wire-neutral namespace map carrying an entry's `extensions.nexus` payload.
+///
+/// Local stand-in for spoke's `ExtensionMap` (which lives in
+/// `spoke-operations`). The storage layer only needs the `"nexus"` namespace
+/// key, so a plain `HashMap<String, Map<String, Value>>` is sufficient —
+/// `nexus-local-db` no longer depends on `nexus-spoke-adapter` (V1.145 P1b,
+/// spec §8).
+type ExtensionMap = HashMap<String, serde_json::Map<String, serde_json::Value>>;
+
+/// The 5 typed identity field names carried under `extensions.nexus`.
+///
+/// Mirror of `nexus_spoke_adapter::extensions::KNOWN_NEXUS_KEYS`. Inlined here
+/// so the storage layer can separate authoritative typed columns from
+/// verbatim-carried extras without a spoke-adapter dep (V1.145 P1b).
+const KNOWN_NEXUS_KEYS: [&str; 5] = [
+    "world_id",
+    "created_from_command_id",
+    "source_work_id",
+    "source_chapter",
+    "source_provenance_kind",
+];
+
+/// Returns `true` if `key` is one of the 5 typed `extensions.nexus` identity
+/// fields. Local mirror of `nexus_spoke_adapter::extensions::is_known_nexus_key`
+/// (spec §2.2 round-trip rule 2).
+fn is_known_nexus_key(key: &str) -> bool {
+    KNOWN_NEXUS_KEYS.contains(&key)
+}
+
+/// Build the `extensions.nexus` namespace object from typed nexus fields.
+///
+/// Behavior-equivalent local copy of
+/// `nexus_spoke_adapter::extensions::build_extensions_nexus` (spec §2.3 write
+/// path). `world_id` is always inserted (required); each optional field is
+/// inserted when `Some`, removed when `None`. Unknown keys already present
+/// under the `"nexus"` namespace of `existing_extensions` are preserved
+/// verbatim (spec §2.2 round-trip rule 2).
+fn build_extensions_nexus(
+    world_id: &str,
+    created_from_command_id: Option<&str>,
+    source_work_id: Option<&str>,
+    source_chapter: Option<i64>,
+    source_provenance_kind: Option<&str>,
+    existing_extensions: &ExtensionMap,
+) -> serde_json::Value {
+    let mut nexus = existing_extensions
+        .get("nexus")
+        .cloned()
+        .unwrap_or_default();
+
+    nexus.insert(
+        "world_id".into(),
+        serde_json::Value::String(world_id.to_owned()),
+    );
+    insert_opt_string(
+        &mut nexus,
+        "created_from_command_id",
+        created_from_command_id,
+    );
+    insert_opt_string(&mut nexus, "source_work_id", source_work_id);
+    insert_opt_i64(&mut nexus, "source_chapter", source_chapter);
+    insert_opt_string(&mut nexus, "source_provenance_kind", source_provenance_kind);
+
+    serde_json::Value::Object(nexus)
+}
+
+/// Insert a string field when `Some(value)`, remove it when `None`.
+fn insert_opt_string(
+    nexus: &mut serde_json::Map<String, serde_json::Value>,
+    key: &str,
+    value: Option<&str>,
+) {
+    match value {
+        Some(v) => nexus.insert(key.into(), serde_json::Value::String(v.to_owned())),
+        None => nexus.remove(key),
+    };
+}
+
+/// Insert an integer field when `Some(value)`, remove it when `None`.
+fn insert_opt_i64(
+    nexus: &mut serde_json::Map<String, serde_json::Value>,
+    key: &str,
+    value: Option<i64>,
+) {
+    match value {
+        Some(v) => nexus.insert(key.into(), serde_json::Value::Number(v.into())),
+        None => nexus.remove(key),
+    };
+}
 
 /// Test helpers for seeding KB data into the database.
 ///

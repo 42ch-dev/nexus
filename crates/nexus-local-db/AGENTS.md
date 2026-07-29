@@ -11,7 +11,8 @@ Migration files under `migrations/` use naming convention `YYYYMMDD_<description
 - **Compile-time checked queries only** — use `sqlx::query!()` / `sqlx::query_as!()` for all static SQL. Runtime `sqlx::query()` only for DDL, PRAGMAs, or truly dynamic SQL with a `// SAFETY:` comment.
 - See [`crates/nexus-daemon-runtime/AGENTS.md`](../nexus-daemon-runtime/AGENTS.md) for full sqlx compile-time macro rules and `.sqlx/` commit conventions.
 - Do not add local sqlx features beyond what the workspace declares.
-- **Spoke production port home (V1.142):** `NexusBaselineAdapter` (in `src/spoke_adapter/`) is the production `BaselinePorts` impl backing spoke orchestrators against this crate's SQLite storage. See `.mstar/specs/spoke-adapter-architecture.md` §7.4 for the family matrix (production vs stub).
+- **Pure storage (V1.145 P1b):** this crate is storage-only — DB CRUD primitives (`SqliteKbStore`, `open_pool`, `run_migrations`, CAS helpers). The production `NexusBaselineAdapter` + 6 spoke port impls **moved to `nexus-spoke-adapter/src/adapter/`** (spec §7.4 / §8). `nexus-local-db` has **no `nexus-spoke-adapter` dependency**; the `extensions.nexus` round-trip helpers (`build_extensions_nexus`, `is_known_nexus_key`) are inlined as private local fns in `kb_store.rs` so the legacy INSERT/UPDATE wrappers stay spoke-unaware. See `.mstar/specs/spoke-adapter-architecture.md` §7.4 for the family matrix (production vs stub).
+- **Temp P4 dep:** `narrative_gateway::get_timeline_ordered` calls the spoke `order_timeline_events_by_ids` helper via a direct `spoke-operations` dep (temporary, until P4 routes that path through the adapter's `ScopeQueryPort`).
 
 ## Waived Residuals
 

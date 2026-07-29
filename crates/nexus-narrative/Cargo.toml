@@ -22,12 +22,22 @@ strum.workspace = true
 # the L5 temporal axis. The two `From` impls in `timeline_event.rs` are the
 # sole conversion seam (spec spoke-adapter-architecture.md §7.1).
 spoke-schemas.workspace = true
-# V1.143 P0 T2: production dependency for the spoke 0.4.1 timeline
-# beat-assist helper `order_timeline_events_by_ids`, called from
-# `InMemoryNarrativeGateway::get_timeline_ordered` (compass AC-I1 production
-# adoption). The adapter is the sole spoke boundary (call-boundary invariant
-# §7); nexus domain types are converted to spoke wire types before the call.
-nexus-spoke-adapter = { path = "../nexus-spoke-adapter" }
+# V1.145 P1b — TEMPORARY P4 dep: `InMemoryNarrativeGateway::get_timeline_ordered`
+# calls the spoke `order_timeline_events_by_ids` beat-assist helper. Previously
+# this came via `nexus-spoke-adapter`, but adding `nexus-spoke-adapter →
+# nexus-local-db` (the P1b adapter rehome) created a transitive cycle
+# (local-db → narrative → spoke-adapter → local-db). Routing the helper
+# through `spoke-operations` directly breaks the cycle. Once P4 routes
+# `get_timeline_ordered` through the adapter's `ScopeQueryPort`, this dep
+# moves back to `nexus-spoke-adapter` (the single spoke boundary). Tracked:
+# spec §7.4 P4 read-path adoption.
+spoke-operations = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["rt", "macros"] }
+# V1.145 P1b — the timeline-helper adoption test references spoke wire types
+# (`TimelineEvent`, `SpokeRejectCode`) re-exported through the adapter
+# boundary. Runtime dep on spoke-adapter was removed to break the
+# local-db → narrative → spoke-adapter → local-db cycle; the test keeps it
+# as a dev-dep.
+nexus-spoke-adapter = { path = "../nexus-spoke-adapter" }
