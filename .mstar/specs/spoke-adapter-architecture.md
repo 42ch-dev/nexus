@@ -469,7 +469,7 @@ Each orchestrator adoption on a daemon write path is registered here. The regist
 |---|---|---|---|---|---|
 | `orchestrate_promote` | `promote_adopt()` | `world_kb.rs:608` | `NexusBaselineAdapter` | V1.142 | Shipped |
 | `orchestrate_upsert` | `patch_entity()` | `world_kb.rs:286` | `NexusBaselineAdapter` | V1.143 | Shipped |
-| `orchestrate_relate` | `patch_relationship_add()` / `_update()` | `world_kb.rs:1669`/`1727` | `NexusBaselineAdapter` | V1.144 | Planned (0.5.0 unblocks) |
+| `orchestrate_relate` | `patch_relationship_add()` / `_update()` | `world_kb.rs:2156`/`2211` | `NexusBaselineAdapter` | V1.144 | Shipped (`e17b9a34`; `remove` stays Surface A) |
 
 > **Note:** `patch_relationship_remove()` (line 1653) is **not** a cutover candidate — `orchestrate_relate` has no delete path (`RelationPort` exposes only `put_relation`). The `remove` action stays on Surface A via `delete_relationship_in_tx()`.
 

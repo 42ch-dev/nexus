@@ -2075,6 +2075,31 @@ async fn map_relate_reject(
                 "refetch the World KB graph and reapply",
             )
         }
+        // V1.144 P2 known misclassification (low residual — see
+        // task-4-5-report.md §Part B): the production `RelationPort`
+        // (nexus-local-db) raises `InvalidInput` for BOTH genuine validation
+        // failures (e.g. missing `extensions.nexus.world_id`) AND storage
+        // failures (tx begin/commit, insert, pre-read) — see
+        // `relation_port.rs` reject sites. Storage failures are semantically
+        // 500 but surface here as 400.
+        //
+        // Why not fixed in V1.144: `SpokeRejectCode` (spoke-operations 0.5.0)
+        // has NO 500-class variant, and all four production ports (finding /
+        // knowledge_entry / relation / scope_query) share the same
+        // `InvalidInput`-for-storage-errors pattern. A proper fix is
+        // cross-cutting (spoke-level 500-class code + pin bump + 4 ports + 4
+        // handler mappers) — out of scope for a P2 cutover. The V1.142 upsert
+        // path avoids this only by OMITTING the explicit `InvalidInput` arm
+        // (catch-all → 500), an accidental correctness this path does not
+        // replicate.
+        //
+        // Why acceptable pre-1.0: on the production `patch_relationship` path
+        // every validation `InvalidInput` is pre-checked by the handler
+        // (`world_id` always sourced from the path; endpoints + anchors
+        // validated up front), so the only `InvalidInput`s reachable here are
+        // storage failures — rare in local single-writer SQLite, and 400 vs 500
+        // is a minor client-experience difference. Tracked for a spoke-level
+        // fix in a later iteration.
         SpokeRejectCode::InvalidInput => NexusApiError::InvalidInput {
             field: "relationship".to_string(),
             reason: reject.message,
