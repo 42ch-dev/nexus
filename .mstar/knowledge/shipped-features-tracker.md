@@ -896,3 +896,14 @@ Archived from [deferred-features-cross-version-tracker.md](deferred-features-cro
 | **Open follow-ups** | `R-V1143P0-STRETCH` (T4b precedes → V1.144); `R-V1143P2-DEFER-RELATE` (relate cutover → V1.144 `RelationPort` adapter-extension); `R-V1143P2-ACCEPT-01/02` (promote-reject/merge Surface A, accepted) |
 | **Roadmap** | V1.144 (next): RelationPort extension + remaining orchestrators behind feature owners + first stub-family; V1.145 (next-next): CLI adapter spoke-protocol service interop + remaining stubs (feature-triggered) |
 
+## V1.144 — Deep SPOKE integration (orchestrate_relate cutover) — 2026-07-29
+
+| Field | Value |
+|-------|-------|
+| **Iteration** | V1.144 (roadmap step 2 of 3 to full SPOKE adoption) |
+| **Integration / PR** | `iteration/v1.144` → `main` (PR [#189](https://github.com/42ch-dev/nexus/pull/189), merge `ffb86f96`, MERGED) |
+| **Plans** | P0 spoke lockstep pin `0.4.1 → 0.5.0` across Rust + npm with compile-gate stubs; P1 production `RelationPort` OCC extension in `nexus-local-db`; P2 `orchestrate_relate` cutover on daemon relation add/update |
+| **Outcome** | Spoke 0.5.0 added `Relation.revision: Option<u64>` (resolved V1.143 `R-V1143P2-DEFER-RELATE` at the protocol level — no nexus schema change, the `kb_relationships.revision` column predates V1.74); production `RelationPort` is OCC-aware (create seeds revision=1, CAS update bumps `expected + 1`, all `VersionMismatch` shapes collapse to `STORED_REVISION_STALE`). `orchestrate_relate` is the 3rd production Surface B consumer — promote + upsert + relate (all three storage-backed write families) now route through spoke orchestrators. `wire_contracts_changed: false`. |
+| **Open follow-ups** | `R-V1144P1-001` (Relation unknown-key gap under `extensions.nexus` — no extras-JSON column on `kb_relationships`, unknown keys silently dropped → V1.145+ schema decision); `R-V1144P2-INVALIDINPUT-400` (production ports raise `InvalidInput` for both validation AND storage failures, but `SpokeRejectCode` has no 500-class variant → next spoke pin bump); `R-V1143P0-STRETCH` (T4b, still open from V1.143) |
+| **Roadmap** | V1.145 (next): CLI adapter spoke-protocol service interop + remaining orchestrators/stubs feature-triggered (roadmap step 3 of 3) |
+
