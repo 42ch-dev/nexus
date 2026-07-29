@@ -686,6 +686,101 @@ mod tests {
         }
     }
 
+    /// Round-trip a relation carrying the FULL set of nexus-locals
+    /// (`extensions.nexus`: `world_id` + `symmetric` + `confidence` +
+    /// `source_anchor_ids` + `needs_review` + `source`) through put → get
+    /// and confirm every known key survives.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn put_relation_round_trips_explicit_nexus_locals() {
+        let (pool, _dir) = fresh_pool().await;
+        seed_world_and_endpoints(&pool).await;
+
+        let adapter = NexusBaselineAdapter::new(pool);
+
+        // Build a relation with every nexus-local set explicitly (the
+        // sibling `get_relation_round_trips_persisted_row` only proves the
+        // default-seed shape; this one proves explicit values survive).
+        let relation: Relation = serde_json::from_value(json!({
+            "schema_version": 1,
+            "relation_id": "rel_locals",
+            "from_id": "kb_src",
+            "to_id": "kb_dst",
+            "relation_type": "rivals_with",
+            "label": "Alice ✗ Bob",
+            "metadata": { "tag": "fixture" },
+            "extensions": {
+                "nexus": {
+                    "world_id": "wld_rel",
+                    "symmetric": true,
+                    "confidence": 0.87,
+                    "source_anchor_ids": ["anc_a", "anc_b"],
+                    "needs_review": true,
+                    "source": "extraction"
+                }
+            }
+        }))
+        .expect("valid spoke Relation fixture with full nexus-locals");
+
+        let created = unwrap_ok(adapter.put_relation(relation, None), "create");
+        assert_eq!(created.revision, Some(1));
+
+        // Re-read through the port and confirm every nexus-local survived.
+        //
+        // Known limitation (brief concern #1): ONLY the nexus-local keys
+        // asserted below round-trip. The `kb_relationships` table has no
+        // extras-JSON column (unlike `kb_key_blocks.extensions_nexus_json`),
+        // so any UNKNOWN key under `extensions.nexus` — e.g. a hypothetical
+        // `custom_flag` — is silently dropped on put and absent on get. We
+        // therefore do NOT assert any unknown key here; this test pins the
+        // known set only. Lifting that limitation is a schema change, out of
+        // scope for V1.144.
+        match adapter.get_relation("rel_locals") {
+            SpokeResult::Ok(r) => {
+                assert_eq!(r.relation_id, "rel_locals");
+                assert_eq!(r.relation_type, "rivals_with");
+                assert_eq!(r.label.as_deref(), Some("Alice ✗ Bob"));
+                assert_eq!(
+                    r.metadata.get("tag"),
+                    Some(&json!("fixture")),
+                    "open metadata bag round-trips"
+                );
+                let key = RelationExtensionsKey::try_from("nexus").unwrap();
+                let ns = r.extensions.get(&key).expect("nexus namespace present");
+                assert_eq!(ns.get("world_id"), Some(&json!("wld_rel")));
+                assert_eq!(
+                    ns.get("symmetric"),
+                    Some(&json!(true)),
+                    "explicit symmetric=true survives"
+                );
+                // confidence is an f64 → JSON number; compare numerically.
+                let confidence = ns
+                    .get("confidence")
+                    .and_then(Value::as_f64)
+                    .expect("confidence present");
+                assert!(
+                    (confidence - 0.87).abs() < 1e-9,
+                    "explicit confidence=0.87 survives (got {confidence})"
+                );
+                assert_eq!(
+                    ns.get("source_anchor_ids"),
+                    Some(&json!(["anc_a", "anc_b"])),
+                    "explicit source_anchor_ids survive"
+                );
+                assert_eq!(
+                    ns.get("needs_review"),
+                    Some(&json!(true)),
+                    "explicit needs_review=true survives"
+                );
+                assert_eq!(
+                    ns.get("source"),
+                    Some(&json!("extraction")),
+                    "explicit source=extraction survives"
+                );
+            }
+            SpokeResult::Reject(r) => panic!("expected ok, got reject: {r:?}"),
+        }
+    }
+
     // ── put_relation create path ──────────────────────────────────────
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -834,34 +929,44 @@ mod tests {
         );
         assert_eq!(created.revision, Some(1));
 
-        // Update with expected_base_revision = Some(1). CAS accepts; revision
-        // bumps to 2. label + relation_type round-trip.
+        // First update: expected_base_revision = Some(1). CAS accepts;
+        // revision bumps 1 → 2. label + relation_type round-trip.
         let mut updated = created;
         updated.label = Some("Alice ↔ Bob (revised)".to_string());
         updated.relation_type = "opposes".to_string();
 
-        match adapter.put_relation(updated, Some(1)) {
-            SpokeResult::Ok(r) => {
-                assert_eq!(r.relation_id, "rel_upd");
-                assert_eq!(r.revision, Some(2), "CAS update must bump revision");
-                assert_eq!(r.relation_type, "opposes");
-                assert_eq!(r.label.as_deref(), Some("Alice ↔ Bob (revised)"));
-                // nexus-locals preserved (world_id still present after update).
-                let key = RelationExtensionsKey::try_from("nexus").unwrap();
-                assert_eq!(
-                    r.extensions.get(&key).and_then(|ns| ns.get("world_id")),
-                    Some(&json!("wld_rel")),
-                    "world_id is preserved across update"
-                );
-            }
-            SpokeResult::Reject(r) => panic!("expected ok, got reject: {r:?}"),
-        }
+        let rev2 = unwrap_ok(adapter.put_relation(updated, Some(1)), "first update");
+        assert_eq!(rev2.relation_id, "rel_upd");
+        assert_eq!(rev2.revision, Some(2), "CAS update must bump revision");
+        assert_eq!(rev2.relation_type, "opposes");
+        assert_eq!(rev2.label.as_deref(), Some("Alice ↔ Bob (revised)"));
+        // nexus-locals preserved (world_id still present after update).
+        let key = RelationExtensionsKey::try_from("nexus").unwrap();
+        assert_eq!(
+            rev2.extensions.get(&key).and_then(|ns| ns.get("world_id")),
+            Some(&json!("wld_rel")),
+            "world_id is preserved across update"
+        );
 
-        // Re-read: persisted row has revision 2 + the new label/type.
+        // Second update: expected_base_revision = Some(2). CAS accepts;
+        // revision bumps 2 → 3 — proves the revision-bump chain repeats,
+        // not a one-shot. Mutate the label again to distinguish the writes.
+        let mut rev2_mut = rev2;
+        rev2_mut.label = Some("Alice ↔ Bob (v3)".to_string());
+        let rev3 = unwrap_ok(adapter.put_relation(rev2_mut, Some(2)), "second update");
+        assert_eq!(
+            rev3.revision,
+            Some(3),
+            "second CAS update must bump revision 2 → 3"
+        );
+        assert_eq!(rev3.label.as_deref(), Some("Alice ↔ Bob (v3)"));
+
+        // Re-read: persisted row has revision 3 + the latest label/type.
         match adapter.get_relation("rel_upd") {
             SpokeResult::Ok(r) => {
-                assert_eq!(r.revision, Some(2));
+                assert_eq!(r.revision, Some(3));
                 assert_eq!(r.relation_type, "opposes");
+                assert_eq!(r.label.as_deref(), Some("Alice ↔ Bob (v3)"));
             }
             SpokeResult::Reject(r) => panic!("re-read failed: {r:?}"),
         }
