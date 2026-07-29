@@ -188,11 +188,27 @@ async fn put_create(
     let mut world_entry: WorldKbEntry = entry.clone().into();
     world_entry.revision = Some(1);
 
+    // V1.145 P0 T2: build `extensions.nexus` JSON at the adapter boundary so
+    // the storage layer stays spoke-unaware. Mirrors the UPDATE CAS path in
+    // `run_cas_update_in_tx` (spec §7.4); the JSON is passed opaquely to
+    // `insert_key_block_with_extensions_in_tx`.
+    let extensions_nexus_json = serde_json::to_string(&build_extensions_nexus(
+        &world_entry.world_id,
+        world_entry.created_from_command_id.as_deref(),
+        world_entry.source_work_id.as_deref(),
+        world_entry.source_chapter,
+        world_entry.source_provenance_kind.as_deref(),
+        &nexus_extras_extension_map(world_entry.extensions_nexus_extras.as_ref()),
+    ))
+    .unwrap_or_default();
+
     let insert_result = if adapter.is_bound() {
         let mut tx = adapter
             .take_bound_tx()
             .expect("bound adapter must have tx in cell");
-        let result = store.insert_key_block_in_tx(&mut tx, world_entry).await;
+        let result = store
+            .insert_key_block_with_extensions_in_tx(&mut tx, world_entry, extensions_nexus_json)
+            .await;
         adapter.restore_bound_tx(tx);
         result
     } else {
@@ -206,7 +222,9 @@ async fn put_create(
                 );
             }
         };
-        let result = store.insert_key_block_in_tx(&mut tx, world_entry).await;
+        let result = store
+            .insert_key_block_with_extensions_in_tx(&mut tx, world_entry, extensions_nexus_json)
+            .await;
         if result.is_ok() {
             if let Err(e) = tx.commit().await {
                 return reject(

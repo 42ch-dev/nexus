@@ -293,6 +293,54 @@ impl SqliteKbStore {
         tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
         kb: WorldKbEntry,
     ) -> Result<KbInsertResult, KbStoreError> {
+        // V1.145 P0: legacy compat wrapper. Builds the `extensions.nexus` JSON
+        // internally (keeps the `build_extensions_nexus` import) then delegates
+        // to the spoke-unaware primitive [`insert_key_block_with_extensions_in_tx`].
+        // Retained for the 5+ external callers (`apps/nexus42`,
+        // `nexus-daemon-runtime`, `nexus-orchestration`) and the `KbStore` trait
+        // impl. Residual R-V145P0-I1: this wrapper keeps the spoke-adapter import
+        // until P1 moves the trait impls / external callers migrate to the
+        // opaque primitive.
+        let extensions_nexus_json = serde_json::to_string(&build_extensions_nexus(
+            &kb.world_id,
+            kb.created_from_command_id.as_deref(),
+            kb.source_work_id.as_deref(),
+            kb.source_chapter,
+            kb.source_provenance_kind.as_deref(),
+            &nexus_extras_extension_map(kb.extensions_nexus_extras.as_ref()),
+        ))
+        .unwrap_or_default();
+        self.insert_key_block_with_extensions_in_tx(tx, kb, extensions_nexus_json)
+            .await
+    }
+
+    /// Insert a `kb_key_blocks` row from a **pre-built** opaque
+    /// `extensions_nexus_json` string (V1.145 P0 T1 — spoke-unaware storage
+    /// primitive, spec §7.4).
+    ///
+    /// This is the INSERT-side counterpart to
+    /// [`update_key_block_auxiliary_fields_in_tx`]: the storage layer accepts
+    /// the serialized `extensions.nexus` namespace as an opaque string and
+    /// does **not** call `build_extensions_nexus`. The serialization boundary
+    /// is owned by the caller (the spoke adapter port impl), matching the
+    /// already-lifted UPDATE CAS path.
+    ///
+    /// Validation, column binding, and the `kb_key_blocks_active_unique`
+    /// duplicate mapping are identical to [`insert_key_block_in_tx`]; the only
+    /// difference is that the caller supplies `extensions_nexus_json`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`KbStoreError::Validation`] / [`KbStoreError::ValidationLegacy`]
+    /// on `canonical_name` or body validation failure, [`KbStoreError::Duplicate`]
+    /// on the `kb_key_blocks_active_unique` violation, or [`KbStoreError::Storage`]
+    /// on database failure.
+    pub async fn insert_key_block_with_extensions_in_tx(
+        &self,
+        tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+        kb: WorldKbEntry,
+        extensions_nexus_json: String,
+    ) -> Result<KbInsertResult, KbStoreError> {
         // Validate canonical_name format/safety (same as trait impl).
         validate_canonical_name(&kb.canonical_name).map_err(validation_err)?;
 
@@ -326,20 +374,6 @@ impl SqliteKbStore {
         let wld_id = kb.world_id.clone();
         let cname = kb.canonical_name.clone();
         let btype = kb.block_type;
-        // V1.139 P1 T4: serialize the full `extensions.nexus` namespace from the
-        // entry's typed identity fields (spec §2.3 write path). Known fields are
-        // also written to their typed columns (authoritative); unknown keys ride
-        // on `extensions_nexus_extras` and are merged in so they survive the
-        // read-modify-write cycle verbatim.
-        let extensions_nexus_json = serde_json::to_string(&build_extensions_nexus(
-            &kb.world_id,
-            kb.created_from_command_id.as_deref(),
-            kb.source_work_id.as_deref(),
-            kb.source_chapter,
-            kb.source_provenance_kind.as_deref(),
-            &nexus_extras_extension_map(kb.extensions_nexus_extras.as_ref()),
-        ))
-        .unwrap_or_default();
         sqlx::query(
             r"INSERT INTO kb_key_blocks
                 (key_block_id, world_id, block_type, canonical_name, status, revision,
@@ -1795,6 +1829,54 @@ mod tests {
         assert_eq!(extras["priority"], 7);
         // Typed identity fields remain authoritative on their own columns.
         assert_eq!(fetched.world_id, "wld_1");
+    }
+
+    #[tokio::test]
+    async fn test_insert_key_block_with_extensions_in_tx_round_trip() {
+        // V1.145 P0 T3: the new opaque-JSON INSERT primitive round-trips
+        // `extensions.nexus` identical to the legacy wrapper. Verifies the
+        // storage primitive is behavior-equivalent when the caller owns the
+        // serialization boundary (spec §7.4) — the same shape the spoke
+        // adapter `put_create` path now uses (T2).
+        let (pool, _dir) = fresh_pool().await;
+        seed_world(&pool).await;
+
+        let store = SqliteKbStore::new(pool.clone());
+        let mut kb = WorldKbEntry::new("wld_1", BlockType::Character, "Opaque");
+        kb.source_work_id = Some("wrk_src".to_string());
+        kb.source_chapter = Some(7);
+        kb.extensions_nexus_extras = Some(serde_json::json!({"edition": "alpha", "priority": 7}));
+        let id = kb.entry_id.clone();
+
+        // Build the opaque JSON the way the spoke adapter does (T2 path).
+        let extensions_nexus_json = serde_json::to_string(&build_extensions_nexus(
+            &kb.world_id,
+            kb.created_from_command_id.as_deref(),
+            kb.source_work_id.as_deref(),
+            kb.source_chapter,
+            kb.source_provenance_kind.as_deref(),
+            &nexus_extras_extension_map(kb.extensions_nexus_extras.as_ref()),
+        ))
+        .unwrap_or_default();
+
+        let mut tx = pool.begin().await.unwrap();
+        store
+            .insert_key_block_with_extensions_in_tx(&mut tx, kb.clone(), extensions_nexus_json)
+            .await
+            .unwrap();
+        tx.commit().await.unwrap();
+
+        let fetched = store.get_knowledge_entry(&id).await.unwrap();
+        assert_eq!(fetched.world_id, "wld_1");
+        assert_eq!(fetched.source_work_id, Some("wrk_src".to_string()));
+        assert_eq!(fetched.source_chapter, Some(7));
+        let extras = fetched
+            .extensions_nexus_extras
+            .as_ref()
+            .and_then(serde_json::Value::as_object)
+            .expect("unknown keys survive the opaque-JSON INSERT path");
+        assert_eq!(extras["edition"], "alpha");
+        assert_eq!(extras["priority"], 7);
     }
 
     #[tokio::test]
