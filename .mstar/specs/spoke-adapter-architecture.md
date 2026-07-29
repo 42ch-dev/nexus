@@ -37,7 +37,7 @@ Where spoke already provides a type, field, op, or lifecycle invariant, nexus us
 
 ### 1.4 Crate topology
 
-- **New:** `crates/nexus-spoke-adapter/` — the only boundary that constructs spoke objects with a **lean** `extensions.nexus` populated and delegates lifecycle ops to `spoke-operations`. Thin facade (Q13).
+- **New:** `crates/nexus-spoke-adapter/` — the only boundary that constructs spoke objects with a **lean** `extensions.nexus` populated and delegates lifecycle ops to `spoke-operations`. Capability aggregation (Q13, refined V1.145).
 - **Merge:** `crates/nexus-kb/` is merged INTO the **existing** `crates/nexus-knowledge/` (which today owns User-scoped global knowledge + reference sources). After merger, `nexus-knowledge` consolidates three knowledge tiers in one crate:
   1. **World KnowledgeEntry** (formerly `nexus-kb`'s domain — narrative KB entries tied to a World)
   2. **User knowledge** (existing — tag-driven global knowledge entries indexed per `user_id`)
@@ -452,7 +452,7 @@ examples/
 | `KnowledgeEntryPort` | **Production** | `kb_key_blocks` via `SqliteKbStore` primitives + V1.73 CAS | Existing storage with OCC; adapter in spoke-adapter, storage primitives in local-db |
 | `RelationPort` | **Production** (OCC-aware, V1.144 P1) | `kb_relationships` via `SqliteKbStore` primitives + CAS (`WHERE revision = ?`) | Existing storage; OCC added V1.144 P1 per spoke 0.5.0 `RelationPort` trait |
 | `FindingPort` | **Production** | `findings` table | Existing storage |
-| `ScopeQueryPort.list_knowledge_entries` | **Production** | `kb_key_blocks` scope-filtered by `scope_id` + `entry_ids`/`entry_types`; scope-pushdown via `extensions.nexus` for text_search/limit/canonical_name/computable (§7.5) | Existing storage; P2 production read via ScopeQuery |
+| `ScopeQueryPort.list_knowledge_entries` | **Production** | `kb_key_blocks` scope-filtered by `scope_id` + `entry_ids`/`entry_types`; scope-pushdown via `extensions.nexus` for text_search/limit/canonical_name/computable (see §7.4 — scope-pushdown contract) | Existing storage; P2 production read via ScopeQuery |
 | `ScopeQueryPort.list_timeline_events` | **Production** (V1.145 P3) | `narrative_timeline_events` table (V1.26); scope-filtered by `scope_id` → `world_id`, `extensions.nexus.branch_id`, `timeline_event_ids` | **Was stub; now production.** Timeline IS persisted in `narrative_timeline_events` (V1.26 migration `20260524_narrative_worlds.sql`); the stub was incorrect — data exists, the port just didn't query it. |
 | `RuleQueryPort` | **Stub** — `Ok(Vec::new())` | None | No spoke `Rule` persistence table |
 | `HostManifestPort` | **Static-stub** — self manifest only | Static data | Multi-host / peer discovery not implemented |
