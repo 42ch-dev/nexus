@@ -45,7 +45,31 @@ use nexus_spoke_adapter::{
 use serde_json::{json, Map, Value};
 
 impl RelationPort for NexusBaselineAdapter<'_> {
-    fn put_relation(&self, relation: Relation) -> SpokeResult<Relation> {
+    /// P0 compile-gate stub — production lookup ships in P1 (V1.144).
+    ///
+    /// Returns `RelationNotFound` unconditionally. Spoke 0.5.0 made
+    /// `RelationPort::get_relation` a required method (no default impl);
+    /// the real `kb_relationships` read path lands in P1 alongside the
+    /// optimistic-concurrency `put_relation` wiring.
+    fn get_relation(&self, relation_id: &str) -> SpokeResult<Relation> {
+        reject(
+            SpokeRejectCode::RelationNotFound,
+            format!(
+                "Relation lookup is a P0 compile-gate stub (V1.144 P1 will implement): {relation_id}"
+            ),
+            json!({ "relation_id": relation_id }),
+        )
+    }
+
+    /// P0 compile-gate — `expected_base_revision` is ignored until P1 CAS
+    /// impl (V1.144). The insert-only create path below is preserved
+    /// verbatim; P1 will add compare-and-put + adapter-owned revision
+    /// assignment per the spoke 0.5.0 `RelationPort` contract.
+    fn put_relation(
+        &self,
+        relation: Relation,
+        _expected_base_revision: Option<u64>,
+    ) -> SpokeResult<Relation> {
         let pool = self.pool.clone();
         self.block_on(async move {
             let relation_id = relation.relation_id.clone();
@@ -124,9 +148,10 @@ impl RelationPort for NexusBaselineAdapter<'_> {
             }
 
             // Reflect adapter-assigned timestamps back onto the returned
-            // relation so callers see what was actually persisted (spoke
-            // `Relation` has no revision field, so there is no DB-assigned
-            // revision to project).
+            // relation so callers see what was actually persisted. Spoke
+            // 0.5.0 added a `revision` field to `Relation`; P0 leaves it
+            // unseeded (insert-only) — P1 (V1.144) will wire OCC +
+            // adapter-owned revision assignment per the trait contract.
             let mut result = relation;
             if result.created_at.is_none() {
                 result.created_at = parse_rfc3339(&created_at);
@@ -263,7 +288,7 @@ mod tests {
         let adapter = NexusBaselineAdapter::new(pool.clone());
         let relation = spoke_relation("rel_happy", "kb_src", "kb_dst");
 
-        let result = adapter.put_relation(relation);
+        let result = adapter.put_relation(relation, None);
         let returned = match result {
             SpokeResult::Ok(r) => r,
             SpokeResult::Reject(err) => panic!("expected ok, got reject: {err:?}"),
@@ -319,7 +344,7 @@ mod tests {
         }))
         .expect("valid minimal Relation");
 
-        match adapter.put_relation(relation) {
+        match adapter.put_relation(relation, None) {
             SpokeResult::Reject(r) => {
                 assert_eq!(
                     r.code,
@@ -343,7 +368,7 @@ mod tests {
         let adapter = NexusBaselineAdapter::new(pool.clone());
         let relation = spoke_relation("rel_bad_endpoint", "kb_src", "kb_nonexistent");
 
-        match adapter.put_relation(relation) {
+        match adapter.put_relation(relation, None) {
             SpokeResult::Reject(r) => {
                 assert_eq!(
                     r.code,

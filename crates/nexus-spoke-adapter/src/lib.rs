@@ -43,7 +43,7 @@ pub mod ops;
 // operand types. These mirror `spoke_operations`' own `pub use spoke_schemas`.
 
 pub use spoke_operations::{ExtensionMap, SpokeReject, SpokeRejectCode, SpokeResult};
-// Spoke 0.4.1 timeline beat-assist pure helpers (Surface A) — pass-through,
+// Spoke 0.5.0 timeline beat-assist pure helpers (Surface A) — pass-through,
 // no nexus logic (call-boundary invariant §7 preserved).
 pub use spoke_operations::{
     filter_timeline_events_by_moment_scale, order_timeline_events_by_ids,
