@@ -1,18 +1,22 @@
 //! # nexus-spoke-adapter
 //!
 //! The single boundary that crosses between nexus domain concerns and SPOKE
-//! standard objects. It does two things and nothing else:
+//! standard objects, and the **spoke capability-aggregation layer** for nexus
+//! (tracked spec `spoke-adapter-architecture.md` §1.2 / §7 / §7.4). It owns
+//! four surfaces:
 //!
 //! 1. **Typed accessors** over the `extensions.nexus` namespace on a spoke
 //!    [`KnowledgeEntry`] — see the [`extensions`] module.
-//! 2. **Thin delegation** of standard lifecycle invariants to
+//! 2. **Surface A delegation** of standard lifecycle invariants to
 //!    [`spoke_operations`] — see the [`ops`] module.
+//! 3. **The `WorldKbEntry` ↔ spoke `KnowledgeEntry` conversion seam** — see
+//!    the [`conversion`] module (V1.145 P1a).
+//! 4. **The production `BaselinePorts` implementation** ([`NexusBaselineAdapter`]
+//!    + 6 port impls) — see the [`adapter`] module (V1.145 P1b).
 //!
-//! This crate is a **delegation facade** (tracked spec
-//! `spoke-adapter-architecture.md` §1.2 / §7): where `spoke-operations`
-//! already exports a function, this adapter re-exports or thin-wraps it. It
-//! does NOT reimplement any lifecycle invariant, and it introduces no
-//! parallel nexus types where spoke already provides them.
+//! Surfaces 1–3 are **pure delegation / conversion**: where `spoke-operations`
+//! already exports a function, this adapter re-exports or thin-wraps it, and it
+//! introduces no parallel nexus types where spoke already provides them.
 //!
 //! Since V1.141 the crate also flat-re-exports the spoke adapter **port
 //! traits + orchestration entrypoints** (Surface B, spec §7.3) so consumers

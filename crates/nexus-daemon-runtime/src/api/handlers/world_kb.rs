@@ -954,7 +954,7 @@ fn promote_adopt_commit_ambiguity_error(
 /// Build a spoke [`PromoteRequest`] from a nexus [`WorldKbEntry`] candidate.
 ///
 /// The candidate is converted to the spoke [`SpokeKnowledgeEntry`] boundary
-/// type via the sole `From<WorldKbEntry>` conversion seam (spec §7.1), then
+/// type via the sole `world_kb_to_spoke` conversion seam (spec §7.1), then
 /// round-tripped through JSON to fit the `PromoteRequest.candidate` wire
 /// shape. The spoke codegen emits a distinct struct per wire shape even
 /// when the schema is shared; the orchestrator's internal
@@ -988,7 +988,7 @@ fn build_spoke_promote_request(candidate: &WorldKbEntry) -> PromoteRequest {
 /// [`WorldKbEntry`] candidate.
 ///
 /// Mirrors [`build_spoke_promote_request`]: the entry is converted to the
-/// spoke [`SpokeKnowledgeEntry`] boundary type via the sole `From<WorldKbEntry>`
+/// spoke [`SpokeKnowledgeEntry`] boundary type via the sole `world_kb_to_spoke`
 /// conversion seam (spec §7.1), then round-tripped through JSON to fit the
 /// `UpsertRequest.knowledge_entries` wire shape (the spoke codegen emits a
 /// distinct struct per wire shape even when the schema is shared).
@@ -1049,7 +1049,7 @@ async fn map_upsert_response(
             })?;
             // The codegen emits a DISTINCT `KnowledgeEntry` struct per wire
             // shape. Round-trip through JSON into the canonical data type that
-            // the `From<SpokeKnowledgeEntry> for WorldKbEntry` seam consumes
+            // the `spoke_to_world_kb` conversion seam consumes
             // (mirrors `map_promote_response`).
             let wire = serde_json::to_value(&persisted_wire).map_err(|e| NexusApiError::Internal {
                 code: "SPOKE_RESPONSE_DECODE".to_string(),

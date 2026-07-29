@@ -331,6 +331,33 @@ pub fn merge_extensions(
 
 /// Delegate to `spoke_operations::assert_revision_match`.
 pub fn assert_revision(expected: u64, actual: u64) -> SpokeResult<()>;
+
+// ── Conversion seam (V1.145 P1a — sole WorldKbEntry ↔ KnowledgeEntry seam) ─
+
+/// Forward: nexus domain `WorldKbEntry` → spoke standard `KnowledgeEntry`.
+/// Borrows the domain entry (owned fields are cloned internally).
+pub fn world_kb_to_spoke(entry: &WorldKbEntry) -> KnowledgeEntry;
+
+/// Reverse: spoke standard `KnowledgeEntry` → nexus domain `WorldKbEntry`.
+/// Consumes the spoke entry (extracts the body carrier + destructures the body).
+pub fn spoke_to_world_kb(entry: KnowledgeEntry) -> WorldKbEntry;
+
+/// Nexus lifecycle methods on `WorldKbEntry` that delegate status-transition
+/// validity to `spoke_operations` (`confirm` / `deprecate` / `merge_into` /
+/// `delete`). Local trait on a foreign type (orphan-rule compliant). Callers
+/// must `use nexus_spoke_adapter::conversion::WorldKbEntrySpokeExt;`.
+pub trait WorldKbEntrySpokeExt {
+    fn confirm(
+        &mut self,
+        membership: &MembershipPermissionCheck,
+        base_revision: u64,
+        conflict_check: &ConflictCheckResult,
+        visible_manifests: &[&str],
+    ) -> Result<(), KbError>;
+    fn deprecate(&mut self, replacement_kb_id: Option<&str>) -> Result<(), KbError>;
+    fn merge_into(&mut self, target_kb_id: &str) -> Result<(), KbError>;
+    fn delete(&mut self) -> Result<(), KbError>;
+}
 ```
 
 All delegation wrappers are thin — they enforce the boundary that operands must already be spoke types at the call site. They do not transform types internally.
