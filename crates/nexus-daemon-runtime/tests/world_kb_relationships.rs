@@ -120,7 +120,14 @@ fn add_request(
     }
 }
 
-#[tokio::test]
+// V1.144 P2: add/update now route through `orchestrate_relate` via
+// `NexusBaselineAdapter`, which bridges sync spoke ports to async SQLite via
+// `tokio::task::block_in_place`. That requires a multi-threaded runtime (the
+// production daemon uses one; tests opt in via `flavor = "multi_thread"` —
+// same rationale as the V1.143 patch_entity tests). Pre-orchestrator
+// fast-fail tests (self-loop / bad-label / confidence / cross-world / bad
+// anchor) short-circuit on handler guards and stay on the default runtime.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn add_relationship_returns_projected_row() {
     let (_tmp, state) = fresh_state().await;
     seed_key_block(
@@ -151,14 +158,17 @@ async fn add_relationship_returns_projected_row() {
     .await
     .expect("add should succeed");
 
-    assert_eq!(resp.version, 0);
+    assert_eq!(
+        resp.version, 1,
+        "V1.144: spoke create seeds revision = 1 (not 0)"
+    );
     let rel = resp.relationship.expect("response includes relationship");
     assert_eq!(rel.source_entity_id, "kb_a");
     assert_eq!(rel.target_entity_id, "kb_b");
     assert_eq!(rel.relation_type.to_string(), "allied_with");
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn update_relationship_returns_bumped_version_and_projected_row() {
     let (_tmp, state) = fresh_state().await;
     seed_key_block(
@@ -196,7 +206,9 @@ async fn update_relationship_returns_bumped_version_and_projected_row() {
     let req = WorldKbPatchRelationshipRequest {
         relationship_id: Some(rel_id.clone()),
         action: "update".parse().unwrap(),
-        expected_version: Some(0),
+        // V1.144: add now seeds revision = 1 (spoke convention), so the CAS
+        // base for the first update is 1 (was 0 pre-cutover).
+        expected_version: Some(1),
         relationship: Some(NexusWorldKbRelationshipInput {
             source_entity_id: "kb_a".to_string(),
             target_entity_id: "kb_b".to_string(),
@@ -217,7 +229,7 @@ async fn update_relationship_returns_bumped_version_and_projected_row() {
     .await
     .expect("update should succeed");
 
-    assert_eq!(resp.version, 1);
+    assert_eq!(resp.version, 2, "V1.144: CAS bump 1 -> 2 (was 0 -> 1)");
     let rel = resp.relationship.unwrap();
     assert_eq!(rel.relationship_id, rel_id);
     assert_eq!(rel.relation_type.to_string(), "mentor_of");
@@ -225,7 +237,7 @@ async fn update_relationship_returns_bumped_version_and_projected_row() {
     assert_eq!(rel.confidence.unwrap(), 0.75);
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn remove_relationship_returns_null_projection() {
     let (_tmp, state) = fresh_state().await;
     seed_key_block(
@@ -263,7 +275,10 @@ async fn remove_relationship_returns_null_projection() {
     let req = WorldKbPatchRelationshipRequest {
         relationship_id: Some(rel_id),
         action: "remove".parse().unwrap(),
-        expected_version: Some(0),
+        // V1.144: remove stays on Surface A (unchanged), but the row was
+        // created via the orchestrator path which seeds revision = 1, so the
+        // CAS base for remove is the created version.
+        expected_version: Some(created.version),
         relationship: None,
     };
     let Json(resp) = patch_relationship(
@@ -380,7 +395,7 @@ async fn add_confidence_out_of_range_rejects_422() {
     assert_eq!(err.error_code(), "world_kb_validation_failed");
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn update_stale_version_returns_409() {
     let (_tmp, state) = fresh_state().await;
     seed_key_block(
@@ -441,10 +456,12 @@ async fn update_stale_version_returns_409() {
     assert_eq!(err.status_code(), axum::http::StatusCode::CONFLICT);
     assert_eq!(err.error_code(), "world_kb_conflict");
     let details = err.error_details().expect("conflict details");
-    assert_eq!(details["current_version"], 0);
+    // V1.144: add seeds revision = 1 (spoke convention), so the stale-precheck
+    // current_version the handler reports is 1 (was 0 pre-cutover).
+    assert_eq!(details["current_version"], 1);
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn get_graph_includes_symmetric_reverse_projection() {
     let (_tmp, state) = fresh_state().await;
     seed_key_block(
@@ -505,7 +522,7 @@ async fn get_graph_includes_symmetric_reverse_projection() {
     assert_eq!(stored.target_entity_id, reverse.source_entity_id);
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn add_with_valid_anchor_succeeds() {
     let (_tmp, state) = fresh_state().await;
     seed_key_block_with_source(
@@ -696,7 +713,7 @@ async fn relationship_in_other_world(state: &WorkspaceState, other_world_id: &st
     created.relationship.unwrap().relationship_id
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn update_cross_world_relationship_returns_403() {
     let (_tmp, state) = fresh_state().await;
     seed_key_block(
@@ -746,7 +763,7 @@ async fn update_cross_world_relationship_returns_403() {
     assert_eq!(err.error_code(), "forbidden");
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn remove_cross_world_relationship_returns_403() {
     let (_tmp, state) = fresh_state().await;
     let rel_id = relationship_in_other_world(&state, "wld_other_remove").await;
@@ -801,7 +818,7 @@ async fn seed_extraction_suggestion(
     rel_id
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn get_graph_hides_needs_review_by_default() {
     let (_tmp, state) = fresh_state().await;
     seed_key_block(
@@ -886,7 +903,7 @@ async fn get_graph_hides_needs_review_by_default() {
     assert!(suggestion.needs_review);
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn promote_suggestion_clears_needs_review() {
     let (_tmp, state) = fresh_state().await;
     seed_key_block(
@@ -972,7 +989,7 @@ async fn promote_suggestion_clears_needs_review() {
     );
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn update_preserves_needs_review_when_omitted() {
     let (_tmp, state) = fresh_state().await;
     seed_key_block(
