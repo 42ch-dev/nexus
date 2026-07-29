@@ -59,6 +59,12 @@ pub mod ops;
 // (spec §7.4 import path: `nexus_spoke_adapter::NexusBaselineAdapter`).
 pub use adapter::NexusBaselineAdapter;
 
+// V1.145 P2 — `SpokeBackedKbStore` (the `KbStore` impl injected at the MCA
+// `assemble_moment` wiring site) + the scoped-read result type. Re-exported so
+// the MCA composition root (`apps/nexus42`) constructs it through the single
+// spoke-adapter import boundary (spec §7.4 V1.145 P2 amendment).
+pub use adapter::mca_read::{ScopedKbRead, SpokeBackedKbStore};
+
 // ── Spoke type re-exports (consumer convenience) ────────────────────────
 //
 // Consumers depend on `nexus-spoke-adapter` for both the accessors and the

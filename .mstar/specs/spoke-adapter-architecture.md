@@ -481,7 +481,7 @@ examples/
 | `KnowledgeEntryPort` | **Production** | `kb_key_blocks` via `SqliteKbStore` primitives + V1.73 CAS | Existing storage with OCC; adapter in spoke-adapter, storage primitives in local-db |
 | `RelationPort` | **Production** (OCC-aware, V1.144 P1) | `kb_relationships` via `SqliteKbStore` primitives + CAS (`WHERE revision = ?`) | Existing storage; OCC added V1.144 P1 per spoke 0.5.0 `RelationPort` trait |
 | `FindingPort` | **Production** | `findings` table | Existing storage |
-| `ScopeQueryPort.list_knowledge_entries` | **Production** | `kb_key_blocks` scope-filtered by `scope_id` + `entry_ids`/`entry_types`; scope-pushdown via `extensions.nexus` for text_search/limit/canonical_name/computable (see §7.4 — scope-pushdown contract) | Existing storage; P2 production read via ScopeQuery |
+| `ScopeQueryPort.list_knowledge_entries` | **Production** | `kb_key_blocks` scope-filtered by `scope_id` + `entry_ids`/`entry_types`; unfiltered full-world listings reject on >`LIST_BY_WORLD_LIMIT` overflow (no silent truncation for orchestrators). The MCA read path does NOT use this trait method — it uses `SpokeBackedKbStore` → `NexusBaselineAdapter::list_knowledge_entries_scoped` + the typed `KbScopeFilters` carrier (see §7.4 scope-pushdown contract) | Existing storage; P2 production read via `SpokeBackedKbStore` (MCA only) |
 | `ScopeQueryPort.list_timeline_events` | **Production** (V1.145 P3) | `narrative_timeline_events` table (V1.26); scope-filtered by `scope_id` → `world_id`, `extensions.nexus.branch_id`, `timeline_event_ids` | **Was stub; now production.** Timeline IS persisted in `narrative_timeline_events` (V1.26 migration `20260524_narrative_worlds.sql`); the stub was incorrect — data exists, the port just didn't query it. |
 | `RuleQueryPort` | **Stub** — `Ok(Vec::new())` | None | No spoke `Rule` persistence table |
 | `HostManifestPort` | **Static-stub** — self manifest only | Static data | Multi-host / peer discovery not implemented |
@@ -515,25 +515,38 @@ On create, the adapter seeds `revision = 1` (spoke convention), not `0` (nexus V
 
 `RelationPort::get_relation` reads from `kb_relationships` via the existing `KbRelationshipRow` → spoke `Relation` conversion. On not-found it returns `SpokeRejectCode::RelationNotFound` (available in spoke 0.5.0; verified in `result.rs` line 28). The conversion mapping is identical to the `put_relation` path (see `relation_port.rs` header table, verified for 0.5.0 field names).
 
-#### Scope-pushdown contract — Nexus query extensions on `Scope` (V1.145 P2)
+#### Scope-pushdown contract — Nexus query filters alongside `Scope` (V1.145 P2)
 
-spoke `Scope` supports `entry_ids`, `entry_types`, `source_id`, `fork_id`, `timeline_event_ids`, `timeline_scale`. Nexus WorldKB read paths (MCA `assemble_moment`) need additional filters that spoke Scope does not natively provide: `text_search`, `canonical_name`, `limit`, `offset`, `computable`. These ride on `scope.extensions["nexus"]` — a spoke-conformant extension pattern (Scope `extensions` is designed for consumer-specific metadata).
+> **V1.145 P2 amendment (typed-carrier design):** the original v0.6 design
+> specified these filters riding on `scope.extensions["nexus"]`. **spoke 0.5.0's
+> `Scope` struct has no `extensions` field** (only 7 native fields:
+> `scope_id`, `entry_ids`, `entry_types`, `source_id`, `fork_id`,
+> `timeline_event_ids`, `timeline_scale`; verified against
+> `spoke-schemas-0.5.0`). The extensions-based design was based on an incorrect
+> `Scope` assumption and is **superseded**: the nexus-specific filters ride a
+> typed `KbScopeFilters` carrier alongside the spoke `Scope`'s native
+> `entry_types`, applied in the adapter's SQL read primitive. See
+> `nexus-local-db/src/kb_store.rs::KbScopeFilters` +
+> `SqliteKbStore::query_scoped`, and
+> `nexus-spoke-adapter/src/adapter/mca_read.rs`.
 
-| Nexus query field | Where it rides | Adapter SQL push-down |
+spoke `Scope` supports `entry_ids`, `entry_types`, `source_id`, `fork_id`, `timeline_event_ids`, `timeline_scale`. Nexus WorldKB read paths (MCA `assemble_moment`) need additional filters that spoke Scope does not natively provide: `text_search`, `canonical_name`, `limit`, `offset`, `computable`. These ride the typed `KbScopeFilters` carrier — a nexus-side struct (not a spoke `Scope` extension, which 0.5.0 lacks) passed alongside the `Scope`'s native fields to the adapter's scoped read primitive.
+
+| Nexus query field | Where it rides | Adapter handling |
 |---|---|---|
-| `world_id` | `scope.scope_id` | `WHERE world_id = ?` |
-| `block_type` | `scope.entry_types` | `WHERE block_type IN (...)` |
-| `canonical_name` | `scope.extensions["nexus"]["canonical_name"]` | `WHERE canonical_name = ?` |
-| `text_search` | `scope.extensions["nexus"]["text_search"]` | `WHERE (canonical_name LIKE ? OR json_extract(body_json,'$.summary') LIKE ? OR json_extract(body_json,'$.tags') LIKE ?)` |
-| `limit` | `scope.extensions["nexus"]["limit"]` | `LIMIT ?` |
-| `offset` | `scope.extensions["nexus"]["offset"]` | `OFFSET ?` |
-| `computable` | `scope.extensions["nexus"]["computable"]` | `WHERE json_extract(body_json,'$.computable') = ?` |
+| `world_id` | `Scope.scope_id` | `WHERE world_id = ?` |
+| `block_type` | `Scope.entry_types` | maps to `KbQuery.block_type` (MCA sends at most one) |
+| `canonical_name` | `KbScopeFilters.canonical_name` | in-memory filter (matches `KbStore::query`) |
+| `text_search` | `KbScopeFilters.text_search` | in-memory filter (matches `KbStore::query`) |
+| `limit` | `KbScopeFilters.limit` | in-memory pagination (matches `KbStore::query`) |
+| `offset` | `KbScopeFilters.offset` | in-memory pagination (matches `KbStore::query`) |
+| `computable` | `KbScopeFilters.computable` | in-memory filter (matches `KbStore::query`) |
 
-**Spoke boundary adherence:** These keys are read-only by the adapter — they are NOT passed to spoke helpers (`knowledge_entry_matches_scope` ignores unknown Scope fields, confirmed by spoke `scope.rs` test `knowledge_entry_ignores_timeline_event_refinements`). The adapter applies the SQL push-down before spoke `ScopeMatch` filtering. This preserves the `ScopeQueryPort` call-boundary invariant while giving MCA full KbQuery capability without regression.
+**Behavior preservation (HARD):** `SpokeBackedKbStore::query` delegates through `SqliteKbStore::query_scoped` → `SqliteKbStore::query`, so it produces a byte-identical `KbQueryResult` to the direct `query` path — same silent 500-row window, same in-memory filter + pagination, **no** reject-on-overflow. This deliberately does NOT route through `ScopeQueryPort::list_knowledge_entries` (whose reject-on-overflow serves spoke orchestrators, not MCA). The body round-trips losslessly: the adapter stashes the `_nexus_body` carrier on the read path so `spoke_to_world_kb` recovers the exact body (V1.143 body-fidelity mechanism).
 
 #### Read-path ScopeQuery adoption (V1.145)
 
-**P2 — MCA WorldKB read:** MCA's `fetch_world_kb` (in `nexus-moment-context-assembly/src/moment.rs`) switches from `KbStore::query(KbQuery)` to a `SpokeBackedKbStore` wrapper that implements `KbStore` by translating `KbQuery` → `Scope` (with scope-pushdown extensions) → `ScopeQueryPort::list_knowledge_entries`. The wrapper lives in `nexus-spoke-adapter` and converts spoke `KnowledgeEntry` → nexus `WorldKbEntry` via the existing `From<SpokeKnowledgeEntry> for WorldKbEntry` impl (lossless body carrier preserves summary/tags/attributes). MCA's generic `K: KbStore` signature is unchanged — only the daemon's injected implementation changes.
+**P2 — MCA WorldKB read:** MCA's `fetch_world_kb` (in `nexus-moment-context-assembly/src/moment.rs`) switches from `SqliteKbStore` to a `SpokeBackedKbStore` wrapper (`nexus-spoke-adapter/src/adapter/mca_read.rs`) that implements `KbStore` by translating `KbQuery` → spoke `Scope` (native `entry_types` only) + typed `KbScopeFilters` carrier → `NexusBaselineAdapter::list_knowledge_entries_scoped` (an async inherent method, NOT the sync spoke `ScopeQueryPort` trait method, so MCA does not inherit the spoke port's reject-on-overflow). The wrapper converts spoke `KnowledgeEntry` → nexus `WorldKbEntry` via the free function `spoke_to_world_kb` (V1.145 P1a conversion seam; lossless body carrier preserves summary/tags/attributes). The MCA read is wired at `apps/nexus42/src/commands/platform/context.rs::run_assemble_moment` (the single production `assemble_moment` KB-store call site). MCA's generic `K: KbStore` signature is unchanged — only the injected implementation changes.
 
 **P2 scope boundary (explicit):** MCA is the only production consumer cut over in V1.145. Daemon CRUD read paths (`get_graph`, `get_candidates`) stay on `SqliteKbStore` directly — these are UI views, not spoke integration concerns. Evaluation deferred to V1.146+.
 

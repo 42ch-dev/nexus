@@ -557,7 +557,12 @@ pub async fn run_assemble_moment(
 ) -> Result<MomentContext> {
     let pool = open_shared_pool(config).await?;
     let narrative = nexus_local_db::narrative_gateway::SqliteNarrativeGateway::new(pool.clone());
-    let kb = nexus_local_db::kb_store::SqliteKbStore::new(pool.clone());
+    // V1.145 P2 — the MCA WorldKB read now crosses the spoke-adapter boundary:
+    // `SpokeBackedKbStore` routes `query` through `NexusBaselineAdapter`'s
+    // scoped read (storage → spoke `KnowledgeEntry` → `WorldKbEntry` via the
+    // `spoke_to_world_kb` conversion seam), matching `SqliteKbStore::query`
+    // behavior exactly (silent 500-row window; no reject-on-overflow).
+    let kb = nexus_spoke_adapter::SpokeBackedKbStore::new(pool.clone());
     let knowledge = SqliteKnowledgeStore::new(pool);
 
     let wid = world_id.unwrap_or("wld_default");
@@ -1321,5 +1326,115 @@ mod tests {
         let config = CliConfig::default();
         let slug = config.workspace_slug_for_creator("ctr_anyone");
         assert_eq!(slug, DEFAULT_WORKSPACE_SLUG);
+    }
+
+    // ── V1.145 P2: assemble_moment behavior equivalence (T4) ────────────
+    //
+    // Proves the MCA wiring switch from `SqliteKbStore` to
+    // `SpokeBackedKbStore` produces byte-identical `assemble_moment` output:
+    // the `world_kb` section (the only KB-dependent slice) is rendered from
+    // `canonical_name` / `block_type` / `body.summary`, all of which round-trip
+    // losslessly through the spoke conversion seam.
+
+    async fn fresh_pool() -> (sqlx::SqlitePool, tempfile::TempDir) {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("test.db");
+        let pool = nexus_local_db::open_pool(&db_path).await.unwrap();
+        nexus_local_db::run_migrations(&pool).await.unwrap();
+        (pool, dir)
+    }
+
+    async fn seed_mca_world(pool: &sqlx::SqlitePool) {
+        // SAFETY: test-only static INSERTs with bind params.
+        sqlx::query(
+            "INSERT OR IGNORE INTO creators (creator_id, display_name, status, cached_at, data) \
+             VALUES ('ctr_test', 'Test', 'active', datetime('now'), '{}')",
+        )
+        .execute(pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO narrative_worlds \
+             (world_id, workspace_id, owner_creator_id, title, slug, status, visibility, time_policy, metadata_json) \
+             VALUES ('wld_t4', 'wrk_test', 'ctr_test', 'T4 World', 't4-world', 'active', 'private', 'manual', '{}')",
+        )
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+
+    /// T4: `assemble_moment` renders an identical `world_kb` section whether
+    /// the KB store is `SqliteKbStore` (pre-P2) or `SpokeBackedKbStore` (P2).
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn assemble_moment_world_kb_identical_across_kb_stores() {
+        use nexus_contracts::BlockType;
+        use nexus_knowledge::world_kb::knowledge_entry::{WorldKbBody, WorldKbEntry};
+        use nexus_knowledge::world_kb::KbStore;
+        use nexus_moment_context_assembly::MomentContext;
+
+        let (pool, _dir) = fresh_pool().await;
+        seed_mca_world(&pool).await;
+
+        // Seed entries whose bodies exercise summary + a block_type each.
+        let seeder = nexus_local_db::kb_store::SqliteKbStore::new(pool.clone());
+        for (idx, (bt, name)) in [
+            (BlockType::Character, "Alice"),
+            (BlockType::Item, "Atlantis"),
+            (BlockType::Organization, "Anvil"),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let mut entry = WorldKbEntry::new("wld_t4", bt, name);
+            entry.entry_id = format!("kb_t4_{idx}");
+            entry.body = Some(WorldKbBody {
+                summary: Some(format!("{name} summary")),
+                // An integer attribute that the spoke typed body alone would
+                // round-trip as a float — the lossless carrier must recover it.
+                attributes: Some(serde_json::json!({"order": idx})),
+                ..Default::default()
+            });
+            seeder.insert_knowledge_entry(entry).await.unwrap();
+        }
+
+        let stage0 = Stage0Assembly {
+            personality: "P.".to_string(),
+            experience: "E.".to_string(),
+            user_prompt: "P.".to_string(),
+            ..Stage0Assembly::default()
+        };
+
+        // `KbStore` has async methods (not dyn-compatible), so use a generic
+        // helper that runs `assemble_moment` against a concrete store type.
+        #[allow(clippy::future_not_send)]
+        async fn run<K: KbStore>(pool: &sqlx::SqlitePool, kb_store: &K) -> MomentContext {
+            let narrative =
+                nexus_local_db::narrative_gateway::SqliteNarrativeGateway::new(pool.clone());
+            let knowledge = SqliteKnowledgeStore::new(pool.clone());
+            let stage0 = Stage0Assembly {
+                personality: "P.".to_string(),
+                experience: "E.".to_string(),
+                user_prompt: "P.".to_string(),
+                ..Stage0Assembly::default()
+            };
+            let request = MomentRequest::new(stage0).with_world("wld_t4");
+            assemble_moment(&request, &narrative, kb_store, &knowledge).await
+        }
+
+        let sqlite_store = nexus_local_db::kb_store::SqliteKbStore::new(pool.clone());
+        let ctx_sqlite = run(&pool, &sqlite_store).await;
+        let spoke_store = nexus_spoke_adapter::SpokeBackedKbStore::new(pool.clone());
+        let ctx_spoke = run(&pool, &spoke_store).await;
+
+        // The KB-dependent slice must be byte-identical.
+        assert_eq!(
+            ctx_sqlite.world_kb, ctx_spoke.world_kb,
+            "assemble_moment world_kb must be identical across SqliteKbStore and SpokeBackedKbStore"
+        );
+        // Sanity: the section is non-empty and contains the seeded names.
+        let kb_text = ctx_spoke.world_kb.as_deref().unwrap_or("");
+        assert!(kb_text.contains("Alice"));
+        assert!(kb_text.contains("Atlantis"));
+        assert!(kb_text.contains("Anvil"));
     }
 }

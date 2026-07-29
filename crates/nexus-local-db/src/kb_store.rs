@@ -206,6 +206,34 @@ pub struct WorldKbScopedList {
     pub truncated: bool,
 }
 
+/// Nexus-side typed filter carrier for scoped KB reads (V1.145 P2 Option 2).
+///
+/// spoke 0.5.0's `Scope` carries only 7 native fields (`scope_id` / `entry_ids`
+/// / `entry_types` / `source_id` / `fork_id` / `timeline_event_ids` /
+/// `timeline_scale`) — it has **no** `extensions` map, so the `KbQuery` filters
+/// that MCA needs (text search / canonical name / computable / pagination)
+/// cannot ride on `Scope`. This carrier holds exactly those filters, in a
+/// typed struct, alongside the spoke `Scope`'s native `entry_types`.
+///
+/// Consumed by [`SqliteKbStore::query_scoped`], which reconstructs the
+/// equivalent [`KbQuery`] and delegates to [`SqliteKbStore::query`] — so the
+/// MCA read path produces a byte-identical [`KbQueryResult`] to the direct
+/// `query` path (spec §7.4 V1.145 P2 amendment). `entry_types` from the spoke
+/// `Scope` maps to [`KbQuery::block_type`] (MCA sends at most one).
+#[derive(Debug, Clone, Default)]
+pub struct KbScopeFilters {
+    /// Case-insensitive substring search over `canonical_name` / summary / tags.
+    pub text_search: Option<String>,
+    /// Exact `canonical_name` match.
+    pub canonical_name: Option<String>,
+    /// Filter by the `body.computable` flag.
+    pub computable: Option<bool>,
+    /// Maximum number of results (pagination).
+    pub limit: Option<usize>,
+    /// Number of results to skip (pagination).
+    pub offset: Option<usize>,
+}
+
 /// SQLite-backed KB store.
 ///
 /// Holds an `Arc<SqlitePool>` shared per active workspace. Construct once
@@ -363,6 +391,54 @@ impl SqliteKbStore {
             .collect::<Result<Vec<_>, _>>()?;
 
         Ok(WorldKbScopedList { entries, truncated })
+    }
+
+    /// Scoped read for the MCA path that matches [`SqliteKbStore::query`]'s
+    /// limit/overflow semantics **exactly** (V1.145 P2 Option 2).
+    ///
+    /// This is the SQL read primitive the spoke-adapter's
+    /// `SpokeBackedKbStore` calls: the nexus-specific filters (`text_search` /
+    /// `canonical_name` / `computable` / `limit` / `offset`) ride the typed
+    /// [`KbScopeFilters`] carrier, while `entry_types` comes from the spoke
+    /// `Scope`'s native field and maps to [`KbQuery::block_type`] (MCA sends at
+    /// most one `entry_types` element).
+    ///
+    /// It reconstructs the equivalent [`KbQuery`] and delegates to
+    /// [`SqliteKbStore::query`], so the MCA read produces a byte-identical
+    /// [`KbQueryResult`] to the direct `query` path — including the silent
+    /// 500-row window (no reject-on-overflow). This deliberately does **not**
+    /// route through [`SqliteKbStore::list_by_world_scoped`], whose
+    /// reject-on-overflow contract serves spoke orchestrators (spec §7.4) but
+    /// would be a behavior regression for MCA.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`KbStoreError::Storage`] on database failure (same surface as
+    /// [`KbStore::query`]).
+    pub async fn query_scoped(
+        &self,
+        world_id: &str,
+        entry_types: &[String],
+        filters: &KbScopeFilters,
+    ) -> Result<KbQueryResult, KbStoreError> {
+        // Map the spoke Scope entry_types (snake_case wire strings) to
+        // KbQuery's single block_type filter. MCA sends at most one; empty →
+        // no block_type filter. parse_block_type accepts snake_case (serde)
+        // and legacy PascalCase.
+        let block_type = entry_types.first().and_then(|s| parse_block_type(s).ok());
+
+        let query = KbQuery {
+            world_id: world_id.to_string(),
+            block_type,
+            canonical_name: filters.canonical_name.clone(),
+            text_search: filters.text_search.clone(),
+            computable: filters.computable,
+            limit: filters.limit,
+            offset: filters.offset,
+        };
+        // Delegate to the canonical query path — identical window, filter, and
+        // pagination semantics (behavior-preservation HARD rule, P2 brief).
+        self.query(&query).await
     }
 
     /// Transaction-aware variant of [`KbStore::insert_knowledge_entry`] (R-V150KBED-03).
