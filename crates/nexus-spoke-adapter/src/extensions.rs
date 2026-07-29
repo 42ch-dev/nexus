@@ -251,18 +251,49 @@ fn insert_opt_string(nexus: &mut Map<String, Value>, key: &str, value: Option<&s
 /// preserving full body fidelity. This key is reserved (`_nexus_` prefix); it
 /// is consumed by [`take_nexus_body`] on the reverse path and never reaches the
 /// product-local extras / the `extensions` DB column.
+///
+/// # Carrier boundary (HARD)
+///
+/// Only **two** production call sites may set this carrier:
+/// - the **MCA read path** (`SpokeBackedKbStore` →
+///   [`NexusBaselineAdapter::list_knowledge_entries_scoped`]), and
+/// - the **persist path** (`build_spoke_upsert_request` in `nexus-daemon-runtime`,
+///   so the orchestrator's `put_update` recovers the body).
+///
+/// The **spoke orchestrator read path** (`ScopeQueryPort::list_knowledge_entries`)
+/// must NEVER carry this carrier: it returns spoke entries straight to the
+/// orchestrator, so a leaked carrier would persist into the `extensions` DB
+/// column. [`has_nexus_body`] backs the `debug_assert!` guard at that boundary.
 const NEXUS_BODY_KEY: &str = "_nexus_body";
 
 /// Stash the full nexus body (as JSON) under `extensions.nexus._nexus_body`.
 ///
 /// Pass `None` to clear a previously-stashed carrier. Preserves the 5 typed
 /// identity keys and any sibling unknown keys already present.
+///
+/// See [`NEXUS_BODY_KEY`] for the carrier-boundary contract — this must only be
+/// called on the MCA read or persist paths.
 pub fn set_nexus_body(entry: &mut KnowledgeEntry, body: Option<&Value>) {
     let ns = entry.extensions.entry(nexus_key()).or_default();
     match body {
         Some(v) => ns.insert(NEXUS_BODY_KEY.into(), v.clone()),
         None => ns.remove(NEXUS_BODY_KEY),
     };
+}
+
+/// Read-only check: does `entry` carry the reserved `_nexus_body` carrier?
+///
+/// Backs the carrier-boundary guard (see [`NEXUS_BODY_KEY`]): the spoke
+/// orchestrator read path (`ScopeQueryPort::list_knowledge_entries`) asserts
+/// none of its returned entries carry the carrier, so a future caller that
+/// accidentally stashes one on a non-MCA path is caught at test time. Unlike
+/// [`take_nexus_body`], this does not mutate.
+#[must_use]
+pub fn has_nexus_body(entry: &KnowledgeEntry) -> bool {
+    entry
+        .extensions
+        .get(&nexus_key())
+        .is_some_and(|ns| ns.contains_key(NEXUS_BODY_KEY))
 }
 
 /// Remove and return the reserved `_nexus_body` carrier from

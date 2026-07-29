@@ -155,13 +155,29 @@ impl SpokeBackedKbStore {
 
     /// Map an inbound [`KbQuery::block_type`] to the spoke `Scope.entry_types`
     /// wire string (`snake_case`). MCA sends at most one; `None` → empty.
+    ///
+    /// Reuses `BlockType`'s serde mapping (the single source of truth for the
+    /// wire string — `#[serde(rename_all = "snake_case")]`) rather than a
+    /// hand-written variant table, so newly-added variants map automatically.
+    /// A previous version fell back to `format!("{bt:?}").to_lowercase()` on a
+    /// non-string serde result; that fallback was only correct *accidentally*
+    /// (derived `Debug` happens to match `snake_case`) and would silently
+    /// diverge if a variant ever gained a non-standard `Debug` impl. The serde
+    /// representation of a unit enum is always a `Value::String`, so the
+    /// non-string / error arms are unreachable for the current `BlockType`;
+    /// any divergence is surfaced loudly rather than turned into a silent
+    /// query miss.
     fn block_type_to_entry_types(block_type: Option<nexus_contracts::BlockType>) -> Vec<String> {
         block_type
-            .map(|bt| {
-                serde_json::to_value(bt)
-                    .ok()
-                    .and_then(|v| v.as_str().map(str::to_string))
-                    .unwrap_or_else(|| format!("{bt:?}").to_lowercase())
+            .map(|bt| match serde_json::to_value(bt) {
+                Ok(serde_json::Value::String(s)) => s,
+                Ok(other) => unreachable!(
+                    "BlockType serialized to non-string {other:?}; \
+                     rename_all = snake_case invariant broken — update the wire mapping deliberately"
+                ),
+                Err(e) => {
+                    unreachable!("BlockType (unit enum) serialization cannot fail: {e}")
+                }
             })
             .into_iter()
             .collect()

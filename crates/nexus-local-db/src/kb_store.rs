@@ -422,9 +422,21 @@ impl SqliteKbStore {
         filters: &KbScopeFilters,
     ) -> Result<KbQueryResult, KbStoreError> {
         // Map the spoke Scope entry_types (snake_case wire strings) to
-        // KbQuery's single block_type filter. MCA sends at most one; empty →
-        // no block_type filter. parse_block_type accepts snake_case (serde)
-        // and legacy PascalCase.
+        // KbQuery's single block_type filter. `KbQuery::block_type` is
+        // `Option<BlockType>` (single-type by design — see
+        // `nexus-knowledge::world_kb::query`); the spoke `Scope.entry_types`
+        // field is a `Vec<String>`, but MCA sends at most one element. A
+        // multi-element `entry_types` here would silently drop 2+; the
+        // `debug_assert!` surfaces that as a test-time bug so a future caller
+        // is caught before shipping a silent truncation. (If genuine
+        // multi-type support is ever needed, `KbQuery.block_type` must change
+        // to a collection or `query_scoped` must emit/union multiple queries —
+        // neither is a behavior-equivalent change.)
+        debug_assert!(
+            entry_types.len() <= 1,
+            "MCA sends at most one entry_type; multiple would be silently dropped \
+             by the KbQuery.block_type single-value mapping"
+        );
         let block_type = entry_types.first().and_then(|s| parse_block_type(s).ok());
 
         let query = KbQuery {

@@ -31,6 +31,7 @@
 
 use super::NexusBaselineAdapter;
 use crate::conversion::world_kb_to_spoke;
+use crate::extensions::has_nexus_body;
 use crate::{
     KnowledgeEntry, Scope, ScopeQueryPort, SpokeReject, SpokeRejectCode, SpokeResult, TimelineEvent,
 };
@@ -90,6 +91,18 @@ impl ScopeQueryPort for NexusBaselineAdapter<'_> {
                 // function in nexus-spoke-adapter since V1.145 P1a.
                 .map(world_kb_to_spoke)
                 .collect();
+
+            // Carrier-boundary guard (QC2-W003): the reserved `_nexus_body`
+            // carrier is MCA-read-path + persist-path only. This orchestrator
+            // read path hands spoke entries straight back to the orchestrator,
+            // so a leaked carrier would persist into the `extensions` DB
+            // column. `world_kb_to_spoke` never sets it, but this debug-only
+            // assertion catches a future caller that accidentally stashes one.
+            debug_assert!(
+                !wire.iter().any(has_nexus_body),
+                "ScopeQueryPort::list_knowledge_entries must not carry the _nexus_body carrier \
+                 (MCA/persist-only); a leaked carrier would reach the extensions DB column"
+            );
 
             SpokeResult::Ok(wire)
         })
