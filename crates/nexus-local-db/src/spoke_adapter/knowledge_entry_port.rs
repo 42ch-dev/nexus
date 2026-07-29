@@ -4,11 +4,10 @@
 //!
 //! # Wire conversion reuse (HARD, spec §7.1)
 //!
-//! The adapter REUSES the existing two `From` impls in
-//! `nexus_knowledge::world_kb::knowledge_entry` (`impl From<WorldKbEntry> for
-//! SpokeKnowledgeEntry` + reverse) as the **sole** conversion seam between
-//! SQLite-backed [`WorldKbEntry`] rows and spoke [`KnowledgeEntry`] wire
-//! types. No second conversion path is added here.
+//! The adapter REUSES the sole conversion seam (`world_kb_to_spoke` /
+//! `spoke_to_world_kb` in `nexus_spoke_adapter::conversion`, since V1.145 P1a)
+//! between SQLite-backed [`WorldKbEntry`] rows and spoke [`KnowledgeEntry`]
+//! wire types. No second conversion path is added here.
 //!
 //! # CAS contract (spec §7.4)
 //!
@@ -31,6 +30,7 @@ use crate::kb_store::{
 use crate::LocalDbError;
 use nexus_knowledge::world_kb::store::{KbStore, KbStoreError};
 use nexus_knowledge::world_kb::WorldKbEntry;
+use nexus_spoke_adapter::conversion::{spoke_to_world_kb, world_kb_to_spoke};
 use nexus_spoke_adapter::extensions::build_extensions_nexus;
 use nexus_spoke_adapter::{
     KnowledgeEntry, KnowledgeEntryPort, SpokeReject, SpokeRejectCode, SpokeResult,
@@ -128,9 +128,9 @@ impl KnowledgeEntryPort for NexusBaselineAdapter<'_> {
                 Ok(row) => row,
                 Err(e) => return Self::map_get_err(e, &entry_id),
             };
-            // Reuse the existing `From<WorldKbEntry> for SpokeKnowledgeEntry`
-            // impl — sole conversion seam (spec §7.1).
-            SpokeResult::Ok(world_entry.into())
+            // Reuse the sole conversion seam (spec §7.1) — now free functions
+            // in nexus-spoke-adapter (V1.145 P1a dep-graph reversal).
+            SpokeResult::Ok(world_kb_to_spoke(&world_entry))
         })
     }
 
@@ -181,11 +181,11 @@ async fn put_create(
         }
     }
 
-    // Reuse the existing `From<SpokeKnowledgeEntry> for WorldKbEntry` impl —
-    // sole conversion seam (spec §7.1). Set the initial post-create revision
+    // Reuse the sole conversion seam (spec §7.1) — free function in
+    // nexus-spoke-adapter (V1.145 P1a). Set the initial post-create revision
     // to 1 (matches the V1.73 NULL-normalization rule: the first successful
     // write sets revision = 1).
-    let mut world_entry: WorldKbEntry = entry.clone().into();
+    let mut world_entry: WorldKbEntry = spoke_to_world_kb(entry.clone());
     world_entry.revision = Some(1);
 
     // V1.145 P0 T2: build `extensions.nexus` JSON at the adapter boundary so
@@ -289,7 +289,7 @@ async fn put_update_bound(
     expected: u64,
 ) -> SpokeResult<KnowledgeEntry> {
     let entry_id = entry.entry_id.clone();
-    let world_entry: WorldKbEntry = entry.clone().into();
+    let world_entry: WorldKbEntry = spoke_to_world_kb(entry.clone());
     let mut tx = adapter
         .take_bound_tx()
         .expect("bound adapter must have tx in cell");
@@ -312,7 +312,7 @@ async fn put_update_unbound(
     expected: u64,
 ) -> SpokeResult<KnowledgeEntry> {
     let entry_id = entry.entry_id.clone();
-    let world_entry: WorldKbEntry = entry.clone().into();
+    let world_entry: WorldKbEntry = spoke_to_world_kb(entry.clone());
     let mut tx = match pool.begin().await {
         Ok(tx) => tx,
         Err(e) => {
@@ -479,10 +479,10 @@ mod tests {
     /// Build a spoke `KnowledgeEntry` fixture with a populated `extensions.nexus`
     /// (so it round-trips into the `kb_key_blocks` row that requires `world_id`).
     fn spoke_entry(entry_id: &str, canonical_name: &str, revision: Option<u64>) -> KnowledgeEntry {
-        // Round-trip through the From impls: build a WorldKbEntry (which carries
-        // world_id natively), convert forward to spoke — this guarantees the
-        // fixture satisfies the storage shape requirements (world_id present
-        // under extensions.nexus; canonical_name format-valid).
+        // Round-trip through the sole conversion seam: build a WorldKbEntry
+        // (which carries world_id natively), convert forward to spoke — this
+        // guarantees the fixture satisfies the storage shape requirements
+        // (world_id present under extensions.nexus; canonical_name format-valid).
         let mut world = WorldKbEntry::new("wld_1", BlockType::Character, canonical_name);
         world.entry_id = entry_id.to_string();
         world.revision = revision;
@@ -490,7 +490,7 @@ mod tests {
             summary: Some(format!("{canonical_name} summary")),
             ..Default::default()
         });
-        world.into()
+        world_kb_to_spoke(&world)
     }
 
     /// Test helper: unwrap a `SpokeResult::Ok` or panic with the reject payload.

@@ -32,6 +32,7 @@
 //! `AssemblePacket`, `ExtensionMap`). There are no nexus wrapper types here
 //! — the adapter IS the boundary.
 
+pub mod conversion;
 pub mod extensions;
 pub mod ops;
 

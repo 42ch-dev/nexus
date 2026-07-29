@@ -26,13 +26,17 @@ consolidates three knowledge tiers in one crate.
 
 Per spec `spoke-adapter-architecture.md` §7.1, `WorldKbEntry` is the **nexus
 domain aggregate**; `spoke_schemas::KnowledgeEntry` is the **wire/standard
-boundary type**. The two `From` impls in `world_kb/knowledge_entry.rs` are the
-**sole conversion seam** (re-exported from `world_kb`).
+boundary type**. Since V1.145 P1a the **sole conversion seam** lives in
+`nexus-spoke-adapter::conversion` as the free functions `world_kb_to_spoke` /
+`spoke_to_world_kb` (orphan rule forbids the `From` impls here — both types are
+foreign to this crate) plus the `WorldKbEntrySpokeExt` lifecycle trait; this
+crate owns the pure domain aggregate only. `world_kb/mod.rs` still re-exports
+the spoke `KnowledgeEntry` wire type for consumers that read it through this crate.
 
 - **Call-boundary invariant (HARD):** `spoke-operations` functions receive the
   **converted spoke type only** — never `WorldKbEntry`. Convert first
-  (`spoke_schemas::KnowledgeEntry::from(world_kb_entry)`), then delegate via
-  `nexus-spoke-adapter` (T3 wires the lifecycle delegation).
+  (`nexus_spoke_adapter::conversion::world_kb_to_spoke(&entry)`), then delegate
+  via `nexus-spoke-adapter`.
 - **Q13 (prefer spoke):** `WorldKbEntry` carries the nexus-local **body** content
   (`summary`/`attributes`/`tags`/`state`/`computable`) that spoke deliberately
   keeps product-local. Identity / status / extensions map to/from spoke on
@@ -44,8 +48,9 @@ boundary type**. The two `From` impls in `world_kb/knowledge_entry.rs` are the
   `computable`/`state` typed maps today (typify drops `additionalProperties`),
   so the forward conversion maps `state` only; `summary`/`attributes`/`tags`
   stay on `WorldKbEntry` (spoke-operations does not consume them). When spoke
-  later declares body fields, **extend only the two `From` impls** — the
-  validation engine and all consumers are unaffected (minimal future delta).
+  later declares body fields, **extend only the two free functions in
+  `nexus-spoke-adapter::conversion`** — the validation engine and all consumers
+  are unaffected (minimal future delta).
 - **Name collision resolved (R-V1139P0-004):** the User-scoped struct is
   `UserKnowledgeEntry` (in `knowledge`); the World KB spoke boundary type is
   `spoke_schemas::KnowledgeEntry` (re-exported from `world_kb`).
@@ -59,9 +64,11 @@ boundary type**. The two `From` impls in `world_kb/knowledge_entry.rs` are the
   `WorldKbEntry`) vs User knowledge (`knowledge` / `UserKnowledgeEntry`) when
   ambiguity matters; do not use this crate for Creator memory semantics.
 - **Lifecycle delegation boundary**: spoke-provided standard lifecycle
-  invariants (promote gate, status transitions, extension merge) live in
-  `nexus-spoke-adapter`, **not** in this crate. This crate owns domain types,
-  the `KbStore` / `KnowledgeStore` traits, and the conversion seam only.
+  invariants (promote gate, status transitions, extension merge) **and the
+  `WorldKbEntry ↔ KnowledgeEntry` conversion seam** live in
+  `nexus-spoke-adapter` (since V1.145 P1a — dep-graph reversal, spec §8), **not**
+  in this crate. This crate owns domain types and the `KbStore` /
+  `KnowledgeStore` traits only.
 - **Persistence boundary (DF-43)**: `nexus-local-db` is the sole production
   SQLite persistence owner (both for User knowledge via
   `SqliteKnowledgeStore` and for World KB via its `kb_store`). This crate
@@ -71,5 +78,8 @@ boundary type**. The two `From` impls in `world_kb/knowledge_entry.rs` are the
 ## Dependencies
 
 - `nexus-contracts` (retained `BlockType` / `KeyBlockStatus` enums + daemon-api envelopes)
-- `nexus-spoke-adapter` (extensions.nexus accessors + ops delegation facade)
-- `spoke-schemas` (standard `KnowledgeEntry` wire type)
+- `spoke-schemas` (standard `KnowledgeEntry` wire type — re-exported from `world_kb`)
+
+> Since V1.145 P1a this crate **no longer depends on `nexus-spoke-adapter`**.
+> The conversion seam + lifecycle delegation moved there, reversing the former
+> edge to `nexus-spoke-adapter → nexus-knowledge` (spec §8).

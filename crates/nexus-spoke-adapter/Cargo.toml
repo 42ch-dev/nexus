@@ -18,8 +18,21 @@ spoke-schemas.workspace = true
 spoke-operations.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+# V1.145 P1a — the WorldKbEntry↔KnowledgeEntry conversion seam + the
+# `WorldKbEntrySpokeExt` lifecycle trait moved here from `nexus-knowledge`
+# (orphan rule: both WorldKbEntry and KnowledgeEntry are foreign to
+# `nexus-knowledge`'s `From` impls, so the seam became free functions /
+# a local trait in this crate). This reverses the former
+# `nexus-knowledge → nexus-spoke-adapter` edge to
+# `nexus-spoke-adapter → nexus-knowledge` (spec §8 dep-graph reversal).
+nexus-knowledge = { path = "../nexus-knowledge" }
+nexus-contracts = { path = "../nexus-contracts" }
+chrono.workspace = true
 
 [dev-dependencies]
 spoke-schemas.workspace = true
 spoke-operations.workspace = true
 serde_json.workspace = true
+# Integration tests (spoke_parity) reference nexus domain types directly.
+nexus-knowledge = { path = "../nexus-knowledge" }
+nexus-contracts = { path = "../nexus-contracts" }

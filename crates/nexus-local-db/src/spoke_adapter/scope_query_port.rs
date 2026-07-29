@@ -31,6 +31,7 @@
 
 use super::NexusBaselineAdapter;
 use crate::kb_store::SqliteKbStore;
+use nexus_spoke_adapter::conversion::world_kb_to_spoke;
 use nexus_spoke_adapter::{
     KnowledgeEntry, Scope, ScopeQueryPort, SpokeReject, SpokeRejectCode, SpokeResult, TimelineEvent,
 };
@@ -83,10 +84,11 @@ impl ScopeQueryPort for NexusBaselineAdapter<'_> {
 
             let wire: Vec<KnowledgeEntry> = scoped
                 .entries
-                .into_iter()
+                .iter()
                 // Reuse the V1.139 conversion seam — sole boundary between
-                // WorldKbEntry rows and the spoke wire type (spec §7.1).
-                .map(KnowledgeEntry::from)
+                // WorldKbEntry rows and the spoke wire type (spec §7.1); free
+                // function in nexus-spoke-adapter since V1.145 P1a.
+                .map(world_kb_to_spoke)
                 .collect();
 
             SpokeResult::Ok(wire)

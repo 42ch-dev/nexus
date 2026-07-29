@@ -104,7 +104,7 @@ fn spoke_entry(
         summary: Some(format!("{canonical_name} summary")),
         ..Default::default()
     });
-    world.into()
+    nexus_spoke_adapter::conversion::world_kb_to_spoke(&world)
 }
 
 /// Build an `UpsertRequest` from a single spoke `KnowledgeEntry`. The entry is

@@ -2770,7 +2770,6 @@ dependencies = [
  "async-trait",
  "chrono",
  "nexus-contracts",
- "nexus-spoke-adapter",
  "serde",
  "serde_json",
  "spoke-schemas",
@@ -2859,6 +2858,7 @@ dependencies = [
  "nexus-knowledge",
  "nexus-local-db",
  "nexus-narrative",
+ "nexus-spoke-adapter",
  "nexus-wasm-host",
  "nix 0.29.0",
  "regex",
@@ -2882,6 +2882,9 @@ dependencies = [
 name = "nexus-spoke-adapter"
 version = "0.1.0"
 dependencies = [
+ "chrono",
+ "nexus-contracts",
+ "nexus-knowledge",
  "serde",
  "serde_json",
  "spoke-operations",

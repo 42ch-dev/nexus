@@ -64,6 +64,7 @@ use nexus_local_db::LocalDbError;
 // on Surface A (spoke `RelationPort` has no delete).
 // These spoke types are re-exported through `nexus_spoke_adapter` (the
 // single boundary that crosses into spoke standard objects; spec §7).
+use nexus_spoke_adapter::conversion::{spoke_to_world_kb, world_kb_to_spoke};
 use nexus_spoke_adapter::extensions::set_nexus_body;
 use nexus_spoke_adapter::{
     orchestrate_promote, orchestrate_relate, orchestrate_upsert,
@@ -965,7 +966,7 @@ fn promote_adopt_commit_ambiguity_error(
 /// error. That class of failure should surface as a panic at the seam,
 /// not a misleading 422 to the caller.
 fn build_spoke_promote_request(candidate: &WorldKbEntry) -> PromoteRequest {
-    let spoke_entry: SpokeKnowledgeEntry = candidate.clone().into();
+    let spoke_entry: SpokeKnowledgeEntry = world_kb_to_spoke(candidate);
     let wire = serde_json::to_value(&spoke_entry).unwrap_or_else(|_| serde_json::json!({}));
     serde_json::from_value(serde_json::json!({ "candidate": wire }))
         .expect("KnowledgeEntry-derived candidate fits PromoteRequest.candidate shape")
@@ -992,7 +993,7 @@ fn build_spoke_promote_request(candidate: &WorldKbEntry) -> PromoteRequest {
 /// orchestrator derives it from its own `get_knowledge_entry` + the candidate's
 /// `revision` (which the caller sets to the current stored revision).
 fn build_spoke_upsert_request(entry: &WorldKbEntry) -> UpsertRequest {
-    let mut spoke_entry: SpokeKnowledgeEntry = entry.clone().into();
+    let mut spoke_entry: SpokeKnowledgeEntry = world_kb_to_spoke(entry);
     // Stash the full nexus body losslessly across the spoke boundary. Spoke's
     // typed BodyAttributeValue only models string/number/bool; null/array/
     // object attribute values have no spoke slot and would be silently dropped
@@ -1060,7 +1061,7 @@ async fn map_upsert_response(
                     ),
                 }
             })?;
-            Ok(spoke_entry.into())
+            Ok(spoke_to_world_kb(spoke_entry))
         }
         // Variant1 is the wire error-envelope case. The orchestrator always
         // surfaces errors via `SpokeResult::Reject` (not Variant1), so this arm
@@ -1271,7 +1272,7 @@ async fn map_promote_reject(
                             "promote_adopt retry-safe: returning existing confirmed entry from prior partial attempt"
                         );
                         return Ok(PromoteAdoptOrchestrateOutcome::RecoveredConfirmed(
-                            existing.into(),
+                            world_kb_to_spoke(&existing),
                         ));
                     }
                     tracing::warn!(
