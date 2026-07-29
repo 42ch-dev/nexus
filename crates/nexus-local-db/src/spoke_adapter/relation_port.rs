@@ -236,8 +236,9 @@ async fn put_relation_create(pool: &sqlx::SqlitePool, relation: Relation) -> Spo
 /// Update path: `expected_base_revision = Some(expected)`. Pre-read the
 /// stored row, reuse [`update_relationship_in_tx`] (CAS `WHERE revision = ?`)
 /// and map any [`LocalDbError::VersionMismatch`] to `STORED_REVISION_STALE`.
-/// nexus-locals not carried on the spoke `Relation` are preserved from the
-/// stored row.
+/// Optional nexus-locals not carried on the spoke `Relation` are CLEARED
+/// (clear-on-omit, behavior-equivalent to pre-cutover); see the block in
+/// [`put_relation_update`] for the full rationale.
 async fn put_relation_update(
     pool: &sqlx::SqlitePool,
     relation: Relation,
@@ -273,16 +274,29 @@ async fn put_relation_update(
 
     let locals = extract_nexus_locals(&relation);
 
-    // Preserve nexus-locals the spoke Relation does not carry from the stored
-    // row (spec: "preserve unchanged nexus-locals on update"). `metadata` is
-    // always taken from the spoke Relation (it is the open metadata bag, not a
-    // nexus-local); an empty bag clears the column.
-    let symmetric = locals.symmetric.unwrap_or(existing.symmetric != 0);
-    let confidence = locals.confidence.or(existing.confidence);
-    let source_anchor_ids = locals
-        .source_anchor_ids
-        .unwrap_or_else(|| parse_anchor_ids(existing.source_anchor_ids.as_deref()));
-    let needs_review = locals.needs_review.unwrap_or(existing.needs_review != 0);
+    // nexus-locals on update follow clear-on-omit semantics: an optional local
+    // the spoke `Relation` does NOT carry is cleared (symmetric→0,
+    // confidence→SQL NULL, source_anchor_ids→'[]', needs_review→0). This is
+    // behavior-equivalent to the pre-cutover `update_relationship_in_tx`,
+    // which wrote every bound local directly (the V1.144 P2 cutover
+    // accidentally switched these to preserve-on-omit, violating AC-I3).
+    //
+    // The orchestrator/handler round-trip stays safe because `get_relation`
+    // (`row_to_relation`) FULLY populates `extensions.nexus` before any
+    // read-modify-write put — so a carried local is never lost on a genuine
+    // round-trip; only an explicit omit clears it. The handler additionally
+    // pre-fills `needs_review` from `existing` when omitted (see
+    // `patch_relationship_update`), so its routine-edit path is unaffected.
+    //
+    // `world_id` and `source` are NOT cleared here: neither is in
+    // `UpdateRelationshipParams`, so `update_relationship_in_tx` always
+    // preserves them from `existing` (required FK / immutable provenance) —
+    // matching the pre-cutover path. `metadata` is the open bag, taken from
+    // the spoke Relation directly; an empty bag clears the column.
+    let symmetric = locals.symmetric.unwrap_or(false);
+    let confidence = locals.confidence;
+    let source_anchor_ids = locals.source_anchor_ids.unwrap_or_default();
+    let needs_review = locals.needs_review.unwrap_or(false);
 
     let metadata_value = if relation.metadata.is_empty() {
         None
@@ -487,8 +501,8 @@ fn row_to_relation(row: &KbRelationshipRow) -> Relation {
 
 /// nexus-locals carried under `extensions.nexus` on a spoke `Relation`.
 /// Every field is optional — the create path defaults missing fields to the
-/// V1.76 manual-author shape; the update path preserves them from the stored
-/// row.
+/// V1.76 manual-author shape; the update path clears-on-omit (an absent
+/// optional local is cleared, matching pre-cutover `update_relationship_in_tx`).
 #[derive(Default)]
 struct NexusLocals {
     world_id: Option<String>,
@@ -1028,5 +1042,159 @@ mod tests {
             }
             SpokeResult::Ok(_) => panic!("expected STORED_REVISION_STALE reject"),
         }
+    }
+
+    // ── V1.144 Phase 5 fix: clear-on-omit + round-trip safety ──────────
+
+    /// Regression (V1.144 Phase 5 fix): an update that OMITS the optional
+    /// nexus-locals must CLEAR them, matching the pre-cutover
+    /// `update_relationship_in_tx` (which wrote every bound local —
+    /// None→SQL NULL). The P2 cutover accidentally switched these to
+    /// preserve-on-omit; this test pins the restored clear-on-omit semantics
+    /// for `confidence`, `symmetric`, `source_anchor_ids`, and `needs_review`.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn put_relation_update_omitting_optional_clears_it() {
+        let (pool, _dir) = fresh_pool().await;
+        seed_world_and_endpoints(&pool).await;
+
+        let adapter = NexusBaselineAdapter::new(pool);
+
+        // Create with the full set of optional locals set explicitly.
+        let seed: Relation = serde_json::from_value(json!({
+            "schema_version": 1,
+            "relation_id": "rel_clr",
+            "from_id": "kb_src",
+            "to_id": "kb_dst",
+            "relation_type": "allied_with",
+            "extensions": {
+                "nexus": {
+                    "world_id": "wld_rel",
+                    "symmetric": true,
+                    "confidence": 0.9,
+                    "source_anchor_ids": ["anc_x"],
+                    "needs_review": true
+                }
+            }
+        }))
+        .expect("valid seed Relation");
+        let created = unwrap_ok(adapter.put_relation(seed, None), "create");
+        assert_eq!(created.revision, Some(1));
+
+        // Update with a Relation that carries ONLY the required world_id and
+        // omits every optional local (plus a label change so the CAS write is
+        // observable). Clear-on-omit must clear confidence/symmetric/etc.
+        let update: Relation = serde_json::from_value(json!({
+            "schema_version": 1,
+            "relation_id": "rel_clr",
+            "from_id": "kb_src",
+            "to_id": "kb_dst",
+            "relation_type": "allied_with",
+            "label": "cleared locals",
+            "extensions": {
+                "nexus": {
+                    "world_id": "wld_rel"
+                }
+            }
+        }))
+        .expect("valid update Relation omitting optional locals");
+        let updated = unwrap_ok(adapter.put_relation(update, Some(1)), "update");
+        assert_eq!(updated.revision, Some(2));
+
+        // Re-read through the port and confirm every omitted local is cleared.
+        let r = unwrap_ok(adapter.get_relation("rel_clr"), "re-read");
+        let key = RelationExtensionsKey::try_from("nexus").unwrap();
+        let ns = r.extensions.get(&key).expect("nexus namespace present");
+        assert_eq!(
+            ns.get("symmetric"),
+            Some(&json!(false)),
+            "omitted symmetric is cleared (false)"
+        );
+        assert_eq!(
+            ns.get("confidence"),
+            None,
+            "omitted confidence is cleared (absent from extensions.nexus = SQL NULL)"
+        );
+        assert_eq!(
+            ns.get("source_anchor_ids"),
+            Some(&json!([])),
+            "omitted source_anchor_ids is cleared (empty array)"
+        );
+        assert_eq!(
+            ns.get("needs_review"),
+            Some(&json!(false)),
+            "omitted needs_review is cleared (false)"
+        );
+        assert_eq!(r.label.as_deref(), Some("cleared locals"));
+    }
+
+    /// Safety check (V1.144 Phase 5 fix): a full get→put round-trip (read the
+    /// relation via `get_relation`, mutate a non-local field, write it back via
+    /// `put_relation`) must PRESERVE every nexus-local. This proves
+    /// clear-on-omit is safe: `get_relation` (`row_to_relation`) fully
+    /// populates `extensions.nexus`, so the orchestrator/handler round-trip
+    /// never loses a carried local — only an explicit omit clears one.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn put_relation_update_get_put_round_trip_preserves_locals() {
+        let (pool, _dir) = fresh_pool().await;
+        seed_world_and_endpoints(&pool).await;
+
+        let adapter = NexusBaselineAdapter::new(pool);
+
+        // Create with the full set of locals set explicitly.
+        let seed: Relation = serde_json::from_value(json!({
+            "schema_version": 1,
+            "relation_id": "rel_rt2",
+            "from_id": "kb_src",
+            "to_id": "kb_dst",
+            "relation_type": "allied_with",
+            "extensions": {
+                "nexus": {
+                    "world_id": "wld_rel",
+                    "symmetric": true,
+                    "confidence": 0.87,
+                    "source_anchor_ids": ["anc_a", "anc_b"],
+                    "needs_review": true,
+                    "source": "extraction"
+                }
+            }
+        }))
+        .expect("valid seed Relation");
+        let created = unwrap_ok(adapter.put_relation(seed, None), "create");
+        assert_eq!(created.revision, Some(1));
+
+        // Read-modify-write: get the fully-populated Relation, mutate a
+        // non-local field (label), write it back with the get-result's
+        // revision as the CAS base.
+        let read = unwrap_ok(adapter.get_relation("rel_rt2"), "get");
+        assert_eq!(read.revision, Some(1));
+        let mut to_write = read;
+        to_write.label = Some("round-tripped".to_string());
+        let written = unwrap_ok(adapter.put_relation(to_write, Some(1)), "round-trip update");
+        assert_eq!(written.revision, Some(2));
+
+        // Re-read: every local survived the get→put round-trip (clear-on-omit
+        // did NOT fire because get populated them all).
+        let r = unwrap_ok(adapter.get_relation("rel_rt2"), "final get");
+        assert_eq!(r.label.as_deref(), Some("round-tripped"));
+        let key = RelationExtensionsKey::try_from("nexus").unwrap();
+        let ns = r.extensions.get(&key).expect("nexus namespace present");
+        assert_eq!(ns.get("world_id"), Some(&json!("wld_rel")));
+        assert_eq!(ns.get("symmetric"), Some(&json!(true)));
+        let confidence = ns
+            .get("confidence")
+            .and_then(Value::as_f64)
+            .expect("confidence present");
+        assert!(
+            (confidence - 0.87).abs() < 1e-9,
+            "confidence survived round-trip (got {confidence})"
+        );
+        assert_eq!(
+            ns.get("source_anchor_ids"),
+            Some(&json!(["anc_a", "anc_b"]))
+        );
+        assert_eq!(ns.get("needs_review"), Some(&json!(true)));
+        // `source` is immutable on the update path (not in
+        // UpdateRelationshipParams) — preserved from the stored row.
+        assert_eq!(ns.get("source"), Some(&json!("extraction")));
     }
 }
