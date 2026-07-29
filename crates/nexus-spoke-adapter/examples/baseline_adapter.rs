@@ -2,13 +2,14 @@
 //! adoptable from the `nexus-spoke-adapter` crate.
 //!
 //! Implements a minimal in-memory [`NexusBaselineMock`] satisfying all six
-//! baseline port traits (with optimistic-concurrency enforcement on
-//! `put_knowledge_entry`), then drives `orchestrate_promote` (happy path +
-//! stale-revision CAS reject) and `orchestrate_assemble` (happy path)
-//! end-to-end through it. The mock owns storage I/O only; every lifecycle
-//! invariant (validate / apply / scope-filter / packet-build / revision
-//! compare) stays in `spoke_operations` — the call-boundary invariant (spec
-//! §7) is preserved.
+//! baseline port traits (with optimistic-concurrency enforcement on both
+//! `put_knowledge_entry` and `put_relation`), then drives `orchestrate_promote`
+//! (happy path + stale-revision CAS reject), `orchestrate_assemble` (happy
+//! path), and `orchestrate_relate` (create happy + update happy + stale CAS
+//! reject) end-to-end through it. The mock owns storage I/O only; every
+//! lifecycle invariant (validate / apply / scope-filter / packet-build /
+//! revision compare) stays in `spoke_operations` — the call-boundary
+//! invariant (spec §7) is preserved.
 //!
 //! Run with:
 //! ```text
@@ -28,12 +29,13 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 
 use nexus_spoke_adapter::{
-    orchestrate_assemble, orchestrate_promote, AssembleRequest, AssembleResponse, Finding,
-    FindingPort, HostCapabilityManifest, HostManifestPort, KnowledgeEntry, KnowledgeEntryPort,
-    PromoteRequest, PromoteResponse, Relation, RelationPort, Rule, RuleQueryPort, Scope,
-    ScopeQueryPort, SpokeReject, SpokeRejectCode, SpokeResult, TimelineEvent,
+    orchestrate_assemble, orchestrate_promote, orchestrate_relate, AssembleRequest,
+    AssembleResponse, Finding, FindingPort, HostCapabilityManifest, HostManifestPort,
+    KnowledgeEntry, KnowledgeEntryPort, PromoteRequest, PromoteResponse, RelateRequest,
+    RelateResponse, Relation, RelationPort, Rule, RuleQueryPort, Scope, ScopeQueryPort,
+    SpokeReject, SpokeRejectCode, SpokeResult, TimelineEvent,
 };
-use serde_json::{json, Map};
+use serde_json::{json, Map, Value};
 // simplify: `spoke_ok` / `spoke_reject` are convenience constructors for
 // `SpokeResult` values used inside the mock's port impls. The adapter crate
 // deliberately does not re-export them (that would widen its public API), so
@@ -60,7 +62,7 @@ use spoke_operations::{spoke_ok, spoke_reject};
 /// binary itself `pub` is a no-op (the binary crate root sees everything).
 pub struct NexusBaselineMock {
     entries: RefCell<HashMap<String, KnowledgeEntry>>,
-    relations: RefCell<Vec<Relation>>,
+    relations: RefCell<HashMap<String, Relation>>,
     events: RefCell<Vec<TimelineEvent>>,
     rules: RefCell<HashMap<String, Rule>>,
     findings: RefCell<Vec<Finding>>,
@@ -90,7 +92,7 @@ impl NexusBaselineMock {
         entries.insert(entry.entry_id.clone(), entry);
         Self {
             entries: RefCell::new(entries),
-            relations: RefCell::new(Vec::new()),
+            relations: RefCell::new(HashMap::new()),
             events: RefCell::new(Vec::new()),
             rules: RefCell::new(HashMap::new()),
             findings: RefCell::new(Vec::new()),
@@ -229,29 +231,108 @@ impl KnowledgeEntryPort for NexusBaselineMock {
 }
 
 impl RelationPort for NexusBaselineMock {
-    /// P0 compile-gate stub — production lookup ships in P1 (V1.144).
-    /// This mock is never read via `get_relation` (no `orchestrate_relate`
-    /// call exercises it in the example or parity tests); returns
-    /// `RelationNotFound`.
+    /// In-memory OCC reference — mirrors the production
+    /// `nexus-local-db::NexusBaselineAdapter::get_relation`: read the stored
+    /// `Relation` by id; absent → `RelationNotFound`.
     fn get_relation(&self, relation_id: &str) -> SpokeResult<Relation> {
+        let relations = self.relations.borrow();
+        if let Some(relation) = relations.get(relation_id) {
+            return spoke_ok(relation.clone());
+        }
         let mut details = Map::new();
         details.insert("relation_id".to_string(), json!(relation_id));
         spoke_reject(
             SpokeRejectCode::RelationNotFound,
-            format!("Relation lookup is a P0 compile-gate stub (P1 will implement): {relation_id}"),
+            format!("Relation not found: {relation_id}"),
             Some(details),
         )
     }
 
-    /// P0 compile-gate — `expected_base_revision` is ignored until P1 CAS
-    /// impl (V1.144). The insert-only store-and-return path is preserved.
+    /// In-memory OCC reference — mirrors the production
+    /// `nexus-local-db::NexusBaselineAdapter::put_relation` (spec §7.4 OCC
+    /// contract):
+    ///
+    /// | `expected_base_revision` | Path   | Outcome                                                              |
+    /// |--------------------------|--------|----------------------------------------------------------------------|
+    /// | `None`                   | create | absent → seed `revision = 1` + insert; present → `RelationAlreadyExists` |
+    /// | `Some(expected)`         | CAS    | absent → `StoredRevisionStale` (storeRevision=null); `stored > expected` or `stored < expected` → `StoredRevisionStale` (every mismatch collapses, matching production); `stored == expected` → bump to `expected + 1` + insert |
+    ///
+    /// Unlike `put_knowledge_entry` (where the promote orchestrator bumps the
+    /// candidate's revision before calling the port), the relate orchestrator
+    /// passes the candidate through untouched — so the port owns the revision
+    /// seed/bump, exactly as the production SQLite-backed port does.
     fn put_relation(
         &self,
         relation: Relation,
-        _expected_base_revision: Option<u64>,
+        expected_base_revision: Option<u64>,
     ) -> SpokeResult<Relation> {
-        self.relations.borrow_mut().push(relation.clone());
-        spoke_ok(relation)
+        let mut relations = self.relations.borrow_mut();
+        let relation_id = relation.relation_id.clone();
+        match expected_base_revision {
+            None => {
+                if relations.contains_key(&relation_id) {
+                    let mut details = Map::new();
+                    details.insert("relation_id".into(), json!(relation_id));
+                    return spoke_reject(
+                        SpokeRejectCode::RelationAlreadyExists,
+                        format!("Relation already exists: {relation_id}"),
+                        Some(details),
+                    );
+                }
+                // Seed revision = 1 (spoke convention; matches the production
+                // port's INSERT with `revision = 1`).
+                let mut stored = relation;
+                stored.revision = Some(1);
+                relations.insert(relation_id, stored.clone());
+                spoke_ok(stored)
+            }
+            Some(expected) => match relations.get(&relation_id) {
+                None => {
+                    // Absent + Some(expected): the store has no revision at
+                    // all. Collapses to STORED_REVISION_STALE with
+                    // storeRevision=null (mirrors production).
+                    let mut details = Map::new();
+                    details.insert("relation_id".into(), json!(relation_id));
+                    details.insert("expectedBaseRevision".into(), json!(expected));
+                    details.insert("storeRevision".into(), Value::Null);
+                    spoke_reject(
+                        SpokeRejectCode::StoredRevisionStale,
+                        format!(
+                            "Relation not found for update: {relation_id} (expected base {expected})"
+                        ),
+                        Some(details),
+                    )
+                }
+                Some(stored) => {
+                    let current = stored.revision.unwrap_or(0);
+                    if current != expected {
+                        // The relation-port CAS mapping collapses every
+                        // mismatch to STORED_REVISION_STALE (simpler than the
+                        // KnowledgeEntryPort 3-way split — the relate
+                        // orchestrator pre-routes create vs update, so the
+                        // only reachable failure here is "the store moved
+                        // since the caller's read"). Matches production.
+                        let mut details = Map::new();
+                        details.insert("relation_id".into(), json!(relation_id));
+                        details.insert("expectedBaseRevision".into(), json!(expected));
+                        details.insert("storeRevision".into(), json!(current));
+                        return spoke_reject(
+                            SpokeRejectCode::StoredRevisionStale,
+                            format!(
+                                "Store revision {current} is not the expected base {expected} for relation {relation_id}"
+                            ),
+                            Some(details),
+                        );
+                    }
+                    // current == expected: accept, bump revision to expected + 1
+                    // (matches production `update_relationship_in_tx`).
+                    let mut updated = relation;
+                    updated.revision = Some(expected + 1);
+                    relations.insert(relation_id, updated.clone());
+                    spoke_ok(updated)
+                }
+            },
+        }
     }
 }
 
@@ -353,6 +434,35 @@ pub fn assemble_request(scope_id: &str, entry_id: &str) -> AssembleRequest {
     .expect("valid AssembleRequest fixture")
 }
 
+/// Build the wire shape for a `Relation`.
+///
+/// `revision` is parameterized so the same builder serves the create candidate
+/// (revision absent → `None`) and the update candidates (revision set
+/// explicitly to drive the CAS gate).
+pub fn relation_wire(relation_id: &str, revision: Option<u64>) -> serde_json::Value {
+    let mut wire = json!({
+        "schema_version": 1,
+        "relation_id": relation_id,
+        "from_id": "kb_mira",
+        "to_id": "kb_aran",
+        "relation_type": "allied_with",
+        "label": "Mira \u{2194} Aran",
+        "metadata": { "bond": "inaugural-arc" },
+        "extensions": {}
+    });
+    if let Some(rev) = revision {
+        wire["revision"] = json!(rev);
+    }
+    wire
+}
+
+/// Wrap a `Relation` wire into a `RelateRequest` via JSON round-trip (mirrors
+/// the daemon's `build_spoke_relate_request`).
+pub fn relate_request(relation_id: &str, revision: Option<u64>) -> RelateRequest {
+    serde_json::from_value(json!({ "relation": relation_wire(relation_id, revision) }))
+        .expect("valid RelateRequest fixture")
+}
+
 fn print_reject(label: &str, reject: &SpokeReject) {
     println!(
         "  [{label}] REJECT code={} message={}",
@@ -419,6 +529,58 @@ fn main() {
         }
         SpokeResult::Ok(_) => println!("  (unexpected assemble response variant)"),
         SpokeResult::Reject(reject) => print_reject("assemble", &reject),
+    }
+    println!();
+
+    // ── 4. orchestrate_relate — create happy path ─────────────────────
+    // The candidate carries no revision (valid for create per
+    // `validate_create_revision`). The orchestrator loads stored → absent →
+    // create path → calls our mock's `put_relation(candidate, None)`. The
+    // mock seeds revision = 1 (spoke convention) and returns the stored
+    // relation. This is the 3rd shipped Surface B cutover (promote + upsert
+    // + relate) exercised through the mock.
+    println!("--- 4. orchestrate_relate (create happy path) ---");
+    match orchestrate_relate(&mock, relate_request("rel_demo", None)) {
+        SpokeResult::Ok(RelateResponse::Variant0 { relation, .. }) => {
+            println!(
+                "  OK: relation_id={} type={} revision={:?}",
+                relation.relation_id, relation.relation_type, relation.revision
+            );
+        }
+        SpokeResult::Ok(_) => println!("  (unexpected relate response variant)"),
+        SpokeResult::Reject(reject) => print_reject("relate-create", &reject),
+    }
+    println!();
+
+    // ── 5. orchestrate_relate — update happy path ─────────────────────
+    // The create seeded revision = 1. Issuing a relate whose candidate
+    // claims revision 1 matches stored; the orchestrator's
+    // `assert_revision_match(1, 1)` passes, then our mock's CAS sees
+    // stored(1) == expected(1) → accepts and bumps to revision 2.
+    println!("--- 5. orchestrate_relate (update happy path) ---");
+    match orchestrate_relate(&mock, relate_request("rel_demo", Some(1))) {
+        SpokeResult::Ok(RelateResponse::Variant0 { relation, .. }) => {
+            println!(
+                "  OK: relation_id={} revision={:?} (bumped 1 -> 2)",
+                relation.relation_id, relation.revision
+            );
+        }
+        SpokeResult::Ok(_) => println!("  (unexpected relate response variant)"),
+        SpokeResult::Reject(reject) => print_reject("relate-update", &reject),
+    }
+    println!();
+
+    // ── 6. orchestrate_relate — stale CAS reject ──────────────────────
+    // The update bumped the stored revision to 2. Issuing another relate
+    // whose candidate STILL claims revision 1 triggers the orchestrator's
+    // `assert_revision_match(1, 2)`: the store is ahead of the caller's
+    // expectation, so it rejects with `STORED_REVISION_STALE`. Same shape
+    // as the promote CAS reject (block 2) — the CAS gate surfaces through
+    // the orchestrator's validation before the mock's put fires.
+    println!("--- 6. orchestrate_relate (stale revision -> CAS reject) ---");
+    match orchestrate_relate(&mock, relate_request("rel_demo", Some(1))) {
+        SpokeResult::Ok(_) => println!("  UNEXPECTED OK — expected CAS reject"),
+        SpokeResult::Reject(reject) => print_reject("relate-cas", &reject),
     }
     println!();
     println!("=== example complete ===");
