@@ -466,7 +466,7 @@ On create, the adapter seeds `revision = 1` (spoke convention), not `0` (nexus V
 Each orchestrator adoption on a daemon write path is registered here. The registry records the handler, the orchestrator, the adapter, and the cutover iteration.
 
 | Orchestrator | Handler (symbol) | File | Adapter | Cutover | Status |
-|---|---|---|---|---|---|---|
+|---|---|---|---|---|---|
 | `orchestrate_promote` | `promote_adopt()` | `world_kb.rs:608` | `NexusBaselineAdapter` | V1.142 | Shipped |
 | `orchestrate_upsert` | `patch_entity()` | `world_kb.rs:286` | `NexusBaselineAdapter` | V1.143 | Shipped |
 | `orchestrate_relate` | `patch_relationship_add()` / `_update()` | `world_kb.rs:1669`/`1727` | `NexusBaselineAdapter` | V1.144 | Planned (0.5.0 unblocks) |
