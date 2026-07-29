@@ -19,7 +19,7 @@
 //! implement spoke's ports and call spoke's `orchestrate_*` functions through
 //! this single import boundary — still no nexus logic, still pure pass-through.
 //!
-//! Since V1.142 the crate additionally re-exports spoke 0.4.1's timeline
+//! Since V1.142 the crate additionally re-exports spoke 0.5.0's timeline
 //! beat-assist pure helpers (Surface A — `filter_timeline_events_by_moment_scale`,
 //! `order_timeline_events_by_ids`, `order_timeline_events_by_precedes`, plus
 //! the `OrderTimelineEventsByPrecedesOptions` operand) — again pure
