@@ -26,6 +26,7 @@ pub mod finding_port;
 pub mod host_manifest_port;
 pub mod knowledge_entry_port;
 pub mod mca_read;
+pub mod narrative_read;
 pub mod relation_port;
 pub mod rule_query_port;
 pub mod scope_query_port;
