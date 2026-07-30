@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT\n             relationship_id,\n             world_id,\n             source_entity_id,\n             target_entity_id,\n             relation_type,\n             custom_label as \"custom_label?\",\n             symmetric,\n             confidence as \"confidence?\",\n             source_anchor_ids as \"source_anchor_ids?\",\n             metadata as \"metadata?\",\n             created_at,\n             updated_at,\n             revision,\n             needs_review,\n             source\n           FROM kb_relationships\n           WHERE relationship_id = ?",
+  "query": "SELECT\n              relationship_id,\n              world_id,\n              source_entity_id,\n              target_entity_id,\n              relation_type,\n              custom_label as \"custom_label?\",\n              symmetric,\n              confidence as \"confidence?\",\n              source_anchor_ids as \"source_anchor_ids?\",\n              metadata as \"metadata?\",\n              created_at,\n              updated_at,\n              revision,\n              needs_review,\n              source,\n              extensions_nexus_json as \"extensions_nexus_json?\"\n            FROM kb_relationships\n            WHERE world_id = ?\n            ORDER BY updated_at DESC\n            LIMIT ?",
   "describe": {
     "columns": [
       {
@@ -77,10 +77,15 @@
         "name": "source",
         "ordinal": 14,
         "type_info": "Text"
+      },
+      {
+        "name": "extensions_nexus_json?",
+        "ordinal": 15,
+        "type_info": "Text"
       }
     ],
     "parameters": {
-      "Right": 1
+      "Right": 2
     },
     "nullable": [
       false,
@@ -97,8 +102,9 @@
       false,
       false,
       false,
-      false
+      false,
+      true
     ]
   },
-  "hash": "313a34b67372a9161916fa97aa47664edf69aa4524bbbfd4a14d9bbc9e2be13e"
+  "hash": "52b021fda8bf27c01970c265a4a697d6d26b87ed28ddea6cb5af9c3b3a28fb48"
 }

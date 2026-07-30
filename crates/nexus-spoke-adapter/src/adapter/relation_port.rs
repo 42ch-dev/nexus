@@ -227,6 +227,7 @@ async fn put_relation_create(pool: &sqlx::SqlitePool, relation: Relation) -> Spo
         revision: 1,
         needs_review: f.needs_review_i64,
         source: f.source,
+        extensions_nexus_json: None,
     };
     SpokeResult::Ok(crate::conversion::kb_relationship_row_to_spoke(&row))
 }
@@ -313,6 +314,7 @@ async fn put_relation_update(
         metadata: metadata_value,
         updated_at: chrono::Utc::now().to_rfc3339(),
         needs_review,
+        extensions_nexus_json: None,
     };
 
     // `update_relationship_in_tx` compares `revision = expected_revision` (CAS).

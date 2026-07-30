@@ -27,7 +27,7 @@ pub fn generate_relationship_id() -> String {
     format!("rel_{}", uuid::Uuid::new_v4().simple())
 }
 
-/// Row type matching the `kb_relationships` DDL (V1.74 + V1.76 columns).
+/// Row type matching the `kb_relationships` DDL (V1.74 + V1.76 + V1.146 columns).
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub struct KbRelationshipRow {
     pub relationship_id: String,
@@ -48,6 +48,10 @@ pub struct KbRelationshipRow {
     pub needs_review: i64,
     /// V1.76: provenance — [`SOURCE_MANUAL`] or [`SOURCE_EXTRACTION`].
     pub source: String,
+    /// V1.146 P5 T1: full serialized `extensions.nexus` namespace (round-trip).
+    /// Known identity fields stay authoritative in their typed columns above;
+    /// this column preserves unknown keys when a spoke Relation transits `SQLite`.
+    pub extensions_nexus_json: Option<String>,
 }
 
 /// Params for inserting a new relationship row.
@@ -71,6 +75,9 @@ pub struct InsertRelationshipParams {
     /// V1.76: provenance. [`SOURCE_MANUAL`] for author adds;
     /// [`SOURCE_EXTRACTION`] for extraction suggestions.
     pub source: String,
+    /// V1.146 P5 T1: serialized `extensions.nexus` for round-trip preservation.
+    /// `None` (NULL in DB) for rows without extra extension keys.
+    pub extensions_nexus_json: Option<String>,
 }
 
 /// Params for updating an existing relationship row.
@@ -87,6 +94,9 @@ pub struct UpdateRelationshipParams {
     /// patch-relationship route carries it so no second promotion state machine
     /// is needed. `source` is immutable and not part of the update payload.
     pub needs_review: bool,
+    /// V1.146 P5 T1: serialized `extensions.nexus` for round-trip preservation.
+    /// `None` clears the column; `Some(...)` writes it.
+    pub extensions_nexus_json: Option<String>,
 }
 
 pub(crate) fn bool_to_i64(v: bool) -> i64 {
@@ -123,13 +133,15 @@ pub async fn insert_relationship_in_tx(
         .map(|v| serde_json::to_string(v).unwrap_or_else(|_| "{}".to_string()));
     let custom_label_ref = params.custom_label.as_deref();
 
+    let extensions_nexus_ref = params.extensions_nexus_json.as_deref();
+
     sqlx::query!(
         r#"INSERT INTO kb_relationships
            (relationship_id, world_id, source_entity_id, target_entity_id,
             relation_type, custom_label, symmetric, confidence,
             source_anchor_ids, metadata, created_at, updated_at, revision,
-            needs_review, source)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"#,
+            needs_review, source, extensions_nexus_json)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"#,
         params.relationship_id,
         params.world_id,
         params.source_entity_id,
@@ -145,6 +157,7 @@ pub async fn insert_relationship_in_tx(
         0i64,
         needs_review_i64,
         params.source,
+        extensions_nexus_ref,
     )
     .execute(&mut **tx)
     .await?;
@@ -165,6 +178,7 @@ pub async fn insert_relationship_in_tx(
         revision: 0,
         needs_review: needs_review_i64,
         source: params.source.clone(),
+        extensions_nexus_json: params.extensions_nexus_json.clone(),
     })
 }
 
@@ -200,6 +214,8 @@ pub async fn update_relationship_in_tx(
         .map(|v| serde_json::to_string(v).unwrap_or_else(|_| "{}".to_string()));
     let custom_label_ref = params.custom_label.as_deref();
 
+    let extensions_nexus_ref = params.extensions_nexus_json.as_deref();
+
     let result = sqlx::query!(
         r#"UPDATE kb_relationships SET
              relation_type = ?,
@@ -209,6 +225,7 @@ pub async fn update_relationship_in_tx(
              source_anchor_ids = ?,
              metadata = ?,
              needs_review = ?,
+             extensions_nexus_json = ?,
              updated_at = ?,
              revision = ?
            WHERE relationship_id = ? AND revision = ?"#,
@@ -219,6 +236,7 @@ pub async fn update_relationship_in_tx(
         source_anchor_json,
         metadata_json,
         needs_review_i64,
+        extensions_nexus_ref,
         params.updated_at,
         new_revision,
         relationship_id,
@@ -255,6 +273,7 @@ pub async fn update_relationship_in_tx(
         needs_review: needs_review_i64,
         // source is immutable — preserved from the existing row.
         source: existing.source.clone(),
+        extensions_nexus_json: params.extensions_nexus_json.clone(),
     })
 }
 
@@ -321,7 +340,8 @@ pub async fn get_relationship(
              updated_at,
              revision,
              needs_review,
-             source
+             source,
+             extensions_nexus_json as "extensions_nexus_json?"
            FROM kb_relationships
            WHERE relationship_id = ?"#,
         relationship_id,
@@ -381,7 +401,8 @@ pub async fn list_relationships_for_world(
               updated_at,
               revision,
               needs_review,
-              source
+              source,
+              extensions_nexus_json as "extensions_nexus_json?"
             FROM kb_relationships
             WHERE world_id = ?
             ORDER BY updated_at DESC
@@ -409,7 +430,8 @@ pub async fn list_relationships_for_world(
               updated_at,
               revision,
               needs_review,
-              source
+              source,
+              extensions_nexus_json as "extensions_nexus_json?"
             FROM kb_relationships
             WHERE world_id = ? AND needs_review = 0
             ORDER BY updated_at DESC
@@ -652,8 +674,10 @@ mod tests {
                 created_at: chrono::Utc::now().to_rfc3339(),
                 updated_at: chrono::Utc::now().to_rfc3339(),
                 needs_review: false,
-                source: SOURCE_MANUAL.to_string(),
+                                source: SOURCE_MANUAL.to_string(),
+                extensions_nexus_json: None,
             },
+            
         )
         .await
         .unwrap();
@@ -689,8 +713,10 @@ mod tests {
                 created_at: chrono::Utc::now().to_rfc3339(),
                 updated_at: chrono::Utc::now().to_rfc3339(),
                 needs_review: false,
-                source: SOURCE_MANUAL.to_string(),
+                                source: SOURCE_MANUAL.to_string(),
+                extensions_nexus_json: None,
             },
+            
         )
         .await
         .unwrap();
@@ -711,6 +737,7 @@ mod tests {
                 metadata: None,
                 updated_at: chrono::Utc::now().to_rfc3339(),
                 needs_review: false,
+                extensions_nexus_json: None,
             },
             0,
             &existing,
@@ -750,8 +777,10 @@ mod tests {
                 created_at: chrono::Utc::now().to_rfc3339(),
                 updated_at: chrono::Utc::now().to_rfc3339(),
                 needs_review: false,
-                source: SOURCE_MANUAL.to_string(),
+                                source: SOURCE_MANUAL.to_string(),
+                extensions_nexus_json: None,
             },
+            
         )
         .await
         .unwrap();
@@ -771,6 +800,7 @@ mod tests {
                 metadata: None,
                 updated_at: chrono::Utc::now().to_rfc3339(),
                 needs_review: false,
+                extensions_nexus_json: None,
             },
             99,
             &existing,
@@ -803,8 +833,10 @@ mod tests {
                 created_at: chrono::Utc::now().to_rfc3339(),
                 updated_at: chrono::Utc::now().to_rfc3339(),
                 needs_review: false,
-                source: SOURCE_MANUAL.to_string(),
+                                source: SOURCE_MANUAL.to_string(),
+                extensions_nexus_json: None,
             },
+            
         )
         .await
         .unwrap();
@@ -843,6 +875,7 @@ mod tests {
                     updated_at: format!("{}-{:02}", chrono::Utc::now().to_rfc3339(), i),
                     needs_review: false,
                     source: SOURCE_MANUAL.to_string(),
+                    extensions_nexus_json: None,
                 },
             )
             .await
@@ -883,6 +916,7 @@ mod tests {
                     updated_at: format!("{}-{:02}", chrono::Utc::now().to_rfc3339(), i),
                     needs_review: false,
                     source: SOURCE_MANUAL.to_string(),
+                    extensions_nexus_json: None,
                 },
             )
             .await
