@@ -22,6 +22,7 @@
 //! context (e.g. an HTTP handler or a `#[tokio::test(flavor = "multi_thread")]`
 //! test) so a runtime handle is available.
 
+pub mod computable_port;
 pub mod finding_port;
 pub mod host_manifest_port;
 pub mod knowledge_entry_port;
@@ -178,6 +179,8 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn nexus_adapter_satisfies_baseline_ports_blanket_impl() {
         fn accepts_baseline_ports(_: &dyn crate::BaselinePorts) {}
+        fn accepts_computable_ports(_: &dyn crate::ComputablePorts) {}
+        fn accepts_computable_port(_: &dyn crate::ComputablePort) {}
         fn accepts_knowledge_entry_port(_: &dyn crate::KnowledgeEntryPort) {}
         fn accepts_relation_port(_: &dyn crate::RelationPort) {}
         fn accepts_scope_query_port(_: &dyn crate::ScopeQueryPort) {}
@@ -192,6 +195,8 @@ mod tests {
         let adapter = NexusAdapter::new(pool);
 
         accepts_baseline_ports(&adapter);
+        accepts_computable_port(&adapter);
+        accepts_computable_ports(&adapter);
         accepts_knowledge_entry_port(&adapter);
         accepts_relation_port(&adapter);
         accepts_scope_query_port(&adapter);
