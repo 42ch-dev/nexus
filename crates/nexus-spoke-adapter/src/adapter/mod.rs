@@ -176,7 +176,7 @@ mod tests {
     /// NexusAdapter` block exists. The function body is empty
     /// — runtime behavior is exercised in the per-port `tests` modules.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn nexus_baseline_adapter_satisfies_baseline_ports_blanket_impl() {
+    async fn nexus_adapter_satisfies_baseline_ports_blanket_impl() {
         fn accepts_baseline_ports(_: &dyn crate::BaselinePorts) {}
         fn accepts_knowledge_entry_port(_: &dyn crate::KnowledgeEntryPort) {}
         fn accepts_relation_port(_: &dyn crate::RelationPort) {}
