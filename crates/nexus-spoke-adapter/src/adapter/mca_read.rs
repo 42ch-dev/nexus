@@ -6,38 +6,41 @@
 //! `KnowledgeEntry` (via the [`conversion`] seam) → [`WorldKbEntry`] (via
 //! [`spoke_to_world_kb`]).
 //!
-//! # Why a typed carrier (not `Scope.extensions`)
+//! # `scope.extensions["nexus"]` (spoke-native, ≥ 0.6.0)
 //!
-//! spoke 0.5.0's `Scope` carries only 7 native fields and has **no**
-//! `extensions` map, so the `KbQuery` filters MCA needs (`text_search` /
-//! `canonical_name` / `computable` / `limit` / `offset`) cannot ride on the
-//! spoke `Scope`. They ride the typed [`KbScopeFilters`] carrier alongside the
-//! `Scope`'s native `entry_types`, applied in the same SQL read (P2 spec §7.4
-//! amendment). See the carrier's doc comment in `nexus-local-db::kb_store`.
+//! spoke 0.6.0's `Scope` gained an `extensions` map. The `KbQuery` filters
+//! MCA needs that spoke `Scope` has no native field for (`text_search` /
+//! `canonical_name` / `computable` / `limit` / `offset`) ride
+//! `scope.extensions["nexus"]` (looked up via the typify `ScopeExtensionsKey`
+//! newtype), alongside the `Scope`'s native `entry_types` (mapped from
+//! [`KbQuery::block_type`]). This is the architect's original §7.5
+//! scope-pushdown design — feasible since 0.6.0 (the prior typed
+//! `KbScopeFilters` carrier was a 0.5.0 workaround, now removed). The
+//! round-trip is proven by the `scope_extensions_round_trip` smoke test.
 //!
 //! # Behavior preservation (HARD)
 //!
 //! [`SpokeBackedKbStore::query`] produces a byte-identical [`KbQueryResult`]
-//! to [`SqliteKbStore::query`]: the adapter's scoped read delegates to
-//! [`SqliteKbStore::query_scoped`], which in turn delegates to
-//! [`SqliteKbStore::query`] — same silent 500-row window, same in-memory
-//! filter + pagination, **no** reject-on-overflow (the spoke
-//! `ScopeQueryPort::list_knowledge_entries` reject serves spoke orchestrators,
-//! not MCA).
+//! to [`SqliteKbStore::query`]: the adapter's scoped read extracts the nexus
+//! filters from `scope.extensions["nexus"]`, reconstructs the equivalent
+//! [`KbQuery`], and delegates to [`SqliteKbStore::query`] — same silent
+//! 500-row window, same in-memory filter + pagination, **no**
+//! reject-on-overflow (the spoke `ScopeQueryPort::list_knowledge_entries`
+//! reject serves spoke orchestrators, not MCA).
 //!
 //! [`conversion`]: crate::conversion
 //! [`spoke_to_world_kb`]: crate::conversion::spoke_to_world_kb
 //! [`world_kb_to_spoke`]: crate::conversion::world_kb_to_spoke
-
 use super::NexusBaselineAdapter;
 use crate::conversion::{spoke_to_world_kb, world_kb_to_spoke};
 use crate::extensions::set_nexus_body;
-use crate::KnowledgeEntry;
+use crate::{KnowledgeEntry, Scope, ScopeExtensionsKey};
 use nexus_knowledge::world_kb::knowledge_entry::WorldKbEntry;
 use nexus_knowledge::world_kb::query::{KbQuery, KbQueryResult};
 use nexus_knowledge::world_kb::source_anchor::SourceAnchor;
 use nexus_knowledge::world_kb::store::{KbStore, KbStoreError};
-use nexus_local_db::kb_store::{KbScopeFilters, SqliteKbStore};
+use nexus_local_db::kb_store::SqliteKbStore;
+use serde_json::Value;
 use sqlx::SqlitePool;
 
 // ── Adapter scoped-read method ──────────────────────────────────────────
@@ -59,20 +62,35 @@ pub struct ScopedKbRead {
 
 impl NexusBaselineAdapter<'_> {
     /// MCA `WorldKB` read: list active knowledge entries for a world as spoke
-    /// wire types, applying the typed [`KbScopeFilters`] carrier + the spoke
-    /// `Scope`'s native `entry_types` (V1.145 P2 Option 2).
+    /// wire types, applying the spoke `Scope`'s native `entry_types` plus the
+    /// nexus-specific filters carried under `scope.extensions["nexus"]`
+    /// (V1.145 P2 — scope-pushdown via extensions, spoke-native since 0.6.0).
     ///
-    /// Routes through [`SqliteKbStore::query_scoped`] (→ [`SqliteKbStore::query`])
-    /// so the result matches the direct `query` path's limit/overflow semantics
-    /// **exactly** (silent 500-row window; no reject). Each [`WorldKbEntry`] row
-    /// is projected to a spoke [`KnowledgeEntry`] via the sole conversion seam
-    /// ([`world_kb_to_spoke`]); the lossless `_nexus_body` carrier is stashed so
-    /// the reverse conversion in [`SpokeBackedKbStore`] recovers the exact body
-    /// (V1.143 body-fidelity mechanism, applied to the read path).
+    /// The nexus filters (`text_search` / `canonical_name` / `computable` /
+    /// `limit` / `offset`) are extracted from `scope.extensions["nexus"]`, the
+    /// scope's native `entry_types` is mapped back to [`KbQuery::block_type`],
+    /// and the reconstructed [`KbQuery`] is delegated to
+    /// [`SqliteKbStore::query`] — the canonical read path — so the result
+    /// matches the direct `query` path's limit/overflow semantics **exactly**
+    /// (silent 500-row window; no reject).
     ///
-    /// This is an async inherent method (not the sync spoke `ScopeQueryPort`
-    /// trait method): MCA is an async caller and must NOT inherit the spoke
-    /// port's reject-on-overflow contract.
+    /// # Limit-semantics decision (HARD)
+    ///
+    /// This is an async **inherent** method (not the sync spoke
+    /// [`ScopeQueryPort::list_knowledge_entries`] trait method). MCA must NOT
+    /// inherit the spoke port's reject-on-overflow contract: that reject
+    /// serves spoke orchestrators, while MCA needs the silent-truncate-at-500
+    /// window that [`SqliteKbStore::query`] provides. Unifying the two paths
+    /// would either drop the orchestrator's reject (a regression) or make MCA
+    /// reject (breaks byte-identical `assemble_moment` output). They stay
+    /// separate — the extensions mechanism changes WHERE the MCA filters ride,
+    /// not the limit contract.
+    ///
+    /// Each [`WorldKbEntry`] row is projected to a spoke [`KnowledgeEntry`]
+    /// via the sole conversion seam ([`world_kb_to_spoke`]); the lossless
+    /// `_nexus_body` carrier is stashed so the reverse conversion in
+    /// [`SpokeBackedKbStore`] recovers the exact body (V1.143 body-fidelity
+    /// mechanism, applied to the read path).
     ///
     /// # Errors
     ///
@@ -80,12 +98,12 @@ impl NexusBaselineAdapter<'_> {
     /// [`KbStore::query`]).
     pub async fn list_knowledge_entries_scoped(
         &self,
-        world_id: &str,
-        entry_types: &[String],
-        filters: &KbScopeFilters,
+        scope: &Scope,
     ) -> Result<ScopedKbRead, KbStoreError> {
+        let query = kb_query_from_scope(scope);
+
         let store = SqliteKbStore::new(self.pool.clone());
-        let result = store.query_scoped(world_id, entry_types, filters).await?;
+        let result = store.query(&query).await?;
 
         let items = result
             .items
@@ -121,10 +139,11 @@ impl NexusBaselineAdapter<'_> {
 /// spoke-adapter boundary (V1.145 P2 Option 2).
 ///
 /// [`query`](Self::query) is the production path: it builds a spoke `Scope`
-/// (native fields only) + a [`KbScopeFilters`] carrier from the inbound
-/// [`KbQuery`], calls the adapter's scoped read, and converts each spoke
-/// [`KnowledgeEntry`] back to a [`WorldKbEntry`] via [`spoke_to_world_kb`]. The
-/// result is byte-identical to [`SqliteKbStore::query`] (see the module docs).
+/// (native `entry_types` from [`KbQuery::block_type`] + the nexus-specific
+/// filters under `scope.extensions["nexus"]`) from the inbound [`KbQuery`],
+/// calls the adapter's scoped read, and converts each spoke [`KnowledgeEntry`]
+/// back to a [`WorldKbEntry`] via [`spoke_to_world_kb`]. The result is
+/// byte-identical to [`SqliteKbStore::query`] (see the module docs).
 ///
 /// The remaining read methods (`get_knowledge_entry` / `list_by_world` /
 /// `get_anchors`) delegate to [`SqliteKbStore`] directly — MCA does not call
@@ -152,36 +171,42 @@ impl SpokeBackedKbStore {
         let adapter = NexusBaselineAdapter::new(pool.clone());
         Self { adapter, pool }
     }
+}
 
-    /// Map an inbound [`KbQuery::block_type`] to the spoke `Scope.entry_types`
-    /// wire string (`snake_case`). MCA sends at most one; `None` → empty.
-    ///
-    /// Reuses `BlockType`'s serde mapping (the single source of truth for the
-    /// wire string — `#[serde(rename_all = "snake_case")]`) rather than a
-    /// hand-written variant table, so newly-added variants map automatically.
-    /// A previous version fell back to `format!("{bt:?}").to_lowercase()` on a
-    /// non-string serde result; that fallback was only correct *accidentally*
-    /// (derived `Debug` happens to match `snake_case`) and would silently
-    /// diverge if a variant ever gained a non-standard `Debug` impl. The serde
-    /// representation of a unit enum is always a `Value::String`, so the
-    /// non-string / error arms are unreachable for the current `BlockType`;
-    /// any divergence is surfaced loudly rather than turned into a silent
-    /// query miss.
-    fn block_type_to_entry_types(block_type: Option<nexus_contracts::BlockType>) -> Vec<String> {
-        block_type
-            .map(|bt| match serde_json::to_value(bt) {
-                Ok(serde_json::Value::String(s)) => s,
-                Ok(other) => unreachable!(
-                    "BlockType serialized to non-string {other:?}; \
-                     rename_all = snake_case invariant broken — update the wire mapping deliberately"
-                ),
-                Err(e) => {
-                    unreachable!("BlockType (unit enum) serialization cannot fail: {e}")
-                }
-            })
-            .into_iter()
-            .collect()
-    }
+/// Map an inbound [`KbQuery::block_type`] to the spoke `Scope.entry_types`
+/// wire string (`snake_case`). MCA sends at most one; `None` → empty.
+///
+/// Reuses `BlockType`'s serde mapping (the single source of truth for the
+/// wire string — `#[serde(rename_all = "snake_case")]`) rather than a
+/// hand-written variant table, so newly-added variants map automatically.
+/// The serde representation of a unit enum is always a `Value::String`, so the
+/// non-string / error arms are unreachable for the current `BlockType`; any
+/// divergence is surfaced loudly rather than turned into a silent query miss.
+fn block_type_to_entry_types(block_type: Option<nexus_contracts::BlockType>) -> Vec<String> {
+    block_type
+        .map(|bt| match serde_json::to_value(bt) {
+            Ok(serde_json::Value::String(s)) => s,
+            Ok(other) => unreachable!(
+                "BlockType serialized to non-string {other:?}; \
+                 rename_all = snake_case invariant broken — update the wire mapping deliberately"
+            ),
+            Err(e) => {
+                unreachable!("BlockType (unit enum) serialization cannot fail: {e}")
+            }
+        })
+        .into_iter()
+        .collect()
+}
+
+/// Reverse map: spoke `Scope.entry_types` (`snake_case` wire string) →
+/// [`KbQuery::block_type`]. MCA sends at most one element, so only the first
+/// is consulted. serde round-trips the `snake_case` string emitted by
+/// [`block_type_to_entry_types`] exactly; the legacy `PascalCase` fallback in
+/// `nexus-local-db::kb_store::parse_block_type` is not needed here because
+/// the MCA `entry_types` always originate from the serde forward map (never
+/// from a DB-stored string).
+fn entry_type_to_block_type(s: &str) -> Option<nexus_contracts::BlockType> {
+    serde_json::from_value::<nexus_contracts::BlockType>(Value::String(s.to_string())).ok()
 }
 
 // SAFETY: sqlx SQLite futures borrow the connection pool internally; safe for
@@ -190,23 +215,15 @@ impl SpokeBackedKbStore {
 #[allow(clippy::future_not_send)]
 impl KbStore for SpokeBackedKbStore {
     async fn query(&self, query: &KbQuery) -> Result<KbQueryResult, KbStoreError> {
-        // Build the spoke Scope's native filters + the typed carrier for the
-        // filters spoke Scope cannot hold (spoke 0.5.0 Scope has no extensions).
-        let entry_types = Self::block_type_to_entry_types(query.block_type);
-        let filters = KbScopeFilters {
-            text_search: query.text_search.clone(),
-            canonical_name: query.canonical_name.clone(),
-            computable: query.computable,
-            limit: query.limit,
-            offset: query.offset,
-        };
+        // Build the spoke Scope: native `entry_types` (from block_type) + the
+        // nexus-specific filters under `scope.extensions["nexus"]` (spoke-native
+        // since 0.6.0). The Scope crosses the spoke boundary carrying every
+        // filter MCA needs — no separate typed carrier.
+        let scope = scope_from_kb_query(query);
 
         // Cross the spoke-adapter boundary: storage → spoke KnowledgeEntry,
         // then convert back to the domain type via the sole conversion seam.
-        let read = self
-            .adapter
-            .list_knowledge_entries_scoped(&query.world_id, &entry_types, &filters)
-            .await?;
+        let read = self.adapter.list_knowledge_entries_scoped(&scope).await?;
         let items: Vec<WorldKbEntry> = read.items.into_iter().map(spoke_to_world_kb).collect();
         Ok(KbQueryResult {
             items,
@@ -265,6 +282,139 @@ fn read_only_error(method: &str) -> KbStoreError {
         "SpokeBackedKbStore is read-only (MCA `WorldKB` read path); \
          `{method}` is not supported — use the daemon CRUD / spoke orchestrator paths"
     ))
+}
+
+// ── Scope ↔ KbQuery bridge (spoke-native scope.extensions, ≥ 0.6.0) ──────
+
+/// Build the typed `ScopeExtensionsKey` for the `"nexus"` namespace.
+///
+/// The literal `"nexus"` always satisfies the typify `^[a-z][a-z0-9_-]*$`
+/// namespace regex, so construction is infallible at runtime. The newtype does
+/// not implement `Borrow<str>`, so `HashMap::get("nexus")` does not compile —
+/// this bridges that gap (mirrors `extensions::nexus_key` for the entry key).
+fn nexus_scope_key() -> ScopeExtensionsKey {
+    ScopeExtensionsKey::try_from("nexus")
+        .expect("\"nexus\" matches the ^[a-z][a-z0-9_-]*$ namespace regex")
+}
+
+/// Build a spoke [`Scope`] from an inbound [`KbQuery`] so the `WorldKB` read
+/// crosses the spoke boundary carrying every MCA filter — native `entry_types`
+/// (from `block_type`) + the 5 nexus-specific filters under
+/// `scope.extensions["nexus"]` (V1.145 P2 scope-pushdown, spoke-native ≥ 0.6.0).
+///
+/// Omitted filters (the `None` arms) are left absent so the reverse extraction
+/// in [`kb_query_from_scope`] recovers `None` (round-trips `None ↔ absent`,
+/// matching [`KbQuery`] semantics). The serde construction mirrors the wire
+/// shape proven by the `scope_extensions_round_trip` smoke test.
+fn scope_from_kb_query(query: &KbQuery) -> Scope {
+    let entry_types = block_type_to_entry_types(query.block_type);
+
+    let mut nexus_ns = serde_json::Map::new();
+    if let Some(ts) = &query.text_search {
+        nexus_ns.insert("text_search".into(), Value::String(ts.clone()));
+    }
+    if let Some(name) = &query.canonical_name {
+        nexus_ns.insert("canonical_name".into(), Value::String(name.clone()));
+    }
+    if let Some(computable) = query.computable {
+        nexus_ns.insert("computable".into(), Value::Bool(computable));
+    }
+    // `usize` → JSON number; read back via `as_u64` on the reverse path
+    // (lossless on 64-bit; saturates to u64::MAX on absurd values).
+    if let Some(limit) = query.limit {
+        nexus_ns.insert(
+            "limit".into(),
+            Value::from(u64::try_from(limit).unwrap_or(u64::MAX)),
+        );
+    }
+    if let Some(offset) = query.offset {
+        nexus_ns.insert(
+            "offset".into(),
+            Value::from(u64::try_from(offset).unwrap_or(u64::MAX)),
+        );
+    }
+
+    let mut wire = serde_json::Map::new();
+    wire.insert("scope_id".into(), Value::String(query.world_id.clone()));
+    if !entry_types.is_empty() {
+        wire.insert(
+            "entry_types".into(),
+            Value::Array(entry_types.into_iter().map(Value::String).collect()),
+        );
+    }
+    if !nexus_ns.is_empty() {
+        wire.insert(
+            "extensions".into(),
+            Value::Object(
+                std::iter::once(("nexus".to_string(), Value::Object(nexus_ns))).collect(),
+            ),
+        );
+    }
+
+    serde_json::from_value(Value::Object(wire))
+        .expect("KbQuery → Scope wire shape is schema-valid (mirrors scope_extensions_round_trip)")
+}
+
+/// Reverse of [`scope_from_kb_query`]: reconstruct the [`KbQuery`] from a spoke
+/// [`Scope`] so the adapter's MCA read can delegate to [`SqliteKbStore::query`]
+/// (the canonical silent-truncate path). Called by
+/// [`NexusBaselineAdapter::list_knowledge_entries_scoped`].
+///
+/// Guarantees byte-identical behavior to a direct [`SqliteKbStore::query`]
+/// call: the reconstructed [`KbQuery`] is the exact input that path consumes,
+/// so the 500-row window, in-memory filter, and pagination are identical.
+fn kb_query_from_scope(scope: &Scope) -> KbQuery {
+    let world_id = scope.scope_id.clone();
+
+    // MCA sends at most one entry_type; multiple would be silently dropped by
+    // the KbQuery.block_type single-value mapping. debug_assert surfaces a
+    // future caller before shipping a silent truncation.
+    debug_assert!(
+        scope.entry_types.len() <= 1,
+        "MCA sends at most one entry_type; multiple would be silently dropped \
+         by the KbQuery.block_type single-value mapping"
+    );
+    let block_type = scope
+        .entry_types
+        .first()
+        .and_then(|s| entry_type_to_block_type(s));
+
+    // Extract the 5 nexus-specific filters from scope.extensions["nexus"]; an
+    // absent namespace or absent key recovers `None` (the None ↔ absent round
+    // trip from scope_from_kb_query).
+    let (text_search, canonical_name, computable, limit, offset) = scope
+        .extensions
+        .get(&nexus_scope_key())
+        .map_or((None, None, None, None, None), |ns| {
+            let text_search = ns
+                .get("text_search")
+                .and_then(Value::as_str)
+                .map(str::to_owned);
+            let canonical_name = ns
+                .get("canonical_name")
+                .and_then(Value::as_str)
+                .map(str::to_owned);
+            let computable = ns.get("computable").and_then(Value::as_bool);
+            let limit = ns
+                .get("limit")
+                .and_then(Value::as_u64)
+                .map(|v| usize::try_from(v).unwrap_or(usize::MAX));
+            let offset = ns
+                .get("offset")
+                .and_then(Value::as_u64)
+                .map(|v| usize::try_from(v).unwrap_or(usize::MAX));
+            (text_search, canonical_name, computable, limit, offset)
+        });
+
+    KbQuery {
+        world_id,
+        block_type,
+        canonical_name,
+        text_search,
+        computable,
+        limit,
+        offset,
+    }
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────
