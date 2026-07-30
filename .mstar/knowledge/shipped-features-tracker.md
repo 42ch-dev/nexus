@@ -907,3 +907,14 @@ Archived from [deferred-features-cross-version-tracker.md](deferred-features-cro
 | **Open follow-ups** | `R-V1144P1-001` (Relation unknown-key gap under `extensions.nexus` — no extras-JSON column on `kb_relationships`, unknown keys silently dropped → V1.145+ schema decision); `R-V1144P2-INVALIDINPUT-400` (production ports raise `InvalidInput` for both validation AND storage failures, but `SpokeRejectCode` has no 500-class variant → next spoke pin bump); `R-V1143P0-STRETCH` (T4b, still open from V1.143) |
 | **Roadmap** | V1.145 (next): CLI adapter spoke-protocol service interop + remaining orchestrators/stubs feature-triggered (roadmap step 3 of 3) |
 
+## V1.145 — Spoke consumer alignment (adapter rehome + dep reversal + read via scope.extensions) — 2026-07-30
+
+| Field | Value |
+|-------|-------|
+| **Iteration** | V1.145 (XL, deep-integration completion) |
+| **Integration / PR** | `iteration/v1.145` → `main` (PR [#191](https://github.com/42ch-dev/nexus/pull/191), merge `24c2239a`, MERGED) |
+| **Plans** | P0 local-db storage primitive API; P1 NexusBaselineAdapter rehome to spoke-adapter + dep reversal (seam as free fns / orphan-rule) + conversion seam ownership move; P2 WorldKB read via spoke `scope.extensions["nexus"]` (spoke 0.6.0; P2 redo removed the 0.5.0 typed-carrier workaround); P3 timeline port production (`list_timeline_events` stub→production, table existed V1.26); P4 docs sweep + narrative-read-via-adapter deferred |
+| **Outcome** | Crate topology corrected: `nexus-spoke-adapter` = capability aggregation (conversion seam + adapter + 6 ports + Surface A/B); `nexus-local-db` = pure storage (no spoke-adapter edge); `nexus-knowledge` = pure domain (no spoke-adapter edge). Cycle-free. spoke 0.5.0→0.6.0 bump (Scope.extensions added — the gap that blocked P2; fixed upstream per user's "advance spoke too" principle). `R-V1142P1-003` closed. `wire_contracts_changed: false`. |
+| **Open follow-ups** | `R-V1145P4-001` (narrative-read-via-adapter → V1.146 dep-topology refactor); `R-V1143P0-STRETCH` (T4b precedes); `R-V1144P2-INVALIDINPUT-400` (spoke 500-class); spoke-side: Scope.extensions ✓ (0.6.0), 500-class reject code (open) |
+| **Roadmap** | V1.146 (next): narrative-read refactor + NexusAdapter (FullAdapter) + CLI spoke-protocol interop + spoke-side 500-class contribution |
+
