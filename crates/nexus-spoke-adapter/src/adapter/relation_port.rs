@@ -120,7 +120,7 @@ async fn put_relation_create(pool: &sqlx::SqlitePool, relation: Relation) -> Spo
     let locals = extract_nexus_locals(&relation);
 
     // Pre-check existence. The PK is the true race guard; if a concurrent
-    // writer beats us the INSERT fails and surfaces as InvalidInput —
+    // writer beats us the INSERT fails and surfaces as InternalError —
     // acceptable for the local single-writer daemon path.
     match get_relationship(pool, &relation_id).await {
         Ok(_) => {

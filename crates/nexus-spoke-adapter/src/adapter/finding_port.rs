@@ -667,4 +667,32 @@ mod tests {
         // W-1 transaction wrap, `fnd_rb_first` would be committed here.
         assert_finding_absent(&pool, "fnd_rb_first").await;
     }
+
+    // ── V1.146 P0: InternalError on DB failure ─────────────────────────
+
+    /// DB failure (dropped table) on put_findings surfaces `InternalError`.
+    /// One representative test covers tx-begin/insert/commit — the first
+    /// INSERT inside the transaction hits the missing table and rejects.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn put_findings_on_dropped_table_surfaces_internal_error() {
+        let (pool, _dir) = fresh_pool().await;
+        seed_work(&pool).await;
+        sqlx::query("DROP TABLE findings")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let adapter = NexusBaselineAdapter::new(pool);
+        let finding = spoke_finding("fnd_fail", "info", "open", None, None);
+        match adapter.put_findings(vec![finding]) {
+            SpokeResult::Reject(r) => {
+                assert_eq!(
+                    r.code,
+                    SpokeRejectCode::InternalError,
+                    "dropped table must surface INTERNAL_ERROR on put_findings"
+                );
+            }
+            SpokeResult::Ok(_) => panic!("expected InternalError reject"),
+        }
+    }
 }

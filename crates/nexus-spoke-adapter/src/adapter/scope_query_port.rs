@@ -625,4 +625,52 @@ mod tests {
         TimelineEventExtensionsKey::try_from("nexus")
             .expect("\"nexus\" matches the ^[a-z][a-z0-9_-]*$ namespace regex")
     }
+
+    // ── V1.146 P0: InternalError on DB failure ─────────────────────────
+
+    /// DB failure (dropped table) on list_knowledge_entries surfaces `InternalError`.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn list_knowledge_entries_on_dropped_table_surfaces_internal_error() {
+        let (pool, _dir) = fresh_pool().await;
+        let (world_id, _) = seed_world_with_entries(&pool).await;
+        sqlx::query("DROP TABLE kb_key_blocks")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let adapter = NexusBaselineAdapter::new(pool);
+        match adapter.list_knowledge_entries(&scope_for(&world_id)) {
+            SpokeResult::Reject(r) => {
+                assert_eq!(
+                    r.code,
+                    SpokeRejectCode::InternalError,
+                    "dropped table must surface INTERNAL_ERROR on list_knowledge_entries"
+                );
+            }
+            SpokeResult::Ok(_) => panic!("expected InternalError reject"),
+        }
+    }
+
+    /// DB failure (dropped table) on list_timeline_events surfaces `InternalError`.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn list_timeline_events_on_dropped_table_surfaces_internal_error() {
+        let (pool, _dir) = fresh_pool().await;
+        let (world_id, _) = seed_world_with_timeline_events(&pool).await;
+        sqlx::query("DROP TABLE narrative_timeline_events")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let adapter = NexusBaselineAdapter::new(pool);
+        match adapter.list_timeline_events(&scope_for(&world_id)) {
+            SpokeResult::Reject(r) => {
+                assert_eq!(
+                    r.code,
+                    SpokeRejectCode::InternalError,
+                    "dropped table must surface INTERNAL_ERROR on list_timeline_events"
+                );
+            }
+            SpokeResult::Ok(_) => panic!("expected InternalError reject"),
+        }
+    }
 }
