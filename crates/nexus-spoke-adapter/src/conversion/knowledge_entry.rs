@@ -130,6 +130,7 @@ pub fn world_kb_to_spoke(entry: &WorldKbEntry) -> SpokeKnowledgeEntry {
         entry_id: entry.entry_id.clone(),
         entry_type: block_type_to_entry_type(entry.block_type),
         extensions: HashMap::new(),
+        modules: HashMap::new(),
         revision: entry.revision,
         schema_version: NonZeroU64::new(u64::from(entry.schema_version))
             .expect("schema_version >= 1"),

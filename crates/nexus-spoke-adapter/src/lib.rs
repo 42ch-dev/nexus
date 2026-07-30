@@ -101,7 +101,7 @@ pub use spoke_schemas::{
 // `spoke-schemas` dependency for relation / finding ports.
 pub use spoke_schemas::{
     finding::FindingExtensionsKey, knowledge_entry::KnowledgeEntryExtensionsKey,
-    relation::RelationExtensionsKey,
+    relation::RelationExtensionsKey, ScopeExtensionsKey,
 };
 
 // ── Spoke adapter port + orchestration surface (spoke ≥ 0.3.0) ─────────
