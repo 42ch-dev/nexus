@@ -900,7 +900,7 @@ mod tests {
     }
 
     #[test]
-    fn internal_error_response_body_contains_spoke_error_info() {
+    fn internal_error_message_preserves_orchestrator_context() {
         let err = NexusApiError::Internal {
             code: "INTERNAL_ERROR".to_string(),
             message: "orchestrate_upsert internal error: DB connection lost".to_string(),

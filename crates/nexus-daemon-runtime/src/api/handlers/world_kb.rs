@@ -1117,6 +1117,11 @@ async fn map_upsert_reject(
         | SpokeRejectCode::InvalidKnowledgeEntryStatusTransition => {
             NexusApiError::world_kb_validation_failed(&[reject.message], &[])
         }
+        // explicit 400 contract for validation rejects (S-001)
+        SpokeRejectCode::InvalidInput => NexusApiError::InvalidInput {
+            field: "knowledge_entry".to_string(),
+            reason: reject.message,
+        },
         // V1.146 P0: InternalError → 500 (explicit 500-class mapping; see T4
         // for the adapter-side remap). The body carries the spoke reject
         // message; the public HTTP status is 500 INTERNAL_SERVER_ERROR.
@@ -1362,6 +1367,11 @@ async fn spoke_reject_to_api_error(
         | SpokeRejectCode::KnowledgeEntryTerminalStatus => {
             NexusApiError::world_kb_validation_failed(&[reject.message], &[])
         }
+        // explicit 400 contract for validation rejects (S-001)
+        SpokeRejectCode::InvalidInput => NexusApiError::InvalidInput {
+            field: "promotion".to_string(),
+            reason: reject.message,
+        },
         SpokeRejectCode::RevisionConflict | SpokeRejectCode::StoredRevisionStale => {
             let current = reread_promotion_version(pool, job_id).await.unwrap_or(0);
             NexusApiError::world_kb_conflict(
