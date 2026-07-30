@@ -2360,13 +2360,39 @@ async fn patch_relationship_update(
     let mut input = input;
     let needs_review_for_relation = input.needs_review.unwrap_or(existing.needs_review != 0);
     input.needs_review = Some(needs_review_for_relation);
-    let relation = nexus_input_to_spoke_relation(
+    let mut relation = nexus_input_to_spoke_relation(
         relationship_id,
         world_id,
         &input,
         Some(current_revision),
         None,
     );
+
+    // V1.146 P5 F-001: preserve unknown `extensions.nexus` keys from the
+    // existing row. `nexus_input_to_spoke_relation` only populates the 6 known
+    // nexus-locals; unknown keys from the stored `extensions_nexus_json` must
+    // be merged back so they survive the update round-trip through
+    // `serialize_extensions_nexus_json`. Without this merge, a routine update
+    // (e.g. label change) silently drops any key outside the 6 known locals.
+    let known_nexus_keys: &[&str] = &[
+        "world_id", "symmetric", "confidence", "source_anchor_ids", "needs_review", "source",
+    ];
+    if let Some(json) = &existing.extensions_nexus_json {
+        if let Ok(stored_ns) =
+            serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(json)
+        {
+            let key = RelationExtensionsKey::try_from("nexus")
+                .expect("\"nexus\" matches the extensions-key regex");
+            if let Some(nexus_ns) = relation.extensions.get_mut(&key) {
+                for (k, v) in stored_ns {
+                    if !known_nexus_keys.contains(&k.as_str()) {
+                        nexus_ns.entry(k).or_insert(v);
+                    }
+                }
+            }
+        }
+    }
+
     let spoke_req = build_spoke_relate_request(&relation);
     let adapter = NexusAdapter::new(pool.clone());
     let result = adapter.with_bound_tx(|| orchestrate_relate(&adapter, spoke_req));
