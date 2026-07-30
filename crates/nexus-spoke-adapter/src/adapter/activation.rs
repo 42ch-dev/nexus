@@ -264,13 +264,30 @@ fn evaluate_activation(cfg: &ActivationConfig, scan_text: &str) -> (bool, String
             }
         }
         other => {
-            // Unknown logic → treat as and_any (most permissive fallback).
-            (
-                true,
-                format!(
-                    "unknown activation logic '{other}' — treated as and_any (all keys matched)"
-                ),
-            )
+            // Unknown logic → treat as and_any (most permissive fallback),
+            // actually run matching so the entry is only accepted when a key hits.
+            let matches: Vec<&str> = lower_keys
+                .iter()
+                .filter(|k| scan_text.contains(k.as_str()))
+                .map(String::as_str)
+                .collect();
+            if matches.is_empty() {
+                (
+                    false,
+                    format!(
+                        "unknown activation logic '{other}' — treated as and_any: no key matched ({} keys scanned)",
+                        cfg.key.len()
+                    ),
+                )
+            } else {
+                let matched_keys = matches.join(", ");
+                (
+                    true,
+                    format!(
+                        "unknown activation logic '{other}' — treated as and_any: matched keys [{matched_keys}]"
+                    ),
+                )
+            }
         }
     }
 }
@@ -638,6 +655,37 @@ mod tests {
         let result = apply_activation(&entries, stage0, &[]);
         assert_eq!(result.matched.len(), 2); // kb_m1 (matched) + kb_m3 (neutral)
         assert_eq!(result.unmatched.len(), 1); // kb_m2
+    }
+
+    // ── unknown logic ───────────────────────────────────────────────
+
+    #[test]
+    fn test_unknown_logic_treated_as_and_any_with_matching() {
+        // Unknown logic "fuzzy" must actually run and_any matching.
+        let entries = vec![
+            entry_with_activation(
+                "kb_u1",
+                "Matched",
+                "Contains king",
+                Some(activation_json(&["king"], "fuzzy")),
+            ),
+            entry_with_activation(
+                "kb_u2",
+                "Unmatched",
+                "Nothing relevant",
+                Some(activation_json(&["dragon"], "fuzzy")),
+            ),
+        ];
+        let stage0 = "The king ruled the land.";
+        let result = apply_activation(&entries, stage0, &[]);
+        assert_eq!(result.matched.len(), 1);
+        assert_eq!(result.unmatched.len(), 1);
+        assert!(result.trace[0]
+            .reason
+            .contains("treated as and_any: matched keys"));
+        assert!(result.trace[0].accepted);
+        assert!(result.trace[1].reason.contains("no key matched"));
+        assert!(!result.trace[1].accepted);
     }
 
     // ── modules durability round-trip test ──────────────────────────
