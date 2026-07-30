@@ -41,8 +41,8 @@ use serde_json::{Map, Value};
 use spoke_schemas::knowledge_entry::{
     KnowledgeEntry as SpokeKnowledgeEntry, KnowledgeEntryBody as SpokeKnowledgeEntryBody,
     KnowledgeEntryBodyAttributesItem, KnowledgeEntryBodyAttributesItemTraitType,
-    KnowledgeEntryBodyAttributesItemValue, KnowledgeEntryCanonicalName,
-    SourceAnchor as SpokeSourceAnchor,
+    KnowledgeEntryBodyAttributesItemValue, KnowledgeEntryCanonicalName, KnowledgeEntryModulesKey,
+    KnowledgeEntryModulesValue, SourceAnchor as SpokeSourceAnchor,
 };
 
 use crate::extensions::{
@@ -130,7 +130,7 @@ pub fn world_kb_to_spoke(entry: &WorldKbEntry) -> SpokeKnowledgeEntry {
         entry_id: entry.entry_id.clone(),
         entry_type: block_type_to_entry_type(entry.block_type),
         extensions: HashMap::new(),
-        modules: HashMap::new(),
+        modules: nexus_modules_to_spoke(entry.modules.as_ref()),
         revision: entry.revision,
         schema_version: NonZeroU64::new(u64::from(entry.schema_version))
             .expect("schema_version >= 1"),
@@ -247,6 +247,7 @@ pub fn spoke_to_world_kb(entry: SpokeKnowledgeEntry) -> WorldKbEntry {
         source_chapter,
         source_provenance_kind,
         extensions_nexus_extras,
+        modules: spoke_modules_to_nexus(&s.modules),
     }
 }
 
@@ -338,6 +339,63 @@ fn spoke_anchor_to_nexus(a: &SpokeSourceAnchor) -> SourceAnchor {
         excerpt: None,
         summary: None,
     })
+}
+
+// ── Modules conversion helpers ────────────────────────────────────────────
+//
+// V1.146 P4 T1: `WorldKbEntry.modules` ↔ spoke `KnowledgeEntry.modules`
+// round-trip. The nexus domain carries modules as a JSON object
+// (`Option<Value>`); the spoke wire type uses `HashMap<ModulesKey,
+// ModulesValue>`. These helpers convert between the two representations,
+// preserving unknown namespaces verbatim.
+
+/// Forward: nexus `modules` JSON → spoke `HashMap<ModulesKey, ModulesValue>`.
+///
+/// Each key in the JSON object is converted to a `KnowledgeEntryModulesKey`
+/// (regex-validated `^[a-z][a-z0-9_-]*$`). Values that are JSON objects map to
+/// `Variant0(Map)`; arrays to `Variant1(Vec)`; other value types are skipped.
+/// Returns an empty `HashMap` when `modules` is `None` or not a JSON object.
+fn nexus_modules_to_spoke(
+    modules: Option<&Value>,
+) -> HashMap<KnowledgeEntryModulesKey, KnowledgeEntryModulesValue> {
+    let Some(Value::Object(map)) = modules else {
+        return HashMap::new();
+    };
+    let mut result = HashMap::new();
+    for (key, val) in map {
+        let Ok(ns_key) = KnowledgeEntryModulesKey::try_from(key.as_str()) else {
+            continue;
+        };
+        let ns_val = match val {
+            Value::Object(obj) => KnowledgeEntryModulesValue::Variant0(obj.clone()),
+            Value::Array(arr) => KnowledgeEntryModulesValue::Variant1(arr.clone()),
+            // Scalar values / null — no spoke slot.
+            _ => continue,
+        };
+        result.insert(ns_key, ns_val);
+    }
+    result
+}
+
+/// Reverse: spoke `HashMap<ModulesKey, ModulesValue>` → nexus `modules` JSON.
+///
+/// Each key is converted back to a `String`; `Variant0` becomes a JSON object,
+/// `Variant1` becomes a JSON array. Returns `None` when the spoke map is empty.
+fn spoke_modules_to_nexus(
+    spoke: &HashMap<KnowledgeEntryModulesKey, KnowledgeEntryModulesValue>,
+) -> Option<Value> {
+    if spoke.is_empty() {
+        return None;
+    }
+    let mut map = Map::new();
+    for (key, val) in spoke {
+        let json_val = match val {
+            KnowledgeEntryModulesValue::Variant0(obj) => Value::Object(obj.clone()),
+            KnowledgeEntryModulesValue::Variant1(arr) => Value::Array(arr.clone()),
+        };
+        map.insert(key.to_string(), json_val);
+    }
+    Some(Value::Object(map))
 }
 
 // ── Lifecycle delegation (local trait on a foreign type) ─────────────────

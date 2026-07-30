@@ -22,6 +22,7 @@
 //! context (e.g. an HTTP handler or a `#[tokio::test(flavor = "multi_thread")]`
 //! test) so a runtime handle is available.
 
+pub mod activation;
 pub mod computable_port;
 pub mod finding_port;
 pub mod fork_port;

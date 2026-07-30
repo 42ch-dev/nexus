@@ -120,6 +120,14 @@ pub struct WorldKbEntry {
     /// round-trip rule 2). `None` when no unknown keys are present.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub extensions_nexus_extras: Option<serde_json::Value>,
+    /// Per-entry functional-dialect modules (`modules.*`).
+    ///
+    /// Carried as a JSON object (`{"activation": {...}, "pack": {...}}`).
+    /// Preserved verbatim across the `SQLite` read-modify-write cycle and the
+    /// spoke conversion seam. `None` when no modules data is present.
+    /// V1.146 P4 T1 — additive field; legacy entries have `modules = None`.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub modules: Option<serde_json::Value>,
 }
 
 impl WorldKbEntry {
@@ -145,6 +153,7 @@ impl WorldKbEntry {
             source_chapter: None,
             source_provenance_kind: None,
             extensions_nexus_extras: None,
+            modules: None,
         }
     }
 

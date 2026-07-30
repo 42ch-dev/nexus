@@ -363,6 +363,11 @@ async fn run_cas_update_in_tx(
         &nexus_extras_extension_map(world_entry.extensions_nexus_extras.as_ref()),
     ))
     .unwrap_or_default();
+    // V1.146 P4 T1: serialize modules_json for the CAS auxiliary update.
+    let modules_json = world_entry
+        .modules
+        .as_ref()
+        .map(|m| serde_json::to_string(m).unwrap_or_default());
 
     let new_rev = match cas_update_key_block_fields(
         tx,
@@ -384,6 +389,7 @@ async fn run_cas_update_in_tx(
         &world_entry.status,
         source_anchor_json.as_deref(),
         &extensions_nexus_json,
+        modules_json.as_deref(),
     )
     .await
     {
