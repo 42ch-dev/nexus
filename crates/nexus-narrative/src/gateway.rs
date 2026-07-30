@@ -142,11 +142,14 @@ impl<K: KbStore> InMemoryNarrativeGateway<K> {
     /// call, spoke→nexus conversion after. The nexus domain type never
     /// crosses the boundary.
     ///
-    /// # Expected first caller
+    /// # Supersession
     ///
-    /// No production call site yet (V1.143 P0). Expected first consumer:
-    /// Moment Context Assembly timeline ordering, or a future
-    /// `ScopeQueryPort`-backed ordered-timeline path.
+    /// No production call site ever existed (V1.143 P0 → V1.146 P1).
+    /// Superseded by `NexusBaselineAdapter::list_timeline_events_ordered`
+    /// in `nexus-spoke-adapter` (V1.146 P1) — the spoke-adapter
+    /// ordered-timeline facet that routes this ordering through the SPOKE
+    /// boundary. This gateway method is retained only until Task 3 of plan
+    /// `2026-07-30-v1.146-p1-narrative-read-via-adapter` removes it.
     ///
     /// # Errors
     ///
