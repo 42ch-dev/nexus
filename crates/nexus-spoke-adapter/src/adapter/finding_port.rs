@@ -74,7 +74,7 @@ impl FindingPort for NexusBaselineAdapter<'_> {
                 Ok(tx) => tx,
                 Err(e) => {
                     return reject(
-                        SpokeRejectCode::InvalidInput,
+                        SpokeRejectCode::InternalError,
                         format!("failed to begin findings batch transaction: {e}"),
                         json!({}),
                     );
@@ -89,7 +89,7 @@ impl FindingPort for NexusBaselineAdapter<'_> {
                 let finding_id = nexus_finding.finding_id.clone();
                 if let Err(e) = insert_finding_tx(&mut tx, &nexus_finding).await {
                     return reject(
-                        SpokeRejectCode::InvalidInput,
+                        SpokeRejectCode::InternalError,
                         format!("storage error on finding {finding_id} insert: {e}"),
                         json!({ "finding_id": finding_id }),
                     );
@@ -101,7 +101,7 @@ impl FindingPort for NexusBaselineAdapter<'_> {
             // point nothing is durably persisted; a failure here rolls back.
             if let Err(e) = tx.commit().await {
                 return reject(
-                    SpokeRejectCode::InvalidInput,
+                    SpokeRejectCode::InternalError,
                     format!("failed to commit findings batch transaction: {e}"),
                     json!({}),
                 );
@@ -656,8 +656,8 @@ mod tests {
             SpokeResult::Reject(r) => {
                 assert_eq!(
                     r.code,
-                    SpokeRejectCode::InvalidInput,
-                    "mid-batch collision must reject with INVALID_INPUT"
+                    SpokeRejectCode::InternalError,
+                    "mid-batch collision must reject with INTERNAL_ERROR (storage-level UNIQUE violation)"
                 );
             }
             SpokeResult::Ok(_) => panic!("expected reject on duplicate finding_id mid-batch"),

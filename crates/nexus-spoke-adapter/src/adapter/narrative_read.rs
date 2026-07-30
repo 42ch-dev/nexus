@@ -113,7 +113,7 @@ impl NexusBaselineAdapter<'_> {
                 Ok(rows) => rows,
                 Err(e) => {
                     return reject(
-                        SpokeRejectCode::InvalidInput,
+                        SpokeRejectCode::InternalError,
                         format!("storage error on list_timeline_events_scoped: {e}"),
                         json!({ "scope_id": world_id }),
                     );
