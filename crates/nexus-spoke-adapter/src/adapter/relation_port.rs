@@ -29,11 +29,12 @@
 //!
 //! spoke 0.5.0 `Relation` has no `symmetric`/`confidence`/`custom_label`
 //! fields — those ride `extensions.nexus` (nexus-locals); spoke uses `label`.
-//! Unknown keys under `extensions.nexus` are not round-tripped: the
-//! `kb_relationships` table has no extras-JSON column (unlike
-//! `kb_key_blocks.extensions_nexus_json`), so only the known nexus-locals
-//! above survive a put → get cycle. That is a pre-existing schema
-//! limitation, out of scope for V1.144.
+//!
+//! V1.146 P5 T2: the `extensions_nexus_json` column (added by T1) now
+//! preserves unknown `extensions.nexus` keys across the `SQLite` round-trip.
+//! On write, the full `extensions["nexus"]` namespace is serialized into the
+//! column; on read, [`kb_relationship_row_to_spoke`] merges it back with the
+//! 6 typed columns as authoritative.
 //!
 //! # OCC contract (V1.144)
 //!
@@ -115,6 +116,7 @@ impl RelationPort for NexusAdapter<'_> {
 /// Create path: `expected_base_revision = None`. Reject if the row already
 /// exists; otherwise INSERT with `revision = 1` (spoke convention) and return
 /// the resulting spoke `Relation`.
+#[allow(clippy::too_many_lines)]
 async fn put_relation_create(pool: &sqlx::SqlitePool, relation: Relation) -> SpokeResult<Relation> {
     let relation_id = relation.relation_id.clone();
     let locals = extract_nexus_locals(&relation);
@@ -140,8 +142,14 @@ async fn put_relation_create(pool: &sqlx::SqlitePool, relation: Relation) -> Spo
         }
     }
 
+    // V1.146 P5 T2: serialize the full extensions.nexus namespace before
+    // prepare_create_fields consumes `relation` (the locals extraction borrows
+    // relation, so we compute the JSON string before prepare_create_fields
+    // which also borrows relation).
+    let extensions_nexus_json = serialize_extensions_nexus_json(&relation);
+
     // Compute the create column values before moving `locals.world_id` below.
-    let f = prepare_create_fields(&relation, &locals);
+    let f = prepare_create_fields(&relation, &locals, extensions_nexus_json);
 
     let Some(world_id) = locals.world_id else {
         return reject(
@@ -165,6 +173,8 @@ async fn put_relation_create(pool: &sqlx::SqlitePool, relation: Relation) -> Spo
         }
     };
 
+    let extensions_nexus_ref = f.extensions_nexus_json.as_deref();
+
     // Seed revision = 1 directly (spoke convention). The legacy
     // `insert_relationship_in_tx` seeds 0 for the daemon's add-relationship
     // route and is deliberately NOT reused here — the port owns the spoke
@@ -174,8 +184,8 @@ async fn put_relation_create(pool: &sqlx::SqlitePool, relation: Relation) -> Spo
            (relationship_id, world_id, source_entity_id, target_entity_id,
             relation_type, custom_label, symmetric, confidence,
             source_anchor_ids, metadata, created_at, updated_at, revision,
-            needs_review, source)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)"#,
+            needs_review, source, extensions_nexus_json)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)"#,
         relation_id,
         world_id,
         relation.from_id,
@@ -190,6 +200,7 @@ async fn put_relation_create(pool: &sqlx::SqlitePool, relation: Relation) -> Spo
         f.updated_at,
         f.needs_review_i64,
         f.source,
+        extensions_nexus_ref,
     )
     .execute(&mut *tx)
     .await;
@@ -227,7 +238,7 @@ async fn put_relation_create(pool: &sqlx::SqlitePool, relation: Relation) -> Spo
         revision: 1,
         needs_review: f.needs_review_i64,
         source: f.source,
-        extensions_nexus_json: None,
+        extensions_nexus_json: f.extensions_nexus_json,
     };
     SpokeResult::Ok(crate::conversion::kb_relationship_row_to_spoke(&row))
 }
@@ -299,6 +310,10 @@ async fn put_relation_update(
     let source_anchor_ids = locals.source_anchor_ids.unwrap_or_default();
     let needs_review = locals.needs_review.unwrap_or(false);
 
+    // V1.146 P5 T2: serialize the full extensions.nexus namespace for
+    // round-trip preservation. Unknown keys survive the update cycle.
+    let extensions_nexus_json = serialize_extensions_nexus_json(&relation);
+
     let metadata_value = if relation.metadata.is_empty() {
         None
     } else {
@@ -314,7 +329,7 @@ async fn put_relation_update(
         metadata: metadata_value,
         updated_at: chrono::Utc::now().to_rfc3339(),
         needs_review,
-        extensions_nexus_json: None,
+        extensions_nexus_json,
     };
 
     // `update_relationship_in_tx` compares `revision = expected_revision` (CAS).
@@ -399,6 +414,8 @@ struct CreateFields {
     source: String,
     metadata_json: Option<String>,
     custom_label: Option<String>,
+    /// V1.146 P5 T2: serialized `extensions.nexus` for round-trip preservation.
+    extensions_nexus_json: Option<String>,
 }
 
 /// Compute the [`CreateFields`] for a create: adapter-assigned timestamps
@@ -406,7 +423,15 @@ struct CreateFields {
 /// nexus-locals defaulted to the V1.76 manual-author add shape when the
 /// spoke `Relation` does not carry them (`symmetric=false`, `confidence=NULL`,
 /// `source_anchor_ids='[]'`, `needs_review=false`, `source='manual'`).
-fn prepare_create_fields(relation: &Relation, locals: &NexusLocals) -> CreateFields {
+///
+/// `extensions_nexus_json` is the full serialized `extensions.nexus` namespace
+/// (V1.146 P5 T2), pre-computed by the caller so `prepare_create_fields` stays
+/// pure.
+fn prepare_create_fields(
+    relation: &Relation,
+    locals: &NexusLocals,
+    extensions_nexus_json: Option<String>,
+) -> CreateFields {
     let now = chrono::Utc::now().to_rfc3339();
     let created_at = relation
         .created_at
@@ -434,6 +459,7 @@ fn prepare_create_fields(relation: &Relation, locals: &NexusLocals) -> CreateFie
             Some(serde_json::to_string(&relation.metadata).unwrap_or_else(|_| "{}".to_string()))
         },
         custom_label: relation.label.clone(),
+        extensions_nexus_json,
     }
 }
 
@@ -493,6 +519,24 @@ fn reject<T>(code: SpokeRejectCode, message: impl Into<String>, details: Value) 
         message: message.into(),
         details: details_map,
     })
+}
+
+/// Serialize the full `extensions.nexus` namespace into the
+/// `extensions_nexus_json` column value (`None` when absent or empty).
+///
+/// V1.146 P5 T2: the full namespace (known + unknown keys) is serialized so
+/// unknown keys survive the `SQLite` round-trip. On read,
+/// [`crate::conversion::kb_relationship_row_to_spoke`] merges the JSON back,
+/// with the 6 typed columns as authoritative.
+fn serialize_extensions_nexus_json(relation: &Relation) -> Option<String> {
+    let Ok(key) = RelationExtensionsKey::try_from("nexus") else {
+        return None;
+    };
+    let ns = relation.extensions.get(&key)?;
+    if ns.is_empty() {
+        return None;
+    }
+    serde_json::to_string(ns).ok()
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────
@@ -670,14 +714,10 @@ mod tests {
 
         // Re-read through the port and confirm every nexus-local survived.
         //
-        // Known limitation (brief concern #1): ONLY the nexus-local keys
-        // asserted below round-trip. The `kb_relationships` table has no
-        // extras-JSON column (unlike `kb_key_blocks.extensions_nexus_json`),
-        // so any UNKNOWN key under `extensions.nexus` — e.g. a hypothetical
-        // `custom_flag` — is silently dropped on put and absent on get. We
-        // therefore do NOT assert any unknown key here; this test pins the
-        // known set only. Lifting that limitation is a schema change, out of
-        // scope for V1.144.
+        // V1.146 P5 T2: the `extensions_nexus_json` column now preserves
+        // unknown `extensions.nexus` keys across the SQLite round-trip.
+        // Known keys are verified below; unknown-key round-trip is covered
+        // by the dedicated `put_relation_round_trips_unknown_nexus_key` test.
         match adapter.get_relation("rel_locals") {
             SpokeResult::Ok(r) => {
                 assert_eq!(r.relation_id, "rel_locals");
@@ -1250,5 +1290,116 @@ mod tests {
         // `source` is immutable on the update path (not in
         // UpdateRelationshipParams) — preserved from the stored row.
         assert_eq!(ns.get("source"), Some(&json!("extraction")));
+    }
+
+    // ── V1.146 P5 T2: unknown extensions.nexus key round-trip ──────────
+
+    /// Create a Relation with an unknown `extensions.nexus` key, then re-read
+    /// it and confirm the unknown key survives the SQLite round-trip.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn put_relation_round_trips_unknown_nexus_key() {
+        let (pool, _dir) = fresh_pool().await;
+        seed_world_and_endpoints(&pool).await;
+
+        let adapter = NexusAdapter::new(pool);
+
+        // Create with a known nexus-local (world_id) plus an unknown key.
+        let relation: Relation = serde_json::from_value(json!({
+            "schema_version": 1,
+            "relation_id": "rel_unknown_key",
+            "from_id": "kb_src",
+            "to_id": "kb_dst",
+            "relation_type": "allied_with",
+            "extensions": {
+                "nexus": {
+                    "world_id": "wld_rel",
+                    "custom_flag": "experimental",
+                    "priority": 3,
+                    "vendor_data": {"source": "cli", "version": 2}
+                }
+            }
+        }))
+        .expect("valid spoke Relation with unknown nexus key");
+
+        let created = unwrap_ok(adapter.put_relation(relation, None), "create");
+        assert_eq!(created.revision, Some(1));
+
+        // Re-read and confirm the unknown keys survived alongside the known ones.
+        let r = unwrap_ok(adapter.get_relation("rel_unknown_key"), "get");
+        let key = RelationExtensionsKey::try_from("nexus").unwrap();
+        let ns = r.extensions.get(&key).expect("nexus namespace present");
+
+        // Known key: always present from the typed column.
+        assert_eq!(ns.get("world_id"), Some(&json!("wld_rel")));
+
+        // Unknown keys: survived the round-trip via extensions_nexus_json.
+        assert_eq!(
+            ns.get("custom_flag"),
+            Some(&json!("experimental")),
+            "unknown string key survives"
+        );
+        assert_eq!(
+            ns.get("priority"),
+            Some(&json!(3)),
+            "unknown number key survives"
+        );
+        assert_eq!(
+            ns.get("vendor_data"),
+            Some(&json!({"source": "cli", "version": 2})),
+            "unknown object key survives"
+        );
+    }
+
+    /// V1.146 P5 T2: the unknown-key round-trip also holds across updates.
+    /// Create with unknown keys, update (mutating only the label), re-read —
+    /// unknown keys must still be present.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn put_relation_update_preserves_unknown_nexus_key() {
+        let (pool, _dir) = fresh_pool().await;
+        seed_world_and_endpoints(&pool).await;
+
+        let adapter = NexusAdapter::new(pool);
+
+        let seed: Relation = serde_json::from_value(json!({
+            "schema_version": 1,
+            "relation_id": "rel_upd_unk",
+            "from_id": "kb_src",
+            "to_id": "kb_dst",
+            "relation_type": "allied_with",
+            "extensions": {
+                "nexus": {
+                    "world_id": "wld_rel",
+                    "custom_tag": "imported",
+                    "batch_id": "B42"
+                }
+            }
+        }))
+        .expect("valid seed Relation");
+
+        let created = unwrap_ok(adapter.put_relation(seed, None), "create");
+        assert_eq!(created.revision, Some(1));
+
+        // Update: change only the label. The unknown keys must survive.
+        let mut update = created;
+        update.label = Some("updated label".to_string());
+        let updated = unwrap_ok(adapter.put_relation(update, Some(1)), "update");
+        assert_eq!(updated.revision, Some(2));
+
+        let r = unwrap_ok(adapter.get_relation("rel_upd_unk"), "get after update");
+        let key = RelationExtensionsKey::try_from("nexus").unwrap();
+        let ns = r.extensions.get(&key).expect("nexus namespace present");
+
+        assert_eq!(r.label.as_deref(), Some("updated label"));
+        assert_eq!(ns.get("world_id"), Some(&json!("wld_rel")));
+        assert_eq!(
+            ns.get("custom_tag"),
+            Some(&json!("imported")),
+            "unknown key survives update cycle"
+        );
+        assert_eq!(
+            ns.get("batch_id"),
+            Some(&json!("B42")),
+            "unknown key survives update cycle"
+        );
     }
 }
