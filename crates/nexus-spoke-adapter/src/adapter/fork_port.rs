@@ -50,14 +50,27 @@ impl ForkTimelineQueryPort for NexusAdapter<'_> {
         self.block_on(async move {
             // ── Validate world existence (unknown fork → reject, not empty) ──
             // SAFETY: runtime query for existence check — SELECT 1 pattern,
-            // single bind parameter.
-            let world_exists: bool = sqlx::query_scalar(
+            // single bind parameter. Do NOT use unwrap_or(false) — a storage
+            // failure (dropped table, SQLite file error) must surface as
+            // InternalError, not silently become "unknown world" InvalidInput.
+            let world_exists: bool = match sqlx::query_scalar(
                 "SELECT EXISTS(SELECT 1 FROM narrative_worlds WHERE world_id = ?)",
             )
             .bind(&world_id)
             .fetch_one(&pool)
             .await
-            .unwrap_or(false);
+            {
+                Ok(exists) => exists,
+                Err(e) => {
+                    return reject(
+                        SpokeRejectCode::InternalError,
+                        format!(
+                            "storage error checking world existence for {world_id}: {e}"
+                        ),
+                        json!({ "scope_id": world_id, "fork_id": fork_id }),
+                    );
+                }
+            };
 
             if !world_exists {
                 return reject(
@@ -417,6 +430,31 @@ mod tests {
                 );
             }
             SpokeResult::Ok(_) => panic!("expected InternalError reject"),
+        }
+    }
+
+    // ── DB failure on world-existence check → InternalError ───────────
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn list_fork_timeline_events_dropped_worlds_table_surfaces_internal_error() {
+        let (pool, _dir) = fresh_pool().await;
+        let (world_id, _) = seed_fork_world(&pool).await;
+        sqlx::query("DROP TABLE narrative_worlds")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let adapter = NexusAdapter::new(pool);
+        let scope = fork_scope(&world_id, "fbk_main", &[]);
+        match adapter.list_fork_timeline_events(&scope) {
+            SpokeResult::Reject(r) => {
+                assert_eq!(
+                    r.code,
+                    SpokeRejectCode::InternalError,
+                    "dropped narrative_worlds table must surface INTERNAL_ERROR, not InvalidInput"
+                );
+            }
+            SpokeResult::Ok(_) => panic!("expected InternalError reject on dropped worlds table"),
         }
     }
 
