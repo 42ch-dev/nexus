@@ -1353,14 +1353,12 @@ async fn update_preserves_unknown_extensions_nexus_keys() {
     let rel_id = created.relationship.unwrap().relationship_id;
 
     // Inject unknown keys into the stored `extensions_nexus_json` column.
-    sqlx::query(
-        "UPDATE kb_relationships SET extensions_nexus_json = ? WHERE relationship_id = ?",
-    )
-    .bind(r#"{"world_id":"wld_test_world","custom_tag":"imported","batch_id":"B42"}"#)
-    .bind(&rel_id)
-    .execute(state.pool().unwrap())
-    .await
-    .unwrap();
+    sqlx::query("UPDATE kb_relationships SET extensions_nexus_json = ? WHERE relationship_id = ?")
+        .bind(r#"{"world_id":"wld_test_world","custom_tag":"imported","batch_id":"B42"}"#)
+        .bind(&rel_id)
+        .execute(state.pool().unwrap())
+        .await
+        .unwrap();
 
     // Update: change only `relation_type`. Unknown keys must survive.
     let req = WorldKbPatchRelationshipRequest {

@@ -2375,7 +2375,12 @@ async fn patch_relationship_update(
     // `serialize_extensions_nexus_json`. Without this merge, a routine update
     // (e.g. label change) silently drops any key outside the 6 known locals.
     let known_nexus_keys: &[&str] = &[
-        "world_id", "symmetric", "confidence", "source_anchor_ids", "needs_review", "source",
+        "world_id",
+        "symmetric",
+        "confidence",
+        "source_anchor_ids",
+        "needs_review",
+        "source",
     ];
     if let Some(json) = &existing.extensions_nexus_json {
         if let Ok(stored_ns) =
