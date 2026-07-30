@@ -249,6 +249,30 @@ impl TimelineEvent {
 
 // ── Conversion: Domain ↔ Contract ──────────────────────────────────────
 
+/// Parse a `created_at` value that may be RFC3339 or `SQLite` `datetime('now')`.
+///
+/// The `narrative_timeline_events.created_at` DEFAULT uses `SQLite`'s
+/// `datetime('now')`, which returns `"YYYY-MM-DD HH:MM:SS"` (space separator,
+/// no `T`/`Z`). Try RFC3339 first; on failure, normalize the space to `T` and
+/// append `Z` (UTC), then try RFC3339 again. A final `NaiveDateTime` fallback
+/// covers optional fractional seconds.
+fn parse_created_at(s: &str) -> Option<chrono::DateTime<chrono::Utc>> {
+    chrono::DateTime::parse_from_rfc3339(s)
+        .ok()
+        .map(|dt| dt.with_timezone(&chrono::Utc))
+        .or_else(|| {
+            let normalized = s.replacen(' ', "T", 1) + "Z";
+            chrono::DateTime::parse_from_rfc3339(&normalized)
+                .ok()
+                .map(|dt| dt.with_timezone(&chrono::Utc))
+                .or_else(|| {
+                    chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S%.f")
+                        .ok()
+                        .map(|naive| naive.and_utc())
+                })
+        })
+}
+
 impl From<nexus_contracts::TimelineEvent> for TimelineEvent {
     fn from(c: nexus_contracts::TimelineEvent) -> Self {
         Self {
@@ -310,9 +334,8 @@ impl From<TimelineEvent> for nexus_contracts::TimelineEvent {
                 .map(|s| s.parse().unwrap())
                 .collect(),
             source_command_id: d.source_command_id.map(|s| s.parse().unwrap()),
-            created_at: chrono::DateTime::parse_from_rfc3339(&d.created_at)
-                .unwrap()
-                .with_timezone(&chrono::Utc),
+            created_at: parse_created_at(&d.created_at)
+                .expect("created_at must be RFC3339 or SQLite datetime('now')"),
         }
     }
 }
@@ -392,10 +415,8 @@ impl From<TimelineEvent> for SpokeTimelineEvent {
         };
 
         // created_at: RFC3339 String → Option<DateTime<Utc>>. Graceful on parse
-        // failure (matches the WorldKbEntry↔KnowledgeEntry seam convention).
-        let created_at = chrono::DateTime::parse_from_rfc3339(&d.created_at)
-            .ok()
-            .map(|dt| dt.with_timezone(&chrono::Utc));
+        // failure; SQLite datetime('now') is normalized to RFC3339 first.
+        let created_at = parse_created_at(&d.created_at);
 
         // Build extensions.nexus carrying the 7 typed nexus fields.
         let mut extensions: std::collections::HashMap<
@@ -802,6 +823,37 @@ mod tests {
         let id = evt_bare.timeline_event_id.clone();
         let spoke: SpokeTimelineEvent = evt_bare.into();
         assert_eq!(spoke.canonical_name.to_string(), id);
+    }
+
+    #[test]
+    fn created_at_parses_rfc3339_and_sqlite_datetime() {
+        let rfc = "2026-07-30T14:30:00+00:00";
+        let sqlite = "2026-07-30 14:30:00";
+        let expected = chrono::NaiveDateTime::parse_from_str(sqlite, "%Y-%m-%d %H:%M:%S")
+            .unwrap()
+            .and_utc();
+        assert_eq!(parse_created_at(rfc), Some(expected));
+        assert_eq!(parse_created_at(sqlite), Some(expected));
+    }
+
+    #[test]
+    fn spoke_seam_created_at_accepts_sqlite_datetime_format() {
+        let mut evt = TimelineEvent::new("wld_x", "fbk_y", TimelineEventType::StateUpdate, 1);
+        evt.created_at = "2026-07-30 14:30:00".to_string();
+        let spoke: SpokeTimelineEvent = evt.into();
+        let expected =
+            chrono::NaiveDateTime::parse_from_str("2026-07-30 14:30:00", "%Y-%m-%d %H:%M:%S")
+                .unwrap()
+                .and_utc();
+        assert_eq!(spoke.created_at, Some(expected));
+    }
+
+    #[test]
+    fn contract_seam_created_at_accepts_sqlite_datetime_format() {
+        let mut evt = TimelineEvent::new("wld_x", "fbk_y", TimelineEventType::StateUpdate, 1);
+        evt.created_at = "2026-07-30 14:30:00".to_string();
+        let c: nexus_contracts::TimelineEvent = evt.into();
+        assert_eq!(c.created_at.to_rfc3339(), "2026-07-30T14:30:00+00:00");
     }
 
     #[test]
