@@ -1,5 +1,13 @@
-//! Static-stub `HostManifestPort` impl — see spec §7.4 production-vs-stub
+//! Production `HostManifestPort` impl — see spec §7.4 production-vs-stub
 //! matrix.
+//!
+//! The self-manifest declares the full capability set proven by the
+//! adapter's port implementations:
+//! - `spoke-baseline` — all six baseline ports (T1).
+//! - `l2-computable` — production `ComputablePort` (T2, 10 tests incl.
+//!   orchestrate round-trip).
+//! - `l5-fork` — production `ForkTimelineQueryPort` (T3, 9 tests;
+//!   reviewer adjudicated declaration justified).
 //!
 //! Local-first nexus has no peers: the production daemon runs against a
 //! single `nexus-local` host that owns the `nexus` extension namespace and
@@ -32,7 +40,7 @@ impl HostManifestPort for NexusAdapter<'_> {
             "schema_version": 1,
             "host_id": HOST_ID,
             "roles": ["data-store"],
-            "capabilities": ["spoke-baseline"],
+            "capabilities": ["spoke-baseline", "l2-computable", "l5-fork"],
             "namespaces": ["nexus"],
             "extensions": {}
         }))
@@ -76,7 +84,14 @@ mod tests {
 
         assert_eq!(manifest.host_id.as_str(), HOST_ID);
         assert_eq!(manifest.roles, vec!["data-store".to_string()]);
-        assert_eq!(manifest.capabilities, vec!["spoke-baseline".to_string()]);
+        assert_eq!(
+            manifest.capabilities,
+            vec![
+                "spoke-baseline".to_string(),
+                "l2-computable".to_string(),
+                "l5-fork".to_string()
+            ]
+        );
         assert_eq!(
             manifest
                 .namespaces
