@@ -33,18 +33,53 @@ use std::time::SystemTime;
 const MODULE_IDS: &[&str] = &["basic-combat"];
 
 fn main() {
+    // Declare the custom cfg flag early so rustc does not warn about
+    // `unexpected_cfgs` in the library source.
+    println!("cargo::rustc-check-cfg=cfg(nexus_no_wasm_target)");
+
     let manifest_dir = PathBuf::from(
         std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR is set by Cargo"),
     );
-    // `modules/` is a sibling of `crates/` at the workspace root.
-    let modules_root = manifest_dir.join("../../modules");
     let embedded_root = manifest_dir.join("embedded-modules");
 
+    // Detect whether the wasm32-unknown-unknown target is installed before
+    // attempting any WASM compilation. A missing target is the overwhelmingly
+    // common reason `cargo check --all` breaks on developer machines that have
+    // not added it — and `cargo check` does not need the compiled blobs, just
+    // type-check completion. We emit a cfg flag so the crate's source can
+    // switch to empty stubs when the target is absent (R-V1139P0-005).
+    if !has_wasm_target() {
+        println!(
+            "cargo:warning=nexus-wasm-host: wasm32-unknown-unknown target not found; \
+             skipping embedded WASM compilation. Embedded modules will be empty at \
+             runtime. Install the target with: rustup target add wasm32-unknown-unknown"
+        );
+        println!("cargo:rustc-cfg=nexus_no_wasm_target");
+        // Still create empty directory so anything that stat-checks the path
+        // does not trip over a missing dir.
+        create_dir_all_or_die(&embedded_root);
+        return;
+    }
+
+    let modules_root = manifest_dir.join("../../modules");
     create_dir_all_or_die(&embedded_root);
 
     for &id in MODULE_IDS {
         build_module(id, &modules_root, &embedded_root);
     }
+}
+
+/// Returns `true` when the `wasm32-unknown-unknown` sysroot is installed.
+///
+/// Uses `rustc --print sysroot --target wasm32-unknown-unknown` which exits 0
+/// only when the target is available. This is a fast metadata query — it does
+/// not compile anything.
+#[must_use]
+fn has_wasm_target() -> bool {
+    std::process::Command::new("rustc")
+        .args(["--print", "sysroot", "--target", "wasm32-unknown-unknown"])
+        .output()
+        .is_ok_and(|o| o.status.success())
 }
 
 /// Compile one module's `.wasm` from source and stage its manifest, unless the

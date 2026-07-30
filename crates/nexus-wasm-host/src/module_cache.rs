@@ -260,6 +260,8 @@ mod tests {
         assert!(!cache.contains("basic-combat"));
     }
 
+    /// Only meaningful when embedded modules were compiled by build.rs.
+    #[cfg(not(nexus_no_wasm_target))]
     #[test]
     fn warm_embedded_loads_basic_combat() {
         let engine = WasmEngine::new().unwrap();
@@ -284,6 +286,8 @@ mod tests {
         assert_eq!(warmed, 0);
     }
 
+    /// Only meaningful when embedded modules were compiled (target available).
+    #[cfg(not(nexus_no_wasm_target))]
     #[test]
     fn warm_dir_loads_user_module_pair() {
         let engine = WasmEngine::new().unwrap();

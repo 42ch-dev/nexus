@@ -86,6 +86,8 @@ fn broken_summary(id: &str) -> ModuleSummary {
 mod tests {
     use super::*;
 
+    /// Only meaningful when embedded modules were compiled by build.rs.
+    #[cfg(not(nexus_no_wasm_target))]
     #[test]
     fn list_modules_includes_basic_combat() {
         let modules = list_modules();
@@ -95,6 +97,8 @@ mod tests {
         );
     }
 
+    /// Only meaningful when embedded modules were compiled by build.rs.
+    #[cfg(not(nexus_no_wasm_target))]
     #[test]
     fn list_modules_marks_valid_modules_ok() {
         let modules = list_modules();
@@ -138,6 +142,8 @@ mod tests {
         assert_eq!(summary.status.to_string(), "ok");
     }
 
+    /// Only meaningful when embedded modules were compiled by build.rs.
+    #[cfg(not(nexus_no_wasm_target))]
     #[test]
     fn get_module_returns_basic_combat_detail() {
         let detail = get_module("basic-combat")
@@ -159,6 +165,8 @@ mod tests {
         assert!(get_module("no-such-module").unwrap().is_none());
     }
 
+    /// Only meaningful when embedded modules were compiled by build.rs.
+    #[cfg(not(nexus_no_wasm_target))]
     #[test]
     fn list_modules_and_get_module_agree_on_basic_combat() {
         let summary = list_modules()

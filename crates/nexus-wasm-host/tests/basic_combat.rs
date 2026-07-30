@@ -2,6 +2,10 @@
 //! invocation with two computable characters, and validate the 4-part
 //! `ComputeOutput` envelope. This is the P2 acceptance test (compass Q9:
 //! basic-combat's triple role — integration test, ABI validation, reference impl).
+//!
+//! Only meaningful when embedded modules were actually compiled (the wasm
+//! target is installed); skipped when `nexus_no_wasm_target` is set (R-V1139P0-005).
+#![cfg(not(nexus_no_wasm_target))]
 
 use nexus_wasm_host::{
     embedded_module_bytes, embedded_module_manifest, ComputeInput, ComputeOutput, ModuleManifest,
