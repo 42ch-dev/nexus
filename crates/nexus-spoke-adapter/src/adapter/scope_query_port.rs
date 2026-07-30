@@ -1,4 +1,4 @@
-//! `ScopeQueryPort` impl — production for knowledge entries, stub for
+//! `ScopeQueryPort` impl — production for both knowledge entries and
 //! timeline events (spec §7.4 production-vs-stub matrix).
 //!
 //! # Knowledge entries (production)
@@ -13,29 +13,34 @@
 //! Rows are projected through the V1.139 `WorldKbEntry → SpokeKnowledgeEntry`
 //! conversion seam (spec §7.1). The world id is taken from `scope.scope_id`.
 //!
-//! # Timeline events (stub)
+//! # Timeline events (production — V1.145 P3)
 //!
-//! [`ScopeQueryPort::list_timeline_events`] is a documented stub: nexus
-//! has no persisted `TimelineEvent` storage today (`nexus-narrative`
-//! holds timeline events in-memory inside active narrative sessions),
-//! so the query surface returns the documented empty set rather than
-//! fabricating events from session state.
+//! [`ScopeQueryPort::list_timeline_events`] queries the `narrative_timeline_events`
+//! table (V1.26) via [`list_timeline_events_scoped`], the production local-db
+//! read primitive. Scope filters (spec §7.4 timeline Scope filter alignment):
 //!
-//! ## Roadmap trigger (timeline events)
+//! | Scope field | SQL filter |
+//! |-------------|------------|
+//! | `scope_id` | `WHERE world_id = ?` (always) |
+//! | `extensions["nexus"]["branch_id"]` | `AND branch_id = ?` (optional) |
+//! | `timeline_event_ids` | `AND timeline_event_id IN (json_each(?))` (optional) |
 //!
-//! Spec §7.4 stub matrix — upgrade is a roadmap item tracked via the
-//! iteration compass "Roadmap Next" rows. The upgrade path is: add a
-//! `timeline_events` persistence layer; teach the orchestrator which
-//! scope filters (`timeline_event_ids`, `timeline_scale`, `fork_id`)
-//! route to SQL vs in-memory session state.
+//! Rows are projected through the V1.143 `TimelineEvent → SpokeTimelineEvent`
+//! conversion seam (spec §7.1) — the `From<nexus_narrative::TimelineEvent>` impl
+//! packs the 7 typed nexus fields into the spoke type's `extensions.nexus`.
+//! `timeline_scale` / `fork_id` are no-op pass-through (nexus does not use
+//! spoke's fork model yet). Unlike knowledge entries, there is no overflow cap —
+//! timeline events are append-ordered and bounded per branch.
 
 use super::NexusBaselineAdapter;
 use crate::conversion::world_kb_to_spoke;
 use crate::extensions::has_nexus_body;
 use crate::{
-    KnowledgeEntry, Scope, ScopeQueryPort, SpokeReject, SpokeRejectCode, SpokeResult, TimelineEvent,
+    KnowledgeEntry, Scope, ScopeExtensionsKey, ScopeQueryPort, SpokeReject, SpokeRejectCode,
+    SpokeResult, TimelineEvent,
 };
 use nexus_local_db::kb_store::SqliteKbStore;
+use nexus_local_db::narrative_gateway::list_timeline_events_scoped;
 use serde_json::{json, Map, Value};
 impl ScopeQueryPort for NexusBaselineAdapter<'_> {
     /// List the active knowledge entries for the scope's world.
@@ -108,17 +113,75 @@ impl ScopeQueryPort for NexusBaselineAdapter<'_> {
         })
     }
 
-    /// Stub — returns the documented empty list (spec §7.4).
+    /// List the timeline events matching the scope (production — V1.145 P3).
     ///
-    /// Nexus has no persisted `TimelineEvent` storage today; the full
-    /// impl is a roadmap item triggered when timeline persistence
-    /// lands. See the module-level docs.
-    fn list_timeline_events(&self, _scope: &Scope) -> SpokeResult<Vec<TimelineEvent>> {
-        SpokeResult::Ok(Vec::new())
+    /// Queries `narrative_timeline_events` via [`list_timeline_events_scoped`]
+    /// (the local-db read primitive). Filters: `scope.scope_id` → `world_id`;
+    /// `scope.extensions["nexus"]["branch_id"]` → `branch_id`;
+    /// `scope.timeline_event_ids` → event-id IN filter. Rows are converted to
+    /// spoke [`TimelineEvent`] via the V1.143 conversion seam. See the
+    /// module-level docs for the full filter matrix.
+    fn list_timeline_events(&self, scope: &Scope) -> SpokeResult<Vec<TimelineEvent>> {
+        let pool = self.pool.clone();
+        let world_id = scope.scope_id.clone();
+        // branch_id rides scope.extensions["nexus"] (spoke-native since 0.6.0),
+        // looked up via the typify ScopeExtensionsKey newtype — mirrors the
+        // MCA `kb_query_from_scope` extraction (spec §7.5 scope-pushdown).
+        let branch_id = scope
+            .extensions
+            .get(&nexus_scope_key())
+            .and_then(|ns| ns.get("branch_id"))
+            .and_then(Value::as_str)
+            .map(str::to_owned);
+        let timeline_event_ids = scope.timeline_event_ids.clone();
+
+        self.block_on(async move {
+            let rows = match list_timeline_events_scoped(
+                &pool,
+                &world_id,
+                branch_id.as_deref(),
+                &timeline_event_ids,
+            )
+            .await
+            {
+                Ok(rows) => rows,
+                Err(e) => {
+                    return reject(
+                        SpokeRejectCode::InvalidInput,
+                        format!("storage error on list_timeline_events_scoped: {e}"),
+                        json!({ "scope_id": world_id }),
+                    );
+                }
+            };
+
+            // Convert nexus TimelineEvent → spoke TimelineEvent via the V1.143
+            // conversion seam (the `From<nexus_narrative::TimelineEvent>` impl
+            // defined in nexus-narrative packs the 7 typed nexus fields into
+            // extensions.nexus). Sole boundary between the nexus domain row and
+            // the spoke wire type; call-boundary invariant §7 preserved (the
+            // primitive's nexus type never crosses). The `Vec<TimelineEvent>`
+            // annotation pins the `Into` target to the spoke type (nexus
+            // TimelineEvent also has a `From` for nexus_contracts::TimelineEvent,
+            // so `.into()` is otherwise ambiguous).
+            let wire: Vec<TimelineEvent> = rows.into_iter().map(Into::into).collect();
+            SpokeResult::Ok(wire)
+        })
     }
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────
+
+/// Construct the typed `ScopeExtensionsKey` for the `"nexus"` namespace.
+///
+/// The literal `"nexus"` always satisfies the typify `^[a-z][a-z0-9_-]*$`
+/// namespace regex, so construction is infallible at runtime. The newtype does
+/// not implement `Borrow<str>`, so `HashMap::get("nexus")` does not compile —
+/// this bridges that gap (mirrors `mca_read::nexus_scope_key` /
+/// `extensions::nexus_key`).
+fn nexus_scope_key() -> ScopeExtensionsKey {
+    ScopeExtensionsKey::try_from("nexus")
+        .expect("\"nexus\" matches the ^[a-z][a-z0-9_-]*$ namespace regex")
+}
 
 /// Construct a `SpokeResult::Reject` (mirrors the helper in
 /// `knowledge_entry_port.rs`).
@@ -148,7 +211,9 @@ mod tests {
     use nexus_knowledge::world_kb::store::KbStore;
     use nexus_knowledge::world_kb::{WorldKbBody, WorldKbEntry};
     use nexus_local_db::kb_store::LIST_BY_WORLD_LIMIT;
+    use nexus_local_db::narrative_gateway::seed;
     use nexus_local_db::{open_pool, run_migrations};
+    use spoke_schemas::timeline_event::TimelineEventExtensionsKey;
 
     async fn fresh_pool() -> (sqlx::SqlitePool, tempfile::TempDir) {
         let dir = tempfile::tempdir().unwrap();
@@ -358,14 +423,206 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn list_timeline_events_stub_returns_empty_vec() {
+    async fn list_timeline_events_returns_all_world_events_as_spoke() {
         let (pool, _dir) = fresh_pool().await;
-        let adapter = NexusBaselineAdapter::new(pool);
+        let (world_id, _) = seed_world_with_timeline_events(&pool).await;
 
-        let events = match adapter.list_timeline_events(&scope_for("wld_any")) {
+        let adapter = NexusBaselineAdapter::new(pool);
+        let events = match adapter.list_timeline_events(&scope_for(&world_id)) {
             SpokeResult::Ok(v) => v,
-            SpokeResult::Reject(r) => panic!("stub must return Ok: {r:?}"),
+            SpokeResult::Reject(r) => panic!("expected ok, got reject: {r:?}"),
         };
-        assert!(events.is_empty(), "stub returns the documented empty list");
+
+        // Unfiltered scope returns every event in the world (3 seeded across
+        // 2 branches). The port converts each nexus row to spoke via the
+        // V1.143 seam; the spoke type carries world_id + branch_id in
+        // extensions.nexus (spec §7.1 conversion contract).
+        assert_eq!(events.len(), 3, "unfiltered scope returns all world events");
+        let key = nexus_te_key();
+        let has_root_branch = events.iter().any(|e| {
+            e.extensions
+                .get(&key)
+                .and_then(|ns| ns.get("branch_id"))
+                .and_then(Value::as_str)
+                == Some("fbk_root")
+        });
+        let has_fork_branch = events.iter().any(|e| {
+            e.extensions
+                .get(&key)
+                .and_then(|ns| ns.get("branch_id"))
+                .and_then(Value::as_str)
+                == Some("fbk_fork")
+        });
+        assert!(
+            has_root_branch,
+            "spoke events carry branch_id in extensions.nexus"
+        );
+        assert!(has_fork_branch, "events from both branches are present");
+        // world_id survives the conversion seam (extensions.nexus.world_id).
+        assert!(events.iter().all(|e| {
+            e.extensions
+                .get(&key)
+                .and_then(|ns| ns.get("world_id"))
+                .and_then(Value::as_str)
+                == Some(world_id.as_str())
+        }));
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn list_timeline_events_filters_by_branch_via_extensions() {
+        let (pool, _dir) = fresh_pool().await;
+        let (world_id, _) = seed_world_with_timeline_events(&pool).await;
+
+        let adapter = NexusBaselineAdapter::new(pool);
+        // branch_id rides scope.extensions["nexus"] (spoke-native ≥ 0.6.0).
+        let scope = timeline_scope(&world_id, Some("fbk_root"), &[]);
+        let events = match adapter.list_timeline_events(&scope) {
+            SpokeResult::Ok(v) => v,
+            SpokeResult::Reject(r) => panic!("expected ok, got reject: {r:?}"),
+        };
+
+        // Only the two events on fbk_root match; the fbk_fork event is excluded.
+        assert_eq!(events.len(), 2, "branch_id filter narrows to one branch");
+        let key = nexus_te_key();
+        assert!(events.iter().all(|e| {
+            e.extensions
+                .get(&key)
+                .and_then(|ns| ns.get("branch_id"))
+                .and_then(Value::as_str)
+                == Some("fbk_root")
+        }));
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn list_timeline_events_filters_by_timeline_event_ids() {
+        let (pool, _dir) = fresh_pool().await;
+        let (world_id, _) = seed_world_with_timeline_events(&pool).await;
+
+        let adapter = NexusBaselineAdapter::new(pool);
+        // timeline_event_ids is a native Scope field (not under extensions).
+        let scope = timeline_scope(&world_id, None, &["evt_tl_1"]);
+        let events = match adapter.list_timeline_events(&scope) {
+            SpokeResult::Ok(v) => v,
+            SpokeResult::Reject(r) => panic!("expected ok, got reject: {r:?}"),
+        };
+
+        assert_eq!(
+            events.len(),
+            1,
+            "timeline_event_ids filter narrows to one row"
+        );
+        assert_eq!(events[0].timeline_event_id, "evt_tl_1");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn list_timeline_events_empty_world_returns_empty_vec() {
+        let (pool, _dir) = fresh_pool().await;
+
+        let adapter = NexusBaselineAdapter::new(pool);
+        let events = match adapter.list_timeline_events(&scope_for("wld_empty")) {
+            SpokeResult::Ok(v) => v,
+            SpokeResult::Reject(r) => panic!("expected ok, got reject: {r:?}"),
+        };
+        // No persisted events for the world → empty success (matches
+        // list_knowledge_entries' empty-world behavior; an empty answer is valid).
+        assert!(events.is_empty());
+    }
+
+    // ── timeline test helpers ──────────────────────────────────────────
+
+    /// Seed a world with timeline events across two branches for scope-filter
+    /// tests: `evt_tl_0`/`evt_tl_1` on `fbk_root`, `evt_tl_2` on `fbk_fork`.
+    async fn seed_world_with_timeline_events(pool: &sqlx::SqlitePool) -> (String, [String; 3]) {
+        seed::world(
+            pool,
+            "wld_tl",
+            "ctr_test",
+            "Timeline World",
+            "timeline-world",
+            "private",
+            "manual",
+        )
+        .await;
+        let event_ids = [
+            "evt_tl_0".to_string(),
+            "evt_tl_1".to_string(),
+            "evt_tl_2".to_string(),
+        ];
+        // Root branch: sequence 0 and 1.
+        seed::event(
+            pool,
+            &event_ids[0],
+            "wld_tl",
+            "fbk_root",
+            "story_advance",
+            0,
+        )
+        .await;
+        seed::event(
+            pool,
+            &event_ids[1],
+            "wld_tl",
+            "fbk_root",
+            "story_advance",
+            1,
+        )
+        .await;
+        // Fork branch: sequence 0.
+        seed::event(
+            pool,
+            &event_ids[2],
+            "wld_tl",
+            "fbk_fork",
+            "story_advance",
+            0,
+        )
+        .await;
+        ("wld_tl".to_string(), event_ids)
+    }
+
+    /// Build a spoke `Scope` for timeline queries: `scope_id` = world, optional
+    /// `extensions["nexus"]["branch_id"]`, optional `timeline_event_ids`.
+    fn timeline_scope(world_id: &str, branch_id: Option<&str>, event_ids: &[&str]) -> Scope {
+        let mut wire = serde_json::Map::new();
+        wire.insert("scope_id".into(), Value::String(world_id.to_string()));
+        if let Some(branch) = branch_id {
+            wire.insert(
+                "extensions".into(),
+                Value::Object(
+                    std::iter::once((
+                        "nexus".to_string(),
+                        Value::Object(
+                            std::iter::once((
+                                "branch_id".to_string(),
+                                Value::String(branch.to_string()),
+                            ))
+                            .collect(),
+                        ),
+                    ))
+                    .collect(),
+                ),
+            );
+        }
+        if !event_ids.is_empty() {
+            wire.insert(
+                "timeline_event_ids".into(),
+                Value::Array(
+                    event_ids
+                        .iter()
+                        .map(|s| Value::String((*s).to_string()))
+                        .collect(),
+                ),
+            );
+        }
+        serde_json::from_value(Value::Object(wire))
+            .expect("timeline scope wire shape is schema-valid")
+    }
+
+    /// Typed `TimelineEventExtensionsKey` for the `"nexus"` namespace — the only
+    /// way to read `extensions.nexus` on a spoke `TimelineEvent` (the typify
+    /// newtype does not impl `Borrow<str>`).
+    fn nexus_te_key() -> TimelineEventExtensionsKey {
+        TimelineEventExtensionsKey::try_from("nexus")
+            .expect("\"nexus\" matches the ^[a-z][a-z0-9_-]*$ namespace regex")
     }
 }
