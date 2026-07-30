@@ -918,3 +918,16 @@ Archived from [deferred-features-cross-version-tracker.md](deferred-features-cro
 | **Open follow-ups** | `R-V1145P4-001` (narrative-read-via-adapter → V1.146 dep-topology refactor); `R-V1144P2-INVALIDINPUT-400` (spoke 500-class); spoke-side: Scope.extensions ✓ (0.6.0), 500-class reject code (open) |
 | **Roadmap** | V1.146 (next): narrative-read refactor + NexusAdapter (FullAdapter) + CLI spoke-protocol interop + spoke-side 500-class contribution |
 
+---
+
+## V1.146 Delivery Snapshot (2026-07-31)
+
+| Field | Value |
+|-------|-------|
+| **Integration branch** | `iteration/v1.146` |
+| **Plans** | P0–P5 all Done (spoke 0.6.1 InternalError; narrative-read adapter; NexusAdapter FullAdapter; pack I/O CLI; lore activation flag-gated; residual sweep) |
+| **Key surfaces** | `nexus42 creator world kb pack export\|import`; `NEXUS_MCA_LORE_ACTIVATION=1`; `assemble-moment --emit-packet`; `modules_json` + relation `extensions_nexus_json` |
+| **Closed residuals** | R-V1144P2-INVALIDINPUT-400, R-V1145P4-001, R-V1139P0-005, R-V1144P1-001, R-V1143P0-STRETCH (defer), R-V1146P3-001 |
+| **Open follow-ups** | R-V1146P0-ACCEPT-01 (constraint→500); R-V1146P2-001 (compute_sessions TTL) |
+| **Wire contracts** | unchanged (`wire_contracts_changed: false`) |
+
