@@ -55,17 +55,10 @@ const FALLBACK_CREATOR: &str = "nexus42";
 
 /// Provenance stamp on imported Knowledge entries.
 ///
-/// V1.146 P3: the product spec (`pack-io-product-behavior.md`) prescribes
-/// `"pack_import"`, but the DB-level CHECK constraint on
-/// `source_provenance_kind` (migration 202606190003) does not yet include
-/// this value. A table-rebuild migration to add it is deferred because
-/// the rebuild depends on column state from earlier migrations that are
-/// not reliably available in sqlx's `migrate!()` runtime ordering.
-/// For now we stamp `"manual"` (the closest existing provenance kind)
-/// so the orchestrator's `put_knowledge_entry` succeeds. The full
-/// `pack_import` provenance is recoverable from the import command
-/// context at the application layer.
-const IMPORT_PROVENANCE: &str = "manual";
+/// Product lock (`pack-io-product-behavior.md` §Interfaces): import-created
+/// entries must carry `source_provenance_kind = "pack_import"`. The DB CHECK
+/// (expanded in migration `20260731000001`) now includes this value.
+const IMPORT_PROVENANCE: &str = "pack_import";
 
 /// `creator world kb pack` subcommands.
 #[derive(Debug, Subcommand)]
