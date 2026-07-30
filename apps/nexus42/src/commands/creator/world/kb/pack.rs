@@ -1566,6 +1566,254 @@ mod tests {
         );
     }
 
+    // ── V1.146 P4 T5: modules activation round-trip ────────────────────
+
+    /// Modules (activation) survive pack export → import round-trip, and
+    /// `apply_activation` correctly classifies imported entries by their
+    /// carried `modules.activation` fire-conditions.
+    ///
+    /// Proves:
+    /// 1. `modules_json` survives the full pack I/O path (closes R-V1146P3-001).
+    /// 2. The activation engine works on entries that arrived via pack import.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn pack_io_modules_preserved_and_activation_round_trip() {
+        use nexus_spoke_adapter::adapter::activation;
+
+        // ── Phase 1: Seed world A with entries carrying modules ─────────
+        let dir_a = tempfile::tempdir().unwrap();
+        let db_path_a = dir_a.path().join("state.db");
+        let pool_a = crate::db::Schema::init(&db_path_a).await.unwrap();
+
+        const WORLD_A: &str = "wld_activation_a";
+
+        // Reuse owner/creator seeding from the shared helpers.
+        // SAFETY: test-only INSERT.
+        sqlx::query(
+            "INSERT OR IGNORE INTO creators (creator_id, display_name, status, cached_at, data) \
+             VALUES (?, ?, 'active', datetime('now'), '{}')",
+        )
+        .bind(OWNER)
+        .bind(OWNER_NAME)
+        .execute(&pool_a)
+        .await
+        .unwrap();
+
+        nexus_local_db::kb_store::seed::world(
+            &pool_a,
+            WORLD_A,
+            OWNER,
+            "Activation World A",
+            "activation-world-a",
+            "private",
+            "manual",
+        )
+        .await;
+
+        let store_a = SqliteKbStore::new(pool_a.clone());
+
+        // Entry "Dragon" — activation key ["dragon"], logic "and_any".
+        let mut dragon = WorldKbEntry::new(WORLD_A, BlockType::Character, "Dragon");
+        dragon.body = Some(WorldKbBody {
+            summary: Some("A fearsome fire-breathing dragon".to_string()),
+            ..Default::default()
+        });
+        dragon.modules = Some(serde_json::json!({
+            "activation": {"key": ["dragon"], "logic": "and_any"}
+        }));
+        let _dragon_res = store_a.insert_knowledge_entry(dragon).await.unwrap();
+
+        // Entry "Ghost" — activation key ["haunt"], must NOT match
+        // a stage0 that only mentions "dragon". Summary deliberately
+        // avoids the substring "haunt" so the entry does not self-match.
+        let mut ghost = WorldKbEntry::new(WORLD_A, BlockType::Character, "Ghost");
+        ghost.body = Some(WorldKbBody {
+            summary: Some("A spooky translucent apparition".to_string()),
+            ..Default::default()
+        });
+        ghost.modules = Some(serde_json::json!({
+            "activation": {"key": ["haunt"], "logic": "and_any"}
+        }));
+        let _ghost_res = store_a.insert_knowledge_entry(ghost).await.unwrap();
+
+        // ── Phase 2: Export world A → pack file ─────────────────────────
+        let (pack_path, _pack_dir) = export_to_file_custom_world(&pool_a, WORLD_A).await;
+
+        // ── Phase 3: Fresh DB with world B, import pack ─────────────────
+        const WORLD_B: &str = "wld_activation_b";
+
+        let dir_b = tempfile::tempdir().unwrap();
+        let db_path_b = dir_b.path().join("state.db");
+        let pool_b = crate::db::Schema::init(&db_path_b).await.unwrap();
+
+        // SAFETY: test-only INSERT.
+        sqlx::query(
+            "INSERT OR IGNORE INTO creators (creator_id, display_name, status, cached_at, data) \
+             VALUES (?, ?, 'active', datetime('now'), '{}')",
+        )
+        .bind(OWNER)
+        .bind(OWNER_NAME)
+        .execute(&pool_b)
+        .await
+        .unwrap();
+
+        nexus_local_db::kb_store::seed::world(
+            &pool_b,
+            WORLD_B,
+            OWNER,
+            "Activation World B",
+            "activation-world-b",
+            "private",
+            "manual",
+        )
+        .await;
+
+        let import_args = ImportArgs {
+            world_ref: WORLD_B.to_string(),
+            r#in: pack_path,
+            dry_run: false,
+            conflict: ConflictStrategy::Skip,
+        };
+        import(import_args, &config_with_active_creator(), &pool_b)
+            .await
+            .expect("import must succeed");
+
+        // ── Phase 4: Verify modules survived the round-trip ─────────────
+        let store_b = SqliteKbStore::new(pool_b.clone());
+        let entries_b = store_b.list_by_world(WORLD_B).await.unwrap();
+        assert_eq!(entries_b.len(), 2, "both entries imported");
+
+        // Dragon: modules must be preserved verbatim.
+        let imported_dragon = entries_b
+            .iter()
+            .find(|e| e.canonical_name == "Dragon")
+            .expect("Dragon entry must exist after import");
+        assert!(
+            imported_dragon.modules.is_some(),
+            "Dragon.modules must survive pack round-trip — R-V1146P3-001 gate"
+        );
+        let dragon_modules = imported_dragon.modules.as_ref().unwrap();
+        let activation = dragon_modules
+            .get("activation")
+            .expect("activation sub-module must be present");
+        assert_eq!(
+            activation["logic"], "and_any",
+            "activation.logic must round-trip"
+        );
+        assert!(
+            activation["key"]
+                .as_array()
+                .unwrap()
+                .contains(&serde_json::json!("dragon")),
+            "activation.key must contain 'dragon' after round-trip"
+        );
+
+        // Ghost: must also preserve modules.
+        let imported_ghost = entries_b
+            .iter()
+            .find(|e| e.canonical_name == "Ghost")
+            .expect("Ghost entry must exist after import");
+        assert!(
+            imported_ghost.modules.is_some(),
+            "Ghost.modules must survive pack round-trip"
+        );
+
+        // ── Phase 5: Activation with stage0 mentioning "dragon" only ────
+        let stage0_dragon = "The story begins where a fearsome dragon awakens.";
+        let result = activation::apply_activation(&entries_b, stage0_dragon, &[]);
+
+        // Dragon: has activation key "dragon", present in stage0 → matched.
+        assert_eq!(
+            result.matched.len(),
+            1,
+            "only Dragon should match when stage0 contains 'dragon' but not 'haunt'"
+        );
+        assert_eq!(result.unmatched.len(), 1, "Ghost should be unmatched");
+
+        let matched_names: Vec<&str> = result
+            .matched
+            .iter()
+            .map(|e| e.canonical_name.as_str())
+            .collect();
+        assert!(
+            matched_names.contains(&"Dragon"),
+            "Dragon must be in matched set"
+        );
+
+        let unmatched_names: Vec<&str> = result
+            .unmatched
+            .iter()
+            .map(|e| e.canonical_name.as_str())
+            .collect();
+        assert!(
+            unmatched_names.contains(&"Ghost"),
+            "Ghost must be in unmatched set"
+        );
+
+        // Trace must record the classification.
+        let dragon_trace = result
+            .trace
+            .iter()
+            .find(|t| t.canonical_name == "Dragon")
+            .expect("Dragon must have a trace entry");
+        assert!(dragon_trace.accepted, "Dragon trace must show accepted");
+        assert!(
+            dragon_trace.reason.contains("matched"),
+            "Dragon trace reason must indicate key match: {}",
+            dragon_trace.reason
+        );
+
+        let ghost_trace = result
+            .trace
+            .iter()
+            .find(|t| t.canonical_name == "Ghost")
+            .expect("Ghost must have a trace entry");
+        assert!(!ghost_trace.accepted, "Ghost trace must show NOT accepted");
+        assert!(
+            ghost_trace.reason.contains("no key matched"),
+            "Ghost trace reason must indicate no match: {}",
+            ghost_trace.reason
+        );
+
+        // ── Phase 6: Activation with stage0 mentioning both keys ────────
+        let stage0_both = "A dragon battles a ghost that haunts the ruins.";
+        let result2 = activation::apply_activation(&entries_b, stage0_both, &[]);
+
+        assert_eq!(
+            result2.matched.len(),
+            2,
+            "both entries should match when stage0 contains both 'dragon' and 'haunt'"
+        );
+        assert!(
+            result2.unmatched.is_empty(),
+            "no entries should be unmatched"
+        );
+    }
+
+    /// Helper: export pool's entries for a given world to a temp pack file.
+    /// Mirrors [`export_to_file`] but accepts a custom `world_id`.
+    async fn export_to_file_custom_world(
+        pool: &SqlitePool,
+        world_id: &str,
+    ) -> (PathBuf, tempfile::TempDir) {
+        let tmp_dir = tempfile::tempdir().unwrap();
+        let out_path = tmp_dir.path().join("test_pack.json");
+
+        let args = ExportArgs {
+            world_ref: world_id.to_string(),
+            out: out_path.clone(),
+            title: None,
+            pack_version: DEFAULT_PACK_VERSION.to_string(),
+            include_deprecated: false,
+            include_anchors: false,
+        };
+        let config = config_with_active_creator();
+        export(args, &config, pool)
+            .await
+            .expect("export must succeed for test fixture");
+
+        (out_path, tmp_dir)
+    }
+
     #[tokio::test]
     async fn import_errors_on_invalid_pack_shape() {
         let (pool, _dir) = empty_world_pool().await;
