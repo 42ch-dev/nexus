@@ -49,7 +49,7 @@
 //! via `extensions.nexus.{work_id, creator_id}`. Missing values reject
 //! with `INVALID_INPUT`.
 
-use super::NexusBaselineAdapter;
+use super::NexusAdapter;
 use crate::{
     Finding as SpokeFinding, FindingExtensionsKey, FindingPort, SpokeReject, SpokeRejectCode,
     SpokeResult,
@@ -58,7 +58,7 @@ use nexus_local_db::findings::{validate_finding_enums, Finding as NexusFinding};
 use nexus_local_db::LocalDbError;
 use serde_json::{json, Map, Value};
 
-impl FindingPort for NexusBaselineAdapter<'_> {
+impl FindingPort for NexusAdapter<'_> {
     fn put_findings(&self, findings: Vec<SpokeFinding>) -> SpokeResult<Vec<SpokeFinding>> {
         let pool = self.pool.clone();
         self.block_on(async move {
@@ -486,7 +486,7 @@ mod tests {
         let (pool, _dir) = fresh_pool().await;
         seed_work(&pool).await;
 
-        let adapter = NexusBaselineAdapter::new(pool.clone());
+        let adapter = NexusAdapter::new(pool.clone());
         let spoke = spoke_finding(
             "fnd_happy",
             "warning",
@@ -522,7 +522,7 @@ mod tests {
         let (pool, _dir) = fresh_pool().await;
         seed_work(&pool).await;
 
-        let adapter = NexusBaselineAdapter::new(pool.clone());
+        let adapter = NexusAdapter::new(pool.clone());
         let spoke = spoke_finding("fnd_voc", "error", "dismissed", None, None);
 
         match adapter.put_findings(vec![spoke]) {
@@ -544,7 +544,7 @@ mod tests {
         let (pool, _dir) = fresh_pool().await;
         seed_work(&pool).await;
 
-        let adapter = NexusBaselineAdapter::new(pool);
+        let adapter = NexusAdapter::new(pool);
         // Strip the work_id; keep creator_id so the rejection is
         // specifically about the missing work_id.
         let spoke: SpokeFinding = serde_json::from_value(json!({
@@ -577,7 +577,7 @@ mod tests {
         let (pool, _dir) = fresh_pool().await;
         seed_work(&pool).await;
 
-        let adapter = NexusBaselineAdapter::new(pool);
+        let adapter = NexusAdapter::new(pool);
         // `critical` is not in the spoke documented vocabulary.
         let spoke: SpokeFinding = serde_json::from_value(json!({
             "schema_version": 1,
@@ -609,7 +609,7 @@ mod tests {
         let (pool, _dir) = fresh_pool().await;
         seed_work(&pool).await;
 
-        let adapter = NexusBaselineAdapter::new(pool);
+        let adapter = NexusAdapter::new(pool);
         let result = adapter.put_findings(Vec::new());
         match result {
             SpokeResult::Ok(v) => assert!(v.is_empty()),
@@ -643,7 +643,7 @@ mod tests {
         let (pool, _dir) = fresh_pool().await;
         seed_work(&pool).await;
 
-        let adapter = NexusBaselineAdapter::new(pool.clone());
+        let adapter = NexusAdapter::new(pool.clone());
 
         // First item: valid, would persist on its own.
         let first = spoke_finding("fnd_rb_first", "info", "open", None, None);
@@ -682,7 +682,7 @@ mod tests {
             .await
             .unwrap();
 
-        let adapter = NexusBaselineAdapter::new(pool);
+        let adapter = NexusAdapter::new(pool);
         let finding = spoke_finding("fnd_fail", "info", "open", None, None);
         match adapter.put_findings(vec![finding]) {
             SpokeResult::Reject(r) => {

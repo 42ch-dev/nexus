@@ -17,10 +17,10 @@
 //! → row lookup; expose rule authoring through the daemon API. Until
 //! then this stub is the entire impl.
 
-use super::NexusBaselineAdapter;
+use super::NexusAdapter;
 use crate::{Rule, RuleQueryPort, SpokeResult};
 
-impl RuleQueryPort for NexusBaselineAdapter<'_> {
+impl RuleQueryPort for NexusAdapter<'_> {
     /// Stub — returns the documented empty set (spec §7.4).
     ///
     /// Nexus has no persisted spoke `Rule` rows today; rules come from

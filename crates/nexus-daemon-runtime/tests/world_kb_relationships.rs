@@ -121,7 +121,7 @@ fn add_request(
 }
 
 // V1.144 P2: add/update now route through `orchestrate_relate` via
-// `NexusBaselineAdapter`, which bridges sync spoke ports to async SQLite via
+// `NexusAdapter`, which bridges sync spoke ports to async SQLite via
 // `tokio::task::block_in_place`. That requires a multi-threaded runtime (the
 // production daemon uses one; tests opt in via `flavor = "multi_thread"` —
 // same rationale as the V1.143 patch_entity tests). Pre-orchestrator

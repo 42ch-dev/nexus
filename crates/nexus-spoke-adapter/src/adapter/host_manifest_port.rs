@@ -15,14 +15,14 @@
 //! manifest IS authoritative — the daemon is the data-store for its
 //! local storage.
 
-use super::NexusBaselineAdapter;
+use super::NexusAdapter;
 use crate::{HostCapabilityManifest, HostManifestPort, SpokeResult};
 use serde_json::json;
 /// The local-first host id (spec §7.4 — `nexus-local` is the documented
 /// default host identity for the production adapter).
 const HOST_ID: &str = "nexus-local";
 
-impl HostManifestPort for NexusBaselineAdapter<'_> {
+impl HostManifestPort for NexusAdapter<'_> {
     fn get_host_capability_manifest(&self) -> SpokeResult<HostCapabilityManifest> {
         // Mirror V1.141 mock's `make_manifest` pattern: construct the
         // canonical shape via `serde_json::from_value`, which exercises the
@@ -68,7 +68,7 @@ mod tests {
         let pool = nexus_local_db::open_pool(&db_path).await.unwrap();
         nexus_local_db::run_migrations(&pool).await.unwrap();
 
-        let adapter = NexusBaselineAdapter::new(pool);
+        let adapter = NexusAdapter::new(pool);
         let manifest = match adapter.get_host_capability_manifest() {
             SpokeResult::Ok(m) => m,
             SpokeResult::Reject(r) => panic!("self manifest is Ok: {r:?}"),
@@ -95,7 +95,7 @@ mod tests {
         let pool = nexus_local_db::open_pool(&db_path).await.unwrap();
         nexus_local_db::run_migrations(&pool).await.unwrap();
 
-        let adapter = NexusBaselineAdapter::new(pool);
+        let adapter = NexusAdapter::new(pool);
         let peers = match adapter.list_peer_host_capability_manifests() {
             SpokeResult::Ok(p) => p,
             SpokeResult::Reject(r) => panic!("peer list is Ok: {r:?}"),

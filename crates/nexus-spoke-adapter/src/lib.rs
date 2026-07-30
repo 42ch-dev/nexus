@@ -11,7 +11,7 @@
 //!    [`spoke_operations`] — see the [`ops`] module.
 //! 3. **The `WorldKbEntry` ↔ spoke `KnowledgeEntry` conversion seam** — see
 //!    the [`conversion`] module (V1.145 P1a).
-//! 4. **The production `BaselinePorts` implementation** ([`NexusBaselineAdapter`]
+//! 4. **The production `BaselinePorts` implementation** ([`NexusAdapter`]
 //!    + 6 port impls) — see the [`adapter`] module (V1.145 P1b).
 //!
 //! Surfaces 1–3 are **pure delegation / conversion**: where `spoke-operations`
@@ -30,7 +30,7 @@
 //! pass-through, again no nexus logic.
 //!
 //! Since V1.145 P1b the crate also hosts the **production `BaselinePorts`
-//! implementation** (`NexusBaselineAdapter` + 6 port impls in the [`adapter`]
+//! implementation** (`NexusAdapter` + 6 port impls in the [`adapter`]
 //! module, spec §7.4). The adapter consumes `nexus-local-db` storage primitives
 //! and bridges spoke's sync port traits to async `SQLite` I/O. This makes
 //! `nexus-spoke-adapter` the capability-aggregation layer, while
@@ -44,7 +44,7 @@
 //! `AssemblePacket`, `ExtensionMap`). There are no nexus wrapper types here
 //! — the adapter IS the boundary.
 //!
-//! (The production [`adapter::NexusBaselineAdapter`] is the documented
+//! (The production [`adapter::NexusAdapter`] is the documented
 //! exception: it necessarily touches nexus storage rows on the *inside* of
 //! its port impls, but its public surface — the spoke port traits — stays
 //! spoke-only.)
@@ -55,9 +55,9 @@ pub mod extensions;
 pub mod ops;
 
 // V1.145 P1b — production adapter re-export so consumers can construct
-// `NexusBaselineAdapter` through the single spoke-adapter import boundary
-// (spec §7.4 import path: `nexus_spoke_adapter::NexusBaselineAdapter`).
-pub use adapter::NexusBaselineAdapter;
+// `NexusAdapter` through the single spoke-adapter import boundary
+// (spec §7.4 import path: `nexus_spoke_adapter::NexusAdapter`).
+pub use adapter::NexusAdapter;
 
 // V1.145 P2 — `SpokeBackedKbStore` (the `KbStore` impl injected at the MCA
 // `assemble_moment` wiring site) + the scoped-read result type. Re-exported so

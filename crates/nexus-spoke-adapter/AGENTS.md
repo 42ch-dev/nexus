@@ -9,7 +9,7 @@ Since V1.145 P1b this crate is the **capability aggregation** layer (spec §7.4 
 1. **Typed accessors** over the `extensions.nexus` namespace on a spoke `KnowledgeEntry` (5 fields: `world_id`, `created_from_command_id`, `source_work_id`, `source_chapter`, `source_provenance_kind`). See `src/extensions.rs`.
 2. **Lifecycle delegation (Surface A)** — delegates standard lifecycle invariants to `spoke-operations` (validate/apply promote, status transitions, assemble packet, extension merge, revision assert). Where `spoke-operations` exports a function, this crate re-exports or wraps it; it never reimplements a lifecycle invariant. See `src/ops.rs`.
 3. **Conversion seam** — the sole `WorldKbEntry` ↔ spoke `KnowledgeEntry` conversion (`world_kb_to_spoke` / `spoke_to_world_kb` + `WorldKbEntrySpokeExt`), owned here since V1.145 P1a (moved out of `nexus-knowledge` per the orphan rule). See `src/conversion/`.
-4. **Production adapter home** — `NexusBaselineAdapter` + 6 spoke port impls in `src/adapter/` (V1.145 P1b rehome from `nexus-local-db`). Consumes `nexus-local-db` storage primitives and bridges spoke's sync port traits to async `SQLite` I/O.
+4. **Production adapter home** — `NexusAdapter` (V1.146 rename; was `NexusBaselineAdapter` in V1.145) + 6 spoke port impls in `src/adapter/` (V1.145 P1b rehome from `nexus-local-db`). Consumes `nexus-local-db` storage primitives and bridges spoke's sync port traits to async `SQLite` I/O.
 
 Since V1.141 the crate also flat-re-exports spoke 0.4.0's adapter **port traits + `orchestrate_*` entrypoints + operand wire types** (Surface B, spec §7.3) so consumers implement spoke's ports and call spoke's orchestrators through this single import boundary — pure pass-through, no nexus logic.
 

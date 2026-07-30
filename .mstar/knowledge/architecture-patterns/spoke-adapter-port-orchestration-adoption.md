@@ -267,15 +267,15 @@ V1.145 (XL) shipped the adapter topology correction that the V1.141–V1.144 roa
 
 ### Adapter rehome + dep reversal (P1a/P1b)
 
-The conversion seam and production `NexusBaselineAdapter` both moved to `nexus-spoke-adapter`, reversing the dependency graph:
+The conversion seam and production adapter (now `NexusAdapter`, formerly `NexusBaselineAdapter`) both moved to `nexus-spoke-adapter`, reversing the dependency graph:
 
 **Conversion seam (P1a):** The `WorldKbEntry↔KnowledgeEntry` `From` impls were in `nexus-knowledge`. They needed to move to `nexus-spoke-adapter` so the adapter owns the sole boundary. But the **orphan rule** (E0117) prevented implementing `From<WorldKbEntry>` for `KnowledgeEntry` (or vice versa) in a third crate where both types are foreign. Solution: **free functions** `world_kb_to_spoke` / `spoke_to_world_kb` (the compiler's own suggestion — `rustc --explain E0117` explicitly recommends free functions over orphan-compatible newtypes) + a local **trait** `WorldKbEntrySpokeExt` for lifecycle methods (`confirm`/`deprecate`/`merge_into`/`delete`). This is the **proven pattern** for conversion seams across crates: when orphan rule blocks `From`/`Into`, use a free function pair + local trait on the product type.
 
-**Production `NexusBaselineAdapter` (P1b):** `NexusBaselineAdapter` + 6 baseline port impls moved from `nexus-local-db/src/spoke_adapter/` to `nexus-spoke-adapter/src/adapter/`. The adapter crate becomes the **capability aggregation** layer — it depends on `nexus-local-db` storage primitives (`SqliteKbStore`, `open_pool`, `run_migrations`), `sqlx`, and `tokio`, but the port families are adapter-owned.
+**Production adapter (P1b):** `NexusAdapter` (formerly `NexusBaselineAdapter`) + 6 baseline port impls moved from `nexus-local-db/src/spoke_adapter/` to `nexus-spoke-adapter/src/adapter/`. The adapter crate becomes the **capability aggregation** layer — it depends on `nexus-local-db` storage primitives (`SqliteKbStore`, `open_pool`, `run_migrations`), `sqlx`, and `tokio`, but the port families are adapter-owned.
 
 **`nexus-local-db`** becomes **pure storage**: no `nexus-spoke-adapter` dep, no spoke types in its public API. It still depends on `nexus-narrative` (for `TimelineEvent` type) and `nexus-knowledge` (for `WorldKbEntry` type), but these are domain-type deps, not adapter deps.
 
-**Import path change:** `nexus_local_db::spoke_adapter::NexusBaselineAdapter` → `nexus_spoke_adapter::adapter::NexusBaselineAdapter` — every daemon-runtime handler site and integration test updates to the new path.
+**Import path change (V1.145→V1.146 rename):** `nexus_local_db::spoke_adapter::NexusBaselineAdapter` → `nexus_spoke_adapter::NexusAdapter` — every daemon-runtime handler site and integration test updates to the new path. (V1.145 intermediate: `nexus_spoke_adapter::adapter::NexusBaselineAdapter`.)
 
 **Dep graph reversal (before → after):**
 
@@ -299,7 +299,7 @@ The original architect scope-pushdown design (§7.5) called for nexus-specific K
 
 P2 shipped a **typed `KbScopeFilters` carrier** as a workaround: a nexus-only struct that carried the 5 nexus filters alongside a spoke `Scope` (which carried only native fields like `entry_types`). This worked but introduced a parallel carrier path — every conversion site wrapped/unwrapped the extra struct.
 
-**spoke 0.6.0** (bumped mid-iteration, commit `c641a99a`) added `Scope.extensions: ExtensionMap` — the gap was real, and the upstream fix closed it. P2 **redid** the mechanism in commit `77f91067`: removed `KbScopeFilters` + `SqliteKbStore::query_scoped` entirely and rebuilt the query path on spoke-native `scope.extensions["nexus"]` (looked up via `ScopeExtensionsKey`). `NexusBaselineAdapter::list_knowledge_entries_scoped` reads the scope, reconstructs `KbQuery` from extensions, and delegates to `SqliteKbStore::query` — byte-identical output proven by comparison test.
+**spoke 0.6.0** (bumped mid-iteration, commit `c641a99a`) added `Scope.extensions: ExtensionMap` — the gap was real, and the upstream fix closed it. P2 **redid** the mechanism in commit `77f91067`: removed `KbScopeFilters` + `SqliteKbStore::query_scoped` entirely and rebuilt the query path on spoke-native `scope.extensions["nexus"]` (looked up via `ScopeExtensionsKey`). `NexusAdapter::list_knowledge_entries_scoped` reads the scope, reconstructs `KbQuery` from extensions, and delegates to `SqliteKbStore::query` — byte-identical output proven by comparison test.
 
 **Lesson:** When spoke has a gap, the best-practice fix is **upstream** (advance spoke), not nexus workarounds. The typed carrier was the correct work-for-today, but the 0.6.0 upgrade made it obsolete within the same iteration. This reinforces the V1.143 "verify spoke source before claiming clean mapping" discipline multiply: spec authors must check the **actual published spoke version** for the fields they depend on.
 

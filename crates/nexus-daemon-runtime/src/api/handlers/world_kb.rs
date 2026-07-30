@@ -54,17 +54,17 @@ use nexus_local_db::kb_relationships::{
 };
 use nexus_local_db::kb_store::{self, cas_update_key_block_fields};
 use nexus_local_db::LocalDbError;
-// V1.145 P1b — the production `NexusBaselineAdapter` rehomed from
+// V1.145 P1b — the production `NexusAdapter` rehomed from
 // `nexus-local-db/src/spoke_adapter/` to `nexus-spoke-adapter/src/adapter/`
 // (spec §7.4 / §8 dep-graph reversal). Construct through the single
 // spoke-adapter import boundary.
-use nexus_spoke_adapter::NexusBaselineAdapter;
+use nexus_spoke_adapter::NexusAdapter;
 // V1.142 P2: first production orchestrator cutover. `promote_adopt` routes
-// through `orchestrate_promote(&NexusBaselineAdapter, PromoteRequest)`.
+// through `orchestrate_promote(&NexusAdapter, PromoteRequest)`.
 // V1.143 P1: second cutover — `patch_entity` routes the canonical entity edit
-// through `orchestrate_upsert(&NexusBaselineAdapter, UpsertRequest)`.
+// through `orchestrate_upsert(&NexusAdapter, UpsertRequest)`.
 // V1.144 P2: third cutover — `patch_relationship` add/update route through
-// `orchestrate_relate(&NexusBaselineAdapter, RelateRequest)`. `remove` stays
+// `orchestrate_relate(&NexusAdapter, RelateRequest)`. `remove` stays
 // on Surface A (spoke `RelationPort` has no delete).
 // These spoke types are re-exported through `nexus_spoke_adapter` (the
 // single boundary that crosses into spoke standard objects; spec §7).
@@ -415,7 +415,7 @@ pub async fn patch_entity(
     post_patch.revision = Some(current_version);
 
     let spoke_req = build_spoke_upsert_request(&post_patch);
-    let adapter = NexusBaselineAdapter::new(pool.clone());
+    let adapter = NexusAdapter::new(pool.clone());
     // `with_bound_tx` is a no-op when the adapter has no shared tx cell
     // (`put_update` opens + commits its own transaction) — patch_entity has no
     // sibling write, so the unbound path is behavior-equivalent to the previous
@@ -699,7 +699,7 @@ async fn promote_adopt(
 
     let tx = pool.begin().await.map_err(NexusApiError::from)?;
     let tx_cell = Arc::new(Mutex::new(Some(tx)));
-    let adapter = NexusBaselineAdapter::new(pool.clone()).with_tx_cell(Arc::clone(&tx_cell));
+    let adapter = NexusAdapter::new(pool.clone()).with_tx_cell(Arc::clone(&tx_cell));
 
     let spoke_req = build_spoke_promote_request(&kb);
     let result = adapter.with_bound_tx(|| orchestrate_promote(&adapter, spoke_req));
@@ -2258,7 +2258,7 @@ async fn patch_relationship_add(
         Some(nexus_local_db::kb_relationships::SOURCE_MANUAL),
     );
     let spoke_req = build_spoke_relate_request(&relation);
-    let adapter = NexusBaselineAdapter::new(pool.clone());
+    let adapter = NexusAdapter::new(pool.clone());
     // `with_bound_tx` is a no-op when the adapter has no shared tx cell
     // (`put_relation_create` opens + commits its own transaction) — add has no
     // sibling write, so the unbound path is behavior-equivalent to the previous
@@ -2368,7 +2368,7 @@ async fn patch_relationship_update(
         None,
     );
     let spoke_req = build_spoke_relate_request(&relation);
-    let adapter = NexusBaselineAdapter::new(pool.clone());
+    let adapter = NexusAdapter::new(pool.clone());
     let result = adapter.with_bound_tx(|| orchestrate_relate(&adapter, spoke_req));
     let row = map_relate_response(result, pool, relationship_id).await?;
 

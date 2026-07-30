@@ -23,7 +23,7 @@
 //! | Entry absent + `expected_revision = Some(_)`     | `REVISION_CONFLICT`          |
 //! | Entry present + `expected_revision = None`       | `KNOWLEDGE_ENTRY_ALREADY_EXISTS` |
 
-use super::NexusBaselineAdapter;
+use super::NexusAdapter;
 use crate::conversion::{spoke_to_world_kb, world_kb_to_spoke};
 use crate::extensions::build_extensions_nexus;
 use crate::{KnowledgeEntry, KnowledgeEntryPort, SpokeReject, SpokeRejectCode, SpokeResult};
@@ -35,7 +35,7 @@ use nexus_local_db::kb_store::{
 use nexus_local_db::LocalDbError;
 use serde_json::{json, Map};
 
-impl NexusBaselineAdapter<'_> {
+impl NexusAdapter<'_> {
     /// Convert a `SQLite` row error into a `KNOWLEDGE_ENTRY_NOT_FOUND` reject
     /// when the underlying store signals absence. Any other storage error
     /// surfaces as `INTERNAL_ERROR` (server-side failure).
@@ -116,7 +116,7 @@ impl NexusBaselineAdapter<'_> {
     }
 }
 
-impl KnowledgeEntryPort for NexusBaselineAdapter<'_> {
+impl KnowledgeEntryPort for NexusAdapter<'_> {
     fn get_knowledge_entry(&self, entry_id: &str) -> SpokeResult<KnowledgeEntry> {
         let pool = self.pool.clone();
         let entry_id = entry_id.to_string();
@@ -151,7 +151,7 @@ impl KnowledgeEntryPort for NexusBaselineAdapter<'_> {
 /// exists; otherwise insert via [`SqliteKbStore::insert_key_block_in_tx`]
 /// and return the entry with its initial post-create revision (`Some(1)`).
 async fn put_create(
-    adapter: &NexusBaselineAdapter<'_>,
+    adapter: &NexusAdapter<'_>,
     pool: &sqlx::SqlitePool,
     entry: KnowledgeEntry,
 ) -> SpokeResult<KnowledgeEntry> {
@@ -270,7 +270,7 @@ async fn put_create(
 /// via a sibling UPDATE so the full row is replaced atomically with the CAS
 /// guard.
 async fn put_update(
-    adapter: &NexusBaselineAdapter<'_>,
+    adapter: &NexusAdapter<'_>,
     pool: &sqlx::SqlitePool,
     entry: KnowledgeEntry,
     expected: u64,
@@ -282,7 +282,7 @@ async fn put_update(
 }
 
 async fn put_update_bound(
-    adapter: &NexusBaselineAdapter<'_>,
+    adapter: &NexusAdapter<'_>,
     entry: KnowledgeEntry,
     expected: u64,
 ) -> SpokeResult<KnowledgeEntry> {
@@ -375,7 +375,7 @@ async fn run_cas_update_in_tx(
     .await
     {
         Ok(new_rev) => new_rev,
-        Err(e) => return NexusBaselineAdapter::map_cas_err(e, entry_id, expected),
+        Err(e) => return NexusAdapter::map_cas_err(e, entry_id, expected),
     };
 
     if let Err(e) = update_key_block_auxiliary_fields_in_tx(
@@ -504,7 +504,7 @@ mod tests {
         let (pool, _dir) = fresh_pool().await;
         seed_world(&pool).await;
 
-        let adapter = NexusBaselineAdapter::new(pool);
+        let adapter = NexusAdapter::new(pool);
         let result = adapter.get_knowledge_entry("kb_missing");
         match result {
             SpokeResult::Reject(r) => {
@@ -523,7 +523,7 @@ mod tests {
         let (pool, _dir) = fresh_pool().await;
         seed_world(&pool).await;
 
-        let adapter = NexusBaselineAdapter::new(pool.clone());
+        let adapter = NexusAdapter::new(pool.clone());
         let entry = spoke_entry("kb_alpha", "Alpha", None);
         let put_result = adapter.put_knowledge_entry(entry, None);
         assert!(
@@ -549,7 +549,7 @@ mod tests {
         let (pool, _dir) = fresh_pool().await;
         seed_world(&pool).await;
 
-        let adapter = NexusBaselineAdapter::new(pool);
+        let adapter = NexusAdapter::new(pool);
         let entry = spoke_entry("kb_create_happy", "CreateHappy", None);
 
         match adapter.put_knowledge_entry(entry, None) {
@@ -566,7 +566,7 @@ mod tests {
         let (pool, _dir) = fresh_pool().await;
         seed_world(&pool).await;
 
-        let adapter = NexusBaselineAdapter::new(pool);
+        let adapter = NexusAdapter::new(pool);
         let entry = spoke_entry("kb_dup", "Dup", None);
 
         let first = adapter.put_knowledge_entry(entry.clone(), None);
@@ -587,7 +587,7 @@ mod tests {
         let (pool, _dir) = fresh_pool().await;
         seed_world(&pool).await;
 
-        let adapter = NexusBaselineAdapter::new(pool);
+        let adapter = NexusAdapter::new(pool);
         let entry = spoke_entry("kb_upd_happy", "UpdHappy", None);
 
         // Create first (revision becomes 1).
@@ -629,7 +629,7 @@ mod tests {
         let (pool, _dir) = fresh_pool().await;
         seed_world(&pool).await;
 
-        let adapter = NexusBaselineAdapter::new(pool);
+        let adapter = NexusAdapter::new(pool);
         let entry = spoke_entry("kb_stale", "Stale", None);
 
         // Create → revision 1. Bump to 2. Then attempt another update with
@@ -661,7 +661,7 @@ mod tests {
         let (pool, _dir) = fresh_pool().await;
         seed_world(&pool).await;
 
-        let adapter = NexusBaselineAdapter::new(pool);
+        let adapter = NexusAdapter::new(pool);
         let entry = spoke_entry("kb_conflict", "Conflict", None);
 
         // Create → revision 1. Then attempt update with expected = 5 (caller
@@ -689,7 +689,7 @@ mod tests {
         let (pool, _dir) = fresh_pool().await;
         seed_world(&pool).await;
 
-        let adapter = NexusBaselineAdapter::new(pool);
+        let adapter = NexusAdapter::new(pool);
         let entry = spoke_entry("kb_absent", "Absent", None);
 
         // No prior create — entry is absent. Caller passes expected = Some(3),
@@ -719,7 +719,7 @@ mod tests {
         let (pool, _dir) = fresh_pool().await;
         seed_world(&pool).await;
 
-        let adapter = NexusBaselineAdapter::new(pool.clone());
+        let adapter = NexusAdapter::new(pool.clone());
         let entry = spoke_entry("kb_unbound_create", "UnboundCreate", None);
 
         match adapter.put_knowledge_entry(entry, None) {
@@ -747,7 +747,7 @@ mod tests {
             .await
             .unwrap();
 
-        let adapter = NexusBaselineAdapter::new(pool);
+        let adapter = NexusAdapter::new(pool);
         match adapter.get_knowledge_entry("kb_alpha") {
             SpokeResult::Reject(r) => {
                 assert_eq!(
@@ -770,7 +770,7 @@ mod tests {
             .await
             .unwrap();
 
-        let adapter = NexusBaselineAdapter::new(pool);
+        let adapter = NexusAdapter::new(pool);
         let entry = spoke_entry("kb_fail", "FailCreate", None);
         match adapter.put_knowledge_entry(entry, None) {
             SpokeResult::Reject(r) => {
@@ -791,7 +791,7 @@ mod tests {
         seed_world(&pool).await;
 
         // Create a real entry first so the update path is exercised.
-        let adapter = NexusBaselineAdapter::new(pool.clone());
+        let adapter = NexusAdapter::new(pool.clone());
         let entry = spoke_entry("kb_upd_fail", "UpdFail", None);
         let created = unwrap_ok(adapter.put_knowledge_entry(entry, None), "create");
         assert_eq!(created.revision, Some(1));
@@ -823,7 +823,7 @@ mod tests {
         let (pool, _dir) = fresh_pool().await;
         seed_world(&pool).await;
 
-        let adapter = NexusBaselineAdapter::new(pool);
+        let adapter = NexusAdapter::new(pool);
         // put_create on already-existing entry — this is an OCC/domain signal,
         // NOT a storage failure; the DAO's pre-check returns `KnowledgeEntryAlreadyExists`.
         let entry = spoke_entry("kb_val_ae", "ValAE", None);
@@ -869,7 +869,7 @@ mod tests {
 
         let tx = pool.begin().await.unwrap();
         let tx_cell = Arc::new(Mutex::new(Some(tx)));
-        let adapter = NexusBaselineAdapter::new(pool.clone()).with_tx_cell(Arc::clone(&tx_cell));
+        let adapter = NexusAdapter::new(pool.clone()).with_tx_cell(Arc::clone(&tx_cell));
         let entry = spoke_entry("kb_bound_create", "BoundCreate", None);
         let entry_id = entry.entry_id.clone();
 

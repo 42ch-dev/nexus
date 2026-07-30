@@ -558,7 +558,7 @@ pub async fn run_assemble_moment(
     let pool = open_shared_pool(config).await?;
     let narrative = nexus_local_db::narrative_gateway::SqliteNarrativeGateway::new(pool.clone());
     // V1.145 P2 — the MCA WorldKB read now crosses the spoke-adapter boundary:
-    // `SpokeBackedKbStore` routes `query` through `NexusBaselineAdapter`'s
+    // `SpokeBackedKbStore` routes `query` through `NexusAdapter`'s
     // scoped read (storage → spoke `KnowledgeEntry` → `WorldKbEntry` via the
     // `spoke_to_world_kb` conversion seam), matching `SqliteKbStore::query`
     // behavior exactly (silent 500-row window; no reject-on-overflow).

@@ -1,6 +1,6 @@
 //! Production `BaselinePorts` implementation home (spec §7.4).
 //!
-//! `NexusBaselineAdapter` is the production spoke port impl backing spoke
+//! `NexusAdapter` is the production spoke port impl backing spoke
 //! orchestrators against `nexus-local-db`'s `SQLite` storage. The port-family
 //! matrix (which families are production vs stub) lives in
 //! `.mstar/specs/spoke-adapter-architecture.md` §7.4.
@@ -54,7 +54,7 @@ use tokio::runtime::Handle;
 /// In debug builds it additionally panics if that runtime is **not**
 /// multi-threaded — the `block_in_place` bridge used by every sync port
 /// method requires a multi-threaded runtime (see [`Self::block_on`]).
-pub struct NexusBaselineAdapter<'a> {
+pub struct NexusAdapter<'a> {
     pool: SqlitePool,
     handle: Handle,
     /// When set (via [`Self::with_tx_cell`]), `put_knowledge_entry` joins this
@@ -64,7 +64,7 @@ pub struct NexusBaselineAdapter<'a> {
     bound_tx_cell: Option<Arc<Mutex<Option<sqlx::Transaction<'a, sqlx::Sqlite>>>>>,
 }
 
-impl NexusBaselineAdapter<'static> {
+impl NexusAdapter<'static> {
     /// Construct from the current tokio runtime.
     ///
     /// # Panics
@@ -87,10 +87,10 @@ impl NexusBaselineAdapter<'static> {
         // No-op in release builds.
         debug_assert!(
             handle.runtime_flavor() == tokio::runtime::RuntimeFlavor::MultiThread,
-            "NexusBaselineAdapter requires a multi-threaded tokio runtime \
+            "NexusAdapter requires a multi-threaded tokio runtime \
              (block_in_place panics under a current_thread runtime)"
         );
-        NexusBaselineAdapter {
+        NexusAdapter {
             pool,
             handle,
             bound_tx_cell: None,
@@ -99,7 +99,7 @@ impl NexusBaselineAdapter<'static> {
 }
 
 #[allow(clippy::elidable_lifetime_names)]
-impl<'a> NexusBaselineAdapter<'a> {
+impl<'a> NexusAdapter<'a> {
     /// Attach a shared transaction cell for the duration of one adopt/orchestrate
     /// call. The handler installs the open `sqlx::Transaction` in the cell before
     /// calling [`Self::with_bound_tx`], then removes it afterward for job flip +
@@ -166,14 +166,14 @@ impl<'a> NexusBaselineAdapter<'a> {
 mod tests {
     use super::*;
 
-    /// Compile-time proof that `NexusBaselineAdapter` satisfies the
+    /// Compile-time proof that `NexusAdapter` satisfies the
     /// `BaselinePorts` blanket impl once all 6 port families are in scope
     /// (spec §7.4 — production-vs-stub matrix is complete).
     ///
     /// Each helper accepts `&dyn <PortFamily>`; passing a
-    /// `&NexusBaselineAdapter` performs the implicit trait-upcast that
+    /// `&NexusAdapter` performs the implicit trait-upcast that
     /// only compiles when the appropriate `impl <PortFamily> for
-    /// NexusBaselineAdapter` block exists. The function body is empty
+    /// NexusAdapter` block exists. The function body is empty
     /// — runtime behavior is exercised in the per-port `tests` modules.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn nexus_baseline_adapter_satisfies_baseline_ports_blanket_impl() {
@@ -189,7 +189,7 @@ mod tests {
         let db_path = dir.path().join("test.db");
         let pool = nexus_local_db::open_pool(&db_path).await.unwrap();
         nexus_local_db::run_migrations(&pool).await.unwrap();
-        let adapter = NexusBaselineAdapter::new(pool);
+        let adapter = NexusAdapter::new(pool);
 
         accepts_baseline_ports(&adapter);
         accepts_knowledge_entry_port(&adapter);
