@@ -28,7 +28,7 @@ serde_json.workspace = true
 nexus-knowledge = { path = "../nexus-knowledge" }
 nexus-contracts = { path = "../nexus-contracts" }
 chrono.workspace = true
-# V1.145 P1b — the production `NexusAdapter` (formerly `NexusBaselineAdapter`) + 6 port impls rehomed
+# V1.145 P1b — the production `NexusAdapter` (V1.146 rename) + 6 port impls rehomed
 # here from `nexus-local-db/src/spoke_adapter/` (spec §7.4 / §8 dep-graph
 # reversal). The adapter consumes local-db's storage primitives
 # (`SqliteKbStore`, `open_pool`, `run_migrations`, CAS helpers) and bridges

@@ -15,13 +15,20 @@
 //! `KnowledgeEntry`, `Relation`, and `Finding` storage). Multi-host /
 //! peer discovery is not implemented.
 //!
-//! # Roadmap trigger (peers)
+//! # Roadmap trigger — `list_peer_host_capability_manifests` (spec §7.4 stub matrix)
 //!
-//! Spec §7.4 stub matrix — `list_peer_host_capability_manifests` returns
-//! `Ok(Vec::new())` until peer discovery lands (roadmap item triggered
-//! when nexus supports multi-host collaboration). The static self
-//! manifest IS authoritative — the daemon is the data-store for its
-//! local storage.
+//! **Trigger:** when nexus ships multi-host collaboration (peer daemon
+//! discovery + cross-host orchestration). Nexus is local-first today;
+//! peer manifests have no backing table and no discovery protocol.
+//!
+//! **Upgrade path:** add a `peer_hosts` table (host_id, manifest JSON,
+//! last_seen, capabilities); implement a peer-discovery protocol (mDNS
+//! or spoke's host-hello handshake); wire `list_peer_host_capability_manifests`
+//! to query the table. Until a trigger fires, this stub returns the
+//! documented empty peer list.
+//!
+//! **Residual:** tracked as `R-V1143P0-STRETCH` (closed V1.146 P5 — deferred;
+//! peer discovery is multi-host infra, not spoke fork-port scope).
 
 use super::NexusAdapter;
 use crate::{HostCapabilityManifest, HostManifestPort, SpokeResult};
