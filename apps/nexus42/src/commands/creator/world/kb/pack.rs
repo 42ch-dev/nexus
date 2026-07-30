@@ -1135,6 +1135,127 @@ mod tests {
         );
     }
 
+    #[tokio::test(flavor = "multi_thread")]
+    async fn pack_export_import_cross_world_complementarity() {
+        // ── Phase 1: Seed World A with 3 entries + 1 relation ─────────
+        let (pool_a, _dir_a, _entry_ids_a, _rel_ids_a) = seeded_pool().await;
+        assert_eq!(count_entries(&pool_a, WORLD).await, 3);
+        assert_eq!(count_relations(&pool_a, WORLD).await, 1);
+
+        // Export World A → pack file.
+        let (pack_path, _pack_dir) = export_to_file(&pool_a).await;
+
+        // ── Phase 2: Create fresh DB with World B (different world_id) ─
+        const WORLD_B: &str = "wld_pack_b";
+        const WORLD_B_TITLE: &str = "Pack World B";
+
+        let dir_b = tempfile::tempdir().unwrap();
+        let db_path_b = dir_b.path().join("state.db");
+        let pool_b = crate::db::Schema::init(&db_path_b).await.unwrap();
+
+        // Seed creator for FK satisfaction.
+        // SAFETY: test-only INSERT.
+        sqlx::query(
+            "INSERT OR IGNORE INTO creators (creator_id, display_name, status, cached_at, data) \
+             VALUES (?, ?, 'active', datetime('now'), '{}')",
+        )
+        .bind(OWNER)
+        .bind(OWNER_NAME)
+        .execute(&pool_b)
+        .await
+        .unwrap();
+
+        nexus_local_db::kb_store::seed::world(
+            &pool_b,
+            WORLD_B,
+            OWNER,
+            WORLD_B_TITLE,
+            "pack-world-b",
+            "private",
+            "manual",
+        )
+        .await;
+
+        assert_eq!(
+            count_entries(&pool_b, WORLD_B).await,
+            0,
+            "World B starts empty"
+        );
+        assert_eq!(
+            count_relations(&pool_b, WORLD_B).await,
+            0,
+            "World B starts with zero relations"
+        );
+
+        // ── Phase 3: Import pack into World B ─────────────────────────
+        let args = ImportArgs {
+            world_ref: WORLD_B.to_string(),
+            r#in: pack_path.clone(),
+            dry_run: false,
+            conflict: ConflictStrategy::Skip,
+        };
+        import(args, &pool_b)
+            .await
+            .expect("import into World B must succeed");
+
+        // ── Phase 4: Assert entries and relation present ──────────────
+        assert_eq!(
+            count_entries(&pool_b, WORLD_B).await,
+            3,
+            "World B must have all 3 imported entries"
+        );
+        assert_eq!(
+            count_relations(&pool_b, WORLD_B).await,
+            1,
+            "World B must have the imported relation"
+        );
+
+        // Verify entries by entry_id from the pack (ids preserved across worlds).
+        let store_b = SqliteKbStore::new(pool_b.clone());
+        let entries_b = store_b.list_by_world(WORLD_B).await.unwrap();
+        let imported_names: Vec<&str> = entries_b
+            .iter()
+            .map(|e| e.canonical_name.as_str())
+            .collect();
+        assert_eq!(
+            imported_names,
+            vec!["Alice", "Bob", "Carol"],
+            "imported entries must have expected canonical names"
+        );
+
+        // ── Phase 5: Assert provenance on imported entries ────────────
+        for entry in &entries_b {
+            assert_eq!(
+                entry.source_provenance_kind.as_deref(),
+                Some(IMPORT_PROVENANCE),
+                "imported entry {} must have source_provenance_kind = 'pack_import'",
+                entry.entry_id
+            );
+        }
+
+        // ── Phase 6: Re-import → idempotent (created: 0, all skipped) ─
+        let args2 = ImportArgs {
+            world_ref: WORLD_B.to_string(),
+            r#in: pack_path,
+            dry_run: false,
+            conflict: ConflictStrategy::Skip,
+        };
+        import(args2, &pool_b)
+            .await
+            .expect("re-import must succeed");
+
+        assert_eq!(
+            count_entries(&pool_b, WORLD_B).await,
+            3,
+            "entry count unchanged on re-import (idempotent)"
+        );
+        assert_eq!(
+            count_relations(&pool_b, WORLD_B).await,
+            1,
+            "relation count unchanged on re-import (idempotent)"
+        );
+    }
+
     #[tokio::test]
     async fn import_surfaces_clean_error_when_world_missing() {
         let dir = tempfile::tempdir().unwrap();
