@@ -24,6 +24,7 @@
 
 pub mod computable_port;
 pub mod finding_port;
+pub mod fork_port;
 pub mod host_manifest_port;
 pub mod knowledge_entry_port;
 pub mod mca_read;
@@ -180,6 +181,7 @@ mod tests {
     async fn nexus_adapter_satisfies_baseline_ports_blanket_impl() {
         fn accepts_baseline_ports(_: &dyn crate::BaselinePorts) {}
         fn accepts_computable_ports(_: &dyn crate::ComputablePorts) {}
+        fn accepts_fork_ports(_: &dyn crate::ForkPorts) {}
         fn accepts_computable_port(_: &dyn crate::ComputablePort) {}
         fn accepts_knowledge_entry_port(_: &dyn crate::KnowledgeEntryPort) {}
         fn accepts_relation_port(_: &dyn crate::RelationPort) {}
@@ -187,6 +189,7 @@ mod tests {
         fn accepts_finding_port(_: &dyn crate::FindingPort) {}
         fn accepts_rule_query_port(_: &dyn crate::RuleQueryPort) {}
         fn accepts_host_manifest_port(_: &dyn crate::HostManifestPort) {}
+        fn accepts_fork_timeline_port(_: &dyn crate::ForkTimelineQueryPort) {}
 
         let dir = tempfile::tempdir().unwrap();
         let db_path = dir.path().join("test.db");
@@ -197,6 +200,8 @@ mod tests {
         accepts_baseline_ports(&adapter);
         accepts_computable_port(&adapter);
         accepts_computable_ports(&adapter);
+        accepts_fork_ports(&adapter);
+        accepts_fork_timeline_port(&adapter);
         accepts_knowledge_entry_port(&adapter);
         accepts_relation_port(&adapter);
         accepts_scope_query_port(&adapter);
