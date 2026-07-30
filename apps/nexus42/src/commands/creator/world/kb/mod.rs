@@ -25,6 +25,8 @@
 //!
 //! Read paths (`list`/`show`) are local-first and do not perform an owner gate.
 
+pub mod pack;
+
 use crate::config::CliConfig;
 use crate::errors::{CliError, Result};
 use clap::Subcommand;
@@ -132,6 +134,13 @@ pub enum WorldKbCommand {
         /// `kb_extract_jobs` job ID (e.g. `xj_...`)
         extract_job_id: String,
     },
+
+    /// Portable Knowledge-pack I/O (export / import a world's lore as a
+    /// single spoke-compatible JSON file).
+    Pack {
+        #[command(subcommand)]
+        command: pack::PackCommand,
+    },
 }
 
 /// Run a `creator world kb` subcommand.
@@ -208,6 +217,7 @@ pub async fn run(cmd: WorldKbCommand, config: &CliConfig) -> Result<()> {
             let ws_root = crate::config::find_workspace_root();
             kb_reject(&pool, &creator_id, &extract_job_id, ws_root.as_deref()).await
         }
+        WorldKbCommand::Pack { command } => pack::run(command, config, &pool).await,
     }
 }
 

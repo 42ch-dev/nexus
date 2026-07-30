@@ -99,7 +99,7 @@ pub use spoke_schemas::{
     AssemblePacket, AssembleRequest, AssembleResponse, CheckRequest, CheckResponse, ComputeRequest,
     ComputeResponse, Finding, HostCapabilityManifest, KnowledgeEntry, ProjectRequest,
     ProjectResponse, PromoteRequest, PromoteResponse, RelateRequest, RelateResponse, Relation,
-    Rule, Scope, TimelineEvent, UpsertRequest, UpsertResponse,
+    Rule, Scope, SourceAnchor, TimelineEvent, UpsertRequest, UpsertResponse,
 };
 
 // ── Spoke extension-key newtypes (re-export) ─────────────────────────

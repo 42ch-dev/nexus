@@ -6,8 +6,9 @@
 //! There is no second conversion seam for `Relation` analogous to the
 //! V1.139 `WorldKbEntry ↔ KnowledgeEntry` pair — spoke's `Relation`
 //! wire type maps directly onto the nexus `kb_relationships` row at
-//! this boundary via [`row_to_relation`] (the single reverse-mapping
-//! seam, reused by get / create-return / update-return):
+//! this boundary via the single reverse-mapping seam
+//! [`crate::conversion::kb_relationship_row_to_spoke`] (moved here in
+//! V1.146 P3 so the CLI pack exporter and the port share one mapping):
 //!
 //! | Spoke `Relation` field        | Nexus `kb_relationships` column        |
 //! |-------------------------------|-----------------------------------------|
@@ -67,7 +68,6 @@ use nexus_local_db::kb_relationships::{
 };
 use nexus_local_db::LocalDbError;
 use serde_json::{json, Map, Value};
-use std::num::NonZeroU64;
 
 impl RelationPort for NexusAdapter<'_> {
     fn get_relation(&self, relation_id: &str) -> SpokeResult<Relation> {
@@ -91,7 +91,7 @@ impl RelationPort for NexusAdapter<'_> {
                     );
                 }
             };
-            SpokeResult::Ok(row_to_relation(&row))
+            SpokeResult::Ok(crate::conversion::kb_relationship_row_to_spoke(&row))
         })
     }
 
@@ -228,7 +228,7 @@ async fn put_relation_create(pool: &sqlx::SqlitePool, relation: Relation) -> Spo
         needs_review: f.needs_review_i64,
         source: f.source,
     };
-    SpokeResult::Ok(row_to_relation(&row))
+    SpokeResult::Ok(crate::conversion::kb_relationship_row_to_spoke(&row))
 }
 
 // ── put_relation: CAS update path ─────────────────────────────────────
@@ -282,7 +282,7 @@ async fn put_relation_update(
     // accidentally switched these to preserve-on-omit, violating AC-I3).
     //
     // The orchestrator/handler round-trip stays safe because `get_relation`
-    // (`row_to_relation`) FULLY populates `extensions.nexus` before any
+    // (`kb_relationship_row_to_spoke`) FULLY populates `extensions.nexus` before any
     // read-modify-write put — so a carried local is never lost on a genuine
     // round-trip; only an explicit omit clears it. The handler additionally
     // pre-fills `needs_review` from `existing` when omitted (see
@@ -377,7 +377,9 @@ async fn put_relation_update(
 
     // `updated_row` already carries revision = expected + 1 and the persisted
     // mutable fields; project it through the single reverse-mapping seam.
-    SpokeResult::Ok(row_to_relation(&updated_row))
+    SpokeResult::Ok(crate::conversion::kb_relationship_row_to_spoke(
+        &updated_row,
+    ))
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────
@@ -433,72 +435,6 @@ fn prepare_create_fields(relation: &Relation, locals: &NexusLocals) -> CreateFie
     }
 }
 
-/// Single reverse-mapping seam: project a `kb_relationships` row onto a spoke
-/// `Relation` (used by get / create-return / update-return). `schema_version`
-/// is set to the spoke 0.5.0 relation schema version (1).
-fn row_to_relation(row: &KbRelationshipRow) -> Relation {
-    let metadata = row
-        .metadata
-        .as_deref()
-        .and_then(|s| serde_json::from_str::<Map<String, Value>>(s).ok())
-        .unwrap_or_default();
-
-    let created_at = row
-        .created_at
-        .parse::<chrono::DateTime<chrono::FixedOffset>>()
-        .ok()
-        .map(|dt| dt.with_timezone(&chrono::Utc));
-    let updated_at = row
-        .updated_at
-        .parse::<chrono::DateTime<chrono::FixedOffset>>()
-        .ok()
-        .map(|dt| dt.with_timezone(&chrono::Utc));
-
-    let mut nexus_ns = Map::new();
-    nexus_ns.insert("world_id".to_string(), Value::String(row.world_id.clone()));
-    nexus_ns.insert("symmetric".to_string(), Value::Bool(row.symmetric != 0));
-    if let Some(c) = row.confidence {
-        let v = serde_json::Number::from_f64(c).map_or(Value::Null, Value::Number);
-        nexus_ns.insert("confidence".to_string(), v);
-    }
-    nexus_ns.insert(
-        "source_anchor_ids".to_string(),
-        Value::Array(
-            parse_anchor_ids(row.source_anchor_ids.as_deref())
-                .into_iter()
-                .map(Value::String)
-                .collect(),
-        ),
-    );
-    nexus_ns.insert(
-        "needs_review".to_string(),
-        Value::Bool(row.needs_review != 0),
-    );
-    nexus_ns.insert("source".to_string(), Value::String(row.source.clone()));
-
-    let mut extensions = std::collections::HashMap::new();
-    // `"nexus"` always satisfies the `RelationExtensionsKey` regex — the
-    // conversion is infallible at runtime (mirrors the V1.139
-    // `KnowledgeEntryExtensionsKey` pattern).
-    let key = RelationExtensionsKey::try_from("nexus")
-        .expect("\"nexus\" matches the extensions-key regex");
-    extensions.insert(key, nexus_ns);
-
-    Relation {
-        schema_version: NonZeroU64::new(1).expect("1 is non-zero"),
-        relation_id: row.relationship_id.clone(),
-        from_id: row.source_entity_id.clone(),
-        to_id: row.target_entity_id.clone(),
-        relation_type: row.relation_type.clone(),
-        label: row.custom_label.clone(),
-        metadata,
-        revision: Some(u64::try_from(row.revision).unwrap_or(0)),
-        created_at,
-        updated_at,
-        extensions,
-    }
-}
-
 /// nexus-locals carried under `extensions.nexus` on a spoke `Relation`.
 /// Every field is optional — the create path defaults missing fields to the
 /// V1.76 manual-author shape; the update path clears-on-omit (an absent
@@ -537,14 +473,6 @@ fn extract_nexus_locals(relation: &Relation) -> NexusLocals {
 fn value_as_string_array(v: &Value) -> Option<Vec<String>> {
     let arr = v.as_array()?;
     arr.iter().map(|i| i.as_str().map(String::from)).collect()
-}
-
-/// Parse the stored `source_anchor_ids` JSON-array column back into a
-/// `Vec<String>`; empty when the column is NULL or unparseable.
-fn parse_anchor_ids(stored: Option<&str>) -> Vec<String> {
-    stored
-        .and_then(|s| serde_json::from_str::<Vec<String>>(s).ok())
-        .unwrap_or_default()
 }
 
 /// Construct a `SpokeResult::Reject` (mirrors the helper in
@@ -1254,7 +1182,7 @@ mod tests {
     /// Safety check (V1.144 Phase 5 fix): a full get→put round-trip (read the
     /// relation via `get_relation`, mutate a non-local field, write it back via
     /// `put_relation`) must PRESERVE every nexus-local. This proves
-    /// clear-on-omit is safe: `get_relation` (`row_to_relation`) fully
+    /// clear-on-omit is safe: `get_relation` (`kb_relationship_row_to_spoke`) fully
     /// populates `extensions.nexus`, so the orchestrator/handler round-trip
     /// never loses a carried local — only an explicit omit clears one.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

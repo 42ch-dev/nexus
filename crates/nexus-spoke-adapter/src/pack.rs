@@ -207,12 +207,10 @@ pub fn build_pack(
         serde_json::to_value(relations).expect("Relation is always serializable"),
     );
     if let Some(anchors_slice) = anchors {
-        if !anchors_slice.is_empty() {
-            root.insert(
-                "source_anchors".into(),
-                serde_json::to_value(anchors_slice).expect("SourceAnchor is always serializable"),
-            );
-        }
+        root.insert(
+            "source_anchors".into(),
+            serde_json::to_value(anchors_slice).expect("SourceAnchor is always serializable"),
+        );
     }
 
     Value::Object(root)
@@ -622,9 +620,12 @@ mod tests {
     }
 
     #[test]
-    fn build_pack_omits_anchors_when_empty_slice() {
+    fn build_pack_emits_empty_anchors_when_some_empty_slice() {
         let pack = build_pack(&[], &[], Some(&[]), "T", "1.0", "me", None, None);
-        assert!(pack.get("source_anchors").is_none());
+        let anchors = pack["source_anchors"]
+            .as_array()
+            .expect("should be an array when Some(&[])");
+        assert!(anchors.is_empty());
     }
 
     // ── parse_pack_str convenience ────────────────────────────────────────

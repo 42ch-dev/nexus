@@ -1032,6 +1032,74 @@ impl KbStore for SqliteKbStore {
     }
 }
 
+// ── V1.146 P3: pack-IO widened list methods (inherent, not trait) ─────────
+
+impl SqliteKbStore {
+    /// List `WorldKbEntry`s for a world **including** `deprecated` rows
+    /// (still excluding `deleted` / `merged` terminal states).
+    ///
+    /// Used by the V1.146 P3 `creator world kb pack export --include-deprecated`
+    /// CLI path. Mirrors [`KbStore::list_by_world`] but widens the status
+    /// filter. Bound by the same [`LIST_BY_WORLD_LIMIT`] safety cap.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`KbStoreError::Storage`] on database failure.
+    pub async fn list_by_world_including_deprecated(
+        &self,
+        world_id: &str,
+    ) -> Result<Vec<WorldKbEntry>, KbStoreError> {
+        self.list_by_world_with_status_filter(world_id, true).await
+    }
+
+    /// Shared body for [`Self::list_by_world_including_deprecated`] —
+    /// parameterized status clause so the two call sites don't duplicate
+    /// the full SELECT shape.
+    async fn list_by_world_with_status_filter(
+        &self,
+        world_id: &str,
+        include_deprecated: bool,
+    ) -> Result<Vec<WorldKbEntry>, KbStoreError> {
+        // SAFETY: LIMIT is a compile-time constant; status filter is a static
+        // fragment chosen from two literals (no user input). Dynamic SQL
+        // needed because sqlx offline mode cannot bind LIMIT.
+        let status_clause = if include_deprecated {
+            "status NOT IN ('deleted', 'merged')"
+        } else {
+            "status NOT IN ('deleted', 'merged', 'deprecated')"
+        };
+        let sql = format!(
+            r"SELECT
+                key_block_id,
+                world_id,
+                block_type,
+                canonical_name,
+                status,
+                revision,
+                body_json,
+                source_anchor_json,
+                created_from_command_id,
+                created_at,
+                updated_at,
+                source_work_id,
+                source_chapter,
+                source_provenance_kind, extensions_nexus_json
+            FROM kb_key_blocks
+            WHERE world_id = ?
+              AND {status_clause}
+            ORDER BY created_at ASC
+            LIMIT {LIST_BY_WORLD_LIMIT}"
+        );
+        let rows = sqlx::query_as::<_, KeyBlockRow>(&sql)
+            .bind(world_id)
+            .fetch_all(&*self.pool)
+            .await
+            .map_err(|e| db_err(&e))?;
+
+        rows.iter().map(KeyBlockRow::to_key_block).collect()
+    }
+}
+
 // ── V1.73 Canvas World KB: per-row OCC CAS entity edit ──────────────────────
 
 /// V1.73 P0: CAS-aware partial update of a `kb_key_blocks` row.
