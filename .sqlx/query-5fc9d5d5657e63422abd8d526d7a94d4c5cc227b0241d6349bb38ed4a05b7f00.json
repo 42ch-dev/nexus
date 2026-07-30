@@ -1,0 +1,38 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT session_id, entry_id, state_json, created_at FROM compute_sessions WHERE session_id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "session_id",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "entry_id",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "state_json",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "created_at",
+        "ordinal": 3,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      true,
+      false,
+      true,
+      false
+    ]
+  },
+  "hash": "5fc9d5d5657e63422abd8d526d7a94d4c5cc227b0241d6349bb38ed4a05b7f00"
+}

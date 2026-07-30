@@ -54,6 +54,11 @@ pub async fn insert_compute_session(
 ///
 /// Returns `Ok(None)` when the session does not exist.
 ///
+/// # Panics
+///
+/// Panics if the database returns a row with a NULL `session_id` column,
+/// which violates the PRIMARY KEY constraint.
+///
 /// # Errors
 /// Returns `LocalDbError` on database failure.
 pub async fn get_compute_session(
@@ -103,8 +108,11 @@ pub async fn delete_compute_session(
     pool: &SqlitePool,
     session_id: &str,
 ) -> Result<(), LocalDbError> {
-    sqlx::query!("DELETE FROM compute_sessions WHERE session_id = ?", session_id)
-        .execute(pool)
-        .await?;
+    sqlx::query!(
+        "DELETE FROM compute_sessions WHERE session_id = ?",
+        session_id
+    )
+    .execute(pool)
+    .await?;
     Ok(())
 }

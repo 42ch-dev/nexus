@@ -6,7 +6,7 @@
 //! | Concept | spoke side | Nexus side | Mapping |
 //! |---------|-----------|------------|---------|
 //! | Session identity | `session_id` (opaque, product-owned) | `compute_sessions` row | Nexus owns session lifecycle; spoke `session_id` is a pass-through correlation id |
-//! | Session state | `ProjectRequest.state` (ComputableFieldMap) | `state_json` column | `project()` stages static state; `compute()` merges dynamic updates |
+//! | Session state | `ProjectRequest.state` (`ComputableFieldMap`) | `state_json` column | `project()` stages static state; `compute()` merges dynamic updates |
 //! | Computable I/O | `ProjectRequest` / `ComputeRequest` | `WasmEngine::compute(module, manifest, input)` | `project()`: validate entry, stage state; `compute()`: load session, build `ComputeInput`, call WASM |
 //! | Settle | `ComputeRequest.settle: bool` | Merge `ComputeOutput.state_delta` into entry's `body.state` | On `settle=true`, update entry via `KnowledgeEntryPort::put_knowledge_entry` |
 //!
@@ -16,15 +16,17 @@
 //!
 //! 1. Check the merged session state for a `module_id` key.
 //! 2. Fall back to the entry's `body.computable` (if present) for a `module_id` field.
-//! 3. Default to `"basic-combat"` — the only embedded compute module.
+//! 3. Reject with `InvalidInput` if neither source provides a module identity.
 //!
 //! This is documented as the honest bridge decision per the plan's Architecture
 //! Lock: the module identity is genuinely absent from the spoke wire, so the
-//! adapter resolves it from the staged session context.
+//! adapter resolves it from the staged session context. Callers must
+//! explicitly declare their module choice via `project()` state or entry
+//! `body.computable`.
 //!
 //! # Async ↔ sync bridge
 //!
-//! The port traits are sync; the adapter bridges async SQLite + WASM host
+//! The port traits are sync; the adapter bridges async `SQLite` + WASM host
 //! construction via the established `block_on` pattern (see `mod.rs`). The
 //! `WasmEngine::new()` call is one-time (cold; subsequent calls reuse the
 //! engine via a `OnceCell`), and the WASM compute call is synchronous
@@ -37,12 +39,15 @@ use crate::{
     SpokeRejectCode, SpokeResult,
 };
 use crate::{ComputeRequest, ComputeResponse};
-use nexus_local_db::compute_session::{get_compute_session, insert_compute_session, update_compute_session_state};
+use nexus_local_db::compute_session::{
+    get_compute_session, insert_compute_session, update_compute_session_state,
+};
 use nexus_wasm_host::{
-    embedded_module_bytes, embedded_module_manifest, ComputeInput,
-    ModuleManifest, WasmEngine, WasmModule,
+    embedded_module_bytes, embedded_module_manifest, ComputeInput, ModuleManifest, WasmEngine,
+    WasmModule,
 };
 use serde_json::{json, Map, Value};
+use std::collections::HashMap;
 use std::sync::OnceLock;
 
 /// One-time initialised WASM engine, reused across all compute invocations.
@@ -60,46 +65,50 @@ fn engine() -> &'static WasmEngine {
 /// Priority:
 /// 1. `module_id` in the merged session state
 /// 2. `module_id` in the entry's `body.computable`
-/// 3. Default `"basic-combat"`
+/// 3. Reject — module identity is required; callers must explicitly declare
+///    their module choice via `project()` state or entry `body.computable`.
 fn resolve_module_id(
     state: &Map<String, Value>,
-    _entry_json: &Map<String, Value>,
-) -> String {
+    entry: &crate::KnowledgeEntry,
+) -> SpokeResult<String> {
     if let Some(module_id) = state.get("module_id").and_then(Value::as_str) {
-        return module_id.to_string();
+        return SpokeResult::Ok(module_id.to_string());
     }
     // Check the entry body's computable field for module_id.
-    if let Some(body) = _entry_json.get("body") {
-        if let Some(computable) = body.get("computable") {
-            if let Some(module_id) = computable.get("module_id").and_then(Value::as_str) {
-                return module_id.to_string();
-            }
-        }
+    // This reads the typed body.computable map from the spoke KnowledgeEntry
+    // rather than relying on a derived key_block map (which would be fragile
+    // if `spoke_entry_to_key_block` ever strips or transforms
+    // `body.computable`).
+    if let Some(module_id) = entry
+        .body
+        .computable
+        .get("module_id")
+        .and_then(Value::as_str)
+    {
+        return SpokeResult::Ok(module_id.to_string());
     }
-    "basic-combat".to_string()
+    reject(
+        SpokeRejectCode::InvalidInput,
+        "module identity required on session state or entry body.computable",
+        json!({}),
+    )
 }
 
 /// Load (or get cached) a compiled WASM module by id.
 fn load_module(module_id: &str) -> SpokeResult<(WasmModule, ModuleManifest)> {
-    let wasm_bytes = match embedded_module_bytes(module_id) {
-        Some(b) => b,
-        None => {
-            return reject(
-                SpokeRejectCode::InternalError,
-                format!("embedded WASM module not found: {module_id}"),
-                json!({ "module_id": module_id }),
-            );
-        }
+    let Some(wasm_bytes) = embedded_module_bytes(module_id) else {
+        return reject(
+            SpokeRejectCode::InternalError,
+            format!("embedded WASM module not found: {module_id}"),
+            json!({ "module_id": module_id }),
+        );
     };
-    let manifest_json = match embedded_module_manifest(module_id) {
-        Some(m) => m,
-        None => {
-            return reject(
-                SpokeRejectCode::InternalError,
-                format!("embedded module manifest not found: {module_id}"),
-                json!({ "module_id": module_id }),
-            );
-        }
+    let Some(manifest_json) = embedded_module_manifest(module_id) else {
+        return reject(
+            SpokeRejectCode::InternalError,
+            format!("embedded module manifest not found: {module_id}"),
+            json!({ "module_id": module_id }),
+        );
     };
     let manifest: ModuleManifest = match serde_json::from_str(manifest_json) {
         Ok(m) => m,
@@ -140,9 +149,7 @@ impl ComputablePort for NexusAdapter<'_> {
                 if r.code == SpokeRejectCode::KnowledgeEntryNotFound {
                     return reject(
                         SpokeRejectCode::InvalidInput,
-                        format!(
-                            "target KnowledgeEntry not found for compute project: {entry_id}"
-                        ),
+                        format!("target KnowledgeEntry not found for compute project: {entry_id}"),
                         json!({ "entry_id": entry_id }),
                     );
                 }
@@ -150,19 +157,16 @@ impl ComputablePort for NexusAdapter<'_> {
             }
         };
 
-        let state_json =
-            serde_json::to_string(&state).unwrap_or_else(|_| "{}".to_string());
+        let state_json = serde_json::to_string(&state).unwrap_or_else(|_| "{}".to_string());
 
         self.block_on(async move {
             match insert_compute_session(&pool, &session_id, &entry_id, &state_json).await {
-                Ok(_session) => {
-                    SpokeResult::Ok(ProjectResponse::Variant0 {
-                        computable: state,
-                        entry_id,
-                        session_id,
-                        extensions: Default::default(),
-                    })
-                }
+                Ok(_session) => SpokeResult::Ok(ProjectResponse::Variant0 {
+                    computable: state,
+                    entry_id,
+                    session_id,
+                    extensions: HashMap::default(),
+                }),
                 Err(e) => {
                     // sqlx::Error::Database with UNIQUE constraint → session
                     // already exists. Map to a friendly InvalidInput.
@@ -185,6 +189,7 @@ impl ComputablePort for NexusAdapter<'_> {
         })
     }
 
+    #[allow(clippy::too_many_lines)]
     fn compute(&self, request: ComputeRequest) -> SpokeResult<ComputeResponse> {
         let pool = self.pool.clone();
         let session_id = request.session_id.clone();
@@ -193,9 +198,7 @@ impl ComputablePort for NexusAdapter<'_> {
         let settle = request.settle.unwrap_or(false);
 
         // ── 1. Load session row ──────────────────────────────────────────
-        let session = self.block_on(async {
-            get_compute_session(&pool, &session_id).await
-        });
+        let session = self.block_on(async { get_compute_session(&pool, &session_id).await });
         let session = match session {
             Ok(Some(s)) => s,
             Ok(None) => {
@@ -247,8 +250,8 @@ impl ComputablePort for NexusAdapter<'_> {
         }
 
         // ── 4. Persist updated state back to session ──────────────────────
-        let updated_state_json = serde_json::to_string(&merged_state)
-            .unwrap_or_else(|_| "{}".to_string());
+        let updated_state_json =
+            serde_json::to_string(&merged_state).unwrap_or_else(|_| "{}".to_string());
         if let Err(e) = self.block_on(async {
             update_compute_session_state(&pool, &session_id, &updated_state_json).await
         }) {
@@ -271,13 +274,12 @@ impl ComputablePort for NexusAdapter<'_> {
         // Load additional entries referenced by known invocation keys that
         // carry entry IDs (attacker_id, defender_id for basic-combat).
         for key in &["attacker_id", "defender_id"] {
-            if let Some(ref_id) = merged_state
-                .get(*key)
-                .and_then(Value::as_str)
-            {
-                if ref_id != entry_id && !key_blocks.iter().any(|kb| {
-                    kb.get("entry_id").and_then(Value::as_str) == Some(ref_id)
-                }) {
+            if let Some(ref_id) = merged_state.get(*key).and_then(Value::as_str) {
+                if ref_id != entry_id
+                    && !key_blocks
+                        .iter()
+                        .any(|kb| kb.get("entry_id").and_then(Value::as_str) == Some(ref_id))
+                {
                     if let SpokeResult::Ok(ref_entry) = self.get_knowledge_entry(ref_id) {
                         key_blocks.push(spoke_entry_to_key_block(&ref_entry));
                     }
@@ -288,10 +290,7 @@ impl ComputablePort for NexusAdapter<'_> {
         // Extract world_id from extensions.nexus (the spoke-provided field).
         let world_id = entry
             .extensions
-            .get(
-                &crate::KnowledgeEntryExtensionsKey::try_from("nexus")
-                    .expect("valid nexus key"),
-            )
+            .get(&crate::KnowledgeEntryExtensionsKey::try_from("nexus").expect("valid nexus key"))
             .and_then(|ns| ns.get("world_id"))
             .and_then(Value::as_str)
             .unwrap_or("unknown")
@@ -307,6 +306,11 @@ impl ComputablePort for NexusAdapter<'_> {
 
         let compute_input = ComputeInput {
             key_blocks,
+            // narrative_state is not yet wired: the adapter does not feed
+            // narrative context from the gateway into the compute envelope.
+            // This is acceptable while all embedded modules (basic-combat)
+            // do not use `narrative_query` — the first module that needs
+            // narrative state should trigger wiring this field.
             narrative_state: None,
             invocation,
             schema_version: std::num::NonZeroU64::new(1).expect("1 is non-zero"),
@@ -321,7 +325,10 @@ impl ComputablePort for NexusAdapter<'_> {
         };
 
         // ── 6. Resolve module and run compute ─────────────────────────────
-        let module_id = resolve_module_id(&merged_state, &compute_input.key_blocks[0]);
+        let module_id = match resolve_module_id(&merged_state, &entry) {
+            SpokeResult::Ok(id) => id,
+            SpokeResult::Reject(r) => return SpokeResult::Reject(r),
+        };
         let (wasm_module, manifest) = match load_module(&module_id) {
             SpokeResult::Ok(m) => m,
             SpokeResult::Reject(r) => return SpokeResult::Reject(r),
@@ -351,14 +358,11 @@ impl ComputablePort for NexusAdapter<'_> {
                     .unwrap_or("set");
                 if let Some(value) = delta_value.get("value") {
                     match op {
-                        "set" => {
-                            set_json_path(&mut merged_state, path, value.clone());
-                        }
                         "+" => {
-                            add_json_path(&mut merged_state, path, value.clone());
+                            add_json_path(&mut merged_state, path, value);
                         }
                         "-" => {
-                            sub_json_path(&mut merged_state, path, value.clone());
+                            sub_json_path(&mut merged_state, path, value);
                         }
                         _ => {
                             set_json_path(&mut merged_state, path, value.clone());
@@ -371,8 +375,9 @@ impl ComputablePort for NexusAdapter<'_> {
         // ── 8. Settle: merge back into the KnowledgeEntry ─────────────────
         let mut post_settle_state = Map::new();
         if settle {
-            // Load current entry body.state, merge with state_delta, and
-            // write back via put_knowledge_entry.
+            // Load current entry, apply ONLY state_delta (not full merged
+            // session state) to body.state, and write back via
+            // put_knowledge_entry.
             let current_entry = match self.get_knowledge_entry(&entry_id) {
                 SpokeResult::Ok(e) => e,
                 SpokeResult::Reject(r) => return SpokeResult::Reject(r),
@@ -392,25 +397,47 @@ impl ComputablePort for NexusAdapter<'_> {
                 .cloned()
                 .unwrap_or_default();
 
+            // Apply state_delta operations to the entry's existing body.state
+            // (NOT merged_state — merged_state contains invocation metadata
+            // like module_id/attacker_id/defender_id that must not be
+            // persisted). The state_delta is the authoritative output from
+            // the WASM module per plan Decision 2 row 4.
             let mut final_state = existing_state;
-            for (k, v) in &merged_state {
-                final_state.insert(k.clone(), v.clone());
+            for delta in &output.state_delta {
+                let delta_value: Value = serde_json::to_value(delta).unwrap_or_default();
+                if let Some(path) = delta_value.get("path").and_then(Value::as_str) {
+                    let op = delta_value
+                        .get("op")
+                        .and_then(Value::as_str)
+                        .unwrap_or("set");
+                    if let Some(value) = delta_value.get("value") {
+                        match op {
+                            "+" => {
+                                add_json_path(&mut final_state, path, value);
+                            }
+                            "-" => {
+                                sub_json_path(&mut final_state, path, value);
+                            }
+                            _ => {
+                                set_json_path(&mut final_state, path, value.clone());
+                            }
+                        }
+                    }
+                }
             }
-            post_settle_state = final_state.clone();
+            post_settle_state.clone_from(&final_state);
 
             // Write the merged state back into the entry body.
             if let Some(body) = entry_body.get_mut("body") {
                 if let Some(body_obj) = body.as_object_mut() {
-                    body_obj.insert(
-                        "state".to_string(),
-                        Value::Object(final_state),
-                    );
+                    body_obj.insert("state".to_string(), Value::Object(final_state));
                 }
             }
 
             // Reconstruct the KnowledgeEntry with the updated body.
             let updated_entry: crate::KnowledgeEntry =
-                serde_json::from_value(Value::Object(entry_body)).unwrap_or(current_entry.clone());
+                serde_json::from_value(Value::Object(entry_body))
+                    .unwrap_or_else(|_| current_entry.clone());
 
             // Use put_knowledge_entry to persist (with CAS, using the
             // current revision as expected base).
@@ -430,15 +457,19 @@ impl ComputablePort for NexusAdapter<'_> {
             computable: merged_state,
             entry_id,
             session_id,
-            extensions: Default::default(),
-            state: if settle { post_settle_state } else { Map::new() },
+            extensions: HashMap::default(),
+            state: if settle {
+                post_settle_state
+            } else {
+                Map::new()
+            },
         })
     }
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 
-/// Convert a spoke KnowledgeEntry to a JSON key_block map suitable for the
+/// Convert a spoke `KnowledgeEntry` to a JSON `key_block` map suitable for the
 /// WASM module's `ComputeInput.key_blocks` snapshot.
 ///
 /// The spoke `KnowledgeEntry.body.attributes` is a `Vec<AttributesItem>`
@@ -447,16 +478,18 @@ impl ComputablePort for NexusAdapter<'_> {
 /// spoke attributes vector into the flat-object format.
 fn spoke_entry_to_key_block(entry: &crate::KnowledgeEntry) -> Map<String, Value> {
     // Serialize the spoke entry to a JSON map first.
-    let mut kb = match serde_json::to_value(entry).unwrap_or_default() {
-        Value::Object(m) => m,
-        _ => return Map::new(),
+    let Value::Object(mut kb) = serde_json::to_value(entry).unwrap_or_default() else {
+        return Map::new();
     };
 
     // The basic-combat module uses `key_block_id` (not `entry_id`) to
     // identify key_blocks. Add it as a duplicate of entry_id so the
     // module's select_combatants lookup works.
     if let Some(entry_id) = kb.get("entry_id").and_then(Value::as_str) {
-        kb.insert("key_block_id".to_string(), Value::String(entry_id.to_string()));
+        kb.insert(
+            "key_block_id".to_string(),
+            Value::String(entry_id.to_string()),
+        );
     }
 
     // Convert body.attributes from spoke Vec<AttributesItem> to flat object.
@@ -467,7 +500,8 @@ fn spoke_entry_to_key_block(entry: &crate::KnowledgeEntry) -> Map<String, Value>
                     .iter()
                     .filter_map(|item| {
                         let trait_type = item.get("trait_type").and_then(Value::as_str)?;
-                        let value = item.get("value")
+                        let value = item
+                            .get("value")
                             .or_else(|| item.get("value"))
                             .cloned()
                             .unwrap_or(Value::Null);
@@ -503,12 +537,16 @@ fn set_json_path(root: &mut Map<String, Value>, path: &str, value: Value) {
         .or_insert_with(|| Value::Object(Map::new()));
     for seg in &segments[1..segments.len() - 1] {
         if let Value::Object(ref mut obj) = current {
-            current = obj.entry(seg.to_string()).or_insert_with(|| Value::Object(Map::new()));
+            current = obj
+                .entry(seg.to_string())
+                .or_insert_with(|| Value::Object(Map::new()));
         } else {
             // Can't traverse into non-object; overwrite.
             *current = Value::Object(Map::new());
             if let Value::Object(ref mut obj) = current {
-                current = obj.entry(seg.to_string()).or_insert_with(|| Value::Object(Map::new()));
+                current = obj
+                    .entry(seg.to_string())
+                    .or_insert_with(|| Value::Object(Map::new()));
             }
         }
     }
@@ -518,7 +556,7 @@ fn set_json_path(root: &mut Map<String, Value>, path: &str, value: Value) {
 }
 
 /// Add a numeric value at a dotted JSON path.
-fn add_json_path(root: &mut Map<String, Value>, path: &str, delta: Value) {
+fn add_json_path(root: &mut Map<String, Value>, path: &str, delta: &Value) {
     let segments: Vec<&str> = path.split('.').collect();
     if segments.is_empty() {
         return;
@@ -528,40 +566,39 @@ fn add_json_path(root: &mut Map<String, Value>, path: &str, delta: Value) {
         .or_insert_with(|| Value::Object(Map::new()));
     for seg in &segments[1..segments.len() - 1] {
         if let Value::Object(ref mut obj) = current {
-            current = obj.entry(seg.to_string()).or_insert_with(|| Value::Object(Map::new()));
+            current = obj
+                .entry(seg.to_string())
+                .or_insert_with(|| Value::Object(Map::new()));
         } else {
             return; // Can't traverse
         }
     }
     let last_key = segments.last().unwrap();
     if let Value::Object(ref mut obj) = current {
-        let current_val = obj.get(*last_key).and_then(|v| v.as_f64()).unwrap_or(0.0);
+        let current_val = obj.get(*last_key).and_then(Value::as_f64).unwrap_or(0.0);
         let delta_f = delta.as_f64().unwrap_or(0.0);
-        obj.insert(last_key.to_string(), Value::Number(
-            serde_json::Number::from_f64(current_val + delta_f).unwrap_or_else(|| {
-                serde_json::Number::from_f64(0.0).unwrap()
-            }),
-        ));
+        obj.insert(
+            last_key.to_string(),
+            Value::Number(
+                serde_json::Number::from_f64(current_val + delta_f)
+                    .unwrap_or_else(|| serde_json::Number::from_f64(0.0).unwrap()),
+            ),
+        );
     }
 }
 
 /// Subtract a numeric value at a dotted JSON path.
-fn sub_json_path(root: &mut Map<String, Value>, path: &str, delta: Value) {
+fn sub_json_path(root: &mut Map<String, Value>, path: &str, delta: &Value) {
     let delta_val = delta.as_f64().unwrap_or(0.0);
     let neg_delta = Value::Number(
-        serde_json::Number::from_f64(-delta_val).unwrap_or_else(|| {
-            serde_json::Number::from_f64(0.0).unwrap()
-        }),
+        serde_json::Number::from_f64(-delta_val)
+            .unwrap_or_else(|| serde_json::Number::from_f64(0.0).unwrap()),
     );
-    add_json_path(root, path, neg_delta);
+    add_json_path(root, path, &neg_delta);
 }
 
 /// Construct a `SpokeResult::Reject`.
-fn reject<T>(
-    code: SpokeRejectCode,
-    message: impl Into<String>,
-    details: Value,
-) -> SpokeResult<T> {
+fn reject<T>(code: SpokeRejectCode, message: impl Into<String>, details: Value) -> SpokeResult<T> {
     let details_map = match details {
         Value::Object(map) => Some(map),
         other => {
@@ -671,15 +708,18 @@ mod tests {
 
         // Create a character entry first.
         let entry = spoke_character_entry("kb_hero", "Hero", 100, 20, 10, 100);
-        let _created = unwrap_ok(
-            adapter.put_knowledge_entry(entry, None),
-            "create character",
-        );
+        let _created = unwrap_ok(adapter.put_knowledge_entry(entry, None), "create character");
 
         // Stage a project session.
         let mut state = Map::new();
-        state.insert("module_id".to_string(), Value::String("basic-combat".to_string()));
-        state.insert("attacker_id".to_string(), Value::String("kb_hero".to_string()));
+        state.insert(
+            "module_id".to_string(),
+            Value::String("basic-combat".to_string()),
+        );
+        state.insert(
+            "attacker_id".to_string(),
+            Value::String("kb_hero".to_string()),
+        );
         state.insert("defender_id".to_string(), Value::String("".to_string()));
 
         let project_req = ProjectRequest {
@@ -698,7 +738,10 @@ mod tests {
             }) => {
                 assert_eq!(entry_id, "kb_hero");
                 assert_eq!(session_id, "ses_test_001");
-                assert_eq!(computable.get("module_id").and_then(Value::as_str), Some("basic-combat"));
+                assert_eq!(
+                    computable.get("module_id").and_then(Value::as_str),
+                    Some("basic-combat")
+                );
             }
             other => panic!("expected Variant0, got {other:?}"),
         }
@@ -841,9 +884,18 @@ mod tests {
 
         // ── project: stage the combat session ──
         let mut state = Map::new();
-        state.insert("module_id".to_string(), Value::String("basic-combat".to_string()));
-        state.insert("attacker_id".to_string(), Value::String("kb_hero_c".to_string()));
-        state.insert("defender_id".to_string(), Value::String("kb_monster_c".to_string()));
+        state.insert(
+            "module_id".to_string(),
+            Value::String("basic-combat".to_string()),
+        );
+        state.insert(
+            "attacker_id".to_string(),
+            Value::String("kb_hero_c".to_string()),
+        );
+        state.insert(
+            "defender_id".to_string(),
+            Value::String("kb_monster_c".to_string()),
+        );
 
         let project_resp = unwrap_ok(
             adapter.project(ProjectRequest {
@@ -861,8 +913,14 @@ mod tests {
         // The compute() method loads both attacker and defender entries
         // from storage and converts them to key_blocks for the WASM module.
         let mut computable = Map::new();
-        computable.insert("attacker_id".to_string(), Value::String("kb_hero_c".to_string()));
-        computable.insert("defender_id".to_string(), Value::String("kb_monster_c".to_string()));
+        computable.insert(
+            "attacker_id".to_string(),
+            Value::String("kb_hero_c".to_string()),
+        );
+        computable.insert(
+            "defender_id".to_string(),
+            Value::String("kb_monster_c".to_string()),
+        );
 
         let compute_resp = unwrap_ok(
             adapter.compute(ComputeRequest {
@@ -888,7 +946,10 @@ mod tests {
         assert_eq!(entry_id, "kb_hero_c");
         assert_eq!(session_id, "ses_combat_001");
         // The module should produce some computable output.
-        assert!(!result_computable.is_empty(), "compute should return computable state");
+        assert!(
+            !result_computable.is_empty(),
+            "compute should return computable state"
+        );
     }
 
     /// Integration test: project → compute with settle=true persists
@@ -907,9 +968,18 @@ mod tests {
 
         // project
         let mut state = Map::new();
-        state.insert("module_id".to_string(), Value::String("basic-combat".to_string()));
-        state.insert("attacker_id".to_string(), Value::String("kb_settle_h".to_string()));
-        state.insert("defender_id".to_string(), Value::String("kb_settle_m".to_string()));
+        state.insert(
+            "module_id".to_string(),
+            Value::String("basic-combat".to_string()),
+        );
+        state.insert(
+            "attacker_id".to_string(),
+            Value::String("kb_settle_h".to_string()),
+        );
+        state.insert(
+            "defender_id".to_string(),
+            Value::String("kb_settle_m".to_string()),
+        );
         unwrap_ok(
             adapter.project(ProjectRequest {
                 session_id: "ses_settle".to_string(),
@@ -922,8 +992,14 @@ mod tests {
 
         // compute with settle=true
         let mut computable = Map::new();
-        computable.insert("attacker_id".to_string(), Value::String("kb_settle_h".to_string()));
-        computable.insert("defender_id".to_string(), Value::String("kb_settle_m".to_string()));
+        computable.insert(
+            "attacker_id".to_string(),
+            Value::String("kb_settle_h".to_string()),
+        );
+        computable.insert(
+            "defender_id".to_string(),
+            Value::String("kb_settle_m".to_string()),
+        );
 
         let compute_resp = unwrap_ok(
             adapter.compute(ComputeRequest {
@@ -936,20 +1012,76 @@ mod tests {
             "compute settle",
         );
 
-        let ComputeResponse::Variant0 { state: post_state, .. } = compute_resp else {
+        let ComputeResponse::Variant0 {
+            state: post_state, ..
+        } = compute_resp
+        else {
             panic!("expected Variant0 from compute");
         };
 
         // After settle, the state map should be non-empty.
-        assert!(!post_state.is_empty(), "settle should populate merged state");
+        assert!(
+            !post_state.is_empty(),
+            "settle should populate merged state"
+        );
 
         // Re-read the entry — state should have been persisted.
         let entry = unwrap_ok(adapter.get_knowledge_entry("kb_settle_h"), "re-read");
-        // The entry's body.state should now contain the settle-persisted data.
         let body_state = &entry.body.state;
         // After basic-combat runs, state will contain dynamic fields.
-        assert!(!body_state.is_empty() || !post_state.is_empty(),
-            "settle should have persisted state into the entry");
+        assert!(
+            !body_state.is_empty(),
+            "settle should have persisted state into the entry"
+        );
+
+        // ── Finding 1 assertion: body.state must NOT contain invocation
+        //    metadata (module_id, attacker_id, defender_id). The settle path
+        //    merges only state_delta, not the full merged session state.
+        for forbidden_key in &["module_id", "attacker_id", "defender_id"] {
+            assert!(
+                !body_state.contains_key(*forbidden_key),
+                "body.state must not contain invocation metadata key '{forbidden_key}': body_state={body_state:?}"
+            );
+        }
+    }
+
+    /// When neither session state nor entry `body.computable` provide a
+    /// `module_id`, compute() must reject with `InvalidInput` — no silent
+    /// default.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn compute_missing_module_id_rejects_invalid_input() {
+        let (pool, _dir) = fresh_pool().await;
+        seed_world(&pool).await;
+
+        let adapter = NexusAdapter::new(pool.clone());
+        let entry = spoke_character_entry("kb_no_mod", "NoModule", 100, 20, 10, 100);
+        unwrap_ok(adapter.put_knowledge_entry(entry, None), "create");
+
+        // Project WITHOUT module_id in state and WITHOUT body.computable on
+        // the entry — both resolution tiers are empty.
+        unwrap_ok(
+            adapter.project(ProjectRequest {
+                session_id: "ses_no_mod".to_string(),
+                entry_id: "kb_no_mod".to_string(),
+                state: Map::new(),
+                extensions: Default::default(),
+            }),
+            "project no-module",
+        );
+
+        match adapter.compute(ComputeRequest {
+            session_id: "ses_no_mod".to_string(),
+            entry_id: "kb_no_mod".to_string(),
+            computable: Map::new(),
+            settle: None,
+            extensions: Default::default(),
+        }) {
+            SpokeResult::Reject(r) => {
+                assert_eq!(r.code, SpokeRejectCode::InvalidInput);
+                assert!(r.message.contains("module identity required"));
+            }
+            _ => panic!("expected InvalidInput for missing module_id"),
+        }
     }
 
     // ── WASM engine / module loading edge cases ──────────────────────────
