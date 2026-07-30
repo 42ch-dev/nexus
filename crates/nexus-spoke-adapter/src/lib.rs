@@ -1,18 +1,22 @@
 //! # nexus-spoke-adapter
 //!
 //! The single boundary that crosses between nexus domain concerns and SPOKE
-//! standard objects. It does two things and nothing else:
+//! standard objects, and the **spoke capability-aggregation layer** for nexus
+//! (tracked spec `spoke-adapter-architecture.md` §1.2 / §7 / §7.4). It owns
+//! four surfaces:
 //!
 //! 1. **Typed accessors** over the `extensions.nexus` namespace on a spoke
 //!    [`KnowledgeEntry`] — see the [`extensions`] module.
-//! 2. **Thin delegation** of standard lifecycle invariants to
+//! 2. **Surface A delegation** of standard lifecycle invariants to
 //!    [`spoke_operations`] — see the [`ops`] module.
+//! 3. **The `WorldKbEntry` ↔ spoke `KnowledgeEntry` conversion seam** — see
+//!    the [`conversion`] module (V1.145 P1a).
+//! 4. **The production `BaselinePorts` implementation** ([`NexusBaselineAdapter`]
+//!    + 6 port impls) — see the [`adapter`] module (V1.145 P1b).
 //!
-//! This crate is a **delegation facade** (tracked spec
-//! `spoke-adapter-architecture.md` §1.2 / §7): where `spoke-operations`
-//! already exports a function, this adapter re-exports or thin-wraps it. It
-//! does NOT reimplement any lifecycle invariant, and it introduces no
-//! parallel nexus types where spoke already provides them.
+//! Surfaces 1–3 are **pure delegation / conversion**: where `spoke-operations`
+//! already exports a function, this adapter re-exports or thin-wraps it, and it
+//! introduces no parallel nexus types where spoke already provides them.
 //!
 //! Since V1.141 the crate also flat-re-exports the spoke adapter **port
 //! traits + orchestration entrypoints** (Surface B, spec §7.3) so consumers
@@ -25,15 +29,41 @@
 //! the `OrderTimelineEventsByPrecedesOptions` operand) — again pure
 //! pass-through, again no nexus logic.
 //!
+//! Since V1.145 P1b the crate also hosts the **production `BaselinePorts`
+//! implementation** (`NexusBaselineAdapter` + 6 port impls in the [`adapter`]
+//! module, spec §7.4). The adapter consumes `nexus-local-db` storage primitives
+//! and bridges spoke's sync port traits to async `SQLite` I/O. This makes
+//! `nexus-spoke-adapter` the capability-aggregation layer, while
+//! `nexus-local-db` is pure storage (no spoke-adapter dep — spec §8 dep-graph
+//! reversal).
+//!
 //! ## Call-boundary invariant (HARD)
 //!
 //! Every public function in this crate accepts and returns only spoke
 //! standard objects (`KnowledgeEntry`, `Finding`, `Scope`, `PromoteRequest`,
 //! `AssemblePacket`, `ExtensionMap`). There are no nexus wrapper types here
 //! — the adapter IS the boundary.
+//!
+//! (The production [`adapter::NexusBaselineAdapter`] is the documented
+//! exception: it necessarily touches nexus storage rows on the *inside* of
+//! its port impls, but its public surface — the spoke port traits — stays
+//! spoke-only.)
 
+pub mod adapter;
+pub mod conversion;
 pub mod extensions;
 pub mod ops;
+
+// V1.145 P1b — production adapter re-export so consumers can construct
+// `NexusBaselineAdapter` through the single spoke-adapter import boundary
+// (spec §7.4 import path: `nexus_spoke_adapter::NexusBaselineAdapter`).
+pub use adapter::NexusBaselineAdapter;
+
+// V1.145 P2 — `SpokeBackedKbStore` (the `KbStore` impl injected at the MCA
+// `assemble_moment` wiring site) + the scoped-read result type. Re-exported so
+// the MCA composition root (`apps/nexus42`) constructs it through the single
+// spoke-adapter import boundary (spec §7.4 V1.145 P2 amendment).
+pub use adapter::mca_read::{ScopedKbRead, SpokeBackedKbStore};
 
 // ── Spoke type re-exports (consumer convenience) ────────────────────────
 //
@@ -71,7 +101,7 @@ pub use spoke_schemas::{
 // `spoke-schemas` dependency for relation / finding ports.
 pub use spoke_schemas::{
     finding::FindingExtensionsKey, knowledge_entry::KnowledgeEntryExtensionsKey,
-    relation::RelationExtensionsKey,
+    relation::RelationExtensionsKey, ScopeExtensionsKey,
 };
 
 // ── Spoke adapter port + orchestration surface (spoke ≥ 0.3.0) ─────────

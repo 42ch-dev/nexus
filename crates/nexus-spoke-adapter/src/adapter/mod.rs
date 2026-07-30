@@ -1,9 +1,14 @@
 //! Production `BaselinePorts` implementation home (spec §7.4).
 //!
 //! `NexusBaselineAdapter` is the production spoke port impl backing spoke
-//! orchestrators against this crate's `SQLite` storage. The port-family matrix
-//! (which families are production vs stub) lives in
+//! orchestrators against `nexus-local-db`'s `SQLite` storage. The port-family
+//! matrix (which families are production vs stub) lives in
 //! `.mstar/specs/spoke-adapter-architecture.md` §7.4.
+//!
+//! V1.145 P1b rehome: this module moved from
+//! `nexus-local-db/src/spoke_adapter/` so that `nexus-local-db` is pure
+//! storage (no spoke-adapter dep) and `nexus-spoke-adapter` is the capability
+//! aggregation layer (spec §8 dep-graph reversal).
 //!
 //! # Async ↔ sync bridge
 //!
@@ -20,6 +25,7 @@
 pub mod finding_port;
 pub mod host_manifest_port;
 pub mod knowledge_entry_port;
+pub mod mca_read;
 pub mod relation_port;
 pub mod rule_query_port;
 pub mod scope_query_port;
@@ -170,18 +176,18 @@ mod tests {
     /// — runtime behavior is exercised in the per-port `tests` modules.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn nexus_baseline_adapter_satisfies_baseline_ports_blanket_impl() {
-        fn accepts_baseline_ports(_: &dyn nexus_spoke_adapter::BaselinePorts) {}
-        fn accepts_knowledge_entry_port(_: &dyn nexus_spoke_adapter::KnowledgeEntryPort) {}
-        fn accepts_relation_port(_: &dyn nexus_spoke_adapter::RelationPort) {}
-        fn accepts_scope_query_port(_: &dyn nexus_spoke_adapter::ScopeQueryPort) {}
-        fn accepts_finding_port(_: &dyn nexus_spoke_adapter::FindingPort) {}
-        fn accepts_rule_query_port(_: &dyn nexus_spoke_adapter::RuleQueryPort) {}
-        fn accepts_host_manifest_port(_: &dyn nexus_spoke_adapter::HostManifestPort) {}
+        fn accepts_baseline_ports(_: &dyn crate::BaselinePorts) {}
+        fn accepts_knowledge_entry_port(_: &dyn crate::KnowledgeEntryPort) {}
+        fn accepts_relation_port(_: &dyn crate::RelationPort) {}
+        fn accepts_scope_query_port(_: &dyn crate::ScopeQueryPort) {}
+        fn accepts_finding_port(_: &dyn crate::FindingPort) {}
+        fn accepts_rule_query_port(_: &dyn crate::RuleQueryPort) {}
+        fn accepts_host_manifest_port(_: &dyn crate::HostManifestPort) {}
 
         let dir = tempfile::tempdir().unwrap();
         let db_path = dir.path().join("test.db");
-        let pool = crate::open_pool(&db_path).await.unwrap();
-        crate::run_migrations(&pool).await.unwrap();
+        let pool = nexus_local_db::open_pool(&db_path).await.unwrap();
+        nexus_local_db::run_migrations(&pool).await.unwrap();
         let adapter = NexusBaselineAdapter::new(pool);
 
         accepts_baseline_ports(&adapter);

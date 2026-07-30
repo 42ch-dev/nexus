@@ -11,10 +11,14 @@ workspace = true
 
 [dependencies]
 nexus-contracts = { path = "../nexus-contracts" }
-# V1.139 P1 T1: nexus-spoke-adapter + spoke-schemas brought in via the
-# nexus-kb → nexus-knowledge merger. The relocated `world_kb` modules will
-# migrate onto spoke `KnowledgeEntry` types in T2/T3.
-nexus-spoke-adapter = { path = "../nexus-spoke-adapter" }
+# V1.145 P1a: the WorldKbEntry↔KnowledgeEntry conversion seam + lifecycle
+# delegation moved OUT of this crate into `nexus-spoke-adapter` (orphan rule
+# → free functions + a local trait there). This reversed the former
+# `nexus-knowledge → nexus-spoke-adapter` edge to
+# `nexus-spoke-adapter → nexus-knowledge` (spec §8 dep-graph reversal), so
+# this crate no longer depends on `nexus-spoke-adapter`. `spoke-schemas`
+# stays because `world_kb/mod.rs` re-exports the spoke `KnowledgeEntry` wire
+# type for consumers (e.g. nexus-orchestration) that read it through this crate.
 spoke-schemas.workspace = true
 async-trait.workspace = true
 chrono = { version = "0.4", features = ["serde"] }
@@ -28,7 +32,7 @@ uuid = { version = "1", features = ["v4"] }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt"] }
-# V1.139 P1 T6 — spoke-operations parity tests reference BlockType (nexus-contracts)
-# and call nexus-spoke-adapter ops directly for cross-product conformance.
+# V1.139 P1 T6 — spoke-operations parity tests moved to `nexus-spoke-adapter`
+# in V1.145 P1a (they exercise the conversion seam + lifecycle trait that now
+# live there). This crate's own tests no longer reference spoke-adapter.
 nexus-contracts = { path = "../nexus-contracts" }
-nexus-spoke-adapter = { path = "../nexus-spoke-adapter" }

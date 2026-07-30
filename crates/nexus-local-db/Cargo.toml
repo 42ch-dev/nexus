@@ -23,8 +23,13 @@ nexus-contracts = { path = "../nexus-contracts" }
 nexus-home-layout = { path = "../nexus-home-layout" }
 nexus-narrative = { path = "../nexus-narrative" }
 nexus-knowledge = { path = "../nexus-knowledge" }
-# V1.139 P1 T4 — extensions.nexus round-trip helpers (build_extensions_nexus).
-nexus-spoke-adapter = { path = "../nexus-spoke-adapter" }
+# V1.145 P1b — standard spoke-library usage: `narrative_gateway::get_timeline_ordered`
+# calls the spoke `order_timeline_events_by_ids` ordering helper directly. `spoke-operations`
+# is a leaf dependency (no cycle) — standard library usage like depending on `serde`, not a
+# spoke-adapter aggregation concern. Routing that ordering back through the spoke-adapter
+# boundary is a V1.146 refactor (needs the narrative read in a spoke-adapter-dependent layer).
+# See spec §7.4 "Read-path ScopeQuery adoption".
+spoke-operations = { workspace = true }
 async-trait.workspace = true
 futures-util = { workspace = true }
 

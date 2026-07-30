@@ -232,7 +232,7 @@ impl KnowledgeEntryPort for NexusBaselineMock {
 
 impl RelationPort for NexusBaselineMock {
     /// In-memory OCC reference — mirrors the production
-    /// `nexus-local-db::NexusBaselineAdapter::get_relation`: read the stored
+    /// `nexus_spoke_adapter::NexusBaselineAdapter::get_relation`: read the stored
     /// `Relation` by id; absent → `RelationNotFound`.
     fn get_relation(&self, relation_id: &str) -> SpokeResult<Relation> {
         let relations = self.relations.borrow();
@@ -249,7 +249,7 @@ impl RelationPort for NexusBaselineMock {
     }
 
     /// In-memory OCC reference — mirrors the production
-    /// `nexus-local-db::NexusBaselineAdapter::put_relation` (spec §7.4 OCC
+    /// `nexus_spoke_adapter::NexusBaselineAdapter::put_relation` (spec §7.4 OCC
     /// contract):
     ///
     /// | `expected_base_revision` | Path   | Outcome                                                              |

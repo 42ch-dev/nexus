@@ -54,6 +54,7 @@ use crate::capability::{Capability, CapabilityError};
 use async_trait::async_trait;
 use nexus_knowledge::world_kb::KbStore;
 use nexus_narrative::NarrativeGateway;
+use nexus_spoke_adapter::conversion::{spoke_to_world_kb, world_kb_to_spoke};
 use nexus_wasm_host::{ComputeInput, ComputeOutputStateDelta, ModuleCache, WasmEngine};
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -266,8 +267,11 @@ impl Capability for NarrativeCompute {
                         // V1.139 P0: ComputeInput.key_blocks is opaque spoke-
                         // KnowledgeEntry JSON (the spoke $ref is unresolved at
                         // codegen). Convert domain WorldKbEntry → spoke
-                        // KnowledgeEntry (T2 seam) → JSON object map.
-                        let spoke: nexus_knowledge::world_kb::KnowledgeEntry = kb.into();
+                        // KnowledgeEntry (sole conversion seam, now a free
+                        // function in nexus-spoke-adapter — V1.145 P1a) → JSON
+                        // object map.
+                        let spoke: nexus_knowledge::world_kb::KnowledgeEntry =
+                            world_kb_to_spoke(&kb);
                         serde_json::to_value(&spoke)
                             .ok()
                             .and_then(|v| v.as_object().cloned())
@@ -645,11 +649,12 @@ async fn create_new_key_blocks(
     for kb_map in blocks {
         // V1.139 P0: compute output `new_key_blocks` is opaque spoke-
         // KnowledgeEntry JSON. Convert Map → spoke KnowledgeEntry → domain
-        // WorldKbEntry (T2 seam) before persisting.
+        // WorldKbEntry (sole conversion seam, now a free function in
+        // nexus-spoke-adapter — V1.145 P1a) before persisting.
         let spoke: nexus_knowledge::world_kb::KnowledgeEntry =
             serde_json::from_value(serde_json::Value::Object(kb_map.clone()))
                 .map_err(|e| CapabilityError::Internal(format!("decode new_key_block: {e}")))?;
-        let kb = nexus_knowledge::world_kb::knowledge_entry::WorldKbEntry::from(spoke);
+        let kb = spoke_to_world_kb(spoke);
         if kb.world_id != world_id {
             return Err(CapabilityError::InputInvalid(format!(
                 "new_key_block '{}' targets world '{}' but admitted world is '{}'; \

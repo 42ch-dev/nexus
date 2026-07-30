@@ -15,7 +15,15 @@ use nexus_narrative::{
     EventSnapshot, NarrativeContext, NarrativeError, NarrativeGateway, NarrativeQuery,
     TimelinePosition, WorldState,
 };
-use nexus_spoke_adapter::{order_timeline_events_by_ids, SpokeReject, SpokeResult};
+// V1.145 P1b — `nexus-local-db` no longer depends on `nexus-spoke-adapter`
+// (spec §8 dep-graph reversal: the adapter depends on local-db, not vice
+// versa). This timeline-ordering helper + the reject types come from
+// `spoke-operations` directly — a standard spoke-library usage (leaf dep, no
+// cycle), the same way a crate depends on `serde`. The fuller goal of
+// routing `get_timeline_ordered` ordering through the spoke-adapter boundary
+// is a V1.146 refactor (it needs the narrative ordering to live in a
+// spoke-adapter-dependent layer). See spec §7.4 "Read-path ScopeQuery adoption".
+use spoke_operations::{order_timeline_events_by_ids, SpokeReject, SpokeResult};
 use sqlx::SqlitePool;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -189,6 +197,115 @@ impl SqliteNarrativeGateway {
             }
         }
     }
+}
+
+// ── V1.145 P3 production read primitive for ScopeQueryPort ───────────────
+
+/// Read timeline events for a world, optionally narrowed by `branch_id` and/or
+/// a set of `timeline_event_id`s (V1.145 P3 production read primitive).
+///
+/// Backs `ScopeQueryPort::list_timeline_events` (spec §7.4). This is a **free
+/// function** taking a `&SqlitePool` (not a `SqliteNarrativeGateway` method) so
+/// the production `NexusBaselineAdapter` port can call it directly without
+/// constructing a gateway. `branch_id` and `event_ids` are both optional;
+/// `None`/empty means no filter on that dimension.
+///
+/// # Filters (applied in SQL)
+///
+/// - `world_id` — always required (`WHERE world_id = ?`); mirrors
+///   `Scope.scope_id` → `world_id` (spec §7.4 timeline Scope filter alignment).
+/// - `branch_id` — optional strict equality (`scope.extensions["nexus"]
+///   ["branch_id"]`).
+/// - `event_ids` — optional `IN (SELECT value FROM json_each(?))`, the same
+///   `SQLite` idiom `kb_store::list_by_world_scoped` uses for `entry_ids`
+///   (`scope.timeline_event_ids`).
+///
+/// # Ordering
+///
+/// Results are ordered by `sequence_no ASC` within a branch; across branches
+/// (when `branch_id` is `None`) by `branch_id, sequence_no` — matching
+/// [`get_timeline`](SqliteNarrativeGateway::get_timeline)'s no-branch ordering.
+///
+/// # Overflow contract
+///
+/// Unlike `list_knowledge_entries`, there is **no** overflow-safety cap:
+/// timeline events are append-ordered and bounded per branch (spec §7.4
+/// timeline row lists only the three scope filters; no `LIST_BY_WORLD_LIMIT`
+/// reject applies).
+///
+/// # Errors
+///
+/// Returns [`NarrativeError::Storage`] on database failure.
+pub async fn list_timeline_events_scoped(
+    pool: &SqlitePool,
+    world_id: &str,
+    branch_id: Option<&str>,
+    event_ids: &[String],
+) -> Result<Vec<TimelineEvent>, NarrativeError> {
+    let has_id_filter = !event_ids.is_empty();
+    let has_branch = branch_id.is_some();
+
+    // SAFETY: static column list; the only dynamic fragments are the optional
+    // `branch_id` equality and the optional `event_ids` IN clause — both use
+    // bind params only (no user-controlled SQL). Same runtime-query pattern as
+    // `get_timeline` (line ~320) and `kb_store::list_by_world_scoped` (line
+    // ~328). The bind order below matches the `?` order in the SQL: world_id,
+    // then branch_id (if present), then the event_ids JSON array (if present).
+    let mut sql = String::from(if has_branch {
+        r"SELECT
+                timeline_event_id,
+                world_id,
+                branch_id,
+                event_type,
+                status,
+                sequence_no,
+                title,
+                summary,
+                caused_by_event_ids_json,
+                affected_key_block_ids_json,
+                source_command_id,
+                created_at
+            FROM narrative_timeline_events
+            WHERE world_id = ? AND branch_id = ?"
+    } else {
+        r"SELECT
+                timeline_event_id,
+                world_id,
+                branch_id,
+                event_type,
+                status,
+                sequence_no,
+                title,
+                summary,
+                caused_by_event_ids_json,
+                affected_key_block_ids_json,
+                source_command_id,
+                created_at
+            FROM narrative_timeline_events
+            WHERE world_id = ?"
+    });
+    if has_id_filter {
+        sql.push_str(" AND timeline_event_id IN (SELECT value FROM json_each(?))");
+    }
+    sql.push_str(if has_branch {
+        " ORDER BY sequence_no ASC"
+    } else {
+        " ORDER BY branch_id ASC, sequence_no ASC"
+    });
+
+    let mut q = sqlx::query_as::<_, TimelineEventRow>(&sql).bind(world_id);
+    if let Some(bid) = branch_id {
+        q = q.bind(bid);
+    }
+    if has_id_filter {
+        q = q.bind(serde_json::to_string(event_ids).unwrap_or_else(|_| "[]".to_string()));
+    }
+
+    let rows = q.fetch_all(pool).await.map_err(|e| db_err(&e))?;
+    Ok(rows
+        .iter()
+        .map(TimelineEventRow::to_timeline_event)
+        .collect())
 }
 
 // Row type matching the narrative_worlds DDL.

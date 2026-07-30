@@ -453,6 +453,7 @@ impl KbStore for InMemoryKbStore {
 mod tests {
     use super::*;
     use crate::world_kb::knowledge_entry::WorldKbBody;
+    use nexus_contracts::KeyBlockStatus;
 
     fn make_block(world_id: &str, block_type: BlockType, name: &str) -> WorldKbEntry {
         WorldKbEntry::new(world_id, block_type, name)
@@ -816,7 +817,7 @@ mod tests {
         let mut kb = make_block("wld_1", BlockType::Character, "Hero");
         store.insert_knowledge_entry(kb.clone()).await.unwrap();
 
-        kb.deprecate(None).unwrap();
+        kb.status = KeyBlockStatus::Deprecated.as_str().to_string();
         store.update_knowledge_entry(kb).await.unwrap();
 
         // Re-insert with same name + type should succeed
@@ -831,7 +832,7 @@ mod tests {
         let mut kb = make_block("wld_1", BlockType::Character, "Hero");
         store.insert_knowledge_entry(kb.clone()).await.unwrap();
 
-        kb.merge_into("kb_other").unwrap();
+        kb.status = KeyBlockStatus::Merged.as_str().to_string();
         store.update_knowledge_entry(kb).await.unwrap();
 
         let kb2 = make_block("wld_1", BlockType::Character, "Hero");

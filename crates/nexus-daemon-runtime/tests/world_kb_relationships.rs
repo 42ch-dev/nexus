@@ -407,7 +407,7 @@ async fn update_then_reread_via_get_graph_confirms_data_persisted() {
 /// `RelationAlreadyExists`, which `map_relate_reject` maps to 409" — is proven
 /// at the port layer against the real SQLite store by
 /// `put_relation_create_on_existing_rejects_already_exists` in
-/// `nexus-local-db/src/spoke_adapter/relation_port.rs` (real-server, not a
+/// `nexus-spoke-adapter/src/adapter/relation_port.rs` (real-server, not a
 /// mock). That test drives `RelationPort::put_relation(.., None)` twice with
 /// the same id and asserts the second rejects with
 /// `SpokeRejectCode::RelationAlreadyExists`, the exact code this handler's

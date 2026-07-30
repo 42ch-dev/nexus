@@ -27,14 +27,16 @@
 //! Mirrors the existing `crates/nexus-local-db/tests/` pattern
 //! (`tempfile::tempdir` + `open_pool` + `run_migrations` + seed FK parents),
 //! matching the production adapter's own `#[cfg(test)] mod tests` in
-//! `src/spoke_adapter/knowledge_entry_port.rs`.
+//! `nexus-spoke-adapter/src/adapter/knowledge_entry_port.rs` (V1.145 P1b
+//! rehome).
 
 #![allow(clippy::unwrap_used)]
 
 use nexus_contracts::BlockType;
 use nexus_knowledge::world_kb::{WorldKbBody, WorldKbEntry};
-use nexus_local_db::spoke_adapter::NexusBaselineAdapter;
 use nexus_local_db::{open_pool, run_migrations};
+// V1.145 P1b — adapter rehomed to nexus-spoke-adapter (spec §7.4).
+use nexus_spoke_adapter::NexusBaselineAdapter;
 use nexus_spoke_adapter::{
     orchestrate_promote, orchestrate_upsert, PromoteRequest, PromoteResponse, SpokeRejectCode,
     SpokeResult, UpsertRequest, UpsertResponse,
@@ -104,7 +106,7 @@ fn spoke_entry(
         summary: Some(format!("{canonical_name} summary")),
         ..Default::default()
     });
-    world.into()
+    nexus_spoke_adapter::conversion::world_kb_to_spoke(&world)
 }
 
 /// Build an `UpsertRequest` from a single spoke `KnowledgeEntry`. The entry is

@@ -5,7 +5,7 @@ edition.workspace = true
 authors.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Thin boundary between nexus domain types and spoke standard objects — extensions.nexus accessors + spoke-operations delegation"
+description = "Capability-aggregation boundary between nexus domain concerns and spoke standard objects — extensions.nexus accessors, lifecycle delegation, conversion seam, production NexusBaselineAdapter + 6 port impls"
 
 [lints]
 workspace = true
@@ -18,8 +18,31 @@ spoke-schemas.workspace = true
 spoke-operations.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+# V1.145 P1a — the WorldKbEntry↔KnowledgeEntry conversion seam + the
+# `WorldKbEntrySpokeExt` lifecycle trait moved here from `nexus-knowledge`
+# (orphan rule: both WorldKbEntry and KnowledgeEntry are foreign to
+# `nexus-knowledge`'s `From` impls, so the seam became free functions /
+# a local trait in this crate). This reverses the former
+# `nexus-knowledge → nexus-spoke-adapter` edge to
+# `nexus-spoke-adapter → nexus-knowledge` (spec §8 dep-graph reversal).
+nexus-knowledge = { path = "../nexus-knowledge" }
+nexus-contracts = { path = "../nexus-contracts" }
+chrono.workspace = true
+# V1.145 P1b — the production `NexusBaselineAdapter` + 6 port impls rehomed
+# here from `nexus-local-db/src/spoke_adapter/` (spec §7.4 / §8 dep-graph
+# reversal). The adapter consumes local-db's storage primitives
+# (`SqliteKbStore`, `open_pool`, `run_migrations`, CAS helpers) and bridges
+# spoke's sync port traits to async SQLite I/O. This edge replaces the
+# former `nexus-local-db → nexus-spoke-adapter` dep (now removed).
+nexus-local-db = { path = "../nexus-local-db" }
+sqlx.workspace = true
+tokio.workspace = true
 
 [dev-dependencies]
 spoke-schemas.workspace = true
 spoke-operations.workspace = true
 serde_json.workspace = true
+tempfile = "3"
+# Integration tests (spoke_parity) reference nexus domain types directly.
+nexus-knowledge = { path = "../nexus-knowledge" }
+nexus-contracts = { path = "../nexus-contracts" }

@@ -16,7 +16,7 @@
 //! local storage.
 
 use super::NexusBaselineAdapter;
-use nexus_spoke_adapter::{HostCapabilityManifest, HostManifestPort, SpokeResult};
+use crate::{HostCapabilityManifest, HostManifestPort, SpokeResult};
 use serde_json::json;
 /// The local-first host id (spec §7.4 — `nexus-local` is the documented
 /// default host identity for the production adapter).
@@ -55,7 +55,7 @@ impl HostManifestPort for NexusBaselineAdapter<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nexus_spoke_adapter::HostManifestPort;
+    use crate::HostManifestPort;
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn self_manifest_reports_nexus_local_data_store() {
@@ -65,8 +65,8 @@ mod tests {
         // ports.
         let dir = tempfile::tempdir().unwrap();
         let db_path = dir.path().join("test.db");
-        let pool = crate::open_pool(&db_path).await.unwrap();
-        crate::run_migrations(&pool).await.unwrap();
+        let pool = nexus_local_db::open_pool(&db_path).await.unwrap();
+        nexus_local_db::run_migrations(&pool).await.unwrap();
 
         let adapter = NexusBaselineAdapter::new(pool);
         let manifest = match adapter.get_host_capability_manifest() {
@@ -92,8 +92,8 @@ mod tests {
     async fn peer_manifests_is_empty_for_local_first_nexus() {
         let dir = tempfile::tempdir().unwrap();
         let db_path = dir.path().join("test.db");
-        let pool = crate::open_pool(&db_path).await.unwrap();
-        crate::run_migrations(&pool).await.unwrap();
+        let pool = nexus_local_db::open_pool(&db_path).await.unwrap();
+        nexus_local_db::run_migrations(&pool).await.unwrap();
 
         let adapter = NexusBaselineAdapter::new(pool);
         let peers = match adapter.list_peer_host_capability_manifests() {

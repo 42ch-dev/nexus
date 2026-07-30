@@ -31,6 +31,9 @@ tracing = { workspace = true }
 nexus-contracts = { path = "../nexus-contracts" }
 nexus-home-layout = { path = "../nexus-home-layout" }
 nexus-knowledge = { path = "../nexus-knowledge" }
+# V1.145 P1a: narrative.compute converts WorldKbEntry↔spoke KnowledgeEntry via
+# the conversion seam that now lives in nexus-spoke-adapter (dep-graph reversal).
+nexus-spoke-adapter = { path = "../nexus-spoke-adapter" }
 nexus-local-db = { path = "../nexus-local-db" }
 # V1.60 P0: DF-46 — world.state.query uses the NarrativeGateway trait for
 # world/timeline reads via SqliteNarrativeGateway.

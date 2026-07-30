@@ -1,6 +1,6 @@
 # Spoke Adapter Architecture
 
-> **Status:** Normative (v0.5 — V1.144 spoke 0.5.0 upgrade + RelationPort OCC extension + orchestrate_relate cutover; v0.4 was V1.143 orchestrator cutover on upsert/relate + timeline wire-type unification + promote-reject/merge resolution; v0.3 was V1.142 SPOKE 0.4.1 pin + production adapter home + first orchestrator cutover)
+> **Status:** Normative (v0.6 — V1.145 spoke consumer alignment: adapter rehome to spoke-adapter + dep reversal + WorldKB/timeline read via ScopeQuery + scope-pushdown contract; v0.5 was V1.144 spoke 0.5.0 upgrade + RelationPort OCC extension + orchestrate_relate cutover)
 > **Document class:** Master
 > **Scope:** The `nexus-spoke-adapter` crate boundary, `extensions.nexus` namespace contract, spoke-operations delegation rules, daemon-api envelope strategy, drift detection adaptation, and the `/kb/` HTTP route stability decision.
 > **Related:** [entity-scope-model.md](entity-scope-model.md), [local-db-schema.md](local-db-schema.md), [schemas-directory-layout.md](schemas-directory-layout.md), spoke `CONCEPTS.md`, spoke `.mstar/specs/spoke-data-model.md`, spoke `.mstar/specs/spoke-operations.md`
@@ -37,7 +37,7 @@ Where spoke already provides a type, field, op, or lifecycle invariant, nexus us
 
 ### 1.4 Crate topology
 
-- **New:** `crates/nexus-spoke-adapter/` — the only boundary that constructs spoke objects with a **lean** `extensions.nexus` populated and delegates lifecycle ops to `spoke-operations`. Thin facade (Q13).
+- **New:** `crates/nexus-spoke-adapter/` — the only boundary that constructs spoke objects with a **lean** `extensions.nexus` populated and delegates lifecycle ops to `spoke-operations`. Capability aggregation (Q13, refined V1.145).
 - **Merge:** `crates/nexus-kb/` is merged INTO the **existing** `crates/nexus-knowledge/` (which today owns User-scoped global knowledge + reference sources). After merger, `nexus-knowledge` consolidates three knowledge tiers in one crate:
   1. **World KnowledgeEntry** (formerly `nexus-kb`'s domain — narrative KB entries tied to a World)
   2. **User knowledge** (existing — tag-driven global knowledge entries indexed per `user_id`)
@@ -242,7 +242,7 @@ This is the single most important architectural rule in this spec. It is restate
 
 | Layer | Enforcement mechanism |
 |-------|----------------------|
-| **`nexus-spoke-adapter`** | All public functions accept/return spoke types only. The adapter's internal mapping layer converts nexus DB rows ↔ spoke objects — but the public API surface is spoke-only. |
+| **`nexus-spoke-adapter`** | All public functions accept/return spoke types only. The adapter owns the sole conversion seam (free fns `world_kb_to_spoke` / `spoke_to_world_kb` + `WorldKbEntrySpokeExt` in `src/conversion/`, V1.145 P1a) and the production `NexusBaselineAdapter` port impls in `src/adapter/` (V1.145 P1b) — the public API surface is spoke-only. |
 | **Rust type system** | `spoke-operations` functions take `spoke_schemas::KnowledgeEntry`, not `nexus_knowledge::KnowledgeEntry`. The adapter constructs the spoke type before calling spoke-operations. |
 | **Code review** | P1 implement AC-P1-3: static check (grep) confirms no spoke-operations call site passes a nexus-wrapper type. |
 
@@ -331,6 +331,33 @@ pub fn merge_extensions(
 
 /// Delegate to `spoke_operations::assert_revision_match`.
 pub fn assert_revision(expected: u64, actual: u64) -> SpokeResult<()>;
+
+// ── Conversion seam (V1.145 P1a — sole WorldKbEntry ↔ KnowledgeEntry seam) ─
+
+/// Forward: nexus domain `WorldKbEntry` → spoke standard `KnowledgeEntry`.
+/// Borrows the domain entry (owned fields are cloned internally).
+pub fn world_kb_to_spoke(entry: &WorldKbEntry) -> KnowledgeEntry;
+
+/// Reverse: spoke standard `KnowledgeEntry` → nexus domain `WorldKbEntry`.
+/// Consumes the spoke entry (extracts the body carrier + destructures the body).
+pub fn spoke_to_world_kb(entry: KnowledgeEntry) -> WorldKbEntry;
+
+/// Nexus lifecycle methods on `WorldKbEntry` that delegate status-transition
+/// validity to `spoke_operations` (`confirm` / `deprecate` / `merge_into` /
+/// `delete`). Local trait on a foreign type (orphan-rule compliant). Callers
+/// must `use nexus_spoke_adapter::conversion::WorldKbEntrySpokeExt;`.
+pub trait WorldKbEntrySpokeExt {
+    fn confirm(
+        &mut self,
+        membership: &MembershipPermissionCheck,
+        base_revision: u64,
+        conflict_check: &ConflictCheckResult,
+        visible_manifests: &[&str],
+    ) -> Result<(), KbError>;
+    fn deprecate(&mut self, replacement_kb_id: Option<&str>) -> Result<(), KbError>;
+    fn merge_into(&mut self, target_kb_id: &str) -> Result<(), KbError>;
+    fn delete(&mut self) -> Result<(), KbError>;
+}
 ```
 
 All delegation wrappers are thin — they enforce the boundary that operands must already be spoke types at the call site. They do not transform types internally.
@@ -414,21 +441,48 @@ When a consumer calls an optional orchestrator (`orchestrate_project`, `orchestr
 
 **Production adapter shipped (V1.142):** the production `BaselinePorts` implementation (`NexusBaselineAdapter`) is now shipped in `nexus-local-db/src/spoke_adapter/`, replacing the V1.141 reference in-memory mock for the four storage-backed families. The mock remains the reference shape for tests. See §7.4 for the production adapter home, family matrix, and CAS contract reuse.
 
-### 7.4 Production Adapter Home — `NexusBaselineAdapter` in `nexus-local-db`
+### 7.4 Production Adapter Home — `NexusBaselineAdapter` in `nexus-spoke-adapter` (V1.145)
 
-The production `BaselinePorts` implementation (`NexusBaselineAdapter`) lives in **`nexus-local-db/src/spoke_adapter/`**, not in `nexus-knowledge`. Rationale: `nexus-local-db` already depends on both `nexus-knowledge` (for domain types + the `WorldKbEntry ↔ KnowledgeEntry` conversion seam) and `nexus-spoke-adapter` (for port traits + orchestrators), and it owns the SQLite persistence. `nexus-knowledge` is a domain-types-and-traits crate that does **not** depend on `nexus-local-db` — it cannot be the production port home (the V1.141 compound doc §"Production boundary" suggestion that production impls live "downstream in nexus-knowledge" is stale; the actual dependency graph is `nexus-local-db → nexus-knowledge → nexus-spoke-adapter` — see §8).
+The production `BaselinePorts` implementation (`NexusBaselineAdapter`) lives in **`nexus-spoke-adapter/src/adapter/`** (V1.145 rehome). The V1.142 placement in `nexus-local-db/src/spoke_adapter/` was a pragmatic ship for write-path speed; V1.145 corrects the topology to match the durable layering vision:
 
-The adapter converts between nexus storage rows and spoke wire types using the existing V1.139 conversion seam in `nexus-knowledge::world_kb::knowledge_entry` (`impl From<WorldKbEntry> for SpokeKnowledgeEntry` + the reverse). This is reachable from `nexus-local-db` through its existing `nexus-knowledge` dependency. No second conversion path is added — the two `From` impls are the sole seam (spec §7.1).
+| Layer | Role | Dependency direction |
+|-------|------|---------------------|
+| `nexus-local-db` | **Pure storage** — DB CRUD primitives (`SqliteKbStore`, `open_pool`, `run_migrations`); no spoke types or dep on spoke-adapter | ← `nexus-spoke-adapter` depends on these primitives |
+| `nexus-spoke-adapter` | **Capability aggregation** — owns `NexusBaselineAdapter` + 6 port impls; maps spoke ↔ storage primitives; re-exports Surface A/B | → depends on `nexus-local-db`, `nexus-knowledge`, `spoke-schemas`, `spoke-operations` |
+| Business crates (`nexus-daemon-runtime`, `nexus-narrative`, MCA, …) | **Spoke consumers** — call adapter/orchestrators; do not host port impls or spoke serialization | → depend on `nexus-spoke-adapter` + `nexus-knowledge` |
 
-#### Production-vs-stub matrix per port family
+The adapter converts between nexus storage rows and spoke wire types using the V1.145 P1a conversion seam, now owned by `nexus-spoke-adapter` as free functions in `src/conversion/` (`world_kb_to_spoke` / `spoke_to_world_kb`) plus the `WorldKbEntrySpokeExt` lifecycle trait. The seam moved out of `nexus-knowledge` (orphan rule: both `WorldKbEntry` and `KnowledgeEntry` are foreign to `nexus-knowledge`'s former `From` impls), reversing the `nexus-knowledge → nexus-spoke-adapter` edge to `nexus-spoke-adapter → nexus-knowledge`. The conversion seam remains the sole boundary — no second conversion path is added (spec §7.1).
+
+**Module layout (post-V1.145 P1b):**
+```
+nexus-spoke-adapter/src/
+  lib.rs                            ← Surface A (extensions accessors, delegate wrappers) + Surface B (port trait re-exports, orchestrator entrypoints) + production adapter re-export
+  extensions.rs                     ← extensions.nexus accessors
+  ops.rs                            ← Surface A delegation wrappers
+  conversion/                       ← V1.145 P1a — WorldKbEntry↔KnowledgeEntry free fns + WorldKbEntrySpokeExt (sole conversion seam)
+  adapter/
+    mod.rs                          ← NexusBaselineAdapter struct + TX bridge (Arc<Mutex<Option<Transaction>>>) [V1.145 P1b rehome from nexus-local-db]
+    knowledge_entry_port.rs         ← impl KnowledgeEntryPort for NexusBaselineAdapter
+    relation_port.rs                ← impl RelationPort for NexusBaselineAdapter
+    scope_query_port.rs             ← impl ScopeQueryPort for NexusBaselineAdapter
+    finding_port.rs                 ← impl FindingPort for NexusBaselineAdapter
+    rule_query_port.rs              ← impl RuleQueryPort for NexusBaselineAdapter (stub)
+    host_manifest_port.rs           ← impl HostManifestPort for NexusBaselineAdapter (stub)
+examples/
+  baseline_adapter.rs               ← reference in-memory mock (for port shape reference)
+```
+
+**Import path change (V1.145 consumer update):** `nexus_local_db::spoke_adapter::NexusBaselineAdapter` → `nexus_spoke_adapter::adapter::NexusBaselineAdapter`. All daemon-runtime handler construction sites (world_kb.rs) and integration tests update to the new path.
+
+#### Production-vs-stub matrix per port family (post-V1.145)
 
 | Port family / method | Implementation class | Backing | Rationale |
 |---|---|---|---|
-| `KnowledgeEntryPort` | **Production** | `kb_key_blocks` via V1.73 CAS (`cas_update_key_block_fields`) | Existing storage with OCC |
-| `RelationPort` | **Production** (OCC-aware, V1.144 P1) | `kb_relationships` via CAS (`WHERE revision = ?`) | Existing storage; OCC added V1.144 P1 per spoke 0.5.0 `RelationPort` trait |
-| `FindingPort` | **Production** | `findings` | Existing storage |
-| `ScopeQueryPort.list_knowledge_entries` | **Production** | `kb_key_blocks` scope-filtered by `extensions.nexus.world_id` | Existing storage |
-| `ScopeQueryPort.list_timeline_events` | **Stub** — `Ok(Vec::new())` | None | No persisted `TimelineEvent` storage; nexus-narrative holds events in-memory |
+| `KnowledgeEntryPort` | **Production** | `kb_key_blocks` via `SqliteKbStore` primitives + V1.73 CAS | Existing storage with OCC; adapter in spoke-adapter, storage primitives in local-db |
+| `RelationPort` | **Production** (OCC-aware, V1.144 P1) | `kb_relationships` via `SqliteKbStore` primitives + CAS (`WHERE revision = ?`) | Existing storage; OCC added V1.144 P1 per spoke 0.5.0 `RelationPort` trait |
+| `FindingPort` | **Production** | `findings` table | Existing storage |
+| `ScopeQueryPort.list_knowledge_entries` | **Production** | `kb_key_blocks` scope-filtered by `scope_id` + `entry_ids`/`entry_types`; unfiltered full-world listings reject on >`LIST_BY_WORLD_LIMIT` overflow (no silent truncation for orchestrators). The MCA read path does NOT use this trait method — it uses `SpokeBackedKbStore` → `NexusBaselineAdapter::list_knowledge_entries_scoped` reading `scope.extensions["nexus"]` (see §7.4 scope-pushdown contract) | Existing storage; P2 production read via `SpokeBackedKbStore` (MCA only) |
+| `ScopeQueryPort.list_timeline_events` | **Production** (V1.145 P3) | `narrative_timeline_events` table (V1.26); scope-filtered by `scope_id` → `world_id`, `extensions.nexus.branch_id`, `timeline_event_ids` | **Was stub; now production.** Timeline IS persisted in `narrative_timeline_events` (V1.26 migration `20260524_narrative_worlds.sql`); the stub was incorrect — data exists, the port just didn't query it. |
 | `RuleQueryPort` | **Stub** — `Ok(Vec::new())` | None | No spoke `Rule` persistence table |
 | `HostManifestPort` | **Static-stub** — self manifest only | Static data | Multi-host / peer discovery not implemented |
 
@@ -460,6 +514,49 @@ True concurrent safety requires the CAS check to be atomic with the write. The V
 On create, the adapter seeds `revision = 1` (spoke convention), not `0` (nexus V1.74 legacy). The spoke `Relation.revision` field is `Option<u64>`, so consumers already handle optionality — no wire break.
 
 `RelationPort::get_relation` reads from `kb_relationships` via the existing `KbRelationshipRow` → spoke `Relation` conversion. On not-found it returns `SpokeRejectCode::RelationNotFound` (available in spoke 0.5.0; verified in `result.rs` line 28). The conversion mapping is identical to the `put_relation` path (see `relation_port.rs` header table, verified for 0.5.0 field names).
+
+#### Scope-pushdown contract — Nexus query filters alongside `Scope` (V1.145 P2)
+
+> **V1.145 P2 (spoke-native extensions, ≥ 0.6.0):** the nexus-specific filters
+> ride `scope.extensions["nexus"]` (looked up via the typify
+> `ScopeExtensionsKey` newtype). This is the original scope-pushdown design;
+> the prior typed `KbScopeFilters` carrier was a 0.5.0 workaround (0.5.0's
+> `Scope` had no `extensions` field) and is **removed** in the 0.6.0 redo. See
+> `nexus-spoke-adapter/src/adapter/mca_read.rs` (`scope_from_kb_query` /
+> `kb_query_from_scope`). The round-trip is proven by the
+> `scope_extensions_round_trip` smoke test.
+
+spoke `Scope` supports `entry_ids`, `entry_types`, `source_id`, `fork_id`, `timeline_event_ids`, `timeline_scale`. Nexus WorldKB read paths (MCA `assemble_moment`) need additional filters that spoke Scope does not natively provide: `text_search`, `canonical_name`, `limit`, `offset`, `computable`. Since spoke 0.6.0 these ride the spoke-native `scope.extensions["nexus"]` namespace (a typed `ExtensionMap`), so the WorldKB read crosses the spoke boundary carrying every filter on a spoke `Scope` — no separate nexus-side carrier struct.
+
+| Nexus query field | Where it rides | Adapter handling |
+|---|---|---|
+| `world_id` | `Scope.scope_id` | `WHERE world_id = ?` |
+| `block_type` | `Scope.entry_types` | maps to `KbQuery.block_type` (MCA sends at most one) |
+| `canonical_name` | `scope.extensions["nexus"].canonical_name` | in-memory filter (matches `KbStore::query`) |
+| `text_search` | `scope.extensions["nexus"].text_search` | in-memory filter (matches `KbStore::query`) |
+| `limit` | `scope.extensions["nexus"].limit` | in-memory pagination (matches `KbStore::query`) |
+| `offset` | `scope.extensions["nexus"].offset` | in-memory pagination (matches `KbStore::query`) |
+| `computable` | `scope.extensions["nexus"].computable` | in-memory filter (matches `KbStore::query`) |
+
+**Behavior preservation (HARD):** `SpokeBackedKbStore::query` builds a spoke `Scope` (native `entry_types` + `extensions["nexus"]`), then `NexusBaselineAdapter::list_knowledge_entries_scoped` extracts the nexus filters from the scope, reconstructs the equivalent `KbQuery`, and delegates to `SqliteKbStore::query` — so it produces a byte-identical `KbQueryResult` to the direct `query` path (same silent 500-row window, same in-memory filter + pagination, **no** reject-on-overflow). The MCA inherent method and the spoke `ScopeQueryPort::list_knowledge_entries` (whose reject-on-overflow serves orchestrators) stay **separate** — unifying them would break one limit contract or the other. The body round-trips losslessly: the adapter stashes the `_nexus_body` carrier on the read path so `spoke_to_world_kb` recovers the exact body (V1.143 body-fidelity mechanism).
+
+#### Read-path ScopeQuery adoption (V1.145)
+
+**P2 — MCA WorldKB read:** MCA's `fetch_world_kb` (in `nexus-moment-context-assembly/src/moment.rs`) switches from `SqliteKbStore` to a `SpokeBackedKbStore` wrapper (`nexus-spoke-adapter/src/adapter/mca_read.rs`) that implements `KbStore` by translating `KbQuery` → spoke `Scope` (native `entry_types` from `block_type` + the nexus-specific filters under `scope.extensions["nexus"]`) → `NexusBaselineAdapter::list_knowledge_entries_scoped` (an async inherent method, NOT the sync spoke `ScopeQueryPort` trait method, so MCA does not inherit the spoke port's reject-on-overflow). The wrapper converts spoke `KnowledgeEntry` → nexus `WorldKbEntry` via the free function `spoke_to_world_kb` (V1.145 P1a conversion seam; lossless body carrier preserves summary/tags/attributes). The MCA read is wired at `apps/nexus42/src/commands/platform/context.rs::run_assemble_moment` (the single production `assemble_moment` KB-store call site). MCA's generic `K: KbStore` signature is unchanged — only the injected implementation changes.
+
+**P2 scope boundary (explicit):** MCA is the only production consumer cut over in V1.145. Daemon CRUD read paths (`get_graph`, `get_candidates`) stay on `SqliteKbStore` directly — these are UI views, not spoke integration concerns. Evaluation deferred to V1.146+.
+
+**Narrative timeline ordering through the adapter (deferred to V1.146):** P3 shipped production `ScopeQueryPort.list_timeline_events` (table query + scope filter). The remaining goal — routing the narrative gateway's `get_timeline_ordered` ordering through the adapter boundary so the spoke `order_timeline_events_by_ids` helper is called via adapter re-export rather than a direct `spoke-operations` import in `narrative_gateway.rs` — is **deferred to V1.146**. It is a real refactor: `narrative_gateway` lives in `nexus-local-db` (pure storage, no spoke-adapter dep post-P1b reversal) and in `nexus-narrative`, neither of which can depend on `nexus-spoke-adapter` without re-introducing the reversed edge. The ordering therefore needs to move to a spoke-adapter-dependent layer. Until then, `nexus-local-db` and `nexus-narrative` take `spoke-operations` directly as a **standard leaf library dep** (no cycle) for the ordering helper.
+
+#### Timeline storage — existing table reuse (V1.145 P3)
+
+The `narrative_timeline_events` table already exists (V1.26 migration `20260524_narrative_worlds.sql`). The production write path (`narrative_write.rs::append_event`) already writes to it. The V1.143 `TimelineEvent` ↔ spoke `TimelineEvent` conversion seam already maps the stored columns. P3 adds one additive column for spoke round-trip (`extensions_nexus_json TEXT`) and replaces the stub `list_timeline_events` with a production query. No new table, no write migration needed — the SSOT for timeline data already lives in `narrative_timeline_events`.
+
+**Timeline Scope filter alignment:** Scope for timeline:
+- `scope.scope_id` → `world_id` (SQL `WHERE world_id = ?`)
+- `scope.extensions["nexus"]["branch_id"]` → `branch_id` (for fork-scoped queries)
+- `scope.timeline_event_ids` → `WHERE timeline_event_id IN (...)`
+- `scope.timeline_scale`, `scope.fork_id` → no-op filter (nexus doesn't use these; spoke pass-through)
 
 #### Orchestrator cutover registry
 
@@ -512,23 +609,35 @@ spoke-only fields (`fork_id`, `parent_fork_id`, `timeline_scale`, `source_anchor
 
 **Beat-assist helper adoption:** `order_timeline_events_by_ids` is the primary production adoption target (V1.143 P0 T2). The helper operates on `timeline_event_id` alone and requires no peripheral infrastructure. `order_timeline_events_by_precedes` is a stretch target (requires mapping `caused_by_event_ids` → spoke `Relation` objects + `extensions.spoke.timeline_entry_id` on each event).
 
-**`ScopeQueryPort.list_timeline_events`** remains a stub (`Ok(Vec::new())`) — the conversion seam enables future production implementation when a product feature requires persisted timeline events (roadmap V1.145).
+**`ScopeQueryPort.list_timeline_events`** is now **production** (V1.145 P3) — queries `narrative_timeline_events` table, converts via the V1.143 conversion seam, filters by Scope. The V1.142 stub (`Ok(Vec::new())`) is replaced.
 
-## 8. Crate Dependency Graph
+## 8. Crate Dependency Graph (post-V1.145)
 
 ```
-nexus-local-db                       ← production adapter home (§7.4)
-  ├── nexus-knowledge ──────────────┐
-  │   ├── nexus-spoke-adapter ──┐   │
-  │   │   ├── spoke-schemas     │   │ (spoke types)
-  │   │   └── spoke-operations  │   │ (lifecycle helpers + orchestrators)
-  │   ├── spoke-schemas         │   │ (native KnowledgeEntry type)
-  │   └── nexus-contracts       │   │ (local DTOs)
-  ├── nexus-spoke-adapter ──────────┘ (port traits + orchestrator entrypoints)
-  └── sqlx, ...                       (persistence)
+nexus-spoke-adapter                    ← capability aggregation (PRODUCTION ADAPTER HOME)
+  ├── nexus-local-db ──────────────┐   ← depends on storage primitives (SqliteKbStore, open_pool, …) [V1.145 P1b]
+  │   ├── nexus-narrative ───────┐ │   ← local-db implements NarrativeGateway over SQLite
+  │   │   ├── nexus-knowledge ───┤ │
+  │   │   ├── spoke-schemas      │ │   (TimelineEvent wire type)
+  │   │   └── spoke-operations   │ │   (standard leaf lib: order_timeline_events_by_ids ordering helper)
+  │   ├── nexus-knowledge ───────┤ │
+  │   │   └── spoke-schemas      │ │   (native KnowledgeEntry type)
+  │   ├── spoke-operations       │ │   (standard leaf lib: order_timeline_events_by_ids for narrative_gateway)
+  │   └── sqlx, …                │ │   (persistence)
+  ├── nexus-knowledge ───────────────┘ ← domain types (WorldKbEntry); conversion seam moved OUT to spoke-adapter (P1a)
+  ├── spoke-schemas                    ← native spoke types
+  └── spoke-operations                 ← orchestrators + helpers + port traits
+
+nexus-local-db                       ← pure storage (NO spoke-adapter dep after P1b)
+  ├── nexus-knowledge                 ← domain types
+  ├── nexus-narrative                 ← NarrativeGateway trait impl over SQLite
+  ├── spoke-operations                ← standard leaf library dep (narrative_gateway timeline ordering helper)
+  └── sqlx, …                         ← persistence only
 ```
 
-`nexus-daemon-runtime`, `nexus-orchestration`, `nexus-moment-context-assembly`, `nexus-cloud-sync`, `nexus-wasm-host`, and `apps/nexus42` depend on `nexus-knowledge` (and transitively on `nexus-spoke-adapter` for ops delegation). `nexus-local-db` is the **production `BaselinePorts` home** — it depends on `nexus-knowledge` for domain types + the conversion seam, and directly on `nexus-spoke-adapter` for the port traits + orchestrators it implements. No crate other than `nexus-spoke-adapter` directly depends on `spoke-operations`.
+**Key change from V1.144:** `nexus-local-db` no longer depends on `nexus-spoke-adapter`. The dependency edge is reversed — `nexus-spoke-adapter` depends on `nexus-local-db` for storage primitives. Business crates (`nexus-daemon-runtime`, MCA) depend on `nexus-spoke-adapter` for the adapter + orchestrators. (`nexus-narrative` and `nexus-local-db` depend on `spoke-operations` directly as a standard leaf library for the timeline ordering helper — see the note below.)
+
+**`spoke-operations` direct deps (standard library usage, not temporary):** adding `nexus-spoke-adapter → nexus-local-db` in P1b would have formed a transitive cycle (`local-db → narrative → spoke-adapter → local-db`) while `nexus-narrative` still runtime-depended on `nexus-spoke-adapter` for the `order_timeline_events_by_ids` timeline helper. The dep edge was reversed instead, and both `nexus-narrative` and `nexus-local-db` take `spoke-operations` directly for that helper. `spoke-operations` is a leaf dependency — this is standard spoke-library usage (like depending on `serde`), **not** a temporary workaround and **not** a cycle. The conversion seam (`world_kb_to_spoke` / `spoke_to_world_kb`) is owned by `nexus-spoke-adapter` (V1.145 P1a), not `nexus-knowledge`. Routing the `get_timeline_ordered` ordering back through the spoke-adapter boundary is a **V1.146** refactor (it needs the narrative ordering to live in a spoke-adapter-dependent layer; see §7.4 "Read-path ScopeQuery adoption").
 
 ## 9. Migration Summary
 

@@ -31,6 +31,9 @@ nexus-acp-host = { path = "../../crates/nexus-acp-host" }
 nexus-daemon-runtime = { path = "../../crates/nexus-daemon-runtime" }
 nexus-narrative = { path = "../../crates/nexus-narrative" }
 nexus-knowledge = { path = "../../crates/nexus-knowledge" }
+# V1.145 P2 — MCA WorldKB read routes through the spoke-adapter boundary
+# (`SpokeBackedKbStore`), injected at the `assemble_moment` wiring site.
+nexus-spoke-adapter = { path = "../../crates/nexus-spoke-adapter" }
 clap = { workspace = true }
 clap_complete = { workspace = true }
 tokio = { workspace = true }

@@ -2770,7 +2770,6 @@ dependencies = [
  "async-trait",
  "chrono",
  "nexus-contracts",
- "nexus-spoke-adapter",
  "serde",
  "serde_json",
  "spoke-schemas",
@@ -2792,10 +2791,10 @@ dependencies = [
  "nexus-home-layout",
  "nexus-knowledge",
  "nexus-narrative",
- "nexus-spoke-adapter",
  "nix 0.28.0",
  "serde",
  "serde_json",
+ "spoke-operations",
  "sqlx",
  "tempfile",
  "thiserror 1.0.69",
@@ -2830,6 +2829,7 @@ dependencies = [
  "nexus-spoke-adapter",
  "serde",
  "serde_json",
+ "spoke-operations",
  "spoke-schemas",
  "strum 0.26.3",
  "thiserror 1.0.69",
@@ -2859,6 +2859,7 @@ dependencies = [
  "nexus-knowledge",
  "nexus-local-db",
  "nexus-narrative",
+ "nexus-spoke-adapter",
  "nexus-wasm-host",
  "nix 0.29.0",
  "regex",
@@ -2882,10 +2883,17 @@ dependencies = [
 name = "nexus-spoke-adapter"
 version = "0.1.0"
 dependencies = [
+ "chrono",
+ "nexus-contracts",
+ "nexus-knowledge",
+ "nexus-local-db",
  "serde",
  "serde_json",
  "spoke-operations",
  "spoke-schemas",
+ "sqlx",
+ "tempfile",
+ "tokio",
 ]
 
 [[package]]
@@ -2930,6 +2938,7 @@ dependencies = [
  "nexus-moment-context-assembly",
  "nexus-narrative",
  "nexus-orchestration",
+ "nexus-spoke-adapter",
  "nix 0.28.0",
  "predicates",
  "regex",
@@ -4464,9 +4473,9 @@ dependencies = [
 
 [[package]]
 name = "spoke-operations"
-version = "0.5.0"
+version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bc960a930fe5e7c5663d3adf7ca419c1595429cea2a62b70dc34a5d2e3a5a77b"
+checksum = "60be0eb63df061491b6085ed987bacec8809d450ad613761e38d0cae9c4e6dc3"
 dependencies = [
  "chrono",
  "serde",
@@ -4476,9 +4485,9 @@ dependencies = [
 
 [[package]]
 name = "spoke-schemas"
-version = "0.5.0"
+version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d94e6bda5a5a26972b89461909d42c51bafb3258f9944a6370ba44474f3dc01c"
+checksum = "e22905ee5d544e64578c78dfa0bac77c327eec86a82a612436e4a99e85ece675"
 dependencies = [
  "chrono",
  "regress",

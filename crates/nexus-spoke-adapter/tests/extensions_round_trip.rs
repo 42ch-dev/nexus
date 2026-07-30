@@ -31,6 +31,7 @@ fn make_entry() -> KnowledgeEntry {
         entry_id: "kb_test".into(),
         entry_type: "character".into(),
         extensions: HashMap::new(),
+        modules: HashMap::new(),
         revision: None,
         schema_version: NonZeroU64::new(1).expect("1 is non-zero"),
         source_anchor: None,

@@ -1,6 +1,11 @@
 //! V1.139 P1 T6 — Parity tests: spoke-operations delegation (T3) produces
 //! identical transition outcomes to the pre-refactor nexus hand-rolled rules.
 //!
+//! **V1.145 P1a:** relocated from `nexus-knowledge/tests/` to
+//! `nexus-spoke-adapter/tests/` — the conversion seam (`world_kb_to_spoke`) and
+//! the lifecycle trait (`WorldKbEntrySpokeExt`) now live in this crate (spec
+//! §8 dep-graph reversal), so the parity tests exercise them here.
+//!
 //! Two complementary proof strategies:
 //! 1. **Pure spoke conformance** — drive `nexus_spoke_adapter::ops::transition_status`
 //!    / `assert_revision` directly across the full status cross-product, asserting
@@ -8,9 +13,10 @@
 //!    exposes (the 6 edges nexus uses, plus `deprecated → merged` correctly
 //!    excluded, plus terminal-state enforcement).
 //! 2. **End-to-end routing** — exercise the `WorldKbEntry` domain methods
-//!    (`confirm` / `deprecate` / `merge_into` / `delete`), which T3 routes through
-//!    spoke via the conversion seam, and assert the same accept/reject + final
-//!    status the prior nexus hand-rolled rules produced.
+//!    (`confirm` / `deprecate` / `merge_into` / `delete`) — now on the
+//!    `WorldKbEntrySpokeExt` trait — which route through spoke via the
+//!    conversion seam, and assert the same accept/reject + final status the
+//!    prior nexus hand-rolled rules produced.
 //!
 //! Together these prove: the spoke cross-product table is the authority, the
 //! nexus domain methods delegate to it correctly, and authors see the same
@@ -18,8 +24,10 @@
 
 use nexus_contracts::BlockType;
 use nexus_knowledge::world_kb::knowledge_entry::{ConflictCheckResult, MembershipPermissionCheck};
-use nexus_knowledge::world_kb::{KbError, KnowledgeEntry, WorldKbEntry};
+use nexus_knowledge::world_kb::{KbError, WorldKbEntry};
+use nexus_spoke_adapter::conversion::{world_kb_to_spoke, WorldKbEntrySpokeExt};
 use nexus_spoke_adapter::ops::{assert_revision, transition_status};
+use nexus_spoke_adapter::KnowledgeEntry;
 use nexus_spoke_adapter::SpokeResult;
 
 // ── Fixtures ───────────────────────────────────────────────────────────────
@@ -46,7 +54,7 @@ const fn no_conflicts() -> ConflictCheckResult {
 /// Convert a domain entry (seeded into `from`) to the spoke type and ask spoke
 /// whether the `from → to` transition is allowed.
 fn spoke_allows(from: &str, to: &str) -> bool {
-    let spoke: KnowledgeEntry = entry_in(from).into();
+    let spoke: KnowledgeEntry = world_kb_to_spoke(&entry_in(from));
     transition_status(&spoke, to).is_ok()
 }
 

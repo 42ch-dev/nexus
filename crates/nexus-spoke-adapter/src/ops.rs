@@ -1,4 +1,4 @@
-//! Thin delegation wrappers over [`spoke_operations`] lifecycle helpers.
+//! Surface A delegation wrappers over [`spoke_operations`] lifecycle helpers.
 //!
 //! Each wrapper enforces the call-boundary invariant (tracked spec §7):
 //! operands are already spoke standard types at the call site. The wrappers

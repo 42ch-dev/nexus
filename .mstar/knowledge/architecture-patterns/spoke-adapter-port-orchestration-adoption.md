@@ -260,3 +260,77 @@ This pattern is generic: any `*Port` that starts with insert-only storage and la
 
 - **`R-V1144P1-001` — `extensions.nexus` keys don't round-trip on Relation:** unknown `extensions.nexus` keys are silently dropped when a Relation is stored and re-read, because there is no `extras` JSON column for `kb_relationships` (unlike `kb_key_blocks` which stores full body fidelity via the V1.143 Greptile P1 fix). The `extras` column pattern from `kb_key_blocks` would be the model for a future fix.
 - **`R-V1144P2-INVALIDINPUT-400` — no spoke 500-class reject code:** storage errors (e.g. SQLite constraint failures) are currently classified as `INVALID_INPUT` (400) because spoke's `RejectCode` enum has no server-error / 500-class variant. This misclassification is shared across all four cutover ports (promote, upsert, relate, remove). Tracked for a future iteration when spoke adds the reject code or nexus implements a local mapping fallback.
+
+## V1.145 — Spoke consumer alignment (adapter归位 + scope.extensions + timeline port production)
+
+V1.145 (XL) shipped the adapter topology correction that the V1.141–V1.144 roadmap had been building toward. Three structural changes (P1a/P1b rehome, P2 scope-pushdown redo, P3 timeline port production) plus a P4 docs-correction pass.
+
+### Adapter rehome + dep reversal (P1a/P1b)
+
+The conversion seam and production `NexusBaselineAdapter` both moved to `nexus-spoke-adapter`, reversing the dependency graph:
+
+**Conversion seam (P1a):** The `WorldKbEntry↔KnowledgeEntry` `From` impls were in `nexus-knowledge`. They needed to move to `nexus-spoke-adapter` so the adapter owns the sole boundary. But the **orphan rule** (E0117) prevented implementing `From<WorldKbEntry>` for `KnowledgeEntry` (or vice versa) in a third crate where both types are foreign. Solution: **free functions** `world_kb_to_spoke` / `spoke_to_world_kb` (the compiler's own suggestion — `rustc --explain E0117` explicitly recommends free functions over orphan-compatible newtypes) + a local **trait** `WorldKbEntrySpokeExt` for lifecycle methods (`confirm`/`deprecate`/`merge_into`/`delete`). This is the **proven pattern** for conversion seams across crates: when orphan rule blocks `From`/`Into`, use a free function pair + local trait on the product type.
+
+**Production `NexusBaselineAdapter` (P1b):** `NexusBaselineAdapter` + 6 baseline port impls moved from `nexus-local-db/src/spoke_adapter/` to `nexus-spoke-adapter/src/adapter/`. The adapter crate becomes the **capability aggregation** layer — it depends on `nexus-local-db` storage primitives (`SqliteKbStore`, `open_pool`, `run_migrations`), `sqlx`, and `tokio`, but the port families are adapter-owned.
+
+**`nexus-local-db`** becomes **pure storage**: no `nexus-spoke-adapter` dep, no spoke types in its public API. It still depends on `nexus-narrative` (for `TimelineEvent` type) and `nexus-knowledge` (for `WorldKbEntry` type), but these are domain-type deps, not adapter deps.
+
+**Import path change:** `nexus_local_db::spoke_adapter::NexusBaselineAdapter` → `nexus_spoke_adapter::adapter::NexusBaselineAdapter` — every daemon-runtime handler site and integration test updates to the new path.
+
+**Dep graph reversal (before → after):**
+
+```
+Before V1.145:
+  nexus-local-db (hosted adapter, depended on spoke-adapter)
+    → nexus-spoke-adapter
+    → nexus-knowledge (hosted conversion seam)
+
+After V1.145:
+  nexus-spoke-adapter (capability aggregation, hosts adapter + conversion seam)
+    → nexus-local-db (pure storage, no spoke-adapter dep)
+    → nexus-knowledge
+```
+
+**Cycle break:** The reversal created a transitive `local-db → narrative-gateway → spoke-operations (via order_timeline_events_by_ids) → ... → spoke-adapter → local-db` cycle. Resolved by having `narrative_gateway` (local-db) and `gateway` (nexus-narrative) take a **direct** `spoke-operations` dep for the `order_timeline_events_by_ids` helper. P4 reframed this from "temporary cycle-break workaround" to **legitimate standard-leaf-library usage**: `spoke-operations` is a leaf crate with zero nexus transitive edges, so there is no cycle. The narrative-read-via-spoke-adapter goal remains deferred to V1.146.
+
+### Scope.extensions (spoke 0.6.0) — P2 typed-carrier → native extensions redo
+
+The original architect scope-pushdown design (§7.5) called for nexus-specific KB query filters (text_search, canonical_name, limit, offset, computable) to ride `scope.extensions["nexus"]`. But **spoke 0.5.0 had no `Scope.extensions` field** — the spec was based on an incorrect assumption about the published spoke version.
+
+P2 shipped a **typed `KbScopeFilters` carrier** as a workaround: a nexus-only struct that carried the 5 nexus filters alongside a spoke `Scope` (which carried only native fields like `entry_types`). This worked but introduced a parallel carrier path — every conversion site wrapped/unwrapped the extra struct.
+
+**spoke 0.6.0** (bumped mid-iteration, commit `c641a99a`) added `Scope.extensions: ExtensionMap` — the gap was real, and the upstream fix closed it. P2 **redid** the mechanism in commit `77f91067`: removed `KbScopeFilters` + `SqliteKbStore::query_scoped` entirely and rebuilt the query path on spoke-native `scope.extensions["nexus"]` (looked up via `ScopeExtensionsKey`). `NexusBaselineAdapter::list_knowledge_entries_scoped` reads the scope, reconstructs `KbQuery` from extensions, and delegates to `SqliteKbStore::query` — byte-identical output proven by comparison test.
+
+**Lesson:** When spoke has a gap, the best-practice fix is **upstream** (advance spoke), not nexus workarounds. The typed carrier was the correct work-for-today, but the 0.6.0 upgrade made it obsolete within the same iteration. This reinforces the V1.143 "verify spoke source before claiming clean mapping" discipline multiply: spec authors must check the **actual published spoke version** for the fields they depend on.
+
+### Timeline port production (P3)
+
+`ScopeQueryPort::list_timeline_events` was a stub returning `Ok(Vec::new())` — the V1.142 spec claimed "nexus-narrative holds events in-memory" as justification. **This was incorrect.** Timeline data IS persisted in `narrative_timeline_events` (V1.26 migration `20260524_narrative_worlds.sql`). The port just never queried it.
+
+P3 (commit `4ccaf8bd`) replaced the stub with a production implementation that:
+1. Queries `narrative_timeline_events` by `world_id` (from `scope.scope_id`), `branch_id` (via `scope.extensions["nexus"]["branch_id"]`), and `timeline_event_ids` (from `scope.timeline_event_ids`).
+2. Converts each nexus `TimelineEvent` row to the spoke `TimelineEvent` wire type via the V1.143 `From<nexus_narrative::TimelineEvent>` conversion seam.
+3. Adds an additive column `extensions_nexus_json TEXT` (migration `20260729_000001`) for future spoke-round-trip write paths.
+4. Replaces the single stub-returns-empty test with 4 integration tests (unfiltered, branch filter, event-ids filter, empty-world).
+
+No new table and no write migration — the SSOT for timeline data already lived in `narrative_timeline_events`.
+
+### Narrative-read deferral (P4)
+
+P4 was re-scoped to docs-only (commit `63037b4f`). Key outcomes:
+
+1. **Direct `spoke-operations` deps accepted as standard library usage.** All "TEMP P4" / "cycle-break" annotations in source comments, Cargo descriptions, and AGENTS.md were corrected to "standard spoke-operations library usage".
+2. **Spec §7.4/§8 corrected** to match the post-reversal dep graph (architect commit `67c45629`).
+3. **Narrative-read-via-spoke-adapter deferred to V1.146** (`R-V1145P4-001`). The `get_timeline_ordered` ordering helper is called from `narrative_gateway` (local-db, pure storage) and `gateway` (nexus-narrative), neither of which can depend on `nexus-spoke-adapter` post-P1b reversal without re-introducing the reversed edge. The ordering logic needs to move to a spoke-adapter-dependent layer (or be called from the daemon-runtime handler layer instead). Until then, the direct `spoke-operations` dep is the correct intermediate.
+
+### The 3 architect Phase-1 errors caught at implement time
+
+V1.145 surfaced three spec-vs-reality gaps during implement (not QC) — all caught because the implementer read the spoke source to verify. This reinforces the V1.143 "verify spoke source before claiming clean mapping" discipline as a **required pre-implement step**.
+
+| Error | Spec claimed | Reality at implement time | Was caught when | Fix |
+|-------|-------------|---------------------------|-----------------|-----|
+| **P0 — non-existent fn** | An opaque-JSON INSERT primitive existed for `kb_key_blocks` | No such primitive — spoke-adapter built `extensions_nexus_json` inline at the INSERT site (the UPDATE path had one; INSERT did not) | T1: implementer found no call target | P0 added `insert_key_block_with_extensions_in_tx` to `SqliteKbStore` |
+| **P1 — orphan rule + cycle** | `From` impls move cleanly to spoke-adapter; dep graph reversal is a pure file move | Orphan rule (E0117) blocks `From<WorldKbEntry> for KnowledgeEntry` in a third crate; reversal creates `local-db→narrative→spoke-adapter→local-db` cycle | T1: `rustc` rejects orphan impls; T2: `cargo tree` reveals cycle | Free functions + local trait for conversion seam; direct `spoke-operations` leaf dep for timeline ordering helper |
+| **P2 — Scope.extensions fiction** | `Scope.extensions` exists at spoke 0.5.0, enabling native scope-pushdown via `extensions["nexus"]` | spoke 0.5.0 Scope has **no** `extensions` field — field was added in spoke 0.6.0 | P2 T1: implementer reads spoke `Scope` source | Typed carrier workaround (P2) → spoke 0.6.0 upgrade (mid-iteration) → redo on native extensions (P2 redo) |
+
+**Pattern:** architect spec errors that survive QC only surface at implement time when the implementer reads the actual spoke crate source at the pinned version. Before assuming a spoke field, function, or enum variant exists, **grep the spoke crate** at the `Cargo.lock`-resolved version. The V1.1139/V1.143 lesson ("verify before claiming") is now codified as a mandatory pre-implement step for any spec that asserts a spoke behavior.

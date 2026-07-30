@@ -53,8 +53,12 @@ use nexus_local_db::kb_relationships::{
     list_relationships_for_world, KbRelationshipRow,
 };
 use nexus_local_db::kb_store::{self, cas_update_key_block_fields};
-use nexus_local_db::spoke_adapter::NexusBaselineAdapter;
 use nexus_local_db::LocalDbError;
+// V1.145 P1b — the production `NexusBaselineAdapter` rehomed from
+// `nexus-local-db/src/spoke_adapter/` to `nexus-spoke-adapter/src/adapter/`
+// (spec §7.4 / §8 dep-graph reversal). Construct through the single
+// spoke-adapter import boundary.
+use nexus_spoke_adapter::NexusBaselineAdapter;
 // V1.142 P2: first production orchestrator cutover. `promote_adopt` routes
 // through `orchestrate_promote(&NexusBaselineAdapter, PromoteRequest)`.
 // V1.143 P1: second cutover — `patch_entity` routes the canonical entity edit
@@ -64,6 +68,7 @@ use nexus_local_db::LocalDbError;
 // on Surface A (spoke `RelationPort` has no delete).
 // These spoke types are re-exported through `nexus_spoke_adapter` (the
 // single boundary that crosses into spoke standard objects; spec §7).
+use nexus_spoke_adapter::conversion::{spoke_to_world_kb, world_kb_to_spoke};
 use nexus_spoke_adapter::extensions::set_nexus_body;
 use nexus_spoke_adapter::{
     orchestrate_promote, orchestrate_relate, orchestrate_upsert,
@@ -949,7 +954,7 @@ fn promote_adopt_commit_ambiguity_error(
 /// Build a spoke [`PromoteRequest`] from a nexus [`WorldKbEntry`] candidate.
 ///
 /// The candidate is converted to the spoke [`SpokeKnowledgeEntry`] boundary
-/// type via the sole `From<WorldKbEntry>` conversion seam (spec §7.1), then
+/// type via the sole `world_kb_to_spoke` conversion seam (spec §7.1), then
 /// round-tripped through JSON to fit the `PromoteRequest.candidate` wire
 /// shape. The spoke codegen emits a distinct struct per wire shape even
 /// when the schema is shared; the orchestrator's internal
@@ -965,7 +970,7 @@ fn promote_adopt_commit_ambiguity_error(
 /// error. That class of failure should surface as a panic at the seam,
 /// not a misleading 422 to the caller.
 fn build_spoke_promote_request(candidate: &WorldKbEntry) -> PromoteRequest {
-    let spoke_entry: SpokeKnowledgeEntry = candidate.clone().into();
+    let spoke_entry: SpokeKnowledgeEntry = world_kb_to_spoke(candidate);
     let wire = serde_json::to_value(&spoke_entry).unwrap_or_else(|_| serde_json::json!({}));
     serde_json::from_value(serde_json::json!({ "candidate": wire }))
         .expect("KnowledgeEntry-derived candidate fits PromoteRequest.candidate shape")
@@ -983,7 +988,7 @@ fn build_spoke_promote_request(candidate: &WorldKbEntry) -> PromoteRequest {
 /// [`WorldKbEntry`] candidate.
 ///
 /// Mirrors [`build_spoke_promote_request`]: the entry is converted to the
-/// spoke [`SpokeKnowledgeEntry`] boundary type via the sole `From<WorldKbEntry>`
+/// spoke [`SpokeKnowledgeEntry`] boundary type via the sole `world_kb_to_spoke`
 /// conversion seam (spec §7.1), then round-tripped through JSON to fit the
 /// `UpsertRequest.knowledge_entries` wire shape (the spoke codegen emits a
 /// distinct struct per wire shape even when the schema is shared).
@@ -992,7 +997,7 @@ fn build_spoke_promote_request(candidate: &WorldKbEntry) -> PromoteRequest {
 /// orchestrator derives it from its own `get_knowledge_entry` + the candidate's
 /// `revision` (which the caller sets to the current stored revision).
 fn build_spoke_upsert_request(entry: &WorldKbEntry) -> UpsertRequest {
-    let mut spoke_entry: SpokeKnowledgeEntry = entry.clone().into();
+    let mut spoke_entry: SpokeKnowledgeEntry = world_kb_to_spoke(entry);
     // Stash the full nexus body losslessly across the spoke boundary. Spoke's
     // typed BodyAttributeValue only models string/number/bool; null/array/
     // object attribute values have no spoke slot and would be silently dropped
@@ -1044,7 +1049,7 @@ async fn map_upsert_response(
             })?;
             // The codegen emits a DISTINCT `KnowledgeEntry` struct per wire
             // shape. Round-trip through JSON into the canonical data type that
-            // the `From<SpokeKnowledgeEntry> for WorldKbEntry` seam consumes
+            // the `spoke_to_world_kb` conversion seam consumes
             // (mirrors `map_promote_response`).
             let wire = serde_json::to_value(&persisted_wire).map_err(|e| NexusApiError::Internal {
                 code: "SPOKE_RESPONSE_DECODE".to_string(),
@@ -1060,7 +1065,7 @@ async fn map_upsert_response(
                     ),
                 }
             })?;
-            Ok(spoke_entry.into())
+            Ok(spoke_to_world_kb(spoke_entry))
         }
         // Variant1 is the wire error-envelope case. The orchestrator always
         // surfaces errors via `SpokeResult::Reject` (not Variant1), so this arm
@@ -1271,7 +1276,7 @@ async fn map_promote_reject(
                             "promote_adopt retry-safe: returning existing confirmed entry from prior partial attempt"
                         );
                         return Ok(PromoteAdoptOrchestrateOutcome::RecoveredConfirmed(
-                            existing.into(),
+                            world_kb_to_spoke(&existing),
                         ));
                     }
                     tracing::warn!(
