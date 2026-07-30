@@ -85,7 +85,7 @@ impl RelationPort for NexusBaselineAdapter<'_> {
                 }
                 Err(e) => {
                     return reject(
-                        SpokeRejectCode::InvalidInput,
+                        SpokeRejectCode::InternalError,
                         format!("storage error on relation read: {e}"),
                         json!({ "relation_id": relation_id }),
                     );
@@ -120,7 +120,7 @@ async fn put_relation_create(pool: &sqlx::SqlitePool, relation: Relation) -> Spo
     let locals = extract_nexus_locals(&relation);
 
     // Pre-check existence. The PK is the true race guard; if a concurrent
-    // writer beats us the INSERT fails and surfaces as InvalidInput —
+    // writer beats us the INSERT fails and surfaces as InternalError —
     // acceptable for the local single-writer daemon path.
     match get_relationship(pool, &relation_id).await {
         Ok(_) => {
@@ -133,7 +133,7 @@ async fn put_relation_create(pool: &sqlx::SqlitePool, relation: Relation) -> Spo
         Err(LocalDbError::Sqlx(sqlx::Error::RowNotFound)) => {} // proceed to insert
         Err(e) => {
             return reject(
-                SpokeRejectCode::InvalidInput,
+                SpokeRejectCode::InternalError,
                 format!("storage error on create pre-check: {e}"),
                 json!({ "relation_id": relation_id }),
             );
@@ -158,7 +158,7 @@ async fn put_relation_create(pool: &sqlx::SqlitePool, relation: Relation) -> Spo
         Ok(tx) => tx,
         Err(e) => {
             return reject(
-                SpokeRejectCode::InvalidInput,
+                SpokeRejectCode::InternalError,
                 format!("storage error on tx begin: {e}"),
                 json!({ "relation_id": relation_id }),
             );
@@ -196,7 +196,7 @@ async fn put_relation_create(pool: &sqlx::SqlitePool, relation: Relation) -> Spo
 
     if let Err(e) = insert_result {
         return reject(
-            SpokeRejectCode::InvalidInput,
+            SpokeRejectCode::InternalError,
             format!("storage error on relation insert: {e}"),
             json!({ "relation_id": relation_id }),
         );
@@ -204,7 +204,7 @@ async fn put_relation_create(pool: &sqlx::SqlitePool, relation: Relation) -> Spo
 
     if let Err(e) = tx.commit().await {
         return reject(
-            SpokeRejectCode::InvalidInput,
+            SpokeRejectCode::InternalError,
             format!("storage error on tx commit: {e}"),
             json!({ "relation_id": relation_id }),
         );
@@ -265,7 +265,7 @@ async fn put_relation_update(
         }
         Err(e) => {
             return reject(
-                SpokeRejectCode::InvalidInput,
+                SpokeRejectCode::InternalError,
                 format!("storage error on update pre-read: {e}"),
                 json!({ "relation_id": relation_id }),
             );
@@ -324,7 +324,7 @@ async fn put_relation_update(
         Ok(tx) => tx,
         Err(e) => {
             return reject(
-                SpokeRejectCode::InvalidInput,
+                SpokeRejectCode::InternalError,
                 format!("storage error on tx begin: {e}"),
                 json!({ "relation_id": relation_id }),
             );
@@ -360,7 +360,7 @@ async fn put_relation_update(
         }
         Err(e) => {
             return reject(
-                SpokeRejectCode::InvalidInput,
+                SpokeRejectCode::InternalError,
                 format!("storage error on relation CAS update: {e}"),
                 json!({ "relation_id": relation_id }),
             );
@@ -369,7 +369,7 @@ async fn put_relation_update(
 
     if let Err(e) = tx.commit().await {
         return reject(
-            SpokeRejectCode::InvalidInput,
+            SpokeRejectCode::InternalError,
             format!("storage error on tx commit: {e}"),
             json!({ "relation_id": relation_id }),
         );
@@ -902,7 +902,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn put_relation_unknown_endpoint_rejects_invalid_input() {
+    async fn put_relation_unknown_endpoint_rejects_internal_error() {
         let (pool, _dir) = fresh_pool().await;
         seed_world_and_endpoints(&pool).await;
 
@@ -913,11 +913,11 @@ mod tests {
             SpokeResult::Reject(r) => {
                 assert_eq!(
                     r.code,
-                    SpokeRejectCode::InvalidInput,
-                    "FK violation on target endpoint must surface as INVALID_INPUT"
+                    SpokeRejectCode::InternalError,
+                    "FK violation on target endpoint must surface as INTERNAL_ERROR (storage-level constraint)"
                 );
             }
-            SpokeResult::Ok(_) => panic!("expected INVALID_INPUT reject"),
+            SpokeResult::Ok(_) => panic!("expected INTERNAL_ERROR reject"),
         }
 
         // The transaction must have rolled back: no row exists.
@@ -1126,6 +1126,130 @@ mod tests {
         );
         assert_eq!(r.label.as_deref(), Some("cleared locals"));
     }
+
+    // ── V1.146 P0: InternalError on DB failure ─────────────────────────
+
+    /// DB failure (dropped table) on get surfaces `InternalError`.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn get_relation_on_dropped_table_surfaces_internal_error() {
+        let (pool, _dir) = fresh_pool().await;
+        seed_world_and_endpoints(&pool).await;
+        sqlx::query("DROP TABLE kb_relationships")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let adapter = NexusBaselineAdapter::new(pool);
+        match adapter.get_relation("rel_any") {
+            SpokeResult::Reject(r) => {
+                assert_eq!(
+                    r.code,
+                    SpokeRejectCode::InternalError,
+                    "dropped table must surface INTERNAL_ERROR on get"
+                );
+            }
+            SpokeResult::Ok(_) => panic!("expected InternalError reject"),
+        }
+    }
+
+    /// DB failure on put_relation create path surfaces `InternalError`.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn put_relation_create_on_dropped_table_surfaces_internal_error() {
+        let (pool, _dir) = fresh_pool().await;
+        seed_world_and_endpoints(&pool).await;
+        sqlx::query("DROP TABLE kb_relationships")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let adapter = NexusBaselineAdapter::new(pool);
+        let relation = spoke_relation("rel_fail_create", "kb_src", "kb_dst");
+        match adapter.put_relation(relation, None) {
+            SpokeResult::Reject(r) => {
+                assert_eq!(
+                    r.code,
+                    SpokeRejectCode::InternalError,
+                    "create on dropped table must surface INTERNAL_ERROR"
+                );
+            }
+            SpokeResult::Ok(_) => panic!("expected InternalError reject"),
+        }
+    }
+
+    /// DB failure on put_relation update path surfaces `InternalError`.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn put_relation_update_on_dropped_table_surfaces_internal_error() {
+        let (pool, _dir) = fresh_pool().await;
+        seed_world_and_endpoints(&pool).await;
+
+        let adapter = NexusBaselineAdapter::new(pool.clone());
+        let created = unwrap_ok(
+            adapter.put_relation(spoke_relation("rel_upd_fail", "kb_src", "kb_dst"), None),
+            "create",
+        );
+        assert_eq!(created.revision, Some(1));
+
+        // Drop the table to simulate DB failure on update.
+        sqlx::query("DROP TABLE kb_relationships")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        match adapter.put_relation(created, Some(1)) {
+            SpokeResult::Reject(r) => {
+                assert_eq!(
+                    r.code,
+                    SpokeRejectCode::InternalError,
+                    "update on dropped table must surface INTERNAL_ERROR"
+                );
+            }
+            SpokeResult::Ok(_) => panic!("expected InternalError reject"),
+        }
+    }
+
+    // ── V1.146 P0: validation → InvalidInput (unchanged) ───────────────
+
+    /// Validation failure (missing required extension field) still surfaces
+    /// `InvalidInput` — no DB I/O is performed before the guard.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn relation_validation_still_rejects_invalid_input() {
+        let (pool, _dir) = fresh_pool().await;
+        seed_world_and_endpoints(&pool).await;
+
+        let adapter = NexusBaselineAdapter::new(pool);
+        // Create-success-then-recreate → RelationAlreadyExists (domain signal, not storage)
+        let first = spoke_relation("rel_val_ae", "kb_src", "kb_dst");
+        let _ = unwrap_ok(adapter.put_relation(first.clone(), None), "first create");
+
+        match adapter.put_relation(first, None) {
+            SpokeResult::Reject(r) => {
+                assert_eq!(
+                    r.code,
+                    SpokeRejectCode::RelationAlreadyExists,
+                    "duplicate create must still surface RelationAlreadyExists"
+                );
+            }
+            SpokeResult::Ok(_) => panic!("expected AlreadyExists reject"),
+        }
+
+        // get on non-existent → RelationNotFound
+        match adapter.get_relation("rel_never_created") {
+            SpokeResult::Reject(r) => {
+                assert_eq!(
+                    r.code,
+                    SpokeRejectCode::RelationNotFound,
+                    "missing relation must still surface RelationNotFound"
+                );
+            }
+            SpokeResult::Ok(_) => panic!("expected NotFound reject"),
+        }
+    }
+
+    // ── V1.146 P0: OCC rejects unchanged ───────────────────────────────
+    // put_relation_update_stale_rejects_stored_revision_stale and
+    // put_relation_update_on_absent_rejects_stored_revision_stale above
+    // already cover STORED_REVISION_STALE — they pass unchanged (confirmed
+    // by the red-green run). No additional OCC test needed.
 
     /// Safety check (V1.144 Phase 5 fix): a full get→put round-trip (read the
     /// relation via `get_relation`, mutate a non-local field, write it back via

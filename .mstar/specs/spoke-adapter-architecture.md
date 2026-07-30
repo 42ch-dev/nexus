@@ -1,6 +1,6 @@
 # Spoke Adapter Architecture
 
-> **Status:** Normative (v0.6 — V1.145 spoke consumer alignment: adapter rehome to spoke-adapter + dep reversal + WorldKB/timeline read via ScopeQuery + scope-pushdown contract; v0.5 was V1.144 spoke 0.5.0 upgrade + RelationPort OCC extension + orchestrate_relate cutover)
+> **Status:** Normative (v0.7 — V1.146 spoke InternalError reject code: pin bump 0.6.0→0.6.1; v0.6 was V1.145 spoke consumer alignment: adapter rehome to spoke-adapter + dep reversal + WorldKB/timeline read via ScopeQuery + scope-pushdown contract; v0.5 was V1.144 spoke 0.5.0 upgrade + RelationPort OCC extension + orchestrate_relate cutover)
 > **Document class:** Master
 > **Scope:** The `nexus-spoke-adapter` crate boundary, `extensions.nexus` namespace contract, spoke-operations delegation rules, daemon-api envelope strategy, drift detection adaptation, and the `/kb/` HTTP route stability decision.
 > **Related:** [entity-scope-model.md](entity-scope-model.md), [local-db-schema.md](local-db-schema.md), [schemas-directory-layout.md](schemas-directory-layout.md), spoke `CONCEPTS.md`, spoke `.mstar/specs/spoke-data-model.md`, spoke `.mstar/specs/spoke-operations.md`
@@ -16,10 +16,10 @@ These are the architecture bedrock — do not re-litigate.
 ### 1.1 Consume spoke packages directly
 
 nexus depends on spoke's published packages directly:
-- **Rust:** `spoke-schemas` + `spoke-operations` (crates.io, lockstep **`0.5.0`** exact pin)
-- **TypeScript:** `@42ch/spoke-schemas` + `@42ch/spoke-operations` (npm, lockstep **`0.5.0`** exact pin)
+- **Rust:** `spoke-schemas` + `spoke-operations` (crates.io, lockstep **`0.6.1`** exact pin)
+- **TypeScript:** `@42ch/spoke-schemas` + `@42ch/spoke-operations` (npm, lockstep **`0.6.1`** exact pin)
 
-> **Historical:** V1.139 shipped at `0.1.1`; V1.140 bumped to `0.2.0`. V1.141 jumped to `0.4.0` (covering both the `0.3.0` capability-sliced port architecture and `0.4.0` additive `HostCapabilityManifest` + body helpers + UTF-8 peer sort). V1.144 bumps to `0.5.0` (additive `Relation.revision` + OCC-aware `RelationPort` + `RelationAlreadyExists`/`RelationNotFound` reject codes + relate-gate explicit mode).
+> **Historical:** V1.139 shipped at `0.1.1`; V1.140 bumped to `0.2.0`. V1.141 jumped to `0.4.0` (covering both the `0.3.0` capability-sliced port architecture and `0.4.0` additive `HostCapabilityManifest` + body helpers + UTF-8 peer sort). V1.144 bumped to `0.5.0` (additive `Relation.revision` + OCC-aware `RelationPort` + `RelationAlreadyExists`/`RelationNotFound` reject codes + relate-gate explicit mode). V1.145 bumped to `0.6.0` (additive `Scope.extensions` + `KnowledgeEntry.modules`). V1.146 bumped to `0.6.1` (additive `InternalError` 500-class reject code, PR #35).
 
 The bespoke `schemas/domain/key-block.schema.json` is deleted. No nexus-local copy of spoke schemas exists. The atomic KB wire type is `KnowledgeEntry` from spoke.
 
@@ -196,8 +196,8 @@ The `schema_drift_detection.rs` `build_schema_map()` removes the `key-block.sche
 
 `check-wire-drift.sh` gains a new spoke-conformance step (P0 T4):
 
-1. Verify `spoke-schemas` crate version matches pinned **`0.5.0`** in `Cargo.toml`.
-2. Verify `@42ch/spoke-schemas` npm version matches pinned **`0.5.0`** in `package.json`.
+1. Verify `spoke-schemas` crate version matches pinned **`0.6.1`** in `Cargo.toml`.
+2. Verify `@42ch/spoke-schemas` npm version matches pinned **`0.6.1`** in `package.json`.
 3. Construct a `KnowledgeEntry` from spoke fixture JSON, deserialize via nexus's serde path, serialize back — verify structural round-trip. This catches type-mapping regressions without requiring a local schema.
 
 ### 5.3 Daemon-api envelopes that `$ref` spoke types

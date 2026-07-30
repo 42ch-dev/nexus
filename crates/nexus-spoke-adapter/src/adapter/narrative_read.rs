@@ -113,7 +113,7 @@ impl NexusBaselineAdapter<'_> {
                 Ok(rows) => rows,
                 Err(e) => {
                     return reject(
-                        SpokeRejectCode::InvalidInput,
+                        SpokeRejectCode::InternalError,
                         format!("storage error on list_timeline_events_scoped: {e}"),
                         json!({ "scope_id": world_id }),
                     );
@@ -549,5 +549,34 @@ mod tests {
             ],
             "result spans all three branches: {branches:?}"
         );
+    }
+
+    // ── V1.146 P0: InternalError on DB failure ─────────────────────────
+
+    /// DB failure (dropped table) on list_timeline_events_ordered surfaces
+    /// `InternalError`.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn list_timeline_events_ordered_on_dropped_table_surfaces_internal_error() {
+        let (pool, _dir) = fresh_pool().await;
+        seed_world_shuffled(&pool).await;
+        sqlx::query("DROP TABLE narrative_timeline_events")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let adapter = NexusBaselineAdapter::new(pool);
+        match adapter.list_timeline_events_ordered(
+            &ordered_scope("wld_ord", Some("fbk_root")),
+            &["evt_1".to_string()],
+        ) {
+            SpokeResult::Reject(r) => {
+                assert_eq!(
+                    r.code,
+                    SpokeRejectCode::InternalError,
+                    "dropped table must surface INTERNAL_ERROR on list_timeline_events_ordered"
+                );
+            }
+            SpokeResult::Ok(_) => panic!("expected InternalError reject"),
+        }
     }
 }

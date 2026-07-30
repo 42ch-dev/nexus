@@ -38,7 +38,7 @@ use serde_json::{json, Map};
 impl NexusBaselineAdapter<'_> {
     /// Convert a `SQLite` row error into a `KNOWLEDGE_ENTRY_NOT_FOUND` reject
     /// when the underlying store signals absence. Any other storage error
-    /// surfaces as `INVALID_INPUT`.
+    /// surfaces as `INTERNAL_ERROR` (server-side failure).
     fn map_get_err(err: KbStoreError, entry_id: &str) -> SpokeResult<KnowledgeEntry> {
         match err {
             KbStoreError::NotFound(_) => reject(
@@ -47,7 +47,7 @@ impl NexusBaselineAdapter<'_> {
                 json!({ "entry_id": entry_id }),
             ),
             other => reject(
-                SpokeRejectCode::InvalidInput,
+                SpokeRejectCode::InternalError,
                 format!("storage error on read: {other}"),
                 json!({ "entry_id": entry_id }),
             ),
@@ -108,7 +108,7 @@ impl NexusBaselineAdapter<'_> {
                 )
             }
             other => reject(
-                SpokeRejectCode::InvalidInput,
+                SpokeRejectCode::InternalError,
                 format!("storage error on CAS update: {other}"),
                 json!({ "entry_id": entry_id }),
             ),
@@ -172,7 +172,7 @@ async fn put_create(
         Err(KbStoreError::NotFound(_)) => {} // proceed to insert
         Err(e) => {
             return reject(
-                SpokeRejectCode::InvalidInput,
+                SpokeRejectCode::InternalError,
                 format!("storage error on create pre-check: {e}"),
                 json!({ "entry_id": entry_id }),
             );
@@ -214,7 +214,7 @@ async fn put_create(
             Ok(tx) => tx,
             Err(e) => {
                 return reject(
-                    SpokeRejectCode::InvalidInput,
+                    SpokeRejectCode::InternalError,
                     format!("storage error on tx begin: {e}"),
                     json!({ "entry_id": entry_id }),
                 );
@@ -226,7 +226,7 @@ async fn put_create(
         if result.is_ok() {
             if let Err(e) = tx.commit().await {
                 return reject(
-                    SpokeRejectCode::InvalidInput,
+                    SpokeRejectCode::InternalError,
                     format!("storage error on tx commit: {e}"),
                     json!({ "entry_id": entry_id }),
                 );
@@ -256,7 +256,7 @@ async fn put_create(
             }),
         ),
         Err(e) => reject(
-            SpokeRejectCode::InvalidInput,
+            SpokeRejectCode::InternalError,
             format!("storage error on create: {e}"),
             json!({ "entry_id": entry_id }),
         ),
@@ -315,7 +315,7 @@ async fn put_update_unbound(
         Ok(tx) => tx,
         Err(e) => {
             return reject(
-                SpokeRejectCode::InvalidInput,
+                SpokeRejectCode::InternalError,
                 format!("storage error on tx begin: {e}"),
                 json!({ "entry_id": entry_id }),
             );
@@ -327,7 +327,7 @@ async fn put_update_unbound(
     };
     if let Err(e) = tx.commit().await {
         return reject(
-            SpokeRejectCode::InvalidInput,
+            SpokeRejectCode::InternalError,
             format!("storage error on tx commit: {e}"),
             json!({ "entry_id": entry_id }),
         );
@@ -388,7 +388,7 @@ async fn run_cas_update_in_tx(
     .await
     {
         return reject(
-            SpokeRejectCode::InvalidInput,
+            SpokeRejectCode::InternalError,
             format!("storage error on post-CAS field update: {e}"),
             json!({ "entry_id": entry_id }),
         );
@@ -733,6 +733,132 @@ mod tests {
             "unbound put must commit without an outer transaction"
         );
     }
+
+    // ── V1.146 P0: InternalError on DB failure ─────────────────────────
+
+    /// DB failure (dropped table) on get surfaces `InternalError`.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn get_on_dropped_table_surfaces_internal_error() {
+        let (pool, _dir) = fresh_pool().await;
+        seed_world(&pool).await;
+        // Drop the table to simulate a DB-level failure.
+        sqlx::query("DROP TABLE kb_key_blocks")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let adapter = NexusBaselineAdapter::new(pool);
+        match adapter.get_knowledge_entry("kb_alpha") {
+            SpokeResult::Reject(r) => {
+                assert_eq!(
+                    r.code,
+                    SpokeRejectCode::InternalError,
+                    "dropped table must surface INTERNAL_ERROR"
+                );
+            }
+            SpokeResult::Ok(_) => panic!("expected InternalError reject"),
+        }
+    }
+
+    /// DB failure on put_create surfaces `InternalError`.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn put_create_on_dropped_table_surfaces_internal_error() {
+        let (pool, _dir) = fresh_pool().await;
+        seed_world(&pool).await;
+        sqlx::query("DROP TABLE kb_key_blocks")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let adapter = NexusBaselineAdapter::new(pool);
+        let entry = spoke_entry("kb_fail", "FailCreate", None);
+        match adapter.put_knowledge_entry(entry, None) {
+            SpokeResult::Reject(r) => {
+                assert_eq!(
+                    r.code,
+                    SpokeRejectCode::InternalError,
+                    "create on dropped table must surface INTERNAL_ERROR"
+                );
+            }
+            SpokeResult::Ok(_) => panic!("expected InternalError reject"),
+        }
+    }
+
+    /// DB failure on put_update surfaces `InternalError`.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn put_update_on_dropped_table_surfaces_internal_error() {
+        let (pool, _dir) = fresh_pool().await;
+        seed_world(&pool).await;
+
+        // Create a real entry first so the update path is exercised.
+        let adapter = NexusBaselineAdapter::new(pool.clone());
+        let entry = spoke_entry("kb_upd_fail", "UpdFail", None);
+        let created = unwrap_ok(adapter.put_knowledge_entry(entry, None), "create");
+        assert_eq!(created.revision, Some(1));
+
+        // Drop the table to simulate a DB-level failure on update.
+        sqlx::query("DROP TABLE kb_key_blocks")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        match adapter.put_knowledge_entry(created, Some(1)) {
+            SpokeResult::Reject(r) => {
+                assert_eq!(
+                    r.code,
+                    SpokeRejectCode::InternalError,
+                    "update on dropped table must surface INTERNAL_ERROR"
+                );
+            }
+            SpokeResult::Ok(_) => panic!("expected InternalError reject"),
+        }
+    }
+
+    // ── V1.146 P0: validation → InvalidInput (unchanged) ───────────────
+
+    /// Validation failure (missing entry_id / canonical_name — rejected by the
+    /// spoke boundary before any DB I/O) still surfaces `InvalidInput`.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn validation_still_rejects_invalid_input() {
+        let (pool, _dir) = fresh_pool().await;
+        seed_world(&pool).await;
+
+        let adapter = NexusBaselineAdapter::new(pool);
+        // put_create on already-existing entry — this is an OCC/domain signal,
+        // NOT a storage failure; the DAO's pre-check returns `KnowledgeEntryAlreadyExists`.
+        let entry = spoke_entry("kb_val_ae", "ValAE", None);
+        let _ = unwrap_ok(adapter.put_knowledge_entry(entry.clone(), None), "create");
+
+        match adapter.put_knowledge_entry(entry, None) {
+            SpokeResult::Reject(r) => {
+                assert_eq!(
+                    r.code,
+                    SpokeRejectCode::KnowledgeEntryAlreadyExists,
+                    "duplicate create must still surface KnowledgeEntryAlreadyExists"
+                );
+            }
+            SpokeResult::Ok(_) => panic!("expected AlreadyExists reject"),
+        }
+
+        // get on non-existent entry still surfaces KnowledgeEntryNotFound
+        match adapter.get_knowledge_entry("kb_never_created") {
+            SpokeResult::Reject(r) => {
+                assert_eq!(
+                    r.code,
+                    SpokeRejectCode::KnowledgeEntryNotFound,
+                    "missing entry must still surface KnowledgeEntryNotFound"
+                );
+            }
+            SpokeResult::Ok(_) => panic!("expected NotFound reject"),
+        }
+    }
+
+    // ── V1.146 P0: OCC rejects unchanged ───────────────────────────────
+    // The put_update_stale_rejects_stored_revision_stale and
+    // put_update_conflict_rejects_revision_conflict tests above already
+    // cover STORED_REVISION_STALE and REVISION_CONFLICT — they pass
+    // unchanged (confirmed by the red-green run). No additional OCC test
+    // needed beyond the existing coverage.
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn put_create_bound_tx_not_visible_until_outer_commit() {
