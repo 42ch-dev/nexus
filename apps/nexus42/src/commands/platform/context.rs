@@ -607,6 +607,12 @@ pub async fn run_assemble_moment(
         request = request.with_knowledge_limit(limit);
     }
 
+    // V1.146 P4 T2: activation flag from env (MCA lib stays env-agnostic).
+    // Set activation_enabled when NEXUS_MCA_LORE_ACTIVATION is exactly "1".
+    if std::env::var("NEXUS_MCA_LORE_ACTIVATION").as_deref() == Ok("1") {
+        request = request.with_activation_enabled(true);
+    }
+
     // Call assemble_moment with persistent stores
     Ok(assemble_moment(&request, &narrative, &kb, &knowledge).await)
 }

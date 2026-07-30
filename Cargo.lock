@@ -2813,6 +2813,7 @@ dependencies = [
  "nexus-creator-memory",
  "nexus-knowledge",
  "nexus-narrative",
+ "nexus-spoke-adapter",
  "serde",
  "serde_json",
  "tokio",
