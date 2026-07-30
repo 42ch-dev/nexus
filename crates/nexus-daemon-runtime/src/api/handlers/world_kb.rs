@@ -1030,6 +1030,7 @@ fn build_spoke_upsert_request(entry: &WorldKbEntry) -> UpsertRequest {
 /// |-----------------------------------------|----------------------------|
 /// | `StoredRevisionStale` / `RevisionConflict` / `KnowledgeEntryAlreadyExists` | `world_kb_conflict` (409) |
 /// | `KnowledgeEntryTerminalStatus` / `InvalidKnowledgeEntryStatus` / `InvalidKnowledgeEntryStatusTransition` | `world_kb_validation_failed` (422) |
+/// | `InternalError` (V1.146 P0)             | `Internal` (500)           |
 /// | other / `Variant1` error envelope       | `Internal` (500)           |
 async fn map_upsert_response(
     result: SpokeResult<UpsertResponse>,
@@ -1116,6 +1117,13 @@ async fn map_upsert_reject(
         | SpokeRejectCode::InvalidKnowledgeEntryStatusTransition => {
             NexusApiError::world_kb_validation_failed(&[reject.message], &[])
         }
+        // V1.146 P0: InternalError → 500 (explicit 500-class mapping; see T4
+        // for the adapter-side remap). The body carries the spoke reject
+        // message; the public HTTP status is 500 INTERNAL_SERVER_ERROR.
+        SpokeRejectCode::InternalError => NexusApiError::Internal {
+            code: "INTERNAL_ERROR".to_string(),
+            message: format!("orchestrate_upsert internal error: {}", reject.message),
+        },
         _ => NexusApiError::Internal {
             code: "SPOKE_ORCHESTRATOR_REJECT".to_string(),
             message: format!(
@@ -1179,6 +1187,7 @@ async fn reread_entity_revision_sync(pool: &sqlx::SqlitePool, entity_id: &str) -
 /// | `KnowledgeEntryAlreadyExists`           | retry-safe check (see below)       |
 /// | `RevisionConflict`                      | `world_kb_conflict` (409)          |
 /// | `StoredRevisionStale`                   | `world_kb_conflict` (409)          |
+/// | `InternalError` (V1.146 P0)             | `Internal` (500)                   |
 /// | `InvalidInput` / `CapabilityPortMissing` / other | `Internal` (500)         |
 ///
 /// # Retry-safe idempotency
@@ -1362,6 +1371,12 @@ async fn spoke_reject_to_api_error(
                 "refetch the candidates list and reapply",
             )
         }
+        // V1.146 P0: InternalError → 500 (explicit 500-class mapping; see T4
+        // for the adapter-side remap).
+        SpokeRejectCode::InternalError => NexusApiError::Internal {
+            code: "INTERNAL_ERROR".to_string(),
+            message: format!("orchestrate_promote internal error: {}", reject.message),
+        },
         _ => NexusApiError::Internal {
             code: "SPOKE_ORCHESTRATOR_REJECT".to_string(),
             message: format!(
@@ -2010,6 +2025,7 @@ fn build_spoke_relate_request(relation: &SpokeRelation) -> RelateRequest {
 /// | `InvalidInput`                          | `InvalidInput` (400)       |
 /// | `RelationSelfEdge` / `RelationMissingEndpoint` / `MissingRequiredField` | `world_kb_validation_failed` (422) |
 /// | `RelationNotFound`                      | `NotFound` (404)           |
+/// | `InternalError` (V1.146 P0)             | `Internal` (500)           |
 /// | other / `Variant1` error envelope       | `Internal` (500)           |
 async fn map_relate_response(
     result: SpokeResult<RelateResponse>,
@@ -2121,6 +2137,13 @@ async fn map_relate_reject(
         SpokeRejectCode::RelationNotFound => {
             NexusApiError::NotFound(format!("relationship {relationship_id}"))
         }
+        // V1.146 P0: InternalError → 500 (explicit 500-class mapping; see T4
+        // for the adapter-side remap). The body carries the spoke reject
+        // message; the public HTTP status is 500 INTERNAL_SERVER_ERROR.
+        SpokeRejectCode::InternalError => NexusApiError::Internal {
+            code: "INTERNAL_ERROR".to_string(),
+            message: format!("orchestrate_relate internal error: {}", reject.message),
+        },
         _ => NexusApiError::Internal {
             code: "SPOKE_ORCHESTRATOR_REJECT".to_string(),
             message: format!(
