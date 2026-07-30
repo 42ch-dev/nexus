@@ -1030,6 +1030,7 @@ fn build_spoke_upsert_request(entry: &WorldKbEntry) -> UpsertRequest {
 /// |-----------------------------------------|----------------------------|
 /// | `StoredRevisionStale` / `RevisionConflict` / `KnowledgeEntryAlreadyExists` | `world_kb_conflict` (409) |
 /// | `KnowledgeEntryTerminalStatus` / `InvalidKnowledgeEntryStatus` / `InvalidKnowledgeEntryStatusTransition` | `world_kb_validation_failed` (422) |
+/// | `InvalidInput` (V1.146 P0)               | `InvalidInput` (400)       |
 /// | `InternalError` (V1.146 P0)             | `Internal` (500)           |
 /// | other / `Variant1` error envelope       | `Internal` (500)           |
 async fn map_upsert_response(
@@ -1193,7 +1194,8 @@ async fn reread_entity_revision_sync(pool: &sqlx::SqlitePool, entity_id: &str) -
 /// | `RevisionConflict`                      | `world_kb_conflict` (409)          |
 /// | `StoredRevisionStale`                   | `world_kb_conflict` (409)          |
 /// | `InternalError` (V1.146 P0)             | `Internal` (500)                   |
-/// | `InvalidInput` / `CapabilityPortMissing` / other | `Internal` (500)         |
+/// | `InvalidInput`                          | `InvalidInput` (400)               |
+/// | `CapabilityPortMissing` / other          | `Internal` (500)                   |
 ///
 /// # Retry-safe idempotency
 ///
