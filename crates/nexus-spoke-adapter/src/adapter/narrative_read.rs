@@ -4,7 +4,7 @@
 //! V1.146 P1 closes the dep-topology deferral (spec §7.4 "Read-path `ScopeQuery`
 //! adoption"): narrative timeline ordering now lives behind the
 //! `nexus-spoke-adapter` boundary instead of inside the local-db / in-memory
-//! gateways. [`NexusBaselineAdapter::list_timeline_events_ordered`] is the
+//! gateways. [`NexusAdapter::list_timeline_events_ordered`] is the
 //! adapter-owned ordered read; the gateway ordered methods have been removed
 //! (Task 3 of this plan dropped `narrative` + `local-db` direct
 //! `spoke-operations` ordering deps — this facet is now the canonical ordered
@@ -43,13 +43,13 @@
 //! | `scope_id` | `world_id` (always) |
 //! | `extensions["nexus"]["branch_id"]` | `branch_id` (optional) |
 
-use super::NexusBaselineAdapter;
+use super::NexusAdapter;
 use crate::{Scope, ScopeExtensionsKey, SpokeReject, SpokeRejectCode, SpokeResult, TimelineEvent};
 use nexus_local_db::narrative_gateway::list_timeline_events_scoped;
 use serde_json::{json, Map, Value};
 use spoke_operations::order_timeline_events_by_ids;
 
-impl NexusBaselineAdapter<'_> {
+impl NexusAdapter<'_> {
     /// List timeline events ordered by an explicit `ordered_ids` list, with
     /// the remaining world/branch-matching events appended in `sequence_no`
     /// order (stable tail).
@@ -78,7 +78,7 @@ impl NexusBaselineAdapter<'_> {
     /// # Panics
     ///
     /// Panics only if constructed outside a tokio multi-threaded runtime
-    /// (inherited from [`NexusBaselineAdapter::new`] via [`Self::block_on`]).
+    /// (inherited from [`NexusAdapter::new`] via [`Self::block_on`]).
     pub fn list_timeline_events_ordered(
         &self,
         scope: &Scope,
@@ -183,7 +183,7 @@ fn reject<T>(code: SpokeRejectCode, message: impl Into<String>, details: Value) 
 // Migrated from the V1.143 T2/T3 ordering suites (`nexus-narrative`'s
 // in-memory `InMemoryNarrativeGateway::get_timeline_ordered` tests and
 // `nexus-local-db`'s `SqliteNarrativeGateway::get_timeline_ordered` parity
-// tests). The adapter is SQLite-backed (`NexusBaselineAdapter`), so the T3
+// tests). The adapter is SQLite-backed (`NexusAdapter`), so the T3
 // storage path is the natural migration target; the same five named
 // assertions are preserved: explicit-ids-first + sequence tail, unknown-id
 // reject, duplicate-id reject, shuffled-storage ordering, and the no-mutation
@@ -273,7 +273,7 @@ mod tests {
         let (pool, _dir) = fresh_pool().await;
         seed_world_shuffled(&pool).await;
 
-        let adapter = NexusBaselineAdapter::new(pool);
+        let adapter = NexusAdapter::new(pool);
         // Request [evt_3, evt_1, evt_5] explicitly; remaining (evt_2 seq1,
         // evt_4 seq2) form the stable tail in sequence_no order.
         let ordered = match adapter.list_timeline_events_ordered(
@@ -338,7 +338,7 @@ mod tests {
         seed::event(&pool, "evt_1", "wld_nomut", "fbk_root", "story_advance", 1).await;
         seed::event(&pool, "evt_2", "wld_nomut", "fbk_root", "story_advance", 2).await;
 
-        let adapter = NexusBaselineAdapter::new(pool.clone());
+        let adapter = NexusAdapter::new(pool.clone());
         let scope = ordered_scope("wld_nomut", Some("fbk_root"));
 
         // Baseline: the same rows via the un-ordered spoke read.
@@ -383,7 +383,7 @@ mod tests {
         let (pool, _dir) = fresh_pool().await;
         seed_world_shuffled(&pool).await;
 
-        let adapter = NexusBaselineAdapter::new(pool);
+        let adapter = NexusAdapter::new(pool);
         let result = adapter.list_timeline_events_ordered(
             &ordered_scope("wld_ord", Some("fbk_root")),
             &["evt_1".to_string(), "evt_missing".to_string()],
@@ -412,7 +412,7 @@ mod tests {
         .await;
         seed::event(&pool, "evt_1", "wld_dup", "fbk_root", "story_advance", 1).await;
 
-        let adapter = NexusBaselineAdapter::new(pool);
+        let adapter = NexusAdapter::new(pool);
         let result = adapter.list_timeline_events_ordered(
             &ordered_scope("wld_dup", Some("fbk_root")),
             &["evt_1".to_string(), "evt_1".to_string()],
@@ -440,7 +440,7 @@ mod tests {
         let (pool, _dir) = fresh_pool().await;
         seed_world_shuffled(&pool).await;
 
-        let adapter = NexusBaselineAdapter::new(pool);
+        let adapter = NexusAdapter::new(pool);
         let ordered = match adapter
             .list_timeline_events_ordered(&ordered_scope("wld_ord", Some("fbk_root")), &[])
         {
@@ -496,7 +496,7 @@ mod tests {
         seed::event(&pool, "evt_c", "wld_nb", "fbk_root", "story_advance", 4).await;
         seed::event(&pool, "evt_d", "wld_nb", "fbk_other", "story_advance", 3).await;
 
-        let adapter = NexusBaselineAdapter::new(pool);
+        let adapter = NexusAdapter::new(pool);
         // Scope carries world_id only — no `extensions.nexus.branch_id`.
         let ordered = match adapter
             .list_timeline_events_ordered(&ordered_scope("wld_nb", None), &[])
@@ -564,7 +564,7 @@ mod tests {
             .await
             .unwrap();
 
-        let adapter = NexusBaselineAdapter::new(pool);
+        let adapter = NexusAdapter::new(pool);
         match adapter.list_timeline_events_ordered(
             &ordered_scope("wld_ord", Some("fbk_root")),
             &["evt_1".to_string()],

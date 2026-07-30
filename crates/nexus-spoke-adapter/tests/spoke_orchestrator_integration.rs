@@ -1,5 +1,5 @@
 //! Production orchestrator integration test — proves `orchestrate_upsert` +
-//! `orchestrate_promote` work end-to-end through `NexusBaselineAdapter` against
+//! `orchestrate_promote` work end-to-end through `NexusAdapter` against
 //! REAL `SQLite` storage (in-memory pool + migrations), not the V1.141 mock.
 //!
 //! Closes `R-V1141P1-001` — the deferred production port impl + orchestrator
@@ -7,7 +7,7 @@
 //!
 //! # What this proves
 //!
-//! 1. The production `NexusBaselineAdapter` (six baseline port families backing
+//! 1. The production `NexusAdapter` (six baseline port families backing
 //!    real `SQLite` storage in `kb_key_blocks`) is genuinely consumable by
 //!    spoke's Surface B orchestrators.
 //! 2. The CAS revision lifecycle works through both orchestrators end-to-end
@@ -19,7 +19,7 @@
 //!
 //! # Call-boundary invariant (spec §7, preserved)
 //!
-//! The test calls orchestrators through `&NexusBaselineAdapter` only — no spoke
+//! The test calls orchestrators through `&NexusAdapter` only — no spoke
 //! invariant is reimplemented here. The adapter IS the boundary.
 //!
 //! # Harness pattern
@@ -36,7 +36,7 @@ use nexus_contracts::BlockType;
 use nexus_knowledge::world_kb::{WorldKbBody, WorldKbEntry};
 use nexus_local_db::{open_pool, run_migrations};
 // V1.145 P1b — adapter rehomed to nexus-spoke-adapter (spec §7.4).
-use nexus_spoke_adapter::NexusBaselineAdapter;
+use nexus_spoke_adapter::NexusAdapter;
 use nexus_spoke_adapter::{
     orchestrate_promote, orchestrate_upsert, PromoteRequest, PromoteResponse, SpokeRejectCode,
     SpokeResult, UpsertRequest, UpsertResponse,
@@ -186,7 +186,7 @@ fn expect_reject_with_code<T: std::fmt::Debug>(result: SpokeResult<T>, code: Spo
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn orchestrate_upsert_happy_create() {
     let (pool, _dir) = fresh_pool().await;
-    let adapter = NexusBaselineAdapter::new(pool.clone());
+    let adapter = NexusAdapter::new(pool.clone());
 
     let entry_id = "kb_create_happy";
     let candidate = spoke_entry(entry_id, "CreateHappy", None, "provisional");
@@ -231,7 +231,7 @@ async fn orchestrate_upsert_happy_create() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn orchestrate_upsert_happy_update() {
     let (pool, _dir) = fresh_pool().await;
-    let adapter = NexusBaselineAdapter::new(pool.clone());
+    let adapter = NexusAdapter::new(pool.clone());
 
     // Create → stored at revision 1.
     let entry_id = "kb_update_happy";
@@ -284,7 +284,7 @@ async fn orchestrate_upsert_happy_update() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn orchestrate_upsert_stale_reject() {
     let (pool, _dir) = fresh_pool().await;
-    let adapter = NexusBaselineAdapter::new(pool.clone());
+    let adapter = NexusAdapter::new(pool.clone());
 
     // Create → revision 1.
     let entry_id = "kb_stale_reject";
@@ -327,7 +327,7 @@ async fn orchestrate_upsert_stale_reject() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn orchestrate_promote_happy() {
     let (pool, _dir) = fresh_pool().await;
-    let adapter = NexusBaselineAdapter::new(pool.clone());
+    let adapter = NexusAdapter::new(pool.clone());
 
     // Create a provisional entry → stored at revision 1.
     let entry_id = "kb_promote_happy";
@@ -379,7 +379,7 @@ async fn orchestrate_assemble_scope_filtered() {
     use nexus_spoke_adapter::{orchestrate_assemble, AssembleResponse};
 
     let (pool, _dir) = fresh_pool().await;
-    let adapter = NexusBaselineAdapter::new(pool);
+    let adapter = NexusAdapter::new(pool);
 
     // Create two entries in wld_1.
     let a = spoke_entry("kb_assemble_a", "AssembleA", None, "provisional");

@@ -32,7 +32,7 @@
 //! spoke's fork model yet). Unlike knowledge entries, there is no overflow cap —
 //! timeline events are append-ordered and bounded per branch.
 
-use super::NexusBaselineAdapter;
+use super::NexusAdapter;
 use crate::conversion::world_kb_to_spoke;
 use crate::extensions::has_nexus_body;
 use crate::{
@@ -42,7 +42,7 @@ use crate::{
 use nexus_local_db::kb_store::SqliteKbStore;
 use nexus_local_db::narrative_gateway::list_timeline_events_scoped;
 use serde_json::{json, Map, Value};
-impl ScopeQueryPort for NexusBaselineAdapter<'_> {
+impl ScopeQueryPort for NexusAdapter<'_> {
     /// List the active knowledge entries for the scope's world.
     ///
     /// Routes through [`SqliteKbStore::list_by_world_scoped`] so optional
@@ -279,7 +279,7 @@ mod tests {
         let (pool, _dir) = fresh_pool().await;
         let (world_id, seeded) = seed_world_with_entries(&pool).await;
 
-        let adapter = NexusBaselineAdapter::new(pool);
+        let adapter = NexusAdapter::new(pool);
         let entries = match adapter.list_knowledge_entries(&scope_for(&world_id)) {
             SpokeResult::Ok(v) => v,
             SpokeResult::Reject(r) => panic!("expected ok, got reject: {r:?}"),
@@ -302,7 +302,7 @@ mod tests {
     async fn list_knowledge_entries_empty_world_returns_empty_vec() {
         let (pool, _dir) = fresh_pool().await;
 
-        let adapter = NexusBaselineAdapter::new(pool);
+        let adapter = NexusAdapter::new(pool);
         let entries = match adapter.list_knowledge_entries(&scope_for("wld_empty")) {
             SpokeResult::Ok(v) => v,
             SpokeResult::Reject(r) => panic!("expected ok, got reject: {r:?}"),
@@ -324,7 +324,7 @@ mod tests {
         let mut scope = scope_for(&world_id);
         scope.entry_ids = vec![target_id.clone()];
 
-        let adapter = NexusBaselineAdapter::new(pool);
+        let adapter = NexusAdapter::new(pool);
         let entries = match adapter.list_knowledge_entries(&scope) {
             SpokeResult::Ok(v) => v,
             SpokeResult::Reject(r) => panic!("expected ok, got reject: {r:?}"),
@@ -341,7 +341,7 @@ mod tests {
         let mut scope = scope_for(&world_id);
         scope.entry_types = vec!["character".to_string()];
 
-        let adapter = NexusBaselineAdapter::new(pool);
+        let adapter = NexusAdapter::new(pool);
         let entries = match adapter.list_knowledge_entries(&scope) {
             SpokeResult::Ok(v) => v,
             SpokeResult::Reject(r) => panic!("expected ok, got reject: {r:?}"),
@@ -369,7 +369,7 @@ mod tests {
         let mut scope = scope_for(&world_id);
         scope.entry_ids = vec![target_id.clone()];
 
-        let adapter = NexusBaselineAdapter::new(pool);
+        let adapter = NexusAdapter::new(pool);
         let entries = match adapter.list_knowledge_entries(&scope) {
             SpokeResult::Ok(v) => v,
             SpokeResult::Reject(r) => panic!("expected ok, got reject: {r:?}"),
@@ -408,7 +408,7 @@ mod tests {
             store.insert_knowledge_entry(entry).await.unwrap();
         }
 
-        let adapter = NexusBaselineAdapter::new(pool);
+        let adapter = NexusAdapter::new(pool);
         match adapter.list_knowledge_entries(&scope_for("wld_big")) {
             SpokeResult::Ok(_) => panic!("unfiltered cap overflow must reject"),
             SpokeResult::Reject(r) => {
@@ -427,7 +427,7 @@ mod tests {
         let (pool, _dir) = fresh_pool().await;
         let (world_id, _) = seed_world_with_timeline_events(&pool).await;
 
-        let adapter = NexusBaselineAdapter::new(pool);
+        let adapter = NexusAdapter::new(pool);
         let events = match adapter.list_timeline_events(&scope_for(&world_id)) {
             SpokeResult::Ok(v) => v,
             SpokeResult::Reject(r) => panic!("expected ok, got reject: {r:?}"),
@@ -473,7 +473,7 @@ mod tests {
         let (pool, _dir) = fresh_pool().await;
         let (world_id, _) = seed_world_with_timeline_events(&pool).await;
 
-        let adapter = NexusBaselineAdapter::new(pool);
+        let adapter = NexusAdapter::new(pool);
         // branch_id rides scope.extensions["nexus"] (spoke-native ≥ 0.6.0).
         let scope = timeline_scope(&world_id, Some("fbk_root"), &[]);
         let events = match adapter.list_timeline_events(&scope) {
@@ -498,7 +498,7 @@ mod tests {
         let (pool, _dir) = fresh_pool().await;
         let (world_id, _) = seed_world_with_timeline_events(&pool).await;
 
-        let adapter = NexusBaselineAdapter::new(pool);
+        let adapter = NexusAdapter::new(pool);
         // timeline_event_ids is a native Scope field (not under extensions).
         let scope = timeline_scope(&world_id, None, &["evt_tl_1"]);
         let events = match adapter.list_timeline_events(&scope) {
@@ -518,7 +518,7 @@ mod tests {
     async fn list_timeline_events_empty_world_returns_empty_vec() {
         let (pool, _dir) = fresh_pool().await;
 
-        let adapter = NexusBaselineAdapter::new(pool);
+        let adapter = NexusAdapter::new(pool);
         let events = match adapter.list_timeline_events(&scope_for("wld_empty")) {
             SpokeResult::Ok(v) => v,
             SpokeResult::Reject(r) => panic!("expected ok, got reject: {r:?}"),
@@ -638,7 +638,7 @@ mod tests {
             .await
             .unwrap();
 
-        let adapter = NexusBaselineAdapter::new(pool);
+        let adapter = NexusAdapter::new(pool);
         match adapter.list_knowledge_entries(&scope_for(&world_id)) {
             SpokeResult::Reject(r) => {
                 assert_eq!(
@@ -661,7 +661,7 @@ mod tests {
             .await
             .unwrap();
 
-        let adapter = NexusBaselineAdapter::new(pool);
+        let adapter = NexusAdapter::new(pool);
         match adapter.list_timeline_events(&scope_for(&world_id)) {
             SpokeResult::Reject(r) => {
                 assert_eq!(

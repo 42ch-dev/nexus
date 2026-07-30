@@ -1,7 +1,7 @@
 //! MCA (Moment Context Assembly) `WorldKB` read path (V1.145 P2 Option 2).
 //!
 //! [`SpokeBackedKbStore`] is the [`KbStore`] implementation injected at the
-//! `assemble_moment` wiring site ([`NexusBaselineAdapter`]'s MCA fetch) so the
+//! `assemble_moment` wiring site ([`NexusAdapter`]'s MCA fetch) so the
 //! `WorldKB` read crosses the spoke-adapter boundary: storage rows → spoke
 //! `KnowledgeEntry` (via the [`conversion`] seam) → [`WorldKbEntry`] (via
 //! [`spoke_to_world_kb`]).
@@ -31,7 +31,7 @@
 //! [`conversion`]: crate::conversion
 //! [`spoke_to_world_kb`]: crate::conversion::spoke_to_world_kb
 //! [`world_kb_to_spoke`]: crate::conversion::world_kb_to_spoke
-use super::NexusBaselineAdapter;
+use super::NexusAdapter;
 use crate::conversion::{spoke_to_world_kb, world_kb_to_spoke};
 use crate::extensions::set_nexus_body;
 use crate::{KnowledgeEntry, Scope, ScopeExtensionsKey};
@@ -45,7 +45,7 @@ use sqlx::SqlitePool;
 
 // ── Adapter scoped-read method ──────────────────────────────────────────
 
-/// Result of [`NexusBaselineAdapter::list_knowledge_entries_scoped`] — the
+/// Result of [`NexusAdapter::list_knowledge_entries_scoped`] — the
 /// spoke-wire analogue of [`KbQueryResult`] (items are spoke
 /// [`KnowledgeEntry`] instead of [`WorldKbEntry`]).
 #[derive(Debug, Clone)]
@@ -60,7 +60,7 @@ pub struct ScopedKbRead {
     pub has_more: bool,
 }
 
-impl NexusBaselineAdapter<'_> {
+impl NexusAdapter<'_> {
     /// MCA `WorldKB` read: list active knowledge entries for a world as spoke
     /// wire types, applying the spoke `Scope`'s native `entry_types` plus the
     /// nexus-specific filters carried under `scope.extensions["nexus"]`
@@ -134,7 +134,7 @@ impl NexusBaselineAdapter<'_> {
 
 // ── SpokeBackedKbStore — KbStore impl for the MCA read path ─────────────
 
-/// `KbStore` implementation backed by [`NexusBaselineAdapter`], used at the
+/// `KbStore` implementation backed by [`NexusAdapter`], used at the
 /// `assemble_moment` wiring site so the MCA `WorldKB` read crosses the
 /// spoke-adapter boundary (V1.145 P2 Option 2).
 ///
@@ -152,7 +152,7 @@ impl NexusBaselineAdapter<'_> {
 /// through the daemon CRUD / spoke orchestrator paths.
 pub struct SpokeBackedKbStore {
     /// The adapter the `query` path routes through (storage → spoke conversion).
-    adapter: NexusBaselineAdapter<'static>,
+    adapter: NexusAdapter<'static>,
     /// Pool for delegating the non-MCA read methods to `SqliteKbStore`.
     pool: SqlitePool,
 }
@@ -160,15 +160,15 @@ pub struct SpokeBackedKbStore {
 impl SpokeBackedKbStore {
     /// Construct from a [`SqlitePool`], built inside a tokio multi-threaded
     /// runtime (the adapter captures the runtime [`Handle`] — see
-    /// [`NexusBaselineAdapter::new`]).
+    /// [`NexusAdapter::new`]).
     ///
     /// # Panics
     ///
     /// Panics if no tokio runtime is running on the current thread (same
-    /// precondition as [`NexusBaselineAdapter::new`]).
+    /// precondition as [`NexusAdapter::new`]).
     #[must_use]
     pub fn new(pool: SqlitePool) -> Self {
-        let adapter = NexusBaselineAdapter::new(pool.clone());
+        let adapter = NexusAdapter::new(pool.clone());
         Self { adapter, pool }
     }
 }
@@ -358,7 +358,7 @@ fn scope_from_kb_query(query: &KbQuery) -> Scope {
 /// Reverse of [`scope_from_kb_query`]: reconstruct the [`KbQuery`] from a spoke
 /// [`Scope`] so the adapter's MCA read can delegate to [`SqliteKbStore::query`]
 /// (the canonical silent-truncate path). Called by
-/// [`NexusBaselineAdapter::list_knowledge_entries_scoped`].
+/// [`NexusAdapter::list_knowledge_entries_scoped`].
 ///
 /// Guarantees byte-identical behavior to a direct [`SqliteKbStore::query`]
 /// call: the reconstructed [`KbQuery`] is the exact input that path consumes,

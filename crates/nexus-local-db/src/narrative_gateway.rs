@@ -106,7 +106,7 @@ impl SqliteNarrativeGateway {
 ///
 /// Backs `ScopeQueryPort::list_timeline_events` (spec §7.4). This is a **free
 /// function** taking a `&SqlitePool` (not a `SqliteNarrativeGateway` method) so
-/// the production `NexusBaselineAdapter` port can call it directly without
+/// the production `NexusAdapter` port can call it directly without
 /// constructing a gateway. `branch_id` and `event_ids` are both optional;
 /// `None`/empty means no filter on that dimension.
 ///

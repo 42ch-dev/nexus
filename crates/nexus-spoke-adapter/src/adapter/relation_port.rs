@@ -57,7 +57,7 @@
 //! create vs update from stored presence, so the only reachable failure on
 //! the update path is "the store moved since the caller's read".
 
-use super::NexusBaselineAdapter;
+use super::NexusAdapter;
 use crate::{
     Relation, RelationExtensionsKey, RelationPort, SpokeReject, SpokeRejectCode, SpokeResult,
 };
@@ -69,7 +69,7 @@ use nexus_local_db::LocalDbError;
 use serde_json::{json, Map, Value};
 use std::num::NonZeroU64;
 
-impl RelationPort for NexusBaselineAdapter<'_> {
+impl RelationPort for NexusAdapter<'_> {
     fn get_relation(&self, relation_id: &str) -> SpokeResult<Relation> {
         let pool = self.pool.clone();
         let relation_id = relation_id.to_string();
@@ -651,7 +651,7 @@ mod tests {
         let (pool, _dir) = fresh_pool().await;
         seed_world_and_endpoints(&pool).await;
 
-        let adapter = NexusBaselineAdapter::new(pool);
+        let adapter = NexusAdapter::new(pool);
         match adapter.get_relation("rel_missing") {
             SpokeResult::Reject(r) => {
                 assert_eq!(
@@ -673,7 +673,7 @@ mod tests {
         let (pool, _dir) = fresh_pool().await;
         seed_world_and_endpoints(&pool).await;
 
-        let adapter = NexusBaselineAdapter::new(pool.clone());
+        let adapter = NexusAdapter::new(pool.clone());
         let created = unwrap_ok(
             adapter.put_relation(spoke_relation("rel_rt", "kb_src", "kb_dst"), None),
             "create",
@@ -709,7 +709,7 @@ mod tests {
         let (pool, _dir) = fresh_pool().await;
         seed_world_and_endpoints(&pool).await;
 
-        let adapter = NexusBaselineAdapter::new(pool);
+        let adapter = NexusAdapter::new(pool);
 
         // Build a relation with every nexus-local set explicitly (the
         // sibling `get_relation_round_trips_persisted_row` only proves the
@@ -802,7 +802,7 @@ mod tests {
         let (pool, _dir) = fresh_pool().await;
         seed_world_and_endpoints(&pool).await;
 
-        let adapter = NexusBaselineAdapter::new(pool.clone());
+        let adapter = NexusAdapter::new(pool.clone());
         let relation = spoke_relation("rel_happy", "kb_src", "kb_dst");
 
         let returned = unwrap_ok(adapter.put_relation(relation, None), "create");
@@ -850,7 +850,7 @@ mod tests {
         let (pool, _dir) = fresh_pool().await;
         seed_world_and_endpoints(&pool).await;
 
-        let adapter = NexusBaselineAdapter::new(pool);
+        let adapter = NexusAdapter::new(pool);
         let relation = spoke_relation("rel_dup", "kb_src", "kb_dst");
 
         let first = adapter.put_relation(relation.clone(), None);
@@ -873,7 +873,7 @@ mod tests {
         let (pool, _dir) = fresh_pool().await;
         seed_world_and_endpoints(&pool).await;
 
-        let adapter = NexusBaselineAdapter::new(pool);
+        let adapter = NexusAdapter::new(pool);
         // Build a relation without extensions.nexus.world_id.
         let relation: Relation = serde_json::from_value(json!({
             "schema_version": 1,
@@ -906,7 +906,7 @@ mod tests {
         let (pool, _dir) = fresh_pool().await;
         seed_world_and_endpoints(&pool).await;
 
-        let adapter = NexusBaselineAdapter::new(pool.clone());
+        let adapter = NexusAdapter::new(pool.clone());
         let relation = spoke_relation("rel_bad_endpoint", "kb_src", "kb_nonexistent");
 
         match adapter.put_relation(relation, None) {
@@ -934,7 +934,7 @@ mod tests {
         let (pool, _dir) = fresh_pool().await;
         seed_world_and_endpoints(&pool).await;
 
-        let adapter = NexusBaselineAdapter::new(pool);
+        let adapter = NexusAdapter::new(pool);
 
         // Create → revision 1.
         let created = unwrap_ok(
@@ -991,7 +991,7 @@ mod tests {
         let (pool, _dir) = fresh_pool().await;
         seed_world_and_endpoints(&pool).await;
 
-        let adapter = NexusBaselineAdapter::new(pool);
+        let adapter = NexusAdapter::new(pool);
 
         // Create → revision 1. Bump to 2. Then attempt another update with
         // expected = 1 (caller read a stale base before the second writer
@@ -1025,7 +1025,7 @@ mod tests {
         let (pool, _dir) = fresh_pool().await;
         seed_world_and_endpoints(&pool).await;
 
-        let adapter = NexusBaselineAdapter::new(pool);
+        let adapter = NexusAdapter::new(pool);
         // No prior create — relation is absent. Caller passes expected = Some(3);
         // the relation-port CAS mapping collapses this to STORED_REVISION_STALE
         // with storeRevision = null (V1.144 brief).
@@ -1057,7 +1057,7 @@ mod tests {
         let (pool, _dir) = fresh_pool().await;
         seed_world_and_endpoints(&pool).await;
 
-        let adapter = NexusBaselineAdapter::new(pool);
+        let adapter = NexusAdapter::new(pool);
 
         // Create with the full set of optional locals set explicitly.
         let seed: Relation = serde_json::from_value(json!({
@@ -1139,7 +1139,7 @@ mod tests {
             .await
             .unwrap();
 
-        let adapter = NexusBaselineAdapter::new(pool);
+        let adapter = NexusAdapter::new(pool);
         match adapter.get_relation("rel_any") {
             SpokeResult::Reject(r) => {
                 assert_eq!(
@@ -1162,7 +1162,7 @@ mod tests {
             .await
             .unwrap();
 
-        let adapter = NexusBaselineAdapter::new(pool);
+        let adapter = NexusAdapter::new(pool);
         let relation = spoke_relation("rel_fail_create", "kb_src", "kb_dst");
         match adapter.put_relation(relation, None) {
             SpokeResult::Reject(r) => {
@@ -1182,7 +1182,7 @@ mod tests {
         let (pool, _dir) = fresh_pool().await;
         seed_world_and_endpoints(&pool).await;
 
-        let adapter = NexusBaselineAdapter::new(pool.clone());
+        let adapter = NexusAdapter::new(pool.clone());
         let created = unwrap_ok(
             adapter.put_relation(spoke_relation("rel_upd_fail", "kb_src", "kb_dst"), None),
             "create",
@@ -1216,7 +1216,7 @@ mod tests {
         let (pool, _dir) = fresh_pool().await;
         seed_world_and_endpoints(&pool).await;
 
-        let adapter = NexusBaselineAdapter::new(pool);
+        let adapter = NexusAdapter::new(pool);
         // Create-success-then-recreate → RelationAlreadyExists (domain signal, not storage)
         let first = spoke_relation("rel_val_ae", "kb_src", "kb_dst");
         let _ = unwrap_ok(adapter.put_relation(first.clone(), None), "first create");
@@ -1262,7 +1262,7 @@ mod tests {
         let (pool, _dir) = fresh_pool().await;
         seed_world_and_endpoints(&pool).await;
 
-        let adapter = NexusBaselineAdapter::new(pool);
+        let adapter = NexusAdapter::new(pool);
 
         // Create with the full set of locals set explicitly.
         let seed: Relation = serde_json::from_value(json!({

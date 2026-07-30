@@ -2885,6 +2885,7 @@ dependencies = [
  "nexus-contracts",
  "nexus-knowledge",
  "nexus-local-db",
+ "nexus-wasm-host",
  "serde",
  "serde_json",
  "spoke-operations",

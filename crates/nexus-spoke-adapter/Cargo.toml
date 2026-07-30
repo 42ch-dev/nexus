@@ -5,7 +5,7 @@ edition.workspace = true
 authors.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Capability-aggregation boundary between nexus domain concerns and spoke standard objects — extensions.nexus accessors, lifecycle delegation, conversion seam, production NexusBaselineAdapter + 6 port impls"
+description = "Capability-aggregation boundary between nexus domain concerns and spoke standard objects — extensions.nexus accessors, lifecycle delegation, conversion seam, production NexusAdapter + 6 port impls"
 
 [lints]
 workspace = true
@@ -28,13 +28,16 @@ serde_json.workspace = true
 nexus-knowledge = { path = "../nexus-knowledge" }
 nexus-contracts = { path = "../nexus-contracts" }
 chrono.workspace = true
-# V1.145 P1b — the production `NexusBaselineAdapter` + 6 port impls rehomed
+# V1.145 P1b — the production `NexusAdapter` (formerly `NexusBaselineAdapter`) + 6 port impls rehomed
 # here from `nexus-local-db/src/spoke_adapter/` (spec §7.4 / §8 dep-graph
 # reversal). The adapter consumes local-db's storage primitives
 # (`SqliteKbStore`, `open_pool`, `run_migrations`, CAS helpers) and bridges
 # spoke's sync port traits to async SQLite I/O. This edge replaces the
 # former `nexus-local-db → nexus-spoke-adapter` dep (now removed).
 nexus-local-db = { path = "../nexus-local-db" }
+# V1.146 P2 T2 — ComputablePort impl bridges spoke compute requests to nexus's
+# stateless WASM host via the session store (Decision 2 mapping table).
+nexus-wasm-host = { path = "../nexus-wasm-host" }
 sqlx.workspace = true
 tokio.workspace = true
 

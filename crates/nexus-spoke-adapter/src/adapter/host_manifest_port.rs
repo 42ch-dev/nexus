@@ -1,5 +1,13 @@
-//! Static-stub `HostManifestPort` impl — see spec §7.4 production-vs-stub
+//! Production `HostManifestPort` impl — see spec §7.4 production-vs-stub
 //! matrix.
+//!
+//! The self-manifest declares the full capability set proven by the
+//! adapter's port implementations:
+//! - `spoke-baseline` — all six baseline ports (T1).
+//! - `l2-computable` — production `ComputablePort` (T2, 10 tests incl.
+//!   orchestrate round-trip).
+//! - `l5-fork` — production `ForkTimelineQueryPort` (T3, 9 tests;
+//!   reviewer adjudicated declaration justified).
 //!
 //! Local-first nexus has no peers: the production daemon runs against a
 //! single `nexus-local` host that owns the `nexus` extension namespace and
@@ -15,14 +23,14 @@
 //! manifest IS authoritative — the daemon is the data-store for its
 //! local storage.
 
-use super::NexusBaselineAdapter;
+use super::NexusAdapter;
 use crate::{HostCapabilityManifest, HostManifestPort, SpokeResult};
 use serde_json::json;
 /// The local-first host id (spec §7.4 — `nexus-local` is the documented
 /// default host identity for the production adapter).
 const HOST_ID: &str = "nexus-local";
 
-impl HostManifestPort for NexusBaselineAdapter<'_> {
+impl HostManifestPort for NexusAdapter<'_> {
     fn get_host_capability_manifest(&self) -> SpokeResult<HostCapabilityManifest> {
         // Mirror V1.141 mock's `make_manifest` pattern: construct the
         // canonical shape via `serde_json::from_value`, which exercises the
@@ -32,7 +40,7 @@ impl HostManifestPort for NexusBaselineAdapter<'_> {
             "schema_version": 1,
             "host_id": HOST_ID,
             "roles": ["data-store"],
-            "capabilities": ["spoke-baseline"],
+            "capabilities": ["spoke-baseline", "l2-computable", "l5-fork"],
             "namespaces": ["nexus"],
             "extensions": {}
         }))
@@ -68,7 +76,7 @@ mod tests {
         let pool = nexus_local_db::open_pool(&db_path).await.unwrap();
         nexus_local_db::run_migrations(&pool).await.unwrap();
 
-        let adapter = NexusBaselineAdapter::new(pool);
+        let adapter = NexusAdapter::new(pool);
         let manifest = match adapter.get_host_capability_manifest() {
             SpokeResult::Ok(m) => m,
             SpokeResult::Reject(r) => panic!("self manifest is Ok: {r:?}"),
@@ -76,7 +84,14 @@ mod tests {
 
         assert_eq!(manifest.host_id.as_str(), HOST_ID);
         assert_eq!(manifest.roles, vec!["data-store".to_string()]);
-        assert_eq!(manifest.capabilities, vec!["spoke-baseline".to_string()]);
+        assert_eq!(
+            manifest.capabilities,
+            vec![
+                "spoke-baseline".to_string(),
+                "l2-computable".to_string(),
+                "l5-fork".to_string()
+            ]
+        );
         assert_eq!(
             manifest
                 .namespaces
@@ -95,7 +110,7 @@ mod tests {
         let pool = nexus_local_db::open_pool(&db_path).await.unwrap();
         nexus_local_db::run_migrations(&pool).await.unwrap();
 
-        let adapter = NexusBaselineAdapter::new(pool);
+        let adapter = NexusAdapter::new(pool);
         let peers = match adapter.list_peer_host_capability_manifests() {
             SpokeResult::Ok(p) => p,
             SpokeResult::Reject(r) => panic!("peer list is Ok: {r:?}"),
