@@ -371,16 +371,41 @@ async fn import(args: ImportArgs, config: &CliConfig, pool: &SqlitePool) -> Resu
         };
 
         // ── Entry ID collision ──────────────────────────────────────
-        if store.get_knowledge_entry(&entry.entry_id).await.is_ok() {
+        // get_knowledge_entry is global by PK — must verify the row belongs
+        // to the *target* world before treating the id as a valid relation
+        // endpoint (Greptile P1 / Cursor security: cross-world bypass).
+        if let Ok(existing_by_id) = store.get_knowledge_entry(&entry.entry_id).await {
+            if existing_by_id.world_id == world_id {
+                if args.dry_run {
+                    eprintln!(
+                        "  [dry-run] skip entry {} ({:?}): entry_id already exists in target world",
+                        entry.entry_id, entry.canonical_name
+                    );
+                }
+                entries_skipped += 1;
+                // F-003: track only when the row is in the target world.
+                target_entry_ids.insert(entry.entry_id.clone());
+                continue;
+            }
+            // Same entry_id in a *foreign* world: do not admit as endpoint.
+            // Fall through to canonical-name collision / create under target
+            // world (create will fail on global PK if ids must stay unique —
+            // skip with clear message instead of importing a cross-world edge).
             if args.dry_run {
                 eprintln!(
-                    "  [dry-run] skip entry {} ({:?}): entry_id already exists in target world",
-                    entry.entry_id, entry.canonical_name
+                    "  [dry-run] skip entry {} ({:?}): entry_id exists in foreign world {}",
+                    entry.entry_id, entry.canonical_name, existing_by_id.world_id
+                );
+            } else {
+                eprintln!(
+                    "  warn: skip entry {} ({:?}): entry_id already owned by world {} (not target {})",
+                    entry.entry_id,
+                    entry.canonical_name,
+                    existing_by_id.world_id,
+                    world_id
                 );
             }
             entries_skipped += 1;
-            // F-003: track the real id (the row exists under this id).
-            target_entry_ids.insert(entry.entry_id.clone());
             continue;
         }
 

@@ -262,7 +262,10 @@ impl ComputablePort for NexusAdapter<'_> {
             SpokeResult::Reject(r) => return SpokeResult::Reject(r),
         };
 
-        // ── 3. Merge staged state + dynamic computable ────────────────────
+        // ── 3. Merge staged state + dynamic computable (in-memory only) ──
+        // Do NOT persist session state until WASM compute succeeds — otherwise
+        // a failed compute leaves the session advanced while the entry is
+        // unchanged (Greptile P1: failed computes advance session state).
         let mut merged_state: Map<String, Value> = session
             .state_json
             .as_deref()
@@ -272,20 +275,7 @@ impl ComputablePort for NexusAdapter<'_> {
             merged_state.insert(k.clone(), v.clone());
         }
 
-        // ── 4. Persist updated state back to session ──────────────────────
-        let updated_state_json =
-            serde_json::to_string(&merged_state).unwrap_or_else(|_| "{}".to_string());
-        if let Err(e) = self.block_on(async {
-            update_compute_session_state(&pool, &session_id, &updated_state_json).await
-        }) {
-            return reject(
-                SpokeRejectCode::InternalError,
-                format!("storage error on compute session state update: {e}"),
-                json!({ "session_id": session_id }),
-            );
-        }
-
-        // ── 5. Build ComputeInput envelope ────────────────────────────────
+        // ── 4. Build ComputeInput envelope ────────────────────────────────
         // Collect key_blocks: primary entry + any additional entries
         // referenced in the invocation (e.g., attacker_id, defender_id for
         // basic-combat). Each entry is converted from spoke format to the
@@ -559,7 +549,23 @@ impl ComputablePort for NexusAdapter<'_> {
             }
         }
 
-        // ── 9. Return ComputeResponse ─────────────────────────────────────
+        // ── 9. Persist session state only after compute (+ settle) succeed ─
+        // Merged dynamic computable + optional WASM state_delta applied above
+        // in-memory; commit here so retries do not see advanced session state
+        // from a failed WASM/settle attempt.
+        let updated_state_json =
+            serde_json::to_string(&merged_state).unwrap_or_else(|_| "{}".to_string());
+        if let Err(e) = self.block_on(async {
+            update_compute_session_state(&pool, &session_id, &updated_state_json).await
+        }) {
+            return reject(
+                SpokeRejectCode::InternalError,
+                format!("storage error on compute session state update: {e}"),
+                json!({ "session_id": session_id }),
+            );
+        }
+
+        // ── 10. Return ComputeResponse ────────────────────────────────────
         SpokeResult::Ok(ComputeResponse::Variant0 {
             computable: merged_state,
             entry_id,
