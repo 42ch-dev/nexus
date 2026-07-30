@@ -42,7 +42,7 @@ use nexus_spoke_adapter::{
     RelateRequest, Relation, RelationExtensionsKey, UpsertRequest,
 };
 use sqlx::SqlitePool;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
 /// Default version string stamped into `modules.pack.version` when
@@ -115,7 +115,7 @@ pub struct ExportArgs {
 pub async fn run(cmd: PackCommand, config: &CliConfig, pool: &SqlitePool) -> Result<()> {
     match cmd {
         PackCommand::Export(args) => export(args, config, pool).await,
-        PackCommand::Import(args) => import(args, pool).await,
+        PackCommand::Import(args) => import(args, config, pool).await,
     }
 }
 
@@ -283,8 +283,13 @@ async fn export(args: ExportArgs, config: &CliConfig, pool: &SqlitePool) -> Resu
 /// implemented).
 // Entry + relation phases in one function mirrors export's single-function
 // style. Extracting sub-phases would add indirection with no reuse benefit.
+//
+// V1.146 P3 QC fix-wave: added owner gate (F-004), endpoint remap for
+// canonical-name collisions (F-002), separate rejected counter (F-005),
+// entry revision clearance on create (F-001), unknown entry_type skip (F-007),
+// and list_by_world error mapping (F-009).
 #[allow(clippy::too_many_lines)]
-async fn import(args: ImportArgs, pool: &SqlitePool) -> Result<()> {
+async fn import(args: ImportArgs, config: &CliConfig, pool: &SqlitePool) -> Result<()> {
     // ── Conflict strategy gate ─────────────────────────────────────────
     if !matches!(args.conflict, ConflictStrategy::Skip) {
         return Err(CliError::Other(
@@ -295,6 +300,13 @@ async fn import(args: ImportArgs, pool: &SqlitePool) -> Result<()> {
     }
 
     let world_id = args.world_ref.as_str();
+
+    // ── Owner gate (F-004) ────────────────────────────────────────────
+    // Match sibling KB write commands: only the world owner may mutate.
+    // Export remains open (read-only). Same-DB cross-world clone is not
+    // supported — global PKs (entry_id/relation_id) will cause skips.
+    let creator_id = super::super::active_creator_id(config)?;
+    super::require_world_owner(pool, world_id, &creator_id).await?;
 
     // ── Verify world exists ────────────────────────────────────────────
     let _title = resolve_world_title(pool, world_id).await?;
@@ -324,39 +336,75 @@ async fn import(args: ImportArgs, pool: &SqlitePool) -> Result<()> {
     // ── Phase 1: Import entries ────────────────────────────────────────
     let mut entries_created = 0u32;
     let mut entries_skipped = 0u32;
+    let mut entries_rejected = 0u32;
 
     // Track which entry_ids are present in the target world after the
     // entry pass — both pre-existing and newly created — for the relation
     // endpoint resolution below.
     let mut target_entry_ids: HashSet<String> = HashSet::new();
 
-    // Pre-populate with entries already existing in the target world.
-    // This uses the same LIMIT as list_by_world, which is conservative but
-    // works for the scope of this slice (export→import round-trip).
-    if let Ok(existing) = store.list_by_world(world_id).await {
-        for e in &existing {
-            target_entry_ids.insert(e.entry_id.clone());
-        }
+    // Remap: pack entry_id → existing target entry_id when a canonical-name
+    // collision occurs (F-002). Relation endpoints are rewritten through this
+    // map so they resolve to the correct target-row id.
+    let mut remap: HashMap<String, String> = HashMap::new();
+
+    // Pre-populate with entries already existing in the target world (F-009:
+    // map errors to CliError instead of silently swallowing).
+    let existing = store.list_by_world(world_id).await.map_err(|e| {
+        CliError::Other(format!(
+            "Failed to list existing entries for {world_id}: {e}"
+        ))
+    })?;
+    for e in &existing {
+        target_entry_ids.insert(e.entry_id.clone());
     }
 
     for mut entry in parsed.entries {
-        let entry_type = parse_entry_type(&entry.entry_type);
+        // F-007: reject unknown entry_type; do not silently default to Character.
+        let Some(entry_type) = parse_entry_type(&entry.entry_type) else {
+            eprintln!(
+                "  warn: unknown entry_type '{}' for entry {} ({:?}), skipping",
+                entry.entry_type, entry.entry_id, entry.canonical_name
+            );
+            entries_skipped += 1;
+            continue;
+        };
 
-        // ── Collision check ──────────────────────────────────────────
-        let collision = check_entry_collision(&store, world_id, &entry, entry_type).await;
-        if collision {
+        // ── Entry ID collision ──────────────────────────────────────
+        if store.get_knowledge_entry(&entry.entry_id).await.is_ok() {
             if args.dry_run {
                 eprintln!(
-                    "  [dry-run] skip entry {} ({:?}): already exists in target world",
+                    "  [dry-run] skip entry {} ({:?}): entry_id already exists in target world",
                     entry.entry_id, entry.canonical_name
                 );
             }
             entries_skipped += 1;
-            // Still track the id for relation endpoint resolution.
+            // F-003: track the real id (the row exists under this id).
             target_entry_ids.insert(entry.entry_id.clone());
             continue;
         }
 
+        // ── Canonical-name collision (F-002) ─────────────────────────
+        if let Ok(Some(existing)) = store
+            .get_active_by_unique_key(world_id, &entry.canonical_name, entry_type)
+            .await
+        {
+            if args.dry_run {
+                eprintln!(
+                    "  [dry-run] skip entry {} ({:?}): canonical-name collision with existing {}",
+                    entry.entry_id, entry.canonical_name, existing.entry_id
+                );
+            }
+            entries_skipped += 1;
+            // F-002: remap pack entry_id → existing target entry_id for
+            // relation endpoint resolution.
+            remap.insert(entry.entry_id.clone(), existing.entry_id.clone());
+            // F-003: track the existing id, not the pack id.
+            target_entry_ids.insert(existing.entry_id.clone());
+            continue;
+        }
+
+        // ── No collision → create ────────────────────────────────────
         if args.dry_run {
             eprintln!(
                 "  [dry-run] would create entry {} ({:?})",
@@ -367,7 +415,10 @@ async fn import(args: ImportArgs, pool: &SqlitePool) -> Result<()> {
             continue;
         }
 
-        // ── Create via orchestrate_upsert ────────────────────────────
+        // F-001: clear revision on create path (mirrors relation handling).
+        // Spoke validate_create_revision rejects create when revision >= 1.
+        entry.revision = None;
+
         // Rebind to target world + stamp provenance.
         extensions::set_world_id(&mut entry, world_id.to_string());
         extensions::set_provenance(&mut entry, None, None, Some(IMPORT_PROVENANCE.to_string()));
@@ -377,6 +428,7 @@ async fn import(args: ImportArgs, pool: &SqlitePool) -> Result<()> {
         match orchestrate_upsert(&adapter, upsert_req) {
             nexus_spoke_adapter::SpokeResult::Ok(_) => {
                 entries_created += 1;
+                // F-003: track id on successful create.
                 target_entry_ids.insert(entry.entry_id.clone());
             }
             nexus_spoke_adapter::SpokeResult::Reject(reject) => {
@@ -384,9 +436,8 @@ async fn import(args: ImportArgs, pool: &SqlitePool) -> Result<()> {
                     "  warn: orchestrate_upsert rejected entry {} ({:?}): {}: {}",
                     entry.entry_id, entry.canonical_name, reject.code, reject.message
                 );
-                entries_skipped += 1;
-                // Still track so relations referencing this entry resolve.
-                target_entry_ids.insert(entry.entry_id.clone());
+                // F-003 / F-005: do NOT add to target_entry_ids; count as rejected.
+                entries_rejected += 1;
             }
         }
     }
@@ -394,11 +445,23 @@ async fn import(args: ImportArgs, pool: &SqlitePool) -> Result<()> {
     // ── Phase 2: Import relations ──────────────────────────────────────
     let mut relations_created = 0u32;
     let mut relations_skipped = 0u32;
+    let mut relations_rejected = 0u32;
 
     for mut relation in parsed.relations {
+        // F-002: rewrite endpoints through the remap so relations
+        // resolve to existing target-row ids.
+        let resolved_from = remap
+            .get(&relation.from_id)
+            .cloned()
+            .unwrap_or_else(|| relation.from_id.clone());
+        let resolved_to = remap
+            .get(&relation.to_id)
+            .cloned()
+            .unwrap_or_else(|| relation.to_id.clone());
+
         // ── Endpoint resolution ──────────────────────────────────────
-        let source_ok = target_entry_ids.contains(&relation.from_id);
-        let target_ok = target_entry_ids.contains(&relation.to_id);
+        let source_ok = target_entry_ids.contains(&resolved_from);
+        let target_ok = target_entry_ids.contains(&resolved_to);
         if !source_ok || !target_ok {
             if args.dry_run {
                 let reason = if !source_ok && !target_ok {
@@ -416,6 +479,10 @@ async fn import(args: ImportArgs, pool: &SqlitePool) -> Result<()> {
             relations_skipped += 1;
             continue;
         }
+
+        // ── Apply resolved endpoints ─────────────────────────────────
+        relation.from_id = resolved_from;
+        relation.to_id = resolved_to;
 
         // ── Collision check ─────────────────────────────────────────
         if get_relationship(pool, &relation.relation_id).await.is_ok() {
@@ -457,7 +524,8 @@ async fn import(args: ImportArgs, pool: &SqlitePool) -> Result<()> {
                     "  warn: orchestrate_relate rejected relation {} → {}: {}: {}",
                     relation.relation_id, relation.to_id, reject.code, reject.message
                 );
-                relations_skipped += 1;
+                // F-005: count as rejected (not a clean skip).
+                relations_rejected += 1;
             }
         }
     }
@@ -465,42 +533,32 @@ async fn import(args: ImportArgs, pool: &SqlitePool) -> Result<()> {
     // ── Report ─────────────────────────────────────────────────────────
     let created = entries_created + relations_created;
     let skipped = entries_skipped + relations_skipped;
+    let rejected = entries_rejected + relations_rejected;
     if args.dry_run {
         println!("[dry-run] would create: {created}, would skip: {skipped}");
     } else {
         println!("created: {created}, skipped: {skipped}");
     }
 
+    // F-005: non-zero exit when any upsert/relate was rejected.
+    // Pure collision skips remain success.
+    if rejected > 0 {
+        return Err(CliError::Other(format!(
+            "Import completed with {rejected} rejected atom(s) \
+             (created: {created}, skipped: {skipped}). \
+             Check warnings above for rejection details."
+        )));
+    }
+
     Ok(())
 }
 
-/// Check whether a pack entry would collide with an existing entry in the
-/// target world — by `entry_id` or by unique key (`world_id`, `block_type`,
-/// `canonical_name`).
-async fn check_entry_collision(
-    store: &SqliteKbStore,
-    world_id: &str,
-    entry: &KnowledgeEntry,
-    entry_type: BlockType,
-) -> bool {
-    // Check by entry_id.
-    if store.get_knowledge_entry(&entry.entry_id).await.is_ok() {
-        return true;
-    }
-    // Check by active unique key.
-    if let Ok(Some(_existing)) = store
-        .get_active_by_unique_key(world_id, &entry.canonical_name, entry_type)
-        .await
-    {
-        return true;
-    }
-    false
-}
-
-/// Parse a pack `entry_type` string to [`BlockType`] (unknown values →
-/// default).
-fn parse_entry_type(s: &str) -> BlockType {
-    serde_json::from_value(serde_json::Value::String(s.to_string())).unwrap_or_default()
+/// Parse a pack `entry_type` string to [`BlockType`].
+///
+/// Returns `None` for unknown values so the import path can skip the entry
+/// with a clear reason rather than silently defaulting to `Character`.
+fn parse_entry_type(s: &str) -> Option<BlockType> {
+    serde_json::from_value(serde_json::Value::String(s.to_string())).ok()
 }
 
 /// Update the nexus `world_id` in a pack relation's extensions for the target
@@ -932,7 +990,9 @@ mod tests {
             dry_run: false,
             conflict: ConflictStrategy::Skip,
         };
-        import(args, &pool2).await.expect("import must succeed");
+        import(args, &config_with_active_creator(), &pool2)
+            .await
+            .expect("import must succeed");
 
         assert_eq!(count_entries(&pool2, WORLD).await, 3);
         assert_eq!(count_relations(&pool2, WORLD).await, 1);
@@ -951,7 +1011,7 @@ mod tests {
             dry_run: false,
             conflict: ConflictStrategy::Skip,
         };
-        import(args, &pool2)
+        import(args, &config_with_active_creator(), &pool2)
             .await
             .expect("first import must succeed");
         assert_eq!(count_entries(&pool2, WORLD).await, 3);
@@ -964,7 +1024,7 @@ mod tests {
             dry_run: false,
             conflict: ConflictStrategy::Skip,
         };
-        import(args2, &pool2)
+        import(args2, &config_with_active_creator(), &pool2)
             .await
             .expect("second import must succeed");
         // Counts unchanged — all collisions skipped.
@@ -995,7 +1055,7 @@ mod tests {
             dry_run: true,
             conflict: ConflictStrategy::Skip,
         };
-        import(args, &pool2)
+        import(args, &config_with_active_creator(), &pool2)
             .await
             .expect("dry-run import must succeed");
 
@@ -1042,7 +1102,9 @@ mod tests {
             dry_run: false,
             conflict: ConflictStrategy::Skip,
         };
-        import(args, &pool2).await.expect("import must succeed");
+        import(args, &config_with_active_creator(), &pool2)
+            .await
+            .expect("import must succeed");
 
         // Should create 2 entries (Alice, Bob — not Carol because
         // canonical_name collision), and skip Carol's entry_id.
@@ -1075,7 +1137,9 @@ mod tests {
             dry_run: false,
             conflict: ConflictStrategy::Skip,
         };
-        import(args, &pool2).await.expect("import must succeed");
+        import(args, &config_with_active_creator(), &pool2)
+            .await
+            .expect("import must succeed");
 
         // Verify provenance on created entries.
         let store = SqliteKbStore::new(pool2.clone());
@@ -1103,7 +1167,7 @@ mod tests {
             dry_run: false,
             conflict: ConflictStrategy::Rename,
         };
-        let err = import(args, &pool2)
+        let err = import(args, &config_with_active_creator(), &pool2)
             .await
             .expect_err("rename conflict strategy must error");
         let msg = format!("{err}");
@@ -1125,7 +1189,7 @@ mod tests {
             dry_run: false,
             conflict: ConflictStrategy::Overwrite,
         };
-        let err = import(args, &pool2)
+        let err = import(args, &config_with_active_creator(), &pool2)
             .await
             .expect_err("overwrite conflict strategy must error");
         let msg = format!("{err}");
@@ -1194,7 +1258,7 @@ mod tests {
             dry_run: false,
             conflict: ConflictStrategy::Skip,
         };
-        import(args, &pool_b)
+        import(args, &config_with_active_creator(), &pool_b)
             .await
             .expect("import into World B must succeed");
 
@@ -1240,7 +1304,7 @@ mod tests {
             dry_run: false,
             conflict: ConflictStrategy::Skip,
         };
-        import(args2, &pool_b)
+        import(args2, &config_with_active_creator(), &pool_b)
             .await
             .expect("re-import must succeed");
 
@@ -1281,13 +1345,256 @@ mod tests {
             dry_run: false,
             conflict: ConflictStrategy::Skip,
         };
-        let err = import(args, &pool)
+        let err = import(args, &config_with_active_creator(), &pool)
             .await
             .expect_err("import must fail for missing world");
         let msg = format!("{err}");
         assert!(
             msg.contains("not found"),
             "error must mention world not found; got: {msg}"
+        );
+    }
+
+    // ── F-001: revision clearance on create ────────────────────────────
+
+    /// Seed a pool where one entry has `revision >= 1` (simulates an entry
+    /// created/updated through the spoke adapter path), export, then import
+    /// into a fresh world. The import must clear `revision` to `None` before
+    /// create so the spoke `validate_create_revision` gate passes.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn import_create_clears_entry_revision() {
+        let (pool, _dir, _entry_ids, _rel_ids) = seeded_pool().await;
+
+        // SAFETY: test-only UPDATE to bump revision on one entry.
+        let store = SqliteKbStore::new(pool.clone());
+        let entries = store.list_by_world(WORLD).await.unwrap();
+        let alice = entries
+            .iter()
+            .find(|e| e.canonical_name == "Alice")
+            .unwrap();
+        sqlx::query("UPDATE kb_key_blocks SET revision = 3 WHERE key_block_id = ?")
+            .bind(&alice.entry_id)
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let (pack_path, _pack_dir) = export_to_file(&pool).await;
+
+        // Import into fresh world — revision must be cleared.
+        let (pool2, _dir2) = empty_world_pool().await;
+        let args = ImportArgs {
+            world_ref: WORLD.to_string(),
+            r#in: pack_path,
+            dry_run: false,
+            conflict: ConflictStrategy::Skip,
+        };
+        import(args, &config_with_active_creator(), &pool2)
+            .await
+            .expect("import must succeed despite revision >= 1");
+
+        // All 3 entries should be created.
+        assert_eq!(count_entries(&pool2, WORLD).await, 3);
+
+        // Imported entries must carry pack_import provenance.
+        let store2 = SqliteKbStore::new(pool2.clone());
+        let imported = store2.list_by_world(WORLD).await.unwrap();
+        for entry in &imported {
+            assert_eq!(
+                entry.source_provenance_kind.as_deref(),
+                Some(IMPORT_PROVENANCE),
+                "imported entry {} must have provenance 'pack_import'",
+                entry.entry_id
+            );
+        }
+    }
+
+    // ── F-002: canonical-name collision remap ──────────────────────────
+
+    /// Pre-create Carol under a different entry_id in the target world,
+    /// import a pack that has Alice→Carol relation. After import, the
+    /// relation must point at the **existing** Carol id (remap), not the
+    /// pack's Carol id.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn import_remaps_relation_endpoints_on_name_collision() {
+        // Build a pool that has Carol→Alice relation (instead of Alice→Bob).
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("state.db");
+        let pool = crate::db::Schema::init(&db_path).await.unwrap();
+
+        // Seed creator + world.
+        sqlx::query(
+            "INSERT OR IGNORE INTO creators (creator_id, display_name, status, cached_at, data) \
+             VALUES (?, ?, 'active', datetime('now'), '{}')",
+        )
+        .bind(OWNER)
+        .bind(OWNER_NAME)
+        .execute(&pool)
+        .await
+        .unwrap();
+        nexus_local_db::kb_store::seed::world(
+            &pool,
+            WORLD,
+            OWNER,
+            WORLD_TITLE,
+            "pack-world",
+            "private",
+            "manual",
+        )
+        .await;
+
+        let store = SqliteKbStore::new(pool.clone());
+        let mut entry_ids = Vec::new();
+        for name in ["Alice", "Bob", "Carol"] {
+            let mut kb = WorldKbEntry::new(WORLD, BlockType::Character, name);
+            kb.body = Some(WorldKbBody {
+                summary: Some(format!("{name} summary")),
+                ..Default::default()
+            });
+            let res = store.insert_knowledge_entry(kb).await.unwrap();
+            entry_ids.push(res.entry_id);
+        }
+        let alice_id = &entry_ids[0];
+        let carol_id = &entry_ids[2];
+
+        // Carol→Alice relation (instead of Alice→Bob).
+        let rel_id = "rel_carol_to_alice".to_string();
+        sqlx::query(
+            "INSERT INTO kb_relationships \
+                (relationship_id, world_id, source_entity_id, target_entity_id, \
+                 relation_type, symmetric, confidence, source_anchor_ids, metadata, \
+                 created_at, updated_at, revision, needs_review, source) \
+             VALUES (?, ?, ?, ?, 'related_to', 0, NULL, '[]', '{}', \
+                     datetime('now'), datetime('now'), 1, 0, 'manual')",
+        )
+        .bind(&rel_id)
+        .bind(WORLD)
+        .bind(carol_id)
+        .bind(alice_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let (pack_path, _pack_dir) = export_to_file(&pool).await;
+
+        // ── Target world: pre-create Carol with a different id ─────────
+        let (pool2, _dir2) = empty_world_pool().await;
+        let store2 = SqliteKbStore::new(pool2.clone());
+        let mut carol_clone = WorldKbEntry::new(WORLD, BlockType::Character, "Carol");
+        carol_clone.body = Some(WorldKbBody {
+            summary: Some("Pre-existing Carol".to_string()),
+            ..Default::default()
+        });
+        let res = store2.insert_knowledge_entry(carol_clone).await.unwrap();
+        let preexisting_carol_id = res.entry_id;
+        assert_ne!(
+            preexisting_carol_id, *carol_id,
+            "pre-created Carol must have different id than pack Carol"
+        );
+
+        // ── Import ─────────────────────────────────────────────────────
+        let args = ImportArgs {
+            world_ref: WORLD.to_string(),
+            r#in: pack_path,
+            dry_run: false,
+            conflict: ConflictStrategy::Skip,
+        };
+        import(args, &config_with_active_creator(), &pool2)
+            .await
+            .expect("import must succeed");
+
+        // Alice and Bob created (2 new), Carol skipped (name collision) → 3 total.
+        assert_eq!(count_entries(&pool2, WORLD).await, 3);
+
+        // Carol→Alice relation must exist, with from_id = pre-existing Carol id.
+        let relations = list_relationships_for_world(&pool2, WORLD, false, i64::MAX)
+            .await
+            .unwrap();
+        assert_eq!(relations.len(), 1, "exactly one relation imported");
+        let rel = &relations[0];
+        assert_eq!(rel.relationship_id, rel_id);
+        assert_eq!(
+            rel.source_entity_id, preexisting_carol_id,
+            "relation from_id must be pre-existing Carol id (remapped)"
+        );
+        assert_eq!(
+            rel.target_entity_id, *alice_id,
+            "relation to_id must be pack Alice id (unchanged)"
+        );
+    }
+
+    // ── F-006: CLI error-path tests ────────────────────────────────────
+
+    #[tokio::test]
+    async fn import_errors_on_missing_file() {
+        let (pool, _dir) = empty_world_pool().await;
+        let args = ImportArgs {
+            world_ref: WORLD.to_string(),
+            r#in: PathBuf::from("/nonexistent/pack.json"),
+            dry_run: false,
+            conflict: ConflictStrategy::Skip,
+        };
+        let err = import(args, &config_with_active_creator(), &pool)
+            .await
+            .expect_err("import must fail for missing file");
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("Failed to read pack file"),
+            "error must mention read failure; got: {msg}"
+        );
+    }
+
+    #[tokio::test]
+    async fn import_errors_on_invalid_json() {
+        let (pool, _dir) = empty_world_pool().await;
+        let dir = tempfile::tempdir().unwrap();
+        let pack_path = dir.path().join("bad.json");
+        std::fs::write(&pack_path, "not json at all").unwrap();
+
+        let args = ImportArgs {
+            world_ref: WORLD.to_string(),
+            r#in: pack_path,
+            dry_run: false,
+            conflict: ConflictStrategy::Skip,
+        };
+        let err = import(args, &config_with_active_creator(), &pool)
+            .await
+            .expect_err("import must fail for invalid JSON");
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("Invalid JSON"),
+            "error must mention Invalid JSON; got: {msg}"
+        );
+    }
+
+    #[tokio::test]
+    async fn import_errors_on_invalid_pack_shape() {
+        let (pool, _dir) = empty_world_pool().await;
+        let dir = tempfile::tempdir().unwrap();
+        let pack_path = dir.path().join("bad_pack.json");
+        // Valid JSON but missing the required `modules.pack` key.
+        let pack_json = serde_json::json!({
+            "entries": [],
+            "relations": []
+        });
+        std::fs::write(
+            &pack_path,
+            serde_json::to_string_pretty(&pack_json).unwrap(),
+        )
+        .unwrap();
+
+        let args = ImportArgs {
+            world_ref: WORLD.to_string(),
+            r#in: pack_path,
+            dry_run: false,
+            conflict: ConflictStrategy::Skip,
+        };
+        let err = import(args, &config_with_active_creator(), &pool)
+            .await
+            .expect_err("import must fail for invalid pack shape");
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("Invalid pack format"),
+            "error must mention Invalid pack format; got: {msg}"
         );
     }
 }
