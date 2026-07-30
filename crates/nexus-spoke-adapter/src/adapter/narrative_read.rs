@@ -5,8 +5,10 @@
 //! adoption"): narrative timeline ordering now lives behind the
 //! `nexus-spoke-adapter` boundary instead of inside the local-db / in-memory
 //! gateways. [`NexusBaselineAdapter::list_timeline_events_ordered`] is the
-//! adapter-owned ordered read; the gateway ordered methods are removed in a
-//! later task of this plan.
+//! adapter-owned ordered read; the gateway ordered methods have been removed
+//! (Task 3 of this plan dropped `narrative` + `local-db` direct
+//! `spoke-operations` ordering deps — this facet is now the canonical ordered
+//! read).
 //!
 //! # Semantics (parity with the V1.143 T2/T3 ordering suites)
 //!
@@ -68,9 +70,10 @@ impl NexusBaselineAdapter<'_> {
     /// # Expected first caller
     ///
     /// No production call site yet (V1.146 P1). Expected first consumer:
-    /// Moment Context Assembly timeline ordering, replacing the former
-    /// gateway `get_timeline_ordered` calls (Task 3 of this plan removes the
-    /// gateway methods once callers flip).
+    /// Moment Context Assembly timeline ordering. The former gateway
+    /// `get_timeline_ordered` methods (and their direct `spoke-operations`
+    /// deps) were removed in Task 3 of this plan — this facet is the
+    /// canonical ordered read for the workspace.
     ///
     /// # Panics
     ///
@@ -184,9 +187,10 @@ fn reject<T>(code: SpokeRejectCode, message: impl Into<String>, details: Value) 
 // storage path is the natural migration target; the same five named
 // assertions are preserved: explicit-ids-first + sequence tail, unknown-id
 // reject, duplicate-id reject, shuffled-storage ordering, and the no-mutation
-// regression. The gateway methods + their original tests stay in place until
-// Task 3 of this plan removes them together (this task adds the adapter
-// coverage; it does not delete the source suites).
+// regression. The gateway methods + their original tests were removed in
+// Task 3 of this plan (along with `narrative` + `local-db` direct
+// `spoke-operations` ordering deps) — this facet is the sole surviving
+// ordered-timeline coverage.
 
 #[cfg(test)]
 mod tests {
@@ -421,6 +425,129 @@ mod tests {
             reject.message.contains("duplicate"),
             "reject message should mention duplicates: {}",
             reject.message
+        );
+    }
+
+    // T-mig-5 (edge case, qc2 S-002 / qc3 F-003): empty `ordered_ids` returns
+    // the full world set in `sequence_no` order. The spoke helper passes its
+    // input through verbatim when no explicit ids pin the head (the ordered-id
+    // set is empty, so the entire input forms the "stable tail"); the facet
+    // pre-sorts by `sequence_no`, so the result is the sequence-ordered view of
+    // the shuffled fixture (seq1→evt_2, seq2→evt_4, seq3→evt_1, seq4→evt_5,
+    // seq5→evt_3). Asserts no reject + exact sequence ordering.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn list_timeline_events_ordered_empty_ids_returns_full_sequence_sorted() {
+        let (pool, _dir) = fresh_pool().await;
+        seed_world_shuffled(&pool).await;
+
+        let adapter = NexusBaselineAdapter::new(pool);
+        let ordered = match adapter
+            .list_timeline_events_ordered(&ordered_scope("wld_ord", Some("fbk_root")), &[])
+        {
+            SpokeResult::Ok(v) => v,
+            SpokeResult::Reject(r) => {
+                panic!("expected ok for empty ordered_ids, got reject: {r:?}")
+            }
+        };
+
+        let ids: Vec<&str> = ordered
+            .iter()
+            .map(|e| e.timeline_event_id.as_str())
+            .collect();
+        assert_eq!(
+            ordered.len(),
+            5,
+            "empty ordered_ids returns the full world set"
+        );
+        assert_eq!(
+            ids,
+            vec!["evt_2", "evt_4", "evt_1", "evt_5", "evt_3"],
+            "empty ordered_ids → full set in sequence_no order (stable tail)"
+        );
+    }
+
+    // T-mig-6 (edge case, qc2 S-002 / qc3 F-003): a `scope` without
+    // `extensions.nexus.branch_id` widens the world query to ALL branches (no
+    // branch filter in `list_timeline_events_scoped`). Events from every branch
+    // of the world are returned in stable `sequence_no` order — the facet's
+    // pre-sort flattens the cross-branch `(branch_id, sequence_no)` storage
+    // order into a single sequence_no order. Uses empty `ordered_ids` to
+    // isolate the scope-filter behavior from the explicit-id ordering path.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn list_timeline_events_ordered_no_branch_scope_returns_all_branches_in_sequence_order() {
+        let (pool, _dir) = fresh_pool().await;
+        seed::world(
+            &pool,
+            "wld_nb",
+            "ctr_test",
+            "NoBranch",
+            "no-branch",
+            "private",
+            "manual",
+        )
+        .await;
+        // Three different branches interleaved by sequence_no:
+        //   evt_a → fbk_root,   seq 2
+        //   evt_b → fbk_alt,    seq 1
+        //   evt_c → fbk_root,   seq 4
+        //   evt_d → fbk_other,  seq 3
+        seed::event(&pool, "evt_a", "wld_nb", "fbk_root", "story_advance", 2).await;
+        seed::event(&pool, "evt_b", "wld_nb", "fbk_alt", "story_advance", 1).await;
+        seed::event(&pool, "evt_c", "wld_nb", "fbk_root", "story_advance", 4).await;
+        seed::event(&pool, "evt_d", "wld_nb", "fbk_other", "story_advance", 3).await;
+
+        let adapter = NexusBaselineAdapter::new(pool);
+        // Scope carries world_id only — no `extensions.nexus.branch_id`.
+        let ordered = match adapter
+            .list_timeline_events_ordered(&ordered_scope("wld_nb", None), &[])
+        {
+            SpokeResult::Ok(v) => v,
+            SpokeResult::Reject(r) => panic!("expected ok for no-branch scope, got reject: {r:?}"),
+        };
+
+        let ids: Vec<&str> = ordered
+            .iter()
+            .map(|e| e.timeline_event_id.as_str())
+            .collect();
+        assert_eq!(
+            ordered.len(),
+            4,
+            "no-branch scope returns events from all branches"
+        );
+        assert_eq!(
+            ids,
+            vec!["evt_b", "evt_a", "evt_d", "evt_c"],
+            "no-branch scope → all branches in stable sequence_no order"
+        );
+        // Confirm the result genuinely spans branches (not silently narrowed).
+        let key = nexus_te_key();
+        let branches: Vec<String> = ordered
+            .iter()
+            .map(|e| {
+                e.extensions
+                    .get(&key)
+                    .and_then(|ns| ns.get("branch_id"))
+                    .and_then(Value::as_str)
+                    .map(str::to_owned)
+                    .unwrap_or_else(|| {
+                        panic!(
+                            "missing extensions.nexus.branch_id on {}",
+                            e.timeline_event_id
+                        )
+                    })
+            })
+            .collect();
+        let mut unique = branches.clone();
+        unique.sort();
+        unique.dedup();
+        assert_eq!(
+            unique,
+            vec![
+                "fbk_alt".to_string(),
+                "fbk_other".to_string(),
+                "fbk_root".to_string()
+            ],
+            "result spans all three branches: {branches:?}"
         );
     }
 }
