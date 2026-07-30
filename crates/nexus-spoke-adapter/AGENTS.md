@@ -4,11 +4,12 @@ The **only** crate boundary that crosses between nexus domain concerns and SPOKE
 
 ## Purpose
 
-The **only** crate boundary that crosses between nexus domain concerns and SPOKE standard objects. Since V1.145 P1b it is the **capability aggregation** layer (spec §7.4 / §8):
+Since V1.145 P1b this crate is the **capability aggregation** layer (spec §7.4 / §8). It owns four surfaces that together form the single spoke boundary:
 
 1. **Typed accessors** over the `extensions.nexus` namespace on a spoke `KnowledgeEntry` (5 fields: `world_id`, `created_from_command_id`, `source_work_id`, `source_chapter`, `source_provenance_kind`). See `src/extensions.rs`.
-2. **Thin delegation** of standard lifecycle invariants to `spoke-operations` (validate/apply promote, status transitions, assemble packet, extension merge, revision assert). See `src/ops.rs`.
-3. **Production adapter home** — `NexusBaselineAdapter` + 6 spoke port impls in `src/adapter/` (V1.145 P1b rehome from `nexus-local-db`). Consumes `nexus-local-db` storage primitives and bridges spoke's sync port traits to async `SQLite` I/O.
+2. **Lifecycle delegation (Surface A)** — delegates standard lifecycle invariants to `spoke-operations` (validate/apply promote, status transitions, assemble packet, extension merge, revision assert). Where `spoke-operations` exports a function, this crate re-exports or wraps it; it never reimplements a lifecycle invariant. See `src/ops.rs`.
+3. **Conversion seam** — the sole `WorldKbEntry` ↔ spoke `KnowledgeEntry` conversion (`world_kb_to_spoke` / `spoke_to_world_kb` + `WorldKbEntrySpokeExt`), owned here since V1.145 P1a (moved out of `nexus-knowledge` per the orphan rule). See `src/conversion/`.
+4. **Production adapter home** — `NexusBaselineAdapter` + 6 spoke port impls in `src/adapter/` (V1.145 P1b rehome from `nexus-local-db`). Consumes `nexus-local-db` storage primitives and bridges spoke's sync port traits to async `SQLite` I/O.
 
 Since V1.141 the crate also flat-re-exports spoke 0.4.0's adapter **port traits + `orchestrate_*` entrypoints + operand wire types** (Surface B, spec §7.3) so consumers implement spoke's ports and call spoke's orchestrators through this single import boundary — pure pass-through, no nexus logic.
 
@@ -26,7 +27,7 @@ Since V1.141 the crate also flat-re-exports spoke 0.4.0's adapter **port traits 
 
 ## Key rules
 
-- **Thin facade (Q13).** Where `spoke-operations` exports a function, this adapter re-exports or thin-wraps it. Do NOT reimplement any lifecycle invariant here. A wrapper that renames (`apply_promote` → `apply_promote_acceptance`) is fine; a wrapper that re-checks the promote gate is not.
+- **No lifecycle reimplementation (Q13).** Where `spoke-operations` exports a function, this adapter re-exports or wraps it. Do NOT reimplement any lifecycle invariant here. A wrapper that renames (`apply_promote` → `apply_promote_acceptance`) is fine; a wrapper that re-checks the promote gate is not. The lifecycle-delegation surface (Surface A) is pass-through over `spoke-operations`; the production adapter (surface 4) maps spoke ↔ storage, it does not re-derive spoke invariants.
 - **Call-boundary invariant (HARD, spec §7).** Every public function accepts/returns spoke standard types only (`KnowledgeEntry`, `Finding`, `PromoteRequest`, `AssemblePacket`, `ExtensionMap`, `SpokeResult`). There are no nexus wrapper types in this crate — the adapter IS the boundary.
 - **Round-trip preservation (spec §2.2).** Unknown namespaces and unknown keys inside `extensions.nexus` are preserved verbatim. Empty `extensions.nexus` is valid and not dropped. The typed accessors touch only the 5 known keys under the `"nexus"` namespace.
 - **`extensions` newtype key.** `KnowledgeEntry.extensions` is keyed by the typify-generated `KnowledgeEntryExtensionsKey` newtype (regex-validated `^[a-z][a-z0-9_-]*$`), not plain `String`. It does not implement `Borrow<str>`, so namespace lookups must construct the key via `KnowledgeEntryExtensionsKey::try_from("nexus")`.

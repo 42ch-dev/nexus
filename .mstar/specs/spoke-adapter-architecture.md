@@ -546,7 +546,7 @@ spoke `Scope` supports `entry_ids`, `entry_types`, `source_id`, `fork_id`, `time
 
 **P2 scope boundary (explicit):** MCA is the only production consumer cut over in V1.145. Daemon CRUD read paths (`get_graph`, `get_candidates`) stay on `SqliteKbStore` directly — these are UI views, not spoke integration concerns. Evaluation deferred to V1.146+.
 
-**P4 — Narrative timeline read:** After P3 enables production `list_timeline_events`, the narrative gateway's `get_timeline_ordered` routes through the adapter's `ScopeQueryPort`. The spoke `order_timeline_events_by_ids` helper is called through adapter re-export, not direct crate import from `narrative_gateway.rs`.
+**Narrative timeline ordering through the adapter (deferred to V1.146):** P3 shipped production `ScopeQueryPort.list_timeline_events` (table query + scope filter). The remaining goal — routing the narrative gateway's `get_timeline_ordered` ordering through the adapter boundary so the spoke `order_timeline_events_by_ids` helper is called via adapter re-export rather than a direct `spoke-operations` import in `narrative_gateway.rs` — is **deferred to V1.146**. It is a real refactor: `narrative_gateway` lives in `nexus-local-db` (pure storage, no spoke-adapter dep post-P1b reversal) and in `nexus-narrative`, neither of which can depend on `nexus-spoke-adapter` without re-introducing the reversed edge. The ordering therefore needs to move to a spoke-adapter-dependent layer. Until then, `nexus-local-db` and `nexus-narrative` take `spoke-operations` directly as a **standard leaf library dep** (no cycle) for the ordering helper.
 
 #### Timeline storage — existing table reuse (V1.145 P3)
 
@@ -619,10 +619,10 @@ nexus-spoke-adapter                    ← capability aggregation (PRODUCTION AD
   │   ├── nexus-narrative ───────┐ │   ← local-db implements NarrativeGateway over SQLite
   │   │   ├── nexus-knowledge ───┤ │
   │   │   ├── spoke-schemas      │ │   (TimelineEvent wire type)
-  │   │   └── spoke-operations   │ │   (TEMP P4 dep: order_timeline_events_by_ids; cycle-break)
+  │   │   └── spoke-operations   │ │   (standard leaf lib: order_timeline_events_by_ids ordering helper)
   │   ├── nexus-knowledge ───────┤ │
   │   │   └── spoke-schemas      │ │   (native KnowledgeEntry type)
-  │   ├── spoke-operations       │ │   (TEMP P4 dep: order_timeline_events_by_ids for narrative_gateway)
+  │   ├── spoke-operations       │ │   (standard leaf lib: order_timeline_events_by_ids for narrative_gateway)
   │   └── sqlx, …                │ │   (persistence)
   ├── nexus-knowledge ───────────────┘ ← domain types (WorldKbEntry); conversion seam moved OUT to spoke-adapter (P1a)
   ├── spoke-schemas                    ← native spoke types
@@ -631,13 +631,13 @@ nexus-spoke-adapter                    ← capability aggregation (PRODUCTION AD
 nexus-local-db                       ← pure storage (NO spoke-adapter dep after P1b)
   ├── nexus-knowledge                 ← domain types
   ├── nexus-narrative                 ← NarrativeGateway trait impl over SQLite
-  ├── spoke-operations                ← TEMP P4 dep (narrative_gateway timeline helper); removed in P4
+  ├── spoke-operations                ← standard leaf library dep (narrative_gateway timeline ordering helper)
   └── sqlx, …                         ← persistence only
 ```
 
-**Key change from V1.144:** `nexus-local-db` no longer depends on `nexus-spoke-adapter`. The dependency edge is reversed — `nexus-spoke-adapter` depends on `nexus-local-db` for storage primitives. Business crates (`nexus-daemon-runtime`, MCA, `nexus-narrative`) depend on `nexus-spoke-adapter` for the adapter + orchestrators. No crate other than `nexus-spoke-adapter` directly depends on `spoke-operations`.
+**Key change from V1.144:** `nexus-local-db` no longer depends on `nexus-spoke-adapter`. The dependency edge is reversed — `nexus-spoke-adapter` depends on `nexus-local-db` for storage primitives. Business crates (`nexus-daemon-runtime`, MCA) depend on `nexus-spoke-adapter` for the adapter + orchestrators. (`nexus-narrative` and `nexus-local-db` depend on `spoke-operations` directly as a standard leaf library for the timeline ordering helper — see the note below.)
 
-**V1.145 P1b cycle-break note:** adding `nexus-spoke-adapter → nexus-local-db` exposed a transitive cycle (`local-db → narrative → spoke-adapter → local-db`), because `nexus-narrative` runtime-depended on `nexus-spoke-adapter` for the `order_timeline_events_by_ids` timeline helper. Both `nexus-narrative` and `nexus-local-db` now take a **temporary direct `spoke-operations` dep** for that helper (identical pattern). These temp edges are removed in P4 when `get_timeline_ordered` routes through the adapter's `ScopeQueryPort` (spec §7.4 P4 read-path adoption). The conversion seam (`world_kb_to_spoke` / `spoke_to_world_kb`) is owned by `nexus-spoke-adapter` (V1.145 P1a), not `nexus-knowledge`.
+**`spoke-operations` direct deps (standard library usage, not temporary):** adding `nexus-spoke-adapter → nexus-local-db` in P1b would have formed a transitive cycle (`local-db → narrative → spoke-adapter → local-db`) while `nexus-narrative` still runtime-depended on `nexus-spoke-adapter` for the `order_timeline_events_by_ids` timeline helper. The dep edge was reversed instead, and both `nexus-narrative` and `nexus-local-db` take `spoke-operations` directly for that helper. `spoke-operations` is a leaf dependency — this is standard spoke-library usage (like depending on `serde`), **not** a temporary workaround and **not** a cycle. The conversion seam (`world_kb_to_spoke` / `spoke_to_world_kb`) is owned by `nexus-spoke-adapter` (V1.145 P1a), not `nexus-knowledge`. Routing the `get_timeline_ordered` ordering back through the spoke-adapter boundary is a **V1.146** refactor (it needs the narrative ordering to live in a spoke-adapter-dependent layer; see §7.4 "Read-path ScopeQuery adoption").
 
 ## 9. Migration Summary
 

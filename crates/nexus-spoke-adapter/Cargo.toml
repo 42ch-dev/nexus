@@ -5,7 +5,7 @@ edition.workspace = true
 authors.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Thin boundary between nexus domain types and spoke standard objects — extensions.nexus accessors + spoke-operations delegation"
+description = "Capability-aggregation boundary between nexus domain concerns and spoke standard objects — extensions.nexus accessors, lifecycle delegation, conversion seam, production NexusBaselineAdapter + 6 port impls"
 
 [lints]
 workspace = true
