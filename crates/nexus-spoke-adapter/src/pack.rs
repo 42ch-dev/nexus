@@ -147,7 +147,10 @@ pub struct ParsedPack {
 ///
 /// # Parameters
 ///
-/// - `entries` — ordered `KnowledgeEntry` list.
+/// - `entries` — ordered `KnowledgeEntry` list. Each entry carries its own
+///   `world_id` via the typed `extensions.nexus.world_id` accessor (see
+///   [`crate::extensions`]); there is no top-level `world_id` parameter because
+///   the spoke handbook pack shape is intentionally world-agnostic.
 /// - `relations` — Relations referencing entries in the pack.
 /// - `anchors` — optional `SourceAnchors` (pass `None` or empty slice to omit the key).
 /// - `title`, `version`, `creator` — required `modules.pack` metadata.
@@ -431,16 +434,6 @@ mod tests {
         assert!(matches!(err, PackError::MissingModulesPack));
     }
 
-    #[test]
-    fn error_missing_modules_top_level() {
-        let bad = json!({
-            "entries": [],
-            "relations": []
-        });
-        let err = parse_pack(&bad).unwrap_err();
-        assert!(matches!(err, PackError::MissingModulesPack));
-    }
-
     // ── Missing required pack fields ──────────────────────────────────────
 
     #[test]
@@ -469,6 +462,44 @@ mod tests {
             err,
             PackError::MissingPackField { field: "version" }
         ));
+    }
+
+    // ── Type-mismatch validation paths ───────────────────────────────────
+
+    #[test]
+    fn error_modules_pack_not_object() {
+        let bad = json!({
+            "modules": { "pack": "not-an-object" },
+            "entries": [],
+            "relations": []
+        });
+        let err = parse_pack(&bad).unwrap_err();
+        assert!(matches!(err, PackError::MissingModulesPack));
+    }
+
+    #[test]
+    fn error_title_wrong_type() {
+        let bad = json!({
+            "modules": { "pack": { "title": 42, "version": "1.0", "creator": "me" } },
+            "entries": [],
+            "relations": []
+        });
+        let err = parse_pack(&bad).unwrap_err();
+        assert!(matches!(
+            err,
+            PackError::MissingPackField { field: "title" }
+        ));
+    }
+
+    #[test]
+    fn error_entries_not_array() {
+        let bad = json!({
+            "modules": { "pack": { "title": "T", "version": "1.0", "creator": "me" } },
+            "entries": { "not": "an-array" },
+            "relations": []
+        });
+        let err = parse_pack(&bad).unwrap_err();
+        assert!(matches!(err, PackError::Json(_)));
     }
 
     // ── Missing entries / relations ───────────────────────────────────────
