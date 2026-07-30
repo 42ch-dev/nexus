@@ -674,10 +674,9 @@ mod tests {
                 created_at: chrono::Utc::now().to_rfc3339(),
                 updated_at: chrono::Utc::now().to_rfc3339(),
                 needs_review: false,
-                                source: SOURCE_MANUAL.to_string(),
+                source: SOURCE_MANUAL.to_string(),
                 extensions_nexus_json: None,
             },
-            
         )
         .await
         .unwrap();
@@ -713,10 +712,9 @@ mod tests {
                 created_at: chrono::Utc::now().to_rfc3339(),
                 updated_at: chrono::Utc::now().to_rfc3339(),
                 needs_review: false,
-                                source: SOURCE_MANUAL.to_string(),
+                source: SOURCE_MANUAL.to_string(),
                 extensions_nexus_json: None,
             },
-            
         )
         .await
         .unwrap();
@@ -777,10 +775,9 @@ mod tests {
                 created_at: chrono::Utc::now().to_rfc3339(),
                 updated_at: chrono::Utc::now().to_rfc3339(),
                 needs_review: false,
-                                source: SOURCE_MANUAL.to_string(),
+                source: SOURCE_MANUAL.to_string(),
                 extensions_nexus_json: None,
             },
-            
         )
         .await
         .unwrap();
@@ -833,10 +830,9 @@ mod tests {
                 created_at: chrono::Utc::now().to_rfc3339(),
                 updated_at: chrono::Utc::now().to_rfc3339(),
                 needs_review: false,
-                                source: SOURCE_MANUAL.to_string(),
+                source: SOURCE_MANUAL.to_string(),
                 extensions_nexus_json: None,
             },
-            
         )
         .await
         .unwrap();

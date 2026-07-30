@@ -21,8 +21,8 @@
 //! discovery + cross-host orchestration). Nexus is local-first today;
 //! peer manifests have no backing table and no discovery protocol.
 //!
-//! **Upgrade path:** add a `peer_hosts` table (host_id, manifest JSON,
-//! last_seen, capabilities); implement a peer-discovery protocol (mDNS
+//! **Upgrade path:** add a `peer_hosts` table (`host_id`, manifest JSON,
+//! `last_seen`, capabilities); implement a peer-discovery protocol (mDNS
 //! or spoke's host-hello handshake); wire `list_peer_host_capability_manifests`
 //! to query the table. Until a trigger fires, this stub returns the
 //! documented empty peer list.

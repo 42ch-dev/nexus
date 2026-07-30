@@ -172,6 +172,10 @@ pub fn apply_activation(
 /// Evaluate `cfg.logic` against the combined scan text.
 ///
 /// Returns `(accepted, reason)`.
+///
+/// Four logic arms + unknown→`and_any` fallback keep this slightly over the
+/// pedantic line budget; splitting would obscure the exhaustive match table.
+#[allow(clippy::too_many_lines)] // exhaustive activation.logic match table
 fn evaluate_activation(cfg: &ActivationConfig, scan_text: &str) -> (bool, String) {
     let lower_keys: Vec<String> = cfg.key.iter().map(|k| k.to_lowercase()).collect();
 
