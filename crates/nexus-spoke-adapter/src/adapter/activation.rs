@@ -42,7 +42,7 @@ pub struct ActivationResult {
 }
 
 /// Per-entry activation trace record.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct ActivationTraceEntry {
     pub entry_id: String,
     pub canonical_name: String,

@@ -149,6 +149,14 @@ pub enum ContextCommand {
         /// Maximum number of user knowledge entries to return (default: 20)
         #[arg(long, default_value_t = 20)]
         knowledge_limit: usize,
+
+        /// Emit diagnostic inspector packet JSON (requires `NEXUS_MCA_LORE_ACTIVATION=1`)
+        #[arg(long)]
+        emit_packet: bool,
+
+        /// Write inspector packet JSON to file instead of stdout
+        #[arg(long)]
+        packet_out: Option<String>,
     },
 }
 
@@ -190,8 +198,10 @@ pub async fn run(cmd: ContextCommand, config: &CliConfig) -> Result<()> {
             kb_search,
             kb_type,
             knowledge_limit,
+            emit_packet,
+            packet_out,
         } => {
-            let ctx = run_assemble_moment(
+            let maybe_ctx = run_assemble_moment(
                 config,
                 world_id.as_deref(),
                 user_id.as_deref(),
@@ -204,8 +214,16 @@ pub async fn run(cmd: ContextCommand, config: &CliConfig) -> Result<()> {
                 kb_search.as_deref(),
                 kb_type.as_deref(),
                 Some(knowledge_limit),
+                emit_packet,
+                packet_out.as_deref(),
             )
             .await?;
+
+            // None means --emit-packet already wrote JSON to stdout;
+            // skip normal context output.
+            let Some(ctx) = maybe_ctx else {
+                return Ok(());
+            };
 
             // Print full context to stdout
             println!("{}", ctx.to_full_context());
@@ -535,6 +553,10 @@ async fn open_shared_pool(config: &CliConfig) -> Result<sqlx::SqlitePool> {
 /// Uses `SqliteNarrativeGateway`, `SqliteKbStore`, and `SqliteKnowledgeStore`
 /// from `nexus-local-db` for all four domain slices.
 ///
+/// Returns `None` when `--emit-packet` writes diagnostic JSON to stdout
+/// (normal context output should be suppressed). Returns `Some(ctx)` when
+/// normal context output should proceed.
+///
 /// # Errors
 ///
 /// Returns `CliError` if the database cannot be opened or migrations fail.
@@ -554,7 +576,18 @@ pub async fn run_assemble_moment(
     kb_search: Option<&str>,
     kb_type: Option<&str>,
     knowledge_limit: Option<usize>,
-) -> Result<MomentContext> {
+    emit_packet: bool,
+    packet_out: Option<&str>,
+) -> Result<Option<MomentContext>> {
+    // V1.146 P4 T3: gate — emit-packet requires activation to be ON.
+    let activation_on = std::env::var("NEXUS_MCA_LORE_ACTIVATION").as_deref() == Ok("1");
+    if emit_packet && !activation_on {
+        return Err(crate::errors::CliError::Other(
+            "--emit-packet requires lore activation. Set NEXUS_MCA_LORE_ACTIVATION=1 to enable activation."
+                .to_string(),
+        ));
+    }
+
     let pool = open_shared_pool(config).await?;
     let narrative = nexus_local_db::narrative_gateway::SqliteNarrativeGateway::new(pool.clone());
     // V1.145 P2 — the MCA WorldKB read now crosses the spoke-adapter boundary:
@@ -609,12 +642,79 @@ pub async fn run_assemble_moment(
 
     // V1.146 P4 T2: activation flag from env (MCA lib stays env-agnostic).
     // Set activation_enabled when NEXUS_MCA_LORE_ACTIVATION is exactly "1".
-    if std::env::var("NEXUS_MCA_LORE_ACTIVATION").as_deref() == Ok("1") {
+    if activation_on {
         request = request.with_activation_enabled(true);
     }
 
     // Call assemble_moment with persistent stores
-    Ok(assemble_moment(&request, &narrative, &kb, &knowledge).await)
+    let ctx = assemble_moment(&request, &narrative, &kb, &knowledge).await;
+
+    // V1.146 P4 T3: emit diagnostic inspector packet when --emit-packet is set.
+    if emit_packet {
+        emit_inspector_packet(&ctx, packet_out)?;
+        if packet_out.is_some() {
+            // JSON written to file; normal context output should follow.
+            Ok(Some(ctx))
+        } else {
+            // JSON written to stdout; suppress normal context output.
+            Ok(None)
+        }
+    } else {
+        Ok(Some(ctx))
+    }
+}
+
+/// Build and emit the inspector packet diagnostic JSON from the activation trace.
+fn emit_inspector_packet(ctx: &MomentContext, packet_out: Option<&str>) -> Result<()> {
+    let trace = ctx.activation_trace.as_deref().unwrap_or(&[]);
+
+    // modules.placement: entries that passed activation (accepted == true).
+    let placement: Vec<serde_json::Value> = trace
+        .iter()
+        .filter(|t| t.accepted)
+        .map(|t| {
+            serde_json::json!({
+                "entry_id": t.entry_id,
+                "canonical_name": t.canonical_name,
+                "reason": t.reason,
+            })
+        })
+        .collect();
+
+    // modules.activation_trace: full per-entry fire/miss trace.
+    let trace_json: Vec<serde_json::Value> = trace
+        .iter()
+        .map(|t| {
+            serde_json::json!({
+                "entry_id": t.entry_id,
+                "canonical_name": t.canonical_name,
+                "reason": t.reason,
+                "accepted": t.accepted,
+            })
+        })
+        .collect();
+
+    let packet = serde_json::json!({
+        "modules": {
+            "placement": placement,
+            "activation_trace": trace_json,
+        }
+    });
+
+    let json_str = serde_json::to_string_pretty(&packet).map_err(|e| {
+        crate::errors::CliError::Other(format!("Failed to serialize inspector packet: {e}"))
+    })?;
+
+    if let Some(path) = packet_out {
+        std::fs::write(path, format!("{json_str}\n")).map_err(|e| {
+            crate::errors::CliError::Other(format!("Failed to write packet to {path}: {e}"))
+        })?;
+        eprintln!("Inspector packet written to {path}");
+    } else {
+        println!("{json_str}");
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]
@@ -622,6 +722,9 @@ pub async fn run_assemble_moment(
 #[allow(clippy::field_reassign_with_default)]
 mod tests {
     use super::*;
+
+    // Import activation types for inspector packet tests.
+    use nexus_spoke_adapter::adapter::activation::ActivationTraceEntry;
 
     /// Test valid `WorldId` formats
     #[test]
@@ -710,6 +813,8 @@ mod tests {
             kb_search: Some("hero".to_string()),
             kb_type: Some("character".to_string()),
             knowledge_limit: 10,
+            emit_packet: true,
+            packet_out: Some("packet.json".to_string()),
         };
         let _ = ContextCommand::AssembleMoment {
             world_id: None,
@@ -723,6 +828,8 @@ mod tests {
             kb_search: None,
             kb_type: None,
             knowledge_limit: 20,
+            emit_packet: false,
+            packet_out: None,
         };
     }
 
@@ -1403,7 +1510,7 @@ mod tests {
             seeder.insert_knowledge_entry(entry).await.unwrap();
         }
 
-        let stage0 = Stage0Assembly {
+        let _stage0 = Stage0Assembly {
             personality: "P.".to_string(),
             experience: "E.".to_string(),
             user_prompt: "P.".to_string(),
@@ -1442,5 +1549,175 @@ mod tests {
         assert!(kb_text.contains("Alice"));
         assert!(kb_text.contains("Atlantis"));
         assert!(kb_text.contains("Anvil"));
+    }
+
+    // ── V1.146 P4 T3: inspector packet emission ──────────────────────
+
+    /// Build a `MomentContext` with a mock activation trace.
+    fn mock_ctx_with_trace(trace: Vec<ActivationTraceEntry>) -> MomentContext {
+        MomentContext {
+            stage0_context: "Test".to_string(),
+            world_state: None,
+            timeline: None,
+            world_kb: None,
+            user_knowledge: None,
+            activation_trace: Some(trace),
+        }
+    }
+
+    /// Helper: build a trace entry.
+    fn trace_entry(
+        entry_id: &str,
+        canonical_name: &str,
+        reason: &str,
+        accepted: bool,
+    ) -> ActivationTraceEntry {
+        ActivationTraceEntry {
+            entry_id: entry_id.to_string(),
+            canonical_name: canonical_name.to_string(),
+            reason: reason.to_string(),
+            accepted,
+        }
+    }
+
+    /// P4 T3: inspector packet JSON contains `modules.placement` and
+    /// `modules.activation_trace` keys with correct structure.
+    #[test]
+    fn inspector_packet_contains_placement_and_trace_keys() {
+        let trace = vec![
+            trace_entry("kb_hero", "Hero", "and_any: matched keys [king]", true),
+            trace_entry(
+                "kb_castle",
+                "Castle",
+                "and_any: no key matched (1 keys scanned)",
+                false,
+            ),
+            trace_entry("kb_forest", "Forest", "no activation module", true),
+        ];
+        let ctx = mock_ctx_with_trace(trace);
+
+        // Write packet to temp file and inspect JSON.
+        let dir = tempfile::tempdir().unwrap();
+        let packet_path = dir.path().join("packet.json");
+        let path_str = packet_path.to_str().unwrap();
+
+        emit_inspector_packet(&ctx, Some(path_str)).unwrap();
+
+        let raw = std::fs::read_to_string(&packet_path).unwrap();
+        let packet: serde_json::Value = serde_json::from_str(&raw).unwrap();
+
+        // Top-level key
+        let modules = &packet["modules"];
+        assert!(modules.is_object(), "packet.modules must be an object");
+
+        // placement
+        let placement = &modules["placement"];
+        assert!(placement.is_array(), "placement must be an array");
+        assert_eq!(placement.as_array().unwrap().len(), 2, "2 accepted entries");
+
+        // First placed: Hero (accepted)
+        assert_eq!(placement[0]["entry_id"], "kb_hero");
+        assert_eq!(placement[0]["canonical_name"], "Hero");
+        assert!(placement[0]["reason"]
+            .as_str()
+            .unwrap()
+            .contains("matched keys"));
+
+        // Second placed: Forest (neutral, accepted)
+        assert_eq!(placement[1]["entry_id"], "kb_forest");
+        assert_eq!(placement[1]["canonical_name"], "Forest");
+
+        // activation_trace
+        let activation_trace = &modules["activation_trace"];
+        assert!(
+            activation_trace.is_array(),
+            "activation_trace must be an array"
+        );
+        assert_eq!(
+            activation_trace.as_array().unwrap().len(),
+            3,
+            "all 3 entries traced"
+        );
+
+        // Verify each trace entry has required fields
+        for (i, entry) in activation_trace.as_array().unwrap().iter().enumerate() {
+            assert!(entry["entry_id"].is_string(), "trace[{i}] missing entry_id");
+            assert!(
+                entry["canonical_name"].is_string(),
+                "trace[{i}] missing canonical_name"
+            );
+            assert!(entry["reason"].is_string(), "trace[{i}] missing reason");
+            assert!(
+                entry["accepted"].is_boolean(),
+                "trace[{i}] missing accepted"
+            );
+        }
+
+        // Unmatched entry (Castle) appears in trace with accepted=false
+        // but does NOT appear in placement.
+        assert_eq!(activation_trace[1]["entry_id"], "kb_castle");
+        assert_eq!(activation_trace[1]["accepted"], false);
+        let placement_ids: Vec<&str> = placement
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|e| e["entry_id"].as_str().unwrap())
+            .collect();
+        assert!(
+            !placement_ids.contains(&"kb_castle"),
+            "Castle must not appear in placement (unmatched)"
+        );
+    }
+
+    /// P4 T3: empty trace produces valid but minimal packet.
+    #[test]
+    fn inspector_packet_empty_trace() {
+        let ctx = mock_ctx_with_trace(vec![]);
+
+        let dir = tempfile::tempdir().unwrap();
+        let packet_path = dir.path().join("packet.json");
+        let path_str = packet_path.to_str().unwrap();
+
+        emit_inspector_packet(&ctx, Some(path_str)).unwrap();
+
+        let raw = std::fs::read_to_string(&packet_path).unwrap();
+        let packet: serde_json::Value = serde_json::from_str(&raw).unwrap();
+
+        assert_eq!(packet["modules"]["placement"].as_array().unwrap().len(), 0);
+        assert_eq!(
+            packet["modules"]["activation_trace"]
+                .as_array()
+                .unwrap()
+                .len(),
+            0
+        );
+    }
+
+    /// P4 T3: activation_trace is None (no activation enabled) → empty arrays.
+    #[test]
+    fn inspector_packet_no_trace_produces_empty_arrays() {
+        let ctx = MomentContext {
+            stage0_context: "Test".to_string(),
+            activation_trace: None,
+            ..MomentContext::default()
+        };
+
+        let dir = tempfile::tempdir().unwrap();
+        let packet_path = dir.path().join("packet.json");
+        let path_str = packet_path.to_str().unwrap();
+
+        emit_inspector_packet(&ctx, Some(path_str)).unwrap();
+
+        let raw = std::fs::read_to_string(&packet_path).unwrap();
+        let packet: serde_json::Value = serde_json::from_str(&raw).unwrap();
+
+        assert_eq!(packet["modules"]["placement"].as_array().unwrap().len(), 0);
+        assert_eq!(
+            packet["modules"]["activation_trace"]
+                .as_array()
+                .unwrap()
+                .len(),
+            0
+        );
     }
 }

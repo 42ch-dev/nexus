@@ -184,6 +184,10 @@ pub struct MomentContext {
     pub world_kb: Option<String>,
     /// User knowledge summary text (entries for the user).
     pub user_knowledge: Option<String>,
+    /// Per-entry activation trace (populated when `activation_enabled` is true).
+    /// V1.146 P4 T3: exposed for inspector packet emission.
+    pub activation_trace:
+        Option<Vec<nexus_spoke_adapter::adapter::activation::ActivationTraceEntry>>,
 }
 
 impl MomentContext {
@@ -382,6 +386,10 @@ where
     };
 
     // 3. World KB (if world_id provided)
+    // V1.146 P4 T3: capture activation trace for inspector packet emission.
+    let mut activation_trace: Option<
+        Vec<nexus_spoke_adapter::adapter::activation::ActivationTraceEntry>,
+    > = None;
     let world_kb = if let Some(ref world_id) = request.world_id {
         match fetch_world_kb_entries(kb_store, world_id, request).await {
             Ok(entries) if !entries.is_empty() => {
@@ -390,11 +398,14 @@ where
                     // and User Knowledge assembly. Unmatched entries are filtered
                     // out (activation gate). Neutral entries (no activation module)
                     // remain in matched.
+                    // V1.146 P4 T3: capture the full ActivationResult for
+                    // diagnostic trace emission.
                     let result = nexus_spoke_adapter::adapter::activation::apply_activation(
                         &entries,
                         &stage0_context,
                         &[],
                     );
+                    activation_trace = Some(result.trace);
                     result.matched
                 } else {
                     entries
@@ -427,6 +438,7 @@ where
         timeline,
         world_kb,
         user_knowledge,
+        activation_trace,
     };
 
     // 5. Cross-domain truncation if max_tokens set
@@ -938,6 +950,7 @@ mod tests {
             timeline: None,
             world_kb: None,
             user_knowledge: None,
+            activation_trace: None,
         };
 
         let (personality, rest) = ctx.split_stage0_personality();
@@ -974,6 +987,7 @@ mod tests {
             timeline: Some("Timeline events.".to_string()),
             world_kb: None,
             user_knowledge: None,
+            activation_trace: None,
         };
 
         // apply_cross_domain_truncation uses split_stage0_personality internally
