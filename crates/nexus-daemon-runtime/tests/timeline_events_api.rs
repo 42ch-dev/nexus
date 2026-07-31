@@ -413,3 +413,45 @@ async fn empty_list() {
     assert_eq!(body["has_more"], false);
     assert!(body["next_cursor"].is_null());
 }
+
+/// QC W-1: `limit=0` must return an empty page with `has_more=false` +
+/// `next_cursor=null` (the wire contract ties `has_more` to a non-null
+/// `next_cursor`; `has_more=true` with a null cursor would growth-loop a
+/// keyset client).
+#[tokio::test]
+async fn limit_zero_returns_no_more_pages() {
+    let ctx = ctx().await;
+    let world = "wld_test_world";
+    // Seed events that WOULD paginate at a normal limit — limit=0 must not
+    // report them as a continuation.
+    for seq in 0..3 {
+        seed_event(
+            &ctx.pool,
+            world,
+            ROOT_BRANCH,
+            "story_advance",
+            "canon",
+            seq,
+            &format!("Event {seq}"),
+            None,
+        )
+        .await;
+    }
+
+    let resp = list_events(&ctx, world, "?limit=0").await;
+    assert_eq!(resp.status_code(), StatusCode::OK, "body={}", resp.text());
+    let body: Value = resp.json();
+    assert_eq!(
+        body["items"].as_array().unwrap().len(),
+        0,
+        "limit=0 must return an empty page: {body}"
+    );
+    assert_eq!(
+        body["has_more"], false,
+        "limit=0 must not report has_more: {body}"
+    );
+    assert!(
+        body["next_cursor"].is_null(),
+        "limit=0 must return a null next_cursor: {body}"
+    );
+}

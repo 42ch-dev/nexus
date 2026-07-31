@@ -1381,8 +1381,21 @@ export function useDiscardRun() {
 
 // ── World timeline events (V1.147 P2 — compute_result merge) ────────────────
 
-/** Optional filter for the canvas events query (branch scoping only). */
-export interface WorldTimelineEventsFilter {
+/**
+ * Read-slice query for the canvas compute-event timeline.
+ *
+ * This is NOT a general timeline-events query: the daemon request is
+ * **hard-locked** to `event_type='compute_result'`, `status='canon'`, and
+ * `limit=100` — the values below are injected by the hook and cannot be
+ * overridden (they are deliberately absent from this type). `branch_id` is
+ * the only caller-controlled field; it is forwarded verbatim, and when
+ * omitted the daemon defaults to the World's current branch (root fallback).
+ *
+ * A future plan that wants a different event family (e.g. KB
+ * `block_type=event` rows) must introduce a separate hook/type — see
+ * `ListTimelineEventsQuery` (the broad wire query) on `NexusClient`.
+ */
+export interface WorldTimelineComputeEventsQuery {
   branch_id?: string;
 }
 
@@ -1391,9 +1404,9 @@ export interface WorldTimelineEventsFilter {
  * Narrative merge. Hard-filtered to the machine-written `compute_result`
  * family in `canon` state (plan Global Constraints merge discipline; the T1
  * route defaults status to canon anyway). `branch_id` is intentionally NOT
- * sent — the daemon defaults to the World's current branch (root fallback),
- * which is the canvas's existing world-state source. Pages map to the shared
- * `CursorPage` shape so `flattenPages` works.
+ * sent by the canvas — the daemon defaults to the World's current branch
+ * (root fallback), which is the canvas's existing world-state source. Pages
+ * map to the shared `CursorPage` shape so `flattenPages` works.
  *
  * Invalidation: `useAcceptRun` / `useDiscardRun` already invalidate
  * `queryKeys.timeline.all`, which prefix-matches `['timeline','events',…]` —
@@ -1402,7 +1415,7 @@ export interface WorldTimelineEventsFilter {
  */
 export function useWorldTimelineEvents(
   worldId: string | undefined,
-  filter?: WorldTimelineEventsFilter,
+  filter?: WorldTimelineComputeEventsQuery,
 ) {
   const client = useNexusClient();
   const limit = 100;

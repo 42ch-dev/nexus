@@ -860,21 +860,21 @@ export function isMergeableComputeEvent(event: TimelineEventInfo): boolean {
 }
 
 /**
- * Build the compute node payload from a log event + the KB graph.
+ * Build the compute node payload from a log event + a prebuilt
+ * `key_block_id → canonical_name` map (QC S-map: the map is built ONCE in
+ * `mergeComputeEvents` and shared across all events — O(events + entities),
+ * not O(events × entities)).
  *
- * `affectedEntries` resolves `affected_key_block_ids` against the graph's
- * `canonical_name` (unknown ids fall back to the id itself — honest).
+ * `affectedEntries` resolves `affected_key_block_ids` against the map
+ * (unknown ids fall back to the id itself — honest).
  * Exported for unit tests; consumed by `mergeComputeEvents`.
  */
 export function buildComputeNodePayload(
   event: TimelineEventInfo,
-  graph: TimelineGraph,
+  graphById: ReadonlyMap<string, string>,
   moduleNames?: ReadonlyMap<string, string>,
 ): ComputeNodePayload {
   const provenance = computeProvenanceOf(event);
-  const graphById = new Map(
-    (graph.entities ?? []).map((e) => [e.key_block_id, e.canonical_name]),
-  );
   const affectedEntries = (event.affected_key_block_ids ?? []).map((id) => ({
     id,
     title: graphById.get(id) ?? id,
@@ -929,6 +929,11 @@ export function mergeComputeEvents(
   const mergeable = events.filter(isMergeableComputeEvent);
   if (mergeable.length === 0) return [];
 
+  // QC S-map: hoist the id → canonical_name map so `buildComputeNodePayload`
+  // never rebuilds it per event (O(entities) once, then O(events) lookups).
+  const graphById = new Map(
+    (graph.entities ?? []).map((e) => [e.key_block_id, e.canonical_name]),
+  );
   const worldId = (graph.entities ?? [])[0]?.world_id ?? '';
 
   const dated: Array<{ event: TimelineEventInfo; createdAt: string }> = [];
@@ -955,7 +960,7 @@ export function mergeComputeEvents(
       id: computeNodeIdOf(event.id),
       type: 'timeline-compute-result',
       position: { x: computeStartX + i * EVENT_STEP_X, y: WHEN_AXIS_Y },
-      data: computeEventToTimelineNodeData(event, graph, worldId, createdAt, moduleNames),
+      data: computeEventToTimelineNodeData(event, graphById, worldId, createdAt, moduleNames),
     });
   });
 
@@ -969,7 +974,7 @@ export function mergeComputeEvents(
       id: computeNodeIdOf(event.id),
       type: 'timeline-compute-result',
       position: { x: undatedOriginX + i * EVENT_STEP_X, y: TEMPORAL_UNKNOWN_Y },
-      data: computeEventToTimelineNodeData(event, graph, worldId, undefined, moduleNames),
+      data: computeEventToTimelineNodeData(event, graphById, worldId, undefined, moduleNames),
     });
   });
 
@@ -978,12 +983,12 @@ export function mergeComputeEvents(
 
 function computeEventToTimelineNodeData(
   event: TimelineEventInfo,
-  graph: TimelineGraph,
+  graphById: ReadonlyMap<string, string>,
   worldId: string,
   createdAt: string | undefined,
   moduleNames?: ReadonlyMap<string, string>,
 ): TimelineNodeData {
-  const payload = buildComputeNodePayload(event, graph, moduleNames);
+  const payload = buildComputeNodePayload(event, graphById, moduleNames);
   const data: TimelineNodeData = {
     // Synthetic entity-projection fields (see TimelineNodeData docblock):
     // compute nodes are NOT KB entities; the write path never sees them.

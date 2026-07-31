@@ -338,6 +338,7 @@ pub async fn append_event(
         summary,
         sequence_no,
         None, // extensions_nexus_json — default (no provenance)
+        None, // affected_key_block_ids_json — default (none)
         "provisional",
     )
     .await
@@ -400,96 +401,36 @@ pub async fn append_event_in_tx(
         summary,
         sequence_no,
         None, // extensions_nexus_json — default (no provenance)
-        "provisional",
-    )
-    .await
-}
-
-/// Append a timeline event inside an existing transaction, with
-/// `extensions_nexus_json` provenance (V1.147 P0 — direct lane compute
-/// provenance).
-///
-/// Like [`append_event_in_tx`] but writes the supplied JSON string into the
-/// `narrative_timeline_events.extensions_nexus_json` column (additive migration
-/// `20260729_000001_timeline_extensions_nexus.sql`).  Existing callers of
-/// `append_event_in_tx` without provenance needs are unchanged.
-///
-/// Events are appended as `provisional` (the default pending state); the
-/// direct-lane compute Accept path must use
-/// [`append_event_canon_with_extensions_in_tx`] instead — an accepted Run is
-/// author-committed world truth and the P2 Timeline projection reads `canon`
-/// events only.
-///
-/// # Errors
-///
-/// Same error variants as [`append_event_in_tx`].
-pub async fn append_event_with_extensions_in_tx(
-    tx: &mut sqlx::Transaction<'_, Sqlite>,
-    world_id: &str,
-    branch_id: &str,
-    event_type: &str,
-    title: Option<&str>,
-    summary: Option<&str>,
-    extensions_nexus_json: &str,
-) -> Result<AppendEventResult, NarrativeWriteError> {
-    // Validate world_id prefix
-    validate_id_prefix(world_id, "wld_", "world_id")?;
-
-    // Validate world FK exists
-    // SAFETY: simple EXISTS query against known table schema
-    let world_exists: i64 =
-        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM narrative_worlds WHERE world_id = ?)")
-            .bind(world_id)
-            .fetch_one(&mut **tx)
-            .await?;
-
-    if world_exists == 0 {
-        return Err(NarrativeWriteError::FkNotFound {
-            table: "world".to_string(),
-            id: world_id.to_string(),
-        });
-    }
-
-    // Allocate next sequence_no
-    // SAFETY: MAX aggregate query against known table schema
-    let max_seq: Option<i64> = sqlx::query_scalar(
-        "SELECT MAX(sequence_no) FROM narrative_timeline_events WHERE world_id = ? AND branch_id = ?",
-    )
-    .bind(world_id)
-    .bind(branch_id)
-    .fetch_one(&mut **tx)
-    .await?;
-
-    let sequence_no = max_seq.unwrap_or(-1) + 1;
-
-    append_event_core(
-        &mut **tx,
-        world_id,
-        branch_id,
-        event_type,
-        title,
-        summary,
-        sequence_no,
-        Some(extensions_nexus_json),
+        None, // affected_key_block_ids_json — default (none)
         "provisional",
     )
     .await
 }
 
 /// Append a **canon** timeline event inside an existing transaction, with
-/// `extensions_nexus_json` provenance (V1.147 P2 dogfood — direct lane
-/// compute Accept).
+/// `extensions_nexus_json` provenance and optional `affected_key_block_ids`
+/// (V1.147 P2 dogfood — direct lane compute Accept).
 ///
-/// Identical to [`append_event_with_extensions_in_tx`] but writes
-/// `status = 'canon'` instead of the default `provisional`. The direct-lane
-/// Accept transaction commits the author's approved proposals as world truth,
-/// and the V1.147 P2 Timeline projection (`GET .../timeline/events` default +
-/// `useWorldTimelineEvents`) reads `canon` events only — a provisional
-/// `compute_result` would never surface as a Timeline node.
+/// The direct-lane Accept transaction commits the author's approved proposals
+/// as world truth, and the V1.147 P2 Timeline projection
+/// (`GET .../timeline/events` default + `useWorldTimelineEvents`) reads
+/// `canon` events only — a provisional `compute_result` would never surface
+/// as a Timeline node. `append_event_in_tx` (no provenance) remains the
+/// pending/provisional writer for non-Accept paths; there is intentionally no
+/// provisional-with-provenance writer (deleted pre-1.0 — the canon helper
+/// owns the only provenance write today).
+///
+/// `affected_key_block_ids_json`, when `Some`, is written to
+/// `narrative_timeline_events.affected_key_block_ids_json` so the P2
+/// inspector's "Affected knowledge" section can resolve the proposal's
+/// affected entries (V1.147 P2 QC S-affected).
 ///
 /// # Errors
 ///
 /// Same error variants as [`append_event_in_tx`].
+#[allow(clippy::too_many_arguments)]
+// ^ justification: mirrors append_event_core's INSERT columns; grouping would
+// add indirection for one caller (the Accept path).
 pub async fn append_event_canon_with_extensions_in_tx(
     tx: &mut sqlx::Transaction<'_, Sqlite>,
     world_id: &str,
@@ -498,6 +439,7 @@ pub async fn append_event_canon_with_extensions_in_tx(
     title: Option<&str>,
     summary: Option<&str>,
     extensions_nexus_json: &str,
+    affected_key_block_ids_json: Option<&str>,
 ) -> Result<AppendEventResult, NarrativeWriteError> {
     // Validate world_id prefix
     validate_id_prefix(world_id, "wld_", "world_id")?;
@@ -538,13 +480,13 @@ pub async fn append_event_canon_with_extensions_in_tx(
         summary,
         sequence_no,
         Some(extensions_nexus_json),
+        affected_key_block_ids_json,
         "canon",
     )
     .await
 }
 
-/// Shared INSERT logic for [`append_event`], [`append_event_in_tx`],
-/// [`append_event_with_extensions_in_tx`], and
+/// Shared INSERT logic for [`append_event`], [`append_event_in_tx`], and
 /// [`append_event_canon_with_extensions_in_tx`].
 ///
 /// `executor` must be an object that can run a single sqlx query (e.g. `&Pool`
@@ -556,11 +498,16 @@ pub async fn append_event_canon_with_extensions_in_tx(
 /// `20260729_000001_timeline_extensions_nexus.sql`); when `None` the column
 /// stays `NULL`.
 ///
+/// `affected_key_block_ids_json`, when `Some`, is written to
+/// `narrative_timeline_events.affected_key_block_ids_json` (V1.147 P2 — the
+/// Accept path persists the proposal's affected entries for the compute
+/// inspector); when `None` the column stays `NULL`.
+///
 /// `status` is the timeline event status written on insert (`provisional` for
 /// pending/appended events; `canon` for author-committed events such as
 /// accepted direct-lane compute Runs).
 #[allow(clippy::too_many_arguments)]
-// ^ justification: internal helper; all 9 scalar args map 1:1 to INSERT columns.
+// ^ justification: internal helper; all 10 scalar args map 1:1 to INSERT columns.
 // Grouping into a struct would add indirection for zero abstraction gain.
 async fn append_event_core<'e, E: sqlx::Executor<'e, Database = Sqlite>>(
     executor: E,
@@ -571,6 +518,7 @@ async fn append_event_core<'e, E: sqlx::Executor<'e, Database = Sqlite>>(
     summary: Option<&str>,
     sequence_no: i64,
     extensions_nexus_json: Option<&str>,
+    affected_key_block_ids_json: Option<&str>,
     status: &str,
 ) -> Result<AppendEventResult, NarrativeWriteError> {
     let event_id = generate_event_id();
@@ -581,8 +529,9 @@ async fn append_event_core<'e, E: sqlx::Executor<'e, Database = Sqlite>>(
     let result = sqlx::query(
         "INSERT INTO narrative_timeline_events \
             (timeline_event_id, world_id, branch_id, event_type, status, sequence_no, \
-             title, summary, metadata_json, extensions_nexus_json, created_at) \
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, '{}', ?, ?)",
+             title, summary, metadata_json, extensions_nexus_json, \
+             affected_key_block_ids_json, created_at) \
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, '{}', ?, ?, ?)",
     )
     .bind(&event_id)
     .bind(world_id)
@@ -593,6 +542,7 @@ async fn append_event_core<'e, E: sqlx::Executor<'e, Database = Sqlite>>(
     .bind(title)
     .bind(summary)
     .bind(extensions_nexus_json)
+    .bind(affected_key_block_ids_json)
     .bind(&created_at)
     .execute(executor)
     .await;
@@ -912,57 +862,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_append_event_with_extensions_in_tx_writes_provenance() {
-        let (pool, _dir) = fresh_pool().await;
-        seed_creator(&pool).await;
-
-        let world = create_world(
-            &pool,
-            "ctr_test",
-            "Provenance Test",
-            "provenance-test",
-            "private",
-            "manual",
-        )
-        .await
-        .unwrap();
-
-        let provenance = r#"{"compute":{"module_id":"mod_test","module_version":"0.1.0","run_id":"run_abc","source_kind":"direct_invoke"}}"#;
-
-        // Begin a TX, append with extensions, commit.
-        let mut tx = pool.begin().await.unwrap();
-        let result = append_event_with_extensions_in_tx(
-            &mut tx,
-            &world.world_id,
-            &world.root_fork_branch_id,
-            "compute_result",
-            Some("Test Compute Result"),
-            Some("Module mod_test computed against the world."),
-            provenance,
-        )
-        .await
-        .unwrap();
-        tx.commit().await.unwrap();
-
-        assert!(result.event_id.starts_with("evt_"));
-
-        // Read back and verify the extensions_nexus_json column.
-        // SAFETY: test-only query against vetted table.
-        let row: (Option<String>,) = sqlx::query_as(
-            "SELECT extensions_nexus_json FROM narrative_timeline_events WHERE timeline_event_id = ?",
-        )
-        .bind(&result.event_id)
-        .fetch_one(&pool)
-        .await
-        .unwrap();
-
-        assert_eq!(row.0.as_deref(), Some(provenance));
-    }
-
-    #[tokio::test]
     async fn test_append_event_canon_with_extensions_in_tx_writes_canon() {
         // V1.147 P2 dogfood: an accepted direct-lane compute Run must land on
         // the Timeline as a `canon` event — the projection reads canon only.
+        // Folds the former `append_event_with_extensions_in_tx` assertions
+        // (provenance column + affected_key_block_ids_json) into the canon
+        // helper's test — the provisional-with-provenance writer was deleted
+        // pre-1.0 (QC S-dead: the canon helper owns the only provenance write).
         let (pool, _dir) = fresh_pool().await;
         seed_creator(&pool).await;
 
@@ -978,6 +884,7 @@ mod tests {
         .unwrap();
 
         let provenance = r#"{"compute":{"module_id":"basic-combat","module_version":"1.0.0","run_id":"run_canon","source_kind":"direct_invoke"}}"#;
+        let affected = r#"["kb_def","kb_atk"]"#;
 
         let mut tx = pool.begin().await.unwrap();
         let result = append_event_canon_with_extensions_in_tx(
@@ -988,6 +895,7 @@ mod tests {
             Some("Combat resolved"),
             None,
             provenance,
+            Some(affected),
         )
         .await
         .unwrap();
@@ -996,8 +904,9 @@ mod tests {
         assert!(result.event_id.starts_with("evt_"));
 
         // SAFETY: test-only query against vetted table.
-        let row: (String,) = sqlx::query_as(
-            "SELECT status FROM narrative_timeline_events WHERE timeline_event_id = ?",
+        let row: (String, Option<String>, Option<String>) = sqlx::query_as(
+            "SELECT status, extensions_nexus_json, affected_key_block_ids_json \
+             FROM narrative_timeline_events WHERE timeline_event_id = ?",
         )
         .bind(&result.event_id)
         .fetch_one(&pool)
@@ -1005,6 +914,12 @@ mod tests {
         .unwrap();
 
         assert_eq!(row.0, "canon");
+        assert_eq!(row.1.as_deref(), Some(provenance));
+        assert_eq!(
+            row.2.as_deref(),
+            Some(affected),
+            "affected_key_block_ids_json must round-trip from the proposals"
+        );
     }
 
     #[tokio::test]

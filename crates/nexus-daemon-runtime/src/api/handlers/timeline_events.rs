@@ -227,6 +227,18 @@ pub async fn get_timeline_events(
     let cursor_ref = cursor.as_ref().map(|(b, s)| (b.as_str(), *s));
 
     let limit = params.limit.unwrap_or(DEFAULT_PAGE_SIZE).min(MAX_PAGE_SIZE);
+    // W-1 (QC): `limit=0` must not report `has_more` — the wire contract
+    // states `has_more` is equivalent to `next_cursor` being non-null, and a
+    // `has_more=true, next_cursor=null` response would growth-loop a keyset
+    // client (null cursor → re-request page 1). An empty page with no
+    // continuation is the only honest answer.
+    if limit == 0 {
+        return Ok(Json(ListTimelineEventsResponse {
+            items: Vec::new(),
+            has_more: false,
+            next_cursor: None,
+        }));
+    }
     // Fetch one extra row to detect has_more.
     let fetch_limit = i64::from(limit) + 1;
 

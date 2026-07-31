@@ -118,6 +118,12 @@ export interface NodeChromeShellProps {
    * Inline style wins over the base `bg-canvas-node-fill` / border classes.
    */
   style?: CSSProperties;
+  /**
+   * Accessible name for the node card (QC S-aria — family-wide a11y fix:
+   * every node kind passes `aria-label`; before this prop existed it was
+   * silently dropped and the i18n strings were dead).
+   */
+  'aria-label'?: string;
   children?: ReactNode;
 }
 
@@ -135,6 +141,7 @@ export function NodeChromeShell({
   dragging = false,
   className,
   style,
+  'aria-label': ariaLabel,
   children,
 }: NodeChromeShellProps) {
   // `accent={true}` (legacy boolean) → 'strategy' so existing call sites
@@ -145,6 +152,7 @@ export function NodeChromeShell({
   return (
     <div
       data-dragging={dragging ? 'true' : undefined}
+      aria-label={ariaLabel}
       className={cn(
         // Base structural chrome. `shadow-card` is the v0.4 elevation-1 alias
         // (DESIGN.md §Elevation). Hover lifts to elevation-2; the
