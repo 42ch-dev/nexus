@@ -502,9 +502,15 @@ async fn list_runs_filter_by_status() {
 async fn list_runs_filter_by_creator_world_ids() {
     let (pool, _dir) = setup_db().await;
 
-    insert_run(&pool, "w-1", "mod-x", None, None, None, None).await.unwrap();
-    insert_run(&pool, "w-2", "mod-x", None, None, None, None).await.unwrap();
-    insert_run(&pool, "w-3", "mod-x", None, None, None, None).await.unwrap();
+    insert_run(&pool, "w-1", "mod-x", None, None, None, None)
+        .await
+        .unwrap();
+    insert_run(&pool, "w-2", "mod-x", None, None, None, None)
+        .await
+        .unwrap();
+    insert_run(&pool, "w-3", "mod-x", None, None, None, None)
+        .await
+        .unwrap();
 
     let filters = RunListFilters {
         creator_world_ids: Some(vec!["w-1".to_string(), "w-2".to_string()]),
@@ -521,8 +527,12 @@ async fn list_runs_filter_by_creator_world_ids() {
 async fn list_runs_empty_creator_world_ids_returns_nothing() {
     let (pool, _dir) = setup_db().await;
 
-    insert_run(&pool, "w-1", "mod-x", None, None, None, None).await.unwrap();
-    insert_run(&pool, "w-2", "mod-x", None, None, None, None).await.unwrap();
+    insert_run(&pool, "w-1", "mod-x", None, None, None, None)
+        .await
+        .unwrap();
+    insert_run(&pool, "w-2", "mod-x", None, None, None, None)
+        .await
+        .unwrap();
 
     let filters = RunListFilters {
         creator_world_ids: Some(vec![]),

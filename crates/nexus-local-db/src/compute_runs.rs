@@ -308,7 +308,7 @@ pub async fn set_run_discarded(pool: &SqlitePool, run_id: &str) -> Result<u64, L
 /// `"{created_at}|{run_id}"` composite cursor that the caller passes back
 /// unchanged as `cursor` (the wire contract declares it opaque — clients
 /// MUST NOT parse it).  Rows are ordered newest-first to match the
-/// `RunListResponse.items` description ("ordered by created_at
+/// `RunListResponse.items` description ("ordered by `created_at`
 /// descending") — W1 fix (was `ORDER BY run_id ASC`).
 ///
 /// Callers should pass `limit >= 1`.  When `limit == 0` the `limit+1`
@@ -352,7 +352,7 @@ pub async fn list_runs(
          FROM compute_sessions WHERE run_id IS NOT NULL",
     );
 
-    if let Some(ref cursor_val) = cursor {
+    if let Some(cursor_val) = cursor {
         // Keyset cursor on (created_at, run_id): decode the opaque
         // "{created_at}|{run_id}" pair.  RFC3339 timestamps never contain
         // '|', so the split is unambiguous.

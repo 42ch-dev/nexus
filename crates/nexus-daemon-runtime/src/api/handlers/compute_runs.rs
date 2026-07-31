@@ -113,8 +113,9 @@ pub async fn run(
     // Build ComputeInput.
     let invocation_params = req.invocation_params.clone();
     let invocation_params_str = serde_json::to_string(&invocation_params).ok();
-    let builder = ComputeInputBuilder::new(pool.clone(), &req.world_id, manifest, invocation_params)
-        .with_narrative_position(branch_id.clone(), timeline_head_event_id.clone());
+    let builder =
+        ComputeInputBuilder::new(pool.clone(), &req.world_id, manifest, invocation_params)
+            .with_narrative_position(branch_id.clone(), timeline_head_event_id.clone());
     let compute_input = builder.build().await.map_err(map_build_error)?;
 
     // Insert run row (F-003: snapshot branch + timeline head).
@@ -343,9 +344,8 @@ pub async fn accept_run(
         if req.timeline_event_ids_to_accept.is_empty() {
             None
         } else {
-            let mut selected = std::collections::HashSet::with_capacity(
-                req.timeline_event_ids_to_accept.len(),
-            );
+            let mut selected =
+                std::collections::HashSet::with_capacity(req.timeline_event_ids_to_accept.len());
             for id in &req.timeline_event_ids_to_accept {
                 let index = id
                     .strip_prefix("evt_")
@@ -669,7 +669,9 @@ async fn resolve_run_branch(
         message: format!("world '{world_id}' not found"),
     })?;
 
-    let root = row.root_fork_branch_id.unwrap_or_else(|| "fbk_root".to_string());
+    let root = row
+        .root_fork_branch_id
+        .unwrap_or_else(|| "fbk_root".to_string());
     match req_branch_id {
         None => Ok((root, row.current_timeline_head_id)),
         Some(req) if req == root => Ok((req.to_string(), row.current_timeline_head_id)),

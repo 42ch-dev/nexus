@@ -108,6 +108,23 @@ async fn seed_character(
     current_hp: i64,
     max_hp: i64,
 ) {
+    seed_character_in_world(
+        pool, WORLD, entry_id, name, base_atk, base_def, current_hp, max_hp,
+    )
+    .await;
+}
+
+/// World-aware variant of [`seed_character`] (foreign-world KB fixtures).
+async fn seed_character_in_world(
+    pool: &sqlx::SqlitePool,
+    world_id: &str,
+    entry_id: &str,
+    name: &str,
+    base_atk: i64,
+    base_def: i64,
+    current_hp: i64,
+    max_hp: i64,
+) {
     use nexus_contracts::BlockType;
     use nexus_knowledge::world_kb::knowledge_entry::{WorldKbBody, WorldKbEntry};
     use nexus_knowledge::world_kb::KbStore;
@@ -115,7 +132,7 @@ async fn seed_character(
 
     let kb = WorldKbEntry {
         entry_id: entry_id.to_string(),
-        world_id: WORLD.to_string(),
+        world_id: world_id.to_string(),
         block_type: BlockType::Character,
         canonical_name: name.to_string(),
         body: Some(WorldKbBody {
@@ -135,7 +152,7 @@ async fn seed_character(
             })),
             ..Default::default()
         }),
-        ..WorldKbEntry::new(WORLD, BlockType::Character, name)
+        ..WorldKbEntry::new(world_id, BlockType::Character, name)
     };
     SqliteKbStore::new(pool.clone())
         .insert_knowledge_entry(kb)
@@ -854,4 +871,436 @@ async fn concurrent_runs_serialize_compute_and_long_survives_short_watchdog() {
     for (_, status) in &runs {
         assert_eq!(status, "failed", "all loop runs must be persisted failed");
     }
+}
+
+// ── F-001 / S-4 fix wave — world-scoped Accept + rollback ──────────────────
+
+/// Insert a direct-lane run row and flip it to `succeeded` with crafted
+/// proposals (bypasses the module — lets tests drive the Accept path with
+/// arbitrary proposal payloads).
+async fn craft_succeeded_run(pool: &sqlx::SqlitePool, proposals: Value) -> String {
+    let run_id = nexus_local_db::compute_runs::insert_run(
+        pool,
+        WORLD,
+        MODULE,
+        Some("1.0.0"),
+        None,
+        None,
+        Some(r#"{}"#),
+    )
+    .await
+    .unwrap();
+    nexus_local_db::compute_runs::set_run_succeeded(pool, &run_id, &proposals.to_string())
+        .await
+        .unwrap();
+    run_id
+}
+
+/// Craft a `ComputeOutput` envelope with the given state deltas and timeline
+/// event titles (each event carries the minimal valid NexusTimelineEvent
+/// fields; the Accept handler only consumes title/summary).
+fn crafted_proposals(state_delta: Vec<Value>, event_titles: &[&str]) -> Value {
+    let timeline_events: Vec<Value> = event_titles
+        .iter()
+        .enumerate()
+        .map(|(i, title)| {
+            json!({
+                "schema_version": 1,
+                "timeline_event_id": format!("evt_p{i}"),
+                "world_id": WORLD,
+                "branch_id": "fbk_root",
+                "event_type": "story_advance",
+                "status": "provisional",
+                "sequence_no": i,
+                "title": title,
+                "summary": format!("summary {title}"),
+                "created_at": "2026-07-31T12:00:00Z",
+            })
+        })
+        .collect();
+    json!({
+        "schema_version": 1,
+        "state_delta": state_delta,
+        "timeline_events": timeline_events,
+        "new_key_blocks": [],
+        "battle_report": {"kind": "combat"},
+    })
+}
+
+/// Read a KB entry's `body.state.character.current_hp` (world-aware).
+async fn world_entry_hp(pool: &sqlx::SqlitePool, entry_id: &str) -> i64 {
+    use nexus_knowledge::world_kb::KbStore;
+    use nexus_local_db::kb_store::SqliteKbStore;
+    let kb = SqliteKbStore::new(pool.clone())
+        .get_knowledge_entry(entry_id)
+        .await
+        .unwrap();
+    kb.body.unwrap().state.unwrap()["character"]["current_hp"]
+        .as_i64()
+        .unwrap()
+}
+
+/// F-001: Accept with a state_delta targeting another world's KB must reject
+/// the whole Accept (422 invalid_input) and leave every table untouched.
+#[tokio::test]
+#[serial]
+async fn accept_foreign_delta_target_rejects_with_422_and_rolls_back() {
+    let c = ctx().await;
+    seed_character(&c.pool, "kb_atk", "Striker", 20, 3, 100, 100).await;
+    seed_character(&c.pool, "kb_def", "Guardian", 10, 5, 30, 50).await;
+    // Foreign world + foreign KB with a distinctive current_hp.
+    seed_foreign_world(&c.pool).await;
+    seed_character_in_world(
+        &c.pool,
+        FOREIGN_WORLD,
+        "kb_foreign",
+        "Stranger",
+        99,
+        99,
+        777,
+        777,
+    )
+    .await;
+
+    let run_id = craft_succeeded_run(
+        &c.pool,
+        crafted_proposals(
+            vec![json!({
+                "op": "sub",
+                "path": "character.current_hp",
+                "target_key_block_id": "kb_foreign",
+                "value": 100,
+            })],
+            &[],
+        ),
+    )
+    .await;
+
+    let resp = c
+        .server
+        .post(&format!("/v1/daemon/compute/runs/{run_id}/accept"))
+        .json(&json!({}))
+        .await;
+    assert_error_envelope(&resp, StatusCode::UNPROCESSABLE_ENTITY, "invalid_input");
+
+    // Foreign KB untouched; own KB untouched; timeline empty; run still
+    // succeeded (nothing partially applied).
+    assert_eq!(world_entry_hp(&c.pool, "kb_foreign").await, 777);
+    assert_eq!(world_entry_hp(&c.pool, "kb_def").await, 30);
+    assert!(timeline_events(&c.pool).await.is_empty());
+    let row = nexus_local_db::compute_runs::get_run(&c.pool, &run_id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(row.status, "succeeded");
+}
+
+/// S-4: a mid-loop failure inside the Accept TX (1st delta valid, 2nd delta
+/// foreign) must roll back EVERYTHING — the first delta's mutation included.
+#[tokio::test]
+#[serial]
+async fn accept_mid_loop_failure_rolls_back_entire_tx() {
+    let c = ctx().await;
+    seed_character(&c.pool, "kb_atk", "Striker", 20, 3, 100, 100).await;
+    seed_character(&c.pool, "kb_def", "Guardian", 10, 5, 30, 50).await;
+    seed_foreign_world(&c.pool).await;
+    seed_character_in_world(
+        &c.pool,
+        FOREIGN_WORLD,
+        "kb_foreign",
+        "Stranger",
+        99,
+        99,
+        777,
+        777,
+    )
+    .await;
+
+    let run_id = craft_succeeded_run(
+        &c.pool,
+        crafted_proposals(
+            vec![
+                // 1st delta: valid, applies inside the TX (def 30 → 15).
+                json!({
+                    "op": "sub",
+                    "path": "character.current_hp",
+                    "target_key_block_id": "kb_def",
+                    "value": 15,
+                }),
+                // 2nd delta: foreign target → InputInvalid mid-loop.
+                json!({
+                    "op": "sub",
+                    "path": "character.current_hp",
+                    "target_key_block_id": "kb_foreign",
+                    "value": 1,
+                }),
+            ],
+            &["Battle"],
+        ),
+    )
+    .await;
+
+    let resp = c
+        .server
+        .post(&format!("/v1/daemon/compute/runs/{run_id}/accept"))
+        .json(&json!({}))
+        .await;
+    assert_error_envelope(&resp, StatusCode::UNPROCESSABLE_ENTITY, "invalid_input");
+
+    // FULL rollback: the first delta must NOT be visible, no events appended,
+    // run still succeeded.
+    assert_eq!(world_entry_hp(&c.pool, "kb_def").await, 30);
+    assert_eq!(world_entry_hp(&c.pool, "kb_foreign").await, 777);
+    assert!(timeline_events(&c.pool).await.is_empty());
+    let row = nexus_local_db::compute_runs::get_run(&c.pool, &run_id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(row.status, "succeeded");
+}
+
+// ── F-002/F-003 fix wave — branch scoping + snapshot ───────────────────────
+
+/// Seed a timeline event on a named (non-root) branch of the combat world.
+async fn seed_branch_event(pool: &sqlx::SqlitePool, branch_id: &str) {
+    sqlx::query(
+        "INSERT INTO narrative_timeline_events \
+            (timeline_event_id, world_id, branch_id, event_type, status, sequence_no, metadata_json) \
+         VALUES (?, ?, ?, 'fork_marker', 'provisional', 0, '{}')",
+    )
+    .bind(format!("evt_bside{}", branch_id.replace('_', "")))
+    .bind(WORLD)
+    .bind(branch_id)
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
+/// POST /run with an explicit branch_id.
+async fn post_run_on_branch(server: &TestServer, branch_id: &str) -> axum_test::TestResponse {
+    server
+        .post("/v1/daemon/compute/run")
+        .json(&json!({
+            "world_id": WORLD,
+            "module_id": MODULE,
+            "branch_id": branch_id,
+            "invocation_params": {"attacker_id": "kb_atk", "defender_id": "kb_def"},
+        }))
+        .await
+}
+
+/// F-002/F-003: a run scoped to a named branch snapshots that branch and
+/// Accept appends timeline events to the SNAPSHOT — not the world root.
+#[tokio::test]
+#[serial]
+async fn run_on_named_branch_snapshots_and_accept_lands_events_there() {
+    let c = ctx().await;
+    seed_character(&c.pool, "kb_atk", "Striker", 20, 3, 100, 100).await;
+    seed_character(&c.pool, "kb_def", "Guardian", 10, 5, 30, 50).await;
+    seed_branch_event(&c.pool, "fbk_side1").await;
+
+    let resp = post_run_on_branch(&c.server, "fbk_side1").await;
+    assert_eq!(resp.status_code(), StatusCode::OK, "body={}", resp.text());
+    let body: Value = resp.json();
+    let run_id = body["run_id"].as_str().expect("run_id").to_string();
+
+    // Snapshot on the run row.
+    let row = nexus_local_db::compute_runs::get_run(&c.pool, &run_id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        row.branch_id.as_deref(),
+        Some("fbk_side1"),
+        "run row must snapshot the requested branch"
+    );
+
+    // Accept → events land on the SNAPSHOTTED branch.
+    let accept = c
+        .server
+        .post(&format!("/v1/daemon/compute/runs/{run_id}/accept"))
+        .json(&json!({}))
+        .await;
+    assert_eq!(
+        accept.status_code(),
+        StatusCode::OK,
+        "body={}",
+        accept.text()
+    );
+
+    let events: Vec<(String, String)> = sqlx::query_as::<_, (String, String)>(
+        "SELECT branch_id, event_type FROM narrative_timeline_events \
+         WHERE world_id = ? ORDER BY branch_id, sequence_no",
+    )
+    .bind(WORLD)
+    .fetch_all(&c.pool)
+    .await
+    .unwrap();
+    let compute_events: Vec<&(String, String)> = events
+        .iter()
+        .filter(|(_, t)| t == "compute_result")
+        .collect();
+    assert_eq!(compute_events.len(), 1);
+    assert_eq!(
+        compute_events[0].0, "fbk_side1",
+        "compute_result must land on the snapshotted branch: {events:?}"
+    );
+}
+
+/// F-002: an unknown / other-world branch must be rejected at run time.
+#[tokio::test]
+#[serial]
+async fn run_with_unknown_branch_returns_422() {
+    let c = ctx().await;
+    seed_character(&c.pool, "kb_atk", "Striker", 20, 3, 100, 100).await;
+    seed_character(&c.pool, "kb_def", "Guardian", 10, 5, 30, 50).await;
+
+    let resp = post_run_on_branch(&c.server, "fbk_nonexistent").await;
+    assert_error_envelope(&resp, StatusCode::UNPROCESSABLE_ENTITY, "invalid_input");
+}
+
+// ── W2 fix wave — subset-accept ────────────────────────────────────────────
+
+/// W2: `timeline_event_ids_to_accept` appends ONLY the referenced proposed
+/// events (state updates stay all-or-nothing).
+#[tokio::test]
+#[serial]
+async fn accept_subset_appends_only_listed_events() {
+    let c = ctx().await;
+    seed_character(&c.pool, "kb_atk", "Striker", 20, 3, 100, 100).await;
+    seed_character(&c.pool, "kb_def", "Guardian", 10, 5, 30, 50).await;
+
+    let run_id = craft_succeeded_run(
+        &c.pool,
+        crafted_proposals(
+            vec![json!({
+                "op": "sub",
+                "path": "character.current_hp",
+                "target_key_block_id": "kb_def",
+                "value": 15,
+            })],
+            &["First", "Second"],
+        ),
+    )
+    .await;
+
+    let resp = c
+        .server
+        .post(&format!("/v1/daemon/compute/runs/{run_id}/accept"))
+        .json(&json!({"timeline_event_ids_to_accept": ["evt_0"]}))
+        .await;
+    assert_eq!(resp.status_code(), StatusCode::OK, "body={}", resp.text());
+    let body: Value = resp.json();
+    assert_eq!(body["applied"]["events_created"], 1);
+    assert_eq!(body["timeline_event_ids"].as_array().unwrap().len(), 1);
+
+    // Only the first proposed event was appended (title "First"); the
+    // second was NOT.  State delta still applied (all-or-nothing).
+    let events = timeline_events(&c.pool).await;
+    assert_eq!(events.len(), 1, "only the referenced event appended");
+    let detail = c
+        .server
+        .get(&format!("/v1/daemon/compute/runs/{run_id}"))
+        .await;
+    let detail_body: Value = detail.json();
+    let proposed: &Value = &detail_body["proposals"]["timeline_events"];
+    assert_eq!(proposed[0]["title"], "First");
+    assert_eq!(proposed[1]["title"], "Second");
+    assert_eq!(defender_hp(&c.pool, "kb_def").await, 15);
+}
+
+/// W2: an unknown `timeline_event_ids_to_accept` id rejects the whole Accept
+/// BEFORE any write (422 invalid_input; run stays succeeded).
+#[tokio::test]
+#[serial]
+async fn accept_subset_with_unknown_id_returns_422_and_writes_nothing() {
+    let c = ctx().await;
+    seed_character(&c.pool, "kb_atk", "Striker", 20, 3, 100, 100).await;
+    seed_character(&c.pool, "kb_def", "Guardian", 10, 5, 30, 50).await;
+
+    let run_id = craft_succeeded_run(
+        &c.pool,
+        crafted_proposals(
+            vec![json!({
+                "op": "sub",
+                "path": "character.current_hp",
+                "target_key_block_id": "kb_def",
+                "value": 15,
+            })],
+            &["Only"],
+        ),
+    )
+    .await;
+
+    let resp = c
+        .server
+        .post(&format!("/v1/daemon/compute/runs/{run_id}/accept"))
+        .json(&json!({"timeline_event_ids_to_accept": ["evt_9"]}))
+        .await;
+    assert_error_envelope(&resp, StatusCode::UNPROCESSABLE_ENTITY, "invalid_input");
+
+    // Nothing written: no delta, no events, run still succeeded.
+    assert_eq!(defender_hp(&c.pool, "kb_def").await, 30);
+    assert!(timeline_events(&c.pool).await.is_empty());
+    let row = nexus_local_db::compute_runs::get_run(&c.pool, &run_id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(row.status, "succeeded");
+}
+
+// ── W1 fix wave — newest-first list ordering ───────────────────────────────
+
+/// W1: `GET /runs` returns runs newest-first and the cursor walks that order.
+#[tokio::test]
+#[serial]
+async fn list_orders_newest_first() {
+    let c = ctx().await;
+    seed_character(&c.pool, "kb_atk", "Striker", 20, 3, 100, 100).await;
+    seed_character(&c.pool, "kb_def", "Guardian", 10, 5, 30, 50).await;
+    let a = run_succeeded(&c).await;
+    let b = run_succeeded(&c).await;
+    let d = run_succeeded(&c).await;
+
+    // Pin distinct created_at values so ordering does not depend on clock
+    // precision within the same second.
+    // SAFETY: test-only — pinning timestamps to verify ORDER BY semantics.
+    for (run_id, ts) in [
+        (&a, "2026-07-31T10:00:00.000Z"),
+        (&b, "2026-07-31T10:00:01.000Z"),
+        (&d, "2026-07-31T10:00:02.000Z"),
+    ] {
+        sqlx::query("UPDATE compute_sessions SET created_at = ? WHERE run_id = ?")
+            .bind(ts)
+            .bind(run_id)
+            .execute(&c.pool)
+            .await
+            .unwrap();
+    }
+
+    let page1 = c.server.get("/v1/daemon/compute/runs?limit=2").await;
+    assert_eq!(page1.status_code(), StatusCode::OK, "body={}", page1.text());
+    let p1: Value = page1.json();
+    let ids1: Vec<&str> = p1["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|i| i["run_id"].as_str().unwrap())
+        .collect();
+    assert_eq!(ids1, vec![d.as_str(), b.as_str()], "newest first");
+    let cursor = p1["next_cursor"].as_str().expect("cursor").to_string();
+
+    let page2 = c
+        .server
+        .get(&format!("/v1/daemon/compute/runs?limit=2&cursor={cursor}"))
+        .await;
+    let p2: Value = page2.json();
+    let ids2: Vec<&str> = p2["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|i| i["run_id"].as_str().unwrap())
+        .collect();
+    assert_eq!(ids2, vec![a.as_str()], "cursor continues the order");
+    assert_eq!(p2["has_more"], false);
 }
