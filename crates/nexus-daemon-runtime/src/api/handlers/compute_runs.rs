@@ -131,8 +131,40 @@ pub async fn run(
     .map_err(NexusApiError::from)?;
 
     // Execute compute.
+    // W-1: `engine.compute` is CPU-bound for up to the wall-time budget —
+    // run it on the blocking pool (repo convention), never inline on an
+    // async worker (a long run would stall the whole daemon HTTP runtime).
+    // W-2: the wasmtime epoch counter is engine-GLOBAL — the first watchdog
+    // to fire traps every concurrent invocation at the shortest budget.
+    // The daemon-wide `Semaphore(1)` serializes invocations so each run's
+    // watchdog only ever observes its own budget.
     let engine = resolve_engine(&state)?;
-    let output = match engine.compute(&module, &cached.manifest, &compute_input) {
+    let permit = state
+        .compute_serializer()
+        .acquire_owned()
+        .await
+        .map_err(|_| NexusApiError::Internal {
+            code: "COMPUTE_SERIALIZER".to_string(),
+            message: "compute serializer closed".to_string(),
+        })?;
+    let engine_task = engine.clone();
+    let module_task = module.clone();
+    let manifest_task = cached.manifest.clone();
+    let input_task = compute_input.clone();
+    let compute_result = tokio::task::spawn_blocking(move || {
+        // The permit is held for the whole invocation (dropped when compute
+        // returns) — a queued run only arms its watchdog after the previous
+        // run has fully reaped its own.
+        let _permit = permit;
+        engine_task.compute(&module_task, &manifest_task, &input_task)
+    })
+    .await
+    .map_err(|e| NexusApiError::Internal {
+        code: "COMPUTE_TASK_JOIN".to_string(),
+        message: format!("compute task join failed: {e}"),
+    })?;
+
+    let output = match compute_result {
         Ok(o) => o,
         Err(e) => {
             let error_code = compute_error_code(&e);
@@ -168,9 +200,26 @@ pub async fn run(
         code: "SERIALIZATION_ERROR".to_string(),
         message: format!("serialize compute output: {e}"),
     })?;
-    let _ = compute_runs::set_run_succeeded(pool, &run_id, &proposals_json)
-        .await
-        .map_err(NexusApiError::from)?;
+    if let Err(db_err) = compute_runs::set_run_succeeded(pool, &run_id, &proposals_json).await {
+        // F-006: compensating failure persist so the row is not stuck in
+        // 'running' forever (it can never be accepted and retries on the
+        // same run_id are forbidden by the status guard).
+        let compensation_error = serde_json::to_string(&json!({
+            "code": "internal",
+            "message": format!("failed to persist succeeded outcome: {db_err}"),
+        }))
+        .unwrap_or_else(|_| r#"{"code":"internal"}"#.to_string());
+        if let Err(comp_err) =
+            compute_runs::set_run_failed(pool, &run_id, &compensation_error).await
+        {
+            tracing::error!(
+                run_id = %run_id,
+                error = %comp_err,
+                "compensating set_run_failed after set_run_succeeded failure also failed"
+            );
+        }
+        return Err(NexusApiError::from(db_err));
+    }
 
     let proposals_raw: Value = serde_json::from_str(&proposals_json).unwrap_or(Value::Null);
 

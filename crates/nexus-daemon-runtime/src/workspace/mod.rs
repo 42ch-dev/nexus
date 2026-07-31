@@ -117,6 +117,14 @@ pub struct WorkspaceState {
     /// V1.147 P0: daemon-wide compiled module cache (pre-warmed at boot with
     /// embedded + user-installed modules).
     module_cache: Arc<Option<Arc<nexus_wasm_host::ModuleCache>>>,
+    /// V1.147 P0 fix wave (W-2): serializes `engine.compute` invocations on
+    /// the shared daemon engine. The wasmtime epoch counter is engine-global
+    /// (`increment_epoch` is a single atomic on the engine) — two concurrent
+    /// runs would share the shortest wall-time budget (the first watchdog to
+    /// fire traps every running invocation). A `Semaphore(1)` around compute
+    /// makes each invocation's watchdog observe only its own budget; it also
+    /// caps W-1's worst case (one CPU-bound compute at a time).
+    compute_serializer: Arc<tokio::sync::Semaphore>,
 }
 
 impl WorkspaceState {
@@ -176,6 +184,7 @@ impl WorkspaceState {
             tls_fingerprint: Arc::new(None),
             wasm_engine: Arc::new(None),
             module_cache: Arc::new(None),
+            compute_serializer: Arc::new(tokio::sync::Semaphore::new(1)),
         }
     }
 
@@ -268,6 +277,7 @@ impl WorkspaceState {
             tls_fingerprint: Arc::new(None),
             wasm_engine: Arc::new(None),
             module_cache: Arc::new(None),
+            compute_serializer: Arc::new(tokio::sync::Semaphore::new(1)),
         })
     }
 
@@ -479,6 +489,14 @@ impl WorkspaceState {
     #[must_use]
     pub fn module_cache(&self) -> Option<Arc<nexus_wasm_host::ModuleCache>> {
         self.module_cache.as_ref().clone()
+    }
+
+    /// Compute serialization permit (W-2): acquire before calling
+    /// `engine.compute` so concurrent runs never share the engine-global
+    /// epoch watchdog budget.
+    #[must_use]
+    pub fn compute_serializer(&self) -> Arc<tokio::sync::Semaphore> {
+        Arc::clone(&self.compute_serializer)
     }
 
     /// Set the lifecycle HSM for this workspace state.

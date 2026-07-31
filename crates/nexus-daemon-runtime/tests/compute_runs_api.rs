@@ -762,3 +762,96 @@ async fn failed_run_leaves_timeline_empty() {
     // Direct lane writes NO timeline events on failure (no compute_error rows).
     assert!(timeline_events(&c.pool).await.is_empty());
 }
+
+// ── W-1/W-2 fix wave — concurrent runs must not share the watchdog budget ──
+
+/// Two staggered-budget manifests for the infinite-loop module: the long run
+/// may execute up to 1500 ms, the short one only 300 ms.
+fn staggered_loop_manifests() -> [(&'static str, ModuleManifest); 2] {
+    let long = serde_json::from_str(
+        r#"{"module_id":"loop_long","name":"Loop Long","version":"0.1.0","nexus_abi_version":1,
+           "required_key_block_types":[],"compute_export":"compute","init_export":"init",
+           "host_functions":[],"max_wall_time_ms":1500}"#,
+    )
+    .unwrap();
+    let short = serde_json::from_str(
+        r#"{"module_id":"loop_short","name":"Loop Short","version":"0.1.0","nexus_abi_version":1,
+           "required_key_block_types":[],"compute_export":"compute","init_export":"init",
+           "host_functions":[],"max_wall_time_ms":300}"#,
+    )
+    .unwrap();
+    [("loop_long", long), ("loop_short", short)]
+}
+
+/// W-1/W-2: two concurrent POST /run against the shared engine must run
+/// serially — the long run (1500 ms budget) must survive the short run's
+/// (300 ms) watchdog.  Without the compute serializer, the engine-global
+/// epoch counter makes the first watchdog to fire trap BOTH invocations at
+/// the shortest budget (~300 ms); with serialization, whichever order the
+/// runs take, the long one executes for its own full budget, so the slower
+/// response arrives >= 1200 ms after its request started.
+#[tokio::test]
+#[serial]
+async fn concurrent_runs_serialize_compute_and_long_survives_short_watchdog() {
+    let manifests = staggered_loop_manifests();
+    let cfg = SandboxConfig {
+        fuel: 100_000_000_000, // huge — the loops cannot exhaust fuel
+        max_memory_bytes: 64 * 1024 * 1024,
+        wall_time: Duration::from_millis(5000), // host ceiling above both manifests
+    };
+    let c = ctx_with_engine(
+        WasmEngine::with_config(cfg).expect("engine"),
+        &[
+            ("loop_long", manifests[0].1.clone(), loop_wasm()),
+            ("loop_short", manifests[1].1.clone(), loop_wasm()),
+        ],
+    )
+    .await;
+    seed_character(&c.pool, "kb_atk", "Striker", 20, 3, 100, 100).await;
+
+    // Fire both runs concurrently (no required_key_block_types → the seeded
+    // character is not needed for the manifest filter; the builder still
+    // requires at least one computable entry, which the seed provides).
+    let long_req = post_run(&c.server, WORLD, "loop_long", json!({}));
+    let short_req = post_run(&c.server, WORLD, "loop_short", json!({}));
+    let started = std::time::Instant::now();
+    let (long_resp, short_resp) = tokio::join!(long_req, short_req);
+    let both_elapsed = started.elapsed();
+
+    // Both must honestly report wall-time exhaustion.
+    assert_error_envelope(
+        &long_resp,
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "compute_wall_time_exceeded",
+    );
+    assert_error_envelope(
+        &short_resp,
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "compute_wall_time_exceeded",
+    );
+
+    // Serialization proof: with the compute serializer, the two runs execute
+    // back-to-back (300 ms + 1500 ms in either order) so both complete in
+    // >= 1500 ms — the LONG run always runs for its own full budget and
+    // survives the short run's watchdog.  Had the engine-global epoch
+    // counter cross-tripped the invocations, both would have died at the
+    // short budget (~300 ms).
+    assert!(
+        both_elapsed >= Duration::from_millis(1200),
+        "concurrent runs must serialize (long survives short watchdog), took {both_elapsed:?}"
+    );
+
+    // Both runs were persisted as failed (honest detail).
+    let runs: Vec<(String, String)> = sqlx::query_as::<_, (String, String)>(
+        "SELECT run_id, status FROM compute_sessions \
+         WHERE world_id = ? AND run_id IS NOT NULL ORDER BY created_at DESC LIMIT 2",
+    )
+    .bind(WORLD)
+    .fetch_all(&c.pool)
+    .await
+    .unwrap();
+    assert_eq!(runs.len(), 2, "both staggered runs persisted: {runs:?}");
+    for (_, status) in &runs {
+        assert_eq!(status, "failed", "all loop runs must be persisted failed");
+    }
+}
