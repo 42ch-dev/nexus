@@ -774,7 +774,13 @@ function projectNarrativeLayer(
   // `compute:<event_id>` (compute log events). The families are disjoint by
   // storage + node id, so a KB event and a compute log event can never
   // double-render the same story beat.
-  const computeNodes = mergeComputeEvents(events ?? [], graph, datedEvents.length, moduleNames);
+  const computeNodes = mergeComputeEvents(
+    events ?? [],
+    graph,
+    datedEvents.length,
+    moduleNames,
+    undatedEvents.length,
+  );
   nodes.push(...computeNodes);
 
   // V1.126 P1 — Narrative directed axis spine (decoration-only, Y=0,
@@ -905,12 +911,20 @@ export function buildComputeNodePayload(
  * than interleaved with the freeform `occurred_at` lexical ordering. Mixed
  * freeform-vs-ISO chronology is not canonical; a temporal-aware sort that
  * unifies both families is deferred (DF-V1122-DEEPER-WB).
+ *
+ * Undated rows continue the temporal-unknown group's X spread PAST the KB
+ * undated cluster (`kbUndatedCount` offset) so the two undated families
+ * never share coordinates on the y=220 lane (review F2 — the KB cluster
+ * starts at `ORIGIN_X + kbDatedCount*EVENT_STEP_X`; without the offset the
+ * compute undated base could land on top of it whenever
+ * `datedComputeCount < kbUndatedCount`).
  */
 export function mergeComputeEvents(
   events: TimelineEventInfo[],
   graph: TimelineGraph,
   kbDatedCount: number,
   moduleNames?: ReadonlyMap<string, string>,
+  kbUndatedCount = 0,
 ): Node<TimelineNodeData>[] {
   const mergeable = events.filter(isMergeableComputeEvent);
   if (mergeable.length === 0) return [];
@@ -945,7 +959,11 @@ export function mergeComputeEvents(
     });
   });
 
-  const undatedOriginX = computeStartX + dated.length * EVENT_STEP_X;
+  // Undated compute rows cluster in the temporal-unknown group (y=220) AFTER
+  // the KB undated cluster (review F2): `kbUndatedCount` shifts the X base so
+  // the two families never stack on identical coordinates.
+  const undatedOriginX =
+    computeStartX + dated.length * EVENT_STEP_X + kbUndatedCount * EVENT_STEP_X;
   undated.forEach((event, i) => {
     nodes.push({
       id: computeNodeIdOf(event.id),

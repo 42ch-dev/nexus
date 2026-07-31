@@ -179,6 +179,41 @@ describe('Narrative merge of compute_result events', () => {
     expect(undated?.position.y).toBe(220);
   });
 
+  it('never stacks the compute undated cluster on the KB undated cluster (review F2 — mixed family)', () => {
+    const graph = graphWith([
+      entity({
+        key_block_id: 'kb-dated',
+        block_type: 'event',
+        canonical_name: 'The coronation',
+        body: { attributes: { occurred_at: '2026-07-01T00:00:00Z' } },
+      }),
+      entity({ key_block_id: 'kb-undated-1', block_type: 'event', canonical_name: 'Mystery one' }),
+      entity({ key_block_id: 'kb-undated-2', block_type: 'event', canonical_name: 'Mystery two' }),
+    ]);
+    const events = [
+      // All-compute-undated case: dated compute count (0) < KB undated count
+      // (2) — the exact overlap scenario the review flagged for the y=220
+      // temporal-unknown lane.
+      computeEvent({ id: 'evt_undated_compute', created_at: 'not-a-date' }),
+    ];
+
+    const { nodes } = projectTimelineGraph(graph, 'narrative', events);
+
+    // Both event families on the Narrative layer share no identical
+    // coordinates (KB events + compute result nodes).
+    const family = nodes.filter(
+      (n) => n.type === 'timeline-event' || n.type === 'timeline-compute-result',
+    );
+    const coords = family.map((n) => `${n.position.x},${n.position.y}`);
+    expect(new Set(coords).size).toBe(coords.length);
+
+    // The compute undated row sits PAST the KB undated cluster, not on it.
+    const kbUndated = nodes.find((n) => n.id === 'entity:kb-undated-2');
+    const computeUndated = nodes.find((n) => n.id === 'compute:evt_undated_compute');
+    expect(computeUndated?.position.y).toBe(220);
+    expect(computeUndated!.position.x).toBeGreaterThan(kbUndated!.position.x);
+  });
+
   it('carries the compute payload (provenance + digest + affected entries resolved from the graph)', () => {
     const graph = graphWith([
       entity({ key_block_id: 'char-aria', block_type: 'character', canonical_name: 'Aria' }),

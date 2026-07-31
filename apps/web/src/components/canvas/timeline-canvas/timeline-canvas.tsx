@@ -91,6 +91,17 @@ export interface TimelineCanvasProps {
 }
 
 /**
+ * V1.147 P2 T3 — hard ceiling for the auto-fetched compute-event projection
+ * (review F1). The canvas consumes the events log as a SNAPSHOT source — the
+ * complete canon `compute_result` projection, not a browse list — so remaining
+ * pages are auto-fetched while `hasNextPage`. This constant is the safety
+ * valve: a pathological World log (> 500 events) stops fetching and logs a
+ * dev warning instead of issuing unbounded refetches. Pages beyond the cap are
+ * honestly not rendered (the projection renders only what it fetched).
+ */
+const TIMELINE_EVENTS_PROJECTION_CAP = 500;
+
+/**
  * Build the V1.73 `WorldKbPatchEntityRequest` envelope from the adapter's
  * structured patch + the selected node's per-row OCC version. The daemon is
  * the authority on validation; the orchestrator only forwards the patch.
@@ -169,6 +180,31 @@ export function TimelineCanvas({ worldId }: TimelineCanvasProps) {
     () => flattenPages(timelineEvents.data),
     [timelineEvents.data],
   );
+
+  // Review F1 — bounded auto-fetch of remaining events pages. The projection
+  // is a snapshot source (the canvas needs the COMPLETE canon compute_result
+  // log, not a browsable list), so pages are fetched automatically while
+  // `hasNextPage`, up to the hard `TIMELINE_EVENTS_PROJECTION_CAP` (500).
+  // The effect fires at most once per resolved page: its deps change only
+  // when a page lands (`fetchNextPage` is stable; `hasNextPage` flips when
+  // the last page resolves), so there is no refetch loop.
+  useEffect(() => {
+    if (!timelineEvents.hasNextPage) return;
+    if (eventsList.length >= TIMELINE_EVENTS_PROJECTION_CAP) {
+      // Cap reached — stop fetching and warn in dev. The projection renders
+      // the pages it has; older events stay hidden until the cap is raised
+      // (or the log is pruned). `simplify:` 500 is a deliberate ceiling for
+      // V1.147; a virtualized canvas would lift it without UI churn.
+      if (import.meta.env.DEV) {
+        console.warn(
+          `[timeline] compute-event projection capped at ${TIMELINE_EVENTS_PROJECTION_CAP} ` +
+            `events (has_more still true for world ${worldId}); older events are not rendered.`,
+        );
+      }
+      return;
+    }
+    void timelineEvents.fetchNextPage();
+  }, [timelineEvents.hasNextPage, timelineEvents.fetchNextPage, eventsList.length, worldId]);
 
   // Module display names for compute node provenance (module_id fallback
   // when the registry has not loaded the module — honest for preset-path

@@ -181,6 +181,7 @@ function computeTimelineJourney(over: { initialEvents?: unknown[]; kbEntities?: 
   const state = {
     eventsStore: [...(over.initialEvents ?? [])],
     lastEventsUrl: null as string | null,
+    eventsFetchCount: 0,
     runsStore: [] as unknown[],
     acceptCalls: 0,
   };
@@ -195,7 +196,22 @@ function computeTimelineJourney(over: { initialEvents?: unknown[]; kbEntities?: 
     ),
     http.get('/v1/daemon/worlds/:worldId/timeline/events', ({ request }) => {
       state.lastEventsUrl = request.url;
-      return HttpResponse.json({ items: state.eventsStore, has_more: false });
+      state.eventsFetchCount += 1;
+      // Page the store by the daemon's limit/cursor contract so
+      // `has_more: true` + a second page can be exercised (review F1
+      // regression: the canvas auto-fetches remaining pages).
+      const url = new URL(request.url);
+      const limit = Number(url.searchParams.get('limit')) || 100;
+      const cursorRaw = url.searchParams.get('cursor');
+      const cursor = cursorRaw ? Number(cursorRaw) : 0;
+      const items = state.eventsStore.slice(cursor, cursor + limit);
+      const nextCursor = cursor + limit;
+      const hasMore = nextCursor < state.eventsStore.length;
+      return HttpResponse.json({
+        items,
+        has_more: hasMore,
+        next_cursor: hasMore ? String(nextCursor) : undefined,
+      });
     }),
     http.get('/v1/daemon/works', () =>
       HttpResponse.json({ items: [], pagination: { limit: 20, has_more: false } }),
@@ -254,6 +270,12 @@ function computeTimelineJourney(over: { initialEvents?: unknown[]; kbEntities?: 
         proposals: SUCCESS_PROPOSALS,
         created_at: '2026-08-01T01:00:00Z',
       }),
+    ),
+    // F3 (review) — the app-under-test fires a registry scan (Settings shell /
+    // agent-host polling); serve it so MSW stops logging unhandled-request
+    // noise in the journey test.
+    http.post('/v1/daemon/agent-host/scan', () =>
+      HttpResponse.json({ agents: [] }),
     ),
   ];
 
@@ -315,6 +337,21 @@ describe('TimelineCanvas compute-on-Timeline (V1.147 P2 T3)', () => {
     expect(url.searchParams.get('event_type')).toBe('compute_result');
     expect(url.searchParams.get('status')).toBe('canon');
     expect(url.searchParams.get('branch_id')).toBeNull();
+  });
+
+  it('auto-fetches remaining events pages — nodes from page 2 render (review F1)', async () => {
+    // 105 events → page 1 = 100 (limit), page 2 = 5 (has_more: true on
+    // page 1). The last event renders only if the canvas wired
+    // `fetchNextPage` for its snapshot projection.
+    const events = Array.from({ length: 105 }, (_, i) => ({
+      ...COMPUTE_EVENT,
+      id: `evt_page_${i}`,
+      title: `Event #${i + 1}`,
+    }));
+    const { state } = renderTimelineApp({ initialEvents: events });
+
+    await screen.findByText('Event #105');
+    await waitFor(() => expect(state.eventsFetchCount).toBeGreaterThanOrEqual(2));
   });
 
   it('Run Module entry opens the shared Run Studio with the World pre-filled', async () => {
