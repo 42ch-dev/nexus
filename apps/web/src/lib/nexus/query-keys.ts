@@ -138,5 +138,14 @@ export const queryKeys = {
     all: ['timeline'] as const,
     overview: (cursor?: string) =>
       [...queryKeys.timeline.all, 'overview', cursor ?? '__first'] as const,
+    // V1.147 P2 — per-World timeline log events (machine-written families,
+    // e.g. compute_result). `all()` prefix-covers every world + filter so
+    // accept/discard invalidation via `timeline.all` refetches the mounted
+    // canvas events query.
+    events: {
+      all: () => [...queryKeys.timeline.all, 'events'] as const,
+      list: (worldId: string, filter?: object) =>
+        [...queryKeys.timeline.events.all(), worldId, filter ?? {}] as const,
+    },
   },
 } as const;

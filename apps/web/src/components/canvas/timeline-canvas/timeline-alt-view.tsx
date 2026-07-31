@@ -179,7 +179,12 @@ export function TimelineAltView({
                       {data.canonical_name || t('timeline.altView.unnamed')}
                     </td>
                     <td className="px-3 py-2 text-gray-900">
-                      {BLOCK_TYPE_LABELS[data.block_type] ?? data.block_type}
+                      {/* V1.147 P2 T3 — compute rows show the compute kind
+                          label ("Compute result"), not the synthetic
+                          `block_type='event'` of the log-event family. */}
+                      {data.layoutHint === 'compute'
+                        ? t('timeline.computeNode.kindLabel')
+                        : BLOCK_TYPE_LABELS[data.block_type] ?? data.block_type}
                     </td>
                     <td
                       className="px-3 py-2 text-copy-13-mono text-gray-700"

@@ -55,6 +55,7 @@ import type {
   ScanResponse,
   SoulNarrativeResponse,
   TimelineOverviewResponse,
+  TimelineEventInfo,
   UpdateFindingRequest,
   ValidatePresetRequest,
   WorkSummary,
@@ -1375,6 +1376,61 @@ export function useDiscardRun() {
       void qc.invalidateQueries({ queryKey: queryKeys.worldKb.all });
     },
     onError: (error) => errorToast(error, 'error.couldNotDiscardRun'),
+  });
+}
+
+// ── World timeline events (V1.147 P2 — compute_result merge) ────────────────
+
+/** Optional filter for the canvas events query (branch scoping only). */
+export interface WorldTimelineEventsFilter {
+  branch_id?: string;
+}
+
+/**
+ * Cursor-paginated per-World timeline log events for the Timeline canvas
+ * Narrative merge. Hard-filtered to the machine-written `compute_result`
+ * family in `canon` state (plan Global Constraints merge discipline; the T1
+ * route defaults status to canon anyway). `branch_id` is intentionally NOT
+ * sent — the daemon defaults to the World's current branch (root fallback),
+ * which is the canvas's existing world-state source. Pages map to the shared
+ * `CursorPage` shape so `flattenPages` works.
+ *
+ * Invalidation: `useAcceptRun` / `useDiscardRun` already invalidate
+ * `queryKeys.timeline.all`, which prefix-matches `['timeline','events',…]` —
+ * an accepted Run's new compute_result event appears on the canvas without a
+ * manual refresh (the canvas stays mounted behind the Settings modal).
+ */
+export function useWorldTimelineEvents(
+  worldId: string | undefined,
+  filter?: WorldTimelineEventsFilter,
+) {
+  const client = useNexusClient();
+  const limit = 100;
+  return useInfiniteQuery({
+    queryKey: queryKeys.timeline.events.list(worldId ?? '', {
+      ...filter,
+      event_type: 'compute_result',
+      status: 'canon',
+      limit,
+    }),
+    initialPageParam: FIRST_PAGE,
+    queryFn: async ({ pageParam }): Promise<CursorPage<TimelineEventInfo>> => {
+      const res = await client.getTimelineEvents(worldId!, {
+        ...filter,
+        event_type: 'compute_result',
+        status: 'canon',
+        limit,
+        cursor: pageParam,
+      });
+      return {
+        items: res.items,
+        pagination: { limit, has_more: res.has_more, next_cursor: res.next_cursor },
+      };
+    },
+    getNextPageParam: (lastPage: CursorPage<TimelineEventInfo>): Cursor =>
+      lastPage.pagination.has_more ? lastPage.pagination.next_cursor : undefined,
+    enabled: Boolean(worldId),
+    staleTime: 10_000,
   });
 }
 

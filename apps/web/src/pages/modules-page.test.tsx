@@ -701,3 +701,96 @@ describe('ModulesPage Run Studio (V1.147 P1 T3)', () => {
     expect((await screen.findAllByText('世界')).length).toBeGreaterThan(0);
   });
 });
+
+describe('ModulesPage deep-link selection (V1.147 P2 T3)', () => {
+  // `?module=basic-combat&run=run_9&world=w1` — the compute node "Open Run"
+  // deep link (module + run) and the Timeline Run Module entry (`world`
+  // pre-fill) land here from `/settings/modules`.
+  function renderDeepLinked(initialUrl = '/settings/modules?module=basic-combat&run=run_9&world=w1') {
+    return renderInApp(<ModulesPageBody />, {
+      client: client(),
+      initialRouterEntries: [initialUrl],
+    });
+  }
+
+  it('seeds the module selection, opens the run inspector, and pre-fills the World', async () => {
+    useHandlers(
+      http.get('/v1/daemon/compute/modules', () =>
+        HttpResponse.json({
+          items: [
+            {
+              module_id: 'basic-combat',
+              name: 'Basic Combat',
+              version: '1.0.0',
+              description: 'A simple combat resolution module.',
+              required_key_block_types: ['character'],
+            },
+          ],
+          has_more: false,
+        }),
+      ),
+      http.get('/v1/daemon/compute/modules/basic-combat', () =>
+        HttpResponse.json(BASIC_COMBAT_MANIFEST),
+      ),
+      http.get('/v1/daemon/narrative/worlds', () =>
+        HttpResponse.json({ worlds: [{ world_id: 'w1', title: 'Test World' }] }),
+      ),
+      http.get('/v1/daemon/worlds/w1/kb/graph', () =>
+        HttpResponse.json({ entities: [], source_anchors: [], relationships: [] }),
+      ),
+      http.get('/v1/daemon/compute/runs', () =>
+        HttpResponse.json({ items: [], has_more: false }),
+      ),
+      http.get('/v1/daemon/compute/runs/run_9', () =>
+        HttpResponse.json({
+          run_id: 'run_9',
+          status: 'applied',
+          module_id: 'basic-combat',
+          module_version: '1.0.0',
+          world_id: 'w1',
+          invocation_params: { attacker_id: 'kb-aria', defender_id: 'kb-brann' },
+          proposals: SUCCESS_PROPOSALS,
+          created_at: '2026-08-01T01:00:00Z',
+        }),
+      ),
+    );
+
+    renderDeepLinked();
+
+    // Module detail auto-selected from `?module=` — no list click.
+    await screen.findByText('Basic Combat');
+    // Run Studio present with the World pre-filled from `?world=` (the
+    // worlds list resolves async; the pre-fill state is set on mount).
+    await screen.findByTestId('run-studio');
+    await waitFor(() =>
+      expect(screen.getByTestId('run-studio-world')).toHaveValue('w1'),
+    );
+    // The run inspector opens from `?run=` (deep link).
+    await screen.findByTestId('run-inspector');
+    expect(screen.getByTestId('run-inspector-applied-note')).toBeInTheDocument();
+  });
+
+  it('no deep-link params → plain list/detail behavior (regression)', async () => {
+    useHandlers(
+      http.get('/v1/daemon/compute/modules', () =>
+        HttpResponse.json({
+          items: [
+            {
+              module_id: 'basic-combat',
+              name: 'Basic Combat',
+              version: '1.0.0',
+              required_key_block_types: ['character'],
+            },
+          ],
+          has_more: false,
+        }),
+      ),
+    );
+
+    renderInApp(<ModulesPageBody />, { client: client() });
+
+    // No module auto-selected, no run inspector.
+    expect(screen.queryByTestId('run-studio')).not.toBeInTheDocument();
+    await screen.findByText('Basic Combat');
+  });
+});

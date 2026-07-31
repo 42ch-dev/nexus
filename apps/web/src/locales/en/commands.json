@@ -14,7 +14,8 @@
     "navigate": "Navigate",
     "strategy": "Strategy",
     "outline": "Outline",
-    "world-kb": "World KB"
+    "world-kb": "World KB",
+    "compute": "Compute"
   },
   "go": {
     "timeline": {
@@ -102,6 +103,26 @@
         "list": "list",
         "alt-view": "alt view",
         "switch": "switch"
+      }
+    }
+  },
+  "compute": {
+    "run-module": {
+      "label": "Run Module…",
+      "keywords": {
+        "compute": "compute",
+        "studio": "run studio",
+        "invoke": "invoke",
+        "wasm": "wasm"
+      }
+    },
+    "run-module-on-world": {
+      "label": "Run Module on this World…",
+      "keywords": {
+        "timeline": "timeline",
+        "world": "world",
+        "compute": "compute",
+        "prefill": "pre-filled"
       }
     }
   }

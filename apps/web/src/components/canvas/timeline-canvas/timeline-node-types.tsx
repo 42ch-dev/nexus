@@ -1,7 +1,8 @@
 /**
- * Timeline canvas node types — V1.122 P1 T2 + V1.123 P1 T2 + V1.124 P0 T2.
+ * Timeline canvas node types — V1.122 P1 T2 + V1.123 P1 T2 + V1.124 P0 T2 +
+ * V1.147 P2 T3.
  *
- * Three node kinds, all projecting from `WorldKbEntityProjection`:
+ * Four node kinds, all projecting onto the Timeline surface:
  *   • timeline-brief-era  — V1.123 P1 T2 Brief-era marker
  *                           (`block_type=era` projected onto the Brief
  *                           when-axis). Body chrome: `TimelineBriefEraChrome`.
@@ -10,6 +11,13 @@
  *   • timeline-key-block  — V1.122 non-event, non-era KeyBlock entity in the
  *                           Narrative Context cluster. Body chrome:
  *                           `TimelineKeyBlockChrome`.
+ *   • timeline-compute-result — V1.147 P2 T3 machine-written
+ *                           `event_type=compute_result` log events merged
+ *                           into the Narrative when-axis (accepted compute
+ *                           Runs). Body chrome: `ComputeResultNodeChrome`
+ *                           (promoted primitive, @42ch/nexus-ui). Compute
+ *                           nodes are NOT KB entities — the KB inspector +
+ *                           `kb.patch_entity` write path never sees them.
  *
  * V1.124 P0 T2 — RF wrappers are thin App-local shells:
  *   `NodeChromeShell` + `Handle`s + presentational body extract + RF
@@ -29,6 +37,9 @@ import { memo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 
+import { ComputeResultNodeChrome } from '@42ch/nexus-ui';
+
+import { shortId } from '@/lib/format';
 import { NodeChromeShell } from '../presentational/node-chrome-shell';
 import {
   TimelineBriefEraChrome,
@@ -193,9 +204,68 @@ export const TimelineKeyBlockNode = memo(function TimelineKeyBlockNode({
   );
 });
 
+/**
+ * V1.147 P2 T3 — Compute result node (Narrative layer). Thin App-local RF
+ * wrapper over the promoted `ComputeResultNodeChrome` primitive: i18n copy
+ * resolution + `NodeChromeShell` + Handles only. The chrome reads the
+ * adapter-built `compute` payload (provenance + digest).
+ *
+ * Same-family rule (behavior spec §5): shares the Narrative visual language
+ * with `TimelineEventNode` (worldkb spine + narrative accents); the Cpu icon,
+ * "Compute result" kind pill, and provenance chip carry the distinction.
+ */
+export const TimelineComputeResultNode = memo(function TimelineComputeResultNode({
+  data,
+  selected,
+  dragging,
+}: NodeProps) {
+  const d = data as TimelineNodeData;
+  const { t } = useTranslation('canvas');
+  const payload = d.compute;
+
+  // Defensive: a compute node always carries a payload (the adapter builds
+  // them together); render nothing honest otherwise.
+  if (!payload) return null;
+
+  const provenanceLabel =
+    payload.sourceKind === 'preset'
+      ? t('timeline.computeNode.provenance.preset')
+      : t('timeline.computeNode.provenance.direct');
+
+  return (
+    <NodeChromeShell
+      selected={selected}
+      dragging={dragging}
+      accent="worldkb"
+      aria-label={t('timeline.computeNode.aria', { name: d.canonical_name })}
+    >
+      <Handle
+        type="target"
+        position={Position.Left}
+        className="!h-2.5 !w-2.5 !border-canvas-port !bg-canvas-port"
+      />
+      <ComputeResultNodeChrome
+        title={d.canonical_name || payload.moduleName}
+        kindLabel={t('timeline.computeNode.kindLabel')}
+        provenanceLabel={provenanceLabel}
+        moduleName={payload.moduleName}
+        moduleVersion={payload.moduleVersion}
+        runId={payload.runId ? shortId(payload.runId) : undefined}
+      />
+      <Handle
+        type="source"
+        position={Position.Right}
+        className="!h-2.5 !w-2.5 !border-canvas-port !bg-canvas-port"
+      />
+      {selected ? <span className="sr-only">{t('timeline.computeNode.selected')}</span> : null}
+    </NodeChromeShell>
+  );
+});
+
 export const timelineNodeTypes = {
   'timeline-brief-era': TimelineBriefEraNode,
   'timeline-event': TimelineEventNode,
   'timeline-key-block': TimelineKeyBlockNode,
+  'timeline-compute-result': TimelineComputeResultNode,
   'directedAxisSpine': DirectedAxisSpine,
 } as const;

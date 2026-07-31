@@ -110,6 +110,7 @@ import type {
   StrategyPatchTransitionRequest,
   TimelineOverviewResponse,
   TimelinePatchEventRequest,
+  ListTimelineEventsResponse,
   UpdateFindingRequest,
   UpdatePresetRequest,
   UpdatePresetResponse,
@@ -166,6 +167,27 @@ export interface DiscardRunResponse {
   run_id: string;
   /** Always `"discarded"` on success. */
   status: 'discarded';
+}
+
+/**
+ * Query params for `GET /v1/daemon/worlds/:world_id/timeline/events`
+ * (V1.147 P2). App-side type: no generated schema for this query object; the
+ * fields mirror the daemon handler's `TimelineEventsParams` (branch_id /
+ * status / event_type / limit / cursor). Omitted filters take the daemon
+ * defaults — status defaults to `canon`, branch_id defaults to the World's
+ * current branch (root fallback).
+ */
+export interface ListTimelineEventsQuery {
+  /** Fork branch id; omitted → the World's current branch (root fallback). */
+  branch_id?: string;
+  /** `canon` (default) | `provisional` | `rejected`. */
+  status?: 'canon' | 'provisional' | 'rejected';
+  /** Exact event_type match (e.g. `compute_result`). */
+  event_type?: string;
+  /** Page size (daemon default 20, max 100). */
+  limit?: number;
+  /** Opaque cursor from a previous page's `next_cursor`. */
+  cursor?: string;
 }
 
 /**
@@ -424,6 +446,19 @@ export interface NexusClient {
   listRuns(query?: ListRunsQuery): Promise<RunListResponse>;
   /** `GET /v1/daemon/compute/runs/{run_id}` — full detail incl. proposals/error. */
   getRun(runId: string): Promise<RunDetail>;
+
+  // ── World timeline events (V1.147 P2) ───────────────────────────────────
+  /**
+   * `GET /v1/daemon/worlds/:world_id/timeline/events` — cursor-paginated
+   * per-World timeline log events (production `narrative_timeline_events`
+   * storage; machine-written families like `compute_result` carry compute
+   * provenance in `extensions`). Omitted filters take the daemon defaults:
+   * status `canon`, branch = the World's current branch (root fallback).
+   */
+  getTimelineEvents(
+    worldId: string,
+    query?: ListTimelineEventsQuery,
+  ): Promise<ListTimelineEventsResponse>;
 
   // ── Creator Memory review-loop (V1.78) ─────────────────────────────────────
   // All memory endpoints are creator-scoped: the daemon rejects a `creator_id`
