@@ -543,25 +543,35 @@ describe('BrowserClient compute runs (V1.147 P1)', () => {
     expect(res.proposals?.state_delta).toHaveLength(1);
   });
 
-  it('surfaces a failed run outcome as data (status failed + error), not a thrown error', async () => {
+  it('rejects with the canonical error envelope when the daemon fails a run', async () => {
+    // Live daemon shape (qc2 W-001): `POST /run` never returns 200 with
+    // status=failed — on compute failure the daemon persists a Failed row and
+    // returns the shared ErrorResponse envelope (422 sandbox / 500 internal).
+    // The Failed row is surfaced through the runs list refetch, not as data
+    // from this call.
     useHandlers(
       http.post('/v1/daemon/compute/run', () =>
-        HttpResponse.json({
-          run_id: 'run_2',
-          status: 'failed',
-          module_id: 'basic-combat',
-          module_version: '1.0.0',
-          error: { code: 'module_trap', message: 'The module stopped unexpectedly.' },
-          created_at: '2026-07-31T00:00:00Z',
-        }),
+        HttpResponse.json(
+          {
+            success: false,
+            error: {
+              code: 'compute_wall_time_exceeded',
+              message: 'module exceeded wall time',
+              details: {},
+              extensions: {},
+            },
+          },
+          { status: 422 },
+        ),
       ),
     );
 
     const client = new BrowserClient();
-    const res = await client.runCompute({ world_id: 'w1', module_id: 'basic-combat' });
-    expect(res.status).toBe('failed');
-    expect(res.error?.code).toBe('module_trap');
-    expect(res.proposals).toBeUndefined();
+    const result = client.runCompute({ world_id: 'w1', module_id: 'basic-combat' });
+    await expect(result).rejects.toMatchObject({
+      status: 422,
+      code: 'compute_wall_time_exceeded',
+    });
   });
 
   it('accepts a run with an optional subset of timeline events', async () => {

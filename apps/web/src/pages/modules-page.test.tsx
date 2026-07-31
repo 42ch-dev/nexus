@@ -299,16 +299,43 @@ const RUN_9: RunSummary = {
  * Full MSW handler set for the module-detail Run Studio journey. Keeps a
  * mutable runs store so Accept/Discard flips the row the table shows after the
  * hooks' invalidation refetches.
+ *
+ * Failure shape mirrors the live daemon (qc2 W-001 fix): `POST /run` never
+ * returns 200-with-status=failed — on compute failure the daemon persists a
+ * Failed row, then returns the canonical error envelope (422 sandbox / 500
+ * internal). The UI surfaces the row via the runs-list refetch and the author
+ * opens it to see the structured failure block.
  */
 function runStudioJourney(
-  over: { failedRun?: boolean; noSchema?: boolean; kbEntities?: typeof CHARACTER_ENTITIES } = {},
+  over: {
+    failedRun?: boolean;
+    noSchema?: boolean;
+    kbEntities?: typeof CHARACTER_ENTITIES;
+    seedRuns?: RunSummary[];
+    /** Two-page cursor stream (Load-more journey). */
+    paginatedRuns?: boolean;
+    /** `GET /runs` fails with the canonical error envelope. */
+    runsError?: boolean;
+    /** `GET /narrative/worlds` fails with the canonical error envelope. */
+    worldsError?: boolean;
+    /** `GET /worlds/:id/kb/graph` fails with the canonical error envelope. */
+    kbGraphError?: boolean;
+  } = {},
 ) {
   const state = {
-    runsStore: [] as RunSummary[],
+    runsStore: [...(over.seedRuns ?? [])] as RunSummary[],
     lastRunBody: null as unknown,
+    lastRunsUrl: null as string | null,
+    failedError: null as null | { code: string; message: string },
     acceptCalls: 0,
     discardCalls: 0,
   };
+
+  const ERROR_500 = () =>
+    HttpResponse.json(
+      { success: false, error: { code: 'internal', message: 'boom' } },
+      { status: 500 },
+    );
 
   const handlers = [
     http.get('/v1/daemon/compute/modules', () =>
@@ -330,29 +357,62 @@ function runStudioJourney(
         over.noSchema ? { ...BASIC_COMBAT_MANIFEST, schemas: undefined } : BASIC_COMBAT_MANIFEST,
       ),
     ),
-    http.get('/v1/daemon/narrative/worlds', () => HttpResponse.json({ worlds: [WORLD] })),
+    http.get('/v1/daemon/narrative/worlds', () =>
+      over.worldsError ? ERROR_500() : HttpResponse.json({ worlds: [WORLD] }),
+    ),
     http.get('/v1/daemon/worlds/:worldId/kb/graph', () =>
-      HttpResponse.json({
-        entities: over.kbEntities ?? CHARACTER_ENTITIES,
-        source_anchors: [],
-        relationships: [],
-      }),
+      over.kbGraphError
+        ? ERROR_500()
+        : HttpResponse.json({
+            entities: over.kbEntities ?? CHARACTER_ENTITIES,
+            source_anchors: [],
+            relationships: [],
+          }),
     ),
-    http.get('/v1/daemon/compute/runs', () =>
-      HttpResponse.json({ items: state.runsStore, has_more: false }),
-    ),
+    http.get('/v1/daemon/compute/runs', ({ request }) => {
+      state.lastRunsUrl = request.url;
+      if (over.runsError) {
+        return ERROR_500();
+      }
+      if (over.paginatedRuns) {
+        const cursor = new URL(request.url).searchParams.get('cursor');
+        if (!cursor) {
+          return HttpResponse.json({
+            items: [RUN_9],
+            has_more: true,
+            next_cursor: 'cur-2',
+          });
+        }
+        return HttpResponse.json({
+          items: [{ ...RUN_9, run_id: 'run_10', created_at: '2026-07-30T00:00:00Z' }],
+          has_more: false,
+        });
+      }
+      // Mirror the daemon filter contract (world_id / status) so the filter
+      // chrome tests exercise the real request path.
+      const url = new URL(request.url);
+      const status = url.searchParams.get('status');
+      const worldId = url.searchParams.get('world_id');
+      let items = state.runsStore;
+      if (status) items = items.filter((r) => r.status === status);
+      if (worldId) items = items.filter((r) => r.world_id === worldId);
+      return HttpResponse.json({ items, has_more: false });
+    }),
     http.post('/v1/daemon/compute/run', async ({ request }) => {
       state.lastRunBody = await request.json();
       if (over.failedRun) {
+        state.failedError = {
+          code: 'compute_wall_time_exceeded',
+          message: 'module exceeded wall time',
+        };
         state.runsStore = [...state.runsStore, { ...RUN_9, run_id: 'run_fail', status: 'failed' }];
-        return HttpResponse.json({
-          run_id: 'run_fail',
-          status: 'failed',
-          module_id: 'basic-combat',
-          module_version: '1.0.0',
-          error: { code: 'compute_wall_time_exceeded', message: 'module exceeded wall time' },
-          created_at: '2026-07-31T01:00:00Z',
-        });
+        return HttpResponse.json(
+          {
+            success: false,
+            error: { ...state.failedError, details: {}, extensions: {} },
+          },
+          { status: 422 },
+        );
       }
       state.runsStore = [...state.runsStore, RUN_9];
       return HttpResponse.json({
@@ -390,7 +450,10 @@ function runStudioJourney(
       const stored = state.runsStore.find((r) => r.run_id === runId);
       return HttpResponse.json({
         ...(stored ?? RUN_9),
-        proposals: SUCCESS_PROPOSALS,
+        // Failed rows carry the structured error; terminal/succeeded rows the proposals.
+        ...(stored?.status === 'failed'
+          ? { error: state.failedError }
+          : { proposals: SUCCESS_PROPOSALS }),
       });
     }),
   ];
@@ -483,7 +546,7 @@ describe('ModulesPage Run Studio (V1.147 P1 T3)', () => {
     );
   });
 
-  it('shows the failure block for a failed run and offers no Accept/Discard', async () => {
+  it('surfaces a daemon error envelope as a Failed row; Open shows the §6 failure block', async () => {
     const user = userEvent.setup();
     const { handlers } = runStudioJourney({ failedRun: true });
     useHandlers(...handlers);
@@ -492,18 +555,98 @@ describe('ModulesPage Run Studio (V1.147 P1 T3)', () => {
     await fillBasicCombatForm(user);
     await user.click(screen.getByTestId('run-studio-run'));
 
-    // §6 limit copy + honest error code; World unchanged (no accept/discard CTAs).
-    await screen.findByText('Run stopped (limit)');
-    expect(screen.getByText(/compute_wall_time_exceeded/)).toBeInTheDocument();
-    expect(screen.queryByTestId('run-inspector-accept')).not.toBeInTheDocument();
-    expect(screen.queryByTestId('run-inspector-discard')).not.toBeInTheDocument();
-
-    // The failed run stays in Runs history with the Failed label.
+    // Live daemon shape (qc2 W-001): the POST rejects with the error envelope
+    // and the daemon-recorded Failed row appears in Runs via the list refetch
+    // — the inspector does not auto-open; the author opens the row.
     await waitFor(() =>
       expect(
         within(screen.getByTestId('runs-table-row-run_fail')).getByText('Failed'),
       ).toBeInTheDocument(),
     );
+    expect(screen.queryByTestId('run-inspector-failed')).not.toBeInTheDocument();
+
+    // Open the Failed run → §6 limit copy + honest error code; no Accept/Discard.
+    await user.click(
+      within(screen.getByTestId('runs-table-row-run_fail')).getByRole('button', { name: 'Open' }),
+    );
+    await screen.findByText('Run stopped (limit)');
+    expect(screen.getByText(/compute_wall_time_exceeded/)).toBeInTheDocument();
+    expect(screen.queryByTestId('run-inspector-accept')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('run-inspector-discard')).not.toBeInTheDocument();
+  });
+
+  it('loads more Runs when history spans multiple pages (Needs-review stays reachable)', async () => {
+    const user = userEvent.setup();
+    const { handlers } = runStudioJourney({ paginatedRuns: true });
+    useHandlers(...handlers);
+
+    await openRunStudio(user);
+
+    // Page 1 row visible; Load more appears while a next page exists.
+    await screen.findByTestId('runs-table-row-run_9');
+    await user.click(await screen.findByTestId('run-runs-load-more'));
+
+    await waitFor(() => expect(screen.getByTestId('runs-table-row-run_10')).toBeInTheDocument());
+    expect(screen.queryByTestId('run-runs-load-more')).not.toBeInTheDocument();
+  });
+
+  it('filters Runs history by status (request param + table rows)', async () => {
+    const user = userEvent.setup();
+    const { state, handlers } = runStudioJourney({
+      seedRuns: [
+        RUN_9,
+        { ...RUN_9, run_id: 'run_fail', status: 'failed', created_at: '2026-07-30T00:00:00Z' },
+      ],
+    });
+    useHandlers(...handlers);
+
+    await openRunStudio(user);
+    await screen.findByTestId('runs-table-row-run_9');
+    await screen.findByTestId('runs-table-row-run_fail');
+    // Filter chrome ships on module detail (spec §4): status + World selects.
+    expect(screen.getByTestId('run-runs-status-filter')).toBeInTheDocument();
+    expect(screen.getByTestId('run-runs-world-filter')).toBeInTheDocument();
+
+    await user.selectOptions(screen.getByTestId('run-runs-status-filter'), 'failed');
+
+    await waitFor(() => expect(screen.getByTestId('runs-table-row-run_fail')).toBeInTheDocument());
+    expect(screen.queryByTestId('runs-table-row-run_9')).not.toBeInTheDocument();
+    expect(state.lastRunsUrl).toContain('status=failed');
+  });
+
+  it('shows an ErrorState when the Runs history query fails (no silent empty state)', async () => {
+    const user = userEvent.setup();
+    const { handlers } = runStudioJourney({ runsError: true });
+    useHandlers(...handlers);
+
+    await openRunStudio(user);
+
+    expect(await screen.findByText('Could not load Runs')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument();
+    expect(screen.queryByText('No runs yet')).not.toBeInTheDocument();
+  });
+
+  it('shows an ErrorState when the Worlds query fails', async () => {
+    const user = userEvent.setup();
+    const { handlers } = runStudioJourney({ worldsError: true });
+    useHandlers(...handlers);
+
+    await openRunStudio(user);
+
+    expect(await screen.findByText('Could not load Worlds')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument();
+  });
+
+  it('shows an ErrorState when the World KB graph query fails', async () => {
+    const user = userEvent.setup();
+    const { handlers } = runStudioJourney({ kbGraphError: true });
+    useHandlers(...handlers);
+
+    await openRunStudio(user);
+    await user.selectOptions(screen.getByTestId('run-studio-world'), 'w1');
+
+    expect(await screen.findByText('Could not load World characters')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument();
   });
 
   it('shows the §6 empty state for an empty Runs history', async () => {

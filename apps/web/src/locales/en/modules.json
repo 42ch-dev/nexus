@@ -70,6 +70,15 @@
     "discardedNote": "Proposals discarded. World unchanged.",
     "runningNote": "This Run is still executing.",
     "runsTitle": "Runs",
+    "runsLoading": "Loading Runs…",
+    "runsErrorTitle": "Could not load Runs",
+    "runsErrorDescription": "Runs history is unavailable right now. Try again.",
+    "worldsErrorTitle": "Could not load Worlds",
+    "worldsErrorDescription": "Worlds are unavailable right now. Try again.",
+    "worldGraphErrorTitle": "Could not load World characters",
+    "worldGraphErrorDescription": "Character entries are unavailable right now. Try again.",
+    "kbGraphLoading": "Loading characters…",
+    "runLoadingDetail": "Loading Run…",
     "runsStatus": {
       "running": "Running",
       "needsReview": "Needs review",
@@ -107,7 +116,13 @@
       "openRunLabel": "Open",
       "copyIdLabel": "Copy",
       "emptyTitle": "No runs yet",
-      "emptyDescription": "Run this module to see history here."
+      "emptyDescription": "Run this module to see history here.",
+      "loadMore": "Load more",
+      "loadingMore": "Loading…",
+      "statusFilter": "Filter by status",
+      "worldFilter": "Filter by World",
+      "allStatuses": "All statuses",
+      "allWorlds": "All Worlds"
     }
   }
 }

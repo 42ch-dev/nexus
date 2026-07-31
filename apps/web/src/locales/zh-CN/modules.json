@@ -70,6 +70,15 @@
     "discardedNote": "提案已舍弃。世界未改变。",
     "runningNote": "此运行仍在执行中。",
     "runsTitle": "运行记录",
+    "runsLoading": "正在加载运行…",
+    "runsErrorTitle": "无法加载运行记录",
+    "runsErrorDescription": "运行历史暂时不可用，请重试。",
+    "worldsErrorTitle": "无法加载世界",
+    "worldsErrorDescription": "世界列表暂时不可用，请重试。",
+    "worldGraphErrorTitle": "无法加载世界角色",
+    "worldGraphErrorDescription": "角色条目暂时不可用，请重试。",
+    "kbGraphLoading": "正在加载角色…",
+    "runLoadingDetail": "正在加载运行…",
     "runsStatus": {
       "running": "运行中",
       "needsReview": "待审阅",
@@ -106,7 +115,13 @@
       "openRunLabel": "打开",
       "copyIdLabel": "复制",
       "emptyTitle": "暂无运行",
-      "emptyDescription": "运行此模块后，历史记录将显示在此处。"
+      "emptyDescription": "运行此模块后，历史记录将显示在此处。",
+      "loadMore": "加载更多",
+      "loadingMore": "加载中…",
+      "statusFilter": "按状态筛选",
+      "worldFilter": "按世界筛选",
+      "allStatuses": "全部状态",
+      "allWorlds": "全部世界"
     }
   }
 }

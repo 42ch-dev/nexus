@@ -13,6 +13,7 @@
  */
 import { screen, fireEvent, waitFor } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
+import { useQuery } from '@tanstack/react-query';
 import { describe, expect, it, vi } from 'vitest';
 
 import { BrowserClient } from '@/lib/nexus';
@@ -24,6 +25,7 @@ import {
   useDiscardRun,
   useRunCompute,
 } from '@/api/queries';
+import { queryKeys } from '@/lib/nexus/query-keys';
 import { renderInApp } from '@/test/test-providers';
 import { useHandlers } from '@/test/msw-server';
 import type { RunSummary } from '@42ch/nexus-contracts';
@@ -232,12 +234,34 @@ describe('useRunCompute — runs-list invalidation', () => {
 });
 
 describe('useAcceptRun / useDiscardRun — runs-list + run-detail invalidation', () => {
-  function renderRunInspector(button: 'accept' | 'discard') {
+  /**
+   * Harness for the accept/discard invalidation contract. Mounts the runs
+   * list + run detail (the mutation's direct targets) AND the Timeline
+   * overview + World-KB graph consumers that must also refetch after an
+   * Accept (qc1 W-001 / qc3 W-1: Accept mutates World + Timeline + KB
+   * together; `refetchOnWindowFocus: false` means invalidation is the only
+   * freshness path).
+   */
+  function renderRunInspector(
+    button: 'accept' | 'discard',
+    crossCache: {
+      timelineSpy: ReturnType<typeof vi.fn>;
+      worldKbSpy: ReturnType<typeof vi.fn>;
+    },
+  ) {
     function Harness() {
       const runs = useComputeRuns();
       const run = useComputeRun('run_1');
       const acceptRun = useAcceptRun();
       const discardRun = useDiscardRun();
+      useQuery({
+        queryKey: queryKeys.timeline.overview(),
+        queryFn: () => crossCache.timelineSpy(),
+      });
+      useQuery({
+        queryKey: queryKeys.worldKb.graph('w1'),
+        queryFn: () => crossCache.worldKbSpy(),
+      });
       return (
         <div>
           <span data-testid="status">{run.data?.status ?? 'none'}</span>
@@ -257,11 +281,13 @@ describe('useAcceptRun / useDiscardRun — runs-list + run-detail invalidation',
     renderInApp(<Harness />, { client: new BrowserClient() });
   }
 
-  it('accept refetches the runs list and the run detail', async () => {
+  it('accept refetches the runs list, the run detail, the Timeline and the World KB graph', async () => {
     const listSpy = vi.fn(() =>
       HttpResponse.json({ items: [makeRun()], has_more: false }),
     );
     const detailSpy = vi.fn(() => HttpResponse.json(makeRun()));
+    const timelineSpy = vi.fn(() => ({ eras: [], events: [] }));
+    const worldKbSpy = vi.fn(() => ({ entities: [], source_anchors: [], relationships: [] }));
     useHandlers(
       http.get('/v1/daemon/compute/runs', () => listSpy()),
       http.get('/v1/daemon/compute/runs/:runId', () => detailSpy()),
@@ -275,21 +301,29 @@ describe('useAcceptRun / useDiscardRun — runs-list + run-detail invalidation',
       ),
     );
 
-    renderRunInspector('accept');
+    renderRunInspector('accept', { timelineSpy, worldKbSpy });
     expect(await screen.findByText('succeeded')).toBeInTheDocument();
     expect(listSpy).toHaveBeenCalledTimes(1);
     expect(detailSpy).toHaveBeenCalledTimes(1);
+    expect(timelineSpy).toHaveBeenCalledTimes(1);
+    expect(worldKbSpy).toHaveBeenCalledTimes(1);
 
     fireEvent.click(screen.getByRole('button', { name: /accept/i }));
     await waitFor(() => expect(listSpy).toHaveBeenCalledTimes(2));
     await waitFor(() => expect(detailSpy).toHaveBeenCalledTimes(2));
+    // Cross-cache fan-out: the post-Accept World state must be fresh on the
+    // Timeline and the KB graph without a manual reload.
+    await waitFor(() => expect(timelineSpy).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(worldKbSpy).toHaveBeenCalledTimes(2));
   });
 
-  it('discard refetches the runs list and the run detail', async () => {
+  it('discard refetches the runs list, the run detail, the Timeline and the World KB graph', async () => {
     const listSpy = vi.fn(() =>
       HttpResponse.json({ items: [makeRun()], has_more: false }),
     );
     const detailSpy = vi.fn(() => HttpResponse.json(makeRun()));
+    const timelineSpy = vi.fn(() => ({ eras: [], events: [] }));
+    const worldKbSpy = vi.fn(() => ({ entities: [], source_anchors: [], relationships: [] }));
     useHandlers(
       http.get('/v1/daemon/compute/runs', () => listSpy()),
       http.get('/v1/daemon/compute/runs/:runId', () => detailSpy()),
@@ -298,13 +332,17 @@ describe('useAcceptRun / useDiscardRun — runs-list + run-detail invalidation',
       ),
     );
 
-    renderRunInspector('discard');
+    renderRunInspector('discard', { timelineSpy, worldKbSpy });
     expect(await screen.findByText('succeeded')).toBeInTheDocument();
     expect(listSpy).toHaveBeenCalledTimes(1);
     expect(detailSpy).toHaveBeenCalledTimes(1);
+    expect(timelineSpy).toHaveBeenCalledTimes(1);
+    expect(worldKbSpy).toHaveBeenCalledTimes(1);
 
     fireEvent.click(screen.getByRole('button', { name: /discard/i }));
     await waitFor(() => expect(listSpy).toHaveBeenCalledTimes(2));
     await waitFor(() => expect(detailSpy).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(timelineSpy).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(worldKbSpy).toHaveBeenCalledTimes(2));
   });
 });

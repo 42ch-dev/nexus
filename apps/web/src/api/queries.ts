@@ -1331,7 +1331,12 @@ export function useRunCompute() {
 /**
  * Accept a succeeded run — atomically commits its proposals into the World.
  * Refetches the runs lists + the run detail so the status flip to Applied is
- * reflected everywhere it is cached.
+ * reflected everywhere it is cached, and the cross-screen fan-out (qc1 W-001 /
+ * qc3 W-1): Accept mutates World + Timeline + KB together, so the Timeline
+ * overview and World-KB graph caches are invalidated too (mirroring the
+ * `useCreateWorld` / `useDeleteWorld` convention) — the app sets
+ * `refetchOnWindowFocus: false`, so without this the post-Accept World state
+ * would stay stale until a remount.
  */
 export function useAcceptRun() {
   const client = useNexusClient();
@@ -1343,6 +1348,8 @@ export function useAcceptRun() {
     onSuccess: (_data, vars) => {
       void qc.invalidateQueries({ queryKey: queryKeys.compute.runs.lists() });
       void qc.invalidateQueries({ queryKey: queryKeys.compute.runs.detail(vars.runId) });
+      void qc.invalidateQueries({ queryKey: queryKeys.timeline.all });
+      void qc.invalidateQueries({ queryKey: queryKeys.worldKb.all });
     },
     onError: (error) => errorToast(error, 'error.couldNotAcceptRun'),
   });
@@ -1350,7 +1357,10 @@ export function useAcceptRun() {
 
 /**
  * Discard a succeeded run — drops its proposals (destructive; the UI confirms
- * first per the behavior spec). Same invalidation contract as accept.
+ * first per the behavior spec). Same invalidation contract as accept,
+ * including the Timeline/KB fan-out for symmetry (a discarded run never wrote
+ * World state, but the stale-cache window after a previous Accept on the same
+ * surface is closed the same way).
  */
 export function useDiscardRun() {
   const client = useNexusClient();
@@ -1361,6 +1371,8 @@ export function useDiscardRun() {
     onSuccess: (_data, runId) => {
       void qc.invalidateQueries({ queryKey: queryKeys.compute.runs.lists() });
       void qc.invalidateQueries({ queryKey: queryKeys.compute.runs.detail(runId) });
+      void qc.invalidateQueries({ queryKey: queryKeys.timeline.all });
+      void qc.invalidateQueries({ queryKey: queryKeys.worldKb.all });
     },
     onError: (error) => errorToast(error, 'error.couldNotDiscardRun'),
   });

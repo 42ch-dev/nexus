@@ -23,7 +23,6 @@ import {
   RunStatusBadge,
   RunsTable,
   type EntityPickerEntry,
-  type InvocationSchema,
   type ProposalSectionsCopy,
   type RunFormCopy,
   type RunStatus,
@@ -50,6 +49,7 @@ import {
   useNarrativeWorlds,
   useRunCompute,
 } from '@/api/queries';
+import { toInvocationSchema } from '@/api/run-studio-schemas';
 import { useWorldKbGraph } from '@/lib/canvas/use-world-kb-data';
 import { formatDateTime, shortId } from '@/lib/format';
 import { isOrchestrationEngineUnavailable } from '@/lib/nexus/errors';
@@ -60,6 +60,20 @@ import { cn } from '@/lib/utils';
 export function ModulesPage() {
   return <Navigate to="/settings/modules" replace />;
 }
+
+/**
+ * Status filter options for the Runs history (spec §4 + plan Global
+ * Constraints "module/world/status filter"). Values are the wire statuses the
+ * daemon matches against the persisted row; labels are the product status
+ * names (Needs review = `succeeded`).
+ */
+const RUN_STATUS_FILTER_OPTIONS: { value: RunStatus; labelKey: string }[] = [
+  { value: 'running', labelKey: 'run.runsStatus.running' },
+  { value: 'succeeded', labelKey: 'run.runsStatus.needsReview' },
+  { value: 'applied', labelKey: 'run.runsStatus.applied' },
+  { value: 'discarded', labelKey: 'run.runsStatus.discarded' },
+  { value: 'failed', labelKey: 'run.runsStatus.failed' },
+];
 
 /** Shared list/detail body — reused by SettingsModulesSection (no duplicate hooks). */
 export function ModulesPageBody() {
@@ -307,9 +321,10 @@ function RunStudio({ module }: { module: ModuleDetail }) {
   const worldGraph = useWorldKbGraph(worldId || undefined);
 
   // ── Guided form + Advanced JSON (best-effort sync) ────────────────────────
-  // Narrow the generated open index signature at the app boundary; the
-  // primitive consumes the structural InvocationSchema fragment.
-  const invocationSchema = module.schemas?.invocation as InvocationSchema | undefined;
+  // Narrow the generated open index signature at the app boundary through the
+  // structural guard (qc1 W-003 fix) — the primitive consumes the structural
+  // InvocationSchema fragment; shape drift is rejected instead of cast.
+  const invocationSchema = toInvocationSchema(module.schemas?.invocation);
 
   const [values, setValues] = useState<Record<string, unknown>>({});
   const [jsonText, setJsonText] = useState('{}');
@@ -324,6 +339,26 @@ function RunStudio({ module }: { module: ModuleDetail }) {
       setJsonText(JSON.stringify(values, null, 2));
     }
   }, [values, jsonDirty]);
+
+  // Parsed Advanced-JSON payload while `jsonDirty`; `null` when the text is
+  // not a complete JSON object. This is the enablement source of truth for the
+  // JSON path (qc2 W-002 fix): a valid complete JSON object can satisfy Run
+  // even when the guided `required` fields are empty — the server/manifest
+  // validation stays the source of truth on submit (behavior spec §3), and
+  // the guided `required` gate only applies while the guided form is the
+  // active input.
+  const jsonObject = useMemo(() => {
+    if (!jsonDirty) return null;
+    try {
+      const parsed: unknown = JSON.parse(jsonText);
+      if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        return null;
+      }
+      return parsed as Record<string, unknown>;
+    } catch {
+      return null;
+    }
+  }, [jsonDirty, jsonText]);
 
   const setField = (name: string, value: unknown) =>
     setValues((prev) => ({ ...prev, [name]: value }));
@@ -356,7 +391,18 @@ function RunStudio({ module }: { module: ModuleDetail }) {
   }, [worldGraph.data, invocationSchema, module.required_key_block_types]);
 
   // ── Runs history (scoped to this module — context filter per spec §4) ─────
-  const runs = useComputeRuns({ module_id: module.module_id });
+  // Filter chrome on module detail (qc1 W-005 / qc3 W-4 fix): status + World
+  // narrow the module-scoped history; each filter view caches independently
+  // (the filter is part of the query key). No daemon DELETE API exists for
+  // Clear history in P1, so filtering is the honest affordance — a
+  // server-backed Clear is registered as a residual for PM.
+  const [runStatusFilter, setRunStatusFilter] = useState<'' | RunStatus>('');
+  const [runWorldFilter, setRunWorldFilter] = useState('');
+  const runs = useComputeRuns({
+    module_id: module.module_id,
+    status: runStatusFilter || undefined,
+    world_id: runWorldFilter || undefined,
+  });
   const runCompute = useRunCompute();
   const acceptRun = useAcceptRun();
   const discardRun = useDiscardRun();
@@ -382,21 +428,23 @@ function RunStudio({ module }: { module: ModuleDetail }) {
     });
   }, [invocationSchema, values]);
 
-  const canRun = worldId !== '' && requiredFilled && !runCompute.isPending;
+  // Run enablement (qc2 W-002 fix): while the Advanced JSON path is the
+  // active input (`jsonDirty`), a complete valid JSON object satisfies
+  // enablement even when guided `required` fields are empty — the author's
+  // JSON is what gets submitted and the server validates it on submit.
+  const canRun =
+    worldId !== '' &&
+    (jsonDirty ? jsonObject !== null : requiredFilled) &&
+    !runCompute.isPending;
 
   function handleRun() {
     let params: Record<string, unknown> = values;
     if (jsonDirty) {
-      try {
-        const parsed: unknown = JSON.parse(jsonText);
-        if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
-          throw new Error('invocation json must be an object');
-        }
-        params = parsed as Record<string, unknown>;
-      } catch {
+      if (!jsonObject) {
         setJsonError(t('run.jsonInvalid'));
         return;
       }
+      params = jsonObject;
     }
     setJsonError(null);
     runCompute.mutate(
@@ -472,32 +520,48 @@ function RunStudio({ module }: { module: ModuleDetail }) {
     <div className="flex flex-col gap-4 border-t border-gray-alpha-300 pt-4" data-testid="run-studio">
       <p className="text-label-12 uppercase tracking-wide text-gray-700">{t('run.title')}</p>
 
-      {/* Product chrome: World selector (always present, spec §3). */}
-      <div className="flex max-w-xs flex-col gap-1.5">
-        <Label htmlFor="run-studio-world">{t('run.worldLabel')}</Label>
-        <Select
-          id="run-studio-world"
-          value={worldId}
-          onChange={(event) => handleWorldChange(event.target.value)}
-          disabled={worlds.isLoading}
-          data-testid="run-studio-world"
-        >
-          <option value="" disabled>
-            {t('run.worldPlaceholder')}
-          </option>
-          {(worlds.data ?? []).map((w) => (
-            <option key={w.world_id} value={w.world_id}>
-              {w.title}
+      {/* Product chrome: World selector (always present, spec §3). A data-feed
+          failure here must not collapse into a silent empty select (qc3 W-3
+          fix) — surface the ErrorState with a retry instead. */}
+      {worlds.isError ? (
+        <ErrorState
+          title={t('run.worldsErrorTitle')}
+          description={t('run.worldsErrorDescription')}
+          onRetry={() => worlds.refetch()}
+        />
+      ) : (
+        <div className="flex max-w-xs flex-col gap-1.5">
+          <Label htmlFor="run-studio-world">{t('run.worldLabel')}</Label>
+          <Select
+            id="run-studio-world"
+            value={worldId}
+            onChange={(event) => handleWorldChange(event.target.value)}
+            disabled={worlds.isLoading}
+            data-testid="run-studio-world"
+          >
+            <option value="" disabled>
+              {t('run.worldPlaceholder')}
             </option>
-          ))}
-        </Select>
-        <p className="text-copy-13 text-gray-700">
-          {worldId ? t('run.branchNote') : t('run.noWorldHint')}
-        </p>
-      </div>
+            {(worlds.data ?? []).map((w) => (
+              <option key={w.world_id} value={w.world_id}>
+                {w.title}
+              </option>
+            ))}
+          </Select>
+          <p className="text-copy-13 text-gray-700">
+            {worldId ? t('run.branchNote') : t('run.noWorldHint')}
+          </p>
+        </div>
+      )}
 
-      {worldId !== '' && worldGraph.isLoading ? (
-        <LoadingState label={t('loading')} />
+      {worldId !== '' && worldGraph.isError ? (
+        <ErrorState
+          title={t('run.worldGraphErrorTitle')}
+          description={t('run.worldGraphErrorDescription')}
+          onRetry={() => worldGraph.refetch()}
+        />
+      ) : worldId !== '' && worldGraph.isLoading ? (
+        <LoadingState label={t('run.kbGraphLoading')} />
       ) : (
         <RunFormFields
           schema={invocationSchema}
@@ -551,23 +615,106 @@ function RunStudio({ module }: { module: ModuleDetail }) {
         </Button>
       </div>
 
-      {inspectorRun && (
-        <RunInspector
-          run={inspectorRun}
-          truncated={latestRun?.truncated ?? false}
-          acceptPending={acceptRun.isPending}
-          discardPending={discardRun.isPending}
-          onAccept={handleAccept}
-          onDiscard={() => {
-            const runId = inspectorRunId ?? latestRun?.run_id;
-            if (runId) setDiscardTargetId(runId);
-          }}
-        />
+      {inspectorRunId && runDetail.isLoading ? (
+        <LoadingState label={t('run.runLoadingDetail')} />
+      ) : (
+        inspectorRun && (
+          <RunInspector
+            run={inspectorRun}
+            truncated={latestRun?.truncated ?? false}
+            acceptPending={acceptRun.isPending}
+            discardPending={discardRun.isPending}
+            onAccept={handleAccept}
+            onDiscard={() => {
+              const runId = inspectorRunId ?? latestRun?.run_id;
+              if (runId) setDiscardTargetId(runId);
+            }}
+          />
+        )
       )}
 
       <div className="flex flex-col gap-2">
-        <p className="text-label-12 uppercase tracking-wide text-gray-700">{t('run.runsTitle')}</p>
-        <RunsTable rows={runRows} copy={runsTableCopy(t)} onOpenRun={openRun} />
+        <div className="flex flex-wrap items-end justify-between gap-2">
+          <p className="text-label-12 uppercase tracking-wide text-gray-700">
+            {t('run.runsTitle')}
+          </p>
+          {/* Filter chrome (spec §4 + plan Global Constraints). Status + World
+              narrow the module-scoped history. Clear history needs a daemon
+              DELETE API that does not exist in P1 — filtering ships now and a
+              server-backed Clear is registered as a residual (no invented
+              backend route, no disabled "coming soon" affordance). */}
+          <div className="flex flex-wrap items-end gap-2">
+            <div className="flex flex-col gap-1">
+              <Label htmlFor="run-runs-status-filter" className="text-label-12 text-gray-700">
+                {t('run.runsTable.statusFilter')}
+              </Label>
+              <Select
+                id="run-runs-status-filter"
+                value={runStatusFilter}
+                onChange={(event) => setRunStatusFilter(event.target.value as '' | RunStatus)}
+                className="w-44"
+                data-testid="run-runs-status-filter"
+              >
+                <option value="">{t('run.runsTable.allStatuses')}</option>
+                {RUN_STATUS_FILTER_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {t(option.labelKey)}
+                  </option>
+                ))}
+              </Select>
+            </div>
+            <div className="flex flex-col gap-1">
+              <Label htmlFor="run-runs-world-filter" className="text-label-12 text-gray-700">
+                {t('run.runsTable.worldFilter')}
+              </Label>
+              <Select
+                id="run-runs-world-filter"
+                value={runWorldFilter}
+                onChange={(event) => setRunWorldFilter(event.target.value)}
+                disabled={worlds.isLoading || worlds.isError}
+                className="w-44"
+                data-testid="run-runs-world-filter"
+              >
+                <option value="">{t('run.runsTable.allWorlds')}</option>
+                {(worlds.data ?? []).map((w) => (
+                  <option key={w.world_id} value={w.world_id}>
+                    {w.title}
+                  </option>
+                ))}
+              </Select>
+            </div>
+          </div>
+        </div>
+
+        {/* Data-feed errors must not collapse into "No runs yet" (qc3 W-3
+            fix): a failed runs query renders ErrorState, and a loading list
+            renders a placeholder instead of flashing the empty state. */}
+        {runs.isLoading ? (
+          <LoadingState label={t('run.runsLoading')} />
+        ) : runs.isError ? (
+          <ErrorState
+            title={t('run.runsErrorTitle')}
+            description={t('run.runsErrorDescription')}
+            onRetry={() => runs.refetch()}
+          />
+        ) : (
+          <RunsTable rows={runRows} copy={runsTableCopy(t)} onOpenRun={openRun} />
+        )}
+
+        {/* Cursor pagination (qc1 W-002 / qc3 W-2 fix): runs beyond the first
+            page — including older Needs-review rows — must stay reachable. */}
+        {runs.hasNextPage && (
+          <Button
+            type="button"
+            variant="tertiary"
+            size="small"
+            onClick={() => void runs.fetchNextPage()}
+            disabled={runs.isFetchingNextPage}
+            data-testid="run-runs-load-more"
+          >
+            {runs.isFetchingNextPage ? t('run.runsTable.loadingMore') : t('run.runsTable.loadMore')}
+          </Button>
+        )}
       </div>
 
       <DiscardRunDialog

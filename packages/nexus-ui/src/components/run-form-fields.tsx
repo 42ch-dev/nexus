@@ -178,9 +178,29 @@ export function RunFormFields({
 
         return (
           <div key={name} className="flex flex-col gap-1.5" data-field={name}>
-            <Label htmlFor={id}>
-              {label} {requiredMark}
-            </Label>
+            {kind === 'boolean' ? (
+              // Single label owning both the text and the checkbox (a11y —
+              // two labels targeting one control would double the announcement).
+              <label className="flex h-10 items-center gap-2" htmlFor={id}>
+                {label} {requiredMark}
+                <input
+                  id={id}
+                  type="checkbox"
+                  checked={values[name] === true}
+                  onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                    onChange(name, event.target.checked)
+                  }
+                  disabled={disabled}
+                  aria-describedby={property.description ? helperId : undefined}
+                  className="h-4 w-4 accent-blue-700"
+                  data-testid={`run-form-field-${name}`}
+                />
+              </label>
+            ) : (
+              <Label htmlFor={id}>
+                {label} {requiredMark}
+              </Label>
+            )}
             {kind === 'enum' && (
               <Select
                 id={id}
@@ -199,22 +219,6 @@ export function RunFormFields({
                   </option>
                 ))}
               </Select>
-            )}
-            {kind === 'boolean' && (
-              <label className="flex h-10 items-center gap-2" htmlFor={id}>
-                <input
-                  id={id}
-                  type="checkbox"
-                  checked={values[name] === true}
-                  onChange={(event: ChangeEvent<HTMLInputElement>) =>
-                    onChange(name, event.target.checked)
-                  }
-                  disabled={disabled}
-                  aria-describedby={property.description ? helperId : undefined}
-                  className="h-4 w-4 accent-blue-700"
-                  data-testid={`run-form-field-${name}`}
-                />
-              </label>
             )}
             {kind === 'number' && (
               <Input
