@@ -337,6 +337,77 @@ async fn put_update_unbound(
     SpokeResult::Ok(result)
 }
 
+/// Atomically CAS-update zero or more knowledge entries and optionally update
+/// a compute session's `state_json` in a **single** `SQLite` transaction.
+///
+/// Used by `ComputablePort::compute` settle path so a multi-target settle
+/// cannot leave partial entry writes if a later CAS or the session update
+/// fails (Greptile P1: rejected computes leave partial state). On any reject
+/// the transaction is dropped without commit → full rollback.
+///
+/// `entry_updates`: `(candidate entry, expected_base_revision)` pairs.
+/// `session_update`: optional `(session_id, state_json)` to persist after
+/// all entry CAS succeeds, still inside the same transaction.
+pub(crate) fn commit_compute_settlement(
+    adapter: &NexusAdapter<'_>,
+    entry_updates: Vec<(KnowledgeEntry, u64)>,
+    session_update: Option<(String, String)>,
+) -> SpokeResult<()> {
+    let pool = adapter.pool.clone();
+    adapter.block_on(async move {
+        let mut tx = match pool.begin().await {
+            Ok(tx) => tx,
+            Err(e) => {
+                return reject(
+                    SpokeRejectCode::InternalError,
+                    format!("storage error on settlement tx begin: {e}"),
+                    json!({}),
+                );
+            }
+        };
+
+        for (entry, expected) in entry_updates {
+            let entry_id = entry.entry_id.clone();
+            let world_entry: WorldKbEntry = spoke_to_world_kb(entry);
+            match run_cas_update_in_tx(&mut tx, &entry_id, &world_entry, expected).await {
+                SpokeResult::Ok(_) => {}
+                SpokeResult::Reject(r) => {
+                    // Drop tx without commit → rollback prior CAS writes.
+                    return SpokeResult::Reject(r);
+                }
+            }
+        }
+
+        if let Some((session_id, state_json)) = session_update {
+            // SAFETY: static SQL; same shape as update_compute_session_state
+            // but joins the settlement transaction.
+            if let Err(e) =
+                sqlx::query("UPDATE compute_sessions SET state_json = ? WHERE session_id = ?")
+                    .bind(&state_json)
+                    .bind(&session_id)
+                    .execute(&mut *tx)
+                    .await
+            {
+                return reject(
+                    SpokeRejectCode::InternalError,
+                    format!("storage error on compute session state update: {e}"),
+                    json!({ "session_id": session_id }),
+                );
+            }
+        }
+
+        if let Err(e) = tx.commit().await {
+            return reject(
+                SpokeRejectCode::InternalError,
+                format!("storage error on settlement tx commit: {e}"),
+                json!({}),
+            );
+        }
+
+        SpokeResult::Ok(())
+    })
+}
+
 async fn run_cas_update_in_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     entry_id: &str,

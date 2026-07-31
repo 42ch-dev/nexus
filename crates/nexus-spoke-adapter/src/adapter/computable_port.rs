@@ -39,9 +39,7 @@ use crate::{
     SpokeRejectCode, SpokeResult,
 };
 use crate::{ComputeRequest, ComputeResponse};
-use nexus_local_db::compute_session::{
-    get_compute_session, insert_compute_session, update_compute_session_state,
-};
+use nexus_local_db::compute_session::{get_compute_session, insert_compute_session};
 use nexus_wasm_host::{
     embedded_module_bytes, embedded_module_ids, embedded_module_manifest, ComputeInput,
     ModuleManifest, WasmEngine, WasmModule,
@@ -415,13 +413,20 @@ impl ComputablePort for NexusAdapter<'_> {
             }
         }
 
-        // ── 8. Settle: route deltas by target_key_block_id ─────────────────
+        // ── 8. Settle: prepare in-memory updates, then commit atomically ──
         // F-001: state_delta carries `target_key_block_id` naming the
         // KnowledgeEntry each delta should apply to (schema L29-31). Default
         // to `request.entry_id` when omitted. The adapter must group deltas
         // by target and apply each group to its respective entry — NOT
         // blindly apply everything to the primary entry.
+        //
+        // Greptile P1 (partial settle): all target CAS writes + session
+        // state update share one SQLite transaction via
+        // `commit_compute_settlement`. A later CAS/session failure rolls
+        // back earlier entry writes so retries never double-apply deltas.
         let mut post_settle_state = Map::new();
+        let mut pending_entry_updates: Vec<(crate::KnowledgeEntry, u64)> = Vec::new();
+
         if settle {
             // Group deltas by target_key_block_id.
             let mut deltas_by_target: HashMap<String, Vec<_>> = HashMap::new();
@@ -471,6 +476,14 @@ impl ComputablePort for NexusAdapter<'_> {
                         }),
                     );
                 }
+
+                let Some(expected_rev) = target_entry.revision else {
+                    return reject(
+                        SpokeRejectCode::InvalidInput,
+                        format!("settle target {target_id} has no revision"),
+                        json!({ "target_id": target_id }),
+                    );
+                };
 
                 // Serialize the target entry to a JSON map for mutation.
                 let mut target_body = match serde_json::to_value(&target_entry).unwrap_or_default()
@@ -539,30 +552,23 @@ impl ComputablePort for NexusAdapter<'_> {
                         }
                     };
 
-                // CAS-persist with the target entry's own revision.
-                match self.put_knowledge_entry(updated_target, target_entry.revision) {
-                    SpokeResult::Ok(_) => { /* settled */ }
-                    SpokeResult::Reject(r) => {
-                        return SpokeResult::Reject(r);
-                    }
-                }
+                pending_entry_updates.push((updated_target, expected_rev));
             }
         }
 
-        // ── 9. Persist session state only after compute (+ settle) succeed ─
-        // Merged dynamic computable + optional WASM state_delta applied above
-        // in-memory; commit here so retries do not see advanced session state
-        // from a failed WASM/settle attempt.
+        // ── 9. Atomic commit: entry settles + session state ───────────────
+        // Session state is only advanced when compute succeeded and every
+        // settle CAS (if any) is ready. One TX → no partial entry writes and
+        // no session advance without successful settles.
         let updated_state_json =
             serde_json::to_string(&merged_state).unwrap_or_else(|_| "{}".to_string());
-        if let Err(e) = self.block_on(async {
-            update_compute_session_state(&pool, &session_id, &updated_state_json).await
-        }) {
-            return reject(
-                SpokeRejectCode::InternalError,
-                format!("storage error on compute session state update: {e}"),
-                json!({ "session_id": session_id }),
-            );
+        match super::knowledge_entry_port::commit_compute_settlement(
+            self,
+            pending_entry_updates,
+            Some((session_id.clone(), updated_state_json)),
+        ) {
+            SpokeResult::Ok(()) => {}
+            SpokeResult::Reject(r) => return SpokeResult::Reject(r),
         }
 
         // ── 10. Return ComputeResponse ────────────────────────────────────
