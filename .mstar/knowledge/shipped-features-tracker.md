@@ -6,7 +6,7 @@
 **Location**: `.mstar/knowledge/` (shared result; closed-row archive companion to the active deferred tracker).  
 **Split from**: [deferred-features-cross-version-tracker.md](deferred-features-cross-version-tracker.md) §4–§5 (2026-05-30 restructure)  
 **Created**: 2026-05-30  
-**Last updated**: 2026-07-22 (V1.131 close: DF-V1130-* shell IA + DF-V1131-* Chronos chrome/icons shipped)
+**Last updated**: 2026-07-31 (V1.146 close: SPOKE full host graduation PR #193 → main)
 
 **Last updated (V1.55 history)**: 2026-06-22 (V1.55 closeout: 7 plans all Done — P-1 prepare + P0 DF-43 SQLite persistence / crate-model alignment (closed) + P1 DF-31 workspace interface skeleton + P2 game-bible Depth 3.5 (design-writing + design 五问 rubric + section completion detection + KB extraction; Master spec) + P3 Script profile scaffold (V1.54-style parity + additive BlockType dialogue/beat/act + script_category + ScaffoldTransaction closure on BOTH non-novel scaffolds) + P-mid QC rhythm + P-last closeout (Profile B compaction + spec promotion + tracker ship snapshot + tech-debt rollup); R-V154P1-W001 + R-V154P1-S002 + DF-43 + DF-31 all closed; 1 new R-V155P2-F002 → V1.56+; wire contracts unchanged)
 
@@ -915,8 +915,8 @@ Archived from [deferred-features-cross-version-tracker.md](deferred-features-cro
 | **Integration / PR** | `iteration/v1.145` → `main` (PR [#191](https://github.com/42ch-dev/nexus/pull/191), merge `24c2239a`, MERGED) |
 | **Plans** | P0 local-db storage primitive API; P1 NexusAdapter rehome to spoke-adapter + dep reversal (seam as free fns / orphan-rule) + conversion seam ownership move; P2 WorldKB read via spoke `scope.extensions["nexus"]` (spoke 0.6.0; P2 redo removed the 0.5.0 typed-carrier workaround); P3 timeline port production (`list_timeline_events` stub→production, table existed V1.26); P4 docs sweep + narrative-read-via-adapter deferred |
 | **Outcome** | Crate topology corrected: `nexus-spoke-adapter` = capability aggregation (conversion seam + adapter + 6 ports + Surface A/B); `nexus-local-db` = pure storage (no spoke-adapter edge); `nexus-knowledge` = pure domain (no spoke-adapter edge). Cycle-free. spoke 0.5.0→0.6.0 bump (Scope.extensions added — the gap that blocked P2; fixed upstream per user's "advance spoke too" principle). `R-V1142P1-003` closed. `wire_contracts_changed: false`. |
-| **Open follow-ups** | `R-V1145P4-001` (narrative-read-via-adapter → V1.146 dep-topology refactor); `R-V1144P2-INVALIDINPUT-400` (spoke 500-class); spoke-side: Scope.extensions ✓ (0.6.0), 500-class reject code (open) |
-| **Roadmap** | V1.146 (next): narrative-read refactor + NexusAdapter (FullAdapter) + CLI spoke-protocol interop + spoke-side 500-class contribution |
+| **Open follow-ups** | *(closed in V1.146)* `R-V1145P4-001`, `R-V1144P2-INVALIDINPUT-400` |
+| **Roadmap** | V1.146 **delivered** (PR [#193](https://github.com/42ch-dev/nexus/pull/193)) |
 
 ---
 
@@ -924,10 +924,12 @@ Archived from [deferred-features-cross-version-tracker.md](deferred-features-cro
 
 | Field | Value |
 |-------|-------|
-| **Integration branch** | `iteration/v1.146` |
+| **Iteration** | V1.146 (XL — SPOKE deep integration / full host graduation) |
+| **Integration / PR** | `iteration/v1.146` → `main` (PR [#193](https://github.com/42ch-dev/nexus/pull/193), merge `24c6b507`, MERGED 2026-07-31) |
 | **Plans** | P0–P5 all Done (spoke 0.6.1 InternalError; narrative-read adapter; NexusAdapter FullAdapter; pack I/O CLI; lore activation flag-gated; residual sweep) |
 | **Key surfaces** | `nexus42 creator world kb pack export\|import`; `NEXUS_MCA_LORE_ACTIVATION=1`; `assemble-moment --emit-packet`; `modules_json` + relation `extensions_nexus_json` |
 | **Closed residuals** | R-V1144P2-INVALIDINPUT-400, R-V1145P4-001, R-V1139P0-005, R-V1144P1-001, R-V1143P0-STRETCH (defer), R-V1146P3-001 |
 | **Open follow-ups** | R-V1146P0-ACCEPT-01 (constraint→500); R-V1146P2-001 (compute_sessions TTL) |
 | **Wire contracts** | unchanged (`wire_contracts_changed: false`) |
+| **Roadmap** | Next: residual hygiene (constraint taxonomy + session TTL); optional Control Room pack UI (out of scope V1.146) |
 
