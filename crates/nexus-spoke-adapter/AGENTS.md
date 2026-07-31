@@ -9,7 +9,7 @@ Since V1.145 P1b this crate is the **capability aggregation** layer (spec §7.4 
 1. **Typed accessors** over the `extensions.nexus` namespace on a spoke `KnowledgeEntry` (5 fields: `world_id`, `created_from_command_id`, `source_work_id`, `source_chapter`, `source_provenance_kind`). See `src/extensions.rs`.
 2. **Lifecycle delegation (Surface A)** — delegates standard lifecycle invariants to `spoke-operations` (validate/apply promote, status transitions, assemble packet, extension merge, revision assert). Where `spoke-operations` exports a function, this crate re-exports or wraps it; it never reimplements a lifecycle invariant. See `src/ops.rs`.
 3. **Conversion seam** — the sole `WorldKbEntry` ↔ spoke `KnowledgeEntry` conversion (`world_kb_to_spoke` / `spoke_to_world_kb` + `WorldKbEntrySpokeExt`), owned here since V1.145 P1a (moved out of `nexus-knowledge` per the orphan rule). See `src/conversion/`.
-4. **Production adapter home** — `NexusBaselineAdapter` + 6 spoke port impls in `src/adapter/` (V1.145 P1b rehome from `nexus-local-db`). Consumes `nexus-local-db` storage primitives and bridges spoke's sync port traits to async `SQLite` I/O.
+4. **Production adapter home** — `NexusAdapter` (V1.146 rename) + 6 spoke port impls in `src/adapter/` (V1.145 P1b rehome from `nexus-local-db`). Consumes `nexus-local-db` storage primitives and bridges spoke's sync port traits to async `SQLite` I/O.
 
 Since V1.141 the crate also flat-re-exports spoke 0.4.0's adapter **port traits + `orchestrate_*` entrypoints + operand wire types** (Surface B, spec §7.3) so consumers implement spoke's ports and call spoke's orchestrators through this single import boundary — pure pass-through, no nexus logic.
 
@@ -23,7 +23,7 @@ Since V1.141 the crate also flat-re-exports spoke 0.4.0's adapter **port traits 
 ## Authority
 
 - Normative spec: [`specs/spoke-adapter-architecture.md`](../../.mstar/specs/spoke-adapter-architecture.md) (tracked). §7.2 is the authoritative public API surface; §7.3 is the Surface B (ports + orchestrators) surface; §2 is the `extensions.nexus` contract.
-- Upstream types: `spoke-schemas` + `spoke-operations` (crates.io, lockstep exact pin `=0.5.0`).
+- Upstream types: `spoke-schemas` + `spoke-operations` (crates.io, lockstep exact pin `=0.6.1`).
 
 ## Key rules
 
@@ -34,7 +34,7 @@ Since V1.141 the crate also flat-re-exports spoke 0.4.0's adapter **port traits 
 
 ## Dependencies
 
-- `spoke-schemas`, `spoke-operations` (workspace, `=0.5.0`)
+- `spoke-schemas`, `spoke-operations` (workspace, `=0.6.1`)
 - `serde`, `serde_json`
 - `nexus-knowledge` (domain types + conversion seam, V1.145 P1a)
 - `nexus-local-db` (storage primitives — `SqliteKbStore`, `open_pool`, `run_migrations`, CAS helpers; V1.145 P1b adapter rehome)
@@ -42,6 +42,7 @@ Since V1.141 the crate also flat-re-exports spoke 0.4.0's adapter **port traits 
 
 Dev-deps mirror the runtime deps so tests can compare wrapper output against the underlying spoke function directly; `tempfile` for the adapter's `#[cfg(test)]` SQLite fixtures.
 
-## Known concerns (open at V1.139 P0)
+## V1.146 P5 sweep notes
 
-- `build_assemble_packet` exposes the spec §7.2 signature `(packet_id, &[KnowledgeEntry], max_entries)`. Spoke's real API takes a `BuildAssemblePacketInput` struct with `&[KnowledgeEntryForAssemble]` and a packet-level `extensions` slot. The wrapper honors §7.2 and wraps internally (`extensions: None`). If a future caller needs packet-level extensions, amend §7.2 rather than growing this wrapper. See `src/ops.rs` doc comment.
+- The adapter now hosts 11 modules (activation, computable_port, finding_port, fork_port, host_manifest_port, knowledge_entry_port, mca_read, narrative_read, relation_port, rule_query_port, scope_query_port) plus the free-function conversion seam in `src/conversion/`. See `.mstar/specs/spoke-adapter-architecture.md` §7.4 for the production-vs-stub matrix.
+- `build_assemble_packet` exposes the spec §7.2 signature. Spoke's real API takes a `BuildAssemblePacketInput` struct with `&[KnowledgeEntryForAssemble]` and a packet-level `extensions` slot. The wrapper honors §7.2 and wraps internally. See `src/ops.rs` doc comment.

@@ -879,6 +879,49 @@ mod tests {
         assert_eq!(body.items[0].creator_id, "test_creator");
     }
 
+    // ── V1.146 P0 T5: InternalError → 500 mapping unit tests ─────────────
+    // Substitutes for a full handler-level fault-injection integration test
+    // (handler-level DB fault injection is impractical without mocked
+    // adapters). These tests verify that NexusApiError::Internal with the
+    // INTERNAL_ERROR classification produces the correct 500 HTTP response
+    // and body structure — the same error variant the handler mappers emit
+    // when the adapter surfaces SpokeRejectCode::InternalError.
+
+    #[test]
+    fn internal_error_spoke_reject_maps_to_500() {
+        // Simulate what map_upsert_reject / spoke_reject_to_api_error /
+        // map_relate_reject emit for SpokeRejectCode::InternalError.
+        let err = NexusApiError::Internal {
+            code: "INTERNAL_ERROR".to_string(),
+            message: "orchestrate_upsert internal error: DB connection lost".to_string(),
+        };
+        assert_eq!(err.status_code(), StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(err.error_code(), "internal");
+    }
+
+    #[test]
+    fn internal_error_message_preserves_orchestrator_context() {
+        let err = NexusApiError::Internal {
+            code: "INTERNAL_ERROR".to_string(),
+            message: "orchestrate_upsert internal error: DB connection lost".to_string(),
+        };
+        let body = err.to_response_body();
+        assert!(!body.success);
+        // Public error code is always "internal" for the Internal variant
+        // (not "INTERNAL_ERROR" — see module-level two-tier code design).
+        assert_eq!(body.error.code, "internal");
+        // The message field carries the spoke-level error context so the
+        // caller can diagnose the failure.
+        assert!(
+            body.error
+                .message
+                .contains("orchestrate_upsert internal error"),
+            "message should contain the spoke error context: {}",
+            body.error.message
+        );
+        assert!(body.error.details.is_none());
+    }
+
     /// Integration test: GET /v1/daemon/references when no workspace → returns empty list.
     ///
     /// Workspace initialization is enforced by middleware, not by the handler.

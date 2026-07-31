@@ -54,17 +54,17 @@ use nexus_local_db::kb_relationships::{
 };
 use nexus_local_db::kb_store::{self, cas_update_key_block_fields};
 use nexus_local_db::LocalDbError;
-// V1.145 P1b — the production `NexusBaselineAdapter` rehomed from
+// V1.145 P1b — the production `NexusAdapter` rehomed from
 // `nexus-local-db/src/spoke_adapter/` to `nexus-spoke-adapter/src/adapter/`
 // (spec §7.4 / §8 dep-graph reversal). Construct through the single
 // spoke-adapter import boundary.
-use nexus_spoke_adapter::NexusBaselineAdapter;
+use nexus_spoke_adapter::NexusAdapter;
 // V1.142 P2: first production orchestrator cutover. `promote_adopt` routes
-// through `orchestrate_promote(&NexusBaselineAdapter, PromoteRequest)`.
+// through `orchestrate_promote(&NexusAdapter, PromoteRequest)`.
 // V1.143 P1: second cutover — `patch_entity` routes the canonical entity edit
-// through `orchestrate_upsert(&NexusBaselineAdapter, UpsertRequest)`.
+// through `orchestrate_upsert(&NexusAdapter, UpsertRequest)`.
 // V1.144 P2: third cutover — `patch_relationship` add/update route through
-// `orchestrate_relate(&NexusBaselineAdapter, RelateRequest)`. `remove` stays
+// `orchestrate_relate(&NexusAdapter, RelateRequest)`. `remove` stays
 // on Surface A (spoke `RelationPort` has no delete).
 // These spoke types are re-exported through `nexus_spoke_adapter` (the
 // single boundary that crosses into spoke standard objects; spec §7).
@@ -415,7 +415,7 @@ pub async fn patch_entity(
     post_patch.revision = Some(current_version);
 
     let spoke_req = build_spoke_upsert_request(&post_patch);
-    let adapter = NexusBaselineAdapter::new(pool.clone());
+    let adapter = NexusAdapter::new(pool.clone());
     // `with_bound_tx` is a no-op when the adapter has no shared tx cell
     // (`put_update` opens + commits its own transaction) — patch_entity has no
     // sibling write, so the unbound path is behavior-equivalent to the previous
@@ -699,7 +699,7 @@ async fn promote_adopt(
 
     let tx = pool.begin().await.map_err(NexusApiError::from)?;
     let tx_cell = Arc::new(Mutex::new(Some(tx)));
-    let adapter = NexusBaselineAdapter::new(pool.clone()).with_tx_cell(Arc::clone(&tx_cell));
+    let adapter = NexusAdapter::new(pool.clone()).with_tx_cell(Arc::clone(&tx_cell));
 
     let spoke_req = build_spoke_promote_request(&kb);
     let result = adapter.with_bound_tx(|| orchestrate_promote(&adapter, spoke_req));
@@ -1030,6 +1030,8 @@ fn build_spoke_upsert_request(entry: &WorldKbEntry) -> UpsertRequest {
 /// |-----------------------------------------|----------------------------|
 /// | `StoredRevisionStale` / `RevisionConflict` / `KnowledgeEntryAlreadyExists` | `world_kb_conflict` (409) |
 /// | `KnowledgeEntryTerminalStatus` / `InvalidKnowledgeEntryStatus` / `InvalidKnowledgeEntryStatusTransition` | `world_kb_validation_failed` (422) |
+/// | `InvalidInput` (V1.146 P0)               | `InvalidInput` (400)       |
+/// | `InternalError` (V1.146 P0)             | `Internal` (500)           |
 /// | other / `Variant1` error envelope       | `Internal` (500)           |
 async fn map_upsert_response(
     result: SpokeResult<UpsertResponse>,
@@ -1116,6 +1118,18 @@ async fn map_upsert_reject(
         | SpokeRejectCode::InvalidKnowledgeEntryStatusTransition => {
             NexusApiError::world_kb_validation_failed(&[reject.message], &[])
         }
+        // explicit 400 contract for validation rejects (S-001)
+        SpokeRejectCode::InvalidInput => NexusApiError::InvalidInput {
+            field: "knowledge_entry".to_string(),
+            reason: reject.message,
+        },
+        // V1.146 P0: InternalError → 500 (explicit 500-class mapping; see T4
+        // for the adapter-side remap). The body carries the spoke reject
+        // message; the public HTTP status is 500 INTERNAL_SERVER_ERROR.
+        SpokeRejectCode::InternalError => NexusApiError::Internal {
+            code: "INTERNAL_ERROR".to_string(),
+            message: format!("orchestrate_upsert internal error: {}", reject.message),
+        },
         _ => NexusApiError::Internal {
             code: "SPOKE_ORCHESTRATOR_REJECT".to_string(),
             message: format!(
@@ -1179,7 +1193,9 @@ async fn reread_entity_revision_sync(pool: &sqlx::SqlitePool, entity_id: &str) -
 /// | `KnowledgeEntryAlreadyExists`           | retry-safe check (see below)       |
 /// | `RevisionConflict`                      | `world_kb_conflict` (409)          |
 /// | `StoredRevisionStale`                   | `world_kb_conflict` (409)          |
-/// | `InvalidInput` / `CapabilityPortMissing` / other | `Internal` (500)         |
+/// | `InternalError` (V1.146 P0)             | `Internal` (500)                   |
+/// | `InvalidInput`                          | `InvalidInput` (400)               |
+/// | `CapabilityPortMissing` / other          | `Internal` (500)                   |
 ///
 /// # Retry-safe idempotency
 ///
@@ -1353,6 +1369,11 @@ async fn spoke_reject_to_api_error(
         | SpokeRejectCode::KnowledgeEntryTerminalStatus => {
             NexusApiError::world_kb_validation_failed(&[reject.message], &[])
         }
+        // explicit 400 contract for validation rejects (S-001)
+        SpokeRejectCode::InvalidInput => NexusApiError::InvalidInput {
+            field: "promotion".to_string(),
+            reason: reject.message,
+        },
         SpokeRejectCode::RevisionConflict | SpokeRejectCode::StoredRevisionStale => {
             let current = reread_promotion_version(pool, job_id).await.unwrap_or(0);
             NexusApiError::world_kb_conflict(
@@ -1362,6 +1383,12 @@ async fn spoke_reject_to_api_error(
                 "refetch the candidates list and reapply",
             )
         }
+        // V1.146 P0: InternalError → 500 (explicit 500-class mapping; see T4
+        // for the adapter-side remap).
+        SpokeRejectCode::InternalError => NexusApiError::Internal {
+            code: "INTERNAL_ERROR".to_string(),
+            message: format!("orchestrate_promote internal error: {}", reject.message),
+        },
         _ => NexusApiError::Internal {
             code: "SPOKE_ORCHESTRATOR_REJECT".to_string(),
             message: format!(
@@ -2010,6 +2037,7 @@ fn build_spoke_relate_request(relation: &SpokeRelation) -> RelateRequest {
 /// | `InvalidInput`                          | `InvalidInput` (400)       |
 /// | `RelationSelfEdge` / `RelationMissingEndpoint` / `MissingRequiredField` | `world_kb_validation_failed` (422) |
 /// | `RelationNotFound`                      | `NotFound` (404)           |
+/// | `InternalError` (V1.146 P0)             | `Internal` (500)           |
 /// | other / `Variant1` error envelope       | `Internal` (500)           |
 async fn map_relate_response(
     result: SpokeResult<RelateResponse>,
@@ -2121,6 +2149,13 @@ async fn map_relate_reject(
         SpokeRejectCode::RelationNotFound => {
             NexusApiError::NotFound(format!("relationship {relationship_id}"))
         }
+        // V1.146 P0: InternalError → 500 (explicit 500-class mapping; see T4
+        // for the adapter-side remap). The body carries the spoke reject
+        // message; the public HTTP status is 500 INTERNAL_SERVER_ERROR.
+        SpokeRejectCode::InternalError => NexusApiError::Internal {
+            code: "INTERNAL_ERROR".to_string(),
+            message: format!("orchestrate_relate internal error: {}", reject.message),
+        },
         _ => NexusApiError::Internal {
             code: "SPOKE_ORCHESTRATOR_REJECT".to_string(),
             message: format!(
@@ -2223,7 +2258,7 @@ async fn patch_relationship_add(
         Some(nexus_local_db::kb_relationships::SOURCE_MANUAL),
     );
     let spoke_req = build_spoke_relate_request(&relation);
-    let adapter = NexusBaselineAdapter::new(pool.clone());
+    let adapter = NexusAdapter::new(pool.clone());
     // `with_bound_tx` is a no-op when the adapter has no shared tx cell
     // (`put_relation_create` opens + commits its own transaction) — add has no
     // sibling write, so the unbound path is behavior-equivalent to the previous
@@ -2325,15 +2360,46 @@ async fn patch_relationship_update(
     let mut input = input;
     let needs_review_for_relation = input.needs_review.unwrap_or(existing.needs_review != 0);
     input.needs_review = Some(needs_review_for_relation);
-    let relation = nexus_input_to_spoke_relation(
+    let mut relation = nexus_input_to_spoke_relation(
         relationship_id,
         world_id,
         &input,
         Some(current_revision),
         None,
     );
+
+    // V1.146 P5 F-001: preserve unknown `extensions.nexus` keys from the
+    // existing row. `nexus_input_to_spoke_relation` only populates the 6 known
+    // nexus-locals; unknown keys from the stored `extensions_nexus_json` must
+    // be merged back so they survive the update round-trip through
+    // `serialize_extensions_nexus_json`. Without this merge, a routine update
+    // (e.g. label change) silently drops any key outside the 6 known locals.
+    let known_nexus_keys: &[&str] = &[
+        "world_id",
+        "symmetric",
+        "confidence",
+        "source_anchor_ids",
+        "needs_review",
+        "source",
+    ];
+    if let Some(json) = &existing.extensions_nexus_json {
+        if let Ok(stored_ns) =
+            serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(json)
+        {
+            let key = RelationExtensionsKey::try_from("nexus")
+                .expect("\"nexus\" matches the extensions-key regex");
+            if let Some(nexus_ns) = relation.extensions.get_mut(&key) {
+                for (k, v) in stored_ns {
+                    if !known_nexus_keys.contains(&k.as_str()) {
+                        nexus_ns.entry(k).or_insert(v);
+                    }
+                }
+            }
+        }
+    }
+
     let spoke_req = build_spoke_relate_request(&relation);
-    let adapter = NexusBaselineAdapter::new(pool.clone());
+    let adapter = NexusAdapter::new(pool.clone());
     let result = adapter.with_bound_tx(|| orchestrate_relate(&adapter, spoke_req));
     let row = map_relate_response(result, pool, relationship_id).await?;
 

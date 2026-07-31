@@ -12,6 +12,7 @@
 
 #[cfg(unix)]
 pub mod cas;
+pub mod compute_session;
 pub mod file_lock;
 pub mod findings;
 pub mod force_gates_audit;
@@ -183,6 +184,12 @@ pub use force_gates_audit::{
 pub use runtime_lock::{
     acquire_runtime_lock, clear_stale_lock, cli_holder, is_lock_stale, release_runtime_lock,
     schedule_holder, ttl_from_env, AcquireResult, DEFAULT_RUNTIME_LOCK_TTL_SECS,
+};
+
+// Re-export compute_session types (V1.146 P2 T2)
+pub use compute_session::{
+    delete_compute_session, get_compute_session, insert_compute_session,
+    update_compute_session_state, ComputeSessionRow,
 };
 
 // Re-export workspace_session types (V1.56 P0 DF-31)

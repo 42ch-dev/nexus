@@ -121,7 +121,7 @@ fn add_request(
 }
 
 // V1.144 P2: add/update now route through `orchestrate_relate` via
-// `NexusBaselineAdapter`, which bridges sync spoke ports to async SQLite via
+// `NexusAdapter`, which bridges sync spoke ports to async SQLite via
 // `tokio::task::block_in_place`. That requires a multi-threaded runtime (the
 // production daemon uses one; tests opt in via `flavor = "multi_thread"` —
 // same rationale as the V1.143 patch_entity tests). Pre-orchestrator
@@ -1311,4 +1311,101 @@ async fn get_graph_truncates_relationships_at_cap() {
     // The newest relationships are retained.
     assert!(ids.contains("rel_cap_0002"));
     assert!(ids.contains(format!("rel_cap_{CAP:04}").as_str()));
+}
+
+// V1.146 P5 F-001: a routine update (e.g. label change) must not wipe unknown
+// keys from the `extensions_nexus_json` column. This test seeds the column
+// with an unknown key, updates via the handler, and verifies the key survives.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn update_preserves_unknown_extensions_nexus_keys() {
+    let (_tmp, state) = fresh_state().await;
+    seed_key_block(
+        state.pool().unwrap(),
+        "kb_a",
+        "wld_test_world",
+        "character",
+        "Aria",
+        "confirmed",
+    )
+    .await;
+    seed_key_block(
+        state.pool().unwrap(),
+        "kb_b",
+        "wld_test_world",
+        "character",
+        "Kael",
+        "confirmed",
+    )
+    .await;
+
+    // Create via handler → valid row with revision = 1 (spoke convention).
+    let Json(created) = patch_relationship(
+        State(state.clone()),
+        Path("wld_test_world".to_string()),
+        Json(add_request(
+            "kb_a",
+            "kb_b",
+            WorldKbRelationshipKind::AlliedWith,
+        )),
+    )
+    .await
+    .unwrap();
+    let rel_id = created.relationship.unwrap().relationship_id;
+
+    // Inject unknown keys into the stored `extensions_nexus_json` column.
+    sqlx::query("UPDATE kb_relationships SET extensions_nexus_json = ? WHERE relationship_id = ?")
+        .bind(r#"{"world_id":"wld_test_world","custom_tag":"imported","batch_id":"B42"}"#)
+        .bind(&rel_id)
+        .execute(state.pool().unwrap())
+        .await
+        .unwrap();
+
+    // Update: change only `relation_type`. Unknown keys must survive.
+    let req = WorldKbPatchRelationshipRequest {
+        relationship_id: Some(rel_id.clone()),
+        action: "update".parse().unwrap(),
+        expected_version: Some(1),
+        relationship: Some(NexusWorldKbRelationshipInput {
+            source_entity_id: "kb_a".to_string(),
+            target_entity_id: "kb_b".to_string(),
+            relation_type: relation_type_to_nexus(WorldKbRelationshipKind::MentorOf),
+            custom_label: None,
+            symmetric: false,
+            confidence: None,
+            source_anchor_ids: Vec::new(),
+            metadata: Default::default(),
+            needs_review: None,
+        }),
+    };
+    let Json(resp) = patch_relationship(
+        State(state.clone()),
+        Path("wld_test_world".to_string()),
+        Json(req),
+    )
+    .await
+    .expect("update should succeed");
+
+    assert_eq!(resp.version, 2, "CAS bump after update");
+
+    // Verify unknown keys survived the round-trip.
+    let extensions_json: String = sqlx::query_scalar(
+        "SELECT extensions_nexus_json FROM kb_relationships WHERE relationship_id = ?",
+    )
+    .bind(&rel_id)
+    .fetch_one(state.pool().unwrap())
+    .await
+    .unwrap();
+
+    let ns: serde_json::Map<String, serde_json::Value> =
+        serde_json::from_str(&extensions_json).expect("valid JSON");
+    assert_eq!(
+        ns.get("custom_tag").and_then(|v| v.as_str()),
+        Some("imported"),
+        "unknown key 'custom_tag' survives update"
+    );
+    assert_eq!(
+        ns.get("batch_id").and_then(|v| v.as_str()),
+        Some("B42"),
+        "unknown key 'batch_id' survives update"
+    );
 }

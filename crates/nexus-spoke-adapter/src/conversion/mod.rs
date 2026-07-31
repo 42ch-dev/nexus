@@ -24,5 +24,7 @@
 //! blocked aggregating spoke capability against storage in this crate.
 
 pub mod knowledge_entry;
+pub mod relation;
 
 pub use knowledge_entry::{spoke_to_world_kb, world_kb_to_spoke, WorldKbEntrySpokeExt};
+pub use relation::kb_relationship_row_to_spoke;

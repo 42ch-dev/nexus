@@ -24,6 +24,7 @@
 use crate::stage0::{Stage0Assembly, STAGE0_PERSONALITY_END, STAGE0_PERSONALITY_START};
 use crate::world_context::WorldKbQueryBuilder;
 use nexus_contracts::BlockType;
+use nexus_knowledge::world_kb::knowledge_entry::WorldKbEntry;
 use nexus_knowledge::world_kb::KbStore;
 use nexus_knowledge::KnowledgeStore;
 use nexus_narrative::NarrativeGateway;
@@ -68,6 +69,13 @@ pub struct MomentRequest {
     pub kb_block_type: Option<BlockType>,
     /// User knowledge query: maximum number of entries to return.
     pub knowledge_limit: Option<usize>,
+    /// Enable lore activation filtering on `WorldKB` entries (V1.146 P4 T2).
+    ///
+    /// When `true`, the activation pass runs between `WorldKB` fetch and
+    /// User Knowledge assembly, calling `apply_activation` to filter/inspect
+    /// entries by their `modules.activation` fire-conditions.
+    /// Default `false` — zero path change.
+    pub activation_enabled: bool,
 }
 
 impl MomentRequest {
@@ -85,6 +93,7 @@ impl MomentRequest {
             kb_text_search: None,
             kb_block_type: None,
             knowledge_limit: None,
+            activation_enabled: false,
         }
     }
 
@@ -150,6 +159,13 @@ impl MomentRequest {
         self.knowledge_limit = Some(limit);
         self
     }
+
+    /// Enable lore activation filtering (V1.146 P4 T2).
+    #[must_use]
+    pub const fn with_activation_enabled(mut self, enabled: bool) -> Self {
+        self.activation_enabled = enabled;
+        self
+    }
 }
 
 /// Assembled context from all domain sources for a single moment.
@@ -168,6 +184,10 @@ pub struct MomentContext {
     pub world_kb: Option<String>,
     /// User knowledge summary text (entries for the user).
     pub user_knowledge: Option<String>,
+    /// Per-entry activation trace (populated when `activation_enabled` is true).
+    /// V1.146 P4 T3: exposed for inspector packet emission.
+    pub activation_trace:
+        Option<Vec<nexus_spoke_adapter::adapter::activation::ActivationTraceEntry>>,
 }
 
 impl MomentContext {
@@ -366,9 +386,36 @@ where
     };
 
     // 3. World KB (if world_id provided)
+    // V1.146 P4 T3: capture activation trace for inspector packet emission.
+    let mut activation_trace: Option<
+        Vec<nexus_spoke_adapter::adapter::activation::ActivationTraceEntry>,
+    > = None;
     let world_kb = if let Some(ref world_id) = request.world_id {
-        match fetch_world_kb(kb_store, world_id, request).await {
-            Ok(Some(kb_text)) => Some(kb_text),
+        match fetch_world_kb_entries(kb_store, world_id, request).await {
+            Ok(entries) if !entries.is_empty() => {
+                let entries = if request.activation_enabled {
+                    // V1.146 P4 T2: apply lore activation between WorldKB fetch
+                    // and User Knowledge assembly. Unmatched entries are filtered
+                    // out (activation gate). Neutral entries (no activation module)
+                    // remain in matched.
+                    // V1.146 P4 T3: capture the full ActivationResult for
+                    // diagnostic trace emission.
+                    let result = nexus_spoke_adapter::adapter::activation::apply_activation(
+                        &entries,
+                        &stage0_context,
+                        &[],
+                    );
+                    activation_trace = Some(result.trace);
+                    result.matched
+                } else {
+                    entries
+                };
+                if entries.is_empty() {
+                    None
+                } else {
+                    Some(format_kb_entries(&entries))
+                }
+            }
             _ => None,
         }
     } else {
@@ -391,6 +438,7 @@ where
         timeline,
         world_kb,
         user_knowledge,
+        activation_trace,
     };
 
     // 5. Cross-domain truncation if max_tokens set
@@ -421,15 +469,16 @@ async fn fetch_narrative_context<G: NarrativeGateway>(
     Ok((world_state_text, timeline_text))
 }
 
-/// Fetch World KB assets using structured query and format as context text.
+/// Fetch World KB entries using structured query (no formatting).
 ///
-/// Uses [`WorldKbQueryBuilder`] for shared filter logic (T2 refactor).
+/// V1.146 P4 T2: extracted so the activation pass can operate on entries
+/// before formatting. Callers use `format_kb_entries` to produce context text.
 #[allow(clippy::future_not_send)]
-async fn fetch_world_kb<K: KbStore>(
+async fn fetch_world_kb_entries<K: KbStore>(
     kb_store: &K,
     world_id: &str,
     request: &MomentRequest,
-) -> Result<Option<String>, nexus_knowledge::world_kb::KbStoreError> {
+) -> Result<Vec<WorldKbEntry>, nexus_knowledge::world_kb::KbStoreError> {
     let builder = WorldKbQueryBuilder::new(world_id);
     let mut query = builder.query_all();
     if let Some(limit) = request.kb_limit {
@@ -442,11 +491,12 @@ async fn fetch_world_kb<K: KbStore>(
         query = query.with_block_type(block_type);
     }
     let result = kb_store.query(&query).await?;
-    if result.items.is_empty() {
-        return Ok(None);
-    }
-    let lines: Vec<String> = result
-        .items
+    Ok(result.items)
+}
+
+/// Format `WorldKB` entries into markdown context text lines.
+fn format_kb_entries(entries: &[WorldKbEntry]) -> String {
+    entries
         .iter()
         .map(|kb| {
             let summary = kb
@@ -459,8 +509,8 @@ async fn fetch_world_kb<K: KbStore>(
                 kb.canonical_name, kb.block_type
             )
         })
-        .collect();
-    Ok(Some(lines.join("\n")))
+        .collect::<Vec<String>>()
+        .join("\n")
 }
 
 /// Fetch User knowledge entries and format as context text.
@@ -900,6 +950,7 @@ mod tests {
             timeline: None,
             world_kb: None,
             user_knowledge: None,
+            activation_trace: None,
         };
 
         let (personality, rest) = ctx.split_stage0_personality();
@@ -936,6 +987,7 @@ mod tests {
             timeline: Some("Timeline events.".to_string()),
             world_kb: None,
             user_knowledge: None,
+            activation_trace: None,
         };
 
         // apply_cross_domain_truncation uses split_stage0_personality internally
@@ -997,5 +1049,217 @@ mod tests {
             "legacy heuristic must not include experience"
         );
         assert!(rest.contains("10 years"), "rest must contain experience");
+    }
+
+    // ── V1.146 P4 T2: activation flag tests ────────────────────────
+
+    /// Helper: create a `WorldKbEntry` with optional `modules.activation` JSON.
+    fn kb_entry_with_modules(
+        world_id: &str,
+        block_type: nexus_contracts::BlockType,
+        name: &str,
+        entry_id: &str,
+        modules: Option<serde_json::Value>,
+    ) -> WorldKbEntry {
+        let mut entry = WorldKbEntry::new(world_id, block_type, name);
+        entry.entry_id = entry_id.to_string();
+        entry.modules = modules;
+        entry
+    }
+
+    #[tokio::test]
+    async fn activation_flag_off_includes_all_entries() {
+        // Flag OFF (default): entries with activation modules all appear
+        // — byte-identical to pre-P4 baseline behavior.
+        let stores = TestStores::new();
+
+        let hero = kb_entry_with_modules(
+            "wld_1",
+            nexus_contracts::BlockType::Character,
+            "Hero",
+            "kb_h",
+            Some(serde_json::json!({"activation": {"key": ["hero"], "logic": "and_any"}})),
+        );
+        stores.kb.insert_knowledge_entry(hero).await.unwrap();
+
+        let castle = kb_entry_with_modules(
+            "wld_1",
+            nexus_contracts::BlockType::Scene,
+            "Castle",
+            "kb_c",
+            None,
+        );
+        stores.kb.insert_knowledge_entry(castle).await.unwrap();
+
+        let request = MomentRequest::new(minimal_stage0()).with_world("wld_1");
+        let ctx = assemble_moment(&request, &stores.narrative, &stores.kb, &stores.knowledge).await;
+        let kb_text = ctx.world_kb.unwrap();
+        assert!(kb_text.contains("Hero"), "flag OFF: all entries appear");
+        assert!(kb_text.contains("Castle"), "flag OFF: all entries appear");
+    }
+
+    #[tokio::test]
+    async fn activation_flag_on_no_activation_module_includes_all() {
+        // Flag ON but no entries carry activation modules → same output as OFF.
+        let stores = TestStores::new();
+
+        for (id, name, bt) in [
+            ("kb_a", "Hero", nexus_contracts::BlockType::Character),
+            ("kb_b", "Castle", nexus_contracts::BlockType::Scene),
+            ("kb_c", "Forest", nexus_contracts::BlockType::Scene),
+        ] {
+            let entry = kb_entry_with_modules("wld_1", bt, name, id, None);
+            stores.kb.insert_knowledge_entry(entry).await.unwrap();
+        }
+
+        let request = MomentRequest::new(minimal_stage0())
+            .with_world("wld_1")
+            .with_activation_enabled(true);
+
+        let ctx = assemble_moment(&request, &stores.narrative, &stores.kb, &stores.knowledge).await;
+        let kb_text = ctx.world_kb.unwrap();
+        assert!(kb_text.contains("Hero"));
+        assert!(kb_text.contains("Castle"));
+        assert!(kb_text.contains("Forest"));
+    }
+
+    #[tokio::test]
+    async fn activation_flag_on_filters_unmatched_entries() {
+        // Flag ON: stage0 mentions "king" → Hero matches (key "king"),
+        // Castle is unmatched (key "dragon"), Forest is neutral.
+        let stores = TestStores::new();
+
+        stores
+            .kb
+            .insert_knowledge_entry(kb_entry_with_modules(
+                "wld_1",
+                nexus_contracts::BlockType::Character,
+                "Hero",
+                "kb_hero",
+                Some(serde_json::json!({"activation": {"key": ["king"], "logic": "and_any"}})),
+            ))
+            .await
+            .unwrap();
+        stores
+            .kb
+            .insert_knowledge_entry(kb_entry_with_modules(
+                "wld_1",
+                nexus_contracts::BlockType::Scene,
+                "Castle",
+                "kb_castle",
+                Some(serde_json::json!({"activation": {"key": ["dragon"], "logic": "and_any"}})),
+            ))
+            .await
+            .unwrap();
+        stores
+            .kb
+            .insert_knowledge_entry(kb_entry_with_modules(
+                "wld_1",
+                nexus_contracts::BlockType::Scene,
+                "Forest",
+                "kb_forest",
+                None,
+            ))
+            .await
+            .unwrap();
+
+        let stage0 = Stage0Assembly {
+            personality: "A king rules the land.".to_string(),
+            experience: "10 years.".to_string(),
+            user_prompt: "Write chapter 3.".to_string(),
+            ..Stage0Assembly::default()
+        };
+        let request = MomentRequest::new(stage0)
+            .with_world("wld_1")
+            .with_activation_enabled(true);
+
+        let ctx = assemble_moment(&request, &stores.narrative, &stores.kb, &stores.knowledge).await;
+        let kb_text = ctx.world_kb.unwrap();
+        assert!(
+            kb_text.contains("Hero"),
+            "Hero should match 'king' in stage0"
+        );
+        assert!(
+            !kb_text.contains("Castle"),
+            "Castle should be filtered (no 'dragon' match)"
+        );
+        assert!(
+            kb_text.contains("Forest"),
+            "Forest (neutral, no modules) should survive activation"
+        );
+    }
+
+    #[tokio::test]
+    async fn activation_flag_on_and_all_requires_all_keys() {
+        // Flag ON with and_all: entry needs all keys to match.
+        let stores = TestStores::new();
+        stores
+            .kb
+            .insert_knowledge_entry(kb_entry_with_modules(
+                "wld_1",
+                nexus_contracts::BlockType::Character,
+                "Royal Guard",
+                "kb_guard",
+                Some(
+                    serde_json::json!({"activation": {"key": ["king", "throne", "guard"], "logic": "and_all"}}),
+                ),
+            ))
+            .await
+            .unwrap();
+
+        let stage0 = Stage0Assembly {
+            personality: "The king sat on the throne while the guard stood watch.".to_string(),
+            ..Stage0Assembly::default()
+        };
+        let request = MomentRequest::new(stage0)
+            .with_world("wld_1")
+            .with_activation_enabled(true);
+
+        let ctx = assemble_moment(&request, &stores.narrative, &stores.kb, &stores.knowledge).await;
+        assert!(ctx.world_kb.is_some(), "all 3 keys matched → entry present");
+        assert!(ctx.world_kb.unwrap().contains("Royal Guard"));
+    }
+
+    #[tokio::test]
+    async fn activation_flag_on_not_any_excludes_matched() {
+        // Flag ON with not_any: entry excluded if any key matches.
+        let stores = TestStores::new();
+        stores
+            .kb
+            .insert_knowledge_entry(kb_entry_with_modules(
+                "wld_1",
+                nexus_contracts::BlockType::Character,
+                "Orc Warlord",
+                "kb_orc",
+                Some(serde_json::json!({"activation": {"key": ["orc"], "logic": "not_any"}})),
+            ))
+            .await
+            .unwrap();
+
+        let stage0 = Stage0Assembly {
+            personality: "The orc army marched forward.".to_string(),
+            ..Stage0Assembly::default()
+        };
+        let request = MomentRequest::new(stage0)
+            .with_world("wld_1")
+            .with_activation_enabled(true);
+
+        let ctx = assemble_moment(&request, &stores.narrative, &stores.kb, &stores.knowledge).await;
+        assert!(
+            ctx.world_kb.is_none(),
+            "Orc Warlord excluded by not_any → no entries remain"
+        );
+    }
+
+    #[tokio::test]
+    async fn activation_empty_world_yields_none() {
+        // Flag ON but no KB entries → world_kb is None.
+        let stores = TestStores::new();
+        let request = MomentRequest::new(minimal_stage0())
+            .with_world("wld_ghost")
+            .with_activation_enabled(true);
+
+        let ctx = assemble_moment(&request, &stores.narrative, &stores.kb, &stores.knowledge).await;
+        assert!(ctx.world_kb.is_none());
     }
 }

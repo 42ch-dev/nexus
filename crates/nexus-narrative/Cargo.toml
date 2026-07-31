@@ -22,15 +22,6 @@ strum.workspace = true
 # the L5 temporal axis. The two `From` impls in `timeline_event.rs` are the
 # sole conversion seam (spec spoke-adapter-architecture.md §7.1).
 spoke-schemas.workspace = true
-# V1.145 P1b — standard spoke-library usage: `InMemoryNarrativeGateway::get_timeline_ordered`
-# calls the spoke `order_timeline_events_by_ids` beat-assist helper. `spoke-operations` is a
-# leaf dependency (no cycle), used the same way a crate depends on `serde`. Earlier this came
-# via `nexus-spoke-adapter`, but adding `nexus-spoke-adapter → nexus-local-db` (the P1b adapter
-# rehome) would have created a `local-db → narrative → spoke-adapter → local-db` cycle, so the
-# dep edge was reversed and narrative now takes `spoke-operations` directly. Routing the helper
-# back through the spoke-adapter boundary is a V1.146 refactor (needs narrative ordering to live
-# in a spoke-adapter-dependent layer). See spec §7.4 "Read-path ScopeQuery adoption".
-spoke-operations = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["rt", "macros"] }

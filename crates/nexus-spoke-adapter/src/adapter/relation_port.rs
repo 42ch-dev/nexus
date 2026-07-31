@@ -6,8 +6,9 @@
 //! There is no second conversion seam for `Relation` analogous to the
 //! V1.139 `WorldKbEntry ↔ KnowledgeEntry` pair — spoke's `Relation`
 //! wire type maps directly onto the nexus `kb_relationships` row at
-//! this boundary via [`row_to_relation`] (the single reverse-mapping
-//! seam, reused by get / create-return / update-return):
+//! this boundary via the single reverse-mapping seam
+//! [`crate::conversion::kb_relationship_row_to_spoke`] (moved here in
+//! V1.146 P3 so the CLI pack exporter and the port share one mapping):
 //!
 //! | Spoke `Relation` field        | Nexus `kb_relationships` column        |
 //! |-------------------------------|-----------------------------------------|
@@ -28,11 +29,12 @@
 //!
 //! spoke 0.5.0 `Relation` has no `symmetric`/`confidence`/`custom_label`
 //! fields — those ride `extensions.nexus` (nexus-locals); spoke uses `label`.
-//! Unknown keys under `extensions.nexus` are not round-tripped: the
-//! `kb_relationships` table has no extras-JSON column (unlike
-//! `kb_key_blocks.extensions_nexus_json`), so only the known nexus-locals
-//! above survive a put → get cycle. That is a pre-existing schema
-//! limitation, out of scope for V1.144.
+//!
+//! V1.146 P5 T2: the `extensions_nexus_json` column (added by T1) now
+//! preserves unknown `extensions.nexus` keys across the `SQLite` round-trip.
+//! On write, the full `extensions["nexus"]` namespace is serialized into the
+//! column; on read, [`kb_relationship_row_to_spoke`] merges it back with the
+//! 6 typed columns as authoritative.
 //!
 //! # OCC contract (V1.144)
 //!
@@ -57,7 +59,7 @@
 //! create vs update from stored presence, so the only reachable failure on
 //! the update path is "the store moved since the caller's read".
 
-use super::NexusBaselineAdapter;
+use super::NexusAdapter;
 use crate::{
     Relation, RelationExtensionsKey, RelationPort, SpokeReject, SpokeRejectCode, SpokeResult,
 };
@@ -67,9 +69,8 @@ use nexus_local_db::kb_relationships::{
 };
 use nexus_local_db::LocalDbError;
 use serde_json::{json, Map, Value};
-use std::num::NonZeroU64;
 
-impl RelationPort for NexusBaselineAdapter<'_> {
+impl RelationPort for NexusAdapter<'_> {
     fn get_relation(&self, relation_id: &str) -> SpokeResult<Relation> {
         let pool = self.pool.clone();
         let relation_id = relation_id.to_string();
@@ -85,13 +86,13 @@ impl RelationPort for NexusBaselineAdapter<'_> {
                 }
                 Err(e) => {
                     return reject(
-                        SpokeRejectCode::InvalidInput,
+                        SpokeRejectCode::InternalError,
                         format!("storage error on relation read: {e}"),
                         json!({ "relation_id": relation_id }),
                     );
                 }
             };
-            SpokeResult::Ok(row_to_relation(&row))
+            SpokeResult::Ok(crate::conversion::kb_relationship_row_to_spoke(&row))
         })
     }
 
@@ -115,12 +116,13 @@ impl RelationPort for NexusBaselineAdapter<'_> {
 /// Create path: `expected_base_revision = None`. Reject if the row already
 /// exists; otherwise INSERT with `revision = 1` (spoke convention) and return
 /// the resulting spoke `Relation`.
+#[allow(clippy::too_many_lines)]
 async fn put_relation_create(pool: &sqlx::SqlitePool, relation: Relation) -> SpokeResult<Relation> {
     let relation_id = relation.relation_id.clone();
     let locals = extract_nexus_locals(&relation);
 
     // Pre-check existence. The PK is the true race guard; if a concurrent
-    // writer beats us the INSERT fails and surfaces as InvalidInput —
+    // writer beats us the INSERT fails and surfaces as InternalError —
     // acceptable for the local single-writer daemon path.
     match get_relationship(pool, &relation_id).await {
         Ok(_) => {
@@ -133,15 +135,21 @@ async fn put_relation_create(pool: &sqlx::SqlitePool, relation: Relation) -> Spo
         Err(LocalDbError::Sqlx(sqlx::Error::RowNotFound)) => {} // proceed to insert
         Err(e) => {
             return reject(
-                SpokeRejectCode::InvalidInput,
+                SpokeRejectCode::InternalError,
                 format!("storage error on create pre-check: {e}"),
                 json!({ "relation_id": relation_id }),
             );
         }
     }
 
+    // V1.146 P5 T2: serialize the full extensions.nexus namespace before
+    // prepare_create_fields consumes `relation` (the locals extraction borrows
+    // relation, so we compute the JSON string before prepare_create_fields
+    // which also borrows relation).
+    let extensions_nexus_json = serialize_extensions_nexus_json(&relation);
+
     // Compute the create column values before moving `locals.world_id` below.
-    let f = prepare_create_fields(&relation, &locals);
+    let f = prepare_create_fields(&relation, &locals, extensions_nexus_json);
 
     let Some(world_id) = locals.world_id else {
         return reject(
@@ -158,12 +166,14 @@ async fn put_relation_create(pool: &sqlx::SqlitePool, relation: Relation) -> Spo
         Ok(tx) => tx,
         Err(e) => {
             return reject(
-                SpokeRejectCode::InvalidInput,
+                SpokeRejectCode::InternalError,
                 format!("storage error on tx begin: {e}"),
                 json!({ "relation_id": relation_id }),
             );
         }
     };
+
+    let extensions_nexus_ref = f.extensions_nexus_json.as_deref();
 
     // Seed revision = 1 directly (spoke convention). The legacy
     // `insert_relationship_in_tx` seeds 0 for the daemon's add-relationship
@@ -174,8 +184,8 @@ async fn put_relation_create(pool: &sqlx::SqlitePool, relation: Relation) -> Spo
            (relationship_id, world_id, source_entity_id, target_entity_id,
             relation_type, custom_label, symmetric, confidence,
             source_anchor_ids, metadata, created_at, updated_at, revision,
-            needs_review, source)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)"#,
+            needs_review, source, extensions_nexus_json)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)"#,
         relation_id,
         world_id,
         relation.from_id,
@@ -190,13 +200,14 @@ async fn put_relation_create(pool: &sqlx::SqlitePool, relation: Relation) -> Spo
         f.updated_at,
         f.needs_review_i64,
         f.source,
+        extensions_nexus_ref,
     )
     .execute(&mut *tx)
     .await;
 
     if let Err(e) = insert_result {
         return reject(
-            SpokeRejectCode::InvalidInput,
+            SpokeRejectCode::InternalError,
             format!("storage error on relation insert: {e}"),
             json!({ "relation_id": relation_id }),
         );
@@ -204,7 +215,7 @@ async fn put_relation_create(pool: &sqlx::SqlitePool, relation: Relation) -> Spo
 
     if let Err(e) = tx.commit().await {
         return reject(
-            SpokeRejectCode::InvalidInput,
+            SpokeRejectCode::InternalError,
             format!("storage error on tx commit: {e}"),
             json!({ "relation_id": relation_id }),
         );
@@ -227,8 +238,9 @@ async fn put_relation_create(pool: &sqlx::SqlitePool, relation: Relation) -> Spo
         revision: 1,
         needs_review: f.needs_review_i64,
         source: f.source,
+        extensions_nexus_json: f.extensions_nexus_json,
     };
-    SpokeResult::Ok(row_to_relation(&row))
+    SpokeResult::Ok(crate::conversion::kb_relationship_row_to_spoke(&row))
 }
 
 // ── put_relation: CAS update path ─────────────────────────────────────
@@ -265,7 +277,7 @@ async fn put_relation_update(
         }
         Err(e) => {
             return reject(
-                SpokeRejectCode::InvalidInput,
+                SpokeRejectCode::InternalError,
                 format!("storage error on update pre-read: {e}"),
                 json!({ "relation_id": relation_id }),
             );
@@ -282,7 +294,7 @@ async fn put_relation_update(
     // accidentally switched these to preserve-on-omit, violating AC-I3).
     //
     // The orchestrator/handler round-trip stays safe because `get_relation`
-    // (`row_to_relation`) FULLY populates `extensions.nexus` before any
+    // (`kb_relationship_row_to_spoke`) FULLY populates `extensions.nexus` before any
     // read-modify-write put — so a carried local is never lost on a genuine
     // round-trip; only an explicit omit clears it. The handler additionally
     // pre-fills `needs_review` from `existing` when omitted (see
@@ -297,6 +309,10 @@ async fn put_relation_update(
     let confidence = locals.confidence;
     let source_anchor_ids = locals.source_anchor_ids.unwrap_or_default();
     let needs_review = locals.needs_review.unwrap_or(false);
+
+    // V1.146 P5 T2: serialize the full extensions.nexus namespace for
+    // round-trip preservation. Unknown keys survive the update cycle.
+    let extensions_nexus_json = serialize_extensions_nexus_json(&relation);
 
     let metadata_value = if relation.metadata.is_empty() {
         None
@@ -313,6 +329,7 @@ async fn put_relation_update(
         metadata: metadata_value,
         updated_at: chrono::Utc::now().to_rfc3339(),
         needs_review,
+        extensions_nexus_json,
     };
 
     // `update_relationship_in_tx` compares `revision = expected_revision` (CAS).
@@ -324,7 +341,7 @@ async fn put_relation_update(
         Ok(tx) => tx,
         Err(e) => {
             return reject(
-                SpokeRejectCode::InvalidInput,
+                SpokeRejectCode::InternalError,
                 format!("storage error on tx begin: {e}"),
                 json!({ "relation_id": relation_id }),
             );
@@ -360,7 +377,7 @@ async fn put_relation_update(
         }
         Err(e) => {
             return reject(
-                SpokeRejectCode::InvalidInput,
+                SpokeRejectCode::InternalError,
                 format!("storage error on relation CAS update: {e}"),
                 json!({ "relation_id": relation_id }),
             );
@@ -369,7 +386,7 @@ async fn put_relation_update(
 
     if let Err(e) = tx.commit().await {
         return reject(
-            SpokeRejectCode::InvalidInput,
+            SpokeRejectCode::InternalError,
             format!("storage error on tx commit: {e}"),
             json!({ "relation_id": relation_id }),
         );
@@ -377,7 +394,9 @@ async fn put_relation_update(
 
     // `updated_row` already carries revision = expected + 1 and the persisted
     // mutable fields; project it through the single reverse-mapping seam.
-    SpokeResult::Ok(row_to_relation(&updated_row))
+    SpokeResult::Ok(crate::conversion::kb_relationship_row_to_spoke(
+        &updated_row,
+    ))
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────
@@ -395,6 +414,8 @@ struct CreateFields {
     source: String,
     metadata_json: Option<String>,
     custom_label: Option<String>,
+    /// V1.146 P5 T2: serialized `extensions.nexus` for round-trip preservation.
+    extensions_nexus_json: Option<String>,
 }
 
 /// Compute the [`CreateFields`] for a create: adapter-assigned timestamps
@@ -402,7 +423,15 @@ struct CreateFields {
 /// nexus-locals defaulted to the V1.76 manual-author add shape when the
 /// spoke `Relation` does not carry them (`symmetric=false`, `confidence=NULL`,
 /// `source_anchor_ids='[]'`, `needs_review=false`, `source='manual'`).
-fn prepare_create_fields(relation: &Relation, locals: &NexusLocals) -> CreateFields {
+///
+/// `extensions_nexus_json` is the full serialized `extensions.nexus` namespace
+/// (V1.146 P5 T2), pre-computed by the caller so `prepare_create_fields` stays
+/// pure.
+fn prepare_create_fields(
+    relation: &Relation,
+    locals: &NexusLocals,
+    extensions_nexus_json: Option<String>,
+) -> CreateFields {
     let now = chrono::Utc::now().to_rfc3339();
     let created_at = relation
         .created_at
@@ -430,72 +459,7 @@ fn prepare_create_fields(relation: &Relation, locals: &NexusLocals) -> CreateFie
             Some(serde_json::to_string(&relation.metadata).unwrap_or_else(|_| "{}".to_string()))
         },
         custom_label: relation.label.clone(),
-    }
-}
-
-/// Single reverse-mapping seam: project a `kb_relationships` row onto a spoke
-/// `Relation` (used by get / create-return / update-return). `schema_version`
-/// is set to the spoke 0.5.0 relation schema version (1).
-fn row_to_relation(row: &KbRelationshipRow) -> Relation {
-    let metadata = row
-        .metadata
-        .as_deref()
-        .and_then(|s| serde_json::from_str::<Map<String, Value>>(s).ok())
-        .unwrap_or_default();
-
-    let created_at = row
-        .created_at
-        .parse::<chrono::DateTime<chrono::FixedOffset>>()
-        .ok()
-        .map(|dt| dt.with_timezone(&chrono::Utc));
-    let updated_at = row
-        .updated_at
-        .parse::<chrono::DateTime<chrono::FixedOffset>>()
-        .ok()
-        .map(|dt| dt.with_timezone(&chrono::Utc));
-
-    let mut nexus_ns = Map::new();
-    nexus_ns.insert("world_id".to_string(), Value::String(row.world_id.clone()));
-    nexus_ns.insert("symmetric".to_string(), Value::Bool(row.symmetric != 0));
-    if let Some(c) = row.confidence {
-        let v = serde_json::Number::from_f64(c).map_or(Value::Null, Value::Number);
-        nexus_ns.insert("confidence".to_string(), v);
-    }
-    nexus_ns.insert(
-        "source_anchor_ids".to_string(),
-        Value::Array(
-            parse_anchor_ids(row.source_anchor_ids.as_deref())
-                .into_iter()
-                .map(Value::String)
-                .collect(),
-        ),
-    );
-    nexus_ns.insert(
-        "needs_review".to_string(),
-        Value::Bool(row.needs_review != 0),
-    );
-    nexus_ns.insert("source".to_string(), Value::String(row.source.clone()));
-
-    let mut extensions = std::collections::HashMap::new();
-    // `"nexus"` always satisfies the `RelationExtensionsKey` regex — the
-    // conversion is infallible at runtime (mirrors the V1.139
-    // `KnowledgeEntryExtensionsKey` pattern).
-    let key = RelationExtensionsKey::try_from("nexus")
-        .expect("\"nexus\" matches the extensions-key regex");
-    extensions.insert(key, nexus_ns);
-
-    Relation {
-        schema_version: NonZeroU64::new(1).expect("1 is non-zero"),
-        relation_id: row.relationship_id.clone(),
-        from_id: row.source_entity_id.clone(),
-        to_id: row.target_entity_id.clone(),
-        relation_type: row.relation_type.clone(),
-        label: row.custom_label.clone(),
-        metadata,
-        revision: Some(u64::try_from(row.revision).unwrap_or(0)),
-        created_at,
-        updated_at,
-        extensions,
+        extensions_nexus_json,
     }
 }
 
@@ -539,14 +503,6 @@ fn value_as_string_array(v: &Value) -> Option<Vec<String>> {
     arr.iter().map(|i| i.as_str().map(String::from)).collect()
 }
 
-/// Parse the stored `source_anchor_ids` JSON-array column back into a
-/// `Vec<String>`; empty when the column is NULL or unparseable.
-fn parse_anchor_ids(stored: Option<&str>) -> Vec<String> {
-    stored
-        .and_then(|s| serde_json::from_str::<Vec<String>>(s).ok())
-        .unwrap_or_default()
-}
-
 /// Construct a `SpokeResult::Reject` (mirrors the helper in
 /// `knowledge_entry_port.rs`).
 fn reject<T>(code: SpokeRejectCode, message: impl Into<String>, details: Value) -> SpokeResult<T> {
@@ -563,6 +519,24 @@ fn reject<T>(code: SpokeRejectCode, message: impl Into<String>, details: Value) 
         message: message.into(),
         details: details_map,
     })
+}
+
+/// Serialize the full `extensions.nexus` namespace into the
+/// `extensions_nexus_json` column value (`None` when absent or empty).
+///
+/// V1.146 P5 T2: the full namespace (known + unknown keys) is serialized so
+/// unknown keys survive the `SQLite` round-trip. On read,
+/// [`crate::conversion::kb_relationship_row_to_spoke`] merges the JSON back,
+/// with the 6 typed columns as authoritative.
+fn serialize_extensions_nexus_json(relation: &Relation) -> Option<String> {
+    let Ok(key) = RelationExtensionsKey::try_from("nexus") else {
+        return None;
+    };
+    let ns = relation.extensions.get(&key)?;
+    if ns.is_empty() {
+        return None;
+    }
+    serde_json::to_string(ns).ok()
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────
@@ -651,7 +625,7 @@ mod tests {
         let (pool, _dir) = fresh_pool().await;
         seed_world_and_endpoints(&pool).await;
 
-        let adapter = NexusBaselineAdapter::new(pool);
+        let adapter = NexusAdapter::new(pool);
         match adapter.get_relation("rel_missing") {
             SpokeResult::Reject(r) => {
                 assert_eq!(
@@ -673,7 +647,7 @@ mod tests {
         let (pool, _dir) = fresh_pool().await;
         seed_world_and_endpoints(&pool).await;
 
-        let adapter = NexusBaselineAdapter::new(pool.clone());
+        let adapter = NexusAdapter::new(pool.clone());
         let created = unwrap_ok(
             adapter.put_relation(spoke_relation("rel_rt", "kb_src", "kb_dst"), None),
             "create",
@@ -709,7 +683,7 @@ mod tests {
         let (pool, _dir) = fresh_pool().await;
         seed_world_and_endpoints(&pool).await;
 
-        let adapter = NexusBaselineAdapter::new(pool);
+        let adapter = NexusAdapter::new(pool);
 
         // Build a relation with every nexus-local set explicitly (the
         // sibling `get_relation_round_trips_persisted_row` only proves the
@@ -740,14 +714,10 @@ mod tests {
 
         // Re-read through the port and confirm every nexus-local survived.
         //
-        // Known limitation (brief concern #1): ONLY the nexus-local keys
-        // asserted below round-trip. The `kb_relationships` table has no
-        // extras-JSON column (unlike `kb_key_blocks.extensions_nexus_json`),
-        // so any UNKNOWN key under `extensions.nexus` — e.g. a hypothetical
-        // `custom_flag` — is silently dropped on put and absent on get. We
-        // therefore do NOT assert any unknown key here; this test pins the
-        // known set only. Lifting that limitation is a schema change, out of
-        // scope for V1.144.
+        // V1.146 P5 T2: the `extensions_nexus_json` column now preserves
+        // unknown `extensions.nexus` keys across the SQLite round-trip.
+        // Known keys are verified below; unknown-key round-trip is covered
+        // by the dedicated `put_relation_round_trips_unknown_nexus_key` test.
         match adapter.get_relation("rel_locals") {
             SpokeResult::Ok(r) => {
                 assert_eq!(r.relation_id, "rel_locals");
@@ -802,7 +772,7 @@ mod tests {
         let (pool, _dir) = fresh_pool().await;
         seed_world_and_endpoints(&pool).await;
 
-        let adapter = NexusBaselineAdapter::new(pool.clone());
+        let adapter = NexusAdapter::new(pool.clone());
         let relation = spoke_relation("rel_happy", "kb_src", "kb_dst");
 
         let returned = unwrap_ok(adapter.put_relation(relation, None), "create");
@@ -850,7 +820,7 @@ mod tests {
         let (pool, _dir) = fresh_pool().await;
         seed_world_and_endpoints(&pool).await;
 
-        let adapter = NexusBaselineAdapter::new(pool);
+        let adapter = NexusAdapter::new(pool);
         let relation = spoke_relation("rel_dup", "kb_src", "kb_dst");
 
         let first = adapter.put_relation(relation.clone(), None);
@@ -873,7 +843,7 @@ mod tests {
         let (pool, _dir) = fresh_pool().await;
         seed_world_and_endpoints(&pool).await;
 
-        let adapter = NexusBaselineAdapter::new(pool);
+        let adapter = NexusAdapter::new(pool);
         // Build a relation without extensions.nexus.world_id.
         let relation: Relation = serde_json::from_value(json!({
             "schema_version": 1,
@@ -902,22 +872,22 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn put_relation_unknown_endpoint_rejects_invalid_input() {
+    async fn put_relation_unknown_endpoint_rejects_internal_error() {
         let (pool, _dir) = fresh_pool().await;
         seed_world_and_endpoints(&pool).await;
 
-        let adapter = NexusBaselineAdapter::new(pool.clone());
+        let adapter = NexusAdapter::new(pool.clone());
         let relation = spoke_relation("rel_bad_endpoint", "kb_src", "kb_nonexistent");
 
         match adapter.put_relation(relation, None) {
             SpokeResult::Reject(r) => {
                 assert_eq!(
                     r.code,
-                    SpokeRejectCode::InvalidInput,
-                    "FK violation on target endpoint must surface as INVALID_INPUT"
+                    SpokeRejectCode::InternalError,
+                    "FK violation on target endpoint must surface as INTERNAL_ERROR (storage-level constraint)"
                 );
             }
-            SpokeResult::Ok(_) => panic!("expected INVALID_INPUT reject"),
+            SpokeResult::Ok(_) => panic!("expected INTERNAL_ERROR reject"),
         }
 
         // The transaction must have rolled back: no row exists.
@@ -934,7 +904,7 @@ mod tests {
         let (pool, _dir) = fresh_pool().await;
         seed_world_and_endpoints(&pool).await;
 
-        let adapter = NexusBaselineAdapter::new(pool);
+        let adapter = NexusAdapter::new(pool);
 
         // Create → revision 1.
         let created = unwrap_ok(
@@ -991,7 +961,7 @@ mod tests {
         let (pool, _dir) = fresh_pool().await;
         seed_world_and_endpoints(&pool).await;
 
-        let adapter = NexusBaselineAdapter::new(pool);
+        let adapter = NexusAdapter::new(pool);
 
         // Create → revision 1. Bump to 2. Then attempt another update with
         // expected = 1 (caller read a stale base before the second writer
@@ -1025,7 +995,7 @@ mod tests {
         let (pool, _dir) = fresh_pool().await;
         seed_world_and_endpoints(&pool).await;
 
-        let adapter = NexusBaselineAdapter::new(pool);
+        let adapter = NexusAdapter::new(pool);
         // No prior create — relation is absent. Caller passes expected = Some(3);
         // the relation-port CAS mapping collapses this to STORED_REVISION_STALE
         // with storeRevision = null (V1.144 brief).
@@ -1057,7 +1027,7 @@ mod tests {
         let (pool, _dir) = fresh_pool().await;
         seed_world_and_endpoints(&pool).await;
 
-        let adapter = NexusBaselineAdapter::new(pool);
+        let adapter = NexusAdapter::new(pool);
 
         // Create with the full set of optional locals set explicitly.
         let seed: Relation = serde_json::from_value(json!({
@@ -1127,10 +1097,134 @@ mod tests {
         assert_eq!(r.label.as_deref(), Some("cleared locals"));
     }
 
+    // ── V1.146 P0: InternalError on DB failure ─────────────────────────
+
+    /// DB failure (dropped table) on get surfaces `InternalError`.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn get_relation_on_dropped_table_surfaces_internal_error() {
+        let (pool, _dir) = fresh_pool().await;
+        seed_world_and_endpoints(&pool).await;
+        sqlx::query("DROP TABLE kb_relationships")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let adapter = NexusAdapter::new(pool);
+        match adapter.get_relation("rel_any") {
+            SpokeResult::Reject(r) => {
+                assert_eq!(
+                    r.code,
+                    SpokeRejectCode::InternalError,
+                    "dropped table must surface INTERNAL_ERROR on get"
+                );
+            }
+            SpokeResult::Ok(_) => panic!("expected InternalError reject"),
+        }
+    }
+
+    /// DB failure on put_relation create path surfaces `InternalError`.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn put_relation_create_on_dropped_table_surfaces_internal_error() {
+        let (pool, _dir) = fresh_pool().await;
+        seed_world_and_endpoints(&pool).await;
+        sqlx::query("DROP TABLE kb_relationships")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let adapter = NexusAdapter::new(pool);
+        let relation = spoke_relation("rel_fail_create", "kb_src", "kb_dst");
+        match adapter.put_relation(relation, None) {
+            SpokeResult::Reject(r) => {
+                assert_eq!(
+                    r.code,
+                    SpokeRejectCode::InternalError,
+                    "create on dropped table must surface INTERNAL_ERROR"
+                );
+            }
+            SpokeResult::Ok(_) => panic!("expected InternalError reject"),
+        }
+    }
+
+    /// DB failure on put_relation update path surfaces `InternalError`.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn put_relation_update_on_dropped_table_surfaces_internal_error() {
+        let (pool, _dir) = fresh_pool().await;
+        seed_world_and_endpoints(&pool).await;
+
+        let adapter = NexusAdapter::new(pool.clone());
+        let created = unwrap_ok(
+            adapter.put_relation(spoke_relation("rel_upd_fail", "kb_src", "kb_dst"), None),
+            "create",
+        );
+        assert_eq!(created.revision, Some(1));
+
+        // Drop the table to simulate DB failure on update.
+        sqlx::query("DROP TABLE kb_relationships")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        match adapter.put_relation(created, Some(1)) {
+            SpokeResult::Reject(r) => {
+                assert_eq!(
+                    r.code,
+                    SpokeRejectCode::InternalError,
+                    "update on dropped table must surface INTERNAL_ERROR"
+                );
+            }
+            SpokeResult::Ok(_) => panic!("expected InternalError reject"),
+        }
+    }
+
+    // ── V1.146 P0: validation → InvalidInput (unchanged) ───────────────
+
+    /// Validation failure (missing required extension field) still surfaces
+    /// `InvalidInput` — no DB I/O is performed before the guard.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn relation_validation_still_rejects_invalid_input() {
+        let (pool, _dir) = fresh_pool().await;
+        seed_world_and_endpoints(&pool).await;
+
+        let adapter = NexusAdapter::new(pool);
+        // Create-success-then-recreate → RelationAlreadyExists (domain signal, not storage)
+        let first = spoke_relation("rel_val_ae", "kb_src", "kb_dst");
+        let _ = unwrap_ok(adapter.put_relation(first.clone(), None), "first create");
+
+        match adapter.put_relation(first, None) {
+            SpokeResult::Reject(r) => {
+                assert_eq!(
+                    r.code,
+                    SpokeRejectCode::RelationAlreadyExists,
+                    "duplicate create must still surface RelationAlreadyExists"
+                );
+            }
+            SpokeResult::Ok(_) => panic!("expected AlreadyExists reject"),
+        }
+
+        // get on non-existent → RelationNotFound
+        match adapter.get_relation("rel_never_created") {
+            SpokeResult::Reject(r) => {
+                assert_eq!(
+                    r.code,
+                    SpokeRejectCode::RelationNotFound,
+                    "missing relation must still surface RelationNotFound"
+                );
+            }
+            SpokeResult::Ok(_) => panic!("expected NotFound reject"),
+        }
+    }
+
+    // ── V1.146 P0: OCC rejects unchanged ───────────────────────────────
+    // put_relation_update_stale_rejects_stored_revision_stale and
+    // put_relation_update_on_absent_rejects_stored_revision_stale above
+    // already cover STORED_REVISION_STALE — they pass unchanged (confirmed
+    // by the red-green run). No additional OCC test needed.
+
     /// Safety check (V1.144 Phase 5 fix): a full get→put round-trip (read the
     /// relation via `get_relation`, mutate a non-local field, write it back via
     /// `put_relation`) must PRESERVE every nexus-local. This proves
-    /// clear-on-omit is safe: `get_relation` (`row_to_relation`) fully
+    /// clear-on-omit is safe: `get_relation` (`kb_relationship_row_to_spoke`) fully
     /// populates `extensions.nexus`, so the orchestrator/handler round-trip
     /// never loses a carried local — only an explicit omit clears one.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -1138,7 +1232,7 @@ mod tests {
         let (pool, _dir) = fresh_pool().await;
         seed_world_and_endpoints(&pool).await;
 
-        let adapter = NexusBaselineAdapter::new(pool);
+        let adapter = NexusAdapter::new(pool);
 
         // Create with the full set of locals set explicitly.
         let seed: Relation = serde_json::from_value(json!({
@@ -1196,5 +1290,116 @@ mod tests {
         // `source` is immutable on the update path (not in
         // UpdateRelationshipParams) — preserved from the stored row.
         assert_eq!(ns.get("source"), Some(&json!("extraction")));
+    }
+
+    // ── V1.146 P5 T2: unknown extensions.nexus key round-trip ──────────
+
+    /// Create a Relation with an unknown `extensions.nexus` key, then re-read
+    /// it and confirm the unknown key survives the SQLite round-trip.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn put_relation_round_trips_unknown_nexus_key() {
+        let (pool, _dir) = fresh_pool().await;
+        seed_world_and_endpoints(&pool).await;
+
+        let adapter = NexusAdapter::new(pool);
+
+        // Create with a known nexus-local (world_id) plus an unknown key.
+        let relation: Relation = serde_json::from_value(json!({
+            "schema_version": 1,
+            "relation_id": "rel_unknown_key",
+            "from_id": "kb_src",
+            "to_id": "kb_dst",
+            "relation_type": "allied_with",
+            "extensions": {
+                "nexus": {
+                    "world_id": "wld_rel",
+                    "custom_flag": "experimental",
+                    "priority": 3,
+                    "vendor_data": {"source": "cli", "version": 2}
+                }
+            }
+        }))
+        .expect("valid spoke Relation with unknown nexus key");
+
+        let created = unwrap_ok(adapter.put_relation(relation, None), "create");
+        assert_eq!(created.revision, Some(1));
+
+        // Re-read and confirm the unknown keys survived alongside the known ones.
+        let r = unwrap_ok(adapter.get_relation("rel_unknown_key"), "get");
+        let key = RelationExtensionsKey::try_from("nexus").unwrap();
+        let ns = r.extensions.get(&key).expect("nexus namespace present");
+
+        // Known key: always present from the typed column.
+        assert_eq!(ns.get("world_id"), Some(&json!("wld_rel")));
+
+        // Unknown keys: survived the round-trip via extensions_nexus_json.
+        assert_eq!(
+            ns.get("custom_flag"),
+            Some(&json!("experimental")),
+            "unknown string key survives"
+        );
+        assert_eq!(
+            ns.get("priority"),
+            Some(&json!(3)),
+            "unknown number key survives"
+        );
+        assert_eq!(
+            ns.get("vendor_data"),
+            Some(&json!({"source": "cli", "version": 2})),
+            "unknown object key survives"
+        );
+    }
+
+    /// V1.146 P5 T2: the unknown-key round-trip also holds across updates.
+    /// Create with unknown keys, update (mutating only the label), re-read —
+    /// unknown keys must still be present.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn put_relation_update_preserves_unknown_nexus_key() {
+        let (pool, _dir) = fresh_pool().await;
+        seed_world_and_endpoints(&pool).await;
+
+        let adapter = NexusAdapter::new(pool);
+
+        let seed: Relation = serde_json::from_value(json!({
+            "schema_version": 1,
+            "relation_id": "rel_upd_unk",
+            "from_id": "kb_src",
+            "to_id": "kb_dst",
+            "relation_type": "allied_with",
+            "extensions": {
+                "nexus": {
+                    "world_id": "wld_rel",
+                    "custom_tag": "imported",
+                    "batch_id": "B42"
+                }
+            }
+        }))
+        .expect("valid seed Relation");
+
+        let created = unwrap_ok(adapter.put_relation(seed, None), "create");
+        assert_eq!(created.revision, Some(1));
+
+        // Update: change only the label. The unknown keys must survive.
+        let mut update = created;
+        update.label = Some("updated label".to_string());
+        let updated = unwrap_ok(adapter.put_relation(update, Some(1)), "update");
+        assert_eq!(updated.revision, Some(2));
+
+        let r = unwrap_ok(adapter.get_relation("rel_upd_unk"), "get after update");
+        let key = RelationExtensionsKey::try_from("nexus").unwrap();
+        let ns = r.extensions.get(&key).expect("nexus namespace present");
+
+        assert_eq!(r.label.as_deref(), Some("updated label"));
+        assert_eq!(ns.get("world_id"), Some(&json!("wld_rel")));
+        assert_eq!(
+            ns.get("custom_tag"),
+            Some(&json!("imported")),
+            "unknown key survives update cycle"
+        );
+        assert_eq!(
+            ns.get("batch_id"),
+            Some(&json!("B42")),
+            "unknown key survives update cycle"
+        );
     }
 }

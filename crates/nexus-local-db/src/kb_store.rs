@@ -261,7 +261,7 @@ impl SqliteKbStore {
                 key_block_id, world_id, block_type, canonical_name, status,
                 revision, body_json, source_anchor_json, created_from_command_id,
                 created_at, updated_at, source_work_id, source_chapter,
-                source_provenance_kind, extensions_nexus_json
+                source_provenance_kind, extensions_nexus_json, modules_json
             FROM kb_key_blocks
             WHERE world_id = ?
               AND block_type = ?
@@ -319,7 +319,7 @@ impl SqliteKbStore {
                 updated_at,
                 source_work_id,
                 source_chapter,
-                source_provenance_kind, extensions_nexus_json
+                source_provenance_kind, extensions_nexus_json, modules_json
             FROM kb_key_blocks
             WHERE world_id = ?
               AND status NOT IN ('deleted', 'merged', 'deprecated')",
@@ -455,6 +455,11 @@ impl SqliteKbStore {
             .source_anchor
             .as_ref()
             .map(|a| serde_json::to_string(a).unwrap_or_default());
+        // V1.146 P4 T1: serialize modules to JSON for the modules_json column.
+        let modules_json = kb
+            .modules
+            .as_ref()
+            .map(|m| serde_json::to_string(m).unwrap_or_default());
         // Stable snake_case serialization matching wire format (not Debug)
         let block_type_str = serde_json::to_string(&kb.block_type)
             .unwrap_or_else(|_| format!("{:?}", kb.block_type));
@@ -473,8 +478,9 @@ impl SqliteKbStore {
             r"INSERT INTO kb_key_blocks
                 (key_block_id, world_id, block_type, canonical_name, status, revision,
                  body_json, source_anchor_json, created_from_command_id, created_at, updated_at,
-                 source_work_id, source_chapter, source_provenance_kind, extensions_nexus_json)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                 source_work_id, source_chapter, source_provenance_kind, extensions_nexus_json,
+                 modules_json)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(&key_block_id)
         .bind(&wld_id)
@@ -491,6 +497,7 @@ impl SqliteKbStore {
         .bind(kb.source_chapter)
         .bind(&kb.source_provenance_kind)
         .bind(&extensions_nexus_json)
+        .bind(&modules_json)
         .execute(&mut **tx)
         .await
         .map_err(|e| {
@@ -537,6 +544,10 @@ struct KeyBlockRow {
     // Known identity fields stay authoritative in their typed columns above; this
     // column preserves unknown keys when a spoke KnowledgeEntry transits SQLite.
     extensions_nexus_json: Option<String>,
+    // V1.146 P4 T1: full serialized `modules` namespace (modules durability).
+    // Carries per-entry functional dialects (activation, pack, etc.) as a JSON
+    // object. NULL for legacy rows; backfilled on next write cycle.
+    modules_json: Option<String>,
 }
 
 impl KeyBlockRow {
@@ -558,6 +569,12 @@ impl KeyBlockRow {
         // read-modify-write cycle and the spoke conversion seam.
         let extensions_nexus_extras = extract_nexus_extras(&self.build_merged_extensions_nexus());
 
+        // V1.146 P4 T1: surface modules_json as WorldKbEntry.modules.
+        let modules = self
+            .modules_json
+            .as_ref()
+            .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok());
+
         Ok(WorldKbEntry {
             schema_version: 1,
             entry_id: self.key_block_id.clone(),
@@ -575,6 +592,7 @@ impl KeyBlockRow {
             source_chapter: self.source_chapter,
             source_provenance_kind: self.source_provenance_kind.clone(),
             extensions_nexus_extras,
+            modules,
         })
     }
 
@@ -718,7 +736,7 @@ impl KbStore for SqliteKbStore {
                 key_block_id, world_id, block_type, canonical_name, status,
                 revision, body_json, source_anchor_json, created_from_command_id,
                 created_at, updated_at, source_work_id, source_chapter,
-                source_provenance_kind, extensions_nexus_json
+                source_provenance_kind, extensions_nexus_json, modules_json
             FROM kb_key_blocks
             WHERE key_block_id = ?",
         )
@@ -749,7 +767,7 @@ impl KbStore for SqliteKbStore {
                 updated_at,
                 source_work_id,
                 source_chapter,
-                source_provenance_kind, extensions_nexus_json
+                source_provenance_kind, extensions_nexus_json, modules_json
             FROM kb_key_blocks
             WHERE world_id = ?
               AND status NOT IN ('deleted', 'merged', 'deprecated')
@@ -979,6 +997,11 @@ impl KbStore for SqliteKbStore {
             &nexus_extras_extension_map(kb.extensions_nexus_extras.as_ref()),
         ))
         .unwrap_or_default();
+        // V1.146 P4 T1: serialize modules_json on UPDATE too.
+        let modules_json = kb
+            .modules
+            .as_ref()
+            .map(|m| serde_json::to_string(m).unwrap_or_default());
 
         // SAFETY: runtime query because `extensions_nexus_json` column is
         // unknown to sqlx offline mode (mirrors the INSERT path). Static SQL
@@ -992,7 +1015,8 @@ impl KbStore for SqliteKbStore {
                 body_json = ?,
                 source_anchor_json = ?,
                 updated_at = ?,
-                extensions_nexus_json = ?
+                extensions_nexus_json = ?,
+                modules_json = ?
               WHERE key_block_id = ?",
         )
         .bind(&block_type_str)
@@ -1003,6 +1027,7 @@ impl KbStore for SqliteKbStore {
         .bind(&source_anchor_json)
         .bind(&kb.updated_at)
         .bind(&extensions_nexus_json)
+        .bind(&modules_json)
         .bind(&kb.entry_id)
         .execute(&*self.pool)
         .await
@@ -1029,6 +1054,74 @@ impl KbStore for SqliteKbStore {
         }
 
         Ok(())
+    }
+}
+
+// ── V1.146 P3: pack-IO widened list methods (inherent, not trait) ─────────
+
+impl SqliteKbStore {
+    /// List `WorldKbEntry`s for a world **including** `deprecated` rows
+    /// (still excluding `deleted` / `merged` terminal states).
+    ///
+    /// Used by the V1.146 P3 `creator world kb pack export --include-deprecated`
+    /// CLI path. Mirrors [`KbStore::list_by_world`] but widens the status
+    /// filter. Bound by the same [`LIST_BY_WORLD_LIMIT`] safety cap.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`KbStoreError::Storage`] on database failure.
+    pub async fn list_by_world_including_deprecated(
+        &self,
+        world_id: &str,
+    ) -> Result<Vec<WorldKbEntry>, KbStoreError> {
+        self.list_by_world_with_status_filter(world_id, true).await
+    }
+
+    /// Shared body for [`Self::list_by_world_including_deprecated`] —
+    /// parameterized status clause so the two call sites don't duplicate
+    /// the full SELECT shape.
+    async fn list_by_world_with_status_filter(
+        &self,
+        world_id: &str,
+        include_deprecated: bool,
+    ) -> Result<Vec<WorldKbEntry>, KbStoreError> {
+        // SAFETY: LIMIT is a compile-time constant; status filter is a static
+        // fragment chosen from two literals (no user input). Dynamic SQL
+        // needed because sqlx offline mode cannot bind LIMIT.
+        let status_clause = if include_deprecated {
+            "status NOT IN ('deleted', 'merged')"
+        } else {
+            "status NOT IN ('deleted', 'merged', 'deprecated')"
+        };
+        let sql = format!(
+            r"SELECT
+                key_block_id,
+                world_id,
+                block_type,
+                canonical_name,
+                status,
+                revision,
+                body_json,
+                source_anchor_json,
+                created_from_command_id,
+                created_at,
+                updated_at,
+                source_work_id,
+                source_chapter,
+                source_provenance_kind, extensions_nexus_json, modules_json
+            FROM kb_key_blocks
+            WHERE world_id = ?
+              AND {status_clause}
+            ORDER BY created_at ASC
+            LIMIT {LIST_BY_WORLD_LIMIT}"
+        );
+        let rows = sqlx::query_as::<_, KeyBlockRow>(&sql)
+            .bind(world_id)
+            .fetch_all(&*self.pool)
+            .await
+            .map_err(|e| db_err(&e))?;
+
+        rows.iter().map(KeyBlockRow::to_key_block).collect()
     }
 }
 
@@ -1140,8 +1233,8 @@ pub async fn cas_update_key_block_fields(
 /// transaction.
 ///
 /// Used after [`cas_update_key_block_fields`] on the spoke adapter update path
-/// so `status`, `source_anchor_json`, and `extensions_nexus_json` are written
-/// in the same transaction as the revision bump.
+/// so `status`, `source_anchor_json`, `extensions_nexus_json`, and
+/// `modules_json` are written in the same transaction as the revision bump.
 ///
 /// # Errors
 ///
@@ -1152,6 +1245,7 @@ pub async fn update_key_block_auxiliary_fields_in_tx(
     status: &str,
     source_anchor_json: Option<&str>,
     extensions_nexus_json: &str,
+    modules_json: Option<&str>,
 ) -> Result<(), sqlx::Error> {
     // SAFETY: static SQL with vetted column names from migration
     // 202606190003_kb_key_blocks_provenance.sql.
@@ -1159,12 +1253,14 @@ pub async fn update_key_block_auxiliary_fields_in_tx(
         r"UPDATE kb_key_blocks SET
              status = ?,
              source_anchor_json = ?,
-             extensions_nexus_json = ?
+             extensions_nexus_json = ?,
+             modules_json = ?
            WHERE key_block_id = ?",
     )
     .bind(status)
     .bind(source_anchor_json)
     .bind(extensions_nexus_json)
+    .bind(modules_json)
     .bind(key_block_id)
     .execute(&mut **tx)
     .await

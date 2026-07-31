@@ -130,11 +130,11 @@ A common mistake (made and corrected during V1.141 P1 T2): collapse both mismatc
 - **Pulling `nexus-local-db` into the adapter crate** to implement a "real" `KnowledgeEntryPort` — violates the dependency graph (spec §8: adapter stays `spoke-schemas` + `spoke-operations` only). Concrete product port impls live downstream (e.g. `nexus-knowledge`, which already depends on both).
 - **Testing CAS by calling the mock directly** — proves the mock's CAS works, not that the orchestrator path works. Drive rejects through `orchestrate_*`.
 
-## Production boundary (shipped V1.142)
+## Production boundary (shipped V1.142; updated V1.146)
 
-> **Update (V1.142):** The production `BaselinePorts` implementation (`NexusBaselineAdapter`) now lives in `nexus-local-db/src/spoke_adapter/`, **not** "downstream in nexus-knowledge" as the V1.141 doc speculated. `nexus-knowledge` is a domain-types-and-traits crate with no SQLite dependency — it cannot be the production port home. The actual dep graph is `nexus-local-db → nexus-knowledge → nexus-spoke-adapter`. See spec [`spoke-adapter-architecture.md`](../../../specs/spoke-adapter-architecture.md) §7.4 for the production-vs-stub matrix and dependency rationale.
+> **Update (V1.142):** The production `BaselinePorts` implementation (`NexusAdapter`, V1.146 rename) was originally landed in `nexus-local-db/src/spoke_adapter/`, **not** "downstream in nexus-knowledge" as the V1.141 doc speculated. `nexus-knowledge` is a domain-types-and-traits crate with no SQLite dependency — it cannot be the production port home. V1.145 P1b rehomed the adapter to `nexus-spoke-adapter/src/adapter/` (spec §7.4 / §8 dep-graph reversal). See spec [`spoke-adapter-architecture.md`](../../../specs/spoke-adapter-architecture.md) §7.4 for the production-vs-stub matrix and dependency rationale.
 
-V1.142 shipped the production `NexusBaselineAdapter` in `nexus-local-db` implementing all 6 baseline port families against existing SQLite storage:
+V1.142 shipped the production adapter in `nexus-local-db` implementing all 6 baseline port families against existing SQLite storage (V1.145 P1b rehome to `nexus-spoke-adapter`):
 
 | Family | Status | Backing |
 |--------|--------|---------|
@@ -154,14 +154,14 @@ Stub families are documented per spec §7.4 with roadmap triggers for full versi
 2. **CAS mapping per spec §7.4 (6 outcomes):** `stored > expected → STORED_REVISION_STALE`; `stored < expected → REVISION_CONFLICT`; `absent + Some(_) → RevisionConflict` (NOT `StoredRevisionStale` as the V1.141 mock returned — spec production table is authority).
 3. **Async→sync bridge:** `tokio::task::block_in_place` wraps async sqlx behind the sync port trait methods. Requires a multi-threaded tokio runtime; `debug_assert!` on `Handle::runtime_flavor() == MultiThread` at adapter construction catches wrong-flavor early in dev/CI.
 4. **Batch transaction:** `FindingPort.put_findings` wraps the batch loop in an explicit SQLite transaction (`pool.begin() → loop → tx.commit()`) so mid-batch failure rolls back the whole batch.
-5. **Per-request construction:** `NexusBaselineAdapter::new(pool.clone())` is cheap (pool handle clone); construct per request, not per application.
+5. **Per-request construction:** `NexusAdapter::new(pool.clone())` is cheap (pool handle clone); construct per request, not per application.
 
 ### Orchestrator cutover on write paths (V1.142 P2)
 
-The first production orchestrator consumer is `promote_adopt` in `nexus-daemon-runtime/src/api/handlers/world_kb.rs`, routed through `orchestrate_promote(&NexusBaselineAdapter, PromoteRequest)`. Key patterns:
+The first production orchestrator consumer is `promote_adopt` in `nexus-daemon-runtime/src/api/handlers/world_kb.rs`, routed through `orchestrate_promote(&NexusAdapter, PromoteRequest)`. Key patterns:
 
 1. **`orchestrate_promote` handles `stored = None`:** the orchestrator can promote a NEW candidate (not just an existing provisional entry). It skips stored-entry terminal-status checks when `stored = None`, validates `candidate.status == "provisional"`, applies acceptance (`→ confirmed`, revision bump), and calls `put_knowledge_entry(None)` (create path). This means the nexus adopt flow (create + confirm in one step) maps cleanly: build candidate with `status = "provisional"`, let the orchestrator flip it.
-2. **Single-transaction adopt (V1.142 P3):** `promote_adopt` binds a handler-owned `sqlx::Transaction` into `NexusBaselineAdapter` via a shared `Arc<std::sync::Mutex<Option<Transaction>>>` for the synchronous `orchestrate_promote` bridge, then flips the extract job in the same transaction before one `COMMIT`. Rollback on any failure — no greploop soft-delete compensation.
+2. **Single-transaction adopt (V1.142 P3):** `promote_adopt` binds a handler-owned `sqlx::Transaction` into `NexusAdapter` via a shared `Arc<std::sync::Mutex<Option<Transaction>>>` for the synchronous `orchestrate_promote` bridge, then flips the extract job in the same transaction before one `COMMIT`. Rollback on any failure — no greploop soft-delete compensation.
 3. **Retry-safe idempotency:** when a prior attempt committed but returned an error (commit-ack ambiguity), retry hits `KnowledgeEntryAlreadyExists` → handler checks job status → returns success if already confirmed and attributed.
 4. **SpokeRejectCode → NexusApiError mapping:** OCC codes → 409 with re-read version; validation codes → 422; remaining → 500. Preserve existing error semantics.
 
@@ -169,7 +169,7 @@ The first production orchestrator consumer is `promote_adopt` in `nexus-daemon-r
 
 - Remaining write paths cut over as product features need them: **`upsert` shipped V1.143** (P1 — `patch_entity` → `orchestrate_upsert`); `relate` **deferred to V1.144** (spoke `Relation` lacks `revision` — see V1.143 lesson below).
 - Stub family upgrades: `RuleQueryPort` (persisted Rules), `HostManifestPort.list_peer` (multi-host collaboration), `ScopeQueryPort.list_timeline_events` (persisted `TimelineEvent` storage; also unblocks T3b full timeline helper migration in nexus-narrative — **partial progress V1.143** with `get_timeline_ordered()` on both gateways).
-- Transaction-boundary unification for `promote_adopt`: **shipped** (V1.142 P3 — adapter-local TX bind via `NexusBaselineAdapter::with_tx_cell`).
+- Transaction-boundary unification for `promote_adopt`: **shipped** (V1.142 P3 — adapter-local TX bind via `NexusAdapter::with_tx_cell`).
 - TS app orchestrator pattern adoption (separate product surface).
 
 ## V1.143 — Deep SPOKE integration (roadmap step 1 of 3)
@@ -267,15 +267,15 @@ V1.145 (XL) shipped the adapter topology correction that the V1.141–V1.144 roa
 
 ### Adapter rehome + dep reversal (P1a/P1b)
 
-The conversion seam and production `NexusBaselineAdapter` both moved to `nexus-spoke-adapter`, reversing the dependency graph:
+The conversion seam and production adapter (`NexusAdapter`, V1.146 rename) both moved to `nexus-spoke-adapter`, reversing the dependency graph:
 
 **Conversion seam (P1a):** The `WorldKbEntry↔KnowledgeEntry` `From` impls were in `nexus-knowledge`. They needed to move to `nexus-spoke-adapter` so the adapter owns the sole boundary. But the **orphan rule** (E0117) prevented implementing `From<WorldKbEntry>` for `KnowledgeEntry` (or vice versa) in a third crate where both types are foreign. Solution: **free functions** `world_kb_to_spoke` / `spoke_to_world_kb` (the compiler's own suggestion — `rustc --explain E0117` explicitly recommends free functions over orphan-compatible newtypes) + a local **trait** `WorldKbEntrySpokeExt` for lifecycle methods (`confirm`/`deprecate`/`merge_into`/`delete`). This is the **proven pattern** for conversion seams across crates: when orphan rule blocks `From`/`Into`, use a free function pair + local trait on the product type.
 
-**Production `NexusBaselineAdapter` (P1b):** `NexusBaselineAdapter` + 6 baseline port impls moved from `nexus-local-db/src/spoke_adapter/` to `nexus-spoke-adapter/src/adapter/`. The adapter crate becomes the **capability aggregation** layer — it depends on `nexus-local-db` storage primitives (`SqliteKbStore`, `open_pool`, `run_migrations`), `sqlx`, and `tokio`, but the port families are adapter-owned.
+**Production adapter (P1b):** `NexusAdapter` (V1.146 rename) + 6 baseline port impls moved from `nexus-local-db/src/spoke_adapter/` to `nexus-spoke-adapter/src/adapter/`. The adapter crate becomes the **capability aggregation** layer — it depends on `nexus-local-db` storage primitives (`SqliteKbStore`, `open_pool`, `run_migrations`), `sqlx`, and `tokio`, but the port families are adapter-owned.
 
 **`nexus-local-db`** becomes **pure storage**: no `nexus-spoke-adapter` dep, no spoke types in its public API. It still depends on `nexus-narrative` (for `TimelineEvent` type) and `nexus-knowledge` (for `WorldKbEntry` type), but these are domain-type deps, not adapter deps.
 
-**Import path change:** `nexus_local_db::spoke_adapter::NexusBaselineAdapter` → `nexus_spoke_adapter::adapter::NexusBaselineAdapter` — every daemon-runtime handler site and integration test updates to the new path.
+**Import path change (V1.145→V1.146 rename):** `nexus_spoke_adapter::NexusAdapter` — V1.145 P1b rehomed the adapter from `nexus-local-db` to `nexus-spoke-adapter` (intermediate path: `nexus_spoke_adapter::adapter::NexusAdapter`); V1.146 renamed the struct and upgraded it to `FullAdapter`.
 
 **Dep graph reversal (before → after):**
 
@@ -299,7 +299,7 @@ The original architect scope-pushdown design (§7.5) called for nexus-specific K
 
 P2 shipped a **typed `KbScopeFilters` carrier** as a workaround: a nexus-only struct that carried the 5 nexus filters alongside a spoke `Scope` (which carried only native fields like `entry_types`). This worked but introduced a parallel carrier path — every conversion site wrapped/unwrapped the extra struct.
 
-**spoke 0.6.0** (bumped mid-iteration, commit `c641a99a`) added `Scope.extensions: ExtensionMap` — the gap was real, and the upstream fix closed it. P2 **redid** the mechanism in commit `77f91067`: removed `KbScopeFilters` + `SqliteKbStore::query_scoped` entirely and rebuilt the query path on spoke-native `scope.extensions["nexus"]` (looked up via `ScopeExtensionsKey`). `NexusBaselineAdapter::list_knowledge_entries_scoped` reads the scope, reconstructs `KbQuery` from extensions, and delegates to `SqliteKbStore::query` — byte-identical output proven by comparison test.
+**spoke 0.6.0** (bumped mid-iteration, commit `c641a99a`) added `Scope.extensions: ExtensionMap` — the gap was real, and the upstream fix closed it. P2 **redid** the mechanism in commit `77f91067`: removed `KbScopeFilters` + `SqliteKbStore::query_scoped` entirely and rebuilt the query path on spoke-native `scope.extensions["nexus"]` (looked up via `ScopeExtensionsKey`). `NexusAdapter::list_knowledge_entries_scoped` reads the scope, reconstructs `KbQuery` from extensions, and delegates to `SqliteKbStore::query` — byte-identical output proven by comparison test.
 
 **Lesson:** When spoke has a gap, the best-practice fix is **upstream** (advance spoke), not nexus workarounds. The typed carrier was the correct work-for-today, but the 0.6.0 upgrade made it obsolete within the same iteration. This reinforces the V1.143 "verify spoke source before claiming clean mapping" discipline multiply: spec authors must check the **actual published spoke version** for the fields they depend on.
 

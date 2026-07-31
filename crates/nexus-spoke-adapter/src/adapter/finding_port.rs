@@ -49,7 +49,7 @@
 //! via `extensions.nexus.{work_id, creator_id}`. Missing values reject
 //! with `INVALID_INPUT`.
 
-use super::NexusBaselineAdapter;
+use super::NexusAdapter;
 use crate::{
     Finding as SpokeFinding, FindingExtensionsKey, FindingPort, SpokeReject, SpokeRejectCode,
     SpokeResult,
@@ -58,7 +58,7 @@ use nexus_local_db::findings::{validate_finding_enums, Finding as NexusFinding};
 use nexus_local_db::LocalDbError;
 use serde_json::{json, Map, Value};
 
-impl FindingPort for NexusBaselineAdapter<'_> {
+impl FindingPort for NexusAdapter<'_> {
     fn put_findings(&self, findings: Vec<SpokeFinding>) -> SpokeResult<Vec<SpokeFinding>> {
         let pool = self.pool.clone();
         self.block_on(async move {
@@ -74,7 +74,7 @@ impl FindingPort for NexusBaselineAdapter<'_> {
                 Ok(tx) => tx,
                 Err(e) => {
                     return reject(
-                        SpokeRejectCode::InvalidInput,
+                        SpokeRejectCode::InternalError,
                         format!("failed to begin findings batch transaction: {e}"),
                         json!({}),
                     );
@@ -89,7 +89,7 @@ impl FindingPort for NexusBaselineAdapter<'_> {
                 let finding_id = nexus_finding.finding_id.clone();
                 if let Err(e) = insert_finding_tx(&mut tx, &nexus_finding).await {
                     return reject(
-                        SpokeRejectCode::InvalidInput,
+                        SpokeRejectCode::InternalError,
                         format!("storage error on finding {finding_id} insert: {e}"),
                         json!({ "finding_id": finding_id }),
                     );
@@ -101,7 +101,7 @@ impl FindingPort for NexusBaselineAdapter<'_> {
             // point nothing is durably persisted; a failure here rolls back.
             if let Err(e) = tx.commit().await {
                 return reject(
-                    SpokeRejectCode::InvalidInput,
+                    SpokeRejectCode::InternalError,
                     format!("failed to commit findings batch transaction: {e}"),
                     json!({}),
                 );
@@ -486,7 +486,7 @@ mod tests {
         let (pool, _dir) = fresh_pool().await;
         seed_work(&pool).await;
 
-        let adapter = NexusBaselineAdapter::new(pool.clone());
+        let adapter = NexusAdapter::new(pool.clone());
         let spoke = spoke_finding(
             "fnd_happy",
             "warning",
@@ -522,7 +522,7 @@ mod tests {
         let (pool, _dir) = fresh_pool().await;
         seed_work(&pool).await;
 
-        let adapter = NexusBaselineAdapter::new(pool.clone());
+        let adapter = NexusAdapter::new(pool.clone());
         let spoke = spoke_finding("fnd_voc", "error", "dismissed", None, None);
 
         match adapter.put_findings(vec![spoke]) {
@@ -544,7 +544,7 @@ mod tests {
         let (pool, _dir) = fresh_pool().await;
         seed_work(&pool).await;
 
-        let adapter = NexusBaselineAdapter::new(pool);
+        let adapter = NexusAdapter::new(pool);
         // Strip the work_id; keep creator_id so the rejection is
         // specifically about the missing work_id.
         let spoke: SpokeFinding = serde_json::from_value(json!({
@@ -577,7 +577,7 @@ mod tests {
         let (pool, _dir) = fresh_pool().await;
         seed_work(&pool).await;
 
-        let adapter = NexusBaselineAdapter::new(pool);
+        let adapter = NexusAdapter::new(pool);
         // `critical` is not in the spoke documented vocabulary.
         let spoke: SpokeFinding = serde_json::from_value(json!({
             "schema_version": 1,
@@ -609,7 +609,7 @@ mod tests {
         let (pool, _dir) = fresh_pool().await;
         seed_work(&pool).await;
 
-        let adapter = NexusBaselineAdapter::new(pool);
+        let adapter = NexusAdapter::new(pool);
         let result = adapter.put_findings(Vec::new());
         match result {
             SpokeResult::Ok(v) => assert!(v.is_empty()),
@@ -643,7 +643,7 @@ mod tests {
         let (pool, _dir) = fresh_pool().await;
         seed_work(&pool).await;
 
-        let adapter = NexusBaselineAdapter::new(pool.clone());
+        let adapter = NexusAdapter::new(pool.clone());
 
         // First item: valid, would persist on its own.
         let first = spoke_finding("fnd_rb_first", "info", "open", None, None);
@@ -656,8 +656,8 @@ mod tests {
             SpokeResult::Reject(r) => {
                 assert_eq!(
                     r.code,
-                    SpokeRejectCode::InvalidInput,
-                    "mid-batch collision must reject with INVALID_INPUT"
+                    SpokeRejectCode::InternalError,
+                    "mid-batch collision must reject with INTERNAL_ERROR (storage-level UNIQUE violation)"
                 );
             }
             SpokeResult::Ok(_) => panic!("expected reject on duplicate finding_id mid-batch"),
@@ -666,5 +666,33 @@ mod tests {
         // Atomicity: the first insert must NOT have leaked through. Before the
         // W-1 transaction wrap, `fnd_rb_first` would be committed here.
         assert_finding_absent(&pool, "fnd_rb_first").await;
+    }
+
+    // ── V1.146 P0: InternalError on DB failure ─────────────────────────
+
+    /// DB failure (dropped table) on put_findings surfaces `InternalError`.
+    /// One representative test covers tx-begin/insert/commit — the first
+    /// INSERT inside the transaction hits the missing table and rejects.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn put_findings_on_dropped_table_surfaces_internal_error() {
+        let (pool, _dir) = fresh_pool().await;
+        seed_work(&pool).await;
+        sqlx::query("DROP TABLE findings")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let adapter = NexusAdapter::new(pool);
+        let finding = spoke_finding("fnd_fail", "info", "open", None, None);
+        match adapter.put_findings(vec![finding]) {
+            SpokeResult::Reject(r) => {
+                assert_eq!(
+                    r.code,
+                    SpokeRejectCode::InternalError,
+                    "dropped table must surface INTERNAL_ERROR on put_findings"
+                );
+            }
+            SpokeResult::Ok(_) => panic!("expected InternalError reject"),
+        }
     }
 }

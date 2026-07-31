@@ -23,7 +23,7 @@
 //! | Entry absent + `expected_revision = Some(_)`     | `REVISION_CONFLICT`          |
 //! | Entry present + `expected_revision = None`       | `KNOWLEDGE_ENTRY_ALREADY_EXISTS` |
 
-use super::NexusBaselineAdapter;
+use super::NexusAdapter;
 use crate::conversion::{spoke_to_world_kb, world_kb_to_spoke};
 use crate::extensions::build_extensions_nexus;
 use crate::{KnowledgeEntry, KnowledgeEntryPort, SpokeReject, SpokeRejectCode, SpokeResult};
@@ -35,10 +35,10 @@ use nexus_local_db::kb_store::{
 use nexus_local_db::LocalDbError;
 use serde_json::{json, Map};
 
-impl NexusBaselineAdapter<'_> {
+impl NexusAdapter<'_> {
     /// Convert a `SQLite` row error into a `KNOWLEDGE_ENTRY_NOT_FOUND` reject
     /// when the underlying store signals absence. Any other storage error
-    /// surfaces as `INVALID_INPUT`.
+    /// surfaces as `INTERNAL_ERROR` (server-side failure).
     fn map_get_err(err: KbStoreError, entry_id: &str) -> SpokeResult<KnowledgeEntry> {
         match err {
             KbStoreError::NotFound(_) => reject(
@@ -47,7 +47,7 @@ impl NexusBaselineAdapter<'_> {
                 json!({ "entry_id": entry_id }),
             ),
             other => reject(
-                SpokeRejectCode::InvalidInput,
+                SpokeRejectCode::InternalError,
                 format!("storage error on read: {other}"),
                 json!({ "entry_id": entry_id }),
             ),
@@ -108,7 +108,7 @@ impl NexusBaselineAdapter<'_> {
                 )
             }
             other => reject(
-                SpokeRejectCode::InvalidInput,
+                SpokeRejectCode::InternalError,
                 format!("storage error on CAS update: {other}"),
                 json!({ "entry_id": entry_id }),
             ),
@@ -116,7 +116,7 @@ impl NexusBaselineAdapter<'_> {
     }
 }
 
-impl KnowledgeEntryPort for NexusBaselineAdapter<'_> {
+impl KnowledgeEntryPort for NexusAdapter<'_> {
     fn get_knowledge_entry(&self, entry_id: &str) -> SpokeResult<KnowledgeEntry> {
         let pool = self.pool.clone();
         let entry_id = entry_id.to_string();
@@ -151,7 +151,7 @@ impl KnowledgeEntryPort for NexusBaselineAdapter<'_> {
 /// exists; otherwise insert via [`SqliteKbStore::insert_key_block_in_tx`]
 /// and return the entry with its initial post-create revision (`Some(1)`).
 async fn put_create(
-    adapter: &NexusBaselineAdapter<'_>,
+    adapter: &NexusAdapter<'_>,
     pool: &sqlx::SqlitePool,
     entry: KnowledgeEntry,
 ) -> SpokeResult<KnowledgeEntry> {
@@ -172,7 +172,7 @@ async fn put_create(
         Err(KbStoreError::NotFound(_)) => {} // proceed to insert
         Err(e) => {
             return reject(
-                SpokeRejectCode::InvalidInput,
+                SpokeRejectCode::InternalError,
                 format!("storage error on create pre-check: {e}"),
                 json!({ "entry_id": entry_id }),
             );
@@ -214,7 +214,7 @@ async fn put_create(
             Ok(tx) => tx,
             Err(e) => {
                 return reject(
-                    SpokeRejectCode::InvalidInput,
+                    SpokeRejectCode::InternalError,
                     format!("storage error on tx begin: {e}"),
                     json!({ "entry_id": entry_id }),
                 );
@@ -226,7 +226,7 @@ async fn put_create(
         if result.is_ok() {
             if let Err(e) = tx.commit().await {
                 return reject(
-                    SpokeRejectCode::InvalidInput,
+                    SpokeRejectCode::InternalError,
                     format!("storage error on tx commit: {e}"),
                     json!({ "entry_id": entry_id }),
                 );
@@ -256,7 +256,7 @@ async fn put_create(
             }),
         ),
         Err(e) => reject(
-            SpokeRejectCode::InvalidInput,
+            SpokeRejectCode::InternalError,
             format!("storage error on create: {e}"),
             json!({ "entry_id": entry_id }),
         ),
@@ -270,7 +270,7 @@ async fn put_create(
 /// via a sibling UPDATE so the full row is replaced atomically with the CAS
 /// guard.
 async fn put_update(
-    adapter: &NexusBaselineAdapter<'_>,
+    adapter: &NexusAdapter<'_>,
     pool: &sqlx::SqlitePool,
     entry: KnowledgeEntry,
     expected: u64,
@@ -282,7 +282,7 @@ async fn put_update(
 }
 
 async fn put_update_bound(
-    adapter: &NexusBaselineAdapter<'_>,
+    adapter: &NexusAdapter<'_>,
     entry: KnowledgeEntry,
     expected: u64,
 ) -> SpokeResult<KnowledgeEntry> {
@@ -315,7 +315,7 @@ async fn put_update_unbound(
         Ok(tx) => tx,
         Err(e) => {
             return reject(
-                SpokeRejectCode::InvalidInput,
+                SpokeRejectCode::InternalError,
                 format!("storage error on tx begin: {e}"),
                 json!({ "entry_id": entry_id }),
             );
@@ -327,7 +327,7 @@ async fn put_update_unbound(
     };
     if let Err(e) = tx.commit().await {
         return reject(
-            SpokeRejectCode::InvalidInput,
+            SpokeRejectCode::InternalError,
             format!("storage error on tx commit: {e}"),
             json!({ "entry_id": entry_id }),
         );
@@ -335,6 +335,77 @@ async fn put_update_unbound(
     let mut result = entry;
     result.revision = Some(new_rev);
     SpokeResult::Ok(result)
+}
+
+/// Atomically CAS-update zero or more knowledge entries and optionally update
+/// a compute session's `state_json` in a **single** `SQLite` transaction.
+///
+/// Used by `ComputablePort::compute` settle path so a multi-target settle
+/// cannot leave partial entry writes if a later CAS or the session update
+/// fails (Greptile P1: rejected computes leave partial state). On any reject
+/// the transaction is dropped without commit → full rollback.
+///
+/// `entry_updates`: `(candidate entry, expected_base_revision)` pairs.
+/// `session_update`: optional `(session_id, state_json)` to persist after
+/// all entry CAS succeeds, still inside the same transaction.
+pub(crate) fn commit_compute_settlement(
+    adapter: &NexusAdapter<'_>,
+    entry_updates: Vec<(KnowledgeEntry, u64)>,
+    session_update: Option<(String, String)>,
+) -> SpokeResult<()> {
+    let pool = adapter.pool.clone();
+    adapter.block_on(async move {
+        let mut tx = match pool.begin().await {
+            Ok(tx) => tx,
+            Err(e) => {
+                return reject(
+                    SpokeRejectCode::InternalError,
+                    format!("storage error on settlement tx begin: {e}"),
+                    json!({}),
+                );
+            }
+        };
+
+        for (entry, expected) in entry_updates {
+            let entry_id = entry.entry_id.clone();
+            let world_entry: WorldKbEntry = spoke_to_world_kb(entry);
+            match run_cas_update_in_tx(&mut tx, &entry_id, &world_entry, expected).await {
+                SpokeResult::Ok(_) => {}
+                SpokeResult::Reject(r) => {
+                    // Drop tx without commit → rollback prior CAS writes.
+                    return SpokeResult::Reject(r);
+                }
+            }
+        }
+
+        if let Some((session_id, state_json)) = session_update {
+            // SAFETY: static SQL; same shape as update_compute_session_state
+            // but joins the settlement transaction.
+            if let Err(e) =
+                sqlx::query("UPDATE compute_sessions SET state_json = ? WHERE session_id = ?")
+                    .bind(&state_json)
+                    .bind(&session_id)
+                    .execute(&mut *tx)
+                    .await
+            {
+                return reject(
+                    SpokeRejectCode::InternalError,
+                    format!("storage error on compute session state update: {e}"),
+                    json!({ "session_id": session_id }),
+                );
+            }
+        }
+
+        if let Err(e) = tx.commit().await {
+            return reject(
+                SpokeRejectCode::InternalError,
+                format!("storage error on settlement tx commit: {e}"),
+                json!({}),
+            );
+        }
+
+        SpokeResult::Ok(())
+    })
 }
 
 async fn run_cas_update_in_tx(
@@ -363,6 +434,11 @@ async fn run_cas_update_in_tx(
         &nexus_extras_extension_map(world_entry.extensions_nexus_extras.as_ref()),
     ))
     .unwrap_or_default();
+    // V1.146 P4 T1: serialize modules_json for the CAS auxiliary update.
+    let modules_json = world_entry
+        .modules
+        .as_ref()
+        .map(|m| serde_json::to_string(m).unwrap_or_default());
 
     let new_rev = match cas_update_key_block_fields(
         tx,
@@ -375,7 +451,7 @@ async fn run_cas_update_in_tx(
     .await
     {
         Ok(new_rev) => new_rev,
-        Err(e) => return NexusBaselineAdapter::map_cas_err(e, entry_id, expected),
+        Err(e) => return NexusAdapter::map_cas_err(e, entry_id, expected),
     };
 
     if let Err(e) = update_key_block_auxiliary_fields_in_tx(
@@ -384,11 +460,12 @@ async fn run_cas_update_in_tx(
         &world_entry.status,
         source_anchor_json.as_deref(),
         &extensions_nexus_json,
+        modules_json.as_deref(),
     )
     .await
     {
         return reject(
-            SpokeRejectCode::InvalidInput,
+            SpokeRejectCode::InternalError,
             format!("storage error on post-CAS field update: {e}"),
             json!({ "entry_id": entry_id }),
         );
@@ -504,7 +581,7 @@ mod tests {
         let (pool, _dir) = fresh_pool().await;
         seed_world(&pool).await;
 
-        let adapter = NexusBaselineAdapter::new(pool);
+        let adapter = NexusAdapter::new(pool);
         let result = adapter.get_knowledge_entry("kb_missing");
         match result {
             SpokeResult::Reject(r) => {
@@ -523,7 +600,7 @@ mod tests {
         let (pool, _dir) = fresh_pool().await;
         seed_world(&pool).await;
 
-        let adapter = NexusBaselineAdapter::new(pool.clone());
+        let adapter = NexusAdapter::new(pool.clone());
         let entry = spoke_entry("kb_alpha", "Alpha", None);
         let put_result = adapter.put_knowledge_entry(entry, None);
         assert!(
@@ -549,7 +626,7 @@ mod tests {
         let (pool, _dir) = fresh_pool().await;
         seed_world(&pool).await;
 
-        let adapter = NexusBaselineAdapter::new(pool);
+        let adapter = NexusAdapter::new(pool);
         let entry = spoke_entry("kb_create_happy", "CreateHappy", None);
 
         match adapter.put_knowledge_entry(entry, None) {
@@ -566,7 +643,7 @@ mod tests {
         let (pool, _dir) = fresh_pool().await;
         seed_world(&pool).await;
 
-        let adapter = NexusBaselineAdapter::new(pool);
+        let adapter = NexusAdapter::new(pool);
         let entry = spoke_entry("kb_dup", "Dup", None);
 
         let first = adapter.put_knowledge_entry(entry.clone(), None);
@@ -587,7 +664,7 @@ mod tests {
         let (pool, _dir) = fresh_pool().await;
         seed_world(&pool).await;
 
-        let adapter = NexusBaselineAdapter::new(pool);
+        let adapter = NexusAdapter::new(pool);
         let entry = spoke_entry("kb_upd_happy", "UpdHappy", None);
 
         // Create first (revision becomes 1).
@@ -629,7 +706,7 @@ mod tests {
         let (pool, _dir) = fresh_pool().await;
         seed_world(&pool).await;
 
-        let adapter = NexusBaselineAdapter::new(pool);
+        let adapter = NexusAdapter::new(pool);
         let entry = spoke_entry("kb_stale", "Stale", None);
 
         // Create → revision 1. Bump to 2. Then attempt another update with
@@ -661,7 +738,7 @@ mod tests {
         let (pool, _dir) = fresh_pool().await;
         seed_world(&pool).await;
 
-        let adapter = NexusBaselineAdapter::new(pool);
+        let adapter = NexusAdapter::new(pool);
         let entry = spoke_entry("kb_conflict", "Conflict", None);
 
         // Create → revision 1. Then attempt update with expected = 5 (caller
@@ -689,7 +766,7 @@ mod tests {
         let (pool, _dir) = fresh_pool().await;
         seed_world(&pool).await;
 
-        let adapter = NexusBaselineAdapter::new(pool);
+        let adapter = NexusAdapter::new(pool);
         let entry = spoke_entry("kb_absent", "Absent", None);
 
         // No prior create — entry is absent. Caller passes expected = Some(3),
@@ -719,7 +796,7 @@ mod tests {
         let (pool, _dir) = fresh_pool().await;
         seed_world(&pool).await;
 
-        let adapter = NexusBaselineAdapter::new(pool.clone());
+        let adapter = NexusAdapter::new(pool.clone());
         let entry = spoke_entry("kb_unbound_create", "UnboundCreate", None);
 
         match adapter.put_knowledge_entry(entry, None) {
@@ -734,6 +811,132 @@ mod tests {
         );
     }
 
+    // ── V1.146 P0: InternalError on DB failure ─────────────────────────
+
+    /// DB failure (dropped table) on get surfaces `InternalError`.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn get_on_dropped_table_surfaces_internal_error() {
+        let (pool, _dir) = fresh_pool().await;
+        seed_world(&pool).await;
+        // Drop the table to simulate a DB-level failure.
+        sqlx::query("DROP TABLE kb_key_blocks")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let adapter = NexusAdapter::new(pool);
+        match adapter.get_knowledge_entry("kb_alpha") {
+            SpokeResult::Reject(r) => {
+                assert_eq!(
+                    r.code,
+                    SpokeRejectCode::InternalError,
+                    "dropped table must surface INTERNAL_ERROR"
+                );
+            }
+            SpokeResult::Ok(_) => panic!("expected InternalError reject"),
+        }
+    }
+
+    /// DB failure on put_create surfaces `InternalError`.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn put_create_on_dropped_table_surfaces_internal_error() {
+        let (pool, _dir) = fresh_pool().await;
+        seed_world(&pool).await;
+        sqlx::query("DROP TABLE kb_key_blocks")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let adapter = NexusAdapter::new(pool);
+        let entry = spoke_entry("kb_fail", "FailCreate", None);
+        match adapter.put_knowledge_entry(entry, None) {
+            SpokeResult::Reject(r) => {
+                assert_eq!(
+                    r.code,
+                    SpokeRejectCode::InternalError,
+                    "create on dropped table must surface INTERNAL_ERROR"
+                );
+            }
+            SpokeResult::Ok(_) => panic!("expected InternalError reject"),
+        }
+    }
+
+    /// DB failure on put_update surfaces `InternalError`.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn put_update_on_dropped_table_surfaces_internal_error() {
+        let (pool, _dir) = fresh_pool().await;
+        seed_world(&pool).await;
+
+        // Create a real entry first so the update path is exercised.
+        let adapter = NexusAdapter::new(pool.clone());
+        let entry = spoke_entry("kb_upd_fail", "UpdFail", None);
+        let created = unwrap_ok(adapter.put_knowledge_entry(entry, None), "create");
+        assert_eq!(created.revision, Some(1));
+
+        // Drop the table to simulate a DB-level failure on update.
+        sqlx::query("DROP TABLE kb_key_blocks")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        match adapter.put_knowledge_entry(created, Some(1)) {
+            SpokeResult::Reject(r) => {
+                assert_eq!(
+                    r.code,
+                    SpokeRejectCode::InternalError,
+                    "update on dropped table must surface INTERNAL_ERROR"
+                );
+            }
+            SpokeResult::Ok(_) => panic!("expected InternalError reject"),
+        }
+    }
+
+    // ── V1.146 P0: validation → InvalidInput (unchanged) ───────────────
+
+    /// Validation failure (missing entry_id / canonical_name — rejected by the
+    /// spoke boundary before any DB I/O) still surfaces `InvalidInput`.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn validation_still_rejects_invalid_input() {
+        let (pool, _dir) = fresh_pool().await;
+        seed_world(&pool).await;
+
+        let adapter = NexusAdapter::new(pool);
+        // put_create on already-existing entry — this is an OCC/domain signal,
+        // NOT a storage failure; the DAO's pre-check returns `KnowledgeEntryAlreadyExists`.
+        let entry = spoke_entry("kb_val_ae", "ValAE", None);
+        let _ = unwrap_ok(adapter.put_knowledge_entry(entry.clone(), None), "create");
+
+        match adapter.put_knowledge_entry(entry, None) {
+            SpokeResult::Reject(r) => {
+                assert_eq!(
+                    r.code,
+                    SpokeRejectCode::KnowledgeEntryAlreadyExists,
+                    "duplicate create must still surface KnowledgeEntryAlreadyExists"
+                );
+            }
+            SpokeResult::Ok(_) => panic!("expected AlreadyExists reject"),
+        }
+
+        // get on non-existent entry still surfaces KnowledgeEntryNotFound
+        match adapter.get_knowledge_entry("kb_never_created") {
+            SpokeResult::Reject(r) => {
+                assert_eq!(
+                    r.code,
+                    SpokeRejectCode::KnowledgeEntryNotFound,
+                    "missing entry must still surface KnowledgeEntryNotFound"
+                );
+            }
+            SpokeResult::Ok(_) => panic!("expected NotFound reject"),
+        }
+    }
+
+    // ── V1.146 P0: OCC rejects unchanged ───────────────────────────────
+    // The put_update_stale_rejects_stored_revision_stale and
+    // put_update_conflict_rejects_revision_conflict tests above already
+    // cover STORED_REVISION_STALE and REVISION_CONFLICT — they pass
+    // unchanged (confirmed by the red-green run). No additional OCC test
+    // needed beyond the existing coverage.
+
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn put_create_bound_tx_not_visible_until_outer_commit() {
         use std::sync::{Arc, Mutex};
@@ -743,7 +946,7 @@ mod tests {
 
         let tx = pool.begin().await.unwrap();
         let tx_cell = Arc::new(Mutex::new(Some(tx)));
-        let adapter = NexusBaselineAdapter::new(pool.clone()).with_tx_cell(Arc::clone(&tx_cell));
+        let adapter = NexusAdapter::new(pool.clone()).with_tx_cell(Arc::clone(&tx_cell));
         let entry = spoke_entry("kb_bound_create", "BoundCreate", None);
         let entry_id = entry.entry_id.clone();
 

@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO compute_sessions (session_id, entry_id, state_json, created_at) VALUES (?, ?, ?, ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": []
+  },
+  "hash": "9dc70661b608b81c8c0e5f4ad8ee35ecbd08903e1cf40f2c88b6b0aefbcc0466"
+}

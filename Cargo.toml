@@ -107,13 +107,15 @@ chrono-tz = "0.10"
 regress = "0.10"
 # V1.139 T1: SPOKE foundation deps. Lockstep exact pin at 0.6.0 across both
 # Rust crates and both npm packages (compass Q14). The `=` prefix forces an
-# exact resolution (no caret/tilde range). Published on crates.io at 0.6.0.
+# exact resolution (no caret/tilde range). Published on crates.io at 0.6.1.
+# V1.146: 0.6.0 → 0.6.1 — spoke adds InternalError 500-class reject code
+# (PR #35). Additive; no consumer code change required.
 # V1.145: 0.5.0 → 0.6.0 — Scope.extensions (HashMap<ScopeExtensionsKey, _>)
 # additive + KnowledgeEntry.modules (capability-flagged, additive).
 # Consumers (the upcoming spoke-adapter crate + nexus-contracts generated
 # types) will reference these via `spoke-schemas.workspace = true`.
-spoke-schemas = "=0.6.0"
-spoke-operations = "=0.6.0"
+spoke-schemas = "=0.6.1"
+spoke-operations = "=0.6.1"
 
 # --- Dev profile: keep local `target/` smaller ---
 # Default `debug = true` (full) inflates deps/rlibs and test binaries. Line-limited

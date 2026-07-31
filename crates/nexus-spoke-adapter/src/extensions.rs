@@ -256,7 +256,7 @@ fn insert_opt_string(nexus: &mut Map<String, Value>, key: &str, value: Option<&s
 ///
 /// Only **two** production call sites may set this carrier:
 /// - the **MCA read path** (`SpokeBackedKbStore` →
-///   [`NexusBaselineAdapter::list_knowledge_entries_scoped`]), and
+///   [`NexusAdapter::list_knowledge_entries_scoped`]), and
 /// - the **persist path** (`build_spoke_upsert_request` in `nexus-daemon-runtime`,
 ///   so the orchestrator's `put_update` recovers the body).
 ///

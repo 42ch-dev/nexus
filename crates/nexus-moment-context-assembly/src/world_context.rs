@@ -159,7 +159,7 @@ pub struct ChapterKbBlockParams {
 /// for single-user local daemon with bounded KB size; index when needed.
 ///
 /// Encapsulates the filter/taxonomy logic used by both the chapter KB block
-/// and the generic `fetch_world_kb` in `moment.rs`.
+/// and the generic `fetch_world_kb_entries` + `format_kb_entries` in `moment.rs`.
 pub struct WorldKbQueryBuilder<'a> {
     world_id: &'a str,
 }
