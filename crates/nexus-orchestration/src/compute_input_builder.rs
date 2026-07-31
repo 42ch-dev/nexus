@@ -87,6 +87,11 @@ pub struct ComputeInputBuilder {
     world_id: String,
     module_manifest: ModuleManifest,
     invocation_params: Map<String, Value>,
+    /// Optional branch/head override resolved by the caller (direct lane).
+    /// When `None`, [`Self::read_narrative_state`] falls back to the
+    /// gateway's world state (world root branch) — preserving the original
+    /// behavior for callers that do not resolve a position themselves.
+    narrative_position: Option<(String, Option<String>)>,
 }
 
 impl ComputeInputBuilder {
@@ -103,7 +108,26 @@ impl ComputeInputBuilder {
             world_id: world_id.into(),
             module_manifest,
             invocation_params,
+            narrative_position: None,
         }
+    }
+
+    /// Override the narrative position (branch + timeline head) used for the
+    /// `ComputeInput.world_ref`.
+    ///
+    /// The direct Control Room lane resolves the branch (validated under the
+    /// owned world, defaulting to the world root) and snapshots it onto the
+    /// run row — the module must see exactly the position that is snapshotted
+    /// (F-002/F-003).  When not called, the builder reads the world state and
+    /// defaults to the root branch, as before.
+    #[must_use]
+    pub fn with_narrative_position(
+        mut self,
+        branch_id: String,
+        timeline_head_event_id: Option<String>,
+    ) -> Self {
+        self.narrative_position = Some((branch_id, timeline_head_event_id));
+        self
     }
 
     /// Assemble the [`ComputeInput`] envelope.
@@ -126,7 +150,10 @@ impl ComputeInputBuilder {
         let mut key_blocks = self.query_entries(&kb_store).await?;
         self.load_referenced_entries(&kb_store, &mut key_blocks)
             .await?;
-        let (branch_id, timeline_head_event_id) = self.read_narrative_state(&narrative_gw).await?;
+        let (branch_id, timeline_head_event_id) = match self.narrative_position {
+            Some(ref pos) => pos.clone(),
+            None => self.read_narrative_state(&narrative_gw).await?,
+        };
         let key_blocks_json = convert_entries_to_spoke_json(key_blocks);
         let world_ref = self.build_world_ref(&branch_id, timeline_head_event_id.as_ref())?;
         let narrative_state = ComputeInputNarrativeState {

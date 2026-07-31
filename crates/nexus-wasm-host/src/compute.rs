@@ -229,12 +229,24 @@ fn validate_compute_input(input: &Value, schemas: &ModuleSchemas) -> Result<()> 
                 .and_then(Value::as_str)
                 .or_else(|| kb.get("block_type").and_then(Value::as_str))
                 .unwrap_or("");
-            if let Some(schema) = kb_attrs.get(block_type) {
-                let attrs = kb.get("body").and_then(|b| b.get("attributes"));
-                let instance = attrs.unwrap_or(&Value::Null);
-                let path = format!("key_blocks[{i}].body.attributes");
-                validate_against_schema(instance, &path, schema, &path, MAX_VALIDATION_DEPTH)?;
-            }
+            let Some(schema) = kb_attrs.get(block_type) else {
+                // F-005 hardening (V1.147 P0 fix wave): when the manifest
+                // DECLARES key_block_attributes, an unresolvable or
+                // uncovered entry type is a manifest/input contract breach —
+                // reject fail-closed instead of silently skipping the entry.
+                return Err(ComputeError::ManifestValidationFailed {
+                    path: format!("key_blocks[{i}]"),
+                    detail: format!(
+                        "unknown key_block type '{block_type}': manifest declares \
+                         key_block_attributes for [{}], and no schema covers this entry",
+                        kb_attrs.keys().cloned().collect::<Vec<_>>().join(", ")
+                    ),
+                });
+            };
+            let attrs = kb.get("body").and_then(|b| b.get("attributes"));
+            let instance = attrs.unwrap_or(&Value::Null);
+            let path = format!("key_blocks[{i}].body.attributes");
+            validate_against_schema(instance, &path, schema, &path, MAX_VALIDATION_DEPTH)?;
         }
     }
 
@@ -253,22 +265,32 @@ fn validate_compute_input(input: &Value, schemas: &ModuleSchemas) -> Result<()> 
                 .and_then(Value::as_str)
                 .or_else(|| kb.get("block_type").and_then(Value::as_str))
                 .unwrap_or("");
-            if let Some(schema) = kb_state.get(block_type) {
-                let state = kb
-                    .get("body")
-                    .and_then(|b| b.get("state"))
-                    .and_then(|s| s.get(block_type));
-                // Skip validation if state is absent or null. State may not
-                // yet be initialized for newly-created computable blocks
-                // (e.g. a character participating in its first combat scene);
-                // modules handle missing state via their own fallback chains
-                // (see `basic-combat/src/lib.rs` HP fallback logic). This
-                // mirrors the `invocation` null-skip just below.
-                if let Some(state) = state {
-                    if !state.is_null() {
-                        let path = format!("key_blocks[{i}].body.state.{block_type}");
-                        validate_against_schema(state, &path, schema, &path, MAX_VALIDATION_DEPTH)?;
-                    }
+            let Some(schema) = kb_state.get(block_type) else {
+                // F-005 hardening: fail-closed when key_block_state is
+                // declared, mirroring the key_block_attributes rule.
+                return Err(ComputeError::ManifestValidationFailed {
+                    path: format!("key_blocks[{i}]"),
+                    detail: format!(
+                        "unknown key_block type '{block_type}': manifest declares \
+                         key_block_state for [{}], and no schema covers this entry",
+                        kb_state.keys().cloned().collect::<Vec<_>>().join(", ")
+                    ),
+                });
+            };
+            let state = kb
+                .get("body")
+                .and_then(|b| b.get("state"))
+                .and_then(|s| s.get(block_type));
+            // Skip validation if state is absent or null. State may not
+            // yet be initialized for newly-created computable blocks
+            // (e.g. a character participating in its first combat scene);
+            // modules handle missing state via their own fallback chains
+            // (see `basic-combat/src/lib.rs` HP fallback logic). This
+            // mirrors the `invocation` null-skip just below.
+            if let Some(state) = state {
+                if !state.is_null() {
+                    let path = format!("key_blocks[{i}].body.state.{block_type}");
+                    validate_against_schema(state, &path, schema, &path, MAX_VALIDATION_DEPTH)?;
                 }
             }
         }
@@ -882,17 +904,43 @@ mod tests {
     }
 
     #[test]
-    fn no_schemas_means_no_validation() {
-        // Without schemas declared, validate_compute_input is never called
-        // (guarded by `if let Some(schemas)` in compute()).
-        // This test verifies that an input that would fail validation passes
-        // when schemas have NO matching key.
+    fn declared_schemas_reject_unknown_key_block_type() {
+        // F-005 hardening (V1.147 P0 fix wave): when the manifest DECLARES
+        // key_block_attributes, an entry whose type is not covered by the
+        // schema map is a contract breach — reject fail-closed instead of
+        // silently skipping validation.
         let schemas = ModuleSchemas {
             key_block_attributes: Some([("monster".to_string(), json!({"type": "object"}))].into()),
             ..Default::default()
         };
         // key_block type is "character", but schema only covers "monster" →
-        // no validation for this block.
+        // previously skipped (fail-open); now rejected.
+        let input = json!({
+            "key_blocks": [{
+                "block_type": "character",
+                "body": {"attributes": {"anything": "goes"}}
+            }]
+        });
+        let err = validate_compute_input(&input, &schemas).unwrap_err();
+        match err {
+            ComputeError::ManifestValidationFailed { path, detail } => {
+                assert!(path.contains("key_blocks[0]"), "path={path}");
+                assert!(detail.contains("unknown key_block type"), "detail={detail}");
+            }
+            other => panic!("expected ManifestValidationFailed, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn no_declared_key_block_schema_means_no_validation() {
+        // Domain-shape fallback preserved: when the manifest declares NO
+        // key_block schema map (None), entries of any type pass untouched
+        // (fixtures and schema-less modules keep working).
+        let schemas = ModuleSchemas {
+            key_block_attributes: None,
+            key_block_state: None,
+            ..Default::default()
+        };
         let input = json!({
             "key_blocks": [{
                 "block_type": "character",

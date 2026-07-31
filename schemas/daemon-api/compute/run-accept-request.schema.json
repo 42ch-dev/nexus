@@ -11,7 +11,7 @@
       "items": {
         "type": "string"
       },
-      "description": "Optional subset of timeline event IDs from the proposals to accept. All timeline events are accepted when this field is absent or null. State updates and new knowledge entries are always all-or-nothing with the Accept action."
+      "description": "Optional subset of timeline events from the proposals to accept, referenced by their stable index-based id: 'evt_0', 'evt_1', ... assigned by position in the Run's proposals.timeline_events array. Only the referenced events are appended to the timeline; all timeline events are accepted when this field is absent or null. An unknown id (out of range, or not of the form 'evt_<index>') rejects the whole Accept with 422 invalid_input. State updates and new knowledge entries are always all-or-nothing with the Accept action."
     }
   },
   "additionalProperties": false

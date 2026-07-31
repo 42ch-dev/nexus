@@ -90,6 +90,12 @@ pub async fn apply_state_delta_pool(
 /// Apply a list of `ComputeOutputStateDelta` entries inside a caller-owned
 /// `SQLite` transaction.  Used by the Accept handler (V1.147 P0 direct lane).
 ///
+/// `world_id` is the **admitted world** (the run's `world_id`).  Every
+/// `target_key_block_id` must resolve to a `kb_key_blocks` row in that
+/// world — a foreign target rejects the whole batch (F-001 fix: the Accept
+/// TX is the durable apply boundary for untrusted module proposals, so it
+/// must world-scope each delta exactly like `new_key_blocks` does).
+///
 /// Only updates `kb_key_blocks.body_json` and `updated_at` — skips the
 /// full `SqliteKbStore::update_knowledge_entry` validation (canonical name,
 /// uniqueness, extensions) because the delta only mutates `body.state`.
@@ -99,10 +105,11 @@ pub async fn apply_state_delta_pool(
 /// # Errors
 ///
 /// Returns `CapabilityError::InputInvalid` for unknown ops, missing target
-/// entries, or path validation failures.
+/// entries, foreign-world targets, or path validation failures.
 /// Returns `CapabilityError::Internal` on DB read/write failures.
 pub async fn apply_state_delta_in_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    world_id: &str,
     deltas: &[ComputeOutputStateDelta],
 ) -> Result<usize, CapabilityError> {
     use chrono::Utc;
@@ -126,28 +133,35 @@ pub async fn apply_state_delta_in_tx(
             ));
         }
 
-        // Read current block_type and body_json from the TX.
-        // SAFETY: runtime query — nexus-orchestration does not have sqlx
-        // offline mode configured for these queries. Tables are vetted
-        // (kb_key_blocks columns from kb_store migration).
-        let row =
-            sqlx::query("SELECT block_type, body_json FROM kb_key_blocks WHERE key_block_id = ?")
-                .bind(target_id)
-                .fetch_optional(&mut **tx)
-                .await
-                .map_err(|e| CapabilityError::Internal(format!("kb read for delta: {e}")))?;
+        // Read current block_type, body_json, and world_id from the TX.
+        // Compile-time checked query (F-004 fix — the Accept path is the
+        // highest-risk write path, so its SQL must be offline-validated).
+        let row = sqlx::query!(
+            "SELECT block_type, body_json, world_id FROM kb_key_blocks \
+             WHERE key_block_id = ?",
+            target_id
+        )
+        .fetch_optional(&mut **tx)
+        .await
+        .map_err(|e| CapabilityError::Internal(format!("kb read for delta: {e}")))?;
 
-        let (block_type_str, body_json_str): (String, Option<String>) = match row {
-            Some(r) => {
-                use sqlx::Row;
-                (r.get(0), r.get(1))
-            }
+        let (block_type_str, body_json_str, target_world_id) = match row {
+            Some(r) => (r.block_type, r.body_json, r.world_id),
             None => {
                 return Err(CapabilityError::InputInvalid(format!(
                     "state_delta target '{target_id}' not found"
                 )));
             }
         };
+
+        // F-001: world-scope check — a delta targeting another world's KB
+        // must reject the whole Accept (caller rolls back the TX).
+        if target_world_id != world_id {
+            return Err(CapabilityError::InputInvalid(format!(
+                "state_delta target '{target_id}' belongs to world '{target_world_id}', \
+                 not admitted world '{world_id}'"
+            )));
+        }
 
         let block_type: BlockType = serde_json::from_str(&format!("\"{block_type_str}\""))
             .map_err(|e| {
@@ -193,13 +207,16 @@ pub async fn apply_state_delta_in_tx(
         })?;
 
         let updated_at = Utc::now().to_rfc3339();
-        // SAFETY: runtime query — see note above. Table is kb_key_blocks (vetted).
-        let affected = sqlx::query(
-            "UPDATE kb_key_blocks SET body_json = ?, updated_at = ? WHERE key_block_id = ?",
+        // Defense in depth: the UPDATE re-asserts world_id so a target that
+        // somehow changed worlds mid-TX cannot be written either.
+        let affected = sqlx::query!(
+            "UPDATE kb_key_blocks SET body_json = ?, updated_at = ? \
+             WHERE key_block_id = ? AND world_id = ?",
+            updated_body_json,
+            updated_at,
+            target_id,
+            world_id,
         )
-        .bind(&updated_body_json)
-        .bind(&updated_at)
-        .bind(target_id)
         .execute(&mut **tx)
         .await
         .map_err(|e| {

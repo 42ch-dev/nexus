@@ -27,7 +27,6 @@ use nexus_contracts::generated::daemon_api::compute::{
 };
 use nexus_local_db::compute_runs::{self, list_runs, RunListFilters};
 use nexus_local_db::narrative_write;
-use nexus_narrative::NarrativeGateway;
 use nexus_orchestration::compute_input_builder::ComputeInputBuilder;
 use nexus_orchestration::state_delta;
 use nexus_wasm_host::{ComputeError, WasmEngine};
@@ -105,21 +104,27 @@ pub async fn run(
     let module_version = cached.manifest.version.clone();
     let manifest = cached.manifest.clone();
 
+    // F-002: resolve the run's branch BEFORE assembling input so the module
+    // sees exactly the position that is snapshotted onto the run row.
+    // Defaults to the World root branch; unknown/other-world branch → 422.
+    let (branch_id, timeline_head_event_id) =
+        resolve_run_branch(pool, &req.world_id, req.branch_id.as_deref()).await?;
+
     // Build ComputeInput.
     let invocation_params = req.invocation_params.clone();
     let invocation_params_str = serde_json::to_string(&invocation_params).ok();
-    let builder =
-        ComputeInputBuilder::new(pool.clone(), &req.world_id, manifest, invocation_params);
+    let builder = ComputeInputBuilder::new(pool.clone(), &req.world_id, manifest, invocation_params)
+        .with_narrative_position(branch_id.clone(), timeline_head_event_id.clone());
     let compute_input = builder.build().await.map_err(map_build_error)?;
 
-    // Insert run row.
+    // Insert run row (F-003: snapshot branch + timeline head).
     let run_id = compute_runs::insert_run(
         pool,
         &req.world_id,
         &req.module_id,
         Some(&module_version),
-        Some("fbk_root"),
-        None,
+        Some(&branch_id),
+        timeline_head_event_id.as_deref(),
         invocation_params_str.as_deref(),
     )
     .await
@@ -215,7 +220,7 @@ pub async fn run(
 pub async fn accept_run(
     State(state): State<WorkspaceState>,
     Path(run_id): Path<String>,
-    Json(_req): Json<RunAcceptRequest>,
+    Json(req): Json<RunAcceptRequest>,
 ) -> Result<Json<RunAcceptResponse>, NexusApiError> {
     let pool = state.pool_or_uninit()?;
     let creator_id =
@@ -271,17 +276,52 @@ pub async fn accept_run(
             message: format!("parse run proposals: {e}"),
         })?;
 
-    let gw = nexus_local_db::narrative_gateway::SqliteNarrativeGateway::new(pool.clone());
-    let world_state =
-        gw.get_world_state(&run.world_id)
-            .await
-            .map_err(|e| NexusApiError::Internal {
-                code: "DATABASE_ERROR".to_string(),
-                message: format!("world state read: {e}"),
-            })?;
-    let branch_id = world_state
-        .fork_branch_id
+    // F-003: Accept appends timeline events to the branch SNAPSHOTTED at run
+    // time (not the current fork head — the fork may have changed between
+    // run and accept).  Pre-fix rows have NULL `branch_id`; fall back to the
+    // legacy constant to preserve their behavior exactly.
+    let branch_id = run
+        .branch_id
+        .clone()
         .unwrap_or_else(|| "fbk_root".to_string());
+
+    // W2: subset-accept — when `timeline_event_ids_to_accept` is present,
+    // only the referenced proposed events are appended.  Stable ids are the
+    // index-based `evt_<index>` assigned by position in the proposals'
+    // `timeline_events` array.  Unknown ids reject the whole Accept (422)
+    // BEFORE any write.  Absent/null → accept all (unchanged).
+    let selected_event_indices: Option<std::collections::HashSet<usize>> =
+        if req.timeline_event_ids_to_accept.is_empty() {
+            None
+        } else {
+            let mut selected = std::collections::HashSet::with_capacity(
+                req.timeline_event_ids_to_accept.len(),
+            );
+            for id in &req.timeline_event_ids_to_accept {
+                let index = id
+                    .strip_prefix("evt_")
+                    .and_then(|s| s.parse::<usize>().ok())
+                    .filter(|i| *i < output.timeline_events.len());
+                match index {
+                    Some(i) => {
+                        selected.insert(i);
+                    }
+                    None => {
+                        return Err(NexusApiError::BadRequest {
+                            code: "invalid_input".to_string(),
+                            message: format!(
+                                "timeline_event_ids_to_accept references unknown event id \
+                                 '{id}' (proposals contain {} timeline events; ids are \
+                                 'evt_0'..'evt_{}')",
+                                output.timeline_events.len(),
+                                output.timeline_events.len().saturating_sub(1)
+                            ),
+                        });
+                    }
+                }
+            }
+            Some(selected)
+        };
 
     let mut tx = pool.begin().await.map_err(|e| NexusApiError::Internal {
         code: "DATABASE_ERROR".to_string(),
@@ -290,9 +330,12 @@ pub async fn accept_run(
 
     let accepted_at = chrono::Utc::now().to_rfc3339();
 
-    let state_delta_count = state_delta::apply_state_delta_in_tx(&mut tx, &output.state_delta)
-        .await
-        .map_err(map_delta_error)?;
+    // F-001: every delta target must resolve inside the run's world — a
+    // foreign target rejects the whole Accept (full rollback on drop).
+    let state_delta_count =
+        state_delta::apply_state_delta_in_tx(&mut tx, &run.world_id, &output.state_delta)
+            .await
+            .map_err(map_delta_error)?;
 
     let new_entries_created =
         create_key_blocks_in_tx(&mut tx, &run.world_id, &output.new_key_blocks).await?;
@@ -312,9 +355,16 @@ pub async fn accept_run(
         message: format!("build compute provenance: {e}"),
     })?;
 
-    let events_created = output.timeline_events.len();
+    let events_created = selected_event_indices
+        .as_ref()
+        .map_or(output.timeline_events.len(), std::collections::HashSet::len);
     let mut timeline_event_ids = Vec::with_capacity(events_created);
-    for evt in &output.timeline_events {
+    for (index, evt) in output.timeline_events.iter().enumerate() {
+        if let Some(ref selected) = selected_event_indices {
+            if !selected.contains(&index) {
+                continue;
+            }
+        }
         let event_type = "compute_result";
         let result = narrative_write::append_event_with_extensions_in_tx(
             &mut tx,
@@ -529,6 +579,80 @@ pub async fn get_run_detail(
 
 // ─── Helpers ─────────────────────────────────────────────────────────────
 
+/// Resolve the effective run branch for `POST /run` (F-002).
+///
+/// - `req_branch_id == None` → the World root branch
+///   (`narrative_worlds.root_fork_branch_id`, falling back to the legacy
+///   `"fbk_root"` constant when unset).
+/// - `req_branch_id == Some(id)` → must be a branch of the owned world:
+///   the root branch, or a branch that has timeline events in this world.
+///   The local DB keeps no `fork_branches` table (fork branches are
+///   in-memory in `nexus-narrative`), so the durable branch registry is
+///   `root_fork_branch_id` + the `branch_id`s materialized on
+///   `narrative_timeline_events`.  Unknown / other-world branches → 422
+///   `invalid_input`.
+///
+/// Returns `(branch_id, timeline_head_event_id)`: the head is the world's
+/// `current_timeline_head_id` for the root branch, and the branch's own
+/// latest event (by sequence) for named branches.
+///
+/// # Errors
+///
+/// Returns 422 `invalid_input` for unknown branches, 500 on DB failure.
+async fn resolve_run_branch(
+    pool: &sqlx::SqlitePool,
+    world_id: &str,
+    req_branch_id: Option<&str>,
+) -> Result<(String, Option<String>), NexusApiError> {
+    let row = sqlx::query!(
+        "SELECT root_fork_branch_id, current_timeline_head_id \
+         FROM narrative_worlds WHERE world_id = ?",
+        world_id,
+    )
+    .fetch_optional(pool)
+    .await
+    .map_err(|e| NexusApiError::Internal {
+        code: "DATABASE_ERROR".to_string(),
+        message: e.to_string(),
+    })?
+    .ok_or_else(|| NexusApiError::BadRequest {
+        code: "invalid_input".to_string(),
+        message: format!("world '{world_id}' not found"),
+    })?;
+
+    let root = row.root_fork_branch_id.unwrap_or_else(|| "fbk_root".to_string());
+    match req_branch_id {
+        None => Ok((root, row.current_timeline_head_id)),
+        Some(req) if req == root => Ok((req.to_string(), row.current_timeline_head_id)),
+        Some(req) => {
+            // Branch membership: the branch must have timeline events in
+            // this world (the durable branch registry).
+            let branch_head = sqlx::query_scalar!(
+                "SELECT timeline_event_id FROM narrative_timeline_events \
+                 WHERE world_id = ? AND branch_id = ? ORDER BY sequence_no DESC LIMIT 1",
+                world_id,
+                req,
+            )
+            .fetch_optional(pool)
+            .await
+            .map_err(|e| NexusApiError::Internal {
+                code: "DATABASE_ERROR".to_string(),
+                message: e.to_string(),
+            })?;
+            match branch_head {
+                Some(Some(head)) => Ok((req.to_string(), Some(head))),
+                // `Some(None)` / `None`: no event on that branch in this
+                // world → the branch is unknown here (sqlx reports the PK
+                // column as nullable; a real row always has a value).
+                Some(None) | None => Err(NexusApiError::BadRequest {
+                    code: "invalid_input".to_string(),
+                    message: format!("branch '{req}' does not exist under world '{world_id}'"),
+                }),
+            }
+        }
+    }
+}
+
 async fn list_owned_world_ids(
     pool: &sqlx::SqlitePool,
     creator_id: &str,
@@ -661,22 +785,23 @@ async fn create_key_blocks_in_tx(
             .map(|a| serde_json::to_string(a).unwrap_or_default());
         let now = chrono::Utc::now().to_rfc3339();
 
-        // SAFETY: runtime query — table is kb_key_blocks (vetted DDL).
-        sqlx::query(
+        // Compile-time checked query (F-004 fix — the Accept TX is the
+        // highest-risk write path, so its SQL must be offline-validated).
+        sqlx::query!(
             "INSERT INTO kb_key_blocks \
              (key_block_id, world_id, block_type, canonical_name, status, \
               body_json, source_anchor_json, created_at, updated_at) \
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            kb.entry_id,
+            kb.world_id,
+            block_type_str,
+            kb.canonical_name,
+            kb.status,
+            body_json,
+            source_anchor_json,
+            now,
+            now,
         )
-        .bind(&kb.entry_id)
-        .bind(&kb.world_id)
-        .bind(block_type_str)
-        .bind(&kb.canonical_name)
-        .bind(&kb.status)
-        .bind(&body_json)
-        .bind(&source_anchor_json)
-        .bind(&now)
-        .bind(&now)
         .execute(&mut **tx)
         .await
         .map_err(|e| NexusApiError::Internal {

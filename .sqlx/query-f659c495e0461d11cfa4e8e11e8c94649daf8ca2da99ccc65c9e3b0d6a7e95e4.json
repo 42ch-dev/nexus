@@ -1,0 +1,32 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT block_type, body_json, world_id FROM kb_key_blocks WHERE key_block_id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "block_type",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "body_json",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "world_id",
+        "ordinal": 2,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      true,
+      false
+    ]
+  },
+  "hash": "f659c495e0461d11cfa4e8e11e8c94649daf8ca2da99ccc65c9e3b0d6a7e95e4"
+}

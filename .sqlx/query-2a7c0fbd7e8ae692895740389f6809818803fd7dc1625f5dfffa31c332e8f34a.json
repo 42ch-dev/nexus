@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT timeline_event_id FROM narrative_timeline_events WHERE world_id = ? AND branch_id = ? ORDER BY sequence_no DESC LIMIT 1",
+  "describe": {
+    "columns": [
+      {
+        "name": "timeline_event_id",
+        "ordinal": 0,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "2a7c0fbd7e8ae692895740389f6809818803fd7dc1625f5dfffa31c332e8f34a"
+}
