@@ -6,8 +6,13 @@
 -- timeline head at run time). Accept appends timeline events to the
 -- SNAPSHOTTED branch, not the current fork head.
 --
--- Also adds the composite index backing the newest-first list cursor
--- (S-1): `list_runs` always filters/orders by world + created_at.
+-- Also adds the composite index for the direct lane's world-scoped lookup
+-- shape (S-1): `list_runs` always filters by `world_id` (owned-world scope),
+-- so `(world_id, run_id)` narrows the scan to one world. It does NOT back
+-- the newest-first list cursor ordering (`ORDER BY created_at DESC,
+-- run_id DESC`) — covering that ordering would need
+-- `(world_id, created_at DESC, run_id DESC)` and is deferred to the P3 TTL
+-- work (qc1 N-2 / qc3 N-2; comment-honesty only, no new migration).
 
 ALTER TABLE compute_sessions ADD COLUMN branch_id TEXT;
 ALTER TABLE compute_sessions ADD COLUMN timeline_head_event_id TEXT;

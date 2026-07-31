@@ -152,7 +152,7 @@ pub async fn run(
     let module_task = module.clone();
     let manifest_task = cached.manifest.clone();
     let input_task = compute_input.clone();
-    let compute_result = tokio::task::spawn_blocking(move || {
+    let compute_result = match tokio::task::spawn_blocking(move || {
         // The permit is held for the whole invocation (dropped when compute
         // returns) — a queued run only arms its watchdog after the previous
         // run has fully reaped its own.
@@ -160,10 +160,33 @@ pub async fn run(
         engine_task.compute(&module_task, &manifest_task, &input_task)
     })
     .await
-    .map_err(|e| NexusApiError::Internal {
-        code: "COMPUTE_TASK_JOIN".to_string(),
-        message: format!("compute task join failed: {e}"),
-    })?;
+    {
+        Ok(result) => result,
+        Err(join_err) => {
+            // qc3 N-1: the blocking task panicked — best-effort compensating
+            // persist so the row is not stuck in 'running' forever (mirrors
+            // F-006's compensation when set_run_succeeded persistence fails;
+            // retries on the same run_id are forbidden by the status guard).
+            let compensation_error = serde_json::to_string(&json!({
+                "code": "internal",
+                "message": format!("compute task join failed: {join_err}"),
+            }))
+            .unwrap_or_else(|_| r#"{"code":"internal"}"#.to_string());
+            if let Err(db_err) =
+                compute_runs::set_run_failed(pool, &run_id, &compensation_error).await
+            {
+                tracing::error!(
+                    run_id = %run_id,
+                    error = %db_err,
+                    "compensating set_run_failed after compute task join failure also failed"
+                );
+            }
+            return Err(NexusApiError::Internal {
+                code: "COMPUTE_TASK_JOIN".to_string(),
+                message: format!("compute task join failed: {join_err}"),
+            });
+        }
+    };
 
     let output = match compute_result {
         Ok(o) => o,
@@ -339,37 +362,39 @@ pub async fn accept_run(
     // only the referenced proposed events are appended.  Stable ids are the
     // index-based `evt_<index>` assigned by position in the proposals'
     // `timeline_events` array.  Unknown ids reject the whole Accept (422)
-    // BEFORE any write.  Absent/null → accept all (unchanged).
+    // BEFORE any write.  Absent/null → accept all (N1: the wire field is
+    // nullable `["array", "null"]`; an explicit JSON `null` must deserialize
+    // and behave exactly like an absent field).  Empty array → accept all.
     let selected_event_indices: Option<std::collections::HashSet<usize>> =
-        if req.timeline_event_ids_to_accept.is_empty() {
-            None
-        } else {
-            let mut selected =
-                std::collections::HashSet::with_capacity(req.timeline_event_ids_to_accept.len());
-            for id in &req.timeline_event_ids_to_accept {
-                let index = id
-                    .strip_prefix("evt_")
-                    .and_then(|s| s.parse::<usize>().ok())
-                    .filter(|i| *i < output.timeline_events.len());
-                match index {
-                    Some(i) => {
-                        selected.insert(i);
-                    }
-                    None => {
-                        return Err(NexusApiError::BadRequest {
-                            code: "invalid_input".to_string(),
-                            message: format!(
-                                "timeline_event_ids_to_accept references unknown event id \
-                                 '{id}' (proposals contain {} timeline events; ids are \
-                                 'evt_0'..'evt_{}')",
-                                output.timeline_events.len(),
-                                output.timeline_events.len().saturating_sub(1)
-                            ),
-                        });
+        match req.timeline_event_ids_to_accept.as_deref() {
+            None | Some([]) => None,
+            Some(ids) => {
+                let mut selected = std::collections::HashSet::with_capacity(ids.len());
+                for id in ids {
+                    let index = id
+                        .strip_prefix("evt_")
+                        .and_then(|s| s.parse::<usize>().ok())
+                        .filter(|i| *i < output.timeline_events.len());
+                    match index {
+                        Some(i) => {
+                            selected.insert(i);
+                        }
+                        None => {
+                            return Err(NexusApiError::BadRequest {
+                                code: "invalid_input".to_string(),
+                                message: format!(
+                                    "timeline_event_ids_to_accept references unknown event id \
+                                     '{id}' (proposals contain {} timeline events; ids are \
+                                     'evt_0'..'evt_{}')",
+                                    output.timeline_events.len(),
+                                    output.timeline_events.len().saturating_sub(1)
+                                ),
+                            });
+                        }
                     }
                 }
+                Some(selected)
             }
-            Some(selected)
         };
 
     let mut tx = pool.begin().await.map_err(|e| NexusApiError::Internal {

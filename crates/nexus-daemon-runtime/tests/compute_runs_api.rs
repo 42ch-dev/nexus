@@ -1249,6 +1249,47 @@ async fn accept_subset_with_unknown_id_returns_422_and_writes_nothing() {
     assert_eq!(row.status, "succeeded");
 }
 
+/// N1: the wire field is nullable (`["array", "null"]`) — an explicit JSON
+/// `null` must deserialize and behave exactly like an absent field (accept
+/// ALL timeline events, state delta still applied).
+#[tokio::test]
+#[serial]
+async fn accept_with_explicit_null_timeline_ids_accepts_all() {
+    let c = ctx().await;
+    seed_character(&c.pool, "kb_atk", "Striker", 20, 3, 100, 100).await;
+    seed_character(&c.pool, "kb_def", "Guardian", 10, 5, 30, 50).await;
+
+    let run_id = craft_succeeded_run(
+        &c.pool,
+        crafted_proposals(
+            vec![json!({
+                "op": "sub",
+                "path": "character.current_hp",
+                "target_key_block_id": "kb_def",
+                "value": 15,
+            })],
+            &["First", "Second"],
+        ),
+    )
+    .await;
+
+    let resp = c
+        .server
+        .post(&format!("/v1/daemon/compute/runs/{run_id}/accept"))
+        .json(&json!({"timeline_event_ids_to_accept": null}))
+        .await;
+    assert_eq!(resp.status_code(), StatusCode::OK, "body={}", resp.text());
+    let body: Value = resp.json();
+    assert_eq!(body["status"], "applied", "body={body}");
+    assert_eq!(body["applied"]["events_created"], 2);
+    assert_eq!(body["timeline_event_ids"].as_array().unwrap().len(), 2);
+
+    // Both proposed events appended (accept-all), state delta still applied.
+    let events = timeline_events(&c.pool).await;
+    assert_eq!(events.len(), 2, "explicit null must accept all events");
+    assert_eq!(defender_hp(&c.pool, "kb_def").await, 15);
+}
+
 // ── W1 fix wave — newest-first list ordering ───────────────────────────────
 
 /// W1: `GET /runs` returns runs newest-first and the cursor walks that order.
