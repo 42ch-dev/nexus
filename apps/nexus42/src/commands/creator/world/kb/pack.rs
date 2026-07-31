@@ -387,18 +387,37 @@ async fn import(args: ImportArgs, config: &CliConfig, pool: &SqlitePool) -> Resu
                 target_entry_ids.insert(entry.entry_id.clone());
                 continue;
             }
-            // Same entry_id in a *foreign* world: do not admit as endpoint.
-            // Fall through to canonical-name collision / create under target
-            // world (create will fail on global PK if ids must stay unique —
-            // skip with clear message instead of importing a cross-world edge).
+            // Same entry_id in a *foreign* world: never admit the foreign PK as
+            // an endpoint. Prefer canonical-name remap onto a target-world row
+            // when one exists (Greptile: do not bypass remap on this path).
+            // Global PK uniqueness still prevents creating a second row with
+            // the pack's entry_id, so create is skipped either way.
+            if let Ok(Some(existing)) = store
+                .get_active_by_unique_key(world_id, &entry.canonical_name, entry_type)
+                .await
+            {
+                if args.dry_run {
+                    eprintln!(
+                        "  [dry-run] skip entry {} ({:?}): foreign entry_id (world {}); remapped → {}",
+                        entry.entry_id,
+                        entry.canonical_name,
+                        existing_by_id.world_id,
+                        existing.entry_id
+                    );
+                }
+                entries_skipped += 1;
+                remap.insert(entry.entry_id.clone(), existing.entry_id.clone());
+                target_entry_ids.insert(existing.entry_id.clone());
+                continue;
+            }
             if args.dry_run {
                 eprintln!(
-                    "  [dry-run] skip entry {} ({:?}): entry_id exists in foreign world {}",
+                    "  [dry-run] skip entry {} ({:?}): entry_id exists in foreign world {} (no target-world name match to remap)",
                     entry.entry_id, entry.canonical_name, existing_by_id.world_id
                 );
             } else {
                 eprintln!(
-                    "  warn: skip entry {} ({:?}): entry_id already owned by world {} (not target {})",
+                    "  warn: skip entry {} ({:?}): entry_id already owned by world {} (not target {}); no canonical-name match in target",
                     entry.entry_id,
                     entry.canonical_name,
                     existing_by_id.world_id,
@@ -1265,6 +1284,75 @@ mod tests {
         assert_eq!(count_entries(&pool, WORLD).await, 3);
         assert_eq!(count_relations(&pool, WORLD).await, 1);
         let _ = entry_ids_a;
+    }
+
+    /// Greptile P1 follow-up: foreign entry_id + target-world canonical-name
+    /// match must still remap pack id → target id so relations import.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn import_foreign_entry_id_remaps_via_canonical_name() {
+        const WORLD_B: &str = "wld_pack_b2";
+        const WORLD_B_TITLE: &str = "Pack World B2";
+
+        let (pool, _dir_a, entry_ids_a, _rel_ids_a) = seeded_pool().await;
+        let (pack_path, _pack_dir) = export_to_file(&pool).await;
+
+        nexus_local_db::kb_store::seed::world(
+            &pool,
+            WORLD_B,
+            OWNER,
+            WORLD_B_TITLE,
+            "pack-world-b2",
+            "private",
+            "manual",
+        )
+        .await;
+
+        // Pre-create Alice/Bob/Carol in B under *new* entry_ids (same names).
+        let store = SqliteKbStore::new(pool.clone());
+        let mut b_ids = Vec::new();
+        for name in ["Alice", "Bob", "Carol"] {
+            let mut kb = WorldKbEntry::new(WORLD_B, BlockType::Character, name);
+            kb.body = Some(WorldKbBody {
+                summary: Some(format!("{name} in B")),
+                ..Default::default()
+            });
+            let res = store.insert_knowledge_entry(kb).await.unwrap();
+            b_ids.push(res.entry_id);
+        }
+
+        let args = ImportArgs {
+            world_ref: WORLD_B.to_string(),
+            r#in: pack_path,
+            dry_run: false,
+            conflict: ConflictStrategy::Skip,
+        };
+        import(args, &config_with_active_creator(), &pool)
+            .await
+            .expect("import must succeed with remap");
+
+        // No new entries (all name-collided); relation Alice→Bob from pack
+        // should land pointing at B's Alice/Bob ids.
+        assert_eq!(count_entries(&pool, WORLD_B).await, 3);
+        assert_eq!(
+            count_relations(&pool, WORLD_B).await,
+            1,
+            "relation must import via canonical-name remap despite foreign pack entry_ids"
+        );
+
+        // SAFETY: test-only SELECT of relation endpoints.
+        let row: (String, String) = sqlx::query_as(
+            "SELECT source_entity_id, target_entity_id FROM kb_relationships \
+             WHERE world_id = ? LIMIT 1",
+        )
+        .bind(WORLD_B)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(row.0, b_ids[0], "source remapped to B Alice");
+        assert_eq!(row.1, b_ids[1], "target remapped to B Bob");
+        // Pack's World A entry_ids must not appear as endpoints in B.
+        assert_ne!(row.0, entry_ids_a[0]);
+        assert_ne!(row.1, entry_ids_a[1]);
     }
 
     #[tokio::test(flavor = "multi_thread")]
