@@ -495,6 +495,193 @@ describe('BrowserClient compute module + KeyBlock state wiring (V1.114 P2)', () 
   });
 });
 
+describe('BrowserClient compute runs (V1.147 P1)', () => {
+  const runSummary = {
+    run_id: 'run_1',
+    status: 'succeeded',
+    module_id: 'basic-combat',
+    module_version: '1.0.0',
+    world_id: 'w1',
+    created_at: '2026-07-31T00:00:00Z',
+  };
+
+  it('invokes a module via POST /compute/run and returns the run outcome', async () => {
+    let receivedBody: unknown = null;
+    useHandlers(
+      http.post('/v1/daemon/compute/run', async ({ request }) => {
+        receivedBody = await request.json();
+        return HttpResponse.json({
+          run_id: 'run_1',
+          status: 'succeeded',
+          module_id: 'basic-combat',
+          module_version: '1.0.0',
+          proposals: {
+            schema_version: 1,
+            state_delta: [{ op: 'sub', path: 'character.current_hp', target_key_block_id: 'kb-def', value: 6 }],
+            timeline_events: [],
+            new_key_blocks: [],
+            battle_report: { kind: 'combat', winner: 'kb-atk' },
+          },
+          created_at: '2026-07-31T00:00:00Z',
+        });
+      }),
+    );
+
+    const client = new BrowserClient();
+    const res = await client.runCompute({
+      world_id: 'w1',
+      module_id: 'basic-combat',
+      invocation_params: { attacker_id: 'kb-atk', defender_id: 'kb-def' },
+    });
+    expect(receivedBody).toEqual({
+      world_id: 'w1',
+      module_id: 'basic-combat',
+      invocation_params: { attacker_id: 'kb-atk', defender_id: 'kb-def' },
+    });
+    expect(res.run_id).toBe('run_1');
+    expect(res.status).toBe('succeeded');
+    expect(res.proposals?.state_delta).toHaveLength(1);
+  });
+
+  it('surfaces a failed run outcome as data (status failed + error), not a thrown error', async () => {
+    useHandlers(
+      http.post('/v1/daemon/compute/run', () =>
+        HttpResponse.json({
+          run_id: 'run_2',
+          status: 'failed',
+          module_id: 'basic-combat',
+          module_version: '1.0.0',
+          error: { code: 'module_trap', message: 'The module stopped unexpectedly.' },
+          created_at: '2026-07-31T00:00:00Z',
+        }),
+      ),
+    );
+
+    const client = new BrowserClient();
+    const res = await client.runCompute({ world_id: 'w1', module_id: 'basic-combat' });
+    expect(res.status).toBe('failed');
+    expect(res.error?.code).toBe('module_trap');
+    expect(res.proposals).toBeUndefined();
+  });
+
+  it('accepts a run with an optional subset of timeline events', async () => {
+    let receivedBody: unknown = null;
+    useHandlers(
+      http.post('/v1/daemon/compute/runs/:runId/accept', async ({ params, request }) => {
+        receivedBody = await request.json();
+        return HttpResponse.json({
+          run_id: params.runId,
+          status: 'applied',
+          applied: { state_delta_count: 1, events_created: 1, new_entries_created: 0 },
+          timeline_event_ids: ['evt_0'],
+        });
+      }),
+    );
+
+    const client = new BrowserClient();
+    const res = await client.acceptRun('run_1', { timeline_event_ids_to_accept: ['evt_0'] });
+    expect(receivedBody).toEqual({ timeline_event_ids_to_accept: ['evt_0'] });
+    expect(res.status).toBe('applied');
+    expect(res.applied.events_created).toBe(1);
+  });
+
+  it('accepts a run with an empty JSON body when no request is given', async () => {
+    let receivedBody: unknown = null;
+    let receivedContentType: string | null = null;
+    useHandlers(
+      http.post('/v1/daemon/compute/runs/:runId/accept', async ({ request }) => {
+        receivedContentType = request.headers.get('content-type');
+        receivedBody = await request.json();
+        return HttpResponse.json({
+          run_id: 'run_1',
+          status: 'applied',
+          applied: { state_delta_count: 0, events_created: 2, new_entries_created: 0 },
+          timeline_event_ids: ['evt_0', 'evt_1'],
+        });
+      }),
+    );
+
+    const client = new BrowserClient();
+    const res = await client.acceptRun('run_1');
+    // The daemon's axum Json extractor requires a JSON body — the client sends
+    // `{}` (accept everything) rather than an empty POST.
+    expect(receivedContentType).toContain('application/json');
+    expect(receivedBody).toEqual({});
+    expect(res.status).toBe('applied');
+  });
+
+  it('discards a run via POST /runs/:id/discard', async () => {
+    useHandlers(
+      http.post('/v1/daemon/compute/runs/:runId/discard', ({ params }) =>
+        HttpResponse.json({ run_id: params.runId, status: 'discarded' }),
+      ),
+    );
+
+    const client = new BrowserClient();
+    const res = await client.discardRun('run_1');
+    expect(res).toEqual({ run_id: 'run_1', status: 'discarded' });
+  });
+
+  it('lists runs with filters + cursor threaded as query params', async () => {
+    let seenUrl: URL | null = null;
+    useHandlers(
+      http.get('/v1/daemon/compute/runs', ({ request }) => {
+        seenUrl = new URL(request.url);
+        return HttpResponse.json({
+          items: [runSummary],
+          has_more: true,
+          next_cursor: 'cur-2',
+        });
+      }),
+    );
+
+    const client = new BrowserClient();
+    const res = await client.listRuns({
+      world_id: 'w1',
+      module_id: 'basic-combat',
+      status: 'succeeded',
+      limit: 10,
+      cursor: 'cur-1',
+    });
+    expect(seenUrl).not.toBeNull();
+    expect(seenUrl!.searchParams.get('world_id')).toBe('w1');
+    expect(seenUrl!.searchParams.get('module_id')).toBe('basic-combat');
+    expect(seenUrl!.searchParams.get('status')).toBe('succeeded');
+    expect(seenUrl!.searchParams.get('limit')).toBe('10');
+    expect(seenUrl!.searchParams.get('cursor')).toBe('cur-1');
+    expect(res.items).toHaveLength(1);
+    expect(res.items[0]!.run_id).toBe('run_1');
+    expect(res.has_more).toBe(true);
+    expect(res.next_cursor).toBe('cur-2');
+  });
+
+  it('fetches a run detail by id', async () => {
+    useHandlers(
+      http.get('/v1/daemon/compute/runs/:runId', ({ params }) =>
+        HttpResponse.json({
+          ...runSummary,
+          run_id: params.runId,
+          invocation_params: { attacker_id: 'kb-atk', defender_id: 'kb-def' },
+          proposals: {
+            schema_version: 1,
+            state_delta: [],
+            timeline_events: [],
+            new_key_blocks: [],
+            battle_report: { kind: 'combat' },
+          },
+        }),
+      ),
+    );
+
+    const client = new BrowserClient();
+    const res = await client.getRun('run_1');
+    expect(res.run_id).toBe('run_1');
+    expect(res.status).toBe('succeeded');
+    expect(res.invocation_params).toEqual({ attacker_id: 'kb-atk', defender_id: 'kb-def' });
+    expect(res.proposals?.battle_report.kind).toBe('combat');
+  });
+});
+
 // ── Transport classification matrix (V1.129 P0 T3) ─────────────────────────
 //
 // The classifier is a pure function of `(baseUrl, cause)` plus the
