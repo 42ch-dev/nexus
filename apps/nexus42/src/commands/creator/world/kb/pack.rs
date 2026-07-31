@@ -1224,6 +1224,49 @@ mod tests {
         );
     }
 
+    /// Greptile P1 / PR #193: global entry_id collision with a foreign-world row
+    /// must not admit that id into `target_entry_ids` (no cross-world edges).
+    #[tokio::test(flavor = "multi_thread")]
+    async fn import_skips_foreign_world_entry_id_collision_endpoints() {
+        const WORLD_B: &str = "wld_pack_b";
+        const WORLD_B_TITLE: &str = "Pack World B";
+
+        // World A seeded with 3 entries + 1 relation; export its pack.
+        let (pool, _dir_a, entry_ids_a, _rel_ids_a) = seeded_pool().await;
+        let (pack_path, _pack_dir) = export_to_file(&pool).await;
+
+        // Second world in the *same* DB — entry_ids from World A already exist globally.
+        nexus_local_db::kb_store::seed::world(
+            &pool,
+            WORLD_B,
+            OWNER,
+            WORLD_B_TITLE,
+            "pack-world-b",
+            "private",
+            "manual",
+        )
+        .await;
+
+        let args = ImportArgs {
+            world_ref: WORLD_B.to_string(),
+            r#in: pack_path,
+            dry_run: false,
+            conflict: ConflictStrategy::Skip,
+        };
+        import(args, &config_with_active_creator(), &pool)
+            .await
+            .expect("import into World B must succeed");
+
+        // Entries skipped (foreign-world PK collision) — none created in B.
+        assert_eq!(count_entries(&pool, WORLD_B).await, 0);
+        // Relations must not be inserted: endpoints were never admitted for B.
+        assert_eq!(count_relations(&pool, WORLD_B).await, 0);
+        // World A unchanged.
+        assert_eq!(count_entries(&pool, WORLD).await, 3);
+        assert_eq!(count_relations(&pool, WORLD).await, 1);
+        let _ = entry_ids_a;
+    }
+
     #[tokio::test(flavor = "multi_thread")]
     async fn pack_export_import_cross_world_complementarity() {
         // ── Phase 1: Seed World A with 3 entries + 1 relation ─────────
