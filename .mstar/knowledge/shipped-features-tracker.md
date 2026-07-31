@@ -6,7 +6,7 @@
 **Location**: `.mstar/knowledge/` (shared result; closed-row archive companion to the active deferred tracker).  
 **Split from**: [deferred-features-cross-version-tracker.md](deferred-features-cross-version-tracker.md) §4–§5 (2026-05-30 restructure)  
 **Created**: 2026-05-30  
-**Last updated**: 2026-07-31 (V1.146 close: SPOKE full host graduation PR #193 → main)
+**Last updated**: 2026-08-01 (V1.147 — DF-V1122-COMPUTABLE-UI + DF-V1122-COMPUTE-ON-TIMELINE shipped; closed from active tracker)
 
 **Last updated (V1.55 history)**: 2026-06-22 (V1.55 closeout: 7 plans all Done — P-1 prepare + P0 DF-43 SQLite persistence / crate-model alignment (closed) + P1 DF-31 workspace interface skeleton + P2 game-bible Depth 3.5 (design-writing + design 五问 rubric + section completion detection + KB extraction; Master spec) + P3 Script profile scaffold (V1.54-style parity + additive BlockType dialogue/beat/act + script_category + ScaffoldTransaction closure on BOTH non-novel scaffolds) + P-mid QC rhythm + P-last closeout (Profile B compaction + spec promotion + tracker ship snapshot + tech-debt rollup); R-V154P1-W001 + R-V154P1-S002 + DF-43 + DF-31 all closed; 1 new R-V155P2-F002 → V1.56+; wire contracts unchanged)
 
@@ -67,6 +67,8 @@ When a version ships, append new closed rows here and remove them from the activ
 | ~~DF-52~~ | nexus42 preset command group | V1.45 (P-last) | Resolved via creator run <preset_id>. |
 | ~~BL-12~~ | creator run preset-generic entry | V1.45 (P0+P1+P2) | Replaced hardcoded enum variants with generic runner. |
 | ~~BL-13~~ | STAGE_PRESET_ALLOWLIST stale ref | V1.45 (P1 T4) | Removed memory-review from allowlist. |
+| ~~DF-V1122-COMPUTABLE-UI~~ | Computable pillar UI surfacing (compute registry / canvas marketing) | V1.147 | Closed by the direct compute lane: Run Studio on Modules surface (guided form + result inspector + Runs history) shipped. Plans: `2026-07-31-v1.147-p0-compute-invoke-daemon-route` + `2026-07-31-v1.147-p1-compute-run-studio-modules`. Product lock: [computable-author-behavior.md](../iterations/v1.147/specs/computable-author-behavior.md). |
+| ~~DF-V1122-COMPUTE-ON-TIMELINE~~ | Invoke WASM compute from the Timeline surface | V1.147 | Closed by compute-on-Timeline: Timeline entry with context pre-fill; Accept lands canon **Compute result** nodes with `extensions.nexus.compute` provenance. Plan: `2026-07-31-v1.147-p2-compute-on-timeline`. Routes: [daemon-api-surface-conventions.md](../specs/daemon-api-surface-conventions.md) §12.3. |
 
 ### Tech-debt residuals shipped
 
