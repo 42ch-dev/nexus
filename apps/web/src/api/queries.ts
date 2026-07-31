@@ -1316,7 +1316,15 @@ export function useRunCompute() {
       // module (brief: runs-list + module-detail invalidation).
       void qc.invalidateQueries({ queryKey: queryKeys.compute.modules.detail(request.module_id) });
     },
-    onError: (error) => errorToast(error, 'error.couldNotRunCompute'),
+    onError: (error, request) => {
+      // The daemon persists a Failed run row even when the POST surfaces an
+      // error envelope — refetch the Runs lists so the row shows immediately
+      // (dogfood finding, V1.147 P1 T4). Unknown world / not-owner rejections
+      // create no row; an extra refetch is harmless there.
+      void qc.invalidateQueries({ queryKey: queryKeys.compute.runs.lists() });
+      void qc.invalidateQueries({ queryKey: queryKeys.compute.modules.detail(request.module_id) });
+      errorToast(error, 'error.couldNotRunCompute');
+    },
   });
 }
 

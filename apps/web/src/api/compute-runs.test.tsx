@@ -175,6 +175,60 @@ describe('useRunCompute — runs-list invalidation', () => {
     await waitFor(() => expect(listSpy).toHaveBeenCalledTimes(2));
     expect(receivedBody).toMatchObject({ world_id: 'w1', module_id: 'basic-combat' });
   });
+
+  it('refetches the runs list when a run fails (daemon still records a Failed row)', async () => {
+    const listSpy = vi.fn(() =>
+      HttpResponse.json({ items: [makeRun()], has_more: false }),
+    );
+    useHandlers(
+      http.get('/v1/daemon/compute/runs', () => listSpy()),
+      http.post('/v1/daemon/compute/run', () =>
+        HttpResponse.json(
+          {
+            success: false,
+            error: {
+              code: 'compute_module_error',
+              message: 'manifest validation failed at key_blocks[0]',
+              details: {},
+              extensions: {},
+            },
+          },
+          { status: 500 },
+        ),
+      ),
+    );
+
+    function Harness() {
+      const runs = useComputeRuns();
+      const runCompute = useRunCompute();
+      return (
+        <div>
+          <span data-testid="runs">{flattenPages(runs.data).length}</span>
+          <button
+            type="button"
+            onClick={() =>
+              runCompute.mutate({
+                world_id: 'w1',
+                module_id: 'basic-combat',
+                invocation_params: { attacker_id: 'kb-atk', defender_id: 'kb-def' },
+              })
+            }
+          >
+            Run
+          </button>
+        </div>
+      );
+    }
+
+    renderInApp(<Harness />, { client: new BrowserClient() });
+    expect(await screen.findByText('1')).toBeInTheDocument();
+    expect(listSpy).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByRole('button', { name: /^run$/i }));
+    // Mutation rejects (error envelope) but the runs lists are invalidated so
+    // the server-recorded Failed row surfaces without a manual refresh.
+    await waitFor(() => expect(listSpy).toHaveBeenCalledTimes(2));
+  });
 });
 
 describe('useAcceptRun / useDiscardRun — runs-list + run-detail invalidation', () => {
