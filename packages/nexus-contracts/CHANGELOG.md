@@ -5,6 +5,20 @@ All notable changes to the `@42ch/nexus-contracts` package will be documented in
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.27.0] - 2026-08-01
+
+### Added
+
+- **Per-World timeline events read contracts (V1.147 P2):** added 2 additive schemas under `daemon-api/timeline/` for the World Timeline events route:
+  - `TimelineEventInfo` — one `narrative_timeline_events` row: id, branch_id, event_type, status, sequence_no, title, summary, affected/caused event id lists, source_command_id, metadata, parsed `extensions` (extensions_nexus_json — compute provenance: module_id, module_version, run_id, source_kind), created_at
+  - `ListTimelineEventsResponse` — cursor-paginated list envelope (items / has_more / next_cursor) for `GET /v1/daemon/worlds/:world_id/timeline/events`
+
+### Consumer Impact
+
+- **Additive only** — no existing schemas modified; generated types for existing consumers are unchanged.
+- New Rust types: `nexus_contracts::generated::daemon_api::timeline::{TimelineEventInfo, ListTimelineEventsResponse}`.
+- New TypeScript types: `@42ch/nexus-contracts` exports the same shapes under `daemon-api/timeline/timeline-event-info.ts` and `daemon-api/timeline/list-timeline-events-response.ts`.
+
 ## [0.26.0] - 2026-07-31
 
 ### Added

@@ -536,11 +536,21 @@ fn compute_invoke_routes() -> Router<WorkspaceState> {
 ///
 /// Composite cursor-paginated overview of visible Worlds with per-World
 /// era/event counts and last activity timestamp. No new persistence.
+///
+/// Also hosts the per-World timeline-events read route (V1.147 P2 T1) —
+/// `GET /v1/daemon/worlds/:world_id/timeline/events` — cursor-paginated
+/// `narrative_timeline_events` read with branch / status / `event_type`
+/// filters.
 fn timeline_routes() -> Router<WorkspaceState> {
-    Router::new().route(
-        "/v1/daemon/timeline/overview",
-        get(handlers::timeline::get_timeline_overview),
-    )
+    Router::new()
+        .route(
+            "/v1/daemon/timeline/overview",
+            get(handlers::timeline::get_timeline_overview),
+        )
+        .route(
+            "/v1/daemon/worlds/:world_id/timeline/events",
+            get(handlers::timeline_events::get_timeline_events),
+        )
 }
 
 /// Profile-scoped (Tier-2) routes — require active creator + lazy-open pool.

@@ -256,7 +256,7 @@ impl TimelineEvent {
 /// no `T`/`Z`). Try RFC3339 first; on failure, normalize the space to `T` and
 /// append `Z` (UTC), then try RFC3339 again. A final `NaiveDateTime` fallback
 /// covers optional fractional seconds.
-fn parse_created_at(s: &str) -> Option<chrono::DateTime<chrono::Utc>> {
+pub fn parse_created_at(s: &str) -> Option<chrono::DateTime<chrono::Utc>> {
     chrono::DateTime::parse_from_rfc3339(s)
         .ok()
         .map(|dt| dt.with_timezone(&chrono::Utc))

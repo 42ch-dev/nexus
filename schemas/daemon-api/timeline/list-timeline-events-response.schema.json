@@ -1,0 +1,27 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/daemon-api/timeline/list-timeline-events-response.schema.json",
+  "schema_version": 1,
+  "title": "ListTimelineEventsResponse",
+  "description": "Response for GET /v1/daemon/worlds/:world_id/timeline/events — cursor-paginated list of timeline events for a world (branch/status/event_type filters, keyset cursor on (branch_id, sequence_no)).",
+  "type": "object",
+  "required": ["items", "has_more"],
+  "properties": {
+    "items": {
+      "type": "array",
+      "items": {
+        "$ref": "https://nexus42.invalid/schemas/daemon-api/timeline/timeline-event-info.schema.json"
+      },
+      "description": "TimelineEventInfo rows, ordered by (branch_id, sequence_no) ascending within the filtered branch."
+    },
+    "has_more": {
+      "type": "boolean",
+      "description": "True when another page exists (equivalent to next_cursor being non-null)."
+    },
+    "next_cursor": {
+      "type": "string",
+      "description": "Opaque keyset cursor for the next page. Clients MUST NOT parse it. Non-null only when has_more is true."
+    }
+  },
+  "additionalProperties": false
+}
