@@ -50,7 +50,7 @@ Surfaces pages label each section with badges (`surface-source-badge-*` test ids
 | `@web-global-timeline/*` | `../web/src/components/global-timeline/presentational/*` | Global Timeline list chrome extract (`global-timeline-list-chrome`, V1.124 P2) — props-driven rows / empty / loading / error frames; no daemon, no contracts, no router, no `useTranslation` |
 | `@web-shell/selection-submenu` | `../web/src/components/selection-submenu/` | V1.126 P0 — selection submenu presentational (transitional alias to apps/web/src/components/selection-submenu/) |
 | `@web-lib/utils` | `../web/src/lib/utils.ts` | `cn()` only |
-| `@42ch/nexus-ui` | workspace package | Brand VI plus promoted presentational primitives (Button, Badge, Card, Input, Label, Textarea, Select, Tabs, Toast, TransportErrorBlock) through public exports |
+| `@42ch/nexus-ui` | workspace package | Brand VI plus promoted presentational primitives (Button, Badge, Card, Input, Label, Textarea, Select, Tabs, Toast, TransportErrorBlock, RunFormFields, EntityPickerField, ProposalSections, RunStatusBadge, RunsTable) through public exports |
 | `@nexus/design-tokens` | `tooling/design-tokens` | Shared CSS + Tailwind preset |
 
 ### Forbidden
