@@ -111,6 +111,12 @@ pub struct WorkspaceState {
     /// V1.92: optional TLS certificate fingerprint for remote (non-loopback)
     /// binds. Loopback-only daemons leave this as `None`.
     tls_fingerprint: Arc<Option<CertFingerprintResponse>>,
+    /// V1.147 P0: daemon-wide WASM compute engine singleton (boot.rs wires
+    /// the same engine into `narrative.compute` via the capability registry).
+    wasm_engine: Arc<Option<Arc<nexus_wasm_host::WasmEngine>>>,
+    /// V1.147 P0: daemon-wide compiled module cache (pre-warmed at boot with
+    /// embedded + user-installed modules).
+    module_cache: Arc<Option<Arc<nexus_wasm_host::ModuleCache>>>,
 }
 
 impl WorkspaceState {
@@ -168,6 +174,8 @@ impl WorkspaceState {
             daemon_tool_dispatch: Arc::new(None),
             memory_review_locks: Arc::new(std::sync::Mutex::new(HashMap::new())),
             tls_fingerprint: Arc::new(None),
+            wasm_engine: Arc::new(None),
+            module_cache: Arc::new(None),
         }
     }
 
@@ -258,6 +266,8 @@ impl WorkspaceState {
             daemon_tool_dispatch: Arc::new(None),
             memory_review_locks: Arc::new(std::sync::Mutex::new(HashMap::new())),
             tls_fingerprint: Arc::new(None),
+            wasm_engine: Arc::new(None),
+            module_cache: Arc::new(None),
         })
     }
 
@@ -447,6 +457,28 @@ impl WorkspaceState {
     #[must_use]
     pub fn tls_fingerprint(&self) -> Option<CertFingerprintResponse> {
         self.tls_fingerprint.as_ref().clone()
+    }
+
+    /// Set the daemon-wide WASM compute engine singleton (V1.147 P0).
+    pub fn set_wasm_engine(&mut self, engine: Arc<nexus_wasm_host::WasmEngine>) {
+        self.wasm_engine = Arc::new(Some(engine));
+    }
+
+    /// Get the daemon-wide WASM compute engine, if set.
+    #[must_use]
+    pub fn wasm_engine(&self) -> Option<Arc<nexus_wasm_host::WasmEngine>> {
+        self.wasm_engine.as_ref().clone()
+    }
+
+    /// Set the daemon-wide compiled module cache (V1.147 P0).
+    pub fn set_module_cache(&mut self, cache: Arc<nexus_wasm_host::ModuleCache>) {
+        self.module_cache = Arc::new(Some(cache));
+    }
+
+    /// Get the daemon-wide compiled module cache, if set.
+    #[must_use]
+    pub fn module_cache(&self) -> Option<Arc<nexus_wasm_host::ModuleCache>> {
+        self.module_cache.as_ref().clone()
     }
 
     /// Set the lifecycle HSM for this workspace state.

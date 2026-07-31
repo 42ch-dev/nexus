@@ -253,9 +253,15 @@ impl NexusApiError {
                     | "world_clear_forbidden"
                     | "invalid_transition"
                     | "invalid_input"
+                    | "invalid_state"
                     | "too_many_findings"
                     | "strategy_self_loop"
-                    | "strategy_transition_duplicate" => StatusCode::UNPROCESSABLE_ENTITY,
+                    | "strategy_transition_duplicate"
+                    | "compute_fuel_exhausted"
+                    | "compute_wall_time_exceeded"
+                    | "compute_memory_cap_exceeded"
+                    | "compute_module_trapped"
+                    | "compute_module_error" => StatusCode::UNPROCESSABLE_ENTITY,
                     // V1.65: chapter bodies above the size cap return 413.
                     "chapter_body_too_large" => StatusCode::PAYLOAD_TOO_LARGE,
                     _ => StatusCode::BAD_REQUEST,
@@ -294,17 +300,24 @@ impl NexusApiError {
                 // Surface canonical tool-bridge codes (spec §12.4), plus
                 // V1.40 world-binding and V1.49 F6 lifecycle codes, as-is.
                 // V1.67 F-F1: resource-specific sort-invalid codes are also public.
+                // V1.147 P0: compute sandbox error codes.
                 match code.as_str() {
                     "policy_blocked"
                     | "not_supported"
                     | "invalid_input"
+                    | "invalid_state"
                     | "invalid_transition"
                     | "too_many_findings"
                     | "world_id_required"
                     | "invalid_world_id"
                     | "world_clear_forbidden"
                     | "strategy_self_loop"
-                    | "strategy_transition_duplicate" => code.as_str(),
+                    | "strategy_transition_duplicate"
+                    | "compute_fuel_exhausted"
+                    | "compute_wall_time_exceeded"
+                    | "compute_memory_cap_exceeded"
+                    | "compute_module_trapped"
+                    | "compute_module_error" => code.as_str(),
                     _ if code.ends_with("_sort_invalid") => code.as_str(),
                     _ => "bad_request",
                 }
