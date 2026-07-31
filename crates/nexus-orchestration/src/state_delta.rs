@@ -9,8 +9,11 @@
 //!
 //! `apply_state_delta_pool` uses a pool-backed `SqliteKbStore` (existing
 //! pattern). `apply_state_delta_in_tx` operates inside a caller-owned
-//! `sqlx::Transaction` using raw queries — needed for the Accept handler's
-//! single-transaction atomic boundary.
+//! `sqlx::Transaction` and routes its `kb_key_blocks` reads/writes through
+//! the transaction-aware `nexus_local_db::kb_store` primitives
+//! (`read_kb_state_in_tx` / `update_kb_state_in_tx`) — SQL ownership lives in
+//! `nexus-local-db` (W3: one `kb_key_blocks` write-path family); this module
+//! owns the semantic merge.
 
 use crate::capability::CapabilityError;
 use nexus_contracts::generated::daemon_api::compute::compute_output::ComputeOutputStateDeltaItem as ComputeOutputStateDelta;
@@ -99,6 +102,9 @@ pub async fn apply_state_delta_pool(
 /// Only updates `kb_key_blocks.body_json` and `updated_at` — skips the
 /// full `SqliteKbStore::update_knowledge_entry` validation (canonical name,
 /// uniqueness, extensions) because the delta only mutates `body.state`.
+/// The read and the write go through the TX-aware storage primitives in
+/// `nexus_local_db::kb_store` (W3), so the SQL for this table lives in
+/// `nexus-local-db` — the same write-path family as the pool-backed lane.
 ///
 /// Returns the number of state deltas successfully applied.
 ///
@@ -112,8 +118,8 @@ pub async fn apply_state_delta_in_tx(
     world_id: &str,
     deltas: &[ComputeOutputStateDelta],
 ) -> Result<usize, CapabilityError> {
-    use chrono::Utc;
     use nexus_contracts::BlockType;
+    use nexus_local_db::kb_store::{read_kb_state_in_tx, update_kb_state_in_tx};
 
     let mut applied = 0usize;
 
@@ -133,26 +139,21 @@ pub async fn apply_state_delta_in_tx(
             ));
         }
 
-        // Read current block_type, body_json, and world_id from the TX.
+        // Read through the local-db storage primitive inside the caller's TX.
         // Compile-time checked query (F-004 fix — the Accept path is the
         // highest-risk write path, so its SQL must be offline-validated).
-        let row = sqlx::query!(
-            "SELECT block_type, body_json, world_id FROM kb_key_blocks \
-             WHERE key_block_id = ?",
-            target_id
-        )
-        .fetch_optional(&mut **tx)
-        .await
-        .map_err(|e| CapabilityError::Internal(format!("kb read for delta: {e}")))?;
-
-        let (block_type_str, body_json_str, target_world_id) = match row {
-            Some(r) => (r.block_type, r.body_json, r.world_id),
-            None => {
-                return Err(CapabilityError::InputInvalid(format!(
-                    "state_delta target '{target_id}' not found"
-                )));
-            }
+        let Some(row) = read_kb_state_in_tx(tx, target_id)
+            .await
+            .map_err(|e| CapabilityError::Internal(format!("kb read for delta: {e}")))?
+        else {
+            return Err(CapabilityError::InputInvalid(format!(
+                "state_delta target '{target_id}' not found"
+            )));
         };
+
+        let block_type_str = row.block_type;
+        let body_json_str = row.body_json;
+        let target_world_id = row.world_id;
 
         // F-001: world-scope check — a delta targeting another world's KB
         // must reject the whole Accept (caller rolls back the TX).
@@ -206,24 +207,15 @@ pub async fn apply_state_delta_in_tx(
             CapabilityError::Internal(format!("serialize updated body for '{target_id}': {e}"))
         })?;
 
-        let updated_at = Utc::now().to_rfc3339();
-        // Defense in depth: the UPDATE re-asserts world_id so a target that
-        // somehow changed worlds mid-TX cannot be written either.
-        let affected = sqlx::query!(
-            "UPDATE kb_key_blocks SET body_json = ?, updated_at = ? \
-             WHERE key_block_id = ? AND world_id = ?",
-            updated_body_json,
-            updated_at,
-            target_id,
-            world_id,
-        )
-        .execute(&mut **tx)
-        .await
-        .map_err(|e| {
-            CapabilityError::Internal(format!("kb update state for '{target_id}': {e}"))
-        })?;
+        // Storage primitive: world-scoped UPDATE (defense in depth — a target
+        // that somehow changed worlds mid-TX cannot be written either).
+        let affected = update_kb_state_in_tx(tx, target_id, world_id, &updated_body_json)
+            .await
+            .map_err(|e| {
+                CapabilityError::Internal(format!("kb update state for '{target_id}': {e}"))
+            })?;
 
-        if affected.rows_affected() == 0 {
+        if affected == 0 {
             return Err(CapabilityError::InputInvalid(format!(
                 "state_delta target '{target_id}' disappeared during transaction"
             )));

@@ -1267,6 +1267,93 @@ pub async fn update_key_block_auxiliary_fields_in_tx(
     .map(|_| ())
 }
 
+// ── V1.147 W3: TX-aware state read/write primitives (state-delta lane) ─────
+// The Accept lane's state-delta path reads/writes `kb_key_blocks` through
+// these primitives so ALL SQL against the table lives in `nexus-local-db`
+// (one storage write-path family). `nexus-orchestration::state_delta` owns
+// the semantic merge (dot-path validation, add/sub/set, block_type state-key
+// rules) and calls these inside the caller's transaction.
+
+/// The `kb_key_blocks` storage fields a state delta needs, read inside a
+/// caller-owned transaction (V1.147 W3).
+#[derive(Debug, Clone)]
+pub struct KbStateRow {
+    /// Stored `block_type` column value (`snake_case` wire string).
+    pub block_type: String,
+    /// Stored `body_json` (`None` when the row has no body).
+    pub body_json: Option<String>,
+    /// Stored `world_id` — the caller's world-scope check compares against it.
+    pub world_id: String,
+}
+
+/// Read a key block's state-relevant storage fields inside a caller-owned
+/// transaction.
+///
+/// Compile-time checked (F-004: the Accept lane is the highest-risk write
+/// path, so its SQL must be offline-validated). Returns `Ok(None)` when no
+/// row with `key_block_id` exists — the caller distinguishes "not found"
+/// from "found" (a foreign-world target must read the row to be detected).
+///
+/// # Errors
+///
+/// Returns [`LocalDbError`] on database failure.
+pub async fn read_kb_state_in_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    key_block_id: &str,
+) -> Result<Option<KbStateRow>, LocalDbError> {
+    let row = sqlx::query!(
+        "SELECT block_type, body_json, world_id FROM kb_key_blocks \
+         WHERE key_block_id = ?",
+        key_block_id,
+    )
+    .fetch_optional(&mut **tx)
+    .await?;
+    Ok(row.map(|r| KbStateRow {
+        block_type: r.block_type,
+        body_json: r.body_json,
+        world_id: r.world_id,
+    }))
+}
+
+/// Transaction-aware state-only update of a `kb_key_blocks` row.
+///
+/// This is the storage primitive behind the state-delta Accept lane: it
+/// updates ONLY `body_json` + `updated_at` inside a caller-owned transaction
+/// and is **world-scoped** (`WHERE key_block_id = ? AND world_id = ?`) so a
+/// target that changed worlds mid-transaction cannot be written. The caller
+/// (`nexus-orchestration::state_delta`) owns the semantic merge and passes
+/// the re-serialized body.
+///
+/// This is deliberately NOT the full [`KbStore::update_knowledge_entry`]
+/// validation path (canonical name, uniqueness, extensions): the delta only
+/// mutates `body.state`, so those invariants are untouched by construction.
+///
+/// Returns the number of affected rows (1 on success, 0 when no row with
+/// `key_block_id` exists in `world_id`).
+///
+/// # Errors
+///
+/// Returns [`LocalDbError`] on database failure.
+pub async fn update_kb_state_in_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    key_block_id: &str,
+    world_id: &str,
+    body_json: &str,
+) -> Result<u64, LocalDbError> {
+    let updated_at = chrono::Utc::now().to_rfc3339();
+    let result = sqlx::query!(
+        "UPDATE kb_key_blocks SET body_json = ?, updated_at = ? \
+         WHERE key_block_id = ? AND world_id = ?",
+        body_json,
+        updated_at,
+        key_block_id,
+        world_id,
+    )
+    .execute(&mut **tx)
+    .await?;
+    Ok(result.rows_affected())
+}
+
 /// V1.73 P0: read the per-row OCC version of a `kb_key_blocks` row,
 /// NULL-normalized to 0. Returns `None` when the row does not exist.
 ///
@@ -1292,6 +1379,7 @@ pub async fn read_key_block_revision(
 mod tests {
     use super::*;
     use crate::{open_pool, run_migrations};
+    use serde_json::{json, Value};
 
     async fn fresh_pool() -> (SqlitePool, tempfile::TempDir) {
         let dir = tempfile::tempdir().unwrap();
@@ -1356,6 +1444,121 @@ mod tests {
         assert!(
             matches!(err, KbStoreError::NotFound(ref id) if *id == entry_id),
             "rolled-back insert must not persist: {err:?}"
+        );
+    }
+
+    // ── V1.147 W3: TX-aware state read/write primitives ──────────────────────
+
+    fn kb_with_state(world_id: &str, canonical_name: &str, hp: i64) -> WorldKbEntry {
+        let mut kb = WorldKbEntry::new(world_id, BlockType::Character, canonical_name);
+        kb.body = Some(WorldKbBody {
+            summary: None,
+            attributes: None,
+            tags: None,
+            state: Some(json!({"character": {"current_hp": hp}})),
+            computable: Some(true),
+        });
+        kb
+    }
+
+    /// Read the persisted `body_json` through the state-delta read primitive
+    /// (keeps the assertion on the same lane the Accept path uses).
+    async fn stored_body_json(pool: &SqlitePool, key_block_id: &str) -> Option<String> {
+        let mut tx = pool.begin().await.unwrap();
+        let row = read_kb_state_in_tx(&mut tx, key_block_id).await.unwrap();
+        tx.rollback().await.unwrap();
+        row.and_then(|r| r.body_json)
+    }
+
+    #[tokio::test]
+    async fn read_kb_state_in_tx_returns_stored_fields() {
+        let (pool, _dir) = fresh_pool().await;
+        seed_world(&pool).await;
+
+        let store = SqliteKbStore::new(pool.clone());
+        let kb = kb_with_state("wld_1", "ReadHero", 100);
+        let entry_id = kb.entry_id.clone();
+        store.insert_knowledge_entry(kb).await.unwrap();
+
+        let mut tx = pool.begin().await.unwrap();
+        let row = read_kb_state_in_tx(&mut tx, &entry_id)
+            .await
+            .expect("read in tx must succeed")
+            .expect("row must exist");
+        let missing = read_kb_state_in_tx(&mut tx, "kb_missing")
+            .await
+            .expect("read must not error");
+        tx.rollback().await.unwrap();
+
+        assert_eq!(row.block_type, "character");
+        assert_eq!(row.world_id, "wld_1");
+        let body: Value = serde_json::from_str(&row.body_json.expect("body present")).unwrap();
+        assert_eq!(body["state"]["character"]["current_hp"], 100);
+
+        assert!(missing.is_none(), "unknown id must read as None");
+    }
+
+    #[tokio::test]
+    async fn update_kb_state_in_tx_world_scope_rejects_foreign_world() {
+        let (pool, _dir) = fresh_pool().await;
+        seed_world(&pool).await;
+        // Second world for the foreign-target case.
+        sqlx::query!(
+            r#"INSERT INTO narrative_worlds
+                (world_id, workspace_id, owner_creator_id, title, slug, status, visibility, time_policy, metadata_json)
+               VALUES ('wld_2', 'wrk_test', 'ctr_test', 'Other World', 'other-world', 'active', 'private', 'manual', '{}')"#
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let store = SqliteKbStore::new(pool.clone());
+        let kb = kb_with_state("wld_1", "ScopedHero", 100);
+        let entry_id = kb.entry_id.clone();
+        store.insert_knowledge_entry(kb).await.unwrap();
+
+        let mut tx = pool.begin().await.unwrap();
+        let affected = update_kb_state_in_tx(&mut tx, &entry_id, "wld_2", "{}")
+            .await
+            .expect("world-scoped update must not error");
+        tx.rollback().await.unwrap();
+        assert_eq!(affected, 0, "foreign-world update must affect no rows");
+
+        // Body unchanged.
+        let body_json = stored_body_json(&pool, &entry_id)
+            .await
+            .expect("row still has body");
+        let body: Value = serde_json::from_str(&body_json).unwrap();
+        assert_eq!(body["state"]["character"]["current_hp"], 100);
+    }
+
+    #[tokio::test]
+    async fn update_kb_state_in_tx_rollback_restores_body() {
+        let (pool, _dir) = fresh_pool().await;
+        seed_world(&pool).await;
+
+        let store = SqliteKbStore::new(pool.clone());
+        let kb = kb_with_state("wld_1", "RollbackState", 100);
+        let entry_id = kb.entry_id.clone();
+        store.insert_knowledge_entry(kb).await.unwrap();
+
+        // Write a new body inside a TX, then roll back — the primitive's
+        // write must be rolled back with the caller's transaction.
+        let new_body = json!({"state": {"character": {"current_hp": 7}}});
+        let mut tx = pool.begin().await.unwrap();
+        let affected = update_kb_state_in_tx(&mut tx, &entry_id, "wld_1", &new_body.to_string())
+            .await
+            .expect("in-tx update must succeed");
+        assert_eq!(affected, 1);
+        tx.rollback().await.unwrap();
+
+        let body_json = stored_body_json(&pool, &entry_id)
+            .await
+            .expect("row still has body");
+        let body: Value = serde_json::from_str(&body_json).unwrap();
+        assert_eq!(
+            body["state"]["character"]["current_hp"], 100,
+            "rolled-back state update must not persist"
         );
     }
 
