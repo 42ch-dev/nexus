@@ -2,12 +2,16 @@
 //!
 //! Covers: insert/get/status transitions/list pagination + filter;
 //! unique run_id violation; adapter-style row with NULL run_id coexists.
+//!
+//! Task 2 fix wave adds: status-transition guards, rollback, no-op
+//! transition errors, empty-creator_world_ids filter behaviour.
 
 use nexus_local_db::compute_runs::{
     get_run, insert_run, list_runs, set_run_applied_in_tx, set_run_discarded, set_run_failed,
     set_run_succeeded, RunListFilters, RUN_STATUS_APPLIED, RUN_STATUS_DISCARDED, RUN_STATUS_FAILED,
     RUN_STATUS_RUNNING, RUN_STATUS_SUCCEEDED,
 };
+use nexus_local_db::LocalDbError;
 
 async fn setup_db() -> (sqlx::SqlitePool, tempfile::TempDir) {
     let dir = tempfile::tempdir().unwrap();
@@ -15,6 +19,16 @@ async fn setup_db() -> (sqlx::SqlitePool, tempfile::TempDir) {
     let pool = nexus_local_db::open_pool(&db_path).await.unwrap();
     nexus_local_db::run_migrations(&pool).await.unwrap();
     (pool, dir)
+}
+
+/// Helper: insert a run and transition it to succeeded, returning the run_id.
+async fn insert_and_succeed(pool: &sqlx::SqlitePool, world_id: &str, module_id: &str) -> String {
+    let run_id = insert_run(pool, world_id, module_id, None, None)
+        .await
+        .unwrap();
+    let affected = set_run_succeeded(&pool, &run_id, r#"{}"#).await.unwrap();
+    assert_eq!(affected, 1, "succeeded should affect exactly 1 row");
+    run_id
 }
 
 // ── insert + get ────────────────────────────────────────────────
@@ -76,7 +90,7 @@ async fn insert_with_module_version_and_params() {
     );
 }
 
-// ── status transitions ──────────────────────────────────────────
+// ── status transitions (happy path) ─────────────────────────────
 
 #[tokio::test]
 async fn transition_to_succeeded() {
@@ -86,7 +100,8 @@ async fn transition_to_succeeded() {
         .unwrap();
 
     let proposals = r#"{"state_delta":[]}"#;
-    set_run_succeeded(&pool, &run_id, proposals).await.unwrap();
+    let affected = set_run_succeeded(&pool, &run_id, proposals).await.unwrap();
+    assert_eq!(affected, 1);
 
     let row = get_run(&pool, &run_id)
         .await
@@ -106,7 +121,8 @@ async fn transition_to_failed() {
         .unwrap();
 
     let error = r#"{"code":"compute_fuel_exhausted"}"#;
-    set_run_failed(&pool, &run_id, error).await.unwrap();
+    let affected = set_run_failed(&pool, &run_id, error).await.unwrap();
+    assert_eq!(affected, 1);
 
     let row = get_run(&pool, &run_id)
         .await
@@ -132,9 +148,10 @@ async fn transition_to_applied_in_tx() {
 
     let accepted_at = "2026-07-31T12:00:00+00:00";
     let mut tx = pool.begin().await.unwrap();
-    set_run_applied_in_tx(&mut tx, &run_id, accepted_at)
+    let affected = set_run_applied_in_tx(&mut tx, &run_id, accepted_at)
         .await
         .unwrap();
+    assert_eq!(affected, 1);
     tx.commit().await.unwrap();
 
     let row = get_run(&pool, &run_id)
@@ -149,12 +166,10 @@ async fn transition_to_applied_in_tx() {
 #[tokio::test]
 async fn transition_to_discarded() {
     let (pool, _dir) = setup_db().await;
-    let run_id = insert_run(&pool, "world-6", "module-f", None, None)
-        .await
-        .unwrap();
+    let run_id = insert_and_succeed(&pool, "world-6", "module-f").await;
 
-    set_run_succeeded(&pool, &run_id, r#"{}"#).await.unwrap();
-    set_run_discarded(&pool, &run_id).await.unwrap();
+    let affected = set_run_discarded(&pool, &run_id).await.unwrap();
+    assert_eq!(affected, 1);
 
     let row = get_run(&pool, &run_id)
         .await
@@ -162,6 +177,141 @@ async fn transition_to_discarded() {
         .expect("row must exist");
     assert_eq!(row.status, RUN_STATUS_DISCARDED);
     assert!(row.updated_at.is_some());
+}
+
+// ── guard: transition from wrong status errors ──────────────────
+
+#[tokio::test]
+async fn set_succeeded_guard_requires_running() {
+    let (pool, _dir) = setup_db().await;
+    let run_id = insert_and_succeed(&pool, "world-g1", "mod-g1").await;
+    // Already succeeded — second succeed call must fail
+    let err = set_run_succeeded(&pool, &run_id, r#"{"x":1}"#)
+        .await
+        .unwrap_err();
+    assert_constraint_violation(&err, "not in 'running' status");
+}
+
+#[tokio::test]
+async fn set_failed_guard_requires_running() {
+    let (pool, _dir) = setup_db().await;
+    let run_id = insert_run(&pool, "world-g2", "mod-g2", None, None)
+        .await
+        .unwrap();
+    set_run_failed(&pool, &run_id, r#"{"e":1}"#).await.unwrap();
+    // Already failed — second fail must error
+    let err = set_run_failed(&pool, &run_id, r#"{"e":2}"#)
+        .await
+        .unwrap_err();
+    assert_constraint_violation(&err, "not in 'running' status");
+}
+
+#[tokio::test]
+async fn set_applied_guard_requires_succeeded() {
+    let (pool, _dir) = setup_db().await;
+    // Running run — cannot apply directly
+    let run_id = insert_run(&pool, "world-g3", "mod-g3", None, None)
+        .await
+        .unwrap();
+    let accepted_at = "2026-07-31T12:00:00+00:00";
+    let mut tx = pool.begin().await.unwrap();
+    let err = set_run_applied_in_tx(&mut tx, &run_id, accepted_at)
+        .await
+        .unwrap_err();
+    // TX is dirty — rollback is fine
+    let _ = tx.rollback().await;
+    assert_constraint_violation(&err, "not in 'succeeded' status");
+}
+
+#[tokio::test]
+async fn set_applied_guard_requires_succeeded_after_failed() {
+    let (pool, _dir) = setup_db().await;
+    let run_id = insert_run(&pool, "world-g3b", "mod-g3b", None, None)
+        .await
+        .unwrap();
+    set_run_failed(&pool, &run_id, r#"{}"#).await.unwrap();
+    // Failed → cannot accept
+    let accepted_at = "2026-07-31T12:00:00+00:00";
+    let mut tx = pool.begin().await.unwrap();
+    let err = set_run_applied_in_tx(&mut tx, &run_id, accepted_at)
+        .await
+        .unwrap_err();
+    let _ = tx.rollback().await;
+    assert_constraint_violation(&err, "not in 'succeeded' status");
+}
+
+#[tokio::test]
+async fn set_discarded_guard_requires_succeeded() {
+    let (pool, _dir) = setup_db().await;
+    // Running run — cannot discard directly
+    let run_id = insert_run(&pool, "world-g4", "mod-g4", None, None)
+        .await
+        .unwrap();
+    let err = set_run_discarded(&pool, &run_id).await.unwrap_err();
+    assert_constraint_violation(&err, "not in 'succeeded' status");
+}
+
+#[tokio::test]
+async fn set_discarded_on_already_discarded_errors() {
+    let (pool, _dir) = setup_db().await;
+    let run_id = insert_and_succeed(&pool, "world-g5", "mod-g5").await;
+    set_run_discarded(&pool, &run_id).await.unwrap();
+    // Second discard → error
+    let err = set_run_discarded(&pool, &run_id).await.unwrap_err();
+    assert_constraint_violation(&err, "not in 'succeeded' status");
+}
+
+// ── guard: transition on nonexistent run_id errors ──────────────
+
+#[tokio::test]
+async fn transition_nonexistent_run_errors() {
+    let (pool, _dir) = setup_db().await;
+    let nonexistent = "run_00000000-0000-0000-0000-000000000000";
+
+    let err = set_run_succeeded(&pool, nonexistent, r#"{}"#)
+        .await
+        .unwrap_err();
+    assert_constraint_violation(&err, "not in 'running' status");
+
+    let err = set_run_failed(&pool, nonexistent, r#"{}"#)
+        .await
+        .unwrap_err();
+    assert_constraint_violation(&err, "not in 'running' status");
+
+    let err = set_run_discarded(&pool, nonexistent).await.unwrap_err();
+    assert_constraint_violation(&err, "not in 'succeeded' status");
+
+    let mut tx = pool.begin().await.unwrap();
+    let err = set_run_applied_in_tx(&mut tx, nonexistent, "2026-07-31T00:00:00+00:00")
+        .await
+        .unwrap_err();
+    let _ = tx.rollback().await;
+    assert_constraint_violation(&err, "not in 'succeeded' status");
+}
+
+// ── rollback: applied_in_tx rolls back correctly ────────────────
+
+#[tokio::test]
+async fn applied_in_tx_rollback_preserves_status() {
+    let (pool, _dir) = setup_db().await;
+    let run_id = insert_and_succeed(&pool, "world-rb", "mod-rb").await;
+
+    let accepted_at = "2026-07-31T12:00:00+00:00";
+    let mut tx = pool.begin().await.unwrap();
+    let affected = set_run_applied_in_tx(&mut tx, &run_id, accepted_at)
+        .await
+        .unwrap();
+    assert_eq!(affected, 1);
+
+    // Rollback — status must revert to succeeded.
+    // (We cannot verify inside the tx via get_run because pool reads from a
+    // different connection and WAL mode hides uncommitted writes.)
+    tx.rollback().await.unwrap();
+
+    let row = get_run(&pool, &run_id).await.unwrap().unwrap();
+    assert_eq!(row.status, RUN_STATUS_SUCCEEDED);
+    // accepted_at must NOT have been persisted
+    assert!(row.accepted_at.is_none());
 }
 
 // ── list + pagination ───────────────────────────────────────────
@@ -276,6 +426,21 @@ async fn list_runs_filter_by_creator_world_ids() {
 }
 
 #[tokio::test]
+async fn list_runs_empty_creator_world_ids_returns_nothing() {
+    let (pool, _dir) = setup_db().await;
+
+    insert_run(&pool, "w-1", "mod-x", None, None).await.unwrap();
+    insert_run(&pool, "w-2", "mod-x", None, None).await.unwrap();
+
+    let filters = RunListFilters {
+        creator_world_ids: Some(vec![]),
+        ..Default::default()
+    };
+    let (items, _) = list_runs(&pool, &filters, None, 10).await.unwrap();
+    assert!(items.is_empty(), "empty set should match nothing");
+}
+
+#[tokio::test]
 async fn list_runs_empty() {
     let (pool, _dir) = setup_db().await;
     let filters = RunListFilters::default();
@@ -346,28 +511,17 @@ async fn adapter_row_with_null_run_id_coexists() {
     assert_eq!(items.len(), 1);
 }
 
-// ── set_run_succeeded clears error_json ─────────────────────────
+// ── helpers ─────────────────────────────────────────────────────
 
-#[tokio::test]
-async fn succeeded_clears_error_json() {
-    let (pool, _dir) = setup_db().await;
-    let run_id = insert_run(&pool, "world-e", "mod-e", None, None)
-        .await
-        .unwrap();
-
-    // Mark failed first
-    set_run_failed(&pool, &run_id, r#"{"code":"test"}"#)
-        .await
-        .unwrap();
-    let row = get_run(&pool, &run_id).await.unwrap().unwrap();
-    assert!(row.error_json.is_some());
-
-    // Then mark succeeded — error should be cleared
-    set_run_succeeded(&pool, &run_id, r#"{"ok":true}"#)
-        .await
-        .unwrap();
-    let row = get_run(&pool, &run_id).await.unwrap().unwrap();
-    assert_eq!(row.status, RUN_STATUS_SUCCEEDED);
-    assert!(row.error_json.is_none());
-    assert!(row.proposals_json.is_some());
+/// Assert `err` is a `ConstraintViolation` whose message contains `fragment`.
+fn assert_constraint_violation(err: &LocalDbError, fragment: &str) {
+    let msg = format!("{err}");
+    assert!(
+        msg.contains("constraint violation"),
+        "expected ConstraintViolation, got: {msg}"
+    );
+    assert!(
+        msg.contains(fragment),
+        "expected message containing '{fragment}', got: {msg}"
+    );
 }

@@ -47,6 +47,14 @@ pub struct RunListFilters {
 
 /// Insert a new compute run row and return its generated `run_id`.
 ///
+/// The `entry_id` column is set to `''` (empty string) because the
+/// original schema defines it as `TEXT NOT NULL`, yet direct-lane rows
+/// have no spoke entry.  Adapter reads key on `session_id`, never
+/// `entry_id`, and `session_id` is NULL for direct-lane rows — SQL NULL
+/// semantics guarantee the adapter's `WHERE session_id = ?` predicates
+/// never match these rows.  `''` is also distinguishable from valid
+/// KB entry ids (UUIDs), so it cannot leak into spoke-adapter reads.
+///
 /// # Errors
 /// Returns [`LocalDbError`] on database failure.
 pub async fn insert_run(
@@ -121,100 +129,158 @@ pub async fn get_run(
 
 /// Update a run to `succeeded` status with proposals.
 ///
-/// Clears `error_json` (set to NULL) so a retry-after-failure produces a
-/// clean row. Sets `updated_at` to now.
+/// Clears `error_json` (set to NULL) and sets `updated_at` to now.
+/// Only fires when the run is in `running` status — this prevents
+/// a completed or discarded run from being overwritten.
+///
+/// Returns the number of affected rows (1 on success).
 ///
 /// # Errors
-/// Returns [`LocalDbError`] on database failure.
+/// Returns [`LocalDbError`] on database failure, or
+/// [`LocalDbError::ConstraintViolation`] when the run does not exist
+/// or is not in `running` status (0 rows affected).
 pub async fn set_run_succeeded(
     pool: &SqlitePool,
     run_id: &str,
     proposals_json: &str,
-) -> Result<(), LocalDbError> {
+) -> Result<u64, LocalDbError> {
     let updated_at = chrono::Utc::now().to_rfc3339();
-    sqlx::query!(
+    let result = sqlx::query!(
         "UPDATE compute_sessions \
          SET status = 'succeeded', proposals_json = ?, error_json = NULL, updated_at = ? \
-         WHERE run_id = ?",
+         WHERE run_id = ? AND status = 'running'",
         proposals_json,
         updated_at,
         run_id,
     )
     .execute(pool)
     .await?;
-    Ok(())
+    let affected = result.rows_affected();
+    if affected == 0 {
+        return Err(LocalDbError::ConstraintViolation {
+            table: "compute_sessions".to_string(),
+            constraint: format!(
+                "run {run_id} is not in 'running' status — cannot transition to 'succeeded'"
+            ),
+        });
+    }
+    Ok(affected)
 }
 
 /// Update a run to `failed` status with error details.
 ///
 /// Sets `error_json`, clears `proposals_json` (set to NULL), and sets
-/// `updated_at` to now.
+/// `updated_at` to now.  Only fires when the run is in `running` status
+/// — this prevents a completed or discarded run from being overwritten.
+///
+/// Returns the number of affected rows (1 on success).
 ///
 /// # Errors
-/// Returns [`LocalDbError`] on database failure.
+/// Returns [`LocalDbError`] on database failure, or
+/// [`LocalDbError::ConstraintViolation`] when the run does not exist
+/// or is not in `running` status (0 rows affected).
 pub async fn set_run_failed(
     pool: &SqlitePool,
     run_id: &str,
     error_json: &str,
-) -> Result<(), LocalDbError> {
+) -> Result<u64, LocalDbError> {
     let updated_at = chrono::Utc::now().to_rfc3339();
-    sqlx::query!(
+    let result = sqlx::query!(
         "UPDATE compute_sessions \
          SET status = 'failed', error_json = ?, proposals_json = NULL, updated_at = ? \
-         WHERE run_id = ?",
+         WHERE run_id = ? AND status = 'running'",
         error_json,
         updated_at,
         run_id,
     )
     .execute(pool)
     .await?;
-    Ok(())
+    let affected = result.rows_affected();
+    if affected == 0 {
+        return Err(LocalDbError::ConstraintViolation {
+            table: "compute_sessions".to_string(),
+            constraint: format!(
+                "run {run_id} is not in 'running' status — cannot transition to 'failed'"
+            ),
+        });
+    }
+    Ok(affected)
 }
 
 /// Update a run to `applied` status within an existing transaction.
 ///
-/// Sets `accepted_at` and `updated_at`. Caller owns the transaction
-/// lifecycle (`begin` / `commit` / `rollback`).
+/// Sets `accepted_at` and `updated_at`.  Only fires when the run is in
+/// `succeeded` status — this is the atomic guard that prevents TOCTOU
+/// races: two concurrent accepts both pass a pre-check but only one
+/// UPDATE actually matches.
+///
+/// Caller owns the transaction lifecycle (`begin` / `commit` / `rollback`).
+///
+/// Returns the number of affected rows (1 on success).
 ///
 /// # Errors
-/// Returns [`LocalDbError`] on database failure.
+/// Returns [`LocalDbError`] on database failure, or
+/// [`LocalDbError::ConstraintViolation`] when the run does not exist
+/// or is not in `succeeded` status (0 rows affected — already accepted,
+/// discarded, or still running).
 pub async fn set_run_applied_in_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     run_id: &str,
     accepted_at: &str,
-) -> Result<(), LocalDbError> {
+) -> Result<u64, LocalDbError> {
     let updated_at = chrono::Utc::now().to_rfc3339();
-    sqlx::query!(
+    let result = sqlx::query!(
         "UPDATE compute_sessions \
          SET status = 'applied', accepted_at = ?, updated_at = ? \
-         WHERE run_id = ?",
+         WHERE run_id = ? AND status = 'succeeded'",
         accepted_at,
         updated_at,
         run_id,
     )
     .execute(&mut **tx)
     .await?;
-    Ok(())
+    let affected = result.rows_affected();
+    if affected == 0 {
+        return Err(LocalDbError::ConstraintViolation {
+            table: "compute_sessions".to_string(),
+            constraint: format!("run {run_id} is not in 'succeeded' status — cannot accept"),
+        });
+    }
+    Ok(affected)
 }
 
 /// Update a run to `discarded` status.
 ///
-/// Sets `updated_at` to now.
+/// Sets `updated_at` to now.  Only fires when the run is in `succeeded`
+/// status — matches the route spec §2.4 prescribed SQL.  This prevents
+/// double-discard TOCTOU races.
+///
+/// Returns the number of affected rows (1 on success).
 ///
 /// # Errors
-/// Returns [`LocalDbError`] on database failure.
-pub async fn set_run_discarded(pool: &SqlitePool, run_id: &str) -> Result<(), LocalDbError> {
+/// Returns [`LocalDbError`] on database failure, or
+/// [`LocalDbError::ConstraintViolation`] when the run does not exist
+/// or is not in `succeeded` status (0 rows affected — already discarded,
+/// accepted, or still running).
+pub async fn set_run_discarded(pool: &SqlitePool, run_id: &str) -> Result<u64, LocalDbError> {
     let updated_at = chrono::Utc::now().to_rfc3339();
-    sqlx::query!(
+    let result = sqlx::query!(
         "UPDATE compute_sessions \
          SET status = 'discarded', updated_at = ? \
-         WHERE run_id = ?",
+         WHERE run_id = ? AND status = 'succeeded'",
         updated_at,
         run_id,
     )
     .execute(pool)
     .await?;
-    Ok(())
+    let affected = result.rows_affected();
+    if affected == 0 {
+        return Err(LocalDbError::ConstraintViolation {
+            table: "compute_sessions".to_string(),
+            constraint: format!("run {run_id} is not in 'succeeded' status — cannot discard"),
+        });
+    }
+    Ok(affected)
 }
 
 /// List compute runs with optional filters and key-based cursor pagination.
@@ -223,6 +289,19 @@ pub async fn set_run_discarded(pool: &SqlitePool, run_id: &str) -> Result<(), Lo
 /// when another page may exist (the caller should pass it back as `cursor`).
 /// Rows are ordered by `run_id` ascending; the cursor is the last-seen
 /// `run_id`.
+///
+/// Callers should pass `limit >= 1`.  When `limit == 0` the `limit+1`
+/// trick still fetches one row to detect `has_more`, but `take(0)` yields
+/// zero items and `next_cursor` will be `None` even though a row exists
+/// — treat `limit = 0` as a caller bug.
+///
+/// # Filter: `creator_world_ids`
+///
+/// - `None` (or absent) — no world-id filter; all worlds included.
+/// - `Some(vec![])` — an empty set: **no world can match**, so the
+///   result is always empty.  This is explicit — the caller must pass
+///   `None` to skip the filter.
+/// - `Some(vec!["w1", "w2"])` — restricts results to those worlds.
 ///
 /// # Panics
 ///
@@ -241,8 +320,9 @@ pub async fn list_runs(
     // varies by filter presence.  Each push_bind parameterises the value so
     // the SQL is parameterised, not string-interpolated.
     // SAFETY: dynamic SQL — QueryBuilder constructs WHERE clauses from
-    // checked filter enum values; every value is bound as a parameter;
-    // the base query and ORDER BY / LIMIT are static.
+    // parameterised filter values; every user-supplied value goes through
+    // `push_bind` (parameterised); the SQL skeleton, ORDER BY, and LIMIT
+    // clause are static.  No string interpolation of filter values.
     let mut builder = sqlx::QueryBuilder::new(
         "SELECT run_id, world_id, module_id, module_version, status, \
          proposals_json, error_json, created_at, updated_at, accepted_at, \
@@ -271,7 +351,12 @@ pub async fn list_runs(
     }
 
     if let Some(ref world_ids) = filters.creator_world_ids {
-        if !world_ids.is_empty() {
+        if world_ids.is_empty() {
+            // Empty set explicitly matches nothing (definitive no-op).
+            // Without this the IN clause is skipped and every world matches,
+            // which is surprising for an explicit `Some(vec![])`.
+            builder.push(" AND 1 = 0");
+        } else {
             builder.push(" AND world_id IN (");
             let mut separated = builder.separated(", ");
             for wid in world_ids {
@@ -283,6 +368,8 @@ pub async fn list_runs(
 
     builder.push(" ORDER BY run_id LIMIT ");
     // Fetch limit + 1 to detect `has_more` without a second query.
+    // When limit == 0 this fetches 1 row: items will be empty but the
+    // row exists — callers should pass limit >= 1 (see doc above).
     builder.push_bind(i64::from(limit) + 1);
 
     let rows = builder
