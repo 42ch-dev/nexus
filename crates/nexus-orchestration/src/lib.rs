@@ -5,6 +5,7 @@ pub mod auto_chain;
 pub mod auto_chronology;
 pub mod capability;
 pub mod completion_lock;
+pub mod compute_input_builder;
 pub mod embedded_rules;
 pub mod embedded_skills;
 pub mod engine;
