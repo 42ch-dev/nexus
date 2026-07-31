@@ -208,6 +208,140 @@ pub async fn list_timeline_events_scoped(
         .collect())
 }
 
+/// Read a page of timeline events for a world (V1.147 P2 T1 route read
+/// primitive).
+///
+/// Serves `GET /v1/daemon/worlds/:world_id/timeline/events`. Unlike
+/// [`list_timeline_events_scoped`] (orchestrator read path, returns domain
+/// [`TimelineEvent`]s without the JSON extension columns), this page read
+/// returns the full row surface the daemon wire DTO needs — including
+/// `metadata_json` and `extensions_nexus_json` — and applies optional
+/// `status` / `event_type` equality filters plus a keyset cursor on
+/// `(branch_id, sequence_no)`.
+///
+/// # Filter semantics
+///
+/// - `world_id` — always required (`WHERE world_id = ?`).
+/// - `branch_id` — optional strict equality. When absent, rows from all
+///   branches are returned ordered by `(branch_id, sequence_no)`; the keyset
+///   cursor then carries the composite pair (matching the
+///   `UNIQUE (world_id, branch_id, sequence_no)` index).
+/// - `status` / `event_type` — optional strict equality.
+/// - `cursor` — `Some((branch_id, sequence_no))` exclusive keyset; the caller
+///   is responsible for the opaque cursor encoding/validation.
+/// - `limit` — max rows to return (caller typically requests `limit + 1` to
+///   detect `has_more`).
+///
+/// # Ordering
+///
+/// `sequence_no ASC` within the branch; across branches
+/// `branch_id ASC, sequence_no ASC` — both index-backed by
+/// `idx_narrative_timeline_events_world_branch_sequence`.
+///
+/// # Errors
+///
+/// Returns [`NarrativeError::Storage`] on database failure.
+pub async fn list_timeline_events_page(
+    pool: &SqlitePool,
+    world_id: &str,
+    branch_id: Option<&str>,
+    status: Option<&str>,
+    event_type: Option<&str>,
+    cursor: Option<(&str, i64)>,
+    limit: i64,
+) -> Result<Vec<TimelineEventPageRow>, NarrativeError> {
+    // SAFETY: static column list; the only dynamic fragments are optional
+    // `branch_id` / `status` / `event_type` equalities and the keyset cursor
+    // predicate — all bind-parameter driven (no user-controlled SQL), same
+    // runtime-query pattern as `list_timeline_events_scoped` above.
+    let has_branch = branch_id.is_some();
+    let has_status = status.is_some();
+    let has_event_type = event_type.is_some();
+
+    let mut sql = String::from(
+        r"SELECT
+                timeline_event_id,
+                world_id,
+                branch_id,
+                event_type,
+                status,
+                sequence_no,
+                title,
+                summary,
+                caused_by_event_ids_json,
+                affected_key_block_ids_json,
+                source_command_id,
+                metadata_json,
+                extensions_nexus_json,
+                created_at
+            FROM narrative_timeline_events
+            WHERE world_id = ?",
+    );
+    if has_branch {
+        sql.push_str(" AND branch_id = ?");
+    }
+    if has_status {
+        sql.push_str(" AND status = ?");
+    }
+    if has_event_type {
+        sql.push_str(" AND event_type = ?");
+    }
+    if cursor.is_some() {
+        if has_branch {
+            sql.push_str(" AND sequence_no > ?");
+        } else {
+            // Composite keyset: strictly after (cursor_branch, cursor_seq).
+            sql.push_str(" AND (branch_id > ? OR (branch_id = ? AND sequence_no > ?))");
+        }
+    }
+    sql.push_str(if has_branch {
+        " ORDER BY sequence_no ASC LIMIT ?"
+    } else {
+        " ORDER BY branch_id ASC, sequence_no ASC LIMIT ?"
+    });
+
+    let mut q = sqlx::query_as::<_, TimelineEventPageRow>(&sql).bind(world_id);
+    if let Some(bid) = branch_id {
+        q = q.bind(bid);
+    }
+    if let Some(st) = status {
+        q = q.bind(st);
+    }
+    if let Some(et) = event_type {
+        q = q.bind(et);
+    }
+    if let Some((cursor_branch, cursor_seq)) = cursor {
+        if has_branch {
+            q = q.bind(cursor_seq);
+        } else {
+            q = q.bind(cursor_branch).bind(cursor_branch).bind(cursor_seq);
+        }
+    }
+    q = q.bind(limit);
+
+    q.fetch_all(pool).await.map_err(|e| db_err(&e))
+}
+
+/// Full row surface for the daemon timeline-events page read, including the
+/// JSON extension columns ([`list_timeline_events_page`]).
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub struct TimelineEventPageRow {
+    pub timeline_event_id: String,
+    pub world_id: String,
+    pub branch_id: String,
+    pub event_type: String,
+    pub status: String,
+    pub sequence_no: i64,
+    pub title: Option<String>,
+    pub summary: Option<String>,
+    pub caused_by_event_ids_json: Option<String>,
+    pub affected_key_block_ids_json: Option<String>,
+    pub source_command_id: Option<String>,
+    pub metadata_json: Option<String>,
+    pub extensions_nexus_json: Option<String>,
+    pub created_at: String,
+}
+
 // Row type matching the narrative_worlds DDL.
 #[derive(Debug, Clone, sqlx::FromRow)]
 struct WorldRow {

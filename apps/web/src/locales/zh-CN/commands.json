@@ -14,7 +14,8 @@
     "navigate": "导航",
     "strategy": "策略",
     "outline": "大纲",
-    "world-kb": "世界知识库"
+    "world-kb": "世界知识库",
+    "compute": "计算"
   },
   "go": {
     "timeline": {
@@ -102,6 +103,26 @@
         "list": "列表",
         "alt-view": "替代视图",
         "switch": "切换"
+      }
+    }
+  },
+  "compute": {
+    "run-module": {
+      "label": "运行模块…",
+      "keywords": {
+        "compute": "计算",
+        "studio": "运行工作室",
+        "invoke": "调用",
+        "wasm": "wasm"
+      }
+    },
+    "run-module-on-world": {
+      "label": "在世界中运行模块…",
+      "keywords": {
+        "timeline": "时间轴",
+        "world": "世界",
+        "compute": "计算",
+        "prefill": "预填"
       }
     }
   }

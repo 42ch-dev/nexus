@@ -440,7 +440,26 @@ pub async fn accept_run(
             }
         }
         let event_type = "compute_result";
-        let result = narrative_write::append_event_with_extensions_in_tx(
+        // Canon (not provisional): an accepted Run is author-committed world
+        // truth and the P2 Timeline projection reads `canon` events only —
+        // dogfood AC-I3.3 (node must appear on the Narrative layer after
+        // Accept). Discard/failed paths never reach this write.
+        // QC S-affected: persist the proposal's affected entries so the P2
+        // inspector's "Affected knowledge" section resolves them against the
+        // KB graph (empty proposals → NULL column, honest).
+        let affected_json = if evt.affected_key_block_ids.is_empty() {
+            None
+        } else {
+            Some(
+                serde_json::to_string(&evt.affected_key_block_ids).map_err(|e| {
+                    NexusApiError::Internal {
+                        code: "SERIALIZATION_ERROR".to_string(),
+                        message: format!("serialize affected_key_block_ids: {e}"),
+                    }
+                })?,
+            )
+        };
+        let result = narrative_write::append_event_canon_with_extensions_in_tx(
             &mut tx,
             &run.world_id,
             &branch_id,
@@ -448,6 +467,7 @@ pub async fn accept_run(
             evt.title.as_deref().map(std::string::String::as_str),
             evt.summary.as_deref(),
             &provenance,
+            affected_json.as_deref(),
         )
         .await
         .map_err(|e| NexusApiError::Internal {

@@ -1080,6 +1080,16 @@ fn build_schema_map() -> Vec<SchemaEntry> {
             Strict,
             TimelineOverviewResponse
         ),
+        entry!(
+            "schemas/daemon-api/timeline/timeline-event-info.schema.json",
+            Strict,
+            TimelineEventInfo
+        ),
+        entry!(
+            "schemas/daemon-api/timeline/list-timeline-events-response.schema.json",
+            Strict,
+            ListTimelineEventsResponse
+        ),
     ]
 }
 

@@ -48,20 +48,21 @@
  * per layer; Task 5 owns the breadcrumb cross-layer affordance.
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useCallback } from 'react';
+import { useCallback, useContext } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link, useBeforeUnload, useNavigate, useSearchParams } from 'react-router-dom';
 import type { Node } from '@xyflow/react';
 import { useQueries } from '@tanstack/react-query';
-import { Info } from 'lucide-react';
+import { Cpu, Info } from 'lucide-react';
 
 import { CanvasShell } from '@/components/canvas/canvas-shell';
 import { LayerBreadcrumb } from '@/components/canvas/layer-breadcrumb';
 import { useCanvasSurface, type CanvasSurfaceQueryResult } from '@/components/canvas/use-canvas-surface';
 import { SemanticZoomBridge } from '@/components/canvas/use-semantic-zoom';
 import { useWorldKbGraph, usePatchWorldKbEntity } from '@/lib/canvas/use-world-kb-data';
-import { flattenPages, useWorks } from '@/api/queries';
+import { flattenPages, useComputeModules, useWorldTimelineEvents, useWorks } from '@/api/queries';
 import { useNexusClient } from '@/lib/client-context';
+import { SettingsModalContext } from '@/components/layout/settings-modal-context';
 import { LoadingState, ErrorState, EmptyState } from '@/components/ui/states';
 import { Button } from '@42ch/nexus-ui';
 import type {
@@ -88,6 +89,17 @@ import { filterTimelineEntityNodes } from './nle-timeline-projection';
 export interface TimelineCanvasProps {
   worldId: string;
 }
+
+/**
+ * V1.147 P2 T3 — hard ceiling for the auto-fetched compute-event projection
+ * (review F1). The canvas consumes the events log as a SNAPSHOT source — the
+ * complete canon `compute_result` projection, not a browse list — so remaining
+ * pages are auto-fetched while `hasNextPage`. This constant is the safety
+ * valve: a pathological World log (> 500 events) stops fetching and logs a
+ * dev warning instead of issuing unbounded refetches. Pages beyond the cap are
+ * honestly not rendered (the projection renders only what it fetched).
+ */
+const TIMELINE_EVENTS_PROJECTION_CAP = 500;
 
 /**
  * Build the V1.73 `WorldKbPatchEntityRequest` envelope from the adapter's
@@ -151,6 +163,91 @@ export function TimelineCanvas({ worldId }: TimelineCanvasProps) {
   const navigate = useNavigate();
   const graph = useWorldKbGraph(worldId);
   const patchEntity = usePatchWorldKbEntity(worldId);
+
+  // ── V1.147 P2 T3 — compute events + module registry ──────────────────────
+  //
+  // The Narrative projection merges the World's canon compute_result log
+  // events (T1 route) with the KB graph. The events query hard-filters
+  // `event_type=compute_result&status=canon` and omits `branch_id` so the
+  // daemon resolves the World's current branch (the canvas's existing
+  // world-state source). Accept invalidation flows through
+  // `queryKeys.timeline.all` (already wired in `useAcceptRun`), so an
+  // accepted Run's node appears without a manual refresh.
+  const timelineEvents = useWorldTimelineEvents(worldId);
+  const computeModules = useComputeModules();
+
+  const eventsList = useMemo(
+    () => flattenPages(timelineEvents.data),
+    [timelineEvents.data],
+  );
+
+  // Review F1 — bounded auto-fetch of remaining events pages. The projection
+  // is a snapshot source (the canvas needs the COMPLETE canon compute_result
+  // log, not a browsable list), so pages are fetched automatically while
+  // `hasNextPage`, up to the hard `TIMELINE_EVENTS_PROJECTION_CAP` (500).
+  // The effect fires at most once per resolved page: its deps change only
+  // when a page lands (`fetchNextPage` is stable; `hasNextPage` flips when
+  // the last page resolves), so there is no refetch loop.
+  useEffect(() => {
+    if (!timelineEvents.hasNextPage) return;
+    if (eventsList.length >= TIMELINE_EVENTS_PROJECTION_CAP) {
+      // Cap reached — stop fetching and warn in dev. The projection renders
+      // the pages it has; older events stay hidden until the cap is raised
+      // (or the log is pruned). `simplify:` 500 is a deliberate ceiling for
+      // V1.147; a virtualized canvas would lift it without UI churn.
+      if (import.meta.env.DEV) {
+        console.warn(
+          `[timeline] compute-event projection capped at ${TIMELINE_EVENTS_PROJECTION_CAP} ` +
+            `events (has_more still true for world ${worldId}); older events are not rendered.`,
+        );
+      }
+      return;
+    }
+    void timelineEvents.fetchNextPage();
+  }, [timelineEvents.hasNextPage, timelineEvents.fetchNextPage, eventsList.length, worldId]);
+
+  // Module display names for compute node provenance (module_id fallback
+  // when the registry has not loaded the module — honest for preset-path
+  // modules absent locally).
+  const computeModuleNames = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const m of computeModules.data ?? []) map.set(m.module_id, m.name);
+    return map;
+  }, [computeModules.data]);
+
+  // ── V1.147 P2 T3 — Settings → Modules Run Studio deep links ─────────────
+  //
+  // The Run Module entry (toolbar + empty-state) and the compute inspector's
+  // Open Run hand-off both open the Settings modal with the Modules section.
+  // The context is consumed null-safely: surfaces rendered outside
+  // `SettingsModalProvider` (isolated canvas tests) degrade to no entry
+  // chrome; production always provides the provider (App wraps AppRoutes).
+  const settingsModal = useContext(SettingsModalContext);
+
+  // Timeline-scoped Run Studio: World pre-filled via `?world=` (behavior
+  // spec §1 P2 — context pre-fill + entry chrome, not a second studio).
+  const onRunModule = useCallback(() => {
+    settingsModal?.openSettings(
+      'modules',
+      undefined,
+      undefined,
+      `?world=${encodeURIComponent(worldId)}`,
+    );
+  }, [settingsModal, worldId]);
+
+  // Open Run from a Compute result node → Settings → Modules run detail
+  // (deep link selects the module + opens the run inspector).
+  const onOpenRun = useCallback(
+    (runId: string, moduleId: string) => {
+      settingsModal?.openSettings(
+        'modules',
+        undefined,
+        undefined,
+        `?module=${encodeURIComponent(moduleId)}&run=${encodeURIComponent(runId)}`,
+      );
+    },
+    [settingsModal],
+  );
 
   // ── V1.123 P3 Task 4 — bound Work (cross-surface navigation) ───────────
   //
@@ -339,9 +436,14 @@ export function TimelineCanvas({ worldId }: TimelineCanvasProps) {
   // adapter]` memo re-projects (semantic discrete swap per layer-feel §3.1).
   // The ctxRef stays mutable; the adapter just captures the new layer
   // value, so this is a cheap factory re-run, not a full layout rebuild.
+  //
+  // V1.147 P2 T3 — the adapter also rebuilds when the compute events array or
+  // the module-name map change (data-driven re-projection: `useCanvasSurface`
+  // memoises on `[graph, adapter]`, so a new adapter identity re-runs the
+  // Narrative merge with the fresh events).
   const adapter = useMemo(
-    () => createTimelineCanvasAdapter(ctxRef, activeLayer),
-    [activeLayer],
+    () => createTimelineCanvasAdapter(ctxRef, activeLayer, eventsList, computeModuleNames),
+    [activeLayer, eventsList, computeModuleNames],
   );
 
   const surface = useCanvasSurface(adapter, surfaceQuery);
@@ -482,6 +584,10 @@ export function TimelineCanvas({ worldId }: TimelineCanvasProps) {
     // honest scope cut).
     boundWorkId,
     onViewInWorkTimeline: boundWorkId ? onViewInWorkTimeline : undefined,
+    // V1.147 P2 T3 — Open Run hand-off from the compute node inspector.
+    // Wired only when the Settings modal context exists (production always
+    // provides it; isolated canvas tests degrade to read-only inspectors).
+    onOpenRun: settingsModal ? onOpenRun : undefined,
   };
 
   // When the user navigates to a different node, clear a stale validation
@@ -504,8 +610,13 @@ export function TimelineCanvas({ worldId }: TimelineCanvasProps) {
     );
   }
 
+  // V1.147 P2 T3 — emptiness spans BOTH projection families: the KB graph AND
+  // the merged compute log events. A World whose only Narrative content is an
+  // accepted compute Run must render its Compute result node, not the
+  // global empty state.
   const isEmpty =
-    !graph.data || (graph.data.entities ?? []).length === 0;
+    ((!graph.data || (graph.data.entities ?? []).length === 0) &&
+      eventsList.length === 0);
 
   // V1.123 P1 T5 — Brief-empty detection. The active layer is Brief but the
   // graph carries zero `block_type=era` entities (the user clicked the Brief
@@ -546,6 +657,7 @@ export function TimelineCanvas({ worldId }: TimelineCanvasProps) {
         activeLayer={activeLayer}
         onLayerChange={handleLayerChange}
         showLayerSwitcher={!isEmpty}
+        onRunModule={onRunModule}
       />
 
       {validationBanner && validationBanner.length > 0 ? (
@@ -580,6 +692,19 @@ export function TimelineCanvas({ worldId }: TimelineCanvasProps) {
         <EmptyState
           title={t('timeline.empty.title')}
           description={t('timeline.empty.description')}
+          action={
+            settingsModal ? (
+              <Button
+                type="button"
+                variant="primary"
+                data-testid="timeline-run-module-empty-cta"
+                onClick={onRunModule}
+              >
+                <Cpu className="h-4 w-4" aria-hidden />
+                {t('timeline.runModuleEntry.button')}
+              </Button>
+            ) : undefined
+          }
         />
       ) : isBriefEmpty ? (
         <BriefEmptyState onSwitchToNarrative={() => handleLayerChange('narrative')} />
@@ -690,6 +815,7 @@ function TimelineCanvasHeader({
   activeLayer,
   onLayerChange,
   showLayerSwitcher,
+  onRunModule,
 }: {
   worldId: string;
   showAltView: boolean;
@@ -702,6 +828,13 @@ function TimelineCanvasHeader({
    * when the graph is empty (Task 5 owns the per-layer empty-state copy).
    */
   showLayerSwitcher: boolean;
+  /**
+   * V1.147 P2 T3 — Run Module entry (behavior spec §1 P2 hero shortcut).
+   * Opens the shared Run Studio (Settings → Modules) with the World
+   * pre-filled. The orchestrator omits it when the Settings modal context
+   * is absent (isolated canvas tests).
+   */
+  onRunModule?: () => void;
 }) {
   const { t } = useTranslation('canvas');
   return (
@@ -758,6 +891,23 @@ function TimelineCanvasHeader({
         >
           {showAltView ? t('timeline.header.showGraph') : t('timeline.header.showList')}
         </button>
+        {/* V1.147 P2 T3 — Run Module entry (hero shortcut per behavior spec
+            §1 P2). Opens the shared Run Studio with the World pre-filled;
+            the Cpu icon marks the compute affordance family (spec §5
+            iconography). */}
+        {onRunModule ? (
+          <Button
+            type="button"
+            variant="secondary"
+            size="small"
+            onClick={onRunModule}
+            data-testid="timeline-run-module-entry"
+            aria-label={t('timeline.runModuleEntry.aria')}
+          >
+            <Cpu className="h-3.5 w-3.5" aria-hidden />
+            {t('timeline.runModuleEntry.button')}
+          </Button>
+        ) : null}
         <nav
           className="flex flex-wrap items-center gap-2"
           aria-label={t('timeline.header.peerNavAria')}

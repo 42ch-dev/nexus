@@ -1,0 +1,73 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/daemon-api/timeline/timeline-event-info.schema.json",
+  "schema_version": 1,
+  "title": "TimelineEventInfo",
+  "description": "Timeline event row for a world's per-branch timeline (GET /v1/daemon/worlds/:world_id/timeline/events). Maps 1:1 to a narrative_timeline_events row: typed columns stay authoritative, extensions carries the parsed extensions_nexus_json namespace (compute provenance etc.).",
+  "type": "object",
+  "required": ["id", "branch_id", "event_type", "status", "sequence_no", "metadata", "created_at"],
+  "properties": {
+    "id": {
+      "type": "string",
+      "description": "Timeline event identifier (timeline_event_id)."
+    },
+    "branch_id": {
+      "type": "string",
+      "description": "Fork branch ID this event belongs to (root branch or specific fork)."
+    },
+    "event_type": {
+      "type": "string",
+      "description": "Event type. Machine-written log families (e.g. compute_result) and author event types share this column."
+    },
+    "status": {
+      "type": "string",
+      "enum": ["canon", "provisional", "rejected"],
+      "description": "Event status; only canon is merged into the Narrative layer projection."
+    },
+    "sequence_no": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Append-ordered sequence number within (world_id, branch_id)."
+    },
+    "title": {
+      "type": ["string", "null"],
+      "description": "Event title."
+    },
+    "summary": {
+      "type": ["string", "null"],
+      "description": "Event summary."
+    },
+    "affected_key_block_ids": {
+      "type": ["array", "null"],
+      "items": {
+        "type": "string"
+      },
+      "description": "KnowledgeEntry entry_ids affected by this event."
+    },
+    "caused_by_event_ids": {
+      "type": ["array", "null"],
+      "items": {
+        "type": "string"
+      },
+      "description": "Timeline event ids that caused this one."
+    },
+    "source_command_id": {
+      "type": ["string", "null"],
+      "description": "SyncCommand that triggered this event."
+    },
+    "metadata": {
+      "type": "object",
+      "description": "Structured event metadata (metadata_json column)."
+    },
+    "extensions": {
+      "type": ["object", "null"],
+      "description": "Parsed extensions_nexus_json namespace — carries compute provenance (module_id, module_version, run_id, source_kind) and any future extension keys."
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO 8601 UTC timestamp of event creation."
+    }
+  },
+  "additionalProperties": false
+}

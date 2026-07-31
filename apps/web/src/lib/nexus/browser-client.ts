@@ -70,6 +70,7 @@ import type {
   RunAcceptRequest,
   RunAcceptResponse,
   RunDetail,
+  ListTimelineEventsResponse,
   RunListResponse,
   RunRequest,
   RunResponse,
@@ -110,7 +111,13 @@ import type {
 } from '@42ch/nexus-contracts';
 
 import { NexusClientError, type TransportErrorKind } from './errors';
-import type { DaemonHealth, DiscardRunResponse, ListRunsQuery, NexusClient } from './types';
+import type {
+  DaemonHealth,
+  DiscardRunResponse,
+  ListRunsQuery,
+  ListTimelineEventsQuery,
+  NexusClient,
+} from './types';
 
 export interface BrowserClientOptions {
   /**
@@ -514,6 +521,17 @@ export class BrowserClient implements NexusClient {
   }
   getRun(runId: string): Promise<RunDetail> {
     return this.get<RunDetail>(`/v1/daemon/compute/runs/${encodeURIComponent(runId)}`);
+  }
+
+  // ── World timeline events (V1.147 P2) ─────────────────────────────────────
+  getTimelineEvents(
+    worldId: string,
+    query?: ListTimelineEventsQuery,
+  ): Promise<ListTimelineEventsResponse> {
+    return this.get<ListTimelineEventsResponse>(
+      `/v1/daemon/worlds/${encodeURIComponent(worldId)}/timeline/events`,
+      query,
+    );
   }
 
   // ── Creator Memory review-loop (V1.78) ─────────────────────────────────────

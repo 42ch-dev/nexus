@@ -530,11 +530,17 @@ describe('TimelineCanvasAdapter.projectGraph — default layer delegation', () =
 // ─── Node-type registry (additive over V1.122) ──────────────────────────────
 
 describe('TimelineCanvasAdapter — node-type registry (V1.123 P1 T2 + V1.126 P1)', () => {
-  it("registers 'timeline-brief-era' alongside V1.122 'timeline-event' + 'timeline-key-block' + V1.126 'directedAxisSpine'", () => {
+  it("registers 'timeline-brief-era' alongside V1.122 'timeline-event' + 'timeline-key-block' + V1.126 'directedAxisSpine' + V1.147 'timeline-compute-result'", () => {
     const adapter = createTimelineCanvasAdapter({ current: makeContext() });
     const keys = Object.keys(adapter.nodeTypes).sort();
     expect(keys).toEqual(
-      ['directedAxisSpine', 'timeline-brief-era', 'timeline-event', 'timeline-key-block'].sort(),
+      [
+        'directedAxisSpine',
+        'timeline-brief-era',
+        'timeline-compute-result',
+        'timeline-event',
+        'timeline-key-block',
+      ].sort(),
     );
   });
 

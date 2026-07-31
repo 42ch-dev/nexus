@@ -4,4 +4,6 @@
  * Generator: json-schema-to-typescript (tooling/codegen/src/ts-gen.ts)
  */
 
+export type { ListTimelineEventsResponse } from './list-timeline-events-response';
+export type { TimelineEventInfo } from './timeline-event-info';
 export type { TimelineOverviewResponse } from './timeline-overview-response';

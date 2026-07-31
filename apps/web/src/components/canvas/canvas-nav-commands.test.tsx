@@ -128,9 +128,14 @@ describe('CanvasNavCommands — registration', () => {
   // shape, additive only.
   // V1.123 P3 Task 2 — `go.timeline` (global Timeline entry) registered
   // alongside the V1.123 P2 quartet. Always available; same Navigate group.
-  it('registers the Navigate-family commands (incl. Work Timeline V1.123 P2, global Timeline V1.123 P3 T2)', () => {
+  // V1.147 P2 T3 — `compute.run-module` + `compute.run-module-on-world`
+  // (jump-only compute commands; the world-scoped one is availability-gated
+  // and does not appear on `/sessions`).
+  it('registers the Navigate + Compute jump commands (V1.111 trio + Work Timeline + global Timeline + Run Module)', () => {
     renderInLayout('/sessions');
     expect(getCommands().map((c) => c.id).sort()).toEqual([
+      'compute.run-module',
+      'compute.run-module-on-world',
       'go.outline',
       'go.strategy',
       'go.timeline',
@@ -141,15 +146,15 @@ describe('CanvasNavCommands — registration', () => {
 
   it('unregisters all commands on unmount (no leak across mounts)', () => {
     const { unmount } = renderInLayout('/sessions');
-    expect(getCommands()).toHaveLength(5);
+    expect(getCommands()).toHaveLength(7);
     unmount();
     expect(getCommands()).toEqual([]);
   });
 
-  it('each command carries a Navigate group, icon, and non-empty label', () => {
+  it('each command carries a Navigate/Compute group, icon, and non-empty label', () => {
     renderInLayout('/sessions');
     for (const cmd of getCommands()) {
-      expect(cmd.groupKey).toBe('group.navigate');
+      expect(['group.navigate', 'group.compute']).toContain(cmd.groupKey);
       expect(cmd.labelKey.length).toBeGreaterThan(0);
       expect(cmd.icon).toBeDefined();
     }
@@ -298,3 +303,77 @@ describe('CanvasNavCommands — live handler reads current id (no remount)', () 
 
 // (No trailing guard — all imports are used.)
 
+
+describe('CanvasNavCommands — Compute jumps (V1.147 P2 T3)', () => {
+  // Search-aware probe: the compute commands navigate to Settings URLs that
+  // carry query params (`/settings/modules?world=…`), so the plain pathname
+  // probe is not enough here.
+  function makeFullProbe() {
+    let last: string | null = null;
+    function LocationProbe(): null {
+      const location = useLocation();
+      last = `${location.pathname}${location.search}`;
+      return null;
+    }
+    return { LocationProbe, read: () => last };
+  }
+
+  function renderWithFullProbe(initialPath: string) {
+    const probe = makeFullProbe();
+    const result = render(
+      <MemoryRouter initialEntries={[initialPath]}>
+        <Routes>
+          <Route
+            element={
+              <>
+                <CanvasNavCommands />
+                <probe.LocationProbe />
+                <Outlet />
+              </>
+            }
+          >
+            <Route path="worlds/:worldId/timeline" element={<div />} />
+            <Route path="sessions" element={<div />} />
+            {/* Catch-all so Settings deep-link navigations keep the layout
+                (and its command registrations + probe) mounted. */}
+            <Route path="*" element={<div />} />
+          </Route>
+        </Routes>
+      </MemoryRouter>,
+    );
+    return { ...result, probe };
+  }
+
+  it('Run Module… is always available and jumps to the Modules Run Studio', () => {
+    const { probe } = renderWithFullProbe('/sessions');
+    const cmd = findById('compute.run-module');
+    expect(cmd?.available?.() ?? true).toBe(true);
+    act(() => {
+      cmd?.handler();
+    });
+    expect(probe.read()).toBe('/settings/modules');
+  });
+
+  it('Run Module on this World… is hidden without a worldId in the URL', () => {
+    renderWithFullProbe('/sessions');
+    expect(findById('compute.run-module-on-world')?.available?.()).toBe(false);
+  });
+
+  it('Run Module on this World… jumps to the Timeline-scoped Run Studio (World pre-filled)', () => {
+    const { probe } = renderWithFullProbe('/worlds/world-7/timeline');
+    const cmd = findById('compute.run-module-on-world');
+    expect(cmd?.available?.()).toBe(true);
+    act(() => {
+      cmd?.handler();
+    });
+    expect(probe.read()).toBe('/settings/modules?world=world-7');
+  });
+
+  it('encodes the worldId so a space-bearing id stays one query value', () => {
+    const { probe } = renderWithFullProbe('/worlds/w%20world/timeline');
+    act(() => {
+      findById('compute.run-module-on-world')?.handler();
+    });
+    expect(probe.read()).toBe('/settings/modules?world=w%20world');
+  });
+});

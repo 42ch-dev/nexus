@@ -174,9 +174,11 @@ export function resolveSettingsLocation(
 export function settingsPathFor(
   section: SettingsSectionId,
   hash?: string,
+  search?: string,
 ): string {
   const base = `/settings/${section}`;
-  return hash ? `${base}#${hash}` : base;
+  const withSearch = search ? `${base}${search}` : base;
+  return hash ? `${withSearch}#${hash}` : withSearch;
 }
 
 /** Canonical location string for compare/replace navigation. */

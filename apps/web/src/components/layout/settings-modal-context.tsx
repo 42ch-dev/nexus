@@ -9,6 +9,11 @@
  * path with dirty sources opens the host discard confirm and restores the
  * Settings URL until the user confirms (BrowserRouter-compatible equivalent of
  * `useBlocker`; data-router migration is tracked separately).
+ *
+ * V1.147 P2 T3 — the context object is exported for null-safe consumption
+ * (the Timeline canvas opens Settings → Modules with a World pre-fill deep
+ * link; surfaces rendered outside the provider degrade gracefully instead of
+ * throwing from `useSettingsModal`).
  */
 
 import {
@@ -52,6 +57,7 @@ export interface SettingsModalContextValue {
     defaultSection?: SettingsSectionId,
     invoker?: HTMLElement | null,
     hash?: string,
+    search?: string,
   ) => void;
   selectSection: (section: SettingsSectionId, hash?: string) => void;
   requestClose: (reason?: SettingsCloseReason) => void;
@@ -62,7 +68,7 @@ export interface SettingsModalContextValue {
   cancelDiscard: () => void;
 }
 
-const SettingsModalContext = createContext<SettingsModalContextValue | null>(
+export const SettingsModalContext = createContext<SettingsModalContextValue | null>(
   null,
 );
 
@@ -116,16 +122,17 @@ export function SettingsModalProvider({ children }: { children: ReactNode }) {
   const sectionHash = resolved?.hash ?? '';
 
   // Normalize aliases and unknown sections to the canonical Settings path.
+  // V1.147 P2 T3: `search` is preserved verbatim so deep links into a section
+  // (`/settings/modules?module=…&run=…`) survive the canonicalization instead
+  // of having their query params dropped on arrival.
   useEffect(() => {
     if (!resolved) return;
-    const canonical = settingsLocationKey(resolved);
-    const current = location.hash
-      ? `${location.pathname}${location.hash}`
-      : location.pathname;
+    const canonical = `${settingsLocationKey(resolved)}${location.search}`;
+    const current = `${location.pathname}${location.search}${location.hash}`;
     if (current !== canonical) {
       navigate(canonical, { replace: true });
     }
-  }, [location.hash, location.pathname, navigate, resolved]);
+  }, [location.hash, location.pathname, location.search, navigate, resolved]);
 
   // Track last safe non-settings location (direct Settings loads keep /works).
   useEffect(() => {
@@ -153,11 +160,14 @@ export function SettingsModalProvider({ children }: { children: ReactNode }) {
   }, []);
 
   // Remember the Settings URL while open so dirty leave can restore it.
+  // V1.147 P2 T3: `search` is preserved so deep-linked sections (`?module=…`)
+  // restore with their selection intact after a dirty-leave block.
   useEffect(() => {
     if (resolved) {
-      settingsPathWhileOpenRef.current = settingsLocationKey(resolved);
+      settingsPathWhileOpenRef.current =
+        `${settingsLocationKey(resolved)}${location.search}`;
     }
-  }, [resolved]);
+  }, [location.search, resolved]);
 
   // Dirty-aware route leave (BrowserRouter-compatible useBlocker equivalent).
   useLayoutEffect(() => {
@@ -208,13 +218,14 @@ export function SettingsModalProvider({ children }: { children: ReactNode }) {
       defaultSection: SettingsSectionId = DEFAULT_SETTINGS_SECTION,
       invoker?: HTMLElement | null,
       hash?: string,
+      search?: string,
     ) => {
       invokerRef.current = invoker ?? null;
       if (!isSettingsDrivenPath(location.pathname)) {
         setBackgroundLocation(location);
         backgroundSeededRef.current = true;
       }
-      navigate(settingsPathFor(defaultSection, hash));
+      navigate(settingsPathFor(defaultSection, hash, search));
     },
     [location, navigate],
   );

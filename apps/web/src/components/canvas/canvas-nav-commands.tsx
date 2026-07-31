@@ -33,7 +33,7 @@
  */
 import { useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { CalendarRange, ListTree, Network, Sparkles, Clock } from 'lucide-react';
+import { CalendarRange, Cpu, ListTree, Network, Sparkles, Clock } from 'lucide-react';
 
 import { useRegisterCommand } from '@/lib/canvas/command-registry';
 
@@ -137,6 +137,47 @@ export function CanvasNavCommands(): null {
       if (w) navigate(`/works/${encodeURIComponent(w)}/timeline`);
     },
     available: () => Boolean(idsRef.current.workId),
+  });
+
+  // ── V1.147 P2 T3 — Compute jump commands (behavior spec §1 P3) ───────────
+  //
+  // Jump-only per plan ⌘K scope ("navigation jumps into the Timeline Run
+  // Module entry only; no palette form"):
+  //   - Run Module… — always available → Settings → Modules (the shared Run
+  //     Studio entry).
+  //   - Run Module on this World… — gated on a `worldId` in the current URL
+  //     → Settings → Modules with the World pre-filled (the Timeline-scoped
+  //     Run Studio; spec §1 P2 hero shortcut).
+  useRegisterCommand({
+    id: 'compute.run-module',
+    labelKey: 'compute.run-module.label',
+    groupKey: 'group.compute',
+    keywordKeys: [
+      'compute.run-module.keywords.compute',
+      'compute.run-module.keywords.studio',
+      'compute.run-module.keywords.invoke',
+      'compute.run-module.keywords.wasm',
+    ],
+    icon: Cpu,
+    handler: () => navigate('/settings/modules'),
+  });
+
+  useRegisterCommand({
+    id: 'compute.run-module-on-world',
+    labelKey: 'compute.run-module-on-world.label',
+    groupKey: 'group.compute',
+    keywordKeys: [
+      'compute.run-module-on-world.keywords.timeline',
+      'compute.run-module-on-world.keywords.world',
+      'compute.run-module-on-world.keywords.compute',
+      'compute.run-module-on-world.keywords.prefill',
+    ],
+    icon: Cpu,
+    handler: () => {
+      const { worldId: w } = idsRef.current;
+      if (w) navigate(`/settings/modules?world=${encodeURIComponent(w)}`);
+    },
+    available: () => Boolean(idsRef.current.worldId),
   });
 
   return null;

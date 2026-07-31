@@ -241,9 +241,9 @@ async fn defender_hp(pool: &sqlx::SqlitePool, entry_id: &str) -> i64 {
 }
 
 /// `(timeline_event_id, event_type, extensions_nexus_json)` for a world's timeline.
-async fn timeline_events(pool: &sqlx::SqlitePool) -> Vec<(String, String, Option<String>)> {
-    sqlx::query_as::<_, (String, String, Option<String>)>(
-        "SELECT timeline_event_id, event_type, extensions_nexus_json \
+async fn timeline_events(pool: &sqlx::SqlitePool) -> Vec<(String, String, Option<String>, String)> {
+    sqlx::query_as::<_, (String, String, Option<String>, String)>(
+        "SELECT timeline_event_id, event_type, extensions_nexus_json, status \
          FROM narrative_timeline_events WHERE world_id = ? ORDER BY sequence_no",
     )
     .bind(WORLD)
@@ -457,10 +457,16 @@ async fn accept_happy_path_applies_atomically_and_creates_events() {
     assert_eq!(defender_hp(&c.pool, "kb_def").await, 15);
     assert_eq!(defender_hp(&c.pool, "kb_atk").await, 100);
 
-    // Timeline events created with `compute_result` + compute provenance.
+    // Timeline events created with `compute_result` + compute provenance,
+    // committed as canon (P2 dogfood: the Timeline projection reads canon
+    // events only — an accepted Run must surface as a Narrative node).
     let events = timeline_events(&c.pool).await;
     assert_eq!(events.len(), 1);
     assert_eq!(events[0].1, "compute_result");
+    assert_eq!(
+        events[0].3, "canon",
+        "accepted events must be canon, not provisional"
+    );
     assert_eq!(
         event_ids[0],
         json!(events[0].0),
@@ -494,6 +500,53 @@ async fn accept_on_already_accepted_run_returns_409() {
         .json(&json!({}))
         .await;
     assert_error_envelope(&second, StatusCode::CONFLICT, "conflict");
+}
+
+/// QC S-affected: Accept must persist `affected_key_block_ids` from
+/// `proposals.timeline_events` onto the appended events — the P2 compute
+/// inspector resolves its "Affected knowledge" section from this column, so
+/// dropping it would leave the section permanently empty (behavior §5).
+#[tokio::test]
+#[serial]
+async fn accept_persists_affected_key_block_ids() {
+    let c = ctx().await;
+    seed_character(&c.pool, "kb_atk", "Striker", 20, 3, 100, 100).await;
+    seed_character(&c.pool, "kb_def", "Guardian", 10, 5, 30, 50).await;
+
+    let run_id = craft_succeeded_run(
+        &c.pool,
+        crafted_proposals(
+            vec![json!({
+                "op": "sub",
+                "path": "character.current_hp",
+                "target_key_block_id": "kb_def",
+                "value": 15,
+            })],
+            &["Combat resolved"],
+            Some(&["kb_def", "kb_atk"]),
+        ),
+    )
+    .await;
+
+    let resp = c
+        .server
+        .post(&format!("/v1/daemon/compute/runs/{run_id}/accept"))
+        .json(&json!({}))
+        .await;
+    assert_eq!(resp.status_code(), StatusCode::OK, "body={}", resp.text());
+
+    // SAFETY: test-only read against the known narrative_timeline_events schema.
+    let row: (Option<String>,) = sqlx::query_as(
+        "SELECT affected_key_block_ids_json FROM narrative_timeline_events \
+         WHERE world_id = ? ORDER BY sequence_no",
+    )
+    .bind(WORLD)
+    .fetch_one(&c.pool)
+    .await
+    .unwrap();
+    let affected: Vec<String> =
+        serde_json::from_str(row.0.as_deref().expect("affected ids must be persisted")).unwrap();
+    assert_eq!(affected, vec!["kb_def".to_string(), "kb_atk".to_string()]);
 }
 
 // ── §6 row 9 — discard ─────────────────────────────────────────────────────
@@ -898,13 +951,18 @@ async fn craft_succeeded_run(pool: &sqlx::SqlitePool, proposals: Value) -> Strin
 
 /// Craft a `ComputeOutput` envelope with the given state deltas and timeline
 /// event titles (each event carries the minimal valid NexusTimelineEvent
-/// fields; the Accept handler only consumes title/summary).
-fn crafted_proposals(state_delta: Vec<Value>, event_titles: &[&str]) -> Value {
+/// fields; the Accept handler consumes title/summary/affected_key_block_ids).
+/// `affected_ids`, when `Some`, is stamped onto every event.
+fn crafted_proposals(
+    state_delta: Vec<Value>,
+    event_titles: &[&str],
+    affected_ids: Option<&[&str]>,
+) -> Value {
     let timeline_events: Vec<Value> = event_titles
         .iter()
         .enumerate()
         .map(|(i, title)| {
-            json!({
+            let mut evt = json!({
                 "schema_version": 1,
                 "timeline_event_id": format!("evt_p{i}"),
                 "world_id": WORLD,
@@ -915,7 +973,11 @@ fn crafted_proposals(state_delta: Vec<Value>, event_titles: &[&str]) -> Value {
                 "title": title,
                 "summary": format!("summary {title}"),
                 "created_at": "2026-07-31T12:00:00Z",
-            })
+            });
+            if let Some(ids) = affected_ids {
+                evt["affected_key_block_ids"] = json!(ids);
+            }
+            evt
         })
         .collect();
     json!({
@@ -972,6 +1034,7 @@ async fn accept_foreign_delta_target_rejects_with_422_and_rolls_back() {
                 "value": 100,
             })],
             &[],
+            None,
         ),
     )
     .await;
@@ -1036,6 +1099,7 @@ async fn accept_mid_loop_failure_rolls_back_entire_tx() {
                 }),
             ],
             &["Battle"],
+            None,
         ),
     )
     .await;
@@ -1180,6 +1244,7 @@ async fn accept_subset_appends_only_listed_events() {
                 "value": 15,
             })],
             &["First", "Second"],
+            None,
         ),
     )
     .await;
@@ -1228,6 +1293,7 @@ async fn accept_subset_with_unknown_id_returns_422_and_writes_nothing() {
                 "value": 15,
             })],
             &["Only"],
+            None,
         ),
     )
     .await;
@@ -1269,6 +1335,7 @@ async fn accept_with_explicit_null_timeline_ids_accepts_all() {
                 "value": 15,
             })],
             &["First", "Second"],
+            None,
         ),
     )
     .await;
