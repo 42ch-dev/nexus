@@ -1,0 +1,27 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/daemon-api/compute/run-list-response.schema.json",
+  "schema_version": 1,
+  "title": "Nexus RunListResponse",
+  "description": "Response for GET /v1/daemon/compute/runs — cursor-paginated list of compute runs for the active creator (V1.147 P0 direct lane).",
+  "type": "object",
+  "required": ["items", "has_more"],
+  "properties": {
+    "items": {
+      "type": "array",
+      "items": {
+        "$ref": "https://nexus42.invalid/schemas/daemon-api/compute/run-summary.schema.json"
+      },
+      "description": "Array of RunSummary rows, ordered by created_at descending."
+    },
+    "has_more": {
+      "type": "boolean",
+      "description": "True when another page exists (equivalent to next_cursor being non-null)."
+    },
+    "next_cursor": {
+      "type": "string",
+      "description": "Opaque cursor for the next page. Clients MUST NOT parse it. Non-null only when has_more is true."
+    }
+  },
+  "additionalProperties": false
+}

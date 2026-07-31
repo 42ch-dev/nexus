@@ -5,6 +5,24 @@ All notable changes to the `@42ch/nexus-contracts` package will be documented in
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.26.0] - 2026-07-31
+
+### Added
+
+- **Compute run wire contracts (V1.147 P0):** added 7 additive schemas under `daemon-api/compute/` for the direct Control Room compute invocation lane:
+  - `RunRequest` / `RunResponse` — invoke a WASM module against an owned World (POST /run)
+  - `RunAcceptRequest` / `RunAcceptResponse` — atomically accept a succeeded Run's proposals (POST /runs/:run_id/accept)
+  - `RunSummary` / `RunDetail` — paginated list item and full detail for Runs history (GET /runs, GET /runs/:run_id)
+  - `RunListResponse` — cursor-paginated Runs list envelope
+- `RunResponse.proposals` and `RunDetail.proposals` reuse the existing `ComputeOutput` envelope via `$ref` (4-part: state_delta, timeline_events, new_key_blocks, battle_report).
+- `RunResponse.error` and `RunDetail.error` reuse the existing `ErrorResponse` schema.
+
+### Consumer Impact
+
+- **Additive only** — no existing schemas modified; generated types for existing consumers are unchanged.
+- New Rust types: `nexus_contracts::generated::daemon_api::compute::{RunRequest, RunResponse, RunAcceptRequest, RunAcceptResponse, RunSummary, RunDetail, RunListResponse}`.
+- New TypeScript types: `@42ch/nexus-contracts` exports the same shapes under `daemon-api/compute/run-*.ts`.
+
 ## [0.25.0] - 2026-07-26
 
 ### Changed
