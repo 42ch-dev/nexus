@@ -528,16 +528,30 @@ async fn import(args: ImportArgs, config: &CliConfig, pool: &SqlitePool) -> Resu
         relation.from_id = resolved_from;
         relation.to_id = resolved_to;
 
-        // ── Collision check ─────────────────────────────────────────
-        if get_relationship(pool, &relation.relation_id).await.is_ok() {
+        // ── Collision check (world-scoped) ───────────────────────────
+        // relationship_id is a global PK. Skip only when the row already
+        // lives in the *target* world (idempotent re-import). If the id is
+        // owned by another world (same-DB multi-world pack import), mint a
+        // fresh id so remapped endpoints can still form the edge.
+        if let Ok(existing_rel) = get_relationship(pool, &relation.relation_id).await {
+            if existing_rel.world_id == world_id {
+                if args.dry_run {
+                    eprintln!(
+                        "  [dry-run] skip relation {}: already exists in target world",
+                        relation.relation_id
+                    );
+                }
+                relations_skipped += 1;
+                continue;
+            }
+            let new_id = nexus_local_db::kb_relationships::generate_relationship_id();
             if args.dry_run {
                 eprintln!(
-                    "  [dry-run] skip relation {}: already exists in target world",
-                    relation.relation_id
+                    "  [dry-run] relation {} owned by foreign world {}; would mint {}",
+                    relation.relation_id, existing_rel.world_id, new_id
                 );
             }
-            relations_skipped += 1;
-            continue;
+            relation.relation_id = new_id;
         }
 
         if args.dry_run {
