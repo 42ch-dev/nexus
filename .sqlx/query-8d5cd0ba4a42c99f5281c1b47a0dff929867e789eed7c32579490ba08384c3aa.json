@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO compute_sessions (run_id, world_id, module_id, module_version, status, proposals_json, error_json, created_at, updated_at, accepted_at, invocation_params_json, branch_id, timeline_head_event_id, entry_id) VALUES (?, ?, ?, ?, 'running', NULL, NULL, ?, NULL, NULL, ?, ?, ?, '')",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 8
+    },
+    "nullable": []
+  },
+  "hash": "8d5cd0ba4a42c99f5281c1b47a0dff929867e789eed7c32579490ba08384c3aa"
+}

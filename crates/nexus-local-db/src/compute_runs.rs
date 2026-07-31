@@ -13,7 +13,7 @@ use crate::LocalDbError;
 use sqlx::SqlitePool;
 
 /// A row in the `compute_sessions` table covering the direct-lane columns
-/// added by V1.147 P0.
+/// added by V1.147 P0 (fix wave: `branch_id` + `timeline_head_event_id`).
 #[derive(Debug, Clone)]
 pub struct ComputeRunRow {
     pub run_id: String,
@@ -27,6 +27,12 @@ pub struct ComputeRunRow {
     pub updated_at: Option<String>,
     pub accepted_at: Option<String>,
     pub invocation_params_json: Option<String>,
+    /// Branch the run was scoped to at run time (snapshot; Accept appends
+    /// timeline events to this branch, not the current fork head — F-003).
+    /// `None` only for rows created before the branch-snapshot migration.
+    pub branch_id: Option<String>,
+    /// World timeline head at run time (snapshot, informational).
+    pub timeline_head_event_id: Option<String>,
 }
 
 /// Valid status strings for the direct lane.
@@ -47,6 +53,12 @@ pub struct RunListFilters {
 
 /// Insert a new compute run row and return its generated `run_id`.
 ///
+/// `branch_id` is the resolved branch the run is scoped to (defaults to the
+/// World root branch at run time — the handler resolves it before calling);
+/// it is snapshotted so a later Accept appends timeline events to the same
+/// branch even if the active fork changes in between (F-003).
+/// `timeline_head_event_id` snapshots the world's timeline head at run time.
+///
 /// The `entry_id` column is set to `''` (empty string) because the
 /// original schema defines it as `TEXT NOT NULL`, yet direct-lane rows
 /// have no spoke entry.  Adapter reads key on `session_id`, never
@@ -62,6 +74,8 @@ pub async fn insert_run(
     world_id: &str,
     module_id: &str,
     module_version: Option<&str>,
+    branch_id: Option<&str>,
+    timeline_head_event_id: Option<&str>,
     invocation_params_json: Option<&str>,
 ) -> Result<String, LocalDbError> {
     let run_id = format!("run_{}", uuid::Uuid::new_v4());
@@ -70,14 +84,16 @@ pub async fn insert_run(
         "INSERT INTO compute_sessions \
          (run_id, world_id, module_id, module_version, status, \
           proposals_json, error_json, created_at, updated_at, accepted_at, \
-          invocation_params_json, entry_id) \
-         VALUES (?, ?, ?, ?, 'running', NULL, NULL, ?, NULL, NULL, ?, '')",
+          invocation_params_json, branch_id, timeline_head_event_id, entry_id) \
+         VALUES (?, ?, ?, ?, 'running', NULL, NULL, ?, NULL, NULL, ?, ?, ?, '')",
         run_id,
         world_id,
         module_id,
         module_version,
         created_at,
         invocation_params_json,
+        branch_id,
+        timeline_head_event_id,
     )
     .execute(pool)
     .await?;
@@ -102,7 +118,7 @@ pub async fn get_run(
     let row = sqlx::query!(
         "SELECT run_id, world_id, module_id, module_version, status, \
          proposals_json, error_json, created_at, updated_at, accepted_at, \
-         invocation_params_json \
+         invocation_params_json, branch_id, timeline_head_event_id \
          FROM compute_sessions WHERE run_id = ?",
         run_id,
     )
@@ -124,6 +140,8 @@ pub async fn get_run(
         updated_at: r.updated_at,
         accepted_at: r.accepted_at,
         invocation_params_json: r.invocation_params_json,
+        branch_id: r.branch_id,
+        timeline_head_event_id: r.timeline_head_event_id,
     }))
 }
 
@@ -283,12 +301,15 @@ pub async fn set_run_discarded(pool: &SqlitePool, run_id: &str) -> Result<u64, L
     Ok(affected)
 }
 
-/// List compute runs with optional filters and key-based cursor pagination.
+/// List compute runs with optional filters and keyset cursor pagination,
+/// **newest-first** (`ORDER BY created_at DESC, run_id DESC`).
 ///
-/// Returns `(items, next_cursor)` where `next_cursor` is `Some(last_run_id)`
-/// when another page may exist (the caller should pass it back as `cursor`).
-/// Rows are ordered by `run_id` ascending; the cursor is the last-seen
-/// `run_id`.
+/// Returns `(items, next_cursor)` where `next_cursor` is an opaque
+/// `"{created_at}|{run_id}"` composite cursor that the caller passes back
+/// unchanged as `cursor` (the wire contract declares it opaque — clients
+/// MUST NOT parse it).  Rows are ordered newest-first to match the
+/// `RunListResponse.items` description ("ordered by created_at
+/// descending") — W1 fix (was `ORDER BY run_id ASC`).
 ///
 /// Callers should pass `limit >= 1`.  When `limit == 0` the `limit+1`
 /// trick still fetches one row to detect `has_more`, but `take(0)` yields
@@ -309,7 +330,8 @@ pub async fn set_run_discarded(pool: &SqlitePool, run_id: &str) -> Result<u64, L
 /// `world_id`, or `module_id` column (violates the direct-lane invariant).
 ///
 /// # Errors
-/// Returns [`LocalDbError`] on database failure.
+/// Returns [`LocalDbError::ValidationError`] when `cursor` is not a
+/// well-formed composite cursor, and [`LocalDbError`] on database failure.
 pub async fn list_runs(
     pool: &SqlitePool,
     filters: &RunListFilters,
@@ -326,13 +348,31 @@ pub async fn list_runs(
     let mut builder = sqlx::QueryBuilder::new(
         "SELECT run_id, world_id, module_id, module_version, status, \
          proposals_json, error_json, created_at, updated_at, accepted_at, \
-         invocation_params_json \
+         invocation_params_json, branch_id, timeline_head_event_id \
          FROM compute_sessions WHERE run_id IS NOT NULL",
     );
 
     if let Some(ref cursor_val) = cursor {
-        builder.push(" AND run_id > ");
-        builder.push_bind(cursor_val);
+        // Keyset cursor on (created_at, run_id): decode the opaque
+        // "{created_at}|{run_id}" pair.  RFC3339 timestamps never contain
+        // '|', so the split is unambiguous.
+        let (cursor_created_at, cursor_run_id) = cursor_val
+            .split_once('|')
+            .ok_or_else(|| LocalDbError::ValidationError(format!(
+                "invalid pagination cursor '{cursor_val}' (expected opaque '<created_at>|<run_id>' pair)"
+            )))?;
+        if cursor_created_at.is_empty() || cursor_run_id.is_empty() {
+            return Err(LocalDbError::ValidationError(format!(
+                "invalid pagination cursor '{cursor_val}' (empty component)"
+            )));
+        }
+        builder.push(" AND (created_at < ");
+        builder.push_bind(cursor_created_at);
+        builder.push(" OR (created_at = ");
+        builder.push_bind(cursor_created_at);
+        builder.push(" AND run_id < ");
+        builder.push_bind(cursor_run_id);
+        builder.push("))");
     }
 
     if let Some(ref world_id) = filters.world_id {
@@ -366,7 +406,7 @@ pub async fn list_runs(
         }
     }
 
-    builder.push(" ORDER BY run_id LIMIT ");
+    builder.push(" ORDER BY created_at DESC, run_id DESC LIMIT ");
     // Fetch limit + 1 to detect `has_more` without a second query.
     // When limit == 0 this fetches 1 row: items will be empty but the
     // row exists — callers should pass limit >= 1 (see doc above).
@@ -397,11 +437,15 @@ pub async fn list_runs(
             updated_at: r.updated_at,
             accepted_at: r.accepted_at,
             invocation_params_json: r.invocation_params_json,
+            branch_id: r.branch_id,
+            timeline_head_event_id: r.timeline_head_event_id,
         })
         .collect();
 
     let next_cursor = if has_more {
-        items.last().map(|r| r.run_id.clone())
+        items
+            .last()
+            .map(|r| format!("{}|{}", r.created_at, r.run_id))
     } else {
         None
     };
@@ -423,4 +467,6 @@ struct RawRunRow {
     updated_at: Option<String>,
     accepted_at: Option<String>,
     invocation_params_json: Option<String>,
+    branch_id: Option<String>,
+    timeline_head_event_id: Option<String>,
 }

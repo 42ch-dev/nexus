@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT run_id, world_id, module_id, module_version, status, proposals_json, error_json, created_at, updated_at, accepted_at, invocation_params_json FROM compute_sessions WHERE run_id = ?",
+  "query": "SELECT run_id, world_id, module_id, module_version, status, proposals_json, error_json, created_at, updated_at, accepted_at, invocation_params_json, branch_id, timeline_head_event_id FROM compute_sessions WHERE run_id = ?",
   "describe": {
     "columns": [
       {
@@ -57,6 +57,16 @@
         "name": "invocation_params_json",
         "ordinal": 10,
         "type_info": "Text"
+      },
+      {
+        "name": "branch_id",
+        "ordinal": 11,
+        "type_info": "Text"
+      },
+      {
+        "name": "timeline_head_event_id",
+        "ordinal": 12,
+        "type_info": "Text"
       }
     ],
     "parameters": {
@@ -73,8 +83,10 @@
       false,
       true,
       true,
+      true,
+      true,
       true
     ]
   },
-  "hash": "6e968a1b7caded8863a7a3b6bd6c71114bb917fb5d4d4b7a72a9ba770eeb1e3c"
+  "hash": "894858f87095963d9d97c4a9bf5770c62b907cc04844acf58857acdcccc2b1e8"
 }

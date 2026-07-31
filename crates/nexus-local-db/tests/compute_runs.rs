@@ -23,7 +23,7 @@ async fn setup_db() -> (sqlx::SqlitePool, tempfile::TempDir) {
 
 /// Helper: insert a run and transition it to succeeded, returning the run_id.
 async fn insert_and_succeed(pool: &sqlx::SqlitePool, world_id: &str, module_id: &str) -> String {
-    let run_id = insert_run(pool, world_id, module_id, None, None)
+    let run_id = insert_run(pool, world_id, module_id, None, None, None, None)
         .await
         .unwrap();
     let affected = set_run_succeeded(&pool, &run_id, r#"{}"#).await.unwrap();
@@ -37,7 +37,7 @@ async fn insert_and_succeed(pool: &sqlx::SqlitePool, world_id: &str, module_id: 
 async fn insert_and_get_roundtrip() {
     let (pool, _dir) = setup_db().await;
 
-    let run_id = insert_run(&pool, "world-1", "module-a", None, None)
+    let run_id = insert_run(&pool, "world-1", "module-a", None, None, None, None)
         .await
         .unwrap();
     assert!(run_id.starts_with("run_"));
@@ -56,6 +56,32 @@ async fn insert_and_get_roundtrip() {
     assert!(!row.created_at.is_empty());
     assert!(row.updated_at.is_none());
     assert!(row.accepted_at.is_none());
+    assert!(row.branch_id.is_none());
+    assert!(row.timeline_head_event_id.is_none());
+}
+
+#[tokio::test]
+async fn insert_with_branch_snapshot_roundtrips() {
+    let (pool, _dir) = setup_db().await;
+
+    let run_id = insert_run(
+        &pool,
+        "world-bs",
+        "module-bs",
+        None,
+        Some("fbk_side1"),
+        Some("evt_head"),
+        None,
+    )
+    .await
+    .unwrap();
+
+    let row = get_run(&pool, &run_id)
+        .await
+        .unwrap()
+        .expect("row must exist");
+    assert_eq!(row.branch_id.as_deref(), Some("fbk_side1"));
+    assert_eq!(row.timeline_head_event_id.as_deref(), Some("evt_head"));
 }
 
 #[tokio::test]
@@ -74,6 +100,8 @@ async fn insert_with_module_version_and_params() {
         "world-2",
         "module-b",
         Some("1.2.3"),
+        None,
+        None,
         Some(r#"{"key":"value"}"#),
     )
     .await
@@ -95,7 +123,7 @@ async fn insert_with_module_version_and_params() {
 #[tokio::test]
 async fn transition_to_succeeded() {
     let (pool, _dir) = setup_db().await;
-    let run_id = insert_run(&pool, "world-3", "module-c", None, None)
+    let run_id = insert_run(&pool, "world-3", "module-c", None, None, None, None)
         .await
         .unwrap();
 
@@ -116,7 +144,7 @@ async fn transition_to_succeeded() {
 #[tokio::test]
 async fn transition_to_failed() {
     let (pool, _dir) = setup_db().await;
-    let run_id = insert_run(&pool, "world-4", "module-d", None, None)
+    let run_id = insert_run(&pool, "world-4", "module-d", None, None, None, None)
         .await
         .unwrap();
 
@@ -137,7 +165,7 @@ async fn transition_to_failed() {
 #[tokio::test]
 async fn transition_to_applied_in_tx() {
     let (pool, _dir) = setup_db().await;
-    let run_id = insert_run(&pool, "world-5", "module-e", None, None)
+    let run_id = insert_run(&pool, "world-5", "module-e", None, None, None, None)
         .await
         .unwrap();
 
@@ -195,7 +223,7 @@ async fn set_succeeded_guard_requires_running() {
 #[tokio::test]
 async fn set_failed_guard_requires_running() {
     let (pool, _dir) = setup_db().await;
-    let run_id = insert_run(&pool, "world-g2", "mod-g2", None, None)
+    let run_id = insert_run(&pool, "world-g2", "mod-g2", None, None, None, None)
         .await
         .unwrap();
     set_run_failed(&pool, &run_id, r#"{"e":1}"#).await.unwrap();
@@ -210,7 +238,7 @@ async fn set_failed_guard_requires_running() {
 async fn set_applied_guard_requires_succeeded() {
     let (pool, _dir) = setup_db().await;
     // Running run — cannot apply directly
-    let run_id = insert_run(&pool, "world-g3", "mod-g3", None, None)
+    let run_id = insert_run(&pool, "world-g3", "mod-g3", None, None, None, None)
         .await
         .unwrap();
     let accepted_at = "2026-07-31T12:00:00+00:00";
@@ -226,7 +254,7 @@ async fn set_applied_guard_requires_succeeded() {
 #[tokio::test]
 async fn set_applied_guard_requires_succeeded_after_failed() {
     let (pool, _dir) = setup_db().await;
-    let run_id = insert_run(&pool, "world-g3b", "mod-g3b", None, None)
+    let run_id = insert_run(&pool, "world-g3b", "mod-g3b", None, None, None, None)
         .await
         .unwrap();
     set_run_failed(&pool, &run_id, r#"{}"#).await.unwrap();
@@ -244,7 +272,7 @@ async fn set_applied_guard_requires_succeeded_after_failed() {
 async fn set_discarded_guard_requires_succeeded() {
     let (pool, _dir) = setup_db().await;
     // Running run — cannot discard directly
-    let run_id = insert_run(&pool, "world-g4", "mod-g4", None, None)
+    let run_id = insert_run(&pool, "world-g4", "mod-g4", None, None, None, None)
         .await
         .unwrap();
     let err = set_run_discarded(&pool, &run_id).await.unwrap_err();
@@ -321,13 +349,13 @@ async fn list_runs_pagination() {
     let (pool, _dir) = setup_db().await;
 
     // Insert 3 runs
-    let r1 = insert_run(&pool, "world-list", "mod-a", None, None)
+    let r1 = insert_run(&pool, "world-list", "mod-a", None, None, None, None)
         .await
         .unwrap();
-    let r2 = insert_run(&pool, "world-list", "mod-a", None, None)
+    let r2 = insert_run(&pool, "world-list", "mod-a", None, None, None, None)
         .await
         .unwrap();
-    let r3 = insert_run(&pool, "world-list", "mod-a", None, None)
+    let r3 = insert_run(&pool, "world-list", "mod-a", None, None, None, None)
         .await
         .unwrap();
 
@@ -356,14 +384,78 @@ async fn list_runs_pagination() {
     assert_eq!(all_ids, expected);
 }
 
+/// W1 fix: `list_runs` orders newest-first (`created_at DESC, run_id DESC`)
+/// and the keyset cursor walks that order.
+#[tokio::test]
+async fn list_runs_orders_newest_first() {
+    let (pool, _dir) = setup_db().await;
+
+    let r1 = insert_run(&pool, "world-order", "mod-a", None, None, None, None)
+        .await
+        .unwrap();
+    let r2 = insert_run(&pool, "world-order", "mod-a", None, None, None, None)
+        .await
+        .unwrap();
+    let r3 = insert_run(&pool, "world-order", "mod-a", None, None, None, None)
+        .await
+        .unwrap();
+
+    // Pin distinct created_at values (all rows were created in the same
+    // instant before this point — the ordering test must not depend on
+    // clock precision).
+    // SAFETY: test-only — pinning timestamps to verify ORDER BY semantics.
+    for (run_id, ts) in [
+        (&r1, "2026-07-31T10:00:00.000Z"),
+        (&r2, "2026-07-31T10:00:01.000Z"),
+        (&r3, "2026-07-31T10:00:02.000Z"),
+    ] {
+        sqlx::query("UPDATE compute_sessions SET created_at = ? WHERE run_id = ?")
+            .bind(ts)
+            .bind(run_id)
+            .execute(&pool)
+            .await
+            .unwrap();
+    }
+
+    let filters = RunListFilters::default();
+    let (items1, cursor1) = list_runs(&pool, &filters, None, 2).await.unwrap();
+    // Newest first: r3, then r2.
+    assert_eq!(items1.len(), 2);
+    assert_eq!(items1[0].run_id, r3, "newest run must come first");
+    assert_eq!(items1[1].run_id, r2);
+    assert!(cursor1.is_some());
+
+    // Page 2 continues in the same ordering (r1 last).
+    let (items2, cursor2) = list_runs(&pool, &filters, cursor1.as_deref(), 2)
+        .await
+        .unwrap();
+    assert_eq!(items2.len(), 1);
+    assert_eq!(items2[0].run_id, r1);
+    assert!(cursor2.is_none());
+}
+
+#[tokio::test]
+async fn list_runs_rejects_malformed_cursor() {
+    let (pool, _dir) = setup_db().await;
+    let filters = RunListFilters::default();
+
+    let err = list_runs(&pool, &filters, Some("not-a-composite-cursor"), 10)
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, LocalDbError::ValidationError(_)),
+        "malformed cursor must be a validation error, got {err:?}"
+    );
+}
+
 #[tokio::test]
 async fn list_runs_filter_by_world_id() {
     let (pool, _dir) = setup_db().await;
 
-    insert_run(&pool, "world-a", "mod-x", None, None)
+    insert_run(&pool, "world-a", "mod-x", None, None, None, None)
         .await
         .unwrap();
-    insert_run(&pool, "world-b", "mod-x", None, None)
+    insert_run(&pool, "world-b", "mod-x", None, None, None, None)
         .await
         .unwrap();
 
@@ -380,10 +472,10 @@ async fn list_runs_filter_by_world_id() {
 async fn list_runs_filter_by_status() {
     let (pool, _dir) = setup_db().await;
 
-    let r1 = insert_run(&pool, "world-s", "mod-x", None, None)
+    let r1 = insert_run(&pool, "world-s", "mod-x", None, None, None, None)
         .await
         .unwrap();
-    let r2 = insert_run(&pool, "world-s", "mod-x", None, None)
+    let r2 = insert_run(&pool, "world-s", "mod-x", None, None, None, None)
         .await
         .unwrap();
     set_run_succeeded(&pool, &r2, r#"{}"#).await.unwrap();
@@ -410,9 +502,9 @@ async fn list_runs_filter_by_status() {
 async fn list_runs_filter_by_creator_world_ids() {
     let (pool, _dir) = setup_db().await;
 
-    insert_run(&pool, "w-1", "mod-x", None, None).await.unwrap();
-    insert_run(&pool, "w-2", "mod-x", None, None).await.unwrap();
-    insert_run(&pool, "w-3", "mod-x", None, None).await.unwrap();
+    insert_run(&pool, "w-1", "mod-x", None, None, None, None).await.unwrap();
+    insert_run(&pool, "w-2", "mod-x", None, None, None, None).await.unwrap();
+    insert_run(&pool, "w-3", "mod-x", None, None, None, None).await.unwrap();
 
     let filters = RunListFilters {
         creator_world_ids: Some(vec!["w-1".to_string(), "w-2".to_string()]),
@@ -429,8 +521,8 @@ async fn list_runs_filter_by_creator_world_ids() {
 async fn list_runs_empty_creator_world_ids_returns_nothing() {
     let (pool, _dir) = setup_db().await;
 
-    insert_run(&pool, "w-1", "mod-x", None, None).await.unwrap();
-    insert_run(&pool, "w-2", "mod-x", None, None).await.unwrap();
+    insert_run(&pool, "w-1", "mod-x", None, None, None, None).await.unwrap();
+    insert_run(&pool, "w-2", "mod-x", None, None, None, None).await.unwrap();
 
     let filters = RunListFilters {
         creator_world_ids: Some(vec![]),
@@ -455,7 +547,7 @@ async fn list_runs_empty() {
 async fn insert_run_unique_id_violation() {
     let (pool, _dir) = setup_db().await;
 
-    let run_id = insert_run(&pool, "world-u", "mod-u", None, None)
+    let run_id = insert_run(&pool, "world-u", "mod-u", None, None, None, None)
         .await
         .unwrap();
 
@@ -491,7 +583,7 @@ async fn adapter_row_with_null_run_id_coexists() {
     .unwrap();
 
     // Insert a direct-lane row — run_id is set, session_id is NULL.
-    let run_id = insert_run(&pool, "world-c", "mod-c", None, None)
+    let run_id = insert_run(&pool, "world-c", "mod-c", None, None, None, None)
         .await
         .unwrap();
 

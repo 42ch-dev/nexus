@@ -118,6 +118,8 @@ pub async fn run(
         &req.world_id,
         &req.module_id,
         Some(&module_version),
+        Some("fbk_root"),
+        None,
         invocation_params_str.as_deref(),
     )
     .await
