@@ -123,8 +123,6 @@ pub async fn run(
     .await
     .map_err(NexusApiError::from)?;
 
-    let created_at = chrono::Utc::now();
-
     // Execute compute.
     let engine = resolve_engine(&state)?;
     let output = match engine.compute(&module, &cached.manifest, &compute_input) {
@@ -136,24 +134,26 @@ pub async fn run(
                 "message": e.to_string(),
             }))
             .unwrap_or_else(|_| format!("{{\"message\":\"{e}\"}}"));
-            let _ = compute_runs::set_run_failed(pool, &run_id, &error_json).await;
+            // Persist the failed row regardless of HTTP outcome.
+            if let Err(db_err) = compute_runs::set_run_failed(pool, &run_id, &error_json).await {
+                tracing::error!(
+                    run_id = %run_id,
+                    error = %db_err,
+                    "failed to persist set_run_failed on compute error"
+                );
+            }
 
-            let resp: RunResponse = serde_json::from_value(json!({
-                "run_id": run_id,
-                "status": "failed",
-                "module_id": req.module_id,
-                "module_version": module_version,
-                "created_at": created_at.to_rfc3339(),
-                "error": {
-                    "code": error_code,
-                    "message": e.to_string(),
-                },
-            }))
-            .map_err(|err| NexusApiError::Internal {
-                code: "SERIALIZATION_ERROR".to_string(),
-                message: format!("build failed response: {err}"),
-            })?;
-            return Ok(Json(resp));
+            // Route spec §2.1 step 6 + §4: sandbox errors → 422, internal → 500.
+            if error_code == "internal" {
+                return Err(NexusApiError::Internal {
+                    code: "COMPUTE_ERROR".to_string(),
+                    message: e.to_string(),
+                });
+            }
+            return Err(NexusApiError::BadRequest {
+                code: error_code.to_string(),
+                message: e.to_string(),
+            });
         }
     };
 
@@ -166,36 +166,44 @@ pub async fn run(
         .map_err(NexusApiError::from)?;
 
     let proposals_raw: Value = serde_json::from_str(&proposals_json).unwrap_or(Value::Null);
-    let truncated =
-        serde_json::to_vec(&proposals_raw).unwrap_or_default().len() > RESPONSE_BYTE_CAP;
-    let proposals_for_resp = if truncated {
-        let mut p = proposals_raw.as_object().cloned().unwrap_or_default();
-        p.insert("_truncated".to_string(), json!(true));
-        if p.contains_key("battle_report") {
-            p.insert("battle_report".to_string(), json!({
-                "kind": "truncated",
-                "reason": format!("response exceeds {RESPONSE_BYTE_CAP} bytes; full output in GET /runs/:id"),
-            }));
-        }
-        Value::Object(p)
-    } else {
-        proposals_raw
-    };
 
-    let resp: RunResponse = serde_json::from_value(json!({
-        "run_id": run_id,
+    // Build the full RunResponse and measure its serialized size against the
+    // 1 MiB response cap (plan Global Constraints).  When over the cap,
+    // truncate all 4 parts of the proposals payload; the full output remains
+    // in `proposals_json` (persisted in the session row).
+    let created_at = chrono::Utc::now();
+    let resp_candidate: RunResponse = serde_json::from_value(json!({
+        "run_id": &run_id,
         "status": "succeeded",
-        "module_id": req.module_id,
-        "module_version": module_version,
+        "module_id": &req.module_id,
+        "module_version": &module_version,
         "created_at": created_at.to_rfc3339(),
-        "proposals": proposals_for_resp,
+        "proposals": &proposals_raw,
     }))
     .map_err(|err| NexusApiError::Internal {
         code: "SERIALIZATION_ERROR".to_string(),
         message: format!("build run response: {err}"),
     })?;
 
-    Ok(Json(resp))
+    let resp_bytes = serde_json::to_vec(&resp_candidate).unwrap_or_default();
+    if resp_bytes.len() > RESPONSE_BYTE_CAP {
+        let truncated_proposals = build_truncated_proposals();
+        let resp: RunResponse = serde_json::from_value(json!({
+            "run_id": run_id,
+            "status": "succeeded",
+            "module_id": req.module_id,
+            "module_version": module_version,
+            "created_at": created_at.to_rfc3339(),
+            "proposals": truncated_proposals,
+        }))
+        .map_err(|err| NexusApiError::Internal {
+            code: "SERIALIZATION_ERROR".to_string(),
+            message: format!("build truncated run response: {err}"),
+        })?;
+        return Ok(Json(resp));
+    }
+
+    Ok(Json(resp_candidate))
 }
 
 // ── POST /v1/daemon/compute/runs/:run_id/accept ──────────────────────────
@@ -220,6 +228,11 @@ pub async fn accept_run(
         "applied" => {
             return Err(NexusApiError::Conflict(format!(
                 "run {run_id} has already been accepted"
+            )));
+        }
+        "discarded" => {
+            return Err(NexusApiError::Conflict(format!(
+                "run {run_id} has already been discarded"
             )));
         }
         _ => {
@@ -279,17 +292,33 @@ pub async fn accept_run(
     let new_entries_created =
         create_key_blocks_in_tx(&mut tx, &run.world_id, &output.new_key_blocks).await?;
 
+    // Build compute provenance per plan Global Constraints:
+    // {"compute": {"module_id", "module_version", "run_id", "source_kind": "direct_invoke"}}
+    let provenance = serde_json::to_string(&json!({
+        "compute": {
+            "module_id": run.module_id,
+            "module_version": run.module_version,
+            "run_id": run_id,
+            "source_kind": "direct_invoke",
+        }
+    }))
+    .map_err(|e| NexusApiError::Internal {
+        code: "SERIALIZATION_ERROR".to_string(),
+        message: format!("build compute provenance: {e}"),
+    })?;
+
     let events_created = output.timeline_events.len();
     let mut timeline_event_ids = Vec::with_capacity(events_created);
     for evt in &output.timeline_events {
         let event_type = "compute_result";
-        let result = narrative_write::append_event_in_tx(
+        let result = narrative_write::append_event_with_extensions_in_tx(
             &mut tx,
             &run.world_id,
             &branch_id,
             event_type,
             evt.title.as_deref().map(std::string::String::as_str),
             evt.summary.as_deref(),
+            &provenance,
         )
         .await
         .map_err(|e| NexusApiError::Internal {
@@ -499,12 +528,17 @@ async fn list_owned_world_ids(
     pool: &sqlx::SqlitePool,
     creator_id: &str,
 ) -> Result<Vec<String>, sqlx::Error> {
-    let rows: Vec<(String,)> =
-        sqlx::query_as("SELECT world_id FROM narrative_worlds WHERE owner_creator_id = ?")
-            .bind(creator_id)
-            .fetch_all(pool)
-            .await?;
-    Ok(rows.into_iter().map(|(id,)| id).collect())
+    // Compile-time checked query (daemon-runtime AGENTS.md mandatory rule).
+    // `world_id` is TEXT PRIMARY KEY in narrative_worlds (NOT NULL), but
+    // the sqlx offline cache may report it as nullable; filter None away
+    // (impossible in practice — every narrative_worlds row has a PK).
+    let rows = sqlx::query_scalar!(
+        r#"SELECT world_id as "world_id!" FROM narrative_worlds WHERE owner_creator_id = ?"#,
+        creator_id
+    )
+    .fetch_all(pool)
+    .await?;
+    Ok(rows)
 }
 
 fn map_build_error(
@@ -537,6 +571,34 @@ const fn compute_error_code(e: &ComputeError) -> &'static str {
         ComputeError::ModuleComputeFailed { .. } => "compute_module_error",
         _ => "internal",
     }
+}
+
+/// Build a truncated proposals object when the full `RunResponse` exceeds
+/// [`RESPONSE_BYTE_CAP`].  All 4 parts of the compute output are replaced with
+/// empty/stub values; the untruncated output remains in `proposals_json` on the
+/// session row.
+///
+/// Truncation strategy (per compute-output schema):
+/// - `state_delta`     → empty `[]` (satisifes `"type": "array"`)
+/// - `timeline_events` → empty `[]`
+/// - `new_key_blocks`  → empty `[]`
+/// - `battle_report`   → `{"kind": "truncated", ...}` (valid per
+///   `additionalProperties: true`)
+fn build_truncated_proposals() -> Value {
+    let reason = format!(
+        "response exceeds {RESPONSE_BYTE_CAP} bytes; full output available in GET /runs/:id"
+    );
+    json!({
+        "schema_version": 1,
+        "state_delta": [],
+        "timeline_events": [],
+        "new_key_blocks": [],
+        "battle_report": {
+            "kind": "truncated",
+            "_truncated": true,
+            "reason": reason,
+        },
+    })
 }
 
 fn map_delta_error(e: nexus_orchestration::capability::CapabilityError) -> NexusApiError {

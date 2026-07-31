@@ -337,6 +337,7 @@ pub async fn append_event(
         title,
         summary,
         sequence_no,
+        None, // extensions_nexus_json — default (no provenance)
     )
     .await
 }
@@ -397,15 +398,89 @@ pub async fn append_event_in_tx(
         title,
         summary,
         sequence_no,
+        None, // extensions_nexus_json — default (no provenance)
     )
     .await
 }
 
-/// Shared INSERT logic for [`append_event`] and [`append_event_in_tx`].
+/// Append a timeline event inside an existing transaction, with
+/// `extensions_nexus_json` provenance (V1.147 P0 — direct lane compute
+/// provenance).
+///
+/// Like [`append_event_in_tx`] but writes the supplied JSON string into the
+/// `narrative_timeline_events.extensions_nexus_json` column (additive migration
+/// `20260729_000001_timeline_extensions_nexus.sql`).  Existing callers of
+/// `append_event_in_tx` without provenance needs are unchanged.
+///
+/// # Errors
+///
+/// Same error variants as [`append_event_in_tx`].
+pub async fn append_event_with_extensions_in_tx(
+    tx: &mut sqlx::Transaction<'_, Sqlite>,
+    world_id: &str,
+    branch_id: &str,
+    event_type: &str,
+    title: Option<&str>,
+    summary: Option<&str>,
+    extensions_nexus_json: &str,
+) -> Result<AppendEventResult, NarrativeWriteError> {
+    // Validate world_id prefix
+    validate_id_prefix(world_id, "wld_", "world_id")?;
+
+    // Validate world FK exists
+    // SAFETY: simple EXISTS query against known table schema
+    let world_exists: i64 =
+        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM narrative_worlds WHERE world_id = ?)")
+            .bind(world_id)
+            .fetch_one(&mut **tx)
+            .await?;
+
+    if world_exists == 0 {
+        return Err(NarrativeWriteError::FkNotFound {
+            table: "world".to_string(),
+            id: world_id.to_string(),
+        });
+    }
+
+    // Allocate next sequence_no
+    // SAFETY: MAX aggregate query against known table schema
+    let max_seq: Option<i64> = sqlx::query_scalar(
+        "SELECT MAX(sequence_no) FROM narrative_timeline_events WHERE world_id = ? AND branch_id = ?",
+    )
+    .bind(world_id)
+    .bind(branch_id)
+    .fetch_one(&mut **tx)
+    .await?;
+
+    let sequence_no = max_seq.unwrap_or(-1) + 1;
+
+    append_event_core(
+        &mut **tx,
+        world_id,
+        branch_id,
+        event_type,
+        title,
+        summary,
+        sequence_no,
+        Some(extensions_nexus_json),
+    )
+    .await
+}
+
+/// Shared INSERT logic for [`append_event`], [`append_event_in_tx`], and
+/// [`append_event_with_extensions_in_tx`].
 ///
 /// `executor` must be an object that can run a single sqlx query (e.g. `&Pool`
 /// or `&mut Transaction`). Only one query is issued here, so the generic
 /// executor is safe.
+///
+/// `extensions_nexus_json`, when `Some`, is written to
+/// `narrative_timeline_events.extensions_nexus_json` (additive migration
+/// `20260729_000001_timeline_extensions_nexus.sql`); when `None` the column
+/// stays `NULL`.
+#[allow(clippy::too_many_arguments)]
+// ^ justification: internal helper; all 8 scalar args map 1:1 to INSERT columns.
+// Grouping into a struct would add indirection for zero abstraction gain.
 async fn append_event_core<'e, E: sqlx::Executor<'e, Database = Sqlite>>(
     executor: E,
     world_id: &str,
@@ -414,16 +489,18 @@ async fn append_event_core<'e, E: sqlx::Executor<'e, Database = Sqlite>>(
     title: Option<&str>,
     summary: Option<&str>,
     sequence_no: i64,
+    extensions_nexus_json: Option<&str>,
 ) -> Result<AppendEventResult, NarrativeWriteError> {
     let event_id = generate_event_id();
     let created_at = chrono::Utc::now().to_rfc3339();
 
     // SAFETY: INSERT matches narrative_timeline_events DDL in 20260524_narrative_worlds.sql
+    //         + 20260729_000001_timeline_extensions_nexus.sql (extensions_nexus_json column).
     let result = sqlx::query(
         "INSERT INTO narrative_timeline_events \
             (timeline_event_id, world_id, branch_id, event_type, status, sequence_no, \
-             title, summary, metadata_json, created_at) \
-           VALUES (?, ?, ?, ?, 'provisional', ?, ?, ?, '{}', ?)",
+             title, summary, metadata_json, extensions_nexus_json, created_at) \
+           VALUES (?, ?, ?, ?, 'provisional', ?, ?, ?, '{}', ?, ?)",
     )
     .bind(&event_id)
     .bind(world_id)
@@ -432,6 +509,7 @@ async fn append_event_core<'e, E: sqlx::Executor<'e, Database = Sqlite>>(
     .bind(sequence_no)
     .bind(title)
     .bind(summary)
+    .bind(extensions_nexus_json)
     .bind(&created_at)
     .execute(executor)
     .await;
@@ -748,5 +826,99 @@ mod tests {
         assert_eq!(events[0].title.as_deref(), Some("Chapter 1"));
         assert_eq!(events[1].sequence_no, 1);
         assert_eq!(events[1].title.as_deref(), Some("Chapter 2"));
+    }
+
+    #[tokio::test]
+    async fn test_append_event_with_extensions_in_tx_writes_provenance() {
+        let (pool, _dir) = fresh_pool().await;
+        seed_creator(&pool).await;
+
+        let world = create_world(
+            &pool,
+            "ctr_test",
+            "Provenance Test",
+            "provenance-test",
+            "private",
+            "manual",
+        )
+        .await
+        .unwrap();
+
+        let provenance = r#"{"compute":{"module_id":"mod_test","module_version":"0.1.0","run_id":"run_abc","source_kind":"direct_invoke"}}"#;
+
+        // Begin a TX, append with extensions, commit.
+        let mut tx = pool.begin().await.unwrap();
+        let result = append_event_with_extensions_in_tx(
+            &mut tx,
+            &world.world_id,
+            &world.root_fork_branch_id,
+            "compute_result",
+            Some("Test Compute Result"),
+            Some("Module mod_test computed against the world."),
+            provenance,
+        )
+        .await
+        .unwrap();
+        tx.commit().await.unwrap();
+
+        assert!(result.event_id.starts_with("evt_"));
+
+        // Read back and verify the extensions_nexus_json column.
+        // SAFETY: test-only query against vetted table.
+        let row: (Option<String>,) = sqlx::query_as(
+            "SELECT extensions_nexus_json FROM narrative_timeline_events WHERE timeline_event_id = ?",
+        )
+        .bind(&result.event_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+        assert_eq!(row.0.as_deref(), Some(provenance));
+    }
+
+    #[tokio::test]
+    async fn test_append_event_in_tx_leaves_extensions_null() {
+        // Verify backward compat: the existing `append_event_in_tx` (no
+        // extensions param) writes NULL, not a default object.
+        let (pool, _dir) = fresh_pool().await;
+        seed_creator(&pool).await;
+
+        let world = create_world(
+            &pool,
+            "ctr_test",
+            "Null Extensions Test",
+            "null-ext-test",
+            "private",
+            "manual",
+        )
+        .await
+        .unwrap();
+
+        let mut tx = pool.begin().await.unwrap();
+        let result = append_event_in_tx(
+            &mut tx,
+            &world.world_id,
+            &world.root_fork_branch_id,
+            "story_advance",
+            Some("Backward Compat"),
+            None,
+        )
+        .await
+        .unwrap();
+        tx.commit().await.unwrap();
+
+        // SAFETY: test-only query against vetted table.
+        let row: (Option<String>,) = sqlx::query_as(
+            "SELECT extensions_nexus_json FROM narrative_timeline_events WHERE timeline_event_id = ?",
+        )
+        .bind(&result.event_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+        assert!(
+            row.0.is_none(),
+            "existing append_event_in_tx must write NULL in extensions_nexus_json"
+        );
     }
 }

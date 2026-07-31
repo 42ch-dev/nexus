@@ -62,22 +62,26 @@ impl WasmEngine {
         self.run_invocation(module, manifest, &input_bytes, sandbox)
     }
 
-    /// Resolve the effective sandbox limits: manifest overrides take precedence,
-    /// otherwise the engine default applies.
+    /// Resolve the effective sandbox limits: manifest overrides **tighten** the
+    /// host defaults via `min(manifest_override, host_default)` (§4.1).  A
+    /// module cannot request limits *greater* than the host defaults — this
+    /// prevents user-installed modules from exceeding the configured safety
+    /// boundaries.
     fn resolve_sandbox(&self, manifest: &ModuleManifest) -> ResolvedSandbox {
         let base = self.default_sandbox();
         ResolvedSandbox {
-            fuel: manifest.max_fuel.unwrap_or(base.fuel),
+            fuel: manifest.max_fuel.map_or(base.fuel, |f| f.min(base.fuel)),
             max_memory_bytes: manifest
                 .max_memory_mib
                 .map_or(base.max_memory_bytes, |mib| {
                     usize::try_from(mib)
                         .unwrap_or(0)
                         .saturating_mul(1024 * 1024)
+                        .min(base.max_memory_bytes)
                 }),
-            wall_time: manifest
-                .max_wall_time_ms
-                .map_or(base.wall_time, Duration::from_millis),
+            wall_time: manifest.max_wall_time_ms.map_or(base.wall_time, |ms| {
+                Duration::from_millis(ms).min(base.wall_time)
+            }),
         }
     }
 
