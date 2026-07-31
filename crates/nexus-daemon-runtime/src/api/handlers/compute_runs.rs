@@ -440,7 +440,11 @@ pub async fn accept_run(
             }
         }
         let event_type = "compute_result";
-        let result = narrative_write::append_event_with_extensions_in_tx(
+        // Canon (not provisional): an accepted Run is author-committed world
+        // truth and the P2 Timeline projection reads `canon` events only —
+        // dogfood AC-I3.3 (node must appear on the Narrative layer after
+        // Accept). Discard/failed paths never reach this write.
+        let result = narrative_write::append_event_canon_with_extensions_in_tx(
             &mut tx,
             &run.world_id,
             &branch_id,

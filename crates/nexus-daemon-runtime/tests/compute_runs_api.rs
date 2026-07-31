@@ -241,9 +241,9 @@ async fn defender_hp(pool: &sqlx::SqlitePool, entry_id: &str) -> i64 {
 }
 
 /// `(timeline_event_id, event_type, extensions_nexus_json)` for a world's timeline.
-async fn timeline_events(pool: &sqlx::SqlitePool) -> Vec<(String, String, Option<String>)> {
-    sqlx::query_as::<_, (String, String, Option<String>)>(
-        "SELECT timeline_event_id, event_type, extensions_nexus_json \
+async fn timeline_events(pool: &sqlx::SqlitePool) -> Vec<(String, String, Option<String>, String)> {
+    sqlx::query_as::<_, (String, String, Option<String>, String)>(
+        "SELECT timeline_event_id, event_type, extensions_nexus_json, status \
          FROM narrative_timeline_events WHERE world_id = ? ORDER BY sequence_no",
     )
     .bind(WORLD)
@@ -457,10 +457,16 @@ async fn accept_happy_path_applies_atomically_and_creates_events() {
     assert_eq!(defender_hp(&c.pool, "kb_def").await, 15);
     assert_eq!(defender_hp(&c.pool, "kb_atk").await, 100);
 
-    // Timeline events created with `compute_result` + compute provenance.
+    // Timeline events created with `compute_result` + compute provenance,
+    // committed as canon (P2 dogfood: the Timeline projection reads canon
+    // events only — an accepted Run must surface as a Narrative node).
     let events = timeline_events(&c.pool).await;
     assert_eq!(events.len(), 1);
     assert_eq!(events[0].1, "compute_result");
+    assert_eq!(
+        events[0].3, "canon",
+        "accepted events must be canon, not provisional"
+    );
     assert_eq!(
         event_ids[0],
         json!(events[0].0),
