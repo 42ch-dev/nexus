@@ -27,6 +27,10 @@ export interface RunResponse {
   proposals?: NexusComputeOutputEnvelope;
   error?: NexusErrorResponse;
   /**
+   * True when the proposals payload was truncated because the full response exceeded 1 MiB. Full output is always available via GET /runs/:id.
+   */
+  truncated?: boolean;
+  /**
    * ISO 8601 UTC timestamp of run creation.
    */
   created_at: string;

@@ -193,6 +193,7 @@ pub async fn run(
             "status": "succeeded",
             "module_id": req.module_id,
             "module_version": module_version,
+            "truncated": true,
             "created_at": created_at.to_rfc3339(),
             "proposals": truncated_proposals,
         }))
@@ -683,4 +684,63 @@ async fn create_key_blocks_in_tx(
     }
 
     Ok(created)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use nexus_contracts::generated::daemon_api::compute::run_response::RunResponse;
+
+    #[test]
+    fn build_truncated_proposals_round_trips_to_typed_run_response() {
+        let truncated = build_truncated_proposals();
+        // Verify the JSON shape satisfies compute-output schema requirements.
+        assert_eq!(truncated["schema_version"], json!(1));
+        assert_eq!(truncated["state_delta"], json!([]));
+        assert_eq!(truncated["timeline_events"], json!([]));
+        assert_eq!(truncated["new_key_blocks"], json!([]));
+        assert_eq!(truncated["battle_report"]["kind"], json!("truncated"));
+
+        // Round-trip through the typed RunResponse: the only honest truncation
+        // signal is the first-class `truncated` field — not a battle_report
+        // stubbed value (those are silently dropped by the schema-typed
+        // deserializer; QC residual F1).
+        let resp: RunResponse = serde_json::from_value(json!({
+            "run_id": "run_test",
+            "status": "succeeded",
+            "module_id": "mod",
+            "module_version": "1.0.0",
+            "truncated": true,
+            "created_at": "2026-07-31T12:00:00Z",
+            "proposals": truncated,
+        }))
+        .expect("truncated RunResponse must deserialize");
+        assert!(
+            resp.truncated,
+            "truncated field must survive the typed wire round-trip"
+        );
+    }
+
+    #[test]
+    fn run_response_default_truncated_is_false() {
+        let resp: RunResponse = serde_json::from_value(json!({
+            "run_id": "run_test",
+            "status": "succeeded",
+            "module_id": "mod",
+            "module_version": "1.0.0",
+            "created_at": "2026-07-31T12:00:00Z",
+            "proposals": {
+                "schema_version": 1,
+                "state_delta": [],
+                "timeline_events": [],
+                "new_key_blocks": [],
+                "battle_report": {"kind": "combat"}
+            },
+        }))
+        .expect("normal RunResponse must deserialize");
+        assert!(
+            !resp.truncated,
+            "non-truncated response must have truncated=false"
+        );
+    }
 }

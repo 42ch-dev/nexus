@@ -67,7 +67,8 @@ impl WasmEngine {
     /// module cannot request limits *greater* than the host defaults — this
     /// prevents user-installed modules from exceeding the configured safety
     /// boundaries.
-    fn resolve_sandbox(&self, manifest: &ModuleManifest) -> ResolvedSandbox {
+    #[must_use]
+    pub fn resolve_sandbox(&self, manifest: &ModuleManifest) -> ResolvedSandbox {
         let base = self.default_sandbox();
         ResolvedSandbox {
             fuel: manifest.max_fuel.map_or(base.fuel, |f| f.min(base.fuel)),
@@ -453,7 +454,7 @@ fn describe_value(val: &Value) -> &'static str {
 
 /// Effective per-invocation limits (manifest overrides applied).
 #[derive(Clone, Copy)]
-struct ResolvedSandbox {
+pub struct ResolvedSandbox {
     fuel: u64,
     max_memory_bytes: usize,
     wall_time: Duration,
@@ -1031,5 +1032,105 @@ mod tests {
             }
             other => panic!("expected ManifestValidationFailed, got {other:?}"),
         }
+    }
+
+    // ------------------------------------------------------------------
+    // resolve_sandbox clamp tests
+    // ------------------------------------------------------------------
+
+    fn make_manifest(
+        module_id: &str,
+        max_fuel: Option<u64>,
+        max_memory_mib: Option<u32>,
+        max_wall_time_ms: Option<u64>,
+    ) -> ModuleManifest {
+        ModuleManifest {
+            module_id: module_id.to_string(),
+            name: module_id.to_string(),
+            version: "1.0.0".to_string(),
+            nexus_abi_version: 1,
+            required_key_block_types: vec![],
+            compute_export: "compute".to_string(),
+            init_export: "init".to_string(),
+            description: None,
+            author: None,
+            host_functions: vec![],
+            schemas: None,
+            battle_report_kind: None,
+            max_fuel,
+            max_memory_mib,
+            max_wall_time_ms,
+        }
+    }
+
+    #[test]
+    fn resolve_sandbox_absent_overrides_use_host_defaults() {
+        let engine = WasmEngine::new().unwrap();
+        let manifest = make_manifest("no-overrides", None, None, None);
+        let resolved = engine.resolve_sandbox(&manifest);
+        assert_eq!(resolved.fuel, crate::sandbox::DEFAULT_FUEL);
+        assert_eq!(
+            resolved.max_memory_bytes,
+            (crate::sandbox::DEFAULT_MEMORY_MIB as usize) * 1024 * 1024
+        );
+        assert_eq!(resolved.wall_time, crate::sandbox::DEFAULT_WALL_TIME);
+    }
+
+    #[test]
+    fn resolve_sandbox_higher_than_host_clamped_to_default() {
+        let engine = WasmEngine::new().unwrap();
+        let manifest = make_manifest(
+            "over-the-limit",
+            Some(crate::sandbox::DEFAULT_FUEL * 10), // 10× host default
+            Some(crate::sandbox::DEFAULT_MEMORY_MIB * 4), // 4× host default
+            Some(crate::sandbox::DEFAULT_WALL_TIME.as_millis() as u64 * 5), // 5× host default
+        );
+        let resolved = engine.resolve_sandbox(&manifest);
+        assert_eq!(resolved.fuel, crate::sandbox::DEFAULT_FUEL);
+        assert_eq!(
+            resolved.max_memory_bytes,
+            (crate::sandbox::DEFAULT_MEMORY_MIB as usize) * 1024 * 1024
+        );
+        assert_eq!(resolved.wall_time, crate::sandbox::DEFAULT_WALL_TIME);
+    }
+
+    #[test]
+    fn resolve_sandbox_lower_than_host_manifest_wins() {
+        let engine = WasmEngine::new().unwrap();
+        let half_fuel = crate::sandbox::DEFAULT_FUEL / 2;
+        let half_mem_mib = crate::sandbox::DEFAULT_MEMORY_MIB / 2;
+        let half_wall_ms = crate::sandbox::DEFAULT_WALL_TIME.as_millis() as u64 / 2;
+        let manifest = make_manifest(
+            "under-the-limit",
+            Some(half_fuel),
+            Some(half_mem_mib),
+            Some(half_wall_ms),
+        );
+        let resolved = engine.resolve_sandbox(&manifest);
+        assert_eq!(resolved.fuel, half_fuel);
+        assert_eq!(
+            resolved.max_memory_bytes,
+            (half_mem_mib as usize) * 1024 * 1024
+        );
+        assert_eq!(
+            resolved.wall_time,
+            std::time::Duration::from_millis(half_wall_ms)
+        );
+    }
+
+    #[test]
+    fn resolve_sandbox_mixed_overrides() {
+        // Fuel lower (wins), memory higher (clamped), wall-time absent (default).
+        let engine = WasmEngine::new().unwrap();
+        let low_fuel = crate::sandbox::DEFAULT_FUEL / 4;
+        let high_mem = crate::sandbox::DEFAULT_MEMORY_MIB * 8;
+        let manifest = make_manifest("mixed", Some(low_fuel), Some(high_mem), None);
+        let resolved = engine.resolve_sandbox(&manifest);
+        assert_eq!(resolved.fuel, low_fuel);
+        assert_eq!(
+            resolved.max_memory_bytes,
+            (crate::sandbox::DEFAULT_MEMORY_MIB as usize) * 1024 * 1024
+        );
+        assert_eq!(resolved.wall_time, crate::sandbox::DEFAULT_WALL_TIME);
     }
 }

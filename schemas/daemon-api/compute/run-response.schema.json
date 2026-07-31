@@ -32,6 +32,11 @@
       "$ref": "https://nexus42.invalid/schemas/daemon-api/common/error-response.schema.json",
       "description": "Honest error detail when status is \"failed\" (sandbox limit, module trap, host error, etc. per route spec §4)."
     },
+    "truncated": {
+      "type": "boolean",
+      "default": false,
+      "description": "True when the proposals payload was truncated because the full response exceeded 1 MiB. Full output is always available via GET /runs/:id."
+    },
     "created_at": {
       "type": "string",
       "format": "date-time",
