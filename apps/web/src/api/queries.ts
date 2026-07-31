@@ -64,7 +64,7 @@ import type {
 
 import { useToast } from '@/lib/use-toast';
 import { useDesktopCapabilities, useNexusClient } from '@/lib/client-context';
-import { NexusClientError, type ListRunsQuery } from '@/lib/nexus';
+import { NexusClientError, type ClearRunsQuery, type ListRunsQuery } from '@/lib/nexus';
 import { shortId } from '@/lib/format';
 import { queryKeys } from '@/lib/nexus/query-keys';
 import { useActiveCreatorId as useActiveCreatorIdFromContext } from '@/lib/active-creator-context';
@@ -1376,6 +1376,31 @@ export function useDiscardRun() {
       void qc.invalidateQueries({ queryKey: queryKeys.worldKb.all });
     },
     onError: (error) => errorToast(error, 'error.couldNotDiscardRun'),
+  });
+}
+
+/**
+ * Clear history (V1.147 P3 T2) — deletes terminal runs
+ * (`applied|discarded|failed`) for one World. The World scope is required
+ * (the daemon 422s without it); the UI gates the button on a selected World
+ * filter. On success the runs lists + detail caches are invalidated so the
+ * cleared rows disappear from every cached view (including the module screen
+ * that hosts the Run Studio). Timeline/KB caches are intentionally NOT
+ * invalidated: clearing run rows never mutates World state — Applied runs
+ * already committed their events; the rows are history records only.
+ */
+export function useClearRuns() {
+  const client = useNexusClient();
+  const qc = useQueryClient();
+  const errorToast = useErrorToast();
+  return useMutation({
+    mutationFn: (vars: { worldId: string; status?: ClearRunsQuery['status'] }) =>
+      client.clearRuns({ world_id: vars.worldId, status: vars.status }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: queryKeys.compute.runs.lists() });
+      void qc.invalidateQueries({ queryKey: queryKeys.compute.runs.details() });
+    },
+    onError: (error) => errorToast(error, 'error.couldNotClearRuns'),
   });
 }
 

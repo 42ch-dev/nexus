@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM compute_sessions WHERE world_id = ? AND run_id IS NOT NULL AND status IN ('applied', 'discarded', 'failed')",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "a8c810230e72298f644c6aaf3a5919297f9773beba01b0c18016dc8cb95b578e"
+}

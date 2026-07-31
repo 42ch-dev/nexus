@@ -61,6 +61,17 @@ pub struct ListRunsQuery {
     pub limit: Option<u32>,
 }
 
+/// Query params for `DELETE /runs` (Clear history — V1.147 P3 T2).
+#[derive(Debug, Deserialize)]
+pub struct DeleteRunsQuery {
+    /// Required scope: runs are cleared per World; the caller must own it.
+    pub world_id: Option<String>,
+    /// Optional terminal-state filter (`applied|discarded|failed`). Absent →
+    /// all terminal runs of the World. `running` / `succeeded` are never
+    /// deletable and are rejected with 422.
+    pub status: Option<String>,
+}
+
 // ── POST /v1/daemon/compute/run ──────────────────────────────────────────
 ///
 /// # Errors
@@ -646,6 +657,84 @@ pub async fn list_runs_handler(
         has_more,
         next_cursor,
     }))
+}
+
+// ── DELETE /v1/daemon/compute/runs ─────────────────────────────────────────
+
+/// Clear history — delete terminal runs for an owned World (V1.147 P3 T2).
+///
+/// Plan Clear-history semantics lock:
+/// - `world_id` is **required** (Clear is per-World scope; never a world-wide
+///   purge) — missing scope → 422.
+/// - Optional `status` filter limited to terminal states
+///   (`applied|discarded|failed`); a request targeting `running` / `succeeded`
+///   (needs-review) is rejected with 422 — those rows are never deleted.
+/// - World-ownership is guarded **before** any DB work (403).
+/// - Returns `{ "deleted": n }` (schema-less inline response — P1
+///   `DiscardRunResponse` precedent for trivial shapes).
+///
+/// Clearing run rows never mutates World state: Applied runs already
+/// committed their timeline events; the rows are history records only.
+///
+/// # Errors
+/// 422 when `world_id` is missing or `status` is not terminal; 403 when the
+/// World is not owned; 500 on DB failure.
+#[allow(clippy::missing_errors_doc)]
+pub async fn delete_runs(
+    State(state): State<WorkspaceState>,
+    Query(params): Query<DeleteRunsQuery>,
+) -> Result<Json<Value>, NexusApiError> {
+    let pool = state.pool_or_uninit()?;
+    let creator_id =
+        read_active_creator_id(state.nexus_home()).ok_or(NexusApiError::AuthRequired)?;
+
+    // Scope required (plan lock) — never a world-wide purge.
+    let world_id = params
+        .world_id
+        .as_deref()
+        .ok_or_else(|| NexusApiError::BadRequest {
+            code: "invalid_input".to_string(),
+            message: "world_id is required to clear run history (scope is per World)".to_string(),
+        })?;
+
+    // Ownership gate BEFORE any DB work (plan lock).
+    let owned = narrative_write::is_world_owned(pool, &creator_id, world_id)
+        .await
+        .map_err(|e| NexusApiError::Internal {
+            code: "DATABASE_ERROR".to_string(),
+            message: e.to_string(),
+        })?;
+    if !owned {
+        return Err(NexusApiError::Forbidden {
+            resource: format!("world {world_id}"),
+            reason: "you do not own this world".to_string(),
+        });
+    }
+
+    // Terminal-only status filter (plan lock): running/succeeded → 422.
+    if let Some(ref status) = params.status {
+        if !matches!(
+            status.as_str(),
+            compute_runs::RUN_STATUS_APPLIED
+                | compute_runs::RUN_STATUS_DISCARDED
+                | compute_runs::RUN_STATUS_FAILED
+        ) {
+            return Err(NexusApiError::BadRequest {
+                code: "invalid_input".to_string(),
+                message: format!(
+                    "status '{status}' cannot be cleared: only terminal states \
+                     (applied|discarded|failed) are deletable; running and succeeded \
+                     (needs review) runs are kept"
+                ),
+            });
+        }
+    }
+
+    let deleted = compute_runs::delete_terminal_runs(pool, world_id, params.status.as_deref())
+        .await
+        .map_err(NexusApiError::from)?;
+
+    Ok(Json(json!({ "deleted": deleted })))
 }
 
 // ── GET /v1/daemon/compute/runs/:run_id ──────────────────────────────────

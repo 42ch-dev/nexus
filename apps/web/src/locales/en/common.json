@@ -97,6 +97,7 @@
     "couldNotRunCompute": "Could not run module",
     "couldNotAcceptRun": "Could not apply compute result",
     "couldNotDiscardRun": "Could not discard compute result",
+    "couldNotClearRuns": "Could not clear runs",
     "openExternalFailed": "Could not open the link. Try opening it manually in your browser."
   },
   "toast": {

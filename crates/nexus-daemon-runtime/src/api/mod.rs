@@ -528,7 +528,11 @@ fn compute_invoke_routes() -> Router<WorkspaceState> {
         )
         .route(
             "/v1/daemon/compute/runs",
-            get(handlers::compute_runs::list_runs_handler),
+            get(handlers::compute_runs::list_runs_handler)
+                // V1.147 P3 T2 — Clear history: scoped (world_id required),
+                // terminal-status-only delete of run rows. No world-state
+                // mutation (Applied runs already committed their events).
+                .delete(handlers::compute_runs::delete_runs),
         )
 }
 

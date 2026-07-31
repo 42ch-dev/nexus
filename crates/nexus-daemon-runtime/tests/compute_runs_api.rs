@@ -1487,6 +1487,259 @@ async fn accept_with_explicit_null_timeline_ids_accepts_all() {
     assert_eq!(defender_hp(&c.pool, "kb_def").await, 15);
 }
 
+// ── V1.147 P3 T2 — DELETE /v1/daemon/compute/runs (Clear history) ───────────
+
+/// `DELETE /v1/daemon/compute/runs` with optional `world_id` / `status`.
+async fn delete_runs(
+    server: &TestServer,
+    world_id: Option<&str>,
+    status: Option<&str>,
+) -> axum_test::TestResponse {
+    let mut query: Vec<String> = Vec::new();
+    if let Some(w) = world_id {
+        query.push(format!("world_id={w}"));
+    }
+    if let Some(s) = status {
+        query.push(format!("status={s}"));
+    }
+    let path = if query.is_empty() {
+        "/v1/daemon/compute/runs".to_string()
+    } else {
+        format!("/v1/daemon/compute/runs?{}", query.join("&"))
+    };
+    server.delete(&path).await
+}
+
+/// Seed one run in EVERY lifecycle status on the owned combat world (plus a
+/// terminal run on a foreign world) so Clear-scope tests can assert exactly
+/// which rows survive. Returns the run ids by status.
+struct RunStatusSeed {
+    succeeded: String,
+    applied: String,
+    discarded: String,
+    failed: String,
+    running: String,
+    foreign_failed: String,
+}
+
+async fn seed_run_status_mix(c: &Ctx) -> RunStatusSeed {
+    seed_character(&c.pool, "kb_atk", "Striker", 20, 3, 100, 100).await;
+    seed_character(&c.pool, "kb_def", "Guardian", 10, 5, 30, 50).await;
+
+    let succeeded = run_succeeded(c).await;
+
+    let applied = run_succeeded(c).await;
+    let accept = c
+        .server
+        .post(&format!("/v1/daemon/compute/runs/{applied}/accept"))
+        .json(&json!({}))
+        .await;
+    assert_eq!(
+        accept.status_code(),
+        StatusCode::OK,
+        "body={}",
+        accept.text()
+    );
+
+    let discarded = run_succeeded(c).await;
+    let discard = c
+        .server
+        .post(&format!("/v1/daemon/compute/runs/{discarded}/discard"))
+        .await;
+    assert_eq!(
+        discard.status_code(),
+        StatusCode::OK,
+        "body={}",
+        discard.text()
+    );
+
+    let failed = nexus_local_db::compute_runs::insert_run(
+        &c.pool,
+        WORLD,
+        MODULE,
+        Some("1.0.0"),
+        None,
+        None,
+        None,
+    )
+    .await
+    .unwrap();
+    nexus_local_db::compute_runs::set_run_failed(&c.pool, &failed, r#"{"code":"internal"}"#)
+        .await
+        .unwrap();
+
+    let running = nexus_local_db::compute_runs::insert_run(
+        &c.pool,
+        WORLD,
+        MODULE,
+        Some("1.0.0"),
+        None,
+        None,
+        None,
+    )
+    .await
+    .unwrap();
+
+    // A terminal (failed) run on a world owned by ANOTHER creator — the
+    // ownership gate must keep it untouched.
+    seed_foreign_world(&c.pool).await;
+    let foreign_failed = nexus_local_db::compute_runs::insert_run(
+        &c.pool,
+        FOREIGN_WORLD,
+        MODULE,
+        Some("1.0.0"),
+        None,
+        None,
+        None,
+    )
+    .await
+    .unwrap();
+    nexus_local_db::compute_runs::set_run_failed(
+        &c.pool,
+        &foreign_failed,
+        r#"{"code":"internal"}"#,
+    )
+    .await
+    .unwrap();
+
+    RunStatusSeed {
+        succeeded,
+        applied,
+        discarded,
+        failed,
+        running,
+        foreign_failed,
+    }
+}
+
+/// Clear requires explicit scope — `DELETE /runs` without `world_id` is 422.
+#[tokio::test]
+#[serial]
+async fn delete_runs_without_world_id_returns_422_scope_required() {
+    let c = ctx().await;
+    let resp = delete_runs(&c.server, None, None).await;
+    assert_error_envelope(&resp, StatusCode::UNPROCESSABLE_ENTITY, "invalid_input");
+}
+
+/// Clear deletes ONLY terminal runs (applied|discarded|failed) of the OWNED
+/// world and returns the deleted count. `running`, `succeeded` (needs review)
+/// and foreign-world rows survive.
+#[tokio::test]
+#[serial]
+async fn delete_runs_removes_terminal_runs_only_and_returns_deleted_count() {
+    let c = ctx().await;
+    let seed = seed_run_status_mix(&c).await;
+
+    let resp = delete_runs(&c.server, Some(WORLD), None).await;
+    assert_eq!(resp.status_code(), StatusCode::OK, "body={}", resp.text());
+    let body: Value = resp.json();
+    assert_eq!(body["deleted"], 3, "body={body}");
+
+    // Survivors: needs-review (succeeded), running, foreign terminal.
+    for id in [&seed.succeeded, &seed.running, &seed.foreign_failed] {
+        assert!(
+            nexus_local_db::compute_runs::get_run(&c.pool, id)
+                .await
+                .unwrap()
+                .is_some(),
+            "{id} must survive Clear"
+        );
+    }
+    // Deleted: applied, discarded, failed (the 3 terminal states).
+    for id in [&seed.applied, &seed.discarded, &seed.failed] {
+        assert!(
+            nexus_local_db::compute_runs::get_run(&c.pool, id)
+                .await
+                .unwrap()
+                .is_none(),
+            "{id} must be deleted"
+        );
+    }
+}
+
+/// A non-terminal `status` filter is rejected — running/succeeded are never
+/// deletable (422 `invalid_input`).
+#[tokio::test]
+#[serial]
+async fn delete_runs_with_non_terminal_status_returns_422() {
+    let c = ctx().await;
+    let resp = delete_runs(&c.server, Some(WORLD), Some("running")).await;
+    assert_error_envelope(&resp, StatusCode::UNPROCESSABLE_ENTITY, "invalid_input");
+
+    let resp = delete_runs(&c.server, Some(WORLD), Some("succeeded")).await;
+    assert_error_envelope(&resp, StatusCode::UNPROCESSABLE_ENTITY, "invalid_input");
+}
+
+/// A terminal `status` filter narrows Clear to exactly that state.
+#[tokio::test]
+#[serial]
+async fn delete_runs_with_terminal_status_filter_deletes_only_matching() {
+    let c = ctx().await;
+    let seed = seed_run_status_mix(&c).await;
+
+    let resp = delete_runs(&c.server, Some(WORLD), Some("failed")).await;
+    assert_eq!(resp.status_code(), StatusCode::OK, "body={}", resp.text());
+    let body: Value = resp.json();
+    assert_eq!(body["deleted"], 1, "body={body}");
+    assert!(
+        nexus_local_db::compute_runs::get_run(&c.pool, &seed.failed)
+            .await
+            .unwrap()
+            .is_none(),
+        "failed row must be deleted"
+    );
+    for id in [
+        &seed.applied,
+        &seed.discarded,
+        &seed.succeeded,
+        &seed.running,
+    ] {
+        assert!(
+            nexus_local_db::compute_runs::get_run(&c.pool, id)
+                .await
+                .unwrap()
+                .is_some(),
+            "{id} must survive a failed-only Clear"
+        );
+    }
+}
+
+/// Ownership gate: a foreign world (and an unknown world) return 403 and no
+/// row is touched.
+#[tokio::test]
+#[serial]
+async fn delete_runs_on_foreign_or_unknown_world_returns_403() {
+    let c = ctx().await;
+    seed_foreign_world(&c.pool).await;
+    let foreign = nexus_local_db::compute_runs::insert_run(
+        &c.pool,
+        FOREIGN_WORLD,
+        MODULE,
+        Some("1.0.0"),
+        None,
+        None,
+        None,
+    )
+    .await
+    .unwrap();
+    nexus_local_db::compute_runs::set_run_failed(&c.pool, &foreign, r#"{"code":"internal"}"#)
+        .await
+        .unwrap();
+
+    let resp = delete_runs(&c.server, Some(FOREIGN_WORLD), None).await;
+    assert_error_envelope(&resp, StatusCode::FORBIDDEN, "forbidden");
+    assert!(
+        nexus_local_db::compute_runs::get_run(&c.pool, &foreign)
+            .await
+            .unwrap()
+            .is_some(),
+        "foreign run must survive a 403 Clear"
+    );
+
+    let resp = delete_runs(&c.server, Some("wld_nonexistent"), None).await;
+    assert_error_envelope(&resp, StatusCode::FORBIDDEN, "forbidden");
+}
+
 // ── W1 fix wave — newest-first list ordering ───────────────────────────────
 
 /// W1: `GET /runs` returns runs newest-first and the cursor walks that order.
