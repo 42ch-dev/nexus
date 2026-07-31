@@ -208,13 +208,18 @@ pub async fn run(
             // an honest 422 `invalid_input` with per-entry detail (entry id +
             // reason) — invalid entries are never silently skipped.
             let entries_value = serde_json::to_value(&entries).unwrap_or_else(|_| json!([]));
+            // NOTE: `invalid_entries` lives under `details` — the persisted
+            // error_json is a `NexusErrorResponse` (`code`/`details`/`message`,
+            // strict), which is what `GET /runs/:id` re-deserializes into
+            // `RunDetail.error`. A top-level `invalid_entries` key broke the
+            // detail read with a 500 SERIALIZATION_ERROR (V1.147 P3 T4 dogfood).
             let error_json = serde_json::to_string(&json!({
                 "code": "invalid_input",
                 "message": format!(
                     "compute input validation failed: {} invalid entry(ies); the run was not applied",
                     entries.len()
                 ),
-                "invalid_entries": entries_value,
+                "details": json!({ "invalid_entries": entries_value }),
             }))
             .unwrap_or_else(|_| r#"{"code":"invalid_input"}"#.to_string());
             if let Err(db_err) = compute_runs::set_run_failed(pool, &run_id, &error_json).await {

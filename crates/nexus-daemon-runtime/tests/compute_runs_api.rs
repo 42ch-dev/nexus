@@ -1348,9 +1348,38 @@ async fn run_with_invalid_entry_returns_422_with_per_entry_detail() {
     assert_eq!(status, "failed");
     let error: Value = serde_json::from_str(error_json.as_deref().unwrap()).unwrap();
     assert_eq!(error["code"], "invalid_input");
-    assert_eq!(error["invalid_entries"][0]["entry_id"], "kb_broken");
+    // `invalid_entries` lives under `details`: the persisted error_json is a
+    // strict `NexusErrorResponse` (`code`/`details`/`message`) and
+    // `GET /runs/:id` re-deserializes it into `RunDetail.error` — a
+    // top-level `invalid_entries` key 500s the detail read (V1.147 P3 T4
+    // dogfood regression; the detail-read assertion below is the guard).
+    assert_eq!(
+        error["details"]["invalid_entries"][0]["entry_id"],
+        "kb_broken"
+    );
     assert!(timeline_events(&c.pool).await.is_empty());
     assert!(!run_id.is_empty());
+
+    // Regression (T4 dogfood): the detail endpoint must still serve this
+    // failed run — 200, `error.code = invalid_input`, per-entry detail
+    // readable — instead of 500 `SERIALIZATION_ERROR`.
+    let detail = c
+        .server
+        .get(&format!("/v1/daemon/compute/runs/{run_id}"))
+        .await;
+    assert_eq!(
+        detail.status_code(),
+        StatusCode::OK,
+        "detail body={}",
+        detail.text()
+    );
+    let detail_body: Value = detail.json();
+    assert_eq!(detail_body["status"], "failed");
+    assert_eq!(detail_body["error"]["code"], "invalid_input");
+    assert_eq!(
+        detail_body["error"]["details"]["invalid_entries"][0]["entry_id"],
+        "kb_broken"
+    );
 }
 
 // ── W2 fix wave — subset-accept ────────────────────────────────────────────
