@@ -15,6 +15,7 @@ Every primitive promoted into this package is recorded here with: component name
 | `<Toast>` (`ToastProvider` / `Toaster` / `useToast`) | V1.106 P0 | 2025-05 | Studio Surfaces fixtures. |
 | `<TransportErrorBlock>` | V1.129 P1 — `transport-error-ux.md` | 2026-07-21 | Pure presentational transport-failure block. Props: `kind`, `onRetry?`, `onOpenSettings?`, `detail?`, `title?`. No `react-i18next` import; CTA matrix driven by `kind`. |
 | `<Tabs>` (`TabsList` / `TabsTrigger` / `TabsContent`) | V1.137 P2 — `p2-tabs-nexus-ui-promotion` | 2026-07-23 | React context compound; controlled + uncontrolled. Ported from `apps/web/src/components/ui/tabs.tsx`; package `cn` only. HubTabBar out of scope. |
+| `<RunStatusBadge>`, `<EntityPickerField>`, `<RunFormFields>`, `<ProposalSections>`, `<RunsTable>` | V1.147 P1 — `2026-07-31-v1.147-p1-compute-run-studio-modules` T2 | 2026-07-31 | Compute Run Studio primitive set. Pure presentational: data + caller-owned copy + callbacks; structural mirrors only (no wire-contract imports). Studio fixture: `compute-run-studio.tsx` (Components → Run Studio). |
 
 A promotion entry alone is not sufficient — the workflow in root `AGENTS.md` (UI Component Policy) must be followed: Studio fixture first → package promotion → app wiring.
 

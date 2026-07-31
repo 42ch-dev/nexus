@@ -47,6 +47,9 @@ import type {
   ReadingAnnotationPatchRequest,
   ReadingProgressResponse,
   ReviewResponse,
+  RunAcceptRequest,
+  RunRequest,
+  RunSummary,
   ScaffoldPresetRequest,
   ScanRequest,
   ScanResponse,
@@ -60,7 +63,7 @@ import type {
 
 import { useToast } from '@/lib/use-toast';
 import { useDesktopCapabilities, useNexusClient } from '@/lib/client-context';
-import { NexusClientError } from '@/lib/nexus';
+import { NexusClientError, type ListRunsQuery } from '@/lib/nexus';
 import { shortId } from '@/lib/format';
 import { queryKeys } from '@/lib/nexus/query-keys';
 import { useActiveCreatorId as useActiveCreatorIdFromContext } from '@/lib/active-creator-context';
@@ -1253,6 +1256,125 @@ export function useComputeModule(moduleId: string) {
     queryKey: queryKeys.compute.modules.detail(moduleId),
     queryFn: () => client.getComputeModule(moduleId),
     enabled: Boolean(moduleId),
+  });
+}
+
+// ── Compute runs (V1.147 P1 — Run Studio) ────────────────────────────────────
+
+/** Filter for the runs history list (cursor + page size are hook-managed). */
+export type ComputeRunsFilter = Omit<ListRunsQuery, 'cursor' | 'limit'>;
+
+/**
+ * Cursor-paginated compute run history (newest-first). Pages map to the shared
+ * `CursorPage` shape so `flattenPages` works; the filter is part of the query
+ * key so each filter view caches independently.
+ */
+export function useComputeRuns(filter?: ComputeRunsFilter) {
+  const client = useNexusClient();
+  const limit = DEFAULT_PAGE_SIZE;
+  return useInfiniteQuery({
+    queryKey: queryKeys.compute.runs.list({ ...filter, limit }),
+    initialPageParam: FIRST_PAGE,
+    queryFn: async ({ pageParam }): Promise<CursorPage<RunSummary>> => {
+      const res = await client.listRuns({ ...filter, limit, cursor: pageParam });
+      return {
+        items: res.items,
+        pagination: { limit, has_more: res.has_more, next_cursor: res.next_cursor },
+      };
+    },
+    getNextPageParam: (lastPage: CursorPage<RunSummary>): Cursor =>
+      lastPage.pagination.has_more ? lastPage.pagination.next_cursor : undefined,
+  });
+}
+
+/** Full detail for a single run (proposals on succeeded, error on failed). */
+export function useComputeRun(runId: string | undefined) {
+  const client = useNexusClient();
+  return useQuery({
+    queryKey: queryKeys.compute.runs.detail(runId ?? ''),
+    queryFn: () => client.getRun(runId!),
+    enabled: Boolean(runId),
+  });
+}
+
+/**
+ * Invoke a module against an owned World. The World is not mutated by the run
+ * itself — proposals are reviewed, then accepted or discarded. On success the
+ * runs lists refetch so the new run appears in history without a reload.
+ * `status: "failed"` arrives as data (not a thrown error); the caller renders
+ * the failure copy from `RunResponse.error`.
+ */
+export function useRunCompute() {
+  const client = useNexusClient();
+  const qc = useQueryClient();
+  const errorToast = useErrorToast();
+  return useMutation({
+    mutationFn: (request: RunRequest) => client.runCompute(request),
+    onSuccess: (_data, request) => {
+      void qc.invalidateQueries({ queryKey: queryKeys.compute.runs.lists() });
+      // Keep the module screen fresh — it hosts the Run Studio entry for this
+      // module (brief: runs-list + module-detail invalidation).
+      void qc.invalidateQueries({ queryKey: queryKeys.compute.modules.detail(request.module_id) });
+    },
+    onError: (error, request) => {
+      // The daemon persists a Failed run row even when the POST surfaces an
+      // error envelope — refetch the Runs lists so the row shows immediately
+      // (dogfood finding, V1.147 P1 T4). Unknown world / not-owner rejections
+      // create no row; an extra refetch is harmless there.
+      void qc.invalidateQueries({ queryKey: queryKeys.compute.runs.lists() });
+      void qc.invalidateQueries({ queryKey: queryKeys.compute.modules.detail(request.module_id) });
+      errorToast(error, 'error.couldNotRunCompute');
+    },
+  });
+}
+
+/**
+ * Accept a succeeded run — atomically commits its proposals into the World.
+ * Refetches the runs lists + the run detail so the status flip to Applied is
+ * reflected everywhere it is cached, and the cross-screen fan-out (qc1 W-001 /
+ * qc3 W-1): Accept mutates World + Timeline + KB together, so the Timeline
+ * overview and World-KB graph caches are invalidated too (mirroring the
+ * `useCreateWorld` / `useDeleteWorld` convention) — the app sets
+ * `refetchOnWindowFocus: false`, so without this the post-Accept World state
+ * would stay stale until a remount.
+ */
+export function useAcceptRun() {
+  const client = useNexusClient();
+  const qc = useQueryClient();
+  const errorToast = useErrorToast();
+  return useMutation({
+    mutationFn: (vars: { runId: string; request?: RunAcceptRequest | null }) =>
+      client.acceptRun(vars.runId, vars.request),
+    onSuccess: (_data, vars) => {
+      void qc.invalidateQueries({ queryKey: queryKeys.compute.runs.lists() });
+      void qc.invalidateQueries({ queryKey: queryKeys.compute.runs.detail(vars.runId) });
+      void qc.invalidateQueries({ queryKey: queryKeys.timeline.all });
+      void qc.invalidateQueries({ queryKey: queryKeys.worldKb.all });
+    },
+    onError: (error) => errorToast(error, 'error.couldNotAcceptRun'),
+  });
+}
+
+/**
+ * Discard a succeeded run — drops its proposals (destructive; the UI confirms
+ * first per the behavior spec). Same invalidation contract as accept,
+ * including the Timeline/KB fan-out for symmetry (a discarded run never wrote
+ * World state, but the stale-cache window after a previous Accept on the same
+ * surface is closed the same way).
+ */
+export function useDiscardRun() {
+  const client = useNexusClient();
+  const qc = useQueryClient();
+  const errorToast = useErrorToast();
+  return useMutation({
+    mutationFn: (runId: string) => client.discardRun(runId),
+    onSuccess: (_data, runId) => {
+      void qc.invalidateQueries({ queryKey: queryKeys.compute.runs.lists() });
+      void qc.invalidateQueries({ queryKey: queryKeys.compute.runs.detail(runId) });
+      void qc.invalidateQueries({ queryKey: queryKeys.timeline.all });
+      void qc.invalidateQueries({ queryKey: queryKeys.worldKb.all });
+    },
+    onError: (error) => errorToast(error, 'error.couldNotDiscardRun'),
   });
 }
 

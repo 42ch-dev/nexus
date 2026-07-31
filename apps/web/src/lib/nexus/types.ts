@@ -86,6 +86,13 @@ import type {
   ReloadPresetResponse,
   ReviewRequest,
   ReviewResponse,
+  RunAcceptRequest,
+  RunAcceptResponse,
+  RunDetail,
+  RunListResponse,
+  RunRequest,
+  RunResponse,
+  RunSummary,
   ScaffoldPresetRequest,
   ScaffoldPresetResponse,
   ScanRequest,
@@ -129,6 +136,36 @@ export interface DaemonHealth {
   status: string;
   /** Daemon (`nexus42`) package version. */
   version: string;
+}
+
+/**
+ * Query params for `GET /v1/daemon/compute/runs` (V1.147 P1). App-side type:
+ * P0 shipped no generated schema for this query object; the fields mirror the
+ * daemon handler's `ListRunsQuery` (`world_id` / `module_id` / `status` /
+ * `limit` / `cursor`). Promote to a generated contract when a schema lands.
+ */
+export interface ListRunsQuery {
+  /** Restrict to runs targeting this World. */
+  world_id?: string;
+  /** Restrict to runs of this module. */
+  module_id?: string;
+  /** Restrict to one lifecycle status. */
+  status?: RunSummary['status'];
+  /** Page size (daemon default 20, max 100). */
+  limit?: number;
+  /** Opaque cursor from a previous page's `next_cursor`. */
+  cursor?: string;
+}
+
+/**
+ * Response for `POST /v1/daemon/compute/runs/{run_id}/discard` (V1.147 P1).
+ * App-side type: the daemon returns an inline `{"run_id", "status"}` JSON
+ * object and P0 shipped no generated schema for it.
+ */
+export interface DiscardRunResponse {
+  run_id: string;
+  /** Always `"discarded"` on success. */
+  status: 'discarded';
 }
 
 /**
@@ -367,6 +404,26 @@ export interface NexusClient {
    * mutable runtime state of a computable KeyBlock plus computability flag + OCC version.
    */
   getKeyBlockState(worldId: string, keyBlockId: string): Promise<WorldKbKeyBlockStateResponse>;
+
+  // ── Compute runs (V1.147 P1) ──────────────────────────────────────────────
+  /**
+   * `POST /v1/daemon/compute/run` — invoke a module against an owned World.
+   * The World is not mutated; `status: "succeeded"` carries proposals for
+   * review-then-accept, `status: "failed"` carries an honest error.
+   */
+  runCompute(request: RunRequest): Promise<RunResponse>;
+  /**
+   * `POST /v1/daemon/compute/runs/{run_id}/accept` — atomically commit a
+   * succeeded Run's proposals. `request` omitted/`null` accepts everything;
+   * the client still sends a `{}` JSON body (axum `Json` extractor).
+   */
+  acceptRun(runId: string, request?: RunAcceptRequest | null): Promise<RunAcceptResponse>;
+  /** `POST /v1/daemon/compute/runs/{run_id}/discard` — drop a succeeded Run's proposals. */
+  discardRun(runId: string): Promise<DiscardRunResponse>;
+  /** `GET /v1/daemon/compute/runs` — cursor-paginated run history (newest-first). */
+  listRuns(query?: ListRunsQuery): Promise<RunListResponse>;
+  /** `GET /v1/daemon/compute/runs/{run_id}` — full detail incl. proposals/error. */
+  getRun(runId: string): Promise<RunDetail>;
 
   // ── Creator Memory review-loop (V1.78) ─────────────────────────────────────
   // All memory endpoints are creator-scoped: the daemon rejects a `creator_id`

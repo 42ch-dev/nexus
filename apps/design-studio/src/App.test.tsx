@@ -1555,7 +1555,11 @@ describe('Components page — form-field composition fixture', () => {
   });
 
   it('renders required field indicator (*)', () => {
-    expect(screen.getByText('*')).toBeInTheDocument();
+    // Scoped to the email label — other gallery sections (e.g. Run Studio)
+    // also render required markers.
+    const emailLabel = document.querySelector('label[for="ff-email"]');
+    expect(emailLabel).toBeInTheDocument();
+    expect(emailLabel).toHaveTextContent('*');
     // The required input should have the required attribute
     const emailInput = screen.getByPlaceholderText('you@example.com');
     expect(emailInput).toBeRequired();

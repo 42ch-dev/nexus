@@ -67,6 +67,12 @@ import type {
   ReloadPresetResponse,
   ReviewRequest,
   ReviewResponse,
+  RunAcceptRequest,
+  RunAcceptResponse,
+  RunDetail,
+  RunListResponse,
+  RunRequest,
+  RunResponse,
   ScaffoldPresetRequest,
   ScaffoldPresetResponse,
   ScanRequest,
@@ -104,7 +110,7 @@ import type {
 } from '@42ch/nexus-contracts';
 
 import { NexusClientError, type TransportErrorKind } from './errors';
-import type { DaemonHealth, NexusClient } from './types';
+import type { DaemonHealth, DiscardRunResponse, ListRunsQuery, NexusClient } from './types';
 
 export interface BrowserClientOptions {
   /**
@@ -484,6 +490,30 @@ export class BrowserClient implements NexusClient {
     return this.get<WorldKbKeyBlockStateResponse>(
       `/v1/daemon/worlds/${encodeURIComponent(worldId)}/kb/key-blocks/${encodeURIComponent(keyBlockId)}/state`,
     );
+  }
+
+  // ── Compute runs (V1.147 P1) ──────────────────────────────────────────────
+  runCompute(request: RunRequest): Promise<RunResponse> {
+    return this.post<RunResponse>('/v1/daemon/compute/run', request);
+  }
+  acceptRun(runId: string, request?: RunAcceptRequest | null): Promise<RunAcceptResponse> {
+    // The daemon's axum `Json<RunAcceptRequest>` extractor requires a JSON
+    // body; an omitted request means "accept everything", sent as `{}`.
+    return this.post<RunAcceptResponse>(
+      `/v1/daemon/compute/runs/${encodeURIComponent(runId)}/accept`,
+      request ?? {},
+    );
+  }
+  discardRun(runId: string): Promise<DiscardRunResponse> {
+    return this.post<DiscardRunResponse>(
+      `/v1/daemon/compute/runs/${encodeURIComponent(runId)}/discard`,
+    );
+  }
+  listRuns(query?: ListRunsQuery): Promise<RunListResponse> {
+    return this.get<RunListResponse>('/v1/daemon/compute/runs', query);
+  }
+  getRun(runId: string): Promise<RunDetail> {
+    return this.get<RunDetail>(`/v1/daemon/compute/runs/${encodeURIComponent(runId)}`);
   }
 
   // ── Creator Memory review-loop (V1.78) ─────────────────────────────────────

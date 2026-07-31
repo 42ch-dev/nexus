@@ -788,3 +788,88 @@ describe('NexusClient reading-depth-method parity guard (V1.89)', () => {
     ]);
   });
 });
+
+// ── 8. Compute-run-method parity guard (V1.147 P1) ──────────────────────────
+
+/**
+ * The V1.147 P1 Run Studio promotion added five methods to the `NexusClient`
+ * interface (`runCompute` / `acceptRun` / `discardRun` / `listRuns` /
+ * `getRun`). This guard mirrors the preset + findings + memory + reading
+ * parity guards: it fails at compile time (the `satisfies` constraint) if the
+ * interface drops any method, and at runtime if an adapter implementation is
+ * missing it.
+ */
+const COMPUTE_RUN_METHODS = [
+  'runCompute',
+  'acceptRun',
+  'discardRun',
+  'listRuns',
+  'getRun',
+] as const satisfies readonly (keyof NexusClient)[];
+
+describe('NexusClient compute-run-method parity guard (V1.147 P1)', () => {
+  it('BrowserClient implements every compute-run method on the NexusClient interface', () => {
+    const client = new BrowserClient();
+    for (const method of COMPUTE_RUN_METHODS) {
+      expect(typeof client[method], `BrowserClient.${method} must be a function`).toBe('function');
+    }
+  });
+
+  it('TauriClient inherits every compute-run method (thin-over-BrowserClient)', () => {
+    const client = new TauriClient({
+      fetchImpl: async () =>
+        new Response(JSON.stringify({ ok: true }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+    });
+    for (const method of COMPUTE_RUN_METHODS) {
+      expect(typeof client[method], `TauriClient.${method} must be a function`).toBe('function');
+    }
+  });
+
+  it('routes the compute-run methods to the right verb + path + body/query shape', async () => {
+    const seen: { method: string; url: string; body?: unknown }[] = [];
+    const fetchImpl: typeof fetch = async (input, init) => {
+      seen.push({
+        method: init?.method ?? 'GET',
+        url: String(input),
+        body: init?.body ? JSON.parse(String(init.body)) : undefined,
+      });
+      return new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    };
+
+    const client = new BrowserClient({ fetchImpl });
+    await client.runCompute({ world_id: 'w1', module_id: 'basic-combat' });
+    await client.acceptRun('run_1');
+    await client.acceptRun('run_1', { timeline_event_ids_to_accept: ['evt_0'] });
+    await client.discardRun('run_2');
+    await client.listRuns({ world_id: 'w1', status: 'succeeded', limit: 10, cursor: 'cur' });
+    await client.getRun('run_1');
+
+    expect(seen).toEqual([
+      {
+        method: 'POST',
+        url: '/v1/daemon/compute/run',
+        body: { world_id: 'w1', module_id: 'basic-combat' },
+      },
+      // Accept with no request still sends a `{}` JSON body (axum Json extractor).
+      { method: 'POST', url: '/v1/daemon/compute/runs/run_1/accept', body: {} },
+      {
+        method: 'POST',
+        url: '/v1/daemon/compute/runs/run_1/accept',
+        body: { timeline_event_ids_to_accept: ['evt_0'] },
+      },
+      // Discard carries no body (handler has no Json extractor).
+      { method: 'POST', url: '/v1/daemon/compute/runs/run_2/discard', body: undefined },
+      {
+        method: 'GET',
+        url: '/v1/daemon/compute/runs?world_id=w1&status=succeeded&limit=10&cursor=cur',
+      },
+      { method: 'GET', url: '/v1/daemon/compute/runs/run_1' },
+    ]);
+  });
+});
