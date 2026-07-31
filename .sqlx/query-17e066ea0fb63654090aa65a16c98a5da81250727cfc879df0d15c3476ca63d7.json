@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE compute_sessions SET status = 'failed', error_json = ?, proposals_json = NULL, updated_at = ? WHERE run_id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "17e066ea0fb63654090aa65a16c98a5da81250727cfc879df0d15c3476ca63d7"
+}

@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE compute_sessions SET status = 'discarded', updated_at = ? WHERE run_id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "998760f9033609a5aa9b9d5a4fb78ce98c4a2f23a55d5604494e5735deb5a4b0"
+}

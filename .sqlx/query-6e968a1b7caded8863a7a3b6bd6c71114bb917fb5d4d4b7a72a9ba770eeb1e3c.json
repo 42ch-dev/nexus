@@ -1,0 +1,80 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT run_id, world_id, module_id, module_version, status, proposals_json, error_json, created_at, updated_at, accepted_at, invocation_params_json FROM compute_sessions WHERE run_id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "run_id",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "world_id",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "module_id",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "module_version",
+        "ordinal": 3,
+        "type_info": "Text"
+      },
+      {
+        "name": "status",
+        "ordinal": 4,
+        "type_info": "Text"
+      },
+      {
+        "name": "proposals_json",
+        "ordinal": 5,
+        "type_info": "Text"
+      },
+      {
+        "name": "error_json",
+        "ordinal": 6,
+        "type_info": "Text"
+      },
+      {
+        "name": "created_at",
+        "ordinal": 7,
+        "type_info": "Text"
+      },
+      {
+        "name": "updated_at",
+        "ordinal": 8,
+        "type_info": "Text"
+      },
+      {
+        "name": "accepted_at",
+        "ordinal": 9,
+        "type_info": "Text"
+      },
+      {
+        "name": "invocation_params_json",
+        "ordinal": 10,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      true,
+      true,
+      true,
+      true,
+      false,
+      true,
+      true,
+      false,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "6e968a1b7caded8863a7a3b6bd6c71114bb917fb5d4d4b7a72a9ba770eeb1e3c"
+}

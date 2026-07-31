@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE compute_sessions SET status = 'applied', accepted_at = ?, updated_at = ? WHERE run_id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "bb2f0911a44237e39c141d65083f6d7136d96d120649669b8ee496907501ff2b"
+}
