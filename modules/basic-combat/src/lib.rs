@@ -19,6 +19,16 @@
 //! path — the host always bundles the relevant blocks per the schema). The
 //! optional `invocation.attacker_id` / `invocation.defender_id` select the two
 //! combatants; otherwise the first two character blocks are used.
+//!
+//! # Key-block JSON shape
+//!
+//! Since V1.139, `ComputeInput.key_blocks` carries **spoke `KnowledgeEntry`
+//! JSON** (id field `entry_id`, type field `entry_type`, `body.attributes` as
+//! an ERC721-style array of `{trait_type, value}` items). This module reads
+//! that canonical shape with fallbacks to the legacy domain `KeyBlock` shape
+//! (`key_block_id` / `block_type` / flat `body.attributes.<trait>` object), so
+//! the module-level fixtures in `crates/nexus-wasm-host/tests/basic_combat.rs`
+//! (which hand-build domain-shaped input) keep working unchanged.
 
 use std::format;
 use std::ptr;
@@ -127,27 +137,23 @@ fn run_combat(input: &Value) -> Result<Value, ()> {
 
     let (attacker, defender) = select_combatants(input, key_blocks)?;
 
-    let attacker_id = attacker
-        .get("key_block_id")
-        .and_then(Value::as_str)
+    let attacker_id = entry_id_of(attacker)
         .unwrap_or("attacker")
         .to_string();
-    let defender_id = defender
-        .get("key_block_id")
-        .and_then(Value::as_str)
+    let defender_id = entry_id_of(defender)
         .unwrap_or("defender")
         .to_string();
 
-    let atk = read_int(attacker, &["body", "attributes", "base_atk"])
+    let atk = read_attr_int(attacker, "base_atk")
         .or_else(|| read_int(attacker, &["body", "base_atk"]))
         .unwrap_or(0);
-    let def = read_int(defender, &["body", "attributes", "base_def"])
+    let def = read_attr_int(defender, "base_def")
         .or_else(|| read_int(defender, &["body", "base_def"]))
         .unwrap_or(0);
     // current_hp: nested by block_type (compass Q5) -> body.state.character.current_hp
     let hp_before = read_int(defender, &["body", "state", "character", "current_hp"])
         .or_else(|| read_int(defender, &["body", "state", "current_hp"]))
-        .or_else(|| read_int(defender, &["body", "attributes", "max_hp"]))
+        .or_else(|| read_attr_int(defender, "max_hp"))
         .unwrap_or(0);
 
     let damage = (atk - def).max(0);
@@ -244,11 +250,7 @@ fn select_combatants<'a>(
         .and_then(|i| i.get("defender_id"))
         .and_then(Value::as_str);
 
-    let find = |id: &str| {
-        key_blocks
-            .iter()
-            .find(|kb| kb.get("key_block_id").and_then(Value::as_str) == Some(id))
-    };
+    let find = |id: &str| key_blocks.iter().find(|kb| entry_id_of(kb) == Some(id));
 
     if let (Some(a), Some(d)) = (want_attacker, want_defender) {
         if a == d {
@@ -261,12 +263,50 @@ fn select_combatants<'a>(
     }
 
     // Fallback: first two character blocks.
-    let mut chars = key_blocks
-        .iter()
-        .filter(|kb| kb.get("block_type").and_then(Value::as_str) == Some("character"));
+    let mut chars = key_blocks.iter().filter(|kb| is_character(kb));
     let attacker = chars.next().ok_or(())?;
     let defender = chars.next().ok_or(())?;
     Ok((attacker, defender))
+}
+
+/// Resolve a key block's identity: spoke `entry_id` (canonical since V1.139)
+/// with legacy domain `key_block_id` fallback.
+fn entry_id_of(kb: &Value) -> Option<&str> {
+    kb.get("entry_id")
+        .and_then(Value::as_str)
+        .or_else(|| kb.get("key_block_id").and_then(Value::as_str))
+}
+
+/// Whether a key block is a character: spoke `entry_type` (canonical since
+/// V1.139) with legacy domain `block_type` fallback.
+fn is_character(kb: &Value) -> bool {
+    kb.get("entry_type")
+        .and_then(Value::as_str)
+        .or_else(|| kb.get("block_type").and_then(Value::as_str))
+        == Some("character")
+}
+
+/// Read an integer attribute from a key block. Supports both the legacy
+/// domain flat-object form (`body.attributes.base_atk`) and the canonical
+/// spoke ERC721-array form (`body.attributes[].trait_type`/`value`).
+///
+/// Spoke attribute values round-trip as JSON floats (`20.0` — the spoke
+/// `BodyAttributeValue` number variant is an f64), so the array scan accepts
+/// both integer and float values.
+fn read_attr_int(kb: &Value, trait_name: &str) -> Option<i64> {
+    if let Some(v) = read_int(kb, &["body", "attributes", trait_name]) {
+        return Some(v);
+    }
+    let attrs = kb.get("body")?.get("attributes")?.as_array()?;
+    attrs.iter().find_map(|item| {
+        if item.get("trait_type").and_then(Value::as_str) == Some(trait_name) {
+            item.get("value")
+                .and_then(Value::as_i64)
+                .or_else(|| item.get("value").and_then(Value::as_f64).map(|f| f as i64))
+        } else {
+            None
+        }
+    })
 }
 
 /// Read a nested integer along a JSON path; returns `None` on any miss.

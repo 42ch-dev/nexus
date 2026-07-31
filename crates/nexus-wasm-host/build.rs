@@ -116,9 +116,27 @@ fn build_module(id: &str, modules_root: &Path, embedded_root: &Path) {
         compile_module(id, &src_dir);
         // cdylib artifact names use underscores (crate name `basic-combat` →
         // `basic_combat.wasm`); the embedded id keeps the dash.
-        let artifact = src_dir
-            .join("target/wasm32-unknown-unknown/release")
-            .join(format!("{}.wasm", id.replace('-', "_")));
+        //
+        // The nested module build inherits `CARGO_TARGET_DIR` when the repo's
+        // direnv layout (`.envrc`) is active, so the artifact lands in the
+        // shared cache — NOT the module-local `target/`. Resolve the artifact
+        // the same way cargo does, or a stale local blob gets embedded while
+        // the fresh one sits in the shared cache (V1.147 P0 fix).
+        let artifact = std::env::var_os("CARGO_TARGET_DIR").map_or_else(
+            || {
+                src_dir
+                    .join("target")
+                    .join("wasm32-unknown-unknown")
+                    .join("release")
+                    .join(format!("{}.wasm", id.replace('-', "_")))
+            },
+            |dir| {
+                PathBuf::from(dir)
+                    .join("wasm32-unknown-unknown")
+                    .join("release")
+                    .join(format!("{}.wasm", id.replace('-', "_")))
+            },
+        );
         copy_or_die(&artifact, &dest_wasm, &format!("{id}.wasm"));
     }
 }

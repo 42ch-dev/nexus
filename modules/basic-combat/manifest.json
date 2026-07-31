@@ -13,15 +13,25 @@
   "schemas": {
     "key_block_attributes": {
       "character": {
-        "type": "object",
+        "type": ["object", "array"],
+        "description": "Accept both the legacy domain flat-object form (body.attributes.base_atk) and the canonical spoke ERC721-array form (body.attributes[].trait_type/value) — ComputeInput.key_blocks carries spoke KnowledgeEntry JSON since V1.139.",
         "properties": {
-          "max_hp": {"type": "integer", "minimum": 0},
-          "base_atk": {"type": "integer", "minimum": 0},
-          "base_def": {"type": "integer", "minimum": 0},
-          "speed": {"type": "integer", "minimum": 0},
-          "level": {"type": "integer", "minimum": 1}
+          "max_hp": {"type": ["integer", "number"], "minimum": 0},
+          "base_atk": {"type": ["integer", "number"], "minimum": 0},
+          "base_def": {"type": ["integer", "number"], "minimum": 0},
+          "speed": {"type": ["integer", "number"], "minimum": 0},
+          "level": {"type": ["integer", "number"], "minimum": 1}
         },
         "required": ["max_hp", "base_atk", "base_def"],
+        "items": {
+          "type": "object",
+          "properties": {
+            "trait_type": {"type": "string"},
+            "value": {"type": ["string", "number", "boolean"]}
+          },
+          "required": ["trait_type", "value"],
+          "additionalProperties": true
+        },
         "additionalProperties": true
       }
     },

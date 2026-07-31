@@ -224,6 +224,21 @@ pub async fn accept_run(
         .map_err(NexusApiError::from)?
         .ok_or_else(|| NexusApiError::NotFound(format!("run {run_id} not found")))?;
 
+    // Ownership gate FIRST (plan Global Constraints) — before any status
+    // pre-check, so a foreign run never leaks lifecycle state (403, not 422).
+    let owned = narrative_write::is_world_owned(pool, &creator_id, &run.world_id)
+        .await
+        .map_err(|e| NexusApiError::Internal {
+            code: "DATABASE_ERROR".to_string(),
+            message: e.to_string(),
+        })?;
+    if !owned {
+        return Err(NexusApiError::Forbidden {
+            resource: format!("world {}", run.world_id),
+            reason: "you do not own the world this run targets".to_string(),
+        });
+    }
+
     match run.status.as_str() {
         "succeeded" => {}
         "applied" => {
@@ -245,19 +260,6 @@ pub async fn accept_run(
                 ),
             });
         }
-    }
-
-    let owned = narrative_write::is_world_owned(pool, &creator_id, &run.world_id)
-        .await
-        .map_err(|e| NexusApiError::Internal {
-            code: "DATABASE_ERROR".to_string(),
-            message: e.to_string(),
-        })?;
-    if !owned {
-        return Err(NexusApiError::Forbidden {
-            resource: format!("world {}", run.world_id),
-            reason: "you do not own the world this run targets".to_string(),
-        });
     }
 
     let proposals_json = run.proposals_json.as_deref().unwrap_or("{}");

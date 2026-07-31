@@ -220,7 +220,15 @@ fn validate_compute_input(input: &Value, schemas: &ModuleSchemas) -> Result<()> 
             .and_then(Value::as_array)
             .unwrap_or(&empty);
         for (i, kb) in key_blocks.iter().enumerate() {
-            let block_type = kb.get("block_type").and_then(Value::as_str).unwrap_or("");
+            // V1.147 P0: ComputeInput.key_blocks carries spoke KnowledgeEntry
+            // JSON since V1.139 (type field `entry_type`); fall back to the
+            // legacy domain `block_type` so domain-shaped fixtures keep
+            // validating (e.g. nexus-wasm-host/tests/basic_combat.rs).
+            let block_type = kb
+                .get("entry_type")
+                .and_then(Value::as_str)
+                .or_else(|| kb.get("block_type").and_then(Value::as_str))
+                .unwrap_or("");
             if let Some(schema) = kb_attrs.get(block_type) {
                 let attrs = kb.get("body").and_then(|b| b.get("attributes"));
                 let instance = attrs.unwrap_or(&Value::Null);
@@ -238,7 +246,13 @@ fn validate_compute_input(input: &Value, schemas: &ModuleSchemas) -> Result<()> 
             .and_then(Value::as_array)
             .unwrap_or(&empty);
         for (i, kb) in key_blocks.iter().enumerate() {
-            let block_type = kb.get("block_type").and_then(Value::as_str).unwrap_or("");
+            // V1.147 P0: spoke `entry_type` first, legacy `block_type` fallback
+            // (see key_block_attributes loop above).
+            let block_type = kb
+                .get("entry_type")
+                .and_then(Value::as_str)
+                .or_else(|| kb.get("block_type").and_then(Value::as_str))
+                .unwrap_or("");
             if let Some(schema) = kb_state.get(block_type) {
                 let state = kb
                     .get("body")
@@ -315,14 +329,17 @@ fn validate_against_schema(
         return Ok(()); // empty / non-object schema → pass
     };
 
-    // `type` check
-    if let Some(expected) = obj.get("type").and_then(Value::as_str) {
-        if !check_type(instance, expected) {
+    // `type` check — string form, or union form (array of type names).
+    // Union support (V1.147 P0): spoke attribute values round-trip as floats
+    // (`20.0`), so module manifests declare `["integer", "number"]` and the
+    // validator must accept a value matching ANY member.
+    if let Some(type_val) = obj.get("type") {
+        if !schema_type_matches(instance, type_val) {
             return Err(ComputeError::ManifestValidationFailed {
                 path: instance_path.to_string(),
                 detail: format!(
                     "expected type {}, got {}",
-                    expected,
+                    schema_type_desc(type_val),
                     describe_value(instance)
                 ),
             });
@@ -429,6 +446,33 @@ fn check_type(val: &Value, expected: &str) -> bool {
         "array" => val.is_array(),
         "number" => val.is_number(),
         _ => true, // unknown type → pass
+    }
+}
+
+/// Whether `instance` matches the schema's `type` keyword: a bare type name,
+/// or a union (array of type names — matches ANY member). Non-string /
+/// non-array `type` values pass (permissive).
+fn schema_type_matches(instance: &Value, type_val: &Value) -> bool {
+    match type_val {
+        Value::String(expected) => check_type(instance, expected),
+        Value::Array(types) => types
+            .iter()
+            .map(Value::as_str)
+            .any(|t| t.is_none_or(|s| check_type(instance, s))),
+        _ => true,
+    }
+}
+
+/// Human-readable description of a schema `type` value (for error details).
+fn schema_type_desc(type_val: &Value) -> String {
+    match type_val {
+        Value::String(expected) => expected.clone(),
+        Value::Array(types) => types
+            .iter()
+            .filter_map(Value::as_str)
+            .collect::<Vec<_>>()
+            .join("|"),
+        other => other.to_string(),
     }
 }
 
