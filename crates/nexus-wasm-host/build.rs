@@ -28,6 +28,8 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::SystemTime;
 
+mod build_walk;
+
 /// Module ids that must be embedded. Each id must match a source crate under
 /// `../../modules/<id>/`.
 const MODULE_IDS: &[&str] = &["basic-combat"];
@@ -90,11 +92,14 @@ fn build_module(id: &str, modules_root: &Path, embedded_root: &Path) {
     let src_cargo = src_dir.join("Cargo.toml");
     let src_code = src_dir.join("src");
 
-    // Tell Cargo to re-run this script when the module's sources change. The
-    // directory path watches recursive file additions/removals and mtimes.
+    // Tell Cargo to re-run this script when the module's sources change.
+    // Per-file directives (not dir-level): `cargo:rerun-if-changed=<dir>` does
+    // NOT recurse into subdirectories, so an edit to a nested module source
+    // file (e.g. `modules/basic-combat/src/lib.rs`) would otherwise go
+    // undetected and the embedded `.wasm` would go stale (R-V1147P0-001).
     println!("cargo:rerun-if-changed={}", src_manifest.display());
     println!("cargo:rerun-if-changed={}", src_cargo.display());
-    println!("cargo:rerun-if-changed={}", src_code.display());
+    emit_rerun_if_changed(&src_code);
 
     if !src_dir.is_dir() {
         die(&format!(
@@ -138,6 +143,18 @@ fn build_module(id: &str, modules_root: &Path, embedded_root: &Path) {
             },
         );
         copy_or_die(&artifact, &dest_wasm, &format!("{id}.wasm"));
+    }
+}
+
+/// Emit one `cargo:rerun-if-changed` directive per file under `dir` (walk).
+///
+/// Dir-level directives do not recurse (R-V1147P0-001); per-file emission
+/// makes Cargo re-run this script when any nested module source changes.
+fn emit_rerun_if_changed(dir: &Path) {
+    let mut files = Vec::new();
+    build_walk::walk_files(dir, &mut files);
+    for file in files {
+        println!("cargo:rerun-if-changed={}", file.display());
     }
 }
 

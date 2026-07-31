@@ -190,6 +190,33 @@ pub async fn run(
 
     let output = match compute_result {
         Ok(o) => o,
+        Err(ComputeError::InputValidationFailed(entries)) => {
+            // V1.147 P3 F2 (stat-less poison → 500): manifest validation
+            // failures are a client-input problem, not an internal fault.
+            // The run still fails (row persisted Failed) and the HTTP error is
+            // an honest 422 `invalid_input` with per-entry detail (entry id +
+            // reason) — invalid entries are never silently skipped.
+            let entries_value = serde_json::to_value(&entries).unwrap_or_else(|_| json!([]));
+            let error_json = serde_json::to_string(&json!({
+                "code": "invalid_input",
+                "message": format!(
+                    "compute input validation failed: {} invalid entry(ies); the run was not applied",
+                    entries.len()
+                ),
+                "invalid_entries": entries_value,
+            }))
+            .unwrap_or_else(|_| r#"{"code":"invalid_input"}"#.to_string());
+            if let Err(db_err) = compute_runs::set_run_failed(pool, &run_id, &error_json).await {
+                tracing::error!(
+                    run_id = %run_id,
+                    error = %db_err,
+                    "failed to persist set_run_failed on input validation failure"
+                );
+            }
+            return Err(NexusApiError::InputValidationFailed {
+                details: json!({ "invalid_entries": entries_value }),
+            });
+        }
         Err(e) => {
             let error_code = compute_error_code(&e);
             let error_json = serde_json::to_string(&json!({
@@ -686,6 +713,27 @@ pub async fn get_run_detail(
 ///   `narrative_timeline_events`.  Unknown / other-world branches → 422
 ///   `invalid_input`.
 ///
+/// **Branch parity with the invoke path (V1.147 P3):** the preset invoke path
+/// (`narrative.compute`) never accepts a caller-supplied branch — it derives
+/// the branch from world state (`get_world_state().fork_branch_id` →
+/// `"fbk_root"` fallback), so it can only ever bind the world root or an
+/// event-bearing branch of the owned world. This resolver enforces the same
+/// membership semantics for the direct lane's caller-supplied `branch_id`:
+/// anything outside {world root, event-bearing branches of the owned world}
+/// is rejected with 422 `invalid_input` — an unknown branch, or a branch
+/// whose events live in another world, can never be bound.
+///
+/// **Lazy-fork limit (documented pre-1.0 persistence limit):** fork branches
+/// are established lazily — a new branch exists in the durable registry only
+/// once its first timeline event is appended (`world-delta-propose-apply.md`:
+/// "the new branch is established by its first appended event"). A freshly
+/// created but empty fork (no events yet) is therefore indistinguishable from
+/// an unknown branch here and is rejected with 422. This mirrors the invoke
+/// path, which also cannot bind an empty fork (its `fork_branch_id` derives
+/// from the same event-based registry). Resolving empty forks would require a
+/// durable fork-branch table — tracked as a pre-1.0 limitation, not an open
+/// correctness hole (membership fails closed; no foreign branch is reachable).
+///
 /// Returns `(branch_id, timeline_head_event_id)`: the head is the world's
 /// `current_timeline_head_id` for the root branch, and the branch's own
 /// latest event (by sequence) for named branches.
@@ -794,6 +842,13 @@ const fn compute_error_code(e: &ComputeError) -> &'static str {
         ComputeError::MemoryCapExceeded => "compute_memory_cap_exceeded",
         ComputeError::Trap { .. } => "compute_module_trapped",
         ComputeError::ModuleComputeFailed { .. } => "compute_module_error",
+        // V1.147 P3 F2: manifest-schema validation failures are input
+        // problems, not internal faults → 422 `invalid_input`. The aggregated
+        // per-entry form is handled with full detail in the run handler; the
+        // single-aspect form (invocation / battle_report) falls through here.
+        ComputeError::ManifestValidationFailed { .. } | ComputeError::InputValidationFailed(_) => {
+            "invalid_input"
+        }
         _ => "internal",
     }
 }

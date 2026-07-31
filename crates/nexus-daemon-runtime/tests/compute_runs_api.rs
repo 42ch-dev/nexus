@@ -1127,13 +1127,19 @@ async fn accept_mid_loop_failure_rolls_back_entire_tx() {
 
 /// Seed a timeline event on a named (non-root) branch of the combat world.
 async fn seed_branch_event(pool: &sqlx::SqlitePool, branch_id: &str) {
+    seed_branch_event_in_world(pool, WORLD, branch_id).await;
+}
+
+/// World-aware variant of [`seed_branch_event`] (other-world branch fixtures).
+async fn seed_branch_event_in_world(pool: &sqlx::SqlitePool, world_id: &str, branch_id: &str) {
+    // SAFETY: test-only seed against the known narrative_timeline_events schema.
     sqlx::query(
         "INSERT INTO narrative_timeline_events \
             (timeline_event_id, world_id, branch_id, event_type, status, sequence_no, metadata_json) \
          VALUES (?, ?, ?, 'fork_marker', 'provisional', 0, '{}')",
     )
     .bind(format!("evt_bside{}", branch_id.replace('_', "")))
-    .bind(WORLD)
+    .bind(world_id)
     .bind(branch_id)
     .execute(pool)
     .await
@@ -1221,6 +1227,130 @@ async fn run_with_unknown_branch_returns_422() {
 
     let resp = post_run_on_branch(&c.server, "fbk_nonexistent").await;
     assert_error_envelope(&resp, StatusCode::UNPROCESSABLE_ENTITY, "invalid_input");
+}
+
+/// Branch parity (V1.147 P3 T1): membership is world-scoped — a branch that is
+/// event-bearing in ANOTHER world must still be rejected on this world's run
+/// (422 `invalid_input`), matching the invoke path's membership semantics
+/// (unknown / other-world branches are never bindable).
+#[tokio::test]
+#[serial]
+async fn run_with_other_world_branch_returns_422() {
+    let c = ctx().await;
+    seed_character(&c.pool, "kb_atk", "Striker", 20, 3, 100, 100).await;
+    seed_character(&c.pool, "kb_def", "Guardian", 10, 5, 30, 50).await;
+    seed_foreign_world(&c.pool).await;
+    // The branch exists — but only under FOREIGN_WORLD (owned by another
+    // creator, which makes the rejection even stronger: the check is
+    // world-scoped, not ownership-scoped).
+    seed_branch_event_in_world(&c.pool, FOREIGN_WORLD, "fbk_other").await;
+
+    let resp = post_run_on_branch(&c.server, "fbk_other").await;
+    assert_error_envelope(&resp, StatusCode::UNPROCESSABLE_ENTITY, "invalid_input");
+}
+
+// ── V1.147 P3 T1 — F2: manifest validation failures → 422 with per-entry detail
+
+/// Seed a computable character whose `state.character` violates the
+/// basic-combat manifest schema (`current_hp` must be an integer) — the
+/// "poison entry" dogfood case (F2): one invalid entry must fail the whole
+/// run honestly (422 + per-entry detail), never 500.
+///
+/// NOTE: flat `attributes` cannot poison the direct lane — the spoke
+/// conversion rewrites them into the ERC721-array form, which validates
+/// per-item shape only (`trait_type`/`value`); a missing key is silently
+/// absent from the array. `state` is preserved verbatim, so a malformed
+/// state is the honest manifest violation.
+async fn seed_broken_character(pool: &sqlx::SqlitePool, entry_id: &str) {
+    use nexus_contracts::BlockType;
+    use nexus_knowledge::world_kb::knowledge_entry::{WorldKbBody, WorldKbEntry};
+    use nexus_knowledge::world_kb::KbStore;
+    use nexus_local_db::kb_store::SqliteKbStore;
+
+    let kb = WorldKbEntry {
+        entry_id: entry_id.to_string(),
+        world_id: WORLD.to_string(),
+        block_type: BlockType::Character,
+        canonical_name: format!("Broken {entry_id}"),
+        body: Some(WorldKbBody {
+            summary: Some("Broken combatant".to_string()),
+            attributes: Some(json!({
+                "max_hp": 100,
+                "base_atk": 5,
+                "base_def": 10,
+            })),
+            computable: Some(true),
+            state: Some(json!({
+                "character": {
+                    "current_hp": "one-hundred", // must be integer per manifest
+                    "is_alive": true,
+                    "status_effects": [],
+                }
+            })),
+            ..Default::default()
+        }),
+        ..WorldKbEntry::new(WORLD, BlockType::Character, "Broken")
+    };
+    SqliteKbStore::new(pool.clone())
+        .insert_knowledge_entry(kb)
+        .await
+        .unwrap();
+}
+
+/// F2 (dogfood, V1.147 P3): an input entry that violates the manifest schema
+/// poisons the run — HTTP **422** `invalid_input` with per-entry failure
+/// detail (`error.details.invalid_entries` = entry id + reason), NOT a 500.
+/// The run row is still recorded `failed` with the honest per-entry error_json;
+/// no timeline events are written.
+#[tokio::test]
+#[serial]
+async fn run_with_invalid_entry_returns_422_with_per_entry_detail() {
+    let c = ctx().await;
+    seed_character(&c.pool, "kb_atk", "Striker", 20, 3, 100, 100).await;
+    seed_character(&c.pool, "kb_def", "Guardian", 10, 5, 30, 50).await;
+    seed_broken_character(&c.pool, "kb_broken").await;
+
+    let resp = post_run(
+        &c.server,
+        WORLD,
+        MODULE,
+        json!({"attacker_id": "kb_atk", "defender_id": "kb_def"}),
+    )
+    .await;
+    assert_eq!(
+        resp.status_code(),
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "body={}",
+        resp.text()
+    );
+    let body: Value = resp.json();
+    assert_eq!(body["success"], false, "body={body}");
+    assert_eq!(body["error"]["code"], "invalid_input", "body={body}");
+    let invalid_entries = &body["error"]["details"]["invalid_entries"];
+    let invalid_entries = invalid_entries
+        .as_array()
+        .unwrap_or_else(|| panic!("invalid_entries must be an array: {body}"));
+    assert!(!invalid_entries.is_empty(), "body={body}");
+    assert_eq!(invalid_entries[0]["entry_id"], "kb_broken", "body={body}");
+    let reason = invalid_entries[0]["reason"].as_str().unwrap();
+    assert!(
+        reason.contains("current_hp"),
+        "reason must name the failing field: {reason}"
+    );
+    assert!(
+        reason.contains("expected type integer"),
+        "reason must explain the violation: {reason}"
+    );
+
+    // Run row persisted as Failed with the honest per-entry error_json; the
+    // direct lane writes NO timeline events on failure.
+    let (run_id, status, error_json) = latest_run(&c.pool).await;
+    assert_eq!(status, "failed");
+    let error: Value = serde_json::from_str(error_json.as_deref().unwrap()).unwrap();
+    assert_eq!(error["code"], "invalid_input");
+    assert_eq!(error["invalid_entries"][0]["entry_id"], "kb_broken");
+    assert!(timeline_events(&c.pool).await.is_empty());
+    assert!(!run_id.is_empty());
 }
 
 // ── W2 fix wave — subset-accept ────────────────────────────────────────────

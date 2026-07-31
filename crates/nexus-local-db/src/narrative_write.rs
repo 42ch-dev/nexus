@@ -302,32 +302,13 @@ pub async fn append_event(
     // Validate world_id prefix
     validate_id_prefix(world_id, "wld_", "world_id")?;
 
-    // Validate world FK exists
-    // SAFETY: simple EXISTS query against known table schema
-    let world_exists: i64 =
-        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM narrative_worlds WHERE world_id = ?)")
-            .bind(world_id)
-            .fetch_one(pool)
-            .await?;
-
-    if world_exists == 0 {
+    if !world_exists(pool, world_id).await? {
         return Err(NarrativeWriteError::FkNotFound {
             table: "world".to_string(),
             id: world_id.to_string(),
         });
     }
-
-    // Allocate next sequence_no
-    // SAFETY: MAX aggregate query against known table schema
-    let max_seq: Option<i64> = sqlx::query_scalar(
-        "SELECT MAX(sequence_no) FROM narrative_timeline_events WHERE world_id = ? AND branch_id = ?",
-    )
-    .bind(world_id)
-    .bind(branch_id)
-    .fetch_one(pool)
-    .await?;
-
-    let sequence_no = max_seq.unwrap_or(-1) + 1;
+    let sequence_no = max_sequence_no(pool, world_id, branch_id).await?;
 
     append_event_core(
         pool,
@@ -365,32 +346,13 @@ pub async fn append_event_in_tx(
     // Validate world_id prefix
     validate_id_prefix(world_id, "wld_", "world_id")?;
 
-    // Validate world FK exists
-    // SAFETY: simple EXISTS query against known table schema
-    let world_exists: i64 =
-        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM narrative_worlds WHERE world_id = ?)")
-            .bind(world_id)
-            .fetch_one(&mut **tx)
-            .await?;
-
-    if world_exists == 0 {
+    if !world_exists(&mut **tx, world_id).await? {
         return Err(NarrativeWriteError::FkNotFound {
             table: "world".to_string(),
             id: world_id.to_string(),
         });
     }
-
-    // Allocate next sequence_no
-    // SAFETY: MAX aggregate query against known table schema
-    let max_seq: Option<i64> = sqlx::query_scalar(
-        "SELECT MAX(sequence_no) FROM narrative_timeline_events WHERE world_id = ? AND branch_id = ?",
-    )
-    .bind(world_id)
-    .bind(branch_id)
-    .fetch_one(&mut **tx)
-    .await?;
-
-    let sequence_no = max_seq.unwrap_or(-1) + 1;
+    let sequence_no = max_sequence_no(&mut **tx, world_id, branch_id).await?;
 
     append_event_core(
         &mut **tx,
@@ -444,32 +406,13 @@ pub async fn append_event_canon_with_extensions_in_tx(
     // Validate world_id prefix
     validate_id_prefix(world_id, "wld_", "world_id")?;
 
-    // Validate world FK exists
-    // SAFETY: simple EXISTS query against known table schema
-    let world_exists: i64 =
-        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM narrative_worlds WHERE world_id = ?)")
-            .bind(world_id)
-            .fetch_one(&mut **tx)
-            .await?;
-
-    if world_exists == 0 {
+    if !world_exists(&mut **tx, world_id).await? {
         return Err(NarrativeWriteError::FkNotFound {
             table: "world".to_string(),
             id: world_id.to_string(),
         });
     }
-
-    // Allocate next sequence_no
-    // SAFETY: MAX aggregate query against known table schema
-    let max_seq: Option<i64> = sqlx::query_scalar(
-        "SELECT MAX(sequence_no) FROM narrative_timeline_events WHERE world_id = ? AND branch_id = ?",
-    )
-    .bind(world_id)
-    .bind(branch_id)
-    .fetch_one(&mut **tx)
-    .await?;
-
-    let sequence_no = max_seq.unwrap_or(-1) + 1;
+    let sequence_no = max_sequence_no(&mut **tx, world_id, branch_id).await?;
 
     append_event_core(
         &mut **tx,
@@ -484,6 +427,47 @@ pub async fn append_event_canon_with_extensions_in_tx(
         "canon",
     )
     .await
+}
+
+/// Shared preamble for the append family (qc1 S-2 consolidation): validates
+/// the `world_id` FK and returns whether a `narrative_worlds` row exists.
+///
+/// Consumes an executor — callers pass a `&SqlitePool` (a `Copy` reference,
+/// safe to use again) or a `&mut SqliteConnection` reborrow (e.g.
+/// `&mut **tx`), so preamble and INSERT share the same executor.
+async fn world_exists<'e, E>(executor: E, world_id: &str) -> Result<bool, NarrativeWriteError>
+where
+    E: sqlx::Executor<'e, Database = Sqlite>,
+{
+    // SAFETY: simple EXISTS query against known table schema
+    Ok(
+        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM narrative_worlds WHERE world_id = ?)")
+            .bind(world_id)
+            .fetch_one(executor)
+            .await?,
+    )
+}
+
+/// Shared preamble for the append family: the next `sequence_no` for
+/// `(world_id, branch_id)` (`MAX(sequence_no) + 1`).
+async fn max_sequence_no<'e, E>(
+    executor: E,
+    world_id: &str,
+    branch_id: &str,
+) -> Result<i64, NarrativeWriteError>
+where
+    E: sqlx::Executor<'e, Database = Sqlite>,
+{
+    // SAFETY: MAX aggregate query against known table schema
+    let max_seq: Option<i64> = sqlx::query_scalar(
+        "SELECT MAX(sequence_no) FROM narrative_timeline_events WHERE world_id = ? AND branch_id = ?",
+    )
+    .bind(world_id)
+    .bind(branch_id)
+    .fetch_one(executor)
+    .await?;
+
+    Ok(max_seq.unwrap_or(-1) + 1)
 }
 
 /// Shared INSERT logic for [`append_event`], [`append_event_in_tx`], and
