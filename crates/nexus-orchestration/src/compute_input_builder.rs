@@ -41,6 +41,10 @@ pub enum ComputeBuildError {
     #[error("cross-world reference: {0}")]
     ReferencedEntryNotInWorld(String),
 
+    /// An invocation-parameter `*_id` referenced an entry that does not exist.
+    #[error("referenced entry not found: {0}")]
+    ReferencedEntryNotFound(String),
+
     /// A database error occurred during KB or narrative-state queries.
     #[error("store error: {0}")]
     Store(#[from] sqlx::Error),
@@ -190,9 +194,9 @@ impl ComputeInputBuilder {
 
         for ref_id in &referenced_entry_ids {
             let ref_entry = kb_store.get_knowledge_entry(ref_id).await.map_err(|e| {
-                ComputeBuildError::Store(sqlx::Error::Protocol(format!(
+                ComputeBuildError::ReferencedEntryNotFound(format!(
                     "referenced entry {ref_id} not found: {e}"
-                )))
+                ))
             })?;
 
             if ref_entry.world_id != self.world_id {

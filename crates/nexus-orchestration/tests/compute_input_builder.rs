@@ -54,6 +54,21 @@ async fn seed_world(pool: &sqlx::SqlitePool, world_id: &str) {
     .unwrap();
 }
 
+async fn seed_world_with_head(pool: &sqlx::SqlitePool, world_id: &str, head_event_id: &str) {
+    // SAFETY: test-only — uses runtime query to avoid duplicating sqlx cache.
+    seed_creator(pool, "ctr_test").await;
+    sqlx::query(
+        "INSERT INTO narrative_worlds \
+         (world_id, workspace_id, owner_creator_id, title, slug, status, visibility, time_policy, current_timeline_head_id, metadata_json) \
+         VALUES (?, 'wrk_test', 'ctr_test', 'Test World', 'test-world', 'active', 'private', 'single', ?, '{}')",
+    )
+    .bind(world_id)
+    .bind(head_event_id)
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
 /// Seed a computable `WorldKbEntry` with the given block_type and attributes.
 async fn seed_kb_entry(
     pool: &sqlx::SqlitePool,
@@ -173,15 +188,20 @@ async fn non_computable_entries_excluded() {
 }
 
 /// Step 4: Referenced `_id` entries are loaded into key_blocks.
+///
+/// The attacker is computable and already in the manifest filter set;
+/// the defender is non-computable so it exercises the `_id` load path
+/// (not the initial query dedup branch).
 #[tokio::test]
 async fn referenced_id_entries_loaded() {
     let (pool, _dir) = fresh_pool().await;
     seed_world(&pool, "wld_test").await;
 
+    // Attacker: computable, in manifest filter → comes from initial query.
     let attacker = seed_kb_entry(&pool, "wld_test", BlockType::Character, "swordsman", true).await;
-    let defender = seed_kb_entry(&pool, "wld_test", BlockType::Character, "archer", true).await;
+    // Defender: non-computable → must be loaded via the `_id` reference path.
+    let defender = seed_kb_entry(&pool, "wld_test", BlockType::Character, "archer", false).await;
 
-    // invocation_params reference another entry (even if not computable).
     let mut params = Map::new();
     params.insert(
         "attacker_id".to_string(),
@@ -194,8 +214,8 @@ async fn referenced_id_entries_loaded() {
     // Also pass a non-_id key — should be ignored for entry loading.
     params.insert("difficulty".to_string(), Value::String("hard".to_string()));
 
-    // Manifest only wants characters; the attacker and defender will already
-    // be in the computable set, but test verifies they aren't duplicated.
+    // Manifest only wants characters; only the attacker will be in the
+    // initial computable query — the defender is loaded via `_id`.
     let manifest = basic_manifest(vec!["character"]);
     let builder = ComputeInputBuilder::new(pool, "wld_test", manifest, params);
 
@@ -207,7 +227,11 @@ async fn referenced_id_entries_loaded() {
         .iter()
         .filter_map(|kb| kb.get("entry_id").and_then(Value::as_str))
         .collect();
-    assert_eq!(entry_ids.len(), 2, "two characters total");
+    assert_eq!(
+        entry_ids.len(),
+        2,
+        "attacker (query) + defender (loaded via _id)"
+    );
     assert!(entry_ids.contains(&attacker.entry_id.as_str()));
     assert!(entry_ids.contains(&defender.entry_id.as_str()));
 }
@@ -254,6 +278,37 @@ async fn cross_world_reference_rejected() {
     }
 }
 
+/// Step 5b: Referenced `*_id` entry that does not exist → `ReferencedEntryNotFound`.
+#[tokio::test]
+async fn referenced_entry_not_found_error() {
+    let (pool, _dir) = fresh_pool().await;
+    seed_world(&pool, "wld_test").await;
+
+    // Seed one computable entry (so the initial query is non-empty).
+    seed_kb_entry(&pool, "wld_test", BlockType::Character, "hero", true).await;
+
+    // Reference a non-existent entry ID.
+    let mut params = Map::new();
+    params.insert(
+        "ally_id".to_string(),
+        Value::String("ent_nonexistent_999".to_string()),
+    );
+
+    let manifest = basic_manifest(vec!["character"]);
+    let builder = ComputeInputBuilder::new(pool, "wld_test", manifest, params);
+
+    let result = builder.build().await;
+    match result {
+        Err(ComputeBuildError::ReferencedEntryNotFound(msg)) => {
+            assert!(
+                msg.contains("ent_nonexistent_999"),
+                "error should name the missing entry id, got: {msg}"
+            );
+        }
+        other => panic!("expected ReferencedEntryNotFound, got {other:?}"),
+    }
+}
+
 /// Step 6: `narrative_state` shape includes `timeline_position: "0"`.
 #[tokio::test]
 async fn narrative_state_shape() {
@@ -276,11 +331,16 @@ async fn narrative_state_shape() {
     );
 }
 
-/// Step 7: `world_ref` contains the expected fields.
+/// Step 7: `world_ref` contains `world_id`, `branch_id`, and `timeline_head_event_id`.
 #[tokio::test]
 async fn world_ref_contains_expected_fields() {
     let (pool, _dir) = fresh_pool().await;
-    seed_world(&pool, "wld_test").await;
+
+    // Use an event ID format matching the canonical generate_event_id
+    // pattern (evt_ + hex) to satisfy the newtype regex guard.
+    let head_id = "evt_0";
+    seed_world_with_head(&pool, "wld_test", head_id).await;
+
     seed_kb_entry(&pool, "wld_test", BlockType::Character, "hero", true).await;
 
     let manifest = basic_manifest(vec!["character"]);
@@ -295,6 +355,13 @@ async fn world_ref_contains_expected_fields() {
     // Default branch is "fbk_root" when no fork branch exists.
     let bid = world_ref.branch_id.as_deref().expect("branch_id present");
     assert_eq!(bid, "fbk_root");
+
+    // Timeline head should be present when seeded.
+    let head = world_ref
+        .timeline_head_event_id
+        .as_ref()
+        .expect("timeline_head_event_id present when seeded");
+    assert_eq!(head.as_str(), head_id);
 }
 
 /// Step 8: `invocation` is passed through verbatim.
