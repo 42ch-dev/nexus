@@ -12,6 +12,7 @@
 
 #[cfg(unix)]
 pub mod cas;
+pub mod compute_runs;
 pub mod compute_session;
 pub mod file_lock;
 pub mod findings;

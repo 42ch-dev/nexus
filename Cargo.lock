@@ -2755,6 +2755,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "uuid",
+ "wat",
  "which 8.0.2",
  "x509-parser",
 ]

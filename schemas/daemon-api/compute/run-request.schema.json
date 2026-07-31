@@ -1,0 +1,29 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/daemon-api/compute/run-request.schema.json",
+  "schema_version": 1,
+  "title": "Nexus RunRequest",
+  "description": "Request body for POST /v1/daemon/compute/run — invoke a compute module against an owned World (V1.147 P0 direct lane).",
+  "type": "object",
+  "required": ["world_id", "module_id"],
+  "properties": {
+    "world_id": {
+      "type": "string",
+      "description": "The World to run the module against. Must be owned by the active creator (ownership gate enforced server-side)."
+    },
+    "module_id": {
+      "type": "string",
+      "description": "Installed compute module ID (from ModuleCache)."
+    },
+    "branch_id": {
+      "type": "string",
+      "description": "Optional timeline branch to scope the run to. Defaults to the World root branch when omitted."
+    },
+    "invocation_params": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "Module-specific invocation parameters (manifest-driven: attacker_id, defender_id, etc.). Keys ending in _id that correspond to required_key_block_types are resolved into KnowledgeEntry references during ComputeInput assembly."
+    }
+  },
+  "additionalProperties": false
+}

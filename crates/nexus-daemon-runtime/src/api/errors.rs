@@ -253,9 +253,15 @@ impl NexusApiError {
                     | "world_clear_forbidden"
                     | "invalid_transition"
                     | "invalid_input"
+                    | "invalid_state"
                     | "too_many_findings"
                     | "strategy_self_loop"
-                    | "strategy_transition_duplicate" => StatusCode::UNPROCESSABLE_ENTITY,
+                    | "strategy_transition_duplicate"
+                    | "compute_fuel_exhausted"
+                    | "compute_wall_time_exceeded"
+                    | "compute_memory_cap_exceeded"
+                    | "compute_module_trapped"
+                    | "compute_module_error" => StatusCode::UNPROCESSABLE_ENTITY,
                     // V1.65: chapter bodies above the size cap return 413.
                     "chapter_body_too_large" => StatusCode::PAYLOAD_TOO_LARGE,
                     _ => StatusCode::BAD_REQUEST,
@@ -294,17 +300,24 @@ impl NexusApiError {
                 // Surface canonical tool-bridge codes (spec §12.4), plus
                 // V1.40 world-binding and V1.49 F6 lifecycle codes, as-is.
                 // V1.67 F-F1: resource-specific sort-invalid codes are also public.
+                // V1.147 P0: compute sandbox error codes.
                 match code.as_str() {
                     "policy_blocked"
                     | "not_supported"
                     | "invalid_input"
+                    | "invalid_state"
                     | "invalid_transition"
                     | "too_many_findings"
                     | "world_id_required"
                     | "invalid_world_id"
                     | "world_clear_forbidden"
                     | "strategy_self_loop"
-                    | "strategy_transition_duplicate" => code.as_str(),
+                    | "strategy_transition_duplicate"
+                    | "compute_fuel_exhausted"
+                    | "compute_wall_time_exceeded"
+                    | "compute_memory_cap_exceeded"
+                    | "compute_module_trapped"
+                    | "compute_module_error" => code.as_str(),
                     _ if code.ends_with("_sort_invalid") => code.as_str(),
                     _ => "bad_request",
                 }
@@ -942,5 +955,69 @@ mod tests {
         );
         let body = result.expect("result should be Ok");
         assert!(body.references.is_empty());
+    }
+
+    // ── V1.147 P0 T4 fix (C1): sandbox compute error codes → 422 ─────────
+    // Verifies the error taxonomy locked in route spec §4.  Each sandbox
+    // error code maps to 422 Unprocessable Entity; the unknown-code fallback
+    // maps to 400 Bad Request; Conflict maps to 409.
+    #[test]
+    fn compute_sandbox_error_codes_map_to_422() {
+        for code in &[
+            "compute_fuel_exhausted",
+            "compute_wall_time_exceeded",
+            "compute_memory_cap_exceeded",
+            "compute_module_trapped",
+            "compute_module_error",
+        ] {
+            let err = NexusApiError::BadRequest {
+                code: (*code).to_string(),
+                message: "simulated compute error".to_string(),
+            };
+            assert_eq!(
+                err.status_code(),
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "code '{code}' must map to 422"
+            );
+            assert_eq!(err.error_code(), *code);
+        }
+    }
+
+    #[test]
+    fn compute_error_internal_map_to_500() {
+        // Internal errors from the compute path must return 500.
+        let err = NexusApiError::Internal {
+            code: "COMPUTE_ERROR".to_string(),
+            message: "host engine failure".to_string(),
+        };
+        assert_eq!(err.status_code(), StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(err.error_code(), "internal");
+    }
+
+    #[test]
+    fn compute_error_unknown_code_falls_back_to_400() {
+        let err = NexusApiError::BadRequest {
+            code: "some_future_compute_code".to_string(),
+            message: "unknown".to_string(),
+        };
+        assert_eq!(err.status_code(), StatusCode::BAD_REQUEST);
+        assert_eq!(err.error_code(), "bad_request");
+    }
+
+    #[test]
+    fn conflict_maps_to_409() {
+        let err = NexusApiError::Conflict("run has already been accepted".to_string());
+        assert_eq!(err.status_code(), StatusCode::CONFLICT);
+        assert_eq!(err.error_code(), "conflict");
+    }
+
+    #[test]
+    fn invalid_state_maps_to_422() {
+        let err = NexusApiError::BadRequest {
+            code: "invalid_state".to_string(),
+            message: "run is not in 'succeeded' state".to_string(),
+        };
+        assert_eq!(err.status_code(), StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(err.error_code(), "invalid_state");
     }
 }

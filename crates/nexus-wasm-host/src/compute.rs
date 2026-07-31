@@ -62,22 +62,27 @@ impl WasmEngine {
         self.run_invocation(module, manifest, &input_bytes, sandbox)
     }
 
-    /// Resolve the effective sandbox limits: manifest overrides take precedence,
-    /// otherwise the engine default applies.
-    fn resolve_sandbox(&self, manifest: &ModuleManifest) -> ResolvedSandbox {
+    /// Resolve the effective sandbox limits: manifest overrides **tighten** the
+    /// host defaults via `min(manifest_override, host_default)` (§4.1).  A
+    /// module cannot request limits *greater* than the host defaults — this
+    /// prevents user-installed modules from exceeding the configured safety
+    /// boundaries.
+    #[must_use]
+    pub fn resolve_sandbox(&self, manifest: &ModuleManifest) -> ResolvedSandbox {
         let base = self.default_sandbox();
         ResolvedSandbox {
-            fuel: manifest.max_fuel.unwrap_or(base.fuel),
+            fuel: manifest.max_fuel.map_or(base.fuel, |f| f.min(base.fuel)),
             max_memory_bytes: manifest
                 .max_memory_mib
                 .map_or(base.max_memory_bytes, |mib| {
                     usize::try_from(mib)
                         .unwrap_or(0)
                         .saturating_mul(1024 * 1024)
+                        .min(base.max_memory_bytes)
                 }),
-            wall_time: manifest
-                .max_wall_time_ms
-                .map_or(base.wall_time, Duration::from_millis),
+            wall_time: manifest.max_wall_time_ms.map_or(base.wall_time, |ms| {
+                Duration::from_millis(ms).min(base.wall_time)
+            }),
         }
     }
 
@@ -215,13 +220,33 @@ fn validate_compute_input(input: &Value, schemas: &ModuleSchemas) -> Result<()> 
             .and_then(Value::as_array)
             .unwrap_or(&empty);
         for (i, kb) in key_blocks.iter().enumerate() {
-            let block_type = kb.get("block_type").and_then(Value::as_str).unwrap_or("");
-            if let Some(schema) = kb_attrs.get(block_type) {
-                let attrs = kb.get("body").and_then(|b| b.get("attributes"));
-                let instance = attrs.unwrap_or(&Value::Null);
-                let path = format!("key_blocks[{i}].body.attributes");
-                validate_against_schema(instance, &path, schema, &path, MAX_VALIDATION_DEPTH)?;
-            }
+            // V1.147 P0: ComputeInput.key_blocks carries spoke KnowledgeEntry
+            // JSON since V1.139 (type field `entry_type`); fall back to the
+            // legacy domain `block_type` so domain-shaped fixtures keep
+            // validating (e.g. nexus-wasm-host/tests/basic_combat.rs).
+            let block_type = kb
+                .get("entry_type")
+                .and_then(Value::as_str)
+                .or_else(|| kb.get("block_type").and_then(Value::as_str))
+                .unwrap_or("");
+            let Some(schema) = kb_attrs.get(block_type) else {
+                // F-005 hardening (V1.147 P0 fix wave): when the manifest
+                // DECLARES key_block_attributes, an unresolvable or
+                // uncovered entry type is a manifest/input contract breach —
+                // reject fail-closed instead of silently skipping the entry.
+                return Err(ComputeError::ManifestValidationFailed {
+                    path: format!("key_blocks[{i}]"),
+                    detail: format!(
+                        "unknown key_block type '{block_type}': manifest declares \
+                         key_block_attributes for [{}], and no schema covers this entry",
+                        kb_attrs.keys().cloned().collect::<Vec<_>>().join(", ")
+                    ),
+                });
+            };
+            let attrs = kb.get("body").and_then(|b| b.get("attributes"));
+            let instance = attrs.unwrap_or(&Value::Null);
+            let path = format!("key_blocks[{i}].body.attributes");
+            validate_against_schema(instance, &path, schema, &path, MAX_VALIDATION_DEPTH)?;
         }
     }
 
@@ -233,23 +258,39 @@ fn validate_compute_input(input: &Value, schemas: &ModuleSchemas) -> Result<()> 
             .and_then(Value::as_array)
             .unwrap_or(&empty);
         for (i, kb) in key_blocks.iter().enumerate() {
-            let block_type = kb.get("block_type").and_then(Value::as_str).unwrap_or("");
-            if let Some(schema) = kb_state.get(block_type) {
-                let state = kb
-                    .get("body")
-                    .and_then(|b| b.get("state"))
-                    .and_then(|s| s.get(block_type));
-                // Skip validation if state is absent or null. State may not
-                // yet be initialized for newly-created computable blocks
-                // (e.g. a character participating in its first combat scene);
-                // modules handle missing state via their own fallback chains
-                // (see `basic-combat/src/lib.rs` HP fallback logic). This
-                // mirrors the `invocation` null-skip just below.
-                if let Some(state) = state {
-                    if !state.is_null() {
-                        let path = format!("key_blocks[{i}].body.state.{block_type}");
-                        validate_against_schema(state, &path, schema, &path, MAX_VALIDATION_DEPTH)?;
-                    }
+            // V1.147 P0: spoke `entry_type` first, legacy `block_type` fallback
+            // (see key_block_attributes loop above).
+            let block_type = kb
+                .get("entry_type")
+                .and_then(Value::as_str)
+                .or_else(|| kb.get("block_type").and_then(Value::as_str))
+                .unwrap_or("");
+            let Some(schema) = kb_state.get(block_type) else {
+                // F-005 hardening: fail-closed when key_block_state is
+                // declared, mirroring the key_block_attributes rule.
+                return Err(ComputeError::ManifestValidationFailed {
+                    path: format!("key_blocks[{i}]"),
+                    detail: format!(
+                        "unknown key_block type '{block_type}': manifest declares \
+                         key_block_state for [{}], and no schema covers this entry",
+                        kb_state.keys().cloned().collect::<Vec<_>>().join(", ")
+                    ),
+                });
+            };
+            let state = kb
+                .get("body")
+                .and_then(|b| b.get("state"))
+                .and_then(|s| s.get(block_type));
+            // Skip validation if state is absent or null. State may not
+            // yet be initialized for newly-created computable blocks
+            // (e.g. a character participating in its first combat scene);
+            // modules handle missing state via their own fallback chains
+            // (see `basic-combat/src/lib.rs` HP fallback logic). This
+            // mirrors the `invocation` null-skip just below.
+            if let Some(state) = state {
+                if !state.is_null() {
+                    let path = format!("key_blocks[{i}].body.state.{block_type}");
+                    validate_against_schema(state, &path, schema, &path, MAX_VALIDATION_DEPTH)?;
                 }
             }
         }
@@ -310,14 +351,17 @@ fn validate_against_schema(
         return Ok(()); // empty / non-object schema → pass
     };
 
-    // `type` check
-    if let Some(expected) = obj.get("type").and_then(Value::as_str) {
-        if !check_type(instance, expected) {
+    // `type` check — string form, or union form (array of type names).
+    // Union support (V1.147 P0): spoke attribute values round-trip as floats
+    // (`20.0`), so module manifests declare `["integer", "number"]` and the
+    // validator must accept a value matching ANY member.
+    if let Some(type_val) = obj.get("type") {
+        if !schema_type_matches(instance, type_val) {
             return Err(ComputeError::ManifestValidationFailed {
                 path: instance_path.to_string(),
                 detail: format!(
                     "expected type {}, got {}",
-                    expected,
+                    schema_type_desc(type_val),
                     describe_value(instance)
                 ),
             });
@@ -427,6 +471,33 @@ fn check_type(val: &Value, expected: &str) -> bool {
     }
 }
 
+/// Whether `instance` matches the schema's `type` keyword: a bare type name,
+/// or a union (array of type names — matches ANY member). Non-string /
+/// non-array `type` values pass (permissive).
+fn schema_type_matches(instance: &Value, type_val: &Value) -> bool {
+    match type_val {
+        Value::String(expected) => check_type(instance, expected),
+        Value::Array(types) => types
+            .iter()
+            .map(Value::as_str)
+            .any(|t| t.is_none_or(|s| check_type(instance, s))),
+        _ => true,
+    }
+}
+
+/// Human-readable description of a schema `type` value (for error details).
+fn schema_type_desc(type_val: &Value) -> String {
+    match type_val {
+        Value::String(expected) => expected.clone(),
+        Value::Array(types) => types
+            .iter()
+            .filter_map(Value::as_str)
+            .collect::<Vec<_>>()
+            .join("|"),
+        other => other.to_string(),
+    }
+}
+
 fn describe_value(val: &Value) -> &'static str {
     if val.is_object() {
         "object"
@@ -449,7 +520,7 @@ fn describe_value(val: &Value) -> &'static str {
 
 /// Effective per-invocation limits (manifest overrides applied).
 #[derive(Clone, Copy)]
-struct ResolvedSandbox {
+pub struct ResolvedSandbox {
     fuel: u64,
     max_memory_bytes: usize,
     wall_time: Duration,
@@ -833,17 +904,43 @@ mod tests {
     }
 
     #[test]
-    fn no_schemas_means_no_validation() {
-        // Without schemas declared, validate_compute_input is never called
-        // (guarded by `if let Some(schemas)` in compute()).
-        // This test verifies that an input that would fail validation passes
-        // when schemas have NO matching key.
+    fn declared_schemas_reject_unknown_key_block_type() {
+        // F-005 hardening (V1.147 P0 fix wave): when the manifest DECLARES
+        // key_block_attributes, an entry whose type is not covered by the
+        // schema map is a contract breach — reject fail-closed instead of
+        // silently skipping validation.
         let schemas = ModuleSchemas {
             key_block_attributes: Some([("monster".to_string(), json!({"type": "object"}))].into()),
             ..Default::default()
         };
         // key_block type is "character", but schema only covers "monster" →
-        // no validation for this block.
+        // previously skipped (fail-open); now rejected.
+        let input = json!({
+            "key_blocks": [{
+                "block_type": "character",
+                "body": {"attributes": {"anything": "goes"}}
+            }]
+        });
+        let err = validate_compute_input(&input, &schemas).unwrap_err();
+        match err {
+            ComputeError::ManifestValidationFailed { path, detail } => {
+                assert!(path.contains("key_blocks[0]"), "path={path}");
+                assert!(detail.contains("unknown key_block type"), "detail={detail}");
+            }
+            other => panic!("expected ManifestValidationFailed, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn no_declared_key_block_schema_means_no_validation() {
+        // Domain-shape fallback preserved: when the manifest declares NO
+        // key_block schema map (None), entries of any type pass untouched
+        // (fixtures and schema-less modules keep working).
+        let schemas = ModuleSchemas {
+            key_block_attributes: None,
+            key_block_state: None,
+            ..Default::default()
+        };
         let input = json!({
             "key_blocks": [{
                 "block_type": "character",
@@ -1027,5 +1124,105 @@ mod tests {
             }
             other => panic!("expected ManifestValidationFailed, got {other:?}"),
         }
+    }
+
+    // ------------------------------------------------------------------
+    // resolve_sandbox clamp tests
+    // ------------------------------------------------------------------
+
+    fn make_manifest(
+        module_id: &str,
+        max_fuel: Option<u64>,
+        max_memory_mib: Option<u32>,
+        max_wall_time_ms: Option<u64>,
+    ) -> ModuleManifest {
+        ModuleManifest {
+            module_id: module_id.to_string(),
+            name: module_id.to_string(),
+            version: "1.0.0".to_string(),
+            nexus_abi_version: 1,
+            required_key_block_types: vec![],
+            compute_export: "compute".to_string(),
+            init_export: "init".to_string(),
+            description: None,
+            author: None,
+            host_functions: vec![],
+            schemas: None,
+            battle_report_kind: None,
+            max_fuel,
+            max_memory_mib,
+            max_wall_time_ms,
+        }
+    }
+
+    #[test]
+    fn resolve_sandbox_absent_overrides_use_host_defaults() {
+        let engine = WasmEngine::new().unwrap();
+        let manifest = make_manifest("no-overrides", None, None, None);
+        let resolved = engine.resolve_sandbox(&manifest);
+        assert_eq!(resolved.fuel, crate::sandbox::DEFAULT_FUEL);
+        assert_eq!(
+            resolved.max_memory_bytes,
+            (crate::sandbox::DEFAULT_MEMORY_MIB as usize) * 1024 * 1024
+        );
+        assert_eq!(resolved.wall_time, crate::sandbox::DEFAULT_WALL_TIME);
+    }
+
+    #[test]
+    fn resolve_sandbox_higher_than_host_clamped_to_default() {
+        let engine = WasmEngine::new().unwrap();
+        let manifest = make_manifest(
+            "over-the-limit",
+            Some(crate::sandbox::DEFAULT_FUEL * 10), // 10× host default
+            Some(crate::sandbox::DEFAULT_MEMORY_MIB * 4), // 4× host default
+            Some(crate::sandbox::DEFAULT_WALL_TIME.as_millis() as u64 * 5), // 5× host default
+        );
+        let resolved = engine.resolve_sandbox(&manifest);
+        assert_eq!(resolved.fuel, crate::sandbox::DEFAULT_FUEL);
+        assert_eq!(
+            resolved.max_memory_bytes,
+            (crate::sandbox::DEFAULT_MEMORY_MIB as usize) * 1024 * 1024
+        );
+        assert_eq!(resolved.wall_time, crate::sandbox::DEFAULT_WALL_TIME);
+    }
+
+    #[test]
+    fn resolve_sandbox_lower_than_host_manifest_wins() {
+        let engine = WasmEngine::new().unwrap();
+        let half_fuel = crate::sandbox::DEFAULT_FUEL / 2;
+        let half_mem_mib = crate::sandbox::DEFAULT_MEMORY_MIB / 2;
+        let half_wall_ms = crate::sandbox::DEFAULT_WALL_TIME.as_millis() as u64 / 2;
+        let manifest = make_manifest(
+            "under-the-limit",
+            Some(half_fuel),
+            Some(half_mem_mib),
+            Some(half_wall_ms),
+        );
+        let resolved = engine.resolve_sandbox(&manifest);
+        assert_eq!(resolved.fuel, half_fuel);
+        assert_eq!(
+            resolved.max_memory_bytes,
+            (half_mem_mib as usize) * 1024 * 1024
+        );
+        assert_eq!(
+            resolved.wall_time,
+            std::time::Duration::from_millis(half_wall_ms)
+        );
+    }
+
+    #[test]
+    fn resolve_sandbox_mixed_overrides() {
+        // Fuel lower (wins), memory higher (clamped), wall-time absent (default).
+        let engine = WasmEngine::new().unwrap();
+        let low_fuel = crate::sandbox::DEFAULT_FUEL / 4;
+        let high_mem = crate::sandbox::DEFAULT_MEMORY_MIB * 8;
+        let manifest = make_manifest("mixed", Some(low_fuel), Some(high_mem), None);
+        let resolved = engine.resolve_sandbox(&manifest);
+        assert_eq!(resolved.fuel, low_fuel);
+        assert_eq!(
+            resolved.max_memory_bytes,
+            (crate::sandbox::DEFAULT_MEMORY_MIB as usize) * 1024 * 1024
+        );
+        assert_eq!(resolved.wall_time, crate::sandbox::DEFAULT_WALL_TIME);
     }
 }
