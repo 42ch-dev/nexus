@@ -97,9 +97,13 @@ fn build_module(id: &str, modules_root: &Path, embedded_root: &Path) {
     // NOT recurse into subdirectories, so an edit to a nested module source
     // file (e.g. `modules/basic-combat/src/lib.rs`) would otherwise go
     // undetected and the embedded `.wasm` would go stale (R-V1147P0-001).
+    // The dir-level directive for the walked src dir is emitted *alongside*
+    // the per-file list: it covers a pure file *addition*, which the per-file
+    // directives cannot see (the new file was never in the emitted list).
     println!("cargo:rerun-if-changed={}", src_manifest.display());
     println!("cargo:rerun-if-changed={}", src_cargo.display());
     emit_rerun_if_changed(&src_code);
+    println!("cargo:rerun-if-changed={}", src_code.display());
 
     if !src_dir.is_dir() {
         die(&format!(
