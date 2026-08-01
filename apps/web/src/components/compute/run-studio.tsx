@@ -255,6 +255,32 @@ export function RunStudio({ module, initialWorldId, initialRunId, onRunOpen }: R
   );
   const [discardTargetId, setDiscardTargetId] = useState<string | null>(null);
 
+  // V1.147 PR #194 round 4 — a module switch must reset the invocation
+  // authoring state exactly like a World switch. The Settings Modules section
+  // stays mounted when the author clicks another module in the list or a
+  // `?module=` deep-link switches while the target module's detail is cached
+  // (no LoadingState remount), so the `useState` seeds alone would keep the
+  // previous module's guided values + Advanced JSON — a Run would submit one
+  // module's params against another. Mirrors the World re-sync: keyed on the
+  // prop VALUE (`module.module_id`) with a ref guard, so the initial mount is
+  // a no-op and an unchanged prop never clears the form the author is
+  // filling. The run inspector is cleared here too — a module change
+  // invalidates the previous module's run context, and the `latestRun`
+  // fresh-run path has no `?run=` URL backing for the run re-sync effect to
+  // close (selectModule deletes `?run=` with the same semantics for the
+  // deep-linked path). Declared before the `initialRunId` re-sync effect so
+  // a same-commit `?module=&run=` deep-link change re-opens the new run
+  // after this reset.
+  const lastModuleIdRef = useRef(module.module_id);
+  useEffect(() => {
+    if (module.module_id !== lastModuleIdRef.current) {
+      lastModuleIdRef.current = module.module_id;
+      resetInvocation();
+      setInspectorRunId(null);
+      setLatestRun(null);
+    }
+  }, [module.module_id]);
+
   // V1.147 PR #194 — deep-link `?run=` re-sync. The Settings Modules section
   // stays mounted when a second compute-node "Open Run" navigates to the same
   // route (`/settings/modules?module=…&run=…` — search params only), so the

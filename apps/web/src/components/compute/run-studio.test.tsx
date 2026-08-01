@@ -18,6 +18,12 @@
  * must reset the guided values + Advanced JSON exactly like the manual World
  * switch (a Run would otherwise submit the previous World's params against
  * the new World), while an unchanged prop must not clear the author's input.
+ *
+ * Round 4 (Issue 4) pins the same parity for a module switch: user-driven
+ * module clicks and `?module=` deep-link switches (same mounted instance,
+ * cached module detail) must reset the guided values + Advanced JSON and
+ * close the previous module's run inspector, while the World selection — a
+ * shared axis — survives.
  */
 import { http, HttpResponse } from 'msw';
 import { beforeEach, describe, expect, it } from 'vitest';
@@ -56,6 +62,15 @@ const MODULE_WITH_FIELD: ModuleDetail = {
       required: ['difficulty'],
     },
   },
+};
+
+/** Second module id for the module-switch reset tests (PR #194 round 4) —
+ * same schema so the guided field stays mounted and the reset is asserted
+ * on the cleared value, not on field removal. */
+const MODULE_OTHER: ModuleDetail = {
+  ...MODULE_WITH_FIELD,
+  module_id: 'skill-check',
+  name: 'Skill Check',
 };
 
 /** Distinct inspector content per deep-linked run id. */
@@ -322,5 +337,112 @@ describe('RunStudio deep-link `?world=` re-sync (V1.147 PR #194)', () => {
     view.rerender(<RunStudio module={MODULE_WITH_FIELD} initialWorldId="w1" />);
     expect(screen.getByTestId('run-studio-world')).toHaveValue('w2');
     expect(screen.getByTestId('run-form-field-difficulty')).toHaveValue('hard');
+  });
+});
+
+describe('RunStudio module-switch re-sync (V1.147 PR #194 round 4)', () => {
+  /** Worlds list + Runs history + per-run detail + World KB graph. */
+  function moduleSwitchHandlers(worlds: unknown[]) {
+    return [
+      ...deepLinkHandlers(worlds),
+      http.get('/v1/daemon/worlds/:worldId/kb/graph', () =>
+        HttpResponse.json({ entities: [], source_anchors: [], relationships: [] }),
+      ),
+    ];
+  }
+
+  it('clears guided invocation values on a module switch (user-driven click, Run re-gated)', async () => {
+    const user = userEvent.setup();
+    useHandlers(...moduleSwitchHandlers([{ world_id: 'w1', title: 'World One' }]));
+
+    const view = renderStudio(undefined, 'w1', MODULE_WITH_FIELD);
+    await waitFor(() => expect(screen.getByTestId('run-studio-world')).toHaveValue('w1'));
+
+    // Populate the guided form for the first module.
+    const field = await screen.findByTestId('run-form-field-difficulty');
+    await user.type(field, 'hard');
+    expect(field).toHaveValue('hard');
+    expect(screen.getByTestId('run-studio-run')).toBeEnabled();
+
+    // The author clicks another module (same route element; the new module's
+    // detail is cached so the studio stays mounted) — the previous module's
+    // params must not be submittable against the new module.
+    view.rerender(<RunStudio module={MODULE_OTHER} initialWorldId="w1" />);
+
+    await waitFor(() =>
+      expect(screen.getByTestId('run-form-field-difficulty')).toHaveValue(''),
+    );
+    expect(screen.getByTestId('run-studio-run')).toBeDisabled();
+    // The World selection is a shared axis — the module switch must not reset it.
+    expect(screen.getByTestId('run-studio-world')).toHaveValue('w1');
+  });
+
+  it('resets populated Advanced JSON on a deep-link module switch (same mount)', async () => {
+    const user = userEvent.setup();
+    useHandlers(...moduleSwitchHandlers([{ world_id: 'w1', title: 'World One' }]));
+
+    const view = renderStudio(undefined, 'w1', MODULE_WITH_FIELD);
+    await waitFor(() => expect(screen.getByTestId('run-studio-world')).toHaveValue('w1'));
+
+    // Populate the Advanced JSON escape hatch (enablement comes from the
+    // valid JSON object, not the guided `required` gate).
+    await user.click(screen.getByText('Advanced: edit invocation JSON'));
+    const jsonArea = screen.getByTestId('run-studio-json-textarea');
+    fireEvent.change(jsonArea, { target: { value: '{"difficulty":"hard"}' } });
+    expect(jsonArea).toHaveValue('{"difficulty":"hard"}');
+    expect(screen.getByTestId('run-studio-run')).toBeEnabled();
+
+    // `?module=` deep-link switch (second Timeline "Run Module" entry on
+    // another module — search-params-only navigation, studio stays mounted).
+    view.rerender(<RunStudio module={MODULE_OTHER} initialWorldId="w1" />);
+
+    await waitFor(() =>
+      expect(screen.getByTestId('run-studio-json-textarea')).toHaveValue('{}'),
+    );
+    // `jsonDirty` is reset: enablement falls back to the guided gate, which
+    // is unsatisfied after the reset.
+    expect(screen.getByTestId('run-studio-run')).toBeDisabled();
+  });
+
+  it('closes the previous module fresh-run inspector on a module switch', async () => {
+    const user = userEvent.setup();
+    useHandlers(
+      ...moduleSwitchHandlers([{ world_id: 'w1', title: 'World One' }]),
+      http.post('/v1/daemon/compute/run', () =>
+        HttpResponse.json({
+          run_id: 'run_fresh_2',
+          status: 'succeeded',
+          module_id: 'basic-combat',
+          module_version: '1.0.0',
+          world_id: 'w1',
+          proposals: {
+            schema_version: 1,
+            state_delta: [],
+            timeline_events: [{ title: 'Fresh run event', summary: '...' }],
+            new_key_blocks: [],
+            battle_report: { kind: 'combat' },
+          },
+          created_at: '2026-08-01T03:00:00Z',
+        }),
+      ),
+    );
+
+    const view = renderStudio(undefined, 'w1', MODULE);
+    await waitFor(() => expect(screen.getByTestId('run-studio-world')).toBeEnabled());
+
+    // Fresh run with NO `?run=` in the URL: the inspector renders from
+    // `latestRun`, which the run re-sync effect never sees.
+    await user.click(screen.getByTestId('run-studio-run'));
+    expect(await screen.findByText('Fresh run event')).toBeInTheDocument();
+    expect(screen.getByTestId('run-inspector')).toBeInTheDocument();
+
+    // Module switch (user click): the stale fresh-run inspector from the
+    // previous module must close even though `initialRunId` never changed.
+    view.rerender(<RunStudio module={MODULE_OTHER} initialWorldId="w1" />);
+
+    await waitFor(() =>
+      expect(screen.queryByTestId('run-inspector')).not.toBeInTheDocument(),
+    );
+    expect(screen.queryByText('Fresh run event')).not.toBeInTheDocument();
   });
 });
