@@ -22,7 +22,7 @@
  * to the World's current branch (root fallback), which matches the World
  * Timeline's world-state source.
  */
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
 import { Play } from 'lucide-react';
@@ -110,6 +110,23 @@ export function RunStudio({ module, initialWorldId, initialRunId, onRunOpen }: R
   const worlds = useNarrativeWorlds();
   const [worldId, setWorldId] = useState(initialWorldId ?? '');
   const worldGraph = useWorldKbGraph(worldId || undefined);
+
+  // V1.147 PR #194 — deep-link `?world=` re-sync. The Settings Modules
+  // section stays mounted when a second Timeline "Run Module" entry lands on
+  // the same route (`/settings/modules?module=…&world=…` — search-params-only
+  // navigation), so the `useState(initialWorldId ?? '')` seed alone would
+  // keep the previous World selected — a Run would execute against the wrong
+  // World. The ref tracks the last-seen prop VALUE: a new value switches the
+  // selector (and `?world=` removal resets it to the empty placeholder),
+  // while an unchanged prop never clobbers a World the author picked manually
+  // (mirror of the round-1 `initialRunId` re-sync pattern).
+  const lastWorldSeedRef = useRef(initialWorldId);
+  useEffect(() => {
+    if (initialWorldId !== lastWorldSeedRef.current) {
+      lastWorldSeedRef.current = initialWorldId;
+      setWorldId(initialWorldId ?? '');
+    }
+  }, [initialWorldId]);
 
   // ── Guided form + Advanced JSON (best-effort sync) ────────────────────────
   // Narrow the generated open index signature at the app boundary through the

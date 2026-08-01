@@ -12,6 +12,8 @@ import { http, HttpResponse } from 'msw';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { act, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import type { ReactElement } from 'react';
+import { useNavigate } from 'react-router-dom';
 import type { RunSummary } from '@42ch/nexus-contracts';
 
 import { renderInApp } from '@/test/test-providers';
@@ -888,5 +890,132 @@ describe('ModulesPage deep-link selection (V1.147 P2 T3)', () => {
     // No module auto-selected, no run inspector.
     expect(screen.queryByTestId('run-studio')).not.toBeInTheDocument();
     await screen.findByText('Basic Combat');
+  });
+});
+
+describe('ModulesPage deep-link re-sync (V1.147 PR #194)', () => {
+  /** Second installed module for the `?module=` switch journey. */
+  const SCOUTING_MANIFEST = {
+    module_id: 'scouting-party',
+    name: 'Scouting Party',
+    version: '1.2.0',
+    nexus_abi_version: 1,
+    required_key_block_types: ['character'],
+    compute_export: 'compute',
+    init_export: 'init',
+    description: 'A scouting resolution module.',
+    author: 'Scout Team',
+    host_functions: ['scout_read'],
+  };
+
+  /**
+   * Renders a button that calls `navigate(to)` so a test can drive an
+   * in-router search-params navigation while `ModulesPageBody` stays mounted
+   * (real `MemoryRouter` — same pattern as `canvas-nav-commands.test.tsx`).
+   */
+  function NavigateButton({ to }: { to: string }): ReactElement {
+    const navigate = useNavigate();
+    return (
+      <button type="button" onClick={() => navigate(to)}>
+        go-{to}
+      </button>
+    );
+  }
+
+  /** Render the body with a nav harness; the URL drives the deep link. */
+  function renderWithNav(initialUrl: string, targetUrl: string) {
+    return renderInApp(
+      <>
+        <NavigateButton to={targetUrl} />
+        <ModulesPageBody />
+      </>,
+      { client: client(), initialRouterEntries: [initialUrl] },
+    );
+  }
+
+  /** Two-module list + details + the Run Studio's Worlds/Runs queries. */
+  function moduleSwitchHandlers() {
+    return [
+      http.get('/v1/daemon/compute/modules', () =>
+        HttpResponse.json({
+          items: [
+            {
+              module_id: 'basic-combat',
+              name: 'Basic Combat',
+              version: '1.0.0',
+              required_key_block_types: ['character'],
+            },
+            {
+              module_id: 'scouting-party',
+              name: 'Scouting Party',
+              version: '1.2.0',
+              required_key_block_types: ['character'],
+            },
+          ],
+          has_more: false,
+        }),
+      ),
+      http.get('/v1/daemon/compute/modules/basic-combat', () =>
+        HttpResponse.json(BASIC_COMBAT_MANIFEST),
+      ),
+      http.get('/v1/daemon/compute/modules/scouting-party', () =>
+        HttpResponse.json(SCOUTING_MANIFEST),
+      ),
+      http.get('/v1/daemon/narrative/worlds', () => HttpResponse.json({ worlds: [] })),
+      http.get('/v1/daemon/compute/runs', () =>
+        HttpResponse.json({ items: [], has_more: false }),
+      ),
+    ];
+  }
+
+  it('switches the detail panel when the deep-linked `?module=` changes without remounting', async () => {
+    const user = userEvent.setup();
+    useHandlers(...moduleSwitchHandlers());
+
+    renderWithNav(
+      '/settings/modules?module=basic-combat',
+      '/settings/modules?module=scouting-party',
+    );
+
+    // Deep link opens the basic-combat detail (author copy is detail-only).
+    await screen.findByText('Nexus Team');
+
+    // Same route element, new `?module=` value (compute node B "Open Run" or
+    // back/forward) — the detail panel must follow the URL, not stay on the
+    // stale module while the Run Studio opens a new run in its context.
+    await user.click(screen.getByRole('button', { name: /scouting-party/ }));
+
+    await screen.findByText('Scout Team');
+    expect(screen.queryByText('Nexus Team')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Scouting Party' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    expect(screen.getByRole('button', { name: 'Basic Combat' })).toHaveAttribute(
+      'aria-pressed',
+      'false',
+    );
+  });
+
+  it('clears the selection when `?module=` is removed while mounted', async () => {
+    const user = userEvent.setup();
+    useHandlers(...moduleSwitchHandlers());
+
+    renderWithNav('/settings/modules?module=basic-combat', '/settings/modules');
+
+    // Deep link opens the basic-combat detail.
+    await screen.findByText('Nexus Team');
+    expect(screen.getByTestId('run-studio')).toBeInTheDocument();
+
+    // `?module=` removed (browser back to the plain list) — the selection
+    // must clear and the list placeholder return.
+    await user.click(screen.getByRole('button', { name: /go-\/settings\/modules$/ }));
+
+    await screen.findByText('Select a module');
+    expect(screen.queryByTestId('run-studio')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Basic Combat' })).toHaveAttribute(
+      'aria-pressed',
+      'false',
+    );
   });
 });

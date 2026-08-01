@@ -1,13 +1,18 @@
 /**
- * RunStudio deep-link `?run=` re-sync (V1.147 PR #194 Greptile Issue 1).
+ * RunStudio deep-link re-sync (V1.147 PR #194 Greptile Issues 1 + 2).
  *
  * The Settings Modules section is NOT remounted when a second compute node
  * "Open Run" navigates to the same `/settings/modules?module=…&run=…` route
  * (search-params-only navigation), so `useState(initialRunId ?? null)` alone
- * would leave the previous run's inspector open. These tests pin the re-sync:
- * a new `initialRunId` switches the inspector, removing it closes the
- * inspector, and an unchanged prop never clobbers the fresh-run inspector
+ * would leave the previous run's inspector open. These tests pin the run
+ * re-sync: a new `initialRunId` switches the inspector, removing it closes
+ * the inspector, and an unchanged prop never clobbers the fresh-run inspector
  * (the POST-success flow).
+ *
+ * Issue 2 pins the World re-sync: a second Timeline "Run Module" entry (or
+ * back/forward) with a different `?world=` must switch the World selector
+ * while the studio stays mounted; an unchanged prop must never clobber a
+ * World the author picked manually.
  */
 import { http, HttpResponse } from 'msw';
 import { beforeEach, describe, expect, it } from 'vitest';
@@ -76,10 +81,15 @@ function deepLinkHandlers(worlds: unknown[] = []) {
   ];
 }
 
-function renderStudio(initialRunId?: string) {
-  return renderInApp(<RunStudio module={MODULE} initialRunId={initialRunId} />, {
-    client: new BrowserClient(),
-  });
+function renderStudio(initialRunId?: string, initialWorldId?: string) {
+  return renderInApp(
+    <RunStudio
+      module={MODULE}
+      initialRunId={initialRunId}
+      initialWorldId={initialWorldId}
+    />,
+    { client: new BrowserClient() },
+  );
 }
 
 beforeEach(async () => {
@@ -163,5 +173,73 @@ describe('RunStudio deep-link `?run=` re-sync (V1.147 PR #194)', () => {
     view.rerender(<RunStudio module={MODULE} initialRunId="run-a" />);
     expect(screen.getByText('Fresh run event')).toBeInTheDocument();
     expect(screen.queryByText('Run A timeline event')).not.toBeInTheDocument();
+  });
+});
+
+describe('RunStudio deep-link `?world=` re-sync (V1.147 PR #194)', () => {
+  /** Worlds list + Runs history + per-run detail + World KB graph. */
+  function worldSyncHandlers(worlds: unknown[]) {
+    return [
+      ...deepLinkHandlers(worlds),
+      http.get('/v1/daemon/worlds/:worldId/kb/graph', () =>
+        HttpResponse.json({ entities: [], source_anchors: [], relationships: [] }),
+      ),
+    ];
+  }
+
+  it('switches the World selector when the deep-linked world changes without remounting', async () => {
+    useHandlers(
+      ...worldSyncHandlers([
+        { world_id: 'w1', title: 'World One' },
+        { world_id: 'w2', title: 'World Two' },
+      ]),
+    );
+
+    const view = renderStudio('run-a', 'w1');
+
+    // Deep link `?world=w1` pre-fills the selector.
+    await waitFor(() => expect(screen.getByTestId('run-studio-world')).toHaveValue('w1'));
+
+    // Same route element, new `?world=` value (second Timeline Run Module
+    // entry) — the selector must follow the prop, not stay on the stale
+    // World (a Run would otherwise execute against the wrong World).
+    view.rerender(<RunStudio module={MODULE} initialRunId="run-a" initialWorldId="w2" />);
+
+    await waitFor(() => expect(screen.getByTestId('run-studio-world')).toHaveValue('w2'));
+  });
+
+  it('does not clobber a manually picked World when an unchanged deep-link prop re-renders', async () => {
+    const user = userEvent.setup();
+    useHandlers(
+      ...worldSyncHandlers([
+        { world_id: 'w1', title: 'World One' },
+        { world_id: 'w2', title: 'World Two' },
+      ]),
+    );
+
+    const view = renderStudio(undefined, 'w1');
+    await waitFor(() => expect(screen.getByTestId('run-studio-world')).toHaveValue('w1'));
+
+    // The author picks a different World manually.
+    await user.selectOptions(screen.getByTestId('run-studio-world'), 'w2');
+    await waitFor(() => expect(screen.getByTestId('run-studio-world')).toHaveValue('w2'));
+
+    // The parent re-renders with the SAME `?world=w1` value (runs-list
+    // refresh etc.) — the sync effect must not force the selector back.
+    view.rerender(<RunStudio module={MODULE} initialRunId={undefined} initialWorldId="w1" />);
+    expect(screen.getByTestId('run-studio-world')).toHaveValue('w2');
+  });
+
+  it('resets the World selector when the deep-linked world param is removed', async () => {
+    useHandlers(...worldSyncHandlers([{ world_id: 'w1', title: 'World One' }]));
+
+    const view = renderStudio('run-a', 'w1');
+    await waitFor(() => expect(screen.getByTestId('run-studio-world')).toHaveValue('w1'));
+
+    // `?world=` removed (param deleted, browser back) — the selector resets
+    // to the empty placeholder, mirroring the round-1 `?run=` removal close.
+    view.rerender(<RunStudio module={MODULE} initialRunId="run-a" initialWorldId={undefined} />);
+
+    await waitFor(() => expect(screen.getByTestId('run-studio-world')).toHaveValue(''));
   });
 });

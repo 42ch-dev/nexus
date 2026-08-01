@@ -20,7 +20,7 @@
  * selection + run opening write the params back so refresh keeps the detail.
  */
 import { Cpu, RefreshCw } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Navigate, useSearchParams } from 'react-router-dom';
 
@@ -52,6 +52,20 @@ export function ModulesPageBody() {
   const [selectedId, setSelectedId] = useState<string | null>(() =>
     searchParams.get('module'),
   );
+
+  // V1.147 PR #194 — deep-link `?module=` re-sync. The Settings Modules
+  // section stays mounted when a second compute-node "Open Run" navigates to
+  // the same route (`/settings/modules?module=…` — search-params-only), so
+  // the `useState` seed alone would keep the stale module selected. Keyed on
+  // the URL VALUE: external navigation (Timeline "Open Run", back/forward)
+  // switches the detail panel, and `?module=` removal clears the selection.
+  // User-driven writes go through `selectModule` (state + URL set together),
+  // so when the effect fires on those the value is already consistent — a
+  // no-op set on an unchanged value.
+  const moduleParam = searchParams.get('module');
+  useEffect(() => {
+    setSelectedId(moduleParam);
+  }, [moduleParam]);
 
   function selectModule(id: string) {
     setSelectedId(id);
