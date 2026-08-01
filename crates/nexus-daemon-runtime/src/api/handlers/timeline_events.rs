@@ -131,7 +131,7 @@ fn map_status(s: &str) -> Result<TimelineEventInfoStatus, NexusApiError> {
 ///
 /// JSON columns are parsed leniently (malformed stored JSON degrades to
 /// `None` / empty rather than failing the page); `created_at` handles both
-/// RFC3339 and SQLite `datetime('now')` formats via the shared
+/// `RFC3339` and `SQLite` `datetime('now')` formats via the shared
 /// `nexus_narrative::timeline_event::parse_created_at`.
 fn rows_to_items(
     r: nexus_local_db::narrative_gateway::TimelineEventPageRow,
