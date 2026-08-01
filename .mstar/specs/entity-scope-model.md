@@ -228,29 +228,29 @@ This amendment exists to clarify that DF-56 conditional routing branch inputs ar
 **Status**: Normative — V1.62 Shipped (closes `R-V161P1-LOW-001`).
 
 V1.61 added `computable: Option<bool>` and `state: Option<serde_json::Value>` to
-`KeyBlockBody` (carried inside spoke `KnowledgeEntry` — see spoke `knowledge-entry.schema.json`). V1.62 formalizes
+`KnowledgeEntryBody` (carried inside spoke `KnowledgeEntry` — see spoke `knowledge-entry.schema.json`). V1.62 formalizes
 the semantics of these fields and establishes the structured validation mode that
 was deferred from V1.61 P1.
 
 ##### 5.5.9.1 `computable` flag
 
-The `computable` boolean field on `KeyBlockBody` marks a KeyBlock as
+The `computable` boolean field on `KnowledgeEntryBody` marks a KnowledgeEntry as
 participating in WASM compute. Its semantics are:
 
 | Value | Meaning |
 | --- | --- |
-| `Some(true)` | The KeyBlock participates in WASM compute. Its `body` must carry `attributes` (immutable compute params, e.g., `max_hp`, `base_atk`) and may carry `state` (mutable runtime data, e.g., `current_hp`). The host includes computable KeyBlocks in `ComputeInput.key_blocks` when their `block_type` matches the module's `required_key_block_types`. |
-| `None` or `Some(false)` | The KeyBlock does not participate in WASM compute. It may still appear in `ComputeInput.key_blocks` for read-only reference (e.g., a scene KeyBlock providing narrative context), but the host does not apply `state_delta` operations to it. |
+| `Some(true)` | The KnowledgeEntry participates in WASM compute. Its `body` must carry `attributes` (immutable compute params, e.g., `max_hp`, `base_atk`) and may carry `state` (mutable runtime data, e.g., `current_hp`). The host includes computable KnowledgeEntries in `ComputeInput.key_blocks` when their `block_type` matches the module's `required_key_block_types`. |
+| `None` or `Some(false)` | The KnowledgeEntry does not participate in WASM compute. It may still appear in `ComputeInput.key_blocks` for read-only reference (e.g., a scene KnowledgeEntry providing narrative context), but the host does not apply `state_delta` operations to it. |
 
 The flag is a filterable marker — the KB query layer
-(`KbQuery::with_computable(bool)`) can select only computable KeyBlocks when
-building the invocation snapshot. This was implemented in V1.61 P1
+(`KbQuery::with_computable(bool)`) can select only computable KnowledgeEntries
+when building the invocation snapshot. This was implemented in V1.61 P1
 (`crates/nexus-kb/src/query.rs`, `InMemoryKbStore`, `SqliteKbStore`).
 
 ##### 5.5.9.2 `state` field
 
-The `state` field on `KeyBlockBody` holds **mutable runtime data** scoped to the
-KeyBlock. Its shape is nested by `block_type` (compass V1.61 Q5):
+The `state` field on `KnowledgeEntryBody` holds **mutable runtime data** scoped
+to the KnowledgeEntry. Its shape is nested by `block_type` (compass V1.61 Q5):
 
 ```json
 {
@@ -264,12 +264,12 @@ KeyBlock. Its shape is nested by `block_type` (compass V1.61 Q5):
 }
 ```
 
-The nesting by `block_type` avoids field-name collisions when the same KeyBlock
+The nesting by `block_type` avoids field-name collisions when the same KnowledgeEntry
 is used by different module types. The `state` object is mutable — the host
 applies `state_delta` operations (`+/-/set`) from `ComputeOutput.state_delta`
 (see [compute-module-abi.md](./compute-module-abi.md) §5.1).
 
-The `state` field is carried in the KeyBlock's `body_json` (TEXT column in
+The `state` field is carried in the KnowledgeEntry's `body_json` (TEXT column in
 SQLite). No separate DB column is required — the JSON is transparent to the
 storage layer (compass V1.61 design item #2). Growth is expected as modules
 add per-block state, but individual state objects are small (character-scale
@@ -277,17 +277,18 @@ combat state is < 1 KiB).
 
 ##### 5.5.9.2.1 SQLite `body_json` growth expectations (R-V161P0-LOW-004)
 
-The `body_json` TEXT column in `kb_key_blocks` stores the full `KeyBlockBody`
-(including `state`) as serialized JSON. Computable KeyBlocks accumulate mutable
-state across compute invocations — each `state_delta` apply writes back the
-updated `body_json` via `SqliteKbStore::update_key_block`.
+The `body_json` TEXT column in `kb_key_blocks` stores the full
+`KnowledgeEntryBody` (including `state`) as serialized JSON. Computable
+KnowledgeEntries accumulate mutable state across compute invocations — each
+`state_delta` apply writes back the updated `body_json` via
+`SqliteKbStore::update_key_block`.
 
 | Concern | Assessment | Mitigation |
 | --- | --- | --- |
-| Row size growth | Each computable KeyBlock's `body_json` grows proportionally to its state object. Typical character state (< 1 KiB) is negligible. Larger state shapes (e.g., 10 KiB terrain grids) would still be within SQLite's 1 GiB default `max_page_count`. | Per-module state schemas cap individual state objects (see `manifest.json` `schemas.key_block_state`). No per-row growth cap is needed at current scale. |
+| Row size growth | Each computable KnowledgeEntry's `body_json` grows proportionally to its state object. Typical character state (< 1 KiB) is negligible. Larger state shapes (e.g., 10 KiB terrain grids) would still be within SQLite's 1 GiB default `max_page_count`. | Per-module state schemas cap individual state objects (see `manifest.json` `schemas.key_block_state`). No per-row growth cap is needed at current scale. |
 | DB file growth | The `kb_key_blocks` table is append-mostly (inserts on adopt/add; updates on state delta apply). Updates rewrite the row in-place via SQLite's B-tree (no append-only bloat beyond WAL). | SQLite WAL auto-checkpoints. `VACUUM` recovers space after bulk deletes — not needed for normal operations. |
-| `json_extract` query cost | Computable query filters (`KbQuery::with_computable(true)`) use `computable` as a separate `WHERE` clause column (extracted from `body_json` during insert, not via `json_extract` at query time). State-path lookups (e.g. "all characters with `current_hp < 10`") are not a current query pattern. | No `json_extract` index is needed. If state-path queries become a hot path (≥ 10K computable KeyBlocks per world), add a per-`block_type` computed column or a `state_summary_json` denormalization column. Reassess at V2.0+ when user-authored compute modules introduce unbounded state shapes. |
-| Migration risk | `body_json` is TEXT (no schema migration needed if the body shape evolves). Invalid JSON on read returns `None` for `body` — the KeyBlock is still returned but without a parsed body. | Serialization is validated at insert/update time. Existing rows with old shapes degrade gracefully (missing fields = `None` in the deserialized struct). |
+| `json_extract` query cost | Computable query filters (`KbQuery::with_computable(true)`) use `computable` as a separate `WHERE` clause column (extracted from `body_json` during insert, not via `json_extract` at query time). State-path lookups (e.g. "all characters with `current_hp < 10`") are not a current query pattern. | No `json_extract` index is needed. If state-path queries become a hot path (≥ 10K computable KnowledgeEntries per world), add a per-`block_type` computed column or a `state_summary_json` denormalization column. Reassess at V2.0+ when user-authored compute modules introduce unbounded state shapes. |
+| Migration risk | `body_json` is TEXT (no schema migration needed if the body shape evolves). Invalid JSON on read returns `None` for `body` — the KnowledgeEntry is still returned but without a parsed body. | Serialization is validated at insert/update time. Existing rows with old shapes degrade gracefully (missing fields = `None` in the deserialized struct). |
 
 The current design intentionally trades query flexibility for schema simplicity.
 Post-1.0, if state-path queries emerge as a product requirement, a dedicated
@@ -309,12 +310,12 @@ The structured validation mode is:
 
 1. The `nexus-kb::validation` module provides `ValidationMode::Structured`
    (added in V1.61 P1, `crates/nexus-kb/src/validation.rs`). This mode
-   requires `computable: true` on KeyBlocks that carry `state`.
+   requires `computable: true` on KnowledgeEntries that carry `state`.
 2. Per-module attribute/state shapes are declared in the module's
    `manifest.json` `schemas.key_block_attributes[block_type]` and
    `schemas.key_block_state[block_type]` blocks.
 3. At compute invocation time, the host (`nexus-wasm-host`) validates each
-   KeyBlock in `ComputeInput.key_blocks` against the manifest-declared
+   KnowledgeEntry in `ComputeInput.key_blocks` against the manifest-declared
    schemas (see [wasm-host.md](./wasm-host.md) §8.5).
 4. Validation failures produce `ComputeError::ManifestValidationFailed`
    with a JSON path to the offending field.
@@ -323,7 +324,7 @@ The `ValidationMode::Structured` variant in `nexus-kb` validates the
 computable flag and state field at the KB layer; the manifest-driven
 validation in `nexus-wasm-host` validates the **shapes** of those fields
 at compute time. Both layers are additive — KB validation ensures the
-KeyBlock is structurally valid for compute; host validation ensures the
+KnowledgeEntry is structurally valid for compute; host validation ensures the
 concrete values match the module's declared schemas.
 
 ##### 5.5.9.4 Relationship to deleted entity-* schemas

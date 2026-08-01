@@ -507,15 +507,54 @@ fn compute_routes() -> Router<WorkspaceState> {
         )
 }
 
+/// Compute invoke routes — direct Control Room lane (V1.147 P0).
+///
+/// These are mounted in tier2 (`require_api_key` + `require_active_creator`)
+/// because they require an active creator to invoke compute on owned worlds.
+fn compute_invoke_routes() -> Router<WorkspaceState> {
+    Router::new()
+        .route("/v1/daemon/compute/run", post(handlers::compute_runs::run))
+        .route(
+            "/v1/daemon/compute/runs/:run_id/accept",
+            post(handlers::compute_runs::accept_run),
+        )
+        .route(
+            "/v1/daemon/compute/runs/:run_id/discard",
+            post(handlers::compute_runs::discard_run),
+        )
+        .route(
+            "/v1/daemon/compute/runs/:run_id",
+            get(handlers::compute_runs::get_run_detail),
+        )
+        .route(
+            "/v1/daemon/compute/runs",
+            get(handlers::compute_runs::list_runs_handler)
+                // V1.147 P3 T2 — Clear history: scoped (world_id required),
+                // terminal-status-only delete of run rows. No world-state
+                // mutation (Applied runs already committed their events).
+                .delete(handlers::compute_runs::delete_runs),
+        )
+}
+
 /// Timeline overview routes (V1.126 P2).
 ///
 /// Composite cursor-paginated overview of visible Worlds with per-World
 /// era/event counts and last activity timestamp. No new persistence.
+///
+/// Also hosts the per-World timeline-events read route (V1.147 P2 T1) —
+/// `GET /v1/daemon/worlds/:world_id/timeline/events` — cursor-paginated
+/// `narrative_timeline_events` read with branch / status / `event_type`
+/// filters.
 fn timeline_routes() -> Router<WorkspaceState> {
-    Router::new().route(
-        "/v1/daemon/timeline/overview",
-        get(handlers::timeline::get_timeline_overview),
-    )
+    Router::new()
+        .route(
+            "/v1/daemon/timeline/overview",
+            get(handlers::timeline::get_timeline_overview),
+        )
+        .route(
+            "/v1/daemon/worlds/:world_id/timeline/events",
+            get(handlers::timeline_events::get_timeline_events),
+        )
 }
 
 /// Profile-scoped (Tier-2) routes — require active creator + lazy-open pool.
@@ -541,6 +580,7 @@ fn tier2_routes() -> Router<WorkspaceState> {
         .merge(orchestration_routes())
         .merge(agent_host_tier2_routes())
         .merge(timeline_routes())
+        .merge(compute_invoke_routes())
 }
 
 /// Create the Daemon API router

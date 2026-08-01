@@ -61,6 +61,7 @@ import type { Edge, Node } from '@xyflow/react';
 
 import type { CanvasSurfaceAdapter } from '../canvas-surface-adapter';
 import type {
+  TimelineEventInfo,
   WorldKbEntityProjection,
   WorldKbGraphResponse,
   WorldKbRelationshipProjection,
@@ -68,6 +69,7 @@ import type {
 
 import type { WorldKbEdgeData } from '../world-kb/types';
 import { TimelineInspector } from './timeline-inspector';
+import { TimelineComputeInspector } from './timeline-compute-inspector';
 import { TimelineBriefEraInspector } from './timeline-brief-era-inspector';
 import { TimelineAltView } from './timeline-alt-view';
 import type { BriefSpineConfig, DirectedAxisSpineNodeData, NarrativeSpineConfig } from './directed-axis-spine';
@@ -95,20 +97,72 @@ export type TimelineGraph = WorldKbGraphResponse;
 export type TimelineLayer = 'brief' | 'narrative';
 
 /**
+ * V1.147 P2 T3 — compute provenance carried by a merged Narrative compute
+ * node (derived from a `TimelineEventInfo` row + the KB graph). App-local
+ * payload; the node chrome + compute inspector render from it.
+ *
+ * The `TimelineEventInfo` wire type stays authoritative: `eventId` +
+ * `moduleId`/`moduleVersion`/`runId`/`sourceKind` come from
+ * `extensions.compute` (daemon-stamped provenance), `reportDigest` from the
+ * event summary, and `affectedEntries` resolve `affected_key_block_ids`
+ * against the KB graph at projection time.
+ */
+export interface ComputeNodePayload {
+  /** Timeline event row id (`compute:<id>` node id prefix). */
+  eventId: string;
+  /** Module id from provenance (`extensions.compute.module_id`). */
+  moduleId: string;
+  /**
+   * Module version at invocation time.
+   */
+  moduleVersion: string;
+  /**
+   * Module display name — resolved from the caller-supplied module registry
+   * map at projection time (falls back to `moduleId` when the registry has
+   * not loaded the module — honest for preset-path modules absent locally).
+   */
+  moduleName: string;
+  /** Run correlation id — direct lane only (absent for preset-path nodes). */
+  runId?: string;
+  /**
+   * Provenance source kind — `direct_invoke` vs `preset` when stamped. The
+   * daemon stamps only these two today; unknown kinds resolve to
+   * `undefined` (the UI falls back to the direct-lane label — `simplify:`
+   * a new kind needs a catalog entry when one ships).
+   */
+  sourceKind?: 'direct_invoke' | 'preset';
+  /** Module event summary — the report digest (e.g. the damage line). */
+  reportDigest?: string;
+  /** Affected KnowledgeEntries resolved against the KB graph by id. */
+  affectedEntries: Array<{ id: string; title: string }>;
+}
+
+/**
  * Node data payload for the Timeline surface.
  *
  * `WorldKbEntityProjection` carries `key_block_id`, `block_type`,
  * `canonical_name`, `status`, `version`, `body`, `source_anchor_count`, etc.
  * The adapter adds:
- *   - `layoutHint` — discriminates the three projection kinds:
+ *   - `layoutHint` — discriminates the four projection kinds:
  *     `'event'`  for Narrative `block_type=event` (V1.122).
  *     `'context'` for Narrative non-event, non-era KeyBlocks (V1.122).
  *     `'brief'`  for Brief `block_type=era` (V1.123 P1 T2).
+ *     `'compute'` for V1.147 P2 compute_result log events merged into the
+ *     Narrative projection (V1.147 P2 T3). Compute nodes carry synthetic
+ *     entity-projection fields (`key_block_id: "log:<event_id>"`,
+ *     `block_type: 'event'`, `canonical_name` = event title fallback) purely
+ *     to satisfy the shared `WorldKbEntityProjection` base — they are NOT KB
+ *     entities and MUST NOT route to the `kb.patch_entity` write path (the
+ *     compute inspector owns no patch wiring).
  *   - `occurredAtHint` — free-form temporal signal extracted from
- *     `body.attributes.occurred_at` when present (Narrative layer).
+ *     `body.attributes.occurred_at` when present (Narrative layer). Compute
+ *     nodes set it to the event's ISO `created_at` (a machine timestamp, not
+ *     a fabricated chronology).
  *   - `eraId` / `startHint` / `endHint` / `worldSummary` — V1.123 Brief-era
  *     markers extracted from `body.attributes` when `layoutHint === 'brief'`
  *     (architect §2.3 + §8).
+ *   - `compute` — V1.147 P2 compute payload, present only when
+ *     `layoutHint === 'compute'`.
  *
  * The `[key: string]: unknown` index signature satisfies React Flow's
  * `Node<TNodeData extends Record<string, unknown>>` constraint.
@@ -118,16 +172,17 @@ export interface TimelineNodeData extends WorldKbEntityProjection {
   [key: string]: unknown;
   /**
    * Projection kind. `'event'` / `'context'` are the V1.122 Narrative
-   * partitions; `'brief'` is the V1.123 P1 T2 Brief-era partition. The
-   * adapter's `projectGraphForLayer(graph, layer)` selects which entities
-   * receive which `layoutHint`.
+   * partitions; `'brief'` is the V1.123 P1 T2 Brief-era partition; `'compute'`
+   * is the V1.147 P2 machine-written compute-result partition (Narrative
+   * only — the Brief layer never projects compute nodes).
    */
-  layoutHint: 'event' | 'context' | 'brief';
+  layoutHint: 'event' | 'context' | 'brief' | 'compute';
   /**
    * Free-form temporal signal extracted from `body.attributes.occurred_at`
    * when it is a non-empty string. Undefined when not declared by the
    * KeyBlock body — the entity then clusters in the temporal-unknown group.
-   * Narrative layer only (V1.122).
+   * Narrative layer only (V1.122). Compute nodes carry the machine
+   * `created_at` of the log event instead.
    */
   occurredAtHint?: string;
   /**
@@ -144,6 +199,11 @@ export interface TimelineNodeData extends WorldKbEntityProjection {
   endHint?: string;
   /** Optional world-shape summary line for the era card. */
   worldSummary?: string;
+  /**
+   * V1.147 P2 T3 — compute payload for merged compute_result nodes. Present
+   * only when `layoutHint === 'compute'`. See {@link ComputeNodePayload}.
+   */
+  compute?: ComputeNodePayload;
 }
 
 /** Verbatim reuse of the V1.74 World KB relationship edge payload. */
@@ -304,6 +364,14 @@ export interface TimelineCanvasAdapterContext {
    * contract"). Undefined when no realizing Work is bound.
    */
   onViewInWorkTimeline?: () => void;
+  /**
+   * V1.147 P2 T3 — Open Run hand-off from the compute node inspector.
+   * Fires with the full run id + module id when the author activates "Open
+   * Run" on a Compute result node; the orchestrator navigates to
+   * Settings → Modules run detail (deep link). Undefined when the compute
+   * inspector is read-only (tests without wiring).
+   */
+  onOpenRun?: (runId: string, moduleId: string) => void;
 }
 
 export type TimelineCanvasAdapter = CanvasSurfaceAdapter<
@@ -370,9 +438,21 @@ const NARRATIVE_LAYOUT_OPTIONS = {
 };
 
 const NODE_ID_PREFIX = 'entity:';
+/** V1.147 P2 T3 — compute log-event node id prefix (`compute:<event_id>`). */
+const COMPUTE_NODE_ID_PREFIX = 'compute:';
+/**
+ * V1.147 P2 T3 — synthetic `key_block_id` for compute nodes. Compute nodes
+ * are NOT KB entities; the id is namespaced so it can never collide with a
+ * real `entity:` node and never reaches the `kb.patch_entity` write path.
+ */
+const COMPUTE_KEY_BLOCK_PREFIX = 'log:';
 
 function nodeIdOf(keyBlockId: string): string {
   return `${NODE_ID_PREFIX}${keyBlockId}`;
+}
+
+function computeNodeIdOf(eventId: string): string {
+  return `${COMPUTE_NODE_ID_PREFIX}${eventId}`;
 }
 
 /**
@@ -457,10 +537,19 @@ function extractEraAttributes(entity: WorldKbEntityProjection): {
  * Relationship edges reuse the V1.74 World KB edge rendering verbatim
  * (`WorldKbEdgeData`); both the stored + symmetric_reverse projections are
  * rendered when a relationship is symmetric, mirroring the World KB adapter.
+ *
+ * V1.147 P2 T3 — compute merge. `events` (optional) carries the World's
+ * `event_type=compute_result` + `status=canon` timeline log events (the T1
+ * route already filters; the adapter re-enforces defensively). The Narrative
+ * layer merges them as `timeline-compute-result` nodes — the machine-written
+ * family alongside the author KB `block_type=event` family. Brief ignores
+ * events entirely. See `mergeComputeEvents` for the family distinction.
  */
 export function projectTimelineGraph(
   graph: TimelineGraph,
   layer: TimelineLayer = 'narrative',
+  events?: TimelineEventInfo[],
+  moduleNames?: ReadonlyMap<string, string>,
 ): {
   nodes: Node<TimelineNodeData>[];
   edges: Edge<TimelineEdgeData>[];
@@ -468,7 +557,7 @@ export function projectTimelineGraph(
   if (layer === 'brief') {
     return projectBriefLayer(graph);
   }
-  return projectNarrativeLayer(graph);
+  return projectNarrativeLayer(graph, events, moduleNames);
 }
 
 /**
@@ -598,8 +687,16 @@ function eraEntityToTimelineNodeData(
  * are EXCLUDED from Context clusters per architect §5.2 (Context clusters =
  * entities.filter(e => !['event','era'].includes(e.block_type))). They are
  * Brief-layer-only markers.
+ *
+ * V1.147 P2 T3 — compute merge: canon compute_result log events are appended
+ * to the Narrative projection as `timeline-compute-result` nodes (see
+ * `mergeComputeEvents`).
  */
-function projectNarrativeLayer(graph: TimelineGraph): {
+function projectNarrativeLayer(
+  graph: TimelineGraph,
+  events?: TimelineEventInfo[],
+  moduleNames?: ReadonlyMap<string, string>,
+): {
   nodes: Node<TimelineNodeData>[];
   edges: Edge<TimelineEdgeData>[];
 } {
@@ -671,6 +768,21 @@ function projectNarrativeLayer(graph: TimelineGraph): {
     });
   });
 
+  // V1.147 P2 T3 — merge canon compute_result log events (machine-written
+  // family) after the authored KB block. Two event families coexist on the
+  // Narrative when-axis: `entity:<kb_id>` (author KB `block_type=event`) and
+  // `compute:<event_id>` (compute log events). The families are disjoint by
+  // storage + node id, so a KB event and a compute log event can never
+  // double-render the same story beat.
+  const computeNodes = mergeComputeEvents(
+    events ?? [],
+    graph,
+    datedEvents.length,
+    moduleNames,
+    undatedEvents.length,
+  );
+  nodes.push(...computeNodes);
+
   // V1.126 P1 — Narrative directed axis spine (decoration-only, Y=0,
   // appended after entity nodes so existing tests pass unchanged).
   // Only added when the layer has event data.
@@ -708,6 +820,191 @@ function entityToTimelineNodeData(
     layoutHint,
     ...(occurredAt !== undefined ? { occurredAtHint: occurredAt } : {}),
   };
+}
+
+// ─── Compute-result merge (V1.147 P2 T3) ────────────────────────────────────
+
+/**
+ * Narrow the daemon-stamped provenance namespace
+ * (`extensions.compute = { module_id, module_version, run_id, source_kind }`).
+ * The T1 route parses `extensions_nexus_json`; P0 Accept stamps
+ * `source_kind: "direct_invoke"` (preset-path stamping lands separately).
+ * Unknown shapes are treated as absent (no fabricated provenance).
+ */
+interface ComputeProvenanceShape {
+  module_id?: unknown;
+  module_version?: unknown;
+  run_id?: unknown;
+  source_kind?: unknown;
+}
+
+function computeProvenanceOf(event: TimelineEventInfo): ComputeProvenanceShape {
+  const ext = event.extensions;
+  if (ext === null || typeof ext !== 'object') return {};
+  const compute = (ext as Record<string, unknown>).compute;
+  if (compute === null || typeof compute !== 'object') return {};
+  return compute as ComputeProvenanceShape;
+}
+
+function readString(value: unknown): string | undefined {
+  return typeof value === 'string' && value.length > 0 ? value : undefined;
+}
+
+/**
+ * Merge gate — only machine-written `compute_result` log events in the
+ * `canon` state project onto the Narrative layer (plan Global Constraints
+ * merge discipline; the T1 route filters server-side, this re-enforces).
+ */
+export function isMergeableComputeEvent(event: TimelineEventInfo): boolean {
+  return event.event_type === 'compute_result' && event.status === 'canon';
+}
+
+/**
+ * Build the compute node payload from a log event + a prebuilt
+ * `key_block_id → canonical_name` map (QC S-map: the map is built ONCE in
+ * `mergeComputeEvents` and shared across all events — O(events + entities),
+ * not O(events × entities)).
+ *
+ * `affectedEntries` resolves `affected_key_block_ids` against the map
+ * (unknown ids fall back to the id itself — honest).
+ * Exported for unit tests; consumed by `mergeComputeEvents`.
+ */
+export function buildComputeNodePayload(
+  event: TimelineEventInfo,
+  graphById: ReadonlyMap<string, string>,
+  moduleNames?: ReadonlyMap<string, string>,
+): ComputeNodePayload {
+  const provenance = computeProvenanceOf(event);
+  const affectedEntries = (event.affected_key_block_ids ?? []).map((id) => ({
+    id,
+    title: graphById.get(id) ?? id,
+  }));
+  const moduleId = readString(provenance.module_id) ?? '';
+  const sourceKindRaw = readString(provenance.source_kind);
+  const sourceKind: ComputeNodePayload['sourceKind'] =
+    sourceKindRaw === 'direct_invoke' || sourceKindRaw === 'preset'
+      ? sourceKindRaw
+      : undefined;
+  return {
+    eventId: event.id,
+    moduleId,
+    moduleName: moduleId ? (moduleNames?.get(moduleId) ?? moduleId) : moduleId,
+    moduleVersion: readString(provenance.module_version) ?? '',
+    runId: readString(provenance.run_id),
+    sourceKind,
+    reportDigest: event.summary ?? undefined,
+    affectedEntries,
+  };
+}
+
+/**
+ * Project canon compute_result log events onto the Narrative layer.
+ *
+ * Positioned AFTER the authored KB dated block on the when-axis (Y = 0),
+ * sorted among themselves by ISO `created_at`. Dated-only (parseable
+ * `created_at`); unparseable rows cluster in the temporal-unknown group —
+ * mirrors the V1.122 undated-event convention. Compute nodes carry the
+ * machine `created_at` as `occurredAtHint` (a real timestamp, not a
+ * fabricated chronology — `sequence_no` is never used for ordering).
+ *
+ * `simplify:` compute events are appended after the KB dated block rather
+ * than interleaved with the freeform `occurred_at` lexical ordering. Mixed
+ * freeform-vs-ISO chronology is not canonical; a temporal-aware sort that
+ * unifies both families is deferred (DF-V1122-DEEPER-WB).
+ *
+ * Undated rows continue the temporal-unknown group's X spread PAST the KB
+ * undated cluster (`kbUndatedCount` offset) so the two undated families
+ * never share coordinates on the y=220 lane (review F2 — the KB cluster
+ * starts at `ORIGIN_X + kbDatedCount*EVENT_STEP_X`; without the offset the
+ * compute undated base could land on top of it whenever
+ * `datedComputeCount < kbUndatedCount`).
+ */
+export function mergeComputeEvents(
+  events: TimelineEventInfo[],
+  graph: TimelineGraph,
+  kbDatedCount: number,
+  moduleNames?: ReadonlyMap<string, string>,
+  kbUndatedCount = 0,
+): Node<TimelineNodeData>[] {
+  const mergeable = events.filter(isMergeableComputeEvent);
+  if (mergeable.length === 0) return [];
+
+  // QC S-map: hoist the id → canonical_name map so `buildComputeNodePayload`
+  // never rebuilds it per event (O(entities) once, then O(events) lookups).
+  const graphById = new Map(
+    (graph.entities ?? []).map((e) => [e.key_block_id, e.canonical_name]),
+  );
+  const worldId = (graph.entities ?? [])[0]?.world_id ?? '';
+
+  const dated: Array<{ event: TimelineEventInfo; createdAt: string }> = [];
+  const undated: TimelineEventInfo[] = [];
+  for (const event of mergeable) {
+    const createdAt = event.created_at;
+    if (createdAt && !Number.isNaN(Date.parse(createdAt))) {
+      dated.push({ event, createdAt });
+    } else {
+      undated.push(event);
+    }
+  }
+  dated.sort((a, b) => {
+    if (a.createdAt < b.createdAt) return -1;
+    if (a.createdAt > b.createdAt) return 1;
+    return a.event.id.localeCompare(b.event.id);
+  });
+
+  const nodes: Node<TimelineNodeData>[] = [];
+  const computeStartX = ORIGIN_X + kbDatedCount * EVENT_STEP_X;
+
+  dated.forEach(({ event, createdAt }, i) => {
+    nodes.push({
+      id: computeNodeIdOf(event.id),
+      type: 'timeline-compute-result',
+      position: { x: computeStartX + i * EVENT_STEP_X, y: WHEN_AXIS_Y },
+      data: computeEventToTimelineNodeData(event, graphById, worldId, createdAt, moduleNames),
+    });
+  });
+
+  // Undated compute rows cluster in the temporal-unknown group (y=220) AFTER
+  // the KB undated cluster (review F2): `kbUndatedCount` shifts the X base so
+  // the two families never stack on identical coordinates.
+  const undatedOriginX =
+    computeStartX + dated.length * EVENT_STEP_X + kbUndatedCount * EVENT_STEP_X;
+  undated.forEach((event, i) => {
+    nodes.push({
+      id: computeNodeIdOf(event.id),
+      type: 'timeline-compute-result',
+      position: { x: undatedOriginX + i * EVENT_STEP_X, y: TEMPORAL_UNKNOWN_Y },
+      data: computeEventToTimelineNodeData(event, graphById, worldId, undefined, moduleNames),
+    });
+  });
+
+  return nodes;
+}
+
+function computeEventToTimelineNodeData(
+  event: TimelineEventInfo,
+  graphById: ReadonlyMap<string, string>,
+  worldId: string,
+  createdAt: string | undefined,
+  moduleNames?: ReadonlyMap<string, string>,
+): TimelineNodeData {
+  const payload = buildComputeNodePayload(event, graphById, moduleNames);
+  const data: TimelineNodeData = {
+    // Synthetic entity-projection fields (see TimelineNodeData docblock):
+    // compute nodes are NOT KB entities; the write path never sees them.
+    key_block_id: `${COMPUTE_KEY_BLOCK_PREFIX}${event.id}`,
+    world_id: worldId,
+    block_type: 'event',
+    canonical_name: event.title ?? payload.moduleName,
+    status: event.status,
+    version: 0,
+    layoutHint: 'compute',
+    compute: payload,
+    source_anchor_count: 0,
+    updated_at: event.created_at,
+  };
+  if (createdAt !== undefined) data.occurredAtHint = createdAt;
+  return data;
 }
 
 /**
@@ -806,8 +1103,15 @@ const ORDERING_DISCLAIMER =
  * visible label; the World KB precedent follows this rule. If a future
  * iteration localises the canvas a11y summary, mirror the change here and
  * in `world-kb/graph-projection.ts::graphSummary`.
+ *
+ * V1.147 P2 T3 — `computeEvents` (optional) appends the merged compute
+ * family count ("N compute events") when present, so the SR summary reflects
+ * the full Narrative projection, not only the KB half.
  */
-export function summarizeTimelineGraph(graph: TimelineGraph): string {
+export function summarizeTimelineGraph(
+  graph: TimelineGraph,
+  computeEvents?: TimelineEventInfo[],
+): string {
   const entities = graph.entities ?? [];
   const relationships = graph.relationships ?? [];
   const anchors = graph.source_anchors ?? [];
@@ -829,6 +1133,13 @@ export function summarizeTimelineGraph(graph: TimelineGraph): string {
   if (anchors.length > 0) {
     parts.push(
       `${anchors.length} ${anchors.length === 1 ? 'source anchor' : 'source anchors'}`,
+    );
+  }
+  // V1.147 P2 T3 — merged compute family (machine-written log events).
+  const computeCount = (computeEvents ?? []).filter(isMergeableComputeEvent).length;
+  if (computeCount > 0) {
+    parts.push(
+      `${computeCount} ${computeCount === 1 ? 'compute event' : 'compute events'}`,
     );
   }
 
@@ -911,10 +1222,26 @@ export function summarizeTimelineGraph(graph: TimelineGraph): string {
  *     temporal signal); emits the ordering disclaimer whenever event
  *     entities are rendered (lexical string sort is never canonical
  *     chronology), and omits it only for zero-event graphs (PR #156 fix).
+ *
+ * V1.147 P2 T3 extensions over T5:
+ *   - `timelineEvents` (optional) — the World's canon compute_result log
+ *     events (T1 route). Captured at factory creation; the orchestrator
+ *     rebuilds the adapter when the events array changes so
+ *     `useCanvasSurface`'s `[graph, adapter]` memo re-projects with the
+ *     merged family (data-driven rebuild, same as the layer swap).
+ *   - `projectGraph(graph)` — delegates to `projectTimelineGraph(graph,
+ *     activeLayer, timelineEvents)`; the Narrative layer merges compute
+ *     events, Brief ignores them.
+ *   - `renderInspector(node)` — `layoutHint === 'compute'` dispatches to
+ *     `TimelineComputeInspector` (module + version + provenance + digests +
+ *     Open Run hand-off via `ctxRef.current.onOpenRun`). Compute nodes never
+ *     reach `TimelineInspector` — the `kb.patch_entity` write path is KB-only.
  */
 export function createTimelineCanvasAdapter(
   ctxRef: MutableRefObject<TimelineCanvasAdapterContext>,
   activeLayer: TimelineLayer = 'narrative',
+  timelineEvents?: TimelineEventInfo[],
+  computeModuleNames?: ReadonlyMap<string, string>,
 ): TimelineCanvasAdapter {
   return {
     surfaceKind: 'timeline',
@@ -942,7 +1269,11 @@ export function createTimelineCanvasAdapter(
       // the World entry has era data; the canvas component rebuilds the
       // adapter via `useMemo([activeLayer], ...)` so layer swap triggers a
       // fresh projection through `useCanvasSurface`.
-      return projectTimelineGraph(graph, activeLayer);
+      //
+      // V1.147 P2 T3 — the captured `timelineEvents` merge into the Narrative
+      // projection; Brief ignores them. `computeModuleNames` resolves module
+      // display names from the registry map (module_id fallback).
+      return projectTimelineGraph(graph, activeLayer, timelineEvents, computeModuleNames);
     },
 
     adaptConflict(_error) {
@@ -966,6 +1297,13 @@ export function createTimelineCanvasAdapter(
       if (data.layoutHint === 'brief') {
         return <TimelineBriefEraInspector node={node} ctxRef={ctxRef} />;
       }
+      // V1.147 P2 T3 — compute nodes get the compute inspector (module +
+      // version + provenance + digests + Open Run). Compute nodes MUST NOT
+      // reach the KB inspector: they are log events, not KB entities, and
+      // the `kb.patch_entity` write path is KB-only.
+      if (data.layoutHint === 'compute') {
+        return <TimelineComputeInspector node={node} ctxRef={ctxRef} />;
+      }
       return <TimelineInspector node={node} ctxRef={ctxRef} />;
     },
 
@@ -974,7 +1312,9 @@ export function createTimelineCanvasAdapter(
     },
 
     summarizeGraph(graph) {
-      return summarizeTimelineGraph(graph);
+      // V1.147 P2 T3 — the a11y summary includes the merged compute family
+      // count when events are present.
+      return summarizeTimelineGraph(graph, timelineEvents);
      },
   };
 }

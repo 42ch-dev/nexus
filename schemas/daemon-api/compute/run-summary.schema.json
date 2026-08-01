@@ -1,0 +1,48 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/daemon-api/compute/run-summary.schema.json",
+  "schema_version": 1,
+  "title": "Nexus RunSummary",
+  "description": "Summary row for a compute run in a paginated list (GET /v1/daemon/compute/runs). Lightweight — excludes full proposals and invocation params.",
+  "type": "object",
+  "required": ["run_id", "status", "module_id", "module_version", "world_id", "created_at"],
+  "properties": {
+    "run_id": {
+      "type": "string",
+      "description": "Unique run identifier."
+    },
+    "status": {
+      "type": "string",
+      "enum": ["running", "succeeded", "failed", "applied", "discarded"],
+      "description": "Run lifecycle status. Product mapping: succeeded = \"Needs review\", applied = \"Applied\", discarded = \"Discarded\", failed = \"Failed\"."
+    },
+    "module_id": {
+      "type": "string",
+      "description": "Module that was invoked."
+    },
+    "module_version": {
+      "type": "string",
+      "description": "Version of the module at invocation time."
+    },
+    "world_id": {
+      "type": "string",
+      "description": "World the run targeted."
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO 8601 UTC timestamp of run creation."
+    },
+    "updated_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO 8601 UTC timestamp of last status change (succeeded/failed/applied/discarded)."
+    },
+    "accepted_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO 8601 UTC timestamp when accepted. Present only when status is \"applied\"."
+    }
+  },
+  "additionalProperties": false
+}

@@ -28,6 +28,8 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::SystemTime;
 
+mod build_walk;
+
 /// Module ids that must be embedded. Each id must match a source crate under
 /// `../../modules/<id>/`.
 const MODULE_IDS: &[&str] = &["basic-combat"];
@@ -90,10 +92,17 @@ fn build_module(id: &str, modules_root: &Path, embedded_root: &Path) {
     let src_cargo = src_dir.join("Cargo.toml");
     let src_code = src_dir.join("src");
 
-    // Tell Cargo to re-run this script when the module's sources change. The
-    // directory path watches recursive file additions/removals and mtimes.
+    // Tell Cargo to re-run this script when the module's sources change.
+    // Per-file directives (not dir-level): `cargo:rerun-if-changed=<dir>` does
+    // NOT recurse into subdirectories, so an edit to a nested module source
+    // file (e.g. `modules/basic-combat/src/lib.rs`) would otherwise go
+    // undetected and the embedded `.wasm` would go stale (R-V1147P0-001).
+    // The dir-level directive for the walked src dir is emitted *alongside*
+    // the per-file list: it covers a pure file *addition*, which the per-file
+    // directives cannot see (the new file was never in the emitted list).
     println!("cargo:rerun-if-changed={}", src_manifest.display());
     println!("cargo:rerun-if-changed={}", src_cargo.display());
+    emit_rerun_if_changed(&src_code);
     println!("cargo:rerun-if-changed={}", src_code.display());
 
     if !src_dir.is_dir() {
@@ -116,10 +125,40 @@ fn build_module(id: &str, modules_root: &Path, embedded_root: &Path) {
         compile_module(id, &src_dir);
         // cdylib artifact names use underscores (crate name `basic-combat` →
         // `basic_combat.wasm`); the embedded id keeps the dash.
-        let artifact = src_dir
-            .join("target/wasm32-unknown-unknown/release")
-            .join(format!("{}.wasm", id.replace('-', "_")));
+        //
+        // The nested module build inherits `CARGO_TARGET_DIR` when the repo's
+        // direnv layout (`.envrc`) is active, so the artifact lands in the
+        // shared cache — NOT the module-local `target/`. Resolve the artifact
+        // the same way cargo does, or a stale local blob gets embedded while
+        // the fresh one sits in the shared cache (V1.147 P0 fix).
+        let artifact = std::env::var_os("CARGO_TARGET_DIR").map_or_else(
+            || {
+                src_dir
+                    .join("target")
+                    .join("wasm32-unknown-unknown")
+                    .join("release")
+                    .join(format!("{}.wasm", id.replace('-', "_")))
+            },
+            |dir| {
+                PathBuf::from(dir)
+                    .join("wasm32-unknown-unknown")
+                    .join("release")
+                    .join(format!("{}.wasm", id.replace('-', "_")))
+            },
+        );
         copy_or_die(&artifact, &dest_wasm, &format!("{id}.wasm"));
+    }
+}
+
+/// Emit one `cargo:rerun-if-changed` directive per file under `dir` (walk).
+///
+/// Dir-level directives do not recurse (R-V1147P0-001); per-file emission
+/// makes Cargo re-run this script when any nested module source changes.
+fn emit_rerun_if_changed(dir: &Path) {
+    let mut files = Vec::new();
+    build_walk::walk_files(dir, &mut files);
+    for file in files {
+        println!("cargo:rerun-if-changed={}", file.display());
     }
 }
 

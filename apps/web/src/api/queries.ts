@@ -47,11 +47,15 @@ import type {
   ReadingAnnotationPatchRequest,
   ReadingProgressResponse,
   ReviewResponse,
+  RunAcceptRequest,
+  RunRequest,
+  RunSummary,
   ScaffoldPresetRequest,
   ScanRequest,
   ScanResponse,
   SoulNarrativeResponse,
   TimelineOverviewResponse,
+  TimelineEventInfo,
   UpdateFindingRequest,
   ValidatePresetRequest,
   WorkSummary,
@@ -60,7 +64,7 @@ import type {
 
 import { useToast } from '@/lib/use-toast';
 import { useDesktopCapabilities, useNexusClient } from '@/lib/client-context';
-import { NexusClientError } from '@/lib/nexus';
+import { NexusClientError, type ClearRunsQuery, type ListRunsQuery } from '@/lib/nexus';
 import { shortId } from '@/lib/format';
 import { queryKeys } from '@/lib/nexus/query-keys';
 import { useActiveCreatorId as useActiveCreatorIdFromContext } from '@/lib/active-creator-context';
@@ -1253,6 +1257,218 @@ export function useComputeModule(moduleId: string) {
     queryKey: queryKeys.compute.modules.detail(moduleId),
     queryFn: () => client.getComputeModule(moduleId),
     enabled: Boolean(moduleId),
+  });
+}
+
+// ── Compute runs (V1.147 P1 — Run Studio) ────────────────────────────────────
+
+/** Filter for the runs history list (cursor + page size are hook-managed). */
+export type ComputeRunsFilter = Omit<ListRunsQuery, 'cursor' | 'limit'>;
+
+/**
+ * Cursor-paginated compute run history (newest-first). Pages map to the shared
+ * `CursorPage` shape so `flattenPages` works; the filter is part of the query
+ * key so each filter view caches independently.
+ */
+export function useComputeRuns(filter?: ComputeRunsFilter) {
+  const client = useNexusClient();
+  const limit = DEFAULT_PAGE_SIZE;
+  return useInfiniteQuery({
+    queryKey: queryKeys.compute.runs.list({ ...filter, limit }),
+    initialPageParam: FIRST_PAGE,
+    queryFn: async ({ pageParam }): Promise<CursorPage<RunSummary>> => {
+      const res = await client.listRuns({ ...filter, limit, cursor: pageParam });
+      return {
+        items: res.items,
+        pagination: { limit, has_more: res.has_more, next_cursor: res.next_cursor },
+      };
+    },
+    getNextPageParam: (lastPage: CursorPage<RunSummary>): Cursor =>
+      lastPage.pagination.has_more ? lastPage.pagination.next_cursor : undefined,
+  });
+}
+
+/** Full detail for a single run (proposals on succeeded, error on failed). */
+export function useComputeRun(runId: string | undefined) {
+  const client = useNexusClient();
+  return useQuery({
+    queryKey: queryKeys.compute.runs.detail(runId ?? ''),
+    queryFn: () => client.getRun(runId!),
+    enabled: Boolean(runId),
+  });
+}
+
+/**
+ * Invoke a module against an owned World. The World is not mutated by the run
+ * itself — proposals are reviewed, then accepted or discarded. On success the
+ * runs lists refetch so the new run appears in history without a reload.
+ * `status: "failed"` arrives as data (not a thrown error); the caller renders
+ * the failure copy from `RunResponse.error`.
+ */
+export function useRunCompute() {
+  const client = useNexusClient();
+  const qc = useQueryClient();
+  const errorToast = useErrorToast();
+  return useMutation({
+    mutationFn: (request: RunRequest) => client.runCompute(request),
+    onSuccess: (_data, request) => {
+      void qc.invalidateQueries({ queryKey: queryKeys.compute.runs.lists() });
+      // Keep the module screen fresh — it hosts the Run Studio entry for this
+      // module (brief: runs-list + module-detail invalidation).
+      void qc.invalidateQueries({ queryKey: queryKeys.compute.modules.detail(request.module_id) });
+    },
+    onError: (error, request) => {
+      // The daemon persists a Failed run row even when the POST surfaces an
+      // error envelope — refetch the Runs lists so the row shows immediately
+      // (dogfood finding, V1.147 P1 T4). Unknown world / not-owner rejections
+      // create no row; an extra refetch is harmless there.
+      void qc.invalidateQueries({ queryKey: queryKeys.compute.runs.lists() });
+      void qc.invalidateQueries({ queryKey: queryKeys.compute.modules.detail(request.module_id) });
+      errorToast(error, 'error.couldNotRunCompute');
+    },
+  });
+}
+
+/**
+ * Accept a succeeded run — atomically commits its proposals into the World.
+ * Refetches the runs lists + the run detail so the status flip to Applied is
+ * reflected everywhere it is cached, and the cross-screen fan-out (qc1 W-001 /
+ * qc3 W-1): Accept mutates World + Timeline + KB together, so the Timeline
+ * overview and World-KB graph caches are invalidated too (mirroring the
+ * `useCreateWorld` / `useDeleteWorld` convention) — the app sets
+ * `refetchOnWindowFocus: false`, so without this the post-Accept World state
+ * would stay stale until a remount.
+ */
+export function useAcceptRun() {
+  const client = useNexusClient();
+  const qc = useQueryClient();
+  const errorToast = useErrorToast();
+  return useMutation({
+    mutationFn: (vars: { runId: string; request?: RunAcceptRequest | null }) =>
+      client.acceptRun(vars.runId, vars.request),
+    onSuccess: (_data, vars) => {
+      void qc.invalidateQueries({ queryKey: queryKeys.compute.runs.lists() });
+      void qc.invalidateQueries({ queryKey: queryKeys.compute.runs.detail(vars.runId) });
+      void qc.invalidateQueries({ queryKey: queryKeys.timeline.all });
+      void qc.invalidateQueries({ queryKey: queryKeys.worldKb.all });
+    },
+    onError: (error) => errorToast(error, 'error.couldNotAcceptRun'),
+  });
+}
+
+/**
+ * Discard a succeeded run — drops its proposals (destructive; the UI confirms
+ * first per the behavior spec). Same invalidation contract as accept,
+ * including the Timeline/KB fan-out for symmetry (a discarded run never wrote
+ * World state, but the stale-cache window after a previous Accept on the same
+ * surface is closed the same way).
+ */
+export function useDiscardRun() {
+  const client = useNexusClient();
+  const qc = useQueryClient();
+  const errorToast = useErrorToast();
+  return useMutation({
+    mutationFn: (runId: string) => client.discardRun(runId),
+    onSuccess: (_data, runId) => {
+      void qc.invalidateQueries({ queryKey: queryKeys.compute.runs.lists() });
+      void qc.invalidateQueries({ queryKey: queryKeys.compute.runs.detail(runId) });
+      void qc.invalidateQueries({ queryKey: queryKeys.timeline.all });
+      void qc.invalidateQueries({ queryKey: queryKeys.worldKb.all });
+    },
+    onError: (error) => errorToast(error, 'error.couldNotDiscardRun'),
+  });
+}
+
+/**
+ * Clear history (V1.147 P3 T2) — deletes terminal runs
+ * (`applied|discarded|failed`) for one World. The World scope is required
+ * (the daemon 422s without it); the UI gates the button on a selected World
+ * filter. On success the runs lists + detail caches are invalidated so the
+ * cleared rows disappear from every cached view (including the module screen
+ * that hosts the Run Studio). Timeline/KB caches are intentionally NOT
+ * invalidated: clearing run rows never mutates World state — Applied runs
+ * already committed their events; the rows are history records only.
+ */
+export function useClearRuns() {
+  const client = useNexusClient();
+  const qc = useQueryClient();
+  const errorToast = useErrorToast();
+  return useMutation({
+    mutationFn: (vars: { worldId: string; status?: ClearRunsQuery['status'] }) =>
+      client.clearRuns({ world_id: vars.worldId, status: vars.status }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: queryKeys.compute.runs.lists() });
+      void qc.invalidateQueries({ queryKey: queryKeys.compute.runs.details() });
+    },
+    onError: (error) => errorToast(error, 'error.couldNotClearRuns'),
+  });
+}
+
+// ── World timeline events (V1.147 P2 — compute_result merge) ────────────────
+
+/**
+ * Read-slice query for the canvas compute-event timeline.
+ *
+ * This is NOT a general timeline-events query: the daemon request is
+ * **hard-locked** to `event_type='compute_result'`, `status='canon'`, and
+ * `limit=100` — the values below are injected by the hook and cannot be
+ * overridden (they are deliberately absent from this type). `branch_id` is
+ * the only caller-controlled field; it is forwarded verbatim, and when
+ * omitted the daemon defaults to the World's current branch (root fallback).
+ *
+ * A future plan that wants a different event family (e.g. KB
+ * `block_type=event` rows) must introduce a separate hook/type — see
+ * `ListTimelineEventsQuery` (the broad wire query) on `NexusClient`.
+ */
+export interface WorldTimelineComputeEventsQuery {
+  branch_id?: string;
+}
+
+/**
+ * Cursor-paginated per-World timeline log events for the Timeline canvas
+ * Narrative merge. Hard-filtered to the machine-written `compute_result`
+ * family in `canon` state (plan Global Constraints merge discipline; the T1
+ * route defaults status to canon anyway). `branch_id` is intentionally NOT
+ * sent by the canvas — the daemon defaults to the World's current branch
+ * (root fallback), which is the canvas's existing world-state source. Pages
+ * map to the shared `CursorPage` shape so `flattenPages` works.
+ *
+ * Invalidation: `useAcceptRun` / `useDiscardRun` already invalidate
+ * `queryKeys.timeline.all`, which prefix-matches `['timeline','events',…]` —
+ * an accepted Run's new compute_result event appears on the canvas without a
+ * manual refresh (the canvas stays mounted behind the Settings modal).
+ */
+export function useWorldTimelineEvents(
+  worldId: string | undefined,
+  filter?: WorldTimelineComputeEventsQuery,
+) {
+  const client = useNexusClient();
+  const limit = 100;
+  return useInfiniteQuery({
+    queryKey: queryKeys.timeline.events.list(worldId ?? '', {
+      ...filter,
+      event_type: 'compute_result',
+      status: 'canon',
+      limit,
+    }),
+    initialPageParam: FIRST_PAGE,
+    queryFn: async ({ pageParam }): Promise<CursorPage<TimelineEventInfo>> => {
+      const res = await client.getTimelineEvents(worldId!, {
+        ...filter,
+        event_type: 'compute_result',
+        status: 'canon',
+        limit,
+        cursor: pageParam,
+      });
+      return {
+        items: res.items,
+        pagination: { limit, has_more: res.has_more, next_cursor: res.next_cursor },
+      };
+    },
+    getNextPageParam: (lastPage: CursorPage<TimelineEventInfo>): Cursor =>
+      lastPage.pagination.has_more ? lastPage.pagination.next_cursor : undefined,
+    enabled: Boolean(worldId),
+    staleTime: 10_000,
   });
 }
 

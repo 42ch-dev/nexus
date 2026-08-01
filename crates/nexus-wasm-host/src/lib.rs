@@ -55,3 +55,11 @@ pub use nexus_contracts::generated::daemon_api::compute::compute_input::ComputeI
 pub use nexus_contracts::generated::daemon_api::compute::compute_output::{
     ComputeOutput, ComputeOutputStateDeltaItem as ComputeOutputStateDelta,
 };
+
+// The build-script walker (R-V1147P0-001: per-file `rerun-if-changed`) is
+// compiled from `build.rs` as `mod build_walk;`. Include the same file here
+// under `#[cfg(test)]` so its unit tests run with `cargo test` (build scripts
+// are not test targets).
+#[cfg(test)]
+#[path = "../build_walk.rs"]
+mod build_walk;

@@ -51,11 +51,12 @@
 
 use crate::capability::builtins::world::ensure_world_owned;
 use crate::capability::{Capability, CapabilityError};
+use crate::state_delta;
 use async_trait::async_trait;
 use nexus_knowledge::world_kb::KbStore;
 use nexus_narrative::NarrativeGateway;
 use nexus_spoke_adapter::conversion::{spoke_to_world_kb, world_kb_to_spoke};
-use nexus_wasm_host::{ComputeInput, ComputeOutputStateDelta, ModuleCache, WasmEngine};
+use nexus_wasm_host::{ComputeInput, ModuleCache, WasmEngine};
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::sync::Arc;
@@ -63,18 +64,6 @@ use std::sync::Arc;
 /// Maximum size in bytes for the serialized `battle_report` field (64 KiB).
 /// R-V161P0-LOW-003: freeform `battle_report` cap to prevent unbounded output.
 const BATTLE_REPORT_MAX_BYTES: usize = 64 * 1024;
-
-/// Valid `state_delta.op` variants recognized by `apply_state_delta`.
-const VALID_OPS: &[&str] = &["add", "sub", "set"];
-
-const fn state_delta_op_wire(op: nexus_contracts::ComputeOutputStateDeltaItemOp) -> &'static str {
-    use nexus_contracts::ComputeOutputStateDeltaItemOp;
-    match op {
-        ComputeOutputStateDeltaItemOp::Add => "add",
-        ComputeOutputStateDeltaItemOp::Sub => "sub",
-        ComputeOutputStateDeltaItemOp::Set => "set",
-    }
-}
 
 /// Input for `narrative.compute`.
 #[derive(Debug, Deserialize)]
@@ -338,7 +327,7 @@ impl Capability for NarrativeCompute {
         }
 
         // 5. Apply state_delta to KB state fields.
-        let applied = apply_state_delta(pool, &parsed.world_id, &output.state_delta).await?;
+        let applied = state_delta::apply_state_delta_pool(pool, &output.state_delta).await?;
 
         // 6. Create new KeyBlocks from output.
         let new_kb_count = create_new_key_blocks(pool, &parsed.world_id, &output.new_key_blocks)
@@ -379,248 +368,6 @@ impl Capability for NarrativeCompute {
             "new_key_blocks_created": new_kb_count,
         }))
     }
-}
-
-// ─── State delta merge (open design item #1, compass §5) ─────────────────
-
-/// Apply a list of `ComputeOutputStateDelta` entries to the world's `WorldKbEntry`
-/// bodies. Each entry targets a specific `WorldKbEntry` by `target_key_block_id`
-/// and applies an `op` (`+`/`-`/`set`) at a dot-separated `path` inside the
-/// block's `body.state` field.
-///
-/// # Merge semantics
-///
-/// The `path` uses dot-notation: `character.current_hp` maps to
-/// `body.state.character.current_hp` in the target `WorldKbEntry`. The first
-/// segment (e.g. `character`) is the per-`block_type` state key (compass Q5),
-/// validated against `nexus_knowledge::world_kb::block_type_state_key()`.
-///
-/// - `set` replaces the value at `path` (numeric, string, bool, object).
-/// - `+` adds `value` (must be numeric) to the current value at `path`.
-/// - `-` subtracts `value` (must be numeric) from the current value at `path`.
-/// - Unknown ops → `CapabilityError::InputInvalid`.
-/// - `+/-` on non-numeric fields → `CapabilityError::InputInvalid`.
-///
-/// # Returns
-///
-/// The number of state deltas successfully applied.
-async fn apply_state_delta(
-    pool: &sqlx::SqlitePool,
-    _world_id: &str,
-    deltas: &[ComputeOutputStateDelta],
-) -> Result<usize, CapabilityError> {
-    // Batch-apply threat-model note (R-V161P3-CORR-001):
-    // State deltas are applied sequentially without an enclosing SQLite
-    // transaction. If delta N of M fails, deltas 0..N-1 are already
-    // committed and NOT rolled back. This is accepted under the V1.61
-    // trusted-module threat model:
-    //
-    //   1. All compute modules are embedded (compiled into the binary).
-    //   2. Compute runs on same-creator worlds (no cross-author attack).
-    //   3. WASM execution is sandboxed; output is validated before this
-    //      function is called.
-    //   4. A partial failure means the module produced a structurally
-    //      valid but semantically inconsistent output — a logic bug in
-    //      the module, not a security boundary.
-    //
-    // For V2.0+ with user-authored modules, this should be replaced by
-    // a transaction-aware `SqliteKbStore` API (collect deltas → validate
-    // all → apply atomically via pool.begin()). The current incremental
-    // apply preserves the coherent state that was written before failure,
-    // which is safer than silently discarding it (the module may have
-    // been designed for eventual consistency).
-    let kb_store = nexus_local_db::kb_store::SqliteKbStore::new(pool.clone());
-    let mut applied = 0usize;
-
-    for delta in deltas {
-        // Validate op.
-        let op_wire = state_delta_op_wire(delta.op);
-        if !VALID_OPS.contains(&op_wire) {
-            return Err(CapabilityError::InputInvalid(format!(
-                "unknown state_delta op '{}' (expected one of: {})",
-                op_wire,
-                VALID_OPS.join(", ")
-            )));
-        }
-
-        let target_id = delta.target_key_block_id.as_deref().unwrap_or("");
-        if target_id.is_empty() {
-            return Err(CapabilityError::InputInvalid(
-                "state_delta entry missing target_key_block_id".to_string(),
-            ));
-        }
-
-        // Read current WorldKbEntry.
-        let mut kb = kb_store.get_knowledge_entry(target_id).await.map_err(|e| {
-            CapabilityError::InputInvalid(format!(
-                "state_delta target '{target_id}' not found: {e}"
-            ))
-        })?;
-
-        // Ensure the body exists and has state.
-        let mut body = kb.body.take().unwrap_or_default();
-        let mut state = body
-            .state
-            .take()
-            .unwrap_or_else(|| Value::Object(serde_json::Map::default()));
-
-        // Resolve the path: first segment is the block_type state key.
-        let path_segments: Vec<&str> = delta.path.split('.').collect();
-        if path_segments.is_empty() {
-            return Err(CapabilityError::InputInvalid(
-                "state_delta path must be non-empty (e.g. 'character.current_hp')".to_string(),
-            ));
-        }
-
-        // Validate the first segment against the block_type's expected state key.
-        let expected_state_key =
-            nexus_knowledge::world_kb::block_type_state_key(kb.block_type).unwrap_or("unknown");
-        let state_key = path_segments[0];
-        if expected_state_key != "unknown" && state_key != expected_state_key {
-            return Err(CapabilityError::InputInvalid(format!(
-                "state_delta path key '{state_key}' does not match block_type '{:?}' expected key '{expected_state_key}'",
-                kb.block_type
-            )));
-        }
-
-        let rest_path: Vec<&str> = path_segments[1..].to_vec();
-
-        // Apply the delta to the state JSON.
-        apply_json_delta(&mut state, state_key, &rest_path, op_wire, &delta.value)?;
-
-        // Write back.
-        body.state = Some(state);
-        kb.body = Some(body);
-
-        kb_store
-            .update_knowledge_entry(kb)
-            .await
-            .map_err(|e| CapabilityError::Internal(format!("kb update state: {e}")))?;
-
-        applied += 1;
-    }
-
-    Ok(applied)
-}
-
-/// Apply a single value change at a JSON path inside the state object.
-///
-/// `state_key` is the top-level key inside the state map (e.g. `"character"`).
-///  `rest_path` is the remaining path segments inside the `state_key` object.
-#[allow(clippy::ref_option)]
-fn apply_json_delta(
-    state: &mut Value,
-    state_key: &str,
-    rest_path: &[&str],
-    op: &str,
-    value: &Option<Value>,
-) -> Result<(), CapabilityError> {
-    let state_obj = state
-        .as_object_mut()
-        .ok_or_else(|| CapabilityError::InputInvalid("state must be a JSON object".to_string()))?;
-
-    let inner = state_obj.get_mut(state_key).ok_or_else(|| {
-        CapabilityError::InputInvalid(format!(
-            "state key '{state_key}' not found in target WorldKbEntry state"
-        ))
-    })?;
-
-    let inner_obj = inner.as_object_mut().ok_or_else(|| {
-        CapabilityError::InputInvalid(format!("'state.{state_key}' must be a JSON object"))
-    })?;
-
-    // Navigate to the target field.
-    let target_key = rest_path.last().copied().ok_or_else(|| {
-        CapabilityError::InputInvalid("empty field path after state key".to_string())
-    })?;
-
-    let new_val = value.as_ref().unwrap_or(&Value::Null);
-
-    // Navigate through intermediate path segments, creating intermediate objects
-    // for `set` if needed. `+` and `-` require the path to already exist.
-    if rest_path.len() > 1 {
-        let intermediate = &rest_path[..rest_path.len() - 1];
-        let mut current = inner_obj;
-        for &seg in intermediate {
-            if !current.contains_key(seg) {
-                if op == "set" {
-                    current.insert(seg.to_string(), json!({}));
-                } else {
-                    return Err(CapabilityError::InputInvalid(format!(
-                        "path segment '{seg}' does not exist; cannot apply '{op}' to missing field"
-                    )));
-                }
-            }
-            let next = current.get_mut(seg).and_then(|v| v.as_object_mut());
-            current = next.ok_or_else(|| {
-                CapabilityError::InputInvalid(format!("path segment '{seg}' is not an object"))
-            })?;
-        }
-        // `current` now points to the parent object of the target field.
-        apply_op_to_field(current, target_key, op, new_val)?;
-    } else {
-        // Single-segment path after state_key — operate directly on inner_obj.
-        apply_op_to_field(inner_obj, target_key, op, new_val)?;
-    }
-
-    Ok(())
-}
-
-/// Apply a single operation to a field in the state map.
-///
-/// Game state values (HP, ATK, DEF) are well within `i64`/`f64` safe
-/// ranges; the precision-loss warnings from the casts below are
-/// theoretical, not practical.
-#[allow(clippy::cast_precision_loss, clippy::cast_possible_truncation)]
-fn apply_op_to_field(
-    obj: &mut serde_json::Map<String, Value>,
-    target_key: &str,
-    op: &str,
-    new_val: &Value,
-) -> Result<(), CapabilityError> {
-    match op {
-        "set" => {
-            obj.insert(target_key.to_string(), new_val.clone());
-        }
-        "add" | "sub" => {
-            let current = obj.get(target_key).cloned().unwrap_or(Value::Null);
-            let current_num = current
-                .as_f64()
-                .or_else(|| current.as_i64().map(|i| i as f64));
-            let delta_num = new_val
-                .as_f64()
-                .or_else(|| new_val.as_i64().map(|i| i as f64));
-
-            match (current_num, delta_num) {
-                (Some(c), Some(d)) => {
-                    let result = if op == "add" { c + d } else { c - d };
-                    // Preserve integer type if both values were integers and the
-                    // result fits in i64.
-                    let is_int = current.as_i64().is_some() && new_val.as_i64().is_some();
-                    if is_int
-                        && result.fract() == 0.0
-                        && result >= (i64::MIN as f64)
-                        && result <= (i64::MAX as f64)
-                    {
-                        obj.insert(target_key.to_string(), json!(result as i64));
-                    } else {
-                        obj.insert(target_key.to_string(), json!(result));
-                    }
-                }
-                _ => {
-                    return Err(CapabilityError::InputInvalid(format!(
-                        "cannot apply '{op}' to non-numeric field '{target_key}': current={current}, delta={new_val}"
-                    )));
-                }
-            }
-        }
-        other => {
-            return Err(CapabilityError::InputInvalid(format!(
-                "unknown op '{other}'"
-            )));
-        }
-    }
-    Ok(())
 }
 
 // ─── New WorldKbEntry creation ─────────────────────────────────────────────────
@@ -757,6 +504,7 @@ async fn handle_compute_error(
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
+    use crate::state_delta;
     use nexus_knowledge::world_kb::knowledge_entry::{WorldKbBody, WorldKbEntry};
     use nexus_knowledge::world_kb::KbStore;
     use nexus_local_db::{open_pool, run_migrations};
@@ -864,7 +612,7 @@ mod tests {
     #[test]
     fn delta_set_numeric() {
         let mut state = json!({"character": {"current_hp": 100, "name": "Hero"}});
-        apply_json_delta(
+        state_delta::apply_json_delta(
             &mut state,
             "character",
             &["current_hp"],
@@ -878,7 +626,7 @@ mod tests {
     #[test]
     fn delta_add_numeric() {
         let mut state = json!({"character": {"current_hp": 80}});
-        apply_json_delta(
+        state_delta::apply_json_delta(
             &mut state,
             "character",
             &["current_hp"],
@@ -892,7 +640,7 @@ mod tests {
     #[test]
     fn delta_subtract_numeric() {
         let mut state = json!({"character": {"current_hp": 100}});
-        apply_json_delta(
+        state_delta::apply_json_delta(
             &mut state,
             "character",
             &["current_hp"],
@@ -906,7 +654,7 @@ mod tests {
     #[test]
     fn delta_set_string_field() {
         let mut state = json!({"character": {"position": "front_line"}});
-        apply_json_delta(
+        state_delta::apply_json_delta(
             &mut state,
             "character",
             &["position"],
@@ -920,23 +668,35 @@ mod tests {
     #[test]
     fn delta_add_on_non_numeric_errors() {
         let mut state = json!({"character": {"name": "Hero"}});
-        let err = apply_json_delta(&mut state, "character", &["name"], "add", &Some(json!(1)))
-            .unwrap_err();
+        let err = state_delta::apply_json_delta(
+            &mut state,
+            "character",
+            &["name"],
+            "add",
+            &Some(json!(1)),
+        )
+        .unwrap_err();
         assert!(matches!(err, CapabilityError::InputInvalid(_)));
     }
 
     #[test]
     fn delta_sub_on_non_numeric_errors() {
         let mut state = json!({"character": {"name": "Hero"}});
-        let err = apply_json_delta(&mut state, "character", &["name"], "sub", &Some(json!(1)))
-            .unwrap_err();
+        let err = state_delta::apply_json_delta(
+            &mut state,
+            "character",
+            &["name"],
+            "sub",
+            &Some(json!(1)),
+        )
+        .unwrap_err();
         assert!(matches!(err, CapabilityError::InputInvalid(_)));
     }
 
     #[test]
     fn delta_unknown_op_errors() {
         let mut state = json!({"character": {"current_hp": 50}});
-        let err = apply_json_delta(
+        let err = state_delta::apply_json_delta(
             &mut state,
             "character",
             &["current_hp"],
@@ -950,7 +710,7 @@ mod tests {
     #[test]
     fn delta_missing_state_key_errors() {
         let mut state = json!({"item": {"durability": 50}});
-        let err = apply_json_delta(
+        let err = state_delta::apply_json_delta(
             &mut state,
             "character",
             &["current_hp"],
@@ -964,7 +724,7 @@ mod tests {
     #[test]
     fn delta_integer_addition_preserves_int_type() {
         let mut state = json!({"character": {"current_hp": 80}});
-        apply_json_delta(
+        state_delta::apply_json_delta(
             &mut state,
             "character",
             &["current_hp"],
@@ -980,7 +740,7 @@ mod tests {
     #[test]
     fn delta_float_addition_produces_float() {
         let mut state = json!({"character": {"current_hp": 80.5}});
-        apply_json_delta(
+        state_delta::apply_json_delta(
             &mut state,
             "character",
             &["current_hp"],

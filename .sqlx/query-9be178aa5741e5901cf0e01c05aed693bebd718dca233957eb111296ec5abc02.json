@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT root_fork_branch_id as \"root_fork_branch_id\" FROM narrative_worlds WHERE world_id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "root_fork_branch_id",
+        "ordinal": 0,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "9be178aa5741e5901cf0e01c05aed693bebd718dca233957eb111296ec5abc02"
+}

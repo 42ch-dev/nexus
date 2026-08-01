@@ -636,6 +636,7 @@
     "canvasAriaLabel": "World timeline canvas",
     "nleBandScrollAriaLabel": "World Timeline scrub area",
     "orderingDisclaimer": "Timeline order is inferred from available event data; not a canonical chronology.",
+    "computeProjectionCapNote": "Showing the first {{count}} compute events. Older events are not rendered.",
     "empty": {
       "title": "This World's timeline is empty",
       "description": "Events you add through World KB or chapter extraction will appear here."
@@ -747,6 +748,28 @@
         "asc": "ascending",
         "desc": "descending"
       }
+    },
+    "computeNode": {
+      "kindLabel": "Compute result",
+      "provenance": {
+        "direct": "From module run",
+        "preset": "From preset"
+      },
+      "aria": "Compute result: {{name}}",
+      "selected": "Selected compute result"
+    },
+    "computeInspector": {
+      "aria": "Compute result inspector",
+      "moduleTitle": "Module",
+      "reportTitle": "Report",
+      "affectedTitle": "Affected knowledge",
+      "runTitle": "Run",
+      "paramsTitle": "Parameters",
+      "openRun": "Open Run"
+    },
+    "runModuleEntry": {
+      "button": "Run Module",
+      "aria": "Open the Run Studio for this World"
     }
   },
   "workTimeline": {

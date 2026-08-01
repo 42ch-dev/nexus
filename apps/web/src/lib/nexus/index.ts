@@ -20,7 +20,14 @@ export {
   type DaemonStatus,
 } from './desktop-capabilities';
 export { isDesktopBuild } from './detect';
-export type { DaemonHealth, NexusClient } from './types';
+export type {
+  ClearRunsQuery,
+  ClearRunsResponse,
+  DaemonHealth,
+  DiscardRunResponse,
+  ListRunsQuery,
+  NexusClient,
+} from './types';
 export {
   createConnectionStorage,
   normalizeEndpointUrl,

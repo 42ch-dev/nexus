@@ -82,6 +82,9 @@ nexus-orchestration = { path = "../nexus-orchestration" }
 serial_test = "3"
 criterion = { version = "0.5", features = ["html_reports"] }
 tokio-rustls = "0.26"
+# `wat` compiles WebAssembly text → binary for integration tests that exercise
+# sandbox-limit paths (mirrors nexus-wasm-host's own test convention).
+wat = "1"
 
 [[bench]]
 name = "dispatch_latency"

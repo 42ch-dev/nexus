@@ -1,0 +1,51 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/daemon-api/compute/run-accept-response.schema.json",
+  "schema_version": 1,
+  "title": "Nexus RunAcceptResponse",
+  "description": "Response for POST /v1/daemon/compute/runs/{run_id}/accept — result of atomically applying a Run's proposals (V1.147 P0 direct lane).",
+  "type": "object",
+  "required": ["run_id", "status", "applied", "timeline_event_ids"],
+  "properties": {
+    "run_id": {
+      "type": "string",
+      "description": "Run identifier that was accepted."
+    },
+    "status": {
+      "type": "string",
+      "enum": ["applied"],
+      "description": "Always \"applied\" on success."
+    },
+    "applied": {
+      "type": "object",
+      "required": ["state_delta_count", "events_created", "new_entries_created"],
+      "properties": {
+        "state_delta_count": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Number of state delta operations applied to existing KnowledgeEntries."
+        },
+        "events_created": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Number of Timeline events created (event_type: \"compute_result\")."
+        },
+        "new_entries_created": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Number of new KnowledgeEntry records created from new_key_blocks."
+        }
+      },
+      "additionalProperties": false,
+      "description": "Summary counts of what was applied in the atomic transaction."
+    },
+    "timeline_event_ids": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "IDs of the Timeline events created during accept, in the order they were appended."
+    }
+  },
+  "additionalProperties": false
+}

@@ -55,6 +55,17 @@ pub enum ComputeError {
     #[error("manifest validation failed at {path}: {detail}")]
     ManifestValidationFailed { path: String, detail: String },
 
+    /// Manifest-declared JSON-Schema validation failed for one or more
+    /// `key_blocks` input entries (V1.147 P3 F2).
+    ///
+    /// All-or-nothing: ANY invalid entry fails the whole invocation — invalid
+    /// entries are never silently skipped. Each failure carries the entry id
+    /// (or a positional `key_blocks[i]` fallback label) plus the reason, so
+    /// the caller can surface an honest, actionable per-entry error (HTTP 422
+    /// `invalid_input` with `invalid_entries` detail) instead of a 500.
+    #[error("input validation failed for {} entry(ies)", .0.len())]
+    InputValidationFailed(Vec<EntryValidationFailure>),
+
     /// An internal wasmtime error (engine/store/instantiation failure).
     #[error("wasmtime error: {0}")]
     Wasmtime(#[from] wasmtime::Error),
@@ -77,3 +88,15 @@ pub enum ComputeError {
 
 /// Result alias used across the crate.
 pub type Result<T> = std::result::Result<T, ComputeError>;
+
+/// One input `key_blocks` entry that failed manifest-schema validation
+/// (V1.147 P3 F2 — per-entry failure detail).
+///
+/// `entry_id` is the spoke `KnowledgeEntry` id carried on the input entry;
+/// entries without an id fall back to the positional `key_blocks[i]` label
+/// (see `compute::kb_entry_id`).
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct EntryValidationFailure {
+    pub entry_id: String,
+    pub reason: String,
+}

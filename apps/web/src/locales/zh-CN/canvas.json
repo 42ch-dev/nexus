@@ -625,6 +625,7 @@
     "canvasAriaLabel": "世界时间轴画布",
     "nleBandScrollAriaLabel": "世界时间轴横向浏览区域",
     "orderingDisclaimer": "时间轴顺序根据可用事件数据推断，并非权威年表。",
+    "computeProjectionCapNote": "仅显示前 {{count}} 条计算事件，更早的事件不会渲染。",
     "empty": {
       "title": "该世界的时间轴为空",
       "description": "通过世界知识库或章节抽取添加的事件将显示在此处。"
@@ -736,6 +737,28 @@
         "asc": "升序",
         "desc": "降序"
       }
+    },
+    "computeNode": {
+      "kindLabel": "计算结果",
+      "provenance": {
+        "direct": "来自模块运行",
+        "preset": "来自预设"
+      },
+      "aria": "计算结果：{{name}}",
+      "selected": "已选中计算结果"
+    },
+    "computeInspector": {
+      "aria": "计算结果检查器",
+      "moduleTitle": "模块",
+      "reportTitle": "报告",
+      "affectedTitle": "受影响的知识",
+      "runTitle": "运行",
+      "paramsTitle": "参数",
+      "openRun": "打开运行"
+    },
+    "runModuleEntry": {
+      "button": "运行模块",
+      "aria": "为此世界打开运行工作室"
     }
   },
   "workTimeline": {

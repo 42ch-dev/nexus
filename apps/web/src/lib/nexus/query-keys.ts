@@ -124,10 +124,28 @@ export const queryKeys = {
       detail: (moduleId: string) =>
         [...queryKeys.compute.modules.all(), 'detail', moduleId] as const,
     },
+    // V1.147 P1 — Run Studio history. `lists()` covers every filter variant so
+    // run/accept/discard mutations invalidate all visible runs lists at once.
+    runs: {
+      all: () => [...queryKeys.compute.all, 'runs'] as const,
+      lists: () => [...queryKeys.compute.runs.all(), 'list'] as const,
+      list: (filter?: object) => [...queryKeys.compute.runs.lists(), filter ?? {}] as const,
+      details: () => [...queryKeys.compute.runs.all(), 'detail'] as const,
+      detail: (runId: string) => [...queryKeys.compute.runs.details(), runId] as const,
+    },
   },
   timeline: {
     all: ['timeline'] as const,
     overview: (cursor?: string) =>
       [...queryKeys.timeline.all, 'overview', cursor ?? '__first'] as const,
+    // V1.147 P2 — per-World timeline log events (machine-written families,
+    // e.g. compute_result). `all()` prefix-covers every world + filter so
+    // accept/discard invalidation via `timeline.all` refetches the mounted
+    // canvas events query.
+    events: {
+      all: () => [...queryKeys.timeline.all, 'events'] as const,
+      list: (worldId: string, filter?: object) =>
+        [...queryKeys.timeline.events.all(), worldId, filter ?? {}] as const,
+    },
   },
 } as const;

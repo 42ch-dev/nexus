@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT root_fork_branch_id, current_timeline_head_id FROM narrative_worlds WHERE world_id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "root_fork_branch_id",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "current_timeline_head_id",
+        "ordinal": 1,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      true,
+      true
+    ]
+  },
+  "hash": "b2b16fccd0b477a94cbd547ed83f5fddae548aa0ec2874fed6dd245483eb7cdf"
+}

@@ -111,14 +111,16 @@ export function projectWorldTimelineNodesToNleTracks(
       label: 'Narrative',
       accent: 'narrative',
       match: (node) =>
-        node.type === 'timeline-event' && node.position.y === WORLD_WHEN_AXIS_Y,
+        (node.type === 'timeline-event' || node.type === 'timeline-compute-result') &&
+        node.position.y === WORLD_WHEN_AXIS_Y,
     },
     {
       id: 'undated',
       label: 'Undated',
       accent: 'narrative',
       match: (node) =>
-        node.type === 'timeline-event' && node.position.y !== WORLD_WHEN_AXIS_Y,
+        (node.type === 'timeline-event' || node.type === 'timeline-compute-result') &&
+        node.position.y !== WORLD_WHEN_AXIS_Y,
     },
     {
       id: 'context',

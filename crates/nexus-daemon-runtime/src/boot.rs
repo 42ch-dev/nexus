@@ -322,9 +322,18 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
         daemon_tool_dispatch: None,
         cdn_config,
     };
-    let capabilities = Arc::new(match wasm_singleton {
+    let capabilities = Arc::new(match &wasm_singleton {
         Some((engine, cache)) => {
-            CapabilityRegistry::with_runtime_deps_and_wasm(&runtime_deps, engine, cache)
+            // V1.147 P0: store daemon-wide engine+cache on WorkspaceState
+            // so the direct compute handler can use them. Clone the Arcs
+            // before they are moved into the capability registry.
+            state.set_wasm_engine(Arc::clone(engine));
+            state.set_module_cache(Arc::clone(cache));
+            CapabilityRegistry::with_runtime_deps_and_wasm(
+                &runtime_deps,
+                Arc::clone(engine),
+                Arc::clone(cache),
+            )
         }
         None => CapabilityRegistry::with_runtime_deps(&runtime_deps),
     });

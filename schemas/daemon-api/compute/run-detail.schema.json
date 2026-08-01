@@ -1,0 +1,72 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/daemon-api/compute/run-detail.schema.json",
+  "schema_version": 1,
+  "title": "Nexus RunDetail",
+  "description": "Full detail for GET /v1/daemon/compute/runs/{run_id}. Extends RunSummary with invocation params, full proposals (on succeeded), error (on failed), and accept metadata (on applied).",
+  "type": "object",
+  "required": ["run_id", "status", "module_id", "module_version", "world_id", "created_at"],
+  "properties": {
+    "run_id": {
+      "type": "string",
+      "description": "Unique run identifier."
+    },
+    "status": {
+      "type": "string",
+      "enum": ["running", "succeeded", "failed", "applied", "discarded"],
+      "description": "Run lifecycle status."
+    },
+    "module_id": {
+      "type": "string",
+      "description": "Module that was invoked."
+    },
+    "module_version": {
+      "type": "string",
+      "description": "Version of the module at invocation time."
+    },
+    "world_id": {
+      "type": "string",
+      "description": "World the run targeted."
+    },
+    "branch_id": {
+      "type": "string",
+      "description": "Timeline branch the run was scoped to (defaults to root when omitted in request)."
+    },
+    "invocation_params": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "Module-specific invocation parameters as provided in the run request."
+    },
+    "proposals": {
+      "$ref": "https://nexus42.invalid/schemas/daemon-api/compute/compute-output.schema.json",
+      "description": "Full module output proposals. Present only when status is \"succeeded\"."
+    },
+    "error": {
+      "$ref": "https://nexus42.invalid/schemas/daemon-api/common/error-response.schema.json",
+      "description": "Honest error detail when status is \"failed\"."
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO 8601 UTC timestamp of run creation."
+    },
+    "updated_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO 8601 UTC timestamp of last status change."
+    },
+    "accepted_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO 8601 UTC timestamp when accepted. Present only when status is \"applied\"."
+    },
+    "timeline_event_ids": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "IDs of the Timeline events created during accept. Present only when status is \"applied\"."
+    }
+  },
+  "additionalProperties": false
+}

@@ -1,0 +1,47 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/daemon-api/compute/run-response.schema.json",
+  "schema_version": 1,
+  "title": "Nexus RunResponse",
+  "description": "Response for POST /v1/daemon/compute/run — result of a direct-lane compute invocation (V1.147 P0). On success (status \"succeeded\"), proposals are populated for review-then-accept. On failure (status \"failed\"), error provides the honest reason; World is unchanged and no Timeline events are created.",
+  "type": "object",
+  "required": ["run_id", "status", "module_id", "module_version", "created_at"],
+  "properties": {
+    "run_id": {
+      "type": "string",
+      "description": "Unique run identifier (run_<uuid>) for subsequent Accept/Discard/detail operations."
+    },
+    "status": {
+      "type": "string",
+      "enum": ["succeeded", "failed"],
+      "description": "Run outcome: succeeded (proposals available for review) or failed (error populated)."
+    },
+    "module_id": {
+      "type": "string",
+      "description": "Module that was invoked."
+    },
+    "module_version": {
+      "type": "string",
+      "description": "Version of the module at invocation time."
+    },
+    "proposals": {
+      "$ref": "https://nexus42.invalid/schemas/daemon-api/compute/compute-output.schema.json",
+      "description": "Module output proposals (state_delta, timeline_events, new_key_blocks, battle_report). Present only when status is \"succeeded\". World is not yet mutated — author must Accept or Discard."
+    },
+    "error": {
+      "$ref": "https://nexus42.invalid/schemas/daemon-api/common/error-response.schema.json",
+      "description": "Honest error detail when status is \"failed\" (sandbox limit, module trap, host error, etc. per route spec §4)."
+    },
+    "truncated": {
+      "type": "boolean",
+      "default": false,
+      "description": "True when the proposals payload was truncated because the full response exceeded 1 MiB. Full output is always available via GET /runs/:id."
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO 8601 UTC timestamp of run creation."
+    }
+  },
+  "additionalProperties": false
+}

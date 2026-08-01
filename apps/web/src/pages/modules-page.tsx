@@ -1,13 +1,28 @@
 /**
- * Compute Modules body (Control Room — READ) — V1.114 P2 T4 / V1.131 P2.
+ * Compute Modules body (Control Room — READ + Run) — V1.114 P2 T4 / V1.131 P2 /
+ * V1.147 P1 T3 / V1.147 P2 T3.
  *
  * List/detail/query/error live here once. Settings modal mounts the body as
  * the `modules` section; `/modules` is a compatibility redirect only.
+ *
+ * V1.147 P1: the detail panel gains the Run Studio — World selector, guided
+ * form (manifest `schemas.invocation` → first-class controls), Advanced JSON
+ * disclosure, Run → proposal inspector with Accept/Discard, and Runs history.
+ * All form/proposal/runs chrome is thin app wiring over promoted
+ * `@42ch/nexus-ui` primitives; copy, data, and callbacks stay app-owned.
+ *
+ * V1.147 P2 T3: the Run Studio body moved to the shared
+ * `components/compute/run-studio.tsx` (qc1 W-004 hook extraction — the
+ * Timeline Run Module entry mounts the SAME studio with context pre-fill).
+ * This page gains the deep-link selection mechanism: `?module=<id>&run=<id>`
+ * (compute node "Open Run" → Settings → Modules run detail) and
+ * `?world=<id>` (Timeline Run Module entry → World pre-filled). Module
+ * selection + run opening write the params back so refresh keeps the detail.
  */
 import { Cpu, RefreshCw } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Navigate } from 'react-router-dom';
+import { Navigate, useSearchParams } from 'react-router-dom';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -15,6 +30,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { EmptyState, ErrorState, LoadingState, UnavailableState } from '@/components/ui/states';
 import { useComputeModule, useComputeModules } from '@/api/queries';
 import { isOrchestrationEngineUnavailable } from '@/lib/nexus/errors';
+import { RunStudio } from '@/components/compute/run-studio';
 import { cn } from '@/lib/utils';
 
 /** Compatibility adapter — product entry is Settings modal `modules` section. */
@@ -26,7 +42,40 @@ export function ModulesPage() {
 export function ModulesPageBody() {
   const { t } = useTranslation('modules');
   const modules = useComputeModules();
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+
+  // V1.147 P2 T3 — deep-link selection mechanism (consistent with the
+  // `?layer=` search-param convention on the Timeline surface). Seeds the
+  // initial module selection from `?module=`; `?run=` + `?world=` thread
+  // into the detail panel (Run inspector + World pre-fill). User selection
+  // writes the params back (replace) so refresh keeps the detail.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [selectedId, setSelectedId] = useState<string | null>(() =>
+    searchParams.get('module'),
+  );
+
+  // V1.147 PR #194 — deep-link `?module=` re-sync. The Settings Modules
+  // section stays mounted when a second compute-node "Open Run" navigates to
+  // the same route (`/settings/modules?module=…` — search-params-only), so
+  // the `useState` seed alone would keep the stale module selected. Keyed on
+  // the URL VALUE: external navigation (Timeline "Open Run", back/forward)
+  // switches the detail panel, and `?module=` removal clears the selection.
+  // User-driven writes go through `selectModule` (state + URL set together),
+  // so when the effect fires on those the value is already consistent — a
+  // no-op set on an unchanged value.
+  const moduleParam = searchParams.get('module');
+  useEffect(() => {
+    setSelectedId(moduleParam);
+  }, [moduleParam]);
+
+  function selectModule(id: string) {
+    setSelectedId(id);
+    // Preserve the `?world=` entry pre-fill (Timeline Run Module entry);
+    // a module change invalidates the deep-linked run context.
+    const next = new URLSearchParams(searchParams);
+    next.set('module', id);
+    next.delete('run');
+    setSearchParams(next, { replace: true });
+  }
 
   return (
     <Card className="shadow-card" data-testid="modules-page-body">
@@ -84,7 +133,7 @@ export function ModulesPageBody() {
                       type="button"
                       aria-label={m.name}
                       aria-pressed={selectedId === m.module_id}
-                      onClick={() => setSelectedId(m.module_id)}
+                      onClick={() => selectModule(m.module_id)}
                       className={cn(
                         'flex w-full flex-col gap-2 rounded-card border p-4 text-left transition-colors duration-state ease-standard focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-1000 dark:focus-visible:ring-blue-700 focus-visible:ring-offset-2 focus-visible:ring-offset-background-100',
                         selectedId === m.module_id
@@ -116,7 +165,19 @@ export function ModulesPageBody() {
             </div>
             <div className="lg:col-span-2">
               {selectedId ? (
-                <ModuleDetailPanel moduleId={selectedId} />
+                <ModuleDetailPanel
+                  moduleId={selectedId}
+                  initialWorldId={searchParams.get('world') ?? undefined}
+                  initialRunId={searchParams.get('run') ?? undefined}
+                  onRunOpen={(runId) => {
+                    // Keep `?world=` (entry pre-fill) alongside the run
+                    // deep link so refresh preserves the whole selection.
+                    const next = new URLSearchParams(searchParams);
+                    next.set('module', selectedId);
+                    next.set('run', runId);
+                    setSearchParams(next, { replace: true });
+                  }}
+                />
               ) : (
                 <div className="flex h-full min-h-[240px] flex-col items-center justify-center gap-2 rounded-card border border-dashed border-gray-alpha-400 p-6 text-center">
                   <Cpu className="h-8 w-8 text-gray-500" aria-hidden />
@@ -132,7 +193,20 @@ export function ModulesPageBody() {
   );
 }
 
-function ModuleDetailPanel({ moduleId }: { moduleId: string }) {
+function ModuleDetailPanel({
+  moduleId,
+  initialWorldId,
+  initialRunId,
+  onRunOpen,
+}: {
+  moduleId: string;
+  /** V1.147 P2 T3 — Timeline Run Module entry pre-fill (`?world=`). */
+  initialWorldId?: string;
+  /** V1.147 P2 T3 — compute node "Open Run" deep link (`?run=`). */
+  initialRunId?: string;
+  /** V1.147 P2 T3 — Runs-table open → URL write-back (`?module&run`). */
+  onRunOpen?: (runId: string) => void;
+}) {
   const { t } = useTranslation('modules');
   const detail = useComputeModule(moduleId);
 
@@ -240,6 +314,13 @@ function ModuleDetailPanel({ moduleId }: { moduleId: string }) {
           <SchemaBlock title={t('detail.battleReport')} value={m.schemas.battle_report} />
         </div>
       )}
+
+      <RunStudio
+        module={m}
+        initialWorldId={initialWorldId}
+        initialRunId={initialRunId}
+        onRunOpen={onRunOpen}
+      />
     </div>
   );
 }

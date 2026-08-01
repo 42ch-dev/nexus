@@ -1,7 +1,7 @@
 {
   "name": "@42ch/nexus-ui",
   "version": "0.3.0",
-  "description": "Nexus brand assets, design tokens, theme helpers, and React brand + presentational primitives (NexusLogo, NexusMark, Button, Badge, Card, Input, Label, Textarea, Select, Toast, TransportErrorBlock)",
+  "description": "Nexus brand assets, design tokens, theme helpers, and React brand + presentational primitives (NexusLogo, NexusMark, Button, Badge, Card, Input, Label, Textarea, Select, Tabs, Toast, TransportErrorBlock, RunFormFields, EntityPickerField, ProposalSections, RunStatusBadge, RunsTable, ComputeResultNodeChrome, ComputeInspectorSections)",
   "author": "42ch",
   "license": "Apache-2.0",
   "repository": {

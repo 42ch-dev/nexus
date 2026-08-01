@@ -22,6 +22,8 @@ import { Dialog, DialogTrigger, DialogContent } from '@web-ui/dialog'; // transi
 import { Spinner, LoadingState, EmptyState, ErrorState } from '@web-ui/states'; // transitional — keep-web (lucide-react asset boundary; product copy & app-composition callbacks)
 import { ToastFixtures } from '@/fixtures/toast-fixtures';
 import { TransportErrorBlockFixtures } from '@/fixtures/transport-error-block';
+import { ComputeRunStudioFixtures } from '@/fixtures/compute-run-studio';
+import { TimelineComputeFixtures } from '@/fixtures/timeline-compute';
 import {
   ViButtonAcceptanceFixtures,
   ViTransportErrorAcceptanceFixtures,
@@ -111,6 +113,8 @@ function SubNav() {
     { label: 'Form Field', href: '#comp-form-field' },
     { label: 'Toast', href: '#comp-toast' },
     { label: 'Transport Error', href: '#comp-transport-error-block' },
+    { label: 'Run Studio', href: '#comp-run-studio' },
+    { label: 'Compute Timeline', href: '#comp-compute-timeline' },
     { label: 'VI acceptance', href: '#comp-vi-acceptance' },
   ];
 
@@ -1196,6 +1200,63 @@ function TransportErrorBlockSection() {
 }
 
 /* ------------------------------------------------------------------ */
+/*  15. Compute Run Studio (V1.147 P1)                                   */
+/* ------------------------------------------------------------------ */
+
+function RunStudioSection() {
+  return (
+    <section>
+      <SectionHeading id="comp-run-studio">Run Studio (Compute)</SectionHeading>
+      <p className="text-copy-16 text-gray-700 mb-6">
+        Promoted{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">@42ch/nexus-ui</code>{' '}
+        primitives for the V1.147 Compute Run Studio:{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">RunFormFields</code>,{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">EntityPickerField</code>,{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">ProposalSections</code>,{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">RunStatusBadge</code>,{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">RunsTable</code>.
+        Schema-driven form variants (basic-combat pickers, kitchen sink,
+        missing-schema empty state), proposal inspector variants (success with
+        all four parts, truncated, failed), and Runs history variants (all
+        statuses, empty). All copy is caller-owned literal English (studio is
+        developer-auxiliary). Toggle the theme to verify light + dark.
+      </p>
+      <ComputeRunStudioFixtures />
+    </section>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  16. Compute Timeline (V1.147 P2)                                     */
+/* ------------------------------------------------------------------ */
+
+function ComputeTimelineSection() {
+  return (
+    <section>
+      <SectionHeading id="comp-compute-timeline">Compute Timeline</SectionHeading>
+      <p className="text-copy-16 text-gray-700 mb-6">
+        Promoted{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">@42ch/nexus-ui</code>{' '}
+        primitives for compute-as-a-Timeline-citizen (V1.147 P2):{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">ComputeResultNodeChrome</code>{' '}
+        (Narrative node body) and{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">ComputeInspectorSections</code>{' '}
+        (node inspector content), composed with the shared{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">@web-canvas/*</code>{' '}
+        node shell. Variants: compute node alongside KB events (direct run /
+        preset / summary-less / selected / dragging), inspector (direct /
+        preset / sparse), Run Module entry chrome (toolbar + empty-state
+        hint), and Brief-layer-unaffected evidence. All copy is caller-owned
+        literal English (studio is developer-auxiliary). Toggle the theme to
+        verify light + dark.
+      </p>
+      <TimelineComputeFixtures />
+    </section>
+  );
+}
+
+/* ------------------------------------------------------------------ */
 /*  Page                                                                */
 /* ------------------------------------------------------------------ */
 
@@ -1233,6 +1294,8 @@ export function ComponentsPage() {
       <FormFieldSection />
       <ToastSection />
       <TransportErrorBlockSection />
+      <RunStudioSection />
+      <ComputeTimelineSection />
 
       <section id="comp-vi-acceptance" data-testid="comp-vi-acceptance" className="scroll-mt-16">
         <SectionHeading id="comp-vi-acceptance-heading">VI acceptance (P2)</SectionHeading>
@@ -1248,9 +1311,11 @@ export function ComponentsPage() {
       </section>
 
       <p className="text-copy-13 text-gray-500 mt-12 pt-8 border-t border-gray-alpha-200">
-        10 promoted (Badge, Button, Card, Input, Label, Textarea, Select, Toast,
-        TransportErrorBlock, Tabs) + 3 transitional (Dialog, States, Table)
-        rendered live via{' '}
+        17 promoted (Badge, Button, Card, Input, Label, Textarea, Select, Toast,
+        TransportErrorBlock, Tabs, RunFormFields, EntityPickerField,
+        ProposalSections, RunStatusBadge, RunsTable, ComputeResultNodeChrome,
+        ComputeInspectorSections) + 3 transitional (Dialog,
+        States, Table) rendered live via{' '}
         <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">@42ch/nexus-ui</code>{' '}
         (promoted) and{' '}
         <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">@web-ui/*</code>{' '}

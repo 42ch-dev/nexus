@@ -8,6 +8,10 @@
  * V1.106 P0 ships: `<Toast>` (+ ToastProvider / Toaster / useToast).
  * V1.129 P1 ships: `<TransportErrorBlock>`.
  * V1.137 P2 ships: `<Tabs>` (+ TabsList / TabsTrigger / TabsContent).
+ * V1.147 P1 ships: Compute Run Studio primitives (`<RunFormFields>`,
+ * `<EntityPickerField>`, `<ProposalSections>`, `<RunStatusBadge>`, `<RunsTable>`).
+ * V1.147 P2 ships: compute-on-Timeline primitives (`<ComputeResultNodeChrome>`,
+ * `<ComputeInspectorSections>`).
  * VI logo upgrade ships: timeline `<NexusMark>`, `logoVariants.text`,
  * Studio-only `<NexusLogoVariant>` specimens.
  */
@@ -92,3 +96,51 @@ export {
   type TabsTriggerProps,
   type TabsContentProps,
 } from './components/tabs';
+
+// V1.147 P1 — promoted Compute Run Studio presentational primitives.
+// Pure presentational: data + caller-owned copy + callbacks in; no daemon,
+// no wire-contract imports (structural mirrors only), no routing.
+export {
+  RunStatusBadge,
+  type RunStatus,
+  type RunStatusBadgeProps,
+} from './components/run-status-badge';
+export {
+  EntityPickerField,
+  type EntityPickerEntry,
+  type EntityPickerFieldProps,
+} from './components/entity-picker-field';
+export {
+  RunFormFields,
+  type InvocationSchema,
+  type InvocationSchemaProperty,
+  type RunFormCopy,
+  type RunFormFieldsProps,
+} from './components/run-form-fields';
+export {
+  ProposalSections,
+  type BattleReportProposal,
+  type ComputeProposals,
+  type ProposalSectionsCopy,
+  type ProposalSectionsProps,
+  type StateDeltaProposal,
+  type TimelineEventProposal,
+} from './components/proposal-sections';
+export {
+  RunsTable,
+  type RunsTableCopy,
+  type RunsTableProps,
+  type RunTableRow,
+} from './components/runs-table';
+// V1.147 P2 — compute-on-Timeline primitives (Studio fixture:
+// `timeline-compute.tsx`, Components → Compute Timeline).
+export {
+  ComputeResultNodeChrome,
+  type ComputeResultNodeChromeProps,
+} from './components/compute-result-node-chrome';
+export {
+  ComputeInspectorSections,
+  type ComputeAffectedEntry,
+  type ComputeInspectorSectionsCopy,
+  type ComputeInspectorSectionsProps,
+} from './components/compute-inspector-sections';
