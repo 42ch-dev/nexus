@@ -61,6 +61,17 @@ pub struct ListRunsQuery {
     pub limit: Option<u32>,
 }
 
+/// Query params for `DELETE /runs` (Clear history — V1.147 P3 T2).
+#[derive(Debug, Deserialize)]
+pub struct DeleteRunsQuery {
+    /// Required scope: runs are cleared per World; the caller must own it.
+    pub world_id: Option<String>,
+    /// Optional terminal-state filter (`applied|discarded|failed`). Absent →
+    /// all terminal runs of the World. `running` / `succeeded` are never
+    /// deletable and are rejected with 422.
+    pub status: Option<String>,
+}
+
 // ── POST /v1/daemon/compute/run ──────────────────────────────────────────
 ///
 /// # Errors
@@ -190,6 +201,38 @@ pub async fn run(
 
     let output = match compute_result {
         Ok(o) => o,
+        Err(ComputeError::InputValidationFailed(entries)) => {
+            // V1.147 P3 F2 (stat-less poison → 500): manifest validation
+            // failures are a client-input problem, not an internal fault.
+            // The run still fails (row persisted Failed) and the HTTP error is
+            // an honest 422 `invalid_input` with per-entry detail (entry id +
+            // reason) — invalid entries are never silently skipped.
+            let entries_value = serde_json::to_value(&entries).unwrap_or_else(|_| json!([]));
+            // NOTE: `invalid_entries` lives under `details` — the persisted
+            // error_json is a `NexusErrorResponse` (`code`/`details`/`message`,
+            // strict), which is what `GET /runs/:id` re-deserializes into
+            // `RunDetail.error`. A top-level `invalid_entries` key broke the
+            // detail read with a 500 SERIALIZATION_ERROR (V1.147 P3 T4 dogfood).
+            let error_json = serde_json::to_string(&json!({
+                "code": "invalid_input",
+                "message": format!(
+                    "compute input validation failed: {} invalid entry(ies); the run was not applied",
+                    entries.len()
+                ),
+                "details": json!({ "invalid_entries": entries_value }),
+            }))
+            .unwrap_or_else(|_| r#"{"code":"invalid_input"}"#.to_string());
+            if let Err(db_err) = compute_runs::set_run_failed(pool, &run_id, &error_json).await {
+                tracing::error!(
+                    run_id = %run_id,
+                    error = %db_err,
+                    "failed to persist set_run_failed on input validation failure"
+                );
+            }
+            return Err(NexusApiError::InputValidationFailed {
+                details: json!({ "invalid_entries": entries_value }),
+            });
+        }
         Err(e) => {
             let error_code = compute_error_code(&e);
             let error_json = serde_json::to_string(&json!({
@@ -621,6 +664,84 @@ pub async fn list_runs_handler(
     }))
 }
 
+// ── DELETE /v1/daemon/compute/runs ─────────────────────────────────────────
+
+/// Clear history — delete terminal runs for an owned World (V1.147 P3 T2).
+///
+/// Plan Clear-history semantics lock:
+/// - `world_id` is **required** (Clear is per-World scope; never a world-wide
+///   purge) — missing scope → 422.
+/// - Optional `status` filter limited to terminal states
+///   (`applied|discarded|failed`); a request targeting `running` / `succeeded`
+///   (needs-review) is rejected with 422 — those rows are never deleted.
+/// - World-ownership is guarded **before** any DB work (403).
+/// - Returns `{ "deleted": n }` (schema-less inline response — P1
+///   `DiscardRunResponse` precedent for trivial shapes).
+///
+/// Clearing run rows never mutates World state: Applied runs already
+/// committed their timeline events; the rows are history records only.
+///
+/// # Errors
+/// 422 when `world_id` is missing or `status` is not terminal; 403 when the
+/// World is not owned; 500 on DB failure.
+#[allow(clippy::missing_errors_doc)]
+pub async fn delete_runs(
+    State(state): State<WorkspaceState>,
+    Query(params): Query<DeleteRunsQuery>,
+) -> Result<Json<Value>, NexusApiError> {
+    let pool = state.pool_or_uninit()?;
+    let creator_id =
+        read_active_creator_id(state.nexus_home()).ok_or(NexusApiError::AuthRequired)?;
+
+    // Scope required (plan lock) — never a world-wide purge.
+    let world_id = params
+        .world_id
+        .as_deref()
+        .ok_or_else(|| NexusApiError::BadRequest {
+            code: "invalid_input".to_string(),
+            message: "world_id is required to clear run history (scope is per World)".to_string(),
+        })?;
+
+    // Ownership gate BEFORE any DB work (plan lock).
+    let owned = narrative_write::is_world_owned(pool, &creator_id, world_id)
+        .await
+        .map_err(|e| NexusApiError::Internal {
+            code: "DATABASE_ERROR".to_string(),
+            message: e.to_string(),
+        })?;
+    if !owned {
+        return Err(NexusApiError::Forbidden {
+            resource: format!("world {world_id}"),
+            reason: "you do not own this world".to_string(),
+        });
+    }
+
+    // Terminal-only status filter (plan lock): running/succeeded → 422.
+    if let Some(ref status) = params.status {
+        if !matches!(
+            status.as_str(),
+            compute_runs::RUN_STATUS_APPLIED
+                | compute_runs::RUN_STATUS_DISCARDED
+                | compute_runs::RUN_STATUS_FAILED
+        ) {
+            return Err(NexusApiError::BadRequest {
+                code: "invalid_input".to_string(),
+                message: format!(
+                    "status '{status}' cannot be cleared: only terminal states \
+                     (applied|discarded|failed) are deletable; running and succeeded \
+                     (needs review) runs are kept"
+                ),
+            });
+        }
+    }
+
+    let deleted = compute_runs::delete_terminal_runs(pool, world_id, params.status.as_deref())
+        .await
+        .map_err(NexusApiError::from)?;
+
+    Ok(Json(json!({ "deleted": deleted })))
+}
+
 // ── GET /v1/daemon/compute/runs/:run_id ──────────────────────────────────
 
 #[allow(clippy::missing_errors_doc)]
@@ -685,6 +806,27 @@ pub async fn get_run_detail(
 ///   `root_fork_branch_id` + the `branch_id`s materialized on
 ///   `narrative_timeline_events`.  Unknown / other-world branches → 422
 ///   `invalid_input`.
+///
+/// **Branch parity with the invoke path (V1.147 P3):** the preset invoke path
+/// (`narrative.compute`) never accepts a caller-supplied branch — it derives
+/// the branch from world state (`get_world_state().fork_branch_id` →
+/// `"fbk_root"` fallback), so it can only ever bind the world root or an
+/// event-bearing branch of the owned world. This resolver enforces the same
+/// membership semantics for the direct lane's caller-supplied `branch_id`:
+/// anything outside {world root, event-bearing branches of the owned world}
+/// is rejected with 422 `invalid_input` — an unknown branch, or a branch
+/// whose events live in another world, can never be bound.
+///
+/// **Lazy-fork limit (documented pre-1.0 persistence limit):** fork branches
+/// are established lazily — a new branch exists in the durable registry only
+/// once its first timeline event is appended (`world-delta-propose-apply.md`:
+/// "the new branch is established by its first appended event"). A freshly
+/// created but empty fork (no events yet) is therefore indistinguishable from
+/// an unknown branch here and is rejected with 422. This mirrors the invoke
+/// path, which also cannot bind an empty fork (its `fork_branch_id` derives
+/// from the same event-based registry). Resolving empty forks would require a
+/// durable fork-branch table — tracked as a pre-1.0 limitation, not an open
+/// correctness hole (membership fails closed; no foreign branch is reachable).
 ///
 /// Returns `(branch_id, timeline_head_event_id)`: the head is the world's
 /// `current_timeline_head_id` for the root branch, and the branch's own
@@ -794,6 +936,13 @@ const fn compute_error_code(e: &ComputeError) -> &'static str {
         ComputeError::MemoryCapExceeded => "compute_memory_cap_exceeded",
         ComputeError::Trap { .. } => "compute_module_trapped",
         ComputeError::ModuleComputeFailed { .. } => "compute_module_error",
+        // V1.147 P3 F2: manifest-schema validation failures are input
+        // problems, not internal faults → 422 `invalid_input`. The aggregated
+        // per-entry form is handled with full detail in the run handler; the
+        // single-aspect form (invocation / battle_report) falls through here.
+        ComputeError::ManifestValidationFailed { .. } | ComputeError::InputValidationFailed(_) => {
+            "invalid_input"
+        }
         _ => "internal",
     }
 }

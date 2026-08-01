@@ -625,6 +625,7 @@
     "canvasAriaLabel": "世界时间轴画布",
     "nleBandScrollAriaLabel": "世界时间轴横向浏览区域",
     "orderingDisclaimer": "时间轴顺序根据可用事件数据推断，并非权威年表。",
+    "computeProjectionCapNote": "仅显示前 {{count}} 条计算事件，更早的事件不会渲染。",
     "empty": {
       "title": "该世界的时间轴为空",
       "description": "通过世界知识库或章节抽取添加的事件将显示在此处。"

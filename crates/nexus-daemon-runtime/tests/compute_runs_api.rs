@@ -1127,13 +1127,19 @@ async fn accept_mid_loop_failure_rolls_back_entire_tx() {
 
 /// Seed a timeline event on a named (non-root) branch of the combat world.
 async fn seed_branch_event(pool: &sqlx::SqlitePool, branch_id: &str) {
+    seed_branch_event_in_world(pool, WORLD, branch_id).await;
+}
+
+/// World-aware variant of [`seed_branch_event`] (other-world branch fixtures).
+async fn seed_branch_event_in_world(pool: &sqlx::SqlitePool, world_id: &str, branch_id: &str) {
+    // SAFETY: test-only seed against the known narrative_timeline_events schema.
     sqlx::query(
         "INSERT INTO narrative_timeline_events \
             (timeline_event_id, world_id, branch_id, event_type, status, sequence_no, metadata_json) \
          VALUES (?, ?, ?, 'fork_marker', 'provisional', 0, '{}')",
     )
     .bind(format!("evt_bside{}", branch_id.replace('_', "")))
-    .bind(WORLD)
+    .bind(world_id)
     .bind(branch_id)
     .execute(pool)
     .await
@@ -1221,6 +1227,159 @@ async fn run_with_unknown_branch_returns_422() {
 
     let resp = post_run_on_branch(&c.server, "fbk_nonexistent").await;
     assert_error_envelope(&resp, StatusCode::UNPROCESSABLE_ENTITY, "invalid_input");
+}
+
+/// Branch parity (V1.147 P3 T1): membership is world-scoped — a branch that is
+/// event-bearing in ANOTHER world must still be rejected on this world's run
+/// (422 `invalid_input`), matching the invoke path's membership semantics
+/// (unknown / other-world branches are never bindable).
+#[tokio::test]
+#[serial]
+async fn run_with_other_world_branch_returns_422() {
+    let c = ctx().await;
+    seed_character(&c.pool, "kb_atk", "Striker", 20, 3, 100, 100).await;
+    seed_character(&c.pool, "kb_def", "Guardian", 10, 5, 30, 50).await;
+    seed_foreign_world(&c.pool).await;
+    // The branch exists — but only under FOREIGN_WORLD (owned by another
+    // creator, which makes the rejection even stronger: the check is
+    // world-scoped, not ownership-scoped).
+    seed_branch_event_in_world(&c.pool, FOREIGN_WORLD, "fbk_other").await;
+
+    let resp = post_run_on_branch(&c.server, "fbk_other").await;
+    assert_error_envelope(&resp, StatusCode::UNPROCESSABLE_ENTITY, "invalid_input");
+}
+
+// ── V1.147 P3 T1 — F2: manifest validation failures → 422 with per-entry detail
+
+/// Seed a computable character whose `state.character` violates the
+/// basic-combat manifest schema (`current_hp` must be an integer) — the
+/// "poison entry" dogfood case (F2): one invalid entry must fail the whole
+/// run honestly (422 + per-entry detail), never 500.
+///
+/// NOTE: flat `attributes` cannot poison the direct lane — the spoke
+/// conversion rewrites them into the ERC721-array form, which validates
+/// per-item shape only (`trait_type`/`value`); a missing key is silently
+/// absent from the array. `state` is preserved verbatim, so a malformed
+/// state is the honest manifest violation.
+async fn seed_broken_character(pool: &sqlx::SqlitePool, entry_id: &str) {
+    use nexus_contracts::BlockType;
+    use nexus_knowledge::world_kb::knowledge_entry::{WorldKbBody, WorldKbEntry};
+    use nexus_knowledge::world_kb::KbStore;
+    use nexus_local_db::kb_store::SqliteKbStore;
+
+    let kb = WorldKbEntry {
+        entry_id: entry_id.to_string(),
+        world_id: WORLD.to_string(),
+        block_type: BlockType::Character,
+        canonical_name: format!("Broken {entry_id}"),
+        body: Some(WorldKbBody {
+            summary: Some("Broken combatant".to_string()),
+            attributes: Some(json!({
+                "max_hp": 100,
+                "base_atk": 5,
+                "base_def": 10,
+            })),
+            computable: Some(true),
+            state: Some(json!({
+                "character": {
+                    "current_hp": "one-hundred", // must be integer per manifest
+                    "is_alive": true,
+                    "status_effects": [],
+                }
+            })),
+            ..Default::default()
+        }),
+        ..WorldKbEntry::new(WORLD, BlockType::Character, "Broken")
+    };
+    SqliteKbStore::new(pool.clone())
+        .insert_knowledge_entry(kb)
+        .await
+        .unwrap();
+}
+
+/// F2 (dogfood, V1.147 P3): an input entry that violates the manifest schema
+/// poisons the run — HTTP **422** `invalid_input` with per-entry failure
+/// detail (`error.details.invalid_entries` = entry id + reason), NOT a 500.
+/// The run row is still recorded `failed` with the honest per-entry error_json;
+/// no timeline events are written.
+#[tokio::test]
+#[serial]
+async fn run_with_invalid_entry_returns_422_with_per_entry_detail() {
+    let c = ctx().await;
+    seed_character(&c.pool, "kb_atk", "Striker", 20, 3, 100, 100).await;
+    seed_character(&c.pool, "kb_def", "Guardian", 10, 5, 30, 50).await;
+    seed_broken_character(&c.pool, "kb_broken").await;
+
+    let resp = post_run(
+        &c.server,
+        WORLD,
+        MODULE,
+        json!({"attacker_id": "kb_atk", "defender_id": "kb_def"}),
+    )
+    .await;
+    assert_eq!(
+        resp.status_code(),
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "body={}",
+        resp.text()
+    );
+    let body: Value = resp.json();
+    assert_eq!(body["success"], false, "body={body}");
+    assert_eq!(body["error"]["code"], "invalid_input", "body={body}");
+    let invalid_entries = &body["error"]["details"]["invalid_entries"];
+    let invalid_entries = invalid_entries
+        .as_array()
+        .unwrap_or_else(|| panic!("invalid_entries must be an array: {body}"));
+    assert!(!invalid_entries.is_empty(), "body={body}");
+    assert_eq!(invalid_entries[0]["entry_id"], "kb_broken", "body={body}");
+    let reason = invalid_entries[0]["reason"].as_str().unwrap();
+    assert!(
+        reason.contains("current_hp"),
+        "reason must name the failing field: {reason}"
+    );
+    assert!(
+        reason.contains("expected type integer"),
+        "reason must explain the violation: {reason}"
+    );
+
+    // Run row persisted as Failed with the honest per-entry error_json; the
+    // direct lane writes NO timeline events on failure.
+    let (run_id, status, error_json) = latest_run(&c.pool).await;
+    assert_eq!(status, "failed");
+    let error: Value = serde_json::from_str(error_json.as_deref().unwrap()).unwrap();
+    assert_eq!(error["code"], "invalid_input");
+    // `invalid_entries` lives under `details`: the persisted error_json is a
+    // strict `NexusErrorResponse` (`code`/`details`/`message`) and
+    // `GET /runs/:id` re-deserializes it into `RunDetail.error` — a
+    // top-level `invalid_entries` key 500s the detail read (V1.147 P3 T4
+    // dogfood regression; the detail-read assertion below is the guard).
+    assert_eq!(
+        error["details"]["invalid_entries"][0]["entry_id"],
+        "kb_broken"
+    );
+    assert!(timeline_events(&c.pool).await.is_empty());
+    assert!(!run_id.is_empty());
+
+    // Regression (T4 dogfood): the detail endpoint must still serve this
+    // failed run — 200, `error.code = invalid_input`, per-entry detail
+    // readable — instead of 500 `SERIALIZATION_ERROR`.
+    let detail = c
+        .server
+        .get(&format!("/v1/daemon/compute/runs/{run_id}"))
+        .await;
+    assert_eq!(
+        detail.status_code(),
+        StatusCode::OK,
+        "detail body={}",
+        detail.text()
+    );
+    let detail_body: Value = detail.json();
+    assert_eq!(detail_body["status"], "failed");
+    assert_eq!(detail_body["error"]["code"], "invalid_input");
+    assert_eq!(
+        detail_body["error"]["details"]["invalid_entries"][0]["entry_id"],
+        "kb_broken"
+    );
 }
 
 // ── W2 fix wave — subset-accept ────────────────────────────────────────────
@@ -1355,6 +1514,259 @@ async fn accept_with_explicit_null_timeline_ids_accepts_all() {
     let events = timeline_events(&c.pool).await;
     assert_eq!(events.len(), 2, "explicit null must accept all events");
     assert_eq!(defender_hp(&c.pool, "kb_def").await, 15);
+}
+
+// ── V1.147 P3 T2 — DELETE /v1/daemon/compute/runs (Clear history) ───────────
+
+/// `DELETE /v1/daemon/compute/runs` with optional `world_id` / `status`.
+async fn delete_runs(
+    server: &TestServer,
+    world_id: Option<&str>,
+    status: Option<&str>,
+) -> axum_test::TestResponse {
+    let mut query: Vec<String> = Vec::new();
+    if let Some(w) = world_id {
+        query.push(format!("world_id={w}"));
+    }
+    if let Some(s) = status {
+        query.push(format!("status={s}"));
+    }
+    let path = if query.is_empty() {
+        "/v1/daemon/compute/runs".to_string()
+    } else {
+        format!("/v1/daemon/compute/runs?{}", query.join("&"))
+    };
+    server.delete(&path).await
+}
+
+/// Seed one run in EVERY lifecycle status on the owned combat world (plus a
+/// terminal run on a foreign world) so Clear-scope tests can assert exactly
+/// which rows survive. Returns the run ids by status.
+struct RunStatusSeed {
+    succeeded: String,
+    applied: String,
+    discarded: String,
+    failed: String,
+    running: String,
+    foreign_failed: String,
+}
+
+async fn seed_run_status_mix(c: &Ctx) -> RunStatusSeed {
+    seed_character(&c.pool, "kb_atk", "Striker", 20, 3, 100, 100).await;
+    seed_character(&c.pool, "kb_def", "Guardian", 10, 5, 30, 50).await;
+
+    let succeeded = run_succeeded(c).await;
+
+    let applied = run_succeeded(c).await;
+    let accept = c
+        .server
+        .post(&format!("/v1/daemon/compute/runs/{applied}/accept"))
+        .json(&json!({}))
+        .await;
+    assert_eq!(
+        accept.status_code(),
+        StatusCode::OK,
+        "body={}",
+        accept.text()
+    );
+
+    let discarded = run_succeeded(c).await;
+    let discard = c
+        .server
+        .post(&format!("/v1/daemon/compute/runs/{discarded}/discard"))
+        .await;
+    assert_eq!(
+        discard.status_code(),
+        StatusCode::OK,
+        "body={}",
+        discard.text()
+    );
+
+    let failed = nexus_local_db::compute_runs::insert_run(
+        &c.pool,
+        WORLD,
+        MODULE,
+        Some("1.0.0"),
+        None,
+        None,
+        None,
+    )
+    .await
+    .unwrap();
+    nexus_local_db::compute_runs::set_run_failed(&c.pool, &failed, r#"{"code":"internal"}"#)
+        .await
+        .unwrap();
+
+    let running = nexus_local_db::compute_runs::insert_run(
+        &c.pool,
+        WORLD,
+        MODULE,
+        Some("1.0.0"),
+        None,
+        None,
+        None,
+    )
+    .await
+    .unwrap();
+
+    // A terminal (failed) run on a world owned by ANOTHER creator — the
+    // ownership gate must keep it untouched.
+    seed_foreign_world(&c.pool).await;
+    let foreign_failed = nexus_local_db::compute_runs::insert_run(
+        &c.pool,
+        FOREIGN_WORLD,
+        MODULE,
+        Some("1.0.0"),
+        None,
+        None,
+        None,
+    )
+    .await
+    .unwrap();
+    nexus_local_db::compute_runs::set_run_failed(
+        &c.pool,
+        &foreign_failed,
+        r#"{"code":"internal"}"#,
+    )
+    .await
+    .unwrap();
+
+    RunStatusSeed {
+        succeeded,
+        applied,
+        discarded,
+        failed,
+        running,
+        foreign_failed,
+    }
+}
+
+/// Clear requires explicit scope — `DELETE /runs` without `world_id` is 422.
+#[tokio::test]
+#[serial]
+async fn delete_runs_without_world_id_returns_422_scope_required() {
+    let c = ctx().await;
+    let resp = delete_runs(&c.server, None, None).await;
+    assert_error_envelope(&resp, StatusCode::UNPROCESSABLE_ENTITY, "invalid_input");
+}
+
+/// Clear deletes ONLY terminal runs (applied|discarded|failed) of the OWNED
+/// world and returns the deleted count. `running`, `succeeded` (needs review)
+/// and foreign-world rows survive.
+#[tokio::test]
+#[serial]
+async fn delete_runs_removes_terminal_runs_only_and_returns_deleted_count() {
+    let c = ctx().await;
+    let seed = seed_run_status_mix(&c).await;
+
+    let resp = delete_runs(&c.server, Some(WORLD), None).await;
+    assert_eq!(resp.status_code(), StatusCode::OK, "body={}", resp.text());
+    let body: Value = resp.json();
+    assert_eq!(body["deleted"], 3, "body={body}");
+
+    // Survivors: needs-review (succeeded), running, foreign terminal.
+    for id in [&seed.succeeded, &seed.running, &seed.foreign_failed] {
+        assert!(
+            nexus_local_db::compute_runs::get_run(&c.pool, id)
+                .await
+                .unwrap()
+                .is_some(),
+            "{id} must survive Clear"
+        );
+    }
+    // Deleted: applied, discarded, failed (the 3 terminal states).
+    for id in [&seed.applied, &seed.discarded, &seed.failed] {
+        assert!(
+            nexus_local_db::compute_runs::get_run(&c.pool, id)
+                .await
+                .unwrap()
+                .is_none(),
+            "{id} must be deleted"
+        );
+    }
+}
+
+/// A non-terminal `status` filter is rejected — running/succeeded are never
+/// deletable (422 `invalid_input`).
+#[tokio::test]
+#[serial]
+async fn delete_runs_with_non_terminal_status_returns_422() {
+    let c = ctx().await;
+    let resp = delete_runs(&c.server, Some(WORLD), Some("running")).await;
+    assert_error_envelope(&resp, StatusCode::UNPROCESSABLE_ENTITY, "invalid_input");
+
+    let resp = delete_runs(&c.server, Some(WORLD), Some("succeeded")).await;
+    assert_error_envelope(&resp, StatusCode::UNPROCESSABLE_ENTITY, "invalid_input");
+}
+
+/// A terminal `status` filter narrows Clear to exactly that state.
+#[tokio::test]
+#[serial]
+async fn delete_runs_with_terminal_status_filter_deletes_only_matching() {
+    let c = ctx().await;
+    let seed = seed_run_status_mix(&c).await;
+
+    let resp = delete_runs(&c.server, Some(WORLD), Some("failed")).await;
+    assert_eq!(resp.status_code(), StatusCode::OK, "body={}", resp.text());
+    let body: Value = resp.json();
+    assert_eq!(body["deleted"], 1, "body={body}");
+    assert!(
+        nexus_local_db::compute_runs::get_run(&c.pool, &seed.failed)
+            .await
+            .unwrap()
+            .is_none(),
+        "failed row must be deleted"
+    );
+    for id in [
+        &seed.applied,
+        &seed.discarded,
+        &seed.succeeded,
+        &seed.running,
+    ] {
+        assert!(
+            nexus_local_db::compute_runs::get_run(&c.pool, id)
+                .await
+                .unwrap()
+                .is_some(),
+            "{id} must survive a failed-only Clear"
+        );
+    }
+}
+
+/// Ownership gate: a foreign world (and an unknown world) return 403 and no
+/// row is touched.
+#[tokio::test]
+#[serial]
+async fn delete_runs_on_foreign_or_unknown_world_returns_403() {
+    let c = ctx().await;
+    seed_foreign_world(&c.pool).await;
+    let foreign = nexus_local_db::compute_runs::insert_run(
+        &c.pool,
+        FOREIGN_WORLD,
+        MODULE,
+        Some("1.0.0"),
+        None,
+        None,
+        None,
+    )
+    .await
+    .unwrap();
+    nexus_local_db::compute_runs::set_run_failed(&c.pool, &foreign, r#"{"code":"internal"}"#)
+        .await
+        .unwrap();
+
+    let resp = delete_runs(&c.server, Some(FOREIGN_WORLD), None).await;
+    assert_error_envelope(&resp, StatusCode::FORBIDDEN, "forbidden");
+    assert!(
+        nexus_local_db::compute_runs::get_run(&c.pool, &foreign)
+            .await
+            .unwrap()
+            .is_some(),
+        "foreign run must survive a 403 Clear"
+    );
+
+    let resp = delete_runs(&c.server, Some("wld_nonexistent"), None).await;
+    assert_error_envelope(&resp, StatusCode::FORBIDDEN, "forbidden");
 }
 
 // ── W1 fix wave — newest-first list ordering ───────────────────────────────

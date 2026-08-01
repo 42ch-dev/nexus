@@ -470,3 +470,65 @@ struct RawRunRow {
     branch_id: Option<String>,
     timeline_head_event_id: Option<String>,
 }
+
+/// Delete terminal runs for a World (Clear history — V1.147 P3 T2).
+///
+/// Clear-history semantics lock: only terminal states (`applied` |
+/// `discarded` | `failed`) are ever deleted. `running` and `succeeded`
+/// (needs-review) rows are structurally excluded by the SQL predicate, so a
+/// buggy caller can never clear them. `status` narrows Clear to one terminal
+/// state when present; a non-terminal value is rejected here too (defense in
+/// depth — the handler validates before calling).
+///
+/// Spoke-adapter rows (NULL `run_id`) are never matched — the `run_id IS NOT
+/// NULL` predicate keeps Clear scoped to the direct lane.
+///
+/// Returns the number of deleted rows.
+///
+/// # Errors
+/// Returns [`LocalDbError::ValidationError`] when `status` is not a terminal
+/// state, [`LocalDbError`] on database failure.
+pub async fn delete_terminal_runs(
+    pool: &SqlitePool,
+    world_id: &str,
+    status: Option<&str>,
+) -> Result<u64, LocalDbError> {
+    if let Some(s) = status {
+        if !matches!(
+            s,
+            RUN_STATUS_APPLIED | RUN_STATUS_DISCARDED | RUN_STATUS_FAILED
+        ) {
+            return Err(LocalDbError::ValidationError(format!(
+                "status '{s}' is not a terminal run state (applied|discarded|failed); \
+                 running and succeeded rows are never deletable"
+            )));
+        }
+    }
+    let result = match status {
+        // Guarded predicate: the IN-list is structural, so this arm can never
+        // touch running/succeeded rows.
+        None => {
+            sqlx::query!(
+                "DELETE FROM compute_sessions \
+             WHERE world_id = ? AND run_id IS NOT NULL \
+               AND status IN ('applied', 'discarded', 'failed')",
+                world_id,
+            )
+            .execute(pool)
+            .await?
+        }
+        // `status` was validated as terminal above; the explicit equality
+        // narrows Clear to exactly that state.
+        Some(s) => {
+            sqlx::query!(
+                "DELETE FROM compute_sessions \
+             WHERE world_id = ? AND run_id IS NOT NULL AND status = ?",
+                world_id,
+                s,
+            )
+            .execute(pool)
+            .await?
+        }
+    };
+    Ok(result.rows_affected())
+}

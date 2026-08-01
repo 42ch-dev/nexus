@@ -73,6 +73,12 @@ A structured, non-linear representation of a work's planned content — nodes re
 ### Compute (Capability)
 A WASM-powered execution unit within a world — the *mechanism* an author or agent invokes. Examples: combat engine resolution, dice rolling, relationship graph computation. Compute modules are embedded (shipped with the binary) or user-authored. **Distinct from the [Computable](#computable) pillar** in *Three Pillars* above: this entry is the capability mechanism; *Computable* is the product thesis that worlds react via such capabilities.
 
+### Run
+One execution of a compute module against a World — the direct-lane (Control Room) product concept over the `compute_sessions` row. A Run moves `running → succeeded | failed`; a succeeded Run stays **Needs review** until the author explicitly **Accept**s (→ Applied) or **Discard**s (→ Discarded). The direct lane **never auto-applies** (review-then-apply); the preset `narrative.compute` path may auto-apply inside a Harness session. Run history is retained, and terminal Runs can be cleared per World (Clear history — never `running`/needs-review rows). Author-facing vocabulary (Run / Proposal / Accept / Discard): [computable-author-behavior.md](.mstar/iterations/v1.147/specs/computable-author-behavior.md). Cross-ref: [Compute (Capability)](#compute-capability), [Compute result](#compute-result), [Computable](#computable). Wire surface: [daemon-api-surface-conventions.md](.mstar/specs/daemon-api-surface-conventions.md) §12.3.
+
+### Compute result
+A Timeline node created when an author **accepts** a Run's proposals — `event_type: "compute_result"`, appended **canon** (never provisional) with `extensions.nexus.compute` provenance (module id/version, run id, `source_kind: "direct_invoke"`). Preset-path compute events share the same event family so accepted reactions speak one visual language; failed/discarded Runs never produce Timeline nodes (the Timeline stays narrative truth, not an ops log). Cross-ref: [Run](#run), [Timeline](#timeline), [Computable](#computable).
+
 ### Preset
 A pre-configured bundle of compute capabilities with a YAML manifest. Presets define which capabilities are available, how they sequence, and what prompts/rules they use. Example: "combat-engine" preset.
 
@@ -185,6 +191,8 @@ Paths are relative to the repo root. Each entry links the term to its authoritat
 | Term | Related concepts | Spec doc |
 |------|-----------------|----------|
 | Compute | Preset, WASM module, Capability Registry | [compute-module-abi.md](.mstar/specs/compute-module-abi.md) |
+| Run | Compute, Module, Accept, Discard, Compute result | [daemon-api-surface-conventions.md](.mstar/specs/daemon-api-surface-conventions.md) |
+| Compute result | Run, Timeline, Accept, Computable | [entity-scope-model.md](.mstar/specs/entity-scope-model.md) |
 | Preset | Compute, Orchestration, Capability | [orchestration-engine.md](.mstar/specs/orchestration-engine.md) |
 | Creator | Creator Memory, Works | [creator-workflow.md](.mstar/specs/creator-workflow.md) |
 | Creator Memory | Creator, SOUL I/O | [creator-workflow.md](.mstar/specs/creator-workflow.md) |

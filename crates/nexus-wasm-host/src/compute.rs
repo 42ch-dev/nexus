@@ -18,7 +18,7 @@ use std::time::Duration;
 
 use wasmtime::{Instance, Linker, Store, StoreLimitsBuilder, Trap, TypedFunc};
 
-use crate::error::{ComputeError, Result};
+use crate::error::{ComputeError, EntryValidationFailure, Result};
 use crate::host::{register_host_imports, InvocationState};
 use crate::manifest::{ModuleManifest, ModuleSchemas};
 use crate::{ComputeInput, ComputeOutput, HostContext, WasmEngine, WasmModule};
@@ -211,7 +211,16 @@ impl WasmEngine {
 use serde_json::Value;
 
 /// Validate all applicable manifest-schema fragments against `ComputeInput`.
+///
+/// All-or-nothing (V1.147 P3 F2): every `key_blocks` entry is validated and
+/// EVERY failing entry is collected — the invocation fails with
+/// [`ComputeError::InputValidationFailed`] carrying per-entry detail (entry id
+/// and reason). Invalid entries are never silently skipped. The `invocation`
+/// aspect (not an entry) keeps the original fail-fast
+/// [`ComputeError::ManifestValidationFailed`] shape.
 fn validate_compute_input(input: &Value, schemas: &ModuleSchemas) -> Result<()> {
+    let mut entry_failures: Vec<EntryValidationFailure> = Vec::new();
+
     // -- key_block_attributes -------------------------------------------------
     if let Some(ref kb_attrs) = schemas.key_block_attributes {
         let empty = vec![];
@@ -229,24 +238,29 @@ fn validate_compute_input(input: &Value, schemas: &ModuleSchemas) -> Result<()> 
                 .and_then(Value::as_str)
                 .or_else(|| kb.get("block_type").and_then(Value::as_str))
                 .unwrap_or("");
-            let Some(schema) = kb_attrs.get(block_type) else {
+            let result = kb_attrs.get(block_type).map_or_else(
                 // F-005 hardening (V1.147 P0 fix wave): when the manifest
                 // DECLARES key_block_attributes, an unresolvable or
                 // uncovered entry type is a manifest/input contract breach —
                 // reject fail-closed instead of silently skipping the entry.
-                return Err(ComputeError::ManifestValidationFailed {
-                    path: format!("key_blocks[{i}]"),
-                    detail: format!(
-                        "unknown key_block type '{block_type}': manifest declares \
+                || {
+                    Err(ComputeError::ManifestValidationFailed {
+                        path: format!("key_blocks[{i}]"),
+                        detail: format!(
+                            "unknown key_block type '{block_type}': manifest declares \
                          key_block_attributes for [{}], and no schema covers this entry",
-                        kb_attrs.keys().cloned().collect::<Vec<_>>().join(", ")
-                    ),
-                });
-            };
-            let attrs = kb.get("body").and_then(|b| b.get("attributes"));
-            let instance = attrs.unwrap_or(&Value::Null);
-            let path = format!("key_blocks[{i}].body.attributes");
-            validate_against_schema(instance, &path, schema, &path, MAX_VALIDATION_DEPTH)?;
+                            kb_attrs.keys().cloned().collect::<Vec<_>>().join(", ")
+                        ),
+                    })
+                },
+                |schema| {
+                    let attrs = kb.get("body").and_then(|b| b.get("attributes"));
+                    let instance = attrs.unwrap_or(&Value::Null);
+                    let path = format!("key_blocks[{i}].body.attributes");
+                    validate_against_schema(instance, &path, schema, &path, MAX_VALIDATION_DEPTH)
+                },
+            );
+            collect_entry_failure(&mut entry_failures, kb_entry_id(kb, i), result);
         }
     }
 
@@ -265,35 +279,53 @@ fn validate_compute_input(input: &Value, schemas: &ModuleSchemas) -> Result<()> 
                 .and_then(Value::as_str)
                 .or_else(|| kb.get("block_type").and_then(Value::as_str))
                 .unwrap_or("");
-            let Some(schema) = kb_state.get(block_type) else {
+            let result = kb_state.get(block_type).map_or_else(
                 // F-005 hardening: fail-closed when key_block_state is
                 // declared, mirroring the key_block_attributes rule.
-                return Err(ComputeError::ManifestValidationFailed {
-                    path: format!("key_blocks[{i}]"),
-                    detail: format!(
-                        "unknown key_block type '{block_type}': manifest declares \
+                || {
+                    Err(ComputeError::ManifestValidationFailed {
+                        path: format!("key_blocks[{i}]"),
+                        detail: format!(
+                            "unknown key_block type '{block_type}': manifest declares \
                          key_block_state for [{}], and no schema covers this entry",
-                        kb_state.keys().cloned().collect::<Vec<_>>().join(", ")
-                    ),
-                });
-            };
-            let state = kb
-                .get("body")
-                .and_then(|b| b.get("state"))
-                .and_then(|s| s.get(block_type));
-            // Skip validation if state is absent or null. State may not
-            // yet be initialized for newly-created computable blocks
-            // (e.g. a character participating in its first combat scene);
-            // modules handle missing state via their own fallback chains
-            // (see `basic-combat/src/lib.rs` HP fallback logic). This
-            // mirrors the `invocation` null-skip just below.
-            if let Some(state) = state {
-                if !state.is_null() {
-                    let path = format!("key_blocks[{i}].body.state.{block_type}");
-                    validate_against_schema(state, &path, schema, &path, MAX_VALIDATION_DEPTH)?;
-                }
-            }
+                            kb_state.keys().cloned().collect::<Vec<_>>().join(", ")
+                        ),
+                    })
+                },
+                |schema| {
+                    let state = kb
+                        .get("body")
+                        .and_then(|b| b.get("state"))
+                        .and_then(|s| s.get(block_type));
+                    // Skip validation if state is absent or null. State may not
+                    // yet be initialized for newly-created computable blocks
+                    // (e.g. a character participating in its first combat scene);
+                    // modules handle missing state via their own fallback chains
+                    // (see `basic-combat/src/lib.rs` HP fallback logic). This
+                    // mirrors the `invocation` null-skip just below.
+                    match state {
+                        Some(state) if !state.is_null() => {
+                            let path = format!("key_blocks[{i}].body.state.{block_type}");
+                            validate_against_schema(
+                                state,
+                                &path,
+                                schema,
+                                &path,
+                                MAX_VALIDATION_DEPTH,
+                            )
+                        }
+                        _ => Ok(()),
+                    }
+                },
+            );
+            collect_entry_failure(&mut entry_failures, kb_entry_id(kb, i), result);
         }
+    }
+
+    // All-or-nothing: any failing entry fails the whole invocation with
+    // per-entry detail (V1.147 P3 F2) — no silent skip of invalid entries.
+    if !entry_failures.is_empty() {
+        return Err(ComputeError::InputValidationFailed(entry_failures));
     }
 
     // -- invocation -----------------------------------------------------------
@@ -315,6 +347,43 @@ fn validate_compute_input(input: &Value, schemas: &ModuleSchemas) -> Result<()> 
     }
 
     Ok(())
+}
+
+/// Stable per-entry label for validation failures (V1.147 P3 F2): the spoke
+/// `entry_id` when the entry carries one, else the positional
+/// `key_blocks[{index}]` label.
+fn kb_entry_id(kb: &Value, index: usize) -> String {
+    kb.get("entry_id")
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty())
+        .map_or_else(|| format!("key_blocks[{index}]"), str::to_string)
+}
+
+/// Fold one entry's validation result into the per-entry failure list
+/// (all-or-nothing aggregation, V1.147 P3 F2).
+fn collect_entry_failure(
+    entry_failures: &mut Vec<EntryValidationFailure>,
+    entry_id: String,
+    result: Result<()>,
+) {
+    match result {
+        Ok(()) => {}
+        Err(ComputeError::ManifestValidationFailed { path, detail }) => {
+            entry_failures.push(EntryValidationFailure {
+                entry_id,
+                reason: format!("{path}: {detail}"),
+            });
+        }
+        Err(other) => {
+            // Unreachable today (validate_against_schema only emits
+            // ManifestValidationFailed); keep the failure honest if that
+            // ever changes.
+            entry_failures.push(EntryValidationFailure {
+                entry_id,
+                reason: other.to_string(),
+            });
+        }
+    }
 }
 
 /// Validate a module-emitted `battle_report` object against the manifest schema.
@@ -864,6 +933,7 @@ mod tests {
         // Missing `base_atk` (required).
         let input = json!({
             "key_blocks": [{
+                "entry_id": "kb_striker",
                 "block_type": "character",
                 "body": {
                     "attributes": {
@@ -875,12 +945,14 @@ mod tests {
         });
         let err = validate_compute_input(&input, &schemas).unwrap_err();
         match err {
-            ComputeError::ManifestValidationFailed { path, detail } => {
-                assert!(path.contains("key_blocks[0].body.attributes"));
-                assert!(detail.contains("missing required field"));
-                assert!(detail.contains("base_atk"));
+            ComputeError::InputValidationFailed(entries) => {
+                assert_eq!(entries.len(), 1, "exactly one failing entry: {entries:?}");
+                assert_eq!(entries[0].entry_id, "kb_striker");
+                assert!(entries[0].reason.contains("key_blocks[0].body.attributes"));
+                assert!(entries[0].reason.contains("missing required field"));
+                assert!(entries[0].reason.contains("base_atk"));
             }
-            other => panic!("expected ManifestValidationFailed, got {other:?}"),
+            other => panic!("expected InputValidationFailed, got {other:?}"),
         }
     }
 
@@ -923,11 +995,88 @@ mod tests {
         });
         let err = validate_compute_input(&input, &schemas).unwrap_err();
         match err {
-            ComputeError::ManifestValidationFailed { path, detail } => {
-                assert!(path.contains("key_blocks[0]"), "path={path}");
-                assert!(detail.contains("unknown key_block type"), "detail={detail}");
+            ComputeError::InputValidationFailed(entries) => {
+                assert_eq!(entries.len(), 1, "exactly one failing entry: {entries:?}");
+                // No `entry_id` on the fixture → positional fallback label.
+                assert_eq!(entries[0].entry_id, "key_blocks[0]");
+                assert!(
+                    entries[0].reason.contains("unknown key_block type"),
+                    "reason={}",
+                    entries[0].reason
+                );
             }
-            other => panic!("expected ManifestValidationFailed, got {other:?}"),
+            other => panic!("expected InputValidationFailed, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn all_invalid_entries_reported_without_silent_skip() {
+        // V1.147 P3 F2: all-or-nothing manifest validation — every invalid
+        // entry is reported (entry id + reason), never silently skipped.
+        let schemas = make_schemas();
+        let input = json!({
+            "key_blocks": [
+                {
+                    "entry_id": "kb_broken_a",
+                    "block_type": "character",
+                    "body": {"attributes": {"max_hp": 100}}
+                    // missing base_atk + base_def
+                },
+                {
+                    "entry_id": "kb_broken_b",
+                    "block_type": "character",
+                    "body": {"attributes": {"base_atk": 10}}
+                    // missing max_hp + base_def
+                }
+            ]
+        });
+        let err = validate_compute_input(&input, &schemas).unwrap_err();
+        match err {
+            ComputeError::InputValidationFailed(entries) => {
+                assert_eq!(
+                    entries.len(),
+                    2,
+                    "all invalid entries must be reported: {entries:?}"
+                );
+                let ids: Vec<&str> = entries.iter().map(|e| e.entry_id.as_str()).collect();
+                assert!(ids.contains(&"kb_broken_a"), "ids={ids:?}");
+                assert!(ids.contains(&"kb_broken_b"), "ids={ids:?}");
+            }
+            other => panic!("expected InputValidationFailed, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn statless_entry_failure_reason_carries_field_path() {
+        // F2 dogfood: an entry that fails the manifest (missing required
+        // attribute) surfaces an honest per-entry failure with the failing
+        // field path, instead of a generic internal error.
+        let schemas = make_schemas();
+        let input = json!({
+            "key_blocks": [{
+                "entry_id": "kb_statless",
+                "block_type": "character",
+                "body": {"attributes": {"max_hp": 100, "base_atk": 5}}
+                // base_def missing
+            }]
+        });
+        let err = validate_compute_input(&input, &schemas).unwrap_err();
+        match err {
+            ComputeError::InputValidationFailed(entries) => {
+                assert_eq!(entries.len(), 1);
+                assert_eq!(entries[0].entry_id, "kb_statless");
+                assert!(
+                    entries[0].reason.contains("key_blocks[0].body.attributes"),
+                    "reason must carry the failing field path: {}",
+                    entries[0].reason
+                );
+                assert!(
+                    entries[0].reason.contains("base_def"),
+                    "reason must name the missing field: {}",
+                    entries[0].reason
+                );
+            }
+            other => panic!("expected InputValidationFailed, got {other:?}"),
         }
     }
 
@@ -1116,13 +1265,15 @@ mod tests {
         });
         let err = validate_compute_input(&input_bad, &schemas).unwrap_err();
         match err {
-            ComputeError::ManifestValidationFailed { detail, .. } => {
+            ComputeError::InputValidationFailed(entries) => {
+                assert_eq!(entries.len(), 1);
                 assert!(
-                    detail.contains("expected type object"),
-                    "expected 'expected type object' for non-null bad shape, got: {detail}"
+                    entries[0].reason.contains("expected type object"),
+                    "expected 'expected type object' for non-null bad shape, got: {}",
+                    entries[0].reason
                 );
             }
-            other => panic!("expected ManifestValidationFailed, got {other:?}"),
+            other => panic!("expected InputValidationFailed, got {other:?}"),
         }
     }
 

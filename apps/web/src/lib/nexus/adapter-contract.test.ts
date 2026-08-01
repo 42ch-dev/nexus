@@ -794,10 +794,10 @@ describe('NexusClient reading-depth-method parity guard (V1.89)', () => {
 /**
  * The V1.147 P1 Run Studio promotion added five methods to the `NexusClient`
  * interface (`runCompute` / `acceptRun` / `discardRun` / `listRuns` /
- * `getRun`). This guard mirrors the preset + findings + memory + reading
- * parity guards: it fails at compile time (the `satisfies` constraint) if the
- * interface drops any method, and at runtime if an adapter implementation is
- * missing it.
+ * `getRun`); the V1.147 P2 clear-runs promotion added `clearRuns`. This guard
+ * mirrors the preset + findings + memory + reading parity guards: it fails at
+ * compile time (the `satisfies` constraint) if the interface drops any method,
+ * and at runtime if an adapter implementation is missing it.
  */
 const COMPUTE_RUN_METHODS = [
   'runCompute',
@@ -805,6 +805,7 @@ const COMPUTE_RUN_METHODS = [
   'discardRun',
   'listRuns',
   'getRun',
+  'clearRuns',
 ] as const satisfies readonly (keyof NexusClient)[];
 
 describe('NexusClient compute-run-method parity guard (V1.147 P1)', () => {

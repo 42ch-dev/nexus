@@ -621,3 +621,57 @@ Response semantics:
 This route is intentionally read-only and distinct from the World KB canvas
 patch routes in §7.5; it gives clients a focused, cacheable state dump without
 a full graph projection.
+
+### 12.3 V1.147 compute direct lane and World timeline events routes
+
+V1.147 adds the **direct Control Room compute lane** — invoke/accept/discard of
+installed WASM compute modules against owned Worlds over HTTP — plus a
+per-World timeline-events read. These routes are mounted in tier-2 (behind
+`require_api_key` + `require_active_creator`, like the timeline/compute
+surfaces) and are schema-backed by `schemas/daemon-api/compute/` (run wire
+contracts; `@42ch/nexus-contracts` 0.25.0 → 0.26.0) and
+`schemas/daemon-api/timeline/`.
+
+| Use | Route | Response DTO |
+| --- | --- | --- |
+| Invoke a module on an owned World (direct lane) | `POST /v1/daemon/compute/run` | `RunResponse` |
+| Accept a succeeded Run (atomic apply of its proposals) | `POST /v1/daemon/compute/runs/{run_id}/accept` | `RunAcceptResponse` |
+| Discard a succeeded Run (no World writes) | `POST /v1/daemon/compute/runs/{run_id}/discard` | `{ "run_id", "status": "discarded" }` (inline) |
+| Read a Run's full detail (proposals / error / invocation params) | `GET /v1/daemon/compute/runs/{run_id}` | `RunDetail` |
+| List Runs (cursor-paginated; filters `world_id` / `module_id` / `status`) | `GET /v1/daemon/compute/runs` | `RunListResponse` (`items`, `has_more`, `next_cursor`) |
+| Clear history — delete terminal Runs for an owned World | `DELETE /v1/daemon/compute/runs?world_id=&status=` | `{ "deleted": number }` (inline) |
+| Read a World's timeline events (cursor-paginated; filters `branch_id` / `status` / `event_type`) | `GET /v1/daemon/worlds/{world_id}/timeline/events` | `ListTimelineEventsResponse` (`items`, `has_more`, `next_cursor`) |
+
+**Run lifecycle:** `running → succeeded | failed`; a succeeded Run stays
+**needs-review** until the author explicitly `Accept`s (→ `applied`) or
+`Discard`s (→ `discarded`). The direct lane **never auto-applies** — Accept is
+one atomic transaction that applies the Run's proposals (state deltas, new
+knowledge, timeline events together) and stamps **canon** `compute_result`
+events with `extensions.nexus.compute` provenance
+(`{"compute": {"module_id", "module_version", "run_id", "source_kind":
+"direct_invoke"}}`); see `compute-module-abi.md` §5.5 for the apply order.
+Failed and discarded Runs never produce Timeline events on the direct lane —
+the Timeline stays narrative truth, not an ops log.
+
+**Clear history (`DELETE`):** `world_id` is required (per-World scope — never
+a world-wide purge) and the optional `status` filter is limited to terminal
+states `applied | discarded | failed`; `running` and `succeeded` (needs-review)
+rows are never deleted. The response is the schema-less inline `{ "deleted":
+number }` count (trivial-shape precedent — no contract bump).
+
+**Error-code family (V1.147 compute lane)** — all errors use the canonical §3
+envelope:
+
+| HTTP | Code | Condition |
+|------|------|-----------|
+| 403 | `forbidden` | World not owned (all run routes + DELETE) |
+| 404 | `not_found` | Module or Run not found |
+| 409 | `conflict` | Run already `applied` / `discarded` (accept/discard) |
+| 422 | `invalid_input` | Input-validation family: ComputeInput build failures (no computable entries, referenced entry missing / cross-World), manifest/entry validation with per-entry detail (`details.invalid_entries`: entry id + reason), unknown or other-World branch, DELETE missing scope or non-terminal status, unknown `timeline_event_ids_to_accept` |
+| 422 | `invalid_state` | Accept on a Run not in `succeeded` |
+| 422 | `compute_fuel_exhausted` / `compute_wall_time_exceeded` / `compute_memory_cap_exceeded` / `compute_module_trapped` / `compute_module_error` | Sandbox / module failures — honest to the caller |
+| 500 | `internal` | Database / host / serialization failures |
+
+Sandbox, validation, and build failures persist the Run row as `failed` with
+the same error code — never a silent skip of invalid entries, never a
+misleading 500 (V1.147 P3 F2 reclassification).

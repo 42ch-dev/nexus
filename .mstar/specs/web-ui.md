@@ -1438,6 +1438,13 @@ The Canvas shell now hosts **four** peer surfaces: Strategy / Outline (Timeline-
 
 The Web UI is the primary home of the **Canvas** pillar (spatial steering surface, with Timeline-centric World building as the hero). The **Harness** pillar (orchestration/agent host/capability registry) is surfaced today as "Strategy/Preset" — the product rename to "Harness" is deferred (`DF-V1122-HARNESS-RENAME`), so V1.122 UI strings keep "Strategy". The **Computable** pillar (WASM reactivity) is backend-only in V1.122; compute-registry/canvas surfacing is deferred (`DF-V1122-COMPUTABLE-UI`, `DF-V1122-COMPUTE-ON-TIMELINE`). Pillar definitions: [`STRATEGY.md`](../../STRATEGY.md) + [`CONCEPTS.md`](../../CONCEPTS.md).
 
+> **V1.147 forward-pointer:** the Computable pillar is no longer backend-only —
+> V1.147 shipped **Run Studio** on the Modules surface (`DF-V1122-COMPUTABLE-UI`
+> closed) and **compute-on-Timeline** entry with Accept-landed **Compute result**
+> nodes (`DF-V1122-COMPUTE-ON-TIMELINE` closed; both tracker rows archived).
+> The direct lane routes: [`daemon-api-surface-conventions.md`](daemon-api-surface-conventions.md) §12.3.
+> Product lock: [`computable-author-behavior.md`](../iterations/v1.147/specs/computable-author-behavior.md).
+
 #### 29.18.3 Contract boundary
 
 `wire_contracts_changed: false`. P1 is additive frontend only (new `CanvasSurfaceKind = "timeline"` enum value + new Timeline adapter module under `apps/web/src/components/canvas/timeline-canvas/`); no `schemas/`, no codegen, no daemon Rust change, no `@42ch/nexus-contracts` version bump. Timeline reads `WorldKbGraphResponse` (V1.73) and writes through `kb.patch_entity` (V1.73) only — full architect-locked contract in [`timeline-canvas-architecture.md`](../iterations/v1.122/specs/timeline-canvas-architecture.md).

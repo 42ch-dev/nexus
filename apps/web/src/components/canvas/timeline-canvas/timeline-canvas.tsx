@@ -195,6 +195,8 @@ export function TimelineCanvas({ worldId }: TimelineCanvasProps) {
       // the pages it has; older events stay hidden until the cap is raised
       // (or the log is pruned). `simplify:` 500 is a deliberate ceiling for
       // V1.147; a virtualized canvas would lift it without UI churn.
+      // V1.147 P3 T2: the honest cap note (plan Global Constraints
+      // "500-cap honesty") renders from the same condition — see `isCapped`.
       if (import.meta.env.DEV) {
         console.warn(
           `[timeline] compute-event projection capped at ${TIMELINE_EVENTS_PROJECTION_CAP} ` +
@@ -205,6 +207,14 @@ export function TimelineCanvas({ worldId }: TimelineCanvasProps) {
     }
     void timelineEvents.fetchNextPage();
   }, [timelineEvents.hasNextPage, timelineEvents.fetchNextPage, eventsList.length, worldId]);
+
+  // 500-cap honesty (V1.147 P3 T2): when the projection hit the ceiling while
+  // more pages existed (`hasNextPage` stays true after the effect stops
+  // fetching), the canvas says so instead of silently dropping older events.
+  // A World with exactly 500 events and nothing more (`hasNextPage` false)
+  // shows no note — nothing is hidden.
+  const isProjectionCapped =
+    eventsList.length >= TIMELINE_EVENTS_PROJECTION_CAP && timelineEvents.hasNextPage;
 
   // Module display names for compute node provenance (module_id fallback
   // when the registry has not loaded the module — honest for preset-path
@@ -685,6 +695,22 @@ export function TimelineCanvas({ worldId }: TimelineCanvasProps) {
         >
           <Info className="mt-0.5 h-4 w-4 flex-shrink-0 text-gray-700" aria-hidden />
           <span>{t('timeline.orderingDisclaimer')}</span>
+        </div>
+      ) : null}
+
+      {isProjectionCapped ? (
+        <div
+          // 500-cap honesty (V1.147 P3 T2): same visible-note pattern as the
+          // ordering disclaimer — an honest statement that older compute
+          // events are not rendered, not a silent truncation.
+          role="note"
+          data-testid="timeline-compute-projection-cap-note"
+          className="flex items-start gap-2 rounded-card border border-gray-alpha-400 bg-background-100 px-3 py-2 text-copy-13 text-gray-700 shadow-elevation-2"
+        >
+          <Info className="mt-0.5 h-4 w-4 flex-shrink-0 text-gray-700" aria-hidden />
+          <span>
+            {t('timeline.computeProjectionCapNote', { count: TIMELINE_EVENTS_PROJECTION_CAP })}
+          </span>
         </div>
       ) : null}
 

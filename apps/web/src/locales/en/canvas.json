@@ -636,6 +636,7 @@
     "canvasAriaLabel": "World timeline canvas",
     "nleBandScrollAriaLabel": "World Timeline scrub area",
     "orderingDisclaimer": "Timeline order is inferred from available event data; not a canonical chronology.",
+    "computeProjectionCapNote": "Showing the first {{count}} compute events. Older events are not rendered.",
     "empty": {
       "title": "This World's timeline is empty",
       "description": "Events you add through World KB or chapter extraction will appear here."

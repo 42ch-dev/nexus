@@ -8,7 +8,7 @@
 | **Document class** | Master |
 | **Pillar (V1.122)** | **Computable** — this spec is the host-runtime contract for the [Computable](../../STRATEGY.md) pillar (the WASM layer that makes worlds *react*). Computable is a product pillar distinct from the `Compute (Capability)` mechanism ([`CONCEPTS.md`](../../CONCEPTS.md)); this crate is the host side of the [`compute-module-abi.md`](./compute-module-abi.md) contract. Pillar framing: [`pillar-framing.md`](../iterations/v1.122/specs/pillar-framing.md). |
 | **Scope** | `nexus-wasm-host` crate: wasmtime runtime, engine lifecycle, per-invocation sandbox, limits, wall-time watchdog, embedded module loading, user module discovery, error taxonomy, host function implementation |
-| **Last updated** | 2026-06-23 — V1.62 P2 |
+| **Last updated** | 2026-06-23 — V1.62 P2; 2026-08-01 — V1.147 added §2.3 direct-lane invocation note (no ABI change) |
 | **Related** | [compute-module-abi.md](./compute-module-abi.md), [orchestration-engine.md](./orchestration-engine.md) §8 (narrative.compute), [entity-scope-model.md](./entity-scope-model.md) §5.5.9, [`crates/nexus-wasm-host/AGENTS.md`](../../../crates/nexus-wasm-host/AGENTS.md) |
 
 This Master is normative for the `nexus-wasm-host` crate — the sandboxed
@@ -18,8 +18,10 @@ It consolidates the crate's `AGENTS.md`, the V1.61 compass grill decisions
 (Q1/Q6/Q10), and the source-level implementation details into a single durable
 reference.
 
-The `nexus-wasm-host` crate is the **runtime**; it does not wire itself into the
-daemon. The `narrative.compute` capability (orchestration) calls into it. Read
+The `nexus-wasm-host` crate is the **runtime**; it does not wire itself into
+the daemon. Three callers invoke it — the `narrative.compute` capability
+(orchestration), the `ComputablePort` spoke adapter, and, since V1.147, the
+direct Control Room lane (`compute_runs` handler — see §2.3). Read
 [compute-module-abi.md](./compute-module-abi.md) for the module-side contract
 that this crate implements on the host side.
 
@@ -78,6 +80,26 @@ The module cache is populated at daemon boot in two phases:
 Cache warmup failures are aggregated into a single `ComputeError::CacheWarmup`
 so a single bad module does not block the daemon. Individual module errors are
 logged at `warn!`.
+
+### 2.3 Invocation callers (V1.147)
+
+This host has three invocation callers, all exercising the same
+`WasmEngine::compute()` surface with the same per-invocation sandbox (§3):
+
+1. **`narrative.compute` capability** (orchestration / preset path) — invoked
+   inside a Harness session; may auto-apply output inline.
+2. **`ComputablePort` spoke adapter** — spoke protocol consumers; entry-scoped
+   `compute_sessions` rows, `settle`-flag apply control.
+3. **Direct Control Room lane** (V1.147) — the daemon `compute_runs` handler
+   makes the invocation surface HTTP-reachable (`POST /v1/daemon/compute/run`,
+   tier-2 protected). It adds a **Run / Accept / Discard** lifecycle at the
+   handler/DB layer — review-then-apply, never auto-apply; accepted Runs stamp
+   canon `compute_result` Timeline events with `extensions.nexus.compute`
+   provenance (`module_id`, `module_version`, `run_id`, `source_kind:
+   "direct_invoke"`). See `daemon-api-surface-conventions.md` §12.3.
+
+The host-ABI contract is identical for all three callers: no export, import,
+envelope, or sandbox change (see `compute-module-abi.md` §5.6).
 
 ---
 

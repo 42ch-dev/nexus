@@ -49,6 +49,7 @@ import { Select } from '@/components/ui/select';
 import {
   flattenPages,
   useAcceptRun,
+  useClearRuns,
   useComputeRun,
   useComputeRuns,
   useDiscardRun,
@@ -196,6 +197,15 @@ export function RunStudio({ module, initialWorldId, initialRunId, onRunOpen }: R
   const runCompute = useRunCompute();
   const acceptRun = useAcceptRun();
   const discardRun = useDiscardRun();
+  const clearRuns = useClearRuns();
+
+  // ── Clear history (V1.147 P3 T2) ─────────────────────────────────────────
+  // Server-backed `DELETE /runs?world_id=` (plan Clear-history lock): the
+  // daemon REQUIRES a World scope, so the affordance is gated on the World
+  // filter — no world-wide purge is possible. Terminal runs only
+  // (applied|discarded|failed); running / needs-review rows are kept.
+  const [clearTargetWorldId, setClearTargetWorldId] = useState<string | null>(null);
+  const clearScopeWorldId = runWorldFilter !== '' ? runWorldFilter : null;
 
   // ── Inspector state ────────────────────────────────────────────────────────
   // Fresh runs render from the POST response (carries the truncated flag);
@@ -282,6 +292,32 @@ export function RunStudio({ module, initialWorldId, initialRunId, onRunOpen }: R
         setLatestRun(null);
       },
     });
+  }
+
+  function handleClearConfirmed() {
+    if (!clearTargetWorldId) return;
+    const worldId = clearTargetWorldId;
+    setClearTargetWorldId(null);
+    clearRuns.mutate(
+      { worldId },
+      {
+        onSuccess: (res) => {
+          toast({ variant: 'success', title: t('run.clearToast', { count: res.deleted }) });
+          // A cleared (terminal) run open in the inspector no longer exists —
+          // close the inspector honestly; needs-review/running rows survive
+          // Clear and stay open.
+          if (
+            inspectorRun &&
+            (inspectorRun.status === 'applied' ||
+              inspectorRun.status === 'discarded' ||
+              inspectorRun.status === 'failed')
+          ) {
+            setInspectorRunId(null);
+            setLatestRun(null);
+          }
+        },
+      },
+    );
   }
 
   function openRun(runId: string) {
@@ -479,6 +515,26 @@ export function RunStudio({ module, initialWorldId, initialRunId, onRunOpen }: R
                 ))}
               </Select>
             </div>
+            {/* Clear history (V1.147 P3 T2) — server-backed DELETE. The
+                daemon REQUIRES `world_id`, so the button is gated on the
+                World filter (never a world-wide purge); running / needs-review
+                rows are always kept. */}
+            <div className="flex items-end">
+              <Button
+                type="button"
+                variant="secondary"
+                size="small"
+                onClick={() => {
+                  if (clearScopeWorldId) setClearTargetWorldId(clearScopeWorldId);
+                }}
+                disabled={clearScopeWorldId === null || clearRuns.isPending}
+                title={clearScopeWorldId === null ? t('run.clearDisabledHint') : undefined}
+                aria-label={t('run.clearHistory')}
+                data-testid="run-runs-clear"
+              >
+                {t('run.clearHistory')}
+              </Button>
+            </div>
           </div>
         </div>
 
@@ -517,6 +573,15 @@ export function RunStudio({ module, initialWorldId, initialRunId, onRunOpen }: R
         open={discardTargetId !== null}
         onCancel={() => setDiscardTargetId(null)}
         onConfirm={handleDiscardConfirmed}
+      />
+
+      <ClearHistoryDialog
+        worldId={clearTargetWorldId}
+        worldTitle={clearTargetWorldId ? (worldTitleById.get(clearTargetWorldId) ?? clearTargetWorldId) : undefined}
+        open={clearTargetWorldId !== null}
+        pending={clearRuns.isPending}
+        onCancel={() => setClearTargetWorldId(null)}
+        onConfirm={handleClearConfirmed}
       />
     </div>
   );
@@ -647,6 +712,57 @@ function DiscardRunDialog({
             </Button>
             <Button type="button" variant="primary" size="small" onClick={onConfirm}>
               {t('run.discardConfirmButton')}
+            </Button>
+          </div>
+        </DialogContent>
+      )}
+    </Dialog>
+  );
+}
+
+/**
+ * Destructive Clear-history confirmation (V1.147 P3 T2, behavior spec §4
+ * Retain / clear). The daemon deletes terminal runs (applied|discarded|
+ * failed) for the selected World; running / needs-review rows are kept. The
+ * confirm names the World and the permanent nature of the delete — Applied
+ * runs are included with the stronger confirm copy per §4.
+ */
+function ClearHistoryDialog({
+  worldId,
+  worldTitle,
+  open,
+  pending,
+  onCancel,
+  onConfirm,
+}: {
+  worldId: string | null;
+  worldTitle: string | undefined;
+  open: boolean;
+  pending: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const { t } = useTranslation('modules');
+  return (
+    <Dialog open={open} onOpenChange={(next) => !next && onCancel()}>
+      {open && (
+        <DialogContent
+          title={t('run.clearConfirmTitle')}
+          description={t('run.clearConfirmDescription', { world: worldTitle ?? worldId })}
+        >
+          <p className="text-copy-14 text-gray-900">{t('run.clearConfirmWarning')}</p>
+          <div className="mt-4 flex justify-end gap-2">
+            <Button type="button" variant="secondary" size="small" onClick={onCancel}>
+              {t('run.cancel')}
+            </Button>
+            <Button
+              type="button"
+              variant="primary"
+              size="small"
+              onClick={onConfirm}
+              disabled={pending}
+            >
+              {t('run.clearConfirmButton')}
             </Button>
           </div>
         </DialogContent>

@@ -354,6 +354,25 @@ describe('TimelineCanvas compute-on-Timeline (V1.147 P2 T3)', () => {
     await waitFor(() => expect(state.eventsFetchCount).toBeGreaterThanOrEqual(2));
   });
 
+  it('shows an honest cap note when the compute-event projection hits the 500 ceiling (V1.147 P3 T2)', async () => {
+    // 520 events → pages 1–5 fetch exactly 500; page 5 still reports
+    // `has_more`, so the projection is capped and the canvas must say so
+    // instead of silently dropping the older events.
+    const events = Array.from({ length: 520 }, (_, i) => ({
+      ...COMPUTE_EVENT,
+      id: `evt_cap_${i}`,
+      title: `Cap event #${i + 1}`,
+    }));
+    renderTimelineApp({ initialEvents: events });
+
+    await waitFor(
+      () =>
+        expect(screen.getByTestId('timeline-compute-projection-cap-note')).toBeInTheDocument(),
+      { timeout: 10_000 },
+    );
+    expect(screen.getByText(/first 500 compute events/i)).toBeInTheDocument();
+  });
+
   it('Run Module entry opens the shared Run Studio with the World pre-filled', async () => {
     const user = userEvent.setup();
     renderTimelineApp();

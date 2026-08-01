@@ -112,6 +112,8 @@ import type {
 
 import { NexusClientError, type TransportErrorKind } from './errors';
 import type {
+  ClearRunsQuery,
+  ClearRunsResponse,
   DaemonHealth,
   DiscardRunResponse,
   ListRunsQuery,
@@ -521,6 +523,9 @@ export class BrowserClient implements NexusClient {
   }
   getRun(runId: string): Promise<RunDetail> {
     return this.get<RunDetail>(`/v1/daemon/compute/runs/${encodeURIComponent(runId)}`);
+  }
+  clearRuns(query: ClearRunsQuery): Promise<ClearRunsResponse> {
+    return this.delete<ClearRunsResponse>('/v1/daemon/compute/runs', query);
   }
 
   // ── World timeline events (V1.147 P2) ─────────────────────────────────────

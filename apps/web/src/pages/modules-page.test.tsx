@@ -320,6 +320,8 @@ function runStudioJourney(
     worldsError?: boolean;
     /** `GET /worlds/:id/kb/graph` fails with the canonical error envelope. */
     kbGraphError?: boolean;
+    /** `DELETE /runs` fails with the canonical error envelope (Clear error). */
+    clearError?: boolean;
   } = {},
 ) {
   const state = {
@@ -329,6 +331,8 @@ function runStudioJourney(
     failedError: null as null | { code: string; message: string },
     acceptCalls: 0,
     discardCalls: 0,
+    deleteCalls: 0,
+    lastDeleteUrl: null as string | null,
   };
 
   const ERROR_500 = () =>
@@ -444,6 +448,29 @@ function runStudioJourney(
         r.run_id === runId ? { ...r, status: 'discarded', updated_at: '2026-07-31T02:00:00Z' } : r,
       );
       return HttpResponse.json({ run_id: runId, status: 'discarded' });
+    }),
+    // V1.147 P3 T2 — Clear history. Mirrors the daemon contract: `world_id`
+    // required, terminal states only (`applied|discarded|failed`), returns
+    // `{ deleted }`.
+    http.delete('/v1/daemon/compute/runs', ({ request }) => {
+      state.deleteCalls += 1;
+      state.lastDeleteUrl = request.url;
+      if (over.clearError) {
+        return HttpResponse.json(
+          { success: false, error: { code: 'internal', message: 'boom' } },
+          { status: 500 },
+        );
+      }
+      const url = new URL(request.url);
+      const worldId = url.searchParams.get('world_id');
+      const status = url.searchParams.get('status');
+      const isTerminal = (s: RunSummary['status']) =>
+        s === 'applied' || s === 'discarded' || s === 'failed';
+      const toDelete = state.runsStore.filter(
+        (r) => r.world_id === worldId && isTerminal(r.status) && (!status || r.status === status),
+      );
+      state.runsStore = state.runsStore.filter((r) => !toDelete.includes(r));
+      return HttpResponse.json({ deleted: toDelete.length });
     }),
     http.get('/v1/daemon/compute/runs/:runId', ({ params }) => {
       const runId = String(params.runId);
@@ -699,6 +726,75 @@ describe('ModulesPage Run Studio (V1.147 P1 T3)', () => {
     expect(screen.getByText('暂无运行')).toBeInTheDocument();
     // World label appears on the selector and the Runs table column header.
     expect((await screen.findAllByText('世界')).length).toBeGreaterThan(0);
+  });
+
+  // ── V1.147 P3 T2 — Clear history (server-backed DELETE) ──────────────────
+
+  /** Terminal + needs-review seed rows for the Clear journeys. */
+  const CLEAR_SEED_RUNS: RunSummary[] = [
+    { ...RUN_9, run_id: 'run_clear_applied', status: 'applied', created_at: '2026-07-31T03:00:00Z' },
+    { ...RUN_9, run_id: 'run_clear_discarded', status: 'discarded', created_at: '2026-07-30T03:00:00Z' },
+    { ...RUN_9, run_id: 'run_clear_failed', status: 'failed', created_at: '2026-07-29T03:00:00Z' },
+    { ...RUN_9, run_id: 'run_keep_review', status: 'succeeded', created_at: '2026-07-28T03:00:00Z' },
+  ];
+
+  it('clears terminal runs for the chosen World after confirmation (list refresh + toast)', async () => {
+    const user = userEvent.setup();
+    const { state, handlers } = runStudioJourney({ seedRuns: CLEAR_SEED_RUNS });
+    useHandlers(...handlers);
+
+    await openRunStudio(user);
+    await screen.findByTestId('runs-table-row-run_clear_applied');
+
+    // Scope gate: without a World filter the button is disabled (world_id
+    // required by the daemon — no silent world-wide purge).
+    const clearButton = screen.getByTestId('run-runs-clear');
+    expect(clearButton).toBeDisabled();
+
+    // Choose the World scope, then Clear.
+    await user.selectOptions(screen.getByTestId('run-runs-world-filter'), 'w1');
+    await waitFor(() => expect(screen.getByTestId('run-runs-clear')).toBeEnabled());
+    await user.click(screen.getByTestId('run-runs-clear'));
+    await screen.findByRole('heading', { name: 'Clear history for this World?' });
+
+    // Cancelling keeps every row.
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(state.deleteCalls).toBe(0);
+    expect(screen.getByTestId('runs-table-row-run_clear_applied')).toBeInTheDocument();
+
+    // Confirmed Clear → DELETE with world scope (no status filter), toast,
+    // list refresh: terminal rows gone, needs-review row kept.
+    await user.click(screen.getByTestId('run-runs-clear'));
+    await screen.findByRole('heading', { name: 'Clear history for this World?' });
+    await user.click(screen.getByRole('button', { name: 'Clear history' }));
+    expect(await screen.findByText('Cleared 3 runs')).toBeInTheDocument();
+    await waitFor(() => expect(state.deleteCalls).toBe(1));
+    expect(state.lastDeleteUrl).toContain('world_id=w1');
+    expect(state.lastDeleteUrl).not.toContain('status=');
+    await waitFor(() => {
+      expect(screen.queryByTestId('runs-table-row-run_clear_applied')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('runs-table-row-run_clear_discarded')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('runs-table-row-run_clear_failed')).not.toBeInTheDocument();
+    });
+    expect(screen.getByTestId('runs-table-row-run_keep_review')).toBeInTheDocument();
+  });
+
+  it('surfaces an honest error toast when Clear fails and keeps the list intact', async () => {
+    const user = userEvent.setup();
+    const { state, handlers } = runStudioJourney({ seedRuns: CLEAR_SEED_RUNS, clearError: true });
+    useHandlers(...handlers);
+
+    await openRunStudio(user);
+    await screen.findByTestId('runs-table-row-run_clear_applied');
+    await user.selectOptions(screen.getByTestId('run-runs-world-filter'), 'w1');
+    await user.click(await screen.findByTestId('run-runs-clear'));
+    await screen.findByRole('heading', { name: 'Clear history for this World?' });
+    await user.click(screen.getByRole('button', { name: 'Clear history' }));
+
+    expect(await screen.findByText('Could not clear runs')).toBeInTheDocument();
+    await waitFor(() => expect(state.deleteCalls).toBe(1));
+    // No rows were removed (the mutation failed).
+    expect(screen.getByTestId('runs-table-row-run_clear_applied')).toBeInTheDocument();
   });
 });
 

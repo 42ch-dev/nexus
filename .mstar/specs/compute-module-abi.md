@@ -8,7 +8,7 @@
 | **Document class** | Master |
 | **Pillar (V1.122)** | **Computable** — this spec is the module-side ABI contract for the [Computable](../../STRATEGY.md) pillar (the WASM layer that makes worlds *react*). Computable is a product pillar distinct from the `Compute (Capability)` mechanism ([`CONCEPTS.md`](../../CONCEPTS.md)). Pillar framing: [`pillar-framing.md`](../iterations/v1.122/specs/pillar-framing.md). |
 | **Scope** | V1 envelope ABI: `ComputeInput` / `ComputeOutput` wire contracts, module exports table, host import ABI, marshalling convention, `manifest.json` contract, sandbox cross-ref, versioning policy |
-| **Last updated** | 2026-06-23 — V1.62 Shipped; 2026-07-13 — V1.115 P2 clarified wire vs runtime-only split in §7.6 (no normative change) |
+| **Last updated** | 2026-06-23 — V1.62 Shipped; 2026-07-13 — V1.115 P2 clarified wire vs runtime-only split in §7.6 (no normative change); 2026-08-01 — V1.147 added §5.6 direct-lane invocation note (no ABI change) |
 | **Related** | [wasm-host.md](./wasm-host.md), [schemas-directory-layout.md](./schemas-directory-layout.md) §3.5, [orchestration-engine.md](./orchestration-engine.md) §8 (narrative.compute), [entity-scope-model.md](./entity-scope-model.md) §5.5.9 |
 
 This Master is normative for the V1 compute ABI — the interface contract between the
@@ -222,6 +222,30 @@ The host applies the output in this order:
 
 This ordering ensures that timeline events can reference freshly upserted
 KnowledgeEntries, and that the battle report reflects the post-delta state.
+
+### 5.6 Direct-lane invocation surface (V1.147 — no ABI change)
+
+The V1 envelope ABI in this spec is **unchanged**: the module-side contract
+(exports table, host imports, marshalling, `manifest.json`, sandbox limits) is
+identical no matter which path invokes the module. V1.147 adds a third caller
+of the same `WasmEngine::compute()` surface — the **direct Control Room lane**,
+which makes the invocation surface HTTP-reachable for the first time:
+
+- `POST /v1/daemon/compute/run` invokes an installed module against an owned
+  World (module id + manifest-driven `invocation` params; the host builds the
+  `key_blocks` snapshot server-side).
+- Runs follow a **Run / Accept / Discard** lifecycle at the handler/DB layer
+  (see `daemon-api-surface-conventions.md` §12.3): the direct lane **never
+  auto-applies**; an accepted Run commits its `ComputeOutput` atomically and
+  stamps **canon** `compute_result` Timeline events with
+  `extensions.nexus.compute` provenance (`module_id`, `module_version`,
+  `run_id`, `source_kind: "direct_invoke"`).
+- Failed / discarded Runs never produce Timeline events on the direct lane.
+
+The preset orchestration path (`narrative.compute`) is unchanged and still
+applies inline inside a Harness session. Module authors do not need to do
+anything new — a module that works under `narrative.compute` works in the
+direct lane unchanged.
 
 ---
 

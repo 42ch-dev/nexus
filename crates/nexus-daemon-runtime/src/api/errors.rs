@@ -213,6 +213,16 @@ pub enum NexusApiError {
     /// concurrent-write version mismatch only.
     #[error("World KB validation failed")]
     WorldKbValidationFailed { details: serde_json::Value },
+
+    /// Compute input manifest validation failed (HTTP 422).
+    ///
+    /// V1.147 P3 F2: an input entry that violates the module's declared
+    /// manifest schema poisons the whole run — the run fails (row persisted
+    /// `failed`) and the response carries per-entry failure detail
+    /// (`details.invalid_entries`: entry id + reason) so the caller can act,
+    /// instead of a misleading 500. `error_code()` surfaces `invalid_input`.
+    #[error("compute input validation failed")]
+    InputValidationFailed { details: serde_json::Value },
 }
 
 impl NexusApiError {
@@ -235,6 +245,7 @@ impl NexusApiError {
             | Self::StrategyValidationFailed { .. }
             | Self::OutlineValidationFailed { .. }
             | Self::WorldKbValidationFailed { .. } => StatusCode::UNPROCESSABLE_ENTITY,
+            Self::InputValidationFailed { .. } => StatusCode::UNPROCESSABLE_ENTITY,
             Self::BadRequest { code, .. } => {
                 match code.as_str() {
                     "policy_blocked" => StatusCode::FORBIDDEN,
@@ -328,6 +339,7 @@ impl NexusApiError {
             Self::OutlineValidationFailed { .. } => "outline_validation_failed",
             Self::WorldKbConflict { .. } => "world_kb_conflict",
             Self::WorldKbValidationFailed { .. } => "world_kb_validation_failed",
+            Self::InputValidationFailed { .. } => "invalid_input",
             Self::SessionExpired => "session_expired",
             Self::Conflict(_) => "conflict",
             Self::Locked { .. } => "locked",
@@ -356,6 +368,7 @@ impl NexusApiError {
             | Self::StrategyValidationFailed { details }
             | Self::OutlineValidationFailed { details }
             | Self::WorldKbValidationFailed { details } => Some(details.clone()),
+            Self::InputValidationFailed { details } => Some(details.clone()),
             Self::StrategyConflict {
                 current_revision,
                 node_id,
@@ -1019,5 +1032,29 @@ mod tests {
         };
         assert_eq!(err.status_code(), StatusCode::UNPROCESSABLE_ENTITY);
         assert_eq!(err.error_code(), "invalid_state");
+    }
+
+    // ── V1.147 P3 T1 (F2): input-validation failures → 422 + per-entry detail
+    #[test]
+    fn input_validation_failed_maps_to_422_with_invalid_input_code() {
+        let err = NexusApiError::InputValidationFailed {
+            details: serde_json::json!({
+                "invalid_entries": [
+                    {"entry_id": "kb_broken", "reason": "key_blocks[0].body.attributes: missing required field: base_atk"}
+                ]
+            }),
+        };
+        assert_eq!(err.status_code(), StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(err.error_code(), "invalid_input");
+        let body = err.to_response_body();
+        let entries = &body.error.details.expect("details must be present")["invalid_entries"];
+        assert_eq!(entries[0]["entry_id"], "kb_broken");
+        assert!(
+            entries[0]["reason"]
+                .as_str()
+                .unwrap()
+                .contains("missing required field"),
+            "reason must survive the envelope: {entries}"
+        );
     }
 }

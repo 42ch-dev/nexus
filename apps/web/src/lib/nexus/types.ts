@@ -170,6 +170,30 @@ export interface DiscardRunResponse {
 }
 
 /**
+ * Query params for `DELETE /v1/daemon/compute/runs` (V1.147 P3 T2 — Clear
+ * history). `world_id` is required: Clear is per-World scope (the daemon 422s
+ * without it) and the caller must own the World. `status` narrows Clear to one
+ * terminal state (`applied|discarded|failed`) — `running` and `succeeded`
+ * (needs-review) rows are never deleted.
+ */
+export interface ClearRunsQuery {
+  /** World whose terminal runs are cleared (must be owned). */
+  world_id: string;
+  /** Optional terminal-state filter; absent → all terminal runs of the World. */
+  status?: Extract<RunSummary['status'], 'applied' | 'discarded' | 'failed'>;
+}
+
+/**
+ * Response for `DELETE /v1/daemon/compute/runs` (V1.147 P3 T2). App-side
+ * type: the daemon returns an inline `{"deleted": n}` object; the plan picked
+ * schema-less inline (P1 `DiscardRunResponse` precedent for trivial shapes).
+ */
+export interface ClearRunsResponse {
+  /** Number of terminal runs deleted (applied|discarded|failed). */
+  deleted: number;
+}
+
+/**
  * Query params for `GET /v1/daemon/worlds/:world_id/timeline/events`
  * (V1.147 P2). App-side type: no generated schema for this query object; the
  * fields mirror the daemon handler's `TimelineEventsParams` (branch_id /
@@ -446,6 +470,12 @@ export interface NexusClient {
   listRuns(query?: ListRunsQuery): Promise<RunListResponse>;
   /** `GET /v1/daemon/compute/runs/{run_id}` — full detail incl. proposals/error. */
   getRun(runId: string): Promise<RunDetail>;
+  /**
+   * `DELETE /v1/daemon/compute/runs` — Clear history (V1.147 P3 T2): deletes
+   * terminal runs (`applied|discarded|failed`) for an owned World. Running and
+   * succeeded (needs-review) rows are never deleted.
+   */
+  clearRuns(query: ClearRunsQuery): Promise<ClearRunsResponse>;
 
   // ── World timeline events (V1.147 P2) ───────────────────────────────────
   /**
