@@ -244,8 +244,8 @@ impl NexusApiError {
             Self::PresetGatesFailed { .. }
             | Self::StrategyValidationFailed { .. }
             | Self::OutlineValidationFailed { .. }
-            | Self::WorldKbValidationFailed { .. } => StatusCode::UNPROCESSABLE_ENTITY,
-            Self::InputValidationFailed { .. } => StatusCode::UNPROCESSABLE_ENTITY,
+            | Self::WorldKbValidationFailed { .. }
+            | Self::InputValidationFailed { .. } => StatusCode::UNPROCESSABLE_ENTITY,
             Self::BadRequest { code, .. } => {
                 match code.as_str() {
                     "policy_blocked" => StatusCode::FORBIDDEN,
@@ -298,7 +298,7 @@ impl NexusApiError {
     pub fn error_code(&self) -> &str {
         match self {
             Self::Uninitialized => "uninitialized",
-            Self::InvalidInput { .. } => "invalid_input",
+            Self::InvalidInput { .. } | Self::InputValidationFailed { .. } => "invalid_input",
             Self::Internal { .. } => "internal",
             Self::AuthRequired => "auth_required",
             Self::NotFound(_) => "not_found",
@@ -339,7 +339,6 @@ impl NexusApiError {
             Self::OutlineValidationFailed { .. } => "outline_validation_failed",
             Self::WorldKbConflict { .. } => "world_kb_conflict",
             Self::WorldKbValidationFailed { .. } => "world_kb_validation_failed",
-            Self::InputValidationFailed { .. } => "invalid_input",
             Self::SessionExpired => "session_expired",
             Self::Conflict(_) => "conflict",
             Self::Locked { .. } => "locked",
@@ -367,8 +366,8 @@ impl NexusApiError {
             Self::PresetGatesFailed { details }
             | Self::StrategyValidationFailed { details }
             | Self::OutlineValidationFailed { details }
-            | Self::WorldKbValidationFailed { details } => Some(details.clone()),
-            Self::InputValidationFailed { details } => Some(details.clone()),
+            | Self::WorldKbValidationFailed { details }
+            | Self::InputValidationFailed { details } => Some(details.clone()),
             Self::StrategyConflict {
                 current_revision,
                 node_id,
