@@ -13,10 +13,15 @@
  * back/forward) with a different `?world=` must switch the World selector
  * while the studio stays mounted; an unchanged prop must never clobber a
  * World the author picked manually.
+ *
+ * Round 3 (Issue 3) pins invocation-state parity: a deep-link World switch
+ * must reset the guided values + Advanced JSON exactly like the manual World
+ * switch (a Run would otherwise submit the previous World's params against
+ * the new World), while an unchanged prop must not clear the author's input.
  */
 import { http, HttpResponse } from 'msw';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { screen, waitFor } from '@testing-library/react';
+import { fireEvent, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { ModuleDetail } from '@42ch/nexus-contracts';
 
@@ -38,6 +43,19 @@ const MODULE: ModuleDetail = {
   author: 'Nexus Team',
   // No `required` fields → the Run button only needs a World selection.
   schemas: { invocation: { type: 'object', properties: {}, required: [] } },
+};
+
+/** Module with one guided string field — lets tests populate invocation
+ * values and pin the form-reset parity (PR #194 round 3). */
+const MODULE_WITH_FIELD: ModuleDetail = {
+  ...MODULE,
+  schemas: {
+    invocation: {
+      type: 'object',
+      properties: { difficulty: { type: 'string' } },
+      required: ['difficulty'],
+    },
+  },
 };
 
 /** Distinct inspector content per deep-linked run id. */
@@ -81,10 +99,10 @@ function deepLinkHandlers(worlds: unknown[] = []) {
   ];
 }
 
-function renderStudio(initialRunId?: string, initialWorldId?: string) {
+function renderStudio(initialRunId?: string, initialWorldId?: string, module: ModuleDetail = MODULE) {
   return renderInApp(
     <RunStudio
-      module={MODULE}
+      module={module}
       initialRunId={initialRunId}
       initialWorldId={initialWorldId}
     />,
@@ -241,5 +259,68 @@ describe('RunStudio deep-link `?world=` re-sync (V1.147 PR #194)', () => {
     view.rerender(<RunStudio module={MODULE} initialRunId="run-a" initialWorldId={undefined} />);
 
     await waitFor(() => expect(screen.getByTestId('run-studio-world')).toHaveValue(''));
+  });
+
+  it('clears invocation form state when the deep-linked world changes (round-3 parity with the manual switch)', async () => {
+    const user = userEvent.setup();
+    useHandlers(
+      ...worldSyncHandlers([
+        { world_id: 'w1', title: 'World One' },
+        { world_id: 'w2', title: 'World Two' },
+      ]),
+    );
+
+    const view = renderStudio(undefined, 'w1', MODULE_WITH_FIELD);
+    await waitFor(() => expect(screen.getByTestId('run-studio-world')).toHaveValue('w1'));
+
+    // Populate the guided form AND the Advanced JSON escape hatch.
+    const field = await screen.findByTestId('run-form-field-difficulty');
+    await user.type(field, 'hard');
+    expect(field).toHaveValue('hard');
+
+    await user.click(screen.getByText('Advanced: edit invocation JSON'));
+    const jsonArea = screen.getByTestId('run-studio-json-textarea');
+    fireEvent.change(jsonArea, { target: { value: '{"difficulty":"hard"}' } });
+    expect(jsonArea).toHaveValue('{"difficulty":"hard"}');
+    expect(screen.getByTestId('run-studio-run')).toBeEnabled();
+
+    // Same route element, new `?world=` value — the invocation state must
+    // reset exactly like the manual World switch (the old World's params must
+    // never be submitted against the new World).
+    view.rerender(<RunStudio module={MODULE_WITH_FIELD} initialWorldId="w2" />);
+
+    await waitFor(() => expect(screen.getByTestId('run-studio-world')).toHaveValue('w2'));
+    const clearedField = await screen.findByTestId('run-form-field-difficulty');
+    expect(clearedField).toHaveValue('');
+    expect(screen.getByTestId('run-studio-json-textarea')).toHaveValue('{}');
+    // `jsonDirty` is reset too: enablement falls back to the guided required
+    // gate, which is unsatisfied after the reset.
+    expect(screen.getByTestId('run-studio-run')).toBeDisabled();
+  });
+
+  it('does not clobber populated invocation values when an unchanged deep-link prop re-renders (round-3 parity)', async () => {
+    const user = userEvent.setup();
+    useHandlers(
+      ...worldSyncHandlers([
+        { world_id: 'w1', title: 'World One' },
+        { world_id: 'w2', title: 'World Two' },
+      ]),
+    );
+
+    const view = renderStudio(undefined, 'w1', MODULE_WITH_FIELD);
+    await waitFor(() => expect(screen.getByTestId('run-studio-world')).toHaveValue('w1'));
+
+    // Manual World switch, then populate the guided form for the new World.
+    await user.selectOptions(screen.getByTestId('run-studio-world'), 'w2');
+    const field = await screen.findByTestId('run-form-field-difficulty');
+    await user.type(field, 'hard');
+    expect(field).toHaveValue('hard');
+
+    // The parent re-renders with the SAME `?world=w1` value (runs-list
+    // refresh etc.) — the sync effect must neither force the selector back
+    // nor clear the author's values.
+    view.rerender(<RunStudio module={MODULE_WITH_FIELD} initialWorldId="w1" />);
+    expect(screen.getByTestId('run-studio-world')).toHaveValue('w2');
+    expect(screen.getByTestId('run-form-field-difficulty')).toHaveValue('hard');
   });
 });

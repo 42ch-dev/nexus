@@ -120,11 +120,19 @@ export function RunStudio({ module, initialWorldId, initialRunId, onRunOpen }: R
   // selector (and `?world=` removal resets it to the empty placeholder),
   // while an unchanged prop never clobbers a World the author picked manually
   // (mirror of the round-1 `initialRunId` re-sync pattern).
+  //
+  // Round 3 — a deep-link switch must also reset the invocation authoring
+  // state exactly like the manual `handleWorldChange`: otherwise the entity
+  // IDs / params filled for the previous World would be submitted against the
+  // new World. Inspector parity is intentional — the manual path does not
+  // touch the run inspector, so this does not either (`initialRunId` re-sync
+  // owns run-inspector changes).
   const lastWorldSeedRef = useRef(initialWorldId);
   useEffect(() => {
     if (initialWorldId !== lastWorldSeedRef.current) {
       lastWorldSeedRef.current = initialWorldId;
       setWorldId(initialWorldId ?? '');
+      resetInvocation();
     }
   }, [initialWorldId]);
 
@@ -171,12 +179,21 @@ export function RunStudio({ module, initialWorldId, initialRunId, onRunOpen }: R
   const setField = (name: string, value: unknown) =>
     setValues((prev) => ({ ...prev, [name]: value }));
 
-  function handleWorldChange(next: string) {
-    setWorldId(next);
+  /** Reset the invocation authoring state (guided values + Advanced JSON) to
+   * pristine — shared by the manual World switch and the deep-link `?world=`
+   * re-sync (PR #194 round 3) so a Run can never submit one World's params
+   * against another World. The run inspector is intentionally untouched
+   * (manual-path parity; `initialRunId` re-sync owns inspector changes). */
+  function resetInvocation() {
     setValues({});
     setJsonText('{}');
     setJsonDirty(false);
     setJsonError(null);
+  }
+
+  function handleWorldChange(next: string) {
+    setWorldId(next);
+    resetInvocation();
   }
 
   // ── Entity picker entries (KnowledgeEntry list from the World KB graph) ────
