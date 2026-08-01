@@ -220,6 +220,20 @@ export function RunStudio({ module, initialWorldId, initialRunId, onRunOpen }: R
     initialRunId ?? null,
   );
   const [discardTargetId, setDiscardTargetId] = useState<string | null>(null);
+
+  // V1.147 PR #194 — deep-link `?run=` re-sync. The Settings Modules section
+  // stays mounted when a second compute-node "Open Run" navigates to the same
+  // route (`/settings/modules?module=…&run=…` — search params only), so the
+  // `useState(initialRunId ?? null)` seed alone would keep the stale run open.
+  // Keyed on the prop VALUE: a new `initialRunId` switches the inspector;
+  // removing `?run=` (module switch deletes the param) closes it. The effect
+  // never fires from a render alone, so the POST-success fresh-run inspector
+  // (`latestRun` after `setInspectorRunId(null)`) is not clobbered while the
+  // prop stays unchanged.
+  useEffect(() => {
+    setInspectorRunId(initialRunId ?? null);
+    setLatestRun(null);
+  }, [initialRunId]);
   const runDetail = useComputeRun(inspectorRunId ?? undefined);
   const inspectorRun = inspectorRunId ? runDetail.data : latestRun;
 
