@@ -3862,6 +3862,7 @@ dependencies = [
  "dialoguer",
  "dirs",
  "hex",
+ "libp2p",
  "nexus-acp-host",
  "nexus-cloud-sync",
  "nexus-contracts",

@@ -39,6 +39,11 @@ nexus-spoke-adapter = { path = "../../crates/nexus-spoke-adapter" }
 # default build (and `daemon start`) must stay libp2p-free, so this dep is
 # `optional` and only `connect start` links it. `mdns` is never enabled.
 spoke-connect = { workspace = true, optional = true }
+# libp2p identity/PeerId/Multiaddr types for the `connect start` CLI (key
+# generation + protobuf key persistence + allowlist/listen parsing). Same
+# 0.56 pin as spoke-connect's transport; optional + feature-gated with
+# `connect-host` so the default graph stays libp2p-free.
+libp2p = { workspace = true, optional = true }
 clap = { workspace = true }
 clap_complete = { workspace = true }
 tokio = { workspace = true }
@@ -89,4 +94,4 @@ serial_test = "3"
 # but only `nexus42 connect start` opens a Connect listener; `daemon start`
 # never does. `spoke-connect/mdns` is deliberately NOT enabled.
 [features]
-connect-host = ["dep:spoke-connect"]
+connect-host = ["dep:spoke-connect", "dep:libp2p"]

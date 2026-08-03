@@ -12,6 +12,11 @@ pub mod acp;
 pub mod acp_trace;
 #[deny(clippy::unwrap_used)]
 pub mod acp_worker;
+// V1.148 P3 N-C0 (DF-72): Connect Host facade — compiled only with the
+// opt-in `connect-host` feature (`nexus42 connect start`).
+#[cfg(feature = "connect-host")]
+#[deny(clippy::unwrap_used)]
+pub mod connect;
 #[deny(clippy::unwrap_used)]
 pub mod creator;
 #[deny(clippy::unwrap_used)]

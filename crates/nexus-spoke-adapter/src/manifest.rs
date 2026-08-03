@@ -25,6 +25,16 @@ use serde_json::{json, Map, Value};
 use std::collections::HashMap;
 use std::num::NonZeroU64;
 
+/// The `connect_hello` wire type used by `spoke_connect::ConnectConfig.local_manifest`.
+///
+/// Codegen inlines `$ref` types, so this is field-identical to the data-type
+/// [`HostCapabilityManifest`] but a **distinct generated type** (per
+/// spoke-connect crate docs) — the JSON round-trip in [`to_connect_hello`] is
+/// the conversion. Re-exported here so Connect Host consumers spell the type
+/// through the single spoke-adapter import boundary instead of adding a
+/// direct `spoke-schemas` dependency.
+pub use spoke_schemas::connect::connect_hello::HostCapabilityManifest as ConnectHelloManifest;
+
 /// Wire schema version of this manifest (`NonZeroU64`, matches every spoke
 /// 0.8.2 fixture and the previous static manifest).
 pub const MANIFEST_SCHEMA_VERSION: NonZeroU64 = NonZeroU64::MIN;
@@ -94,6 +104,52 @@ fn reject_invalid_host_id(e: impl std::fmt::Display) -> SpokeReject {
         code: SpokeRejectCode::InvalidInput,
         message: format!("invalid host_id for HostCapabilityManifest: {e}"),
         details: None,
+    }
+}
+
+/// Convert the data-type manifest into the field-identical `connect_hello`
+/// wire type via a JSON round-trip (the connect variant has no `PartialEq`,
+/// so equality is asserted at the JSON level).
+///
+/// # Errors
+/// Returns `InternalError` when the round-trip fails. The two types are
+/// schema-identical today, so this only fires if a future schema edit
+/// desynchronizes them — the locked wire family must stay in lockstep.
+#[must_use]
+pub fn to_connect_hello(manifest: &HostCapabilityManifest) -> SpokeResult<ConnectHelloManifest> {
+    let value = match serde_json::to_value(manifest) {
+        Ok(value) => value,
+        Err(e) => {
+            return SpokeResult::Reject(SpokeReject {
+                code: SpokeRejectCode::InternalError,
+                message: format!("data manifest serialization failed: {e}"),
+                details: None,
+            });
+        }
+    };
+    match serde_json::from_value(value) {
+        Ok(manifest) => SpokeResult::Ok(manifest),
+        Err(e) => SpokeResult::Reject(SpokeReject {
+            code: SpokeRejectCode::InternalError,
+            message: format!("connect_hello manifest round-trip failed: {e}"),
+            details: None,
+        }),
+    }
+}
+
+/// One-call N-C0 builder for the Connect Host's `ConnectConfig.local_manifest`.
+///
+/// Same single-builder SSOT as [`build_local_host_manifest`]; the connect
+/// wire type is the JSON round-trip of the data type.
+///
+/// # Errors
+/// `InvalidInput` when `host_id` is empty; `InternalError` on a wire-type
+/// round-trip failure (schema lockstep drift).
+#[must_use]
+pub fn build_connect_hello_manifest(host_id: &str) -> SpokeResult<ConnectHelloManifest> {
+    match build_local_host_manifest(host_id) {
+        SpokeResult::Ok(manifest) => to_connect_hello(&manifest),
+        SpokeResult::Reject(reject) => SpokeResult::Reject(reject),
     }
 }
 
@@ -215,6 +271,55 @@ mod tests {
         assert!(
             matches!(result, SpokeResult::Reject(r) if r.code == SpokeRejectCode::InvalidInput),
             "empty host_id must be rejected (schema minLength 1)"
+        );
+    }
+
+    #[test]
+    fn connect_hello_manifest_round_trips_through_the_wire_type() {
+        // The Connect Host's `ConnectConfig.local_manifest` must carry the
+        // `connect_hello::HostCapabilityManifest` wire type. The conversion
+        // is a JSON round-trip of the data type (both generated from the
+        // same schema; equality is asserted at the JSON level).
+        let data = match build_local_host_manifest("test-device-uuid-0000") {
+            SpokeResult::Ok(m) => m,
+            SpokeResult::Reject(r) => panic!("builder rejected: {r:?}"),
+        };
+        let hello = match build_connect_hello_manifest("test-device-uuid-0000") {
+            SpokeResult::Ok(m) => m,
+            SpokeResult::Reject(r) => panic!("connect hello builder rejected: {r:?}"),
+        };
+        let data_json = serde_json::to_value(&data).expect("data manifest serializes");
+        let hello_json = serde_json::to_value(&hello).expect("hello manifest serializes");
+        assert_eq!(
+            hello_json, data_json,
+            "connect_hello manifest must be field-identical to the data manifest"
+        );
+        assert_eq!(
+            hello_json["host_id"],
+            serde_json::json!("test-device-uuid-0000")
+        );
+        assert_eq!(hello_json["schema_version"], serde_json::json!(1));
+        assert_eq!(
+            hello_json["extensions"]["nexus"]["connect_host_slice"],
+            serde_json::json!("n-c0")
+        );
+
+        // The round-tripped value deserializes back into the data type
+        // without loss (both directions are lossless).
+        let back: HostCapabilityManifest =
+            serde_json::from_value(hello_json).expect("wire type deserializes as data type");
+        assert_eq!(
+            serde_json::to_value(back).expect("back serializes"),
+            data_json
+        );
+
+        // Rejected host_id propagates through the connect builder unchanged.
+        assert!(
+            matches!(
+                build_connect_hello_manifest(""),
+                SpokeResult::Reject(r) if r.code == SpokeRejectCode::InvalidInput
+            ),
+            "connect builder must reject empty host_id like the data builder"
         );
     }
 }

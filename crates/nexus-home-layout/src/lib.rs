@@ -223,6 +223,26 @@ pub fn device_id_path(home: &Path) -> PathBuf {
     nexus_root_from_home(home).join("device-id")
 }
 
+/// `$HOME/.nexus42/connect/` — Connect Host (DF-72 N-C0) state directory.
+#[must_use]
+pub fn connect_dir(home: &Path) -> PathBuf {
+    nexus_root_from_home(home).join("connect")
+}
+
+/// `$HOME/.nexus42/connect/identity.key` — Connect Host Ed25519 identity key
+/// (libp2p protobuf encoding; created once with 0600).
+#[must_use]
+pub fn connect_identity_key_path(home: &Path) -> PathBuf {
+    connect_dir(home).join("identity.key")
+}
+
+/// `$HOME/.nexus42/connect/allowlist.json` — Connect Host peer allowlist
+/// (`{ "peer_ids": ["12D3…", …] }`; missing file ⇒ empty ⇒ fail-closed).
+#[must_use]
+pub fn connect_allowlist_path(home: &Path) -> PathBuf {
+    connect_dir(home).join("allowlist.json")
+}
+
 /// `$HOME/.nexus42/creators/<creator_id>/SOUL.md` (`ADR-014`, `ADR-016` D1).
 ///
 /// # Defense-in-depth
@@ -646,6 +666,23 @@ mod tests {
         assert_eq!(
             device_id_path(&home),
             PathBuf::from("/fake/home/.nexus42/device-id")
+        );
+    }
+
+    #[test]
+    fn connect_path_layout() {
+        let home = PathBuf::from("/fake/home");
+        assert_eq!(
+            connect_dir(&home),
+            PathBuf::from("/fake/home/.nexus42/connect")
+        );
+        assert_eq!(
+            connect_identity_key_path(&home),
+            PathBuf::from("/fake/home/.nexus42/connect/identity.key")
+        );
+        assert_eq!(
+            connect_allowlist_path(&home),
+            PathBuf::from("/fake/home/.nexus42/connect/allowlist.json")
         );
     }
 
