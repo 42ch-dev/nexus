@@ -34,6 +34,16 @@ nexus-knowledge = { path = "../../crates/nexus-knowledge" }
 # V1.145 P2 — MCA WorldKB read routes through the spoke-adapter boundary
 # (`SpokeBackedKbStore`), injected at the `assemble_moment` wiring site.
 nexus-spoke-adapter = { path = "../../crates/nexus-spoke-adapter" }
+# V1.148 P3 N-C0 (DF-72): Connect Host facade, opt-in via feature
+# `connect-host` below. spoke-connect pulls libp2p 0.56 transitively — the
+# default build (and `daemon start`) must stay libp2p-free, so this dep is
+# `optional` and only `connect start` links it. `mdns` is never enabled.
+spoke-connect = { workspace = true, optional = true }
+# libp2p identity/PeerId/Multiaddr types for the `connect start` CLI (key
+# generation + protobuf key persistence + allowlist/listen parsing). Same
+# 0.56 pin as spoke-connect's transport; optional + feature-gated with
+# `connect-host` so the default graph stays libp2p-free.
+libp2p = { workspace = true, optional = true }
 clap = { workspace = true }
 clap_complete = { workspace = true }
 tokio = { workspace = true }
@@ -77,3 +87,11 @@ wiremock = "0.6"
 # Without it, the summary_config_from_env_* tests race on NEXUS_CONTEXT_MAX_FILE_SIZE
 # under cargo's default parallel runner and intermittently fail on CI.
 serial_test = "3"
+
+# V1.148 P3 N-C0 (DF-72): opt-in Connect Host surface. Feature OFF by default
+# — the default daemon graph stays libp2p-free (`cargo tree -p nexus42 -i
+# libp2p` empty). With the feature ON, `spoke-connect` links into the binary,
+# but only `nexus42 connect start` opens a Connect listener; `daemon start`
+# never does. `spoke-connect/mdns` is deliberately NOT enabled.
+[features]
+connect-host = ["dep:spoke-connect", "dep:libp2p"]

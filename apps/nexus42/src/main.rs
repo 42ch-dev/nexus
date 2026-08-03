@@ -89,6 +89,8 @@ async fn async_main(cli: Cli) -> Result<()> {
         Some(Commands::Daemon { command }) => {
             nexus42::commands::daemon::run(command, &config).await
         }
+        #[cfg(feature = "connect-host")]
+        Some(Commands::Connect { command }) => nexus42::commands::connect::run(command).await,
         Some(Commands::Sync { command }) => {
             eprintln!(
                 "Warning: `nexus42 sync` is deprecated. Use `nexus42 platform sync` instead. \

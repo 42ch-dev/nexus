@@ -12,3 +12,12 @@ workspace = true
 
 [lib]
 path = "src/lib.rs"
+
+[dependencies]
+# V1.148 P3 N-C0: device-id get/create moved here from nexus-cloud-sync so the
+# path SSOT (this crate owns `device_id_path`) also owns the value read/write.
+uuid = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"

@@ -124,6 +124,18 @@ regress = "0.10"
 # types) will reference these via `spoke-schemas.workspace = true`.
 spoke-schemas = "=0.8.2"
 spoke-operations = "=0.8.2"
+# V1.148 P3 N-C0 (DF-72): spoke-connect =0.8.2 — Connect Host facade (signed
+# hello, allowlist, capability-token gate). Opt-in ONLY: libp2p 0.56 is a
+# transitive dep, so this entry is consumed behind feature `connect-host` on
+# `apps/nexus42` and the DEFAULT daemon graph stays libp2p-free. The `mdns`
+# feature of spoke-connect must NOT be enabled (explicit peering only).
+spoke-connect = "=0.8.2"
+# V1.148 P3 N-C0: libp2p 0.56 — identity/PeerId/Multiaddr types for the
+# `nexus42 connect` CLI (ed25519 keypair + protobuf key serialization only).
+# Pinned exactly to spoke-connect's transport so the feature-on graph shares
+# ONE libp2p build. Consumed behind feature `connect-host` on `apps/nexus42`;
+# the DEFAULT daemon graph stays libp2p-free.
+libp2p = { version = "=0.56.0", features = ["ed25519"] }
 
 # --- Dev profile: keep local `target/` smaller ---
 # Default `debug = true` (full) inflates deps/rlibs and test binaries. Line-limited

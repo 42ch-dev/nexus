@@ -54,6 +54,13 @@ pub mod conversion;
 pub mod extensions;
 pub mod ops;
 
+/// The HostCapabilityManifest single builder SSOT (DF-72 N-C0, §4.1).
+///
+/// [`manifest::build_local_host_manifest`] is shared by
+/// `HostManifestPort::get_host_capability_manifest` and the Connect Host's
+/// `ConnectConfig.local_manifest`.
+pub mod manifest;
+
 /// Narrative Knowledge Pack build/parse helpers.
 ///
 /// Implements the pack dialect defined in the spoke handbook
