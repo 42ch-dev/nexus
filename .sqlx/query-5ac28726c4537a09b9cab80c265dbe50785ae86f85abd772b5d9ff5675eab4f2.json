@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO spoke_rules\n           (rule_id, world_id, schema_version, canonical_name, kind, statement,\n            description, target_entry_types_json, severity_hint, status,\n            source_anchor_json, extensions_json, created_at, updated_at)\n           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 14
+    },
+    "nullable": []
+  },
+  "hash": "5ac28726c4537a09b9cab80c265dbe50785ae86f85abd772b5d9ff5675eab4f2"
+}
