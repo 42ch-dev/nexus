@@ -1,0 +1,96 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/daemon-api/check/check-response.schema.json",
+  "schema_version": 1,
+  "title": "NexusDaemonCheckResponse",
+  "description": "Response for POST /v1/daemon/check (V1.148 P2). Mirrors the spoke CheckResponse wire contract 1:1: the success branch carries the checker Finding(s) produced by spoke orchestrate_check (persisted via FindingPort.put_findings — persisting findings is the check outcome, not an 'apply fix'); the error branch carries a structured error envelope. HTTP 200 may carry either branch (findings XOR error); spoke Reject results are surfaced as 4xx/5xx daemon error-envelope responses instead of the error branch (handler module docs — nearest compute/kb pattern).",
+  "type": "object",
+  "oneOf": [
+    {
+      "type": "object",
+      "title": "NexusDaemonCheckResponseSuccess",
+      "description": "Success: checker output findings.",
+      "required": ["findings"],
+      "additionalProperties": false,
+      "properties": {
+        "findings": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "description": "Spoke Finding wire shape (mirrored inline — monorepo codegen dereferences only in-repo $refs, so the spoke data/finding.schema.json shape is replicated field-for-field; no parallel runtime type, the handler round-trips nexus_spoke_adapter::Finding through JSON).",
+            "required": ["finding_id", "schema_version", "title", "description", "severity", "status"],
+            "additionalProperties": false,
+            "properties": {
+              "finding_id": { "type": "string", "description": "Stable finding id." },
+              "schema_version": { "type": "integer", "minimum": 1, "description": "Wire schema version (integer >= 1)." },
+              "title": { "type": "string", "description": "Short finding title." },
+              "description": { "type": "string", "description": "Finding detail text." },
+              "severity": { "type": "string", "description": "Open string. Core vocabulary (documented, not enforced): info, warning, error." },
+              "status": { "type": "string", "description": "Open string. Core vocabulary (documented, not enforced): open, resolved, dismissed." },
+              "kind": { "type": "string", "description": "Optional checker kind or category." },
+              "target_entry_id": { "type": "string", "description": "Optional KnowledgeEntry the finding targets." },
+              "source_anchor": {
+                "type": "object",
+                "description": "Spoke SourceAnchor wire shape (mirrored inline).",
+                "required": ["source_id", "schema_version"],
+                "additionalProperties": false,
+                "properties": {
+                  "source_id": { "type": "string" },
+                  "schema_version": { "type": "integer", "minimum": 1 },
+                  "label": { "type": "string" },
+                  "mime_type": { "type": "string" },
+                  "span": {
+                    "type": "object",
+                    "required": ["start", "end"],
+                    "additionalProperties": false,
+                    "properties": {
+                      "start": { "type": "number" },
+                      "end": { "type": "number" }
+                    }
+                  },
+                  "extensions": { "type": "object", "additionalProperties": true }
+                }
+              },
+              "suggested_fix": { "type": "string", "description": "Optional suggested remediation text." },
+              "text_position": { "type": "object", "additionalProperties": true, "description": "Optional position hint within source text." },
+              "created_at": { "type": "string", "format": "date-time", "description": "RFC 3339 UTC datetime string." },
+              "updated_at": { "type": "string", "format": "date-time", "description": "RFC 3339 UTC datetime string." },
+              "extensions": { "type": "object", "additionalProperties": true, "description": "Product namespace bag keyed by product-chosen ids matching ^[a-z][a-z0-9_-]*$. Values are opaque JSON objects." }
+            }
+          }
+        },
+        "extensions": {
+          "type": "object",
+          "additionalProperties": true,
+          "description": "Product namespace bag keyed by product-chosen ids matching ^[a-z][a-z0-9_-]*$. Values are opaque JSON objects."
+        }
+      }
+    },
+    {
+      "type": "object",
+      "title": "NexusDaemonCheckResponseError",
+      "description": "Wire error envelope (spoke CheckResponse error branch; unused by the current handler — Reject maps to 4xx/5xx daemon error responses — kept for wire parity).",
+      "required": ["error"],
+      "additionalProperties": false,
+      "properties": {
+        "error": {
+          "type": "object",
+          "description": "Spoke ErrorEnvelope wire shape (mirrored inline).",
+          "required": ["code", "message"],
+          "additionalProperties": false,
+          "properties": {
+            "code": { "type": "string", "description": "Machine-readable error code." },
+            "message": { "type": "string", "description": "Human-readable error message." },
+            "details": { "type": "object", "additionalProperties": true, "description": "Optional structured error context." },
+            "extensions": { "type": "object", "additionalProperties": true, "description": "Product namespace bag keyed by product-chosen ids matching ^[a-z][a-z0-9_-]*$. Values are opaque JSON objects." }
+          }
+        },
+        "extensions": {
+          "type": "object",
+          "additionalProperties": true,
+          "description": "Product namespace bag keyed by product-chosen ids matching ^[a-z][a-z0-9_-]*$. Values are opaque JSON objects."
+        }
+      }
+    }
+  ]
+}

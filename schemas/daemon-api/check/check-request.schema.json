@@ -1,0 +1,51 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/daemon-api/check/check-request.schema.json",
+  "schema_version": 1,
+  "title": "NexusDaemonCheckRequest",
+  "description": "POST /v1/daemon/check — run spoke orchestrate_check over an owned World (V1.148 P2).",
+  "type": "object",
+  "required": ["world_id", "scope"],
+  "additionalProperties": false,
+  "properties": {
+    "world_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "World ownership key; must match active creator ownership (is_world_owned)."
+    },
+    "scope": {
+      "type": "object",
+      "description": "Spoke Scope selector (scope_id should equal world_id). Mirrors spoke ops CheckRequest.scope fields needed by codegen.",
+      "required": ["scope_id"],
+      "properties": {
+        "scope_id": { "type": "string" },
+        "entry_ids": { "type": "array", "items": { "type": "string" } },
+        "entry_types": { "type": "array", "items": { "type": "string" } },
+        "timeline_event_ids": { "type": "array", "items": { "type": "string" } },
+        "timeline_scale": { "type": "string" },
+        "fork_id": { "type": "string" },
+        "source_id": { "type": "string" },
+        "extensions": { "type": "object", "additionalProperties": true }
+      },
+      "additionalProperties": false
+    },
+    "rule_refs": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Opaque rule ids resolved via RuleQueryPort (P1)."
+    },
+    "rules": {
+      "type": "array",
+      "items": { "type": "object", "additionalProperties": true },
+      "description": "Optional embedded spoke Rule objects (portable interchange). Prefer $ref to spoke rule schema if monorepo codegen supports external $ref; else opaque object validated when mapped to spoke Rule."
+    },
+    "checker_kinds": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "extensions": {
+      "type": "object",
+      "additionalProperties": true
+    }
+  }
+}
