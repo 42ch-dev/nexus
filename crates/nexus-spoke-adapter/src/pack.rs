@@ -19,8 +19,11 @@
 //!
 //! ## Triad ADR (spoke-extension-modules.md)
 //!
-//! - `modules.pack` is the **only** home for pack-level metadata (cross-product
-//!   functional dialect → `modules.*`, NOT `extensions.*`).
+//! - Pack-level catalog metadata (`title` / `version` / `creator`) is
+//!   **product transport envelope** material, not a `modules.*` dialect on
+//!   KnowledgeEntry or AssemblePacket (spoke 0.7.0 pack-catalog demote).
+//!   Nexus keeps it on its own pack envelope root under the product-local
+//!   key `modules.pack`; it is never written into KE atoms' `modules`.
 //! - Unknown `modules.*` keys and unknown `extensions.*` namespaces on atoms
 //!   **MUST round-trip verbatim** — see [`ParsedPack::extra_modules`] and the
 //!   round-trip test.
