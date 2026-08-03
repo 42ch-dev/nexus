@@ -6,6 +6,12 @@
 
 use std::path::{Path, PathBuf};
 
+/// Device ID generation and persistence (`~/.nexus42/device-id`, UUID v4).
+///
+/// V1.148 P3 N-C0: moved here from `nexus-cloud-sync` so the path-layout SSOT
+/// also owns the value; `nexus-cloud-sync::device_id` re-exports it.
+pub mod device_id;
+
 const NEXUS_DIR: &str = ".nexus42";
 
 /// Create the `~/.nexus42/` system directory layout and config skeleton if they
