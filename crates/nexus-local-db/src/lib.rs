@@ -34,6 +34,7 @@ pub mod reference_source;
 pub mod runtime_lock;
 pub mod soul_meta;
 pub mod soul_narrative;
+pub mod spoke_rules;
 pub mod work_chapters;
 pub mod works;
 pub mod workspace_session;
@@ -180,6 +181,9 @@ pub use force_gates_audit::{
     insert_force_gates_audit, list_force_gates_audit, prune_force_gates_audit_before,
     ForceGatesAuditParams, ForceGatesAuditRow,
 };
+
+// Re-export spoke_rules types (V1.148 P1)
+pub use spoke_rules::{get_spoke_rules_by_ids, insert_spoke_rule_for_test, SpokeRuleRow};
 
 // Re-export runtime_lock types (V1.42 P0)
 pub use runtime_lock::{
