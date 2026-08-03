@@ -5,6 +5,21 @@ All notable changes to the `@42ch/nexus-contracts` package will be documented in
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.28.0] - 2026-08-04
+
+### Added
+
+- **Daemon check route wire contracts (V1.148 P2):** added 2 additive schemas under `daemon-api/check/` for the spoke `orchestrate_check` Daemon HTTP surface (`POST /v1/daemon/check` — closes V1.146 Non-Goal 5a):
+  - `CheckRequest` — `world_id` (ownership key) + spoke-mirrored `scope` selector (`scope_id` must equal `world_id`), `rule_refs`, embedded `rules`, `checker_kinds`, `extensions`
+  - `CheckResponse` — mirrors the spoke `CheckResponse` oneOf 1:1: success branch `{ findings: [...] }` (spoke Finding wire shape, mirrored inline) XOR error branch `{ error: ErrorEnvelope }`; HTTP 200 may carry either branch, spoke Reject results surface as 4xx/5xx daemon error-envelope responses
+
+### Consumer Impact
+
+- **Additive only** — no existing schemas modified; generated types for existing consumers are unchanged.
+- New Rust types: `nexus_contracts::generated::daemon_api::check::{CheckRequest, CheckRequestScope, CheckResponse, NexusDaemonCheckResponseSuccessFindingsItem, ...}`.
+- New TypeScript types: `@42ch/nexus-contracts` exports the same shapes under `daemon-api/check/check-request.ts` and `daemon-api/check/check-response.ts`.
+- **Daemon-only route:** `check` is **not** a Connect op — Connect (N-C0) refuses `check`; the route lives on the Daemon API tier2 surface (`require_api_key` + `require_active_creator`).
+
 ## [0.27.0] - 2026-08-01
 
 ### Added

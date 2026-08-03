@@ -185,6 +185,22 @@ fn build_schema_map() -> Vec<SchemaEntry> {
             Strict,
             CertFingerprintResponse
         ),
+        // ── daemon-api/check/ (V1.148 P2 — orchestrate_check daemon route) ──
+        // CheckRequest is a plain object → Strict. CheckResponse is registered
+        // for inventory completeness but is skipped by the drift loop: it is a
+        // oneOf-root schema (mirrors spoke CheckResponse) with no top-level
+        // `properties`, and the `properties.is_empty()` guard skips it before
+        // any field comparison (oneOf-aware drift checking is future work).
+        entry!(
+            "schemas/daemon-api/check/check-request.schema.json",
+            Strict,
+            CheckRequest
+        ),
+        entry!(
+            "schemas/daemon-api/check/check-response.schema.json",
+            Strict,
+            CheckResponse
+        ),
         // ── daemon-api/compute/ ───────────────────────────────────────────
         // V1.62 reorganization: compute envelopes moved here from compute/.
         // V1.61 WASM compute ABI envelopes (compass Q3/Q8). Only the top-level

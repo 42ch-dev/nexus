@@ -80,6 +80,8 @@ pub const SCHEMA_VERSIONS: &[(&str, u32)] = &[
     ("WorldKbRelationshipProjection", 1),
     ("WorldKbSourceAnchorProjection", 1),
     ("WorldKbValidationError", 1),
+    ("CheckRequest", 1),
+    ("CheckResponse", 1),
     ("ErrorResponse", 1),
     ("ComputeInput", 1),
     ("ComputeOutput", 1),
