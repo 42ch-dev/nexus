@@ -27,28 +27,41 @@ pub fn load_or_create_identity(nexus_home: &Path) -> Result<Keypair> {
         std::fs::create_dir_all(parent)?;
     }
 
+    // Serialize before touching the filesystem so a serialization failure can
+    // never leave a partial identity file behind.
+    let keypair = Keypair::generate_ed25519();
+    let encoded = keypair
+        .to_protobuf_encoding()
+        .map_err(|e| CliError::Config(format!("identity key serialization failed: {e}")))?;
+
     // `create_new` eliminates the TOCTOU race between the existence check and
     // the write (same pattern as the device-id file in `nexus-home-layout`).
-    match std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(&path)
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    // W-1: apply the owner-only mode at creation time (atomic create-with-mode)
+    // so the key is never observable at a permissive mode — not even if the
+    // process crashes between open and write (the old open-then-chmod window).
+    // umask can only tighten the bits, never loosen them. On non-unix, the
+    // platform default applies (best available).
+    #[cfg(unix)]
     {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    match options.open(&path) {
         Ok(mut file) => {
-            let keypair = Keypair::generate_ed25519();
-            let encoded = keypair
-                .to_protobuf_encoding()
-                .map_err(|e| CliError::Config(format!("identity key serialization failed: {e}")))?;
-            file.write_all(&encoded)?;
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::PermissionsExt;
-                std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
+            if let Err(e) = file.write_all(&encoded) {
+                // S-1: never leave a partial key file behind — a corrupt key
+                // would block every later start (the reload path rejects it).
+                let _ = std::fs::remove_file(&path);
+                return Err(CliError::Io(e));
             }
             Ok(keypair)
         }
         Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
             let bytes = std::fs::read(&path)?;
+            #[cfg(unix)]
+            harden_identity_key_permissions(&path)?;
             Keypair::from_protobuf_encoding(&bytes).map_err(|e| {
                 CliError::Config(format!(
                     "invalid Connect identity key at {}: {e}",
@@ -58,6 +71,23 @@ pub fn load_or_create_identity(nexus_home: &Path) -> Result<Keypair> {
         }
         Err(e) => Err(CliError::Io(e)),
     }
+}
+
+/// Ensure the identity key file is owner-only (0600) on the reload path.
+///
+/// Files created before the atomic `mode(0o600)` fix (open-then-chmod) may
+/// still sit at a permissive mode if a previous process crashed between the
+/// two calls. Hardening is preferred over erroring: it self-heals existing
+/// installations instead of refusing to start over a permissions issue.
+#[cfg(unix)]
+fn harden_identity_key_permissions(path: &Path) -> Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+
+    let mode = std::fs::metadata(path)?.permissions().mode();
+    if (mode & 0o777) > 0o600 {
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -103,6 +133,38 @@ mod tests {
             mode & 0o777,
             0o600,
             "identity key must be owner-only (0600)"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn reload_hardens_permissive_key_mode() {
+        use std::os::unix::fs::PermissionsExt;
+        let temp = tempfile::tempdir().expect("tempdir");
+        let home = temp.path();
+        let path = nexus_home_layout::connect_identity_key_path(home);
+
+        // Simulate a key left behind by the old open-then-chmod path (crash
+        // between open and chmod ⇒ file stuck at 0644).
+        std::fs::create_dir_all(path.parent().expect("parent")).expect("mkdir");
+        let keypair = Keypair::generate_ed25519();
+        std::fs::write(&path, keypair.to_protobuf_encoding().expect("encode")).expect("write key");
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).expect("chmod");
+
+        let reloaded = load_or_create_identity(home).expect("reload");
+        assert_eq!(
+            reloaded.public().to_peer_id(),
+            keypair.public().to_peer_id(),
+            "reload must still yield the persisted keypair"
+        );
+        let mode = std::fs::metadata(&path)
+            .expect("metadata")
+            .permissions()
+            .mode();
+        assert_eq!(
+            mode & 0o777,
+            0o600,
+            "reload must harden a permissive key mode to 0600"
         );
     }
 

@@ -13,7 +13,12 @@ use serde::Deserialize;
 use std::path::Path;
 
 /// On-disk allowlist shape (`allowlist.json`).
+///
+/// `deny_unknown_fields` turns typos like `peerIds` / `peer-id` into a hard
+/// config error instead of silently producing an empty (fail-closed)
+/// allowlist that confuses the operator.
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct AllowlistFile {
     peer_ids: Vec<String>,
 }
@@ -110,6 +115,19 @@ mod tests {
         std::fs::write(&path, "{ not json").expect("write");
 
         let err = load(temp.path(), &[]).expect_err("malformed allowlist rejected");
+        assert!(matches!(err, CliError::Config(_)), "got {err:?}");
+    }
+
+    #[test]
+    fn unknown_allowlist_fields_are_rejected() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let path = nexus_home_layout::connect_allowlist_path(temp.path());
+        std::fs::create_dir_all(path.parent().expect("parent")).expect("mkdir");
+        // `peerIds` is a common typo for `peer_ids`; accepting it would
+        // silently produce an empty (fail-closed) allowlist.
+        std::fs::write(&path, r#"{ "peer_ids": [], "peerIds": ["12D3KooWxxxx"] }"#).expect("write");
+
+        let err = load(temp.path(), &[]).expect_err("unknown field rejected");
         assert!(matches!(err, CliError::Config(_)), "got {err:?}");
     }
 
