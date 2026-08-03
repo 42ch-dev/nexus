@@ -200,7 +200,11 @@ async fn list_rules_does_not_fabricate_from_work_side_rule_sources() {
     // phantom id. `NexusAdapter` holds only a `SqlitePool` — it has no
     // filesystem path — so this documents that the boundary cannot observe
     // Work-side rule findings at all.
-    let work_agents_md = dir.path().join("Works").join("rule-test-work").join("AGENTS.md");
+    let work_agents_md = dir
+        .path()
+        .join("Works")
+        .join("rule-test-work")
+        .join("AGENTS.md");
     std::fs::create_dir_all(work_agents_md.parent().unwrap()).unwrap();
     std::fs::write(
         &work_agents_md,
@@ -236,15 +240,16 @@ async fn list_rules_does_not_fabricate_from_work_side_rule_sources() {
 // ── 4. Duplicate refs (documented contract) ──────────────────────────────
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn list_rules_duplicate_refs_yield_one_row_each() {
+async fn list_rules_duplicate_refs_are_deduplicated() {
     let (pool, _dir) = fresh_pool().await;
     seed_rule(&pool, "rule_a1", "wld_a").await;
     seed_rule(&pool, "rule_a2", "wld_a").await;
 
     let adapter = NexusAdapter::new(pool);
     // SQLite `IN (subquery)` membership semantics dedup: the
-    // `get_spoke_rules_by_ids` doc contract ("duplicate ids in the input
-    // yield one row each") holds end-to-end through the production port.
+    // `get_spoke_rules_by_ids` doc contract ("duplicate ids in the input are
+    // deduplicated; one row per distinct `rule_id`") holds end-to-end through
+    // the production port.
     let rules = unwrap_ok(
         adapter.list_rules(&[
             "rule_a1".to_string(),

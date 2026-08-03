@@ -47,7 +47,8 @@ pub struct SpokeRuleRow {
 /// Fetch the rows whose `rule_id` is in `rule_ids`.
 ///
 /// Unknown ids are silently omitted (the caller resolves a subset — spoke
-/// `list_rules` semantics); duplicate ids in the input yield one row each.
+/// `list_rules` semantics); duplicate ids in the input are deduplicated; one
+/// row per distinct `rule_id`.
 /// Returns `Ok(vec![])` for an empty `rule_ids` without touching the DB.
 ///
 /// # Errors
