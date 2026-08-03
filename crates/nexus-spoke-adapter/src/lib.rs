@@ -60,8 +60,10 @@ pub mod ops;
 /// `domain-profile-narrative-knowledge-pack.md` — a portable lore bundle
 /// that ships ordered [`KnowledgeEntry`]s, [`Relation`]s, and optional
 /// [`SourceAnchor`]s between narrative hosts, with pack-level metadata
-/// under `modules.pack` (triad ADR: `spoke-extension-modules.md` —
-/// `modules.pack` is the ONLY home for pack metadata; never `extensions.*`).
+/// on the product transport envelope (spoke 0.7.0 pack-catalog demote:
+/// catalog is envelope material, never `modules.*` on KnowledgeEntry /
+/// AssemblePacket). Nexus keeps it at the pack envelope root under the
+/// product-local key `modules.pack`; it is not written into KE atoms.
 ///
 /// See the [module-level documentation](pack) for the full pack shape,
 /// validation rules, and round-trip guarantees.
