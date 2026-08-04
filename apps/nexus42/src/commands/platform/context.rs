@@ -579,11 +579,17 @@ pub async fn run_assemble_moment(
     emit_packet: bool,
     packet_out: Option<&str>,
 ) -> Result<Option<MomentContext>> {
-    // V1.146 P4 T3: gate — emit-packet requires activation to be ON.
-    let activation_on = std::env::var("NEXUS_MCA_LORE_ACTIVATION").as_deref() == Ok("1");
-    if emit_packet && !activation_on {
+    // V1.149 P0 T2: activation is DEFAULT-ON. The env off-switch
+    // (NEXUS_MCA_LORE_ACTIVATION=off|0|false, case-insensitive) restores
+    // V1.146 flag-off semantics; any other value (incl. unset, empty, =1)
+    // keeps activation on (spec §6).
+    let activation_off = std::env::var("NEXUS_MCA_LORE_ACTIVATION")
+        .map(|v| matches!(v.trim().to_ascii_lowercase().as_str(), "off" | "0" | "false"))
+        .unwrap_or(false);
+    if emit_packet && activation_off {
         return Err(crate::errors::CliError::Other(
-            "--emit-packet requires lore activation. Set NEXUS_MCA_LORE_ACTIVATION=1 to enable activation."
+            "--emit-packet requires lore activation. Activation is on by default; \
+             unset the NEXUS_MCA_LORE_ACTIVATION off-switch (off/0/false) to keep it enabled."
                 .to_string(),
         ));
     }
@@ -640,10 +646,10 @@ pub async fn run_assemble_moment(
         request = request.with_knowledge_limit(limit);
     }
 
-    // V1.146 P4 T2: activation flag from env (MCA lib stays env-agnostic).
-    // Set activation_enabled when NEXUS_MCA_LORE_ACTIVATION is exactly "1".
-    if activation_on {
-        request = request.with_activation_enabled(true);
+    // V1.149 P0 T2: `MomentRequest` defaults to activation ON; only the
+    // off-switch needs an explicit call here.
+    if activation_off {
+        request = request.with_activation_enabled(false);
     }
 
     // Call assemble_moment with persistent stores

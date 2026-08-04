@@ -45,6 +45,9 @@ nexus-home-layout = { path = "../nexus-home-layout" }
 dirs = { workspace = true }
 sqlx.workspace = true
 tokio.workspace = true
+# V1.149 P0 T1 — `modules.activation` `match: "regex"` flavor (architect lock Q6;
+# workspace pin, same as `nexus-contracts` generated code).
+regress = { workspace = true }
 
 [dev-dependencies]
 spoke-schemas.workspace = true
