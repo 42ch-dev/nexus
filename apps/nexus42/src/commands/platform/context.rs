@@ -12,7 +12,8 @@ use clap::Subcommand;
 use nexus_contracts::local::domain::RuntimeMode;
 use nexus_moment_context_assembly::cloud_stage::{AssembleResponse, AssemblyRuntimeMode};
 use nexus_moment_context_assembly::{
-    assemble_moment_with_directive, MomentContext, MomentRequest, Stage0Assembly, TwoStageAssembly,
+    assemble_moment_with_directive, GenerationStage, MomentContext, MomentRequest, Stage0Assembly,
+    TwoStageAssembly,
 };
 
 use crate::domain::{DegradationGuard, DomainRuntimeMode};
@@ -162,6 +163,15 @@ pub enum ContextCommand {
         /// Write inspector packet JSON to file instead of stdout
         #[arg(long)]
         packet_out: Option<String>,
+
+        /// Generation stage for spec §4 slot gating (V1.150 P2):
+        /// `intake|research|produce|review|persist|work_maintenance|system_maintenance|unspecified`.
+        /// Default (absent) = unspecified = all slots on (current behavior,
+        /// inspector path). The preset runner / schedule threads the
+        /// executing stage through this flag (see
+        /// `.mstar/iterations/v1.150/guides/generation-trigger-wiring.md`).
+        #[arg(long)]
+        stage: Option<String>,
     },
 }
 
@@ -207,6 +217,7 @@ pub async fn run(cmd: ContextCommand, config: &CliConfig) -> Result<()> {
             knowledge_limit,
             emit_packet,
             packet_out,
+            stage,
         } => {
             let maybe_ctx = run_assemble_moment(
                 config,
@@ -224,6 +235,7 @@ pub async fn run(cmd: ContextCommand, config: &CliConfig) -> Result<()> {
                 Some(knowledge_limit),
                 emit_packet,
                 packet_out.as_deref(),
+                stage.as_deref(),
             )
             .await?;
 
@@ -613,6 +625,7 @@ pub async fn run_assemble_moment(
     knowledge_limit: Option<usize>,
     emit_packet: bool,
     packet_out: Option<&str>,
+    stage: Option<&str>,
 ) -> Result<Option<MomentContext>> {
     // V1.149 P0 T2: activation is DEFAULT-ON. The env off-switch
     // (NEXUS_MCA_LORE_ACTIVATION=off|0|false, case-insensitive) restores
@@ -712,6 +725,23 @@ pub async fn run_assemble_moment(
     // off-switch needs an explicit call here.
     if activation_off {
         request = request.with_activation_enabled(false);
+    }
+
+    // V1.150 P2 (DF-75, spec §4 / Q4 lock): generation-stage wire. The
+    // preset runner / schedule path drives assembly through this CLI entry
+    // and threads the stage it is executing via `--stage` (see
+    // `guides/generation-trigger-wiring.md`). Unknown values degrade to
+    // unspecified (all slots on) with a warning — an unknown stage must
+    // never fail or panic the inspector path (T3 safe default).
+    if let Some(stage_str) = stage {
+        if let Some(stage) = GenerationStage::parse(stage_str) {
+            request = request.with_generation_stage(stage);
+        } else {
+            tracing::warn!(
+                stage = %stage_str,
+                "unknown generation stage for assemble-moment; treating as unspecified (all slots on)"
+            );
+        }
     }
 
     // V1.149 P1: relation-hop expand — pass the preloaded edges and the
@@ -914,6 +944,7 @@ mod tests {
             knowledge_limit: 10,
             emit_packet: true,
             packet_out: Some("packet.json".to_string()),
+            stage: Some("produce".to_string()),
         };
         let _ = ContextCommand::AssembleMoment {
             world_id: None,
@@ -930,6 +961,7 @@ mod tests {
             knowledge_limit: 20,
             emit_packet: false,
             packet_out: None,
+            stage: None,
         };
     }
 

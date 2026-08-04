@@ -22,6 +22,7 @@
 //! of the store traits. The crate provides no default runtime or storage backend.
 
 use crate::directive::{ActiveDirective, DirectiveDepth, DirectiveStore, NoDirectiveStore};
+use crate::generation::GenerationStage;
 use crate::slots;
 use crate::stage0::{Stage0Assembly, STAGE0_PERSONALITY_END, STAGE0_PERSONALITY_START};
 use crate::world_context::WorldKbQueryBuilder;
@@ -113,6 +114,17 @@ pub struct MomentRequest {
     /// absent, only this cap applies (`None` ⇒ depth + cycle only).
     /// See [`hop_budget_tokens`].
     pub hop_max_tokens: Option<usize>,
+    /// Generation type for spec §4 slot gating (V1.150 P2, DF-75 — guide
+    /// `mca-section-audit.md` Q4 lock).
+    ///
+    /// `None` (the default) is treated as [`GenerationStage::Unspecified`] —
+    /// every slot fills, which is current behavior and the neutral golden /
+    /// direct-CLI / inspector path (AC-I1b). `run_intent` is **derivable**
+    /// from the stage (creator-workflow §3.1) — there is deliberately no
+    /// separate field. Wired from the CLI `assemble-moment --stage` flag;
+    /// the preset runner / schedule path threads the executing stage when it
+    /// drives assembly (see `guides/generation-trigger-wiring.md`).
+    pub generation_stage: Option<GenerationStage>,
 }
 
 impl MomentRequest {
@@ -135,6 +147,7 @@ impl MomentRequest {
             activation_enabled: true,
             hop_edges: None,
             hop_max_tokens: None,
+            generation_stage: None,
         }
     }
 
@@ -237,6 +250,16 @@ impl MomentRequest {
     #[must_use]
     pub const fn with_hop_max_tokens(mut self, cap: usize) -> Self {
         self.hop_max_tokens = Some(cap);
+        self
+    }
+
+    /// Set the generation stage for spec §4 slot gating (V1.150 P2).
+    ///
+    /// `None` (the default — don't call this) keeps every slot on
+    /// ([`GenerationStage::Unspecified`]).
+    #[must_use]
+    pub const fn with_generation_stage(mut self, stage: GenerationStage) -> Self {
+        self.generation_stage = Some(stage);
         self
     }
 }
@@ -635,15 +658,15 @@ where
                 if entries.is_empty() {
                     None
                 } else if request.activation_enabled {
-                    // V1.150 P0 (DF-75): route the V1.149-emitted matched
-                    // candidate list into named, ordered slots within the
-                    // World-KB section (spec §2 / Q1/Q5 provisional locks —
-                    // `slots.rs`). Neutral-only Worlds route everything into
-                    // the default fallback, which renders byte-identically to
-                    // the V1.149 flat block (AC-I1b). Entries non-empty
-                    // guarantees at least one slot is non-empty, so this is
-                    // always `Some`.
-                    slots::render_slots(&slots::route_slots(entries))
+                    // V1.150 P0/P2 (DF-75): shape the activation-matched
+                    // entries into the World-KB body — spec §4 generation-
+                    // stage gate first (`slots::apply_stage_gate`), then
+                    // slot routing + render (spec §2 / Q5). Neutral-only
+                    // Worlds render byte-identically to the V1.149 flat
+                    // block (AC-I1b); the gate runs only on the activation-
+                    // on path (the off-switch below keeps every entry
+                    // unchanged); `None` stage ⇒ all slots on.
+                    render_gated_slots(entries, request.generation_stage)
                 } else {
                     // Off-switch (V1.149 escape hatch, lock #1 — "off ⇒ every
                     // candidate entry unchanged", V1.146 flag-off semantics):
@@ -729,6 +752,19 @@ async fn apply_directive<D: DirectiveStore>(
             .await;
     }
     directive
+}
+
+/// V1.150 P2 (DF-75, spec §4 / Q5) — shape the activation-matched World-KB
+/// entries into the section body: apply the generation-stage gate
+/// ([`slots::apply_stage_gate`]), route the eligible entries into named,
+/// ordered slots, and render. `None` (all entries gated off, e.g.
+/// `system_maintenance`) yields `None` — the caller omits the whole
+/// World-KB section.
+fn render_gated_slots(
+    entries: Vec<WorldKbEntry>,
+    stage: Option<GenerationStage>,
+) -> Option<String> {
+    slots::render_slots(&slots::route_slots(slots::apply_stage_gate(entries, stage)))
 }
 
 /// Fetch narrative context (world state + timeline) from the gateway.
