@@ -33,6 +33,9 @@ The core creative container — a narrative universe with its own knowledge base
 ### KnowledgeEntry
 The fundamental unit of structured knowledge in a world. KnowledgeEntries have typed attributes (character, location, event, concept, etc.), taxonomy labels, and an immutable identity. *Computable* KnowledgeEntries accumulate mutable state over WASM compute invocations.
 
+### Lore Activation
+The default-on mechanism (V1.149 / DF-74) that selects and orders World KB entries for a moment by their `modules.activation` fire-conditions (`keys` / `secondary_keys` / `logic` / `constant` / `priority` / `order` / `match`), with optional relation-hop expansion (≤2 hops) from firing entries. Worlds whose entries carry no activation module are assembled byte-identically to the pre-activation path. Applied during [Moment Context Assembly](#moment-context-assembly); dialect and contract: [`spoke-adapter-architecture.md`](.mstar/specs/spoke-adapter-architecture.md) §7.4.
+
 ### SourceAnchor
 A reference that ties a KnowledgeEntry to its provenance — which artifact (manuscript chapter, outline node, etc.) produced it and at what position.
 

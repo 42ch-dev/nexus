@@ -45,4 +45,5 @@ Dev-deps mirror the runtime deps so tests can compare wrapper output against the
 ## V1.146 P5 sweep notes
 
 - The adapter now hosts 11 modules (activation, computable_port, finding_port, fork_port, host_manifest_port, knowledge_entry_port, mca_read, narrative_read, relation_port, rule_query_port, scope_query_port) plus the free-function conversion seam in `src/conversion/`. See `.mstar/specs/spoke-adapter-architecture.md` §7.4 for the production-vs-stub matrix.
+- `activation` is the **default-on lore activation engine** (V1.149 / DF-74) — pure match + Relation hop expand; supersedes the V1.146 flag-gated spike. MCA calls the engine; CLI loads hop edges; no matching/hop code in `spoke-operations`.
 - `build_assemble_packet` exposes the spec §7.2 signature. Spoke's real API takes a `BuildAssemblePacketInput` struct with `&[KnowledgeEntryForAssemble]` and a packet-level `extensions` slot. The wrapper honors §7.2 and wraps internally. See `src/ops.rs` doc comment.

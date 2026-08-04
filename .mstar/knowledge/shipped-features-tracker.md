@@ -6,7 +6,7 @@
 **Location**: `.mstar/knowledge/` (shared result; closed-row archive companion to the active deferred tracker).  
 **Split from**: [deferred-features-cross-version-tracker.md](deferred-features-cross-version-tracker.md) §4–§5 (2026-05-30 restructure)  
 **Created**: 2026-05-30  
-**Last updated**: 2026-08-01 (V1.147 — DF-V1122-COMPUTABLE-UI + DF-V1122-COMPUTE-ON-TIMELINE shipped; closed from active tracker)
+**Last updated**: 2026-08-04 (V1.149 — DF-74 default-on lore activation + Relation hop expand shipped; closed from active tracker). Prior: 2026-08-01 (V1.147 — DF-V1122-COMPUTABLE-UI + DF-V1122-COMPUTE-ON-TIMELINE shipped; closed from active tracker)
 
 **Last updated (V1.55 history)**: 2026-06-22 (V1.55 closeout: 7 plans all Done — P-1 prepare + P0 DF-43 SQLite persistence / crate-model alignment (closed) + P1 DF-31 workspace interface skeleton + P2 game-bible Depth 3.5 (design-writing + design 五问 rubric + section completion detection + KB extraction; Master spec) + P3 Script profile scaffold (V1.54-style parity + additive BlockType dialogue/beat/act + script_category + ScaffoldTransaction closure on BOTH non-novel scaffolds) + P-mid QC rhythm + P-last closeout (Profile B compaction + spec promotion + tracker ship snapshot + tech-debt rollup); R-V154P1-W001 + R-V154P1-S002 + DF-43 + DF-31 all closed; 1 new R-V155P2-F002 → V1.56+; wire contracts unchanged)
 
@@ -146,6 +146,7 @@ Archived from [deferred-features-cross-version-tracker.md](deferred-features-cro
 | DF-V1131-CHRONOS-TITLEBAR | Full-width Chronos ink titlebar + Tauri Overlay | V1.131 | Plan `…-p0-chronos-titlebar`. Open human Overlay smoke: `R-V1131P0-QC2-W-001`. |
 | DF-V1131-LOGO-GALLERY-LOCKUP | Studio plate fill + wordmark + Chronos mini on ink | V1.131 | Plan `…-p1-logo-gallery-lockup`. Open human wordmark measure: `R-VI-004`. |
 | DF-V1131-DESKTOP-ICON | Desktop Chronos plate icon compose/generate + Dock cache README | V1.131 | Plan `…-p3-desktop-icons-residuals`. Open human Dock tile: `R-VI-003`. |
+| ~~DF-74~~ | **FL-L W4 — Keyword / selective lore activation + Relation hop expand** | V1.149 | PD-10 / FL-L wave 1 (spoke absorption W4). **Shipped:** default-on `modules.activation` engine in `assemble_moment` (no opt-in; `NEXUS_MCA_LORE_ACTIVATION=off`/`0`/`false` escape hatch kept ≥ one minor) — full spoke dialect `keys`/`secondary_keys`/`logic`/`constant`/`order`/`priority`/`position_hint`/`outlet`/`match` (handbook truth table; secondary empty ⇒ primary-any, logic ignored); scan = Stage-0 + outline beats (timeline title/summary; manuscript body deferred — Stage-0 fallback); emit priority-desc → order-asc, `constant` band first; **Relation hops:** ≤2 undirected hops from firing entries via adapter hop-edge list (`list_relationships_for_world(include_suggested=false)`; not `RelationPort` — trait get/put only) under MCA token budget; no keyword re-fire; cycle-safe; traced. **Neutral-only Worlds byte-identical to V1.146 flag-off** (hard gate; P2 dogfood green on rich fixtures). No matching/hop algorithms in `spoke-operations` (consumer-only). Plans: `2026-08-04-v1.149-p0-activation-engine` + `…-p1-relation-hop-expand` + `…-p2-activation-dogfood-and-sweep`. Next wave: DF-75 (FL-L W5 — trigger met at V1.149 ship). |
 
 ---
 
