@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE moment_directives\n         SET status = 'expired', expires_at = ?, replaced_by = ?, updated_at = ?\n         WHERE creator_id = ? AND scope_kind = ? AND scope_id = ? AND status = 'active'",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 6
+    },
+    "nullable": []
+  },
+  "hash": "6a88fff98714e5c9bc9037ea443a25d588b37f28cb071a1bc6290fe4c77db6a9"
+}

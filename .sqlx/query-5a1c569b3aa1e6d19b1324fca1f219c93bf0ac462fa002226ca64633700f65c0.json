@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE moment_directives\n         SET last_focused_event_id = ?, last_chapter_no = ?, updated_at = ?\n         WHERE directive_id = ? AND status = 'active'",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": []
+  },
+  "hash": "5a1c569b3aa1e6d19b1324fca1f219c93bf0ac462fa002226ca64633700f65c0"
+}

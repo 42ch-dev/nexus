@@ -12,7 +12,7 @@ use clap::Subcommand;
 use nexus_contracts::local::domain::RuntimeMode;
 use nexus_moment_context_assembly::cloud_stage::{AssembleResponse, AssemblyRuntimeMode};
 use nexus_moment_context_assembly::{
-    assemble_moment, MomentContext, MomentRequest, Stage0Assembly, TwoStageAssembly,
+    assemble_moment_with_directive, MomentContext, MomentRequest, Stage0Assembly, TwoStageAssembly,
 };
 
 use crate::domain::{DegradationGuard, DomainRuntimeMode};
@@ -110,6 +110,11 @@ pub enum ContextCommand {
         #[arg(long)]
         world_id: Option<String>,
 
+        /// Work ID for the work-bound moment (V1.150 P1 — Moment Directive
+        /// scope resolution + chapter-advance TTL)
+        #[arg(long)]
+        work_id: Option<String>,
+
         /// User ID for knowledge lookup
         #[arg(long)]
         user_id: Option<String>,
@@ -168,6 +173,7 @@ pub enum ContextCommand {
 /// - Context assembly fails (platform API errors, file I/O errors)
 /// - Degradation guard checks fail
 /// - Configuration cannot be loaded
+#[allow(clippy::too_many_lines)] // CLI dispatch arm — param plumbing (V1.150 P1 directive summary)
 pub async fn run(cmd: ContextCommand, config: &CliConfig) -> Result<()> {
     match cmd {
         ContextCommand::Assemble {
@@ -188,6 +194,7 @@ pub async fn run(cmd: ContextCommand, config: &CliConfig) -> Result<()> {
         }
         ContextCommand::AssembleMoment {
             world_id,
+            work_id,
             user_id,
             branch_id,
             event_id,
@@ -204,6 +211,7 @@ pub async fn run(cmd: ContextCommand, config: &CliConfig) -> Result<()> {
             let maybe_ctx = run_assemble_moment(
                 config,
                 world_id.as_deref(),
+                work_id.as_deref(),
                 user_id.as_deref(),
                 branch_id.as_deref(),
                 event_id.as_deref(),
@@ -250,6 +258,14 @@ pub async fn run(cmd: ContextCommand, config: &CliConfig) -> Result<()> {
             eprintln!(
                 "World KB: {}",
                 if ctx.world_kb.is_some() {
+                    "present"
+                } else {
+                    "absent"
+                }
+            );
+            eprintln!(
+                "Moment Directive: {}",
+                if ctx.moment_directive.is_some() {
                     "present"
                 } else {
                     "absent"
@@ -584,9 +600,10 @@ fn lore_activation_value_is_off(value: &str) -> bool {
 pub async fn run_assemble_moment(
     config: &CliConfig,
     world_id: Option<&str>,
+    work_id: Option<&str>,
     user_id: Option<&str>,
     branch_id: Option<&str>,
-    _event_id: Option<&str>,
+    event_id: Option<&str>,
     max_tokens: Option<usize>,
     include_fragments: bool,
     hint: Option<&str>,
@@ -637,7 +654,7 @@ pub async fn run_assemble_moment(
             .filter(|edges| !edges.is_empty())
     };
     let uid = user_id.unwrap_or("user_default");
-    let knowledge = SqliteKnowledgeStore::new(pool);
+    let knowledge = SqliteKnowledgeStore::new(pool.clone());
 
     // Build Stage0Assembly — load from creator memory if available
     let stage0 = build_stage0_from_local(config, hint, max_tokens, include_fragments)
@@ -655,6 +672,19 @@ pub async fn run_assemble_moment(
     // Build MomentRequest with KB query + budget fields
     let mut request = MomentRequest::new(stage0).with_world(wid).with_user(uid);
 
+    // V1.150 P1 (DF-75): Moment Directive scope resolution is keyed on the
+    // creator + work of the moment (spec §3.2). The active creator is always
+    // threaded through; the work is optional — a raw world assembly applies
+    // the World override directly.
+    if let Some(cid) = config.active_creator_id.as_deref() {
+        request = request.with_creator(cid);
+    }
+    if let Some(wid) = work_id {
+        request = request.with_work(wid);
+    }
+    if let Some(eid) = event_id {
+        request = request.with_event(eid);
+    }
     if let Some(bid) = branch_id {
         request = request.with_branch(bid);
     }
@@ -696,8 +726,15 @@ pub async fn run_assemble_moment(
         }
     }
 
-    // Call assemble_moment with persistent stores
-    let ctx = assemble_moment(&request, &narrative, &kb, &knowledge).await;
+    // Call assemble_moment with persistent stores. V1.150 P1: the Moment
+    // Directive store (composition-root adapter over the same pool) is wired
+    // here — an active directive renders into the reserved `moment.directive`
+    // slot and its TTL / scene-change lifecycle runs. When no directive is
+    // active, `assemble_moment_with_directive` is byte-equivalent to the
+    // plain `assemble_moment` (AC-I1b).
+    let directives = crate::commands::creator::moment_directive::LocalDirectiveStore::new(pool);
+    let ctx =
+        assemble_moment_with_directive(&request, &narrative, &kb, &knowledge, &directives).await;
 
     // V1.146 P4 T3: emit diagnostic inspector packet when --emit-packet is set.
     if emit_packet {
@@ -716,6 +753,31 @@ pub async fn run_assemble_moment(
 
 /// Build and emit the inspector packet diagnostic JSON from the activation trace.
 fn emit_inspector_packet(ctx: &MomentContext, packet_out: Option<&str>) -> Result<()> {
+    let packet = build_inspector_packet(ctx);
+
+    let json_str = serde_json::to_string_pretty(&packet).map_err(|e| {
+        crate::errors::CliError::Other(format!("Failed to serialize inspector packet: {e}"))
+    })?;
+
+    if let Some(path) = packet_out {
+        std::fs::write(path, format!("{json_str}\n")).map_err(|e| {
+            crate::errors::CliError::Other(format!("Failed to write packet to {path}: {e}"))
+        })?;
+        eprintln!("Inspector packet written to {path}");
+    } else {
+        println!("{json_str}");
+    }
+
+    Ok(())
+}
+
+/// Build the inspector packet JSON (`modules.placement` +
+/// `modules.activation_trace`) from the activation trace.
+///
+/// AC-I3 (V1.150 P1): the packet is derived **only** from the activation
+/// trace — the Moment Directive is product-local and structurally cannot
+/// appear here (it is never part of `modules.*` / `AssemblePacket`).
+fn build_inspector_packet(ctx: &MomentContext) -> serde_json::Value {
     let trace = ctx.activation_trace.as_deref().unwrap_or(&[]);
 
     // modules.placement: entries that passed activation (accepted == true).
@@ -744,27 +806,12 @@ fn emit_inspector_packet(ctx: &MomentContext, packet_out: Option<&str>) -> Resul
         })
         .collect();
 
-    let packet = serde_json::json!({
+    serde_json::json!({
         "modules": {
             "placement": placement,
             "activation_trace": trace_json,
         }
-    });
-
-    let json_str = serde_json::to_string_pretty(&packet).map_err(|e| {
-        crate::errors::CliError::Other(format!("Failed to serialize inspector packet: {e}"))
-    })?;
-
-    if let Some(path) = packet_out {
-        std::fs::write(path, format!("{json_str}\n")).map_err(|e| {
-            crate::errors::CliError::Other(format!("Failed to write packet to {path}: {e}"))
-        })?;
-        eprintln!("Inspector packet written to {path}");
-    } else {
-        println!("{json_str}");
-    }
-
-    Ok(())
+    })
 }
 
 #[cfg(test)]
@@ -774,6 +821,7 @@ mod tests {
     use super::*;
 
     // Import activation types for inspector packet tests.
+    use nexus_moment_context_assembly::assemble_moment;
     use nexus_spoke_adapter::adapter::activation::ActivationTraceEntry;
 
     /// Test valid `WorldId` formats
@@ -853,6 +901,7 @@ mod tests {
     fn context_command_assemble_moment_exists_with_flags() {
         let _ = ContextCommand::AssembleMoment {
             world_id: Some("wld_test".to_string()),
+            work_id: Some("wrk_test".to_string()),
             user_id: Some("user_test".to_string()),
             branch_id: None,
             event_id: None,
@@ -868,6 +917,7 @@ mod tests {
         };
         let _ = ContextCommand::AssembleMoment {
             world_id: None,
+            work_id: None,
             user_id: None,
             branch_id: None,
             event_id: None,
@@ -1489,6 +1539,57 @@ mod tests {
         let config = CliConfig::default();
         let slug = config.workspace_slug_for_creator("ctr_anyone");
         assert_eq!(slug, DEFAULT_WORKSPACE_SLUG);
+    }
+
+    // ── V1.150 P1: inspector packet never carries the Moment Directive (AC-I3)
+
+    /// AC-I3 (V1.150 P1): the inspector packet (`modules.placement` +
+    /// `modules.activation_trace`) is derived only from the activation trace.
+    /// The Moment Directive is product-local — it must never appear in
+    /// AssemblePacket `placement[]` / `activation_trace[]` (and never in
+    /// `modules.*`), so the packet JSON must not contain the directive body.
+    #[test]
+    fn inspector_packet_never_carries_moment_directive() {
+        use nexus_moment_context_assembly::directive::DirectiveDepth;
+
+        let trace = vec![
+            ActivationTraceEntry {
+                entry_id: "kb_hero".to_string(),
+                canonical_name: "Hero".to_string(),
+                reason: "keyword match".to_string(),
+                accepted: true,
+                hop_origin_entry_id: None,
+                hop_depth: None,
+                source_relation_type: None,
+                source_relation_id: None,
+            },
+            ActivationTraceEntry {
+                entry_id: "kb_castle".to_string(),
+                canonical_name: "Castle".to_string(),
+                reason: "no keyword match".to_string(),
+                accepted: false,
+                hop_origin_entry_id: None,
+                hop_depth: None,
+                source_relation_type: None,
+                source_relation_id: None,
+            },
+        ];
+        let ctx = MomentContext {
+            stage0_context: "stage0".to_string(),
+            moment_directive: Some("DIRECTIVE_SECRET_MARKER keep the prose terse".to_string()),
+            moment_directive_depth: DirectiveDepth::Head,
+            activation_trace: Some(trace),
+            ..MomentContext::default()
+        };
+
+        let packet = build_inspector_packet(&ctx);
+        let json = serde_json::to_string(&packet).expect("packet serializes");
+        assert!(
+            !json.contains("DIRECTIVE_SECRET_MARKER"),
+            "AC-I3: inspector packet must never carry the Moment Directive body"
+        );
+        assert!(json.contains("kb_hero"), "trace entries still present");
+        assert!(json.contains("modules"), "packet shape preserved");
     }
 
     // ── V1.145 P2: assemble_moment behavior equivalence (T4) ────────────
