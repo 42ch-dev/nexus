@@ -16,13 +16,18 @@ use std::path::Path;
 /// the canonical libp2p key serialization. spoke-connect exposes no
 /// identity-persistence helper, so this module owns the file format.
 ///
+/// # Parameters
+/// `home` is the **raw user home** (`$HOME`); this fn joins `.nexus42`
+/// internally via `connect_identity_key_path`, so callers MUST NOT pre-join
+/// `~/.nexus42`.
+///
 /// # Errors
 /// Returns [`CliError::Io`] on filesystem failure, or [`CliError::Config`]
 /// when an existing key file is corrupt or unreadable.
-pub fn load_or_create_identity(nexus_home: &Path) -> Result<Keypair> {
+pub fn load_or_create_identity(home: &Path) -> Result<Keypair> {
     use std::io::Write;
 
-    let path = nexus_home_layout::connect_identity_key_path(nexus_home);
+    let path = nexus_home_layout::connect_identity_key_path(home);
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }

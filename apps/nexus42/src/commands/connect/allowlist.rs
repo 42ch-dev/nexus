@@ -29,12 +29,17 @@ struct AllowlistFile {
 /// An unreadable/malformed file or an unparseable peer id is a hard error so
 /// a typo cannot silently open or lock the host.
 ///
+/// # Parameters
+/// `home` is the **raw user home** (`$HOME`); this fn joins `.nexus42`
+/// internally via `connect_allowlist_path`, so callers MUST NOT pre-join
+/// `~/.nexus42`.
+///
 /// # Errors
 /// Returns [`CliError::Io`] when the file exists but cannot be read, or
 /// [`CliError::Config`] when the file is malformed or an entry is not a
 /// valid libp2p `PeerId`.
-pub fn load(nexus_home: &Path, cli_peers: &[String]) -> Result<Vec<PeerId>> {
-    let path = nexus_home_layout::connect_allowlist_path(nexus_home);
+pub fn load(home: &Path, cli_peers: &[String]) -> Result<Vec<PeerId>> {
+    let path = nexus_home_layout::connect_allowlist_path(home);
 
     let mut entries = Vec::new();
     match std::fs::read_to_string(&path) {
