@@ -24,10 +24,9 @@ use sqlx::SqlitePool;
 
 use crate::config::CliConfig;
 use crate::errors::{CliError, Result};
-use nexus_local_db::moment_directive::scope_kind;
 use nexus_local_db::moment_directive::{
     clear, clear_on_scene_change, decrement_ttl, get_active_for_work, get_active_for_world,
-    get_by_id, replace_active, set_active, update_lifecycle_anchor, MomentDirectiveRow,
+    get_by_id, replace_active, scope_kind, set_active, update_lifecycle_anchor, MomentDirectiveRow,
     NewMomentDirective,
 };
 use nexus_local_db::{get_work, is_novel_profile, list_works, WorkListFilters};
@@ -1349,6 +1348,58 @@ mod tests {
         assert_eq!(shown.ttl_kind, "chapters");
         assert_eq!(shown.ttl_remaining, 4);
         assert_eq!(source, "world wld_1");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn cli_show_and_clear_world_scope_work_independent() {
+        // R-007 matrix coverage: `show --world <id>` / `clear --world <id>`
+        // select the World scope directly — no Work resolution required
+        // (deliberately no Work seeded here).
+        let (pool, _dir) = fresh_pool().await;
+        seed_creator(&pool).await;
+        seed_world(&pool, "wld_1").await;
+        set_active(
+            &pool,
+            &new_params("dir_world", scope_kind::WORLD, "wld_1", "generations", 3),
+        )
+        .await
+        .unwrap();
+
+        // show --world: the World override row itself, no Work in play.
+        let scope = MomentDirectiveScopeArgs {
+            work: None,
+            world: Some("wld_1".to_string()),
+        };
+        handle_show(&pool, "ctr_test", "wrk_novel", &scope)
+            .await
+            .unwrap();
+        let (shown, source) = resolve_effective_for_show(&pool, "ctr_test", "wrk_novel", &scope)
+            .await
+            .unwrap()
+            .expect("world directive shown");
+        assert_eq!(shown.directive_id, "dir_world");
+        assert_eq!(shown.scope_kind, "world");
+        assert_eq!(source, "world wld_1");
+
+        // clear --world: soft-deletes the World row; a second show reports none.
+        handle_clear(&pool, "ctr_test", "wrk_novel", &scope)
+            .await
+            .unwrap();
+        let row = get_by_id(&pool, "dir_world")
+            .await
+            .unwrap()
+            .expect("row retained for inspection");
+        assert_eq!(
+            row.status, "expired",
+            "clear --world must soft-delete the World-scoped row"
+        );
+        assert!(
+            resolve_effective_for_show(&pool, "ctr_test", "wrk_novel", &scope)
+                .await
+                .unwrap()
+                .is_none(),
+            "show --world after clear reports no active directive"
+        );
     }
 
     // ── T6/T7: end-to-end injection through `assemble_moment_with_directive`

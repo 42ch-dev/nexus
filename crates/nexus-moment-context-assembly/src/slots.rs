@@ -28,6 +28,14 @@
 //! are **not** errors — they open a `kb.outlet.<name>` slot so author packs
 //! round-trip without code changes (spec §2).
 //!
+//! Outlet names are **normalized before routing** (R-001 hardening): names
+//! are trimmed (so a `"style.post_history "` near-variant still matches the
+//! reserved well-known outlet — and its stage gate — instead of opening a
+//! near-duplicate open outlet), and names carrying structural characters
+//! (newline/CR, `#`, or any other control char) fall back to the default
+//! slot — a crafted name must not break the `### Outlet: <name>` heading or
+//! inject a fake sub-heading.
+//!
 //! # Emit order (spec §2, Q5 provisional lock)
 //!
 //! Within `## World Knowledge Base` (top → bottom):
@@ -113,11 +121,16 @@ pub fn route_slots(matched: Vec<WorldKbEntry>) -> SlotRouting {
     let mut routing = SlotRouting::default();
     for entry in matched {
         let (position_hint, outlet) = placement_of(&entry);
-        match (position_hint.as_deref(), outlet.as_deref()) {
+        // Outlet names are normalized before routing (R-001): trimmed so the
+        // reserved `style.post_history` matches even with stray whitespace,
+        // and names carrying structural characters (newline/CR/`#`/control
+        // chars) fall back instead of rendering an injected `### Outlet:`
+        // sub-heading.
+        match (position_hint.as_deref(), outlet.as_deref().map(str::trim)) {
             (Some(HINT_BEFORE_DEFS), _) => routing.before.push(entry),
             (Some(HINT_AFTER_DEFS), _) => routing.after.push(entry),
             (Some(HINT_OUTLET), Some(WELL_KNOWN_STYLE_OUTLET)) => routing.post_history.push(entry),
-            (Some(HINT_OUTLET), Some(name)) if !name.trim().is_empty() => {
+            (Some(HINT_OUTLET), Some(name)) if is_safe_outlet_name(name) && !name.is_empty() => {
                 routing
                     .outlets
                     .entry(name.to_string())
@@ -125,9 +138,9 @@ pub fn route_slots(matched: Vec<WorldKbEntry>) -> SlotRouting {
                     .push(entry);
             }
             // `depth` (parsed-not-actioned), unknown hints, `outlet` without a
-            // paired name or with an empty/whitespace name (would render a
-            // nameless `### Outlet: ` heading), and no hint → default fallback
-            // (round-trip safe).
+            // paired name, empty/whitespace names, and structural-char names
+            // (R-001 — would break the `### Outlet:` heading) → default
+            // fallback (round-trip safe).
             _ => routing.fallback.push(entry),
         }
     }
@@ -201,11 +214,26 @@ pub fn apply_stage_gate(
 
 /// True when the entry's placement routes it to the reserved
 /// `style.post_history` slot (the one well-known outlet name, spec §2).
+///
+/// The outlet name is compared **trimmed** so the near-variant
+/// `"style.post_history "` (trailing whitespace) is treated as the same
+/// reserved outlet — it must not open a near-duplicate `kb.outlet.*` slot or
+/// bypass the generation-stage gate (R-001).
 fn routes_to_style_post_history(entry: &WorldKbEntry) -> bool {
     matches!(
         placement_of(entry),
-        (Some(hint), Some(outlet)) if hint == HINT_OUTLET && outlet == WELL_KNOWN_STYLE_OUTLET
+        (Some(hint), Some(outlet)) if hint == HINT_OUTLET && outlet.trim() == WELL_KNOWN_STYLE_OUTLET
     )
+}
+
+/// True when an outlet name is safe to render inside a `### Outlet: <name>`
+/// heading: no newline/CR (would break the heading and inject a second
+/// section), no `#` (would fake a nested sub-heading), and no other control
+/// characters (R-001). Unsafe names fall back like empty/whitespace ones —
+/// the router opens a slot only for well-formed names.
+fn is_safe_outlet_name(name: &str) -> bool {
+    name.chars()
+        .all(|c| c != '\n' && c != '\r' && c != '#' && !c.is_control())
 }
 
 /// Render the routed slots into the `## World Knowledge Base` body.
@@ -464,6 +492,106 @@ mod tests {
     }
 
     #[test]
+    fn style_outlet_with_trailing_space_still_matches_reserved() {
+        // R-001: a `"style.post_history "` near-variant (trailing whitespace)
+        // must route to the reserved tail slot — not open a near-duplicate
+        // `kb.outlet."style.post_history "` slot (which would also bypass the
+        // generation-stage gate).
+        for variant in [
+            "style.post_history ",
+            "  style.post_history",
+            " style.post_history ",
+        ] {
+            let routing = route_slots(vec![entry(
+                "PostStyle",
+                "kb_ph",
+                Some(with_outlet(variant)),
+            )]);
+            assert_eq!(
+                names(&routing.post_history),
+                vec!["PostStyle"],
+                "near-variant {variant:?} must hit the reserved style slot"
+            );
+            assert!(
+                routing.outlets.is_empty(),
+                "no open outlet may be opened for {variant:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn outlet_names_with_structural_chars_fall_back() {
+        // R-001: outlet names carrying newline/CR/`#`/control chars would
+        // break the `### Outlet: <name>` heading (newline injects a second
+        // section; `#` fakes a nested sub-heading) — they must fall back and
+        // never render as an outlet heading.
+        for bad_name in ["zone.\nFake", "zone\rFake", "zone#Fake", "zone\u{0000}Fake"] {
+            let routing = route_slots(vec![entry("Lore", "kb_s", Some(with_outlet(bad_name)))]);
+            assert_eq!(
+                names(&routing.fallback),
+                vec!["Lore"],
+                "structural outlet name must fall back ({bad_name:?})"
+            );
+            assert!(
+                routing.outlets.is_empty(),
+                "no outlet slot may be opened for {bad_name:?}"
+            );
+            let rendered = render_slots(&routing).expect("fallback present");
+            assert!(
+                !rendered.contains("### Outlet: "),
+                "no outlet heading for {bad_name:?}, got: {rendered:?}"
+            );
+            assert!(
+                !rendered.contains("\n### "),
+                "no injected sub-heading for {bad_name:?}, got: {rendered:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn hint_wins_over_outlet_when_both_present() {
+        // R-003 coverage: `position_hint` takes precedence over a paired
+        // `outlet` name — `before_defs`/`after_defs` route to their slots even
+        // when the entry also carries an outlet (match-arm order; the outlet
+        // hint only opens a slot when the hint IS `outlet`).
+        let routing = route_slots(vec![
+            entry(
+                "Rules",
+                "kb_1",
+                Some(serde_json::json!({ "position_hint": "before_defs", "outlet": "aether" })),
+            ),
+            entry(
+                "Reminders",
+                "kb_2",
+                Some(serde_json::json!({
+                    "position_hint": "after_defs",
+                    "outlet": "style.post_history"
+                })),
+            ),
+            entry(
+                "PostStyle",
+                "kb_3",
+                Some(serde_json::json!({
+                    "position_hint": "before_defs",
+                    "outlet": "style.post_history"
+                })),
+            ),
+        ]);
+        assert_eq!(
+            names(&routing.before),
+            vec!["Rules", "PostStyle"],
+            "before_defs hint beats the paired outlet"
+        );
+        assert_eq!(
+            names(&routing.after),
+            vec!["Reminders"],
+            "after_defs hint beats the paired outlet"
+        );
+        assert!(routing.outlets.is_empty());
+        assert!(routing.post_history.is_empty());
+    }
+
+    #[test]
     fn within_slot_keeps_emitted_order() {
         // The matched list arrives in V1.149 emit order (priority desc, order
         // asc, stable; constant band first). Routing appends in that order,
@@ -626,6 +754,26 @@ mod tests {
                 assert!(names(&gated).contains(&kept), "{stage}: {kept} kept");
             }
         }
+    }
+
+    #[test]
+    fn stage_gate_excludes_trailing_space_style_variant() {
+        // R-001: the trimmed comparison in `routes_to_style_post_history`
+        // closes the near-variant bypass — a `"style.post_history "` entry is
+        // gated off for `persist` just like the exact name.
+        let gated = apply_stage_gate(
+            vec![entry(
+                "PostStyle",
+                "kb_ph",
+                Some(with_outlet("style.post_history ")),
+            )],
+            Some(GenerationStage::Persist),
+        );
+        assert_eq!(
+            gated,
+            Vec::<WorldKbEntry>::new(),
+            "trailing-space style variant must be gated off for persist"
+        );
     }
 
     #[test]

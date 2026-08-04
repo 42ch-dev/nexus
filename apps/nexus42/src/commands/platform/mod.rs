@@ -33,6 +33,8 @@ pub enum PlatformCommand {
 
     /// Context assembly
     Context {
+        // ContextCommand is large (many `Option<String>` flags, incl. `--stage`);
+        // boxed to keep `PlatformCommand` small (type-size hygiene; no behavior).
         #[command(subcommand)]
         command: Box<context::ContextCommand>,
     },
