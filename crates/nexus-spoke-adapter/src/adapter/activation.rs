@@ -227,7 +227,12 @@ fn whole_word_match(key: &str, scan_lower: &str) -> bool {
         if before_ok && after_ok {
             return true;
         }
-        offset = start + 1;
+        // Advance past this occurrence by one full char (not one byte):
+        // `start + 1` sliced mid-char for multi-byte keys and panicked
+        // ("byte index is not a char boundary") — e.g. CJK keys. `start` is
+        // always a char boundary and `key_lower` is non-empty, so this is
+        // always `Some`; the `map_or` default is defensive only.
+        offset = start + scan_lower[start..].chars().next().map_or(1, char::len_utf8);
     }
     false
 }
@@ -844,6 +849,24 @@ mod tests {
 
         let result2 = run(&entries, "A king ruled.");
         assert_eq!(result2.matched.len(), 1);
+    }
+
+    #[test]
+    fn test_whole_word_cjk_char_boundary_safe_advance() {
+        // Regression (QC F1): the advance after a failed boundary check used
+        // `start + 1` bytes, slicing mid-char for multi-byte keys — this
+        // panicked with "byte index 1 is not a char boundary" for
+        // `whole_word_match("王", "王宫")`. "王" inside the CJK word "王宫" is
+        // not a whole word → must not match, and must not panic.
+        assert!(!whole_word_match("王", "王宫"));
+
+        // A CJK key at a true boundary still matches; the scan must continue
+        // past the failed boundary and find the later standalone occurrence.
+        assert!(whole_word_match("王", "王宫。王"));
+
+        // A CJK key inside a longer CJK word must not match mid-word.
+        assert!(!whole_word_match("宫", "王宫"));
+        assert!(!whole_word_match("王宫", "大秦王宫"));
     }
 
     #[test]

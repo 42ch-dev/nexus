@@ -150,7 +150,7 @@ pub enum ContextCommand {
         #[arg(long, default_value_t = 20)]
         knowledge_limit: usize,
 
-        /// Emit diagnostic inspector packet JSON (requires `NEXUS_MCA_LORE_ACTIVATION=1`)
+        /// Emit diagnostic inspector packet JSON (lore activation is on by default; `NEXUS_MCA_LORE_ACTIVATION=off` disables)
         #[arg(long)]
         emit_packet: bool,
 
@@ -584,7 +584,12 @@ pub async fn run_assemble_moment(
     // V1.146 flag-off semantics; any other value (incl. unset, empty, =1)
     // keeps activation on (spec §6).
     let activation_off = std::env::var("NEXUS_MCA_LORE_ACTIVATION")
-        .map(|v| matches!(v.trim().to_ascii_lowercase().as_str(), "off" | "0" | "false"))
+        .map(|v| {
+            matches!(
+                v.trim().to_ascii_lowercase().as_str(),
+                "off" | "0" | "false"
+            )
+        })
         .unwrap_or(false);
     if emit_packet && activation_off {
         return Err(crate::errors::CliError::Other(
