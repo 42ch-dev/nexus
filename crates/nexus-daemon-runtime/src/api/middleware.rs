@@ -207,7 +207,10 @@ fn generate_request_id() -> String {
     // Mix counter + timestamp for uniqueness (truncate to u64 is fine for ID purposes)
     #[allow(clippy::cast_possible_truncation)]
     let mixed = count.wrapping_add(millis as u64);
-    format!("req_{:013}", base62_encode(mixed))
+    // `{:013}` would space-pad Strings (the `0` fill flag is numeric-only),
+    // leaking trailing spaces into the wire request_id — emit the bare
+    // base62 value instead (doc format `req_<base62>`; u64 max is 11 digits).
+    format!("req_{}", base62_encode(mixed))
 }
 
 /// Encode a u64 as base62 (0-9, a-z, A-Z).

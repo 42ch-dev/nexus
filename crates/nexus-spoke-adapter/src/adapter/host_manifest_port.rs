@@ -78,8 +78,9 @@ fn resolve_device_id_from_standard_home() -> SpokeResult<String> {
             "cannot resolve home directory for device-id".into(),
         ));
     };
-    let nexus_home = nexus_home_layout::nexus_root_from_home(&home);
-    match get_or_create_device_id(&nexus_home) {
+    // `get_or_create_device_id` takes the RAW home and joins `.nexus42`
+    // itself (canonical `~/.nexus42/device-id`; device_id_path contract).
+    match get_or_create_device_id(&home) {
         Ok(id) => SpokeResult::Ok(id),
         Err(e) => SpokeResult::Reject(reject_internal(format!("device-id unavailable: {e}"))),
     }

@@ -18,6 +18,15 @@ path = "src/lib.rs"
 name = "nexus42"
 path = "src/main.rs"
 
+# V1.148 P4 (DF-72 N-C0): real-process dogfood dialer — a spoke-connect
+# reference peer that dials a running `nexus42 connect start` host from
+# OUTSIDE the host process. Feature-gated so the default graph stays
+# libp2p-free; built only with `--features connect-host`.
+[[example]]
+name = "connect_dialer"
+path = "examples/connect_dialer.rs"
+required-features = ["connect-host"]
+
 [dependencies]
 nexus-contracts = { path = "../../crates/nexus-contracts" }
 nexus-orchestration = { path = "../../crates/nexus-orchestration" }

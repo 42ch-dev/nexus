@@ -67,9 +67,11 @@ async fn async_main(cli: Cli) -> Result<()> {
     // Resolve persistent device ID (UUID v4) for platform HTTP requests.
     // Only create the device-id file if the nexus home already exists
     // (i.e., the user has already run `init workspace` or equivalent).
-    if let Ok(nexus_home) = nexus42::config::nexus_home() {
+    // `get_or_create_device_id` takes the RAW home and joins `.nexus42`
+    // itself (canonical `~/.nexus42/device-id`; device_id_path contract).
+    if let (Ok(nexus_home), Some(raw_home)) = (nexus42::config::nexus_home(), dirs::home_dir()) {
         if nexus_home.exists() {
-            match nexus_cloud_sync::device_id::get_or_create_device_id(&nexus_home) {
+            match nexus_cloud_sync::device_id::get_or_create_device_id(&raw_home) {
                 Ok(device_id) => config.device_id = device_id,
                 Err(e) => {
                     // Device ID failure is non-fatal: platform falls back to
