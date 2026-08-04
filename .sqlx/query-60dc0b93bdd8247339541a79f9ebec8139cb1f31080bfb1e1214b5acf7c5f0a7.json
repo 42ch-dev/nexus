@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO moment_directives\n            (directive_id, creator_id, scope_kind, scope_id, body, insert_depth,\n             ttl_kind, ttl_remaining, clear_on_scene_change, status,\n             created_at, updated_at)\n         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 11
+    },
+    "nullable": []
+  },
+  "hash": "60dc0b93bdd8247339541a79f9ebec8139cb1f31080bfb1e1214b5acf7c5f0a7"
+}

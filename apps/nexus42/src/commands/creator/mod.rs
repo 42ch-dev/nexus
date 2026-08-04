@@ -16,6 +16,7 @@ pub mod bootstrap;
 pub mod kb;
 pub mod knowledge;
 pub mod memory;
+pub mod moment_directive;
 pub mod reference;
 pub mod rules_runtime;
 pub mod run;
@@ -547,10 +548,22 @@ pub enum CreatorCommand {
     ///
     /// Stores unstructured knowledge entries scoped to the User (not Creator).
     /// For Work-scope file index or World narrative KB, use `creator kb` instead.
-    /// See entity-scope-model §5.3–5.4 for the three KB namespaces.
+    /// See entity-scope-model §5.3–§5.4 for the three KB namespaces.
     Knowledge {
         #[command(subcommand)]
         command: knowledge::KnowledgeCommand,
+    },
+
+    /// Moment Directive author surface (V1.150 P1, DF-75)
+    ///
+    /// A short author-written instruction injected into the assembled prompt's
+    /// reserved `moment.directive` slot (above lore, below system/personality)
+    /// with an insert depth and a TTL in generations or chapters. Set, show,
+    /// and clear the active directive for a Work scope (or the World override).
+    /// Rendered output is observable in `platform context assemble-moment`.
+    MomentDirective {
+        #[command(subcommand)]
+        command: moment_directive::MomentDirectiveCommand,
     },
 
     /// Reference source management (V1.26 reference store)
@@ -713,6 +726,7 @@ pub async fn run(cmd: CreatorCommand, config: &CliConfig) -> Result<()> {
         CreatorCommand::Kb { command } => kb::run(command, config).await,
         CreatorCommand::World { command } => world::run(command, config).await,
         CreatorCommand::Knowledge { command } => knowledge::run(command, config).await,
+        CreatorCommand::MomentDirective { command } => moment_directive::run(command, config).await,
         CreatorCommand::Run { command } => run::handle_run(command, config).await,
         CreatorCommand::Works { command } => works::handle_works(command, config).await,
         CreatorCommand::DemoSeed { force } => run_demo_seed(config, force).await,
