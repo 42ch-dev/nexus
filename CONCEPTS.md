@@ -132,6 +132,9 @@ The local background process within `nexus42` that manages the World KB SQLite d
 ### Daemon API
 The HTTP surface served by the Daemon Runtime, reachable under `/v1/daemon/*` (previously `/v1/local/*`). It exposes world/knowledge, creator, orchestration, and manuscript endpoints to the CLI, web SPA, and desktop shell. By default it binds to loopback; remote bind requires both `NEXUS42_DAEMON_API_KEY` and `NEXUS_DAEMON_REMOTE_BIND=1`.
 
+### Connect Host
+The opt-in spoke-connect surface for **third-party narrative reasoning** (PD-09 / FL-R / DF-72 N-C0, V1.148): a separate OS process started by `nexus42 connect start` (Cargo feature `connect-host`, default off) that peers over spoke-connect with integrator runtimes and advertises an honest `HostCapabilityManifest` (installation `host_id` = `~/.nexus42/device-id`; roles `["data-store"]`; no `"reasoning-complete"` until N-C2). It is the third consumption surface **alongside Daemon HTTP** — Adapter-full, not Product-full: it never exposes Harness UI, ACP-as-server, or Canvas, and N-C0 refuses every inbound op (`op_unsupported`). Capability-token / world scoping must exist before multi-tenant exposure. See [Daemon API](#daemon-api) (creator UI SSOT) and the FL-R roadmap in [deferred-features-cross-version-tracker.md](.mstar/knowledge/deferred-features-cross-version-tracker.md). Spec: [spoke-adapter-architecture.md](.mstar/specs/spoke-adapter-architecture.md) §10.
+
 ### Setup Wizard
 The first-launch 4-step flow (welcome + workspace → daemon ready → ACP agent detection → done) gated by a `setup_completed` marker in `~/.nexus42/config.toml`. Triggers again if the marker is cleared. Every app launch (not only first) verifies the daemon is running before entering the main UI.
 
@@ -208,6 +211,7 @@ Paths are relative to the repo root. Each entry links the term to its authoritat
 | Agent Host | ACP, Capability, Daemon Runtime | [agent-host.md](.mstar/specs/agent-host.md) |
 | Daemon Runtime | Local Database, Agent Host, Daemon API | [daemon-runtime.md](.mstar/specs/daemon-runtime.md) |
 | Daemon API | Daemon Runtime, Web UI, CLI, JSON Schema | [daemon-api-surface-conventions.md](.mstar/specs/daemon-api-surface-conventions.md) |
+| Connect Host | Daemon API, ACP, FL-R / DF-72 | [spoke-adapter-architecture.md](.mstar/specs/spoke-adapter-architecture.md) |
 | Local Database | SQLite, World KB, Orchestration state | [local-db-schema.md](.mstar/specs/local-db-schema.md) |
 | JSON Schema (Wire Contracts) | schemas/, codegen, nexus-contracts | [schemas-directory-layout.md](.mstar/specs/schemas-directory-layout.md) |
 | Workspace (Canvas) | Canvas, Outline, Manuscript | [canvas-strategy-surface.md](.mstar/specs/canvas-strategy-surface.md) |
