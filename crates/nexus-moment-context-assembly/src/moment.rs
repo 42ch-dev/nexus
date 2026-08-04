@@ -28,6 +28,7 @@ use nexus_knowledge::world_kb::knowledge_entry::WorldKbEntry;
 use nexus_knowledge::world_kb::KbStore;
 use nexus_knowledge::KnowledgeStore;
 use nexus_narrative::NarrativeGateway;
+use nexus_spoke_adapter::adapter::activation::{apply_activation_with_hops, HopConfig, HopEdge};
 
 /// Section heading for World State in assembled context.
 const WORLD_STATE_HEADING: &str = "## World State";
@@ -78,6 +79,24 @@ pub struct MomentRequest {
     /// Default `true` — activation is the shipped product behavior; `false`
     /// restores V1.146 flag-off semantics (all entries returned unchanged).
     pub activation_enabled: bool,
+    /// Preloaded confirmed relation edges of the world for relation-hop
+    /// expansion (V1.149 P1, spec §5). `None` ⇒ activation-only pass
+    /// (P0 behavior); `Some(..)` ⇒ `apply_activation_with_hops` — primary-
+    /// fired / `constant` entries BFS-expand up to 2 graph hops within the
+    /// hop token budget, and graph-adjacent entries join `matched` without
+    /// re-firing keyword activation.
+    ///
+    /// Edges are loaded by the CLI/wire layer via
+    /// `NexusAdapter::list_hop_edges_for_world` (the `RelationPort` gap:
+    /// spoke's port is get/put only); MCA itself never walks relations.
+    pub hop_edges: Option<Vec<HopEdge>>,
+    /// Caller-provided cap on the hop token budget (chars/4, spec Q1).
+    /// When `max_tokens` is set, the effective budget is the cross-domain
+    /// remainder after personality (never truncated) + `world_state` +
+    /// `timeline` reservations, bounded by this cap; when `max_tokens` is
+    /// absent, only this cap applies (`None` ⇒ depth + cycle only).
+    /// See [`hop_budget_tokens`].
+    pub hop_max_tokens: Option<usize>,
 }
 
 impl MomentRequest {
@@ -96,6 +115,8 @@ impl MomentRequest {
             kb_block_type: None,
             knowledge_limit: None,
             activation_enabled: true,
+            hop_edges: None,
+            hop_max_tokens: None,
         }
     }
 
@@ -166,6 +187,22 @@ impl MomentRequest {
     #[must_use]
     pub const fn with_activation_enabled(mut self, enabled: bool) -> Self {
         self.activation_enabled = enabled;
+        self
+    }
+
+    /// Provide preloaded relation-hop edges (V1.149 P1, spec §5). `None`
+    /// (the default) keeps the activation-only P0 behavior.
+    #[must_use]
+    pub fn with_hop_edges(mut self, edges: Vec<HopEdge>) -> Self {
+        self.hop_edges = Some(edges);
+        self
+    }
+
+    /// Cap the hop token budget (chars/4, spec Q1). See [`hop_budget_tokens`]
+    /// for how the cap combines with `max_tokens`.
+    #[must_use]
+    pub const fn with_hop_max_tokens(mut self, cap: usize) -> Self {
+        self.hop_max_tokens = Some(cap);
         self
     }
 }
@@ -279,39 +316,7 @@ impl MomentContext {
     /// `---STAGE0:PERSONALITY:END---`). Falls back to the markdown-header
     /// heuristic for legacy content without delimiters.
     fn split_stage0_personality(&self) -> (String, String) {
-        let ctx = &self.stage0_context;
-
-        // Primary path: structured delimiters
-        if let (Some(start_pos), Some(end_pos)) = (
-            ctx.find(STAGE0_PERSONALITY_START),
-            ctx.find(STAGE0_PERSONALITY_END),
-        ) {
-            let content_start = start_pos + STAGE0_PERSONALITY_START.len();
-            if end_pos > content_start {
-                let personality_section = ctx[content_start..end_pos].to_string();
-                let rest = format!(
-                    "{}{}",
-                    &ctx[..start_pos],
-                    &ctx[end_pos + STAGE0_PERSONALITY_END.len()..]
-                );
-                return (personality_section, rest);
-            }
-        }
-
-        // Legacy fallback: markdown-header heuristic
-        ctx.find("## Personality").map_or_else(
-            || (String::new(), ctx.clone()),
-            |pos| {
-                let after_personality_header = &ctx[pos..];
-                let end_of_personality = after_personality_header[14..] // skip "## Personality"
-                    .find("\n## ")
-                    .map_or(after_personality_header.len(), |i| 14 + i);
-
-                let personality_section = ctx[pos..pos + end_of_personality].to_string();
-                let rest = format!("{}{}", &ctx[..pos], &ctx[pos + end_of_personality..]);
-                (personality_section, rest)
-            },
-        )
+        split_stage0_personality(&self.stage0_context)
     }
 
     /// Truncate a section to fit within `max_chars`, returning remaining chars.
@@ -340,6 +345,81 @@ impl MomentContext {
             truncated
         }
     }
+}
+
+/// Extract the personality section from a Stage-0 context string — the shared
+/// helper behind [`MomentContext::split_stage0_personality`] (delimiter
+/// protocol first, legacy `## Personality` heuristic fallback). The relation-
+/// hop budget reuses it so the personality reservation matches exactly what
+/// cross-domain truncation protects (personality is **never** truncated).
+fn split_stage0_personality(ctx: &str) -> (String, String) {
+    // Primary path: structured delimiters
+    if let (Some(start_pos), Some(end_pos)) = (
+        ctx.find(STAGE0_PERSONALITY_START),
+        ctx.find(STAGE0_PERSONALITY_END),
+    ) {
+        let content_start = start_pos + STAGE0_PERSONALITY_START.len();
+        if end_pos > content_start {
+            let personality_section = ctx[content_start..end_pos].to_string();
+            let rest = format!(
+                "{}{}",
+                &ctx[..start_pos],
+                &ctx[end_pos + STAGE0_PERSONALITY_END.len()..]
+            );
+            return (personality_section, rest);
+        }
+    }
+
+    // Legacy fallback: markdown-header heuristic
+    ctx.find("## Personality").map_or_else(
+        || (String::new(), ctx.to_string()),
+        |pos| {
+            let after_personality_header = &ctx[pos..];
+            let end_of_personality = after_personality_header[14..] // skip "## Personality"
+                .find("\n## ")
+                .map_or(after_personality_header.len(), |i| 14 + i);
+
+            let personality_section = ctx[pos..pos + end_of_personality].to_string();
+            let rest = format!("{}{}", &ctx[..pos], &ctx[pos + end_of_personality..]);
+            (personality_section, rest)
+        },
+    )
+}
+
+/// Hop token budget per iteration spec Q1 (architect lock).
+///
+/// Formula: when `max_tokens` is set, the hop budget is the cross-domain
+/// remainder **after** reserving personality (never truncated) +
+/// `world_state` + `timeline`, all estimated at chars/4:
+///
+/// `hop_budget = (max_tokens*4 − personality_chars − world_state_chars −
+/// timeline_chars) / 4`, bounded by the caller-provided `hop_max_tokens` cap.
+///
+/// The engine then further subtracts the primary-matched KB estimate
+/// (chars/4 of summary-or-name) before the hop pass, so the effective cap
+/// honors "hop remainder after primary KB + `world_state` + `timeline`
+/// estimates". When `max_tokens` is absent, only the caller cap applies
+/// (`None` ⇒ depth + cycle only).
+fn hop_budget_tokens(
+    request: &MomentRequest,
+    stage0_context: &str,
+    world_state: Option<&str>,
+    timeline: Option<&str>,
+) -> Option<usize> {
+    let Some(max_tokens) = request.max_tokens else {
+        return request.hop_max_tokens;
+    };
+    let max_chars = max_tokens.saturating_mul(4);
+    let (personality, _) = split_stage0_personality(stage0_context);
+    let reserved = personality.chars().count()
+        + world_state.map_or(0, |text| text.chars().count())
+        + timeline.map_or(0, |text| text.chars().count());
+    let remainder = max_chars.saturating_sub(reserved) / 4;
+    Some(
+        request
+            .hop_max_tokens
+            .map_or(remainder, |cap| remainder.min(cap)),
+    )
 }
 
 /// Assemble moment context from all domain sources.
@@ -416,13 +496,40 @@ where
                     // entries (no activation module) remain in matched.
                     // V1.146 P4 T3: capture the full ActivationResult for
                     // diagnostic trace emission.
-                    let result = nexus_spoke_adapter::adapter::activation::apply_activation(
-                        &entries,
-                        &activation_scan_text,
-                        &[],
+                    // V1.149 P1: when preloaded relation-hop edges are present,
+                    // the engine also BFS-expands up to 2 graph hops from
+                    // primary-fired/constant entries within the hop token
+                    // budget (spec Q1 — `hop_budget_tokens`); hop-pulled
+                    // entries join matched without re-firing keys.
+                    let activation_result = request.hop_edges.as_deref().map_or_else(
+                        || {
+                            nexus_spoke_adapter::adapter::activation::apply_activation(
+                                &entries,
+                                &activation_scan_text,
+                                &[],
+                            )
+                        },
+                        |edges| {
+                            let hop_config = HopConfig {
+                                max_hops: 2, // architect lock Q1
+                                max_hop_tokens: hop_budget_tokens(
+                                    request,
+                                    &stage0_context,
+                                    world_state.as_deref(),
+                                    timeline.as_deref(),
+                                ),
+                            };
+                            apply_activation_with_hops(
+                                &entries,
+                                &activation_scan_text,
+                                &[],
+                                edges,
+                                &hop_config,
+                            )
+                        },
                     );
-                    activation_trace = Some(result.trace);
-                    result.matched
+                    activation_trace = Some(activation_result.trace);
+                    activation_result.matched
                 } else {
                     entries
                 };
@@ -1333,5 +1440,321 @@ mod tests {
             !kb_text.contains("Ghost"),
             "Ghost must be filtered (key appears nowhere)"
         );
+    }
+
+    // ── V1.149 P1: relation-hop expansion (fixture edges, no DB) ──────
+
+    fn hop_edge(from_id: &str, to_id: &str, relation_type: &str) -> HopEdge {
+        HopEdge {
+            relation_id: format!("rel_{from_id}_{to_id}"),
+            from_id: from_id.to_string(),
+            to_id: to_id.to_string(),
+            relation_type: relation_type.to_string(),
+        }
+    }
+
+    fn stage0_with(personality: &str) -> Stage0Assembly {
+        Stage0Assembly {
+            personality: personality.to_string(),
+            ..minimal_stage0()
+        }
+    }
+
+    /// Seed: Harbor (fires on "king"), Dawn Dock (key "dragon" — no match),
+    /// Harbor Guild (key "elf" — no match). Edges: Harbor→Dawn Dock→Guild.
+    async fn seed_hop_fixture(stores: &TestStores) {
+        stores
+            .kb
+            .insert_knowledge_entry(kb_entry_with_modules(
+                "wld_1",
+                nexus_contracts::BlockType::Scene,
+                "Harbor",
+                "kb_harbor",
+                Some(serde_json::json!({"activation": {"keys": ["king"], "logic": "and_any"}})),
+            ))
+            .await
+            .unwrap();
+        stores
+            .kb
+            .insert_knowledge_entry(kb_entry_with_modules(
+                "wld_1",
+                nexus_contracts::BlockType::Scene,
+                "Dawn Dock",
+                "kb_dock",
+                Some(serde_json::json!({"activation": {"keys": ["dragon"], "logic": "and_any"}})),
+            ))
+            .await
+            .unwrap();
+        stores
+            .kb
+            .insert_knowledge_entry(kb_entry_with_modules(
+                "wld_1",
+                nexus_contracts::BlockType::Organization,
+                "Harbor Guild",
+                "kb_guild",
+                Some(serde_json::json!({"activation": {"keys": ["elf"], "logic": "and_any"}})),
+            ))
+            .await
+            .unwrap();
+    }
+
+    fn hop_fixture_edges() -> Vec<HopEdge> {
+        vec![
+            hop_edge("kb_harbor", "kb_dock", "located_in"),
+            hop_edge("kb_dock", "kb_guild", "member_of"),
+        ]
+    }
+
+    #[tokio::test]
+    async fn activation_hops_pull_graph_neighbors() {
+        // Harbor fires on "king" → BFS pulls Dawn Dock (1 hop) and Harbor
+        // Guild (2 hops) without keyword-tagging them (spec §5 product story).
+        let stores = TestStores::new();
+        seed_hop_fixture(&stores).await;
+
+        let request = MomentRequest::new(stage0_with("A king rules the land."))
+            .with_world("wld_1")
+            .with_hop_edges(hop_fixture_edges());
+        let ctx = assemble_moment(&request, &stores.narrative, &stores.kb, &stores.knowledge).await;
+
+        let kb_text = ctx.world_kb.expect("world_kb must be present");
+        assert!(kb_text.contains("Harbor"), "primary hit present");
+        assert!(
+            kb_text.contains("Dawn Dock"),
+            "1-hop neighbor pulled without keyword match"
+        );
+        assert!(
+            kb_text.contains("Harbor Guild"),
+            "2-hop neighbor pulled without keyword match"
+        );
+        // Hop trace rows carry the hop fields.
+        let trace = ctx.activation_trace.expect("trace present");
+        let dock_hop = trace
+            .iter()
+            .find(|t| t.entry_id == "kb_dock" && t.accepted)
+            .expect("Dawn Dock hop row");
+        assert_eq!(dock_hop.hop_origin_entry_id.as_deref(), Some("kb_harbor"));
+        assert_eq!(dock_hop.hop_depth, Some(1));
+        let guild_hop = trace
+            .iter()
+            .find(|t| t.entry_id == "kb_guild" && t.accepted)
+            .expect("Harbor Guild hop row");
+        assert_eq!(guild_hop.hop_origin_entry_id.as_deref(), Some("kb_dock"));
+        assert_eq!(guild_hop.hop_depth, Some(2));
+    }
+
+    #[tokio::test]
+    async fn activation_hops_without_edges_is_p0_only() {
+        // No preloaded edges ⇒ activation-only behavior (P0): neighbors stay
+        // filtered out.
+        let stores = TestStores::new();
+        seed_hop_fixture(&stores).await;
+
+        let request = MomentRequest::new(stage0_with("A king rules the land.")).with_world("wld_1");
+        let ctx = assemble_moment(&request, &stores.narrative, &stores.kb, &stores.knowledge).await;
+
+        let kb_text = ctx.world_kb.expect("world_kb must be present");
+        assert!(kb_text.contains("Harbor"), "primary hit present");
+        assert!(!kb_text.contains("Dawn Dock"), "no edges ⇒ no hop pull");
+        assert!(!kb_text.contains("Harbor Guild"), "no edges ⇒ no hop pull");
+    }
+
+    #[tokio::test]
+    async fn activation_hops_off_switch_returns_all_entries_no_hop() {
+        // Off-switch (V1.146 flag-off semantics): even with hop edges
+        // preloaded, every entry is returned unchanged and nothing hops.
+        let stores = TestStores::new();
+        seed_hop_fixture(&stores).await;
+
+        let request = MomentRequest::new(stage0_with("A king rules the land."))
+            .with_world("wld_1")
+            .with_activation_enabled(false)
+            .with_hop_edges(hop_fixture_edges());
+        let ctx = assemble_moment(&request, &stores.narrative, &stores.kb, &stores.knowledge).await;
+
+        let kb_text = ctx.world_kb.expect("world_kb must be present");
+        assert!(kb_text.contains("Harbor"));
+        assert!(kb_text.contains("Dawn Dock"), "off-switch: all entries");
+        assert!(kb_text.contains("Harbor Guild"), "off-switch: all entries");
+        assert!(
+            ctx.activation_trace.is_none(),
+            "off-switch: no activation trace at all"
+        );
+    }
+
+    #[tokio::test]
+    async fn activation_hops_neutral_only_byte_equivalent() {
+        // Neutral-only golden under hops: no activation modules ⇒ no seeds ⇒
+        // no hop pull ⇒ world_kb byte-identical with and without edges
+        // (the neutral-only ship guarantee, spec §1, holds under hops).
+        //
+        // Both runs share ONE store: `InMemoryKbStore` iterates a
+        // per-instance-seeded `HashMap`, so two separately-seeded stores can
+        // return identical entries in different orders (flaky test, fixed
+        // T3); reads are pure, so a single store keeps the input order
+        // identical and the byte-comparison meaningful.
+        let stores = TestStores::new();
+        for (name, id) in [("Hero", "kb_n1"), ("Castle", "kb_n2")] {
+            stores
+                .kb
+                .insert_knowledge_entry(kb_entry_with_modules(
+                    "wld_1",
+                    nexus_contracts::BlockType::Scene,
+                    name,
+                    id,
+                    None,
+                ))
+                .await
+                .unwrap();
+        }
+
+        let request_plain = MomentRequest::new(stage0_with("Any text.")).with_world("wld_1");
+        let ctx_plain = assemble_moment(
+            &request_plain,
+            &stores.narrative,
+            &stores.kb,
+            &stores.knowledge,
+        )
+        .await;
+
+        let request_edges = MomentRequest::new(stage0_with("Any text."))
+            .with_world("wld_1")
+            .with_hop_edges(hop_fixture_edges());
+        let ctx_edges = assemble_moment(
+            &request_edges,
+            &stores.narrative,
+            &stores.kb,
+            &stores.knowledge,
+        )
+        .await;
+
+        assert_eq!(
+            ctx_edges.world_kb, ctx_plain.world_kb,
+            "neutral-only World: hop edges must not change assembled output bytes"
+        );
+        let trace_edges = ctx_edges
+            .activation_trace
+            .as_ref()
+            .map(|t| serde_json::to_string(t).expect("trace serializes"));
+        let trace_plain = ctx_plain
+            .activation_trace
+            .as_ref()
+            .map(|t| serde_json::to_string(t).expect("trace serializes"));
+        assert_eq!(
+            trace_edges, trace_plain,
+            "neutral-only World: trace identical (no hop rows)"
+        );
+    }
+
+    // ── V1.149 P1: hop budget (spec Q1 — AC-I2 #4, MCA half) ──────────
+
+    #[test]
+    fn hop_budget_personality_reservation_can_zero_the_budget() {
+        // AC-I2 #4: personality is reserved FIRST (never truncated), so a
+        // personality section that alone exceeds max_chars leaves zero hop
+        // budget — a large caller cap cannot override the reservation.
+        let stage0 = stage0_with(&"P".repeat(200)); // section ≈ 219 chars
+        let request = MomentRequest::new(stage0.clone())
+            .with_max_tokens(50) // max_chars 200 < personality section
+            .with_hop_max_tokens(1000);
+        assert_eq!(
+            hop_budget_tokens(&request, &stage0.assemble(), None, None),
+            Some(0)
+        );
+    }
+
+    #[test]
+    fn hop_budget_caller_cap_bounds_the_remainder() {
+        // The caller-provided hop cap is an upper bound on the computed
+        // cross-domain remainder.
+        let stage0 = stage0_with("small");
+        let request = MomentRequest::new(stage0.clone())
+            .with_max_tokens(1000) // remainder ≈ 994 tokens
+            .with_hop_max_tokens(7);
+        assert_eq!(
+            hop_budget_tokens(&request, &stage0.assemble(), None, None),
+            Some(7)
+        );
+    }
+
+    #[test]
+    fn hop_budget_no_max_tokens_passes_through_caller_cap() {
+        // No `max_tokens` ⇒ no cross-domain remainder to compute: the caller
+        // cap passes through unchanged (`None` stays `None` — depth + cycle
+        // only, spec Q1).
+        let stage0 = stage0_with("Any");
+        let capped = MomentRequest::new(stage0.clone()).with_hop_max_tokens(9);
+        assert_eq!(
+            hop_budget_tokens(&capped, &stage0.assemble(), None, None),
+            Some(9)
+        );
+        let uncapped = MomentRequest::new(stage0.clone());
+        assert_eq!(
+            hop_budget_tokens(&uncapped, &stage0.assemble(), None, None),
+            None
+        );
+    }
+
+    #[test]
+    fn hop_budget_subtracts_world_state_and_timeline() {
+        // Formula (spec Q1): `(max_tokens*4 − personality_section −
+        // world_state − timeline) / 4`, floored. The personality section
+        // length is derived from the assembled delimiter format so the
+        // assertion pins the exact arithmetic.
+        let stage0 = stage0_with("A king rules the land.");
+        let assembled = stage0.assemble();
+        let section_chars = {
+            let start = assembled
+                .find(STAGE0_PERSONALITY_START)
+                .expect("start token")
+                + STAGE0_PERSONALITY_START.len();
+            let end = assembled.find(STAGE0_PERSONALITY_END).expect("end token");
+            assembled[start..end].chars().count()
+        };
+        let ws = "ws";
+        let tl = "tl";
+        let request = MomentRequest::new(stage0).with_max_tokens(100); // 400 chars
+        let budget = hop_budget_tokens(&request, &assembled, Some(ws), Some(tl));
+        let expected = (400 - section_chars - ws.chars().count() - tl.chars().count()) / 4;
+        assert_eq!(budget, Some(expected));
+    }
+
+    #[tokio::test]
+    async fn activation_hops_tight_budget_keeps_personality_and_gates_pulls() {
+        // AC-I2 #4 end-to-end: with `max_tokens` set, the hop budget is the
+        // cross-domain remainder AFTER reserving personality (never
+        // truncated), and the engine stops pulling when the remainder is
+        // exhausted.
+        //
+        // Arithmetic (spec Q1): personality section = "\n## Personality\n\n"
+        // + "A king rules the land." (21 chars) + "\n\n" = 40 chars.
+        // max_tokens 14 ⇒ max_chars 56 ⇒ hop budget (56 − 40) / 4 = 4. The
+        // engine reserves Harbor's primary-matched estimate (5/4 = 1) ⇒ 3
+        // left. Dawn Dock (9/4 = 2) fits ⇒ pulled; Harbor Guild (12/4 = 3)
+        // exceeds ⇒ skipped.
+        let stores = TestStores::new();
+        seed_hop_fixture(&stores).await;
+
+        let request = MomentRequest::new(stage0_with("A king rules the land."))
+            .with_world("wld_1")
+            .with_max_tokens(14)
+            .with_hop_edges(hop_fixture_edges());
+        let ctx = assemble_moment(&request, &stores.narrative, &stores.kb, &stores.knowledge).await;
+
+        // Personality survives the tight budget untouched (never truncated):
+        // the section content + heading are preserved (the truncation
+        // reconstruction keeps the personality section verbatim — delimiter
+        // tokens themselves live in the truncated remainder).
+        assert!(ctx.stage0_context.contains("A king rules the land."));
+        assert!(ctx.stage0_context.contains("## Personality"));
+
+        // Budget-gated pull: Dock (fits the remainder) is accepted via hop,
+        // Guild (exceeds it) is not.
+        let trace = ctx.activation_trace.expect("trace present");
+        assert!(trace.iter().any(|t| t.entry_id == "kb_dock" && t.accepted));
+        assert!(trace
+            .iter()
+            .any(|t| t.entry_id == "kb_guild" && !t.accepted));
+        assert!(!trace.iter().any(|t| t.entry_id == "kb_guild" && t.accepted));
     }
 }

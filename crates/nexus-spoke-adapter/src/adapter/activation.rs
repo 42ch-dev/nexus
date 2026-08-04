@@ -67,6 +67,45 @@
 //! **always** in `matched` — identical to V1.146 flag-off behavior. `constant:
 //! true` entries are always-on seeds, sorted first by the engine (V1.149 P0 T3
 //! ordering — constant band first, spec §4).
+//!
+//! # Relation hops (V1.149 P1 — spec §5; iteration spec:
+//! `.mstar/iterations/v1.149/specs/fl-l-w4-activation.md` §5)
+//!
+//! When a primary-matched or `constant`-seed entry fires, the engine BFS-
+//! expands **up to 2** graph hops over the world's confirmed relation graph
+//! and pulls graph-adjacent entries into `matched` ([`apply_activation_with_hops`]).
+//! Graph recursion, not string-mention recursion: an author no longer has to
+//! keyword-tag every related entry.
+//!
+//! - **Edge source (`RelationPort` gap):** spoke 0.8.2 `RelationPort` is
+//!   get/put only — there is no list-by-entity on the trait. The hop edge
+//!   source is the storage list primitive `list_relationships_for_world`
+//!   (confirmed graph only) loaded by the inherent adapter helper
+//!   [`crate::adapter::relation_port::NexusAdapter::list_hop_edges_for_world`],
+//!   mapped to engine-local [`HopEdge`]s. Not a `RelationPort` trait method.
+//! - **Adjacency:** each edge is treated as **undirected** for neighbor
+//!   discovery (both endpoints connect); the trace still records the stored
+//!   `relation_type` / `relation_id`.
+//! - **Seeds:** only primary-fired + `constant` entries (neutral entries never
+//!   seed a hop — that is what keeps neutral-only Worlds byte-equivalent).
+//! - **Dedup:** entries already accepted by the primary pass (neutral ones
+//!   included) are pre-marked visited, so hop expansion never re-pulls them;
+//!   hop-pulled entries are removed from `unmatched` (matched ∩ unmatched = ∅).
+//! - **No re-fire:** hop-pulled entries never re-run [`apply_activation`]
+//!   key evaluation (spec Q5) — they enter `matched` with a hop trace row.
+//! - **Cycle safety:** `visited` on `entry_id` — A↔B and A→B→A terminate.
+//! - **Budget (spec Q1):** when `HopConfig::max_hop_tokens` is set, the caller
+//!   passes the cross-domain remainder after reserving personality (never
+//!   truncated) and `world_state`/timeline (computed in MCA); the engine
+//!   further subtracts the primary-matched KB estimate (chars/4 of
+//!   summary-or-name) and stops before adding a hopped entry whose estimate
+//!   would exceed the remainder. `None` ⇒ depth + cycle only.
+//! - **Trace:** pulled entries carry `hop_origin_entry_id`, `hop_depth`,
+//!   `source_relation_type`, `source_relation_id` on [`ActivationTraceEntry`]
+//!   (skipped from serialization for primary-only rows).
+
+use std::cmp::Ordering;
+use std::collections::{HashMap, HashSet};
 
 use nexus_knowledge::world_kb::knowledge_entry::WorldKbEntry;
 use serde::{Deserialize, Serialize};
@@ -98,6 +137,67 @@ pub struct ActivationTraceEntry {
     pub reason: String,
     /// Whether the entry ended up in `matched`.
     pub accepted: bool,
+    /// V1.149 P1 (spec §5): entry the hop originated from — set only on
+    /// hop-pulled rows.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hop_origin_entry_id: Option<String>,
+    /// V1.149 P1: hop depth (1..=`max_hops`) — set only on hop-pulled rows.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hop_depth: Option<u32>,
+    /// V1.149 P1: stored `relation_type` of the edge that first reached the
+    /// entry — set only on hop-pulled rows.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_relation_type: Option<String>,
+    /// V1.149 P1: stored `relation_id` of the edge that first reached the
+    /// entry — set only on hop-pulled rows.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_relation_id: Option<String>,
+}
+
+/// Engine-local relation edge for hop expansion (spec §5) — **not** a spoke
+/// wire type.
+///
+/// Produced by the adapter inherent loader
+/// `NexusAdapter::list_hop_edges_for_world` (the `RelationPort` gap: spoke's
+/// port is get/put only, so the storage list primitive is the edge source).
+#[derive(Debug, Clone)]
+pub struct HopEdge {
+    pub relation_id: String,
+    pub from_id: String,
+    pub to_id: String,
+    pub relation_type: String,
+}
+
+/// Hop-expansion knobs (spec Q1).
+#[derive(Debug, Clone, Copy)]
+pub struct HopConfig {
+    /// Maximum BFS depth from each seed entry — architect lock: **2**.
+    pub max_hops: u32,
+    /// Hop token budget (chars/4) **after** the caller's personality +
+    /// `world_state`/`timeline` reservations; the engine further subtracts
+    /// the primary-matched KB estimate before the hop pass. `None` ⇒ depth +
+    /// cycle only (no token stop).
+    pub max_hop_tokens: Option<usize>,
+}
+
+impl Default for HopConfig {
+    fn default() -> Self {
+        Self {
+            max_hops: 2,
+            max_hop_tokens: None,
+        }
+    }
+}
+
+/// Result of [`expand_relation_hops`] — the BFS pull set + its trace rows.
+#[derive(Debug, Clone)]
+pub struct HopExpandResult {
+    /// Entries pulled by the hop BFS, in discovery order (BFS level order).
+    pub pulled: Vec<WorldKbEntry>,
+    /// One accepted trace row per pulled entry, carrying the hop fields
+    /// (`hop_origin_entry_id`, `hop_depth`, `source_relation_type`,
+    /// `source_relation_id`).
+    pub hop_trace: Vec<ActivationTraceEntry>,
 }
 
 /// Emit-order inputs captured during classify (V1.149 P0 T3 — spec §4).
@@ -387,10 +487,264 @@ pub fn apply_activation(
     scan_text: &str,
     constant_seed_ids: &[String],
 ) -> ActivationResult {
+    let mut pass = run_primary_pass(entries, scan_text, constant_seed_ids);
+    sort_matched(&mut pass.matched);
+    ActivationResult {
+        matched: pass.matched.into_iter().map(|(entry, _)| entry).collect(),
+        unmatched: pass.unmatched,
+        trace: pass.trace,
+    }
+}
+
+/// Apply lore activation **and** relation-hop expansion (V1.149 P1, spec §5).
+///
+/// Runs the same primary classification pass as [`apply_activation`], then —
+/// when `edges` is non-empty and `hop.max_hops > 0` — BFS-expands up to
+/// `hop.max_hops` hops from every **seed** entry (primary-fired or `constant`
+/// only; neutral entries never seed) and pulls graph-adjacent entries into
+/// `matched`. Pulled entries are **not** re-evaluated against
+/// `modules.activation` keys (spec Q5) and carry hop fields on their trace
+/// rows. Entries already accepted by the primary pass (neutral ones included)
+/// are pre-marked visited, so hop expansion never pulls (or duplicates) an
+/// entry already in `matched`; a hop-pulled entry leaves `unmatched`.
+///
+/// Emit ordering after merge is the spec §4 sort (constant band first,
+/// priority desc → order asc → stable): pulled entries join the non-constant
+/// band with their own `priority`/`order` keys; on exact sort-key ties the
+/// stable sort keeps primary-pass entries before pulled ones.
+///
+/// # Budget contract (spec Q1 — split between caller and engine)
+///
+/// `hop.max_hop_tokens` is the caller-provided cap: MCA passes the
+/// cross-domain remainder **after** reserving personality (never truncated),
+/// `world_state` and `timeline` at chars/4. The engine then subtracts the
+/// primary-matched KB estimate (same chars/4 estimator) and stops before
+/// adding a hopped entry whose estimate would exceed the remainder. `None`
+/// ⇒ depth + cycle only.
+///
+/// # Arguments
+///
+/// * `entries` — Slice of `WorldKB` entries to classify (the full candidate
+///   pool — hop expansion only reaches entries present here; an edge endpoint
+///   outside the pool is skipped).
+/// * `scan_text` — See [`apply_activation`].
+/// * `constant_seed_ids` — See [`apply_activation`].
+/// * `edges` — Confirmed relation edges of the world (engine-local
+///   [`HopEdge`]s; loaded by the adapter helper, never by MCA itself).
+/// * `hop` — Hop knobs ([`HopConfig`]).
+#[must_use]
+pub fn apply_activation_with_hops(
+    entries: &[WorldKbEntry],
+    scan_text: &str,
+    constant_seed_ids: &[String],
+    edges: &[HopEdge],
+    hop: &HopConfig,
+) -> ActivationResult {
+    let mut primary = run_primary_pass(entries, scan_text, constant_seed_ids);
+
+    if !edges.is_empty() && hop.max_hops > 0 {
+        // Spec Q1: the caller already reserved personality/world_state/
+        // timeline; the engine reserves the primary-matched KB estimate.
+        let budget = hop.max_hop_tokens.map(|budget| {
+            let primary_estimate: usize = primary
+                .matched
+                .iter()
+                .map(|(entry, _)| estimate_tokens(entry))
+                .sum();
+            budget.saturating_sub(primary_estimate)
+        });
+        let config = HopConfig {
+            max_hops: hop.max_hops,
+            max_hop_tokens: budget,
+        };
+        let pool: HashMap<String, WorldKbEntry> = entries
+            .iter()
+            .map(|entry| (entry.entry_id.clone(), entry.clone()))
+            .collect();
+        // QC C-001: every primary-matched entry (neutral ones included) is
+        // pre-marked visited, so hop expansion never re-pulls an entry that
+        // is already in `matched` — and never traverses through it.
+        let pre_visited: Vec<String> = primary
+            .matched
+            .iter()
+            .map(|(entry, _)| entry.entry_id.clone())
+            .collect();
+        let expanded = expand_relation_hops(&primary.seed_ids, &pre_visited, &pool, edges, &config);
+
+        // QC2 F-001: a primary-missed entry that the hop pass pulled must not
+        // also stay in `unmatched` — matched ∩ unmatched = ∅ after this.
+        let pulled_ids: HashSet<String> = expanded
+            .pulled
+            .iter()
+            .map(|entry| entry.entry_id.clone())
+            .collect();
+        primary
+            .unmatched
+            .retain(|entry| !pulled_ids.contains(&entry.entry_id));
+
+        primary
+            .matched
+            .extend(expanded.pulled.into_iter().map(|entry| {
+                let sort_key = ActivationSortKey::from_activation(
+                    parse_activation(&entry).as_ref(),
+                    &entry.entry_id,
+                    constant_seed_ids,
+                );
+                (entry, sort_key)
+            }));
+        primary.trace.extend(expanded.hop_trace);
+    }
+
+    sort_matched(&mut primary.matched);
+    ActivationResult {
+        matched: primary
+            .matched
+            .into_iter()
+            .map(|(entry, _)| entry)
+            .collect(),
+        unmatched: primary.unmatched,
+        trace: primary.trace,
+    }
+}
+
+/// BFS/level hop expansion (V1.149 P1 — spec §5).
+///
+/// From `seeds` (primary-fired/`constant` entry ids), walks the **undirected**
+/// adjacency of `edges` level by level, up to `config.max_hops`, pulling
+/// entries that exist in `entry_pool` into `pulled` with a hop trace row
+/// (`hop_origin_entry_id` = the origin entry of the edge that first reached
+/// it, `hop_depth`, `source_relation_type`, `source_relation_id`).
+///
+/// `pre_visited` carries entry ids that are **already accepted** by the caller
+/// (the primary `matched` set, neutral entries included). They are pre-marked
+/// `visited` so they are never pulled a second time and never act as BFS
+/// waypoints — only `seeds` start the traversal (spec §5 seed rule).
+///
+/// Guarantees:
+/// - **Cycle-safe:** `visited` on `entry_id` (seeds and `pre_visited`
+///   pre-marked; A↔B and A→B→A terminate; self-loops are no-ops).
+/// - **No re-fire:** pulled entries are never evaluated against
+///   `modules.activation` keys (spec Q5).
+/// - **Budget:** when `config.max_hop_tokens` is `Some`, an entry whose
+///   estimate (`chars/4` of summary-or-name) would exceed the remaining
+///   budget is skipped (and marked visited — the budget is monotonic, so it
+///   can never fit later); over-budget skips are silent (no trace row).
+///   `None` ⇒ depth + cycle only.
+/// - **Deterministic:** seeds are processed in order, edges in slice order;
+///   the first edge to reach an entry wins its trace.
+///
+/// An edge endpoint that is not a candidate entry (outside `entry_pool`, e.g.
+/// a key block not in the fetched set) is skipped silently — hop expansion
+/// only reaches entries present in the candidate pool.
+// plan-locked signature (plan T1): engine-internal `HashMap<String, WorldKbEntry>`
+// with the default hasher — generalizing over hashers would be dead flexibility.
+#[allow(clippy::implicit_hasher)]
+#[must_use]
+pub fn expand_relation_hops(
+    seeds: &[String],
+    pre_visited: &[String],
+    entry_pool: &HashMap<String, WorldKbEntry>,
+    edges: &[HopEdge],
+    config: &HopConfig,
+) -> HopExpandResult {
+    // Undirected adjacency index: every edge connects both endpoints (spec
+    // §5 adjacency rule), so both endpoints carry the edge.
+    let mut adjacency: HashMap<&str, Vec<&HopEdge>> = HashMap::new();
+    for edge in edges {
+        adjacency
+            .entry(edge.from_id.as_str())
+            .or_default()
+            .push(edge);
+        adjacency.entry(edge.to_id.as_str()).or_default().push(edge);
+    }
+
+    let mut visited: HashSet<String> = seeds.iter().chain(pre_visited).cloned().collect();
+    let mut pulled: Vec<WorldKbEntry> = Vec::new();
+    let mut hop_trace: Vec<ActivationTraceEntry> = Vec::new();
+    let mut remaining = config.max_hop_tokens.unwrap_or(usize::MAX);
+
+    let mut frontier: Vec<String> = seeds.to_vec();
+    for depth in 1..=config.max_hops {
+        let mut next_level: Vec<String> = Vec::new();
+        for origin_id in &frontier {
+            let Some(origin_edges) = adjacency.get(origin_id.as_str()) else {
+                continue;
+            };
+            for edge in origin_edges {
+                let neighbor_id = if edge.from_id == *origin_id {
+                    &edge.to_id
+                } else {
+                    &edge.from_id
+                };
+                if !visited.insert(neighbor_id.clone()) {
+                    continue;
+                }
+                let Some(entry) = entry_pool.get(neighbor_id) else {
+                    continue;
+                };
+                let estimate = estimate_tokens(entry);
+                if estimate > remaining {
+                    continue;
+                }
+                remaining -= estimate;
+                hop_trace.push(ActivationTraceEntry {
+                    entry_id: neighbor_id.clone(),
+                    canonical_name: entry.canonical_name.clone(),
+                    reason: format!(
+                        "relation hop (depth {depth}): {} from {origin_id}",
+                        edge.relation_type
+                    ),
+                    accepted: true,
+                    hop_origin_entry_id: Some(origin_id.clone()),
+                    hop_depth: Some(depth),
+                    source_relation_type: Some(edge.relation_type.clone()),
+                    source_relation_id: Some(edge.relation_id.clone()),
+                });
+                pulled.push(entry.clone());
+                next_level.push(neighbor_id.clone());
+            }
+        }
+        frontier = next_level;
+    }
+
+    HopExpandResult { pulled, hop_trace }
+}
+
+/// Token estimate for one entry: `chars/4` of summary-or-name (plan T1; the
+/// same estimator reserves the primary-matched KB cost and gates each hop).
+fn estimate_tokens(entry: &WorldKbEntry) -> usize {
+    let text = entry
+        .body
+        .as_ref()
+        .and_then(|body| body.summary.as_ref())
+        .map_or(entry.canonical_name.as_str(), String::as_str);
+    text.chars().count() / 4
+}
+
+/// The primary classification pass shared by [`apply_activation`] and
+/// [`apply_activation_with_hops`].
+///
+/// In addition to the P0 output (`matched` with sort keys, `unmatched`,
+/// `trace`), it derives `seed_ids` — the ids of accepted entries that
+/// primary-fired or are `constant` seeds (neutral entries never seed a hop,
+/// which keeps neutral-only Worlds byte-equivalent under hops).
+struct PrimaryPassOutput {
+    matched: Vec<(WorldKbEntry, ActivationSortKey)>,
+    unmatched: Vec<WorldKbEntry>,
+    trace: Vec<ActivationTraceEntry>,
+    seed_ids: Vec<String>,
+}
+
+fn run_primary_pass(
+    entries: &[WorldKbEntry],
+    scan_text: &str,
+    constant_seed_ids: &[String],
+) -> PrimaryPassOutput {
     let base_lower = scan_text.to_lowercase();
     let mut matched: Vec<(WorldKbEntry, ActivationSortKey)> = Vec::new();
     let mut unmatched = Vec::new();
     let mut trace = Vec::new();
+    let mut seed_ids = Vec::new();
 
     for entry in entries {
         let entry_id = entry.entry_id.clone();
@@ -408,11 +762,7 @@ pub fn apply_activation(
         let scan_raw = format!("{scan_text}\n{entry_raw}");
         let scan_lower = format!("{base_lower}\n{}", entry_raw.to_lowercase());
 
-        let activation = entry
-            .modules
-            .as_ref()
-            .and_then(|m| m.get("activation"))
-            .and_then(|v| serde_json::from_value::<ActivationConfig>(v.clone()).ok());
+        let activation = parse_activation(entry);
 
         let (accepted, reason) = activation.as_ref().map_or_else(
             || {
@@ -427,7 +777,21 @@ pub fn apply_activation(
             canonical_name: canonical_name.clone(),
             reason: reason.clone(),
             accepted,
+            hop_origin_entry_id: None,
+            hop_depth: None,
+            source_relation_type: None,
+            source_relation_id: None,
         });
+
+        // V1.149 P1: hop seeds = accepted entries that primary-fired or are
+        // `constant` — NOT neutral entries (spec §5 seed rule).
+        if accepted
+            && activation.as_ref().is_some_and(|cfg| {
+                is_constant_seed(cfg, &entry_id, constant_seed_ids) || !cfg.keys.is_empty()
+            })
+        {
+            seed_ids.push(entry_id.clone());
+        }
 
         if accepted {
             matched.push((
@@ -443,23 +807,38 @@ pub fn apply_activation(
         }
     }
 
-    // V1.149 P0 T3 emit ordering (spec §4): constant band first, then priority
-    // desc → order asc → stable original index. `sort_by` is stable, so equal
-    // sort keys keep their original entry order — an all-neutral set sorts to
-    // its original order and stays byte-identical to V1.146 flag-off.
-    matched.sort_by(|(_, a), (_, b)| {
-        b.constant
-            .cmp(&a.constant)
-            .then_with(|| b.priority.total_cmp(&a.priority))
-            .then_with(|| a.order.total_cmp(&b.order))
-    });
-    let matched: Vec<WorldKbEntry> = matched.into_iter().map(|(entry, _)| entry).collect();
-
-    ActivationResult {
+    PrimaryPassOutput {
         matched,
         unmatched,
         trace,
+        seed_ids,
     }
+}
+
+/// Parse the `modules.activation` config of an entry (`None` when absent or
+/// malformed — malformed configs classify as neutral).
+fn parse_activation(entry: &WorldKbEntry) -> Option<ActivationConfig> {
+    entry
+        .modules
+        .as_ref()
+        .and_then(|modules| modules.get("activation"))
+        .and_then(|value| serde_json::from_value::<ActivationConfig>(value.clone()).ok())
+}
+
+/// Spec §4 emit ordering comparator: constant band first, `priority`
+/// descending (higher wins), `order` ascending (lower first).
+fn compare_sort_keys(a: &ActivationSortKey, b: &ActivationSortKey) -> Ordering {
+    b.constant
+        .cmp(&a.constant)
+        .then_with(|| b.priority.total_cmp(&a.priority))
+        .then_with(|| a.order.total_cmp(&b.order))
+}
+
+/// Sort the matched pairs in place (spec §4). `sort_by` is stable, so equal
+/// sort keys keep their original entry order — an all-neutral set sorts to
+/// its original order and stays byte-identical to V1.146 flag-off.
+fn sort_matched(matched: &mut [(WorldKbEntry, ActivationSortKey)]) {
+    matched.sort_by(|(_, a), (_, b)| compare_sort_keys(a, b));
 }
 
 /// Evaluate one entry against the handbook logic truth table (spec §2.1).
@@ -1574,5 +1953,828 @@ mod tests {
         assert_eq!(activation["match"], "whole_word");
         // Unknown module namespace preserved.
         assert_eq!(modules["other_module"]["version"], 1);
+    }
+
+    // ── V1.149 P1: relation-hop expansion (pure engine, fixture edges) ──
+
+    /// Build a fixture `HopEdge` (deterministic id derived from endpoints).
+    fn edge(from_id: &str, to_id: &str, relation_type: &str) -> HopEdge {
+        HopEdge {
+            relation_id: format!("rel_{from_id}_{to_id}"),
+            from_id: from_id.to_string(),
+            to_id: to_id.to_string(),
+            relation_type: relation_type.to_string(),
+        }
+    }
+
+    fn hop_ids(result: &HopExpandResult) -> Vec<&str> {
+        result.pulled.iter().map(|e| e.entry_id.as_str()).collect()
+    }
+
+    #[test]
+    fn test_expand_relation_hops_pure_api_pulls_chain_with_trace() {
+        // Direct exercise of the pure BFS API (plan T1 signature).
+        let mut pool = HashMap::new();
+        for id in ["kb_a", "kb_b", "kb_c"] {
+            let entry = entry_with_activation(id, id, "summary", None);
+            pool.insert(entry.entry_id.clone(), entry);
+        }
+        let seeds = vec!["kb_a".to_string()];
+        let edges = vec![
+            edge("kb_a", "kb_b", "located_in"),
+            edge("kb_b", "kb_c", "member_of"),
+        ];
+        let config = HopConfig::default(); // max_hops 2, no budget
+
+        let result = expand_relation_hops(&seeds, &[], &pool, &edges, &config);
+        assert_eq!(
+            hop_ids(&result),
+            ["kb_b", "kb_c"],
+            "BFS pulls level 1 then level 2"
+        );
+        assert_eq!(result.hop_trace.len(), 2);
+        // Level-1 row: origin = seed, depth 1, first edge wins.
+        let row1 = &result.hop_trace[0];
+        assert_eq!(row1.entry_id, "kb_b");
+        assert_eq!(row1.hop_origin_entry_id.as_deref(), Some("kb_a"));
+        assert_eq!(row1.hop_depth, Some(1));
+        assert_eq!(row1.source_relation_type.as_deref(), Some("located_in"));
+        assert_eq!(row1.source_relation_id.as_deref(), Some("rel_kb_a_kb_b"));
+        assert!(row1.accepted);
+        // Level-2 row: origin = the level-1 entry that reached it.
+        let row2 = &result.hop_trace[1];
+        assert_eq!(row2.entry_id, "kb_c");
+        assert_eq!(row2.hop_origin_entry_id.as_deref(), Some("kb_b"));
+        assert_eq!(row2.hop_depth, Some(2));
+        assert_eq!(row2.source_relation_type.as_deref(), Some("member_of"));
+        assert_eq!(row2.source_relation_id.as_deref(), Some("rel_kb_b_kb_c"));
+    }
+
+    #[test]
+    fn test_expand_relation_hops_pre_visited_blocks_pull_and_traversal() {
+        // QC C-001 engine level: pre-visited ids (already in `matched`) are
+        // never pulled, and the BFS does not traverse through them.
+        let mut pool = HashMap::new();
+        for id in ["kb_a", "kb_b", "kb_c"] {
+            let entry = entry_with_activation(id, id, "summary", None);
+            pool.insert(entry.entry_id.clone(), entry);
+        }
+        let seeds = vec!["kb_a".to_string()];
+        let pre_visited = vec!["kb_b".to_string()];
+        let edges = vec![
+            edge("kb_a", "kb_b", "located_in"),
+            edge("kb_b", "kb_c", "member_of"),
+        ];
+        let config = HopConfig::default();
+
+        let result = expand_relation_hops(&seeds, &pre_visited, &pool, &edges, &config);
+        assert!(
+            hop_ids(&result).is_empty(),
+            "pre-visited neighbor not pulled; chain not traversed through it"
+        );
+        assert!(result.hop_trace.is_empty());
+    }
+
+    #[test]
+    fn test_apply_activation_with_hops_one_hop_pulls_neighbor() {
+        let entries = vec![
+            entry_with_activation(
+                "kb_a",
+                "Harbor",
+                "The harbor gates.",
+                Some(activation_primary(&["king"], "and_any")),
+            ),
+            entry_with_activation(
+                "kb_b",
+                "Dawn Dock",
+                "A quiet dock.",
+                Some(activation_primary(&["dragon"], "and_any")),
+            ),
+        ];
+        let edges = vec![edge("kb_a", "kb_b", "located_in")];
+        let result = apply_activation_with_hops(
+            &entries,
+            "The king ruled.",
+            &[],
+            &edges,
+            &HopConfig::default(),
+        );
+
+        assert_eq!(
+            matched_ids(&result),
+            ["kb_a", "kb_b"],
+            "neighbor pulled into matched"
+        );
+        // B never fires on the primary pass…
+        let b_primary = result
+            .trace
+            .iter()
+            .find(|t| t.entry_id == "kb_b" && !t.accepted);
+        assert!(b_primary.is_some(), "B has a primary-pass miss row");
+        // …and is accepted only via the hop row.
+        let b_hop = result
+            .trace
+            .iter()
+            .find(|t| t.entry_id == "kb_b" && t.accepted)
+            .expect("B has a hop row");
+        assert_eq!(b_hop.hop_origin_entry_id.as_deref(), Some("kb_a"));
+        assert_eq!(b_hop.hop_depth, Some(1));
+        assert!(b_hop.reason.contains("relation hop (depth 1): located_in"));
+    }
+
+    #[test]
+    fn test_apply_activation_with_hops_two_hops_pulls_chain() {
+        let entries = vec![
+            entry_with_activation(
+                "kb_a",
+                "Harbor",
+                "The harbor gates.",
+                Some(activation_primary(&["king"], "and_any")),
+            ),
+            entry_with_activation(
+                "kb_b",
+                "Dawn Dock",
+                "A quiet dock.",
+                Some(activation_primary(&["dragon"], "and_any")),
+            ),
+            entry_with_activation(
+                "kb_c",
+                "Harbor Guild",
+                "The guild hall.",
+                Some(activation_primary(&["elf"], "and_any")),
+            ),
+        ];
+        let edges = vec![
+            edge("kb_a", "kb_b", "located_in"),
+            edge("kb_b", "kb_c", "member_of"),
+        ];
+        let result = apply_activation_with_hops(
+            &entries,
+            "The king ruled.",
+            &[],
+            &edges,
+            &HopConfig::default(),
+        );
+
+        assert_eq!(
+            matched_ids(&result),
+            ["kb_a", "kb_b", "kb_c"],
+            "2-hop chain fully pulled"
+        );
+        let c_hop = result
+            .trace
+            .iter()
+            .find(|t| t.entry_id == "kb_c" && t.accepted)
+            .expect("C has a hop row");
+        assert_eq!(c_hop.hop_depth, Some(2));
+        assert_eq!(c_hop.hop_origin_entry_id.as_deref(), Some("kb_b"));
+        assert_eq!(c_hop.source_relation_type.as_deref(), Some("member_of"));
+    }
+
+    #[test]
+    fn test_apply_activation_with_hops_a_b_cycle_terminates() {
+        // A↔B: the reverse edge must not duplicate B or loop forever.
+        let entries = vec![
+            entry_with_activation(
+                "kb_a",
+                "Harbor",
+                "The harbor gates.",
+                Some(activation_primary(&["king"], "and_any")),
+            ),
+            entry_with_activation(
+                "kb_b",
+                "Dawn Dock",
+                "A quiet dock.",
+                Some(activation_primary(&["dragon"], "and_any")),
+            ),
+        ];
+        let edges = vec![
+            edge("kb_a", "kb_b", "located_in"),
+            edge("kb_b", "kb_a", "contains"),
+        ];
+        let result = apply_activation_with_hops(
+            &entries,
+            "The king ruled.",
+            &[],
+            &edges,
+            &HopConfig::default(),
+        );
+
+        assert_eq!(
+            matched_ids(&result),
+            ["kb_a", "kb_b"],
+            "A↔B pulls B once, no dup, terminates"
+        );
+        let b_rows: Vec<_> = result
+            .trace
+            .iter()
+            .filter(|t| t.entry_id == "kb_b")
+            .collect();
+        assert_eq!(b_rows.len(), 2, "B: one primary miss + one hop row");
+        assert_eq!(
+            b_rows[1].source_relation_type.as_deref(),
+            Some("located_in"),
+            "first edge in slice order wins the trace"
+        );
+    }
+
+    #[test]
+    fn test_apply_activation_with_hops_a_to_b_to_a_terminates() {
+        // A→B→A: A is already visited (seed), so the hop back is a no-op.
+        let entries = vec![
+            entry_with_activation(
+                "kb_a",
+                "Harbor",
+                "The harbor gates.",
+                Some(activation_primary(&["king"], "and_any")),
+            ),
+            entry_with_activation(
+                "kb_b",
+                "Dawn Dock",
+                "A quiet dock.",
+                Some(activation_primary(&["dragon"], "and_any")),
+            ),
+        ];
+        let edges = vec![
+            edge("kb_a", "kb_b", "located_in"),
+            edge("kb_b", "kb_a", "located_in"),
+        ];
+        let result = apply_activation_with_hops(
+            &entries,
+            "The king ruled.",
+            &[],
+            &edges,
+            &HopConfig::default(),
+        );
+
+        assert_eq!(
+            matched_ids(&result),
+            ["kb_a", "kb_b"],
+            "A→B→A terminates with no re-pull"
+        );
+        assert_eq!(
+            result.trace.iter().filter(|t| t.entry_id == "kb_a").count(),
+            1,
+            "A has only its primary row (never hop-pulled)"
+        );
+    }
+
+    #[test]
+    fn test_apply_activation_with_hops_max_hops_cap_blocks_depth_3() {
+        let entries = vec![
+            entry_with_activation(
+                "kb_a",
+                "A",
+                "The harbor gates.",
+                Some(activation_primary(&["king"], "and_any")),
+            ),
+            entry_with_activation(
+                "kb_b",
+                "B",
+                "B.",
+                Some(activation_primary(&["b1"], "and_any")),
+            ),
+            entry_with_activation(
+                "kb_c",
+                "C",
+                "C.",
+                Some(activation_primary(&["c1"], "and_any")),
+            ),
+            entry_with_activation(
+                "kb_d",
+                "D",
+                "D.",
+                Some(activation_primary(&["d1"], "and_any")),
+            ),
+        ];
+        let edges = vec![
+            edge("kb_a", "kb_b", "t1"),
+            edge("kb_b", "kb_c", "t2"),
+            edge("kb_c", "kb_d", "t3"),
+        ];
+        let result = apply_activation_with_hops(
+            &entries,
+            "The king ruled.",
+            &[],
+            &edges,
+            &HopConfig::default(),
+        );
+
+        assert_eq!(
+            matched_ids(&result),
+            ["kb_a", "kb_b", "kb_c"],
+            "max_hops 2 pulls depths 1..=2 only — D (depth 3) stays unmatched"
+        );
+        assert!(result.unmatched.iter().any(|e| e.entry_id == "kb_d"));
+    }
+
+    #[test]
+    fn test_apply_activation_with_hops_budget_stops_mid_expansion() {
+        // max_hop_tokens = 10; primary KB (A, 9 chars → 2 tokens) reserves 2 →
+        // remaining 8. B (60 chars → 15 tokens) exceeds → skipped; C
+        // (8 chars → 2 tokens) fits → pulled. Per-entry gate, not level-stop:
+        // the over-budget edge comes FIRST and C is still pulled.
+        let entries = vec![
+            entry_with_activation(
+                "kb_a",
+                "A",
+                "The king.",
+                Some(activation_primary(&["king"], "and_any")),
+            ),
+            entry_with_activation(
+                "kb_b",
+                "B",
+                &"x".repeat(60),
+                Some(activation_primary(&["dragon"], "and_any")),
+            ),
+            entry_with_activation(
+                "kb_c",
+                "C",
+                &"y".repeat(8),
+                Some(activation_primary(&["elf"], "and_any")),
+            ),
+        ];
+        let edges = vec![edge("kb_a", "kb_b", "big"), edge("kb_a", "kb_c", "small")];
+        let config = HopConfig {
+            max_hops: 2,
+            max_hop_tokens: Some(10),
+        };
+        let result = apply_activation_with_hops(&entries, "The king ruled.", &[], &edges, &config);
+
+        assert_eq!(
+            matched_ids(&result),
+            ["kb_a", "kb_c"],
+            "over-budget B skipped, in-budget C pulled"
+        );
+        assert!(result.unmatched.iter().any(|e| e.entry_id == "kb_b"));
+        assert!(result
+            .trace
+            .iter()
+            .all(|t| t.entry_id != "kb_b" || !t.accepted));
+    }
+
+    #[test]
+    fn test_apply_activation_with_hops_budget_exhaustion_blocks_deeper_levels() {
+        // max_hop_tokens = 10; primary A (9 chars → 2) → remaining 8.
+        // Level 1: B (8 chars → 2) pulled → 6; C (24 chars → 6) pulled → 0.
+        // Level 2: D/E (8 chars → 2 each) exceed the exhausted budget → skipped.
+        let entries = vec![
+            entry_with_activation(
+                "kb_a",
+                "A",
+                "The king.",
+                Some(activation_primary(&["king"], "and_any")),
+            ),
+            entry_with_activation(
+                "kb_b",
+                "B",
+                &"b".repeat(8),
+                Some(activation_primary(&["dragon"], "and_any")),
+            ),
+            entry_with_activation(
+                "kb_c",
+                "C",
+                &"c".repeat(24),
+                Some(activation_primary(&["elf"], "and_any")),
+            ),
+            entry_with_activation(
+                "kb_d",
+                "D",
+                &"d".repeat(8),
+                Some(activation_primary(&["d1"], "and_any")),
+            ),
+            entry_with_activation(
+                "kb_e",
+                "E",
+                &"e".repeat(8),
+                Some(activation_primary(&["e1"], "and_any")),
+            ),
+        ];
+        let edges = vec![
+            edge("kb_a", "kb_b", "t1"),
+            edge("kb_a", "kb_c", "t1"),
+            edge("kb_b", "kb_d", "t2"),
+            edge("kb_c", "kb_e", "t2"),
+        ];
+        let config = HopConfig {
+            max_hops: 2,
+            max_hop_tokens: Some(10),
+        };
+        let result = apply_activation_with_hops(&entries, "The king ruled.", &[], &edges, &config);
+
+        assert_eq!(matched_ids(&result), ["kb_a", "kb_b", "kb_c"]);
+        assert!(result.unmatched.iter().any(|e| e.entry_id == "kb_d"));
+        assert!(result.unmatched.iter().any(|e| e.entry_id == "kb_e"));
+    }
+
+    #[test]
+    fn test_apply_activation_with_hops_no_keyword_refire_on_pulled() {
+        // B's keys would NOT match the scan; B enters matched ONLY via the
+        // graph hop. The accepted trace row for B is the hop row (graph
+        // reason), not a key-match reason — proving pulled entries are never
+        // re-evaluated against modules.activation (spec Q5).
+        let entries = vec![
+            entry_with_activation(
+                "kb_a",
+                "Harbor",
+                "The harbor gates.",
+                Some(activation_primary(&["king"], "and_any")),
+            ),
+            entry_with_activation(
+                "kb_b",
+                "Dawn Dock",
+                "A quiet dock.",
+                Some(activation_primary(&["dragon"], "and_any")),
+            ),
+        ];
+        let edges = vec![edge("kb_a", "kb_b", "located_in")];
+        let result = apply_activation_with_hops(
+            &entries,
+            "The king ruled.",
+            &[],
+            &edges,
+            &HopConfig::default(),
+        );
+
+        let b_rows: Vec<_> = result
+            .trace
+            .iter()
+            .filter(|t| t.entry_id == "kb_b")
+            .collect();
+        assert_eq!(b_rows.len(), 2, "B: primary miss + hop pull");
+        let b_hop = b_rows
+            .iter()
+            .find(|t| t.accepted)
+            .expect("B hop row accepted");
+        assert!(
+            b_hop.reason.starts_with("relation hop"),
+            "accepted row reason must be the graph reason, got: {}",
+            b_hop.reason
+        );
+        assert_eq!(matched_ids(&result), ["kb_a", "kb_b"]);
+        assert_eq!(
+            result
+                .matched
+                .iter()
+                .filter(|e| e.entry_id == "kb_b")
+                .count(),
+            1,
+            "B present in matched exactly once"
+        );
+    }
+
+    #[test]
+    fn test_apply_activation_with_hops_constant_seed_expands() {
+        // A constant seed (empty keys) is a hop seed: B pulled from it.
+        let entries = vec![
+            entry_with_activation(
+                "kb_a",
+                "World Rule",
+                "Always-on seed.",
+                Some(json!({"activation": {"keys": [], "constant": true}})),
+            ),
+            entry_with_activation(
+                "kb_b",
+                "Dawn Dock",
+                "A quiet dock.",
+                Some(activation_primary(&["dragon"], "and_any")),
+            ),
+        ];
+        let edges = vec![edge("kb_a", "kb_b", "located_in")];
+        let result = apply_activation_with_hops(
+            &entries,
+            "Nothing matches.",
+            &[],
+            &edges,
+            &HopConfig::default(),
+        );
+
+        assert_eq!(
+            matched_ids(&result),
+            ["kb_a", "kb_b"],
+            "constant seed + hop pull"
+        );
+        let b_hop = result
+            .trace
+            .iter()
+            .find(|t| t.entry_id == "kb_b" && t.accepted)
+            .expect("B hop row");
+        assert_eq!(b_hop.hop_origin_entry_id.as_deref(), Some("kb_a"));
+    }
+
+    #[test]
+    fn test_apply_activation_with_hops_pulled_sorts_in_non_constant_band() {
+        // Spec §4: hop-expanded entries sort in the non-constant band by the
+        // same keys (not automatically demoted). B (pulled, priority 100)
+        // outranks A (primary hit, priority 5).
+        let entries = vec![
+            entry_with_activation(
+                "kb_a",
+                "Harbor",
+                "The harbor gates.",
+                Some(json!({"activation": {"keys": ["king"], "priority": 5}})),
+            ),
+            entry_with_activation(
+                "kb_b",
+                "Dawn Dock",
+                "A quiet dock.",
+                Some(json!({"activation": {"keys": ["dragon"], "priority": 100}})),
+            ),
+        ];
+        let edges = vec![edge("kb_a", "kb_b", "located_in")];
+        let result = apply_activation_with_hops(
+            &entries,
+            "The king ruled.",
+            &[],
+            &edges,
+            &HopConfig::default(),
+        );
+
+        assert_eq!(
+            matched_ids(&result),
+            ["kb_b", "kb_a"],
+            "priority desc across pulled + primary"
+        );
+    }
+
+    #[test]
+    fn test_apply_activation_with_hops_self_loop_safe() {
+        let entries = vec![entry_with_activation(
+            "kb_a",
+            "Harbor",
+            "The harbor gates.",
+            Some(activation_primary(&["king"], "and_any")),
+        )];
+        let edges = vec![edge("kb_a", "kb_a", "self_loop")];
+        let result = apply_activation_with_hops(
+            &entries,
+            "The king ruled.",
+            &[],
+            &edges,
+            &HopConfig::default(),
+        );
+
+        assert_eq!(matched_ids(&result), ["kb_a"]);
+        assert_eq!(result.trace.len(), 1, "self-loop produces no extra rows");
+    }
+
+    #[test]
+    fn test_apply_activation_with_hops_endpoint_outside_pool_skipped() {
+        // Edge A→X where X is not a candidate entry: skipped silently.
+        let entries = vec![
+            entry_with_activation(
+                "kb_a",
+                "Harbor",
+                "The harbor gates.",
+                Some(activation_primary(&["king"], "and_any")),
+            ),
+            entry_with_activation(
+                "kb_b",
+                "Dawn Dock",
+                "A quiet dock.",
+                Some(activation_primary(&["dragon"], "and_any")),
+            ),
+        ];
+        let edges = vec![
+            edge("kb_a", "kb_x", "located_in"),
+            edge("kb_a", "kb_b", "located_in"),
+        ];
+        let result = apply_activation_with_hops(
+            &entries,
+            "The king ruled.",
+            &[],
+            &edges,
+            &HopConfig::default(),
+        );
+
+        assert_eq!(
+            matched_ids(&result),
+            ["kb_a", "kb_b"],
+            "pool-missing endpoint skipped, B pulled"
+        );
+        assert!(result.trace.iter().all(|t| t.entry_id != "kb_x"));
+    }
+
+    #[test]
+    fn test_apply_activation_with_hops_first_edge_wins_trace() {
+        // Two parallel edges A→B: the first in slice order supplies the trace.
+        let entries = vec![
+            entry_with_activation(
+                "kb_a",
+                "Harbor",
+                "The harbor gates.",
+                Some(activation_primary(&["king"], "and_any")),
+            ),
+            entry_with_activation(
+                "kb_b",
+                "Dawn Dock",
+                "A quiet dock.",
+                Some(activation_primary(&["dragon"], "and_any")),
+            ),
+        ];
+        let edges = vec![
+            HopEdge {
+                relation_id: "rel_first".to_string(),
+                from_id: "kb_a".to_string(),
+                to_id: "kb_b".to_string(),
+                relation_type: "first_edge".to_string(),
+            },
+            HopEdge {
+                relation_id: "rel_second".to_string(),
+                from_id: "kb_a".to_string(),
+                to_id: "kb_b".to_string(),
+                relation_type: "second_edge".to_string(),
+            },
+        ];
+        let result = apply_activation_with_hops(
+            &entries,
+            "The king ruled.",
+            &[],
+            &edges,
+            &HopConfig::default(),
+        );
+
+        assert_eq!(
+            matched_ids(&result),
+            ["kb_a", "kb_b"],
+            "B pulled once despite two edges"
+        );
+        let b_rows: Vec<_> = result
+            .trace
+            .iter()
+            .filter(|t| t.entry_id == "kb_b")
+            .collect();
+        assert_eq!(b_rows.len(), 2, "B: primary miss + one hop row");
+        let b_hop = b_rows.iter().find(|t| t.accepted).expect("B hop row");
+        assert_eq!(b_hop.source_relation_id.as_deref(), Some("rel_first"));
+        assert_eq!(b_hop.source_relation_type.as_deref(), Some("first_edge"));
+    }
+
+    #[test]
+    fn test_apply_activation_with_hops_no_edges_equals_apply_activation() {
+        // P0-parity: empty edges ⇒ hop pass skipped ⇒ byte-identical result.
+        let entries = vec![
+            entry_with_activation(
+                "kb_a",
+                "Harbor",
+                "The harbor gates.",
+                Some(activation_primary(&["king"], "and_any")),
+            ),
+            entry_with_activation(
+                "kb_b",
+                "Dawn Dock",
+                "A quiet dock.",
+                Some(activation_primary(&["dragon"], "and_any")),
+            ),
+            entry_with_activation("kb_c", "Forest", "A forest.", None),
+        ];
+        let base = apply_activation(&entries, "The king ruled.", &[]);
+        let with_hops = apply_activation_with_hops(
+            &entries,
+            "The king ruled.",
+            &[],
+            &[],
+            &HopConfig::default(),
+        );
+
+        assert_eq!(matched_ids(&base), matched_ids(&with_hops));
+        assert_eq!(
+            serde_json::to_value(&base.trace).unwrap(),
+            serde_json::to_value(&with_hops.trace).unwrap(),
+            "no edges ⇒ identical trace (no hop rows)"
+        );
+        assert_eq!(base.unmatched.len(), with_hops.unmatched.len());
+    }
+
+    #[test]
+    fn test_apply_activation_with_hops_neutral_only_no_seeds_no_pulls() {
+        // Engine-level golden: a neutral-only world has no seeds ⇒ no hop
+        // pull ⇒ identical to the P0 activation result (byte-equivalence
+        // guarantee holds under hops; spec §1).
+        let entries = vec![
+            entry_with_activation("kb_n1", "Neutral A", "No modules.", None),
+            entry_with_activation("kb_n2", "Neutral B", "No modules.", None),
+        ];
+        let edges = vec![edge("kb_n1", "kb_n2", "located_in")];
+        let base = apply_activation(&entries, "Any text.", &[]);
+        let with_hops =
+            apply_activation_with_hops(&entries, "Any text.", &[], &edges, &HopConfig::default());
+
+        assert_eq!(matched_ids(&base), matched_ids(&with_hops));
+        assert_eq!(
+            with_hops.trace.len(),
+            2,
+            "no hop rows for neutral-only world"
+        );
+        assert!(with_hops.trace.iter().all(|t| t.hop_depth.is_none()));
+    }
+
+    #[test]
+    fn test_apply_activation_with_hops_neutral_matched_not_pulled_again() {
+        // QC C-001 regression: a seed fires; a neutral entry (no
+        // `modules.activation`) is graph-adjacent to it AND already in
+        // `matched` from the primary pass (neutral ⇒ always included). Hop
+        // expansion must not pull it a second time — every entry_id appears
+        // exactly once in `matched`.
+        let entries = vec![
+            entry_with_activation(
+                "kb_a",
+                "Harbor",
+                "The harbor gates.",
+                Some(activation_primary(&["king"], "and_any")),
+            ),
+            entry_with_activation("kb_n", "Dawn Dock", "A quiet dock.", None),
+        ];
+        let edges = vec![edge("kb_a", "kb_n", "located_in")];
+        let result = apply_activation_with_hops(
+            &entries,
+            "The king ruled.",
+            &[],
+            &edges,
+            &HopConfig::default(),
+        );
+
+        assert_eq!(
+            matched_ids(&result),
+            ["kb_a", "kb_n"],
+            "neutral already-matched neighbor is not re-pulled"
+        );
+        let mut seen: HashSet<&str> = HashSet::new();
+        for entry in &result.matched {
+            assert!(
+                seen.insert(entry.entry_id.as_str()),
+                "entry '{}' appears more than once in matched",
+                entry.entry_id
+            );
+        }
+        assert_eq!(result.trace.len(), 2, "no hop rows for the neutral entry");
+        assert!(result.trace.iter().all(|t| t.hop_depth.is_none()));
+        // qc2 F-001 partition: matched ∩ unmatched = ∅.
+        for entry in &result.matched {
+            assert!(
+                !result
+                    .unmatched
+                    .iter()
+                    .any(|u| u.entry_id == entry.entry_id),
+                "entry '{}' in both matched and unmatched",
+                entry.entry_id
+            );
+        }
+    }
+
+    #[test]
+    fn test_apply_activation_with_hops_pulled_entry_removed_from_unmatched() {
+        // qc2 F-001: a primary-missed entry pulled by the hop pass must not
+        // also remain in `unmatched` — matched ∩ unmatched = ∅.
+        let entries = vec![
+            entry_with_activation(
+                "kb_a",
+                "Harbor",
+                "The harbor gates.",
+                Some(activation_primary(&["king"], "and_any")),
+            ),
+            entry_with_activation(
+                "kb_b",
+                "Dawn Dock",
+                "A quiet dock.",
+                Some(activation_primary(&["dragon"], "and_any")),
+            ),
+            entry_with_activation(
+                "kb_c",
+                "Harbor Guild",
+                "The guild hall.",
+                Some(activation_primary(&["elf"], "and_any")),
+            ),
+        ];
+        // kb_b and kb_c both miss the scan; only kb_b is pulled (kb_c is not
+        // adjacent) → kb_c legitimately stays unmatched.
+        let edges = vec![edge("kb_a", "kb_b", "located_in")];
+        let result = apply_activation_with_hops(
+            &entries,
+            "The king ruled.",
+            &[],
+            &edges,
+            &HopConfig::default(),
+        );
+
+        assert_eq!(matched_ids(&result), ["kb_a", "kb_b"]);
+        assert!(
+            !result.unmatched.iter().any(|e| e.entry_id == "kb_b"),
+            "hop-pulled entry removed from unmatched"
+        );
+        assert!(
+            result.unmatched.iter().any(|e| e.entry_id == "kb_c"),
+            "non-adjacent primary miss stays unmatched"
+        );
+        for entry in &result.matched {
+            assert!(
+                !result
+                    .unmatched
+                    .iter()
+                    .any(|u| u.entry_id == entry.entry_id),
+                "entry '{}' in both matched and unmatched",
+                entry.entry_id
+            );
+        }
     }
 }

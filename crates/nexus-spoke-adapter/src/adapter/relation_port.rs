@@ -58,14 +58,27 @@
 //! 3-way split): the spoke `orchestrate_relate` entrypoint pre-routes
 //! create vs update from stored presence, so the only reachable failure on
 //! the update path is "the store moved since the caller's read".
+//!
+//! # `RelationPort` read gap + hop-edge loader (V1.149 P1, spec §5; iteration
+//! spec: `.mstar/iterations/v1.149/specs/fl-l-w4-activation.md` §5)
+//!
+//! spoke 0.8.2 `RelationPort` is **get/put only** — there is no
+//! list-by-entity on the trait. Relation-hop expansion (lore activation,
+//! `adapter::activation`) therefore cannot read the graph through the port:
+//! [`NexusAdapter::list_hop_edges_for_world`] below is an **inherent** adapter
+//! helper that reads the storage list primitive
+//! `list_relationships_for_world` (confirmed graph only) and maps rows to
+//! engine-local [`HopEdge`]s (`super::activation::HopEdge` — not a spoke wire
+//! type). No hop/matcher logic lives in `spoke-operations`.
 
+use super::activation::HopEdge;
 use super::NexusAdapter;
 use crate::{
     Relation, RelationExtensionsKey, RelationPort, SpokeReject, SpokeRejectCode, SpokeResult,
 };
 use nexus_local_db::kb_relationships::{
-    get_relationship, update_relationship_in_tx, KbRelationshipRow, UpdateRelationshipParams,
-    SOURCE_MANUAL,
+    get_relationship, list_relationships_for_world, update_relationship_in_tx, KbRelationshipRow,
+    UpdateRelationshipParams, SOURCE_MANUAL,
 };
 use nexus_local_db::LocalDbError;
 use serde_json::{json, Map, Value};
@@ -107,6 +120,69 @@ impl RelationPort for NexusAdapter<'_> {
                 None => put_relation_create(&pool, relation).await,
                 Some(expected) => put_relation_update(&pool, relation, expected).await,
             }
+        })
+    }
+}
+
+/// Upper bound for one hop-edge load — confirmed relation rows per world
+/// (V1.149 P1, spec §5).
+///
+/// Generous but finite: a world whose confirmed graph exceeds this limit is
+/// **truncated** to the `HOP_EDGE_LIST_LIMIT` newest rows (the `cap + 1`
+/// probe row is dropped). Truncation is silent — no panic, no error — the
+/// engine simply sees fewer edges. Worlds that routinely exceed the limit
+/// are tracked in the V1.149 P1 plan residual (paginated / neighbor-indexed
+/// read is the follow-up).
+pub const HOP_EDGE_LIST_LIMIT: i64 = 10_000;
+
+impl NexusAdapter<'_> {
+    /// Load the confirmed relation edges of a world for relation-hop
+    /// expansion (V1.149 P1, spec §5).
+    ///
+    /// # `RelationPort` gap
+    ///
+    /// spoke 0.8.2 [`RelationPort`] is get/put only — no list-by-entity — so
+    /// hop expansion cannot use the port. This **inherent** helper (not a
+    /// trait method) reads the storage list primitive
+    /// [`list_relationships_for_world`] directly with
+    /// `include_suggested = false` (the confirmed graph; extraction
+    /// suggestions stay out of lore hops) and maps rows to engine-local
+    /// [`HopEdge`]s (`adapter::activation::HopEdge` — not a spoke wire type).
+    /// Matching/hop logic itself lives in the pure activation engine, never
+    /// in `spoke-operations`.
+    ///
+    /// # Truncation
+    ///
+    /// At most [`HOP_EDGE_LIST_LIMIT`] edges are returned; a larger graph is
+    /// silently truncated to the newest rows (no panic, no error — see the
+    /// constant docs and the V1.149 P1 plan residual).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LocalDbError`] on database failure.
+    pub fn list_hop_edges_for_world(&self, world_id: &str) -> Result<Vec<HopEdge>, LocalDbError> {
+        let pool = self.pool.clone();
+        let world_id = world_id.to_string();
+        self.block_on(async move {
+            // `cap + 1` probe per the `list_relationships_for_world` caller
+            // convention: a result of `cap + 1` rows signals overflow; the
+            // probe row is dropped below (truncate, no panic). The const
+            // (10_000) always fits `usize`; the fallback is defensive only.
+            let limit = usize::try_from(HOP_EDGE_LIST_LIMIT).unwrap_or(usize::MAX);
+            let rows =
+                list_relationships_for_world(&pool, &world_id, false, HOP_EDGE_LIST_LIMIT + 1)
+                    .await?;
+            let edges = rows
+                .into_iter()
+                .take(limit)
+                .map(|row| HopEdge {
+                    relation_id: row.relationship_id,
+                    from_id: row.source_entity_id,
+                    to_id: row.target_entity_id,
+                    relation_type: row.relation_type,
+                })
+                .collect();
+            Ok(edges)
         })
     }
 }
@@ -1400,6 +1476,69 @@ mod tests {
             ns.get("batch_id"),
             Some(&json!("B42")),
             "unknown key survives update cycle"
+        );
+    }
+
+    // ── V1.149 P1: list_hop_edges_for_world (inherent hop-edge loader) ──
+
+    /// Seed a confirmed + a suggested relation through the port, then load
+    /// hop edges: the loader must return only the confirmed graph, mapped to
+    /// engine-local `HopEdge`s (the `RelationPort` gap — get/put only — is
+    /// bridged by the storage list primitive, spec §5).
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn list_hop_edges_for_world_loads_confirmed_graph_only() {
+        let (pool, _dir) = fresh_pool().await;
+        seed_world_and_endpoints(&pool).await;
+
+        let adapter = NexusAdapter::new(pool);
+        // Two confirmed edges (different types) + one extraction suggestion
+        // (needs_review = true — must be excluded from lore hops).
+        unwrap_ok(
+            adapter.put_relation(spoke_relation("rel_hop1", "kb_src", "kb_dst"), None),
+            "create confirmed edge 1",
+        );
+        unwrap_ok(
+            adapter.put_relation(spoke_relation("rel_hop2", "kb_dst", "kb_src"), None),
+            "create confirmed edge 2",
+        );
+        let suggested: Relation = serde_json::from_value(json!({
+            "schema_version": 1,
+            "relation_id": "rel_sugg",
+            "from_id": "kb_src",
+            "to_id": "kb_dst",
+            "relation_type": "suggests",
+            "label": "extraction suggestion",
+            "extensions": {
+                "nexus": {
+                    "world_id": "wld_rel",
+                    "needs_review": true
+                }
+            }
+        }))
+        .expect("valid spoke Relation fixture (suggested)");
+        unwrap_ok(
+            adapter.put_relation(suggested, None),
+            "create suggested relation",
+        );
+
+        let edges = adapter
+            .list_hop_edges_for_world("wld_rel")
+            .expect("hop-edge load succeeds");
+        assert_eq!(edges.len(), 2, "suggested (needs_review) edge excluded");
+
+        let by_id: std::collections::HashMap<&str, &HopEdge> =
+            edges.iter().map(|e| (e.relation_id.as_str(), e)).collect();
+        let e1 = by_id.get("rel_hop1").expect("rel_hop1 present");
+        assert_eq!(e1.from_id, "kb_src");
+        assert_eq!(e1.to_id, "kb_dst");
+        assert_eq!(e1.relation_type, "allied_with");
+        let e2 = by_id.get("rel_hop2").expect("rel_hop2 present");
+        assert_eq!(e2.from_id, "kb_dst");
+        assert_eq!(e2.to_id, "kb_src");
+        assert_eq!(e2.relation_type, "allied_with");
+        assert!(
+            !by_id.contains_key("rel_sugg"),
+            "extraction suggestion must not appear in hop edges"
         );
     }
 }
