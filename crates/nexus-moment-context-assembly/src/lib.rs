@@ -26,6 +26,7 @@
 //! - `nexus-knowledge` — User-scoped knowledge entries (via `KnowledgeStore`)
 
 pub mod moment;
+pub mod slots;
 pub mod stage0;
 pub mod world_context;
 

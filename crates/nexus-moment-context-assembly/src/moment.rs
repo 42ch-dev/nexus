@@ -21,6 +21,7 @@
 //! Domain store queries are async. Callers must provide concrete implementations
 //! of the store traits. The crate provides no default runtime or storage backend.
 
+use crate::slots;
 use crate::stage0::{Stage0Assembly, STAGE0_PERSONALITY_END, STAGE0_PERSONALITY_START};
 use crate::world_context::WorldKbQueryBuilder;
 use nexus_contracts::BlockType;
@@ -41,6 +42,12 @@ const WORLD_KB_HEADING: &str = "## World Knowledge Base";
 
 /// Section heading for User Knowledge in assembled context.
 const USER_KNOWLEDGE_HEADING: &str = "## User Knowledge";
+
+/// Section heading for the reserved Moment Directive slot (V1.150 P0 —
+/// spec §2 / Q1 provisional lock). Placed between `## Timeline` and
+/// `## World Knowledge Base`. P0 reserves the position but never renders it
+/// (no directive active); P1 fills the slot.
+const MOMENT_DIRECTIVE_HEADING: &str = "## Moment Directive";
 
 /// Parameters for a single moment context assembly request.
 ///
@@ -223,6 +230,13 @@ pub struct MomentContext {
     pub world_kb: Option<String>,
     /// User knowledge summary text (entries for the user).
     pub user_knowledge: Option<String>,
+    /// Reserved Moment Directive slot (V1.150 P0, spec §2): the
+    /// `## Moment Directive` top-level section between `## Timeline` and
+    /// `## World Knowledge Base`. P0 always leaves this `None` (no directive
+    /// active) so the section is never rendered — the neutral-only
+    /// byte-equivalence anchor (AC-I1b). P1 fills it with the active
+    /// directive body; the emit position is already stable here.
+    pub moment_directive: Option<String>,
     /// Per-entry activation trace (populated when `activation_enabled` is true).
     /// V1.146 P4 T3: exposed for inspector packet emission.
     pub activation_trace:
@@ -236,8 +250,10 @@ impl MomentContext {
     /// 1. Stage-0 context (system prefix, personality, memories, keywords, experience, prompt)
     /// 2. World state (narrative)
     /// 3. Timeline (narrative)
-    /// 4. World KB (key blocks)
-    /// 5. User knowledge
+    /// 4. Moment Directive (V1.150 P0 — reserved; only rendered when P1
+    ///    fills the slot)
+    /// 5. World KB (key blocks — V1.150 P0 slots subdivide this section)
+    /// 6. User knowledge
     ///
     /// Empty sections are omitted.
     #[must_use]
@@ -257,6 +273,12 @@ impl MomentContext {
         if let Some(ref tl) = self.timeline {
             if !tl.is_empty() {
                 parts.push(format!("{TIMELINE_HEADING}\n\n{tl}\n"));
+            }
+        }
+
+        if let Some(ref md) = self.moment_directive {
+            if !md.is_empty() {
+                parts.push(format!("{MOMENT_DIRECTIVE_HEADING}\n\n{md}\n"));
             }
         }
 
@@ -536,7 +558,15 @@ where
                 if entries.is_empty() {
                     None
                 } else {
-                    Some(format_kb_entries(&entries))
+                    // V1.150 P0 (DF-75): route the V1.149-emitted matched
+                    // candidate list into named, ordered slots within the
+                    // World-KB section (spec §2 / Q1/Q5 provisional locks —
+                    // `slots.rs`). Neutral-only Worlds route everything into
+                    // the default fallback, which renders byte-identically to
+                    // the V1.149 flat block (AC-I1b). Entries non-empty
+                    // guarantees at least one slot is non-empty, so this is
+                    // always `Some`.
+                    slots::render_slots(&slots::route_slots(entries))
                 }
             }
             _ => None,
@@ -561,6 +591,8 @@ where
         timeline,
         world_kb,
         user_knowledge,
+        // V1.150 P0: reserved slot — always empty in P0 (P1 fills it).
+        moment_directive: None,
         activation_trace,
     };
 
@@ -615,25 +647,6 @@ async fn fetch_world_kb_entries<K: KbStore>(
     }
     let result = kb_store.query(&query).await?;
     Ok(result.items)
-}
-
-/// Format `WorldKB` entries into markdown context text lines.
-fn format_kb_entries(entries: &[WorldKbEntry]) -> String {
-    entries
-        .iter()
-        .map(|kb| {
-            let summary = kb
-                .body
-                .as_ref()
-                .and_then(|b| b.summary.as_ref())
-                .map_or("(no summary)", std::string::String::as_str);
-            format!(
-                "- **{}** [{:?}]: {summary}",
-                kb.canonical_name, kb.block_type
-            )
-        })
-        .collect::<Vec<String>>()
-        .join("\n")
 }
 
 /// Fetch User knowledge entries and format as context text.
@@ -895,6 +908,70 @@ mod tests {
         assert!(!full.contains(USER_KNOWLEDGE_HEADING));
     }
 
+    // ── V1.150 P0: reserved Moment Directive slot (spec §2 / Q1) ──────
+
+    #[tokio::test]
+    async fn assemble_moment_reserves_directive_slot_empty() {
+        // P0 reserves the `moment.directive` slot but never fills it: a full
+        // assembly leaves `moment_directive` None and renders no
+        // `## Moment Directive` section (AC-I1b neutral-only promise).
+        let stores = TestStores::new();
+        let request = MomentRequest::new(minimal_stage0())
+            .with_world("wld_1")
+            .with_user("user_1");
+
+        let ctx = assemble_moment(&request, &stores.narrative, &stores.kb, &stores.knowledge).await;
+        assert!(
+            ctx.moment_directive.is_none(),
+            "P0 must leave the reserved directive slot empty"
+        );
+        let full = ctx.to_full_context();
+        assert!(
+            !full.contains(MOMENT_DIRECTIVE_HEADING),
+            "P0 must not render the Moment Directive section"
+        );
+    }
+
+    #[test]
+    fn to_full_context_renders_directive_between_timeline_and_world_kb() {
+        // The reserved slot's emit position: between `## Timeline` and
+        // `## World Knowledge Base` (above lore, below system) — the stable
+        // insertion point P1 fills.
+        let ctx = MomentContext {
+            stage0_context: "stage0".to_string(),
+            world_state: Some("ws".to_string()),
+            timeline: Some("tl".to_string()),
+            moment_directive: Some("Keep the prose terse.".to_string()),
+            world_kb: Some("kb".to_string()),
+            ..MomentContext::default()
+        };
+        let full = ctx.to_full_context();
+        let timeline_pos = full.find(TIMELINE_HEADING).expect("timeline heading");
+        let directive_pos = full
+            .find(MOMENT_DIRECTIVE_HEADING)
+            .expect("directive heading");
+        let world_kb_pos = full.find(WORLD_KB_HEADING).expect("world KB heading");
+        assert!(
+            timeline_pos < directive_pos && directive_pos < world_kb_pos,
+            "directive must sit between Timeline and World Knowledge Base"
+        );
+        assert!(
+            full.contains("Keep the prose terse."),
+            "directive body present"
+        );
+    }
+
+    #[test]
+    fn to_full_context_omits_empty_directive() {
+        // An empty directive body renders nothing (guards P1 drift).
+        let ctx = MomentContext {
+            stage0_context: "stage0".to_string(),
+            moment_directive: Some(String::new()),
+            ..MomentContext::default()
+        };
+        assert!(!ctx.to_full_context().contains(MOMENT_DIRECTIVE_HEADING));
+    }
+
     #[tokio::test]
     async fn moment_context_preserves_stage0_content() {
         let stores = TestStores::new();
@@ -1073,6 +1150,7 @@ mod tests {
             timeline: None,
             world_kb: None,
             user_knowledge: None,
+            moment_directive: None,
             activation_trace: None,
         };
 
@@ -1110,6 +1188,7 @@ mod tests {
             timeline: Some("Timeline events.".to_string()),
             world_kb: None,
             user_knowledge: None,
+            moment_directive: None,
             activation_trace: None,
         };
 
