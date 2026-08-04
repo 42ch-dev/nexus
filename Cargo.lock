@@ -3823,6 +3823,8 @@ dependencies = [
  "nexus-knowledge",
  "nexus-local-db",
  "nexus-wasm-host",
+ "regex",
+ "regress",
  "serde",
  "serde_json",
  "spoke-operations",

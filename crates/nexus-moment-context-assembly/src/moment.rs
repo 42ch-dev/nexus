@@ -69,12 +69,14 @@ pub struct MomentRequest {
     pub kb_block_type: Option<BlockType>,
     /// User knowledge query: maximum number of entries to return.
     pub knowledge_limit: Option<usize>,
-    /// Enable lore activation filtering on `WorldKB` entries (V1.146 P4 T2).
+    /// Enable lore activation filtering on `WorldKB` entries (V1.146 P4 T2,
+    /// default-on since V1.149 P0 T2).
     ///
     /// When `true`, the activation pass runs between `WorldKB` fetch and
     /// User Knowledge assembly, calling `apply_activation` to filter/inspect
     /// entries by their `modules.activation` fire-conditions.
-    /// Default `false` — zero path change.
+    /// Default `true` — activation is the shipped product behavior; `false`
+    /// restores V1.146 flag-off semantics (all entries returned unchanged).
     pub activation_enabled: bool,
 }
 
@@ -93,7 +95,7 @@ impl MomentRequest {
             kb_text_search: None,
             kb_block_type: None,
             knowledge_limit: None,
-            activation_enabled: false,
+            activation_enabled: true,
         }
     }
 
@@ -385,6 +387,19 @@ where
         (None, None)
     };
 
+    // V1.149 P0 T2: extended activation scan — Stage-0 full text + outline
+    // beats (timeline title/summary). The timeline was already fetched above;
+    // reuse it here BEFORE it is stored on the context. Manuscript body is not
+    // on the MCA path (documented gap, spec §3) — Stage-0 fallback only.
+    let activation_scan_text = if request.activation_enabled {
+        timeline.as_ref().map_or_else(
+            || stage0_context.clone(),
+            |tl| format!("{stage0_context}\n{tl}"),
+        )
+    } else {
+        String::new()
+    };
+
     // 3. World KB (if world_id provided)
     // V1.146 P4 T3: capture activation trace for inspector packet emission.
     let mut activation_trace: Option<
@@ -394,15 +409,16 @@ where
         match fetch_world_kb_entries(kb_store, world_id, request).await {
             Ok(entries) if !entries.is_empty() => {
                 let entries = if request.activation_enabled {
-                    // V1.146 P4 T2: apply lore activation between WorldKB fetch
-                    // and User Knowledge assembly. Unmatched entries are filtered
-                    // out (activation gate). Neutral entries (no activation module)
-                    // remain in matched.
+                    // V1.149 P0 T2: default-on lore activation between WorldKB
+                    // fetch and User Knowledge assembly. Scan text = Stage-0 +
+                    // timeline outline beats (reused from step 2). Unmatched
+                    // entries are filtered out (activation gate). Neutral
+                    // entries (no activation module) remain in matched.
                     // V1.146 P4 T3: capture the full ActivationResult for
                     // diagnostic trace emission.
                     let result = nexus_spoke_adapter::adapter::activation::apply_activation(
                         &entries,
-                        &stage0_context,
+                        &activation_scan_text,
                         &[],
                     );
                     activation_trace = Some(result.trace);
@@ -1069,8 +1085,8 @@ mod tests {
 
     #[tokio::test]
     async fn activation_flag_off_includes_all_entries() {
-        // Flag OFF (default): entries with activation modules all appear
-        // — byte-identical to pre-P4 baseline behavior.
+        // Explicit OFF (off-switch semantics): entries with activation modules
+        // all appear — byte-identical to V1.146 flag-off behavior.
         let stores = TestStores::new();
 
         let hero = kb_entry_with_modules(
@@ -1078,7 +1094,7 @@ mod tests {
             nexus_contracts::BlockType::Character,
             "Hero",
             "kb_h",
-            Some(serde_json::json!({"activation": {"key": ["hero"], "logic": "and_any"}})),
+            Some(serde_json::json!({"activation": {"keys": ["hero"], "logic": "and_any"}})),
         );
         stores.kb.insert_knowledge_entry(hero).await.unwrap();
 
@@ -1091,7 +1107,9 @@ mod tests {
         );
         stores.kb.insert_knowledge_entry(castle).await.unwrap();
 
-        let request = MomentRequest::new(minimal_stage0()).with_world("wld_1");
+        let request = MomentRequest::new(minimal_stage0())
+            .with_world("wld_1")
+            .with_activation_enabled(false);
         let ctx = assemble_moment(&request, &stores.narrative, &stores.kb, &stores.knowledge).await;
         let kb_text = ctx.world_kb.unwrap();
         assert!(kb_text.contains("Hero"), "flag OFF: all entries appear");
@@ -1124,9 +1142,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn activation_flag_on_filters_unmatched_entries() {
-        // Flag ON: stage0 mentions "king" → Hero matches (key "king"),
-        // Castle is unmatched (key "dragon"), Forest is neutral.
+    async fn activation_default_on_filters_unmatched_entries() {
+        // Default-ON (no explicit flag): stage0 mentions "king" → Hero matches
+        // (key "king"), Castle is unmatched (key "dragon"), Forest is neutral.
         let stores = TestStores::new();
 
         stores
@@ -1136,7 +1154,7 @@ mod tests {
                 nexus_contracts::BlockType::Character,
                 "Hero",
                 "kb_hero",
-                Some(serde_json::json!({"activation": {"key": ["king"], "logic": "and_any"}})),
+                Some(serde_json::json!({"activation": {"keys": ["king"], "logic": "and_any"}})),
             ))
             .await
             .unwrap();
@@ -1147,7 +1165,7 @@ mod tests {
                 nexus_contracts::BlockType::Scene,
                 "Castle",
                 "kb_castle",
-                Some(serde_json::json!({"activation": {"key": ["dragon"], "logic": "and_any"}})),
+                Some(serde_json::json!({"activation": {"keys": ["dragon"], "logic": "and_any"}})),
             ))
             .await
             .unwrap();
@@ -1169,9 +1187,8 @@ mod tests {
             user_prompt: "Write chapter 3.".to_string(),
             ..Stage0Assembly::default()
         };
-        let request = MomentRequest::new(stage0)
-            .with_world("wld_1")
-            .with_activation_enabled(true);
+        // No with_activation_enabled call — the default is ON since V1.149.
+        let request = MomentRequest::new(stage0).with_world("wld_1");
 
         let ctx = assemble_moment(&request, &stores.narrative, &stores.kb, &stores.knowledge).await;
         let kb_text = ctx.world_kb.unwrap();
@@ -1190,8 +1207,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn activation_flag_on_and_all_requires_all_keys() {
-        // Flag ON with and_all: entry needs all keys to match.
+    async fn activation_default_on_and_all_requires_all_keys_with_secondary() {
+        // and_all with secondary_keys: entry needs ALL primary AND ALL
+        // secondary keys to match (handbook truth table §2.1).
         let stores = TestStores::new();
         stores
             .kb
@@ -1201,7 +1219,7 @@ mod tests {
                 "Royal Guard",
                 "kb_guard",
                 Some(
-                    serde_json::json!({"activation": {"key": ["king", "throne", "guard"], "logic": "and_all"}}),
+                    serde_json::json!({"activation": {"keys": ["king", "throne"], "secondary_keys": ["guard"], "logic": "and_all"}}),
                 ),
             ))
             .await
@@ -1211,9 +1229,7 @@ mod tests {
             personality: "The king sat on the throne while the guard stood watch.".to_string(),
             ..Stage0Assembly::default()
         };
-        let request = MomentRequest::new(stage0)
-            .with_world("wld_1")
-            .with_activation_enabled(true);
+        let request = MomentRequest::new(stage0).with_world("wld_1");
 
         let ctx = assemble_moment(&request, &stores.narrative, &stores.kb, &stores.knowledge).await;
         assert!(ctx.world_kb.is_some(), "all 3 keys matched → entry present");
@@ -1221,8 +1237,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn activation_flag_on_not_any_excludes_matched() {
-        // Flag ON with not_any: entry excluded if any key matches.
+    async fn activation_default_on_not_any_excludes_when_secondary_matches() {
+        // not_any with secondary_keys: entry excluded when a secondary key
+        // matches (primary-any + no secondary = fire; spec §2.1).
         let stores = TestStores::new();
         stores
             .kb
@@ -1231,7 +1248,9 @@ mod tests {
                 nexus_contracts::BlockType::Character,
                 "Orc Warlord",
                 "kb_orc",
-                Some(serde_json::json!({"activation": {"key": ["orc"], "logic": "not_any"}})),
+                Some(
+                    serde_json::json!({"activation": {"keys": ["orc"], "secondary_keys": ["army"], "logic": "not_any"}}),
+                ),
             ))
             .await
             .unwrap();
@@ -1240,26 +1259,79 @@ mod tests {
             personality: "The orc army marched forward.".to_string(),
             ..Stage0Assembly::default()
         };
-        let request = MomentRequest::new(stage0)
-            .with_world("wld_1")
-            .with_activation_enabled(true);
+        // Default-on (no explicit flag).
+        let request = MomentRequest::new(stage0).with_world("wld_1");
 
         let ctx = assemble_moment(&request, &stores.narrative, &stores.kb, &stores.knowledge).await;
         assert!(
             ctx.world_kb.is_none(),
-            "Orc Warlord excluded by not_any → no entries remain"
+            "Orc Warlord excluded by not_any (secondary 'army' matched) → no entries remain"
         );
     }
 
     #[tokio::test]
     async fn activation_empty_world_yields_none() {
-        // Flag ON but no KB entries → world_kb is None.
+        // Default-on but no KB entries → world_kb is None.
         let stores = TestStores::new();
-        let request = MomentRequest::new(minimal_stage0())
-            .with_world("wld_ghost")
-            .with_activation_enabled(true);
+        let request = MomentRequest::new(minimal_stage0()).with_world("wld_ghost");
 
         let ctx = assemble_moment(&request, &stores.narrative, &stores.kb, &stores.knowledge).await;
         assert!(ctx.world_kb.is_none());
+    }
+
+    #[tokio::test]
+    async fn activation_timeline_participates_in_scan() {
+        // Extended scan (V1.149 P0 T2): the activation key matches ONLY the
+        // timeline outline-beat text (event title), not stage0 and not the
+        // entry's own self-match text — the entry fires via timeline text.
+        let stores = TestStores::new();
+
+        use nexus_narrative::timeline_event::{TimelineEvent, TimelineEventType};
+        let mut event = TimelineEvent::new("wld_1", "fbk_root", TimelineEventType::StoryAdvance, 1);
+        event.title = Some("The dawn dock heist".to_string());
+        stores.narrative.insert_event(event);
+
+        stores
+            .kb
+            .insert_knowledge_entry(kb_entry_with_modules(
+                "wld_1",
+                nexus_contracts::BlockType::Scene,
+                "Dawn Dock",
+                "kb_dock",
+                Some(serde_json::json!({"activation": {"keys": ["heist"], "logic": "and_any"}})),
+            ))
+            .await
+            .unwrap();
+        // A second entry whose key appears nowhere → filtered.
+        stores
+            .kb
+            .insert_knowledge_entry(kb_entry_with_modules(
+                "wld_1",
+                nexus_contracts::BlockType::Character,
+                "Ghost",
+                "kb_ghost",
+                Some(serde_json::json!({"activation": {"keys": ["necromancer"], "logic": "and_any"}})),
+            ))
+            .await
+            .unwrap();
+
+        let stage0 = Stage0Assembly {
+            personality: "A quiet village morning.".to_string(),
+            experience: "10 years.".to_string(),
+            user_prompt: "Write the next beat.".to_string(),
+            ..Stage0Assembly::default()
+        };
+        let request = MomentRequest::new(stage0).with_world("wld_1");
+
+        let ctx = assemble_moment(&request, &stores.narrative, &stores.kb, &stores.knowledge).await;
+        let kb_text = ctx.world_kb.expect("world_kb must be present");
+        assert!(
+            kb_text.contains("Dawn Dock"),
+            "timeline title 'dawn dock' must activate the entry under default-on"
+        );
+        assert!(
+            !kb_text.contains("Ghost"),
+            "Ghost must be filtered (key appears nowhere)"
+        );
     }
 }
