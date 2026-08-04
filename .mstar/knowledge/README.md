@@ -152,3 +152,9 @@ Engineering reference for the Nexus OSS harness **knowledge** tree.
 | --- | --- |
 | [architecture-patterns/connect-host-opt-in-feature-gate.md](architecture-patterns/connect-host-opt-in-feature-gate.md) | Connect Host — opt-in feature gate for a heavy transport dep (N-C0 pattern): keep the default build graph free of the dep (gate-checkable `cargo tree`), one shared honest `HostCapabilityManifest` builder, total op-refusal via `invoke_handler = None` (not a per-op refuse handler), atomic identity-key perms + fail-closed allowlist, separate-OS-process topology, deterministic libp2p interop test (mDNS off, fixed seeds). DF-72 N-C0; N-C1 next (compound V1.148) |
 | [conventions/nexus-home-layout-path-helpers.md](conventions/nexus-home-layout-path-helpers.md) | `nexus-home-layout` path helpers take **raw home** — never pre-join `.nexus42`. The V1.148 P4 F-1 dogfood bug (device-id double-nesting → host_id churn) root cause + convention. Name the param for the raw input (`home`, not `nexus_home`) (compound V1.148) |
+
+### V1.149 additions
+
+| Document | Description |
+| --- | --- |
+| [architecture-patterns/spoke-dialect-default-on-engine.md](architecture-patterns/spoke-dialect-default-on-engine.md) | Spoke-dialect consumption as a default-on engine — the lore activation pattern: consumer-only (no spoke-operations matchers), handbook truth-table logic (secondary-empty ⇒ primary-any), ReDoS-safe `regex` crate (NOT `regress` for untrusted input), neutral-only byte-equivalence HARD golden (ship gate), graph hops via storage list (not RelationPort get/put), char-boundary-safe whole_word. DF-74 (compound V1.149) |
