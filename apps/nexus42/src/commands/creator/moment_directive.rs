@@ -1431,4 +1431,87 @@ mod tests {
                 .replace("## Moment Directive\n\nKeep the prose terse.\n\n", "",)
         );
     }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn assemble_ttl_three_injects_exactly_three_then_stops() {
+        // V1.150 P2 dogfood (T4): `--ttl-generations 3` ⇒ the directive
+        // injects on exactly 3 `assemble_moment` calls, then stops. Counting
+        // one generation = one injecting assemble (spec §3.3).
+        use nexus_moment_context_assembly::{
+            assemble_moment_with_directive, MomentRequest, Stage0Assembly,
+        };
+
+        let (pool, _dir) = fresh_pool().await;
+        seed_creator(&pool).await;
+        seed_world(&pool, "wld_1").await;
+        seed_work(&pool, &work_record("wrk_1", Some("wld_1"), Some("novel"))).await;
+        nexus_local_db::narrative_gateway::seed::event(
+            &pool,
+            "evt_e2e",
+            "wld_1",
+            "fbk_root",
+            "story_advance",
+            1,
+        )
+        .await;
+        nexus_local_db::kb_store::seed::knowledge_entry(
+            &pool,
+            "kb_e2e",
+            "wld_1",
+            "Character",
+            "Hero",
+            "confirmed",
+        )
+        .await;
+        set_active(
+            &pool,
+            &new_params("dir_ttl3", scope_kind::WORK, "wrk_1", "generations", 3),
+        )
+        .await
+        .unwrap();
+
+        let narrative =
+            nexus_local_db::narrative_gateway::SqliteNarrativeGateway::new(pool.clone());
+        let kb = nexus_local_db::kb_store::SqliteKbStore::new(pool.clone());
+        let knowledge = nexus_local_db::SqliteKnowledgeStore::new(pool.clone());
+        let directives = LocalDirectiveStore::new(pool.clone());
+
+        let stage0 = Stage0Assembly {
+            personality: "Test personality.".to_string(),
+            ..Stage0Assembly::default()
+        };
+        let request = MomentRequest::new(stage0)
+            .with_world("wld_1")
+            .with_work("wrk_1")
+            .with_creator("ctr_test")
+            .with_event("evt_e2e");
+
+        // Calls 1–3: the directive injects and the TTL counts down 3→2→1.
+        for expected_remaining in [2, 1, 0] {
+            let ctx =
+                assemble_moment_with_directive(&request, &narrative, &kb, &knowledge, &directives)
+                    .await;
+            assert_eq!(
+                ctx.moment_directive.as_deref(),
+                Some("Keep the prose terse."),
+                "directive must inject on call {expected_remaining} (remaining {expected_remaining})"
+            );
+            assert!(ctx.to_full_context().contains("## Moment Directive"));
+            let row = get_by_id(&pool, "dir_ttl3").await.unwrap().unwrap();
+            assert_eq!(row.ttl_remaining, expected_remaining);
+        }
+        // After the 3rd injection the TTL is 0 → row expired.
+        let expired = get_by_id(&pool, "dir_ttl3").await.unwrap().unwrap();
+        assert_eq!(expired.status, "expired");
+
+        // Call 4: no injection (expired rows never inject, spec §3.3).
+        let ctx4 =
+            assemble_moment_with_directive(&request, &narrative, &kb, &knowledge, &directives)
+                .await;
+        assert!(
+            ctx4.moment_directive.is_none(),
+            "4th assemble must not inject the expired directive"
+        );
+        assert!(!ctx4.to_full_context().contains("## Moment Directive"));
+    }
 }
