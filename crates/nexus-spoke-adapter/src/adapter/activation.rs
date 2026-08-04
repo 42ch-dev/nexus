@@ -1,17 +1,40 @@
 //! Lore activation engine — scans `WorldKB` entries against assembled moment
 //! text and classifies them by `modules.activation` fire-conditions.
 //!
-//! V1.149 P0 T1 (DF-74): this is the **default-on** engine. The flag-gated
+//! **V1.149 P0 (DF-74): default-on lore activation engine.** The flag-gated
 //! V1.146 spike is promoted to a consumer of the spoke `modules.activation`
-//! dialect — the handbook field table is `spoke/.mstar/specs/domain-profile-lore-activation.md`
-//! §"`modules.activation` — portable subset" (iteration spec `fl-l-w4-activation.md`
-//! §2). Nexus parses the portable subset, never invents nexus-private portable
-//! fields, and keeps all matching/scan logic product-local — no
-//! `spoke-operations` matchers (spoke owns the dialect wire only).
+//! dialect — the handbook field table is
+//! `spoke/.mstar/specs/domain-profile-lore-activation.md` §"`modules.activation`
+//! — portable subset" (product detail + acceptance:
+//! `.mstar/iterations/v1.149/specs/fl-l-w4-activation.md` §1–§4). Nexus parses
+//! the portable subset, never invents nexus-private portable fields, and keeps
+//! all matching/scan logic product-local — no `spoke-operations` matchers
+//! (spoke owns the dialect wire only).
 //!
 //! MCA calls `apply_activation` between `WorldKB` fetch and User Knowledge
 //! assembly; the engine operates on the already-fetched entries — MCA stays
 //! generic (spec Architecture Lock Decision 5).
+//!
+//! # Emit ordering (V1.149 P0 T3 — spec §4)
+//!
+//! After classify, `matched` is sorted in place: `constant` seeds first
+//! (constant band), then non-constant; within each band `priority`
+//! **descending** (higher wins, missing ⇒ 0) → `order` **ascending** (lower
+//! first, missing ⇒ 0) → **stable original entry order**. Sort inputs are
+//! captured during classify from the parsed config (no re-parse per
+//! comparison). `unmatched` is never reordered (order is irrelevant there).
+//!
+//! Neutral entries (no activation module) carry default sort keys
+//! (non-constant, priority 0, order 0), so an all-neutral set keeps its
+//! original entry order — byte-identical to V1.146 flag-off (the neutral-only
+//! ship guarantee, spec §1 / AC-I1 #2).
+//!
+//! # Trace reasons (DF-76 inspector surface)
+//!
+//! Every hit/miss `reason` carries the match mode + logic arm, e.g.
+//! `primary-any (literal): matched key [king]` (hit) or
+//! `and_all (whole_word): missing keys [horn, bell]` (miss) — human-readable
+//! for the future DF-76 assembly inspector.
 //!
 //! # Logic truth table (handbook §2.1 — replaces the V1.146 primary-only spike)
 //!
@@ -40,8 +63,8 @@
 //! Entries with no `modules` map, with `modules` but no `activation`, or with
 //! an `activation` module whose `keys` are empty and `constant` is false are
 //! **always** in `matched` — identical to V1.146 flag-off behavior. `constant:
-//! true` entries are always-on seed candidates (emitted first by the caller,
-//! V1.149 P0 T3 ordering).
+//! true` entries are always-on seeds, sorted first by the engine (V1.149 P0 T3
+//! ordering — constant band first, spec §4).
 
 use nexus_knowledge::world_kb::knowledge_entry::WorldKbEntry;
 use serde::{Deserialize, Serialize};
@@ -73,6 +96,45 @@ pub struct ActivationTraceEntry {
     pub reason: String,
     /// Whether the entry ended up in `matched`.
     pub accepted: bool,
+}
+
+/// Emit-order inputs captured during classify (V1.149 P0 T3 — spec §4).
+///
+/// Built once per entry from the parsed [`ActivationConfig`]; the sort never
+/// re-parses config. Neutral entries (no activation module) get the default:
+/// non-constant, priority 0, order 0 — so an all-neutral set keeps its
+/// original entry order (byte-equivalence ship guarantee).
+#[derive(Debug, Clone, Copy, Default)]
+struct ActivationSortKey {
+    /// Constant band flag — same seed predicate as [`evaluate_entry`].
+    constant: bool,
+    /// Primary sort key — higher wins (descending), missing ⇒ 0.
+    priority: f64,
+    /// Secondary sort key — lower first (ascending), missing ⇒ 0.
+    order: f64,
+}
+
+impl ActivationSortKey {
+    fn from_activation(
+        activation: Option<&ActivationConfig>,
+        entry_id: &str,
+        caller_seed_ids: &[String],
+    ) -> Self {
+        activation.map_or_else(Self::default, |cfg| Self {
+            constant: is_constant_seed(cfg, entry_id, caller_seed_ids),
+            priority: cfg.priority,
+            order: cfg.order,
+        })
+    }
+}
+
+/// Seed predicate shared by classify + ordering: handbook `constant: true`,
+/// V1.146 spike `constant_seeds` self-id, or caller-supplied seed id
+/// (spec §2.2 — the spike alias "treats as `constant: true`").
+fn is_constant_seed(cfg: &ActivationConfig, entry_id: &str, caller_seed_ids: &[String]) -> bool {
+    cfg.constant
+        || cfg.constant_seeds.iter().any(|s| s == entry_id)
+        || caller_seed_ids.iter().any(|s| s == entry_id)
 }
 
 /// The parsed `modules.activation` data from a single entry (handbook shape).
@@ -317,7 +379,7 @@ pub fn apply_activation(
     constant_seed_ids: &[String],
 ) -> ActivationResult {
     let base_lower = scan_text.to_lowercase();
-    let mut matched = Vec::new();
+    let mut matched: Vec<(WorldKbEntry, ActivationSortKey)> = Vec::new();
     let mut unmatched = Vec::new();
     let mut trace = Vec::new();
 
@@ -359,11 +421,30 @@ pub fn apply_activation(
         });
 
         if accepted {
-            matched.push(entry.clone());
+            matched.push((
+                entry.clone(),
+                ActivationSortKey::from_activation(
+                    activation.as_ref(),
+                    &entry_id,
+                    constant_seed_ids,
+                ),
+            ));
         } else {
             unmatched.push(entry.clone());
         }
     }
+
+    // V1.149 P0 T3 emit ordering (spec §4): constant band first, then priority
+    // desc → order asc → stable original index. `sort_by` is stable, so equal
+    // sort keys keep their original entry order — an all-neutral set sorts to
+    // its original order and stays byte-identical to V1.146 flag-off.
+    matched.sort_by(|(_, a), (_, b)| {
+        b.constant
+            .cmp(&a.constant)
+            .then_with(|| b.priority.total_cmp(&a.priority))
+            .then_with(|| a.order.total_cmp(&b.order))
+    });
+    let matched: Vec<WorldKbEntry> = matched.into_iter().map(|(entry, _)| entry).collect();
 
     ActivationResult {
         matched,
@@ -386,10 +467,7 @@ fn evaluate_entry(
 ) -> (bool, String) {
     // Always-on seeds: handbook `constant: true`, V1.146 spike
     // `constant_seeds` self-id, or caller-supplied seed ids.
-    if cfg.constant
-        || cfg.constant_seeds.iter().any(|s| s == entry_id)
-        || caller_seed_ids.iter().any(|s| s == entry_id)
-    {
+    if is_constant_seed(cfg, entry_id, caller_seed_ids) {
         let seed_source = if cfg.constant {
             "constant"
         } else if cfg.constant_seeds.iter().any(|s| s == entry_id) {
@@ -992,6 +1070,279 @@ mod tests {
         assert!(result.trace[0]
             .reason
             .contains("constant seed (self-declared)"));
+    }
+
+    // ── ordering (V1.149 P0 T3 — spec §4 / AC-I1 #7) ────────────────
+
+    fn matched_ids(result: &ActivationResult) -> Vec<&str> {
+        result.matched.iter().map(|e| e.entry_id.as_str()).collect()
+    }
+
+    #[test]
+    fn test_ordering_priority_desc_higher_first() {
+        let entries = vec![
+            entry_with_activation(
+                "kb_o1",
+                "Low",
+                "p",
+                Some(json!({"activation": {"keys": ["king"], "priority": 1}})),
+            ),
+            entry_with_activation(
+                "kb_o2",
+                "High",
+                "p",
+                Some(json!({"activation": {"keys": ["king"], "priority": 5}})),
+            ),
+            entry_with_activation(
+                "kb_o3",
+                "Mid",
+                "p",
+                Some(json!({"activation": {"keys": ["king"], "priority": 3}})),
+            ),
+        ];
+        let result = run(&entries, "The king ruled.");
+        assert_eq!(
+            matched_ids(&result),
+            ["kb_o2", "kb_o3", "kb_o1"],
+            "priority desc: 5 > 3 > 1"
+        );
+    }
+
+    #[test]
+    fn test_ordering_order_asc_within_same_priority() {
+        let entries = vec![
+            entry_with_activation(
+                "kb_o11",
+                "A",
+                "p",
+                Some(json!({"activation": {"keys": ["king"], "priority": 2, "order": 10}})),
+            ),
+            entry_with_activation(
+                "kb_o12",
+                "B",
+                "p",
+                Some(json!({"activation": {"keys": ["king"], "priority": 2, "order": 1}})),
+            ),
+            entry_with_activation(
+                "kb_o13",
+                "C",
+                "p",
+                Some(json!({"activation": {"keys": ["king"], "priority": 2, "order": 5}})),
+            ),
+        ];
+        let result = run(&entries, "The king ruled.");
+        assert_eq!(
+            matched_ids(&result),
+            ["kb_o12", "kb_o13", "kb_o11"],
+            "order asc within equal priority: 1 < 5 < 10"
+        );
+    }
+
+    #[test]
+    fn test_ordering_constant_band_first_even_at_lower_priority() {
+        // Constant seed (priority 0) must precede a non-constant priority 100.
+        let entries = vec![
+            entry_with_activation(
+                "kb_o21",
+                "Hot",
+                "p",
+                Some(json!({"activation": {"keys": ["king"], "priority": 100}})),
+            ),
+            entry_with_activation(
+                "kb_o22",
+                "Seed",
+                "p",
+                Some(json!({"activation": {"keys": [], "constant": true}})),
+            ),
+        ];
+        let result = run(&entries, "The king ruled.");
+        assert_eq!(
+            matched_ids(&result),
+            ["kb_o22", "kb_o21"],
+            "constant band sorts before non-constant regardless of priority"
+        );
+    }
+
+    #[test]
+    fn test_ordering_constant_band_internal_priority() {
+        // Within the constant band, priority still applies (spec §4).
+        let entries = vec![
+            entry_with_activation(
+                "kb_o31",
+                "Seed A",
+                "p",
+                Some(json!({"activation": {"constant": true, "priority": 1}})),
+            ),
+            entry_with_activation(
+                "kb_o32",
+                "Seed B",
+                "p",
+                Some(json!({"activation": {"constant": true, "priority": 9}})),
+            ),
+        ];
+        let result = run(&entries, "Nothing matches.");
+        assert_eq!(matched_ids(&result), ["kb_o32", "kb_o31"]);
+    }
+
+    #[test]
+    fn test_ordering_stable_tiebreak_keeps_original_order() {
+        // Equal priority + order + band → original entry order (stable sort).
+        let entries = vec![
+            entry_with_activation(
+                "kb_o41",
+                "First",
+                "p",
+                Some(json!({"activation": {"keys": ["king"], "priority": 3, "order": 2}})),
+            ),
+            entry_with_activation(
+                "kb_o42",
+                "Second",
+                "p",
+                Some(json!({"activation": {"keys": ["king"], "priority": 3, "order": 2}})),
+            ),
+            entry_with_activation(
+                "kb_o43",
+                "Third",
+                "p",
+                Some(json!({"activation": {"keys": ["king"], "priority": 3, "order": 2}})),
+            ),
+        ];
+        let result = run(&entries, "The king ruled.");
+        assert_eq!(
+            matched_ids(&result),
+            ["kb_o41", "kb_o42", "kb_o43"],
+            "equal priority+order keeps original entry order"
+        );
+    }
+
+    #[test]
+    fn test_ordering_missing_priority_order_default_to_zero() {
+        // Missing priority/order ⇒ 0 (spec §4): a default-0 entry sits between
+        // explicit positive and negative priorities.
+        let entries = vec![
+            entry_with_activation(
+                "kb_o51",
+                "Default",
+                "p",
+                Some(json!({"activation": {"keys": ["king"]}})),
+            ),
+            entry_with_activation(
+                "kb_o52",
+                "Negative",
+                "p",
+                Some(json!({"activation": {"keys": ["king"], "priority": -5}})),
+            ),
+            entry_with_activation(
+                "kb_o53",
+                "Positive",
+                "p",
+                Some(json!({"activation": {"keys": ["king"], "priority": 5}})),
+            ),
+        ];
+        let result = run(&entries, "The king ruled.");
+        assert_eq!(
+            matched_ids(&result),
+            ["kb_o53", "kb_o51", "kb_o52"],
+            "missing priority ⇒ 0, sorted desc: 5 > 0 > -5"
+        );
+    }
+
+    #[test]
+    fn test_ordering_neutral_only_keeps_original_order() {
+        // All-neutral set: every entry carries default sort keys → stable sort
+        // returns the original order — the engine-level byte-equivalence
+        // guarantee (spec §1 / §4).
+        let entries = vec![
+            entry_with_activation("kb_nA", "Neutral A", "No modules", None),
+            entry_with_activation(
+                "kb_nB",
+                "Neutral B",
+                "Modules, no activation",
+                Some(json!({"pack": {"version": 1}})),
+            ),
+            entry_with_activation(
+                "kb_nC",
+                "Neutral C",
+                "Empty keys",
+                Some(activation_primary(&[], "and_any")),
+            ),
+        ];
+        let result = run(&entries, "Any text.");
+        assert_eq!(
+            matched_ids(&result),
+            ["kb_nA", "kb_nB", "kb_nC"],
+            "all-neutral matched set keeps original entry order"
+        );
+        assert!(result.unmatched.is_empty());
+    }
+
+    #[test]
+    fn test_ordering_neutral_mixed_with_priority_entries() {
+        // Neutral entries act as default-key members of the non-constant band.
+        let entries = vec![
+            entry_with_activation("kb_mx1", "Neutral", "No activation", None),
+            entry_with_activation(
+                "kb_mx2",
+                "Matched High",
+                "p",
+                Some(json!({"activation": {"keys": ["king"], "priority": 10}})),
+            ),
+            entry_with_activation(
+                "kb_mx3",
+                "Matched Low",
+                "p",
+                Some(json!({"activation": {"keys": ["king"], "priority": -10}})),
+            ),
+        ];
+        let result = run(&entries, "The king ruled.");
+        assert_eq!(
+            matched_ids(&result),
+            ["kb_mx2", "kb_mx1", "kb_mx3"],
+            "priority 10 > neutral default 0 > priority -10"
+        );
+    }
+
+    #[test]
+    fn test_trace_reason_includes_match_mode_and_logic_arm() {
+        // T3 verify: hit + miss reasons carry match mode + logic arm for the
+        // future DF-76 inspector (spec §1 #5).
+        let hit_entries = vec![entry_with_activation(
+            "kb_tr1",
+            "Hit",
+            "p",
+            Some(json!({"activation": {
+                "keys": ["king"],
+                "secondary_keys": ["throne"],
+                "logic": "and_any",
+                "match": "whole_word"
+            }})),
+        )];
+        let result = run(&hit_entries, "The king sits on a throne.");
+        assert!(result.trace[0].accepted);
+        assert!(
+            result.trace[0].reason.contains("and_any (whole_word)"),
+            "hit reason must carry arm + mode: {}",
+            result.trace[0].reason
+        );
+
+        let miss_entries = vec![entry_with_activation(
+            "kb_tr2",
+            "Miss",
+            "p",
+            Some(json!({"activation": {
+                "keys": ["king", "queen"],
+                "secondary_keys": ["throne"],
+                "logic": "and_all",
+                "match": "whole_word"
+            }})),
+        )];
+        let result = run(&miss_entries, "The queen sits on a throne.");
+        assert!(!result.trace[0].accepted);
+        assert!(
+            result.trace[0].reason.contains("and_all (whole_word)"),
+            "miss reason must carry arm + mode: {}",
+            result.trace[0].reason
+        );
     }
 
     // ── spike aliases: `key` ─────────────────────────────────────────
