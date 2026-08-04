@@ -1,6 +1,6 @@
 # Spoke Adapter Architecture
 
-> **Status:** Normative (v0.8 — V1.148 spoke pin 0.6.1→0.8.2 + RuleQueryPort production + orchestrate_check daemon route + Connect Host N-C0 surface; v0.7 was V1.146 spoke InternalError reject code: pin bump 0.6.0→0.6.1; v0.6 was V1.145 spoke consumer alignment: adapter rehome to spoke-adapter + dep reversal + WorldKB/timeline read via ScopeQuery + scope-pushdown contract; v0.5 was V1.144 spoke 0.5.0 upgrade + RelationPort OCC extension + orchestrate_relate cutover)
+> **Status:** Normative (v0.9 — V1.149 lore activation §7.4 production matrix: default-on engine + Relation hop expand (in-flight; P2 dogfood confirms before ship); v0.8 was V1.148 spoke pin 0.6.1→0.8.2 + RuleQueryPort production + orchestrate_check daemon route + Connect Host N-C0 surface; v0.7 was V1.146 spoke InternalError reject code: pin bump 0.6.0→0.6.1; v0.6 was V1.145 spoke consumer alignment: adapter rehome to spoke-adapter + dep reversal + WorldKB/timeline read via ScopeQuery + scope-pushdown contract; v0.5 was V1.144 spoke 0.5.0 upgrade + RelationPort OCC extension + orchestrate_relate cutover)
 > **Document class:** Master
 > **Scope:** The `nexus-spoke-adapter` crate boundary, `extensions.nexus` namespace contract, spoke-operations delegation rules, daemon-api envelope strategy, drift detection adaptation, the `/kb/` HTTP route stability decision, and the opt-in Connect Host N-C0 surface (DF-72).
 > **Related:** [entity-scope-model.md](entity-scope-model.md), [local-db-schema.md](local-db-schema.md), [schemas-directory-layout.md](schemas-directory-layout.md), spoke `CONCEPTS.md`, spoke `.mstar/specs/spoke-data-model.md`, spoke `.mstar/specs/spoke-operations.md`, spoke `.mstar/specs/spoke-connect.md`. Iteration product draft (process): `.mstar/iterations/v1.148/specs/fl-r-connect-host-foundation.md`
@@ -473,7 +473,7 @@ nexus-spoke-adapter/src/
     computable_port.rs              ← impl ComputablePort for NexusAdapter (production, V1.146 P2 T2)
     fork_port.rs                    ← impl ForkTimelineQueryPort for NexusAdapter (production, V1.146 P2 T3)
     ── Adapter-internal capabilities ──
-    activation.rs                   ← Lore activation engine (V1.146 P4 T1) — scans WorldKB against spoke `narrative-modules.activation` dialect
+    activation.rs                   ← Lore activation engine (V1.149 / DF-74) — default-on; full spoke `modules.activation` dialect + Relation hop expand (see §7.4 Lore activation)
     mca_read.rs                     ← SpokeBackedKbStore wrapper (V1.145 P2) — implements KbStore by translating KbQuery → spoke Scope + NexusAdapter::list_knowledge_entries_scoped
     narrative_read.rs               ← Timeline ordering through adapter boundary (V1.146 P1) — NexusAdapter::list_timeline_events_ordered
 examples/
@@ -481,6 +481,22 @@ examples/
 ```
 
 **V1.146 rename:** adapter struct renamed to `NexusAdapter`. Import path: `nexus_spoke_adapter::NexusAdapter`. (V1.145: `nexus_spoke_adapter::adapter::NexusAdapter`; V1.142–V1.144: `nexus_local_db::spoke_adapter::NexusAdapter` before the rename.)
+
+#### Lore activation engine — default-on + Relation hop expand (V1.149 / DF-74)
+
+| Aspect | Contract |
+|--------|----------|
+| **Status** | **Production default-on** (V1.149 — in-flight; P2 dogfood confirms before ship). Supersedes V1.146 P4 flag-gated spike (`NEXUS_MCA_LORE_ACTIVATION=1` opt-in). |
+| **Owner** | `nexus-spoke-adapter/src/adapter/activation.rs` (pure match + hop). MCA calls the engine; CLI loads hop edges. **No** matching/hop code in `spoke-operations`. |
+| **Dialect** | Consumer-only over spoke handbook `domain-profile-lore-activation.md` `modules.activation`: `keys`, `secondary_keys`, `logic`, `constant`, `order`, `priority`, `position_hint`, `outlet`, `match`. Inner shapes are handbook-defined under open `ModuleMap` (KE schema does not enumerate activation fields). Logic per handbook truth table — `secondary_keys` absent/empty ⇒ primary-any, `logic` ignored (replaces V1.146 primary-only). Unknown keys ignored + round-trip safe. `position_hint`/`outlet` parsed-not-actioned until DF-75. |
+| **Default / off-switch** | Runs on every `assemble_moment` with `world_id` + non-empty World-KB. Escape hatch: `NEXUS_MCA_LORE_ACTIVATION=off` (kept ≥ one minor). |
+| **Neutral-only guarantee** | Worlds with no `modules.activation` produce assembled output **byte-equivalent** to V1.146 flag-off (hard ship gate). |
+| **Scan** | Stage-0 full string + outline beats = timeline `title`/`summary` from existing narrative fetch. Per-entry `canonical_name` + `body.summary` self-match. Raw manuscript body **not** on MCA path (documented Stage-0 fallback). |
+| **Ordering** | Constant seeds first; then `priority` descending (higher wins) → `order` ascending → stable index. |
+| **Hops** | On primary/constant fire, expand ≤ **2** hops over undirected adjacency built from confirmed `kb_relationships` via inherent `NexusAdapter::list_hop_edges_for_world` (`list_relationships_for_world(..., include_suggested=false)`). spoke `RelationPort` remains get/put only — **no** list-by-entity on the trait. Hop-pulled entries do **not** re-fire keyword activation. Token budget = remaining MCA budget after primary match when `max_tokens` set; personality never truncated. Cycle-safe (`visited` on `entry_id`). |
+| **Trace** | Per-entry reason + hop-origin / hop-depth / source-relation for hopped rows (`--emit-packet`; Control Room inspector = DF-76). |
+
+Product behavior detail (author story, DF mapping, Prepare locks): iteration draft [`../iterations/v1.149/specs/fl-l-w4-activation.md`](../iterations/v1.149/specs/fl-l-w4-activation.md) (process path until P2 closeout promotes any durable deltas here). DF mapping + tracker: [`../knowledge/deferred-features-cross-version-tracker.md`](../knowledge/deferred-features-cross-version-tracker.md) — DF-74 (in-flight, V1.149) / DF-75 (next wave) / DF-76 (inspector).
 
 #### Production-vs-stub matrix per port family (V1.148)
 
