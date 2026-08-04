@@ -1,9 +1,12 @@
-//! Golden regression test — `assemble_moment` with `activation_enabled: false`.
+//! Golden regression test — `assemble_moment` with explicit
+//! `activation_enabled: false` (the off-switch path).
 //!
-//! V1.146 P4 T4: HARD gate. The test captures a deterministic fixture output
-//! and verifies it is byte-identical to a checked-in golden. Any drift in the
-//! OFF path (e.g. unintentional activation gate leaking into the OFF branch)
-//! causes this test to fail.
+//! V1.146 P4 T4 / V1.149 P0 T2: HARD gate. The test captures a deterministic
+//! fixture output and verifies it is byte-identical to a checked-in golden.
+//! Any drift in the OFF path (e.g. unintentional activation gate leaking into
+//! the OFF branch) causes this test to fail. The default is now ON; this test
+//! pins the off-switch semantics that the neutral-only default-on golden
+//! (`golden_neutral_only_default_on.rs`) must match byte-for-byte.
 
 #![allow(clippy::manual_string_new, clippy::doc_markdown)]
 
@@ -94,10 +97,12 @@ async fn assemble_moment_flag_off_golden() {
     let (narrative, kb, knowledge, stage0) = build_deterministic_fixture();
     seed_stores(&kb, &knowledge).await;
 
-    // activation_enabled: false (default) — no activation filtering
+    // activation_enabled: false (explicit off-switch) — no activation
+    // filtering even with activation modules present.
     let request = MomentRequest::new(stage0)
         .with_world("wld_golden")
-        .with_user("user_golden");
+        .with_user("user_golden")
+        .with_activation_enabled(false);
 
     let ctx = assemble_moment(&request, &narrative, &kb, &knowledge).await;
     let output = ctx.to_full_context();
