@@ -618,10 +618,26 @@ pub async fn run_assemble_moment(
     // `spoke_to_world_kb` conversion seam), matching `SqliteKbStore::query`
     // behavior exactly (silent 500-row window; no reject-on-overflow).
     let kb = nexus_spoke_adapter::SpokeBackedKbStore::new(pool.clone());
-    let knowledge = SqliteKnowledgeStore::new(pool);
-
+    // V1.149 P1: preload the world's confirmed relation edges for relation-hop
+    // expansion when activation is on (off-switch ⇒ no hop load; spec §6).
+    // The edge source is the inherent `NexusAdapter::list_hop_edges_for_world`
+    // — spoke `RelationPort` is get/put only, so the storage list primitive
+    // (`list_relationships_for_world`, confirmed graph) backs the loader.
+    // A storage-read failure degrades to activation-only (no hop pass),
+    // consistent with `assemble_moment`'s per-section degradation; a graph
+    // beyond the loader limit is truncated silently (documented at the
+    // loader, V1.149 P1 plan residual for the paginated follow-up).
     let wid = world_id.unwrap_or("wld_default");
+    let hop_edges = if activation_off {
+        None
+    } else {
+        nexus_spoke_adapter::adapter::NexusAdapter::new(pool.clone())
+            .list_hop_edges_for_world(wid)
+            .ok()
+            .filter(|edges| !edges.is_empty())
+    };
     let uid = user_id.unwrap_or("user_default");
+    let knowledge = SqliteKnowledgeStore::new(pool);
 
     // Build Stage0Assembly — load from creator memory if available
     let stage0 = build_stage0_from_local(config, hint, max_tokens, include_fragments)
@@ -666,6 +682,18 @@ pub async fn run_assemble_moment(
     // off-switch needs an explicit call here.
     if activation_off {
         request = request.with_activation_enabled(false);
+    }
+
+    // V1.149 P1: relation-hop expand — pass the preloaded edges and the
+    // caller hop cap. `hop_max_tokens` is set to the full cross-domain
+    // budget; MCA refines it to the spec Q1 remainder (personality never
+    // truncated + world_state + timeline + primary-KB reservations) at the
+    // call site (see `hop_budget_tokens` in nexus-moment-context-assembly).
+    if let Some(edges) = hop_edges {
+        request = request.with_hop_edges(edges);
+        if let Some(mt) = max_tokens {
+            request = request.with_hop_max_tokens(mt);
+        }
     }
 
     // Call assemble_moment with persistent stores
@@ -1587,7 +1615,7 @@ mod tests {
         }
     }
 
-    /// Helper: build a trace entry.
+    /// Helper: build a trace entry (primary-only row — no hop fields).
     fn trace_entry(
         entry_id: &str,
         canonical_name: &str,
@@ -1599,6 +1627,10 @@ mod tests {
             canonical_name: canonical_name.to_string(),
             reason: reason.to_string(),
             accepted,
+            hop_origin_entry_id: None,
+            hop_depth: None,
+            source_relation_type: None,
+            source_relation_id: None,
         }
     }
 
