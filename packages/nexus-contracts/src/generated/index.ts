@@ -9,6 +9,7 @@ export * from './daemon-api/agent-host';
 export * from './daemon-api/canvas/outline';
 export * from './daemon-api/canvas/strategy';
 export * from './daemon-api/canvas/world-kb';
+export * from './daemon-api/check';
 export * from './daemon-api/common';
 export * from './daemon-api/compute';
 export * from './daemon-api/creators';
@@ -68,6 +69,8 @@ export const SCHEMA_VERSIONS: Record<string, number> = {
   WorldKbRelationshipProjection: 1,
   WorldKbSourceAnchorProjection: 1,
   WorldKbValidationError: 1,
+  CheckRequest: 1,
+  CheckResponse: 1,
   ErrorResponse: 1,
   ComputeInput: 1,
   ComputeOutput: 1,

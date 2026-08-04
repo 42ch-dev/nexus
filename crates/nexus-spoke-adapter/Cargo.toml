@@ -38,6 +38,11 @@ nexus-local-db = { path = "../nexus-local-db" }
 # V1.146 P2 T2 — ComputablePort impl bridges spoke compute requests to nexus's
 # stateless WASM host via the session store (Decision 2 mapping table).
 nexus-wasm-host = { path = "../nexus-wasm-host" }
+# V1.148 P3 N-C0 — the HostCapabilityManifest honesty surface: the shared
+# manifest builder resolves the installation device-id (`~/.nexus42/device-id`)
+# through the path-layout SSOT when no host_id is injected.
+nexus-home-layout = { path = "../nexus-home-layout" }
+dirs = { workspace = true }
 sqlx.workspace = true
 tokio.workspace = true
 

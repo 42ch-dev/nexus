@@ -28,6 +28,7 @@ where
 pub mod acp;
 pub mod agent_host;
 pub mod chapters;
+pub mod check;
 pub mod compute_modules;
 pub mod compute_runs;
 pub mod creators;

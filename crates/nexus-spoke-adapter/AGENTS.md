@@ -23,7 +23,7 @@ Since V1.141 the crate also flat-re-exports spoke 0.4.0's adapter **port traits 
 ## Authority
 
 - Normative spec: [`specs/spoke-adapter-architecture.md`](../../.mstar/specs/spoke-adapter-architecture.md) (tracked). §7.2 is the authoritative public API surface; §7.3 is the Surface B (ports + orchestrators) surface; §2 is the `extensions.nexus` contract.
-- Upstream types: `spoke-schemas` + `spoke-operations` (crates.io, lockstep exact pin `=0.6.1`).
+- Upstream types: `spoke-schemas` + `spoke-operations` (crates.io, lockstep exact pin `=0.8.2`).
 
 ## Key rules
 
@@ -34,7 +34,7 @@ Since V1.141 the crate also flat-re-exports spoke 0.4.0's adapter **port traits 
 
 ## Dependencies
 
-- `spoke-schemas`, `spoke-operations` (workspace, `=0.6.1`)
+- `spoke-schemas`, `spoke-operations` (workspace, `=0.8.2`)
 - `serde`, `serde_json`
 - `nexus-knowledge` (domain types + conversion seam, V1.145 P1a)
 - `nexus-local-db` (storage primitives — `SqliteKbStore`, `open_pool`, `run_migrations`, CAS helpers; V1.145 P1b adapter rehome)

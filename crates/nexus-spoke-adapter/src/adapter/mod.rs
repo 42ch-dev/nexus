@@ -60,6 +60,12 @@ use tokio::runtime::Handle;
 pub struct NexusAdapter<'a> {
     pool: SqlitePool,
     handle: Handle,
+    /// Injected installation identity (`~/.nexus42/device-id` UUID) for the
+    /// `HostCapabilityManifest`. `None` → `HostManifestPort` resolves the
+    /// device id from the standard nexus home on demand. V1.148 P3 N-C0:
+    /// replaces the former static `"nexus-local"` host id (honesty lock —
+    /// installation-scoped stable id, not a `PeerId` / world id).
+    host_id: Option<String>,
     /// When set (via [`Self::with_tx_cell`]), `put_knowledge_entry` joins this
     /// transaction instead of opening its own. The handler moves the
     /// `sqlx::Transaction` into the shared cell before `orchestrate_promote`
@@ -96,6 +102,7 @@ impl NexusAdapter<'static> {
         NexusAdapter {
             pool,
             handle,
+            host_id: None,
             bound_tx_cell: None,
         }
     }
@@ -103,6 +110,20 @@ impl NexusAdapter<'static> {
 
 #[allow(clippy::elidable_lifetime_names)]
 impl<'a> NexusAdapter<'a> {
+    /// Inject the installation identity used by [`crate::HostManifestPort`]
+    /// (`HostCapabilityManifest.host_id`).
+    ///
+    /// V1.148 P3 N-C0 honesty lock: the manifest `host_id` is the installation
+    /// device-id UUID (`~/.nexus42/device-id`), not a static `"nexus-local"`.
+    /// When no id is injected, the port resolves the device id from the
+    /// standard nexus home on demand (see `adapter/host_manifest_port.rs`).
+    /// Tests inject an id to stay hermetic.
+    #[must_use]
+    pub fn with_host_id(mut self, host_id: impl Into<String>) -> Self {
+        self.host_id = Some(host_id.into());
+        self
+    }
+
     /// Attach a shared transaction cell for the duration of one adopt/orchestrate
     /// call. The handler installs the open `sqlx::Transaction` in the cell before
     /// calling [`Self::with_bound_tx`], then removes it afterward for job flip +

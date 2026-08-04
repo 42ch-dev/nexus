@@ -145,3 +145,10 @@ Engineering reference for the Nexus OSS harness **knowledge** tree.
 | Document | Description |
 | --- | --- |
 | [architecture-patterns/spoke-adapter-port-orchestration-adoption.md](architecture-patterns/spoke-adapter-port-orchestration-adoption.md) | **Updated** — V1.144 section: structural-mismatch resolution (spoke 0.5.0 adds `Relation.revision` → `R-V1143P2-DEFER-RELATE` closed at protocol level); production cutover count now 3/3 shipped (promote V1.142, upsert V1.143, relate V1.144); OCC port-extension pattern (insert-only → OCC-aware via existing `kb_*` revision column + CAS guard + revision-seed=1); known gaps (`extensions.nexus` no round-trip on Relation; no spoke 500-class reject code → 400 misclassification across all 4 ports) (compound V1.144) |
+
+### V1.148 additions
+
+| Document | Description |
+| --- | --- |
+| [architecture-patterns/connect-host-opt-in-feature-gate.md](architecture-patterns/connect-host-opt-in-feature-gate.md) | Connect Host — opt-in feature gate for a heavy transport dep (N-C0 pattern): keep the default build graph free of the dep (gate-checkable `cargo tree`), one shared honest `HostCapabilityManifest` builder, total op-refusal via `invoke_handler = None` (not a per-op refuse handler), atomic identity-key perms + fail-closed allowlist, separate-OS-process topology, deterministic libp2p interop test (mDNS off, fixed seeds). DF-72 N-C0; N-C1 next (compound V1.148) |
+| [conventions/nexus-home-layout-path-helpers.md](conventions/nexus-home-layout-path-helpers.md) | `nexus-home-layout` path helpers take **raw home** — never pre-join `.nexus42`. The V1.148 P4 F-1 dogfood bug (device-id double-nesting → host_id churn) root cause + convention. Name the param for the raw input (`home`, not `nexus_home`) (compound V1.148) |

@@ -2,18 +2,26 @@
 //! matrix.
 //!
 //! The self-manifest declares the full capability set proven by the
-//! adapter's port implementations:
+//! adapter's port implementations (built by the single shared builder
+//! [`crate::manifest::build_local_host_manifest`], DF-72 N-C0 lock):
 //! - `spoke-baseline` — all six baseline ports (T1).
 //! - `l2-computable` — production `ComputablePort` (T2, 10 tests incl.
 //!   orchestrate round-trip).
 //! - `l5-fork` — production `ForkTimelineQueryPort` (T3, 9 tests;
 //!   reviewer adjudicated declaration justified).
 //!
+//! V1.148 P3 N-C0 honesty lock: `host_id` is the installation device-id UUID
+//! (`~/.nexus42/device-id` via `nexus_home_layout::device_id`), replacing the
+//! former static `"nexus-local"` constant — an installation-scoped stable id,
+//! not a libp2p `PeerId`, not a world id. An injected [`NexusAdapter::with_host_id`]
+//! id wins; otherwise the device id is resolved from the standard nexus home
+//! on demand.
+//!
 //! Local-first nexus has no peers: the production daemon runs against a
-//! single `nexus-local` host that owns the `nexus` extension namespace and
-//! declares the `data-store` role (it is the SQLite-backed authority for
-//! `KnowledgeEntry`, `Relation`, and `Finding` storage). Multi-host /
-//! peer discovery is not implemented.
+//! single local host that owns the `nexus` extension namespace and declares
+//! the `data-store` role (it is the SQLite-backed authority for
+//! `KnowledgeEntry`, `Relation`, and `Finding` storage). Multi-host / peer
+//! discovery is not implemented.
 //!
 //! # Roadmap trigger — `list_peer_host_capability_manifests` (spec §7.4 stub matrix)
 //!
@@ -31,28 +39,24 @@
 //! peer discovery is multi-host infra, not spoke fork-port scope).
 
 use super::NexusAdapter;
-use crate::{HostCapabilityManifest, HostManifestPort, SpokeResult};
-use serde_json::json;
-/// The local-first host id (spec §7.4 — `nexus-local` is the documented
-/// default host identity for the production adapter).
-const HOST_ID: &str = "nexus-local";
+use crate::{HostCapabilityManifest, HostManifestPort, SpokeRejectCode, SpokeResult};
+use nexus_home_layout::device_id::get_or_create_device_id;
 
 impl HostManifestPort for NexusAdapter<'_> {
     fn get_host_capability_manifest(&self) -> SpokeResult<HostCapabilityManifest> {
-        // Mirror V1.141 mock's `make_manifest` pattern: construct the
-        // canonical shape via `serde_json::from_value`, which exercises the
-        // same typify-generated newtype validation a real wire manifest
-        // would impose (host_id min-length, namespace regex, etc.).
-        let manifest = serde_json::from_value(json!({
-            "schema_version": 1,
-            "host_id": HOST_ID,
-            "roles": ["data-store"],
-            "capabilities": ["spoke-baseline", "l2-computable", "l5-fork"],
-            "namespaces": ["nexus"],
-            "extensions": {}
-        }))
-        .expect("static nexus-local manifest is schema-valid");
-        SpokeResult::Ok(manifest)
+        // Single builder SSOT (product draft §4.1): the Connect Host's
+        // `local_manifest` (P3 T3) calls the same function with the same
+        // device-id host_id — one capability list, one extensions.nexus block.
+        let host_id = match &self.host_id {
+            Some(id) => id.clone(),
+            None => {
+                return match resolve_device_id_from_standard_home() {
+                    SpokeResult::Ok(id) => crate::manifest::build_local_host_manifest(&id),
+                    SpokeResult::Reject(r) => SpokeResult::Reject(r),
+                };
+            }
+        };
+        crate::manifest::build_local_host_manifest(&host_id)
     }
 
     /// Stub — returns the documented empty peer list (spec §7.4).
@@ -65,6 +69,31 @@ impl HostManifestPort for NexusAdapter<'_> {
     }
 }
 
+/// Resolve the installation device id from the standard nexus home
+/// (`$HOME/.nexus42` — matches `apps/nexus42` `config::nexus_home()`), so an
+/// adapter without an injected host id still advertises the honest identity.
+fn resolve_device_id_from_standard_home() -> SpokeResult<String> {
+    let Some(home) = dirs::home_dir() else {
+        return SpokeResult::Reject(reject_internal(
+            "cannot resolve home directory for device-id".into(),
+        ));
+    };
+    // `get_or_create_device_id` takes the RAW home and joins `.nexus42`
+    // itself (canonical `~/.nexus42/device-id`; device_id_path contract).
+    match get_or_create_device_id(&home) {
+        Ok(id) => SpokeResult::Ok(id),
+        Err(e) => SpokeResult::Reject(reject_internal(format!("device-id unavailable: {e}"))),
+    }
+}
+
+const fn reject_internal(message: String) -> crate::SpokeReject {
+    crate::SpokeReject {
+        code: SpokeRejectCode::InternalError,
+        message,
+        details: None,
+    }
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -73,23 +102,24 @@ mod tests {
     use crate::HostManifestPort;
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn self_manifest_reports_nexus_local_data_store() {
+    async fn self_manifest_reports_injected_host_id_and_n_c0_contract() {
         // HostManifestPort is storage-free; the pool is only needed to
         // satisfy the adapter struct shape. Use an in-memory pool with
         // migrations so the adapter construction path mirrors the other
-        // ports.
+        // ports. The host id is injected so the test stays hermetic — no
+        // reads/writes against the real `~/.nexus42`.
         let dir = tempfile::tempdir().unwrap();
         let db_path = dir.path().join("test.db");
         let pool = nexus_local_db::open_pool(&db_path).await.unwrap();
         nexus_local_db::run_migrations(&pool).await.unwrap();
 
-        let adapter = NexusAdapter::new(pool);
+        let adapter = NexusAdapter::new(pool).with_host_id("test-host-uuid-0000");
         let manifest = match adapter.get_host_capability_manifest() {
             SpokeResult::Ok(m) => m,
             SpokeResult::Reject(r) => panic!("self manifest is Ok: {r:?}"),
         };
 
-        assert_eq!(manifest.host_id.as_str(), HOST_ID);
+        assert_eq!(manifest.host_id.as_str(), "test-host-uuid-0000");
         assert_eq!(manifest.roles, vec!["data-store".to_string()]);
         assert_eq!(
             manifest.capabilities,
@@ -107,7 +137,27 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec!["nexus".to_string()]
         );
-        assert!(manifest.extensions.is_empty(), "no product extensions");
+        // Same builder as the Connect Host → the extensions.nexus N-C0 block
+        // is present on the port surface too (product draft §4.3 item 9).
+        let nexus_ext = manifest
+            .extensions
+            .get(&"nexus".parse().expect("locked key parses"))
+            .expect("extensions.nexus block present");
+        assert_eq!(
+            nexus_ext
+                .get("connect_host_slice")
+                .and_then(serde_json::Value::as_str),
+            Some("n-c0")
+        );
+        assert_eq!(
+            nexus_ext
+                .get("daemon_http_coexists")
+                .and_then(serde_json::Value::as_bool),
+            Some(true)
+        );
+        assert!(!serde_json::to_string(&manifest)
+            .expect("serializes")
+            .contains("reasoning-complete"));
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

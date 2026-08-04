@@ -4,6 +4,8 @@
 //! accessed from both the binary entry point (`main.rs`) and library modules
 //! (e.g. `system::print_completion` for shell completion generation).
 
+#[cfg(feature = "connect-host")]
+use crate::commands::connect::ConnectCommand;
 use crate::commands::{
     acp::AcpCommand, acp_worker::AcpWorkerArgs, creator::CreatorCommand, daemon::DaemonCommand,
     daemon_run::DaemonRunArgs, desktop::DesktopCommand, host_call::HostCallArgs,
@@ -73,6 +75,18 @@ pub enum Commands {
     Daemon {
         #[command(subcommand)]
         command: DaemonCommand,
+    },
+
+    /// Connect Host (DF-72 N-C0) — peer surface for third-party reasoners
+    ///
+    /// Runs a `spoke-connect` node in a separate OS process: signed-hello
+    /// handshake + allowlist + honest `HostCapabilityManifest`; every inbound
+    /// op is refused (`invoke_handler = None`). Compiled only when the
+    /// `connect-host` feature is enabled.
+    #[cfg(feature = "connect-host")]
+    Connect {
+        #[command(subcommand)]
+        command: ConnectCommand,
     },
 
     /// ACP capability plane (agents, registry, connectivity)

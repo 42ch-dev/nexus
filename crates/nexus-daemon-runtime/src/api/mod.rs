@@ -557,6 +557,17 @@ fn timeline_routes() -> Router<WorkspaceState> {
         )
 }
 
+/// Check routes — spoke `orchestrate_check` Daemon HTTP surface (V1.148 P2;
+/// closes V1.146 Non-Goal 5a).
+///
+/// Mounted in tier2 (`require_api_key` + `require_active_creator`) because the
+/// check runs over Worlds the active creator owns (`is_world_owned` guard in
+/// the handler). Not under `/compute/` (architect lock): check is a
+/// quality-loop op, not a WASM compute invocation.
+fn check_routes() -> Router<WorkspaceState> {
+    Router::new().route("/v1/daemon/check", post(handlers::check::run_check))
+}
+
 /// Profile-scoped (Tier-2) routes — require active creator + lazy-open pool.
 fn tier2_routes() -> Router<WorkspaceState> {
     Router::new()
@@ -581,6 +592,7 @@ fn tier2_routes() -> Router<WorkspaceState> {
         .merge(agent_host_tier2_routes())
         .merge(timeline_routes())
         .merge(compute_invoke_routes())
+        .merge(check_routes())
 }
 
 /// Create the Daemon API router

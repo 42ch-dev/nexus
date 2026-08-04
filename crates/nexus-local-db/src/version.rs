@@ -7,7 +7,8 @@
 ///
 /// This version tracks `SQLite` structure migrations only.
 /// Increment when adding new tables, columns, or modifying DDL.
-pub const DB_SCHEMA_VERSION: u32 = 10;
+// V1.148: 10 → 11 — spoke_rules table (RuleQueryPort production) + the V1.145–V1.147 schema additions that were also unbumped (compute_sessions direct-lane columns, kb_relationships.extensions_nexus_json, modules_json). Adopting a stricter per-structural-change bump going forward.
+pub const DB_SCHEMA_VERSION: u32 = 11;
 
 /// Contract schema version from generated wire types
 ///

@@ -1,9 +1,9 @@
 # Spoke Adapter Architecture
 
-> **Status:** Normative (v0.7 — V1.146 spoke InternalError reject code: pin bump 0.6.0→0.6.1; v0.6 was V1.145 spoke consumer alignment: adapter rehome to spoke-adapter + dep reversal + WorldKB/timeline read via ScopeQuery + scope-pushdown contract; v0.5 was V1.144 spoke 0.5.0 upgrade + RelationPort OCC extension + orchestrate_relate cutover)
+> **Status:** Normative (v0.8 — V1.148 spoke pin 0.6.1→0.8.2 + RuleQueryPort production + orchestrate_check daemon route + Connect Host N-C0 surface; v0.7 was V1.146 spoke InternalError reject code: pin bump 0.6.0→0.6.1; v0.6 was V1.145 spoke consumer alignment: adapter rehome to spoke-adapter + dep reversal + WorldKB/timeline read via ScopeQuery + scope-pushdown contract; v0.5 was V1.144 spoke 0.5.0 upgrade + RelationPort OCC extension + orchestrate_relate cutover)
 > **Document class:** Master
-> **Scope:** The `nexus-spoke-adapter` crate boundary, `extensions.nexus` namespace contract, spoke-operations delegation rules, daemon-api envelope strategy, drift detection adaptation, and the `/kb/` HTTP route stability decision.
-> **Related:** [entity-scope-model.md](entity-scope-model.md), [local-db-schema.md](local-db-schema.md), [schemas-directory-layout.md](schemas-directory-layout.md), spoke `CONCEPTS.md`, spoke `.mstar/specs/spoke-data-model.md`, spoke `.mstar/specs/spoke-operations.md`
+> **Scope:** The `nexus-spoke-adapter` crate boundary, `extensions.nexus` namespace contract, spoke-operations delegation rules, daemon-api envelope strategy, drift detection adaptation, the `/kb/` HTTP route stability decision, and the opt-in Connect Host N-C0 surface (DF-72).
+> **Related:** [entity-scope-model.md](entity-scope-model.md), [local-db-schema.md](local-db-schema.md), [schemas-directory-layout.md](schemas-directory-layout.md), spoke `CONCEPTS.md`, spoke `.mstar/specs/spoke-data-model.md`, spoke `.mstar/specs/spoke-operations.md`, spoke `.mstar/specs/spoke-connect.md`. Iteration product draft (process): `.mstar/iterations/v1.148/specs/fl-r-connect-host-foundation.md`
 
 ## 0. Document Position
 
@@ -16,10 +16,11 @@ These are the architecture bedrock — do not re-litigate.
 ### 1.1 Consume spoke packages directly
 
 nexus depends on spoke's published packages directly:
-- **Rust:** `spoke-schemas` + `spoke-operations` (crates.io, lockstep **`0.6.1`** exact pin)
-- **TypeScript:** `@42ch/spoke-schemas` + `@42ch/spoke-operations` (npm, lockstep **`0.6.1`** exact pin)
+- **Rust:** `spoke-schemas` + `spoke-operations` (crates.io, lockstep **`0.8.2`** exact pin)
+- **TypeScript:** `@42ch/spoke-schemas` + `@42ch/spoke-operations` (npm, lockstep **`0.8.2`** exact pin)
+- **Rust (opt-in Connect Host only):** `spoke-connect` (crates.io, lockstep **`0.8.2`** exact pin) — workspace dep consumed **only** behind cargo feature `connect-host` on `apps/nexus42`. Default `nexus42` / daemon builds MUST NOT link `spoke-connect`. See §10.
 
-> **Historical:** V1.139 shipped at `0.1.1`; V1.140 bumped to `0.2.0`. V1.141 jumped to `0.4.0` (covering both the `0.3.0` capability-sliced port architecture and `0.4.0` additive `HostCapabilityManifest` + body helpers + UTF-8 peer sort). V1.144 bumped to `0.5.0` (additive `Relation.revision` + OCC-aware `RelationPort` + `RelationAlreadyExists`/`RelationNotFound` reject codes + relate-gate explicit mode). V1.145 bumped to `0.6.0` (additive `Scope.extensions` + `KnowledgeEntry.modules`). V1.146 bumped to `0.6.1` (additive `InternalError` 500-class reject code, PR #35).
+> **Historical:** V1.139 shipped at `0.1.1`; V1.140 bumped to `0.2.0`. V1.141 jumped to `0.4.0` (covering both the `0.3.0` capability-sliced port architecture and `0.4.0` additive `HostCapabilityManifest` + body helpers + UTF-8 peer sort). V1.144 bumped to `0.5.0` (additive `Relation.revision` + OCC-aware `RelationPort` + `RelationAlreadyExists`/`RelationNotFound` reject codes + relate-gate explicit mode). V1.145 bumped to `0.6.0` (additive `Scope.extensions` + `KnowledgeEntry.modules`). V1.146 bumped to `0.6.1` (additive `InternalError` 500-class reject code, PR #35). **V1.148 bumped to `0.8.2`** (spoke-connect surface 0.7.0–0.8.2 additive; 0.7.0 demote pack catalog from ModuleMap — pack catalog is product transport envelope, not `modules.pack` on KE/AssemblePacket; connect family schemas additive).
 
 The bespoke `schemas/domain/key-block.schema.json` is deleted. No nexus-local copy of spoke schemas exists. The atomic KB wire type is `KnowledgeEntry` from spoke.
 
@@ -196,8 +197,8 @@ The `schema_drift_detection.rs` `build_schema_map()` removes the `key-block.sche
 
 `check-wire-drift.sh` gains a new spoke-conformance step (P0 T4):
 
-1. Verify `spoke-schemas` crate version matches pinned **`0.6.1`** in `Cargo.toml`.
-2. Verify `@42ch/spoke-schemas` npm version matches pinned **`0.6.1`** in `package.json`.
+1. Verify `spoke-schemas` crate version matches pinned **`0.8.2`** in `Cargo.toml`.
+2. Verify `@42ch/spoke-schemas` npm version matches pinned **`0.8.2`** in `package.json`.
 3. Construct a `KnowledgeEntry` from spoke fixture JSON, deserialize via nexus's serde path, serialize back — verify structural round-trip. This catches type-mapping regressions without requiring a local schema.
 
 ### 5.3 Daemon-api envelopes that `$ref` spoke types
@@ -448,7 +449,7 @@ The production `BaselinePorts` implementation (`NexusAdapter`, V1.146 rename) li
 | Layer | Role | Dependency direction |
 |-------|------|---------------------|
 | `nexus-local-db` | **Pure storage** — DB CRUD primitives (`SqliteKbStore`, `open_pool`, `run_migrations`); no spoke types or dep on spoke-adapter | ← `nexus-spoke-adapter` depends on these primitives |
-| `nexus-spoke-adapter` | **Capability aggregation** — owns `NexusAdapter` + 6 port impls; maps spoke ↔ storage primitives; re-exports Surface A/B | → depends on `nexus-local-db`, `nexus-knowledge`, `spoke-schemas`, `spoke-operations` |
+| `nexus-spoke-adapter` | **Capability aggregation** — owns `NexusAdapter` + 8 port impls; maps spoke ↔ storage primitives; re-exports Surface A/B | → depends on `nexus-local-db`, `nexus-knowledge`, `spoke-schemas`, `spoke-operations` |
 | Business crates (`nexus-daemon-runtime`, `nexus-narrative`, MCA, …) | **Spoke consumers** — call adapter/orchestrators; do not host port impls or spoke serialization | → depend on `nexus-spoke-adapter` + `nexus-knowledge` |
 
 The adapter converts between nexus storage rows and spoke wire types using the V1.145 P1a conversion seam, now owned by `nexus-spoke-adapter` as free functions in `src/conversion/` (`world_kb_to_spoke` / `spoke_to_world_kb`) plus the `WorldKbEntrySpokeExt` lifecycle trait. The seam moved out of `nexus-knowledge` (orphan rule: both `WorldKbEntry` and `KnowledgeEntry` are foreign to `nexus-knowledge`'s former `From` impls), reversing the `nexus-knowledge → nexus-spoke-adapter` edge to `nexus-spoke-adapter → nexus-knowledge`. The conversion seam remains the sole boundary — no second conversion path is added (spec §7.1).
@@ -467,7 +468,7 @@ nexus-spoke-adapter/src/
     relation_port.rs                ← impl RelationPort for NexusAdapter (OCC-aware + extensions_nexus_json round-trip)
     scope_query_port.rs             ← impl ScopeQueryPort for NexusAdapter (list_knowledge_entries + list_timeline_events, both production)
     finding_port.rs                 ← impl FindingPort for NexusAdapter
-    rule_query_port.rs              ← impl RuleQueryPort for NexusAdapter (stub)
+    rule_query_port.rs              ← impl RuleQueryPort for NexusAdapter (production, V1.148 P1)
     host_manifest_port.rs           ← impl HostManifestPort for NexusAdapter (self manifest production; list_peer stub)
     computable_port.rs              ← impl ComputablePort for NexusAdapter (production, V1.146 P2 T2)
     fork_port.rs                    ← impl ForkTimelineQueryPort for NexusAdapter (production, V1.146 P2 T3)
@@ -481,7 +482,7 @@ examples/
 
 **V1.146 rename:** adapter struct renamed to `NexusAdapter`. Import path: `nexus_spoke_adapter::NexusAdapter`. (V1.145: `nexus_spoke_adapter::adapter::NexusAdapter`; V1.142–V1.144: `nexus_local_db::spoke_adapter::NexusAdapter` before the rename.)
 
-#### Production-vs-stub matrix per port family (V1.146)
+#### Production-vs-stub matrix per port family (V1.148)
 
 | Port family / method | Implementation class | Backing | Rationale |
 |---|---|---|---|
@@ -490,12 +491,13 @@ examples/
 | `FindingPort` | **Production** | `findings` table | Existing storage |
 | `ScopeQueryPort.list_knowledge_entries` | **Production** | `kb_key_blocks` scope-filtered by `scope_id` + `entry_ids`/`entry_types`; unfiltered full-world listings reject on >`LIST_BY_WORLD_LIMIT` overflow (no silent truncation for orchestrators). The MCA read path does NOT use this trait method — it uses `SpokeBackedKbStore` → `NexusAdapter::list_knowledge_entries_scoped` reading `scope.extensions["nexus"]` (see §7.4 scope-pushdown contract) | Existing storage; P2 production read via `SpokeBackedKbStore` (MCA only) |
 | `ScopeQueryPort.list_timeline_events` | **Production** (V1.145 P3) | `narrative_timeline_events` table (V1.26); scope-filtered by `scope_id` → `world_id`, `extensions.nexus.branch_id`, `timeline_event_ids` | Timeline IS persisted in `narrative_timeline_events` (V1.26 migration); the V1.142 stub was incorrect — data exists, the port just didn't query it |
-| `RuleQueryPort` | **Stub** — `Ok(Vec::new())` | None | No spoke `Rule` persistence table; triggers on quality-loop engine spoke `Rule` DTO adoption |
-| `HostManifestPort` | **Static-stub** — self manifest only | Static data | Multi-host / peer discovery not implemented; `list_peer_host_capability_manifests` returns empty |
+| `RuleQueryPort` | **Production** (V1.148 P1) | New `spoke_rules` table (`nexus-local-db`); `list_rules(rule_refs)` maps `rule_id` → spoke `Rule`; unknown refs omitted (not error); empty ref-set → empty | Closes `R-V1142P1-001`. Substrate for Daemon HTTP `POST /v1/daemon/check` (P2). Does **not** imply Connect `check` dispatch (N-C0 refuses all ops). |
+| `HostManifestPort.get_host_capability_manifest` | **Production** (self) | Shared builder: installation `host_id` from `~/.nexus42/device-id`; roles `["data-store"]`; capabilities `spoke-baseline` + `l2-computable` + `l5-fork`; namespaces `["nexus"]` | Honest self-description for adapter + Connect Host hello (`ConnectConfig.local_manifest`) |
+| `HostManifestPort.list_peer_host_capability_manifests` | **Stub** — `Ok(Vec::new())` | None | Multi-host / peer discovery not implemented; **N-C3** (DF-72). Partial surface: local Connect Host makes *self* manifest honest over Connect (N-C0); peer-list remains empty. Residual `R-V1142P1-002` retargeted to N-C3. |
 | `ComputablePort` | **Production** (V1.146 P2 T2) | `compute_sessions` table via `nexus-wasm-host` session store | WASM compute sessions; bridges spoke `project`/`compute` requests to the stateless WASM runtime |
 | `ForkTimelineQueryPort` | **Production** (V1.146 P2 T3) | `narrative_timeline_events` + `narrative_branches` fork-filtered | Fork-scoped timeline queries; fork has no relation to fork-timeline precedes ordering (precedes is Relation-DAG, not fork-port scope) |
 
-**Stub behavior contract:** each stub is a documented empty/static return with a doc-comment referencing its roadmap trigger and closed residual (V1.146 P5). Stubs must never fabricate data — they return exactly what the backing storage would if it were empty/static. The two remaining stubs (`RuleQueryPort`, `HostManifestPort.list_peer`) are deferred: `RuleQueryPort` triggers on spoke `Rule` DTO adoption from the quality-loop engine; `HostManifestPort.list_peer` triggers on multi-host collaboration. See `rule_query_port.rs` and `host_manifest_port.rs` module-level docs for trigger conditions.
+**Stub behavior contract:** each stub is a documented empty/static return with a doc-comment referencing its roadmap trigger and residual. Stubs must never fabricate data — they return exactly what the backing storage would if it were empty/static. After V1.148 the only remaining stub method is `HostManifestPort.list_peer_host_capability_manifests` (N-C3 multi-host). See `host_manifest_port.rs` module-level docs and §10.
 
 #### CAS contract reuse
 
@@ -660,3 +662,53 @@ nexus-narrative                      ← narrative domain: worlds, forks, timeli
 | P0 | P1 | P2 | P3 |
 |----|----|----|-----|
 | Add spoke deps; create adapter crate; delete `key-block.schema.json`; repoint daemon-api envelope `$ref`; regenerate codegen; update drift detection; create this tracked spec | Rename `nexus-kb` → `nexus-knowledge`; migrate types to spoke `KnowledgeEntry`; route lifecycle ops through adapter; migrate SQLite storage; migrate all Rust consumers | Rename daemon-api DTOs; bump `@42ch/nexus-contracts`; migrate TS apps (import from `@42ch/spoke-schemas`); update UI strings to Q11 product label | Sweep specs/docs/knowledge/CLI/fixtures for terminology; add pattern doc via compound at iteration-close |
+
+## 10. Connect Host N-C0 (V1.148 / DF-72)
+
+Normative architectural surface for the first FL-R Connect Host slice. Product behavior detail (integrator persona, dogfood story, non-goals) lives in the iteration draft `.mstar/iterations/v1.148/specs/fl-r-connect-host-foundation.md` until promoted; this section locks durable topology and honesty rules for implementers and QC.
+
+### 10.1 Opt-in boundary
+
+| Rule | Norm |
+|------|------|
+| Cargo feature | `connect-host` on `apps/nexus42` (default **off**) |
+| CLI entrypoint | `nexus42 connect start` only (feature-gated) |
+| Dependency | `spoke-connect = "=0.8.2"` workspace dep; optional on `nexus42` |
+| Default daemon | Feature-off build does **not** link `spoke-connect`. `nexus42 daemon start` never opens a Connect listener (even if feature-on binary is used as daemon). |
+| mDNS | Do not enable `spoke-connect` `mdns` feature for N-C0 |
+
+### 10.2 Topology
+
+- Connect Host runs as a **separate OS process** (`connect start`), not a tokio task inside the daemon.
+- N-C0 does **not** share `Arc<NexusAdapter>` with the daemon process (no invoke path needs the adapter).
+- Coexistence with Daemon HTTP is process-level (both may run); Connect does not proxy creator HTTP routes.
+- N-C1+ may open workspace DB inside the Connect process and construct `NexusAdapter` there.
+
+### 10.3 Manifest honesty
+
+- **Single builder** shared by `HostManifestPort::get_host_capability_manifest` and `ConnectConfig.local_manifest`.
+- Wire type: spoke `HostCapabilityManifest` (`schemas/data/host-capability-manifest.schema.json`); hello embeds field-identical `connect_hello::HostCapabilityManifest`.
+- N-C0 field contract: `schema_version = 1`; `host_id` = `~/.nexus42/device-id` UUID; `roles = ["data-store"]`; `capabilities = ["spoke-baseline", "l2-computable", "l5-fork"]`; `namespaces = ["nexus"]`; `authority` absent; `extensions.nexus = { connect_host_slice: "n-c0", daemon_http_coexists: true }`.
+- MUST NOT advertise `"reasoning-complete"` or any role beyond `data-store` until Connect dispatch exists for that role.
+- Capability strings must map to production adapter ports (machine-checked in P3 honesty test).
+
+### 10.4 Handshake, allowlist, op-refusal
+
+- Normative spoke-connect hello (`spoke-connect-hello-jcs-v1`): JCS + Ed25519 over `{protocol_version, peer_id, nonce, host}`; `PROTOCOL_VERSION = 1`.
+- Allowlist: `~/.nexus42/connect/allowlist.json` + CLI `--allow-peer`; empty ⇒ fail-closed (spoke semantics).
+- Capability-token: structural gate only — production defaults `trusted_issuers` empty, `capability_token_provider = None`, `require_capability_token = false`.
+- **Op refusal:** `ConnectConfig.invoke_handler = None` ⇒ every inbound invoke returns `ErrorEnvelope.code = "op_unsupported"` with no side effects. No `NexusAdapter` call from Connect invoke in N-C0.
+
+### 10.5 Daemon HTTP `check` (related, not Connect)
+
+- V1.148 also lands **`POST /v1/daemon/check`** (tier2, `is_world_owned`, adapter `orchestrate_check`, no KB auto-apply beyond FindingPort persistence). That route is **creator Daemon HTTP only** — it does not make Connect `check` available. See plan `2026-08-04-v1.148-p2-orchestrate-check-daemon-cutover`.
+
+### 10.6 Phased DF-72 roadmap (durable)
+
+| Slice | Content | Tracker |
+|-------|---------|---------|
+| **N-C0** (V1.148) | Opt-in host, hello + allowlist, honest manifest, all ops refused | DF-72 partial |
+| **N-C1** (next) | Inbound write ops over Connect + OCC + token/world scoping | DF-72; owner architect; trigger: N-C0 dogfood green + partner demand |
+| **N-C2** | `check` / `assemble` over Connect; "reasoning-complete" legitimate | DF-72 later |
+| **N-C3** | `list_peer_host_capability_manifests` production / multi-host | DF-72 later; `R-V1142P1-002` |
+| **DF-73** | Headless `nexus-runtime` binary | Separate backlog; after N-C0 dogfood |
