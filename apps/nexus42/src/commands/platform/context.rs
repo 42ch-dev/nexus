@@ -548,6 +548,24 @@ async fn open_shared_pool(config: &CliConfig) -> Result<sqlx::SqlitePool> {
     Ok(pool)
 }
 
+/// V1.149 P0 T2: lore activation is DEFAULT-ON. Reads the env off-switch
+/// `NEXUS_MCA_LORE_ACTIVATION` (`off|0|false`, case-insensitive, trimmed)
+/// that restores V1.146 flag-off semantics; any other value — including
+/// unset or empty — keeps activation on (spec §6). Extracted for unit
+/// testing (P0 fix wave, QC F-002).
+fn lore_activation_env_is_off() -> bool {
+    std::env::var("NEXUS_MCA_LORE_ACTIVATION").is_ok_and(|v| lore_activation_value_is_off(&v))
+}
+
+/// Parse a single `NEXUS_MCA_LORE_ACTIVATION` value: `off` / `0` / `false`
+/// (case-insensitive, trimmed) → off; anything else → on.
+fn lore_activation_value_is_off(value: &str) -> bool {
+    matches!(
+        value.trim().to_ascii_lowercase().as_str(),
+        "off" | "0" | "false"
+    )
+}
+
 /// Run four-domain Moment assembly using persistent narrative + KB + knowledge stores.
 ///
 /// Uses `SqliteNarrativeGateway`, `SqliteKbStore`, and `SqliteKnowledgeStore`
@@ -583,14 +601,7 @@ pub async fn run_assemble_moment(
     // (NEXUS_MCA_LORE_ACTIVATION=off|0|false, case-insensitive) restores
     // V1.146 flag-off semantics; any other value (incl. unset, empty, =1)
     // keeps activation on (spec §6).
-    let activation_off = std::env::var("NEXUS_MCA_LORE_ACTIVATION")
-        .map(|v| {
-            matches!(
-                v.trim().to_ascii_lowercase().as_str(),
-                "off" | "0" | "false"
-            )
-        })
-        .unwrap_or(false);
+    let activation_off = lore_activation_env_is_off();
     if emit_packet && activation_off {
         return Err(crate::errors::CliError::Other(
             "--emit-packet requires lore activation. Activation is on by default; \
@@ -1730,5 +1741,44 @@ mod tests {
                 .len(),
             0
         );
+    }
+
+    // ── NEXUS_MCA_LORE_ACTIVATION off-switch (P0 fix wave, QC F-002) ──
+
+    #[test]
+    fn lore_activation_off_switch_off_values() {
+        for value in ["off", "0", "false", " OFF ", "FALSE", "Off"] {
+            assert!(
+                lore_activation_value_is_off(value),
+                "{value:?} must disable activation"
+            );
+        }
+    }
+
+    #[test]
+    fn lore_activation_off_switch_on_values() {
+        for value in ["", "1", "on", "true", "garbage", "disabled", "yes"] {
+            assert!(
+                !lore_activation_value_is_off(value),
+                "{value:?} must keep activation on"
+            );
+        }
+    }
+
+    #[test]
+    fn lore_activation_off_switch_env_wrapper() {
+        // Unset → on (spec §6 default); `off` → off; `1` → on. Kept in one
+        // test so the env writes stay sequential — no other test in this
+        // binary touches `NEXUS_MCA_LORE_ACTIVATION`.
+        std::env::remove_var("NEXUS_MCA_LORE_ACTIVATION");
+        assert!(
+            !lore_activation_env_is_off(),
+            "unset must keep activation on"
+        );
+        std::env::set_var("NEXUS_MCA_LORE_ACTIVATION", "off");
+        assert!(lore_activation_env_is_off(), "off must disable activation");
+        std::env::set_var("NEXUS_MCA_LORE_ACTIVATION", "1");
+        assert!(!lore_activation_env_is_off(), "=1 must keep activation on");
+        std::env::remove_var("NEXUS_MCA_LORE_ACTIVATION");
     }
 }

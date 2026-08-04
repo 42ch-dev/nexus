@@ -53,8 +53,10 @@
 //! # Match modes
 //!
 //! - `literal` (default) — case-insensitive substring.
-//! - `regex` — `regress::Regex` (workspace pin); key ≤ 256 chars (longer keys
-//!   are skipped with a trace note), scan text capped at 64 KiB, compile
+//! - `regex` — `regex::Regex` (workspace pin; linear-time by construction, so
+//!   ReDoS-immune — F-001 P0 fix wave, replacing the backtracking engine on
+//!   this hot path); key ≤ 256 chars (longer keys are skipped with
+//!   a trace note), scan text capped at 64 KiB (defense-in-depth), compile
 //!   failure → non-match + `"invalid regex"` trace note.
 //! - `whole_word` — case-insensitive Unicode-aware word-boundary match.
 //!
@@ -248,6 +250,12 @@ enum MatchKeyError {
 /// lowercased form used by `literal` / `whole_word` (spec §3 match casing —
 /// lowercasing applies only to those modes; regex case-folding is the
 /// pattern's business). Unknown modes fall back to `literal` (handbook default).
+///
+/// Regex notes (F-001, P0 fix wave): the `regex` crate is linear-time, so a
+/// catastrophic pattern like `(a+)+b` cannot hang the engine (the previous
+/// backtracking engine allowed exponential worst-case time on this default-on
+/// hot path). `regex` does not support lookaround/backreferences — such
+/// patterns fail to compile and degrade to a traced non-match.
 fn match_key(
     mode: &str,
     key: &str,
@@ -259,10 +267,11 @@ fn match_key(
             if key.chars().count() > MAX_REGEX_KEY_CHARS {
                 return Err(MatchKeyError::OverlongKey);
             }
-            let re = regress::Regex::new(key).map_err(|_| MatchKeyError::InvalidRegex)?;
-            // Truncate with a stable prefix (architect lock Q6).
+            let re = regex::Regex::new(key).map_err(|_| MatchKeyError::InvalidRegex)?;
+            // Truncate with a stable prefix (architect lock Q6; kept as
+            // defense-in-depth — the engine is linear-time regardless).
             let capped = truncate_chars(scan_raw, MAX_REGEX_SCAN_CHARS);
-            Ok(re.find(capped).is_some())
+            Ok(re.is_match(capped))
         }
         "whole_word" => Ok(whole_word_match(key, scan_lower)),
         _ => Ok(literal_match(key, scan_lower)),
@@ -1002,6 +1011,30 @@ mod tests {
         )];
         let result = run(&entries, &scan);
         assert_eq!(result.matched.len(), 1, "key at stable prefix head matches");
+    }
+
+    #[test]
+    fn test_regex_catastrophic_pattern_completes_in_bounded_time() {
+        // F-001 ReDoS regression (qc2 F-001, Critical): `(a+)+b` against a
+        // non-matching run of 'a's drives a backtracking engine to
+        // exponential worst-case time — qc2 measured >1.5s on 28 chars. The
+        // `regex` crate is linear-time by construction, so this must return
+        // promptly; the test reaching its assertions at all is the regression
+        // guard (a backtracking engine would hang on the 5k 'a' scan below).
+        let scan = format!("{}!", "a".repeat(5000));
+        let entries = vec![entry_with_activation(
+            "kb_redos",
+            "ReDoS Guard",
+            "Must not match the pattern",
+            Some(json!({"activation": {"keys": ["(a+)+b"], "match": "regex"}})),
+        )];
+        let result = run(&entries, &scan);
+        assert_eq!(
+            result.matched.len(),
+            0,
+            "catastrophic pattern must not match a non-matching scan"
+        );
+        assert!(result.trace[0].reason.contains("no key matched"));
     }
 
     #[test]

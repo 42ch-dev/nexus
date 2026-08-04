@@ -45,8 +45,13 @@ nexus-home-layout = { path = "../nexus-home-layout" }
 dirs = { workspace = true }
 sqlx.workspace = true
 tokio.workspace = true
-# V1.149 P0 T1 — `modules.activation` `match: "regex"` flavor (architect lock Q6;
-# workspace pin, same as `nexus-contracts` generated code).
+# V1.149 P0 T1 — `modules.activation` `match: "regex"` flavor (architect lock Q6).
+# F-001 (P0 fix wave, ReDoS Critical): the activation regex arm now uses the
+# linear-time `regex` crate (workspace pin) — see `src/adapter/activation.rs`
+# `match_key`. `regress` is retained in this manifest per the fix-wave
+# constraint; its only workspace consumer is nexus-contracts generated code
+# (`format:regex` ECMA262 fidelity).
+regex = { workspace = true }
 regress = { workspace = true }
 
 [dev-dependencies]
