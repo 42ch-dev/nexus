@@ -1607,11 +1607,8 @@ mod tests {
     fn mock_ctx_with_trace(trace: Vec<ActivationTraceEntry>) -> MomentContext {
         MomentContext {
             stage0_context: "Test".to_string(),
-            world_state: None,
-            timeline: None,
-            world_kb: None,
-            user_knowledge: None,
             activation_trace: Some(trace),
+            ..MomentContext::default()
         }
     }
 
