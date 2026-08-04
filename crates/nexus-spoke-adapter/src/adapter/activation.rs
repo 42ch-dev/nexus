@@ -68,7 +68,8 @@
 //! true` entries are always-on seeds, sorted first by the engine (V1.149 P0 T3
 //! ordering — constant band first, spec §4).
 //!
-//! # Relation hops (V1.149 P1 — spec §5)
+//! # Relation hops (V1.149 P1 — spec §5; iteration spec:
+//! `.mstar/iterations/v1.149/specs/fl-l-w4-activation.md` §5)
 //!
 //! When a primary-matched or `constant`-seed entry fires, the engine BFS-
 //! expands **up to 2** graph hops over the world's confirmed relation graph
@@ -1976,6 +1977,7 @@ mod tests {
         assert_eq!(row2.hop_origin_entry_id.as_deref(), Some("kb_b"));
         assert_eq!(row2.hop_depth, Some(2));
         assert_eq!(row2.source_relation_type.as_deref(), Some("member_of"));
+        assert_eq!(row2.source_relation_id.as_deref(), Some("rel_kb_b_kb_c"));
     }
 
     #[test]

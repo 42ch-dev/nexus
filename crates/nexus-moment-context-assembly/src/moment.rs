@@ -1587,27 +1587,21 @@ mod tests {
         // Neutral-only golden under hops: no activation modules ⇒ no seeds ⇒
         // no hop pull ⇒ world_kb byte-identical with and without edges
         // (the neutral-only ship guarantee, spec §1, holds under hops).
-        let stores_with_edges = TestStores::new();
-        let stores_without = TestStores::new();
-        for stores in [&stores_with_edges, &stores_without] {
+        //
+        // Both runs share ONE store: `InMemoryKbStore` iterates a
+        // per-instance-seeded `HashMap`, so two separately-seeded stores can
+        // return identical entries in different orders (flaky test, fixed
+        // T3); reads are pure, so a single store keeps the input order
+        // identical and the byte-comparison meaningful.
+        let stores = TestStores::new();
+        for (name, id) in [("Hero", "kb_n1"), ("Castle", "kb_n2")] {
             stores
                 .kb
                 .insert_knowledge_entry(kb_entry_with_modules(
                     "wld_1",
                     nexus_contracts::BlockType::Scene,
-                    "Hero",
-                    "kb_n1",
-                    None,
-                ))
-                .await
-                .unwrap();
-            stores
-                .kb
-                .insert_knowledge_entry(kb_entry_with_modules(
-                    "wld_1",
-                    nexus_contracts::BlockType::Scene,
-                    "Castle",
-                    "kb_n2",
+                    name,
+                    id,
                     None,
                 ))
                 .await
@@ -1617,9 +1611,9 @@ mod tests {
         let request_plain = MomentRequest::new(stage0_with("Any text.")).with_world("wld_1");
         let ctx_plain = assemble_moment(
             &request_plain,
-            &stores_without.narrative,
-            &stores_without.kb,
-            &stores_without.knowledge,
+            &stores.narrative,
+            &stores.kb,
+            &stores.knowledge,
         )
         .await;
 
@@ -1628,9 +1622,9 @@ mod tests {
             .with_hop_edges(hop_fixture_edges());
         let ctx_edges = assemble_moment(
             &request_edges,
-            &stores_with_edges.narrative,
-            &stores_with_edges.kb,
-            &stores_with_edges.knowledge,
+            &stores.narrative,
+            &stores.kb,
+            &stores.knowledge,
         )
         .await;
 
@@ -1650,5 +1644,117 @@ mod tests {
             trace_edges, trace_plain,
             "neutral-only World: trace identical (no hop rows)"
         );
+    }
+
+    // ── V1.149 P1: hop budget (spec Q1 — AC-I2 #4, MCA half) ──────────
+
+    #[test]
+    fn hop_budget_personality_reservation_can_zero_the_budget() {
+        // AC-I2 #4: personality is reserved FIRST (never truncated), so a
+        // personality section that alone exceeds max_chars leaves zero hop
+        // budget — a large caller cap cannot override the reservation.
+        let stage0 = stage0_with(&"P".repeat(200)); // section ≈ 219 chars
+        let request = MomentRequest::new(stage0.clone())
+            .with_max_tokens(50) // max_chars 200 < personality section
+            .with_hop_max_tokens(1000);
+        assert_eq!(
+            hop_budget_tokens(&request, &stage0.assemble(), None, None),
+            Some(0)
+        );
+    }
+
+    #[test]
+    fn hop_budget_caller_cap_bounds_the_remainder() {
+        // The caller-provided hop cap is an upper bound on the computed
+        // cross-domain remainder.
+        let stage0 = stage0_with("small");
+        let request = MomentRequest::new(stage0.clone())
+            .with_max_tokens(1000) // remainder ≈ 994 tokens
+            .with_hop_max_tokens(7);
+        assert_eq!(
+            hop_budget_tokens(&request, &stage0.assemble(), None, None),
+            Some(7)
+        );
+    }
+
+    #[test]
+    fn hop_budget_no_max_tokens_passes_through_caller_cap() {
+        // No `max_tokens` ⇒ no cross-domain remainder to compute: the caller
+        // cap passes through unchanged (`None` stays `None` — depth + cycle
+        // only, spec Q1).
+        let stage0 = stage0_with("Any");
+        let capped = MomentRequest::new(stage0.clone()).with_hop_max_tokens(9);
+        assert_eq!(
+            hop_budget_tokens(&capped, &stage0.assemble(), None, None),
+            Some(9)
+        );
+        let uncapped = MomentRequest::new(stage0.clone());
+        assert_eq!(
+            hop_budget_tokens(&uncapped, &stage0.assemble(), None, None),
+            None
+        );
+    }
+
+    #[test]
+    fn hop_budget_subtracts_world_state_and_timeline() {
+        // Formula (spec Q1): `(max_tokens*4 − personality_section −
+        // world_state − timeline) / 4`, floored. The personality section
+        // length is derived from the assembled delimiter format so the
+        // assertion pins the exact arithmetic.
+        let stage0 = stage0_with("A king rules the land.");
+        let assembled = stage0.assemble();
+        let section_chars = {
+            let start = assembled
+                .find(STAGE0_PERSONALITY_START)
+                .expect("start token")
+                + STAGE0_PERSONALITY_START.len();
+            let end = assembled.find(STAGE0_PERSONALITY_END).expect("end token");
+            assembled[start..end].chars().count()
+        };
+        let ws = "ws";
+        let tl = "tl";
+        let request = MomentRequest::new(stage0).with_max_tokens(100); // 400 chars
+        let budget = hop_budget_tokens(&request, &assembled, Some(ws), Some(tl));
+        let expected = (400 - section_chars - ws.chars().count() - tl.chars().count()) / 4;
+        assert_eq!(budget, Some(expected));
+    }
+
+    #[tokio::test]
+    async fn activation_hops_tight_budget_keeps_personality_and_gates_pulls() {
+        // AC-I2 #4 end-to-end: with `max_tokens` set, the hop budget is the
+        // cross-domain remainder AFTER reserving personality (never
+        // truncated), and the engine stops pulling when the remainder is
+        // exhausted.
+        //
+        // Arithmetic (spec Q1): personality section = "\n## Personality\n\n"
+        // + "A king rules the land." (21 chars) + "\n\n" = 40 chars.
+        // max_tokens 14 ⇒ max_chars 56 ⇒ hop budget (56 − 40) / 4 = 4. The
+        // engine reserves Harbor's primary-matched estimate (5/4 = 1) ⇒ 3
+        // left. Dawn Dock (9/4 = 2) fits ⇒ pulled; Harbor Guild (12/4 = 3)
+        // exceeds ⇒ skipped.
+        let stores = TestStores::new();
+        seed_hop_fixture(&stores).await;
+
+        let request = MomentRequest::new(stage0_with("A king rules the land."))
+            .with_world("wld_1")
+            .with_max_tokens(14)
+            .with_hop_edges(hop_fixture_edges());
+        let ctx = assemble_moment(&request, &stores.narrative, &stores.kb, &stores.knowledge).await;
+
+        // Personality survives the tight budget untouched (never truncated):
+        // the section content + heading are preserved (the truncation
+        // reconstruction keeps the personality section verbatim — delimiter
+        // tokens themselves live in the truncated remainder).
+        assert!(ctx.stage0_context.contains("A king rules the land."));
+        assert!(ctx.stage0_context.contains("## Personality"));
+
+        // Budget-gated pull: Dock (fits the remainder) is accepted via hop,
+        // Guild (exceeds it) is not.
+        let trace = ctx.activation_trace.expect("trace present");
+        assert!(trace.iter().any(|t| t.entry_id == "kb_dock" && t.accepted));
+        assert!(trace
+            .iter()
+            .any(|t| t.entry_id == "kb_guild" && !t.accepted));
+        assert!(!trace.iter().any(|t| t.entry_id == "kb_guild" && t.accepted));
     }
 }

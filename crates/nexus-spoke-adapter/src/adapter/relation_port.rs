@@ -59,7 +59,8 @@
 //! create vs update from stored presence, so the only reachable failure on
 //! the update path is "the store moved since the caller's read".
 //!
-//! # `RelationPort` read gap + hop-edge loader (V1.149 P1, spec §5)
+//! # `RelationPort` read gap + hop-edge loader (V1.149 P1, spec §5; iteration
+//! spec: `.mstar/iterations/v1.149/specs/fl-l-w4-activation.md` §5)
 //!
 //! spoke 0.8.2 `RelationPort` is **get/put only** — there is no
 //! list-by-entity on the trait. Relation-hop expansion (lore activation,
