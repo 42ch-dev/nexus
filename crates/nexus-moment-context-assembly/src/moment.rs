@@ -730,6 +730,17 @@ where
 /// injected — run the post-injection lifecycle (spec §3.3: TTL decrement /
 /// chapter-advance / scene-clear bookkeeping, best-effort; the store never
 /// fails the assembly).
+///
+/// # Threat model — single-author, local-only (PR #198 P1)
+///
+/// The load-then-decrement pair is deliberately **non-atomic**: two
+/// overlapping same-scope assembles can both load a directive with one use
+/// remaining and both render it before either decrements. That is not a
+/// realistic local threat — Nexus is single-author, single-active-creator,
+/// local-only, with no parallel creators and no background jobs (the same
+/// synchronous/proportional discipline V1.80 established for
+/// `POST /v1/local/memory/review`). Locking the directive lifecycle would
+/// be over-engineering for this threat model, so none is added by design.
 #[allow(clippy::future_not_send)]
 async fn apply_directive<D: DirectiveStore>(
     directives: &D,
