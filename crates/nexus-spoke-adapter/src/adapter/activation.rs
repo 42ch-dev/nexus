@@ -88,6 +88,9 @@
 //!   `relation_type` / `relation_id`.
 //! - **Seeds:** only primary-fired + `constant` entries (neutral entries never
 //!   seed a hop — that is what keeps neutral-only Worlds byte-equivalent).
+//! - **Dedup:** entries already accepted by the primary pass (neutral ones
+//!   included) are pre-marked visited, so hop expansion never re-pulls them;
+//!   hop-pulled entries are removed from `unmatched` (matched ∩ unmatched = ∅).
 //! - **No re-fire:** hop-pulled entries never re-run [`apply_activation`]
 //!   key evaluation (spec Q5) — they enter `matched` with a hop trace row.
 //! - **Cycle safety:** `visited` on `entry_id` — A↔B and A→B→A terminate.
@@ -501,7 +504,9 @@ pub fn apply_activation(
 /// only; neutral entries never seed) and pulls graph-adjacent entries into
 /// `matched`. Pulled entries are **not** re-evaluated against
 /// `modules.activation` keys (spec Q5) and carry hop fields on their trace
-/// rows.
+/// rows. Entries already accepted by the primary pass (neutral ones included)
+/// are pre-marked visited, so hop expansion never pulls (or duplicates) an
+/// entry already in `matched`; a hop-pulled entry leaves `unmatched`.
 ///
 /// Emit ordering after merge is the spec §4 sort (constant band first,
 /// priority desc → order asc → stable): pulled entries join the non-constant
@@ -556,7 +561,26 @@ pub fn apply_activation_with_hops(
             .iter()
             .map(|entry| (entry.entry_id.clone(), entry.clone()))
             .collect();
-        let expanded = expand_relation_hops(&primary.seed_ids, &pool, edges, &config);
+        // QC C-001: every primary-matched entry (neutral ones included) is
+        // pre-marked visited, so hop expansion never re-pulls an entry that
+        // is already in `matched` — and never traverses through it.
+        let pre_visited: Vec<String> = primary
+            .matched
+            .iter()
+            .map(|(entry, _)| entry.entry_id.clone())
+            .collect();
+        let expanded = expand_relation_hops(&primary.seed_ids, &pre_visited, &pool, edges, &config);
+
+        // QC2 F-001: a primary-missed entry that the hop pass pulled must not
+        // also stay in `unmatched` — matched ∩ unmatched = ∅ after this.
+        let pulled_ids: HashSet<String> = expanded
+            .pulled
+            .iter()
+            .map(|entry| entry.entry_id.clone())
+            .collect();
+        primary
+            .unmatched
+            .retain(|entry| !pulled_ids.contains(&entry.entry_id));
 
         primary
             .matched
@@ -591,9 +615,14 @@ pub fn apply_activation_with_hops(
 /// (`hop_origin_entry_id` = the origin entry of the edge that first reached
 /// it, `hop_depth`, `source_relation_type`, `source_relation_id`).
 ///
+/// `pre_visited` carries entry ids that are **already accepted** by the caller
+/// (the primary `matched` set, neutral entries included). They are pre-marked
+/// `visited` so they are never pulled a second time and never act as BFS
+/// waypoints — only `seeds` start the traversal (spec §5 seed rule).
+///
 /// Guarantees:
-/// - **Cycle-safe:** `visited` on `entry_id` (seeds pre-marked; A↔B and
-///   A→B→A terminate; self-loops are no-ops).
+/// - **Cycle-safe:** `visited` on `entry_id` (seeds and `pre_visited`
+///   pre-marked; A↔B and A→B→A terminate; self-loops are no-ops).
 /// - **No re-fire:** pulled entries are never evaluated against
 ///   `modules.activation` keys (spec Q5).
 /// - **Budget:** when `config.max_hop_tokens` is `Some`, an entry whose
@@ -613,6 +642,7 @@ pub fn apply_activation_with_hops(
 #[must_use]
 pub fn expand_relation_hops(
     seeds: &[String],
+    pre_visited: &[String],
     entry_pool: &HashMap<String, WorldKbEntry>,
     edges: &[HopEdge],
     config: &HopConfig,
@@ -628,7 +658,7 @@ pub fn expand_relation_hops(
         adjacency.entry(edge.to_id.as_str()).or_default().push(edge);
     }
 
-    let mut visited: HashSet<String> = seeds.iter().cloned().collect();
+    let mut visited: HashSet<String> = seeds.iter().chain(pre_visited).cloned().collect();
     let mut pulled: Vec<WorldKbEntry> = Vec::new();
     let mut hop_trace: Vec<ActivationTraceEntry> = Vec::new();
     let mut remaining = config.max_hop_tokens.unwrap_or(usize::MAX);
@@ -1956,7 +1986,7 @@ mod tests {
         ];
         let config = HopConfig::default(); // max_hops 2, no budget
 
-        let result = expand_relation_hops(&seeds, &pool, &edges, &config);
+        let result = expand_relation_hops(&seeds, &[], &pool, &edges, &config);
         assert_eq!(
             hop_ids(&result),
             ["kb_b", "kb_c"],
@@ -1978,6 +2008,31 @@ mod tests {
         assert_eq!(row2.hop_depth, Some(2));
         assert_eq!(row2.source_relation_type.as_deref(), Some("member_of"));
         assert_eq!(row2.source_relation_id.as_deref(), Some("rel_kb_b_kb_c"));
+    }
+
+    #[test]
+    fn test_expand_relation_hops_pre_visited_blocks_pull_and_traversal() {
+        // QC C-001 engine level: pre-visited ids (already in `matched`) are
+        // never pulled, and the BFS does not traverse through them.
+        let mut pool = HashMap::new();
+        for id in ["kb_a", "kb_b", "kb_c"] {
+            let entry = entry_with_activation(id, id, "summary", None);
+            pool.insert(entry.entry_id.clone(), entry);
+        }
+        let seeds = vec!["kb_a".to_string()];
+        let pre_visited = vec!["kb_b".to_string()];
+        let edges = vec![
+            edge("kb_a", "kb_b", "located_in"),
+            edge("kb_b", "kb_c", "member_of"),
+        ];
+        let config = HopConfig::default();
+
+        let result = expand_relation_hops(&seeds, &pre_visited, &pool, &edges, &config);
+        assert!(
+            hop_ids(&result).is_empty(),
+            "pre-visited neighbor not pulled; chain not traversed through it"
+        );
+        assert!(result.hop_trace.is_empty());
     }
 
     #[test]
@@ -2157,13 +2212,8 @@ mod tests {
             ["kb_a", "kb_b"],
             "A→B→A terminates with no re-pull"
         );
-        let a_rows: Vec<_> = result
-            .trace
-            .iter()
-            .filter(|t| t.entry_id == "kb_a")
-            .collect();
         assert_eq!(
-            a_rows.len(),
+            result.trace.iter().filter(|t| t.entry_id == "kb_a").count(),
             1,
             "A has only its primary row (never hop-pulled)"
         );
@@ -2617,5 +2667,114 @@ mod tests {
             "no hop rows for neutral-only world"
         );
         assert!(with_hops.trace.iter().all(|t| t.hop_depth.is_none()));
+    }
+
+    #[test]
+    fn test_apply_activation_with_hops_neutral_matched_not_pulled_again() {
+        // QC C-001 regression: a seed fires; a neutral entry (no
+        // `modules.activation`) is graph-adjacent to it AND already in
+        // `matched` from the primary pass (neutral ⇒ always included). Hop
+        // expansion must not pull it a second time — every entry_id appears
+        // exactly once in `matched`.
+        let entries = vec![
+            entry_with_activation(
+                "kb_a",
+                "Harbor",
+                "The harbor gates.",
+                Some(activation_primary(&["king"], "and_any")),
+            ),
+            entry_with_activation("kb_n", "Dawn Dock", "A quiet dock.", None),
+        ];
+        let edges = vec![edge("kb_a", "kb_n", "located_in")];
+        let result = apply_activation_with_hops(
+            &entries,
+            "The king ruled.",
+            &[],
+            &edges,
+            &HopConfig::default(),
+        );
+
+        assert_eq!(
+            matched_ids(&result),
+            ["kb_a", "kb_n"],
+            "neutral already-matched neighbor is not re-pulled"
+        );
+        let mut seen: HashSet<&str> = HashSet::new();
+        for entry in &result.matched {
+            assert!(
+                seen.insert(entry.entry_id.as_str()),
+                "entry '{}' appears more than once in matched",
+                entry.entry_id
+            );
+        }
+        assert_eq!(result.trace.len(), 2, "no hop rows for the neutral entry");
+        assert!(result.trace.iter().all(|t| t.hop_depth.is_none()));
+        // qc2 F-001 partition: matched ∩ unmatched = ∅.
+        for entry in &result.matched {
+            assert!(
+                !result
+                    .unmatched
+                    .iter()
+                    .any(|u| u.entry_id == entry.entry_id),
+                "entry '{}' in both matched and unmatched",
+                entry.entry_id
+            );
+        }
+    }
+
+    #[test]
+    fn test_apply_activation_with_hops_pulled_entry_removed_from_unmatched() {
+        // qc2 F-001: a primary-missed entry pulled by the hop pass must not
+        // also remain in `unmatched` — matched ∩ unmatched = ∅.
+        let entries = vec![
+            entry_with_activation(
+                "kb_a",
+                "Harbor",
+                "The harbor gates.",
+                Some(activation_primary(&["king"], "and_any")),
+            ),
+            entry_with_activation(
+                "kb_b",
+                "Dawn Dock",
+                "A quiet dock.",
+                Some(activation_primary(&["dragon"], "and_any")),
+            ),
+            entry_with_activation(
+                "kb_c",
+                "Harbor Guild",
+                "The guild hall.",
+                Some(activation_primary(&["elf"], "and_any")),
+            ),
+        ];
+        // kb_b and kb_c both miss the scan; only kb_b is pulled (kb_c is not
+        // adjacent) → kb_c legitimately stays unmatched.
+        let edges = vec![edge("kb_a", "kb_b", "located_in")];
+        let result = apply_activation_with_hops(
+            &entries,
+            "The king ruled.",
+            &[],
+            &edges,
+            &HopConfig::default(),
+        );
+
+        assert_eq!(matched_ids(&result), ["kb_a", "kb_b"]);
+        assert!(
+            !result.unmatched.iter().any(|e| e.entry_id == "kb_b"),
+            "hop-pulled entry removed from unmatched"
+        );
+        assert!(
+            result.unmatched.iter().any(|e| e.entry_id == "kb_c"),
+            "non-adjacent primary miss stays unmatched"
+        );
+        for entry in &result.matched {
+            assert!(
+                !result
+                    .unmatched
+                    .iter()
+                    .any(|u| u.entry_id == entry.entry_id),
+                "entry '{}' in both matched and unmatched",
+                entry.entry_id
+            );
+        }
     }
 }
