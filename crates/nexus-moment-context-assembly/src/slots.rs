@@ -22,7 +22,9 @@
 //! Non-Goal — chat-history depth is not Nexus-native); it routes to the
 //! default fallback. Unknown `position_hint` values route to the default
 //! fallback (round-trip safe, consumer-only discipline). An `outlet` hint
-//! without a paired `outlet` name also falls back. Unknown `outlet` strings
+//! without a paired `outlet` name — or with an empty/whitespace one, which
+//! would render a nameless `### Outlet: ` heading — also falls back. Unknown
+//! `outlet` strings
 //! are **not** errors — they open a `kb.outlet.<name>` slot so author packs
 //! round-trip without code changes (spec §2).
 //!
@@ -114,7 +116,7 @@ pub fn route_slots(matched: Vec<WorldKbEntry>) -> SlotRouting {
             (Some(HINT_BEFORE_DEFS), _) => routing.before.push(entry),
             (Some(HINT_AFTER_DEFS), _) => routing.after.push(entry),
             (Some(HINT_OUTLET), Some(WELL_KNOWN_STYLE_OUTLET)) => routing.post_history.push(entry),
-            (Some(HINT_OUTLET), Some(name)) => {
+            (Some(HINT_OUTLET), Some(name)) if !name.trim().is_empty() => {
                 routing
                     .outlets
                     .entry(name.to_string())
@@ -122,7 +124,9 @@ pub fn route_slots(matched: Vec<WorldKbEntry>) -> SlotRouting {
                     .push(entry);
             }
             // `depth` (parsed-not-actioned), unknown hints, `outlet` without a
-            // paired name, and no hint → default fallback (round-trip safe).
+            // paired name or with an empty/whitespace name (would render a
+            // nameless `### Outlet: ` heading), and no hint → default fallback
+            // (round-trip safe).
             _ => routing.fallback.push(entry),
         }
     }
@@ -206,8 +210,10 @@ fn placement_of(entry: &WorldKbEntry) -> (Option<String>, Option<String>) {
 /// Format `WorldKB` entries into markdown context text lines — the exact
 /// V1.149 flat-block format (`- **name** [BlockType]: summary`). The default
 /// fallback slot renders through this function so neutral-only output stays
-/// byte-identical to V1.149 (AC-I1b).
-fn format_entries(entries: &[WorldKbEntry]) -> String {
+/// byte-identical to V1.149 (AC-I1b); the activation off-switch in
+/// `assemble_moment` also renders through it so flag-off output stays the
+/// V1.149 flat block (no slot sub-headings).
+pub(crate) fn format_entries(entries: &[WorldKbEntry]) -> String {
     entries
         .iter()
         .map(|kb| {
@@ -348,6 +354,38 @@ mod tests {
         )]);
         assert_eq!(names(&routing.fallback), vec!["BareOutlet"]);
         assert!(routing.outlets.is_empty());
+    }
+
+    #[test]
+    fn empty_or_whitespace_outlet_name_routes_to_default_fallback() {
+        // `position_hint:"outlet"` with an empty/whitespace `outlet` string
+        // would open a nameless `kb.outlet.<"">` slot and render a bare
+        // `### Outlet: ` heading — route to the default fallback instead.
+        for bad_name in ["", "   "] {
+            let routing = route_slots(vec![entry(
+                "NamelessOutlet",
+                "kb_e",
+                Some(with_outlet(bad_name)),
+            )]);
+            assert_eq!(
+                names(&routing.fallback),
+                vec!["NamelessOutlet"],
+                "empty/whitespace outlet name must fall back ({bad_name:?})"
+            );
+            assert!(
+                routing.outlets.is_empty(),
+                "no outlet slot may be opened for {bad_name:?}"
+            );
+            assert!(
+                routing.post_history.is_empty(),
+                "no style slot for {bad_name:?}"
+            );
+            let rendered = render_slots(&routing).expect("fallback present");
+            assert!(
+                !rendered.contains("### Outlet: "),
+                "no nameless outlet heading for {bad_name:?}, got: {rendered}"
+            );
+        }
     }
 
     #[test]

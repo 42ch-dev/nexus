@@ -557,7 +557,7 @@ where
                 };
                 if entries.is_empty() {
                     None
-                } else {
+                } else if request.activation_enabled {
                     // V1.150 P0 (DF-75): route the V1.149-emitted matched
                     // candidate list into named, ordered slots within the
                     // World-KB section (spec §2 / Q1/Q5 provisional locks —
@@ -567,6 +567,15 @@ where
                     // guarantees at least one slot is non-empty, so this is
                     // always `Some`.
                     slots::render_slots(&slots::route_slots(entries))
+                } else {
+                    // Off-switch (V1.149 escape hatch, lock #1 — "off ⇒ every
+                    // candidate entry unchanged", V1.146 flag-off semantics):
+                    // slot routing is an activation-product shaping step and
+                    // must not run when activation is disabled. Every entry is
+                    // emitted UNCHANGED as the V1.149 flat block (no
+                    // `### World (Before)` / `### Outlet:` /
+                    // `### Style (Post-History)` sub-headings).
+                    Some(slots::format_entries(&entries))
                 }
             }
             _ => None,
@@ -627,7 +636,8 @@ async fn fetch_narrative_context<G: NarrativeGateway>(
 /// Fetch World KB entries using structured query (no formatting).
 ///
 /// V1.146 P4 T2: extracted so the activation pass can operate on entries
-/// before formatting. Callers use `format_kb_entries` to produce context text.
+/// before formatting. Callers use `format_entries` (in `slots.rs`) to produce
+/// context text.
 #[allow(clippy::future_not_send)]
 async fn fetch_world_kb_entries<K: KbStore>(
     kb_store: &K,
@@ -1300,6 +1310,83 @@ mod tests {
         let kb_text = ctx.world_kb.unwrap();
         assert!(kb_text.contains("Hero"), "flag OFF: all entries appear");
         assert!(kb_text.contains("Castle"), "flag OFF: all entries appear");
+    }
+
+    #[tokio::test]
+    async fn activation_off_hinted_entries_emit_flat_v149_block() {
+        // Off-switch (V1.149 escape hatch, lock #1 — "off ⇒ every candidate
+        // entry unchanged", V1.146 flag-off semantics): slot routing is an
+        // activation-product shaping step and MUST NOT run when activation is
+        // disabled. Entries carrying `position_hint` / `outlet` hints render
+        // as the V1.149 flat block — byte-identical, with no `### World
+        // (Before)` / `### Outlet:` / `### Style (Post-History)` sub-headings.
+        let stores = TestStores::new();
+        for (name, id, modules) in [
+            (
+                "Rules",
+                "kb_rules",
+                Some(serde_json::json!({"activation": {"position_hint": "before_defs"}})),
+            ),
+            (
+                "Style Note",
+                "kb_style",
+                Some(
+                    serde_json::json!({"activation": {"position_hint": "outlet", "outlet": "style.post_history"}}),
+                ),
+            ),
+            (
+                "Open Lore",
+                "kb_open",
+                Some(
+                    serde_json::json!({"activation": {"position_hint": "outlet", "outlet": "zone.z"}}),
+                ),
+            ),
+            ("Neutral", "kb_neutral", None),
+        ] {
+            stores
+                .kb
+                .insert_knowledge_entry(kb_entry_with_modules(
+                    "wld_1",
+                    nexus_contracts::BlockType::Character,
+                    name,
+                    id,
+                    modules,
+                ))
+                .await
+                .unwrap();
+        }
+
+        let request = MomentRequest::new(minimal_stage0())
+            .with_world("wld_1")
+            .with_activation_enabled(false);
+        let ctx = assemble_moment(&request, &stores.narrative, &stores.kb, &stores.knowledge).await;
+        let kb_text = ctx.world_kb.expect("world_kb must be present");
+
+        // Every candidate entry appears unchanged (off-switch: no filtering).
+        for name in ["Rules", "Style Note", "Open Lore", "Neutral"] {
+            assert!(kb_text.contains(name), "off-switch: {name} must appear");
+        }
+        // No slot sub-headings — the off-switch output is the flat block.
+        assert!(
+            !kb_text.contains("### "),
+            "off-switch must not render slot sub-headings, got: {kb_text}"
+        );
+
+        // Byte-identical to the V1.149 flat block for the same entries: the
+        // store read order is shared between the assembly and this re-query
+        // (same `InMemoryKbStore` instance, no mutation in between), so the
+        // expected string is deterministic.
+        let items = stores
+            .kb
+            .query(&nexus_knowledge::world_kb::KbQuery::new("wld_1"))
+            .await
+            .expect("query succeeds")
+            .items;
+        let expected = slots::format_entries(&items);
+        assert_eq!(
+            kb_text, expected,
+            "off-switch output must be byte-identical to the V1.149 flat block"
+        );
     }
 
     #[tokio::test]
