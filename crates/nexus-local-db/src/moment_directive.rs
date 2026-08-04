@@ -247,15 +247,22 @@ pub async fn get_by_id(
     pool: &SqlitePool,
     directive_id: &str,
 ) -> Result<Option<MomentDirectiveRow>, LocalDbError> {
-    let row = sqlx::query_as::<_, MomentDirectiveRow>(
-        "SELECT directive_id, creator_id, scope_kind, scope_id, body, insert_depth,
-                ttl_kind, ttl_remaining, clear_on_scene_change, status,
+    let row = sqlx::query_as!(
+        MomentDirectiveRow,
+        // `directive_id!` — SQLite describes a TEXT PRIMARY KEY as nullable,
+        // the macro needs the non-null coercion for the `String` field;
+        // `clear_on_scene_change: bool` — the column is INTEGER, the struct
+        // field is `bool` (explicit decode override).
+        "SELECT directive_id as \"directive_id!\",
+                creator_id, scope_kind, scope_id, body, insert_depth,
+                ttl_kind, ttl_remaining, clear_on_scene_change as \"clear_on_scene_change: bool\",
+                status,
                 last_focused_event_id, last_chapter_no, created_at, updated_at,
                 expires_at, replaced_by
          FROM moment_directives
          WHERE directive_id = ?",
+        directive_id
     )
-    .bind(directive_id)
     .fetch_optional(pool)
     .await?;
     Ok(row)
@@ -306,23 +313,33 @@ pub async fn decrement_ttl(
     directive_id: &str,
     now: i64,
 ) -> Result<Option<MomentDirectiveRow>, LocalDbError> {
-    let result = sqlx::query!(
+    // Single round-trip `UPDATE … RETURNING` (QC3-S002): the updated row comes
+    // back in the same statement as the write — no `get_by_id` read-back race,
+    // and no spurious "failed" log when the read-back would fail after a
+    // successful write.
+    let row = sqlx::query_as!(
+        MomentDirectiveRow,
+        // Column annotations as in `get_by_id` (SQLite TEXT-PK nullability
+        // quirk + INTEGER→bool decode override).
         "UPDATE moment_directives
          SET ttl_remaining = MAX(ttl_remaining - 1, 0),
              status = CASE WHEN ttl_remaining <= 1 THEN 'expired' ELSE status END,
              expires_at = CASE WHEN ttl_remaining <= 1 THEN ? ELSE expires_at END,
              updated_at = ?
-         WHERE directive_id = ? AND status = 'active'",
+         WHERE directive_id = ? AND status = 'active'
+         RETURNING directive_id as \"directive_id!\",
+                   creator_id, scope_kind, scope_id, body, insert_depth,
+                   ttl_kind, ttl_remaining, clear_on_scene_change as \"clear_on_scene_change: bool\",
+                   status,
+                   last_focused_event_id, last_chapter_no, created_at, updated_at,
+                   expires_at, replaced_by",
         now,
         now,
         directive_id,
     )
-    .execute(pool)
+    .fetch_optional(pool)
     .await?;
-    if result.rows_affected() == 0 {
-        return Ok(None);
-    }
-    get_by_id(pool, directive_id).await
+    Ok(row)
 }
 
 /// Scene clear — soft-delete an active directive because the focused moment
@@ -340,20 +357,27 @@ pub async fn clear_on_scene_change(
     directive_id: &str,
     now: i64,
 ) -> Result<Option<MomentDirectiveRow>, LocalDbError> {
-    let result = sqlx::query!(
+    // Single round-trip `UPDATE … RETURNING` (QC3-S002) — see `decrement_ttl`.
+    let row = sqlx::query_as!(
+        MomentDirectiveRow,
+        // Column annotations as in `get_by_id` (SQLite TEXT-PK nullability
+        // quirk + INTEGER→bool decode override).
         "UPDATE moment_directives
          SET status = 'expired', expires_at = ?, updated_at = ?
-         WHERE directive_id = ? AND status = 'active'",
+         WHERE directive_id = ? AND status = 'active'
+         RETURNING directive_id as \"directive_id!\",
+                   creator_id, scope_kind, scope_id, body, insert_depth,
+                   ttl_kind, ttl_remaining, clear_on_scene_change as \"clear_on_scene_change: bool\",
+                   status,
+                   last_focused_event_id, last_chapter_no, created_at, updated_at,
+                   expires_at, replaced_by",
         now,
         now,
         directive_id,
     )
-    .execute(pool)
+    .fetch_optional(pool)
     .await?;
-    if result.rows_affected() == 0 {
-        return Ok(None);
-    }
-    get_by_id(pool, directive_id).await
+    Ok(row)
 }
 
 /// Record the cross-assemble lifecycle anchors on an active directive
@@ -391,17 +415,22 @@ async fn get_active_by_scope(
     scope_kind: &str,
     scope_id: &str,
 ) -> Result<Option<MomentDirectiveRow>, LocalDbError> {
-    let row = sqlx::query_as::<_, MomentDirectiveRow>(
-        "SELECT directive_id, creator_id, scope_kind, scope_id, body, insert_depth,
-                ttl_kind, ttl_remaining, clear_on_scene_change, status,
+    let row = sqlx::query_as!(
+        MomentDirectiveRow,
+        // Column annotations as in `get_by_id` (SQLite TEXT-PK nullability
+        // quirk + INTEGER→bool decode override).
+        "SELECT directive_id as \"directive_id!\",
+                creator_id, scope_kind, scope_id, body, insert_depth,
+                ttl_kind, ttl_remaining, clear_on_scene_change as \"clear_on_scene_change: bool\",
+                status,
                 last_focused_event_id, last_chapter_no, created_at, updated_at,
                 expires_at, replaced_by
          FROM moment_directives
          WHERE creator_id = ? AND scope_kind = ? AND scope_id = ? AND status = 'active'",
+        creator_id,
+        scope_kind,
+        scope_id,
     )
-    .bind(creator_id)
-    .bind(scope_kind)
-    .bind(scope_id)
     .fetch_optional(pool)
     .await?;
     Ok(row)

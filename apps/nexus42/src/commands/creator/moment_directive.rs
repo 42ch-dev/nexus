@@ -241,19 +241,25 @@ async fn handle_set(
     Ok(())
 }
 
-/// `creator moment-directive show` handler.
+/// `creator moment-directive show` handler — displays the **effective**
+/// directive for the requested scope (spec §3.2, QC2-F8): for a Work the
+/// author sees the directive that actually injects (the Work's own, or the
+/// inherited World override), with the source scope called out explicitly.
 async fn handle_show(
     pool: &SqlitePool,
     creator_id: &str,
     workspace_slug: &str,
     args: &MomentDirectiveScopeArgs,
 ) -> Result<()> {
-    let Some(row) = resolve_active_for_scope(pool, creator_id, workspace_slug, args).await? else {
+    let Some((row, effective_for)) =
+        resolve_effective_for_show(pool, creator_id, workspace_slug, args).await?
+    else {
         println!("No active Moment Directive for this scope.");
         return Ok(());
     };
     println!("Directive: {}", row.directive_id);
     println!("Scope: {} {}", row.scope_kind, row.scope_id);
+    println!("Effective for: {effective_for}");
     println!("Depth: {}", row.insert_depth);
     println!("TTL: {} remaining ({})", row.ttl_remaining, row.ttl_kind);
     if row.clear_on_scene_change {
@@ -281,19 +287,41 @@ async fn handle_clear(
     Ok(())
 }
 
-/// Resolve the active directive row for a `show`/`clear` scope selection.
-async fn resolve_active_for_scope(
+/// Resolve the **effective** directive for `show` (spec §3.2, Work-wins /
+/// World-override, QC2-F8) together with a human label of the scope it came
+/// from:
+///
+/// - `--world <id>`: the World override itself (it is what a raw world
+///   assembly would inject).
+/// - Work selection: the Work's own directive wins; otherwise the bound
+///   World's override is inherited (reported as such). No directive when the
+///   Work is worldless/unbound and has no own directive.
+async fn resolve_effective_for_show(
     pool: &SqlitePool,
     creator_id: &str,
     workspace_slug: &str,
     args: &MomentDirectiveScopeArgs,
-) -> Result<Option<MomentDirectiveRow>> {
-    let (scope_kind, scope_id) = resolve_scope_ids(pool, creator_id, workspace_slug, args).await?;
-    Ok(if scope_kind == scope_kind::WORK {
-        get_active_for_work(pool, creator_id, &scope_id).await?
-    } else {
-        get_active_for_world(pool, creator_id, &scope_id).await?
-    })
+) -> Result<Option<(MomentDirectiveRow, String)>> {
+    if let Some(world_id) = args.world.as_deref() {
+        let row = get_active_for_world(pool, creator_id, world_id).await?;
+        return Ok(row.map(|r| (r, format!("world {world_id}"))));
+    }
+    let work = resolve_work(pool, creator_id, workspace_slug, args.work.as_deref()).await?;
+    if let Some(row) = get_active_for_work(pool, creator_id, &work.work_id).await? {
+        return Ok(Some((
+            row,
+            format!("work {} (own directive)", work.work_id),
+        )));
+    }
+    if let Some(world_id) = work.world_id {
+        if let Some(row) = get_active_for_world(pool, creator_id, &world_id).await? {
+            return Ok(Some((
+                row,
+                format!("work {} (inherited from world {world_id})", work.work_id),
+            )));
+        }
+    }
+    Ok(None)
 }
 
 /// Resolve the `(scope_kind, scope_id)` for a `show`/`clear` selection:
@@ -409,6 +437,14 @@ impl DirectiveStore for LocalDirectiveStore {
 /// an unknown Work (binding unverifiable) resolves to no directive.
 /// A raw world assembly (no Work context) applies the World override
 /// directly to the focused World.
+///
+/// **Error isolation (QC2-F2):** a **failed** read is "no directive", never a
+/// fall-through. Only a *confirmed* result (`Ok(None)`) — no Work directive,
+/// or a verified World-bound Work — may fall through to the World override.
+/// Otherwise a transient DB error could leak a World override into a Work
+/// whose own directive state could not be verified. All DB-error degradation
+/// paths warn (QC3-S001); failures degrade to "no directive", never fail the
+/// assembly.
 async fn resolve_active_row(
     pool: &SqlitePool,
     creator_id: &str,
@@ -416,27 +452,66 @@ async fn resolve_active_row(
     world_id: Option<&str>,
 ) -> Option<MomentDirectiveRow> {
     if let Some(work_id) = work_id {
-        if let Ok(Some(row)) = get_active_for_work(pool, creator_id, work_id).await {
-            return Some(row);
+        match get_active_for_work(pool, creator_id, work_id).await {
+            // Work-wins.
+            Ok(Some(row)) => return Some(row),
+            // Unverifiable Work-directive state: do NOT fall through to the
+            // World override (QC2-F2).
+            Err(e) => {
+                tracing::warn!(creator_id, work_id, error = %e,
+                    "moment directive: work-scoped read failed; resolving to no directive");
+                return None;
+            }
+            // Confirmed no Work directive — the binding check may fall
+            // through to the World override.
+            Ok(None) => {}
         }
-        let Ok(Some(work)) = get_work(pool, creator_id, work_id).await else {
-            return None;
-        };
-        let world_id = work.world_id?;
-        get_active_for_world(pool, creator_id, &world_id)
-            .await
-            .ok()?
+        match get_work(pool, creator_id, work_id).await {
+            // Binding verified: a World-bound Work inherits the override.
+            Ok(Some(work)) => match work.world_id {
+                Some(world_id) => match get_active_for_world(pool, creator_id, &world_id).await {
+                    Ok(row) => row,
+                    Err(e) => {
+                        tracing::warn!(creator_id, work_id, error = %e,
+                            "moment directive: world-override read failed; resolving to no directive");
+                        None
+                    }
+                },
+                // Confirmed worldless Work — no override can apply.
+                None => None,
+            },
+            // Unknown Work (Ok(None)) or unreadable binding (Err): no override.
+            Ok(None) => None,
+            Err(e) => {
+                tracing::warn!(creator_id, work_id, error = %e,
+                    "moment directive: work binding read failed; resolving to no directive");
+                None
+            }
+        }
     } else {
-        get_active_for_world(pool, creator_id, world_id?)
-            .await
-            .ok()?
+        match get_active_for_world(pool, creator_id, world_id?).await {
+            Ok(row) => row,
+            Err(e) => {
+                tracing::warn!(creator_id, error = %e,
+                    "moment directive: world override read failed; resolving to no directive");
+                None
+            }
+        }
     }
 }
 
-/// Map a stored row to the MCA payload. A corrupt row (unknown depth / TTL
-/// kind strings) never injects — the adapter skips it with a warning
-/// (failures degrade to "no directive", never fail the assembly).
+/// Map a stored row to the MCA payload. A corrupt row (empty body / unknown
+/// depth / TTL kind strings) never injects — the adapter skips it with a
+/// warning (failures degrade to "no directive", never fail the assembly).
 fn map_to_active_directive(row: MomentDirectiveRow) -> Option<ActiveDirective> {
+    if row.body.trim().is_empty() {
+        // QC2-F5: a corrupt row with an empty body would render nothing yet
+        // still count as an injection — skip it, and because `load_active`
+        // returns `None` the post-injection TTL decrement never runs.
+        tracing::warn!(directive_id = %row.directive_id,
+            "moment directive row has an empty body; skipping injection");
+        return None;
+    }
     let Some(insert_depth) = DirectiveDepth::parse(&row.insert_depth) else {
         tracing::warn!(directive_id = %row.directive_id, depth = %row.insert_depth,
             "moment directive row has unknown insert_depth; skipping injection");
@@ -808,6 +883,90 @@ mod tests {
         );
     }
 
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn scope_resolution_work_read_error_never_leaks_world_override() {
+        let (pool, _dir) = fresh_pool().await;
+        seed_creator(&pool).await;
+        seed_world(&pool, "wld_1").await;
+        seed_work(&pool, &work_record("wrk_1", Some("wld_1"), Some("novel"))).await;
+        set_active(
+            &pool,
+            &new_params("dir_world", scope_kind::WORLD, "wld_1", "generations", 3),
+        )
+        .await
+        .unwrap();
+
+        // Simulate a broken Work-directive read: the `moment_directives` table
+        // is dropped while `works` stays readable and the World override row is
+        // (in principle) present. A fall-through on error would leak the World
+        // override into a Work whose own directive state could not be verified;
+        // the fixed logic treats any Work-read error as "no directive"
+        // (QC2-F2) and `load_active` degrades to `None` instead of erroring.
+        // SAFETY: test-only DDL against the scratch pool.
+        sqlx::query("DROP TABLE moment_directives")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let store = LocalDirectiveStore::new(pool);
+        let active = store
+            .load_active(Some("ctr_test"), Some("wrk_1"), Some("wld_1"))
+            .await;
+        assert!(
+            active.is_none(),
+            "a failed Work-directive read must not leak the World override"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn scope_resolution_empty_body_row_never_injects() {
+        let (pool, _dir) = fresh_pool().await;
+        seed_creator(&pool).await;
+        seed_world(&pool, "wld_1").await;
+        seed_work(&pool, &work_record("wrk_1", Some("wld_1"), Some("novel"))).await;
+        let mut params = new_params("dir_1", scope_kind::WORK, "wrk_1", "generations", 3);
+        params.body = "   ";
+        set_active(&pool, &params).await.unwrap();
+
+        let store = LocalDirectiveStore::new(pool);
+        let active = store
+            .load_active(Some("ctr_test"), Some("wrk_1"), Some("wld_1"))
+            .await;
+        assert!(
+            active.is_none(),
+            "a corrupt empty-body row must not inject (QC2-F5)"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn cli_show_work_displays_effective_inherited_world_override() {
+        let (pool, _dir) = fresh_pool().await;
+        seed_creator(&pool).await;
+        seed_world(&pool, "wld_1").await;
+        seed_work(&pool, &work_record("wrk_1", Some("wld_1"), Some("novel"))).await;
+        set_active(
+            &pool,
+            &new_params("dir_world", scope_kind::WORLD, "wld_1", "generations", 3),
+        )
+        .await
+        .unwrap();
+
+        let scope = MomentDirectiveScopeArgs {
+            work: Some("wrk_1".to_string()),
+            world: None,
+        };
+        let (shown, source) = resolve_effective_for_show(&pool, "ctr_test", "wrk_novel", &scope)
+            .await
+            .unwrap()
+            .expect("effective directive resolves through the World override");
+        assert_eq!(shown.directive_id, "dir_world");
+        assert_eq!(shown.scope_kind, "world");
+        assert!(
+            source.contains("inherited from world wld_1"),
+            "show must name the inherited source scope, got: {source}"
+        );
+    }
+
     // ── T4: post-injection lifecycle (spec §3.3) ──────────────────────
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -998,12 +1157,12 @@ mod tests {
             .await
             .unwrap();
 
-        // show
+        // show — the effective directive for the Work is its own row.
         let scope = MomentDirectiveScopeArgs {
             work: Some("wrk_1".to_string()),
             world: None,
         };
-        let shown = resolve_active_for_scope(&pool, "ctr_test", "wrk_novel", &scope)
+        let (shown, source) = resolve_effective_for_show(&pool, "ctr_test", "wrk_novel", &scope)
             .await
             .unwrap()
             .expect("show finds the active directive");
@@ -1012,13 +1171,17 @@ mod tests {
         assert_eq!(shown.ttl_kind, "generations");
         assert_eq!(shown.ttl_remaining, 5);
         assert!(shown.clear_on_scene_change);
+        assert!(
+            source.contains("own directive"),
+            "the Work's own directive is the effective source, got: {source}"
+        );
 
         // clear
         handle_clear(&pool, "ctr_test", "wrk_novel", &scope)
             .await
             .unwrap();
         assert!(
-            resolve_active_for_scope(&pool, "ctr_test", "wrk_novel", &scope)
+            resolve_effective_for_show(&pool, "ctr_test", "wrk_novel", &scope)
                 .await
                 .unwrap()
                 .is_none()
@@ -1029,7 +1192,7 @@ mod tests {
             .await
             .unwrap();
         assert!(
-            resolve_active_for_scope(&pool, "ctr_test", "wrk_novel", &scope)
+            resolve_effective_for_show(&pool, "ctr_test", "wrk_novel", &scope)
                 .await
                 .unwrap()
                 .is_none()
@@ -1178,13 +1341,14 @@ mod tests {
             work: None,
             world: Some("wld_1".to_string()),
         };
-        let shown = resolve_active_for_scope(&pool, "ctr_test", "wrk_novel", &scope)
+        let (shown, source) = resolve_effective_for_show(&pool, "ctr_test", "wrk_novel", &scope)
             .await
             .unwrap()
             .expect("world override visible");
         assert_eq!(shown.scope_kind, "world");
         assert_eq!(shown.ttl_kind, "chapters");
         assert_eq!(shown.ttl_remaining, 4);
+        assert_eq!(source, "world wld_1");
     }
 
     // ── T6/T7: end-to-end injection through `assemble_moment_with_directive`

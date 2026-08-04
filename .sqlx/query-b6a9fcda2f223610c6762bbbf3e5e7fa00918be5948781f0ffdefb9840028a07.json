@@ -1,0 +1,110 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE moment_directives\n         SET ttl_remaining = MAX(ttl_remaining - 1, 0),\n             status = CASE WHEN ttl_remaining <= 1 THEN 'expired' ELSE status END,\n             expires_at = CASE WHEN ttl_remaining <= 1 THEN ? ELSE expires_at END,\n             updated_at = ?\n         WHERE directive_id = ? AND status = 'active'\n         RETURNING directive_id as \"directive_id!\",\n                   creator_id, scope_kind, scope_id, body, insert_depth,\n                   ttl_kind, ttl_remaining, clear_on_scene_change as \"clear_on_scene_change: bool\",\n                   status,\n                   last_focused_event_id, last_chapter_no, created_at, updated_at,\n                   expires_at, replaced_by",
+  "describe": {
+    "columns": [
+      {
+        "name": "directive_id!",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "creator_id",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "scope_kind",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "scope_id",
+        "ordinal": 3,
+        "type_info": "Text"
+      },
+      {
+        "name": "body",
+        "ordinal": 4,
+        "type_info": "Text"
+      },
+      {
+        "name": "insert_depth",
+        "ordinal": 5,
+        "type_info": "Text"
+      },
+      {
+        "name": "ttl_kind",
+        "ordinal": 6,
+        "type_info": "Text"
+      },
+      {
+        "name": "ttl_remaining",
+        "ordinal": 7,
+        "type_info": "Integer"
+      },
+      {
+        "name": "clear_on_scene_change: bool",
+        "ordinal": 8,
+        "type_info": "Integer"
+      },
+      {
+        "name": "status",
+        "ordinal": 9,
+        "type_info": "Text"
+      },
+      {
+        "name": "last_focused_event_id",
+        "ordinal": 10,
+        "type_info": "Text"
+      },
+      {
+        "name": "last_chapter_no",
+        "ordinal": 11,
+        "type_info": "Integer"
+      },
+      {
+        "name": "created_at",
+        "ordinal": 12,
+        "type_info": "Integer"
+      },
+      {
+        "name": "updated_at",
+        "ordinal": 13,
+        "type_info": "Integer"
+      },
+      {
+        "name": "expires_at",
+        "ordinal": 14,
+        "type_info": "Integer"
+      },
+      {
+        "name": "replaced_by",
+        "ordinal": 15,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": [
+      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      false,
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "b6a9fcda2f223610c6762bbbf3e5e7fa00918be5948781f0ffdefb9840028a07"
+}
