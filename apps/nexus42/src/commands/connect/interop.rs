@@ -523,8 +523,8 @@ async fn cli_wiring_starts_a_node_with_persisted_identity_and_allowlist() {
     .expect("config builds through the CLI path");
 
     // The CLI path resolved a real device id + the file ∪ CLI allowlist.
-    let expected_host_id =
-        get_or_create_device_id(&nexus_home_layout::nexus_root_from_home(home)).expect("device id");
+    // `get_or_create_device_id` takes the RAW home (joins `.nexus42` itself).
+    let expected_host_id = get_or_create_device_id(home).expect("device id");
     assert_eq!(
         host_id, expected_host_id,
         "host_id must use the shared host_manifest_port resolution"

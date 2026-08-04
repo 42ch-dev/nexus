@@ -28,15 +28,20 @@ const MAX_EMPTY_RETRIES: u8 = 3;
 
 /// Get the existing device ID or create a new one.
 ///
+/// `home` is the **raw user home** (`$HOME`) — the function resolves the
+/// canonical `~/.nexus42/device-id` itself via [`crate::device_id_path`]
+/// (which joins `.nexus42`). Callers MUST NOT pre-join the nexus root:
+/// passing `$HOME/.nexus42` produces a stray `.nexus42/.nexus42/device-id`.
+///
 /// Uses atomic file creation (`create_new`) to eliminate the TOCTOU race
 /// between the existence check and the write. If the file already exists,
 /// its contents are read and returned unchanged.
 ///
 /// # Errors
 /// Returns the specific error type if the operation fails.
-pub fn get_or_create_device_id(nexus_home: &Path) -> Result<String, DeviceIdError> {
+pub fn get_or_create_device_id(home: &Path) -> Result<String, DeviceIdError> {
     use std::io::Write;
-    let path = crate::device_id_path(nexus_home);
+    let path = crate::device_id_path(home);
 
     // Ensure parent directory exists.
     if let Some(parent) = path.parent() {

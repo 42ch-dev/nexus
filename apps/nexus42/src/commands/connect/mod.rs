@@ -102,10 +102,10 @@ async fn start(allow_peer: Vec<String>, listen: Vec<String>) -> Result<()> {
 /// state + CLI inputs (steps 1–6 of `start`).
 ///
 /// `home` is the **raw** user home (`$HOME`): identity/allowlist helpers
-/// join `.nexus42` themselves. The device-id is resolved through
-/// [`nexus_home_layout::nexus_root_from_home`] + `get_or_create_device_id`
-/// — the identical resolution `host_manifest_port` uses, so the Connect
-/// `host_id` always equals the manifest's `host_id`.
+/// join `.nexus42` themselves. The device-id is resolved via
+/// `get_or_create_device_id(home)` — the identical resolution
+/// `host_manifest_port::resolve_device_id_from_standard_home` uses, so the
+/// Connect `host_id` always equals the manifest's `host_id`.
 ///
 /// Returns the config, the resolved `host_id` (for start-up logging), and
 /// the effective allowlist length.
@@ -123,8 +123,9 @@ fn build_config(
 
     // 2. host_id: installation device-id UUID — resolved exactly like
     //    `host_manifest_port::resolve_device_id_from_standard_home`.
-    let nexus_home = nexus_home_layout::nexus_root_from_home(home);
-    let host_id = get_or_create_device_id(&nexus_home)
+    //    `get_or_create_device_id` takes the RAW home and joins `.nexus42`
+    //    itself (canonical `~/.nexus42/device-id`; device_id_path contract).
+    let host_id = get_or_create_device_id(home)
         .map_err(|e| CliError::Config(format!("device id unavailable: {e}")))?;
 
     // 3. Allowlist: file ∪ `--allow-peer*`; missing file ⇒ empty ⇒ fail-closed.
