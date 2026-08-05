@@ -1,0 +1,28 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/daemon-api/kb/pack-import-request.schema.json",
+  "schema_version": 1,
+  "title": "Nexus PackImportRequest",
+  "description": "POST /v1/daemon/worlds/:world_id/kb/pack/import — import a Narrative Knowledge Pack into a World (V1.152 P0 DF-77). The pack is an opaque handbook pack object; conflict policy is required semantic state.",
+  "type": "object",
+  "required": ["pack", "conflict"],
+  "additionalProperties": false,
+  "properties": {
+    "pack": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "Opaque Narrative Knowledge Pack (spoke handbook shape: modules.pack + entries + relations + optional source_anchors). Parsed server-side via nexus_spoke_adapter::pack::parse_pack."
+    },
+    "conflict": {
+      "type": "string",
+      "enum": ["skip", "rename", "overwrite"],
+      "description": "Collision policy: skip (keep existing, default), rename (disambiguate and create), overwrite (replace one entry body, behind confirmation).",
+      "default": "skip"
+    },
+    "include_anchors": {
+      "type": "boolean",
+      "description": "Whether to import source_anchors from the pack. Accepted on the wire; no-op until anchor persistence ships.",
+      "default": false
+    }
+  }
+}

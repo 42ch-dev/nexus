@@ -1,0 +1,33 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/daemon-api/kb/pack-export-request.schema.json",
+  "schema_version": 1,
+  "title": "Nexus PackExportRequest",
+  "description": "POST /v1/daemon/worlds/:world_id/kb/pack/export — export one World's lore as a Narrative Knowledge Pack (V1.152 P0 DF-77).",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "include_deprecated": {
+      "type": "boolean",
+      "description": "Include deprecated entries in the export (default: active entries only).",
+      "default": false
+    },
+    "include_anchors": {
+      "type": "boolean",
+      "description": "Include source_anchors in the export response envelope.",
+      "default": false
+    },
+    "title": {
+      "type": "string",
+      "description": "Override modules.pack.title (default: World title)."
+    },
+    "pack_version": {
+      "type": "string",
+      "description": "Override modules.pack.version (default: 0.1.0)."
+    },
+    "description": {
+      "type": "string",
+      "description": "Optional modules.pack.description."
+    }
+  }
+}

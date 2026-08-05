@@ -1,0 +1,78 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/daemon-api/kb/pack-import-response.schema.json",
+  "schema_version": 1,
+  "title": "Nexus PackImportResponse",
+  "description": "Response for POST /v1/daemon/worlds/:world_id/kb/pack/import (V1.152 P0 DF-77). Per-atom-type summary counts plus a details list.",
+  "type": "object",
+  "required": ["entries", "relations", "details"],
+  "additionalProperties": false,
+  "properties": {
+    "entries": {
+      "$ref": "#/definitions/atom_counts",
+      "description": "Entry-level counts."
+    },
+    "relations": {
+      "$ref": "#/definitions/atom_counts",
+      "description": "Relation-level counts."
+    },
+    "details": {
+      "type": "array",
+      "description": "Per-atom outcome details (entry or relation).",
+      "items": {
+        "$ref": "#/definitions/import_detail"
+      }
+    }
+  },
+  "definitions": {
+    "atom_counts": {
+      "type": "object",
+      "required": ["created", "skipped", "rejected", "renamed", "overwritten"],
+      "additionalProperties": false,
+      "properties": {
+        "created": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "skipped": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "rejected": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "renamed": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "overwritten": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "import_detail": {
+      "type": "object",
+      "required": ["kind", "id", "outcome"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": ["entry", "relation"]
+        },
+        "id": {
+          "type": "string"
+        },
+        "outcome": {
+          "type": "string",
+          "enum": ["created", "skipped", "rejected", "renamed", "overwritten"]
+        },
+        "reason": {
+          "type": "string",
+          "description": "Optional human-readable reason (e.g. why rejected or skipped)."
+        }
+      }
+    }
+  }
+}

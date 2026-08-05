@@ -1,0 +1,44 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/daemon-api/kb/pack-export-response.schema.json",
+  "schema_version": 1,
+  "title": "Nexus PackExportResponse",
+  "description": "Response for POST /v1/daemon/worlds/:world_id/kb/pack/export (V1.152 P0 DF-77). The Narrative Knowledge Pack envelope (spoke handbook domain-profile-narrative-knowledge-pack). Entries and relations are opaque spoke objects (V1.139 fallback).",
+  "type": "object",
+  "required": ["modules", "entries", "relations"],
+  "additionalProperties": false,
+  "properties": {
+    "modules": {
+      "type": "object",
+      "description": "modules.pack catalog metadata plus any unknown modules.* dialect keys (round-trip verbatim).",
+      "additionalProperties": true
+    },
+    "entries": {
+      "type": "array",
+      "description": "Ordered KnowledgeEntry list (canonical_name ASC).",
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "description": "Spoke KnowledgeEntry (serialized JSON object). Typed access is via the spoke package (@42ch/spoke-schemas / spoke-schemas). Canonical schema: https://spoke42.invalid/schemas/data/knowledge-entry.schema.json. V1.139 fallback: opaque object here."
+      }
+    },
+    "relations": {
+      "type": "array",
+      "description": "Ordered Relation list (relationship_id ASC).",
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "description": "Spoke Relation (serialized JSON object). Canonical schema: https://spoke42.invalid/schemas/data/relation.schema.json. V1.139 fallback: opaque object here."
+      }
+    },
+    "source_anchors": {
+      "type": "array",
+      "description": "Optional SourceAnchor list (present only when include_anchors is set on the request).",
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "description": "Spoke SourceAnchor (serialized JSON object)."
+      }
+    }
+  }
+}
