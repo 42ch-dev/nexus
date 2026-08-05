@@ -94,7 +94,15 @@ async fn seed_key_block(
     world_id: &str,
     canonical_name: &str,
 ) {
-    seed_key_block_with_body(pool, key_block_id, world_id, canonical_name, "{}", "confirmed").await;
+    seed_key_block_with_body(
+        pool,
+        key_block_id,
+        world_id,
+        canonical_name,
+        "{}",
+        "confirmed",
+    )
+    .await;
 }
 
 async fn seed_key_block_with_body(
@@ -195,10 +203,7 @@ fn fresh_entry_ids_in_pack(pack: &mut Value) {
 }
 
 async fn export_pack(server: &TestServer, world_id: &str) -> Value {
-    let resp = server
-        .post(&export_url(world_id))
-        .json(&json!({}))
-        .await;
+    let resp = server.post(&export_url(world_id)).json(&json!({})).await;
     assert_eq!(resp.status_code(), StatusCode::OK, "body={}", resp.text());
     resp.json()
 }
@@ -252,11 +257,7 @@ async fn seed_export_source_world(pool: &sqlx::SqlitePool) {
     seed_relation(pool, "rel_pack_1", OWNED_WORLD, "kb_pack_a", "kb_pack_b").await;
 }
 
-async fn assert_entry_provenance(
-    pool: &sqlx::SqlitePool,
-    world_id: &str,
-    canonical_name: &str,
-) {
+async fn assert_entry_provenance(pool: &sqlx::SqlitePool, world_id: &str, canonical_name: &str) {
     // SAFETY: test-only SELECT against known kb_key_blocks schema.
     let provenance: Option<String> = sqlx::query_scalar(
         "SELECT source_provenance_kind FROM kb_key_blocks WHERE world_id = ? AND canonical_name = ?",
@@ -280,7 +281,14 @@ async fn pack_export_owned_world_returns_pack_envelope() {
     seed_key_block(&ctx.pool, "kb_pack_a", OWNED_WORLD, "Aria").await;
     seed_key_block(&ctx.pool, "kb_pack_b", OWNED_WORLD, "Kael").await;
     seed_key_block(&ctx.pool, "kb_pack_c", OWNED_WORLD, "Mira").await;
-    seed_relation(&ctx.pool, "rel_pack_1", OWNED_WORLD, "kb_pack_a", "kb_pack_b").await;
+    seed_relation(
+        &ctx.pool,
+        "rel_pack_1",
+        OWNED_WORLD,
+        "kb_pack_a",
+        "kb_pack_b",
+    )
+    .await;
 
     let body = export_pack(&ctx.server, OWNED_WORLD).await;
     assert_eq!(
@@ -308,7 +316,12 @@ async fn pack_export_foreign_world_returns_403() {
         .post(&export_url(FOREIGN_WORLD))
         .json(&json!({}))
         .await;
-    assert_eq!(resp.status_code(), StatusCode::FORBIDDEN, "body={}", resp.text());
+    assert_eq!(
+        resp.status_code(),
+        StatusCode::FORBIDDEN,
+        "body={}",
+        resp.text()
+    );
 
     let body: Value = resp.json();
     assert_eq!(body["success"], false, "body={body}");
@@ -333,7 +346,6 @@ async fn pack_import_skip_cross_world_and_reimport_is_idempotent() {
         body["relations"]["created"].as_u64().unwrap_or(0) >= 1,
         "expected created relations >= 1: {body}"
     );
-
 
     let (status2, body2) = import_pack_http(&ctx.server, TARGET_WORLD, &pack, "skip").await;
     assert_eq!(status2, StatusCode::OK, "body={body2}");
@@ -377,7 +389,11 @@ async fn pack_import_rename_creates_disambiguated_entry() {
     .await
     .unwrap();
     assert!(names.iter().any(|n| n.contains("imported")));
-    assert_eq!(names.len(), 4, "Aria + Mira + pre-existing Kael + renamed Kael");
+    assert_eq!(
+        names.len(),
+        4,
+        "Aria + Mira + pre-existing Kael + renamed Kael"
+    );
 
     let renamed_kael_id: String = sqlx::query_scalar(
         "SELECT key_block_id FROM kb_key_blocks WHERE world_id = ? AND canonical_name LIKE '%imported%'",
@@ -416,7 +432,11 @@ async fn pack_import_rename_creates_disambiguated_entry() {
     .await
     .unwrap()
     .flatten();
-    assert_ne!(preexisting.as_deref(), Some(IMPORT_PROVENANCE), "pre-seeded collision row must not be stamped");
+    assert_ne!(
+        preexisting.as_deref(),
+        Some(IMPORT_PROVENANCE),
+        "pre-seeded collision row must not be stamped"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -452,7 +472,10 @@ async fn pack_import_overwrite_replaces_body_preserves_status() {
     .fetch_one(&ctx.pool)
     .await
     .unwrap();
-    assert_eq!(row.0, "provisional", "overwrite must preserve target provisional status, not pack confirmed");
+    assert_eq!(
+        row.0, "provisional",
+        "overwrite must preserve target provisional status, not pack confirmed"
+    );
     assert!(
         row.1.contains("Kael from pack"),
         "overwrite must replace body with pack content; got body_json={}",

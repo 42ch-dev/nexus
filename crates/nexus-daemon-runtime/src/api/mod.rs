@@ -607,7 +607,6 @@ fn pack_routes() -> Router<WorkspaceState> {
         )
 }
 
-
 /// Profile-scoped (Tier-2) routes — require active creator + lazy-open pool.
 fn tier2_routes() -> Router<WorkspaceState> {
     Router::new()

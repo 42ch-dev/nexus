@@ -316,10 +316,7 @@ async fn import(args: ImportArgs, config: &CliConfig, pool: &SqlitePool) -> Resu
     for detail in &summary.details {
         if detail.outcome == ImportOutcome::Rejected {
             if let Some(reason) = &detail.reason {
-                eprintln!(
-                    "  warn: {:?} {} rejected: {reason}",
-                    detail.kind, detail.id
-                );
+                eprintln!("  warn: {:?} {} rejected: {reason}", detail.kind, detail.id);
             }
         } else if args.dry_run {
             if let Some(reason) = &detail.reason {
@@ -933,8 +930,15 @@ mod tests {
         carol_rel["relation_id"] = json!("rel_carol_alice_rename");
         carol_rel["from_id"] = json!(carol_pack_id);
         carol_rel["to_id"] = json!(alice_pack_id);
-        pack_value["relations"].as_array_mut().unwrap().push(carol_rel);
-        std::fs::write(&pack_path, serde_json::to_string_pretty(&pack_value).unwrap()).unwrap();
+        pack_value["relations"]
+            .as_array_mut()
+            .unwrap()
+            .push(carol_rel);
+        std::fs::write(
+            &pack_path,
+            serde_json::to_string_pretty(&pack_value).unwrap(),
+        )
+        .unwrap();
 
         let (pool2, _dir2) = empty_world_pool().await;
         let store = SqliteKbStore::new(pool2.clone());
@@ -943,7 +947,10 @@ mod tests {
             summary: Some("Pre-existing Carol".to_string()),
             ..Default::default()
         });
-        store.insert_knowledge_entry(carol_clone).await.expect("pre-create Carol");
+        store
+            .insert_knowledge_entry(carol_clone)
+            .await
+            .expect("pre-create Carol");
 
         let args = ImportArgs {
             world_ref: WORLD.to_string(),
@@ -956,10 +963,16 @@ mod tests {
             .expect("rename import must succeed");
 
         let entries = store.list_by_world(WORLD).await.unwrap();
-        assert_eq!(entries.len(), 4, "pre-existing Carol + Alice + Bob + renamed Carol");
+        assert_eq!(
+            entries.len(),
+            4,
+            "pre-existing Carol + Alice + Bob + renamed Carol"
+        );
         let renamed = entries
             .iter()
-            .find(|e| e.canonical_name.ends_with(" imported") || e.canonical_name.contains(" imported "))
+            .find(|e| {
+                e.canonical_name.ends_with(" imported") || e.canonical_name.contains(" imported ")
+            })
             .expect("rename policy must create a disambiguated entry with ' imported' suffix");
         let renamed_carol_id = renamed.entry_id.clone();
 
@@ -1035,7 +1048,10 @@ mod tests {
 
         // Mutate Carol in-place so re-import has something to overwrite.
         let store = SqliteKbStore::new(pool.clone());
-        let mut carol = store.get_knowledge_entry(carol_id).await.expect("Carol must exist");
+        let mut carol = store
+            .get_knowledge_entry(carol_id)
+            .await
+            .expect("Carol must exist");
         carol.body = Some(WorldKbBody {
             summary: Some("Stale Carol body".to_string()),
             ..Default::default()
@@ -1061,7 +1077,10 @@ mod tests {
             "overwrite re-import must not add duplicate rows"
         );
 
-        let carol = store.get_knowledge_entry(carol_id).await.expect("Carol must remain");
+        let carol = store
+            .get_knowledge_entry(carol_id)
+            .await
+            .expect("Carol must remain");
         assert_eq!(
             carol.body.as_ref().and_then(|b| b.summary.as_deref()),
             Some("Carol summary"),
@@ -1098,7 +1117,10 @@ mod tests {
             .iter()
             .filter(|e| e.canonical_name.contains(" imported"))
             .count();
-        assert_eq!(imported_suffix, 3, "each pack entry must be renamed on re-import");
+        assert_eq!(
+            imported_suffix, 3,
+            "each pack entry must be renamed on re-import"
+        );
     }
 
     /// Greptile P1 / PR #193: global entry_id collision with a foreign-world row
@@ -1334,7 +1356,6 @@ mod tests {
         );
     }
 
-
     /// V1.152 P2 dogfood: export→import round-trip on activation-carrying entries +
     /// relations preserves provenance, `modules.activation`, and skip-idempotency.
     #[tokio::test(flavor = "multi_thread")]
@@ -1373,11 +1394,7 @@ mod tests {
 
         let store_a = SqliteKbStore::new(pool_a.clone());
         let mut entry_ids = Vec::new();
-        for (name, key) in [
-            ("Alice", "alice"),
-            ("Bob", "bob"),
-            ("Carol", "carol"),
-        ] {
+        for (name, key) in [("Alice", "alice"), ("Bob", "bob"), ("Carol", "carol")] {
             let mut kb = WorldKbEntry::new(WORLD_A, BlockType::Character, name);
             kb.body = Some(WorldKbBody {
                 summary: Some(format!("{name} summary")),
@@ -1451,8 +1468,7 @@ mod tests {
         .expect("first import must succeed");
 
         assert_eq!(
-            summary.entries.created,
-            3,
+            summary.entries.created, 3,
             "first import must create all seeded entries"
         );
         assert!(
@@ -1507,13 +1523,11 @@ mod tests {
         .expect("re-import must succeed");
 
         assert_eq!(
-            summary2.entries.created,
-            0,
+            summary2.entries.created, 0,
             "skip re-import must not create entries"
         );
         assert_eq!(
-            summary2.relations.created,
-            0,
+            summary2.relations.created, 0,
             "skip re-import must not create relations"
         );
         assert_eq!(count_entries(&pool_b, WORLD_B).await, 3);
@@ -2014,7 +2028,6 @@ mod tests {
         (out_path, tmp_dir)
     }
 
-
     #[tokio::test(flavor = "multi_thread")]
     async fn import_skips_unknown_entry_type_without_nonzero_exit() {
         let (pool, _dir) = empty_world_pool().await;
@@ -2044,12 +2057,24 @@ mod tests {
             ],
             "relations": []
         });
-        std::fs::write(&pack_path, serde_json::to_string_pretty(&pack_json).unwrap()).unwrap();
+        std::fs::write(
+            &pack_path,
+            serde_json::to_string_pretty(&pack_json).unwrap(),
+        )
+        .unwrap();
 
         let parsed = parse_pack(&pack_json).expect("pack must parse");
-        let summary = import_pack(&pool, WORLD, OWNER, parsed, ConflictPolicy::Skip, false, false)
-            .await
-            .expect("unknown entry_type must not fail import under skip");
+        let summary = import_pack(
+            &pool,
+            WORLD,
+            OWNER,
+            parsed,
+            ConflictPolicy::Skip,
+            false,
+            false,
+        )
+        .await
+        .expect("unknown entry_type must not fail import under skip");
         assert_eq!(summary.entries.skipped, 1);
         assert_eq!(summary.entries.rejected, 0);
         assert_eq!(summary.entries.created, 1);
@@ -2066,17 +2091,35 @@ mod tests {
         assert_eq!(count_entries(&pool, WORLD).await, 1);
     }
 
-
     #[tokio::test(flavor = "multi_thread")]
     async fn import_dry_run_rename_reports_counts_without_writes() {
         let (pool, _dir, _entry_ids, _rel_ids) = seeded_pool().await;
         let (pack_path, _pack_dir) = export_to_file(&pool).await;
         let (pool2, _dir2) = empty_world_pool().await;
         let store = SqliteKbStore::new(pool2.clone());
-        store.insert_knowledge_entry(WorldKbEntry::new(WORLD, BlockType::Character, "Carol")).await.unwrap();
+        store
+            .insert_knowledge_entry(WorldKbEntry::new(WORLD, BlockType::Character, "Carol"))
+            .await
+            .unwrap();
         let pre = count_entries(&pool2, WORLD).await;
-        let parsed = parse_pack(&serde_json::from_str::<serde_json::Value>(&std::fs::read_to_string(&pack_path).unwrap()).unwrap()).unwrap();
-        let summary = import_pack(&pool2, WORLD, OWNER, parsed, ConflictPolicy::Rename, false, true).await.unwrap();
+        let parsed = parse_pack(
+            &serde_json::from_str::<serde_json::Value>(
+                &std::fs::read_to_string(&pack_path).unwrap(),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let summary = import_pack(
+            &pool2,
+            WORLD,
+            OWNER,
+            parsed,
+            ConflictPolicy::Rename,
+            false,
+            true,
+        )
+        .await
+        .unwrap();
         assert!(summary.entries.renamed >= 1);
         assert_eq!(count_entries(&pool2, WORLD).await, pre);
     }
@@ -2087,10 +2130,29 @@ mod tests {
         let (pack_path, _pack_dir) = export_to_file(&pool).await;
         let (pool2, _dir2) = empty_world_pool().await;
         let store = SqliteKbStore::new(pool2.clone());
-        store.insert_knowledge_entry(WorldKbEntry::new(WORLD, BlockType::Character, "Carol")).await.unwrap();
+        store
+            .insert_knowledge_entry(WorldKbEntry::new(WORLD, BlockType::Character, "Carol"))
+            .await
+            .unwrap();
         let pre = count_entries(&pool2, WORLD).await;
-        let parsed = parse_pack(&serde_json::from_str::<serde_json::Value>(&std::fs::read_to_string(&pack_path).unwrap()).unwrap()).unwrap();
-        let summary = import_pack(&pool2, WORLD, OWNER, parsed, ConflictPolicy::Overwrite, false, true).await.unwrap();
+        let parsed = parse_pack(
+            &serde_json::from_str::<serde_json::Value>(
+                &std::fs::read_to_string(&pack_path).unwrap(),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let summary = import_pack(
+            &pool2,
+            WORLD,
+            OWNER,
+            parsed,
+            ConflictPolicy::Overwrite,
+            false,
+            true,
+        )
+        .await
+        .unwrap();
         assert!(summary.entries.overwritten >= 1);
         assert_eq!(count_entries(&pool2, WORLD).await, pre);
     }
@@ -2100,7 +2162,10 @@ mod tests {
         let long_name = "x".repeat(250);
         let (pool, _dir) = empty_world_pool().await;
         let store = SqliteKbStore::new(pool.clone());
-        store.insert_knowledge_entry(WorldKbEntry::new(WORLD, BlockType::Character, &long_name)).await.unwrap();
+        store
+            .insert_knowledge_entry(WorldKbEntry::new(WORLD, BlockType::Character, &long_name))
+            .await
+            .unwrap();
         let pack_json = json!({
             "modules": { "pack": { "title": "Long", "version": "0.1.0", "creator": "test" } },
             "entries": [{
@@ -2114,12 +2179,25 @@ mod tests {
             }],
             "relations": []
         });
-        let summary = import_pack(&pool, WORLD, OWNER, parse_pack(&pack_json).unwrap(), ConflictPolicy::Rename, false, false).await.unwrap();
+        let summary = import_pack(
+            &pool,
+            WORLD,
+            OWNER,
+            parse_pack(&pack_json).unwrap(),
+            ConflictPolicy::Rename,
+            false,
+            false,
+        )
+        .await
+        .unwrap();
         assert_eq!(summary.entries.renamed, 1);
         assert_eq!(summary.entries.rejected, 0);
         let entries = store.list_by_world(WORLD).await.unwrap();
         assert_eq!(entries.len(), 2);
-        let renamed = entries.iter().find(|e| e.canonical_name.contains("imported")).expect("renamed");
+        let renamed = entries
+            .iter()
+            .find(|e| e.canonical_name.contains("imported"))
+            .expect("renamed");
         assert!(renamed.canonical_name.len() <= 256);
     }
 
@@ -2140,8 +2218,24 @@ mod tests {
         let rel_id = &rel_ids[0];
         sqlx::query("INSERT INTO kb_relationships (relationship_id, world_id, source_entity_id, target_entity_id, relation_type, symmetric, confidence, source_anchor_ids, metadata, created_at, updated_at, revision, needs_review, source) VALUES (?, ?, ?, ?, 'related_to', 0, NULL, '[]', '{}', datetime('now'), datetime('now'), 1, 0, 'manual')")
             .bind(rel_id).bind(WORLD).bind(&target_ids[0]).bind(&target_ids[1]).execute(&pool2).await.unwrap();
-        let parsed = parse_pack(&serde_json::from_str::<serde_json::Value>(&std::fs::read_to_string(&pack_path).unwrap()).unwrap()).unwrap();
-        let summary = import_pack(&pool2, WORLD, OWNER, parsed, ConflictPolicy::Overwrite, false, false).await.unwrap();
+        let parsed = parse_pack(
+            &serde_json::from_str::<serde_json::Value>(
+                &std::fs::read_to_string(&pack_path).unwrap(),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let summary = import_pack(
+            &pool2,
+            WORLD,
+            OWNER,
+            parsed,
+            ConflictPolicy::Overwrite,
+            false,
+            false,
+        )
+        .await
+        .unwrap();
         assert!(summary.relations.overwritten >= 1);
         assert_eq!(count_relations(&pool2, WORLD).await, 1);
     }
@@ -2150,10 +2244,21 @@ mod tests {
     async fn pack_io_modules_preserved_on_rename_and_overwrite_collision() {
         use nexus_spoke_adapter::adapter::activation;
         let dir_a = tempfile::tempdir().unwrap();
-        let pool_a = crate::db::Schema::init(&dir_a.path().join("state.db")).await.unwrap();
+        let pool_a = crate::db::Schema::init(&dir_a.path().join("state.db"))
+            .await
+            .unwrap();
         const WORLD_A: &str = "wld_activation_rename";
         sqlx::query("INSERT OR IGNORE INTO creators (creator_id, display_name, status, cached_at, data) VALUES (?, ?, 'active', datetime('now'), '{}')").bind(OWNER).bind(OWNER_NAME).execute(&pool_a).await.unwrap();
-        nexus_local_db::kb_store::seed::world(&pool_a, WORLD_A, OWNER, "Activation Rename", "activation-rename", "private", "manual").await;
+        nexus_local_db::kb_store::seed::world(
+            &pool_a,
+            WORLD_A,
+            OWNER,
+            "Activation Rename",
+            "activation-rename",
+            "private",
+            "manual",
+        )
+        .await;
         let store_a = SqliteKbStore::new(pool_a.clone());
         let mut dragon = WorldKbEntry::new(WORLD_A, BlockType::Character, "Dragon");
         dragon.modules = Some(json!({"activation": {"key": ["dragon"], "logic": "and_any"}}));
@@ -2161,10 +2266,35 @@ mod tests {
         let (pack_path, _pack_dir) = export_to_file_custom_world(&pool_a, WORLD_A).await;
         let (pool_rename, _dir_r) = empty_world_pool().await;
         let store_r = SqliteKbStore::new(pool_rename.clone());
-        store_r.insert_knowledge_entry(WorldKbEntry::new(WORLD, BlockType::Character, "Dragon")).await.unwrap();
-        let parsed = parse_pack(&serde_json::from_str::<serde_json::Value>(&std::fs::read_to_string(&pack_path).unwrap()).unwrap()).unwrap();
-        import_pack(&pool_rename, WORLD, OWNER, parsed, ConflictPolicy::Rename, false, false).await.unwrap();
-        let renamed = store_r.list_by_world(WORLD).await.unwrap().into_iter().find(|e| e.canonical_name.contains("imported")).expect("renamed Dragon");
+        store_r
+            .insert_knowledge_entry(WorldKbEntry::new(WORLD, BlockType::Character, "Dragon"))
+            .await
+            .unwrap();
+        let parsed = parse_pack(
+            &serde_json::from_str::<serde_json::Value>(
+                &std::fs::read_to_string(&pack_path).unwrap(),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        import_pack(
+            &pool_rename,
+            WORLD,
+            OWNER,
+            parsed,
+            ConflictPolicy::Rename,
+            false,
+            false,
+        )
+        .await
+        .unwrap();
+        let renamed = store_r
+            .list_by_world(WORLD)
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|e| e.canonical_name.contains("imported"))
+            .expect("renamed Dragon");
         assert!(renamed.modules.is_some());
         let _ = activation::apply_activation(&[renamed], "a dragon appears", &[]);
         let (pool_over, _dir_o) = empty_world_pool().await;
@@ -2172,10 +2302,41 @@ mod tests {
         let mut pre2 = WorldKbEntry::new(WORLD, BlockType::Character, "Dragon");
         pre2.modules = Some(json!({"activation": {"key": ["stale"], "logic": "and_any"}}));
         store_o.insert_knowledge_entry(pre2).await.unwrap();
-        let parsed2 = parse_pack(&serde_json::from_str::<serde_json::Value>(&std::fs::read_to_string(&pack_path).unwrap()).unwrap()).unwrap();
-        import_pack(&pool_over, WORLD, OWNER, parsed2, ConflictPolicy::Overwrite, false, false).await.unwrap();
-        let overwritten = store_o.list_by_world(WORLD).await.unwrap().into_iter().find(|e| e.canonical_name == "Dragon").expect("overwritten Dragon");
-        assert_eq!(overwritten.modules.as_ref().and_then(|m| m.get("activation")).and_then(|a| a.get("key")).and_then(|k| k.get(0)).and_then(|v| v.as_str()), Some("dragon"));
+        let parsed2 = parse_pack(
+            &serde_json::from_str::<serde_json::Value>(
+                &std::fs::read_to_string(&pack_path).unwrap(),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        import_pack(
+            &pool_over,
+            WORLD,
+            OWNER,
+            parsed2,
+            ConflictPolicy::Overwrite,
+            false,
+            false,
+        )
+        .await
+        .unwrap();
+        let overwritten = store_o
+            .list_by_world(WORLD)
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|e| e.canonical_name == "Dragon")
+            .expect("overwritten Dragon");
+        assert_eq!(
+            overwritten
+                .modules
+                .as_ref()
+                .and_then(|m| m.get("activation"))
+                .and_then(|a| a.get("key"))
+                .and_then(|k| k.get(0))
+                .and_then(|v| v.as_str()),
+            Some("dragon")
+        );
     }
 
     #[tokio::test]

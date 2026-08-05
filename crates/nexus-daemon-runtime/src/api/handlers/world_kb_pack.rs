@@ -15,7 +15,8 @@ use crate::workspace::WorkspaceState;
 use axum::extract::{Path, State};
 use axum::Json;
 use nexus_contracts::generated::daemon_api::kb::{
-    pack_export_request::PackExportRequest, pack_export_response::PackExportResponse,
+    pack_export_request::PackExportRequest,
+    pack_export_response::PackExportResponse,
     pack_import_request::{PackImportRequest, PackImportRequestConflict},
     pack_import_response::{
         PackImportResponse, PackImportResponseDetailsItem, PackImportResponseDetailsItemKind,
@@ -32,7 +33,6 @@ use std::collections::HashSet;
 
 /// Default `modules.pack.version` when the request omits `pack_version`.
 const DEFAULT_PACK_VERSION: &str = "0.1.0";
-
 
 // ─── Shared guards (mirror `world_kb.rs`) ───────────────────────────────────
 
@@ -72,7 +72,10 @@ async fn require_world_owner(
     }
 }
 
-async fn resolve_world_title(pool: &sqlx::SqlitePool, world_id: &str) -> Result<String, NexusApiError> {
+async fn resolve_world_title(
+    pool: &sqlx::SqlitePool,
+    world_id: &str,
+) -> Result<String, NexusApiError> {
     // SAFETY: static SELECT against known narrative_worlds table schema.
     let title: Option<String> =
         sqlx::query_scalar("SELECT title FROM narrative_worlds WHERE world_id = ?")
@@ -102,8 +105,6 @@ async fn resolve_creator_string(
         .filter(|n| !n.trim().is_empty())
         .unwrap_or_else(|| creator_id.to_string()))
 }
-
-
 
 async fn load_pack_anchors(
     pool: &sqlx::SqlitePool,
@@ -236,9 +237,7 @@ fn conflict_policy_from_request(conflict: PackImportRequestConflict) -> Conflict
     }
 }
 
-fn atom_counts_to_entries(
-    counts: crate::pack_import::AtomCounts,
-) -> PackImportResponseEntries {
+fn atom_counts_to_entries(counts: crate::pack_import::AtomCounts) -> PackImportResponseEntries {
     PackImportResponseEntries {
         created: u64::from(counts.created),
         skipped: u64::from(counts.skipped),
@@ -248,9 +247,7 @@ fn atom_counts_to_entries(
     }
 }
 
-fn atom_counts_to_relations(
-    counts: crate::pack_import::AtomCounts,
-) -> PackImportResponseRelations {
+fn atom_counts_to_relations(counts: crate::pack_import::AtomCounts) -> PackImportResponseRelations {
     PackImportResponseRelations {
         created: u64::from(counts.created),
         skipped: u64::from(counts.skipped),
@@ -278,9 +275,7 @@ fn import_summary_to_response(summary: ImportSummary) -> PackImportResponse {
                     ImportOutcome::Skipped => PackImportResponseDetailsItemOutcome::Skipped,
                     ImportOutcome::Rejected => PackImportResponseDetailsItemOutcome::Rejected,
                     ImportOutcome::Renamed => PackImportResponseDetailsItemOutcome::Renamed,
-                    ImportOutcome::Overwritten => {
-                        PackImportResponseDetailsItemOutcome::Overwritten
-                    }
+                    ImportOutcome::Overwritten => PackImportResponseDetailsItemOutcome::Overwritten,
                 },
                 reason: detail.reason,
             })

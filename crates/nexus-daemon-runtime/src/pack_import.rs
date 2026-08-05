@@ -13,14 +13,13 @@ use nexus_local_db::kb_relationships::{generate_relationship_id, get_relationshi
 use nexus_local_db::kb_store::SqliteKbStore;
 use nexus_spoke_adapter::pack::ParsedPack;
 use nexus_spoke_adapter::{
-    extensions, orchestrate_relate, orchestrate_upsert, KnowledgeEntry, NexusAdapter, RelateRequest,
-    Relation, RelationExtensionsKey, UpsertRequest,
+    extensions, orchestrate_relate, orchestrate_upsert, KnowledgeEntry, NexusAdapter,
+    RelateRequest, Relation, RelationExtensionsKey, UpsertRequest,
 };
 use sqlx::SqlitePool;
 use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 use thiserror::Error;
-
 
 /// Outcome of a single orchestrator persist call, with optional reject detail.
 struct PersistOutcome {
@@ -437,14 +436,13 @@ pub async fn import_pack(
                         relation.relation_id = generate_relationship_id();
                     }
                     ConflictPolicy::Overwrite => {
-                        relation.revision = Some(u64::try_from(existing_rel.revision).map_err(
-                            |e| {
+                        relation.revision =
+                            Some(u64::try_from(existing_rel.revision).map_err(|e| {
                                 PackImportError::Storage(format!(
                                     "invalid relation revision for {}: {e}",
                                     existing_rel.relationship_id
                                 ))
-                            },
-                        )?);
+                            })?);
                         if dry_run {
                             record_relation(
                                 &mut summary,
@@ -522,10 +520,20 @@ pub async fn import_pack(
             } => {
                 if renamed {
                     summary.relations.renamed += 1;
-                    record_relation(&mut summary, &pack_relation_id, ImportOutcome::Renamed, None);
+                    record_relation(
+                        &mut summary,
+                        &pack_relation_id,
+                        ImportOutcome::Renamed,
+                        None,
+                    );
                 } else {
                     summary.relations.created += 1;
-                    record_relation(&mut summary, &pack_relation_id, ImportOutcome::Created, None);
+                    record_relation(
+                        &mut summary,
+                        &pack_relation_id,
+                        ImportOutcome::Created,
+                        None,
+                    );
                 }
             }
             PersistOutcome {
@@ -580,19 +588,20 @@ async fn import_renamed_entry(
 ) -> Result<(), PackImportError> {
     let store = SqliteKbStore::new(pool.clone());
     let original_name = entry.canonical_name.to_string();
-    let disambiguated = match disambiguate_canonical_name(&store, world_id, &original_name, entry_type).await {
-        Ok(name) => name,
-        Err(e) => {
-            summary.entries.rejected += 1;
-            record_entry(
-                summary,
-                pack_entry_id,
-                ImportOutcome::Rejected,
-                Some(e.to_string()),
-            );
-            return Ok(());
-        }
-    };
+    let disambiguated =
+        match disambiguate_canonical_name(&store, world_id, &original_name, entry_type).await {
+            Ok(name) => name,
+            Err(e) => {
+                summary.entries.rejected += 1;
+                record_entry(
+                    summary,
+                    pack_entry_id,
+                    ImportOutcome::Rejected,
+                    Some(e.to_string()),
+                );
+                return Ok(());
+            }
+        };
     let fresh_id = mint_entry_id();
 
     if dry_run {
@@ -724,7 +733,6 @@ async fn import_overwritten_entry(
     Ok(())
 }
 
-
 async fn stamp_import_provenance_column(
     pool: &SqlitePool,
     world_id: &str,
@@ -827,10 +835,7 @@ async fn name_available(
 }
 
 fn mint_entry_id() -> String {
-    format!(
-        "kb_{}",
-        uuid::Uuid::new_v4().to_string().replace('-', "")
-    )
+    format!("kb_{}", uuid::Uuid::new_v4().to_string().replace('-', ""))
 }
 
 fn prepare_create_entry(entry: &mut KnowledgeEntry, world_id: &str) {
