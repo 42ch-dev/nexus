@@ -371,10 +371,12 @@ async fn inspect_moment_expands_confirmed_relation_hops() {
         .iter()
         .find(|t| t["entry_id"] == HOP_TARGET_ENTRY && t["accepted"] == true)
         .expect("hopped entry must be present: {body}");
-    assert!(hop["reason"]
-        .as_str()
-        .is_some_and(|r| r.contains("relation hop (depth 1)")),
-        "reason must name the relation hop with its depth: {body}");
+    assert!(
+        hop["reason"]
+            .as_str()
+            .is_some_and(|r| r.contains("relation hop (depth 1)")),
+        "reason must name the relation hop with its depth: {body}"
+    );
 
     // The hopped entry also lands in placement (accepted entries).
     assert!(
