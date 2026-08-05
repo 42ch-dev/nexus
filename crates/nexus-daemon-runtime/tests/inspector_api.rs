@@ -38,6 +38,11 @@ const OWNED_WORLD: &str = "wld_test_world";
 const FOREIGN_WORLD: &str = "wld_foreign";
 /// Lore entry id seeded into `kb_key_blocks` for the happy path.
 const LORE_ENTRY: &str = "kb_inspector_lore";
+/// Lore entry id seeded as the relation-hop target (Greptile P1): a
+/// keyword activation module whose key never appears in the inspector scan
+/// text, so it misses the primary pass and can only reach the packet via
+/// relation-hop expansion.
+const HOP_TARGET_ENTRY: &str = "kb_inspector_hop_target";
 
 struct Ctx {
     _tmp: TestTempRoot,
@@ -118,6 +123,49 @@ async fn seed_inspector_lore(pool: &sqlx::SqlitePool) {
     )
     .bind(LORE_ENTRY)
     .bind(OWNED_WORLD)
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
+/// Seed the hop-target lore row (Greptile P1): keyword activation module
+/// ("dragon") that never matches the inspector scan text (empty Stage-0,
+/// no timeline), so the entry misses the primary pass and stays in the
+/// candidate pool — relation-hop expansion is its only way into the packet.
+async fn seed_inspector_hop_target(pool: &sqlx::SqlitePool) {
+    // SAFETY: test-only seed against the known kb_key_blocks schema
+    // (20260525_kb_key_blocks.sql + 20260731120000_modules_json.sql).
+    sqlx::query(
+        "INSERT OR IGNORE INTO kb_key_blocks \
+            (key_block_id, world_id, block_type, canonical_name, status, created_at, modules_json) \
+           VALUES (?, ?, 'character', 'Dockhand Apprentice', 'confirmed', datetime('now'), \
+             '{\"activation\":{\"keys\":[\"dragon\"],\"logic\":\"and_any\"}}')",
+    )
+    .bind(HOP_TARGET_ENTRY)
+    .bind(OWNED_WORLD)
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
+/// Seed one confirmed (`needs_review = 0`) relation edge from the constant
+/// lore seed to the hop target — the confirmed-graph edge the hop loader
+/// (`NexusAdapter::list_hop_edges_for_world`) reads.
+async fn seed_hop_relation(pool: &sqlx::SqlitePool) {
+    // SAFETY: test-only seed against the known kb_relationships schema
+    // (202606290001_kb_relationships.sql + V1.76 needs_review additions).
+    sqlx::query(
+        "INSERT INTO kb_relationships \
+         (relationship_id, world_id, source_entity_id, target_entity_id, relation_type, \
+          symmetric, confidence, source_anchor_ids, metadata, created_at, updated_at, \
+          revision, needs_review, source) \
+         VALUES (?, ?, ?, ?, 'mentors', 0, 1.0, '[]', '{}', \
+          datetime('now'), datetime('now'), 0, 0, 'manual')",
+    )
+    .bind("rel_inspector_hop")
+    .bind(OWNED_WORLD)
+    .bind(LORE_ENTRY)
+    .bind(HOP_TARGET_ENTRY)
     .execute(pool)
     .await
     .unwrap();
@@ -279,6 +327,66 @@ async fn inspect_moment_owned_world_returns_200_full_packet() {
     assert!(
         !directive.contains_key("body"),
         "directive body must never appear on the wire (AC-I3): {body}"
+    );
+}
+
+/// Greptile P1 regression (CLI parity): with a confirmed relation edge
+/// seeded, the inspector packet must include the hopped neighbor — the
+/// activation trace carries the hopped entry (accepted, reason naming the
+/// relation hop at depth 1, origin = the constant seed) and
+/// `budget.hop_tokens_est > 0`. Pre-fix the handler wires no hop edges:
+/// the target stays unmatched and the hop budget is zero — the packet
+/// diverges from the CLI assembly.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn inspect_moment_expands_confirmed_relation_hops() {
+    let ctx = ctx().await;
+    seed_inspector_lore(&ctx.pool).await; // constant seed → hop origin
+    seed_inspector_hop_target(&ctx.pool).await;
+    seed_hop_relation(&ctx.pool).await;
+
+    let resp = ctx
+        .server
+        .post("/v1/daemon/inspector/moment")
+        .json(&inspect_body(OWNED_WORLD))
+        .await;
+    assert_eq!(resp.status_code(), StatusCode::OK, "body={}", resp.text());
+    let body: Value = resp.json();
+
+    // The constant seed still primary-fires into placement.
+    let placement = body["modules"]["placement"]
+        .as_array()
+        .expect("modules.placement array");
+    assert!(
+        placement.iter().any(|p| p["entry_id"] == LORE_ENTRY),
+        "constant seed must be placed: {body}"
+    );
+
+    // The graph neighbor is hopped into the trace: accepted, depth 1,
+    // origin = the constant seed, reason naming the hop pass. Pre-fix the
+    // only trace row for the target is the primary miss (accepted=false).
+    let trace = body["modules"]["activation_trace"]
+        .as_array()
+        .expect("modules.activation_trace array");
+    let hop = trace
+        .iter()
+        .find(|t| t["entry_id"] == HOP_TARGET_ENTRY && t["accepted"] == true)
+        .expect("hopped entry must be present: {body}");
+    assert!(hop["reason"]
+        .as_str()
+        .is_some_and(|r| r.contains("relation hop (depth 1)")),
+        "reason must name the relation hop with its depth: {body}");
+
+    // The hopped entry also lands in placement (accepted entries).
+    assert!(
+        placement.iter().any(|p| p["entry_id"] == HOP_TARGET_ENTRY),
+        "hopped entry must be placed: {body}"
+    );
+
+    // The budget section reports a non-zero hop estimate.
+    let budget = body["budget"].as_object().expect("budget object");
+    assert!(
+        budget["hop_tokens_est"].as_u64().unwrap_or(0) > 0,
+        "hop_tokens_est must be > 0 when hops ran: {body}"
     );
 }
 

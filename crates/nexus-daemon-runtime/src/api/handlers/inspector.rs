@@ -75,8 +75,12 @@ use nexus_spoke_adapter::SpokeBackedKbStore;
 /// world ownership (`is_world_owned`, 403) → work→world binding check
 /// (400 when the Work is bound to a different World, QC2-S-001) →
 /// `MomentRequest` construction (mirrors the CLI `run_assemble_moment`
-/// wiring — creator + world always, work + generation stage when present)
-/// → `assemble_moment_with_directive` over the same persistent stores the
+/// wiring — creator + world always, work + generation stage when present;
+/// Greptile P1: confirmed relation edges are preloaded and wired for
+/// relation-hop expansion exactly like the CLI, context.rs:672-680,
+/// 759-769 — degraded to activation-only when the read fails or the
+/// confirmed graph is empty) →
+/// `assemble_moment_with_directive` over the same persistent stores the
 /// CLI uses (`SqliteNarrativeGateway` / `SpokeBackedKbStore` /
 /// `SqliteKnowledgeStore`) with a **read-only** directive store
 /// (`ReadOnlyDirectiveStore` — W-001 / QC2-W-001 + QC3-W-1: the packet's
@@ -166,6 +170,26 @@ pub async fn inspect_moment(
                 "unknown generation stage for inspector moment; treating as unspecified (all slots on)"
             );
         }
+    }
+
+    // Greptile P1 (CLI parity): preload the World's confirmed relation
+    // edges for relation-hop expansion, mirroring the CLI
+    // `run_assemble_moment` wiring (context.rs:672-680, 759-769) — without
+    // them the inspector packet would omit hopped entries that the CLI
+    // assembly includes. Best-effort like the CLI: a storage-read failure
+    // degrades to activation-only (no hop pass, no panic, no 500), and an
+    // empty confirmed graph yields `None` (P0 activation-only behavior).
+    let hop_edges = nexus_spoke_adapter::adapter::NexusAdapter::new(pool.clone())
+        .list_hop_edges_for_world(req.world_id.as_str())
+        .ok()
+        .filter(|edges| !edges.is_empty());
+    // Parity note: the CLI only caps the hop budget when the caller passes
+    // `--max-tokens` (context.rs:766-768); `MomentInspectRequest` carries
+    // no such knob, so the cap stays unset — MCA's `hop_budget_tokens`
+    // then runs the hop pass depth+cycle-only, identical to a default CLI
+    // invocation. A hardcoded cap here would be a new policy, not parity.
+    if let Some(edges) = hop_edges {
+        request = request.with_hop_edges(edges);
     }
 
     // Four-domain assembly over the same persistent stores the CLI uses
