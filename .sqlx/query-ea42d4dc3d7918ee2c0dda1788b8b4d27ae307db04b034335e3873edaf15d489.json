@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT last_chapter_no\n         FROM moment_directive_chapter_anchors\n         WHERE directive_id = ? AND work_id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "last_chapter_no",
+        "ordinal": 0,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "ea42d4dc3d7918ee2c0dda1788b8b4d27ae307db04b034335e3873edaf15d489"
+}

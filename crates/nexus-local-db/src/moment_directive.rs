@@ -20,13 +20,18 @@
 //! the Work→World binding can be verified against the `works` table — this
 //! module stays a pure storage layer.
 //!
-//! # Lifecycle bookkeeping columns
+//! # Lifecycle bookkeeping state
 //!
-//! `last_focused_event_id` / `last_chapter_no` persist the cross-assemble
-//! state that drives the TTL + scene-change signals (spec §3.3, guide Q7):
-//! a `MomentRequest.event_id` change between injecting assembles is the
-//! scene-change proxy; a `works.current_chapter` advance is the chapter-
-//! advance signal for novel Works.
+//! `last_focused_event_id` (on the directive row) persists the cross-assemble
+//! scene-change proxy (spec §3.3, guide Q7): a `MomentRequest.event_id`
+//! change between injecting assembles is the scene-change signal for
+//! `clear_on_scene_change` directives.
+//!
+//! Chapter advance state lives in `moment_directive_chapter_anchors`, keyed
+//! by `(directive_id, work_id)` (V1.150 residual close R-004/R-008): a
+//! `chapters`-TTL directive burns the **delta** of `works.current_chapter`
+//! advances since the last injecting assemble **for that work** — so a
+//! world-scoped directive has an independent TTL burn per Work that uses it.
 //!
 //! # Never on the spoke wire (AC-I3)
 //!
@@ -58,6 +63,10 @@ pub struct MomentDirectiveRow {
     /// Work id (`scope_kind` = `work`) or world id (`scope_kind` = `world`).
     pub scope_id: String,
     /// Author instruction text (non-empty after trim).
+    ///
+    /// No size cap by design — consistent with the personality section; the
+    /// MCA token budget governs overall context, not per-section caps
+    /// (R-V1150P2-006 accepted).
     pub body: String,
     /// `head` | `mid` | `tail` — placement within the directive region.
     pub insert_depth: String,
@@ -72,10 +81,6 @@ pub struct MomentDirectiveRow {
     /// Last focused `MomentRequest.event_id` seen at an injecting assemble
     /// (scene-change signal; `NULL` until the first injection).
     pub last_focused_event_id: Option<String>,
-    /// Last observed `works.current_chapter` at an injecting assemble
-    /// (chapter-advance signal for novel Works; `NULL` until the first
-    /// injection / for non-novel Works).
-    pub last_chapter_no: Option<i64>,
     /// Unix epoch millis when created.
     pub created_at: i64,
     /// Unix epoch millis of the last lifecycle write.
@@ -171,7 +176,6 @@ where
         clear_on_scene_change: new.clear_on_scene_change,
         status: "active".to_string(),
         last_focused_event_id: None,
-        last_chapter_no: None,
         created_at: new.now,
         updated_at: new.now,
         expires_at: None,
@@ -257,7 +261,7 @@ pub async fn get_by_id(
                 creator_id, scope_kind, scope_id, body, insert_depth,
                 ttl_kind, ttl_remaining, clear_on_scene_change as \"clear_on_scene_change: bool\",
                 status,
-                last_focused_event_id, last_chapter_no, created_at, updated_at,
+                last_focused_event_id, created_at, updated_at,
                 expires_at, replaced_by
          FROM moment_directives
          WHERE directive_id = ?",
@@ -299,8 +303,10 @@ pub async fn clear(
 }
 
 /// Decrement `ttl_remaining` by 1 for an active directive (spec §3.3 TTL
-/// expiry); when it reaches 0 the row is soft-deleted (`status='expired'`,
-/// `expires_at` set).
+/// expiry; the `generations` path); at 0 the row is soft-deleted
+/// (`status='expired'`, `expires_at` set).
+///
+/// The `chapters` fallback for non-novel Works also lands here.
 ///
 /// Returns the updated row, or `None` when the directive is not active (or
 /// unknown).
@@ -313,26 +319,60 @@ pub async fn decrement_ttl(
     directive_id: &str,
     now: i64,
 ) -> Result<Option<MomentDirectiveRow>, LocalDbError> {
-    // Single round-trip `UPDATE … RETURNING` (QC3-S002): the updated row comes
-    // back in the same statement as the write — no `get_by_id` read-back race,
-    // and no spurious "failed" log when the read-back would fail after a
-    // successful write.
+    decrement_ttl_by(pool, directive_id, 1, now).await
+}
+
+/// Decrement `ttl_remaining` by `delta` for an active directive (spec §3.3
+/// TTL expiry); at 0 the row is soft-deleted (`status='expired'`,
+/// `expires_at` set).
+///
+/// A delta larger than the remaining TTL expires the directive, never goes
+/// negative. R-V1150P2-004: a `chapters`-TTL directive burns the number of
+/// chapter advances since the last injecting assemble (per (directive, work)
+/// — R-V1150P2-008), not a flat 1.
+///
+/// Returns the updated row, or `None` when the directive is not active (or
+/// unknown).
+///
+/// # Errors
+///
+/// Returns `LocalDbError` if the database query fails.
+///
+/// # Write-failure threat model (R-V1150P2-005 accepted)
+///
+/// The decrement is atomic via the single-round-trip `UPDATE … RETURNING`
+/// (QC3-S002): the updated row comes back in the same statement as the write
+/// — no read-back race. On the local-only `SQLite` threat model
+/// (single-author, no transient network), a write failure indicates a broken
+/// DB, not a retryable lost-update window — there is no in-between "write
+/// lost" state to retry into (consistent with the V1.80 synchronous
+/// discipline for `POST /v1/local/memory/review`). No compensating write or
+/// retry loop is added by design.
+pub async fn decrement_ttl_by(
+    pool: &SqlitePool,
+    directive_id: &str,
+    delta: i64,
+    now: i64,
+) -> Result<Option<MomentDirectiveRow>, LocalDbError> {
     let row = sqlx::query_as!(
         MomentDirectiveRow,
         // Column annotations as in `get_by_id` (SQLite TEXT-PK nullability
         // quirk + INTEGER→bool decode override).
         "UPDATE moment_directives
-         SET ttl_remaining = MAX(ttl_remaining - 1, 0),
-             status = CASE WHEN ttl_remaining <= 1 THEN 'expired' ELSE status END,
-             expires_at = CASE WHEN ttl_remaining <= 1 THEN ? ELSE expires_at END,
+         SET ttl_remaining = MAX(ttl_remaining - ?, 0),
+             status = CASE WHEN ttl_remaining <= ? THEN 'expired' ELSE status END,
+             expires_at = CASE WHEN ttl_remaining <= ? THEN ? ELSE expires_at END,
              updated_at = ?
          WHERE directive_id = ? AND status = 'active'
          RETURNING directive_id as \"directive_id!\",
                    creator_id, scope_kind, scope_id, body, insert_depth,
                    ttl_kind, ttl_remaining, clear_on_scene_change as \"clear_on_scene_change: bool\",
                    status,
-                   last_focused_event_id, last_chapter_no, created_at, updated_at,
+                   last_focused_event_id, created_at, updated_at,
                    expires_at, replaced_by",
+        delta,
+        delta,
+        delta,
         now,
         now,
         directive_id,
@@ -369,7 +409,7 @@ pub async fn clear_on_scene_change(
                    creator_id, scope_kind, scope_id, body, insert_depth,
                    ttl_kind, ttl_remaining, clear_on_scene_change as \"clear_on_scene_change: bool\",
                    status,
-                   last_focused_event_id, last_chapter_no, created_at, updated_at,
+                   last_focused_event_id, created_at, updated_at,
                    expires_at, replaced_by",
         now,
         now,
@@ -380,8 +420,8 @@ pub async fn clear_on_scene_change(
     Ok(row)
 }
 
-/// Record the cross-assemble lifecycle anchors on an active directive
-/// (spec §3.3): the `event_id` / chapter observed at this injecting assemble.
+/// Record the cross-assemble scene anchor on an active directive (spec
+/// §3.3): the `event_id` observed at this injecting assemble.
 ///
 /// Returns `true` when an active row was updated.
 ///
@@ -392,21 +432,76 @@ pub async fn update_lifecycle_anchor(
     pool: &SqlitePool,
     directive_id: &str,
     last_focused_event_id: Option<&str>,
-    last_chapter_no: Option<i64>,
     now: i64,
 ) -> Result<bool, LocalDbError> {
     let result = sqlx::query!(
         "UPDATE moment_directives
-         SET last_focused_event_id = ?, last_chapter_no = ?, updated_at = ?
+         SET last_focused_event_id = ?, updated_at = ?
          WHERE directive_id = ? AND status = 'active'",
         last_focused_event_id,
-        last_chapter_no,
         now,
         directive_id,
     )
     .execute(pool)
     .await?;
     Ok(result.rows_affected() > 0)
+}
+
+/// Read the last observed `works.current_chapter` for a (directive, work)
+/// pair; `None` when this Work has never injected the directive.
+///
+/// This is the anchor that drives a `chapters`-TTL delta burn
+/// (R-V1150P2-004/R-V1150P2-008): on first injection the caller observes
+/// instead of burning.
+///
+/// # Errors
+///
+/// Returns `LocalDbError` if the database query fails.
+pub async fn get_chapter_anchor(
+    pool: &SqlitePool,
+    directive_id: &str,
+    work_id: &str,
+) -> Result<Option<i64>, LocalDbError> {
+    let row = sqlx::query!(
+        "SELECT last_chapter_no
+         FROM moment_directive_chapter_anchors
+         WHERE directive_id = ? AND work_id = ?",
+        directive_id,
+        work_id,
+    )
+    .fetch_optional(pool)
+    .await?;
+    Ok(row.map(|r| r.last_chapter_no))
+}
+
+/// Record (or overwrite) the chapter anchor for a (directive, work) pair —
+/// the `works.current_chapter` observed at an injecting assemble.
+///
+/// # Errors
+///
+/// Returns `LocalDbError` if the database query fails.
+pub async fn upsert_chapter_anchor(
+    pool: &SqlitePool,
+    directive_id: &str,
+    work_id: &str,
+    last_chapter_no: i64,
+    now: i64,
+) -> Result<(), LocalDbError> {
+    sqlx::query!(
+        "INSERT INTO moment_directive_chapter_anchors
+            (directive_id, work_id, last_chapter_no, updated_at)
+         VALUES (?, ?, ?, ?)
+         ON CONFLICT(directive_id, work_id) DO UPDATE SET
+             last_chapter_no = excluded.last_chapter_no,
+             updated_at = excluded.updated_at",
+        directive_id,
+        work_id,
+        last_chapter_no,
+        now,
+    )
+    .execute(pool)
+    .await?;
+    Ok(())
 }
 
 async fn get_active_by_scope(
@@ -423,7 +518,7 @@ async fn get_active_by_scope(
                 creator_id, scope_kind, scope_id, body, insert_depth,
                 ttl_kind, ttl_remaining, clear_on_scene_change as \"clear_on_scene_change: bool\",
                 status,
-                last_focused_event_id, last_chapter_no, created_at, updated_at,
+                last_focused_event_id, created_at, updated_at,
                 expires_at, replaced_by
          FROM moment_directives
          WHERE creator_id = ? AND scope_kind = ? AND scope_id = ? AND status = 'active'",
@@ -714,21 +809,114 @@ mod tests {
         .await
         .unwrap();
 
-        let updated = update_lifecycle_anchor(&pool, "dir_1", Some("evt_a"), Some(4), now + 1)
+        let updated = update_lifecycle_anchor(&pool, "dir_1", Some("evt_a"), now + 1)
             .await
             .unwrap();
         assert!(updated);
         let row = get_by_id(&pool, "dir_1").await.unwrap().unwrap();
         assert_eq!(row.last_focused_event_id.as_deref(), Some("evt_a"));
-        assert_eq!(row.last_chapter_no, Some(4));
 
-        // NULL anchors clear the stored state.
-        let cleared_anchor = update_lifecycle_anchor(&pool, "dir_1", None, None, now + 2)
+        // NULL anchor clears the stored state.
+        let cleared_anchor = update_lifecycle_anchor(&pool, "dir_1", None, now + 2)
             .await
             .unwrap();
         assert!(cleared_anchor);
         let row = get_by_id(&pool, "dir_1").await.unwrap().unwrap();
         assert!(row.last_focused_event_id.is_none());
-        assert!(row.last_chapter_no.is_none());
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn chapter_anchor_round_trips_per_work() {
+        let (pool, _dir) = fresh_pool().await;
+        let now = now_ms();
+        set_active(
+            &pool,
+            &new_directive("dir_1", scope_kind::WORLD, "wld_1", 5, now),
+        )
+        .await
+        .unwrap();
+
+        // No anchor yet for either work.
+        assert_eq!(
+            get_chapter_anchor(&pool, "dir_1", "wrk_a").await.unwrap(),
+            None
+        );
+        assert_eq!(
+            get_chapter_anchor(&pool, "dir_1", "wrk_b").await.unwrap(),
+            None
+        );
+
+        // Each work records its own chapter observation.
+        upsert_chapter_anchor(&pool, "dir_1", "wrk_a", 1, now + 1)
+            .await
+            .unwrap();
+        upsert_chapter_anchor(&pool, "dir_1", "wrk_b", 4, now + 1)
+            .await
+            .unwrap();
+        assert_eq!(
+            get_chapter_anchor(&pool, "dir_1", "wrk_a").await.unwrap(),
+            Some(1),
+            "wrk_a's anchor is independent of wrk_b's"
+        );
+        assert_eq!(
+            get_chapter_anchor(&pool, "dir_1", "wrk_b").await.unwrap(),
+            Some(4)
+        );
+
+        // Upsert overwrites the pair's own value only.
+        upsert_chapter_anchor(&pool, "dir_1", "wrk_a", 3, now + 2)
+            .await
+            .unwrap();
+        assert_eq!(
+            get_chapter_anchor(&pool, "dir_1", "wrk_a").await.unwrap(),
+            Some(3)
+        );
+        assert_eq!(
+            get_chapter_anchor(&pool, "dir_1", "wrk_b").await.unwrap(),
+            Some(4),
+            "wrk_a's upsert must not touch wrk_b's anchor"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn decrement_ttl_by_delta_keeps_active() {
+        let (pool, _dir) = fresh_pool().await;
+        let now = now_ms();
+        set_active(
+            &pool,
+            &new_directive("dir_1", scope_kind::WORK, "wrk_1", 5, now),
+        )
+        .await
+        .unwrap();
+
+        // 3 chapter advances between assembles ⇒ 3 decrements.
+        let after = decrement_ttl_by(&pool, "dir_1", 3, now + 1)
+            .await
+            .unwrap()
+            .expect("row updated");
+        assert_eq!(after.ttl_remaining, 2);
+        assert_eq!(after.status, "active");
+        assert!(after.expires_at.is_none());
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn decrement_ttl_by_delta_expires_when_delta_exceeds_remaining() {
+        let (pool, _dir) = fresh_pool().await;
+        let now = now_ms();
+        set_active(
+            &pool,
+            &new_directive("dir_1", scope_kind::WORK, "wrk_1", 2, now),
+        )
+        .await
+        .unwrap();
+
+        // Delta larger than the remaining TTL caps at 0 and expires.
+        let after = decrement_ttl_by(&pool, "dir_1", 5, now + 1)
+            .await
+            .unwrap()
+            .expect("row updated");
+        assert_eq!(after.ttl_remaining, 0);
+        assert_eq!(after.status, "expired");
+        assert!(after.expires_at.is_some());
     }
 }

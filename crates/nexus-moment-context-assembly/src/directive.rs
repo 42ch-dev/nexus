@@ -68,9 +68,11 @@ impl DirectiveDepth {
 pub enum DirectiveTtlKind {
     /// Count-down by 1 on every injecting `assemble_moment`.
     Generations,
-    /// Count-down by 1 when the active chapter advances for a novel Work;
-    /// treated identically to `generations` for essay / game-bible / script /
-    /// worldless Works (documented fallback, spec §3.3).
+    /// Count-down by the number of chapter advances since the last injecting
+    /// assemble (R-V1150P2-004: the delta between the previously observed
+    /// `works.current_chapter` and the current one, per (directive, work) —
+    /// R-V1150P2-008); treated identically to `generations` for essay /
+    /// game-bible / script / worldless Works (documented fallback, spec §3.3).
     Chapters,
 }
 
@@ -103,6 +105,10 @@ pub struct ActiveDirective {
     /// Stable directive id (lifecycle handle).
     pub directive_id: String,
     /// Author instruction text (non-empty after trim — validated at write).
+    ///
+    /// No size cap by design — consistent with the personality section; the
+    /// MCA token budget governs overall context, not per-section caps
+    /// (R-V1150P2-006 accepted).
     pub body: String,
     /// Placement within the directive region.
     pub insert_depth: DirectiveDepth,

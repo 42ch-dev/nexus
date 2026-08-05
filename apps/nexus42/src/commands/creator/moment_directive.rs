@@ -25,9 +25,9 @@ use sqlx::SqlitePool;
 use crate::config::CliConfig;
 use crate::errors::{CliError, Result};
 use nexus_local_db::moment_directive::{
-    clear, clear_on_scene_change, decrement_ttl, get_active_for_work, get_active_for_world,
-    get_by_id, replace_active, scope_kind, set_active, update_lifecycle_anchor, MomentDirectiveRow,
-    NewMomentDirective,
+    clear, clear_on_scene_change, decrement_ttl_by, get_active_for_work, get_active_for_world,
+    get_by_id, get_chapter_anchor, replace_active, scope_kind, set_active, update_lifecycle_anchor,
+    upsert_chapter_anchor, MomentDirectiveRow, NewMomentDirective,
 };
 use nexus_local_db::{get_work, is_novel_profile, list_works, WorkListFilters};
 use nexus_moment_context_assembly::directive::{
@@ -71,9 +71,11 @@ pub struct MomentDirectiveSetArgs {
     #[arg(long, conflicts_with = "ttl_chapters")]
     pub ttl_generations: Option<i64>,
 
-    /// TTL in chapters — count-down by 1 on chapter advance (novel Works) or
-    /// per injecting assemble (essay/game-bible/script/worldless Works).
-    /// Exactly one TTL kind is required.
+    /// TTL in chapters — count-down by the number of chapter advances since
+    /// the last injecting assemble (novel Works; R-V1150P2-004/R-V1150P2-008:
+    /// per-(directive, work) delta) or per injecting assemble
+    /// (essay/game-bible/script/worldless Works). Exactly one TTL kind is
+    /// required.
     #[arg(long, conflicts_with = "ttl_generations")]
     pub ttl_chapters: Option<i64>,
 
@@ -538,13 +540,15 @@ fn map_to_active_directive(row: MomentDirectiveRow) -> Option<ActiveDirective> {
 ///    assembles, soft-delete instead of decrementing. The first injection
 ///    (no previous anchor) never clears. Documented limitation (guide Q7):
 ///    no true scene concept exists; `event_id` is the V1.150 proxy.
-/// 2. **TTL decrement**: `generations` decrements on every injecting
-///    assemble. `chapters` decrements only when the active chapter advanced
-///    (novel Works — compared against the last-observed `works.current_chapter`);
-///    for essay/game-bible/script/worldless Works it behaves identically to
-///    `generations` (documented fallback, spec §3.3).
-/// 3. **Re-anchor**: store the observed `event_id` / chapter so the next
-///    assemble can detect change.
+/// 2. **TTL burn**: `generations` burns 1 on every injecting assemble.
+///    `chapters` burns the **delta** of chapter advances since the last
+///    injecting assemble **for the same work** — tracked per
+///    (directive, work) in `moment_directive_chapter_anchors` so a
+///    world-scoped directive burns independently per Work that uses it
+///    (R-V1150P2-008); for essay/game-bible/script/worldless Works it
+///    behaves identically to `generations` (documented fallback, spec §3.3).
+/// 3. **Re-anchor**: store the observed `event_id` (directive row) and
+///    chapter (per-work anchor table) so the next assemble can detect change.
 ///
 /// Best-effort: failures are logged, never surfaced as assembly errors.
 async fn after_injection_lifecycle(
@@ -569,36 +573,57 @@ async fn after_injection_lifecycle(
         }
     }
 
-    // Chapter-advance gating for novel Works with `chapters` TTL.
-    let (decrement, chapter_no) = match (row.ttl_kind.as_str(), work_id) {
+    // Chapter-advance TTL burn for novel Works with `chapters` TTL. The burn
+    // is the chapter delta since this work's last injecting assemble — see
+    // `decrement_ttl_by` in `nexus-local-db` for the write-failure threat
+    // model (R-V1150P2-005 accepted: atomic via RETURNING; a write failure
+    // on local-only SQLite indicates a broken DB, not a lost-update window).
+    let (burn, chapter_anchor) = match (row.ttl_kind.as_str(), work_id) {
         ("chapters", Some(work_id)) => {
             match get_work(pool, &row.creator_id, work_id).await {
                 Ok(Some(work)) if is_novel_profile(work.work_profile.as_deref()) => {
                     let chapter = i64::from(work.current_chapter);
-                    // "Advance" = a chapter was observed before AND it changed.
-                    let advanced =
-                        row.last_chapter_no.is_some() && row.last_chapter_no != Some(chapter);
-                    (advanced, Some(chapter))
+                    let burn = match get_chapter_anchor(pool, directive_id, work_id).await {
+                        // Delta since this work's last injecting assemble;
+                        // never negative — a chapter rewind does not refund TTL.
+                        Ok(Some(last)) => i64::max(0, chapter - last),
+                        // First injecting assemble for this work: observe
+                        // only, no burn (R-V1150P2-004).
+                        Ok(None) => 0,
+                        // Unreadable anchor: degrade like the non-novel
+                        // fallback (burn 1, keep the directive moving toward
+                        // expiry) — never fail the assembly (QC2-F2).
+                        Err(e) => {
+                            tracing::warn!(directive_id, work_id, error = %e,
+                                "moment directive: chapter anchor read failed; burning 1");
+                            1
+                        }
+                    };
+                    (burn, Some((work_id, chapter)))
                 }
                 // Non-novel / unknown Work: `chapters` behaves like
                 // `generations` (documented, not silent — spec §3.3).
-                _ => (true, None),
+                _ => (1, None),
             }
         }
-        _ => (true, None),
+        _ => (1, None),
     };
 
-    // Anchor first, then decrement: if the decrement write fails, the next
-    // assemble re-reads the row and re-attempts (no double-count on scene
-    // change); if the directive expires at 0, the anchor is already recorded
-    // for DF-76 inspection.
-    if let Err(e) =
-        update_lifecycle_anchor(pool, directive_id, event_id, chapter_no, now_ms()).await
-    {
+    // Anchor first, then burn: if the burn write fails, the next assemble
+    // re-reads the row and re-attempts; if the directive expires at 0, the
+    // anchors are already recorded for DF-76 inspection.
+    if let Err(e) = update_lifecycle_anchor(pool, directive_id, event_id, now_ms()).await {
         tracing::warn!(directive_id, error = %e, "moment directive anchor update failed");
     }
-    if decrement {
-        if let Err(e) = decrement_ttl(pool, directive_id, now_ms()).await {
+    if let Some((work_id, chapter)) = chapter_anchor {
+        if let Err(e) = upsert_chapter_anchor(pool, directive_id, work_id, chapter, now_ms()).await
+        {
+            tracing::warn!(directive_id, work_id, error = %e,
+                "moment directive chapter anchor upsert failed");
+        }
+    }
+    if burn > 0 {
+        if let Err(e) = decrement_ttl_by(pool, directive_id, burn, now_ms()).await {
             tracing::warn!(directive_id, error = %e, "moment directive TTL decrement failed");
         }
     }
@@ -1020,18 +1045,22 @@ mod tests {
         .unwrap();
 
         let store = LocalDirectiveStore::new(pool.clone());
-        // First injection: no previously observed chapter ⇒ no advance ⇒ no decrement.
+        // First injection: no previously observed chapter for this work ⇒ no burn.
         store.after_injection("dir_1", None, Some("wrk_1")).await;
         let row = get_by_id(&pool, "dir_1").await.unwrap().unwrap();
         assert_eq!(row.ttl_remaining, 3);
-        assert_eq!(row.last_chapter_no, Some(1));
+        assert_eq!(
+            get_chapter_anchor(&pool, "dir_1", "wrk_1").await.unwrap(),
+            Some(1),
+            "first injection records the per-work chapter anchor"
+        );
 
-        // Same chapter again ⇒ still no decrement.
+        // Same chapter again ⇒ still no burn.
         store.after_injection("dir_1", None, Some("wrk_1")).await;
         let row = get_by_id(&pool, "dir_1").await.unwrap().unwrap();
         assert_eq!(row.ttl_remaining, 3);
 
-        // Chapter advances (workflow path bumps `current_chapter`) ⇒ decrement.
+        // Chapter advances (workflow path bumps `current_chapter`) ⇒ burn 1.
         // SAFETY: test-only UPDATE with bind params against known schema.
         sqlx::query("UPDATE works SET current_chapter = 2 WHERE work_id = 'wrk_1'")
             .execute(&pool)
@@ -1044,7 +1073,123 @@ mod tests {
             row.ttl_remaining, 2,
             "chapter advance decrements chapters TTL"
         );
-        assert_eq!(row.last_chapter_no, Some(2));
+        assert_eq!(
+            get_chapter_anchor(&pool, "dir_1", "wrk_1").await.unwrap(),
+            Some(2)
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn lifecycle_chapters_multi_advance_burns_delta_and_caps() {
+        let (pool, _dir) = fresh_pool().await;
+        seed_creator(&pool).await;
+        seed_world(&pool, "wld_1").await;
+        seed_work(&pool, &work_record("wrk_1", Some("wld_1"), Some("novel"))).await;
+        set_active(
+            &pool,
+            &new_params("dir_1", scope_kind::WORK, "wrk_1", "chapters", 5),
+        )
+        .await
+        .unwrap();
+
+        let store = LocalDirectiveStore::new(pool.clone());
+        // Observe chapter 1 (no burn).
+        store.after_injection("dir_1", None, Some("wrk_1")).await;
+        assert_eq!(
+            get_by_id(&pool, "dir_1")
+                .await
+                .unwrap()
+                .unwrap()
+                .ttl_remaining,
+            5
+        );
+
+        // 3 chapter advances between assembles ⇒ 3 burns (R-V1150P2-004).
+        // SAFETY: test-only UPDATE with bind params against known schema.
+        sqlx::query("UPDATE works SET current_chapter = 4 WHERE work_id = 'wrk_1'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        store.after_injection("dir_1", None, Some("wrk_1")).await;
+        let row = get_by_id(&pool, "dir_1").await.unwrap().unwrap();
+        assert_eq!(
+            row.ttl_remaining, 2,
+            "multi-advance between assembles burns the full delta, got {}",
+            row.ttl_remaining
+        );
+        assert_eq!(row.status, "active");
+
+        // 5 more advances but only 2 TTL left ⇒ capped at 0 and expires.
+        // SAFETY: test-only UPDATE with bind params against known schema.
+        sqlx::query("UPDATE works SET current_chapter = 9 WHERE work_id = 'wrk_1'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        store.after_injection("dir_1", None, Some("wrk_1")).await;
+        let row = get_by_id(&pool, "dir_1").await.unwrap().unwrap();
+        assert_eq!(row.ttl_remaining, 0, "burn is bounded at remaining TTL");
+        assert_eq!(row.status, "expired", "TTL-0 ⇒ soft-delete");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn lifecycle_chapters_world_scoped_burns_per_work() {
+        let (pool, _dir) = fresh_pool().await;
+        seed_creator(&pool).await;
+        seed_world(&pool, "wld_1").await;
+        // Two novel Works sharing the world (R-V1150P2-008 cross-work case).
+        seed_work(&pool, &work_record("wrk_a", Some("wld_1"), Some("novel"))).await;
+        seed_work(&pool, &work_record("wrk_b", Some("wld_1"), Some("novel"))).await;
+        set_active(
+            &pool,
+            &new_params("dir_w", scope_kind::WORLD, "wld_1", "chapters", 5),
+        )
+        .await
+        .unwrap();
+
+        let store = LocalDirectiveStore::new(pool.clone());
+        // Both works' first injections observe only (no burn, no cross-work).
+        store.after_injection("dir_w", None, Some("wrk_a")).await;
+        store.after_injection("dir_w", None, Some("wrk_b")).await;
+        let row = get_by_id(&pool, "dir_w").await.unwrap().unwrap();
+        assert_eq!(row.ttl_remaining, 5, "first injections never burn");
+        assert_eq!(
+            get_chapter_anchor(&pool, "dir_w", "wrk_a").await.unwrap(),
+            Some(1)
+        );
+        assert_eq!(
+            get_chapter_anchor(&pool, "dir_w", "wrk_b").await.unwrap(),
+            Some(1),
+            "each work holds its own anchor"
+        );
+
+        // wrk_b advances 1 chapter ⇒ burns 1 for wrk_b only.
+        // SAFETY: test-only UPDATE with bind params against known schema.
+        sqlx::query("UPDATE works SET current_chapter = 2 WHERE work_id = 'wrk_b'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        store.after_injection("dir_w", None, Some("wrk_b")).await;
+        let row = get_by_id(&pool, "dir_w").await.unwrap().unwrap();
+        assert_eq!(row.ttl_remaining, 4, "wrk_b's advance burns 1");
+
+        // wrk_a has not advanced ⇒ its assemble burns nothing.
+        store.after_injection("dir_w", None, Some("wrk_a")).await;
+        let row = get_by_id(&pool, "dir_w").await.unwrap().unwrap();
+        assert_eq!(
+            row.ttl_remaining, 4,
+            "assembling wrk_a must not burn wrk_b's share of the TTL"
+        );
+
+        // wrk_a advances 2 chapters ⇒ burns 2 (its own delta).
+        // SAFETY: test-only UPDATE with bind params against known schema.
+        sqlx::query("UPDATE works SET current_chapter = 3 WHERE work_id = 'wrk_a'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        store.after_injection("dir_w", None, Some("wrk_a")).await;
+        let row = get_by_id(&pool, "dir_w").await.unwrap().unwrap();
+        assert_eq!(row.ttl_remaining, 2, "wrk_a burns its own 2-advance delta");
+        assert_eq!(row.status, "active");
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -1235,7 +1380,7 @@ mod tests {
         let old_rows: Vec<MomentDirectiveRow> = sqlx::query_as::<_, MomentDirectiveRow>(
             "SELECT directive_id, creator_id, scope_kind, scope_id, body, insert_depth,
                     ttl_kind, ttl_remaining, clear_on_scene_change, status,
-                    last_focused_event_id, last_chapter_no, created_at, updated_at,
+                    last_focused_event_id, created_at, updated_at,
                     expires_at, replaced_by
              FROM moment_directives WHERE status = 'expired' AND scope_kind = 'work' AND scope_id = 'wrk_1'",
         )

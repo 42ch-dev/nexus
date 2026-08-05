@@ -553,6 +553,15 @@ where
 /// The directive section is never truncated (author instruction; like
 /// personality, it survives cross-domain truncation).
 ///
+/// # Caller wiring (R-V1150P2-011 accepted — future-wiring note)
+///
+/// Today only the `platform context assemble-moment` CLI path calls this
+/// entry point, threading `creator_id` / `work_id` / `world_id` and the
+/// generation stage through [`MomentRequest`]. A future daemon/ACP caller
+/// MUST thread the same fields (`creator_id` / `work_id` / `event_id` +
+/// `generation_stage`) when it wires MCA assembly — tracked in DF-76 / the
+/// daemon-route iteration, not an open defect in shipped code.
+///
 /// # Type parameters
 ///
 /// - `G`, `K`, `S`: as in [`assemble_moment`].
