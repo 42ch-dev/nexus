@@ -127,6 +127,28 @@ fn inspect_body(world_id: &str) -> Value {
     json!({ "world_id": world_id })
 }
 
+/// Seed an active World-scoped Moment Directive for the owned World (T3
+/// wire-up test): the inspector packet then reflects it — status/metadata
+/// only, never the body (AC-I3).
+async fn seed_active_world_directive(pool: &sqlx::SqlitePool) {
+    // SAFETY: test-only seed through the public directive repository.
+    let new = nexus_local_db::moment_directive::NewMomentDirective {
+        directive_id: "dir_inspector_active",
+        creator_id: "test_creator",
+        scope_kind: nexus_local_db::moment_directive::scope_kind::WORLD,
+        scope_id: OWNED_WORLD,
+        body: "Keep the prose terse.",
+        insert_depth: "mid",
+        ttl_kind: "generations",
+        ttl_remaining: 5,
+        clear_on_scene_change: false,
+        now: 1_780_000_000_000,
+    };
+    nexus_local_db::moment_directive::set_active(pool, &new)
+        .await
+        .expect("seed active world directive");
+}
+
 /// Assert the canonical daemon API error envelope
 /// (`{"success": false, "error": {"code", "message", ...}}`).
 fn assert_error_envelope(resp: &axum_test::TestResponse, status: StatusCode, code: &str) {
@@ -208,6 +230,37 @@ async fn inspect_moment_owned_world_returns_200_full_packet() {
         .expect("moment_directive object");
     assert_eq!(directive["status"], "none", "body={body}");
     assert!(directive["scope"].is_null(), "body={body}");
+    assert!(
+        !directive.contains_key("body"),
+        "directive body must never appear on the wire (AC-I3): {body}"
+    );
+}
+
+/// T3 wire-up: with an active World-scoped directive seeded, the inspector
+/// packet's `moment_directive` section reflects it (status/metadata only —
+/// no `body`, AC-I3). Without a directive the section renders `"none"`
+/// (AC-I1b, covered by the happy path above).
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn inspect_moment_reflects_active_directive() {
+    let ctx = ctx().await;
+    seed_active_world_directive(&ctx.pool).await;
+
+    let resp = ctx
+        .server
+        .post("/v1/daemon/inspector/moment")
+        .json(&inspect_body(OWNED_WORLD))
+        .await;
+    assert_eq!(resp.status_code(), StatusCode::OK, "body={}", resp.text());
+
+    let body: Value = resp.json();
+    let directive = body["moment_directive"]
+        .as_object()
+        .expect("moment_directive object");
+    assert_eq!(directive["status"], "active", "body={body}");
+    assert_eq!(directive["scope"], "world", "body={body}");
+    assert_eq!(directive["scope_id"], OWNED_WORLD, "body={body}");
+    assert_eq!(directive["insert_depth"], "mid", "body={body}");
+    assert_eq!(directive["ttl_kind"], "generations", "body={body}");
     assert!(
         !directive.contains_key("body"),
         "directive body must never appear on the wire (AC-I3): {body}"

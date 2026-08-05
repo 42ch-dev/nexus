@@ -568,18 +568,26 @@ fn check_routes() -> Router<WorkspaceState> {
     Router::new().route("/v1/daemon/check", post(handlers::check::run_check))
 }
 
-/// Inspector routes — enriched MCA assembly inspector packet (V1.151 P0;
-/// DF-76).
+/// Inspector + Moment Directive routes — DF-76 P0 control-room surface
+/// (V1.151).
 ///
 /// Mounted in tier2 (`require_api_key` + `require_active_creator`) because
 /// the assembly runs over Worlds the active creator owns (`is_world_owned`
-/// guard in the handler). The route observes `assemble_moment` output only —
-/// it returns the packet, it never writes.
+/// guard in the handler) and the directive route writes to scopes the active
+/// creator owns (ownership guard in the handler). The inspector route
+/// observes `assemble_moment` output only — it returns the packet, it never
+/// writes; the directive route is the thin set/show/clear wrapper (spec §5,
+/// architect lock H5 — same tier2 group).
 fn inspector_routes() -> Router<WorkspaceState> {
-    Router::new().route(
-        "/v1/daemon/inspector/moment",
-        post(handlers::inspector::inspect_moment),
-    )
+    Router::new()
+        .route(
+            "/v1/daemon/inspector/moment",
+            post(handlers::inspector::inspect_moment),
+        )
+        .route(
+            "/v1/daemon/moment-directive",
+            post(handlers::directive::moment_directive),
+        )
 }
 
 /// Profile-scoped (Tier-2) routes — require active creator + lazy-open pool.

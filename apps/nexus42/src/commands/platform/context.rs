@@ -762,7 +762,7 @@ pub async fn run_assemble_moment(
     // slot and its TTL / scene-change lifecycle runs. When no directive is
     // active, `assemble_moment_with_directive` is byte-equivalent to the
     // plain `assemble_moment` (AC-I1b).
-    let directives = crate::commands::creator::moment_directive::LocalDirectiveStore::new(pool);
+    let directives = nexus_daemon_runtime::directive_store::LocalDirectiveStore::new(pool);
     let ctx =
         assemble_moment_with_directive(&request, &narrative, &kb, &knowledge, &directives).await;
 

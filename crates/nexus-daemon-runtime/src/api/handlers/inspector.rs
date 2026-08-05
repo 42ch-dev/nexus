@@ -16,16 +16,15 @@
 //! Directive body is never on the wire — the builder reads only
 //! `ctx.moment_directive_meta` (AC-I3, body exclusion by construction).
 //!
-//! ## Directive-store note (plain `assemble_moment`)
+//! ## Directive-store wiring
 //!
-//! The CLI composition root (`LocalDirectiveStore`, apps/nexus42) wires a
-//! `DirectiveStore` into `assemble_moment_with_directive`; no production
-//! `DirectiveStore` implementation exists outside the CLI crate, so this
-//! handler uses the plain `assemble_moment` (internal `NoDirectiveStore`).
-//! That path is **byte-equivalent** to `assemble_moment_with_directive` with
-//! no active directive (AC-I1b) — the packet's `moment_directive` section
-//! renders `"none"` + nulls. Wiring a daemon-side directive store (the T3
-//! directive-route scope) is a tracked follow-up, not this task.
+//! The handler wires the relocated composition root
+//! (`nexus_daemon_runtime::directive_store::LocalDirectiveStore`, shared
+//! with the CLI and the `POST /v1/daemon/moment-directive` route — T3, DF-76)
+//! into `assemble_moment_with_directive`, so the packet's `moment_directive`
+//! section reflects an active directive for the scoped World/Work. When no
+//! directive is active that path is **byte-equivalent** to the plain
+//! `assemble_moment` (AC-I1b) — the section renders `"none"` + nulls.
 //!
 //! ## Response mapping decision
 //!
@@ -48,6 +47,7 @@
 
 use crate::api::errors::NexusApiError;
 use crate::api::handlers::works::read_active_creator_id;
+use crate::directive_store::LocalDirectiveStore;
 use crate::workspace::WorkspaceState;
 use axum::{extract::State, Json};
 use nexus_contracts::generated::daemon_api::inspector::{
@@ -58,7 +58,8 @@ use nexus_local_db::narrative_gateway::SqliteNarrativeGateway;
 use nexus_local_db::narrative_write;
 use nexus_local_db::SqliteKnowledgeStore;
 use nexus_moment_context_assembly::{
-    assemble_moment, build_inspector_packet, GenerationStage, MomentRequest, Stage0Assembly,
+    assemble_moment_with_directive, build_inspector_packet, GenerationStage, MomentRequest,
+    Stage0Assembly,
 };
 use nexus_spoke_adapter::SpokeBackedKbStore;
 
@@ -130,13 +131,17 @@ pub async fn inspect_moment(
     }
 
     // Four-domain assembly over the same persistent stores the CLI uses
-    // (context.rs:643-670). Plain `assemble_moment` (see module docs —
-    // directive-store note): per-domain failures degrade to omitted sections,
-    // they never reject.
+    // (context.rs:643-670) + the relocated directive store (T3, DF-76 — see
+    // module docs): the packet's `moment_directive` section reflects an
+    // active directive; none active ⇒ byte-equivalent to plain
+    // `assemble_moment` (AC-I1b). Per-domain failures degrade to omitted
+    // sections, they never reject.
     let narrative = SqliteNarrativeGateway::new(pool.clone());
     let kb = SpokeBackedKbStore::new(pool.clone());
     let knowledge = SqliteKnowledgeStore::new(pool.clone());
-    let ctx = assemble_moment(&request, &narrative, &kb, &knowledge).await;
+    let directives = LocalDirectiveStore::new(pool.clone());
+    let ctx =
+        assemble_moment_with_directive(&request, &narrative, &kb, &knowledge, &directives).await;
 
     // Enriched packet → generated wire DTO via JSON round-trip at the
     // boundary (mirrors run_check's response mapping; validates the builder
