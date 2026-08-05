@@ -252,28 +252,6 @@ async fn seed_export_source_world(pool: &sqlx::SqlitePool) {
     seed_relation(pool, "rel_pack_1", OWNED_WORLD, "kb_pack_a", "kb_pack_b").await;
 }
 
-async fn assert_pack_import_provenance(pool: &sqlx::SqlitePool, world_id: &str) {
-    // SAFETY: test-only SELECT against known kb_key_blocks schema.
-    let rows: Vec<(String, Option<String>)> = sqlx::query_as(
-        "SELECT key_block_id, source_provenance_kind FROM kb_key_blocks          WHERE world_id = ? AND source_provenance_kind IS NOT NULL",
-    )
-    .bind(world_id)
-    .fetch_all(pool)
-    .await
-    .unwrap();
-    assert!(
-        !rows.is_empty(),
-        "expected imported rows with pack_import provenance in {world_id}"
-    );
-    for (entry_id, provenance) in rows {
-        assert_eq!(
-            provenance.as_deref(),
-            Some(IMPORT_PROVENANCE),
-            "entry {entry_id} in {world_id} must have pack_import provenance"
-        );
-    }
-}
-
 async fn assert_entry_provenance(
     pool: &sqlx::SqlitePool,
     world_id: &str,
@@ -281,7 +259,7 @@ async fn assert_entry_provenance(
 ) {
     // SAFETY: test-only SELECT against known kb_key_blocks schema.
     let provenance: Option<String> = sqlx::query_scalar(
-        "SELECT source_provenance_kind FROM kb_key_blocks          WHERE world_id = ? AND canonical_name = ?",
+        "SELECT source_provenance_kind FROM kb_key_blocks WHERE world_id = ? AND canonical_name = ?",
     )
     .bind(world_id)
     .bind(canonical_name)
@@ -356,7 +334,6 @@ async fn pack_import_skip_cross_world_and_reimport_is_idempotent() {
         "expected created relations >= 1: {body}"
     );
 
-    assert_pack_import_provenance(&ctx.pool, TARGET_WORLD).await;
 
     let (status2, body2) = import_pack_http(&ctx.server, TARGET_WORLD, &pack, "skip").await;
     assert_eq!(status2, StatusCode::OK, "body={body2}");
@@ -365,13 +342,18 @@ async fn pack_import_skip_cross_world_and_reimport_is_idempotent() {
         0,
         "re-import must be idempotent: {body2}"
     );
+
+    assert_entry_provenance(&ctx.pool, TARGET_WORLD, "Aria").await;
+    assert_entry_provenance(&ctx.pool, TARGET_WORLD, "Kael").await;
+    assert_entry_provenance(&ctx.pool, TARGET_WORLD, "Mira").await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn pack_import_rename_creates_disambiguated_entry() {
     let ctx = ctx().await;
     seed_export_source_world(&ctx.pool).await;
-    let pack = export_pack(&ctx.server, OWNED_WORLD).await;
+    let mut pack = export_pack(&ctx.server, OWNED_WORLD).await;
+    fresh_entry_ids_in_pack(&mut pack);
 
     seed_key_block_with_body(
         &ctx.pool,
@@ -385,12 +367,8 @@ async fn pack_import_rename_creates_disambiguated_entry() {
 
     let (status, body) = import_pack_http(&ctx.server, TARGET_WORLD, &pack, "rename").await;
     assert_eq!(status, StatusCode::OK, "body={body}");
-    assert!(
-        body["entries"]["renamed"].as_u64().unwrap_or(0) >= 1,
-        "expected renamed entries >= 1: {body}"
-    );
+    assert!(body["entries"]["renamed"].as_u64().unwrap_or(0) >= 1);
 
-    // SAFETY: test-only SELECT against known kb_key_blocks schema.
     let names: Vec<String> = sqlx::query_scalar(
         "SELECT canonical_name FROM kb_key_blocks WHERE world_id = ? ORDER BY canonical_name",
     )
@@ -398,19 +376,55 @@ async fn pack_import_rename_creates_disambiguated_entry() {
     .fetch_all(&ctx.pool)
     .await
     .unwrap();
-    assert!(
-        names.iter().any(|n| n.ends_with(" imported") || n.contains(" imported ")),
-        "expected disambiguated ' imported' suffix among {names:?}"
-    );
+    assert!(names.iter().any(|n| n.contains("imported")));
+    assert_eq!(names.len(), 4, "Aria + Mira + pre-existing Kael + renamed Kael");
 
-    assert_pack_import_provenance(&ctx.pool, TARGET_WORLD).await;
+    let renamed_kael_id: String = sqlx::query_scalar(
+        "SELECT key_block_id FROM kb_key_blocks WHERE world_id = ? AND canonical_name LIKE '%imported%'",
+    )
+    .bind(TARGET_WORLD)
+    .fetch_one(&ctx.pool)
+    .await
+    .unwrap();
+    let imported_aria_id: String = sqlx::query_scalar(
+        "SELECT key_block_id FROM kb_key_blocks WHERE world_id = ? AND canonical_name = 'Aria'",
+    )
+    .bind(TARGET_WORLD)
+    .fetch_one(&ctx.pool)
+    .await
+    .unwrap();
+
+    let row: (String, String) = sqlx::query_as(
+        "SELECT source_entity_id, target_entity_id FROM kb_relationships WHERE world_id = ? LIMIT 1",
+    )
+    .bind(TARGET_WORLD)
+    .fetch_one(&ctx.pool)
+    .await
+    .unwrap();
+    assert_eq!(row.0, imported_aria_id);
+    assert_eq!(row.1, renamed_kael_id);
+
+    assert_entry_provenance(&ctx.pool, TARGET_WORLD, "Aria").await;
+    assert_entry_provenance(&ctx.pool, TARGET_WORLD, "Mira").await;
+    let renamed_name = names.iter().find(|n| n.contains("imported")).unwrap();
+    assert_entry_provenance(&ctx.pool, TARGET_WORLD, renamed_name).await;
+    let preexisting: Option<String> = sqlx::query_scalar(
+        "SELECT source_provenance_kind FROM kb_key_blocks WHERE world_id = ? AND key_block_id = 'kb_target_kael'",
+    )
+    .bind(TARGET_WORLD)
+    .fetch_optional(&ctx.pool)
+    .await
+    .unwrap()
+    .flatten();
+    assert_ne!(preexisting.as_deref(), Some(IMPORT_PROVENANCE), "pre-seeded collision row must not be stamped");
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn pack_import_overwrite_replaces_body_preserves_status() {
     let ctx = ctx().await;
     seed_export_source_world(&ctx.pool).await;
-    let pack = export_pack(&ctx.server, OWNED_WORLD).await;
+    let mut pack = export_pack(&ctx.server, OWNED_WORLD).await;
+    fresh_entry_ids_in_pack(&mut pack);
 
     seed_key_block_with_body(
         &ctx.pool,
@@ -418,7 +432,7 @@ async fn pack_import_overwrite_replaces_body_preserves_status() {
         TARGET_WORLD,
         "Kael",
         r#"{"summary":"Pre-existing Kael body"}"#,
-        "confirmed",
+        "provisional",
     )
     .await;
 
@@ -438,7 +452,7 @@ async fn pack_import_overwrite_replaces_body_preserves_status() {
     .fetch_one(&ctx.pool)
     .await
     .unwrap();
-    assert_eq!(row.0, "confirmed", "overwrite must preserve status");
+    assert_eq!(row.0, "provisional", "overwrite must preserve target provisional status, not pack confirmed");
     assert!(
         row.1.contains("Kael from pack"),
         "overwrite must replace body with pack content; got body_json={}",

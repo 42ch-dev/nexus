@@ -112,7 +112,7 @@ async fn load_pack_anchors(
     let mut anchors = Vec::new();
     for entry_id in entry_ids {
         let rows = sqlx::query_scalar::<_, String>(
-            "SELECT source_anchor_json FROM kb_source_anchors WHERE key_block_id = ?              ORDER BY anchor_ordinal ASC",
+            "SELECT source_anchor_json FROM kb_source_anchors WHERE key_block_id = ? ORDER BY anchor_ordinal ASC",
         )
         .bind(entry_id)
         .fetch_all(pool)

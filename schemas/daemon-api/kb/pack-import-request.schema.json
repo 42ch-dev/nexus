@@ -21,7 +21,7 @@
     },
     "include_anchors": {
       "type": "boolean",
-      "description": "Whether to import source_anchors from the pack.",
+      "description": "Whether to import source_anchors from the pack. Accepted on the wire; no-op until anchor persistence ships.",
       "default": false
     }
   }

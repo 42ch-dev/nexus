@@ -6,6 +6,7 @@
 //! [`crate::directive_store::LocalDirectiveStore`] precedent).
 
 use nexus_contracts::BlockType;
+use nexus_knowledge::world_kb::validation::CANONICAL_NAME_MAX_LEN;
 use nexus_knowledge::world_kb::KbStore;
 use nexus_knowledge::world_kb::WorldKbEntry;
 use nexus_local_db::kb_relationships::{generate_relationship_id, get_relationship};
@@ -17,7 +18,17 @@ use nexus_spoke_adapter::{
 };
 use sqlx::SqlitePool;
 use std::collections::{HashMap, HashSet};
+use std::hash::{Hash, Hasher};
 use thiserror::Error;
+
+
+/// Outcome of a single orchestrator persist call, with optional reject detail.
+struct PersistOutcome {
+    outcome: ImportOutcome,
+    reject_reason: Option<String>,
+}
+
+const DISAMBIGUATE_MAX_ATTEMPTS: u32 = 100;
 
 /// Provenance stamp on imported Knowledge entries and relations.
 pub const IMPORT_PROVENANCE: &str = "pack_import";
@@ -133,13 +144,19 @@ pub async fn import_pack(
         let pack_entry_id = entry.entry_id.clone();
         let Some(entry_type) = parse_entry_type(&entry.entry_type) else {
             let reason = format!("unknown entry_type '{}'", entry.entry_type);
+            tracing::warn!(
+                entry_id = %pack_entry_id,
+                canonical_name = %entry.canonical_name.as_str(),
+                entry_type = %entry.entry_type,
+                "unknown entry_type in pack import, skipping"
+            );
             record_entry(
                 &mut summary,
                 &pack_entry_id,
-                ImportOutcome::Rejected,
+                ImportOutcome::Skipped,
                 Some(reason),
             );
-            summary.entries.rejected += 1;
+            summary.entries.skipped += 1;
             continue;
         };
 
@@ -287,18 +304,24 @@ pub async fn import_pack(
 
         prepare_create_entry(&mut entry, world_id);
         match persist_entry_upsert(pool, &entry) {
-            ImportOutcome::Created => {
+            PersistOutcome {
+                outcome: ImportOutcome::Created,
+                ..
+            } => {
                 summary.entries.created += 1;
                 target_entry_ids.insert(entry.entry_id.clone());
                 record_entry(&mut summary, &pack_entry_id, ImportOutcome::Created, None);
             }
-            ImportOutcome::Rejected => {
+            PersistOutcome {
+                outcome: ImportOutcome::Rejected,
+                reject_reason,
+            } => {
                 summary.entries.rejected += 1;
                 record_entry(
                     &mut summary,
                     &pack_entry_id,
                     ImportOutcome::Rejected,
-                    Some("orchestrate_upsert rejected entry".to_string()),
+                    reject_reason,
                 );
             }
             _ => {}
@@ -377,7 +400,10 @@ pub async fn import_pack(
                         }
                         update_relation_world_id(&mut relation, world_id);
                         match persist_relation_relate(pool, &relation) {
-                            ImportOutcome::Overwritten => {
+                            PersistOutcome {
+                                outcome: ImportOutcome::Overwritten,
+                                ..
+                            } => {
                                 summary.relations.overwritten += 1;
                                 record_relation(
                                     &mut summary,
@@ -386,13 +412,16 @@ pub async fn import_pack(
                                     None,
                                 );
                             }
-                            ImportOutcome::Rejected => {
+                            PersistOutcome {
+                                outcome: ImportOutcome::Rejected,
+                                reject_reason,
+                            } => {
                                 summary.relations.rejected += 1;
                                 record_relation(
                                     &mut summary,
                                     &pack_relation_id,
                                     ImportOutcome::Rejected,
-                                    Some("orchestrate_relate rejected relation".to_string()),
+                                    reject_reason,
                                 );
                             }
                             _ => {}
@@ -430,7 +459,10 @@ pub async fn import_pack(
 
         let renamed = relation.relation_id != pack_relation_id;
         match persist_relation_relate(pool, &relation) {
-            ImportOutcome::Created => {
+            PersistOutcome {
+                outcome: ImportOutcome::Created,
+                ..
+            } => {
                 if renamed {
                     summary.relations.renamed += 1;
                     record_relation(&mut summary, &pack_relation_id, ImportOutcome::Renamed, None);
@@ -439,13 +471,16 @@ pub async fn import_pack(
                     record_relation(&mut summary, &pack_relation_id, ImportOutcome::Created, None);
                 }
             }
-            ImportOutcome::Rejected => {
+            PersistOutcome {
+                outcome: ImportOutcome::Rejected,
+                reject_reason,
+            } => {
                 summary.relations.rejected += 1;
                 record_relation(
                     &mut summary,
                     &pack_relation_id,
                     ImportOutcome::Rejected,
-                    Some("orchestrate_relate rejected relation".to_string()),
+                    reject_reason,
                 );
             }
             _ => {}
@@ -488,8 +523,19 @@ async fn import_renamed_entry(
 ) -> Result<(), PackImportError> {
     let store = SqliteKbStore::new(pool.clone());
     let original_name = entry.canonical_name.to_string();
-    let disambiguated =
-        disambiguate_canonical_name(&store, world_id, &original_name, entry_type).await?;
+    let disambiguated = match disambiguate_canonical_name(&store, world_id, &original_name, entry_type).await {
+        Ok(name) => name,
+        Err(e) => {
+            summary.entries.rejected += 1;
+            record_entry(
+                summary,
+                pack_entry_id,
+                ImportOutcome::Rejected,
+                Some(e.to_string()),
+            );
+            return Ok(());
+        }
+    };
     let fresh_id = mint_entry_id();
 
     if dry_run {
@@ -508,14 +554,28 @@ async fn import_renamed_entry(
     }
 
     entry.entry_id = fresh_id.clone();
-    entry.canonical_name = disambiguated.parse().map_err(|e| {
-        PackImportError::Storage(format!("invalid disambiguated canonical_name: {e}"))
-    })?;
+    let parsed_name = match disambiguated.parse() {
+        Ok(name) => name,
+        Err(e) => {
+            summary.entries.rejected += 1;
+            record_entry(
+                summary,
+                pack_entry_id,
+                ImportOutcome::Rejected,
+                Some(format!("invalid disambiguated canonical_name: {e}")),
+            );
+            return Ok(());
+        }
+    };
+    entry.canonical_name = parsed_name;
     prepare_create_entry(entry, world_id);
     remap.insert(pack_entry_id.to_string(), fresh_id.clone());
 
     match persist_entry_upsert(pool, entry) {
-        ImportOutcome::Created => {
+        PersistOutcome {
+            outcome: ImportOutcome::Created,
+            ..
+        } => {
             summary.entries.renamed += 1;
             target_entry_ids.insert(fresh_id);
             record_entry(
@@ -525,13 +585,16 @@ async fn import_renamed_entry(
                 Some(format!("renamed to {disambiguated}")),
             );
         }
-        ImportOutcome::Rejected => {
+        PersistOutcome {
+            outcome: ImportOutcome::Rejected,
+            reject_reason,
+        } => {
             summary.entries.rejected += 1;
             record_entry(
                 summary,
                 pack_entry_id,
                 ImportOutcome::Rejected,
-                Some("orchestrate_upsert rejected entry".to_string()),
+                reject_reason,
             );
         }
         _ => {}
@@ -572,7 +635,10 @@ async fn import_overwritten_entry(
     extensions::set_provenance(entry, None, None, Some(IMPORT_PROVENANCE.to_string()));
 
     match persist_entry_upsert(pool, entry) {
-        ImportOutcome::Created => {
+        PersistOutcome {
+            outcome: ImportOutcome::Created,
+            ..
+        } => {
             stamp_import_provenance_column(pool, world_id, &existing_id).await?;
             remap.insert(pack_entry_id.to_string(), existing_id.clone());
             target_entry_ids.insert(existing_id.clone());
@@ -584,12 +650,15 @@ async fn import_overwritten_entry(
                 Some(format!("overwrote {existing_id}")),
             );
         }
-        ImportOutcome::Rejected => {
+        PersistOutcome {
+            outcome: ImportOutcome::Rejected,
+            reject_reason,
+        } => {
             record_entry(
                 summary,
                 pack_entry_id,
                 ImportOutcome::Rejected,
-                Some("orchestrate_upsert rejected entry".to_string()),
+                reject_reason,
             );
             summary.entries.rejected += 1;
         }
@@ -606,7 +675,7 @@ async fn stamp_import_provenance_column(
 ) -> Result<(), PackImportError> {
     // SAFETY: UPDATE against known kb_key_blocks schema.
     sqlx::query(
-        "UPDATE kb_key_blocks SET source_provenance_kind = ?          WHERE key_block_id = ? AND world_id = ?",
+        "UPDATE kb_key_blocks SET source_provenance_kind = ? WHERE key_block_id = ? AND world_id = ?",
     )
     .bind(IMPORT_PROVENANCE)
     .bind(entry_id)
@@ -621,24 +690,70 @@ async fn stamp_import_provenance_column(
     Ok(())
 }
 
+fn truncated_name_with_suffix(base: &str, suffix: &str) -> String {
+    let max_base_len = CANONICAL_NAME_MAX_LEN.saturating_sub(suffix.len());
+    let fitted_base = fit_canonical_name_base(base, max_base_len);
+    format!("{fitted_base}{suffix}")
+}
+
+fn fit_canonical_name_base(base: &str, max_len: usize) -> String {
+    if base.len() <= max_len {
+        return base.to_string();
+    }
+    if max_len == 0 {
+        return String::new();
+    }
+    const HASH_TAG_LEN: usize = 9; // "~" + 8 hex chars
+    if max_len <= HASH_TAG_LEN {
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        base.hash(&mut hasher);
+        let hash = format!("{:x}", hasher.finish());
+        return hash.chars().take(max_len).collect();
+    }
+    let prefix_len = max_len - HASH_TAG_LEN;
+    let prefix = truncate_to_char_boundary(base, prefix_len);
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    base.hash(&mut hasher);
+    let hash = format!("{:08x}", hasher.finish() & 0xffff_ffff);
+    format!("{prefix}~{hash}")
+}
+
+fn truncate_to_char_boundary(s: &str, max_bytes: usize) -> &str {
+    if s.len() <= max_bytes {
+        return s;
+    }
+    let mut end = max_bytes;
+    while end > 0 && !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    &s[..end]
+}
+
 async fn disambiguate_canonical_name(
     store: &SqliteKbStore,
     world_id: &str,
     original: &str,
     entry_type: BlockType,
 ) -> Result<String, PackImportError> {
-    let first = format!("{original} imported");
-    if name_available(store, world_id, &first, entry_type).await? {
+    let first_suffix = " imported";
+    let first = truncated_name_with_suffix(original, first_suffix);
+    if first.len() <= CANONICAL_NAME_MAX_LEN
+        && name_available(store, world_id, &first, entry_type).await?
+    {
         return Ok(first);
     }
-    let mut n = 2u32;
-    loop {
-        let candidate = format!("{original} imported {n}");
-        if name_available(store, world_id, &candidate, entry_type).await? {
+    for n in 2..=DISAMBIGUATE_MAX_ATTEMPTS {
+        let suffix = format!(" imported {n}");
+        let candidate = truncated_name_with_suffix(original, &suffix);
+        if candidate.len() <= CANONICAL_NAME_MAX_LEN
+            && name_available(store, world_id, &candidate, entry_type).await?
+        {
             return Ok(candidate);
         }
-        n += 1;
     }
+    Err(PackImportError::Storage(format!(
+        "failed to disambiguate canonical_name '{original}' after {DISAMBIGUATE_MAX_ATTEMPTS} attempts"
+    )))
 }
 
 async fn name_available(
@@ -667,34 +782,41 @@ fn prepare_create_entry(entry: &mut KnowledgeEntry, world_id: &str) {
     extensions::set_provenance(entry, None, None, Some(IMPORT_PROVENANCE.to_string()));
 }
 
-fn persist_entry_upsert(pool: &SqlitePool, entry: &KnowledgeEntry) -> ImportOutcome {
+fn persist_entry_upsert(pool: &SqlitePool, entry: &KnowledgeEntry) -> PersistOutcome {
     let upsert_req = build_import_upsert_request(entry);
     let adapter = NexusAdapter::new(pool.clone());
     match orchestrate_upsert(&adapter, upsert_req) {
-        nexus_spoke_adapter::SpokeResult::Ok(_) => ImportOutcome::Created,
+        nexus_spoke_adapter::SpokeResult::Ok(_) => PersistOutcome {
+            outcome: ImportOutcome::Created,
+            reject_reason: None,
+        },
         nexus_spoke_adapter::SpokeResult::Reject(reject) => {
-tracing::warn!(
+            tracing::warn!(
                 entry_id = %entry.entry_id,
                 code = %reject.code,
                 "orchestrate_upsert rejected pack import entry: {}",
                 reject.message
             );
-            ImportOutcome::Rejected
+            PersistOutcome {
+                outcome: ImportOutcome::Rejected,
+                reject_reason: Some(format!("{}: {}", reject.code, reject.message)),
+            }
         }
     }
 }
 
-fn persist_relation_relate(pool: &SqlitePool, relation: &Relation) -> ImportOutcome {
+fn persist_relation_relate(pool: &SqlitePool, relation: &Relation) -> PersistOutcome {
     let relate_req = build_import_relate_request(relation);
     let adapter = NexusAdapter::new(pool.clone());
     match orchestrate_relate(&adapter, relate_req) {
-        nexus_spoke_adapter::SpokeResult::Ok(_) => {
-            if relation.revision.is_some() {
+        nexus_spoke_adapter::SpokeResult::Ok(_) => PersistOutcome {
+            outcome: if relation.revision.is_some() {
                 ImportOutcome::Overwritten
             } else {
                 ImportOutcome::Created
-            }
-        }
+            },
+            reject_reason: None,
+        },
         nexus_spoke_adapter::SpokeResult::Reject(reject) => {
             tracing::warn!(
                 relation_id = %relation.relation_id,
@@ -702,7 +824,10 @@ fn persist_relation_relate(pool: &SqlitePool, relation: &Relation) -> ImportOutc
                 "orchestrate_relate rejected pack import relation: {}",
                 reject.message
             );
-            ImportOutcome::Rejected
+            PersistOutcome {
+                outcome: ImportOutcome::Rejected,
+                reject_reason: Some(format!("{}: {}", reject.code, reject.message)),
+            }
         }
     }
 }
