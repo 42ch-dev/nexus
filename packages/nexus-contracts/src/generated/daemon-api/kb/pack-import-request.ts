@@ -19,7 +19,7 @@ export interface PackImportRequest {
    */
   conflict: "skip" | "rename" | "overwrite";
   /**
-   * Whether to import source_anchors from the pack.
+   * Whether to import source_anchors from the pack. Accepted on the wire; no-op until anchor persistence ships.
    */
   include_anchors?: boolean;
 }
