@@ -464,6 +464,44 @@ async fn pack_import_overwrite_replaces_body_preserves_status() {
     assert_entry_provenance(&ctx.pool, TARGET_WORLD, "Mira").await;
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn pack_import_same_world_reimport_overwrite_updates_body() {
+    let ctx = ctx().await;
+    seed_export_source_world(&ctx.pool).await;
+
+    let pack = export_pack(&ctx.server, OWNED_WORLD).await;
+
+    // Stale Kael body before same-world re-import.
+    sqlx::query(
+        "UPDATE kb_key_blocks SET body_json = ? WHERE world_id = ? AND key_block_id = 'kb_pack_b'",
+    )
+    .bind(r#"{"summary":"Stale Kael body"}"#)
+    .bind(OWNED_WORLD)
+    .execute(&ctx.pool)
+    .await
+    .unwrap();
+
+    let (status, body) = import_pack_http(&ctx.server, OWNED_WORLD, &pack, "overwrite").await;
+    assert_eq!(status, StatusCode::OK, "body={body}");
+    assert!(
+        body["entries"]["overwritten"].as_u64().unwrap_or(0) >= 1,
+        "same-world re-import must overwrite, not skip: {body}"
+    );
+
+    let row: (String,) = sqlx::query_as(
+        "SELECT body_json FROM kb_key_blocks WHERE world_id = ? AND key_block_id = 'kb_pack_b'",
+    )
+    .bind(OWNED_WORLD)
+    .fetch_one(&ctx.pool)
+    .await
+    .unwrap();
+    assert!(
+        row.0.contains("Kael from pack"),
+        "overwrite must restore pack body on same-world re-import; got body_json={}",
+        row.0
+    );
+}
+
 #[tokio::test]
 async fn pack_import_foreign_world_returns_403() {
     let ctx = ctx().await;

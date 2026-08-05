@@ -1025,6 +1025,82 @@ mod tests {
         );
     }
 
+    /// Greptile P1 / PR #200: same-world export → re-import must honor overwrite
+    /// (not unconditionally skip on entry_id PK collision).
+    #[tokio::test(flavor = "multi_thread")]
+    async fn import_same_world_reimport_overwrite_updates_body() {
+        let (pool, _dir, entry_ids, _rel_ids) = seeded_pool().await;
+        let carol_id = &entry_ids[2];
+        let (pack_path, _pack_dir) = export_to_file(&pool).await;
+
+        // Mutate Carol in-place so re-import has something to overwrite.
+        let store = SqliteKbStore::new(pool.clone());
+        let mut carol = store.get_knowledge_entry(carol_id).await.expect("Carol must exist");
+        carol.body = Some(WorldKbBody {
+            summary: Some("Stale Carol body".to_string()),
+            ..Default::default()
+        });
+        store
+            .update_knowledge_entry(carol)
+            .await
+            .expect("update Carol body");
+
+        let args = ImportArgs {
+            world_ref: WORLD.to_string(),
+            r#in: pack_path,
+            dry_run: false,
+            conflict: ConflictStrategy::Overwrite,
+        };
+        import(args, &config_with_active_creator(), &pool)
+            .await
+            .expect("same-world overwrite re-import must succeed");
+
+        assert_eq!(
+            count_entries(&pool, WORLD).await,
+            3,
+            "overwrite re-import must not add duplicate rows"
+        );
+
+        let carol = store.get_knowledge_entry(carol_id).await.expect("Carol must remain");
+        assert_eq!(
+            carol.body.as_ref().and_then(|b| b.summary.as_deref()),
+            Some("Carol summary"),
+            "overwrite must replace body with pack content on same-world re-import"
+        );
+    }
+
+    /// Greptile P1 / PR #200: same-world export → re-import under rename must
+    /// mint disambiguated copies instead of skipping on entry_id collision.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn import_same_world_reimport_rename_creates_disambiguated_entries() {
+        let (pool, _dir, _entry_ids, _rel_ids) = seeded_pool().await;
+        let (pack_path, _pack_dir) = export_to_file(&pool).await;
+
+        let args = ImportArgs {
+            world_ref: WORLD.to_string(),
+            r#in: pack_path,
+            dry_run: false,
+            conflict: ConflictStrategy::Rename,
+        };
+        import(args, &config_with_active_creator(), &pool)
+            .await
+            .expect("same-world rename re-import must succeed");
+
+        assert_eq!(
+            count_entries(&pool, WORLD).await,
+            6,
+            "rename re-import must duplicate all three entries"
+        );
+
+        let store = SqliteKbStore::new(pool.clone());
+        let entries = store.list_by_world(WORLD).await.unwrap();
+        let imported_suffix = entries
+            .iter()
+            .filter(|e| e.canonical_name.contains(" imported"))
+            .count();
+        assert_eq!(imported_suffix, 3, "each pack entry must be renamed on re-import");
+    }
+
     /// Greptile P1 / PR #193: global entry_id collision with a foreign-world row
     /// must not admit that id into `target_entry_ids` (no cross-world edges).
     #[tokio::test(flavor = "multi_thread")]

@@ -163,6 +163,63 @@ pub async fn import_pack(
         // ── Entry ID collision (global PK, world-scoped semantics) ─────
         if let Ok(existing_by_id) = store.get_knowledge_entry(&entry.entry_id).await {
             if existing_by_id.world_id == world_id {
+                // Same-world re-import: when entry_id and canonical_name both
+                // match, this is the same entry — honor conflict policy.
+                // If canonical_name differs (ambiguous), keep conservative skip.
+                let is_same_entry = existing_by_id.canonical_name == entry.canonical_name.as_str()
+                    && existing_by_id.block_type == entry_type;
+
+                if is_same_entry {
+                    match conflict {
+                        ConflictPolicy::Skip => {
+                            remap.insert(pack_entry_id.clone(), existing_by_id.entry_id.clone());
+                            target_entry_ids.insert(existing_by_id.entry_id.clone());
+                            record_entry(
+                                &mut summary,
+                                &pack_entry_id,
+                                ImportOutcome::Skipped,
+                                Some(if dry_run {
+                                    "dry-run: same-world re-import (entry_id + canonical_name match)"
+                                        .to_string()
+                                } else {
+                                    "same-world re-import (entry_id + canonical_name match)"
+                                        .to_string()
+                                }),
+                            );
+                            summary.entries.skipped += 1;
+                        }
+                        ConflictPolicy::Rename => {
+                            import_renamed_entry(
+                                pool,
+                                world_id,
+                                &mut entry,
+                                entry_type,
+                                &pack_entry_id,
+                                &mut summary,
+                                &mut target_entry_ids,
+                                &mut remap,
+                                dry_run,
+                            )
+                            .await?;
+                        }
+                        ConflictPolicy::Overwrite => {
+                            import_overwritten_entry(
+                                pool,
+                                world_id,
+                                &mut entry,
+                                &existing_by_id,
+                                &pack_entry_id,
+                                &mut summary,
+                                &mut target_entry_ids,
+                                &mut remap,
+                                dry_run,
+                            )
+                            .await?;
+                        }
+                    }
+                    continue;
+                }
+
                 handle_entry_id_collision_in_target(
                     &mut summary,
                     &mut target_entry_ids,
