@@ -1,0 +1,75 @@
+{
+  "section": {
+    "title": "Knowledge Pack",
+    "description": "Export this World's lore as a shareable .json pack, or import a pack file into this World."
+  },
+  "export": {
+    "title": "Export",
+    "description": "Download this World's lore as a pack file to share or back up.",
+    "button": "Export pack",
+    "exporting": "Exporting…",
+    "success": "Pack exported — check your downloads.",
+    "errors": {
+      "forbidden": "You do not have permission to export this World.",
+      "generic": "Could not export the pack."
+    }
+  },
+  "import": {
+    "title": "Import",
+    "description": "Import a pack file into this World. Conflicting entries follow the chosen policy.",
+    "fileLabel": "Pack file",
+    "fileHint": "A .json pack exported from Nexus.",
+    "conflictLabel": "When an entry already exists",
+    "conflict": {
+      "skip": "Keep the existing entry",
+      "rename": "Rename the imported entry",
+      "overwrite": "Replace the existing entry"
+    },
+    "submit": "Import",
+    "importing": "Importing…",
+    "errors": {
+      "noFile": "Choose a pack file to import.",
+      "invalidJson": "The selected file is not valid JSON.",
+      "tooLarge": "The selected file is too large. Packs must be under {{size}} MB.",
+      "invalidPack": "The selected file is not a valid Knowledge Pack.",
+      "forbidden": "You do not have permission to import into this World.",
+      "generic": "Could not import the pack."
+    }
+  },
+  "results": {
+    "title": "Import results",
+    "entries": "Entries",
+    "relations": "Relations",
+    "outcomes": {
+      "created": "Created",
+      "skipped": "Skipped",
+      "rejected": "Rejected",
+      "renamed": "Renamed",
+      "overwritten": "Overwritten"
+    },
+    "liveCount": {
+      "created": "{{count}} created",
+      "skipped": "{{count}} skipped",
+      "rejected": "{{count}} rejected",
+      "renamed": "{{count}} renamed",
+      "overwritten": "{{count}} overwritten"
+    },
+    "nothing": "nothing",
+    "liveSummary": "Import finished. Entries: {{entries}}. Relations: {{relations}}.",
+    "detailsToggle": "Show details",
+    "detailsToggleWithCount": "Show details ({{count}})",
+    "detailsEmpty": "No per-atom details.",
+    "kind": {
+      "entry": "Entry",
+      "relation": "Relation"
+    }
+  },
+  "confirm": {
+    "title": "Overwrite existing entries?",
+    "warning": "This will replace existing entries. This cannot be undone.",
+    "count_one": "{{count}} existing entry will be replaced.",
+    "count_other": "{{count}} existing entries will be replaced.",
+    "confirm": "Overwrite",
+    "cancel": "Cancel"
+  }
+}
