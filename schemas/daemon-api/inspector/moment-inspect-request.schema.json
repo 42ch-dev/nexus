@@ -18,7 +18,7 @@
     },
     "generation_stage": {
       "type": "string",
-      "enum": ["intake", "research", "produce", "review", "persist", "unspecified"],
+      "enum": ["intake", "research", "produce", "review", "persist", "work_maintenance", "system_maintenance", "unspecified"],
       "description": "Generation stage gate. Maps via GenerationStage::as_str/parse; unknown values default to unspecified."
     }
   }

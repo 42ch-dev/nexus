@@ -116,9 +116,10 @@ const MAX_REGEX_KEY_CHARS: usize = 256;
 /// consistent with the chars/4 token heuristic used across MCA.
 const MAX_REGEX_SCAN_CHARS: usize = 64 * 1024;
 
-/// Token-budget accounting of an activation pass (V1.151 P0, DF-76 spec §2
-/// H3) — chars/4 estimates, computed by the engine, exposed additively for
-/// the inspector packet. No wire change: the values were already computed
+/// Token-budget accounting of an activation pass (V1.151 P0, DF-76 spec §2 H3).
+///
+/// Chars/4 estimates computed by the engine, exposed additively for the
+/// inspector packet. No wire change: the values were already computed
 /// internally (`apply_activation_with_hops` primary estimate + hop spend);
 /// only exposure is new.
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -19,5 +19,13 @@ export interface MomentInspectRequest {
   /**
    * Generation stage gate. Maps via GenerationStage::as_str/parse; unknown values default to unspecified.
    */
-  generation_stage?: "intake" | "research" | "produce" | "review" | "persist" | "unspecified";
+  generation_stage?:
+    | "intake"
+    | "research"
+    | "produce"
+    | "review"
+    | "persist"
+    | "work_maintenance"
+    | "system_maintenance"
+    | "unspecified";
 }
