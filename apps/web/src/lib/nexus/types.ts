@@ -111,6 +111,9 @@ import type {
   TimelineOverviewResponse,
   TimelinePatchEventRequest,
   ListTimelineEventsResponse,
+  MomentDirectiveRequest,
+  MomentInspectRequest,
+  MomentInspectResponse,
   UpdateFindingRequest,
   UpdatePresetRequest,
   UpdatePresetResponse,
@@ -212,6 +215,32 @@ export interface ListTimelineEventsQuery {
   limit?: number;
   /** Opaque cursor from a previous page's `next_cursor`. */
   cursor?: string;
+}
+
+/**
+ * Response for `POST /v1/daemon/moment-directive` (V1.151 P1 — DF-76).
+ * App-side type: P0 shipped no generated schema for it — the handler returns
+ * `Json<Value>` with the full directive row on `set`/`show` (incl. body — the
+ * author surface, not the inspector packet) and `{}` on `clear`. The UI only
+ * consumes success/failure, never the row fields, so every field is optional
+ * (mirrors the `DiscardRunResponse` precedent for schema-less inline shapes).
+ */
+export interface MomentDirectiveResponse {
+  directive_id?: string;
+  creator_id?: string;
+  scope_kind?: string;
+  scope_id?: string;
+  body?: string;
+  insert_depth?: string;
+  ttl_kind?: string;
+  ttl_remaining?: number;
+  clear_on_scene_change?: boolean;
+  status?: string;
+  last_focused_event_id?: string | null;
+  created_at?: number;
+  updated_at?: number;
+  expires_at?: number | null;
+  replaced_by?: string | null;
 }
 
 /**
@@ -593,6 +622,24 @@ export interface NexusClient {
   ): Promise<ReadingAnnotation>;
   /** `DELETE /v1/daemon/reading/annotations/{annotation_id}` — delete annotation. */
   deleteReadingAnnotation(annotationId: string): Promise<void>;
+
+  // ── Assembly Inspector (V1.151 P1 — DF-76) ────────────────────────────────
+  /**
+   * `POST /v1/daemon/inspector/moment` — assemble and return the enriched
+   * inspector packet for one moment (activation trace + slot map + budget +
+   * directive status). Read-only observation: the assembled prompt bytes are
+   * never modified (AC-I6).
+   */
+  inspectMoment(request: MomentInspectRequest): Promise<MomentInspectResponse>;
+  /**
+   * `POST /v1/daemon/moment-directive` — set/show/clear the active Moment
+   * Directive for an owned scope (the author write surface; DF-76). A `set`
+   * without `replace` when a directive is already active in the scope
+   * surfaces as a 409 conflict (no silent overwrite, CLI `--replace`
+   * discipline). Returns the inserted/showed row on `set`/`show`, `{}` on
+   * `clear`.
+   */
+  momentDirective(request: MomentDirectiveRequest): Promise<MomentDirectiveResponse>;
 }
 
 /** Re-exported for consumers building query/mutation hooks. */

@@ -190,7 +190,7 @@ components:
     textarea: { minHeight: "96px" }
     placeholder: { textColor: "{colors.gray-700}" }
     helperText: { typography: "{typography.copy-13}" }
-    errorHelperText: { textColor: "{colors.red-700}", typography: "{typography.copy-13}" }
+    errorHelperText: { textColor: "{colors.red-1000}", typography: "{typography.copy-13}" }
 
   # ── select: native `<select>` chevron inset ──
   select:
@@ -1282,7 +1282,7 @@ Transport-failure alert primitive (`@42ch/nexus-ui` `TransportErrorBlock`). CTAs
 
 ### Input / Select / Textarea
 
-Variants: see frontmatter `components.input-select-textarea`. Textarea min height: `96px`. Placeholder uses `gray-700`. Helper text uses `copy-13`; error helper uses `red-700`.
+Variants: see frontmatter `components.input-select-textarea`. Textarea min height: `96px`. Placeholder uses `gray-700`. Helper text uses `copy-13`; error helper uses `red-1000` (shipped error-text convention — `#7f1018`, AA-passing).
 
 ### Card
 
@@ -1376,7 +1376,7 @@ Token values: see frontmatter `components.states`.
 1. `Label` with `htmlFor` matching control `id` (Title Case label text; optional *(optional)* suffix is app copy)
 2. `Input` or `Textarea` with `id`, optional `invalid`, and `aria-describedby` listing helper/error element IDs
 3. Helper paragraph (`copy-13`, `gray-600` / `gray-700`) — sentence case
-4. Error paragraph (`copy-13`, `red-700`, `role="alert"`) — sentence case; shown when `invalid`
+4. Error paragraph (`copy-13`, `red-1000`, `role="alert"`) — sentence case; shown when `invalid`
 
 Package controls do **not** render helper/error/required ornaments. Settings and wizard form rows follow this stack.
 

@@ -17,6 +17,7 @@ import enStrategies from '../../locales/en/strategies.json';
 import enCapabilities from '../../locales/en/capabilities.json';
 import enModules from '../../locales/en/modules.json';
 import enWorlds from '../../locales/en/worlds.json';
+import enInspector from '../../locales/en/inspector.json';
 
 import zhCommon from '../../locales/zh-CN/common.json';
 import zhShell from '../../locales/zh-CN/shell.json';
@@ -34,6 +35,7 @@ import zhStrategies from '../../locales/zh-CN/strategies.json';
 import zhCapabilities from '../../locales/zh-CN/capabilities.json';
 import zhModules from '../../locales/zh-CN/modules.json';
 import zhWorlds from '../../locales/zh-CN/worlds.json';
+import zhInspector from '../../locales/zh-CN/inspector.json';
 
 export type LocalePreference = 'system' | 'en' | 'zh-CN';
 export type ResolvedLocale = 'en' | 'zh-CN';
@@ -88,6 +90,7 @@ export const namespaces = [
   'capabilities',
   'modules',
   'worlds',
+  'inspector',
 ] as const;
 
 export type Namespace = (typeof namespaces)[number];
@@ -118,6 +121,7 @@ i18next
         capabilities: enCapabilities,
         modules: enModules,
         worlds: enWorlds,
+        inspector: enInspector,
       },
       'zh-CN': {
         common: zhCommon,
@@ -136,6 +140,7 @@ i18next
         capabilities: zhCapabilities,
         modules: zhModules,
         worlds: zhWorlds,
+        inspector: zhInspector,
       },
     },
     interpolation: {

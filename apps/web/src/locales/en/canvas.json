@@ -785,7 +785,8 @@
       "title": "Work Timeline",
       "description": "The work's narrative + moments. Pivots to Outline for edits.",
       "peerNavAria": "Peer surfaces",
-      "outlineLink": "Outline"
+      "outlineLink": "Outline",
+      "inspectorLink": "Assembly Inspector"
     },
     "layerSwitcher": {
       "ariaLabel": "Work Timeline layer",

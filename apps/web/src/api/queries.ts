@@ -36,6 +36,9 @@ import type {
   ListSessionsQuery,
   ListWorksQuery,
   ModuleSummary,
+  MomentDirectiveRequest,
+  MomentInspectRequest,
+  MomentInspectResponse,
   PaginationInfo,
   PatchChapterRequest,
   PatchWorkRequest,
@@ -1469,6 +1472,49 @@ export function useWorldTimelineEvents(
       lastPage.pagination.has_more ? lastPage.pagination.next_cursor : undefined,
     enabled: Boolean(worldId),
     staleTime: 10_000,
+  });
+}
+
+// ── Assembly Inspector (V1.151 P1 — DF-76) ──────────────────────────────────
+
+/**
+ * Read-only moment inspection for the Assembly Inspector panel.
+ *
+ * `POST /v1/daemon/inspector/moment` assembles one moment and returns the
+ * enriched inspector packet (activation trace + slot map + budget + directive
+ * status). Observation only — the assembled bytes are never modified (AC-I6).
+ * Disabled until a full request (`world_id` present) is provided; the
+ * directive set/clear form is Batch B and never touches this hook.
+ */
+export function useInspectMoment(request: MomentInspectRequest | undefined) {
+  const client = useNexusClient();
+  return useQuery({
+    queryKey: queryKeys.inspector.moment(request),
+    queryFn: (): Promise<MomentInspectResponse> => client.inspectMoment(request!),
+    enabled: Boolean(request),
+  });
+}
+
+/**
+ * Set/clear the active Moment Directive (V1.151 P1 — DF-76). The thin
+ * author surface over `POST /v1/daemon/moment-directive` — validation mirrors
+ * the CLI `handle_set` (non-empty body, exactly one TTL kind, `ttl_remaining
+ * >= 1`, explicit `replace` when one is active — no silent overwrite).
+ *
+ * On success the `inspector` cache is invalidated so the panel's
+ * directive-status block refreshes (set → active; clear → none; AC-I5).
+ * Errors are surfaced inline by the form (a 409 conflict prompts the author
+ * to enable `replace`), so this hook intentionally does not toast — a toast
+ * would duplicate the form's inline error/conflict UX.
+ */
+export function useMomentDirective() {
+  const client = useNexusClient();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (request: MomentDirectiveRequest) => client.momentDirective(request),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: queryKeys.inspector.all });
+    },
   });
 }
 

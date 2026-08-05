@@ -21,9 +21,11 @@
 //! Domain store queries are async. Callers must provide concrete implementations
 //! of the store traits. The crate provides no default runtime or storage backend.
 
-use crate::directive::{ActiveDirective, DirectiveDepth, DirectiveStore, NoDirectiveStore};
+use crate::directive::{
+    ActiveDirective, DirectiveDepth, DirectiveStore, MomentDirectiveStatus, NoDirectiveStore,
+};
 use crate::generation::GenerationStage;
-use crate::slots;
+use crate::slots::{self, SlotMapEntry};
 use crate::stage0::{Stage0Assembly, STAGE0_PERSONALITY_END, STAGE0_PERSONALITY_START};
 use crate::world_context::WorldKbQueryBuilder;
 use nexus_contracts::BlockType;
@@ -31,7 +33,9 @@ use nexus_knowledge::world_kb::knowledge_entry::WorldKbEntry;
 use nexus_knowledge::world_kb::KbStore;
 use nexus_knowledge::KnowledgeStore;
 use nexus_narrative::NarrativeGateway;
-use nexus_spoke_adapter::adapter::activation::{apply_activation_with_hops, HopConfig, HopEdge};
+use nexus_spoke_adapter::adapter::activation::{
+    apply_activation_with_hops, ActivationBudget, HopConfig, HopEdge,
+};
 
 /// Section heading for World State in assembled context.
 const WORLD_STATE_HEADING: &str = "## World State";
@@ -295,6 +299,24 @@ pub struct MomentContext {
     /// V1.146 P4 T3: exposed for inspector packet emission.
     pub activation_trace:
         Option<Vec<nexus_spoke_adapter::adapter::activation::ActivationTraceEntry>>,
+    /// Slot map (V1.151 P0, DF-76 spec §2 H2): every accepted entry that
+    /// survived the generation-stage gate mapped to its slot id — captured
+    /// **post stage-gate** so the map reflects what actually rendered.
+    /// `None` when no slot routing ran (no World-KB, activation off, or all
+    /// entries gated off). A synthetic
+    /// `{ entry_id: <directive_id>, slot: "moment.directive" }` entry is
+    /// appended when a directive injected this assembly.
+    pub slot_map: Option<Vec<SlotMapEntry>>,
+    /// Activation token-budget accounting (spec §2 H3): chars/4 estimates
+    /// for primary matches vs. relation hops + cap/remaining. `Some` whenever
+    /// activation ran; `None` when activation is disabled. Additive — never
+    /// part of `to_full_context()` (AC-I6).
+    pub activation_budget: Option<ActivationBudget>,
+    /// Status-only Moment Directive metadata for the inspector packet (spec
+    /// §2 H6) — **NEVER the directive body** (AC-I3; body exclusion is by
+    /// construction — the packet builder reads only this field). `None` when
+    /// no directive is active. Additive — never part of `to_full_context()`.
+    pub moment_directive_meta: Option<MomentDirectiveStatus>,
 }
 
 impl MomentContext {
@@ -568,6 +590,10 @@ where
 /// - `D`: A [`DirectiveStore`] implementation (composition root adapter over
 ///   `nexus-local-db`; in-memory stub in tests).
 #[allow(clippy::future_not_send)]
+// Four-domain assembly orchestrator (stage-0 → world_state → timeline →
+// world-kb → user-knowledge → directive) — the per-section blocks keep the
+// function at ~114 lines; splitting would scatter one assembly's steps.
+#[allow(clippy::too_many_lines)]
 pub async fn assemble_moment_with_directive<G, K, S, D>(
     request: &MomentRequest,
     narrative: &G,
@@ -616,6 +642,12 @@ where
     let mut activation_trace: Option<
         Vec<nexus_spoke_adapter::adapter::activation::ActivationTraceEntry>,
     > = None;
+    // V1.151 P0 (DF-76 spec §2 H3): capture the activation token-budget
+    // accounting (primary/hop estimates + cap/remaining) alongside the trace.
+    let mut activation_budget: Option<ActivationBudget> = None;
+    // V1.151 P0 (spec §2 H2): capture the post stage-gate slot map (which
+    // accepted entry landed in which slot) for the inspector packet.
+    let mut slot_map: Option<Vec<SlotMapEntry>> = None;
     let world_kb = if let Some(ref world_id) = request.world_id {
         match fetch_world_kb_entries(kb_store, world_id, request).await {
             Ok(entries) if !entries.is_empty() => {
@@ -660,6 +692,7 @@ where
                         },
                     );
                     activation_trace = Some(activation_result.trace);
+                    activation_budget = activation_result.budget;
                     activation_result.matched
                 } else {
                     entries
@@ -675,7 +708,11 @@ where
                     // block (AC-I1b); the gate runs only on the activation-
                     // on path (the off-switch below keeps every entry
                     // unchanged); `None` stage ⇒ all slots on.
-                    render_gated_slots(entries, request.generation_stage)
+                    // V1.151 P0 (spec §2 H2): capture the slot map post
+                    // stage-gate — it reflects what actually rendered.
+                    let (rendered, map) = render_gated_slots(entries, request.generation_stage);
+                    slot_map = Some(map);
+                    rendered
                 } else {
                     // Off-switch (V1.149 escape hatch, lock #1 — "off ⇒ every
                     // candidate entry unchanged", V1.146 flag-off semantics):
@@ -711,6 +748,17 @@ where
     //    resolves `None` — nothing renders, nothing decrements (AC-I1b).
     let directive = apply_directive(directives, request).await;
 
+    // V1.151 P0 (spec §2 H2): the directive occupies the reserved
+    // `moment.directive` slot — a synthetic slot-map entry appears only
+    // when a directive injected this assembly (`moment.directive` is a
+    // top-level section, never a World-KB routing slot).
+    if let Some(d) = &directive {
+        slot_map.get_or_insert_with(Vec::new).push(SlotMapEntry {
+            entry_id: d.directive_id.clone(),
+            slot: "moment.directive".to_string(),
+        });
+    }
+
     let mut ctx = MomentContext {
         stage0_context,
         world_state,
@@ -724,6 +772,11 @@ where
             .as_ref()
             .map_or_else(DirectiveDepth::default, |d| d.insert_depth),
         activation_trace,
+        // V1.151 P0 (spec §2 H3/H6): additive inspector surface — budget
+        // accounting + status-only directive metadata (never the body).
+        slot_map,
+        activation_budget,
+        moment_directive_meta: directive.as_ref().map(MomentDirectiveStatus::from),
     };
 
     // 6. Cross-domain truncation if max_tokens set (the directive section is
@@ -780,11 +833,17 @@ async fn apply_directive<D: DirectiveStore>(
 /// ordered slots, and render. `None` (all entries gated off, e.g.
 /// `system_maintenance`) yields `None` — the caller omits the whole
 /// World-KB section.
+///
+/// Returns the rendered body plus the post-gate slot map (V1.151 P0, spec
+/// §2 H2): which entry landed in which slot **after** the gate ran — the
+/// map reflects what actually rendered, not what activation matched.
 fn render_gated_slots(
     entries: Vec<WorldKbEntry>,
     stage: Option<GenerationStage>,
-) -> Option<String> {
-    slots::render_slots(&slots::route_slots(slots::apply_stage_gate(entries, stage)))
+) -> (Option<String>, Vec<SlotMapEntry>) {
+    let routing = slots::route_slots(slots::apply_stage_gate(entries, stage));
+    let map = routing.to_slot_map();
+    (slots::render_slots(&routing), map)
 }
 
 /// Fetch narrative context (world state + timeline) from the gateway.
@@ -1213,6 +1272,10 @@ mod tests {
             insert_depth: depth,
             ttl_kind: DirectiveTtlKind::Generations,
             clear_on_scene_change: false,
+            ttl_remaining: Some(3),
+            status: "active".to_string(),
+            scope_kind: "work".to_string(),
+            scope_id: "wrk_1".to_string(),
         }
     }
 
@@ -1634,6 +1697,9 @@ mod tests {
             moment_directive: None,
             moment_directive_depth: DirectiveDepth::default(),
             activation_trace: None,
+            slot_map: None,
+            activation_budget: None,
+            moment_directive_meta: None,
         };
 
         let (personality, rest) = ctx.split_stage0_personality();
@@ -1673,6 +1739,9 @@ mod tests {
             moment_directive: None,
             moment_directive_depth: DirectiveDepth::default(),
             activation_trace: None,
+            slot_map: None,
+            activation_budget: None,
+            moment_directive_meta: None,
         };
 
         // apply_cross_domain_truncation uses split_stage0_personality internally

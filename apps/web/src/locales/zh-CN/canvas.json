@@ -774,7 +774,8 @@
       "title": "作品时间轴",
       "description": "作品的叙事与瞬间。切换到大纲进行编辑。",
       "peerNavAria": "同级面板",
-      "outlineLink": "大纲"
+      "outlineLink": "大纲",
+      "inspectorLink": "装配检查器"
     },
     "layerSwitcher": {
       "ariaLabel": "作品时间轴图层",

@@ -422,6 +422,15 @@ function WorkTimelineCanvasHeader({
           >
             {t('workTimeline.header.outlineLink', { defaultValue: 'Outline' })}
           </Link>
+          {/* V1.151 P1 (DF-76) — Assembly Inspector peer link. Read-only
+              moment-level debug surface at `/works/:workId/inspector`; the
+              same peer-nav pattern as the Outline link. */}
+          <Link
+            to={`/works/${encodeURIComponent(workId)}/inspector`}
+            className="rounded-control border border-gray-alpha-400 bg-background-100 px-3 py-1.5 text-button-12 text-gray-900 shadow-elevation-2 hover:bg-gray-alpha-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-700 focus-visible:ring-offset-2"
+          >
+            {t('workTimeline.header.inspectorLink', { defaultValue: 'Assembly Inspector' })}
+          </Link>
         </nav>
       </div>
     </div>

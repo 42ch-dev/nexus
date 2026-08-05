@@ -62,6 +62,15 @@
         "scenes": "scenes",
         "beats": "beats"
       }
+    },
+    "work-inspector": {
+      "label": "Go to Assembly Inspector",
+      "keywords": {
+        "assembly": "assembly",
+        "activation": "activation",
+        "slots": "slots",
+        "budget": "budget"
+      }
     }
   },
   "strategy": {

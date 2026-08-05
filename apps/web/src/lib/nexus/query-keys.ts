@@ -134,6 +134,15 @@ export const queryKeys = {
       detail: (runId: string) => [...queryKeys.compute.runs.details(), runId] as const,
     },
   },
+  // V1.151 P1 — Assembly Inspector (DF-76). The moment packet is read-only
+  // (the UI observes the route, AC-I6), but the directive set/clear mutation
+  // invalidates `inspector.all` so the packet's directive-status section
+  // refreshes after a write (AC-I5).
+  inspector: {
+    all: ['inspector'] as const,
+    moment: (request?: object) =>
+      [...queryKeys.inspector.all, 'moment', request ?? {}] as const,
+  },
   timeline: {
     all: ['timeline'] as const,
     overview: (cursor?: string) =>
