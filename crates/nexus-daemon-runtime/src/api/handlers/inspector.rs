@@ -18,13 +18,17 @@
 //!
 //! ## Directive-store wiring
 //!
-//! The handler wires the relocated composition root
-//! (`nexus_daemon_runtime::directive_store::LocalDirectiveStore`, shared
-//! with the CLI and the `POST /v1/daemon/moment-directive` route — T3, DF-76)
-//! into `assemble_moment_with_directive`, so the packet's `moment_directive`
-//! section reflects an active directive for the scoped World/Work. When no
-//! directive is active that path is **byte-equivalent** to the plain
-//! `assemble_moment` (AC-I1b) — the section renders `"none"` + nulls.
+//! The handler wires the relocated composition root's **read-only variant**
+//! (`nexus_daemon_runtime::directive_store::ReadOnlyDirectiveStore` — W-001 /
+//! QC2-W-001 + QC3-W-1) into `assemble_moment_with_directive`, so the
+//! packet's `moment_directive` section reflects the active directive for the
+//! scoped World/Work (Work scope → World override fallback) **without**
+//! running the post-injection lifecycle (`after_injection` is a no-op): an
+//! inspection poll never burns TTL, never resets the scene anchor
+//! (`last_focused_event_id`), and never writes chapter anchors — the
+//! read-only observability contract holds. When no directive is active that
+//! path is **byte-equivalent** to the plain `assemble_moment` (AC-I1b) —
+//! the section renders `"none"` + nulls.
 //!
 //! ## Response mapping decision
 //!
@@ -47,7 +51,7 @@
 
 use crate::api::errors::NexusApiError;
 use crate::api::handlers::works::read_active_creator_id;
-use crate::directive_store::LocalDirectiveStore;
+use crate::directive_store::ReadOnlyDirectiveStore;
 use crate::workspace::WorkspaceState;
 use axum::{extract::State, Json};
 use nexus_contracts::generated::daemon_api::inspector::{
@@ -56,7 +60,7 @@ use nexus_contracts::generated::daemon_api::inspector::{
 };
 use nexus_local_db::narrative_gateway::SqliteNarrativeGateway;
 use nexus_local_db::narrative_write;
-use nexus_local_db::SqliteKnowledgeStore;
+use nexus_local_db::{get_work, SqliteKnowledgeStore};
 use nexus_moment_context_assembly::{
     assemble_moment_with_directive, build_inspector_packet, GenerationStage, MomentRequest,
     Stage0Assembly,
@@ -69,13 +73,18 @@ use nexus_spoke_adapter::SpokeBackedKbStore;
 /// inspector packet (V1.151 P0, DF-76).
 ///
 /// Guard order (plan lock): tier2 middleware (API key + active creator) →
-/// world ownership (`is_world_owned`, 403) → `MomentRequest` construction
-/// (mirrors the CLI `run_assemble_moment` wiring — creator + world always,
-/// work + generation stage when present) → plain `assemble_moment` over the
-/// same persistent stores the CLI uses (`SqliteNarrativeGateway` /
-/// `SpokeBackedKbStore` / `SqliteKnowledgeStore`) → enriched packet via the
-/// single relocated builder → JSON round-trip onto the generated
-/// `MomentInspectResponse` wire DTO.
+/// world ownership (`is_world_owned`, 403) → work→world binding check
+/// (400 when the Work is bound to a different World, QC2-S-001) →
+/// `MomentRequest` construction (mirrors the CLI `run_assemble_moment`
+/// wiring — creator + world always, work + generation stage when present)
+/// → `assemble_moment_with_directive` over the same persistent stores the
+/// CLI uses (`SqliteNarrativeGateway` / `SpokeBackedKbStore` /
+/// `SqliteKnowledgeStore`) with a **read-only** directive store
+/// (`ReadOnlyDirectiveStore` — W-001 / QC2-W-001 + QC3-W-1: the packet's
+/// `moment_directive` section reflects the active directive without running
+/// the post-injection lifecycle, so observation never burns TTL or writes
+/// anchors) → enriched packet via the single relocated builder → JSON
+/// round-trip onto the generated `MomentInspectResponse` wire DTO.
 #[allow(clippy::missing_errors_doc)]
 pub async fn inspect_moment(
     State(state): State<WorkspaceState>,
@@ -99,6 +108,35 @@ pub async fn inspect_moment(
             resource: format!("world {}", req.world_id.as_str()),
             reason: "you do not own this world".to_string(),
         });
+    }
+
+    // Work→world binding (QC2-S-001): when both ids are given, the Work's
+    // own binding must agree with the request World. Otherwise a Work bound
+    // to World B passed alongside owned World A would resolve B's World
+    // override into A's assembly — the packet would show a directive whose
+    // scope_id does not match the request world_id. A worldless or unknown
+    // Work resolves no override and stays legal (matches the CLI).
+    if let Some(work_id) = req.work_id.as_deref() {
+        let work = get_work(pool, &creator_id, work_id)
+            .await
+            .map_err(|e| NexusApiError::Internal {
+                code: "DATABASE_ERROR".to_string(),
+                message: e.to_string(),
+            })?;
+        if let Some(work) = work {
+            if let Some(bound_world) = work.world_id.as_deref() {
+                if bound_world != req.world_id.as_str() {
+                    return Err(NexusApiError::InvalidInput {
+                        field: "work_id".to_string(),
+                        reason: format!(
+                            "work {work_id} is bound to world {bound_world}, \
+                             not the requested world {}",
+                            req.world_id.as_str()
+                        ),
+                    });
+                }
+            }
+        }
     }
 
     // MomentRequest mirroring the CLI `run_assemble_moment` wiring
@@ -131,15 +169,18 @@ pub async fn inspect_moment(
     }
 
     // Four-domain assembly over the same persistent stores the CLI uses
-    // (context.rs:643-670) + the relocated directive store (T3, DF-76 — see
-    // module docs): the packet's `moment_directive` section reflects an
-    // active directive; none active ⇒ byte-equivalent to plain
+    // (context.rs:643-670) + a **read-only** directive store (W-001 /
+    // QC2-W-001 + QC3-W-1 — see module docs): the packet's
+    // `moment_directive` section reflects the active directive (Work scope
+    // → World override fallback) without running the post-injection
+    // lifecycle, so observation never burns TTL, resets the scene anchor,
+    // or writes chapter anchors. None active ⇒ byte-equivalent to plain
     // `assemble_moment` (AC-I1b). Per-domain failures degrade to omitted
     // sections, they never reject.
     let narrative = SqliteNarrativeGateway::new(pool.clone());
     let kb = SpokeBackedKbStore::new(pool.clone());
     let knowledge = SqliteKnowledgeStore::new(pool.clone());
-    let directives = LocalDirectiveStore::new(pool.clone());
+    let directives = ReadOnlyDirectiveStore::new(pool.clone());
     let ctx =
         assemble_moment_with_directive(&request, &narrative, &kb, &knowledge, &directives).await;
 

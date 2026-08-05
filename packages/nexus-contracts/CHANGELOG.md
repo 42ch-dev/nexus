@@ -10,9 +10,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **Moment inspector + directive wire contracts (V1.151 P0 DF-76):** added 3 additive schemas under `daemon-api/inspector/` for the two new Daemon HTTP surfaces (`POST /v1/daemon/inspector/moment`, `POST /v1/daemon/moment-directive`):
-  - `MomentInspectRequest` — `world_id` (required), optional `work_id`, optional `generation_stage` (`intake` | `research` | `produce` | `review` | `persist` | `unspecified`; maps via `GenerationStage::as_str`/`parse`, unknown → `unspecified`)
-  - `MomentInspectResponse` — mirrors the enriched inspector packet from `nexus-moment-context-assembly::inspector::build_inspector_packet` 1:1: spoke `modules` (`placement[]` + `activation_trace[]`), `slot_map[]` (`entry_id` → slot id), `budget` (token estimates + nullable `cap`/`remaining`), `moment_directive` — **status/metadata only, no body field by construction (AC-I3)**; root `additionalProperties: true` so product-local sections may grow
-  - `MomentDirectiveRequest` — `action` (`set` | `show` | `clear`) + scoped `scope` (`kind`: `work` | `world`, `id`), optional `body`, `insert_depth` (`head` | `mid` | `tail`), `ttl_kind` (`generations` | `chapters`), `ttl_n` (≥1), `clear_on_scene_change`, `replace`; validation mirrors CLI `handle_set`
+  - `MomentInspectRequest` — `world_id` (required), optional `work_id`, optional `generation_stage` (`intake` | `research` | `produce` | `review` | `persist` | `work_maintenance` | `system_maintenance` | `unspecified`; maps via `GenerationStage::as_str`/`parse`, unknown → `unspecified`)
+  - `MomentInspectResponse` — mirrors the enriched inspector packet from `nexus-moment-context-assembly::inspector::build_inspector_packet` 1:1: spoke `modules` (`placement[]` + `activation_trace[]`), `slot_map[]` (`entry_id` → slot id), `budget` (token estimates + nullable `cap`/`remaining`), `moment_directive` — **status/metadata only, no body field by construction (AC-I3)**; root `additionalProperties: false` per the H1 locked pattern (product-local sections grow by extending schema + codegen together, never silently)
+  - `MomentDirectiveRequest` — `action` (`set` | `show` | `clear`) + scoped `scope` (`kind`: `work` | `world`, `id`), optional `body`, `insert_depth` (`head` | `mid` | `tail`), `ttl_kind` (`generations` | `chapters`), `ttl_remaining` (≥1; input name matches the read-back column per the spec §5 H5 lock), `clear_on_scene_change`, `replace`; validation mirrors CLI `handle_set`
 
 ### Consumer Impact
 

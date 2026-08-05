@@ -590,6 +590,10 @@ where
 /// - `D`: A [`DirectiveStore`] implementation (composition root adapter over
 ///   `nexus-local-db`; in-memory stub in tests).
 #[allow(clippy::future_not_send)]
+// Four-domain assembly orchestrator (stage-0 → world_state → timeline →
+// world-kb → user-knowledge → directive) — the per-section blocks keep the
+// function at ~114 lines; splitting would scatter one assembly's steps.
+#[allow(clippy::too_many_lines)]
 pub async fn assemble_moment_with_directive<G, K, S, D>(
     request: &MomentRequest,
     narrative: &G,

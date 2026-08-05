@@ -11,16 +11,20 @@
 //!
 //! - `set` validates exactly like the CLI `handle_set`
 //!   (`apps/nexus42/.../moment_directive.rs`): non-empty body after trim,
-//!   exactly one TTL kind with `ttl_n >= 1`, known `insert_depth`, explicit
+//!   exactly one TTL kind with `ttl_remaining >= 1` (wire name per the spec
+//!   §5 H5 lock, W-3 / QC1-F-001), known `insert_depth`, explicit
 //!   `replace` when a directive is already active in the scope (no silent
 //!   overwrite — the unique partial index
 //!   `moment_directives_one_active_per_scope` enforces it). Returns the
 //!   inserted row.
-//! - `show` reads the active row for the scope (`get_active_for_work` /
-//!   `get_active_for_world` by `scope.kind`) and returns it **incl. body**
-//!   — this is the author surface (DF-76), not the inspector packet
-//!   (AC-I3: the packet's `moment_directive` section stays status-only).
-//!   No active directive → `{}` (mirrors the CLI's "No active Moment
+//! - `show` resolves the **effective** directive for the scope (spec §3.2,
+//!   Work-wins / World-override — mirrors the CLI
+//!   `resolve_effective_for_show`, W-2 / QC3): a Work scope returns the
+//!   Work's own directive, else the bound World's override; a World scope
+//!   returns the World override itself. Returns the row **incl. body** —
+//!   this is the author surface (DF-76), not the inspector packet (AC-I3:
+//!   the packet's `moment_directive` section stays status-only).
+//!   No effective directive → `{}` (mirrors the CLI's "No active Moment
 //!   Directive for this scope." success message).
 //! - `clear` soft-deletes the active row (row retained for DF-76
 //!   inspection). Returns `{}`.
@@ -44,6 +48,7 @@
 
 use crate::api::errors::NexusApiError;
 use crate::api::handlers::works::read_active_creator_id;
+use crate::directive_store::now_ms;
 use crate::workspace::WorkspaceState;
 use axum::{extract::State, Json};
 use nexus_contracts::generated::daemon_api::inspector::moment_directive_request::{
@@ -131,16 +136,17 @@ async fn set(
     if body.is_empty() {
         return Err(validation("body", "must be non-empty (after trimming whitespace)"));
     }
-    // Exactly one TTL kind, count >= 1 (`NonZeroU64` makes ttl_n >= 1 by
-    // construction; the signed cast mirrors the CLI's `i64 --ttl-*` flags).
-    let (Some(ttl_kind), Some(ttl_n)) = (req.ttl_kind, req.ttl_n) else {
+    // Exactly one TTL kind, count >= 1 (`NonZeroU64` makes ttl_remaining >= 1
+    // by construction; the signed cast mirrors the CLI's `i64 --ttl-*` flags).
+    // Wire name `ttl_remaining` per the spec §5 H5 lock (W-3 / QC1-F-001).
+    let (Some(ttl_kind), Some(ttl_count)) = (req.ttl_kind, req.ttl_remaining) else {
         return Err(validation(
             "ttl_kind",
-            "exactly one TTL kind with a positive ttl_n is required for set",
+            "exactly one TTL kind with a positive ttl_remaining is required for set",
         ));
     };
-    let ttl_remaining = i64::try_from(ttl_n.get())
-        .map_err(|_| validation("ttl_n", "must fit in a signed 64-bit count"))?;
+    let ttl_remaining = i64::try_from(ttl_count.get())
+        .map_err(|_| validation("ttl_remaining", "must fit in a signed 64-bit count"))?;
     // Known insert depth (closed wire enum; required for set).
     let Some(insert_depth) = req.insert_depth else {
         return Err(validation("insert_depth", "is required for set"));
@@ -186,8 +192,15 @@ async fn set(
     Ok(Json(row_json(&row)?))
 }
 
-/// `show` — read the active row for the scope (incl. body, the author
-/// surface); `{}` when no directive is active.
+/// `show` — resolve the **effective** directive for the scope (incl. body,
+/// the author surface); `{}` when nothing is effective.
+///
+/// Mirrors the CLI `resolve_effective_for_show`
+/// (`apps/nexus42/.../moment_directive.rs:298-324`, spec §3.2 — W-2 / QC3):
+/// for a Work scope the Work's own directive wins; with none, the bound
+/// World's override is inherited (the returned row's `scope_kind` /
+/// `scope_id` then name the inherited source). A World scope returns the
+/// World override itself.
 async fn show(
     pool: &sqlx::SqlitePool,
     creator_id: &str,
@@ -195,11 +208,31 @@ async fn show(
     scope_id: &str,
 ) -> Result<Json<Value>, NexusApiError> {
     let row = if kind == scope_kind::WORK {
-        get_active_for_work(pool, creator_id, scope_id).await
+        match get_active_for_work(pool, creator_id, scope_id).await {
+            // Work-wins.
+            Ok(Some(row)) => Some(row),
+            // Confirmed no Work directive — inherit the bound World's
+            // override (the ownership gate already verified the Work, so
+            // `get_work` resolves; a worldless Work has no override).
+            Ok(None) => {
+                let world_id = get_work(pool, creator_id, scope_id)
+                    .await
+                    .map_err(|e| database_error(&e))?
+                    .and_then(|w| w.world_id);
+                match world_id {
+                    Some(world_id) => get_active_for_world(pool, creator_id, &world_id)
+                        .await
+                        .map_err(|e| database_error(&e))?,
+                    None => None,
+                }
+            }
+            Err(e) => return Err(database_error(&e)),
+        }
     } else {
-        get_active_for_world(pool, creator_id, scope_id).await
-    }
-    .map_err(|e| database_error(&e))?;
+        get_active_for_world(pool, creator_id, scope_id)
+            .await
+            .map_err(|e| database_error(&e))?
+    };
 
     match row {
         Some(row) => Ok(Json(row_json(&row)?)),
@@ -263,7 +296,5 @@ fn generate_directive_id() -> String {
     format!("dir_{}", uuid::Uuid::new_v4())
 }
 
-/// Unix epoch milliseconds.
-fn now_ms() -> i64 {
-    chrono::Utc::now().timestamp_millis()
-}
+// `now_ms` — shared crate-level helper (`crate::directive_store::now_ms`,
+// QC3-S-2 dedupe).

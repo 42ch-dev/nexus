@@ -168,7 +168,7 @@ fn set_body() -> Value {
         "body": "Keep the prose terse.",
         "insert_depth": "mid",
         "ttl_kind": "generations",
-        "ttl_n": 3,
+        "ttl_remaining": 3,
     })
 }
 
@@ -272,7 +272,7 @@ async fn set_show_world_scope_round_trip() {
             "body": "World override.",
             "insert_depth": "head",
             "ttl_kind": "chapters",
-            "ttl_n": 5,
+            "ttl_remaining": 5,
         }))
         .await;
     assert_eq!(resp.status_code(), StatusCode::OK, "body={}", resp.text());
@@ -415,6 +415,83 @@ async fn show_without_active_directive_returns_empty_object() {
     assert_eq!(resp.json::<Value>(), json!({}), "no directive → {{}}");
 }
 
+/// W-2 (QC3): `show` for a Work scope resolves the **effective** directive —
+/// the Work's own wins; with none, the bound World's override is inherited
+/// (mirrors the CLI `resolve_effective_for_show`). Both halves are proven:
+/// work-wins over a present World override, and inheritance once the Work's
+/// own directive is cleared.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn show_work_scope_resolves_effective_directive() {
+    let ctx = ctx().await;
+
+    // Seed a World-scoped override on the owned World.
+    let resp = ctx
+        .server
+        .post("/v1/daemon/moment-directive")
+        .json(&json!({
+            "action": "set",
+            "scope": { "kind": "world", "id": OWNED_WORLD },
+            "body": "World override.",
+            "insert_depth": "head",
+            "ttl_kind": "generations",
+            "ttl_remaining": 7,
+        }))
+        .await;
+    assert_eq!(resp.status_code(), StatusCode::OK, "body={}", resp.text());
+
+    // Seed the Work's own directive — it must win over the World override.
+    let resp = ctx
+        .server
+        .post("/v1/daemon/moment-directive")
+        .json(&set_body())
+        .await;
+    assert_eq!(resp.status_code(), StatusCode::OK, "body={}", resp.text());
+    let set: Value = resp.json();
+    let work_directive_id = set["directive_id"]
+        .as_str()
+        .expect("directive_id")
+        .to_string();
+
+    // show on the Work scope → the Work's own directive (work-wins).
+    let resp = ctx
+        .server
+        .post("/v1/daemon/moment-directive")
+        .json(&json!({
+            "action": "show",
+            "scope": { "kind": "work", "id": OWNED_WORK },
+        }))
+        .await;
+    assert_eq!(resp.status_code(), StatusCode::OK, "body={}", resp.text());
+    let shown: Value = resp.json();
+    assert_eq!(shown["directive_id"], work_directive_id, "work directive must win: {shown}");
+    assert_eq!(shown["scope_kind"], "work", "source scope: {shown}");
+
+    // Clear the Work's own directive → show now inherits the World override.
+    let resp = ctx
+        .server
+        .post("/v1/daemon/moment-directive")
+        .json(&json!({
+            "action": "clear",
+            "scope": { "kind": "work", "id": OWNED_WORK },
+        }))
+        .await;
+    assert_eq!(resp.status_code(), StatusCode::OK, "body={}", resp.text());
+
+    let resp = ctx
+        .server
+        .post("/v1/daemon/moment-directive")
+        .json(&json!({
+            "action": "show",
+            "scope": { "kind": "work", "id": OWNED_WORK },
+        }))
+        .await;
+    assert_eq!(resp.status_code(), StatusCode::OK, "body={}", resp.text());
+    let shown: Value = resp.json();
+    assert_eq!(shown["body"], "World override.", "inherited override: {shown}");
+    assert_eq!(shown["scope_kind"], "world", "inherited source scope: {shown}");
+    assert_eq!(shown["scope_id"], OWNED_WORLD, "inherited source scope id: {shown}");
+}
+
 /// Validation mirrors CLI `handle_set`: empty body → 400 `invalid_input`.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn set_empty_body_rejects_400() {
@@ -429,7 +506,7 @@ async fn set_empty_body_rejects_400() {
             "body": "   ",
             "insert_depth": "mid",
             "ttl_kind": "generations",
-            "ttl_n": 3,
+            "ttl_remaining": 3,
         }))
         .await;
     assert_error_envelope(&resp, StatusCode::BAD_REQUEST, "invalid_input");
@@ -456,7 +533,7 @@ async fn foreign_scope_rejects_403() {
             "body": "Nope.",
             "insert_depth": "mid",
             "ttl_kind": "generations",
-            "ttl_n": 3,
+            "ttl_remaining": 3,
         }))
         .await;
     assert_error_envelope(&resp, StatusCode::FORBIDDEN, "forbidden");
@@ -471,7 +548,7 @@ async fn foreign_scope_rejects_403() {
             "body": "Nope.",
             "insert_depth": "mid",
             "ttl_kind": "generations",
-            "ttl_n": 3,
+            "ttl_remaining": 3,
         }))
         .await;
     assert_error_envelope(&resp, StatusCode::FORBIDDEN, "forbidden");

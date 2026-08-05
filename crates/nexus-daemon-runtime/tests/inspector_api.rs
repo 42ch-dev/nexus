@@ -28,6 +28,8 @@ use nexus_daemon_runtime::api;
 use nexus_daemon_runtime::api::auth_middleware::DaemonApiConfig;
 use nexus_daemon_runtime::test_utils::{self, TestTempRoot};
 use nexus_daemon_runtime::workspace::WorkspaceState;
+use nexus_local_db::moment_directive::get_by_id;
+use nexus_local_db::{create_work, WorkRecord};
 use serde_json::{json, Value};
 
 /// World owned by `test_creator` (seeded by `seed_test_creator_and_world`).
@@ -125,6 +127,49 @@ async fn seed_inspector_lore(pool: &sqlx::SqlitePool) {
 /// `generation_stage` optional.
 fn inspect_body(world_id: &str) -> Value {
     json!({ "world_id": world_id })
+}
+
+/// Seed a Work owned by `test_creator` bound to the foreign World — the
+/// binding-mismatch fixture for the QC2-S-001 work→world validation.
+async fn seed_mismatched_work(pool: &sqlx::SqlitePool) {
+    create_work(
+        pool,
+        &WorkRecord {
+            work_id: "wrk_bound_elsewhere".to_string(),
+            creator_id: "test_creator".to_string(),
+            workspace_slug: "ws".to_string(),
+            status: "active".to_string(),
+            title: "Work bound to a foreign world".to_string(),
+            long_term_goal: "Write a novel.".to_string(),
+            initial_idea: "An idea.".to_string(),
+            creative_brief: None,
+            intake_status: "complete".to_string(),
+            world_id: Some(FOREIGN_WORLD.to_string()),
+            story_ref: None,
+            inspiration_log: "[]".to_string(),
+            primary_preset_id: "novel-writing".to_string(),
+            schedule_ids: "[]".to_string(),
+            created_at: "2026-08-01T00:00:00Z".to_string(),
+            updated_at: "2026-08-01T00:00:00Z".to_string(),
+            current_stage: "produce".to_string(),
+            stage_status: "complete".to_string(),
+            work_profile: Some("novel".to_string()),
+            work_ref: Some("wrk_bound_elsewhere".to_string()),
+            total_planned_chapters: Some(10),
+            current_chapter: 1,
+            auto_chain_enabled: true,
+            driver_schedule_id: None,
+            auto_chain_interrupted: false,
+            auto_review_master_on_timeout: false,
+            runtime_lock_holder: None,
+            runtime_lock_acquired_at: None,
+            completion_locked_at: None,
+            novel_completion_status: None,
+            lineage_from_work_id: None,
+        },
+    )
+    .await
+    .expect("seed mismatched work");
 }
 
 /// Seed an active World-scoped Moment Directive for the owned World (T3
@@ -264,6 +309,79 @@ async fn inspect_moment_reflects_active_directive() {
     assert!(
         !directive.contains_key("body"),
         "directive body must never appear on the wire (AC-I3): {body}"
+    );
+}
+
+/// W-001 / QC2-W-001 + QC3-W-1 regression: the inspector route is a
+/// read-only observation surface — repeated inspections of an active
+/// directive must NOT mutate directive lifecycle state. The packet reflects
+/// the directive (status/metadata only, AC-I3), the shown `ttl_remaining`
+/// stays at the persisted value across calls, and the DB row is untouched
+/// (no TTL burn, no scene-anchor write) — the read-only store never runs
+/// `after_injection`.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn inspect_moment_does_not_mutate_directive_state() {
+    let ctx = ctx().await;
+    seed_active_world_directive(&ctx.pool).await;
+    let directive_id = "dir_inspector_active";
+
+    for _ in 0..2 {
+        let resp = ctx
+            .server
+            .post("/v1/daemon/inspector/moment")
+            .json(&inspect_body(OWNED_WORLD))
+            .await;
+        assert_eq!(resp.status_code(), StatusCode::OK, "body={}", resp.text());
+        let body: Value = resp.json();
+        let directive = body["moment_directive"]
+            .as_object()
+            .expect("moment_directive object");
+        assert_eq!(directive["status"], "active", "body={body}");
+        assert_eq!(
+            directive["ttl_remaining"], 5,
+            "packet must show the as-loaded TTL on every call (no decrement): {body}"
+        );
+        assert!(
+            !directive.contains_key("body"),
+            "directive body must never appear on the wire (AC-I3): {body}"
+        );
+    }
+
+    // No lifecycle writes: TTL untouched, no scene anchor recorded.
+    let row = get_by_id(&ctx.pool, directive_id)
+        .await
+        .expect("read directive row")
+        .expect("directive row still present");
+    assert_eq!(row.ttl_remaining, 5, "inspection must not burn TTL (W-001)");
+    assert_eq!(
+        row.last_focused_event_id, None,
+        "inspection must not write a scene anchor (W-001)"
+    );
+}
+
+/// QC2-S-001: when both `work_id` and `world_id` are given, a Work bound to
+/// a *different* World must be rejected 400 — otherwise the mismatched
+/// Work's World override would leak into the requested World's assembly and
+/// the packet would show a directive whose `scope_id` disagrees with the
+/// request `world_id`.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn inspect_moment_rejects_work_bound_to_other_world() {
+    let ctx = ctx().await;
+    seed_mismatched_work(&ctx.pool).await;
+
+    let resp = ctx
+        .server
+        .post("/v1/daemon/inspector/moment")
+        .json(&json!({
+            "world_id": OWNED_WORLD,
+            "work_id": "wrk_bound_elsewhere",
+        }))
+        .await;
+    assert_error_envelope(&resp, StatusCode::BAD_REQUEST, "invalid_input");
+    assert!(
+        resp.text().contains("bound to world"),
+        "message must name the binding mismatch: {}",
+        resp.text()
     );
 }
 

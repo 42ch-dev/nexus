@@ -108,10 +108,11 @@ pub struct SlotRouting {
     pub post_history: Vec<WorldKbEntry>,
 }
 
-/// One accepted entry's slot assignment — the inspector packet `slot_map`
-/// row (V1.151 P0, DF-76 spec §2 H2): `entry_id` → slot id
-/// (`world.before` | `default` | `world.after` | `kb.outlet.<name>` |
-/// `style.post_history` | `moment.directive`).
+/// One accepted entry's slot assignment.
+///
+/// The inspector packet `slot_map` row (V1.151 P0, DF-76 spec §2 H2):
+/// `entry_id` → slot id (`world.before` | `default` | `world.after` |
+/// `kb.outlet.<name>` | `style.post_history` | `moment.directive`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SlotMapEntry {
     /// The routed entry's stable id.

@@ -35,9 +35,9 @@ export interface MomentDirectiveRequest {
    */
   ttl_kind?: "generations" | "chapters";
   /**
-   * TTL count.
+   * TTL count (spec §5 H5 lock: the input name matches the read-back `ttl_remaining` column).
    */
-  ttl_n?: number;
+  ttl_remaining?: number;
   /**
    * Clear when the focused moment anchor changes between assembles.
    */

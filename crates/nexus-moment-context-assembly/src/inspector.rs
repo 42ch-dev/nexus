@@ -32,6 +32,10 @@ use crate::moment::MomentContext;
 /// `slot_map` / `budget` / `moment_directive` are additive product-local
 /// sections (spec §2). All sections are always present with nullable/empty
 /// values so consumers can rely on a fixed shape.
+// The Some/None arms are two full `json!` object literals (the None arm
+// mirrors the Some shape with nulls); a `match` reads clearer than a
+// `map_or_else` closure pair here.
+#[allow(clippy::option_if_let_else)]
 #[must_use]
 pub fn build_inspector_packet(ctx: &MomentContext) -> serde_json::Value {
     let trace = ctx.activation_trace.as_deref().unwrap_or(&[]);

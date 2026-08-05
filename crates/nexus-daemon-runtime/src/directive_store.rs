@@ -68,6 +68,53 @@ impl DirectiveStore for LocalDirectiveStore {
     }
 }
 
+/// Read-only [`DirectiveStore`] for the inspector route (W-001).
+///
+/// Resolves + renders the active directive exactly like
+/// [`LocalDirectiveStore`] but **never** runs the post-injection lifecycle —
+/// [`DirectiveStore::after_injection`] is a no-op. The inspector is an
+/// observation surface with a hard "no writes" contract
+/// (`api/handlers/inspector.rs`): a poll must not burn TTL, reset the scene
+/// anchor (`last_focused_event_id`), or write chapter anchors. The
+/// `DirectiveStore` trait already separates `load_active` (read) from
+/// `after_injection` (write), so this wrapper is the whole fix — the packet
+/// shows the true remaining TTL as persisted at load and inspection never
+/// mutates directive state.
+#[derive(Debug, Clone)]
+pub struct ReadOnlyDirectiveStore {
+    pool: SqlitePool,
+}
+
+impl ReadOnlyDirectiveStore {
+    /// Create the read-only adapter over a shared pool.
+    #[must_use]
+    pub const fn new(pool: SqlitePool) -> Self {
+        Self { pool }
+    }
+}
+
+impl DirectiveStore for ReadOnlyDirectiveStore {
+    async fn load_active(
+        &self,
+        creator_id: Option<&str>,
+        work_id: Option<&str>,
+        world_id: Option<&str>,
+    ) -> Option<ActiveDirective> {
+        let creator_id = creator_id?;
+        let row = resolve_active_row(&self.pool, creator_id, work_id, world_id).await?;
+        map_to_active_directive(row)
+    }
+
+    async fn after_injection(
+        &self,
+        _directive_id: &str,
+        _event_id: Option<&str>,
+        _work_id: Option<&str>,
+    ) {
+        // Read-only: the inspector never advances the directive lifecycle.
+    }
+}
+
 /// Scope resolution (spec §3.2 — Work wins / World-override fallback):
 ///
 /// 1. If the Work has a Work-scoped directive, use it.
@@ -174,7 +221,9 @@ fn map_to_active_directive(row: MomentDirectiveRow) -> Option<ActiveDirective> {
         // to MCA for the inspector packet — status/metadata only, never the
         // body (AC-I3). `ttl_remaining` is `i64` on the row; only non-
         // negative values surface (an active row's TTL never goes negative).
-        ttl_remaining: u32::try_from(row.ttl_remaining).ok(),
+        // `u64` matches the wire input width (NonZeroU64) so counts above
+        // u32::MAX render instead of silently nulling (QC3-S-1).
+        ttl_remaining: u64::try_from(row.ttl_remaining).ok(),
         status: row.status,
         scope_kind: row.scope_kind,
         scope_id: row.scope_id,
@@ -277,8 +326,9 @@ async fn after_injection_lifecycle(
         }
     }
 }
-/// Unix epoch milliseconds.
-fn now_ms() -> i64 {
+/// Unix epoch milliseconds — crate-level helper shared with
+/// `api::handlers::directive` (QC3-S-2 dedupe).
+pub(crate) fn now_ms() -> i64 {
     chrono::Utc::now().timestamp_millis()
 }
 

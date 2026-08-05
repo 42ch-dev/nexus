@@ -43,10 +43,10 @@
       "enum": ["generations", "chapters"],
       "description": "TTL kind: count down by assembling generations or chapter advances."
     },
-    "ttl_n": {
+    "ttl_remaining": {
       "type": "integer",
       "minimum": 1,
-      "description": "TTL count."
+      "description": "TTL count (spec §5 H5 lock: the input name matches the read-back `ttl_remaining` column)."
     },
     "clear_on_scene_change": {
       "type": "boolean",

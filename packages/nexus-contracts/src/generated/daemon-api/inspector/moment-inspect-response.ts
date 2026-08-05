@@ -5,7 +5,7 @@
  */
 
 /**
- * Response for POST /v1/daemon/inspector/moment (V1.151 P0 DF-76). Mirrors the enriched inspector packet emitted by nexus-moment-context-assembly::inspector::build_inspector_packet 1:1: spoke `modules` (placement + activation_trace), plus three additive product-local sections — `slot_map`, `budget`, `moment_directive` (status/metadata only; the directive body is NEVER on the wire — AC-I3). All sections are always present with nullable/empty values; root keeps additionalProperties: true so product-local sections may grow.
+ * Response for POST /v1/daemon/inspector/moment (V1.151 P0 DF-76). Mirrors the enriched inspector packet emitted by nexus-moment-context-assembly::inspector::build_inspector_packet 1:1: spoke `modules` (placement + activation_trace), plus three additive product-local sections — `slot_map`, `budget`, `moment_directive` (status/metadata only; the directive body is NEVER on the wire — AC-I3). All sections are always present with nullable/empty values. Root `additionalProperties: false` per the H1 locked pattern: the schema is the SSOT — product-local sections grow by extending schema + codegen together, and the handler's packet round-trip fails loudly (500) on unknown root sections instead of silently dropping them.
  */
 export interface MomentInspectResponse {
   /**
@@ -118,5 +118,4 @@ export interface MomentInspectResponse {
      */
     status: string;
   };
-  [k: string]: unknown | undefined;
 }
