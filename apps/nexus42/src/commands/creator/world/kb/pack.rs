@@ -1258,6 +1258,192 @@ mod tests {
         );
     }
 
+
+    /// V1.152 P2 dogfood: export→import round-trip on activation-carrying entries +
+    /// relations preserves provenance, `modules.activation`, and skip-idempotency.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn dogfood_pack_round_trip_preserves_activation_and_relations() {
+        const WORLD_A: &str = "wld_dogfood_a";
+        const WORLD_A_TITLE: &str = "Dogfood World A";
+        const WORLD_B: &str = "wld_dogfood_b";
+        const WORLD_B_TITLE: &str = "Dogfood World B";
+
+        let dir_a = tempfile::tempdir().unwrap();
+        let pool_a = crate::db::Schema::init(&dir_a.path().join("state.db"))
+            .await
+            .unwrap();
+
+        // SAFETY: test-only INSERT.
+        sqlx::query(
+            "INSERT OR IGNORE INTO creators (creator_id, display_name, status, cached_at, data) \
+             VALUES (?, ?, 'active', datetime('now'), '{}')",
+        )
+        .bind(OWNER)
+        .bind(OWNER_NAME)
+        .execute(&pool_a)
+        .await
+        .unwrap();
+
+        nexus_local_db::kb_store::seed::world(
+            &pool_a,
+            WORLD_A,
+            OWNER,
+            WORLD_A_TITLE,
+            "dogfood-a",
+            "private",
+            "manual",
+        )
+        .await;
+
+        let store_a = SqliteKbStore::new(pool_a.clone());
+        let mut entry_ids = Vec::new();
+        for (name, key) in [
+            ("Alice", "alice"),
+            ("Bob", "bob"),
+            ("Carol", "carol"),
+        ] {
+            let mut kb = WorldKbEntry::new(WORLD_A, BlockType::Character, name);
+            kb.body = Some(WorldKbBody {
+                summary: Some(format!("{name} summary")),
+                ..Default::default()
+            });
+            kb.modules = Some(json!({
+                "activation": {"key": [key], "logic": "and_any"}
+            }));
+            let res = store_a.insert_knowledge_entry(kb).await.unwrap();
+            entry_ids.push(res.entry_id);
+        }
+
+        let rel_id = "rel_dogfood_001".to_string();
+        sqlx::query(
+            "INSERT INTO kb_relationships \
+                (relationship_id, world_id, source_entity_id, target_entity_id, \
+                 relation_type, symmetric, confidence, source_anchor_ids, metadata, \
+                 created_at, updated_at, revision, needs_review, source) \
+             VALUES (?, ?, ?, ?, 'related_to', 0, NULL, '[]', '{}', \
+                     datetime('now'), datetime('now'), 1, 0, 'manual')",
+        )
+        .bind(&rel_id)
+        .bind(WORLD_A)
+        .bind(&entry_ids[0])
+        .bind(&entry_ids[1])
+        .execute(&pool_a)
+        .await
+        .unwrap();
+
+        let (pack_path, _pack_dir) = export_to_file_custom_world(&pool_a, WORLD_A).await;
+        let pack_value: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&pack_path).unwrap()).unwrap();
+        let parsed = parse_pack(&pack_value).expect("exported pack must parse");
+
+        let dir_b = tempfile::tempdir().unwrap();
+        let pool_b = crate::db::Schema::init(&dir_b.path().join("state.db"))
+            .await
+            .unwrap();
+
+        sqlx::query(
+            "INSERT OR IGNORE INTO creators (creator_id, display_name, status, cached_at, data) \
+             VALUES (?, ?, 'active', datetime('now'), '{}')",
+        )
+        .bind(OWNER)
+        .bind(OWNER_NAME)
+        .execute(&pool_b)
+        .await
+        .unwrap();
+
+        nexus_local_db::kb_store::seed::world(
+            &pool_b,
+            WORLD_B,
+            OWNER,
+            WORLD_B_TITLE,
+            "dogfood-b",
+            "private",
+            "manual",
+        )
+        .await;
+
+        let summary = import_pack(
+            &pool_b,
+            WORLD_B,
+            OWNER,
+            parsed.clone(),
+            ConflictPolicy::Skip,
+            false,
+            false,
+        )
+        .await
+        .expect("first import must succeed");
+
+        assert_eq!(
+            summary.entries.created,
+            3,
+            "first import must create all seeded entries"
+        );
+        assert!(
+            summary.relations.created >= 1,
+            "first import must create at least one relation"
+        );
+
+        let store_b = SqliteKbStore::new(pool_b.clone());
+        let entries_b = store_b.list_by_world(WORLD_B).await.unwrap();
+        assert_eq!(entries_b.len(), 3);
+        for entry in &entries_b {
+            assert_eq!(
+                entry.source_provenance_kind.as_deref(),
+                Some(IMPORT_PROVENANCE),
+                "imported entry {} must carry pack_import provenance",
+                entry.entry_id
+            );
+        }
+
+        let entries_a = store_a.list_by_world(WORLD_A).await.unwrap();
+        for name in ["Alice", "Bob", "Carol"] {
+            let a_modules = entries_a
+                .iter()
+                .find(|e| e.canonical_name == name)
+                .expect("World A entry")
+                .modules
+                .clone();
+            let b_modules = entries_b
+                .iter()
+                .find(|e| e.canonical_name == name)
+                .expect("World B entry")
+                .modules
+                .clone();
+            assert_eq!(
+                a_modules, b_modules,
+                "modules.activation must deep-equal A→B for {name}"
+            );
+        }
+
+        assert_eq!(count_relations(&pool_b, WORLD_B).await, 1);
+
+        let summary2 = import_pack(
+            &pool_b,
+            WORLD_B,
+            OWNER,
+            parsed,
+            ConflictPolicy::Skip,
+            false,
+            false,
+        )
+        .await
+        .expect("re-import must succeed");
+
+        assert_eq!(
+            summary2.entries.created,
+            0,
+            "skip re-import must not create entries"
+        );
+        assert_eq!(
+            summary2.relations.created,
+            0,
+            "skip re-import must not create relations"
+        );
+        assert_eq!(count_entries(&pool_b, WORLD_B).await, 3);
+        assert_eq!(count_relations(&pool_b, WORLD_B).await, 1);
+    }
+
     #[tokio::test]
     async fn import_surfaces_clean_error_when_world_missing() {
         let dir = tempfile::tempdir().unwrap();
