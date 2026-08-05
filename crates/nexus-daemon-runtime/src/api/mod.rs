@@ -568,6 +568,20 @@ fn check_routes() -> Router<WorkspaceState> {
     Router::new().route("/v1/daemon/check", post(handlers::check::run_check))
 }
 
+/// Inspector routes — enriched MCA assembly inspector packet (V1.151 P0;
+/// DF-76).
+///
+/// Mounted in tier2 (`require_api_key` + `require_active_creator`) because
+/// the assembly runs over Worlds the active creator owns (`is_world_owned`
+/// guard in the handler). The route observes `assemble_moment` output only —
+/// it returns the packet, it never writes.
+fn inspector_routes() -> Router<WorkspaceState> {
+    Router::new().route(
+        "/v1/daemon/inspector/moment",
+        post(handlers::inspector::inspect_moment),
+    )
+}
+
 /// Profile-scoped (Tier-2) routes — require active creator + lazy-open pool.
 fn tier2_routes() -> Router<WorkspaceState> {
     Router::new()
@@ -593,6 +607,7 @@ fn tier2_routes() -> Router<WorkspaceState> {
         .merge(timeline_routes())
         .merge(compute_invoke_routes())
         .merge(check_routes())
+        .merge(inspector_routes())
 }
 
 /// Create the Daemon API router
