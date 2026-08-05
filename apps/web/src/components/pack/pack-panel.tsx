@@ -214,6 +214,10 @@ export function PackPanel({ worldId }: PackPanelProps) {
               // Results belong to the previously imported file — drop them
               // when the author picks a different one.
               setLastSummary(null);
+              // A failed mutation keeps isError until reset — the new file
+              // has not been submitted yet, so the stale error banner from
+              // the previous attempt must not linger.
+              importPack.reset();
             }}
             className="block w-full max-w-sm text-copy-13 text-gray-900 file:mr-3 file:rounded-control file:border-0 file:bg-gray-alpha-100 file:px-3 file:py-1.5 file:text-button-12 file:text-gray-1000 hover:file:bg-gray-alpha-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-700 focus-visible:ring-offset-2"
             data-testid="pack-file-input"

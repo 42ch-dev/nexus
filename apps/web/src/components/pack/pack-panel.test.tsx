@@ -86,6 +86,12 @@ const PACK_FILE = new File(
   { type: 'application/json' },
 );
 
+const PACK_FILE_B = new File(
+  [JSON.stringify({ modules: { pack: { title: 'Test Pack B' } }, entries: [], relations: [] })],
+  'test-pack-b.json',
+  { type: 'application/json' },
+);
+
 const EXPORT_FIXTURE: PackExportResponse = {
   modules: { pack: { title: 'My World' } },
   entries: [{ id: 'e1' }],
@@ -304,6 +310,72 @@ describe('PackPanel — import error states (T5)', () => {
     expect(await screen.findByTestId('pack-import-errors')).toHaveTextContent(
       'You do not have permission to import into this World.',
     );
+    expect(screen.queryByTestId('pack-import-results')).toBeNull();
+  });
+});
+
+describe('PackPanel — import guards & state lifecycle (QC fix wave)', () => {
+  it('clears the stale import error when a new file is picked', async () => {
+    packMock.importMutationFn = async () => {
+      throw new NexusClientError(403, 'forbidden', 'You do not own this World');
+    };
+    const user = userEvent.setup();
+    renderPanel();
+
+    // File A fails with 403 → error banner renders.
+    await uploadAndSubmit(user);
+    expect(await screen.findByTestId('pack-import-errors')).toHaveTextContent(
+      'You do not have permission to import into this World.',
+    );
+
+    // Picking file B must drop the previous attempt's error — the banner
+    // belongs to the old file, not the new (unsubmitted) one.
+    await user.upload(screen.getByTestId('pack-file-input'), PACK_FILE_B);
+
+    expect(screen.queryByTestId('pack-import-errors')).toBeNull();
+  });
+
+  it('blocks oversized files client-side without calling the import mutation', async () => {
+    const oversized = new File([new ArrayBuffer(3 * 1024 * 1024)], 'oversized.json', {
+      type: 'application/json',
+    });
+    const user = userEvent.setup();
+    renderPanel();
+
+    await user.upload(screen.getByTestId('pack-file-input'), oversized);
+    await user.click(screen.getByTestId('pack-import-submit'));
+
+    expect(await screen.findByTestId('pack-import-errors')).toHaveTextContent(
+      'The selected file is too large. Packs must be under 2 MB.',
+    );
+    expect(packMock.importCalls).toHaveLength(0);
+    expect(screen.queryByTestId('pack-import-results')).toBeNull();
+  });
+
+  it('resets the file input and keeps results after a successful import', async () => {
+    packMock.importMutationFn = async () =>
+      makeSummary({ entries: { created: 1 }, relations: { created: 1 } });
+    const user = userEvent.setup();
+    renderPanel();
+
+    await uploadAndSubmit(user);
+
+    expect(await screen.findByTestId('pack-import-results')).toBeInTheDocument();
+    // The picker is reset so selecting the same file again re-fires onChange.
+    expect((screen.getByTestId('pack-file-input') as HTMLInputElement).value).toBe('');
+  });
+
+  it('drops previous results when a new file is picked after a success', async () => {
+    packMock.importMutationFn = async () =>
+      makeSummary({ entries: { created: 1 }, relations: { created: 1 } });
+    const user = userEvent.setup();
+    renderPanel();
+
+    await uploadAndSubmit(user);
+    expect(await screen.findByTestId('pack-import-results')).toBeInTheDocument();
+
+    await user.upload(screen.getByTestId('pack-file-input'), PACK_FILE_B);
+
     expect(screen.queryByTestId('pack-import-results')).toBeNull();
   });
 });
