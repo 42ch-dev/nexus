@@ -160,6 +160,13 @@ pub enum ContextCommand {
         #[arg(long)]
         emit_packet: bool,
 
+        /// Render a human-readable inspector view of the enriched packet
+        /// (activation trace / slot map / budget / moment directive sections).
+        /// Observation only — never changes assembled output (AC-I6).
+        /// Mutually exclusive with --emit-packet.
+        #[arg(long, conflicts_with = "emit_packet")]
+        inspect: bool,
+
         /// Write inspector packet JSON to file instead of stdout
         #[arg(long)]
         packet_out: Option<String>,
@@ -216,6 +223,7 @@ pub async fn run(cmd: ContextCommand, config: &CliConfig) -> Result<()> {
             kb_type,
             knowledge_limit,
             emit_packet,
+            inspect,
             packet_out,
             stage,
         } => {
@@ -234,6 +242,7 @@ pub async fn run(cmd: ContextCommand, config: &CliConfig) -> Result<()> {
                 kb_type.as_deref(),
                 Some(knowledge_limit),
                 emit_packet,
+                inspect,
                 packet_out.as_deref(),
                 stage.as_deref(),
             )
@@ -599,9 +608,10 @@ fn lore_activation_value_is_off(value: &str) -> bool {
 /// Uses `SqliteNarrativeGateway`, `SqliteKbStore`, and `SqliteKnowledgeStore`
 /// from `nexus-local-db` for all four domain slices.
 ///
-/// Returns `None` when `--emit-packet` writes diagnostic JSON to stdout
-/// (normal context output should be suppressed). Returns `Some(ctx)` when
-/// normal context output should proceed.
+/// Returns `None` when `--emit-packet` writes diagnostic JSON to stdout or
+/// `--inspect` renders the readable inspector view (normal context output
+/// should be suppressed). Returns `Some(ctx)` when normal context output
+/// should proceed.
 ///
 /// # Errors
 ///
@@ -609,6 +619,7 @@ fn lore_activation_value_is_off(value: &str) -> bool {
 #[allow(clippy::future_not_send)]
 #[allow(clippy::fn_params_excessive_bools)]
 #[allow(clippy::too_many_arguments)] // CLI param plumbing — acceptable until refactored into builder
+#[allow(clippy::too_many_lines)] // CLI param plumbing + flag tail — same builder-refactor path
 pub async fn run_assemble_moment(
     config: &CliConfig,
     world_id: Option<&str>,
@@ -624,6 +635,7 @@ pub async fn run_assemble_moment(
     kb_type: Option<&str>,
     knowledge_limit: Option<usize>,
     emit_packet: bool,
+    inspect: bool,
     packet_out: Option<&str>,
     stage: Option<&str>,
 ) -> Result<Option<MomentContext>> {
@@ -776,6 +788,14 @@ pub async fn run_assemble_moment(
             // JSON written to stdout; suppress normal context output.
             Ok(None)
         }
+    } else if inspect {
+        // V1.151 P0 T4: --inspect renders the same enriched packet (T1's
+        // relocated builder) as a human-readable view. Observation only —
+        // the assembled output is untouched (AC-I6). Mirrors the
+        // --emit-packet stdout suppression: the view replaces the context.
+        let packet = build_inspector_packet(&ctx);
+        println!("{}", render_inspector_readable(&packet));
+        Ok(None)
     } else {
         Ok(Some(ctx))
     }
@@ -803,6 +823,132 @@ fn emit_inspector_packet(ctx: &MomentContext, packet_out: Option<&str>) -> Resul
     }
 
     Ok(())
+}
+
+/// Render the enriched inspector packet (V1.151 P0 T4) as a human-readable
+/// view for `assemble-moment --inspect`.
+///
+/// Reads the same `build_inspector_packet` JSON that `--emit-packet` writes
+/// and formats four sections — activation trace (✓ fired / ✗ missed with the
+/// human-readable reason; fired entries additionally show their slot from
+/// `slot_map`, plus hop depth/origin when the packet carries them), slot map,
+/// budget (chars/4 estimates), and the Moment Directive (status/metadata
+/// only — the packet never carries the body, AC-I3). Observation only: the
+/// assembled output is never modified (AC-I6).
+#[allow(clippy::too_many_lines)] // one block per readable section — keeps sections scannable
+fn render_inspector_readable(packet: &serde_json::Value) -> String {
+    use std::fmt::Write as _;
+    use std::collections::HashMap;
+
+    let mut out = String::new();
+
+    // ── Activation trace ──────────────────────────────────────────────
+    out.push_str("## Activation trace\n");
+    let trace = packet["modules"]["activation_trace"].as_array();
+    let slot_by_entry: HashMap<&str, &str> = packet["slot_map"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|e| Some((e.get("entry_id")?.as_str()?, e.get("slot")?.as_str()?)))
+        .collect();
+    match trace {
+        Some(entries) if !entries.is_empty() => {
+            for entry in entries {
+                let name = entry["canonical_name"].as_str().unwrap_or("?");
+                let id = entry["entry_id"].as_str().unwrap_or("?");
+                let reason = entry["reason"].as_str().unwrap_or("");
+                if entry["accepted"].as_bool().unwrap_or(false) {
+                    writeln!(out, "  ✓ {name}  ({id})").ok();
+                    if let Some(slot) = slot_by_entry.get(id) {
+                        writeln!(out, "      slot: {slot}").ok();
+                    }
+                    // Hop depth / origin only when the packet carries them
+                    // (not emitted today; forward-compatible, spec §2 H4).
+                    if let Some(depth) = entry
+                        .get("hop_depth")
+                        .and_then(serde_json::Value::as_u64)
+                    {
+                        writeln!(out, "      hop depth: {depth}").ok();
+                    }
+                    if let Some(origin) = entry
+                        .get("hop_origin_entry_id")
+                        .and_then(serde_json::Value::as_str)
+                    {
+                        writeln!(out, "      hop origin: {origin}").ok();
+                    }
+                } else {
+                    writeln!(out, "  ✗ {name}  ({id})").ok();
+                }
+                writeln!(out, "      reason: {reason}").ok();
+            }
+        }
+        _ => out.push_str("  (no activation trace entries)\n"),
+    }
+
+    // ── Slot map ──────────────────────────────────────────────────────
+    out.push_str("\n## Slot map\n");
+    match packet["slot_map"].as_array() {
+        Some(entries) if !entries.is_empty() => {
+            for entry in entries {
+                let id = entry["entry_id"].as_str().unwrap_or("?");
+                let slot = entry["slot"].as_str().unwrap_or("?");
+                writeln!(out, "  {id} → {slot}").ok();
+            }
+        }
+        _ => out.push_str("  (empty)\n"),
+    }
+
+    // ── Budget ────────────────────────────────────────────────────────
+    out.push_str("\n## Budget\n");
+    let budget = &packet["budget"];
+    let est = |key: &str| budget[key].as_u64().unwrap_or(0);
+    let cap = budget["cap"]
+        .as_u64()
+        .map_or_else(|| "none".to_string(), |v| v.to_string());
+    let remaining = budget["remaining"]
+        .as_u64()
+        .map_or_else(|| "none".to_string(), |v| v.to_string());
+    writeln!(
+        out,
+        "  primary tokens est: {} (chars/4)",
+        est("primary_tokens_est")
+    )
+    .ok();
+    writeln!(out, "  hop tokens est: {} (chars/4)", est("hop_tokens_est")).ok();
+    writeln!(out, "  cap: {cap}").ok();
+    writeln!(out, "  remaining: {remaining}").ok();
+
+    // ── Moment Directive ──────────────────────────────────────────────
+    out.push_str("\n## Moment Directive\n");
+    let directive = &packet["moment_directive"];
+    let status = directive["status"].as_str().unwrap_or("none");
+    if status == "none" {
+        out.push_str("  status: none (no active directive)\n");
+    } else {
+        let scope = directive["scope"].as_str().unwrap_or("?");
+        let scope_id = directive["scope_id"].as_str().unwrap_or("?");
+        writeln!(out, "  scope: {scope} ({scope_id})").ok();
+        writeln!(
+            out,
+            "  insert depth: {}",
+            directive["insert_depth"].as_str().unwrap_or("?")
+        )
+        .ok();
+        let ttl_kind = directive["ttl_kind"].as_str().unwrap_or("?");
+        match directive["ttl_remaining"].as_u64() {
+            Some(remaining_ttl) => writeln!(out, "  ttl: {ttl_kind} ({remaining_ttl} remaining)").ok(),
+            None => writeln!(out, "  ttl: {ttl_kind}").ok(),
+        };
+        writeln!(
+            out,
+            "  clear on scene change: {}",
+            directive["clear_on_scene_change"].as_bool().unwrap_or(false)
+        )
+        .ok();
+        writeln!(out, "  status: {status}").ok();
+    }
+
+    out
 }
 
 #[cfg(test)]
@@ -904,6 +1050,7 @@ mod tests {
             kb_type: Some("character".to_string()),
             knowledge_limit: 10,
             emit_packet: true,
+            inspect: false,
             packet_out: Some("packet.json".to_string()),
             stage: Some("produce".to_string()),
         };
@@ -921,6 +1068,7 @@ mod tests {
             kb_type: None,
             knowledge_limit: 20,
             emit_packet: false,
+            inspect: true,
             packet_out: None,
             stage: None,
         };
@@ -1952,5 +2100,184 @@ mod tests {
         std::env::set_var("NEXUS_MCA_LORE_ACTIVATION", "1");
         assert!(!lore_activation_env_is_off(), "=1 must keep activation on");
         std::env::remove_var("NEXUS_MCA_LORE_ACTIVATION");
+    }
+
+    // ── V1.151 P0 T4: assemble-moment --inspect + enriched --emit-packet ──
+
+    /// Build a `MomentContext` carrying the full enriched surface (activation
+    /// trace + slot_map + budget + directive meta) for the renderer /
+    /// emission tests — the same shape `build_inspector_packet` consumes.
+    fn enriched_mock_ctx() -> MomentContext {
+        use nexus_moment_context_assembly::directive::{
+            DirectiveDepth, DirectiveTtlKind, MomentDirectiveScope,
+        };
+        use nexus_moment_context_assembly::MomentDirectiveStatus;
+        use nexus_spoke_adapter::adapter::activation::ActivationBudget;
+
+        let trace = vec![
+            trace_entry(
+                "kb_hero",
+                "Hero",
+                "primary-any (literal): matched key [king]",
+                true,
+            ),
+            trace_entry(
+                "kb_castle",
+                "Castle",
+                "primary-any (literal): no key matched",
+                false,
+            ),
+        ];
+        MomentContext {
+            stage0_context: "Test".to_string(),
+            activation_trace: Some(trace),
+            slot_map: Some(vec![nexus_moment_context_assembly::slots::SlotMapEntry {
+                entry_id: "kb_hero".to_string(),
+                slot: "world.before".to_string(),
+            }]),
+            activation_budget: Some(ActivationBudget {
+                primary_tokens_est: 4,
+                hop_tokens_est: 2,
+                cap: Some(100),
+                remaining: Some(94),
+            }),
+            moment_directive_meta: Some(MomentDirectiveStatus {
+                scope: MomentDirectiveScope {
+                    kind: "work".to_string(),
+                    id: "wrk_1".to_string(),
+                },
+                insert_depth: DirectiveDepth::Head,
+                ttl_kind: DirectiveTtlKind::Generations,
+                ttl_remaining: Some(2),
+                clear_on_scene_change: false,
+                status: "active".to_string(),
+            }),
+            ..MomentContext::default()
+        }
+    }
+
+    /// T4: `--inspect` renders the four readable sections with the fired
+    /// entry's canonical name + its slot id from `slot_map`.
+    #[test]
+    fn render_inspector_readable_shows_four_sections() {
+        let packet = build_inspector_packet(&enriched_mock_ctx());
+        let view = render_inspector_readable(&packet);
+
+        // Four section headers.
+        assert!(view.contains("## Activation trace"));
+        assert!(view.contains("## Slot map"));
+        assert!(view.contains("## Budget"));
+        assert!(view.contains("## Moment Directive"));
+        // Fired entry: canonical name + slot id; missed entry + reason.
+        assert!(view.contains("Hero"), "fired canonical_name rendered");
+        assert!(
+            view.contains("world.before"),
+            "fired entry's slot id rendered from slot_map"
+        );
+        assert!(view.contains("Castle"), "missed entry rendered");
+        assert!(
+            view.contains("matched key [king]"),
+            "human-readable reason rendered"
+        );
+        // Directive status/metadata only — never the body (AC-I3).
+        assert!(view.contains("status: active"));
+        assert!(view.contains("wrk_1"));
+        assert!(
+            !view.contains("DIRECTIVE_SECRET_MARKER"),
+            "AC-I3: directive body never rendered"
+        );
+        // Budget figures.
+        assert!(view.contains("primary tokens est: 4"));
+        assert!(view.contains("remaining: 94"));
+    }
+
+    /// T4: an empty packet still renders all four sections with empty markers.
+    #[test]
+    fn render_inspector_readable_empty_packet() {
+        let packet = build_inspector_packet(&MomentContext::default());
+        let view = render_inspector_readable(&packet);
+
+        assert!(view.contains("## Activation trace"));
+        assert!(view.contains("(no activation trace entries)"));
+        assert!(view.contains("## Slot map"));
+        assert!(view.contains("(empty)"));
+        assert!(view.contains("## Budget"));
+        assert!(view.contains("## Moment Directive"));
+        assert!(view.contains("status: none"));
+    }
+
+    /// T4: the `--emit-packet` emission path (enriched builder) writes the
+    /// three additive product-local sections as top-level keys.
+    #[test]
+    fn emit_inspector_packet_emits_enriched_json() {
+        let ctx = enriched_mock_ctx();
+        let dir = tempfile::tempdir().unwrap();
+        let packet_path = dir.path().join("packet.json");
+        let path_str = packet_path.to_str().unwrap();
+
+        emit_inspector_packet(&ctx, Some(path_str)).unwrap();
+
+        let raw = std::fs::read_to_string(&packet_path).unwrap();
+        let packet: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        assert!(packet["modules"].is_object(), "modules section present");
+        assert!(
+            packet["slot_map"].is_array(),
+            "enriched slot_map top-level key present"
+        );
+        assert!(
+            packet["budget"].is_object(),
+            "enriched budget top-level key present"
+        );
+        assert!(
+            packet["moment_directive"].is_object(),
+            "enriched moment_directive top-level key present"
+        );
+        // Enriched values round-trip through the emission path.
+        assert_eq!(packet["slot_map"][0]["slot"], "world.before");
+        assert_eq!(packet["budget"]["primary_tokens_est"], 4);
+        assert_eq!(packet["moment_directive"]["status"], "active");
+    }
+
+    /// T4: `--inspect` and `--emit-packet` are mutually exclusive at the clap
+    /// level (`conflicts_with`); `--inspect` alone parses and sets the flag.
+    #[test]
+    fn inspect_and_emit_packet_conflict_at_clap() {
+        use crate::cli::{Cli, Commands};
+        use crate::commands::platform::PlatformCommand;
+        use clap::Parser;
+
+        let inspect_only = Cli::try_parse_from([
+            "nexus42",
+            "platform",
+            "context",
+            "assemble-moment",
+            "--inspect",
+        ])
+        .expect("--inspect alone must parse");
+        match inspect_only.into_command() {
+            Some(Commands::Platform { command }) => match command {
+                PlatformCommand::Context { command } => match *command {
+                    ContextCommand::AssembleMoment { inspect, .. } => {
+                        assert!(inspect, "--inspect must set inspect = true");
+                    }
+                    _ => panic!("unexpected context subcommand"),
+                },
+                _ => panic!("unexpected platform subcommand"),
+            },
+            _ => panic!("unexpected top-level command"),
+        }
+
+        let conflict = Cli::try_parse_from([
+            "nexus42",
+            "platform",
+            "context",
+            "assemble-moment",
+            "--inspect",
+            "--emit-packet",
+        ]);
+        assert!(
+            conflict.is_err(),
+            "--inspect + --emit-packet must be rejected by clap"
+        );
     }
 }
