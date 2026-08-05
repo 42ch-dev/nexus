@@ -1,12 +1,13 @@
 ---
-module: nexus-spoke-adapter, nexus-moment-context-assembly
+module: nexus-moment-context-assembly / nexus-spoke-adapter
 date: 2026-08-04
-problem_type: knowledge
+last_updated: 2026-08-05
+problem_type: architecture_pattern
 category: architecture-patterns
 severity: medium
 plan_id: 2026-08-04-v1.149-p0-activation-engine-default-on-and-spoke-dialect
-tags: [spoke-dialect, modules-activation, lore-activation, regex-redos, neutral-byte-equivalence, default-on, consumer-only]
-applies_when: consuming a spoke `modules.*` dialect as a nexus engine; promoting a flag-gated spike to default-on; parsing untrusted author regex
+tags: [lore-activation, spoke, modules-activation, mca, assemble-moment, neutral-only, byte-equivalence, default-on, preset-slots, moment-directive, df-75]
+applies_when: consuming a spoke modules.* dialect / promoting a flag-gated engine to default-on / building prompt-control over activated lore
 ---
 
 # Spoke-dialect consumption as a default-on engine — the lore activation pattern
@@ -62,3 +63,39 @@ Multi-byte (CJK) keys + `whole_word` match: advancing `offset = start + 1` split
 - V1.149 P1 `expand_relation_hops` + `NexusAdapter::list_hop_edges_for_world` (graph hops via storage list, pre_visited dedup).
 - Spec: `.mstar/specs/spoke-adapter-architecture.md` §7.4 Lore activation engine (normative contract).
 - Spoke handbook: `spoke/.mstar/specs/domain-profile-lore-activation.md` (the dialect — consumer-only).
+
+---
+
+## V1.150 (DF-75) extension — preset slots + Moment Directive: product-local prompt control over activated lore
+
+V1.150 extends the default-on engine pattern with two **product-local** prompt-control layers that consume the V1.149-emitted activated candidate list. Neither touches spoke wire.
+
+### 7. Slot routing = thin post-activation step (never matching logic)
+
+Once V1.149 decides what fires (the activated candidate list, priority-then-order), a **pure routing step** reads each entry's parsed `modules.activation.position_hint` / `outlet` and assigns it to a named slot (`world.before` / `world.after` / `kb.outlet.<name>` / `style.post_history` / default fallback). Slots render as sub-sections inside `## World Knowledge Base` in a fixed order; within-slot order is the V1.149 order unchanged. **Key discipline:** routing adds NO matching logic, NO spoke calls, NO source-entry mutation — it only shapes assembly output. The same neutral-only byte-equivalence guarantee extends: an entry with no `position_hint` lands in the default fallback, which must be byte-identical to the V1.149 flat block (P0 golden test). `position_hint:"depth"` is parsed + preserved but NOT actioned (chat-history depth is not Nexus-native).
+
+### 8. Activation off-switch gates ALL activation-product shaping
+
+The V1.149 off-switch (`NEXUS_MCA_LORE_ACTIVATION=off` ⇒ "every candidate entry unchanged, V1.146 flag-off semantics") must gate **both** activation AND every downstream activation-product step (slot routing, generation-stage gating). When off, skip routing entirely and emit the flat V1.149 block — do NOT reshape hinted entries into sub-sections. This was a P0 QC Warning (the routing step initially ran outside the `activation_enabled` branch); the contract is: off-switch means the activation product is invisible, not just the matcher.
+
+### 9. Moment Directive is product-local prompt control, NEVER on spoke wire
+
+The Moment Directive (Author's-Note analogue: body + insert depth + TTL generations/chapters + clear-on-scene-change, scoped per-Work with World override) injects into a distinct `## Moment Directive` section above lore. It is **not** a `modules.*` object, **not** a KnowledgeEntry, **not** an AssemblePacket `placement[]`/`activation_trace[]` entry, never in pack export/import. Persistence is a local-DB table (`moment_directives`) mirroring the `prompt_injection.rs` repository pattern but with a persistent scoped-directive lifecycle (at-most-one-active per scope, soft-delete + `replaced_by` audit), NOT the injection queue. The directive loads via a `DirectiveStore` trait with a `NoDirectiveStore` default so `assemble_moment` stays decoupled (and the no-directive path emits nothing — byte-equivalent). Compile-time `query_as!` is mandatory for static SELECTs in `nexus-local-db` (crate rule); runtime `query_as` without a SAFETY comment is a QC-blocker.
+
+### 10. Generation-stage gating is internal-only (`wire_contracts_changed: false`)
+
+Slot filling is gated by the creator-workflow `stage` (`intake`/`research`/`produce`/`review`/`persist` + `work_maintenance`/`system_maintenance`) via an internal `MomentRequest.generation_stage: Option<GenerationStage>` field. `MomentRequest` is NOT in `schemas/` (it's constructed in the CLI/orchestration, internal to MCA) → adding the field is **not** a wire/contracts change. `run_intent` is **derivable** from `stage` (no separate field). Default `None` ⇒ `Unspecified` ⇒ all slots on (neutral golden + direct-CLI/inspector path). The `Unspecified` arm must be a true zero-cost pass-through (byte-identical to pre-gate) — the stage gate is a no-op for the default path.
+
+### Why V1.150 matters (additive to V1.149)
+
+- The **layered contract**: spoke owns the dialect wire (`modules.activation`); nexus owns the engine (V1.149) + the prompt-control layers (V1.150 slots + Directive) + the gating (V1.150 stage). Each layer is additive and independently byte-equivalence-safe for the neutral author.
+- The **off-switch scope** lesson (§8): a flag that disables a stage of a pipeline must disable every downstream product of that stage, not just the stage itself.
+- The **product-local-vs-wire** discipline (§9): author-facing prompt control (Directive) and prompt shaping (slots) are never pushed onto the cross-product dialect wire — they live in MCA / orchestration / local-DB only.
+
+### V1.150 examples
+
+- V1.150 P0 `crates/nexus-moment-context-assembly/src/slots.rs` (slot routing + emit order; gated behind `activation_enabled`).
+- V1.150 P1 `crates/nexus-moment-context-assembly/src/directive.rs` + `crates/nexus-local-db/src/moment_directive.rs` (Moment Directive + `DirectiveStore` trait + `NoDirectiveStore` default + compile-time `query_as!`).
+- V1.150 P2 `crates/nexus-moment-context-assembly/src/generation.rs` (`apply_stage_gate` §4 matrix; `Unspecified` zero-cost pass-through).
+- Spec: `.mstar/specs/spoke-adapter-architecture.md` §7.4 (V1.150 slot + Directive matrix promoted by P2 sweep).
+- Iteration guide: `.mstar/iterations/v1.150/guides/mca-section-audit.md` (MCA section-heading evidence).

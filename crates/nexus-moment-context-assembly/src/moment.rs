@@ -21,6 +21,9 @@
 //! Domain store queries are async. Callers must provide concrete implementations
 //! of the store traits. The crate provides no default runtime or storage backend.
 
+use crate::directive::{ActiveDirective, DirectiveDepth, DirectiveStore, NoDirectiveStore};
+use crate::generation::GenerationStage;
+use crate::slots;
 use crate::stage0::{Stage0Assembly, STAGE0_PERSONALITY_END, STAGE0_PERSONALITY_START};
 use crate::world_context::WorldKbQueryBuilder;
 use nexus_contracts::BlockType;
@@ -42,6 +45,12 @@ const WORLD_KB_HEADING: &str = "## World Knowledge Base";
 /// Section heading for User Knowledge in assembled context.
 const USER_KNOWLEDGE_HEADING: &str = "## User Knowledge";
 
+/// Section heading for the reserved Moment Directive slot (V1.150 P0 —
+/// spec §2 / Q1 provisional lock). Placed between `## Timeline` and
+/// `## World Knowledge Base`. P0 reserves the position but never renders it
+/// (no directive active); P1 fills the slot.
+const MOMENT_DIRECTIVE_HEADING: &str = "## Moment Directive";
+
 /// Parameters for a single moment context assembly request.
 ///
 /// All IDs are strings for now (matching current domain APIs).
@@ -50,6 +59,14 @@ const USER_KNOWLEDGE_HEADING: &str = "## User Knowledge";
 pub struct MomentRequest {
     /// World ID to pull narrative state and KB assets for.
     pub world_id: Option<String>,
+    /// Work ID for the work-bound moment (V1.150 P1): scope resolution of the
+    /// Moment Directive (spec §3.2) and the chapter-advance TTL signal
+    /// (spec §3.3) are keyed on it. Optional — the observation path may
+    /// assemble a raw world without a Work.
+    pub work_id: Option<String>,
+    /// Creator ID owning the moment (V1.150 P1): directives are
+    /// creator-scoped; `None` means no directive can be in scope.
+    pub creator_id: Option<String>,
     /// Branch ID within the world (optional, for fork-specific context).
     pub branch_id: Option<String>,
     /// Event ID to focus context around (optional).
@@ -97,6 +114,17 @@ pub struct MomentRequest {
     /// absent, only this cap applies (`None` ⇒ depth + cycle only).
     /// See [`hop_budget_tokens`].
     pub hop_max_tokens: Option<usize>,
+    /// Generation type for spec §4 slot gating (V1.150 P2, DF-75 — guide
+    /// `mca-section-audit.md` Q4 lock).
+    ///
+    /// `None` (the default) is treated as [`GenerationStage::Unspecified`] —
+    /// every slot fills, which is current behavior and the neutral golden /
+    /// direct-CLI / inspector path (AC-I1b). `run_intent` is **derivable**
+    /// from the stage (creator-workflow §3.1) — there is deliberately no
+    /// separate field. Wired from the CLI `assemble-moment --stage` flag;
+    /// the preset runner / schedule path threads the executing stage when it
+    /// drives assembly (see `guides/generation-trigger-wiring.md`).
+    pub generation_stage: Option<GenerationStage>,
 }
 
 impl MomentRequest {
@@ -105,6 +133,8 @@ impl MomentRequest {
     pub const fn new(stage0: Stage0Assembly) -> Self {
         Self {
             world_id: None,
+            work_id: None,
+            creator_id: None,
             branch_id: None,
             event_id: None,
             user_id: None,
@@ -117,6 +147,7 @@ impl MomentRequest {
             activation_enabled: true,
             hop_edges: None,
             hop_max_tokens: None,
+            generation_stage: None,
         }
     }
 
@@ -124,6 +155,22 @@ impl MomentRequest {
     #[must_use]
     pub fn with_world(mut self, world_id: impl Into<String>) -> Self {
         self.world_id = Some(world_id.into());
+        self
+    }
+
+    /// Set the work ID for the work-bound moment (V1.150 P1 — Moment
+    /// Directive scope resolution + chapter-advance TTL).
+    #[must_use]
+    pub fn with_work(mut self, work_id: impl Into<String>) -> Self {
+        self.work_id = Some(work_id.into());
+        self
+    }
+
+    /// Set the owning creator ID (V1.150 P1 — Moment Directives are
+    /// creator-scoped; `None` ⇒ no directive can be in scope).
+    #[must_use]
+    pub fn with_creator(mut self, creator_id: impl Into<String>) -> Self {
+        self.creator_id = Some(creator_id.into());
         self
     }
 
@@ -205,6 +252,16 @@ impl MomentRequest {
         self.hop_max_tokens = Some(cap);
         self
     }
+
+    /// Set the generation stage for spec §4 slot gating (V1.150 P2).
+    ///
+    /// `None` (the default — don't call this) keeps every slot on
+    /// ([`GenerationStage::Unspecified`]).
+    #[must_use]
+    pub const fn with_generation_stage(mut self, stage: GenerationStage) -> Self {
+        self.generation_stage = Some(stage);
+        self
+    }
 }
 
 /// Assembled context from all domain sources for a single moment.
@@ -223,6 +280,17 @@ pub struct MomentContext {
     pub world_kb: Option<String>,
     /// User knowledge summary text (entries for the user).
     pub user_knowledge: Option<String>,
+    /// Moment Directive slot (V1.150 P0 reserved — V1.150 P1 fills it): the
+    /// `## Moment Directive` top-level section within the directive region
+    /// (above lore, below system/personality). `None` means no directive is
+    /// active and the section is never rendered — the neutral-only
+    /// byte-equivalence anchor (AC-I1b).
+    pub moment_directive: Option<String>,
+    /// Placement of the directive section within the directive region
+    /// (V1.150 P1). Defaults to [`DirectiveDepth::Tail`] — P0's reserved
+    /// position between `## Timeline` and `## World Knowledge Base` — so
+    /// contexts that set only the body keep the P0 layout.
+    pub moment_directive_depth: DirectiveDepth,
     /// Per-entry activation trace (populated when `activation_enabled` is true).
     /// V1.146 P4 T3: exposed for inspector packet emission.
     pub activation_trace:
@@ -236,43 +304,57 @@ impl MomentContext {
     /// 1. Stage-0 context (system prefix, personality, memories, keywords, experience, prompt)
     /// 2. World state (narrative)
     /// 3. Timeline (narrative)
-    /// 4. World KB (key blocks)
-    /// 5. User knowledge
+    /// 4. Moment Directive (V1.150 P0 reserved — only rendered when P1
+    ///    fills the slot)
+    /// 5. World KB (key blocks — V1.150 P0 slots subdivide this section)
+    /// 6. User knowledge
     ///
     /// Empty sections are omitted.
+    ///
+    /// The Moment Directive section is positioned by `moment_directive_depth`
+    /// **within the directive region** (between the Stage-0 block above and
+    /// the World Knowledge Base below, spec §1.2 / §3.3): `head` directly
+    /// below Stage-0, `mid` between World State and Timeline, `tail` between
+    /// Timeline and World KB — P0's reserved position (the default). The
+    /// directive can never move below lore or above system.
     #[must_use]
     pub fn to_full_context(&self) -> String {
-        let mut parts = Vec::new();
+        let section = |text: Option<&String>, heading: &str| {
+            text.filter(|s| !s.is_empty())
+                .map(|s| format!("{heading}\n\n{s}\n"))
+        };
+        let stage0 = (!self.stage0_context.is_empty()).then(|| self.stage0_context.clone());
+        let world_state = section(self.world_state.as_ref(), WORLD_STATE_HEADING);
+        let timeline = section(self.timeline.as_ref(), TIMELINE_HEADING);
+        let directive = section(self.moment_directive.as_ref(), MOMENT_DIRECTIVE_HEADING);
+        let world_kb = section(self.world_kb.as_ref(), WORLD_KB_HEADING);
+        let user_knowledge = section(self.user_knowledge.as_ref(), USER_KNOWLEDGE_HEADING);
 
-        if !self.stage0_context.is_empty() {
-            parts.push(self.stage0_context.clone());
-        }
-
-        if let Some(ref ws) = self.world_state {
-            if !ws.is_empty() {
-                parts.push(format!("{WORLD_STATE_HEADING}\n\n{ws}\n"));
+        let mut parts: Vec<Option<String>> = vec![stage0];
+        match self.moment_directive_depth {
+            DirectiveDepth::Head => {
+                parts.push(directive);
+                parts.push(world_state);
+                parts.push(timeline);
+                parts.push(world_kb);
+                parts.push(user_knowledge);
+            }
+            DirectiveDepth::Mid => {
+                parts.push(world_state);
+                parts.push(directive);
+                parts.push(timeline);
+                parts.push(world_kb);
+                parts.push(user_knowledge);
+            }
+            DirectiveDepth::Tail => {
+                parts.push(world_state);
+                parts.push(timeline);
+                parts.push(directive);
+                parts.push(world_kb);
+                parts.push(user_knowledge);
             }
         }
-
-        if let Some(ref tl) = self.timeline {
-            if !tl.is_empty() {
-                parts.push(format!("{TIMELINE_HEADING}\n\n{tl}\n"));
-            }
-        }
-
-        if let Some(ref kb) = self.world_kb {
-            if !kb.is_empty() {
-                parts.push(format!("{WORLD_KB_HEADING}\n\n{kb}\n"));
-            }
-        }
-
-        if let Some(ref uk) = self.user_knowledge {
-            if !uk.is_empty() {
-                parts.push(format!("{USER_KNOWLEDGE_HEADING}\n\n{uk}\n"));
-            }
-        }
-
-        parts.join("\n")
+        parts.into_iter().flatten().collect::<Vec<_>>().join("\n")
     }
 
     /// Apply cross-domain token budget truncation.
@@ -427,6 +509,11 @@ fn hop_budget_tokens(
 /// This is the primary entry point for full moment context assembly.
 /// It queries each domain source in sequence and combines the results.
 ///
+/// Uses a [`NoDirectiveStore`] — the Moment Directive slot can never fill on
+/// this path (AC-I1b neutral-only byte-equivalence promise). Callers that
+/// need the directive inject through
+/// [`assemble_moment_with_directive`].
+///
 /// # Errors
 ///
 /// Individual domain failures are logged but do not fail the entire assembly.
@@ -449,6 +536,50 @@ where
     G: NarrativeGateway,
     K: KbStore,
     S: KnowledgeStore,
+{
+    assemble_moment_with_directive(request, narrative, kb_store, knowledge, &NoDirectiveStore).await
+}
+
+/// Assemble moment context with a Moment Directive store (V1.150 P1, DF-75).
+///
+/// Same flow as [`assemble_moment`], plus the directive step (spec §3):
+/// resolve + load the active directive for the work-bound moment, render it
+/// into the reserved `moment.directive` slot at its `insert_depth`, and run
+/// the post-injection lifecycle (TTL decrement / chapter-advance /
+/// scene-clear bookkeeping) after a successful injecting assembly.
+///
+/// When no directive is active — or the store resolves none — the slot stays
+/// empty and the output is byte-identical to [`assemble_moment`] (AC-I1b).
+/// The directive section is never truncated (author instruction; like
+/// personality, it survives cross-domain truncation).
+///
+/// # Caller wiring (R-V1150P2-011 accepted — future-wiring note)
+///
+/// Today only the `platform context assemble-moment` CLI path calls this
+/// entry point, threading `creator_id` / `work_id` / `world_id` and the
+/// generation stage through [`MomentRequest`]. A future daemon/ACP caller
+/// MUST thread the same fields (`creator_id` / `work_id` / `event_id` +
+/// `generation_stage`) when it wires MCA assembly — tracked in DF-76 / the
+/// daemon-route iteration, not an open defect in shipped code.
+///
+/// # Type parameters
+///
+/// - `G`, `K`, `S`: as in [`assemble_moment`].
+/// - `D`: A [`DirectiveStore`] implementation (composition root adapter over
+///   `nexus-local-db`; in-memory stub in tests).
+#[allow(clippy::future_not_send)]
+pub async fn assemble_moment_with_directive<G, K, S, D>(
+    request: &MomentRequest,
+    narrative: &G,
+    kb_store: &K,
+    knowledge: &S,
+    directives: &D,
+) -> MomentContext
+where
+    G: NarrativeGateway,
+    K: KbStore,
+    S: KnowledgeStore,
+    D: DirectiveStore,
 {
     // 1. Stage-0: always assemble from creator memory inputs
     let stage0_context = if request.stage0.max_tokens.is_some() {
@@ -535,8 +666,25 @@ where
                 };
                 if entries.is_empty() {
                     None
+                } else if request.activation_enabled {
+                    // V1.150 P0/P2 (DF-75): shape the activation-matched
+                    // entries into the World-KB body — spec §4 generation-
+                    // stage gate first (`slots::apply_stage_gate`), then
+                    // slot routing + render (spec §2 / Q5). Neutral-only
+                    // Worlds render byte-identically to the V1.149 flat
+                    // block (AC-I1b); the gate runs only on the activation-
+                    // on path (the off-switch below keeps every entry
+                    // unchanged); `None` stage ⇒ all slots on.
+                    render_gated_slots(entries, request.generation_stage)
                 } else {
-                    Some(format_kb_entries(&entries))
+                    // Off-switch (V1.149 escape hatch, lock #1 — "off ⇒ every
+                    // candidate entry unchanged", V1.146 flag-off semantics):
+                    // slot routing is an activation-product shaping step and
+                    // must not run when activation is disabled. Every entry is
+                    // emitted UNCHANGED as the V1.149 flat block (no
+                    // `### World (Before)` / `### Outlet:` /
+                    // `### Style (Post-History)` sub-headings).
+                    Some(slots::format_entries(&entries))
                 }
             }
             _ => None,
@@ -555,21 +703,88 @@ where
         None
     };
 
+    // 5. Moment Directive (V1.150 P1, spec §3): resolve + load the active
+    //    directive for the work-bound moment (scope resolution spec §3.2 —
+    //    Work wins, else World override for the Work's bound World, else
+    //    none), then run the post-injection lifecycle. The plain
+    //    `assemble_moment` path passes a `NoDirectiveStore`, which always
+    //    resolves `None` — nothing renders, nothing decrements (AC-I1b).
+    let directive = apply_directive(directives, request).await;
+
     let mut ctx = MomentContext {
         stage0_context,
         world_state,
         timeline,
         world_kb,
         user_knowledge,
+        // V1.150 P0 reserved the slot; P1 fills it with the active directive
+        // body. `None` ⇒ no `## Moment Directive` section (neutral-only).
+        moment_directive: directive.as_ref().map(|d| d.body.clone()),
+        moment_directive_depth: directive
+            .as_ref()
+            .map_or_else(DirectiveDepth::default, |d| d.insert_depth),
         activation_trace,
     };
 
-    // 5. Cross-domain truncation if max_tokens set
+    // 6. Cross-domain truncation if max_tokens set (the directive section is
+    //    never truncated — it is author instruction, like personality).
     if let Some(max_tokens) = request.max_tokens {
         ctx.apply_cross_domain_truncation(max_tokens);
     }
 
     ctx
+}
+
+/// Resolve the active Moment Directive for a request and — when one was
+/// injected — run the post-injection lifecycle (spec §3.3: TTL decrement /
+/// chapter-advance / scene-clear bookkeeping, best-effort; the store never
+/// fails the assembly).
+///
+/// # Threat model — single-author, local-only (PR #198 P1)
+///
+/// The load-then-decrement pair is deliberately **non-atomic**: two
+/// overlapping same-scope assembles can both load a directive with one use
+/// remaining and both render it before either decrements. That is not a
+/// realistic local threat — Nexus is single-author, single-active-creator,
+/// local-only, with no parallel creators and no background jobs (the same
+/// synchronous/proportional discipline V1.80 established for
+/// `POST /v1/local/memory/review`). Locking the directive lifecycle would
+/// be over-engineering for this threat model, so none is added by design.
+#[allow(clippy::future_not_send)]
+async fn apply_directive<D: DirectiveStore>(
+    directives: &D,
+    request: &MomentRequest,
+) -> Option<ActiveDirective> {
+    let directive = directives
+        .load_active(
+            request.creator_id.as_deref(),
+            request.work_id.as_deref(),
+            request.world_id.as_deref(),
+        )
+        .await;
+    if let Some(d) = directive.as_ref() {
+        directives
+            .after_injection(
+                &d.directive_id,
+                request.event_id.as_deref(),
+                request.work_id.as_deref(),
+            )
+            .await;
+    }
+    directive
+}
+
+/// V1.150 P2 (DF-75, spec §4 / Q5) — shape the activation-matched World-KB
+/// entries into the section body: apply the generation-stage gate
+/// ([`slots::apply_stage_gate`]), route the eligible entries into named,
+/// ordered slots, and render. `None` (all entries gated off, e.g.
+/// `system_maintenance`) yields `None` — the caller omits the whole
+/// World-KB section.
+fn render_gated_slots(
+    entries: Vec<WorldKbEntry>,
+    stage: Option<GenerationStage>,
+) -> Option<String> {
+    slots::render_slots(&slots::route_slots(slots::apply_stage_gate(entries, stage)))
 }
 
 /// Fetch narrative context (world state + timeline) from the gateway.
@@ -595,7 +810,8 @@ async fn fetch_narrative_context<G: NarrativeGateway>(
 /// Fetch World KB entries using structured query (no formatting).
 ///
 /// V1.146 P4 T2: extracted so the activation pass can operate on entries
-/// before formatting. Callers use `format_kb_entries` to produce context text.
+/// before formatting. Callers use `format_entries` (in `slots.rs`) to produce
+/// context text.
 #[allow(clippy::future_not_send)]
 async fn fetch_world_kb_entries<K: KbStore>(
     kb_store: &K,
@@ -615,25 +831,6 @@ async fn fetch_world_kb_entries<K: KbStore>(
     }
     let result = kb_store.query(&query).await?;
     Ok(result.items)
-}
-
-/// Format `WorldKB` entries into markdown context text lines.
-fn format_kb_entries(entries: &[WorldKbEntry]) -> String {
-    entries
-        .iter()
-        .map(|kb| {
-            let summary = kb
-                .body
-                .as_ref()
-                .and_then(|b| b.summary.as_ref())
-                .map_or("(no summary)", std::string::String::as_str);
-            format!(
-                "- **{}** [{:?}]: {summary}",
-                kb.canonical_name, kb.block_type
-            )
-        })
-        .collect::<Vec<String>>()
-        .join("\n")
 }
 
 /// Fetch User knowledge entries and format as context text.
@@ -708,9 +905,11 @@ fn format_timeline(events: &[nexus_narrative::timeline_event::TimelineEvent]) ->
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::directive::DirectiveTtlKind;
     use nexus_knowledge::world_kb::InMemoryKbStore;
     use nexus_knowledge::InMemoryKnowledgeStore;
     use nexus_narrative::InMemoryNarrativeGateway;
+    use std::sync::Arc;
 
     /// Helper: create a `Stage0Assembly` with minimal content.
     fn minimal_stage0() -> Stage0Assembly {
@@ -895,6 +1094,365 @@ mod tests {
         assert!(!full.contains(USER_KNOWLEDGE_HEADING));
     }
 
+    // ── V1.150 P0: reserved Moment Directive slot (spec §2 / Q1) ──────
+
+    #[tokio::test]
+    async fn assemble_moment_reserves_directive_slot_empty() {
+        // P0 reserves the `moment.directive` slot but never fills it: a full
+        // assembly leaves `moment_directive` None and renders no
+        // `## Moment Directive` section (AC-I1b neutral-only promise).
+        let stores = TestStores::new();
+        let request = MomentRequest::new(minimal_stage0())
+            .with_world("wld_1")
+            .with_user("user_1");
+
+        let ctx = assemble_moment(&request, &stores.narrative, &stores.kb, &stores.knowledge).await;
+        assert!(
+            ctx.moment_directive.is_none(),
+            "P0 must leave the reserved directive slot empty"
+        );
+        let full = ctx.to_full_context();
+        assert!(
+            !full.contains(MOMENT_DIRECTIVE_HEADING),
+            "P0 must not render the Moment Directive section"
+        );
+    }
+
+    #[test]
+    fn to_full_context_renders_directive_between_timeline_and_world_kb() {
+        // The reserved slot's emit position: between `## Timeline` and
+        // `## World Knowledge Base` (above lore, below system) — the stable
+        // insertion point P1 fills.
+        let ctx = MomentContext {
+            stage0_context: "stage0".to_string(),
+            world_state: Some("ws".to_string()),
+            timeline: Some("tl".to_string()),
+            moment_directive: Some("Keep the prose terse.".to_string()),
+            world_kb: Some("kb".to_string()),
+            ..MomentContext::default()
+        };
+        let full = ctx.to_full_context();
+        let timeline_pos = full.find(TIMELINE_HEADING).expect("timeline heading");
+        let directive_pos = full
+            .find(MOMENT_DIRECTIVE_HEADING)
+            .expect("directive heading");
+        let world_kb_pos = full.find(WORLD_KB_HEADING).expect("world KB heading");
+        assert!(
+            timeline_pos < directive_pos && directive_pos < world_kb_pos,
+            "directive must sit between Timeline and World Knowledge Base"
+        );
+        assert!(
+            full.contains("Keep the prose terse."),
+            "directive body present"
+        );
+    }
+
+    #[test]
+    fn to_full_context_omits_empty_directive() {
+        // An empty directive body renders nothing (guards P1 drift).
+        let ctx = MomentContext {
+            stage0_context: "stage0".to_string(),
+            moment_directive: Some(String::new()),
+            ..MomentContext::default()
+        };
+        assert!(!ctx.to_full_context().contains(MOMENT_DIRECTIVE_HEADING));
+    }
+
+    // ── V1.150 P1: Moment Directive injection (spec §3) ──────────────
+
+    /// In-memory `DirectiveStore` stub: serves a fixed directive and records
+    /// `after_injection` calls (directive_id, event_id, work_id).
+    #[derive(Default)]
+    struct TestDirectiveStore {
+        active: Option<ActiveDirective>,
+        calls: Arc<std::sync::Mutex<Vec<(String, Option<String>, Option<String>)>>>,
+    }
+
+    impl TestDirectiveStore {
+        fn with_directive(active: ActiveDirective) -> Self {
+            Self {
+                active: Some(active),
+                ..Self::default()
+            }
+        }
+
+        fn after_injection_calls(&self) -> Vec<(String, Option<String>, Option<String>)> {
+            self.calls.lock().unwrap().clone()
+        }
+    }
+
+    impl DirectiveStore for TestDirectiveStore {
+        async fn load_active(
+            &self,
+            _creator_id: Option<&str>,
+            _work_id: Option<&str>,
+            _world_id: Option<&str>,
+        ) -> Option<ActiveDirective> {
+            self.active.clone()
+        }
+
+        async fn after_injection(
+            &self,
+            directive_id: &str,
+            event_id: Option<&str>,
+            work_id: Option<&str>,
+        ) {
+            self.calls.lock().unwrap().push((
+                directive_id.to_string(),
+                event_id.map(ToOwned::to_owned),
+                work_id.map(ToOwned::to_owned),
+            ));
+        }
+    }
+
+    /// Helper: a directive with the given depth and a distinctive body.
+    fn active_directive(depth: DirectiveDepth) -> ActiveDirective {
+        ActiveDirective {
+            directive_id: "dir_1".to_string(),
+            body: "Keep the prose terse.".to_string(),
+            insert_depth: depth,
+            ttl_kind: DirectiveTtlKind::Generations,
+            clear_on_scene_change: false,
+        }
+    }
+
+    /// Seed a world + a timeline event so `world_state` and `timeline` are
+    /// both present (the directive region has three interior positions).
+    async fn seed_world_and_timeline(stores: &TestStores) {
+        let world = nexus_narrative::world::World::new(
+            "wld_1",
+            "ctr_test",
+            "Test World",
+            "test-world",
+            nexus_contracts::Visibility::Private,
+            nexus_contracts::TimePolicy::Manual,
+        );
+        stores.narrative.insert_world(world);
+        let event = nexus_narrative::timeline_event::TimelineEvent::new(
+            "wld_1",
+            "fbk_root",
+            nexus_narrative::timeline_event::TimelineEventType::StoryAdvance,
+            1,
+        );
+        stores.narrative.insert_event(event);
+    }
+
+    #[tokio::test]
+    async fn directive_injects_into_reserved_slot_with_lifecycle() {
+        let stores = TestStores::new();
+        seed_world_and_timeline(&stores).await;
+        let kb = nexus_knowledge::world_kb::knowledge_entry::WorldKbEntry::new(
+            "wld_1",
+            nexus_contracts::BlockType::Character,
+            "Hero",
+        );
+        stores.kb.insert_knowledge_entry(kb).await.unwrap();
+        let store = TestDirectiveStore::with_directive(active_directive(DirectiveDepth::Tail));
+
+        let request = MomentRequest::new(minimal_stage0())
+            .with_world("wld_1")
+            .with_creator("ctr_1")
+            .with_work("wrk_1")
+            .with_event("evt_1");
+        let ctx = assemble_moment_with_directive(
+            &request,
+            &stores.narrative,
+            &stores.kb,
+            &stores.knowledge,
+            &store,
+        )
+        .await;
+
+        assert_eq!(
+            ctx.moment_directive.as_deref(),
+            Some("Keep the prose terse."),
+            "the active directive body fills the reserved slot"
+        );
+        assert_eq!(ctx.moment_directive_depth, DirectiveDepth::Tail);
+
+        let full = ctx.to_full_context();
+        let timeline_pos = full.find(TIMELINE_HEADING).expect("timeline heading");
+        let directive_pos = full
+            .find(MOMENT_DIRECTIVE_HEADING)
+            .expect("directive heading");
+        let world_kb_pos = full.find(WORLD_KB_HEADING).expect("world KB heading");
+        assert!(
+            timeline_pos < directive_pos && directive_pos < world_kb_pos,
+            "tail directive sits between Timeline and World Knowledge Base"
+        );
+        assert!(
+            ctx.stage0_context.contains("A creative writer."),
+            "personality is never replaced or truncated"
+        );
+
+        // Post-injection lifecycle ran exactly once with the request anchors.
+        assert_eq!(
+            store.after_injection_calls(),
+            vec![(
+                "dir_1".to_string(),
+                Some("evt_1".to_string()),
+                Some("wrk_1".to_string())
+            )],
+            "after_injection must run once per injecting assemble"
+        );
+    }
+
+    #[tokio::test]
+    async fn directive_depth_positions_section_within_region() {
+        let stores = TestStores::new();
+        seed_world_and_timeline(&stores).await;
+        let kb = nexus_knowledge::world_kb::knowledge_entry::WorldKbEntry::new(
+            "wld_1",
+            nexus_contracts::BlockType::Character,
+            "Hero",
+        );
+        stores.kb.insert_knowledge_entry(kb).await.unwrap();
+
+        for (depth, expected) in [
+            // head: directly below Stage-0 (nearest system) — before World State
+            (DirectiveDepth::Head, ("stage0", "directive", "world state")),
+            // mid: between World State and Timeline
+            (
+                DirectiveDepth::Mid,
+                ("world state", "directive", "timeline"),
+            ),
+            // tail: between Timeline and World KB (nearest lore — P0's reserved position)
+            (DirectiveDepth::Tail, ("timeline", "directive", "world KB")),
+        ] {
+            let store = TestDirectiveStore::with_directive(active_directive(depth));
+            let request = MomentRequest::new(minimal_stage0()).with_world("wld_1");
+            let ctx = assemble_moment_with_directive(
+                &request,
+                &stores.narrative,
+                &stores.kb,
+                &stores.knowledge,
+                &store,
+            )
+            .await;
+            let full = ctx.to_full_context();
+
+            let marker = |label: &str| -> usize {
+                match label {
+                    "stage0" => full.find("Write chapter 3.").expect("stage0 prompt"),
+                    "world state" => full.find(WORLD_STATE_HEADING).expect("world state heading"),
+                    "timeline" => full.find(TIMELINE_HEADING).expect("timeline heading"),
+                    "directive" => full
+                        .find(MOMENT_DIRECTIVE_HEADING)
+                        .expect("directive heading"),
+                    "world KB" => full.find(WORLD_KB_HEADING).expect("world KB heading"),
+                    other => panic!("unknown marker {other:?}"),
+                }
+            };
+            let (a, b, c) = expected;
+            assert!(
+                marker(a) < marker(b) && marker(b) < marker(c),
+                "depth {depth:?}: expected order {a} < {b} < {c}, got:\n{full}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn no_active_directive_is_byte_equivalent_to_plain_assembly() {
+        // AC-I1b with a store present but empty: a `DirectiveStore` that
+        // resolves nothing must not change the assembled bytes at all —
+        // no `## Moment Directive` wrapper, no lifecycle call.
+        let stores = TestStores::new();
+        seed_world_and_timeline(&stores).await;
+        let store = TestDirectiveStore::default();
+
+        let request = MomentRequest::new(minimal_stage0())
+            .with_world("wld_1")
+            .with_creator("ctr_1")
+            .with_work("wrk_1")
+            .with_event("evt_1");
+        let plain =
+            assemble_moment(&request, &stores.narrative, &stores.kb, &stores.knowledge).await;
+        let with_store = assemble_moment_with_directive(
+            &request,
+            &stores.narrative,
+            &stores.kb,
+            &stores.knowledge,
+            &store,
+        )
+        .await;
+
+        assert_eq!(
+            plain.to_full_context(),
+            with_store.to_full_context(),
+            "empty directive store must be byte-equivalent to the no-store path"
+        );
+        assert!(with_store.moment_directive.is_none());
+        assert!(
+            store.after_injection_calls().is_empty(),
+            "no directive injected ⇒ no lifecycle call"
+        );
+    }
+
+    #[tokio::test]
+    async fn directive_never_leaks_into_activation_trace_or_world_kb() {
+        // AC-I3: the Moment Directive is product-local — it must never appear
+        // in the activation trace (the AssemblePacket `activation_trace[]`
+        // source) nor in the World-KB text (the `modules.placement[]` source).
+        let stores = TestStores::new();
+        seed_world_and_timeline(&stores).await;
+        stores
+            .kb
+            .insert_knowledge_entry(kb_entry_with_modules(
+                "wld_1",
+                nexus_contracts::BlockType::Character,
+                "Hero",
+                "kb_hero",
+                Some(serde_json::json!({"activation": {"keys": ["king"], "logic": "and_any"}})),
+            ))
+            .await
+            .unwrap();
+
+        let stage0 = Stage0Assembly {
+            personality: "A king rules the land.".to_string(),
+            ..minimal_stage0()
+        };
+        let store = TestDirectiveStore::with_directive(active_directive(DirectiveDepth::Head));
+        let request = MomentRequest::new(stage0)
+            .with_world("wld_1")
+            .with_creator("ctr_1");
+        let ctx = assemble_moment_with_directive(
+            &request,
+            &stores.narrative,
+            &stores.kb,
+            &stores.knowledge,
+            &store,
+        )
+        .await;
+
+        // The directive IS injected into the slot.
+        assert_eq!(
+            ctx.moment_directive.as_deref(),
+            Some("Keep the prose terse.")
+        );
+        // The trace is present (activation fired on "king") and carries the
+        // entry — but never the directive body.
+        let trace = ctx.activation_trace.expect("activation trace present");
+        assert!(
+            trace.iter().any(|t| t.entry_id == "kb_hero" && t.accepted),
+            "activation trace still carries KB entries"
+        );
+        let trace_json = serde_json::to_string(&trace).expect("trace serializes");
+        assert!(
+            !trace_json.contains("Keep the prose terse."),
+            "directive body must never appear in activation_trace (AC-I3)"
+        );
+        // The directive body is not lore: absent from the World-KB text.
+        let kb_text = ctx.world_kb.expect("world KB present");
+        assert!(
+            !kb_text.contains("Keep the prose terse."),
+            "directive body must never appear in the World-KB section (AC-I3)"
+        );
+        assert!(
+            kb_text.contains("Hero"),
+            "activated KB entry still renders normally"
+        );
+    }
+
     #[tokio::test]
     async fn moment_context_preserves_stage0_content() {
         let stores = TestStores::new();
@@ -1073,6 +1631,8 @@ mod tests {
             timeline: None,
             world_kb: None,
             user_knowledge: None,
+            moment_directive: None,
+            moment_directive_depth: DirectiveDepth::default(),
             activation_trace: None,
         };
 
@@ -1110,6 +1670,8 @@ mod tests {
             timeline: Some("Timeline events.".to_string()),
             world_kb: None,
             user_knowledge: None,
+            moment_directive: None,
+            moment_directive_depth: DirectiveDepth::default(),
             activation_trace: None,
         };
 
@@ -1221,6 +1783,83 @@ mod tests {
         let kb_text = ctx.world_kb.unwrap();
         assert!(kb_text.contains("Hero"), "flag OFF: all entries appear");
         assert!(kb_text.contains("Castle"), "flag OFF: all entries appear");
+    }
+
+    #[tokio::test]
+    async fn activation_off_hinted_entries_emit_flat_v149_block() {
+        // Off-switch (V1.149 escape hatch, lock #1 — "off ⇒ every candidate
+        // entry unchanged", V1.146 flag-off semantics): slot routing is an
+        // activation-product shaping step and MUST NOT run when activation is
+        // disabled. Entries carrying `position_hint` / `outlet` hints render
+        // as the V1.149 flat block — byte-identical, with no `### World
+        // (Before)` / `### Outlet:` / `### Style (Post-History)` sub-headings.
+        let stores = TestStores::new();
+        for (name, id, modules) in [
+            (
+                "Rules",
+                "kb_rules",
+                Some(serde_json::json!({"activation": {"position_hint": "before_defs"}})),
+            ),
+            (
+                "Style Note",
+                "kb_style",
+                Some(
+                    serde_json::json!({"activation": {"position_hint": "outlet", "outlet": "style.post_history"}}),
+                ),
+            ),
+            (
+                "Open Lore",
+                "kb_open",
+                Some(
+                    serde_json::json!({"activation": {"position_hint": "outlet", "outlet": "zone.z"}}),
+                ),
+            ),
+            ("Neutral", "kb_neutral", None),
+        ] {
+            stores
+                .kb
+                .insert_knowledge_entry(kb_entry_with_modules(
+                    "wld_1",
+                    nexus_contracts::BlockType::Character,
+                    name,
+                    id,
+                    modules,
+                ))
+                .await
+                .unwrap();
+        }
+
+        let request = MomentRequest::new(minimal_stage0())
+            .with_world("wld_1")
+            .with_activation_enabled(false);
+        let ctx = assemble_moment(&request, &stores.narrative, &stores.kb, &stores.knowledge).await;
+        let kb_text = ctx.world_kb.expect("world_kb must be present");
+
+        // Every candidate entry appears unchanged (off-switch: no filtering).
+        for name in ["Rules", "Style Note", "Open Lore", "Neutral"] {
+            assert!(kb_text.contains(name), "off-switch: {name} must appear");
+        }
+        // No slot sub-headings — the off-switch output is the flat block.
+        assert!(
+            !kb_text.contains("### "),
+            "off-switch must not render slot sub-headings, got: {kb_text}"
+        );
+
+        // Byte-identical to the V1.149 flat block for the same entries: the
+        // store read order is shared between the assembly and this re-query
+        // (same `InMemoryKbStore` instance, no mutation in between), so the
+        // expected string is deterministic.
+        let items = stores
+            .kb
+            .query(&nexus_knowledge::world_kb::KbQuery::new("wld_1"))
+            .await
+            .expect("query succeeds")
+            .items;
+        let expected = slots::format_entries(&items);
+        assert_eq!(
+            kb_text, expected,
+            "off-switch output must be byte-identical to the V1.149 flat block"
+        );
     }
 
     #[tokio::test]

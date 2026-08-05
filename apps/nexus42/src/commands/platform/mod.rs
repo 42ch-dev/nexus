@@ -33,8 +33,10 @@ pub enum PlatformCommand {
 
     /// Context assembly
     Context {
+        // ContextCommand is large (many `Option<String>` flags, incl. `--stage`);
+        // boxed to keep `PlatformCommand` small (type-size hygiene; no behavior).
         #[command(subcommand)]
-        command: context::ContextCommand,
+        command: Box<context::ContextCommand>,
     },
 
     /// Synchronize workspace with platform (pull, push, status, resolve, world, retry)
@@ -56,7 +58,7 @@ pub async fn run(cmd: PlatformCommand, config: &CliConfig, _output_format: &str)
     match cmd {
         PlatformCommand::Auth { command } => auth::run(command, config).await,
         PlatformCommand::Explore { command } => explore::run(command).await,
-        PlatformCommand::Context { command } => context::run(command, config).await,
+        PlatformCommand::Context { command } => context::run(*command, config).await,
         PlatformCommand::Sync { command } => sync::run(command, config).await,
         PlatformCommand::Publish => {
             println!("publish command coming soon");

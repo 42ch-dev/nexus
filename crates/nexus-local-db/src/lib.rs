@@ -24,6 +24,7 @@ pub mod kb_relationships;
 pub mod kb_store;
 pub mod knowledge_store;
 pub mod memory_fragment;
+pub mod moment_directive;
 pub mod narrative_gateway;
 pub mod narrative_write;
 pub mod novel_pool_entries;
@@ -134,6 +135,17 @@ pub use kb_extract_job::{
 pub use prompt_injection::{
     claim_prompt_injections, enqueue_prompt_injection, mark_prompt_injections_consumed,
     NewPromptInjection, PromptInjectionRow,
+};
+
+// Re-export moment_directive types (V1.150 P1, DF-75)
+pub use moment_directive::{
+    clear as clear_moment_directive,
+    clear_on_scene_change as clear_moment_directive_on_scene_change,
+    decrement_ttl as decrement_moment_directive_ttl, get_active_for_work, get_active_for_world,
+    get_by_id as get_moment_directive_by_id, replace_active as replace_moment_directive,
+    set_active as set_moment_directive,
+    update_lifecycle_anchor as update_moment_directive_lifecycle_anchor, MomentDirectiveRow,
+    NewMomentDirective,
 };
 
 // Re-export findings types

@@ -25,7 +25,10 @@
 //! - `nexus-kb` — World-scoped key blocks (via `KbStore`)
 //! - `nexus-knowledge` — User-scoped knowledge entries (via `KnowledgeStore`)
 
+pub mod directive;
+pub mod generation;
 pub mod moment;
+pub mod slots;
 pub mod stage0;
 pub mod world_context;
 
@@ -36,7 +39,9 @@ pub mod cloud_stage;
 // Re-export primary types
 #[cfg(feature = "cloud-stage")]
 pub use cloud_stage::TwoStageAssembly;
-pub use moment::{assemble_moment, MomentContext, MomentRequest};
+pub use directive::{ActiveDirective, DirectiveDepth, DirectiveStore, DirectiveTtlKind};
+pub use generation::GenerationStage;
+pub use moment::{assemble_moment, assemble_moment_with_directive, MomentContext, MomentRequest};
 pub use stage0::Stage0Assembly;
 pub use world_context::{
     build_chapter_kb_block, ChapterKbBlockParams, WorldContextBlock, WorldContextItem,

@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO moment_directive_chapter_anchors\n            (directive_id, work_id, last_chapter_no, updated_at)\n         VALUES (?, ?, ?, ?)\n         ON CONFLICT(directive_id, work_id) DO UPDATE SET\n             last_chapter_no = excluded.last_chapter_no,\n             updated_at = excluded.updated_at",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": []
+  },
+  "hash": "b380621be3f12d6791f8f320d903ec452bf55771ae9d8f70685541698da06f32"
+}
