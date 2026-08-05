@@ -590,6 +590,24 @@ fn inspector_routes() -> Router<WorkspaceState> {
         )
 }
 
+/// World KB pack routes — Narrative Knowledge Pack export/import (V1.152 P0,
+/// DF-77).
+///
+/// Mounted in tier2 (`require_api_key` + `require_active_creator`). Handlers
+/// additionally verify world ownership before export/import business logic.
+fn pack_routes() -> Router<WorkspaceState> {
+    Router::new()
+        .route(
+            "/v1/daemon/worlds/:world_id/kb/pack/export",
+            post(handlers::world_kb_pack::pack_export),
+        )
+        .route(
+            "/v1/daemon/worlds/:world_id/kb/pack/import",
+            post(handlers::world_kb_pack::pack_import),
+        )
+}
+
+
 /// Profile-scoped (Tier-2) routes — require active creator + lazy-open pool.
 fn tier2_routes() -> Router<WorkspaceState> {
     Router::new()
@@ -616,6 +634,7 @@ fn tier2_routes() -> Router<WorkspaceState> {
         .merge(compute_invoke_routes())
         .merge(check_routes())
         .merge(inspector_routes())
+        .merge(pack_routes())
 }
 
 /// Create the Daemon API router
