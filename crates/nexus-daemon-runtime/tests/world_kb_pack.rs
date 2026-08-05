@@ -459,7 +459,9 @@ async fn pack_import_overwrite_replaces_body_preserves_status() {
         row.1
     );
 
+    assert_entry_provenance(&ctx.pool, TARGET_WORLD, "Aria").await;
     assert_entry_provenance(&ctx.pool, TARGET_WORLD, "Kael").await;
+    assert_entry_provenance(&ctx.pool, TARGET_WORLD, "Mira").await;
 }
 
 #[tokio::test]
