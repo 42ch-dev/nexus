@@ -1,0 +1,75 @@
+{
+  "section": {
+    "title": "知识包",
+    "description": "将本世界的设定导出为可分享的 .json 知识包，或将知识包文件导入本世界。"
+  },
+  "export": {
+    "title": "导出",
+    "description": "将本世界的设定下载为知识包文件，便于分享或备份。",
+    "button": "导出知识包",
+    "exporting": "正在导出…",
+    "success": "知识包已导出——请查看你的下载。",
+    "errors": {
+      "forbidden": "你没有权限导出该世界。",
+      "generic": "无法导出知识包。"
+    }
+  },
+  "import": {
+    "title": "导入",
+    "description": "将知识包文件导入本世界。冲突条目按所选策略处理。",
+    "fileLabel": "知识包文件",
+    "fileHint": "从 Nexus 导出的 .json 知识包。",
+    "conflictLabel": "当条目已存在时",
+    "conflict": {
+      "skip": "保留现有条目",
+      "rename": "重命名导入条目",
+      "overwrite": "替换现有条目"
+    },
+    "submit": "导入",
+    "importing": "正在导入…",
+    "errors": {
+      "noFile": "请先选择要导入的知识包文件。",
+      "invalidJson": "所选文件不是有效的 JSON。",
+      "tooLarge": "所选文件过大。知识包必须小于 {{size}} MB。",
+      "invalidPack": "所选文件不是有效的知识包。",
+      "forbidden": "你没有权限导入到该世界。",
+      "generic": "无法导入知识包。"
+    }
+  },
+  "results": {
+    "title": "导入结果",
+    "entries": "条目",
+    "relations": "关系",
+    "outcomes": {
+      "created": "已创建",
+      "skipped": "已跳过",
+      "rejected": "已拒绝",
+      "renamed": "已重命名",
+      "overwritten": "已覆盖"
+    },
+    "liveCount": {
+      "created": "创建 {{count}} 个",
+      "skipped": "跳过 {{count}} 个",
+      "rejected": "拒绝 {{count}} 个",
+      "renamed": "重命名 {{count}} 个",
+      "overwritten": "覆盖 {{count}} 个"
+    },
+    "nothing": "无",
+    "liveSummary": "导入完成。条目：{{entries}}。关系：{{relations}}。",
+    "detailsToggle": "显示详情",
+    "detailsToggleWithCount": "显示详情（{{count}}）",
+    "detailsEmpty": "没有逐条详情。",
+    "kind": {
+      "entry": "条目",
+      "relation": "关系"
+    }
+  },
+  "confirm": {
+    "title": "覆盖现有条目？",
+    "warning": "这将替换现有条目，且无法撤销。",
+    "count_one": "将替换 {{count}} 个现有条目。",
+    "count_other": "将替换 {{count}} 个现有条目。",
+    "confirm": "覆盖",
+    "cancel": "取消"
+  }
+}

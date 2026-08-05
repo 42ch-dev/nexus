@@ -39,6 +39,10 @@ import type {
   MomentDirectiveRequest,
   MomentInspectRequest,
   MomentInspectResponse,
+  PackExportRequest,
+  PackExportResponse,
+  PackImportRequest,
+  PackImportResponse,
   PaginationInfo,
   PatchChapterRequest,
   PatchWorkRequest,
@@ -1514,6 +1518,84 @@ export function useMomentDirective() {
     mutationFn: (request: MomentDirectiveRequest) => client.momentDirective(request),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: queryKeys.inspector.all });
+    },
+  });
+}
+
+// ── Narrative Knowledge Pack (V1.152 P1 — DF-77) ───────────────────────────
+
+/**
+ * Export one World's lore as a Narrative Knowledge Pack and trigger a browser
+ * download of `<world-title>.json`.
+ *
+ * `POST /v1/daemon/worlds/:world_id/kb/pack/export` returns the opaque pack
+ * envelope; this hook wraps it in a `Blob` and drives an anchor download so
+ * the author can share or re-import the pack. The filename uses the envelope's
+ * own `modules.pack.title` (daemon default: the World title), falling back to
+ * the `world_id`. Errors surface to the caller's mutation error state (daemon
+ * 403 ownership, 400 invalid).
+ */
+export function useExportPack() {
+  const client = useNexusClient();
+  return useMutation({
+    mutationFn: async ({ worldId, opts }: { worldId: string; opts?: Partial<PackExportRequest> }) => {
+      const response = await client.exportPack(worldId, opts);
+      const title = packTitleFromEnvelope(response.modules) ?? worldId;
+      const blob = new Blob([JSON.stringify(response, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${title.replace(/[/\\]/g, '_')}.json`;
+      a.style.display = 'none';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      return response;
+    },
+  });
+}
+
+/** Read `modules.pack.title` from an opaque pack envelope (defensively). */
+function packTitleFromEnvelope(modules: PackExportResponse['modules']): string | undefined {
+  const pack = modules.pack;
+  if (typeof pack === 'object' && pack !== null && 'title' in pack && typeof pack.title === 'string') {
+    return pack.title;
+  }
+  return undefined;
+}
+
+/**
+ * Import a Narrative Knowledge Pack file into a World.
+ *
+ * Reads the selected file as JSON client-side (the daemon re-validates), then
+ * `POST /v1/daemon/worlds/:world_id/kb/pack/import` with the chosen collision
+ * policy and `include_anchors: false`. On success the target World's KB
+ * queries (graph + candidates) are invalidated so the panel reflects the
+ * imported entries. Errors surface to the caller: file-not-JSON (parse
+ * error), daemon 403 ownership, daemon 400 invalid pack.
+ */
+export function useImportPack() {
+  const client = useNexusClient();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      worldId,
+      file,
+      conflict,
+    }: {
+      worldId: string;
+      file: File;
+      conflict: 'skip' | 'rename' | 'overwrite';
+    }): Promise<PackImportResponse> => {
+      const packJson = await file.text();
+      const pack = JSON.parse(packJson) as PackImportRequest['pack'];
+      const request: PackImportRequest = { pack, conflict, include_anchors: false };
+      return client.importPack(worldId, request);
+    },
+    onSuccess: (_data, variables) => {
+      void qc.invalidateQueries({ queryKey: queryKeys.worldKb.graph(variables.worldId) });
+      void qc.invalidateQueries({ queryKey: queryKeys.worldKb.candidates(variables.worldId) });
     },
   });
 }
