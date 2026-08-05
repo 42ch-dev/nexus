@@ -116,7 +116,7 @@ export function WorkInspectorPage() {
           <MomentDirectiveForm
             workId={workId}
             worldId={worldId}
-            hasActiveDirective={inspect.data.moment_directive.status !== 'none'}
+            momentDirective={inspect.data.moment_directive}
           />
         }
       />

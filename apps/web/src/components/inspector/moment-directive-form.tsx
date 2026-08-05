@@ -25,7 +25,7 @@ import { Label } from '@/components/ui/label';
 import { Select } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { NexusClientError } from '@/lib/nexus';
-import type { MomentDirectiveRequest } from '@42ch/nexus-contracts';
+import type { MomentDirectiveRequest, MomentInspectResponse } from '@42ch/nexus-contracts';
 
 export interface MomentDirectiveFormProps {
   /** Work scope id (`scope.kind === 'work'`). */
@@ -33,16 +33,19 @@ export interface MomentDirectiveFormProps {
   /** The Work's bound world id (`scope.kind === 'world'` override). The
    *  page gates on it — the form only mounts when the Work is bound. */
   worldId: string;
-  /** True when the inspector packet reports an active directive for the
-   *  scoped work/world — gates the Clear action. */
-  hasActiveDirective: boolean;
+  /** The inspector packet's `moment_directive` section (status/metadata only;
+   *  body never on the wire — AC-I3). Clear targets the **active** directive's
+   *  scope from this section — never the form's default Work scope — so Clear
+   *  always clears what the status block shows (QC W-1). Disabled when
+   *  `status === 'none'`. */
+  momentDirective: MomentInspectResponse['moment_directive'];
 }
 
 type ScopeKind = MomentDirectiveRequest['scope']['kind'];
 type InsertDepth = NonNullable<MomentDirectiveRequest['insert_depth']>;
 type TtlKind = NonNullable<MomentDirectiveRequest['ttl_kind']>;
 
-export function MomentDirectiveForm({ workId, worldId, hasActiveDirective }: MomentDirectiveFormProps) {
+export function MomentDirectiveForm({ workId, worldId, momentDirective }: MomentDirectiveFormProps) {
   const { t } = useTranslation('inspector');
   const directive = useMomentDirective();
   const uid = useId();
@@ -58,11 +61,24 @@ export function MomentDirectiveForm({ workId, worldId, hasActiveDirective }: Mom
 
   const scopeId = scopeKind === 'world' ? worldId : workId;
 
+  // The active directive's scope from the inspector packet (null when none).
+  // Clear targets this — never the form's selected scope — so clearing a
+  // World-scoped active directive actually clears it (QC W-1).
+  const activeDirectiveScope: { kind: 'work' | 'world'; id: string } | null =
+    momentDirective.status !== 'none' &&
+    (momentDirective.scope === 'work' || momentDirective.scope === 'world') &&
+    momentDirective.scope_id !== null
+      ? { kind: momentDirective.scope, id: momentDirective.scope_id }
+      : null;
+
   const errors: string[] = [];
   if (body.trim().length === 0) errors.push(t('directive.form.validation.bodyRequired'));
   if (ttlKind === null) errors.push(t('directive.form.validation.ttlKindRequired'));
   const ttlValue = Number(ttlRemaining);
-  if (!Number.isInteger(ttlValue) || ttlValue < 1) {
+  // Safe integer caps at 2^53-1 — fits the daemon's i64 while rejecting
+  // values that would overflow the JSON number on the wire (QC3 S-2).
+  const ttlInvalid = !Number.isSafeInteger(ttlValue) || ttlValue < 1;
+  if (ttlInvalid) {
     errors.push(t('directive.form.validation.ttlRemainingInvalid'));
   }
 
@@ -73,24 +89,41 @@ export function MomentDirectiveForm({ workId, worldId, hasActiveDirective }: Mom
   const showErrors = (attempted || directive.isError) && errors.length > 0;
   const pending = directive.isPending;
 
+  // Back to pristine state after a successful set/clear — repeat sets after
+  // clear stay clean and the disclosure never shows a "ghost" directive (QC3 S-3).
+  const resetForm = () => {
+    setScopeKind('work');
+    setBody('');
+    setInsertDepth('tail');
+    setTtlKind(null);
+    setTtlRemaining('5');
+    setClearOnSceneChange(false);
+    setReplace(false);
+    setAttempted(false);
+  };
+
   const submitSet = (replaceOverride?: boolean) => {
     setAttempted(true);
     if (errors.length > 0 || ttlKind === null) return;
     const useReplace = replaceOverride ?? replace;
-    directive.mutate({
-      action: 'set',
-      scope: { kind: scopeKind, id: scopeId },
-      body: body.trim(),
-      insert_depth: insertDepth,
-      ttl_kind: ttlKind,
-      ttl_remaining: ttlValue,
-      clear_on_scene_change: clearOnSceneChange,
-      ...(useReplace ? { replace: true } : {}),
-    });
+    directive.mutate(
+      {
+        action: 'set',
+        scope: { kind: scopeKind, id: scopeId },
+        body: body.trim(),
+        insert_depth: insertDepth,
+        ttl_kind: ttlKind,
+        ttl_remaining: ttlValue,
+        clear_on_scene_change: clearOnSceneChange,
+        ...(useReplace ? { replace: true } : {}),
+      },
+      { onSuccess: resetForm },
+    );
   };
 
   const submitClear = () => {
-    directive.mutate({ action: 'clear', scope: { kind: scopeKind, id: scopeId } });
+    if (!activeDirectiveScope) return;
+    directive.mutate({ action: 'clear', scope: activeDirectiveScope }, { onSuccess: resetForm });
   };
 
   const enableReplaceAndRetry = () => {
@@ -214,19 +247,18 @@ export function MomentDirectiveForm({ workId, worldId, hasActiveDirective }: Mom
                 id={`${uid}-ttl-remaining`}
                 type="number"
                 min={1}
+                max={Number.MAX_SAFE_INTEGER}
                 step={1}
                 inputMode="numeric"
                 value={ttlRemaining}
                 onChange={(e) => setTtlRemaining(e.target.value)}
-                invalid={showErrors && (!Number.isInteger(ttlValue) || ttlValue < 1)}
+                invalid={showErrors && ttlInvalid}
                 aria-describedby={
-                  showErrors && (!Number.isInteger(ttlValue) || ttlValue < 1)
-                    ? `${uid}-ttl-remaining-error`
-                    : undefined
+                  showErrors && ttlInvalid ? `${uid}-ttl-remaining-error` : undefined
                 }
                 className="w-28"
               />
-              {showErrors && (!Number.isInteger(ttlValue) || ttlValue < 1) ? (
+              {showErrors && ttlInvalid ? (
                 <p id={`${uid}-ttl-remaining-error`} className="text-copy-13 text-red-1000">
                   {t('directive.form.validation.ttlRemainingInvalid')}
                 </p>
@@ -284,7 +316,7 @@ export function MomentDirectiveForm({ workId, worldId, hasActiveDirective }: Mom
                   variant="secondary"
                   size="small"
                   onClick={enableReplaceAndRetry}
-                  disabled={pending}
+                  disabled={pending || errors.length > 0}
                   className="self-start"
                   data-testid="directive-form-enable-replace"
                 >
@@ -324,7 +356,7 @@ export function MomentDirectiveForm({ workId, worldId, hasActiveDirective }: Mom
         variant="secondary"
         size="small"
         onClick={submitClear}
-        disabled={!hasActiveDirective || pending}
+        disabled={!activeDirectiveScope || pending}
         data-testid="directive-form-clear"
       >
         {pending ? t('directive.form.clearing') : t('directive.form.clear')}

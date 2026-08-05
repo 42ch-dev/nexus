@@ -32,21 +32,24 @@ type DirectiveBody = {
 };
 
 /** Shared directive state — flipped by the directive handler, read by the
- * inspector handler so the refetch reflects the write (AC-I5). */
-let directiveStatus: 'none' | 'active' = 'none';
+ * inspector handler so the refetch reflects the write (AC-I5). Carries the
+ * active directive's scope so a World-scoped clear can be asserted end to end
+ * (QC W-1). */
+type DirectiveState = { status: 'none' | 'active'; scope: 'work' | 'world' };
+let directiveState: DirectiveState = { status: 'none', scope: 'work' };
 let setRequests: DirectiveBody[] = [];
 let clearRequests: DirectiveBody[] = [];
 
-function makePacket(status: 'none' | 'active'): MomentInspectResponse {
+function makePacket(state: DirectiveState): MomentInspectResponse {
   return {
     modules: { placement: [], activation_trace: [] },
     slot_map: [],
     budget: { primary_tokens_est: 0, hop_tokens_est: 0, cap: null, remaining: null },
     moment_directive:
-      status === 'active'
+      state.status === 'active'
         ? {
-            scope: 'work',
-            scope_id: 'work-a',
+            scope: state.scope,
+            scope_id: state.scope === 'world' ? 'world-a' : 'work-a',
             insert_depth: 'tail',
             ttl_kind: 'generations',
             ttl_remaining: 5,
@@ -68,13 +71,13 @@ function makePacket(status: 'none' | 'active'): MomentInspectResponse {
 function harnessHandlers() {
   return [
     http.post('/v1/daemon/inspector/moment', () =>
-      HttpResponse.json(makePacket(directiveStatus)),
+      HttpResponse.json(makePacket(directiveState)),
     ),
     http.post('/v1/daemon/moment-directive', async ({ request }) => {
       const body = (await request.json()) as DirectiveBody;
       if (body.action === 'set') {
         setRequests.push(body);
-        if (directiveStatus === 'active' && !body.replace) {
+        if (directiveState.status === 'active' && !body.replace) {
           return HttpResponse.json(
             {
               success: false,
@@ -87,11 +90,14 @@ function harnessHandlers() {
             { status: 409 },
           );
         }
-        directiveStatus = 'active';
+        directiveState = {
+          status: 'active',
+          scope: body.scope?.kind === 'world' ? 'world' : 'work',
+        };
         return HttpResponse.json({ directive_id: 'dir_1', status: 'active' });
       }
       clearRequests.push(body);
-      directiveStatus = 'none';
+      directiveState = { status: 'none', scope: 'work' };
       return HttpResponse.json({});
     }),
   ];
@@ -110,7 +116,7 @@ function Harness({ workId = 'work-a', worldId = 'world-a' }: { workId?: string; 
         <MomentDirectiveForm
           workId={workId}
           worldId={worldId}
-          hasActiveDirective={packet.moment_directive.status !== 'none'}
+          momentDirective={packet.moment_directive}
         />
       }
     />
@@ -137,7 +143,7 @@ async function fillValidSet(user: UserEvent) {
 
 beforeEach(async () => {
   await i18n.changeLanguage('en');
-  directiveStatus = 'none';
+  directiveState = { status: 'none', scope: 'work' };
   setRequests = [];
   clearRequests = [];
 });
@@ -172,6 +178,11 @@ describe('MomentDirectiveForm — set (T4)', () => {
     expect(await screen.findByTestId('directive-status-active')).toHaveTextContent('Active');
     expect(screen.queryByTestId('directive-none')).toBeNull();
     await waitFor(() => expect(screen.getByTestId('directive-form-clear')).toBeEnabled());
+
+    // Success resets the form (QC3 S-3) — no ghost body/TTL for the next set.
+    expect(screen.getByLabelText('Directive body')).toHaveValue('');
+    expect(screen.getByLabelText('Generations')).not.toBeChecked();
+    expect(screen.getByLabelText('TTL count')).toHaveValue(5);
   });
 
   it('scopes to the bound World when the World override is selected', async () => {
@@ -192,7 +203,7 @@ describe('MomentDirectiveForm — set (T4)', () => {
 
 describe('MomentDirectiveForm — clear (T4)', () => {
   it('clears the active directive and the inspector refreshes to none', async () => {
-    directiveStatus = 'active';
+    directiveState = { status: 'active', scope: 'work' };
     useHandlers(...harnessHandlers());
     const user = userEvent.setup();
     renderHarness();
@@ -209,6 +220,28 @@ describe('MomentDirectiveForm — clear (T4)', () => {
     await waitFor(() => expect(screen.getByTestId('directive-form-clear')).toBeDisabled());
   });
 
+  it('clears a World-scoped active directive by targeting its actual scope (QC W-1)', async () => {
+    directiveState = { status: 'active', scope: 'world' };
+    useHandlers(...harnessHandlers());
+    const user = userEvent.setup();
+    renderHarness();
+
+    // The packet reports the active directive as World-scoped; the form's own
+    // scope default is Work — Clear must still target the World scope.
+    expect(await screen.findByTestId('directive-status-active')).toBeInTheDocument();
+    expect(screen.getByTestId('directive-scope')).toHaveTextContent('world');
+
+    await user.click(screen.getByTestId('directive-form-clear'));
+
+    await waitFor(() => expect(clearRequests).toHaveLength(1));
+    expect(clearRequests[0]).toEqual({ action: 'clear', scope: { kind: 'world', id: 'world-a' } });
+
+    // The World directive was actually cleared — not still active.
+    expect(await screen.findByTestId('directive-none')).toHaveTextContent('No active directive');
+    expect(screen.queryByTestId('directive-status-active')).toBeNull();
+    await waitFor(() => expect(screen.getByTestId('directive-form-clear')).toBeDisabled());
+  });
+
   it('keeps Clear disabled while no directive is active', async () => {
     useHandlers(...harnessHandlers());
     renderHarness();
@@ -219,7 +252,7 @@ describe('MomentDirectiveForm — clear (T4)', () => {
 
 describe('MomentDirectiveForm — 409 replace prompt (T4)', () => {
   it('surfaces the conflict and retries with replace enabled — no silent overwrite', async () => {
-    directiveStatus = 'active';
+    directiveState = { status: 'active', scope: 'work' };
     useHandlers(...harnessHandlers());
     const user = userEvent.setup();
     renderHarness();
@@ -241,6 +274,33 @@ describe('MomentDirectiveForm — 409 replace prompt (T4)', () => {
     expect(setRequests[1].replace).toBe(true);
     expect(screen.queryByTestId('directive-form-conflict')).toBeNull();
     expect(await screen.findByTestId('directive-status-active')).toHaveTextContent('Active');
+  });
+
+  it('disables the retry button while the form is invalid (QC1 S-4 / QC2 S-3 / QC3 S-1)', async () => {
+    directiveState = { status: 'active', scope: 'work' };
+    useHandlers(...harnessHandlers());
+    const user = userEvent.setup();
+    renderHarness();
+    await screen.findByTestId('directive-form');
+
+    await openForm(user);
+    await fillValidSet(user);
+    await user.click(screen.getByTestId('directive-form-set'));
+    await screen.findByTestId('directive-form-conflict');
+
+    const retry = screen.getByTestId('directive-form-enable-replace');
+    expect(retry).toBeEnabled();
+
+    // Clearing the body invalidates the form → the retry path can no longer
+    // fire (it would silently no-op on the validation early-return).
+    await user.clear(screen.getByLabelText('Directive body'));
+    expect(screen.getByTestId('directive-form-errors')).toHaveTextContent(
+      'Directive body is required.',
+    );
+    expect(screen.getByTestId('directive-form-enable-replace')).toBeDisabled();
+
+    // And it stays a no-op — no second request is fired.
+    expect(setRequests).toHaveLength(1);
   });
 });
 
@@ -277,6 +337,27 @@ describe('MomentDirectiveForm — client-side validation mirrors the CLI (T4)', 
     );
 
     fireEvent.change(screen.getByLabelText('TTL count'), { target: { value: '2.5' } });
+    await user.click(screen.getByTestId('directive-form-set'));
+    expect(screen.getByTestId('directive-form-errors')).toHaveTextContent(
+      'TTL count must be a whole number of at least 1.',
+    );
+    expect(setRequests).toHaveLength(0);
+  });
+
+  it('rejects TTL counts beyond the safe-integer upper bound (QC3 S-2)', async () => {
+    useHandlers(...harnessHandlers());
+    const user = userEvent.setup();
+    renderHarness();
+    await screen.findByTestId('directive-form');
+
+    await openForm(user);
+    await user.type(screen.getByLabelText('Directive body'), 'Keep the prose terse.');
+    await user.click(screen.getByLabelText('Generations'));
+
+    // 2^53 overflows the JSON number on the wire — integral but not safe.
+    fireEvent.change(screen.getByLabelText('TTL count'), {
+      target: { value: String(Number.MAX_SAFE_INTEGER + 1) },
+    });
     await user.click(screen.getByTestId('directive-form-set'));
     expect(screen.getByTestId('directive-form-errors')).toHaveTextContent(
       'TTL count must be a whole number of at least 1.',
