@@ -229,6 +229,7 @@ pub async fn pack_export(
 
 // ─── POST /v1/daemon/worlds/:world_id/kb/pack/import ──────────────────────
 
+#[allow(clippy::missing_const_for_fn)]
 fn conflict_policy_from_request(conflict: PackImportRequestConflict) -> ConflictPolicy {
     match conflict {
         PackImportRequestConflict::Skip => ConflictPolicy::Skip,

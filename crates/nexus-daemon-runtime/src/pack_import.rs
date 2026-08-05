@@ -103,6 +103,11 @@ pub enum PackImportError {
 ///
 /// Returns [`PackImportError`] on storage failures. Individual atom rejections
 /// are recorded in [`ImportSummary`] (`rejected` counts + `details`).
+#[allow(
+    clippy::too_many_lines,
+    clippy::too_many_arguments,
+    clippy::if_not_else
+)]
 pub async fn import_pack(
     pool: &SqlitePool,
     world_id: &str,
@@ -575,6 +580,7 @@ fn handle_entry_id_collision_in_target(
     target_entry_ids.insert(pack_entry_id.to_string());
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn import_renamed_entry(
     pool: &SqlitePool,
     world_id: &str,
@@ -619,7 +625,7 @@ async fn import_renamed_entry(
         return Ok(());
     }
 
-    entry.entry_id = fresh_id.clone();
+    entry.entry_id.clone_from(&fresh_id);
     let parsed_name = match disambiguated.parse() {
         Ok(name) => name,
         Err(e) => {
@@ -668,6 +674,7 @@ async fn import_renamed_entry(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn import_overwritten_entry(
     pool: &SqlitePool,
     world_id: &str,
@@ -768,6 +775,7 @@ fn fit_canonical_name_base(base: &str, max_len: usize) -> String {
     if max_len == 0 {
         return String::new();
     }
+    #[allow(clippy::items_after_statements)]
     const HASH_TAG_LEN: usize = 9; // "~" + 8 hex chars
     if max_len <= HASH_TAG_LEN {
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
