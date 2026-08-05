@@ -201,6 +201,26 @@ fn build_schema_map() -> Vec<SchemaEntry> {
             Strict,
             CheckResponse
         ),
+        // ── daemon-api/inspector/ (V1.151 P0 DF-76 — moment inspect +
+        // moment-directive daemon routes; additive wire DTOs) ─────────────
+        // All three are plain-object root schemas → Strict. The response
+        // packet mirrors build_inspector_packet 1:1 (AC-I3: moment_directive
+        // is status-only, no body field by construction).
+        entry!(
+            "schemas/daemon-api/inspector/moment-inspect-request.schema.json",
+            Strict,
+            MomentInspectRequest
+        ),
+        entry!(
+            "schemas/daemon-api/inspector/moment-inspect-response.schema.json",
+            Strict,
+            MomentInspectResponse
+        ),
+        entry!(
+            "schemas/daemon-api/inspector/moment-directive-request.schema.json",
+            Strict,
+            MomentDirectiveRequest
+        ),
         // ── daemon-api/compute/ ───────────────────────────────────────────
         // V1.62 reorganization: compute envelopes moved here from compute/.
         // V1.61 WASM compute ABI envelopes (compass Q3/Q8). Only the top-level

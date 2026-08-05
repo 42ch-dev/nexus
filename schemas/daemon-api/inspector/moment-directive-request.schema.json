@@ -1,0 +1,60 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/daemon-api/inspector/moment-directive-request.schema.json",
+  "schema_version": 1,
+  "title": "NexusDaemonMomentDirectiveRequest",
+  "description": "POST /v1/daemon/moment-directive — set/show/clear the active Moment Directive (V1.151 P0 DF-76). Validation mirrors the CLI handle_set (apps/nexus42/src/commands/creator/moment_directive.rs).",
+  "type": "object",
+  "required": ["action", "scope"],
+  "additionalProperties": false,
+  "properties": {
+    "action": {
+      "type": "string",
+      "enum": ["set", "show", "clear"],
+      "description": "Directive operation: set (create/replace), show (read active), clear (remove active)."
+    },
+    "scope": {
+      "type": "object",
+      "required": ["kind", "id"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": ["work", "world"],
+          "description": "Scope kind of the directive."
+        },
+        "id": {
+          "type": "string",
+          "description": "Work id (kind=work) or world id (kind=world) the directive is scoped to."
+        }
+      }
+    },
+    "body": {
+      "type": "string",
+      "description": "Author instruction text (required for action=set)."
+    },
+    "insert_depth": {
+      "type": "string",
+      "enum": ["head", "mid", "tail"],
+      "description": "Placement within the directive region. Defaults to tail."
+    },
+    "ttl_kind": {
+      "type": "string",
+      "enum": ["generations", "chapters"],
+      "description": "TTL kind: count down by assembling generations or chapter advances."
+    },
+    "ttl_n": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "TTL count."
+    },
+    "clear_on_scene_change": {
+      "type": "boolean",
+      "description": "Clear when the focused moment anchor changes between assembles."
+    },
+    "replace": {
+      "type": "boolean",
+      "description": "Replace an existing directive at the same scope."
+    }
+  }
+}

@@ -1,0 +1,110 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/daemon-api/inspector/moment-inspect-response.schema.json",
+  "schema_version": 1,
+  "title": "NexusDaemonMomentInspectResponse",
+  "description": "Response for POST /v1/daemon/inspector/moment (V1.151 P0 DF-76). Mirrors the enriched inspector packet emitted by nexus-moment-context-assembly::inspector::build_inspector_packet 1:1: spoke `modules` (placement + activation_trace), plus three additive product-local sections — `slot_map`, `budget`, `moment_directive` (status/metadata only; the directive body is NEVER on the wire — AC-I3). All sections are always present with nullable/empty values; root keeps additionalProperties: true so product-local sections may grow.",
+  "type": "object",
+  "required": ["modules", "slot_map", "budget", "moment_directive"],
+  "additionalProperties": true,
+  "properties": {
+    "modules": {
+      "type": "object",
+      "description": "Spoke assemble-module recipe (unchanged, AC-I3).",
+      "required": ["placement", "activation_trace"],
+      "additionalProperties": false,
+      "properties": {
+        "placement": {
+          "type": "array",
+          "description": "Entries that passed activation (accepted == true).",
+          "items": {
+            "type": "object",
+            "required": ["entry_id", "canonical_name", "reason"],
+            "additionalProperties": false,
+            "properties": {
+              "entry_id": { "type": "string", "description": "Stable entry id." },
+              "canonical_name": { "type": "string", "description": "Human-readable entry name." },
+              "reason": { "type": "string", "description": "Why the entry was matched." }
+            }
+          }
+        },
+        "activation_trace": {
+          "type": "array",
+          "description": "Full per-entry fire/miss trace.",
+          "items": {
+            "type": "object",
+            "required": ["entry_id", "canonical_name", "reason", "accepted"],
+            "additionalProperties": false,
+            "properties": {
+              "entry_id": { "type": "string", "description": "Stable entry id." },
+              "canonical_name": { "type": "string", "description": "Human-readable entry name." },
+              "reason": { "type": "string", "description": "Why the entry was matched or not." },
+              "accepted": { "type": "boolean", "description": "Whether the entry ended up in the matched placement." }
+            }
+          }
+        }
+      }
+    },
+    "slot_map": {
+      "type": "array",
+      "description": "entry_id → slot id (world.before | default | world.after | kb.outlet.<name> | style.post_history | moment.directive), captured post stage-gate at assembly time.",
+      "items": {
+        "type": "object",
+        "required": ["entry_id", "slot"],
+        "additionalProperties": false,
+        "properties": {
+          "entry_id": { "type": "string", "description": "The routed entry's stable id." },
+          "slot": { "type": "string", "description": "The named slot the entry landed in." }
+        }
+      }
+    },
+    "budget": {
+      "type": "object",
+      "description": "Activation token-budget accounting (chars/4 estimates).",
+      "required": ["primary_tokens_est", "hop_tokens_est", "cap", "remaining"],
+      "additionalProperties": false,
+      "properties": {
+        "primary_tokens_est": { "type": "integer", "description": "Estimated primary-match tokens. Zero when no activation ran." },
+        "hop_tokens_est": { "type": "integer", "description": "Estimated relation-hop tokens. Zero when no activation ran." },
+        "cap": { "type": ["integer", "null"], "description": "Activation budget cap; null when no activation ran." },
+        "remaining": { "type": ["integer", "null"], "description": "Remaining budget after activation; null when no activation ran." }
+      }
+    },
+    "moment_directive": {
+      "type": "object",
+      "description": "Status/metadata only — the directive body is excluded by construction (AC-I3); \"none\" + nulls when no directive injected.",
+      "required": ["scope", "scope_id", "insert_depth", "ttl_kind", "ttl_remaining", "clear_on_scene_change", "status"],
+      "additionalProperties": false,
+      "properties": {
+        "scope": {
+          "type": ["string", "null"],
+          "description": "Directive scope kind: work | world. Null when no directive injected."
+        },
+        "scope_id": {
+          "type": ["string", "null"],
+          "description": "Work id (scope=work) or world id (scope=world). Null when no directive injected."
+        },
+        "insert_depth": {
+          "type": ["string", "null"],
+          "description": "Placement within the directive region: head | mid | tail. Null when no directive injected."
+        },
+        "ttl_kind": {
+          "type": ["string", "null"],
+          "description": "TTL kind: generations | chapters. Null when no directive injected."
+        },
+        "ttl_remaining": {
+          "type": ["integer", "null"],
+          "description": "Remaining TTL count after this assembly's decrement. Null when no directive injected."
+        },
+        "clear_on_scene_change": {
+          "type": "boolean",
+          "description": "Clear when the focused moment anchor changes between assembles. False when no directive injected."
+        },
+        "status": {
+          "type": "string",
+          "description": "Open string. Core vocabulary (documented, not enforced): none (no directive injected), active (directive injected this assembly)."
+        }
+      }
+    }
+  }
+}
