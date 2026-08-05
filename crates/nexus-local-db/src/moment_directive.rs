@@ -52,7 +52,11 @@ pub mod scope_kind {
 }
 
 /// Moment Directive row — mirrors the `moment_directives` DB row.
-#[derive(Debug, Clone, sqlx::FromRow)]
+///
+/// `Serialize` powers the daemon directive route response (`show`/`set`
+/// return the full row incl. body — the author surface, not the inspector
+/// packet; AC-I3).
+#[derive(Debug, Clone, serde::Serialize, sqlx::FromRow)]
 pub struct MomentDirectiveRow {
     /// Unique directive id (application-generated).
     pub directive_id: String,

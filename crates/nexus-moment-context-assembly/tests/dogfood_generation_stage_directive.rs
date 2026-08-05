@@ -194,6 +194,10 @@ fn directive() -> ActiveDirective {
         insert_depth: DirectiveDepth::Tail,
         ttl_kind: DirectiveTtlKind::Generations,
         clear_on_scene_change: false,
+        ttl_remaining: Some(3),
+        status: "active".to_string(),
+        scope_kind: "work".to_string(),
+        scope_id: "wrk_1".to_string(),
     }
 }
 

@@ -1,0 +1,25 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/daemon-api/inspector/moment-inspect-request.schema.json",
+  "schema_version": 1,
+  "title": "NexusDaemonMomentInspectRequest",
+  "description": "POST /v1/daemon/inspector/moment — assemble and return the enriched inspector packet for one moment (V1.151 P0 DF-76).",
+  "type": "object",
+  "required": ["world_id"],
+  "additionalProperties": false,
+  "properties": {
+    "world_id": {
+      "type": "string",
+      "description": "World id to assemble the moment over."
+    },
+    "work_id": {
+      "type": "string",
+      "description": "Optional work id for a work-bound moment (scope resolution of the directive region)."
+    },
+    "generation_stage": {
+      "type": "string",
+      "enum": ["intake", "research", "produce", "review", "persist", "work_maintenance", "system_maintenance", "unspecified"],
+      "description": "Generation stage gate. Maps via GenerationStage::as_str/parse; unknown values default to unspecified."
+    }
+  }
+}

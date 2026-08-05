@@ -5,6 +5,22 @@ All notable changes to the `@42ch/nexus-contracts` package will be documented in
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.28.1] - 2026-08-05
+
+### Added
+
+- **Moment inspector + directive wire contracts (V1.151 P0 DF-76):** added 3 additive schemas under `daemon-api/inspector/` for the two new Daemon HTTP surfaces (`POST /v1/daemon/inspector/moment`, `POST /v1/daemon/moment-directive`):
+  - `MomentInspectRequest` — `world_id` (required), optional `work_id`, optional `generation_stage` (`intake` | `research` | `produce` | `review` | `persist` | `work_maintenance` | `system_maintenance` | `unspecified`; maps via `GenerationStage::as_str`/`parse`, unknown → `unspecified`)
+  - `MomentInspectResponse` — mirrors the enriched inspector packet from `nexus-moment-context-assembly::inspector::build_inspector_packet` 1:1: spoke `modules` (`placement[]` + `activation_trace[]`), `slot_map[]` (`entry_id` → slot id), `budget` (token estimates + nullable `cap`/`remaining`), `moment_directive` — **status/metadata only, no body field by construction (AC-I3)**; root `additionalProperties: false` per the H1 locked pattern (product-local sections grow by extending schema + codegen together, never silently)
+  - `MomentDirectiveRequest` — `action` (`set` | `show` | `clear`) + scoped `scope` (`kind`: `work` | `world`, `id`), optional `body`, `insert_depth` (`head` | `mid` | `tail`), `ttl_kind` (`generations` | `chapters`), `ttl_remaining` (≥1; input name matches the read-back column per the spec §5 H5 lock), `clear_on_scene_change`, `replace`; validation mirrors CLI `handle_set`
+
+### Consumer Impact
+
+- **Additive only** — no existing schemas modified; generated types for existing consumers are unchanged.
+- New Rust types: `nexus_contracts::generated::daemon_api::inspector::{MomentInspectRequest, MomentInspectResponse, MomentInspectResponseModules, MomentInspectResponseBudget, MomentInspectResponseMomentDirective, MomentInspectResponseSlotMapItem, MomentDirectiveRequest, MomentDirectiveRequestScope, ...}`.
+- New TypeScript types: `@42ch/nexus-contracts` exports the same shapes under `daemon-api/inspector/moment-inspect-request.ts`, `moment-inspect-response.ts`, and `moment-directive-request.ts`.
+- **Daemon-only routes:** both routes live on the Daemon API tier2 surface; neither is a Connect op.
+
 ## [0.28.0] - 2026-08-04
 
 ### Added

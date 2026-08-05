@@ -14,6 +14,7 @@ export * from './daemon-api/common';
 export * from './daemon-api/compute';
 export * from './daemon-api/creators';
 export * from './daemon-api/findings';
+export * from './daemon-api/inspector';
 export * from './daemon-api/kb';
 export * from './daemon-api/memory';
 export * from './daemon-api/orchestration/capabilities';
@@ -101,6 +102,9 @@ export const SCHEMA_VERSIONS: Record<string, number> = {
   ListFindingsResponse: 1,
   StaleFindingsResponse: 1,
   UpdateFindingRequest: 1,
+  MomentDirectiveRequest: 1,
+  MomentInspectRequest: 1,
+  MomentInspectResponse: 1,
   AddKbEntryRequest: 1,
   AddKbEntryResponse: 1,
   DeleteKbEntryResponse: 1,
