@@ -312,7 +312,14 @@ async fn dogfood_produce_packet_carries_slots_directive_and_hops() {
         .map(|row| (row["entry_id"].as_str().expect("placed id"), row))
         .collect();
     for id in [
-        "kb_bf", "kb_hero", "kb_af", "kb_a", "kb_ph", "kb_mid", "kb_hidden", "kb_neutral",
+        "kb_bf",
+        "kb_hero",
+        "kb_af",
+        "kb_a",
+        "kb_ph",
+        "kb_mid",
+        "kb_hidden",
+        "kb_neutral",
     ] {
         assert!(placed.contains_key(id), "placement must include {id}");
     }
@@ -395,10 +402,7 @@ async fn dogfood_produce_packet_carries_slots_directive_and_hops() {
         hidden.source_relation_type.as_deref(),
         Some("hero_hidden_path")
     );
-    assert_eq!(
-        hidden.source_relation_id.as_deref(),
-        Some("rel_hero_cove")
-    );
+    assert_eq!(hidden.source_relation_id.as_deref(), Some("rel_hero_cove"));
 
     // ── slot_map: every fired entry routed to its expected slot ──
     let slots = slot_map(&packet);
@@ -410,7 +414,10 @@ async fn dogfood_produce_packet_carries_slots_directive_and_hops() {
     assert_eq!(slots["kb_hero"], "default");
     assert_eq!(slots["kb_mid"], "default");
     assert_eq!(slots["kb_neutral"], "default");
-    assert_eq!(slots["kb_hidden"], "default", "hop-pulled entry routes to default");
+    assert_eq!(
+        slots["kb_hidden"], "default",
+        "hop-pulled entry routes to default"
+    );
     assert_eq!(slots["dir_dogfood"], "moment.directive");
 
     // The rendered World-KB matches the slot map (post-gate reality).
@@ -426,11 +433,17 @@ async fn dogfood_produce_packet_carries_slots_directive_and_hops() {
 
     // ── budget: primary + hop estimates with caller cap / remaining ──
     assert!(
-        packet["budget"]["primary_tokens_est"].as_u64().expect("primary est") > 0,
+        packet["budget"]["primary_tokens_est"]
+            .as_u64()
+            .expect("primary est")
+            > 0,
         "primary estimate must be non-zero"
     );
     assert!(
-        packet["budget"]["hop_tokens_est"].as_u64().expect("hop est") > 0,
+        packet["budget"]["hop_tokens_est"]
+            .as_u64()
+            .expect("hop est")
+            > 0,
         "hop estimate must be non-zero (Hidden Cove pulled)"
     );
     assert_eq!(
@@ -484,7 +497,9 @@ async fn dogfood_review_keeps_style_slot_in_packet() {
     assert!(kb_text.contains("### Style (Post-History)"));
     assert!(kb_text.contains("- **PostStyle**"));
     assert_eq!(
-        packet["moment_directive"]["status"].as_str().expect("status"),
+        packet["moment_directive"]["status"]
+            .as_str()
+            .expect("status"),
         "active",
         "review: directive metadata present"
     );
@@ -533,7 +548,9 @@ async fn dogfood_persist_gates_style_in_slot_map() {
         );
     }
     assert_eq!(
-        packet["moment_directive"]["status"].as_str().expect("status"),
+        packet["moment_directive"]["status"]
+            .as_str()
+            .expect("status"),
         "active",
         "persist: directive still injects (not stage-gated)"
     );

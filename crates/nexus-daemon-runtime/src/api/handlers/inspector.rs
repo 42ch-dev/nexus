@@ -55,8 +55,7 @@ use crate::directive_store::ReadOnlyDirectiveStore;
 use crate::workspace::WorkspaceState;
 use axum::{extract::State, Json};
 use nexus_contracts::generated::daemon_api::inspector::{
-    moment_inspect_request::MomentInspectRequest,
-    moment_inspect_response::MomentInspectResponse,
+    moment_inspect_request::MomentInspectRequest, moment_inspect_response::MomentInspectResponse,
 };
 use nexus_local_db::narrative_gateway::SqliteNarrativeGateway;
 use nexus_local_db::narrative_write;
@@ -117,12 +116,13 @@ pub async fn inspect_moment(
     // scope_id does not match the request world_id. A worldless or unknown
     // Work resolves no override and stays legal (matches the CLI).
     if let Some(work_id) = req.work_id.as_deref() {
-        let work = get_work(pool, &creator_id, work_id)
-            .await
-            .map_err(|e| NexusApiError::Internal {
-                code: "DATABASE_ERROR".to_string(),
-                message: e.to_string(),
-            })?;
+        let work =
+            get_work(pool, &creator_id, work_id)
+                .await
+                .map_err(|e| NexusApiError::Internal {
+                    code: "DATABASE_ERROR".to_string(),
+                    message: e.to_string(),
+                })?;
         if let Some(work) = work {
             if let Some(bound_world) = work.world_id.as_deref() {
                 if bound_world != req.world_id.as_str() {

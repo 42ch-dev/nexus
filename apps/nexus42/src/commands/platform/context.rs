@@ -837,8 +837,8 @@ fn emit_inspector_packet(ctx: &MomentContext, packet_out: Option<&str>) -> Resul
 /// assembled output is never modified (AC-I6).
 #[allow(clippy::too_many_lines)] // one block per readable section — keeps sections scannable
 fn render_inspector_readable(packet: &serde_json::Value) -> String {
-    use std::fmt::Write as _;
     use std::collections::HashMap;
+    use std::fmt::Write as _;
 
     let mut out = String::new();
 
@@ -864,9 +864,7 @@ fn render_inspector_readable(packet: &serde_json::Value) -> String {
                     }
                     // Hop depth / origin only when the packet carries them
                     // (not emitted today; forward-compatible, spec §2 H4).
-                    if let Some(depth) = entry
-                        .get("hop_depth")
-                        .and_then(serde_json::Value::as_u64)
+                    if let Some(depth) = entry.get("hop_depth").and_then(serde_json::Value::as_u64)
                     {
                         writeln!(out, "      hop depth: {depth}").ok();
                     }
@@ -936,13 +934,17 @@ fn render_inspector_readable(packet: &serde_json::Value) -> String {
         .ok();
         let ttl_kind = directive["ttl_kind"].as_str().unwrap_or("?");
         match directive["ttl_remaining"].as_u64() {
-            Some(remaining_ttl) => writeln!(out, "  ttl: {ttl_kind} ({remaining_ttl} remaining)").ok(),
+            Some(remaining_ttl) => {
+                writeln!(out, "  ttl: {ttl_kind} ({remaining_ttl} remaining)").ok()
+            }
             None => writeln!(out, "  ttl: {ttl_kind}").ok(),
         };
         writeln!(
             out,
             "  clear on scene change: {}",
-            directive["clear_on_scene_change"].as_bool().unwrap_or(false)
+            directive["clear_on_scene_change"]
+                .as_bool()
+                .unwrap_or(false)
         )
         .ok();
         writeln!(out, "  status: {status}").ok();

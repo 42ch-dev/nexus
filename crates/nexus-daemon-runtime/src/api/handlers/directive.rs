@@ -87,9 +87,7 @@ pub async fn moment_directive(
     // Ownership gate (inspector/check pattern): a foreign scope never leaks
     // directive state — 403, not 404.
     let owned = match req.scope.kind {
-        MomentDirectiveRequestScopeKind::Work => {
-            is_work_owned(pool, &creator_id, scope_id).await?
-        }
+        MomentDirectiveRequestScopeKind::Work => is_work_owned(pool, &creator_id, scope_id).await?,
         MomentDirectiveRequestScopeKind::World => {
             narrative_write::is_world_owned(pool, &creator_id, scope_id)
                 .await
@@ -115,7 +113,9 @@ pub async fn moment_directive(
     match req.action {
         MomentDirectiveRequestAction::Set => set(pool, &creator_id, &req, kind, scope_id).await,
         MomentDirectiveRequestAction::Show => show(pool, &creator_id, kind, scope_id).await,
-        MomentDirectiveRequestAction::Clear => clear_action(pool, &creator_id, kind, scope_id).await,
+        MomentDirectiveRequestAction::Clear => {
+            clear_action(pool, &creator_id, kind, scope_id).await
+        }
     }
 }
 
@@ -134,7 +134,10 @@ async fn set(
     };
     let body = body.trim();
     if body.is_empty() {
-        return Err(validation("body", "must be non-empty (after trimming whitespace)"));
+        return Err(validation(
+            "body",
+            "must be non-empty (after trimming whitespace)",
+        ));
     }
     // Exactly one TTL kind, count >= 1 (`NonZeroU64` makes ttl_remaining >= 1
     // by construction; the signed cast mirrors the CLI's `i64 --ttl-*` flags).
@@ -268,7 +271,9 @@ async fn is_work_owned(
 }
 
 /// Serialize the directive row for the `show`/`set` response.
-fn row_json(row: &nexus_local_db::moment_directive::MomentDirectiveRow) -> Result<Value, NexusApiError> {
+fn row_json(
+    row: &nexus_local_db::moment_directive::MomentDirectiveRow,
+) -> Result<Value, NexusApiError> {
     serde_json::to_value(row).map_err(|e| NexusApiError::Internal {
         code: "DIRECTIVE_ROW_SERIALIZE".to_string(),
         message: e.to_string(),

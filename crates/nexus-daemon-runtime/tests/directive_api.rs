@@ -115,12 +115,18 @@ async fn seed_foreign_world(pool: &sqlx::SqlitePool) {
 /// `OWNED_WORLD`) and `FOREIGN_WORK` (`other_creator`, bound to
 /// `FOREIGN_WORLD`).
 async fn seed_works(pool: &sqlx::SqlitePool) {
-    create_work(pool, &work_record(OWNED_WORK, "test_creator", Some(OWNED_WORLD)))
-        .await
-        .unwrap();
-    create_work(pool, &work_record(FOREIGN_WORK, "other_creator", Some(FOREIGN_WORLD)))
-        .await
-        .unwrap();
+    create_work(
+        pool,
+        &work_record(OWNED_WORK, "test_creator", Some(OWNED_WORLD)),
+    )
+    .await
+    .unwrap();
+    create_work(
+        pool,
+        &work_record(FOREIGN_WORK, "other_creator", Some(FOREIGN_WORLD)),
+    )
+    .await
+    .unwrap();
 }
 
 /// Build a `WorkRecord` with sane defaults for the test DB.
@@ -208,7 +214,10 @@ async fn set_show_clear_work_scope_round_trip() {
     assert_eq!(set["insert_depth"], "mid", "body={set}");
     assert_eq!(set["ttl_kind"], "generations", "body={set}");
     assert_eq!(set["ttl_remaining"], 3, "body={set}");
-    let directive_id = set["directive_id"].as_str().expect("directive_id").to_string();
+    let directive_id = set["directive_id"]
+        .as_str()
+        .expect("directive_id")
+        .to_string();
 
     // show → the row incl. body (author surface, DF-76).
     let resp = ctx
@@ -241,7 +250,10 @@ async fn set_show_clear_work_scope_round_trip() {
         .await
         .expect("row retained after clear")
         .expect("row still present (soft-delete)");
-    assert_eq!(row.status, "expired", "clear soft-deletes (DF-76 retention)");
+    assert_eq!(
+        row.status, "expired",
+        "clear soft-deletes (DF-76 retention)"
+    );
     assert!(row.expires_at.is_some(), "expires_at set on soft-delete");
 
     // show after clear → {} (no active directive).
@@ -254,7 +266,11 @@ async fn set_show_clear_work_scope_round_trip() {
         }))
         .await;
     assert_eq!(resp.status_code(), StatusCode::OK, "body={}", resp.text());
-    assert_eq!(resp.json::<Value>(), json!({}), "show after clear must return {{}}");
+    assert_eq!(
+        resp.json::<Value>(),
+        json!({}),
+        "show after clear must return {{}}"
+    );
 }
 
 /// World-scope round trip: `set` on the owned World → row returned;
@@ -322,9 +338,7 @@ async fn set_without_replace_when_active_conflicts_409() {
         .await;
     assert_error_envelope(&second, StatusCode::CONFLICT, "conflict");
     assert!(
-        second
-            .text()
-            .contains("replace"),
+        second.text().contains("replace"),
         "conflict message must point at the replace option: {}",
         second.text()
     );
@@ -335,7 +349,10 @@ async fn set_without_replace_when_active_conflicts_409() {
         .expect("read row")
         .expect("first row still active");
     assert_eq!(row.status, "active", "no silent overwrite");
-    assert!(row.replaced_by.is_none(), "no replaced_by without --replace");
+    assert!(
+        row.replaced_by.is_none(),
+        "no replaced_by without --replace"
+    );
 }
 
 /// `set` with `"replace": true` supersedes the active directive: 200, and
@@ -363,7 +380,12 @@ async fn set_with_replace_supersedes_active() {
         .post("/v1/daemon/moment-directive")
         .json(&replace)
         .await;
-    assert_eq!(second.status_code(), StatusCode::OK, "body={}", second.text());
+    assert_eq!(
+        second.status_code(),
+        StatusCode::OK,
+        "body={}",
+        second.text()
+    );
     let second_id = second.json::<Value>()["directive_id"]
         .as_str()
         .expect("directive_id")
@@ -463,7 +485,10 @@ async fn show_work_scope_resolves_effective_directive() {
         .await;
     assert_eq!(resp.status_code(), StatusCode::OK, "body={}", resp.text());
     let shown: Value = resp.json();
-    assert_eq!(shown["directive_id"], work_directive_id, "work directive must win: {shown}");
+    assert_eq!(
+        shown["directive_id"], work_directive_id,
+        "work directive must win: {shown}"
+    );
     assert_eq!(shown["scope_kind"], "work", "source scope: {shown}");
 
     // Clear the Work's own directive → show now inherits the World override.
@@ -487,9 +512,18 @@ async fn show_work_scope_resolves_effective_directive() {
         .await;
     assert_eq!(resp.status_code(), StatusCode::OK, "body={}", resp.text());
     let shown: Value = resp.json();
-    assert_eq!(shown["body"], "World override.", "inherited override: {shown}");
-    assert_eq!(shown["scope_kind"], "world", "inherited source scope: {shown}");
-    assert_eq!(shown["scope_id"], OWNED_WORLD, "inherited source scope id: {shown}");
+    assert_eq!(
+        shown["body"], "World override.",
+        "inherited override: {shown}"
+    );
+    assert_eq!(
+        shown["scope_kind"], "world",
+        "inherited source scope: {shown}"
+    );
+    assert_eq!(
+        shown["scope_id"], OWNED_WORLD,
+        "inherited source scope id: {shown}"
+    );
 }
 
 /// Validation mirrors CLI `handle_set`: empty body → 400 `invalid_input`.

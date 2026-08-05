@@ -383,7 +383,6 @@ fn now_ms() -> i64 {
     chrono::Utc::now().timestamp_millis()
 }
 
-
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
@@ -535,7 +534,6 @@ mod tests {
             "show must name the inherited source scope, got: {source}"
         );
     }
-
 
     // ── T5: CLI author surface (set/show/clear) ───────────────────────
 

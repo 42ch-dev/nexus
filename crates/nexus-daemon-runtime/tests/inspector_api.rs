@@ -235,14 +235,20 @@ async fn inspect_moment_owned_world_returns_200_full_packet() {
         .expect("modules.placement array");
     assert_eq!(placement.len(), 1, "constant seed must be placed: {body}");
     assert_eq!(placement[0]["entry_id"], LORE_ENTRY, "body={body}");
-    assert_eq!(placement[0]["canonical_name"], "Harbor Master", "body={body}");
+    assert_eq!(
+        placement[0]["canonical_name"], "Harbor Master",
+        "body={body}"
+    );
 
     // modules.activation_trace — full per-entry fire/miss trace.
     let trace = body["modules"]["activation_trace"]
         .as_array()
         .expect("modules.activation_trace array");
     assert_eq!(trace.len(), 1, "one entry in the trace: {body}");
-    assert_eq!(trace[0]["accepted"], true, "constant seed must fire: {body}");
+    assert_eq!(
+        trace[0]["accepted"], true,
+        "constant seed must fire: {body}"
+    );
     assert!(
         trace[0]["reason"]
             .as_str()
@@ -259,12 +265,7 @@ async fn inspect_moment_owned_world_returns_200_full_packet() {
 
     // budget — activation token accounting always present.
     let budget = body["budget"].as_object().expect("budget object");
-    for key in [
-        "primary_tokens_est",
-        "hop_tokens_est",
-        "cap",
-        "remaining",
-    ] {
+    for key in ["primary_tokens_est", "hop_tokens_est", "cap", "remaining"] {
         assert!(budget.contains_key(key), "budget must carry {key}: {body}");
     }
 
