@@ -573,6 +573,7 @@ async fn import_overwritten_entry(
 
     match persist_entry_upsert(pool, entry) {
         ImportOutcome::Created => {
+            stamp_import_provenance_column(pool, world_id, &existing_id).await?;
             remap.insert(pack_entry_id.to_string(), existing_id.clone());
             target_entry_ids.insert(existing_id.clone());
             summary.entries.overwritten += 1;
@@ -594,6 +595,29 @@ async fn import_overwritten_entry(
         }
         _ => {}
     }
+    Ok(())
+}
+
+
+async fn stamp_import_provenance_column(
+    pool: &SqlitePool,
+    world_id: &str,
+    entry_id: &str,
+) -> Result<(), PackImportError> {
+    // SAFETY: UPDATE against known kb_key_blocks schema.
+    sqlx::query(
+        "UPDATE kb_key_blocks SET source_provenance_kind = ?          WHERE key_block_id = ? AND world_id = ?",
+    )
+    .bind(IMPORT_PROVENANCE)
+    .bind(entry_id)
+    .bind(world_id)
+    .execute(pool)
+    .await
+    .map_err(|e| {
+        PackImportError::Storage(format!(
+            "failed to stamp pack_import provenance on {entry_id}: {e}"
+        ))
+    })?;
     Ok(())
 }
 

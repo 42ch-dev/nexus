@@ -1,11 +1,13 @@
-//! V1.152 P0 — `POST /v1/daemon/worlds/:world_id/kb/pack/export` integration tests.
+//! V1.152 P0 — World KB pack export/import Daemon HTTP integration tests.
 //!
-//! Proves the Narrative Knowledge Pack export Daemon HTTP surface end-to-end
-//! over a real `axum` router + `SQLite`:
+//! Proves the Narrative Knowledge Pack export/import surfaces end-to-end over a
+//! real `axum` router + `SQLite`:
 //!
-//! - Happy path (owned World; seeded entries + relation) → 200 with pack
-//!   envelope (`modules.pack.title`, `entries`, `relations`).
-//! - Ownership reject (World owned by a different creator) → 403.
+//! - Export: owned World → 200 pack envelope; foreign World → 403.
+//! - Import skip: cross-world import + idempotent re-import.
+//! - Import rename / overwrite conflict policies.
+//! - Ownership reject on import.
+//! - `pack_import` provenance stamp on imported rows.
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
@@ -13,12 +15,16 @@ use axum::http::StatusCode;
 use axum_test::TestServer;
 use nexus_daemon_runtime::api;
 use nexus_daemon_runtime::api::auth_middleware::DaemonApiConfig;
+use nexus_daemon_runtime::pack_import::IMPORT_PROVENANCE;
 use nexus_daemon_runtime::test_utils::{self, TestTempRoot};
 use nexus_daemon_runtime::workspace::WorkspaceState;
 use serde_json::{json, Value};
+use std::collections::HashMap;
 
 /// World owned by `test_creator` (seeded by `seed_test_creator_and_world`).
 const OWNED_WORLD: &str = "wld_test_world";
+/// Second world owned by `test_creator` — import target.
+const TARGET_WORLD: &str = "wld_import_target";
 /// World owned by `other_creator` (ownership-gate tests).
 const FOREIGN_WORLD: &str = "wld_foreign";
 
@@ -34,6 +40,7 @@ async fn ctx() -> Ctx {
     let pool = state.pool().expect("pool").clone();
     test_utils::seed_test_creator_and_world(&pool).await;
     seed_foreign_world(&pool).await;
+    seed_import_target_world(&pool).await;
     let app = api::create_router(state, DaemonApiConfig::keyless());
     let server = TestServer::new(app).expect("test server");
     Ctx {
@@ -66,22 +73,50 @@ async fn seed_foreign_world(pool: &sqlx::SqlitePool) {
     .unwrap();
 }
 
+async fn seed_import_target_world(pool: &sqlx::SqlitePool) {
+    // SAFETY: test-only seed against the known narrative_worlds schema.
+    sqlx::query(
+        "INSERT OR IGNORE INTO narrative_worlds \
+            (world_id, workspace_id, owner_creator_id, title, slug, status, visibility, \
+             time_policy, metadata_json, created_at) \
+           VALUES (?, 'ws', 'test_creator', 'Import Target', 'import-target', \
+             'active', 'private', 'manual', '{}', datetime('now'))",
+    )
+    .bind(TARGET_WORLD)
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
 async fn seed_key_block(
     pool: &sqlx::SqlitePool,
     key_block_id: &str,
     world_id: &str,
     canonical_name: &str,
 ) {
+    seed_key_block_with_body(pool, key_block_id, world_id, canonical_name, "{}", "confirmed").await;
+}
+
+async fn seed_key_block_with_body(
+    pool: &sqlx::SqlitePool,
+    key_block_id: &str,
+    world_id: &str,
+    canonical_name: &str,
+    body_json: &str,
+    status: &str,
+) {
     // SAFETY: test-only seed against the known kb_key_blocks schema.
     sqlx::query(
         "INSERT OR IGNORE INTO kb_key_blocks \
             (key_block_id, world_id, block_type, canonical_name, status, revision, body_json, \
              created_at, updated_at) \
-           VALUES (?, ?, 'character', ?, 'confirmed', 0, '{}', datetime('now'), datetime('now'))",
+           VALUES (?, ?, 'character', ?, ?, 0, ?, datetime('now'), datetime('now'))",
     )
     .bind(key_block_id)
     .bind(world_id)
     .bind(canonical_name)
+    .bind(status)
+    .bind(body_json)
     .execute(pool)
     .await
     .unwrap();
@@ -116,6 +151,151 @@ fn export_url(world_id: &str) -> String {
     format!("/v1/daemon/worlds/{world_id}/kb/pack/export")
 }
 
+fn import_url(world_id: &str) -> String {
+    format!("/v1/daemon/worlds/{world_id}/kb/pack/import")
+}
+
+/// Same-DB cross-world import cannot reuse entry_ids owned by the source world.
+/// Mint fresh ids (and remap relation endpoints) so import exercises create paths.
+fn fresh_entry_ids_in_pack(pack: &mut Value) {
+    let entries = pack
+        .as_object_mut()
+        .and_then(|obj| obj.get_mut("entries"))
+        .and_then(|v| v.as_array_mut())
+        .expect("pack entries array");
+    let mut id_map = HashMap::new();
+    for (idx, entry) in entries.iter_mut().enumerate() {
+        let old_id = entry
+            .get("entry_id")
+            .and_then(|v| v.as_str())
+            .expect("entry_id")
+            .to_string();
+        let new_id = format!("kb_import_test_{idx:03}");
+        entry["entry_id"] = json!(new_id);
+        id_map.insert(old_id, new_id);
+    }
+    let relations = pack
+        .as_object_mut()
+        .and_then(|obj| obj.get_mut("relations"))
+        .and_then(|v| v.as_array_mut())
+        .expect("pack relations array");
+    for (idx, relation) in relations.iter_mut().enumerate() {
+        relation["relation_id"] = json!(format!("rel_import_test_{idx:03}"));
+        if let Some(from) = relation.get("from_id").and_then(|v| v.as_str()) {
+            if let Some(mapped) = id_map.get(from) {
+                relation["from_id"] = json!(mapped);
+            }
+        }
+        if let Some(to) = relation.get("to_id").and_then(|v| v.as_str()) {
+            if let Some(mapped) = id_map.get(to) {
+                relation["to_id"] = json!(mapped);
+            }
+        }
+    }
+}
+
+async fn export_pack(server: &TestServer, world_id: &str) -> Value {
+    let resp = server
+        .post(&export_url(world_id))
+        .json(&json!({}))
+        .await;
+    assert_eq!(resp.status_code(), StatusCode::OK, "body={}", resp.text());
+    resp.json()
+}
+
+async fn import_pack_http(
+    server: &TestServer,
+    world_id: &str,
+    pack: &Value,
+    conflict: &str,
+) -> (StatusCode, Value) {
+    let resp = server
+        .post(&import_url(world_id))
+        .json(&json!({
+            "pack": pack,
+            "conflict": conflict,
+        }))
+        .await;
+    let status = resp.status_code();
+    let body: Value = resp.json();
+    (status, body)
+}
+
+async fn seed_export_source_world(pool: &sqlx::SqlitePool) {
+    seed_key_block_with_body(
+        pool,
+        "kb_pack_a",
+        OWNED_WORLD,
+        "Aria",
+        r#"{"summary":"Aria summary"}"#,
+        "confirmed",
+    )
+    .await;
+    seed_key_block_with_body(
+        pool,
+        "kb_pack_b",
+        OWNED_WORLD,
+        "Kael",
+        r#"{"summary":"Kael from pack"}"#,
+        "confirmed",
+    )
+    .await;
+    seed_key_block_with_body(
+        pool,
+        "kb_pack_c",
+        OWNED_WORLD,
+        "Mira",
+        r#"{"summary":"Mira summary"}"#,
+        "confirmed",
+    )
+    .await;
+    seed_relation(pool, "rel_pack_1", OWNED_WORLD, "kb_pack_a", "kb_pack_b").await;
+}
+
+async fn assert_pack_import_provenance(pool: &sqlx::SqlitePool, world_id: &str) {
+    // SAFETY: test-only SELECT against known kb_key_blocks schema.
+    let rows: Vec<(String, Option<String>)> = sqlx::query_as(
+        "SELECT key_block_id, source_provenance_kind FROM kb_key_blocks          WHERE world_id = ? AND source_provenance_kind IS NOT NULL",
+    )
+    .bind(world_id)
+    .fetch_all(pool)
+    .await
+    .unwrap();
+    assert!(
+        !rows.is_empty(),
+        "expected imported rows with pack_import provenance in {world_id}"
+    );
+    for (entry_id, provenance) in rows {
+        assert_eq!(
+            provenance.as_deref(),
+            Some(IMPORT_PROVENANCE),
+            "entry {entry_id} in {world_id} must have pack_import provenance"
+        );
+    }
+}
+
+async fn assert_entry_provenance(
+    pool: &sqlx::SqlitePool,
+    world_id: &str,
+    canonical_name: &str,
+) {
+    // SAFETY: test-only SELECT against known kb_key_blocks schema.
+    let provenance: Option<String> = sqlx::query_scalar(
+        "SELECT source_provenance_kind FROM kb_key_blocks          WHERE world_id = ? AND canonical_name = ?",
+    )
+    .bind(world_id)
+    .bind(canonical_name)
+    .fetch_optional(pool)
+    .await
+    .unwrap()
+    .flatten();
+    assert_eq!(
+        provenance.as_deref(),
+        Some(IMPORT_PROVENANCE),
+        "entry {canonical_name} in {world_id} must have pack_import provenance"
+    );
+}
+
 #[tokio::test]
 async fn pack_export_owned_world_returns_pack_envelope() {
     let ctx = ctx().await;
@@ -124,14 +304,7 @@ async fn pack_export_owned_world_returns_pack_envelope() {
     seed_key_block(&ctx.pool, "kb_pack_c", OWNED_WORLD, "Mira").await;
     seed_relation(&ctx.pool, "rel_pack_1", OWNED_WORLD, "kb_pack_a", "kb_pack_b").await;
 
-    let resp = ctx
-        .server
-        .post(&export_url(OWNED_WORLD))
-        .json(&json!({}))
-        .await;
-    assert_eq!(resp.status_code(), StatusCode::OK, "body={}", resp.text());
-
-    let body: Value = resp.json();
+    let body = export_pack(&ctx.server, OWNED_WORLD).await;
     assert_eq!(
         body["modules"]["pack"]["title"], "Test World",
         "default title should be the world title: {body}"
@@ -160,6 +333,130 @@ async fn pack_export_foreign_world_returns_403() {
     assert_eq!(resp.status_code(), StatusCode::FORBIDDEN, "body={}", resp.text());
 
     let body: Value = resp.json();
+    assert_eq!(body["success"], false, "body={body}");
+    assert_eq!(body["error"]["code"], "forbidden", "body={body}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn pack_import_skip_cross_world_and_reimport_is_idempotent() {
+    let ctx = ctx().await;
+    seed_export_source_world(&ctx.pool).await;
+
+    let mut pack = export_pack(&ctx.server, OWNED_WORLD).await;
+    fresh_entry_ids_in_pack(&mut pack);
+
+    let (status, body) = import_pack_http(&ctx.server, TARGET_WORLD, &pack, "skip").await;
+    assert_eq!(status, StatusCode::OK, "body={body}");
+    assert!(
+        body["entries"]["created"].as_u64().unwrap_or(0) >= 2,
+        "expected created entries >= 2: {body}"
+    );
+    assert!(
+        body["relations"]["created"].as_u64().unwrap_or(0) >= 1,
+        "expected created relations >= 1: {body}"
+    );
+
+    assert_pack_import_provenance(&ctx.pool, TARGET_WORLD).await;
+
+    let (status2, body2) = import_pack_http(&ctx.server, TARGET_WORLD, &pack, "skip").await;
+    assert_eq!(status2, StatusCode::OK, "body={body2}");
+    assert_eq!(
+        body2["entries"]["created"].as_u64().unwrap_or(0),
+        0,
+        "re-import must be idempotent: {body2}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn pack_import_rename_creates_disambiguated_entry() {
+    let ctx = ctx().await;
+    seed_export_source_world(&ctx.pool).await;
+    let pack = export_pack(&ctx.server, OWNED_WORLD).await;
+
+    seed_key_block_with_body(
+        &ctx.pool,
+        "kb_target_kael",
+        TARGET_WORLD,
+        "Kael",
+        r#"{"summary":"Pre-existing Kael"}"#,
+        "confirmed",
+    )
+    .await;
+
+    let (status, body) = import_pack_http(&ctx.server, TARGET_WORLD, &pack, "rename").await;
+    assert_eq!(status, StatusCode::OK, "body={body}");
+    assert!(
+        body["entries"]["renamed"].as_u64().unwrap_or(0) >= 1,
+        "expected renamed entries >= 1: {body}"
+    );
+
+    // SAFETY: test-only SELECT against known kb_key_blocks schema.
+    let names: Vec<String> = sqlx::query_scalar(
+        "SELECT canonical_name FROM kb_key_blocks WHERE world_id = ? ORDER BY canonical_name",
+    )
+    .bind(TARGET_WORLD)
+    .fetch_all(&ctx.pool)
+    .await
+    .unwrap();
+    assert!(
+        names.iter().any(|n| n.ends_with(" imported") || n.contains(" imported ")),
+        "expected disambiguated ' imported' suffix among {names:?}"
+    );
+
+    assert_pack_import_provenance(&ctx.pool, TARGET_WORLD).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn pack_import_overwrite_replaces_body_preserves_status() {
+    let ctx = ctx().await;
+    seed_export_source_world(&ctx.pool).await;
+    let pack = export_pack(&ctx.server, OWNED_WORLD).await;
+
+    seed_key_block_with_body(
+        &ctx.pool,
+        "kb_target_kael",
+        TARGET_WORLD,
+        "Kael",
+        r#"{"summary":"Pre-existing Kael body"}"#,
+        "confirmed",
+    )
+    .await;
+
+    let (status, body) = import_pack_http(&ctx.server, TARGET_WORLD, &pack, "overwrite").await;
+    assert_eq!(status, StatusCode::OK, "body={body}");
+    assert!(
+        body["entries"]["overwritten"].as_u64().unwrap_or(0) >= 1,
+        "expected overwritten entries >= 1: {body}"
+    );
+
+    // SAFETY: test-only SELECT against known kb_key_blocks schema.
+    let row: (String, String) = sqlx::query_as(
+        "SELECT status, body_json FROM kb_key_blocks \
+         WHERE world_id = ? AND canonical_name = 'Kael'",
+    )
+    .bind(TARGET_WORLD)
+    .fetch_one(&ctx.pool)
+    .await
+    .unwrap();
+    assert_eq!(row.0, "confirmed", "overwrite must preserve status");
+    assert!(
+        row.1.contains("Kael from pack"),
+        "overwrite must replace body with pack content; got body_json={}",
+        row.1
+    );
+
+    assert_entry_provenance(&ctx.pool, TARGET_WORLD, "Kael").await;
+}
+
+#[tokio::test]
+async fn pack_import_foreign_world_returns_403() {
+    let ctx = ctx().await;
+    seed_export_source_world(&ctx.pool).await;
+    let mut pack = export_pack(&ctx.server, OWNED_WORLD).await;
+    fresh_entry_ids_in_pack(&mut pack);
+
+    let (status, body) = import_pack_http(&ctx.server, FOREIGN_WORLD, &pack, "skip").await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "body={body}");
     assert_eq!(body["success"], false, "body={body}");
     assert_eq!(body["error"]["code"], "forbidden", "body={body}");
 }

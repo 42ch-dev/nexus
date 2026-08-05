@@ -3,21 +3,31 @@
 //!
 //! - `POST /v1/daemon/worlds/:world_id/kb/pack/export` — export one World's
 //!   lore as a handbook pack (read-only; mirrors CLI `pack export`).
-//! - `POST /v1/daemon/worlds/:world_id/kb/pack/import` — placeholder for T4.
+//! - `POST /v1/daemon/worlds/:world_id/kb/pack/import` — import a handbook pack
+//!   into a World under a conflict policy (mirrors CLI `pack import`).
 
 use crate::api::errors::NexusApiError;
 use crate::api::handlers::works::{read_active_creator_id, read_active_workspace_slug};
+use crate::pack_import::{
+    import_pack, ConflictPolicy, ImportAtomKind, ImportOutcome, ImportSummary, PackImportError,
+};
 use crate::workspace::WorkspaceState;
 use axum::extract::{Path, State};
 use axum::Json;
 use nexus_contracts::generated::daemon_api::kb::{
     pack_export_request::PackExportRequest, pack_export_response::PackExportResponse,
+    pack_import_request::{PackImportRequest, PackImportRequestConflict},
+    pack_import_response::{
+        PackImportResponse, PackImportResponseDetailsItem, PackImportResponseDetailsItemKind,
+        PackImportResponseDetailsItemOutcome, PackImportResponseEntries,
+        PackImportResponseRelations,
+    },
 };
 use nexus_knowledge::world_kb::KbStore;
 use nexus_local_db::kb_relationships::list_relationships_for_world;
 use nexus_local_db::kb_store::SqliteKbStore;
 use nexus_spoke_adapter::conversion::{kb_relationship_row_to_spoke, world_kb_to_spoke};
-use nexus_spoke_adapter::pack::build_pack;
+use nexus_spoke_adapter::pack::{build_pack, parse_pack};
 use std::collections::HashSet;
 
 /// Default `modules.pack.version` when the request omits `pack_version`.
@@ -218,13 +228,104 @@ pub async fn pack_export(
 
 // ─── POST /v1/daemon/worlds/:world_id/kb/pack/import ──────────────────────
 
-/// Placeholder for pack import (T4).
+fn conflict_policy_from_request(conflict: PackImportRequestConflict) -> ConflictPolicy {
+    match conflict {
+        PackImportRequestConflict::Skip => ConflictPolicy::Skip,
+        PackImportRequestConflict::Rename => ConflictPolicy::Rename,
+        PackImportRequestConflict::Overwrite => ConflictPolicy::Overwrite,
+    }
+}
+
+fn atom_counts_to_entries(
+    counts: crate::pack_import::AtomCounts,
+) -> PackImportResponseEntries {
+    PackImportResponseEntries {
+        created: u64::from(counts.created),
+        skipped: u64::from(counts.skipped),
+        rejected: u64::from(counts.rejected),
+        renamed: u64::from(counts.renamed),
+        overwritten: u64::from(counts.overwritten),
+    }
+}
+
+fn atom_counts_to_relations(
+    counts: crate::pack_import::AtomCounts,
+) -> PackImportResponseRelations {
+    PackImportResponseRelations {
+        created: u64::from(counts.created),
+        skipped: u64::from(counts.skipped),
+        rejected: u64::from(counts.rejected),
+        renamed: u64::from(counts.renamed),
+        overwritten: u64::from(counts.overwritten),
+    }
+}
+
+fn import_summary_to_response(summary: ImportSummary) -> PackImportResponse {
+    PackImportResponse {
+        entries: atom_counts_to_entries(summary.entries),
+        relations: atom_counts_to_relations(summary.relations),
+        details: summary
+            .details
+            .into_iter()
+            .map(|detail| PackImportResponseDetailsItem {
+                kind: match detail.kind {
+                    ImportAtomKind::Entry => PackImportResponseDetailsItemKind::Entry,
+                    ImportAtomKind::Relation => PackImportResponseDetailsItemKind::Relation,
+                },
+                id: detail.id,
+                outcome: match detail.outcome {
+                    ImportOutcome::Created => PackImportResponseDetailsItemOutcome::Created,
+                    ImportOutcome::Skipped => PackImportResponseDetailsItemOutcome::Skipped,
+                    ImportOutcome::Rejected => PackImportResponseDetailsItemOutcome::Rejected,
+                    ImportOutcome::Renamed => PackImportResponseDetailsItemOutcome::Renamed,
+                    ImportOutcome::Overwritten => {
+                        PackImportResponseDetailsItemOutcome::Overwritten
+                    }
+                },
+                reason: detail.reason,
+            })
+            .collect(),
+    }
+}
+
+/// Import a handbook pack into a World under a conflict policy (V1.152 P0).
+///
+/// Guard order: tier2 middleware → `require_creator` → `require_world_owner`
+/// → business logic (mirrors CLI `pack.rs::import`).
 #[allow(clippy::missing_errors_doc)]
 pub async fn pack_import(
-    State(_state): State<WorkspaceState>,
-    Path(_world_id): Path<String>,
-) -> Result<Json<serde_json::Value>, NexusApiError> {
-    Err(NexusApiError::NotImplemented(
-        "POST /v1/daemon/worlds/:world_id/kb/pack/import is not implemented yet (T4)".to_string(),
-    ))
+    State(state): State<WorkspaceState>,
+    Path(world_id): Path<String>,
+    Json(req): Json<PackImportRequest>,
+) -> Result<Json<PackImportResponse>, NexusApiError> {
+    let pool = state.pool_or_uninit()?;
+    let creator_id = require_creator(&state)?;
+    require_world_owner(pool, &world_id, &creator_id).await?;
+
+    let pack_value = serde_json::Value::Object(req.pack);
+    let parsed = parse_pack(&pack_value).map_err(|e| NexusApiError::InvalidInput {
+        field: "pack".to_string(),
+        reason: e.to_string(),
+    })?;
+
+    let conflict = conflict_policy_from_request(req.conflict);
+
+    // `include_anchors` is accepted on the wire but currently a no-op: Nexus has
+    // no standalone SourceAnchor store yet (see `pack_import::import_pack`).
+    let summary = import_pack(
+        pool,
+        &world_id,
+        &creator_id,
+        parsed,
+        conflict,
+        req.include_anchors,
+        false,
+    )
+    .await
+    .map_err(|e: PackImportError| NexusApiError::Internal {
+        code: "PACK_IMPORT_ERROR".to_string(),
+        message: e.to_string(),
+    })?;
+
+    Ok(Json(import_summary_to_response(summary)))
 }
