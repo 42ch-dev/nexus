@@ -134,6 +134,13 @@ export const queryKeys = {
       detail: (runId: string) => [...queryKeys.compute.runs.details(), runId] as const,
     },
   },
+  // V1.151 P1 — Assembly Inspector (DF-76). Read-only moment packet; no
+  // mutation invalidates it (the UI observes the route, AC-I6).
+  inspector: {
+    all: ['inspector'] as const,
+    moment: (request?: object) =>
+      [...queryKeys.inspector.all, 'moment', request ?? {}] as const,
+  },
   timeline: {
     all: ['timeline'] as const,
     overview: (cursor?: string) =>

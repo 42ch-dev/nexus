@@ -52,6 +52,8 @@ import type {
   ListSessionsResponse,
   ListWorksQuery,
   ListWorksResponse,
+  MomentInspectRequest,
+  MomentInspectResponse,
   ModuleDetail,
   OutlinePatchChapterRequest,
   OutlinePatchResponse,
@@ -200,6 +202,11 @@ export class BrowserClient implements NexusClient {
   }
   scanAgents(request?: ScanRequest): Promise<ScanResponse> {
     return this.post<ScanResponse>('/v1/daemon/agent-host/scan', request);
+  }
+
+  // ── Assembly Inspector (V1.151 P1 — DF-76) ────────────────────────────────
+  inspectMoment(request: MomentInspectRequest): Promise<MomentInspectResponse> {
+    return this.post<MomentInspectResponse>('/v1/daemon/inspector/moment', request);
   }
 
   // ── Works ──────────────────────────────────────────────────────────────────

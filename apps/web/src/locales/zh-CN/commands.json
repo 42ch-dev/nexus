@@ -62,6 +62,15 @@
         "scenes": "场景",
         "beats": "节拍"
       }
+    },
+    "work-inspector": {
+      "label": "前往装配检查器",
+      "keywords": {
+        "assembly": "装配",
+        "activation": "触发",
+        "slots": "槽位",
+        "budget": "预算"
+      }
     }
   },
   "strategy": {

@@ -1,0 +1,72 @@
+{
+  "page": {
+    "title": "装配检查器",
+    "description": "查看此作品的瞬间装配中哪些设定被触发或未命中、条目落入哪些槽位，以及令牌预算的消耗情况。只读。",
+    "noWorkTitle": "未找到作品",
+    "noWorkDescription": "无法加载该作品。",
+    "noWorldTitle": "未绑定世界",
+    "noWorldDescription": "为该作品绑定一个世界后即可检查瞬间装配。",
+    "generationStageLabel": "生成阶段",
+    "generationStageDefault": "默认",
+    "generationStage": {
+      "intake": "采集",
+      "research": "研究",
+      "produce": "产出",
+      "review": "评审",
+      "persist": "持久化",
+      "work_maintenance": "作品维护",
+      "system_maintenance": "系统维护",
+      "unspecified": "未指定"
+    },
+    "refresh": "重新检查",
+    "refreshAria": "重新运行瞬间检查",
+    "loading": "正在检查瞬间…",
+    "loadError": "无法检查该瞬间。"
+  },
+  "trace": {
+    "title": "触发轨迹",
+    "description": "本次瞬间评估的每一条设定条目，按评估顺序排列。",
+    "empty": "无触发轨迹条目",
+    "fired": "已触发",
+    "missed": "未命中",
+    "slotLabel": "槽位",
+    "reasonLabel": "原因",
+    "hopDepthLabel": "跳转深度",
+    "hopOriginLabel": "跳转来源"
+  },
+  "slotMap": {
+    "title": "槽位映射",
+    "description": "每个已触发条目落位的位置，按输出顺序排列。",
+    "empty": "未捕获到槽位",
+    "entryLabel": "条目",
+    "slotLabel": "槽位"
+  },
+  "budget": {
+    "title": "预算",
+    "description": "触发令牌估算（字符数 ÷ 4）。",
+    "primaryEstLabel": "主匹配令牌（估算）",
+    "hopEstLabel": "关系跳转令牌（估算）",
+    "capLabel": "上限",
+    "remainingLabel": "剩余",
+    "none": "—"
+  },
+  "directive": {
+    "title": "瞬间指令",
+    "description": "仅显示生效指令的元数据——指令正文绝不会出现在此界面。",
+    "noActive": "无生效指令",
+    "statusLabel": "状态",
+    "status": {
+      "active": "生效中",
+      "none": "无"
+    },
+    "scopeLabel": "作用域",
+    "scopeIdLabel": "作用域 ID",
+    "insertDepthLabel": "插入深度",
+    "ttlLabel": "TTL",
+    "ttlRemaining": "剩余 {{count}}",
+    "clearOnSceneChangeLabel": "场景切换时清除",
+    "yes": "是",
+    "no": "否"
+  },
+  "readonlyNote": "只读视图——检查瞬间绝不会修改你的内容。"
+}

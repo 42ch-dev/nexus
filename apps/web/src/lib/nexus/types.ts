@@ -111,6 +111,8 @@ import type {
   TimelineOverviewResponse,
   TimelinePatchEventRequest,
   ListTimelineEventsResponse,
+  MomentInspectRequest,
+  MomentInspectResponse,
   UpdateFindingRequest,
   UpdatePresetRequest,
   UpdatePresetResponse,
@@ -593,6 +595,15 @@ export interface NexusClient {
   ): Promise<ReadingAnnotation>;
   /** `DELETE /v1/daemon/reading/annotations/{annotation_id}` — delete annotation. */
   deleteReadingAnnotation(annotationId: string): Promise<void>;
+
+  // ── Assembly Inspector (V1.151 P1 — DF-76) ────────────────────────────────
+  /**
+   * `POST /v1/daemon/inspector/moment` — assemble and return the enriched
+   * inspector packet for one moment (activation trace + slot map + budget +
+   * directive status). Read-only observation: the assembled prompt bytes are
+   * never modified (AC-I6).
+   */
+  inspectMoment(request: MomentInspectRequest): Promise<MomentInspectResponse>;
 }
 
 /** Re-exported for consumers building query/mutation hooks. */
