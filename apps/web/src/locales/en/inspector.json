@@ -66,7 +66,46 @@
     "ttlRemaining": "{{count}} remaining",
     "clearOnSceneChangeLabel": "Clear on scene change",
     "yes": "Yes",
-    "no": "No"
+    "no": "No",
+    "noneValue": "—",
+    "form": {
+      "summary": "Set / edit directive",
+      "scopeLegend": "Scope",
+      "scope": {
+        "work": "Work",
+        "world": "World"
+      },
+      "bodyLabel": "Directive body",
+      "bodyPlaceholder": "Author instruction injected into the moment prompt…",
+      "insertDepthLabel": "Insert depth",
+      "depth": {
+        "head": "Head",
+        "mid": "Mid",
+        "tail": "Tail"
+      },
+      "ttlLegend": "TTL kind (exactly one)",
+      "ttl": {
+        "generations": "Generations",
+        "chapters": "Chapters"
+      },
+      "ttlRemainingLabel": "TTL count",
+      "clearOnSceneChangeLabel": "Clear on scene change",
+      "replaceLabel": "Replace active directive",
+      "replaceHint": "Supersede an existing active directive at this scope; the previous directive is retained.",
+      "set": "Set",
+      "setting": "Setting…",
+      "clear": "Clear",
+      "clearing": "Clearing…",
+      "validation": {
+        "bodyRequired": "Directive body is required.",
+        "ttlKindRequired": "Choose exactly one TTL kind.",
+        "ttlRemainingInvalid": "TTL count must be a whole number of at least 1."
+      },
+      "conflictTitle": "A directive is already active for this scope",
+      "conflictDescription": "Set without Replace would not overwrite it. Enable Replace to supersede it — the previous directive is retained.",
+      "conflictEnableReplace": "Enable replace and retry",
+      "genericError": "Could not update the directive."
+    }
   },
   "readonlyNote": "Read-only view — inspecting a moment never modifies your content."
 }

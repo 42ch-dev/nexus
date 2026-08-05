@@ -11,7 +11,7 @@
  * Batch B extension point: the Moment Directive set/clear form (T4) mounts via
  * `directiveActions`, forwarded to {@link DirectiveStatusBlock}.
  */
-import { useMemo } from 'react';
+import { useId, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import type { MomentInspectResponse } from '@42ch/nexus-contracts';
@@ -29,6 +29,7 @@ export interface AssemblyInspectorPanelProps {
 
 export function AssemblyInspectorPanel({ packet, directiveActions }: AssemblyInspectorPanelProps) {
   const { t } = useTranslation('inspector');
+  const traceTitleId = useId();
 
   // entry_id → slot, joined once per packet so the trace rows and slot map
   // share one lookup.
@@ -39,8 +40,8 @@ export function AssemblyInspectorPanel({ packet, directiveActions }: AssemblyIns
 
   return (
     <div className="flex flex-col gap-6" data-testid="assembly-inspector-panel">
-      <section aria-labelledby="inspector-trace-title" data-testid="trace-block">
-        <h2 id="inspector-trace-title" className="text-heading-16 font-heading text-gray-1000">
+      <section aria-labelledby={traceTitleId} data-testid="trace-block">
+        <h2 id={traceTitleId} className="text-heading-16 font-heading text-gray-1000">
           {t('trace.title')}
         </h2>
         <p className="text-copy-13 text-gray-700">{t('trace.description')}</p>

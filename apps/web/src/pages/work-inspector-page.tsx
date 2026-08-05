@@ -13,9 +13,10 @@
  * panel assembles via `useInspectMoment` — observation only, never writes
  * (AC-I4/I6).
  *
- * Batch B extension point (T4): the Moment Directive set/clear form mounts as
- * a sibling of the directive-status section (via
- * `AssemblyInspectorPanel#directiveActions`) — not built this batch.
+ * Batch B (T4): the Moment Directive set/clear form mounts beside the
+ * directive-status section via `AssemblyInspectorPanel#directiveActions` —
+ * the panel itself stays read-only (AC-I4); the form is the author write
+ * surface (AC-I5), invalidating `useInspectMoment` on set/clear.
  */
 import { useState } from 'react';
 import { useParams } from 'react-router-dom';
@@ -23,6 +24,7 @@ import { useTranslation } from 'react-i18next';
 
 import { useInspectMoment, useWork } from '@/api/queries';
 import { AssemblyInspectorPanel } from '@/components/inspector/assembly-inspector-panel';
+import { MomentDirectiveForm } from '@/components/inspector/moment-directive-form';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Select } from '@/components/ui/select';
@@ -108,7 +110,16 @@ export function WorkInspectorPage() {
         </Button>
       </div>
 
-      <AssemblyInspectorPanel packet={inspect.data} />
+      <AssemblyInspectorPanel
+        packet={inspect.data}
+        directiveActions={
+          <MomentDirectiveForm
+            workId={workId}
+            worldId={worldId}
+            hasActiveDirective={inspect.data.moment_directive.status !== 'none'}
+          />
+        }
+      />
     </div>
   );
 }

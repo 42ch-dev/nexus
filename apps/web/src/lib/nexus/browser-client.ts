@@ -52,6 +52,7 @@ import type {
   ListSessionsResponse,
   ListWorksQuery,
   ListWorksResponse,
+  MomentDirectiveRequest,
   MomentInspectRequest,
   MomentInspectResponse,
   ModuleDetail,
@@ -120,6 +121,7 @@ import type {
   DiscardRunResponse,
   ListRunsQuery,
   ListTimelineEventsQuery,
+  MomentDirectiveResponse,
   NexusClient,
 } from './types';
 
@@ -207,6 +209,14 @@ export class BrowserClient implements NexusClient {
   // ── Assembly Inspector (V1.151 P1 — DF-76) ────────────────────────────────
   inspectMoment(request: MomentInspectRequest): Promise<MomentInspectResponse> {
     return this.post<MomentInspectResponse>('/v1/daemon/inspector/moment', request);
+  }
+  /**
+   * `POST /v1/daemon/moment-directive` — set/show/clear the active Moment
+   * Directive (V1.151 P1 — DF-76). The daemon surfaces an already-active
+   * directive without `replace` as HTTP 409 (no silent overwrite).
+   */
+  momentDirective(request: MomentDirectiveRequest): Promise<MomentDirectiveResponse> {
+    return this.post<MomentDirectiveResponse>('/v1/daemon/moment-directive', request);
   }
 
   // ── Works ──────────────────────────────────────────────────────────────────

@@ -5,13 +5,14 @@
  * never on the wire and never rendered here (AC-I3; the DTO has no body field
  * by construction). `status: "none"` renders "No active directive".
  *
- * Batch B extension point: the directive set/clear form mounts through the
- * `actions` slot (right-aligned in the section header). Nothing passes it
- * this batch — the panel stays read-only (AC-I4).
+ * Batch B extension point: the Moment Directive set/clear form (T4) mounts
+ * through the `actions` slot (right-aligned in the section header) — the
+ * panel itself stays read-only (AC-I4); the form is the author write surface.
  */
 import { Badge } from '@/components/ui/badge';
 import type { MomentInspectResponse } from '@42ch/nexus-contracts';
 import type { ReactNode } from 'react';
+import { useId } from 'react';
 import { useTranslation } from 'react-i18next';
 
 export interface DirectiveStatusBlockProps {
@@ -22,12 +23,14 @@ export interface DirectiveStatusBlockProps {
 
 export function DirectiveStatusBlock({ directive, actions }: DirectiveStatusBlockProps) {
   const { t } = useTranslation('inspector');
+  const titleId = useId();
   const active = directive.status !== 'none';
+  const none = t('directive.noneValue');
 
   return (
-    <section aria-labelledby="inspector-directive-title" data-testid="directive-status-block">
+    <section aria-labelledby={titleId} data-testid="directive-status-block">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <h3 id="inspector-directive-title" className="text-heading-16 font-heading text-gray-1000">
+        <h3 id={titleId} className="text-heading-16 font-heading text-gray-1000">
           {t('directive.title')}
         </h3>
         {actions}
@@ -43,32 +46,35 @@ export function DirectiveStatusBlock({ directive, actions }: DirectiveStatusBloc
             <dt className="text-gray-900">{t('directive.statusLabel')}</dt>
             <dd>
               <Badge variant="running" tone="soft" data-testid="directive-status-active">
-                {t(`directive.status.${directive.status === 'active' ? 'active' : 'none'}`)}
+                {/* M1: the label derives from the status value (falling back
+                    to the raw value) rather than the active boolean, so a
+                    future non-none status never renders "None". */}
+                {t(`directive.status.${directive.status}`, { defaultValue: directive.status })}
               </Badge>
             </dd>
           </div>
           <div className="flex items-center justify-between gap-4">
             <dt className="text-gray-900">{t('directive.scopeLabel')}</dt>
             <dd className="text-gray-1000" data-testid="directive-scope">
-              {directive.scope ?? '—'}
+              {directive.scope ?? none}
             </dd>
           </div>
           <div className="flex items-center justify-between gap-4">
             <dt className="text-gray-900">{t('directive.scopeIdLabel')}</dt>
             <dd className="text-copy-13-mono text-gray-1000" data-testid="directive-scope-id">
-              {directive.scope_id ?? '—'}
+              {directive.scope_id ?? none}
             </dd>
           </div>
           <div className="flex items-center justify-between gap-4">
             <dt className="text-gray-900">{t('directive.insertDepthLabel')}</dt>
             <dd className="text-gray-1000" data-testid="directive-depth">
-              {directive.insert_depth ?? '—'}
+              {directive.insert_depth ?? none}
             </dd>
           </div>
           <div className="flex items-center justify-between gap-4">
             <dt className="text-gray-900">{t('directive.ttlLabel')}</dt>
             <dd className="text-gray-1000" data-testid="directive-ttl">
-              {directive.ttl_kind ?? '—'}
+              {directive.ttl_kind ?? none}
               {directive.ttl_remaining !== null && directive.ttl_kind
                 ? ` · ${t('directive.ttlRemaining', { count: directive.ttl_remaining })}`
                 : ''}

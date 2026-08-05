@@ -66,7 +66,46 @@
     "ttlRemaining": "剩余 {{count}}",
     "clearOnSceneChangeLabel": "场景切换时清除",
     "yes": "是",
-    "no": "否"
+    "no": "否",
+    "noneValue": "—",
+    "form": {
+      "summary": "设置 / 编辑指令",
+      "scopeLegend": "作用域",
+      "scope": {
+        "work": "作品",
+        "world": "世界"
+      },
+      "bodyLabel": "指令正文",
+      "bodyPlaceholder": "注入到瞬间提示中的作者指令…",
+      "insertDepthLabel": "插入深度",
+      "depth": {
+        "head": "顶部",
+        "mid": "中部",
+        "tail": "尾部"
+      },
+      "ttlLegend": "TTL 类型（恰好一个）",
+      "ttl": {
+        "generations": "按生成次数",
+        "chapters": "按章节"
+      },
+      "ttlRemainingLabel": "TTL 计数",
+      "clearOnSceneChangeLabel": "场景切换时清除",
+      "replaceLabel": "替换当前生效指令",
+      "replaceHint": "取代该作用域下已生效的指令；旧指令会被保留。",
+      "set": "设置",
+      "setting": "设置中…",
+      "clear": "清除",
+      "clearing": "清除中…",
+      "validation": {
+        "bodyRequired": "指令正文不能为空。",
+        "ttlKindRequired": "请选择且仅选择一种 TTL 类型。",
+        "ttlRemainingInvalid": "TTL 计数必须是 ≥ 1 的整数。"
+      },
+      "conflictTitle": "该作用域已有一条生效指令",
+      "conflictDescription": "未勾选「替换」时不会覆盖现有指令。启用替换以取代它——旧指令会被保留。",
+      "conflictEnableReplace": "启用替换并重试",
+      "genericError": "无法更新指令。"
+    }
   },
   "readonlyNote": "只读视图——检查瞬间绝不会修改你的内容。"
 }

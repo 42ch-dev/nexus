@@ -11,6 +11,7 @@
 import { Badge } from '@/components/ui/badge';
 import { shortId } from '@/lib/format';
 import type { MomentInspectResponse } from '@42ch/nexus-contracts';
+import { useId } from 'react';
 import { useTranslation } from 'react-i18next';
 
 /** Emit-order rank for named slots (spec §2 H2). `kb.outlet.<name>` is a prefix family. */
@@ -33,11 +34,12 @@ export interface SlotMapBlockProps {
 
 export function SlotMapBlock({ slotMap }: SlotMapBlockProps) {
   const { t } = useTranslation('inspector');
+  const titleId = useId();
   const ordered = [...slotMap].sort((a, b) => slotRank(a.slot) - slotRank(b.slot));
 
   return (
-    <section aria-labelledby="inspector-slot-map-title" data-testid="slot-map-block">
-      <h3 id="inspector-slot-map-title" className="text-heading-16 font-heading text-gray-1000">
+    <section aria-labelledby={titleId} data-testid="slot-map-block">
+      <h3 id={titleId} className="text-heading-16 font-heading text-gray-1000">
         {t('slotMap.title')}
       </h3>
       <p className="text-copy-13 text-gray-700">{t('slotMap.description')}</p>

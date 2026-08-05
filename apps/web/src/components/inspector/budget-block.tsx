@@ -7,6 +7,7 @@
  * is observed, never modified (AC-I6). No live meter (plan non-goal).
  */
 import type { MomentInspectResponse } from '@42ch/nexus-contracts';
+import { useId } from 'react';
 import { useTranslation } from 'react-i18next';
 
 export interface BudgetBlockProps {
@@ -15,6 +16,7 @@ export interface BudgetBlockProps {
 
 export function BudgetBlock({ budget }: BudgetBlockProps) {
   const { t } = useTranslation('inspector');
+  const titleId = useId();
   const none = t('budget.none');
 
   const rows: { label: string; value: string; testId: string }[] = [
@@ -29,8 +31,8 @@ export function BudgetBlock({ budget }: BudgetBlockProps) {
   ];
 
   return (
-    <section aria-labelledby="inspector-budget-title" data-testid="budget-block">
-      <h3 id="inspector-budget-title" className="text-heading-16 font-heading text-gray-1000">
+    <section aria-labelledby={titleId} data-testid="budget-block">
+      <h3 id={titleId} className="text-heading-16 font-heading text-gray-1000">
         {t('budget.title')}
       </h3>
       <p className="text-copy-13 text-gray-700">{t('budget.description')}</p>
