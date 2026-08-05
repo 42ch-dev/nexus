@@ -114,6 +114,10 @@ import type {
   MomentDirectiveRequest,
   MomentInspectRequest,
   MomentInspectResponse,
+  PackExportRequest,
+  PackExportResponse,
+  PackImportRequest,
+  PackImportResponse,
   UpdateFindingRequest,
   UpdatePresetRequest,
   UpdatePresetResponse,
@@ -640,6 +644,21 @@ export interface NexusClient {
    * `clear`.
    */
   momentDirective(request: MomentDirectiveRequest): Promise<MomentDirectiveResponse>;
+
+  // ── Narrative Knowledge Pack (V1.152 P1 — DF-77) ─────────────────────────
+  /**
+   * `POST /v1/daemon/worlds/:world_id/kb/pack/export` — export one World's
+   * lore as a Narrative Knowledge Pack (opaque spoke envelope; entries and
+   * relations are opaque objects). The response round-trips through
+   * `importPack`.
+   */
+  exportPack(worldId: string, request?: PackExportRequest): Promise<PackExportResponse>;
+  /**
+   * `POST /v1/daemon/worlds/:world_id/kb/pack/import` — import a Narrative
+   * Knowledge Pack into a World under a collision policy (skip / rename /
+   * overwrite). Returns per-atom-type counts plus a details list.
+   */
+  importPack(worldId: string, request: PackImportRequest): Promise<PackImportResponse>;
 }
 
 /** Re-exported for consumers building query/mutation hooks. */

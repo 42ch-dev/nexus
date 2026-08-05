@@ -57,6 +57,10 @@ import type {
   MomentInspectResponse,
   ModuleDetail,
   OutlinePatchChapterRequest,
+  PackExportRequest,
+  PackExportResponse,
+  PackImportRequest,
+  PackImportResponse,
   OutlinePatchResponse,
   OutlinePatchStructureRequest,
   PatchChapterRequest,
@@ -217,6 +221,20 @@ export class BrowserClient implements NexusClient {
    */
   momentDirective(request: MomentDirectiveRequest): Promise<MomentDirectiveResponse> {
     return this.post<MomentDirectiveResponse>('/v1/daemon/moment-directive', request);
+  }
+
+  // ── Narrative Knowledge Pack (V1.152 P1 — DF-77) ─────────────────────────
+  exportPack(worldId: string, request?: PackExportRequest): Promise<PackExportResponse> {
+    return this.post<PackExportResponse>(
+      `/v1/daemon/worlds/${encodeURIComponent(worldId)}/kb/pack/export`,
+      request,
+    );
+  }
+  importPack(worldId: string, request: PackImportRequest): Promise<PackImportResponse> {
+    return this.post<PackImportResponse>(
+      `/v1/daemon/worlds/${encodeURIComponent(worldId)}/kb/pack/import`,
+      request,
+    );
   }
 
   // ── Works ──────────────────────────────────────────────────────────────────
