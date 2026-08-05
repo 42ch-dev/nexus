@@ -529,6 +529,14 @@ fn map_to_active_directive(row: MomentDirectiveRow) -> Option<ActiveDirective> {
         insert_depth,
         ttl_kind,
         clear_on_scene_change: row.clear_on_scene_change,
+        // V1.151 P0 (DF-76 spec §2 H6): carry the persisted metadata through
+        // to MCA for the inspector packet — status/metadata only, never the
+        // body (AC-I3). `ttl_remaining` is `i64` on the row; only non-
+        // negative values surface (an active row's TTL never goes negative).
+        ttl_remaining: u32::try_from(row.ttl_remaining).ok(),
+        status: row.status,
+        scope_kind: row.scope_kind,
+        scope_id: row.scope_id,
     })
 }
 

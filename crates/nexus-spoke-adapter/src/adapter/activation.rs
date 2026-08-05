@@ -116,6 +116,25 @@ const MAX_REGEX_KEY_CHARS: usize = 256;
 /// consistent with the chars/4 token heuristic used across MCA.
 const MAX_REGEX_SCAN_CHARS: usize = 64 * 1024;
 
+/// Token-budget accounting of an activation pass (V1.151 P0, DF-76 spec §2
+/// H3) — chars/4 estimates, computed by the engine, exposed additively for
+/// the inspector packet. No wire change: the values were already computed
+/// internally (`apply_activation_with_hops` primary estimate + hop spend);
+/// only exposure is new.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ActivationBudget {
+    /// Sum of chars/4 estimates over primary-matched entries.
+    pub primary_tokens_est: usize,
+    /// Sum of chars/4 estimates over hop-pulled entries (0 without hops).
+    pub hop_tokens_est: usize,
+    /// The caller-provided hop cap (`HopConfig::max_hop_tokens`); `None` ⇒
+    /// depth + cycle only (no token stop).
+    pub cap: Option<usize>,
+    /// `cap` minus the primary + hop estimates (what the hop budget has
+    /// left); `None` when no cap was set.
+    pub remaining: Option<usize>,
+}
+
 /// Result of an activation pass over a set of `WorldKB` entries.
 #[derive(Debug, Clone)]
 pub struct ActivationResult {
@@ -126,6 +145,10 @@ pub struct ActivationResult {
     pub unmatched: Vec<WorldKbEntry>,
     /// Per-entry fire/miss trace for diagnostics.
     pub trace: Vec<ActivationTraceEntry>,
+    /// Token-budget accounting (spec §2 H3): `Some` whenever activation ran
+    /// — primary estimate always; hop estimate + cap/remaining only on the
+    /// with-hops path.
+    pub budget: Option<ActivationBudget>,
 }
 
 /// Per-entry activation trace record.
@@ -198,6 +221,9 @@ pub struct HopExpandResult {
     /// (`hop_origin_entry_id`, `hop_depth`, `source_relation_type`,
     /// `source_relation_id`).
     pub hop_trace: Vec<ActivationTraceEntry>,
+    /// Sum of chars/4 estimates over pulled entries (V1.151 P0 — the hop
+    /// spend, surfaced for the inspector budget section, spec §2 H3).
+    pub tokens_consumed: usize,
 }
 
 /// Emit-order inputs captured during classify (V1.149 P0 T3 — spec §4).
@@ -489,10 +515,23 @@ pub fn apply_activation(
 ) -> ActivationResult {
     let mut pass = run_primary_pass(entries, scan_text, constant_seed_ids);
     sort_matched(&mut pass.matched);
+    // V1.151 P0 (spec §2 H3): no-hops path — primary estimate only,
+    // `cap`/`remaining` = `None` (no hop budget active).
+    let primary_tokens_est: usize = pass
+        .matched
+        .iter()
+        .map(|(entry, _)| estimate_tokens(entry))
+        .sum();
     ActivationResult {
         matched: pass.matched.into_iter().map(|(entry, _)| entry).collect(),
         unmatched: pass.unmatched,
         trace: pass.trace,
+        budget: Some(ActivationBudget {
+            primary_tokens_est,
+            hop_tokens_est: 0,
+            cap: None,
+            remaining: None,
+        }),
     }
 }
 
@@ -541,18 +580,21 @@ pub fn apply_activation_with_hops(
     hop: &HopConfig,
 ) -> ActivationResult {
     let mut primary = run_primary_pass(entries, scan_text, constant_seed_ids);
+    // V1.151 P0 (spec §2 H3): record the already-computed primary estimate
+    // for the inspector budget section.
+    let primary_tokens_est: usize = primary
+        .matched
+        .iter()
+        .map(|(entry, _)| estimate_tokens(entry))
+        .sum();
+    let mut hop_tokens_est: usize = 0;
 
     if !edges.is_empty() && hop.max_hops > 0 {
         // Spec Q1: the caller already reserved personality/world_state/
         // timeline; the engine reserves the primary-matched KB estimate.
-        let budget = hop.max_hop_tokens.map(|budget| {
-            let primary_estimate: usize = primary
-                .matched
-                .iter()
-                .map(|(entry, _)| estimate_tokens(entry))
-                .sum();
-            budget.saturating_sub(primary_estimate)
-        });
+        let budget = hop
+            .max_hop_tokens
+            .map(|b| b.saturating_sub(primary_tokens_est));
         let config = HopConfig {
             max_hops: hop.max_hops,
             max_hop_tokens: budget,
@@ -570,6 +612,7 @@ pub fn apply_activation_with_hops(
             .map(|(entry, _)| entry.entry_id.clone())
             .collect();
         let expanded = expand_relation_hops(&primary.seed_ids, &pre_visited, &pool, edges, &config);
+        hop_tokens_est = expanded.tokens_consumed;
 
         // QC2 F-001: a primary-missed entry that the hop pass pulled must not
         // also stay in `unmatched` — matched ∩ unmatched = ∅ after this.
@@ -604,6 +647,17 @@ pub fn apply_activation_with_hops(
             .collect(),
         unmatched: primary.unmatched,
         trace: primary.trace,
+        // V1.151 P0 (spec §2 H3): `cap` is the caller's hop cap; `remaining`
+        // is what the hop budget has left after primary + hop spends.
+        budget: Some(ActivationBudget {
+            primary_tokens_est,
+            hop_tokens_est,
+            cap: hop.max_hop_tokens,
+            remaining: hop.max_hop_tokens.map(|cap| {
+                cap.saturating_sub(primary_tokens_est)
+                    .saturating_sub(hop_tokens_est)
+            }),
+        }),
     }
 }
 
@@ -662,6 +716,9 @@ pub fn expand_relation_hops(
     let mut pulled: Vec<WorldKbEntry> = Vec::new();
     let mut hop_trace: Vec<ActivationTraceEntry> = Vec::new();
     let mut remaining = config.max_hop_tokens.unwrap_or(usize::MAX);
+    // V1.151 P0 (spec §2 H3): hop spend = sum of estimates over pulled
+    // entries — surfaced on the result for the inspector budget section.
+    let mut tokens_consumed: usize = 0;
 
     let mut frontier: Vec<String> = seeds.to_vec();
     for depth in 1..=config.max_hops {
@@ -687,6 +744,7 @@ pub fn expand_relation_hops(
                     continue;
                 }
                 remaining -= estimate;
+                tokens_consumed += estimate;
                 hop_trace.push(ActivationTraceEntry {
                     entry_id: neighbor_id.clone(),
                     canonical_name: entry.canonical_name.clone(),
@@ -707,7 +765,11 @@ pub fn expand_relation_hops(
         frontier = next_level;
     }
 
-    HopExpandResult { pulled, hop_trace }
+    HopExpandResult {
+        pulled,
+        hop_trace,
+        tokens_consumed,
+    }
 }
 
 /// Token estimate for one entry: `chars/4` of summary-or-name (plan T1; the

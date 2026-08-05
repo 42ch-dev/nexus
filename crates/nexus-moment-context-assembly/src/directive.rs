@@ -116,6 +116,66 @@ pub struct ActiveDirective {
     pub ttl_kind: DirectiveTtlKind,
     /// Clear when the focused moment anchor changes between assembles.
     pub clear_on_scene_change: bool,
+    /// Remaining TTL count after this assembly's decrement (V1.151 P0,
+    /// DF-76 spec §2 H6 — surfaced from `MomentDirectiveRow.ttl_remaining`;
+    /// `None` when no TTL is tracked). Active rows always have a value.
+    pub ttl_remaining: Option<u32>,
+    /// `active` | `expired` (V1.151 P0 H6) — only active rows inject, so
+    /// this is `"active"` on every payload MCA ever renders.
+    pub status: String,
+    /// `work` | `world` (V1.151 P0 H6 — `scope_kind` column).
+    pub scope_kind: String,
+    /// Work id (`scope_kind` = `work`) or world id (`scope_kind` = `world`)
+    /// (V1.151 P0 H6 — `scope_id` column).
+    pub scope_id: String,
+}
+
+/// Scope pair of a Moment Directive (`work` | `world` + the scoped id) —
+/// the metadata surface of the inspector packet's `moment_directive`
+/// section (V1.151 P0, DF-76 spec §2 H6). Status-only: never the body.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MomentDirectiveScope {
+    /// `work` | `world` (`scope_kind` column).
+    pub kind: String,
+    /// Work id / world id (`scope_id` column).
+    pub id: String,
+}
+
+/// Status-only metadata of the active Moment Directive — the source of the
+/// inspector packet's `moment_directive` section (V1.151 P0, DF-76 spec §2
+/// H6). **NEVER carries the directive body** — body exclusion is by
+/// construction: the packet builder reads only this metadata, never
+/// `MomentContext::moment_directive` (AC-I3).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MomentDirectiveStatus {
+    /// Scope kind + scoped id.
+    pub scope: MomentDirectiveScope,
+    /// Placement within the directive region (`head` | `mid` | `tail`).
+    pub insert_depth: DirectiveDepth,
+    /// TTL kind (`generations` | `chapters`).
+    pub ttl_kind: DirectiveTtlKind,
+    /// Remaining TTL count after this assembly's decrement.
+    pub ttl_remaining: Option<u32>,
+    /// Clear when the focused moment anchor changes between assembles.
+    pub clear_on_scene_change: bool,
+    /// `"active"` when the directive injected this assembly.
+    pub status: String,
+}
+
+impl From<&ActiveDirective> for MomentDirectiveStatus {
+    fn from(d: &ActiveDirective) -> Self {
+        Self {
+            scope: MomentDirectiveScope {
+                kind: d.scope_kind.clone(),
+                id: d.scope_id.clone(),
+            },
+            insert_depth: d.insert_depth,
+            ttl_kind: d.ttl_kind,
+            ttl_remaining: d.ttl_remaining,
+            clear_on_scene_change: d.clear_on_scene_change,
+            status: d.status.clone(),
+        }
+    }
 }
 
 /// Provider boundary for the directive persistence adapter.

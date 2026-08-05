@@ -27,6 +27,7 @@
 
 pub mod directive;
 pub mod generation;
+pub mod inspector;
 pub mod moment;
 pub mod slots;
 pub mod stage0;
@@ -39,8 +40,11 @@ pub mod cloud_stage;
 // Re-export primary types
 #[cfg(feature = "cloud-stage")]
 pub use cloud_stage::TwoStageAssembly;
-pub use directive::{ActiveDirective, DirectiveDepth, DirectiveStore, DirectiveTtlKind};
+pub use directive::{
+    ActiveDirective, DirectiveDepth, DirectiveStore, DirectiveTtlKind, MomentDirectiveStatus,
+};
 pub use generation::GenerationStage;
+pub use inspector::build_inspector_packet;
 pub use moment::{assemble_moment, assemble_moment_with_directive, MomentContext, MomentRequest};
 pub use stage0::Stage0Assembly;
 pub use world_context::{

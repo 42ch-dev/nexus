@@ -12,8 +12,8 @@ use clap::Subcommand;
 use nexus_contracts::local::domain::RuntimeMode;
 use nexus_moment_context_assembly::cloud_stage::{AssembleResponse, AssemblyRuntimeMode};
 use nexus_moment_context_assembly::{
-    assemble_moment_with_directive, GenerationStage, MomentContext, MomentRequest, Stage0Assembly,
-    TwoStageAssembly,
+    assemble_moment_with_directive, build_inspector_packet, GenerationStage, MomentContext,
+    MomentRequest, Stage0Assembly, TwoStageAssembly,
 };
 
 use crate::domain::{DegradationGuard, DomainRuntimeMode};
@@ -781,7 +781,11 @@ pub async fn run_assemble_moment(
     }
 }
 
-/// Build and emit the inspector packet diagnostic JSON from the activation trace.
+/// Build and emit the inspector packet diagnostic JSON (V1.151 P0: the
+/// enriched packet — `modules` unchanged + `slot_map` / `budget` /
+/// `moment_directive` product-local sections). The builder relocated to MCA
+/// (`nexus_moment_context_assembly::build_inspector_packet`) so the daemon
+/// route and CLI share one implementation.
 fn emit_inspector_packet(ctx: &MomentContext, packet_out: Option<&str>) -> Result<()> {
     let packet = build_inspector_packet(ctx);
 
@@ -799,49 +803,6 @@ fn emit_inspector_packet(ctx: &MomentContext, packet_out: Option<&str>) -> Resul
     }
 
     Ok(())
-}
-
-/// Build the inspector packet JSON (`modules.placement` +
-/// `modules.activation_trace`) from the activation trace.
-///
-/// AC-I3 (V1.150 P1): the packet is derived **only** from the activation
-/// trace — the Moment Directive is product-local and structurally cannot
-/// appear here (it is never part of `modules.*` / `AssemblePacket`).
-fn build_inspector_packet(ctx: &MomentContext) -> serde_json::Value {
-    let trace = ctx.activation_trace.as_deref().unwrap_or(&[]);
-
-    // modules.placement: entries that passed activation (accepted == true).
-    let placement: Vec<serde_json::Value> = trace
-        .iter()
-        .filter(|t| t.accepted)
-        .map(|t| {
-            serde_json::json!({
-                "entry_id": t.entry_id,
-                "canonical_name": t.canonical_name,
-                "reason": t.reason,
-            })
-        })
-        .collect();
-
-    // modules.activation_trace: full per-entry fire/miss trace.
-    let trace_json: Vec<serde_json::Value> = trace
-        .iter()
-        .map(|t| {
-            serde_json::json!({
-                "entry_id": t.entry_id,
-                "canonical_name": t.canonical_name,
-                "reason": t.reason,
-                "accepted": t.accepted,
-            })
-        })
-        .collect();
-
-    serde_json::json!({
-        "modules": {
-            "placement": placement,
-            "activation_trace": trace_json,
-        }
-    })
 }
 
 #[cfg(test)]
@@ -1575,14 +1536,20 @@ mod tests {
 
     // ── V1.150 P1: inspector packet never carries the Moment Directive (AC-I3)
 
-    /// AC-I3 (V1.150 P1): the inspector packet (`modules.placement` +
-    /// `modules.activation_trace`) is derived only from the activation trace.
-    /// The Moment Directive is product-local — it must never appear in
-    /// AssemblePacket `placement[]` / `activation_trace[]` (and never in
-    /// `modules.*`), so the packet JSON must not contain the directive body.
+    /// AC-I3 (V1.150 P1, extended V1.151 P0): the inspector packet
+    /// (`modules.placement` + `modules.activation_trace` + the enriched
+    /// product-local `slot_map` / `budget` / `moment_directive` sections) is
+    /// derived only from the activation trace + additive metadata. The
+    /// Moment Directive is product-local — its **body** must never appear
+    /// anywhere in the packet JSON, including the new `moment_directive`
+    /// section (metadata-only by construction, spec §2 H6).
     #[test]
     fn inspector_packet_never_carries_moment_directive() {
-        use nexus_moment_context_assembly::directive::DirectiveDepth;
+        use nexus_moment_context_assembly::directive::{
+            DirectiveDepth, DirectiveTtlKind, MomentDirectiveScope,
+        };
+        use nexus_moment_context_assembly::MomentDirectiveStatus;
+        use nexus_spoke_adapter::adapter::activation::ActivationBudget;
 
         let trace = vec![
             ActivationTraceEntry {
@@ -1611,6 +1578,29 @@ mod tests {
             moment_directive: Some("DIRECTIVE_SECRET_MARKER keep the prose terse".to_string()),
             moment_directive_depth: DirectiveDepth::Head,
             activation_trace: Some(trace),
+            // V1.151 P0: populate the enriched surface — the directive meta
+            // carries status/metadata only (never the body).
+            slot_map: Some(vec![nexus_moment_context_assembly::slots::SlotMapEntry {
+                entry_id: "kb_hero".to_string(),
+                slot: "world.before".to_string(),
+            }]),
+            activation_budget: Some(ActivationBudget {
+                primary_tokens_est: 4,
+                hop_tokens_est: 0,
+                cap: None,
+                remaining: None,
+            }),
+            moment_directive_meta: Some(MomentDirectiveStatus {
+                scope: MomentDirectiveScope {
+                    kind: "work".to_string(),
+                    id: "wrk_1".to_string(),
+                },
+                insert_depth: DirectiveDepth::Head,
+                ttl_kind: DirectiveTtlKind::Generations,
+                ttl_remaining: Some(2),
+                clear_on_scene_change: false,
+                status: "active".to_string(),
+            }),
             ..MomentContext::default()
         };
 
@@ -1622,6 +1612,26 @@ mod tests {
         );
         assert!(json.contains("kb_hero"), "trace entries still present");
         assert!(json.contains("modules"), "packet shape preserved");
+        // Enriched product-local sections present (V1.151 P0, spec §2).
+        assert!(
+            json.contains("slot_map"),
+            "enriched slot_map section present"
+        );
+        assert!(json.contains("budget"), "enriched budget section present");
+        assert!(
+            json.contains("moment_directive"),
+            "enriched moment_directive section present"
+        );
+        // The moment_directive section is metadata-only: scope metadata
+        // present, no `body` key anywhere in the packet.
+        assert!(
+            json.contains("\"scope\":\"work\""),
+            "directive scope metadata present"
+        );
+        assert!(
+            !json.contains("\"body\""),
+            "AC-I3: no body key anywhere in the enriched packet"
+        );
     }
 
     // ── V1.145 P2: assemble_moment behavior equivalence (T4) ────────────

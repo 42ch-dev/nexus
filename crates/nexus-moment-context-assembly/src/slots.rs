@@ -108,6 +108,74 @@ pub struct SlotRouting {
     pub post_history: Vec<WorldKbEntry>,
 }
 
+/// One accepted entry's slot assignment — the inspector packet `slot_map`
+/// row (V1.151 P0, DF-76 spec §2 H2): `entry_id` → slot id
+/// (`world.before` | `default` | `world.after` | `kb.outlet.<name>` |
+/// `style.post_history` | `moment.directive`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SlotMapEntry {
+    /// The routed entry's stable id.
+    pub entry_id: String,
+    /// The named slot the entry landed in (product slot ids, spec §2).
+    pub slot: String,
+}
+
+impl SlotRouting {
+    /// Flatten the routed slots into the inspector slot map — every entry
+    /// that survived the stage gate mapped to its slot id (spec §2 H2).
+    ///
+    /// Emit order follows the render order (top → bottom, spec §2 / Q5):
+    /// `world.before` → `default` → `world.after` → `kb.outlet.<name>`
+    /// (sorted by name, `BTreeMap` iteration) → `style.post_history`. The
+    /// reserved `moment.directive` slot is never produced here — it is a
+    /// top-level section, not a World-KB routing slot; the assembly capture
+    /// appends a synthetic entry when a directive injects.
+    #[must_use]
+    pub fn to_slot_map(&self) -> Vec<SlotMapEntry> {
+        let capacity = self
+            .before
+            .len()
+            .saturating_add(self.fallback.len())
+            .saturating_add(self.after.len())
+            .saturating_add(self.post_history.len())
+            .saturating_add(self.outlets.values().map(Vec::len).sum::<usize>());
+        let mut map = Vec::with_capacity(capacity);
+        for entry in &self.before {
+            map.push(SlotMapEntry {
+                entry_id: entry.entry_id.clone(),
+                slot: "world.before".to_string(),
+            });
+        }
+        for entry in &self.fallback {
+            map.push(SlotMapEntry {
+                entry_id: entry.entry_id.clone(),
+                slot: "default".to_string(),
+            });
+        }
+        for entry in &self.after {
+            map.push(SlotMapEntry {
+                entry_id: entry.entry_id.clone(),
+                slot: "world.after".to_string(),
+            });
+        }
+        for (name, entries) in &self.outlets {
+            for entry in entries {
+                map.push(SlotMapEntry {
+                    entry_id: entry.entry_id.clone(),
+                    slot: format!("kb.outlet.{name}"),
+                });
+            }
+        }
+        for entry in &self.post_history {
+            map.push(SlotMapEntry {
+                entry_id: entry.entry_id.clone(),
+                slot: "style.post_history".to_string(),
+            });
+        }
+        map
+    }
+}
+
 /// Route the V1.149-emitted matched candidate list into named slots.
 ///
 /// Consumes the list and moves each entry into exactly one slot; entries are
