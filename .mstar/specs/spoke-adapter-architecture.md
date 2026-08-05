@@ -1,6 +1,6 @@
 # Spoke Adapter Architecture
 
-> **Status:** Normative (v0.12 — V1.152 DF-77 §11 Narrative Knowledge Pack I/O: additive daemon export/import routes + all three conflict policies (skip/rename/overwrite) + CLI↔daemon shared import-orchestration module + Control Room panel; v0.11 — V1.151 DF-76 §7.4 inspector packet field surface (shipped P0+P1; P2 dogfood-confirmed against the spoke assemble-module recipe handbook); v0.10 — V1.150 DF-75 §7.4 slot + Moment Directive + generation-stage matrix shipped at P2 close; v0.9 was V1.149 lore activation §7.4 production matrix: default-on engine + Relation hop expand; v0.8 was V1.148 spoke pin 0.6.1→0.8.2 + RuleQueryPort production + orchestrate_check daemon route + Connect Host N-C0 surface; v0.7 was V1.146 spoke InternalError reject code: pin bump 0.6.0→0.6.1; v0.6 was V1.145 spoke consumer alignment: adapter rehome to spoke-adapter + dep reversal + WorldKB/timeline read via ScopeQuery + scope-pushdown contract; v0.5 was V1.144 spoke 0.5.0 upgrade + RelationPort OCC extension + orchestrate_relate cutover)
+> **Status:** Normative (v0.12 — V1.152 DF-77 §11 Narrative Knowledge Pack I/O: shipped P0+P1; P2 dogfood-confirmed — additive daemon export/import routes + all three conflict policies (skip/rename/overwrite) + CLI↔daemon shared `import_pack` module + Control Room panel; v0.11 — V1.151 DF-76 §7.4 inspector packet field surface (shipped P0+P1; P2 dogfood-confirmed against the spoke assemble-module recipe handbook); v0.10 — V1.150 DF-75 §7.4 slot + Moment Directive + generation-stage matrix shipped at P2 close; v0.9 was V1.149 lore activation §7.4 production matrix: default-on engine + Relation hop expand; v0.8 was V1.148 spoke pin 0.6.1→0.8.2 + RuleQueryPort production + orchestrate_check daemon route + Connect Host N-C0 surface; v0.7 was V1.146 spoke InternalError reject code: pin bump 0.6.0→0.6.1; v0.6 was V1.145 spoke consumer alignment: adapter rehome to spoke-adapter + dep reversal + WorldKB/timeline read via ScopeQuery + scope-pushdown contract; v0.5 was V1.144 spoke 0.5.0 upgrade + RelationPort OCC extension + orchestrate_relate cutover)
 > **Document class:** Master
 > **Scope:** The `nexus-spoke-adapter` crate boundary, `extensions.nexus` namespace contract, spoke-operations delegation rules, daemon-api envelope strategy, drift detection adaptation, the `/kb/` HTTP route stability decision, the opt-in Connect Host N-C0 surface (DF-72), and the Narrative Knowledge Pack I/O product-transport surface (DF-77).
 > **Related:** [entity-scope-model.md](entity-scope-model.md), [local-db-schema.md](local-db-schema.md), [schemas-directory-layout.md](schemas-directory-layout.md), spoke `CONCEPTS.md`, spoke `.mstar/specs/spoke-data-model.md`, spoke `.mstar/specs/spoke-operations.md`, spoke `.mstar/specs/spoke-connect.md`. Iteration product drafts (process): `.mstar/iterations/v1.148/specs/fl-r-connect-host-foundation.md`, `.mstar/iterations/v1.152/specs/fl-l-w7-knowledge-pack-productization.md`.
@@ -835,8 +835,10 @@ applies **uniformly** to entries and relations:
 | Policy | On collision | Entry mechanics | Count |
 |--------|-------------|-----------------|-------|
 | **skip** (default) | Keep existing; imported atom not written | Skip; remap pack `entry_id` → existing for relation endpoints (F-002) | `skipped` |
-| **rename** | Bring in both; imported atom is disambiguated + created | `canonical_name` ← `<original> (imported)` with numeric tiebreak (` (imported 2)`, …); fresh `entry_id` minted (`kb_<uuid>`, matching `WorldKbEntry::new()`); remap for relations | `renamed` |
+| **rename** | Bring in both; imported atom is disambiguated + created | `canonical_name` ← `<original> imported` with numeric tiebreak (` imported 2`, …); fresh `entry_id` minted (`kb_<uuid>`, matching `WorldKbEntry::new()`); remap for relations | `renamed` |
 | **overwrite** | Replace exactly one colliding atom (body via upsert; lifecycle + revision preserved) | `orchestrate_upsert` on collided `entry_id` with imported body, `expected_base_revision = existing.revision`, `status` preserved; revision bumped by orchestrator; **never** raw DELETE | `overwritten` |
+
+**Create-path revision normalization:** new entries (no collision) clear `revision` to `None` before `orchestrate_upsert` (`prepare_create_entry` in `pack_import.rs`) so pack rows that carried `revision >= 1` from export still pass the spoke create gate. Overwrite preserves the existing row's `status` and sets `revision` to the collided row's current revision for CAS upsert.
 
 **Additive-only at the policy level:** skip and rename never delete. Overwrite
 replaces via `orchestrate_upsert` / `orchestrate_relate` (CAS body replace), never
@@ -893,9 +895,11 @@ transport envelope, not a `spoke-operations` surface).
 
 ### 11.8 Dogfood gate
 
-P2 ships a `dogfood_pack_round_trip_all_policies` test
-(`apps/nexus42/.../pack.rs::tests`) that seeds World A (entries with
-`modules.activation` + relations) → exports → imports into fresh World B under
-each policy → asserts created/renamed/overwritten counts, `pack_import`
-provenance, `modules.activation` deep-equal A→B, and skip-idempotency
-(created=0 on second run).
+P2 ships `dogfood_pack_round_trip_preserves_activation_and_relations`
+(`apps/nexus42/.../pack.rs::tests`) — seeds World A (entries with
+`modules.activation` + ≥1 relation) → export → import into fresh World B under
+`skip` → asserts `entries.created` matches seeded count, `pack_import`
+provenance on all B entries, `modules.activation` deep-equal A→B,
+`relations.created >= 1`, then re-import under `skip` with
+`entries.created == 0` (idempotency). Separate tests cover rename/overwrite
+policies and activation preservation on collision paths.
