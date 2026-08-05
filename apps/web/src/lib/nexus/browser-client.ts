@@ -225,9 +225,11 @@ export class BrowserClient implements NexusClient {
 
   // ── Narrative Knowledge Pack (V1.152 P1 — DF-77) ─────────────────────────
   exportPack(worldId: string, request?: PackExportRequest): Promise<PackExportResponse> {
+    // The daemon's axum `Json<PackExportRequest>` extractor requires a JSON
+    // body; an omitted request means "export with defaults", sent as `{}`.
     return this.post<PackExportResponse>(
       `/v1/daemon/worlds/${encodeURIComponent(worldId)}/kb/pack/export`,
-      request,
+      request ?? {},
     );
   }
   importPack(worldId: string, request: PackImportRequest): Promise<PackImportResponse> {
