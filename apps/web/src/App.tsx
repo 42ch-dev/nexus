@@ -58,6 +58,13 @@ const WorldKbPage = lazy(() =>
   import('@/pages/world-kb-page').then((m) => ({ default: m.WorldKbPage })),
 );
 
+// V1.151 P1 (DF-76) — Assembly Inspector debug surface. A Control-Room-style
+// read-only page (no `@xyflow/react`), sibling of outline/timeline/chapters
+// under the Work canvas shell.
+const WorkInspectorPage = lazy(() =>
+  import('@/pages/work-inspector-page').then((m) => ({ default: m.WorkInspectorPage })),
+);
+
 // Route-split: the Timeline canvas (V1.122 P1 T3) is the default World entry.
 // Lazy-loaded alongside the other canvas routes so React Flow stays out of the
 // Control Room bootstrap chunk (canvas-strategy-surface.md §3.1).
@@ -127,6 +134,16 @@ function AppRoutes() {
           />
           <Route path="chapters" element={<ChaptersPage />} />
           <Route path="chapters/:chapter" element={<ChapterPage />} />
+          {/* V1.151 P1 (DF-76) — Assembly Inspector debug surface (read-only,
+              moment-level; sibling of outline/timeline/chapters). */}
+          <Route
+            path="inspector"
+            element={
+              <Suspense fallback={<LoadingState label="Loading Assembly Inspector…" />}>
+                <WorkInspectorPage />
+              </Suspense>
+            }
+          />
         </Route>
         <Route
           path="worlds"

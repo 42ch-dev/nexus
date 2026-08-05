@@ -139,6 +139,27 @@ export function CanvasNavCommands(): null {
     available: () => Boolean(idsRef.current.workId),
   });
 
+  // V1.151 P1 (DF-76) — Assembly Inspector debug surface. Mirrors
+  // `go.work-timeline`'s workId-gating; exposes the read-only moment-level
+  // inspector at `/works/:workId/inspector` from ⌘K.
+  useRegisterCommand({
+    id: 'go.work-inspector',
+    labelKey: 'go.work-inspector.label',
+    groupKey: 'group.navigate',
+    keywordKeys: [
+      'go.work-inspector.keywords.assembly',
+      'go.work-inspector.keywords.activation',
+      'go.work-inspector.keywords.slots',
+      'go.work-inspector.keywords.budget',
+    ],
+    icon: ListTree,
+    handler: () => {
+      const { workId: w } = idsRef.current;
+      if (w) navigate(`/works/${encodeURIComponent(w)}/inspector`);
+    },
+    available: () => Boolean(idsRef.current.workId),
+  });
+
   // ── V1.147 P2 T3 — Compute jump commands (behavior spec §1 P3) ───────────
   //
   // Jump-only per plan ⌘K scope ("navigation jumps into the Timeline Run

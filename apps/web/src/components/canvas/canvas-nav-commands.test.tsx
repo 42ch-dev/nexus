@@ -97,6 +97,7 @@ function renderInLayout(
           <Route path="works/:workId" element={<div />} />
           <Route path="works/:workId/outline" element={<div />} />
           <Route path="works/:workId/timeline" element={<div />} />
+          <Route path="works/:workId/inspector" element={<div />} />
           <Route path="worlds/:worldId/kb" element={<div />} />
           <Route path="strategies" element={<div />} />
           <Route path="sessions" element={<div />} />
@@ -131,7 +132,9 @@ describe('CanvasNavCommands — registration', () => {
   // V1.147 P2 T3 — `compute.run-module` + `compute.run-module-on-world`
   // (jump-only compute commands; the world-scoped one is availability-gated
   // and does not appear on `/sessions`).
-  it('registers the Navigate + Compute jump commands (V1.111 trio + Work Timeline + global Timeline + Run Module)', () => {
+  // V1.151 P1 T3 — `go.work-inspector` (Assembly Inspector debug surface;
+  // workId-gated like `go.work-timeline`).
+  it('registers the Navigate + Compute jump commands (V1.111 trio + Work Timeline + global Timeline + Run Module + Assembly Inspector)', () => {
     renderInLayout('/sessions');
     expect(getCommands().map((c) => c.id).sort()).toEqual([
       'compute.run-module',
@@ -139,6 +142,7 @@ describe('CanvasNavCommands — registration', () => {
       'go.outline',
       'go.strategy',
       'go.timeline',
+      'go.work-inspector',
       'go.work-timeline',
       'go.world-kb',
     ]);
@@ -146,7 +150,7 @@ describe('CanvasNavCommands — registration', () => {
 
   it('unregisters all commands on unmount (no leak across mounts)', () => {
     const { unmount } = renderInLayout('/sessions');
-    expect(getCommands()).toHaveLength(7);
+    expect(getCommands()).toHaveLength(8);
     unmount();
     expect(getCommands()).toEqual([]);
   });
@@ -259,6 +263,30 @@ describe('CanvasNavCommands — Go to Work Timeline (workId-gated, V1.123 P2)', 
       findById('go.work-timeline')?.handler();
     });
     expect(probe.read()).toBe('/works/w%204/timeline');
+  });
+});
+
+describe('CanvasNavCommands — Go to Assembly Inspector (workId-gated, V1.151 P1 T3)', () => {
+  // Plan Q1: the inspector is a moment-level debug surface in the creator
+  // area — reachable from ⌘K on Work routes like `go.work-timeline`.
+  it('is hidden when no workId is in the URL', () => {
+    renderInLayout('/sessions');
+    expect(findById('go.work-inspector')?.available?.()).toBe(false);
+  });
+
+  it('is available and navigates to /works/:workId/inspector when on a Work route', () => {
+    const { probe } = renderInLayout('/works/w-123');
+    const cmd = findById('go.work-inspector');
+    expect(cmd?.available?.()).toBe(true);
+    act(() => {
+      cmd?.handler();
+    });
+    expect(probe.read()).toBe('/works/w-123/inspector');
+  });
+
+  it('is available on the Outline route (workId still present — peer reachable)', () => {
+    renderInLayout('/works/w-1/outline');
+    expect(findById('go.work-inspector')?.available?.()).toBe(true);
   });
 });
 
