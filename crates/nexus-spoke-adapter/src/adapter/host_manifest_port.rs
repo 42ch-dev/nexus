@@ -106,7 +106,7 @@ mod tests {
     use crate::HostManifestPort;
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn self_manifest_reports_injected_host_id_and_n_c0_contract() {
+    async fn self_manifest_reports_injected_host_id_and_n_c1_contract() {
         // HostManifestPort is storage-free; the pool is only needed to
         // satisfy the adapter struct shape. Use an in-memory pool with
         // migrations so the adapter construction path mirrors the other
@@ -141,7 +141,7 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec!["nexus".to_string()]
         );
-        // Same builder as the Connect Host → the extensions.nexus N-C0 block
+        // Same builder as the Connect Host → the extensions.nexus N-C1 block
         // is present on the port surface too (product draft §4.3 item 9).
         let nexus_ext = manifest
             .extensions
@@ -151,7 +151,17 @@ mod tests {
             nexus_ext
                 .get("connect_host_slice")
                 .and_then(serde_json::Value::as_str),
-            Some("n-c0")
+            Some("n-c1")
+        );
+        let expected_ops_value = serde_json::json!(crate::manifest::LOCAL_SERVED_OPS);
+        let expected_ops = expected_ops_value
+            .as_array()
+            .expect("locked op list serializes as an array");
+        assert_eq!(
+            nexus_ext
+                .get("served_ops")
+                .and_then(serde_json::Value::as_array),
+            Some(expected_ops)
         );
         assert_eq!(
             nexus_ext

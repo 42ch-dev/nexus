@@ -73,8 +73,13 @@ use spoke_schemas::connect::connect_invoke_response::ErrorEnvelope;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-/// The write ops this host serves (N-C1). T3's manifest-honesty test
-/// machine-checks this set ⇔ the advertised capabilities.
+/// The write ops this host serves (N-C1).
+///
+/// The manifest-honesty test
+/// (`n_c1_manifest_served_ops_match_dispatch_both_directions` in
+/// `commands::connect::interop`) machine-checks this set ⇔ the manifest's
+/// advertised `extensions.nexus.served_ops` (`nexus_spoke_adapter`'s
+/// `LOCAL_SERVED_OPS`) in both directions.
 pub const SERVED_OPS: [&str; 3] = ["upsert", "promote", "relate"];
 
 /// Build the N-C1 `InvokeHandler`: a fail-closed op gate + allowlist

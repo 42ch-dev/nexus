@@ -312,7 +312,9 @@ async fn allowlisted_peer_handshakes_and_reads_nexus_manifest() {
     assert!(!session.session_id().is_empty());
 
     // The manifest is delivered inside the signed hello (§2.5 — no separate
-    // get-manifest op). Assert the full N-C0 field contract.
+    // get-manifest op). Assert the full N-C0 baseline + N-C1 extension of
+    // the field contract (the single shared builder now advertises the
+    // delivered N-C1 slice + served write ops).
     let wire = serde_json::to_value(session.remote_manifest()).expect("manifest serializes");
     assert_eq!(wire["host_id"], serde_json::json!(TEST_HOST_ID));
     assert_eq!(wire["schema_version"], serde_json::json!(1));
@@ -324,7 +326,11 @@ async fn allowlisted_peer_handshakes_and_reads_nexus_manifest() {
     assert_eq!(wire["namespaces"], serde_json::json!(["nexus"]));
     assert_eq!(
         wire["extensions"]["nexus"]["connect_host_slice"],
-        serde_json::json!("n-c0")
+        serde_json::json!("n-c1")
+    );
+    assert_eq!(
+        wire["extensions"]["nexus"]["served_ops"],
+        serde_json::json!(["upsert", "promote", "relate"])
     );
     assert_eq!(
         wire["extensions"]["nexus"]["daemon_http_coexists"],
@@ -342,6 +348,60 @@ async fn allowlisted_peer_handshakes_and_reads_nexus_manifest() {
 
     host.shutdown().await.expect("host shuts down");
     peer_node.shutdown().await.expect("peer shuts down");
+}
+
+/// N-C1 honesty machine-check (P1 spec § Manifest honesty, both directions):
+/// the manifest a peer reads off the signed hello must advertise exactly the
+/// write ops the invoke dispatcher serves. (a) Every op the manifest
+/// advertises (`extensions.nexus.served_ops`) is actually served by the
+/// dispatch; (b) every op the dispatch serves (`super::invoke::SERVED_OPS`)
+/// is advertised by the manifest. The manifest comes from the single shared
+/// builder (`build_connect_hello_manifest` — the same bytes
+/// `connect start` puts in `ConnectConfig.local_manifest`), so this is the
+/// wire-truth cross-crate check; the crate-level honesty test
+/// (`n_c1_manifest_is_honest` in `nexus-spoke-adapter`) covers the
+/// manifest-side contract (exact op list + production-orchestrator backing).
+///
+/// No network needed — the builder is host_id-injectable and hermetic.
+#[test]
+fn n_c1_manifest_served_ops_match_dispatch_both_directions() {
+    let manifest = nexus_manifest(TEST_HOST_ID);
+    let wire = serde_json::to_value(&manifest).expect("manifest serializes");
+    let advertised = wire["extensions"]["nexus"]["served_ops"]
+        .as_array()
+        .expect("extensions.nexus.served_ops array present")
+        .iter()
+        .map(|op| op.as_str().expect("served op is a string").to_string())
+        .collect::<Vec<_>>();
+
+    // (a) Every capability advertised in the manifest is actually served by
+    //     the dispatch.
+    for op in &advertised {
+        assert!(
+            super::invoke::SERVED_OPS.contains(&op.as_str()),
+            "manifest advertises op {op:?} but the dispatch does not serve it"
+        );
+    }
+
+    // (b) Every op served by the dispatch is advertised in the manifest.
+    for op in super::invoke::SERVED_OPS {
+        assert!(
+            advertised
+                .iter()
+                .any(|advertised| advertised.as_str() == op),
+            "dispatch serves op {op:?} but the manifest does not advertise it"
+        );
+    }
+
+    // The two sets are identical — no extras on either side.
+    assert_eq!(
+        advertised,
+        super::invoke::SERVED_OPS
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>(),
+        "advertised served_ops must equal the dispatch served-op table exactly"
+    );
 }
 
 /// (b) A non-allowlisted peer is rejected at the handshake — no session, no
