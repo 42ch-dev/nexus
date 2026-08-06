@@ -137,12 +137,14 @@ fn issuer_peer_id(issuer_secret: &[u8; 32]) -> String {
 
 /// A challenge-response token provider for `subject`: mints a token from
 /// `issuer_secret` with the challenger as the audience (per the upstream
-/// spoke-connect test pattern).
+/// spoke-connect test pattern). Issued at `now` (Unix seconds, the 0.9.1
+/// issuance-time parameter) with a one-hour lifetime (`exp = now + 3600`),
+/// which passes the 0.9.1 fail-fast issuance guards.
 fn token_provider(
     issuer_secret: [u8; 32],
     subject: PeerId,
     capabilities: Vec<String>,
-    exp: u64,
+    now: u64,
 ) -> Arc<spoke_connect::CapabilityTokenProvider> {
     Arc::new(move |audience: &str| {
         let proof = issue_capability_token(
@@ -152,23 +154,26 @@ fn token_provider(
                 sub: subject.to_string(),
                 aud: audience.to_string(),
                 capabilities: capabilities.clone(),
-                exp,
+                exp: now + 3600,
                 iat: None,
                 jti: None,
             },
+            now,
         )
         .map_err(|e| e.to_string())?;
         serde_json::to_value(&proof).map_err(|e| e.to_string())
     })
 }
 
-/// A valid per-invoke `auth` proof (wire `proof` object).
+/// A valid per-invoke `auth` proof (wire `proof` object), issued at `now`
+/// (Unix seconds) with a one-hour lifetime (`exp = now + 3600`) — the
+/// 0.9.1 `issue_capability_token` signature and issuance-guard shape.
 fn token_proof(
     issuer_secret: &[u8; 32],
     subject: &str,
     audience: &str,
     capabilities: &[&str],
-    exp: u64,
+    now: u64,
 ) -> serde_json::Value {
     let proof = issue_capability_token(
         issuer_secret,
@@ -177,12 +182,13 @@ fn token_proof(
             sub: subject.to_string(),
             aud: audience.to_string(),
             capabilities: capabilities.iter().map(|c| (*c).to_string()).collect(),
-            exp,
+            exp: now + 3600,
             iat: None,
             jti: None,
         },
+        now,
     )
-    .expect("issuer key derives iss");
+    .expect("issuer key derives iss and claims pass the 0.9.1 issuance guards");
     serde_json::to_value(&proof).expect("proof serializes")
 }
 
@@ -379,7 +385,7 @@ async fn capability_token_gate_authorizes_and_ops_stay_refused() {
         issuer_secret,
         host_peer,
         vec!["spoke-baseline".into()],
-        now_plus(3600),
+        now_plus(0),
     ));
     let mut peer_cfg = peer_config(peer_key, vec![host_peer]);
     peer_cfg.trusted_issuers = vec![issuer_peer];
@@ -388,7 +394,7 @@ async fn capability_token_gate_authorizes_and_ops_stay_refused() {
         issuer_secret,
         peer_peer,
         vec!["spoke-baseline".into()],
-        now_plus(3600),
+        now_plus(0),
     ));
 
     let host = start(host_cfg).await;
@@ -460,7 +466,7 @@ async fn token_required_host_rejects_tokenless_peer_then_accepts_valid_auth() {
         &peer_peer.to_string(),
         &host_peer.to_string(),
         &["spoke-baseline"],
-        now_plus(3600),
+        now_plus(0),
     );
     match session
         .invoke_with_auth("check", serde_json::json!({ "extensions": {} }), Some(auth))
@@ -471,13 +477,16 @@ async fn token_required_host_rejects_tokenless_peer_then_accepts_valid_auth() {
     }
 
     // An expired proof is rejected auth_failed (the gate validates on every
-    // invoke).
+    // invoke). 0.9.1 `issue_capability_token` fail-fast refuses `exp` within
+    // the clock-skew window of its `now` argument, so the fixture backdates
+    // the issuance time two hours: the mint-time guards pass, but the token's
+    // `exp = now + 3600` lands an hour in the past of the verifier's clock.
     let expired = token_proof(
         &issuer_secret,
         &peer_peer.to_string(),
         &host_peer.to_string(),
         &["spoke-baseline"],
-        now_plus(0).saturating_sub(60),
+        now_plus(0).saturating_sub(7200),
     );
     match session
         .invoke_with_auth(
