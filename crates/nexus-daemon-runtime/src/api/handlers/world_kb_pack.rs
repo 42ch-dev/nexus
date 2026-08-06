@@ -49,7 +49,7 @@ async fn require_world_owner(
     world_id: &str,
     creator_id: &str,
 ) -> Result<(), NexusApiError> {
-    // SAFETY: SELECT against the known narrative_worlds table schema.
+    // Runtime query: mirrors `world_kb.rs` pattern; table schema is stable.
     let owner: Option<Option<String>> =
         sqlx::query_scalar("SELECT owner_creator_id FROM narrative_worlds WHERE world_id = ?")
             .bind(world_id)
@@ -76,7 +76,7 @@ async fn resolve_world_title(
     pool: &sqlx::SqlitePool,
     world_id: &str,
 ) -> Result<String, NexusApiError> {
-    // SAFETY: static SELECT against known narrative_worlds table schema.
+    // Runtime query: mirrors `world_kb.rs` pattern; table schema is stable.
     let title: Option<String> =
         sqlx::query_scalar("SELECT title FROM narrative_worlds WHERE world_id = ?")
             .bind(world_id)
@@ -92,7 +92,7 @@ async fn resolve_creator_string(
     pool: &sqlx::SqlitePool,
     creator_id: &str,
 ) -> Result<String, NexusApiError> {
-    // SAFETY: static SELECT against known creators table schema.
+    // Runtime query: mirrors `world_kb.rs` pattern; table schema is stable.
     let display_name: Option<String> =
         sqlx::query_scalar("SELECT display_name FROM creators WHERE creator_id = ?")
             .bind(creator_id)
@@ -112,6 +112,7 @@ async fn load_pack_anchors(
 ) -> Result<Vec<nexus_spoke_adapter::SourceAnchor>, NexusApiError> {
     let mut anchors = Vec::new();
     for entry_id in entry_ids {
+        // Runtime query: mirrors `world_kb.rs` pattern; table schema is stable.
         let rows = sqlx::query_scalar::<_, String>(
             "SELECT source_anchor_json FROM kb_source_anchors WHERE key_block_id = ? ORDER BY anchor_ordinal ASC",
         )
@@ -134,6 +135,8 @@ async fn load_pack_anchors(
 ///
 /// Guard order: tier2 middleware → `require_creator` → `require_world_owner`
 /// → business logic (mirrors CLI `pack.rs::export`).
+// Handler boundary: error docs on internal axum handlers add noise without aiding
+// callers (matches `world_kb.rs` pattern).
 #[allow(clippy::missing_errors_doc)]
 pub async fn pack_export(
     State(state): State<WorkspaceState>,
@@ -288,6 +291,8 @@ fn import_summary_to_response(summary: ImportSummary) -> PackImportResponse {
 ///
 /// Guard order: tier2 middleware → `require_creator` → `require_world_owner`
 /// → business logic (mirrors CLI `pack.rs::import`).
+// Handler boundary: error docs on internal axum handlers add noise without aiding
+// callers (matches `world_kb.rs` pattern).
 #[allow(clippy::missing_errors_doc)]
 pub async fn pack_import(
     State(state): State<WorkspaceState>,

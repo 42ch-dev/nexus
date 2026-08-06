@@ -169,7 +169,8 @@ pub async fn import_pack(
             if existing_by_id.world_id == world_id {
                 // Same-world re-import: when entry_id and canonical_name both
                 // match, this is the same entry — honor conflict policy.
-                // If canonical_name differs (ambiguous), keep conservative skip.
+                // If canonical_name or block_type differs, honor conflict policy on
+                // the entry_id collision (cannot safely overwrite a different entry).
                 let is_same_entry = existing_by_id.canonical_name == entry.canonical_name.as_str()
                     && existing_by_id.block_type == entry_type;
 
@@ -224,12 +225,39 @@ pub async fn import_pack(
                     continue;
                 }
 
-                handle_entry_id_collision_in_target(
-                    &mut summary,
-                    &mut target_entry_ids,
-                    &pack_entry_id,
-                    dry_run,
-                );
+                match conflict {
+                    ConflictPolicy::Skip => {
+                        handle_entry_id_collision_in_target(
+                            &mut summary,
+                            &mut target_entry_ids,
+                            &pack_entry_id,
+                            dry_run,
+                        );
+                    }
+                    ConflictPolicy::Rename => {
+                        import_renamed_on_entry_id_collision(
+                            pool,
+                            world_id,
+                            &mut entry,
+                            entry_type,
+                            &pack_entry_id,
+                            &mut summary,
+                            &mut target_entry_ids,
+                            &mut remap,
+                            dry_run,
+                        )
+                        .await?;
+                    }
+                    ConflictPolicy::Overwrite => {
+                        summary.entries.rejected += 1;
+                        record_entry(
+                            &mut summary,
+                            &pack_entry_id,
+                            ImportOutcome::Rejected,
+                            Some("entry_id collision with different identity".to_string()),
+                        );
+                    }
+                }
                 continue;
             }
 
@@ -558,6 +586,103 @@ pub async fn import_pack(
     }
 
     Ok(summary)
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn import_renamed_on_entry_id_collision(
+    pool: &SqlitePool,
+    world_id: &str,
+    entry: &mut KnowledgeEntry,
+    entry_type: BlockType,
+    pack_entry_id: &str,
+    summary: &mut ImportSummary,
+    target_entry_ids: &mut HashSet<String>,
+    remap: &mut HashMap<String, String>,
+    dry_run: bool,
+) -> Result<(), PackImportError> {
+    let store = SqliteKbStore::new(pool.clone());
+    let original_name = entry.canonical_name.to_string();
+    let resolved_name = if name_available(&store, world_id, &original_name, entry_type).await? {
+        original_name
+    } else {
+        match disambiguate_canonical_name(&store, world_id, &original_name, entry_type).await {
+            Ok(name) => name,
+            Err(e) => {
+                summary.entries.rejected += 1;
+                record_entry(
+                    summary,
+                    pack_entry_id,
+                    ImportOutcome::Rejected,
+                    Some(e.to_string()),
+                );
+                return Ok(());
+            }
+        }
+    };
+    let fresh_id = mint_entry_id();
+
+    if dry_run {
+        record_entry(
+            summary,
+            pack_entry_id,
+            ImportOutcome::Renamed,
+            Some(format!(
+                "dry-run: would rename to {resolved_name} as {fresh_id}"
+            )),
+        );
+        summary.entries.renamed += 1;
+        remap.insert(pack_entry_id.to_string(), fresh_id.clone());
+        target_entry_ids.insert(fresh_id);
+        return Ok(());
+    }
+
+    entry.entry_id.clone_from(&fresh_id);
+    let parsed_name = match resolved_name.parse() {
+        Ok(name) => name,
+        Err(e) => {
+            summary.entries.rejected += 1;
+            record_entry(
+                summary,
+                pack_entry_id,
+                ImportOutcome::Rejected,
+                Some(format!("invalid disambiguated canonical_name: {e}")),
+            );
+            return Ok(());
+        }
+    };
+    entry.canonical_name = parsed_name;
+    prepare_create_entry(entry, world_id);
+    remap.insert(pack_entry_id.to_string(), fresh_id.clone());
+
+    match persist_entry_upsert(pool, entry) {
+        PersistOutcome {
+            outcome: ImportOutcome::Created,
+            ..
+        } => {
+            summary.entries.renamed += 1;
+            target_entry_ids.insert(fresh_id);
+            record_entry(
+                summary,
+                pack_entry_id,
+                ImportOutcome::Renamed,
+                Some(format!("renamed to {resolved_name}")),
+            );
+        }
+        PersistOutcome {
+            outcome: ImportOutcome::Rejected,
+            reject_reason,
+        } => {
+            summary.entries.rejected += 1;
+            record_entry(
+                summary,
+                pack_entry_id,
+                ImportOutcome::Rejected,
+                reject_reason,
+            );
+        }
+        _ => {}
+    }
+    Ok(())
 }
 
 fn handle_entry_id_collision_in_target(
