@@ -14,21 +14,25 @@ name: Runtime Build
 #
 # Trigger set (locked by Clarify #3 + PM drift writeback 2026-08-07):
 # `workflow_dispatch` + tag `runtime-v*` ONLY. GitHub only offers
-# `workflow_dispatch` for workflows present on the DEFAULT branch, so during
-# plan-branch iteration the `push` trigger below is TEMPORARY scaffolding
-# scoped to this branch; it is removed in the final T2 commit.
+# `workflow_dispatch` for workflows present on the DEFAULT branch, and a
+# workflow file that exists only on a non-default branch is not evaluated
+# for `push` events at all (verified empirically during T2: the workflow
+# never registered and no check suite was created). So plan-branch iteration
+# runs through the TEMPORARY `pull_request` trigger below (PR against the
+# spec integration branch); it is removed in the final T2 commit.
 
 on:
   workflow_dispatch:
   push:
-    # TEMPORARY (T2 iteration only): workflow_dispatch requires the workflow
-    # on the default branch, so the plan branch iterates via a push trigger.
-    # REMOVE before merge — the delivered trigger set is workflow_dispatch +
-    # tag runtime-v* only.
-    branches:
-      - plan/v1.153-p2-nexus-runtime-headless-bin-windows-x64
     tags:
       - 'runtime-v*'
+  pull_request:
+    # TEMPORARY (T2 iteration only): iteration vehicle for a workflow that
+    # does not exist on the default branch yet (see header note). REMOVE
+    # before merge — the delivered trigger set is workflow_dispatch + tag
+    # runtime-v* only.
+    branches:
+      - iteration/v1.153
 
 concurrency:
   group: runtime-build-${{ github.ref }}
