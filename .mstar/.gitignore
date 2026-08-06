@@ -11,3 +11,6 @@ status.json
 local-paths.json
 #
 # Tracked (results): AGENTS.md, knowledge/, specs/
+
+# Local EPIC roadmaps (user-directed; not specs/knowledge corpus)
+references/
