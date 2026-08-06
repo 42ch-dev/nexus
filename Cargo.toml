@@ -107,7 +107,11 @@ chrono-tz = "0.10"
 regress = "0.10"
 # V1.139 T1: SPOKE foundation deps. Lockstep exact pin at 0.6.0 across both
 # Rust crates and both npm packages (compass Q14). The `=` prefix forces an
-# exact resolution (no caret/tilde range). Published on crates.io at 0.8.2.
+# exact resolution (no caret/tilde range). Published on crates.io at 0.9.1.
+# V1.153 P0 (FL-R E1): 0.8.2 → 0.9.1 — lockstep re-baseline on the connect
+# v2 wire. 0.9.0's connect changes (dial-bound hello, envelope-auth v2
+# signature fields) are internal to spoke-connect (pub(crate), owned by
+# SpokeConnectNode); the nexus-used public surface is unchanged.
 # V1.148: 0.6.1 → 0.8.2 — the connect family is additive: 0.7.0 added the
 # connect interaction wire surface (schemas/connect/*, + libp2p spike) and
 # the pack-catalog demote (ModuleMap / KE.modules description-only — catalog
@@ -122,14 +126,16 @@ regress = "0.10"
 # additive + KnowledgeEntry.modules (capability-flagged, additive).
 # Consumers (the upcoming spoke-adapter crate + nexus-contracts generated
 # types) will reference these via `spoke-schemas.workspace = true`.
-spoke-schemas = "=0.8.2"
-spoke-operations = "=0.8.2"
-# V1.148 P3 N-C0 (DF-72): spoke-connect =0.8.2 — Connect Host facade (signed
-# hello, allowlist, capability-token gate). Opt-in ONLY: libp2p 0.56 is a
+spoke-schemas = "=0.9.1"
+spoke-operations = "=0.9.1"
+# V1.148 P3 N-C0 (DF-72): spoke-connect — Connect Host facade (signed
+# hello, allowlist, capability-token gate). V1.153 P0: 0.8.2 → 0.9.1
+# (dial-bound hello + envelope-auth v2 are internal to spoke-connect;
+# nexus surface unchanged). Opt-in ONLY: libp2p 0.56 is a
 # transitive dep, so this entry is consumed behind feature `connect-host` on
 # `apps/nexus42` and the DEFAULT daemon graph stays libp2p-free. The `mdns`
 # feature of spoke-connect must NOT be enabled (explicit peering only).
-spoke-connect = "=0.8.2"
+spoke-connect = "=0.9.1"
 # V1.148 P3 N-C0: libp2p 0.56 — identity/PeerId/Multiaddr types for the
 # `nexus42 connect` CLI (ed25519 keypair + protobuf key serialization only).
 # Pinned exactly to spoke-connect's transport so the feature-on graph shares
