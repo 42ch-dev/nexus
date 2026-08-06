@@ -157,6 +157,28 @@ fn spawn_runtime(home: &Path) -> (Child, Vec<String>, Vec<String>) {
     (child, ready_lines, listen_addrs)
 }
 
+/// RAII guard that kills and reaps the spawned runtime child on drop —
+/// including panic unwind — so a failed assertion never orphans the
+/// process (the pre-fix test only killed on the success path).
+struct RuntimeGuard {
+    child: Option<Child>,
+}
+
+impl RuntimeGuard {
+    const fn new(child: Child) -> Self {
+        Self { child: Some(child) }
+    }
+}
+
+impl Drop for RuntimeGuard {
+    fn drop(&mut self) {
+        if let Some(child) = self.child.as_mut() {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+    }
+}
+
 /// Assert the spawned runtime has NO HTTP listener: every TCP listener of
 /// the runtime process must be one of the Connect listen multiaddrs it
 /// printed. (A well-known-port probe would false-fail under the spec's
@@ -194,12 +216,9 @@ fn assert_no_http_listener(child_pid: u32, listen_addrs: &[String]) {
         );
         let text = String::from_utf8_lossy(&out.stdout);
         for line in text.lines().skip(1) {
-            let port = line
-                .split_whitespace()
-                .last()
-                .and_then(|addr| addr.rsplit(':').next())
-                .and_then(|port| port.parse::<u16>().ok());
-            let Some(port) = port else { continue };
+            let Some(port) = lsof_line_port(line) else {
+                continue;
+            };
             assert!(
                 ports.contains(&port),
                 "runtime process holds an unexpected TCP listener on port {port} \
@@ -212,6 +231,60 @@ fn assert_no_http_listener(child_pid: u32, listen_addrs: &[String]) {
         // Structural no-op — see the doc comment.
         let _ = (child_pid, listen_addrs);
     }
+}
+
+/// Extract the listening port from a `lsof -sTCP:LISTEN` NAME column line.
+///
+/// Real lines end with the state suffix — `TCP 127.0.0.1:62488 (LISTEN)` —
+/// so the port token is the SECOND-TO-LAST whitespace token
+/// (`split_whitespace().rev().nth(1)` — `str` has no `rsplit_whitespace`),
+/// NOT `.last()` (which is always `(LISTEN)` and never parses as a port —
+/// the pre-fix parser skipped every line, making the no-HTTP assertion
+/// vacuous).
+fn lsof_line_port(line: &str) -> Option<u16> {
+    line.split_whitespace()
+        .rev()
+        .nth(1)
+        .and_then(|addr| addr.rsplit(':').next())
+        .and_then(|port| port.parse::<u16>().ok())
+}
+
+#[test]
+fn lsof_line_port_parses_real_listener_lines() {
+    // Real shapes from `lsof -nP -iTCP -sTCP:LISTEN -a -p <pid>`: IPv4
+    // loopback (observed: `TCP 127.0.0.1:62488 (LISTEN)`), wildcard, and
+    // bracketed IPv6.
+    assert_eq!(
+        lsof_line_port(
+            "nexus-runtime 5469 user 14u IPv4 0x8f7d2f5b5e0b4c8f 0t0 TCP 127.0.0.1:62488 (LISTEN)"
+        ),
+        Some(62488)
+    );
+    assert_eq!(lsof_line_port("TCP *:62086 (LISTEN)"), Some(62086));
+    assert_eq!(lsof_line_port("TCP [::1]:62086 (LISTEN)"), Some(62086));
+
+    // Regression guard: the vacuous pre-fix parser (`.last()` token, i.e.
+    // always `(LISTEN)`) extracts no port from ANY real listener line, so
+    // it could never fail the no-HTTP assertion. If this guard trips, the
+    // assertion became vacuous again.
+    for line in [
+        "TCP 127.0.0.1:62488 (LISTEN)",
+        "TCP *:62086 (LISTEN)",
+        "TCP [::1]:62086 (LISTEN)",
+    ] {
+        assert_eq!(
+            line.split_whitespace()
+                .last()
+                .and_then(|tok| tok.rsplit(':').next())
+                .and_then(|p| p.parse::<u16>().ok()),
+            None,
+            "pre-fix parser must not extract a port from {line:?}"
+        );
+    }
+
+    // Malformed / non-listen lines are skipped, never mis-parsed.
+    assert_eq!(lsof_line_port("TCP 127.0.0.1:62488"), None);
+    assert_eq!(lsof_line_port(""), None);
 }
 
 #[test]
@@ -237,8 +310,11 @@ fn headless_runtime_prints_readiness_serves_connect_and_has_no_http_listener() {
     let tmp = tempfile::tempdir().expect("temp dir");
     seed_home(tmp.path());
 
-    // Boot the real binary against the temp home.
-    let (mut child, ready_lines, listen_addrs) = spawn_runtime(tmp.path());
+    // Boot the real binary against the temp home. The guard kills the
+    // child on EVERY exit path — success or panic — never orphaning it.
+    let (child, ready_lines, listen_addrs) = spawn_runtime(tmp.path());
+    let runtime_pid = child.id();
+    let _guard = RuntimeGuard::new(child);
 
     // 1. Readiness block: the required lines are present on stdout.
     let ready = ready_lines.join("\n");
@@ -257,7 +333,7 @@ fn headless_runtime_prints_readiness_serves_connect_and_has_no_http_listener() {
 
     // 2. No HTTP/SPA listener: every TCP listener of the runtime process
     //    is one of its printed Connect listen addrs.
-    assert_no_http_listener(child.id(), &listen_addrs);
+    assert_no_http_listener(runtime_pid, &listen_addrs);
 
     // 3. The reference probe peer dials the host and completes the
     //    signed-hello handshake; the N-C1 manifest advertises exactly the
@@ -291,7 +367,6 @@ fn headless_runtime_prints_readiness_serves_connect_and_has_no_http_listener() {
             "probe output missing {expected:?}:\n{stdout}\nstderr:\n{stderr}"
         );
     }
-
-    let _ = child.kill();
-    let _ = child.wait();
+    // `_guard` drops here (and on any panic unwind above): the child is
+    // killed and reaped on every path.
 }

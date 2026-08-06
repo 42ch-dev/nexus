@@ -17,7 +17,9 @@
 //! `cargo build --release --bin nexus-runtime --no-default-features
 //! --features connect-host` (the `web-embed` feature is OFF).
 //!
-//! Home resolution: `--home` > `$NEXUS42_HOME` > the user home. The home is
+//! Home resolution: `--home` > `$NEXUS42_HOME` > the user home. The home
+//! value is the HOME DIR itself — the PARENT of the `.nexus42` layout dir
+//! (e.g. `/home/me` → `/home/me/.nexus42`), not the layout dir. The home is
 //! shared with the creator-facing `nexus42` app; shared-DB write access is
 //! governed by `SQLite` `WAL` (not the per-Work `runtime_lock`), per the P2
 //! spec § Coexistence.
@@ -55,6 +57,9 @@ struct RuntimeCli {
     allow_peer: Vec<String>,
 
     /// Nexus home override (default: `$NEXUS42_HOME`, else the user home).
+    ///
+    /// The home is the parent of the `.nexus42` layout dir: `/foo` →
+    /// `/foo/.nexus42`.
     #[arg(long, value_name = "PATH")]
     home: Option<PathBuf>,
 }
