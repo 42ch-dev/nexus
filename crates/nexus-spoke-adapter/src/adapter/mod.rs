@@ -68,7 +68,7 @@ impl NexusAdapter<'static> {
     /// `SQLite` I/O on the caller's runtime, so the former multi-threaded
     /// runtime requirement (`block_in_place` bridge) is gone.
     #[must_use]
-    pub fn new(pool: SqlitePool) -> Self {
+    pub const fn new(pool: SqlitePool) -> Self {
         NexusAdapter {
             pool,
             host_id: None,

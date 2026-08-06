@@ -158,14 +158,11 @@ pub struct SpokeBackedKbStore {
 }
 
 impl SpokeBackedKbStore {
-    /// Construct from a [`SqlitePool`], built inside a tokio multi-threaded
-    /// runtime (the adapter captures the runtime [`Handle`] — see
+    /// Construct from a [`SqlitePool`]. The adapter's port methods are
+    /// natively `async fn` (spoke-operations 0.9.1 surface) and await
+    /// `SQLite` I/O on the caller's runtime — no runtime handle is captured
+    /// and no tokio runtime is required at construction (see
     /// [`NexusAdapter::new`]).
-    ///
-    /// # Panics
-    ///
-    /// Panics if no tokio runtime is running on the current thread (same
-    /// precondition as [`NexusAdapter::new`]).
     #[must_use]
     pub fn new(pool: SqlitePool) -> Self {
         let adapter = NexusAdapter::new(pool.clone());

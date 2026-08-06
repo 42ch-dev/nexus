@@ -111,7 +111,10 @@ regress = "0.10"
 # V1.153 P0 (FL-R E1): 0.8.2 → 0.9.1 — lockstep re-baseline on the connect
 # v2 wire. 0.9.0's connect changes (dial-bound hello, envelope-auth v2
 # signature fields) are internal to spoke-connect (pub(crate), owned by
-# SpokeConnectNode); the nexus-used public surface is unchanged.
+# SpokeConnectNode); the nexus-used connect surface is unchanged.
+# spoke-operations 0.9.1 additionally converted the adapter port traits +
+# `orchestrate_*` from sync to native async — adapted signature-level in
+# V1.153 P0 T2 (no operations-surface parity implied).
 # V1.148: 0.6.1 → 0.8.2 — the connect family is additive: 0.7.0 added the
 # connect interaction wire surface (schemas/connect/*, + libp2p spike) and
 # the pack-catalog demote (ModuleMap / KE.modules description-only — catalog

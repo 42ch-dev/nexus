@@ -1,6 +1,6 @@
 # Spoke Adapter Architecture
 
-> **Status:** Normative (v0.12 — V1.152 DF-77 §11 Narrative Knowledge Pack I/O: shipped P0+P1; P2 dogfood-confirmed — additive daemon export/import routes + all three conflict policies (skip/rename/overwrite) + CLI↔daemon shared `import_pack` module + Control Room panel; v0.11 — V1.151 DF-76 §7.4 inspector packet field surface (shipped P0+P1; P2 dogfood-confirmed against the spoke assemble-module recipe handbook); v0.10 — V1.150 DF-75 §7.4 slot + Moment Directive + generation-stage matrix shipped at P2 close; v0.9 was V1.149 lore activation §7.4 production matrix: default-on engine + Relation hop expand; v0.8 was V1.148 spoke pin 0.6.1→0.8.2 + RuleQueryPort production + orchestrate_check daemon route + Connect Host N-C0 surface; v0.7 was V1.146 spoke InternalError reject code: pin bump 0.6.0→0.6.1; v0.6 was V1.145 spoke consumer alignment: adapter rehome to spoke-adapter + dep reversal + WorldKB/timeline read via ScopeQuery + scope-pushdown contract; v0.5 was V1.144 spoke 0.5.0 upgrade + RelationPort OCC extension + orchestrate_relate cutover)
+> **Status:** Normative (v0.13 — V1.153 P0 spoke lockstep pin 0.8.2→0.9.1: `spoke-operations` port traits + `orchestrate_*` sync→async (adapter adapted signature-level; durable note §7.3); v0.12 — V1.152 DF-77 §11 Narrative Knowledge Pack I/O: shipped P0+P1; P2 dogfood-confirmed — additive daemon export/import routes + all three conflict policies (skip/rename/overwrite) + CLI↔daemon shared `import_pack` module + Control Room panel; v0.11 — V1.151 DF-76 §7.4 inspector packet field surface (shipped P0+P1; P2 dogfood-confirmed against the spoke assemble-module recipe handbook); v0.10 — V1.150 DF-75 §7.4 slot + Moment Directive + generation-stage matrix shipped at P2 close; v0.9 was V1.149 lore activation §7.4 production matrix: default-on engine + Relation hop expand; v0.8 was V1.148 spoke pin 0.6.1→0.8.2 + RuleQueryPort production + orchestrate_check daemon route + Connect Host N-C0 surface; v0.7 was V1.146 spoke InternalError reject code: pin bump 0.6.0→0.6.1; v0.6 was V1.145 spoke consumer alignment: adapter rehome to spoke-adapter + dep reversal + WorldKB/timeline read via ScopeQuery + scope-pushdown contract; v0.5 was V1.144 spoke 0.5.0 upgrade + RelationPort OCC extension + orchestrate_relate cutover)
 > **Document class:** Master
 > **Scope:** The `nexus-spoke-adapter` crate boundary, `extensions.nexus` namespace contract, spoke-operations delegation rules, daemon-api envelope strategy, drift detection adaptation, the `/kb/` HTTP route stability decision, the opt-in Connect Host N-C0 surface (DF-72), and the Narrative Knowledge Pack I/O product-transport surface (DF-77).
 > **Related:** [entity-scope-model.md](entity-scope-model.md), [local-db-schema.md](local-db-schema.md), [schemas-directory-layout.md](schemas-directory-layout.md), spoke `CONCEPTS.md`, spoke `.mstar/specs/spoke-data-model.md`, spoke `.mstar/specs/spoke-operations.md`, spoke `.mstar/specs/spoke-connect.md`. Iteration product drafts (process): `.mstar/iterations/v1.148/specs/fl-r-connect-host-foundation.md`, `.mstar/iterations/v1.152/specs/fl-l-w7-knowledge-pack-productization.md`.
@@ -16,11 +16,11 @@ These are the architecture bedrock — do not re-litigate.
 ### 1.1 Consume spoke packages directly
 
 nexus depends on spoke's published packages directly:
-- **Rust:** `spoke-schemas` + `spoke-operations` (crates.io, lockstep **`0.8.2`** exact pin)
-- **TypeScript:** `@42ch/spoke-schemas` + `@42ch/spoke-operations` (npm, lockstep **`0.8.2`** exact pin)
-- **Rust (opt-in Connect Host only):** `spoke-connect` (crates.io, lockstep **`0.8.2`** exact pin) — workspace dep consumed **only** behind cargo feature `connect-host` on `apps/nexus42`. Default `nexus42` / daemon builds MUST NOT link `spoke-connect`. See §10.
+- **Rust:** `spoke-schemas` + `spoke-operations` (crates.io, lockstep **`0.9.1`** exact pin)
+- **TypeScript:** `@42ch/spoke-schemas` + `@42ch/spoke-operations` (npm, lockstep **`0.9.1`** exact pin)
+- **Rust (opt-in Connect Host only):** `spoke-connect` (crates.io, lockstep **`0.9.1`** exact pin) — workspace dep consumed **only** behind cargo feature `connect-host` on `apps/nexus42`. Default `nexus42` / daemon builds MUST NOT link `spoke-connect`. See §10.
 
-> **Historical:** V1.139 shipped at `0.1.1`; V1.140 bumped to `0.2.0`. V1.141 jumped to `0.4.0` (covering both the `0.3.0` capability-sliced port architecture and `0.4.0` additive `HostCapabilityManifest` + body helpers + UTF-8 peer sort). V1.144 bumped to `0.5.0` (additive `Relation.revision` + OCC-aware `RelationPort` + `RelationAlreadyExists`/`RelationNotFound` reject codes + relate-gate explicit mode). V1.145 bumped to `0.6.0` (additive `Scope.extensions` + `KnowledgeEntry.modules`). V1.146 bumped to `0.6.1` (additive `InternalError` 500-class reject code, PR #35). **V1.148 bumped to `0.8.2`** (spoke-connect surface 0.7.0–0.8.2 additive; 0.7.0 demote pack catalog from ModuleMap — pack catalog is product transport envelope, not `modules.pack` on KE/AssemblePacket; connect family schemas additive).
+> **Historical:** V1.139 shipped at `0.1.1`; V1.140 bumped to `0.2.0`. V1.141 jumped to `0.4.0` (covering both the `0.3.0` capability-sliced port architecture and `0.4.0` additive `HostCapabilityManifest` + body helpers + UTF-8 peer sort). V1.144 bumped to `0.5.0` (additive `Relation.revision` + OCC-aware `RelationPort` + `RelationAlreadyExists`/`RelationNotFound` reject codes + relate-gate explicit mode). V1.145 bumped to `0.6.0` (additive `Scope.extensions` + `KnowledgeEntry.modules`). V1.146 bumped to `0.6.1` (additive `InternalError` 500-class reject code, PR #35). **V1.148 bumped to `0.8.2`** (spoke-connect surface 0.7.0–0.8.2 additive; 0.7.0 demote pack catalog from ModuleMap — pack catalog is product transport envelope, not `modules.pack` on KE/AssemblePacket; connect family schemas additive). **V1.153 bumped to `0.9.1`** (lockstep re-baseline on the connect v2 wire; 0.9.0's dial-bound hello + envelope-auth v2 are internal to `spoke-connect`; `spoke-operations` 0.9.1 additionally converted the adapter port traits + `orchestrate_*` to native async — nexus adapted signature-level, see §7.3).
 
 The bespoke `schemas/domain/key-block.schema.json` is deleted. No nexus-local copy of spoke schemas exists. The atomic KB wire type is `KnowledgeEntry` from spoke.
 
@@ -197,8 +197,8 @@ The `schema_drift_detection.rs` `build_schema_map()` removes the `key-block.sche
 
 `check-wire-drift.sh` gains a new spoke-conformance step (P0 T4):
 
-1. Verify `spoke-schemas` crate version matches pinned **`0.8.2`** in `Cargo.toml`.
-2. Verify `@42ch/spoke-schemas` npm version matches pinned **`0.8.2`** in `package.json`.
+1. Verify the three crate pins (`spoke-schemas`, `spoke-operations`, `spoke-connect`) all match the pinned **`0.9.1`** in `Cargo.toml`.
+2. Verify the two npm pins (`@42ch/spoke-schemas`, `@42ch/spoke-operations`) both match the pinned **`0.9.1`** in `package.json`.
 3. Construct a `KnowledgeEntry` from spoke fixture JSON, deserialize via nexus's serde path, serialize back — verify structural round-trip. This catches type-mapping regressions without requiring a local schema.
 
 ### 5.3 Daemon-api envelopes that `$ref` spoke types
@@ -366,6 +366,8 @@ All delegation wrappers are thin — they enforce the boundary that operands mus
 ### 7.3 Adapter port + injection-orchestration surface — Surface B (spoke ≥ 0.3.0)
 
 As of spoke 0.3.0, `spoke-operations` ships a **capability-sliced adapter port** architecture with **injection orchestration**. The `nexus-spoke-adapter` crate re-exports the port traits and orchestration entrypoints so that consumers can participate in spoke's injection-orchestration model through the same boundary crate — without a direct `spoke-operations` dependency.
+
+> **Async port surface (spoke-operations ≥ 0.9.1):** the adapter port traits are `#[async_trait] async fn` and the `orchestrate_*` entrypoints are native `async fn` — no sync compatibility shim exists (verified against the 0.9.1 registry source). Nexus port impls and every `orchestrate_*` call site use the async surface (`.await`); the adapter no longer captures a tokio runtime handle and can be constructed anywhere. Any future port impl or orchestrator call MUST use the async surface.
 
 **What changes:** the adapter crate's public API gains a second surface (Surface B) alongside the existing pure-delegate helpers (Surface A). Consumers that currently call `ops::validate_promote` / `ops::apply_promote` directly (Surface A) can **optionally** adopt the port+orchestrator pattern (Surface B) by implementing spoke port traits and calling `orchestrate_*` entrypoints. Surface A is **frozen and unchanged** — no existing call site must migrate.
 
@@ -601,7 +603,7 @@ spoke `Scope` supports `entry_ids`, `entry_types`, `source_id`, `fork_id`, `time
 
 #### Read-path ScopeQuery adoption (V1.145)
 
-**P2 — MCA WorldKB read:** MCA's `fetch_world_kb` (in `nexus-moment-context-assembly/src/moment.rs`) switches from `SqliteKbStore` to a `SpokeBackedKbStore` wrapper (`nexus-spoke-adapter/src/adapter/mca_read.rs`) that implements `KbStore` by translating `KbQuery` → spoke `Scope` (native `entry_types` from `block_type` + the nexus-specific filters under `scope.extensions["nexus"]`) → `NexusAdapter::list_knowledge_entries_scoped` (an async inherent method, NOT the sync spoke `ScopeQueryPort` trait method, so MCA does not inherit the spoke port's reject-on-overflow). The wrapper converts spoke `KnowledgeEntry` → nexus `WorldKbEntry` via the free function `spoke_to_world_kb` (V1.145 P1a conversion seam; lossless body carrier preserves summary/tags/attributes). The MCA read is wired at `apps/nexus42/src/commands/platform/context.rs::run_assemble_moment` (the single production `assemble_moment` KB-store call site). MCA's generic `K: KbStore` signature is unchanged — only the injected implementation changes.
+**P2 — MCA WorldKB read:** MCA's `fetch_world_kb` (in `nexus-moment-context-assembly/src/moment.rs`) switches from `SqliteKbStore` to a `SpokeBackedKbStore` wrapper (`nexus-spoke-adapter/src/adapter/mca_read.rs`) that implements `KbStore` by translating `KbQuery` → spoke `Scope` (native `entry_types` from `block_type` + the nexus-specific filters under `scope.extensions["nexus"]`) → `NexusAdapter::list_knowledge_entries_scoped` (an async inherent method, NOT the spoke `ScopeQueryPort` trait method, so MCA does not inherit the spoke port's reject-on-overflow). The wrapper converts spoke `KnowledgeEntry` → nexus `WorldKbEntry` via the free function `spoke_to_world_kb` (V1.145 P1a conversion seam; lossless body carrier preserves summary/tags/attributes). The MCA read is wired at `apps/nexus42/src/commands/platform/context.rs::run_assemble_moment` (the single production `assemble_moment` KB-store call site). MCA's generic `K: KbStore` signature is unchanged — only the injected implementation changes.
 
 **P2 scope boundary (explicit):** MCA is the only production consumer cut over in V1.145. Daemon CRUD read paths (`get_graph`, `get_candidates`) stay on `SqliteKbStore` directly — these are UI views, not spoke integration concerns. Evaluation deferred to V1.146+.
 
@@ -721,7 +723,7 @@ Normative architectural surface for the first FL-R Connect Host slice. Product b
 |------|------|
 | Cargo feature | `connect-host` on `apps/nexus42` (default **off**) |
 | CLI entrypoint | `nexus42 connect start` only (feature-gated) |
-| Dependency | `spoke-connect = "=0.8.2"` workspace dep; optional on `nexus42` |
+| Dependency | `spoke-connect = "=0.9.1"` workspace dep; optional on `nexus42` |
 | Default daemon | Feature-off build does **not** link `spoke-connect`. `nexus42 daemon start` never opens a Connect listener (even if feature-on binary is used as daemon). |
 | mDNS | Do not enable `spoke-connect` `mdns` feature for N-C0 |
 

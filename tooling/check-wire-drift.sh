@@ -5,8 +5,10 @@
 # Two gates:
 #   1. Spoke version conformance — the lockstep spoke pin (spoke-adapter-
 #      architecture spec §1.1/§5.2) is honored in both the Rust workspace
-#      Cargo.toml and the root npm package.json, for BOTH spoke packages
-#      (spoke-schemas + spoke-operations). All four pins must match.
+#      Cargo.toml and the root npm package.json, for ALL spoke packages
+#      (spoke-schemas + spoke-operations + spoke-connect crates;
+#      @42ch/spoke-schemas + @42ch/spoke-operations npm). All five pins must
+#      match.
 #   2. Schema drift detection — the integration test that validates JSON Schema
 #      wire contracts match their corresponding Rust struct definitions.
 #
@@ -28,11 +30,13 @@ echo "Expected lockstep pin: ${SPOKE_PIN}"
 echo ""
 
 # ── Gate 1a: Rust crate pins (workspace Cargo.toml) ─────────────────────────
-# The workspace [workspace.dependencies] declares exact pins for both crates:
+# The workspace [workspace.dependencies] declares exact pins for all three
+# crates:
 #   spoke-schemas    = "=0.9.1"
 #   spoke-operations = "=0.9.1"
+#   spoke-connect    = "=0.9.1"   (opt-in behind feature `connect-host`)
 CARGO_TOML="${PROJECT_ROOT}/Cargo.toml"
-for crate in spoke-schemas spoke-operations; do
+for crate in spoke-schemas spoke-operations spoke-connect; do
   cargo_spoke_raw=$(grep -E "^[[:space:]]*${crate}[[:space:]]*=" "$CARGO_TOML" | head -1)
   # Strip to the version token inside the quotes, dropping the leading `=` (exact pin).
   cargo_spoke=$(printf '%s' "$cargo_spoke_raw" | sed -E 's/.*"=?([^"]*)".*/\1/')

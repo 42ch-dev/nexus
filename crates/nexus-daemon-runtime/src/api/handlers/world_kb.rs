@@ -663,8 +663,8 @@ fn merge_aliases_into_body(body: &mut WorldKbBody, aliases: &[String]) {
 ///
 /// V1.142 P3: single `COMMIT` covers both the orchestrator's KB write and
 /// `mark_confirmed_in_tx_with_cas`. The handler owns `BEGIN`/`COMMIT`; the
-/// adapter joins the open transaction via a shared cell for the synchronous
-/// `orchestrate_promote` bridge.
+/// adapter joins the open transaction via a shared cell while the native-async
+/// `orchestrate_promote` is awaited (`with_bound_tx(...).await`).
 async fn promote_adopt(
     state: &WorkspaceState,
     world_id: &str,
