@@ -54,61 +54,61 @@ use crate::{
     Finding as SpokeFinding, FindingExtensionsKey, FindingPort, SpokeReject, SpokeRejectCode,
     SpokeResult,
 };
+use async_trait::async_trait;
 use nexus_local_db::findings::{validate_finding_enums, Finding as NexusFinding};
 use nexus_local_db::LocalDbError;
 use serde_json::{json, Map, Value};
 
+#[async_trait]
 impl FindingPort for NexusAdapter<'_> {
-    fn put_findings(&self, findings: Vec<SpokeFinding>) -> SpokeResult<Vec<SpokeFinding>> {
+    async fn put_findings(&self, findings: Vec<SpokeFinding>) -> SpokeResult<Vec<SpokeFinding>> {
         let pool = self.pool.clone();
-        self.block_on(async move {
-            let mut persisted: Vec<SpokeFinding> = Vec::with_capacity(findings.len());
+        let mut persisted: Vec<SpokeFinding> = Vec::with_capacity(findings.len());
 
-            // W-1 (qc3): wrap the entire batch in one SQLite transaction so a
-            // mid-batch failure rolls back every earlier insert. Without this,
-            // each insert auto-committed independently and the caller would
-            // receive a Reject while the preceding findings stayed persisted
-            // (a retry would then hit UNIQUE errors on those rows). `tx` drops
-            // uncommitted on any early `return` below → automatic rollback.
-            let mut tx = match pool.begin().await {
-                Ok(tx) => tx,
-                Err(e) => {
-                    return reject(
-                        SpokeRejectCode::InternalError,
-                        format!("failed to begin findings batch transaction: {e}"),
-                        json!({}),
-                    );
-                }
-            };
-
-            for finding in findings {
-                let nexus_finding = match map_spoke_to_nexus(&finding) {
-                    Ok(n) => n,
-                    Err(rejection) => return SpokeResult::Reject(rejection),
-                };
-                let finding_id = nexus_finding.finding_id.clone();
-                if let Err(e) = insert_finding_tx(&mut tx, &nexus_finding).await {
-                    return reject(
-                        SpokeRejectCode::InternalError,
-                        format!("storage error on finding {finding_id} insert: {e}"),
-                        json!({ "finding_id": finding_id }),
-                    );
-                }
-                persisted.push(finding);
-            }
-
-            // All inserts succeeded — commit the batch atomically. Until this
-            // point nothing is durably persisted; a failure here rolls back.
-            if let Err(e) = tx.commit().await {
+        // W-1 (qc3): wrap the entire batch in one SQLite transaction so a
+        // mid-batch failure rolls back every earlier insert. Without this,
+        // each insert auto-committed independently and the caller would
+        // receive a Reject while the preceding findings stayed persisted
+        // (a retry would then hit UNIQUE errors on those rows). `tx` drops
+        // uncommitted on any early `return` below → automatic rollback.
+        let mut tx = match pool.begin().await {
+            Ok(tx) => tx,
+            Err(e) => {
                 return reject(
                     SpokeRejectCode::InternalError,
-                    format!("failed to commit findings batch transaction: {e}"),
+                    format!("failed to begin findings batch transaction: {e}"),
                     json!({}),
                 );
             }
+        };
 
-            SpokeResult::Ok(persisted)
-        })
+        for finding in findings {
+            let nexus_finding = match map_spoke_to_nexus(&finding) {
+                Ok(n) => n,
+                Err(rejection) => return SpokeResult::Reject(rejection),
+            };
+            let finding_id = nexus_finding.finding_id.clone();
+            if let Err(e) = insert_finding_tx(&mut tx, &nexus_finding).await {
+                return reject(
+                    SpokeRejectCode::InternalError,
+                    format!("storage error on finding {finding_id} insert: {e}"),
+                    json!({ "finding_id": finding_id }),
+                );
+            }
+            persisted.push(finding);
+        }
+
+        // All inserts succeeded — commit the batch atomically. Until this
+        // point nothing is durably persisted; a failure here rolls back.
+        if let Err(e) = tx.commit().await {
+            return reject(
+                SpokeRejectCode::InternalError,
+                format!("failed to commit findings batch transaction: {e}"),
+                json!({}),
+            );
+        }
+
+        SpokeResult::Ok(persisted)
     }
 }
 
@@ -495,7 +495,7 @@ mod tests {
             Some("fix me"),
         );
 
-        let result = adapter.put_findings(vec![spoke]);
+        let result = adapter.put_findings(vec![spoke]).await;
         let returned = match result {
             SpokeResult::Ok(v) => v,
             SpokeResult::Reject(r) => panic!("expected ok, got reject: {r:?}"),
@@ -525,7 +525,7 @@ mod tests {
         let adapter = NexusAdapter::new(pool.clone());
         let spoke = spoke_finding("fnd_voc", "error", "dismissed", None, None);
 
-        match adapter.put_findings(vec![spoke]) {
+        match adapter.put_findings(vec![spoke]).await {
             SpokeResult::Ok(v) => assert_eq!(v.len(), 1),
             SpokeResult::Reject(r) => panic!("ok on valid vocabulary: {r:?}"),
         }
@@ -560,7 +560,7 @@ mod tests {
         }))
         .expect("valid Finding");
 
-        match adapter.put_findings(vec![spoke]) {
+        match adapter.put_findings(vec![spoke]).await {
             SpokeResult::Reject(r) => {
                 assert_eq!(r.code, SpokeRejectCode::InvalidInput);
                 assert_eq!(
@@ -592,7 +592,7 @@ mod tests {
         }))
         .expect("valid Finding shape (vocabulary not yet validated by spoke)");
 
-        match adapter.put_findings(vec![spoke]) {
+        match adapter.put_findings(vec![spoke]).await {
             SpokeResult::Reject(r) => {
                 assert_eq!(
                     r.code,
@@ -610,7 +610,7 @@ mod tests {
         seed_work(&pool).await;
 
         let adapter = NexusAdapter::new(pool);
-        let result = adapter.put_findings(Vec::new());
+        let result = adapter.put_findings(Vec::new()).await;
         match result {
             SpokeResult::Ok(v) => assert!(v.is_empty()),
             SpokeResult::Reject(r) => panic!("empty input must be Ok: {r:?}"),
@@ -652,7 +652,7 @@ mod tests {
         // clearly separate objects.
         let second = spoke_finding("fnd_rb_first", "warning", "open", None, None);
 
-        match adapter.put_findings(vec![first, second]) {
+        match adapter.put_findings(vec![first, second]).await {
             SpokeResult::Reject(r) => {
                 assert_eq!(
                     r.code,
@@ -684,7 +684,7 @@ mod tests {
 
         let adapter = NexusAdapter::new(pool);
         let finding = spoke_finding("fnd_fail", "info", "open", None, None);
-        match adapter.put_findings(vec![finding]) {
+        match adapter.put_findings(vec![finding]).await {
             SpokeResult::Reject(r) => {
                 assert_eq!(
                     r.code,

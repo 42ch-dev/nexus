@@ -25,9 +25,10 @@
 #![allow(clippy::missing_panics_doc)]
 #![allow(clippy::must_use_candidate)]
 
-use std::cell::RefCell;
 use std::collections::HashMap;
+use std::sync::Mutex;
 
+use async_trait::async_trait;
 use nexus_spoke_adapter::{
     orchestrate_assemble, orchestrate_promote, orchestrate_relate, AssembleRequest,
     AssembleResponse, Finding, FindingPort, HostCapabilityManifest, HostManifestPort,
@@ -51,8 +52,9 @@ use spoke_operations::{spoke_ok, spoke_reject};
 // adapter-owned per spec §7 ("adapters own transport, persistence,
 // transactions"; the library stays I/O-free).
 //
-// simplify: `RefCell` for interior mutability — this example is single-
-// threaded. A production adapter backs these ports with real storage.
+// simplify: `Mutex` for interior mutability — the 0.9.1 port traits are
+// `#[async_trait] async fn` (Send futures), so the mock must be `Sync`.
+// A production adapter backs these ports with real storage.
 
 /// In-memory store implementing spoke's six baseline port families.
 ///
@@ -61,11 +63,11 @@ use spoke_operations::{spoke_ok, spoke_reject};
 /// hidden module and reuse the mock without duplication. In the example
 /// binary itself `pub` is a no-op (the binary crate root sees everything).
 pub struct NexusBaselineMock {
-    entries: RefCell<HashMap<String, KnowledgeEntry>>,
-    relations: RefCell<HashMap<String, Relation>>,
-    events: RefCell<Vec<TimelineEvent>>,
-    rules: RefCell<HashMap<String, Rule>>,
-    findings: RefCell<Vec<Finding>>,
+    entries: Mutex<HashMap<String, KnowledgeEntry>>,
+    relations: Mutex<HashMap<String, Relation>>,
+    events: Mutex<Vec<TimelineEvent>>,
+    rules: Mutex<HashMap<String, Rule>>,
+    findings: Mutex<Vec<Finding>>,
     self_manifest: HostCapabilityManifest,
     peer_manifests: Vec<HostCapabilityManifest>,
     /// One-shot `get_knowledge_entry` overrides used by the test twin to
@@ -76,7 +78,7 @@ pub struct NexusBaselineMock {
     /// the given `entry_id`:
     ///   - `Some(rev)` → return the stored entry with `revision` overwritten by `rev`
     ///   - `None`      → return `KnowledgeEntryNotFound` even if the entry exists
-    next_get_override: RefCell<HashMap<String, Option<u64>>>,
+    next_get_override: Mutex<HashMap<String, Option<u64>>>,
 }
 
 impl NexusBaselineMock {
@@ -91,14 +93,14 @@ impl NexusBaselineMock {
         let mut entries = HashMap::new();
         entries.insert(entry.entry_id.clone(), entry);
         Self {
-            entries: RefCell::new(entries),
-            relations: RefCell::new(HashMap::new()),
-            events: RefCell::new(Vec::new()),
-            rules: RefCell::new(HashMap::new()),
-            findings: RefCell::new(Vec::new()),
+            entries: Mutex::new(entries),
+            relations: Mutex::new(HashMap::new()),
+            events: Mutex::new(Vec::new()),
+            rules: Mutex::new(HashMap::new()),
+            findings: Mutex::new(Vec::new()),
             self_manifest: host_manifest("nexus-baseline-mock", &["nexus"], &["data-store"]),
             peer_manifests: Vec::new(),
-            next_get_override: RefCell::new(HashMap::new()),
+            next_get_override: Mutex::new(HashMap::new()),
         }
     }
 
@@ -107,7 +109,8 @@ impl NexusBaselineMock {
     /// stored the entry between the caller's read and write window.
     pub fn mask_next_get(&self, entry_id: &str) {
         self.next_get_override
-            .borrow_mut()
+            .lock()
+            .expect("mock override mutex")
             .insert(entry_id.into(), None);
     }
 
@@ -119,15 +122,22 @@ impl NexusBaselineMock {
     /// `stored < expected` → CONFLICT) through `orchestrate_upsert`.
     pub fn override_next_get_revision(&self, entry_id: &str, revision: u64) {
         self.next_get_override
-            .borrow_mut()
+            .lock()
+            .expect("mock override mutex")
             .insert(entry_id.into(), Some(revision));
     }
 }
 
+#[async_trait]
 impl KnowledgeEntryPort for NexusBaselineMock {
-    fn get_knowledge_entry(&self, entry_id: &str) -> SpokeResult<KnowledgeEntry> {
+    async fn get_knowledge_entry(&self, entry_id: &str) -> SpokeResult<KnowledgeEntry> {
         // Consume a one-shot override first (test-fixture race simulation).
-        if let Some(override_rev) = self.next_get_override.borrow_mut().remove(entry_id) {
+        if let Some(override_rev) = self
+            .next_get_override
+            .lock()
+            .expect("mock override mutex")
+            .remove(entry_id)
+        {
             match override_rev {
                 None => {
                     let mut details = Map::new();
@@ -139,7 +149,13 @@ impl KnowledgeEntryPort for NexusBaselineMock {
                     );
                 }
                 Some(rev) => {
-                    if let Some(entry) = self.entries.borrow().get(entry_id).cloned() {
+                    if let Some(entry) = self
+                        .entries
+                        .lock()
+                        .expect("mock entries mutex")
+                        .get(entry_id)
+                        .cloned()
+                    {
                         let mut snapshot = entry;
                         snapshot.revision = Some(rev);
                         return spoke_ok(snapshot);
@@ -148,7 +164,7 @@ impl KnowledgeEntryPort for NexusBaselineMock {
                 }
             }
         }
-        let entries = self.entries.borrow();
+        let entries = self.entries.lock().expect("mock entries mutex");
         if let Some(entry) = entries.get(entry_id) {
             return spoke_ok(entry.clone());
         }
@@ -161,12 +177,12 @@ impl KnowledgeEntryPort for NexusBaselineMock {
         )
     }
 
-    fn put_knowledge_entry(
+    async fn put_knowledge_entry(
         &self,
         entry: KnowledgeEntry,
         expected_base_revision: Option<u64>,
     ) -> SpokeResult<KnowledgeEntry> {
-        let mut entries = self.entries.borrow_mut();
+        let mut entries = self.entries.lock().expect("mock entries mutex");
         let existing = entries.get(&entry.entry_id);
         match expected_base_revision {
             None => {
@@ -230,12 +246,13 @@ impl KnowledgeEntryPort for NexusBaselineMock {
     }
 }
 
+#[async_trait]
 impl RelationPort for NexusBaselineMock {
     /// In-memory OCC reference — mirrors the production
     /// `nexus_spoke_adapter::NexusAdapter::get_relation`: read the stored
     /// `Relation` by id; absent → `RelationNotFound`.
-    fn get_relation(&self, relation_id: &str) -> SpokeResult<Relation> {
-        let relations = self.relations.borrow();
+    async fn get_relation(&self, relation_id: &str) -> SpokeResult<Relation> {
+        let relations = self.relations.lock().expect("mock relations mutex");
         if let Some(relation) = relations.get(relation_id) {
             return spoke_ok(relation.clone());
         }
@@ -261,12 +278,12 @@ impl RelationPort for NexusBaselineMock {
     /// candidate's revision before calling the port), the relate orchestrator
     /// passes the candidate through untouched — so the port owns the revision
     /// seed/bump, exactly as the production SQLite-backed port does.
-    fn put_relation(
+    async fn put_relation(
         &self,
         relation: Relation,
         expected_base_revision: Option<u64>,
     ) -> SpokeResult<Relation> {
-        let mut relations = self.relations.borrow_mut();
+        let mut relations = self.relations.lock().expect("mock relations mutex");
         let relation_id = relation.relation_id.clone();
         match expected_base_revision {
             None => {
@@ -336,30 +353,43 @@ impl RelationPort for NexusBaselineMock {
     }
 }
 
+#[async_trait]
 impl ScopeQueryPort for NexusBaselineMock {
-    fn list_knowledge_entries(&self, _scope: &Scope) -> SpokeResult<Vec<KnowledgeEntry>> {
+    async fn list_knowledge_entries(&self, _scope: &Scope) -> SpokeResult<Vec<KnowledgeEntry>> {
         // The mock returns all stored entries; spoke's orchestrator applies
         // scope filtering via `filter_knowledge_entries_by_scope`. Re-
         // implementing that helper here would violate the call-boundary
         // invariant (spec §7).
-        spoke_ok(self.entries.borrow().values().cloned().collect())
+        spoke_ok(
+            self.entries
+                .lock()
+                .expect("mock entries mutex")
+                .values()
+                .cloned()
+                .collect(),
+        )
     }
 
-    fn list_timeline_events(&self, _scope: &Scope) -> SpokeResult<Vec<TimelineEvent>> {
-        spoke_ok(self.events.borrow().clone())
+    async fn list_timeline_events(&self, _scope: &Scope) -> SpokeResult<Vec<TimelineEvent>> {
+        spoke_ok(self.events.lock().expect("mock events mutex").clone())
     }
 }
 
+#[async_trait]
 impl FindingPort for NexusBaselineMock {
-    fn put_findings(&self, findings: Vec<Finding>) -> SpokeResult<Vec<Finding>> {
-        self.findings.borrow_mut().extend(findings.iter().cloned());
+    async fn put_findings(&self, findings: Vec<Finding>) -> SpokeResult<Vec<Finding>> {
+        self.findings
+            .lock()
+            .expect("mock findings mutex")
+            .extend(findings.iter().cloned());
         spoke_ok(findings)
     }
 }
 
+#[async_trait]
 impl RuleQueryPort for NexusBaselineMock {
-    fn list_rules(&self, rule_refs: &[String]) -> SpokeResult<Vec<Rule>> {
-        let rules = self.rules.borrow();
+    async fn list_rules(&self, rule_refs: &[String]) -> SpokeResult<Vec<Rule>> {
+        let rules = self.rules.lock().expect("mock rules mutex");
         let mut resolved = Vec::new();
         for rule_ref in rule_refs {
             if let Some(rule) = rules.get(rule_ref) {
@@ -378,12 +408,15 @@ impl RuleQueryPort for NexusBaselineMock {
     }
 }
 
+#[async_trait]
 impl HostManifestPort for NexusBaselineMock {
-    fn get_host_capability_manifest(&self) -> SpokeResult<HostCapabilityManifest> {
+    async fn get_host_capability_manifest(&self) -> SpokeResult<HostCapabilityManifest> {
         spoke_ok(self.self_manifest.clone())
     }
 
-    fn list_peer_host_capability_manifests(&self) -> SpokeResult<Vec<HostCapabilityManifest>> {
+    async fn list_peer_host_capability_manifests(
+        &self,
+    ) -> SpokeResult<Vec<HostCapabilityManifest>> {
         spoke_ok(self.peer_manifests.clone())
     }
 }
@@ -471,7 +504,8 @@ fn print_reject(label: &str, reject: &SpokeReject) {
     );
 }
 
-fn main() {
+#[tokio::main]
+async fn main() {
     let entry_id = "kb_mira";
     let mock = NexusBaselineMock::with_seeded_entry(knowledge_entry(entry_id, 2));
 
@@ -487,7 +521,7 @@ fn main() {
     // sees stored == expected (2 == 2) and accepts the write; the persisted
     // entry becomes status=confirmed, revision=3.
     println!("--- 1. orchestrate_promote (happy path) ---");
-    match orchestrate_promote(&mock, promote_request(entry_id, 2)) {
+    match orchestrate_promote(&mock, promote_request(entry_id, 2)).await {
         SpokeResult::Ok(PromoteResponse::Variant0 {
             knowledge_entry, ..
         }) => {
@@ -508,7 +542,7 @@ fn main() {
     // the caller's expectation, so it rejects with `STORED_REVISION_STALE`.
     // This is the CAS gate surfacing through the orchestrator.
     println!("--- 2. orchestrate_promote (stale revision -> CAS reject) ---");
-    match orchestrate_promote(&mock, promote_request(entry_id, 2)) {
+    match orchestrate_promote(&mock, promote_request(entry_id, 2)).await {
         SpokeResult::Ok(_) => println!("  UNEXPECTED OK — expected CAS reject"),
         SpokeResult::Reject(reject) => print_reject("promote-cas", &reject),
     }
@@ -519,7 +553,7 @@ fn main() {
     // (returns all stored entries); spoke's scope helpers filter to the
     // requested entry_ids and the packet builder assembles the result.
     println!("--- 3. orchestrate_assemble (happy path) ---");
-    match orchestrate_assemble(&mock, assemble_request("world_1", entry_id)) {
+    match orchestrate_assemble(&mock, assemble_request("world_1", entry_id)).await {
         SpokeResult::Ok(AssembleResponse::Variant0 { packet, .. }) => {
             println!(
                 "  OK: packet_id={} entries={}",
@@ -540,7 +574,7 @@ fn main() {
     // relation. This is the 3rd shipped Surface B cutover (promote + upsert
     // + relate) exercised through the mock.
     println!("--- 4. orchestrate_relate (create happy path) ---");
-    match orchestrate_relate(&mock, relate_request("rel_demo", None)) {
+    match orchestrate_relate(&mock, relate_request("rel_demo", None)).await {
         SpokeResult::Ok(RelateResponse::Variant0 { relation, .. }) => {
             println!(
                 "  OK: relation_id={} type={} revision={:?}",
@@ -558,7 +592,7 @@ fn main() {
     // `assert_revision_match(1, 1)` passes, then our mock's CAS sees
     // stored(1) == expected(1) → accepts and bumps to revision 2.
     println!("--- 5. orchestrate_relate (update happy path) ---");
-    match orchestrate_relate(&mock, relate_request("rel_demo", Some(1))) {
+    match orchestrate_relate(&mock, relate_request("rel_demo", Some(1))).await {
         SpokeResult::Ok(RelateResponse::Variant0 { relation, .. }) => {
             println!(
                 "  OK: relation_id={} revision={:?} (bumped 1 -> 2)",
@@ -578,7 +612,7 @@ fn main() {
     // as the promote CAS reject (block 2) — the CAS gate surfaces through
     // the orchestrator's validation before the mock's put fires.
     println!("--- 6. orchestrate_relate (stale revision -> CAS reject) ---");
-    match orchestrate_relate(&mock, relate_request("rel_demo", Some(1))) {
+    match orchestrate_relate(&mock, relate_request("rel_demo", Some(1))).await {
         SpokeResult::Ok(_) => println!("  UNEXPECTED OK — expected CAS reject"),
         SpokeResult::Reject(reject) => print_reject("relate-cas", &reject),
     }

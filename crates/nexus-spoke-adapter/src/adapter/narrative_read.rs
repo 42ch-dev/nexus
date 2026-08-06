@@ -75,11 +75,7 @@ impl NexusAdapter<'_> {
     /// deps) were removed in Task 3 of this plan — this facet is the
     /// canonical ordered read for the workspace.
     ///
-    /// # Panics
-    ///
-    /// Panics only if constructed outside a tokio multi-threaded runtime
-    /// (inherited from [`NexusAdapter::new`] via [`Self::block_on`]).
-    pub fn list_timeline_events_ordered(
+    pub async fn list_timeline_events_ordered(
         &self,
         scope: &Scope,
         ordered_ids: &[String],
@@ -95,54 +91,50 @@ impl NexusAdapter<'_> {
             .and_then(|ns| ns.get("branch_id"))
             .and_then(Value::as_str)
             .map(str::to_owned);
-        // Clone the ordered_ids so the async block is 'static (the sync method
-        // takes a slice; the async bridge owns its own copy).
         let ordered_ids = ordered_ids.to_vec();
 
-        self.block_on(async move {
-            let rows = match list_timeline_events_scoped(
-                &pool,
-                &world_id,
-                branch_id.as_deref(),
-                // No event_ids filter: the ordered view needs the full matching
-                // set so the spoke helper can build a correct stable tail.
-                &[],
-            )
-            .await
-            {
-                Ok(rows) => rows,
-                Err(e) => {
-                    return reject(
-                        SpokeRejectCode::InternalError,
-                        format!("storage error on list_timeline_events_scoped: {e}"),
-                        json!({ "scope_id": world_id }),
-                    );
-                }
-            };
+        let rows = match list_timeline_events_scoped(
+            &pool,
+            &world_id,
+            branch_id.as_deref(),
+            // No event_ids filter: the ordered view needs the full matching
+            // set so the spoke helper can build a correct stable tail.
+            &[],
+        )
+        .await
+        {
+            Ok(rows) => rows,
+            Err(e) => {
+                return reject(
+                    SpokeRejectCode::InternalError,
+                    format!("storage error on list_timeline_events_scoped: {e}"),
+                    json!({ "scope_id": world_id }),
+                );
+            }
+        };
 
-            // Sort purely by sequence_no so the spoke helper's "stable tail"
-            // (un-listed events) is appended in deterministic sequence order —
-            // matching the V1.143 T2/T3 stable-tail semantics the gateways
-            // established (`list_timeline_events_scoped` with a branch already
-            // returns sequence_no order; the re-sort keeps parity for the
-            // no-branch / cross-branch case).
-            let mut sorted = rows;
-            sorted.sort_by_key(|e| e.sequence_no);
+        // Sort purely by sequence_no so the spoke helper's "stable tail"
+        // (un-listed events) is appended in deterministic sequence order —
+        // matching the V1.143 T2/T3 stable-tail semantics the gateways
+        // established (`list_timeline_events_scoped` with a branch already
+        // returns sequence_no order; the re-sort keeps parity for the
+        // no-branch / cross-branch case).
+        let mut sorted = rows;
+        sorted.sort_by_key(|e| e.sequence_no);
 
-            // Convert nexus TimelineEvent → spoke TimelineEvent via the V1.143
-            // conversion seam (the `From<nexus_narrative::TimelineEvent>` impl
-            // in nexus-narrative). Call-boundary §7 preserved: the spoke helper
-            // receives only spoke wire types. The `Vec<TimelineEvent>`
-            // annotation pins the `Into` target to the spoke type.
-            let spoke_events: Vec<TimelineEvent> = sorted.into_iter().map(Into::into).collect();
+        // Convert nexus TimelineEvent → spoke TimelineEvent via the V1.143
+        // conversion seam (the `From<nexus_narrative::TimelineEvent>` impl
+        // in nexus-narrative). Call-boundary §7 preserved: the spoke helper
+        // receives only spoke wire types. The `Vec<TimelineEvent>`
+        // annotation pins the `Into` target to the spoke type.
+        let spoke_events: Vec<TimelineEvent> = sorted.into_iter().map(Into::into).collect();
 
-            // Delegate ordering to the spoke beat-assist helper (pure,
-            // synchronous — no DB I/O inside). The helper returns the reordered
-            // spoke events directly; since our return type is already spoke,
-            // we surface its `SpokeResult` verbatim (Ok or Reject) with no
-            // reverse conversion — the read-only ordering cannot mutate fields.
-            order_timeline_events_by_ids(&spoke_events, &ordered_ids)
-        })
+        // Delegate ordering to the spoke beat-assist helper (pure,
+        // synchronous — no DB I/O inside). The helper returns the reordered
+        // spoke events directly; since our return type is already spoke,
+        // we surface its `SpokeResult` verbatim (Ok or Reject) with no
+        // reverse conversion — the read-only ordering cannot mutate fields.
+        order_timeline_events_by_ids(&spoke_events, &ordered_ids)
     }
 }
 
@@ -276,14 +268,17 @@ mod tests {
         let adapter = NexusAdapter::new(pool);
         // Request [evt_3, evt_1, evt_5] explicitly; remaining (evt_2 seq1,
         // evt_4 seq2) form the stable tail in sequence_no order.
-        let ordered = match adapter.list_timeline_events_ordered(
-            &ordered_scope("wld_ord", Some("fbk_root")),
-            &[
-                "evt_3".to_string(),
-                "evt_1".to_string(),
-                "evt_5".to_string(),
-            ],
-        ) {
+        let ordered = match adapter
+            .list_timeline_events_ordered(
+                &ordered_scope("wld_ord", Some("fbk_root")),
+                &[
+                    "evt_3".to_string(),
+                    "evt_1".to_string(),
+                    "evt_5".to_string(),
+                ],
+            )
+            .await
+        {
             SpokeResult::Ok(v) => v,
             SpokeResult::Reject(r) => panic!("expected ok, got reject: {r:?}"),
         };
@@ -342,7 +337,7 @@ mod tests {
         let scope = ordered_scope("wld_nomut", Some("fbk_root"));
 
         // Baseline: the same rows via the un-ordered spoke read.
-        let baseline = match adapter.list_timeline_events(&scope) {
+        let baseline = match adapter.list_timeline_events(&scope).await {
             SpokeResult::Ok(v) => v,
             SpokeResult::Reject(r) => panic!("baseline read rejected: {r:?}"),
         };
@@ -353,6 +348,7 @@ mod tests {
 
         let ordered = match adapter
             .list_timeline_events_ordered(&scope, &["evt_1".to_string(), "evt_2".to_string()])
+            .await
         {
             SpokeResult::Ok(v) => v,
             SpokeResult::Reject(r) => panic!("expected ok, got reject: {r:?}"),
@@ -384,10 +380,12 @@ mod tests {
         seed_world_shuffled(&pool).await;
 
         let adapter = NexusAdapter::new(pool);
-        let result = adapter.list_timeline_events_ordered(
-            &ordered_scope("wld_ord", Some("fbk_root")),
-            &["evt_1".to_string(), "evt_missing".to_string()],
-        );
+        let result = adapter
+            .list_timeline_events_ordered(
+                &ordered_scope("wld_ord", Some("fbk_root")),
+                &["evt_1".to_string(), "evt_missing".to_string()],
+            )
+            .await;
         let SpokeResult::Reject(reject) = result else {
             panic!("expected reject for unknown ordered id, got: {result:?}");
         };
@@ -413,10 +411,12 @@ mod tests {
         seed::event(&pool, "evt_1", "wld_dup", "fbk_root", "story_advance", 1).await;
 
         let adapter = NexusAdapter::new(pool);
-        let result = adapter.list_timeline_events_ordered(
-            &ordered_scope("wld_dup", Some("fbk_root")),
-            &["evt_1".to_string(), "evt_1".to_string()],
-        );
+        let result = adapter
+            .list_timeline_events_ordered(
+                &ordered_scope("wld_dup", Some("fbk_root")),
+                &["evt_1".to_string(), "evt_1".to_string()],
+            )
+            .await;
         let SpokeResult::Reject(reject) = result else {
             panic!("expected reject for duplicate ordered id, got: {result:?}");
         };
@@ -443,6 +443,7 @@ mod tests {
         let adapter = NexusAdapter::new(pool);
         let ordered = match adapter
             .list_timeline_events_ordered(&ordered_scope("wld_ord", Some("fbk_root")), &[])
+            .await
         {
             SpokeResult::Ok(v) => v,
             SpokeResult::Reject(r) => {
@@ -500,6 +501,7 @@ mod tests {
         // Scope carries world_id only — no `extensions.nexus.branch_id`.
         let ordered = match adapter
             .list_timeline_events_ordered(&ordered_scope("wld_nb", None), &[])
+            .await
         {
             SpokeResult::Ok(v) => v,
             SpokeResult::Reject(r) => panic!("expected ok for no-branch scope, got reject: {r:?}"),
@@ -565,10 +567,13 @@ mod tests {
             .unwrap();
 
         let adapter = NexusAdapter::new(pool);
-        match adapter.list_timeline_events_ordered(
-            &ordered_scope("wld_ord", Some("fbk_root")),
-            &["evt_1".to_string()],
-        ) {
+        match adapter
+            .list_timeline_events_ordered(
+                &ordered_scope("wld_ord", Some("fbk_root")),
+                &["evt_1".to_string()],
+            )
+            .await
+        {
             SpokeResult::Reject(r) => {
                 assert_eq!(
                     r.code,

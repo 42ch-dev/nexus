@@ -23,6 +23,7 @@
 #[allow(dead_code, unused_imports)]
 mod baseline_adapter;
 
+use async_trait::async_trait;
 use baseline_adapter::{
     assemble_request, knowledge_entry, knowledge_entry_wire, promote_request, NexusBaselineMock,
 };
@@ -82,15 +83,15 @@ fn project_request(entry_id: &str) -> ProjectRequest {
 
 // ── 1. orchestrate_upsert — happy create path ──────────────────────────
 
-#[test]
-fn orchestrate_upsert_happy_create_path() {
+#[tokio::test]
+async fn orchestrate_upsert_happy_create_path() {
     // Seeded mock holds kb_mira; we upsert a *different* entry so the
     // create path (`expected_base_revision = None`, entry absent) fires.
     let mock = seeded_mock();
     let new_id = "kb_aran";
     let request = upsert_request(&[upsert_entry_wire(new_id, 0)]);
 
-    let result = orchestrate_upsert(&mock, request);
+    let result = orchestrate_upsert(&mock, request).await;
     match result {
         SpokeResult::Ok(UpsertResponse::Variant0 {
             knowledge_entries, ..
@@ -104,6 +105,7 @@ fn orchestrate_upsert_happy_create_path() {
     // Entry is actually in the store.
     let stored = mock
         .get_knowledge_entry(new_id)
+        .await
         .expect_ok("stored after upsert");
     assert_eq!(stored.entry_id, new_id);
     assert_eq!(stored.revision, Some(0));
@@ -111,8 +113,8 @@ fn orchestrate_upsert_happy_create_path() {
 
 // ── 2. orchestrate_upsert — CAS reject: create when entry already exists ──
 
-#[test]
-fn orchestrate_upsert_cas_reject_create_when_exists() {
+#[tokio::test]
+async fn orchestrate_upsert_cas_reject_create_when_exists() {
     // kb_mira is already seeded. Mask the orchestrator's get so it believes
     // the entry is absent → derives `expected_base_revision = None` and
     // treats this as a create (`validate_create_path` requires revision ≤ 0
@@ -124,14 +126,14 @@ fn orchestrate_upsert_cas_reject_create_when_exists() {
 
     let request = upsert_request(&[upsert_entry_wire(SEEDED_ENTRY_ID, 0)]);
 
-    let result = orchestrate_upsert(&mock, request);
+    let result = orchestrate_upsert(&mock, request).await;
     expect_reject_with_code(result, SpokeRejectCode::KnowledgeEntryAlreadyExists);
 }
 
 // ── 3. orchestrate_upsert — happy update path ──────────────────────────
 
-#[test]
-fn orchestrate_upsert_happy_update_path() {
+#[tokio::test]
+async fn orchestrate_upsert_happy_update_path() {
     // Upsert is CAS-guarded replace, not an increment: the candidate MUST
     // carry the same revision as stored (the library's
     // `validate_update_path` calls `assert_revision_match(candidate.revision,
@@ -153,7 +155,7 @@ fn orchestrate_upsert_happy_update_path() {
     });
     let request = upsert_request(&[updated_wire]);
 
-    let result = orchestrate_upsert(&mock, request);
+    let result = orchestrate_upsert(&mock, request).await;
     match result {
         SpokeResult::Ok(UpsertResponse::Variant0 {
             knowledge_entries, ..
@@ -167,6 +169,7 @@ fn orchestrate_upsert_happy_update_path() {
 
     let stored = mock
         .get_knowledge_entry(SEEDED_ENTRY_ID)
+        .await
         .expect_ok("stored after upsert");
     assert_eq!(stored.revision, Some(SEEDED_REVISION));
     assert_eq!(stored.canonical_name.as_str(), "Mira Vale (revised)");
@@ -174,8 +177,8 @@ fn orchestrate_upsert_happy_update_path() {
 
 // ── 4. orchestrate_upsert — CAS reject: stored > expected (STALE) ───────
 
-#[test]
-fn orchestrate_upsert_cas_reject_stale_revision() {
+#[tokio::test]
+async fn orchestrate_upsert_cas_reject_stale_revision() {
     // Seeded entry is at revision 3. Override the orchestrator's get so it
     // returns revision 1 → orchestrator derives `expected_base_revision =
     // Some(1)` → calls put(candidate, Some(1)). Mock CAS sees stored(3) >
@@ -185,7 +188,7 @@ fn orchestrate_upsert_cas_reject_stale_revision() {
 
     let request = upsert_request(&[upsert_entry_wire(SEEDED_ENTRY_ID, 1)]);
 
-    let result = orchestrate_upsert(&mock, request);
+    let result = orchestrate_upsert(&mock, request).await;
     expect_reject_with_code(result, SpokeRejectCode::StoredRevisionStale);
 }
 
@@ -197,8 +200,8 @@ fn orchestrate_upsert_cas_reject_stale_revision() {
 //   - stored > expected → `STORED_REVISION_STALE` (test #4 above)
 //   - stored < expected → `REVISION_CONFLICT` (this test)
 
-#[test]
-fn orchestrate_upsert_cas_reject_conflict() {
+#[tokio::test]
+async fn orchestrate_upsert_cas_reject_conflict() {
     // Seeded entry is at revision 1. Override the orchestrator's get so it
     // returns revision 5 → orchestrator derives `expected_base_revision =
     // Some(5)` → calls put(candidate, Some(5)). Mock CAS sees stored(1) <
@@ -209,21 +212,22 @@ fn orchestrate_upsert_cas_reject_conflict() {
 
     let request = upsert_request(&[upsert_entry_wire(SEEDED_ENTRY_ID, 5)]);
 
-    let result = orchestrate_upsert(&mock, request);
+    let result = orchestrate_upsert(&mock, request).await;
     expect_reject_with_code(result, SpokeRejectCode::RevisionConflict);
 }
 
 // ── 6. orchestrate_promote — happy path ────────────────────────────────
 
-#[test]
-fn orchestrate_promote_happy_path() {
+#[tokio::test]
+async fn orchestrate_promote_happy_path() {
     // Candidate claims revision 2, matching the stored provisional entry.
     // The orchestrator's `assert_revision_match(2, 2)` passes, the promote
     // gate validates, and the mock's CAS sees stored(2) == expected(2) →
     // accepts. Persisted entry is `confirmed` at revision 3.
     let mock = seeded_mock();
 
-    let result = orchestrate_promote(&mock, promote_request(SEEDED_ENTRY_ID, SEEDED_REVISION));
+    let result =
+        orchestrate_promote(&mock, promote_request(SEEDED_ENTRY_ID, SEEDED_REVISION)).await;
     match result {
         SpokeResult::Ok(PromoteResponse::Variant0 {
             knowledge_entry, ..
@@ -238,27 +242,28 @@ fn orchestrate_promote_happy_path() {
 
 // ── 7. orchestrate_promote — CAS reject: stale candidate revision ──────
 
-#[test]
-fn orchestrate_promote_cas_reject_stale() {
+#[tokio::test]
+async fn orchestrate_promote_cas_reject_stale() {
     // Candidate claims revision 1; stored is at revision 2. The
     // orchestrator's `assert_revision_match(1, 2)` fires before reaching
     // the mock's put: actual(2) > expected(1) → `STORED_REVISION_STALE`.
     let mock = seeded_mock();
 
-    let result = orchestrate_promote(&mock, promote_request(SEEDED_ENTRY_ID, SEEDED_REVISION - 1));
+    let result =
+        orchestrate_promote(&mock, promote_request(SEEDED_ENTRY_ID, SEEDED_REVISION - 1)).await;
     expect_reject_with_code(result, SpokeRejectCode::StoredRevisionStale);
 }
 
 // ── 8. orchestrate_assemble — happy path ───────────────────────────────
 
-#[test]
-fn orchestrate_assemble_happy_path() {
+#[tokio::test]
+async fn orchestrate_assemble_happy_path() {
     // Scope filters the mock's full entry list down to [kb_mira]; spoke's
     // packet builder assembles the scoped entries into an AssemblePacket
     // keyed by `assemble:<scope_id>`.
     let mock = seeded_mock();
 
-    let result = orchestrate_assemble(&mock, assemble_request("world_1", SEEDED_ENTRY_ID));
+    let result = orchestrate_assemble(&mock, assemble_request("world_1", SEEDED_ENTRY_ID)).await;
     match result {
         SpokeResult::Ok(AssembleResponse::Variant0 { packet, .. }) => {
             assert_eq!(packet.packet_id, "assemble:world_1");
@@ -271,8 +276,8 @@ fn orchestrate_assemble_happy_path() {
 
 // ── 9. orchestrate_check — happy path ──────────────────────────────────
 
-#[test]
-fn orchestrate_check_happy_path() {
+#[tokio::test]
+async fn orchestrate_check_happy_path() {
     // Loads scoped entries/events, resolves rules (none requested), invokes
     // the product checker callback, persists findings. A trivial callback
     // returning Ok(empty) exercises the full pipeline without product
@@ -286,7 +291,8 @@ fn orchestrate_check_happy_path() {
         assert!(input.events.is_empty());
         assert!(input.rules.is_empty());
         spoke_ok(Vec::new())
-    });
+    })
+    .await;
 
     match result {
         SpokeResult::Ok(CheckResponse::Variant0 { findings, .. }) => {
@@ -309,73 +315,84 @@ fn orchestrate_check_happy_path() {
 
 struct BaselineOnlyPorts(NexusBaselineMock);
 
+#[async_trait]
 impl KnowledgeEntryPort for BaselineOnlyPorts {
-    fn get_knowledge_entry(&self, entry_id: &str) -> SpokeResult<KnowledgeEntry> {
-        self.0.get_knowledge_entry(entry_id)
+    async fn get_knowledge_entry(&self, entry_id: &str) -> SpokeResult<KnowledgeEntry> {
+        self.0.get_knowledge_entry(entry_id).await
     }
-    fn put_knowledge_entry(
+    async fn put_knowledge_entry(
         &self,
         entry: KnowledgeEntry,
         expected_base_revision: Option<u64>,
     ) -> SpokeResult<KnowledgeEntry> {
-        self.0.put_knowledge_entry(entry, expected_base_revision)
+        self.0
+            .put_knowledge_entry(entry, expected_base_revision)
+            .await
     }
 }
 
+#[async_trait]
 impl nexus_spoke_adapter::RelationPort for BaselineOnlyPorts {
-    fn get_relation(&self, relation_id: &str) -> SpokeResult<nexus_spoke_adapter::Relation> {
-        self.0.get_relation(relation_id)
+    async fn get_relation(&self, relation_id: &str) -> SpokeResult<nexus_spoke_adapter::Relation> {
+        self.0.get_relation(relation_id).await
     }
 
-    fn put_relation(
+    async fn put_relation(
         &self,
         relation: nexus_spoke_adapter::Relation,
         expected_base_revision: Option<u64>,
     ) -> SpokeResult<nexus_spoke_adapter::Relation> {
-        self.0.put_relation(relation, expected_base_revision)
+        self.0.put_relation(relation, expected_base_revision).await
     }
 }
 
+#[async_trait]
 impl ScopeQueryPort for BaselineOnlyPorts {
-    fn list_knowledge_entries(
+    async fn list_knowledge_entries(
         &self,
         scope: &nexus_spoke_adapter::Scope,
     ) -> SpokeResult<Vec<KnowledgeEntry>> {
-        self.0.list_knowledge_entries(scope)
+        self.0.list_knowledge_entries(scope).await
     }
-    fn list_timeline_events(
+    async fn list_timeline_events(
         &self,
         scope: &nexus_spoke_adapter::Scope,
     ) -> SpokeResult<Vec<nexus_spoke_adapter::TimelineEvent>> {
-        self.0.list_timeline_events(scope)
+        self.0.list_timeline_events(scope).await
     }
 }
 
+#[async_trait]
 impl FindingPort for BaselineOnlyPorts {
-    fn put_findings(
+    async fn put_findings(
         &self,
         findings: Vec<nexus_spoke_adapter::Finding>,
     ) -> SpokeResult<Vec<nexus_spoke_adapter::Finding>> {
-        self.0.put_findings(findings)
+        self.0.put_findings(findings).await
     }
 }
 
+#[async_trait]
 impl RuleQueryPort for BaselineOnlyPorts {
-    fn list_rules(&self, rule_refs: &[String]) -> SpokeResult<Vec<nexus_spoke_adapter::Rule>> {
-        self.0.list_rules(rule_refs)
+    async fn list_rules(
+        &self,
+        rule_refs: &[String],
+    ) -> SpokeResult<Vec<nexus_spoke_adapter::Rule>> {
+        self.0.list_rules(rule_refs).await
     }
 }
 
+#[async_trait]
 impl HostManifestPort for BaselineOnlyPorts {
-    fn get_host_capability_manifest(
+    async fn get_host_capability_manifest(
         &self,
     ) -> SpokeResult<nexus_spoke_adapter::HostCapabilityManifest> {
-        self.0.get_host_capability_manifest()
+        self.0.get_host_capability_manifest().await
     }
-    fn list_peer_host_capability_manifests(
+    async fn list_peer_host_capability_manifests(
         &self,
     ) -> SpokeResult<Vec<nexus_spoke_adapter::HostCapabilityManifest>> {
-        self.0.list_peer_host_capability_manifests()
+        self.0.list_peer_host_capability_manifests().await
     }
 }
 
@@ -389,13 +406,13 @@ impl ComputablePorts for BaselineOnlyPorts {
     }
 }
 
-#[test]
-fn capability_missing_reject() {
+#[tokio::test]
+async fn capability_missing_reject() {
     let ports = BaselineOnlyPorts(seeded_mock());
 
     // `require_port_method(as_computable().is_some(), "project")` fires
     // before `validate_project_request`, so the request body is irrelevant.
-    let result = orchestrate_project(&ports, project_request(SEEDED_ENTRY_ID));
+    let result = orchestrate_project(&ports, project_request(SEEDED_ENTRY_ID)).await;
     expect_reject_with_code(result, SpokeRejectCode::CapabilityPortMissing);
 }
 

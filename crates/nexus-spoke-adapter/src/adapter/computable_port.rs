@@ -24,14 +24,13 @@
 //! explicitly declare their module choice via `project()` state or entry
 //! `body.computable`.
 //!
-//! # Async ↔ sync bridge
+//! # Async surface (V1.153 P0 T2)
 //!
-//! The port traits are sync; the adapter bridges async `SQLite` + WASM host
-//! construction via the established `block_on` pattern (see `mod.rs`). The
-//! `WasmEngine::new()` call is one-time (cold; subsequent calls reuse the
+//! The port methods are natively `async fn` (spoke-operations 0.9.1 surface)
+//! and await `SQLite` I/O directly; the former `block_on` bridge is gone.
+//! The `WasmEngine::new()` call is one-time (cold; subsequent calls reuse the
 //! engine via a `OnceCell`), and the WASM compute call is synchronous
-//! (the wasmtime host does not require an async runtime), so the sync
-//! constraint is compatible with the port signature.
+//! (the wasmtime host does not require an async runtime).
 
 use super::NexusAdapter;
 use crate::{
@@ -39,6 +38,7 @@ use crate::{
     SpokeRejectCode, SpokeResult,
 };
 use crate::{ComputeRequest, ComputeResponse};
+use async_trait::async_trait;
 use nexus_local_db::compute_session::{get_compute_session, insert_compute_session};
 use nexus_wasm_host::{
     embedded_module_bytes, embedded_module_ids, embedded_module_manifest, ComputeInput,
@@ -156,15 +156,16 @@ fn load_module(module_id: &str) -> SpokeResult<(WasmModule, ModuleManifest)> {
 
 impl NexusAdapter<'_> {}
 
+#[async_trait]
 impl ComputablePort for NexusAdapter<'_> {
-    fn project(&self, request: ProjectRequest) -> SpokeResult<ProjectResponse> {
+    async fn project(&self, request: ProjectRequest) -> SpokeResult<ProjectResponse> {
         let pool = self.pool.clone();
         let session_id = request.session_id.clone();
         let entry_id = request.entry_id.clone();
         let state = request.state;
 
         // Validate entry exists (rejects with InvalidInput if entry is missing).
-        let _entry = match self.get_knowledge_entry(&entry_id) {
+        let _entry = match self.get_knowledge_entry(&entry_id).await {
             SpokeResult::Ok(e) => e,
             SpokeResult::Reject(r) => {
                 if r.code == SpokeRejectCode::KnowledgeEntryNotFound {
@@ -180,38 +181,36 @@ impl ComputablePort for NexusAdapter<'_> {
 
         let state_json = serde_json::to_string(&state).unwrap_or_else(|_| "{}".to_string());
 
-        self.block_on(async move {
-            match insert_compute_session(&pool, &session_id, &entry_id, &state_json).await {
-                Ok(_session) => SpokeResult::Ok(ProjectResponse::Variant0 {
-                    computable: state,
-                    entry_id,
-                    session_id,
-                    extensions: HashMap::default(),
-                }),
-                Err(e) => {
-                    // sqlx::Error::Database with UNIQUE constraint → session
-                    // already exists. Map to a friendly InvalidInput.
-                    let msg = e.to_string();
-                    if msg.contains("UNIQUE") {
-                        reject(
-                            SpokeRejectCode::InvalidInput,
-                            format!("session already exists: {session_id}"),
-                            json!({ "session_id": session_id }),
-                        )
-                    } else {
-                        reject(
-                            SpokeRejectCode::InternalError,
-                            format!("storage error on compute session insert: {e}"),
-                            json!({ "session_id": session_id }),
-                        )
-                    }
+        match insert_compute_session(&pool, &session_id, &entry_id, &state_json).await {
+            Ok(_session) => SpokeResult::Ok(ProjectResponse::Variant0 {
+                computable: state,
+                entry_id,
+                session_id,
+                extensions: HashMap::default(),
+            }),
+            Err(e) => {
+                // sqlx::Error::Database with UNIQUE constraint → session
+                // already exists. Map to a friendly InvalidInput.
+                let msg = e.to_string();
+                if msg.contains("UNIQUE") {
+                    reject(
+                        SpokeRejectCode::InvalidInput,
+                        format!("session already exists: {session_id}"),
+                        json!({ "session_id": session_id }),
+                    )
+                } else {
+                    reject(
+                        SpokeRejectCode::InternalError,
+                        format!("storage error on compute session insert: {e}"),
+                        json!({ "session_id": session_id }),
+                    )
                 }
             }
-        })
+        }
     }
 
     #[allow(clippy::too_many_lines)]
-    fn compute(&self, request: ComputeRequest) -> SpokeResult<ComputeResponse> {
+    async fn compute(&self, request: ComputeRequest) -> SpokeResult<ComputeResponse> {
         let pool = self.pool.clone();
         let session_id = request.session_id.clone();
         let entry_id = request.entry_id.clone();
@@ -219,7 +218,7 @@ impl ComputablePort for NexusAdapter<'_> {
         let settle = request.settle.unwrap_or(false);
 
         // ── 1. Load session row ──────────────────────────────────────────
-        let session = self.block_on(async { get_compute_session(&pool, &session_id).await });
+        let session = get_compute_session(&pool, &session_id).await;
         let session = match session {
             Ok(Some(s)) => s,
             Ok(None) => {
@@ -255,7 +254,7 @@ impl ComputablePort for NexusAdapter<'_> {
         }
 
         // ── 2. Load the entry for compute envelope ────────────────────────
-        let entry = match self.get_knowledge_entry(&entry_id) {
+        let entry = match self.get_knowledge_entry(&entry_id).await {
             SpokeResult::Ok(e) => e,
             SpokeResult::Reject(r) => return SpokeResult::Reject(r),
         };
@@ -305,7 +304,7 @@ impl ComputablePort for NexusAdapter<'_> {
                         .iter()
                         .any(|kb| kb.get("entry_id").and_then(Value::as_str) == Some(ref_id))
                 {
-                    match self.get_knowledge_entry(ref_id) {
+                    match self.get_knowledge_entry(ref_id).await {
                         SpokeResult::Ok(ref_entry) => {
                             let ref_world_id = ref_entry
                                 .extensions
@@ -449,7 +448,7 @@ impl ComputablePort for NexusAdapter<'_> {
 
             for (target_id, deltas) in &deltas_by_target {
                 // Load the target entry.
-                let target_entry = match self.get_knowledge_entry(target_id) {
+                let target_entry = match self.get_knowledge_entry(target_id).await {
                     SpokeResult::Ok(e) => e,
                     SpokeResult::Reject(r) => return SpokeResult::Reject(r),
                 };
@@ -566,7 +565,9 @@ impl ComputablePort for NexusAdapter<'_> {
             self,
             pending_entry_updates,
             Some((session_id.clone(), updated_state_json)),
-        ) {
+        )
+        .await
+        {
             SpokeResult::Ok(()) => {}
             SpokeResult::Reject(r) => return SpokeResult::Reject(r),
         }
@@ -827,7 +828,10 @@ mod tests {
 
         // Create a character entry first.
         let entry = spoke_character_entry("kb_hero", "Hero", 100, 20, 10, 100);
-        let _created = unwrap_ok(adapter.put_knowledge_entry(entry, None), "create character");
+        let _created = unwrap_ok(
+            adapter.put_knowledge_entry(entry, None).await,
+            "create character",
+        );
 
         // Stage a project session.
         let mut state = Map::new();
@@ -848,7 +852,7 @@ mod tests {
             extensions: Default::default(),
         };
 
-        match adapter.project(project_req) {
+        match adapter.project(project_req).await {
             SpokeResult::Ok(ProjectResponse::Variant0 {
                 computable,
                 entry_id,
@@ -887,7 +891,7 @@ mod tests {
             extensions: Default::default(),
         };
 
-        match adapter.project(project_req) {
+        match adapter.project(project_req).await {
             SpokeResult::Reject(r) => {
                 assert_eq!(r.code, SpokeRejectCode::InvalidInput);
                 assert!(r.message.contains("not found"));
@@ -903,7 +907,7 @@ mod tests {
 
         let adapter = NexusAdapter::new(pool.clone());
         let entry = spoke_character_entry("kb_dup_ses", "DupSes", 100, 20, 10, 100);
-        unwrap_ok(adapter.put_knowledge_entry(entry, None), "create");
+        unwrap_ok(adapter.put_knowledge_entry(entry, None).await, "create");
 
         let project_req = ProjectRequest {
             session_id: "ses_dup".to_string(),
@@ -911,9 +915,9 @@ mod tests {
             state: Map::new(),
             extensions: Default::default(),
         };
-        unwrap_ok(adapter.project(project_req.clone()), "first project");
+        unwrap_ok(adapter.project(project_req.clone()).await, "first project");
 
-        match adapter.project(project_req) {
+        match adapter.project(project_req).await {
             SpokeResult::Reject(r) => {
                 assert_eq!(r.code, SpokeRejectCode::InvalidInput);
                 assert!(r.message.contains("already exists"));
@@ -938,7 +942,7 @@ mod tests {
             extensions: Default::default(),
         };
 
-        match adapter.compute(compute_req) {
+        match adapter.compute(compute_req).await {
             SpokeResult::Reject(r) => {
                 assert_eq!(r.code, SpokeRejectCode::InvalidInput);
                 assert!(r.message.contains("not found"));
@@ -954,7 +958,7 @@ mod tests {
 
         let adapter = NexusAdapter::new(pool.clone());
         let entry = spoke_character_entry("kb_mismatch", "Mismatch", 100, 20, 10, 100);
-        unwrap_ok(adapter.put_knowledge_entry(entry, None), "create");
+        unwrap_ok(adapter.put_knowledge_entry(entry, None).await, "create");
 
         // Stage a session against kb_mismatch.
         let project_req = ProjectRequest {
@@ -963,7 +967,7 @@ mod tests {
             state: Map::new(),
             extensions: Default::default(),
         };
-        unwrap_ok(adapter.project(project_req), "project");
+        unwrap_ok(adapter.project(project_req).await, "project");
 
         // Compute against a different entry_id.
         let compute_req = ComputeRequest {
@@ -974,7 +978,7 @@ mod tests {
             extensions: Default::default(),
         };
 
-        match adapter.compute(compute_req) {
+        match adapter.compute(compute_req).await {
             SpokeResult::Reject(r) => {
                 assert_eq!(r.code, SpokeRejectCode::InvalidInput);
                 assert!(r.message.contains("mismatch"));
@@ -1003,8 +1007,11 @@ mod tests {
         // Create two character entries in spoke format.
         let hero = spoke_character_entry("kb_hero_c", "HeroC", 100, 25, 15, 100);
         let monster = spoke_character_entry("kb_monster_c", "MonsterC", 60, 15, 8, 60);
-        unwrap_ok(adapter.put_knowledge_entry(hero, None), "create hero");
-        unwrap_ok(adapter.put_knowledge_entry(monster, None), "create monster");
+        unwrap_ok(adapter.put_knowledge_entry(hero, None).await, "create hero");
+        unwrap_ok(
+            adapter.put_knowledge_entry(monster, None).await,
+            "create monster",
+        );
 
         // ── project: stage the combat session ──
         let mut state = Map::new();
@@ -1022,12 +1029,14 @@ mod tests {
         );
 
         let project_resp = unwrap_ok(
-            adapter.project(ProjectRequest {
-                session_id: "ses_combat_001".to_string(),
-                entry_id: "kb_hero_c".to_string(),
-                state,
-                extensions: Default::default(),
-            }),
+            adapter
+                .project(ProjectRequest {
+                    session_id: "ses_combat_001".to_string(),
+                    entry_id: "kb_hero_c".to_string(),
+                    state,
+                    extensions: Default::default(),
+                })
+                .await,
             "project combat",
         );
 
@@ -1047,13 +1056,15 @@ mod tests {
         );
 
         let compute_resp = unwrap_ok(
-            adapter.compute(ComputeRequest {
-                session_id: "ses_combat_001".to_string(),
-                entry_id: "kb_hero_c".to_string(),
-                computable,
-                settle: Some(false),
-                extensions: Default::default(),
-            }),
+            adapter
+                .compute(ComputeRequest {
+                    session_id: "ses_combat_001".to_string(),
+                    entry_id: "kb_hero_c".to_string(),
+                    computable,
+                    settle: Some(false),
+                    extensions: Default::default(),
+                })
+                .await,
             "compute combat",
         );
 
@@ -1091,8 +1102,11 @@ mod tests {
 
         let hero = spoke_character_entry("kb_settle_h", "SettleHero", 100, 25, 15, 100);
         let monster = spoke_character_entry("kb_settle_m", "SettleMonster", 60, 15, 8, 60);
-        unwrap_ok(adapter.put_knowledge_entry(hero, None), "create hero");
-        unwrap_ok(adapter.put_knowledge_entry(monster, None), "create monster");
+        unwrap_ok(adapter.put_knowledge_entry(hero, None).await, "create hero");
+        unwrap_ok(
+            adapter.put_knowledge_entry(monster, None).await,
+            "create monster",
+        );
 
         // project
         let mut state = Map::new();
@@ -1109,12 +1123,14 @@ mod tests {
             Value::String("kb_settle_m".to_string()),
         );
         unwrap_ok(
-            adapter.project(ProjectRequest {
-                session_id: "ses_settle".to_string(),
-                entry_id: "kb_settle_h".to_string(),
-                state,
-                extensions: Default::default(),
-            }),
+            adapter
+                .project(ProjectRequest {
+                    session_id: "ses_settle".to_string(),
+                    entry_id: "kb_settle_h".to_string(),
+                    state,
+                    extensions: Default::default(),
+                })
+                .await,
             "project",
         );
 
@@ -1130,13 +1146,15 @@ mod tests {
         );
 
         let compute_resp = unwrap_ok(
-            adapter.compute(ComputeRequest {
-                session_id: "ses_settle".to_string(),
-                entry_id: "kb_settle_h".to_string(),
-                computable,
-                settle: Some(true),
-                extensions: Default::default(),
-            }),
+            adapter
+                .compute(ComputeRequest {
+                    session_id: "ses_settle".to_string(),
+                    entry_id: "kb_settle_h".to_string(),
+                    computable,
+                    settle: Some(true),
+                    extensions: Default::default(),
+                })
+                .await,
             "compute settle",
         );
 
@@ -1150,9 +1168,12 @@ mod tests {
         // target it.
 
         // Re-read both entries — the defender (target) must have updated state.
-        let entry_h = unwrap_ok(adapter.get_knowledge_entry("kb_settle_h"), "re-read hero");
+        let entry_h = unwrap_ok(
+            adapter.get_knowledge_entry("kb_settle_h").await,
+            "re-read hero",
+        );
         let entry_m = unwrap_ok(
-            adapter.get_knowledge_entry("kb_settle_m"),
+            adapter.get_knowledge_entry("kb_settle_m").await,
             "re-read monster",
         );
         let hero_state = &entry_h.body.state;
@@ -1186,27 +1207,32 @@ mod tests {
 
         let adapter = NexusAdapter::new(pool.clone());
         let entry = spoke_character_entry("kb_no_mod", "NoModule", 100, 20, 10, 100);
-        unwrap_ok(adapter.put_knowledge_entry(entry, None), "create");
+        unwrap_ok(adapter.put_knowledge_entry(entry, None).await, "create");
 
         // Project WITHOUT module_id in state and WITHOUT body.computable on
         // the entry — both resolution tiers are empty.
         unwrap_ok(
-            adapter.project(ProjectRequest {
-                session_id: "ses_no_mod".to_string(),
-                entry_id: "kb_no_mod".to_string(),
-                state: Map::new(),
-                extensions: Default::default(),
-            }),
+            adapter
+                .project(ProjectRequest {
+                    session_id: "ses_no_mod".to_string(),
+                    entry_id: "kb_no_mod".to_string(),
+                    state: Map::new(),
+                    extensions: Default::default(),
+                })
+                .await,
             "project no-module",
         );
 
-        match adapter.compute(ComputeRequest {
-            session_id: "ses_no_mod".to_string(),
-            entry_id: "kb_no_mod".to_string(),
-            computable: Map::new(),
-            settle: None,
-            extensions: Default::default(),
-        }) {
+        match adapter
+            .compute(ComputeRequest {
+                session_id: "ses_no_mod".to_string(),
+                entry_id: "kb_no_mod".to_string(),
+                computable: Map::new(),
+                settle: None,
+                extensions: Default::default(),
+            })
+            .await
+        {
             SpokeResult::Reject(r) => {
                 assert_eq!(r.code, SpokeRejectCode::InvalidInput);
                 assert!(r.message.contains("module identity required"));
@@ -1224,7 +1250,7 @@ mod tests {
 
         let adapter = NexusAdapter::new(pool.clone());
         let entry = spoke_character_entry("kb_unknown_mod", "UnknownMod", 100, 20, 10, 100);
-        unwrap_ok(adapter.put_knowledge_entry(entry, None), "create");
+        unwrap_ok(adapter.put_knowledge_entry(entry, None).await, "create");
 
         // Stage with a non-existent module_id.
         let mut state = Map::new();
@@ -1233,22 +1259,27 @@ mod tests {
             Value::String("nonexistent-module".to_string()),
         );
         unwrap_ok(
-            adapter.project(ProjectRequest {
-                session_id: "ses_bad_mod".to_string(),
-                entry_id: "kb_unknown_mod".to_string(),
-                state,
-                extensions: Default::default(),
-            }),
+            adapter
+                .project(ProjectRequest {
+                    session_id: "ses_bad_mod".to_string(),
+                    entry_id: "kb_unknown_mod".to_string(),
+                    state,
+                    extensions: Default::default(),
+                })
+                .await,
             "project",
         );
 
-        match adapter.compute(ComputeRequest {
-            session_id: "ses_bad_mod".to_string(),
-            entry_id: "kb_unknown_mod".to_string(),
-            computable: Map::new(),
-            settle: None,
-            extensions: Default::default(),
-        }) {
+        match adapter
+            .compute(ComputeRequest {
+                session_id: "ses_bad_mod".to_string(),
+                entry_id: "kb_unknown_mod".to_string(),
+                computable: Map::new(),
+                settle: None,
+                extensions: Default::default(),
+            })
+            .await
+        {
             SpokeResult::Reject(r) => {
                 // F-002: unknown module_id is a client-input error → InvalidInput.
                 assert_eq!(r.code, SpokeRejectCode::InvalidInput);
@@ -1272,12 +1303,21 @@ mod tests {
         // Create attacker (hero) and defender (monster) entries.
         let hero = spoke_character_entry("kb_atk_r", "AttackerR", 100, 25, 15, 100);
         let monster = spoke_character_entry("kb_def_r", "DefenderR", 60, 15, 8, 60);
-        unwrap_ok(adapter.put_knowledge_entry(hero, None), "create hero");
-        unwrap_ok(adapter.put_knowledge_entry(monster, None), "create monster");
+        unwrap_ok(adapter.put_knowledge_entry(hero, None).await, "create hero");
+        unwrap_ok(
+            adapter.put_knowledge_entry(monster, None).await,
+            "create monster",
+        );
 
         // Record pre-settle HP values.
-        let pre_hero = unwrap_ok(adapter.get_knowledge_entry("kb_atk_r"), "read hero pre");
-        let pre_monster = unwrap_ok(adapter.get_knowledge_entry("kb_def_r"), "read monster pre");
+        let pre_hero = unwrap_ok(
+            adapter.get_knowledge_entry("kb_atk_r").await,
+            "read hero pre",
+        );
+        let pre_monster = unwrap_ok(
+            adapter.get_knowledge_entry("kb_def_r").await,
+            "read monster pre",
+        );
         let pre_hero_hp = pre_hero
             .body
             .state
@@ -1310,12 +1350,14 @@ mod tests {
             Value::String("kb_def_r".to_string()),
         );
         unwrap_ok(
-            adapter.project(ProjectRequest {
-                session_id: "ses_f001".to_string(),
-                entry_id: "kb_atk_r".to_string(),
-                state,
-                extensions: Default::default(),
-            }),
+            adapter
+                .project(ProjectRequest {
+                    session_id: "ses_f001".to_string(),
+                    entry_id: "kb_atk_r".to_string(),
+                    state,
+                    extensions: Default::default(),
+                })
+                .await,
             "project",
         );
 
@@ -1330,19 +1372,27 @@ mod tests {
             Value::String("kb_def_r".to_string()),
         );
         unwrap_ok(
-            adapter.compute(ComputeRequest {
-                session_id: "ses_f001".to_string(),
-                entry_id: "kb_atk_r".to_string(),
-                computable,
-                settle: Some(true),
-                extensions: Default::default(),
-            }),
+            adapter
+                .compute(ComputeRequest {
+                    session_id: "ses_f001".to_string(),
+                    entry_id: "kb_atk_r".to_string(),
+                    computable,
+                    settle: Some(true),
+                    extensions: Default::default(),
+                })
+                .await,
             "compute settle",
         );
 
         // Re-read both entries.
-        let post_hero = unwrap_ok(adapter.get_knowledge_entry("kb_atk_r"), "read hero post");
-        let post_monster = unwrap_ok(adapter.get_knowledge_entry("kb_def_r"), "read monster post");
+        let post_hero = unwrap_ok(
+            adapter.get_knowledge_entry("kb_atk_r").await,
+            "read hero post",
+        );
+        let post_monster = unwrap_ok(
+            adapter.get_knowledge_entry("kb_def_r").await,
+            "read monster post",
+        );
         let post_hero_hp = post_hero
             .body
             .state
@@ -1393,7 +1443,7 @@ mod tests {
         // Create a character in world A (wld_cmp, seeded by seed_world).
         let hero = spoke_character_entry("kb_hero_f003", "HeroF003", 100, 20, 10, 100);
         unwrap_ok(
-            adapter.put_knowledge_entry(hero, None),
+            adapter.put_knowledge_entry(hero, None).await,
             "create hero in wld_cmp",
         );
 
@@ -1427,7 +1477,7 @@ mod tests {
         });
         let other_spoke = world_kb_to_spoke(&world_b);
         unwrap_ok(
-            adapter.put_knowledge_entry(other_spoke, None),
+            adapter.put_knowledge_entry(other_spoke, None).await,
             "create other_world char",
         );
 
@@ -1447,12 +1497,14 @@ mod tests {
             Value::String("kb_other_f003".to_string()),
         );
         unwrap_ok(
-            adapter.project(ProjectRequest {
-                session_id: "ses_f003".to_string(),
-                entry_id: "kb_hero_f003".to_string(),
-                state,
-                extensions: Default::default(),
-            }),
+            adapter
+                .project(ProjectRequest {
+                    session_id: "ses_f003".to_string(),
+                    entry_id: "kb_hero_f003".to_string(),
+                    state,
+                    extensions: Default::default(),
+                })
+                .await,
             "project",
         );
 
@@ -1466,13 +1518,16 @@ mod tests {
             "defender_id".to_string(),
             Value::String("kb_other_f003".to_string()),
         );
-        match adapter.compute(ComputeRequest {
-            session_id: "ses_f003".to_string(),
-            entry_id: "kb_hero_f003".to_string(),
-            computable,
-            settle: None,
-            extensions: Default::default(),
-        }) {
+        match adapter
+            .compute(ComputeRequest {
+                session_id: "ses_f003".to_string(),
+                entry_id: "kb_hero_f003".to_string(),
+                computable,
+                settle: None,
+                extensions: Default::default(),
+            })
+            .await
+        {
             SpokeResult::Reject(r) => {
                 assert_eq!(r.code, SpokeRejectCode::InvalidInput);
                 assert!(r.message.contains("cross-world"));
@@ -1490,7 +1545,7 @@ mod tests {
 
         let adapter = NexusAdapter::new(pool.clone());
         let entry = spoke_character_entry("kb_pathmod", "PathMod", 100, 20, 10, 100);
-        unwrap_ok(adapter.put_knowledge_entry(entry, None), "create");
+        unwrap_ok(adapter.put_knowledge_entry(entry, None).await, "create");
 
         // Stage with a module_id that looks like path traversal.
         let mut state = Map::new();
@@ -1499,22 +1554,27 @@ mod tests {
             Value::String("../etc/passwd".to_string()),
         );
         unwrap_ok(
-            adapter.project(ProjectRequest {
-                session_id: "ses_pathmod".to_string(),
-                entry_id: "kb_pathmod".to_string(),
-                state,
-                extensions: Default::default(),
-            }),
+            adapter
+                .project(ProjectRequest {
+                    session_id: "ses_pathmod".to_string(),
+                    entry_id: "kb_pathmod".to_string(),
+                    state,
+                    extensions: Default::default(),
+                })
+                .await,
             "project",
         );
 
-        match adapter.compute(ComputeRequest {
-            session_id: "ses_pathmod".to_string(),
-            entry_id: "kb_pathmod".to_string(),
-            computable: Map::new(),
-            settle: None,
-            extensions: Default::default(),
-        }) {
+        match adapter
+            .compute(ComputeRequest {
+                session_id: "ses_pathmod".to_string(),
+                entry_id: "kb_pathmod".to_string(),
+                computable: Map::new(),
+                settle: None,
+                extensions: Default::default(),
+            })
+            .await
+        {
             SpokeResult::Reject(r) => {
                 assert_eq!(
                     r.code,

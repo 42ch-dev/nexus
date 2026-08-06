@@ -192,7 +192,7 @@ async fn orchestrate_upsert_happy_create() {
     let candidate = spoke_entry(entry_id, "CreateHappy", None, "provisional");
     let request = upsert_request(&candidate);
 
-    let result = orchestrate_upsert(&adapter, request);
+    let result = orchestrate_upsert(&adapter, request).await;
     match result {
         SpokeResult::Ok(UpsertResponse::Variant0 {
             knowledge_entries, ..
@@ -236,7 +236,7 @@ async fn orchestrate_upsert_happy_update() {
     // Create → stored at revision 1.
     let entry_id = "kb_update_happy";
     let created = spoke_entry(entry_id, "UpdateHappy", None, "provisional");
-    let create_result = orchestrate_upsert(&adapter, upsert_request(&created));
+    let create_result = orchestrate_upsert(&adapter, upsert_request(&created)).await;
     assert!(
         matches!(create_result, SpokeResult::Ok(_)),
         "create must succeed first"
@@ -247,7 +247,7 @@ async fn orchestrate_upsert_happy_update() {
     // table) and tweak canonical_name to prove row mutation beyond just the
     // revision bump.
     let updated = spoke_entry(entry_id, "UpdateHappy Revised", Some(1), "confirmed");
-    let result = orchestrate_upsert(&adapter, upsert_request(&updated));
+    let result = orchestrate_upsert(&adapter, upsert_request(&updated)).await;
     match result {
         SpokeResult::Ok(UpsertResponse::Variant0 {
             knowledge_entries, ..
@@ -289,10 +289,10 @@ async fn orchestrate_upsert_stale_reject() {
     // Create → revision 1.
     let entry_id = "kb_stale_reject";
     let created = spoke_entry(entry_id, "StaleReject", None, "provisional");
-    let _ = orchestrate_upsert(&adapter, upsert_request(&created));
+    let _ = orchestrate_upsert(&adapter, upsert_request(&created)).await;
     // Bump → revision 2 (happy update with matching revision).
     let bumped = spoke_entry(entry_id, "StaleReject", Some(1), "provisional");
-    let bump_result = orchestrate_upsert(&adapter, upsert_request(&bumped));
+    let bump_result = orchestrate_upsert(&adapter, upsert_request(&bumped)).await;
     assert!(
         matches!(bump_result, SpokeResult::Ok(_)),
         "first update must succeed to advance the stored revision"
@@ -300,7 +300,7 @@ async fn orchestrate_upsert_stale_reject() {
 
     // Stale candidate: revision 1 < stored 2.
     let stale_candidate = spoke_entry(entry_id, "StaleReject", Some(1), "provisional");
-    let result = orchestrate_upsert(&adapter, upsert_request(&stale_candidate));
+    let result = orchestrate_upsert(&adapter, upsert_request(&stale_candidate)).await;
     expect_reject_with_code(result, SpokeRejectCode::StoredRevisionStale);
 
     // INDEPENDENT verification: row is unchanged at revision 2 (the stale
@@ -332,7 +332,7 @@ async fn orchestrate_promote_happy() {
     // Create a provisional entry → stored at revision 1.
     let entry_id = "kb_promote_happy";
     let created = spoke_entry(entry_id, "PromoteHappy", None, "provisional");
-    let create_result = orchestrate_upsert(&adapter, upsert_request(&created));
+    let create_result = orchestrate_upsert(&adapter, upsert_request(&created)).await;
     assert!(
         matches!(create_result, SpokeResult::Ok(_)),
         "create must succeed before promote"
@@ -341,7 +341,7 @@ async fn orchestrate_promote_happy() {
     // Build promote candidate carrying revision = Some(1), status = provisional
     // (validate_promote_request enforces provisional).
     let candidate = spoke_entry(entry_id, "PromoteHappy", Some(1), "provisional");
-    let result = orchestrate_promote(&adapter, promote_request(&candidate));
+    let result = orchestrate_promote(&adapter, promote_request(&candidate)).await;
     match result {
         SpokeResult::Ok(PromoteResponse::Variant0 {
             knowledge_entry, ..
@@ -384,8 +384,8 @@ async fn orchestrate_assemble_scope_filtered() {
     // Create two entries in wld_1.
     let a = spoke_entry("kb_assemble_a", "AssembleA", None, "provisional");
     let b = spoke_entry("kb_assemble_b", "AssembleB", None, "provisional");
-    let _ = orchestrate_upsert(&adapter, upsert_request(&a));
-    let _ = orchestrate_upsert(&adapter, upsert_request(&b));
+    let _ = orchestrate_upsert(&adapter, upsert_request(&a)).await;
+    let _ = orchestrate_upsert(&adapter, upsert_request(&b)).await;
 
     // Scope filters to entry A only.
     let request = serde_json::from_value(json!({
@@ -394,7 +394,7 @@ async fn orchestrate_assemble_scope_filtered() {
     }))
     .expect("valid AssembleRequest fixture");
 
-    let result = orchestrate_assemble(&adapter, request);
+    let result = orchestrate_assemble(&adapter, request).await;
     match result {
         SpokeResult::Ok(AssembleResponse::Variant0 { packet, .. }) => {
             assert_eq!(

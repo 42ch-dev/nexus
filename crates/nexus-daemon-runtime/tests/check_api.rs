@@ -16,9 +16,9 @@
 //! `require_active_creator` gate reads the active creator from the seeded
 //! `config.toml` (`test_creator`).
 //!
-//! All tests run on a multi-threaded tokio runtime: `NexusAdapter::new`
-//! panics under a `current_thread` runtime (`block_in_place` requirement —
-//! same rationale as the `world_kb_patch` tests).
+//! Tests run on a multi-threaded tokio runtime (retained from the
+//! pre-0.9.1 `block_in_place` bridge era; the adapter port methods are now
+//! natively `async fn` — V1.153 P0 T2).
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 

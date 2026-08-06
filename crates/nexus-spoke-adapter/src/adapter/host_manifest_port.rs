@@ -40,10 +40,12 @@
 
 use super::NexusAdapter;
 use crate::{HostCapabilityManifest, HostManifestPort, SpokeRejectCode, SpokeResult};
+use async_trait::async_trait;
 use nexus_home_layout::device_id::get_or_create_device_id;
 
+#[async_trait]
 impl HostManifestPort for NexusAdapter<'_> {
-    fn get_host_capability_manifest(&self) -> SpokeResult<HostCapabilityManifest> {
+    async fn get_host_capability_manifest(&self) -> SpokeResult<HostCapabilityManifest> {
         // Single builder SSOT (product draft §4.1): the Connect Host's
         // `local_manifest` (P3 T3) calls the same function with the same
         // device-id host_id — one capability list, one extensions.nexus block.
@@ -64,7 +66,9 @@ impl HostManifestPort for NexusAdapter<'_> {
     /// Local-first nexus has no peers; peer discovery is a roadmap item
     /// triggered when nexus supports multi-host collaboration. See the
     /// module-level docs.
-    fn list_peer_host_capability_manifests(&self) -> SpokeResult<Vec<HostCapabilityManifest>> {
+    async fn list_peer_host_capability_manifests(
+        &self,
+    ) -> SpokeResult<Vec<HostCapabilityManifest>> {
         SpokeResult::Ok(Vec::new())
     }
 }
@@ -114,7 +118,7 @@ mod tests {
         nexus_local_db::run_migrations(&pool).await.unwrap();
 
         let adapter = NexusAdapter::new(pool).with_host_id("test-host-uuid-0000");
-        let manifest = match adapter.get_host_capability_manifest() {
+        let manifest = match adapter.get_host_capability_manifest().await {
             SpokeResult::Ok(m) => m,
             SpokeResult::Reject(r) => panic!("self manifest is Ok: {r:?}"),
         };
@@ -168,7 +172,7 @@ mod tests {
         nexus_local_db::run_migrations(&pool).await.unwrap();
 
         let adapter = NexusAdapter::new(pool);
-        let peers = match adapter.list_peer_host_capability_manifests() {
+        let peers = match adapter.list_peer_host_capability_manifests().await {
             SpokeResult::Ok(p) => p,
             SpokeResult::Reject(r) => panic!("peer list is Ok: {r:?}"),
         };
