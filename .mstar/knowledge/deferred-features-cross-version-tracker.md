@@ -117,7 +117,7 @@ Residual findings are tracked in [`status.json`](../status.json) → `residual_f
 
 ## 5) Quick index
 
-**Active iteration**: [V1.152](../iterations/v1.152/delivery-compass.md) (**delivered — pending close + PR** — DF-77 shipped; compass `locked` until Phase 3)
+**Active iteration**: none (V1.152 shipped 2026-08-06 — see [V1.152](../iterations/v1.152/delivery-compass.md); next: TBD — FL-R N-C1 or reliability wave)
 
 **Latest shipped**: [V1.152](../iterations/v1.152/delivery-compass.md) (FL-L W7 — Knowledge Pack productization — DF-77; delivered at V1.152 P2 close). Prior: [V1.151](../iterations/v1.151/delivery-compass.md) (FL-L W6 — Assembly inspector — DF-76; delivered at V1.151 P2 close). Prior: [V1.150](../iterations/v1.150/delivery-compass.md) (preset injection slots + Moment Directive + generation-type gates — DF-75; merged via iteration/v1.150). Prior: [V1.149](../iterations/v1.149/delivery-compass.md) (default-on lore activation + Relation hop expand — DF-74; merged via iteration/v1.149).
 
