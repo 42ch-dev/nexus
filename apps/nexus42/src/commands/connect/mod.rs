@@ -189,9 +189,11 @@ fn build_config(
     Ok((config, host_id, allowlist_len, peer_scope))
 }
 
-/// Full N-C1 host boot: [`build_config`] + active-workspace DB open +
-/// per-process `NexusAdapter` + [`invoke::build_handler`] wiring — the exact
-/// shape `connect start` runs (and `nexus-runtime` shares in P2).
+/// Full N-C1 host boot: [`build_config`] + workspace DB open + per-process
+/// `NexusAdapter` + [`invoke::build_handler`] — the `connect start` shape.
+///
+/// DF-73: the `nexus-runtime` bin shares this boot; `run_daemon` is never
+/// called.
 ///
 /// `workspace_db` overrides the resolved active-workspace DB path (hermetic
 /// tests); `None` resolves it by the daemon rules: active workspace from the
@@ -200,7 +202,7 @@ fn build_config(
 ///
 /// # Errors
 /// [`CliError`] on N-C0 assembly, workspace resolution, or DB open failures.
-async fn build_host_config(
+pub async fn build_host_config(
     home: &Path,
     allow_peer: &[String],
     listen: &[String],

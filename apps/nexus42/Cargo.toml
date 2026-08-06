@@ -18,6 +18,16 @@ path = "src/lib.rs"
 name = "nexus42"
 path = "src/main.rs"
 
+# V1.153 P2 (DF-73): standalone headless Connect runtime — same crate's
+# config/home-layout/boot code, `run_daemon` never called. Requires
+# `connect-host` (the distributed artifact is built with
+# `--no-default-features --features connect-host`, web-embed OFF → no
+# embedded SPA bytes; see the P2 spec § Subsystem profile).
+[[bin]]
+name = "nexus-runtime"
+path = "src/bin/nexus-runtime.rs"
+required-features = ["connect-host"]
+
 # V1.148 P4 (DF-72 N-C0): real-process dogfood dialer — a spoke-connect
 # reference peer that dials a running `nexus42 connect start` host from
 # OUTSIDE the host process. Feature-gated so the default graph stays
@@ -25,6 +35,15 @@ path = "src/main.rs"
 [[example]]
 name = "connect_dialer"
 path = "examples/connect_dialer.rs"
+required-features = ["connect-host"]
+
+# V1.153 P2 T1 (DF-73): spawned-process smoke probe for the headless
+# `nexus-runtime` bin — same reference-peer shape, machine-readable output
+# for `tests/nexus_runtime_smoke.rs`. Same feature gate: the default test
+# graph stays libp2p-free.
+[[example]]
+name = "runtime_smoke_probe"
+path = "examples/runtime_smoke_probe.rs"
 required-features = ["connect-host"]
 
 [dependencies]
@@ -37,7 +56,11 @@ nexus-cloud-sync = { path = "../../crates/nexus-cloud-sync", features = ["legacy
 nexus-home-layout = { path = "../../crates/nexus-home-layout" }
 nexus-local-db = { path = "../../crates/nexus-local-db" }
 nexus-acp-host = { path = "../../crates/nexus-acp-host" }
-nexus-daemon-runtime = { path = "../../crates/nexus-daemon-runtime" }
+# V1.153 P2 (DF-73): `default-features = false` + explicit `web-embed`
+# forwarding (see [features]) — the slim `nexus-runtime` artifact
+# (`--no-default-features --features connect-host`) compiles the embedded
+# SPA out while the default `nexus42` build keeps it ON.
+nexus-daemon-runtime = { path = "../../crates/nexus-daemon-runtime", default-features = false }
 nexus-narrative = { path = "../../crates/nexus-narrative" }
 nexus-knowledge = { path = "../../crates/nexus-knowledge" }
 # V1.145 P2 — MCA WorldKB read routes through the spoke-adapter boundary
@@ -102,6 +125,12 @@ wiremock = "0.6"
 # Without it, the summary_config_from_env_* tests race on NEXUS_CONTEXT_MAX_FILE_SIZE
 # under cargo's default parallel runner and intermittently fail on CI.
 serial_test = "3"
+# V1.153 P2 T1: spawned-binary smoke test (`tests/nexus_runtime_smoke.rs`).
+# The Connect dialing lives in the `runtime_smoke_probe` EXAMPLE (regular
+# connect-host deps — the default test graph stays libp2p-free); the test
+# itself only spawns processes and asserts output.
+tokio = { workspace = true }
+tempfile = "3"
 
 # V1.148 P3 N-C0 (DF-72): opt-in Connect Host surface. Feature OFF by default
 # — the default daemon graph stays libp2p-free (`cargo tree -p nexus42 -i
@@ -110,3 +139,10 @@ serial_test = "3"
 # never does. `spoke-connect/mdns` is deliberately NOT enabled.
 [features]
 connect-host = ["dep:spoke-connect", "dep:spoke-schemas", "dep:libp2p"]
+# V1.153 P2 (DF-73): forwarded gate for the embedded Web UI — ON by default
+# (the `nexus42` bin is unchanged); OFF for the `nexus-runtime` artifact via
+# `--no-default-features --features connect-host` (compile-time exclusion of
+# `apps/web/dist` bytes + the SPA fallback route, per the P2 spec
+# § Subsystem profile).
+web-embed = ["nexus-daemon-runtime/web-embed"]
+default = ["web-embed"]

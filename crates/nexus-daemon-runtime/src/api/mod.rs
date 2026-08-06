@@ -21,7 +21,7 @@ pub mod runtime_lock;
 pub mod sort;
 
 use crate::api::auth_middleware::DaemonApiConfig;
-#[cfg(not(debug_assertions))]
+#[cfg(all(not(debug_assertions), feature = "web-embed"))]
 use crate::static_assets;
 use crate::workspace::WorkspaceState;
 use axum::{
@@ -698,7 +698,9 @@ pub fn create_router(state: WorkspaceState, auth_config: DaemonApiConfig) -> Rou
     // unmatched non-API paths. Excluded in debug/test builds so unmatched
     // paths return the framework 404 (avoids masking API routing bugs in
     // tests; dev uses the Vite dev-server proxy, never the daemon's `/`).
-    #[cfg(not(debug_assertions))]
+    // V1.153 P2 (DF-73): additionally gated on `web-embed` (default ON) so
+    // the slim `nexus-runtime` artifact has no SPA fallback by construction.
+    #[cfg(all(not(debug_assertions), feature = "web-embed"))]
     let router = router.fallback(static_assets::serve_embedded_app);
 
     let allowed_origins: Vec<axum::http::HeaderValue> = auth_config
