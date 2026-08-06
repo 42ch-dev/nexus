@@ -739,6 +739,7 @@ Normative architectural surface for the first FL-R Connect Host slice. Product b
 - **Single builder** shared by `HostManifestPort::get_host_capability_manifest` and `ConnectConfig.local_manifest`.
 - Wire type: spoke `HostCapabilityManifest` (`schemas/data/host-capability-manifest.schema.json`); hello embeds field-identical `connect_hello::HostCapabilityManifest`.
 - N-C0 field contract: `schema_version = 1`; `host_id` = `~/.nexus42/device-id` UUID; `roles = ["data-store"]`; `capabilities = ["spoke-baseline", "l2-computable", "l5-fork"]`; `namespaces = ["nexus"]`; `authority` absent; `extensions.nexus = { connect_host_slice: "n-c0", daemon_http_coexists: true }`.
+- N-C1 field extension (V1.153, delivered): `extensions.nexus = { connect_host_slice: "n-c1", served_ops: ["upsert", "promote", "relate"], daemon_http_coexists: true }` — `served_ops` advertises **exactly** the write ops the Connect invoke dispatcher serves; the honesty tests machine-check both directions (advertised ⇔ served) so the manifest cannot drift from the dispatch. `roles` / `capabilities` / `namespaces` unchanged.
 - MUST NOT advertise `"reasoning-complete"` or any role beyond `data-store` until Connect dispatch exists for that role.
 - Capability strings must map to production adapter ports (machine-checked in P3 honesty test).
 
@@ -748,6 +749,7 @@ Normative architectural surface for the first FL-R Connect Host slice. Product b
 - Allowlist: `~/.nexus42/connect/allowlist.json` + CLI `--allow-peer`; empty ⇒ fail-closed (spoke semantics).
 - Capability-token: structural gate only — production defaults `trusted_issuers` empty, `capability_token_provider = None`, `require_capability_token = false`.
 - **Op refusal:** `ConnectConfig.invoke_handler = None` ⇒ every inbound invoke returns `ErrorEnvelope.code = "op_unsupported"` with no side effects. No `NexusAdapter` call from Connect invoke in N-C0.
+- **N-C1 refusal contract (extends):** the connect host wires `invoke_handler = Some(…)`; non-served ops (`check` / `assemble` / `project` / `compute` / unknown) still return `ErrorEnvelope.code = "op_unsupported"` with zero side effects. The `= None` rule above remains the crate default for hosts without a handler.
 
 ### 10.5 Daemon HTTP `check` (related, not Connect)
 
@@ -758,7 +760,7 @@ Normative architectural surface for the first FL-R Connect Host slice. Product b
 | Slice | Content | Tracker |
 |-------|---------|---------|
 | **N-C0** (V1.148) | Opt-in host, hello + allowlist, honest manifest, all ops refused | DF-72 partial |
-| **N-C1** (next) | Inbound write ops over Connect + OCC + token/world scoping | DF-72; owner architect; trigger: N-C0 dogfood green + partner demand |
+| **N-C1** (V1.153, delivered) | Inbound write ops `upsert` / `promote` / `relate` over Connect + OCC (`expected_base_revision`, locked reject-code mapping) + fail-closed world scoping (allowlist `world_scope` + stored-world gate); coexistence = SQLite WAL (no `runtime_lock` on the invoke path); peer_id trust boundary = payload-carried `extensions.nexus.peer_id` (spoofable → E2 residual) | DF-72 |
 | **N-C2** | `check` / `assemble` over Connect; "reasoning-complete" legitimate | DF-72 later |
 | **N-C3** | `list_peer_host_capability_manifests` production / multi-host | DF-72 later; `R-V1142P1-002` |
 | **DF-73** | Headless `nexus-runtime` binary | Separate backlog; after N-C0 dogfood |

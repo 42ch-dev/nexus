@@ -6,19 +6,25 @@
 //! [`build_local_host_manifest`] — there is exactly one capability list and
 //! one `extensions.nexus` block in the product. The N-C0 field lock:
 //!
-//! | Field | N-C0 value |
-//! |-------|------------|
-//! | `schema_version` | `1` (`NonZeroU64::MIN`) |
-//! | `host_id` | caller-supplied installation device-id UUID |
-//! | `roles` | `["data-store"]` |
-//! | `capabilities` | `["spoke-baseline", "l2-computable", "l5-fork"]` |
-//! | `namespaces` | `["nexus"]` |
-//! | `authority` | `None` |
-//! | `extensions.nexus` | `{ "connect_host_slice": "n-c0", "daemon_http_coexists": true }` |
+//! | Field | N-C0 value | N-C1 (V1.153) |
+//! |-------|------------|---------------|
+//! | `schema_version` | `1` (`NonZeroU64::MIN`) | unchanged |
+//! | `host_id` | caller-supplied installation device-id UUID | unchanged |
+//! | `roles` | `["data-store"]` | unchanged |
+//! | `capabilities` | `["spoke-baseline", "l2-computable", "l5-fork"]` | unchanged |
+//! | `namespaces` | `["nexus"]` | unchanged |
+//! | `authority` | `None` | unchanged |
+//! | `extensions.nexus` | `{ "connect_host_slice": "n-c0", "daemon_http_coexists": true }` | `{ "connect_host_slice": "n-c1", "served_ops": ["upsert", "promote", "relate"], "daemon_http_coexists": true }` |
 //!
 //! Honesty rules: `l5-fork` is included because `ForkTimelineQueryPort` is
 //! production (V1.146); `"reasoning-complete"` MUST NOT appear anywhere
 //! (reserved for N-C2 when `check`/`assemble` run over Connect).
+//! N-C1: `extensions.nexus.served_ops` advertises **exactly** the write ops
+//! the Connect invoke dispatcher serves ([`LOCAL_SERVED_OPS`]) — the
+//! connect-host dispatch gate owns the same set
+//! (`apps/nexus42` `commands::connect::invoke::SERVED_OPS`), and the honesty
+//! tests machine-check both directions (advertised ⇔ served) so the two
+//! cannot drift unnoticed.
 
 use crate::{HostCapabilityManifest, SpokeReject, SpokeRejectCode, SpokeResult};
 use serde_json::{json, Map, Value};
@@ -49,6 +55,15 @@ pub const LOCAL_CAPABILITIES: [&str; 3] = ["spoke-baseline", "l2-computable", "l
 
 /// Namespaces owned by the local host.
 pub const LOCAL_NAMESPACES: [&str; 1] = ["nexus"];
+
+/// Write ops the Nexus host serves over Connect (N-C1, V1.153) — the
+/// manifest's advertised op set (`extensions.nexus.served_ops`).
+///
+/// The connect-host dispatch gate owns the same set as its served-op table
+/// (`apps/nexus42` `commands::connect::invoke::SERVED_OPS`); the honesty
+/// tests machine-check both directions (advertised ⇔ served, see
+/// [`build_local_host_manifest`] docs) so the two cannot drift unnoticed.
+pub const LOCAL_SERVED_OPS: [&str; 3] = ["upsert", "promote", "relate"];
 
 /// Build the N-C0 `HostCapabilityManifest` from the given `host_id`.
 ///
@@ -81,7 +96,8 @@ pub fn build_local_host_manifest(host_id: &str) -> SpokeResult<HostCapabilityMan
             .parse()
             .expect("locked extension key is schema-valid"),
         json!({
-            "connect_host_slice": "n-c0",
+            "connect_host_slice": "n-c1",
+            "served_ops": LOCAL_SERVED_OPS,
             "daemon_http_coexists": true,
         })
         .as_object()
@@ -158,6 +174,41 @@ mod tests {
     use super::*;
     use crate::NexusAdapter;
 
+    /// Compile-time production-orchestrator proof for one advertised write op.
+    ///
+    /// The `orchestrate_*` entrypoints are re-exported from `spoke_operations`
+    /// (Surface B, spec §7.3) and generic over the ports bound. Each closure
+    /// is **typecheck-only — never invoked**: its body must compile, proving
+    /// the op maps to a production orchestrator that accepts the production
+    /// adapter's ports bound. An advertised op whose orchestrator regressed
+    /// (or whose port implementation disappeared) stops compiling here.
+    fn assert_op_maps_to_production_orchestrator(adapter: &NexusAdapter<'_>, op: &str) {
+        match op {
+            "upsert" => {
+                let _ = || {
+                    let request: crate::UpsertRequest =
+                        serde_json::from_value(serde_json::json!({})).expect("typecheck-only");
+                    let _ = crate::orchestrate_upsert(adapter, request);
+                };
+            }
+            "promote" => {
+                let _ = || {
+                    let request: crate::PromoteRequest =
+                        serde_json::from_value(serde_json::json!({})).expect("typecheck-only");
+                    let _ = crate::orchestrate_promote(adapter, request);
+                };
+            }
+            "relate" => {
+                let _ = || {
+                    let request: crate::RelateRequest =
+                        serde_json::from_value(serde_json::json!({})).expect("typecheck-only");
+                    let _ = crate::orchestrate_relate(adapter, request);
+                };
+            }
+            other => panic!("advertised op {other:?} is not backed by a production orchestrator"),
+        }
+    }
+
     /// Compile-time production-port proof for one advertised capability.
     ///
     /// The trait upcasts only compile while the corresponding `impl
@@ -187,9 +238,12 @@ mod tests {
         }
     }
 
-    /// AC-I4.3 / product draft §4.3 — the manifest honesty test (machine-checkable).
+    /// AC-I4.3 / product draft §4.3 + P1 spec § Manifest honesty — the
+    /// manifest honesty test (machine-checkable). Renamed for the delivered
+    /// slice: it now machine-checks the N-C1 manifest while keeping the
+    /// full N-C0 baseline (roles / capabilities / no `"reasoning-complete"`).
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn n_c0_manifest_is_honest() {
+    async fn n_c1_manifest_is_honest() {
         // The builder is host_id-injectable so the test is hermetic (no
         // writes to the real `~/.nexus42`).
         let manifest = match build_local_host_manifest("test-device-uuid-0000") {
@@ -247,7 +301,7 @@ mod tests {
         // 8. schema_version == 1.
         assert_eq!(manifest.schema_version.get(), 1);
 
-        // 9. extensions["nexus"] carries the N-C0 marker block.
+        // 9. extensions["nexus"] carries the N-C1 marker block.
         let nexus_key = "nexus".parse().expect("locked extension key parses");
         let nexus_ext = manifest
             .extensions
@@ -255,7 +309,7 @@ mod tests {
             .expect("extensions.nexus block present");
         assert_eq!(
             nexus_ext.get("connect_host_slice").and_then(Value::as_str),
-            Some("n-c0")
+            Some("n-c1")
         );
         assert_eq!(
             nexus_ext
@@ -263,6 +317,34 @@ mod tests {
                 .and_then(Value::as_bool),
             Some(true)
         );
+
+        // 10. N-C1 served-op advertisement (P1 spec § Manifest honesty,
+        //     machine-checkable): extensions.nexus.served_ops is EXACTLY
+        //     LOCAL_SERVED_OPS — no more, no fewer — and every advertised op
+        //     maps to a production orchestrator (compile-time proof).
+        let served_ops = nexus_ext
+            .get("served_ops")
+            .and_then(Value::as_array)
+            .expect("extensions.nexus.served_ops array present");
+        assert_eq!(
+            served_ops
+                .iter()
+                .map(|op| op.as_str().expect("served op is a string"))
+                .collect::<Vec<_>>(),
+            LOCAL_SERVED_OPS,
+            "advertised served_ops must be exactly the N-C1 write-op set"
+        );
+        for op in served_ops
+            .iter()
+            .map(|op| op.as_str().expect("served op is a string"))
+        {
+            assert_op_maps_to_production_orchestrator(&adapter, op);
+        }
+        // Direction (b) — every dispatch-served op is advertised — is
+        // machine-checked against the real dispatch table in the
+        // connect-host interop suite (apps/nexus42
+        // `n_c1_manifest_served_ops_match_dispatch_both_directions`), where
+        // both the manifest builder and the dispatch gate are visible.
     }
 
     #[test]
@@ -301,7 +383,11 @@ mod tests {
         assert_eq!(hello_json["schema_version"], serde_json::json!(1));
         assert_eq!(
             hello_json["extensions"]["nexus"]["connect_host_slice"],
-            serde_json::json!("n-c0")
+            serde_json::json!("n-c1")
+        );
+        assert_eq!(
+            hello_json["extensions"]["nexus"]["served_ops"],
+            serde_json::json!(LOCAL_SERVED_OPS)
         );
 
         // The round-tripped value deserializes back into the data type

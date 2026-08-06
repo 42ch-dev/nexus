@@ -48,6 +48,12 @@ nexus-spoke-adapter = { path = "../../crates/nexus-spoke-adapter" }
 # default build (and `daemon start`) must stay libp2p-free, so this dep is
 # `optional` and only `connect start` links it. `mdns` is never enabled.
 spoke-connect = { workspace = true, optional = true }
+# V1.153 P1 N-C1: the connect wire `ErrorEnvelope`
+# (`spoke_schemas::connect::connect_invoke_response::ErrorEnvelope`) the
+# invoke handler returns. Same 0.9.1 pin; optional + feature-gated with
+# `connect-host` (spoke-schemas is a lightweight schema crate, but the
+# connect path is the only consumer).
+spoke-schemas = { workspace = true, optional = true }
 # libp2p identity/PeerId/Multiaddr types for the `connect start` CLI (key
 # generation + protobuf key persistence + allowlist/listen parsing). Same
 # 0.56 pin as spoke-connect's transport; optional + feature-gated with
@@ -103,4 +109,4 @@ serial_test = "3"
 # but only `nexus42 connect start` opens a Connect listener; `daemon start`
 # never does. `spoke-connect/mdns` is deliberately NOT enabled.
 [features]
-connect-host = ["dep:spoke-connect", "dep:libp2p"]
+connect-host = ["dep:spoke-connect", "dep:spoke-schemas", "dep:libp2p"]
