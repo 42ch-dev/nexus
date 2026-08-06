@@ -1,0 +1,13 @@
+name: Probe
+on:
+  push:
+    branches:
+      - plan/v1.153-p2-nexus-runtime-headless-bin-windows-x64
+  pull_request:
+    branches:
+      - iteration/v1.153
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo probe-ok
