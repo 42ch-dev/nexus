@@ -5,6 +5,23 @@ All notable changes to the `@42ch/nexus-contracts` package will be documented in
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+
+## [0.29.0] - 2026-08-06
+
+### Added
+
+- **Daemon KB pack wire contracts (V1.152 P0 DF-77):** added 4 additive schemas under `daemon-api/kb/` for Narrative Knowledge Pack export/import routes (`POST /v1/daemon/worlds/:world_id/kb/pack/export`, `POST /v1/daemon/worlds/:world_id/kb/pack/import`):
+  - `PackExportRequest` — optional `include_deprecated`, `include_anchors`, `title`, `pack_version`, `description` (all optional; empty body = defaults)
+  - `PackExportResponse` — handbook pack envelope: `modules` (opaque object), `entries` / `relations` (opaque spoke object arrays per V1.139 fallback), optional `source_anchors`
+  - `PackImportRequest` — opaque `pack` object + required `conflict` enum (`skip` | `rename` | `overwrite`) + optional `include_anchors`
+  - `PackImportResponse` — per-atom-type `AtomCounts` summaries for entries and relations plus `details[]` with `kind`, `id`, `outcome`, optional `reason`
+
+### Consumer Impact
+
+- **Additive only** — no existing schemas modified; generated types for existing consumers are unchanged.
+- New Rust types: `nexus_contracts::generated::daemon_api::kb::{PackExportRequest, PackExportResponse, PackImportRequest, PackImportResponse, ...}`.
+- New TypeScript types: `@42ch/nexus-contracts` exports the same shapes under `daemon-api/kb/pack-*.ts`.
+- **Daemon-only routes:** both routes live on the Daemon API tier2 surface; neither is a Connect op.
 ## [0.28.1] - 2026-08-05
 
 ### Added

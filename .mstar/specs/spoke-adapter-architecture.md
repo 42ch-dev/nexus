@@ -1,9 +1,9 @@
 # Spoke Adapter Architecture
 
-> **Status:** Normative (v0.11 — V1.151 DF-76 §7.4 inspector packet field surface (shipped P0+P1; P2 dogfood-confirmed against the spoke assemble-module recipe handbook); v0.10 — V1.150 DF-75 §7.4 slot + Moment Directive + generation-stage matrix shipped at P2 close; v0.9 was V1.149 lore activation §7.4 production matrix: default-on engine + Relation hop expand; v0.8 was V1.148 spoke pin 0.6.1→0.8.2 + RuleQueryPort production + orchestrate_check daemon route + Connect Host N-C0 surface; v0.7 was V1.146 spoke InternalError reject code: pin bump 0.6.0→0.6.1; v0.6 was V1.145 spoke consumer alignment: adapter rehome to spoke-adapter + dep reversal + WorldKB/timeline read via ScopeQuery + scope-pushdown contract; v0.5 was V1.144 spoke 0.5.0 upgrade + RelationPort OCC extension + orchestrate_relate cutover)
+> **Status:** Normative (v0.12 — V1.152 DF-77 §11 Narrative Knowledge Pack I/O: shipped P0+P1; P2 dogfood-confirmed — additive daemon export/import routes + all three conflict policies (skip/rename/overwrite) + CLI↔daemon shared `import_pack` module + Control Room panel; v0.11 — V1.151 DF-76 §7.4 inspector packet field surface (shipped P0+P1; P2 dogfood-confirmed against the spoke assemble-module recipe handbook); v0.10 — V1.150 DF-75 §7.4 slot + Moment Directive + generation-stage matrix shipped at P2 close; v0.9 was V1.149 lore activation §7.4 production matrix: default-on engine + Relation hop expand; v0.8 was V1.148 spoke pin 0.6.1→0.8.2 + RuleQueryPort production + orchestrate_check daemon route + Connect Host N-C0 surface; v0.7 was V1.146 spoke InternalError reject code: pin bump 0.6.0→0.6.1; v0.6 was V1.145 spoke consumer alignment: adapter rehome to spoke-adapter + dep reversal + WorldKB/timeline read via ScopeQuery + scope-pushdown contract; v0.5 was V1.144 spoke 0.5.0 upgrade + RelationPort OCC extension + orchestrate_relate cutover)
 > **Document class:** Master
-> **Scope:** The `nexus-spoke-adapter` crate boundary, `extensions.nexus` namespace contract, spoke-operations delegation rules, daemon-api envelope strategy, drift detection adaptation, the `/kb/` HTTP route stability decision, and the opt-in Connect Host N-C0 surface (DF-72).
-> **Related:** [entity-scope-model.md](entity-scope-model.md), [local-db-schema.md](local-db-schema.md), [schemas-directory-layout.md](schemas-directory-layout.md), spoke `CONCEPTS.md`, spoke `.mstar/specs/spoke-data-model.md`, spoke `.mstar/specs/spoke-operations.md`, spoke `.mstar/specs/spoke-connect.md`. Iteration product draft (process): `.mstar/iterations/v1.148/specs/fl-r-connect-host-foundation.md`
+> **Scope:** The `nexus-spoke-adapter` crate boundary, `extensions.nexus` namespace contract, spoke-operations delegation rules, daemon-api envelope strategy, drift detection adaptation, the `/kb/` HTTP route stability decision, the opt-in Connect Host N-C0 surface (DF-72), and the Narrative Knowledge Pack I/O product-transport surface (DF-77).
+> **Related:** [entity-scope-model.md](entity-scope-model.md), [local-db-schema.md](local-db-schema.md), [schemas-directory-layout.md](schemas-directory-layout.md), spoke `CONCEPTS.md`, spoke `.mstar/specs/spoke-data-model.md`, spoke `.mstar/specs/spoke-operations.md`, spoke `.mstar/specs/spoke-connect.md`. Iteration product drafts (process): `.mstar/iterations/v1.148/specs/fl-r-connect-host-foundation.md`, `.mstar/iterations/v1.152/specs/fl-l-w7-knowledge-pack-productization.md`.
 
 ## 0. Document Position
 
@@ -760,3 +760,146 @@ Normative architectural surface for the first FL-R Connect Host slice. Product b
 | **N-C2** | `check` / `assemble` over Connect; "reasoning-complete" legitimate | DF-72 later |
 | **N-C3** | `list_peer_host_capability_manifests` production / multi-host | DF-72 later; `R-V1142P1-002` |
 | **DF-73** | Headless `nexus-runtime` binary | Separate backlog; after N-C0 dogfood |
+
+## 11. Narrative Knowledge Pack I/O (V1.152 / DF-77)
+
+A **Narrative Knowledge Pack** is a single JSON file that transports one
+World's lore — ordered `KnowledgeEntry` records, their `Relation`s, optional
+`SourceAnchor`s, and pack-level catalog metadata — between narrative hosts.
+Pack I/O is a **product transport envelope**, not a spoke-operations surface:
+it moves spoke-standard atoms in bulk using the adapter's `pack` helpers +
+orchestrators, but it adds no spoke wire dialect and no spoke-operations
+contract. nexus is **consumer-only** for the pack handbook shape (spoke
+`domain-profile-narrative-knowledge-pack.md`).
+
+**Supersedes** iteration-scoped
+`.mstar/iterations/v1.146/specs/pack-io-product-behavior.md` (V1.146 P3 shipped
+the CLI transport; V1.152 ships the author-facing surface: daemon routes, all
+three conflict policies, Control Room UI).
+
+### 11.1 Envelope shape (handbook-conformant)
+
+```jsonc
+{
+  "modules":      { "pack": { "title", "version", "creator", "description?" } },
+  "entries":      [ /* KnowledgeEntry[] — ordered canonical_name ASC */ ],
+  "relations":    [ /* Relation[] — ordered relationship_id ASC */ ],
+  "source_anchors": [ /* optional SourceAnchor[] — only when include_anchors */ ]
+}
+```
+
+Build/parse helpers: `nexus_spoke_adapter::pack::{build_pack, parse_pack,
+parse_pack_str}` (`crates/nexus-spoke-adapter/src/pack.rs`). `parse_pack`
+returns a `ParsedPack { pack_metadata, entries, relations, source_anchors,
+extra_modules }`.
+
+**Round-trip invariants (HARD):**
+
+| Invariant | Mechanism |
+|-----------|-----------|
+| `modules.pack` is **product-envelope metadata** (spoke 0.7.0 pack-catalog demote) — never written into KE atoms' `modules` | `build_pack` writes it at the pack root; `parse_pack` stores it in `ParsedPack::pack_metadata` |
+| Unknown `modules.*` keys round-trip verbatim | `ParsedPack::extra_modules` (always includes `"pack"` for re-emission); `build_pack(extra_modules=…)` merges them |
+| Unknown `extensions.*` namespaces on atoms round-trip verbatim | spoke `KnowledgeEntry.extensions` maps carry them natively; the adapter preserves them (§2.2) |
+| `modules.activation` fire-conditions travel with lore | Export preserves per-entry `modules.activation`; import re-persists it (no force-enable — §7.4 Lore activation engine is default-on, activation travels but is not flipped on import) |
+
+### 11.2 Daemon routes (additive, ownership-guarded)
+
+| Route | Method | Product input | Product output |
+|-------|--------|---------------|----------------|
+| `/v1/daemon/worlds/:world_id/kb/pack/export` | POST | `PackExportRequest` `{include_deprecated?, include_anchors?, title?, pack_version?, description?}` | handbook pack envelope JSON (opaque items — entries/relations are spoke objects per the V1.139 `$ref` fallback §3.4) |
+| `/v1/daemon/worlds/:world_id/kb/pack/import` | POST | `PackImportRequest` `{pack: <opaque handbook pack>, conflict: "skip"\|"rename"\|"overwrite", include_anchors?}` | `PackImportResponse` `{entries: AtomCounts, relations: AtomCounts, details: ImportDetail[]}` |
+
+Handler: `crates/nexus-daemon-runtime/src/api/handlers/world_kb_pack.rs`.
+Registered via a `pack_routes()` fn merged into `tier2_routes()` (`api/mod.rs`),
+mirroring the V1.151 `inspector_routes()` pattern.
+
+**Auth/guard (HARD):** both routes are tier2 (`require_api_key` +
+`require_active_creator` middleware) and additionally call `require_creator` +
+`require_world_owner` (`world_kb.rs:113-149`) inside the handler. Guard order:
+tier2 middleware → `require_world_owner` (403 cross-author / 404 missing world)
+→ business logic. Non-owners cannot export or import.
+
+**Wire schemas:** `schemas/daemon-api/kb/pack-{export,import}-{request,response}.schema.json`.
+All DTOs carry `additionalProperties: false`. Item arrays (entries, relations)
+are opaque `object` per the V1.139 fallback — description cites the spoke
+canonical URIs (`https://spoke42.invalid/schemas/data/{knowledge-entry,relation}.schema.json`).
+Codegen → `nexus-contracts` (Rust + TS). Contracts minor bump;
+`wire_contracts_changed: true`.
+
+### 11.3 Conflict-policy matrix
+
+On collision (matching `entry_id` **or** `canonical_name` + `entry_type` for
+entries; matching `relationship_id` for relations), the selected policy
+applies **uniformly** to entries and relations:
+
+| Policy | On collision | Entry mechanics | Count |
+|--------|-------------|-----------------|-------|
+| **skip** (default) | Keep existing; imported atom not written | Skip; remap pack `entry_id` → existing for relation endpoints (F-002) | `skipped` |
+| **rename** | Bring in both; imported atom is disambiguated + created | `canonical_name` ← `<original> imported` with numeric tiebreak (` imported 2`, …); fresh `entry_id` minted (`kb_<uuid>`, matching `WorldKbEntry::new()`); remap for relations | `renamed` |
+| **overwrite** | Replace exactly one colliding atom (body via upsert; lifecycle + revision preserved) | `orchestrate_upsert` on collided `entry_id` with imported body, `expected_base_revision = existing.revision`, `status` preserved; revision bumped by orchestrator; **never** raw DELETE | `overwritten` |
+
+**Create-path revision normalization:** new entries (no collision) clear `revision` to `None` before `orchestrate_upsert` (`prepare_create_entry` in `pack_import.rs`) so pack rows that carried `revision >= 1` from export still pass the spoke create gate. Overwrite preserves the existing row's `status` and sets `revision` to the collided row's current revision for CAS upsert.
+
+**Additive-only at the policy level:** skip and rename never delete. Overwrite
+replaces via `orchestrate_upsert` / `orchestrate_relate` (CAS body replace), never
+a raw DELETE. The V1.146 "don't clobber author work" invariant holds for the two
+safe policies.
+
+**Control Room confirmation:** overwrite in the Control Room (P1) requires an
+explicit confirmation dialog before any write (data-loss path). CLI overwrite is
+opt-in via `--conflict overwrite`, never the default; no interactive CLI confirm
+required this iteration.
+
+### 11.4 Provenance
+
+Created, renamed, and overwritten rows carry
+`source_provenance_kind = "pack_import"` (stamped via
+`extensions::set_provenance(..., Some("pack_import"))`). Skipped rows are
+unchanged. The constant `IMPORT_PROVENANCE = "pack_import"` is shared by CLI
+and daemon (V1.146 lock; DB CHECK includes this value since migration
+`20260731000001`).
+
+### 11.5 Shared import-orchestration module
+
+The import-orchestration logic (conflict detection per policy, orchestrator
+calls, provenance stamp, endpoint remap) lives in **one** shared module:
+`crates/nexus-daemon-runtime/src/pack_import.rs` (`pub async fn import_pack`).
+Both the CLI (`apps/nexus42/.../pack.rs::import` — thin caller) and the daemon
+route (`world_kb_pack.rs::pack_import` — thin HTTP caller) consume it. This
+follows the V1.151 `LocalDirectiveStore` relocation precedent
+(`directive_store.rs:1-12`): a composition-root module in `nexus-daemon-runtime`
+that both the CLI (which depends on `nexus-daemon-runtime`,
+`apps/nexus42/Cargo.toml:40`) and the daemon consume.
+
+`import_pack` does **not** perform the owner gate — each caller calls
+`require_world_owner` before invoking it (auth is the caller's job, matching the
+`LocalDirectiveStore` precedent). The pack round-trip guarantee is not broken:
+`import_pack` consumes `ParsedPack` (which carries `extra_modules`) and writes
+atoms via orchestrators — it never re-builds the pack.
+
+### 11.6 CLI surface (LOCKED — V1.146 placement, V1.152 completeness)
+
+User-facing path: `creator world kb pack export|import` (Pack is World-lore
+transport). All three conflict policies are implemented (V1.146 shipped `skip`;
+V1.152 implements `rename` + `overwrite`, removing the "not yet implemented"
+stubs). `skip` is the default. `--dry-run` covers all three policies. CLI +
+daemon share the single `import_pack` path.
+
+### 11.7 Non-goals (product)
+
+Pack I/O does **not** ship: an ST lorebook → Pack importer; a seed pack /
+community Pool / marketplace / registry / signing / remote pull; multi-pack
+compose / stack; automatic post-import activation flip (activation travels with
+lore but is not force-enabled); or a new spoke wire dialect (pack is a product
+transport envelope, not a `spoke-operations` surface).
+
+### 11.8 Dogfood gate
+
+P2 ships `dogfood_pack_round_trip_preserves_activation_and_relations`
+(`apps/nexus42/.../pack.rs::tests`) — seeds World A (entries with
+`modules.activation` + ≥1 relation) → export → import into fresh World B under
+`skip` → asserts `entries.created` matches seeded count, `pack_import`
+provenance on all B entries, `modules.activation` deep-equal A→B,
+`relations.created >= 1`, then re-import under `skip` with
+`entries.created == 0` (idempotency). Separate tests cover rename/overwrite
+policies and activation preservation on collision paths.

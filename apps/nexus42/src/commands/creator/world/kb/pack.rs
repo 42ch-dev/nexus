@@ -31,18 +31,14 @@
 use crate::config::CliConfig;
 use crate::errors::{CliError, Result};
 use clap::Subcommand;
-use nexus_contracts::BlockType;
+use nexus_daemon_runtime::pack_import::{import_pack, ConflictPolicy, ImportOutcome};
 use nexus_knowledge::world_kb::KbStore;
-use nexus_local_db::kb_relationships::{get_relationship, list_relationships_for_world};
+use nexus_local_db::kb_relationships::list_relationships_for_world;
 use nexus_local_db::kb_store::SqliteKbStore;
 use nexus_spoke_adapter::conversion::{kb_relationship_row_to_spoke, world_kb_to_spoke};
 use nexus_spoke_adapter::pack::{build_pack, parse_pack};
-use nexus_spoke_adapter::{
-    extensions, orchestrate_relate, orchestrate_upsert, KnowledgeEntry, NexusAdapter,
-    RelateRequest, Relation, RelationExtensionsKey, UpsertRequest,
-};
 use sqlx::SqlitePool;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::path::PathBuf;
 
 /// Default version string stamped into `modules.pack.version` when
@@ -52,13 +48,6 @@ const DEFAULT_PACK_VERSION: &str = "0.1.0";
 /// Fallback author string stamped into `modules.pack.creator` when no active
 /// Creator profile is resolvable (e.g. hermetic tests, ad-hoc workspaces).
 const FALLBACK_CREATOR: &str = "nexus42";
-
-/// Provenance stamp on imported Knowledge entries.
-///
-/// Product lock (`pack-io-product-behavior.md` §Interfaces): import-created
-/// entries must carry `source_provenance_kind = "pack_import"`. The DB CHECK
-/// (expanded in migration `20260731000001`) now includes this value.
-const IMPORT_PROVENANCE: &str = "pack_import";
 
 /// `creator world kb pack` subcommands.
 #[derive(Debug, Subcommand)]
@@ -121,15 +110,14 @@ pub async fn run(cmd: PackCommand, config: &CliConfig, pool: &SqlitePool) -> Res
 
 /// Conflict-resolution policy for the import command.
 ///
-/// Only `Skip` is implemented in V1.146 P3; `Rename` and `Overwrite` are
-/// accepted by clap but produce a "not yet implemented" runtime error.
+/// Maps to [`ConflictPolicy`] in `nexus_daemon_runtime::pack_import`.
 #[derive(Debug, Clone, Copy, clap::ValueEnum)]
 pub enum ConflictStrategy {
     /// Skip existing entries/relations (default).
     Skip,
-    /// Rename conflicting entries (not yet implemented).
+    /// Rename conflicting entries (disambiguate canonical name + fresh id).
     Rename,
-    /// Overwrite existing entries (not yet implemented).
+    /// Overwrite existing entries (body upsert, lifecycle preserved).
     Overwrite,
 }
 
@@ -279,39 +267,15 @@ async fn export(args: ExportArgs, config: &CliConfig, pool: &SqlitePool) -> Resu
 /// # Errors
 ///
 /// Returns `CliError` if the world cannot be resolved, the pack file cannot be
-/// read or parsed, or the conflict strategy is `rename`/`overwrite` (not yet
-/// implemented).
-// Entry + relation phases in one function mirrors export's single-function
-// style. Extracting sub-phases would add indirection with no reuse benefit.
-//
-// V1.146 P3 QC fix-wave: added owner gate (F-004), endpoint remap for
-// canonical-name collisions (F-002), separate rejected counter (F-005),
-// entry revision clearance on create (F-001), unknown entry_type skip (F-007),
-// and list_by_world error mapping (F-009).
-#[allow(clippy::too_many_lines)]
+/// read or parsed, or any atom upsert/relate was rejected.
 async fn import(args: ImportArgs, config: &CliConfig, pool: &SqlitePool) -> Result<()> {
-    // ── Conflict strategy gate ─────────────────────────────────────────
-    if !matches!(args.conflict, ConflictStrategy::Skip) {
-        return Err(CliError::Other(
-            "Conflict strategy 'rename' / 'overwrite' is not yet implemented. \
-             Only 'skip' (the default) is available in V1.146 P3."
-                .to_string(),
-        ));
-    }
-
     let world_id = args.world_ref.as_str();
 
-    // ── Owner gate (F-004) ────────────────────────────────────────────
-    // Match sibling KB write commands: only the world owner may mutate.
-    // Export remains open (read-only). Same-DB cross-world clone is not
-    // supported — global PKs (entry_id/relation_id) will cause skips.
     let creator_id = super::super::active_creator_id(config)?;
     super::require_world_owner(pool, world_id, &creator_id).await?;
 
-    // ── Verify world exists ────────────────────────────────────────────
     let _title = resolve_world_title(pool, world_id).await?;
 
-    // ── Read and parse pack ────────────────────────────────────────────
     let text = std::fs::read_to_string(&args.r#in).map_err(|e| {
         CliError::Other(format!(
             "Failed to read pack file {}: {e}",
@@ -331,324 +295,61 @@ async fn import(args: ImportArgs, config: &CliConfig, pool: &SqlitePool) -> Resu
         ))
     })?;
 
-    let store = SqliteKbStore::new(pool.clone());
+    let conflict = match args.conflict {
+        ConflictStrategy::Skip => ConflictPolicy::Skip,
+        ConflictStrategy::Rename => ConflictPolicy::Rename,
+        ConflictStrategy::Overwrite => ConflictPolicy::Overwrite,
+    };
 
-    // ── Phase 1: Import entries ────────────────────────────────────────
-    let mut entries_created = 0u32;
-    let mut entries_skipped = 0u32;
-    let mut entries_rejected = 0u32;
+    let summary = import_pack(
+        pool,
+        world_id,
+        &creator_id,
+        parsed,
+        conflict,
+        false,
+        args.dry_run,
+    )
+    .await
+    .map_err(|e| CliError::Other(e.to_string()))?;
 
-    // Track which entry_ids are present in the target world after the
-    // entry pass — both pre-existing and newly created — for the relation
-    // endpoint resolution below.
-    let mut target_entry_ids: HashSet<String> = HashSet::new();
-
-    // Remap: pack entry_id → existing target entry_id when a canonical-name
-    // collision occurs (F-002). Relation endpoints are rewritten through this
-    // map so they resolve to the correct target-row id.
-    let mut remap: HashMap<String, String> = HashMap::new();
-
-    // Pre-populate with entries already existing in the target world (F-009:
-    // map errors to CliError instead of silently swallowing).
-    let existing = store.list_by_world(world_id).await.map_err(|e| {
-        CliError::Other(format!(
-            "Failed to list existing entries for {world_id}: {e}"
-        ))
-    })?;
-    for e in &existing {
-        target_entry_ids.insert(e.entry_id.clone());
-    }
-
-    for mut entry in parsed.entries {
-        // F-007: reject unknown entry_type; do not silently default to Character.
-        let Some(entry_type) = parse_entry_type(&entry.entry_type) else {
-            eprintln!(
-                "  warn: unknown entry_type '{}' for entry {} ({:?}), skipping",
-                entry.entry_type, entry.entry_id, entry.canonical_name
-            );
-            entries_skipped += 1;
-            continue;
-        };
-
-        // ── Entry ID collision ──────────────────────────────────────
-        // get_knowledge_entry is global by PK — must verify the row belongs
-        // to the *target* world before treating the id as a valid relation
-        // endpoint (Greptile P1 / Cursor security: cross-world bypass).
-        if let Ok(existing_by_id) = store.get_knowledge_entry(&entry.entry_id).await {
-            if existing_by_id.world_id == world_id {
-                if args.dry_run {
-                    eprintln!(
-                        "  [dry-run] skip entry {} ({:?}): entry_id already exists in target world",
-                        entry.entry_id, entry.canonical_name
-                    );
-                }
-                entries_skipped += 1;
-                // F-003: track only when the row is in the target world.
-                target_entry_ids.insert(entry.entry_id.clone());
-                continue;
+    for detail in &summary.details {
+        if detail.outcome == ImportOutcome::Rejected {
+            if let Some(reason) = &detail.reason {
+                eprintln!("  warn: {:?} {} rejected: {reason}", detail.kind, detail.id);
             }
-            // Same entry_id in a *foreign* world: never admit the foreign PK as
-            // an endpoint. Prefer canonical-name remap onto a target-world row
-            // when one exists (Greptile: do not bypass remap on this path).
-            // Global PK uniqueness still prevents creating a second row with
-            // the pack's entry_id, so create is skipped either way.
-            if let Ok(Some(existing)) = store
-                .get_active_by_unique_key(world_id, &entry.canonical_name, entry_type)
-                .await
-            {
-                if args.dry_run {
-                    eprintln!(
-                        "  [dry-run] skip entry {} ({:?}): foreign entry_id (world {}); remapped → {}",
-                        entry.entry_id,
-                        entry.canonical_name,
-                        existing_by_id.world_id,
-                        existing.entry_id
-                    );
-                }
-                entries_skipped += 1;
-                remap.insert(entry.entry_id.clone(), existing.entry_id.clone());
-                target_entry_ids.insert(existing.entry_id.clone());
-                continue;
-            }
-            if args.dry_run {
-                eprintln!(
-                    "  [dry-run] skip entry {} ({:?}): entry_id exists in foreign world {} (no target-world name match to remap)",
-                    entry.entry_id, entry.canonical_name, existing_by_id.world_id
-                );
-            } else {
-                eprintln!(
-                    "  warn: skip entry {} ({:?}): entry_id already owned by world {} (not target {}); no canonical-name match in target",
-                    entry.entry_id,
-                    entry.canonical_name,
-                    existing_by_id.world_id,
-                    world_id
-                );
-            }
-            entries_skipped += 1;
-            continue;
-        }
-
-        // ── Canonical-name collision (F-002) ─────────────────────────
-        if let Ok(Some(existing)) = store
-            .get_active_by_unique_key(world_id, &entry.canonical_name, entry_type)
-            .await
-        {
-            if args.dry_run {
-                eprintln!(
-                    "  [dry-run] skip entry {} ({:?}): canonical-name collision with existing {}",
-                    entry.entry_id, entry.canonical_name, existing.entry_id
-                );
-            }
-            entries_skipped += 1;
-            // F-002: remap pack entry_id → existing target entry_id for
-            // relation endpoint resolution.
-            remap.insert(entry.entry_id.clone(), existing.entry_id.clone());
-            // F-003: track the existing id, not the pack id.
-            target_entry_ids.insert(existing.entry_id.clone());
-            continue;
-        }
-
-        // ── No collision → create ────────────────────────────────────
-        if args.dry_run {
-            eprintln!(
-                "  [dry-run] would create entry {} ({:?})",
-                entry.entry_id, entry.canonical_name
-            );
-            entries_created += 1;
-            target_entry_ids.insert(entry.entry_id.clone());
-            continue;
-        }
-
-        // F-001: clear revision on create path (mirrors relation handling).
-        // Spoke validate_create_revision rejects create when revision >= 1.
-        entry.revision = None;
-
-        // Rebind to target world + stamp provenance.
-        extensions::set_world_id(&mut entry, world_id.to_string());
-        extensions::set_provenance(&mut entry, None, None, Some(IMPORT_PROVENANCE.to_string()));
-
-        let upsert_req = build_import_upsert_request(&entry);
-        let adapter = NexusAdapter::new(pool.clone());
-        match orchestrate_upsert(&adapter, upsert_req) {
-            nexus_spoke_adapter::SpokeResult::Ok(_) => {
-                entries_created += 1;
-                // F-003: track id on successful create.
-                target_entry_ids.insert(entry.entry_id.clone());
-            }
-            nexus_spoke_adapter::SpokeResult::Reject(reject) => {
-                eprintln!(
-                    "  warn: orchestrate_upsert rejected entry {} ({:?}): {}: {}",
-                    entry.entry_id, entry.canonical_name, reject.code, reject.message
-                );
-                // F-003 / F-005: do NOT add to target_entry_ids; count as rejected.
-                entries_rejected += 1;
+        } else if args.dry_run {
+            if let Some(reason) = &detail.reason {
+                eprintln!("  [dry-run] {:?} {}: {reason}", detail.kind, detail.id);
             }
         }
     }
 
-    // ── Phase 2: Import relations ──────────────────────────────────────
-    let mut relations_created = 0u32;
-    let mut relations_skipped = 0u32;
-    let mut relations_rejected = 0u32;
+    let e = &summary.entries;
+    let r = &summary.relations;
+    let created = e.created + r.created;
+    let skipped = e.skipped + r.skipped;
+    let rejected = e.rejected + r.rejected;
+    let renamed = e.renamed + r.renamed;
+    let overwritten = e.overwritten + r.overwritten;
 
-    for mut relation in parsed.relations {
-        // F-002: rewrite endpoints through the remap so relations
-        // resolve to existing target-row ids.
-        let resolved_from = remap
-            .get(&relation.from_id)
-            .cloned()
-            .unwrap_or_else(|| relation.from_id.clone());
-        let resolved_to = remap
-            .get(&relation.to_id)
-            .cloned()
-            .unwrap_or_else(|| relation.to_id.clone());
-
-        // ── Endpoint resolution ──────────────────────────────────────
-        let source_ok = target_entry_ids.contains(&resolved_from);
-        let target_ok = target_entry_ids.contains(&resolved_to);
-        if !source_ok || !target_ok {
-            if args.dry_run {
-                let reason = if !source_ok && !target_ok {
-                    "both endpoints missing"
-                } else if !source_ok {
-                    "source endpoint missing"
-                } else {
-                    "target endpoint missing"
-                };
-                eprintln!(
-                    "  [dry-run] skip relation {} ({} → {}): {reason} from target world",
-                    relation.relation_id, relation.from_id, relation.to_id
-                );
-            }
-            relations_skipped += 1;
-            continue;
-        }
-
-        // ── Apply resolved endpoints ─────────────────────────────────
-        relation.from_id = resolved_from;
-        relation.to_id = resolved_to;
-
-        // ── Collision check (world-scoped) ───────────────────────────
-        // relationship_id is a global PK. Skip only when the row already
-        // lives in the *target* world (idempotent re-import). If the id is
-        // owned by another world (same-DB multi-world pack import), mint a
-        // fresh id so remapped endpoints can still form the edge.
-        if let Ok(existing_rel) = get_relationship(pool, &relation.relation_id).await {
-            if existing_rel.world_id == world_id {
-                if args.dry_run {
-                    eprintln!(
-                        "  [dry-run] skip relation {}: already exists in target world",
-                        relation.relation_id
-                    );
-                }
-                relations_skipped += 1;
-                continue;
-            }
-            let new_id = nexus_local_db::kb_relationships::generate_relationship_id();
-            if args.dry_run {
-                eprintln!(
-                    "  [dry-run] relation {} owned by foreign world {}; would mint {}",
-                    relation.relation_id, existing_rel.world_id, new_id
-                );
-            }
-            relation.relation_id = new_id;
-        }
-
-        if args.dry_run {
-            eprintln!(
-                "  [dry-run] would create relation {} ({} → {})",
-                relation.relation_id, relation.from_id, relation.to_id
-            );
-            relations_created += 1;
-            continue;
-        }
-
-        // ── Create via orchestrate_relate ───────────────────────────
-        // Rebind to target world + set create path revision.
-        update_relation_world_id(&mut relation, world_id);
-        // Use the pack's original relationship_id (globally unique).
-        // Collision detection above ensures no duplicate IDs; preserving
-        // the pack IDs makes re-import idempotent.
-        relation.revision = None;
-
-        let relate_req = build_import_relate_request(&relation);
-        let adapter = NexusAdapter::new(pool.clone());
-        match orchestrate_relate(&adapter, relate_req) {
-            nexus_spoke_adapter::SpokeResult::Ok(_) => {
-                relations_created += 1;
-            }
-            nexus_spoke_adapter::SpokeResult::Reject(reject) => {
-                eprintln!(
-                    "  warn: orchestrate_relate rejected relation {} → {}: {}: {}",
-                    relation.relation_id, relation.to_id, reject.code, reject.message
-                );
-                // F-005: count as rejected (not a clean skip).
-                relations_rejected += 1;
-            }
-        }
-    }
-
-    // ── Report ─────────────────────────────────────────────────────────
-    let created = entries_created + relations_created;
-    let skipped = entries_skipped + relations_skipped;
-    let rejected = entries_rejected + relations_rejected;
     if args.dry_run {
-        println!("[dry-run] would create: {created}, would skip: {skipped}");
+        println!(
+            "[dry-run] would create: {created}, would skip: {skipped}, would rename: {renamed}, would overwrite: {overwritten}"
+        );
     } else {
-        println!("created: {created}, skipped: {skipped}");
+        println!(
+            "created: {created}, skipped: {skipped}, renamed: {renamed}, overwritten: {overwritten}"
+        );
     }
 
-    // F-005: non-zero exit when any upsert/relate was rejected.
-    // Pure collision skips remain success.
     if rejected > 0 {
         return Err(CliError::Other(format!(
-            "Import completed with {rejected} rejected atom(s) \
-             (created: {created}, skipped: {skipped}). \
-             Check warnings above for rejection details."
+            "Import completed with {rejected} rejected atom(s) (created: {created}, skipped: {skipped}). Check warnings above for rejection details."
         )));
     }
 
     Ok(())
-}
-
-/// Parse a pack `entry_type` string to [`BlockType`].
-///
-/// Returns `None` for unknown values so the import path can skip the entry
-/// with a clear reason rather than silently defaulting to `Character`.
-fn parse_entry_type(s: &str) -> Option<BlockType> {
-    serde_json::from_value(serde_json::Value::String(s.to_string())).ok()
-}
-
-/// Update the nexus `world_id` in a pack relation's extensions for the target
-/// world.
-fn update_relation_world_id(relation: &mut Relation, world_id: &str) {
-    let key = RelationExtensionsKey::try_from("nexus")
-        .expect("\"nexus\" matches the extensions-key regex");
-    let ns = relation.extensions.entry(key).or_default();
-    ns.insert(
-        "world_id".to_string(),
-        serde_json::Value::String(world_id.to_string()),
-    );
-}
-
-/// Wrap a [`KnowledgeEntry`] into an [`UpsertRequest`] via JSON round-trip.
-///
-/// Mirrors the daemon's `build_spoke_upsert_request` pattern: the spoke codegen
-/// emits a distinct struct per wire shape, so the entry is serialized then
-/// re-fit into the `UpsertRequest.knowledge_entries` slot.
-fn build_import_upsert_request(entry: &KnowledgeEntry) -> UpsertRequest {
-    let wire = serde_json::to_value(entry).unwrap_or_else(|_| serde_json::json!({}));
-    serde_json::from_value(serde_json::json!({ "knowledge_entries": [wire] }))
-        .expect("KnowledgeEntry fits UpsertRequest shape")
-}
-
-/// Wrap a [`Relation`] into a [`RelateRequest`] via JSON round-trip.
-///
-/// Mirrors the daemon's `build_spoke_relate_request` pattern.
-fn build_import_relate_request(relation: &Relation) -> RelateRequest {
-    let wire = serde_json::to_value(relation).unwrap_or_else(|_| serde_json::json!({}));
-    serde_json::from_value(serde_json::json!({ "relation": wire }))
-        .expect("Relation fits RelateRequest shape")
 }
 
 /// Resolve a world's human title from `narrative_worlds`.
@@ -708,11 +409,13 @@ async fn resolve_creator_string(
 mod tests {
     use super::*;
     use nexus_contracts::BlockType;
+    use nexus_daemon_runtime::pack_import::IMPORT_PROVENANCE;
     use nexus_knowledge::world_kb::knowledge_entry::{WorldKbBody, WorldKbEntry};
     // parse_pack is re-exported at module level from the parent `pack` module;
     // the explicit import below is a reminder of the path but resolves to the
     // same item.
     use nexus_spoke_adapter::pack::parse_pack;
+    use serde_json::json;
 
     const OWNER: &str = "ctr_owner";
     const OWNER_NAME: &str = "Owner Name";
@@ -1213,47 +916,210 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn import_conflict_rename_errors_not_implemented() {
-        let (pool, _dir, _entry_ids, _rel_ids) = seeded_pool().await;
+    #[tokio::test(flavor = "multi_thread")]
+    async fn import_conflict_rename_creates_disambiguated_entry() {
+        let (pool, _dir, entry_ids, _rel_ids) = seeded_pool().await;
         let (pack_path, _pack_dir) = export_to_file(&pool).await;
+        let carol_pack_id = &entry_ids[2];
+        let alice_pack_id = &entry_ids[0];
+
+        let mut pack_value: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&pack_path).unwrap()).unwrap();
+        let template = pack_value["relations"][0].clone();
+        let mut carol_rel = template;
+        carol_rel["relation_id"] = json!("rel_carol_alice_rename");
+        carol_rel["from_id"] = json!(carol_pack_id);
+        carol_rel["to_id"] = json!(alice_pack_id);
+        pack_value["relations"]
+            .as_array_mut()
+            .unwrap()
+            .push(carol_rel);
+        std::fs::write(
+            &pack_path,
+            serde_json::to_string_pretty(&pack_value).unwrap(),
+        )
+        .unwrap();
 
         let (pool2, _dir2) = empty_world_pool().await;
+        let store = SqliteKbStore::new(pool2.clone());
+        let mut carol_clone = WorldKbEntry::new(WORLD, BlockType::Character, "Carol");
+        carol_clone.body = Some(WorldKbBody {
+            summary: Some("Pre-existing Carol".to_string()),
+            ..Default::default()
+        });
+        store
+            .insert_knowledge_entry(carol_clone)
+            .await
+            .expect("pre-create Carol");
+
         let args = ImportArgs {
             world_ref: WORLD.to_string(),
             r#in: pack_path,
             dry_run: false,
             conflict: ConflictStrategy::Rename,
         };
-        let err = import(args, &config_with_active_creator(), &pool2)
+        import(args, &config_with_active_creator(), &pool2)
             .await
-            .expect_err("rename conflict strategy must error");
-        let msg = format!("{err}");
-        assert!(
-            msg.contains("not yet implemented"),
-            "rename must emit 'not yet implemented'; got: {msg}"
+            .expect("rename import must succeed");
+
+        let entries = store.list_by_world(WORLD).await.unwrap();
+        assert_eq!(
+            entries.len(),
+            4,
+            "pre-existing Carol + Alice + Bob + renamed Carol"
         );
+        let renamed = entries
+            .iter()
+            .find(|e| {
+                e.canonical_name.ends_with(" imported") || e.canonical_name.contains(" imported ")
+            })
+            .expect("rename policy must create a disambiguated entry with ' imported' suffix");
+        let renamed_carol_id = renamed.entry_id.clone();
+
+        let relations = list_relationships_for_world(&pool2, WORLD, false, i64::MAX)
+            .await
+            .unwrap();
+        let carol_rel = relations
+            .iter()
+            .find(|r| r.relationship_id == "rel_carol_alice_rename")
+            .expect("Carol→Alice relation must import");
+        assert_eq!(carol_rel.source_entity_id, renamed_carol_id);
+        assert_eq!(carol_rel.target_entity_id, *alice_pack_id);
     }
 
-    #[tokio::test]
-    async fn import_conflict_overwrite_errors_not_implemented() {
+    #[tokio::test(flavor = "multi_thread")]
+    async fn import_conflict_overwrite_replaces_body_preserves_status() {
         let (pool, _dir, _entry_ids, _rel_ids) = seeded_pool().await;
         let (pack_path, _pack_dir) = export_to_file(&pool).await;
 
+        // Pre-create Carol with a distinct body and non-default status.
         let (pool2, _dir2) = empty_world_pool().await;
+        let store = SqliteKbStore::new(pool2.clone());
+        let mut carol_clone = WorldKbEntry::new(WORLD, BlockType::Character, "Carol");
+        carol_clone.status = "confirmed".to_string();
+        carol_clone.body = Some(WorldKbBody {
+            summary: Some("Pre-existing Carol body".to_string()),
+            ..Default::default()
+        });
+        let res = store
+            .insert_knowledge_entry(carol_clone)
+            .await
+            .expect("pre-create Carol");
+        let preexisting_carol_id = res.entry_id;
+
         let args = ImportArgs {
             world_ref: WORLD.to_string(),
             r#in: pack_path,
             dry_run: false,
             conflict: ConflictStrategy::Overwrite,
         };
-        let err = import(args, &config_with_active_creator(), &pool2)
+        import(args, &config_with_active_creator(), &pool2)
             .await
-            .expect_err("overwrite conflict strategy must error");
-        let msg = format!("{err}");
-        assert!(
-            msg.contains("not yet implemented"),
-            "overwrite must emit 'not yet implemented'; got: {msg}"
+            .expect("overwrite import must succeed");
+
+        assert_eq!(
+            count_entries(&pool2, WORLD).await,
+            3,
+            "overwrite must not add a second Carol row"
+        );
+
+        let carol = store
+            .get_knowledge_entry(&preexisting_carol_id)
+            .await
+            .expect("pre-existing Carol must remain");
+        assert_eq!(
+            carol.status, "confirmed",
+            "overwrite must preserve existing entry status"
+        );
+        assert_eq!(
+            carol.body.as_ref().and_then(|b| b.summary.as_deref()),
+            Some("Carol summary"),
+            "overwrite must replace body with pack content"
+        );
+    }
+
+    /// Greptile P1 / PR #200: same-world export → re-import must honor overwrite
+    /// (not unconditionally skip on entry_id PK collision).
+    #[tokio::test(flavor = "multi_thread")]
+    async fn import_same_world_reimport_overwrite_updates_body() {
+        let (pool, _dir, entry_ids, _rel_ids) = seeded_pool().await;
+        let carol_id = &entry_ids[2];
+        let (pack_path, _pack_dir) = export_to_file(&pool).await;
+
+        // Mutate Carol in-place so re-import has something to overwrite.
+        let store = SqliteKbStore::new(pool.clone());
+        let mut carol = store
+            .get_knowledge_entry(carol_id)
+            .await
+            .expect("Carol must exist");
+        carol.body = Some(WorldKbBody {
+            summary: Some("Stale Carol body".to_string()),
+            ..Default::default()
+        });
+        store
+            .update_knowledge_entry(carol)
+            .await
+            .expect("update Carol body");
+
+        let args = ImportArgs {
+            world_ref: WORLD.to_string(),
+            r#in: pack_path,
+            dry_run: false,
+            conflict: ConflictStrategy::Overwrite,
+        };
+        import(args, &config_with_active_creator(), &pool)
+            .await
+            .expect("same-world overwrite re-import must succeed");
+
+        assert_eq!(
+            count_entries(&pool, WORLD).await,
+            3,
+            "overwrite re-import must not add duplicate rows"
+        );
+
+        let carol = store
+            .get_knowledge_entry(carol_id)
+            .await
+            .expect("Carol must remain");
+        assert_eq!(
+            carol.body.as_ref().and_then(|b| b.summary.as_deref()),
+            Some("Carol summary"),
+            "overwrite must replace body with pack content on same-world re-import"
+        );
+    }
+
+    /// Greptile P1 / PR #200: same-world export → re-import under rename must
+    /// mint disambiguated copies instead of skipping on entry_id collision.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn import_same_world_reimport_rename_creates_disambiguated_entries() {
+        let (pool, _dir, _entry_ids, _rel_ids) = seeded_pool().await;
+        let (pack_path, _pack_dir) = export_to_file(&pool).await;
+
+        let args = ImportArgs {
+            world_ref: WORLD.to_string(),
+            r#in: pack_path,
+            dry_run: false,
+            conflict: ConflictStrategy::Rename,
+        };
+        import(args, &config_with_active_creator(), &pool)
+            .await
+            .expect("same-world rename re-import must succeed");
+
+        assert_eq!(
+            count_entries(&pool, WORLD).await,
+            6,
+            "rename re-import must duplicate all three entries"
+        );
+
+        let store = SqliteKbStore::new(pool.clone());
+        let entries = store.list_by_world(WORLD).await.unwrap();
+        let imported_suffix = entries
+            .iter()
+            .filter(|e| e.canonical_name.contains(" imported"))
+            .count();
+        assert_eq!(
+            imported_suffix, 3,
+            "each pack entry must be renamed on re-import"
         );
     }
 
@@ -1488,6 +1354,184 @@ mod tests {
             1,
             "relation count unchanged on re-import (idempotent)"
         );
+    }
+
+    /// V1.152 P2 dogfood: export→import round-trip on activation-carrying entries +
+    /// relations preserves provenance, `modules.activation`, and skip-idempotency.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn dogfood_pack_round_trip_preserves_activation_and_relations() {
+        const WORLD_A: &str = "wld_dogfood_a";
+        const WORLD_A_TITLE: &str = "Dogfood World A";
+        const WORLD_B: &str = "wld_dogfood_b";
+        const WORLD_B_TITLE: &str = "Dogfood World B";
+
+        let dir_a = tempfile::tempdir().unwrap();
+        let pool_a = crate::db::Schema::init(&dir_a.path().join("state.db"))
+            .await
+            .unwrap();
+
+        // SAFETY: test-only INSERT.
+        sqlx::query(
+            "INSERT OR IGNORE INTO creators (creator_id, display_name, status, cached_at, data) \
+             VALUES (?, ?, 'active', datetime('now'), '{}')",
+        )
+        .bind(OWNER)
+        .bind(OWNER_NAME)
+        .execute(&pool_a)
+        .await
+        .unwrap();
+
+        nexus_local_db::kb_store::seed::world(
+            &pool_a,
+            WORLD_A,
+            OWNER,
+            WORLD_A_TITLE,
+            "dogfood-a",
+            "private",
+            "manual",
+        )
+        .await;
+
+        let store_a = SqliteKbStore::new(pool_a.clone());
+        let mut entry_ids = Vec::new();
+        for (name, key) in [("Alice", "alice"), ("Bob", "bob"), ("Carol", "carol")] {
+            let mut kb = WorldKbEntry::new(WORLD_A, BlockType::Character, name);
+            kb.body = Some(WorldKbBody {
+                summary: Some(format!("{name} summary")),
+                ..Default::default()
+            });
+            kb.modules = Some(json!({
+                "activation": {"key": [key], "logic": "and_any"}
+            }));
+            let res = store_a.insert_knowledge_entry(kb).await.unwrap();
+            entry_ids.push(res.entry_id);
+        }
+
+        let rel_id = "rel_dogfood_001".to_string();
+        sqlx::query(
+            "INSERT INTO kb_relationships \
+                (relationship_id, world_id, source_entity_id, target_entity_id, \
+                 relation_type, symmetric, confidence, source_anchor_ids, metadata, \
+                 created_at, updated_at, revision, needs_review, source) \
+             VALUES (?, ?, ?, ?, 'related_to', 0, NULL, '[]', '{}', \
+                     datetime('now'), datetime('now'), 1, 0, 'manual')",
+        )
+        .bind(&rel_id)
+        .bind(WORLD_A)
+        .bind(&entry_ids[0])
+        .bind(&entry_ids[1])
+        .execute(&pool_a)
+        .await
+        .unwrap();
+
+        let (pack_path, _pack_dir) = export_to_file_custom_world(&pool_a, WORLD_A).await;
+        let pack_value: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&pack_path).unwrap()).unwrap();
+        let parsed = parse_pack(&pack_value).expect("exported pack must parse");
+
+        let dir_b = tempfile::tempdir().unwrap();
+        let pool_b = crate::db::Schema::init(&dir_b.path().join("state.db"))
+            .await
+            .unwrap();
+
+        sqlx::query(
+            "INSERT OR IGNORE INTO creators (creator_id, display_name, status, cached_at, data) \
+             VALUES (?, ?, 'active', datetime('now'), '{}')",
+        )
+        .bind(OWNER)
+        .bind(OWNER_NAME)
+        .execute(&pool_b)
+        .await
+        .unwrap();
+
+        nexus_local_db::kb_store::seed::world(
+            &pool_b,
+            WORLD_B,
+            OWNER,
+            WORLD_B_TITLE,
+            "dogfood-b",
+            "private",
+            "manual",
+        )
+        .await;
+
+        let summary = import_pack(
+            &pool_b,
+            WORLD_B,
+            OWNER,
+            parsed.clone(),
+            ConflictPolicy::Skip,
+            false,
+            false,
+        )
+        .await
+        .expect("first import must succeed");
+
+        assert_eq!(
+            summary.entries.created, 3,
+            "first import must create all seeded entries"
+        );
+        assert!(
+            summary.relations.created >= 1,
+            "first import must create at least one relation"
+        );
+
+        let store_b = SqliteKbStore::new(pool_b.clone());
+        let entries_b = store_b.list_by_world(WORLD_B).await.unwrap();
+        assert_eq!(entries_b.len(), 3);
+        for entry in &entries_b {
+            assert_eq!(
+                entry.source_provenance_kind.as_deref(),
+                Some(IMPORT_PROVENANCE),
+                "imported entry {} must carry pack_import provenance",
+                entry.entry_id
+            );
+        }
+
+        let entries_a = store_a.list_by_world(WORLD_A).await.unwrap();
+        for name in ["Alice", "Bob", "Carol"] {
+            let a_modules = entries_a
+                .iter()
+                .find(|e| e.canonical_name == name)
+                .expect("World A entry")
+                .modules
+                .clone();
+            let b_modules = entries_b
+                .iter()
+                .find(|e| e.canonical_name == name)
+                .expect("World B entry")
+                .modules
+                .clone();
+            assert_eq!(
+                a_modules, b_modules,
+                "modules.activation must deep-equal A→B for {name}"
+            );
+        }
+
+        assert_eq!(count_relations(&pool_b, WORLD_B).await, 1);
+
+        let summary2 = import_pack(
+            &pool_b,
+            WORLD_B,
+            OWNER,
+            parsed,
+            ConflictPolicy::Skip,
+            false,
+            false,
+        )
+        .await
+        .expect("re-import must succeed");
+
+        assert_eq!(
+            summary2.entries.created, 0,
+            "skip re-import must not create entries"
+        );
+        assert_eq!(
+            summary2.relations.created, 0,
+            "skip re-import must not create relations"
+        );
+        assert_eq!(count_entries(&pool_b, WORLD_B).await, 3);
+        assert_eq!(count_relations(&pool_b, WORLD_B).await, 1);
     }
 
     #[tokio::test]
@@ -1982,6 +2026,317 @@ mod tests {
             .expect("export must succeed for test fixture");
 
         (out_path, tmp_dir)
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn import_skips_unknown_entry_type_without_nonzero_exit() {
+        let (pool, _dir) = empty_world_pool().await;
+        let dir = tempfile::tempdir().unwrap();
+        let pack_path = dir.path().join("unknown_type_pack.json");
+        let pack_json = json!({
+            "modules": { "pack": { "title": "Test", "version": "0.1.0", "creator": "test" } },
+            "entries": [
+                {
+                    "entry_id": "kb_valid_entry",
+                    "schema_version": 1,
+                    "entry_type": "character",
+                    "canonical_name": "Valid",
+                    "status": "confirmed",
+                    "body": { "summary": "valid" },
+                    "extensions": { "nexus": { "world_id": "wld_pack" } }
+                },
+                {
+                    "entry_id": "kb_bad_type",
+                    "schema_version": 1,
+                    "entry_type": "not_a_real_block_type",
+                    "canonical_name": "BadType",
+                    "status": "confirmed",
+                    "body": { "summary": "bad" },
+                    "extensions": { "nexus": { "world_id": "wld_pack" } }
+                }
+            ],
+            "relations": []
+        });
+        std::fs::write(
+            &pack_path,
+            serde_json::to_string_pretty(&pack_json).unwrap(),
+        )
+        .unwrap();
+
+        let parsed = parse_pack(&pack_json).expect("pack must parse");
+        let summary = import_pack(
+            &pool,
+            WORLD,
+            OWNER,
+            parsed,
+            ConflictPolicy::Skip,
+            false,
+            false,
+        )
+        .await
+        .expect("unknown entry_type must not fail import under skip");
+        assert_eq!(summary.entries.skipped, 1);
+        assert_eq!(summary.entries.rejected, 0);
+        assert_eq!(summary.entries.created, 1);
+
+        let args = ImportArgs {
+            world_ref: WORLD.to_string(),
+            r#in: pack_path,
+            dry_run: false,
+            conflict: ConflictStrategy::Skip,
+        };
+        import(args, &config_with_active_creator(), &pool)
+            .await
+            .expect("CLI import must succeed with skipped unknown entry_type");
+        assert_eq!(count_entries(&pool, WORLD).await, 1);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn import_dry_run_rename_reports_counts_without_writes() {
+        let (pool, _dir, _entry_ids, _rel_ids) = seeded_pool().await;
+        let (pack_path, _pack_dir) = export_to_file(&pool).await;
+        let (pool2, _dir2) = empty_world_pool().await;
+        let store = SqliteKbStore::new(pool2.clone());
+        store
+            .insert_knowledge_entry(WorldKbEntry::new(WORLD, BlockType::Character, "Carol"))
+            .await
+            .unwrap();
+        let pre = count_entries(&pool2, WORLD).await;
+        let parsed = parse_pack(
+            &serde_json::from_str::<serde_json::Value>(
+                &std::fs::read_to_string(&pack_path).unwrap(),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let summary = import_pack(
+            &pool2,
+            WORLD,
+            OWNER,
+            parsed,
+            ConflictPolicy::Rename,
+            false,
+            true,
+        )
+        .await
+        .unwrap();
+        assert!(summary.entries.renamed >= 1);
+        assert_eq!(count_entries(&pool2, WORLD).await, pre);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn import_dry_run_overwrite_reports_counts_without_writes() {
+        let (pool, _dir, _entry_ids, _rel_ids) = seeded_pool().await;
+        let (pack_path, _pack_dir) = export_to_file(&pool).await;
+        let (pool2, _dir2) = empty_world_pool().await;
+        let store = SqliteKbStore::new(pool2.clone());
+        store
+            .insert_knowledge_entry(WorldKbEntry::new(WORLD, BlockType::Character, "Carol"))
+            .await
+            .unwrap();
+        let pre = count_entries(&pool2, WORLD).await;
+        let parsed = parse_pack(
+            &serde_json::from_str::<serde_json::Value>(
+                &std::fs::read_to_string(&pack_path).unwrap(),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let summary = import_pack(
+            &pool2,
+            WORLD,
+            OWNER,
+            parsed,
+            ConflictPolicy::Overwrite,
+            false,
+            true,
+        )
+        .await
+        .unwrap();
+        assert!(summary.entries.overwritten >= 1);
+        assert_eq!(count_entries(&pool2, WORLD).await, pre);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn import_rename_disambiguates_near_max_length_canonical_name() {
+        let long_name = "x".repeat(250);
+        let (pool, _dir) = empty_world_pool().await;
+        let store = SqliteKbStore::new(pool.clone());
+        store
+            .insert_knowledge_entry(WorldKbEntry::new(WORLD, BlockType::Character, &long_name))
+            .await
+            .unwrap();
+        let pack_json = json!({
+            "modules": { "pack": { "title": "Long", "version": "0.1.0", "creator": "test" } },
+            "entries": [{
+                "entry_id": "kb_long_pack",
+                "schema_version": 1,
+                "entry_type": "character",
+                "canonical_name": long_name,
+                "status": "confirmed",
+                "body": { "summary": "long" },
+                "extensions": { "nexus": { "world_id": WORLD } }
+            }],
+            "relations": []
+        });
+        let summary = import_pack(
+            &pool,
+            WORLD,
+            OWNER,
+            parse_pack(&pack_json).unwrap(),
+            ConflictPolicy::Rename,
+            false,
+            false,
+        )
+        .await
+        .unwrap();
+        assert_eq!(summary.entries.renamed, 1);
+        assert_eq!(summary.entries.rejected, 0);
+        let entries = store.list_by_world(WORLD).await.unwrap();
+        assert_eq!(entries.len(), 2);
+        let renamed = entries
+            .iter()
+            .find(|e| e.canonical_name.contains("imported"))
+            .expect("renamed");
+        assert!(renamed.canonical_name.len() <= 256);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn import_overwrite_relation_cas_marks_overwritten() {
+        let (pool, _dir, _entry_ids, rel_ids) = seeded_pool().await;
+        let (pack_path, _pack_dir) = export_to_file(&pool).await;
+        let (pool2, _dir2) = empty_world_pool().await;
+        let store = SqliteKbStore::new(pool2.clone());
+        let mut target_ids = Vec::new();
+        for name in ["Alice", "Bob", "Carol"] {
+            let res = store
+                .insert_knowledge_entry(WorldKbEntry::new(WORLD, BlockType::Character, name))
+                .await
+                .unwrap();
+            target_ids.push(res.entry_id);
+        }
+        let rel_id = &rel_ids[0];
+        sqlx::query("INSERT INTO kb_relationships (relationship_id, world_id, source_entity_id, target_entity_id, relation_type, symmetric, confidence, source_anchor_ids, metadata, created_at, updated_at, revision, needs_review, source) VALUES (?, ?, ?, ?, 'related_to', 0, NULL, '[]', '{}', datetime('now'), datetime('now'), 1, 0, 'manual')")
+            .bind(rel_id).bind(WORLD).bind(&target_ids[0]).bind(&target_ids[1]).execute(&pool2).await.unwrap();
+        let parsed = parse_pack(
+            &serde_json::from_str::<serde_json::Value>(
+                &std::fs::read_to_string(&pack_path).unwrap(),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let summary = import_pack(
+            &pool2,
+            WORLD,
+            OWNER,
+            parsed,
+            ConflictPolicy::Overwrite,
+            false,
+            false,
+        )
+        .await
+        .unwrap();
+        assert!(summary.relations.overwritten >= 1);
+        assert_eq!(count_relations(&pool2, WORLD).await, 1);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn pack_io_modules_preserved_on_rename_and_overwrite_collision() {
+        use nexus_spoke_adapter::adapter::activation;
+        let dir_a = tempfile::tempdir().unwrap();
+        let pool_a = crate::db::Schema::init(&dir_a.path().join("state.db"))
+            .await
+            .unwrap();
+        const WORLD_A: &str = "wld_activation_rename";
+        sqlx::query("INSERT OR IGNORE INTO creators (creator_id, display_name, status, cached_at, data) VALUES (?, ?, 'active', datetime('now'), '{}')").bind(OWNER).bind(OWNER_NAME).execute(&pool_a).await.unwrap();
+        nexus_local_db::kb_store::seed::world(
+            &pool_a,
+            WORLD_A,
+            OWNER,
+            "Activation Rename",
+            "activation-rename",
+            "private",
+            "manual",
+        )
+        .await;
+        let store_a = SqliteKbStore::new(pool_a.clone());
+        let mut dragon = WorldKbEntry::new(WORLD_A, BlockType::Character, "Dragon");
+        dragon.modules = Some(json!({"activation": {"key": ["dragon"], "logic": "and_any"}}));
+        store_a.insert_knowledge_entry(dragon).await.unwrap();
+        let (pack_path, _pack_dir) = export_to_file_custom_world(&pool_a, WORLD_A).await;
+        let (pool_rename, _dir_r) = empty_world_pool().await;
+        let store_r = SqliteKbStore::new(pool_rename.clone());
+        store_r
+            .insert_knowledge_entry(WorldKbEntry::new(WORLD, BlockType::Character, "Dragon"))
+            .await
+            .unwrap();
+        let parsed = parse_pack(
+            &serde_json::from_str::<serde_json::Value>(
+                &std::fs::read_to_string(&pack_path).unwrap(),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        import_pack(
+            &pool_rename,
+            WORLD,
+            OWNER,
+            parsed,
+            ConflictPolicy::Rename,
+            false,
+            false,
+        )
+        .await
+        .unwrap();
+        let renamed = store_r
+            .list_by_world(WORLD)
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|e| e.canonical_name.contains("imported"))
+            .expect("renamed Dragon");
+        assert!(renamed.modules.is_some());
+        let _ = activation::apply_activation(&[renamed], "a dragon appears", &[]);
+        let (pool_over, _dir_o) = empty_world_pool().await;
+        let store_o = SqliteKbStore::new(pool_over.clone());
+        let mut pre2 = WorldKbEntry::new(WORLD, BlockType::Character, "Dragon");
+        pre2.modules = Some(json!({"activation": {"key": ["stale"], "logic": "and_any"}}));
+        store_o.insert_knowledge_entry(pre2).await.unwrap();
+        let parsed2 = parse_pack(
+            &serde_json::from_str::<serde_json::Value>(
+                &std::fs::read_to_string(&pack_path).unwrap(),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        import_pack(
+            &pool_over,
+            WORLD,
+            OWNER,
+            parsed2,
+            ConflictPolicy::Overwrite,
+            false,
+            false,
+        )
+        .await
+        .unwrap();
+        let overwritten = store_o
+            .list_by_world(WORLD)
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|e| e.canonical_name == "Dragon")
+            .expect("overwritten Dragon");
+        assert_eq!(
+            overwritten
+                .modules
+                .as_ref()
+                .and_then(|m| m.get("activation"))
+                .and_then(|a| a.get("key"))
+                .and_then(|k| k.get(0))
+                .and_then(|v| v.as_str()),
+            Some("dragon")
+        );
     }
 
     #[tokio::test]

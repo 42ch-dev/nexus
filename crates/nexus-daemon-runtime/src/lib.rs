@@ -15,6 +15,7 @@ pub mod cron_supervisor;
 pub mod db;
 pub mod directive_store;
 pub mod lifecycle;
+pub mod pack_import;
 pub mod path_enrichment;
 pub mod refresh_scheduler;
 pub mod stale_findings_watcher;
