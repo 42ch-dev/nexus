@@ -539,7 +539,10 @@ async fn cli_wiring_starts_a_node_with_persisted_identity_and_allowlist() {
         "host_id must use the shared host_manifest_port resolution"
     );
     assert_eq!(allowlist_len, 2);
-    assert_eq!(config.peer_allowlist, vec![file_peer, cli_peer]);
+    // `PeerScope.peer_ids()` is a sorted set — compare order-independently.
+    let mut expected_allowlist = vec![file_peer, cli_peer];
+    expected_allowlist.sort();
+    assert_eq!(config.peer_allowlist, expected_allowlist);
     assert!(
         config.invoke_handler.is_none(),
         "N-C0 must never install an invoke handler"

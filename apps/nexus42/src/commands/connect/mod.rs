@@ -129,7 +129,10 @@ fn build_config(
         .map_err(|e| CliError::Config(format!("device id unavailable: {e}")))?;
 
     // 3. Allowlist: file ∪ `--allow-peer*`; missing file ⇒ empty ⇒ fail-closed.
-    let peer_allowlist = allowlist::load(home, allow_peer)?;
+    //    `load` resolves the N-C1 `PeerScope` (per-peer world/op scope for
+    //    the T2 dispatch gate); the flat id set feeds the handshake allowlist.
+    let peer_scope = allowlist::load(home, allow_peer)?;
+    let peer_allowlist = peer_scope.peer_ids();
     let allowlist_len = peer_allowlist.len();
 
     // 4. Listen multiaddrs from `--listen` (default loopback ephemeral port).
