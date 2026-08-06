@@ -1,0 +1,161 @@
+name: Runtime Build
+
+# V1.153 P2 T2 (DF-73): native multi-platform build + packaging for the
+# headless `nexus-runtime` binary (spoke-connect only, no embedded SPA).
+#
+# Each matrix leg builds natively on its host runner:
+#   windows-x64 → windows-latest / x86_64-pc-windows-msvc
+#   macos-arm64 → macos-latest   / aarch64-apple-darwin
+#   linux-x64   → ubuntu-latest  / x86_64-unknown-linux-gnu
+# with `--no-default-features --features connect-host` (web-embed OFF → no
+# `apps/web/dist` bytes; connect-host ON → the P1 N-C1 invoke surface), then
+# packages `nexus-runtime-<os>-<arch>.zip` + `.sha256`, uploads them, and
+# smoke-tests `--version` on the runner itself.
+#
+# Trigger set (locked by Clarify #3 + PM drift writeback 2026-08-07):
+# `workflow_dispatch` + tag `runtime-v*` ONLY. GitHub only offers
+# `workflow_dispatch` for workflows present on the DEFAULT branch, and a
+# workflow file that exists only on a non-default branch is not evaluated
+# for `push` events at all (verified empirically during T2: the workflow
+# never registered and no check suite was created). So plan-branch iteration
+# runs through the TEMPORARY `pull_request` trigger below (PR against the
+# spec integration branch); it is removed in the final T2 commit.
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'runtime-v*'
+  pull_request:
+    # TEMPORARY (T2 iteration only): iteration vehicle for a workflow that
+    # does not exist on the default branch yet (see header note). REMOVE
+    # before merge — the delivered trigger set is workflow_dispatch + tag
+    # runtime-v* only.
+    branches:
+      - iteration/v1.153
+
+concurrency:
+  group: runtime-build-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  SQLX_OFFLINE: "true"
+  # Cap target/ incremental growth on ephemeral runners (same ENOSPC
+  # mitigation rationale as ci.yml).
+  CARGO_INCREMENTAL: "0"
+
+jobs:
+  runtime-build:
+    name: ${{ matrix.slug }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - slug: windows-x64
+            os: windows-latest
+            target: x86_64-pc-windows-msvc
+            bin: nexus-runtime.exe
+          - slug: macos-arm64
+            os: macos-latest
+            target: aarch64-apple-darwin
+            bin: nexus-runtime
+          - slug: linux-x64
+            os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            bin: nexus-runtime
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+
+      # Heavy Rust job convention (ci.yml): reclaim ubuntu disk before the
+      # toolchain/cache restore. Windows/macOS runners carry enough free
+      # space for this single-bin release graph.
+      - uses: ./.github/actions/free-disk-space
+        if: runner.os == 'Linux'
+
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8  # stable
+        with:
+          # wasm32-unknown-unknown: nexus-wasm-host's build.rs compiles the
+          # embedded modules from source (modules/basic-combat) — it is in the
+          # slim runtime graph too (via nexus-orchestration / -daemon-runtime /
+          # -spoke-adapter). The host triple is installed by default; the
+          # explicit `--target` below keeps the locked triple load-bearing.
+          targets: wasm32-unknown-unknown
+
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32  # v2
+        with:
+          shared-key: nexus-runtime
+          workspaces: .
+
+      - name: Build nexus-runtime (release, native ${{ matrix.target }})
+        run: |
+          cargo build --release --target ${{ matrix.target }} \
+            --bin nexus-runtime \
+            --no-default-features --features connect-host
+
+      - name: Smoke test --version
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $out = & "target/${{ matrix.target }}/release/${{ matrix.bin }}" --version
+          Write-Output $out
+          if ($out -notmatch '^nexus-runtime ') {
+            Write-Error "unexpected --version output: $out"
+            exit 1
+          }
+
+      - name: Smoke test --version
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          out="$(./target/${{ matrix.target }}/release/${{ matrix.bin }} --version)"
+          echo "$out"
+          case "$out" in
+            nexus-runtime\ *) ;;
+            *)
+              echo "::error::unexpected --version output: $out"
+              exit 1
+              ;;
+          esac
+
+      - name: Package zip + sha256 (windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $zip_name = "nexus-runtime-${{ matrix.slug }}.zip"
+          # Single-file Compress-Archive stores the binary at the zip root.
+          Compress-Archive -Path "target/${{ matrix.target }}/release/${{ matrix.bin }}" -DestinationPath $zip_name -Force
+          $hash = (Get-FileHash -Algorithm SHA256 -Path $zip_name).Hash.ToLower()
+          # sha256sum-style line: "<hash>  <zip filename>"
+          Set-Content -Path "$zip_name.sha256" -Value "$hash  $zip_name" -NoNewline -Encoding ascii
+          Get-Content "$zip_name.sha256"
+
+      - name: Package zip + sha256 (unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          zip_name="nexus-runtime-${{ matrix.slug }}.zip"
+          # -j (junk paths): store the binary at the zip root.
+          zip -j "$zip_name" "target/${{ matrix.target }}/release/${{ matrix.bin }}"
+          if command -v sha256sum >/dev/null 2>&1; then
+            sha256sum "$zip_name" > "$zip_name.sha256"
+          else
+            shasum -a 256 "$zip_name" > "$zip_name.sha256"
+          fi
+          cat "$zip_name.sha256"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+        with:
+          name: nexus-runtime-${{ matrix.slug }}
+          path: |
+            nexus-runtime-${{ matrix.slug }}.zip
+            nexus-runtime-${{ matrix.slug }}.zip.sha256
+          if-no-files-found: error
