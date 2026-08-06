@@ -75,11 +75,14 @@ use std::sync::Arc;
 
 /// The write ops this host serves (N-C1).
 ///
+/// This const is load-bearing, not declaration-only: [`dispatch`] gates on
+/// it before routing, so the host can never serve an op it does not list.
 /// The manifest-honesty test
 /// (`n_c1_manifest_served_ops_match_dispatch_both_directions` in
 /// `commands::connect::interop`) machine-checks this set ⇔ the manifest's
 /// advertised `extensions.nexus.served_ops` (`nexus_spoke_adapter`'s
-/// `LOCAL_SERVED_OPS`) in both directions.
+/// `LOCAL_SERVED_OPS`) in both directions — so the manifest ⇔ actual
+/// dispatch routing lockstep holds by construction.
 pub const SERVED_OPS: [&str; 3] = ["upsert", "promote", "relate"];
 
 /// Build the N-C1 `InvokeHandler`: a fail-closed op gate + allowlist
@@ -110,8 +113,25 @@ fn dispatch(
     op: &str,
     payload: Value,
 ) -> Result<Value, ErrorEnvelope> {
-    // 1. Served op set (N-C1): anything else is refused unconditionally,
-    //    regardless of payload shape (N-C0 refusal contract extends).
+    // 1. Served-op gate (N-C1): `SERVED_OPS` is the load-bearing serving
+    //    gate — the manifest-honesty machine check
+    //    (`n_c1_manifest_served_ops_match_dispatch_both_directions`)
+    //    verifies the manifest against this const, so dispatch MUST read it
+    //    too, or the check would bind to a declaration-only table. Anything
+    //    outside the const is refused unconditionally, regardless of payload
+    //    shape (N-C0 refusal contract extends); a match arm for an op that
+    //    is not in `SERVED_OPS` is unreachable by construction.
+    if !SERVED_OPS.contains(&op) {
+        return Err(unsupported(
+            op,
+            "this host serves only upsert / promote / relate",
+        ));
+    }
+
+    // 2. Map the gate-passed op to its route. The arms cover exactly the
+    //    `SERVED_OPS` set; the `_` tail below is unreachable for served ops
+    //    (the gate refused everything else) and stays as a defensive
+    //    fallthrough.
     let route = match op {
         "upsert" => Route::Upsert,
         "promote" => Route::Promote,
@@ -124,7 +144,7 @@ fn dispatch(
         }
     };
 
-    // 2. Calling peer from the ops envelope (fail-closed — see module docs
+    // 3. Calling peer from the ops envelope (fail-closed — see module docs
     //    for why the peer id must ride the payload).
     let Some(peer) = payload
         .pointer("/extensions/nexus/peer_id")
@@ -136,12 +156,12 @@ fn dispatch(
         ));
     };
 
-    // 3. Op-scope gate (T1 PeerScope, fail-closed).
+    // 4. Op-scope gate (T1 PeerScope, fail-closed).
     if !scope.allows_op(&peer, op) {
         return Err(denied(&format!("op {op} is not in this peer's op_scope")));
     }
 
-    // 4. World-scope gate (T1 PeerScope, fail-closed): every target world in
+    // 5. World-scope gate (T1 PeerScope, fail-closed): every target world in
     //    the payload must be in the peer's `world_scope`. Strictness (fix
     //    loop, Important): EVERY entry/relation must carry a parseable
     //    `extensions.nexus.world_id` — a payload where any entry lacks one
@@ -167,7 +187,7 @@ fn dispatch(
         )));
     }
 
-    // 5. Stored-world gate (fix loop, Critical): the orchestrators' stored
+    // 6. Stored-world gate (fix loop, Critical): the orchestrators' stored
     //    lookups and CAS updates are world-agnostic (they match on id +
     //    revision only), so a payload claiming world A could rewrite a row
     //    stored in world B by replaying the revision the OCC rejects
@@ -175,7 +195,7 @@ fn dispatch(
     //    existing row's stored world_id equals the payload-claimed world_id;
     //    a mismatch denies with zero side effects.
     //
-    // 6. Route through the orchestrator. The orchestrators are native async
+    // 7. Route through the orchestrator. The orchestrators are native async
     //    fn (V1.153 P0 T2) but this closure is sync on the node's event
     //    loop: bridge with block_in_place + Handle::block_on (multi-thread
     //    runtime; the CLI main and tokio::test default are multi-thread).

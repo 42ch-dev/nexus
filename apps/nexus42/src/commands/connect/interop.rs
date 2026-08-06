@@ -1326,3 +1326,133 @@ async fn n_c1_mixed_payload_missing_world_id_denies_whole_payload() {
     host.shutdown().await.expect("host shuts down");
     peer_node.shutdown().await.expect("peer shuts down");
 }
+
+/// N-C1 fix loop (L2 Important regression): `SERVED_OPS` is the load-bearing
+/// serving gate — `dispatch()` consults it before routing, so the honesty
+/// machine check (`n_c1_manifest_served_ops_match_dispatch_both_directions`)
+/// transitively enforces manifest ⇔ actual dispatch routing. This test
+/// pins the other half of that lockstep: EVERY op the const advertises must
+/// actually round-trip through a dispatch match arm. Removing an arm (or
+/// growing `SERVED_OPS` without a matching arm) makes the op fall through
+/// to the `op_unsupported` refusal and this loop fails — drift the honesty
+/// check alone cannot see, because it only compares manifest ⇔ const.
+#[tokio::test(flavor = "multi_thread")]
+async fn n_c1_every_served_op_advertised_by_the_const_actually_routes() {
+    let _guard = network_test_guard().await;
+    let temp = tempfile::tempdir().expect("tempdir");
+    let home = temp.path();
+    let peer_key = fixed_keypair(66);
+    let peer_peer = peer_key.public().to_peer_id();
+
+    const WORLD_A: &str = "wld_test_a";
+
+    // Hermetic workspace DB with the world seeded.
+    let db_path = temp.path().join("workspace").join("state.db");
+    let pool = crate::db::Schema::init(&db_path)
+        .await
+        .expect("workspace DB initializes");
+    seed_world(&pool, "ctr_test", WORLD_A).await;
+
+    // The peer is scoped to exactly the op set the const advertises (the
+    // allowlist file is built from the const itself), so the loop below can
+    // only fail if a served op does not route.
+    let allow_path = nexus_home_layout::connect_allowlist_path(home);
+    std::fs::create_dir_all(allow_path.parent().expect("parent dir")).expect("mkdir");
+    std::fs::write(
+        &allow_path,
+        serde_json::json!({ "peer_ids": [{
+            "peer_id": peer_peer.to_string(),
+            "world_scope": [WORLD_A],
+            "op_scope": super::invoke::SERVED_OPS,
+        }] })
+        .to_string(),
+    )
+    .expect("write allowlist");
+
+    let (config, _, _) = super::build_host_config(
+        home,
+        &[],
+        &["/ip4/127.0.0.1/tcp/0".to_string()],
+        Some(&db_path),
+    )
+    .await
+    .expect("N-C1 host config builds");
+    let host_peer = config.identity.public().to_peer_id();
+    let host = start(config).await;
+    let peer_node = start(peer_config(peer_key, vec![host_peer])).await;
+    let session = peer_node
+        .connect(host.listen_addrs()[0].clone())
+        .await
+        .expect("scoped peer handshake");
+    let peer_claim = serde_json::json!(peer_peer.to_string());
+
+    // Relate's `kb_relationships` FKs require both endpoints to exist, so
+    // pre-create the pair it references before the loop; the loop itself
+    // then only uses fresh ids (order-independent of the const's iteration).
+    let pair = session
+        .invoke(
+            "upsert",
+            serde_json::json!({
+                "extensions": { "nexus": { "peer_id": peer_claim } },
+                "knowledge_entries": [
+                    entry_fixture("kb_loop_pair_1", "PairOne", WORLD_A, "confirmed", None),
+                    entry_fixture("kb_loop_pair_2", "PairTwo", WORLD_A, "confirmed", None),
+                ],
+            }),
+        )
+        .await
+        .expect("pre-create the relate pair");
+    assert_eq!(
+        pair.payload["knowledge_entries"][0]["entry_id"],
+        "kb_loop_pair_1"
+    );
+
+    // The regression loop: every op the const advertises must route through
+    // a dispatch match arm. A removed arm surfaces here as the `op_unsupported`
+    // refusal (the gate passes the op, the match falls through) and fails
+    // the invoke — the exact drift the const-binding prevents.
+    for op in super::invoke::SERVED_OPS {
+        let payload = match op {
+            "upsert" => serde_json::json!({
+                "extensions": { "nexus": { "peer_id": peer_claim } },
+                "knowledge_entries": [
+                    entry_fixture("kb_loop_upsert", "LoopUpsert", WORLD_A, "confirmed", None),
+                ],
+            }),
+            "promote" => serde_json::json!({
+                "extensions": { "nexus": { "peer_id": peer_claim } },
+                "candidate": entry_fixture(
+                    "kb_loop_promote",
+                    "LoopPromote",
+                    WORLD_A,
+                    "provisional",
+                    None,
+                ),
+            }),
+            "relate" => serde_json::json!({
+                "extensions": { "nexus": { "peer_id": peer_claim } },
+                "relation": {
+                    "schema_version": 1,
+                    "relation_id": "rel_loop_1",
+                    "relation_type": "related_to",
+                    "from_id": "kb_loop_pair_1",
+                    "to_id": "kb_loop_pair_2",
+                    "extensions": { "nexus": { "world_id": WORLD_A } },
+                },
+            }),
+            other => panic!(
+                "SERVED_OPS advertises op {other:?} but the routing-loop test has no \
+                 payload fixture for it — add one so the new op is proven to route"
+            ),
+        };
+        session.invoke(op, payload).await.unwrap_or_else(|error| {
+            panic!(
+                "SERVED_OPS advertises op {op:?} but dispatch does not route it \
+                 (dispatch-arm drift?): {error:?}"
+            )
+        });
+    }
+
+    host.shutdown().await.expect("host shuts down");
+    peer_node.shutdown().await.expect("peer shuts down");
+}
