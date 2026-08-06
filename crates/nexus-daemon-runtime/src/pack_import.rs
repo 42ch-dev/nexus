@@ -249,13 +249,23 @@ pub async fn import_pack(
                         .await?;
                     }
                     ConflictPolicy::Overwrite => {
-                        summary.entries.rejected += 1;
-                        record_entry(
-                            &mut summary,
+                        // Overwrite replaces the existing entry's body even when
+                        // the imported entry changed canonical_name or block_type.
+                        // The entry_id is the anchor; identity drift is the edit.
+                        remap.insert(pack_entry_id.clone(), existing_by_id.entry_id.clone());
+                        target_entry_ids.insert(existing_by_id.entry_id.clone());
+                        import_overwritten_entry(
+                            pool,
+                            world_id,
+                            &mut entry,
+                            &existing_by_id,
                             &pack_entry_id,
-                            ImportOutcome::Rejected,
-                            Some("entry_id collision with different identity".to_string()),
-                        );
+                            &mut summary,
+                            &mut target_entry_ids,
+                            &mut remap,
+                            dry_run,
+                        )
+                        .await?;
                     }
                 }
                 continue;
