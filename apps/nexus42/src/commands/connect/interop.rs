@@ -70,6 +70,34 @@ async fn seed_world(pool: &sqlx::SqlitePool, creator_id: &str, world_id: &str) {
     .expect("world seed");
 }
 
+/// Seed a `kb_key_blocks` row directly (test-only). Used by the fix-loop
+/// regression tests to plant rows in a world the peer is NOT scoped to —
+/// the dispatch gate must never let the peer reach rows seeded this way.
+async fn seed_key_block(
+    pool: &sqlx::SqlitePool,
+    entry_id: &str,
+    world_id: &str,
+    canonical_name: &str,
+    status: &str,
+    revision: i64,
+) {
+    // SAFETY: test-only static INSERT with bind params against known schema
+    // (20260731000001_pack_import_provenance.sql; `created_at` has a default).
+    sqlx::query(
+        "INSERT INTO kb_key_blocks \
+         (key_block_id, world_id, block_type, canonical_name, status, revision) \
+         VALUES (?, ?, 'character', ?, ?, ?)",
+    )
+    .bind(entry_id)
+    .bind(world_id)
+    .bind(canonical_name)
+    .bind(status)
+    .bind(revision)
+    .execute(pool)
+    .await
+    .expect("seed key block");
+}
+
 /// A wire-shape `KnowledgeEntry` JSON fixture (the pack-test sample shape +
 /// the `extensions.nexus.world_id` carrier the dispatch gate reads).
 ///
@@ -911,4 +939,330 @@ async fn n_c1_peer_upserts_promotes_relates_with_world_scoping() {
     host.shutdown().await.expect("host shuts down");
     peer_node.shutdown().await.expect("peer shuts down");
     outsider_node.shutdown().await.expect("outsider shuts down");
+}
+
+/// N-C1 fix loop (L2 Critical regression): the orchestrators' stored
+/// lookups and CAS updates match on id + revision only (world-agnostic —
+/// `WHERE key_block_id = ?` / `AND COALESCE(revision,0) = ?`), so a payload
+/// claiming WORLD_A can rewrite a row stored in WORLD_B by replaying the
+/// revision the OCC rejects disclose. The dispatch layer must verify the
+/// stored row's world against the payload-claimed world BEFORE the
+/// orchestrator CAS runs and deny with zero side effects. Covers the
+/// update, promote, and relate paths (relate shares the same
+/// world-agnostic lookup/CAS shape).
+#[tokio::test(flavor = "multi_thread")]
+async fn n_c1_cross_world_update_promote_and_relate_are_denied_with_zero_mutation() {
+    let _guard = network_test_guard().await;
+    let temp = tempfile::tempdir().expect("tempdir");
+    let home = temp.path();
+    let peer_key = fixed_keypair(64);
+    let peer_peer = peer_key.public().to_peer_id();
+
+    const WORLD_A: &str = "wld_test_a";
+    const WORLD_B: &str = "wld_test_b";
+
+    // Hermetic workspace DB with both worlds seeded.
+    let db_path = temp.path().join("workspace").join("state.db");
+    let pool = crate::db::Schema::init(&db_path)
+        .await
+        .expect("workspace DB initializes");
+    seed_world(&pool, "ctr_test", WORLD_A).await;
+    seed_world(&pool, "ctr_test", WORLD_B).await;
+
+    // Plant world-B rows the world-A peer must NOT be able to touch: a
+    // confirmed entry (update target), a provisional entry (promote target),
+    // and a relation between them. Revisions are 1 — the value a hostile
+    // peer learns from OCC reject details (`actualRevision`/`storeRevision`).
+    seed_key_block(&pool, "kb_b_update", WORLD_B, "Banished", "confirmed", 1).await;
+    seed_key_block(&pool, "kb_b_promote", WORLD_B, "Seer", "provisional", 1).await;
+    // SAFETY: test-only static INSERT with bind params against the known
+    // 202606290001_kb_relationships.sql schema.
+    sqlx::query(
+        "INSERT INTO kb_relationships \
+         (relationship_id, world_id, source_entity_id, target_entity_id, relation_type, created_at, updated_at, revision) \
+         VALUES (?, ?, ?, ?, 'related_to', 'now', 'now', 1)",
+    )
+    .bind("rel_b1")
+    .bind(WORLD_B)
+    .bind("kb_b_update")
+    .bind("kb_b_promote")
+    .execute(&pool)
+    .await
+    .expect("seed world-B relation");
+
+    // Allowlist file: the peer is world-scoped to WORLD_A only.
+    let allow_path = nexus_home_layout::connect_allowlist_path(home);
+    std::fs::create_dir_all(allow_path.parent().expect("parent dir")).expect("mkdir");
+    std::fs::write(
+        &allow_path,
+        serde_json::json!({ "peer_ids": [{
+            "peer_id": peer_peer.to_string(),
+            "world_scope": [WORLD_A],
+            "op_scope": ["upsert", "promote", "relate"],
+        }] })
+        .to_string(),
+    )
+    .expect("write allowlist");
+
+    let (config, _, _) = super::build_host_config(
+        home,
+        &[],
+        &["/ip4/127.0.0.1/tcp/0".to_string()],
+        Some(&db_path),
+    )
+    .await
+    .expect("N-C1 host config builds");
+    let host_peer = config.identity.public().to_peer_id();
+    let host = start(config).await;
+    let peer_node = start(peer_config(peer_key, vec![host_peer])).await;
+    let session = peer_node
+        .connect(host.listen_addrs()[0].clone())
+        .await
+        .expect("scoped peer handshake");
+    let peer_claim = serde_json::json!(peer_peer.to_string());
+
+    // 1. Cross-world UPDATE denied: the correct stored revision (1) is
+    //    replayed while the payload claims WORLD_A.
+    match session
+        .invoke(
+            "upsert",
+            serde_json::json!({
+                "extensions": { "nexus": { "peer_id": peer_claim } },
+                "knowledge_entries": [entry_fixture(
+                    "kb_b_update",
+                    "Banished",
+                    WORLD_A,
+                    "confirmed",
+                    Some(1),
+                )],
+            }),
+        )
+        .await
+    {
+        Err(InvokeError::Wire(envelope)) => {
+            assert_eq!(
+                envelope.code, "op_unsupported",
+                "cross-world update must be denied"
+            );
+        }
+        other => panic!("cross-world update must be denied, got {other:?}"),
+    }
+
+    // 2. Cross-world PROMOTE denied (same replay, candidate claims WORLD_A).
+    match session
+        .invoke(
+            "promote",
+            serde_json::json!({
+                "extensions": { "nexus": { "peer_id": peer_claim } },
+                "candidate": entry_fixture(
+                    "kb_b_promote",
+                    "Seer",
+                    WORLD_A,
+                    "provisional",
+                    Some(1),
+                ),
+            }),
+        )
+        .await
+    {
+        Err(InvokeError::Wire(envelope)) => {
+            assert_eq!(
+                envelope.code, "op_unsupported",
+                "cross-world promote must be denied"
+            );
+        }
+        other => panic!("cross-world promote must be denied, got {other:?}"),
+    }
+
+    // 3. Cross-world RELATE denied (relation row stored in WORLD_B, payload
+    //    claims WORLD_A with the stored revision replayed).
+    match session
+        .invoke(
+            "relate",
+            serde_json::json!({
+                "extensions": { "nexus": { "peer_id": peer_claim } },
+                "relation": {
+                    "schema_version": 1,
+                    "relation_id": "rel_b1",
+                    "relation_type": "related_to",
+                    "from_id": "kb_b_update",
+                    "to_id": "kb_b_promote",
+                    "revision": 1,
+                    "extensions": { "nexus": { "world_id": WORLD_A } },
+                },
+            }),
+        )
+        .await
+    {
+        Err(InvokeError::Wire(envelope)) => {
+            assert_eq!(
+                envelope.code, "op_unsupported",
+                "cross-world relate must be denied"
+            );
+        }
+        other => panic!("cross-world relate must be denied, got {other:?}"),
+    }
+
+    // Zero side effects: every world-B row is untouched (same world, same
+    // revision, same status).
+    let row: (String, i64, String) = sqlx::query_as(
+        "SELECT world_id, revision, status FROM kb_key_blocks WHERE key_block_id = ?",
+    )
+    .bind("kb_b_update")
+    .fetch_one(&pool)
+    .await
+    .expect("read update row");
+    assert_eq!(
+        row,
+        (WORLD_B.to_string(), 1, "confirmed".to_string()),
+        "world-B update target must be untouched"
+    );
+    let row: (String, i64, String) = sqlx::query_as(
+        "SELECT world_id, revision, status FROM kb_key_blocks WHERE key_block_id = ?",
+    )
+    .bind("kb_b_promote")
+    .fetch_one(&pool)
+    .await
+    .expect("read promote row");
+    assert_eq!(
+        row,
+        (WORLD_B.to_string(), 1, "provisional".to_string()),
+        "world-B promote target must be untouched"
+    );
+    let row: (String, i64) =
+        sqlx::query_as("SELECT world_id, revision FROM kb_relationships WHERE relationship_id = ?")
+            .bind("rel_b1")
+            .fetch_one(&pool)
+            .await
+            .expect("read relation row");
+    assert_eq!(
+        row,
+        (WORLD_B.to_string(), 1),
+        "world-B relation must be untouched"
+    );
+
+    // 4. Denials consume sequences but leave the session open: a legitimate
+    //    world-A write still round-trips afterwards.
+    let after = session
+        .invoke(
+            "upsert",
+            serde_json::json!({
+                "extensions": { "nexus": { "peer_id": peer_claim } },
+                "knowledge_entries": [entry_fixture(
+                    "kb_a_ok",
+                    "Mira",
+                    WORLD_A,
+                    "confirmed",
+                    None,
+                )],
+            }),
+        )
+        .await
+        .expect("session stays usable after cross-world denials");
+    assert_eq!(after.payload["knowledge_entries"][0]["entry_id"], "kb_a_ok");
+
+    host.shutdown().await.expect("host shuts down");
+    peer_node.shutdown().await.expect("peer shuts down");
+}
+
+/// N-C1 fix loop (L2 Important regression): a multi-entry upsert mixing one
+/// scoped entry with one world-less entry used to pass the world gate (the
+/// world-less entry was filter-mapped OUT of the gate's world set), persist
+/// the scoped entry, then fail the world-less entry in the adapter — a
+/// partial-batch write surfacing as `internal_error` for a client input
+/// error. Every entry must carry `extensions.nexus.world_id`; one missing ⇒
+/// the WHOLE payload is denied and zero entries persist.
+#[tokio::test(flavor = "multi_thread")]
+async fn n_c1_mixed_payload_missing_world_id_denies_whole_payload() {
+    let _guard = network_test_guard().await;
+    let temp = tempfile::tempdir().expect("tempdir");
+    let home = temp.path();
+    let peer_key = fixed_keypair(65);
+    let peer_peer = peer_key.public().to_peer_id();
+
+    const WORLD_A: &str = "wld_test_a";
+
+    let db_path = temp.path().join("workspace").join("state.db");
+    let pool = crate::db::Schema::init(&db_path)
+        .await
+        .expect("workspace DB initializes");
+    seed_world(&pool, "ctr_test", WORLD_A).await;
+
+    let allow_path = nexus_home_layout::connect_allowlist_path(home);
+    std::fs::create_dir_all(allow_path.parent().expect("parent dir")).expect("mkdir");
+    std::fs::write(
+        &allow_path,
+        serde_json::json!({ "peer_ids": [{
+            "peer_id": peer_peer.to_string(),
+            "world_scope": [WORLD_A],
+            "op_scope": ["upsert", "promote", "relate"],
+        }] })
+        .to_string(),
+    )
+    .expect("write allowlist");
+
+    let (config, _, _) = super::build_host_config(
+        home,
+        &[],
+        &["/ip4/127.0.0.1/tcp/0".to_string()],
+        Some(&db_path),
+    )
+    .await
+    .expect("N-C1 host config builds");
+    let host_peer = config.identity.public().to_peer_id();
+    let host = start(config).await;
+    let peer_node = start(peer_config(peer_key, vec![host_peer])).await;
+    let session = peer_node
+        .connect(host.listen_addrs()[0].clone())
+        .await
+        .expect("scoped peer handshake");
+    let peer_claim = serde_json::json!(peer_peer.to_string());
+
+    // The world-less fixture: identical to the canonical entry fixture
+    // except `extensions.nexus.world_id` is absent.
+    let worldless = serde_json::json!({
+        "schema_version": 1,
+        "entry_id": "kb_m2",
+        "entry_type": "character",
+        "canonical_name": "Drifter",
+        "status": "confirmed",
+        "revision": null,
+        "body": { "summary": "Drifter summary" },
+        "extensions": { "nexus": {} },
+    });
+
+    match session
+        .invoke(
+            "upsert",
+            serde_json::json!({
+                "extensions": { "nexus": { "peer_id": peer_claim } },
+                "knowledge_entries": [
+                    entry_fixture("kb_m1", "Mira", WORLD_A, "confirmed", None),
+                    worldless,
+                ],
+            }),
+        )
+        .await
+    {
+        Err(InvokeError::Wire(envelope)) => {
+            assert_eq!(
+                envelope.code, "op_unsupported",
+                "mixed payload must be denied as a whole"
+            );
+        }
+        other => panic!("mixed payload must be denied, got {other:?}"),
+    }
+
+    // Zero entries persisted — the scoped entry must NOT have been written
+    // before the denial (whole-payload gate, no partial write).
+    let count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM kb_key_blocks WHERE key_block_id IN ('kb_m1', 'kb_m2')",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("count persisted rows");
+    assert_eq!(count, 0, "no partial write: zero entries persisted");
+
+    host.shutdown().await.expect("host shuts down");
+    peer_node.shutdown().await.expect("peer shuts down");
 }

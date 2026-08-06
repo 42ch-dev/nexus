@@ -28,6 +28,25 @@
 //! (`extensions.nexus.world_id` — the canonical carrier the conversion seam
 //! uses); a payload without a world id is denied (cannot verify scope).
 //!
+//! ## World-scope gates (V1.153 P1 fix loop)
+//!
+//! Two fail-closed gates sit in front of the orchestrators, both with zero
+//! side effects:
+//!
+//! 1. **Whole-payload world-id requirement (Important):** EVERY
+//!    entry/relation must carry a parseable `extensions.nexus.world_id`.
+//!    If any entry lacks one the WHOLE payload is denied — the old
+//!    filter-and-continue shape let a mixed payload pass the gate and fail
+//!    later in the adapter as a partial-batch write surfaced as
+//!    `internal_error`.
+//! 2. **Stored-world check (Critical):** the orchestrators' stored lookups
+//!    and CAS updates are world-agnostic (id + revision only), so a payload
+//!    claiming world A could otherwise rewrite a row stored in world B by
+//!    replaying the revision the OCC rejects disclose. Before the
+//!    orchestrator CAS runs, every targeted existing row's stored `world_id`
+//!    is verified against the payload-claimed `world_id`; a mismatch denies
+//!    the op.
+//!
 //! ## Async bridge
 //!
 //! The orchestrators are native `async fn` (V1.153 P0 T2) but the handler
@@ -41,10 +60,12 @@
 
 use super::allowlist::PeerScope;
 use libp2p::PeerId;
+use nexus_spoke_adapter::extensions::get_world_id;
 use nexus_spoke_adapter::{
-    orchestrate_promote, orchestrate_relate, orchestrate_upsert, NexusAdapter, PromoteRequest,
-    PromoteResponse, RelateRequest, RelateResponse, SpokeReject, SpokeRejectCode, SpokeResult,
-    UpsertRequest, UpsertResponse,
+    orchestrate_promote, orchestrate_relate, orchestrate_upsert, KnowledgeEntryPort, NexusAdapter,
+    PromoteRequest, PromoteResponse, RelateRequest, RelateResponse, Relation,
+    RelationExtensionsKey, RelationPort, SpokeReject, SpokeRejectCode, SpokeResult, UpsertRequest,
+    UpsertResponse,
 };
 use serde_json::{Map, Value};
 use spoke_connect::InvokeHandler;
@@ -116,9 +137,17 @@ fn dispatch(
     }
 
     // 4. World-scope gate (T1 PeerScope, fail-closed): every target world in
-    //    the payload must be in the peer's `world_scope`; a payload without
-    //    a world id cannot be scoped and is denied.
-    let worlds = payload_world_ids(route, &payload);
+    //    the payload must be in the peer's `world_scope`. Strictness (fix
+    //    loop, Important): EVERY entry/relation must carry a parseable
+    //    `extensions.nexus.world_id` — a payload where any entry lacks one
+    //    denies the WHOLE payload (no filter-and-continue; that shape let a
+    //    mixed payload pass the gate and fail later as a partial write).
+    let Some(worlds) = payload_world_ids(route, &payload) else {
+        return Err(denied(
+            "invoke payload requires extensions.nexus.world_id on every entry/relation; \
+             cannot verify world scope",
+        ));
+    };
     if worlds.is_empty() {
         return Err(denied(
             "invoke payload carries no world id; cannot verify world scope",
@@ -133,12 +162,23 @@ fn dispatch(
         )));
     }
 
-    // 5. Route through the orchestrator. The orchestrators are native async
+    // 5. Stored-world gate (fix loop, Critical): the orchestrators' stored
+    //    lookups and CAS updates are world-agnostic (they match on id +
+    //    revision only), so a payload claiming world A could rewrite a row
+    //    stored in world B by replaying the revision the OCC rejects
+    //    disclose. Before the orchestrator CAS runs, verify every targeted
+    //    existing row's stored world_id equals the payload-claimed world_id;
+    //    a mismatch denies with zero side effects.
+    //
+    // 6. Route through the orchestrator. The orchestrators are native async
     //    fn (V1.153 P0 T2) but this closure is sync on the node's event
     //    loop: bridge with block_in_place + Handle::block_on (multi-thread
     //    runtime; the CLI main and tokio::test default are multi-thread).
     tokio::task::block_in_place(|| {
-        tokio::runtime::Handle::current().block_on(route_orchestrator(route, adapter, payload))
+        tokio::runtime::Handle::current().block_on(async {
+            verify_stored_worlds(adapter, route, &payload).await?;
+            route_orchestrator(route, adapter, payload).await
+        })
     })
 }
 
@@ -196,31 +236,160 @@ fn world_id_of(value: &Value) -> Option<&str> {
 /// the scope gate runs before any typed parse (fail-closed, zero side
 /// effects). `extensions.nexus.world_id` is the canonical carrier the
 /// conversion seam writes on entries/relations.
-fn payload_world_ids(route: Route, payload: &Value) -> Vec<String> {
+///
+/// Strictness (fix loop, Important): EVERY entry/relation must carry a
+/// parseable world id. `None` means the payload cannot be scoped as a whole
+/// — an entry/relation lacks the carrier (or the container is absent) — and
+/// the whole payload is denied. Entries are never filtered out of the set.
+fn payload_world_ids(route: Route, payload: &Value) -> Option<Vec<String>> {
     match route {
-        Route::Upsert => payload
-            .get("knowledge_entries")
-            .and_then(Value::as_array)
-            .map(|entries| {
-                entries
-                    .iter()
-                    .filter_map(|entry| world_id_of(entry).map(str::to_string))
-                    .collect()
-            })
-            .unwrap_or_default(),
-        Route::Promote => payload
-            .get("candidate")
-            .and_then(world_id_of)
-            .map(str::to_string)
-            .into_iter()
-            .collect(),
-        Route::Relate => payload
-            .get("relation")
-            .and_then(world_id_of)
-            .map(str::to_string)
-            .into_iter()
-            .collect(),
+        Route::Upsert => {
+            let entries = payload.get("knowledge_entries")?.as_array()?;
+            let mut worlds = Vec::with_capacity(entries.len());
+            for entry in entries {
+                worlds.push(world_id_of(entry)?.to_string());
+            }
+            Some(worlds)
+        }
+        Route::Promote => {
+            let candidate = payload.get("candidate")?;
+            Some(vec![world_id_of(candidate)?.to_string()])
+        }
+        Route::Relate => {
+            let relation = payload.get("relation")?;
+            Some(vec![world_id_of(relation)?.to_string()])
+        }
     }
+}
+
+/// Verify the stored-world invariant before any orchestrator CAS (fix loop,
+/// Critical): for every payload entry/relation that already exists in
+/// storage, the stored row's `world_id` must equal the payload-claimed
+/// `world_id`. The orchestrators' lookups and CAS updates match on id +
+/// revision only (world-agnostic), so without this gate a peer scoped to
+/// world A could rewrite a row stored in world B by replaying the revision
+/// disclosed by OCC rejects. Denials happen before any write — zero side
+/// effects. Rows that do not exist yet (create paths) carry no stored world
+/// and need no check.
+async fn verify_stored_worlds(
+    adapter: &NexusAdapter<'static>,
+    route: Route,
+    payload: &Value,
+) -> Result<(), ErrorEnvelope> {
+    match route {
+        Route::Upsert => {
+            if let Some(entries) = payload.get("knowledge_entries").and_then(Value::as_array) {
+                for entry in entries {
+                    let Some(entry_id) = entry.get("entry_id").and_then(Value::as_str) else {
+                        // No id ⇒ no stored row can be targeted; the typed
+                        // parse rejects the payload later.
+                        continue;
+                    };
+                    let Some(claimed) = world_id_of(entry) else {
+                        // Unreachable: the world gate (step 4) already
+                        // denied any payload with an entry lacking the id.
+                        // Fail closed rather than skip the check.
+                        return Err(denied(
+                            "entry missing extensions.nexus.world_id; cannot verify stored world",
+                        ));
+                    };
+                    assert_stored_entry_world_matches(adapter, entry_id, claimed).await?;
+                }
+            }
+        }
+        Route::Promote => {
+            if let Some(candidate) = payload.get("candidate") {
+                if let Some(entry_id) = candidate.get("entry_id").and_then(Value::as_str) {
+                    let Some(claimed) = world_id_of(candidate) else {
+                        return Err(denied(
+                            "candidate missing extensions.nexus.world_id; cannot verify stored world",
+                        ));
+                    };
+                    assert_stored_entry_world_matches(adapter, entry_id, claimed).await?;
+                }
+            }
+        }
+        Route::Relate => {
+            if let Some(relation) = payload.get("relation") {
+                if let Some(relation_id) = relation.get("relation_id").and_then(Value::as_str) {
+                    let Some(claimed) = world_id_of(relation) else {
+                        return Err(denied(
+                            "relation missing extensions.nexus.world_id; cannot verify stored world",
+                        ));
+                    };
+                    match adapter.get_relation(relation_id).await {
+                        SpokeResult::Ok(stored) => {
+                            if relation_world_id_of(&stored) != Some(claimed) {
+                                return Err(cross_world_denied(
+                                    "relation",
+                                    relation_id,
+                                    relation_world_id_of(&stored),
+                                    claimed,
+                                ));
+                            }
+                        }
+                        SpokeResult::Reject(reject)
+                            if reject.code == SpokeRejectCode::RelationNotFound => {}
+                        SpokeResult::Reject(reject) => return Err(map_reject(&reject)),
+                    }
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Assert an existing entry's stored `world_id` equals the payload-claimed
+/// `world_id` (fix loop, Critical). A missing stored entry (create path) needs
+/// no check; any other read reject fails closed through the locked reject
+/// mapping (a storage fault must not read as a scope denial).
+async fn assert_stored_entry_world_matches(
+    adapter: &NexusAdapter<'static>,
+    entry_id: &str,
+    claimed: &str,
+) -> Result<(), ErrorEnvelope> {
+    match adapter.get_knowledge_entry(entry_id).await {
+        SpokeResult::Ok(stored) => {
+            let stored_world = get_world_id(&stored);
+            if stored_world != Some(claimed) {
+                return Err(cross_world_denied("entry", entry_id, stored_world, claimed));
+            }
+        }
+        SpokeResult::Reject(reject) if reject.code == SpokeRejectCode::KnowledgeEntryNotFound => {}
+        SpokeResult::Reject(reject) => return Err(map_reject(&reject)),
+    }
+    Ok(())
+}
+
+/// Read `extensions.nexus.world_id` from a stored spoke `Relation` (the
+/// typed map lookup — `RelationExtensionsKey` does not implement
+/// `Borrow<str>`, mirroring the adapter's own extension-key pattern).
+fn relation_world_id_of(relation: &Relation) -> Option<&str> {
+    let key = RelationExtensionsKey::try_from("nexus")
+        .expect("\"nexus\" matches the extensions-key regex");
+    relation
+        .extensions
+        .get(&key)
+        .and_then(|namespace| namespace.get("world_id"))
+        .and_then(Value::as_str)
+}
+
+/// Cross-world stored-mismatch denial: same `op_unsupported` refusal family
+/// as the world-scope gate (the plan's locked code for wrong-world), with a
+/// human-readable reason naming the row and both worlds. No information
+/// about OTHER peers' scopes leaks; the stored world of a row the caller
+/// already targets by id is disclosed (consistent with the OCC rejects,
+/// which already disclose stored revisions).
+fn cross_world_denied(
+    kind: &str,
+    id: &str,
+    stored_world: Option<&str>,
+    claimed: &str,
+) -> ErrorEnvelope {
+    denied(&format!(
+        "stored {kind} {id} belongs to world {}; refusing cross-world write (claimed world {claimed})",
+        stored_world.unwrap_or("<unknown>"),
+    ))
 }
 
 /// Locked `SpokeRejectCode → ErrorEnvelope` mapping (P1 spec § OCC + error
