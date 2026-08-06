@@ -43,6 +43,58 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
+/// Seed a `narrative_worlds` row (plus its `creators` FK row) so the
+/// workspace DB satisfies the WAL-adjacent FK constraints the production
+/// adapter's `put_*` ports hit (PRAGMA foreign_keys = ON).
+async fn seed_world(pool: &sqlx::SqlitePool, creator_id: &str, world_id: &str) {
+    sqlx::query(
+        "INSERT OR IGNORE INTO creators (creator_id, display_name, status, cached_at, data) \
+         VALUES (?, 'test creator', 'active', 'now', '{}')",
+    )
+    .bind(creator_id)
+    .execute(pool)
+    .await
+    .expect("creator seed");
+    // SAFETY: test-only static INSERT with bind params against known schema.
+    sqlx::query(
+        "INSERT OR IGNORE INTO narrative_worlds \
+         (world_id, workspace_id, owner_creator_id, title, slug, status, visibility, time_policy, metadata_json) \
+         VALUES (?, 'wrk_test', ?, ?, ?, 'active', 'private', 'manual', '{}')",
+    )
+    .bind(world_id)
+    .bind(creator_id)
+    .bind(world_id)
+    .bind(world_id)
+    .execute(pool)
+    .await
+    .expect("world seed");
+}
+
+/// A wire-shape `KnowledgeEntry` JSON fixture (the pack-test sample shape +
+/// the `extensions.nexus.world_id` carrier the dispatch gate reads).
+///
+/// `revision: None` serializes to JSON `null` (== absent for the wire
+/// `Option<u64>`), which is the legal create-path shape; the OCC test cases
+/// pass `Some(...)` to drive the update-path revision checks.
+fn entry_fixture(
+    entry_id: &str,
+    canonical_name: &str,
+    world_id: &str,
+    status: &str,
+    revision: Option<u64>,
+) -> serde_json::Value {
+    serde_json::json!({
+        "schema_version": 1,
+        "entry_id": entry_id,
+        "entry_type": "character",
+        "canonical_name": canonical_name,
+        "status": status,
+        "revision": revision,
+        "body": { "summary": format!("{canonical_name} summary") },
+        "extensions": { "nexus": { "world_id": world_id } },
+    })
+}
+
 /// Serializes the network scenarios (see module docs).
 static NETWORK_TEST_LOCK: std::sync::OnceLock<tokio::sync::Mutex<()>> = std::sync::OnceLock::new();
 
@@ -505,8 +557,9 @@ async fn token_required_host_rejects_tokenless_peer_then_accepts_valid_auth() {
 }
 
 /// The CLI wiring end-to-end: persisted identity + allowlist file/overlay +
-/// device-id host_id + shared manifest builder assemble the architect-locked
-/// `ConnectConfig` (exactly `connect start`'s code path) and the node starts.
+/// device-id host_id + shared manifest builder + the N-C1 workspace-DB open +
+/// per-process adapter + invoke handler assemble the full `connect start`
+/// boot path (`build_host_config`) and the node starts.
 #[tokio::test]
 async fn cli_wiring_starts_a_node_with_persisted_identity_and_allowlist() {
     let _guard = network_test_guard().await;
@@ -524,11 +577,16 @@ async fn cli_wiring_starts_a_node_with_persisted_identity_and_allowlist() {
     )
     .expect("write allowlist");
 
-    let (config, host_id, allowlist_len) = super::build_config(
+    // Hermetic workspace DB (the `build_host_config` override seam keeps the
+    // boot out of the real `~/.nexus42` config).
+    let db_path = temp.path().join("workspace").join("state.db");
+    let (config, host_id, allowlist_len) = super::build_host_config(
         home,
         &[cli_peer.to_string()],
         &["/ip4/127.0.0.1/tcp/0".to_string()],
+        Some(&db_path),
     )
+    .await
     .expect("config builds through the CLI path");
 
     // The CLI path resolved a real device id + the file ∪ CLI allowlist.
@@ -544,8 +602,8 @@ async fn cli_wiring_starts_a_node_with_persisted_identity_and_allowlist() {
     expected_allowlist.sort();
     assert_eq!(config.peer_allowlist, expected_allowlist);
     assert!(
-        config.invoke_handler.is_none(),
-        "N-C0 must never install an invoke handler"
+        config.invoke_handler.is_some(),
+        "N-C1 host boot must install the invoke dispatch handler"
     );
     // Manifest fields come from the shared builder (single SSOT).
     let manifest_json = serde_json::to_value(&config.local_manifest).expect("serialize");
@@ -565,4 +623,292 @@ async fn cli_wiring_starts_a_node_with_persisted_identity_and_allowlist() {
     assert!(!node.listen_addrs().is_empty());
 
     node.shutdown().await.expect("node shuts down");
+}
+
+/// N-C1 (V1.153 P1): the Connect invoke dispatch layer end-to-end over the
+/// wire. An allowlisted, world-scoped peer runs the three write ops against
+/// a hermetic workspace DB inside the host process (per-process adapter);
+/// the OCC reject mapping is exercised with a stale-revision second upsert;
+/// wrong-world, absent-scope, and non-served ops are denied with
+/// `op_unsupported` and zero side effects; the session stays usable.
+///
+/// `flavor = "multi_thread"` mirrors the CLI runtime (`connect start` runs
+/// on a multi-thread tokio runtime — the dispatch bridge is
+/// `block_in_place` + `Handle::block_on`, which requires it).
+#[tokio::test(flavor = "multi_thread")]
+async fn n_c1_peer_upserts_promotes_relates_with_world_scoping() {
+    let _guard = network_test_guard().await;
+    let temp = tempfile::tempdir().expect("tempdir");
+    let home = temp.path();
+    let peer_key = fixed_keypair(62);
+    let outsider_key = fixed_keypair(63);
+    let peer_peer = peer_key.public().to_peer_id();
+    let outsider_peer = outsider_key.public().to_peer_id();
+
+    const WORLD_A: &str = "wld_test_a";
+    const WORLD_B: &str = "wld_test_b";
+
+    // Hermetic workspace DB (FK rows for both worlds so the production
+    // adapter's put paths can persist).
+    let db_path = temp.path().join("workspace").join("state.db");
+    let pool = crate::db::Schema::init(&db_path)
+        .await
+        .expect("workspace DB initializes");
+    seed_world(&pool, "ctr_test", WORLD_A).await;
+    seed_world(&pool, "ctr_test", WORLD_B).await;
+
+    // Allowlist file: `peer` is world-scoped to WORLD_A with all three write
+    // ops; `outsider` is allowlisted via the CLI overlay only (no scope ⇒
+    // handshake-ok but every write denied — fail-closed).
+    let allow_path = nexus_home_layout::connect_allowlist_path(home);
+    std::fs::create_dir_all(allow_path.parent().expect("parent dir")).expect("mkdir");
+    std::fs::write(
+        &allow_path,
+        serde_json::json!({ "peer_ids": [{
+            "peer_id": peer_peer.to_string(),
+            "world_scope": [WORLD_A],
+            "op_scope": ["upsert", "promote", "relate"],
+        }] })
+        .to_string(),
+    )
+    .expect("write allowlist");
+
+    // Boot the host through the full N-C1 CLI path (hermetic DB override).
+    // The host identity is the persisted `identity.key` from the temp home —
+    // its real peer id is what the dialing peers must allowlist.
+    let (config, _, _) = super::build_host_config(
+        home,
+        &[outsider_peer.to_string()],
+        &["/ip4/127.0.0.1/tcp/0".to_string()],
+        Some(&db_path),
+    )
+    .await
+    .expect("N-C1 host config builds");
+    let host_peer = config.identity.public().to_peer_id();
+    let host = start(config).await;
+    let peer_node = start(peer_config(peer_key, vec![host_peer])).await;
+    let outsider_node = start(peer_config(outsider_key, vec![host_peer])).await;
+    let session = peer_node
+        .connect(host.listen_addrs()[0].clone())
+        .await
+        .expect("scoped peer handshake");
+    let outsider_session = outsider_node
+        .connect(host.listen_addrs()[0].clone())
+        .await
+        .expect("outsider handshake");
+
+    let peer_claim = serde_json::json!(peer_peer.to_string());
+    let outsider_claim = serde_json::json!(outsider_peer.to_string());
+
+    // 1. upsert round-trip: the scoped peer persists a confirmed entry in
+    // WORLD_A; the response carries the post-create revision (Some(1)).
+    let upsert = session
+        .invoke(
+            "upsert",
+            serde_json::json!({
+                "extensions": { "nexus": { "peer_id": peer_claim } },
+                "knowledge_entries": [entry_fixture("kb_a1", "Mira", WORLD_A, "confirmed", None)],
+            }),
+        )
+        .await
+        .expect("scoped upsert is served");
+    assert_eq!(upsert.payload["knowledge_entries"][0]["entry_id"], "kb_a1");
+    assert_eq!(
+        upsert.payload["knowledge_entries"][0]["revision"], 1,
+        "fresh create must persist with revision 1"
+    );
+    let stored_rev: Option<i64> = sqlx::query_scalar(
+        "SELECT revision FROM kb_key_blocks WHERE world_id = ? AND key_block_id = ?",
+    )
+    .bind(WORLD_A)
+    .bind("kb_a1")
+    .fetch_optional(&pool)
+    .await
+    .expect("read persisted row");
+    assert_eq!(stored_rev, Some(1), "entry persisted in the workspace DB");
+
+    // 2. OCC CAS-accept: an update carrying the current revision (1) passes
+    // the revision match and bumps the persisted revision to 2.
+    let updated = session
+        .invoke(
+            "upsert",
+            serde_json::json!({
+                "extensions": { "nexus": { "peer_id": peer_claim } },
+                "knowledge_entries": [entry_fixture("kb_a1", "Mira", WORLD_A, "confirmed", Some(1))],
+            }),
+        )
+        .await
+        .expect("CAS-accept upsert is served");
+    assert_eq!(updated.payload["knowledge_entries"][0]["revision"], 2);
+    let stored_rev: Option<i64> = sqlx::query_scalar(
+        "SELECT revision FROM kb_key_blocks WHERE world_id = ? AND key_block_id = ?",
+    )
+    .bind(WORLD_A)
+    .bind("kb_a1")
+    .fetch_optional(&pool)
+    .await
+    .expect("read persisted row");
+    assert_eq!(stored_rev, Some(2), "CAS update persisted revision 2");
+
+    // 3. OCC stale: a candidate revision behind the stored revision maps to
+    // the locked `stored_revision_stale` envelope code (retry-safe) and the
+    // stored row is untouched.
+    match session
+        .invoke(
+            "upsert",
+            serde_json::json!({
+                "extensions": { "nexus": { "peer_id": peer_claim } },
+                "knowledge_entries": [entry_fixture("kb_a1", "Mira", WORLD_A, "confirmed", Some(0))],
+            }),
+        )
+        .await
+    {
+        Err(InvokeError::Wire(envelope)) => {
+            assert_eq!(envelope.code, "stored_revision_stale");
+        }
+        other => panic!("stale upsert must reject with stored_revision_stale, got {other:?}"),
+    }
+
+    // 4. OCC conflict: a candidate revision ahead of the stored revision
+    // maps to the locked `revision_conflict` envelope code.
+    match session
+        .invoke(
+            "upsert",
+            serde_json::json!({
+                "extensions": { "nexus": { "peer_id": peer_claim } },
+                "knowledge_entries": [entry_fixture("kb_a1", "Mira", WORLD_A, "confirmed", Some(3))],
+            }),
+        )
+        .await
+    {
+        Err(InvokeError::Wire(envelope)) => {
+            assert_eq!(envelope.code, "revision_conflict");
+        }
+        other => panic!("conflicting upsert must reject with revision_conflict, got {other:?}"),
+    }
+    let stored_rev: Option<i64> = sqlx::query_scalar(
+        "SELECT revision FROM kb_key_blocks WHERE world_id = ? AND key_block_id = ?",
+    )
+    .bind(WORLD_A)
+    .bind("kb_a1")
+    .fetch_optional(&pool)
+    .await
+    .expect("read persisted row");
+    assert_eq!(
+        stored_rev,
+        Some(2),
+        "OCC rejects must not mutate the stored row"
+    );
+
+    // 3. promote round-trip: a fresh provisional candidate is confirmed.
+    let promoted = session
+        .invoke(
+            "promote",
+            serde_json::json!({
+                "extensions": { "nexus": { "peer_id": peer_claim } },
+                "candidate": entry_fixture("kb_a2", "Ashford", WORLD_A, "provisional", None),
+            }),
+        )
+        .await
+        .expect("scoped promote is served");
+    assert_eq!(promoted.payload["knowledge_entry"]["entry_id"], "kb_a2");
+    assert_eq!(promoted.payload["knowledge_entry"]["status"], "confirmed");
+
+    // 4. relate round-trip: a fresh relation between the two entries.
+    let related = session
+        .invoke(
+            "relate",
+            serde_json::json!({
+                "extensions": { "nexus": { "peer_id": peer_claim } },
+                "relation": {
+                    "schema_version": 1,
+                    "relation_id": "rel_a1",
+                    "relation_type": "related_to",
+                    "from_id": "kb_a1",
+                    "to_id": "kb_a2",
+                    "extensions": { "nexus": { "world_id": WORLD_A } },
+                },
+            }),
+        )
+        .await
+        .expect("scoped relate is served");
+    assert_eq!(related.payload["relation"]["relation_id"], "rel_a1");
+    let rel_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM kb_relationships WHERE world_id = ? AND relationship_id = ?",
+    )
+    .bind(WORLD_A)
+    .bind("rel_a1")
+    .fetch_one(&pool)
+    .await
+    .expect("count relation rows");
+    assert_eq!(rel_count, 1, "relation persisted in the workspace DB");
+
+    // 5. Wrong-world denied: the same peer targeting WORLD_B gets
+    // `op_unsupported` and the entry is NOT persisted (zero side effects).
+    match session
+        .invoke(
+            "upsert",
+            serde_json::json!({
+                "extensions": { "nexus": { "peer_id": peer_claim } },
+                "knowledge_entries": [entry_fixture("kb_b1", "Banished", WORLD_B, "confirmed", None)],
+            }),
+        )
+        .await
+    {
+        Err(InvokeError::Wire(envelope)) => {
+            assert_eq!(envelope.code, "op_unsupported", "wrong-world upsert denied");
+        }
+        other => panic!("wrong-world upsert must be denied, got {other:?}"),
+    }
+    let leaked: Option<i64> =
+        sqlx::query_scalar("SELECT 1 FROM kb_key_blocks WHERE world_id = ? AND key_block_id = ?")
+            .bind(WORLD_B)
+            .bind("kb_b1")
+            .fetch_optional(&pool)
+            .await
+            .expect("check for leaked row");
+    assert!(leaked.is_none(), "wrong-world entry must not be persisted");
+
+    // 6. Absent-scope peer denied: the CLI-overlay outsider (no world/op
+    // scope in the file) is handshake-allowlisted but every write is
+    // refused — fail-closed.
+    match outsider_session
+        .invoke(
+            "upsert",
+            serde_json::json!({
+                "extensions": { "nexus": { "peer_id": outsider_claim } },
+                "knowledge_entries": [entry_fixture("kb_x1", "Nobody", WORLD_A, "confirmed", None)],
+            }),
+        )
+        .await
+    {
+        Err(InvokeError::Wire(envelope)) => {
+            assert_eq!(
+                envelope.code, "op_unsupported",
+                "absent-scope peer write denied"
+            );
+        }
+        other => panic!("absent-scope upsert must be denied, got {other:?}"),
+    }
+
+    // 7. Non-served op (N-C0 refusal contract extends into the handler).
+    assert_op_unsupported(&session, "check").await;
+
+    // 8. Denials consume sequences but leave the session open: a served op
+    // still round-trips afterwards.
+    let after = session
+        .invoke(
+            "upsert",
+            serde_json::json!({
+                "extensions": { "nexus": { "peer_id": peer_claim } },
+                "knowledge_entries": [entry_fixture("kb_a3", "Rook", WORLD_A, "confirmed", None)],
+            }),
+        )
+        .await
+        .expect("session stays usable after denials");
+    assert_eq!(after.payload["knowledge_entries"][0]["entry_id"], "kb_a3");
+
+    host.shutdown().await.expect("host shuts down");
+    peer_node.shutdown().await.expect("peer shuts down");
+    outsider_node.shutdown().await.expect("outsider shuts down");
 }

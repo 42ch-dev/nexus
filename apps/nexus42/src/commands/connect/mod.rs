@@ -1,10 +1,13 @@
-//! Connect Host commands (DF-72 N-C0) — opt-in feature `connect-host`.
+//! Connect Host commands (DF-72 N-C0 → N-C1) — opt-in feature `connect-host`.
 //!
 //! `nexus42 connect start` runs a `spoke-connect` node in a **separate OS
 //! process** (architect lock Q7): signed-hello handshake, allowlist,
-//! honest `HostCapabilityManifest`, and **every inbound op refused** via
-//! `invoke_handler = None` (architect lock — no `NexusAdapter` on the
-//! connect invoke path; N-C1 is a Non-Goal).
+//! honest `HostCapabilityManifest`, and — since V1.153 P1 (N-C1) — an
+//! inbound **write-op invoke dispatcher** ([`invoke`]) backed by a
+//! per-process `NexusAdapter` over the active workspace DB. Every op the
+//! host does not serve (`check` / `assemble` / `project` / `compute` /
+//! unknown) is refused with `op_unsupported` (the N-C0 refusal contract
+//! extends); non-allowlisted peers never reach the handler (handshake).
 //!
 //! Topology rules (product draft `fl-r-connect-host-foundation.md` §2.1/§2.6):
 //! - mDNS is **never** enabled (`spoke-connect/mdns` not in the feature set).
@@ -12,19 +15,27 @@
 //!   `connect start` does (feature-on binary still keeps the daemon unchanged).
 //! - Identity + allowlist persist under `~/.nexus42/connect/` (home-layout
 //!   path helpers); missing allowlist ⇒ fail-closed (rejects all peers).
+//! - N-C1 coexistence with a co-running daemon/CLI is governed by the
+//!   `SQLite` WAL mode (1 writer + N readers, `DbPool` busy timeout) — the
+//!   per-Work `nexus-local-db` `runtime_lock` is daemon-internal and the
+//!   Connect invoke path never acquires it (P1 spec § Process model,
+//!   corrected). Same-entry write correctness is the orchestrators' OCC CAS.
 
 pub mod allowlist;
 pub mod identity;
+// V1.153 P1 N-C1: the `InvokeHandler` closure (architect-locked home).
+pub mod invoke;
 
 use crate::errors::{CliError, Result};
 use clap::Subcommand;
 use libp2p::Multiaddr;
 use nexus_home_layout::device_id::get_or_create_device_id;
 use nexus_spoke_adapter::manifest::build_connect_hello_manifest;
-use nexus_spoke_adapter::SpokeResult;
+use nexus_spoke_adapter::{NexusAdapter, SpokeResult};
 use spoke_connect::{parse_multiaddr, ConnectConfig, SpokeConnectNode};
 use std::collections::HashMap;
 use std::path::Path;
+use std::sync::Arc;
 
 /// Default listen multiaddr when `--listen` is not given (loopback only —
 /// binding a routable interface is an explicit operator choice, N-C0 §5.3).
@@ -33,7 +44,8 @@ const DEFAULT_LISTEN: &str = "/ip4/127.0.0.1/tcp/0";
 /// Connect Host subcommands.
 #[derive(Debug, Subcommand)]
 pub enum ConnectCommand {
-    /// Start the Connect Host node (N-C0: handshake + manifest; all ops refused)
+    /// Start the Connect Host node (N-C1: handshake + manifest + world-scoped
+    /// upsert/promote/relate invoke dispatch; all other ops refused)
     Start {
         /// Peer IDs to allowlist for this run (repeatable; unioned with
         /// `~/.nexus42/connect/allowlist.json`).
@@ -56,27 +68,27 @@ pub async fn run(command: ConnectCommand) -> Result<()> {
     }
 }
 
-/// Wire the N-C0 `ConnectConfig` exactly per the architect lock:
-/// `invoke_handler = None` (every inbound invoke answered `op_unsupported`),
-/// empty `op_capability_requirements` / `trusted_issuers`,
-/// `require_capability_token = false`, provider `None`, handshake timeout
-/// default, mDNS not compiled. The manifest comes from the **single builder
-/// SSOT** shared with `HostManifestPort` (JSON round-trip to the
-/// `connect_hello` wire type).
+/// Run the full N-C1 `connect start` boot: the N-C0 assembly
+/// ([`build_config`]) + the active-workspace DB open + the per-process
+/// `NexusAdapter` + the [`invoke::build_handler`] wiring — exactly the
+/// shared boot shape the P1 spec § Process model locks (shared with
+/// `nexus-runtime` in P2). Every inbound op that is not served is answered
+/// `op_unsupported` by the handler (N-C0 refusal contract extends).
 async fn start(allow_peer: Vec<String>, listen: Vec<String>) -> Result<()> {
     // Raw home: the home-layout identity/allowlist helpers join `.nexus42`
     // themselves. The device-id resolution mirrors `host_manifest_port`
     // exactly so the Connect host_id is the SAME value HostManifestPort
     // advertises (single builder SSOT).
     let home = crate::config::user_home_dir()?;
-    let (config, host_id, allowlist_len) = build_config(&home, &allow_peer, &listen)?;
+    let (config, host_id, allowlist_len) =
+        build_host_config(&home, &allow_peer, &listen, None).await?;
 
     // 7. Start the node; block on the tokio runtime until SIGINT.
     let node = SpokeConnectNode::start(config)
         .await
         .map_err(|e| CliError::Config(format!("connect node start failed: {e}")))?;
 
-    eprintln!("nexus42 connect start: Connect Host (N-C0) listening");
+    eprintln!("nexus42 connect start: Connect Host (N-C1) listening");
     eprintln!("  peer_id: {}", node.local_peer_id());
     eprintln!("  host_id: {host_id}");
     for addr in node.listen_addrs() {
@@ -85,7 +97,9 @@ async fn start(allow_peer: Vec<String>, listen: Vec<String>) -> Result<()> {
     eprintln!(
         "  allowlisted peers: {allowlist_len} (fail-closed; add via allowlist.json or --allow-peer)"
     );
-    eprintln!("  invokes: all refused (op_unsupported; invoke_handler = None)");
+    eprintln!(
+        "  invokes: upsert/promote/relate served (world-scoped); all other ops refused (op_unsupported)"
+    );
     eprintln!("  press Ctrl-C to stop");
 
     tokio::signal::ctrl_c()
@@ -99,7 +113,9 @@ async fn start(allow_peer: Vec<String>, listen: Vec<String>) -> Result<()> {
 }
 
 /// Assemble the architect-locked N-C0 `ConnectConfig` from the on-disk
-/// state + CLI inputs (steps 1–6 of `start`).
+/// state + CLI inputs (steps 1–6 of `start`). The N-C1 pieces (workspace DB
+/// open + adapter + invoke handler) are added by [`build_host_config`], so
+/// this function stays pure (no I/O beyond the identity/allowlist reads).
 ///
 /// `home` is the **raw** user home (`$HOME`): identity/allowlist helpers
 /// join `.nexus42` themselves. The device-id is resolved via
@@ -107,8 +123,9 @@ async fn start(allow_peer: Vec<String>, listen: Vec<String>) -> Result<()> {
 /// `host_manifest_port::resolve_device_id_from_standard_home` uses, so the
 /// Connect `host_id` always equals the manifest's `host_id`.
 ///
-/// Returns the config, the resolved `host_id` (for start-up logging), and
-/// the effective allowlist length.
+/// Returns the config, the resolved `host_id` (for start-up logging), the
+/// effective allowlist length, and the resolved `PeerScope` (consumed by the
+/// N-C1 dispatch gate in [`invoke`]).
 ///
 /// # Errors
 /// [`CliError`] on identity/allowlist/manifest/listen failures — see the
@@ -117,7 +134,7 @@ fn build_config(
     home: &Path,
     allow_peer: &[String],
     listen: &[String],
-) -> Result<(ConnectConfig, String, usize)> {
+) -> Result<(ConnectConfig, String, usize, allowlist::PeerScope)> {
     // 1. Identity: `~/.nexus42/connect/identity.key` (Ed25519, create-once 0600).
     let identity = identity::load_or_create_identity(home)?;
 
@@ -130,7 +147,7 @@ fn build_config(
 
     // 3. Allowlist: file ∪ `--allow-peer*`; missing file ⇒ empty ⇒ fail-closed.
     //    `load` resolves the N-C1 `PeerScope` (per-peer world/op scope for
-    //    the T2 dispatch gate); the flat id set feeds the handshake allowlist.
+    //    the dispatch gate); the flat id set feeds the handshake allowlist.
     let peer_scope = allowlist::load(home, allow_peer)?;
     let peer_allowlist = peer_scope.peer_ids();
     let allowlist_len = peer_allowlist.len();
@@ -155,7 +172,8 @@ fn build_config(
         }
     };
 
-    // 6. Architect-locked ConnectConfig (N-C0: no inbound op dispatch).
+    // 6. Architect-locked ConnectConfig (the invoke handler is installed by
+    //    build_host_config once the workspace adapter exists).
     let config = ConnectConfig {
         identity,
         peer_allowlist,
@@ -168,7 +186,65 @@ fn build_config(
         require_capability_token: false,
         capability_token_provider: None,
     };
+    Ok((config, host_id, allowlist_len, peer_scope))
+}
+
+/// Full N-C1 host boot: [`build_config`] + active-workspace DB open +
+/// per-process `NexusAdapter` + [`invoke::build_handler`] wiring — the exact
+/// shape `connect start` runs (and `nexus-runtime` shares in P2).
+///
+/// `workspace_db` overrides the resolved active-workspace DB path (hermetic
+/// tests); `None` resolves it by the daemon rules: active workspace from the
+/// `~/.nexus42` `CliConfig` (`active_creator_id` +
+/// `active_workspace_slug_by_creator` → `resolve_state_db_path`).
+///
+/// # Errors
+/// [`CliError`] on N-C0 assembly, workspace resolution, or DB open failures.
+async fn build_host_config(
+    home: &Path,
+    allow_peer: &[String],
+    listen: &[String],
+    workspace_db: Option<&Path>,
+) -> Result<(ConnectConfig, String, usize)> {
+    let (mut config, host_id, allowlist_len, peer_scope) = build_config(home, allow_peer, listen)?;
+
+    // N-C1: workspace DB open (WAL pool via the shared Schema initializer —
+    // coexistence with a co-running daemon is WAL-governed, not
+    // runtime_lock-governed; P1 spec § Process model) + the per-process
+    // adapter singleton + the invoke dispatch handler.
+    let pool = open_workspace_pool(workspace_db).await?;
+    let adapter = Arc::new(NexusAdapter::new(pool));
+    config.invoke_handler = Some(invoke::build_handler(peer_scope, adapter));
+
     Ok((config, host_id, allowlist_len))
+}
+
+/// Open the active-workspace `SQLite` pool (WAL mode, migrations applied) —
+/// the `DbPool` the per-process `NexusAdapter` runs against.
+///
+/// `workspace_db` is a test/embedding seam; `None` resolves the path by the
+/// daemon rules (active workspace from `~/.nexus42` config).
+///
+/// # Errors
+/// [`CliError::Config`] when the active workspace cannot be resolved
+/// (fail-closed: the host refuses to boot without a workspace), or
+/// [`CliError`] from the DB open/migration path.
+async fn open_workspace_pool(workspace_db: Option<&Path>) -> Result<sqlx::SqlitePool> {
+    let db_path = if let Some(path) = workspace_db {
+        path.to_path_buf()
+    } else {
+        let config = crate::config::CliConfig::load()
+            .map_err(|e| CliError::Config(format!("active workspace resolution failed: {e}")))?;
+        crate::config::resolve_state_db_path(&config)
+            .map_err(|e| CliError::Config(format!("active workspace resolution failed: {e}")))?
+    };
+    let pool = crate::db::Schema::init(&db_path).await.map_err(|e| {
+        CliError::Other(format!(
+            "workspace DB open failed at {}: {e}",
+            db_path.display()
+        ))
+    })?;
+    Ok(pool)
 }
 
 #[cfg(all(test, feature = "connect-host"))]
