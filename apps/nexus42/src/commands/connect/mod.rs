@@ -208,6 +208,13 @@ async fn build_host_config(
 ) -> Result<(ConnectConfig, String, usize)> {
     let (mut config, host_id, allowlist_len, peer_scope) = build_config(home, allow_peer, listen)?;
 
+    // Plan QC (QC2 W-1) cheap hardening: warn at boot when more than one
+    // allowlisted peer holds write scope — the per-invoke caller peer_id is
+    // payload-carried (spoofable), so per-peer scoping silently degrades to
+    // the union of all scopes. Warning only (not a refusal): the operator
+    // may have a legitimate reason; the E2 fix is session-bound identity.
+    allowlist::warn_multi_write_peer(&peer_scope, &mut std::io::stderr());
+
     // N-C1: workspace DB open (WAL pool via the shared Schema initializer —
     // coexistence with a co-running daemon is WAL-governed, not
     // runtime_lock-governed; P1 spec § Process model) + the per-process

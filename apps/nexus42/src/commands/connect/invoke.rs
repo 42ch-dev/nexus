@@ -45,7 +45,12 @@
 //!    replaying the revision the OCC rejects disclose. Before the
 //!    orchestrator CAS runs, every targeted existing row's stored `world_id`
 //!    is verified against the payload-claimed `world_id`; a mismatch denies
-//!    the op.
+//!    the op. The relate **create** path additionally verifies its
+//!    endpoints (plan QC, QC1 F-001 / QC2 W-2): `from_id` / `to_id` must
+//!    exist and their stored worlds must equal the claimed world —
+//!    `kb_relationships` FKs are single-column on `key_block_id`, so a
+//!    world-A relation row could otherwise legally reference world-B
+//!    entries (cross-world edge + id-existence oracle).
 //!
 //! ## Async bridge
 //!
@@ -294,8 +299,15 @@ fn payload_world_ids(route: Route, payload: &Value) -> Option<Vec<String>> {
 /// revision only (world-agnostic), so without this gate a peer scoped to
 /// world A could rewrite a row stored in world B by replaying the revision
 /// disclosed by OCC rejects. Denials happen before any write — zero side
-/// effects. Rows that do not exist yet (create paths) carry no stored world
-/// and need no check.
+/// effects.
+///
+/// Create paths carry no stored *target row*, but the relate create path
+/// still has stored **endpoints**: `kb_relationships` FKs are single-column
+/// on `key_block_id` (world-agnostic), so a new relation row claimed in
+/// world A must not reference entries stored in world B (plan QC, QC1
+/// F-001 / QC2 W-2) — `from_id` / `to_id` are resolved and their stored
+/// worlds must equal the claimed world; mismatch or missing endpoint denies
+/// the whole payload with zero insert.
 async fn verify_stored_worlds(
     adapter: &NexusAdapter<'static>,
     route: Route,
@@ -354,7 +366,33 @@ async fn verify_stored_worlds(
                             }
                         }
                         SpokeResult::Reject(reject)
-                            if reject.code == SpokeRejectCode::RelationNotFound => {}
+                            if reject.code == SpokeRejectCode::RelationNotFound =>
+                        {
+                            // Create path (plan QC, QC1 F-001 / QC2 W-2):
+                            // no relation row exists yet, so the stored-row
+                            // check above is a no-op — but the INSERT's FKs
+                            // are single-column on `key_block_id` (world-
+                            // agnostic), so a new world-A relation could
+                            // legally reference world-B entries. Endpoints
+                            // are immutable on the update path (the update
+                            // port carries no endpoint fields), so this
+                            // create-path check is what closes the
+                            // cross-world-edge gap: require each endpoint's
+                            // stored world to equal the claimed world;
+                            // mismatch or missing endpoint denies the whole
+                            // payload with zero insert.
+                            for endpoint in ["from_id", "to_id"] {
+                                let Some(endpoint_id) =
+                                    relation.get(endpoint).and_then(Value::as_str)
+                                else {
+                                    return Err(denied(&format!(
+                                        "relation missing {endpoint}; cannot verify endpoint world"
+                                    )));
+                                };
+                                assert_relate_endpoint_world_matches(adapter, endpoint_id, claimed)
+                                    .await?;
+                            }
+                        }
                         SpokeResult::Reject(reject) => return Err(map_reject(&reject)),
                     }
                 }
@@ -381,6 +419,42 @@ async fn assert_stored_entry_world_matches(
             }
         }
         SpokeResult::Reject(reject) if reject.code == SpokeRejectCode::KnowledgeEntryNotFound => {}
+        SpokeResult::Reject(reject) => return Err(map_reject(&reject)),
+    }
+    Ok(())
+}
+
+/// Assert a relate create-path endpoint exists in storage AND its stored
+/// `world_id` equals the relation's claimed world (plan QC, QC1 F-001 /
+/// QC2 W-2). Unlike [`assert_stored_entry_world_matches`] (whose create
+/// paths legitimately reference not-yet-stored rows), a relate endpoint
+/// MUST exist: `kb_relationships` FKs are single-column on `key_block_id`,
+/// so a missing endpoint would otherwise persist a dangling edge or
+/// surface as an FK `internal_error` — an id-existence oracle via insert
+/// success vs FK-failure differential. Denied like the stored-world gate:
+/// `op_unsupported` family, zero insert.
+async fn assert_relate_endpoint_world_matches(
+    adapter: &NexusAdapter<'static>,
+    endpoint_id: &str,
+    claimed: &str,
+) -> Result<(), ErrorEnvelope> {
+    match adapter.get_knowledge_entry(endpoint_id).await {
+        SpokeResult::Ok(stored) => {
+            let stored_world = get_world_id(&stored);
+            if stored_world != Some(claimed) {
+                return Err(cross_world_denied(
+                    "entry",
+                    endpoint_id,
+                    stored_world,
+                    claimed,
+                ));
+            }
+        }
+        SpokeResult::Reject(reject) if reject.code == SpokeRejectCode::KnowledgeEntryNotFound => {
+            return Err(denied(&format!(
+                "relation endpoint {endpoint_id} does not exist; cannot verify its world"
+            )));
+        }
         SpokeResult::Reject(reject) => return Err(map_reject(&reject)),
     }
     Ok(())

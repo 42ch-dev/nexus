@@ -1456,3 +1456,177 @@ async fn n_c1_every_served_op_advertised_by_the_const_actually_routes() {
     host.shutdown().await.expect("host shuts down");
     peer_node.shutdown().await.expect("peer shuts down");
 }
+
+/// N-C1 fix loop (plan QC, QC1 F-001 + QC2 W-2 regression): the relate
+/// CREATE path used to skip the stored-world gate entirely — the relation
+/// row does not exist yet, so the relation-row world check is a no-op, and
+/// `kb_relationships` FKs are single-column on `key_block_id` (world-
+/// agnostic). A peer scoped ONLY to WORLD_A could therefore mint a world-A
+/// relation whose endpoints are world-B entry ids (cross-world edge + an
+/// id-existence oracle via insert success vs FK/`internal_error`
+/// differential). The gate must resolve `from_id` / `to_id` on the create
+/// path and require their stored worlds to equal the claimed relation
+/// world; mismatch or missing endpoint denies the whole payload with zero
+/// insert. Endpoints are immutable on the update path (the update port
+/// carries no endpoint fields), so the create-path check closes the gap.
+#[tokio::test(flavor = "multi_thread")]
+async fn n_c1_relate_create_rejects_foreign_world_endpoints() {
+    let _guard = network_test_guard().await;
+    let temp = tempfile::tempdir().expect("tempdir");
+    let home = temp.path();
+    let peer_key = fixed_keypair(67);
+    let peer_peer = peer_key.public().to_peer_id();
+
+    const WORLD_A: &str = "wld_test_a";
+    const WORLD_B: &str = "wld_test_b";
+
+    // Hermetic workspace DB with both worlds seeded.
+    let db_path = temp.path().join("workspace").join("state.db");
+    let pool = crate::db::Schema::init(&db_path)
+        .await
+        .expect("workspace DB initializes");
+    seed_world(&pool, "ctr_test", WORLD_A).await;
+    seed_world(&pool, "ctr_test", WORLD_B).await;
+
+    // Endpoint rows: a same-world pair in WORLD_A and a foreign pair in
+    // WORLD_B (the peer is scoped to WORLD_A only — the world-B entries
+    // must be unreachable as relation endpoints).
+    seed_key_block(&pool, "kb_a_e1", WORLD_A, "Mira", "confirmed", 1).await;
+    seed_key_block(&pool, "kb_a_e2", WORLD_A, "Ashford", "confirmed", 1).await;
+    seed_key_block(&pool, "kb_b_e1", WORLD_B, "Banished", "confirmed", 1).await;
+    seed_key_block(&pool, "kb_b_e2", WORLD_B, "Seer", "confirmed", 1).await;
+
+    // Allowlist file: the peer is world-scoped to WORLD_A only.
+    let allow_path = nexus_home_layout::connect_allowlist_path(home);
+    std::fs::create_dir_all(allow_path.parent().expect("parent dir")).expect("mkdir");
+    std::fs::write(
+        &allow_path,
+        serde_json::json!({ "peer_ids": [{
+            "peer_id": peer_peer.to_string(),
+            "world_scope": [WORLD_A],
+            "op_scope": ["upsert", "promote", "relate"],
+        }] })
+        .to_string(),
+    )
+    .expect("write allowlist");
+
+    let (config, _, _) = super::build_host_config(
+        home,
+        &[],
+        &["/ip4/127.0.0.1/tcp/0".to_string()],
+        Some(&db_path),
+    )
+    .await
+    .expect("N-C1 host config builds");
+    let host_peer = config.identity.public().to_peer_id();
+    let host = start(config).await;
+    let peer_node = start(peer_config(peer_key, vec![host_peer])).await;
+    let session = peer_node
+        .connect(host.listen_addrs()[0].clone())
+        .await
+        .expect("scoped peer handshake");
+    let peer_claim = serde_json::json!(peer_peer.to_string());
+
+    let relate_payload = |relation_id: &str, from_id: &str, to_id: &str| {
+        serde_json::json!({
+            "extensions": { "nexus": { "peer_id": peer_claim } },
+            "relation": {
+                "schema_version": 1,
+                "relation_id": relation_id,
+                "relation_type": "related_to",
+                "from_id": from_id,
+                "to_id": to_id,
+                "extensions": { "nexus": { "world_id": WORLD_A } },
+            },
+        })
+    };
+
+    // 1. Both endpoints in WORLD_B: denied (`op_unsupported` family).
+    match session
+        .invoke("relate", relate_payload("rel_new_b", "kb_b_e1", "kb_b_e2"))
+        .await
+    {
+        Err(InvokeError::Wire(envelope)) => {
+            assert_eq!(
+                envelope.code, "op_unsupported",
+                "cross-world relate create must be denied"
+            );
+        }
+        other => panic!("cross-world relate create must be denied, got {other:?}"),
+    }
+
+    // 2. Mixed endpoints (from WORLD_A, to WORLD_B): denied — BOTH
+    //    endpoints must be verified, not just the first.
+    match session
+        .invoke(
+            "relate",
+            relate_payload("rel_new_mix", "kb_a_e1", "kb_b_e1"),
+        )
+        .await
+    {
+        Err(InvokeError::Wire(envelope)) => {
+            assert_eq!(
+                envelope.code, "op_unsupported",
+                "mixed-world relate create must be denied"
+            );
+        }
+        other => panic!("mixed-world relate create must be denied, got {other:?}"),
+    }
+
+    // 3. Missing endpoint (no stored row at all): denied — never surfaced
+    //    as an FK/`internal_error` id-existence oracle.
+    match session
+        .invoke(
+            "relate",
+            relate_payload("rel_new_ghost", "kb_ghost", "kb_a_e1"),
+        )
+        .await
+    {
+        Err(InvokeError::Wire(envelope)) => {
+            assert_eq!(
+                envelope.code, "op_unsupported",
+                "relate to a missing endpoint must be denied"
+            );
+        }
+        other => panic!("relate to a missing endpoint must be denied, got {other:?}"),
+    }
+
+    // Zero inserts: none of the denied relations persisted.
+    let count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM kb_relationships \
+         WHERE relationship_id IN ('rel_new_b', 'rel_new_mix', 'rel_new_ghost')",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("count relation rows");
+    assert_eq!(count, 0, "denied relates must insert zero rows");
+
+    // 4. Same-world relate (both endpoints in WORLD_A) still succeeds —
+    //    denials consumed sequences but the session stays usable and the
+    //    legitimate create path is not over-blocked.
+    let ok = session
+        .invoke("relate", relate_payload("rel_new_a", "kb_a_e1", "kb_a_e2"))
+        .await
+        .expect("same-world relate create is served");
+    assert_eq!(ok.payload["relation"]["relation_id"], "rel_new_a");
+    let stored: (String, String, String) = sqlx::query_as(
+        "SELECT world_id, source_entity_id, target_entity_id FROM kb_relationships \
+         WHERE relationship_id = ?",
+    )
+    .bind("rel_new_a")
+    .fetch_one(&pool)
+    .await
+    .expect("read persisted relation");
+    assert_eq!(
+        stored,
+        (
+            WORLD_A.to_string(),
+            "kb_a_e1".to_string(),
+            "kb_a_e2".to_string()
+        ),
+        "same-world relation persisted in the claimed world"
+    );
+
+    host.shutdown().await.expect("host shuts down");
+    peer_node.shutdown().await.expect("peer shuts down");
+}
