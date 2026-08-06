@@ -195,3 +195,6 @@ tooling/codegen/.schemas-dereferenced/
 # Tracked (results): .mstar/AGENTS.md, .mstar/knowledge/, .mstar/specs/
 # Keep in sync with `.mstar/.gitignore` and `.mstar/AGENTS.md`.
 .agents/sdd/
+
+# Local EPIC roadmaps (user-directed; not specs/knowledge corpus)
+.mstar/references/
