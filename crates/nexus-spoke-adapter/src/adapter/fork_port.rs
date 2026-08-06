@@ -26,11 +26,13 @@ use super::NexusAdapter;
 use crate::{
     ForkTimelineQueryPort, Scope, SpokeReject, SpokeRejectCode, SpokeResult, TimelineEvent,
 };
+use async_trait::async_trait;
 use nexus_local_db::narrative_gateway::list_timeline_events_scoped;
 use serde_json::{json, Map, Value};
 
+#[async_trait]
 impl ForkTimelineQueryPort for NexusAdapter<'_> {
-    fn list_fork_timeline_events(&self, scope: &Scope) -> SpokeResult<Vec<TimelineEvent>> {
+    async fn list_fork_timeline_events(&self, scope: &Scope) -> SpokeResult<Vec<TimelineEvent>> {
         // ── fork_id is required for fork-scoped queries ─────────────────
         let fork_id: String = match &scope.fork_id {
             Some(fid) => fid.to_string(),
@@ -47,69 +49,65 @@ impl ForkTimelineQueryPort for NexusAdapter<'_> {
         let world_id = scope.scope_id.clone();
         let timeline_event_ids = scope.timeline_event_ids.clone();
 
-        self.block_on(async move {
-            // ── Validate world existence (unknown fork → reject, not empty) ──
-            // SAFETY: runtime query for existence check — SELECT 1 pattern,
-            // single bind parameter. Do NOT use unwrap_or(false) — a storage
-            // failure (dropped table, SQLite file error) must surface as
-            // InternalError, not silently become "unknown world" InvalidInput.
-            let world_exists: bool = match sqlx::query_scalar(
-                "SELECT EXISTS(SELECT 1 FROM narrative_worlds WHERE world_id = ?)",
-            )
-            .bind(&world_id)
-            .fetch_one(&pool)
-            .await
-            {
-                Ok(exists) => exists,
-                Err(e) => {
-                    return reject(
-                        SpokeRejectCode::InternalError,
-                        format!(
-                            "storage error checking world existence for {world_id}: {e}"
-                        ),
-                        json!({ "scope_id": world_id, "fork_id": fork_id }),
-                    );
-                }
-            };
-
-            if !world_exists {
+        // ── Validate world existence (unknown fork → reject, not empty) ──
+        // SAFETY: runtime query for existence check — SELECT 1 pattern,
+        // single bind parameter. Do NOT use unwrap_or(false) — a storage
+        // failure (dropped table, SQLite file error) must surface as
+        // InternalError, not silently become "unknown world" InvalidInput.
+        let world_exists: bool = match sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM narrative_worlds WHERE world_id = ?)",
+        )
+        .bind(&world_id)
+        .fetch_one(&pool)
+        .await
+        {
+            Ok(exists) => exists,
+            Err(e) => {
                 return reject(
-                    SpokeRejectCode::InvalidInput,
-                    format!(
-                        "fork scope references unknown world {world_id}; fork_id {fork_id} cannot be resolved"
-                    ),
+                    SpokeRejectCode::InternalError,
+                    format!("storage error checking world existence for {world_id}: {e}"),
                     json!({ "scope_id": world_id, "fork_id": fork_id }),
                 );
             }
+        };
 
-            // ── Query timeline events with fork_id as branch filter ─────
-            // Decision 3 mapping: scope.fork_id → branch_id in
-            // narrative_timeline_events. Pass fork_id as branch_id to the
-            // same production read primitive used by ScopeQueryPort.
-            let rows = match list_timeline_events_scoped(
-                &pool,
-                &world_id,
-                Some(&fork_id),
-                &timeline_event_ids,
-            )
-            .await
-            {
-                Ok(rows) => rows,
-                Err(e) => {
-                    return reject(
-                        SpokeRejectCode::InternalError,
-                        format!("storage error on list_fork_timeline_events: {e}"),
-                        json!({ "scope_id": world_id, "fork_id": fork_id }),
-                    );
-                }
-            };
+        if !world_exists {
+            return reject(
+                SpokeRejectCode::InvalidInput,
+                format!(
+                    "fork scope references unknown world {world_id}; fork_id {fork_id} cannot be resolved"
+                ),
+                json!({ "scope_id": world_id, "fork_id": fork_id }),
+            );
+        }
 
-            // ── Convert via V1.143 seam (same as ScopeQueryPort) ────────
-            // The `From<nexus_narrative::TimelineEvent>` impl packs the 7
-            // typed nexus fields into extensions.nexus (spec §7.1).
-            let wire: Vec<TimelineEvent> = rows.into_iter().map(Into::into).collect();
-            SpokeResult::Ok(wire)
-        })
+        // ── Query timeline events with fork_id as branch filter ─────
+        // Decision 3 mapping: scope.fork_id → branch_id in
+        // narrative_timeline_events. Pass fork_id as branch_id to the
+        // same production read primitive used by ScopeQueryPort.
+        let rows = match list_timeline_events_scoped(
+            &pool,
+            &world_id,
+            Some(&fork_id),
+            &timeline_event_ids,
+        )
+        .await
+        {
+            Ok(rows) => rows,
+            Err(e) => {
+                return reject(
+                    SpokeRejectCode::InternalError,
+                    format!("storage error on list_fork_timeline_events: {e}"),
+                    json!({ "scope_id": world_id, "fork_id": fork_id }),
+                );
+            }
+        };
+
+        // ── Convert via V1.143 seam (same as ScopeQueryPort) ────────
+        // The `From<nexus_narrative::TimelineEvent>` impl packs the 7
+        // typed nexus fields into extensions.nexus (spec §7.1).
+        let wire: Vec<TimelineEvent> = rows.into_iter().map(Into::into).collect();
+        SpokeResult::Ok(wire)
     }
 }
 
@@ -238,7 +236,7 @@ mod tests {
 
         // Query fbk_main branch — should return 2 events (evt_fk_0, evt_fk_1)
         let scope = fork_scope(&world_id, "fbk_main", &[]);
-        let events = match adapter.list_fork_timeline_events(&scope) {
+        let events = match adapter.list_fork_timeline_events(&scope).await {
             SpokeResult::Ok(v) => v,
             SpokeResult::Reject(r) => panic!("expected ok, got reject: {r:?}"),
         };
@@ -250,7 +248,7 @@ mod tests {
 
         // Query fbk_alt branch — should return 1 event (evt_fk_2)
         let scope_alt = fork_scope(&world_id, "fbk_alt", &[]);
-        let events_alt = match adapter.list_fork_timeline_events(&scope_alt) {
+        let events_alt = match adapter.list_fork_timeline_events(&scope_alt).await {
             SpokeResult::Ok(v) => v,
             SpokeResult::Reject(r) => panic!("expected ok, got reject: {r:?}"),
         };
@@ -274,7 +272,7 @@ mod tests {
         // but the world does exist. Per Decision 3: an empty event list
         // for a real world IS Ok(vec![]).
         let scope = fork_scope(&world_id, "fbk_empty", &[]);
-        let events = match adapter.list_fork_timeline_events(&scope) {
+        let events = match adapter.list_fork_timeline_events(&scope).await {
             SpokeResult::Ok(v) => v,
             SpokeResult::Reject(r) => panic!("expected ok, got reject: {r:?}"),
         };
@@ -289,7 +287,7 @@ mod tests {
 
         let adapter = NexusAdapter::new(pool);
         let scope = fork_scope("wld_nonexistent", "fbk_any", &[]);
-        match adapter.list_fork_timeline_events(&scope) {
+        match adapter.list_fork_timeline_events(&scope).await {
             SpokeResult::Ok(_) => panic!("unknown world must reject, not return Ok"),
             SpokeResult::Reject(r) => {
                 assert_eq!(
@@ -321,7 +319,7 @@ mod tests {
         }))
         .expect("minimal scope is schema-valid");
 
-        match adapter.list_fork_timeline_events(&scope) {
+        match adapter.list_fork_timeline_events(&scope).await {
             SpokeResult::Ok(_) => panic!("missing fork_id must reject"),
             SpokeResult::Reject(r) => {
                 assert_eq!(
@@ -347,7 +345,7 @@ mod tests {
 
         let adapter = NexusAdapter::new(pool);
         let scope = fork_scope(&world_id, "fbk_main", &[&event_ids[0]]);
-        let events = match adapter.list_fork_timeline_events(&scope) {
+        let events = match adapter.list_fork_timeline_events(&scope).await {
             SpokeResult::Ok(v) => v,
             SpokeResult::Reject(r) => panic!("expected ok, got reject: {r:?}"),
         };
@@ -368,7 +366,7 @@ mod tests {
 
         let adapter = NexusAdapter::new(pool);
         let scope = fork_scope(&world_id, "fbk_main", &[]);
-        let events = match adapter.list_fork_timeline_events(&scope) {
+        let events = match adapter.list_fork_timeline_events(&scope).await {
             SpokeResult::Ok(v) => v,
             SpokeResult::Reject(r) => panic!("expected ok, got reject: {r:?}"),
         };
@@ -421,7 +419,7 @@ mod tests {
 
         let adapter = NexusAdapter::new(pool);
         let scope = fork_scope(&world_id, "fbk_main", &[]);
-        match adapter.list_fork_timeline_events(&scope) {
+        match adapter.list_fork_timeline_events(&scope).await {
             SpokeResult::Reject(r) => {
                 assert_eq!(
                     r.code,
@@ -446,7 +444,7 @@ mod tests {
 
         let adapter = NexusAdapter::new(pool);
         let scope = fork_scope(&world_id, "fbk_main", &[]);
-        match adapter.list_fork_timeline_events(&scope) {
+        match adapter.list_fork_timeline_events(&scope).await {
             SpokeResult::Reject(r) => {
                 assert_eq!(
                     r.code,

@@ -402,7 +402,7 @@ pub async fn import_pack(
         }
 
         prepare_create_entry(&mut entry, world_id);
-        match persist_entry_upsert(pool, &entry) {
+        match persist_entry_upsert(pool, &entry).await {
             PersistOutcome {
                 outcome: ImportOutcome::Created,
                 ..
@@ -497,7 +497,7 @@ pub async fn import_pack(
                             continue;
                         }
                         update_relation_world_id(&mut relation, world_id);
-                        match persist_relation_relate(pool, &relation) {
+                        match persist_relation_relate(pool, &relation).await {
                             PersistOutcome {
                                 outcome: ImportOutcome::Overwritten,
                                 ..
@@ -556,7 +556,7 @@ pub async fn import_pack(
         relation.revision = None;
 
         let renamed = relation.relation_id != pack_relation_id;
-        match persist_relation_relate(pool, &relation) {
+        match persist_relation_relate(pool, &relation).await {
             PersistOutcome {
                 outcome: ImportOutcome::Created,
                 ..
@@ -664,7 +664,7 @@ async fn import_renamed_on_entry_id_collision(
     prepare_create_entry(entry, world_id);
     remap.insert(pack_entry_id.to_string(), fresh_id.clone());
 
-    match persist_entry_upsert(pool, entry) {
+    match persist_entry_upsert(pool, entry).await {
         PersistOutcome {
             outcome: ImportOutcome::Created,
             ..
@@ -778,7 +778,7 @@ async fn import_renamed_entry(
     prepare_create_entry(entry, world_id);
     remap.insert(pack_entry_id.to_string(), fresh_id.clone());
 
-    match persist_entry_upsert(pool, entry) {
+    match persist_entry_upsert(pool, entry).await {
         PersistOutcome {
             outcome: ImportOutcome::Created,
             ..
@@ -842,7 +842,7 @@ async fn import_overwritten_entry(
     extensions::set_world_id(entry, world_id.to_string());
     extensions::set_provenance(entry, None, None, Some(IMPORT_PROVENANCE.to_string()));
 
-    match persist_entry_upsert(pool, entry) {
+    match persist_entry_upsert(pool, entry).await {
         PersistOutcome {
             outcome: ImportOutcome::Created,
             ..
@@ -987,10 +987,10 @@ fn prepare_create_entry(entry: &mut KnowledgeEntry, world_id: &str) {
     extensions::set_provenance(entry, None, None, Some(IMPORT_PROVENANCE.to_string()));
 }
 
-fn persist_entry_upsert(pool: &SqlitePool, entry: &KnowledgeEntry) -> PersistOutcome {
+async fn persist_entry_upsert(pool: &SqlitePool, entry: &KnowledgeEntry) -> PersistOutcome {
     let upsert_req = build_import_upsert_request(entry);
     let adapter = NexusAdapter::new(pool.clone());
-    match orchestrate_upsert(&adapter, upsert_req) {
+    match orchestrate_upsert(&adapter, upsert_req).await {
         nexus_spoke_adapter::SpokeResult::Ok(_) => PersistOutcome {
             outcome: ImportOutcome::Created,
             reject_reason: None,
@@ -1010,10 +1010,10 @@ fn persist_entry_upsert(pool: &SqlitePool, entry: &KnowledgeEntry) -> PersistOut
     }
 }
 
-fn persist_relation_relate(pool: &SqlitePool, relation: &Relation) -> PersistOutcome {
+async fn persist_relation_relate(pool: &SqlitePool, relation: &Relation) -> PersistOutcome {
     let relate_req = build_import_relate_request(relation);
     let adapter = NexusAdapter::new(pool.clone());
-    match orchestrate_relate(&adapter, relate_req) {
+    match orchestrate_relate(&adapter, relate_req).await {
         nexus_spoke_adapter::SpokeResult::Ok(_) => PersistOutcome {
             outcome: if relation.revision.is_some() {
                 ImportOutcome::Overwritten

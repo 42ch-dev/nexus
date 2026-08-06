@@ -16,6 +16,10 @@ path = "src/lib.rs"
 [dependencies]
 spoke-schemas.workspace = true
 spoke-operations.workspace = true
+# V1.153 P0 T2 — spoke-operations 0.9.1 converted the adapter port traits to
+# `#[async_trait] async fn`; the production impls (and the mock impls in
+# tests/examples) carry the matching attribute.
+async-trait.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 # V1.145 P1a — the WorldKbEntry↔KnowledgeEntry conversion seam + the

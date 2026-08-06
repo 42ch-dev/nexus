@@ -428,7 +428,9 @@ pub async fn patch_entity(
     // begin/commit → tx dropped → rolled back, surfaced as Reject. The
     // handler never holds the tx here, unlike `promote_adopt`'s bound
     // `tx.commit()`/`rollback()`.
-    let result = adapter.with_bound_tx(|| orchestrate_upsert(&adapter, spoke_req));
+    let result = adapter
+        .with_bound_tx(|| orchestrate_upsert(&adapter, spoke_req))
+        .await;
     // Confirm success + extract the bumped revision from the persisted entry.
     let persisted = map_upsert_response(result, pool, &req.entity_id).await?;
     let new_version = persisted.revision.unwrap_or(0);
@@ -702,7 +704,9 @@ async fn promote_adopt(
     let adapter = NexusAdapter::new(pool.clone()).with_tx_cell(Arc::clone(&tx_cell));
 
     let spoke_req = build_spoke_promote_request(&kb);
-    let result = adapter.with_bound_tx(|| orchestrate_promote(&adapter, spoke_req));
+    let result = adapter
+        .with_bound_tx(|| orchestrate_promote(&adapter, spoke_req))
+        .await;
     let knowledge_entry = match map_promote_response(result, pool, &req.job_id, &kb).await {
         Ok(PromoteAdoptOrchestrateOutcome::RecoveredConfirmed(knowledge_entry)) => {
             if let Some(tx) = tx_cell.lock().ok().and_then(|mut guard| guard.take()) {
@@ -1159,11 +1163,10 @@ fn extract_store_revision(reject: &SpokeReject) -> Option<u64> {
 }
 
 /// Re-read the current `kb_key_blocks.revision` for `entity_id` (fallback when
-/// a CAS reject's details omit the store revision). `map_upsert_reject` is
-/// reached only after the synchronous orchestrator call returns (the adapter's
-/// port methods bridge to async `SQLite` via `block_in_place` internally), so
-/// by the time we get here the outer handler is back on its normal async path —
-/// awaiting the store read is safe and avoids a nested `block_in_place`.
+/// a CAS reject's details omit the store revision). Reached after the
+/// (now-awaited) orchestrator call returns; the store read is a plain async
+/// read on the handler's runtime (adapter ports are natively `async fn` since
+/// spoke-operations 0.9.1 — V1.153 P0 T2).
 async fn reread_entity_revision_sync(pool: &sqlx::SqlitePool, entity_id: &str) -> u64 {
     let store = kb_store::SqliteKbStore::new(pool.clone());
     store
@@ -2263,7 +2266,9 @@ async fn patch_relationship_add(
     // (`put_relation_create` opens + commits its own transaction) — add has no
     // sibling write, so the unbound path is behavior-equivalent to the previous
     // `pool.begin()` → INSERT → `commit()` block (mirrors `patch_entity`).
-    let result = adapter.with_bound_tx(|| orchestrate_relate(&adapter, spoke_req));
+    let result = adapter
+        .with_bound_tx(|| orchestrate_relate(&adapter, spoke_req))
+        .await;
     let row = map_relate_response(result, pool, &relationship_id).await?;
 
     Ok(Json(WorldKbPatchRelationshipResponse {
@@ -2400,7 +2405,9 @@ async fn patch_relationship_update(
 
     let spoke_req = build_spoke_relate_request(&relation);
     let adapter = NexusAdapter::new(pool.clone());
-    let result = adapter.with_bound_tx(|| orchestrate_relate(&adapter, spoke_req));
+    let result = adapter
+        .with_bound_tx(|| orchestrate_relate(&adapter, spoke_req))
+        .await;
     let row = map_relate_response(result, pool, relationship_id).await?;
 
     Ok(Json(WorldKbPatchRelationshipResponse {

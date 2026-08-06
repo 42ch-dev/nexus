@@ -76,6 +76,7 @@ use super::NexusAdapter;
 use crate::{
     Relation, RelationExtensionsKey, RelationPort, SpokeReject, SpokeRejectCode, SpokeResult,
 };
+use async_trait::async_trait;
 use nexus_local_db::kb_relationships::{
     get_relationship, list_relationships_for_world, update_relationship_in_tx, KbRelationshipRow,
     UpdateRelationshipParams, SOURCE_MANUAL,
@@ -83,44 +84,41 @@ use nexus_local_db::kb_relationships::{
 use nexus_local_db::LocalDbError;
 use serde_json::{json, Map, Value};
 
+#[async_trait]
 impl RelationPort for NexusAdapter<'_> {
-    fn get_relation(&self, relation_id: &str) -> SpokeResult<Relation> {
+    async fn get_relation(&self, relation_id: &str) -> SpokeResult<Relation> {
         let pool = self.pool.clone();
         let relation_id = relation_id.to_string();
-        self.block_on(async move {
-            let row = match get_relationship(&pool, &relation_id).await {
-                Ok(row) => row,
-                Err(LocalDbError::Sqlx(sqlx::Error::RowNotFound)) => {
-                    return reject(
-                        SpokeRejectCode::RelationNotFound,
-                        format!("Relation not found: {relation_id}"),
-                        json!({ "relation_id": relation_id }),
-                    );
-                }
-                Err(e) => {
-                    return reject(
-                        SpokeRejectCode::InternalError,
-                        format!("storage error on relation read: {e}"),
-                        json!({ "relation_id": relation_id }),
-                    );
-                }
-            };
-            SpokeResult::Ok(crate::conversion::kb_relationship_row_to_spoke(&row))
-        })
+        let row = match get_relationship(&pool, &relation_id).await {
+            Ok(row) => row,
+            Err(LocalDbError::Sqlx(sqlx::Error::RowNotFound)) => {
+                return reject(
+                    SpokeRejectCode::RelationNotFound,
+                    format!("Relation not found: {relation_id}"),
+                    json!({ "relation_id": relation_id }),
+                );
+            }
+            Err(e) => {
+                return reject(
+                    SpokeRejectCode::InternalError,
+                    format!("storage error on relation read: {e}"),
+                    json!({ "relation_id": relation_id }),
+                );
+            }
+        };
+        SpokeResult::Ok(crate::conversion::kb_relationship_row_to_spoke(&row))
     }
 
-    fn put_relation(
+    async fn put_relation(
         &self,
         relation: Relation,
         expected_base_revision: Option<u64>,
     ) -> SpokeResult<Relation> {
         let pool = self.pool.clone();
-        self.block_on(async move {
-            match expected_base_revision {
-                None => put_relation_create(&pool, relation).await,
-                Some(expected) => put_relation_update(&pool, relation, expected).await,
-            }
-        })
+        match expected_base_revision {
+            None => put_relation_create(&pool, relation).await,
+            Some(expected) => put_relation_update(&pool, relation, expected).await,
+        }
     }
 }
 
@@ -160,30 +158,30 @@ impl NexusAdapter<'_> {
     /// # Errors
     ///
     /// Returns [`LocalDbError`] on database failure.
-    pub fn list_hop_edges_for_world(&self, world_id: &str) -> Result<Vec<HopEdge>, LocalDbError> {
+    pub async fn list_hop_edges_for_world(
+        &self,
+        world_id: &str,
+    ) -> Result<Vec<HopEdge>, LocalDbError> {
         let pool = self.pool.clone();
         let world_id = world_id.to_string();
-        self.block_on(async move {
-            // `cap + 1` probe per the `list_relationships_for_world` caller
-            // convention: a result of `cap + 1` rows signals overflow; the
-            // probe row is dropped below (truncate, no panic). The const
-            // (10_000) always fits `usize`; the fallback is defensive only.
-            let limit = usize::try_from(HOP_EDGE_LIST_LIMIT).unwrap_or(usize::MAX);
-            let rows =
-                list_relationships_for_world(&pool, &world_id, false, HOP_EDGE_LIST_LIMIT + 1)
-                    .await?;
-            let edges = rows
-                .into_iter()
-                .take(limit)
-                .map(|row| HopEdge {
-                    relation_id: row.relationship_id,
-                    from_id: row.source_entity_id,
-                    to_id: row.target_entity_id,
-                    relation_type: row.relation_type,
-                })
-                .collect();
-            Ok(edges)
-        })
+        // `cap + 1` probe per the `list_relationships_for_world` caller
+        // convention: a result of `cap + 1` rows signals overflow; the
+        // probe row is dropped below (truncate, no panic). The const
+        // (10_000) always fits `usize`; the fallback is defensive only.
+        let limit = usize::try_from(HOP_EDGE_LIST_LIMIT).unwrap_or(usize::MAX);
+        let rows =
+            list_relationships_for_world(&pool, &world_id, false, HOP_EDGE_LIST_LIMIT + 1).await?;
+        let edges = rows
+            .into_iter()
+            .take(limit)
+            .map(|row| HopEdge {
+                relation_id: row.relationship_id,
+                from_id: row.source_entity_id,
+                to_id: row.target_entity_id,
+                relation_type: row.relation_type,
+            })
+            .collect();
+        Ok(edges)
     }
 }
 
@@ -702,7 +700,7 @@ mod tests {
         seed_world_and_endpoints(&pool).await;
 
         let adapter = NexusAdapter::new(pool);
-        match adapter.get_relation("rel_missing") {
+        match adapter.get_relation("rel_missing").await {
             SpokeResult::Reject(r) => {
                 assert_eq!(
                     r.code,
@@ -725,12 +723,14 @@ mod tests {
 
         let adapter = NexusAdapter::new(pool.clone());
         let created = unwrap_ok(
-            adapter.put_relation(spoke_relation("rel_rt", "kb_src", "kb_dst"), None),
+            adapter
+                .put_relation(spoke_relation("rel_rt", "kb_src", "kb_dst"), None)
+                .await,
             "create",
         );
         assert_eq!(created.revision, Some(1));
 
-        match adapter.get_relation("rel_rt") {
+        match adapter.get_relation("rel_rt").await {
             SpokeResult::Ok(r) => {
                 assert_eq!(r.relation_id, "rel_rt");
                 assert_eq!(r.from_id, "kb_src");
@@ -785,7 +785,7 @@ mod tests {
         }))
         .expect("valid spoke Relation fixture with full nexus-locals");
 
-        let created = unwrap_ok(adapter.put_relation(relation, None), "create");
+        let created = unwrap_ok(adapter.put_relation(relation, None).await, "create");
         assert_eq!(created.revision, Some(1));
 
         // Re-read through the port and confirm every nexus-local survived.
@@ -794,7 +794,7 @@ mod tests {
         // unknown `extensions.nexus` keys across the SQLite round-trip.
         // Known keys are verified below; unknown-key round-trip is covered
         // by the dedicated `put_relation_round_trips_unknown_nexus_key` test.
-        match adapter.get_relation("rel_locals") {
+        match adapter.get_relation("rel_locals").await {
             SpokeResult::Ok(r) => {
                 assert_eq!(r.relation_id, "rel_locals");
                 assert_eq!(r.relation_type, "rivals_with");
@@ -851,7 +851,7 @@ mod tests {
         let adapter = NexusAdapter::new(pool.clone());
         let relation = spoke_relation("rel_happy", "kb_src", "kb_dst");
 
-        let returned = unwrap_ok(adapter.put_relation(relation, None), "create");
+        let returned = unwrap_ok(adapter.put_relation(relation, None).await, "create");
         assert_eq!(returned.relation_id, "rel_happy");
         assert_eq!(returned.from_id, "kb_src");
         assert_eq!(returned.to_id, "kb_dst");
@@ -899,10 +899,10 @@ mod tests {
         let adapter = NexusAdapter::new(pool);
         let relation = spoke_relation("rel_dup", "kb_src", "kb_dst");
 
-        let first = adapter.put_relation(relation.clone(), None);
+        let first = adapter.put_relation(relation.clone(), None).await;
         assert!(matches!(first, SpokeResult::Ok(_)), "first create succeeds");
 
-        match adapter.put_relation(relation, None) {
+        match adapter.put_relation(relation, None).await {
             SpokeResult::Reject(r) => {
                 assert_eq!(
                     r.code,
@@ -931,7 +931,7 @@ mod tests {
         }))
         .expect("valid minimal Relation");
 
-        match adapter.put_relation(relation, None) {
+        match adapter.put_relation(relation, None).await {
             SpokeResult::Reject(r) => {
                 assert_eq!(
                     r.code,
@@ -955,7 +955,7 @@ mod tests {
         let adapter = NexusAdapter::new(pool.clone());
         let relation = spoke_relation("rel_bad_endpoint", "kb_src", "kb_nonexistent");
 
-        match adapter.put_relation(relation, None) {
+        match adapter.put_relation(relation, None).await {
             SpokeResult::Reject(r) => {
                 assert_eq!(
                     r.code,
@@ -984,7 +984,9 @@ mod tests {
 
         // Create → revision 1.
         let created = unwrap_ok(
-            adapter.put_relation(spoke_relation("rel_upd", "kb_src", "kb_dst"), None),
+            adapter
+                .put_relation(spoke_relation("rel_upd", "kb_src", "kb_dst"), None)
+                .await,
             "create",
         );
         assert_eq!(created.revision, Some(1));
@@ -995,7 +997,7 @@ mod tests {
         updated.label = Some("Alice ↔ Bob (revised)".to_string());
         updated.relation_type = "opposes".to_string();
 
-        let rev2 = unwrap_ok(adapter.put_relation(updated, Some(1)), "first update");
+        let rev2 = unwrap_ok(adapter.put_relation(updated, Some(1)).await, "first update");
         assert_eq!(rev2.relation_id, "rel_upd");
         assert_eq!(rev2.revision, Some(2), "CAS update must bump revision");
         assert_eq!(rev2.relation_type, "opposes");
@@ -1013,7 +1015,10 @@ mod tests {
         // not a one-shot. Mutate the label again to distinguish the writes.
         let mut rev2_mut = rev2;
         rev2_mut.label = Some("Alice ↔ Bob (v3)".to_string());
-        let rev3 = unwrap_ok(adapter.put_relation(rev2_mut, Some(2)), "second update");
+        let rev3 = unwrap_ok(
+            adapter.put_relation(rev2_mut, Some(2)).await,
+            "second update",
+        );
         assert_eq!(
             rev3.revision,
             Some(3),
@@ -1022,7 +1027,7 @@ mod tests {
         assert_eq!(rev3.label.as_deref(), Some("Alice ↔ Bob (v3)"));
 
         // Re-read: persisted row has revision 3 + the latest label/type.
-        match adapter.get_relation("rel_upd") {
+        match adapter.get_relation("rel_upd").await {
             SpokeResult::Ok(r) => {
                 assert_eq!(r.revision, Some(3));
                 assert_eq!(r.relation_type, "opposes");
@@ -1043,15 +1048,17 @@ mod tests {
         // expected = 1 (caller read a stale base before the second writer
         // bumped). Store (2) > expected (1) → STORED_REVISION_STALE.
         let created = unwrap_ok(
-            adapter.put_relation(spoke_relation("rel_stale", "kb_src", "kb_dst"), None),
+            adapter
+                .put_relation(spoke_relation("rel_stale", "kb_src", "kb_dst"), None)
+                .await,
             "create",
         );
         let _ = unwrap_ok(
-            adapter.put_relation(created.clone(), Some(1)),
+            adapter.put_relation(created.clone(), Some(1)).await,
             "first update",
         );
 
-        match adapter.put_relation(created, Some(1)) {
+        match adapter.put_relation(created, Some(1)).await {
             SpokeResult::Reject(r) => {
                 assert_eq!(
                     r.code,
@@ -1075,7 +1082,10 @@ mod tests {
         // No prior create — relation is absent. Caller passes expected = Some(3);
         // the relation-port CAS mapping collapses this to STORED_REVISION_STALE
         // with storeRevision = null (V1.144 brief).
-        match adapter.put_relation(spoke_relation("rel_absent", "kb_src", "kb_dst"), Some(3)) {
+        match adapter
+            .put_relation(spoke_relation("rel_absent", "kb_src", "kb_dst"), Some(3))
+            .await
+        {
             SpokeResult::Reject(r) => {
                 assert_eq!(
                     r.code,
@@ -1123,7 +1133,7 @@ mod tests {
             }
         }))
         .expect("valid seed Relation");
-        let created = unwrap_ok(adapter.put_relation(seed, None), "create");
+        let created = unwrap_ok(adapter.put_relation(seed, None).await, "create");
         assert_eq!(created.revision, Some(1));
 
         // Update with a Relation that carries ONLY the required world_id and
@@ -1143,11 +1153,11 @@ mod tests {
             }
         }))
         .expect("valid update Relation omitting optional locals");
-        let updated = unwrap_ok(adapter.put_relation(update, Some(1)), "update");
+        let updated = unwrap_ok(adapter.put_relation(update, Some(1)).await, "update");
         assert_eq!(updated.revision, Some(2));
 
         // Re-read through the port and confirm every omitted local is cleared.
-        let r = unwrap_ok(adapter.get_relation("rel_clr"), "re-read");
+        let r = unwrap_ok(adapter.get_relation("rel_clr").await, "re-read");
         let key = RelationExtensionsKey::try_from("nexus").unwrap();
         let ns = r.extensions.get(&key).expect("nexus namespace present");
         assert_eq!(
@@ -1186,7 +1196,7 @@ mod tests {
             .unwrap();
 
         let adapter = NexusAdapter::new(pool);
-        match adapter.get_relation("rel_any") {
+        match adapter.get_relation("rel_any").await {
             SpokeResult::Reject(r) => {
                 assert_eq!(
                     r.code,
@@ -1210,7 +1220,7 @@ mod tests {
 
         let adapter = NexusAdapter::new(pool);
         let relation = spoke_relation("rel_fail_create", "kb_src", "kb_dst");
-        match adapter.put_relation(relation, None) {
+        match adapter.put_relation(relation, None).await {
             SpokeResult::Reject(r) => {
                 assert_eq!(
                     r.code,
@@ -1230,7 +1240,9 @@ mod tests {
 
         let adapter = NexusAdapter::new(pool.clone());
         let created = unwrap_ok(
-            adapter.put_relation(spoke_relation("rel_upd_fail", "kb_src", "kb_dst"), None),
+            adapter
+                .put_relation(spoke_relation("rel_upd_fail", "kb_src", "kb_dst"), None)
+                .await,
             "create",
         );
         assert_eq!(created.revision, Some(1));
@@ -1241,7 +1253,7 @@ mod tests {
             .await
             .unwrap();
 
-        match adapter.put_relation(created, Some(1)) {
+        match adapter.put_relation(created, Some(1)).await {
             SpokeResult::Reject(r) => {
                 assert_eq!(
                     r.code,
@@ -1265,9 +1277,12 @@ mod tests {
         let adapter = NexusAdapter::new(pool);
         // Create-success-then-recreate → RelationAlreadyExists (domain signal, not storage)
         let first = spoke_relation("rel_val_ae", "kb_src", "kb_dst");
-        let _ = unwrap_ok(adapter.put_relation(first.clone(), None), "first create");
+        let _ = unwrap_ok(
+            adapter.put_relation(first.clone(), None).await,
+            "first create",
+        );
 
-        match adapter.put_relation(first, None) {
+        match adapter.put_relation(first, None).await {
             SpokeResult::Reject(r) => {
                 assert_eq!(
                     r.code,
@@ -1279,7 +1294,7 @@ mod tests {
         }
 
         // get on non-existent → RelationNotFound
-        match adapter.get_relation("rel_never_created") {
+        match adapter.get_relation("rel_never_created").await {
             SpokeResult::Reject(r) => {
                 assert_eq!(
                     r.code,
@@ -1329,22 +1344,25 @@ mod tests {
             }
         }))
         .expect("valid seed Relation");
-        let created = unwrap_ok(adapter.put_relation(seed, None), "create");
+        let created = unwrap_ok(adapter.put_relation(seed, None).await, "create");
         assert_eq!(created.revision, Some(1));
 
         // Read-modify-write: get the fully-populated Relation, mutate a
         // non-local field (label), write it back with the get-result's
         // revision as the CAS base.
-        let read = unwrap_ok(adapter.get_relation("rel_rt2"), "get");
+        let read = unwrap_ok(adapter.get_relation("rel_rt2").await, "get");
         assert_eq!(read.revision, Some(1));
         let mut to_write = read;
         to_write.label = Some("round-tripped".to_string());
-        let written = unwrap_ok(adapter.put_relation(to_write, Some(1)), "round-trip update");
+        let written = unwrap_ok(
+            adapter.put_relation(to_write, Some(1)).await,
+            "round-trip update",
+        );
         assert_eq!(written.revision, Some(2));
 
         // Re-read: every local survived the get→put round-trip (clear-on-omit
         // did NOT fire because get populated them all).
-        let r = unwrap_ok(adapter.get_relation("rel_rt2"), "final get");
+        let r = unwrap_ok(adapter.get_relation("rel_rt2").await, "final get");
         assert_eq!(r.label.as_deref(), Some("round-tripped"));
         let key = RelationExtensionsKey::try_from("nexus").unwrap();
         let ns = r.extensions.get(&key).expect("nexus namespace present");
@@ -1397,11 +1415,11 @@ mod tests {
         }))
         .expect("valid spoke Relation with unknown nexus key");
 
-        let created = unwrap_ok(adapter.put_relation(relation, None), "create");
+        let created = unwrap_ok(adapter.put_relation(relation, None).await, "create");
         assert_eq!(created.revision, Some(1));
 
         // Re-read and confirm the unknown keys survived alongside the known ones.
-        let r = unwrap_ok(adapter.get_relation("rel_unknown_key"), "get");
+        let r = unwrap_ok(adapter.get_relation("rel_unknown_key").await, "get");
         let key = RelationExtensionsKey::try_from("nexus").unwrap();
         let ns = r.extensions.get(&key).expect("nexus namespace present");
 
@@ -1452,16 +1470,19 @@ mod tests {
         }))
         .expect("valid seed Relation");
 
-        let created = unwrap_ok(adapter.put_relation(seed, None), "create");
+        let created = unwrap_ok(adapter.put_relation(seed, None).await, "create");
         assert_eq!(created.revision, Some(1));
 
         // Update: change only the label. The unknown keys must survive.
         let mut update = created;
         update.label = Some("updated label".to_string());
-        let updated = unwrap_ok(adapter.put_relation(update, Some(1)), "update");
+        let updated = unwrap_ok(adapter.put_relation(update, Some(1)).await, "update");
         assert_eq!(updated.revision, Some(2));
 
-        let r = unwrap_ok(adapter.get_relation("rel_upd_unk"), "get after update");
+        let r = unwrap_ok(
+            adapter.get_relation("rel_upd_unk").await,
+            "get after update",
+        );
         let key = RelationExtensionsKey::try_from("nexus").unwrap();
         let ns = r.extensions.get(&key).expect("nexus namespace present");
 
@@ -1494,11 +1515,15 @@ mod tests {
         // Two confirmed edges (different types) + one extraction suggestion
         // (needs_review = true — must be excluded from lore hops).
         unwrap_ok(
-            adapter.put_relation(spoke_relation("rel_hop1", "kb_src", "kb_dst"), None),
+            adapter
+                .put_relation(spoke_relation("rel_hop1", "kb_src", "kb_dst"), None)
+                .await,
             "create confirmed edge 1",
         );
         unwrap_ok(
-            adapter.put_relation(spoke_relation("rel_hop2", "kb_dst", "kb_src"), None),
+            adapter
+                .put_relation(spoke_relation("rel_hop2", "kb_dst", "kb_src"), None)
+                .await,
             "create confirmed edge 2",
         );
         let suggested: Relation = serde_json::from_value(json!({
@@ -1517,12 +1542,13 @@ mod tests {
         }))
         .expect("valid spoke Relation fixture (suggested)");
         unwrap_ok(
-            adapter.put_relation(suggested, None),
+            adapter.put_relation(suggested, None).await,
             "create suggested relation",
         );
 
         let edges = adapter
             .list_hop_edges_for_world("wld_rel")
+            .await
             .expect("hop-edge load succeeds");
         assert_eq!(edges.len(), 2, "suggested (needs_review) edge excluded");
 

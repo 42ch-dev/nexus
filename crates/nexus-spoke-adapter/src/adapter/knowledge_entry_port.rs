@@ -27,6 +27,7 @@ use super::NexusAdapter;
 use crate::conversion::{spoke_to_world_kb, world_kb_to_spoke};
 use crate::extensions::build_extensions_nexus;
 use crate::{KnowledgeEntry, KnowledgeEntryPort, SpokeReject, SpokeRejectCode, SpokeResult};
+use async_trait::async_trait;
 use nexus_knowledge::world_kb::store::{KbStore, KbStoreError};
 use nexus_knowledge::world_kb::WorldKbEntry;
 use nexus_local_db::kb_store::{
@@ -116,34 +117,31 @@ impl NexusAdapter<'_> {
     }
 }
 
+#[async_trait]
 impl KnowledgeEntryPort for NexusAdapter<'_> {
-    fn get_knowledge_entry(&self, entry_id: &str) -> SpokeResult<KnowledgeEntry> {
+    async fn get_knowledge_entry(&self, entry_id: &str) -> SpokeResult<KnowledgeEntry> {
         let pool = self.pool.clone();
         let entry_id = entry_id.to_string();
-        self.block_on(async move {
-            let store = SqliteKbStore::new(pool);
-            let world_entry: WorldKbEntry = match store.get_knowledge_entry(&entry_id).await {
-                Ok(row) => row,
-                Err(e) => return Self::map_get_err(e, &entry_id),
-            };
-            // Reuse the sole conversion seam (spec §7.1) — now free functions
-            // in nexus-spoke-adapter (V1.145 P1a dep-graph reversal).
-            SpokeResult::Ok(world_kb_to_spoke(&world_entry))
-        })
+        let store = SqliteKbStore::new(pool);
+        let world_entry: WorldKbEntry = match store.get_knowledge_entry(&entry_id).await {
+            Ok(row) => row,
+            Err(e) => return Self::map_get_err(e, &entry_id),
+        };
+        // Reuse the sole conversion seam (spec §7.1) — now free functions
+        // in nexus-spoke-adapter (V1.145 P1a dep-graph reversal).
+        SpokeResult::Ok(world_kb_to_spoke(&world_entry))
     }
 
-    fn put_knowledge_entry(
+    async fn put_knowledge_entry(
         &self,
         entry: KnowledgeEntry,
         expected_base_revision: Option<u64>,
     ) -> SpokeResult<KnowledgeEntry> {
         let pool = self.pool.clone();
-        self.block_on(async {
-            match expected_base_revision {
-                None => put_create(self, &pool, entry).await,
-                Some(expected) => put_update(self, &pool, entry, expected).await,
-            }
-        })
+        match expected_base_revision {
+            None => put_create(self, &pool, entry).await,
+            Some(expected) => put_update(self, &pool, entry, expected).await,
+        }
     }
 }
 
@@ -348,13 +346,13 @@ async fn put_update_unbound(
 /// `entry_updates`: `(candidate entry, expected_base_revision)` pairs.
 /// `session_update`: optional `(session_id, state_json)` to persist after
 /// all entry CAS succeeds, still inside the same transaction.
-pub(crate) fn commit_compute_settlement(
+pub(crate) async fn commit_compute_settlement(
     adapter: &NexusAdapter<'_>,
     entry_updates: Vec<(KnowledgeEntry, u64)>,
     session_update: Option<(String, String)>,
 ) -> SpokeResult<()> {
     let pool = adapter.pool.clone();
-    adapter.block_on(async move {
+    {
         let mut tx = match pool.begin().await {
             Ok(tx) => tx,
             Err(e) => {
@@ -405,7 +403,7 @@ pub(crate) fn commit_compute_settlement(
         }
 
         SpokeResult::Ok(())
-    })
+    }
 }
 
 async fn run_cas_update_in_tx(
@@ -582,7 +580,7 @@ mod tests {
         seed_world(&pool).await;
 
         let adapter = NexusAdapter::new(pool);
-        let result = adapter.get_knowledge_entry("kb_missing");
+        let result = adapter.get_knowledge_entry("kb_missing").await;
         match result {
             SpokeResult::Reject(r) => {
                 assert_eq!(r.code, SpokeRejectCode::KnowledgeEntryNotFound);
@@ -602,13 +600,13 @@ mod tests {
 
         let adapter = NexusAdapter::new(pool.clone());
         let entry = spoke_entry("kb_alpha", "Alpha", None);
-        let put_result = adapter.put_knowledge_entry(entry, None);
+        let put_result = adapter.put_knowledge_entry(entry, None).await;
         assert!(
             matches!(put_result, SpokeResult::Ok(_)),
             "create should succeed"
         );
 
-        let got = adapter.get_knowledge_entry("kb_alpha");
+        let got = adapter.get_knowledge_entry("kb_alpha").await;
         match got {
             SpokeResult::Ok(e) => {
                 assert_eq!(e.entry_id, "kb_alpha");
@@ -629,7 +627,7 @@ mod tests {
         let adapter = NexusAdapter::new(pool);
         let entry = spoke_entry("kb_create_happy", "CreateHappy", None);
 
-        match adapter.put_knowledge_entry(entry, None) {
+        match adapter.put_knowledge_entry(entry, None).await {
             SpokeResult::Ok(e) => {
                 assert_eq!(e.entry_id, "kb_create_happy");
                 assert_eq!(e.revision, Some(1));
@@ -646,10 +644,10 @@ mod tests {
         let adapter = NexusAdapter::new(pool);
         let entry = spoke_entry("kb_dup", "Dup", None);
 
-        let first = adapter.put_knowledge_entry(entry.clone(), None);
+        let first = adapter.put_knowledge_entry(entry.clone(), None).await;
         assert!(matches!(first, SpokeResult::Ok(_)));
 
-        match adapter.put_knowledge_entry(entry, None) {
+        match adapter.put_knowledge_entry(entry, None).await {
             SpokeResult::Reject(r) => {
                 assert_eq!(r.code, SpokeRejectCode::KnowledgeEntryAlreadyExists);
             }
@@ -668,7 +666,7 @@ mod tests {
         let entry = spoke_entry("kb_upd_happy", "UpdHappy", None);
 
         // Create first (revision becomes 1).
-        let created = match adapter.put_knowledge_entry(entry, None) {
+        let created = match adapter.put_knowledge_entry(entry, None).await {
             SpokeResult::Ok(e) => e,
             SpokeResult::Reject(r) => panic!("create failed: {r:?}"),
         };
@@ -680,7 +678,7 @@ mod tests {
         updated.body.summary = Some("Updated summary".to_string());
         updated.status = "confirmed".to_string();
 
-        match adapter.put_knowledge_entry(updated, Some(1)) {
+        match adapter.put_knowledge_entry(updated, Some(1)).await {
             SpokeResult::Ok(e) => {
                 assert_eq!(e.revision, Some(2), "CAS update must bump revision");
                 assert_eq!(e.body.summary.as_deref(), Some("Updated summary"));
@@ -691,7 +689,7 @@ mod tests {
 
         // Verify the row persisted the post-CAS field update (status + body
         // must both be reflected on re-read through the conversion seam).
-        match adapter.get_knowledge_entry("kb_upd_happy") {
+        match adapter.get_knowledge_entry("kb_upd_happy").await {
             SpokeResult::Ok(e) => {
                 assert_eq!(e.revision, Some(2));
                 assert_eq!(e.status, "confirmed");
@@ -712,13 +710,13 @@ mod tests {
         // Create → revision 1. Bump to 2. Then attempt another update with
         // expected = 1 (caller read a stale base before the second writer
         // bumped). Store (2) > expected (1) → STORED_REVISION_STALE.
-        let created = unwrap_ok(adapter.put_knowledge_entry(entry, None), "create");
+        let created = unwrap_ok(adapter.put_knowledge_entry(entry, None).await, "create");
         let _ = unwrap_ok(
-            adapter.put_knowledge_entry(created.clone(), Some(1)),
+            adapter.put_knowledge_entry(created.clone(), Some(1)).await,
             "first update",
         );
 
-        match adapter.put_knowledge_entry(created, Some(1)) {
+        match adapter.put_knowledge_entry(created, Some(1)).await {
             SpokeResult::Reject(r) => {
                 assert_eq!(
                     r.code,
@@ -744,9 +742,9 @@ mod tests {
         // Create → revision 1. Then attempt update with expected = 5 (caller
         // expects a revision the store has never reached). Store (1) <
         // expected (5) → REVISION_CONFLICT.
-        let created = unwrap_ok(adapter.put_knowledge_entry(entry, None), "create");
+        let created = unwrap_ok(adapter.put_knowledge_entry(entry, None).await, "create");
 
-        match adapter.put_knowledge_entry(created, Some(5)) {
+        match adapter.put_knowledge_entry(created, Some(5)).await {
             SpokeResult::Reject(r) => {
                 assert_eq!(
                     r.code,
@@ -772,7 +770,7 @@ mod tests {
         // No prior create — entry is absent. Caller passes expected = Some(3),
         // expecting a base the store has never reached. Per spec §7.4 row 3,
         // absent + Some(_) → REVISION_CONFLICT.
-        match adapter.put_knowledge_entry(entry, Some(3)) {
+        match adapter.put_knowledge_entry(entry, Some(3)).await {
             SpokeResult::Reject(r) => {
                 assert_eq!(
                     r.code,
@@ -799,7 +797,7 @@ mod tests {
         let adapter = NexusAdapter::new(pool.clone());
         let entry = spoke_entry("kb_unbound_create", "UnboundCreate", None);
 
-        match adapter.put_knowledge_entry(entry, None) {
+        match adapter.put_knowledge_entry(entry, None).await {
             SpokeResult::Ok(e) => assert_eq!(e.revision, Some(1)),
             SpokeResult::Reject(r) => panic!("expected ok, got reject: {r:?}"),
         }
@@ -825,7 +823,7 @@ mod tests {
             .unwrap();
 
         let adapter = NexusAdapter::new(pool);
-        match adapter.get_knowledge_entry("kb_alpha") {
+        match adapter.get_knowledge_entry("kb_alpha").await {
             SpokeResult::Reject(r) => {
                 assert_eq!(
                     r.code,
@@ -849,7 +847,7 @@ mod tests {
 
         let adapter = NexusAdapter::new(pool);
         let entry = spoke_entry("kb_fail", "FailCreate", None);
-        match adapter.put_knowledge_entry(entry, None) {
+        match adapter.put_knowledge_entry(entry, None).await {
             SpokeResult::Reject(r) => {
                 assert_eq!(
                     r.code,
@@ -870,7 +868,7 @@ mod tests {
         // Create a real entry first so the update path is exercised.
         let adapter = NexusAdapter::new(pool.clone());
         let entry = spoke_entry("kb_upd_fail", "UpdFail", None);
-        let created = unwrap_ok(adapter.put_knowledge_entry(entry, None), "create");
+        let created = unwrap_ok(adapter.put_knowledge_entry(entry, None).await, "create");
         assert_eq!(created.revision, Some(1));
 
         // Drop the table to simulate a DB-level failure on update.
@@ -879,7 +877,7 @@ mod tests {
             .await
             .unwrap();
 
-        match adapter.put_knowledge_entry(created, Some(1)) {
+        match adapter.put_knowledge_entry(created, Some(1)).await {
             SpokeResult::Reject(r) => {
                 assert_eq!(
                     r.code,
@@ -904,9 +902,12 @@ mod tests {
         // put_create on already-existing entry — this is an OCC/domain signal,
         // NOT a storage failure; the DAO's pre-check returns `KnowledgeEntryAlreadyExists`.
         let entry = spoke_entry("kb_val_ae", "ValAE", None);
-        let _ = unwrap_ok(adapter.put_knowledge_entry(entry.clone(), None), "create");
+        let _ = unwrap_ok(
+            adapter.put_knowledge_entry(entry.clone(), None).await,
+            "create",
+        );
 
-        match adapter.put_knowledge_entry(entry, None) {
+        match adapter.put_knowledge_entry(entry, None).await {
             SpokeResult::Reject(r) => {
                 assert_eq!(
                     r.code,
@@ -918,7 +919,7 @@ mod tests {
         }
 
         // get on non-existent entry still surfaces KnowledgeEntryNotFound
-        match adapter.get_knowledge_entry("kb_never_created") {
+        match adapter.get_knowledge_entry("kb_never_created").await {
             SpokeResult::Reject(r) => {
                 assert_eq!(
                     r.code,
@@ -950,7 +951,12 @@ mod tests {
         let entry = spoke_entry("kb_bound_create", "BoundCreate", None);
         let entry_id = entry.entry_id.clone();
 
-        let put_result = adapter.with_bound_tx(|| adapter.put_knowledge_entry(entry, None));
+        // The port method is now async: the closure returns the future and
+        // the handler awaits it outside (with_bound_tx stays a sync
+        // passthrough). UFCS keeps the future un-awaited inside the closure.
+        let put_result = adapter
+            .with_bound_tx(|| KnowledgeEntryPort::put_knowledge_entry(&adapter, entry, None))
+            .await;
         assert!(
             matches!(put_result, SpokeResult::Ok(_)),
             "bound put should succeed in-tx"

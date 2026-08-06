@@ -135,11 +135,13 @@ async fn list_rules_returns_exactly_requested_rules_across_worlds() {
 
     let adapter = NexusAdapter::new(pool);
     let rules = unwrap_ok(
-        adapter.list_rules(&[
-            "rule_a1".to_string(),
-            "rule_missing".to_string(),
-            "rule_a2".to_string(),
-        ]),
+        adapter
+            .list_rules(&[
+                "rule_a1".to_string(),
+                "rule_missing".to_string(),
+                "rule_a2".to_string(),
+            ])
+            .await,
         "list_rules",
     );
 
@@ -170,7 +172,7 @@ async fn list_rules_empty_refs_returns_empty_vec() {
     seed_rule(&pool, "rule_a1", "wld_a").await;
 
     let adapter = NexusAdapter::new(pool);
-    let rules = unwrap_ok(adapter.list_rules(&[]), "list_rules empty");
+    let rules = unwrap_ok(adapter.list_rules(&[]).await, "list_rules empty");
     assert!(
         rules.is_empty(),
         "empty refs must return Ok(vec![]) without error"
@@ -217,7 +219,9 @@ async fn list_rules_does_not_fabricate_from_work_side_rule_sources() {
     // Phantom id requested alongside a real id: only the `spoke_rules` row
     // comes back.
     let rules = unwrap_ok(
-        adapter.list_rules(&["rule_a1".to_string(), "rule_phantom".to_string()]),
+        adapter
+            .list_rules(&["rule_a1".to_string(), "rule_phantom".to_string()])
+            .await,
         "list_rules phantom + real",
     );
     assert_eq!(
@@ -228,7 +232,7 @@ async fn list_rules_does_not_fabricate_from_work_side_rule_sources() {
 
     // Phantom id requested alone: resolves to the empty subset.
     let rules = unwrap_ok(
-        adapter.list_rules(&["rule_phantom".to_string()]),
+        adapter.list_rules(&["rule_phantom".to_string()]).await,
         "list_rules phantom only",
     );
     assert!(
@@ -251,11 +255,13 @@ async fn list_rules_duplicate_refs_are_deduplicated() {
     // deduplicated; one row per distinct `rule_id`") holds end-to-end through
     // the production port.
     let rules = unwrap_ok(
-        adapter.list_rules(&[
-            "rule_a1".to_string(),
-            "rule_a1".to_string(),
-            "rule_a2".to_string(),
-        ]),
+        adapter
+            .list_rules(&[
+                "rule_a1".to_string(),
+                "rule_a1".to_string(),
+                "rule_a2".to_string(),
+            ])
+            .await,
         "list_rules duplicates",
     );
     assert_eq!(

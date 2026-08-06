@@ -39,9 +39,11 @@ use crate::{
     KnowledgeEntry, Scope, ScopeExtensionsKey, ScopeQueryPort, SpokeReject, SpokeRejectCode,
     SpokeResult, TimelineEvent,
 };
+use async_trait::async_trait;
 use nexus_local_db::kb_store::SqliteKbStore;
 use nexus_local_db::narrative_gateway::list_timeline_events_scoped;
 use serde_json::{json, Map, Value};
+#[async_trait]
 impl ScopeQueryPort for NexusAdapter<'_> {
     /// List the active knowledge entries for the scope's world.
     ///
@@ -49,68 +51,64 @@ impl ScopeQueryPort for NexusAdapter<'_> {
     /// `entry_ids` / `entry_types` filters are applied in SQL. Unfiltered
     /// full-world listings reject when more than `LIST_BY_WORLD_LIMIT` active
     /// rows exist (no silent truncation).
-    fn list_knowledge_entries(&self, scope: &Scope) -> SpokeResult<Vec<KnowledgeEntry>> {
+    async fn list_knowledge_entries(&self, scope: &Scope) -> SpokeResult<Vec<KnowledgeEntry>> {
         let pool = self.pool.clone();
-        // Clone the filters so the async block is 'static (the sync trait
-        // method takes `&Scope`; the async bridge owns its own copy).
         let world_id = scope.scope_id.clone();
         let entry_ids: Vec<String> = scope.entry_ids.clone();
         let entry_types: Vec<String> = scope.entry_types.clone();
 
-        self.block_on(async move {
-            let store = SqliteKbStore::new(pool);
-            let scoped = match store
-                .list_by_world_scoped(&world_id, &entry_ids, &entry_types)
-                .await
-            {
-                Ok(rows) => rows,
-                Err(e) => {
-                    return reject(
-                        SpokeRejectCode::InternalError,
-                        format!("storage error on list_by_world_scoped: {e}"),
-                        json!({ "scope_id": world_id }),
-                    );
-                }
-            };
-
-            if scoped.truncated {
+        let store = SqliteKbStore::new(pool);
+        let scoped = match store
+            .list_by_world_scoped(&world_id, &entry_ids, &entry_types)
+            .await
+        {
+            Ok(rows) => rows,
+            Err(e) => {
                 return reject(
-                    SpokeRejectCode::InvalidInput,
-                    format!(
-                        "world {world_id} has more active knowledge entries than the safety cap; \
-                         narrow the scope with entry_ids or entry_types"
-                    ),
-                    json!({
-                        "scope_id": world_id,
-                        "cap": nexus_local_db::kb_store::LIST_BY_WORLD_LIMIT,
-                        "truncated": true,
-                    }),
+                    SpokeRejectCode::InternalError,
+                    format!("storage error on list_by_world_scoped: {e}"),
+                    json!({ "scope_id": world_id }),
                 );
             }
+        };
 
-            let wire: Vec<KnowledgeEntry> = scoped
-                .entries
-                .iter()
-                // Reuse the V1.139 conversion seam — sole boundary between
-                // WorldKbEntry rows and the spoke wire type (spec §7.1); free
-                // function in nexus-spoke-adapter since V1.145 P1a.
-                .map(world_kb_to_spoke)
-                .collect();
-
-            // Carrier-boundary guard (QC2-W003): the reserved `_nexus_body`
-            // carrier is MCA-read-path + persist-path only. This orchestrator
-            // read path hands spoke entries straight back to the orchestrator,
-            // so a leaked carrier would persist into the `extensions` DB
-            // column. `world_kb_to_spoke` never sets it, but this debug-only
-            // assertion catches a future caller that accidentally stashes one.
-            debug_assert!(
-                !wire.iter().any(has_nexus_body),
-                "ScopeQueryPort::list_knowledge_entries must not carry the _nexus_body carrier \
-                 (MCA/persist-only); a leaked carrier would reach the extensions DB column"
+        if scoped.truncated {
+            return reject(
+                SpokeRejectCode::InvalidInput,
+                format!(
+                    "world {world_id} has more active knowledge entries than the safety cap; \
+                     narrow the scope with entry_ids or entry_types"
+                ),
+                json!({
+                    "scope_id": world_id,
+                    "cap": nexus_local_db::kb_store::LIST_BY_WORLD_LIMIT,
+                    "truncated": true,
+                }),
             );
+        }
 
-            SpokeResult::Ok(wire)
-        })
+        let wire: Vec<KnowledgeEntry> = scoped
+            .entries
+            .iter()
+            // Reuse the V1.139 conversion seam — sole boundary between
+            // WorldKbEntry rows and the spoke wire type (spec §7.1); free
+            // function in nexus-spoke-adapter since V1.145 P1a.
+            .map(world_kb_to_spoke)
+            .collect();
+
+        // Carrier-boundary guard (QC2-W003): the reserved `_nexus_body`
+        // carrier is MCA-read-path + persist-path only. This orchestrator
+        // read path hands spoke entries straight back to the orchestrator,
+        // so a leaked carrier would persist into the `extensions` DB
+        // column. `world_kb_to_spoke` never sets it, but this debug-only
+        // assertion catches a future caller that accidentally stashes one.
+        debug_assert!(
+            !wire.iter().any(has_nexus_body),
+            "ScopeQueryPort::list_knowledge_entries must not carry the _nexus_body carrier \
+             (MCA/persist-only); a leaked carrier would reach the extensions DB column"
+        );
+
+        SpokeResult::Ok(wire)
     }
 
     /// List the timeline events matching the scope (production — V1.145 P3).
@@ -121,7 +119,7 @@ impl ScopeQueryPort for NexusAdapter<'_> {
     /// `scope.timeline_event_ids` → event-id IN filter. Rows are converted to
     /// spoke [`TimelineEvent`] via the V1.143 conversion seam. See the
     /// module-level docs for the full filter matrix.
-    fn list_timeline_events(&self, scope: &Scope) -> SpokeResult<Vec<TimelineEvent>> {
+    async fn list_timeline_events(&self, scope: &Scope) -> SpokeResult<Vec<TimelineEvent>> {
         let pool = self.pool.clone();
         let world_id = scope.scope_id.clone();
         // branch_id rides scope.extensions["nexus"] (spoke-native since 0.6.0),
@@ -135,37 +133,35 @@ impl ScopeQueryPort for NexusAdapter<'_> {
             .map(str::to_owned);
         let timeline_event_ids = scope.timeline_event_ids.clone();
 
-        self.block_on(async move {
-            let rows = match list_timeline_events_scoped(
-                &pool,
-                &world_id,
-                branch_id.as_deref(),
-                &timeline_event_ids,
-            )
-            .await
-            {
-                Ok(rows) => rows,
-                Err(e) => {
-                    return reject(
-                        SpokeRejectCode::InternalError,
-                        format!("storage error on list_timeline_events_scoped: {e}"),
-                        json!({ "scope_id": world_id }),
-                    );
-                }
-            };
+        let rows = match list_timeline_events_scoped(
+            &pool,
+            &world_id,
+            branch_id.as_deref(),
+            &timeline_event_ids,
+        )
+        .await
+        {
+            Ok(rows) => rows,
+            Err(e) => {
+                return reject(
+                    SpokeRejectCode::InternalError,
+                    format!("storage error on list_timeline_events_scoped: {e}"),
+                    json!({ "scope_id": world_id }),
+                );
+            }
+        };
 
-            // Convert nexus TimelineEvent → spoke TimelineEvent via the V1.143
-            // conversion seam (the `From<nexus_narrative::TimelineEvent>` impl
-            // defined in nexus-narrative packs the 7 typed nexus fields into
-            // extensions.nexus). Sole boundary between the nexus domain row and
-            // the spoke wire type; call-boundary invariant §7 preserved (the
-            // primitive's nexus type never crosses). The `Vec<TimelineEvent>`
-            // annotation pins the `Into` target to the spoke type (nexus
-            // TimelineEvent also has a `From` for nexus_contracts::TimelineEvent,
-            // so `.into()` is otherwise ambiguous).
-            let wire: Vec<TimelineEvent> = rows.into_iter().map(Into::into).collect();
-            SpokeResult::Ok(wire)
-        })
+        // Convert nexus TimelineEvent → spoke TimelineEvent via the V1.143
+        // conversion seam (the `From<nexus_narrative::TimelineEvent>` impl
+        // defined in nexus-narrative packs the 7 typed nexus fields into
+        // extensions.nexus). Sole boundary between the nexus domain row and
+        // the spoke wire type; call-boundary invariant §7 preserved (the
+        // primitive's nexus type never crosses). The `Vec<TimelineEvent>`
+        // annotation pins the `Into` target to the spoke type (nexus
+        // TimelineEvent also has a `From` for nexus_contracts::TimelineEvent,
+        // so `.into()` is otherwise ambiguous).
+        let wire: Vec<TimelineEvent> = rows.into_iter().map(Into::into).collect();
+        SpokeResult::Ok(wire)
     }
 }
 
@@ -280,7 +276,7 @@ mod tests {
         let (world_id, seeded) = seed_world_with_entries(&pool).await;
 
         let adapter = NexusAdapter::new(pool);
-        let entries = match adapter.list_knowledge_entries(&scope_for(&world_id)) {
+        let entries = match adapter.list_knowledge_entries(&scope_for(&world_id)).await {
             SpokeResult::Ok(v) => v,
             SpokeResult::Reject(r) => panic!("expected ok, got reject: {r:?}"),
         };
@@ -303,7 +299,10 @@ mod tests {
         let (pool, _dir) = fresh_pool().await;
 
         let adapter = NexusAdapter::new(pool);
-        let entries = match adapter.list_knowledge_entries(&scope_for("wld_empty")) {
+        let entries = match adapter
+            .list_knowledge_entries(&scope_for("wld_empty"))
+            .await
+        {
             SpokeResult::Ok(v) => v,
             SpokeResult::Reject(r) => panic!("expected ok, got reject: {r:?}"),
         };
@@ -325,7 +324,7 @@ mod tests {
         scope.entry_ids = vec![target_id.clone()];
 
         let adapter = NexusAdapter::new(pool);
-        let entries = match adapter.list_knowledge_entries(&scope) {
+        let entries = match adapter.list_knowledge_entries(&scope).await {
             SpokeResult::Ok(v) => v,
             SpokeResult::Reject(r) => panic!("expected ok, got reject: {r:?}"),
         };
@@ -342,7 +341,7 @@ mod tests {
         scope.entry_types = vec!["character".to_string()];
 
         let adapter = NexusAdapter::new(pool);
-        let entries = match adapter.list_knowledge_entries(&scope) {
+        let entries = match adapter.list_knowledge_entries(&scope).await {
             SpokeResult::Ok(v) => v,
             SpokeResult::Reject(r) => panic!("expected ok, got reject: {r:?}"),
         };
@@ -370,7 +369,7 @@ mod tests {
         scope.entry_ids = vec![target_id.clone()];
 
         let adapter = NexusAdapter::new(pool);
-        let entries = match adapter.list_knowledge_entries(&scope) {
+        let entries = match adapter.list_knowledge_entries(&scope).await {
             SpokeResult::Ok(v) => v,
             SpokeResult::Reject(r) => panic!("expected ok, got reject: {r:?}"),
         };
@@ -409,7 +408,7 @@ mod tests {
         }
 
         let adapter = NexusAdapter::new(pool);
-        match adapter.list_knowledge_entries(&scope_for("wld_big")) {
+        match adapter.list_knowledge_entries(&scope_for("wld_big")).await {
             SpokeResult::Ok(_) => panic!("unfiltered cap overflow must reject"),
             SpokeResult::Reject(r) => {
                 assert_eq!(r.code, SpokeRejectCode::InvalidInput);
@@ -428,7 +427,7 @@ mod tests {
         let (world_id, _) = seed_world_with_timeline_events(&pool).await;
 
         let adapter = NexusAdapter::new(pool);
-        let events = match adapter.list_timeline_events(&scope_for(&world_id)) {
+        let events = match adapter.list_timeline_events(&scope_for(&world_id)).await {
             SpokeResult::Ok(v) => v,
             SpokeResult::Reject(r) => panic!("expected ok, got reject: {r:?}"),
         };
@@ -476,7 +475,7 @@ mod tests {
         let adapter = NexusAdapter::new(pool);
         // branch_id rides scope.extensions["nexus"] (spoke-native ≥ 0.6.0).
         let scope = timeline_scope(&world_id, Some("fbk_root"), &[]);
-        let events = match adapter.list_timeline_events(&scope) {
+        let events = match adapter.list_timeline_events(&scope).await {
             SpokeResult::Ok(v) => v,
             SpokeResult::Reject(r) => panic!("expected ok, got reject: {r:?}"),
         };
@@ -501,7 +500,7 @@ mod tests {
         let adapter = NexusAdapter::new(pool);
         // timeline_event_ids is a native Scope field (not under extensions).
         let scope = timeline_scope(&world_id, None, &["evt_tl_1"]);
-        let events = match adapter.list_timeline_events(&scope) {
+        let events = match adapter.list_timeline_events(&scope).await {
             SpokeResult::Ok(v) => v,
             SpokeResult::Reject(r) => panic!("expected ok, got reject: {r:?}"),
         };
@@ -519,7 +518,7 @@ mod tests {
         let (pool, _dir) = fresh_pool().await;
 
         let adapter = NexusAdapter::new(pool);
-        let events = match adapter.list_timeline_events(&scope_for("wld_empty")) {
+        let events = match adapter.list_timeline_events(&scope_for("wld_empty")).await {
             SpokeResult::Ok(v) => v,
             SpokeResult::Reject(r) => panic!("expected ok, got reject: {r:?}"),
         };
@@ -639,7 +638,7 @@ mod tests {
             .unwrap();
 
         let adapter = NexusAdapter::new(pool);
-        match adapter.list_knowledge_entries(&scope_for(&world_id)) {
+        match adapter.list_knowledge_entries(&scope_for(&world_id)).await {
             SpokeResult::Reject(r) => {
                 assert_eq!(
                     r.code,
@@ -662,7 +661,7 @@ mod tests {
             .unwrap();
 
         let adapter = NexusAdapter::new(pool);
-        match adapter.list_timeline_events(&scope_for(&world_id)) {
+        match adapter.list_timeline_events(&scope_for(&world_id)).await {
             SpokeResult::Reject(r) => {
                 assert_eq!(
                     r.code,

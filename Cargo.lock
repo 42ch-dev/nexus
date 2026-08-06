@@ -3816,6 +3816,7 @@ dependencies = [
 name = "nexus-spoke-adapter"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "chrono",
  "dirs",
  "nexus-contracts",

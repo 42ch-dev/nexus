@@ -10,17 +10,14 @@
 //! storage (no spoke-adapter dep) and `nexus-spoke-adapter` is the capability
 //! aggregation layer (spec §8 dep-graph reversal).
 //!
-//! # Async ↔ sync bridge
+//! # Async surface (V1.153 P0 T2)
 //!
-//! Spoke's port traits are **synchronous** (`fn ... -> SpokeResult<T>`) while
-//! `SQLite` I/O is async. The adapter captures the current tokio runtime
-//! [`Handle`] at construction and bridges each sync port method to async I/O
-//! via `tokio::task::block_in_place` + `Handle::block_on`. This requires the
-//! calling thread to be inside a tokio **multi-threaded** runtime — which the
-//! production daemon uses (`tokio::runtime::Builder::new_multi_thread` in
-//! `apps/nexus42/src/main.rs`). Construct the adapter from inside an async
-//! context (e.g. an HTTP handler or a `#[tokio::test(flavor = "multi_thread")]`
-//! test) so a runtime handle is available.
+//! spoke-operations 0.9.1 converted the adapter port traits to
+//! `#[async_trait] async fn` (and `orchestrate_*` to native `async fn`), so
+//! the port impls are now natively async: each method awaits `SQLite` I/O
+//! directly on the caller's runtime. The former sync bridge
+//! (`Handle::block_on` + `tokio::task::block_in_place`) is gone; the adapter
+//! no longer captures a runtime handle and can be constructed anywhere.
 
 pub mod activation;
 pub mod computable_port;
@@ -36,30 +33,20 @@ pub mod scope_query_port;
 
 use sqlx::SqlitePool;
 use std::sync::{Arc, Mutex};
-use tokio::runtime::Handle;
 
 /// Production `BaselinePorts` impl backing spoke orchestrators against nexus
 /// `SQLite` storage.
 ///
 /// See `.mstar/specs/spoke-adapter-architecture.md` §7.4 for the family
 /// matrix (which families are production vs stub). Construct per-request from
-/// a [`SqlitePool`] (cheap handle clone) **while inside a tokio multi-threaded
-/// runtime**: the adapter captures the current runtime [`Handle`] and bridges
-/// the sync spoke port trait to async `SQLite` I/O via
-/// `tokio::task::block_in_place`.
+/// a [`SqlitePool`] (cheap handle clone); the port methods are natively
+/// `async fn` (spoke-operations 0.9.1 surface) and await `SQLite` I/O on the
+/// caller's runtime — no runtime handle is captured.
 ///
 /// When `with_tx_cell` is used, the lifetime parameter ties the adapter to the
 /// handler-owned `sqlx::Transaction` for the duration of one orchestrate call.
-///
-/// # Panics
-///
-/// [`Self::new`] panics if no tokio runtime is running on the current thread.
-/// In debug builds it additionally panics if that runtime is **not**
-/// multi-threaded — the `block_in_place` bridge used by every sync port
-/// method requires a multi-threaded runtime (see [`Self::block_on`]).
 pub struct NexusAdapter<'a> {
     pool: SqlitePool,
-    handle: Handle,
     /// Injected installation identity (`~/.nexus42/device-id` UUID) for the
     /// `HostCapabilityManifest`. `None` → `HostManifestPort` resolves the
     /// device id from the standard nexus home on demand. V1.148 P3 N-C0:
@@ -74,34 +61,16 @@ pub struct NexusAdapter<'a> {
 }
 
 impl NexusAdapter<'static> {
-    /// Construct from the current tokio runtime.
+    /// Construct from a [`SqlitePool`] (cheap handle clone).
     ///
-    /// # Panics
-    ///
-    /// Panics if no tokio runtime is running on the current thread
-    /// ([`Handle::current`]). In debug builds, additionally panics if the
-    /// current runtime is **not** multi-threaded: `block_in_place` (used by
-    /// [`Self::block_on`]) panics under a `current_thread` runtime, so this
-    /// early check surfaces the misuse at construction rather than at the
-    /// first port method call. Construct this from inside a multi-threaded
-    /// tokio context (e.g. an async daemon handler or a
-    /// `#[tokio::test(flavor = "multi_thread")]` test).
+    /// V1.153 P0 T2: no tokio runtime is captured anymore — the port methods
+    /// are natively `async fn` (spoke-operations 0.9.1 surface) and await
+    /// `SQLite` I/O on the caller's runtime, so the former multi-threaded
+    /// runtime requirement (`block_in_place` bridge) is gone.
     #[must_use]
     pub fn new(pool: SqlitePool) -> Self {
-        let handle = Handle::current();
-        // W-2 (qc3): `Handle::current()` succeeds even for a `current_thread`
-        // runtime, so the real guard is the flavor check. `block_in_place`
-        // panics under a current-thread runtime; fail fast at construction in
-        // debug builds so the panic points here, not at the first port call.
-        // No-op in release builds.
-        debug_assert!(
-            handle.runtime_flavor() == tokio::runtime::RuntimeFlavor::MultiThread,
-            "NexusAdapter requires a multi-threaded tokio runtime \
-             (block_in_place panics under a current_thread runtime)"
-        );
         NexusAdapter {
             pool,
-            handle,
             host_id: None,
             bound_tx_cell: None,
         }
@@ -141,10 +110,10 @@ impl<'a> NexusAdapter<'a> {
 
     /// Run `f` while the adapter's bound transaction cell (if any) is active.
     ///
-    /// `orchestrate_promote` and other sync spoke orchestrators call this from
-    /// async handlers via a short synchronous bridge (`block_in_place` inside
-    /// `put_knowledge_entry`). The handler must keep the [`Arc`] alive and must
-    /// not commit/rollback until after `f` returns.
+    /// `orchestrate_promote` and the other `orchestrate_*` entrypoints (now
+    /// native `async fn`) are awaited from async handlers while the bound
+    /// transaction cell is active. The handler must keep the [`Arc`] alive and
+    /// must not commit/rollback until after the awaited orchestrator returns.
     pub fn with_bound_tx<F, R>(&self, f: F) -> R
     where
         F: FnOnce() -> R,
@@ -169,20 +138,6 @@ impl<'a> NexusAdapter<'a> {
         self.bound_tx_cell
             .as_ref()
             .is_some_and(|cell| cell.lock().ok().is_some_and(|guard| guard.is_some()))
-    }
-
-    /// Bridge a sync trait method → async `SQLite` I/O.
-    ///
-    /// Requires the calling thread to be inside a tokio multi-threaded runtime
-    /// (the production daemon uses `tokio::runtime::Builder::new_multi_thread`;
-    /// see `apps/nexus42/src/main.rs`). `block_in_place` moves the current
-    /// worker out of the scheduler while the `SQLite` future resolves elsewhere
-    /// on the runtime.
-    fn block_on<F, R>(&self, future: F) -> R
-    where
-        F: std::future::Future<Output = R>,
-    {
-        tokio::task::block_in_place(|| self.handle.block_on(future))
     }
 }
 

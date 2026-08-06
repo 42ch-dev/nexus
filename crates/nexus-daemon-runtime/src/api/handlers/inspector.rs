@@ -181,6 +181,7 @@ pub async fn inspect_moment(
     // empty confirmed graph yields `None` (P0 activation-only behavior).
     let hop_edges = nexus_spoke_adapter::adapter::NexusAdapter::new(pool.clone())
         .list_hop_edges_for_world(req.world_id.as_str())
+        .await
         .ok()
         .filter(|edges| !edges.is_empty());
     // Parity note: the CLI only caps the hop budget when the caller passes

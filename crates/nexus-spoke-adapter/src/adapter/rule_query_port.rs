@@ -44,6 +44,7 @@
 
 use super::NexusAdapter;
 use crate::{Rule, RuleQueryPort, SpokeReject, SpokeRejectCode, SpokeResult};
+use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use nexus_local_db::spoke_rules::{get_spoke_rules_by_ids, SpokeRuleRow};
 use serde_json::{json, Map, Value};
@@ -51,23 +52,22 @@ use spoke_schemas::data::rule::{RuleCanonicalName, RuleExtensionsKey};
 use std::collections::HashMap;
 use std::num::NonZeroU64;
 
+#[async_trait]
 impl RuleQueryPort for NexusAdapter<'_> {
-    fn list_rules(&self, rule_refs: &[String]) -> SpokeResult<Vec<Rule>> {
+    async fn list_rules(&self, rule_refs: &[String]) -> SpokeResult<Vec<Rule>> {
         let pool = self.pool.clone();
         let rule_refs = rule_refs.to_vec();
-        self.block_on(async move {
-            let rows = match get_spoke_rules_by_ids(&pool, &rule_refs).await {
-                Ok(rows) => rows,
-                Err(e) => {
-                    return reject(
-                        SpokeRejectCode::InternalError,
-                        format!("storage error on rule lookup: {e}"),
-                        json!({}),
-                    );
-                }
-            };
-            SpokeResult::Ok(rows.iter().filter_map(row_to_rule).collect())
-        })
+        let rows = match get_spoke_rules_by_ids(&pool, &rule_refs).await {
+            Ok(rows) => rows,
+            Err(e) => {
+                return reject(
+                    SpokeRejectCode::InternalError,
+                    format!("storage error on rule lookup: {e}"),
+                    json!({}),
+                );
+            }
+        };
+        SpokeResult::Ok(rows.iter().filter_map(row_to_rule).collect())
     }
 }
 
@@ -192,11 +192,13 @@ mod tests {
 
         let adapter = NexusAdapter::new(pool);
         let rules = unwrap_ok(
-            adapter.list_rules(&[
-                "rule_a".to_string(),
-                "rule_missing".to_string(),
-                "rule_b".to_string(),
-            ]),
+            adapter
+                .list_rules(&[
+                    "rule_a".to_string(),
+                    "rule_missing".to_string(),
+                    "rule_b".to_string(),
+                ])
+                .await,
             "list_rules",
         );
 
@@ -246,7 +248,10 @@ mod tests {
         .await;
 
         let adapter = NexusAdapter::new(pool);
-        let rules = unwrap_ok(adapter.list_rules(&["rule_rich".to_string()]), "list_rules");
+        let rules = unwrap_ok(
+            adapter.list_rules(&["rule_rich".to_string()]).await,
+            "list_rules",
+        );
         assert_eq!(rules.len(), 1);
         let rule = &rules[0];
 
@@ -269,7 +274,7 @@ mod tests {
         seed_rule(&pool, "rule_a", "wld_1", None, "{}").await;
 
         let adapter = NexusAdapter::new(pool);
-        let rules = unwrap_ok(adapter.list_rules(&[]), "list_rules empty");
+        let rules = unwrap_ok(adapter.list_rules(&[]).await, "list_rules empty");
         assert!(
             rules.is_empty(),
             "empty refs must return Ok(vec![]) without error"
@@ -283,7 +288,9 @@ mod tests {
 
         let adapter = NexusAdapter::new(pool);
         let rules = unwrap_ok(
-            adapter.list_rules(&["rule_nope".to_string(), "rule_nada".to_string()]),
+            adapter
+                .list_rules(&["rule_nope".to_string(), "rule_nada".to_string()])
+                .await,
             "list_rules all missing",
         );
         assert!(
@@ -302,7 +309,7 @@ mod tests {
             .unwrap();
 
         let adapter = NexusAdapter::new(pool);
-        match adapter.list_rules(&["rule_a".to_string()]) {
+        match adapter.list_rules(&["rule_a".to_string()]).await {
             SpokeResult::Reject(r) => {
                 assert_eq!(
                     r.code,
