@@ -146,14 +146,17 @@ impl NexusAdapter<'_> {
 }
 
 /// True when a `SpokeReject` carries the adapter's world-conflict
-/// classification (spec §3.2): a zero-row CAS caused by the stored row
-/// living in a different world than the caller verified. The pinned
-/// `SpokeRejectCode` (spoke-operations 0.9.2) has no conflict-class code, so
-/// the adapter rides the classification on the `InternalError` carrier with a
+/// classification (spec §3.2).
+///
+/// A zero-row CAS caused by the stored row living in a different world
+/// than the caller verified. The pinned `SpokeRejectCode`
+/// (spoke-operations 0.9.2) has no conflict-class code, so the adapter
+/// rides the classification on the `InternalError` carrier with a
 /// `world_conflict: true` details marker. Host mappings (Connect
-/// `ErrorEnvelope`, daemon HTTP) use this to surface the FIXED `world_conflict`
-/// wire spelling instead of collapsing into `revision_conflict` /
-/// `stored_revision_stale` or reading as a server fault.
+/// `ErrorEnvelope`, daemon HTTP) use this to surface the FIXED
+/// `world_conflict` wire spelling instead of collapsing into
+/// `revision_conflict` / `stored_revision_stale` or reading as a server
+/// fault.
 pub fn is_world_conflict_reject(reject: &SpokeReject) -> bool {
     reject
         .details

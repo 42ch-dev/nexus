@@ -1536,21 +1536,8 @@ async fn promote_merge(
     }
 
     // Fold the candidate summary into the target body summary.
-    let candidate_summary = candidate
-        .proposed_payload
-        .as_deref()
-        .and_then(|p| serde_json::from_str::<WorldKbBody>(p).ok())
-        .and_then(|b| b.summary);
-    let mut target_body = target.body.clone().unwrap_or_default();
-    if let Some(cs) = candidate_summary {
-        let merged = target_body.summary.as_ref().map_or_else(
-            || format!("— merged: {cs}"),
-            |existing| format!("{existing}\n\n— merged: {cs}"),
-        );
-        target_body.summary = Some(merged);
-    }
-    let body_value = serde_json::to_value(&target_body).unwrap_or_default();
-    let body_json_str = serde_json::to_string(&body_value).unwrap_or_default();
+    let target_body = target.body.clone().unwrap_or_default();
+    let body_json_str = merge_candidate_summary(&target_body, candidate);
     let target_version = target.revision.unwrap_or(0);
 
     // Atomic: CAS-update target body + CAS-reject candidate job in one tx.
@@ -1618,6 +1605,28 @@ async fn promote_merge(
         version: new_version,
         validation_summary: wire_cast(validation_summary(&[], &[])),
     }))
+}
+
+/// Fold the candidate's proposed summary into the target body summary
+/// (promote-merge): append as a `— merged: …` paragraph, or seed it when
+/// the target has no summary. Returns the serialized body JSON string.
+/// Extracted from [`promote_merge`] to keep that handler under the
+/// `too_many_lines` budget.
+fn merge_candidate_summary(target_body: &WorldKbBody, candidate: &KbExtractPromotion) -> String {
+    let candidate_summary = candidate
+        .proposed_payload
+        .as_deref()
+        .and_then(|p| serde_json::from_str::<WorldKbBody>(p).ok())
+        .and_then(|b| b.summary);
+    let mut merged = target_body.clone();
+    if let Some(cs) = candidate_summary {
+        let summary = merged.summary.as_ref().map_or_else(
+            || format!("— merged: {cs}"),
+            |existing| format!("{existing}\n\n— merged: {cs}"),
+        );
+        merged.summary = Some(summary);
+    }
+    serde_json::to_string(&serde_json::to_value(&merged).unwrap_or_default()).unwrap_or_default()
 }
 
 // ─── read endpoints ─────────────────────────────────────────────────────────

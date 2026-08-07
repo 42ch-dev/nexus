@@ -458,14 +458,56 @@ async fn put_relation_update(
     )
     .await;
 
+    // Map the CAS outcome (rejects before the commit below; success
+    // projects the updated row AFTER the commit).
+    let updated_row = match map_relation_cas_result(result, &relation_id, expected) {
+        SpokeResult::Ok(row) => row,
+        SpokeResult::Reject(r) => return SpokeResult::Reject(r),
+    };
+
+    if let Err(e) = tx.commit().await {
+        return reject(
+            SpokeRejectCode::InternalError,
+            format!("storage error on tx commit: {e}"),
+            json!({ "relation_id": relation_id }),
+        );
+    }
+
+    // `updated_row` already carries revision = expected + 1 and the persisted
+    // mutable fields; project it through the single reverse-mapping seam.
+    SpokeResult::Ok(crate::conversion::kb_relationship_row_to_spoke(
+        &updated_row,
+    ))
+}
+
+/// Map the CAS update outcome for [`put_relation_update`], keeping that
+/// function under the `too_many_lines` budget (same extraction pattern as
+/// [`CreateFields`] for the create path):
+///
+/// - `VersionMismatch` → `STORED_REVISION_STALE` (the relation-port
+///   collapses every mismatch shape to stale; the orchestrator pre-routes
+///   create vs update, so the only reachable failure is "the store moved
+///   since the caller's read").
+/// - `WorldConflict` (V1.154 P2 R3, spec §3.2) → the `world_conflict`-
+///   marked `InternalError` reject — a zero-row CAS caused by a world
+///   mismatch must never collapse into a generic OCC failure (the caller's
+///   revision was valid; the WORLD moved). Same carrier + marker as the
+///   `KnowledgeEntryPort` CAS mapping; hosts remap to the fixed///   `world_conflict` wire code via
+///   [`is_world_conflict_reject`](crate::is_world_conflict_reject).
+/// - Any other storage error → `InternalError`.
+fn map_relation_cas_result(
+    result: Result<KbRelationshipRow, LocalDbError>,
+    relation_id: &str,
+    expected: u64,
+) -> SpokeResult<KbRelationshipRow> {
     let updated_row = match result {
         Ok(row) => row,
         Err(LocalDbError::VersionMismatch { actual, .. }) => {
-            // CAS fail. Per the V1.144 brief the relation-port collapses every
-            // VersionMismatch shape to STORED_REVISION_STALE (simpler than the
-            // KnowledgeEntryPort 3-way split — the orchestrator pre-routes
-            // create vs update, so the only reachable failure here is "the
-            // store moved since the caller's read").
+            // CAS fail. Per the V1.144 brief the relation-port collapses
+            // every VersionMismatch shape to STORED_REVISION_STALE (simpler
+            // than the KnowledgeEntryPort 3-way split — the orchestrator
+            // pre-routes create vs update, so the only reachable failure
+            // here is "the store moved since the caller's read").
             let store_revision = actual
                 .and_then(|v| u64::try_from(v).ok())
                 .map_or(Value::Null, Value::from);
@@ -482,12 +524,6 @@ async fn put_relation_update(
                 }),
             );
         }
-        // V1.154 P2 (R3 closure, spec §3.2): a zero-row CAS caused by a world
-        // mismatch must surface as `world_conflict`, never as a generic OCC
-        // failure (the caller's revision was valid; the WORLD moved). Same
-        // carrier + marker as the KnowledgeEntryPort CAS mapping; hosts remap
-        // to the fixed `world_conflict` wire code via
-        // [`is_world_conflict_reject`](crate::is_world_conflict_reject).
         Err(LocalDbError::WorldConflict {
             table,
             id,
@@ -518,20 +554,7 @@ async fn put_relation_update(
             );
         }
     };
-
-    if let Err(e) = tx.commit().await {
-        return reject(
-            SpokeRejectCode::InternalError,
-            format!("storage error on tx commit: {e}"),
-            json!({ "relation_id": relation_id }),
-        );
-    }
-
-    // `updated_row` already carries revision = expected + 1 and the persisted
-    // mutable fields; project it through the single reverse-mapping seam.
-    SpokeResult::Ok(crate::conversion::kb_relationship_row_to_spoke(
-        &updated_row,
-    ))
+    SpokeResult::Ok(updated_row)
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────
