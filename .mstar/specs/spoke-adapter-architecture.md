@@ -1,6 +1,6 @@
 # Spoke Adapter Architecture
 
-> **Status:** Normative (v0.13 — V1.153 P0 spoke lockstep pin 0.8.2→0.9.1: `spoke-operations` port traits + `orchestrate_*` sync→async (adapter adapted signature-level; durable note §7.3); v0.12 — V1.152 DF-77 §11 Narrative Knowledge Pack I/O: shipped P0+P1; P2 dogfood-confirmed — additive daemon export/import routes + all three conflict policies (skip/rename/overwrite) + CLI↔daemon shared `import_pack` module + Control Room panel; v0.11 — V1.151 DF-76 §7.4 inspector packet field surface (shipped P0+P1; P2 dogfood-confirmed against the spoke assemble-module recipe handbook); v0.10 — V1.150 DF-75 §7.4 slot + Moment Directive + generation-stage matrix shipped at P2 close; v0.9 was V1.149 lore activation §7.4 production matrix: default-on engine + Relation hop expand; v0.8 was V1.148 spoke pin 0.6.1→0.8.2 + RuleQueryPort production + orchestrate_check daemon route + Connect Host N-C0 surface; v0.7 was V1.146 spoke InternalError reject code: pin bump 0.6.0→0.6.1; v0.6 was V1.145 spoke consumer alignment: adapter rehome to spoke-adapter + dep reversal + WorldKB/timeline read via ScopeQuery + scope-pushdown contract; v0.5 was V1.144 spoke 0.5.0 upgrade + RelationPort OCC extension + orchestrate_relate cutover)
+> **Status:** Normative (v0.14 — V1.154 P0 spoke lockstep pin 0.9.1→0.9.2: Connect session-peer invoke identity (`InvokeHandlerV2`; payload `extensions.nexus.peer_id` informational-only, hard deny on mismatch, §10.4/§10.6); spoke-connect `mdns` feature removed upstream); v0.13 — V1.153 P0 spoke lockstep pin 0.8.2→0.9.1: `spoke-operations` port traits + `orchestrate_*` sync→async (adapter adapted signature-level; durable note §7.3); v0.12 — V1.152 DF-77 §11 Narrative Knowledge Pack I/O: shipped P0+P1; P2 dogfood-confirmed — additive daemon export/import routes + all three conflict policies (skip/rename/overwrite) + CLI↔daemon shared `import_pack` module + Control Room panel; v0.11 — V1.151 DF-76 §7.4 inspector packet field surface (shipped P0+P1; P2 dogfood-confirmed against the spoke assemble-module recipe handbook); v0.10 — V1.150 DF-75 §7.4 slot + Moment Directive + generation-stage matrix shipped at P2 close; v0.9 was V1.149 lore activation §7.4 production matrix: default-on engine + Relation hop expand; v0.8 was V1.148 spoke pin 0.6.1→0.8.2 + RuleQueryPort production + orchestrate_check daemon route + Connect Host N-C0 surface; v0.7 was V1.146 spoke InternalError reject code: pin bump 0.6.0→0.6.1; v0.6 was V1.145 spoke consumer alignment: adapter rehome to spoke-adapter + dep reversal + WorldKB/timeline read via ScopeQuery + scope-pushdown contract; v0.5 was V1.144 spoke 0.5.0 upgrade + RelationPort OCC extension + orchestrate_relate cutover)
 > **Document class:** Master
 > **Scope:** The `nexus-spoke-adapter` crate boundary, `extensions.nexus` namespace contract, spoke-operations delegation rules, daemon-api envelope strategy, drift detection adaptation, the `/kb/` HTTP route stability decision, the opt-in Connect Host N-C0 surface (DF-72), and the Narrative Knowledge Pack I/O product-transport surface (DF-77).
 > **Related:** [entity-scope-model.md](entity-scope-model.md), [local-db-schema.md](local-db-schema.md), [schemas-directory-layout.md](schemas-directory-layout.md), spoke `CONCEPTS.md`, spoke `.mstar/specs/spoke-data-model.md`, spoke `.mstar/specs/spoke-operations.md`, spoke `.mstar/specs/spoke-connect.md`. Iteration product drafts (process): `.mstar/iterations/v1.148/specs/fl-r-connect-host-foundation.md`, `.mstar/iterations/v1.152/specs/fl-l-w7-knowledge-pack-productization.md`.
@@ -16,9 +16,9 @@ These are the architecture bedrock — do not re-litigate.
 ### 1.1 Consume spoke packages directly
 
 nexus depends on spoke's published packages directly:
-- **Rust:** `spoke-schemas` + `spoke-operations` (crates.io, lockstep **`0.9.1`** exact pin)
-- **TypeScript:** `@42ch/spoke-schemas` + `@42ch/spoke-operations` (npm, lockstep **`0.9.1`** exact pin)
-- **Rust (opt-in Connect Host only):** `spoke-connect` (crates.io, lockstep **`0.9.1`** exact pin) — workspace dep consumed **only** behind cargo feature `connect-host` on `apps/nexus42`. Default `nexus42` / daemon builds MUST NOT link `spoke-connect`. See §10.
+- **Rust:** `spoke-schemas` + `spoke-operations` (crates.io, lockstep **`0.9.2`** exact pin)
+- **TypeScript:** `@42ch/spoke-schemas` + `@42ch/spoke-operations` (npm, lockstep **`0.9.2`** exact pin)
+- **Rust (opt-in Connect Host only):** `spoke-connect` (crates.io, lockstep **`0.9.2`** exact pin) — workspace dep consumed **only** behind cargo feature `connect-host` on `apps/nexus42`. Default `nexus42` / daemon builds MUST NOT link `spoke-connect`. See §10.
 
 > **Historical:** V1.139 shipped at `0.1.1`; V1.140 bumped to `0.2.0`. V1.141 jumped to `0.4.0` (covering both the `0.3.0` capability-sliced port architecture and `0.4.0` additive `HostCapabilityManifest` + body helpers + UTF-8 peer sort). V1.144 bumped to `0.5.0` (additive `Relation.revision` + OCC-aware `RelationPort` + `RelationAlreadyExists`/`RelationNotFound` reject codes + relate-gate explicit mode). V1.145 bumped to `0.6.0` (additive `Scope.extensions` + `KnowledgeEntry.modules`). V1.146 bumped to `0.6.1` (additive `InternalError` 500-class reject code, PR #35). **V1.148 bumped to `0.8.2`** (spoke-connect surface 0.7.0–0.8.2 additive; 0.7.0 demote pack catalog from ModuleMap — pack catalog is product transport envelope, not `modules.pack` on KE/AssemblePacket; connect family schemas additive). **V1.153 bumped to `0.9.1`** (lockstep re-baseline on the connect v2 wire; 0.9.0's dial-bound hello + envelope-auth v2 are internal to `spoke-connect`; `spoke-operations` 0.9.1 additionally converted the adapter port traits + `orchestrate_*` to native async — nexus adapted signature-level, see §7.3).
 
@@ -197,8 +197,8 @@ The `schema_drift_detection.rs` `build_schema_map()` removes the `key-block.sche
 
 `check-wire-drift.sh` gains a new spoke-conformance step (P0 T4):
 
-1. Verify the three crate pins (`spoke-schemas`, `spoke-operations`, `spoke-connect`) all match the pinned **`0.9.1`** in `Cargo.toml`.
-2. Verify the two npm pins (`@42ch/spoke-schemas`, `@42ch/spoke-operations`) both match the pinned **`0.9.1`** in `package.json`.
+1. Verify the three crate pins (`spoke-schemas`, `spoke-operations`, `spoke-connect`) all match the pinned **`0.9.2`** in `Cargo.toml`.
+2. Verify the two npm pins (`@42ch/spoke-schemas`, `@42ch/spoke-operations`) both match the pinned **`0.9.2`** in `package.json`.
 3. Construct a `KnowledgeEntry` from spoke fixture JSON, deserialize via nexus's serde path, serialize back — verify structural round-trip. This catches type-mapping regressions without requiring a local schema.
 
 ### 5.3 Daemon-api envelopes that `$ref` spoke types
@@ -723,9 +723,9 @@ Normative architectural surface for the first FL-R Connect Host slice. Product b
 |------|------|
 | Cargo feature | `connect-host` on `apps/nexus42` (default **off**) |
 | CLI entrypoint | `nexus42 connect start` only (feature-gated) |
-| Dependency | `spoke-connect = "=0.9.1"` workspace dep; optional on `nexus42` |
+| Dependency | `spoke-connect = "=0.9.2"` workspace dep; optional on `nexus42` |
 | Default daemon | Feature-off build does **not** link `spoke-connect`. `nexus42 daemon start` never opens a Connect listener (even if feature-on binary is used as daemon). |
-| mDNS | Do not enable `spoke-connect` `mdns` feature for N-C0 |
+| mDNS | spoke-connect exposes no `mdns` feature as of 0.9.2 (removed upstream); hickory/libp2p-mdns stay lockfile-only via libp2p 0.56 optional deps, never compiled |
 
 ### 10.2 Topology
 
@@ -748,8 +748,8 @@ Normative architectural surface for the first FL-R Connect Host slice. Product b
 - Normative spoke-connect hello (`spoke-connect-hello-jcs-v1`): JCS + Ed25519 over `{protocol_version, peer_id, nonce, host}`; `PROTOCOL_VERSION = 1`.
 - Allowlist: `~/.nexus42/connect/allowlist.json` + CLI `--allow-peer`; empty ⇒ fail-closed (spoke semantics).
 - Capability-token: structural gate only — production defaults `trusted_issuers` empty, `capability_token_provider = None`, `require_capability_token = false`.
-- **Op refusal:** `ConnectConfig.invoke_handler = None` ⇒ every inbound invoke returns `ErrorEnvelope.code = "op_unsupported"` with no side effects. No `NexusAdapter` call from Connect invoke in N-C0.
-- **N-C1 refusal contract (extends):** the connect host wires `invoke_handler = Some(…)`; non-served ops (`check` / `assemble` / `project` / `compute` / unknown) still return `ErrorEnvelope.code = "op_unsupported"` with zero side effects. The `= None` rule above remains the crate default for hosts without a handler.
+- **Op refusal (no handler):** a host without any invoke handler (`invoke_handler = None` and `invoke_handler_v2 = None`) refuses every inbound invoke with `ErrorEnvelope.code = "op_unsupported"` and no side effects — the crate default. No `NexusAdapter` call from Connect invoke in N-C0.
+- **N-C1 refusal contract (extends):** the connect host wires `config.invoke_handler_v2 = Some(invoke::build_handler(...))` — the session-peer dispatch handler (spoke-connect 0.9.2 `InvokeHandlerV2`, `Fn(&PeerId, &str, Value)`, caller identity = the authenticated session peer) — and leaves the legacy `invoke_handler = None` (clean cutover: the payload-identity path is not selected). Non-served ops (`check` / `assemble` / `project` / `compute` / unknown) still return `ErrorEnvelope.code = "op_unsupported"` with zero side effects. The no-handler rule above remains the crate default for hosts without a handler.
 
 ### 10.5 Daemon HTTP `check` (related, not Connect)
 
@@ -764,6 +764,8 @@ Normative architectural surface for the first FL-R Connect Host slice. Product b
 | **N-C2** | `check` / `assemble` over Connect; "reasoning-complete" legitimate | DF-72 later |
 | **N-C3** | `list_peer_host_capability_manifests` production / multi-host | DF-72 later; `R-V1142P1-002` |
 | **DF-73** | Headless `nexus-runtime` binary | Separate backlog; after N-C0 dogfood |
+
+**Denial signaling (N-C1):** identity denials and non-served ops share the `op_unsupported` refusal family (`ErrorEnvelope.code = "op_unsupported"`), but the message distinguishes them. An invalid payload identity claim (present `extensions.nexus.peer_id` that does not resolve to the session peer — mismatch, non-string, unparseable, or >128 chars) returns `message = "op denied: extensions.nexus.peer_id does not match the session peer; caller identity comes from the authenticated session"` (invoke.rs `denied()`); a non-served op returns `message = "op <op> is not supported: …"` (invoke.rs `unsupported()`). Integrators match on the `op denied:` prefix to tell "identity spoofed / claim invalid" from "op not served".
 
 ## 11. Narrative Knowledge Pack I/O (V1.152 / DF-77)
 

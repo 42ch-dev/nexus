@@ -69,11 +69,13 @@ nexus-spoke-adapter = { path = "../../crates/nexus-spoke-adapter" }
 # V1.148 P3 N-C0 (DF-72): Connect Host facade, opt-in via feature
 # `connect-host` below. spoke-connect pulls libp2p 0.56 transitively — the
 # default build (and `daemon start`) must stay libp2p-free, so this dep is
-# `optional` and only `connect start` links it. `mdns` is never enabled.
+# `optional` and only `connect start` links it. spoke-connect exposes no
+# `mdns` feature (removed upstream in 0.9.2); hickory/libp2p-mdns stay
+# lockfile-only via libp2p 0.56 optional deps, never compiled.
 spoke-connect = { workspace = true, optional = true }
 # V1.153 P1 N-C1: the connect wire `ErrorEnvelope`
 # (`spoke_schemas::connect::connect_invoke_response::ErrorEnvelope`) the
-# invoke handler returns. Same 0.9.1 pin; optional + feature-gated with
+# invoke handler returns. Same 0.9.2 pin; optional + feature-gated with
 # `connect-host` (spoke-schemas is a lightweight schema crate, but the
 # connect path is the only consumer).
 spoke-schemas = { workspace = true, optional = true }
@@ -140,7 +142,9 @@ tempfile = "3"
 # — the default daemon graph stays libp2p-free (`cargo tree -p nexus42 -i
 # libp2p` empty). With the feature ON, `spoke-connect` links into the binary,
 # but only `nexus42 connect start` opens a Connect listener; `daemon start`
-# never does. `spoke-connect/mdns` is deliberately NOT enabled.
+# never does. spoke-connect 0.9.2 exposes no `mdns` feature (removed
+# upstream); hickory/libp2p-mdns stay lockfile-only via libp2p 0.56 optional
+# deps, never compiled.
 [features]
 connect-host = ["dep:spoke-connect", "dep:spoke-schemas", "dep:libp2p"]
 # V1.153 P2 (DF-73): forwarded gate for the embedded Web UI — ON by default

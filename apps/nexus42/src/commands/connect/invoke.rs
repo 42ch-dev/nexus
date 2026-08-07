@@ -167,13 +167,19 @@ fn dispatch(
     //    `peer` argument; spoke-connect 0.9.2 `InvokeHandlerV2` — see
     //    module docs). Spec §5.1 lock: the payload's
     //    `extensions.nexus.peer_id` is informational only — present ⇒ it
-    //    MUST equal the session peer (hard deny on mismatch or unparseable
-    //    claim, fail-closed, zero side effects); absent ⇒ fine. The legacy
-    //    payload-carried identity path is removed (clean cutover, no dual
-    //    registration).
+    //    MUST equal the session peer (hard deny on mismatch, unparseable,
+    //    or >128-char claim — the parse cap below mirrors the spoke
+    //    session-core 128-char decode input cap; fail-closed, zero side
+    //    effects); absent ⇒ fine. The legacy payload-carried identity path
+    //    is removed (clean cutover, no dual registration).
     if let Some(claim) = payload.pointer("/extensions/nexus/peer_id") {
+        // Parse cap: reject claims longer than 128 chars before any decode
+        // work, mirroring the spoke session-core 128-char decode input cap
+        // (libp2p-identity's `FromStr` bs58-decodes without a length bound).
+        // Oversized claims share the identity-deny path below.
         let matches_session_peer = claim
             .as_str()
+            .filter(|raw| raw.len() <= 128)
             .and_then(|raw| raw.parse::<PeerId>().ok())
             .is_some_and(|claimed| claimed == *peer);
         if !matches_session_peer {

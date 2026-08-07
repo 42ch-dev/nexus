@@ -1014,13 +1014,16 @@ async fn n_c1_peer_upserts_promotes_relates_with_world_scoping() {
 ///
 /// Spec §5.1 lock (hard deny, fail-closed): a payload that still carries
 /// `extensions.nexus.peer_id` must have it EQUAL the session peer; a
-/// differing claim is denied through the existing allowlist-denial path
-/// (`op_unsupported` family) before `dispatch` — zero side effects. The
-/// spoofed identity B is itself a scoped allowlisted peer, so the legacy
+/// differing, non-string, unparseable, or oversized claim is denied through
+/// the existing allowlist-denial path (`op_unsupported` family) inside
+/// `dispatch`, before the orchestrator/storage bridge — zero side effects.
+/// The spoofed identity B is itself a scoped allowlisted peer, so the legacy
 /// payload-trusting dispatch would ACCEPT the invoke (the R1 vulnerability
 /// this migration closes); only session-peer identity can deny it.
 ///
-/// Covers all three §5.1 branches: mismatch ⇒ denied + no row persisted;
+/// Covers all §5.1 branches: mismatch ⇒ denied + no row persisted;
+/// non-string claim ⇒ denied + no row; unparseable claim ⇒ denied + no row;
+/// oversized claim (>128 chars, invoke.rs parse cap) ⇒ denied + no row;
 /// absent claim ⇒ served under the session peer's scope (proves the identity
 /// source really switched); equal claim ⇒ served (V1.153 clients sending the
 /// correct payload identity keep working).
@@ -1120,6 +1123,77 @@ async fn n_c1_session_peer_identity_denies_spoofed_payload_claim_and_serves_clai
         leaked.is_none(),
         "spoofed invoke must have zero side effects (no row persisted)"
     );
+
+    // 1b. Non-string claim (spec §5.1 fail-closed): `peer_id` is a number,
+    //     not a PeerId string — same hard deny, zero side effects.
+    let non_string = session
+        .invoke(
+            "upsert",
+            serde_json::json!({
+                "extensions": { "nexus": { "peer_id": 123 } },
+                "knowledge_entries": [
+                    entry_fixture("kb_s1b", "NonString", WORLD_A, "confirmed", None),
+                ],
+            }),
+        )
+        .await;
+    assert!(
+        matches!(&non_string, Err(InvokeError::Wire(envelope)) if envelope.code == "op_unsupported"),
+        "non-string payload peer_id must be denied, got {non_string:?}"
+    );
+
+    // 1c. Unparseable claim: a string that is not a PeerId — fail-closed.
+    let unparseable = session
+        .invoke(
+            "upsert",
+            serde_json::json!({
+                "extensions": { "nexus": { "peer_id": "not-a-peer-id" } },
+                "knowledge_entries": [
+                    entry_fixture("kb_s1c", "Unparseable", WORLD_A, "confirmed", None),
+                ],
+            }),
+        )
+        .await;
+    assert!(
+        matches!(&unparseable, Err(InvokeError::Wire(envelope)) if envelope.code == "op_unsupported"),
+        "unparseable payload peer_id must be denied, got {unparseable:?}"
+    );
+
+    // 1d. Oversized claim: >128 chars — denied by the invoke.rs parse cap
+    //     (mirrors the spoke session-core 128-char decode input cap) before
+    //     any decode work; zero side effects.
+    let oversized = session
+        .invoke(
+            "upsert",
+            serde_json::json!({
+                "extensions": { "nexus": { "peer_id": "z".repeat(129) } },
+                "knowledge_entries": [
+                    entry_fixture("kb_s1d", "Oversized", WORLD_A, "confirmed", None),
+                ],
+            }),
+        )
+        .await;
+    assert!(
+        matches!(&oversized, Err(InvokeError::Wire(envelope)) if envelope.code == "op_unsupported"),
+        "oversized payload peer_id must be denied, got {oversized:?}"
+    );
+
+    // 1e. Zero side effects across every deny branch above: none of the
+    //     denied invokes may persist a row.
+    for denied_id in ["kb_s1b", "kb_s1c", "kb_s1d"] {
+        let leaked: Option<i64> = sqlx::query_scalar(
+            "SELECT 1 FROM kb_key_blocks WHERE world_id = ? AND key_block_id = ?",
+        )
+        .bind(WORLD_A)
+        .bind(denied_id)
+        .fetch_optional(&pool)
+        .await
+        .expect("check for leaked row");
+        assert!(
+            leaked.is_none(),
+            "denied invoke must have zero side effects (no row {denied_id} persisted)"
+        );
+    }
 
     // 2. Absent claim ⇒ the session peer is authoritative: no payload
     //    peer_id, still served under A's scope (the branch the 0.9.1-shaped

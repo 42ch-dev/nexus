@@ -142,8 +142,10 @@ spoke-operations = "=0.9.2"
 # InvokeHandlerV2 session-peer API; `mdns` feature removed upstream —
 # nexus never enabled it). Opt-in ONLY: libp2p 0.56 is a
 # transitive dep, so this entry is consumed behind feature `connect-host` on
-# `apps/nexus42` and the DEFAULT daemon graph stays libp2p-free. The `mdns`
-# feature of spoke-connect must NOT be enabled (explicit peering only).
+# `apps/nexus42` and the DEFAULT daemon graph stays libp2p-free.
+# spoke-connect 0.9.2 exposes no `mdns` feature (removed upstream);
+# hickory/libp2p-mdns stay lockfile-only via libp2p 0.56 optional deps,
+# never compiled.
 spoke-connect = "=0.9.2"
 # V1.148 P3 N-C0: libp2p 0.56 — identity/PeerId/Multiaddr types for the
 # `nexus42 connect` CLI (ed25519 keypair + protobuf key serialization only).

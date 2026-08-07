@@ -285,12 +285,13 @@ peer id **your SDK node** uses in
   handshake-only, no write scope.
 - `--allow-peer <PEER_ID>` on the runtime CLI unions with this file.
 
-> **One write-capable peer only.** The per-invoke caller `peer_id` is
-> payload-carried (`extensions.nexus.peer_id`) and spoofable (the locked
-> spoke-connect 0.9.1 handler signature carries no session peer), so per-peer
-> scoping is a real boundary only while the allowlist holds **at most one
-> write-scoped peer**. The runtime warns at boot if more than one holds write
-> scope. The E2 fix is session-bound identity.
+> **Caller identity = the session peer.** The per-invoke caller `peer_id` is
+> the authenticated Connect session peer (spoke-connect 0.9.2
+> `InvokeHandlerV2`), not the payload. A payload that still carries
+> `extensions.nexus.peer_id` must have it equal the session peer; a differing
+> or unparseable claim is denied in full (`op_unsupported`, zero side
+> effects). Per-peer `world_scope` / `op_scope` scoping is therefore
+> authentic for any number of allowlisted peers.
 
 ### Start the runtime
 
