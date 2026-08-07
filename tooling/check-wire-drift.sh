@@ -32,9 +32,9 @@ echo ""
 # ── Gate 1a: Rust crate pins (workspace Cargo.toml) ─────────────────────────
 # The workspace [workspace.dependencies] declares exact pins for all three
 # crates:
-#   spoke-schemas    = "=0.9.1"
-#   spoke-operations = "=0.9.1"
-#   spoke-connect    = "=0.9.1"   (opt-in behind feature `connect-host`)
+#   spoke-schemas    = "=0.9.2"
+#   spoke-operations = "=0.9.2"
+#   spoke-connect    = "=0.9.2"   (opt-in behind feature `connect-host`)
 CARGO_TOML="${PROJECT_ROOT}/Cargo.toml"
 for crate in spoke-schemas spoke-operations spoke-connect; do
   cargo_spoke_raw=$(grep -E "^[[:space:]]*${crate}[[:space:]]*=" "$CARGO_TOML" | head -1)
