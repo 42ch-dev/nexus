@@ -109,6 +109,12 @@ hex = "0.4"
 [target.'cfg(unix)'.dependencies]
 nix = { version = "0.28", features = ["signal", "process"] }
 
+# V1.153 P2 T2: these were accidentally declared under
+# `[target.'cfg(unix)'.dependencies]` (missing `[dependencies]` header after
+# the nix entry), so every Windows build failed with "cannot find crate
+# dialoguer/tempfile/regex/base64/cron/chrono-tz" (E0433) in lib code that
+# uses them on ALL platforms (e.g. works/cron.rs cron validation).
+[dependencies]
 dialoguer = "0.11"
 tempfile = "3"
 regex = "1"
