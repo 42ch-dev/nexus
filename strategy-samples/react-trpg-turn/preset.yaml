@@ -1,0 +1,176 @@
+# React TRPG Turn Strategies Preset — mechanical-op + natural-language-turn lanes
+#
+# This is a FORKABLE sample for partners who orchestrate a turn-based TRPG
+# through Nexus ("the orchestrator side"). It demonstrates the two AI-triggered
+# turn lanes of the partner's core turn loop:
+#
+#   * Mechanical-op lane (trigger type 2) — an explicit mechanical action
+#     (attack, cast, shield block, check shortcut) carries a stable op id +
+#     parameters; the local rules module settles FIRST (the E2 `compute` op
+#     over Connect, host-local WASM); AI narration is produced from the
+#     confirmed receipt ONLY (and is optional when UI feedback already
+#     suffices). The AI never computes, rewrites, or overrides settlement.
+#
+#   * Natural-language-turn lane (trigger type 3) — the AI parses the player's
+#     free-text intent, PROPOSES an op request + parameters WITHOUT
+#     pre-announcing outcomes, the local rules module settles, and the AI
+#     narrates the confirmed receipt only, then stops at the player response
+#     point. Chained dependent ops resolve stepwise — never guessed in one
+#     shot. Raw player input is preserved verbatim in the ledger.
+#
+# The lane selector is a tiny judge on `preset.input.trigger_type` (GO =
+# mechanical, NOGO = natural language), mirroring the game-narrative preset's
+# routing pattern (the expression engine cannot read dotted `preset.input.*`
+# keys, so lane selection comes from a judge whose prompt CAN read the
+# payload).
+#
+# Pure-UI operations (view sheet, switch page, expand spell, open inventory —
+# partner trigger type 1) are NOT a preset lane: they make no AI call, advance
+# no world time, and mutate no state. They are governed by the README contract
+# (see README.md "Browse guard"), not by a fake preset lane.
+#
+# The manifest declares capability routing + prompt templates only. Nothing
+# here is embedded into any binary; the bundle is consumed through the same
+# preset bundle format as embedded presets (preset.yaml + templates/), via the
+# 3-tier resolution (`~/.nexus42/presets/<id>/` overrides embedded).
+#
+# Run payload (`preset.input`, provided by the partner's backend when creating
+# the schedule):
+#   trigger_type:  "mechanical" | "natural_language"   (lane selector)
+#   turnId:        unique turn identifier — one per turn, client-generated
+#                  (the preset cannot prove uniqueness; see README "Turn
+#                  idempotency and completion")
+#   operationId:   stable rule-op identifier — mechanical lane: client-
+#                  supplied; natural-language lane: proposed by the AI and
+#                  confirmed by the client before settlement
+#   world_id:      target World UUID
+#   creator_id:    creator owning the World
+#   input:         raw player input, VERBATIM (natural-language lane; the
+#                  ledger keeps it unchanged — AI/parser may derive structure,
+#                  never overwrite the original)
+#   params:        operation parameters — mechanical lane: client-supplied;
+#                  natural-language lane: proposed by the AI
+#   state:         current public game state (context assembly; not modified
+#                  by this preset)
+#   receipt:       confirmed structured receipt from the local rules module,
+#                  injected by the caller AFTER the Connect `compute` op has
+#                  settled (absent until then; also carries structured
+#                  failure receipts for invalid ops)
+#
+# Idempotency boundary (spec-locked): the preset/loader enforces schema/graph
+# shape and referenced assets; it CANNOT prove turnId/operationId are
+# non-empty or globally unique, deduplicate retries, atomically commit world +
+# ledger, or unlock the client. Those guarantees belong to the client/runtime
+# boundary — the caller generates stable IDs, persists raw input + receipt +
+# final output, rejects duplicate (turnId, operationId) settlement, and
+# applies the world-aware CAS / structured-failure rules. The templates and
+# README document these obligations without claiming that YAML alone provides
+# idempotency.
+
+preset:
+  id: react-trpg-turn
+  version: 1
+  kind: creator
+  description: "TRPG turn loop: mechanical-op and natural-language-turn lanes — AI proposes, host-local module settles over Connect compute, AI narrates confirmed receipts only, stops at the player response point"
+  requires_capabilities:
+    - acp.prompt
+    - judge.llm
+  run_intents:
+    - work_continue
+  initial: routing
+  terminal: done
+
+states:
+  - id: routing
+    description: "Lane selector: judge reads preset.input.trigger_type -> mechanical-op lane (GO) or natural-language-turn lane (NOGO)"
+    exit_when:
+      kind: llm_judge
+      template_file: templates/lane-route.md
+      judge_capability: judge.llm
+    next:
+      go: mechanical_turn
+      nogo: natural_language_turn
+
+  - id: mechanical_turn
+    description: "Mechanical-op lane: emit stable op request (client-supplied op id + params) -> settle_receipt confirms the module receipt -> receipt_narration (optional in the client) narrates confirmed results only"
+    enter:
+      - kind: inner_graph
+        name: mechanical_graph
+    exit_when:
+      kind: graph_complete
+    next: wait_for_player
+
+  - id: natural_language_turn
+    description: "Natural-language-turn lane: intent_parse -> op_request proposes op + params (no outcome claims) -> settle_receipt confirms the module receipt -> receipt_narration narrates confirmed results only"
+    enter:
+      - kind: inner_graph
+        name: natural_language_graph
+    exit_when:
+      kind: graph_complete
+    next: wait_for_player
+
+  - id: wait_for_player
+    description: "Stop at the player response point: ExitWhen::Manual -> NextAction::WaitForInput; no automatic transition, extra op, or outcome narration before the player resumes"
+    exit_when:
+      kind: manual
+    next: done
+
+  - id: done
+    terminal: true
+
+inner_graphs:
+  # Mechanical-op lane (partner trigger type 2). The client submits a stable
+  # op id + params; the host performs the settlement via the E2 `compute` op
+  # (host-local WASM module over Connect) between op_request and
+  # settle_receipt, then injects the confirmed receipt into
+  # `preset.input.receipt`. Nodes are sequenced with depends_on; each node
+  # template is self-contained (reads preset.input) per the embedded-preset
+  # convention. The host reads the op_request node output (the emitted request
+  # text) to perform the Connect op; `output_binding` exports the narration
+  # text separately from the receipt.
+  mechanical_graph:
+    nodes:
+      - id: op_request
+        kind: acp_prompt
+        template_file: templates/mechanical-op-request.md
+        tool_policy: auto_grant_read_only
+      - id: settle_receipt
+        kind: acp_prompt
+        depends_on: [op_request]
+        template_file: templates/settle-receipt.md
+        tool_policy: auto_grant_read_only
+      - id: receipt_narration
+        kind: acp_prompt
+        depends_on: [settle_receipt]
+        template_file: templates/receipt-narration.md
+        tool_policy: auto_grant_read_only
+    output_binding: receipt_narration.text
+
+  # Natural-language-turn lane (partner trigger type 3). intent_parse reads
+  # the raw player input; op_request proposes the op + params (never a
+  # predicted result); the host settles via the E2 `compute` op between
+  # op_request and settle_receipt; receipt_narration narrates the confirmed
+  # receipt only. Chained dependent ops resolve stepwise — one op per graph
+  # run, the next turn's graph run depends on this turn's confirmed result.
+  natural_language_graph:
+    nodes:
+      - id: intent_parse
+        kind: acp_prompt
+        template_file: templates/natural-language-intent.md
+        tool_policy: auto_grant_read_only
+      - id: op_request
+        kind: acp_prompt
+        depends_on: [intent_parse]
+        template_file: templates/natural-language-op-request.md
+        tool_policy: auto_grant_read_only
+      - id: settle_receipt
+        kind: acp_prompt
+        depends_on: [op_request]
+        template_file: templates/settle-receipt.md
+        tool_policy: auto_grant_read_only
+      - id: receipt_narration
+        kind: acp_prompt
+        depends_on: [settle_receipt]
+        template_file: templates/receipt-narration.md
+        tool_policy: auto_grant_read_only
+    output_binding: receipt_narration.text
