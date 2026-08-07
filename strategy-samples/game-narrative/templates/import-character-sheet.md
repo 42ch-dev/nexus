@@ -19,7 +19,7 @@ into the target World over Connect.
 If the character sheet section is empty or absent, respond with an empty
 `knowledge_entries` array — never invent source material.
 
-## Wire contract (spoke 0.9.1 KnowledgeEntry)
+## Wire contract (spoke 0.9.2 KnowledgeEntry)
 
 | Field | Rule |
 |-------|------|
@@ -69,7 +69,7 @@ is the subset this template emits; it is not the full enum.
    sheet (member of faction, home location, relationship to another character,
    owns item). The hint contract is below.
 
-## Relation hint contract (spoke 0.9.1 Relation — written via Connect `relate`)
+## Relation hint contract (spoke 0.9.2 Relation — written via Connect `relate`)
 
 | Field | Rule |
 |-------|------|
@@ -123,7 +123,7 @@ the lane's final import manifest:
 }
 ```
 
-## SDK-side import pattern (N-C1, @42ch/spoke-connect@0.9.1)
+## SDK-side import pattern (N-C1, @42ch/spoke-connect@0.9.2)
 
 The partner's backend persists these drafts — the preset itself does not write:
 

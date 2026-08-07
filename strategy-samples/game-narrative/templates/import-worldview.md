@@ -17,7 +17,7 @@ backend writes into the target World over Connect.
 If the document section is empty or absent, respond with an empty
 `knowledge_entries` array — never invent source material.
 
-## Wire contract (spoke 0.9.1 KnowledgeEntry)
+## Wire contract (spoke 0.9.2 KnowledgeEntry)
 
 | Field | Rule |
 |-------|------|
@@ -94,7 +94,7 @@ Respond with ONLY a JSON object (no markdown code fences):
 }
 ```
 
-## SDK-side import pattern (N-C1, @42ch/spoke-connect@0.9.1)
+## SDK-side import pattern (N-C1, @42ch/spoke-connect@0.9.2)
 
 The partner's backend persists these drafts — the preset itself does not write:
 
