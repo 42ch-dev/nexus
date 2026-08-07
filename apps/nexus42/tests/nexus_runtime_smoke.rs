@@ -9,9 +9,9 @@
 //! 2. **serves Connect** — the `runtime_smoke_probe` example (a reference
 //!    spoke-connect peer, built with the same `connect-host` feature)
 //!    completes the signed-hello handshake against the spawned process and
-//!    reads the N-C1 manifest (`extensions.nexus.served_ops` =
-//!    upsert/promote/relate — the P1 invoke surface, honest by the P1
-//!    machine-check);
+//!    reads the N-C2 read-half manifest (`extensions.nexus.served_ops` =
+//!    upsert/promote/relate/check/assemble — the invoke surface, honest by
+//!    the machine-check);
 //! 3. **no HTTP/SPA listener** — the daemon HTTP port refuses connections
 //!    (the daemon router never boots; in release the SPA fallback is
 //!    additionally compiled out by `web-embed` OFF).
@@ -319,11 +319,11 @@ fn headless_runtime_prints_readiness_serves_connect_and_has_no_http_listener() {
     // 1. Readiness block: the required lines are present on stdout.
     let ready = ready_lines.join("\n");
     for expected in [
-        "Connect Host (N-C1) ready",
+        "Connect Host (N-C2 read half) ready",
         "peer_id:",
         "host_id:",
         "allowlisted peers: 1",
-        "upsert/promote/relate served",
+        "upsert/promote/relate/check/assemble served",
     ] {
         assert!(
             ready.contains(expected),
@@ -336,8 +336,8 @@ fn headless_runtime_prints_readiness_serves_connect_and_has_no_http_listener() {
     assert_no_http_listener(runtime_pid, &listen_addrs);
 
     // 3. The reference probe peer dials the host and completes the
-    //    signed-hello handshake; the N-C1 manifest advertises exactly the
-    //    served write ops and the session stays usable.
+    //    signed-hello handshake; the N-C2 read-half manifest advertises
+    //    exactly the served ops and the session stays usable.
     let host_peer = ready_lines
         .iter()
         .find_map(|line| line.trim().strip_prefix("peer_id:"))
@@ -361,7 +361,11 @@ fn headless_runtime_prints_readiness_serves_connect_and_has_no_http_listener() {
         status.success(),
         "probe failed (status {status})\nstdout:\n{stdout}\nstderr:\n{stderr}"
     );
-    for expected in ["DIAL_OK", "SERVED_OPS=upsert,promote,relate", "SESSION_OK"] {
+    for expected in [
+        "DIAL_OK",
+        "SERVED_OPS=upsert,promote,relate,check,assemble",
+        "SESSION_OK",
+    ] {
         assert!(
             stdout.contains(expected),
             "probe output missing {expected:?}:\n{stdout}\nstderr:\n{stderr}"

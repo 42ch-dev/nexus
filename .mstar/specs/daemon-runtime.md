@@ -178,10 +178,11 @@ under the default `~/.nexus42` home.
 1. **Boot profile.** The headless boot MUST NOT call
    `nexus_daemon_runtime::boot::run_daemon`. It boots PATH enrichment, the
    home layout, config load, workspace `SQLite` open, ONE per-process
-   `NexusAdapter`, and the Connect host with the **N-C1 invoke surface**
-   (P1); liveness is a **stdout readiness line** — there is no HTTP health
-   endpoint. The daemon HTTP data router, embedded `apps/web` SPA,
-   Setup/Canvas/Control Room routes, ACP/agent-host subsystem, and
+   `NexusAdapter`, and the Connect host with the **N-C2 read-half invoke
+   surface** (`upsert` / `promote` / `relate` / `check` / `assemble`,
+   world-scoped; P1); liveness is a **stdout readiness line** — there is no
+   HTTP health endpoint. The daemon HTTP data router, embedded `apps/web`
+   SPA, Setup/Canvas/Control Room routes, ACP/agent-host subsystem, and
    schedule/worker supervision never start in this process.
 2. **Compile-time SPA exclusion.** The `web-embed` feature (default ON on
    `nexus-daemon-runtime`, forwarded by `apps/nexus42`) gates the

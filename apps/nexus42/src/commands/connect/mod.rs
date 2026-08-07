@@ -1,13 +1,15 @@
-//! Connect Host commands (DF-72 N-C0 → N-C1) — opt-in feature `connect-host`.
+//! Connect Host commands (DF-72 N-C0 → N-C2 read half) — opt-in feature
+//! `connect-host`.
 //!
 //! `nexus42 connect start` runs a `spoke-connect` node in a **separate OS
 //! process** (architect lock Q7): signed-hello handshake, allowlist,
 //! honest `HostCapabilityManifest`, and — since V1.153 P1 (N-C1) — an
-//! inbound **write-op invoke dispatcher** ([`invoke`]) backed by a
-//! per-process `NexusAdapter` over the active workspace DB. Every op the
-//! host does not serve (`check` / `assemble` / `project` / `compute` /
-//! unknown) is refused with `op_unsupported` (the N-C0 refusal contract
-//! extends); non-allowlisted peers never reach the handler (handshake).
+//! inbound **invoke dispatcher** ([`invoke`]) backed by a per-process
+//! `NexusAdapter` over the active workspace DB. N-C2 (V1.154 P1) extends
+//! the served surface with the read half (`check` / `assemble`); every op
+//! the host does not serve (`compute` / `project` / unknown) is refused
+//! with `op_unsupported` (the N-C0 refusal contract extends);
+//! non-allowlisted peers never reach the handler (handshake).
 //!
 //! Topology rules (product draft `fl-r-connect-host-foundation.md` §2.1/§2.6):
 //! - mDNS is **never** enabled (`spoke-connect/mdns` not in the feature set).
@@ -45,8 +47,9 @@ const DEFAULT_LISTEN: &str = "/ip4/127.0.0.1/tcp/0";
 /// Connect Host subcommands.
 #[derive(Debug, Subcommand)]
 pub enum ConnectCommand {
-    /// Start the Connect Host node (N-C1: handshake + manifest + world-scoped
-    /// upsert/promote/relate invoke dispatch; all other ops refused)
+    /// Start the Connect Host node (N-C2 read half: handshake + manifest +
+    /// world-scoped upsert/promote/relate/check/assemble invoke dispatch;
+    /// compute/project/unknown ops refused)
     Start {
         /// Peer IDs to allowlist for this run (repeatable; unioned with
         /// `~/.nexus42/connect/allowlist.json`).
@@ -89,7 +92,7 @@ async fn start(allow_peer: Vec<String>, listen: Vec<String>) -> Result<()> {
         .await
         .map_err(|e| CliError::Config(format!("connect node start failed: {e}")))?;
 
-    eprintln!("nexus42 connect start: Connect Host (N-C1) listening");
+    eprintln!("nexus42 connect start: Connect Host (N-C2 read half) listening");
     eprintln!("  peer_id: {}", node.local_peer_id());
     eprintln!("  host_id: {host_id}");
     for addr in node.listen_addrs() {
@@ -99,7 +102,8 @@ async fn start(allow_peer: Vec<String>, listen: Vec<String>) -> Result<()> {
         "  allowlisted peers: {allowlist_len} (fail-closed; add via allowlist.json or --allow-peer)"
     );
     eprintln!(
-        "  invokes: upsert/promote/relate served (world-scoped); all other ops refused (op_unsupported)"
+        "  invokes: upsert/promote/relate/check/assemble served (world-scoped); \
+         compute/project/unknown refused (op_unsupported)"
     );
     eprintln!("  press Ctrl-C to stop");
 

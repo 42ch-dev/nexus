@@ -87,7 +87,7 @@ NEXUS42_HOME=/path/to/home nexus-runtime         # same override via env
 ```
 
 - **Liveness is a stdout line** — there is no HTTP health endpoint. When the
-  runtime is ready it prints `nexus-runtime: Connect Host (N-C1) ready`,
+  runtime is ready it prints `nexus-runtime: Connect Host (N-C2 read half) ready`,
   followed by its `peer_id`, `host_id`, listen addresses, the allowlisted-peer
   count, and the served ops. Press Ctrl-C to stop.
 - **`--home` / `NEXUS42_HOME` semantics:** the value is the *home directory
@@ -397,9 +397,11 @@ daemon-backed path — neither affects `validate.sh` (which always passes
 
 ## What's next (E2 preview)
 
-- **Compute-over-Connect invocation** — `compute` (and `check` / `assemble` /
-  `project`) over Connect, plus `"reasoning-complete"` in the host manifest:
-  **E2 / N-C2**. Until then they are refused with `op_unsupported`.
+- **Compute-over-Connect invocation** — `compute` over Connect, plus the
+  `"reasoning-complete"` semantic milestone (roles `computable-engine` /
+  capability `l2-computable`) in the host manifest: **P2 of the E2 wave**.
+  `check` / `assemble` are already served (N-C2 read half); `project` stays
+  refused with `op_unsupported`.
 - Release polish (GitHub Release automation, checksums on the release page),
   installer / codesigning / auto-update, and multi-host / multi-peer session
   identity are E2+.
