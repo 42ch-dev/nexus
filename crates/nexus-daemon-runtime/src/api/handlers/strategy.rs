@@ -19,6 +19,7 @@ use nexus_contracts::{
 };
 use nexus_home_layout::{user_preset_base_dir, user_preset_bundle_dir};
 use serde_json::Value;
+#[cfg(unix)]
 use std::os::fd::AsRawFd;
 use tracing::info;
 
