@@ -328,7 +328,7 @@ mod tests {
         let manifest_json = serde_json::to_value(&manifest).expect("manifest serializes");
         assert!(
             !manifest_json.to_string().contains("reasoning-complete"),
-            "N-C0 MUST NOT advertise reasoning-complete (reserved for N-C2)"
+            "MUST NOT advertise the literal reasoning-complete string (semantic milestone lands with compute in the N-C2 reasoning plan)"
         );
 
         // 7. Round-trips through the spoke generated serde type without
