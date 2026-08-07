@@ -42,6 +42,7 @@ react-trpg-turn/
 | `input` | raw player input, preserved verbatim in the ledger — never overwritten by AI/parser rewrites |
 | `params` | operation parameters |
 | `state` | current public game state (context assembly; not mutated by the preset) |
+| `parsed_intent` | structured intent from the `intent_parse` step — caller-injected (host-bound) before `op_request` runs; absent until then |
 | `receipt` | confirmed structured receipt from the local rules module, injected by the caller after settlement |
 
 ## Browse guard (trigger type 1) — README contract
@@ -65,11 +66,16 @@ Explicit mechanical action (attack, cast, shield block, check shortcut) —
 **settle-first**, with no AI step in the request path:
 
 1. The client submits a stable `operationId` + `params`.
-2. The host settles IMMEDIATELY: the client-supplied op id + params are
-   passed through **unchanged** to the E2 `compute` op over Connect
-   (host-local WASM module; see [Settlement](#settlement-host-local-module-over-connect)).
-   The local rules module is the only thing that verifies, computes, and
-   produces the result — no LLM round-trip precedes settlement.
+2. The settlement happens IMMEDIATELY: the caller submits the client-supplied
+   op id + params into the E2 `compute` op over Connect (host-local WASM
+   module; see [Settlement](#settlement-host-local-module-over-connect)).
+   `operationId` is a caller-side ledger correlation key — it does not ride
+   the Connect `ComputeRequest` wire; the params ride in the request's
+   `computable` map. The local rules module is the only thing that verifies,
+   computes, and produces the result — there is no AI step in the op-request
+   path (the routing lane judge runs once on lane entry, before settlement;
+   the op id + params are client-supplied and never generated or rewritten
+   by an LLM).
 3. The AI narrates from the confirmed receipt ONLY
    (`templates/settle-receipt.md` → `templates/receipt-narration.md`).
    Narration is optional at the client's discretion: when UI feedback
@@ -79,12 +85,19 @@ Explicit mechanical action (attack, cast, shield block, check shortcut) —
    choice; the preset declares the full narration-capable flow.
 4. The AI never recalculates or overrides settlement. The mechanical
    op-request contract is a client contract: the op id + params are
-   client-supplied and passed through unchanged — the AI never generates,
-   rewrites, or overrides them.
+   client-supplied and carried into the `compute` op with no AI step in
+   between — the AI never generates, rewrites, or overrides them.
 
 ### Natural-language-turn lane (trigger type 3)
 
 Natural-language action ("I cast phase bolt at the guard"):
+
+**Caller-injected intermediate inputs.** The lane's inner graph is not an
+atomic daemon run: the caller sequences the ACP steps and injects
+`preset.input.parsed_intent` (the `intent_parse` step's output, bound before
+`op_request` runs) and `preset.input.receipt` (the confirmed module receipt,
+bound after the Connect `compute` op settles) between them — the same binding
+convention the `preset.yaml` comments and the op-request template document.
 
 1. `templates/natural-language-intent.md` parses the player's intent; the raw
    input stays unchanged in the ledger.
@@ -173,7 +186,7 @@ Principles are encoded here; prose is not copied.
 | World knowledge import (worldview / character-sheet KnowledgeEntries + relations, E1 flow) | N-C1 write ops over Connect (`upsert` / `promote` / `relate` via `@42ch/spoke-connect`) |
 | Context assembly (public state, world info, characters, applicable contracts) | N-C2 read half over Connect (`check` / `assemble`) |
 | Settlement (rules module invocation) | E2 compute half: the `compute` op over Connect (N-C2 compute) against the host-local module — **read-only over Connect** (see [Settlement](#settlement-host-local-module-over-connect)) |
-| Turn strategy orchestration | This preset bundle (capability routing + prompt templates; validated by `./strategy-samples/validate.sh react-trpg-turn`) |
+| Turn strategy orchestration | This preset bundle (capability routing + prompt templates; validated by `./strategy-samples/validate.sh strategy-samples/react-trpg-turn` from the repo root) |
 
 **Turn ledger is a client-runtime obligation.** The preset cannot persist
 anything — no preset symbol supplies a global ledger. The caller persists the
@@ -191,8 +204,10 @@ peer — never a payload-carried claim.
 
 ## Settlement (host-local module over Connect)
 
-Settlement maps to the E2 `compute` op: the host invokes the Connect compute
-half with the proposed `operationId` + params, and the **host-local WASM
+Settlement maps to the E2 `compute` op: the caller invokes the Connect
+compute half with the proposed op — `operationId` stays a caller-side ledger
+key (the `ComputeRequest` wire carries no such field) and the params ride in
+the request's `computable` map. The **host-local WASM
 module** (installed under `~/.nexus42/modules/<id>/`, e.g.
 `modules/basic-combat` as the stand-in for a rules module) deterministically
 computes the result and returns the confirmed structured receipt.
@@ -220,5 +235,6 @@ applies, but the fallback path is not modeled in this preset.
 ./strategy-samples/validate.sh strategy-samples/react-trpg-turn
 ```
 
+Run from the nexus repository root — the bundle path is repo-root-relative.
 Runs the real offline validator core (`nexus42 system preset validate
 --offline`) — no daemon needed. Exit 0 = clean.

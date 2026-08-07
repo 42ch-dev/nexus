@@ -117,17 +117,22 @@ nexus-runtime: Connect Host (N-C2 E2) ready
 The runtime shares `~/.nexus42` with the creator-facing `nexus42` app
 (`config.toml`, workspace SQLite, presets, modules). It **fails closed without
 an active workspace** — prepare the home first, either with the creator app's
-first-run setup, or with the CLI (`nexus42 creator register` +
-`nexus42 creator workspace init` — both write the `config.toml` keys the
-runtime resolves). For hermetic/test setups, point `--home` / `NEXUS42_HOME`
-at an isolated directory and prepare it the same way:
+first-run setup, or with `nexus42 creator workspace init` (with no creator
+daemon running, its FS fallback writes the `config.toml` keys the runtime
+resolves: `active_creator_id=local`, the workspace slug, and `state.db`).
+`nexus42 creator register` is optional and platform-only (auth token +
+network, writes `auth.json`) — it is not needed for a local run.
+
+**Home binding.** The `nexus42` CLI resolves its home from `$HOME` only
+(`$HOME/.nexus42`); `NEXUS42_HOME` is a nexus-runtime env var. For hermetic/
+test setups, export `HOME` at an isolated directory and prepare it the same
+way — the runtime resolves the same home (`--home` > `NEXUS42_HOME` > `$HOME`):
 
 ```bash
-export NEXUS42_HOME=/tmp/nexus-e2
-nexus42 creator register --name "E2 integrator"            # writes config.toml + device-id
-nexus42 creator workspace init workspace "E2 demo"         # creates the workspace DB (slug defaults to `default`)
+export HOME=/tmp/nexus-e2
+nexus42 creator workspace init workspace "E2 demo"         # FS fallback: active_creator_id=local + slug `default` + state.db
 nexus42 creator world create --title "E2 demo world"       # creates a world; note the wld_... id
-./nexus-runtime --allow-peer 12D3KooW...                   # boot against the temp home
+./nexus-runtime --allow-peer 12D3KooW...                   # boot against the same temp home ($HOME/.nexus42)
 ```
 
 > The workspace slug defaults to `default`; pass `--workspace-slug e2-demo` to
@@ -358,7 +363,7 @@ context window:
 {
   "packet": {
     "schema_version": 1,
-    "packet_id": "pkt_...",
+    "packet_id": "assemble:wld_abc123",
     "entries": [
       { "entry_id": "ent_lin_xia", "entry_type": "character", "canonical_name": "Lin Xia" }
     ],
@@ -473,10 +478,13 @@ state** first, then the entry's `body.computable.module_id` (documented
 precedence). The `project` op is not served over Connect, so a session row is
 staged out-of-band on the host (workspace SQLite `compute_sessions` table —
 `session_id`, `entry_id`, `state_json` with `module_id`, `created_at`).
-Discover the creator id + workspace slug the runtime resolved, then insert:
+Discover the creator id + workspace slug the runtime resolved, then insert.
+The staging step uses the `sqlite3` CLI — ensure it is on `PATH` (macOS ships
+it; elsewhere install it via your package manager, e.g. `brew install
+sqlite3` / `apt-get install sqlite3`):
 
 ```bash
-# the home the runtime booted with (NEXUS42_HOME from §1, else the default)
+# the home the runtime booted with (HOME from §1, else the default)
 NEXUS_HOME="${NEXUS42_HOME:-$HOME}/.nexus42"
 cat "$NEXUS_HOME/config.toml"      # active_creator_id = "ctr_..." + active_workspace_slug_by_creator
 ls "$NEXUS_HOME/creators/"         # the creator_id directory (e.g. ctr_...)
@@ -553,10 +561,10 @@ world-aware CAS / structured-failure rules — never a forced overwrite).
 
 | `ErrorEnvelope.code` | Meaning |
 |---|---|
-| `module_not_found` | No module identity (staged state or `body.computable`), or the module is not installed under `~/.nexus42/modules/<id>/` |
+| `module_not_found` | No module identity (staged state or `body.computable`), an unsafe module id shape (the id-safety check runs first in the store gate), or the module is not installed under `~/.nexus42/modules/<id>/` |
 | `module_not_scoped` | The resolved module is not in the peer's `module_scope` (or the scope is missing/empty) |
 | `settle_not_enabled` | `settle: true` on a read-only compute surface |
-| `invalid_input` | Missing target entry, invalid module id shape, or malformed payload |
+| `invalid_input` | Missing target entry or malformed payload |
 | `op_unsupported` | `project` and unknown ops (zero side effects) |
 
 This op is the settlement step the TRPG turn strategies reference — see
@@ -625,7 +633,7 @@ a `preset.yaml` file, or a standalone YAML file (standalone skips asset
 checks). Machine-readable output:
 
 ```bash
-nexus42 system preset validate --offline --json my-strategy
+nexus42 system preset validate --offline --json strategy-samples/react-trpg-turn
 # {"errors":[],"id":"react-trpg-turn","state_count":5,"valid":true,"version":1}
 ```
 

@@ -12,7 +12,7 @@ should settle — a proposal, never a result.
 ## Inputs
 
 - Raw player input (verbatim, still authoritative): `{{preset.input.input}}`
-- Parsed intent (from the intent_parse step — the host binds that node's
+- Parsed intent (from the intent_parse step — the caller binds that node's
   output here before this step runs): `{{preset.input.parsed_intent}}`
 - Turn id: `{{preset.input.turnId}}`
 - Operation id (caller-supplied hint when present; absent when the AI must
@@ -37,7 +37,7 @@ should settle — a proposal, never a result.
    steps are requested in subsequent turns based on this step's confirmed
    result. NEVER guess the full chain in one shot.
 5. The proposed `operationId` is stable per rule op (e.g. `cast.phase-bolt`,
-   `check.persuasion`) and `turnId` is carried verbatim — the host rejects
+   `check.persuasion`) and `turnId` is carried verbatim — the caller rejects
    duplicate `(turnId, operationId)` settlement. When the run payload
    carries an `operationId` (caller hint / pre-bound candidate), propose
    within it rather than inventing a different id. Raw input stays untouched
@@ -59,7 +59,7 @@ Respond with ONLY a JSON object (no markdown code fences):
     "target_id": "kb_guard",
     "spell_slot": 1
   },
-  "request": "<one sentence: the proposed op and its inputs, ready for the host to invoke; no outcome claim>"
+  "request": "<one sentence: the proposed op and its inputs, ready for the caller to invoke; no outcome claim>"
 }
 ```
 
@@ -86,6 +86,6 @@ For the ambiguous case:
 }
 ```
 
-The host reads this node's `request` text and performs the actual Connect
+The caller reads this node's `request` text and performs the actual Connect
 `compute` op; the confirmed result comes back as `preset.input.receipt` for
 the next step.
