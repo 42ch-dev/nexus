@@ -23,7 +23,8 @@
 
 pub mod allowlist;
 pub mod identity;
-// V1.153 P1 N-C1: the `InvokeHandler` closure (architect-locked home).
+// V1.153 P1 N-C1 → V1.154 P0 T2: the session-peer `InvokeHandlerV2`
+// closure (architect-locked home; identity = the authenticated session peer).
 pub mod invoke;
 
 use crate::errors::{CliError, Result};
@@ -181,6 +182,7 @@ fn build_config(
         local_manifest,
         handshake_timeout: None,
         invoke_handler: None,
+        invoke_handler_v2: None,
         op_capability_requirements: HashMap::new(),
         trusted_issuers: Vec::new(),
         require_capability_token: false,
@@ -210,20 +212,16 @@ pub async fn build_host_config(
 ) -> Result<(ConnectConfig, String, usize)> {
     let (mut config, host_id, allowlist_len, peer_scope) = build_config(home, allow_peer, listen)?;
 
-    // Plan QC (QC2 W-1) cheap hardening: warn at boot when more than one
-    // allowlisted peer holds write scope — the per-invoke caller peer_id is
-    // payload-carried (spoofable), so per-peer scoping silently degrades to
-    // the union of all scopes. Warning only (not a refusal): the operator
-    // may have a legitimate reason; the E2 fix is session-bound identity.
-    allowlist::warn_multi_write_peer(&peer_scope, &mut std::io::stderr());
-
     // N-C1: workspace DB open (WAL pool via the shared Schema initializer —
     // coexistence with a co-running daemon is WAL-governed, not
     // runtime_lock-governed; P1 spec § Process model) + the per-process
-    // adapter singleton + the invoke dispatch handler.
+    // adapter singleton + the session-peer invoke dispatch handler
+    // (spoke-connect 0.9.2 `invoke_handler_v2` — caller identity is the
+    // authenticated session peer; the legacy `invoke_handler` is not
+    // selected, clean cutover per spec §5.2).
     let pool = open_workspace_pool(workspace_db).await?;
     let adapter = Arc::new(NexusAdapter::new(pool));
-    config.invoke_handler = Some(invoke::build_handler(peer_scope, adapter));
+    config.invoke_handler_v2 = Some(invoke::build_handler(peer_scope, adapter));
 
     Ok((config, host_id, allowlist_len))
 }

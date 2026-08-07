@@ -166,6 +166,7 @@ fn host_config(identity: Keypair, allowlist: Vec<PeerId>) -> ConnectConfig {
         local_manifest: nexus_manifest(TEST_HOST_ID),
         handshake_timeout: Some(HANDSHAKE_TIMEOUT),
         invoke_handler: None,
+        invoke_handler_v2: None,
         op_capability_requirements: HashMap::new(),
         trusted_issuers: Vec::new(),
         require_capability_token: false,
@@ -183,6 +184,7 @@ fn peer_config(identity: Keypair, allowlist: Vec<PeerId>) -> ConnectConfig {
         local_manifest: nexus_manifest("peer-device-uuid-0000"),
         handshake_timeout: Some(HANDSHAKE_TIMEOUT),
         invoke_handler: None,
+        invoke_handler_v2: None,
         op_capability_requirements: HashMap::new(),
         trusted_issuers: Vec::new(),
         require_capability_token: false,
@@ -690,8 +692,12 @@ async fn cli_wiring_starts_a_node_with_persisted_identity_and_allowlist() {
     expected_allowlist.sort();
     assert_eq!(config.peer_allowlist, expected_allowlist);
     assert!(
-        config.invoke_handler.is_some(),
-        "N-C1 host boot must install the invoke dispatch handler"
+        config.invoke_handler_v2.is_some(),
+        "N-C1 host boot must install the session-peer invoke dispatch handler (v2)"
+    );
+    assert!(
+        config.invoke_handler.is_none(),
+        "clean cutover: the legacy payload-identity handler must not be selected (spec §5.2)"
     );
     // Manifest fields come from the shared builder (single SSOT).
     let manifest_json = serde_json::to_value(&config.local_manifest).expect("serialize");
@@ -999,6 +1005,232 @@ async fn n_c1_peer_upserts_promotes_relates_with_world_scoping() {
     host.shutdown().await.expect("host shuts down");
     peer_node.shutdown().await.expect("peer shuts down");
     outsider_node.shutdown().await.expect("outsider shuts down");
+}
+
+/// N-C1 → E2 (V1.154 P0 T2): caller identity resolves from the
+/// noise-authenticated **session peer** (spoke-connect 0.9.2
+/// `InvokeHandlerV2`), never from the payload's
+/// `extensions.nexus.peer_id` claim.
+///
+/// Spec §5.1 lock (hard deny, fail-closed): a payload that still carries
+/// `extensions.nexus.peer_id` must have it EQUAL the session peer; a
+/// differing, non-string, unparseable, or oversized claim is denied through
+/// the existing allowlist-denial path (`op_unsupported` family) inside
+/// `dispatch`, before the orchestrator/storage bridge — zero side effects.
+/// The spoofed identity B is itself a scoped allowlisted peer, so the legacy
+/// payload-trusting dispatch would ACCEPT the invoke (the R1 vulnerability
+/// this migration closes); only session-peer identity can deny it.
+///
+/// Covers all §5.1 branches: mismatch ⇒ denied + no row persisted;
+/// non-string claim ⇒ denied + no row; unparseable claim ⇒ denied + no row;
+/// oversized claim (>128 chars, invoke.rs parse cap) ⇒ denied + no row;
+/// absent claim ⇒ served under the session peer's scope (proves the identity
+/// source really switched); equal claim ⇒ served (V1.153 clients sending the
+/// correct payload identity keep working).
+#[tokio::test(flavor = "multi_thread")]
+async fn n_c1_session_peer_identity_denies_spoofed_payload_claim_and_serves_claimless() {
+    let _guard = network_test_guard().await;
+    let temp = tempfile::tempdir().expect("tempdir");
+    let home = temp.path();
+    let peer_key = fixed_keypair(72);
+    let spoofed_key = fixed_keypair(73);
+    let peer_peer = peer_key.public().to_peer_id();
+    let spoofed_peer = spoofed_key.public().to_peer_id();
+
+    const WORLD_A: &str = "wld_test_a";
+
+    // Hermetic workspace DB (FK rows so the production adapter's put paths
+    // can persist).
+    let db_path = temp.path().join("workspace").join("state.db");
+    let pool = crate::db::Schema::init(&db_path)
+        .await
+        .expect("workspace DB initializes");
+    seed_world(&pool, "ctr_test", WORLD_A).await;
+
+    // BOTH peers are scoped write peers for WORLD_A: the spoofed identity B
+    // must carry real write scope, or the legacy payload-trusting dispatch
+    // would deny the invoke for scope reasons and the test could not tell
+    // "denied because spoofed" apart from "denied because B has no scope".
+    let allow_path = nexus_home_layout::connect_allowlist_path(home);
+    std::fs::create_dir_all(allow_path.parent().expect("parent dir")).expect("mkdir");
+    std::fs::write(
+        &allow_path,
+        serde_json::json!({ "peer_ids": [
+            {
+                "peer_id": peer_peer.to_string(),
+                "world_scope": [WORLD_A],
+                "op_scope": ["upsert", "promote", "relate"],
+            },
+            {
+                "peer_id": spoofed_peer.to_string(),
+                "world_scope": [WORLD_A],
+                "op_scope": ["upsert", "promote", "relate"],
+            },
+        ] })
+        .to_string(),
+    )
+    .expect("write allowlist");
+
+    // Boot the host through the full N-C1 CLI path (hermetic DB override).
+    let (config, _, _) = super::build_host_config(
+        home,
+        &[],
+        &["/ip4/127.0.0.1/tcp/0".to_string()],
+        Some(&db_path),
+    )
+    .await
+    .expect("N-C1 host config builds");
+    let host_peer = config.identity.public().to_peer_id();
+    let host = start(config).await;
+    let peer_node = start(peer_config(peer_key, vec![host_peer])).await;
+    let session = peer_node
+        .connect(host.listen_addrs()[0].clone())
+        .await
+        .expect("session peer handshake");
+
+    // 1. Spoof-mismatch (spec §5.1 hard deny): the session peer (A) sends a
+    //    payload claiming the OTHER scoped peer (B). Must be denied with
+    //    `op_unsupported` and ZERO side effects — no row persisted.
+    let spoofed_claim = serde_json::json!(spoofed_peer.to_string());
+    match session
+        .invoke(
+            "upsert",
+            serde_json::json!({
+                "extensions": { "nexus": { "peer_id": spoofed_claim } },
+                "knowledge_entries": [
+                    entry_fixture("kb_s1", "Spoofed", WORLD_A, "confirmed", None),
+                ],
+            }),
+        )
+        .await
+    {
+        Err(InvokeError::Wire(envelope)) => {
+            assert_eq!(
+                envelope.code, "op_unsupported",
+                "spoofed payload peer_id must be denied through the allowlist-denial path"
+            );
+        }
+        other => panic!("spoofed payload peer_id must be denied, got {other:?}"),
+    }
+    let leaked: Option<i64> =
+        sqlx::query_scalar("SELECT 1 FROM kb_key_blocks WHERE world_id = ? AND key_block_id = ?")
+            .bind(WORLD_A)
+            .bind("kb_s1")
+            .fetch_optional(&pool)
+            .await
+            .expect("check for leaked row");
+    assert!(
+        leaked.is_none(),
+        "spoofed invoke must have zero side effects (no row persisted)"
+    );
+
+    // 1b. Non-string claim (spec §5.1 fail-closed): `peer_id` is a number,
+    //     not a PeerId string — same hard deny, zero side effects.
+    let non_string = session
+        .invoke(
+            "upsert",
+            serde_json::json!({
+                "extensions": { "nexus": { "peer_id": 123 } },
+                "knowledge_entries": [
+                    entry_fixture("kb_s1b", "NonString", WORLD_A, "confirmed", None),
+                ],
+            }),
+        )
+        .await;
+    assert!(
+        matches!(&non_string, Err(InvokeError::Wire(envelope)) if envelope.code == "op_unsupported"),
+        "non-string payload peer_id must be denied, got {non_string:?}"
+    );
+
+    // 1c. Unparseable claim: a string that is not a PeerId — fail-closed.
+    let unparseable = session
+        .invoke(
+            "upsert",
+            serde_json::json!({
+                "extensions": { "nexus": { "peer_id": "not-a-peer-id" } },
+                "knowledge_entries": [
+                    entry_fixture("kb_s1c", "Unparseable", WORLD_A, "confirmed", None),
+                ],
+            }),
+        )
+        .await;
+    assert!(
+        matches!(&unparseable, Err(InvokeError::Wire(envelope)) if envelope.code == "op_unsupported"),
+        "unparseable payload peer_id must be denied, got {unparseable:?}"
+    );
+
+    // 1d. Oversized claim: >128 chars — denied by the invoke.rs parse cap
+    //     (mirrors the spoke session-core 128-char decode input cap) before
+    //     any decode work; zero side effects.
+    let oversized = session
+        .invoke(
+            "upsert",
+            serde_json::json!({
+                "extensions": { "nexus": { "peer_id": "z".repeat(129) } },
+                "knowledge_entries": [
+                    entry_fixture("kb_s1d", "Oversized", WORLD_A, "confirmed", None),
+                ],
+            }),
+        )
+        .await;
+    assert!(
+        matches!(&oversized, Err(InvokeError::Wire(envelope)) if envelope.code == "op_unsupported"),
+        "oversized payload peer_id must be denied, got {oversized:?}"
+    );
+
+    // 1e. Zero side effects across every deny branch above: none of the
+    //     denied invokes may persist a row.
+    for denied_id in ["kb_s1b", "kb_s1c", "kb_s1d"] {
+        let leaked: Option<i64> = sqlx::query_scalar(
+            "SELECT 1 FROM kb_key_blocks WHERE world_id = ? AND key_block_id = ?",
+        )
+        .bind(WORLD_A)
+        .bind(denied_id)
+        .fetch_optional(&pool)
+        .await
+        .expect("check for leaked row");
+        assert!(
+            leaked.is_none(),
+            "denied invoke must have zero side effects (no row {denied_id} persisted)"
+        );
+    }
+
+    // 2. Absent claim ⇒ the session peer is authoritative: no payload
+    //    peer_id, still served under A's scope (the branch the 0.9.1-shaped
+    //    payload-identity dispatch could not serve at all).
+    let claimless = session
+        .invoke(
+            "upsert",
+            serde_json::json!({
+                "extensions": { "nexus": {} },
+                "knowledge_entries": [
+                    entry_fixture("kb_s2", "Claimless", WORLD_A, "confirmed", None),
+                ],
+            }),
+        )
+        .await
+        .expect("claimless upsert is served under the session peer identity");
+    assert_eq!(claimless.payload["knowledge_entries"][0]["entry_id"], "kb_s2");
+
+    // 3. Equal claim ⇒ still served (V1.153 clients sending the correct
+    //    payload identity keep working — spec §5.1).
+    let peer_claim = serde_json::json!(peer_peer.to_string());
+    let matching = session
+        .invoke(
+            "upsert",
+            serde_json::json!({
+                "extensions": { "nexus": { "peer_id": peer_claim } },
+                "knowledge_entries": [
+                    entry_fixture("kb_s3", "Matching", WORLD_A, "confirmed", None),
+                ],
+            }),
+        )
+        .await
+        .expect("matching payload peer_id is served");
+    assert_eq!(matching.payload["knowledge_entries"][0]["entry_id"], "kb_s3");
+
+    host.shutdown().await.expect("host shuts down");
+    peer_node.shutdown().await.expect("peer shuts down");
 }
 
 /// N-C1 fix loop (L2 Critical regression): the orchestrators' stored

@@ -69,6 +69,7 @@ async fn main() {
         local_manifest: spoke_connect_manifest(),
         handshake_timeout: Some(std::time::Duration::from_secs(10)),
         invoke_handler: None,
+        invoke_handler_v2: None,
         op_capability_requirements: std::collections::HashMap::default(),
         trusted_issuers: Vec::new(),
         require_capability_token: false,

@@ -75,13 +75,6 @@ pub struct PeerAccess {
     pub op_scope: BTreeSet<String>,
 }
 
-/// The served write ops (N-C1) — the `op_scope` members that make a peer
-/// write-capable for the multi-write-peer boot warning. Kept in lockstep
-/// with `invoke::SERVED_OPS` (same wire strings); the interop honesty
-/// machine-check pins the manifest side to that const, and this const only
-/// feeds a conservative boot warning, so drift here cannot open a gate.
-const WRITE_OPS: [&str; 3] = ["upsert", "promote", "relate"];
-
 impl PeerScope {
     /// All allowlisted peer ids (sorted) — the `ConnectConfig.peer_allowlist`
     /// handshake set.
@@ -116,28 +109,6 @@ impl PeerScope {
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
-    }
-
-    /// Number of allowlisted peers holding any write scope: a peer counts
-    /// when its `op_scope` contains any served write op ([`WRITE_OPS`]), or
-    /// when it carries a non-empty `world_scope` (world scoping expresses
-    /// write intent for those worlds). Over-approximates by design — this
-    /// feeds a boot warning (see [`warn_multi_write_peer`]), and warning
-    /// about a peer that turns out write-less is harmless, while NOT
-    /// warning about a write-capable peer is the failure mode the warning
-    /// exists for.
-    #[must_use]
-    pub fn write_capable_peer_count(&self) -> usize {
-        self.entries
-            .values()
-            .filter(|access| {
-                access
-                    .op_scope
-                    .iter()
-                    .any(|op| WRITE_OPS.contains(&op.as_str()))
-                    || !access.world_scope.is_empty()
-            })
-            .count()
     }
 
     /// File entries: last occurrence wins (a later hand-authored duplicate
@@ -175,40 +146,6 @@ impl PeerScope {
 fn parse_peer_id(raw: &str) -> Result<PeerId> {
     raw.parse::<PeerId>()
         .map_err(|e| CliError::Config(format!("invalid peer id {raw:?} in allowlist: {e}")))
-}
-
-/// Boot-time warning (plan QC, QC2 W-1 cheap hardening): the allowlist
-/// holds more than one write-scoped peer.
-///
-/// The per-invoke caller peer id is payload-carried
-/// (`extensions.nexus.peer_id`) and spoofable — the locked spoke-connect
-/// 0.9.1 handler signature (`dyn Fn(&str, Value)`) carries no authenticated
-/// session peer — so with more than one write-scoped allowlisted peer,
-/// per-peer world/op scoping silently degrades to the union of all scopes
-/// (any allowlisted peer can put another's id in the envelope and inherit
-/// its full write scope).
-///
-/// N-C1 is accepted ONLY while the allowlist holds at most one write-
-/// capable peer (spec §10.6). This is a **warning, not a refusal**: the
-/// operator may have a legitimate reason (e.g. a CLI-overlay peer for
-/// manual writes). The E2 fix is session-bound identity (upstream handler
-/// signature change) or capability-token auth.
-///
-/// Writes to `sink` (boot callers pass `std::io::stderr()`; tests pass a
-/// buffer).
-pub fn warn_multi_write_peer(scope: &PeerScope, sink: &mut dyn std::io::Write) {
-    let write_capable = scope.write_capable_peer_count();
-    if write_capable > 1 {
-        let _ = writeln!(
-            sink,
-            "nexus42 connect start: WARNING: {write_capable} allowlisted peers hold write \
-             scope. The per-invoke caller peer_id is payload-carried (spoofable): any \
-             allowlisted peer can impersonate another and inherit its full world/op scope, \
-             so per-peer scoping degrades to the union of all scopes. N-C1 assumes at most \
-             one write-capable peer — with more, split write peers into separate processes \
-             or accept the risk deliberately."
-        );
-    }
 }
 
 /// Load the effective allowlist: file entries ∪ `--allow-peer` CLI entries.
@@ -506,91 +443,4 @@ mod tests {
         assert!(!scope.allows_op(&outsider, "upsert"));
     }
 
-    // ---- Plan QC fix wave (QC2 W-1): multi-write-peer boot warning ----
-
-    /// The N-C1 trust precondition (spec §10.6): the per-invoke caller
-    /// `peer_id` is payload-carried (`extensions.nexus.peer_id`) and
-    /// spoofable — the locked spoke-connect 0.9.1 handler signature carries
-    /// no session peer — so per-peer world/op scoping is a real boundary
-    /// ONLY while the allowlist holds at most one write-capable peer. More
-    /// than one ⇒ any allowlisted peer can impersonate another and the
-    /// scoping silently degrades to the union of all scopes. The boot
-    /// warning must fire for a multi-write-peer allowlist and name the
-    /// spoofing risk + the single-write-peer precondition.
-    #[test]
-    fn multi_write_peer_allowlist_emits_boot_warning() {
-        let temp = tempfile::tempdir().expect("tempdir");
-        let peer_a = peer_id(12);
-        let peer_b = peer_id(13);
-        write_allowlist(
-            temp.path(),
-            &serde_json::json!([
-                {
-                    "peer_id": peer_a.to_string(),
-                    "world_scope": ["world-a"],
-                    "op_scope": ["upsert"],
-                },
-                {
-                    "peer_id": peer_b.to_string(),
-                    "world_scope": ["world-a"],
-                    "op_scope": ["relate"],
-                },
-            ]),
-        );
-
-        let scope = load(temp.path(), &[]).expect("multi-peer allowlist loads");
-        assert_eq!(
-            scope.write_capable_peer_count(),
-            2,
-            "both scoped peers hold write scope"
-        );
-
-        let mut sink = Vec::new();
-        warn_multi_write_peer(&scope, &mut sink);
-        let output = String::from_utf8(sink).expect("warning is utf8");
-        assert!(
-            output.contains("WARNING"),
-            "multi-write-peer allowlist must warn at boot: {output:?}"
-        );
-        assert!(
-            output.contains("spoof") && output.contains("at most one"),
-            "warning must name the spoofing risk and the single-write-peer \
-             precondition: {output:?}"
-        );
-    }
-
-    /// The single-write-peer deployment (the N-C1 acceptance shape: one
-    /// scoped write peer + bare allowlisted peers) must NOT warn.
-    #[test]
-    fn single_write_peer_allowlist_does_not_warn() {
-        let temp = tempfile::tempdir().expect("tempdir");
-        let peer = peer_id(14);
-        let bare = peer_id(15);
-        write_allowlist(
-            temp.path(),
-            &serde_json::json!([
-                {
-                    "peer_id": peer.to_string(),
-                    "world_scope": ["world-a"],
-                    "op_scope": ["upsert", "promote", "relate"],
-                },
-                bare.to_string(),
-            ]),
-        );
-
-        let scope = load(temp.path(), &[]).expect("single-write-peer allowlist loads");
-        assert_eq!(
-            scope.write_capable_peer_count(),
-            1,
-            "bare entries carry no write scope"
-        );
-
-        let mut sink = Vec::new();
-        warn_multi_write_peer(&scope, &mut sink);
-        assert!(
-            sink.is_empty(),
-            "single write-capable peer must not warn: {:?}",
-            String::from_utf8_lossy(&sink)
-        );
-    }
 }

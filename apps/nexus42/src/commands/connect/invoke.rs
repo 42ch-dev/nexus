@@ -1,5 +1,5 @@
-//! N-C1 Connect invoke dispatch (DF-72, V1.153 P1) — the architect-locked
-//! home of the `InvokeHandler` closure.
+//! N-C1 Connect invoke dispatch (DF-72, V1.153 P1 → V1.154 P0 T2) — the
+//! architect-locked home of the session-peer `InvokeHandlerV2` closure.
 //!
 //! The handler is the product-owned write spine of the Connect Host: it
 //! parses the inbound invoke op/payload, resolves the calling peer, gates it
@@ -13,18 +13,24 @@
 //! is refused with `ErrorEnvelope.code = "op_unsupported"` and zero side
 //! effects (the N-C0 refusal contract extends).
 //!
-//! ## Caller identity (wire reality, documented)
+//! ## Caller identity (session peer — E2, V1.154 P0 T2)
 //!
-//! The locked spoke-connect 0.9.1 handler signature
-//! (`dyn Fn(&str, serde_json::Value) -> Result<Value, ErrorEnvelope>`) does
-//! NOT carry the authenticated session peer — the node calls the closure
-//! with `(op, payload)` only. The allowlist handshake is the trust root
-//! (only allowlisted peers ever reach the handler); the per-invoke **caller
-//! peer id rides in the ops request envelope** under
-//! `extensions.nexus.peer_id`, which the dispatch gate resolves and then
-//! checks against the peer's `world_scope` / `op_scope`. Resolution is
-//! fail-closed: a missing/unparseable `peer_id` denies the op. The target
-//! world id(s) are read from the payload entries/relation
+//! The host registers through the spoke-connect 0.9.2 **session-peer** hook
+//! (`ConnectConfig::invoke_handler_v2` / [`InvokeHandlerV2`]): the node
+//! calls the closure with the noise-authenticated **session peer id** as
+//! its first argument — the peer that passed the allowlist, signed-hello,
+//! and envelope-auth gates — never a payload-carried claim. The allowlist
+//! handshake is the trust root; the session peer is the per-invoke caller
+//! identity the `world_scope` / `op_scope` gates resolve against.
+//!
+//! The payload's `extensions.nexus.peer_id` is **informational only**
+//! (spec §5.1 lock): when present it must equal the session peer — a
+//! differing or unparseable claim is denied through the allowlist-denial
+//! path (`op_unsupported` family) before any orchestrator call (hard deny,
+//! fail-closed, zero side effects). Absent ⇒ the session peer is
+//! authoritative. The legacy payload-carried identity path is removed from
+//! this host (clean cutover, no dual registration). The target world id(s)
+//! are read from the payload entries/relation
 //! (`extensions.nexus.world_id` — the canonical carrier the conversion seam
 //! uses); a payload without a world id is denied (cannot verify scope).
 //!
@@ -73,7 +79,7 @@ use nexus_spoke_adapter::{
     UpsertResponse,
 };
 use serde_json::{Map, Value};
-use spoke_connect::InvokeHandler;
+use spoke_connect::InvokeHandlerV2;
 use spoke_schemas::connect::connect_invoke_response::ErrorEnvelope;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -90,16 +96,23 @@ use std::sync::Arc;
 /// dispatch routing lockstep holds by construction.
 pub const SERVED_OPS: [&str; 3] = ["upsert", "promote", "relate"];
 
-/// Build the N-C1 `InvokeHandler`: a fail-closed op gate + allowlist
-/// world/op scope gate in front of the three `NexusAdapter` orchestrators.
+/// Build the N-C1 `InvokeHandlerV2`: a fail-closed op gate + allowlist
+/// world/op scope gate in front of the three `NexusAdapter` orchestrators,
+/// resolving caller identity from the **session peer** (spoke-connect 0.9.2
+/// session-peer hook, spec §3.2 / §5.1).
 ///
 /// The returned closure is `Send + Sync` (the node holds it in an
-/// `Arc<InvokeHandler>`); `scope` and `adapter` are captured for the
+/// `Arc<InvokeHandlerV2>`); `scope` and `adapter` are captured for the
 /// process lifetime — one adapter per Connect process (P1 spec § Process
 /// model).
 #[must_use]
-pub fn build_handler(scope: PeerScope, adapter: Arc<NexusAdapter<'static>>) -> Arc<InvokeHandler> {
-    Arc::new(move |op: &str, payload: Value| dispatch(&scope, &adapter, op, payload))
+pub fn build_handler(
+    scope: PeerScope,
+    adapter: Arc<NexusAdapter<'static>>,
+) -> Arc<InvokeHandlerV2> {
+    Arc::new(move |peer: &PeerId, op: &str, payload: Value| {
+        dispatch(&scope, &adapter, peer, op, payload)
+    })
 }
 
 /// One served write op.
@@ -115,6 +128,7 @@ enum Route {
 fn dispatch(
     scope: &PeerScope,
     adapter: &NexusAdapter<'static>,
+    peer: &PeerId,
     op: &str,
     payload: Value,
 ) -> Result<Value, ErrorEnvelope> {
@@ -149,20 +163,36 @@ fn dispatch(
         }
     };
 
-    // 3. Calling peer from the ops envelope (fail-closed — see module docs
-    //    for why the peer id must ride the payload).
-    let Some(peer) = payload
-        .pointer("/extensions/nexus/peer_id")
-        .and_then(Value::as_str)
-        .and_then(|raw| raw.parse::<PeerId>().ok())
-    else {
-        return Err(denied(
-            "invoke payload must declare the calling peer id in extensions.nexus.peer_id",
-        ));
-    };
+    // 3. Caller identity = the noise-authenticated **session peer** (the
+    //    `peer` argument; spoke-connect 0.9.2 `InvokeHandlerV2` — see
+    //    module docs). Spec §5.1 lock: the payload's
+    //    `extensions.nexus.peer_id` is informational only — present ⇒ it
+    //    MUST equal the session peer (hard deny on mismatch, unparseable,
+    //    or >128-char claim — the parse cap below mirrors the spoke
+    //    session-core 128-char decode input cap; fail-closed, zero side
+    //    effects); absent ⇒ fine. The legacy payload-carried identity path
+    //    is removed (clean cutover, no dual registration).
+    if let Some(claim) = payload.pointer("/extensions/nexus/peer_id") {
+        // Parse cap: reject claims longer than 128 chars before any decode
+        // work, mirroring the spoke session-core 128-char decode input cap
+        // (libp2p-identity's `FromStr` bs58-decodes without a length bound).
+        // Oversized claims share the identity-deny path below.
+        let matches_session_peer = claim
+            .as_str()
+            .filter(|raw| raw.len() <= 128)
+            .and_then(|raw| raw.parse::<PeerId>().ok())
+            .is_some_and(|claimed| claimed == *peer);
+        if !matches_session_peer {
+            return Err(denied(
+                "extensions.nexus.peer_id does not match the session peer; \
+                 caller identity comes from the authenticated session",
+            ));
+        }
+    }
 
-    // 4. Op-scope gate (T1 PeerScope, fail-closed).
-    if !scope.allows_op(&peer, op) {
+    // 4. Op-scope gate (T1 PeerScope, fail-closed) — identity = session
+    //    peer.
+    if !scope.allows_op(peer, op) {
         return Err(denied(&format!("op {op} is not in this peer's op_scope")));
     }
 
@@ -185,7 +215,7 @@ fn dispatch(
     }
     if let Some(world) = worlds
         .iter()
-        .find(|world| !scope.allows_world(&peer, world))
+        .find(|world| !scope.allows_world(peer, world))
     {
         return Err(denied(&format!(
             "world {world} is not in this peer's world_scope"
