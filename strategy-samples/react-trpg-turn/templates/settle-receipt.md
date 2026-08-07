@@ -21,7 +21,9 @@ rewrite, or override.
 ## Receipt contract
 
 1. The receipt is authoritative: attack/check/damage/resource/status/spell-slot
-   results exist ONLY because the local module computed and committed them.
+   results exist ONLY because the local module computed and confirmed them
+   (over Connect the compute op is read-only — committing confirmed results
+   is the caller's write-path job).
    You accept them as-is. You never recalculate a number, rewrite a ruling,
    or add a mechanical effect the receipt does not contain (no invented
    "grazes", "partial successes", extra damage, or unlisted status changes).

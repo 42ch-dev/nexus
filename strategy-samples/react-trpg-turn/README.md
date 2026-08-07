@@ -7,8 +7,10 @@ module settles deterministically, and the AI understands intent and narrates.
 **Division of labor.** Nexus orchestrates; Spoke carries protocol; the
 host-local rules module settles; the AI understands intent and narrates.
 Attack/check/damage/resource/status/spell-slot results are computed and
-committed ONLY by the local rules module. The AI may request an operation but
-never computes, rewrites, or overrides settlement results.
+confirmed ONLY by the local rules module (the Connect compute op is
+read-only — settle:true is rejected; committing confirmed results is the
+caller's write-path job). The AI may request an operation but never computes,
+rewrites, or overrides settlement results.
 
 The sample covers the three trigger types of the partner's turn contract as
 **two preset lanes** (mechanical-op, natural-language-turn) **plus one README
