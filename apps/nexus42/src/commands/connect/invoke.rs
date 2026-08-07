@@ -56,13 +56,16 @@
 //!    filter-and-continue shape let a mixed payload pass the gate and fail
 //!    later in the adapter as a partial-batch write surfaced as
 //!    `internal_error`.
-//! 2. **Stored-world check (Critical):** the orchestrators' stored lookups
-//!    and CAS updates are world-agnostic (id + revision only), so a payload
-//!    claiming world A could otherwise rewrite a row stored in world B by
-//!    replaying the revision the OCC rejects disclose. Before the
-//!    orchestrator CAS runs, every targeted existing row's stored `world_id`
-//!    is verified against the payload-claimed `world_id`; a mismatch denies
-//!    the op. The relate **create** path additionally verifies its
+//! 2. **Stored-world check (Critical, defense-in-depth):** every targeted
+//!    existing row's stored `world_id` is verified against the
+//!    payload-claimed `world_id` before the orchestrator CAS runs; a
+//!    mismatch denies the op with zero side effects. This gate is the
+//!    **fast-fail layer** — since V1.154 P2 (R3 closure, spec §3) the
+//!    orchestrator/storage CAS is itself world-aware (`world_id` joins the
+//!    per-table CAS predicates), so even a check-then-act race between this
+//!    gate and the CAS (two processes on the same workspace DB) is denied
+//!    atomically at the storage layer with the `world_conflict` wire code.
+//!    The relate **create** path additionally verifies its
 //!    endpoints (plan QC, QC1 F-001 / QC2 W-2): `from_id` / `to_id` must
 //!    exist and their stored worlds must equal the claimed world —
 //!    `kb_relationships` FKs are single-column on `key_block_id`, so a
@@ -440,14 +443,16 @@ fn dispatch(
     //    `block_on` is legal because blocking-pool threads are outside any
     //    async execution context.
     //
-    // 8. Stored-world gate (fix loop, Critical), inside the lane closure
-    //    before the orchestrator: the orchestrators' stored lookups and
-    //    CAS updates are world-agnostic (they match on id + revision only),
-    //    so a payload claiming world A could rewrite a row stored in world
-    //    B by replaying the revision the OCC rejects disclose. Before the
-    //    orchestrator CAS runs, verify every targeted existing row's stored
-    //    world_id equals the payload-claimed world_id; a mismatch denies
-    //    with zero side effects. Compute runs its own gate set instead
+    // 8. Stored-world gate (fix loop, Critical — defense-in-depth), inside
+    //    the lane closure before the orchestrator: every targeted existing
+    //    row's stored world_id is verified against the payload-claimed
+    //    world_id; a mismatch denies with zero side effects. The gate is the
+    //    fast-fail layer — since V1.154 P2 (R3 closure, spec §3) the
+    //    orchestrator/storage CAS is itself world-aware (`world_id` joins
+    //    the per-table CAS predicates), so a check-then-act race between
+    //    this gate and the CAS (a second process moved the row to another
+    //    world) is denied atomically at the storage layer with the
+    //    `world_conflict` wire code. Compute runs its own gate set instead
     //    ([`verify_compute_gates`] — stored world + module identity +
     //    module_scope + host-local store + the read-only settle lock, spec
     //    §2.1–§2.3), all inside the lane, before any WASM execution.
@@ -707,13 +712,16 @@ fn payload_collection_entries(route: Route, payload: &Value) -> usize {
 }
 
 /// Verify the stored-world invariant before any orchestrator CAS (fix loop,
-/// Critical): for every payload entry/relation that already exists in
-/// storage, the stored row's `world_id` must equal the payload-claimed
-/// `world_id`. The orchestrators' lookups and CAS updates match on id +
-/// revision only (world-agnostic), so without this gate a peer scoped to
-/// world A could rewrite a row stored in world B by replaying the revision
-/// disclosed by OCC rejects. Denials happen before any write — zero side
-/// effects.
+/// Critical — defense-in-depth): for every payload entry/relation that
+/// already exists in storage, the stored row's `world_id` must equal the
+/// payload-claimed `world_id`. Since V1.154 P2 (R3 closure, spec §3) the
+/// orchestrator/storage CAS is itself world-aware (`world_id` joins the
+/// per-table CAS predicates), so this gate is the fast-fail layer: a
+/// mismatch is denied here with zero side effects, and even a
+/// check-then-act race between this gate and the CAS (a second process
+/// moved the row to another world) is denied atomically at the storage
+/// layer with the `world_conflict` wire code instead of a cross-world
+/// rewrite.
 ///
 /// Create paths carry no stored *target row*, but the relate create path
 /// still has stored **endpoints**: `kb_relationships` FKs are single-column
