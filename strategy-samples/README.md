@@ -11,7 +11,7 @@ This repository ships three things you use together:
 | Headless runtime | `nexus-runtime` binary (see [Install the runtime](#1-install-the-headless-runtime)) | A Connect-only daemon that serves the N-C1 write-op invoke surface (`upsert` / `promote` / `relate`, world-scoped) against your World KB. No creator UI, no daemon HTTP router. |
 | Strategy sample | [`game-narrative/`](./game-narrative/) | A forkable strategy bundle: capability routing + prompt templates for trigger and scheduled lanes. Nothing here is compiled into any binary. |
 | Validator | [`validate.sh`](./validate.sh) | One command, daemon-free: runs the real validator core on any strategy directory. |
-| WASM modules | `~/.nexus42/modules/` (see [Place a WASM module](#4-place-a-wasm-compute-module)) | User-installed compute modules, loaded at runtime boot. |
+| WASM modules | `~/.nexus42/modules/` (see [Place a WASM module](#4-place-a-wasm-compute-module)) | User-installed compute modules, loaded at creator-daemon boot. |
 | Connect SDK | `@42ch/spoke-connect@0.9.1` (npm) | Your backend's connection + invoke surface to the runtime. |
 
 **The division of labor (read this first).** The strategy declares *capability
@@ -115,7 +115,7 @@ at an isolated directory and prepare it the same way.
 | `connect/allowlist.json` | Peer allowlist + per-peer world/op scope (see [Link the SDK](#5-link-the-connect-sdk)) |
 | `modules/<id>/` | User-installed WASM compute modules (see [Place a WASM module](#4-place-a-wasm-compute-module)) |
 | `presets/<id>/` | User-installed presets (3-tier resolution: user overrides embedded) |
-| `creators/<creator_id>/<slug>/state.db` | Workspace SQLite (WAL mode; coexistence with the creator daemon is WAL-governed) |
+| `creators/<creator_id>/workspaces/<slug>/state.db` | Workspace SQLite (WAL mode; coexistence with the creator daemon is WAL-governed) |
 
 ---
 
@@ -213,9 +213,9 @@ User-installed modules live under:
 ```
 
 (`<id>` must match the directory name and the manifest's `module_id`.) The
-runtime scans this directory at boot (single-level walk; a module with a
-missing/mismatched `<id>.wasm` or an invalid `manifest.json` is skipped with a
-warning — one bad module does not block startup).
+creator-facing daemon scans this directory at boot (single-level walk; a
+module with a missing/mismatched `<id>.wasm` or an invalid `manifest.json` is
+skipped with a warning — one bad module does not block startup).
 
 Author a module with:
 
@@ -326,8 +326,8 @@ Rejects map to the `ErrorEnvelope` (P1 locked table):
 | `revision_conflict` | Your base is ahead of the store (re-read, retry) | yes |
 | `internal_error` | Server fault (details carry the reject) | no |
 
-`reject.message` flows into `ErrorEnvelope.message`; `reject.extensions` into
-`ErrorEnvelope.extensions`.
+`reject.message` flows into `ErrorEnvelope.message`; `reject.details` (when
+present) into `ErrorEnvelope.details`.
 
 ---
 
