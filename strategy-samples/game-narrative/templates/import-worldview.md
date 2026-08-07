@@ -23,14 +23,14 @@ If the document section is empty or absent, respond with an empty
 |-------|------|
 | `schema_version` | integer `1` |
 | `entry_id` | stable, unique, snake_case slug (e.g. `ent_faction_ashguard`). Reuse the same id for the same concept across runs so upsert updates instead of duplicating |
-| `entry_type` | one of the exact snake_case values below |
+| `entry_type` | one of the snake_case values in the curated table below |
 | `canonical_name` | human-readable name (e.g. "Ashguard") |
 | `status` | `"provisional"` — the partner promotes to `"confirmed"` after verification |
 | `body` | JSON object: `{ "summary": <one-line descriptor>, "attributes": { ... }, "tags": [...] }` |
 | `source_anchor` | optional: `{ "schema_version": 1, "source_id": "<doc id>", "label": "<section title>", "extensions": {} }` |
 | `extensions` | `{}` (reserved) |
 
-## `entry_type` enum (snake_case on wire — use these exact values)
+## `entry_type` — curated subset of the nexus BlockType vocabulary (snake_case on wire — use these exact values)
 
 | Wire value     | Use for |
 |----------------|---------|
@@ -42,6 +42,11 @@ If the document section is empty or absent, respond with an empty
 | `conflict`     | Tensions, constraints, rules of the world |
 | `info_point`   | World axioms, cosmology, genre promises, lore facts |
 | `event`        | Historical events, key occurrences, timeline milestones |
+
+Other nexus `BlockType` values are also valid on the wire — `species`,
+`faction`, `magic_system`, `technology`, `deity`, `level`, `economy_tier`,
+`dialogue`, `beat`, `act`, `era` — use them when the document warrants it.
+This table is the subset this template emits; it is not the full enum.
 
 ## Rules
 

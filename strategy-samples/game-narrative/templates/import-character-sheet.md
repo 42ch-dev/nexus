@@ -25,14 +25,14 @@ If the character sheet section is empty or absent, respond with an empty
 |-------|------|
 | `schema_version` | integer `1` |
 | `entry_id` | stable, unique, snake_case slug (e.g. `ent_lin_xia`). Reuse the same id for the same character across runs so upsert updates instead of duplicating |
-| `entry_type` | `"character"` for characters (see the full enum below for companions/NPCs with special roles) |
+| `entry_type` | `"character"` for characters (see the curated `entry_type` table below for companions/NPCs with special roles) |
 | `canonical_name` | human-readable name (e.g. "Lin Xia") |
 | `status` | `"provisional"` — the partner promotes to `"confirmed"` after verification |
 | `body` | JSON object: `{ "summary": <one-line descriptor>, "attributes": { ... }, "tags": [...] }` |
 | `source_anchor` | optional: `{ "schema_version": 1, "source_id": "<sheet id>", "label": "<section title>", "extensions": {} }` |
 | `extensions` | `{}` (reserved) |
 
-## `entry_type` enum (snake_case on wire — use these exact values)
+## `entry_type` — curated subset of the nexus BlockType vocabulary (snake_case on wire — use these exact values)
 
 | Wire value     | Use for |
 |----------------|---------|
@@ -44,6 +44,12 @@ If the character sheet section is empty or absent, respond with an empty
 | `conflict`     | Tensions, constraints, rules of the world |
 | `info_point`   | World axioms, cosmology, genre promises, lore facts |
 | `event`        | Historical events, key occurrences, timeline milestones |
+
+Other nexus `BlockType` values are also valid on the wire — `species`,
+`faction`, `magic_system`, `technology`, `deity`, `level`, `economy_tier`,
+`dialogue`, `beat`, `act`, `era` — use them when a sheet documents such
+material (e.g. a sheet that also defines a species or a faction). This table
+is the subset this template emits; it is not the full enum.
 
 ## Rules
 

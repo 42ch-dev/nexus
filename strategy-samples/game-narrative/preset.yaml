@@ -29,11 +29,20 @@
 #   event:           game event payload (trigger lane only)
 #   documents:       { worldview?: <text>, character_sheets?: [<text>, ...] }
 #                    source documents to extract from (either lane)
+#   watermark:       last-sweep watermark (scheduled lane only; supplied by the
+#                    partner's backend — see the note in
+#                    templates/scheduled-sweep.md)
 #
-# Example schedule creation (creator-facing app; the runtime ships without the
+# Example schedule creation (daemon API — the runtime ships without the
 # daemon HTTP router, so the partner's backend typically drives Connect and
 # their own timer instead):
-#   nexus42 daemon schedule add --preset game-narrative --creator <creator-id> --seed '{"mode":"trigger", ...}'
+#   POST /v1/daemon/orchestration/schedules
+#   { "creator_id": "<creator-id>", "preset_id": "game-narrative",
+#     "input": { "mode": "trigger", "world_id": "...", "documents": {...} } }
+# The `input` field is the run payload the engine maps to `preset.input.*`
+# at schedule start. The CLI's `daemon schedule add --seed <text>` only
+# stores seed text as core_context v0 — it does NOT populate
+# `preset.input.*`.
 
 preset:
   id: game-narrative
@@ -47,16 +56,22 @@ preset:
     - knowledge_ingest
   initial: routing
   terminal: done
-  # The schedule seed text becomes core_context v0 — useful for carrying the
-  # last-sweep watermark in the scheduled lane (see templates/scheduled-sweep.md).
+  # `initial_action: seed_direct` stores the schedule seed/input VERBATIM as
+  # core_context v0 in the derivation store. The engine does NOT parse that
+  # text into session context keys, so templates cannot read it via
+  # {{core_context.*}} — the schedule seed is not a live watermark channel
+  # (see the watermark note in templates/scheduled-sweep.md).
   initial_action:
     kind: seed_direct
 
 # External push mechanism: a declared signal can force the state machine
-# forward. A game event can jump straight into the trigger lane:
-#   nexus42 daemon schedule signal <schedule-id> game_event
-# (signal delivery is a customization point per host; the event payload path —
-# schedule input with mode: "trigger" — is the primary trigger lane entry.)
+# forward. A game event can jump straight into the trigger lane.
+# NOTE: the manifest `signals:` section is schema-valid and parsed by the
+# loader, but no runtime component delivers declared signals yet — the
+# daemon's `/schedules/{id}/signal` endpoint handles only the lifecycle
+# signals start|pause|resume|cancel|advance and REJECTS preset-declared
+# signal names. Treat signal delivery as a customization point for the host;
+# the schedule-input path (mode selector) is the primary lane entry.
 signals:
   - name: game_event
     on_receive:
@@ -65,12 +80,27 @@ signals:
 
 states:
   - id: routing
-    description: "Pick the orchestration lane from the run payload: mode=scheduled -> scheduled sweep; anything else -> game-event trigger"
+    # Lane selector. The expression engine resolves `_context.<path>` against a
+    # FLAT context JSON map (`build_context_json`), so a dotted key like
+    # `preset.input.mode` can never be read: `_context.preset.input.mode`
+    # resolves `map.get("preset")` -> null (context keys are stored literally
+    # as e.g. "preset.input.mode", and the expression grammar has no bracket
+    # syntax). The only runtime-populated discriminator expressions can see is
+    # `_context._judge_result`, written by an `llm_judge` exit BEFORE branch
+    # evaluation — so lane selection is a tiny judge:
+    #   judge GO   (result: true)  -> scheduled lane (interval sweep)
+    #   judge NOGO (result: false) -> trigger lane (game event)
+    # The judge prompt (templates/lane-route.md) reads the payload via
+    # {{preset.input.mode}} — template rendering nests dotted keys, unlike
+    # expression resolution.
+    description: "Lane selector: judge reads preset.input.mode -> scheduled sweep (GO) or game-event trigger (NOGO)"
     exit_when:
-      kind: rule
+      kind: llm_judge
+      template_file: templates/lane-route.md
+      judge_capability: judge.llm
     next:
       branches:
-        - when: "_context.preset.input.mode == 'scheduled'"
+        - when: "_context._judge_result == true"
           target: scheduled_sweep
       default: trigger_extract
 
@@ -92,6 +122,8 @@ states:
       kind: llm_judge
       # Judge cadence: re-evaluate this lane at most once per interval
       # (existing preset mechanism — same as research/novel-writing presets).
+      # NOGO parks the state (WaitForInput); the next interval resumes it and
+      # the judge re-evaluates after `min_interval` elapses.
       template_file: templates/scheduled-sweep-exit.md
       judge_capability: judge.llm
       min_interval: "PT1H"

@@ -17,8 +17,31 @@ artifact and the sweep decision.
 
 - Documents available this sweep: `{{preset.input.documents}}`
 - Target world: `{{preset.input.world_id}}`
-- Last-sweep watermark / prior state (from the schedule seed or core_context;
-  empty on first run): `{{core_context}}`
+- Last-sweep watermark / prior state: `{{preset.input.watermark}}`
+  (empty on the first run)
+
+## Watermark ownership (read this — it is NOT automatic)
+
+The engine does NOT persist the sweep watermark. Nothing writes `core_context.*`
+session keys at runtime (the schedule seed/input is stored verbatim as
+core_context v0 in the derivation store, never parsed into template context),
+and the sweep's `next_watermark` is not written back anywhere by the engine.
+
+The partner's backend owns the watermark:
+
+1. After each sweep run, capture `next_watermark` from the sweep brief (the
+   `sweep_inventory` node output — it is not part of the graph's
+   `output_binding`, which carries the final import manifest).
+2. Persist it on the partner side. Optionally mirror it to the schedule's
+   core_context for audit/continuity via
+   `PATCH /v1/daemon/orchestration/schedules/{id}/core-context`
+   (`struct_merge`/`append`) — that store is the versioned derivation trace,
+   not live session context, and templates cannot read it.
+3. Supply it back on the next sweep run as `preset.input.watermark` (part of
+   the schedule input the partner's backend creates).
+
+With an empty watermark every sweep treats all documents as new — the sweep
+"since last run" semantics only work if the backend feeds the watermark back.
 
 ## Task
 
