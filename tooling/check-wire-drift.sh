@@ -23,7 +23,7 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 # Lockstep spoke pin (spoke-adapter-architecture spec §1.1). Bump this in
 # lockstep across Cargo.toml + package.json when adopting a new spoke release.
-SPOKE_PIN="0.9.1"
+SPOKE_PIN="0.9.2"
 
 echo "=== Spoke Version Conformance ==="
 echo "Expected lockstep pin: ${SPOKE_PIN}"
