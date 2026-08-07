@@ -124,7 +124,14 @@ mod tests {
         };
 
         assert_eq!(manifest.host_id.as_str(), "test-host-uuid-0000");
-        assert_eq!(manifest.roles, vec!["data-store".to_string()]);
+        assert_eq!(
+            manifest.roles,
+            vec![
+                "data-store".to_string(),
+                "checker".to_string(),
+                "assembler".to_string()
+            ]
+        );
         assert_eq!(
             manifest.capabilities,
             vec![

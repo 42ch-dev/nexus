@@ -9,9 +9,9 @@
 //! 2. **serves Connect** — the `runtime_smoke_probe` example (a reference
 //!    spoke-connect peer, built with the same `connect-host` feature)
 //!    completes the signed-hello handshake against the spawned process and
-//!    reads the N-C1 manifest (`extensions.nexus.served_ops` =
-//!    upsert/promote/relate — the P1 invoke surface, honest by the P1
-//!    machine-check);
+//!    reads the N-C1 → N-C2 manifest (`extensions.nexus.served_ops` =
+//!    upsert/promote/relate/check/assemble — the invoke surface, honest by
+//!    the machine-check);
 //! 3. **no HTTP/SPA listener** — the daemon HTTP port refuses connections
 //!    (the daemon router never boots; in release the SPA fallback is
 //!    additionally compiled out by `web-embed` OFF).
@@ -323,7 +323,7 @@ fn headless_runtime_prints_readiness_serves_connect_and_has_no_http_listener() {
         "peer_id:",
         "host_id:",
         "allowlisted peers: 1",
-        "upsert/promote/relate served",
+        "upsert/promote/relate/check/assemble served",
     ] {
         assert!(
             ready.contains(expected),
@@ -361,7 +361,11 @@ fn headless_runtime_prints_readiness_serves_connect_and_has_no_http_listener() {
         status.success(),
         "probe failed (status {status})\nstdout:\n{stdout}\nstderr:\n{stderr}"
     );
-    for expected in ["DIAL_OK", "SERVED_OPS=upsert,promote,relate", "SESSION_OK"] {
+    for expected in [
+        "DIAL_OK",
+        "SERVED_OPS=upsert,promote,relate,check,assemble",
+        "SESSION_OK",
+    ] {
         assert!(
             stdout.contains(expected),
             "probe output missing {expected:?}:\n{stdout}\nstderr:\n{stderr}"

@@ -1,17 +1,18 @@
-//! N-C1 Connect invoke dispatch (DF-72, V1.153 P1 → V1.154 P0 T2) — the
-//! architect-locked home of the session-peer `InvokeHandlerV2` closure.
+//! N-C1 → N-C2 Connect invoke dispatch (DF-72, V1.153 P1 → V1.154 P1 T2) —
+//! the architect-locked home of the session-peer `InvokeHandlerV2` closure.
 //!
-//! The handler is the product-owned write spine of the Connect Host: it
-//! parses the inbound invoke op/payload, resolves the calling peer, gates it
+//! The handler is the product-owned spine of the Connect Host: it parses
+//! the inbound invoke op/payload, resolves the calling peer, gates it
 //! through the fail-closed `PeerScope` allowlist (T1), and routes exactly
-//! `upsert` / `promote` / `relate` through the production `NexusAdapter`
-//! orchestrators (re-exported via `nexus_spoke_adapter`). Contract sources:
+//! `upsert` / `promote` / `relate` / `check` / `assemble` through the
+//! production `NexusAdapter` orchestrators (re-exported via
+//! `nexus_spoke_adapter`). Contract sources:
 //! `.mstar/specs/spoke-adapter-architecture.md` §10.6 and the P1 spec
 //! § OCC + error mapping / § World scoping.
 //!
-//! Every other op — `check` / `assemble` / `project` / `compute` / unknown —
-//! is refused with `ErrorEnvelope.code = "op_unsupported"` and zero side
-//! effects (the N-C0 refusal contract extends).
+//! Every other op — `compute` (P2) / `project` / unknown — is refused with
+//! `ErrorEnvelope.code = "op_unsupported"` and zero side effects (the N-C0
+//! refusal contract extends).
 //!
 //! ## Caller identity (session peer — E2, V1.154 P0 T2)
 //!
@@ -34,14 +35,18 @@
 //! (`extensions.nexus.world_id` — the canonical carrier the conversion seam
 //! uses); a payload without a world id is denied (cannot verify scope).
 //!
-//! ## World-scope gates (V1.153 P1 fix loop)
+//! ## World-scope gates (V1.153 P1 fix loop + V1.154 P1 N-C2 reads)
 //!
 //! Two fail-closed gates sit in front of the orchestrators, both with zero
 //! side effects:
 //!
 //! 1. **Whole-payload world-id requirement (Important):** EVERY
-//!    entry/relation must carry a parseable `extensions.nexus.world_id`.
-//!    If any entry lacks one the WHOLE payload is denied — the old
+//!    entry/relation must carry a parseable `extensions.nexus.world_id`
+//!    (writes). Reads (`check` / `assemble`) carry the world selector on
+//!    the schema's `scope.scope_id` object instead (spec §5.1 lock — no
+//!    second ad-hoc world field), and the same strict rule applies: an
+//!    absent scope / missing scope_id denies the WHOLE payload. If any
+//!    entry lacks one the WHOLE payload is denied — the old
 //!    filter-and-continue shape let a mixed payload pass the gate and fail
 //!    later in the adapter as a partial-batch write surfaced as
 //!    `internal_error`.
@@ -91,10 +96,11 @@ use super::allowlist::PeerScope;
 use libp2p::PeerId;
 use nexus_spoke_adapter::extensions::get_world_id;
 use nexus_spoke_adapter::{
-    orchestrate_promote, orchestrate_relate, orchestrate_upsert, KnowledgeEntryPort, NexusAdapter,
-    PromoteRequest, PromoteResponse, RelateRequest, RelateResponse, Relation,
-    RelationExtensionsKey, RelationPort, SpokeReject, SpokeRejectCode, SpokeResult, UpsertRequest,
-    UpsertResponse,
+    orchestrate_assemble, orchestrate_check, orchestrate_promote, orchestrate_relate,
+    orchestrate_upsert, AssembleRequest, AssembleResponse, CheckRequest, CheckResponse,
+    KnowledgeEntryPort, NexusAdapter, PromoteRequest, PromoteResponse, RelateRequest,
+    RelateResponse, Relation, RelationExtensionsKey, RelationPort, SpokeReject, SpokeRejectCode,
+    SpokeResult, UpsertRequest, UpsertResponse,
 };
 use serde_json::{Map, Value};
 use spoke_connect::InvokeHandlerV2;
@@ -104,7 +110,7 @@ use std::future::Future;
 use std::sync::Arc;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
-/// The write ops this host serves (N-C1).
+/// The ops this host serves (N-C1 writes → N-C2 read half).
 ///
 /// This const is load-bearing, not declaration-only: [`dispatch`] gates on
 /// it before routing, so the host can never serve an op it does not list.
@@ -114,7 +120,7 @@ use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 /// advertised `extensions.nexus.served_ops` (`nexus_spoke_adapter`'s
 /// `LOCAL_SERVED_OPS`) in both directions — so the manifest ⇔ actual
 /// dispatch routing lockstep holds by construction.
-pub const SERVED_OPS: [&str; 3] = ["upsert", "promote", "relate"];
+pub const SERVED_OPS: [&str; 5] = ["upsert", "promote", "relate", "check", "assemble"];
 
 /// Architect-locked bounded-bridge limits (spec §5.4).
 ///
@@ -198,12 +204,14 @@ pub fn build_handler_with_limits(
     (handler, lane)
 }
 
-/// One served write op.
+/// One served op.
 #[derive(Debug, Clone, Copy)]
 enum Route {
     Upsert,
     Promote,
     Relate,
+    Check,
+    Assemble,
 }
 
 /// The full dispatch pipeline. Every gate is fail-closed and runs before
@@ -217,18 +225,19 @@ fn dispatch(
     op: &str,
     payload: Value,
 ) -> Result<Value, ErrorEnvelope> {
-    // 1. Served-op gate (N-C1): `SERVED_OPS` is the load-bearing serving
-    //    gate — the manifest-honesty machine check
+    // 1. Served-op gate (N-C1 → N-C2): `SERVED_OPS` is the load-bearing
+    //    serving gate — the manifest-honesty machine check
     //    (`n_c1_manifest_served_ops_match_dispatch_both_directions`)
     //    verifies the manifest against this const, so dispatch MUST read it
     //    too, or the check would bind to a declaration-only table. Anything
-    //    outside the const is refused unconditionally, regardless of payload
-    //    shape (N-C0 refusal contract extends); a match arm for an op that
-    //    is not in `SERVED_OPS` is unreachable by construction.
+    //    outside the const (incl. `compute` — P2, and `project`) is refused
+    //    unconditionally, regardless of payload shape (N-C0 refusal
+    //    contract extends); a match arm for an op that is not in
+    //    `SERVED_OPS` is unreachable by construction.
     if !SERVED_OPS.contains(&op) {
         return Err(unsupported(
             op,
-            "this host serves only upsert / promote / relate",
+            "this host serves only upsert / promote / relate / check / assemble",
         ));
     }
 
@@ -240,10 +249,12 @@ fn dispatch(
         "upsert" => Route::Upsert,
         "promote" => Route::Promote,
         "relate" => Route::Relate,
+        "check" => Route::Check,
+        "assemble" => Route::Assemble,
         _ => {
             return Err(unsupported(
                 op,
-                "this host serves only upsert / promote / relate",
+                "this host serves only upsert / promote / relate / check / assemble",
             ));
         }
     };
@@ -281,16 +292,19 @@ fn dispatch(
         return Err(denied(&format!("op {op} is not in this peer's op_scope")));
     }
 
-    // 5. World-scope gate (T1 PeerScope, fail-closed): every target world in
-    //    the payload must be in the peer's `world_scope`. Strictness (fix
-    //    loop, Important): EVERY entry/relation must carry a parseable
-    //    `extensions.nexus.world_id` — a payload where any entry lacks one
-    //    denies the WHOLE payload (no filter-and-continue; that shape let a
-    //    mixed payload pass the gate and fail later as a partial write).
+    // 5. World-scope gate (T1 PeerScope, fail-closed; spec §5.5 — reads
+    //    scoped exactly like writes): every target world in the payload
+    //    must be in the peer's `world_scope`. Strictness (fix loop,
+    //    Important): EVERY entry/relation must carry a parseable
+    //    `extensions.nexus.world_id` (writes) / `scope.scope_id` (reads) —
+    //    a payload where any carrier is missing denies the WHOLE payload
+    //    (no filter-and-continue; that shape let a mixed payload pass the
+    //    gate and fail later as a partial write).
     let Some(worlds) = payload_world_ids(route, &payload) else {
         return Err(denied(
-            "invoke payload requires extensions.nexus.world_id on every entry/relation; \
-             cannot verify world scope",
+            "invoke payload carries no verifiable world scope \
+             (writes need extensions.nexus.world_id on every entry/relation; \
+             check/assemble need scope.scope_id); cannot verify world scope",
         ));
     };
     if worlds.is_empty() {
@@ -408,6 +422,32 @@ async fn route_orchestrator(
                 SpokeResult::Reject(reject) => Err(map_reject(&reject)),
             }
         }
+        // N-C2 read half (spec §5.1 lock): the Connect payload deserializes
+        // DIRECTLY into the spoke wire types; the request scope is the
+        // schema's `scope` object (world-scoped by the step-5 gate).
+        // `run_checker` is the production baseline no-op evaluator — the
+        // V1.148 daemon-route cutover shape (zero findings; rules still
+        // resolve via `RuleQueryPort` inside the orchestrator).
+        Route::Check => {
+            let request: CheckRequest = match serde_json::from_value(payload) {
+                Ok(request) => request,
+                Err(error) => return Err(map_reject(&invalid_payload("check", &error))),
+            };
+            match orchestrate_check(adapter, request, |_input| SpokeResult::Ok(vec![])).await {
+                SpokeResult::Ok(response) => serialize_response::<CheckResponse>(&response),
+                SpokeResult::Reject(reject) => Err(map_reject(&reject)),
+            }
+        }
+        Route::Assemble => {
+            let request: AssembleRequest = match serde_json::from_value(payload) {
+                Ok(request) => request,
+                Err(error) => return Err(map_reject(&invalid_payload("assemble", &error))),
+            };
+            match orchestrate_assemble(adapter, request).await {
+                SpokeResult::Ok(response) => serialize_response::<AssembleResponse>(&response),
+                SpokeResult::Reject(reject) => Err(map_reject(&reject)),
+            }
+        }
     }
 }
 
@@ -421,13 +461,16 @@ fn world_id_of(value: &Value) -> Option<&str> {
 
 /// Target world ids inside an ops payload, in wire order — raw JSON reads so
 /// the scope gate runs before any typed parse (fail-closed, zero side
-/// effects). `extensions.nexus.world_id` is the canonical carrier the
-/// conversion seam writes on entries/relations.
+/// effects). Writes carry `extensions.nexus.world_id` (the canonical carrier
+/// the conversion seam writes on entries/relations); reads (`check` /
+/// `assemble`) carry the world selector on the schema's `scope.scope_id`
+/// (spec §5.1 lock — the scope object, not a second ad-hoc world field).
 ///
 /// Strictness (fix loop, Important): EVERY entry/relation must carry a
-/// parseable world id. `None` means the payload cannot be scoped as a whole
-/// — an entry/relation lacks the carrier (or the container is absent) — and
-/// the whole payload is denied. Entries are never filtered out of the set.
+/// parseable world id (writes) / `scope.scope_id` must be present (reads).
+/// `None` means the payload cannot be scoped as a whole — a carrier is
+/// missing (or the container is absent) — and the whole payload is denied.
+/// Entries are never filtered out of the set.
 fn payload_world_ids(route: Route, payload: &Value) -> Option<Vec<String>> {
     match route {
         Route::Upsert => {
@@ -446,14 +489,22 @@ fn payload_world_ids(route: Route, payload: &Value) -> Option<Vec<String>> {
             let relation = payload.get("relation")?;
             Some(vec![world_id_of(relation)?.to_string()])
         }
+        Route::Check | Route::Assemble => {
+            let scope_id = payload.pointer("/scope/scope_id")?.as_str()?;
+            Some(vec![scope_id.to_string()])
+        }
     }
 }
 
 /// Logical collection-entry count for the payload cap (spec §5.4): the
-/// operation's batch arrays. `upsert` counts `knowledge_entries`;
+/// operation's collection fields. `upsert` counts `knowledge_entries`;
 /// `promote` / `relate` carry a single candidate / relation (1 when
-/// present). The orchestrator's typed parse rejects malformed payloads
-/// after the cap gate.
+/// present); `check` counts its batch arrays (`rule_refs` + `rules` +
+/// `checker_kinds`); `assemble` counts `max_entries` — the entries the
+/// peer asks the packet to carry, so an oversized hint is rejected before
+/// the orchestrator (prevents assembled context amplification). The
+/// orchestrator's typed parse rejects malformed payloads after the cap
+/// gate.
 fn payload_collection_entries(route: Route, payload: &Value) -> usize {
     match route {
         Route::Upsert => payload
@@ -462,6 +513,19 @@ fn payload_collection_entries(route: Route, payload: &Value) -> usize {
             .map_or(0, Vec::len),
         Route::Promote => usize::from(payload.get("candidate").is_some()),
         Route::Relate => usize::from(payload.get("relation").is_some()),
+        Route::Check => {
+            let array_len = |field: &str| {
+                payload
+                    .get(field)
+                    .and_then(Value::as_array)
+                    .map_or(0, Vec::len)
+            };
+            array_len("rule_refs") + array_len("rules") + array_len("checker_kinds")
+        }
+        Route::Assemble => payload
+            .get("max_entries")
+            .and_then(Value::as_u64)
+            .map_or(0, |max| usize::try_from(max).unwrap_or(usize::MAX)),
     }
 }
 
@@ -571,6 +635,14 @@ async fn verify_stored_worlds(
                 }
             }
         }
+        // Reads (N-C2): no stored row is targeted by id — `check` /
+        // `assemble` reach storage only through the orchestrators' own
+        // world-scoped `ScopeQueryPort` reads, and the world gate (step 5)
+        // already verified `scope.scope_id` against the peer's
+        // `world_scope`, so no stored-world verification applies (spec
+        // §5.5 — fail-closed world scoping happens before the
+        // orchestrator, zero side effects on denial).
+        Route::Check | Route::Assemble => {}
     }
     Ok(())
 }
@@ -755,23 +827,34 @@ fn bridge_fault(reason: &str) -> ErrorEnvelope {
 }
 
 /// Locked `SpokeRejectCode → ErrorEnvelope` mapping (P1 spec § OCC + error
-/// mapping — verbatim):
+/// mapping — verbatim; extended for the N-C2 read half per the V1.148
+/// daemon-route precedent, where the check handler maps spoke client-input
+/// rejects to the 400 class):
 ///
 /// | `SpokeRejectCode` | `ErrorEnvelope.code` | Retry-safe? |
 /// |-------------------|----------------------|-------------|
 /// | `KnowledgeEntryAlreadyExists` | `knowledge_entry_already_exists` | yes |
 /// | `StoredRevisionStale` | `stored_revision_stale` | yes |
 /// | `RevisionConflict` | `revision_conflict` | yes |
+/// | `InvalidInput` | `invalid_input` | yes (client fixes payload) |
+/// | `InvalidPacketInput` | `invalid_input` | yes (client fixes payload) |
 /// | `InternalError` | `internal_error` | no |
 /// | any other reject | `internal_error` (carries `reject.code`/`message` in `details`) | no |
 ///
-/// `reject.message` flows into `ErrorEnvelope.message`; `reject.details`
-/// (when present) flows into `ErrorEnvelope.details`.
+/// `InvalidInput` / `InvalidPacketInput` are the check/assemble path's
+/// client-input rejects (scope wire conversion, packet extensions
+/// namespace, malformed payloads) — the daemon's 400 class, so they must
+/// not read as server faults. `reject.message` flows into
+/// `ErrorEnvelope.message`; `reject.details` (when present) flows into
+/// `ErrorEnvelope.details`.
 fn map_reject(reject: &SpokeReject) -> ErrorEnvelope {
     let code = match reject.code {
         SpokeRejectCode::KnowledgeEntryAlreadyExists => "knowledge_entry_already_exists",
         SpokeRejectCode::StoredRevisionStale => "stored_revision_stale",
         SpokeRejectCode::RevisionConflict => "revision_conflict",
+        // Client-input family (V1.148 daemon check mapping precedent —
+        // spoke InvalidInput → 400 class; the Connect envelope equivalent).
+        SpokeRejectCode::InvalidInput | SpokeRejectCode::InvalidPacketInput => "invalid_input",
         // Locked safe default for every other reject (incl. InternalError).
         _ => "internal_error",
     };
@@ -907,9 +990,9 @@ mod tests {
         (temp, Arc::new(NexusAdapter::new(pool)))
     }
 
-    /// A `PeerScope` allowlisting `peer` for `WORLD_A` with the upsert op,
+    /// A `PeerScope` allowlisting `peer` for `WORLD_A` with the given ops,
     /// written through the on-disk allowlist shape (like the CLI boot).
-    fn scoped_scope(peer: PeerId) -> PeerScope {
+    fn scoped_scope_for(peer: PeerId, ops: &[&str]) -> PeerScope {
         let temp = tempfile::tempdir().expect("tempdir");
         let allow_path = connect_allowlist_path(temp.path());
         std::fs::create_dir_all(allow_path.parent().expect("parent dir")).expect("mkdir");
@@ -918,12 +1001,17 @@ mod tests {
             serde_json::json!({ "peer_ids": [{
                 "peer_id": peer.to_string(),
                 "world_scope": [WORLD_A],
-                "op_scope": ["upsert"],
+                "op_scope": ops,
             }] })
             .to_string(),
         )
         .expect("write allowlist");
         crate::commands::connect::allowlist::load(temp.path(), &[]).expect("scoped allowlist loads")
+    }
+
+    /// A `PeerScope` allowlisting `peer` for `WORLD_A` with the upsert op.
+    fn scoped_scope(peer: PeerId) -> PeerScope {
+        scoped_scope_for(peer, &["upsert"])
     }
 
     /// A scoped peer + handler + lane over a hermetic adapter. `_temp`
@@ -1056,6 +1144,81 @@ mod tests {
         match handler(&peer, "upsert", payload) {
             Err(envelope) => assert_eq!(envelope.code, "payload_too_large"),
             Ok(_) => panic!("an over-cap payload must reject with payload_too_large"),
+        }
+    }
+
+    /// N-C2 (T1 Minor follow-up, spec §5.4): the entry cap extends to the
+    /// check op's collection fields — `rule_refs` + `rules` +
+    /// `checker_kinds` all count as logical collection entries. 501
+    /// rule_refs (> 500) are rejected with `payload_too_large` before the
+    /// bridge.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn check_payload_entry_cap_counts_collection_fields() {
+        let peer = fixed_keypair(8).public().to_peer_id();
+        let scope = scoped_scope_for(peer, &["check"]);
+        let (_temp, adapter) = test_adapter().await;
+        let (handler, _lane) = build_handler_with_limits(scope, adapter, BridgeLimits::default());
+        let payload = serde_json::json!({
+            "scope": { "scope_id": WORLD_A },
+            "rule_refs": (0..501).map(|i| format!("rule_{i}")).collect::<Vec<_>>(),
+        });
+        match handler(&peer, "check", payload) {
+            Err(envelope) => assert_eq!(
+                envelope.code, "payload_too_large",
+                "501 rule_refs must trip the check entry cap"
+            ),
+            Ok(_) => panic!("an over-cap check payload must reject with payload_too_large"),
+        }
+    }
+
+    /// N-C2 (T1 Minor follow-up, spec §5.4): the entry cap extends to the
+    /// assemble op's collection field — `max_entries` counts as the
+    /// logical entries the peer asks the packet to carry. 501 (> 500) is
+    /// rejected with `payload_too_large` before the bridge (prevents
+    /// assembled context amplification).
+    #[tokio::test(flavor = "multi_thread")]
+    async fn assemble_payload_entry_cap_counts_max_entries() {
+        let peer = fixed_keypair(9).public().to_peer_id();
+        let scope = scoped_scope_for(peer, &["assemble"]);
+        let (_temp, adapter) = test_adapter().await;
+        let (handler, _lane) = build_handler_with_limits(scope, adapter, BridgeLimits::default());
+        let payload = serde_json::json!({
+            "scope": { "scope_id": WORLD_A },
+            "max_entries": 501,
+        });
+        match handler(&peer, "assemble", payload) {
+            Err(envelope) => assert_eq!(
+                envelope.code, "payload_too_large",
+                "max_entries=501 must trip the assemble entry cap"
+            ),
+            Ok(_) => panic!("an over-cap assemble payload must reject with payload_too_large"),
+        }
+    }
+
+    /// N-C2 mapping extension (V1.148 daemon precedent — spoke client-input
+    /// rejects are the 400 class, not server faults): a payload that passes
+    /// the world gate but fails the typed orchestrator parse maps through
+    /// the synthetic `InvalidInput` reject to the `invalid_input` envelope
+    /// (retry-safe), not `internal_error`.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn malformed_payload_maps_to_invalid_input() {
+        let peer = fixed_keypair(10).public().to_peer_id();
+        let scope = scoped_scope_for(peer, &["upsert"]);
+        let (_temp, adapter) = test_adapter().await;
+        let (handler, _lane) = build_handler_with_limits(scope, adapter, BridgeLimits::default());
+        // The entry carries the world_id carrier (world gate passes) but
+        // misses the typed wire's required fields (parse rejects).
+        let payload = serde_json::json!({
+            "knowledge_entries": [{
+                "extensions": { "nexus": { "world_id": WORLD_A } },
+            }],
+        });
+        match handler(&peer, "upsert", payload) {
+            Err(envelope) => assert_eq!(
+                envelope.code, "invalid_input",
+                "a malformed payload must map to the invalid_input envelope"
+            ),
+            Ok(_) => panic!("a malformed payload must reject with invalid_input"),
         }
     }
 }

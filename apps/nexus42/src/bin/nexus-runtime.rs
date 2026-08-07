@@ -40,11 +40,11 @@ const DEFAULT_LISTEN: &str = "/ip4/127.0.0.1/tcp/0";
     name = "nexus-runtime",
     version,
     about = "Nexus headless Connect runtime (N-C1 invoke surface)",
-    long_about = "Headless Connect runtime: serves the N-C1 write-op invoke \
-                  surface (upsert/promote/relate, world-scoped) over \
-                  spoke-connect against the shared ~/.nexus42 home. No \
-                  daemon HTTP router, no embedded Web UI, no Setup/Canvas/\
-                  Control Room."
+    long_about = "Headless Connect runtime: serves the N-C1 write-op + \
+                  N-C2 read-half invoke surface (upsert/promote/relate/\
+                  check/assemble, world-scoped) over spoke-connect against \
+                  the shared ~/.nexus42 home. No daemon HTTP router, no \
+                  embedded Web UI, no Setup/Canvas/Control Room."
 )]
 struct RuntimeCli {
     /// Listen multiaddr (repeatable; default `/ip4/127.0.0.1/tcp/0`).
@@ -158,7 +158,7 @@ async fn boot(home: &Path, allow_peer: &[String], listen: &[String]) -> Result<(
         "  allowlisted peers: {allowlist_len} (fail-closed; add via allowlist.json or --allow-peer)"
     );
     println!(
-        "  invokes: upsert/promote/relate served (world-scoped); all other ops refused (op_unsupported)"
+        "  invokes: upsert/promote/relate/check/assemble served (world-scoped); all other ops refused (op_unsupported)"
     );
     println!("  press Ctrl-C to stop");
 

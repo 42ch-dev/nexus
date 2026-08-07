@@ -2,16 +2,18 @@
 //! repeatable `--allow-peer` overlay).
 //!
 //! N-C0 product contract (draft §2.3): the allowlist is the trust root.
-//! N-C1 world scoping (P1 spec § World scoping — schema locked): each
-//! `peer_ids` entry is either a bare `"12D3…"` peer id (N-C0 shape — no
-//! write access) or an object `{ "peer_id": "12D3…", "world_scope":
-//! ["<world-uuid>", …], "op_scope": ["upsert","promote","relate"] }`.
+//! N-C1 → N-C2 world scoping (P1 spec § World scoping — schema locked):
+//! each `peer_ids` entry is either a bare `"12D3…"` peer id (N-C0 shape —
+//! no write access) or an object `{ "peer_id": "12D3…", "world_scope":
+//! ["<world-uuid>", …], "op_scope": ["upsert","promote","relate","check",
+//! "assemble"] }`.
 //! Both scopes are optional and **fail-closed**: an absent/empty scope
-//! denies world writes — a bare entry (or a `--allow-peer` overlay) is
-//! handshake-allowlisted but can never write. World ids are world UUID
-//! strings, never filesystem paths. A missing file ⇒ empty list ⇒
-//! **fail-closed** (spoke-connect rejects every remote peer). The operator
-//! edits the allowlist out-of-band; there is no online enroll endpoint.
+//! denies world access (writes AND the world-scoped read ops) — a bare
+//! entry (or a `--allow-peer` overlay) is handshake-allowlisted but can
+//! never invoke a served op. World ids are world UUID strings, never
+//! filesystem paths. A missing file ⇒ empty list ⇒ **fail-closed**
+//! (spoke-connect rejects every remote peer). The operator edits the
+//! allowlist out-of-band; there is no online enroll endpoint.
 
 use crate::errors::{CliError, Result};
 use libp2p::PeerId;

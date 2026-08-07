@@ -3,11 +3,12 @@
 //! `nexus42 connect start` runs a `spoke-connect` node in a **separate OS
 //! process** (architect lock Q7): signed-hello handshake, allowlist,
 //! honest `HostCapabilityManifest`, and — since V1.153 P1 (N-C1) — an
-//! inbound **write-op invoke dispatcher** ([`invoke`]) backed by a
-//! per-process `NexusAdapter` over the active workspace DB. Every op the
-//! host does not serve (`check` / `assemble` / `project` / `compute` /
-//! unknown) is refused with `op_unsupported` (the N-C0 refusal contract
-//! extends); non-allowlisted peers never reach the handler (handshake).
+//! inbound **invoke dispatcher** ([`invoke`]) backed by a per-process
+//! `NexusAdapter` over the active workspace DB. N-C2 (V1.154 P1) extends
+//! the served surface with the read half (`check` / `assemble`); every op
+//! the host does not serve (`compute` / `project` / unknown) is refused
+//! with `op_unsupported` (the N-C0 refusal contract extends);
+//! non-allowlisted peers never reach the handler (handshake).
 //!
 //! Topology rules (product draft `fl-r-connect-host-foundation.md` §2.1/§2.6):
 //! - mDNS is **never** enabled (`spoke-connect/mdns` not in the feature set).

@@ -320,7 +320,10 @@ async fn allowlisted_peer_handshakes_and_reads_nexus_manifest() {
     let wire = serde_json::to_value(session.remote_manifest()).expect("manifest serializes");
     assert_eq!(wire["host_id"], serde_json::json!(TEST_HOST_ID));
     assert_eq!(wire["schema_version"], serde_json::json!(1));
-    assert_eq!(wire["roles"], serde_json::json!(["data-store"]));
+    assert_eq!(
+        wire["roles"],
+        serde_json::json!(["data-store", "checker", "assembler"])
+    );
     assert_eq!(
         wire["capabilities"],
         serde_json::json!(["spoke-baseline", "l2-computable", "l5-fork"])
@@ -332,7 +335,7 @@ async fn allowlisted_peer_handshakes_and_reads_nexus_manifest() {
     );
     assert_eq!(
         wire["extensions"]["nexus"]["served_ops"],
-        serde_json::json!(["upsert", "promote", "relate"])
+        serde_json::json!(["upsert", "promote", "relate", "check", "assemble"])
     );
     assert_eq!(
         wire["extensions"]["nexus"]["daemon_http_coexists"],
@@ -352,23 +355,33 @@ async fn allowlisted_peer_handshakes_and_reads_nexus_manifest() {
     peer_node.shutdown().await.expect("peer shuts down");
 }
 
-/// N-C1 honesty machine-check (P1 spec § Manifest honesty, both directions):
-/// the manifest a peer reads off the signed hello must advertise exactly the
-/// write ops the invoke dispatcher serves. (a) Every op the manifest
-/// advertises (`extensions.nexus.served_ops`) is actually served by the
-/// dispatch; (b) every op the dispatch serves (`super::invoke::SERVED_OPS`)
-/// is advertised by the manifest. The manifest comes from the single shared
-/// builder (`build_connect_hello_manifest` — the same bytes
-/// `connect start` puts in `ConnectConfig.local_manifest`), so this is the
-/// wire-truth cross-crate check; the crate-level honesty test
-/// (`n_c1_manifest_is_honest` in `nexus-spoke-adapter`) covers the
-/// manifest-side contract (exact op list + production-orchestrator backing).
+/// N-C1 → N-C2 honesty machine-check (P1 spec § Manifest honesty, both
+/// directions): the manifest a peer reads off the signed hello must
+/// advertise exactly the ops the invoke dispatcher serves
+/// (`upsert`/`promote`/`relate`/`check`/`assemble` — the enlarged N-C2
+/// read-half set). (a) Every op the manifest advertises
+/// (`extensions.nexus.served_ops`) is actually served by the dispatch; (b)
+/// every op the dispatch serves (`super::invoke::SERVED_OPS`) is advertised
+/// by the manifest. The manifest comes from the single shared builder
+/// (`build_connect_hello_manifest` — the same bytes `connect start` puts in
+/// `ConnectConfig.local_manifest`), so this is the wire-truth cross-crate
+/// check; the crate-level honesty test (`n_c1_manifest_is_honest` in
+/// `nexus-spoke-adapter`) covers the manifest-side contract (exact op list +
+/// production-orchestrator backing). Product lock (spec §3/§5.6): the
+/// literal `"reasoning-complete"` string stays absent — the claim waits for
+/// P2's `compute`.
 ///
 /// No network needed — the builder is host_id-injectable and hermetic.
 #[test]
 fn n_c1_manifest_served_ops_match_dispatch_both_directions() {
     let manifest = nexus_manifest(TEST_HOST_ID);
     let wire = serde_json::to_value(&manifest).expect("manifest serializes");
+    let wire_string = wire.to_string();
+    assert!(
+        !wire_string.contains("reasoning-complete"),
+        "the literal \"reasoning-complete\" MUST stay absent from the wire manifest \
+         (product lock — reserved for P2's compute; N-C2 is check+assemble+compute)"
+    );
     let advertised = wire["extensions"]["nexus"]["served_ops"]
         .as_array()
         .expect("extensions.nexus.served_ops array present")
@@ -702,7 +715,10 @@ async fn cli_wiring_starts_a_node_with_persisted_identity_and_allowlist() {
     // Manifest fields come from the shared builder (single SSOT).
     let manifest_json = serde_json::to_value(&config.local_manifest).expect("serialize");
     assert_eq!(manifest_json["host_id"], serde_json::json!(host_id));
-    assert_eq!(manifest_json["roles"], serde_json::json!(["data-store"]));
+    assert_eq!(
+        manifest_json["roles"],
+        serde_json::json!(["data-store", "checker", "assembler"])
+    );
 
     let expected_peer = identity::load_or_create_identity(home)
         .expect("identity reloads")
@@ -986,8 +1002,10 @@ async fn n_c1_peer_upserts_promotes_relates_with_world_scoping() {
         other => panic!("absent-scope upsert must be denied, got {other:?}"),
     }
 
-    // 7. Non-served op (N-C0 refusal contract extends into the handler).
-    assert_op_unsupported(&session, "check").await;
+    // 7. Non-served op (N-C0 refusal contract extends into the handler;
+    //    `compute` stays refused until P2 — the N-C2 read half ships
+    //    check/assemble only).
+    assert_op_unsupported(&session, "compute").await;
 
     // 8. Denials consume sequences but leave the session open: a served op
     // still round-trips afterwards.
@@ -1673,6 +1691,15 @@ async fn n_c1_every_served_op_advertised_by_the_const_actually_routes() {
                     "extensions": { "nexus": { "world_id": WORLD_A } },
                 },
             }),
+            "check" => serde_json::json!({
+                "extensions": { "nexus": { "peer_id": peer_claim } },
+                "scope": { "scope_id": WORLD_A },
+                "rule_refs": [],
+            }),
+            "assemble" => serde_json::json!({
+                "extensions": { "nexus": { "peer_id": peer_claim } },
+                "scope": { "scope_id": WORLD_A },
+            }),
             other => panic!(
                 "SERVED_OPS advertises op {other:?} but the routing-loop test has no \
                  payload fixture for it — add one so the new op is proven to route"
@@ -1859,6 +1886,452 @@ async fn n_c1_relate_create_rejects_foreign_world_endpoints() {
         ),
         "same-world relation persisted in the claimed world"
     );
+
+    host.shutdown().await.expect("host shuts down");
+    peer_node.shutdown().await.expect("peer shuts down");
+}
+
+/// N-C2 (V1.154 P1): the `check` op round-trips over Connect through the
+/// real handler. The peer is scoped to WORLD_A with the full served-op set;
+/// the invoke payload deserializes directly into `spoke_schemas::CheckRequest`
+/// (spec §5.1 lock) and runs `orchestrate_check` with the production
+/// baseline no-op checker (the V1.148 daemon cutover shape) — the response
+/// carries the orchestrator's findings (empty for the baseline checker) and
+/// the checked world's data flowed through the read ports.
+#[tokio::test(flavor = "multi_thread")]
+async fn n_c2_peer_runs_check_over_connect() {
+    let _guard = network_test_guard().await;
+    let temp = tempfile::tempdir().expect("tempdir");
+    let home = temp.path();
+    let peer_key = fixed_keypair(70);
+    let peer_peer = peer_key.public().to_peer_id();
+
+    const WORLD_A: &str = "wld_test_a";
+
+    // Hermetic workspace DB with the world seeded (FK rows for the read
+    // ports and the finding-persist path).
+    let db_path = temp.path().join("workspace").join("state.db");
+    let pool = crate::db::Schema::init(&db_path)
+        .await
+        .expect("workspace DB initializes");
+    seed_world(&pool, "ctr_test", WORLD_A).await;
+
+    // The peer is scoped to WORLD_A with exactly the const's served-op set.
+    let allow_path = nexus_home_layout::connect_allowlist_path(home);
+    std::fs::create_dir_all(allow_path.parent().expect("parent dir")).expect("mkdir");
+    std::fs::write(
+        &allow_path,
+        serde_json::json!({ "peer_ids": [{
+            "peer_id": peer_peer.to_string(),
+            "world_scope": [WORLD_A],
+            "op_scope": super::invoke::SERVED_OPS,
+        }] })
+        .to_string(),
+    )
+    .expect("write allowlist");
+
+    let (config, _, _) = super::build_host_config(
+        home,
+        &[],
+        &["/ip4/127.0.0.1/tcp/0".to_string()],
+        Some(&db_path),
+    )
+    .await
+    .expect("N-C2 host config builds");
+    let host_peer = config.identity.public().to_peer_id();
+    let host = start(config).await;
+    let peer_node = start(peer_config(peer_key, vec![host_peer])).await;
+    let session = peer_node
+        .connect(host.listen_addrs()[0].clone())
+        .await
+        .expect("scoped peer handshake");
+    let peer_claim = serde_json::json!(peer_peer.to_string());
+
+    // Seed one entry so the orchestrator's read paths
+    // (list_knowledge_entries / list_timeline_events) run against data.
+    session
+        .invoke(
+            "upsert",
+            serde_json::json!({
+                "extensions": { "nexus": { "peer_id": peer_claim } },
+                "knowledge_entries": [entry_fixture("kb_c2_1", "Checked", WORLD_A, "confirmed", None)],
+            }),
+        )
+        .await
+        .expect("seed entry for the check");
+
+    // check round-trip: scope.scope_id is the world selector (spec §5.1 —
+    // the schema's scope object, not an ad-hoc world field); the baseline
+    // checker produces zero findings.
+    let checked = session
+        .invoke(
+            "check",
+            serde_json::json!({
+                "extensions": { "nexus": { "peer_id": peer_claim } },
+                "scope": { "scope_id": WORLD_A },
+                "rule_refs": [],
+                "checker_kinds": ["baseline"],
+            }),
+        )
+        .await
+        .expect("scoped check is served");
+    assert_eq!(
+        checked.payload["findings"],
+        serde_json::json!([]),
+        "baseline checker produces zero findings"
+    );
+
+    host.shutdown().await.expect("host shuts down");
+    peer_node.shutdown().await.expect("peer shuts down");
+}
+
+/// N-C2 (V1.154 P1): the `assemble` op round-trips over Connect through the
+/// real handler. The payload deserializes directly into
+/// `spoke_schemas::AssembleRequest` (spec §5.1 lock) and runs
+/// `orchestrate_assemble` — the response carries the assembled packet, and
+/// `max_entries` flows through as the packet truncation hint (spec §5.4's
+/// amplification guard: a huge max_entries is capped before the orchestrator).
+#[tokio::test(flavor = "multi_thread")]
+async fn n_c2_peer_runs_assemble_over_connect() {
+    let _guard = network_test_guard().await;
+    let temp = tempfile::tempdir().expect("tempdir");
+    let home = temp.path();
+    let peer_key = fixed_keypair(71);
+    let peer_peer = peer_key.public().to_peer_id();
+
+    const WORLD_A: &str = "wld_test_a";
+
+    let db_path = temp.path().join("workspace").join("state.db");
+    let pool = crate::db::Schema::init(&db_path)
+        .await
+        .expect("workspace DB initializes");
+    seed_world(&pool, "ctr_test", WORLD_A).await;
+
+    let allow_path = nexus_home_layout::connect_allowlist_path(home);
+    std::fs::create_dir_all(allow_path.parent().expect("parent dir")).expect("mkdir");
+    std::fs::write(
+        &allow_path,
+        serde_json::json!({ "peer_ids": [{
+            "peer_id": peer_peer.to_string(),
+            "world_scope": [WORLD_A],
+            "op_scope": super::invoke::SERVED_OPS,
+        }] })
+        .to_string(),
+    )
+    .expect("write allowlist");
+
+    let (config, _, _) = super::build_host_config(
+        home,
+        &[],
+        &["/ip4/127.0.0.1/tcp/0".to_string()],
+        Some(&db_path),
+    )
+    .await
+    .expect("N-C2 host config builds");
+    let host_peer = config.identity.public().to_peer_id();
+    let host = start(config).await;
+    let peer_node = start(peer_config(peer_key, vec![host_peer])).await;
+    let session = peer_node
+        .connect(host.listen_addrs()[0].clone())
+        .await
+        .expect("scoped peer handshake");
+    let peer_claim = serde_json::json!(peer_peer.to_string());
+
+    // Two entries in the world so the packet has content.
+    session
+        .invoke(
+            "upsert",
+            serde_json::json!({
+                "extensions": { "nexus": { "peer_id": peer_claim } },
+                "knowledge_entries": [
+                    entry_fixture("kb_c2_a1", "AssembledOne", WORLD_A, "confirmed", None),
+                    entry_fixture("kb_c2_a2", "AssembledTwo", WORLD_A, "confirmed", None),
+                ],
+            }),
+        )
+        .await
+        .expect("seed entries for the assemble");
+
+    // assemble round-trip, no truncation: the packet carries both entries
+    // and the orchestrator-derived packet id (scope-anchored).
+    let assembled = session
+        .invoke(
+            "assemble",
+            serde_json::json!({
+                "extensions": { "nexus": { "peer_id": peer_claim } },
+                "scope": { "scope_id": WORLD_A },
+                "max_entries": 10,
+            }),
+        )
+        .await
+        .expect("scoped assemble is served");
+    assert_eq!(
+        assembled.payload["packet"]["packet_id"],
+        serde_json::json!("assemble:wld_test_a"),
+        "packet id is derived from the request scope"
+    );
+    let entries = assembled.payload["packet"]["entries"]
+        .as_array()
+        .expect("packet entries array");
+    assert_eq!(entries.len(), 2, "both seeded entries assembled");
+
+    // max_entries flows through as the truncation hint (packet builder
+    // truncates, not the wire).
+    let truncated = session
+        .invoke(
+            "assemble",
+            serde_json::json!({
+                "extensions": { "nexus": { "peer_id": peer_claim } },
+                "scope": { "scope_id": WORLD_A },
+                "max_entries": 1,
+            }),
+        )
+        .await
+        .expect("scoped assemble with max_entries is served");
+    let truncated_entries = truncated.payload["packet"]["entries"]
+        .as_array()
+        .expect("packet entries array");
+    assert_eq!(
+        truncated_entries.len(),
+        1,
+        "max_entries=1 must truncate the assembled packet"
+    );
+
+    host.shutdown().await.expect("host shuts down");
+    peer_node.shutdown().await.expect("peer shuts down");
+}
+
+/// N-C2 (V1.154 P1) read world-scoping (spec §5.5 — fail-closed reads,
+/// identical to writes): `check` / `assemble` require the session peer's
+/// `world_scope` to contain the request `scope.scope_id` before either
+/// orchestrator is called. Wrong-world scope ⇒ `op_unsupported`; absent
+/// scope object / missing scope_id ⇒ `op_unsupported` (cannot verify
+/// scope). All denials have zero side effects and leave the session usable.
+#[tokio::test(flavor = "multi_thread")]
+async fn n_c2_check_and_assemble_wrong_world_and_absent_scope_denied() {
+    let _guard = network_test_guard().await;
+    let temp = tempfile::tempdir().expect("tempdir");
+    let home = temp.path();
+    let peer_key = fixed_keypair(72);
+    let peer_peer = peer_key.public().to_peer_id();
+
+    const WORLD_A: &str = "wld_test_a";
+    const WORLD_B: &str = "wld_test_b";
+
+    let db_path = temp.path().join("workspace").join("state.db");
+    let pool = crate::db::Schema::init(&db_path)
+        .await
+        .expect("workspace DB initializes");
+    seed_world(&pool, "ctr_test", WORLD_A).await;
+    seed_world(&pool, "ctr_test", WORLD_B).await;
+
+    // The peer is scoped to WORLD_A only — WORLD_B reads must be denied.
+    let allow_path = nexus_home_layout::connect_allowlist_path(home);
+    std::fs::create_dir_all(allow_path.parent().expect("parent dir")).expect("mkdir");
+    std::fs::write(
+        &allow_path,
+        serde_json::json!({ "peer_ids": [{
+            "peer_id": peer_peer.to_string(),
+            "world_scope": [WORLD_A],
+            "op_scope": super::invoke::SERVED_OPS,
+        }] })
+        .to_string(),
+    )
+    .expect("write allowlist");
+
+    let (config, _, _) = super::build_host_config(
+        home,
+        &[],
+        &["/ip4/127.0.0.1/tcp/0".to_string()],
+        Some(&db_path),
+    )
+    .await
+    .expect("N-C2 host config builds");
+    let host_peer = config.identity.public().to_peer_id();
+    let host = start(config).await;
+    let peer_node = start(peer_config(peer_key, vec![host_peer])).await;
+    let session = peer_node
+        .connect(host.listen_addrs()[0].clone())
+        .await
+        .expect("scoped peer handshake");
+    let peer_claim = serde_json::json!(peer_peer.to_string());
+
+    // 1. Wrong-world check: scope.scope_id = WORLD_B, peer scoped to
+    //    WORLD_A ⇒ denied before the orchestrator (zero side effects).
+    match session
+        .invoke(
+            "check",
+            serde_json::json!({
+                "extensions": { "nexus": { "peer_id": peer_claim } },
+                "scope": { "scope_id": WORLD_B },
+                "rule_refs": [],
+            }),
+        )
+        .await
+    {
+        Err(InvokeError::Wire(envelope)) => {
+            assert_eq!(
+                envelope.code, "op_unsupported",
+                "wrong-world check must be denied"
+            );
+        }
+        other => panic!("wrong-world check must be denied, got {other:?}"),
+    }
+
+    // 2. Wrong-world assemble: same fail-closed rule on reads.
+    match session
+        .invoke(
+            "assemble",
+            serde_json::json!({
+                "extensions": { "nexus": { "peer_id": peer_claim } },
+                "scope": { "scope_id": WORLD_B },
+            }),
+        )
+        .await
+    {
+        Err(InvokeError::Wire(envelope)) => {
+            assert_eq!(
+                envelope.code, "op_unsupported",
+                "wrong-world assemble must be denied"
+            );
+        }
+        other => panic!("wrong-world assemble must be denied, got {other:?}"),
+    }
+
+    // 3. Absent scope object ⇒ cannot verify the world ⇒ denied.
+    match session
+        .invoke(
+            "check",
+            serde_json::json!({
+                "extensions": { "nexus": { "peer_id": peer_claim } },
+                "rule_refs": [],
+            }),
+        )
+        .await
+    {
+        Err(InvokeError::Wire(envelope)) => {
+            assert_eq!(
+                envelope.code, "op_unsupported",
+                "check without a scope object must be denied"
+            );
+        }
+        other => panic!("check without scope must be denied, got {other:?}"),
+    }
+
+    // 4. Scope object without scope_id ⇒ cannot verify the world ⇒ denied.
+    match session
+        .invoke(
+            "assemble",
+            serde_json::json!({
+                "extensions": { "nexus": { "peer_id": peer_claim } },
+                "scope": {},
+            }),
+        )
+        .await
+    {
+        Err(InvokeError::Wire(envelope)) => {
+            assert_eq!(
+                envelope.code, "op_unsupported",
+                "assemble without scope_id must be denied"
+            );
+        }
+        other => panic!("assemble without scope_id must be denied, got {other:?}"),
+    }
+
+    // Zero side effects: no findings rows persisted by any denied check.
+    let findings: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM findings")
+        .fetch_one(&pool)
+        .await
+        .expect("count findings rows");
+    assert_eq!(findings, 0, "denied checks must persist zero findings");
+
+    // The session stays usable: a same-world check is served afterwards.
+    let served = session
+        .invoke(
+            "check",
+            serde_json::json!({
+                "extensions": { "nexus": { "peer_id": peer_claim } },
+                "scope": { "scope_id": WORLD_A },
+                "rule_refs": [],
+            }),
+        )
+        .await
+        .expect("same-world check still served after denials");
+    assert_eq!(served.payload["findings"], serde_json::json!([]));
+
+    host.shutdown().await.expect("host shuts down");
+    peer_node.shutdown().await.expect("peer shuts down");
+}
+
+/// N-C2 (V1.154 P1) refusal matrix extension (spec §2.2): through the real
+/// handler, `compute` (P2), `project`, and unknown ops are refused with
+/// `op_unsupported` and zero side effects — even for a peer whose
+/// `op_scope` covers the full served set (the SERVED_OPS gate refuses
+/// before any scope logic). The session stays usable.
+#[tokio::test(flavor = "multi_thread")]
+async fn n_c2_refusal_matrix_compute_project_and_unknown_ops() {
+    let _guard = network_test_guard().await;
+    let temp = tempfile::tempdir().expect("tempdir");
+    let home = temp.path();
+    let peer_key = fixed_keypair(73);
+    let peer_peer = peer_key.public().to_peer_id();
+
+    const WORLD_A: &str = "wld_test_a";
+
+    let db_path = temp.path().join("workspace").join("state.db");
+    let pool = crate::db::Schema::init(&db_path)
+        .await
+        .expect("workspace DB initializes");
+    seed_world(&pool, "ctr_test", WORLD_A).await;
+
+    let allow_path = nexus_home_layout::connect_allowlist_path(home);
+    std::fs::create_dir_all(allow_path.parent().expect("parent dir")).expect("mkdir");
+    std::fs::write(
+        &allow_path,
+        serde_json::json!({ "peer_ids": [{
+            "peer_id": peer_peer.to_string(),
+            "world_scope": [WORLD_A],
+            "op_scope": super::invoke::SERVED_OPS,
+        }] })
+        .to_string(),
+    )
+    .expect("write allowlist");
+
+    let (config, _, _) = super::build_host_config(
+        home,
+        &[],
+        &["/ip4/127.0.0.1/tcp/0".to_string()],
+        Some(&db_path),
+    )
+    .await
+    .expect("N-C2 host config builds");
+    let host_peer = config.identity.public().to_peer_id();
+    let host = start(config).await;
+    let peer_node = start(peer_config(peer_key, vec![host_peer])).await;
+    let session = peer_node
+        .connect(host.listen_addrs()[0].clone())
+        .await
+        .expect("scoped peer handshake");
+
+    // compute (P2), project, and unknown ops are refused by the served-op
+    // gate regardless of op_scope / payload shape.
+    for op in ["compute", "project", "garbage-op"] {
+        assert_op_unsupported(&session, op).await;
+    }
+
+    // Refusals consumed sequences but left the session open: a served op
+    // still round-trips afterwards.
+    let served = session
+        .invoke(
+            "check",
+            serde_json::json!({
+                "scope": { "scope_id": WORLD_A },
+                "rule_refs": [],
+            }),
+        )
+        .await
+        .expect("session stays usable after refusals");
+    assert_eq!(served.payload["findings"], serde_json::json!([]));
 
     host.shutdown().await.expect("host shuts down");
     peer_node.shutdown().await.expect("peer shuts down");
