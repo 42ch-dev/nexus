@@ -6,28 +6,30 @@
 //! [`build_local_host_manifest`] — there is exactly one capability list and
 //! The N-C0 field lock:
 //!
-//! | Field | N-C0 value | N-C1 (V1.153) | N-C2 read half (V1.154 P1) |
-//! |-------|------------|---------------|----------------------------|
-//! | `schema_version` | `1` (`NonZeroU64::MIN`) | unchanged | unchanged |
-//! | `host_id` | caller-supplied installation device-id UUID | unchanged | unchanged |
-//! | `roles` | `["data-store"]` | unchanged | `["data-store", "checker", "assembler"]` |
-//! | `capabilities` | `["spoke-baseline", "l2-computable", "l5-fork"]` | unchanged | unchanged |
-//! | `namespaces` | `["nexus"]` | unchanged | unchanged |
-//! | `authority` | `None` | unchanged | unchanged |
-//! | `extensions.nexus` | `{ "connect_host_slice": "n-c0", "daemon_http_coexists": true }` | `{ "connect_host_slice": "n-c1", "served_ops": ["upsert", "promote", "relate"], "daemon_http_coexists": true }` | `connect_host_slice` → `"n-c2"`; `served_ops` → `["upsert", "promote", "relate", "check", "assemble"]` |
+//! | Field | N-C0 value | N-C1 (V1.153) | N-C2 read half (V1.154 P1) | N-C2 E2 (V1.154 P2) |
+//! |-------|------------|---------------|----------------------------|----------------------|
+//! | `schema_version` | `1` (`NonZeroU64::MIN`) | unchanged | unchanged | unchanged |
+//! | `host_id` | caller-supplied installation device-id UUID | unchanged | unchanged | unchanged |
+//! | `roles` | `["data-store"]` | unchanged | `["data-store", "checker", "assembler"]` | + `"computable-engine"` |
+//! | `capabilities` | `["spoke-baseline", "l2-computable", "l5-fork"]` | unchanged | unchanged | unchanged |
+//! | `namespaces` | `["nexus"]` | unchanged | unchanged | unchanged |
+//! | `authority` | `None` | unchanged | unchanged | unchanged |
+//! | `extensions.nexus` | `{ "connect_host_slice": "n-c0", "daemon_http_coexists": true }` | `{ "connect_host_slice": "n-c1", "served_ops": ["upsert", "promote", "relate"], "daemon_http_coexists": true }` | `connect_host_slice` → `"n-c2"`; `served_ops` → `["upsert", "promote", "relate", "check", "assemble"]` | `served_ops` → `+ "compute"` |
 //!
 //! Honesty rules: `l5-fork` is included because `ForkTimelineQueryPort` is
 //! production (V1.146); `"reasoning-complete"` MUST NOT appear anywhere
-//! (product lock — reserved until P2 serves `compute`; N-C2's complete
-//! surface is check + assemble + compute).
-//! N-C1 → N-C2: `extensions.nexus.served_ops` advertises **exactly** the
+//! (product lock — the semantic reasoning-complete milestone is expressed
+//! by the `computable-engine` role + `l2-computable` capability, not a
+//! literal string; P2 serves compute).
+//! N-C1 → N-C2 E2: `extensions.nexus.served_ops` advertises **exactly** the
 //! ops the Connect invoke dispatcher serves ([`LOCAL_SERVED_OPS`]) — the
 //! connect-host dispatch gate owns the same set
 //! (`apps/nexus42` `commands::connect::invoke::SERVED_OPS`), and the honesty
 //! tests machine-check both directions (advertised ⇔ served) so the two
-//! cannot drift unnoticed. Roles: `checker` / `assembler` are the open-string
-//! roles (host-capability-manifest schema: open string vocabulary) backing
-//! the served `check` / `assemble` ops.
+//! cannot drift unnoticed. Roles: `checker` / `assembler` /
+//! `computable-engine` are the open-string roles (host-capability-manifest
+//! schema: open string vocabulary) backing the served `check` / `assemble`
+//! / `compute` ops.
 
 use crate::{HostCapabilityManifest, SpokeReject, SpokeRejectCode, SpokeResult};
 use serde_json::{json, Map, Value};
@@ -48,13 +50,16 @@ pub use spoke_schemas::connect::connect_hello::HostCapabilityManifest as Connect
 /// 0.8.2 fixture and the previous static manifest).
 pub const MANIFEST_SCHEMA_VERSION: NonZeroU64 = NonZeroU64::MIN;
 
-/// Roles declared by the local host (N-C2 read half, V1.154 P1): the
-/// open-string roles backing the served Connect op set — `data-store`
-/// (storage), `checker` (served `check`), `assembler` (served `assemble`).
-/// `computable-engine` stays out until P2 serves `compute` (spec §5.2
-/// lock; the role vocabulary is open-string per the
+/// Roles declared by the local host (N-C2 E2, V1.154 P2).
+///
+/// The open-string roles backing the served Connect op set: `data-store`
+/// (storage), `checker` (served `check`), `assembler` (served `assemble`),
+/// and `computable-engine` (served `compute` — the semantic
+/// reasoning-complete milestone wire form; the literal
+/// `"reasoning-complete"` string stays absent per the product lock, spec
+/// §4/§6.6 — the role vocabulary is open-string per the
 /// host-capability-manifest schema, verified not invented).
-pub const LOCAL_ROLES: [&str; 3] = ["data-store", "checker", "assembler"];
+pub const LOCAL_ROLES: [&str; 4] = ["data-store", "checker", "assembler", "computable-engine"];
 
 /// Capabilities advertised by the local host — each maps to a production
 /// adapter port (see the honesty test below for the compile-time proof).
@@ -63,15 +68,17 @@ pub const LOCAL_CAPABILITIES: [&str; 3] = ["spoke-baseline", "l2-computable", "l
 /// Namespaces owned by the local host.
 pub const LOCAL_NAMESPACES: [&str; 1] = ["nexus"];
 
-/// Ops the Nexus host serves over Connect (N-C1 writes → N-C2 read half:
-/// `check` / `assemble`; `compute` stays unserved until P2) — the
-/// manifest's advertised op set (`extensions.nexus.served_ops`).
+/// Ops the Nexus host serves over Connect (N-C1 writes → N-C2 read half →
+/// P2 compute: `check` / `assemble` / `compute`) — the manifest's
+/// advertised op set (`extensions.nexus.served_ops`).
 ///
 /// The connect-host dispatch gate owns the same set as its served-op table
 /// (`apps/nexus42` `commands::connect::invoke::SERVED_OPS`); the honesty
 /// tests machine-check both directions (advertised ⇔ served, see
 /// [`build_local_host_manifest`] docs) so the two cannot drift unnoticed.
-pub const LOCAL_SERVED_OPS: [&str; 5] = ["upsert", "promote", "relate", "check", "assemble"];
+pub const LOCAL_SERVED_OPS: [&str; 6] = [
+    "upsert", "promote", "relate", "check", "assemble", "compute",
+];
 
 /// Build the N-C0 `HostCapabilityManifest` from the given `host_id`.
 ///
@@ -235,6 +242,13 @@ mod tests {
                     let _ = crate::orchestrate_assemble(adapter, request);
                 };
             }
+            "compute" => {
+                let _ = || {
+                    let request: crate::ComputeRequest =
+                        serde_json::from_value(serde_json::json!({})).expect("typecheck-only");
+                    let _ = crate::orchestrate_compute(adapter, request);
+                };
+            }
             other => panic!("advertised op {other:?} is not backed by a production orchestrator"),
         }
     }
@@ -299,9 +313,11 @@ mod tests {
         );
 
         // 3. roles == the locked list exactly — data-store (storage) +
-        //    checker + assembler (the N-C2 read-half open-string roles,
-        //    spec §5.2). Role ⇔ served-op pairing: checker backs check,
-        //    assembler backs assemble — both directions.
+        //    checker + assembler + computable-engine (the N-C2 E2
+        //    open-string roles, spec §4/§6.6; computable-engine is the
+        //    semantic reasoning-complete wire form — no literal string).
+        //    Role ⇔ served-op pairing: checker backs check, assembler backs
+        //    assemble, computable-engine backs compute — both directions.
         assert_eq!(
             manifest.roles,
             LOCAL_ROLES.map(ToString::to_string).to_vec()
@@ -317,6 +333,11 @@ mod tests {
             LOCAL_SERVED_OPS.contains(&"assemble"),
             "role assembler ⇔ served op assemble must hold in both directions"
         );
+        assert_eq!(
+            has_role("computable-engine"),
+            LOCAL_SERVED_OPS.contains(&"compute"),
+            "role computable-engine ⇔ served op compute must hold in both directions"
+        );
 
         // 4. namespaces == ["nexus"].
         assert_eq!(manifest.namespaces.len(), 1);
@@ -328,11 +349,15 @@ mod tests {
             "N-C0 must not declare authority"
         );
 
-        // 6. No "reasoning-complete" anywhere in the manifest JSON.
+        // 6. No "reasoning-complete" anywhere in the manifest JSON (the
+        //    semantic milestone is expressed as `computable-engine` role +
+        //    `l2-computable` capability, never a literal string — spec
+        //    §4/§6.6).
         let manifest_json = serde_json::to_value(&manifest).expect("manifest serializes");
         assert!(
             !manifest_json.to_string().contains("reasoning-complete"),
-            "MUST NOT advertise the literal reasoning-complete string (semantic milestone lands with compute in the N-C2 reasoning plan)"
+            "MUST NOT advertise the literal reasoning-complete string (semantic milestone is \
+             computable-engine + l2-computable)"
         );
 
         // 7. Round-trips through the spoke generated serde type without

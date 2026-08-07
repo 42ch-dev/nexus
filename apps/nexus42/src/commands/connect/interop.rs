@@ -123,6 +123,65 @@ fn entry_fixture(
     })
 }
 
+/// A wire-shape `KnowledgeEntry` carrying the flat `body.attributes` the
+/// basic-combat WASM module's manifest requires (`max_hp` / `base_atk` /
+/// `base_def`) plus a `body.state.character` block — the P2 compute
+/// round-trip fixture (the plain [`entry_fixture`] shape has no attributes
+/// and would fail the module's input validation).
+fn combat_entry_fixture(
+    entry_id: &str,
+    world_id: &str,
+    max_hp: i64,
+    base_atk: i64,
+    base_def: i64,
+) -> serde_json::Value {
+    serde_json::json!({
+        "schema_version": 1,
+        "entry_id": entry_id,
+        "entry_type": "character",
+        "canonical_name": entry_id,
+        "status": "confirmed",
+        "revision": null,
+        "body": {
+            "summary": format!("{entry_id} summary"),
+            "attributes": [
+                { "trait_type": "max_hp", "value": max_hp },
+                { "trait_type": "base_atk", "value": base_atk },
+                { "trait_type": "base_def", "value": base_def },
+            ],
+            "state": {
+                "character": { "current_hp": max_hp, "max_hp": max_hp },
+            },
+        },
+        "extensions": { "nexus": { "world_id": world_id } },
+    })
+}
+
+/// Install one embedded module into the hermetic home's host-local module
+/// store (`~/.nexus42/modules/<id>/<id>.wasm` + `manifest.json`) — the
+/// operator-install step the P2 compute route requires (spec §2.1: the peer
+/// can name only a module already installed under `~/.nexus42/modules/`).
+#[cfg(not(nexus42_no_wasm_target))]
+async fn install_test_module(home: &std::path::Path, module_id: &str) {
+    install_test_module_as(home, module_id, module_id).await;
+}
+
+/// Like [`install_test_module`] but under an arbitrary store id: copies the
+/// embedded bytes of `source_id` into `<store>/<module_id>/`. Used to prove
+/// the module-id pin denies an unrelated INSTALLED module (only the store
+/// id differs — the bytes are the embedded `basic-combat` ones).
+#[cfg(not(nexus42_no_wasm_target))]
+async fn install_test_module_as(home: &std::path::Path, module_id: &str, source_id: &str) {
+    let dir = nexus_home_layout::user_modules_dir(home).join(module_id);
+    std::fs::create_dir_all(&dir).expect("mkdir module store dir");
+    let bytes = nexus_wasm_host::embedded_module_bytes(source_id)
+        .unwrap_or_else(|| panic!("embedded module {source_id:?} must ship bytes"));
+    let manifest = nexus_wasm_host::embedded_module_manifest(source_id)
+        .unwrap_or_else(|| panic!("embedded module {source_id:?} must ship a manifest"));
+    std::fs::write(dir.join(format!("{module_id}.wasm")), bytes).expect("write module wasm");
+    std::fs::write(dir.join("manifest.json"), manifest).expect("write module manifest");
+}
+
 /// Serializes the network scenarios (see module docs).
 static NETWORK_TEST_LOCK: std::sync::OnceLock<tokio::sync::Mutex<()>> = std::sync::OnceLock::new();
 
@@ -322,7 +381,7 @@ async fn allowlisted_peer_handshakes_and_reads_nexus_manifest() {
     assert_eq!(wire["schema_version"], serde_json::json!(1));
     assert_eq!(
         wire["roles"],
-        serde_json::json!(["data-store", "checker", "assembler"])
+        serde_json::json!(["data-store", "checker", "assembler", "computable-engine"])
     );
     assert_eq!(
         wire["capabilities"],
@@ -335,7 +394,7 @@ async fn allowlisted_peer_handshakes_and_reads_nexus_manifest() {
     );
     assert_eq!(
         wire["extensions"]["nexus"]["served_ops"],
-        serde_json::json!(["upsert", "promote", "relate", "check", "assemble"])
+        serde_json::json!(["upsert", "promote", "relate", "check", "assemble", "compute"])
     );
     assert_eq!(
         wire["extensions"]["nexus"]["daemon_http_coexists"],
@@ -355,11 +414,11 @@ async fn allowlisted_peer_handshakes_and_reads_nexus_manifest() {
     peer_node.shutdown().await.expect("peer shuts down");
 }
 
-/// N-C1 → N-C2 honesty machine-check (P1 spec § Manifest honesty, both
-/// directions): the manifest a peer reads off the signed hello must
-/// advertise exactly the ops the invoke dispatcher serves
-/// (`upsert`/`promote`/`relate`/`check`/`assemble` — the enlarged N-C2
-/// read-half set). (a) Every op the manifest advertises
+/// N-C1 → N-C2 E2 honesty machine-check (P1 spec § Manifest honesty + P2
+/// spec §4, both directions): the manifest a peer reads off the signed
+/// hello must advertise exactly the ops the invoke dispatcher serves
+/// (`upsert`/`promote`/`relate`/`check`/`assemble`/`compute` — the full
+/// N-C2 E2 set). (a) Every op the manifest advertises
 /// (`extensions.nexus.served_ops`) is actually served by the dispatch; (b)
 /// every op the dispatch serves (`super::invoke::SERVED_OPS`) is advertised
 /// by the manifest. The manifest comes from the single shared builder
@@ -367,9 +426,10 @@ async fn allowlisted_peer_handshakes_and_reads_nexus_manifest() {
 /// `ConnectConfig.local_manifest`), so this is the wire-truth cross-crate
 /// check; the crate-level honesty test (`n_c1_manifest_is_honest` in
 /// `nexus-spoke-adapter`) covers the manifest-side contract (exact op list +
-/// production-orchestrator backing). Product lock (spec §3/§5.6): the
-/// literal `"reasoning-complete"` string stays absent — the claim waits for
-/// P2's `compute`.
+/// production-orchestrator backing + the `computable-engine` role). Product
+/// lock (spec §3/§5.6): the literal `"reasoning-complete"` string stays
+/// absent — the semantic milestone is `computable-engine` +
+/// `l2-computable`.
 ///
 /// No network needed — the builder is host_id-injectable and hermetic.
 #[test]
@@ -380,7 +440,7 @@ fn n_c1_manifest_served_ops_match_dispatch_both_directions() {
     assert!(
         !wire_string.contains("reasoning-complete"),
         "the literal \"reasoning-complete\" MUST stay absent from the wire manifest \
-         (product lock — reserved for P2's compute; N-C2 is check+assemble+compute)"
+         (product lock — the semantic milestone is computable-engine + l2-computable)"
     );
     let advertised = wire["extensions"]["nexus"]["served_ops"]
         .as_array()
@@ -717,7 +777,7 @@ async fn cli_wiring_starts_a_node_with_persisted_identity_and_allowlist() {
     assert_eq!(manifest_json["host_id"], serde_json::json!(host_id));
     assert_eq!(
         manifest_json["roles"],
-        serde_json::json!(["data-store", "checker", "assembler"])
+        serde_json::json!(["data-store", "checker", "assembler", "computable-engine"])
     );
 
     let expected_peer = identity::load_or_create_identity(home)
@@ -1002,9 +1062,10 @@ async fn n_c1_peer_upserts_promotes_relates_with_world_scoping() {
         other => panic!("absent-scope upsert must be denied, got {other:?}"),
     }
 
-    // 7. Non-served op (N-C0 refusal contract extends into the handler;
-    //    `compute` stays refused until P2 — the N-C2 read half ships
-    //    check/assemble only).
+    // 7. Non-served op (N-C0 refusal contract extends into the handler):
+    //    `project` stays refused. `compute` is served as of P2 but this
+    //    peer's op_scope lists only the write ops, so it is still denied
+    //    through the op-scope gate (op_unsupported — fail-closed).
     assert_op_unsupported(&session, "compute").await;
 
     // 8. Denials consume sequences but leave the session open: a served op
@@ -1229,7 +1290,10 @@ async fn n_c1_session_peer_identity_denies_spoofed_payload_claim_and_serves_clai
         )
         .await
         .expect("claimless upsert is served under the session peer identity");
-    assert_eq!(claimless.payload["knowledge_entries"][0]["entry_id"], "kb_s2");
+    assert_eq!(
+        claimless.payload["knowledge_entries"][0]["entry_id"],
+        "kb_s2"
+    );
 
     // 3. Equal claim ⇒ still served (V1.153 clients sending the correct
     //    payload identity keep working — spec §5.1).
@@ -1246,7 +1310,10 @@ async fn n_c1_session_peer_identity_denies_spoofed_payload_claim_and_serves_clai
         )
         .await
         .expect("matching payload peer_id is served");
-    assert_eq!(matching.payload["knowledge_entries"][0]["entry_id"], "kb_s3");
+    assert_eq!(
+        matching.payload["knowledge_entries"][0]["entry_id"],
+        "kb_s3"
+    );
 
     host.shutdown().await.expect("host shuts down");
     peer_node.shutdown().await.expect("peer shuts down");
@@ -1595,7 +1662,9 @@ async fn n_c1_every_served_op_advertised_by_the_const_actually_routes() {
     let peer_key = fixed_keypair(66);
     let peer_peer = peer_key.public().to_peer_id();
 
-    const WORLD_A: &str = "wld_test_a";
+    // Must match the ComputeInput world_ref pattern `^wld_[a-zA-Z0-9]+$`
+    // (the loop's compute arm reaches WASM execution).
+    const WORLD_A: &str = "wld_loop1";
 
     // Hermetic workspace DB with the world seeded.
     let db_path = temp.path().join("workspace").join("state.db");
@@ -1606,7 +1675,8 @@ async fn n_c1_every_served_op_advertised_by_the_const_actually_routes() {
 
     // The peer is scoped to exactly the op set the const advertises (the
     // allowlist file is built from the const itself), so the loop below can
-    // only fail if a served op does not route.
+    // only fail if a served op does not route. The module_scope allowlists
+    // basic-combat for the compute arm (P2: compute is a served op).
     let allow_path = nexus_home_layout::connect_allowlist_path(home);
     std::fs::create_dir_all(allow_path.parent().expect("parent dir")).expect("mkdir");
     std::fs::write(
@@ -1615,10 +1685,38 @@ async fn n_c1_every_served_op_advertised_by_the_const_actually_routes() {
             "peer_id": peer_peer.to_string(),
             "world_scope": [WORLD_A],
             "op_scope": super::invoke::SERVED_OPS,
+            "module_scope": ["basic-combat"],
         }] })
         .to_string(),
     )
     .expect("write allowlist");
+
+    // P2 compute: install the host-local module store entry so the compute
+    // arm can round-trip (spec §2.1 — never peer-supplied bytes). When the
+    // wasm target is absent there are no embedded bytes to install and the
+    // compute arm is excluded from the loop (the cfg-gated round-trip test
+    // covers it wherever the target exists).
+    let mut loop_ops: Vec<&str> = super::invoke::SERVED_OPS.to_vec();
+    if nexus_wasm_host::embedded_module_bytes("basic-combat").is_some() {
+        install_test_module(home, "basic-combat").await;
+        // Stage the compute session the loop's compute arm targets (project
+        // is not a served op; the session row is the staging surface).
+        nexus_local_db::compute_session::insert_compute_session(
+            &pool,
+            "ses_loop_compute",
+            "kb_loop_pair_1",
+            &serde_json::json!({
+                "module_id": "basic-combat",
+                "attacker_id": "kb_loop_pair_1",
+                "defender_id": "kb_loop_pair_2",
+            })
+            .to_string(),
+        )
+        .await
+        .expect("stage compute session for the routing loop");
+    } else {
+        loop_ops.retain(|op| *op != "compute");
+    }
 
     let (config, _, _) = super::build_host_config(
         home,
@@ -1640,14 +1738,16 @@ async fn n_c1_every_served_op_advertised_by_the_const_actually_routes() {
     // Relate's `kb_relationships` FKs require both endpoints to exist, so
     // pre-create the pair it references before the loop; the loop itself
     // then only uses fresh ids (order-independent of the const's iteration).
+    // The pair is seeded with combat attributes so the compute arm's WASM
+    // invocation passes the module's manifest input validation.
     let pair = session
         .invoke(
             "upsert",
             serde_json::json!({
                 "extensions": { "nexus": { "peer_id": peer_claim } },
                 "knowledge_entries": [
-                    entry_fixture("kb_loop_pair_1", "PairOne", WORLD_A, "confirmed", None),
-                    entry_fixture("kb_loop_pair_2", "PairTwo", WORLD_A, "confirmed", None),
+                    combat_entry_fixture("kb_loop_pair_1", WORLD_A, 100, 20, 10),
+                    combat_entry_fixture("kb_loop_pair_2", WORLD_A, 30, 5, 5),
                 ],
             }),
         )
@@ -1662,7 +1762,7 @@ async fn n_c1_every_served_op_advertised_by_the_const_actually_routes() {
     // a dispatch match arm. A removed arm surfaces here as the `op_unsupported`
     // refusal (the gate passes the op, the match falls through) and fails
     // the invoke — the exact drift the const-binding prevents.
-    for op in super::invoke::SERVED_OPS {
+    for op in loop_ops {
         let payload = match op {
             "upsert" => serde_json::json!({
                 "extensions": { "nexus": { "peer_id": peer_claim } },
@@ -1699,6 +1799,16 @@ async fn n_c1_every_served_op_advertised_by_the_const_actually_routes() {
             "assemble" => serde_json::json!({
                 "extensions": { "nexus": { "peer_id": peer_claim } },
                 "scope": { "scope_id": WORLD_A },
+            }),
+            "compute" => serde_json::json!({
+                "extensions": { "nexus": { "peer_id": peer_claim } },
+                "session_id": "ses_loop_compute",
+                "entry_id": "kb_loop_pair_1",
+                "computable": {
+                    "attacker_id": "kb_loop_pair_1",
+                    "defender_id": "kb_loop_pair_2",
+                },
+                "settle": false,
             }),
             other => panic!(
                 "SERVED_OPS advertises op {other:?} but the routing-loop test has no \
@@ -2263,13 +2373,15 @@ async fn n_c2_check_and_assemble_wrong_world_and_absent_scope_denied() {
     peer_node.shutdown().await.expect("peer shuts down");
 }
 
-/// N-C2 (V1.154 P1) refusal matrix extension (spec §2.2): through the real
-/// handler, `compute` (P2), `project`, and unknown ops are refused with
-/// `op_unsupported` and zero side effects — even for a peer whose
-/// `op_scope` covers the full served set (the SERVED_OPS gate refuses
-/// before any scope logic). The session stays usable.
+/// N-C2 (V1.154 P2) refusal matrix: through the real handler, `project`
+/// and unknown ops are refused with `op_unsupported` and zero side effects
+/// — even for a peer whose `op_scope` covers the full served set (the
+/// SERVED_OPS gate refuses before any scope logic). `compute` is SERVED as
+/// of P2: a malformed compute payload passes the served-op gate and maps
+/// through the typed parse to `invalid_input` (NOT `op_unsupported`),
+/// pinning that the gate really admits it. The session stays usable.
 #[tokio::test(flavor = "multi_thread")]
-async fn n_c2_refusal_matrix_compute_project_and_unknown_ops() {
+async fn n_c2_refusal_matrix_project_and_unknown_ops() {
     let _guard = network_test_guard().await;
     let temp = tempfile::tempdir().expect("tempdir");
     let home = temp.path();
@@ -2313,10 +2425,25 @@ async fn n_c2_refusal_matrix_compute_project_and_unknown_ops() {
         .await
         .expect("scoped peer handshake");
 
-    // compute (P2), project, and unknown ops are refused by the served-op
-    // gate regardless of op_scope / payload shape.
-    for op in ["compute", "project", "garbage-op"] {
+    // project and unknown ops are refused by the served-op gate regardless
+    // of op_scope / payload shape.
+    for op in ["project", "garbage-op"] {
         assert_op_unsupported(&session, op).await;
+    }
+
+    // compute IS served (P2): a malformed compute payload passes the
+    // served-op gate and fails the typed ComputeRequest parse — mapped to
+    // the locked `invalid_input` envelope, not `op_unsupported` (pins the
+    // gate admits compute; the parse is the next gate).
+    match session
+        .invoke("compute", serde_json::json!({ "extensions": {} }))
+        .await
+    {
+        Err(InvokeError::Wire(envelope)) => assert_eq!(
+            envelope.code, "invalid_input",
+            "a malformed compute payload must map to invalid_input (compute is served)"
+        ),
+        other => panic!("malformed compute expected invalid_input, got {other:?}"),
     }
 
     // Refusals consumed sequences but left the session open: a served op
@@ -2337,6 +2464,773 @@ async fn n_c2_refusal_matrix_compute_project_and_unknown_ops() {
     peer_node.shutdown().await.expect("peer shuts down");
 }
 
+/// N-C2 (V1.154 P2, spec §2): the `compute` op round-trips over Connect
+/// through the real handler against the host-local `basic-combat` module
+/// installed under the hermetic home's `~/.nexus42/modules/` (spec §2.1 —
+/// the peer names an installed module; bytes are never peer-supplied).
+/// The payload deserializes directly into `spoke_schemas::ComputeRequest`
+/// (spec §2.2 lock) and runs `orchestrate_compute` through the adapter's
+/// `ComputablePort` on the P1 bounded lane. The response is deterministic:
+/// ATK 20 − DEF 5 = 15 damage applied to the defender's 30 HP → 15, and
+/// `settle: false` returns no settled state (read-only compute lock).
+///
+/// Gated on the wasm32 target exactly like the adapter's own embedded-WASM
+/// tests (`nexus42_no_wasm_target` — the module store entry cannot be
+/// installed without the embedded bytes).
+#[cfg(not(nexus42_no_wasm_target))]
+#[tokio::test(flavor = "multi_thread")]
+async fn n_c2_peer_runs_compute_over_connect() {
+    let _guard = network_test_guard().await;
+    let temp = tempfile::tempdir().expect("tempdir");
+    let home = temp.path();
+    let peer_key = fixed_keypair(80);
+    let peer_peer = peer_key.public().to_peer_id();
+
+    // The world id must match the ComputeInput world_ref pattern
+    // `^wld_[a-zA-Z0-9]+$` (underscores are rejected by the wire type).
+    const WORLD_A: &str = "wld_rt1";
+
+    // Operator-install step: the module the peer will name must already be
+    // installed under `~/.nexus42/modules/` (host-local store, fail-closed).
+    install_test_module(home, "basic-combat").await;
+
+    let db_path = temp.path().join("workspace").join("state.db");
+    let pool = crate::db::Schema::init(&db_path)
+        .await
+        .expect("workspace DB initializes");
+    seed_world(&pool, "ctr_test", WORLD_A).await;
+
+    // The peer is scoped to WORLD_A with the full served-op set AND a
+    // `module_scope` allowlisting basic-combat (architect lock, spec §6.1 —
+    // missing/empty module_scope denies ALL compute).
+    let allow_path = nexus_home_layout::connect_allowlist_path(home);
+    std::fs::create_dir_all(allow_path.parent().expect("parent dir")).expect("mkdir");
+    std::fs::write(
+        &allow_path,
+        serde_json::json!({ "peer_ids": [{
+            "peer_id": peer_peer.to_string(),
+            "world_scope": [WORLD_A],
+            "op_scope": super::invoke::SERVED_OPS,
+            "module_scope": ["basic-combat"],
+        }] })
+        .to_string(),
+    )
+    .expect("write allowlist");
+
+    let (config, _, _) = super::build_host_config(
+        home,
+        &[],
+        &["/ip4/127.0.0.1/tcp/0".to_string()],
+        Some(&db_path),
+    )
+    .await
+    .expect("N-C2 host config builds");
+    let host_peer = config.identity.public().to_peer_id();
+    let host = start(config).await;
+    let peer_node = start(peer_config(peer_key, vec![host_peer])).await;
+    let session = peer_node
+        .connect(host.listen_addrs()[0].clone())
+        .await
+        .expect("scoped peer handshake");
+    let peer_claim = serde_json::json!(peer_peer.to_string());
+
+    // Seed the two combatants over the wire (the plain entry_fixture has no
+    // attributes and would fail the module's manifest input validation).
+    session
+        .invoke(
+            "upsert",
+            serde_json::json!({
+                "extensions": { "nexus": { "peer_id": peer_claim } },
+                "knowledge_entries": [
+                    combat_entry_fixture("kb_atk", WORLD_A, 100, 20, 10),
+                    combat_entry_fixture("kb_def", WORLD_A, 30, 5, 5),
+                ],
+            }),
+        )
+        .await
+        .expect("seed combatants");
+
+    // Stage the compute session directly (project is not a served op — the
+    // session row is the out-of-band staging surface; `module_id` lives in
+    // the staged state per the locked resolution precedence, spec §2.2).
+    let state = serde_json::json!({
+        "module_id": "basic-combat",
+        "attacker_id": "kb_atk",
+        "defender_id": "kb_def",
+        "character": { "current_hp": 30, "max_hp": 30 },
+    });
+    nexus_local_db::compute_session::insert_compute_session(
+        &pool,
+        "ses_combat",
+        "kb_atk",
+        &state.to_string(),
+    )
+    .await
+    .expect("stage compute session");
+
+    // compute round-trip: the deterministic combat math lands in the
+    // response's merged computable state (30 HP − 15 damage = 15).
+    let computed = session
+        .invoke(
+            "compute",
+            serde_json::json!({
+                "extensions": { "nexus": { "peer_id": peer_claim } },
+                "session_id": "ses_combat",
+                "entry_id": "kb_atk",
+                "computable": { "attacker_id": "kb_atk", "defender_id": "kb_def" },
+                "settle": false,
+            }),
+        )
+        .await
+        .expect("scoped compute is served");
+    assert_eq!(computed.payload["session_id"], "ses_combat");
+    assert_eq!(computed.payload["entry_id"], "kb_atk");
+    assert_eq!(
+        computed.payload["computable"]["character"]["current_hp"], 15,
+        "deterministic combat delta (ATK 20 − DEF 5 = 15) applied to the merged state"
+    );
+    assert_eq!(
+        computed.payload.get("state"),
+        None,
+        "settle:false returns no settled state (read-only compute lock — the empty state map is omitted on the wire)"
+    );
+
+    // Read-only compute: the stored defender entry is untouched (no settle).
+    let stored_hp: Option<i64> = sqlx::query_scalar(
+        "SELECT json_extract(body_json, '$.state.character.current_hp') \
+         FROM kb_key_blocks WHERE key_block_id = ?",
+    )
+    .bind("kb_def")
+    .fetch_optional(&pool)
+    .await
+    .expect("read stored defender state");
+    assert_eq!(
+        stored_hp,
+        Some(30),
+        "compute with settle:false must not mutate the stored entry"
+    );
+
+    host.shutdown().await.expect("host shuts down");
+    peer_node.shutdown().await.expect("peer shuts down");
+}
+
+/// N-C2 (V1.154 P2) compute denial matrix — world + module gates (spec
+/// §2.1–§2.3): wrong-world ⇒ `op_unsupported` (the same fail-closed family
+/// as every other op); missing module name ⇒ defined `module_not_found`;
+/// module not installed under `~/.nexus42/modules/` ⇒ defined
+/// `module_not_found`; `settle: true` ⇒ defined `settle_not_enabled`
+/// (read-only compute lock, spec §5 / §6.5). All denials happen before any
+/// WASM execution with zero side effects, and the session stays usable.
+#[tokio::test(flavor = "multi_thread")]
+async fn n_c2_compute_wrong_world_missing_module_uninstalled_and_settle_denied() {
+    let _guard = network_test_guard().await;
+    let temp = tempfile::tempdir().expect("tempdir");
+    let home = temp.path();
+    let peer_key = fixed_keypair(81);
+    let peer_peer = peer_key.public().to_peer_id();
+
+    const WORLD_A: &str = "wld_test_a";
+    const WORLD_B: &str = "wld_test_b";
+
+    // NOTE: no module is installed in this home — the module-scope'd peer
+    // still exists, so the not-installed denial is reachable.
+    let db_path = temp.path().join("workspace").join("state.db");
+    let pool = crate::db::Schema::init(&db_path)
+        .await
+        .expect("workspace DB initializes");
+    seed_world(&pool, "ctr_test", WORLD_A).await;
+    seed_world(&pool, "ctr_test", WORLD_B).await;
+
+    // The peer is scoped to WORLD_A with the full served-op set and a
+    // `module_scope` allowlisting basic-combat — which is NOT installed in
+    // this hermetic home (fail-closed: the gate must deny before execution).
+    let allow_path = nexus_home_layout::connect_allowlist_path(home);
+    std::fs::create_dir_all(allow_path.parent().expect("parent dir")).expect("mkdir");
+    std::fs::write(
+        &allow_path,
+        serde_json::json!({ "peer_ids": [{
+            "peer_id": peer_peer.to_string(),
+            "world_scope": [WORLD_A],
+            "op_scope": super::invoke::SERVED_OPS,
+            "module_scope": ["basic-combat"],
+        }] })
+        .to_string(),
+    )
+    .expect("write allowlist");
+
+    let (config, _, _) = super::build_host_config(
+        home,
+        &[],
+        &["/ip4/127.0.0.1/tcp/0".to_string()],
+        Some(&db_path),
+    )
+    .await
+    .expect("N-C2 host config builds");
+    let host_peer = config.identity.public().to_peer_id();
+    let host = start(config).await;
+    let peer_node = start(peer_config(peer_key, vec![host_peer])).await;
+    let session = peer_node
+        .connect(host.listen_addrs()[0].clone())
+        .await
+        .expect("scoped peer handshake");
+    let peer_claim = serde_json::json!(peer_peer.to_string());
+
+    // A same-world combatant for the module-scope'd scenarios.
+    session
+        .invoke(
+            "upsert",
+            serde_json::json!({
+                "extensions": { "nexus": { "peer_id": peer_claim } },
+                "knowledge_entries": [
+                    combat_entry_fixture("kb_cmp_a", WORLD_A, 100, 20, 10),
+                ],
+            }),
+        )
+        .await
+        .expect("seed same-world combatant");
+
+    // (b) Wrong-world: the target entry is stored in WORLD_B (seeded
+    // directly — the peer cannot write there), so the stored-world gate
+    // denies with the same op_unsupported family as every other op.
+    seed_key_block(&pool, "kb_cmp_b", WORLD_B, "Banished", "confirmed", 1).await;
+    nexus_local_db::compute_session::insert_compute_session(
+        &pool,
+        "ses_wrong_world",
+        "kb_cmp_b",
+        &serde_json::json!({ "module_id": "basic-combat" }).to_string(),
+    )
+    .await
+    .expect("stage wrong-world session");
+    match session
+        .invoke(
+            "compute",
+            serde_json::json!({
+                "extensions": { "nexus": { "peer_id": peer_claim } },
+                "session_id": "ses_wrong_world",
+                "entry_id": "kb_cmp_b",
+                "computable": {},
+                "settle": false,
+            }),
+        )
+        .await
+    {
+        Err(InvokeError::Wire(envelope)) => assert_eq!(
+            envelope.code, "op_unsupported",
+            "wrong-world compute must be denied like every other op"
+        ),
+        other => panic!("wrong-world compute must be denied, got {other:?}"),
+    }
+
+    // (d) Missing module name: the staged session carries no `module_id`
+    // and the entry has no `body.computable` — the locked resolution
+    // precedence finds no module identity ⇒ defined module_not_found.
+    nexus_local_db::compute_session::insert_compute_session(
+        &pool,
+        "ses_no_module",
+        "kb_cmp_a",
+        "{}",
+    )
+    .await
+    .expect("stage no-module session");
+    match session
+        .invoke(
+            "compute",
+            serde_json::json!({
+                "extensions": { "nexus": { "peer_id": peer_claim } },
+                "session_id": "ses_no_module",
+                "entry_id": "kb_cmp_a",
+                "computable": {},
+                "settle": false,
+            }),
+        )
+        .await
+    {
+        Err(InvokeError::Wire(envelope)) => assert_eq!(
+            envelope.code, "module_not_found",
+            "a compute request with no module identity must be denied with module_not_found"
+        ),
+        other => panic!("missing-module compute must be denied, got {other:?}"),
+    }
+
+    // (d-ii) Module not installed: the resolved module IS in the peer's
+    // module_scope, but the host-local store under ~/.nexus42/modules/ does
+    // not contain it ⇒ defined module_not_found (never peer-supplied bytes).
+    nexus_local_db::compute_session::insert_compute_session(
+        &pool,
+        "ses_uninstalled",
+        "kb_cmp_a",
+        &serde_json::json!({ "module_id": "basic-combat" }).to_string(),
+    )
+    .await
+    .expect("stage uninstalled-module session");
+    match session
+        .invoke(
+            "compute",
+            serde_json::json!({
+                "extensions": { "nexus": { "peer_id": peer_claim } },
+                "session_id": "ses_uninstalled",
+                "entry_id": "kb_cmp_a",
+                "computable": {},
+                "settle": false,
+            }),
+        )
+        .await
+    {
+        Err(InvokeError::Wire(envelope)) => assert_eq!(
+            envelope.code, "module_not_found",
+            "a scoped module that is not installed host-locally must be denied with module_not_found"
+        ),
+        other => panic!("uninstalled-module compute must be denied, got {other:?}"),
+    }
+
+    // (e) settle:true ⇒ defined settle_not_enabled (read-only compute lock,
+    // spec §5 / §6.5 — the compute settlement helper is NOT enabled on the
+    // N-C2 surface). The gate fires before any module/WASM work.
+    match session
+        .invoke(
+            "compute",
+            serde_json::json!({
+                "extensions": { "nexus": { "peer_id": peer_claim } },
+                "session_id": "ses_uninstalled",
+                "entry_id": "kb_cmp_a",
+                "computable": {},
+                "settle": true,
+            }),
+        )
+        .await
+    {
+        Err(InvokeError::Wire(envelope)) => assert_eq!(
+            envelope.code, "settle_not_enabled",
+            "settle:true must be rejected on the read-only compute surface"
+        ),
+        other => panic!("settle:true compute must be rejected, got {other:?}"),
+    }
+
+    // Zero side effects: no session state advanced, no entry mutated — the
+    // staged session rows still carry their original state_json.
+    let stored: Option<String> =
+        sqlx::query_scalar("SELECT state_json FROM compute_sessions WHERE session_id = ?")
+            .bind("ses_uninstalled")
+            .fetch_optional(&pool)
+            .await
+            .expect("read staged session");
+    assert_eq!(
+        stored.as_deref(),
+        Some(r#"{"module_id":"basic-combat"}"#),
+        "denied computes must not advance session state"
+    );
+
+    // The session stays usable: a served op still round-trips afterwards.
+    let served = session
+        .invoke(
+            "check",
+            serde_json::json!({
+                "extensions": { "nexus": { "peer_id": peer_claim } },
+                "scope": { "scope_id": WORLD_A },
+                "rule_refs": [],
+            }),
+        )
+        .await
+        .expect("session stays usable after compute denials");
+    assert_eq!(served.payload["findings"], serde_json::json!([]));
+
+    host.shutdown().await.expect("host shuts down");
+    peer_node.shutdown().await.expect("peer shuts down");
+}
+
+/// N-C2 (V1.154 P2) unscoped-module denial (architect lock, spec §6.1):
+/// a peer whose allowlist entry has NO `module_scope` (absent ⇒ empty ⇒
+/// fail-closed) is denied ALL compute with the defined `module_not_scoped`
+/// envelope — even when the resolved module would otherwise be valid. The
+/// session stays usable.
+#[tokio::test(flavor = "multi_thread")]
+async fn n_c2_compute_unscoped_module_denied() {
+    let _guard = network_test_guard().await;
+    let temp = tempfile::tempdir().expect("tempdir");
+    let home = temp.path();
+    let peer_key = fixed_keypair(82);
+    let peer_peer = peer_key.public().to_peer_id();
+
+    const WORLD_A: &str = "wld_test_a";
+
+    let db_path = temp.path().join("workspace").join("state.db");
+    let pool = crate::db::Schema::init(&db_path)
+        .await
+        .expect("workspace DB initializes");
+    seed_world(&pool, "ctr_test", WORLD_A).await;
+
+    // The allowlist entry deliberately omits `module_scope` (the V1.153 →
+    // V1.154 file shape without the new field — backward-compatible parse,
+    // fail-closed semantics: no module access).
+    let allow_path = nexus_home_layout::connect_allowlist_path(home);
+    std::fs::create_dir_all(allow_path.parent().expect("parent dir")).expect("mkdir");
+    std::fs::write(
+        &allow_path,
+        serde_json::json!({ "peer_ids": [{
+            "peer_id": peer_peer.to_string(),
+            "world_scope": [WORLD_A],
+            "op_scope": super::invoke::SERVED_OPS,
+        }] })
+        .to_string(),
+    )
+    .expect("write allowlist");
+
+    let (config, _, _) = super::build_host_config(
+        home,
+        &[],
+        &["/ip4/127.0.0.1/tcp/0".to_string()],
+        Some(&db_path),
+    )
+    .await
+    .expect("N-C2 host config builds");
+    let host_peer = config.identity.public().to_peer_id();
+    let host = start(config).await;
+    let peer_node = start(peer_config(peer_key, vec![host_peer])).await;
+    let session = peer_node
+        .connect(host.listen_addrs()[0].clone())
+        .await
+        .expect("scoped peer handshake");
+    let peer_claim = serde_json::json!(peer_peer.to_string());
+
+    session
+        .invoke(
+            "upsert",
+            serde_json::json!({
+                "extensions": { "nexus": { "peer_id": peer_claim } },
+                "knowledge_entries": [
+                    combat_entry_fixture("kb_usc_a", WORLD_A, 100, 20, 10),
+                ],
+            }),
+        )
+        .await
+        .expect("seed combatant");
+
+    nexus_local_db::compute_session::insert_compute_session(
+        &pool,
+        "ses_unscoped",
+        "kb_usc_a",
+        &serde_json::json!({ "module_id": "basic-combat" }).to_string(),
+    )
+    .await
+    .expect("stage session");
+
+    match session
+        .invoke(
+            "compute",
+            serde_json::json!({
+                "extensions": { "nexus": { "peer_id": peer_claim } },
+                "session_id": "ses_unscoped",
+                "entry_id": "kb_usc_a",
+                "computable": {},
+                "settle": false,
+            }),
+        )
+        .await
+    {
+        Err(InvokeError::Wire(envelope)) => assert_eq!(
+            envelope.code, "module_not_scoped",
+            "a peer without module_scope must be denied ALL compute (fail-closed)"
+        ),
+        other => panic!("unscoped-module compute must be denied, got {other:?}"),
+    }
+
+    // The session stays usable.
+    let served = session
+        .invoke(
+            "check",
+            serde_json::json!({
+                "extensions": { "nexus": { "peer_id": peer_claim } },
+                "scope": { "scope_id": WORLD_A },
+                "rule_refs": [],
+            }),
+        )
+        .await
+        .expect("session stays usable after the module-scope denial");
+    assert_eq!(served.payload["findings"], serde_json::json!([]));
+
+    host.shutdown().await.expect("host shuts down");
+    peer_node.shutdown().await.expect("peer shuts down");
+}
+
+/// N-C2 (V1.154 P2, L2 review C-1 regression): the module-id pin. The
+/// adapter's `ComputablePort::compute` merges `request.computable` over the
+/// session state before re-resolving the module id, so a request-carried
+/// `computable.module_id` naming a DIFFERENT installed module would execute
+/// an unscoped module. The gate must deny the override with the defined
+/// `module_not_scoped` envelope before any WASM execution — even though the
+/// override names an installed module and the staged session id is in
+/// scope. Zero side effects; session stays usable.
+#[cfg(not(nexus42_no_wasm_target))]
+#[tokio::test(flavor = "multi_thread")]
+async fn n_c2_compute_request_module_override_denied() {
+    let _guard = network_test_guard().await;
+    let temp = tempfile::tempdir().expect("tempdir");
+    let home = temp.path();
+    let peer_key = fixed_keypair(83);
+    let peer_peer = peer_key.public().to_peer_id();
+
+    // Must match the ComputeInput world_ref pattern `^wld_[a-zA-Z0-9]+$`.
+    const WORLD_A: &str = "wld_pin1";
+
+    // Both module ids are INSTALLED — without the pin, the override would
+    // execute real WASM under the unscoped id.
+    install_test_module(home, "basic-combat").await;
+    install_test_module_as(home, "basic-combat-alt", "basic-combat").await;
+
+    let db_path = temp.path().join("workspace").join("state.db");
+    let pool = crate::db::Schema::init(&db_path)
+        .await
+        .expect("workspace DB initializes");
+    seed_world(&pool, "ctr_test", WORLD_A).await;
+
+    // The peer's module_scope allowlists ONLY basic-combat.
+    let allow_path = nexus_home_layout::connect_allowlist_path(home);
+    std::fs::create_dir_all(allow_path.parent().expect("parent dir")).expect("mkdir");
+    std::fs::write(
+        &allow_path,
+        serde_json::json!({ "peer_ids": [{
+            "peer_id": peer_peer.to_string(),
+            "world_scope": [WORLD_A],
+            "op_scope": super::invoke::SERVED_OPS,
+            "module_scope": ["basic-combat"],
+        }] })
+        .to_string(),
+    )
+    .expect("write allowlist");
+
+    let (config, _, _) = super::build_host_config(
+        home,
+        &[],
+        &["/ip4/127.0.0.1/tcp/0".to_string()],
+        Some(&db_path),
+    )
+    .await
+    .expect("N-C2 host config builds");
+    let host_peer = config.identity.public().to_peer_id();
+    let host = start(config).await;
+    let peer_node = start(peer_config(peer_key, vec![host_peer])).await;
+    let session = peer_node
+        .connect(host.listen_addrs()[0].clone())
+        .await
+        .expect("scoped peer handshake");
+    let peer_claim = serde_json::json!(peer_peer.to_string());
+
+    session
+        .invoke(
+            "upsert",
+            serde_json::json!({
+                "extensions": { "nexus": { "peer_id": peer_claim } },
+                "knowledge_entries": [
+                    combat_entry_fixture("kb_pin_a", WORLD_A, 100, 20, 10),
+                    combat_entry_fixture("kb_pin_d", WORLD_A, 30, 5, 5),
+                ],
+            }),
+        )
+        .await
+        .expect("seed combatants");
+
+    // The staged session declares the in-scope module id (plus the combat
+    // invocation the module needs)...
+    nexus_local_db::compute_session::insert_compute_session(
+        &pool,
+        "ses_pin",
+        "kb_pin_a",
+        &serde_json::json!({
+            "module_id": "basic-combat",
+            "attacker_id": "kb_pin_a",
+            "defender_id": "kb_pin_d",
+        })
+        .to_string(),
+    )
+    .await
+    .expect("stage session");
+
+    // ...but the request's dynamic computable tries to override it with an
+    // installed-but-unscoped module id. The pin must deny.
+    match session
+        .invoke(
+            "compute",
+            serde_json::json!({
+                "extensions": { "nexus": { "peer_id": peer_claim } },
+                "session_id": "ses_pin",
+                "entry_id": "kb_pin_a",
+                "computable": { "module_id": "basic-combat-alt" },
+                "settle": false,
+            }),
+        )
+        .await
+    {
+        Err(InvokeError::Wire(envelope)) => assert_eq!(
+            envelope.code, "module_not_scoped",
+            "a request-carried module_id override outside the peer's module_scope must be denied"
+        ),
+        other => panic!("module override must be denied, got {other:?}"),
+    }
+
+    // P2 QC fix wave FW-1 regression: NON-STRING `module_id` overrides
+    // (42 / {} / null) must ALSO be denied `module_not_scoped` — the old
+    // as_str-only pin let them bypass while the execution-time merge still
+    // shadowed the session-staged id with the non-string value. Key
+    // presence is the pin trigger; the value must be a JSON string EQUAL to
+    // the gated id, else deny (zero side effects — asserted below).
+    for (label, override_value) in [
+        ("number", serde_json::json!(42)),
+        ("object", serde_json::json!({})),
+        ("null", serde_json::Value::Null),
+    ] {
+        match session
+            .invoke(
+                "compute",
+                serde_json::json!({
+                    "extensions": { "nexus": { "peer_id": peer_claim } },
+                    "session_id": "ses_pin",
+                    "entry_id": "kb_pin_a",
+                    "computable": { "module_id": override_value },
+                    "settle": false,
+                }),
+            )
+            .await
+        {
+            Err(InvokeError::Wire(envelope)) => assert_eq!(
+                envelope.code, "module_not_scoped",
+                "non-string module_id override ({label}) must be denied module_not_scoped"
+            ),
+            other => {
+                panic!("non-string module_id override ({label}) must be denied, got {other:?}")
+            }
+        }
+    }
+
+    // Zero side effects: the staged session state is untouched (all four
+    // denials above — string-differ + 42 / {} / null — must not advance it).
+    let stored: Option<String> =
+        sqlx::query_scalar("SELECT state_json FROM compute_sessions WHERE session_id = ?")
+            .bind("ses_pin")
+            .fetch_optional(&pool)
+            .await
+            .expect("read staged session");
+    assert_eq!(
+        stored.as_deref(),
+        Some(r#"{"attacker_id":"kb_pin_a","defender_id":"kb_pin_d","module_id":"basic-combat"}"#),
+        "the denied overrides must not advance session state"
+    );
+
+    // A same-id override (repeat of the gated id) is legal and served —
+    // proves the pin compares, it does not blanket-ban computable.module_id.
+    let served = session
+        .invoke(
+            "compute",
+            serde_json::json!({
+                "extensions": { "nexus": { "peer_id": peer_claim } },
+                "session_id": "ses_pin",
+                "entry_id": "kb_pin_a",
+                "computable": { "module_id": "basic-combat" },
+                "settle": false,
+            }),
+        )
+        .await
+        .expect("a same-id module_id override is served");
+    assert_eq!(served.payload["session_id"], "ses_pin");
+
+    host.shutdown().await.expect("host shuts down");
+    peer_node.shutdown().await.expect("peer shuts down");
+}
+
+/// N-C2 (V1.154 P2, P2 QC fix wave FW-3): a compute request targeting a
+/// missing `entry_id` must be denied with the defined `invalid_input`
+/// envelope (client-input family — the same code the check/assemble paths
+/// use for client-input rejects) — never the `internal_error` the generic
+/// reject table would have produced. The gate's stored-entry read fires
+/// before any module/WASM work (no module scope or store is even needed);
+/// the session stays usable. Runs on every CI leg (no wasm target needed —
+/// the denial never reaches module resolution).
+#[tokio::test(flavor = "multi_thread")]
+async fn n_c2_compute_missing_entry_denied_invalid_input() {
+    let _guard = network_test_guard().await;
+    let temp = tempfile::tempdir().expect("tempdir");
+    let home = temp.path();
+    let peer_key = fixed_keypair(84);
+    let peer_peer = peer_key.public().to_peer_id();
+
+    // Must match the ComputeInput world_ref pattern `^wld_[a-zA-Z0-9]+$`.
+    const WORLD_A: &str = "wld_miss1";
+
+    let db_path = temp.path().join("workspace").join("state.db");
+    let pool = crate::db::Schema::init(&db_path)
+        .await
+        .expect("workspace DB initializes");
+    seed_world(&pool, "ctr_test", WORLD_A).await;
+
+    // No module_scope / module store needed: the missing-entry denial fires
+    // at the stored-entry gate, before module resolution.
+    let allow_path = nexus_home_layout::connect_allowlist_path(home);
+    std::fs::create_dir_all(allow_path.parent().expect("parent dir")).expect("mkdir");
+    std::fs::write(
+        &allow_path,
+        serde_json::json!({ "peer_ids": [{
+            "peer_id": peer_peer.to_string(),
+            "world_scope": [WORLD_A],
+            "op_scope": super::invoke::SERVED_OPS,
+        }] })
+        .to_string(),
+    )
+    .expect("write allowlist");
+
+    let (config, _, _) = super::build_host_config(
+        home,
+        &[],
+        &["/ip4/127.0.0.1/tcp/0".to_string()],
+        Some(&db_path),
+    )
+    .await
+    .expect("N-C2 host config builds");
+    let host_peer = config.identity.public().to_peer_id();
+    let host = start(config).await;
+    let peer_node = start(peer_config(peer_key, vec![host_peer])).await;
+    let session = peer_node
+        .connect(host.listen_addrs()[0].clone())
+        .await
+        .expect("scoped peer handshake");
+    let peer_claim = serde_json::json!(peer_peer.to_string());
+
+    match session
+        .invoke(
+            "compute",
+            serde_json::json!({
+                "extensions": { "nexus": { "peer_id": peer_claim } },
+                "session_id": "ses_ghost",
+                "entry_id": "kb_never_stored",
+                "computable": {},
+                "settle": false,
+            }),
+        )
+        .await
+    {
+        Err(InvokeError::Wire(envelope)) => assert_eq!(
+            envelope.code, "invalid_input",
+            "compute on a missing entry must map to the invalid_input family, not internal_error"
+        ),
+        other => panic!("missing-entry compute must be denied, got {other:?}"),
+    }
+
+    // The session stays usable (a served op still round-trips).
+    let served = session
+        .invoke(
+            "check",
+            serde_json::json!({
+                "extensions": { "nexus": { "peer_id": peer_claim } },
+                "scope": { "scope_id": WORLD_A },
+                "rule_refs": [],
+            }),
+        )
+        .await
+        .expect("session stays usable after the missing-entry denial");
+    assert_eq!(served.payload["findings"], serde_json::json!([]));
+
+    host.shutdown().await.expect("host shuts down");
+    peer_node.shutdown().await.expect("peer shuts down");
+}
+
 /// R2 source assertion (V1.154 P1): the invoke bridge must not use the
 /// banned worker-blocking `block_in_place` bridge — spec §5.3 locks a
 /// per-process `spawn_blocking` lane bounded by a `Semaphore` instead.
@@ -2349,5 +3243,34 @@ fn invoke_bridge_source_has_no_block_in_place() {
         !source.contains("block_in_place"),
         "invoke.rs must keep the bounded spawn_blocking bridge (R2): \
          block_in_place is banned in the invoke path"
+    );
+}
+
+/// R2 closure for compute (V1.154 P2, spec §2.4 / E1 P0 QC note): WASM must
+/// never execute inline on a tokio worker — compute runs on the P1 bounded
+/// `spawn_blocking` lane under the shared semaphore. Checked against the
+/// handler source: the connect handler must not touch the WASM engine
+/// directly (no `nexus_wasm_host` import, no engine/compute call), so the
+/// only execution path is the adapter's `ComputablePort` invoked from
+/// inside the lane closure. Any reintroduction of inline engine usage fails
+/// this test.
+#[test]
+fn invoke_compute_executes_only_inside_the_bounded_lane() {
+    let source = include_str!("invoke.rs");
+    assert!(
+        source.contains("tokio::task::spawn_blocking"),
+        "invoke.rs must dispatch every served op — including compute — through \
+         the bounded spawn_blocking lane"
+    );
+    assert!(
+        !source.contains("nexus_wasm_host"),
+        "invoke.rs must not import nexus_wasm_host: the Connect handler never \
+         executes WASM inline — compute routes through the adapter's \
+         ComputablePort inside the lane closure"
+    );
+    assert!(
+        !source.contains("WasmEngine"),
+        "invoke.rs must not construct or call a WasmEngine directly: WASM \
+         execution stays on the bounded lane (off the tokio worker)"
     );
 }

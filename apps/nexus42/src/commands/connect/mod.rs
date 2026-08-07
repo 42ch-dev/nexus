@@ -92,7 +92,7 @@ async fn start(allow_peer: Vec<String>, listen: Vec<String>) -> Result<()> {
         .await
         .map_err(|e| CliError::Config(format!("connect node start failed: {e}")))?;
 
-    eprintln!("nexus42 connect start: Connect Host (N-C2 read half) listening");
+    eprintln!("nexus42 connect start: Connect Host (N-C2 E2) listening");
     eprintln!("  peer_id: {}", node.local_peer_id());
     eprintln!("  host_id: {host_id}");
     for addr in node.listen_addrs() {
@@ -102,8 +102,8 @@ async fn start(allow_peer: Vec<String>, listen: Vec<String>) -> Result<()> {
         "  allowlisted peers: {allowlist_len} (fail-closed; add via allowlist.json or --allow-peer)"
     );
     eprintln!(
-        "  invokes: upsert/promote/relate/check/assemble served (world-scoped); \
-         compute/project/unknown refused (op_unsupported)"
+        "  invokes: upsert/promote/relate/check/assemble/compute served (world+module scoped); \
+         project/unknown refused (op_unsupported)"
     );
     eprintln!("  press Ctrl-C to stop");
 
@@ -224,7 +224,10 @@ pub async fn build_host_config(
     // authenticated session peer; the legacy `invoke_handler` is not
     // selected, clean cutover per spec §5.2).
     let pool = open_workspace_pool(workspace_db).await?;
-    let adapter = Arc::new(NexusAdapter::new(pool));
+    // P2: the adapter's ComputablePort resolves compute modules host-locally
+    // from `~/.nexus42/modules/` (spec §2.1 — never peer-supplied bytes).
+    let modules_dir = nexus_home_layout::user_modules_dir(home);
+    let adapter = Arc::new(NexusAdapter::new(pool).with_user_modules_dir(modules_dir));
     config.invoke_handler_v2 = Some(invoke::build_handler(peer_scope, adapter));
 
     Ok((config, host_id, allowlist_len))

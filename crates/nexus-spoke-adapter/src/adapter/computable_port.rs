@@ -42,10 +42,11 @@ use async_trait::async_trait;
 use nexus_local_db::compute_session::{get_compute_session, insert_compute_session};
 use nexus_wasm_host::{
     embedded_module_bytes, embedded_module_ids, embedded_module_manifest, ComputeInput,
-    ModuleManifest, WasmEngine, WasmModule,
+    ModuleCache, ModuleManifest, WasmEngine, WasmModule,
 };
 use serde_json::{json, Map, Value};
 use std::collections::HashMap;
+use std::path::Path;
 use std::sync::OnceLock;
 
 /// One-time initialised WASM engine, reused across all compute invocations.
@@ -77,6 +78,15 @@ fn resolve_module_id(
     // rather than relying on a derived key_block map (which would be fragile
     // if `spoke_entry_to_key_block` ever strips or transforms
     // `body.computable`).
+    //
+    // NOTE (P2 QC fix wave FW-1 — dead-code tier): under the current
+    // conversion seam this tier can never fire — `world_kb_to_spoke` emits
+    // only the marker map `{"_computable": true}` from the nexus
+    // `Option<bool>`, and `spoke_to_world_kb` collapses spoke maps back to
+    // `Some(true)`, so `entry.body.computable.get("module_id")` is always
+    // `None` today. The tier is retained as the documented resolution
+    // precedence (spec §2.2) and as defense if body.computable maps ever
+    // survive the seam.
     if let Some(module_id) = entry
         .body
         .computable
@@ -85,24 +95,219 @@ fn resolve_module_id(
     {
         return SpokeResult::Ok(module_id.to_string());
     }
+    // The `module_identity_missing` details marker (P2 QC fix wave FW-5) is
+    // the structured control-flow signal for this reject: hosts classify
+    // the missing-module-name denial via
+    // [`is_module_identity_missing_reject`] instead of string-sniffing the
+    // message.
     reject(
         SpokeRejectCode::InvalidInput,
         "module identity required on session state or entry body.computable",
-        json!({}),
+        json!({ "module_identity_missing": true }),
     )
 }
 
-/// Load (or get cached) a compiled WASM module by id.
+/// Shared module-id path-safety check (P2 QC fix wave FW-4 — single source
+/// of truth for the gate AND the execution guard): the id must be a single
+/// path component — non-empty, no `/` or `\` separators, and not `.` /
+/// `..` — so joining it under the module store directory can never escape
+/// the store. The Connect gate's host-store check
+/// (`apps/nexus42` `module_installed`) and the adapter's user-module loader
+/// ([`load_user_module`]) both route through this so they can never drift.
+#[must_use]
+pub fn is_safe_module_id(module_id: &str) -> bool {
+    !module_id.is_empty()
+        && !module_id.contains('/')
+        && !module_id.contains('\\')
+        && module_id != "."
+        && module_id != ".."
+}
+
+/// Structured marker predicate for the missing-module-identity reject
+/// (P2 QC fix wave FW-5 — same pattern as
+/// [`crate::is_world_conflict_reject`]): `resolve_module_id`'s
+/// `InvalidInput` reject carries a `module_identity_missing: true` details
+/// marker so hosts classify the denial by marker, never by sniffing the
+/// reject message.
+#[must_use]
+pub fn is_module_identity_missing_reject(reject: &SpokeReject) -> bool {
+    reject
+        .details
+        .as_ref()
+        .and_then(|d| d.get("module_identity_missing"))
+        .and_then(serde_json::Value::as_bool)
+        == Some(true)
+}
+
+impl NexusAdapter<'_> {
+    /// Load (or get cached) a compiled WASM module by id — host-local store.
+    ///
+    /// When a user modules dir is configured
+    /// ([`NexusAdapter::with_user_modules_dir`] — the Connect host's
+    /// `~/.nexus42/modules/`), the module MUST be installed there as
+    /// `<dir>/<id>/<id>.wasm` + `<dir>/<id>/manifest.json` (fail-closed: an
+    /// absent/incomplete pair is `InvalidInput`; the embedded ship set is
+    /// NOT reachable — the Connect surface serves only operator-installed
+    /// modules, spec §2.1). Without a configured dir (baseline consumers),
+    /// the embedded ship set is used (V1.146 behavior unchanged).
+    ///
+    /// # Compiled-module cache (P2 QC fix wave FW-2)
+    ///
+    /// Both load paths route through the per-adapter
+    /// [`ModuleCache`](nexus_wasm_host::ModuleCache): the wasmtime compile
+    /// runs once per distinct `(module id, bytes hash)` instead of once per
+    /// invocation (the module artifacts are still re-read per invoke so an
+    /// operator content change is observable — the bytes hash then misses
+    /// and the entry is recompiled + overwritten). The Connect host keeps
+    /// ONE adapter for the process lifetime, so the cache is process-wide
+    /// there.
+    ///
+    /// # Error classification (V1.146 P2 QC fix-wave + P2 user-store
+    /// extension)
+    ///
+    /// - Unknown / invalid `module_id` (not in the store) → `InvalidInput` —
+    ///   the id comes from session state / `body.computable`
+    ///   (caller-controlled), so "not available" is a client-input error,
+    ///   not a host failure.
+    /// - Known module whose install/compile/trap fails → `InternalError`
+    ///   (host problem after the id itself was resolved correctly).
+    fn load_module(&self, module_id: &str) -> SpokeResult<(WasmModule, ModuleManifest)> {
+        if let Some(dir) = &self.user_modules_dir {
+            return load_user_module(&self.module_cache, dir, module_id);
+        }
+        load_embedded_module(&self.module_cache, module_id)
+    }
+}
+
+/// Load a user-installed module from the host-local store (spec §2.1 —
+/// bytes are never peer-supplied).
 ///
-/// # Error classification (V1.146 P2 QC fix-wave)
+/// The module id is operator/peer-named: it must be a single path
+/// component (no separators, no `.` / `..` — [`is_safe_module_id`]), so the
+/// join below can never escape the store directory (mirrors the embedded
+/// allowlist gate's fail-closed spirit — an escaped path would otherwise
+/// read arbitrary files).
 ///
-/// - Unknown / invalid `module_id` (not in the embedded allowlist) →
-///   `InvalidInput` — the id comes from session state / `body.computable`
-///   (caller-controlled), so "not known" is a client-input error, not a host
-///   failure.
-/// - Known module whose embed/compile/trap fails → `InternalError` (host
-///   problem after the id itself was resolved correctly).
-fn load_module(module_id: &str) -> SpokeResult<(WasmModule, ModuleManifest)> {
+/// The compiled module is served through `cache` (id + bytes-hash keying,
+/// P2 QC fix wave FW-2): repeated invokes of unchanged bytes reuse the
+/// cached compile; a changed module file recompiles and overwrites the
+/// entry.
+fn load_user_module(
+    cache: &ModuleCache,
+    dir: &Path,
+    module_id: &str,
+) -> SpokeResult<(WasmModule, ModuleManifest)> {
+    if !is_safe_module_id(module_id) {
+        return reject(
+            SpokeRejectCode::InvalidInput,
+            format!("invalid module id: {module_id:?}"),
+            json!({ "module_id": module_id }),
+        );
+    }
+    let module_dir = dir.join(module_id);
+    let wasm_path = module_dir.join(format!("{module_id}.wasm"));
+    let manifest_path = module_dir.join("manifest.json");
+    if !wasm_path.is_file() || !manifest_path.is_file() {
+        return reject(
+            SpokeRejectCode::InvalidInput,
+            format!(
+                "module '{module_id}' is not installed under {}",
+                dir.display()
+            ),
+            json!({ "module_id": module_id }),
+        );
+    }
+    // Post-existence-check read failures are host faults (the store
+    // changed mid-invoke or is unreadable) — InternalError, like the
+    // embedded path's "known module whose embed/compile fails"
+    // classification.
+    let bytes = match std::fs::read(&wasm_path) {
+        Ok(b) => b,
+        Err(e) => {
+            return reject(
+                SpokeRejectCode::InternalError,
+                format!("failed to read {}: {e}", wasm_path.display()),
+                json!({ "module_id": module_id }),
+            );
+        }
+    };
+    let manifest_json = match std::fs::read_to_string(&manifest_path) {
+        Ok(s) => s,
+        Err(e) => {
+            return reject(
+                SpokeRejectCode::InternalError,
+                format!("failed to read {}: {e}", manifest_path.display()),
+                json!({ "module_id": module_id }),
+            );
+        }
+    };
+    let cached = match cache.get_or_compile(engine(), module_id, &bytes, &manifest_json) {
+        Ok(entry) => entry,
+        Err(e) => {
+            return reject(
+                SpokeRejectCode::InternalError,
+                format!("failed to compile WASM module {module_id}: {e}"),
+                json!({ "module_id": module_id }),
+            );
+        }
+    };
+    SpokeResult::Ok((cached.module.clone(), cached.manifest.clone()))
+}
+
+impl NexusAdapter<'_> {
+    /// Resolve the module identity for a compute invocation using the locked
+    /// precedence (spec §2.2): session state `module_id` first, then the
+    /// entry's `body.computable.module_id`. The Connect compute gate uses
+    /// this to scope the peer BEFORE any WASM execution; `ComputablePort::compute`
+    /// applies the same precedence internally (single source of truth).
+    ///
+    /// # Errors
+    /// `InvalidInput` when the session row is missing, the entry is missing,
+    /// or neither tier carries a module id.
+    pub async fn resolve_compute_module_id(
+        &self,
+        session_id: &str,
+        entry_id: &str,
+    ) -> SpokeResult<String> {
+        let session = match get_compute_session(&self.pool, session_id).await {
+            Ok(Some(s)) => s,
+            Ok(None) => {
+                return reject(
+                    SpokeRejectCode::InvalidInput,
+                    format!("compute session not found: {session_id}"),
+                    json!({ "session_id": session_id }),
+                );
+            }
+            Err(e) => {
+                return reject(
+                    SpokeRejectCode::InternalError,
+                    format!("storage error on compute session read: {e}"),
+                    json!({ "session_id": session_id }),
+                );
+            }
+        };
+        let entry = match self.get_knowledge_entry(entry_id).await {
+            SpokeResult::Ok(e) => e,
+            SpokeResult::Reject(r) => return SpokeResult::Reject(r),
+        };
+        let state: Map<String, Value> = session
+            .state_json
+            .as_deref()
+            .and_then(|s| serde_json::from_str(s).ok())
+            .unwrap_or_default();
+        resolve_module_id(&state, &entry)
+    }
+}
+
+/// Load a compiled module from the embedded ship set (baseline consumers
+/// without a configured user store — V1.146 behavior). The compiled module
+/// is served through `cache` (id + bytes-hash keying, P2 QC fix wave
+/// FW-2): embedded bytes are immutable, so after the first invocation the
+/// compile is a pure cache hit.
+fn load_embedded_module(
+    cache: &ModuleCache,
+    module_id: &str,
+) -> SpokeResult<(WasmModule, ModuleManifest)> {
     // F-002+F-005: validate module_id is a known embedded module before
     // doing any path-formatting or I/O. The embedded_module_ids() list is
     // the authoritative allowlist; an id not present there is InvalidInput.
@@ -131,18 +336,8 @@ fn load_module(module_id: &str) -> SpokeResult<(WasmModule, ModuleManifest)> {
             json!({ "module_id": module_id }),
         );
     };
-    let manifest: ModuleManifest = match serde_json::from_str(manifest_json) {
-        Ok(m) => m,
-        Err(e) => {
-            return reject(
-                SpokeRejectCode::InternalError,
-                format!("failed to parse manifest for {module_id}: {e}"),
-                json!({ "module_id": module_id }),
-            );
-        }
-    };
-    let module = match engine().load_module(wasm_bytes) {
-        Ok(m) => m,
+    let cached = match cache.get_or_compile(engine(), module_id, wasm_bytes, manifest_json) {
+        Ok(entry) => entry,
         Err(e) => {
             return reject(
                 SpokeRejectCode::InternalError,
@@ -151,7 +346,7 @@ fn load_module(module_id: &str) -> SpokeResult<(WasmModule, ModuleManifest)> {
             );
         }
     };
-    SpokeResult::Ok((module, manifest))
+    SpokeResult::Ok((cached.module.clone(), cached.manifest.clone()))
 }
 
 impl NexusAdapter<'_> {}
@@ -254,9 +449,23 @@ impl ComputablePort for NexusAdapter<'_> {
         }
 
         // ── 2. Load the entry for compute envelope ────────────────────────
+        // A missing target entry is a client-input error (the request names
+        // `entry_id` on the wire) — mapped to InvalidInput like `project()`
+        // (P2 QC fix wave FW-3); the Connect gate already denies missing
+        // entries before execution, so this arm covers the check-then-act
+        // race where the entry is deleted between the gate and this call.
         let entry = match self.get_knowledge_entry(&entry_id).await {
             SpokeResult::Ok(e) => e,
-            SpokeResult::Reject(r) => return SpokeResult::Reject(r),
+            SpokeResult::Reject(r) => {
+                if r.code == SpokeRejectCode::KnowledgeEntryNotFound {
+                    return reject(
+                        SpokeRejectCode::InvalidInput,
+                        format!("target KnowledgeEntry not found for compute: {entry_id}"),
+                        json!({ "entry_id": entry_id }),
+                    );
+                }
+                return SpokeResult::Reject(r);
+            }
         };
 
         // ── 3. Merge staged state + dynamic computable (in-memory only) ──
@@ -369,7 +578,7 @@ impl ComputablePort for NexusAdapter<'_> {
             SpokeResult::Ok(id) => id,
             SpokeResult::Reject(r) => return SpokeResult::Reject(r),
         };
-        let (wasm_module, manifest) = match load_module(&module_id) {
+        let (wasm_module, manifest) = match self.load_module(&module_id) {
             SpokeResult::Ok(m) => m,
             SpokeResult::Reject(r) => return SpokeResult::Reject(r),
         };
@@ -1287,6 +1496,189 @@ mod tests {
             }
             _ => panic!("expected InvalidInput for unknown module"),
         }
+    }
+
+    /// P2 QC fix wave FW-2: the user-module load path must reuse the
+    /// per-adapter compiled-module cache — repeated loads of UNCHANGED
+    /// bytes return the SAME cached entry (Arc identity across two loads is
+    /// the timing-independent no-recompile observable), and a CHANGED
+    /// module file (same id, different bytes hash) is a cache miss that
+    /// recompiles and OVERWRITES the entry (the cache's eviction
+    /// semantics) without ever growing the cache.
+    #[cfg(not(nexus_spoke_adapter_no_wasm_target))]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn user_module_load_reuses_compiled_module_cache() {
+        let (pool, _db_dir) = fresh_pool().await;
+
+        // Install the embedded basic-combat bytes as a user module under a
+        // hermetic module store.
+        let modules_dir = tempfile::tempdir().unwrap();
+        let module_dir = modules_dir.path().join("basic-combat");
+        std::fs::create_dir_all(&module_dir).unwrap();
+        let wasm_path = module_dir.join("basic-combat.wasm");
+        let manifest_path = module_dir.join("manifest.json");
+        let bytes = nexus_wasm_host::embedded_module_bytes("basic-combat")
+            .expect("embedded basic-combat bytes");
+        let manifest = nexus_wasm_host::embedded_module_manifest("basic-combat")
+            .expect("embedded basic-combat manifest");
+        std::fs::write(&wasm_path, bytes).expect("write module wasm");
+        std::fs::write(&manifest_path, manifest).expect("write module manifest");
+
+        let adapter =
+            NexusAdapter::new(pool).with_user_modules_dir(modules_dir.path().to_path_buf());
+        let cache = adapter.module_cache();
+        assert_eq!(cache.len(), 0, "fresh adapter starts with an empty cache");
+
+        let (_first_module, _) =
+            unwrap_ok(adapter.load_module("basic-combat"), "first load compiles");
+        assert_eq!(cache.len(), 1, "first load compiles and caches");
+        assert!(cache.contains("basic-combat"));
+        // Capture the cached entry NOW — before the second load — so the
+        // no-recompile assertion compares the first compile against the
+        // post-second-load cache state (fetching both after both loads
+        // would trivially return the same latest entry).
+        let first_entry = cache
+            .get("basic-combat")
+            .expect("cached entry after first load");
+
+        let (_second_module, _) = unwrap_ok(
+            adapter.load_module("basic-combat"),
+            "second load hits the cache",
+        );
+        assert_eq!(cache.len(), 1, "second load must not grow the cache");
+        let second_entry = cache
+            .get("basic-combat")
+            .expect("cached entry after second load");
+        assert!(
+            std::sync::Arc::ptr_eq(&first_entry, &second_entry),
+            "repeated loads of unchanged bytes must return the SAME compiled module \
+             (cache hit — no recompile)"
+        );
+
+        // Operator updates the module file: different bytes under the same
+        // id ⇒ bytes-hash miss ⇒ recompile ⇒ the cached entry is REPLACED
+        // (overwrite eviction), never duplicated. The replacement is a
+        // minimal valid wasm module (magic + version, zero sections) —
+        // different bytes that still compile.
+        let changed: &[u8] = b"\0asm\x01\0\0\0";
+        std::fs::write(&wasm_path, changed).expect("rewrite module wasm");
+
+        let (_third_module, _) = unwrap_ok(
+            adapter.load_module("basic-combat"),
+            "changed bytes recompile",
+        );
+        assert_eq!(cache.len(), 1, "recompile overwrites, never duplicates");
+        let third_entry = cache.get("basic-combat").expect("recompiled entry");
+        assert!(
+            !std::sync::Arc::ptr_eq(&first_entry, &third_entry),
+            "changed bytes must produce a FRESH compiled module (recompile, not stale serve)"
+        );
+    }
+
+    /// P2 QC fix wave FW-3 (adapter tier — TOCTOU defense): compute on a
+    /// session whose target entry was deleted must reject with
+    /// `InvalidInput` ("target KnowledgeEntry not found"), mirroring
+    /// `project()` — never an unclassified `KnowledgeEntryNotFound` reject.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn compute_missing_entry_rejects_invalid_input() {
+        let (pool, _dir) = fresh_pool().await;
+        seed_world(&pool).await;
+
+        let adapter = NexusAdapter::new(pool.clone());
+        let entry = spoke_character_entry("kb_vanished", "Vanished", 100, 20, 10, 100);
+        unwrap_ok(adapter.put_knowledge_entry(entry, None).await, "create");
+
+        // Stage a session against the entry, then delete the entry before
+        // compute runs (the check-then-act interleaving the Connect gate
+        // cannot see).
+        unwrap_ok(
+            adapter
+                .project(ProjectRequest {
+                    session_id: "ses_vanished".to_string(),
+                    entry_id: "kb_vanished".to_string(),
+                    state: Map::new(),
+                    extensions: Default::default(),
+                })
+                .await,
+            "project",
+        );
+        // Direct store delete — the adapter has no delete port, so remove
+        // the row like a concurrent writer would.
+        sqlx::query("DELETE FROM kb_key_blocks WHERE key_block_id = ?")
+            .bind("kb_vanished")
+            .execute(&pool)
+            .await
+            .expect("delete entry");
+
+        match adapter
+            .compute(ComputeRequest {
+                session_id: "ses_vanished".to_string(),
+                entry_id: "kb_vanished".to_string(),
+                computable: Map::new(),
+                settle: None,
+                extensions: Default::default(),
+            })
+            .await
+        {
+            SpokeResult::Reject(r) => {
+                assert_eq!(
+                    r.code,
+                    SpokeRejectCode::InvalidInput,
+                    "compute on a missing entry must be InvalidInput (client-input family)"
+                );
+                assert!(r.message.contains("not found for compute"));
+            }
+            _ => panic!("expected InvalidInput for missing compute target entry"),
+        }
+    }
+
+    /// P2 QC fix wave FW-5: the missing-module-identity reject carries the
+    /// `module_identity_missing` details marker and the shared predicate
+    /// recognizes it — hosts classify the defined `module_not_found`
+    /// denial by marker, never by sniffing the reject message (a message
+    /// rewording cannot silently remap the wire code).
+    #[test]
+    fn module_identity_missing_reject_carries_marker() {
+        // No module id anywhere (empty state, entry without body.computable).
+        let entry = spoke_character_entry("kb_marker", "Marker", 100, 20, 10, 100);
+        match resolve_module_id(&Map::new(), &entry) {
+            SpokeResult::Reject(r) => {
+                assert_eq!(r.code, SpokeRejectCode::InvalidInput);
+                assert!(
+                    is_module_identity_missing_reject(&r),
+                    "the identity-missing reject must carry the marker"
+                );
+                assert!(r.message.contains("module identity required"));
+            }
+            SpokeResult::Ok(_) => panic!("no module identity must reject"),
+        }
+        // A non-marker client-input reject is NOT classified as
+        // identity-missing (the gate must not remap it to module_not_found).
+        let other: SpokeResult<()> = reject(
+            SpokeRejectCode::InvalidInput,
+            "some other client error",
+            json!({}),
+        );
+        let other = match other {
+            SpokeResult::Reject(r) => r,
+            SpokeResult::Ok(_) => panic!("reject helper must reject"),
+        };
+        assert!(!is_module_identity_missing_reject(&other));
+    }
+
+    /// P2 QC fix wave FW-4: the shared id-safety helper accepts only single
+    /// path components — the Connect gate's host-store check and the
+    /// adapter's user-module loader both route through it.
+    #[test]
+    fn is_safe_module_id_accepts_single_components_only() {
+        assert!(is_safe_module_id("basic-combat"));
+        assert!(is_safe_module_id("a1"));
+        assert!(!is_safe_module_id(""));
+        assert!(!is_safe_module_id("a/b"));
+        assert!(!is_safe_module_id("a\\b"));
+        assert!(!is_safe_module_id("."));
+        assert!(!is_safe_module_id(".."));
+        assert!(!is_safe_module_id("../etc/passwd"));
     }
 
     /// F-001 regression: settle must route deltas by `target_key_block_id`.

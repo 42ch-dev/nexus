@@ -7,6 +7,18 @@
 //! `id → CachedModule` map built once at daemon startup and read on every
 //! `narrative.compute` invocation.
 //!
+//! # Cache identity and eviction (P2 QC fix wave FW-2)
+//!
+//! Cache identity is **`(id, bytes_hash)`**: [`CachedModule::bytes_hash`]
+//! records the exact `.wasm` bytes an entry was compiled from, and
+//! [`ModuleCache::get_checked`] / [`ModuleCache::get_or_compile`] treat a
+//! same-id entry compiled from different bytes as a miss, so a loader that
+//! re-reads the module file can detect operator content changes and
+//! recompile instead of serving stale bytes. Entries live for the cache's
+//! lifetime and are never LRU-evicted; the only replacement is the overwrite
+//! on recompile (at most one entry per module id — bounded by the
+//! operator-installed / embedded module set).
+//!
 //! # Warmup
 //!
 //! [`ModuleCache::warm_embedded`] compiles every module shipped under
@@ -18,6 +30,7 @@
 //! valid modules available.
 
 use std::collections::HashMap;
+use std::hash::{Hash, Hasher};
 use std::path::Path;
 use std::sync::{Arc, RwLock};
 
@@ -36,6 +49,11 @@ pub struct CachedModule {
     pub module: WasmModule,
     /// The module's parsed `manifest.json`.
     pub manifest: ModuleManifest,
+    /// Hash of the exact `.wasm` bytes this entry was compiled from. Cache
+    /// identity is `(id, bytes_hash)` (P2 QC fix wave FW-2): a loader that
+    /// sees the same id with a different hash knows the module file changed
+    /// and must recompile instead of serving stale bytes.
+    pub bytes_hash: u64,
 }
 
 /// Thread-safe `id → CachedModule` compilation cache.
@@ -96,6 +114,23 @@ impl ModuleCache {
         guard.get(id).map(Arc::clone)
     }
 
+    /// Look up a cached module by id AND the bytes hash it was compiled
+    /// from (P2 QC fix wave FW-2). A same-id entry compiled from DIFFERENT
+    /// bytes is a miss — the caller must recompile (which then overwrites
+    /// the id's entry).
+    ///
+    /// # Eviction semantics
+    ///
+    /// Entries live for the cache's lifetime (the daemon / Connect process)
+    /// and are never LRU-evicted; the ONLY replacement is the overwrite on
+    /// recompile triggered by this hash miss. The cache therefore holds at
+    /// most one entry per module id — bounded by the operator-installed /
+    /// embedded module set.
+    #[must_use]
+    pub fn get_checked(&self, id: &str, bytes_hash: u64) -> Option<Arc<CachedModule>> {
+        self.get(id).filter(|entry| entry.bytes_hash == bytes_hash)
+    }
+
     /// Whether `id` is present in the cache.
     #[must_use]
     pub fn contains(&self, id: &str) -> bool {
@@ -128,9 +163,40 @@ impl ModuleCache {
         let module = engine.load_module(bytes)?;
         let manifest: ModuleManifest = serde_json::from_str(manifest_json)
             .map_err(|e| ComputeError::InvalidModule(format!("manifest parse for '{id}': {e}")))?;
-        let entry = Arc::new(CachedModule { module, manifest });
+        let entry = Arc::new(CachedModule {
+            module,
+            manifest,
+            bytes_hash: hash_module_bytes(bytes),
+        });
         self.insert(id, Arc::clone(&entry));
         Ok(entry)
+    }
+
+    /// Load-or-compile under the `(id, bytes_hash)` cache identity: a cached
+    /// entry compiled from EXACTLY these bytes is returned without touching
+    /// `engine`; otherwise the module is compiled, cached, and returned.
+    ///
+    /// Callers still read the module artifacts themselves (so content
+    /// changes are observable) — this method only makes the expensive
+    /// compile step happen once per distinct (id, bytes).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ComputeError::InvalidModule`] if `bytes` is not valid wasm or
+    /// `manifest_json` cannot be deserialized into a [`ModuleManifest`]. A
+    /// failed compile does NOT overwrite a prior entry for the same id.
+    pub fn get_or_compile(
+        &self,
+        engine: &WasmEngine,
+        id: &str,
+        bytes: &[u8],
+        manifest_json: &str,
+    ) -> Result<Arc<CachedModule>> {
+        let bytes_hash = hash_module_bytes(bytes);
+        if let Some(entry) = self.get_checked(id, bytes_hash) {
+            return Ok(entry);
+        }
+        self.compile_and_insert(engine, id, bytes, manifest_json)
     }
 
     /// Pre-warm the cache with every embedded module (compass Q2 Embedded).
@@ -247,6 +313,20 @@ impl ModuleCache {
     }
 }
 
+/// Hash the `.wasm` bytes a module was compiled from — the `bytes_hash`
+/// half of the cache identity `(id, bytes_hash)`.
+///
+/// In-process identity only (never persisted / sent on the wire), so
+/// `DefaultHasher`'s per-process seed is fine: both sides of a comparison
+/// (`compile_and_insert` stores, `get_checked` filters) run in the same
+/// process.
+#[must_use]
+pub fn hash_module_bytes(bytes: &[u8]) -> u64 {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    bytes.hash(&mut hasher);
+    hasher.finish()
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
@@ -327,5 +407,58 @@ mod tests {
     fn get_returns_none_for_unknown() {
         let cache = ModuleCache::new();
         assert!(cache.get("nope").is_none());
+    }
+
+    /// P2 QC fix wave FW-2: cache identity is (id, bytes_hash) — a changed
+    /// module file under the same id is a miss (recompile path), and
+    /// get_or_compile returns the SAME entry for unchanged bytes.
+    #[cfg(not(nexus_no_wasm_target))]
+    #[test]
+    fn get_checked_misses_on_bytes_hash_change() {
+        let engine = WasmEngine::new().unwrap();
+        let cache = ModuleCache::new();
+        let bytes = embedded_module_bytes("basic-combat").unwrap();
+        let manifest = embedded_module_manifest("basic-combat").unwrap();
+
+        let first = cache
+            .get_or_compile(&engine, "basic-combat", &bytes, manifest)
+            .expect("first compile");
+        assert_eq!(cache.len(), 1);
+        assert!(
+            cache
+                .get_checked("basic-combat", first.bytes_hash)
+                .is_some(),
+            "same-id same-hash lookup must hit"
+        );
+        assert!(
+            cache
+                .get_checked("basic-combat", first.bytes_hash + 1)
+                .is_none(),
+            "same-id different-hash lookup must miss (module file changed)"
+        );
+
+        // Unchanged bytes ⇒ get_or_compile is a pure cache hit (same Arc —
+        // the timing-independent no-recompile observable).
+        let second = cache
+            .get_or_compile(&engine, "basic-combat", &bytes, manifest)
+            .expect("cache hit");
+        assert!(
+            Arc::ptr_eq(&first, &second),
+            "unchanged bytes must reuse the compiled module"
+        );
+
+        // Changed bytes under the same id ⇒ recompile ⇒ the entry is
+        // OVERWRITTEN (the cache's only eviction), never duplicated. The
+        // replacement is a minimal valid wasm module (magic + version, zero
+        // sections) — different bytes that still compile.
+        let changed: &[u8] = b"\0asm\x01\0\0\0";
+        let third = cache
+            .get_or_compile(&engine, "basic-combat", changed, manifest)
+            .expect("recompile after content change");
+        assert_eq!(cache.len(), 1, "recompile overwrites, never duplicates");
+        assert!(
+            !Arc::ptr_eq(&first, &third),
+            "changed bytes must produce a fresh compile"
+        );
     }
 }

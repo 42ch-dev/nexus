@@ -65,6 +65,19 @@ pub enum LocalDbError {
         expected: i64,
         actual: Option<i64>,
     },
+    /// V1.154 P2 (R3 closure): the world-aware CAS predicate
+    /// (`WHERE … AND world_id = ?`) missed because the row's stored
+    /// `world_id` differs from the world the caller verified — a
+    /// cross-process writer moved the row between the caller's check and the
+    /// UPDATE. This is an internal classification; hosts surface it with the
+    /// fixed `world_conflict` wire code (spec §3.2), never as a generic OCC
+    /// version mismatch.
+    WorldConflict {
+        table: String,
+        id: String,
+        expected_world: String,
+        actual_world: String,
+    },
     /// Input validation failed before reaching the database.
     ValidationError(String),
 }
@@ -154,6 +167,19 @@ impl fmt::Display for LocalDbError {
                     "version mismatch on '{table}' row '{id}': expected v{expected}, actual v{} — \
                      row was modified by another writer; retry",
                     actual.map_or("?".to_string(), |v| v.to_string())
+                )
+            }
+            Self::WorldConflict {
+                table,
+                id,
+                expected_world,
+                actual_world,
+            } => {
+                write!(
+                    f,
+                    "world conflict on '{table}' row '{id}': expected world '{expected_world}', \
+                     actual world '{actual_world}' — the row was moved to another world by \
+                     another writer; re-read it in its stored world",
                 )
             }
             Self::ValidationError(msg) => {

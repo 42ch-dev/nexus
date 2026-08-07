@@ -38,8 +38,8 @@ use nexus_local_db::{open_pool, run_migrations};
 // V1.145 P1b — adapter rehomed to nexus-spoke-adapter (spec §7.4).
 use nexus_spoke_adapter::NexusAdapter;
 use nexus_spoke_adapter::{
-    orchestrate_promote, orchestrate_upsert, PromoteRequest, PromoteResponse, SpokeRejectCode,
-    SpokeResult, UpsertRequest, UpsertResponse,
+    orchestrate_promote, orchestrate_relate, orchestrate_upsert, PromoteRequest, PromoteResponse,
+    RelateRequest, SpokeRejectCode, SpokeResult, UpsertRequest, UpsertResponse,
 };
 use serde_json::json;
 use sqlx::Row;
@@ -407,4 +407,240 @@ async fn orchestrate_assemble_scope_filtered() {
         }
         _ => panic!("expected assemble success, got {result:?}"),
     }
+}
+
+// ── 6. R3 closure: world-aware CAS (spec §3) ────────────────────────────
+//
+// The N-C1 invoke gate's stored-world check is check-then-act. The durable
+// fix is the orchestrator/storage CAS carrying the stored `world_id`. These
+// tests reproduce the interleaved two-writer race at the orchestrator layer
+// (the atomic source of truth): writer 1's world-verified preimage is
+// invalidated by writer 2 moving the row to another world between the
+// gate-check and the CAS. The CAS must deny with the adapter's world-conflict
+// classification — never `REVISION_CONFLICT` / `STORED_REVISION_STALE`.
+
+/// Seed a second world row so a test can FK-move rows across worlds.
+async fn seed_second_world(pool: &sqlx::SqlitePool) {
+    // SAFETY: test-only static seed insert against the post-migration schema.
+    sqlx::query(
+        "INSERT INTO narrative_worlds \
+         (world_id, workspace_id, owner_creator_id, title, slug, status, visibility, time_policy, metadata_json) \
+         VALUES ('wld_2', 'wrk_test', 'ctr_test', 'Second World', 'second-world', 'active', 'private', 'manual', '{}')",
+    )
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
+/// Build a spoke `Relation` fixture carrying `extensions.nexus.world_id`
+/// (required by the production adapter's persist path).
+fn relate_relation(relation_id: &str, from_id: &str, to_id: &str) -> nexus_spoke_adapter::Relation {
+    serde_json::from_value(json!({
+        "schema_version": 1,
+        "relation_id": relation_id,
+        "from_id": from_id,
+        "to_id": to_id,
+        "relation_type": "allied_with",
+        "label": "test edge",
+        "metadata": {},
+        "extensions": { "nexus": { "world_id": WORLD_ID } },
+    }))
+    .expect("valid Relation fixture")
+}
+
+/// Build a `RelateRequest` from a spoke `Relation` (wire round-trip, mirrors
+/// [`upsert_request`]).
+fn relate_request(relation: &nexus_spoke_adapter::Relation) -> RelateRequest {
+    let wire = serde_json::to_value(relation).expect("Relation serializable");
+    serde_json::from_value(json!({ "relation": wire })).expect("valid RelateRequest fixture")
+}
+
+/// Assert a reject is the adapter's world-conflict classification (details
+/// marker), and specifically NOT a collapse into `RevisionConflict` /
+/// `StoredRevisionStale` (spec §3.2).
+fn expect_world_conflict_reject<T: std::fmt::Debug>(
+    result: SpokeResult<T>,
+    expected_world: &str,
+    actual_world: &str,
+) {
+    match result {
+        SpokeResult::Reject(reject) => {
+            assert_ne!(
+                reject.code,
+                SpokeRejectCode::RevisionConflict,
+                "world conflict must never collapse into REVISION_CONFLICT"
+            );
+            assert_ne!(
+                reject.code,
+                SpokeRejectCode::StoredRevisionStale,
+                "world conflict must never collapse into STORED_REVISION_STALE"
+            );
+            // The pinned spoke-operations `SpokeRejectCode` has no
+            // conflict-class code; the adapter carries the classification on
+            // the `InternalError` carrier with a `world_conflict` details
+            // marker, and the host mappings (Connect / daemon) remap it to
+            // the fixed `world_conflict` wire code.
+            assert_eq!(
+                reject.code,
+                SpokeRejectCode::InternalError,
+                "world-conflict rides the InternalError carrier (message: {})",
+                reject.message
+            );
+            let details = reject
+                .details
+                .as_ref()
+                .expect("world-conflict reject carries details");
+            assert_eq!(
+                details
+                    .get("world_conflict")
+                    .and_then(serde_json::Value::as_bool),
+                Some(true),
+                "world_conflict marker present"
+            );
+            assert_eq!(
+                details
+                    .get("expectedWorld")
+                    .and_then(serde_json::Value::as_str),
+                Some(expected_world)
+            );
+            assert_eq!(
+                details
+                    .get("actualWorld")
+                    .and_then(serde_json::Value::as_str),
+                Some(actual_world)
+            );
+        }
+        SpokeResult::Ok(_) => panic!("expected world-conflict reject, got Ok"),
+    }
+}
+
+/// Move a `kb_key_blocks` row to another world WITHOUT bumping its revision —
+/// the interleaved "other writer" that the pre-fix (id + revision) CAS could
+/// not distinguish from a legitimate same-world update.
+async fn move_key_block_to_world(pool: &sqlx::SqlitePool, entry_id: &str, world_id: &str) {
+    // SAFETY: test-only static UPDATE against the post-migration schema.
+    sqlx::query("UPDATE kb_key_blocks SET world_id = ? WHERE key_block_id = ?")
+        .bind(world_id)
+        .bind(entry_id)
+        .execute(pool)
+        .await
+        .unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn orchestrate_upsert_denies_row_moved_to_another_world_between_verification_and_cas() {
+    let (pool, _dir) = fresh_pool().await;
+    seed_second_world(&pool).await;
+    let adapter = NexusAdapter::new(pool.clone());
+
+    // Writer 1 creates the entry in WORLD_ID → revision 1.
+    let entry_id = "kb_wc_upsert";
+    let created = spoke_entry(entry_id, "WorldCasUpsert", None, "provisional");
+    let create_result = orchestrate_upsert(&adapter, upsert_request(&created)).await;
+    assert!(
+        matches!(create_result, SpokeResult::Ok(_)),
+        "create must succeed first"
+    );
+
+    // Gate check passes: the stored row is in the claimed world.
+    let (_, _, _, stored_world, _) = read_kb_row(&pool, entry_id).await;
+    assert_eq!(
+        stored_world, WORLD_ID,
+        "gate-check precondition: row is in the claimed world"
+    );
+
+    // Writer 2 (a second Connect process / the daemon) moves the row to
+    // wld_2 between the gate-check and writer 1's CAS, revision untouched.
+    move_key_block_to_world(&pool, entry_id, "wld_2").await;
+
+    // Writer 1 replays its world-A preimage (revision 1 — still the stored
+    // revision, so the pre-fix id+revision CAS would have succeeded).
+    let candidate = spoke_entry(entry_id, "WorldCasUpsert", Some(1), "provisional");
+    let result = orchestrate_upsert(&adapter, upsert_request(&candidate)).await;
+    expect_world_conflict_reject(result, WORLD_ID, "wld_2");
+
+    // INDEPENDENT verification: the row was not rewritten — still in wld_2
+    // at revision 1 (the denied CAS must leave the row untouched).
+    let (_, _, rev, world, _) = read_kb_row(&pool, entry_id).await;
+    assert_eq!(
+        world, "wld_2",
+        "row stays in the world the interleaved writer set"
+    );
+    assert_eq!(rev, 1, "denied CAS must not mutate the row");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn orchestrate_promote_denies_row_moved_to_another_world_between_verification_and_cas() {
+    let (pool, _dir) = fresh_pool().await;
+    seed_second_world(&pool).await;
+    let adapter = NexusAdapter::new(pool.clone());
+
+    // Writer 1 creates a provisional entry in WORLD_ID → revision 1.
+    let entry_id = "kb_wc_promote";
+    let created = spoke_entry(entry_id, "WorldCasPromote", None, "provisional");
+    let create_result = orchestrate_upsert(&adapter, upsert_request(&created)).await;
+    assert!(
+        matches!(create_result, SpokeResult::Ok(_)),
+        "create must succeed first"
+    );
+
+    // Gate check passes for WORLD_ID; writer 2 then moves the row to wld_2.
+    let (_, _, _, stored_world, _) = read_kb_row(&pool, entry_id).await;
+    assert_eq!(stored_world, WORLD_ID);
+    move_key_block_to_world(&pool, entry_id, "wld_2").await;
+
+    // Writer 1 promotes its world-A preimage (revision 1).
+    let candidate = spoke_entry(entry_id, "WorldCasPromote", Some(1), "provisional");
+    let result = orchestrate_promote(&adapter, promote_request(&candidate)).await;
+    expect_world_conflict_reject(result, WORLD_ID, "wld_2");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn orchestrate_relate_denies_row_moved_to_another_world_between_verification_and_cas() {
+    let (pool, _dir) = fresh_pool().await;
+    seed_second_world(&pool).await;
+    let adapter = NexusAdapter::new(pool.clone());
+
+    // Endpoints must exist in WORLD_ID (kb_relationships FKs on key_block_id).
+    for endpoint in ["kb_wc_src", "kb_wc_dst"] {
+        let ep = spoke_entry(endpoint, endpoint, None, "confirmed");
+        let r = orchestrate_upsert(&adapter, upsert_request(&ep)).await;
+        assert!(
+            matches!(r, SpokeResult::Ok(_)),
+            "endpoint {endpoint} create must succeed"
+        );
+    }
+
+    // Writer 1 creates the relation in WORLD_ID → revision 1.
+    let relation_id = "rel_wc";
+    let relation = relate_relation(relation_id, "kb_wc_src", "kb_wc_dst");
+    let create_result = orchestrate_relate(&adapter, relate_request(&relation)).await;
+    assert!(
+        matches!(create_result, SpokeResult::Ok(_)),
+        "relate create must succeed first"
+    );
+
+    // Gate check passes: the stored row is in the claimed world.
+    let stored_world: String =
+        sqlx::query_scalar("SELECT world_id FROM kb_relationships WHERE relationship_id = ?")
+            .bind(relation_id)
+            .fetch_one(&pool)
+            .await
+            .expect("read persisted relation world");
+    assert_eq!(stored_world, WORLD_ID);
+
+    // Writer 2 moves the relation row to wld_2, revision untouched.
+    // SAFETY: test-only static UPDATE against the post-migration schema.
+    sqlx::query("UPDATE kb_relationships SET world_id = ? WHERE relationship_id = ?")
+        .bind("wld_2")
+        .bind(relation_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    // Writer 1 replays its world-A preimage (revision 1).
+    let mut updated = relation;
+    updated.revision = Some(1);
+    let result = orchestrate_relate(&adapter, relate_request(&updated)).await;
+    expect_world_conflict_reject(result, WORLD_ID, "wld_2");
 }

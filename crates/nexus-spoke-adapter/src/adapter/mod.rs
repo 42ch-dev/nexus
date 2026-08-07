@@ -31,7 +31,9 @@ pub mod relation_port;
 pub mod rule_query_port;
 pub mod scope_query_port;
 
+use nexus_wasm_host::ModuleCache;
 use sqlx::SqlitePool;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 /// Production `BaselinePorts` impl backing spoke orchestrators against nexus
@@ -53,6 +55,22 @@ pub struct NexusAdapter<'a> {
     /// replaces the former static `"nexus-local"` host id (honesty lock —
     /// installation-scoped stable id, not a `PeerId` / world id).
     host_id: Option<String>,
+    /// Host-local compute module store (`~/.nexus42/modules/`) when
+    /// configured (V1.154 P2 — the Connect host). `None` ⇒ `ComputablePort`
+    /// serves only the embedded ship set (baseline consumers, V1.146
+    /// behavior unchanged). When set, compute modules MUST be installed
+    /// under `<dir>/<id>/<id>.wasm` + `<dir>/<id>/manifest.json` — bytes
+    /// are never peer-supplied (spec §2.1).
+    user_modules_dir: Option<PathBuf>,
+    /// Per-adapter compiled-module cache (P2 QC fix wave FW-2): the
+    /// `ComputablePort` module load reuses `nexus_wasm_host::ModuleCache`,
+    /// keyed by (module id, bytes hash), so the expensive wasmtime compile
+    /// runs once per distinct module content instead of once per compute
+    /// invocation. The Connect host constructs ONE adapter per process
+    /// (per-process singleton), so the cache is process-wide there; a
+    /// changed module file (new bytes hash) recompiles and overwrites the
+    /// entry (the cache's only eviction).
+    module_cache: ModuleCache,
     /// When set (via [`Self::with_tx_cell`]), `put_knowledge_entry` joins this
     /// transaction instead of opening its own. The handler moves the
     /// `sqlx::Transaction` into the shared cell before `orchestrate_promote`
@@ -68,10 +86,12 @@ impl NexusAdapter<'static> {
     /// `SQLite` I/O on the caller's runtime, so the former multi-threaded
     /// runtime requirement (`block_in_place` bridge) is gone.
     #[must_use]
-    pub const fn new(pool: SqlitePool) -> Self {
+    pub fn new(pool: SqlitePool) -> Self {
         NexusAdapter {
             pool,
             host_id: None,
+            user_modules_dir: None,
+            module_cache: ModuleCache::new(),
             bound_tx_cell: None,
         }
     }
@@ -91,6 +111,34 @@ impl<'a> NexusAdapter<'a> {
     pub fn with_host_id(mut self, host_id: impl Into<String>) -> Self {
         self.host_id = Some(host_id.into());
         self
+    }
+
+    /// Configure the host-local compute module store (V1.154 P2 — the
+    /// Connect host's `~/.nexus42/modules/`). When set, `ComputablePort`
+    /// resolves compute modules from `<dir>/<id>/<id>.wasm` +
+    /// `<dir>/<id>/manifest.json` ONLY (spec §2.1 — module bytes are never
+    /// peer-supplied; an absent/incomplete pair is a client-input reject).
+    /// Without a store the embedded ship set is used (baseline consumers,
+    /// V1.146 behavior unchanged).
+    #[must_use]
+    pub fn with_user_modules_dir(mut self, dir: PathBuf) -> Self {
+        self.user_modules_dir = Some(dir);
+        self
+    }
+
+    /// The configured host-local module store, if any — the Connect compute
+    /// gate requires one (a host without a store serves no compute module).
+    #[must_use]
+    pub fn user_modules_dir(&self) -> Option<&Path> {
+        self.user_modules_dir.as_deref()
+    }
+
+    /// The per-adapter compiled-module cache (P2 QC fix wave FW-2). Test
+    /// seam: in-crate tests observe cache hits / recompiles through it.
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) fn module_cache(&self) -> &ModuleCache {
+        &self.module_cache
     }
 
     /// Attach a shared transaction cell for the duration of one adopt/orchestrate

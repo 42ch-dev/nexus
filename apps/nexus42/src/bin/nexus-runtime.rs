@@ -149,7 +149,7 @@ async fn boot(home: &Path, allow_peer: &[String], listen: &[String]) -> Result<(
 
     // Liveness = stdout readiness (the ONLY liveness surface — no HTTP
     // health endpoint; the daemon router never boots in this process).
-    println!("nexus-runtime: Connect Host (N-C2 read half) ready");
+    println!("nexus-runtime: Connect Host (N-C2 E2) ready");
     println!("  peer_id: {}", node.local_peer_id());
     println!("  host_id: {host_id}");
     for addr in node.listen_addrs() {
@@ -159,8 +159,8 @@ async fn boot(home: &Path, allow_peer: &[String], listen: &[String]) -> Result<(
         "  allowlisted peers: {allowlist_len} (fail-closed; add via allowlist.json or --allow-peer)"
     );
     println!(
-        "  invokes: upsert/promote/relate/check/assemble served (world-scoped); \
-         compute/project/unknown refused (op_unsupported)"
+        "  invokes: upsert/promote/relate/check/assemble/compute served (world+module scoped); \
+         project/unknown refused (op_unsupported)"
     );
     println!("  press Ctrl-C to stop");
 

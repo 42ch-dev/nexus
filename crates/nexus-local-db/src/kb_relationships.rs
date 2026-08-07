@@ -184,25 +184,35 @@ pub async fn insert_relationship_in_tx(
 
 /// CAS-update a `kb_relationships` row inside a caller-managed transaction.
 ///
-/// The update only applies when `revision = expected_revision`. On mismatch,
-/// returns [`LocalDbError::VersionMismatch`] with the actual current revision.
-/// On success the revision is bumped to `expected_revision + 1` and the
-/// updated row is returned so callers can project it without a post-commit
-/// re-read.
+/// The update only applies when `revision = expected_revision` AND the stored
+/// `world_id` equals `world_id` (V1.154 P2, R3 closure, spec §3.2 LOCKED:
+/// `WHERE relationship_id = ? AND revision = ? AND world_id = ?`). On a
+/// version mismatch, returns [`LocalDbError::VersionMismatch`] with the
+/// actual current revision; on a world mismatch (a cross-process writer moved
+/// the row between the caller's verified read and the CAS), returns
+/// [`LocalDbError::WorldConflict`] — never a generic OCC failure. On success
+/// the revision is bumped to `expected_revision + 1` and the updated row is
+/// returned so callers can project it without a post-commit re-read.
 ///
 /// `existing` supplies the immutable columns (`world_id`, `source_entity_id`,
 /// `target_entity_id`, `created_at`) that are not part of the update payload.
+/// `world_id` is the stored-world expected by the request (the world the
+/// caller verified on read) — it joins the CAS predicate and is NOT taken
+/// from `existing` (a fresh pre-read would mask the race this predicate
+/// closes).
 ///
 /// # Errors
 ///
-/// Returns [`LocalDbError::VersionMismatch`] on stale OCC, or
-/// [`LocalDbError::Sqlx`] on database failure.
+/// Returns [`LocalDbError::VersionMismatch`] on stale OCC,
+/// [`LocalDbError::WorldConflict`] when the row now lives in another world,
+/// or [`LocalDbError::Sqlx`] on database failure.
 pub async fn update_relationship_in_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     relationship_id: &str,
     params: &UpdateRelationshipParams,
     expected_revision: i64,
     existing: &KbRelationshipRow,
+    world_id: &str,
 ) -> Result<KbRelationshipRow, LocalDbError> {
     let new_revision = expected_revision + 1;
     let symmetric_i64 = bool_to_i64(params.symmetric);
@@ -228,7 +238,7 @@ pub async fn update_relationship_in_tx(
              extensions_nexus_json = ?,
              updated_at = ?,
              revision = ?
-           WHERE relationship_id = ? AND revision = ?"#,
+           WHERE relationship_id = ? AND revision = ? AND world_id = ?"#,
         params.relation_type,
         custom_label_ref,
         symmetric_i64,
@@ -241,9 +251,34 @@ pub async fn update_relationship_in_tx(
         new_revision,
         relationship_id,
         expected_revision,
+        world_id,
     )
     .execute(&mut **tx)
     .await?;
+
+    if result.rows_affected() == 0 {
+        // V1.154 P2 (R3 closure): disambiguate a world move from a version
+        // mismatch before falling into the generic OCC classification. The
+        // caller's revision may have been perfectly valid — the WORLD moved
+        // (e.g. a second Connect process / the daemon on the same workspace
+        // DB). `world_id` is NOT NULL on `kb_relationships` (migration
+        // 202606290001), so a present row always carries its stored world.
+        let stored_world: Option<String> =
+            sqlx::query_scalar("SELECT world_id FROM kb_relationships WHERE relationship_id = ?")
+                .bind(relationship_id)
+                .fetch_optional(&mut **tx)
+                .await?;
+        if let Some(actual_world) = stored_world.as_ref() {
+            if actual_world != world_id {
+                return Err(LocalDbError::WorldConflict {
+                    table: "kb_relationships".to_string(),
+                    id: relationship_id.to_string(),
+                    expected_world: world_id.to_string(),
+                    actual_world: actual_world.clone(),
+                });
+            }
+        }
+    }
 
     cas_check_with_version_column(
         &mut **tx,
@@ -739,6 +774,7 @@ mod tests {
             },
             0,
             &existing,
+            &world_id,
         )
         .await
         .unwrap();
@@ -801,10 +837,109 @@ mod tests {
             },
             99,
             &existing,
+            &world_id,
         )
         .await
         .unwrap_err();
         assert!(matches!(err, LocalDbError::VersionMismatch { .. }));
+    }
+
+    #[tokio::test]
+    async fn test_update_cas_rejects_row_in_foreign_world() {
+        // R3 regression (relate side, atomic source of truth): the caller's
+        // world-verified preimage (wld_test) is stale — another writer moved
+        // the row to wld_other without bumping the revision, so the pre-fix
+        // id+revision CAS would have succeeded. The world-aware predicate
+        // must deny with WorldConflict, NOT a plain VersionMismatch.
+        let (pool, _dir) = fresh_pool().await;
+        let (world_id, source_id, target_id) = seed_world_and_entities(&pool).await;
+        sqlx::query!(
+            r#"INSERT INTO narrative_worlds
+               (world_id, workspace_id, owner_creator_id, title, slug, status, visibility, time_policy, metadata_json)
+               VALUES ('wld_other', 'wrk_test', 'ctr_test', 'Other World', 'other-world', 'active', 'private', 'manual', '{}')"#
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let mut tx = pool.begin().await.unwrap();
+        let rel_id = generate_relationship_id();
+        insert_relationship_in_tx(
+            &mut tx,
+            &InsertRelationshipParams {
+                relationship_id: rel_id.clone(),
+                world_id: world_id.clone(),
+                source_entity_id: source_id,
+                target_entity_id: target_id,
+                relation_type: "allied_with".to_string(),
+                custom_label: None,
+                symmetric: false,
+                confidence: None,
+                source_anchor_ids: vec![],
+                metadata: None,
+                created_at: chrono::Utc::now().to_rfc3339(),
+                updated_at: chrono::Utc::now().to_rfc3339(),
+                needs_review: false,
+                source: SOURCE_MANUAL.to_string(),
+                extensions_nexus_json: None,
+            },
+        )
+        .await
+        .unwrap();
+        tx.commit().await.unwrap();
+
+        // The caller's preimage: read BEFORE the interleaved writer moves the
+        // row (the OCC `existing` snapshot the update path would carry).
+        let existing = get_relationship(&pool, &rel_id).await.unwrap();
+        assert_eq!(
+            existing.world_id, world_id,
+            "gate-check precondition: row is in the claimed world"
+        );
+
+        // "Other writer" (Connect process ∥ daemon) moves the row across
+        // worlds between the gate-check and the CAS, revision untouched.
+        sqlx::query("UPDATE kb_relationships SET world_id = ? WHERE relationship_id = ?")
+            .bind("wld_other")
+            .bind(&rel_id)
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let mut tx = pool.begin().await.unwrap();
+        let err = update_relationship_in_tx(
+            &mut tx,
+            &rel_id,
+            &UpdateRelationshipParams {
+                relation_type: "opposes".to_string(),
+                custom_label: None,
+                symmetric: false,
+                confidence: None,
+                source_anchor_ids: vec![],
+                metadata: None,
+                updated_at: chrono::Utc::now().to_rfc3339(),
+                needs_review: false,
+                extensions_nexus_json: None,
+            },
+            0,
+            &existing,
+            &world_id,
+        )
+        .await
+        .unwrap_err();
+        match err {
+            LocalDbError::WorldConflict {
+                table,
+                id,
+                expected_world,
+                actual_world,
+            } => {
+                assert_eq!(table, "kb_relationships");
+                assert_eq!(id, rel_id);
+                assert_eq!(expected_world, world_id);
+                assert_eq!(actual_world, "wld_other");
+            }
+            other => panic!("world mismatch must classify as WorldConflict, got {other:?}"),
+        }
     }
 
     #[tokio::test]
