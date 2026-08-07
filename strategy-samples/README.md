@@ -92,17 +92,17 @@ NEXUS42_HOME=/path/to/home nexus-runtime         # same override via env
 ```
 
 - **Liveness is a stdout line** — there is no HTTP health endpoint. When the
-  runtime is ready it prints:
+  runtime is ready it prints this readiness block:
 
-  ```
-  nexus-runtime: Connect Host (N-C2 E2) ready
-    peer_id: <peer-id>
-    host_id: <device-id>
-    listen: /ip4/127.0.0.1/tcp/<port>
-    allowlisted peers: <n> (fail-closed; add via allowlist.json or --allow-peer)
-    invokes: upsert/promote/relate/check/assemble/compute served (world+module scoped); project/unknown refused (op_unsupported)
-    press Ctrl-C to stop
-  ```
+```
+nexus-runtime: Connect Host (N-C2 E2) ready
+  peer_id: <peer-id>
+  host_id: <device-id>
+  listen: /ip4/127.0.0.1/tcp/<port>
+  allowlisted peers: <n> (fail-closed; add via allowlist.json or --allow-peer)
+  invokes: upsert/promote/relate/check/assemble/compute served (world+module scoped); project/unknown refused (op_unsupported)
+  press Ctrl-C to stop
+```
 
   `served_ops` is also advertised in the host manifest
   (`extensions.nexus.served_ops` — the same six ops, machine-checked against
@@ -170,8 +170,10 @@ spoke-connect peer reaches it through a transport bridge (see
 
 The runtime only accepts peers it has allowlisted (missing file ⇒ empty ⇒
 fail-closed: every remote peer is rejected at the handshake). Allowlist the
-peer id **your node** uses in `~/.nexus42/connect/allowlist.json` on the host
-machine. The scoped entry form:
+peer id **your node** uses in
+`${NEXUS42_HOME:-$HOME}/.nexus42/connect/allowlist.json` on the host machine
+(the path under the home the runtime resolved at boot; default
+`~/.nexus42/connect/allowlist.json`). The scoped entry form:
 
 ```json
 {
@@ -399,12 +401,23 @@ pattern to reuse.
 
 Build with `cargo build --release --target wasm32-unknown-unknown` (install
 the target first: `rustup target add wasm32-unknown-unknown`), then copy the
-artifacts into place:
+artifacts into place. `modules/basic-combat` is a **standalone crate** (not a
+workspace member), so the build runs from inside that directory:
 
 ```bash
-mkdir -p ~/.nexus42/modules/basic-combat
-cp target/wasm32-unknown-unknown/release/basic_combat.wasm ~/.nexus42/modules/basic-combat/basic-combat.wasm
-cp modules/basic-combat/manifest.json ~/.nexus42/modules/basic-combat/
+# run from the repo root (this walkthrough assumes the repo root unless a
+# block says otherwise)
+cd modules/basic-combat
+rustup target add wasm32-unknown-unknown      # once per toolchain
+cargo build --release --target wasm32-unknown-unknown
+
+# operator install: place the module into the runtime's host-local store
+NEXUS_HOME="${NEXUS42_HOME:-$HOME}/.nexus42"
+mkdir -p "$NEXUS_HOME/modules/basic-combat"
+cp target/wasm32-unknown-unknown/release/basic_combat.wasm "$NEXUS_HOME/modules/basic-combat/basic-combat.wasm"
+cp manifest.json "$NEXUS_HOME/modules/basic-combat/"
+
+cd ../..    # back to the repo root
 ```
 
 > On the Connect surface the embedded module set is **not** reachable: the
@@ -459,15 +472,28 @@ carrier by default. The module id resolves from the **staged compute session
 state** first, then the entry's `body.computable.module_id` (documented
 precedence). The `project` op is not served over Connect, so a session row is
 staged out-of-band on the host (workspace SQLite `compute_sessions` table —
-`session_id`, `entry_id`, `state_json` with `module_id`, `created_at`):
+`session_id`, `entry_id`, `state_json` with `module_id`, `created_at`).
+Discover the creator id + workspace slug the runtime resolved, then insert:
 
 ```bash
-sqlite3 ~/.nexus42/creators/<creator_id>/workspaces/<slug>/state.db \
+# the home the runtime booted with (NEXUS42_HOME from §1, else the default)
+NEXUS_HOME="${NEXUS42_HOME:-$HOME}/.nexus42"
+cat "$NEXUS_HOME/config.toml"      # active_creator_id = "ctr_..." + active_workspace_slug_by_creator
+ls "$NEXUS_HOME/creators/"         # the creator_id directory (e.g. ctr_...)
+
+CREATOR_ID="$(sed -n 's/^active_creator_id = "\([^"]*\)"/\1/p' "$NEXUS_HOME/config.toml")"
+SLUG="$(sed -n "s/^ *$CREATOR_ID = \"\([^\"]*\)\"/\1/p" "$NEXUS_HOME/config.toml")"
+DB="$NEXUS_HOME/creators/$CREATOR_ID/workspaces/$SLUG/state.db"
+
+sqlite3 "$DB" \
   "INSERT INTO compute_sessions (session_id, entry_id, state_json, created_at) \
    VALUES ('ses_combat', 'kb_atk', \
            '{\"module_id\":\"basic-combat\",\"attacker_id\":\"kb_atk\",\"defender_id\":\"kb_def\",\"character\":{\"current_hp\":30,\"max_hp\":30}}', \
            '$(date -u +%Y-%m-%dT%H:%M:%SZ)');"
 ```
+
+The workspace slug defaults to `default` unless you renamed it with
+`--workspace-slug` during `nexus42 creator workspace init workspace`.
 
 (The session targets `kb_atk` and names `kb_def` as the defender; both
 combatant entries are the ones seeded above. `basic-combat` reads the
@@ -625,13 +651,17 @@ idempotency ledger.
 - Connect invoke surface (N-C2 E2): `apps/nexus42/src/commands/connect/invoke.rs`
 - Connect SDK + wire family: `@42ch/spoke-connect@0.9.2` on npm
 - SPOKE connect-demo (runnable mock host + third-party RemoteAdapter client):
-  `../spoke/examples/connect-demo` — the TS-side story: a `BaselinePorts`
+  `../../spoke/examples/connect-demo` — the TS-side story: a `BaselinePorts`
   adapter served by a spec-faithful `ConnectHost` over WebSocket, dialed by
   `connectRemoteAdapter` from `@42ch/spoke-connect/remote` over a consumer
   `Transport`
 - RemoteAdapter how-to + step-by-step integration tutorial (English and 简体中文):
-  `../spoke/docs/how-to/connect-remote-adapter.md`,
-  `../spoke/docs/tutorials/integrate-remote-adapter.md`
+  `../../spoke/docs/how-to/connect-remote-adapter.md`,
+  `../../spoke/docs/tutorials/integrate-remote-adapter.md`
+
+> The spoke paths above assume the `spoke` repository is checked out as a
+> sibling of this repository (e.g. `…/42ch/spoke` next to `…/42ch/nexus`);
+> if your checkout differs, use the equivalents from your own clone.
 - In-repo reference peers for the runtime (Rust, `spoke-connect`):
   `apps/nexus42/examples/runtime_smoke_probe.rs` (dials a running runtime,
   prints the manifest's served ops) and `apps/nexus42/examples/connect_dialer.rs`
