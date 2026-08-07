@@ -659,6 +659,7 @@ async fn handle_set(
 
     // V1.51 T-B P0: acquire advisory file lock before mutating works.schedule_json.
     // The lock is released on drop when this function returns.
+    #[cfg(unix)]
     let _file_lock = {
         let work_dir = workspace_dir.join("Works").join(work_ref);
         // Best-effort: only acquire if the work directory exists (production path).
@@ -680,6 +681,12 @@ async fn handle_set(
             None
         }
     };
+
+    #[cfg(not(unix))]
+    // V1.153 P2 T2: the file_lock module is unix-only (flock); on Windows the
+    // shared-DB write access is WAL-governed (P2 spec § Coexistence) — no
+    // advisory lock, proceed unlocked.
+    let _file_lock = ();
 
     // R-V150P0-W5 (resolved in T-A P1): transactional compare-and-swap write.
     // The previous path (`get → apply → set`) was an unconditional

@@ -4,6 +4,9 @@
 //! Works directory) gracefully skips the file lock and does not regress
 //! existing cron supervisor behavior.
 
+// flock is unix-only; the file_lock module is `#[cfg(unix)]` (V1.153 P2 T2).
+#![cfg(unix)]
+
 use nexus_local_db::works::{self, WorkRecord};
 use sqlx::SqlitePool;
 

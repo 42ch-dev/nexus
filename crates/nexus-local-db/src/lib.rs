@@ -14,6 +14,7 @@
 pub mod cas;
 pub mod compute_runs;
 pub mod compute_session;
+#[cfg(unix)]
 pub mod file_lock;
 pub mod findings;
 pub mod force_gates_audit;

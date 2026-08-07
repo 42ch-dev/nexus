@@ -246,6 +246,8 @@ async fn evaluate_work(
 /// Returns `Ok(Some(guard))` on successful acquisition, `Ok(None)` when the
 /// workspace directory doesn't exist (test environments — skip file lock),
 /// and `Err(())` when the lock is held by another process or an I/O error occurs.
+/// Unix-only — the `file_lock` module is `#[cfg(unix)]` (V1.153 P2 T2).
+#[cfg(unix)]
 fn maybe_acquire_cron_file_lock(
     workspace_dir: Option<&Path>,
     work_ref: Option<&String>,
@@ -260,6 +262,18 @@ fn maybe_acquire_cron_file_lock(
     }
     nexus_local_db::file_lock::try_acquire(&work_dir, &format!("daemon:schedule:cron-{role_name}"))
         .map_or_else(|_| Err(()), |guard| Ok(Some(guard)))
+}
+
+/// V1.153 P2 T2: no advisory flock on Windows (the `file_lock` module is
+/// unix-only); shared-DB write access is WAL-governed (P2 spec § Coexistence)
+/// — always proceed unlocked.
+#[cfg(not(unix))]
+fn maybe_acquire_cron_file_lock(
+    _workspace_dir: Option<&Path>,
+    _work_ref: Option<&String>,
+    _role_name: &str,
+) -> Result<Option<()>, ()> {
+    Ok(None)
 }
 
 /// Evaluate one role for one Work: skip (no-match / disabled / gated /
