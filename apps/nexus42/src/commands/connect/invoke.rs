@@ -119,8 +119,12 @@
 //! (`Semaphore(1)` — spec §2.4): the wasmtime epoch watchdog is
 //! engine-global, so only one WASM invocation may run at a time inside the
 //! shared lane (mirrors the daemon's `compute_runs.rs` W-2 permit). The
-//! serializer is acquired inside the lane closure, so the per-invoke
-//! deadline bounds the wait and no second thread pool exists.
+//! serializer is acquired inside the lane closure under an explicit
+//! `tokio::time::timeout` on the REMAINING per-invoke budget (Greptile P1
+//! fix): a compute queued behind another compute fails fast with
+//! `invoke_deadline_exceeded` and releases its lane permit instead of
+//! holding it on an unbounded serializer backlog, and no second thread
+//! pool exists.
 //!
 //! Architect-locked limits (spec §5.4 — [`BridgeLimits`]): **8** concurrent
 //! invokes per process, a **30,000 ms** per-invoke deadline, and **500**
@@ -253,16 +257,17 @@ pub fn build_handler(
 /// [`build_handler`], whose `BridgeLimits::default()` are the
 /// architect-locked numbers; this entrypoint exists so tests can inject
 /// 1-permit lanes, short deadlines, and tiny caps deterministically. Also
-/// returns the process-wide lane so tests can observe the same semaphore
-/// the handler acquires — e.g. to hold permits and force a saturation.
-/// Do not ship non-default caps through this function from production
-/// callers without an architect lock.
+/// returns the process-wide lane AND the compute serializer so tests can
+/// observe the same semaphores the handler acquires — e.g. to hold
+/// permits and force a saturation or a serializer backlog. Do not ship
+/// non-default caps through this function from production callers without
+/// an architect lock.
 #[must_use]
 pub(crate) fn build_handler_with_limits(
     scope: PeerScope,
     adapter: Arc<NexusAdapter<'static>>,
     limits: BridgeLimits,
-) -> (Arc<InvokeHandlerV2>, Arc<Semaphore>) {
+) -> (Arc<InvokeHandlerV2>, Arc<Semaphore>, Arc<Semaphore>) {
     let lane = Arc::new(Semaphore::new(limits.max_concurrent_invokes));
     let lane_for_handler = Arc::clone(&lane);
     // P2 compute serializer (spec §2.4): one WASM invocation at a time —
@@ -270,19 +275,20 @@ pub(crate) fn build_handler_with_limits(
     // calls would trap each other at the shortest budget (the daemon's
     // compute_runs.rs W-2 permit is the same shape).
     let compute_serializer = Arc::new(Semaphore::new(1));
+    let serializer_for_handler = Arc::clone(&compute_serializer);
     let handler = Arc::new(move |peer: &PeerId, op: &str, payload: Value| {
         dispatch(
             &scope,
             Arc::clone(&adapter),
             &lane_for_handler,
-            &compute_serializer,
+            &serializer_for_handler,
             limits,
             peer,
             op,
             payload,
         )
     });
-    (handler, lane)
+    (handler, lane, compute_serializer)
 }
 
 /// One served op.
@@ -459,17 +465,62 @@ fn dispatch(
     //    §2.1–§2.3), all inside the lane, before any WASM execution.
     let deadline = std::time::Instant::now() + limits.invoke_deadline;
     let permit = acquire_permit(lane, deadline)?;
+    run_in_lane(
+        route,
+        scope,
+        adapter,
+        compute_serializer,
+        peer,
+        payload,
+        permit,
+        deadline,
+        limits,
+    )
+}
+
+/// Step 7-8 of [`dispatch`] — the bounded async bridge (R2 closure, spec
+/// §5.3/§5.4): orchestrator calls move to a per-process `spawn_blocking`
+/// lane capped by [`BridgeLimits`].
+///
+/// The lane closure runs inside an entered tokio context (the node's
+/// event-loop task), where `Handle::block_on` panics — the closure's own
+/// `block_on` is legal because blocking-pool threads are outside any async
+/// execution context. Extracted from [`dispatch`] to keep that function
+/// under the `too_many_lines` budget.
+///
+/// Permit semantics (spec §5.4): the lane closure cannot be
+/// force-cancelled safely, so the permit moves in here and stays held
+/// until the closure returns — the deadline bounds the caller's wait (any
+/// late result is discarded below) AND the compute serializer wait inside
+/// the orchestrator (Greptile P1), so a serializer-queued compute cannot
+/// hold its lane permit past its per-invoke budget. The stored-world gate
+/// (step 8) runs inside the closure before the orchestrator; compute runs
+/// its own gate set ([`verify_compute_gates`] — stored world + module
+/// identity + `module_scope` + host-local store + the read-only settle
+/// lock, spec §2.1–§2.3), all before any WASM execution.
+#[allow(clippy::too_many_arguments)]
+// ^ Nine args mirror dispatch's architect-locked pipeline context (route,
+// scope, adapter, serializer, caller, payload, permit, deadline, limits);
+// bundling them would obscure the explicit fail-closed ordering.
+fn run_in_lane(
+    route: Route,
+    scope: &PeerScope,
+    adapter: Arc<NexusAdapter<'static>>,
+    compute_serializer: &Arc<Semaphore>,
+    peer: &PeerId,
+    payload: Value,
+    permit: OwnedSemaphorePermit,
+    deadline: std::time::Instant,
+    limits: BridgeLimits,
+) -> Result<Value, ErrorEnvelope> {
     let (tx, rx) = std::sync::mpsc::channel();
     let scope_for_lane = scope.clone();
-    let adapter_for_lane = Arc::clone(&adapter);
     let serializer_for_lane = Arc::clone(compute_serializer);
+    let deadline_for_lane = deadline;
     let peer_id = *peer;
     tokio::task::spawn_blocking(move || {
-        // Permit semantics (spec §5.4): the lane closure cannot be
-        // force-cancelled safely, so the permit moves in here and stays
-        // held until the closure returns — the deadline only bounds the
-        // caller's wait, and any late result is discarded below.
         let _permit = permit;
+        let adapter_for_lane = adapter;
         let result = tokio::runtime::Handle::current().block_on(async {
             if route == Route::Compute {
                 verify_compute_gates(&scope_for_lane, &adapter_for_lane, &peer_id, &payload)
@@ -477,7 +528,14 @@ fn dispatch(
             } else {
                 verify_stored_worlds(&adapter_for_lane, route, &payload).await?;
             }
-            route_orchestrator(route, &adapter_for_lane, &serializer_for_lane, payload).await
+            route_orchestrator(
+                route,
+                &adapter_for_lane,
+                &serializer_for_lane,
+                deadline_for_lane,
+                payload,
+            )
+            .await
         });
         let _ = tx.send(result);
     });
@@ -504,12 +562,17 @@ fn dispatch(
 /// The compute route additionally holds the per-process compute serializer
 /// (spec §2.4 — one WASM invocation at a time; the engine-global epoch
 /// watchdog would otherwise trap concurrent calls at the shortest budget).
-/// The acquire runs inside the lane closure, so the per-invoke deadline
-/// bounds it like every other lane wait.
+/// `deadline` is the shared per-invoke budget the caller computed BEFORE
+/// the lane acquire (spec §5.4): the serializer wait is bounded by the
+/// budget REMAINING after the lane acquire via an explicit
+/// `tokio::time::timeout`, so a compute queued behind another compute
+/// fails fast with `invoke_deadline_exceeded` instead of holding its lane
+/// permit on an unbounded serializer backlog (Greptile P1).
 async fn route_orchestrator(
     route: Route,
     adapter: &NexusAdapter<'static>,
     compute_serializer: &Arc<Semaphore>,
+    deadline: std::time::Instant,
     payload: Value,
 ) -> Result<Value, ErrorEnvelope> {
     match route {
@@ -582,10 +645,24 @@ async fn route_orchestrator(
                 Ok(request) => request,
                 Err(error) => return Err(map_reject(&invalid_payload("compute", &error))),
             };
+            // Serializer wait bounded by the REMAINING per-invoke budget
+            // (Greptile P1): the lane permit and the serializer permit
+            // share ONE deadline, so a compute queued on the serializer
+            // past its budget fails fast with invoke_deadline_exceeded and
+            // the lane permit is released when this closure returns —
+            // unrelated ops are served instead of starved by a compute
+            // backlog.
+            let remaining = deadline.saturating_duration_since(std::time::Instant::now());
             let serializer = Arc::clone(compute_serializer);
-            let _permit = serializer.acquire_owned().await.map_err(|_| {
-                bridge_fault("compute serializer closed before the WASM invocation")
-            })?;
+            let _permit = match tokio::time::timeout(remaining, serializer.acquire_owned()).await {
+                Ok(Ok(permit)) => permit,
+                Ok(Err(_)) => {
+                    return Err(bridge_fault(
+                        "compute serializer closed before the WASM invocation",
+                    ));
+                }
+                Err(_elapsed) => return Err(deadline_exceeded()),
+            };
             match orchestrate_compute(adapter, request).await {
                 SpokeResult::Ok(response) => serialize_response::<ComputeResponse>(&response),
                 SpokeResult::Reject(reject) => Err(map_reject(&reject)),
@@ -874,7 +951,7 @@ async fn verify_stored_worlds(
 ///    `body.computable` only as a bool marker (`{"_computable": true}` ⇄
 ///    `Some(true)`), so `entry.body.computable.module_id` can never carry a
 ///    value today. If body.computable maps ever survive the seam, the
-///    non-string shadow would silently re-arm the module_scope bypass the
+///    non-string shadow would silently re-arm the `module_scope` bypass the
 ///    pin exists to close — the key-presence pin keeps the C-1 contract
 ///    enforced in that future.
 ///
@@ -1048,16 +1125,19 @@ fn module_not_scoped(module_id: Option<&str>) -> ErrorEnvelope {
     if let Some(id) = module_id {
         details.insert("module_id".to_string(), Value::String(id.to_string()));
     }
-    let message = match module_id {
-        Some(id) => format!(
-            "module {id:?} is not in this peer's module_scope; \
-             compute is denied (fail-closed — missing/empty module_scope denies all modules)"
-        ),
-        None => format!(
+    let message = module_id.map_or_else(
+        || {
             "compute is denied: request computable.module_id must be a JSON string \
              equal to the peer's scoped module id (non-string override)"
-        ),
-    };
+                .to_string()
+        },
+        |id| {
+            format!(
+                "module {id:?} is not in this peer's module_scope; \
+                 compute is denied (fail-closed — missing/empty module_scope denies all modules)"
+            )
+        },
+    );
     ErrorEnvelope {
         code: "module_not_scoped".to_string(),
         message,
@@ -1472,10 +1552,10 @@ mod tests {
         })
     }
 
-    /// A hermetic workspace DB + per-process adapter (the N-C1 golden-test
-    /// shape): FK rows for `WORLD_A` so the production adapter's put paths
-    /// can persist.
-    async fn test_adapter() -> (tempfile::TempDir, Arc<NexusAdapter<'static>>) {
+    /// A hermetic workspace DB (the N-C1 golden-test shape): FK rows for
+    /// `WORLD_A` so the production adapter's put paths can persist.
+    /// `_temp` keeps the DB directory alive for the test's duration.
+    async fn test_pool() -> (tempfile::TempDir, sqlx::SqlitePool) {
         let temp = tempfile::tempdir().expect("tempdir");
         let db_path = temp.path().join("workspace").join("state.db");
         let pool = crate::db::Schema::init(&db_path)
@@ -1500,11 +1580,20 @@ mod tests {
         .execute(&pool)
         .await
         .expect("world seed");
+        (temp, pool)
+    }
+
+    /// A hermetic workspace DB + per-process adapter over [`test_pool`].
+    async fn test_adapter() -> (tempfile::TempDir, Arc<NexusAdapter<'static>>) {
+        let (temp, pool) = test_pool().await;
         (temp, Arc::new(NexusAdapter::new(pool)))
     }
 
     /// A `PeerScope` allowlisting `peer` for `WORLD_A` with the given ops,
     /// written through the on-disk allowlist shape (like the CLI boot).
+    /// Also allowlists the `basic-combat` module (P2 architect lock — an
+    /// absent/empty `module_scope` denies ALL compute, so compute tests
+    /// need the field).
     fn scoped_scope_for(peer: PeerId, ops: &[&str]) -> PeerScope {
         let temp = tempfile::tempdir().expect("tempdir");
         let allow_path = connect_allowlist_path(temp.path());
@@ -1515,6 +1604,7 @@ mod tests {
                 "peer_id": peer.to_string(),
                 "world_scope": [WORLD_A],
                 "op_scope": ops,
+                "module_scope": ["basic-combat"],
             }] })
             .to_string(),
         )
@@ -1527,12 +1617,14 @@ mod tests {
         scoped_scope_for(peer, &["upsert"])
     }
 
-    /// A scoped peer + handler + lane over a hermetic adapter. `_temp`
-    /// keeps the DB directory alive for the test's duration.
+    /// A scoped peer + handler + lane + compute serializer over a hermetic
+    /// adapter. `_temp` keeps the DB directory alive for the test's
+    /// duration.
     async fn test_handler(
         limits: BridgeLimits,
     ) -> (
         Arc<InvokeHandlerV2>,
+        Arc<Semaphore>,
         Arc<Semaphore>,
         PeerId,
         tempfile::TempDir,
@@ -1540,8 +1632,72 @@ mod tests {
         let peer = fixed_keypair(7).public().to_peer_id();
         let scope = scoped_scope(peer);
         let (_temp, adapter) = test_adapter().await;
-        let (handler, lane) = build_handler_with_limits(scope, adapter, limits);
-        (handler, lane, peer, _temp)
+        let (handler, lane, serializer) = build_handler_with_limits(scope, adapter, limits);
+        (handler, lane, serializer, peer, _temp)
+    }
+
+    /// A compute-capable variant of [`test_handler`]: the adapter carries a
+    /// host-local module store holding a `basic-combat` module pair, the
+    /// peer is allowlisted for `compute` + `upsert` with `module_scope`
+    /// (the P2 architect lock — missing/empty module scope denies ALL
+    /// compute), and a `kb_serializer` entry + staged compute session
+    /// (`module_id` = basic-combat) pass the P2 compute gates.
+    ///
+    /// The module pair is a minimal valid wasm + manifest: the P2 gates
+    /// only check the files EXIST, and the serializer-wait under test
+    /// happens before any compile, so the content is never parsed. (The
+    /// invoke source must not reference the WASM host crate — see
+    /// `interop::invoke_compute_executes_only_inside_the_bounded_lane`.)
+    async fn test_compute_handler(
+        limits: BridgeLimits,
+    ) -> (
+        Arc<InvokeHandlerV2>,
+        Arc<Semaphore>,
+        Arc<Semaphore>,
+        PeerId,
+        tempfile::TempDir,
+        tempfile::TempDir,
+    ) {
+        let peer = fixed_keypair(17).public().to_peer_id();
+        let scope = scoped_scope_for(peer, &["compute", "upsert"]);
+        let (_temp, pool) = test_pool().await;
+        // Host-local module store (spec §2.1): `<id>/<id>.wasm` +
+        // `<id>/manifest.json` under a hermetic `~/.nexus42/modules/`.
+        let modules_dir = tempfile::tempdir().expect("modules tempdir");
+        let basic_combat_dir = modules_dir.path().join("basic-combat");
+        std::fs::create_dir_all(&basic_combat_dir).expect("mkdir module store dir");
+        std::fs::write(
+            basic_combat_dir.join("basic-combat.wasm"),
+            b"\0asm\x01\0\0\0",
+        )
+        .expect("write module wasm");
+        std::fs::write(
+            basic_combat_dir.join("manifest.json"),
+            r#"{"module_id":"basic-combat","name":"basic-combat","version":"1.0.0","nexus_abi_version":1,"required_key_block_types":["character"],"compute_export":"compute"}"#,
+        )
+        .expect("write module manifest");
+        let adapter = Arc::new(
+            NexusAdapter::new(pool.clone()).with_user_modules_dir(modules_dir.path().to_path_buf()),
+        );
+        // Stage the compute target entry + session so the P2 gates pass
+        // (the serializer wait is the only thing the test exercises).
+        let entry: nexus_spoke_adapter::KnowledgeEntry =
+            serde_json::from_value(entry_fixture("kb_serializer", WORLD_A))
+                .expect("entry fixture deserializes");
+        match adapter.put_knowledge_entry(entry, None).await {
+            SpokeResult::Ok(_) => {}
+            SpokeResult::Reject(r) => panic!("staging the compute entry failed: {r:?}"),
+        }
+        nexus_local_db::compute_session::insert_compute_session(
+            &pool,
+            "ses_serializer",
+            "kb_serializer",
+            r#"{"module_id":"basic-combat"}"#,
+        )
+        .await
+        .expect("staged compute session");
+        let (handler, lane, serializer) = build_handler_with_limits(scope, adapter, limits);
+        (handler, lane, serializer, peer, _temp, modules_dir)
     }
 
     /// (a) Saturated lane: with the only permit held by a concurrent
@@ -1550,7 +1706,7 @@ mod tests {
     /// lane serves again.
     #[tokio::test(flavor = "multi_thread")]
     async fn saturated_lane_returns_invoke_busy_then_recovers() {
-        let (handler, lane, peer, _temp) = test_handler(BridgeLimits {
+        let (handler, lane, _serializer, peer, _temp) = test_handler(BridgeLimits {
             max_concurrent_invokes: 1,
             invoke_deadline: Duration::from_millis(50),
             ..BridgeLimits::default()
@@ -1579,7 +1735,7 @@ mod tests {
     /// envelope (spec §5.4).
     #[tokio::test(flavor = "multi_thread")]
     async fn slow_invoke_returns_invoke_deadline_exceeded() {
-        let (handler, _lane, peer, _temp) = test_handler(BridgeLimits {
+        let (handler, _lane, _serializer, peer, _temp) = test_handler(BridgeLimits {
             max_concurrent_invokes: 1,
             invoke_deadline: Duration::ZERO,
             ..BridgeLimits::default()
@@ -1600,7 +1756,7 @@ mod tests {
     /// invoke is queued.
     #[tokio::test(flavor = "multi_thread")]
     async fn lane_waiter_is_served_once_permit_frees() {
-        let (handler, lane, peer, _temp) = test_handler(BridgeLimits {
+        let (handler, lane, _serializer, peer, _temp) = test_handler(BridgeLimits {
             max_concurrent_invokes: 1,
             invoke_deadline: Duration::from_secs(5),
             ..BridgeLimits::default()
@@ -1629,12 +1785,81 @@ mod tests {
         assert_eq!(served["knowledge_entries"][0]["entry_id"], "kb_b3");
     }
 
+    /// Greptile P1 (compute serializer backlog): the serializer wait is
+    /// bounded by the REMAINING per-invoke budget — the lane permit and
+    /// the serializer permit share ONE deadline. A compute that acquires
+    /// the lane but queues on a held serializer past its budget fails fast
+    /// with `invoke_deadline_exceeded` AND releases its lane permit, so an
+    /// unrelated op invoked afterwards is still served. (Pre-fix, the
+    /// still-queued compute waited on the serializer with no bound while
+    /// holding the only lane permit, so the upsert would have waited out
+    /// its own budget and returned `invoke_busy`.)
+    #[tokio::test(flavor = "multi_thread")]
+    async fn compute_serializer_waiter_fails_fast_and_releases_lane() {
+        let (handler, lane, serializer, peer, _temp, _modules_dir) =
+            test_compute_handler(BridgeLimits {
+                max_concurrent_invokes: 1,
+                invoke_deadline: Duration::from_millis(400),
+                ..BridgeLimits::default()
+            })
+            .await;
+        // Simulate an in-flight WASM invocation: hold the serializer
+        // permit so a queued compute cannot proceed.
+        let _serializer_held = serializer
+            .try_acquire_owned()
+            .expect("test holds the compute serializer");
+        let held_lane = lane
+            .try_acquire_owned()
+            .expect("test holds the only lane permit");
+
+        let handler_for_task = Arc::clone(&handler);
+        let payload = serde_json::json!({
+            "session_id": "ses_serializer",
+            "entry_id": "kb_serializer",
+            "computable": {},
+        });
+        let invoke = tokio::spawn(async move { handler_for_task(&peer, "compute", payload) });
+        // Let the compute park on the lane, then free the lane permit: it
+        // acquires the lane, passes the P2 compute gates, and queues on
+        // the held serializer until its per-invoke budget expires.
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        drop(held_lane);
+
+        let result = invoke.await.expect("compute invoke completes");
+        match result {
+            Err(envelope) => assert_eq!(
+                envelope.code, "invoke_deadline_exceeded",
+                "a serializer-queued compute past its budget must fail fast with the \
+                 deadline envelope (pre-fix it waited unbounded on the serializer)"
+            ),
+            Ok(_) => panic!("a serializer-queued compute past its budget must fail fast"),
+        }
+
+        // The timed-out compute must NOT hold the lane: an unrelated op is
+        // served immediately after it. Pre-fix, the still-queued compute
+        // held the only lane permit and this upsert would have returned
+        // invoke_busy after its own budget.
+        let served = handler(
+            &peer,
+            "upsert",
+            serde_json::json!({
+                "knowledge_entries": [entry_fixture("kb_after_serializer", WORLD_A)],
+            }),
+        )
+        .expect("unrelated op is served after the timed-out compute");
+        assert_eq!(
+            served["knowledge_entries"][0]["entry_id"],
+            "kb_after_serializer"
+        );
+    }
+
     /// (c) Entry cap: 501 logical collection entries (> 500) are rejected
     /// with the locked `payload_too_large` envelope before the bridge
     /// (spec §5.4).
     #[tokio::test(flavor = "multi_thread")]
     async fn oversize_entry_count_returns_payload_too_large() {
-        let (handler, _lane, peer, _temp) = test_handler(BridgeLimits::default()).await;
+        let (handler, _lane, _serializer, peer, _temp) =
+            test_handler(BridgeLimits::default()).await;
         let entries: Vec<Value> = (0..501)
             .map(|i| entry_fixture(&format!("kb_ov_{i}"), WORLD_A))
             .collect();
@@ -1650,7 +1875,8 @@ mod tests {
     /// §5.4).
     #[tokio::test(flavor = "multi_thread")]
     async fn oversize_payload_bytes_returns_payload_too_large() {
-        let (handler, _lane, peer, _temp) = test_handler(BridgeLimits::default()).await;
+        let (handler, _lane, _serializer, peer, _temp) =
+            test_handler(BridgeLimits::default()).await;
         let mut entry = entry_fixture("kb_ov_bytes", WORLD_A);
         entry["body"] = serde_json::json!({ "summary": "x".repeat(2 * 1024 * 1024 + 1024) });
         let payload = serde_json::json!({ "knowledge_entries": [entry] });
@@ -1670,7 +1896,8 @@ mod tests {
         let peer = fixed_keypair(8).public().to_peer_id();
         let scope = scoped_scope_for(peer, &["check"]);
         let (_temp, adapter) = test_adapter().await;
-        let (handler, _lane) = build_handler_with_limits(scope, adapter, BridgeLimits::default());
+        let (handler, _lane, _serializer) =
+            build_handler_with_limits(scope, adapter, BridgeLimits::default());
         let payload = serde_json::json!({
             "scope": { "scope_id": WORLD_A },
             "rule_refs": (0..501).map(|i| format!("rule_{i}")).collect::<Vec<_>>(),
@@ -1694,7 +1921,8 @@ mod tests {
         let peer = fixed_keypair(9).public().to_peer_id();
         let scope = scoped_scope_for(peer, &["assemble"]);
         let (_temp, adapter) = test_adapter().await;
-        let (handler, _lane) = build_handler_with_limits(scope, adapter, BridgeLimits::default());
+        let (handler, _lane, _serializer) =
+            build_handler_with_limits(scope, adapter, BridgeLimits::default());
         let payload = serde_json::json!({
             "scope": { "scope_id": WORLD_A },
             "max_entries": 501,
@@ -1720,7 +1948,8 @@ mod tests {
         let peer = fixed_keypair(11).public().to_peer_id();
         let scope = scoped_scope_for(peer, &["check"]);
         let (_temp, adapter) = test_adapter().await;
-        let (handler, _lane) = build_handler_with_limits(scope, adapter, BridgeLimits::default());
+        let (handler, _lane, _serializer) =
+            build_handler_with_limits(scope, adapter, BridgeLimits::default());
         let payload = serde_json::json!({
             "scope": {
                 "scope_id": WORLD_A,
@@ -1744,7 +1973,8 @@ mod tests {
         let peer = fixed_keypair(12).public().to_peer_id();
         let scope = scoped_scope_for(peer, &["assemble"]);
         let (_temp, adapter) = test_adapter().await;
-        let (handler, _lane) = build_handler_with_limits(scope, adapter, BridgeLimits::default());
+        let (handler, _lane, _serializer) =
+            build_handler_with_limits(scope, adapter, BridgeLimits::default());
         let payload = serde_json::json!({
             "scope": {
                 "scope_id": WORLD_A,
@@ -1771,7 +2001,7 @@ mod tests {
         let peer = fixed_keypair(13).public().to_peer_id();
         let scope = scoped_scope_for(peer, &["check"]);
         let (_temp, adapter) = test_adapter().await;
-        let (handler, _lane) = build_handler_with_limits(
+        let (handler, _lane, _serializer) = build_handler_with_limits(
             scope,
             adapter,
             BridgeLimits {
@@ -1799,7 +2029,8 @@ mod tests {
         let peer = fixed_keypair(10).public().to_peer_id();
         let scope = scoped_scope_for(peer, &["upsert"]);
         let (_temp, adapter) = test_adapter().await;
-        let (handler, _lane) = build_handler_with_limits(scope, adapter, BridgeLimits::default());
+        let (handler, _lane, _serializer) =
+            build_handler_with_limits(scope, adapter, BridgeLimits::default());
         // The entry carries the world_id carrier (world gate passes) but
         // misses the typed wire's required fields (parse rejects).
         let payload = serde_json::json!({
