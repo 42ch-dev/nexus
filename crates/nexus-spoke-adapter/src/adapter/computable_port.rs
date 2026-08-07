@@ -154,14 +154,17 @@ impl NexusAdapter<'_> {
     /// modules, spec §2.1). Without a configured dir (baseline consumers),
     /// the embedded ship set is used (V1.146 behavior unchanged).
     ///
-    /// # Compiled-module cache (P2 QC fix wave FW-2)
+    /// # Compiled-module cache (P2 QC fix wave FW-2; manifest half:
+    /// Greptile P1)
     ///
     /// Both load paths route through the per-adapter
     /// [`ModuleCache`](nexus_wasm_host::ModuleCache): the wasmtime compile
-    /// runs once per distinct `(module id, bytes hash)` instead of once per
-    /// invocation (the module artifacts are still re-read per invoke so an
-    /// operator content change is observable — the bytes hash then misses
-    /// and the entry is recompiled + overwritten). The Connect host keeps
+    /// runs once per distinct `(module id, wasm bytes hash, manifest
+    /// hash)` instead of once per invocation (the module artifacts are
+    /// still re-read per invoke so an operator content change is
+    /// observable — a wasm OR manifest-only change then misses and the
+    /// entry is recompiled + overwritten, so updated schemas / sandbox
+    /// settings take effect without a wasm change). The Connect host keeps
     /// ONE adapter for the process lifetime, so the cache is process-wide
     /// there.
     ///
@@ -191,10 +194,11 @@ impl NexusAdapter<'_> {
 /// allowlist gate's fail-closed spirit — an escaped path would otherwise
 /// read arbitrary files).
 ///
-/// The compiled module is served through `cache` (id + bytes-hash keying,
-/// P2 QC fix wave FW-2): repeated invokes of unchanged bytes reuse the
-/// cached compile; a changed module file recompiles and overwrites the
-/// entry.
+/// The compiled module is served through `cache` (id + wasm-bytes-hash +
+/// manifest-hash keying, P2 QC fix wave FW-2 + Greptile P1): repeated
+/// invokes of unchanged artifacts reuse the cached compile; a changed
+/// module file — wasm OR manifest-only (new schemas / sandbox overrides) —
+/// recompiles and overwrites the entry.
 fn load_user_module(
     cache: &ModuleCache,
     dir: &Path,
@@ -353,9 +357,9 @@ impl NexusAdapter<'_> {
 
 /// Load a compiled module from the embedded ship set (baseline consumers
 /// without a configured user store — V1.146 behavior). The compiled module
-/// is served through `cache` (id + bytes-hash keying, P2 QC fix wave
-/// FW-2): embedded bytes are immutable, so after the first invocation the
-/// compile is a pure cache hit.
+/// is served through `cache` (id + wasm-bytes-hash + manifest-hash keying,
+/// P2 QC fix wave FW-2 + Greptile P1): embedded bytes are immutable, so
+/// after the first invocation the compile is a pure cache hit.
 fn load_embedded_module(
     cache: &ModuleCache,
     module_id: &str,
@@ -1625,6 +1629,35 @@ mod tests {
             !std::sync::Arc::ptr_eq(&first_entry, &third_entry),
             "changed bytes must produce a FRESH compiled module (recompile, not stale serve)"
         );
+
+        // Greptile P1 (manifest half of the cache identity): an operator
+        // updating manifest.json WITHOUT touching the wasm (new schemas /
+        // sandbox overrides) must miss the cache and recompile with the
+        // NEW settings — the old behavior kept serving the stale manifest
+        // until the wasm changed or the process restarted.
+        let manifest_v2 = {
+            let mut value: serde_json::Value =
+                serde_json::from_str(manifest).expect("embedded manifest parses");
+            value["version"] = serde_json::json!("2.0.0");
+            serde_json::to_string(&value).expect("manifest v2 serializes")
+        };
+        std::fs::write(&manifest_path, manifest_v2).expect("rewrite module manifest");
+
+        let (reloaded_module, reloaded_manifest) = unwrap_ok(
+            adapter.load_module("basic-combat"),
+            "manifest-only change recompiles",
+        );
+        assert_eq!(cache.len(), 1, "recompile overwrites, never duplicates");
+        let manifest_entry = cache.get("basic-combat").expect("recompiled entry");
+        assert!(
+            !std::sync::Arc::ptr_eq(&third_entry, &manifest_entry),
+            "a manifest-only change must produce a FRESH compiled module (stale settings never served)"
+        );
+        assert_eq!(
+            reloaded_manifest.version, "2.0.0",
+            "the fresh entry serves the NEW manifest settings"
+        );
+        let _ = reloaded_module;
     }
 
     /// Greptile P1 (non-atomic module reload — detector tier): the
