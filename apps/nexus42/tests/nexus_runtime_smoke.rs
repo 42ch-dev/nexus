@@ -319,11 +319,11 @@ fn headless_runtime_prints_readiness_serves_connect_and_has_no_http_listener() {
     // 1. Readiness block: the required lines are present on stdout.
     let ready = ready_lines.join("\n");
     for expected in [
-        "Connect Host (N-C2 read half) ready",
+        "Connect Host (N-C2 E2) ready",
         "peer_id:",
         "host_id:",
         "allowlisted peers: 1",
-        "upsert/promote/relate/check/assemble served",
+        "upsert/promote/relate/check/assemble/compute served",
     ] {
         assert!(
             ready.contains(expected),
@@ -363,7 +363,7 @@ fn headless_runtime_prints_readiness_serves_connect_and_has_no_http_listener() {
     );
     for expected in [
         "DIAL_OK",
-        "SERVED_OPS=upsert,promote,relate,check,assemble",
+        "SERVED_OPS=upsert,promote,relate,check,assemble,compute",
         "SESSION_OK",
     ] {
         assert!(

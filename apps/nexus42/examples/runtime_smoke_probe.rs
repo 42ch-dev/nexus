@@ -8,7 +8,7 @@
 //! ```text
 //! PROBE_PEER_ID=<peer-id>            # --print-peer-only (allowlist seed)
 //! DIAL_OK session=<id> remote=<id>   # signed-hello handshake completed
-//! SERVED_OPS=upsert,promote,relate,check,assemble   # manifest extensions.nexus.served_ops
+//! SERVED_OPS=upsert,promote,relate,check,assemble,compute   # manifest extensions.nexus.served_ops
 //! SESSION_OK                         # session still usable after refusals
 //! ```
 //!
