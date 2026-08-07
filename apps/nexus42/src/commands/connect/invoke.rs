@@ -842,8 +842,16 @@ async fn verify_stored_worlds(
 /// 5. **Host-local store gate** (spec §2.1): the module must be installed
 ///    under the configured `~/.nexus42/modules/` (never peer-supplied
 ///    bytes) ⇒ defined `module_not_found`.
+/// 6. **Module-id pin** (L2 review C-1): `ComputablePort::compute` merges
+///    `request.computable` over the session state BEFORE re-resolving the
+///    module id — without this gate a request-carried
+///    `computable.module_id` naming a DIFFERENT installed module would
+///    execute an unscoped module. The request may only repeat the gated
+///    id; a differing override ⇒ defined `module_not_scoped`.
 ///
-/// Returns the parsed typed request for the orchestrator route.
+/// Returns `Ok(())` once every gate passes (the orchestrator route
+/// re-parses the payload for execution); the first denial returns the
+/// mapped envelope.
 async fn verify_compute_gates(
     scope: &PeerScope,
     adapter: &NexusAdapter<'static>,
@@ -923,6 +931,19 @@ async fn verify_compute_gates(
                 modules_dir.display()
             ),
         ));
+    }
+
+    // 6. Module-id pin (L2 review C-1): the adapter's `ComputablePort`
+    //    merges request.computable over the session state before
+    //    re-resolving the module id, so a request-carried
+    //    `computable.module_id` that differs from the gated id would
+    //    execute an unscoped module. The dynamic computable map may carry
+    //    any invocation params EXCEPT a conflicting module identity; a
+    //    differing override is denied before any WASM execution.
+    if let Some(override_id) = request.computable.get("module_id").and_then(Value::as_str) {
+        if override_id != module_id {
+            return Err(module_not_scoped(override_id));
+        }
     }
 
     Ok(())

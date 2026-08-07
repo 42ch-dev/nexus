@@ -334,3 +334,56 @@ fn read_int_f64(value: &Value, path: &[&str]) -> Option<i64> {
     }
     cur.as_f64().map(|f| f as i64)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The `nexus-spoke-adapter` key-block conversion emits spoke attribute
+    /// values as f64-backed JSON numbers in the FLAT form
+    /// (`body.attributes.base_atk` = `20.0` — the spoke `BodyAttributeValue`
+    /// number variant is an f64). `read_attr_int` must accept them on the
+    /// flat path exactly like the array path already did (L2 review
+    /// Minor-1: the flat branch previously read floats as 0 → damage 0).
+    #[test]
+    fn flat_object_attributes_accept_f64_values() {
+        let kb = serde_json::json!({
+            "entry_type": "character",
+            "body": {
+                "attributes": { "max_hp": 100.0, "base_atk": 20.0, "base_def": 5.0 },
+            },
+        });
+        assert_eq!(read_attr_int(&kb, "base_atk"), Some(20));
+        assert_eq!(read_attr_int(&kb, "max_hp"), Some(100));
+        assert_eq!(read_attr_int(&kb, "base_def"), Some(5));
+    }
+
+    /// Integer-valued flat attributes keep working (legacy domain form).
+    #[test]
+    fn flat_object_attributes_accept_integer_values() {
+        let kb = serde_json::json!({
+            "entry_type": "character",
+            "body": {
+                "attributes": { "max_hp": 100, "base_atk": 20, "base_def": 5 },
+            },
+        });
+        assert_eq!(read_attr_int(&kb, "base_atk"), Some(20));
+    }
+
+    /// The canonical ERC721-array form still accepts both int and float
+    /// values (unchanged behavior — regression pin).
+    #[test]
+    fn array_attributes_accept_int_and_float_values() {
+        let kb = serde_json::json!({
+            "entry_type": "character",
+            "body": {
+                "attributes": [
+                    { "trait_type": "base_atk", "value": 20 },
+                    { "trait_type": "base_def", "value": 5.0 },
+                ],
+            },
+        });
+        assert_eq!(read_attr_int(&kb, "base_atk"), Some(20));
+        assert_eq!(read_attr_int(&kb, "base_def"), Some(5));
+    }
+}

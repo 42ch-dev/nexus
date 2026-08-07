@@ -163,12 +163,21 @@ fn combat_entry_fixture(
 /// can name only a module already installed under `~/.nexus42/modules/`).
 #[cfg(not(nexus42_no_wasm_target))]
 async fn install_test_module(home: &std::path::Path, module_id: &str) {
+    install_test_module_as(home, module_id, module_id).await;
+}
+
+/// Like [`install_test_module`] but under an arbitrary store id: copies the
+/// embedded bytes of `source_id` into `<store>/<module_id>/`. Used to prove
+/// the module-id pin denies an unrelated INSTALLED module (only the store
+/// id differs — the bytes are the embedded `basic-combat` ones).
+#[cfg(not(nexus42_no_wasm_target))]
+async fn install_test_module_as(home: &std::path::Path, module_id: &str, source_id: &str) {
     let dir = nexus_home_layout::user_modules_dir(home).join(module_id);
     std::fs::create_dir_all(&dir).expect("mkdir module store dir");
-    let bytes = nexus_wasm_host::embedded_module_bytes(module_id)
-        .unwrap_or_else(|| panic!("embedded module {module_id:?} must ship bytes"));
-    let manifest = nexus_wasm_host::embedded_module_manifest(module_id)
-        .unwrap_or_else(|| panic!("embedded module {module_id:?} must ship a manifest"));
+    let bytes = nexus_wasm_host::embedded_module_bytes(source_id)
+        .unwrap_or_else(|| panic!("embedded module {source_id:?} must ship bytes"));
+    let manifest = nexus_wasm_host::embedded_module_manifest(source_id)
+        .unwrap_or_else(|| panic!("embedded module {source_id:?} must ship a manifest"));
     std::fs::write(dir.join(format!("{module_id}.wasm")), bytes).expect("write module wasm");
     std::fs::write(dir.join("manifest.json"), manifest).expect("write module manifest");
 }
@@ -2938,6 +2947,155 @@ async fn n_c2_compute_unscoped_module_denied() {
         .await
         .expect("session stays usable after the module-scope denial");
     assert_eq!(served.payload["findings"], serde_json::json!([]));
+
+    host.shutdown().await.expect("host shuts down");
+    peer_node.shutdown().await.expect("peer shuts down");
+}
+
+/// N-C2 (V1.154 P2, L2 review C-1 regression): the module-id pin. The
+/// adapter's `ComputablePort::compute` merges `request.computable` over the
+/// session state before re-resolving the module id, so a request-carried
+/// `computable.module_id` naming a DIFFERENT installed module would execute
+/// an unscoped module. The gate must deny the override with the defined
+/// `module_not_scoped` envelope before any WASM execution — even though the
+/// override names an installed module and the staged session id is in
+/// scope. Zero side effects; session stays usable.
+#[cfg(not(nexus42_no_wasm_target))]
+#[tokio::test(flavor = "multi_thread")]
+async fn n_c2_compute_request_module_override_denied() {
+    let _guard = network_test_guard().await;
+    let temp = tempfile::tempdir().expect("tempdir");
+    let home = temp.path();
+    let peer_key = fixed_keypair(83);
+    let peer_peer = peer_key.public().to_peer_id();
+
+    // Must match the ComputeInput world_ref pattern `^wld_[a-zA-Z0-9]+$`.
+    const WORLD_A: &str = "wld_pin1";
+
+    // Both module ids are INSTALLED — without the pin, the override would
+    // execute real WASM under the unscoped id.
+    install_test_module(home, "basic-combat").await;
+    install_test_module_as(home, "basic-combat-alt", "basic-combat").await;
+
+    let db_path = temp.path().join("workspace").join("state.db");
+    let pool = crate::db::Schema::init(&db_path)
+        .await
+        .expect("workspace DB initializes");
+    seed_world(&pool, "ctr_test", WORLD_A).await;
+
+    // The peer's module_scope allowlists ONLY basic-combat.
+    let allow_path = nexus_home_layout::connect_allowlist_path(home);
+    std::fs::create_dir_all(allow_path.parent().expect("parent dir")).expect("mkdir");
+    std::fs::write(
+        &allow_path,
+        serde_json::json!({ "peer_ids": [{
+            "peer_id": peer_peer.to_string(),
+            "world_scope": [WORLD_A],
+            "op_scope": super::invoke::SERVED_OPS,
+            "module_scope": ["basic-combat"],
+        }] })
+        .to_string(),
+    )
+    .expect("write allowlist");
+
+    let (config, _, _) = super::build_host_config(
+        home,
+        &[],
+        &["/ip4/127.0.0.1/tcp/0".to_string()],
+        Some(&db_path),
+    )
+    .await
+    .expect("N-C2 host config builds");
+    let host_peer = config.identity.public().to_peer_id();
+    let host = start(config).await;
+    let peer_node = start(peer_config(peer_key, vec![host_peer])).await;
+    let session = peer_node
+        .connect(host.listen_addrs()[0].clone())
+        .await
+        .expect("scoped peer handshake");
+    let peer_claim = serde_json::json!(peer_peer.to_string());
+
+    session
+        .invoke(
+            "upsert",
+            serde_json::json!({
+                "extensions": { "nexus": { "peer_id": peer_claim } },
+                "knowledge_entries": [
+                    combat_entry_fixture("kb_pin_a", WORLD_A, 100, 20, 10),
+                    combat_entry_fixture("kb_pin_d", WORLD_A, 30, 5, 5),
+                ],
+            }),
+        )
+        .await
+        .expect("seed combatants");
+
+    // The staged session declares the in-scope module id (plus the combat
+    // invocation the module needs)...
+    nexus_local_db::compute_session::insert_compute_session(
+        &pool,
+        "ses_pin",
+        "kb_pin_a",
+        &serde_json::json!({
+            "module_id": "basic-combat",
+            "attacker_id": "kb_pin_a",
+            "defender_id": "kb_pin_d",
+        })
+        .to_string(),
+    )
+    .await
+    .expect("stage session");
+
+    // ...but the request's dynamic computable tries to override it with an
+    // installed-but-unscoped module id. The pin must deny.
+    match session
+        .invoke(
+            "compute",
+            serde_json::json!({
+                "extensions": { "nexus": { "peer_id": peer_claim } },
+                "session_id": "ses_pin",
+                "entry_id": "kb_pin_a",
+                "computable": { "module_id": "basic-combat-alt" },
+                "settle": false,
+            }),
+        )
+        .await
+    {
+        Err(InvokeError::Wire(envelope)) => assert_eq!(
+            envelope.code, "module_not_scoped",
+            "a request-carried module_id override outside the peer's module_scope must be denied"
+        ),
+        other => panic!("module override must be denied, got {other:?}"),
+    }
+
+    // Zero side effects: the staged session state is untouched.
+    let stored: Option<String> =
+        sqlx::query_scalar("SELECT state_json FROM compute_sessions WHERE session_id = ?")
+            .bind("ses_pin")
+            .fetch_optional(&pool)
+            .await
+            .expect("read staged session");
+    assert_eq!(
+        stored.as_deref(),
+        Some(r#"{"attacker_id":"kb_pin_a","defender_id":"kb_pin_d","module_id":"basic-combat"}"#),
+        "the denied override must not advance session state"
+    );
+
+    // A same-id override (repeat of the gated id) is legal and served —
+    // proves the pin compares, it does not blanket-ban computable.module_id.
+    let served = session
+        .invoke(
+            "compute",
+            serde_json::json!({
+                "extensions": { "nexus": { "peer_id": peer_claim } },
+                "session_id": "ses_pin",
+                "entry_id": "kb_pin_a",
+                "computable": { "module_id": "basic-combat" },
+                "settle": false,
+            }),
+        )
+        .await
+        .expect("a same-id module_id override is served");
+    assert_eq!(served.payload["session_id"], "ses_pin");
 
     host.shutdown().await.expect("host shuts down");
     peer_node.shutdown().await.expect("peer shuts down");
