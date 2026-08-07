@@ -58,16 +58,34 @@
 //!    world-A relation row could otherwise legally reference world-B
 //!    entries (cross-world edge + id-existence oracle).
 //!
-//! ## Async bridge
+//! ## Bounded async bridge (R2 closure, V1.154 P1)
 //!
 //! The orchestrators are native `async fn` (V1.153 P0 T2) but the handler
 //! runs synchronously on the spoke-connect network event loop, so dispatch
-//! bridges with `tokio::task::block_in_place` +
-//! `Handle::current().block_on` (multi-thread runtime only — both the CLI
-//! `main` and `#[tokio::test]` default are multi-thread). The adapter is a
-//! **per-process singleton** constructed once at host boot and held for the
-//! process lifetime (P1 spec § Process model); per-invoke construction is
-//! deliberately avoided.
+//! moves the call to a per-process **`spawn_blocking` lane** capped by one
+//! `tokio::sync::Semaphore` (spec §5.3 — the architect-locked shape; the
+//! lane `Arc` lives beside the adapter singleton captured here). The
+//! orchestrator call runs as a `Handle::block_on` inside the lane closure —
+//! legal there because a blocking-pool thread is not inside an async
+//! execution context, unlike the event-loop thread that calls the handler
+//! (where `Handle::block_on` panics and the old worker-blocking bridge is
+//! banned by the R2 contract). The handler thread waits with a bounded
+//! synchronous acquire (polling the semaphore future with a parking waker)
+//! and a bounded result wait over a std channel.
+//!
+//! Architect-locked limits (spec §5.4 — [`BridgeLimits`]): **8** concurrent
+//! invokes per process, a **30,000 ms** per-invoke deadline, and **500**
+//! logical collection entries or **2 MiB** serialized request bytes
+//! (whichever is reached first). The deadline bounds the permit acquire
+//! AND the result wait; the permit stays held until the lane closure
+//! returns (the closure cannot be force-cancelled safely) — a late result
+//! is discarded. Denials extend the N-C1 envelope table with the locked
+//! bridge codes: `invoke_busy` (lane saturated), `invoke_deadline_exceeded`
+//! (per-invoke budget exhausted), `payload_too_large` (over-cap payload).
+//!
+//! The adapter is a **per-process singleton** constructed once at host
+//! boot and held for the process lifetime (P1 spec § Process model);
+//! per-invoke construction is deliberately avoided.
 
 use super::allowlist::PeerScope;
 use libp2p::PeerId;
@@ -82,7 +100,9 @@ use serde_json::{Map, Value};
 use spoke_connect::InvokeHandlerV2;
 use spoke_schemas::connect::connect_invoke_response::ErrorEnvelope;
 use std::collections::HashMap;
+use std::future::Future;
 use std::sync::Arc;
+use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
 /// The write ops this host serves (N-C1).
 ///
@@ -96,23 +116,86 @@ use std::sync::Arc;
 /// dispatch routing lockstep holds by construction.
 pub const SERVED_OPS: [&str; 3] = ["upsert", "promote", "relate"];
 
-/// Build the N-C1 `InvokeHandlerV2`: a fail-closed op gate + allowlist
-/// world/op scope gate in front of the three `NexusAdapter` orchestrators,
-/// resolving caller identity from the **session peer** (spoke-connect 0.9.2
-/// session-peer hook, spec §3.2 / §5.1).
+/// Architect-locked bounded-bridge limits (spec §5.4).
+///
+/// Defaults are the locked numbers — **8** concurrent invokes per process,
+/// a **30,000 ms** per-invoke deadline, and **500** logical collection
+/// entries or **2 MiB** serialized request bytes, whichever is reached
+/// first. Tests construct explicit values (1 permit / short deadline) to
+/// exercise saturation and deadline paths deterministically.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BridgeLimits {
+    /// Max concurrent in-flight invokes per process (semaphore permits).
+    pub max_concurrent_invokes: usize,
+    /// Per-invoke deadline — bounds the permit acquire AND the result wait
+    /// (a busy-queue wait respects the same budget).
+    pub invoke_deadline: std::time::Duration,
+    /// Max logical collection entries per payload (the operation's batch
+    /// arrays).
+    pub max_collection_entries: usize,
+    /// Max serialized request bytes per payload.
+    pub max_payload_bytes: usize,
+}
+
+impl Default for BridgeLimits {
+    fn default() -> Self {
+        Self {
+            max_concurrent_invokes: 8,
+            invoke_deadline: std::time::Duration::from_secs(30),
+            max_collection_entries: 500,
+            max_payload_bytes: 2 * 1024 * 1024,
+        }
+    }
+}
+
+/// Build the N-C1 `InvokeHandlerV2` on the architect-locked bridge limits.
+///
+/// The dispatch pipeline (spec §5.4 — [`BridgeLimits::default`]) is a
+/// fail-closed op gate + allowlist world/op scope gate in front of the
+/// three `NexusAdapter` orchestrators, resolving caller identity from the
+/// **session peer** (spoke-connect 0.9.2 session-peer hook, spec §3.2 /
+/// §5.1).
 ///
 /// The returned closure is `Send + Sync` (the node holds it in an
-/// `Arc<InvokeHandlerV2>`); `scope` and `adapter` are captured for the
-/// process lifetime — one adapter per Connect process (P1 spec § Process
-/// model).
+/// `Arc<InvokeHandlerV2>`); `scope`, `adapter`, and the bounded lane are
+/// captured for the process lifetime — one adapter and one lane per
+/// Connect process (P1 spec § Process model).
 #[must_use]
 pub fn build_handler(
     scope: PeerScope,
     adapter: Arc<NexusAdapter<'static>>,
 ) -> Arc<InvokeHandlerV2> {
-    Arc::new(move |peer: &PeerId, op: &str, payload: Value| {
-        dispatch(&scope, &adapter, peer, op, payload)
-    })
+    build_handler_with_limits(scope, adapter, BridgeLimits::default()).0
+}
+
+/// Like [`build_handler`] with injectable bridge limits.
+///
+/// The test seam for the R2 bounded bridge: tests use 1 permit / short
+/// deadlines to exercise saturation and deadline paths deterministically;
+/// the default limits are the architect-locked numbers. Also returns the
+/// process-wide lane so tests (and future multi-route wiring) can observe
+/// the same semaphore the handler acquires — e.g. to hold permits and
+/// force a saturation.
+#[must_use]
+pub fn build_handler_with_limits(
+    scope: PeerScope,
+    adapter: Arc<NexusAdapter<'static>>,
+    limits: BridgeLimits,
+) -> (Arc<InvokeHandlerV2>, Arc<Semaphore>) {
+    let lane = Arc::new(Semaphore::new(limits.max_concurrent_invokes));
+    let lane_for_handler = Arc::clone(&lane);
+    let handler = Arc::new(move |peer: &PeerId, op: &str, payload: Value| {
+        dispatch(
+            &scope,
+            Arc::clone(&adapter),
+            &lane_for_handler,
+            limits,
+            peer,
+            op,
+            payload,
+        )
+    });
+    (handler, lane)
 }
 
 /// One served write op.
@@ -127,7 +210,9 @@ enum Route {
 /// any orchestrator call, so denials have zero side effects.
 fn dispatch(
     scope: &PeerScope,
-    adapter: &NexusAdapter<'static>,
+    adapter: Arc<NexusAdapter<'static>>,
+    lane: &Arc<Semaphore>,
+    limits: BridgeLimits,
     peer: &PeerId,
     op: &str,
     payload: Value,
@@ -222,24 +307,66 @@ fn dispatch(
         )));
     }
 
-    // 6. Stored-world gate (fix loop, Critical): the orchestrators' stored
-    //    lookups and CAS updates are world-agnostic (they match on id +
-    //    revision only), so a payload claiming world A could rewrite a row
-    //    stored in world B by replaying the revision the OCC rejects
-    //    disclose. Before the orchestrator CAS runs, verify every targeted
-    //    existing row's stored world_id equals the payload-claimed world_id;
-    //    a mismatch denies with zero side effects.
+    // 6. Payload/batch cap (spec §5.4 — architect-locked): 500 logical
+    //    collection entries OR 2 MiB serialized request bytes, whichever
+    //    is reached first. Checked before the bridge so an over-cap
+    //    request never consumes a lane permit or reaches the orchestrator.
+    let entries = payload_collection_entries(route, &payload);
+    if entries > limits.max_collection_entries {
+        return Err(payload_too_large(&format!(
+            "payload carries {entries} collection entries; the cap is {}",
+            limits.max_collection_entries
+        )));
+    }
+    let bytes = serde_json::to_vec(&payload)
+        .expect("a serde_json::Value always serializes")
+        .len();
+    if bytes > limits.max_payload_bytes {
+        return Err(payload_too_large(&format!(
+            "payload serializes to {bytes} bytes; the cap is {}",
+            limits.max_payload_bytes
+        )));
+    }
+
+    // 7. Bounded async bridge (R2 closure — spec §5.3/§5.4): the
+    //    orchestrators are native async fn but this closure is sync on the
+    //    node's event loop, so the call moves to the per-process
+    //    `spawn_blocking` lane capped by [`BridgeLimits`]. The handler runs
+    //    inside an entered tokio context (the node's event-loop task),
+    //    where `Handle::block_on` panics — the lane closure's own
+    //    `block_on` is legal because blocking-pool threads are outside any
+    //    async execution context.
     //
-    // 7. Route through the orchestrator. The orchestrators are native async
-    //    fn (V1.153 P0 T2) but this closure is sync on the node's event
-    //    loop: bridge with block_in_place + Handle::block_on (multi-thread
-    //    runtime; the CLI main and tokio::test default are multi-thread).
-    tokio::task::block_in_place(|| {
-        tokio::runtime::Handle::current().block_on(async {
-            verify_stored_worlds(adapter, route, &payload).await?;
-            route_orchestrator(route, adapter, payload).await
-        })
-    })
+    // 8. Stored-world gate (fix loop, Critical), inside the lane closure
+    //    before the orchestrator: the orchestrators' stored lookups and
+    //    CAS updates are world-agnostic (they match on id + revision only),
+    //    so a payload claiming world A could rewrite a row stored in world
+    //    B by replaying the revision the OCC rejects disclose. Before the
+    //    orchestrator CAS runs, verify every targeted existing row's stored
+    //    world_id equals the payload-claimed world_id; a mismatch denies
+    //    with zero side effects.
+    let deadline = std::time::Instant::now() + limits.invoke_deadline;
+    let permit = acquire_permit(lane, deadline)?;
+    let (tx, rx) = std::sync::mpsc::channel();
+    tokio::task::spawn_blocking(move || {
+        // Permit semantics (spec §5.4): the lane closure cannot be
+        // force-cancelled safely, so the permit moves in here and stays
+        // held until the closure returns — the deadline only bounds the
+        // caller's wait, and any late result is discarded below.
+        let _permit = permit;
+        let result = tokio::runtime::Handle::current().block_on(async {
+            verify_stored_worlds(&adapter, route, &payload).await?;
+            route_orchestrator(route, &adapter, payload).await
+        });
+        let _ = tx.send(result);
+    });
+    match rx.recv_timeout(deadline.saturating_duration_since(std::time::Instant::now())) {
+        Ok(result) => result,
+        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => Err(deadline_exceeded()),
+        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => Err(bridge_fault(
+            "invoke lane worker terminated before returning a result",
+        )),
+    }
 }
 
 /// Run one served op through its orchestrator and map the outcome to the
@@ -319,6 +446,22 @@ fn payload_world_ids(route: Route, payload: &Value) -> Option<Vec<String>> {
             let relation = payload.get("relation")?;
             Some(vec![world_id_of(relation)?.to_string()])
         }
+    }
+}
+
+/// Logical collection-entry count for the payload cap (spec §5.4): the
+/// operation's batch arrays. `upsert` counts `knowledge_entries`;
+/// `promote` / `relate` carry a single candidate / relation (1 when
+/// present). The orchestrator's typed parse rejects malformed payloads
+/// after the cap gate.
+fn payload_collection_entries(route: Route, payload: &Value) -> usize {
+    match route {
+        Route::Upsert => payload
+            .get("knowledge_entries")
+            .and_then(Value::as_array)
+            .map_or(0, Vec::len),
+        Route::Promote => usize::from(payload.get("candidate").is_some()),
+        Route::Relate => usize::from(payload.get("relation").is_some()),
     }
 }
 
@@ -521,6 +664,96 @@ fn cross_world_denied(
     ))
 }
 
+/// A [`std::task::Wake`] impl that unparks the owning thread — the waker
+/// tokio's semaphore uses to wake the acquiring thread when a permit is
+/// released.
+struct ThreadWaker(Arc<std::thread::Thread>);
+
+impl std::task::Wake for ThreadWaker {
+    fn wake(self: Arc<Self>) {
+        self.0.unpark();
+    }
+}
+
+/// Synchronously acquire a lane permit, bounded by `deadline`.
+///
+/// The handler runs inside an entered tokio context (the node's event-loop
+/// task), where `Handle::block_on` panics and the R2 contract bans the old
+/// worker-blocking bridge — so the acquire polls the tokio semaphore
+/// future directly from this thread, parking between polls. `park_timeout`
+/// keeps the wait bounded even when no wake arrives; the semaphore unparks
+/// the thread via [`ThreadWaker`] as soon as a permit is released, so a
+/// briefly saturated lane does not wait out the deadline.
+fn acquire_permit(
+    lane: &Arc<Semaphore>,
+    deadline: std::time::Instant,
+) -> Result<OwnedSemaphorePermit, ErrorEnvelope> {
+    let mut acquire = std::pin::pin!(lane.clone().acquire_owned());
+    let waker: std::task::Waker = Arc::new(ThreadWaker(Arc::new(std::thread::current()))).into();
+    let mut cx = std::task::Context::from_waker(&waker);
+    loop {
+        match acquire.as_mut().poll(&mut cx) {
+            std::task::Poll::Ready(Ok(permit)) => return Ok(permit),
+            std::task::Poll::Ready(Err(_)) => {
+                return Err(bridge_fault("invoke lane is closed"));
+            }
+            std::task::Poll::Pending => {}
+        }
+        let now = std::time::Instant::now();
+        if now >= deadline {
+            return Err(busy_lane());
+        }
+        std::thread::park_timeout(deadline - now);
+    }
+}
+
+/// Saturated-lane denial (spec §5.3): every permit is held by in-flight
+/// invokes and none freed within the per-invoke deadline. Retry-safe — a
+/// later invoke may be served.
+fn busy_lane() -> ErrorEnvelope {
+    ErrorEnvelope {
+        code: "invoke_busy".to_string(),
+        message: "invoke lane saturated: too many concurrent invokes in flight; retry later"
+            .to_string(),
+        details: Map::new(),
+        extensions: HashMap::default(),
+    }
+}
+
+/// Deadline denial (spec §5.4): the invoke did not complete within the
+/// per-invoke budget. Retry-safe.
+fn deadline_exceeded() -> ErrorEnvelope {
+    ErrorEnvelope {
+        code: "invoke_deadline_exceeded".to_string(),
+        message: "invoke exceeded the per-invoke deadline".to_string(),
+        details: Map::new(),
+        extensions: HashMap::default(),
+    }
+}
+
+/// Payload-cap denial (spec §5.4): the request is above the locked batch
+/// caps. Retry-safe for peers that can shrink their payload.
+fn payload_too_large(reason: &str) -> ErrorEnvelope {
+    ErrorEnvelope {
+        code: "payload_too_large".to_string(),
+        message: format!("invoke payload rejected: {reason}"),
+        details: Map::new(),
+        extensions: HashMap::default(),
+    }
+}
+
+/// Bridge fault: the lane could not run the invoke at all (closed
+/// semaphore, lane worker terminated). Server fault — not retry-safe,
+/// mapped through the locked `internal_error` default.
+fn bridge_fault(reason: &str) -> ErrorEnvelope {
+    ErrorEnvelope {
+        code: "internal_error".to_string(),
+        message: format!("invoke bridge failure: {reason}"),
+        details: Map::new(),
+        extensions: HashMap::default(),
+    }
+}
+
 /// Locked `SpokeRejectCode → ErrorEnvelope` mapping (P1 spec § OCC + error
 /// mapping — verbatim):
 ///
@@ -611,5 +844,218 @@ fn denied(reason: &str) -> ErrorEnvelope {
         message: format!("op denied: {reason}"),
         details: Map::new(),
         extensions: HashMap::default(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use libp2p::identity::Keypair;
+    use nexus_home_layout::connect_allowlist_path;
+    use std::time::Duration;
+
+    const WORLD_A: &str = "wld_bridge_a";
+
+    /// A deterministic Ed25519 keypair (the interop golden-test shape).
+    fn fixed_keypair(seed: u8) -> Keypair {
+        Keypair::ed25519_from_bytes([seed; 32]).expect("fixed seed is a valid ed25519 secret")
+    }
+
+    /// A wire-shape upsert entry carrying the `extensions.nexus.world_id`
+    /// carrier the dispatch gates read.
+    fn entry_fixture(entry_id: &str, world_id: &str) -> Value {
+        serde_json::json!({
+            "schema_version": 1,
+            "entry_id": entry_id,
+            "entry_type": "character",
+            "canonical_name": entry_id,
+            "status": "confirmed",
+            "revision": null,
+            "body": { "summary": format!("{entry_id} summary") },
+            "extensions": { "nexus": { "world_id": world_id } },
+        })
+    }
+
+    /// A hermetic workspace DB + per-process adapter (the N-C1 golden-test
+    /// shape): FK rows for `WORLD_A` so the production adapter's put paths
+    /// can persist.
+    async fn test_adapter() -> (tempfile::TempDir, Arc<NexusAdapter<'static>>) {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let db_path = temp.path().join("workspace").join("state.db");
+        let pool = crate::db::Schema::init(&db_path)
+            .await
+            .expect("workspace DB initializes");
+        sqlx::query(
+            "INSERT OR IGNORE INTO creators (creator_id, display_name, status, cached_at, data) \
+             VALUES (?, 'test creator', 'active', 'now', '{}')",
+        )
+        .bind("ctr_bridge")
+        .execute(&pool)
+        .await
+        .expect("creator seed");
+        sqlx::query(
+            "INSERT OR IGNORE INTO narrative_worlds \
+             (world_id, workspace_id, owner_creator_id, title, slug, status, visibility, time_policy, metadata_json) \
+             VALUES (?, 'wrk_bridge', 'ctr_bridge', ?, ?, 'active', 'private', 'manual', '{}')",
+        )
+        .bind(WORLD_A)
+        .bind(WORLD_A)
+        .bind(WORLD_A)
+        .execute(&pool)
+        .await
+        .expect("world seed");
+        (temp, Arc::new(NexusAdapter::new(pool)))
+    }
+
+    /// A `PeerScope` allowlisting `peer` for `WORLD_A` with the upsert op,
+    /// written through the on-disk allowlist shape (like the CLI boot).
+    fn scoped_scope(peer: PeerId) -> PeerScope {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let allow_path = connect_allowlist_path(temp.path());
+        std::fs::create_dir_all(allow_path.parent().expect("parent dir")).expect("mkdir");
+        std::fs::write(
+            &allow_path,
+            serde_json::json!({ "peer_ids": [{
+                "peer_id": peer.to_string(),
+                "world_scope": [WORLD_A],
+                "op_scope": ["upsert"],
+            }] })
+            .to_string(),
+        )
+        .expect("write allowlist");
+        crate::commands::connect::allowlist::load(temp.path(), &[]).expect("scoped allowlist loads")
+    }
+
+    /// A scoped peer + handler + lane over a hermetic adapter. `_temp`
+    /// keeps the DB directory alive for the test's duration.
+    async fn test_handler(
+        limits: BridgeLimits,
+    ) -> (
+        Arc<InvokeHandlerV2>,
+        Arc<Semaphore>,
+        PeerId,
+        tempfile::TempDir,
+    ) {
+        let peer = fixed_keypair(7).public().to_peer_id();
+        let scope = scoped_scope(peer);
+        let (_temp, adapter) = test_adapter().await;
+        let (handler, lane) = build_handler_with_limits(scope, adapter, limits);
+        (handler, lane, peer, _temp)
+    }
+
+    /// (a) Saturated lane: with the only permit held by a concurrent
+    /// invoke, the next invoke fails fast with the locked `invoke_busy`
+    /// envelope (spec §5.3) instead of queuing; once the permit frees, the
+    /// lane serves again.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn saturated_lane_returns_invoke_busy_then_recovers() {
+        let (handler, lane, peer, _temp) = test_handler(BridgeLimits {
+            max_concurrent_invokes: 1,
+            invoke_deadline: Duration::from_millis(50),
+            ..BridgeLimits::default()
+        })
+        .await;
+        let held = lane
+            .clone()
+            .try_acquire_owned()
+            .expect("test holds the only lane permit");
+        let payload = serde_json::json!({
+            "knowledge_entries": [entry_fixture("kb_b1", WORLD_A)],
+        });
+        match handler(&peer, "upsert", payload.clone()) {
+            Err(envelope) => assert_eq!(envelope.code, "invoke_busy"),
+            Ok(_) => panic!("saturated lane must reject with invoke_busy"),
+        }
+        drop(held);
+        let served = handler(&peer, "upsert", payload).expect("lane recovers after permit frees");
+        assert_eq!(served["knowledge_entries"][0]["entry_id"], "kb_b1");
+    }
+
+    /// (b) Slow invoke: a zero-budget deadline override simulates any op
+    /// exceeding the budget — the acquire completes synchronously on a
+    /// free permit, so the result wait deterministically exceeds the
+    /// remaining budget and returns the locked `invoke_deadline_exceeded`
+    /// envelope (spec §5.4).
+    #[tokio::test(flavor = "multi_thread")]
+    async fn slow_invoke_returns_invoke_deadline_exceeded() {
+        let (handler, _lane, peer, _temp) = test_handler(BridgeLimits {
+            max_concurrent_invokes: 1,
+            invoke_deadline: Duration::ZERO,
+            ..BridgeLimits::default()
+        })
+        .await;
+        let payload = serde_json::json!({
+            "knowledge_entries": [entry_fixture("kb_b2", WORLD_A)],
+        });
+        match handler(&peer, "upsert", payload) {
+            Err(envelope) => assert_eq!(envelope.code, "invoke_deadline_exceeded"),
+            Ok(_) => panic!("a zero-budget invoke must reject with invoke_deadline_exceeded"),
+        }
+    }
+
+    /// A waiter whose permit frees mid-wait is served (the acquire wakes
+    /// on release instead of waiting out the deadline): one permit, a long
+    /// deadline, the test holds the permit and releases it after the
+    /// invoke is queued.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn lane_waiter_is_served_once_permit_frees() {
+        let (handler, lane, peer, _temp) = test_handler(BridgeLimits {
+            max_concurrent_invokes: 1,
+            invoke_deadline: Duration::from_secs(5),
+            ..BridgeLimits::default()
+        })
+        .await;
+        let held = lane
+            .clone()
+            .try_acquire_owned()
+            .expect("test holds the only lane permit");
+        let handler_for_task = Arc::clone(&handler);
+        let invoke = tokio::spawn(async move {
+            handler_for_task(
+                &peer,
+                "upsert",
+                serde_json::json!({
+                    "knowledge_entries": [entry_fixture("kb_b3", WORLD_A)],
+                }),
+            )
+        });
+        // Give the invoke time to park in the acquire wait, then free the
+        // permit; the waiter must be woken and served.
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        drop(held);
+        let served = invoke.await.expect("invoke task completes");
+        let served = served.expect("waiter is served once the permit frees");
+        assert_eq!(served["knowledge_entries"][0]["entry_id"], "kb_b3");
+    }
+
+    /// (c) Entry cap: 501 logical collection entries (> 500) are rejected
+    /// with the locked `payload_too_large` envelope before the bridge
+    /// (spec §5.4).
+    #[tokio::test(flavor = "multi_thread")]
+    async fn oversize_entry_count_returns_payload_too_large() {
+        let (handler, _lane, peer, _temp) = test_handler(BridgeLimits::default()).await;
+        let entries: Vec<Value> = (0..501)
+            .map(|i| entry_fixture(&format!("kb_ov_{i}"), WORLD_A))
+            .collect();
+        let payload = serde_json::json!({ "knowledge_entries": entries });
+        match handler(&peer, "upsert", payload) {
+            Err(envelope) => assert_eq!(envelope.code, "payload_too_large"),
+            Ok(_) => panic!("an over-cap payload must reject with payload_too_large"),
+        }
+    }
+
+    /// (c) Byte cap: a payload serializing above 2 MiB is rejected with
+    /// the locked `payload_too_large` envelope before the bridge (spec
+    /// §5.4).
+    #[tokio::test(flavor = "multi_thread")]
+    async fn oversize_payload_bytes_returns_payload_too_large() {
+        let (handler, _lane, peer, _temp) = test_handler(BridgeLimits::default()).await;
+        let mut entry = entry_fixture("kb_ov_bytes", WORLD_A);
+        entry["body"] = serde_json::json!({ "summary": "x".repeat(2 * 1024 * 1024 + 1024) });
+        let payload = serde_json::json!({ "knowledge_entries": [entry] });
+        match handler(&peer, "upsert", payload) {
+            Err(envelope) => assert_eq!(envelope.code, "payload_too_large"),
+            Ok(_) => panic!("an over-cap payload must reject with payload_too_large"),
+        }
     }
 }

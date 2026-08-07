@@ -727,8 +727,9 @@ async fn cli_wiring_starts_a_node_with_persisted_identity_and_allowlist() {
 /// `op_unsupported` and zero side effects; the session stays usable.
 ///
 /// `flavor = "multi_thread"` mirrors the CLI runtime (`connect start` runs
-/// on a multi-thread tokio runtime — the dispatch bridge is
-/// `block_in_place` + `Handle::block_on`, which requires it).
+/// on a multi-thread tokio runtime — the R2 bounded bridge parks the
+/// caller inside the runtime while the orchestrator runs on a
+/// `spawn_blocking` lane, which requires a multi-thread runtime).
 #[tokio::test(flavor = "multi_thread")]
 async fn n_c1_peer_upserts_promotes_relates_with_world_scoping() {
     let _guard = network_test_guard().await;
@@ -1861,4 +1862,19 @@ async fn n_c1_relate_create_rejects_foreign_world_endpoints() {
 
     host.shutdown().await.expect("host shuts down");
     peer_node.shutdown().await.expect("peer shuts down");
+}
+
+/// R2 source assertion (V1.154 P1): the invoke bridge must not use the
+/// banned worker-blocking `block_in_place` bridge — spec §5.3 locks a
+/// per-process `spawn_blocking` lane bounded by a `Semaphore` instead.
+/// Checked against the handler source itself, so any reintroduction fails
+/// this test.
+#[test]
+fn invoke_bridge_source_has_no_block_in_place() {
+    let source = include_str!("invoke.rs");
+    assert!(
+        !source.contains("block_in_place"),
+        "invoke.rs must keep the bounded spawn_blocking bridge (R2): \
+         block_in_place is banned in the invoke path"
+    );
 }
