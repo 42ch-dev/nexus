@@ -685,7 +685,7 @@ All write tools route through the same admission pipeline (`Allowlist → Active
 | Command | Purpose |
 | --- | --- |
 | `nexus42 system preset list` | List embedded + user + system presets with `run_intents` (V1.33 expands beyond `_system.*` only) |
-| `nexus42 system preset validate <path>` | Validate preset bundle via shared orchestration facade (V1.33) |
+| `nexus42 system preset validate <path> [--offline]` | Validate preset bundle via shared orchestration facade (V1.33). `--offline` (V1.153 P3) runs the same checks in-process via the validator core — no daemon required (daemon-backed `POST /v1/daemon/presets:validate` is the default when `--offline` is absent; `nexus-runtime` does not serve the daemon router). Invalid presets exit non-zero. |
 
 **Power-user orchestration** (unchanged):
 
