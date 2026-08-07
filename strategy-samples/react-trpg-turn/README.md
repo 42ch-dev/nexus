@@ -23,7 +23,6 @@ react-trpg-turn/
 ├── preset.yaml            # one bundle, two named lanes (routed by trigger_type)
 ├── templates/
 │   ├── lane-route.md               # lane selector judge (GO = mechanical, NOGO = natural language)
-│   ├── mechanical-op-request.md    # op-request contract — explicit client action
 │   ├── natural-language-intent.md  # intent parse — derived structure, raw input preserved
 │   ├── natural-language-op-request.md  # op-request contract — propose, never pre-announce
 │   ├── settle-receipt.md           # receipt acceptance — sole mechanical source, no recompute
@@ -60,17 +59,26 @@ natural-language actions into the preset lanes.
 
 ### Mechanical-op lane (trigger type 2)
 
-Explicit mechanical action (attack, cast, shield block, check shortcut):
+Explicit mechanical action (attack, cast, shield block, check shortcut) —
+**settle-first**, with no AI step in the request path:
 
 1. The client submits a stable `operationId` + `params`.
-2. The local rules module settles FIRST — the host invokes the E2 `compute`
-   op over Connect (host-local WASM module; see
-   [Settlement](#settlement-host-local-module-over-connect)).
+2. The host settles IMMEDIATELY: the client-supplied op id + params are
+   passed through **unchanged** to the E2 `compute` op over Connect
+   (host-local WASM module; see [Settlement](#settlement-host-local-module-over-connect)).
+   The local rules module is the only thing that verifies, computes, and
+   produces the result — no LLM round-trip precedes settlement.
 3. The AI narrates from the confirmed receipt ONLY
    (`templates/settle-receipt.md` → `templates/receipt-narration.md`).
-   Narration is optional: when UI feedback already suffices, the client may
-   skip the narration node and render the receipt directly.
-4. The AI never recalculates or overrides settlement.
+   Narration is optional at the client's discretion: when UI feedback
+   already suffices, the client may run only the settle-receipt step (or
+   skip the graph entirely) and render the receipt directly. The inner-graph
+   format has no conditional node skip, so the skip is a client-runtime
+   choice; the preset declares the full narration-capable flow.
+4. The AI never recalculates or overrides settlement. The mechanical
+   op-request contract is a client contract: the op id + params are
+   client-supplied and passed through unchanged — the AI never generates,
+   rewrites, or overrides them.
 
 ### Natural-language-turn lane (trigger type 3)
 
@@ -138,12 +146,12 @@ Principles are encoded here; prose is not copied.
 |---|---|
 | 目标 (goals: Nexus orchestrates, Spoke carries protocol, local rules module settles, AI narrates) | README "Division of labor" + "Settlement" |
 | 触发类型 1 — 纯界面操作 (pure UI ops) | README "Browse guard" (contract, not a preset) |
-| 触发类型 2 — 明确的机械操作 (explicit mechanical ops) | `preset.yaml` mechanical-op lane + `templates/mechanical-op-request.md` + `templates/settle-receipt.md` + `templates/receipt-narration.md` |
+| 触发类型 2 — 明确的机械操作 (explicit mechanical ops) | `preset.yaml` mechanical-op lane (settle-first, no AI in the request path) + README "Mechanical-op lane" + `templates/settle-receipt.md` + `templates/receipt-narration.md` |
 | 触发类型 3 — 自然语言行动 (natural-language actions) | `preset.yaml` natural-language-turn lane + `templates/natural-language-intent.md` + `templates/natural-language-op-request.md` + `templates/settle-receipt.md` + `templates/receipt-narration.md` |
 | 核心回合流程 1 — 保存原始输入 (raw input preserved) | `templates/natural-language-intent.md` (ledger preservation) + README run payload `input` |
 | 核心回合流程 2 — 组装本轮上下文 (context assembly) | Run payload `state` (caller-assembled context) |
 | 核心回合流程 3 — AI 判断是否需要结算 (settlement decision) | `templates/natural-language-intent.md` `needs_settlement` + `templates/natural-language-op-request.md` no-settlement path |
-| 核心回合流程 4 — 本地结算并提交状态 (local settle + commit) | Settlement step (E2 `compute` op over Connect) + README "Turn idempotency and completion" (state committed) |
+| 核心回合流程 4 — 本地结算并提交状态 (local settle + commit) | Settlement step (E2 `compute` op over Connect, read-only) + README "Settlement" (commit is the caller's write-path job) |
 | 核心回合流程 5 — AI 根据回执续写 (narrate from receipt) | `templates/settle-receipt.md` + `templates/receipt-narration.md` (confirmed results only) |
 | 核心回合流程 6 — 按依赖继续操作 (stepwise dependent ops) | `templates/natural-language-op-request.md` stepwise contract (one op per graph run) |
 | 核心回合流程 7 — 停在玩家回应点 (stop at player response) | `preset.yaml` `wait_for_player` (`ExitWhen::Manual`) + `templates/receipt-narration.md` "Stop at the player response point" |
@@ -153,17 +161,26 @@ Principles are encoded here; prose is not copied.
 | 输出职责 — 本地运行时输出 (ruling / mechanics / status) | The confirmed receipt (module output, echoed by `templates/settle-receipt.md`) |
 | 幂等与回合完成 (idempotency + completion) | README "Turn idempotency and completion contract" |
 | 示例 (phase-bolt worked example) | `templates/natural-language-op-request.md` `cast.phase-bolt` example |
-| MVP 验收 (acceptance items) | README "Browse guard" + "Turn idempotency and completion" + the two lanes |
+| MVP 验收 (acceptance items) | README "Browse guard" + "Turn idempotency and completion" + the two lanes; the `LocalAdapter` fallback item (basic play when Nexus/remote is unavailable) is noted as a client-runtime concern in README "Settlement", not modeled here |
 | 本阶段不包含 (exclusions) | Not included: PF2R content, prompt counts/copy, token budgets, DM Guide detail, UI art, Godot — structure only |
 
 ## Nexus surface mapping
 
 | Flow step | Nexus surface |
 |---|---|
-| Ledger writes (raw input, receipts, final output persisted by the caller) | N-C1 write ops over Connect (`upsert` / `promote` / `relate` via `@42ch/spoke-connect`) |
+| World knowledge import (worldview / character-sheet KnowledgeEntries + relations, E1 flow) | N-C1 write ops over Connect (`upsert` / `promote` / `relate` via `@42ch/spoke-connect`) |
 | Context assembly (public state, world info, characters, applicable contracts) | N-C2 read half over Connect (`check` / `assemble`) |
-| Settlement (rules module invocation) | E2 compute half: the `compute` op over Connect (N-C2 compute) against the host-local module |
+| Settlement (rules module invocation) | E2 compute half: the `compute` op over Connect (N-C2 compute) against the host-local module — **read-only over Connect** (see [Settlement](#settlement-host-local-module-over-connect)) |
 | Turn strategy orchestration | This preset bundle (capability routing + prompt templates; validated by `./strategy-samples/validate.sh react-trpg-turn`) |
+
+**Turn ledger is a client-runtime obligation.** The preset cannot persist
+anything — no preset symbol supplies a global ledger. The caller persists the
+raw player input, the op receipts, and the final output in its own turn
+ledger, and applies the idempotency/completion rules above. N-C1 write ops
+are NOT the turn ledger: they import world knowledge (KnowledgeEntry /
+Relation data); world-state updates derived from a confirmed receipt go
+through the normal write path with world-aware CAS, never through a silent
+ledger side-write.
 
 The caller's Connect peer must be allowlisted for the ops it uses
 (`world_scope` / `op_scope` on the host; `module_scope` gates which compute
@@ -176,10 +193,24 @@ Settlement maps to the E2 `compute` op: the host invokes the Connect compute
 half with the proposed `operationId` + params, and the **host-local WASM
 module** (installed under `~/.nexus42/modules/<id>/`, e.g.
 `modules/basic-combat` as the stand-in for a rules module) deterministically
-computes and commits the result, returning the confirmed structured receipt.
+computes the result and returns the confirmed structured receipt.
+
+Over the shipped Connect surface the compute op is **read-only**:
+`settle: true` is rejected with the defined `settle_not_enabled` envelope,
+so the module never commits state itself. Committing the confirmed result is
+the caller's job: persist the receipt in the turn ledger and apply world
+state changes through the write path (N-C1 `upsert` with world-aware CAS /
+structured-failure rules — never a forced overwrite).
+
 **Module bytes are never peer-supplied** — the rules module lives on the
 host; peers only request its operations. Presets orchestrate and reference
 the op; they do not embed or ship module bytes.
+
+**Runtime-availability note.** This sample assumes a live Connect surface.
+The partner's `LocalAdapter` fallback (running the local rules module
+directly when Nexus/remote is unavailable, so basic play continues) is a
+client-runtime concern: the same settle → receipt → narrate discipline
+applies, but the fallback path is not modeled in this preset.
 
 ## Validating the sample
 

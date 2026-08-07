@@ -6,10 +6,12 @@
 #
 #   * Mechanical-op lane (trigger type 2) — an explicit mechanical action
 #     (attack, cast, shield block, check shortcut) carries a stable op id +
-#     parameters; the local rules module settles FIRST (the E2 `compute` op
-#     over Connect, host-local WASM); AI narration is produced from the
-#     confirmed receipt ONLY (and is optional when UI feedback already
-#     suffices). The AI never computes, rewrites, or overrides settlement.
+#     parameters; the host settles FIRST (the E2 `compute` op over Connect,
+#     host-local WASM — read-only over Connect), passing the client-supplied
+#     op id + params through unchanged with NO AI step in the request path;
+#     AI narration is produced from the confirmed receipt ONLY (and is
+#     optional when UI feedback already suffices). The AI never computes,
+#     rewrites, or overrides settlement.
 #
 #   * Natural-language-turn lane (trigger type 3) — the AI parses the player's
 #     free-text intent, PROPOSES an op request + parameters WITHOUT
@@ -41,8 +43,10 @@
 #                  (the preset cannot prove uniqueness; see README "Turn
 #                  idempotency and completion")
 #   operationId:   stable rule-op identifier — mechanical lane: client-
-#                  supplied; natural-language lane: proposed by the AI and
-#                  confirmed by the client before settlement
+#                  supplied and passed through to the compute op UNCHANGED
+#                  (no AI step in the request path); natural-language lane:
+#                  proposed by the AI and confirmed by the client before
+#                  settlement
 #   world_id:      target World UUID
 #   creator_id:    creator owning the World
 #   input:         raw player input, VERBATIM (natural-language lane; the
@@ -92,7 +96,7 @@ states:
       nogo: natural_language_turn
 
   - id: mechanical_turn
-    description: "Mechanical-op lane: emit stable op request (client-supplied op id + params) -> settle_receipt confirms the module receipt -> receipt_narration (optional in the client) narrates confirmed results only"
+    description: "Mechanical-op lane: host settles FIRST with the client-supplied op id + params (E2 compute op over Connect, read-only), then settle_receipt confirms the module receipt -> receipt_narration (optional-skip in the client) narrates confirmed results only"
     enter:
       - kind: inner_graph
         name: mechanical_graph
@@ -119,24 +123,24 @@ states:
     terminal: true
 
 inner_graphs:
-  # Mechanical-op lane (partner trigger type 2). The client submits a stable
-  # op id + params; the host performs the settlement via the E2 `compute` op
-  # (host-local WASM module over Connect) between op_request and
-  # settle_receipt, then injects the confirmed receipt into
-  # `preset.input.receipt`. Nodes are sequenced with depends_on; each node
-  # template is self-contained (reads preset.input) per the embedded-preset
-  # convention. The host reads the op_request node output (the emitted request
-  # text) to perform the Connect op; `output_binding` exports the narration
-  # text separately from the receipt.
+  # Mechanical-op lane (partner trigger type 2). SETTLE-FIRST: the host
+  # performs the settlement via the E2 `compute` op (host-local WASM module
+  # over Connect — READ-ONLY over Connect; settle:true is rejected with
+  # `settle_not_enabled`) immediately on lane entry, passing the client-
+  # supplied op id + params through UNCHANGED — no AI step in the request
+  # path (the client's explicit mechanical action never waits on an LLM).
+  # The host injects the confirmed receipt into `preset.input.receipt`, then
+  # the graph runs: settle_receipt confirms the receipt, receipt_narration
+  # narrates confirmed results only. The final narration node is optional at
+  # the client's discretion — when UI feedback already suffices, the client
+  # may run only settle_receipt (or skip the graph entirely) and render the
+  # receipt directly; the inner-graph format has no conditional node skip,
+  # so the skip is a client-runtime choice. `output_binding` exports the
+  # narration text separately from the receipt.
   mechanical_graph:
     nodes:
-      - id: op_request
-        kind: acp_prompt
-        template_file: templates/mechanical-op-request.md
-        tool_policy: auto_grant_read_only
       - id: settle_receipt
         kind: acp_prompt
-        depends_on: [op_request]
         template_file: templates/settle-receipt.md
         tool_policy: auto_grant_read_only
       - id: receipt_narration
@@ -149,9 +153,13 @@ inner_graphs:
   # Natural-language-turn lane (partner trigger type 3). intent_parse reads
   # the raw player input; op_request proposes the op + params (never a
   # predicted result); the host settles via the E2 `compute` op between
-  # op_request and settle_receipt; receipt_narration narrates the confirmed
-  # receipt only. Chained dependent ops resolve stepwise — one op per graph
-  # run, the next turn's graph run depends on this turn's confirmed result.
+  # op_request and settle_receipt (read-only over Connect); receipt_narration
+  # narrates the confirmed receipt only. The host binds the intent_parse node
+  # output into `preset.input.parsed_intent` before running op_request (the
+  # sample's binding convention: explicitly bound prior state output — node
+  # outputs are observable and caller-injected like `preset.input.receipt`).
+  # Chained dependent ops resolve stepwise — one op per graph run, the next
+  # turn's graph run depends on this turn's confirmed result.
   natural_language_graph:
     nodes:
       - id: intent_parse

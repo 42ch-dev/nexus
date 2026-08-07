@@ -12,9 +12,11 @@ should settle — a proposal, never a result.
 ## Inputs
 
 - Raw player input (verbatim, still authoritative): `{{preset.input.input}}`
-- Parsed intent (from the intent_parse step; the host may bind it as
-  `preset.input.parsed_intent`): `{{preset.input.parsed_intent}}`
+- Parsed intent (from the intent_parse step — the host binds that node's
+  output here before this step runs): `{{preset.input.parsed_intent}}`
 - Turn id: `{{preset.input.turnId}}`
+- Operation id (caller-supplied hint when present; absent when the AI must
+  propose it): `{{preset.input.operationId}}`
 - Current public game state (context only): `{{preset.input.state}}`
 
 ## Op-request contract (natural-language lane)
@@ -36,8 +38,10 @@ should settle — a proposal, never a result.
    result. NEVER guess the full chain in one shot.
 5. The proposed `operationId` is stable per rule op (e.g. `cast.phase-bolt`,
    `check.persuasion`) and `turnId` is carried verbatim — the host rejects
-   duplicate `(turnId, operationId)` settlement. Raw input stays untouched in
-   the ledger.
+   duplicate `(turnId, operationId)` settlement. When the run payload
+   carries an `operationId` (caller hint / pre-bound candidate), propose
+   within it rather than inventing a different id. Raw input stays untouched
+   in the ledger.
 6. If the intent is too ambiguous to propose an op, emit a clarifying request
    instead of guessing an operation or its parameters.
 
@@ -49,7 +53,7 @@ Respond with ONLY a JSON object (no markdown code fences):
 {
   "turnId": "{{preset.input.turnId}}",
   "needs_settlement": true,
-  "operationId": "cast.phase-bolt",
+  "operationId": "{{preset.input.operationId}}",
   "params": {
     "caster_id": "kb_hero",
     "target_id": "kb_guard",
@@ -58,6 +62,10 @@ Respond with ONLY a JSON object (no markdown code fences):
   "request": "<one sentence: the proposed op and its inputs, ready for the host to invoke; no outcome claim>"
 }
 ```
+
+When the payload carries no `operationId`, propose the stable id for the rule
+op (e.g. `cast.phase-bolt`) in its place — the client confirms the proposed
+id before settlement.
 
 For the no-settlement case:
 
