@@ -428,24 +428,13 @@ async fn materialize_workspace(
         })?;
     }
 
-    // Use nexus_local_db for schema init (same as CLI path)
-    let pool = nexus_local_db::open_pool(&db_path)
+    // Use nexus_local_db for schema init (same as CLI path; P2 QC3 F-001:
+    // init_pool carries the co-boot migration retry/backoff).
+    nexus_local_db::init_pool(&db_path)
         .await
         .map_err(|e| NexusApiError::Internal {
-            code: "DB_OPEN_ERROR".into(),
-            message: format!("Failed to open state DB: {e}"),
-        })?;
-    nexus_local_db::run_migrations(&pool)
-        .await
-        .map_err(|e| NexusApiError::Internal {
-            code: "DB_MIGRATION_ERROR".into(),
-            message: format!("Failed to run DB migrations: {e}"),
-        })?;
-    nexus_local_db::seed_versions(&pool)
-        .await
-        .map_err(|e| NexusApiError::Internal {
-            code: "DB_SEED_ERROR".into(),
-            message: format!("Failed to seed DB versions: {e}"),
+            code: "DB_INIT_ERROR".into(),
+            message: format!("Failed to initialize state DB: {e}"),
         })?;
 
     Ok(db_path)
