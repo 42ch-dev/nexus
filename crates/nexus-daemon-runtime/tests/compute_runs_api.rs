@@ -63,6 +63,10 @@ async fn ctx_with_engine(engine: WasmEngine, extra: &[(&str, ModuleManifest, Vec
             Arc::new(CachedModule {
                 module,
                 manifest: manifest.clone(),
+                // The cache identity is (id, bytes_hash) — the entry must
+                // record the exact bytes it was compiled from so a loader's
+                // get_checked lookup can match it.
+                bytes_hash: nexus_wasm_host::hash_module_bytes(bytes),
             }),
         );
     }
