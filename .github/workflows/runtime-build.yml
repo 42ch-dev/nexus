@@ -12,33 +12,15 @@ name: Runtime Build
 # packages `nexus-runtime-<os>-<arch>.zip` + `.sha256`, uploads them, and
 # smoke-tests `--version` on the runner itself.
 #
-# Trigger set (locked by Clarify #3 + PM drift writeback 2026-08-07):
-# `workflow_dispatch` + tag `runtime-v*` ONLY. GitHub only offers
-# `workflow_dispatch` for workflows present on the DEFAULT branch, and a
-# workflow file that exists only on a non-default branch is not evaluated
-# for ANY event (verified empirically during T2: the workflow never
-# registered, no check suite was created for push/tag/pull_request). So
-# plan-branch iteration uses the TEMPORARY `push` (plan branch) +
-# `pull_request` (spec integration branch) triggers below, with the
-# workflow mirrored to the default branch by the PM; both are removed in
-# the final T2 commit.
+# Trigger set (locked by Clarify #3): `workflow_dispatch` + tag
+# `runtime-v*` ONLY. Note: `workflow_dispatch` is only offered once this
+# file is on the default branch; release-channel automation polish is E2+.
 
 on:
   workflow_dispatch:
   push:
-    # TEMPORARY (T2 iteration only): iteration vehicle while the workflow is
-    # not on the default branch. REMOVE before merge — the delivered trigger
-    # set is workflow_dispatch + tag runtime-v* only.
-    branches:
-      - plan/v1.153-p2-nexus-runtime-headless-bin-windows-x64
     tags:
       - 'runtime-v*'
-  pull_request:
-    # TEMPORARY (T2 iteration only): PR-based iteration vehicle (see header
-    # note). REMOVE before merge — the delivered trigger set is
-    # workflow_dispatch + tag runtime-v* only.
-    branches:
-      - iteration/v1.153
 
 concurrency:
   group: runtime-build-${{ github.ref }}
