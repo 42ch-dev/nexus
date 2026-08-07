@@ -81,6 +81,12 @@ pub mod pack;
 // (spec §7.4 import path: `nexus_spoke_adapter::NexusAdapter`).
 pub use adapter::NexusAdapter;
 
+// V1.154 P2 (R3 closure): shared world-conflict classification predicate for
+// the adapter's `SpokeReject` carries (spec §3.2 — fixed `world_conflict`
+// wire spelling). Host mappings (Connect ErrorEnvelope, daemon HTTP) use it
+// instead of re-sniffing the details marker.
+pub use adapter::knowledge_entry_port::is_world_conflict_reject;
+
 // V1.145 P2 — `SpokeBackedKbStore` (the `KbStore` impl injected at the MCA
 // `assemble_moment` wiring site) + the scoped-read result type. Re-exported so
 // the MCA composition root (`apps/nexus42`) constructs it through the single

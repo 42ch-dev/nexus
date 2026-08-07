@@ -59,6 +59,12 @@
 //! create vs update from stored presence, so the only reachable failure on
 //! the update path is "the store moved since the caller's read".
 //!
+//! V1.154 P2 (R3 closure): a [`LocalDbError::WorldConflict`] (the stored row
+//! moved to another world between the caller's verified read and the CAS) is
+//! NOT collapsed — it rides the `InternalError` carrier with a
+//! `world_conflict: true` details marker so hosts surface the fixed
+//! `world_conflict` wire code (spec §3.2).
+//!
 //! # `RelationPort` read gap + hop-edge loader (V1.149 P1, spec §5; iteration
 //! spec: `.mstar/iterations/v1.149/specs/fl-l-w4-activation.md` §5)
 //!
@@ -360,6 +366,26 @@ async fn put_relation_update(
 
     let locals = extract_nexus_locals(&relation);
 
+    // V1.154 P2 (R3 closure, spec §3.1): the world bind is the stored-world
+    // expected by the request — the relation's claimed
+    // `extensions.nexus.world_id`, which the invoke gate verified against the
+    // stored row. It is NOT taken from `existing` (a fresh pre-read would
+    // mask the cross-process race this predicate closes). The orchestrator
+    // round-trip always carries it (`get_relation` fully populates
+    // `extensions.nexus`); fail closed when a direct port caller omits it.
+    let Some(claimed_world) = locals.world_id.as_deref() else {
+        return reject(
+            SpokeRejectCode::InvalidInput,
+            format!(
+                "Relation is missing required extensions.nexus.world_id for update: {relation_id}"
+            ),
+            json!({
+                "relation_id": relation_id,
+                "missing": ["extensions.nexus.world_id"],
+            }),
+        );
+    };
+
     // nexus-locals on update follow clear-on-omit semantics: an optional local
     // the spoke `Relation` does NOT carry is cleared (symmetric→0,
     // confidence→SQL NULL, source_anchor_ids→'[]', needs_review→0). This is
@@ -422,8 +448,15 @@ async fn put_relation_update(
         }
     };
 
-    let result =
-        update_relationship_in_tx(&mut tx, &relation_id, &params, expected_i64, &existing).await;
+    let result = update_relationship_in_tx(
+        &mut tx,
+        &relation_id,
+        &params,
+        expected_i64,
+        &existing,
+        claimed_world,
+    )
+    .await;
 
     let updated_row = match result {
         Ok(row) => row,
@@ -446,6 +479,34 @@ async fn put_relation_update(
                     "relation_id": relation_id,
                     "expectedBaseRevision": expected,
                     "storeRevision": store_revision,
+                }),
+            );
+        }
+        // V1.154 P2 (R3 closure, spec §3.2): a zero-row CAS caused by a world
+        // mismatch must surface as `world_conflict`, never as a generic OCC
+        // failure (the caller's revision was valid; the WORLD moved). Same
+        // carrier + marker as the KnowledgeEntryPort CAS mapping; hosts remap
+        // to the fixed `world_conflict` wire code via
+        // [`is_world_conflict_reject`](crate::is_world_conflict_reject).
+        Err(LocalDbError::WorldConflict {
+            table,
+            id,
+            expected_world,
+            actual_world,
+        }) => {
+            return reject(
+                SpokeRejectCode::InternalError,
+                format!(
+                    "Relation {id} now lives in world {actual_world}, \
+                     not the expected world {expected_world} (row moved between \
+                     verification and CAS)"
+                ),
+                json!({
+                    "world_conflict": true,
+                    "table": table,
+                    "id": id,
+                    "expectedWorld": expected_world,
+                    "actualWorld": actual_world,
                 }),
             );
         }

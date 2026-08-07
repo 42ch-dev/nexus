@@ -145,9 +145,9 @@ use super::allowlist::PeerScope;
 use libp2p::PeerId;
 use nexus_spoke_adapter::extensions::get_world_id;
 use nexus_spoke_adapter::{
-    orchestrate_assemble, orchestrate_check, orchestrate_compute, orchestrate_promote,
-    orchestrate_relate, orchestrate_upsert, AssembleRequest, AssembleResponse, CheckRequest,
-    CheckResponse, ComputeRequest, ComputeResponse, KnowledgeEntryPort, NexusAdapter,
+    is_world_conflict_reject, orchestrate_assemble, orchestrate_check, orchestrate_compute,
+    orchestrate_promote, orchestrate_relate, orchestrate_upsert, AssembleRequest, AssembleResponse,
+    CheckRequest, CheckResponse, ComputeRequest, ComputeResponse, KnowledgeEntryPort, NexusAdapter,
     PromoteRequest, PromoteResponse, RelateRequest, RelateResponse, Relation,
     RelationExtensionsKey, RelationPort, SpokeReject, SpokeRejectCode, SpokeResult, UpsertRequest,
     UpsertResponse,
@@ -1249,6 +1249,7 @@ fn bridge_fault(reason: &str) -> ErrorEnvelope {
 /// | `InvalidPacketInput` | `invalid_input` | yes (client fixes payload) |
 /// | `InternalError` | `internal_error` | no |
 /// | any other reject | `internal_error` (carries `reject.code`/`message` in `details`) | no |
+/// | world-conflict reject (V1.154 P2, spec §3.2 — adapter `world_conflict` details marker) | `world_conflict` | yes (client re-requests in the stored world) |
 ///
 /// `InvalidInput` / `InvalidPacketInput` are the check/assemble path's
 /// client-input rejects (scope wire conversion, packet extensions
@@ -1257,6 +1258,20 @@ fn bridge_fault(reason: &str) -> ErrorEnvelope {
 /// `ErrorEnvelope.message`; `reject.details` (when present) flows into
 /// `ErrorEnvelope.details`.
 fn map_reject(reject: &SpokeReject) -> ErrorEnvelope {
+    // V1.154 P2 (R3 closure, spec §3.2 LOCKED): a zero-row CAS caused by a
+    // world mismatch must surface as `world_conflict` — never collapsed into
+    // `revision_conflict` / `stored_revision_stale`. The adapter carries the
+    // classification on the `InternalError` carrier with a `world_conflict:
+    // true` details marker; remap before the code table so the fixed wire
+    // spelling wins.
+    if is_world_conflict_reject(reject) {
+        return ErrorEnvelope {
+            code: "world_conflict".to_string(),
+            message: reject.message.clone(),
+            details: reject.details.clone().unwrap_or_default(),
+            extensions: HashMap::default(),
+        };
+    }
     let code = match reject.code {
         SpokeRejectCode::KnowledgeEntryAlreadyExists => "knowledge_entry_already_exists",
         SpokeRejectCode::StoredRevisionStale => "stored_revision_stale",
@@ -1710,5 +1725,67 @@ mod tests {
             ),
             Ok(_) => panic!("a malformed payload must reject with invalid_input"),
         }
+    }
+
+    /// R3 wire spelling (spec §3.2 LOCKED): a zero-row CAS caused by a world
+    /// mismatch must surface as the `world_conflict` ErrorEnvelope code —
+    /// never collapsed into `revision_conflict` / `stored_revision_stale` —
+    /// and a same-world stale revision keeps its existing code.
+    #[test]
+    fn map_reject_world_conflict_surfaces_world_conflict_wire_code() {
+        let mut details = Map::new();
+        details.insert("world_conflict".to_string(), Value::Bool(true));
+        details.insert(
+            "table".to_string(),
+            Value::String("kb_key_blocks".to_string()),
+        );
+        details.insert("id".to_string(), Value::String("kb_race".to_string()));
+        details.insert(
+            "expectedWorld".to_string(),
+            Value::String("wld_a".to_string()),
+        );
+        details.insert(
+            "actualWorld".to_string(),
+            Value::String("wld_b".to_string()),
+        );
+        let reject = SpokeReject {
+            code: SpokeRejectCode::InternalError,
+            message: "row moved to another world between verification and CAS".to_string(),
+            details: Some(details),
+        };
+
+        let envelope = map_reject(&reject);
+        assert_eq!(
+            envelope.code, "world_conflict",
+            "a world-mismatch CAS miss must surface as world_conflict"
+        );
+        assert_eq!(
+            envelope
+                .details
+                .get("expectedWorld")
+                .and_then(Value::as_str),
+            Some("wld_a"),
+            "expectedWorld rides through to the envelope details"
+        );
+        assert_eq!(
+            envelope.details.get("actualWorld").and_then(Value::as_str),
+            Some("wld_b"),
+            "actualWorld rides through to the envelope details"
+        );
+
+        // Same-world stale/conflict rejects keep the existing codes — the
+        // world-conflict branch must not widen their mapping.
+        let rev_reject = SpokeReject {
+            code: SpokeRejectCode::RevisionConflict,
+            message: "expected base ahead of store".to_string(),
+            details: None,
+        };
+        assert_eq!(map_reject(&rev_reject).code, "revision_conflict");
+        let stale_reject = SpokeReject {
+            code: SpokeRejectCode::StoredRevisionStale,
+            message: "store ahead of expected base".to_string(),
+            details: None,
+        };
+        assert_eq!(map_reject(&stale_reject).code, "stored_revision_stale");
     }
 }
