@@ -7,7 +7,7 @@
 
 use std::path::Path;
 
-use nexus_local_db::{open_pool as local_db_open_pool, run_migrations, SqlitePool};
+use nexus_local_db::SqlitePool;
 
 /// Schema initializer for CLI-side database access.
 ///
@@ -34,10 +34,10 @@ impl Schema {
                 }
             })?;
         }
-        let pool = local_db_open_pool(db_path).await?;
-        run_migrations(&pool).await?;
-        nexus_local_db::seed_versions(&pool).await?;
-        Ok(pool)
+        // P2 QC3 F-001: delegate to `init_pool` so the runtime/CLI boot path
+        // shares the co-boot migration retry/backoff (open pool + migrations
+        // with transient-retry + seed versions, in one call).
+        nexus_local_db::init_pool(db_path).await
     }
 }
 

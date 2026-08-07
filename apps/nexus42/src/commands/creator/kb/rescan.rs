@@ -495,6 +495,8 @@ async fn extract_per_chapter(
 
 /// Acquire the T-B P0 advisory file lock for a work-scoped rescan, mapping
 /// `FileLockError` → the dual exit-code contract (Locked → 75, Io → 78).
+/// Unix-only — the `file_lock` module is `#[cfg(unix)]` (V1.153 P2 T2).
+#[cfg(unix)]
 fn acquire_work_lock(
     work_dir: &std::path::Path,
 ) -> Result<nexus_local_db::file_lock::FileLockGuard> {
@@ -507,6 +509,14 @@ fn acquire_work_lock(
         }),
         Err(nexus_local_db::file_lock::FileLockError::Io(e)) => Err(CliError::LockIo(e)),
     }
+}
+
+/// V1.153 P2 T2: no advisory flock on Windows (the `file_lock` module is
+/// unix-only); shared-DB write access is WAL-governed (P2 spec § Coexistence)
+/// — no-op so the CLI proceeds unlocked.
+#[cfg(not(unix))]
+fn acquire_work_lock(_work_dir: &std::path::Path) -> Result<()> {
+    Ok(())
 }
 
 /// Upsert one row per cross-chapter aggregate + remove stale pending

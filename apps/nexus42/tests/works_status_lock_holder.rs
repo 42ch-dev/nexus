@@ -3,6 +3,9 @@
 //! Tests that `lock_holder` info is correctly read from filesystem.
 //! Full status JSON integration deferred to QA (requires daemon).
 
+// The advisory lock + its holder file are unix-only (flock; V1.153 P2 T2).
+#![cfg(unix)]
+
 use std::path::PathBuf;
 
 fn test_work_dir() -> (tempfile::TempDir, PathBuf) {

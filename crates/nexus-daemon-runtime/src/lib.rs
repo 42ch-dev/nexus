@@ -19,7 +19,11 @@ pub mod pack_import;
 pub mod path_enrichment;
 pub mod refresh_scheduler;
 pub mod stale_findings_watcher;
-#[cfg(not(debug_assertions))]
+// V1.153 P2 (DF-73): embedded `apps/web` SPA — compiled only when the
+// `web-embed` feature is ON (default). The slim `nexus-runtime` artifact
+// builds with `--no-default-features --features connect-host`, so the SPA
+// bytes never enter that binary (P2 spec § Subsystem profile).
+#[cfg(all(not(debug_assertions), feature = "web-embed"))]
 pub mod static_assets;
 pub mod tls;
 pub mod worker_provider;

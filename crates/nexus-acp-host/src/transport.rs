@@ -471,16 +471,18 @@ impl AcpSession {
 
         #[cfg(windows)]
         {
-            // On Windows, directly kill the process
-            self.child
-                .kill()
-                .await
-                .map_err(|e| AcpError::agent_crashed(None, self.agent_path, Some(e.to_string())))?;
+            // On Windows, directly kill the process.
+            // V1.153 P2 T2: `agent_path` is non-Copy and both error closures
+            // need it (the unix branch avoids this because its first use is
+            // on a `return` path); clone once per closure — error path only.
+            let agent_path = self.agent_path.clone();
+            self.child.kill().await.map_err(|e| {
+                AcpError::agent_crashed(None, agent_path.clone(), Some(e.to_string()))
+            })?;
 
-            let status =
-                self.child.wait().await.map_err(|e| {
-                    AcpError::agent_crashed(None, self.agent_path, Some(e.to_string()))
-                })?;
+            let status = self.child.wait().await.map_err(|e| {
+                AcpError::agent_crashed(None, agent_path.clone(), Some(e.to_string()))
+            })?;
 
             tracing::info!(
                 agent_id = %self.agent_id,

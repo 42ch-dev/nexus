@@ -721,6 +721,7 @@ pub async fn kb_adopt(
 
     // V1.51 T-B P0: acquire advisory file lock before the DB transaction (W-001).
     // Resolve work_ref from the candidate's work_id, then acquire the lock.
+    #[cfg(unix)]
     let _file_lock =
         if let (Some(ws_dir), Some(ref wid)) = (workspace_dir, candidate.work_id.as_deref()) {
             let work_ref: Option<String> =
@@ -755,6 +756,12 @@ pub async fn kb_adopt(
         } else {
             None
         };
+
+    #[cfg(not(unix))]
+    // V1.153 P2 T2: the file_lock module is unix-only (flock); on Windows the
+    // shared-DB write access is WAL-governed (P2 spec § Coexistence) — no
+    // advisory lock, proceed unlocked.
+    let _file_lock = ();
 
     // Parse proposed body.
     let body: WorldKbBody =

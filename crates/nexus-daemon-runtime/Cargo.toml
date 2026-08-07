@@ -62,7 +62,11 @@ regex = { workspace = true }
 serde_yaml = { workspace = true }
 sha2 = { workspace = true }
 nix = { version = "0.28", features = ["fs"] }
-rust-embed = { version = "8.11.0", default-features = false, features = ["mime-guess"] }
+# V1.153 P2 (DF-73): the embedded `apps/web` SPA is compile-time-gated behind
+# the `web-embed` feature (default ON; OFF for the slim `nexus-runtime`
+# artifact — see the P2 spec § Subsystem profile). `rust-embed` + the
+# `static_assets` mod + the api SPA fallback are all gated on it.
+rust-embed = { version = "8.11.0", default-features = false, features = ["mime-guess"], optional = true }
 mime_guess = "2.0.5"
 # V1.92 P-1 T1 — TLS transport security (self-signed Ed25519 cert via rcgen,
 # axum-server bind_rustls drop-in for non-loopback listeners).
@@ -92,3 +96,8 @@ harness = false
 
 [features]
 test-support = []
+# V1.153 P2 (DF-73): embedded Web UI (rust-embed SPA bytes) — default ON so
+# the creator-facing daemon is unchanged; OFF (`--no-default-features`)
+# compiles the SPA serving stack out of the `nexus-runtime` artifact.
+web-embed = ["dep:rust-embed"]
+default = ["web-embed"]
