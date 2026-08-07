@@ -6,6 +6,11 @@
 //! the crate's `include_dir!` macro expands, so freshly compiled artifacts are
 //! available at compile time.
 //!
+//! The staged `manifest.json` is the source manifest plus an injected
+//! `wasm_sha256` field computed from the compiled `.wasm` bytes — the embedded
+//! pair is always content-consistent, so the loader's pairing check
+//! (Greptile P1) can never reject an embedded module.
+//!
 //! # Requirements
 //!
 //! Building this crate (or anything that depends on it) requires the
@@ -27,6 +32,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::SystemTime;
+
+use serde_json::Value;
+use sha2::{Digest, Sha256};
 
 mod build_walk;
 
@@ -84,7 +92,8 @@ fn has_wasm_target() -> bool {
         .is_ok_and(|o| o.status.success())
 }
 
-/// Compile one module's `.wasm` from source and stage its manifest, unless the
+/// Compile one module's `.wasm` from source, stage its manifest, and inject
+/// the `wasm_sha256` pairing field (from the staged bytes), unless the
 /// embedded copy is already up to date.
 fn build_module(id: &str, modules_root: &Path, embedded_root: &Path) {
     let src_dir = modules_root.join(id);
@@ -148,6 +157,64 @@ fn build_module(id: &str, modules_root: &Path, embedded_root: &Path) {
         );
         copy_or_die(&artifact, &dest_wasm, &format!("{id}.wasm"));
     }
+
+    // Content-based pairing (Greptile P1): the embedded manifest must declare
+    // the SHA-256 of the EXACT bytes it ships with. Recompute on every run
+    // (not just on recompile) so a staged pair from an older build — whose
+    // manifest predates the field — is upgraded to a self-consistent one.
+    inject_wasm_sha256(id, &dest_wasm, &dest_manifest);
+}
+
+/// Lowercase hex encoding (avoids the `format_collect` lint and a hex dep).
+fn hex_encode(bytes: &[u8]) -> String {
+    use std::fmt::Write as _;
+    let mut out = String::with_capacity(bytes.len() * 2);
+    for b in bytes {
+        let _ = write!(out, "{b:02x}");
+    }
+    out
+}
+
+/// Inject `wasm_sha256` into the staged `manifest.json`, computed from the
+/// staged `.wasm` bytes. The embedded manifest always declares the hash of
+/// the artifact it ships with, so the loader's content-based pairing check
+/// can never reject an embedded module. The source `modules/<id>/manifest.json`
+/// is left untouched; if it carries a `wasm_sha256` of its own, this value
+/// (derived from the actual compiled bytes) wins in the embedded copy.
+fn inject_wasm_sha256(id: &str, wasm_path: &Path, manifest_path: &Path) {
+    let wasm_bytes = fs::read(wasm_path).unwrap_or_else(|e| {
+        die(&format!(
+            "module `{id}`: read embedded wasm {}: {e}",
+            wasm_path.display()
+        ))
+    });
+    let digest = Sha256::digest(&wasm_bytes);
+    let hex = hex_encode(&digest);
+    let manifest_bytes = fs::read(manifest_path).unwrap_or_else(|e| {
+        die(&format!(
+            "module `{id}`: read embedded manifest {}: {e}",
+            manifest_path.display()
+        ))
+    });
+    let mut value: Value = serde_json::from_slice(&manifest_bytes).unwrap_or_else(|e| {
+        die(&format!(
+            "module `{id}`: parse embedded manifest {}: {e}",
+            manifest_path.display()
+        ))
+    });
+    value["wasm_sha256"] = Value::String(hex);
+    let out = serde_json::to_string_pretty(&value).unwrap_or_else(|e| {
+        die(&format!(
+            "module `{id}`: serialize embedded manifest {}: {e}",
+            manifest_path.display()
+        ))
+    });
+    fs::write(manifest_path, out).unwrap_or_else(|e| {
+        die(&format!(
+            "module `{id}`: write embedded manifest {}: {e}",
+            manifest_path.display()
+        ))
+    });
 }
 
 /// Emit one `cargo:rerun-if-changed` directive per file under `dir` (walk).

@@ -89,6 +89,7 @@ the required input surface, the export names, and optional sandbox overrides.
 | `max_fuel` | integer | host `SandboxConfig` | Per-invocation fuel override. |
 | `max_memory_mib` | integer | host `SandboxConfig` | Per-invocation memory-cap override (MiB). |
 | `max_wall_time_ms` | integer | host `SandboxConfig` | Per-invocation wall-time override (ms). |
+| `wasm_sha256` | string | — | SHA-256 (64 lowercase hex chars) of the compiled `.wasm` bytes this manifest pairs with. **Set it**: the host then verifies content-based pairing and rejects a mixed pair (e.g. an old manifest + a new `.wasm`) before it is ever compiled or cached. Omitted (legacy manifests) → the host falls back to a stat fence (size + mtime), which cannot detect a same-size swap landing outside its observation windows. |
 | `schemas` | object | — | **V1.62+**: Inline JSON-Schema fragments for per-module input/output validation (see [The `schemas` block](#the-schemas-block-v162)). Omit for no validation (backward-compatible with V1.61). |
 
 ### The `schemas` block (V1.62+)
@@ -310,7 +311,12 @@ To add a new embedded module:
    `embedded-modules/<id>/`, and emits `cargo:rerun-if-changed=` directives so
    incremental rebuilds only recompile a module when its source changes. If a
    module dir is missing its `<id>.wasm` or `manifest.json` after the build
-   script runs, the build fails with a clear message.
+   script runs, the build fails with a clear message. The staged manifest is
+   the source manifest plus a `wasm_sha256` field **injected by `build.rs`**
+   from the compiled `.wasm` bytes — the embedded pair is always
+   content-consistent, so the loader's pairing check can never reject an
+   embedded module. Keep the source manifest's `wasm_sha256` (if any) in sync
+   with what you actually build, or omit it and let `build.rs` own the field.
 
 To update an existing embedded module, edit its source under `modules/<id>/`
 and rebuild — `build.rs` detects the newer mtime and recompiles automatically.

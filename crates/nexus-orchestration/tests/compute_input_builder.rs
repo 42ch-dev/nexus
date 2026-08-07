@@ -114,6 +114,7 @@ fn basic_manifest(required_types: Vec<&str>) -> ModuleManifest {
         max_fuel: None,
         max_memory_mib: None,
         max_wall_time_ms: None,
+        wasm_sha256: None,
     }
 }
 

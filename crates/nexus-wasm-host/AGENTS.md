@@ -45,8 +45,11 @@ The host whitelists two imported host functions (module namespace `nexus`):
   blobs under `embedded-modules/` are **generated** (gitignored) by `build.rs`,
   which compiles each module from `modules/<id>/` via
   `cargo build --release --target wasm32-unknown-unknown` when the embedded copy
-  is missing or stale. The `wasm32-unknown-unknown` target is therefore
-  **required** to build this crate: `rustup target add wasm32-unknown-unknown`.
+  is missing or stale. `build.rs` also injects the manifest's `wasm_sha256`
+  field, computed from the compiled `.wasm` bytes, so the embedded manifest↔wasm
+  pair is always content-consistent (the loader's pairing check — Greptile P1 —
+  can never reject an embedded module). The `wasm32-unknown-unknown` target is
+  therefore **required** to build this crate: `rustup target add wasm32-unknown-unknown`.
   CI installs it via the `targets:` input on `dtolnay/rust-toolchain` in every
   Rust job (`.github/workflows/ci.yml`). Module authoring: see `modules/README.md`.
 - **Sandbox limits are non-negotiable**: a module that exhausts fuel, exceeds the

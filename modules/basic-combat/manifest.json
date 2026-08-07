@@ -8,6 +8,7 @@
   "required_key_block_types": ["character"],
   "compute_export": "compute",
   "init_export": "init",
+  "wasm_sha256": "7ed89295ba49e06652eef8e3a085fa35abae5fcccc3de3700b2f03ca098bcd6f",
   "host_functions": [],
   "battle_report_kind": "combat",
   "schemas": {

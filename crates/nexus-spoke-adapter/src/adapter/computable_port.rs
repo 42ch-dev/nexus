@@ -237,25 +237,31 @@ fn load_user_module(
     // manifest (m1, the small version marker) → wasm stat (s1) → wasm
     // bytes (b) → wasm stat (s2) → manifest re-read (m2) — and the pair is
     // rejected as a host fault (never compiled) when m1 != m2 (manifest
-    // mutated mid-load) or s1 != s2 (wasm mutated between the stats). The
-    // wasm-change detector is the stat fence (size + mtime), not a byte
-    // comparison: the spoke ModuleManifest schema carries no wasm content
-    // hash/size field (verified), so content-based pairing is impossible
-    // host-side. Note `modified()` mtime can have coarse granularity on
-    // some filesystems — a same-size rewrite landing between s1 and s2
-    // within one clock tick may then slip past the fence.
+    // mutated mid-load) or s1 != s2 (wasm mutated between the stats).
     //
-    // This is the writer-agnostic maximum: the operator's install tool is
-    // external and cannot be assumed to take a per-module flock. Residual
-    // (undetectable without a content hash): a pair whose writes land
-    // OUTSIDE their observation windows — e.g. the wasm write between m1
-    // and s1 plus a manifest write after m2, or a fully atomic pair swap
-    // straddling the reads — leaves each file stable at its own
-    // observation points, so a mixed pair is indistinguishable from a
-    // coherent one. For true atomicity the install tool should write to a
-    // temp directory and rename the module directory into place; the
-    // loader then observes either the old pair or the new pair, never a
-    // mix.
+    // Content-based pairing (the root cause fix): when the manifest
+    // declares `wasm_sha256`, the loaded bytes are hashed and must match —
+    // an old manifest + new wasm ALWAYS mismatches, closing the residual
+    // below for operators who set the field (they SHOULD; see the manifest
+    // docs). The hash check runs BEFORE `get_or_compile`, so a mixed pair
+    // never enters the cache.
+    //
+    // The stat fence below is the LEGACY fallback for manifests without
+    // `wasm_sha256`: size + mtime, not a byte comparison. Note `modified()`
+    // mtime can have coarse granularity on some filesystems — a same-size
+    // rewrite landing between s1 and s2 within one clock tick may then slip
+    // past the fence.
+    //
+    // Residual (legacy manifests only — undetectable without a content
+    // hash): a pair whose writes land OUTSIDE their observation windows —
+    // e.g. the wasm write between m1 and s1 plus a manifest write after m2,
+    // or a fully atomic pair swap straddling the reads — leaves each file
+    // stable at its own observation points, so a mixed pair is
+    // indistinguishable from a coherent one. For true atomicity the install
+    // tool should write to a temp directory and rename the module directory
+    // into place; the loader then observes either the old pair or the new
+    // pair, never a mix. A manifest WITHOUT `wasm_sha256` cannot be paired
+    // by content, so this residual is the operator's choice to accept.
     let manifest_json = match std::fs::read_to_string(&manifest_path) {
         Ok(s) => s,
         Err(e) => {
@@ -308,6 +314,30 @@ fn load_user_module(
             );
         }
     }
+    // Content-based pairing (Greptile P1 root cause): when the manifest
+    // declares `wasm_sha256`, the loaded bytes must hash to it. This is the
+    // ONLY detector that sees a mixed pair whose writes landed outside the
+    // stat fence's observation windows — an old manifest + new wasm always
+    // mismatches. The check runs BEFORE `get_or_compile`, so a mixed pair
+    // never enters the cache; the stat fence above remains the legacy
+    // fallback for manifests without the field.
+    let manifest: ModuleManifest = match serde_json::from_str(&manifest_json) {
+        Ok(m) => m,
+        Err(e) => {
+            return reject(
+                SpokeRejectCode::InternalError,
+                format!("failed to parse manifest for module '{module_id}': {e}"),
+                json!({ "module_id": module_id }),
+            );
+        }
+    };
+    if let Err(msg) = manifest.verify_wasm_sha256(&bytes) {
+        return reject(
+            SpokeRejectCode::InternalError,
+            format!("module '{module_id}': {msg}"),
+            json!({ "module_id": module_id }),
+        );
+    }
     let cached = match cache.get_or_compile(engine(), module_id, &bytes, &manifest_json) {
         Ok(entry) => entry,
         Err(e) => {
@@ -330,6 +360,11 @@ fn load_user_module(
 /// must NOT compile the mixed pair into the cache; `Ok(false)` means the
 /// pair is a consistent snapshot. A read failure here is a host fault
 /// like any other post-check read failure.
+///
+/// This is the LEGACY fallback tier: manifests that declare `wasm_sha256`
+/// are additionally verified by content hash (see
+/// [`ModuleManifest::verify_wasm_sha256`]), which catches mixed pairs the
+/// fence cannot see.
 fn module_pair_changed_mid_load(
     wasm_path: &Path,
     manifest_path: &Path,
@@ -1652,13 +1687,26 @@ mod tests {
              (cache hit — no recompile)"
         );
 
-        // Operator updates the module file: different bytes under the same
+        // Operator updates the module pair: different bytes under the same
         // id ⇒ bytes-hash miss ⇒ recompile ⇒ the cached entry is REPLACED
         // (overwrite eviction), never duplicated. The replacement is a
         // minimal valid wasm module (magic + version, zero sections) —
-        // different bytes that still compile.
+        // different bytes that still compile. The manifest is rewritten in
+        // the same update (a coherent pair) WITHOUT `wasm_sha256` — the
+        // embedded field only hashes the original bytes — so this pair
+        // loads through the legacy stat-fence fallback.
         let changed: &[u8] = b"\0asm\x01\0\0\0";
         std::fs::write(&wasm_path, changed).expect("rewrite module wasm");
+        let manifest_no_hash = {
+            let mut value: serde_json::Value =
+                serde_json::from_str(manifest).expect("embedded manifest parses");
+            value
+                .as_object_mut()
+                .expect("manifest object")
+                .remove("wasm_sha256");
+            serde_json::to_string(&value).expect("manifest without wasm_sha256 serializes")
+        };
+        std::fs::write(&manifest_path, &manifest_no_hash).expect("rewrite module manifest");
 
         let (_third_module, _) = unwrap_ok(
             adapter.load_module("basic-combat"),
@@ -1678,7 +1726,7 @@ mod tests {
         // until the wasm changed or the process restarted.
         let manifest_v2 = {
             let mut value: serde_json::Value =
-                serde_json::from_str(manifest).expect("embedded manifest parses");
+                serde_json::from_str(&manifest_no_hash).expect("legacy manifest parses");
             value["version"] = serde_json::json!("2.0.0");
             serde_json::to_string(&value).expect("manifest v2 serializes")
         };
@@ -1699,6 +1747,153 @@ mod tests {
             "the fresh entry serves the NEW manifest settings"
         );
         let _ = reloaded_module;
+    }
+
+    /// Greptile P1 (root cause — content-based pairing): a user module whose
+    /// manifest declares the CORRECT `wasm_sha256` for its `.wasm` bytes
+    /// loads normally (and caches).
+    #[cfg(not(nexus_spoke_adapter_no_wasm_target))]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn user_module_load_accepts_matching_wasm_sha256() {
+        let (pool, _db_dir) = fresh_pool().await;
+        let modules_dir = tempfile::tempdir().unwrap();
+        let module_dir = modules_dir.path().join("basic-combat");
+        std::fs::create_dir_all(&module_dir).unwrap();
+        let wasm_path = module_dir.join("basic-combat.wasm");
+        let manifest_path = module_dir.join("manifest.json");
+        let bytes = nexus_wasm_host::embedded_module_bytes("basic-combat")
+            .expect("embedded basic-combat bytes");
+        // The embedded manifest carries `wasm_sha256` computed by build.rs
+        // from the EXACT embedded bytes — a correct pair.
+        let manifest = nexus_wasm_host::embedded_module_manifest("basic-combat")
+            .expect("embedded basic-combat manifest");
+        assert!(
+            serde_json::from_str::<serde_json::Value>(manifest).expect("manifest parses")
+                ["wasm_sha256"]
+                .is_string(),
+            "the embedded manifest must declare wasm_sha256 (build.rs injects it)"
+        );
+        std::fs::write(&wasm_path, bytes).expect("write module wasm");
+        std::fs::write(&manifest_path, manifest).expect("write module manifest");
+
+        let adapter =
+            NexusAdapter::new(pool).with_user_modules_dir(modules_dir.path().to_path_buf());
+        let cache = adapter.module_cache();
+        let (module, served_manifest) = unwrap_ok(
+            adapter.load_module("basic-combat"),
+            "correct wasm_sha256 pair loads",
+        );
+        assert_eq!(
+            served_manifest.wasm_sha256.as_deref(),
+            serde_json::from_str::<serde_json::Value>(manifest).expect("manifest parses")
+                ["wasm_sha256"]
+                .as_str(),
+            "the served manifest carries the declared hash"
+        );
+        assert_eq!(cache.len(), 1, "the verified pair is cached");
+        let _ = module;
+    }
+
+    /// Greptile P1 (root cause — content-based pairing): a mixed pair — OLD
+    /// manifest + NEW wasm — must be rejected with `InternalError` BEFORE
+    /// the cache: the bytes do not hash to the manifest's `wasm_sha256`.
+    /// This is the case the stat fence could not see (the straddling-swap
+    /// residual) — the content hash closes it for manifests that declare it.
+    #[cfg(not(nexus_spoke_adapter_no_wasm_target))]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn user_module_load_rejects_mismatched_wasm_sha256_without_caching() {
+        let (pool, _db_dir) = fresh_pool().await;
+        let modules_dir = tempfile::tempdir().unwrap();
+        let module_dir = modules_dir.path().join("basic-combat");
+        std::fs::create_dir_all(&module_dir).unwrap();
+        let wasm_path = module_dir.join("basic-combat.wasm");
+        let manifest_path = module_dir.join("manifest.json");
+        let bytes = nexus_wasm_host::embedded_module_bytes("basic-combat")
+            .expect("embedded basic-combat bytes");
+        // Mixed pair: the manifest is the OLD manifest for the embedded
+        // bytes, but the installed wasm is DIFFERENT (a new build swapped in
+        // without updating the manifest — the Greptile P1 scenario). The
+        // manifest declares the hash of the ORIGINAL bytes; the installed
+        // bytes hash to something else.
+        let manifest = nexus_wasm_host::embedded_module_manifest("basic-combat")
+            .expect("embedded basic-combat manifest");
+        let changed: &[u8] = b"\0asm\x01\0\0\0";
+        assert_ne!(
+            changed, bytes,
+            "the swapped-in wasm must differ from the manifest's bytes"
+        );
+        std::fs::write(&wasm_path, changed).expect("write module wasm");
+        std::fs::write(&manifest_path, manifest).expect("write module manifest");
+
+        let adapter =
+            NexusAdapter::new(pool).with_user_modules_dir(modules_dir.path().to_path_buf());
+        let cache = adapter.module_cache();
+        assert_eq!(cache.len(), 0, "fresh adapter starts with an empty cache");
+
+        match adapter.load_module("basic-combat") {
+            SpokeResult::Ok(_) => panic!("a mixed pair must NOT load"),
+            SpokeResult::Reject(r) => {
+                assert_eq!(
+                    r.code,
+                    SpokeRejectCode::InternalError,
+                    "a manifest/wasm mismatch is a host fault: {r:?}"
+                );
+                assert!(
+                    r.message
+                        .contains("wasm does not match manifest wasm_sha256"),
+                    "reject must name the pairing failure, got: {}",
+                    r.message
+                );
+            }
+        }
+        assert_eq!(
+            cache.len(),
+            0,
+            "the mixed pair must never enter the cache (reject happens BEFORE get_or_compile)"
+        );
+        assert!(!cache.contains("basic-combat"));
+    }
+
+    /// Greptile P1 (legacy fallback): a manifest WITHOUT `wasm_sha256` still
+    /// loads through the stat fence — the content check is skipped, so the
+    /// legacy behavior (and its straddling-swap residual) is unchanged for
+    /// manifests that do not declare the field.
+    #[cfg(not(nexus_spoke_adapter_no_wasm_target))]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn user_module_load_without_wasm_sha256_falls_back_to_stat_fence() {
+        let (pool, _db_dir) = fresh_pool().await;
+        let modules_dir = tempfile::tempdir().unwrap();
+        let module_dir = modules_dir.path().join("basic-combat");
+        std::fs::create_dir_all(&module_dir).unwrap();
+        let wasm_path = module_dir.join("basic-combat.wasm");
+        let manifest_path = module_dir.join("manifest.json");
+        let bytes = nexus_wasm_host::embedded_module_bytes("basic-combat")
+            .expect("embedded basic-combat bytes");
+        let manifest = nexus_wasm_host::embedded_module_manifest("basic-combat")
+            .expect("embedded basic-combat manifest");
+        let legacy_manifest = {
+            let mut value: serde_json::Value =
+                serde_json::from_str(manifest).expect("embedded manifest parses");
+            value
+                .as_object_mut()
+                .expect("manifest object")
+                .remove("wasm_sha256");
+            serde_json::to_string(&value).expect("legacy manifest serializes")
+        };
+        std::fs::write(&wasm_path, bytes).expect("write module wasm");
+        std::fs::write(&manifest_path, &legacy_manifest).expect("write legacy module manifest");
+
+        let adapter =
+            NexusAdapter::new(pool).with_user_modules_dir(modules_dir.path().to_path_buf());
+        let (module, served_manifest) = unwrap_ok(
+            adapter.load_module("basic-combat"),
+            "legacy manifest without wasm_sha256 loads via the stat fence",
+        );
+        assert!(
+            served_manifest.wasm_sha256.is_none(),
+            "legacy manifest serves without a declared hash"
+        );
+        let _ = module;
     }
 
     /// Greptile P1 (non-atomic module reload — fence tier): the coherence
@@ -1776,17 +1971,20 @@ mod tests {
         );
     }
 
-    /// Greptile P1 (non-atomic module reload — documented residual): a
+    /// Greptile P1 (non-atomic module reload — legacy-only residual): a
     /// replacement pair whose writes land OUTSIDE the fence's observation
     /// windows — here the wasm write lands between m1 and s1 (before the
     /// first stat) while the manifest is untouched — leaves each file
     /// stable at its own observation points, so the mixed pair is
-    /// indistinguishable from a coherent one without a content hash. The
-    /// spoke ModuleManifest schema has no wasm hash field, so the loader
-    /// accepts this by design; the operator install tool should do atomic
-    /// directory replacement (write tmp → rename) so the loader observes
-    /// either the old pair or the new pair, never a mix. If a content hash
-    /// ever lands in the schema, this test is the one to delete.
+    /// indistinguishable from a coherent one without a content hash. This
+    /// test uses a manifest WITHOUT `wasm_sha256`, so it documents the
+    /// residual that remains ONLY for legacy manifests: operators who set
+    /// `wasm_sha256` (SHOULD, per the manifest docs) are protected by
+    /// content-based pairing instead — an old manifest + new wasm always
+    /// mismatches and is rejected before it can be cached. The operator
+    /// install tool should additionally do atomic directory replacement
+    /// (write tmp → rename) so the loader observes either the old pair or
+    /// the new pair, never a mix.
     #[test]
     fn module_pair_changed_mid_load_accepts_straddling_pair_swap_residual() {
         let temp = tempfile::tempdir().expect("tempdir");
