@@ -233,21 +233,49 @@ fn load_user_module(
     // an operator replacing a module mid-invoke writes `<id>.wasm` and
     // `manifest.json` as two INDEPENDENT files, so reading them separately
     // can observe a mixed pair (wasm v1 + manifest v2) that would then be
-    // compiled and cached. The manifest is read FIRST (the small version
-    // marker), then the wasm, then BOTH are re-read and compared: a
-    // difference means the store changed mid-load, and the mixed pair is
-    // rejected as a host fault instead of compiled. This is the
-    // writer-agnostic choice — the operator's install tool is external and
-    // cannot be assumed to take a per-module flock. A replacement landing
-    // entirely between the two reads yields a coherent pair either way,
-    // and one landing after the re-read simply leaves the previously-read
-    // consistent pair until the next load observes the new files.
+    // compiled and cached. The reads are ordered as a three-step fence —
+    // manifest (m1, the small version marker) → wasm stat (s1) → wasm
+    // bytes (b) → wasm stat (s2) → manifest re-read (m2) — and the pair is
+    // rejected as a host fault (never compiled) when m1 != m2 (manifest
+    // mutated mid-load) or s1 != s2 (wasm mutated between the stats). The
+    // wasm-change detector is the stat fence (size + mtime), not a byte
+    // comparison: the spoke ModuleManifest schema carries no wasm content
+    // hash/size field (verified), so content-based pairing is impossible
+    // host-side. Note `modified()` mtime can have coarse granularity on
+    // some filesystems — a same-size rewrite landing between s1 and s2
+    // within one clock tick may then slip past the fence.
+    //
+    // This is the writer-agnostic maximum: the operator's install tool is
+    // external and cannot be assumed to take a per-module flock. Residual
+    // (undetectable without a content hash): a pair whose writes land
+    // OUTSIDE their observation windows — e.g. the wasm write between m1
+    // and s1 plus a manifest write after m2, or a fully atomic pair swap
+    // straddling the reads — leaves each file stable at its own
+    // observation points, so a mixed pair is indistinguishable from a
+    // coherent one. For true atomicity the install tool should write to a
+    // temp directory and rename the module directory into place; the
+    // loader then observes either the old pair or the new pair, never a
+    // mix.
     let manifest_json = match std::fs::read_to_string(&manifest_path) {
         Ok(s) => s,
         Err(e) => {
             return reject(
                 SpokeRejectCode::InternalError,
                 format!("failed to read {}: {e}", manifest_path.display()),
+                json!({ "module_id": module_id }),
+            );
+        }
+    };
+    // s1: open the wasm stat fence BEFORE reading the bytes, so a wasm
+    // replacement landing between the manifest read and the wasm read —
+    // previously invisible to a bytes-only re-read — is caught by the
+    // s1 != s2 comparison.
+    let wasm_stat_first = match std::fs::metadata(&wasm_path) {
+        Ok(m) => m,
+        Err(e) => {
+            return reject(
+                SpokeRejectCode::InternalError,
+                format!("failed to stat {}: {e}", wasm_path.display()),
                 json!({ "module_id": module_id }),
             );
         }
@@ -262,7 +290,8 @@ fn load_user_module(
             );
         }
     };
-    match module_pair_changed_mid_load(&wasm_path, &manifest_path, &bytes, &manifest_json) {
+    match module_pair_changed_mid_load(&wasm_path, &manifest_path, &wasm_stat_first, &manifest_json)
+    {
         Ok(true) => {
             return reject(
                 SpokeRejectCode::InternalError,
@@ -292,22 +321,34 @@ fn load_user_module(
     SpokeResult::Ok((cached.module.clone(), cached.manifest.clone()))
 }
 
-/// Coherence check behind [`load_user_module`]'s consistent-snapshot read
-/// (Greptile P1 — non-atomic module reload): re-read both module files and
-/// report whether EITHER changed since the caller's first read. `Ok(true)`
-/// means the store mutated mid-load — the caller must NOT compile the
-/// mixed pair into the cache; `Ok(false)` means the pair is a consistent
-/// snapshot. A read failure here is a host fault like any other post-check
-/// read failure.
+/// Complete the coherence fence behind [`load_user_module`]'s
+/// consistent-snapshot read (Greptile P1 — non-atomic module reload): the
+/// caller has already read the manifest (m1), statted the wasm (s1) and
+/// read the wasm bytes; this closes the fence — re-stat the wasm (s2) and
+/// re-read the manifest (m2) — and reports whether EITHER changed
+/// mid-load. `Ok(true)` means the store mutated mid-load — the caller
+/// must NOT compile the mixed pair into the cache; `Ok(false)` means the
+/// pair is a consistent snapshot. A read failure here is a host fault
+/// like any other post-check read failure.
 fn module_pair_changed_mid_load(
     wasm_path: &Path,
     manifest_path: &Path,
-    wasm_first: &[u8],
+    wasm_stat_first: &std::fs::Metadata,
     manifest_first: &str,
 ) -> Result<bool, std::io::Error> {
-    let wasm_now = std::fs::read(wasm_path)?;
+    let wasm_stat_now = std::fs::metadata(wasm_path)?;
     let manifest_now = std::fs::read_to_string(manifest_path)?;
-    Ok(wasm_now.as_slice() != wasm_first || manifest_now != manifest_first)
+    // Stat fence (wasm): a size or mtime change between the two stats
+    // means the wasm was replaced while it was being read. `modified()`
+    // may quantize on coarse-granularity filesystems — see
+    // [`load_user_module`] for the documented residual. An unreadable
+    // mtime counts as a change (fail-closed).
+    let mtime_changed = match (wasm_stat_first.modified(), wasm_stat_now.modified()) {
+        (Ok(first), Ok(now)) => first != now,
+        _ => true,
+    };
+    let wasm_changed = wasm_stat_first.len() != wasm_stat_now.len() || mtime_changed;
+    Ok(wasm_changed || manifest_now != manifest_first)
 }
 
 impl NexusAdapter<'_> {
@@ -1660,11 +1701,14 @@ mod tests {
         let _ = reloaded_module;
     }
 
-    /// Greptile P1 (non-atomic module reload — detector tier): the
-    /// coherence check behind [`module_pair_changed_mid_load`] must report
-    /// ANY change to either file of the module pair between the first read
-    /// and the re-read — a stable pair is coherent, a replaced wasm OR
-    /// manifest is a mid-load mutation the loader must reject (never
+    /// Greptile P1 (non-atomic module reload — fence tier): the coherence
+    /// fence behind [`module_pair_changed_mid_load`] must report ANY
+    /// mid-load mutation of the module pair. The caller's sequence is
+    /// manifest read (m1) → wasm stat (s1) → wasm read (b) → fence close
+    /// (s2 + m2); the tests below replay that sequence with a replacement
+    /// injected at each observable point: a stable pair is coherent, a
+    /// wasm replaced between the two stats OR a manifest replaced between
+    /// m1 and m2 is a mid-load mutation the loader must reject (never
     /// compile the mixed pair into the cache).
     #[test]
     fn module_pair_changed_mid_load_detects_replaced_files() {
@@ -1674,31 +1718,101 @@ mod tests {
         std::fs::write(&wasm_path, b"\0asm\x01\0\0\0").expect("write wasm");
         std::fs::write(&manifest_path, r#"{"module_id":"m"}"#).expect("write manifest");
 
-        let wasm_first = std::fs::read(&wasm_path).expect("first wasm read");
+        // (c) Coherent pair ⇒ accepted: nothing changes between m1, s1,
+        // the wasm read, s2 and m2.
         let manifest_first = std::fs::read_to_string(&manifest_path).expect("first manifest read");
+        let wasm_stat_first = std::fs::metadata(&wasm_path).expect("first wasm stat");
+        let wasm_first = std::fs::read(&wasm_path).expect("first wasm read");
         assert!(
-            !module_pair_changed_mid_load(&wasm_path, &manifest_path, &wasm_first, &manifest_first)
-                .expect("stable pair re-reads"),
+            !module_pair_changed_mid_load(
+                &wasm_path,
+                &manifest_path,
+                &wasm_stat_first,
+                &manifest_first,
+            )
+            .expect("stable pair fence"),
             "a stable pair is a consistent snapshot"
         );
+        let _ = wasm_first;
 
-        // WASM replaced between the first read and the re-read.
-        std::fs::write(&wasm_path, b"\0asm\x01\0\0\x01").expect("rewrite wasm");
+        // (a) WASM replaced between the two stats ⇒ rejected: the
+        // replacement lands after the caller's s1 stat (on the OLD wasm)
+        // and before the fence's s2 stat — the Greptile hole, where a
+        // bytes-only re-read observed a stable wasm (both byte reads saw
+        // the NEW file) and accepted OLD manifest + NEW wasm. The stat
+        // fence fires because s2 observes the NEW file's metadata.
+        let manifest_first = std::fs::read_to_string(&manifest_path).expect("manifest read");
+        let wasm_stat_first = std::fs::metadata(&wasm_path).expect("wasm stat");
+        std::fs::write(&wasm_path, b"\0asm\x01\0\0\x01").expect("rewrite wasm between stats");
+        let wasm_first = std::fs::read(&wasm_path).expect("wasm read");
         assert!(
-            module_pair_changed_mid_load(&wasm_path, &manifest_path, &wasm_first, &manifest_first)
-                .expect("replaced wasm re-reads"),
-            "a replaced wasm must be detected"
+            module_pair_changed_mid_load(
+                &wasm_path,
+                &manifest_path,
+                &wasm_stat_first,
+                &manifest_first,
+            )
+            .expect("replaced wasm fence"),
+            "a wasm replaced between the two stats must be detected"
         );
+        let _ = wasm_first;
 
-        // Manifest replaced between the first read and the re-read.
+        // (b) Manifest replaced between m1 and m2 ⇒ rejected.
         std::fs::write(&wasm_path, b"\0asm\x01\0\0\0").expect("restore wasm");
+        std::fs::write(&manifest_path, r#"{"module_id":"m"}"#).expect("restore manifest");
+        let manifest_first = std::fs::read_to_string(&manifest_path).expect("manifest read");
+        let wasm_stat_first = std::fs::metadata(&wasm_path).expect("wasm stat");
         std::fs::write(&manifest_path, r#"{"module_id":"m","version":"2"}"#)
             .expect("rewrite manifest");
         assert!(
-            module_pair_changed_mid_load(&wasm_path, &manifest_path, &wasm_first, &manifest_first)
-                .expect("replaced manifest re-reads"),
-            "a replaced manifest must be detected"
+            module_pair_changed_mid_load(
+                &wasm_path,
+                &manifest_path,
+                &wasm_stat_first,
+                &manifest_first,
+            )
+            .expect("replaced manifest fence"),
+            "a manifest replaced between m1 and m2 must be detected"
         );
+    }
+
+    /// Greptile P1 (non-atomic module reload — documented residual): a
+    /// replacement pair whose writes land OUTSIDE the fence's observation
+    /// windows — here the wasm write lands between m1 and s1 (before the
+    /// first stat) while the manifest is untouched — leaves each file
+    /// stable at its own observation points, so the mixed pair is
+    /// indistinguishable from a coherent one without a content hash. The
+    /// spoke ModuleManifest schema has no wasm hash field, so the loader
+    /// accepts this by design; the operator install tool should do atomic
+    /// directory replacement (write tmp → rename) so the loader observes
+    /// either the old pair or the new pair, never a mix. If a content hash
+    /// ever lands in the schema, this test is the one to delete.
+    #[test]
+    fn module_pair_changed_mid_load_accepts_straddling_pair_swap_residual() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let wasm_path = temp.path().join("m.wasm");
+        let manifest_path = temp.path().join("manifest.json");
+        std::fs::write(&wasm_path, b"\0asm\x01\0\0\0").expect("write wasm");
+        std::fs::write(&manifest_path, r#"{"module_id":"m"}"#).expect("write manifest");
+
+        // m1 read, then the operator's wasm write lands BEFORE s1 — both
+        // wasm stats and the byte read observe the NEW wasm, and both
+        // manifest reads observe the OLD manifest: the fence passes.
+        let manifest_first = std::fs::read_to_string(&manifest_path).expect("manifest read");
+        std::fs::write(&wasm_path, b"\0asm\x01\0\0\x01").expect("operator writes wasm");
+        let wasm_stat_first = std::fs::metadata(&wasm_path).expect("wasm stat");
+        let wasm_first = std::fs::read(&wasm_path).expect("wasm read");
+        assert!(
+            !module_pair_changed_mid_load(
+                &wasm_path,
+                &manifest_path,
+                &wasm_stat_first,
+                &manifest_first,
+            )
+            .expect("straddling swap fence"),
+            "residual: a mixed pair stable at every observation point passes the fence"
+        );
+        let _ = wasm_first;
     }
 
     /// Greptile P1 (non-atomic module reload — integration): a concurrent
