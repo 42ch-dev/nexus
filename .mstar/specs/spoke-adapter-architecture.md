@@ -760,7 +760,7 @@ Normative architectural surface for the first FL-R Connect Host slice. Product b
 | Slice | Content | Tracker |
 |-------|---------|---------|
 | **N-C0** (V1.148) | Opt-in host, hello + allowlist, honest manifest, all ops refused | DF-72 partial |
-| **N-C1** (V1.153, delivered) | Inbound write ops `upsert` / `promote` / `relate` over Connect + OCC (`expected_base_revision`, locked reject-code mapping) + fail-closed world scoping (allowlist `world_scope` + stored-world gate); coexistence = SQLite WAL (no `runtime_lock` on the invoke path); peer_id trust boundary = payload-carried `extensions.nexus.peer_id` (spoofable → E2 residual) | DF-72 |
+| **N-C1** (V1.153, delivered) | Inbound write ops `upsert` / `promote` / `relate` over Connect + OCC (`expected_base_revision`, locked reject-code mapping) + fail-closed world scoping (allowlist `world_scope` + stored-world gate); coexistence = SQLite WAL (no `runtime_lock` on the invoke path); caller identity = the noise-authenticated **session peer** (spoke-connect 0.9.2 `InvokeHandlerV2`; payload `extensions.nexus.peer_id` informational only — present ⇒ must equal the session peer, hard deny on mismatch, zero side effects); spoke-connect exposes no `mdns` feature (hickory/libp2p-mdns stay lockfile-only, never compiled) | DF-72 |
 | **N-C2** | `check` / `assemble` over Connect; "reasoning-complete" legitimate | DF-72 later |
 | **N-C3** | `list_peer_host_capability_manifests` production / multi-host | DF-72 later; `R-V1142P1-002` |
 | **DF-73** | Headless `nexus-runtime` binary | Separate backlog; after N-C0 dogfood |
