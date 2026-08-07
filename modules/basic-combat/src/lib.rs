@@ -291,10 +291,17 @@ fn is_character(kb: &Value) -> bool {
 /// spoke ERC721-array form (`body.attributes[].trait_type`/`value`).
 ///
 /// Spoke attribute values round-trip as JSON floats (`20.0` — the spoke
-/// `BodyAttributeValue` number variant is an f64), so the array scan accepts
-/// both integer and float values.
+/// `BodyAttributeValue` number variant is an f64, and the
+/// `nexus-spoke-adapter` key-block conversion emits the flat-object form
+/// from those float values), so BOTH branches accept integer and float
+/// values.
 fn read_attr_int(kb: &Value, trait_name: &str) -> Option<i64> {
     if let Some(v) = read_int(kb, &["body", "attributes", trait_name]) {
+        return Some(v);
+    }
+    // Flat-object form carrying spoke round-tripped float values (`20.0`):
+    // `as_i64` misses f64-backed numbers, so fall back to the float read.
+    if let Some(v) = read_int_f64(kb, &["body", "attributes", trait_name]) {
         return Some(v);
     }
     let attrs = kb.get("body")?.get("attributes")?.as_array()?;
@@ -316,4 +323,14 @@ fn read_int(value: &Value, path: &[&str]) -> Option<i64> {
         cur = cur.get(*seg)?;
     }
     cur.as_i64()
+}
+
+/// Read a nested number along a JSON path as an integer, accepting
+/// f64-backed JSON numbers (`20.0`) that `as_i64` misses.
+fn read_int_f64(value: &Value, path: &[&str]) -> Option<i64> {
+    let mut cur = value;
+    for seg in path {
+        cur = cur.get(*seg)?;
+    }
+    cur.as_f64().map(|f| f as i64)
 }

@@ -137,6 +137,12 @@ serial_test = "3"
 # itself only spawns processes and asserts output.
 tokio = { workspace = true }
 tempfile = "3"
+# V1.154 P2 T1: the Connect compute interop tests install the embedded
+# `basic-combat` module into the hermetic home's `~/.nexus42/modules/`
+# store (spec §2.1 — host-local module resolution). nexus-wasm-host is
+# already in the default graph via nexus-spoke-adapter; the dev-dep makes
+# its embedded-module registry callable from the tests.
+nexus-wasm-host = { path = "../../crates/nexus-wasm-host" }
 
 # V1.148 P3 N-C0 (DF-72): opt-in Connect Host surface. Feature OFF by default
 # — the default daemon graph stays libp2p-free (`cargo tree -p nexus42 -i

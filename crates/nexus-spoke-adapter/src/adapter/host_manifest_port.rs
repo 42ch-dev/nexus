@@ -129,7 +129,8 @@ mod tests {
             vec![
                 "data-store".to_string(),
                 "checker".to_string(),
-                "assembler".to_string()
+                "assembler".to_string(),
+                "computable-engine".to_string()
             ]
         );
         assert_eq!(

@@ -32,6 +32,7 @@ pub mod rule_query_port;
 pub mod scope_query_port;
 
 use sqlx::SqlitePool;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 /// Production `BaselinePorts` impl backing spoke orchestrators against nexus
@@ -53,6 +54,13 @@ pub struct NexusAdapter<'a> {
     /// replaces the former static `"nexus-local"` host id (honesty lock —
     /// installation-scoped stable id, not a `PeerId` / world id).
     host_id: Option<String>,
+    /// Host-local compute module store (`~/.nexus42/modules/`) when
+    /// configured (V1.154 P2 — the Connect host). `None` ⇒ `ComputablePort`
+    /// serves only the embedded ship set (baseline consumers, V1.146
+    /// behavior unchanged). When set, compute modules MUST be installed
+    /// under `<dir>/<id>/<id>.wasm` + `<dir>/<id>/manifest.json` — bytes
+    /// are never peer-supplied (spec §2.1).
+    user_modules_dir: Option<PathBuf>,
     /// When set (via [`Self::with_tx_cell`]), `put_knowledge_entry` joins this
     /// transaction instead of opening its own. The handler moves the
     /// `sqlx::Transaction` into the shared cell before `orchestrate_promote`
@@ -72,6 +80,7 @@ impl NexusAdapter<'static> {
         NexusAdapter {
             pool,
             host_id: None,
+            user_modules_dir: None,
             bound_tx_cell: None,
         }
     }
@@ -91,6 +100,26 @@ impl<'a> NexusAdapter<'a> {
     pub fn with_host_id(mut self, host_id: impl Into<String>) -> Self {
         self.host_id = Some(host_id.into());
         self
+    }
+
+    /// Configure the host-local compute module store (V1.154 P2 — the
+    /// Connect host's `~/.nexus42/modules/`). When set, `ComputablePort`
+    /// resolves compute modules from `<dir>/<id>/<id>.wasm` +
+    /// `<dir>/<id>/manifest.json` ONLY (spec §2.1 — module bytes are never
+    /// peer-supplied; an absent/incomplete pair is a client-input reject).
+    /// Without a store the embedded ship set is used (baseline consumers,
+    /// V1.146 behavior unchanged).
+    #[must_use]
+    pub fn with_user_modules_dir(mut self, dir: PathBuf) -> Self {
+        self.user_modules_dir = Some(dir);
+        self
+    }
+
+    /// The configured host-local module store, if any — the Connect compute
+    /// gate requires one (a host without a store serves no compute module).
+    #[must_use]
+    pub fn user_modules_dir(&self) -> Option<&Path> {
+        self.user_modules_dir.as_deref()
     }
 
     /// Attach a shared transaction cell for the duration of one adopt/orchestrate

@@ -1,16 +1,18 @@
-//! N-C1 → N-C2 Connect invoke dispatch (DF-72, V1.153 P1 → V1.154 P1 T2) —
-//! the architect-locked home of the session-peer `InvokeHandlerV2` closure.
+//! N-C1 → N-C2 Connect invoke dispatch (DF-72, V1.153 P1 → V1.154 P1 T2 →
+//! P2 T1) — the architect-locked home of the session-peer `InvokeHandlerV2`
+//! closure.
 //!
 //! The handler is the product-owned spine of the Connect Host: it parses
 //! the inbound invoke op/payload, resolves the calling peer, gates it
 //! through the fail-closed `PeerScope` allowlist (T1), and routes exactly
-//! `upsert` / `promote` / `relate` / `check` / `assemble` through the
-//! production `NexusAdapter` orchestrators (re-exported via
+//! `upsert` / `promote` / `relate` / `check` / `assemble` / `compute`
+//! through the production `NexusAdapter` orchestrators (re-exported via
 //! `nexus_spoke_adapter`). Contract sources:
 //! `.mstar/specs/spoke-adapter-architecture.md` §10.6 and the P1 spec
-//! § OCC + error mapping / § World scoping.
+//! § OCC + error mapping / § World scoping, plus the P2 spec
+//! §2 compute-over-Connect.
 //!
-//! Every other op — `compute` (P2) / `project` / unknown — is refused with
+//! Every other op — `project` / unknown — is refused with
 //! `ErrorEnvelope.code = "op_unsupported"` and zero side effects (the N-C0
 //! refusal contract extends).
 //!
@@ -22,7 +24,8 @@
 //! its first argument — the peer that passed the allowlist, signed-hello,
 //! and envelope-auth gates — never a payload-carried claim. The allowlist
 //! handshake is the trust root; the session peer is the per-invoke caller
-//! identity the `world_scope` / `op_scope` gates resolve against.
+//! identity the `world_scope` / `op_scope` / `module_scope` gates resolve
+//! against.
 //!
 //! The payload's `extensions.nexus.peer_id` is **informational only**
 //! (spec §5.1 lock): when present it must equal the session peer — a
@@ -34,6 +37,9 @@
 //! are read from the payload entries/relation
 //! (`extensions.nexus.world_id` — the canonical carrier the conversion seam
 //! uses); a payload without a world id is denied (cannot verify scope).
+//! The `compute` op is the exception: its world is resolved from the
+//! **stored entry's** `extensions.nexus.world_id` inside the lane (spec
+//! §2.2 — the `ComputeRequest` wire has no world carrier).
 //!
 //! ## World-scope gates (V1.153 P1 fix loop + V1.154 P1 N-C2 reads)
 //!
@@ -45,7 +51,7 @@
 //!    (writes). Reads (`check` / `assemble`) carry the world selector on
 //!    the schema's `scope.scope_id` object instead (spec §5.1 lock — no
 //!    second ad-hoc world field), and the same strict rule applies: an
-//!    absent scope / missing scope_id denies the WHOLE payload. If any
+//!    absent scope / missing `scope_id` denies the WHOLE payload. If any
 //!    entry lacks one the WHOLE payload is denied — the old
 //!    filter-and-continue shape let a mixed payload pass the gate and fail
 //!    later in the adapter as a partial-batch write surfaced as
@@ -63,7 +69,35 @@
 //!    world-A relation row could otherwise legally reference world-B
 //!    entries (cross-world edge + id-existence oracle).
 //!
-//! ## Bounded async bridge (R2 closure, V1.154 P1)
+//! ## Compute gates (V1.154 P2 — spec §2)
+//!
+//! The `compute` route is world-scoped like every other op, but the world
+//! is the **stored entry's** `extensions.nexus.world_id` (spec §2.2 — no
+//! wire carrier), so its gates run inside the bounded lane before any WASM
+//! execution:
+//!
+//! 1. **Read-only lock (spec §5 / §6.5):** `settle: true` is rejected with
+//!    the defined `settle_not_enabled` envelope — the N-C2 compute
+//!    settlement helper is NOT enabled.
+//! 2. **Stored-world gate:** the target entry's stored world must be in the
+//!    peer's `world_scope` (`op_unsupported` family otherwise, like every
+//!    other op).
+//! 3. **Module identity (locked precedence, spec §2.2):** session state
+//!    `module_id`, then entry `body.computable.module_id` — neither ⇒
+//!    defined `module_not_found` (missing module name).
+//! 4. **Module-scope gate (architect lock, spec §6.1):** the resolved
+//!    module must be in the peer's `module_scope`; missing/empty scope
+//!    denies ALL compute with the defined `module_not_scoped` envelope.
+//! 5. **Host-local store gate (spec §2.1):** the module must be installed
+//!    under `~/.nexus42/modules/` (never peer-supplied bytes) ⇒ defined
+//!    `module_not_found` otherwise.
+//!
+//! Execution routes through `orchestrate_compute` → `ComputablePort::compute`
+//! with the envelope locked to `spoke_schemas::ComputeRequest` /
+//! `ComputeResponse` (spec §2.2 — the V1.147 `RunRequest` / `RunResponse`
+//! HTTP pair is the reference mapping only, never a third wrapper).
+//!
+//! ## Bounded async bridge (R2 closure, V1.154 P1; compute lane P2)
 //!
 //! The orchestrators are native `async fn` (V1.153 P0 T2) but the handler
 //! runs synchronously on the spoke-connect network event loop, so dispatch
@@ -77,6 +111,13 @@
 //! banned by the R2 contract). The handler thread waits with a bounded
 //! synchronous acquire (polling the semaphore future with a parking waker)
 //! and a bounded result wait over a std channel.
+//!
+//! Compute additionally takes a per-process **`compute_serializer`**
+//! (`Semaphore(1)` — spec §2.4): the wasmtime epoch watchdog is
+//! engine-global, so only one WASM invocation may run at a time inside the
+//! shared lane (mirrors the daemon's `compute_runs.rs` W-2 permit). The
+//! serializer is acquired inside the lane closure, so the per-invoke
+//! deadline bounds the wait and no second thread pool exists.
 //!
 //! Architect-locked limits (spec §5.4 — [`BridgeLimits`]): **8** concurrent
 //! invokes per process, a **30,000 ms** per-invoke deadline, and **500**
@@ -93,7 +134,8 @@
 //! the N-C1 envelope table with the locked bridge codes: `invoke_busy`
 //! (lane saturated), `invoke_deadline_exceeded` (per-invoke budget
 //! exhausted), `payload_too_large` (over-cap request),
-//! `response_too_large` (over-cap response).
+//! `response_too_large` (over-cap response), plus the P2 compute codes
+//! `module_not_found` / `module_not_scoped` / `settle_not_enabled`.
 //!
 //! The adapter is a **per-process singleton** constructed once at host
 //! boot and held for the process lifetime (P1 spec § Process model);
@@ -103,21 +145,23 @@ use super::allowlist::PeerScope;
 use libp2p::PeerId;
 use nexus_spoke_adapter::extensions::get_world_id;
 use nexus_spoke_adapter::{
-    orchestrate_assemble, orchestrate_check, orchestrate_promote, orchestrate_relate,
-    orchestrate_upsert, AssembleRequest, AssembleResponse, CheckRequest, CheckResponse,
-    KnowledgeEntryPort, NexusAdapter, PromoteRequest, PromoteResponse, RelateRequest,
-    RelateResponse, Relation, RelationExtensionsKey, RelationPort, SpokeReject, SpokeRejectCode,
-    SpokeResult, UpsertRequest, UpsertResponse,
+    orchestrate_assemble, orchestrate_check, orchestrate_compute, orchestrate_promote,
+    orchestrate_relate, orchestrate_upsert, AssembleRequest, AssembleResponse, CheckRequest,
+    CheckResponse, ComputeRequest, ComputeResponse, KnowledgeEntryPort, NexusAdapter,
+    PromoteRequest, PromoteResponse, RelateRequest, RelateResponse, Relation,
+    RelationExtensionsKey, RelationPort, SpokeReject, SpokeRejectCode, SpokeResult, UpsertRequest,
+    UpsertResponse,
 };
 use serde_json::{Map, Value};
 use spoke_connect::InvokeHandlerV2;
 use spoke_schemas::connect::connect_invoke_response::ErrorEnvelope;
 use std::collections::HashMap;
 use std::future::Future;
+use std::path::Path;
 use std::sync::Arc;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
-/// The ops this host serves (N-C1 writes → N-C2 read half).
+/// The ops this host serves (N-C1 writes → N-C2 read half → P2 compute).
 ///
 /// This const is load-bearing, not declaration-only: [`dispatch`] gates on
 /// it before routing, so the host can never serve an op it does not list.
@@ -127,7 +171,9 @@ use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 /// advertised `extensions.nexus.served_ops` (`nexus_spoke_adapter`'s
 /// `LOCAL_SERVED_OPS`) in both directions — so the manifest ⇔ actual
 /// dispatch routing lockstep holds by construction.
-pub const SERVED_OPS: [&str; 5] = ["upsert", "promote", "relate", "check", "assemble"];
+pub const SERVED_OPS: [&str; 6] = [
+    "upsert", "promote", "relate", "check", "assemble", "compute",
+];
 
 /// Architect-locked bounded-bridge limits (spec §5.4).
 ///
@@ -172,19 +218,22 @@ impl Default for BridgeLimits {
     }
 }
 
-/// Build the N-C2 read-half `InvokeHandlerV2` on the architect-locked
-/// bridge limits.
+/// Build the N-C2 E2 `InvokeHandlerV2` on the architect-locked bridge
+/// limits.
 ///
 /// The dispatch pipeline (spec §5.4 — [`BridgeLimits::default`]) is a
-/// fail-closed op gate + allowlist world/op scope gate in front of the
-/// five `NexusAdapter` orchestrator routes (`upsert` / `promote` / `relate`
-/// / `check` / `assemble`), resolving caller identity from the **session
-/// peer** (spoke-connect 0.9.2 session-peer hook, spec §3.2 / §5.1).
+/// fail-closed op gate + allowlist world/op/module scope gates in front of
+/// the six `NexusAdapter` orchestrator routes (`upsert` / `promote` /
+/// `relate` / `check` / `assemble` / `compute`), resolving caller identity
+/// from the **session peer** (spoke-connect 0.9.2 session-peer hook, spec
+/// §3.2 / §5.1). Compute additionally serializes WASM execution through a
+/// per-process `Semaphore(1)` inside the shared lane (spec §2.4 — the
+/// engine-global epoch watchdog allows one invocation at a time).
 ///
 /// The returned closure is `Send + Sync` (the node holds it in an
-/// `Arc<InvokeHandlerV2>`); `scope`, `adapter`, and the bounded lane are
-/// captured for the process lifetime — one adapter and one lane per
-/// Connect process (P1 spec § Process model).
+/// `Arc<InvokeHandlerV2>`); `scope`, `adapter`, the bounded lane, and the
+/// compute serializer are captured for the process lifetime — one adapter,
+/// one lane, one serializer per Connect process (P1 spec § Process model).
 #[must_use]
 pub fn build_handler(
     scope: PeerScope,
@@ -212,11 +261,17 @@ pub(crate) fn build_handler_with_limits(
 ) -> (Arc<InvokeHandlerV2>, Arc<Semaphore>) {
     let lane = Arc::new(Semaphore::new(limits.max_concurrent_invokes));
     let lane_for_handler = Arc::clone(&lane);
+    // P2 compute serializer (spec §2.4): one WASM invocation at a time —
+    // the wasmtime epoch watchdog is engine-global, so concurrent compute
+    // calls would trap each other at the shortest budget (the daemon's
+    // compute_runs.rs W-2 permit is the same shape).
+    let compute_serializer = Arc::new(Semaphore::new(1));
     let handler = Arc::new(move |peer: &PeerId, op: &str, payload: Value| {
         dispatch(
             &scope,
             Arc::clone(&adapter),
             &lane_for_handler,
+            &compute_serializer,
             limits,
             peer,
             op,
@@ -227,39 +282,46 @@ pub(crate) fn build_handler_with_limits(
 }
 
 /// One served op.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Route {
     Upsert,
     Promote,
     Relate,
     Check,
     Assemble,
+    Compute,
 }
 
 /// The full dispatch pipeline. Every gate is fail-closed and runs before
 /// any orchestrator call, so denials have zero side effects.
+///
+/// The argument list is the architect-locked pipeline context (scope,
+/// adapter, lane, compute serializer, limits, caller, op, payload);
+/// bundling it would obscure the explicit fail-closed ordering.
+#[allow(clippy::too_many_arguments)]
 fn dispatch(
     scope: &PeerScope,
     adapter: Arc<NexusAdapter<'static>>,
     lane: &Arc<Semaphore>,
+    compute_serializer: &Arc<Semaphore>,
     limits: BridgeLimits,
     peer: &PeerId,
     op: &str,
     payload: Value,
 ) -> Result<Value, ErrorEnvelope> {
-    // 1. Served-op gate (N-C1 → N-C2): `SERVED_OPS` is the load-bearing
+    // 1. Served-op gate (N-C1 → N-C2 E2): `SERVED_OPS` is the load-bearing
     //    serving gate — the manifest-honesty machine check
     //    (`n_c1_manifest_served_ops_match_dispatch_both_directions`)
     //    verifies the manifest against this const, so dispatch MUST read it
     //    too, or the check would bind to a declaration-only table. Anything
-    //    outside the const (incl. `compute` — P2, and `project`) is refused
-    //    unconditionally, regardless of payload shape (N-C0 refusal
-    //    contract extends); a match arm for an op that is not in
-    //    `SERVED_OPS` is unreachable by construction.
+    //    outside the const (incl. `project`) is refused unconditionally,
+    //    regardless of payload shape (N-C0 refusal contract extends); a
+    //    match arm for an op that is not in `SERVED_OPS` is unreachable by
+    //    construction.
     if !SERVED_OPS.contains(&op) {
         return Err(unsupported(
             op,
-            "this host serves only upsert / promote / relate / check / assemble",
+            "this host serves only upsert / promote / relate / check / assemble / compute",
         ));
     }
 
@@ -273,10 +335,11 @@ fn dispatch(
         "relate" => Route::Relate,
         "check" => Route::Check,
         "assemble" => Route::Assemble,
+        "compute" => Route::Compute,
         _ => {
             return Err(unsupported(
                 op,
-                "this host serves only upsert / promote / relate / check / assemble",
+                "this host serves only upsert / promote / relate / check / assemble / compute",
             ));
         }
     };
@@ -322,25 +385,29 @@ fn dispatch(
     //    a payload where any carrier is missing denies the WHOLE payload
     //    (no filter-and-continue; that shape let a mixed payload pass the
     //    gate and fail later as a partial write).
-    let Some(worlds) = payload_world_ids(route, &payload) else {
-        return Err(denied(
-            "invoke payload carries no verifiable world scope \
-             (writes need extensions.nexus.world_id on every entry/relation; \
-             check/assemble need scope.scope_id); cannot verify world scope",
-        ));
-    };
-    if worlds.is_empty() {
-        return Err(denied(
-            "invoke payload carries no world id; cannot verify world scope",
-        ));
-    }
-    if let Some(world) = worlds
-        .iter()
-        .find(|world| !scope.allows_world(peer, world))
-    {
-        return Err(denied(&format!(
-            "world {world} is not in this peer's world_scope"
-        )));
+    //
+    //    `compute` is the exception (P2, spec §2.2): the ComputeRequest
+    //    wire has no world carrier — the world is the **stored entry's**
+    //    `extensions.nexus.world_id`, resolved inside the lane by
+    //    [`verify_compute_gates`] with the same fail-closed rule.
+    if route != Route::Compute {
+        let Some(worlds) = payload_world_ids(route, &payload) else {
+            return Err(denied(
+                "invoke payload carries no verifiable world scope \
+                 (writes need extensions.nexus.world_id on every entry/relation; \
+                 check/assemble need scope.scope_id); cannot verify world scope",
+            ));
+        };
+        if worlds.is_empty() {
+            return Err(denied(
+                "invoke payload carries no world id; cannot verify world scope",
+            ));
+        }
+        if let Some(world) = worlds.iter().find(|world| !scope.allows_world(peer, world)) {
+            return Err(denied(&format!(
+                "world {world} is not in this peer's world_scope"
+            )));
+        }
     }
 
     // 6. Payload/batch cap (spec §5.4 — architect-locked): 500 logical
@@ -380,10 +447,17 @@ fn dispatch(
     //    B by replaying the revision the OCC rejects disclose. Before the
     //    orchestrator CAS runs, verify every targeted existing row's stored
     //    world_id equals the payload-claimed world_id; a mismatch denies
-    //    with zero side effects.
+    //    with zero side effects. Compute runs its own gate set instead
+    //    ([`verify_compute_gates`] — stored world + module identity +
+    //    module_scope + host-local store + the read-only settle lock, spec
+    //    §2.1–§2.3), all inside the lane, before any WASM execution.
     let deadline = std::time::Instant::now() + limits.invoke_deadline;
     let permit = acquire_permit(lane, deadline)?;
     let (tx, rx) = std::sync::mpsc::channel();
+    let scope_for_lane = scope.clone();
+    let adapter_for_lane = Arc::clone(&adapter);
+    let serializer_for_lane = Arc::clone(compute_serializer);
+    let peer_id = *peer;
     tokio::task::spawn_blocking(move || {
         // Permit semantics (spec §5.4): the lane closure cannot be
         // force-cancelled safely, so the permit moves in here and stays
@@ -391,8 +465,13 @@ fn dispatch(
         // caller's wait, and any late result is discarded below.
         let _permit = permit;
         let result = tokio::runtime::Handle::current().block_on(async {
-            verify_stored_worlds(&adapter, route, &payload).await?;
-            route_orchestrator(route, &adapter, payload).await
+            if route == Route::Compute {
+                verify_compute_gates(&scope_for_lane, &adapter_for_lane, &peer_id, &payload)
+                    .await?;
+            } else {
+                verify_stored_worlds(&adapter_for_lane, route, &payload).await?;
+            }
+            route_orchestrator(route, &adapter_for_lane, &serializer_for_lane, payload).await
         });
         let _ = tx.send(result);
     });
@@ -415,9 +494,16 @@ fn dispatch(
 /// Run one served op through its orchestrator and map the outcome to the
 /// handler's return type. Rejects map through the locked
 /// `SpokeRejectCode → ErrorEnvelope` table (P1 spec § OCC + error mapping).
+///
+/// The compute route additionally holds the per-process compute serializer
+/// (spec §2.4 — one WASM invocation at a time; the engine-global epoch
+/// watchdog would otherwise trap concurrent calls at the shortest budget).
+/// The acquire runs inside the lane closure, so the per-invoke deadline
+/// bounds it like every other lane wait.
 async fn route_orchestrator(
     route: Route,
     adapter: &NexusAdapter<'static>,
+    compute_serializer: &Arc<Semaphore>,
     payload: Value,
 ) -> Result<Value, ErrorEnvelope> {
     match route {
@@ -477,6 +563,28 @@ async fn route_orchestrator(
                 SpokeResult::Reject(reject) => Err(map_reject(&reject)),
             }
         }
+        // N-C2 E2 (P2, spec §2): the envelope is locked to the spoke
+        // `ComputeRequest` / `ComputeResponse` (no third wrapper; the
+        // V1.147 generated `RunRequest` / `RunResponse` HTTP pair is the
+        // reference mapping only). The read-only lock, world gate, module
+        // identity, module_scope, and host-local store gates all ran in
+        // [`verify_compute_gates`] before this point — zero WASM execution
+        // on denial. The serializer permit is held across the whole
+        // orchestration (one compute invocation at a time, spec §2.4).
+        Route::Compute => {
+            let request: ComputeRequest = match serde_json::from_value(payload) {
+                Ok(request) => request,
+                Err(error) => return Err(map_reject(&invalid_payload("compute", &error))),
+            };
+            let serializer = Arc::clone(compute_serializer);
+            let _permit = serializer.acquire_owned().await.map_err(|_| {
+                bridge_fault("compute serializer closed before the WASM invocation")
+            })?;
+            match orchestrate_compute(adapter, request).await {
+                SpokeResult::Ok(response) => serialize_response::<ComputeResponse>(&response),
+                SpokeResult::Reject(reject) => Err(map_reject(&reject)),
+            }
+        }
     }
 }
 
@@ -522,6 +630,12 @@ fn payload_world_ids(route: Route, payload: &Value) -> Option<Vec<String>> {
             let scope_id = payload.pointer("/scope/scope_id")?.as_str()?;
             Some(vec![scope_id.to_string()])
         }
+        // Compute carries no world on the wire (P2, spec §2.2): the world is
+        // the stored entry's `extensions.nexus.world_id`, resolved inside
+        // the lane by verify_compute_gates. Dispatch skips the raw world
+        // gate for this route; this arm is unreachable and exists only for
+        // match exhaustiveness.
+        Route::Compute => None,
     }
 }
 
@@ -581,6 +695,14 @@ fn payload_collection_entries(route: Route, payload: &Value) -> usize {
                 + scope_array_len("entry_types")
                 + scope_array_len("timeline_event_ids")
         }
+        // Compute (P2): the dynamic `computable` map is the request's batch
+        // surface (the session state is staged out-of-band); its key count
+        // bounds the payload's logical entry amplification. The response
+        // cap additionally bounds the merged-state output.
+        Route::Compute => payload
+            .get("computable")
+            .and_then(Value::as_object)
+            .map_or(0, Map::len),
     }
 }
 
@@ -690,16 +812,192 @@ async fn verify_stored_worlds(
                 }
             }
         }
-        // Reads (N-C2): no stored row is targeted by id — `check` /
-        // `assemble` reach storage only through the orchestrators' own
-        // world-scoped `ScopeQueryPort` reads, and the world gate (step 5)
-        // already verified `scope.scope_id` against the peer's
-        // `world_scope`, so no stored-world verification applies (spec
-        // §5.5 — fail-closed world scoping happens before the
-        // orchestrator, zero side effects on denial).
-        Route::Check | Route::Assemble => {}
+        // Reads (N-C2) and compute (P2): no stored row is targeted by id —
+        // `check` / `assemble` reach storage only through the
+        // orchestrators' own world-scoped `ScopeQueryPort` reads (world
+        // gate verified `scope.scope_id` at step 5), and `compute` runs its
+        // own gate set ([`verify_compute_gates`] — stored-world + module
+        // gates, spec §2).
+        Route::Check | Route::Assemble | Route::Compute => {}
     }
     Ok(())
+}
+
+/// The P2 compute gate set (spec §2.1–§2.3, architect locks). Every gate
+/// runs inside the bounded lane BEFORE any WASM execution, fail-closed, zero
+/// side effects:
+///
+/// 1. **Read-only lock** (spec §5 / §6.5): `settle: true` ⇒ defined
+///    `settle_not_enabled` — the N-C2 compute settlement helper is NOT
+///    enabled.
+/// 2. **Stored-world gate**: the target entry's stored
+///    `extensions.nexus.world_id` must be in the peer's `world_scope`
+///    (`op_unsupported` family — same fail-closed rule as every other op).
+/// 3. **Module identity** (locked precedence, spec §2.2): session state
+///    `module_id`, then entry `body.computable.module_id`; neither ⇒
+///    defined `module_not_found` (missing module name).
+/// 4. **Module-scope gate** (architect lock, spec §6.1): the resolved
+///    module must be in the peer's `module_scope`; missing/empty scope
+///    denies ALL compute ⇒ defined `module_not_scoped`.
+/// 5. **Host-local store gate** (spec §2.1): the module must be installed
+///    under the configured `~/.nexus42/modules/` (never peer-supplied
+///    bytes) ⇒ defined `module_not_found`.
+///
+/// Returns the parsed typed request for the orchestrator route.
+async fn verify_compute_gates(
+    scope: &PeerScope,
+    adapter: &NexusAdapter<'static>,
+    peer: &PeerId,
+    payload: &Value,
+) -> Result<(), ErrorEnvelope> {
+    let request: ComputeRequest = match serde_json::from_value(payload.clone()) {
+        Ok(request) => request,
+        Err(error) => return Err(map_reject(&invalid_payload("compute", &error))),
+    };
+
+    // 1. Read-only compute lock — the cheapest gate, checked first.
+    if request.settle == Some(true) {
+        return Err(settle_not_enabled());
+    }
+
+    // 2. Stored-world gate: the compute world is the stored entry's
+    //    `extensions.nexus.world_id` (spec §2.2 — no wire carrier). A
+    //    missing stored world cannot be verified ⇒ denied like a payload
+    //    without a world carrier.
+    let entry = match adapter.get_knowledge_entry(&request.entry_id).await {
+        SpokeResult::Ok(entry) => entry,
+        SpokeResult::Reject(reject) => return Err(map_reject(&reject)),
+    };
+    let Some(world) = get_world_id(&entry) else {
+        return Err(denied(&format!(
+            "entry {} has no stored world id; cannot verify world scope",
+            request.entry_id
+        )));
+    };
+    if !scope.allows_world(peer, world) {
+        return Err(denied(&format!(
+            "world {world} is not in this peer's world_scope"
+        )));
+    }
+
+    // 3. Module identity — the locked resolution precedence (session state
+    //    → entry body.computable). A resolution reject with the locked
+    //    "module identity required" message is the missing-module-name
+    //    denial (defined `module_not_found`); any other reject (missing
+    //    session / entry / storage fault) maps through the locked table.
+    let module_id = match adapter
+        .resolve_compute_module_id(&request.session_id, &request.entry_id)
+        .await
+    {
+        SpokeResult::Ok(id) => id,
+        SpokeResult::Reject(reject)
+            if reject.code == SpokeRejectCode::InvalidInput
+                && reject.message.contains("module identity required") =>
+        {
+            return Err(module_not_found(None, &reject.message));
+        }
+        SpokeResult::Reject(reject) => return Err(map_reject(&reject)),
+    };
+
+    // 4. Module-scope gate (architect lock, spec §6.1): missing/empty
+    //    `module_scope` denies ALL compute; a resolved module outside the
+    //    list is denied before any WASM execution.
+    if !scope.allows_module(peer, &module_id) {
+        return Err(module_not_scoped(&module_id));
+    }
+
+    // 5. Host-local store gate (spec §2.1): the module must be installed
+    //    under the configured module store; bytes are never peer-supplied.
+    //    A host without a configured store serves no compute module.
+    let Some(modules_dir) = adapter.user_modules_dir() else {
+        return Err(module_not_found(
+            Some(&module_id),
+            "this host has no module store configured; no compute module can be served",
+        ));
+    };
+    if !module_installed(modules_dir, &module_id) {
+        return Err(module_not_found(
+            Some(&module_id),
+            &format!(
+                "module {module_id:?} is not installed under {}",
+                modules_dir.display()
+            ),
+        ));
+    }
+
+    Ok(())
+}
+
+/// Fail-closed host-local module store check (spec §2.1): the peer can name
+/// only a module already installed under `~/.nexus42/modules/` as
+/// `<id>/<id>.wasm` + `<id>/manifest.json`. The id must be a single path
+/// component (no separators, no `.` / `..`) so the join can never escape
+/// the store directory.
+fn module_installed(modules_dir: &Path, module_id: &str) -> bool {
+    let safe = !module_id.is_empty()
+        && !module_id.contains('/')
+        && !module_id.contains('\\')
+        && module_id != "."
+        && module_id != "..";
+    safe && modules_dir
+        .join(module_id)
+        .join(format!("{module_id}.wasm"))
+        .is_file()
+        && modules_dir.join(module_id).join("manifest.json").is_file()
+}
+
+/// Compute denial — the N-C2 compute surface is read-only (spec §5 / §6.5):
+/// `settle: true` is rejected because the compute settlement helper is NOT
+/// enabled over Connect. Retry-safe for peers that re-issue with
+/// `settle: false`.
+fn settle_not_enabled() -> ErrorEnvelope {
+    ErrorEnvelope {
+        code: "settle_not_enabled".to_string(),
+        message: "compute over Connect is read-only: settle:true is not enabled \
+                  (the N-C2 settlement helper is not served)"
+            .to_string(),
+        details: Map::new(),
+        extensions: HashMap::new(),
+    }
+}
+
+/// Compute denial — the resolved module is not in the peer's `module_scope`
+/// (architect lock, spec §6.1): a missing/empty scope denies ALL compute;
+/// a resolved module outside the list is denied before any WASM execution.
+/// Retry-safe for the operator (the allowlist is edited out-of-band).
+fn module_not_scoped(module_id: &str) -> ErrorEnvelope {
+    let mut details = Map::new();
+    details.insert(
+        "module_id".to_string(),
+        Value::String(module_id.to_string()),
+    );
+    ErrorEnvelope {
+        code: "module_not_scoped".to_string(),
+        message: format!(
+            "module {module_id:?} is not in this peer's module_scope; \
+             compute is denied (fail-closed — missing/empty module_scope denies all modules)"
+        ),
+        details,
+        extensions: HashMap::new(),
+    }
+}
+
+/// Compute denial — no module identity is available (missing module name,
+/// spec §2.2 resolution precedence) or the resolved module is not installed
+/// in the host-local store (spec §2.1 — module bytes are never
+/// peer-supplied). Retry-safe for peers that fix their session/entry
+/// declaration or for operators who install the module.
+fn module_not_found(module_id: Option<&str>, reason: &str) -> ErrorEnvelope {
+    let mut details = Map::new();
+    if let Some(id) = module_id {
+        details.insert("module_id".to_string(), Value::String(id.to_string()));
+    }
+    ErrorEnvelope {
+        code: "module_not_found".to_string(),
+        message: format!("compute module unavailable: {reason}"),
+        details,
+        extensions: HashMap::new(),
+    }
 }
 
 /// Assert an existing entry's stored `world_id` equals the payload-claimed

@@ -6,14 +6,17 @@
 //! each `peer_ids` entry is either a bare `"12D3…"` peer id (N-C0 shape —
 //! no op access) or an object `{ "peer_id": "12D3…", "world_scope":
 //! ["<world-uuid>", …], "op_scope": ["upsert","promote","relate","check",
-//! "assemble"] }`.
-//! Both scopes are optional and **fail-closed**: an absent/empty scope
-//! denies world access (writes AND the world-scoped read ops) — a bare
-//! entry (or a `--allow-peer` overlay) is handshake-allowlisted but can
-//! never invoke a served op. World ids are world UUID strings, never
-//! filesystem paths. A missing file ⇒ empty list ⇒ **fail-closed**
-//! (spoke-connect rejects every remote peer). The operator edits the
-//! allowlist out-of-band; there is no online enroll endpoint.
+//! "assemble"], "module_scope": ["<module-id>", …] }`.
+//! All scopes are optional and **fail-closed**: an absent/empty scope
+//! denies world access (writes AND the world-scoped read ops), ops, and —
+//! since P2 — every compute module (the `module_scope` architect lock,
+//! spec §6.1: missing/empty ⇒ deny ALL compute). A bare entry (or a
+//! `--allow-peer` overlay) is handshake-allowlisted but can never invoke a
+//! served op. World ids are world UUID strings, never filesystem paths;
+//! module ids are host-local module names (never peer-supplied bytes). A
+//! missing file ⇒ empty list ⇒ **fail-closed** (spoke-connect rejects every
+//! remote peer). The operator edits the allowlist out-of-band; there is no
+//! online enroll endpoint.
 
 use crate::errors::{CliError, Result};
 use libp2p::PeerId;
@@ -42,10 +45,12 @@ enum PeerEntry {
     Scoped(PeerEntryScoped),
 }
 
-/// Scoped entry form — locked schema (P1 spec § World scoping).
+/// Scoped entry form — locked schema (P1 spec § World scoping; P2 spec
+/// §6.1 adds `module_scope`).
 ///
-/// `world_scope` / `op_scope` are optional; absent fields deserialize to
-/// empty lists and the gate then denies every world/op (fail-closed).
+/// `world_scope` / `op_scope` / `module_scope` are optional; absent fields
+/// deserialize to empty lists and the gate then denies every world/op/
+/// module (fail-closed).
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct PeerEntryScoped {
@@ -54,6 +59,10 @@ struct PeerEntryScoped {
     world_scope: Vec<String>,
     #[serde(default)]
     op_scope: Vec<String>,
+    /// Host-local compute module ids this peer may invoke (P2 — architect
+    /// lock, spec §6.1: absent/empty denies ALL compute).
+    #[serde(default)]
+    module_scope: Vec<String>,
 }
 
 /// Resolved allowlist scoping: peer → allowed world ids / allowed ops.
@@ -67,16 +76,22 @@ pub struct PeerScope {
 }
 
 /// Per-peer scoping. Empty sets ⇒ fail-closed: the peer is handshake-
-/// allowlisted but has no world access.
+/// allowlisted but has no world/op/module access.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct PeerAccess {
     /// World ids (world UUID strings, not paths) this peer may target —
-    /// writes AND the world-scoped read ops (`check` / `assemble`) share
-    /// the same gate.
+    /// writes AND the world-scoped read ops (`check` / `assemble`) and the
+    /// P2 compute op share the same gate.
     pub world_scope: BTreeSet<String>,
-    /// Ops this peer may invoke (N-C2 read-half served ops: `upsert` /
-    /// `promote` / `relate` / `check` / `assemble`).
+    /// Ops this peer may invoke (N-C2 E2 served ops: `upsert` / `promote` /
+    /// `relate` / `check` / `assemble` / `compute`).
     pub op_scope: BTreeSet<String>,
+    /// Host-local compute module ids this peer may invoke (P2 — architect
+    /// lock, spec §6.1: missing/empty denies ALL compute, fail-closed).
+    /// Module ids are operator-allowlisted names; the module bytes are
+    /// never peer-supplied (resolved host-locally under
+    /// `~/.nexus42/modules/` only).
+    pub module_scope: BTreeSet<String>,
 }
 
 impl PeerScope {
@@ -109,6 +124,15 @@ impl PeerScope {
             .is_some_and(|access| access.op_scope.contains(op))
     }
 
+    /// Fail-closed compute-module gate (P2 architect lock, spec §6.1): true
+    /// only when the peer is allowlisted AND its `module_scope` contains
+    /// `module_id`. An absent/empty `module_scope` denies ALL compute.
+    #[must_use]
+    pub fn allows_module(&self, peer: &PeerId, module_id: &str) -> bool {
+        self.access_for(peer)
+            .is_some_and(|access| access.module_scope.contains(module_id))
+    }
+
     /// True when no peer is allowlisted at all (missing/empty file).
     #[must_use]
     pub fn is_empty(&self) -> bool {
@@ -130,6 +154,7 @@ impl PeerScope {
                     PeerAccess {
                         world_scope: scoped.world_scope.into_iter().collect(),
                         op_scope: scoped.op_scope.into_iter().collect(),
+                        module_scope: scoped.module_scope.into_iter().collect(),
                     },
                 );
             }
@@ -336,6 +361,10 @@ mod tests {
             !scope.allows_op(&peer, "upsert"),
             "bare entry has no op scope — fail-closed"
         );
+        assert!(
+            !scope.allows_module(&peer, "basic-combat"),
+            "bare entry has no module scope — fail-closed"
+        );
     }
 
     /// Absent `world_scope` ⇒ no world writes, even with an op scope present.
@@ -369,6 +398,83 @@ mod tests {
         assert!(
             !scope.allows_op(&peer, "upsert"),
             "absent op_scope must deny every op"
+        );
+    }
+
+    // ---- N-C2 (P2) module scoping (architect lock, spec §6.1) ----
+
+    /// The P2 module gate contract: a scoped peer is allowed to invoke a
+    /// listed module and denied every other module.
+    #[test]
+    fn scoped_peer_allowed_on_listed_module_denied_on_other_modules() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let peer = peer_id(14);
+        write_allowlist(
+            temp.path(),
+            &serde_json::json!([{
+                "peer_id": peer.to_string(),
+                "world_scope": ["world-a"],
+                "op_scope": ["compute"],
+                "module_scope": ["basic-combat"],
+            }]),
+        );
+
+        let scope = load(temp.path(), &[]).expect("scoped entry loads");
+        assert!(
+            scope.allows_module(&peer, "basic-combat"),
+            "peer must be allowed on its listed module"
+        );
+        assert!(
+            !scope.allows_module(&peer, "another-module"),
+            "peer must be denied on an unlisted module"
+        );
+    }
+
+    /// Absent `module_scope` ⇒ no compute, even with world/op scopes
+    /// present (the architect lock: missing or empty scope denies ALL
+    /// compute — fail-closed). Also the backward-compat pin: a V1.153 →
+    /// V1.154 allowlist file WITHOUT the new field still loads (optional
+    /// field) and simply carries no module access.
+    #[test]
+    fn object_entry_without_module_scope_is_fail_closed() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let peer = peer_id(15);
+        write_allowlist(
+            temp.path(),
+            &serde_json::json!([{
+                "peer_id": peer.to_string(),
+                "world_scope": ["world-a"],
+                "op_scope": ["compute"],
+            }]),
+        );
+
+        let scope = load(temp.path(), &[]).expect("entry without module_scope loads");
+        assert!(
+            !scope.allows_module(&peer, "basic-combat"),
+            "absent module_scope must deny every module (fail-closed)"
+        );
+    }
+
+    /// An explicit empty `module_scope` list denies compute exactly like an
+    /// absent field.
+    #[test]
+    fn empty_module_scope_is_fail_closed() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let peer = peer_id(16);
+        write_allowlist(
+            temp.path(),
+            &serde_json::json!([{
+                "peer_id": peer.to_string(),
+                "world_scope": ["world-a"],
+                "op_scope": ["compute"],
+                "module_scope": [],
+            }]),
+        );
+
+        let scope = load(temp.path(), &[]).expect("empty module_scope loads");
+        assert!(
+            !scope.allows_module(&peer, "basic-combat"),
+            "an empty module_scope must deny every module"
         );
     }
 
@@ -445,6 +551,9 @@ mod tests {
         assert_eq!(scope.access_for(&outsider), None);
         assert!(!scope.allows_world(&outsider, "world-a"));
         assert!(!scope.allows_op(&outsider, "upsert"));
+        assert!(
+            !scope.allows_module(&outsider, "basic-combat"),
+            "a non-allowlisted peer has no module access"
+        );
     }
-
 }

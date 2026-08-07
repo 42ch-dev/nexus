@@ -46,6 +46,7 @@ use nexus_wasm_host::{
 };
 use serde_json::{json, Map, Value};
 use std::collections::HashMap;
+use std::path::Path;
 use std::sync::OnceLock;
 
 /// One-time initialised WASM engine, reused across all compute invocations.
@@ -92,17 +93,164 @@ fn resolve_module_id(
     )
 }
 
-/// Load (or get cached) a compiled WASM module by id.
+impl NexusAdapter<'_> {
+    /// Load (or get cached) a compiled WASM module by id — host-local store.
+    ///
+    /// When a user modules dir is configured
+    /// ([`NexusAdapter::with_user_modules_dir`] — the Connect host's
+    /// `~/.nexus42/modules/`), the module MUST be installed there as
+    /// `<dir>/<id>/<id>.wasm` + `<dir>/<id>/manifest.json` (fail-closed: an
+    /// absent/incomplete pair is `InvalidInput`; the embedded ship set is
+    /// NOT reachable — the Connect surface serves only operator-installed
+    /// modules, spec §2.1). Without a configured dir (baseline consumers),
+    /// the embedded ship set is used (V1.146 behavior unchanged).
+    ///
+    /// # Error classification (V1.146 P2 QC fix-wave + P2 user-store
+    /// extension)
+    ///
+    /// - Unknown / invalid `module_id` (not in the store) → `InvalidInput` —
+    ///   the id comes from session state / `body.computable`
+    ///   (caller-controlled), so "not available" is a client-input error,
+    ///   not a host failure.
+    /// - Known module whose install/compile/trap fails → `InternalError`
+    ///   (host problem after the id itself was resolved correctly).
+    fn load_module(&self, module_id: &str) -> SpokeResult<(WasmModule, ModuleManifest)> {
+        if let Some(dir) = &self.user_modules_dir {
+            return load_user_module(dir, module_id);
+        }
+        load_embedded_module(module_id)
+    }
+}
+
+/// Load a user-installed module from the host-local store (spec §2.1 —
+/// bytes are never peer-supplied).
 ///
-/// # Error classification (V1.146 P2 QC fix-wave)
-///
-/// - Unknown / invalid `module_id` (not in the embedded allowlist) →
-///   `InvalidInput` — the id comes from session state / `body.computable`
-///   (caller-controlled), so "not known" is a client-input error, not a host
-///   failure.
-/// - Known module whose embed/compile/trap fails → `InternalError` (host
-///   problem after the id itself was resolved correctly).
-fn load_module(module_id: &str) -> SpokeResult<(WasmModule, ModuleManifest)> {
+/// The module id is operator/peer-named: it must be a single path
+/// component (no separators, no `.` / `..`), so the join below can never
+/// escape the store directory (mirrors the embedded allowlist gate's
+/// fail-closed spirit — an escaped path would otherwise read arbitrary
+/// files).
+fn load_user_module(dir: &Path, module_id: &str) -> SpokeResult<(WasmModule, ModuleManifest)> {
+    if module_id.is_empty()
+        || module_id.contains('/')
+        || module_id.contains('\\')
+        || module_id == "."
+        || module_id == ".."
+    {
+        return reject(
+            SpokeRejectCode::InvalidInput,
+            format!("invalid module id: {module_id:?}"),
+            json!({ "module_id": module_id }),
+        );
+    }
+    let module_dir = dir.join(module_id);
+    let wasm_path = module_dir.join(format!("{module_id}.wasm"));
+    let manifest_path = module_dir.join("manifest.json");
+    if !wasm_path.is_file() || !manifest_path.is_file() {
+        return reject(
+            SpokeRejectCode::InvalidInput,
+            format!(
+                "module '{module_id}' is not installed under {}",
+                dir.display()
+            ),
+            json!({ "module_id": module_id }),
+        );
+    }
+    // Post-existence-check read failures are host faults (the store
+    // changed mid-invoke or is unreadable) — InternalError, like the
+    // embedded path's "known module whose embed/compile fails"
+    // classification.
+    let bytes = match std::fs::read(&wasm_path) {
+        Ok(b) => b,
+        Err(e) => {
+            return reject(
+                SpokeRejectCode::InternalError,
+                format!("failed to read {}: {e}", wasm_path.display()),
+                json!({ "module_id": module_id }),
+            );
+        }
+    };
+    let manifest_json = match std::fs::read_to_string(&manifest_path) {
+        Ok(s) => s,
+        Err(e) => {
+            return reject(
+                SpokeRejectCode::InternalError,
+                format!("failed to read {}: {e}", manifest_path.display()),
+                json!({ "module_id": module_id }),
+            );
+        }
+    };
+    let manifest: ModuleManifest = match serde_json::from_str(&manifest_json) {
+        Ok(m) => m,
+        Err(e) => {
+            return reject(
+                SpokeRejectCode::InternalError,
+                format!("failed to parse manifest for {module_id}: {e}"),
+                json!({ "module_id": module_id }),
+            );
+        }
+    };
+    let module = match engine().load_module(&bytes) {
+        Ok(m) => m,
+        Err(e) => {
+            return reject(
+                SpokeRejectCode::InternalError,
+                format!("failed to compile WASM module {module_id}: {e}"),
+                json!({ "module_id": module_id }),
+            );
+        }
+    };
+    SpokeResult::Ok((module, manifest))
+}
+
+impl NexusAdapter<'_> {
+    /// Resolve the module identity for a compute invocation using the locked
+    /// precedence (spec §2.2): session state `module_id` first, then the
+    /// entry's `body.computable.module_id`. The Connect compute gate uses
+    /// this to scope the peer BEFORE any WASM execution; `ComputablePort::compute`
+    /// applies the same precedence internally (single source of truth).
+    ///
+    /// # Errors
+    /// `InvalidInput` when the session row is missing, the entry is missing,
+    /// or neither tier carries a module id.
+    pub async fn resolve_compute_module_id(
+        &self,
+        session_id: &str,
+        entry_id: &str,
+    ) -> SpokeResult<String> {
+        let session = match get_compute_session(&self.pool, session_id).await {
+            Ok(Some(s)) => s,
+            Ok(None) => {
+                return reject(
+                    SpokeRejectCode::InvalidInput,
+                    format!("compute session not found: {session_id}"),
+                    json!({ "session_id": session_id }),
+                );
+            }
+            Err(e) => {
+                return reject(
+                    SpokeRejectCode::InternalError,
+                    format!("storage error on compute session read: {e}"),
+                    json!({ "session_id": session_id }),
+                );
+            }
+        };
+        let entry = match self.get_knowledge_entry(entry_id).await {
+            SpokeResult::Ok(e) => e,
+            SpokeResult::Reject(r) => return SpokeResult::Reject(r),
+        };
+        let state: Map<String, Value> = session
+            .state_json
+            .as_deref()
+            .and_then(|s| serde_json::from_str(s).ok())
+            .unwrap_or_default();
+        resolve_module_id(&state, &entry)
+    }
+}
+
+/// Load a compiled module from the embedded ship set (baseline consumers
+/// without a configured user store — V1.146 behavior).
+fn load_embedded_module(module_id: &str) -> SpokeResult<(WasmModule, ModuleManifest)> {
     // F-002+F-005: validate module_id is a known embedded module before
     // doing any path-formatting or I/O. The embedded_module_ids() list is
     // the authoritative allowlist; an id not present there is InvalidInput.
@@ -369,7 +517,7 @@ impl ComputablePort for NexusAdapter<'_> {
             SpokeResult::Ok(id) => id,
             SpokeResult::Reject(r) => return SpokeResult::Reject(r),
         };
-        let (wasm_module, manifest) = match load_module(&module_id) {
+        let (wasm_module, manifest) = match self.load_module(&module_id) {
             SpokeResult::Ok(m) => m,
             SpokeResult::Reject(r) => return SpokeResult::Reject(r),
         };
