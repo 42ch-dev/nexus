@@ -108,12 +108,14 @@ fn resolve_module_id(
 }
 
 /// Shared module-id path-safety check (P2 QC fix wave FW-4 — single source
-/// of truth for the gate AND the execution guard): the id must be a single
-/// path component — non-empty, no `/` or `\` separators, and not `.` /
-/// `..` — so joining it under the module store directory can never escape
-/// the store. The Connect gate's host-store check
-/// (`apps/nexus42` `module_installed`) and the adapter's user-module loader
-/// ([`load_user_module`]) both route through this so they can never drift.
+/// of truth for the gate AND the execution guard).
+///
+/// The id must be a single path component — non-empty, no `/` or `\`
+/// separators, and not `.` / `..` — so joining it under the module store
+/// directory can never escape the store. The Connect gate's host-store
+/// check (`apps/nexus42` `module_installed`) and the adapter's user-module
+/// loader ([`load_user_module`]) both route through this so they can never
+/// drift.
 #[must_use]
 pub fn is_safe_module_id(module_id: &str) -> bool {
     !module_id.is_empty()
@@ -125,10 +127,11 @@ pub fn is_safe_module_id(module_id: &str) -> bool {
 
 /// Structured marker predicate for the missing-module-identity reject
 /// (P2 QC fix wave FW-5 — same pattern as
-/// [`crate::is_world_conflict_reject`]): `resolve_module_id`'s
-/// `InvalidInput` reject carries a `module_identity_missing: true` details
-/// marker so hosts classify the denial by marker, never by sniffing the
-/// reject message.
+/// [`crate::is_world_conflict_reject`]).
+///
+/// `resolve_module_id`'s `InvalidInput` reject carries a
+/// `module_identity_missing: true` details marker so hosts classify the
+/// denial by marker, never by sniffing the reject message.
 #[must_use]
 pub fn is_module_identity_missing_reject(reject: &SpokeReject) -> bool {
     reject
@@ -221,16 +224,20 @@ fn load_user_module(
     // changed mid-invoke or is unreadable) — InternalError, like the
     // embedded path's "known module whose embed/compile fails"
     // classification.
-    let bytes = match std::fs::read(&wasm_path) {
-        Ok(b) => b,
-        Err(e) => {
-            return reject(
-                SpokeRejectCode::InternalError,
-                format!("failed to read {}: {e}", wasm_path.display()),
-                json!({ "module_id": module_id }),
-            );
-        }
-    };
+    //
+    // Consistent-snapshot read (Greptile P1 — non-atomic module reload):
+    // an operator replacing a module mid-invoke writes `<id>.wasm` and
+    // `manifest.json` as two INDEPENDENT files, so reading them separately
+    // can observe a mixed pair (wasm v1 + manifest v2) that would then be
+    // compiled and cached. The manifest is read FIRST (the small version
+    // marker), then the wasm, then BOTH are re-read and compared: a
+    // difference means the store changed mid-load, and the mixed pair is
+    // rejected as a host fault instead of compiled. This is the
+    // writer-agnostic choice — the operator's install tool is external and
+    // cannot be assumed to take a per-module flock. A replacement landing
+    // entirely between the two reads yields a coherent pair either way,
+    // and one landing after the re-read simply leaves the previously-read
+    // consistent pair until the next load observes the new files.
     let manifest_json = match std::fs::read_to_string(&manifest_path) {
         Ok(s) => s,
         Err(e) => {
@@ -241,6 +248,33 @@ fn load_user_module(
             );
         }
     };
+    let bytes = match std::fs::read(&wasm_path) {
+        Ok(b) => b,
+        Err(e) => {
+            return reject(
+                SpokeRejectCode::InternalError,
+                format!("failed to read {}: {e}", wasm_path.display()),
+                json!({ "module_id": module_id }),
+            );
+        }
+    };
+    match module_pair_changed_mid_load(&wasm_path, &manifest_path, &bytes, &manifest_json) {
+        Ok(true) => {
+            return reject(
+                SpokeRejectCode::InternalError,
+                format!("module '{module_id}' changed while it was being read; retry the invoke"),
+                json!({ "module_id": module_id }),
+            );
+        }
+        Ok(false) => {}
+        Err(e) => {
+            return reject(
+                SpokeRejectCode::InternalError,
+                format!("failed to re-read module store for '{module_id}': {e}"),
+                json!({ "module_id": module_id }),
+            );
+        }
+    }
     let cached = match cache.get_or_compile(engine(), module_id, &bytes, &manifest_json) {
         Ok(entry) => entry,
         Err(e) => {
@@ -252,6 +286,24 @@ fn load_user_module(
         }
     };
     SpokeResult::Ok((cached.module.clone(), cached.manifest.clone()))
+}
+
+/// Coherence check behind [`load_user_module`]'s consistent-snapshot read
+/// (Greptile P1 — non-atomic module reload): re-read both module files and
+/// report whether EITHER changed since the caller's first read. `Ok(true)`
+/// means the store mutated mid-load — the caller must NOT compile the
+/// mixed pair into the cache; `Ok(false)` means the pair is a consistent
+/// snapshot. A read failure here is a host fault like any other post-check
+/// read failure.
+fn module_pair_changed_mid_load(
+    wasm_path: &Path,
+    manifest_path: &Path,
+    wasm_first: &[u8],
+    manifest_first: &str,
+) -> Result<bool, std::io::Error> {
+    let wasm_now = std::fs::read(wasm_path)?;
+    let manifest_now = std::fs::read_to_string(manifest_path)?;
+    Ok(wasm_now.as_slice() != wasm_first || manifest_now != manifest_first)
 }
 
 impl NexusAdapter<'_> {
@@ -1573,6 +1625,125 @@ mod tests {
             !std::sync::Arc::ptr_eq(&first_entry, &third_entry),
             "changed bytes must produce a FRESH compiled module (recompile, not stale serve)"
         );
+    }
+
+    /// Greptile P1 (non-atomic module reload — detector tier): the
+    /// coherence check behind [`module_pair_changed_mid_load`] must report
+    /// ANY change to either file of the module pair between the first read
+    /// and the re-read — a stable pair is coherent, a replaced wasm OR
+    /// manifest is a mid-load mutation the loader must reject (never
+    /// compile the mixed pair into the cache).
+    #[test]
+    fn module_pair_changed_mid_load_detects_replaced_files() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let wasm_path = temp.path().join("m.wasm");
+        let manifest_path = temp.path().join("manifest.json");
+        std::fs::write(&wasm_path, b"\0asm\x01\0\0\0").expect("write wasm");
+        std::fs::write(&manifest_path, r#"{"module_id":"m"}"#).expect("write manifest");
+
+        let wasm_first = std::fs::read(&wasm_path).expect("first wasm read");
+        let manifest_first = std::fs::read_to_string(&manifest_path).expect("first manifest read");
+        assert!(
+            !module_pair_changed_mid_load(&wasm_path, &manifest_path, &wasm_first, &manifest_first)
+                .expect("stable pair re-reads"),
+            "a stable pair is a consistent snapshot"
+        );
+
+        // WASM replaced between the first read and the re-read.
+        std::fs::write(&wasm_path, b"\0asm\x01\0\0\x01").expect("rewrite wasm");
+        assert!(
+            module_pair_changed_mid_load(&wasm_path, &manifest_path, &wasm_first, &manifest_first)
+                .expect("replaced wasm re-reads"),
+            "a replaced wasm must be detected"
+        );
+
+        // Manifest replaced between the first read and the re-read.
+        std::fs::write(&wasm_path, b"\0asm\x01\0\0\0").expect("restore wasm");
+        std::fs::write(&manifest_path, r#"{"module_id":"m","version":"2"}"#)
+            .expect("rewrite manifest");
+        assert!(
+            module_pair_changed_mid_load(&wasm_path, &manifest_path, &wasm_first, &manifest_first)
+                .expect("replaced manifest re-reads"),
+            "a replaced manifest must be detected"
+        );
+    }
+
+    /// Greptile P1 (non-atomic module reload — integration): a concurrent
+    /// writer thrashing the module pair while `load_module` runs must
+    /// never produce a panicking loader or a served mixed pair. Every load
+    /// either returns a coherent pair (both files read identically twice)
+    /// or rejects with `InternalError` (mid-load change detected); once
+    /// the writer stops, the loader serves the final coherent pair.
+    #[cfg(not(nexus_spoke_adapter_no_wasm_target))]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn user_module_load_under_concurrent_replace_never_serves_mixed_pair() {
+        let (pool, _db_dir) = fresh_pool().await;
+        let modules_dir = tempfile::tempdir().unwrap();
+        let module_dir = modules_dir.path().join("basic-combat");
+        std::fs::create_dir_all(&module_dir).unwrap();
+        let wasm_path = module_dir.join("basic-combat.wasm");
+        let manifest_path = module_dir.join("manifest.json");
+        let bytes = nexus_wasm_host::embedded_module_bytes("basic-combat")
+            .expect("embedded basic-combat bytes");
+        let manifest = nexus_wasm_host::embedded_module_manifest("basic-combat")
+            .expect("embedded basic-combat manifest");
+        // Pair B: different (still valid) wasm + a DIFFERENT manifest — a
+        // coherent B is legal to serve; a mixed A/B read must be rejected.
+        let changed: &[u8] = b"\0asm\x01\0\0\0";
+        let manifest_b = r#"{"module_id":"basic-combat","name":"Churn","version":"2"}"#;
+        std::fs::write(&wasm_path, bytes).expect("write module wasm");
+        std::fs::write(&manifest_path, manifest).expect("write module manifest");
+
+        let adapter =
+            NexusAdapter::new(pool).with_user_modules_dir(modules_dir.path().to_path_buf());
+        let adapter = std::sync::Arc::new(adapter);
+
+        // Churn writer: alternate the pair while the loader runs.
+        let wasm_path_t = wasm_path.clone();
+        let manifest_path_t = manifest_path.clone();
+        let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let stop_t = std::sync::Arc::clone(&stop);
+        let writer = std::thread::spawn(move || {
+            let mut pair_b = false;
+            while !stop_t.load(std::sync::atomic::Ordering::Relaxed) {
+                if pair_b {
+                    std::fs::write(&wasm_path_t, changed).expect("write wasm B");
+                    std::fs::write(&manifest_path_t, manifest_b).expect("write manifest B");
+                } else {
+                    std::fs::write(&wasm_path_t, &bytes).expect("write wasm A");
+                    std::fs::write(&manifest_path_t, manifest).expect("write manifest A");
+                }
+                pair_b = !pair_b;
+                std::thread::yield_now();
+            }
+        });
+
+        // Loader: every outcome must be Ok (coherent pair) or
+        // InternalError (mid-load mutation) — never a panic, never a
+        // misclassified code.
+        for _ in 0..200 {
+            match adapter.load_module("basic-combat") {
+                SpokeResult::Ok(_) => {}
+                SpokeResult::Reject(r) => assert_eq!(
+                    r.code,
+                    SpokeRejectCode::InternalError,
+                    "a mid-load mutation must classify as InternalError, got {r:?}"
+                ),
+            }
+        }
+        stop.store(true, std::sync::atomic::Ordering::Relaxed);
+        writer.join().expect("writer thread joins");
+
+        // Final coherent pair (pair A restored) loads cleanly.
+        std::fs::write(&wasm_path, bytes).expect("restore wasm");
+        std::fs::write(&manifest_path, manifest).expect("restore manifest");
+        let (module, served_manifest) =
+            unwrap_ok(adapter.load_module("basic-combat"), "final pair loads");
+        assert_eq!(
+            served_manifest.module_id, "basic-combat",
+            "the served manifest is the coherent final pair"
+        );
+        let _ = module;
     }
 
     /// P2 QC fix wave FW-3 (adapter tier — TOCTOU defense): compute on a
