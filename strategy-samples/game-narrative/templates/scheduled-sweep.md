@@ -1,0 +1,76 @@
+---
+max_tokens: 2000
+---
+
+# Scheduled Sweep — Inventory New/Changed Source Documents (scheduled lane)
+
+You are the scheduled lane of a game-narrative import strategy. This run was
+triggered by a timer (interval/cron-style) rather than a game event. Your job
+is to inventory the source documents available for import and produce a sweep
+brief; the exit judge (scheduled-sweep-exit.md) then decides whether the sweep
+warrants extraction, which runs in a separate state.
+
+## Inputs
+
+- Documents available this sweep: `{{preset.input.documents}}`
+- Target world: `{{preset.input.world_id}}`
+- Last-sweep watermark / prior state: `{{preset.input.watermark}}`
+  (empty on the first run)
+
+## Watermark ownership (read this — it is NOT automatic)
+
+The engine does NOT persist the sweep watermark. Nothing writes `core_context.*`
+session keys at runtime (the schedule seed/input is stored verbatim as
+core_context v0 in the derivation store, never parsed into template context),
+and the sweep's `next_watermark` is not written back anywhere by the engine.
+
+The partner's backend owns the watermark:
+
+1. After each sweep run, capture `next_watermark` from the sweep brief — the
+   scan response produced in the `scheduled_sweep` state (this state's
+   `creator.inject_prompt` queues the scan prompt into the creator session;
+   the brief is the agent's reply, not a graph node output — extraction runs
+   later in the separate `sweep_extract` state and the brief is not part of
+   its `output_binding`, which carries the final import manifest).
+2. Persist it on the partner side. Optionally mirror it to the schedule's
+   core_context for audit/continuity via
+   `PATCH /v1/daemon/orchestration/schedules/{id}/core-context`
+   (`struct_merge`/`append`) — that store is the versioned derivation trace,
+   not live session context, and templates cannot read it.
+3. Supply it back on the next sweep run as `preset.input.watermark` (part of
+   the schedule input the partner's backend creates).
+
+With an empty watermark every sweep treats all documents as new — the sweep
+"since last run" semantics only work if the backend feeds the watermark back.
+
+## Task
+
+1. Inventory the documents present in the payload:
+   - `worldview` — a worldview document (worldbuilding doc, lore bible,
+     setting notes)
+   - `character_sheets` — one or more character design sheets
+2. For each document, decide whether it is NEW or CHANGED since the last sweep
+   (compare against the watermark when one is present). Only new/changed
+   documents should proceed to extraction; unchanged ones are skipped.
+3. Note a suggested watermark for the next run (e.g. latest document revision
+   or timestamp seen).
+
+## Response Format
+
+Respond with ONLY a JSON object (no markdown code fences):
+
+```json
+{
+  "sweep_summary": "<one or two sentences>",
+  "to_extract": {
+    "worldview": "<document text or null>",
+    "character_sheets": ["<sheet text>"]
+  },
+  "skipped": ["<document ids already imported>"],
+  "next_watermark": "<suggested watermark for the next run>"
+}
+```
+
+Use `null` / `[]` for absent sections. If there is nothing new to import, the
+exit judge (scheduled-sweep-exit.md) will keep this lane parked until the next
+interval.

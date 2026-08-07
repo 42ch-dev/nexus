@@ -21,6 +21,7 @@ pub mod runtime_mode;
 
 use crate::config::CliConfig;
 use crate::errors::Result;
+use crate::CliError;
 use clap::Subcommand;
 use clap_complete::Shell;
 
@@ -95,6 +96,11 @@ pub enum SystemPresetSubcommand {
         /// Emit machine-readable JSON
         #[arg(long, default_value_t = false)]
         json: bool,
+        /// Validate in-process via the shared validator core — no daemon
+        /// required (V1.153 P3: `nexus-runtime` does not serve the daemon
+        /// HTTP router). Default: daemon-backed `POST /v1/daemon/presets:validate`.
+        #[arg(long, default_value_t = false)]
+        offline: bool,
     },
 }
 
@@ -129,9 +135,11 @@ pub async fn run(cmd: SystemCommand, config: &CliConfig) -> Result<()> {
             SystemPresetSubcommand::List { intent, json } => {
                 list_system_presets(config, intent.as_deref(), json).await
             }
-            SystemPresetSubcommand::Validate { path, json } => {
-                validate_preset(config, &path, json).await
-            }
+            SystemPresetSubcommand::Validate {
+                path,
+                json,
+                offline,
+            } => validate_preset(config, &path, json, offline).await,
         },
         SystemCommand::Version => {
             println!("nexus42 {}", env!("CARGO_PKG_VERSION"));
@@ -328,13 +336,30 @@ async fn list_system_presets(
 }
 
 /// Validate a preset YAML/bundle at a given path.
-async fn validate_preset(config: &CliConfig, path: &str, json_output: bool) -> Result<()> {
-    let client = crate::api::DaemonClient::from_config(config);
-
-    let body = serde_json::json!({ "path": path });
-    let resp: serde_json::Value = client
-        .post::<serde_json::Value, _>("/v1/daemon/presets:validate", &body)
-        .await?;
+///
+/// With `offline = false` (default) validation is delegated to the daemon
+/// (`POST /v1/daemon/presets:validate`). With `offline = true` the same
+/// checks run in-process via the shared orchestration validator core — no
+/// daemon required (V1.153 P3: `nexus-runtime` does not serve the daemon
+/// HTTP router, so integrators need a daemon-free path).
+///
+/// An invalid preset produces a non-zero exit in both modes so scripts
+/// (e.g. `strategy-samples/validate.sh`) can rely on the exit code.
+async fn validate_preset(
+    config: &CliConfig,
+    path: &str,
+    json_output: bool,
+    offline: bool,
+) -> Result<()> {
+    let resp: serde_json::Value = if offline {
+        validate_preset_offline(path)?
+    } else {
+        let client = crate::api::DaemonClient::from_config(config);
+        let body = serde_json::json!({ "path": path });
+        client
+            .post::<serde_json::Value, _>("/v1/daemon/presets:validate", &body)
+            .await?
+    };
 
     let valid = resp
         .get("valid")
@@ -343,26 +368,186 @@ async fn validate_preset(config: &CliConfig, path: &str, json_output: bool) -> R
 
     if json_output {
         println!("{}", serde_json::to_string_pretty(&resp)?);
-        return Ok(());
+    } else {
+        print_validate_verdict(&resp);
     }
+
+    if valid {
+        Ok(())
+    } else {
+        let error_count = resp
+            .get("errors")
+            .and_then(|v| v.as_array())
+            .map_or(0, std::vec::Vec::len);
+        Err(CliError::Other(format!(
+            "preset validation failed: {error_count} error(s)"
+        )))
+    }
+}
+
+/// Print the human-readable verdict for a validate response
+/// (`{valid, id, version, state_count, errors, warnings}` — the daemon
+/// response shape; `validate_preset_offline` produces the same shape).
+fn print_validate_verdict(resp: &serde_json::Value) {
+    let valid = resp
+        .get("valid")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false);
+    let errors: Vec<&str> = resp
+        .get("errors")
+        .and_then(|v| v.as_array())
+        .map_or_else(Vec::new, |a| {
+            a.iter().filter_map(serde_json::Value::as_str).collect()
+        });
+    let warnings: Vec<&str> = resp
+        .get("warnings")
+        .and_then(|v| v.as_array())
+        .map_or_else(Vec::new, |a| {
+            a.iter().filter_map(serde_json::Value::as_str).collect()
+        });
 
     if valid {
         println!("✓ Valid preset");
     } else {
-        let errors = resp
-            .get("diagnostics")
-            .and_then(|v| v.as_array())
-            .map_or(0, std::vec::Vec::len);
-        println!("✗ Invalid preset ({errors} error(s))");
-        if let Some(diagnostics) = resp.get("diagnostics").and_then(|v| v.as_array()) {
-            for d in diagnostics {
-                let msg = d.get("message").and_then(|v| v.as_str()).unwrap_or("?");
-                println!("  - {msg}");
+        println!("✗ Invalid preset ({} error(s))", errors.len());
+    }
+    for error in &errors {
+        println!("  - {error}");
+    }
+    for warning in &warnings {
+        println!("  - warning: {warning}");
+    }
+}
+
+/// Run preset validation in-process, mirroring the daemon's
+/// `POST /v1/daemon/presets:validate` composition
+/// (`loader_validate_manifest_compat` + `validate_path_safety` +
+/// `validate_preset_semantic` + `validate_assets_in_bundle`) so the
+/// offline verdict is identical to the daemon-backed one.
+///
+/// The daemon handler — not `load_preset` — is deliberately the reference
+/// composition: it parses the manifest directly and treats every
+/// error-severity diagnostic as a failure, whereas `load_preset`
+/// downgrades capability-arg-drift errors to warnings. Mirroring the
+/// handler keeps `--offline` and daemon-backed validation answering the
+/// same question with the same answer (and the same response shape).
+///
+/// `path` may be a bundle directory (containing `preset.yaml`), a
+/// `preset.yaml` file (asset checks run against its parent), or a
+/// standalone YAML file (no asset checks — same as the daemon's
+/// `infer_bundle_root`).
+fn validate_preset_offline(path: &str) -> Result<serde_json::Value> {
+    use nexus_orchestration::preset::{
+        loader_validate_manifest_compat, validate_assets_in_bundle, validate_path_safety,
+        validate_preset_semantic, yaml_value_depth, DiagnosticSeverity,
+        ValidationResult as PresetValidationResult, DEFAULT_MAX_YAML_DEPTH,
+        DEFAULT_MAX_YAML_SIZE,
+    };
+    use nexus_orchestration::CapabilityRegistry;
+
+    // Resolve the target file + optional bundle root (mirrors the daemon's
+    // `infer_bundle_root`: only a file literally named `preset.yaml` has a
+    // bundle root; a directory argument points at its preset.yaml).
+    let file_path = std::path::Path::new(path);
+    let (preset_yaml_path, bundle_root) = if file_path.is_dir() {
+        (
+            file_path.join("preset.yaml"),
+            Some(file_path.to_path_buf()),
+        )
+    } else {
+        let is_bundle_manifest = file_path
+            .file_name()
+            .is_some_and(|name| name == "preset.yaml");
+        (
+            file_path.to_path_buf(),
+            is_bundle_manifest
+                .then(|| file_path.parent().map(std::path::Path::to_path_buf))
+                .flatten(),
+        )
+    };
+
+    if !preset_yaml_path.exists() {
+        return Err(CliError::Other(format!(
+            "File not found: {}",
+            preset_yaml_path.display()
+        )));
+    }
+
+    // Size limit (same 1 MiB limit the loader/daemon enforce).
+    let metadata = std::fs::metadata(&preset_yaml_path)?;
+    if metadata.len() > DEFAULT_MAX_YAML_SIZE as u64 {
+        return Err(CliError::Other(format!(
+            "Preset YAML exceeds maximum size ({} bytes, limit is {} bytes)",
+            metadata.len(),
+            DEFAULT_MAX_YAML_SIZE
+        )));
+    }
+
+    let yaml = std::fs::read_to_string(&preset_yaml_path)?;
+
+    // Parse + depth check (same path as `load_preset_from_str_with_limits`).
+    let yaml_value: serde_yaml::Value = serde_yaml::from_str(&yaml)
+        .map_err(|e| CliError::Other(format!("preset YAML parse error: {e}")))?;
+    let depth = yaml_value_depth(&yaml_value);
+    if depth > DEFAULT_MAX_YAML_DEPTH {
+        return Err(CliError::Other(format!(
+            "Nesting depth ({depth}) exceeds maximum ({DEFAULT_MAX_YAML_DEPTH})"
+        )));
+    }
+    let manifest: nexus_contracts::local::orchestration::preset::PresetManifest =
+        serde_yaml::from_value(yaml_value)
+            .map_err(|e| CliError::Other(format!("preset structural error: {e}")))?;
+
+    let caps = CapabilityRegistry::with_builtins();
+    let mut errors: Vec<String> = Vec::new();
+    let mut warnings: Vec<String> = Vec::new();
+
+    // C2: loader-equivalent structural checks (same defects the runtime
+    //     loader would reject).
+    for problem in loader_validate_manifest_compat(&manifest, &caps) {
+        errors.push(format!("{}: {}", problem.path, problem.error));
+    }
+
+    // C3 + A5 + A3: shared validation facade. Bundle asset checks only run
+    //     when the target resolves to a bundle root.
+    let asset_result = bundle_root.as_deref().map_or_else(
+        PresetValidationResult::default,
+        |root| validate_assets_in_bundle(&manifest, root),
+    );
+    for diagnostic in validate_path_safety(&manifest)
+        .diagnostics
+        .iter()
+        .chain(validate_preset_semantic(&manifest, &caps).diagnostics.iter())
+        .chain(asset_result.diagnostics.iter())
+    {
+        match diagnostic.severity {
+            DiagnosticSeverity::Error => {
+                errors.push(format!("{}: {}", diagnostic.path, diagnostic.message));
+            }
+            DiagnosticSeverity::Warning => {
+                warnings.push(format!("{}: {}", diagnostic.path, diagnostic.message));
             }
         }
     }
 
-    Ok(())
+    // Same response shape as the daemon endpoint (warnings omitted when
+    // empty, matching the daemon's `skip_serializing_if`).
+    let mut resp = serde_json::Map::new();
+    resp.insert("valid".to_string(), serde_json::json!(errors.is_empty()));
+    resp.insert("id".to_string(), serde_json::json!(manifest.preset.id));
+    resp.insert(
+        "version".to_string(),
+        serde_json::json!(manifest.preset.version),
+    );
+    resp.insert(
+        "state_count".to_string(),
+        serde_json::json!(manifest.states.len()),
+    );
+    resp.insert("errors".to_string(), serde_json::json!(errors));
+    if !warnings.is_empty() {
+        resp.insert("warnings".to_string(), serde_json::json!(warnings));
+    }
+    Ok(serde_json::Value::Object(resp))
 }
 
 // ---------------------------------------------------------------------------
@@ -382,7 +567,11 @@ mod tests {
         match cmd.command {
             SystemPresetCommand::Preset { command } => match command {
                 SystemPresetSubcommand::List { intent: _, json: _ } => {} // expected
-                SystemPresetSubcommand::Validate { path: _, json: _ } => {} // expected
+                SystemPresetSubcommand::Validate {
+                    path: _,
+                    json: _,
+                    offline: _,
+                } => {} // expected
             },
         }
     }
@@ -391,6 +580,136 @@ mod tests {
     fn system_preset_subcommand_required() {
         let result = SystemPresetCli::try_parse_from(["system"]);
         assert!(result.is_err());
+    }
+
+    /// Minimal preset that passes the shared validation facade (semantic +
+    /// assets + path safety). The bundle directory name must equal
+    /// `preset.id` (`check_bundle_id_vs_directory`).
+    const OFFLINE_VALID_YAML: &str = r"
+preset:
+  id: tiny-valid
+  version: 1
+  kind: creator
+  description: minimal valid fixture for offline validation
+  requires_capabilities: []
+  run_intents:
+    - work_init
+  initial: a
+  terminal: b
+states:
+  - id: a
+    enter: []
+    exit_when: { kind: manual }
+    next: b
+  - id: b
+    terminal: true
+";
+
+    /// Broken copy: `initial` names a state that does not exist (structural
+    /// error caught by `loader_validate_manifest_compat`).
+    const OFFLINE_BROKEN_YAML: &str = r"
+preset:
+  id: tiny-broken
+  version: 1
+  kind: creator
+  description: broken fixture for offline validation
+  requires_capabilities: []
+  run_intents:
+    - work_init
+  initial: missing_state
+  terminal: b
+states:
+  - id: a
+    enter: []
+    exit_when: { kind: manual }
+    next: b
+  - id: b
+    terminal: true
+";
+
+    #[test]
+    fn offline_validate_accepts_valid_bundle() {
+        let tmp = tempfile::tempdir().unwrap();
+        let bundle = tmp.path().join("tiny-valid");
+        std::fs::create_dir_all(&bundle).unwrap();
+        std::fs::write(bundle.join("preset.yaml"), OFFLINE_VALID_YAML).unwrap();
+
+        let resp = validate_preset_offline(bundle.to_str().unwrap()).unwrap();
+        assert_eq!(
+            resp["valid"], true,
+            "offline validation should accept a valid bundle: {resp}"
+        );
+        assert_eq!(resp["errors"].as_array().unwrap().len(), 0);
+        assert_eq!(resp["id"], "tiny-valid");
+        assert_eq!(resp["state_count"], 2);
+    }
+
+    #[test]
+    fn offline_validate_rejects_broken_bundle() {
+        let tmp = tempfile::tempdir().unwrap();
+        let bundle = tmp.path().join("tiny-broken");
+        std::fs::create_dir_all(&bundle).unwrap();
+        std::fs::write(bundle.join("preset.yaml"), OFFLINE_BROKEN_YAML).unwrap();
+
+        let resp = validate_preset_offline(bundle.to_str().unwrap()).unwrap();
+        assert_eq!(resp["valid"], false);
+        let errors = resp["errors"].as_array().unwrap();
+        assert!(!errors.is_empty());
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.as_str().unwrap_or_default().contains("unknown state")),
+            "expected an 'unknown state' diagnostic, got: {errors:?}"
+        );
+    }
+
+    #[test]
+    fn offline_validate_accepts_standalone_yaml_file() {
+        // A standalone YAML file (not named preset.yaml) skips asset checks.
+        let tmp = tempfile::tempdir().unwrap();
+        let file = tmp.path().join("strategy.yaml");
+        std::fs::write(&file, OFFLINE_VALID_YAML).unwrap();
+
+        let resp = validate_preset_offline(file.to_str().unwrap()).unwrap();
+        assert_eq!(
+            resp["valid"], true,
+            "standalone YAML file should validate: {resp}"
+        );
+    }
+
+    #[test]
+    fn offline_validate_missing_path_errors() {
+        let err = validate_preset_offline("/nonexistent/definitely-missing").unwrap_err();
+        assert!(
+            err.to_string().contains("File not found"),
+            "expected 'File not found' error, got: {err}"
+        );
+    }
+
+    #[test]
+    fn system_preset_validate_offline_flag_parses() {
+        let cmd = SystemPresetCli::try_parse_from([
+            "system",
+            "preset",
+            "validate",
+            "some/path",
+            "--offline",
+        ])
+        .unwrap();
+        match cmd.command {
+            SystemPresetCommand::Preset { command } => match command {
+                SystemPresetSubcommand::Validate {
+                    path,
+                    json,
+                    offline,
+                } => {
+                    assert_eq!(path, "some/path");
+                    assert!(!json);
+                    assert!(offline);
+                }
+                SystemPresetSubcommand::List { .. } => panic!("expected validate"),
+            },
+        }
     }
 
     #[test]

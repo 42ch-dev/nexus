@@ -97,7 +97,7 @@ SIDECAR_TARGETS="x86_64-apple-darwin" pnpm run sidecar
 
 ### Headless runtime
 
-`nexus-runtime` is the standalone headless binary for the integrator channel — Connect-only, shares the `~/.nexus42` home with `nexus42`, and ships without the embedded Web UI. Integrator setup and the Connect invoke surface are covered in the P3 integrator guide.
+`nexus-runtime` is the standalone headless binary for the integrator channel — Connect-only, shares the `~/.nexus42` home with `nexus42`, and ships without the embedded Web UI. Integrator setup and the Connect invoke surface are covered in the [P3 integrator guide](strategy-samples/README.md).
 
 ### Cleanup
 
