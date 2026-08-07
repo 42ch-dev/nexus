@@ -102,19 +102,11 @@ thiserror = { workspace = true }
 url = { workspace = true }
 sha2 = { workspace = true }
 hex = "0.4"
-# ACP SDK consumed via nexus-acp-host (worker-only linkage — see spec §11.3)
-# agent-client-protocol = "=0.10.4"  — REMOVED: consumed through nexus-acp-host
-# tokio-util, async-trait, async-broadcast — consumed through nexus-acp-host
-# nix — also used directly by daemon.rs for process management
-[target.'cfg(unix)'.dependencies]
-nix = { version = "0.28", features = ["signal", "process"] }
-
-# V1.153 P2 T2: these were accidentally declared under
-# `[target.'cfg(unix)'.dependencies]` (missing `[dependencies]` header after
-# the nix entry), so every Windows build failed with "cannot find crate
-# dialoguer/tempfile/regex/base64/cron/chrono-tz" (E0433) in lib code that
-# uses them on ALL platforms (e.g. works/cron.rs cron validation).
-[dependencies]
+# V1.153 P2 T2: these six were previously declared after `nix` inside
+# `[target.'cfg(unix)'.dependencies]` (missing section header), which broke
+# every Windows build with E0433 "cannot find crate" in lib code using them
+# on all platforms (works/cron.rs cron validation, auth/user_auth.rs base64,
+# creator/memory.rs tempfile, rules_runtime.rs dialoguer). Moved here.
 dialoguer = "0.11"
 tempfile = "3"
 regex = "1"
@@ -122,6 +114,12 @@ base64 = "0.22"
 # V1.50 T-A P0 T2: cron validation + IANA TZ parsing (novel-writing staggering)
 cron = { workspace = true }
 chrono-tz = { workspace = true }
+# ACP SDK consumed via nexus-acp-host (worker-only linkage — see spec §11.3)
+# agent-client-protocol = "=0.10.4"  — REMOVED: consumed through nexus-acp-host
+# tokio-util, async-trait, async-broadcast — consumed through nexus-acp-host
+# nix — also used directly by daemon.rs for process management
+[target.'cfg(unix)'.dependencies]
+nix = { version = "0.28", features = ["signal", "process"] }
 
 [dev-dependencies]
 assert_cmd = "2.0"
