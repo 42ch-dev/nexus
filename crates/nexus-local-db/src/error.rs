@@ -82,6 +82,44 @@ pub enum LocalDbError {
     ValidationError(String),
 }
 
+impl LocalDbError {
+    /// Display the [`VersionMismatch`](Self::VersionMismatch) arm. The two
+    /// OCC conflict arms are hoisted out of the main `Display` match so
+    /// the impl stays under clippy's `too_many_lines` ceiling (the
+    /// V1.154 `WorldConflict` arm pushed the `fmt` body over 100 lines).
+    fn fmt_version_mismatch(
+        f: &mut fmt::Formatter<'_>,
+        table: &str,
+        id: &str,
+        expected: i64,
+        actual: Option<i64>,
+    ) -> fmt::Result {
+        write!(
+            f,
+            "version mismatch on '{table}' row '{id}': expected v{expected}, actual v{} — \
+             row was modified by another writer; retry",
+            actual.map_or_else(|| "?".to_string(), |v| v.to_string())
+        )
+    }
+
+    /// Display the [`WorldConflict`](Self::WorldConflict) arm — see
+    /// [`fmt_version_mismatch`].
+    fn fmt_world_conflict(
+        f: &mut fmt::Formatter<'_>,
+        table: &str,
+        id: &str,
+        expected_world: &str,
+        actual_world: &str,
+    ) -> fmt::Result {
+        write!(
+            f,
+            "world conflict on '{table}' row '{id}': expected world '{expected_world}', \
+             actual world '{actual_world}' — the row was moved to another world by \
+             another writer; re-read it in its stored world",
+        )
+    }
+}
+
 impl fmt::Display for LocalDbError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -161,27 +199,13 @@ impl fmt::Display for LocalDbError {
                 id,
                 expected,
                 actual,
-            } => {
-                write!(
-                    f,
-                    "version mismatch on '{table}' row '{id}': expected v{expected}, actual v{} — \
-                     row was modified by another writer; retry",
-                    actual.map_or("?".to_string(), |v| v.to_string())
-                )
-            }
+            } => Self::fmt_version_mismatch(f, table, id, *expected, *actual),
             Self::WorldConflict {
                 table,
                 id,
                 expected_world,
                 actual_world,
-            } => {
-                write!(
-                    f,
-                    "world conflict on '{table}' row '{id}': expected world '{expected_world}', \
-                     actual world '{actual_world}' — the row was moved to another world by \
-                     another writer; re-read it in its stored world",
-                )
-            }
+            } => Self::fmt_world_conflict(f, table, id, expected_world, actual_world),
             Self::ValidationError(msg) => {
                 write!(f, "validation error: {msg}")
             }
