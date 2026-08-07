@@ -476,12 +476,9 @@ impl AcpSession {
             // need it (the unix branch avoids this because its first use is
             // on a `return` path); clone once per closure — error path only.
             let agent_path = self.agent_path.clone();
-            self.child
-                .kill()
-                .await
-                .map_err(|e| {
-                    AcpError::agent_crashed(None, agent_path.clone(), Some(e.to_string()))
-                })?;
+            self.child.kill().await.map_err(|e| {
+                AcpError::agent_crashed(None, agent_path.clone(), Some(e.to_string()))
+            })?;
 
             let status = self.child.wait().await.map_err(|e| {
                 AcpError::agent_crashed(None, agent_path.clone(), Some(e.to_string()))
