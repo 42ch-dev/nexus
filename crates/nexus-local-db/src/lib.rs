@@ -10,7 +10,9 @@
 //!
 //! See `.mstar/archived/knowledge/local-db-refactor-legacy.md` for design baseline.
 
-#[cfg(unix)]
+// V1.153 P2 T2: cas is pure SQL (OCC helpers — no unix APIs); the former
+// `#[cfg(unix)]` gate was wrong and broke `kb_relationships` (which imports
+// `crate::cas`) on the Windows x64 build.
 pub mod cas;
 pub mod compute_runs;
 pub mod compute_session;

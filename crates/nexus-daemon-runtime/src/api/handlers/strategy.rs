@@ -39,11 +39,17 @@ const PRESET_MAX_YAML_DEPTH: usize = 10;
 // ─── Cross-process advisory lock ───────────────────────────────────────────
 
 /// RAII guard holding an exclusive `flock` on the strategy bundle lock file.
+///
+/// Unix-only (`flock`); on other platforms a no-op unit guard (V1.153 P2 T2 —
+/// the shared home is WAL-governed, and this lock serializes preset-bundle
+/// writers which the headless runtime does not run).
 #[derive(Debug)]
+#[cfg(unix)]
 struct StrategyLockGuard {
     fd: std::fs::File,
 }
 
+#[cfg(unix)]
 impl Drop for StrategyLockGuard {
     fn drop(&mut self) {
         let raw_fd = self.fd.as_raw_fd();
@@ -56,10 +62,17 @@ impl Drop for StrategyLockGuard {
     }
 }
 
+/// No-op guard on non-unix (V1.153 P2 T2).
+#[derive(Debug)]
+#[cfg(not(unix))]
+struct StrategyLockGuard;
+
 /// Acquire an exclusive advisory lock for a strategy bundle.
 ///
 /// Blocks until the lock is available. All mutating strategy operations must
 /// hold this lock for the entire load → CAS → validate → write sequence.
+/// Unix-only (`flock`); on other platforms a no-op (V1.153 P2 T2).
+#[cfg(unix)]
 fn acquire_strategy_lock(bundle_dir: &std::path::Path) -> Result<StrategyLockGuard, NexusApiError> {
     let lock_path = bundle_dir.join(STRATEGY_LOCK_FILE);
     if let Some(parent) = lock_path.parent() {
@@ -90,6 +103,14 @@ fn acquire_strategy_lock(bundle_dir: &std::path::Path) -> Result<StrategyLockGua
     })?;
 
     Ok(StrategyLockGuard { fd })
+}
+
+/// V1.153 P2 T2: no advisory flock on non-unix — proceed unlocked.
+#[cfg(not(unix))]
+fn acquire_strategy_lock(
+    _bundle_dir: &std::path::Path,
+) -> Result<StrategyLockGuard, NexusApiError> {
+    Ok(StrategyLockGuard)
 }
 
 // ─── Request helpers ───────────────────────────────────────────────────────
