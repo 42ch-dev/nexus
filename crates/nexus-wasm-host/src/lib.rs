@@ -45,7 +45,7 @@ pub use engine::{WasmEngine, WasmModule};
 pub use error::{ComputeError, Result};
 pub use host::HostContext;
 pub use manifest::{HostFunction, ModuleManifest, ModuleSchemas};
-pub use module_cache::{CachedModule, ModuleCache};
+pub use module_cache::{hash_module_bytes, CachedModule, ModuleCache};
 pub use registry::{get_module, list_modules};
 pub use sandbox::SandboxConfig;
 

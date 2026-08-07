@@ -8,7 +8,7 @@
 //! ```text
 //! PROBE_PEER_ID=<peer-id>            # --print-peer-only (allowlist seed)
 //! DIAL_OK session=<id> remote=<id>   # signed-hello handshake completed
-//! SERVED_OPS=upsert,promote,relate   # manifest extensions.nexus.served_ops
+//! SERVED_OPS=upsert,promote,relate,check,assemble,compute   # manifest extensions.nexus.served_ops
 //! SESSION_OK                         # session still usable after refusals
 //! ```
 //!
@@ -98,6 +98,7 @@ async fn main() {
         local_manifest: probe_manifest(),
         handshake_timeout: Some(std::time::Duration::from_secs(10)),
         invoke_handler: None,
+        invoke_handler_v2: None,
         op_capability_requirements: HashMap::new(),
         trusted_issuers: Vec::new(),
         require_capability_token: false,
@@ -129,7 +130,7 @@ async fn main() {
         session.remote_peer_id()
     );
 
-    // N-C1 surface: the manifest advertises exactly the served write ops.
+    // N-C2 read-half surface: the manifest advertises exactly the served ops.
     let manifest_json =
         serde_json::to_string(session.remote_manifest()).expect("manifest serializes");
     println!("MANIFEST_JSON={manifest_json}");

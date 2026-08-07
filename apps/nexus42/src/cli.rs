@@ -77,12 +77,15 @@ pub enum Commands {
         command: DaemonCommand,
     },
 
-    /// Connect Host (DF-72 N-C0) — peer surface for third-party reasoners
+    /// Connect Host (DF-72 N-C2 read half) — peer surface for third-party reasoners
     ///
     /// Runs a `spoke-connect` node in a separate OS process: signed-hello
-    /// handshake + allowlist + honest `HostCapabilityManifest`; every inbound
-    /// op is refused (`invoke_handler = None`). Compiled only when the
-    /// `connect-host` feature is enabled.
+    /// handshake + allowlist + honest `HostCapabilityManifest`; caller
+    /// identity is the authenticated session peer (spoke-connect 0.9.2
+    /// `InvokeHandlerV2`). Serves `upsert` / `promote` / `relate` /
+    /// `check` / `assemble` with fail-closed world scoping; `compute` /
+    /// `project` / unknown ops are refused. Compiled only
+    /// when the `connect-host` feature is enabled.
     #[cfg(feature = "connect-host")]
     Connect {
         #[command(subcommand)]

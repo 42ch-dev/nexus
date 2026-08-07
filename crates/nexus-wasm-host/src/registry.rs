@@ -137,6 +137,7 @@ mod tests {
             max_fuel: None,
             max_memory_mib: None,
             max_wall_time_ms: None,
+            wasm_sha256: None,
         };
         let summary = manifest_to_summary(&manifest);
         assert_eq!(summary.status.to_string(), "ok");

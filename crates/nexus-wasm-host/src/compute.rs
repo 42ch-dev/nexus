@@ -1303,6 +1303,7 @@ mod tests {
             max_fuel,
             max_memory_mib,
             max_wall_time_ms,
+            wasm_sha256: None,
         }
     }
 

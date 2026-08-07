@@ -67,6 +67,8 @@ Spec files live **flat** in this directory except **`novel-writing/`** — the n
 | [local-runtime-boundary.md](local-runtime-boundary.md) | Master | Normative |
 | [schemas-directory-layout.md](schemas-directory-layout.md) | Master | Normative — V1.64 Shipped (local-api common + findings list-response) |
 | [local-api-surface-conventions.md](local-api-surface-conventions.md) | Master | Normative — **V1.67 amended** (§3.2 casing ratification, §4 `items` enforcement, §5 sort-param contract; 0.5.0→0.6.0) |
+| [outbox-consolidation.md](outbox-consolidation.md) | Master | Normative — V1.59 P-last promote (single-writer contract + schema ownership) |
+| [reference-knowledge.md](reference-knowledge.md) | Master | Normative — V1.58 P-last promote (reference body refreshable scan pipeline) |
 | [spoke-adapter-architecture.md](spoke-adapter-architecture.md) | Master | **Normative (v0.12 — V1.152 DF-77 §11 Narrative Knowledge Pack I/O: additive daemon export/import routes + all three conflict policies (skip/rename/overwrite) + CLI↔daemon shared import-orchestration module + Control Room panel; v0.11 — V1.151 DF-76 §7.4 inspector packet field surface added (start-chain architect lock, shipped P0+P1; P2 dogfood-confirmed against the spoke assemble-module recipe handbook); v0.10 — V1.150 DF-75 §7.4 slot + Moment Directive + generation-stage matrix shipped at P2 close; v0.9 was V1.149 lore activation §7.4 production matrix: default-on engine + Relation hop expand; v0.8 was V1.148 spoke pin 0.6.1→0.8.2 + RuleQueryPort production + orchestrate_check daemon route + Connect Host N-C0 surface §10; v0.7 was V1.146 spoke InternalError reject code: pin bump 0.6.0→0.6.1 + residual sweep + spec alignment; v0.6 was V1.145 spoke consumer alignment: adapter rehome to spoke-adapter + dep reversal + WorldKB/timeline read via ScopeQuery + scope-pushdown contract)** — spoke-adapter boundary, `extensions.nexus` namespace contract, daemon-api envelope strategy, nexus-contracts package boundary, drift adaptation, HTTP route stability, spoke-operations call-boundary invariant, dual-surface adapter API (pure delegates + injection orchestration), production `NexusAdapter` home (`nexus-spoke-adapter`, V1.146 rename), scope-pushdown contract, production-vs-stub port matrix, orchestrator cutover registry, timeline wire-type unification seam (`From`/`Into`), promote-reject/merge Surface A retention rationale, adapter module layout (11 modules + conversion seam), Connect Host N-C0 surface (§10) |
 
 Also: [schemas-external-consumer-boundary.md](../knowledge/schemas-external-consumer-boundary.md) (knowledge root).
@@ -81,6 +83,7 @@ Also: [schemas-external-consumer-boundary.md](../knowledge/schemas-external-cons
 | [canvas-strategy-surface.md](canvas-strategy-surface.md) | Draft overlay | **Shipped α (V1.70)** — Canvas product vision (Nexus = AI-autonomous executor; human steers via Canvas, AI owns prose) + 3 surfaces (Strategy/outline+timeline/World KB) on React Flow + no-raw-file-editing principle + TipTap-as-in-node + Preset→Strategy terminology. **V1.70** shipped the Strategy read/overlay/Idea-steer α slice; write-boundary + node-granular edits + outline/timeline + World KB remain Draft for V1.71+. **V1.122 Draft overlay (§3.3.2 + §4.5)** — fourth peer surface `CanvasSurfaceKind = "timeline"` (World-building hero) + architect-locked World-building projection + write-boundary reuse + Timeline-as-default-World-entry IA; shipped β text preserved (additive); `wire_contracts_changed: false`. |
 | [body-editor.md](body-editor.md) | Archived (pointer stub) | **Superseded (2026-06-26)** — body-editor direction rejected; pointer to `canvas-strategy-surface.md`; full text archived at [../../archived/knowledge/body-editor.md](../../archived/knowledge/body-editor.md) |
 | [reference-store-layout.md](reference-store-layout.md) | Master | Normative |
+| [chapter-content-local-api.md](chapter-content-local-api.md) | Draft overlay | Draft (V1.65) — chapter-content Daemon API field contract (`/v1/daemon/works/{work_id}/chapters/*`); cited by daemon-api-surface-conventions §6 |
 
 ### Compute and WASM
 
@@ -121,6 +124,9 @@ Also: [schemas-external-consumer-boundary.md](../knowledge/schemas-external-cons
 | [desktop-shell.md](desktop-shell.md) | Feature line | **Shipped (V1.66)** — Tauri v2 desktop shell contract (`apps/desktop` wrapper, `TauriClient`, sidecar lifecycle, port discovery, native file actions + path guard); macOS-first unsigned dev build. **V1.118 Draft amendment** (§13.11 Daemon no-Profile boot). |
 | [creator-run-preset-entry.md](creator-run-preset-entry.md) | Master | **Shipped (V1.45)** — `creator run <preset_id>` generic entry; wave 0 for V1.45 CLI IA (promoted P-last) |
 | [creator-challenge-solver.md](creator-challenge-solver.md) | Master | Normative |
+| [creator-memory-soul-lifecycle.md](creator-memory-soul-lifecycle.md) | Draft overlay | Draft (V1.82 amendment) — per-(creator, world) narrative lifecycle |
+| [reading-chrome-profile-checklist.md](reading-chrome-profile-checklist.md) | Feature line | Shipped (V1.91) — acceptance checklist on DESIGN.md `reading-chrome-*` tokens |
+| [web-ui-design-requirements.md](web-ui-design-requirements.md) | Companion | Input brief (V1.64/V1.65) for repo-root `DESIGN.md` — product/design intent; sole SSOT since `apps/web/DESIGN*.md` retired (V1.98) |
 
 ### ACP and agent integration
 
@@ -139,6 +145,7 @@ Also: [schemas-external-consumer-boundary.md](../knowledge/schemas-external-cons
 | --- | --- | --- |
 | [canonical-hash.md](canonical-hash.md) | Companion | Normative (OSS notes; platform ADR-006 authoritative) |
 | [non-novel-profiles-roadmap.md](non-novel-profiles-roadmap.md) | Archived (pointer stub) | **Superseded (2026-06-26)** — all 3 targets shipped (game-bible/script/essay); pointer to archive; normative content in the 3 Feature line specs |
+| [world-delta-propose-apply.md](world-delta-propose-apply.md) | Feature line | Normative — V1.60 P-last promotion (world-delta propose/apply local parity) |
 
 *Novel-writing sync module contract: [novel-writing/sync-contract.md](novel-writing/sync-contract.md).*
 

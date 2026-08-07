@@ -69,4 +69,33 @@ fn main() {
 
     // Rerun if the embedded presets directory changes.
     println!("cargo:rerun-if-changed=../../crates/nexus-orchestration/embedded-presets");
+
+    // V1.154 P2 T1: probe whether the wasm32-unknown-unknown target is
+    // installed so the Connect compute interop tests (which install the
+    // embedded `basic-combat` module into a hermetic `~/.nexus42/modules/`)
+    // can be gated. Mirrors the probes in `nexus-wasm-host/build.rs` and
+    // `nexus-spoke-adapter/build.rs` — the upstream cfg is per-crate and
+    // does not propagate to dependents.
+    println!("cargo::rustc-check-cfg=cfg(nexus42_no_wasm_target)");
+    if !has_wasm_target() {
+        println!(
+            "cargo:warning=nexus42: wasm32-unknown-unknown target not found; \
+             skipping embedded-module compute interop tests. Install the target with: \
+             rustup target add wasm32-unknown-unknown"
+        );
+        println!("cargo:rustc-cfg=nexus42_no_wasm_target");
+    }
+}
+
+/// Returns `true` when the `wasm32-unknown-unknown` sysroot is installed.
+///
+/// Uses `rustc --print sysroot --target wasm32-unknown-unknown` which exits 0
+/// only when the target is available. This is a fast metadata query — it does
+/// not compile anything.
+#[must_use]
+fn has_wasm_target() -> bool {
+    std::process::Command::new("rustc")
+        .args(["--print", "sysroot", "--target", "wasm32-unknown-unknown"])
+        .output()
+        .is_ok_and(|o| o.status.success())
 }

@@ -564,6 +564,17 @@ impl From<nexus_local_db::LocalDbError> for NexusApiError {
                 code: "invalid_input".to_string(),
                 message: msg,
             },
+            // V1.154 P2 (R3 closure, spec §3.2): a world-mismatch CAS miss
+            // must surface as the 409 `world_kb_conflict` family with kind
+            // "world" — never as a 500 — for any future `?` propagation that
+            // bypasses the explicit spoke-reject mappers (the current write
+            // paths map via `map_cas_err` / the marker-aware mappers).
+            nexus_local_db::LocalDbError::WorldConflict { id, .. } => Self::world_kb_conflict(
+                0,
+                id,
+                "world",
+                "the row moved to another world; refetch it in its stored world and reapply",
+            ),
             _ => Self::Internal {
                 code: "DATABASE_ERROR".into(),
                 message: err.to_string(),
@@ -620,6 +631,35 @@ mod tests {
         let err = NexusApiError::NotFound("creator".into());
         assert_eq!(err.status_code(), StatusCode::NOT_FOUND);
         assert_eq!(err.error_code(), "not_found");
+    }
+
+    /// V1.154 P2 (R3 closure): `?`-propagated `LocalDbError::WorldConflict`
+    /// maps to the 409 `world_kb_conflict` family with kind "world" — never
+    /// a 500 (mirrors the explicit marker-aware mappers in `world_kb.rs`).
+    #[test]
+    fn local_db_world_conflict_maps_to_409_world_kb_conflict_kind_world() {
+        let err = NexusApiError::from(nexus_local_db::LocalDbError::WorldConflict {
+            table: "kb_key_blocks".into(),
+            id: "kb_race".into(),
+            expected_world: "wld_a".into(),
+            actual_world: "wld_b".into(),
+        });
+        assert_eq!(err.status_code(), StatusCode::CONFLICT);
+        assert_eq!(err.error_code(), "world_kb_conflict");
+        let body = err.to_response_body();
+        let details = body
+            .error
+            .details
+            .expect("WorldKbConflict carries structured details");
+        assert_eq!(
+            details.get("conflicting_path").and_then(|v| v.as_str()),
+            Some("world"),
+            "world conflicts are distinct from the 'version' OCC path"
+        );
+        assert_eq!(
+            details.get("entity_id").and_then(|v| v.as_str()),
+            Some("kb_race")
+        );
     }
 
     #[test]

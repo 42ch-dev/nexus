@@ -2,16 +2,21 @@
 //! repeatable `--allow-peer` overlay).
 //!
 //! N-C0 product contract (draft §2.3): the allowlist is the trust root.
-//! N-C1 world scoping (P1 spec § World scoping — schema locked): each
-//! `peer_ids` entry is either a bare `"12D3…"` peer id (N-C0 shape — no
-//! write access) or an object `{ "peer_id": "12D3…", "world_scope":
-//! ["<world-uuid>", …], "op_scope": ["upsert","promote","relate"] }`.
-//! Both scopes are optional and **fail-closed**: an absent/empty scope
-//! denies world writes — a bare entry (or a `--allow-peer` overlay) is
-//! handshake-allowlisted but can never write. World ids are world UUID
-//! strings, never filesystem paths. A missing file ⇒ empty list ⇒
-//! **fail-closed** (spoke-connect rejects every remote peer). The operator
-//! edits the allowlist out-of-band; there is no online enroll endpoint.
+//! N-C1 → N-C2 world scoping (P1 spec § World scoping — schema locked):
+//! each `peer_ids` entry is either a bare `"12D3…"` peer id (N-C0 shape —
+//! no op access) or an object `{ "peer_id": "12D3…", "world_scope":
+//! ["<world-uuid>", …], "op_scope": ["upsert","promote","relate","check",
+//! "assemble"], "module_scope": ["<module-id>", …] }`.
+//! All scopes are optional and **fail-closed**: an absent/empty scope
+//! denies world access (writes AND the world-scoped read ops), ops, and —
+//! since P2 — every compute module (the `module_scope` architect lock,
+//! spec §6.1: missing/empty ⇒ deny ALL compute). A bare entry (or a
+//! `--allow-peer` overlay) is handshake-allowlisted but can never invoke a
+//! served op. World ids are world UUID strings, never filesystem paths;
+//! module ids are host-local module names (never peer-supplied bytes). A
+//! missing file ⇒ empty list ⇒ **fail-closed** (spoke-connect rejects every
+//! remote peer). The operator edits the allowlist out-of-band; there is no
+//! online enroll endpoint.
 
 use crate::errors::{CliError, Result};
 use libp2p::PeerId;
@@ -31,8 +36,8 @@ struct AllowlistFile {
     peer_ids: Vec<PeerEntry>,
 }
 
-/// One `peer_ids` entry: a bare peer id (N-C0 shape — no write access) or a
-/// scoped object (N-C1).
+/// One `peer_ids` entry: a bare peer id (N-C0 shape — no op access) or a
+/// scoped object (N-C1 → N-C2).
 #[derive(Debug, Deserialize)]
 #[serde(untagged)]
 enum PeerEntry {
@@ -40,10 +45,12 @@ enum PeerEntry {
     Scoped(PeerEntryScoped),
 }
 
-/// Scoped entry form — locked schema (P1 spec § World scoping).
+/// Scoped entry form — locked schema (P1 spec § World scoping; P2 spec
+/// §6.1 adds `module_scope`).
 ///
-/// `world_scope` / `op_scope` are optional; absent fields deserialize to
-/// empty lists and the gate then denies every world/op (fail-closed).
+/// `world_scope` / `op_scope` / `module_scope` are optional; absent fields
+/// deserialize to empty lists and the gate then denies every world/op/
+/// module (fail-closed).
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct PeerEntryScoped {
@@ -52,6 +59,10 @@ struct PeerEntryScoped {
     world_scope: Vec<String>,
     #[serde(default)]
     op_scope: Vec<String>,
+    /// Host-local compute module ids this peer may invoke (P2 — architect
+    /// lock, spec §6.1: absent/empty denies ALL compute).
+    #[serde(default)]
+    module_scope: Vec<String>,
 }
 
 /// Resolved allowlist scoping: peer → allowed world ids / allowed ops.
@@ -65,22 +76,23 @@ pub struct PeerScope {
 }
 
 /// Per-peer scoping. Empty sets ⇒ fail-closed: the peer is handshake-
-/// allowlisted but has no world-write access.
+/// allowlisted but has no world/op/module access.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct PeerAccess {
-    /// World ids (world UUID strings, not paths) this peer may write to.
+    /// World ids (world UUID strings, not paths) this peer may target —
+    /// writes AND the world-scoped read ops (`check` / `assemble`) and the
+    /// P2 compute op share the same gate.
     pub world_scope: BTreeSet<String>,
-    /// Write ops this peer may invoke (N-C1 served ops: `upsert` / `promote`
-    /// / `relate`).
+    /// Ops this peer may invoke (N-C2 E2 served ops: `upsert` / `promote` /
+    /// `relate` / `check` / `assemble` / `compute`).
     pub op_scope: BTreeSet<String>,
+    /// Host-local compute module ids this peer may invoke (P2 — architect
+    /// lock, spec §6.1: missing/empty denies ALL compute, fail-closed).
+    /// Module ids are operator-allowlisted names; the module bytes are
+    /// never peer-supplied (resolved host-locally under
+    /// `~/.nexus42/modules/` only).
+    pub module_scope: BTreeSet<String>,
 }
-
-/// The served write ops (N-C1) — the `op_scope` members that make a peer
-/// write-capable for the multi-write-peer boot warning. Kept in lockstep
-/// with `invoke::SERVED_OPS` (same wire strings); the interop honesty
-/// machine-check pins the manifest side to that const, and this const only
-/// feeds a conservative boot warning, so drift here cannot open a gate.
-const WRITE_OPS: [&str; 3] = ["upsert", "promote", "relate"];
 
 impl PeerScope {
     /// All allowlisted peer ids (sorted) — the `ConnectConfig.peer_allowlist`
@@ -112,32 +124,19 @@ impl PeerScope {
             .is_some_and(|access| access.op_scope.contains(op))
     }
 
+    /// Fail-closed compute-module gate (P2 architect lock, spec §6.1): true
+    /// only when the peer is allowlisted AND its `module_scope` contains
+    /// `module_id`. An absent/empty `module_scope` denies ALL compute.
+    #[must_use]
+    pub fn allows_module(&self, peer: &PeerId, module_id: &str) -> bool {
+        self.access_for(peer)
+            .is_some_and(|access| access.module_scope.contains(module_id))
+    }
+
     /// True when no peer is allowlisted at all (missing/empty file).
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
-    }
-
-    /// Number of allowlisted peers holding any write scope: a peer counts
-    /// when its `op_scope` contains any served write op ([`WRITE_OPS`]), or
-    /// when it carries a non-empty `world_scope` (world scoping expresses
-    /// write intent for those worlds). Over-approximates by design — this
-    /// feeds a boot warning (see [`warn_multi_write_peer`]), and warning
-    /// about a peer that turns out write-less is harmless, while NOT
-    /// warning about a write-capable peer is the failure mode the warning
-    /// exists for.
-    #[must_use]
-    pub fn write_capable_peer_count(&self) -> usize {
-        self.entries
-            .values()
-            .filter(|access| {
-                access
-                    .op_scope
-                    .iter()
-                    .any(|op| WRITE_OPS.contains(&op.as_str()))
-                    || !access.world_scope.is_empty()
-            })
-            .count()
     }
 
     /// File entries: last occurrence wins (a later hand-authored duplicate
@@ -155,6 +154,7 @@ impl PeerScope {
                     PeerAccess {
                         world_scope: scoped.world_scope.into_iter().collect(),
                         op_scope: scoped.op_scope.into_iter().collect(),
+                        module_scope: scoped.module_scope.into_iter().collect(),
                     },
                 );
             }
@@ -175,40 +175,6 @@ impl PeerScope {
 fn parse_peer_id(raw: &str) -> Result<PeerId> {
     raw.parse::<PeerId>()
         .map_err(|e| CliError::Config(format!("invalid peer id {raw:?} in allowlist: {e}")))
-}
-
-/// Boot-time warning (plan QC, QC2 W-1 cheap hardening): the allowlist
-/// holds more than one write-scoped peer.
-///
-/// The per-invoke caller peer id is payload-carried
-/// (`extensions.nexus.peer_id`) and spoofable — the locked spoke-connect
-/// 0.9.1 handler signature (`dyn Fn(&str, Value)`) carries no authenticated
-/// session peer — so with more than one write-scoped allowlisted peer,
-/// per-peer world/op scoping silently degrades to the union of all scopes
-/// (any allowlisted peer can put another's id in the envelope and inherit
-/// its full write scope).
-///
-/// N-C1 is accepted ONLY while the allowlist holds at most one write-
-/// capable peer (spec §10.6). This is a **warning, not a refusal**: the
-/// operator may have a legitimate reason (e.g. a CLI-overlay peer for
-/// manual writes). The E2 fix is session-bound identity (upstream handler
-/// signature change) or capability-token auth.
-///
-/// Writes to `sink` (boot callers pass `std::io::stderr()`; tests pass a
-/// buffer).
-pub fn warn_multi_write_peer(scope: &PeerScope, sink: &mut dyn std::io::Write) {
-    let write_capable = scope.write_capable_peer_count();
-    if write_capable > 1 {
-        let _ = writeln!(
-            sink,
-            "nexus42 connect start: WARNING: {write_capable} allowlisted peers hold write \
-             scope. The per-invoke caller peer_id is payload-carried (spoofable): any \
-             allowlisted peer can impersonate another and inherit its full world/op scope, \
-             so per-peer scoping degrades to the union of all scopes. N-C1 assumes at most \
-             one write-capable peer — with more, split write peers into separate processes \
-             or accept the risk deliberately."
-        );
-    }
 }
 
 /// Load the effective allowlist: file entries ∪ `--allow-peer` CLI entries.
@@ -395,6 +361,10 @@ mod tests {
             !scope.allows_op(&peer, "upsert"),
             "bare entry has no op scope — fail-closed"
         );
+        assert!(
+            !scope.allows_module(&peer, "basic-combat"),
+            "bare entry has no module scope — fail-closed"
+        );
     }
 
     /// Absent `world_scope` ⇒ no world writes, even with an op scope present.
@@ -428,6 +398,83 @@ mod tests {
         assert!(
             !scope.allows_op(&peer, "upsert"),
             "absent op_scope must deny every op"
+        );
+    }
+
+    // ---- N-C2 (P2) module scoping (architect lock, spec §6.1) ----
+
+    /// The P2 module gate contract: a scoped peer is allowed to invoke a
+    /// listed module and denied every other module.
+    #[test]
+    fn scoped_peer_allowed_on_listed_module_denied_on_other_modules() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let peer = peer_id(14);
+        write_allowlist(
+            temp.path(),
+            &serde_json::json!([{
+                "peer_id": peer.to_string(),
+                "world_scope": ["world-a"],
+                "op_scope": ["compute"],
+                "module_scope": ["basic-combat"],
+            }]),
+        );
+
+        let scope = load(temp.path(), &[]).expect("scoped entry loads");
+        assert!(
+            scope.allows_module(&peer, "basic-combat"),
+            "peer must be allowed on its listed module"
+        );
+        assert!(
+            !scope.allows_module(&peer, "another-module"),
+            "peer must be denied on an unlisted module"
+        );
+    }
+
+    /// Absent `module_scope` ⇒ no compute, even with world/op scopes
+    /// present (the architect lock: missing or empty scope denies ALL
+    /// compute — fail-closed). Also the backward-compat pin: a V1.153 →
+    /// V1.154 allowlist file WITHOUT the new field still loads (optional
+    /// field) and simply carries no module access.
+    #[test]
+    fn object_entry_without_module_scope_is_fail_closed() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let peer = peer_id(15);
+        write_allowlist(
+            temp.path(),
+            &serde_json::json!([{
+                "peer_id": peer.to_string(),
+                "world_scope": ["world-a"],
+                "op_scope": ["compute"],
+            }]),
+        );
+
+        let scope = load(temp.path(), &[]).expect("entry without module_scope loads");
+        assert!(
+            !scope.allows_module(&peer, "basic-combat"),
+            "absent module_scope must deny every module (fail-closed)"
+        );
+    }
+
+    /// An explicit empty `module_scope` list denies compute exactly like an
+    /// absent field.
+    #[test]
+    fn empty_module_scope_is_fail_closed() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let peer = peer_id(16);
+        write_allowlist(
+            temp.path(),
+            &serde_json::json!([{
+                "peer_id": peer.to_string(),
+                "world_scope": ["world-a"],
+                "op_scope": ["compute"],
+                "module_scope": [],
+            }]),
+        );
+
+        let scope = load(temp.path(), &[]).expect("empty module_scope loads");
+        assert!(
+            !scope.allows_module(&peer, "basic-combat"),
+            "an empty module_scope must deny every module"
         );
     }
 
@@ -504,93 +551,9 @@ mod tests {
         assert_eq!(scope.access_for(&outsider), None);
         assert!(!scope.allows_world(&outsider, "world-a"));
         assert!(!scope.allows_op(&outsider, "upsert"));
-    }
-
-    // ---- Plan QC fix wave (QC2 W-1): multi-write-peer boot warning ----
-
-    /// The N-C1 trust precondition (spec §10.6): the per-invoke caller
-    /// `peer_id` is payload-carried (`extensions.nexus.peer_id`) and
-    /// spoofable — the locked spoke-connect 0.9.1 handler signature carries
-    /// no session peer — so per-peer world/op scoping is a real boundary
-    /// ONLY while the allowlist holds at most one write-capable peer. More
-    /// than one ⇒ any allowlisted peer can impersonate another and the
-    /// scoping silently degrades to the union of all scopes. The boot
-    /// warning must fire for a multi-write-peer allowlist and name the
-    /// spoofing risk + the single-write-peer precondition.
-    #[test]
-    fn multi_write_peer_allowlist_emits_boot_warning() {
-        let temp = tempfile::tempdir().expect("tempdir");
-        let peer_a = peer_id(12);
-        let peer_b = peer_id(13);
-        write_allowlist(
-            temp.path(),
-            &serde_json::json!([
-                {
-                    "peer_id": peer_a.to_string(),
-                    "world_scope": ["world-a"],
-                    "op_scope": ["upsert"],
-                },
-                {
-                    "peer_id": peer_b.to_string(),
-                    "world_scope": ["world-a"],
-                    "op_scope": ["relate"],
-                },
-            ]),
-        );
-
-        let scope = load(temp.path(), &[]).expect("multi-peer allowlist loads");
-        assert_eq!(
-            scope.write_capable_peer_count(),
-            2,
-            "both scoped peers hold write scope"
-        );
-
-        let mut sink = Vec::new();
-        warn_multi_write_peer(&scope, &mut sink);
-        let output = String::from_utf8(sink).expect("warning is utf8");
         assert!(
-            output.contains("WARNING"),
-            "multi-write-peer allowlist must warn at boot: {output:?}"
-        );
-        assert!(
-            output.contains("spoof") && output.contains("at most one"),
-            "warning must name the spoofing risk and the single-write-peer \
-             precondition: {output:?}"
-        );
-    }
-
-    /// The single-write-peer deployment (the N-C1 acceptance shape: one
-    /// scoped write peer + bare allowlisted peers) must NOT warn.
-    #[test]
-    fn single_write_peer_allowlist_does_not_warn() {
-        let temp = tempfile::tempdir().expect("tempdir");
-        let peer = peer_id(14);
-        let bare = peer_id(15);
-        write_allowlist(
-            temp.path(),
-            &serde_json::json!([
-                {
-                    "peer_id": peer.to_string(),
-                    "world_scope": ["world-a"],
-                    "op_scope": ["upsert", "promote", "relate"],
-                },
-                bare.to_string(),
-            ]),
-        );
-
-        let scope = load(temp.path(), &[]).expect("single-write-peer allowlist loads");
-        assert_eq!(
-            scope.write_capable_peer_count(),
-            1,
-            "bare entries carry no write scope"
-        );
-
-        let mut sink = Vec::new();
-        warn_multi_write_peer(&scope, &mut sink);
-        assert!(
-            sink.is_empty(),
-            "single write-capable peer must not warn: {:?}",
-            String::from_utf8_lossy(&sink)
+            !scope.allows_module(&outsider, "basic-combat"),
+            "a non-allowlisted peer has no module access"
         );
     }
 }

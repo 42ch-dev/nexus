@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE kb_relationships SET world_id = ? WHERE relationship_id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "ddf35e78958ad91394cf12f375618e881d40178114341054bd72b1b63c65a366"
+}

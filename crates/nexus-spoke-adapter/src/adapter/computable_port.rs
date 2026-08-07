@@ -42,10 +42,11 @@ use async_trait::async_trait;
 use nexus_local_db::compute_session::{get_compute_session, insert_compute_session};
 use nexus_wasm_host::{
     embedded_module_bytes, embedded_module_ids, embedded_module_manifest, ComputeInput,
-    ModuleManifest, WasmEngine, WasmModule,
+    ModuleCache, ModuleManifest, WasmEngine, WasmModule,
 };
 use serde_json::{json, Map, Value};
 use std::collections::HashMap;
+use std::path::Path;
 use std::sync::OnceLock;
 
 /// One-time initialised WASM engine, reused across all compute invocations.
@@ -77,6 +78,15 @@ fn resolve_module_id(
     // rather than relying on a derived key_block map (which would be fragile
     // if `spoke_entry_to_key_block` ever strips or transforms
     // `body.computable`).
+    //
+    // NOTE (P2 QC fix wave FW-1 — dead-code tier): under the current
+    // conversion seam this tier can never fire — `world_kb_to_spoke` emits
+    // only the marker map `{"_computable": true}` from the nexus
+    // `Option<bool>`, and `spoke_to_world_kb` collapses spoke maps back to
+    // `Some(true)`, so `entry.body.computable.get("module_id")` is always
+    // `None` today. The tier is retained as the documented resolution
+    // precedence (spec §2.2) and as defense if body.computable maps ever
+    // survive the seam.
     if let Some(module_id) = entry
         .body
         .computable
@@ -85,24 +95,351 @@ fn resolve_module_id(
     {
         return SpokeResult::Ok(module_id.to_string());
     }
+    // The `module_identity_missing` details marker (P2 QC fix wave FW-5) is
+    // the structured control-flow signal for this reject: hosts classify
+    // the missing-module-name denial via
+    // [`is_module_identity_missing_reject`] instead of string-sniffing the
+    // message.
     reject(
         SpokeRejectCode::InvalidInput,
         "module identity required on session state or entry body.computable",
-        json!({}),
+        json!({ "module_identity_missing": true }),
     )
 }
 
-/// Load (or get cached) a compiled WASM module by id.
+/// Shared module-id path-safety check (P2 QC fix wave FW-4 — single source
+/// of truth for the gate AND the execution guard).
 ///
-/// # Error classification (V1.146 P2 QC fix-wave)
+/// The id must be a single path component — non-empty, no `/` or `\`
+/// separators, and not `.` / `..` — so joining it under the module store
+/// directory can never escape the store. The Connect gate's host-store
+/// check (`apps/nexus42` `module_installed`) and the adapter's user-module
+/// loader ([`load_user_module`]) both route through this so they can never
+/// drift.
+#[must_use]
+pub fn is_safe_module_id(module_id: &str) -> bool {
+    !module_id.is_empty()
+        && !module_id.contains('/')
+        && !module_id.contains('\\')
+        && module_id != "."
+        && module_id != ".."
+}
+
+/// Structured marker predicate for the missing-module-identity reject
+/// (P2 QC fix wave FW-5 — same pattern as
+/// [`crate::is_world_conflict_reject`]).
 ///
-/// - Unknown / invalid `module_id` (not in the embedded allowlist) →
-///   `InvalidInput` — the id comes from session state / `body.computable`
-///   (caller-controlled), so "not known" is a client-input error, not a host
-///   failure.
-/// - Known module whose embed/compile/trap fails → `InternalError` (host
-///   problem after the id itself was resolved correctly).
-fn load_module(module_id: &str) -> SpokeResult<(WasmModule, ModuleManifest)> {
+/// `resolve_module_id`'s `InvalidInput` reject carries a
+/// `module_identity_missing: true` details marker so hosts classify the
+/// denial by marker, never by sniffing the reject message.
+#[must_use]
+pub fn is_module_identity_missing_reject(reject: &SpokeReject) -> bool {
+    reject
+        .details
+        .as_ref()
+        .and_then(|d| d.get("module_identity_missing"))
+        .and_then(serde_json::Value::as_bool)
+        == Some(true)
+}
+
+impl NexusAdapter<'_> {
+    /// Load (or get cached) a compiled WASM module by id — host-local store.
+    ///
+    /// When a user modules dir is configured
+    /// ([`NexusAdapter::with_user_modules_dir`] — the Connect host's
+    /// `~/.nexus42/modules/`), the module MUST be installed there as
+    /// `<dir>/<id>/<id>.wasm` + `<dir>/<id>/manifest.json` (fail-closed: an
+    /// absent/incomplete pair is `InvalidInput`; the embedded ship set is
+    /// NOT reachable — the Connect surface serves only operator-installed
+    /// modules, spec §2.1). Without a configured dir (baseline consumers),
+    /// the embedded ship set is used (V1.146 behavior unchanged).
+    ///
+    /// # Compiled-module cache (P2 QC fix wave FW-2; manifest half:
+    /// Greptile P1)
+    ///
+    /// Both load paths route through the per-adapter
+    /// [`ModuleCache`](nexus_wasm_host::ModuleCache): the wasmtime compile
+    /// runs once per distinct `(module id, wasm bytes hash, manifest
+    /// hash)` instead of once per invocation (the module artifacts are
+    /// still re-read per invoke so an operator content change is
+    /// observable — a wasm OR manifest-only change then misses and the
+    /// entry is recompiled + overwritten, so updated schemas / sandbox
+    /// settings take effect without a wasm change). The Connect host keeps
+    /// ONE adapter for the process lifetime, so the cache is process-wide
+    /// there.
+    ///
+    /// # Error classification (V1.146 P2 QC fix-wave + P2 user-store
+    /// extension)
+    ///
+    /// - Unknown / invalid `module_id` (not in the store) → `InvalidInput` —
+    ///   the id comes from session state / `body.computable`
+    ///   (caller-controlled), so "not available" is a client-input error,
+    ///   not a host failure.
+    /// - Known module whose install/compile/trap fails → `InternalError`
+    ///   (host problem after the id itself was resolved correctly).
+    fn load_module(&self, module_id: &str) -> SpokeResult<(WasmModule, ModuleManifest)> {
+        if let Some(dir) = &self.user_modules_dir {
+            return load_user_module(&self.module_cache, dir, module_id);
+        }
+        load_embedded_module(&self.module_cache, module_id)
+    }
+}
+
+/// Load a user-installed module from the host-local store (spec §2.1 —
+/// bytes are never peer-supplied).
+///
+/// The module id is operator/peer-named: it must be a single path
+/// component (no separators, no `.` / `..` — [`is_safe_module_id`]), so the
+/// join below can never escape the store directory (mirrors the embedded
+/// allowlist gate's fail-closed spirit — an escaped path would otherwise
+/// read arbitrary files).
+///
+/// The compiled module is served through `cache` (id + wasm-bytes-hash +
+/// manifest-hash keying, P2 QC fix wave FW-2 + Greptile P1): repeated
+/// invokes of unchanged artifacts reuse the cached compile; a changed
+/// module file — wasm OR manifest-only (new schemas / sandbox overrides) —
+/// recompiles and overwrites the entry.
+fn load_user_module(
+    cache: &ModuleCache,
+    dir: &Path,
+    module_id: &str,
+) -> SpokeResult<(WasmModule, ModuleManifest)> {
+    if !is_safe_module_id(module_id) {
+        return reject(
+            SpokeRejectCode::InvalidInput,
+            format!("invalid module id: {module_id:?}"),
+            json!({ "module_id": module_id }),
+        );
+    }
+    let module_dir = dir.join(module_id);
+    let wasm_path = module_dir.join(format!("{module_id}.wasm"));
+    let manifest_path = module_dir.join("manifest.json");
+    if !wasm_path.is_file() || !manifest_path.is_file() {
+        return reject(
+            SpokeRejectCode::InvalidInput,
+            format!(
+                "module '{module_id}' is not installed under {}",
+                dir.display()
+            ),
+            json!({ "module_id": module_id }),
+        );
+    }
+    // Post-existence-check read failures are host faults (the store
+    // changed mid-invoke or is unreadable) — InternalError, like the
+    // embedded path's "known module whose embed/compile fails"
+    // classification.
+    //
+    // Consistent-snapshot read (Greptile P1 — non-atomic module reload):
+    // an operator replacing a module mid-invoke writes `<id>.wasm` and
+    // `manifest.json` as two INDEPENDENT files, so reading them separately
+    // can observe a mixed pair (wasm v1 + manifest v2) that would then be
+    // compiled and cached. The reads are ordered as a three-step fence —
+    // manifest (m1, the small version marker) → wasm stat (s1) → wasm
+    // bytes (b) → wasm stat (s2) → manifest re-read (m2) — and the pair is
+    // rejected as a host fault (never compiled) when m1 != m2 (manifest
+    // mutated mid-load) or s1 != s2 (wasm mutated between the stats).
+    //
+    // Content-based pairing (the root cause fix): when the manifest
+    // declares `wasm_sha256`, the loaded bytes are hashed and must match —
+    // an old manifest + new wasm ALWAYS mismatches, closing the residual
+    // below for operators who set the field (they SHOULD; see the manifest
+    // docs). The hash check runs BEFORE `get_or_compile`, so a mixed pair
+    // never enters the cache.
+    //
+    // The stat fence below is the LEGACY fallback for manifests without
+    // `wasm_sha256`: size + mtime, not a byte comparison. Note `modified()`
+    // mtime can have coarse granularity on some filesystems — a same-size
+    // rewrite landing between s1 and s2 within one clock tick may then slip
+    // past the fence.
+    //
+    // Residual (legacy manifests only — undetectable without a content
+    // hash): a pair whose writes land OUTSIDE their observation windows —
+    // e.g. the wasm write between m1 and s1 plus a manifest write after m2,
+    // or a fully atomic pair swap straddling the reads — leaves each file
+    // stable at its own observation points, so a mixed pair is
+    // indistinguishable from a coherent one. For true atomicity the install
+    // tool should write to a temp directory and rename the module directory
+    // into place; the loader then observes either the old pair or the new
+    // pair, never a mix. A manifest WITHOUT `wasm_sha256` cannot be paired
+    // by content, so this residual is the operator's choice to accept.
+    let manifest_json = match std::fs::read_to_string(&manifest_path) {
+        Ok(s) => s,
+        Err(e) => {
+            return reject(
+                SpokeRejectCode::InternalError,
+                format!("failed to read {}: {e}", manifest_path.display()),
+                json!({ "module_id": module_id }),
+            );
+        }
+    };
+    // s1: open the wasm stat fence BEFORE reading the bytes, so a wasm
+    // replacement landing between the manifest read and the wasm read —
+    // previously invisible to a bytes-only re-read — is caught by the
+    // s1 != s2 comparison.
+    let wasm_stat_first = match std::fs::metadata(&wasm_path) {
+        Ok(m) => m,
+        Err(e) => {
+            return reject(
+                SpokeRejectCode::InternalError,
+                format!("failed to stat {}: {e}", wasm_path.display()),
+                json!({ "module_id": module_id }),
+            );
+        }
+    };
+    let bytes = match std::fs::read(&wasm_path) {
+        Ok(b) => b,
+        Err(e) => {
+            return reject(
+                SpokeRejectCode::InternalError,
+                format!("failed to read {}: {e}", wasm_path.display()),
+                json!({ "module_id": module_id }),
+            );
+        }
+    };
+    match module_pair_changed_mid_load(&wasm_path, &manifest_path, &wasm_stat_first, &manifest_json)
+    {
+        Ok(true) => {
+            return reject(
+                SpokeRejectCode::InternalError,
+                format!("module '{module_id}' changed while it was being read; retry the invoke"),
+                json!({ "module_id": module_id }),
+            );
+        }
+        Ok(false) => {}
+        Err(e) => {
+            return reject(
+                SpokeRejectCode::InternalError,
+                format!("failed to re-read module store for '{module_id}': {e}"),
+                json!({ "module_id": module_id }),
+            );
+        }
+    }
+    // Content-based pairing (Greptile P1 root cause): when the manifest
+    // declares `wasm_sha256`, the loaded bytes must hash to it. This is the
+    // ONLY detector that sees a mixed pair whose writes landed outside the
+    // stat fence's observation windows — an old manifest + new wasm always
+    // mismatches. The check runs BEFORE `get_or_compile`, so a mixed pair
+    // never enters the cache; the stat fence above remains the legacy
+    // fallback for manifests without the field.
+    let manifest: ModuleManifest = match serde_json::from_str(&manifest_json) {
+        Ok(m) => m,
+        Err(e) => {
+            return reject(
+                SpokeRejectCode::InternalError,
+                format!("failed to parse manifest for module '{module_id}': {e}"),
+                json!({ "module_id": module_id }),
+            );
+        }
+    };
+    if let Err(msg) = manifest.verify_wasm_sha256(&bytes) {
+        return reject(
+            SpokeRejectCode::InternalError,
+            format!("module '{module_id}': {msg}"),
+            json!({ "module_id": module_id }),
+        );
+    }
+    let cached = match cache.get_or_compile(engine(), module_id, &bytes, &manifest_json) {
+        Ok(entry) => entry,
+        Err(e) => {
+            return reject(
+                SpokeRejectCode::InternalError,
+                format!("failed to compile WASM module {module_id}: {e}"),
+                json!({ "module_id": module_id }),
+            );
+        }
+    };
+    SpokeResult::Ok((cached.module.clone(), cached.manifest.clone()))
+}
+
+/// Complete the coherence fence behind [`load_user_module`]'s
+/// consistent-snapshot read (Greptile P1 — non-atomic module reload): the
+/// caller has already read the manifest (m1), statted the wasm (s1) and
+/// read the wasm bytes; this closes the fence — re-stat the wasm (s2) and
+/// re-read the manifest (m2) — and reports whether EITHER changed
+/// mid-load. `Ok(true)` means the store mutated mid-load — the caller
+/// must NOT compile the mixed pair into the cache; `Ok(false)` means the
+/// pair is a consistent snapshot. A read failure here is a host fault
+/// like any other post-check read failure.
+///
+/// This is the LEGACY fallback tier: manifests that declare `wasm_sha256`
+/// are additionally verified by content hash (see
+/// [`ModuleManifest::verify_wasm_sha256`]), which catches mixed pairs the
+/// fence cannot see.
+fn module_pair_changed_mid_load(
+    wasm_path: &Path,
+    manifest_path: &Path,
+    wasm_stat_first: &std::fs::Metadata,
+    manifest_first: &str,
+) -> Result<bool, std::io::Error> {
+    let wasm_stat_now = std::fs::metadata(wasm_path)?;
+    let manifest_now = std::fs::read_to_string(manifest_path)?;
+    // Stat fence (wasm): a size or mtime change between the two stats
+    // means the wasm was replaced while it was being read. `modified()`
+    // may quantize on coarse-granularity filesystems — see
+    // [`load_user_module`] for the documented residual. An unreadable
+    // mtime counts as a change (fail-closed).
+    let mtime_changed = match (wasm_stat_first.modified(), wasm_stat_now.modified()) {
+        (Ok(first), Ok(now)) => first != now,
+        _ => true,
+    };
+    let wasm_changed = wasm_stat_first.len() != wasm_stat_now.len() || mtime_changed;
+    Ok(wasm_changed || manifest_now != manifest_first)
+}
+
+impl NexusAdapter<'_> {
+    /// Resolve the module identity for a compute invocation using the locked
+    /// precedence (spec §2.2): session state `module_id` first, then the
+    /// entry's `body.computable.module_id`. The Connect compute gate uses
+    /// this to scope the peer BEFORE any WASM execution; `ComputablePort::compute`
+    /// applies the same precedence internally (single source of truth).
+    ///
+    /// # Errors
+    /// `InvalidInput` when the session row is missing, the entry is missing,
+    /// or neither tier carries a module id.
+    pub async fn resolve_compute_module_id(
+        &self,
+        session_id: &str,
+        entry_id: &str,
+    ) -> SpokeResult<String> {
+        let session = match get_compute_session(&self.pool, session_id).await {
+            Ok(Some(s)) => s,
+            Ok(None) => {
+                return reject(
+                    SpokeRejectCode::InvalidInput,
+                    format!("compute session not found: {session_id}"),
+                    json!({ "session_id": session_id }),
+                );
+            }
+            Err(e) => {
+                return reject(
+                    SpokeRejectCode::InternalError,
+                    format!("storage error on compute session read: {e}"),
+                    json!({ "session_id": session_id }),
+                );
+            }
+        };
+        let entry = match self.get_knowledge_entry(entry_id).await {
+            SpokeResult::Ok(e) => e,
+            SpokeResult::Reject(r) => return SpokeResult::Reject(r),
+        };
+        let state: Map<String, Value> = session
+            .state_json
+            .as_deref()
+            .and_then(|s| serde_json::from_str(s).ok())
+            .unwrap_or_default();
+        resolve_module_id(&state, &entry)
+    }
+}
+
+/// Load a compiled module from the embedded ship set (baseline consumers
+/// without a configured user store — V1.146 behavior). The compiled module
+/// is served through `cache` (id + wasm-bytes-hash + manifest-hash keying,
+/// P2 QC fix wave FW-2 + Greptile P1): embedded bytes are immutable, so
+/// after the first invocation the compile is a pure cache hit.
+fn load_embedded_module(
+    cache: &ModuleCache,
+    module_id: &str,
+) -> SpokeResult<(WasmModule, ModuleManifest)> {
     // F-002+F-005: validate module_id is a known embedded module before
     // doing any path-formatting or I/O. The embedded_module_ids() list is
     // the authoritative allowlist; an id not present there is InvalidInput.
@@ -131,18 +468,8 @@ fn load_module(module_id: &str) -> SpokeResult<(WasmModule, ModuleManifest)> {
             json!({ "module_id": module_id }),
         );
     };
-    let manifest: ModuleManifest = match serde_json::from_str(manifest_json) {
-        Ok(m) => m,
-        Err(e) => {
-            return reject(
-                SpokeRejectCode::InternalError,
-                format!("failed to parse manifest for {module_id}: {e}"),
-                json!({ "module_id": module_id }),
-            );
-        }
-    };
-    let module = match engine().load_module(wasm_bytes) {
-        Ok(m) => m,
+    let cached = match cache.get_or_compile(engine(), module_id, wasm_bytes, manifest_json) {
+        Ok(entry) => entry,
         Err(e) => {
             return reject(
                 SpokeRejectCode::InternalError,
@@ -151,7 +478,7 @@ fn load_module(module_id: &str) -> SpokeResult<(WasmModule, ModuleManifest)> {
             );
         }
     };
-    SpokeResult::Ok((module, manifest))
+    SpokeResult::Ok((cached.module.clone(), cached.manifest.clone()))
 }
 
 impl NexusAdapter<'_> {}
@@ -254,9 +581,23 @@ impl ComputablePort for NexusAdapter<'_> {
         }
 
         // ── 2. Load the entry for compute envelope ────────────────────────
+        // A missing target entry is a client-input error (the request names
+        // `entry_id` on the wire) — mapped to InvalidInput like `project()`
+        // (P2 QC fix wave FW-3); the Connect gate already denies missing
+        // entries before execution, so this arm covers the check-then-act
+        // race where the entry is deleted between the gate and this call.
         let entry = match self.get_knowledge_entry(&entry_id).await {
             SpokeResult::Ok(e) => e,
-            SpokeResult::Reject(r) => return SpokeResult::Reject(r),
+            SpokeResult::Reject(r) => {
+                if r.code == SpokeRejectCode::KnowledgeEntryNotFound {
+                    return reject(
+                        SpokeRejectCode::InvalidInput,
+                        format!("target KnowledgeEntry not found for compute: {entry_id}"),
+                        json!({ "entry_id": entry_id }),
+                    );
+                }
+                return SpokeResult::Reject(r);
+            }
         };
 
         // ── 3. Merge staged state + dynamic computable (in-memory only) ──
@@ -369,7 +710,7 @@ impl ComputablePort for NexusAdapter<'_> {
             SpokeResult::Ok(id) => id,
             SpokeResult::Reject(r) => return SpokeResult::Reject(r),
         };
-        let (wasm_module, manifest) = match load_module(&module_id) {
+        let (wasm_module, manifest) = match self.load_module(&module_id) {
             SpokeResult::Ok(m) => m,
             SpokeResult::Reject(r) => return SpokeResult::Reject(r),
         };
@@ -1287,6 +1628,573 @@ mod tests {
             }
             _ => panic!("expected InvalidInput for unknown module"),
         }
+    }
+
+    /// P2 QC fix wave FW-2: the user-module load path must reuse the
+    /// per-adapter compiled-module cache — repeated loads of UNCHANGED
+    /// bytes return the SAME cached entry (Arc identity across two loads is
+    /// the timing-independent no-recompile observable), and a CHANGED
+    /// module file (same id, different bytes hash) is a cache miss that
+    /// recompiles and OVERWRITES the entry (the cache's eviction
+    /// semantics) without ever growing the cache.
+    #[cfg(not(nexus_spoke_adapter_no_wasm_target))]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn user_module_load_reuses_compiled_module_cache() {
+        let (pool, _db_dir) = fresh_pool().await;
+
+        // Install the embedded basic-combat bytes as a user module under a
+        // hermetic module store.
+        let modules_dir = tempfile::tempdir().unwrap();
+        let module_dir = modules_dir.path().join("basic-combat");
+        std::fs::create_dir_all(&module_dir).unwrap();
+        let wasm_path = module_dir.join("basic-combat.wasm");
+        let manifest_path = module_dir.join("manifest.json");
+        let bytes = nexus_wasm_host::embedded_module_bytes("basic-combat")
+            .expect("embedded basic-combat bytes");
+        let manifest = nexus_wasm_host::embedded_module_manifest("basic-combat")
+            .expect("embedded basic-combat manifest");
+        std::fs::write(&wasm_path, bytes).expect("write module wasm");
+        std::fs::write(&manifest_path, manifest).expect("write module manifest");
+
+        let adapter =
+            NexusAdapter::new(pool).with_user_modules_dir(modules_dir.path().to_path_buf());
+        let cache = adapter.module_cache();
+        assert_eq!(cache.len(), 0, "fresh adapter starts with an empty cache");
+
+        let (_first_module, _) =
+            unwrap_ok(adapter.load_module("basic-combat"), "first load compiles");
+        assert_eq!(cache.len(), 1, "first load compiles and caches");
+        assert!(cache.contains("basic-combat"));
+        // Capture the cached entry NOW — before the second load — so the
+        // no-recompile assertion compares the first compile against the
+        // post-second-load cache state (fetching both after both loads
+        // would trivially return the same latest entry).
+        let first_entry = cache
+            .get("basic-combat")
+            .expect("cached entry after first load");
+
+        let (_second_module, _) = unwrap_ok(
+            adapter.load_module("basic-combat"),
+            "second load hits the cache",
+        );
+        assert_eq!(cache.len(), 1, "second load must not grow the cache");
+        let second_entry = cache
+            .get("basic-combat")
+            .expect("cached entry after second load");
+        assert!(
+            std::sync::Arc::ptr_eq(&first_entry, &second_entry),
+            "repeated loads of unchanged bytes must return the SAME compiled module \
+             (cache hit — no recompile)"
+        );
+
+        // Operator updates the module pair: different bytes under the same
+        // id ⇒ bytes-hash miss ⇒ recompile ⇒ the cached entry is REPLACED
+        // (overwrite eviction), never duplicated. The replacement is a
+        // minimal valid wasm module (magic + version, zero sections) —
+        // different bytes that still compile. The manifest is rewritten in
+        // the same update (a coherent pair) WITHOUT `wasm_sha256` — the
+        // embedded field only hashes the original bytes — so this pair
+        // loads through the legacy stat-fence fallback.
+        let changed: &[u8] = b"\0asm\x01\0\0\0";
+        std::fs::write(&wasm_path, changed).expect("rewrite module wasm");
+        let manifest_no_hash = {
+            let mut value: serde_json::Value =
+                serde_json::from_str(manifest).expect("embedded manifest parses");
+            value
+                .as_object_mut()
+                .expect("manifest object")
+                .remove("wasm_sha256");
+            serde_json::to_string(&value).expect("manifest without wasm_sha256 serializes")
+        };
+        std::fs::write(&manifest_path, &manifest_no_hash).expect("rewrite module manifest");
+
+        let (_third_module, _) = unwrap_ok(
+            adapter.load_module("basic-combat"),
+            "changed bytes recompile",
+        );
+        assert_eq!(cache.len(), 1, "recompile overwrites, never duplicates");
+        let third_entry = cache.get("basic-combat").expect("recompiled entry");
+        assert!(
+            !std::sync::Arc::ptr_eq(&first_entry, &third_entry),
+            "changed bytes must produce a FRESH compiled module (recompile, not stale serve)"
+        );
+
+        // Greptile P1 (manifest half of the cache identity): an operator
+        // updating manifest.json WITHOUT touching the wasm (new schemas /
+        // sandbox overrides) must miss the cache and recompile with the
+        // NEW settings — the old behavior kept serving the stale manifest
+        // until the wasm changed or the process restarted.
+        let manifest_v2 = {
+            let mut value: serde_json::Value =
+                serde_json::from_str(&manifest_no_hash).expect("legacy manifest parses");
+            value["version"] = serde_json::json!("2.0.0");
+            serde_json::to_string(&value).expect("manifest v2 serializes")
+        };
+        std::fs::write(&manifest_path, manifest_v2).expect("rewrite module manifest");
+
+        let (reloaded_module, reloaded_manifest) = unwrap_ok(
+            adapter.load_module("basic-combat"),
+            "manifest-only change recompiles",
+        );
+        assert_eq!(cache.len(), 1, "recompile overwrites, never duplicates");
+        let manifest_entry = cache.get("basic-combat").expect("recompiled entry");
+        assert!(
+            !std::sync::Arc::ptr_eq(&third_entry, &manifest_entry),
+            "a manifest-only change must produce a FRESH compiled module (stale settings never served)"
+        );
+        assert_eq!(
+            reloaded_manifest.version, "2.0.0",
+            "the fresh entry serves the NEW manifest settings"
+        );
+        let _ = reloaded_module;
+    }
+
+    /// Greptile P1 (root cause — content-based pairing): a user module whose
+    /// manifest declares the CORRECT `wasm_sha256` for its `.wasm` bytes
+    /// loads normally (and caches).
+    #[cfg(not(nexus_spoke_adapter_no_wasm_target))]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn user_module_load_accepts_matching_wasm_sha256() {
+        let (pool, _db_dir) = fresh_pool().await;
+        let modules_dir = tempfile::tempdir().unwrap();
+        let module_dir = modules_dir.path().join("basic-combat");
+        std::fs::create_dir_all(&module_dir).unwrap();
+        let wasm_path = module_dir.join("basic-combat.wasm");
+        let manifest_path = module_dir.join("manifest.json");
+        let bytes = nexus_wasm_host::embedded_module_bytes("basic-combat")
+            .expect("embedded basic-combat bytes");
+        // The embedded manifest carries `wasm_sha256` computed by build.rs
+        // from the EXACT embedded bytes — a correct pair.
+        let manifest = nexus_wasm_host::embedded_module_manifest("basic-combat")
+            .expect("embedded basic-combat manifest");
+        assert!(
+            serde_json::from_str::<serde_json::Value>(manifest).expect("manifest parses")
+                ["wasm_sha256"]
+                .is_string(),
+            "the embedded manifest must declare wasm_sha256 (build.rs injects it)"
+        );
+        std::fs::write(&wasm_path, bytes).expect("write module wasm");
+        std::fs::write(&manifest_path, manifest).expect("write module manifest");
+
+        let adapter =
+            NexusAdapter::new(pool).with_user_modules_dir(modules_dir.path().to_path_buf());
+        let cache = adapter.module_cache();
+        let (module, served_manifest) = unwrap_ok(
+            adapter.load_module("basic-combat"),
+            "correct wasm_sha256 pair loads",
+        );
+        assert_eq!(
+            served_manifest.wasm_sha256.as_deref(),
+            serde_json::from_str::<serde_json::Value>(manifest).expect("manifest parses")
+                ["wasm_sha256"]
+                .as_str(),
+            "the served manifest carries the declared hash"
+        );
+        assert_eq!(cache.len(), 1, "the verified pair is cached");
+        let _ = module;
+    }
+
+    /// Greptile P1 (root cause — content-based pairing): a mixed pair — OLD
+    /// manifest + NEW wasm — must be rejected with `InternalError` BEFORE
+    /// the cache: the bytes do not hash to the manifest's `wasm_sha256`.
+    /// This is the case the stat fence could not see (the straddling-swap
+    /// residual) — the content hash closes it for manifests that declare it.
+    #[cfg(not(nexus_spoke_adapter_no_wasm_target))]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn user_module_load_rejects_mismatched_wasm_sha256_without_caching() {
+        let (pool, _db_dir) = fresh_pool().await;
+        let modules_dir = tempfile::tempdir().unwrap();
+        let module_dir = modules_dir.path().join("basic-combat");
+        std::fs::create_dir_all(&module_dir).unwrap();
+        let wasm_path = module_dir.join("basic-combat.wasm");
+        let manifest_path = module_dir.join("manifest.json");
+        let bytes = nexus_wasm_host::embedded_module_bytes("basic-combat")
+            .expect("embedded basic-combat bytes");
+        // Mixed pair: the manifest is the OLD manifest for the embedded
+        // bytes, but the installed wasm is DIFFERENT (a new build swapped in
+        // without updating the manifest — the Greptile P1 scenario). The
+        // manifest declares the hash of the ORIGINAL bytes; the installed
+        // bytes hash to something else.
+        let manifest = nexus_wasm_host::embedded_module_manifest("basic-combat")
+            .expect("embedded basic-combat manifest");
+        let changed: &[u8] = b"\0asm\x01\0\0\0";
+        assert_ne!(
+            changed, bytes,
+            "the swapped-in wasm must differ from the manifest's bytes"
+        );
+        std::fs::write(&wasm_path, changed).expect("write module wasm");
+        std::fs::write(&manifest_path, manifest).expect("write module manifest");
+
+        let adapter =
+            NexusAdapter::new(pool).with_user_modules_dir(modules_dir.path().to_path_buf());
+        let cache = adapter.module_cache();
+        assert_eq!(cache.len(), 0, "fresh adapter starts with an empty cache");
+
+        match adapter.load_module("basic-combat") {
+            SpokeResult::Ok(_) => panic!("a mixed pair must NOT load"),
+            SpokeResult::Reject(r) => {
+                assert_eq!(
+                    r.code,
+                    SpokeRejectCode::InternalError,
+                    "a manifest/wasm mismatch is a host fault: {r:?}"
+                );
+                assert!(
+                    r.message
+                        .contains("wasm does not match manifest wasm_sha256"),
+                    "reject must name the pairing failure, got: {}",
+                    r.message
+                );
+            }
+        }
+        assert_eq!(
+            cache.len(),
+            0,
+            "the mixed pair must never enter the cache (reject happens BEFORE get_or_compile)"
+        );
+        assert!(!cache.contains("basic-combat"));
+    }
+
+    /// Greptile P1 (legacy fallback): a manifest WITHOUT `wasm_sha256` still
+    /// loads through the stat fence — the content check is skipped, so the
+    /// legacy behavior (and its straddling-swap residual) is unchanged for
+    /// manifests that do not declare the field.
+    #[cfg(not(nexus_spoke_adapter_no_wasm_target))]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn user_module_load_without_wasm_sha256_falls_back_to_stat_fence() {
+        let (pool, _db_dir) = fresh_pool().await;
+        let modules_dir = tempfile::tempdir().unwrap();
+        let module_dir = modules_dir.path().join("basic-combat");
+        std::fs::create_dir_all(&module_dir).unwrap();
+        let wasm_path = module_dir.join("basic-combat.wasm");
+        let manifest_path = module_dir.join("manifest.json");
+        let bytes = nexus_wasm_host::embedded_module_bytes("basic-combat")
+            .expect("embedded basic-combat bytes");
+        let manifest = nexus_wasm_host::embedded_module_manifest("basic-combat")
+            .expect("embedded basic-combat manifest");
+        let legacy_manifest = {
+            let mut value: serde_json::Value =
+                serde_json::from_str(manifest).expect("embedded manifest parses");
+            value
+                .as_object_mut()
+                .expect("manifest object")
+                .remove("wasm_sha256");
+            serde_json::to_string(&value).expect("legacy manifest serializes")
+        };
+        std::fs::write(&wasm_path, bytes).expect("write module wasm");
+        std::fs::write(&manifest_path, &legacy_manifest).expect("write legacy module manifest");
+
+        let adapter =
+            NexusAdapter::new(pool).with_user_modules_dir(modules_dir.path().to_path_buf());
+        let (module, served_manifest) = unwrap_ok(
+            adapter.load_module("basic-combat"),
+            "legacy manifest without wasm_sha256 loads via the stat fence",
+        );
+        assert!(
+            served_manifest.wasm_sha256.is_none(),
+            "legacy manifest serves without a declared hash"
+        );
+        let _ = module;
+    }
+
+    /// Greptile P1 (non-atomic module reload — fence tier): the coherence
+    /// fence behind [`module_pair_changed_mid_load`] must report ANY
+    /// mid-load mutation of the module pair. The caller's sequence is
+    /// manifest read (m1) → wasm stat (s1) → wasm read (b) → fence close
+    /// (s2 + m2); the tests below replay that sequence with a replacement
+    /// injected at each observable point: a stable pair is coherent, a
+    /// wasm replaced between the two stats OR a manifest replaced between
+    /// m1 and m2 is a mid-load mutation the loader must reject (never
+    /// compile the mixed pair into the cache).
+    #[test]
+    fn module_pair_changed_mid_load_detects_replaced_files() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let wasm_path = temp.path().join("m.wasm");
+        let manifest_path = temp.path().join("manifest.json");
+        std::fs::write(&wasm_path, b"\0asm\x01\0\0\0").expect("write wasm");
+        std::fs::write(&manifest_path, r#"{"module_id":"m"}"#).expect("write manifest");
+
+        // (c) Coherent pair ⇒ accepted: nothing changes between m1, s1,
+        // the wasm read, s2 and m2.
+        let manifest_first = std::fs::read_to_string(&manifest_path).expect("first manifest read");
+        let wasm_stat_first = std::fs::metadata(&wasm_path).expect("first wasm stat");
+        let wasm_first = std::fs::read(&wasm_path).expect("first wasm read");
+        assert!(
+            !module_pair_changed_mid_load(
+                &wasm_path,
+                &manifest_path,
+                &wasm_stat_first,
+                &manifest_first,
+            )
+            .expect("stable pair fence"),
+            "a stable pair is a consistent snapshot"
+        );
+        let _ = wasm_first;
+
+        // (a) WASM replaced between the two stats ⇒ rejected: the
+        // replacement lands after the caller's s1 stat (on the OLD wasm)
+        // and before the fence's s2 stat — the Greptile hole, where a
+        // bytes-only re-read observed a stable wasm (both byte reads saw
+        // the NEW file) and accepted OLD manifest + NEW wasm. The stat
+        // fence fires because s2 observes the NEW file's metadata.
+        let manifest_first = std::fs::read_to_string(&manifest_path).expect("manifest read");
+        let wasm_stat_first = std::fs::metadata(&wasm_path).expect("wasm stat");
+        std::fs::write(&wasm_path, b"\0asm\x01\0\0\x01").expect("rewrite wasm between stats");
+        let wasm_first = std::fs::read(&wasm_path).expect("wasm read");
+        assert!(
+            module_pair_changed_mid_load(
+                &wasm_path,
+                &manifest_path,
+                &wasm_stat_first,
+                &manifest_first,
+            )
+            .expect("replaced wasm fence"),
+            "a wasm replaced between the two stats must be detected"
+        );
+        let _ = wasm_first;
+
+        // (b) Manifest replaced between m1 and m2 ⇒ rejected.
+        std::fs::write(&wasm_path, b"\0asm\x01\0\0\0").expect("restore wasm");
+        std::fs::write(&manifest_path, r#"{"module_id":"m"}"#).expect("restore manifest");
+        let manifest_first = std::fs::read_to_string(&manifest_path).expect("manifest read");
+        let wasm_stat_first = std::fs::metadata(&wasm_path).expect("wasm stat");
+        std::fs::write(&manifest_path, r#"{"module_id":"m","version":"2"}"#)
+            .expect("rewrite manifest");
+        assert!(
+            module_pair_changed_mid_load(
+                &wasm_path,
+                &manifest_path,
+                &wasm_stat_first,
+                &manifest_first,
+            )
+            .expect("replaced manifest fence"),
+            "a manifest replaced between m1 and m2 must be detected"
+        );
+    }
+
+    /// Greptile P1 (non-atomic module reload — legacy-only residual): a
+    /// replacement pair whose writes land OUTSIDE the fence's observation
+    /// windows — here the wasm write lands between m1 and s1 (before the
+    /// first stat) while the manifest is untouched — leaves each file
+    /// stable at its own observation points, so the mixed pair is
+    /// indistinguishable from a coherent one without a content hash. This
+    /// test uses a manifest WITHOUT `wasm_sha256`, so it documents the
+    /// residual that remains ONLY for legacy manifests: operators who set
+    /// `wasm_sha256` (SHOULD, per the manifest docs) are protected by
+    /// content-based pairing instead — an old manifest + new wasm always
+    /// mismatches and is rejected before it can be cached. The operator
+    /// install tool should additionally do atomic directory replacement
+    /// (write tmp → rename) so the loader observes either the old pair or
+    /// the new pair, never a mix.
+    #[test]
+    fn module_pair_changed_mid_load_accepts_straddling_pair_swap_residual() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let wasm_path = temp.path().join("m.wasm");
+        let manifest_path = temp.path().join("manifest.json");
+        std::fs::write(&wasm_path, b"\0asm\x01\0\0\0").expect("write wasm");
+        std::fs::write(&manifest_path, r#"{"module_id":"m"}"#).expect("write manifest");
+
+        // m1 read, then the operator's wasm write lands BEFORE s1 — both
+        // wasm stats and the byte read observe the NEW wasm, and both
+        // manifest reads observe the OLD manifest: the fence passes.
+        let manifest_first = std::fs::read_to_string(&manifest_path).expect("manifest read");
+        std::fs::write(&wasm_path, b"\0asm\x01\0\0\x01").expect("operator writes wasm");
+        let wasm_stat_first = std::fs::metadata(&wasm_path).expect("wasm stat");
+        let wasm_first = std::fs::read(&wasm_path).expect("wasm read");
+        assert!(
+            !module_pair_changed_mid_load(
+                &wasm_path,
+                &manifest_path,
+                &wasm_stat_first,
+                &manifest_first,
+            )
+            .expect("straddling swap fence"),
+            "residual: a mixed pair stable at every observation point passes the fence"
+        );
+        let _ = wasm_first;
+    }
+
+    /// Greptile P1 (non-atomic module reload — integration): a concurrent
+    /// writer thrashing the module pair while `load_module` runs must
+    /// never produce a panicking loader or a served mixed pair. Every load
+    /// either returns a coherent pair (both files read identically twice)
+    /// or rejects with `InternalError` (mid-load change detected); once
+    /// the writer stops, the loader serves the final coherent pair.
+    #[cfg(not(nexus_spoke_adapter_no_wasm_target))]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn user_module_load_under_concurrent_replace_never_serves_mixed_pair() {
+        let (pool, _db_dir) = fresh_pool().await;
+        let modules_dir = tempfile::tempdir().unwrap();
+        let module_dir = modules_dir.path().join("basic-combat");
+        std::fs::create_dir_all(&module_dir).unwrap();
+        let wasm_path = module_dir.join("basic-combat.wasm");
+        let manifest_path = module_dir.join("manifest.json");
+        let bytes = nexus_wasm_host::embedded_module_bytes("basic-combat")
+            .expect("embedded basic-combat bytes");
+        let manifest = nexus_wasm_host::embedded_module_manifest("basic-combat")
+            .expect("embedded basic-combat manifest");
+        // Pair B: different (still valid) wasm + a DIFFERENT manifest — a
+        // coherent B is legal to serve; a mixed A/B read must be rejected.
+        let changed: &[u8] = b"\0asm\x01\0\0\0";
+        let manifest_b = r#"{"module_id":"basic-combat","name":"Churn","version":"2"}"#;
+        std::fs::write(&wasm_path, bytes).expect("write module wasm");
+        std::fs::write(&manifest_path, manifest).expect("write module manifest");
+
+        let adapter =
+            NexusAdapter::new(pool).with_user_modules_dir(modules_dir.path().to_path_buf());
+        let adapter = std::sync::Arc::new(adapter);
+
+        // Churn writer: alternate the pair while the loader runs.
+        let wasm_path_t = wasm_path.clone();
+        let manifest_path_t = manifest_path.clone();
+        let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let stop_t = std::sync::Arc::clone(&stop);
+        let writer = std::thread::spawn(move || {
+            let mut pair_b = false;
+            while !stop_t.load(std::sync::atomic::Ordering::Relaxed) {
+                if pair_b {
+                    std::fs::write(&wasm_path_t, changed).expect("write wasm B");
+                    std::fs::write(&manifest_path_t, manifest_b).expect("write manifest B");
+                } else {
+                    std::fs::write(&wasm_path_t, &bytes).expect("write wasm A");
+                    std::fs::write(&manifest_path_t, manifest).expect("write manifest A");
+                }
+                pair_b = !pair_b;
+                std::thread::yield_now();
+            }
+        });
+
+        // Loader: every outcome must be Ok (coherent pair) or
+        // InternalError (mid-load mutation) — never a panic, never a
+        // misclassified code.
+        for _ in 0..200 {
+            match adapter.load_module("basic-combat") {
+                SpokeResult::Ok(_) => {}
+                SpokeResult::Reject(r) => assert_eq!(
+                    r.code,
+                    SpokeRejectCode::InternalError,
+                    "a mid-load mutation must classify as InternalError, got {r:?}"
+                ),
+            }
+        }
+        stop.store(true, std::sync::atomic::Ordering::Relaxed);
+        writer.join().expect("writer thread joins");
+
+        // Final coherent pair (pair A restored) loads cleanly.
+        std::fs::write(&wasm_path, bytes).expect("restore wasm");
+        std::fs::write(&manifest_path, manifest).expect("restore manifest");
+        let (module, served_manifest) =
+            unwrap_ok(adapter.load_module("basic-combat"), "final pair loads");
+        assert_eq!(
+            served_manifest.module_id, "basic-combat",
+            "the served manifest is the coherent final pair"
+        );
+        let _ = module;
+    }
+
+    /// P2 QC fix wave FW-3 (adapter tier — TOCTOU defense): compute on a
+    /// session whose target entry was deleted must reject with
+    /// `InvalidInput` ("target KnowledgeEntry not found"), mirroring
+    /// `project()` — never an unclassified `KnowledgeEntryNotFound` reject.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn compute_missing_entry_rejects_invalid_input() {
+        let (pool, _dir) = fresh_pool().await;
+        seed_world(&pool).await;
+
+        let adapter = NexusAdapter::new(pool.clone());
+        let entry = spoke_character_entry("kb_vanished", "Vanished", 100, 20, 10, 100);
+        unwrap_ok(adapter.put_knowledge_entry(entry, None).await, "create");
+
+        // Stage a session against the entry, then delete the entry before
+        // compute runs (the check-then-act interleaving the Connect gate
+        // cannot see).
+        unwrap_ok(
+            adapter
+                .project(ProjectRequest {
+                    session_id: "ses_vanished".to_string(),
+                    entry_id: "kb_vanished".to_string(),
+                    state: Map::new(),
+                    extensions: Default::default(),
+                })
+                .await,
+            "project",
+        );
+        // Direct store delete — the adapter has no delete port, so remove
+        // the row like a concurrent writer would.
+        sqlx::query("DELETE FROM kb_key_blocks WHERE key_block_id = ?")
+            .bind("kb_vanished")
+            .execute(&pool)
+            .await
+            .expect("delete entry");
+
+        match adapter
+            .compute(ComputeRequest {
+                session_id: "ses_vanished".to_string(),
+                entry_id: "kb_vanished".to_string(),
+                computable: Map::new(),
+                settle: None,
+                extensions: Default::default(),
+            })
+            .await
+        {
+            SpokeResult::Reject(r) => {
+                assert_eq!(
+                    r.code,
+                    SpokeRejectCode::InvalidInput,
+                    "compute on a missing entry must be InvalidInput (client-input family)"
+                );
+                assert!(r.message.contains("not found for compute"));
+            }
+            _ => panic!("expected InvalidInput for missing compute target entry"),
+        }
+    }
+
+    /// P2 QC fix wave FW-5: the missing-module-identity reject carries the
+    /// `module_identity_missing` details marker and the shared predicate
+    /// recognizes it — hosts classify the defined `module_not_found`
+    /// denial by marker, never by sniffing the reject message (a message
+    /// rewording cannot silently remap the wire code).
+    #[test]
+    fn module_identity_missing_reject_carries_marker() {
+        // No module id anywhere (empty state, entry without body.computable).
+        let entry = spoke_character_entry("kb_marker", "Marker", 100, 20, 10, 100);
+        match resolve_module_id(&Map::new(), &entry) {
+            SpokeResult::Reject(r) => {
+                assert_eq!(r.code, SpokeRejectCode::InvalidInput);
+                assert!(
+                    is_module_identity_missing_reject(&r),
+                    "the identity-missing reject must carry the marker"
+                );
+                assert!(r.message.contains("module identity required"));
+            }
+            SpokeResult::Ok(_) => panic!("no module identity must reject"),
+        }
+        // A non-marker client-input reject is NOT classified as
+        // identity-missing (the gate must not remap it to module_not_found).
+        let other: SpokeResult<()> = reject(
+            SpokeRejectCode::InvalidInput,
+            "some other client error",
+            json!({}),
+        );
+        let other = match other {
+            SpokeResult::Reject(r) => r,
+            SpokeResult::Ok(_) => panic!("reject helper must reject"),
+        };
+        assert!(!is_module_identity_missing_reject(&other));
+    }
+
+    /// P2 QC fix wave FW-4: the shared id-safety helper accepts only single
+    /// path components — the Connect gate's host-store check and the
+    /// adapter's user-module loader both route through it.
+    #[test]
+    fn is_safe_module_id_accepts_single_components_only() {
+        assert!(is_safe_module_id("basic-combat"));
+        assert!(is_safe_module_id("a1"));
+        assert!(!is_safe_module_id(""));
+        assert!(!is_safe_module_id("a/b"));
+        assert!(!is_safe_module_id("a\\b"));
+        assert!(!is_safe_module_id("."));
+        assert!(!is_safe_module_id(".."));
+        assert!(!is_safe_module_id("../etc/passwd"));
     }
 
     /// F-001 regression: settle must route deltas by `target_key_block_id`.

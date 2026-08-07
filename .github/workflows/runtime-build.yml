@@ -8,9 +8,9 @@ name: Runtime Build
 #   macos-arm64 → macos-latest   / aarch64-apple-darwin
 #   linux-x64   → ubuntu-latest  / x86_64-unknown-linux-gnu
 # with `--no-default-features --features connect-host` (web-embed OFF → no
-# `apps/web/dist` bytes; connect-host ON → the P1 N-C1 invoke surface), then
-# packages `nexus-runtime-<os>-<arch>.zip` + `.sha256`, uploads them, and
-# smoke-tests `--version` on the runner itself.
+# `apps/web/dist` bytes; connect-host ON → the N-C2 read-half invoke
+# surface), then packages `nexus-runtime-<os>-<arch>.zip` + `.sha256`,
+# uploads them, and smoke-tests `--version` on the runner itself.
 #
 # Trigger set (locked by Clarify #3): `workflow_dispatch` + tag
 # `runtime-v*` ONLY. Note: `workflow_dispatch` is only offered once this

@@ -22,6 +22,7 @@
 //! | `actual < expected` (caller expects future rev)  | `REVISION_CONFLICT`          |
 //! | Entry absent + `expected_revision = Some(_)`     | `REVISION_CONFLICT`          |
 //! | Entry present + `expected_revision = None`       | `KNOWLEDGE_ENTRY_ALREADY_EXISTS` |
+//! | Row moved to another world (world-aware CAS miss, V1.154 P2 R3) | world-conflict marker (`InternalError` carrier; wire `world_conflict` per spec §3.2) |
 
 use super::NexusAdapter;
 use crate::conversion::{spoke_to_world_kb, world_kb_to_spoke};
@@ -108,6 +109,33 @@ impl NexusAdapter<'_> {
                     }),
                 )
             }
+            // V1.154 P2 (R3 closure, spec §3.2): a zero-row CAS caused by a
+            // world mismatch must surface as `world_conflict`, never as a
+            // generic OCC failure. The pinned `SpokeRejectCode` has no
+            // conflict-class code, so the classification rides the
+            // `InternalError` carrier with a `world_conflict: true` details
+            // marker; hosts remap it to the fixed `world_conflict` wire code
+            // via [`is_world_conflict_reject`].
+            LocalDbError::WorldConflict {
+                table,
+                id,
+                expected_world,
+                actual_world,
+            } => reject(
+                SpokeRejectCode::InternalError,
+                format!(
+                    "KnowledgeEntry {id} now lives in world {actual_world}, \
+                     not the expected world {expected_world} (row moved between \
+                     verification and CAS)"
+                ),
+                json!({
+                    "world_conflict": true,
+                    "table": table,
+                    "id": id,
+                    "expectedWorld": expected_world,
+                    "actualWorld": actual_world,
+                }),
+            ),
             other => reject(
                 SpokeRejectCode::InternalError,
                 format!("storage error on CAS update: {other}"),
@@ -115,6 +143,27 @@ impl NexusAdapter<'_> {
             ),
         }
     }
+}
+
+/// True when a `SpokeReject` carries the adapter's world-conflict
+/// classification (spec §3.2).
+///
+/// A zero-row CAS caused by the stored row living in a different world
+/// than the caller verified. The pinned `SpokeRejectCode`
+/// (spoke-operations 0.9.2) has no conflict-class code, so the adapter
+/// rides the classification on the `InternalError` carrier with a
+/// `world_conflict: true` details marker. Host mappings (Connect
+/// `ErrorEnvelope`, daemon HTTP) use this to surface the FIXED
+/// `world_conflict` wire spelling instead of collapsing into
+/// `revision_conflict` / `stored_revision_stale` or reading as a server
+/// fault.
+pub fn is_world_conflict_reject(reject: &SpokeReject) -> bool {
+    reject
+        .details
+        .as_ref()
+        .and_then(|d| d.get("world_conflict"))
+        .and_then(serde_json::Value::as_bool)
+        == Some(true)
 }
 
 #[async_trait]
@@ -445,6 +494,13 @@ async fn run_cas_update_in_tx(
         Some(&block_type_str),
         body_json.as_deref(),
         expected.cast_signed(),
+        // V1.154 P2 (R3 closure): the world bind is the stored-world
+        // expected by the request — the candidate's claimed world, which the
+        // invoke gate verified against the stored row (spec §3.1). If a
+        // cross-process writer moved the row to another world between the
+        // gate check and this CAS, the predicate misses and the storage
+        // layer classifies it as WorldConflict.
+        &world_entry.world_id,
     )
     .await
     {

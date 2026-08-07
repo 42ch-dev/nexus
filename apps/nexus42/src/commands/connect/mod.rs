@@ -1,13 +1,15 @@
-//! Connect Host commands (DF-72 N-C0 → N-C1) — opt-in feature `connect-host`.
+//! Connect Host commands (DF-72 N-C0 → N-C2 read half) — opt-in feature
+//! `connect-host`.
 //!
 //! `nexus42 connect start` runs a `spoke-connect` node in a **separate OS
 //! process** (architect lock Q7): signed-hello handshake, allowlist,
 //! honest `HostCapabilityManifest`, and — since V1.153 P1 (N-C1) — an
-//! inbound **write-op invoke dispatcher** ([`invoke`]) backed by a
-//! per-process `NexusAdapter` over the active workspace DB. Every op the
-//! host does not serve (`check` / `assemble` / `project` / `compute` /
-//! unknown) is refused with `op_unsupported` (the N-C0 refusal contract
-//! extends); non-allowlisted peers never reach the handler (handshake).
+//! inbound **invoke dispatcher** ([`invoke`]) backed by a per-process
+//! `NexusAdapter` over the active workspace DB. N-C2 (V1.154 P1) extends
+//! the served surface with the read half (`check` / `assemble`); every op
+//! the host does not serve (`compute` / `project` / unknown) is refused
+//! with `op_unsupported` (the N-C0 refusal contract extends);
+//! non-allowlisted peers never reach the handler (handshake).
 //!
 //! Topology rules (product draft `fl-r-connect-host-foundation.md` §2.1/§2.6):
 //! - mDNS is **never** enabled (`spoke-connect/mdns` not in the feature set).
@@ -23,7 +25,8 @@
 
 pub mod allowlist;
 pub mod identity;
-// V1.153 P1 N-C1: the `InvokeHandler` closure (architect-locked home).
+// V1.153 P1 N-C1 → V1.154 P0 T2: the session-peer `InvokeHandlerV2`
+// closure (architect-locked home; identity = the authenticated session peer).
 pub mod invoke;
 
 use crate::errors::{CliError, Result};
@@ -44,8 +47,9 @@ const DEFAULT_LISTEN: &str = "/ip4/127.0.0.1/tcp/0";
 /// Connect Host subcommands.
 #[derive(Debug, Subcommand)]
 pub enum ConnectCommand {
-    /// Start the Connect Host node (N-C1: handshake + manifest + world-scoped
-    /// upsert/promote/relate invoke dispatch; all other ops refused)
+    /// Start the Connect Host node (N-C2 read half: handshake + manifest +
+    /// world-scoped upsert/promote/relate/check/assemble invoke dispatch;
+    /// compute/project/unknown ops refused)
     Start {
         /// Peer IDs to allowlist for this run (repeatable; unioned with
         /// `~/.nexus42/connect/allowlist.json`).
@@ -88,7 +92,7 @@ async fn start(allow_peer: Vec<String>, listen: Vec<String>) -> Result<()> {
         .await
         .map_err(|e| CliError::Config(format!("connect node start failed: {e}")))?;
 
-    eprintln!("nexus42 connect start: Connect Host (N-C1) listening");
+    eprintln!("nexus42 connect start: Connect Host (N-C2 E2) listening");
     eprintln!("  peer_id: {}", node.local_peer_id());
     eprintln!("  host_id: {host_id}");
     for addr in node.listen_addrs() {
@@ -98,7 +102,8 @@ async fn start(allow_peer: Vec<String>, listen: Vec<String>) -> Result<()> {
         "  allowlisted peers: {allowlist_len} (fail-closed; add via allowlist.json or --allow-peer)"
     );
     eprintln!(
-        "  invokes: upsert/promote/relate served (world-scoped); all other ops refused (op_unsupported)"
+        "  invokes: upsert/promote/relate/check/assemble/compute served (world+module scoped); \
+         project/unknown refused (op_unsupported)"
     );
     eprintln!("  press Ctrl-C to stop");
 
@@ -181,6 +186,7 @@ fn build_config(
         local_manifest,
         handshake_timeout: None,
         invoke_handler: None,
+        invoke_handler_v2: None,
         op_capability_requirements: HashMap::new(),
         trusted_issuers: Vec::new(),
         require_capability_token: false,
@@ -210,20 +216,19 @@ pub async fn build_host_config(
 ) -> Result<(ConnectConfig, String, usize)> {
     let (mut config, host_id, allowlist_len, peer_scope) = build_config(home, allow_peer, listen)?;
 
-    // Plan QC (QC2 W-1) cheap hardening: warn at boot when more than one
-    // allowlisted peer holds write scope — the per-invoke caller peer_id is
-    // payload-carried (spoofable), so per-peer scoping silently degrades to
-    // the union of all scopes. Warning only (not a refusal): the operator
-    // may have a legitimate reason; the E2 fix is session-bound identity.
-    allowlist::warn_multi_write_peer(&peer_scope, &mut std::io::stderr());
-
     // N-C1: workspace DB open (WAL pool via the shared Schema initializer —
     // coexistence with a co-running daemon is WAL-governed, not
     // runtime_lock-governed; P1 spec § Process model) + the per-process
-    // adapter singleton + the invoke dispatch handler.
+    // adapter singleton + the session-peer invoke dispatch handler
+    // (spoke-connect 0.9.2 `invoke_handler_v2` — caller identity is the
+    // authenticated session peer; the legacy `invoke_handler` is not
+    // selected, clean cutover per spec §5.2).
     let pool = open_workspace_pool(workspace_db).await?;
-    let adapter = Arc::new(NexusAdapter::new(pool));
-    config.invoke_handler = Some(invoke::build_handler(peer_scope, adapter));
+    // P2: the adapter's ComputablePort resolves compute modules host-locally
+    // from `~/.nexus42/modules/` (spec §2.1 — never peer-supplied bytes).
+    let modules_dir = nexus_home_layout::user_modules_dir(home);
+    let adapter = Arc::new(NexusAdapter::new(pool).with_user_modules_dir(modules_dir));
+    config.invoke_handler_v2 = Some(invoke::build_handler(peer_scope, adapter));
 
     Ok((config, host_id, allowlist_len))
 }

@@ -65,8 +65,59 @@ pub enum LocalDbError {
         expected: i64,
         actual: Option<i64>,
     },
+    /// V1.154 P2 (R3 closure): the world-aware CAS predicate
+    /// (`WHERE … AND world_id = ?`) missed because the row's stored
+    /// `world_id` differs from the world the caller verified — a
+    /// cross-process writer moved the row between the caller's check and the
+    /// UPDATE. This is an internal classification; hosts surface it with the
+    /// fixed `world_conflict` wire code (spec §3.2), never as a generic OCC
+    /// version mismatch.
+    WorldConflict {
+        table: String,
+        id: String,
+        expected_world: String,
+        actual_world: String,
+    },
     /// Input validation failed before reaching the database.
     ValidationError(String),
+}
+
+impl LocalDbError {
+    /// Display the [`VersionMismatch`](Self::VersionMismatch) arm. The two
+    /// OCC conflict arms are hoisted out of the main `Display` match so
+    /// the impl stays under clippy's `too_many_lines` ceiling (the
+    /// V1.154 `WorldConflict` arm pushed the `fmt` body over 100 lines).
+    fn fmt_version_mismatch(
+        f: &mut fmt::Formatter<'_>,
+        table: &str,
+        id: &str,
+        expected: i64,
+        actual: Option<i64>,
+    ) -> fmt::Result {
+        write!(
+            f,
+            "version mismatch on '{table}' row '{id}': expected v{expected}, actual v{} — \
+             row was modified by another writer; retry",
+            actual.map_or_else(|| "?".to_string(), |v| v.to_string())
+        )
+    }
+
+    /// Display the [`WorldConflict`](Self::WorldConflict) arm — see
+    /// [`fmt_version_mismatch`].
+    fn fmt_world_conflict(
+        f: &mut fmt::Formatter<'_>,
+        table: &str,
+        id: &str,
+        expected_world: &str,
+        actual_world: &str,
+    ) -> fmt::Result {
+        write!(
+            f,
+            "world conflict on '{table}' row '{id}': expected world '{expected_world}', \
+             actual world '{actual_world}' — the row was moved to another world by \
+             another writer; re-read it in its stored world",
+        )
+    }
 }
 
 impl fmt::Display for LocalDbError {
@@ -148,14 +199,13 @@ impl fmt::Display for LocalDbError {
                 id,
                 expected,
                 actual,
-            } => {
-                write!(
-                    f,
-                    "version mismatch on '{table}' row '{id}': expected v{expected}, actual v{} — \
-                     row was modified by another writer; retry",
-                    actual.map_or("?".to_string(), |v| v.to_string())
-                )
-            }
+            } => Self::fmt_version_mismatch(f, table, id, *expected, *actual),
+            Self::WorldConflict {
+                table,
+                id,
+                expected_world,
+                actual_world,
+            } => Self::fmt_world_conflict(f, table, id, expected_world, actual_world),
             Self::ValidationError(msg) => {
                 write!(f, "validation error: {msg}")
             }

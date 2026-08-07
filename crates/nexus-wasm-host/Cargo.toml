@@ -18,6 +18,9 @@ nexus-contracts = { path = "../nexus-contracts" }
 wasmtime = { version = "46", default-features = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
+# Content-based manifest↔wasm pairing (Greptile P1): `ModuleManifest::verify_wasm_sha256`
+# hashes loaded wasm bytes against the manifest's `wasm_sha256` field.
+sha2 = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 # Embeds compiled .wasm artifacts at compile time (compass Q10; mirrors the
@@ -33,3 +36,9 @@ tempfile = { workspace = true }
 # `wat` compiles WebAssembly text → binary for unit tests that exercise
 # validation/sandbox paths without shipping a real module.
 wat = "1"
+
+[build-dependencies]
+# build.rs injects the `wasm_sha256` pairing field into the staged embedded
+# manifest, computed from the compiled `.wasm` bytes (Greptile P1).
+serde_json = { workspace = true }
+sha2 = { workspace = true }

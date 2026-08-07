@@ -1131,10 +1131,13 @@ impl SqliteKbStore {
 ///
 /// Mirrors the V1.51 `kb_extract_jobs` CAS pattern
 /// ([`kb_extract_job::mark_confirmed_in_tx_with_cas`]). Adds a
-/// `WHERE key_block_id = ? AND revision = ?` guard so a stale preimage
-/// (read before another writer modified the row) is rejected with
-/// [`LocalDbError::VersionMismatch`]. On success the `revision` column is
-/// bumped to `expected_revision + 1` and the bumped value is returned.
+/// `WHERE key_block_id = ? AND COALESCE(revision, 0) = ? AND world_id = ?`
+/// guard so a stale preimage (read before another writer modified the row)
+/// is rejected with [`LocalDbError::VersionMismatch`], and — V1.154 P2 (R3
+/// closure) — a row moved to another world between the caller's read and the
+/// UPDATE is rejected with [`LocalDbError::WorldConflict`] instead of a
+/// generic version mismatch. On success the `revision` column is bumped to
+/// `expected_revision + 1` and the bumped value is returned.
 ///
 /// Only the fields supplied as `Some(..)` are mutated; `None` fields keep
 /// their current DB value. `revision` is NULL-normalized to 0 by this
@@ -1150,6 +1153,10 @@ impl SqliteKbStore {
 ///   values (JSON strings for `body_json`).
 /// - `expected_revision` — the per-row version the caller observed on read
 ///   (NULL-normalized to 0; this is the OCC precondition).
+/// - `world_id` — the stored-world the caller verified on read (spec §3.1:
+///   the world bind is the stored-world expected by the request). A row that
+///   moved to another world fails the predicate and classifies as
+///   [`LocalDbError::WorldConflict`].
 ///
 /// # Returns
 ///
@@ -1157,6 +1164,8 @@ impl SqliteKbStore {
 /// - `Err(LocalDbError::VersionMismatch)` — the row's `revision` changed
 ///   between read and UPDATE (409 caller-side).
 /// - `Err(LocalDbError::VersionMismatch { actual: None })` — row not found.
+/// - `Err(LocalDbError::WorldConflict)` — the row now lives in another
+///   world (R3: cross-process writers; wire code `world_conflict`).
 /// - `Err(LocalDbError::Sqlx)` — database failure.
 ///
 /// # Errors
@@ -1169,6 +1178,7 @@ pub async fn cas_update_key_block_fields(
     block_type: Option<&str>,
     body_json: Option<&str>,
     expected_revision: i64,
+    world_id: &str,
 ) -> Result<u64, LocalDbError> {
     // Build a dynamic SET clause from the supplied fields. revision is always
     // bumped; updated_at always set. SAFETY: dynamic SET built from a fixed
@@ -1190,9 +1200,12 @@ pub async fn cas_update_key_block_fields(
     // controlled SQL); all values are bind params. COALESCE(revision, 0)
     // NULL-normalizes the revision column per the architect Phase 2b lock
     // (existing rows may have revision = NULL; treated as 0 for OCC).
+    // V1.154 P2 (R3 closure, spec §3.2 LOCKED): the stored `world_id` joins
+    // the CAS predicate so a row moved to another world between the caller's
+    // verified read and this UPDATE cannot be rewritten cross-world.
     let sql = format!(
         "UPDATE kb_key_blocks SET {set_clause} \
-         WHERE key_block_id = ? AND COALESCE(revision, 0) = ?"
+         WHERE key_block_id = ? AND COALESCE(revision, 0) = ? AND world_id = ?"
     );
 
     let mut q = sqlx::query(&sql);
@@ -1206,21 +1219,37 @@ pub async fn cas_update_key_block_fields(
     if let Some(v) = body_json {
         q = q.bind(v);
     }
-    q = q.bind(key_block_id).bind(expected_revision);
+    q = q.bind(key_block_id).bind(expected_revision).bind(world_id);
     let result = q.execute(&mut **tx).await?;
 
     if result.rows_affected() == 1 {
         return Ok(u64::try_from(new_revision).unwrap_or(0));
     }
 
-    // rows_affected == 0 — disambiguate not-found vs version mismatch by
-    // re-reading the row. NULL revision is treated as 0.
-    let current: Option<Option<i64>> =
-        sqlx::query_scalar("SELECT revision FROM kb_key_blocks WHERE key_block_id = ?")
+    // rows_affected == 0 — disambiguate world move vs not-found vs version
+    // mismatch by re-reading the row. `world_id` is NOT NULL on
+    // `kb_key_blocks` (migration 20260525), so a present row always carries
+    // its stored world. NULL revision is treated as 0.
+    let current: Option<(Option<i64>, String)> =
+        sqlx::query_as("SELECT revision, world_id FROM kb_key_blocks WHERE key_block_id = ?")
             .bind(key_block_id)
             .fetch_optional(&mut **tx)
             .await?;
-    let actual = current.map(|rev| rev.unwrap_or(0));
+    if let Some((_, stored_world)) = current.as_ref() {
+        if stored_world != world_id {
+            // The caller's revision was valid; the WORLD moved (a cross-
+            // process writer, e.g. Connect ∥ daemon on the same workspace
+            // DB). This must surface as world_conflict, not a generic OCC
+            // version mismatch (spec §3.2).
+            return Err(LocalDbError::WorldConflict {
+                table: "kb_key_blocks".to_string(),
+                id: key_block_id.to_string(),
+                expected_world: world_id.to_string(),
+                actual_world: stored_world.clone(),
+            });
+        }
+    }
+    let actual = current.map(|(rev, _)| rev.unwrap_or(0));
     Err(LocalDbError::VersionMismatch {
         table: "kb_key_blocks".to_string(),
         id: key_block_id.to_string(),
@@ -2317,6 +2346,121 @@ mod tests {
         assert!(
             fetched.extensions_nexus_extras.is_none(),
             "no unknown keys → extras is None"
+        );
+    }
+
+    // ── V1.154 P2 (R3 closure): world-aware CAS ──────────────────────────
+
+    /// Seed a second world row so a test can FK-move a `kb_key_blocks` row
+    /// across worlds (`world_id` is a NOT NULL FK to `narrative_worlds`).
+    async fn seed_second_world(pool: &SqlitePool) {
+        sqlx::query!(
+            r#"INSERT INTO narrative_worlds
+                (world_id, workspace_id, owner_creator_id, title, slug, status, visibility, time_policy, metadata_json)
+               VALUES ('wld_2', 'wrk_test', 'ctr_test', 'Second World', 'test-world-2', 'active', 'private', 'manual', '{}')"#
+        )
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+
+    /// Seed a `kb_key_blocks` row in `wld_1` (revision NULL → 0 per the
+    /// V1.73 NULL-normalization rule) and return its id.
+    async fn seed_key_block(pool: &SqlitePool, canonical_name: &str) -> String {
+        let store = SqliteKbStore::new(pool.clone());
+        let kb = WorldKbEntry::new("wld_1", BlockType::Character, canonical_name);
+        let id = kb.entry_id.clone();
+        let mut tx = pool.begin().await.unwrap();
+        store.insert_key_block_in_tx(&mut tx, kb).await.unwrap();
+        tx.commit().await.unwrap();
+        id
+    }
+
+    #[tokio::test]
+    async fn cas_update_key_block_fields_same_world_matching_revision_succeeds() {
+        // World-aware CAS happy path: the world bind matches the stored row,
+        // so the CAS bumps revision exactly like the pre-R3 predicate.
+        let (pool, _dir) = fresh_pool().await;
+        seed_world(&pool).await;
+        let id = seed_key_block(&pool, "CasHappy").await;
+
+        let mut tx = pool.begin().await.unwrap();
+        let new_rev = cas_update_key_block_fields(
+            &mut tx,
+            &id,
+            Some("CasHappy Renamed"),
+            None,
+            None,
+            0,
+            "wld_1",
+        )
+        .await
+        .unwrap();
+        tx.commit().await.unwrap();
+        assert_eq!(new_rev, 1, "CAS success bumps revision to expected + 1");
+    }
+
+    #[tokio::test]
+    async fn cas_update_key_block_fields_rejects_row_in_foreign_world() {
+        // R3 regression (atomic source of truth): the caller's world-verified
+        // preimage (wld_1) is stale — a cross-process writer moved the row to
+        // wld_2 without bumping the revision, so the pre-fix id+revision CAS
+        // would have succeeded. The world-aware predicate must deny with
+        // WorldConflict, NOT VersionMismatch (the caller's revision was valid;
+        // the WORLD moved).
+        let (pool, _dir) = fresh_pool().await;
+        seed_world(&pool).await;
+        seed_second_world(&pool).await;
+        let id = seed_key_block(&pool, "CasForeign").await;
+
+        // "Other writer" (Connect process ∥ daemon) moves the row across
+        // worlds between the gate-check and the CAS.
+        sqlx::query!(
+            "UPDATE kb_key_blocks SET world_id = ? WHERE key_block_id = ?",
+            "wld_2",
+            id,
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let mut tx = pool.begin().await.unwrap();
+        let err =
+            cas_update_key_block_fields(&mut tx, &id, Some("CasForeign"), None, None, 0, "wld_1")
+                .await
+                .unwrap_err();
+        match err {
+            LocalDbError::WorldConflict {
+                table,
+                id: err_id,
+                expected_world,
+                actual_world,
+            } => {
+                assert_eq!(table, "kb_key_blocks");
+                assert_eq!(err_id, id);
+                assert_eq!(expected_world, "wld_1");
+                assert_eq!(actual_world, "wld_2");
+            }
+            other => panic!("world mismatch must classify as WorldConflict, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn cas_update_key_block_fields_same_world_stale_revision_stays_version_mismatch() {
+        // A same-world stale revision keeps the existing OCC classification —
+        // the world-aware predicate must not widen the WorldConflict bucket.
+        let (pool, _dir) = fresh_pool().await;
+        seed_world(&pool).await;
+        let id = seed_key_block(&pool, "CasStale").await;
+
+        let mut tx = pool.begin().await.unwrap();
+        let err =
+            cas_update_key_block_fields(&mut tx, &id, Some("CasStale"), None, None, 5, "wld_1")
+                .await
+                .unwrap_err();
+        assert!(
+            matches!(err, LocalDbError::VersionMismatch { .. }),
+            "same-world stale revision keeps VersionMismatch: {err:?}"
         );
     }
 }

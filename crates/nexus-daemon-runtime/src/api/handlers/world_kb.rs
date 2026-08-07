@@ -71,7 +71,7 @@ use nexus_spoke_adapter::NexusAdapter;
 use nexus_spoke_adapter::conversion::{spoke_to_world_kb, world_kb_to_spoke};
 use nexus_spoke_adapter::extensions::set_nexus_body;
 use nexus_spoke_adapter::{
-    orchestrate_promote, orchestrate_relate, orchestrate_upsert,
+    is_world_conflict_reject, orchestrate_promote, orchestrate_relate, orchestrate_upsert,
     KnowledgeEntry as SpokeKnowledgeEntry, PromoteRequest, PromoteResponse, RelateRequest,
     RelateResponse, Relation as SpokeRelation, RelationExtensionsKey, SpokeReject, SpokeRejectCode,
     SpokeResult, UpsertRequest, UpsertResponse,
@@ -163,6 +163,15 @@ fn map_cas_err(e: LocalDbError, entity_id: &str, conflicting_path: &str) -> Nexu
             entity_id,
             conflicting_path,
             "refetch the World KB graph and reapply",
+        ),
+        // V1.154 P2 (R3 closure): a world-mismatch CAS miss (the target moved
+        // to another world between the handler's read and the CAS) maps to
+        // the 409 conflict family with kind "world" — never a 500.
+        LocalDbError::WorldConflict { .. } => NexusApiError::world_kb_conflict(
+            0,
+            entity_id,
+            "world",
+            "the target moved to another world; refetch it in its stored world and reapply",
         ),
         other => NexusApiError::Internal {
             code: "DATABASE_ERROR".to_string(),
@@ -1100,6 +1109,22 @@ async fn map_upsert_reject(
     pool: &sqlx::SqlitePool,
     entity_id: &str,
 ) -> NexusApiError {
+    // V1.154 P2 (R3 closure, spec §3.2): a world-mismatch CAS miss (the row
+    // moved to another world between the gate-check / handler read and the
+    // CAS) maps to the 409 `world_kb_conflict` family with kind "world" —
+    // distinct from the "version" OCC path, never a 500.
+    if is_world_conflict_reject(&reject) {
+        let current = match extract_store_revision(&reject) {
+            Some(rev) => rev,
+            None => reread_entity_revision_sync(pool, entity_id).await,
+        };
+        return NexusApiError::world_kb_conflict(
+            current,
+            entity_id,
+            "world",
+            "the entry moved to another world; refetch it in its stored world and reapply",
+        );
+    }
     match reject.code {
         SpokeRejectCode::StoredRevisionStale
         | SpokeRejectCode::RevisionConflict
@@ -1360,6 +1385,17 @@ async fn spoke_reject_to_api_error(
     pool: &sqlx::SqlitePool,
     job_id: &str,
 ) -> NexusApiError {
+    // V1.154 P2 (R3 closure, spec §3.2): world-mismatch CAS miss → 409
+    // `world_kb_conflict` kind "world" (never 500, never a version conflict).
+    if is_world_conflict_reject(&reject) {
+        let current = reread_promotion_version(pool, job_id).await.unwrap_or(0);
+        return NexusApiError::world_kb_conflict(
+            current,
+            job_id,
+            "world",
+            "the entry moved to another world; refetch it in its stored world and reapply",
+        );
+    }
     match reject.code {
         SpokeRejectCode::MissingRequiredField
         | SpokeRejectCode::EmptyCanonicalName
@@ -1500,27 +1536,17 @@ async fn promote_merge(
     }
 
     // Fold the candidate summary into the target body summary.
-    let candidate_summary = candidate
-        .proposed_payload
-        .as_deref()
-        .and_then(|p| serde_json::from_str::<WorldKbBody>(p).ok())
-        .and_then(|b| b.summary);
-    let mut target_body = target.body.clone().unwrap_or_default();
-    if let Some(cs) = candidate_summary {
-        let merged = target_body.summary.as_ref().map_or_else(
-            || format!("— merged: {cs}"),
-            |existing| format!("{existing}\n\n— merged: {cs}"),
-        );
-        target_body.summary = Some(merged);
-    }
-    let body_value = serde_json::to_value(&target_body).unwrap_or_default();
-    let body_json_str = serde_json::to_string(&body_value).unwrap_or_default();
+    let target_body = target.body.clone().unwrap_or_default();
+    let body_json_str = merge_candidate_summary(&target_body, candidate);
     let target_version = target.revision.unwrap_or(0);
 
     // Atomic: CAS-update target body + CAS-reject candidate job in one tx.
     let mut tx = pool.begin().await.map_err(NexusApiError::from)?;
     // Target CAS miss is tagged "merge_target" (not the candidate's "version")
     // so the client refreshes the target, not the candidate (greptile P1, iter 5).
+    // V1.154 P2 (R3 closure): the world-aware predicate binds the request's
+    // world (verified against the target above) so a target moved to another
+    // world between the read and the CAS is denied, not rewritten.
     let _new_target_version = cas_update_key_block_fields(
         &mut tx,
         target_id,
@@ -1528,6 +1554,7 @@ async fn promote_merge(
         None,
         Some(&body_json_str),
         i64::try_from(target_version).unwrap_or(0),
+        world_id,
     )
     .await
     .map_err(|e| map_cas_err(e, target_id, "merge_target"))?;
@@ -1578,6 +1605,28 @@ async fn promote_merge(
         version: new_version,
         validation_summary: wire_cast(validation_summary(&[], &[])),
     }))
+}
+
+/// Fold the candidate's proposed summary into the target body summary
+/// (promote-merge): append as a `— merged: …` paragraph, or seed it when
+/// the target has no summary. Returns the serialized body JSON string.
+/// Extracted from [`promote_merge`] to keep that handler under the
+/// `too_many_lines` budget.
+fn merge_candidate_summary(target_body: &WorldKbBody, candidate: &KbExtractPromotion) -> String {
+    let candidate_summary = candidate
+        .proposed_payload
+        .as_deref()
+        .and_then(|p| serde_json::from_str::<WorldKbBody>(p).ok())
+        .and_then(|b| b.summary);
+    let mut merged = target_body.clone();
+    if let Some(cs) = candidate_summary {
+        let summary = merged.summary.as_ref().map_or_else(
+            || format!("— merged: {cs}"),
+            |existing| format!("{existing}\n\n— merged: {cs}"),
+        );
+        merged.summary = Some(summary);
+    }
+    serde_json::to_string(&serde_json::to_value(&merged).unwrap_or_default()).unwrap_or_default()
 }
 
 // ─── read endpoints ─────────────────────────────────────────────────────────
@@ -2093,6 +2142,20 @@ async fn map_relate_reject(
     pool: &sqlx::SqlitePool,
     relationship_id: &str,
 ) -> NexusApiError {
+    // V1.154 P2 (R3 closure, spec §3.2): world-mismatch CAS miss → 409
+    // `world_kb_conflict` kind "world" (never 500, never a version conflict).
+    if is_world_conflict_reject(&reject) {
+        let current = match extract_store_revision(&reject) {
+            Some(rev) => rev,
+            None => reread_relation_revision_sync(pool, relationship_id).await,
+        };
+        return NexusApiError::world_kb_conflict(
+            current,
+            relationship_id,
+            "world",
+            "the relationship moved to another world; refetch it in its stored world and reapply",
+        );
+    }
     match reject.code {
         SpokeRejectCode::RelationAlreadyExists
         | SpokeRejectCode::StoredRevisionStale
@@ -2743,5 +2806,109 @@ mod promote_adopt_commit_ambiguity_tests {
             resolve_promote_adopt_commit_ambiguity_after_reread(Err(())),
             PromoteAdoptCommitAmbiguityResolution::Fail
         );
+    }
+}
+
+// ── V1.154 P2 (R3 closure): world-conflict reject mapping ────────────────
+
+#[cfg(test)]
+mod world_conflict_mapping_tests {
+    use super::*;
+
+    /// The adapter's world-conflict reject shape (spec §3.2): the pinned
+    /// spoke-operations `SpokeRejectCode` has no conflict-class code, so the
+    /// adapter carries the classification on the `InternalError` carrier with
+    /// a `world_conflict` details marker + the worlds observed at CAS time.
+    fn world_conflict_reject(
+        entity_id: &str,
+        expected_world: &str,
+        actual_world: &str,
+    ) -> SpokeReject {
+        SpokeReject {
+            code: SpokeRejectCode::InternalError,
+            message: format!("row {entity_id} moved to another world between verification and CAS"),
+            details: Some(
+                serde_json::from_value(serde_json::json!({
+                    "world_conflict": true,
+                    "table": "kb_key_blocks",
+                    "id": entity_id,
+                    "expectedWorld": expected_world,
+                    "actualWorld": actual_world,
+                    "storeRevision": 1u64,
+                }))
+                .expect("object details map"),
+            ),
+        }
+    }
+
+    #[tokio::test]
+    async fn upsert_world_conflict_maps_to_409_world_kb_conflict_kind_world() {
+        let pool = sqlx::SqlitePool::connect("sqlite::memory:")
+            .await
+            .expect("in-memory pool");
+        let err = map_upsert_reject(
+            world_conflict_reject("kb_wc", "wld_a", "wld_b"),
+            &pool,
+            "kb_wc",
+        )
+        .await;
+        match err {
+            NexusApiError::WorldKbConflict {
+                current_version,
+                entity_id,
+                conflicting_path,
+                ..
+            } => {
+                assert_eq!(current_version, 1, "storeRevision from the reject details");
+                assert_eq!(entity_id, "kb_wc");
+                assert_eq!(
+                    conflicting_path, "world",
+                    "a world conflict is distinct from the 'version' OCC path"
+                );
+            }
+            other => panic!("world conflict must map to 409 WorldKbConflict, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn relate_world_conflict_maps_to_409_world_kb_conflict_kind_world() {
+        let pool = sqlx::SqlitePool::connect("sqlite::memory:")
+            .await
+            .expect("in-memory pool");
+        let err = map_relate_reject(
+            world_conflict_reject("rel_wc", "wld_a", "wld_b"),
+            &pool,
+            "rel_wc",
+        )
+        .await;
+        match err {
+            NexusApiError::WorldKbConflict {
+                conflicting_path, ..
+            } => {
+                assert_eq!(conflicting_path, "world");
+            }
+            other => panic!("world conflict must map to 409 WorldKbConflict, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn promote_world_conflict_maps_to_409_world_kb_conflict_kind_world() {
+        let pool = sqlx::SqlitePool::connect("sqlite::memory:")
+            .await
+            .expect("in-memory pool");
+        let err = spoke_reject_to_api_error(
+            world_conflict_reject("kb_wc_p", "wld_a", "wld_b"),
+            &pool,
+            "job_wc",
+        )
+        .await;
+        match err {
+            NexusApiError::WorldKbConflict {
+                conflicting_path, ..
+            } => {
+                assert_eq!(conflicting_path, "world");
+            }
+            other => panic!("world conflict must map to 409 WorldKbConflict, got {other:?}"),
+        }
     }
 }
