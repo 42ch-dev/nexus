@@ -142,11 +142,12 @@ async fn fresh_state() -> (
 // ─── patch-entity ───────────────────────────────────────────────────────────
 
 // V1.143 P1: patch_entity now routes the canonical edit through
-// `orchestrate_upsert` via `NexusAdapter`, which bridges sync spoke
-// ports to async SQLite via `tokio::task::block_in_place`. That requires a
-// multi-threaded runtime (the production daemon uses one; tests must opt in
-// via `flavor = "multi_thread"` — same rationale as the promote_adopt tests
-// below). The fast-fail patch_entity tests (stale version / deleted /
+// `orchestrate_upsert` via `NexusAdapter`. The adapter port methods are
+// natively `async fn` (spoke-operations 0.9.1 surface, V1.153 P0 T2) and run
+// on the test runtime; the multi-threaded flavor is retained from the
+// pre-0.9.1 `block_in_place` bridge era (harmless either way — same
+// rationale as the promote_adopt tests below). The fast-fail patch_entity
+// tests (stale version / deleted /
 // cross-author) short-circuit on pre-orchestrator guards and stay on the
 // default current-thread runtime.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -583,11 +584,10 @@ const NOVEL_CHARACTER_BODY: &str =
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn promote_adopt_confirms_candidate() {
-    // V1.142 P2: promote_adopt now routes through `orchestrate_promote` via
-    // `NexusAdapter`, which bridges sync spoke ports to async SQLite
-    // via `tokio::task::block_in_place`. That requires a multi-threaded
-    // runtime (the production daemon uses one; tests must opt in via
-    // `flavor = "multi_thread"`).
+    // V1.142 P2: promote_adopt routes through `orchestrate_promote` via
+    // `NexusAdapter`. The adapter port methods are natively `async fn`
+    // (spoke-operations 0.9.1 surface, V1.153 P0 T2); the multi-threaded
+    // flavor is retained from the pre-0.9.1 `block_in_place` bridge era.
     let (_tmp, state) = fresh_state().await;
     let candidate = insert_pending(
         state.pool().unwrap(),

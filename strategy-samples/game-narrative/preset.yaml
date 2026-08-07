@@ -1,0 +1,194 @@
+# Game Narrative Preset — sample strategy for AI-narrative game orchestration
+#
+# This is a FORKABLE sample for partners who orchestrate Nexus from their own
+# backend (the "orchestrator side"). It demonstrates:
+#
+#   * Trigger lane  — a game event arrives from the game runtime and is turned
+#                     into an extraction/assembly task (KnowledgeEntry drafts +
+#                     Relation hints).
+#   * Scheduled lane — an interval/cron-style sweep that inventories new or
+#                     changed worldview/character documents since the last run,
+#                     judges whether anything new exists, and only then runs
+#                     extraction (scan state -> judge -> separate extract
+#                     state, mirroring the embedded `research` preset).
+#
+# The extraction prompt templates in templates/ turn source documents into
+# KnowledgeEntry-shaped drafts (and Relation hints for characters) that the
+# partner's backend writes into a World over Connect via the
+# @42ch/spoke-connect SDK (N-C1 import flow: `upsert` provisional entries,
+# `promote` them to confirmed, `relate` relations — see the template comments
+# for the exact call pattern).
+#
+# The manifest declares capability routing + prompt templates only. Nothing
+# here is embedded into any binary; the bundle is consumed through the same
+# preset bundle format as embedded presets (preset.yaml + templates/), via the
+# 3-tier resolution (`~/.nexus42/presets/<id>/` overrides embedded).
+#
+# Run payload (`preset.input`, provided by the partner's backend when creating
+# the schedule):
+#   mode:            "trigger" | "scheduled"        (lane selector)
+#   world_id:        target World UUID
+#   creator_id:      creator owning the World
+#   event:           game event payload (trigger lane only)
+#   documents:       { worldview?: <text>, character_sheets?: [<text>, ...] }
+#                    source documents to extract from (either lane)
+#   watermark:       last-sweep watermark (scheduled lane only; supplied by the
+#                    partner's backend — see the note in
+#                    templates/scheduled-sweep.md)
+#
+# Example schedule creation (daemon API — the runtime ships without the
+# daemon HTTP router, so the partner's backend typically drives Connect and
+# their own timer instead):
+#   POST /v1/daemon/orchestration/schedules
+#   { "creator_id": "<creator-id>", "preset_id": "game-narrative",
+#     "input": { "mode": "trigger", "world_id": "...", "documents": {...} } }
+# The `input` field is the run payload the engine maps to `preset.input.*`
+# at schedule start. The CLI's `daemon schedule add --seed <text>` only
+# stores seed text as core_context v0 — it does NOT populate
+# `preset.input.*`.
+
+preset:
+  id: game-narrative
+  version: 1
+  kind: creator
+  description: "Game narrative import: game-event (trigger) and interval-sweep (scheduled) lanes extracting worldview/character KnowledgeEntry drafts + Relation hints"
+  requires_capabilities:
+    - acp.prompt
+    - creator.inject_prompt
+    - judge.llm
+  run_intents:
+    - knowledge_ingest
+  initial: routing
+  terminal: done
+  # `initial_action: seed_direct` stores the schedule seed/input VERBATIM as
+  # core_context v0 in the derivation store. The engine does NOT parse that
+  # text into session context keys, so templates cannot read it via
+  # {{core_context.*}} — the schedule seed is not a live watermark channel
+  # (see the watermark note in templates/scheduled-sweep.md).
+  initial_action:
+    kind: seed_direct
+
+# External push mechanism: a declared signal can force the state machine
+# forward. A game event can jump straight into the trigger lane.
+# NOTE: the manifest `signals:` section is schema-valid and parsed by the
+# loader, but no runtime component delivers declared signals yet — the
+# daemon's `/schedules/{id}/signal` endpoint handles only the lifecycle
+# signals start|pause|resume|cancel|advance and REJECTS preset-declared
+# signal names. Treat signal delivery as a customization point for the host;
+# the schedule-input path (mode selector) is the primary lane entry.
+signals:
+  - name: game_event
+    on_receive:
+      action: force_transition
+      target: trigger_extract
+
+states:
+  - id: routing
+    # Lane selector. The expression engine resolves `_context.<path>` against a
+    # FLAT context JSON map (`build_context_json`), so a dotted key like
+    # `preset.input.mode` can never be read: `_context.preset.input.mode`
+    # resolves `map.get("preset")` -> null (context keys are stored literally
+    # as e.g. "preset.input.mode", and the expression grammar has no bracket
+    # syntax). The only runtime-populated discriminator expressions can see is
+    # `_context._judge_result`, written by an `llm_judge` exit BEFORE branch
+    # evaluation — so lane selection is a tiny judge:
+    #   judge GO   (result: true)  -> scheduled lane (interval sweep)
+    #   judge NOGO (result: false) -> trigger lane (game event)
+    # The judge prompt (templates/lane-route.md) reads the payload via
+    # {{preset.input.mode}} — template rendering nests dotted keys, unlike
+    # expression resolution.
+    description: "Lane selector: judge reads preset.input.mode -> scheduled sweep (GO) or game-event trigger (NOGO)"
+    exit_when:
+      kind: llm_judge
+      template_file: templates/lane-route.md
+      judge_capability: judge.llm
+    next:
+      branches:
+        - when: "_context._judge_result == true"
+          target: scheduled_sweep
+      default: trigger_extract
+
+  - id: trigger_extract
+    description: "Trigger lane: game event -> extraction/assembly task"
+    enter:
+      - kind: inner_graph
+        name: trigger_graph
+    exit_when:
+      kind: graph_complete
+    next: done
+
+  - id: scheduled_sweep
+    description: "Scheduled lane: inventory new/changed worldview + character documents and judge whether to import (scan state — extraction is a separate state)"
+    enter:
+      # Scan + judge BEFORE extraction, mirroring the embedded `research`
+      # preset's scanning -> extracting split: this state only runs the
+      # inventory prompt (creator.inject_prompt queues it into the creator
+      # session), then the exit judge decides. Extraction runs in the
+      # separate `sweep_extract` state only after the judge says GO, so a
+      # NOGO / `min_interval` park re-runs the cheap scan — never the LLM
+      # extraction work.
+      - kind: capability
+        name: creator.inject_prompt
+        args:
+          prompt_file: templates/scheduled-sweep.md
+    exit_when:
+      kind: llm_judge
+      # Judge cadence: re-evaluate this lane at most once per interval
+      # (existing preset mechanism — same as research/novel-writing presets).
+      # NOGO parks this scan state (WaitForInput); the next interval resumes
+      # it and the judge re-evaluates after `min_interval` elapses.
+      template_file: templates/scheduled-sweep-exit.md
+      judge_capability: judge.llm
+      min_interval: "PT1H"
+    next: sweep_extract
+
+  - id: sweep_extract
+    description: "Scheduled lane extraction: worldview/character KnowledgeEntry drafts + Relation hints (runs only after the sweep judge says GO)"
+    enter:
+      - kind: inner_graph
+        name: sweep_graph
+    exit_when:
+      kind: graph_complete
+    next: done
+
+  - id: done
+    terminal: true
+
+inner_graphs:
+  # Trigger lane: game event -> extraction/assembly.
+  # Nodes are sequenced with depends_on; each node template is self-contained
+  # (reads preset.input) per the embedded-preset convention.
+  trigger_graph:
+    nodes:
+      - id: trigger_parse
+        kind: acp_prompt
+        template_file: templates/trigger-game-event.md
+        tool_policy: auto_grant_read_only
+      - id: extract_worldview
+        kind: acp_prompt
+        depends_on: [trigger_parse]
+        template_file: templates/import-worldview.md
+        tool_policy: auto_grant_read_only
+      - id: extract_characters
+        kind: acp_prompt
+        depends_on: [extract_worldview]
+        template_file: templates/import-character-sheet.md
+        tool_policy: auto_grant_read_only
+    output_binding: extract_characters.text
+
+  # Scheduled lane extraction (runs only after the sweep judge in the
+  # `scheduled_sweep` state says GO — the scan/judge happens there, so this
+  # graph is extraction only). Each node template is self-contained (reads
+  # preset.input) per the embedded-preset convention.
+  sweep_graph:
+    nodes:
+      - id: extract_worldview
+        kind: acp_prompt
+        template_file: templates/import-worldview.md
+        tool_policy: auto_grant_read_only
+      - id: extract_characters
+        kind: acp_prompt
+        depends_on: [extract_worldview]
+        template_file: templates/import-character-sheet.md
+        tool_policy: auto_grant_read_only
+    output_binding: extract_characters.text

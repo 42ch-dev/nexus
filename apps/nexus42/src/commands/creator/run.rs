@@ -103,6 +103,7 @@ pub async fn handle_run(cmd: RunCommand, config: &CliConfig) -> Result<()> {
     // resolve a work_ref (no workspace, no DB, work hasn't been bootstrapped),
     // skip the lock and let the mutation proceed (no-lock degradation is
     // acceptable when there is no workspace to anchor the lock to).
+    #[cfg(unix)]
     let _file_lock = {
         let maybe_lock = if let Ok(db_path) = crate::config::resolve_state_db_path(config) {
             if let Ok(pool) = crate::db::Schema::init(&db_path).await {
@@ -148,6 +149,12 @@ pub async fn handle_run(cmd: RunCommand, config: &CliConfig) -> Result<()> {
         };
         maybe_lock
     };
+
+    #[cfg(not(unix))]
+    // V1.153 P2 T2: the file_lock module is unix-only (flock); on Windows the
+    // shared-DB write access is WAL-governed (P2 spec § Coexistence) — no
+    // advisory lock, proceed unlocked.
+    let _file_lock = ();
 
     // FL-E stage-advance presets: dispatch to stage_advance.
     if let Some(target_stage) = stage_for_preset(&preset_id) {

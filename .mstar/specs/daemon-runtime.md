@@ -4,7 +4,7 @@
 
 | Attribute | Value |
 | --- | --- |
-| **Status** | Normative — V1.65 Prepare amendment (bundled local Web UI serving + chapter-content Daemon API route family); **V1.66 Phase 2b amendment** (§12: Tauri sidecar mode launch/readiness/lifecycle contract); **V1.86 amendment** (§13: Daemon API trust-boundary security — Origin allowlist, deny-fs-without-workspace, component-wise path guard); **V1.90 amendment** (§14: Daemon API remote bind gate; normative surface renaming from Local API to Daemon API with `/v1/daemon/` path prefix); **V1.92 amendment** (§15–16: transport security (TLS) + remote client connection model); **V1.118 amendment** (§17: no-Profile boot + lazy `state.db` open) |
+| **Status** | Normative — V1.65 Prepare amendment (bundled local Web UI serving + chapter-content Daemon API route family); **V1.66 Phase 2b amendment** (§12: Tauri sidecar mode launch/readiness/lifecycle contract); **V1.86 amendment** (§13: Daemon API trust-boundary security — Origin allowlist, deny-fs-without-workspace, component-wise path guard); **V1.90 amendment** (§14: Daemon API remote bind gate; normative surface renaming from Local API to Daemon API with `/v1/daemon/` path prefix); **V1.92 amendment** (§15–16: transport security (TLS) + remote client connection model); **V1.118 amendment** (§17: no-Profile boot + lazy `state.db` open); **V1.153 amendment** (§4.6: headless `nexus-runtime` profile — second user-facing executable artifact for the integrator channel) |
 | **Document class** | Master |
 | **Normative scope** | Architecture boundaries, process model, subsystem responsibilities, pre-release constraints |
 | **Related** | [cli-spec.md](./cli-spec.md), [local-runtime-boundary.md](./local-runtime-boundary.md), [agent-host.md](./agent-host.md) |
@@ -35,7 +35,7 @@ Platform sync and registration **must not** live in daemon-runtime. See [local-c
 
 **Rules**:
 
-1. Only **`nexus42`** is a user-facing executable artifact.
+1. Only **`nexus42`** is a user-facing executable artifact — with the sole exception of the headless **`nexus-runtime`** integrator profile (§4.6).
 2. **Daemon** is started via CLI (`nexus42 daemon start`, foreground or background); background mode may use a hidden internal entry (implementation detail in knowledge SSOT).
 3. **Daemon API** remains loopback HTTP and/or Unix socket; clients must not assume a separate daemon product binary.
 
@@ -165,6 +165,38 @@ surface flushes structured node-edits to chapter files, the write coordination
 (no-raw-file-editing principle; structured/node-granular operations) will be
 designed in the V1.68 canvas context; until then orchestration remains the
 sole body writer and the host-tool path is unchanged.
+
+### 4.6 Headless runtime profile (V1.153)
+
+`nexus-runtime` is the **second user-facing executable artifact**: a
+Connect-only headless daemon for the integrator channel (DF-73). It is a bin
+target in `apps/nexus42` (`src/bin/nexus-runtime.rs`), **not** a separate
+crate, and it shares the creator-facing `nexus42` app's home layout,
+`config.toml`, workspace `SQLite` (`DbPool`, WAL), presets, and `modules/`
+under the default `~/.nexus42` home.
+
+1. **Boot profile.** The headless boot MUST NOT call
+   `nexus_daemon_runtime::boot::run_daemon`. It boots PATH enrichment, the
+   home layout, config load, workspace `SQLite` open, ONE per-process
+   `NexusAdapter`, and the Connect host with the **N-C1 invoke surface**
+   (P1); liveness is a **stdout readiness line** — there is no HTTP health
+   endpoint. The daemon HTTP data router, embedded `apps/web` SPA,
+   Setup/Canvas/Control Room routes, ACP/agent-host subsystem, and
+   schedule/worker supervision never start in this process.
+2. **Compile-time SPA exclusion.** The `web-embed` feature (default ON on
+   `nexus-daemon-runtime`, forwarded by `apps/nexus42`) gates the
+   `static_assets` mod, the SPA fallback route, and the `rust-embed` dep.
+   The distributed artifact is built with
+   `cargo build --release --bin nexus-runtime --no-default-features
+   --features connect-host` (`web-embed` OFF, `connect-host` ON); the
+   default `nexus42` build keeps `web-embed` ON and is unchanged.
+3. **Coexistence.** The Connect listener is its own loopback port (default
+   `/ip4/127.0.0.1/tcp/0`), never the daemon HTTP port. Shared-home write
+   access is governed by `SQLite` WAL, not the per-Work `runtime_lock`
+   (daemon-internal schedule↔CLI only).
+4. **CLI surface (locked).** `--version`; `--listen <MULTIADDR>`
+   (repeatable); `--allow-peer <PEER_ID>` (repeatable); home override via
+   `--home <PATH>` or the existing `NEXUS42_HOME` env.
 
 ---
 

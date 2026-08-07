@@ -4,6 +4,9 @@
 //! the same process, exercising the `flock` semantics through separate
 //! `FileLockGuard` scopes.
 
+// flock is unix-only; the module itself is `#[cfg(unix)]` (V1.153 P2 T2).
+#![cfg(unix)]
+
 use std::path::PathBuf;
 
 use nexus_local_db::file_lock;

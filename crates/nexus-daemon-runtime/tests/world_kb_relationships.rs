@@ -120,11 +120,11 @@ fn add_request(
     }
 }
 
-// V1.144 P2: add/update now route through `orchestrate_relate` via
-// `NexusAdapter`, which bridges sync spoke ports to async SQLite via
-// `tokio::task::block_in_place`. That requires a multi-threaded runtime (the
-// production daemon uses one; tests opt in via `flavor = "multi_thread"` —
-// same rationale as the V1.143 patch_entity tests). Pre-orchestrator
+// V1.144 P2: add/update route through `orchestrate_relate` via
+// `NexusAdapter`. The adapter port methods are natively `async fn`
+// (spoke-operations 0.9.1 surface, V1.153 P0 T2); the multi-threaded flavor
+// is retained from the pre-0.9.1 `block_in_place` bridge era (same
+// rationale as the V1.143 patch_entity tests). Pre-orchestrator
 // fast-fail tests (self-loop / bad-label / confidence / cross-world / bad
 // anchor) short-circuit on handler guards and stay on the default runtime.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

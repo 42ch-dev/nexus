@@ -803,6 +803,7 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
     // --- Section 7: Signal handlers and panic hook ---
     let lifecycle_for_signals = Arc::clone(&lifecycle);
     let state_for_signals = state.clone();
+    #[cfg(unix)]
     tokio::spawn(async move {
         let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
             .expect("Failed to register SIGTERM handler");
@@ -824,6 +825,19 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
                 });
                 state_for_signals.request_shutdown();
             }
+        }
+    });
+
+    #[cfg(not(unix))]
+    // V1.153 P2 T2: tokio::signal::unix is unix-only; Windows gets the
+    // cross-platform Ctrl+C path (graceful shutdown, same dispatch).
+    tokio::spawn(async move {
+        if tokio::signal::ctrl_c().await.is_ok() {
+            tracing::info!("SIGINT received (Ctrl+C)");
+            lifecycle_for_signals.dispatch(Event::ShutdownRequested {
+                source: "signal".into(),
+            });
+            state_for_signals.request_shutdown();
         }
     });
 

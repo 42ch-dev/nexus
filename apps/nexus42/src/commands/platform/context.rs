@@ -675,6 +675,7 @@ pub async fn run_assemble_moment(
     } else {
         nexus_spoke_adapter::adapter::NexusAdapter::new(pool.clone())
             .list_hop_edges_for_world(wid)
+            .await
             .ok()
             .filter(|edges| !edges.is_empty())
     };

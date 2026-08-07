@@ -10,10 +10,13 @@
 //!
 //! See `.mstar/archived/knowledge/local-db-refactor-legacy.md` for design baseline.
 
-#[cfg(unix)]
+// V1.153 P2 T2: cas is pure SQL (OCC helpers — no unix APIs); the former
+// `#[cfg(unix)]` gate was wrong and broke `kb_relationships` (which imports
+// `crate::cas`) on the Windows x64 build.
 pub mod cas;
 pub mod compute_runs;
 pub mod compute_session;
+#[cfg(unix)]
 pub mod file_lock;
 pub mod findings;
 pub mod force_gates_audit;
@@ -49,6 +52,8 @@ mod version;
 // (R-V146P4-QC1-S1 / R-V146P4-QC3-S1). Compiled only under `cfg(test)`.
 #[cfg(test)]
 mod test_tracing;
+
+use std::future::Future;
 
 // Re-export version constants
 pub use version::{DB_SCHEMA_VERSION, SCHEMA_VERSION};
@@ -441,6 +446,84 @@ pub async fn validate(pool: &sqlx::SqlitePool, _role: RuntimeRole) -> Result<(),
     Ok(())
 }
 
+/// Backoff between the initial `run_migrations` attempt and the single retry.
+///
+/// Short enough that a losing boot path recovers quickly; long enough that the
+/// winning process's migration transaction (a handful of small DDL statements)
+/// has committed and its `_sqlx_migrations` rows are visible when the retry
+/// re-reads the applied-versions list.
+const MIGRATION_RETRY_BACKOFF: std::time::Duration = std::time::Duration::from_millis(300);
+
+/// Run migrations with a single retry after [`MIGRATION_RETRY_BACKOFF`] when
+/// the first attempt fails with a transient co-boot error; surface the error
+/// unchanged if it still fails.
+///
+/// The migration runner is a parameter so the retry/backoff control flow is
+/// deterministically testable with a simulated transient failure (production
+/// passes [`run_migrations`]).
+async fn run_migrations_with_retry<'p, F, Fut>(
+    pool: &'p sqlx::SqlitePool,
+    run_once: F,
+) -> Result<(), LocalDbError>
+where
+    F: Fn(&'p sqlx::SqlitePool) -> Fut,
+    Fut: Future<Output = Result<(), LocalDbError>>,
+{
+    match run_once(pool).await {
+        Ok(()) => Ok(()),
+        Err(e) if is_transient_migration_error(&e) => {
+            tracing::warn!(
+                error = %e,
+                backoff_ms = MIGRATION_RETRY_BACKOFF.as_millis(),
+                "transient migration failure during DB init (co-boot race); retrying once"
+            );
+            tokio::time::sleep(MIGRATION_RETRY_BACKOFF).await;
+            run_once(pool).await
+        }
+        Err(e) => Err(e),
+    }
+}
+
+/// Returns `true` when a migration failure is transient — i.e. caused by the
+/// shared-DB co-boot race (P2 QC3 F-001) rather than by the migration SQL
+/// itself. Only these errors are safe to retry: when two processes apply the
+/// same pending migration on a fresh database, the loser fails in one of two
+/// ways:
+///
+/// - `SQLITE_BUSY` (extended result codes 5 / 261 / 517 / 773) once the 5s
+///   default `busy_timeout` expires while the other process holds the write
+///   lock — surfaces from the migration body or the transaction commit
+///   ([`MigrateError::ExecuteMigration`] / [`MigrateError::Execute`]);
+/// - a UNIQUE constraint violation when both processes' bookkeeping inserts
+///   collide on `_sqlx_migrations.version` ([`MigrateError::Execute`]).
+///
+/// Everything else (a SQL error inside a migration, version/checksum drift) is
+/// permanent and must be surfaced immediately.
+fn is_transient_migration_error(err: &LocalDbError) -> bool {
+    let LocalDbError::Migrate(migrate_err) = err else {
+        return false;
+    };
+    let (sqlx::migrate::MigrateError::Execute(sqlx_err)
+    | sqlx::migrate::MigrateError::ExecuteMigration(sqlx_err, _)) = migrate_err
+    else {
+        return false;
+    };
+    // `DatabaseError::code()` is the SQLite extended result code formatted as
+    // a string (SqliteError formats its `sqlite3_extended_errcode` value).
+    let sqlx::Error::Database(db_err) = sqlx_err else {
+        return false;
+    };
+    if db_err
+        .code()
+        .is_some_and(|code| matches!(code.as_ref(), "5" | "261" | "517" | "773"))
+    {
+        return true;
+    }
+    // Both processes applied the same migration; the loser's bookkeeping insert
+    // violates the `_sqlx_migrations.version` UNIQUE constraint.
+    db_err.is_unique_violation() && db_err.message().contains("_sqlx_migrations")
+}
+
 /// Convenience function: open pool, run migrations, and seed versions.
 ///
 /// This is the recommended entry point for CLI and daemon initialization.
@@ -451,7 +534,17 @@ pub async fn validate(pool: &sqlx::SqlitePool, _role: RuntimeRole) -> Result<(),
 /// Returns `LocalDbError` if any step (pool creation, migration, seeding) fails.
 pub async fn init_pool(db_path: &std::path::Path) -> Result<sqlx::SqlitePool, LocalDbError> {
     let pool = open_pool(db_path).await?;
-    run_migrations(&pool).await?;
+    // P2 QC3 F-001: shared-DB co-boot migration race. Both the daemon and the
+    // runtime boot paths call `run_migrations` on the same database; on a
+    // fresh DB two processes can apply the same pending migration concurrently
+    // and the loser fails (SQLITE_BUSY at the write point, or a UNIQUE
+    // violation on `_sqlx_migrations`). The single retry below waits for the
+    // winner's migration transaction to commit, then re-runs migrations —
+    // idempotent, so already-applied migrations are skipped and boot succeeds.
+    // This covers only the narrow first-boot window; steady-state write
+    // contention is handled by the pool's default busy_timeout. Deliberately
+    // no distributed lock — out of scope for this fix.
+    run_migrations_with_retry(&pool, run_migrations).await?;
     seed_versions(&pool).await?;
     Ok(pool)
 }
@@ -528,5 +621,198 @@ mod tests {
             msg.contains("PRAGMA foreign_key_check returned 1 violation"),
             "expected FK-check failure, got: {msg}"
         );
+    }
+
+    // --- P2 QC3 F-001: shared-DB co-boot migration race (retry/backoff) ---
+    //
+    // The race itself (two processes applying the same pending migration on a
+    // fresh database) is timing-dependent and cannot be reproduced
+    // deterministically in a unit test: with the 5s default busy_timeout the
+    // loser usually just waits and succeeds, and the failing window only opens
+    // when a migration outlives the timeout or both bookkeeping inserts
+    // collide. Instead, these tests drive the retry control flow directly by
+    // injecting a simulated transient failure into `run_migrations_with_retry`
+    // and pin the error-classification logic with fake `DatabaseError`s.
+
+    /// Minimal `DatabaseError` stand-in so transient-error classification can
+    /// be exercised without a real `SQLite` error. `kind()` mirrors
+    /// `SqliteError::kind()`: UNIQUE/PRIMARY-KEY codes map to
+    /// `UniqueViolation`, everything else (incl. `SQLITE_BUSY`) to `Other`.
+    struct FakeDbError {
+        code: Option<&'static str>,
+        message: &'static str,
+    }
+
+    impl std::fmt::Display for FakeDbError {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(
+                f,
+                "FakeDbError(code={:?}, message={})",
+                self.code, self.message
+            )
+        }
+    }
+
+    impl std::fmt::Debug for FakeDbError {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            std::fmt::Display::fmt(self, f)
+        }
+    }
+
+    impl std::error::Error for FakeDbError {}
+
+    impl sqlx::error::DatabaseError for FakeDbError {
+        fn message(&self) -> &str {
+            self.message
+        }
+
+        fn code(&self) -> Option<std::borrow::Cow<'_, str>> {
+            self.code.map(std::borrow::Cow::Borrowed)
+        }
+
+        fn as_error(&self) -> &(dyn std::error::Error + Send + Sync + 'static) {
+            self
+        }
+
+        fn as_error_mut(&mut self) -> &mut (dyn std::error::Error + Send + Sync + 'static) {
+            self
+        }
+
+        fn into_error(self: Box<Self>) -> Box<dyn std::error::Error + Send + Sync + 'static> {
+            self
+        }
+
+        fn kind(&self) -> sqlx::error::ErrorKind {
+            match self.code {
+                Some("19" | "2067") => sqlx::error::ErrorKind::UniqueViolation,
+                _ => sqlx::error::ErrorKind::Other,
+            }
+        }
+    }
+
+    fn fake_db_error(code: &'static str, message: &'static str) -> LocalDbError {
+        LocalDbError::Migrate(sqlx::migrate::MigrateError::Execute(sqlx::Error::Database(
+            Box::new(FakeDbError {
+                code: Some(code),
+                message,
+            }),
+        )))
+    }
+
+    #[test]
+    fn transient_migration_error_classification() {
+        // SQLITE_BUSY family (primary + extended result codes) → transient.
+        for code in ["5", "261", "517", "773"] {
+            let err = fake_db_error(code, "database is locked");
+            assert!(
+                is_transient_migration_error(&err),
+                "busy code {code} should be classified as transient"
+            );
+        }
+
+        // UNIQUE violation on `_sqlx_migrations` (both processes applied the
+        // same migration; the loser's bookkeeping insert collides) → transient.
+        let err = fake_db_error("2067", "UNIQUE constraint failed: _sqlx_migrations.version");
+        assert!(is_transient_migration_error(&err));
+
+        // A UNIQUE violation on a real table is NOT the co-boot signature.
+        let err = fake_db_error("2067", "UNIQUE constraint failed: works.work_id");
+        assert!(!is_transient_migration_error(&err));
+
+        // A generic SQL error inside a migration is permanent.
+        let err = fake_db_error("1", "no such column: oops");
+        assert!(!is_transient_migration_error(&err));
+
+        // Non-database sqlx errors and non-Migrate LocalDbErrors are not
+        // transient.
+        assert!(!is_transient_migration_error(&LocalDbError::Sqlx(
+            sqlx::Error::RowNotFound
+        )));
+        assert!(!is_transient_migration_error(
+            &LocalDbError::ValidationError("nope".into())
+        ));
+    }
+
+    #[test]
+    fn transient_migration_error_detected_from_migration_body_wrapper() {
+        // The migration-body path wraps the error in
+        // `ExecuteMigration(error, version)` rather than `Execute`; both must
+        // be recognized.
+        let err = LocalDbError::Migrate(sqlx::migrate::MigrateError::ExecuteMigration(
+            sqlx::Error::Database(Box::new(FakeDbError {
+                code: Some("5"),
+                message: "database is locked",
+            })),
+            1,
+        ));
+        assert!(is_transient_migration_error(&err));
+    }
+
+    #[tokio::test]
+    async fn init_migrations_retries_once_on_transient_error() {
+        // Simulated co-boot loss: the first attempt fails with a busy-like
+        // error; the retry runs the real migrations, which now succeed (as
+        // they would once the winning process has committed).
+        let dir = tempfile::tempdir().unwrap();
+        let pool = open_pool(&dir.path().join("test.db")).await.unwrap();
+        let calls = std::sync::atomic::AtomicUsize::new(0);
+        let calls_ref = &calls;
+
+        let started = std::time::Instant::now();
+        let result = run_migrations_with_retry(&pool, |p| async move {
+            if calls_ref.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 0 {
+                Err(fake_db_error("5", "database is locked"))
+            } else {
+                run_migrations(p).await
+            }
+        })
+        .await;
+
+        result.expect("retry should succeed");
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 2);
+        assert!(
+            started.elapsed() >= MIGRATION_RETRY_BACKOFF,
+            "retry must back off before the second attempt"
+        );
+    }
+
+    #[tokio::test]
+    async fn init_migrations_surfaces_error_after_single_retry() {
+        // A persistently transient error is retried exactly once, then
+        // surfaced.
+        let dir = tempfile::tempdir().unwrap();
+        let pool = open_pool(&dir.path().join("test.db")).await.unwrap();
+        let calls = std::sync::atomic::AtomicUsize::new(0);
+        let calls_ref = &calls;
+
+        let err = run_migrations_with_retry(&pool, |_p| async move {
+            calls_ref.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Err(fake_db_error("5", "database is locked"))
+        })
+        .await
+        .unwrap_err();
+
+        assert!(is_transient_migration_error(&err));
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test]
+    async fn init_migrations_does_not_retry_non_transient_error() {
+        // A permanent migration failure (e.g. a SQL error inside a migration)
+        // must be surfaced immediately — no retry, no backoff.
+        let dir = tempfile::tempdir().unwrap();
+        let pool = open_pool(&dir.path().join("test.db")).await.unwrap();
+        let calls = std::sync::atomic::AtomicUsize::new(0);
+        let calls_ref = &calls;
+
+        let err = run_migrations_with_retry(&pool, |_p| async move {
+            calls_ref.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Err(fake_db_error("1", "no such column: oops"))
+        })
+        .await
+        .unwrap_err();
+
+        assert!(matches!(err, LocalDbError::Migrate(_)));
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
     }
 }

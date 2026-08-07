@@ -18,6 +18,16 @@ path = "src/lib.rs"
 name = "nexus42"
 path = "src/main.rs"
 
+# V1.153 P2 (DF-73): standalone headless Connect runtime — same crate's
+# config/home-layout/boot code, `run_daemon` never called. Requires
+# `connect-host` (the distributed artifact is built with
+# `--no-default-features --features connect-host`, web-embed OFF → no
+# embedded SPA bytes; see the P2 spec § Subsystem profile).
+[[bin]]
+name = "nexus-runtime"
+path = "src/bin/nexus-runtime.rs"
+required-features = ["connect-host"]
+
 # V1.148 P4 (DF-72 N-C0): real-process dogfood dialer — a spoke-connect
 # reference peer that dials a running `nexus42 connect start` host from
 # OUTSIDE the host process. Feature-gated so the default graph stays
@@ -25,6 +35,15 @@ path = "src/main.rs"
 [[example]]
 name = "connect_dialer"
 path = "examples/connect_dialer.rs"
+required-features = ["connect-host"]
+
+# V1.153 P2 T1 (DF-73): spawned-process smoke probe for the headless
+# `nexus-runtime` bin — same reference-peer shape, machine-readable output
+# for `tests/nexus_runtime_smoke.rs`. Same feature gate: the default test
+# graph stays libp2p-free.
+[[example]]
+name = "runtime_smoke_probe"
+path = "examples/runtime_smoke_probe.rs"
 required-features = ["connect-host"]
 
 [dependencies]
@@ -37,7 +56,11 @@ nexus-cloud-sync = { path = "../../crates/nexus-cloud-sync", features = ["legacy
 nexus-home-layout = { path = "../../crates/nexus-home-layout" }
 nexus-local-db = { path = "../../crates/nexus-local-db" }
 nexus-acp-host = { path = "../../crates/nexus-acp-host" }
-nexus-daemon-runtime = { path = "../../crates/nexus-daemon-runtime" }
+# V1.153 P2 (DF-73): `default-features = false` + explicit `web-embed`
+# forwarding (see [features]) — the slim `nexus-runtime` artifact
+# (`--no-default-features --features connect-host`) compiles the embedded
+# SPA out while the default `nexus42` build keeps it ON.
+nexus-daemon-runtime = { path = "../../crates/nexus-daemon-runtime", default-features = false }
 nexus-narrative = { path = "../../crates/nexus-narrative" }
 nexus-knowledge = { path = "../../crates/nexus-knowledge" }
 # V1.145 P2 — MCA WorldKB read routes through the spoke-adapter boundary
@@ -48,6 +71,12 @@ nexus-spoke-adapter = { path = "../../crates/nexus-spoke-adapter" }
 # default build (and `daemon start`) must stay libp2p-free, so this dep is
 # `optional` and only `connect start` links it. `mdns` is never enabled.
 spoke-connect = { workspace = true, optional = true }
+# V1.153 P1 N-C1: the connect wire `ErrorEnvelope`
+# (`spoke_schemas::connect::connect_invoke_response::ErrorEnvelope`) the
+# invoke handler returns. Same 0.9.1 pin; optional + feature-gated with
+# `connect-host` (spoke-schemas is a lightweight schema crate, but the
+# connect path is the only consumer).
+spoke-schemas = { workspace = true, optional = true }
 # libp2p identity/PeerId/Multiaddr types for the `connect start` CLI (key
 # generation + protobuf key persistence + allowlist/listen parsing). Same
 # 0.56 pin as spoke-connect's transport; optional + feature-gated with
@@ -73,13 +102,11 @@ thiserror = { workspace = true }
 url = { workspace = true }
 sha2 = { workspace = true }
 hex = "0.4"
-# ACP SDK consumed via nexus-acp-host (worker-only linkage — see spec §11.3)
-# agent-client-protocol = "=0.10.4"  — REMOVED: consumed through nexus-acp-host
-# tokio-util, async-trait, async-broadcast — consumed through nexus-acp-host
-# nix — also used directly by daemon.rs for process management
-[target.'cfg(unix)'.dependencies]
-nix = { version = "0.28", features = ["signal", "process"] }
-
+# V1.153 P2 T2: these six were previously declared after `nix` inside
+# `[target.'cfg(unix)'.dependencies]` (missing section header), which broke
+# every Windows build with E0433 "cannot find crate" in lib code using them
+# on all platforms (works/cron.rs cron validation, auth/user_auth.rs base64,
+# creator/memory.rs tempfile, rules_runtime.rs dialoguer). Moved here.
 dialoguer = "0.11"
 tempfile = "3"
 regex = "1"
@@ -87,6 +114,12 @@ base64 = "0.22"
 # V1.50 T-A P0 T2: cron validation + IANA TZ parsing (novel-writing staggering)
 cron = { workspace = true }
 chrono-tz = { workspace = true }
+# ACP SDK consumed via nexus-acp-host (worker-only linkage — see spec §11.3)
+# agent-client-protocol = "=0.10.4"  — REMOVED: consumed through nexus-acp-host
+# tokio-util, async-trait, async-broadcast — consumed through nexus-acp-host
+# nix — also used directly by daemon.rs for process management
+[target.'cfg(unix)'.dependencies]
+nix = { version = "0.28", features = ["signal", "process"] }
 
 [dev-dependencies]
 assert_cmd = "2.0"
@@ -96,6 +129,12 @@ wiremock = "0.6"
 # Without it, the summary_config_from_env_* tests race on NEXUS_CONTEXT_MAX_FILE_SIZE
 # under cargo's default parallel runner and intermittently fail on CI.
 serial_test = "3"
+# V1.153 P2 T1: spawned-binary smoke test (`tests/nexus_runtime_smoke.rs`).
+# The Connect dialing lives in the `runtime_smoke_probe` EXAMPLE (regular
+# connect-host deps — the default test graph stays libp2p-free); the test
+# itself only spawns processes and asserts output.
+tokio = { workspace = true }
+tempfile = "3"
 
 # V1.148 P3 N-C0 (DF-72): opt-in Connect Host surface. Feature OFF by default
 # — the default daemon graph stays libp2p-free (`cargo tree -p nexus42 -i
@@ -103,4 +142,11 @@ serial_test = "3"
 # but only `nexus42 connect start` opens a Connect listener; `daemon start`
 # never does. `spoke-connect/mdns` is deliberately NOT enabled.
 [features]
-connect-host = ["dep:spoke-connect", "dep:libp2p"]
+connect-host = ["dep:spoke-connect", "dep:spoke-schemas", "dep:libp2p"]
+# V1.153 P2 (DF-73): forwarded gate for the embedded Web UI — ON by default
+# (the `nexus42` bin is unchanged); OFF for the `nexus-runtime` artifact via
+# `--no-default-features --features connect-host` (compile-time exclusion of
+# `apps/web/dist` bytes + the SPA fallback route, per the P2 spec
+# § Subsystem profile).
+web-embed = ["nexus-daemon-runtime/web-embed"]
+default = ["web-embed"]

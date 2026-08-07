@@ -348,6 +348,7 @@ async fn cross_chapter_idempotent_rerun_produces_empty_candidate_diff() {
 // ── AC5: advisory lock contention → CliError::Locked (exit 75) ─────────────
 
 #[tokio::test]
+#[cfg(unix)] // advisory file lock is unix-only (V1.153 P2 T2)
 async fn cross_chapter_lock_contention_returns_e_lock() {
     let (pool, dir) = fresh_pool().await;
     seed_chapter(&pool, dir.path(), 1, "Aelin walked into the tavern.").await;
@@ -376,6 +377,7 @@ async fn cross_chapter_lock_contention_returns_e_lock() {
 // ── AC5: dry-run never acquires the lock (read-only) ───────────────────────
 
 #[tokio::test]
+#[cfg(unix)] // advisory file lock is unix-only (V1.153 P2 T2)
 async fn cross_chapter_dry_run_succeeds_under_lock_contention() {
     let (pool, dir) = fresh_pool().await;
     seed_chapter(&pool, dir.path(), 1, "Aelin walked into the tavern.").await;
@@ -394,6 +396,7 @@ async fn cross_chapter_dry_run_succeeds_under_lock_contention() {
 // ── AC5: I/O failure → CliError::LockIo (exit 78) ──────────────────────────
 
 #[tokio::test]
+#[cfg(unix)] // advisory file lock is unix-only (V1.153 P2 T2)
 async fn cross_chapter_lock_io_failure_returns_e_lock_io() {
     let (pool, dir) = fresh_pool().await;
     seed_chapter(&pool, dir.path(), 1, "Aelin walked into the tavern.").await;

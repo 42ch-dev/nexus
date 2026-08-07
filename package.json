@@ -20,9 +20,10 @@
   },
   "pnpm": {
     "overrides": {
-      "fast-uri": ">= 3.1.4",
+      "fast-uri": ">=4.1.2",
       "linkify-it": ">=5.0.2 <6",
-      "brace-expansion": ">=5.0.8",
+      "brace-expansion": ">=5.0.9",
+      "js-yaml": ">=4.3.1 <5",
       "esbuild": "^0.28.1"
     }
   },
@@ -57,7 +58,7 @@
     "typescript": "7.0.2"
   },
   "dependencies": {
-    "@42ch/spoke-operations": "0.8.2",
-    "@42ch/spoke-schemas": "0.8.2"
+    "@42ch/spoke-operations": "0.9.1",
+    "@42ch/spoke-schemas": "0.9.1"
   }
 }

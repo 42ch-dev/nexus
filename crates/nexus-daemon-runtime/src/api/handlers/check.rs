@@ -68,8 +68,8 @@
 //!
 //! # Panics
 //!
-//! `NexusAdapter::new` panics if no tokio multi-threaded runtime is running
-//! on the current thread (the daemon uses one — see adapter module docs).
+//! None: `NexusAdapter` port methods are natively `async fn` (spoke-operations
+//! 0.9.1 surface, V1.153 P0 T2) and run on the handler's runtime.
 
 use crate::api::errors::NexusApiError;
 use crate::api::handlers::works::read_active_creator_id;
@@ -157,7 +157,7 @@ pub async fn run_check(
     // via RuleQueryPort inside orchestrate_check; a real quality-loop
     // evaluator is a tracked residual.
     let adapter = NexusAdapter::new(pool.clone());
-    let result = orchestrate_check(&adapter, check_req, |_input| SpokeResult::Ok(vec![]));
+    let result = orchestrate_check(&adapter, check_req, |_input| SpokeResult::Ok(vec![])).await;
 
     match result {
         // Success branch: findings (possibly empty). Round-trip through JSON

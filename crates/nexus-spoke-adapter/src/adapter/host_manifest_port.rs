@@ -40,10 +40,12 @@
 
 use super::NexusAdapter;
 use crate::{HostCapabilityManifest, HostManifestPort, SpokeRejectCode, SpokeResult};
+use async_trait::async_trait;
 use nexus_home_layout::device_id::get_or_create_device_id;
 
+#[async_trait]
 impl HostManifestPort for NexusAdapter<'_> {
-    fn get_host_capability_manifest(&self) -> SpokeResult<HostCapabilityManifest> {
+    async fn get_host_capability_manifest(&self) -> SpokeResult<HostCapabilityManifest> {
         // Single builder SSOT (product draft §4.1): the Connect Host's
         // `local_manifest` (P3 T3) calls the same function with the same
         // device-id host_id — one capability list, one extensions.nexus block.
@@ -64,7 +66,9 @@ impl HostManifestPort for NexusAdapter<'_> {
     /// Local-first nexus has no peers; peer discovery is a roadmap item
     /// triggered when nexus supports multi-host collaboration. See the
     /// module-level docs.
-    fn list_peer_host_capability_manifests(&self) -> SpokeResult<Vec<HostCapabilityManifest>> {
+    async fn list_peer_host_capability_manifests(
+        &self,
+    ) -> SpokeResult<Vec<HostCapabilityManifest>> {
         SpokeResult::Ok(Vec::new())
     }
 }
@@ -102,7 +106,7 @@ mod tests {
     use crate::HostManifestPort;
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn self_manifest_reports_injected_host_id_and_n_c0_contract() {
+    async fn self_manifest_reports_injected_host_id_and_n_c1_contract() {
         // HostManifestPort is storage-free; the pool is only needed to
         // satisfy the adapter struct shape. Use an in-memory pool with
         // migrations so the adapter construction path mirrors the other
@@ -114,7 +118,7 @@ mod tests {
         nexus_local_db::run_migrations(&pool).await.unwrap();
 
         let adapter = NexusAdapter::new(pool).with_host_id("test-host-uuid-0000");
-        let manifest = match adapter.get_host_capability_manifest() {
+        let manifest = match adapter.get_host_capability_manifest().await {
             SpokeResult::Ok(m) => m,
             SpokeResult::Reject(r) => panic!("self manifest is Ok: {r:?}"),
         };
@@ -137,7 +141,7 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec!["nexus".to_string()]
         );
-        // Same builder as the Connect Host → the extensions.nexus N-C0 block
+        // Same builder as the Connect Host → the extensions.nexus N-C1 block
         // is present on the port surface too (product draft §4.3 item 9).
         let nexus_ext = manifest
             .extensions
@@ -147,7 +151,17 @@ mod tests {
             nexus_ext
                 .get("connect_host_slice")
                 .and_then(serde_json::Value::as_str),
-            Some("n-c0")
+            Some("n-c1")
+        );
+        let expected_ops_value = serde_json::json!(crate::manifest::LOCAL_SERVED_OPS);
+        let expected_ops = expected_ops_value
+            .as_array()
+            .expect("locked op list serializes as an array");
+        assert_eq!(
+            nexus_ext
+                .get("served_ops")
+                .and_then(serde_json::Value::as_array),
+            Some(expected_ops)
         );
         assert_eq!(
             nexus_ext
@@ -168,7 +182,7 @@ mod tests {
         nexus_local_db::run_migrations(&pool).await.unwrap();
 
         let adapter = NexusAdapter::new(pool);
-        let peers = match adapter.list_peer_host_capability_manifests() {
+        let peers = match adapter.list_peer_host_capability_manifests().await {
             SpokeResult::Ok(p) => p,
             SpokeResult::Reject(r) => panic!("peer list is Ok: {r:?}"),
         };
