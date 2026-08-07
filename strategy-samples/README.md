@@ -482,7 +482,13 @@ cat "$NEXUS_HOME/config.toml"      # active_creator_id = "ctr_..." + active_work
 ls "$NEXUS_HOME/creators/"         # the creator_id directory (e.g. ctr_...)
 
 CREATOR_ID="$(sed -n 's/^active_creator_id = "\([^"]*\)"/\1/p' "$NEXUS_HOME/config.toml")"
-SLUG="$(sed -n "s/^ *$CREATOR_ID = \"\([^\"]*\)\"/\1/p" "$NEXUS_HOME/config.toml")"
+# slug lives in the [active_workspace_slug_by_creator] section only — other
+# per-creator tables (paths, urls) must never leak into it
+SLUG="$(awk -v cid="$CREATOR_ID" '
+  /^\[/ { in_section = ($0 == "[active_workspace_slug_by_creator]"); next }
+  in_section { key = $1; gsub(/^"|"$/, "", key);
+               if (key == cid) { value = $3; gsub(/^"|"$/, "", value); print value; exit } }
+' "$NEXUS_HOME/config.toml")"
 DB="$NEXUS_HOME/creators/$CREATOR_ID/workspaces/$SLUG/state.db"
 
 sqlite3 "$DB" \
