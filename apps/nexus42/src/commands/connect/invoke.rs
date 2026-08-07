@@ -148,9 +148,10 @@ use super::allowlist::PeerScope;
 use libp2p::PeerId;
 use nexus_spoke_adapter::extensions::get_world_id;
 use nexus_spoke_adapter::{
-    is_world_conflict_reject, orchestrate_assemble, orchestrate_check, orchestrate_compute,
-    orchestrate_promote, orchestrate_relate, orchestrate_upsert, AssembleRequest, AssembleResponse,
-    CheckRequest, CheckResponse, ComputeRequest, ComputeResponse, KnowledgeEntryPort, NexusAdapter,
+    is_module_identity_missing_reject, is_safe_module_id, is_world_conflict_reject,
+    orchestrate_assemble, orchestrate_check, orchestrate_compute, orchestrate_promote,
+    orchestrate_relate, orchestrate_upsert, AssembleRequest, AssembleResponse, CheckRequest,
+    CheckResponse, ComputeRequest, ComputeResponse, KnowledgeEntryPort, NexusAdapter,
     PromoteRequest, PromoteResponse, RelateRequest, RelateResponse, Relation,
     RelationExtensionsKey, RelationPort, SpokeReject, SpokeRejectCode, SpokeResult, UpsertRequest,
     UpsertResponse,
@@ -838,24 +839,50 @@ async fn verify_stored_worlds(
 /// 1. **Read-only lock** (spec §5 / §6.5): `settle: true` ⇒ defined
 ///    `settle_not_enabled` — the N-C2 compute settlement helper is NOT
 ///    enabled.
-/// 2. **Stored-world gate**: the target entry's stored
-///    `extensions.nexus.world_id` must be in the peer's `world_scope`
-///    (`op_unsupported` family — same fail-closed rule as every other op).
+/// 2. **Stored-entry gate**: the target entry must EXIST (a missing entry
+///    is a client-input error ⇒ defined `invalid_input`, P2 QC fix wave
+///    FW-3) and its stored `extensions.nexus.world_id` must be in the
+///    peer's `world_scope` (`op_unsupported` family — same fail-closed rule
+///    as every other op).
 /// 3. **Module identity** (locked precedence, spec §2.2): session state
 ///    `module_id`, then entry `body.computable.module_id`; neither ⇒
-///    defined `module_not_found` (missing module name).
+///    defined `module_not_found` (missing module name). Classified via the
+///    adapter's `module_identity_missing` details marker (P2 QC fix wave
+///    FW-5 — no message sniffing).
 /// 4. **Module-scope gate** (architect lock, spec §6.1): the resolved
 ///    module must be in the peer's `module_scope`; missing/empty scope
 ///    denies ALL compute ⇒ defined `module_not_scoped`.
 /// 5. **Host-local store gate** (spec §2.1): the module must be installed
 ///    under the configured `~/.nexus42/modules/` (never peer-supplied
-///    bytes) ⇒ defined `module_not_found`.
-/// 6. **Module-id pin** (L2 review C-1): `ComputablePort::compute` merges
+///    bytes) ⇒ defined `module_not_found`. The id-safety check shares
+///    [`is_safe_module_id`] with the adapter's loader (P2 QC fix wave
+///    FW-4 — gate and execution guard cannot drift).
+/// 6. **Module-id pin, key-presence form** (L2 review C-1, hardened P2 QC
+///    fix wave FW-1): `ComputablePort::compute` merges
 ///    `request.computable` over the session state BEFORE re-resolving the
 ///    module id — without this gate a request-carried
 ///    `computable.module_id` naming a DIFFERENT installed module would
-///    execute an unscoped module. The request may only repeat the gated
-///    id; a differing override ⇒ defined `module_not_scoped`.
+///    execute an unscoped module. ANY `module_id` key — a differing string
+///    OR a non-string value (`42` / `{}` / `null`, which would otherwise
+///    shadow the gated id while the old as_str-only pin skipped them) —
+///    must be a JSON string EQUAL to the gated id, else defined
+///    `module_not_scoped`.
+///
+///    **Dead-code note (entry-body tier):** the pin is defense for the
+///    entry-body resolution tier, which is currently DEAD CODE — the
+///    conversion seam (`world_kb_to_spoke` / `spoke_to_world_kb`) preserves
+///    `body.computable` only as a bool marker (`{"_computable": true}` ⇄
+///    `Some(true)`), so `entry.body.computable.module_id` can never carry a
+///    value today. If body.computable maps ever survive the seam, the
+///    non-string shadow would silently re-arm the module_scope bypass the
+///    pin exists to close — the key-presence pin keeps the C-1 contract
+///    enforced in that future.
+///
+///    **Accepted TOCTOU (S2 S-003):** between this gate and `compute()`, a
+///    concurrent same-world upsert could change `entry.body.computable` —
+///    irrelevant while the entry tier is dead (above); `world_id` itself is
+///    immutable through the write paths, so the world dimension has no
+///    equivalent divergence.
 ///
 /// Returns `Ok(())` once every gate passes (the orchestrator route
 /// re-parses the payload for execution); the first denial returns the
@@ -876,12 +903,19 @@ async fn verify_compute_gates(
         return Err(settle_not_enabled());
     }
 
-    // 2. Stored-world gate: the compute world is the stored entry's
+    // 2. Stored-entry gate: the compute world is the stored entry's
     //    `extensions.nexus.world_id` (spec §2.2 — no wire carrier). A
-    //    missing stored world cannot be verified ⇒ denied like a payload
+    //    MISSING entry is a client-input error — the request names its
+    //    `entry_id` on the wire — mapped to the defined `invalid_input`
+    //    envelope (P2 QC fix wave FW-3; the generic reject table would have
+    //    read `KnowledgeEntryNotFound` as `internal_error`). A stored entry
+    //    without a world id cannot be verified ⇒ denied like a payload
     //    without a world carrier.
     let entry = match adapter.get_knowledge_entry(&request.entry_id).await {
         SpokeResult::Ok(entry) => entry,
+        SpokeResult::Reject(reject) if reject.code == SpokeRejectCode::KnowledgeEntryNotFound => {
+            return Err(compute_entry_not_found(&request.entry_id));
+        }
         SpokeResult::Reject(reject) => return Err(map_reject(&reject)),
     };
     let Some(world) = get_world_id(&entry) else {
@@ -897,19 +931,18 @@ async fn verify_compute_gates(
     }
 
     // 3. Module identity — the locked resolution precedence (session state
-    //    → entry body.computable). A resolution reject with the locked
-    //    "module identity required" message is the missing-module-name
-    //    denial (defined `module_not_found`); any other reject (missing
-    //    session / entry / storage fault) maps through the locked table.
+    //    → entry body.computable). The adapter marks the missing-module-name
+    //    reject with the `module_identity_missing` details marker
+    //    (P2 QC fix wave FW-5 — classified by marker, never by message
+    //    text); the marker reject ⇒ defined `module_not_found`. Any other
+    //    reject (missing session / storage fault) maps through the locked
+    //    table.
     let module_id = match adapter
         .resolve_compute_module_id(&request.session_id, &request.entry_id)
         .await
     {
         SpokeResult::Ok(id) => id,
-        SpokeResult::Reject(reject)
-            if reject.code == SpokeRejectCode::InvalidInput
-                && reject.message.contains("module identity required") =>
-        {
+        SpokeResult::Reject(reject) if is_module_identity_missing_reject(&reject) => {
             return Err(module_not_found(None, &reject.message));
         }
         SpokeResult::Reject(reject) => return Err(map_reject(&reject)),
@@ -919,7 +952,7 @@ async fn verify_compute_gates(
     //    `module_scope` denies ALL compute; a resolved module outside the
     //    list is denied before any WASM execution.
     if !scope.allows_module(peer, &module_id) {
-        return Err(module_not_scoped(&module_id));
+        return Err(module_not_scoped(Some(&module_id)));
     }
 
     // 5. Host-local store gate (spec §2.1): the module must be installed
@@ -941,16 +974,24 @@ async fn verify_compute_gates(
         ));
     }
 
-    // 6. Module-id pin (L2 review C-1): the adapter's `ComputablePort`
-    //    merges request.computable over the session state before
-    //    re-resolving the module id, so a request-carried
-    //    `computable.module_id` that differs from the gated id would
-    //    execute an unscoped module. The dynamic computable map may carry
-    //    any invocation params EXCEPT a conflicting module identity; a
-    //    differing override is denied before any WASM execution.
-    if let Some(override_id) = request.computable.get("module_id").and_then(Value::as_str) {
-        if override_id != module_id {
-            return Err(module_not_scoped(override_id));
+    // 6. Module-id pin, KEY-PRESENCE form (L2 review C-1, hardened P2 QC
+    //    fix wave FW-1): the adapter's `ComputablePort` merges
+    //    request.computable over the session state before re-resolving the
+    //    module id, so a request-carried `computable.module_id` that
+    //    differs from the gated id would execute an unscoped module. The
+    //    dynamic computable map may carry any invocation params EXCEPT a
+    //    conflicting module identity. ANY `module_id` key must be a JSON
+    //    string EQUAL to the gated id — a differing string OR a non-string
+    //    value (42 / {} / null) is denied `module_not_scoped` before any
+    //    WASM execution. (The non-string cases matter because the
+    //    execution-time merge shadows the session-staged id with whatever
+    //    value the key carries — the old as_str-only pin let them bypass
+    //    while still shadowing.)
+    if request.computable.contains_key("module_id") {
+        match request.computable.get("module_id").and_then(Value::as_str) {
+            Some(override_id) if override_id == module_id => {}
+            Some(override_id) => return Err(module_not_scoped(Some(override_id))),
+            None => return Err(module_not_scoped(None)),
         }
     }
 
@@ -959,19 +1000,18 @@ async fn verify_compute_gates(
 
 /// Fail-closed host-local module store check (spec §2.1): the peer can name
 /// only a module already installed under `~/.nexus42/modules/` as
-/// `<id>/<id>.wasm` + `<id>/manifest.json`. The id must be a single path
-/// component (no separators, no `.` / `..`) so the join can never escape
-/// the store directory.
+/// `<id>/<id>.wasm` + `<id>/manifest.json`. The id-safety check is the
+/// shared [`is_safe_module_id`] (P2 QC fix wave FW-4 — same single source
+/// the adapter's `load_user_module` uses, so the gate and the execution
+/// guard can never drift): the id must be a single path component (no
+/// separators, no `.` / `..`) so the join can never escape the store
+/// directory.
 fn module_installed(modules_dir: &Path, module_id: &str) -> bool {
-    let safe = !module_id.is_empty()
-        && !module_id.contains('/')
-        && !module_id.contains('\\')
-        && module_id != "."
-        && module_id != "..";
-    safe && modules_dir
-        .join(module_id)
-        .join(format!("{module_id}.wasm"))
-        .is_file()
+    is_safe_module_id(module_id)
+        && modules_dir
+            .join(module_id)
+            .join(format!("{module_id}.wasm"))
+            .is_file()
         && modules_dir.join(module_id).join("manifest.json").is_file()
 }
 
@@ -993,19 +1033,34 @@ fn settle_not_enabled() -> ErrorEnvelope {
 /// Compute denial — the resolved module is not in the peer's `module_scope`
 /// (architect lock, spec §6.1): a missing/empty scope denies ALL compute;
 /// a resolved module outside the list is denied before any WASM execution.
-/// Retry-safe for the operator (the allowlist is edited out-of-band).
-fn module_not_scoped(module_id: &str) -> ErrorEnvelope {
+/// Also the module-id pin denial (L2 review C-1, hardened P2 QC fix wave
+/// FW-1): a request-carried `computable.module_id` that is not a JSON
+/// string EQUAL to the gated id (a differing string, or a non-string value)
+/// is denied with the same code.
+///
+/// `module_id` names the offending id when one exists; `None` for a
+/// non-string override (there is no id to report — the envelope still
+/// denies with the fixed `module_not_scoped` code). Retry-safe for the
+/// operator (the allowlist is edited out-of-band) / for peers that fix
+/// their override.
+fn module_not_scoped(module_id: Option<&str>) -> ErrorEnvelope {
     let mut details = Map::new();
-    details.insert(
-        "module_id".to_string(),
-        Value::String(module_id.to_string()),
-    );
-    ErrorEnvelope {
-        code: "module_not_scoped".to_string(),
-        message: format!(
-            "module {module_id:?} is not in this peer's module_scope; \
+    if let Some(id) = module_id {
+        details.insert("module_id".to_string(), Value::String(id.to_string()));
+    }
+    let message = match module_id {
+        Some(id) => format!(
+            "module {id:?} is not in this peer's module_scope; \
              compute is denied (fail-closed — missing/empty module_scope denies all modules)"
         ),
+        None => format!(
+            "compute is denied: request computable.module_id must be a JSON string \
+             equal to the peer's scoped module id (non-string override)"
+        ),
+    };
+    ErrorEnvelope {
+        code: "module_not_scoped".to_string(),
+        message,
         details,
         extensions: HashMap::new(),
     }
@@ -1024,6 +1079,23 @@ fn module_not_found(module_id: Option<&str>, reason: &str) -> ErrorEnvelope {
     ErrorEnvelope {
         code: "module_not_found".to_string(),
         message: format!("compute module unavailable: {reason}"),
+        details,
+        extensions: HashMap::new(),
+    }
+}
+
+/// Compute denial — the target entry does not exist (P2 QC fix wave FW-3).
+/// A compute request names its `entry_id` on the wire, so a missing entry
+/// is a client-input error mapped through the `invalid_input` family — the
+/// same code the check/assemble paths use for client-input rejects — never
+/// the `internal_error` the generic reject table would have produced.
+/// Retry-safe for peers that fix their `entry_id`.
+fn compute_entry_not_found(entry_id: &str) -> ErrorEnvelope {
+    let mut details = Map::new();
+    details.insert("entry_id".to_string(), Value::String(entry_id.to_string()));
+    ErrorEnvelope {
+        code: "invalid_input".to_string(),
+        message: format!("compute target entry not found: {entry_id}"),
         details,
         extensions: HashMap::new(),
     }
@@ -1265,6 +1337,15 @@ fn bridge_fault(reason: &str) -> ErrorEnvelope {
 /// not read as server faults. `reject.message` flows into
 /// `ErrorEnvelope.message`; `reject.details` (when present) flows into
 /// `ErrorEnvelope.details`.
+///
+/// **Compute exceptions (P2 QC fix wave FW-3 / FW-5 — handled at the gate,
+/// not through this table):** (a) a missing compute target entry is mapped
+/// to the defined `invalid_input` envelope by [`compute_entry_not_found`]
+/// BEFORE the reject table runs (the table's safe default would have read
+/// `KnowledgeEntryNotFound` as `internal_error`); (b) the missing-module-name
+/// denial is classified via the adapter's `module_identity_missing` details
+/// marker ([`is_module_identity_missing_reject`]) — the marked reject maps
+/// to `module_not_found`, never through this table.
 fn map_reject(reject: &SpokeReject) -> ErrorEnvelope {
     // V1.154 P2 (R3 closure, spec §3.2 LOCKED): a zero-row CAS caused by a
     // world mismatch must surface as `world_conflict` — never collapsed into

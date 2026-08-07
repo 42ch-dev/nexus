@@ -3067,7 +3067,42 @@ async fn n_c2_compute_request_module_override_denied() {
         other => panic!("module override must be denied, got {other:?}"),
     }
 
-    // Zero side effects: the staged session state is untouched.
+    // P2 QC fix wave FW-1 regression: NON-STRING `module_id` overrides
+    // (42 / {} / null) must ALSO be denied `module_not_scoped` — the old
+    // as_str-only pin let them bypass while the execution-time merge still
+    // shadowed the session-staged id with the non-string value. Key
+    // presence is the pin trigger; the value must be a JSON string EQUAL to
+    // the gated id, else deny (zero side effects — asserted below).
+    for (label, override_value) in [
+        ("number", serde_json::json!(42)),
+        ("object", serde_json::json!({})),
+        ("null", serde_json::Value::Null),
+    ] {
+        match session
+            .invoke(
+                "compute",
+                serde_json::json!({
+                    "extensions": { "nexus": { "peer_id": peer_claim } },
+                    "session_id": "ses_pin",
+                    "entry_id": "kb_pin_a",
+                    "computable": { "module_id": override_value },
+                    "settle": false,
+                }),
+            )
+            .await
+        {
+            Err(InvokeError::Wire(envelope)) => assert_eq!(
+                envelope.code, "module_not_scoped",
+                "non-string module_id override ({label}) must be denied module_not_scoped"
+            ),
+            other => {
+                panic!("non-string module_id override ({label}) must be denied, got {other:?}")
+            }
+        }
+    }
+
+    // Zero side effects: the staged session state is untouched (all four
+    // denials above — string-differ + 42 / {} / null — must not advance it).
     let stored: Option<String> =
         sqlx::query_scalar("SELECT state_json FROM compute_sessions WHERE session_id = ?")
             .bind("ses_pin")
@@ -3077,7 +3112,7 @@ async fn n_c2_compute_request_module_override_denied() {
     assert_eq!(
         stored.as_deref(),
         Some(r#"{"attacker_id":"kb_pin_a","defender_id":"kb_pin_d","module_id":"basic-combat"}"#),
-        "the denied override must not advance session state"
+        "the denied overrides must not advance session state"
     );
 
     // A same-id override (repeat of the gated id) is legal and served —
@@ -3096,6 +3131,101 @@ async fn n_c2_compute_request_module_override_denied() {
         .await
         .expect("a same-id module_id override is served");
     assert_eq!(served.payload["session_id"], "ses_pin");
+
+    host.shutdown().await.expect("host shuts down");
+    peer_node.shutdown().await.expect("peer shuts down");
+}
+
+/// N-C2 (V1.154 P2, P2 QC fix wave FW-3): a compute request targeting a
+/// missing `entry_id` must be denied with the defined `invalid_input`
+/// envelope (client-input family — the same code the check/assemble paths
+/// use for client-input rejects) — never the `internal_error` the generic
+/// reject table would have produced. The gate's stored-entry read fires
+/// before any module/WASM work (no module scope or store is even needed);
+/// the session stays usable. Runs on every CI leg (no wasm target needed —
+/// the denial never reaches module resolution).
+#[tokio::test(flavor = "multi_thread")]
+async fn n_c2_compute_missing_entry_denied_invalid_input() {
+    let _guard = network_test_guard().await;
+    let temp = tempfile::tempdir().expect("tempdir");
+    let home = temp.path();
+    let peer_key = fixed_keypair(84);
+    let peer_peer = peer_key.public().to_peer_id();
+
+    // Must match the ComputeInput world_ref pattern `^wld_[a-zA-Z0-9]+$`.
+    const WORLD_A: &str = "wld_miss1";
+
+    let db_path = temp.path().join("workspace").join("state.db");
+    let pool = crate::db::Schema::init(&db_path)
+        .await
+        .expect("workspace DB initializes");
+    seed_world(&pool, "ctr_test", WORLD_A).await;
+
+    // No module_scope / module store needed: the missing-entry denial fires
+    // at the stored-entry gate, before module resolution.
+    let allow_path = nexus_home_layout::connect_allowlist_path(home);
+    std::fs::create_dir_all(allow_path.parent().expect("parent dir")).expect("mkdir");
+    std::fs::write(
+        &allow_path,
+        serde_json::json!({ "peer_ids": [{
+            "peer_id": peer_peer.to_string(),
+            "world_scope": [WORLD_A],
+            "op_scope": super::invoke::SERVED_OPS,
+        }] })
+        .to_string(),
+    )
+    .expect("write allowlist");
+
+    let (config, _, _) = super::build_host_config(
+        home,
+        &[],
+        &["/ip4/127.0.0.1/tcp/0".to_string()],
+        Some(&db_path),
+    )
+    .await
+    .expect("N-C2 host config builds");
+    let host_peer = config.identity.public().to_peer_id();
+    let host = start(config).await;
+    let peer_node = start(peer_config(peer_key, vec![host_peer])).await;
+    let session = peer_node
+        .connect(host.listen_addrs()[0].clone())
+        .await
+        .expect("scoped peer handshake");
+    let peer_claim = serde_json::json!(peer_peer.to_string());
+
+    match session
+        .invoke(
+            "compute",
+            serde_json::json!({
+                "extensions": { "nexus": { "peer_id": peer_claim } },
+                "session_id": "ses_ghost",
+                "entry_id": "kb_never_stored",
+                "computable": {},
+                "settle": false,
+            }),
+        )
+        .await
+    {
+        Err(InvokeError::Wire(envelope)) => assert_eq!(
+            envelope.code, "invalid_input",
+            "compute on a missing entry must map to the invalid_input family, not internal_error"
+        ),
+        other => panic!("missing-entry compute must be denied, got {other:?}"),
+    }
+
+    // The session stays usable (a served op still round-trips).
+    let served = session
+        .invoke(
+            "check",
+            serde_json::json!({
+                "extensions": { "nexus": { "peer_id": peer_claim } },
+                "scope": { "scope_id": WORLD_A },
+                "rule_refs": [],
+            }),
+        )
+        .await
+        .expect("session stays usable after the missing-entry denial");
+    assert_eq!(served.payload["findings"], serde_json::json!([]));
 
     host.shutdown().await.expect("host shuts down");
     peer_node.shutdown().await.expect("peer shuts down");
