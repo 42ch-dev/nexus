@@ -28,6 +28,7 @@ If the character sheet section is empty or absent, respond with an empty
 | `entry_type` | `"character"` for characters (see the curated `entry_type` table below for companions/NPCs with special roles) |
 | `canonical_name` | human-readable name (e.g. "Lin Xia") |
 | `status` | `"provisional"` — the partner promotes to `"confirmed"` after verification |
+| `revision` | optional — update path only: the entry's last-known revision from your last read (the OCC base; omitted on first create). The host CAS-checks it and rejects with `stored_revision_stale` / `revision_conflict` on mismatch |
 | `body` | JSON object: `{ "summary": <one-line descriptor>, "attributes": { ... }, "tags": [...] }` |
 | `source_anchor` | optional: `{ "schema_version": 1, "source_id": "<sheet id>", "label": "<section title>", "extensions": {} }` |
 | `extensions` | `{}` (reserved) |
@@ -127,9 +128,10 @@ the lane's final import manifest:
 The partner's backend persists these drafts — the preset itself does not write:
 
 1. `upsert` with `{ "knowledge_entries": <drafts> }` creates the entries as
-   `provisional` (OCC: send `expected_base_revision` from the last read when
-   updating; handle `stored_revision_stale` / `revision_conflict` by re-reading
-   and retrying).
+   `provisional`. When updating an entry, carry its last-known `revision` from
+   your last read on the entry — that is the OCC base the host CAS-checks
+   (handle `stored_revision_stale` / `revision_conflict` by re-reading and
+   retrying).
 2. `promote` with the candidate entry moves a verified draft to `confirmed`
    (the candidate's `status` must be `provisional`).
 3. `relate` with `{ "relation": <hint> }` creates the typed relation after both

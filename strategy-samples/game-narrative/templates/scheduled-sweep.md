@@ -7,11 +7,8 @@ max_tokens: 2000
 You are the scheduled lane of a game-narrative import strategy. This run was
 triggered by a timer (interval/cron-style) rather than a game event. Your job
 is to inventory the source documents available for import and produce a sweep
-brief for the extraction steps that follow.
-
-The extraction steps (import-worldview.md, import-character-sheet.md) read the
-source documents from `preset.input.documents`; this brief is the lane's trace
-artifact and the sweep decision.
+brief; the exit judge (scheduled-sweep-exit.md) then decides whether the sweep
+warrants extraction, which runs in a separate state.
 
 ## Inputs
 
@@ -29,9 +26,12 @@ and the sweep's `next_watermark` is not written back anywhere by the engine.
 
 The partner's backend owns the watermark:
 
-1. After each sweep run, capture `next_watermark` from the sweep brief (the
-   `sweep_inventory` node output — it is not part of the graph's
-   `output_binding`, which carries the final import manifest).
+1. After each sweep run, capture `next_watermark` from the sweep brief — the
+   scan response produced in the `scheduled_sweep` state (this state's
+   `creator.inject_prompt` queues the scan prompt into the creator session;
+   the brief is the agent's reply, not a graph node output — extraction runs
+   later in the separate `sweep_extract` state and the brief is not part of
+   its `output_binding`, which carries the final import manifest).
 2. Persist it on the partner side. Optionally mirror it to the schedule's
    core_context for audit/continuity via
    `PATCH /v1/daemon/orchestration/schedules/{id}/core-context`

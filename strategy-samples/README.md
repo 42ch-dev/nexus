@@ -144,7 +144,11 @@ game:
   by a judge (`templates/lane-route.md`).
 - **Scheduled lane** — an interval sweep (`min_interval: "PT1H"`) that
   inventories new/changed worldview + character documents since the last
-  watermark and runs the same extraction templates.
+  watermark, judges whether anything new exists, and only then runs the same
+  extraction templates. The scan + judge live in the `scheduled_sweep` state;
+  extraction is a separate `sweep_extract` state (the embedded `research`
+  preset's scanning → extracting pattern), so an interval park never re-runs
+  extraction.
 
 The templates you will edit:
 
@@ -191,7 +195,7 @@ checks). Machine-readable output:
 
 ```bash
 nexus42 system preset validate --offline --json my-strategy
-# {"errors":[],"id":"game-narrative","state_count":4,"valid":true,"version":1}
+# {"errors":[],"id":"game-narrative","state_count":5,"valid":true,"version":1}
 ```
 
 Without `--offline`, the command delegates to the creator daemon
