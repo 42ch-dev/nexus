@@ -2415,12 +2415,14 @@ mod tests {
 
         // "Other writer" (Connect process ∥ daemon) moves the row across
         // worlds between the gate-check and the CAS.
-        sqlx::query("UPDATE kb_key_blocks SET world_id = ? WHERE key_block_id = ?")
-            .bind("wld_2")
-            .bind(&id)
-            .execute(&pool)
-            .await
-            .unwrap();
+        sqlx::query!(
+            "UPDATE kb_key_blocks SET world_id = ? WHERE key_block_id = ?",
+            "wld_2",
+            id,
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
 
         let mut tx = pool.begin().await.unwrap();
         let err =
