@@ -130,7 +130,7 @@ async fn main() {
         session.remote_peer_id()
     );
 
-    // N-C1 surface: the manifest advertises exactly the served write ops.
+    // N-C2 read-half surface: the manifest advertises exactly the served ops.
     let manifest_json =
         serde_json::to_string(session.remote_manifest()).expect("manifest serializes");
     println!("MANIFEST_JSON={manifest_json}");

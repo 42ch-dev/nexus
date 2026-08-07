@@ -148,8 +148,9 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec!["nexus".to_string()]
         );
-        // Same builder as the Connect Host → the extensions.nexus N-C1 block
-        // is present on the port surface too (product draft §4.3 item 9).
+        // Same builder as the Connect Host → the extensions.nexus N-C2
+        // read-half block is present on the port surface too (product draft
+        // §4.3 item 9).
         let nexus_ext = manifest
             .extensions
             .get(&"nexus".parse().expect("locked key parses"))
@@ -158,7 +159,7 @@ mod tests {
             nexus_ext
                 .get("connect_host_slice")
                 .and_then(serde_json::Value::as_str),
-            Some("n-c1")
+            Some("n-c2")
         );
         let expected_ops_value = serde_json::json!(crate::manifest::LOCAL_SERVED_OPS);
         let expected_ops = expected_ops_value

@@ -4,7 +4,7 @@
 //! N-C0 product contract (draft §2.3): the allowlist is the trust root.
 //! N-C1 → N-C2 world scoping (P1 spec § World scoping — schema locked):
 //! each `peer_ids` entry is either a bare `"12D3…"` peer id (N-C0 shape —
-//! no write access) or an object `{ "peer_id": "12D3…", "world_scope":
+//! no op access) or an object `{ "peer_id": "12D3…", "world_scope":
 //! ["<world-uuid>", …], "op_scope": ["upsert","promote","relate","check",
 //! "assemble"] }`.
 //! Both scopes are optional and **fail-closed**: an absent/empty scope
@@ -33,8 +33,8 @@ struct AllowlistFile {
     peer_ids: Vec<PeerEntry>,
 }
 
-/// One `peer_ids` entry: a bare peer id (N-C0 shape — no write access) or a
-/// scoped object (N-C1).
+/// One `peer_ids` entry: a bare peer id (N-C0 shape — no op access) or a
+/// scoped object (N-C1 → N-C2).
 #[derive(Debug, Deserialize)]
 #[serde(untagged)]
 enum PeerEntry {
@@ -67,13 +67,15 @@ pub struct PeerScope {
 }
 
 /// Per-peer scoping. Empty sets ⇒ fail-closed: the peer is handshake-
-/// allowlisted but has no world-write access.
+/// allowlisted but has no world access.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct PeerAccess {
-    /// World ids (world UUID strings, not paths) this peer may write to.
+    /// World ids (world UUID strings, not paths) this peer may target —
+    /// writes AND the world-scoped read ops (`check` / `assemble`) share
+    /// the same gate.
     pub world_scope: BTreeSet<String>,
-    /// Write ops this peer may invoke (N-C1 served ops: `upsert` / `promote`
-    /// / `relate`).
+    /// Ops this peer may invoke (N-C2 read-half served ops: `upsert` /
+    /// `promote` / `relate` / `check` / `assemble`).
     pub op_scope: BTreeSet<String>,
 }
 

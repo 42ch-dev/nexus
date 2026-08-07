@@ -87,7 +87,7 @@ NEXUS42_HOME=/path/to/home nexus-runtime         # same override via env
 ```
 
 - **Liveness is a stdout line** — there is no HTTP health endpoint. When the
-  runtime is ready it prints `nexus-runtime: Connect Host (N-C1) ready`,
+  runtime is ready it prints `nexus-runtime: Connect Host (N-C2 read half) ready`,
   followed by its `peer_id`, `host_id`, listen addresses, the allowlisted-peer
   count, and the served ops. Press Ctrl-C to stop.
 - **`--home` / `NEXUS42_HOME` semantics:** the value is the *home directory

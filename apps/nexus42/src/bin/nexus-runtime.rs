@@ -1,12 +1,13 @@
 //! `nexus-runtime` — headless Connect runtime (V1.153 P2, DF-73).
 //!
-//! Standalone binary serving ONLY the spoke-connect surface (the N-C1
-//! write-op invoke surface, P1) for the partner/integrator channel. Boots:
+//! Standalone binary serving ONLY the spoke-connect surface (the N-C2
+//! read-half invoke surface: `upsert` / `promote` / `relate` / `check` /
+//! `assemble`, world-scoped) for the partner/integrator channel. Boots:
 //! PATH enrichment, the shared `~/.nexus42` home layout, config load,
 //! active-workspace `SQLite` open (`DbPool`, WAL), ONE per-process
-//! `NexusAdapter`, and the Connect host with the N-C1 invoke handler — then
-//! blocks on SIGINT. Liveness = **stdout readiness only** (no HTTP health
-//! endpoint).
+//! `NexusAdapter`, and the Connect host with the N-C2 read-half invoke
+//! handler — then blocks on SIGINT. Liveness = **stdout readiness only**
+//! (no HTTP health endpoint).
 //!
 //! `nexus_daemon_runtime::boot::run_daemon` is **never called**: the daemon
 //! HTTP data router, embedded `apps/web` SPA, Setup/Canvas/Control Room
@@ -39,9 +40,9 @@ const DEFAULT_LISTEN: &str = "/ip4/127.0.0.1/tcp/0";
 #[command(
     name = "nexus-runtime",
     version,
-    about = "Nexus headless Connect runtime (N-C1 invoke surface)",
-    long_about = "Headless Connect runtime: serves the N-C1 write-op + \
-                  N-C2 read-half invoke surface (upsert/promote/relate/\
+    about = "Nexus headless Connect runtime (N-C2 read-half invoke surface)",
+    long_about = "Headless Connect runtime: serves the N-C2 read-half \
+                  invoke surface (upsert/promote/relate/\
                   check/assemble, world-scoped) over spoke-connect against \
                   the shared ~/.nexus42 home. No daemon HTTP router, no \
                   embedded Web UI, no Setup/Canvas/Control Room."
@@ -122,9 +123,9 @@ fn resolve_home(cli_home: Option<&Path>) -> PathBuf {
     )
 }
 
-/// The headless boot: shared home layout + the exact `connect start` N-C1
-/// assembly ([`connect::build_host_config`]) + node start + stdout
-/// readiness. `run_daemon` is never called.
+/// The headless boot: shared home layout + the exact `connect start` N-C2
+/// read-half assembly ([`connect::build_host_config`]) + node start +
+/// stdout readiness. `run_daemon` is never called.
 ///
 /// # Errors
 /// [`CliError`] on layout/identity/allowlist/workspace-DB/node failures.
@@ -133,10 +134,10 @@ async fn boot(home: &Path, allow_peer: &[String], listen: &[String]) -> Result<(
     let nexus_home = nexus_home_layout::nexus_root_from_home(home);
     nexus_home_layout::ensure_system_layout(&nexus_home).map_err(nexus42::errors::CliError::Io)?;
 
-    // The full N-C1 host boot shared with `nexus42 connect start`:
+    // The full N-C2 host boot shared with `nexus42 connect start`:
     // persisted identity + device-id host_id + allowlist (fail-closed) +
     // honest manifest + active-workspace WAL pool + per-process
-    // NexusAdapter + the N-C1 invoke dispatch handler (P1).
+    // NexusAdapter + the N-C2 read-half invoke dispatch handler.
     let (config, host_id, allowlist_len) =
         connect::build_host_config(home, allow_peer, listen, None).await?;
 
@@ -148,7 +149,7 @@ async fn boot(home: &Path, allow_peer: &[String], listen: &[String]) -> Result<(
 
     // Liveness = stdout readiness (the ONLY liveness surface — no HTTP
     // health endpoint; the daemon router never boots in this process).
-    println!("nexus-runtime: Connect Host (N-C1) ready");
+    println!("nexus-runtime: Connect Host (N-C2 read half) ready");
     println!("  peer_id: {}", node.local_peer_id());
     println!("  host_id: {host_id}");
     for addr in node.listen_addrs() {
@@ -158,7 +159,8 @@ async fn boot(home: &Path, allow_peer: &[String], listen: &[String]) -> Result<(
         "  allowlisted peers: {allowlist_len} (fail-closed; add via allowlist.json or --allow-peer)"
     );
     println!(
-        "  invokes: upsert/promote/relate/check/assemble served (world-scoped); all other ops refused (op_unsupported)"
+        "  invokes: upsert/promote/relate/check/assemble served (world-scoped); \
+         compute/project/unknown refused (op_unsupported)"
     );
     println!("  press Ctrl-C to stop");
 

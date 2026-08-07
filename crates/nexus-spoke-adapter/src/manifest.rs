@@ -14,7 +14,7 @@
 //! | `capabilities` | `["spoke-baseline", "l2-computable", "l5-fork"]` | unchanged | unchanged |
 //! | `namespaces` | `["nexus"]` | unchanged | unchanged |
 //! | `authority` | `None` | unchanged | unchanged |
-//! | `extensions.nexus` | `{ "connect_host_slice": "n-c0", "daemon_http_coexists": true }` | `{ "connect_host_slice": "n-c1", "served_ops": ["upsert", "promote", "relate"], "daemon_http_coexists": true }` | `served_ops` += `["check", "assemble"]` |
+//! | `extensions.nexus` | `{ "connect_host_slice": "n-c0", "daemon_http_coexists": true }` | `{ "connect_host_slice": "n-c1", "served_ops": ["upsert", "promote", "relate"], "daemon_http_coexists": true }` | `connect_host_slice` → `"n-c2"`; `served_ops` → `["upsert", "promote", "relate", "check", "assemble"]` |
 //!
 //! Honesty rules: `l5-fork` is included because `ForkTimelineQueryPort` is
 //! production (V1.146); `"reasoning-complete"` MUST NOT appear anywhere
@@ -104,7 +104,11 @@ pub fn build_local_host_manifest(host_id: &str) -> SpokeResult<HostCapabilityMan
             .parse()
             .expect("locked extension key is schema-valid"),
         json!({
-            "connect_host_slice": "n-c1",
+            // Slice marker (P1 QC fix wave FW-6): "n-c2" tracks the
+            // delivered N-C2 read-half surface — the served set is
+            // authoritative (`served_ops`); the marker is the ladder
+            // position, not a capability list.
+            "connect_host_slice": "n-c2",
             "served_ops": LOCAL_SERVED_OPS,
             "daemon_http_coexists": true,
         })
@@ -345,7 +349,7 @@ mod tests {
         // 8. schema_version == 1.
         assert_eq!(manifest.schema_version.get(), 1);
 
-        // 9. extensions["nexus"] carries the N-C1 marker block.
+        // 9. extensions["nexus"] carries the N-C2 read-half marker block.
         let nexus_key = "nexus".parse().expect("locked extension key parses");
         let nexus_ext = manifest
             .extensions
@@ -353,7 +357,7 @@ mod tests {
             .expect("extensions.nexus block present");
         assert_eq!(
             nexus_ext.get("connect_host_slice").and_then(Value::as_str),
-            Some("n-c1")
+            Some("n-c2")
         );
         assert_eq!(
             nexus_ext
@@ -427,7 +431,7 @@ mod tests {
         assert_eq!(hello_json["schema_version"], serde_json::json!(1));
         assert_eq!(
             hello_json["extensions"]["nexus"]["connect_host_slice"],
-            serde_json::json!("n-c1")
+            serde_json::json!("n-c2")
         );
         assert_eq!(
             hello_json["extensions"]["nexus"]["served_ops"],

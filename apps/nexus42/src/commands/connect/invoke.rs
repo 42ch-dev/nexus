@@ -81,12 +81,19 @@
 //! Architect-locked limits (spec §5.4 — [`BridgeLimits`]): **8** concurrent
 //! invokes per process, a **30,000 ms** per-invoke deadline, and **500**
 //! logical collection entries or **2 MiB** serialized request bytes
-//! (whichever is reached first). The deadline bounds the permit acquire
-//! AND the result wait; the permit stays held until the lane closure
-//! returns (the closure cannot be force-cancelled safely) — a late result
-//! is discarded. Denials extend the N-C1 envelope table with the locked
-//! bridge codes: `invoke_busy` (lane saturated), `invoke_deadline_exceeded`
-//! (per-invoke budget exhausted), `payload_too_large` (over-cap payload).
+//! (whichever is reached first), plus a **2 MiB** serialized response byte
+//! cap (P1 QC fix wave FW-2). The 8 permits bound the **blocking-pool
+//! orchestrator work only** — the wire path is serialized on the node's
+//! single event loop, where the handler parks until the lane returns, so
+//! "8 concurrent" never means parallel wire processing. The deadline
+//! bounds the permit acquire AND the result wait (one shared budget:
+//! `invoke_busy` fires only after the full deadline, not instantly); the
+//! permit stays held until the lane closure returns (the closure cannot be
+//! force-cancelled safely) — a late result is discarded. Denials extend
+//! the N-C1 envelope table with the locked bridge codes: `invoke_busy`
+//! (lane saturated), `invoke_deadline_exceeded` (per-invoke budget
+//! exhausted), `payload_too_large` (over-cap request),
+//! `response_too_large` (over-cap response).
 //!
 //! The adapter is a **per-process singleton** constructed once at host
 //! boot and held for the process lifetime (P1 spec § Process model);
@@ -125,22 +132,32 @@ pub const SERVED_OPS: [&str; 5] = ["upsert", "promote", "relate", "check", "asse
 /// Architect-locked bounded-bridge limits (spec §5.4).
 ///
 /// Defaults are the locked numbers — **8** concurrent invokes per process,
-/// a **30,000 ms** per-invoke deadline, and **500** logical collection
-/// entries or **2 MiB** serialized request bytes, whichever is reached
-/// first. Tests construct explicit values (1 permit / short deadline) to
-/// exercise saturation and deadline paths deterministically.
+/// a **30,000 ms** per-invoke deadline, **500** logical collection entries
+/// or **2 MiB** serialized request bytes, and a **2 MiB** serialized
+/// response byte cap (P1 QC fix wave FW-2), whichever cap is reached
+/// first. The 8 permits bound blocking-pool orchestrator work only; the
+/// wire path stays serialized on the single event loop. Tests construct
+/// explicit values (1 permit / short deadline / tiny caps) to exercise
+/// saturation, deadline, and cap paths deterministically.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BridgeLimits {
-    /// Max concurrent in-flight invokes per process (semaphore permits).
+    /// Max concurrent in-flight invokes per process (semaphore permits) —
+    /// bounds BLOCKING-pool orchestrator work, not wire processing (the
+    /// event loop parks per invoke).
     pub max_concurrent_invokes: usize,
-    /// Per-invoke deadline — bounds the permit acquire AND the result wait
-    /// (a busy-queue wait respects the same budget).
+    /// Per-invoke deadline — ONE shared budget for the permit acquire AND
+    /// the result wait (a saturated-lane wait consumes the same budget, so
+    /// `invoke_busy` fires only after the full deadline).
     pub invoke_deadline: std::time::Duration,
     /// Max logical collection entries per payload (the operation's batch
     /// arrays).
     pub max_collection_entries: usize,
     /// Max serialized request bytes per payload.
     pub max_payload_bytes: usize,
+    /// Max serialized response bytes per invoke — measured after the
+    /// orchestrator returns, before the invoke result is returned (P1 QC
+    /// fix wave FW-2; mirrors the request-side 2 MiB).
+    pub max_response_bytes: usize,
 }
 
 impl Default for BridgeLimits {
@@ -150,17 +167,19 @@ impl Default for BridgeLimits {
             invoke_deadline: std::time::Duration::from_secs(30),
             max_collection_entries: 500,
             max_payload_bytes: 2 * 1024 * 1024,
+            max_response_bytes: 2 * 1024 * 1024,
         }
     }
 }
 
-/// Build the N-C1 `InvokeHandlerV2` on the architect-locked bridge limits.
+/// Build the N-C2 read-half `InvokeHandlerV2` on the architect-locked
+/// bridge limits.
 ///
 /// The dispatch pipeline (spec §5.4 — [`BridgeLimits::default`]) is a
 /// fail-closed op gate + allowlist world/op scope gate in front of the
-/// three `NexusAdapter` orchestrators, resolving caller identity from the
-/// **session peer** (spoke-connect 0.9.2 session-peer hook, spec §3.2 /
-/// §5.1).
+/// five `NexusAdapter` orchestrator routes (`upsert` / `promote` / `relate`
+/// / `check` / `assemble`), resolving caller identity from the **session
+/// peer** (spoke-connect 0.9.2 session-peer hook, spec §3.2 / §5.1).
 ///
 /// The returned closure is `Send + Sync` (the node holds it in an
 /// `Arc<InvokeHandlerV2>`); `scope`, `adapter`, and the bounded lane are
@@ -176,14 +195,17 @@ pub fn build_handler(
 
 /// Like [`build_handler`] with injectable bridge limits.
 ///
-/// The test seam for the R2 bounded bridge: tests use 1 permit / short
-/// deadlines to exercise saturation and deadline paths deterministically;
-/// the default limits are the architect-locked numbers. Also returns the
-/// process-wide lane so tests (and future multi-route wiring) can observe
-/// the same semaphore the handler acquires — e.g. to hold permits and
-/// force a saturation.
+/// **Test seam only** (P1 QC fix wave FW-10): `pub(crate)` because every
+/// caller lives in this crate — production wiring goes through
+/// [`build_handler`], whose `BridgeLimits::default()` are the
+/// architect-locked numbers; this entrypoint exists so tests can inject
+/// 1-permit lanes, short deadlines, and tiny caps deterministically. Also
+/// returns the process-wide lane so tests can observe the same semaphore
+/// the handler acquires — e.g. to hold permits and force a saturation.
+/// Do not ship non-default caps through this function from production
+/// callers without an architect lock.
 #[must_use]
-pub fn build_handler_with_limits(
+pub(crate) fn build_handler_with_limits(
     scope: PeerScope,
     adapter: Arc<NexusAdapter<'static>>,
     limits: BridgeLimits,
@@ -375,7 +397,14 @@ fn dispatch(
         let _ = tx.send(result);
     });
     match rx.recv_timeout(deadline.saturating_duration_since(std::time::Instant::now())) {
-        Ok(result) => result,
+        // Response-cap gate (spec §5.4 — P1 QC fix wave FW-2): the
+        // orchestrator result is serialized and measured AFTER the lane
+        // returns and BEFORE the invoke result is handed back to the
+        // peer. An over-cap response maps to the locked
+        // `response_too_large` envelope instead of surfacing as a hard
+        // codec failure on the peer (the reference peer's inbound-response
+        // codec cap is 10 MiB — this cap fails gracefully well under it).
+        Ok(result) => enforce_response_cap(result, limits.max_response_bytes),
         Err(std::sync::mpsc::RecvTimeoutError::Timeout) => Err(deadline_exceeded()),
         Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => Err(bridge_fault(
             "invoke lane worker terminated before returning a result",
@@ -505,7 +534,23 @@ fn payload_world_ids(route: Route, payload: &Value) -> Option<Vec<String>> {
 /// the orchestrator (prevents assembled context amplification). The
 /// orchestrator's typed parse rejects malformed payloads after the cap
 /// gate.
+///
+/// The scope-object batch arrays (`scope.entry_ids` /
+/// `scope.entry_types` / `scope.timeline_event_ids`) count for BOTH
+/// `check` and `assemble` (P1 QC fix wave FW-1): the spoke Scope schema
+/// places no `maxItems` on them and the adapter consumes them as IN-list
+/// filters (`ScopeQueryPort::list_knowledge_entries` /
+/// `list_timeline_events`), so a payload could otherwise carry far more
+/// than 500 logical collection entries under the byte cap.
 fn payload_collection_entries(route: Route, payload: &Value) -> usize {
+    // Length of one scope-object batch array — raw JSON reads so the cap
+    // gate runs before any typed parse.
+    let scope_array_len = |field: &str| {
+        payload
+            .pointer(&format!("/scope/{field}"))
+            .and_then(Value::as_array)
+            .map_or(0, Vec::len)
+    };
     match route {
         Route::Upsert => payload
             .get("knowledge_entries")
@@ -520,12 +565,22 @@ fn payload_collection_entries(route: Route, payload: &Value) -> usize {
                     .and_then(Value::as_array)
                     .map_or(0, Vec::len)
             };
-            array_len("rule_refs") + array_len("rules") + array_len("checker_kinds")
+            array_len("rule_refs")
+                + array_len("rules")
+                + array_len("checker_kinds")
+                + scope_array_len("entry_ids")
+                + scope_array_len("entry_types")
+                + scope_array_len("timeline_event_ids")
         }
-        Route::Assemble => payload
-            .get("max_entries")
-            .and_then(Value::as_u64)
-            .map_or(0, |max| usize::try_from(max).unwrap_or(usize::MAX)),
+        Route::Assemble => {
+            payload
+                .get("max_entries")
+                .and_then(Value::as_u64)
+                .map_or(0, |max| usize::try_from(max).unwrap_or(usize::MAX))
+                + scope_array_len("entry_ids")
+                + scope_array_len("entry_types")
+                + scope_array_len("timeline_event_ids")
+        }
     }
 }
 
@@ -812,6 +867,41 @@ fn payload_too_large(reason: &str) -> ErrorEnvelope {
         details: Map::new(),
         extensions: HashMap::default(),
     }
+}
+
+/// Response-cap denial (spec §5.4 — P1 QC fix wave FW-2): the orchestrator
+/// produced a result above the locked response byte cap. Retry-safe for
+/// peers that can narrow their request (e.g. fewer `max_entries`).
+fn response_too_large(reason: &str) -> ErrorEnvelope {
+    ErrorEnvelope {
+        code: "response_too_large".to_string(),
+        message: format!("invoke response rejected: {reason}"),
+        details: Map::new(),
+        extensions: HashMap::default(),
+    }
+}
+
+/// Response-cap gate (spec §5.4 — P1 QC fix wave FW-2): serialize the
+/// orchestrator success value and measure it; over the locked cap, return
+/// the `response_too_large` envelope instead of the value. Applied at the
+/// bridge boundary — after the orchestrator returns, before the invoke
+/// returns the `Value` — so an amplified response fails as a graceful
+/// envelope, never as a hard peer codec failure. Rejects pass through
+/// untouched.
+fn enforce_response_cap(
+    result: Result<Value, ErrorEnvelope>,
+    max_response_bytes: usize,
+) -> Result<Value, ErrorEnvelope> {
+    let value = result?;
+    let bytes = serde_json::to_vec(&value)
+        .expect("a serde_json::Value always serializes")
+        .len();
+    if bytes > max_response_bytes {
+        return Err(response_too_large(&format!(
+            "orchestrator response serializes to {bytes} bytes; the cap is {max_response_bytes}"
+        )));
+    }
+    Ok(value)
 }
 
 /// Bridge fault: the lane could not run the invoke at all (closed
@@ -1192,6 +1282,87 @@ mod tests {
                 "max_entries=501 must trip the assemble entry cap"
             ),
             Ok(_) => panic!("an over-cap assemble payload must reject with payload_too_large"),
+        }
+    }
+
+    /// P1 QC fix wave (FW-1, spec §5.4): the check entry cap extends to the
+    /// scope-object batch arrays — `scope.entry_ids` / `scope.entry_types`
+    /// / `scope.timeline_event_ids` all count as logical collection
+    /// entries (the spoke Scope schema places no `maxItems` on them and
+    /// the adapter consumes them as IN-list filters). 501 entry_ids
+    /// (> 500) are rejected with `payload_too_large` before the bridge —
+    /// zero side effects, no orchestrator call.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn check_payload_entry_cap_counts_scope_batch_arrays() {
+        let peer = fixed_keypair(11).public().to_peer_id();
+        let scope = scoped_scope_for(peer, &["check"]);
+        let (_temp, adapter) = test_adapter().await;
+        let (handler, _lane) = build_handler_with_limits(scope, adapter, BridgeLimits::default());
+        let payload = serde_json::json!({
+            "scope": {
+                "scope_id": WORLD_A,
+                "entry_ids": (0..501).map(|i| format!("kb_scope_{i}")).collect::<Vec<_>>(),
+            },
+        });
+        match handler(&peer, "check", payload) {
+            Err(envelope) => assert_eq!(
+                envelope.code, "payload_too_large",
+                "501 scope.entry_ids must trip the check entry cap"
+            ),
+            Ok(_) => panic!("an over-cap check payload must reject with payload_too_large"),
+        }
+    }
+
+    /// P1 QC fix wave (FW-1, spec §5.4): the assemble entry cap counts the
+    /// scope-object batch arrays the same way — 501 `scope.timeline_event_ids`
+    /// (> 500) are rejected with `payload_too_large` before the bridge.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn assemble_payload_entry_cap_counts_scope_batch_arrays() {
+        let peer = fixed_keypair(12).public().to_peer_id();
+        let scope = scoped_scope_for(peer, &["assemble"]);
+        let (_temp, adapter) = test_adapter().await;
+        let (handler, _lane) = build_handler_with_limits(scope, adapter, BridgeLimits::default());
+        let payload = serde_json::json!({
+            "scope": {
+                "scope_id": WORLD_A,
+                "timeline_event_ids": (0..501).map(|i| format!("ev_scope_{i}")).collect::<Vec<_>>(),
+            },
+        });
+        match handler(&peer, "assemble", payload) {
+            Err(envelope) => assert_eq!(
+                envelope.code, "payload_too_large",
+                "501 scope.timeline_event_ids must trip the assemble entry cap"
+            ),
+            Ok(_) => panic!("an over-cap assemble payload must reject with payload_too_large"),
+        }
+    }
+
+    /// P1 QC fix wave (FW-2, spec §5.4): the orchestrator result is
+    /// serialized and measured at the bridge boundary — a response above
+    /// the locked byte cap maps to the `response_too_large` envelope, not
+    /// a hard peer codec failure. The tiny-cap override stands in for a
+    /// fake large check response deterministically (any real check
+    /// response serializes well over 1 byte).
+    #[tokio::test(flavor = "multi_thread")]
+    async fn oversize_response_returns_response_too_large() {
+        let peer = fixed_keypair(13).public().to_peer_id();
+        let scope = scoped_scope_for(peer, &["check"]);
+        let (_temp, adapter) = test_adapter().await;
+        let (handler, _lane) = build_handler_with_limits(
+            scope,
+            adapter,
+            BridgeLimits {
+                max_response_bytes: 1,
+                ..BridgeLimits::default()
+            },
+        );
+        let payload = serde_json::json!({ "scope": { "scope_id": WORLD_A } });
+        match handler(&peer, "check", payload) {
+            Err(envelope) => assert_eq!(
+                envelope.code, "response_too_large",
+                "an over-cap response must reject with response_too_large"
+            ),
+            Ok(_) => panic!("an over-cap response must reject with response_too_large"),
         }
     }
 

@@ -9,7 +9,7 @@
 //! 2. **serves Connect** — the `runtime_smoke_probe` example (a reference
 //!    spoke-connect peer, built with the same `connect-host` feature)
 //!    completes the signed-hello handshake against the spawned process and
-//!    reads the N-C1 → N-C2 manifest (`extensions.nexus.served_ops` =
+//!    reads the N-C2 read-half manifest (`extensions.nexus.served_ops` =
 //!    upsert/promote/relate/check/assemble — the invoke surface, honest by
 //!    the machine-check);
 //! 3. **no HTTP/SPA listener** — the daemon HTTP port refuses connections
@@ -319,7 +319,7 @@ fn headless_runtime_prints_readiness_serves_connect_and_has_no_http_listener() {
     // 1. Readiness block: the required lines are present on stdout.
     let ready = ready_lines.join("\n");
     for expected in [
-        "Connect Host (N-C1) ready",
+        "Connect Host (N-C2 read half) ready",
         "peer_id:",
         "host_id:",
         "allowlisted peers: 1",
@@ -336,8 +336,8 @@ fn headless_runtime_prints_readiness_serves_connect_and_has_no_http_listener() {
     assert_no_http_listener(runtime_pid, &listen_addrs);
 
     // 3. The reference probe peer dials the host and completes the
-    //    signed-hello handshake; the N-C1 manifest advertises exactly the
-    //    served write ops and the session stays usable.
+    //    signed-hello handshake; the N-C2 read-half manifest advertises
+    //    exactly the served ops and the session stays usable.
     let host_peer = ready_lines
         .iter()
         .find_map(|line| line.trim().strip_prefix("peer_id:"))

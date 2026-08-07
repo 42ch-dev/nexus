@@ -316,7 +316,7 @@ async fn allowlisted_peer_handshakes_and_reads_nexus_manifest() {
     // The manifest is delivered inside the signed hello (§2.5 — no separate
     // get-manifest op). Assert the full N-C0 baseline + N-C1 extension of
     // the field contract (the single shared builder now advertises the
-    // delivered N-C1 slice + served write ops).
+    // delivered N-C2 read-half slice + the enlarged served op set).
     let wire = serde_json::to_value(session.remote_manifest()).expect("manifest serializes");
     assert_eq!(wire["host_id"], serde_json::json!(TEST_HOST_ID));
     assert_eq!(wire["schema_version"], serde_json::json!(1));
@@ -331,7 +331,7 @@ async fn allowlisted_peer_handshakes_and_reads_nexus_manifest() {
     assert_eq!(wire["namespaces"], serde_json::json!(["nexus"]));
     assert_eq!(
         wire["extensions"]["nexus"]["connect_host_slice"],
-        serde_json::json!("n-c1")
+        serde_json::json!("n-c2")
     );
     assert_eq!(
         wire["extensions"]["nexus"]["served_ops"],
