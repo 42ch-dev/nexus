@@ -440,8 +440,7 @@ fn validate_preset_offline(path: &str) -> Result<serde_json::Value> {
     use nexus_orchestration::preset::{
         loader_validate_manifest_compat, validate_assets_in_bundle, validate_path_safety,
         validate_preset_semantic, yaml_value_depth, DiagnosticSeverity,
-        ValidationResult as PresetValidationResult, DEFAULT_MAX_YAML_DEPTH,
-        DEFAULT_MAX_YAML_SIZE,
+        ValidationResult as PresetValidationResult, DEFAULT_MAX_YAML_DEPTH, DEFAULT_MAX_YAML_SIZE,
     };
     use nexus_orchestration::CapabilityRegistry;
 
@@ -450,10 +449,7 @@ fn validate_preset_offline(path: &str) -> Result<serde_json::Value> {
     // bundle root; a directory argument points at its preset.yaml).
     let file_path = std::path::Path::new(path);
     let (preset_yaml_path, bundle_root) = if file_path.is_dir() {
-        (
-            file_path.join("preset.yaml"),
-            Some(file_path.to_path_buf()),
-        )
+        (file_path.join("preset.yaml"), Some(file_path.to_path_buf()))
     } else {
         let is_bundle_manifest = file_path
             .file_name()
@@ -510,14 +506,19 @@ fn validate_preset_offline(path: &str) -> Result<serde_json::Value> {
 
     // C3 + A5 + A3: shared validation facade. Bundle asset checks only run
     //     when the target resolves to a bundle root.
-    let asset_result = bundle_root.as_deref().map_or_else(
-        PresetValidationResult::default,
-        |root| validate_assets_in_bundle(&manifest, root),
-    );
+    let asset_result = bundle_root
+        .as_deref()
+        .map_or_else(PresetValidationResult::default, |root| {
+            validate_assets_in_bundle(&manifest, root)
+        });
     for diagnostic in validate_path_safety(&manifest)
         .diagnostics
         .iter()
-        .chain(validate_preset_semantic(&manifest, &caps).diagnostics.iter())
+        .chain(
+            validate_preset_semantic(&manifest, &caps)
+                .diagnostics
+                .iter(),
+        )
         .chain(asset_result.diagnostics.iter())
     {
         match diagnostic.severity {
