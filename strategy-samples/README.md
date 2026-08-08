@@ -395,7 +395,11 @@ User-installed modules live under:
 ```
 
 (`<id>` must match the directory name and the manifest's `module_id`.)
-Author a module with the ABI contract in
+The authoritative authoring reference — ABI at a glance, marshalling,
+`manifest.json` (incl. `wasm_sha256` pairing), `module_scope`, operator
+install, read-only compute — is
+[`docs/module-authoring.md`](../docs/module-authoring.md). The normative ABI
+contract is
 [`.mstar/specs/compute-module-abi.md`](../.mstar/specs/compute-module-abi.md)
 (exports `memory` / `alloc` / `compute` / optional `init`, the host-import
 whitelist, the marshalling convention, and the `manifest.json` contract), or
@@ -605,7 +609,9 @@ copying — validation fails otherwise.
 
 The bundle is the standard preset format (`preset.yaml` + `templates/`). Edit
 prompts, triggers, and cadence freely; keep the manifest schema shape intact
-so the validator stays green.
+so the validator stays green. The authoritative authoring reference — manifest
+format, trigger/scheduled lanes, prompt templates, validator semantics, fork
+flow — is [`docs/strategy-authoring.md`](../docs/strategy-authoring.md).
 
 ### Validate
 
@@ -655,11 +661,16 @@ idempotency ledger.
 
 ## 7. References
 
+- Docs index: [`../docs/README.md`](../docs/README.md)
 - Strategy bundles: [`game-narrative/`](./game-narrative/),
   [`react-trpg-turn/`](./react-trpg-turn/)
+- Strategy authoring guide (manifest format, lanes, prompt templates,
+  validator, fork flow): [`../docs/strategy-authoring.md`](../docs/strategy-authoring.md)
+- Runtime usage guide: [`../docs/nexus-runtime.md`](../docs/nexus-runtime.md)
 - Validator wrapper: [`validate.sh`](./validate.sh)
 - WASM compute ABI: [`../.mstar/specs/compute-module-abi.md`](../.mstar/specs/compute-module-abi.md)
-- Module authoring guide: [`../modules/README.md`](../modules/README.md)
+- Module authoring guide (ABI at a glance, `manifest.json` incl. `wasm_sha256`, `module_scope`, operator install, read-only compute): [`../docs/module-authoring.md`](../docs/module-authoring.md)
+- Module authoring walkthrough: [`../modules/README.md`](../modules/README.md)
 - Reference module: [`../modules/basic-combat/`](../modules/basic-combat/)
 - Headless runtime spec: [`../.mstar/specs/daemon-runtime.md`](../.mstar/specs/daemon-runtime.md) §4.6
 - Connect invoke surface (N-C2 E2): `apps/nexus42/src/commands/connect/invoke.rs`
