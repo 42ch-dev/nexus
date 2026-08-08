@@ -55,8 +55,8 @@ fn parse_args() -> anyhow::Result<Args> {
 }
 
 fn load_identity(path: &Path) -> anyhow::Result<Keypair> {
-    let bytes = std::fs::read(path)
-        .with_context(|| format!("read identity seed at {}", path.display()))?;
+    let bytes =
+        std::fs::read(path).with_context(|| format!("read identity seed at {}", path.display()))?;
     let seed: [u8; 32] = bytes
         .try_into()
         .map_err(|bytes: Vec<u8>| anyhow!("identity seed must be 32 bytes, got {}", bytes.len()))?;
