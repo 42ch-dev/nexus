@@ -187,8 +187,8 @@ observation windows — another reason to set the hash.
 Compute it from the installed artifact:
 
 ```bash
-shasum -a 256 basic-combat.wasm        # macOS
-sha256sum basic-combat.wasm            # Linux
+shasum -a 256 basic-combat.wasm        # macOS (prints "<hash>  <filename>")
+sha256sum basic-combat.wasm            # Linux (prints "<hash>  <filename>")
 ```
 
 **Embedded modules are auto-paired.** `crates/nexus-wasm-host/build.rs`
@@ -266,7 +266,8 @@ Note the rename: cargo emits the artifact under the crate name
 
 ```bash
 shasum -a 256 "$NEXUS_HOME/modules/basic-combat/basic-combat.wasm"
-# → <64 lowercase hex>; write it as "wasm_sha256" in the installed
+# → "<hash>  <filename>" — use only the 64 lowercase hex before the
+# two-space filename separator; write it as "wasm_sha256" in the installed
 #   manifest.json, or remove the field entirely
 ```
 
