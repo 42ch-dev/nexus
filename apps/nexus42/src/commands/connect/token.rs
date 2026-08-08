@@ -18,7 +18,9 @@ use spoke_connect::core::{
     derive_peer_id_from_ed25519_pubkey, issue_capability_token, CapabilityClaims,
     CapabilityTokenProof,
 };
+use spoke_connect::CapabilityTokenProvider;
 use std::path::Path;
+use std::sync::Arc;
 
 /// `connect token` subcommands.
 #[derive(Debug, Subcommand)]
@@ -105,17 +107,7 @@ pub fn load_or_create_issuer_key(home: &Path) -> Result<Keypair> {
             }
             Ok(keypair)
         }
-        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
-            let bytes = std::fs::read(&path)?;
-            #[cfg(unix)]
-            harden_issuer_key_permissions(&path)?;
-            Keypair::from_protobuf_encoding(&bytes).map_err(|e| {
-                CliError::Config(format!(
-                    "invalid Connect issuer key at {}: {e}",
-                    path.display()
-                ))
-            })
-        }
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => load_issuer_key_at(&path),
         Err(e) => Err(CliError::Io(e)),
     }
 }
@@ -154,13 +146,85 @@ pub fn issuer_peer_id(keypair: &Keypair) -> Result<String> {
 /// # Errors
 /// [`CliError::Config`] when the keypair is not Ed25519 or the secret is
 /// not exactly 32 bytes.
-fn issuer_secret_bytes(keypair: &Keypair) -> Result<[u8; 32]> {
+pub(crate) fn issuer_secret_bytes(keypair: &Keypair) -> Result<[u8; 32]> {
     let ed25519 = keypair
         .clone()
         .try_into_ed25519()
         .map_err(|_| CliError::Config("issuer key is not an Ed25519 keypair".into()))?;
     <[u8; 32]>::try_from(ed25519.secret().as_ref())
         .map_err(|_| CliError::Config("issuer key is not a 32-byte Ed25519 secret".into()))
+}
+
+/// Load the persisted issuer key from an explicit path (load-only).
+///
+/// The CLI (`connect token issue`) is the key-creation path (architect
+/// lock #4); an enabled provider requires the key to already exist — a
+/// missing key is a fail-closed boot error, never a silent create.
+///
+/// # Errors
+/// [`CliError::Config`] when the file is missing or not a valid Ed25519
+/// key, or [`CliError::Io`] on filesystem failure.
+pub(crate) fn load_issuer_key_at(path: &Path) -> Result<Keypair> {
+    let bytes = std::fs::read(path).map_err(|e| match e.kind() {
+        std::io::ErrorKind::NotFound => CliError::Config(format!(
+            "issuer key not found at {}: run `nexus42 connect token issue` once \
+             to create it (the CLI is the issuer-key creation path)",
+            path.display()
+        )),
+        _ => CliError::Io(e),
+    })?;
+    #[cfg(unix)]
+    harden_issuer_key_permissions(path)?;
+    Keypair::from_protobuf_encoding(&bytes).map_err(|e| {
+        CliError::Config(format!("invalid Connect issuer key at {}: {e}", path.display()))
+    })
+}
+
+/// TTL for provider-minted proofs (seconds, V1.155 P1): proofs are minted
+/// on demand at challenge time; 5 minutes covers handshake exchanges
+/// without keeping long-lived tokens around.
+pub const PROVIDER_TOKEN_TTL_SECONDS: u64 = 300;
+
+/// Build the mint-on-demand [`CapabilityTokenProvider`] closure for an
+/// enabled provider (iteration spec Design #2).
+///
+/// The closure loads nothing itself — the issuer keypair is loaded at boot
+/// (`load_issuer_key_at`) — and mints a fresh proof for every challenge:
+/// `iss` = the issuer-derived peer id, `sub` = this node's peer id,
+/// `aud` = the challenger, `capabilities` = this host's manifest
+/// capabilities (what the node actually serves — the token can never grant
+/// more than the host advertises), `exp` = now + [`PROVIDER_TOKEN_TTL_SECONDS`].
+///
+/// Execution contract: the closure runs synchronously on the node's
+/// network event loop (spoke [`CapabilityTokenProvider`] docs) — no I/O:
+/// all key material is captured at boot.
+///
+/// # Errors
+/// [`CliError::Config`] when the issuer keypair is not Ed25519 or its
+/// secret is not exactly 32 bytes.
+pub(crate) fn build_provider(
+    issuer: &Keypair,
+    sub: String,
+    capabilities: Vec<String>,
+) -> Result<Arc<CapabilityTokenProvider>> {
+    let iss = issuer_peer_id(issuer)?;
+    let seed = issuer_secret_bytes(issuer)?;
+    let provider = move |aud: &str| -> std::result::Result<serde_json::Value, String> {
+        let now = now_unix_seconds();
+        let claims = CapabilityClaims {
+            iss: iss.clone(),
+            sub: sub.clone(),
+            aud: aud.to_string(),
+            capabilities: capabilities.clone(),
+            exp: now + PROVIDER_TOKEN_TTL_SECONDS,
+            iat: Some(now),
+            jti: None,
+        };
+        let proof = issue_capability_token(&seed, claims, now)
+            .map_err(|e| format!("capability-token issuance failed: {e}"))?;
+        serde_json::to_value(&proof).map_err(|e| format!("proof serialization failed: {e}"))
+    };
+    Ok(Arc::new(provider))
 }
 
 /// Issue a signed capability token with the persisted issuer key.

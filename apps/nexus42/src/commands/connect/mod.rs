@@ -21,7 +21,10 @@
 //! V1.155 P1 (capability-token production): `connect token issue` is the
 //! operator issuance surface — `~/.nexus42/connect/issuer.key` lifecycle
 //! (create-once 0600, distinct from `identity.key`) + the signed wire proof
-//! `{v, claims, sig}` on stdout ([`token`]).
+//! `{v, claims, sig}` on stdout ([`token`]); `~/.nexus42/connect/config.json`
+//! is the operator token policy — `trusted_issuers` /
+//! `require_capability_token` / `capability_token_provider`, wired into
+//! `build_config` ([`config`]).
 //!
 //! Topology rules (product draft `fl-r-connect-host-foundation.md` §2.1/§2.6):
 //! - mDNS is **never** enabled (`spoke-connect/mdns` not in the feature set).
@@ -36,6 +39,9 @@
 //!   corrected). Same-entry write correctness is the orchestrators' OCC CAS.
 
 pub mod allowlist;
+// V1.155 P1 T2: operator config — `~/.nexus42/connect/config.json`
+// (trusted_issuers / require_capability_token / capability_token_provider).
+pub mod config;
 pub mod identity;
 // V1.153 P1 N-C1 → V1.154 P0 T2: the session-peer `InvokeHandlerV2`
 // closure (architect-locked home; identity = the authenticated session peer).
@@ -392,13 +398,20 @@ async fn dial_host(
 /// Assemble the architect-locked N-C0 `ConnectConfig` from the on-disk
 /// state + CLI inputs (steps 1–6 of `start`). The N-C1 pieces (workspace DB
 /// open + adapter + invoke handler) are added by [`build_host_config`], so
-/// this function stays pure (no I/O beyond the identity/allowlist reads).
+/// this function stays pure (no I/O beyond the identity/allowlist/token-
+/// config reads).
 ///
 /// `home` is the **raw** user home (`$HOME`): identity/allowlist helpers
 /// join `.nexus42` themselves. The device-id is resolved via
 /// `get_or_create_device_id(home)` — the identical resolution
 /// `host_manifest_port::resolve_device_id_from_standard_home` uses, so the
 /// Connect `host_id` always equals the manifest's `host_id`.
+///
+/// V1.155 P1: the capability-token surface (`trusted_issuers` /
+/// `require_capability_token` / `capability_token_provider`) comes from
+/// `~/.nexus42/connect/config.json` — absent file ⇒ the pre-V1.155
+/// defaults; malformed file or require-without-issuers ⇒ boot error
+/// (fail-closed); an enabled provider loads the issuer key at boot.
 ///
 /// Returns the config, the resolved `host_id` (for start-up logging), the
 /// effective allowlist length, and the resolved `PeerScope` (consumed by the
@@ -449,6 +462,27 @@ fn build_config(
         }
     };
 
+    // 5b. Token operator config (V1.155 P1): trusted_issuers /
+    //     require_capability_token / capability_token_provider from
+    //     `~/.nexus42/connect/config.json` (absent ⇒ defaults; malformed or
+    //     require-without-issuers ⇒ boot error, fail-closed). An enabled
+    //     provider loads the issuer key at boot — a missing key is a boot
+    //     error (`connect token issue` is the creation path, lock #4); the
+    //     mint-on-demand closure then answers challenges with `sub` = this
+    //     node's peer id and the host's manifest capabilities (a token can
+    //     never grant more than the host advertises).
+    let token_config = config::load(home)?;
+    let capability_token_provider = match &token_config.capability_token_provider {
+        Some(provider) if provider.enabled => {
+            let key_path =
+                config::resolve_issuer_key_path(home, provider.issuer_key_path.as_deref());
+            let issuer = token::load_issuer_key_at(&key_path)?;
+            let sub = identity.public().to_peer_id().to_string();
+            Some(token::build_provider(&issuer, sub, local_manifest.capabilities.clone())?)
+        }
+        _ => None,
+    };
+
     // 6. Architect-locked ConnectConfig (the invoke handler is installed by
     //    build_host_config once the workspace adapter exists).
     let config = ConnectConfig {
@@ -460,9 +494,9 @@ fn build_config(
         invoke_handler: None,
         invoke_handler_v2: None,
         op_capability_requirements: HashMap::new(),
-        trusted_issuers: Vec::new(),
-        require_capability_token: false,
-        capability_token_provider: None,
+        trusted_issuers: token_config.trusted_issuers,
+        require_capability_token: token_config.require_capability_token,
+        capability_token_provider,
     };
     Ok((config, host_id, allowlist_len, peer_scope))
 }
@@ -686,6 +720,162 @@ mod tests {
         // Storage corruption is rejected earlier (InternalError) — the
         // fallback keeps the render total.
         assert_eq!(normalize_last_seen("not-a-timestamp"), "not-a-timestamp");
+    }
+
+    // ── V1.155 P1 T2: token operator config wiring ───────────────────────
+
+    fn temp_home() -> tempfile::TempDir {
+        tempfile::tempdir().expect("tempdir")
+    }
+
+    fn write_config(home: &Path, body: &str) {
+        let dir = home.join(".nexus42").join("connect");
+        std::fs::create_dir_all(&dir).expect("create connect dir");
+        std::fs::write(dir.join("config.json"), body).expect("write config.json");
+    }
+
+    /// `build_config` with a loopback ephemeral listener and no CLI peers —
+    /// the token-config surface under test.
+    fn build_config_for(
+        home: &Path,
+    ) -> Result<(ConnectConfig, String, usize, allowlist::PeerScope)> {
+        build_config(home, &[], &["/ip4/127.0.0.1/tcp/0".to_string()])
+    }
+
+    #[test]
+    fn build_config_absent_token_config_keeps_defaults() {
+        let home = temp_home();
+        let (config, _, _, _) = build_config_for(home.path()).expect("boot with absent config");
+        assert!(
+            config.trusted_issuers.is_empty(),
+            "absent config ⇒ empty trusted_issuers"
+        );
+        assert!(
+            !config.require_capability_token,
+            "absent config ⇒ require_capability_token=false"
+        );
+        assert!(
+            config.capability_token_provider.is_none(),
+            "absent config ⇒ no provider"
+        );
+    }
+
+    #[test]
+    fn build_config_wires_trusted_issuers_and_require_flag() {
+        let home = temp_home();
+        write_config(
+            home.path(),
+            r#"{
+                "trusted_issuers": ["12D3KooWIssuerOne"],
+                "require_capability_token": true
+            }"#,
+        );
+        let (config, _, _, _) = build_config_for(home.path()).expect("boot with token config");
+        assert_eq!(
+            config.trusted_issuers,
+            vec!["12D3KooWIssuerOne".to_string()]
+        );
+        assert!(config.require_capability_token);
+        assert!(
+            config.capability_token_provider.is_none(),
+            "provider stays None when not enabled"
+        );
+    }
+
+    #[test]
+    fn build_config_malformed_token_config_fails_boot() {
+        let home = temp_home();
+        write_config(home.path(), "{ not json");
+        let err = build_config_for(home.path()).expect_err("malformed config must fail boot");
+        assert!(
+            matches!(err, CliError::Config(_)),
+            "malformed config is a boot error: {err:?}"
+        );
+    }
+
+    #[test]
+    fn build_config_require_without_issuers_fails_boot() {
+        let home = temp_home();
+        write_config(home.path(), r#"{ "require_capability_token": true }"#);
+        let err = build_config_for(home.path())
+            .expect_err("require-without-issuers must fail boot");
+        assert!(
+            matches!(err, CliError::Config(_)),
+            "require-without-issuers is a boot error: {err:?}"
+        );
+    }
+
+    #[test]
+    fn build_config_enabled_provider_without_issuer_key_fails_boot() {
+        let home = temp_home();
+        write_config(
+            home.path(),
+            r#"{ "capability_token_provider": { "enabled": true } }"#,
+        );
+        let err = build_config_for(home.path())
+            .expect_err("enabled provider with a missing issuer key must fail boot");
+        assert!(
+            matches!(err, CliError::Config(_)),
+            "missing issuer key is a boot error: {err:?}"
+        );
+    }
+
+    #[test]
+    fn build_config_enabled_provider_yields_working_provider() {
+        use spoke_connect::core::{verify_capability_token, CapabilityTokenProof};
+
+        let home = temp_home();
+        // The issuer key must exist at boot (the CLI is the creation path).
+        let issuer = token::load_or_create_issuer_key(home.path()).expect("issuer key created");
+        let issuer_id = token::issuer_peer_id(&issuer).expect("issuer peer id");
+        write_config(
+            home.path(),
+            &format!(
+                r#"{{
+                    "trusted_issuers": ["{issuer_id}"],
+                    "capability_token_provider": {{ "enabled": true }}
+                }}"#
+            ),
+        );
+
+        let (config, _, _, _) = build_config_for(home.path()).expect("boot with enabled provider");
+        let provider = config
+            .capability_token_provider
+            .as_ref()
+            .expect("provider is Some when enabled");
+
+        // Mint a proof for a challenger audience and validate it end-to-end:
+        // iss = issuer-derived id, sub = this node's peer id, aud = the
+        // challenger, capabilities = the host manifest capabilities.
+        let challenger = "12D3KooWChallengerPeer";
+        let proof_value = provider(challenger).expect("provider mints a proof");
+        let proof: CapabilityTokenProof =
+            serde_json::from_value(proof_value).expect("proof is the wire shape");
+        assert_eq!(proof.claims.iss, issuer_id);
+        assert_eq!(proof.claims.aud, challenger);
+        assert_eq!(
+            proof.claims.sub,
+            config.identity.public().to_peer_id().to_string(),
+            "sub = this node's peer id"
+        );
+        assert_eq!(
+            proof.claims.capabilities, config.local_manifest.capabilities,
+            "token capabilities = the host manifest capabilities"
+        );
+
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock readable")
+            .as_secs();
+        let granted = verify_capability_token(
+            &proof,
+            &[issuer_id],
+            challenger,
+            &proof.claims.sub,
+            now + 2,
+        )
+        .expect("provider proof verifies green");
+        assert_eq!(granted, config.local_manifest.capabilities);
     }
 }
 
