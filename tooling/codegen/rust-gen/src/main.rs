@@ -84,7 +84,7 @@ fn to_rust_module_name(segment: &str) -> String {
 /// Rule (must match the TS side exactly): strip the trailing `.schema.json`, split
 /// on `-`, capitalize the **first** character of each word (leaving the rest
 /// unchanged), join. E.g. `work-summary.schema.json` → `WorkSummary`,
-/// `key-block.schema.json` → `KeyBlock`, `world-membership.schema.json` →
+/// `fork-branch.schema.json` → `ForkBranch`, `world-membership.schema.json` →
 /// `WorldMembership`, `context-assembly-v1.schema.json` → `ContextAssemblyV1`.
 ///
 /// `typify` derives the root type name from the schema `title` (via `convert_case`'s
@@ -209,11 +209,11 @@ fn generate_schema_rust(schema_path: &Path, rel: &Path, out_path: &Path) -> Resu
 
     // Override the schema `title` to the basename-derived PascalCase name BEFORE
     // handing it to `typify`. Without this, `typify` names the root type from the
-    // raw title (e.g. `"Nexus World Entity"` → `NexusWorldEntity`, `"Nexus KeyBlock"`
-    // → `NexusKeyBlock`) or emits no root type at all when the title is absent
+    // raw title (e.g. `"Nexus World Entity"` → `NexusWorldEntity`, `"Nexus Delta"`
+    // → `NexusDelta`) or emits no root type at all when the title is absent
     // (e.g. `work-summary`). Overriding aligns the emitted name with the TS contract
     // (`schemaToTypeName`) and the drift-test `entry!` registrations (`World`,
-    // `WorkSummary`, `KeyBlock`, …). Only the in-memory `metadata.title` is touched;
+    // `WorkSummary`, `ForkBranch`, …). Only the in-memory `metadata.title` is touched;
     // other metadata (description, $id, …) is preserved.
     let file_name = rel
         .file_name()

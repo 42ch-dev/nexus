@@ -99,7 +99,7 @@ pub struct KbCandidate {
 /// [`KbCandidate`]s. Endpoints are referenced by `canonical_name` (+ optional
 /// `block_type`) and resolved to `WorldKbEntry` ids at persist time by
 /// [`persist_relationship_candidates`]. A candidate whose endpoints cannot
-/// resolve to existing non-deleted `KeyBlocks` is skipped + logged (entities are
+/// resolve to existing non-deleted `KnowledgeEntry` rows is skipped + logged (entities are
 /// NOT confirmed in the same extraction pass — architect lock).
 #[derive(Debug, Clone, PartialEq)]
 pub struct KbRelationshipCandidate {
@@ -1333,7 +1333,7 @@ async fn persist_candidates(
     Ok(inserted)
 }
 
-/// Resolve relationship-candidate endpoints to existing `KeyBlocks` and persist
+/// Resolve relationship-candidate endpoints to existing `KnowledgeEntry` rows and persist
 /// idempotent extraction-sourced suggestions into `kb_relationships` (V1.76).
 ///
 /// Implements the architect-locked entity-existence prerequisite: a
@@ -1361,7 +1361,7 @@ async fn persist_relationship_candidates(
     let now = chrono::Utc::now().to_rfc3339();
     let mut inserted = 0usize;
     for rel in relationships {
-        // Resolve both endpoints to existing non-deleted KeyBlocks. When a
+        // Resolve both endpoints to existing non-deleted KnowledgeEntries. When a
         // block_type hint is provided, resolve by (world, block_type, name);
         // otherwise case-insensitive by name only when exactly one matches.
         let source_id = resolve_entity_by_canonical_name(

@@ -15,8 +15,7 @@
       "review": "评审",
       "persist": "持久化",
       "work_maintenance": "作品维护",
-      "system_maintenance": "系统维护",
-      "unspecified": "未指定"
+      "system_maintenance": "系统维护"
     },
     "refresh": "重新检查",
     "refreshAria": "重新运行瞬间检查",

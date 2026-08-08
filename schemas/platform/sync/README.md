@@ -9,7 +9,7 @@ V1.62 (2026-06-23) consolidated this folder: sync-payload files moved here from 
 | File | Role |
 | --- | --- |
 | `bundle.schema.json` | **Codegen canonical** `Bundle` envelope type (was `domain/bundle.schema.json`) |
-| `bundle-refinement.schema.json` | Validation refinement (allOf of canonical bundle with CLI V1.0 constraints). **Codegen-skipped** — see `tooling/codegen/src/schema-loader.ts` `SKIP_STRUCT_GENERATION_REL_PATHS`. (Was `cloud-sync/bundle.schema.json`; renamed to avoid basename collision with the canonical bundle.) |
+| `bundle-refinement.schema.json` | Validation refinement (allOf of canonical bundle with CLI V1.0 constraints). **Codegen-skipped** — see `tooling/codegen/src/ts-gen.ts` `SKIP_LIST` / `tooling/codegen/rust-gen/src/main.rs` `SKIP_SCHEMAS`. (Was `cloud-sync/bundle.schema.json`; renamed to avoid basename collision with the canonical bundle.) |
 | `delta.schema.json` | `Delta` aggregate operation (was `domain/delta.schema.json`) |
 | `sync-command.schema.json` | `SyncCommand` attribution record (was `domain/sync-command.schema.json`) |
 | `sync-pull-request.schema.json` | Pull request (was `cloud-sync/`) |

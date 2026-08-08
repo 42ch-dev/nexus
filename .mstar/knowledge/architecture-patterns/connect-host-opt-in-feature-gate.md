@@ -6,6 +6,7 @@ category: architecture-patterns
 severity: medium
 plan_id: 2026-08-04-v1.148-p3-spoke-connect-host-facade-n-c0
 tags: [spoke-connect, connect-host, feature-gate, libp2p, host-capability-manifest, op-refusal, fl-r, n-c0]
+last_updated: 2026-08-08
 applies_when: adopting a heavy optional transport/network dependency behind a feature gate; building an honest capability manifest; landing a "handshake-only, no-write-ops" host surface
 ---
 
@@ -13,7 +14,7 @@ applies_when: adopting a heavy optional transport/network dependency behind a fe
 
 ## Context
 
-V1.148 P3 adopted `spoke-connect` (libp2p 0.56 + noise + yamux + Ed25519 signed-hello) into a CLI product whose default build must stay small and network-surface-free. The Connect Host surface (DF-72 **N-C0**) is the first external-adjacent peer surface: it must handshake + present an honest `HostCapabilityManifest`, but **refuse every inbound write op** (N-C1 write-op exchange is a deliberate later milestone). The pattern below is what made that safe and maintainable.
+V1.148 P3 adopted `spoke-connect` (libp2p 0.56 + noise + yamux + Ed25519 signed-hello) into a CLI product whose default build must stay small and network-surface-free. The Connect Host surface (DF-72 **N-C0**) is the first external-adjacent peer surface: it must handshake + present an honest `HostCapabilityManifest`, but **refuse every inbound write op** (N-C1 write-op exchange was a deliberate later milestone). The pattern below is what made that safe and maintainable.
 
 ## Guidance
 
@@ -73,11 +74,11 @@ V1.148 P3 adopted `spoke-connect` (libp2p 0.56 + noise + yamux + Ed25519 signed-
 ## When to apply
 
 - Adopting any heavy optional transport (libp2p, quic, a gossip layer) behind a feature gate.
-- Landing a "metadata/handshake-only" host surface ahead of the full op surface (N-C0→N-C1→N-C2 phasing; any "read profile, refuse writes" milestone).
+- Landing a "metadata/handshake-only" host surface ahead of the full op surface (N-C0→N-C1→N-C2→N-C3 phasing; any "read profile, refuse writes" milestone).
 - Building a capability manifest that must stay honest as capabilities are added/removed.
 
 ## Examples
 
 - V1.148 P3 `crates/nexus-spoke-adapter/src/manifest.rs` (shared builder), `apps/nexus42/src/commands/connect/{mod,identity,allowlist,interop}.rs` (Connect Host + interop), `crates/nexus-home-layout/src/device_id.rs` (host_id SSOT).
 - Spec: `.mstar/specs/spoke-adapter-architecture.md` §10 (Connect Host N-C0 normative surface).
-- N-C1 (write-op exchange) is the next milestone — owner architect, trigger N-C0 dogfood green + partner demand (DF-72 tracker).
+- The N-C series shipped end-to-end: **N-C1 (V1.153)** — write-op exchange; **N-C2 (V1.154)**; **N-C3 (V1.155)**. Capability-token production (issuance CLI + `config.json` enforcement + PeerScope intersection) shipped in **V1.155 P1**.

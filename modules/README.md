@@ -14,6 +14,11 @@ each call receives a fresh `ComputeInput` envelope and returns a 4-part
 > `schemas/daemon-api/compute/` (registry) and `schemas/local-api/compute/`
 > (envelopes).
 
+> **Authoritative authoring reference:** the integrator-facing module
+> authoring guide is [`docs/module-authoring.md`](../docs/module-authoring.md)
+> (ABI contract, `manifest.json`, `module_scope`, operator install). This
+> file remains the in-repo source/embed walkthrough for module authors.
+
 ## Module-author onboarding path
 
 1. **Write a `manifest.json`** — declare identity, required `key_block_types`,

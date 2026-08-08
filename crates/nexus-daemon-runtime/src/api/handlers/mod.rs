@@ -56,4 +56,5 @@ pub mod works;
 pub mod workspace;
 pub mod workspaces;
 pub mod world_kb;
+pub mod world_kb_guards;
 pub mod world_kb_pack;

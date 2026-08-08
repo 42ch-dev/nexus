@@ -17,6 +17,7 @@ async fn all_migrations_apply_to_fresh_db() {
         "soul_meta",
         "memory_pending_review",
         "memory_fragments",
+        "peer_hosts",
     ] {
         // SAFETY: test-only — queries sqlite_master to verify migration table existence.
         let found: (i64,) =

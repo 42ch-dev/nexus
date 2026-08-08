@@ -341,4 +341,4 @@ schemas/local-api/works/chapters/
 └── patch-chapter-request.schema.json
 ```
 
-If codegen or schema-loader constraints favor a flat `schemas/local-api/works/` folder, P0 may flatten the files with a `chapter-` prefix, but the normative layout target for V1.65 is the `works/chapters/` subtree.
+If codegen constraints favor a flat `schemas/local-api/works/` folder, P0 may flatten the files with a `chapter-` prefix, but the normative layout target for V1.65 is the `works/chapters/` subtree.

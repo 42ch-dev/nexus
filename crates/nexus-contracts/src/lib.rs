@@ -22,7 +22,7 @@ pub use common_types::SourceAnchor;
 // ── Consumer-facing conveniences (plan v1.138 P1) ─────────────────────────
 //
 // typify inlines shared schema enums per-domain-module with prefixed names
-// (e.g. `KeyBlockBlockType`, `PairingPairingSource`) and does NOT emit the
+// (e.g. `MemoryMemoryKind`, `PairingPairingSource`) and does NOT emit the
 // bare friendly names consumers expect. Below we alias those generated enums
 // to their friendly names so that a consumer's `nexus_contracts::BlockType`
 // resolves to the SAME type the generated structs use as field types —

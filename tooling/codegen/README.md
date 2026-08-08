@@ -61,7 +61,7 @@ env vars (`NEXUS_REPO_ROOT`, `NEXUS_DEREF_SCHEMAS_DIR`, `NEXUS_SRC_SCHEMAS_DIR`)
 
 1. **prep** — localize every schema's base-URI `$id`/`$ref` to POSIX-relative paths
    (`.schemas-localized/`), then dereference cross-file `$ref` via `json-schema-ref-parser`
-   (`.schemas-dereferenced/`). Shared by TS generation and the future typify-based Rust path.
+   (`.schemas-dereferenced/`). Shared by TS and Rust generation.
 2. **ts-gen** — compile each non-skip schema with `json-schema-to-typescript` (title
    overridden to the basename-derived PascalCase name) → nested tree under
    `packages/nexus-contracts/src/generated/`, plus the `SCHEMA_VERSIONS` / `LATEST_SCHEMA_VERSION` stamp.
@@ -76,8 +76,8 @@ codegen pipeline itself).
 
 - **Common types** (`common.schema.json`, `source-anchor.schema.json`): Extracted into `CommonTypes.ts` / `common_types.rs` — no standalone struct generated
 - **Domain schemas** (`domain/*.schema.json`): Each generates a TypeScript interface and Rust struct
-- **Platform** (`platform/*.schema.json`) and **cloud sync** (`cloud-sync/*.schema.json`): Same — one struct per schema file
-- **Cloud-sync bundle refinement** (`cloud-sync/bundle.schema.json`): Skipped for struct generation (canonical `Bundle` from `domain/bundle.schema.json`; see `schema-loader.ts`)
+- **Platform** (`platform/*.schema.json`, including `platform/sync/`) and **daemon API** (`daemon-api/*.schema.json`): Same — one struct per schema file
+- **Sync bundle refinement** (`platform/sync/bundle-refinement.schema.json`): Skipped for struct generation (canonical `Bundle` from `platform/sync/bundle.schema.json`; see the skip lists in `src/ts-gen.ts` `SKIP_LIST` and `rust-gen/src/main.rs` `SKIP_SCHEMAS`)
 - **Meta schema**: Not in `schemas/` — hand-written `crates/nexus-contracts/src/local/meta.rs` only
 
 ## Type Mapping
@@ -128,21 +128,24 @@ exports (one per file, `export type { TypeName } from './<base>'`) so inline
 ```
 crates/nexus-contracts/src/generated/
 ├── mod.rs                # Module declarations + SCHEMA_VERSIONS
-├── common_types.rs       # Shared types and enums
-├── bundle.rs             # DeltaBundle envelope struct
-├── creator.rs            # Creator entity struct
-├── world.rs              # World entity struct
-├── key_block.rs          # KnowledgeEntry entity struct (generated from schema)
-├── timeline_event.rs     # TimelineEvent entity struct
-├── memory.rs             # MemoryItem entity struct
-├── sync_command.rs       # SyncCommand entity struct
-├── outbox_entry.rs       # OutboxEntry entity struct
-├── world_membership.rs   # WorldMembership entity struct
-├── pairing.rs            # Pairing entity struct
-├── story_manifest.rs     # StoryManifest entity struct
-├── version_ref.rs        # VersionRef value object struct
-└── meta.rs               # Meta schema struct
+├── common/               # version_ref.rs (shared value objects)
+├── domain/               # one <base>.rs per schema + mod.rs barrel
+│   ├── creator.rs
+│   ├── fork_branch.rs
+│   ├── memory.rs
+│   ├── world.rs
+│   └── …
+├── platform/
+│   ├── http-bff/         # one <base>.rs per schema (consumer-scope mirror)
+│   └── sync/             # bundle.rs, delta.rs, sync_command.rs, …
+└── daemon-api/           # nested canvas/ compute/ kb/ works/ … each with its own mod.rs
 ```
+
+The tree mirrors the `schemas/` layout (folder names snake_cased for Rust module
+names, e.g. `daemon-api` → `daemon_api`). Hand-maintained companions live outside
+`generated/`: `crates/nexus-contracts/src/common_types.rs` (shared definitions
+from `common.schema.json` + `source-anchor.schema.json`) and
+`crates/nexus-contracts/src/local/meta.rs` (meta schema, not in `schemas/`).
 
 ## Do Not Modify Generated Types
 

@@ -7,7 +7,7 @@
 //!   into a World under a conflict policy (mirrors CLI `pack import`).
 
 use crate::api::errors::NexusApiError;
-use crate::api::handlers::works::{read_active_creator_id, read_active_workspace_slug};
+use crate::api::handlers::world_kb_guards::{require_creator, require_world_owner};
 use crate::pack_import::{
     import_pack, ConflictPolicy, ImportAtomKind, ImportOutcome, ImportSummary, PackImportError,
 };
@@ -34,43 +34,7 @@ use std::collections::HashSet;
 /// Default `modules.pack.version` when the request omits `pack_version`.
 const DEFAULT_PACK_VERSION: &str = "0.1.0";
 
-// ─── Shared guards (mirror `world_kb.rs`) ───────────────────────────────────
-
-fn require_creator(state: &WorkspaceState) -> Result<String, NexusApiError> {
-    let creator_id =
-        read_active_creator_id(state.nexus_home()).ok_or(NexusApiError::AuthRequired)?;
-    let _workspace_slug = read_active_workspace_slug(state.nexus_home(), &creator_id)
-        .ok_or(NexusApiError::AuthRequired)?;
-    Ok(creator_id)
-}
-
-async fn require_world_owner(
-    pool: &sqlx::SqlitePool,
-    world_id: &str,
-    creator_id: &str,
-) -> Result<(), NexusApiError> {
-    // Runtime query: mirrors `world_kb.rs` pattern; table schema is stable.
-    let owner: Option<Option<String>> =
-        sqlx::query_scalar("SELECT owner_creator_id FROM narrative_worlds WHERE world_id = ?")
-            .bind(world_id)
-            .fetch_optional(pool)
-            .await
-            .map_err(NexusApiError::from)?;
-    match owner {
-        None => Err(NexusApiError::NotFound(format!("world {world_id}"))),
-        Some(Some(owner_id)) if owner_id == creator_id => Ok(()),
-        Some(Some(_)) => Err(NexusApiError::Forbidden {
-            resource: format!("world {world_id}"),
-            reason:
-                "active creator does not own this world; cross-author World KB edits are forbidden"
-                    .to_string(),
-        }),
-        Some(None) => Err(NexusApiError::Forbidden {
-            resource: format!("world {world_id}"),
-            reason: "world has no owner_creator_id; cannot authorize World KB edit".to_string(),
-        }),
-    }
-}
+// ─── Shared guards (imported from `world_kb_guards` — R-V1152P0-002) ───────
 
 async fn resolve_world_title(
     pool: &sqlx::SqlitePool,
