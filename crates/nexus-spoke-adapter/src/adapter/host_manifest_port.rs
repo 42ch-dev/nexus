@@ -17,26 +17,20 @@
 //! id wins; otherwise the device id is resolved from the standard nexus home
 //! on demand.
 //!
-//! Local-first nexus has no peers: the production daemon runs against a
-//! single local host that owns the `nexus` extension namespace and declares
-//! the `data-store` role (it is the SQLite-backed authority for
-//! `KnowledgeEntry`, `Relation`, and `Finding` storage). Multi-host / peer
-//! discovery is not implemented.
-//!
-//! # Roadmap trigger — `list_peer_host_capability_manifests` (spec §7.4 stub matrix)
-//!
-//! **Trigger:** when nexus ships multi-host collaboration (peer daemon
-//! discovery + cross-host orchestration). Nexus is local-first today;
-//! peer manifests have no backing table and no discovery protocol.
-//!
-//! **Upgrade path:** add a `peer_hosts` table (`host_id`, manifest JSON,
-//! `last_seen`, capabilities); implement a peer-discovery protocol (mDNS
-//! or spoke's host-hello handshake); wire `list_peer_host_capability_manifests`
-//! to query the table. Until a trigger fires, this stub returns the
-//! documented empty peer list.
-//!
-//! **Residual:** tracked as `R-V1143P0-STRETCH` (closed V1.146 P5 — deferred;
-//! peer discovery is multi-host infra, not spoke fork-port scope).
+//! V1.155 P0 N-C3 (multi-host production, DF-72): the last stub is gone.
+//! [`HostManifestPort::list_peer_host_capability_manifests`] is a production
+//! query over the `peer_hosts` table (`nexus-local-db`, same workspace DB the
+//! adapter already runs against); peers are recorded ONLY from observed
+//! Connect sessions — the outbound `connect()` return observation point
+//! (iteration spec `fl-r-w3-n-c3-multi-host.md` §Design lock #1):
+//! [`NexusAdapter::record_peer_manifest`] upserts the dialed peer's
+//! `HostCapabilityManifest` (`host_id` PK, fail-closed validation at this
+//! adapter boundary — `nexus-local-db` stays spoke-schema-free per spec §8
+//! dep reversal). Inbound-only peers (a peer dials us) are NOT recorded this
+//! iteration: the invoke boundary carries only `&PeerId`, and the
+//! inbound-manifest API change is a spoke-connect change, out of nexus
+//! scope. Honesty: the port never fabricates peers — only observed
+//! manifests are ever stored.
 
 use super::NexusAdapter;
 use crate::{HostCapabilityManifest, HostManifestPort, SpokeRejectCode, SpokeResult};
@@ -61,15 +55,47 @@ impl HostManifestPort for NexusAdapter<'_> {
         crate::manifest::build_local_host_manifest(&host_id)
     }
 
-    /// Stub — returns the documented empty peer list (spec §7.4).
+    /// Production query (V1.155 P0 / N-C3 multi-host production) — the last
+    /// adapter stub is gone (spec §7.3 stub matrix).
     ///
-    /// Local-first nexus has no peers; peer discovery is a roadmap item
-    /// triggered when nexus supports multi-host collaboration. See the
-    /// module-level docs.
+    /// Returns the persisted `HostCapabilityManifest`s of observed peer
+    /// hosts (recorded at the outbound `connect()` return —
+    /// [`NexusAdapter::record_peer_manifest`]), most recently seen first.
+    /// Empty table → `Ok(vec![])` (the former stub contract is preserved).
+    /// Honesty: never fabricates — only manifest-backed observations are
+    /// ever stored; there is no injection path in this impl.
+    ///
+    /// # Errors
+    /// `InternalError` when the store query fails or a stored row fails to
+    /// re-parse as a `HostCapabilityManifest` (rows are validated before
+    /// insert, so a parse failure is storage corruption — surfaced, never
+    /// skipped, never replaced).
     async fn list_peer_host_capability_manifests(
         &self,
     ) -> SpokeResult<Vec<HostCapabilityManifest>> {
-        SpokeResult::Ok(Vec::new())
+        let rows = match nexus_local_db::list_peer_manifests(&self.pool).await {
+            Ok(rows) => rows,
+            Err(e) => {
+                return SpokeResult::Reject(reject_internal(format!(
+                    "peer_hosts query failed: {e}"
+                )));
+            }
+        };
+        let mut manifests = Vec::with_capacity(rows.len());
+        for row in rows {
+            let manifest = match serde_json::from_str::<HostCapabilityManifest>(&row.manifest_json)
+            {
+                Ok(manifest) => manifest,
+                Err(e) => {
+                    return SpokeResult::Reject(reject_internal(format!(
+                        "stored peer manifest for host_id {} is corrupt: {e}",
+                        row.host_id
+                    )));
+                }
+            };
+            manifests.push(manifest);
+        }
+        SpokeResult::Ok(manifests)
     }
 }
 
@@ -87,6 +113,89 @@ fn resolve_device_id_from_standard_home() -> SpokeResult<String> {
     match get_or_create_device_id(&home) {
         Ok(id) => SpokeResult::Ok(id),
         Err(e) => SpokeResult::Reject(reject_internal(format!("device-id unavailable: {e}"))),
+    }
+}
+
+impl NexusAdapter<'_> {
+    /// Record an observed peer host (V1.155 P0 / N-C3 multi-host production).
+    ///
+    /// The outbound `connect()` return observation point (iteration spec
+    /// §Design lock #1): the dialed peer's `HostCapabilityManifest` from
+    /// `PeerSession::remote_manifest()`. The connect host calls this at
+    /// `SpokeConnectNode::connect()` return (`connect::record_dialed_peer`);
+    /// inbound-only peers (peer dials us) are not recorded this iteration —
+    /// the invoke boundary carries only `&PeerId`, and the inbound-manifest
+    /// API change is a spoke-connect change, out of nexus scope.
+    ///
+    /// The adapter is the semantic boundary (spec §8 dep reversal —
+    /// `nexus-local-db` stays spoke-schema-free): the manifest's `host_id`
+    /// becomes the `peer_hosts` PK, the manifest is re-serialized for
+    /// storage (never stored by reference), and the denormalized
+    /// `capabilities` column is written through
+    /// [`nexus_local_db::set_peer_capabilities`]. Fail-closed: a manifest
+    /// with an empty or oversized `host_id` is rejected before insert;
+    /// storage failures surface as rejects (never swallowed).
+    ///
+    /// # Errors
+    /// `InvalidInput` when the manifest `host_id` is empty or exceeds
+    /// [`nexus_local_db::MAX_HOST_ID_CHARS`]; `InternalError` on
+    /// serialization or storage failure.
+    pub async fn record_peer_manifest(&self, manifest: &HostCapabilityManifest) -> SpokeResult<()> {
+        let host_id = manifest.host_id.as_str();
+        if host_id.is_empty() {
+            return SpokeResult::Reject(reject_invalid_input(
+                "peer manifest host_id must not be empty".into(),
+            ));
+        }
+        if host_id.chars().count() > nexus_local_db::MAX_HOST_ID_CHARS {
+            return SpokeResult::Reject(reject_invalid_input(format!(
+                "peer manifest host_id exceeds {} chars",
+                nexus_local_db::MAX_HOST_ID_CHARS
+            )));
+        }
+        let manifest_json = match serde_json::to_string(manifest) {
+            Ok(json) => json,
+            Err(e) => {
+                return SpokeResult::Reject(reject_internal(format!(
+                    "peer manifest serialization failed: {e}"
+                )));
+            }
+        };
+        let capabilities_json = match serde_json::to_string(&manifest.capabilities) {
+            Ok(json) => json,
+            Err(e) => {
+                return SpokeResult::Reject(reject_internal(format!(
+                    "peer capabilities serialization failed: {e}"
+                )));
+            }
+        };
+        let now = chrono::Utc::now().to_rfc3339();
+        match nexus_local_db::record_peer_manifest(&self.pool, host_id, &manifest_json, &now).await
+        {
+            Ok(()) => {}
+            Err(e) => {
+                return SpokeResult::Reject(reject_internal(format!(
+                    "peer manifest recording failed: {e}"
+                )));
+            }
+        }
+        match nexus_local_db::set_peer_capabilities(&self.pool, host_id, &capabilities_json).await {
+            Ok(()) => {}
+            Err(e) => {
+                return SpokeResult::Reject(reject_internal(format!(
+                    "peer capabilities recording failed: {e}"
+                )));
+            }
+        }
+        SpokeResult::Ok(())
+    }
+}
+
+const fn reject_invalid_input(message: String) -> crate::SpokeReject {
+    crate::SpokeReject {
+        code: SpokeRejectCode::InvalidInput,
+        message,
+        details: None,
     }
 }
 
@@ -195,6 +304,116 @@ mod tests {
             SpokeResult::Ok(p) => p,
             SpokeResult::Reject(r) => panic!("peer list is Ok: {r:?}"),
         };
-        assert!(peers.is_empty(), "local-first nexus has no peers");
+        assert!(peers.is_empty(), "empty store has no peers");
+    }
+
+    /// The N-C3 recording contract (V1.155 P0): record a peer manifest at
+    /// the outbound observation point → the port returns exactly it.
+    /// Also pins the production path: the manifest is re-serialized through
+    /// the typed wire (a recorded `HostCapabilityManifest` round-trips field
+    /// for field, including the denormalized capabilities write).
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn recorded_peer_manifest_round_trips_through_port() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("test.db");
+        let pool = nexus_local_db::open_pool(&db_path).await.unwrap();
+        nexus_local_db::run_migrations(&pool).await.unwrap();
+
+        let adapter = NexusAdapter::new(pool);
+        let manifest = match crate::manifest::build_local_host_manifest("peer-host-uuid-0001") {
+            SpokeResult::Ok(m) => m,
+            SpokeResult::Reject(r) => panic!("manifest build is Ok: {r:?}"),
+        };
+        match adapter.record_peer_manifest(&manifest).await {
+            SpokeResult::Ok(()) => {}
+            SpokeResult::Reject(r) => panic!("recording is Ok: {r:?}"),
+        }
+
+        let peers = match adapter.list_peer_host_capability_manifests().await {
+            SpokeResult::Ok(p) => p,
+            SpokeResult::Reject(r) => panic!("peer list is Ok: {r:?}"),
+        };
+        assert_eq!(peers.len(), 1, "recorded peer is listed");
+        assert_eq!(
+            peers[0].host_id, manifest.host_id,
+            "host_id round-trips as the peer_hosts PK"
+        );
+        assert_eq!(
+            peers[0].capabilities, manifest.capabilities,
+            "capabilities round-trip through the typed wire"
+        );
+        assert_eq!(peers[0].roles, manifest.roles);
+        assert_eq!(peers[0].namespaces, manifest.namespaces);
+        assert_eq!(peers[0].schema_version, manifest.schema_version);
+    }
+
+    /// Duplicate host_id → one row: a second observation of the same peer
+    /// upserts (fresh manifest, fresh capabilities) instead of duplicating.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn duplicate_host_id_recording_upserts_single_peer_row() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("test.db");
+        let pool = nexus_local_db::open_pool(&db_path).await.unwrap();
+        nexus_local_db::run_migrations(&pool).await.unwrap();
+
+        let adapter = NexusAdapter::new(pool);
+        let first = match crate::manifest::build_local_host_manifest("peer-host-uuid-0001") {
+            SpokeResult::Ok(m) => m,
+            SpokeResult::Reject(r) => panic!("manifest build is Ok: {r:?}"),
+        };
+        let mut second = first.clone();
+        second.capabilities.push("extra-capability".to_string());
+        match adapter.record_peer_manifest(&first).await {
+            SpokeResult::Ok(()) => {}
+            SpokeResult::Reject(r) => panic!("first record is Ok: {r:?}"),
+        }
+        match adapter.record_peer_manifest(&second).await {
+            SpokeResult::Ok(()) => {}
+            SpokeResult::Reject(r) => panic!("second record is Ok: {r:?}"),
+        }
+
+        let peers = match adapter.list_peer_host_capability_manifests().await {
+            SpokeResult::Ok(p) => p,
+            SpokeResult::Reject(r) => panic!("peer list is Ok: {r:?}"),
+        };
+        assert_eq!(peers.len(), 1, "upsert keeps exactly one row per host_id");
+        assert_eq!(
+            peers[0].capabilities, second.capabilities,
+            "second observation refreshes the manifest + capabilities"
+        );
+    }
+
+    /// Fail-closed: a peer manifest whose `host_id` exceeds the storage cap
+    /// is rejected before insert (never stored, never listed).
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn oversized_peer_host_id_is_rejected_before_insert() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("test.db");
+        let pool = nexus_local_db::open_pool(&db_path).await.unwrap();
+        nexus_local_db::run_migrations(&pool).await.unwrap();
+
+        let adapter = NexusAdapter::new(pool);
+        // `HostCapabilityManifestHostId` only enforces minLength 1 at parse —
+        // an oversized id is constructible, so the adapter's own gate is the
+        // fail-closed boundary (mirrors the storage cap).
+        let huge = "h".repeat(nexus_local_db::MAX_HOST_ID_CHARS + 1);
+        let manifest = match crate::manifest::build_local_host_manifest(&huge) {
+            SpokeResult::Ok(m) => m,
+            SpokeResult::Reject(r) => panic!("manifest build is Ok: {r:?}"),
+        };
+        match adapter.record_peer_manifest(&manifest).await {
+            SpokeResult::Reject(r) => {
+                assert_eq!(r.code, SpokeRejectCode::InvalidInput);
+            }
+            SpokeResult::Ok(()) => panic!("oversized host_id must be rejected"),
+        }
+        let peers = match adapter.list_peer_host_capability_manifests().await {
+            SpokeResult::Ok(p) => p,
+            SpokeResult::Reject(r) => panic!("peer list is Ok: {r:?}"),
+        };
+        assert!(
+            peers.is_empty(),
+            "fail-closed: rejected manifest is never stored"
+        );
     }
 }

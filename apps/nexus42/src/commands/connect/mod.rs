@@ -84,7 +84,12 @@ async fn start(allow_peer: Vec<String>, listen: Vec<String>) -> Result<()> {
     // exactly so the Connect host_id is the SAME value HostManifestPort
     // advertises (single builder SSOT).
     let home = crate::config::user_home_dir()?;
-    let (config, host_id, allowlist_len) =
+    // N-C3 (V1.155 P0): the boot also returns the per-process adapter (the
+    // peer-recording capability). `connect start` never dials — peers are
+    // recorded by the dialing path at `connect()` return
+    // ([`record_dialed_peer`]) — so the adapter is kept alive here (same
+    // Arc the invoke handler captures) for the process lifetime.
+    let (config, host_id, allowlist_len, _adapter) =
         build_host_config(&home, &allow_peer, &listen, None).await?;
 
     // 7. Start the node; block on the tokio runtime until SIGINT.
@@ -206,6 +211,12 @@ fn build_config(
 /// `~/.nexus42` `CliConfig` (`active_creator_id` +
 /// `active_workspace_slug_by_creator` → `resolve_state_db_path`).
 ///
+/// V1.155 P0 N-C3: the fourth return value is the per-process adapter Arc —
+/// the recording capability (and the peer-store handle) the outbound
+/// `connect()`-return wiring needs ([`record_dialed_peer`] /
+/// `NexusAdapter::record_peer_manifest`). `connect start` / `nexus-runtime`
+/// do not dial today, so the adapter flows to callers that do.
+///
 /// # Errors
 /// [`CliError`] on N-C0 assembly, workspace resolution, or DB open failures.
 pub async fn build_host_config(
@@ -213,7 +224,7 @@ pub async fn build_host_config(
     allow_peer: &[String],
     listen: &[String],
     workspace_db: Option<&Path>,
-) -> Result<(ConnectConfig, String, usize)> {
+) -> Result<(ConnectConfig, String, usize, Arc<NexusAdapter<'static>>)> {
     let (mut config, host_id, allowlist_len, peer_scope) = build_config(home, allow_peer, listen)?;
 
     // N-C1: workspace DB open (WAL pool via the shared Schema initializer —
@@ -228,9 +239,54 @@ pub async fn build_host_config(
     // from `~/.nexus42/modules/` (spec §2.1 — never peer-supplied bytes).
     let modules_dir = nexus_home_layout::user_modules_dir(home);
     let adapter = Arc::new(NexusAdapter::new(pool).with_user_modules_dir(modules_dir));
-    config.invoke_handler_v2 = Some(invoke::build_handler(peer_scope, adapter));
+    config.invoke_handler_v2 = Some(invoke::build_handler(peer_scope, Arc::clone(&adapter)));
 
-    Ok((config, host_id, allowlist_len))
+    Ok((config, host_id, allowlist_len, adapter))
+}
+
+/// N-C3 (V1.155 P0): record the dialed peer at `SpokeConnectNode::connect()`
+/// return — the outbound observation point (iteration spec
+/// `fl-r-w3-n-c3-multi-host.md` §Design lock #1).
+///
+/// `session.remote_manifest()` is the dialed peer's manifest as the
+/// `connect_hello` wire type (spoke-connect 0.9.2, verified); it is
+/// converted to the data-type `HostCapabilityManifest` (single builder
+/// SSOT round-trip) and the adapter validates it at the spoke-schema
+/// boundary (`host_id` non-empty/within cap) and upserts it into the
+/// `peer_hosts` table of this host's workspace DB, fail-closed — a
+/// malformed manifest is never stored. Inbound-only peers (a peer dials us)
+/// are not recorded: the invoke boundary carries only `&PeerId`, and the
+/// inbound-manifest API change is a spoke-connect change, out of nexus
+/// scope (spec lock #1 fallback).
+///
+/// Callers decide how to treat a recording failure: the session is already
+/// established, so a record reject is a bookkeeping error, not a connect
+/// failure.
+///
+/// # Errors
+/// [`CliError::Other`] when the wire conversion or the adapter recording is
+/// rejected (manifest validation or storage failure).
+pub async fn record_dialed_peer(
+    adapter: &NexusAdapter<'_>,
+    session: &spoke_connect::PeerSession,
+) -> Result<()> {
+    let manifest =
+        match nexus_spoke_adapter::manifest::from_connect_hello(session.remote_manifest()) {
+            SpokeResult::Ok(manifest) => manifest,
+            SpokeResult::Reject(reject) => {
+                return Err(CliError::Other(format!(
+                    "peer manifest conversion rejected: {}",
+                    reject.message
+                )));
+            }
+        };
+    match adapter.record_peer_manifest(&manifest).await {
+        SpokeResult::Ok(()) => Ok(()),
+        SpokeResult::Reject(reject) => Err(CliError::Other(format!(
+            "peer manifest recording rejected: {}",
+            reject.message
+        ))),
+    }
 }
 
 /// Open the active-workspace `SQLite` pool (WAL mode, migrations applied) —

@@ -172,6 +172,43 @@ pub fn to_connect_hello(manifest: &HostCapabilityManifest) -> SpokeResult<Connec
     }
 }
 
+/// Convert the `connect_hello` wire manifest back into the data-type
+/// [`HostCapabilityManifest`] via a JSON round-trip — the companion of
+/// [`to_connect_hello`].
+///
+/// The wire variant has no `PartialEq`, so equality is asserted at the JSON
+/// level. V1.155 P0 N-C3: the outbound `connect()` return exposes the
+/// peer's manifest as the wire type (`spoke_connect::PeerSession::remote_manifest`
+/// returns `&ConnectHelloManifest`); the adapter's peer-recording boundary
+/// (`NexusAdapter::record_peer_manifest`) consumes the data type, so the
+/// recording wiring converts here.
+///
+/// # Errors
+/// Returns `InternalError` when the round-trip fails. The two types are
+/// schema-identical today, so this only fires if a future schema edit
+/// desynchronizes them — the locked wire family must stay in lockstep.
+#[must_use]
+pub fn from_connect_hello(wire: &ConnectHelloManifest) -> SpokeResult<HostCapabilityManifest> {
+    let value = match serde_json::to_value(wire) {
+        Ok(value) => value,
+        Err(e) => {
+            return SpokeResult::Reject(SpokeReject {
+                code: SpokeRejectCode::InternalError,
+                message: format!("connect_hello manifest serialization failed: {e}"),
+                details: None,
+            });
+        }
+    };
+    match serde_json::from_value(value) {
+        Ok(manifest) => SpokeResult::Ok(manifest),
+        Err(e) => SpokeResult::Reject(SpokeReject {
+            code: SpokeRejectCode::InternalError,
+            message: format!("data manifest round-trip failed: {e}"),
+            details: None,
+        }),
+    }
+}
+
 /// One-call N-C0 builder for the Connect Host's `ConnectConfig.local_manifest`.
 ///
 /// Same single-builder SSOT as [`build_local_host_manifest`]; the connect
@@ -480,5 +517,35 @@ mod tests {
             ),
             "connect builder must reject empty host_id like the data builder"
         );
+    }
+
+    #[test]
+    fn from_connect_hello_round_trips_the_wire_type_back_to_data() {
+        // N-C3 (V1.155 P0): the outbound `connect()` return exposes the
+        // peer's manifest as the `connect_hello` wire type
+        // (`PeerSession::remote_manifest()`); the adapter's recording
+        // boundary consumes the data type. The reverse conversion must be
+        // lossless — a wire manifest round-trips to the identical data
+        // manifest (JSON-level equality: neither type has `PartialEq`).
+        let data = match build_local_host_manifest("test-device-uuid-0000") {
+            SpokeResult::Ok(m) => m,
+            SpokeResult::Reject(r) => panic!("builder rejected: {r:?}"),
+        };
+        let hello = match to_connect_hello(&data) {
+            SpokeResult::Ok(m) => m,
+            SpokeResult::Reject(r) => panic!("to_connect_hello rejected: {r:?}"),
+        };
+        let back = match from_connect_hello(&hello) {
+            SpokeResult::Ok(m) => m,
+            SpokeResult::Reject(r) => panic!("from_connect_hello rejected: {r:?}"),
+        };
+        assert_eq!(
+            serde_json::to_value(&back).expect("back serializes"),
+            serde_json::to_value(&data).expect("data serializes"),
+            "wire → data round-trip must be lossless"
+        );
+        assert_eq!(back.host_id, data.host_id);
+        assert_eq!(back.capabilities, data.capabilities);
+        assert_eq!(back.roles, data.roles);
     }
 }

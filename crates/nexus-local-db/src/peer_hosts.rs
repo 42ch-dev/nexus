@@ -103,6 +103,67 @@ pub async fn list_peer_manifests(pool: &SqlitePool) -> Result<Vec<PeerHostRow>, 
     Ok(rows)
 }
 
+/// Set the denormalized `capabilities` column for a recorded peer host
+/// (V1.155 P0 T2 — the adapter-layer write path the DDL reserves:
+/// "populated by the adapter layer").
+///
+/// The `manifest_json` column stays the source of truth; `capabilities` is
+/// the query-friendly denormalization (T3 operator reads). Fail-closed:
+/// `capabilities_json` must parse as a JSON array within
+/// [`MAX_MANIFEST_JSON_BYTES`] and `host_id` must be non-empty and bounded —
+/// malformed input is rejected with [`LocalDbError::ValidationError`] and
+/// nothing is written. A missing row is a no-op (the caller records the
+/// manifest first via [`record_peer_manifest`]; the column then keeps its
+/// `'[]'` DEFAULT, which is always honest).
+///
+/// # Errors
+///
+/// Returns [`LocalDbError::ValidationError`] for malformed/oversized input
+/// and [`LocalDbError::Sqlx`] on database failure.
+pub async fn set_peer_capabilities(
+    pool: &SqlitePool,
+    host_id: &str,
+    capabilities_json: &str,
+) -> Result<(), LocalDbError> {
+    validate_capabilities_input(host_id, capabilities_json)?;
+    // SAFETY: static UPDATE against peer_hosts with bind params only (no
+    // user-controlled SQL fragments).
+    sqlx::query("UPDATE peer_hosts SET capabilities = ? WHERE host_id = ?")
+        .bind(capabilities_json)
+        .bind(host_id)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
+/// Fail-closed input gate for [`set_peer_capabilities`]: `host_id` non-empty
+/// and bounded, `capabilities_json` a JSON array within the size cap.
+/// Rejects malformed/oversized input with [`LocalDbError::ValidationError`]
+/// before anything reaches the database.
+fn validate_capabilities_input(host_id: &str, capabilities_json: &str) -> Result<(), LocalDbError> {
+    if host_id.is_empty() {
+        return Err(LocalDbError::ValidationError(
+            "peer host_id must not be empty".to_string(),
+        ));
+    }
+    if host_id.chars().count() > MAX_HOST_ID_CHARS {
+        return Err(LocalDbError::ValidationError(format!(
+            "peer host_id exceeds {MAX_HOST_ID_CHARS} chars"
+        )));
+    }
+    if capabilities_json.len() > MAX_MANIFEST_JSON_BYTES {
+        return Err(LocalDbError::ValidationError(format!(
+            "peer capabilities_json exceeds {MAX_MANIFEST_JSON_BYTES} bytes"
+        )));
+    }
+    match serde_json::from_str::<serde_json::Value>(capabilities_json) {
+        Ok(serde_json::Value::Array(_)) => Ok(()),
+        _ => Err(LocalDbError::ValidationError(
+            "peer capabilities_json must be a JSON array".to_string(),
+        )),
+    }
+}
+
 /// Fail-closed input gate for [`record_peer_manifest`]: `host_id` non-empty
 /// and bounded, `manifest_json` parseable JSON within the size cap, `now` an
 /// RFC 3339 UTC timestamp. Rejects malformed/oversized input with
@@ -304,5 +365,71 @@ mod tests {
         let rows = list_peer_manifests(&pool).await.unwrap();
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].capabilities, "[{\"kind\":\"kb\",\"version\":1}]");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn set_capabilities_round_trips_through_list() {
+        let (pool, _dir) = fresh_pool().await;
+        record_peer_manifest(&pool, "peer_a", MANIFEST_V1, T1)
+            .await
+            .unwrap();
+        set_peer_capabilities(&pool, "peer_a", "[\"spoke-baseline\",\"l2-computable\"]")
+            .await
+            .unwrap();
+
+        let rows = list_peer_manifests(&pool).await.unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(
+            rows[0].capabilities, "[\"spoke-baseline\",\"l2-computable\"]",
+            "adapter-layer capabilities write path persists"
+        );
+        assert_eq!(
+            rows[0].manifest_json, MANIFEST_V1,
+            "manifest_json untouched by the denormalized write"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn set_capabilities_rejects_malformed_or_oversized_input() {
+        let (pool, _dir) = fresh_pool().await;
+        record_peer_manifest(&pool, "peer_a", MANIFEST_V1, T1)
+            .await
+            .unwrap();
+        for bad in [
+            "not json [",
+            "{\"kind\":\"kb\"}",
+            "42",
+            "\"spoke-baseline\"",
+        ] {
+            let err = set_peer_capabilities(&pool, "peer_a", bad)
+                .await
+                .unwrap_err();
+            assert!(
+                matches!(err, LocalDbError::ValidationError(_)),
+                "bad capabilities={bad:?}"
+            );
+        }
+        let huge = format!("[\"{}\"]", "x".repeat(MAX_MANIFEST_JSON_BYTES));
+        let err = set_peer_capabilities(&pool, "peer_a", &huge)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, LocalDbError::ValidationError(_)));
+        assert_eq!(
+            list_peer_manifests(&pool).await.unwrap()[0].capabilities,
+            "[]",
+            "fail-closed: rejected writes leave the DEFAULT '[]' untouched"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn set_capabilities_unknown_host_is_a_noop() {
+        let (pool, _dir) = fresh_pool().await;
+        set_peer_capabilities(&pool, "peer_ghost", "[\"spoke-baseline\"]")
+            .await
+            .unwrap();
+        assert!(
+            list_peer_manifests(&pool).await.unwrap().is_empty(),
+            "no row is created by the denormalized write"
+        );
     }
 }
