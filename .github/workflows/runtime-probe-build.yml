@@ -71,22 +71,29 @@ jobs:
             $process = Start-Process -FilePath $runtime -WindowStyle Hidden -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru
             $deadline = (Get-Date).AddSeconds(45)
             $ready = ''
-            do {
+            while ((Get-Date) -lt $deadline) {
               Start-Sleep -Milliseconds 250
-              if ($process.HasExited) { break }
-              if (Test-Path $stdout) { $ready = Get-Content -Raw -Encoding UTF8 $stdout }
-            } while ((Get-Date) -lt $deadline -and $ready -notmatch 'press Ctrl-C to stop')
+              $process.Refresh()
+              if (Test-Path $stdout) {
+                $runtimeOut = Get-Content -Raw -Encoding UTF8 $stdout
+                $ready = if ($null -eq $runtimeOut) { '' } else { [string]$runtimeOut }
+              }
+              if ($process.HasExited -or $ready -match 'press Ctrl-C to stop') { break }
+            }
 
             $runtimeErr = if (Test-Path $stderr) { Get-Content -Raw -Encoding UTF8 $stderr } else { '' }
             Write-Output $ready
             if ($runtimeErr) { Write-Output "runtime stderr:`n$runtimeErr" }
             if ($process.HasExited) { throw "runtime exited early with code $($process.ExitCode)" }
+            if ([string]::IsNullOrWhiteSpace($ready)) { throw 'runtime readiness output was empty' }
             if ($ready -notmatch 'upsert/promote/relate/check/assemble/compute served') { throw 'runtime readiness surface missing' }
 
-            $listenLine = ($ready -split "`r?`n" | Where-Object { $_.Trim().StartsWith('listen:') } | Select-Object -First 1).Trim()
-            $peerLine = ($ready -split "`r?`n" | Where-Object { $_.Trim().StartsWith('peer_id:') } | Select-Object -First 1).Trim()
-            $listen = $listenLine.Substring('listen:'.Length).Trim()
-            $hostPeer = $peerLine.Substring('peer_id:'.Length).Trim()
+            $listenMatch = [regex]::Match($ready, '(?m)^\s*listen:\s*(\S+)\s*$')
+            $peerMatch = [regex]::Match($ready, '(?m)^\s*peer_id:\s*(\S+)\s*$')
+            if (-not $listenMatch.Success) { throw 'runtime readiness omitted listen address' }
+            if (-not $peerMatch.Success) { throw 'runtime readiness omitted peer id' }
+            $listen = $listenMatch.Groups[1].Value
+            $hostPeer = $peerMatch.Groups[1].Value
             $probeOutput = & $probe --addr $listen --host-peer $hostPeer
             Write-Output $probeOutput
             if ($LASTEXITCODE -ne 0) { throw "reference probe exited $LASTEXITCODE" }
