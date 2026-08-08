@@ -6,7 +6,7 @@ category: architecture-patterns
 severity: medium
 plan_id: 2026-07-28-v1.141-p1-adapter-port-architecture-adoption
 tags: [spoke, adapter, baseline-ports, orchestration, surface-b, cas, occ, call-boundary-invariant, mock-test-pattern]
-last_updated: 2026-07-28
+last_updated: 2026-08-08
 applies_when: Consuming SPOKE ≥ 0.3.0 adapter-port + injection-orchestration architecture from a product adapter boundary (Surface B adoption); deciding between pure delegates (Surface A) and port+orchestrator (Surface B); verifying CAS through orchestrators; enforcing call-boundary invariant mechanically
 ---
 
@@ -144,9 +144,11 @@ V1.142 shipped the production adapter in `nexus-local-db` implementing all 6 bas
 | `ScopeQueryPort.list_knowledge_entries` | **Production** | `kb_key_blocks` by `world_id` |
 | `ScopeQueryPort.list_timeline_events` | **Stub (empty)** | no persisted `TimelineEvent` storage; nexus-narrative holds in-memory |
 | `RuleQueryPort` | **Stub (empty)** | no persisted spoke `Rule`; rules come from works config |
-| `HostManifestPort` | **Stub (static self)** | local-first nexus; static self manifest; no peers |
+| `HostManifestPort.list_peer_host_capability_manifests` | **Production (V1.155 P0)** | `peer_hosts` (workspace DB); outbound-observation recording — dialer records the dialed peer at `connect()` return; `connect dial` / `connect peers list` CLI |
 
-Stub families are documented per spec §7.4 with roadmap triggers for full versions.
+The remaining stub family (`RuleQueryPort`) is documented per spec §7.4 with a roadmap trigger for the full version.
+
+**HostManifestPort production (V1.155 P0)** follows the honesty contract: `list_peer_host_capability_manifests` returns **only observed peers** — the dialer records the dialed peer into the workspace-DB `peer_hosts` table at `connect()` return — never fabricated entries. Inbound-only peers are **not recorded**: spoke-connect exposes no hook to observe inbound peers (documented gap, out of scope).
 
 ### Production adapter patterns (V1.142 learnings)
 
