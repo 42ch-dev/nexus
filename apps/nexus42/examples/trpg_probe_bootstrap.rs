@@ -30,7 +30,9 @@ async fn main() -> anyhow::Result<()> {
     let config = CliConfig::load_from_home(&home).context("load explicit-home config")?;
     let db_path = resolve_state_db_path_from_home(&config, &home)
         .context("resolve explicit-home workspace DB")?;
-    let pool = Schema::init(&db_path).await.context("initialize workspace DB")?;
+    let pool = Schema::init(&db_path)
+        .await
+        .context("initialize workspace DB")?;
     let now = chrono::Utc::now().to_rfc3339();
     sqlx::query(
         "INSERT INTO creators (creator_id, display_name, status, cached_at, data) \
