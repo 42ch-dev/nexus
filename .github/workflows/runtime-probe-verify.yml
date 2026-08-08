@@ -49,6 +49,7 @@ jobs:
             'PROVENANCE.json',
             'runtime_smoke_probe.exe',
             'SHA256SUMS',
+            'trpg_probe_bootstrap.exe',
             'trpg_raw_bridge.exe'
           )
           $expectedFiles = $expectedFiles | Sort-Object
@@ -72,6 +73,7 @@ jobs:
             'nexus-runtime.exe',
             'PROVENANCE.json',
             'runtime_smoke_probe.exe',
+            'trpg_probe_bootstrap.exe',
             'trpg_raw_bridge.exe'
           )
           $seen = @{}
@@ -187,6 +189,14 @@ jobs:
           [System.IO.File]::WriteAllBytes($seed, [byte[]](1..32))
           $runtime = Join-Path $env:ARTIFACT_DIR 'nexus-runtime.exe'
           $bridge = Join-Path $env:ARTIFACT_DIR 'trpg_raw_bridge.exe'
+          $bootstrap = Join-Path $env:ARTIFACT_DIR 'trpg_probe_bootstrap.exe'
+          $bootstrapOutput = & $bootstrap --home $runtimeHome
+          if ($LASTEXITCODE -ne 0) { throw "probe bootstrap exited $LASTEXITCODE" }
+          $bootstrapResult = ($bootstrapOutput -join "`n") | ConvertFrom-Json
+          if ($bootstrapResult.schema_version -ne 1 -or $bootstrapResult.world_id -notmatch '^wld_') {
+            throw "probe bootstrap returned an invalid world: $bootstrapOutput"
+          }
+          $worldId = $bootstrapResult.world_id
           $peerOutput = & $bridge --identity-seed $seed --print-peer-only
           if ($LASTEXITCODE -ne 0) { throw "bridge identity command exited $LASTEXITCODE" }
           $peerMatch = [regex]::Match(($peerOutput -join "`n"), '^BRIDGE_PEER_ID=(\S+)$')
@@ -196,7 +206,7 @@ jobs:
           $allowlist = @{
             peer_ids = @(@{
               peer_id = $bridgePeer
-              world_scope = @('wld_trpg_ci')
+              world_scope = @($worldId)
               op_scope = @('upsert', 'promote', 'relate', 'assemble')
               module_scope = @()
             })
@@ -230,11 +240,12 @@ jobs:
             if (-not $hostPeerMatch.Success) { throw 'runtime readiness omitted peer id' }
 
             $commands = Join-Path $env:RUNNER_TEMP 'trpg-bridge-commands.ndjson'
-            $commandLines = @(
-              '{"id":"deny-op","op":"check","payload":{"scope":{"scope_id":"wld_trpg_ci"}}}',
-              '{"id":"deny-world","op":"assemble","payload":{"scope":{"scope_id":"wld_other"},"max_entries":1}}',
-              '{"id":"allow","op":"assemble","payload":{"scope":{"scope_id":"wld_trpg_ci"},"max_entries":1}}'
+            $commandDocuments = @(
+              @{ id = 'deny-op'; op = 'check'; payload = @{ scope = @{ scope_id = $worldId } } },
+              @{ id = 'deny-world'; op = 'assemble'; payload = @{ scope = @{ scope_id = 'wld_other' }; max_entries = 1 } },
+              @{ id = 'allow'; op = 'assemble'; payload = @{ scope = @{ scope_id = $worldId }; max_entries = 1 } }
             )
+            $commandLines = $commandDocuments | ForEach-Object { $_ | ConvertTo-Json -Compress -Depth 5 }
             $commandLines | Set-Content -Encoding utf8NoBOM $commands
             $bridgeOut = Join-Path $env:RUNNER_TEMP 'trpg-bridge.stdout.log'
             $bridgeErr = Join-Path $env:RUNNER_TEMP 'trpg-bridge.stderr.log'

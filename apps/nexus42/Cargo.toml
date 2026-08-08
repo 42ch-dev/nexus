@@ -54,6 +54,13 @@ name = "trpg_raw_bridge"
 path = "examples/trpg_raw_bridge.rs"
 required-features = ["connect-host"]
 
+# Creates one world in the standalone probe's disposable workspace through
+# Nexus' own schema and narrative-write API before the runtime starts.
+[[example]]
+name = "trpg_probe_bootstrap"
+path = "examples/trpg_probe_bootstrap.rs"
+required-features = ["connect-host"]
+
 [dependencies]
 nexus-contracts = { path = "../../crates/nexus-contracts" }
 nexus-orchestration = { path = "../../crates/nexus-orchestration" }

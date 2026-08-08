@@ -35,8 +35,8 @@ jobs:
       - name: Check explicit-home regression tests
         run: cargo test --target x86_64-pc-windows-msvc -p nexus42 --lib --no-default-features --features connect-host explicit_home
 
-      - name: Build runtime, official probe, and Trpg bridge
-        run: cargo build --release --target x86_64-pc-windows-msvc -p nexus42 --bin nexus-runtime --example runtime_smoke_probe --example trpg_raw_bridge --no-default-features --features connect-host
+      - name: Build runtime and probe tools
+        run: cargo build --release --target x86_64-pc-windows-msvc -p nexus42 --bin nexus-runtime --example runtime_smoke_probe --example trpg_raw_bridge --example trpg_probe_bootstrap --no-default-features --features connect-host
 
       - name: Package reusable artifact
         shell: pwsh
@@ -46,6 +46,7 @@ jobs:
           Copy-Item "target/x86_64-pc-windows-msvc/release/nexus-runtime.exe" $out
           Copy-Item "target/x86_64-pc-windows-msvc/release/examples/runtime_smoke_probe.exe" $out
           Copy-Item "target/x86_64-pc-windows-msvc/release/examples/trpg_raw_bridge.exe" $out
+          Copy-Item "target/x86_64-pc-windows-msvc/release/examples/trpg_probe_bootstrap.exe" $out
 
           $provenance = [ordered]@{
             schema_version = 1
@@ -91,3 +92,4 @@ jobs:
           if ($runtime -notmatch '^nexus-runtime ') { throw "unexpected runtime version: $runtime" }
           if ($peer -notmatch '^PROBE_PEER_ID=12D3KooW') { throw "unexpected probe identity: $peer" }
           if ($bridgePeer -notmatch '^BRIDGE_PEER_ID=12D3KooW') { throw "unexpected bridge identity: $bridgePeer" }
+          if (-not (Test-Path "trpg-nexus-context-probe-windows-x64/trpg_probe_bootstrap.exe")) { throw 'probe bootstrap missing' }
