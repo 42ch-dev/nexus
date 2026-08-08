@@ -18,6 +18,11 @@
 //! through the adapter boundary (`NexusAdapter::list_observed_peer_hosts` —
 //! `host_id`, capabilities, `last_seen`; empty store → `no peers observed`).
 //!
+//! V1.155 P1 (capability-token production): `connect token issue` is the
+//! operator issuance surface — `~/.nexus42/connect/issuer.key` lifecycle
+//! (create-once 0600, distinct from `identity.key`) + the signed wire proof
+//! `{v, claims, sig}` on stdout ([`token`]).
+//!
 //! Topology rules (product draft `fl-r-connect-host-foundation.md` §2.1/§2.6):
 //! - mDNS is **never** enabled (`spoke-connect/mdns` not in the feature set).
 //! - `nexus42 daemon start` MUST NOT open a Connect listener — only
@@ -35,6 +40,8 @@ pub mod identity;
 // V1.153 P1 N-C1 → V1.154 P0 T2: the session-peer `InvokeHandlerV2`
 // closure (architect-locked home; identity = the authenticated session peer).
 pub mod invoke;
+// V1.155 P1: capability-token production issuance — `connect token issue`.
+pub mod token;
 
 use crate::errors::{CliError, Result};
 use clap::Subcommand;
@@ -93,6 +100,15 @@ pub enum ConnectCommand {
         #[arg(long = "allow-peer", value_name = "PEER_ID")]
         allow_peer: Vec<String>,
     },
+    /// Issue signed capability tokens (V1.155 P1 production issuance).
+    ///
+    /// The operator issuance surface: loads or creates the issuer key
+    /// (`~/.nexus42/connect/issuer.key`, create-once 0600) and prints the
+    /// signed wire proof `{v, claims, sig}` as JSON on stdout.
+    Token {
+        #[command(subcommand)]
+        command: token::TokenCommand,
+    },
 }
 
 /// `connect peers` subcommands.
@@ -119,6 +135,7 @@ pub async fn run(command: ConnectCommand) -> Result<()> {
         ConnectCommand::Start { allow_peer, listen } => start(allow_peer, listen).await,
         ConnectCommand::Peers { command } => run_peers(command).await,
         ConnectCommand::Dial { peer, allow_peer } => dial(&peer, allow_peer).await,
+        ConnectCommand::Token { command } => token::run(command),
     }
 }
 
