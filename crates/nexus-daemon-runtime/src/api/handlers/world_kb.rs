@@ -1678,7 +1678,7 @@ pub async fn get_graph(
 /// `GET /v1/daemon/worlds/{world_id}/kb/key-blocks/{key_block_id}/state` —
 /// computable `WorldKbEntry` state read.
 ///
-/// V1.114 P2: dedicated read surface for `body.state` of computable KnowledgeEntries.
+/// V1.114 P2: dedicated read surface for `body.state` of computable `KnowledgeEntry` rows.
 /// Returns `state` when `body.computable` is true; `state: null` and
 /// `is_computable: false` otherwise. `version` mirrors the per-row OCC
 /// revision so callers can use the same OCC pattern as the graph/patch flows.
