@@ -57,8 +57,8 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $home = Join-Path $env:RUNNER_TEMP 'reference-home'
-          $nexusDir = Join-Path $home '.nexus42'
+          $runtimeHome = Join-Path $env:RUNNER_TEMP 'reference-home'
+          $nexusDir = Join-Path $runtimeHome '.nexus42'
           $connectDir = Join-Path $nexusDir 'connect'
           New-Item -ItemType Directory -Force -Path $connectDir | Out-Null
           $globalNexusDir = Join-Path $env:USERPROFILE '.nexus42'
@@ -85,7 +85,7 @@ jobs:
           $stderr = Join-Path $env:RUNNER_TEMP 'nexus-runtime.stderr.log'
           $process = $null
           try {
-            $process = Start-Process -FilePath $runtime -ArgumentList @('--home', $home) -WindowStyle Hidden -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru
+            $process = Start-Process -FilePath $runtime -ArgumentList @('--home', $runtimeHome) -WindowStyle Hidden -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru
             $deadline = (Get-Date).AddSeconds(45)
             $ready = ''
             while ((Get-Date) -lt $deadline) {
@@ -130,8 +130,8 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $home = Join-Path $env:RUNNER_TEMP 'trpg-bridge-home'
-          $nexusDir = Join-Path $home '.nexus42'
+          $runtimeHome = Join-Path $env:RUNNER_TEMP 'trpg-bridge-home'
+          $nexusDir = Join-Path $runtimeHome '.nexus42'
           $connectDir = Join-Path $nexusDir 'connect'
           New-Item -ItemType Directory -Force -Path $connectDir | Out-Null
           $globalNexusDir = Join-Path $env:USERPROFILE '.nexus42'
@@ -168,7 +168,7 @@ jobs:
           $runtimeProcess = $null
           $bridgeProcess = $null
           try {
-            $runtimeProcess = Start-Process -FilePath $runtime -ArgumentList @('--home', $home) -WindowStyle Hidden -RedirectStandardOutput $runtimeOut -RedirectStandardError $runtimeErr -PassThru
+            $runtimeProcess = Start-Process -FilePath $runtime -ArgumentList @('--home', $runtimeHome) -WindowStyle Hidden -RedirectStandardOutput $runtimeOut -RedirectStandardError $runtimeErr -PassThru
             $deadline = (Get-Date).AddSeconds(45)
             $ready = ''
             while ((Get-Date) -lt $deadline) {
