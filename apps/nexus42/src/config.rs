@@ -1451,7 +1451,7 @@ pub fn resolve_state_db_path_from_home(
         )
     })?;
     let slug = config.workspace_slug_for_creator(cid);
-    Ok(crate::paths::state_db_path(&user_home, cid, slug))
+    Ok(crate::paths::state_db_path(user_home, cid, slug))
 }
 
 /// Load config and resolve the local `SQLite` database path.

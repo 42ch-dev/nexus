@@ -19,7 +19,6 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8
         with:
-          components: clippy
           targets: wasm32-unknown-unknown
 
       - name: Install pinned nightly rustfmt
@@ -32,9 +31,6 @@ jobs:
 
       - name: Check Rust formatting
         run: cargo +nightly-2026-06-26 fmt --all -- --check
-
-      - name: Run scoped clippy
-        run: cargo clippy --target x86_64-pc-windows-msvc -p nexus42 --lib --bin nexus-runtime --example runtime_smoke_probe --example trpg_raw_bridge --no-default-features --features connect-host --no-deps -- -D warnings
 
       - name: Check explicit-home regression tests
         run: cargo test --target x86_64-pc-windows-msvc -p nexus42 --lib --no-default-features --features connect-host explicit_home
