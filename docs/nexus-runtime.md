@@ -240,4 +240,5 @@ distinct trust role from `identity.key`) and prints the signed wire proof
   (incl. `wasm_sha256`), `module_scope` allowlist, operator install.
 - [Integrator walkthrough](../strategy-samples/README.md) — worked example
   end to end.
+- [Docs index](README.md) — all docs.
 - ABI spec: [`.mstar/specs/compute-module-abi.md`](../.mstar/specs/compute-module-abi.md).

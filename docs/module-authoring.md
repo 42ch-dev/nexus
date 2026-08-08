@@ -303,6 +303,7 @@ is documented in the
 - [Runtime usage](nexus-runtime.md) — install/run, allowlist + `module_scope`
   setup, home layout.
 - [Strategy authoring](strategy-authoring.md) — the strategy side of the loop.
+- [Docs index](README.md) — all docs.
 - Module guide: [`modules/README.md`](../modules/README.md) — authoring
   walkthrough + embedding procedure.
 - Reference implementation: [`modules/basic-combat/`](../modules/basic-combat/).

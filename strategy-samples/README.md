@@ -661,6 +661,7 @@ idempotency ledger.
 
 ## 7. References
 
+- Docs index: [`../docs/README.md`](../docs/README.md)
 - Strategy bundles: [`game-narrative/`](./game-narrative/),
   [`react-trpg-turn/`](./react-trpg-turn/)
 - Strategy authoring guide (manifest format, lanes, prompt templates,

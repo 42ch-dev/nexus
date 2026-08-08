@@ -309,4 +309,4 @@ drives the strategy side (its own timer/event loop + LLM step using the
 templates) and writes results into the World over Connect — see
 [`nexus-runtime.md`](nexus-runtime.md) for the runtime surface and the
 [integrator walkthrough](../strategy-samples/README.md) for the wire
-patterns.
+patterns. See the [docs index](README.md) for the full doc set.
