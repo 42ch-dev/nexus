@@ -183,6 +183,15 @@ pub(crate) fn load_issuer_key_at(path: &Path) -> Result<Keypair> {
 /// TTL for provider-minted proofs (seconds, V1.155 P1): proofs are minted
 /// on demand at challenge time; 5 minutes covers handshake exchanges
 /// without keeping long-lived tokens around.
+///
+/// Clock-skew interplay (QC2 F-002): the ±60s skew guard is applied at
+/// *issuance* (spoke rejects `exp <= now + 60`), and the proof is verified
+/// exactly once at challenge-response — the session stores a boolean grant
+/// afterwards and never re-checks `exp` mid-session. The 300s lifetime
+/// therefore only needs to outlive the one-shot challenge round-trip and
+/// clear the 60s guard: a verifier clock up to ~4 min ahead of the minting
+/// host still accepts, and beyond that the dial fails loudly (fail-closed,
+/// recoverable — never a silent grant).
 pub const PROVIDER_TOKEN_TTL_SECONDS: u64 = 300;
 
 /// Build the mint-on-demand [`CapabilityTokenProvider`] closure for an
@@ -210,7 +219,7 @@ pub(crate) fn build_provider(
     let iss = issuer_peer_id(issuer)?;
     let seed = issuer_secret_bytes(issuer)?;
     let provider = move |aud: &str| -> std::result::Result<serde_json::Value, String> {
-        let now = now_unix_seconds();
+        let now = now_unix_seconds()?;
         let claims = CapabilityClaims {
             iss: iss.clone(),
             sub: sub.clone(),
@@ -235,9 +244,13 @@ pub(crate) fn build_provider(
 /// stamped at `now` (within the ±60s clock-skew window by construction).
 ///
 /// # Errors
-/// [`CliError::Config`] on `--iss` mismatch, key-file corruption, or spoke
-/// issuance rejection (non-empty capabilities, `exp` beyond
-/// `now + 60s` skew, issuer/claims mismatch).
+/// [`CliError::Config`] on empty/blank `sub`/`aud` (QC2 F-001: clap
+/// enforces *presence* only — an empty value would mint an inert token,
+/// since spoke binds `sub` to the noise-authenticated session peer and
+/// `aud` to the challenger, both always non-empty peer ids), `--iss`
+/// mismatch, key-file corruption, or spoke issuance rejection
+/// (non-empty capabilities, `exp` beyond `now + 60s` skew,
+/// issuer/claims mismatch).
 pub fn issue_token(
     home: &Path,
     sub: &str,
@@ -247,6 +260,19 @@ pub fn issue_token(
     iss: Option<&str>,
     now: u64,
 ) -> Result<CapabilityTokenProof> {
+    // Validated BEFORE the issuer-key load so a usage error has no
+    // filesystem side effect (the key file is created only on a valid
+    // issue, not on flag misuse).
+    if sub.trim().is_empty() {
+        return Err(CliError::Config(
+            "--sub must be a non-empty peer id (the subject who may present the token)".into(),
+        ));
+    }
+    if aud.trim().is_empty() {
+        return Err(CliError::Config(
+            "--aud must be a non-empty peer id (the verifying node)".into(),
+        ));
+    }
     let keypair = load_or_create_issuer_key(home)?;
     let derived_iss = issuer_peer_id(&keypair)?;
     let iss = iss.unwrap_or(&derived_iss);
@@ -300,18 +326,27 @@ fn parse_capabilities(raw: &str) -> Result<Vec<String>> {
 
 /// Current time in Unix seconds (the unit spoke `issue_capability_token`
 /// and `verify_capability_token` operate on).
-fn now_unix_seconds() -> u64 {
+///
+/// # Errors
+/// `Err` when the system clock is before the Unix epoch (pre-epoch clock
+/// failure). QC3-001: the failure must surface as a mint error instead of
+/// silently minting a degenerate proof (`iat=0` / `exp=300`) that every
+/// healthy verifier would reject — a loud provider error beats a channel
+/// drop that looks like a generic provider failure.
+fn now_unix_seconds() -> std::result::Result<u64, String> {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |d| d.as_secs())
+        .map(|d| d.as_secs())
+        .map_err(|e| format!("system clock is before the Unix epoch; refusing to mint: {e}"))
 }
 
 /// Run a `connect token` command.
 ///
 /// # Errors
-/// [`CliError::Config`] on flag-validation failures (empty capabilities,
-/// `--iss` ≠ derived issuer, exp within the clock-skew window), key-file
-/// corruption, or spoke issuance rejection.
+/// [`CliError::Config`] on flag-validation failures (empty/blank
+/// `--sub`/`--aud`, empty capabilities, `--iss` ≠ derived issuer, exp
+/// within the clock-skew window), key-file corruption, or spoke issuance
+/// rejection.
 pub fn run(command: TokenCommand) -> Result<()> {
     match command {
         TokenCommand::Issue {
@@ -330,7 +365,7 @@ pub fn run(command: TokenCommand) -> Result<()> {
                 &capabilities,
                 exp,
                 iss.as_deref(),
-                now_unix_seconds(),
+                now_unix_seconds().map_err(CliError::Other)?,
             )?;
             let json = serde_json::to_string(&proof).map_err(CliError::Json)?;
             println!("{json}");
@@ -611,6 +646,101 @@ mod tests {
         assert!(
             matches!(parse_capabilities("   "), Err(CliError::Config(_))),
             "blank list rejected"
+        );
+    }
+
+    #[test]
+    fn empty_sub_rejected() {
+        // QC2 F-001: clap enforces presence only — an empty `--sub ""`
+        // must be a usage error, not an inert token.
+        let home = temp_home();
+        let caps = vec!["spoke-baseline".to_string()];
+        for bad in ["", "   ", "\t"] {
+            let err = issue_token(
+                home.path(),
+                bad,
+                "audience-peer",
+                &caps,
+                NOW + 3600,
+                None,
+                NOW,
+            )
+            .expect_err("empty/blank sub must be rejected");
+            assert!(
+                matches!(err, CliError::Config(_)),
+                "empty sub is a usage error: {err:?}"
+            );
+        }
+        // A usage error must not create the issuer key file (no side effect).
+        let path = nexus_home_layout::connect_issuer_key_path(home.path());
+        assert!(
+            !path.exists(),
+            "rejected issue must not create the issuer key"
+        );
+    }
+
+    #[test]
+    fn empty_aud_rejected() {
+        // QC2 F-001: same for `--aud`.
+        let home = temp_home();
+        let caps = vec!["spoke-baseline".to_string()];
+        for bad in ["", "   "] {
+            let err = issue_token(
+                home.path(),
+                "subject-peer",
+                bad,
+                &caps,
+                NOW + 3600,
+                None,
+                NOW,
+            )
+            .expect_err("empty/blank aud must be rejected");
+            assert!(
+                matches!(err, CliError::Config(_)),
+                "empty aud is a usage error: {err:?}"
+            );
+        }
+        let path = nexus_home_layout::connect_issuer_key_path(home.path());
+        assert!(
+            !path.exists(),
+            "rejected issue must not create the issuer key"
+        );
+    }
+
+    #[test]
+    fn token_from_untrusted_issuer_rejected_through_verify_path() {
+        // QC2 F-003: a token minted by an issuer NOT in `trusted_issuers`
+        // must be rejected through the verify path. Mint with a second
+        // (untrusted) issuer key and verify against the trusted issuer's
+        // whitelist — a regressed issuer-whitelist wiring would fail this.
+        let trusted_home = temp_home();
+        let trusted_iss = issuer_of(trusted_home.path());
+
+        let untrusted_home = temp_home();
+        let proof = issue_ok(
+            untrusted_home.path(),
+            "subject-peer",
+            "audience-peer",
+            &["spoke-baseline"],
+            NOW + 3600,
+        );
+        let untrusted_iss = issuer_of(untrusted_home.path());
+        assert_ne!(
+            untrusted_iss, trusted_iss,
+            "a second home must mint with a distinct issuer key"
+        );
+
+        let err = verify_capability_token(
+            &proof,
+            &[trusted_iss],
+            "audience-peer",
+            "subject-peer",
+            NOW + 10,
+        )
+        .expect_err("token minted by an untrusted issuer must be rejected");
+        assert!(
+            matches!(err, spoke_connect::core::CoreError::TokenInvalid(_)),
+            "untrusted-issuer token rejected: {err:?}"
         );
     }
 

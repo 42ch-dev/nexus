@@ -184,6 +184,46 @@ fn token_issue_rejects_exp_within_skew_window() {
 }
 
 #[test]
+fn token_issue_rejects_empty_sub_and_aud() {
+    // QC2 F-001: clap enforces *presence* only — empty/blank values must
+    // still be usage errors (exit non-zero, message names the flag).
+    let tmp = TempDir::new().expect("tempdir");
+    for (flag, sub, aud) in [
+        ("--sub", "", "audience-peer"),
+        ("--sub", "   ", "audience-peer"),
+        ("--aud", "subject-peer", ""),
+        ("--aud", "subject-peer", "   "),
+    ] {
+        let out = cmd_with_home(tmp.path())
+            .args([
+                "connect",
+                "token",
+                "issue",
+                "--sub",
+                sub,
+                "--aud",
+                aud,
+                "--capabilities",
+                "spoke-baseline",
+                "--exp",
+                &now_plus(3600).to_string(),
+            ])
+            .output()
+            .expect("run");
+        assert!(
+            !out.status.success(),
+            "empty/blank {flag} must fail: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            stderr.contains(flag),
+            "error names the offending flag: {stderr}"
+        );
+    }
+}
+
+#[test]
 fn token_issue_rejects_empty_capabilities() {
     let tmp = TempDir::new().expect("tempdir");
     let out = cmd_with_home(tmp.path())
