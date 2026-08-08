@@ -16,6 +16,18 @@ owns the World KB, the write/read ops, and host-local compute modules — see
 the [integrator walkthrough](../strategy-samples/README.md) — read that first
 for the end-to-end loop; this doc is the authoring reference.
 
+> **Execution surfaces.** A strategy bundle is consumed on two surfaces:
+> 1. **Integrator path (primary)** — your backend runs the LLM step using the
+>    templates and writes KnowledgeEntry drafts into the World over Connect
+>    (the E2 loop in the
+>    [integrator walkthrough](../strategy-samples/README.md)). The runtime has
+>    no daemon HTTP router and no schedule supervision.
+> 2. **Creator-daemon path (optional)** — install the bundle under
+>    `~/.nexus42/presets/<id>/` and drive it through the daemon's schedule
+>    API; preset lanes then execute on the creator-facing daemon's
+>    orchestration engine. Snippets marked *daemon path* below apply only
+>    there.
+
 Two forkable bundles ship as worked examples (details in
 [Worked examples](#worked-examples)):
 
@@ -75,7 +87,8 @@ Each state has:
 ### inner_graphs
 
 Named node graphs entered from a state. Nodes are sequenced with
-`depends_on`:
+`depends_on` (the example below is the `game-narrative` trigger lane's
+`trigger_graph` verbatim):
 
 ```yaml
 inner_graphs:
@@ -90,7 +103,12 @@ inner_graphs:
         depends_on: [trigger_parse]
         template_file: templates/import-worldview.md
         tool_policy: auto_grant_read_only
-    output_binding: extract_worldview.text
+      - id: extract_characters
+        kind: acp_prompt
+        depends_on: [extract_worldview]
+        template_file: templates/import-character-sheet.md
+        tool_policy: auto_grant_read_only
+    output_binding: extract_characters.text
 ```
 
 Node kinds: `acp_prompt` (run a prompt template). `output_binding` exports one
@@ -100,7 +118,8 @@ self-contained (reads `preset.input`) per the embedded-preset convention.
 ## Run payload (`preset.input`)
 
 The run payload is the strategy's input contract. It is supplied by your
-backend when creating the schedule (daemon API):
+backend. On the **daemon path** (optional — the creator app's schedule API),
+it is provided when creating the schedule:
 
 ```text
 POST /v1/daemon/orchestration/schedules
@@ -108,10 +127,10 @@ POST /v1/daemon/orchestration/schedules
   "input": { ... run payload ... } }
 ```
 
-The `input` field maps to `preset.input.*` at schedule start. The CLI's
-`nexus42 daemon schedule add --preset <id> --creator <id> --seed <text>` only
-stores seed text as `core_context` v0 — it does **not** populate
-`preset.input.*`.
+The `input` field maps to `preset.input.*` at schedule start. On the daemon
+path, the CLI's `nexus42 daemon schedule add --preset <id> --creator <id>
+--seed <text>` only stores seed text as `core_context` v0 — it does **not**
+populate `preset.input.*`.
 
 **Template rendering vs expression resolution.** Prompt templates render
 dotted keys — `{{preset.input.mode}}` works inside a template. The expression
@@ -220,7 +239,14 @@ composition in-process: `loader_validate_manifest_compat` +
 
 ```bash
 nexus42 system preset validate --offline --json strategy-samples/react-trpg-turn
-# {"errors":[],"id":"react-trpg-turn","state_count":5,"valid":true,"version":1}
+# pretty-printed JSON on stdout:
+# {
+#   "errors": [],
+#   "id": "react-trpg-turn",
+#   "state_count": 5,
+#   "valid": true,
+#   "version": 1
+# }
 ```
 
 Without `--offline` the command delegates to a running creator daemon; the
@@ -302,11 +328,24 @@ same id.
 
 ## Where the strategy runs
 
-Preset lanes execute on the creator-facing daemon's orchestration engine via
-its schedule API; `nexus-runtime` intentionally ships without the daemon
-HTTP router and without schedule supervision. In the E2 loop your backend
+On the **daemon path** (optional — see the *Execution surfaces* callout at
+the top of this doc), preset lanes execute on the
+creator-facing daemon's orchestration engine via its schedule API;
+`nexus-runtime` intentionally ships without the daemon HTTP router and
+without schedule supervision. On the **integrator path**, your backend
 drives the strategy side (its own timer/event loop + LLM step using the
 templates) and writes results into the World over Connect — see
 [`nexus-runtime.md`](nexus-runtime.md) for the runtime surface and the
 [integrator walkthrough](../strategy-samples/README.md) for the wire
-patterns. See the [docs index](README.md) for the full doc set.
+patterns.
+
+## Next steps
+
+- [Module authoring](module-authoring.md) — WASM ABI, `manifest.json` (incl.
+  `wasm_sha256`), `module_scope` allowlist, operator install (turn strategies
+  depend on the Connect `compute` op).
+- [Runtime usage](nexus-runtime.md) — install/run, allowlist + `module_scope`
+  setup, home layout.
+- [Integrator walkthrough](../strategy-samples/README.md) — worked example
+  end to end.
+- [Docs index](README.md) — all docs.

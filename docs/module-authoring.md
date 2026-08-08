@@ -241,8 +241,8 @@ Modules live under `~/.nexus42/modules/<id>/` (the home the runtime resolved:
 absent or incomplete pair is `module_not_found` at invoke time.
 
 Build and install (mirrors `strategy-samples/README.md` §5; `basic-combat` is
-a **standalone crate** — its own `[workspace]` table — so build from inside the
-directory):
+a **standalone crate** — not a member of the nexus workspace, with its own
+`Cargo.lock` — so build from inside the directory):
 
 ```bash
 cd modules/basic-combat
@@ -254,6 +254,10 @@ mkdir -p "$NEXUS_HOME/modules/basic-combat"
 cp target/wasm32-unknown-unknown/release/basic_combat.wasm "$NEXUS_HOME/modules/basic-combat/basic-combat.wasm"
 cp manifest.json "$NEXUS_HOME/modules/basic-combat/"
 ```
+
+When the runtime runs with `--home <path>`, substitute `<path>/.nexus42` for
+`$NEXUS_HOME` in the block above (the `NEXUS42_HOME` env override is already
+covered).
 
 Note the rename: cargo emits the artifact under the crate name
 (`basic_combat.wasm`), the store expects the module id (`basic-combat.wasm`).
