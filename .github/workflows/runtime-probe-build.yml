@@ -1,0 +1,56 @@
+name: Runtime Probe Build
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  SQLX_OFFLINE: "true"
+  CARGO_INCREMENTAL: "0"
+
+jobs:
+  windows-x64:
+    runs-on: windows-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8
+        with:
+          targets: wasm32-unknown-unknown
+
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32
+        with:
+          shared-key: nexus-runtime
+          workspaces: .
+
+      - name: Build runtime and official reference probe
+        run: cargo build --release --target x86_64-pc-windows-msvc -p nexus42 --bin nexus-runtime --example runtime_smoke_probe --no-default-features --features connect-host
+
+      - name: Smoke test binaries
+        shell: pwsh
+        run: |
+          $runtime = & "target/x86_64-pc-windows-msvc/release/nexus-runtime.exe" --version
+          $peer = & "target/x86_64-pc-windows-msvc/release/examples/runtime_smoke_probe.exe" --print-peer-only
+          Write-Output $runtime
+          Write-Output $peer
+          if ($runtime -notmatch '^nexus-runtime ') { throw "unexpected runtime version: $runtime" }
+          if ($peer -notmatch '^PROBE_PEER_ID=12D3KooW') { throw "unexpected probe identity: $peer" }
+
+      - name: Package binaries and hashes
+        shell: pwsh
+        run: |
+          $out = New-Item -ItemType Directory -Path runtime-probe-windows-x64
+          Copy-Item "target/x86_64-pc-windows-msvc/release/nexus-runtime.exe" $out
+          Copy-Item "target/x86_64-pc-windows-msvc/release/examples/runtime_smoke_probe.exe" $out
+          Get-ChildItem $out -File | Get-FileHash -Algorithm SHA256 |
+            ForEach-Object { "{0}  {1}" -f $_.Hash.ToLowerInvariant(), $_.Path.Substring($out.FullName.Length + 1) } |
+            Set-Content -Encoding ascii -NoNewline:$false (Join-Path $out 'SHA256SUMS')
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: runtime-probe-windows-x64
+          path: runtime-probe-windows-x64/
+          if-no-files-found: error
