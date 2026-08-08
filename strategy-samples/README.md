@@ -426,6 +426,13 @@ mkdir -p "$NEXUS_HOME/modules/basic-combat"
 cp target/wasm32-unknown-unknown/release/basic_combat.wasm "$NEXUS_HOME/modules/basic-combat/basic-combat.wasm"
 cp manifest.json "$NEXUS_HOME/modules/basic-combat/"
 
+# Align the manifest hash to the LOCAL build — the repo manifest's
+# wasm_sha256 is pinned to the embedded artifact, so copying it as-is
+# fails verification. Set it to the installed bytes' hash, or delete the
+# field to fall back to the stat fence (docs/module-authoring.md):
+HASH=$(shasum -a 256 "$NEXUS_HOME/modules/basic-combat/basic-combat.wasm" | cut -d' ' -f1)
+# write "wasm_sha256": "$HASH" into the installed manifest.json
+
 cd ../..    # back to the repo root
 ```
 
