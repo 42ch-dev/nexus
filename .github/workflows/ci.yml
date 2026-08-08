@@ -51,6 +51,8 @@ jobs:
           rust-toolchain: ""
       - name: Run codegen
         run: pnpm run codegen
+      - name: Run codegen tests
+        run: pnpm --filter nexus-codegen test
       - name: Check generated code is up-to-date
         run: |
           # After running codegen, check if generated files match committed versions
