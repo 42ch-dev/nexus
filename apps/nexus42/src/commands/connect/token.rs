@@ -176,7 +176,10 @@ pub(crate) fn load_issuer_key_at(path: &Path) -> Result<Keypair> {
     #[cfg(unix)]
     harden_issuer_key_permissions(path)?;
     Keypair::from_protobuf_encoding(&bytes).map_err(|e| {
-        CliError::Config(format!("invalid Connect issuer key at {}: {e}", path.display()))
+        CliError::Config(format!(
+            "invalid Connect issuer key at {}: {e}",
+            path.display()
+        ))
     })
 }
 
@@ -412,12 +415,18 @@ mod tests {
         assert_eq!(proof.v, spoke_connect::core::TOKEN_VERSION);
         assert_eq!(proof.claims.sub, sub);
         assert_eq!(proof.claims.aud, aud);
-        assert_eq!(proof.claims.capabilities, vec!["spoke-baseline".to_string()]);
+        assert_eq!(
+            proof.claims.capabilities,
+            vec!["spoke-baseline".to_string()]
+        );
         assert!(!proof.sig.is_empty(), "signature must be present");
 
         // Default iss = the issuer key's derived peer id.
         let issuer = issuer_of(home.path());
-        assert_eq!(proof.claims.iss, issuer, "default iss = issuer-derived peer id");
+        assert_eq!(
+            proof.claims.iss, issuer,
+            "default iss = issuer-derived peer id"
+        );
 
         // Issue → verify green with the correct trusted_issuers.
         let granted = verify_capability_token(&proof, &[issuer], aud, sub, NOW + 10)
@@ -428,7 +437,13 @@ mod tests {
     #[test]
     fn issued_token_stamps_iat_at_issuance() {
         let home = temp_home();
-        let proof = issue_ok(home.path(), "subject-peer", "audience-peer", &["spoke-baseline"], NOW + 3600);
+        let proof = issue_ok(
+            home.path(),
+            "subject-peer",
+            "audience-peer",
+            &["spoke-baseline"],
+            NOW + 3600,
+        );
         assert_eq!(proof.claims.iat, Some(NOW), "iat = issuance time");
     }
 
@@ -516,14 +531,8 @@ mod tests {
         // once the verifier's now reaches it (reject when now >= exp).
         let proof = issue_ok(home.path(), sub, aud, &["spoke-baseline"], NOW + 61);
 
-        let err = verify_capability_token(
-            &proof,
-            &[issuer_of(home.path())],
-            aud,
-            sub,
-            NOW + 61,
-        )
-        .expect_err("expired token must be rejected");
+        let err = verify_capability_token(&proof, &[issuer_of(home.path())], aud, sub, NOW + 61)
+            .expect_err("expired token must be rejected");
         assert!(
             matches!(err, spoke_connect::core::CoreError::TokenInvalid(_)),
             "expired token rejected: {err:?}"
@@ -608,14 +617,16 @@ mod tests {
         // `identity.key` — different trust roles, different keypairs.
         let home = temp_home();
         let _ = load_or_create_issuer_key(home.path()).expect("create issuer");
-        let _ = super::super::identity::load_or_create_identity(home.path()).expect("create identity");
+        let _ =
+            super::super::identity::load_or_create_identity(home.path()).expect("create identity");
 
         let issuer_path = nexus_home_layout::connect_issuer_key_path(home.path());
         let identity_path = nexus_home_layout::connect_identity_key_path(home.path());
         assert_ne!(issuer_path, identity_path, "distinct file paths");
 
         let issuer_peer = issuer_of(home.path());
-        let identity_key = super::super::identity::load_or_create_identity(home.path()).expect("reload identity");
+        let identity_key =
+            super::super::identity::load_or_create_identity(home.path()).expect("reload identity");
         let identity_peer = issuer_peer_id(&identity_key).expect("derive identity peer");
         assert_ne!(
             issuer_peer, identity_peer,

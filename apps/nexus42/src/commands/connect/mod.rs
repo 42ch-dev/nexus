@@ -478,7 +478,11 @@ fn build_config(
                 config::resolve_issuer_key_path(home, provider.issuer_key_path.as_deref());
             let issuer = token::load_issuer_key_at(&key_path)?;
             let sub = identity.public().to_peer_id().to_string();
-            Some(token::build_provider(&issuer, sub, local_manifest.capabilities.clone())?)
+            Some(token::build_provider(
+                &issuer,
+                sub,
+                local_manifest.capabilities.clone(),
+            )?)
         }
         _ => None,
     };
@@ -797,8 +801,8 @@ mod tests {
     fn build_config_require_without_issuers_fails_boot() {
         let home = temp_home();
         write_config(home.path(), r#"{ "require_capability_token": true }"#);
-        let err = build_config_for(home.path())
-            .expect_err("require-without-issuers must fail boot");
+        let err =
+            build_config_for(home.path()).expect_err("require-without-issuers must fail boot");
         assert!(
             matches!(err, CliError::Config(_)),
             "require-without-issuers is a boot error: {err:?}"
@@ -867,14 +871,9 @@ mod tests {
             .duration_since(std::time::UNIX_EPOCH)
             .expect("clock readable")
             .as_secs();
-        let granted = verify_capability_token(
-            &proof,
-            &[issuer_id],
-            challenger,
-            &proof.claims.sub,
-            now + 2,
-        )
-        .expect("provider proof verifies green");
+        let granted =
+            verify_capability_token(&proof, &[issuer_id], challenger, &proof.claims.sub, now + 2)
+                .expect("provider proof verifies green");
         assert_eq!(granted, config.local_manifest.capabilities);
     }
 }

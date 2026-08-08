@@ -111,9 +111,7 @@ pub fn load(home: &Path) -> Result<ConnectTokenConfig> {
             config.validate()?;
             Ok(config)
         }
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
-            Ok(ConnectTokenConfig::default())
-        }
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(ConnectTokenConfig::default()),
         Err(err) => Err(CliError::Io(err)),
     }
 }
@@ -181,7 +179,10 @@ mod tests {
             .as_ref()
             .expect("provider block present");
         assert!(provider.enabled);
-        assert_eq!(provider.issuer_key_path.as_deref(), Some("/abs/path/issuer.key"));
+        assert_eq!(
+            provider.issuer_key_path.as_deref(),
+            Some("/abs/path/issuer.key")
+        );
 
         // Serialize → reparse: the on-disk shape round-trips exactly.
         let serialized = serde_json::to_string(&config).expect("serialize");

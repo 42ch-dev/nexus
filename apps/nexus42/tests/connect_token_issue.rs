@@ -82,7 +82,10 @@ fn token_issue_prints_verifiable_token_and_no_secrets() {
     let keypair = libp2p::identity::Keypair::from_protobuf_encoding(&key_bytes)
         .expect("key parses as protobuf");
     let issuer = keypair.public().to_peer_id().to_string();
-    assert_eq!(claims["iss"], issuer, "default iss = issuer-derived peer id");
+    assert_eq!(
+        claims["iss"], issuer,
+        "default iss = issuer-derived peer id"
+    );
 
     // Issue → verify green (spoke, correct trusted_issuers).
     let proof: spoke_connect::core::CapabilityTokenProof =
@@ -101,10 +104,7 @@ fn token_issue_prints_verifiable_token_and_no_secrets() {
     // carry only the public issuer peer id — never key material).
     assert!(!stdout.contains("issuer.key"), "key path must not leak");
     assert!(!stdout.contains("-----BEGIN"), "no PEM-style key material");
-    assert!(
-        !stdout.contains("ed25519"),
-        "no key-encoding labels leak"
-    );
+    assert!(!stdout.contains("ed25519"), "no key-encoding labels leak");
 }
 
 #[test]
@@ -180,7 +180,10 @@ fn token_issue_rejects_exp_within_skew_window() {
         ])
         .output()
         .expect("run");
-    assert!(!out.status.success(), "exp within the 60s skew window must fail");
+    assert!(
+        !out.status.success(),
+        "exp within the 60s skew window must fail"
+    );
 }
 
 #[test]
