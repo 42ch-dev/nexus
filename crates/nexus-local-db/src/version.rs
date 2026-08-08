@@ -10,7 +10,8 @@
 // V1.148: 10 → 11 — spoke_rules table (RuleQueryPort production) + the V1.145–V1.147 schema additions that were also unbumped (compute_sessions direct-lane columns, kb_relationships.extensions_nexus_json, modules_json). Adopting a stricter per-structural-change bump going forward.
 // V1.150: 11 → 12 — moment_directives table (Moment Directive, DF-75 P1).
 // V1.150 (residual close): 12 → 13 — moment_directives rebuild dropping last_chapter_no + new moment_directive_chapter_anchors table (R-V1150P2-004/R-V1150P2-008: per-(directive, work) chapter delta TTL burn).
-pub const DB_SCHEMA_VERSION: u32 = 13;
+// V1.155: 13 → 14 — peer_hosts table (N-C3 multi-host production, P0 T1).
+pub const DB_SCHEMA_VERSION: u32 = 14;
 
 /// Contract schema version from generated wire types
 ///

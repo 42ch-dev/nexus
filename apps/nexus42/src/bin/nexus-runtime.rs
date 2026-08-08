@@ -138,7 +138,7 @@ async fn boot(home: &Path, allow_peer: &[String], listen: &[String]) -> Result<(
     // persisted identity + device-id host_id + allowlist (fail-closed) +
     // honest manifest + active-workspace WAL pool + per-process
     // NexusAdapter + the N-C2 read-half invoke dispatch handler.
-    let (config, host_id, allowlist_len) =
+    let (config, host_id, allowlist_len, _adapter) =
         connect::build_host_config(home, allow_peer, listen, None).await?;
 
     let node = spoke_connect::SpokeConnectNode::start(config)

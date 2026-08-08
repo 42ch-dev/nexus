@@ -34,7 +34,7 @@ use libp2p::identity::Keypair;
 use libp2p::PeerId;
 use nexus_home_layout::device_id::get_or_create_device_id;
 use nexus_spoke_adapter::manifest::{build_connect_hello_manifest, ConnectHelloManifest};
-use nexus_spoke_adapter::SpokeResult;
+use nexus_spoke_adapter::{HostManifestPort, NexusAdapter, SpokeResult};
 use spoke_connect::core::{
     derive_peer_id_from_ed25519_pubkey, issue_capability_token, CapabilityClaims,
 };
@@ -743,7 +743,7 @@ async fn cli_wiring_starts_a_node_with_persisted_identity_and_allowlist() {
     // Hermetic workspace DB (the `build_host_config` override seam keeps the
     // boot out of the real `~/.nexus42` config).
     let db_path = temp.path().join("workspace").join("state.db");
-    let (config, host_id, allowlist_len) = super::build_host_config(
+    let (config, host_id, allowlist_len, _) = super::build_host_config(
         home,
         &[cli_peer.to_string()],
         &["/ip4/127.0.0.1/tcp/0".to_string()],
@@ -793,6 +793,226 @@ async fn cli_wiring_starts_a_node_with_persisted_identity_and_allowlist() {
     assert!(!node.listen_addrs().is_empty());
 
     node.shutdown().await.expect("node shuts down");
+}
+
+/// The N-C3 peer-list assertion helper: the port answers `Ok` (a reject is
+/// a test failure — `SpokeResult` has no `expect`).
+async fn assert_peer_list_ok(
+    adapter: &NexusAdapter<'_>,
+) -> Vec<spoke_schemas::HostCapabilityManifest> {
+    match adapter.list_peer_host_capability_manifests().await {
+        SpokeResult::Ok(peers) => peers,
+        SpokeResult::Reject(r) => panic!("peer list is Ok: {r:?}"),
+    }
+}
+
+/// N-C3 (V1.155 P0): two-node bidirectional-outbound peer recording over
+/// real Connect sessions. Each side is a full nexus Connect Host (persisted
+/// identity + device-id host_id + hermetic workspace DB + per-process
+/// adapter, all through the production `build_host_config` boot).
+///
+/// - A dials B → the outbound `connect()` return carries B's manifest
+///   (`PeerSession::remote_manifest()`), recorded into A's store
+///   (`record_dialed_peer` — the production wiring at `connect()` return).
+/// - B dials A → B's store records A's manifest.
+/// - Each side's `list_peer_host_capability_manifests` returns the dialed
+///   peer's manifest (the AC-1 honesty contract).
+///
+/// Bidirectional-outbound is deliberate (spec lock #1 fallback): an inbound
+/// session (peer dials us) carries no manifest at the invoke boundary, so
+/// an inbound-only peer is NOT recorded — asserted: after A dials B, B's
+/// store stays empty until B itself dials A.
+#[tokio::test(flavor = "multi_thread")]
+async fn n_c3_two_node_bidirectional_outbound_records_dialed_peer_manifests() {
+    let _guard = network_test_guard().await;
+    let temp = tempfile::tempdir().expect("tempdir");
+    let home_a = temp.path().join("host-a");
+    let home_b = temp.path().join("host-b");
+    std::fs::create_dir_all(&home_a).expect("mkdir host-a");
+    std::fs::create_dir_all(&home_b).expect("mkdir host-b");
+
+    // Pre-create both persisted identities so each host can allowlist the
+    // other before boot (the CLI boot generates the key create-once).
+    let peer_a = identity::load_or_create_identity(&home_a)
+        .expect("identity A")
+        .public()
+        .to_peer_id();
+    let peer_b = identity::load_or_create_identity(&home_b)
+        .expect("identity B")
+        .public()
+        .to_peer_id();
+
+    let db_a = home_a.join("workspace").join("state.db");
+    let db_b = home_b.join("workspace").join("state.db");
+    let (config_a, host_id_a, _, adapter_a) = super::build_host_config(
+        &home_a,
+        &[peer_b.to_string()],
+        &["/ip4/127.0.0.1/tcp/0".to_string()],
+        Some(&db_a),
+    )
+    .await
+    .expect("host A config builds");
+    let (config_b, host_id_b, _, adapter_b) = super::build_host_config(
+        &home_b,
+        &[peer_a.to_string()],
+        &["/ip4/127.0.0.1/tcp/0".to_string()],
+        Some(&db_b),
+    )
+    .await
+    .expect("host B config builds");
+
+    let node_a = start(config_a).await;
+    let node_b = start(config_b).await;
+
+    // Both stores start empty (the port's empty-store contract).
+    assert!(
+        assert_peer_list_ok(&adapter_a).await.is_empty(),
+        "A's store starts empty"
+    );
+    assert!(
+        assert_peer_list_ok(&adapter_b).await.is_empty(),
+        "B's store starts empty"
+    );
+
+    // A dials B: the outbound connect() return records B's manifest into
+    // A's store (the production wiring at the observation point).
+    let session_ab = node_a
+        .connect(node_b.listen_addrs()[0].clone())
+        .await
+        .expect("A dials B");
+    super::record_dialed_peer(&adapter_a, &session_ab)
+        .await
+        .expect("A records B at connect() return");
+    let manifest_b = session_ab.remote_manifest();
+
+    let peers = assert_peer_list_ok(&adapter_a).await;
+    assert_eq!(peers.len(), 1, "A's store records exactly the dialed peer");
+    assert_eq!(
+        peers[0].host_id.as_str(),
+        manifest_b.host_id.as_str(),
+        "A's list returns the dialed peer's manifest"
+    );
+    assert_eq!(
+        peers[0].capabilities, manifest_b.capabilities,
+        "capabilities round-trip through the typed wire"
+    );
+    assert_ne!(
+        peers[0].host_id.as_str(),
+        host_id_a,
+        "honesty: A's own host_id is never recorded"
+    );
+
+    // Inbound-only observation (A dialed B ⇒ B saw an inbound session) is
+    // NOT recorded — the invoke boundary carries no manifest (lock #1
+    // fallback): B's store is still empty.
+    assert!(
+        assert_peer_list_ok(&adapter_b).await.is_empty(),
+        "inbound-only peers are not recorded (spec lock #1 fallback)"
+    );
+
+    // B dials A: B's store records A's manifest.
+    let session_ba = node_b
+        .connect(node_a.listen_addrs()[0].clone())
+        .await
+        .expect("B dials A");
+    super::record_dialed_peer(&adapter_b, &session_ba)
+        .await
+        .expect("B records A at connect() return");
+    let manifest_a = session_ba.remote_manifest();
+
+    let peers = assert_peer_list_ok(&adapter_b).await;
+    assert_eq!(peers.len(), 1, "B's store records exactly the dialed peer");
+    assert_eq!(
+        peers[0].host_id.as_str(),
+        manifest_a.host_id.as_str(),
+        "B's list returns the dialed peer's manifest"
+    );
+    assert_eq!(
+        peers[0].capabilities, manifest_a.capabilities,
+        "capabilities round-trip through the typed wire"
+    );
+    assert_ne!(
+        peers[0].host_id.as_str(),
+        host_id_b,
+        "honesty: B's own host_id is never recorded"
+    );
+
+    // A's list is untouched by B's dial (still exactly B's manifest).
+    let peers = assert_peer_list_ok(&adapter_a).await;
+    assert_eq!(peers.len(), 1);
+    assert_eq!(
+        peers[0].host_id.as_str(),
+        manifest_b.host_id.as_str(),
+        "A's store keeps the dialed peer's manifest"
+    );
+
+    node_a.shutdown().await.expect("host A shuts down");
+    node_b.shutdown().await.expect("host B shuts down");
+}
+
+/// QC fix wave F-001: the production dial surface. `connect dial`
+/// (`dial_host` with a hermetic home + workspace DB) dials a peer host
+/// over a real Connect session and records the dialed peer's manifest into
+/// the dialer's store — the shipped trigger that makes N-C3 recording
+/// reachable in production binaries (`connect start` / `nexus-runtime`
+/// never dial, so this command IS the observation point's production
+/// caller). Fail-closed: a successful `dial_host` return implies the
+/// record landed.
+#[tokio::test(flavor = "multi_thread")]
+async fn connect_dial_records_dialed_peer_manifest() {
+    let _guard = network_test_guard().await;
+    let temp = tempfile::tempdir().expect("tempdir");
+    let home_a = temp.path().join("host-a");
+    let home_b = temp.path().join("host-b");
+    std::fs::create_dir_all(&home_a).expect("mkdir host-a");
+    std::fs::create_dir_all(&home_b).expect("mkdir host-b");
+
+    // Mutual allowlist, exactly like the production CLI: B allowlists A
+    // (the dialer) and A's `dial_host` boot allowlists B — the session
+    // allowlist is mutual, so a dial without `--allow-peer <B>` is refused
+    // at the handshake.
+    let peer_a = identity::load_or_create_identity(&home_a)
+        .expect("identity A")
+        .public()
+        .to_peer_id();
+    let peer_b = identity::load_or_create_identity(&home_b)
+        .expect("identity B")
+        .public()
+        .to_peer_id();
+    let db_b = home_b.join("workspace").join("state.db");
+    let (config_b, host_id_b, _, _) = super::build_host_config(
+        &home_b,
+        &[peer_a.to_string()],
+        &["/ip4/127.0.0.1/tcp/0".to_string()],
+        Some(&db_b),
+    )
+    .await
+    .expect("host B config builds");
+    let node_b = start(config_b).await;
+    let b_addr = node_b.listen_addrs()[0].to_string();
+
+    // The production dial surface (CLI core with hermetic home + DB):
+    // boots A, dials B, records B's manifest — all inside `dial_host`.
+    let db_a = home_a.join("workspace").join("state.db");
+    super::dial_host(&home_a, &b_addr, &[peer_b.to_string()], Some(&db_a))
+        .await
+        .expect("connect dial succeeds and records the dialed peer");
+
+    let pool = nexus_local_db::open_pool(&db_a).await.expect("A db opens");
+    let adapter_a = NexusAdapter::new(pool);
+    let peers = assert_peer_list_ok(&adapter_a).await;
+    assert_eq!(peers.len(), 1, "dial records exactly the dialed peer");
+    assert_eq!(
+        peers[0].host_id.as_str(),
+        host_id_b,
+        "A's store returns the dialed peer's manifest host_id"
+    );
+    assert!(
+        peers[0].capabilities.iter().any(|c| c == "spoke-baseline"),
+        "typed manifest capabilities round-trip"
+    );
+
+    node_b.shutdown().await.expect("host B shuts down");
 }
 
 /// N-C1 (V1.153 P1): the Connect invoke dispatch layer end-to-end over the
@@ -847,7 +1067,7 @@ async fn n_c1_peer_upserts_promotes_relates_with_world_scoping() {
     // Boot the host through the full N-C1 CLI path (hermetic DB override).
     // The host identity is the persisted `identity.key` from the temp home —
     // its real peer id is what the dialing peers must allowlist.
-    let (config, _, _) = super::build_host_config(
+    let (config, _, _, _) = super::build_host_config(
         home,
         &[outsider_peer.to_string()],
         &["/ip4/127.0.0.1/tcp/0".to_string()],
@@ -1152,7 +1372,7 @@ async fn n_c1_session_peer_identity_denies_spoofed_payload_claim_and_serves_clai
     .expect("write allowlist");
 
     // Boot the host through the full N-C1 CLI path (hermetic DB override).
-    let (config, _, _) = super::build_host_config(
+    let (config, _, _, _) = super::build_host_config(
         home,
         &[],
         &["/ip4/127.0.0.1/tcp/0".to_string()],
@@ -1382,7 +1602,7 @@ async fn n_c1_cross_world_update_promote_and_relate_are_denied_with_zero_mutatio
     )
     .expect("write allowlist");
 
-    let (config, _, _) = super::build_host_config(
+    let (config, _, _, _) = super::build_host_config(
         home,
         &[],
         &["/ip4/127.0.0.1/tcp/0".to_string()],
@@ -1579,7 +1799,7 @@ async fn n_c1_mixed_payload_missing_world_id_denies_whole_payload() {
     )
     .expect("write allowlist");
 
-    let (config, _, _) = super::build_host_config(
+    let (config, _, _, _) = super::build_host_config(
         home,
         &[],
         &["/ip4/127.0.0.1/tcp/0".to_string()],
@@ -1718,7 +1938,7 @@ async fn n_c1_every_served_op_advertised_by_the_const_actually_routes() {
         loop_ops.retain(|op| *op != "compute");
     }
 
-    let (config, _, _) = super::build_host_config(
+    let (config, _, _, _) = super::build_host_config(
         home,
         &[],
         &["/ip4/127.0.0.1/tcp/0".to_string()],
@@ -1880,7 +2100,7 @@ async fn n_c1_relate_create_rejects_foreign_world_endpoints() {
     )
     .expect("write allowlist");
 
-    let (config, _, _) = super::build_host_config(
+    let (config, _, _, _) = super::build_host_config(
         home,
         &[],
         &["/ip4/127.0.0.1/tcp/0".to_string()],
@@ -2040,7 +2260,7 @@ async fn n_c2_peer_runs_check_over_connect() {
     )
     .expect("write allowlist");
 
-    let (config, _, _) = super::build_host_config(
+    let (config, _, _, _) = super::build_host_config(
         home,
         &[],
         &["/ip4/127.0.0.1/tcp/0".to_string()],
@@ -2130,7 +2350,7 @@ async fn n_c2_peer_runs_assemble_over_connect() {
     )
     .expect("write allowlist");
 
-    let (config, _, _) = super::build_host_config(
+    let (config, _, _, _) = super::build_host_config(
         home,
         &[],
         &["/ip4/127.0.0.1/tcp/0".to_string()],
@@ -2249,7 +2469,7 @@ async fn n_c2_check_and_assemble_wrong_world_and_absent_scope_denied() {
     )
     .expect("write allowlist");
 
-    let (config, _, _) = super::build_host_config(
+    let (config, _, _, _) = super::build_host_config(
         home,
         &[],
         &["/ip4/127.0.0.1/tcp/0".to_string()],
@@ -2409,7 +2629,7 @@ async fn n_c2_refusal_matrix_project_and_unknown_ops() {
     )
     .expect("write allowlist");
 
-    let (config, _, _) = super::build_host_config(
+    let (config, _, _, _) = super::build_host_config(
         home,
         &[],
         &["/ip4/127.0.0.1/tcp/0".to_string()],
@@ -2517,7 +2737,7 @@ async fn n_c2_peer_runs_compute_over_connect() {
     )
     .expect("write allowlist");
 
-    let (config, _, _) = super::build_host_config(
+    let (config, _, _, _) = super::build_host_config(
         home,
         &[],
         &["/ip4/127.0.0.1/tcp/0".to_string()],
@@ -2658,7 +2878,7 @@ async fn n_c2_compute_wrong_world_missing_module_uninstalled_and_settle_denied()
     )
     .expect("write allowlist");
 
-    let (config, _, _) = super::build_host_config(
+    let (config, _, _, _) = super::build_host_config(
         home,
         &[],
         &["/ip4/127.0.0.1/tcp/0".to_string()],
@@ -2875,7 +3095,7 @@ async fn n_c2_compute_unscoped_module_denied() {
     )
     .expect("write allowlist");
 
-    let (config, _, _) = super::build_host_config(
+    let (config, _, _, _) = super::build_host_config(
         home,
         &[],
         &["/ip4/127.0.0.1/tcp/0".to_string()],
@@ -2998,7 +3218,7 @@ async fn n_c2_compute_request_module_override_denied() {
     )
     .expect("write allowlist");
 
-    let (config, _, _) = super::build_host_config(
+    let (config, _, _, _) = super::build_host_config(
         home,
         &[],
         &["/ip4/127.0.0.1/tcp/0".to_string()],
@@ -3176,7 +3396,7 @@ async fn n_c2_compute_missing_entry_denied_invalid_input() {
     )
     .expect("write allowlist");
 
-    let (config, _, _) = super::build_host_config(
+    let (config, _, _, _) = super::build_host_config(
         home,
         &[],
         &["/ip4/127.0.0.1/tcp/0".to_string()],

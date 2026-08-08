@@ -31,6 +31,7 @@ pub mod moment_directive;
 pub mod narrative_gateway;
 pub mod narrative_write;
 pub mod novel_pool_entries;
+pub mod peer_hosts;
 pub mod pending_review;
 pub mod prompt_injection;
 pub mod reading;
@@ -140,6 +141,12 @@ pub use kb_extract_job::{
 pub use prompt_injection::{
     claim_prompt_injections, enqueue_prompt_injection, mark_prompt_injections_consumed,
     NewPromptInjection, PromptInjectionRow,
+};
+
+// Re-export peer_hosts types (V1.155 P0, N-C3 multi-host production)
+pub use peer_hosts::{
+    list_peer_manifests, record_peer_manifest, PeerHostRow, MAX_HOST_ID_CHARS,
+    MAX_MANIFEST_JSON_BYTES,
 };
 
 // Re-export moment_directive types (V1.150 P1, DF-75)
