@@ -39,6 +39,68 @@ jobs:
           if ($runtime -notmatch '^nexus-runtime ') { throw "unexpected runtime version: $runtime" }
           if ($peer -notmatch '^PROBE_PEER_ID=12D3KooW') { throw "unexpected probe identity: $peer" }
 
+      - name: Run real runtime-to-reference-peer probe
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $nexusDir = Join-Path $env:USERPROFILE '.nexus42'
+          $connectDir = Join-Path $nexusDir 'connect'
+          New-Item -ItemType Directory -Force -Path $connectDir | Out-Null
+
+          @'
+          active_creator_id = "ctr_smoke"
+
+          [active_workspace_slug_by_creator]
+          ctr_smoke = "default"
+          '@ | Set-Content -Encoding utf8NoBOM (Join-Path $nexusDir 'config.toml')
+
+          @'
+          {
+            "peer_ids": [
+              "12D3KooWRawPbxPtP1eZaJpumGnyWX2DcUyd3RQnydr3eAto4Az7"
+            ]
+          }
+          '@ | Set-Content -Encoding utf8NoBOM (Join-Path $connectDir 'allowlist.json')
+
+          $runtime = Resolve-Path 'target/x86_64-pc-windows-msvc/release/nexus-runtime.exe'
+          $probe = Resolve-Path 'target/x86_64-pc-windows-msvc/release/examples/runtime_smoke_probe.exe'
+          $stdout = Join-Path $env:RUNNER_TEMP 'nexus-runtime.stdout.log'
+          $stderr = Join-Path $env:RUNNER_TEMP 'nexus-runtime.stderr.log'
+          $process = $null
+          try {
+            $process = Start-Process -FilePath $runtime -WindowStyle Hidden -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru
+            $deadline = (Get-Date).AddSeconds(45)
+            $ready = ''
+            do {
+              Start-Sleep -Milliseconds 250
+              if ($process.HasExited) { break }
+              if (Test-Path $stdout) { $ready = Get-Content -Raw -Encoding UTF8 $stdout }
+            } while ((Get-Date) -lt $deadline -and $ready -notmatch 'press Ctrl-C to stop')
+
+            $runtimeErr = if (Test-Path $stderr) { Get-Content -Raw -Encoding UTF8 $stderr } else { '' }
+            Write-Output $ready
+            if ($runtimeErr) { Write-Output "runtime stderr:`n$runtimeErr" }
+            if ($process.HasExited) { throw "runtime exited early with code $($process.ExitCode)" }
+            if ($ready -notmatch 'upsert/promote/relate/check/assemble/compute served') { throw 'runtime readiness surface missing' }
+
+            $listenLine = ($ready -split "`r?`n" | Where-Object { $_.Trim().StartsWith('listen:') } | Select-Object -First 1).Trim()
+            $peerLine = ($ready -split "`r?`n" | Where-Object { $_.Trim().StartsWith('peer_id:') } | Select-Object -First 1).Trim()
+            $listen = $listenLine.Substring('listen:'.Length).Trim()
+            $hostPeer = $peerLine.Substring('peer_id:'.Length).Trim()
+            $probeOutput = & $probe --addr $listen --host-peer $hostPeer
+            Write-Output $probeOutput
+            if ($LASTEXITCODE -ne 0) { throw "reference probe exited $LASTEXITCODE" }
+            $probeText = $probeOutput -join "`n"
+            if ($probeText -notmatch 'DIAL_OK') { throw 'reference probe did not establish a session' }
+            if ($probeText -notmatch 'SERVED_OPS=upsert,promote,relate,check,assemble,compute') { throw 'served-op manifest mismatch' }
+            if ($probeText -notmatch 'SESSION_OK') { throw 'session did not remain usable' }
+          } finally {
+            if ($process -and -not $process.HasExited) {
+              Stop-Process -Id $process.Id
+              $process.WaitForExit()
+            }
+          }
+
       - name: Package binaries and hashes
         shell: pwsh
         run: |
