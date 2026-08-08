@@ -127,8 +127,26 @@ impl CliConfig {
     /// - Nexus home directory cannot be resolved
     /// - File read operations fail
     pub fn load() -> anyhow::Result<Self> {
-        let config_path = Self::config_path()?;
         let nexus = nexus_home()?;
+        Self::load_from_nexus_home(&nexus)
+    }
+
+    /// Load configuration from an explicit user home directory.
+    ///
+    /// This is the path-aware counterpart to [`Self::load`]. It preserves the
+    /// same TOML and legacy JSON migration behavior without consulting the
+    /// process user's platform home directory.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if file reads, migration, or serialization fail.
+    pub fn load_from_home(home: &Path) -> anyhow::Result<Self> {
+        let nexus = nexus_home_layout::nexus_root_from_home(home);
+        Self::load_from_nexus_home(&nexus)
+    }
+
+    fn load_from_nexus_home(nexus: &Path) -> anyhow::Result<Self> {
+        let config_path = nexus.join("config.toml");
 
         // 1. Try loading config.toml
         if config_path.exists() {
@@ -807,6 +825,42 @@ platform_url = "https://direct.api.io"
     }
 
     #[test]
+    fn load_from_home_reads_only_the_explicit_home() {
+        let home = tempfile::tempdir().expect("explicit home tempdir");
+        let nexus_dir = nexus_home_layout::nexus_root_from_home(home.path());
+        std::fs::create_dir_all(&nexus_dir).expect("create explicit nexus dir");
+        std::fs::write(
+            nexus_dir.join("config.toml"),
+            "active_creator_id = \"ctr_explicit\"\n",
+        )
+        .expect("write explicit config");
+
+        let result = CliConfig::load_from_home(home.path()).expect("load explicit home");
+
+        assert_eq!(result.active_creator_id.as_deref(), Some("ctr_explicit"));
+    }
+
+    #[test]
+    fn resolve_state_db_path_from_home_uses_the_explicit_home() {
+        let home = tempfile::tempdir().expect("explicit home tempdir");
+        let mut config = CliConfig {
+            active_creator_id: Some("ctr_explicit".to_string()),
+            ..Default::default()
+        };
+        config
+            .active_workspace_slug_by_creator
+            .insert("ctr_explicit".to_string(), "probe".to_string());
+
+        let resolved = resolve_state_db_path_from_home(&config, home.path())
+            .expect("resolve explicit workspace path");
+
+        assert_eq!(
+            resolved,
+            crate::paths::state_db_path(home.path(), "ctr_explicit", "probe")
+        );
+    }
+
+    #[test]
     fn save_writes_toml() {
         let _home = crate::testutil::isolated_home();
         let nexus_dir = std::env::var("HOME")
@@ -1379,6 +1433,18 @@ pub fn user_home_dir() -> anyhow::Result<PathBuf> {
 /// - No active creator is configured
 pub fn resolve_state_db_path(config: &CliConfig) -> anyhow::Result<PathBuf> {
     let user_home = user_home_dir()?;
+    resolve_state_db_path_from_home(config, &user_home)
+}
+
+/// Resolve workspace `state.db` from an explicit user home directory.
+///
+/// # Errors
+///
+/// Returns an error when no active creator is configured.
+pub fn resolve_state_db_path_from_home(
+    config: &CliConfig,
+    user_home: &Path,
+) -> anyhow::Result<PathBuf> {
     let cid = config.active_creator_id.as_deref().ok_or_else(|| {
         anyhow::anyhow!(
             "No active creator configured. Run `nexus42 creator workspace init workspace` or `nexus42 creator use <id>`."
