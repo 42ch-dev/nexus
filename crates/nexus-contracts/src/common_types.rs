@@ -37,7 +37,7 @@ pub type CreatorId = String;
 /// `User` `ID` (prefix: 'usr_')
 pub type UserId = String;
 
-/// KnowledgeEntry `ID` (prefix: 'kb_')
+/// `KnowledgeEntry` `ID` (prefix: `'kb_'`)
 pub type KeyBlockId = String;
 
 /// `TimelineEvent` `ID` (prefix: 'evt_')
@@ -130,7 +130,7 @@ pub enum Visibility {
     Public,
 }
 
-/// KnowledgeEntry content type (data-model-v1.md §5.5). `V1`.54 `P1`: added game-bible variants (species, faction, `magic_system`, technology, deity, level, `economy_tier`). `V1`.55 `P3`: added script variants (dialogue, beat, act). `V1`.123 `P1`: added era (cross-profile world-shape marker for `Brief` layer).
+/// `KnowledgeEntry` content type (data-model-v1.md §5.5). `V1.54` `P1`: added game-bible variants (species, faction, `magic_system`, technology, deity, level, `economy_tier`). `V1.55` `P3`: added script variants (dialogue, beat, act). `V1.123` `P1`: added era (cross-profile world-shape marker for `Brief` layer).
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum BlockType {
@@ -247,7 +247,7 @@ pub enum PairingStatus {
     Revoked,
 }
 
-/// KnowledgeEntry status (data-model-v1.md §5.5)
+/// `KnowledgeEntry` status (data-model-v1.md §5.5)
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum KeyBlockStatus {

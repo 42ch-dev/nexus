@@ -243,10 +243,11 @@ pub fn connect_allowlist_path(home: &Path) -> PathBuf {
     connect_dir(home).join("allowlist.json")
 }
 
-/// `$HOME/.nexus42/connect/issuer.key` — Connect Host capability-token
-/// issuer key (Ed25519 libp2p protobuf encoding; created once with 0600;
-/// DISTINCT from `identity.key` — the node identity and the token issuer
-/// are different trust roles, V1.155 P1 architect lock #4).
+/// `$HOME/.nexus42/connect/issuer.key` — Connect Host capability-token issuer key.
+///
+/// Ed25519 libp2p protobuf encoding; created once with 0600; DISTINCT from
+/// `identity.key` — the node identity and the token issuer are different
+/// trust roles (V1.155 P1 architect lock #4).
 #[must_use]
 pub fn connect_issuer_key_path(home: &Path) -> PathBuf {
     connect_dir(home).join("issuer.key")
