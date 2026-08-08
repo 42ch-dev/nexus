@@ -20,6 +20,15 @@
 //! - (e) feature-off: `cargo check -p nexus42` has no `spoke-connect` in the
 //!   graph (verified separately by commands, see the task brief).
 //!
+//! V1.155 P1 T3 — enforcement + tenant isolation interop through the REAL
+//! operator config path (`~/.nexus42/connect/config.json` →
+//! `build_host_config`): a tokenless peer is denied `auth_failed` by the
+//! spoke `evaluate_invoke_token_gate` before the nexus handler (zero side
+//! effects), a challenge-completed token peer invokes green, and a token
+//! granting `l2-computable` cannot widen a peer's `PeerScope.op_scope` —
+//! the nexus `op denied:` refusal family fires even though the spoke
+//! op-dispatch gate passes (token ∩ allowlist scope is the invariant).
+//!
 //! Determinism: fixed Ed25519 seeds for host/peer/outsider keypairs (stable
 //! peer ids), loopback listen with an ephemeral port (`/ip4/127.0.0.1/tcp/0`
 //! resolved via `listen_addrs()`), mDNS off (feature not compiled), and a
@@ -3493,4 +3502,449 @@ fn invoke_compute_executes_only_inside_the_bounded_lane() {
         "invoke.rs must not construct or call a WasmEngine directly: WASM \
          execution stays on the bounded lane (off the tokio worker)"
     );
+}
+
+// ── V1.155 P1 T3: enforcement + tenant isolation through the config path ──
+
+/// Writes the token operator config (`~/.nexus42/connect/config.json`) under
+/// a hermetic home — the T2 file `build_config`/`build_host_config` read.
+fn write_token_config(home: &std::path::Path, body: &str) {
+    let dir = home.join(".nexus42").join("connect");
+    std::fs::create_dir_all(&dir).expect("create connect dir");
+    std::fs::write(dir.join("config.json"), body).expect("write config.json");
+}
+
+/// V1.155 P1 T3 (brief (b) + T2-reviewer follow-up, denial half): the token
+/// policy comes from `~/.nexus42/connect/config.json`
+/// (`require_capability_token` + `trusted_issuers`) and the host boots
+/// through the real CLI path (`build_host_config`). A peer that never
+/// completes the token challenge is rejected with the spoke `auth_failed`
+/// wire envelope BEFORE the nexus handler — proven by zero workspace side
+/// effects (the denied upsert persists no row) and a session that stays
+/// established (a second invoke is answered again, not `session_not_found`).
+#[tokio::test(flavor = "multi_thread")]
+async fn config_require_token_tokenless_peer_invoke_auth_failed_zero_side_effects() {
+    let _guard = network_test_guard().await;
+    let temp = tempfile::tempdir().expect("tempdir");
+    let home = temp.path();
+    let peer_key = fixed_keypair(90);
+    let peer_peer = peer_key.public().to_peer_id();
+
+    const WORLD_A: &str = "wld_test_a";
+
+    // Hermetic workspace DB with the world seeded (FK rows for the write
+    // ports the handler would hit — proving they are never reached).
+    let db_path = temp.path().join("workspace").join("state.db");
+    let pool = crate::db::Schema::init(&db_path)
+        .await
+        .expect("workspace DB initializes");
+    seed_world(&pool, "ctr_test", WORLD_A).await;
+
+    // The peer IS scoped to WORLD_A with the full served-op set — the
+    // allowlist is not the reason the invoke below is denied.
+    let allow_path = nexus_home_layout::connect_allowlist_path(home);
+    std::fs::create_dir_all(allow_path.parent().expect("parent dir")).expect("mkdir");
+    std::fs::write(
+        &allow_path,
+        serde_json::json!({ "peer_ids": [{
+            "peer_id": peer_peer.to_string(),
+            "world_scope": [WORLD_A],
+            "op_scope": super::invoke::SERVED_OPS,
+        }] })
+        .to_string(),
+    )
+    .expect("write allowlist");
+
+    // Operator token policy via the config FILE (not a mutated ConnectConfig):
+    // the host requires a capability token from the trusted issuer.
+    let issuer_secret = [51u8; 32];
+    let issuer_peer = issuer_peer_id(&issuer_secret);
+    write_token_config(
+        home,
+        &format!(
+            r#"{{
+                "trusted_issuers": ["{issuer_peer}"],
+                "require_capability_token": true
+            }}"#
+        ),
+    );
+
+    let (config, _, _, _) = super::build_host_config(
+        home,
+        &[],
+        &["/ip4/127.0.0.1/tcp/0".to_string()],
+        Some(&db_path),
+    )
+    .await
+    .expect("host boots through the CLI config path");
+    assert!(
+        config.require_capability_token,
+        "the config.json require flag must reach ConnectConfig"
+    );
+    assert_eq!(
+        config.trusted_issuers,
+        vec![issuer_peer],
+        "the config.json trusted_issuers must reach ConnectConfig"
+    );
+    let host_peer = config.identity.public().to_peer_id();
+    let host = start(config).await;
+
+    // The tokenless peer has NO token policy and NO provider: it cannot
+    // answer the host's challenge, so its session carries no grant.
+    let peer_node = start(peer_config(peer_key, vec![host_peer])).await;
+    let session = peer_node
+        .connect(host.listen_addrs()[0].clone())
+        .await
+        .expect("hello handshake succeeds; the token gate is session-level");
+    assert!(
+        !session.capability_token_ok(),
+        "tokenless session carries no token grant"
+    );
+
+    // Invoke without `auth` on the not-token-authorized session: the spoke
+    // `evaluate_invoke_token_gate` answers `auth_failed` before the nexus
+    // handler runs.
+    let peer_claim = serde_json::json!(peer_peer.to_string());
+    match session
+        .invoke(
+            "upsert",
+            serde_json::json!({
+                "extensions": { "nexus": { "peer_id": peer_claim } },
+                "knowledge_entries": [entry_fixture(
+                    "kb_t3_denied",
+                    "Denied",
+                    WORLD_A,
+                    "confirmed",
+                    None,
+                )],
+            }),
+        )
+        .await
+    {
+        Err(InvokeError::Wire(envelope)) => assert_eq!(envelope.code, "auth_failed"),
+        other => panic!("expected auth_failed wire error, got {other:?}"),
+    }
+
+    // Zero side effects: the denied upsert never reached the handler — no
+    // kb_key_blocks row was persisted.
+    let rows: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM kb_key_blocks WHERE world_id = ?")
+        .bind(WORLD_A)
+        .fetch_one(&pool)
+        .await
+        .expect("count key blocks");
+    assert_eq!(rows, 0, "a denied invoke must persist zero rows");
+
+    // The refusal leaves the session established: a second invoke is still
+    // answered (auth_failed again, not session_not_found).
+    match session
+        .invoke("check", serde_json::json!({ "extensions": {} }))
+        .await
+    {
+        Err(InvokeError::Wire(envelope)) => assert_eq!(envelope.code, "auth_failed"),
+        other => panic!("expected auth_failed wire error, got {other:?}"),
+    }
+
+    host.shutdown().await.expect("host shuts down");
+    peer_node.shutdown().await.expect("peer shuts down");
+}
+
+/// V1.155 P1 T3 (brief (a) + T2-reviewer follow-up, acceptance half): with
+/// `require_capability_token = true` + `trusted_issuers` in config.json, a
+/// peer that completes the challenge with a provider-minted token invokes
+/// GREEN — end-to-end through `build_host_config` (the real CLI boot path).
+/// The host config also enables the provider block (issuer key at
+/// `~/.nexus42/connect/issuer.key`), so BOTH sessions step up
+/// token-authorized before the dialer's `connect()` resolves — the peer's
+/// first invoke deterministically finds the host's token gate satisfied.
+#[tokio::test(flavor = "multi_thread")]
+async fn config_require_token_valid_token_peer_invokes_green() {
+    let _guard = network_test_guard().await;
+    let temp = tempfile::tempdir().expect("tempdir");
+    let home = temp.path();
+    let peer_key = fixed_keypair(91);
+    let peer_peer = peer_key.public().to_peer_id();
+
+    const WORLD_A: &str = "wld_test_a";
+
+    // Hermetic workspace DB with the world seeded.
+    let db_path = temp.path().join("workspace").join("state.db");
+    let pool = crate::db::Schema::init(&db_path)
+        .await
+        .expect("workspace DB initializes");
+    seed_world(&pool, "ctr_test", WORLD_A).await;
+
+    // The peer is scoped to WORLD_A with the full served-op set.
+    let allow_path = nexus_home_layout::connect_allowlist_path(home);
+    std::fs::create_dir_all(allow_path.parent().expect("parent dir")).expect("mkdir");
+    std::fs::write(
+        &allow_path,
+        serde_json::json!({ "peer_ids": [{
+            "peer_id": peer_peer.to_string(),
+            "world_scope": [WORLD_A],
+            "op_scope": super::invoke::SERVED_OPS,
+        }] })
+        .to_string(),
+    )
+    .expect("write allowlist");
+
+    // Operator config: require a token from the issuer whose key the
+    // provider block loads at boot (`~/.nexus42/connect/issuer.key`, the
+    // CLI creation path — the provider boot is fail-closed without it).
+    let issuer_key = super::token::load_or_create_issuer_key(home).expect("issuer key created");
+    let issuer_id = super::token::issuer_peer_id(&issuer_key).expect("issuer peer id");
+    let issuer_secret = super::token::issuer_secret_bytes(&issuer_key).expect("issuer secret");
+    write_token_config(
+        home,
+        &format!(
+            r#"{{
+                "trusted_issuers": ["{issuer_id}"],
+                "require_capability_token": true,
+                "capability_token_provider": {{ "enabled": true }}
+            }}"#
+        ),
+    );
+
+    let (config, _, _, _) = super::build_host_config(
+        home,
+        &[],
+        &["/ip4/127.0.0.1/tcp/0".to_string()],
+        Some(&db_path),
+    )
+    .await
+    .expect("host boots through the CLI config path");
+    assert!(
+        config.capability_token_provider.is_some(),
+        "the enabled provider block must build a mint-on-demand provider"
+    );
+    let host_peer = config.identity.public().to_peer_id();
+    let host = start(config).await;
+
+    // The peer enforces the same policy and answers the host's challenge
+    // with provider-minted `spoke-baseline` tokens (the required capability
+    // for the served baseline ops). Both sessions are token-authorized
+    // before connect() completes.
+    let mut peer_cfg = peer_config(peer_key, vec![host_peer]);
+    peer_cfg.trusted_issuers = vec![issuer_id];
+    peer_cfg.require_capability_token = true;
+    peer_cfg.capability_token_provider = Some(token_provider(
+        issuer_secret,
+        peer_peer,
+        vec!["spoke-baseline".into()],
+        now_plus(0),
+    ));
+    let peer_node = start(peer_cfg).await;
+    let session = peer_node
+        .connect(host.listen_addrs()[0].clone())
+        .await
+        .expect("token-authorized session");
+    assert!(
+        session.capability_token_ok(),
+        "dialer session must complete the token challenge"
+    );
+
+    // The valid-token session invokes GREEN: the upsert persists (handler
+    // side effects visible in the workspace DB)…
+    let peer_claim = serde_json::json!(peer_peer.to_string());
+    let upserted = session
+        .invoke(
+            "upsert",
+            serde_json::json!({
+                "extensions": { "nexus": { "peer_id": peer_claim } },
+                "knowledge_entries": [entry_fixture(
+                    "kb_t3_ok",
+                    "Authorized",
+                    WORLD_A,
+                    "confirmed",
+                    None,
+                )],
+            }),
+        )
+        .await
+        .expect("valid-token upsert is served");
+    assert_eq!(
+        upserted.payload["knowledge_entries"][0]["entry_id"], "kb_t3_ok",
+        "the green upsert must round-trip the created entry"
+    );
+    let rows: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM kb_key_blocks WHERE world_id = ?")
+        .bind(WORLD_A)
+        .fetch_one(&pool)
+        .await
+        .expect("count key blocks");
+    assert_eq!(rows, 1, "the green upsert must persist exactly one row");
+
+    // …and a scoped read round-trips too.
+    let checked = session
+        .invoke(
+            "check",
+            serde_json::json!({
+                "extensions": { "nexus": { "peer_id": peer_claim } },
+                "scope": { "scope_id": WORLD_A },
+                "rule_refs": [],
+            }),
+        )
+        .await
+        .expect("valid-token check is served");
+    assert_eq!(checked.payload["findings"], serde_json::json!([]));
+
+    host.shutdown().await.expect("host shuts down");
+    peer_node.shutdown().await.expect("peer shuts down");
+}
+
+/// V1.155 P1 T3 (brief (c), tenant isolation): a token granting
+/// `l2-computable` to a peer whose `PeerScope.op_scope` lacks `compute` is
+/// DENIED by the nexus `PeerScope` gate — the token CANNOT widen the
+/// allowlist scope. The spoke op-dispatch gate passes (negotiated
+/// capabilities AND the token grant both cover `l2-computable`), so the
+/// denial wire envelope is the nexus `op denied:` refusal family — pinning
+/// that the nexus PeerScope gate, not the spoke gate, refused. The
+/// intersection is honored: a scoped baseline op still round-trips green.
+#[tokio::test(flavor = "multi_thread")]
+async fn token_cannot_widen_peer_scope_l2_computable_compute_denied() {
+    let _guard = network_test_guard().await;
+    let temp = tempfile::tempdir().expect("tempdir");
+    let home = temp.path();
+    let peer_key = fixed_keypair(92);
+    let peer_peer = peer_key.public().to_peer_id();
+
+    const WORLD_A: &str = "wld_test_a";
+
+    let db_path = temp.path().join("workspace").join("state.db");
+    let pool = crate::db::Schema::init(&db_path)
+        .await
+        .expect("workspace DB initializes");
+    seed_world(&pool, "ctr_test", WORLD_A).await;
+
+    // The peer's allowlist scope covers WORLD_A + the baseline ops — but
+    // NOT compute (no `compute` in op_scope).
+    let allow_path = nexus_home_layout::connect_allowlist_path(home);
+    std::fs::create_dir_all(allow_path.parent().expect("parent dir")).expect("mkdir");
+    std::fs::write(
+        &allow_path,
+        serde_json::json!({ "peer_ids": [{
+            "peer_id": peer_peer.to_string(),
+            "world_scope": [WORLD_A],
+            "op_scope": ["upsert", "promote", "relate", "check", "assemble"],
+        }] })
+        .to_string(),
+    )
+    .expect("write allowlist");
+
+    // Token policy: require a token from the trusted issuer; the host
+    // provider block lets the host answer the peer's own challenge, so both
+    // sessions are token-authorized before the first invoke (no gate race).
+    let issuer_key = super::token::load_or_create_issuer_key(home).expect("issuer key created");
+    let issuer_id = super::token::issuer_peer_id(&issuer_key).expect("issuer peer id");
+    let issuer_secret = super::token::issuer_secret_bytes(&issuer_key).expect("issuer secret");
+    write_token_config(
+        home,
+        &format!(
+            r#"{{
+                "trusted_issuers": ["{issuer_id}"],
+                "require_capability_token": true,
+                "capability_token_provider": {{ "enabled": true }}
+            }}"#
+        ),
+    );
+
+    let (config, _, _, _) = super::build_host_config(
+        home,
+        &[],
+        &["/ip4/127.0.0.1/tcp/0".to_string()],
+        Some(&db_path),
+    )
+    .await
+    .expect("host boots through the CLI config path");
+    let host_peer = config.identity.public().to_peer_id();
+    let host = start(config).await;
+
+    // The peer holds a token that grants `l2-computable` — MORE than its
+    // allowlist scope grants.
+    let mut peer_cfg = peer_config(peer_key, vec![host_peer]);
+    peer_cfg.trusted_issuers = vec![issuer_id];
+    peer_cfg.require_capability_token = true;
+    peer_cfg.capability_token_provider = Some(token_provider(
+        issuer_secret,
+        peer_peer,
+        vec!["spoke-baseline".into(), "l2-computable".into()],
+        now_plus(0),
+    ));
+    let peer_node = start(peer_cfg).await;
+    let session = peer_node
+        .connect(host.listen_addrs()[0].clone())
+        .await
+        .expect("token-authorized session");
+    assert!(
+        session.capability_token_ok(),
+        "the l2-computable token must complete the challenge"
+    );
+
+    // The negotiated capabilities cover `l2-computable` (both manifests
+    // advertise it) and the token grants it — the spoke op-dispatch gate
+    // would pass. The nexus PeerScope op-scope gate is the next boundary:
+    // compute is NOT in the peer's op_scope, so the invoke is denied with
+    // the `op denied:` refusal family (NOT the spoke gate's message).
+    let peer_claim = serde_json::json!(peer_peer.to_string());
+    match session
+        .invoke(
+            "compute",
+            serde_json::json!({
+                "extensions": { "nexus": { "peer_id": peer_claim } },
+                "session_id": "ses_t3_widen",
+                "entry_id": "kb_t3_never_runs",
+                "computable": {},
+                "settle": false,
+            }),
+        )
+        .await
+    {
+        Err(InvokeError::Wire(envelope)) => {
+            assert_eq!(
+                envelope.code, "op_unsupported",
+                "compute outside the peer's op_scope must be denied"
+            );
+            assert!(
+                envelope
+                    .message
+                    .contains("op denied: op compute is not in this peer's op_scope"),
+                "denial must come from the nexus PeerScope gate, got: {}",
+                envelope.message
+            );
+        }
+        other => panic!("compute must be denied by PeerScope, got {other:?}"),
+    }
+
+    // Zero side effects: the denied compute never ran — no rows persisted
+    // by the never-invoked handler path, and the session stays usable.
+    let rows: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM kb_key_blocks WHERE world_id = ?")
+        .bind(WORLD_A)
+        .fetch_one(&pool)
+        .await
+        .expect("count key blocks");
+    assert_eq!(rows, 0, "the denied compute must persist zero rows");
+
+    // The intersection is honored: a scoped baseline op still round-trips
+    // green for the same token-authorized session.
+    let served = session
+        .invoke(
+            "upsert",
+            serde_json::json!({
+                "extensions": { "nexus": { "peer_id": peer_claim } },
+                "knowledge_entries": [entry_fixture(
+                    "kb_t3_scope_ok",
+                    "Scoped",
+                    WORLD_A,
+                    "confirmed",
+                    None,
+                )],
+            }),
+        )
+        .await
+        .expect("scoped baseline op still served after the compute denial");
+    assert_eq!(
+        served.payload["knowledge_entries"][0]["entry_id"], "kb_t3_scope_ok",
+        "the intersection grant (scope ∧ token) must still be honored"
+    );
+
+    host.shutdown().await.expect("host shuts down");
+    peer_node.shutdown().await.expect("peer shuts down");
 }

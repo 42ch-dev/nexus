@@ -243,6 +243,25 @@ pub fn connect_allowlist_path(home: &Path) -> PathBuf {
     connect_dir(home).join("allowlist.json")
 }
 
+/// `$HOME/.nexus42/connect/issuer.key` — Connect Host capability-token
+/// issuer key (Ed25519 libp2p protobuf encoding; created once with 0600;
+/// DISTINCT from `identity.key` — the node identity and the token issuer
+/// are different trust roles, V1.155 P1 architect lock #4).
+#[must_use]
+pub fn connect_issuer_key_path(home: &Path) -> PathBuf {
+    connect_dir(home).join("issuer.key")
+}
+
+/// `$HOME/.nexus42/connect/config.json` — Connect Host operator config.
+///
+/// V1.155 P1 capability-token surface (`trusted_issuers` /
+/// `require_capability_token` / `capability_token_provider`); absent file ⇒
+/// current defaults. `allowlist.json` stays the peer/scope file.
+#[must_use]
+pub fn connect_config_path(home: &Path) -> PathBuf {
+    connect_dir(home).join("config.json")
+}
+
 /// `$HOME/.nexus42/creators/<creator_id>/SOUL.md` (`ADR-014`, `ADR-016` D1).
 ///
 /// # Defense-in-depth
@@ -683,6 +702,24 @@ mod tests {
         assert_eq!(
             connect_allowlist_path(&home),
             PathBuf::from("/fake/home/.nexus42/connect/allowlist.json")
+        );
+        assert_eq!(
+            connect_issuer_key_path(&home),
+            PathBuf::from("/fake/home/.nexus42/connect/issuer.key")
+        );
+        assert_eq!(
+            connect_config_path(&home),
+            PathBuf::from("/fake/home/.nexus42/connect/config.json")
+        );
+        assert_ne!(
+            connect_config_path(&home),
+            connect_allowlist_path(&home),
+            "config.json is DISTINCT from allowlist.json (V1.155 P1 lock #1)"
+        );
+        assert_ne!(
+            connect_issuer_key_path(&home),
+            connect_identity_key_path(&home),
+            "issuer.key is DISTINCT from identity.key (V1.155 P1 lock #4)"
         );
     }
 
