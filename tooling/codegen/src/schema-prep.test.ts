@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import { buildDereferencedSchemaTree } from './schema-prep';
+import { assertPathWithinRoot, buildDereferencedSchemaTree } from './schema-prep';
 
 const tempDirs: string[] = [];
 
@@ -118,5 +118,29 @@ describe('buildDereferencedSchemaTree', () => {
     await expect(
       buildDereferencedSchemaTree(schemaPaths, localizedDir, derefDir),
     ).rejects.toThrow();
+  });
+});
+
+describe('assertPathWithinRoot', () => {
+  it('rejects a candidate path that escapes confinedRoot via a symlink', () => {
+    const confinedRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'nexus-schema-root-'));
+    const outsideDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nexus-schema-outside-'));
+    tempDirs.push(confinedRoot, outsideDir);
+    fs.writeFileSync(path.join(outsideDir, 'secret.json'), JSON.stringify({ type: 'string' }));
+
+    // Symlink inside confinedRoot pointing out — realpath must resolve it and throw.
+    fs.symlinkSync(outsideDir, path.join(confinedRoot, 'escape'));
+
+    expect(() =>
+      assertPathWithinRoot(confinedRoot, path.join(confinedRoot, 'escape', 'secret.json')),
+    ).toThrow(/outside localized schema tree/);
+  });
+
+  it('accepts a candidate path that resolves within confinedRoot', () => {
+    const confinedRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'nexus-schema-root-'));
+    tempDirs.push(confinedRoot);
+    fs.writeFileSync(path.join(confinedRoot, 'schema.json'), JSON.stringify({ type: 'string' }));
+
+    expect(() => assertPathWithinRoot(confinedRoot, path.join(confinedRoot, 'schema.json'))).not.toThrow();
   });
 });

@@ -3,7 +3,7 @@
   "$id": "https://nexus42.invalid/schemas/platform/sync/bundle-refinement.schema.json",
   "schema_version": 1,
   "title": "Nexus CLI Sync Bundle (V1.0)",
-  "description": "V1.0 sync-specific bundle view for CLI <-> Platform synchronization. Reuses domain bundle envelope with sync-specific constraints.\n\nVERIFICATION NOTE (SYNC-R8): allOf + properties pattern is intentional. Codegen skips this schema (schema-loader.ts SKIP_STRUCT_GENERATION_REL_PATHS). Domain bundle.schema.json generates the canonical Bundle type. This schema validates CLI-specific constraints at runtime but does not create duplicate types. Property overrides add sync-context descriptions; bundle_type enum matches common.schema.json#/definitions/BundleType. Verified 2026-04-08.",
+  "description": "V1.0 sync-specific bundle view for CLI <-> Platform synchronization. Reuses domain bundle envelope with sync-specific constraints.\n\nVERIFICATION NOTE (SYNC-R8): allOf + properties pattern is intentional. Codegen skips this schema (tooling/codegen/src/ts-gen.ts SKIP_LIST / rust-gen/src/main.rs SKIP_SCHEMAS). platform/sync/bundle.schema.json generates the canonical Bundle type. This schema validates CLI-specific constraints at runtime but does not create duplicate types. Property overrides add sync-context descriptions; bundle_type enum matches common.schema.json#/definitions/BundleType. Verified 2026-04-08.",
   "type": "object",
   "allOf": [
     {

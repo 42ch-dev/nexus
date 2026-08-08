@@ -789,9 +789,9 @@ impl KbStore for SqliteKbStore {
         //
         // ## body_json growth and computable indexing (R-V161P0-LOW-004)
         //
-        // Computable KeyBlocks (V1.61) embed `state` (dynamic runtime) and
+        // Computable KnowledgeEntries (V1.61) embed `state` (dynamic runtime) and
         // `attributes` (immutable compute params) inside `body_json`. For
-        // character KeyBlocks this can add several KiB of structured JSON
+        // character KnowledgeEntries this can add several KiB of structured JSON
         // per block — the `body_json` TEXT column may grow with compute
         // usage over time.
         //
@@ -1268,6 +1268,12 @@ pub async fn cas_update_key_block_fields(
 /// # Errors
 ///
 /// Returns [`sqlx::Error`] on database failure.
+///
+/// `source_provenance_kind` uses COALESCE semantics (V1.155 P2 T3,
+/// R-V1152P0-001): the dedicated provenance column is updated only when the
+/// incoming entry carries a value, so the pack-import overwrite stamp is
+/// atomic with the CAS body replace while ordinary edits (which do not
+/// round-trip provenance) leave the column untouched.
 pub async fn update_key_block_auxiliary_fields_in_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     key_block_id: &str,
@@ -1275,6 +1281,7 @@ pub async fn update_key_block_auxiliary_fields_in_tx(
     source_anchor_json: Option<&str>,
     extensions_nexus_json: &str,
     modules_json: Option<&str>,
+    source_provenance_kind: Option<&str>,
 ) -> Result<(), sqlx::Error> {
     // SAFETY: static SQL with vetted column names from migration
     // 202606190003_kb_key_blocks_provenance.sql.
@@ -1283,13 +1290,15 @@ pub async fn update_key_block_auxiliary_fields_in_tx(
              status = ?,
              source_anchor_json = ?,
              extensions_nexus_json = ?,
-             modules_json = ?
+             modules_json = ?,
+             source_provenance_kind = COALESCE(?, source_provenance_kind)
            WHERE key_block_id = ?",
     )
     .bind(status)
     .bind(source_anchor_json)
     .bind(extensions_nexus_json)
     .bind(modules_json)
+    .bind(source_provenance_kind)
     .bind(key_block_id)
     .execute(&mut **tx)
     .await

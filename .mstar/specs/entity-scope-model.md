@@ -4,7 +4,7 @@
 
 | Attribute | Value |
 | --- | --- |
-| **Status** | Normative — entity scope hierarchy, uniqueness, crate ownership. **V1.40 Shipped**: §5.1.1 narrative taxonomy (`BlockType` + `novel_category` + `canonical_name` grammar). **V1.50 Shipped**: §5.5 World KB promotion state machine. **V1.51 Shipped**: §5.5.6 LLM pathway subsection. **V1.54 Shipped**: §5.1.1 game-bible taxonomy. **V1.55 P3**: §5.1.1 script taxonomy. **V1.62 Shipped**: §5.5.9 computable-flag semantics + structured validation mode (closes `R-V161P1-LOW-001`). **V1.74 Shipped β**: §5.6 World KB relationship semantics. **V1.139 architect §5.2**: §2 (crate table: `nexus-kb`→`nexus-knowledge`, KeyBlock→KnowledgeEntry in architecture-bearing prose). Remaining KeyBlock in historical/implementation sections (e.g. SQLite table name `kb_key_blocks`) is stable — table rename is a separate migration concern. Full V1.139 SPOKE alignment tracked in [`spoke-adapter-architecture.md`](spoke-adapter-architecture.md). |
+| **Status** | Normative — entity scope hierarchy, uniqueness, crate ownership. **V1.40 Shipped**: §5.1.1 narrative taxonomy (`BlockType` + `novel_category` + `canonical_name` grammar). **V1.50 Shipped**: §5.5 World KB promotion state machine. **V1.51 Shipped**: §5.5.6 LLM pathway subsection. **V1.54 Shipped**: §5.1.1 game-bible taxonomy. **V1.55 P3**: §5.1.1 script taxonomy. **V1.62 Shipped**: §5.5.9 computable-flag semantics + structured validation mode (closes `R-V161P1-LOW-001`). **V1.74 Shipped β**: §5.6 World KB relationship semantics. **V1.139 architect §5.2**: §2 (crate table: `nexus-kb`→`nexus-knowledge`, KeyBlock→KnowledgeEntry in architecture-bearing prose). **V1.155 P2**: §5.5+ prose refs modernized to KnowledgeEntry; remaining `KeyBlock` mentions are structural wire/DB identifiers (`kb_key_blocks` table, `ComputeInput.key_blocks` field, `KeyBlockStatus`/`KeyBlockId` types, `BlockType` enum values) and historical implementation records (`crates/nexus-kb/…` paths as-shipped). Full V1.139 SPOKE alignment tracked in [`spoke-adapter-architecture.md`](spoke-adapter-architecture.md). |
 | **Document class** | Master |
 | **Scope** | Global/User/Creator/World/Timeline/Event/Moment hierarchy; entity ownership; `kb`/`knowledge` naming boundaries; scope transition rules |
 | **Last updated** | 2026-07-26 — V1.139 architect §5.2: crate table update + status note. |
@@ -375,7 +375,7 @@ The `nexus-knowledge` persistence model stores World-scoped KnowledgeEntries wit
 
 Module authors should use the `scene` + `info_point` BlockType combination to model environmental KnowledgeEntries, with per-module shape declarations in `manifest.json` `schemas` (see §5.5.9.3). If a future profile introduces a domain-specific environmental BlockType (e.g. `biome` for game-bible), it should follow the V1.54 game-bible precedent: extend `BlockType` as a new wire variant with a corresponding body-layer category.
 
-**Novel profile semantics (body layer):** The V1.37 novel "seven categories" (`foundation`, `background`, `character`, `location`, `society`, `rules`, `economy`) are carried in `KeyBlock.body.attributes.novel_category` (string) plus type-specific fields in `body.attributes` / `body.summary`. They do **not** replace wire `block_type`.
+**Novel profile semantics (body layer):** The V1.37 novel "seven categories" (`foundation`, `background`, `character`, `location`, `society`, `rules`, `economy`) are carried in `KnowledgeEntry.body.attributes.novel_category` (string) plus type-specific fields in `body.attributes` / `body.summary`. They do **not** replace wire `block_type`.
 
 **V1.40 P1 implementation:** `nexus-kb::validation` module provides `validate_body(block_type, body, ValidationMode)` that enforces `novel_category` presence and validity when `ValidationMode::Novel` is active. Both `InMemoryKbStore` and `SqliteKbStore` run validation on insert/update. Validation errors are structured (`ValidationKind` enum) so callers can produce precise diagnostics without string matching. `canonical_name` is validated for format/safety (no control chars, path separators, shell metacharacters, max 256 chars). Advisory warnings for `novel_category` ↔ `block_type` mismatch are emitted via `tracing::warn!`. See `crates/nexus-kb/src/validation.rs`.
 
@@ -411,7 +411,7 @@ Minimum common `body` shape for novel-profile items (V1.40 P1):
 
 P1 adds validation helpers in `nexus-kb` for wire `BlockType` + optional `novel_category` / per-category `body.attributes` minimums. **Shipped in V1.40 P1** (`nexus-kb::validation`). No `schemas/` enum change in V1.40 unless a future ADR opts into a wire superset (out of V1.40 scope).
 
-**Game-bible profile semantics (body layer — V1.54 P1):** Seven new `BlockType` wire enum variants are registered in `schemas/common/common.schema.json` for game-bible domain concepts. The corresponding body-layer category is `game_bible_category` (string, carried in `KeyBlock.body.attributes`). It does **not** replace wire `block_type`.
+**Game-bible profile semantics (body layer — V1.54 P1):** Seven new `BlockType` wire enum variants are registered in `schemas/common/common.schema.json` for game-bible domain concepts. The corresponding body-layer category is `game_bible_category` (string, carried in `KnowledgeEntry.body.attributes`). It does **not** replace wire `block_type`.
 
 Game-bible profile `BlockType` additions (V1.54 P1, snake_case on wire):
 
@@ -461,9 +461,9 @@ Minimum common `body` shape for game-bible items:
 }
 ```
 
-**Script profile semantics (body layer — V1.55 P3):** Three new `BlockType` wire enum variants are registered in `schemas/common/common.schema.json` for script domain concepts. The corresponding body-layer category is `script_category` (string, carried in `KeyBlock.body.attributes`). It does **not** replace wire `block_type`.
+**Script profile semantics (body layer — V1.55 P3):** Three new `BlockType` wire enum variants are registered in `schemas/common/common.schema.json` for script domain concepts. The corresponding body-layer category is `script_category` (string, carried in `KnowledgeEntry.body.attributes`). It does **not** replace wire `block_type`.
 
-**Three-Layer Timeline semantics (cross-profile, V1.123 Draft overlay):** One new `BlockType` wire enum variant is registered in `schemas/common/common.schema.json` for the V1.123 Brief layer. The corresponding body-layer semantics live in `KeyBlock.body.attributes` as freeform era-marker fields (`era_id`, `start_hint`, `end_hint`, `world_summary`); there is **no `brief_category` body-layer string** because Brief is cross-profile world-shape, not a profile-specific category. See [`iterations/v1.123/specs/three-layer-architecture.md`](../iterations/v1.123/specs/three-layer-architecture.md) §2 for the architect-locked carrier rationale.
+**Three-Layer Timeline semantics (cross-profile, V1.123 Draft overlay):** One new `BlockType` wire enum variant is registered in `schemas/common/common.schema.json` for the V1.123 Brief layer. The corresponding body-layer semantics live in `KnowledgeEntry.body.attributes` as freeform era-marker fields (`era_id`, `start_hint`, `end_hint`, `world_summary`); there is **no `brief_category` body-layer string** because Brief is cross-profile world-shape, not a profile-specific category. See [`iterations/v1.123/specs/three-layer-architecture.md`](../iterations/v1.123/specs/three-layer-architecture.md) §2 for the architect-locked carrier rationale.
 
 Shipped `BlockType` values (snake_case on wire) extended with:
 
@@ -562,7 +562,7 @@ The term `KB` MUST be qualified in architecture/spec text when ambiguity matters
 > **Plan**: [2026-06-18-v1.50-kb-auto-promotion.md](../../plans/2026-06-18-v1.50-kb-auto-promotion.md) (Done; archived)
 > **Cross-refs**: [workflow-profile.md §11.5](novel-writing/workflow-profile.md#115-auto-chronology-per-work-opt-in) — auto-advance logs auto-promotion status; [quality-loop.md §3](novel-writing/quality-loop.md) — review-time extraction hook.
 
-World KB rows enter the World through a **promotion state machine** governed by `kb_extract_jobs.status` and the World-scoped `KeyBlocks` (`nexus-kb` storage, see §5.1.1).
+World KB rows enter the World through a **promotion state machine** governed by `kb_extract_jobs.status` and the World-scoped KnowledgeEntries (`nexus-knowledge` storage, see §5.1.1).
 
 #### 5.5.1 States (normative)
 
@@ -570,7 +570,7 @@ World KB rows enter the World through a **promotion state machine** governed by 
 | --- | --- | --- |
 | `manual` | Author inserted KB row directly via `creator world kb edit` (or initial scaffold) | `creator world kb list` |
 | `pending` | `novel-review-master` extracted candidate; awaiting author confirm | `creator world kb pending` |
-| `confirmed` | Author confirmed via `creator world kb adopt <id>`; row is now a regular `KeyBlock` | `creator world kb list` |
+| `confirmed` | Author confirmed via `creator world kb adopt <id>`; row is now a regular KnowledgeEntry | `creator world kb list` |
 | `rejected` | Author dismissed via `creator world kb reject <id>`; row archived in `Logs/kb/rejected/` | `creator world kb rejected` (audit only) |
 
 #### 5.5.2 Transitions (normative)
@@ -627,7 +627,7 @@ how it transitions. When the LLM worker is unavailable, the hook falls back to
 the V1.50 heuristic so no-worker environments (hermetic tests,
 daemon-without-worker) remain functional.
 
-#### 5.5.7 Work→KeyBlock provenance linkage (Draft V1.52 overlay)
+#### 5.5.7 Work→KnowledgeEntry provenance linkage (Draft V1.52 overlay)
 
 **Status**: Draft (V1.52 — body authored in plan `2026-06-19-v1.52-work-keyblock-provenance-and-essay-profile`)  
 **Authoring plan**: `2026-06-19-v1.52-work-keyblock-provenance-and-essay-profile`  

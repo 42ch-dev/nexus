@@ -515,6 +515,10 @@ async fn run_cas_update_in_tx(
         source_anchor_json.as_deref(),
         &extensions_nexus_json,
         modules_json.as_deref(),
+        // V1.155 P2 T3 (R-V1152P0-001): stamp the dedicated provenance
+        // column atomically with the CAS body replace — the pack-import
+        // overwrite no longer needs a separate post-upsert UPDATE.
+        world_entry.source_provenance_kind.as_deref(),
     )
     .await
     {

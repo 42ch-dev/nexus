@@ -76,7 +76,7 @@ Codegen adoption is **not** done when generated files are byte-identical to the 
 
 ### 1. Keep hand-maintained `common_types.rs`
 
-`common.schema.json` and `source-anchor.schema.json` remain on the skip list (`schema-loader.ts` → `SKIP_STRUCT_GENERATION`). Typify would emit standalone structs/enums per definition if un-skipped, **fragmenting** types that dozens of crates import as `nexus_contracts::common_types::*` aliases.
+`common.schema.json` and `source-anchor.schema.json` remain on the skip list (`tooling/codegen/src/ts-gen.ts` → `SKIP_LIST`; mirrored in `rust-gen/src/main.rs` → `SKIP_SCHEMAS`). Typify would emit standalone structs/enums per definition if un-skipped, **fragmenting** types that dozens of crates import as `nexus_contracts::common_types::*` aliases.
 
 **Rule:** keep the hand-maintained `common_types.rs` / `CommonTypes.ts` extraction for shared definitions. Only un-skip when the team is ready to migrate every `common_types::` import to typify's per-schema copies (V1.138 explicitly deferred this).
 
@@ -90,7 +90,7 @@ Typify derives `Display` and `FromStr` on string enums. Hand-written duplicate i
 
 Typify maps `format: date-time` to `chrono::DateTime<…>`. Serde's default serialization for `DateTime` can differ from the bespoke generator's `String` RFC3339 fields — affecting canonical hash fixtures in cloud-sync specs.
 
-**Residual:** `R-V1138P1-001` — update spec golden hashes after verifying the new serialization is wire-correct, not a behavioral regression.
+**Residual (closed 2026-08-08):** `R-V1138P1-001` — spec golden hashes updated after the new serialization was verified wire-correct (no behavioral regression); see [`../../specs/canonical-hash.md`](../../specs/canonical-hash.md).
 
 ### 4. Consumer adaptation is mechanical but cross-crate
 
@@ -124,8 +124,8 @@ Typify inlines a distinct struct copy for every schema that references a shared 
 | [`crates/nexus-contracts/AGENTS.md`](../../../../crates/nexus-contracts/AGENTS.md) | Generated-crate rules, `enum_conversions.rs` |
 | [`schemas/AGENTS.md`](../../../../schemas/AGENTS.md) | Schema authoring + codegen flow |
 | [`contracts-gap-on-shipped-backend.md`](contracts-gap-on-shipped-backend.md) | Closing schema gaps on shipped handlers (orthogonal but same contracts boundary) |
-| Residuals `R-V1138P0-*` | P0 follow-ups (orphan `schema-loader` cleanup, etc.) |
-| Residual `R-V1138P1-001` | Canonical-hash spec golden sync after DateTime serde change |
+| Residuals `R-V1138P0-*` | Closed/archived 2026-08-08 (V1.155 P2 sweep) — `archived/residuals/2026-07-23-v1.138-p0-ts-codegen-third-party.json` |
+| Residual `R-V1138P1-001` | Canonical-hash spec golden sync — closed 2026-08-08; spec at [`../../specs/canonical-hash.md`](../../specs/canonical-hash.md) |
 
 ## Evidence
 
