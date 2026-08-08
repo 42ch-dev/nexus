@@ -605,7 +605,9 @@ copying — validation fails otherwise.
 
 The bundle is the standard preset format (`preset.yaml` + `templates/`). Edit
 prompts, triggers, and cadence freely; keep the manifest schema shape intact
-so the validator stays green.
+so the validator stays green. The authoritative authoring reference — manifest
+format, trigger/scheduled lanes, prompt templates, validator semantics, fork
+flow — is [`docs/strategy-authoring.md`](../docs/strategy-authoring.md).
 
 ### Validate
 
@@ -657,6 +659,9 @@ idempotency ledger.
 
 - Strategy bundles: [`game-narrative/`](./game-narrative/),
   [`react-trpg-turn/`](./react-trpg-turn/)
+- Strategy authoring guide (manifest format, lanes, prompt templates,
+  validator, fork flow): [`../docs/strategy-authoring.md`](../docs/strategy-authoring.md)
+- Runtime usage guide: [`../docs/nexus-runtime.md`](../docs/nexus-runtime.md)
 - Validator wrapper: [`validate.sh`](./validate.sh)
 - WASM compute ABI: [`../.mstar/specs/compute-module-abi.md`](../.mstar/specs/compute-module-abi.md)
 - Module authoring guide: [`../modules/README.md`](../modules/README.md)
