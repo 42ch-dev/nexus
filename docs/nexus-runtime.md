@@ -56,7 +56,11 @@ Boot sequence (shared with `nexus42 connect start`):
    `HostCapabilityManifest` + active-workspace SQLite pool (WAL) + one
    per-process `NexusAdapter` + the N-C2 invoke dispatch handler.
 4. `SpokeConnectNode::start` — the spoke-connect node.
-5. Readiness on stdout, then block until Ctrl-C (SIGINT).
+
+`nexus-runtime` adds one runtime-only step after the shared sequence:
+
+5. Readiness on stdout, then block until Ctrl-C (SIGINT) (`connect start`
+   prints status to stderr instead).
 
 Readiness is stdout-only: there is no HTTP health endpoint in this process.
 
