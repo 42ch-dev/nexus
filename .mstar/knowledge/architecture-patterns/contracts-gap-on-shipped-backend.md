@@ -22,7 +22,7 @@ Despite this invariant, a handler can ship with **hand-written inline DTOs** if 
 When you discover (or are asked to consume) a shipped Local API handler whose request/response types are **not** in `schemas/local-api/` + `generated/local-api/`:
 
 1. **Transcribe verbatim, do not redesign.** Read every `#[derive(Deserialize/Serialize)]` struct in the handler and transcribe its fields (name, optionality, type) into net-new JSON Schemas under `schemas/local-api/<domain>/`. Field names, `Option<T>` optionality, and types must mirror runtime **exactly**. Validation caps (max-length etc.) stay handler-owned — they are not a contract redesign.
-2. **Let the codegen glob discover them.** The codegen is glob-based (`tooling/codegen/src/schema-loader.ts`: `globSync(schemasDir + '**/*.schema.json')`). No config change, no inclusion list. Run `pnpm run codegen`; the new schemas auto-emit TS + Rust into `generated/local-api/<domain>/`. Bump `@42ch/nexus-contracts` additive (e.g. 0.12.0 → 0.13.0).
+2. **Let the codegen glob discover them.** The codegen is glob-based (`tooling/codegen/src/schema-prep.ts` / `ts-gen.ts`: `glob('**/*.schema.json', { cwd })`). No config change, no inclusion list. Run `pnpm run codegen`; the new schemas auto-emit TS + Rust into `generated/local-api/<domain>/`. Bump `@42ch/nexus-contracts` additive (e.g. 0.12.0 → 0.13.0).
 3. **Normalize the handler to consume its own generated types.** Replace the hand-written structs with `pub use nexus_contracts::{...}` imports. Behavior must stay identical. Add a Rust round-trip regression test asserting a serialized generated type deserializes to the same handler response shape (e.g. `tests/<domain>_dto_roundtrip.rs`).
 
 ### The two non-obvious traps

@@ -489,7 +489,7 @@ pub async fn list_relationships_for_world(
 /// persisting a suggestion (entity-scope-model §5.6 extraction ordering).
 ///
 /// - `block_type = Some(bt)`: resolve by `(world_id, block_type, canonical_name)`
-///   against non-deleted `KeyBlocks`. Returns `None` when no row matches.
+///   against non-deleted KnowledgeEntries. Returns `None` when no row matches.
 /// - `block_type = None`: resolve case-insensitively by
 ///   `(world_id, canonical_name)` and require **exactly one** non-deleted
 ///   `WorldKbEntry` to match. Returns `None` when zero or more than one match
@@ -550,7 +550,7 @@ pub async fn resolve_entity_by_canonical_name(
 /// the verbatim `source_quote` carried in `metadata` for audit.
 ///
 /// The caller (the review-time extraction hook) MUST have already resolved both
-/// endpoint entity ids to existing non-deleted `KeyBlocks` via
+/// endpoint entity ids to existing non-deleted KnowledgeEntries via
 /// [`resolve_entity_by_canonical_name`]; this function does not re-check.
 ///
 /// Returns `Ok(true)` when a new suggestion row was inserted, `Ok(false)` when

@@ -92,7 +92,7 @@ mod tests {
     }
 
     /// Frozen cross-stack fixture: changing field values requires updating
-    /// `.mstar/archived/knowledge/canonical-hash.md` and any platform golden vectors.
+    /// `.mstar/specs/canonical-hash.md` and any platform golden vectors.
     fn golden_alignment_fixture_delta() -> Delta {
         serde_json::from_value(json!({
             "delta_type": "key_block",
@@ -113,7 +113,7 @@ mod tests {
         let got = canonical_hash_for_deltas(&[golden_alignment_fixture_delta()]).unwrap();
         assert_eq!(
             got, EXPECTED,
-            "keep in sync with .mstar/archived/knowledge/canonical-hash.md"
+            "keep in sync with .mstar/specs/canonical-hash.md"
         );
     }
 }

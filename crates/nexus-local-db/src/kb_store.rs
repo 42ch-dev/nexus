@@ -789,9 +789,9 @@ impl KbStore for SqliteKbStore {
         //
         // ## body_json growth and computable indexing (R-V161P0-LOW-004)
         //
-        // Computable KeyBlocks (V1.61) embed `state` (dynamic runtime) and
+        // Computable KnowledgeEntries (V1.61) embed `state` (dynamic runtime) and
         // `attributes` (immutable compute params) inside `body_json`. For
-        // character KeyBlocks this can add several KiB of structured JSON
+        // character KnowledgeEntries this can add several KiB of structured JSON
         // per block — the `body_json` TEXT column may grow with compute
         // usage over time.
         //

@@ -202,7 +202,7 @@ impl Capability for NarrativeCompute {
         // Admission gate: creator must own the world.
         ensure_world_owned(pool, &parsed.creator_id, &parsed.world_id).await?;
 
-        // 1. Read computable KeyBlocks from the KB store.
+        // 1. Read computable KnowledgeEntries from the KB store.
         let kb_store = nexus_local_db::kb_store::SqliteKbStore::new((**pool).clone());
         let q =
             nexus_knowledge::world_kb::KbQuery::new(&parsed.world_id).with_computable(Some(true));
@@ -217,8 +217,9 @@ impl Capability for NarrativeCompute {
             ));
         }
 
-        // Domain KeyBlocks are converted to the compute envelope's inlined
-        // `NexusKeyBlock` (wire-equivalent; drift gate) inline below.
+        // Domain KnowledgeEntries are serialized into the compute envelope's
+        // `key_blocks` items (opaque JSON objects; spoke-adapter-architecture
+        // spec §3.4) inline below.
 
         // 2. Read narrative state (timeline position, root branch).
         let gw = nexus_local_db::narrative_gateway::SqliteNarrativeGateway::new((**pool).clone());
@@ -239,10 +240,11 @@ impl Capability for NarrativeCompute {
         });
 
         // 3. Build ComputeInput envelope and invoke WASM.
-        // The compute envelope uses typify-inlined copies (`NexusKeyBlock`,
-        // `ComputeInputNarrativeState`, `ComputeInputWorldRef`) that are
-        // wire-equivalent to the domain contract types; JSON round-trips bridge
-        // them (drift gate proves equivalence).
+        // The compute envelope's world_ref/narrative_state are typify-inlined
+        // copies (`ComputeInputWorldRef`, `ComputeInputNarrativeState`) that
+        // are wire-equivalent to the domain contract types; JSON round-trips
+        // bridge them (drift gate proves equivalence). `key_blocks` items are
+        // opaque JSON objects (spoke-adapter-architecture spec §3.4).
         let compute_input = ComputeInput {
             schema_version: std::num::NonZeroU64::new(1)
                 .expect("schema_version literal 1 is non-zero"),
@@ -329,7 +331,7 @@ impl Capability for NarrativeCompute {
         // 5. Apply state_delta to KB state fields.
         let applied = state_delta::apply_state_delta_pool(pool, &output.state_delta).await?;
 
-        // 6. Create new KeyBlocks from output.
+        // 6. Create new KnowledgeEntries from output.
         let new_kb_count = create_new_key_blocks(pool, &parsed.world_id, &output.new_key_blocks)
             .await
             .map_err(|e| CapabilityError::Internal(format!("create new key_blocks: {e}")))?;

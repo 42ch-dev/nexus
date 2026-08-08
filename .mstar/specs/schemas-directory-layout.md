@@ -94,7 +94,7 @@ schemas/
 ### 3.2 `platform/sync/`
 
 - CLI ↔ platform sync protocol: bundle envelope (codegen canonical), delta, sync-command, pull request/response, conflict response.
-- **`bundle.schema.json`** is the **codegen canonical** `Bundle` type. **`bundle-refinement.schema.json`** is a **validation refinement** (allOf of the canonical bundle with CLI-specific constraints) — codegen skips it (see `tooling/codegen/src/schema-loader.ts` `SKIP_STRUCT_GENERATION_REL_PATHS`).
+- **`bundle.schema.json`** is the **codegen canonical** `Bundle` type. **`bundle-refinement.schema.json`** is a **validation refinement** (allOf of the canonical bundle with CLI-specific constraints) — codegen skips it (see `tooling/codegen/src/ts-gen.ts` `SKIP_LIST` / `tooling/codegen/rust-gen/src/main.rs` `SKIP_SCHEMAS`).
 - `delta.schema.json` and `sync-command.schema.json` moved here from `domain/` (V1.62 P0) because they are sync-protocol payloads, not wire entities.
 - `$id` / `$ref` URIs use `https://nexus42.invalid/schemas/platform/sync/...`.
 - Maintain [`platform/sync/README.md`](../../../schemas/platform/sync/README.md).

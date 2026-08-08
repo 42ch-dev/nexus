@@ -76,7 +76,7 @@ Codegen adoption is **not** done when generated files are byte-identical to the 
 
 ### 1. Keep hand-maintained `common_types.rs`
 
-`common.schema.json` and `source-anchor.schema.json` remain on the skip list (`schema-loader.ts` → `SKIP_STRUCT_GENERATION`). Typify would emit standalone structs/enums per definition if un-skipped, **fragmenting** types that dozens of crates import as `nexus_contracts::common_types::*` aliases.
+`common.schema.json` and `source-anchor.schema.json` remain on the skip list (`tooling/codegen/src/ts-gen.ts` → `SKIP_LIST`; mirrored in `rust-gen/src/main.rs` → `SKIP_SCHEMAS`). Typify would emit standalone structs/enums per definition if un-skipped, **fragmenting** types that dozens of crates import as `nexus_contracts::common_types::*` aliases.
 
 **Rule:** keep the hand-maintained `common_types.rs` / `CommonTypes.ts` extraction for shared definitions. Only un-skip when the team is ready to migrate every `common_types::` import to typify's per-schema copies (V1.138 explicitly deferred this).
 
