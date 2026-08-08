@@ -11,6 +11,11 @@
 //! with `op_unsupported` (the N-C0 refusal contract extends);
 //! non-allowlisted peers never reach the handler (handshake).
 //!
+//! V1.155 P0 (N-C3 multi-host production): `connect peers list` reads the
+//! observed-peer store through the adapter boundary
+//! (`NexusAdapter::list_observed_peer_hosts` — host_id, capabilities,
+//! last_seen; empty store → `no peers observed`).
+//!
 //! Topology rules (product draft `fl-r-connect-host-foundation.md` §2.1/§2.6):
 //! - mDNS is **never** enabled (`spoke-connect/mdns` not in the feature set).
 //! - `nexus42 daemon start` MUST NOT open a Connect listener — only
@@ -34,7 +39,7 @@ use clap::Subcommand;
 use libp2p::Multiaddr;
 use nexus_home_layout::device_id::get_or_create_device_id;
 use nexus_spoke_adapter::manifest::build_connect_hello_manifest;
-use nexus_spoke_adapter::{NexusAdapter, SpokeResult};
+use nexus_spoke_adapter::{NexusAdapter, ObservedPeerHost, SpokeResult};
 use spoke_connect::{parse_multiaddr, ConnectConfig, SpokeConnectNode};
 use std::collections::HashMap;
 use std::path::Path;
@@ -59,6 +64,25 @@ pub enum ConnectCommand {
         #[arg(long, value_name = "MULTIADDR", default_value = DEFAULT_LISTEN)]
         listen: Vec<String>,
     },
+    /// Inspect observed peer hosts (N-C3 multi-host production).
+    Peers {
+        #[command(subcommand)]
+        command: PeersCommand,
+    },
+}
+
+/// `connect peers` subcommands.
+#[derive(Debug, Subcommand)]
+pub enum PeersCommand {
+    /// List observed peer hosts — host_id, capabilities, last_seen.
+    ///
+    /// Reads the adapter's observed-peer store (the `peer_hosts` table of
+    /// the active workspace DB): every peer this host has dialed and
+    /// recorded at `connect()` return (manifest-backed observations only —
+    /// inbound-only peers are not recorded, spec lock #1 fallback). Empty
+    /// store → `no peers observed`. Ordering: `last_seen` DESC, `host_id`
+    /// ASC (the storage ordering contract).
+    List,
 }
 
 /// Run a Connect Host command.
@@ -69,7 +93,84 @@ pub enum ConnectCommand {
 pub async fn run(command: ConnectCommand) -> Result<()> {
     match command {
         ConnectCommand::Start { allow_peer, listen } => start(allow_peer, listen).await,
+        ConnectCommand::Peers { command } => run_peers(command).await,
     }
+}
+
+/// Run a `connect peers` command.
+///
+/// # Errors
+/// Returns a [`CliError`] when the workspace DB open or the adapter read
+/// fails (fail-closed: an adapter reject is surfaced, never swallowed as an
+/// empty list).
+pub async fn run_peers(command: PeersCommand) -> Result<()> {
+    match command {
+        PeersCommand::List => peers_list().await,
+    }
+}
+
+/// Run `connect peers list`.
+///
+/// Opens the active-workspace DB pool (the same WAL pool the adapter runs
+/// against) and reads the observed-peer store through the adapter boundary
+/// ([`NexusAdapter::list_observed_peer_hosts`] — NOT raw `peer_hosts`
+/// columns; the shared rows→typed-manifest parse path means a corrupt
+/// stored row surfaces as `InternalError`, the port contract).
+///
+/// Output: one row per observed peer host — `host_id`, `capabilities`
+/// (typed `manifest.capabilities`, the single honest spoke-shaped view),
+/// `last_seen` (the nexus-local observation timestamp, the only
+/// non-manifest field). Ordering preserved from the storage contract:
+/// `last_seen` DESC, `host_id` ASC. Empty store → `no peers observed`.
+///
+/// # Errors
+/// [`CliError::Config`] when the active workspace cannot be resolved, or
+/// [`CliError::Other`] when the DB open or the adapter read is rejected.
+async fn peers_list() -> Result<()> {
+    let pool = open_workspace_pool(None).await?;
+    let adapter = NexusAdapter::new(pool);
+    let peers = match adapter.list_observed_peer_hosts().await {
+        SpokeResult::Ok(peers) => peers,
+        SpokeResult::Reject(reject) => {
+            return Err(CliError::Other(format!(
+                "observed peer hosts read rejected: {}",
+                reject.message
+            )));
+        }
+    };
+
+    for line in render_peer_lines(&peers) {
+        println!("{line}");
+    }
+    Ok(())
+}
+
+/// Render the `connect peers list` output lines (pure, testable).
+///
+/// Empty store → the single line `no peers observed`. Otherwise a header
+/// row (`HOST_ID`, `CAPABILITIES`, `LAST_SEEN`) followed by one row per
+/// observed peer host: `host_id` (typed manifest), `capabilities` (typed
+/// `manifest.capabilities` joined with `", "` — the single honest
+/// spoke-shaped view), `last_seen` (the nexus-local observation timestamp,
+/// the only non-manifest field). Callers print each line verbatim.
+fn render_peer_lines(peers: &[ObservedPeerHost]) -> Vec<String> {
+    if peers.is_empty() {
+        return vec!["no peers observed".to_string()];
+    }
+    let mut lines = Vec::with_capacity(peers.len() + 1);
+    lines.push(format!(
+        "{:<40} {:<32} {}",
+        "HOST_ID", "CAPABILITIES", "LAST_SEEN"
+    ));
+    for peer in peers {
+        lines.push(format!(
+            "{:<40} {:<32} {}",
+            peer.manifest.host_id.as_str(),
+            peer.manifest.capabilities.join(", "),
+            peer.last_seen
+        ));
+    }
+    lines
 }
 
 /// Run the full N-C1 `connect start` boot: the N-C0 assembly
@@ -315,6 +416,61 @@ async fn open_workspace_pool(workspace_db: Option<&Path>) -> Result<sqlx::Sqlite
         ))
     })?;
     Ok(pool)
+}
+
+#[cfg(all(test, feature = "connect-host"))]
+mod tests {
+    use super::*;
+
+    fn observed_peer(host_id: &str, capabilities: &[&str], last_seen: &str) -> ObservedPeerHost {
+        let manifest = match nexus_spoke_adapter::manifest::build_local_host_manifest(host_id) {
+            SpokeResult::Ok(m) => m,
+            SpokeResult::Reject(r) => panic!("manifest build is Ok: {r:?}"),
+        };
+        // Capabilities are locked constants in the shared builder; override
+        // them to exercise the render path with the peer's actual list.
+        let manifest = {
+            let mut m = manifest;
+            m.capabilities = capabilities.iter().map(|c| (*c).to_string()).collect();
+            m
+        };
+        ObservedPeerHost {
+            manifest,
+            last_seen: last_seen.to_string(),
+        }
+    }
+
+    #[test]
+    fn render_peer_lines_empty_store_prints_no_peers_observed() {
+        let lines = render_peer_lines(&[]);
+        assert_eq!(lines, vec!["no peers observed"]);
+    }
+
+    #[test]
+    fn render_peer_lines_prints_header_and_peer_rows() {
+        let peers = vec![
+            observed_peer(
+                "peer-host-uuid-0001",
+                &["spoke-baseline", "l2-computable"],
+                "2026-08-08T10:00:00Z",
+            ),
+            observed_peer("peer-host-uuid-0002", &[], "2026-08-08T09:00:00Z"),
+        ];
+        let lines = render_peer_lines(&peers);
+        assert_eq!(lines.len(), 3, "header + one line per peer");
+        assert!(lines[0].starts_with("HOST_ID"), "header names HOST_ID");
+        assert!(lines[0].contains("CAPABILITIES"));
+        assert!(lines[0].contains("LAST_SEEN"));
+        assert!(lines[1].starts_with("peer-host-uuid-0001"));
+        assert!(lines[1].contains("spoke-baseline, l2-computable"));
+        assert!(lines[1].contains("2026-08-08T10:00:00Z"));
+        assert!(lines[2].starts_with("peer-host-uuid-0002"));
+        assert!(
+            lines[2].contains("  "),
+            "empty capabilities render as an empty column (spacing preserved)"
+        );
+        assert!(lines[2].contains("2026-08-08T09:00:00Z"));
+    }
 }
 
 #[cfg(all(test, feature = "connect-host"))]

@@ -81,6 +81,12 @@ pub mod pack;
 // (spec §7.4 import path: `nexus_spoke_adapter::NexusAdapter`).
 pub use adapter::NexusAdapter;
 
+// V1.155 P0 N-C3 — the adapter-level observed-peer read (operator/CLI
+// surface): the peer's manifest + the nexus-local `last_seen` observation
+// metadata (not part of the spoke wire type; the `HostManifestPort` trait
+// surface stays manifest-only).
+pub use adapter::host_manifest_port::ObservedPeerHost;
+
 // V1.154 P2 (R3 closure): shared world-conflict classification predicate for
 // the adapter's `SpokeReject` carries (spec §3.2 — fixed `world_conflict`
 // wire spelling). Host mappings (Connect ErrorEnvelope, daemon HTTP) use it

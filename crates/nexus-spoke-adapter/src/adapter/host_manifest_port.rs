@@ -73,6 +73,54 @@ impl HostManifestPort for NexusAdapter<'_> {
     async fn list_peer_host_capability_manifests(
         &self,
     ) -> SpokeResult<Vec<HostCapabilityManifest>> {
+        match self.list_observed_peer_hosts().await {
+            SpokeResult::Ok(observed) => {
+                SpokeResult::Ok(observed.into_iter().map(|o| o.manifest).collect())
+            }
+            SpokeResult::Reject(r) => SpokeResult::Reject(r),
+        }
+    }
+}
+
+/// A peer host observed over Connect (V1.155 P0 / N-C3 multi-host
+/// production) — the manifest the peer dialed us with (or we dialed it
+/// with), plus the nexus-local observation metadata (the `last_seen`
+/// timestamp of that observation).
+///
+/// `last_seen` is NOT part of the spoke `HostCapabilityManifest` wire type —
+/// it is nexus observation metadata attached by the adapter read; the
+/// `HostManifestPort` trait surface (which spoke consumers see) stays
+/// manifest-only ([`HostManifestPort::list_peer_host_capability_manifests`]).
+#[derive(Debug, Clone)]
+pub struct ObservedPeerHost {
+    /// The dialed peer's `HostCapabilityManifest` (typed round-trip from the
+    /// stored `manifest_json`).
+    pub manifest: HostCapabilityManifest,
+    /// RFC 3339 UTC timestamp of the observation (the `peer_hosts`
+    /// `last_seen` column).
+    pub last_seen: String,
+}
+
+impl NexusAdapter<'_> {
+    /// List observed peer hosts (V1.155 P0 / N-C3 multi-host production) —
+    /// the adapter-level read for operator/CLI surfaces that need the
+    /// nexus-local observation metadata (`last_seen`) alongside the peer's
+    /// manifest.
+    ///
+    /// Single read path shared with
+    /// [`HostManifestPort::list_peer_host_capability_manifests`]: rows from
+    /// `nexus_local_db::list_peer_manifests` (`last_seen` DESC, `host_id` ASC
+    /// — the storage ordering contract), each `manifest_json` re-parsed as a
+    /// typed `HostCapabilityManifest`. Empty store → `Ok(vec![])` (stub
+    /// contract preserved). Honesty: never fabricates — only manifest-backed
+    /// observations are ever stored, and the `last_seen` is the stored row's
+    /// value, never synthesized.
+    ///
+    /// # Errors
+    /// `InternalError` when the store query fails or a stored row fails to
+    /// re-parse as a `HostCapabilityManifest` (storage corruption — surfaced,
+    /// never skipped), identical to the port method's contract.
+    pub async fn list_observed_peer_hosts(&self) -> SpokeResult<Vec<ObservedPeerHost>> {
         let rows = match nexus_local_db::list_peer_manifests(&self.pool).await {
             Ok(rows) => rows,
             Err(e) => {
@@ -81,22 +129,33 @@ impl HostManifestPort for NexusAdapter<'_> {
                 )));
             }
         };
-        let mut manifests = Vec::with_capacity(rows.len());
-        for row in rows {
-            let manifest = match serde_json::from_str::<HostCapabilityManifest>(&row.manifest_json)
-            {
-                Ok(manifest) => manifest,
-                Err(e) => {
-                    return SpokeResult::Reject(reject_internal(format!(
-                        "stored peer manifest for host_id {} is corrupt: {e}",
-                        row.host_id
-                    )));
-                }
-            };
-            manifests.push(manifest);
-        }
-        SpokeResult::Ok(manifests)
+        observed_from_rows(rows)
     }
+}
+
+/// Shared rows → typed-observed parse (the single corrupt-row contract:
+/// a stored row that fails to re-parse as a `HostCapabilityManifest` is
+/// storage corruption → `InternalError`, never skipped, never replaced).
+fn observed_from_rows(
+    rows: Vec<nexus_local_db::PeerHostRow>,
+) -> SpokeResult<Vec<ObservedPeerHost>> {
+    let mut observed = Vec::with_capacity(rows.len());
+    for row in rows {
+        let manifest = match serde_json::from_str::<HostCapabilityManifest>(&row.manifest_json) {
+            Ok(manifest) => manifest,
+            Err(e) => {
+                return SpokeResult::Reject(reject_internal(format!(
+                    "stored peer manifest for host_id {} is corrupt: {e}",
+                    row.host_id
+                )));
+            }
+        };
+        observed.push(ObservedPeerHost {
+            manifest,
+            last_seen: row.last_seen,
+        });
+    }
+    SpokeResult::Ok(observed)
 }
 
 /// Resolve the installation device id from the standard nexus home
@@ -415,5 +474,108 @@ mod tests {
             peers.is_empty(),
             "fail-closed: rejected manifest is never stored"
         );
+    }
+
+    /// The T3 adapter-level read (CLI surface): empty store → empty
+    /// `ObservedPeerHost` list (the stub contract preserved).
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn observed_peer_hosts_is_empty_for_local_first_nexus() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("test.db");
+        let pool = nexus_local_db::open_pool(&db_path).await.unwrap();
+        nexus_local_db::run_migrations(&pool).await.unwrap();
+
+        let adapter = NexusAdapter::new(pool);
+        let observed = match adapter.list_observed_peer_hosts().await {
+            SpokeResult::Ok(o) => o,
+            SpokeResult::Reject(r) => panic!("observed peer list is Ok: {r:?}"),
+        };
+        assert!(observed.is_empty(), "empty store has no observed peers");
+    }
+
+    /// The T3 adapter-level read attaches the nexus-local `last_seen`
+    /// observation timestamp to the typed manifest — the one non-manifest
+    /// field the CLI surfaces (the trait surface stays manifest-only).
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn observed_peer_hosts_attach_last_seen_and_typed_manifest() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("test.db");
+        let pool = nexus_local_db::open_pool(&db_path).await.unwrap();
+        nexus_local_db::run_migrations(&pool).await.unwrap();
+
+        let adapter = NexusAdapter::new(pool.clone());
+        let manifest = match crate::manifest::build_local_host_manifest("peer-host-uuid-0001") {
+            SpokeResult::Ok(m) => m,
+            SpokeResult::Reject(r) => panic!("manifest build is Ok: {r:?}"),
+        };
+        match adapter.record_peer_manifest(&manifest).await {
+            SpokeResult::Ok(()) => {}
+            SpokeResult::Reject(r) => panic!("recording is Ok: {r:?}"),
+        }
+
+        let observed = match adapter.list_observed_peer_hosts().await {
+            SpokeResult::Ok(o) => o,
+            SpokeResult::Reject(r) => panic!("observed peer list is Ok: {r:?}"),
+        };
+        assert_eq!(observed.len(), 1, "recorded peer is listed");
+        assert_eq!(
+            observed[0].manifest.host_id, manifest.host_id,
+            "typed manifest host_id round-trips"
+        );
+        assert_eq!(
+            observed[0].manifest.capabilities, manifest.capabilities,
+            "typed manifest capabilities round-trip"
+        );
+        // `last_seen` is the RFC 3339 UTC observation timestamp the adapter
+        // recorded (chrono::Utc::now().to_rfc3339() — repo convention).
+        assert!(
+            chrono::DateTime::parse_from_rfc3339(&observed[0].last_seen).is_ok(),
+            "last_seen is an RFC 3339 timestamp: {}",
+            observed[0].last_seen
+        );
+        // Ordering contract preserved: the observed list is last_seen DESC.
+        let rows = nexus_local_db::list_peer_manifests(&pool)
+            .await
+            .expect("storage list is Ok");
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].last_seen, observed[0].last_seen);
+    }
+
+    /// The corrupt-row contract is shared: a stored row whose
+    /// `manifest_json` cannot re-parse as a `HostCapabilityManifest` is
+    /// storage corruption → `InternalError` from BOTH the trait port method
+    /// and the T3 adapter read (never skipped, never replaced).
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn corrupt_stored_row_rejects_internal_error_on_both_reads() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("test.db");
+        let pool = nexus_local_db::open_pool(&db_path).await.unwrap();
+        nexus_local_db::run_migrations(&pool).await.unwrap();
+
+        // Corrupt a row directly at the storage layer (the storage
+        // primitives validate JSON on insert, so only raw SQL can plant a
+        // corrupt row — exactly the storage-corruption scenario the
+        // InternalError contract exists for).
+        sqlx::query(
+            "INSERT INTO peer_hosts (host_id, manifest_json, last_seen) \
+             VALUES ('corrupt-peer', '{not-json', '2026-08-08T00:00:00Z')",
+        )
+        .execute(&pool)
+        .await
+        .expect("corrupt row inserts");
+
+        let adapter = NexusAdapter::new(pool);
+        match adapter.list_peer_host_capability_manifests().await {
+            SpokeResult::Reject(r) => {
+                assert_eq!(r.code, SpokeRejectCode::InternalError);
+            }
+            SpokeResult::Ok(_) => panic!("corrupt row must reject, never silently skip"),
+        }
+        match adapter.list_observed_peer_hosts().await {
+            SpokeResult::Reject(r) => {
+                assert_eq!(r.code, SpokeRejectCode::InternalError);
+            }
+            SpokeResult::Ok(_) => panic!("corrupt row must reject, never silently skip"),
+        }
     }
 }
