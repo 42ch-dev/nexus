@@ -15,7 +15,7 @@ The digest covers **only** the JSON serialization of the bundle’s **`deltas` a
 3. **SHA-256** over those bytes.
 4. Encode: `sha256:` + **64 lowercase hex digits** (no `0x` prefix).
 
-**Serialization:** optional fields omitted per Serde `skip_serializing_if`; enums as `snake_case` wire strings; `payload` maps with sorted keys. `local_timestamp` serializes as `DateTime<Utc>` (RFC 3339 with `+00:00` suffix) — a typify-codegen change that updated the frozen digest below. Other stacks must match Rust bytes (golden vector below).
+**Serialization:** optional fields omitted per Serde `skip_serializing_if`; enums as `snake_case` wire strings; `payload` maps with sorted keys. `local_timestamp` serializes as `DateTime<Utc>` (RFC 3339 UTC with `Z` suffix) — a typify-codegen change that updated the frozen digest below. Other stacks must match Rust bytes (golden vector below).
 
 Wire shapes: `schemas/platform/sync/` (`delta.schema.json`, `bundle.schema.json`).
 

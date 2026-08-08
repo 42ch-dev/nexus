@@ -2,7 +2,7 @@
 //!
 //! **Preimage (this crate):** `serde_json::to_vec` bytes of the bundle's **`deltas` JSON array
 //! only** (not the full `Bundle` object). Normative spec: v1-spec **ADR-006**; OSS companion doc:
-//! `.mstar/archived/knowledge/canonical-hash.md`. Unit test `golden_alignment_vector_matches_documented_digest`
+//! `.mstar/specs/canonical-hash.md`. Unit test `golden_alignment_vector_matches_documented_digest`
 //! locks the ADR §3.3 golden vector. Other stacks must match these bytes for interop.
 //!
 //! Wire format: `sha256:` + 64 lowercase hex digits (see [`is_well_formed_canonical_hash`]).
@@ -107,7 +107,7 @@ mod tests {
     fn golden_alignment_vector_matches_documented_digest() {
         // Frozen digest for `golden_alignment_fixture_delta` (serde_json::to_vec on `[delta]`).
         // Updated after typify codegen: `local_timestamp` now serializes as DateTime<Utc>
-        // (RFC 3339 with +00:00 suffix) instead of plain String ("Z" suffix).
+        // (RFC 3339 UTC with `Z` suffix) instead of plain String.
         const EXPECTED: &str =
             "sha256:23f370c5ec4797f194b9fbbdba556c4de1d7c18c60b14a64898b1919486969fe";
         let got = canonical_hash_for_deltas(&[golden_alignment_fixture_delta()]).unwrap();

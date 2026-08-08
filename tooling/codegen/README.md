@@ -115,7 +115,7 @@ packages/nexus-contracts/src/generated/
 ├── platform/
 │   ├── http-bff/             # index.ts + <base>.ts …
 │   └── sync/                 # index.ts + <base>.ts …
-├── daemon-api/               # nested canvas/ works/ worlds/ … each with its own index.ts
+└── daemon-api/               # nested canvas/ works/ worlds/ … each with its own index.ts
 ```
 
 The tree mirrors the consumer-scope `schemas/` layout (folder names preserved as written,
