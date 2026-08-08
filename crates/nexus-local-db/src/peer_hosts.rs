@@ -61,19 +61,16 @@ pub async fn record_peer_manifest(
     now: &str,
 ) -> Result<(), LocalDbError> {
     validate_record_input(host_id, manifest_json, now)?;
-    // SAFETY: static INSERT ... ON CONFLICT upsert with bind params only (no
-    // user-controlled SQL fragments). Single atomic statement — there are no
-    // denormalized columns to keep in sync (QC fix wave F-002).
-    sqlx::query(
+    sqlx::query!(
         "INSERT INTO peer_hosts (host_id, manifest_json, last_seen) \
          VALUES (?, ?, ?) \
          ON CONFLICT(host_id) DO UPDATE SET \
            manifest_json = excluded.manifest_json, \
            last_seen = excluded.last_seen",
+        host_id,
+        manifest_json,
+        now,
     )
-    .bind(host_id)
-    .bind(manifest_json)
-    .bind(now)
     .execute(pool)
     .await?;
     Ok(())
@@ -88,10 +85,11 @@ pub async fn record_peer_manifest(
 ///
 /// Returns [`LocalDbError::Sqlx`] on database failure.
 pub async fn list_peer_manifests(pool: &SqlitePool) -> Result<Vec<PeerHostRow>, LocalDbError> {
-    // SAFETY: static SELECT against peer_hosts with a fixed ORDER BY; no
-    // user-controlled SQL fragments.
-    let rows = sqlx::query_as::<_, PeerHostRow>(
-        "SELECT host_id, manifest_json, last_seen \
+    // `host_id as "host_id!"` — SQLite describes a TEXT PRIMARY KEY as
+    // nullable (sqlx 0.8.6), the non-null coercion matches the `String` field.
+    let rows = sqlx::query_as!(
+        PeerHostRow,
+        "SELECT host_id as \"host_id!\", manifest_json, last_seen \
          FROM peer_hosts \
          ORDER BY last_seen DESC, host_id ASC",
     )
