@@ -25,7 +25,7 @@
 
 use super::wire_cast;
 use crate::api::errors::NexusApiError;
-use crate::api::handlers::works::{read_active_creator_id, read_active_workspace_slug};
+use crate::api::handlers::world_kb_guards::{require_creator, require_world_owner};
 use crate::workspace::WorkspaceState;
 use axum::extract::{Path, Query, State};
 use axum::Json;
@@ -109,44 +109,9 @@ const CANDIDATE_CURSOR_PREFIX: &str = "kbp:";
 
 // ─── Shared helpers ─────────────────────────────────────────────────────────
 
-/// Read the active creator id or return `AuthRequired`.
-fn require_creator(state: &WorkspaceState) -> Result<String, NexusApiError> {
-    let creator_id =
-        read_active_creator_id(state.nexus_home()).ok_or(NexusApiError::AuthRequired)?;
-    let _workspace_slug = read_active_workspace_slug(state.nexus_home(), &creator_id)
-        .ok_or(NexusApiError::AuthRequired)?;
-    Ok(creator_id)
-}
-
-/// Verify the active creator owns the World (`narrative_worlds.owner_creator_id`).
-/// Returns 404 when the world is missing, 403 on cross-author access.
-async fn require_world_owner(
-    pool: &sqlx::SqlitePool,
-    world_id: &str,
-    creator_id: &str,
-) -> Result<(), NexusApiError> {
-    // SAFETY: SELECT against the known narrative_worlds table schema.
-    let owner: Option<Option<String>> =
-        sqlx::query_scalar("SELECT owner_creator_id FROM narrative_worlds WHERE world_id = ?")
-            .bind(world_id)
-            .fetch_optional(pool)
-            .await
-            .map_err(NexusApiError::from)?;
-    match owner {
-        None => Err(NexusApiError::NotFound(format!("world {world_id}"))),
-        Some(Some(owner_id)) if owner_id == creator_id => Ok(()),
-        Some(Some(_)) => Err(NexusApiError::Forbidden {
-            resource: format!("world {world_id}"),
-            reason:
-                "active creator does not own this world; cross-author World KB edits are forbidden"
-                    .to_string(),
-        }),
-        Some(None) => Err(NexusApiError::Forbidden {
-            resource: format!("world {world_id}"),
-            reason: "world has no owner_creator_id; cannot authorize World KB edit".to_string(),
-        }),
-    }
-}
+// NOTE: `require_creator` / `require_world_owner` now live in the shared
+// `world_kb_guards` module (V1.155 P2 T3, R-V1152P0-002) — imported at the
+// top of this file.
 
 /// Map a `LocalDbError::VersionMismatch` to a 409 `WorldKbConflictError`;
 /// everything else to a 500.

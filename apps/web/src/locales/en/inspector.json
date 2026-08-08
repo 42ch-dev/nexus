@@ -15,8 +15,7 @@
       "review": "Review",
       "persist": "Persist",
       "work_maintenance": "Work maintenance",
-      "system_maintenance": "System maintenance",
-      "unspecified": "Unspecified"
+      "system_maintenance": "System maintenance"
     },
     "refresh": "Re-inspect",
     "refreshAria": "Re-run the moment inspection",

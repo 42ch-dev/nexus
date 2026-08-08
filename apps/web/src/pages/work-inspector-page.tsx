@@ -31,6 +31,11 @@ import { Select } from '@/components/ui/select';
 import { EmptyState, ErrorState, LoadingState } from '@/components/ui/states';
 import type { MomentInspectRequest } from '@42ch/nexus-contracts';
 
+// NOTE: `unspecified` is intentionally NOT listed here — the empty-value
+// default option (value="") below already expresses it and is omitted from
+// the wire request so the daemon applies its own default (V1.155 P2 T3,
+// R-V1151P2-003: listing it again rendered the stage selector with two
+// "unspecified" entries).
 const GENERATION_STAGES: MomentInspectRequest['generation_stage'][] = [
   'intake',
   'research',
@@ -39,7 +44,6 @@ const GENERATION_STAGES: MomentInspectRequest['generation_stage'][] = [
   'persist',
   'work_maintenance',
   'system_maintenance',
-  'unspecified',
 ];
 
 export function WorkInspectorPage() {
