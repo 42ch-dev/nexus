@@ -82,10 +82,8 @@ impl HostManifestPort for NexusAdapter<'_> {
     }
 }
 
-/// A peer host observed over Connect (V1.155 P0 / N-C3 multi-host
-/// production) — the manifest the peer dialed us with (or we dialed it
-/// with), plus the nexus-local observation metadata (the `last_seen`
-/// timestamp of that observation).
+/// A peer host observed over Connect (V1.155 P0 / N-C3) — the dialed
+/// peer's manifest plus the nexus-local `last_seen` observation metadata.
 ///
 /// `last_seen` is NOT part of the spoke `HostCapabilityManifest` wire type —
 /// it is nexus observation metadata attached by the adapter read; the
@@ -188,12 +186,18 @@ impl NexusAdapter<'_> {
     ///
     /// The adapter is the semantic boundary (spec §8 dep reversal —
     /// `nexus-local-db` stays spoke-schema-free): the manifest's `host_id`
-    /// becomes the `peer_hosts` PK, the manifest is re-serialized for
-    /// storage (never stored by reference), and the denormalized
-    /// `capabilities` column is written through
-    /// [`nexus_local_db::set_peer_capabilities`]. Fail-closed: a manifest
+    /// becomes the `peer_hosts` PK and the manifest is re-serialized for
+    /// storage (never stored by reference). The record is a **single atomic
+    /// upsert** — `manifest_json` is the one manifest source of truth, so
+    /// there is no denormalized column to keep in sync and no mid-failure
+    /// consistency window (QC fix wave F-002). Fail-closed: a manifest
     /// with an empty or oversized `host_id` is rejected before insert;
     /// storage failures surface as rejects (never swallowed).
+    ///
+    /// `last_seen` is generated at **fixed millisecond precision**
+    /// (`SecondsFormat::Millis`, `Z` suffix) so the storage ordering
+    /// contract (`last_seen` DESC) is lexicographically stable across
+    /// observations (QC fix wave S-003).
     ///
     /// # Errors
     /// `InvalidInput` when the manifest `host_id` is empty or exceeds
@@ -220,33 +224,14 @@ impl NexusAdapter<'_> {
                 )));
             }
         };
-        let capabilities_json = match serde_json::to_string(&manifest.capabilities) {
-            Ok(json) => json,
-            Err(e) => {
-                return SpokeResult::Reject(reject_internal(format!(
-                    "peer capabilities serialization failed: {e}"
-                )));
-            }
-        };
-        let now = chrono::Utc::now().to_rfc3339();
+        let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
         match nexus_local_db::record_peer_manifest(&self.pool, host_id, &manifest_json, &now).await
         {
-            Ok(()) => {}
-            Err(e) => {
-                return SpokeResult::Reject(reject_internal(format!(
-                    "peer manifest recording failed: {e}"
-                )));
-            }
+            Ok(()) => SpokeResult::Ok(()),
+            Err(e) => SpokeResult::Reject(reject_internal(format!(
+                "peer manifest recording failed: {e}"
+            ))),
         }
-        match nexus_local_db::set_peer_capabilities(&self.pool, host_id, &capabilities_json).await {
-            Ok(()) => {}
-            Err(e) => {
-                return SpokeResult::Reject(reject_internal(format!(
-                    "peer capabilities recording failed: {e}"
-                )));
-            }
-        }
-        SpokeResult::Ok(())
     }
 }
 
@@ -370,7 +355,8 @@ mod tests {
     /// the outbound observation point → the port returns exactly it.
     /// Also pins the production path: the manifest is re-serialized through
     /// the typed wire (a recorded `HostCapabilityManifest` round-trips field
-    /// for field, including the denormalized capabilities write).
+    /// for field — `manifest_json` is the single source of truth, QC fix
+    /// wave F-002).
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn recorded_peer_manifest_round_trips_through_port() {
         let dir = tempfile::tempdir().unwrap();

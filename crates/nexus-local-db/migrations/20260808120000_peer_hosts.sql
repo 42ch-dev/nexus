@@ -12,12 +12,11 @@
 --   - `manifest_json`: the serialized spoke `HostCapabilityManifest`, opaque
 --     at the storage layer (`nexus-local-db` has no spoke dependency — spec
 --     §8 dep-graph reversal); validated as JSON before insert (fail-closed).
+--     `manifest_json` is the single source of truth — capabilities are read
+--     from the typed manifest, never denormalized (QC fix wave F-002).
 --   - `last_seen`: RFC 3339 UTC timestamp of the observation.
---   - `capabilities`: denormalized JSON array (DEFAULT '[]') for query
---     without parsing `manifest_json`; populated by the adapter layer.
 CREATE TABLE peer_hosts (
   host_id        TEXT PRIMARY KEY,
   manifest_json  TEXT NOT NULL,
-  last_seen      TEXT NOT NULL,
-  capabilities   TEXT NOT NULL DEFAULT '[]'
+  last_seen      TEXT NOT NULL
 );

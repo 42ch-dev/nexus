@@ -950,6 +950,71 @@ async fn n_c3_two_node_bidirectional_outbound_records_dialed_peer_manifests() {
     node_b.shutdown().await.expect("host B shuts down");
 }
 
+/// QC fix wave F-001: the production dial surface. `connect dial`
+/// (`dial_host` with a hermetic home + workspace DB) dials a peer host
+/// over a real Connect session and records the dialed peer's manifest into
+/// the dialer's store — the shipped trigger that makes N-C3 recording
+/// reachable in production binaries (`connect start` / `nexus-runtime`
+/// never dial, so this command IS the observation point's production
+/// caller). Fail-closed: a successful `dial_host` return implies the
+/// record landed.
+#[tokio::test(flavor = "multi_thread")]
+async fn connect_dial_records_dialed_peer_manifest() {
+    let _guard = network_test_guard().await;
+    let temp = tempfile::tempdir().expect("tempdir");
+    let home_a = temp.path().join("host-a");
+    let home_b = temp.path().join("host-b");
+    std::fs::create_dir_all(&home_a).expect("mkdir host-a");
+    std::fs::create_dir_all(&home_b).expect("mkdir host-b");
+
+    // Mutual allowlist, exactly like the production CLI: B allowlists A
+    // (the dialer) and A's `dial_host` boot allowlists B — the session
+    // allowlist is mutual, so a dial without `--allow-peer <B>` is refused
+    // at the handshake.
+    let peer_a = identity::load_or_create_identity(&home_a)
+        .expect("identity A")
+        .public()
+        .to_peer_id();
+    let peer_b = identity::load_or_create_identity(&home_b)
+        .expect("identity B")
+        .public()
+        .to_peer_id();
+    let db_b = home_b.join("workspace").join("state.db");
+    let (config_b, host_id_b, _, _) = super::build_host_config(
+        &home_b,
+        &[peer_a.to_string()],
+        &["/ip4/127.0.0.1/tcp/0".to_string()],
+        Some(&db_b),
+    )
+    .await
+    .expect("host B config builds");
+    let node_b = start(config_b).await;
+    let b_addr = node_b.listen_addrs()[0].to_string();
+
+    // The production dial surface (CLI core with hermetic home + DB):
+    // boots A, dials B, records B's manifest — all inside `dial_host`.
+    let db_a = home_a.join("workspace").join("state.db");
+    super::dial_host(&home_a, &b_addr, &[peer_b.to_string()], Some(&db_a))
+        .await
+        .expect("connect dial succeeds and records the dialed peer");
+
+    let pool = nexus_local_db::open_pool(&db_a).await.expect("A db opens");
+    let adapter_a = NexusAdapter::new(pool);
+    let peers = assert_peer_list_ok(&adapter_a).await;
+    assert_eq!(peers.len(), 1, "dial records exactly the dialed peer");
+    assert_eq!(
+        peers[0].host_id.as_str(),
+        host_id_b,
+        "A's store returns the dialed peer's manifest host_id"
+    );
+    assert!(
+        peers[0].capabilities.iter().any(|c| c == "spoke-baseline"),
+        "typed manifest capabilities round-trip"
+    );
+
+    node_b.shutdown().await.expect("host B shuts down");
+}
+
 /// N-C1 (V1.153 P1): the Connect invoke dispatch layer end-to-end over the
 /// wire. An allowlisted, world-scoped peer runs the three write ops against
 /// a hermetic workspace DB inside the host process (per-process adapter);
