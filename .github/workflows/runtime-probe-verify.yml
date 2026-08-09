@@ -239,40 +239,100 @@ jobs:
             if (-not $listenMatch.Success) { throw 'runtime readiness omitted listen address' }
             if (-not $hostPeerMatch.Success) { throw 'runtime readiness omitted peer id' }
 
-            $commands = Join-Path $env:RUNNER_TEMP 'trpg-bridge-commands.ndjson'
-            $commandDocuments = @(
-              @{ id = 'deny-op'; op = 'check'; payload = @{ scope = @{ scope_id = $worldId } } },
-              @{ id = 'deny-world'; op = 'assemble'; payload = @{ scope = @{ scope_id = 'wld_other' }; max_entries = 1 } },
-              @{ id = 'allow'; op = 'assemble'; payload = @{ scope = @{ scope_id = $worldId }; max_entries = 1 } }
-            )
-            $commandLines = $commandDocuments | ForEach-Object { $_ | ConvertTo-Json -Compress -Depth 5 }
-            $commandLines | Set-Content -Encoding utf8NoBOM $commands
-            $bridgeOut = Join-Path $env:RUNNER_TEMP 'trpg-bridge.stdout.log'
-            $bridgeErr = Join-Path $env:RUNNER_TEMP 'trpg-bridge.stderr.log'
             $bridgeArgs = @(
               '--identity-seed', $seed,
               '--addr', $listenMatch.Groups[1].Value,
               '--host-peer', $hostPeerMatch.Groups[1].Value
             )
-            $bridgeProcess = Start-Process -FilePath $bridge -ArgumentList $bridgeArgs -WindowStyle Hidden -RedirectStandardInput $commands -RedirectStandardOutput $bridgeOut -RedirectStandardError $bridgeErr -PassThru
+
+            function Write-BridgeCommand {
+              param(
+                [System.Diagnostics.Process]$Process,
+                [hashtable]$Document
+              )
+              $commandLine = $Document | ConvertTo-Json -Compress -Depth 5
+              $Process.StandardInput.WriteLine($commandLine)
+              $Process.StandardInput.Flush()
+            }
+
+            function Read-BridgeEvent {
+              param(
+                [System.Diagnostics.Process]$Process,
+                [string]$Label
+              )
+              $readTask = $Process.StandardOutput.ReadLineAsync()
+              if (-not $readTask.Wait(30000)) {
+                throw "timed out waiting for Trpg bridge event: $Label"
+              }
+              if ($null -eq $readTask.Result) {
+                throw "Trpg bridge stdout closed while waiting for event: $Label"
+              }
+              Write-Output "bridge event [$Label]: $($readTask.Result)"
+              return $readTask.Result | ConvertFrom-Json
+            }
+
+            $bridgeStartInfo = [System.Diagnostics.ProcessStartInfo]::new()
+            $bridgeStartInfo.FileName = $bridge
+            $bridgeStartInfo.UseShellExecute = $false
+            $bridgeStartInfo.CreateNoWindow = $true
+            $bridgeStartInfo.RedirectStandardInput = $true
+            $bridgeStartInfo.RedirectStandardOutput = $true
+            $bridgeStartInfo.RedirectStandardError = $true
+            $bridgeStartInfo.StandardOutputEncoding = [System.Text.Encoding]::UTF8
+            $bridgeStartInfo.StandardErrorEncoding = [System.Text.Encoding]::UTF8
+            foreach ($argument in $bridgeArgs) {
+              [void]$bridgeStartInfo.ArgumentList.Add([string]$argument)
+            }
+            $bridgeProcess = [System.Diagnostics.Process]::new()
+            $bridgeProcess.StartInfo = $bridgeStartInfo
+            if (-not $bridgeProcess.Start()) { throw 'failed to start Trpg bridge' }
+
+            $readyEvent = Read-BridgeEvent -Process $bridgeProcess -Label 'ready'
+
+            Write-BridgeCommand -Process $bridgeProcess -Document @{
+              id = 'allow-before-idle'
+              op = 'assemble'
+              payload = @{ scope = @{ scope_id = $worldId }; max_entries = 1 }
+            }
+            $allowedBeforeIdle = Read-BridgeEvent -Process $bridgeProcess -Label 'allow-before-idle'
+
+            Start-Sleep -Seconds 12
+
+            Write-BridgeCommand -Process $bridgeProcess -Document @{
+              id = 'allow-after-idle'
+              op = 'assemble'
+              payload = @{ scope = @{ scope_id = $worldId }; max_entries = 1 }
+            }
+            $allowedAfterIdle = Read-BridgeEvent -Process $bridgeProcess -Label 'allow-after-idle'
+
+            Write-BridgeCommand -Process $bridgeProcess -Document @{
+              id = 'deny-op'
+              op = 'check'
+              payload = @{ scope = @{ scope_id = $worldId } }
+            }
+            $deniedOp = Read-BridgeEvent -Process $bridgeProcess -Label 'deny-op'
+
+            Write-BridgeCommand -Process $bridgeProcess -Document @{
+              id = 'deny-world'
+              op = 'assemble'
+              payload = @{ scope = @{ scope_id = 'wld_other' }; max_entries = 1 }
+            }
+            $deniedWorld = Read-BridgeEvent -Process $bridgeProcess -Label 'deny-world'
+
+            $bridgeProcess.StandardInput.Close()
             if (-not $bridgeProcess.WaitForExit(30000)) {
-              Stop-Process -Id $bridgeProcess.Id
               throw 'Trpg bridge did not exit after stdin EOF'
             }
+            $bridgeErrorText = $bridgeProcess.StandardError.ReadToEnd()
             if ($bridgeProcess.ExitCode -ne 0) {
-              $bridgeErrorText = if (Test-Path $bridgeErr) { Get-Content -Raw -Encoding UTF8 $bridgeErr } else { '' }
               throw "Trpg bridge exited $($bridgeProcess.ExitCode): $bridgeErrorText"
             }
 
-            $events = Get-Content -Encoding UTF8 $bridgeOut | ForEach-Object { $_ | ConvertFrom-Json }
-            $readyEvent = $events | Where-Object { $_.type -eq 'ready' }
-            $deniedOp = $events | Where-Object { $_.id -eq 'deny-op' }
-            $deniedWorld = $events | Where-Object { $_.id -eq 'deny-world' }
-            $allowed = $events | Where-Object { $_.id -eq 'allow' }
             if ($readyEvent.peer_id -ne $bridgePeer) { throw 'bridge ready identity mismatch' }
+            if ($allowedBeforeIdle.ok -ne $true -or $null -eq $allowedBeforeIdle.payload.packet) { throw 'authorized assemble before idle did not succeed' }
+            if ($allowedAfterIdle.ok -ne $true -or $null -eq $allowedAfterIdle.payload.packet) { throw 'authorized assemble after idle did not reconnect and succeed' }
             if ($deniedOp.ok -ne $false -or $deniedOp.error.code -ne 'op_unsupported') { throw 'unscoped check was not denied' }
             if ($deniedWorld.ok -ne $false -or $deniedWorld.error.code -ne 'op_unsupported') { throw 'wrong-world assemble was not denied' }
-            if ($allowed.ok -ne $true -or $null -eq $allowed.payload.packet) { throw 'authorized assemble did not succeed' }
             if (Test-Path $globalNexusDir) { throw "bridge probe touched runner global Nexus home: $globalNexusDir" }
           } finally {
             if ($bridgeProcess -and -not $bridgeProcess.HasExited) {

@@ -9,7 +9,9 @@ use anyhow::{anyhow, Context};
 use libp2p::identity::Keypair;
 use serde::Deserialize;
 use serde_json::{json, Value};
-use spoke_connect::{parse_multiaddr, ConnectConfig, InvokeError, SpokeConnectNode};
+use spoke_connect::{
+    parse_multiaddr, ConnectConfig, InvokeError, PeerSession, SpokeConnectNode,
+};
 use spoke_schemas::connect::connect_hello::HostCapabilityManifest;
 use std::collections::HashMap;
 use std::num::NonZeroU64;
@@ -104,6 +106,24 @@ async fn emit(stdout: &mut tokio::io::Stdout, value: &Value) -> anyhow::Result<(
     Ok(())
 }
 
+async fn connect_host(
+    node: &SpokeConnectNode,
+    addr: &libp2p::Multiaddr,
+    host_peer: libp2p::PeerId,
+) -> Result<PeerSession, String> {
+    let session = node
+        .connect(addr.clone())
+        .await
+        .map_err(|error| error.to_string())?;
+    if session.remote_peer_id() != host_peer {
+        return Err(format!(
+            "connected peer {} did not match expected host {host_peer}",
+            session.remote_peer_id()
+        ));
+    }
+    Ok(session)
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let args = parse_args()?;
@@ -118,7 +138,7 @@ async fn main() -> anyhow::Result<()> {
         .ok_or_else(|| anyhow!("--host-peer is required"))?
         .parse()
         .context("parse --host-peer as PeerId")?;
-    let addr = args.addr.ok_or_else(|| anyhow!("--addr is required"))?;
+    let addr = parse_multiaddr(&args.addr.ok_or_else(|| anyhow!("--addr is required"))?)?;
     let config = ConnectConfig {
         identity,
         peer_allowlist: vec![host_peer],
@@ -133,13 +153,9 @@ async fn main() -> anyhow::Result<()> {
         capability_token_provider: None,
     };
     let node = SpokeConnectNode::start(config).await?;
-    let session = node.connect(parse_multiaddr(&addr)?).await?;
-    if session.remote_peer_id() != host_peer {
-        return Err(anyhow!(
-            "connected peer {} did not match expected host {host_peer}",
-            session.remote_peer_id()
-        ));
-    }
+    let mut session = connect_host(&node, &addr, host_peer)
+        .await
+        .map_err(anyhow::Error::msg)?;
 
     let mut stdout = tokio::io::stdout();
     emit(
@@ -160,7 +176,56 @@ async fn main() -> anyhow::Result<()> {
             continue;
         }
         let command: BridgeCommand = serde_json::from_str(&line).context("parse NDJSON command")?;
-        let response = match session.invoke(command.op, command.payload).await {
+        session = match connect_host(&node, &addr, host_peer).await {
+            Ok(current_session) => current_session,
+            Err(error) => {
+                emit(
+                    &mut stdout,
+                    &json!({
+                        "id": command.id,
+                        "ok": false,
+                        "kind": "transport",
+                        "error": {
+                            "code": "TRANSPORT_UNAVAILABLE",
+                            "message": error,
+                        },
+                    }),
+                )
+                .await?;
+                continue;
+            }
+        };
+
+        let invoke_result = session
+            .invoke(command.op.clone(), command.payload.clone())
+            .await;
+        let invoke_result = match invoke_result {
+            Err(InvokeError::SessionClosed) => {
+                session = match connect_host(&node, &addr, host_peer).await {
+                    Ok(reconnected_session) => reconnected_session,
+                    Err(error) => {
+                        emit(
+                            &mut stdout,
+                            &json!({
+                                "id": command.id,
+                                "ok": false,
+                                "kind": "transport",
+                                "error": {
+                                    "code": "TRANSPORT_UNAVAILABLE",
+                                    "message": error,
+                                },
+                            }),
+                        )
+                        .await?;
+                        continue;
+                    }
+                };
+                session.invoke(command.op, command.payload).await
+            }
+            result => result,
+        };
+
+        let response = match invoke_result {
             Ok(success) => json!({
                 "id": command.id,
                 "ok": true,
