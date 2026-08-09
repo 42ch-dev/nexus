@@ -4,7 +4,7 @@
 
 **Purpose**: Single source of truth for **open** and **backlog** features deferred from delivery compasses. Closed/shipped history lives in shipped archive.
 **Scope**: `nexus` OSS repository only.
-**Created**: 2026-04-21 · **Last updated**: 2026-08-06 (V1.152 P2 close: DF-77 **delivered** — row moved to shipped archive, quick status moved to V1.152 shipped, latest shipped → V1.152, FL-L W7 row updated; V1.152 start: quick status moved to V1.152 active; DF-77 row marked in-flight under V1.152 (start chain — not delivered); FL-L W7 status updated in §2.2; V1.151 P2 close: DF-76 **delivered** — row moved to shipped archive, quick status moved to V1.151 completed, latest shipped → V1.151, FL-L W6 row updated, V1.150-deferred Control Room Directive input closed; V1.151 start: quick status moved to V1.151 active; DF-76 row marked in-flight under V1.151 (start chain — not delivered); V1.150 P2 close: DF-75 **delivered** — row moved to shipped archive, DF-76 marked next with trigger met + deferred thin Control Room Directive input recorded; quick status moved to V1.150 active; V1.150 start: DF-75/FL-L rows marked in-flight; V1.149 P2: DF-74 **delivered** — row moved to shipped archive, DF-75 marked next with trigger met)
+**Created**: 2026-04-21 · **Last updated**: 2026-08-09 (spec durable-roadmap consolidation: §2.6 added — DR-01..DR-67 migrated from spec-internal registers across 20 specs; specs re-pointed to §2.6); previously: 2026-08-06 (V1.152 P2 close: DF-77 **delivered** — row moved to shipped archive, quick status moved to V1.152 shipped, latest shipped → V1.152, FL-L W7 row updated; V1.152 start: quick status moved to V1.152 active; DF-77 row marked in-flight under V1.152 (start chain — not delivered); FL-L W7 status updated in §2.2; V1.151 P2 close: DF-76 **delivered** — row moved to shipped archive, quick status moved to V1.151 completed, latest shipped → V1.151, FL-L W6 row updated, V1.150-deferred Control Room Directive input closed; V1.151 start: quick status moved to V1.151 active; DF-76 row marked in-flight under V1.151 (start chain — not delivered); V1.150 P2 close: DF-75 **delivered** — row moved to shipped archive, DF-76 marked next with trigger met + deferred thin Control Room Directive input recorded; quick status moved to V1.150 active; V1.150 start: DF-75/FL-L rows marked in-flight; V1.149 P2: DF-74 **delivered** — row moved to shipped archive, DF-75 marked next with trigger met)
 
 ---
 
@@ -17,6 +17,7 @@
 - **Deferring again**: Update `Target` column; keep the row. Add a note.
 - **Shipped/cancelled history**: [shipped archive](shipped-features-tracker.md)
 - **Tech-debt residuals**: [`status.json`](../status.json) `residual_findings` — SSOT. Do not mirror here.
+- **Spec durable roadmaps**: §2.6 (consolidated 2026-08-09 from spec-internal registers; specs carry one-line pointers back here).
 - **Conflict**: Compass wins over tracker; `status.json` wins over tracker for machine-state residuals.
 
 ---
@@ -91,16 +92,103 @@
 
 ### 2.5 Reliability roadmap (cross-version)
 
-Non-feature reliability work routed out of feature iterations; picked up by a dedicated reliability iteration or opportunistically.
+Non-feature reliability work routed out of feature iterations; picked up by a dedicated reliability iteration or opportunistically. (Reliability-track items migrated from specs live in §2.6 — Track = Reliability.)
 
 | ID | Item | Source | Target | Notes |
 |----|------|--------|--------|-------|
+
+### 2.6 Spec-internal durable roadmaps (consolidated 2026-08-09)
+
+**Migration note:** forward-looking registers previously scattered inside specs were consolidated here so the tracker is the single home for deferred work. Specs carry one-line pointers back to this section (see the Source column). Classification used during migration:
+- **Migrated** = register whose purpose is tracking future work (target/trigger/owner).
+- **Kept in spec** = normative deferral that is part of the current contract (e.g. "X is not in V1.x scope", feature-flag-off), or a shipped/rejected decision record.
+- **Pointer-only** = deferral already tracked by an existing ID (DF-*/BL-*/PD-*, residual R-*) — those rows stay in §2.3/§2.4 / `status.json`; this section adds **only new IDs (DR-*)** and links to existing ones.
+
+Rules:
+- **Closing**: remove the row here; append a shipped row to the [shipped archive](shipped-features-tracker.md).
+- **Linked residuals** (R-*): finding severity/lifecycle stays in [`status.json`](../status.json) (SSOT); this row is the roadmap register only.
+- **Targets** are guidance; a compass controls scope for the active iteration.
+- Rows without a committed target = backlog.
+
+| ID | Item | Source (spec §) | Target | Trigger | Track | Linked |
+|----|------|-----------------|--------|---------|-------|--------|
+| DR-01 | Daemon retry jitter range expansion (QC3 S-001) | [daemon-runtime.md](../specs/daemon-runtime.md) §Deferred suggestions (V1.58) | — | surge-load incident observed (N≈100) | Reliability | — |
+| DR-02 | Capability-layer metrics overhead benchmarking (QC3 S-002) | [daemon-runtime.md](../specs/daemon-runtime.md) §Deferred suggestions (V1.58) | — | profiling shows >1% of cold path | Reliability | — |
+| DR-03 | Daemon no-Profile: background subsystem runtime attach (H2) | [daemon-runtime.md](../specs/daemon-runtime.md) §17.7 | follow-up | next daemon-runtime iteration | Reliability | R-V1118-era H2 |
+| DR-04 | Desktop clean-home CI leg in GitHub Actions (I-1) | [daemon-runtime.md](../specs/daemon-runtime.md) §17.7 | — | next desktop/CI iteration | Reliability | — |
+| DR-05 | Secret-store hardening (hardware-backed keystore, biometric unlock) | [daemon-runtime.md](../specs/daemon-runtime.md) §16.5 | future | remote-key UX demand | Reliability | — |
+| DR-06 | Converge `wait_for_all` timeout enforcement (`wait_for_all_timeout_seconds`, default 3600s) | [preset-conditional-routing.md](../specs/preset-conditional-routing.md) §3.3.3 | — | R-V156P2-L003; deadlock observed | Reliability | — |
+| DR-07 | Reference refresh caps: `refresh_policy.get` / `refresh_status` + CLI + E2E + cross-process OCC | [reference-knowledge.md](../specs/reference-knowledge.md) §1/§3/§5 | P3 | user-facing CLI surface demand | Reliability | DF-44 (shipped core) |
+| DR-08 | Drop legacy daemon `outbox` table (phased removal) | [outbox-consolidation.md](../specs/outbox-consolidation.md) §6.3 | V1.61+ | consolidation follow-through (no Rust consumers since V1.59 T3) | Reliability | — |
+| DR-09 | OQ-7 multi-agent per creator | [orchestration-engine.md](../specs/orchestration-engine.md) §11 + [creator-schedule-and-core-context.md](../specs/creator-schedule-and-core-context.md) §13 | V1.5+ | multi-agent author demand | Harness | — |
+| DR-10 | OQ-8 user-authored capabilities (shell / WASM plugin ABI) | [orchestration-engine.md](../specs/orchestration-engine.md) §11 + [creator-schedule-and-core-context.md](../specs/creator-schedule-and-core-context.md) §13 | V1.5+ | demand | Harness | — |
+| DR-11 | Conditional-next routing (loader accepts `next.kind: conditional` / `add_conditional_edge`) | [orchestration-engine.md](../specs/orchestration-engine.md) §4.4/§7.5/§8.3 | — | FL-D conditional routing | Harness | — |
+| DR-12 | `timer.wait_until` capability wiring (clock poller follow-on) | [orchestration-engine.md](../specs/orchestration-engine.md) §5.2 | — | wall-clock trigger demand | Harness | sync.pull/push → DF-46 (PD-05) |
+| DR-13 | Multi-agent workers (switch agent within creator without worker restart) | [orchestration-engine.md](../specs/orchestration-engine.md) §6.2 | V1.5+ | demand | Harness | — |
+| DR-14 | Future native agent providers (codex/gemini/opencode/cursor/kimi PATH-scan waves) | [agent-host.md](../specs/agent-host.md) §4.2.3/§5.1 | later waves | demand | Harness | DF-26 (Wave 1) |
+| DR-15 | Host-level session persistence (`sessions.json`) | [agent-host.md](../specs/agent-host.md) §9.1/§9.3 | — | multi-session demand | Harness | — |
+| DR-16 | Multi-session concurrent execution (task lease + atomic claim) + skills injection | [agent-host.md](../specs/agent-host.md) §11.3 | — | demand | Harness | — |
+| DR-17 | One-shot LLM seed expansion step in presets | [creator-schedule-and-core-context.md](../specs/creator-schedule-and-core-context.md) §2 | — | preset feature demand | Harness | — |
+| DR-18 | `creator world kb` rejected-candidate `--prune-rejected` CLI | [entity-scope-model.md](../specs/entity-scope-model.md) §5.5.4 | — | rejected-log growth | Harness | — |
+| DR-19 | `creator kb` vs `creator knowledge` disambiguation decision | [cli-command-ia.md](../specs/cli-command-ia.md) §3.2 | P3 | decision (Option C rename breaking → `gitnexus_impact` first) | Harness | — |
+| DR-20 | ACP daemon-mediated tool access + centralized permission policy engine (`request_permission`) | [acp-client-tech-spec.md](../specs/acp-client-tech-spec.md) §2.3/§4.3 (ACP-R7/R8) | — | ACP UX demand (note: acp-worker architecture supersedes the V1.1+ framing) | Harness | — |
+| DR-21 | ACP session persistence across CLI invocations | [acp-client-tech-spec.md](../specs/acp-client-tech-spec.md) §2.3 (ACP-R6) | — | demand | Harness | — |
+| DR-22 | ACP-R3/R4/R5/R9/R10/R11: `terminal.kill`/`terminal.wait_for_exit`, `slash_commands`, `agent_plan`, persistent skills manifest (`~/.nexus42/skills.json`), binary auto-update, `session.modes` | [acp-client-tech-spec.md](../specs/acp-client-tech-spec.md) §4.3/§5.1/§5.3/Appendix B | — | demand | Harness | — |
+| DR-23 | Tool-bridge contract-gap codegen (ToolExecution request/response/error envelopes, worker args↔params normalize, `context.assemble` wrapper + POLICY_BLOCKED, per-tool param schemas ×6) | [agent-nexus-tool-bridge.md](../specs/agent-nexus-tool-bridge.md) §11 | P4/P5+ | schema-aware codegen plan | Contract | — |
+| DR-24 | ACP wire full JSON Schema drafts (schema-aware codegen trigger) | [capability-registry.md](../specs/capability-registry.md) §2.5 | — | schema-aware codegen plan | Contract | — |
+| DR-25 | Capability→ACP tool/resource schema map + manuscript read/write quotas + default timeouts | [acp-capability-set.md](../specs/acp-capability-set.md) §8 | — | demand | Contract | — |
+| DR-26 | Moment Work-Timeline wire extension (frontend-only projection today; honest empty-state) | [entity-scope-model.md](../specs/entity-scope-model.md) §1.4.1 + [canvas-strategy-surface.md](../specs/canvas-strategy-surface.md) §3.3.3 | V1.124+ | scene-precision author demand | Canvas | related: DF-V1123-WORK-BRIEF |
+| DR-27 | Control Room cron editing | [web-ui.md](../specs/web-ui.md) §8 | — | author demand (read-only today) | UI | — |
+| DR-28 | Control Room findings remediation actions (inline fix / re-run from finding) | [web-ui.md](../specs/web-ui.md) §8 | — | author demand (one-click orchestration re-trigger rejected — deliberate) | UI | — |
+| DR-29 | Rich live overlay (completed-path history, child-session hierarchy) | [web-ui.md](../specs/web-ui.md) §16.5 | V1.71+ | canvas polish demand | UI | — |
+| DR-30 | Standalone maturation dashboard (multi-chart cross-Work/World aggregate) | [web-ui.md](../specs/web-ui.md) §25.3/§28.5 | V1.80+ | aggregate insight demand | UI | BL-09 |
+| DR-31 | Profile-specific reading chrome (essay section breaks, game-bible cross-refs, novel typography presets) | [web-ui.md](../specs/web-ui.md) §25.3/§28.5 | — | profile demand | UI | BL-11 (registered here) |
+| DR-32 | Per-World SOUL narratives + filtering | [web-ui.md](../specs/web-ui.md) §25.3/§26.3 | — | world-scoped reflection demand | UI | — |
+| DR-33 | SOUL narrative curation/editing + export/share | [web-ui.md](../specs/web-ui.md) §26.3/§27.3 | — | demand | UI | — |
+| DR-34 | Multi-creator CRUD / multi-workspace UI / workspace switcher | [web-ui.md](../specs/web-ui.md) §29.9/§29.13.6 | — | demand | UI | — |
+| DR-35 | Tauri PATH agent scan | [web-ui.md](../specs/web-ui.md) §29.13.6 | — | desktop hardening | UI | — |
+| DR-36 | Script profile: auto-chain | [script-profile.md](../specs/script-profile.md) §12 | — | demand | Harness | — |
+| DR-37 | Script profile: screenplay export + formatting normalization | [script-profile.md](../specs/script-profile.md) §12 | — | demand | Cross-cutting | — |
+| DR-38 | Script profile: multi-character voice tracking | [script-profile.md](../specs/script-profile.md) §12 | — | demand | Cross-cutting | — |
+| DR-39 | Script profile: real-time collaboration (concurrent editing w/ OCC) | [script-profile.md](../specs/script-profile.md) §12 | — | demand | Canvas | DF-52 workspace OCC |
+| DR-40 | Script profile: storyboard pipeline (beat → visual scene plan) | [script-profile.md](../specs/script-profile.md) §12 | — | V1.60 beat structure | Canvas | — |
+| DR-41 | Game-bible: auto-chain (completion detection + chained runs) | [game-bible-profile.md](../specs/game-bible-profile.md) §12 | — | demand | Harness | — |
+| DR-42 | Holistic route-path review across all surfaces (CLI-IA concern) | [spoke-adapter-architecture.md](../specs/spoke-adapter-architecture.md) §6.1 | dedicated iteration | — | Cross-cutting | — |
+| DR-43 | MCA read-path cutover evaluation (daemon CRUD read paths → adapter ScopeQuery) | [spoke-adapter-architecture.md](../specs/spoke-adapter-architecture.md) §7.4 | V1.146+ | read-path parity demand | Cross-cutting | — |
+| DR-44 | Spoke fork-model participation (fork_id/parent_fork_id/timeline_scale/source_anchor/computable_logs lossy today) | [spoke-adapter-architecture.md](../specs/spoke-adapter-architecture.md) §7.4 | — | fork feature demand | Cross-cutting | — |
+| DR-45 | `order_timeline_events_by_precedes` adapter adoption (stretch) | [spoke-adapter-architecture.md](../specs/spoke-adapter-architecture.md) §7.4 | stretch | beat-assist precedence need | Cross-cutting | — |
+| DR-46 | `creator kb --scope world` / user-global knowledge routing | [entity-scope-model.md](../specs/entity-scope-model.md) §5.3 + [local-cloud-crate-architecture.md](../specs/local-cloud-crate-architecture.md) §3.5/§5.2 | — | World-scoped CLI demand | Cross-cutting | — |
+| DR-47 | Computable state-path query perf (per-block_type computed column / state_summary_json / normalized key_block_state table) | [entity-scope-model.md](../specs/entity-scope-model.md) §5.5.9.2.1 | V2.0+ / post-1.0 | ≥10k computable KnowledgeEntries/world | Computable | — |
+| DR-48 | Relationship promotion state machine (mirroring entity pending/confirmed/rejected) | [entity-scope-model.md](../specs/entity-scope-model.md) §5.6.7 | post-1.0 | relationship suggestion UX | Cross-cutting | — |
+| DR-49 | Compute-module ABI V2 bundle: multi-module composition/chaining, CDN distribution + Ed25519 signing, Generic Combat Protocol interop, 3P game-server bridge, KB→UI editor | [compute-module-abi.md](../specs/compute-module-abi.md) §9.3 | V2.0+ / V3.0+ | — | Computable | — |
+| DR-50 | wasm-host richer `narrative_query` engine (V1 returns narrative_state verbatim) | [wasm-host.md](../specs/wasm-host.md) §9.2 | later iteration | query demand | Computable | — |
+| DR-51 | Future platform context merge (optional `cloud-stage`) | [local-cloud-crate-architecture.md](../specs/local-cloud-crate-architecture.md) §3.2 | — | platform resume | Platform | — |
+| DR-52 | User/global knowledge entry surface (future `platform knowledge` / user-scoped subcommand) | [cli-spec.md](../specs/cli-spec.md) §6.2D/§6.2F | — | platform/user KB demand | Cross-cutting | — |
+| DR-53 | Top-level `sync` hard-delete (alias retirement after `platform sync` alias period) | [cli-command-ia.md](../specs/cli-command-ia.md) §5 | — | alias-period cleanup | Cross-cutting | — |
+| DR-54 | Platform upload via `nexus-cloud-sync` (`nexus42 sync push`; module must not call platform HTTP directly) | [novel-writing/sync-contract.md](../specs/novel-writing/sync-contract.md) §5 | long-term | cloud product line | Platform | DF-55 / PD-05 |
+| DR-55 | Registry-integration open items: pin upstream schema compat, enterprise mirror, binary distribution | [registry-integration.md](../specs/registry-integration.md) §9 | — | partner demand | Cross-cutting | — |
+| DR-56 | DB-backed revisions table (audit history / multi-device sync) | [daemon-api-surface-conventions.md](../specs/daemon-api-surface-conventions.md) §7.4 | — | audit/multi-device demand | Contract | — |
+| DR-57 | ACP sessions/operations/events (SSE) DTO promotion (long-lived stateful connections) | [web-ui.md](../specs/web-ui.md) §8 | — | stateful-connection demand | Contract | — |
+| DR-58 | Desktop distribution v2 (signing / notarization / Authenticode / auto-update / tri-OS / GitHub Releases; in-process `nexus-daemon-runtime` lib link) | [desktop-shell.md](../specs/desktop-shell.md) §2 + [web-ui.md](../specs/web-ui.md) §16.5 | V1.71+ backlog | external signing cert + partner distribution need | Desktop | EPIC non-goal (removed 2026-08-08) |
+| DR-59 | Desktop UI productivity wave (drag-reorder, bulk ops, reconcile trigger, outline templates) | [desktop-shell.md](../specs/desktop-shell.md) §2 | — | desktop polish capacity | UI | — |
+| DR-60 | System tray / menu-bar / global hotkeys / native notifications / custom title bar | [desktop-shell.md](../specs/desktop-shell.md) §2 | any future (opportunistic) | desktop polish capacity | Desktop | DF-71 (menu-bar daemon status) |
+| DR-61 | Mobile (Tauri v2 mobile targets) | [desktop-shell.md](../specs/desktop-shell.md) §2 + [web-ui.md](../specs/web-ui.md) §8/§14 | — | demand | Desktop | — |
+| DR-62 | Control Room directive body display (inspector shows status only; CLI `show` carries body) | [web-ui.md](../specs/web-ui.md) (Control Room inspector) | — | author demand for directive body in inspector | UI | R-V1151P2-001 |
+| DR-63 | Additive moment-directive response schema + codegen (currently `Json<Value>` / loose TS type) | [daemon-api-surface-conventions.md](../specs/daemon-api-surface-conventions.md) §8 | — | next contract/3P-client iteration | Contract | R-V1151P2-002 |
+| DR-64 | Real `run_checker` evaluator (baseline no-op; world-scope `list_rules` + findings `work_id`/`creator_id` constraints) | [novel-writing/quality-loop.md](../specs/novel-writing/quality-loop.md) §9.3 | — | author needs non-empty check findings | Harness | R-V1148P2-001 |
+| DR-65 | Timeline accent-chip family WCAG AA text contrast (6/8 theme/shade combos fail) | [web-ui-design-requirements.md](../specs/web-ui-design-requirements.md) §4 | V1.148+ UI iteration | a11y contrast evaluation | UI | R-V1147P3-ACENT-CHIP-001 |
+| DR-66 | E### event-index write+upsert promotion (V1.49 P1 ships read-only stub) | [novel-writing/workflow-profile.md](../specs/novel-writing/workflow-profile.md) §4.6.7 | V1.50+ (unshipped) | author demand for event index authoring | Harness | — |
+| DR-67 | §4.5.7 future acceptance tests #1–5 (chapter selection, `current_chapter` transitions, novel completion, resume, reconcile) | [novel-writing/workflow-profile.md](../specs/novel-writing/workflow-profile.md) §4.5.7 | — | verification depth (test #6 shipped V1.42 P1) | Reliability | — |
+
+**Un-promoted shipped overlays (not migrated — spec-hygiene follow-up):** June-era Draft overlays that still carry "Draft (V1.52) — Promotes to Normative: P-last" headers in [quality-loop.md](../specs/novel-writing/quality-loop.md) §5.6 / [workflow-profile.md](../specs/novel-writing/workflow-profile.md) §5.1.1/§11.7 and [cli-spec.md](../specs/cli-spec.md) §6.2G.2/§6.2M — their iterations shipped; the overlays were never promoted. These are spec-hygiene debt, not open roadmap; promote or fold at the next novel-writing spec pass.
+
+**Kept in specs (normative-defer / delivered-record / pointer-only):** all "X not in V1.x scope" contract statements; shipped/rejected decision records (body-editor rejected 2026-06-26, canvas-pivot retirement, DF-49 cancelled, one-click re-trigger rejected, `createPendingReview` rejected, D-UX locks); DF-*/BL-*/PD-01/DF-55/DF-59/DF-70/DF-71/DF-73/DF-46(4× sync.*)/DF-V1123-* already tracked in §2.3/§2.4; canvas-strategy §6 shipped-slice record; spoke-adapter §10.6 delivered-slice record (N-C0..N-C3 + tokens, DF-73 row stays in §2.4); web-ui stage records (V1.65–V1.89 non-goals where shipped/rejected); wasm-host §9.2 single line noted at DR-50; [specs/README.md](../specs/README.md) Hygiene schedule (spec-governance policy, kept in place).
 
 ---
 
 ## 3) Residuals (SSOT pointer)
 
-Residual findings are tracked in [`status.json`](../status.json) → `residual_findings` + `metadata.tech_debt_summary`. The tracker does **not** mirror residual rows — `status.json` is authoritative. Current rollup: see `metadata.tech_debt_summary` (updated 2026-07-22). Closed/historical: `.mstar/archived/residuals/<plan-id>.json`.
+Residual findings are tracked in [`status.json`](../status.json) → `residual_findings` + `metadata.tech_debt_summary`. The tracker does **not** mirror residual rows — `status.json` is authoritative. Roadmap registers linked to residuals live in §2.6 (DR-* rows reference R-* by ID only; severity/lifecycle stays in `status.json`). Current rollup: see `metadata.tech_debt_summary` (updated 2026-07-22). Closed/historical: `.mstar/archived/residuals/<plan-id>.json`.
 
 **V1.131 residual slate (closed at iteration-close):** DF-V1130-* / DF-V1131-* shipped (see [shipped archive](shipped-features-tracker.md)). Open human smokes remain in `status.json`: `R-VI-003` (Dock live), `R-VI-002` / `R-VI-004` (gallery notes / wordmark sign-off), `R-V1131P0-QC2-W-001` (Overlay H2–H4).
 
@@ -124,5 +212,7 @@ Residual findings are tracked in [`status.json`](../status.json) → `residual_f
 **Full iteration index**: [iterations/README.md](../iterations/README.md)
 
 **Shipped archive**: [shipped-features-tracker.md](shipped-features-tracker.md)
+
+**Spec durable roadmaps**: §2.6 (DR-01..DR-67, consolidated 2026-08-09)
 
 **Machine state**: [`status.json`](../status.json)

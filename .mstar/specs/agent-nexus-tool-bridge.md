@@ -373,13 +373,15 @@ Required side effects: no platform HTTP attempt; audit row recorded with `audit_
 
 ## 11. Contract gap list
 
-This section is informational for P3 and a handoff input for future contract/codegen work. P3 does **not** add schemas or run codegen.
+This section is informational for P3 and documents current contract gaps. P3 does **not** add schemas or run codegen. The future codegen envelope work (gap table below) is consolidated in the [deferred-features tracker §2.6](../knowledge/deferred-features-cross-version-tracker.md) — DR-23.
 
 Current repo snapshot checked for this spec:
 
 - `crates/nexus-daemon-runtime/src/api/handlers/host_tool_executor.rs` defines handwritten `ToolExecuteRequest` / `ToolExecuteResponse` for the existing `fs/*` host tool executor.
 - `crates/nexus-contracts/src/generated/context_assembly_v1.rs` already contains generated `ContextAssembleRequestV1` / `ContextAssembleResponseV1` from `schemas/platform/context-assembly-v1.schema.json`, but its comments mark the shape as deferred/direct platform cloud + CLI local assembly, not the V1.34 daemon tool wrapper.
 - `crates/nexus-contracts/src/local/acp/types.rs` contains Nexus-owned ACP session/protocol DTOs, not host tool execution DTOs.
+
+**Tracked DR-23** — the gap table below documents current contract gaps; the codegen closure is tracked in the deferred-features tracker §2.6.
 
 | Spec §5 / handler shape | Current `nexus-contracts` status | Gap / future codegen note |
 | --- | --- | --- |

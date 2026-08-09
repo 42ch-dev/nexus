@@ -75,7 +75,7 @@ These crates are **not** split by the local/cloud program; they sit **under** al
 | **`nexus-knowledge`** | `World` (narrative KB) + `User` (global knowledge) | Two-tier knowledge crate merged in V1.139 (former `nexus-kb`). World-scoped: narrative KnowledgeEntries, SourceAnchors, graph insertion/query. User-scoped: global knowledge/reference indexing and storage. Does not own Creator memory semantics. | No |
 | **`nexus-narrative`** | `World`, `Timeline`, `Event` | Creative-work narrative state: current work background, world state, forks, timelines, events, story/manuscript projections, and narrative consistency. | No — currently depends on **`nexus-knowledge`** |
 | **`nexus-cloud-domain`** | `User`, `Pairing` | Platform-bridge domain logic for User/Pairing invariants and mappings from contract types. No HTTP transport. | No HTTP; dependency of **`nexus-cloud-sync`** |
-| **`nexus-moment-context-assembly`** | `Moment` | Per-moment, pre-session context aggregation. **`assemble_moment` is the single local CLI SSOT** (V1.28+): aggregates Creator memory, narrative state, World KB assets, and User knowledge via `nexus42 platform context assemble-moment`. Stage0 / degradation / optional two-stage behavior are flags on that command (`assemble-local` **removed** pre-release). User knowledge reads from **SQLite** (V1.27+). Optional `cloud-stage` may merge future platform context; direct platform cloud assembly remains deferred. | Only with `cloud-stage` |
+| **`nexus-moment-context-assembly`** | `Moment` | Per-moment, pre-session context aggregation. **`assemble_moment` is the single local CLI SSOT** (V1.28+): aggregates Creator memory, narrative state, World KB assets, and User knowledge via `nexus42 platform context assemble-moment`. Stage0 / degradation / optional two-stage behavior are flags on that command (`assemble-local` **removed** pre-release). User knowledge reads from **SQLite** (V1.27+). Optional `cloud-stage` may merge future platform context; direct platform cloud assembly remains deferred (tracked deferred-features tracker §2.6 — DR-51). | Only with `cloud-stage` |
 | **`nexus-cloud-sync`** | Cloud transport for User/Pairing and sync bundles | Platform HTTP and sync transport. It MUST use `nexus-cloud-domain` for User/Pairing invariants. | N/A |
 | **`nexus-daemon-runtime`** | Runtime host, not entity owner | Daemon API, lifecycle, DB handles, orchestration, and agent-host. It MUST NOT own cloud transport or platform User/Pairing invariants. | **Forbidden** |
 | **`nexus-orchestration`** | Execution sessions/schedules, not hierarchy owner | Presets, schedules, workers, and capability registry. Carries `creator_id`/workspace/world references as execution context; does not redefine entity ownership. | No cloud-sync (sync capabilities stubbed locally) |
@@ -122,7 +122,7 @@ The legacy crate name `nexus-domain` is **not** retained after the split program
 
 - **`nexus-knowledge` (World-scoped):** Narrative KB graph assets (KnowledgeEntries, SourceAnchors, graph insertion/query) coordinated with `nexus-narrative`. Formerly the separate `nexus-kb` crate (merged in V1.139).
 - **`nexus-knowledge` (User-scoped):** Global knowledge/reference material. Tag-driven, may be pulled into Moment context assembly. Not Creator-scoped, does not own World narrative KnowledgeEntries.
-- **CLI `creator kb`:** today is a local work-scope file/index workflow under the active Creator/workspace. It is not equivalent to the World-scoped narrative KB model until later tasks route or rename it.
+- **CLI `creator kb`:** today is a local work-scope file/index workflow under the active Creator/workspace. It is not equivalent to the World-scoped narrative KB model until later tasks route or rename it. **Durable roadmap:** [deferred-features tracker §2.6](../knowledge/deferred-features-cross-version-tracker.md) — DR-46.
 
 ### 3.6 `nexus-moment-context-assembly`
 
@@ -253,7 +253,7 @@ nexus-moment-context-assembly (default four-domain library target)
 | `nexus-daemon-runtime -> nexus-narrative` | **Wired.** | No dedicated narrative HTTP routes yet. |
 | `nexus-daemon-runtime -> nexus-knowledge` (World KB) | **Wired.** | `/v1/local/kb/*` is still work-scope file index, not World KB (`nexus-knowledge`) integration. |
 | `nexus-daemon-runtime -> nexus-knowledge` | **Wired.** | `GET /v1/local/references` still uses `nexus-local-db`; user knowledge store is not daemon-product wired. |
-| CLI `creator kb` -> World-scoped narrative KB semantics | **Not a Cargo gap.** | KCA-003 C2 keeps `/v1/local/kb/*` and `creator kb` as `scope=work` only; future World KB behavior must route to `nexus-knowledge` + `nexus-narrative`. |
+| CLI `creator kb` -> World-scoped narrative KB semantics | **Not a Cargo gap.** | KCA-003 C2 keeps `/v1/local/kb/*` and `creator kb` as `scope=work` only; future World KB behavior must route to `nexus-knowledge` + `nexus-narrative` (deferred-features tracker §2.6 — DR-46). |
 
 ### 5.3 Edges that are already wired and should remain
 
@@ -270,7 +270,7 @@ nexus-moment-context-assembly (default four-domain library target)
 
 Authoritative route list for a given release lives in **`crates/nexus-daemon-runtime/src/api/mod.rs`** and the active **iteration compass**.
 
-**Always allowed (local product):** runtime health/status, workspace, local creator listing/active/logout, local references, work-scope KB file-index APIs, memory pending-review, presets, orchestration, and agent-host (+ internal tool execution). Future World KB / User knowledge / Moment context surfaces may be local-only, but must be explicitly registered and documented; after KCA-002 B2, daemon context assembly is not an active Daemon API route.
+**Always allowed (local product):** runtime health/status, workspace, local creator listing/active/logout, local references, work-scope KB file-index APIs, memory pending-review, presets, orchestration, and agent-host (+ internal tool execution). Future World KB / User knowledge / Moment context surfaces may be local-only, but must be explicitly registered and documented (deferred-features tracker §2.6 — DR-46); after KCA-002 B2, daemon context assembly is not an active Daemon API route.
 
 **Always forbidden on daemon:** `/sync/*`, `/creators/registrations*`, platform world/explore proxies, public `/acp/*` (use agent-host namespace), `nexus-cloud-sync`, `nexus-cloud-domain`, and platform HTTP paths.
 

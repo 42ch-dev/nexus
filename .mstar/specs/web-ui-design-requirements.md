@@ -82,7 +82,7 @@ A data-dense table (same register as the Control Room dashboards in §1) with an
 ### 5.3 Body read-only context menu
 
 - **"Copy path" only.** The body is rendered read-only (frontmatter-aware header strip + rendered prose). The right-click menu offers **Copy path** (browser clipboard write; path sourced from the API).
-- **Explicitly out of scope (V1.66 Tauri)**: "Open with…" and "Reveal in file manager" are **native-shell** desktop-integration actions (compass §0 Q5), not browser capabilities. The V1.65 design must not imply them — no greyed-out "Open with…" entries that tease an unavailable action. When the Tauri shell lands in V1.66 these become real entries via `TauriClient`; the V1.65 browser menu simply does not contain them.
+- **Explicitly out of scope (V1.66 Tauri)**: "Open with…" and "Reveal in file manager" are **native-shell** desktop-integration actions (compass §0 Q5), not browser capabilities. The V1.65 design must not imply them — no greyed-out "Open with…" entries that tease an unavailable action. When the Tauri shell lands in V1.66 these become real entries via `TauriClient`; the V1.65 browser menu simply does not contain them. **(shipped V1.66)**
 
 ### 5.4 Light + dark theme parity (carried from V1.64)
 
@@ -121,6 +121,8 @@ V1.66 wraps the V1.65 SPA in a Tauri v2 desktop shell (see [web-ui.md](web-ui.md
 - **Window title**: "Nexus" + active Work title when one is open.
 - **Minimum/resizable size**: comfortable for both data-dense Control Room tables AND the authoring editor.
 - **Light + dark parity**: chrome follows system appearance; matches SPA theme tokens in both.
+
+> **Durable polish roadmap** consolidated in the [deferred-features tracker §2.6](../knowledge/deferred-features-cross-version-tracker.md) — DR-58/DR-59/DR-60.
 
 ### 6.2 App menu structure
 

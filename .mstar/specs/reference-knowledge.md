@@ -34,7 +34,7 @@ scheduler). V1.58 P3 adds the CLI subcommand and cross-cut E2E tests.
 
 Non-goals: CLI subcommand (`nexus42 reference refresh`) deferred to P3;
 cross-cut E2E tests deferred to P3; `entity-scope-model.md` unchanged
-(reference refresh is reference-source-scoped, not KB-scoped).
+(reference refresh is reference-source-scoped, not KB-scoped). **Durable roadmap:** [deferred-features tracker §2.6](../knowledge/deferred-features-cross-version-tracker.md) — DR-07.
 
 ---
 
@@ -94,7 +94,7 @@ is a periodic `tokio::spawn` task:
   instances against the same SQLite file, could both proceed to fetch. For the
   V1.58 single-daemon local model this is acceptable; a cross-process mutex or
   row-level optimistic concurrency check (OCC) on the refresh columns should be
-  considered when P3 lands and multi-process scenarios are supported.
+  considered when P3 lands and multi-process scenarios are supported (deferred-features tracker §2.6 — DR-07).
 
 ---
 
@@ -152,6 +152,8 @@ DAO methods added to `crates/nexus-local-db/src/reference_source.rs`:
 `nexus.reference.refresh_policy.get` and `nexus.reference.refresh_status` are
 deferred to P3 if the user-facing surface (CLI) requires them. P1 ships only
 `nexus.reference.refresh` as the core pipeline capability.
+
+> **Durable roadmap:** consolidated in the [deferred-features tracker §2.6](../knowledge/deferred-features-cross-version-tracker.md) — DR-07 (refresh caps + CLI + E2E + cross-process OCC).
 
 ---
 

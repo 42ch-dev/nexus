@@ -292,6 +292,8 @@ All impls live in `crates/nexus-orchestration/src/tasks/`. Task implementations 
 
 **Explicit non-goal:** conditional `next` on NOGO (e.g. return to `gathering`) remains deferred until loader accepts `next.kind: conditional`.
 
+> **Durable roadmap:** consolidated in the [deferred-features tracker §2.6](../knowledge/deferred-features-cross-version-tracker.md) — DR-11 (conditional-next routing).
+
 ### 4.5 Pausing, cancelling, and signals
 
 - **Pause** (user or Schedule): `engine.signal(session, Pause)` — flips status to `paused`; `FlowRunner` refuses to advance until `Resume`.
@@ -333,8 +335,8 @@ All capabilities below are registered at daemon runtime startup. Adding a new ca
 
 | Name                        | Purpose                                                        | Owner crate (target)   | Runtime status |
 | --------------------------- | -------------------------------------------------------------- | ---------------------- | -------------- |
-| `sync.pull`                 | Pull remote deltas (replaces HTTP-era trigger)                 | `nexus-cloud-sync`     | Deferred wiring |
-| `sync.push`                 | Push local outbox (replaces HTTP-era trigger)                  | `nexus-cloud-sync`     | Deferred wiring |
+| `sync.pull`                 | Pull remote deltas (replaces HTTP-era trigger)                 | `nexus-cloud-sync`     | Deferred wiring — tracked DF-46 / PD-05 (§2.3) |
+| `sync.push`                 | Push local outbox (replaces HTTP-era trigger)                  | `nexus-cloud-sync`     | Deferred wiring — tracked DF-46 / PD-05 (§2.3) |
 | `outbox.flush`              | Flush pending outbox entries                                   | `nexus-orchestration`  | **Shipped (V1.59)** — local drain via `nexus-local-db` pool; see §5.7 |
 | `outbox.compact`            | Compact outbox table                                           | `nexus-orchestration`  | **Shipped (V1.59)** — retention-window compaction via `nexus-local-db` pool; see §5.7 |
 | `workspace.open`            | Ensure workspace dir is present and valid                      | `nexus-home-layout`    | Deferred wiring (DF-31) |
@@ -351,7 +353,7 @@ All capabilities below are registered at daemon runtime startup. Adding a new ca
 | `judge.rule`                | Evaluate a pure rule over `contextData`                        | `nexus-orchestration`  | **Real** — boolean literals, field equality/inequality, numeric comparisons (V1.31 DF-32) |
 | `context.summarize`         | Summarize context through a worker-backed ACP prompt           | `nexus-orchestration`  | **Real** — returns `{ summary, prompt_hash }` (V1.31 DF-34/37) |
 | `narrative.compute`         | Invoke WASM compute module; apply state_delta, timeline_events, new_key_blocks, return battle_report | `nexus-orchestration`  | **Real** — calls `nexus-wasm-host::compute()` (V1.61 P3; spec-seal V1.62 P2); see §8.4.1 |
-| `timer.wait_until`          | Schedule a wake-up signal (requires B-track clock)             | `nexus-orchestration`  | Deferred clock integration |
+| `timer.wait_until`          | Schedule a wake-up signal (requires B-track clock)             | `nexus-orchestration`  | Deferred clock integration — **Durable roadmap:** [deferred-features tracker §2.6](../knowledge/deferred-features-cross-version-tracker.md) — DR-12 |
 
 > **V1.31 de-stub note:** `creator.*`, `judge.rule`, `judge.llm`, and `context.summarize` are real runtime capabilities as of V1.31. DF-37 reduces worker-backed fallback to explicit standalone/test construction paths; daemon/preset execution injects runtime dependencies through the registry factory.
 
@@ -415,6 +417,8 @@ The dual-outbox architecture identified in TD-8 ([dual-outbox-architecture.md](.
 - One long-lived worker subprocess per **active** creator.
 - Worker holds **one** ACP agent subprocess at a time (initial MVP); the choice of *which* ACP agent to run is determined by the preset / Schedule and passed on worker start as `--agent <agent_ref>`.
 - Switching agents within a creator requires **worker restart** in MVP (acceptable for V1.4). Multi-agent workers deferred to V1.5+.
+
+> **Durable roadmap:** consolidated in the [deferred-features tracker §2.6](../knowledge/deferred-features-cross-version-tracker.md) — DR-13 (multi-agent workers).
 
 ### 6.3 IPC transport
 
@@ -752,7 +756,7 @@ The binary includes embedded presets under `crates/nexus-orchestration/embedded-
 | `creative-brief-intake` | **V1.33 Shipped** (`2026-06-04-v1.33-creative-brief-intake-preset` P2 plan) — grill-me intake preset | intake → done | `acp.prompt` |
 | `essay-writing` | **V1.63 P2 Shipped** — essay production preset with 4-dimension quality rubric (thesis clarity, evidence support, coherence, ending takeaway) | intake → outline → draft → revise → finalize → finalize_commit → done | `creator.inject_prompt`, `acp.prompt`, `judge.llm`, `essay.draft_status.finalize` |
 
-All shipped presets use **linear** `next` transitions unless noted; conditional routing remains deferred (§7.5).
+All shipped presets use **linear** `next` transitions unless noted; conditional routing remains deferred (§7.5). **Durable roadmap:** [deferred-features tracker §2.6](../knowledge/deferred-features-cross-version-tracker.md) — DR-11.
 
 ### 7.8 Preset `run_intents` (V1.33)
 
@@ -908,6 +912,8 @@ CLI and daemon `POST /v1/local/presets:validate` call these functions directly w
 | `inner_graphs.<name>.nodes[].kind=acp_prompt`         | `AcpPromptTask`                                                                   |
 | `inner_graphs.<name>.nodes[].depends_on`              | `add_edge(dep, this)` in inner graph                                              |
 | `inner_graphs.<name>.output_binding`                  | `InnerGraphTask` post-run: reads `ctx[binding_path]`, writes `state.<x>.output`   |
+
+> **Durable roadmap:** `next.kind=conditional` loader acceptance (the `(future)` row above) is consolidated in the [deferred-features tracker §2.6](../knowledge/deferred-features-cross-version-tracker.md) — DR-11.
 
 ### 8.3 Caching and reloading
 
@@ -1164,8 +1170,8 @@ The following questions were originally parked as B-track in this document. Afte
 | OQ-4  | `seed + user_edits + iterated_experience → core_context` derivation + versioning                         | **Partially answered in WS7**; V1.4 implements seed / user_edit / preset_hook derivation kinds and reserves `LlmSummarize` for V1.5. See [creator-schedule-and-core-context.md](creator-schedule-and-core-context.md) §6 + §11. |
 | OQ-5  | `nexus42 schedule add/update/remove/inspect` semantics — editing in-flight                              | **Answered in WS7** — full CRUD; in-flight edits accepted but take effect at next state transition ("core_context is stable during execution"). See §3.3 + §6.4. |
 | OQ-6  | Timer / clock model for wall-clock triggers                                                             | **Partially answered** — V1.4 on-demand only; `scheduled_at` column reserved; V1.5 adds clock poller zero-migration. See WS7 §2 + §10. |
-| OQ-7  | Multi-agent per creator (worker hosts > 1 agent)                                                        | **Still deferred** to V1.5+ (see WS7 §13).                                                            |
-| OQ-8  | User-authored capabilities (shell / WASM plugin ABI)                                                    | **Still deferred** to V1.5+ (see WS7 §13).                                                            |
+| OQ-7  | Multi-agent per creator (worker hosts > 1 agent)                                                        | **Still deferred** to V1.5+ (see WS7 §13). **Durable roadmap:** [deferred-features tracker §2.6](../knowledge/deferred-features-cross-version-tracker.md) — DR-09. |
+| OQ-8  | User-authored capabilities (shell / WASM plugin ABI)                                                    | **Still deferred** to V1.5+ (see WS7 §13). **Durable roadmap:** [deferred-features tracker §2.6](../knowledge/deferred-features-cross-version-tracker.md) — DR-10. |
 
 ---
 

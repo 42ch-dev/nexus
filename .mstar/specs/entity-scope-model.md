@@ -66,7 +66,7 @@ This subsection is an **additive Draft overlay** — it does not rewrite §1.1 (
 |-------|-------------|-----------|----------------|---------------------------------|
 | **Brief** | World-global | Multi-decade / era / age | **World** (World-global Timeline layer) | `block_type=era` KnowledgeEntry (new wire enum value — see §5.1.1 narrative taxonomy extension + iteration architecture §2) |
 | **Narrative** | Event-level | Human-paced (days/weeks/years) | **Shared** (both World Timeline and Work Timeline) | World scope: `block_type=event` KnowledgeEntry (V1.122 preserved). Work scope: `WorkOutline.timeline_events[]` (V1.72 preserved). |
-| **Moment** | Scene/beat-precise | Sub-scene (minutes/hours within a scene) | **Work** (Work-scoped Timeline layer) | Frontend-only projection of V1.108 `OutlineSceneNodeData` / `OutlineBeatNodeData` from V1.72 `WorkOutline` (wire extension deferred to V1.124+; honest empty-state until then — see iteration architecture §3) |
+| **Moment** | Scene/beat-precise | Sub-scene (minutes/hours within a scene) | **Work** (Work-scoped Timeline layer) | Frontend-only projection of V1.108 `OutlineSceneNodeData` / `OutlineBeatNodeData` from V1.72 `WorkOutline` (wire extension deferred to V1.124+ — **durable roadmap:** consolidated in the [deferred-features tracker §2.6](../knowledge/deferred-features-cross-version-tracker.md) — DR-26; honest empty-state until then — see iteration architecture §3) |
 
 #### 1.4.2 Brief canonization
 
@@ -95,10 +95,10 @@ The two meanings of "Moment" are disambiguated by context:
 World Timeline (V1.123):
   ├── Brief layer (hero)     — `block_type=era` KnowledgeEntry projection (era markers / world shape)
   ├── Narrative layer (peer) — `block_type=event` KnowledgeEntry projection (V1.122 baseline, reframed)
-  └── Moment layer           — NOT composed in V1.123 (DF-V1123-WORLD-MOMENT if ever promoted)
+  └── Moment layer           — NOT composed in V1.123 (DF-V1123-WORLD-MOMENT — durable roadmap: deferred-features tracker §2.3)
 
 Work Timeline (V1.123):
-  ├── Brief layer            — NOT composed in V1.123 (DF-V1123-WORK-BRIEF if ever promoted)
+  ├── Brief layer            — NOT composed in V1.123 (DF-V1123-WORK-BRIEF — durable roadmap: deferred-features tracker §2.3)
   ├── Narrative layer (peer) — `WorkOutline.timeline_events[]` projection (V1.72 preserved)
   └── Moment layer (hero-on-demand) — V1.108 Scene/Beat projection from `WorkOutline`
                                        (default layer = Narrative; Moment is one click away —
@@ -294,6 +294,8 @@ The current design intentionally trades query flexibility for schema simplicity.
 Post-1.0, if state-path queries emerge as a product requirement, a dedicated
 `key_block_state` table (normalized, indexed) should be considered as a
 replacement, not a supplement — avoiding two sources of truth for the same state.
+
+> **Durable roadmap:** consolidated in the [deferred-features tracker §2.6](../knowledge/deferred-features-cross-version-tracker.md) — DR-47 (computable state-path query perf).
 
 ##### 5.5.9.3 Structured validation mode
 
@@ -545,8 +547,8 @@ Minimum common `body` shape for script items:
 
 - Today, its default `work` scope is a local file/index workflow under the active `creator_id` and `workspace_slug`.
 - Its current implementation is not equivalent to the World-scoped narrative KB model.
-- Future `--scope world` behavior must route to the World-scoped narrative KB model (`nexus-knowledge` + `nexus-narrative`).
-- Future user/global knowledge behavior must route to `nexus-knowledge` (User-scoped), not to the World KB model.
+
+> **Durable roadmap:** consolidated in the [deferred-features tracker §2.6](../knowledge/deferred-features-cross-version-tracker.md) — DR-46 (`creator kb --scope world` / user-global knowledge routing).
 
 ### 5.4 Prohibited shorthand
 
@@ -594,7 +596,7 @@ Invalid transitions return `422` with stable error code on Daemon API.
 
 #### 5.5.4 Rejected retention
 
-Rejected promotion candidates are retained in `Logs/kb/rejected/<YYYY-MM-DD>-<extract_job_id>.md` for audit. Retention is **indefinite** by default (no TTL); future iterations may add a `--prune-rejected` CLI.
+Rejected promotion candidates are retained in `Logs/kb/rejected/<YYYY-MM-DD>-<extract_job_id>.md` for audit. Retention is **indefinite** by default (no TTL); future iterations may add a `--prune-rejected` CLI — **durable roadmap:** consolidated in the [deferred-features tracker §2.6](../knowledge/deferred-features-cross-version-tracker.md) — DR-18 (`creator world kb` rejected-candidate `--prune-rejected`).
 
 #### 5.5.5 Relationship to existing `nexus-kb` taxonomy
 
@@ -723,7 +725,8 @@ while `source = 'manual'` marks author-created rows. Extraction-sourced rows
 remain normal `kb_relationships` rows with OCC, symmetric projection, confidence
 validation, and optional grounding; **promotion is clearing `needs_review`**,
 not moving through a pending/confirmed/rejected relationship state machine. A
-full relationship promotion state machine (mirroring entities) is post-1.0.
+full relationship promotion state machine (mirroring entities) is post-1.0 —
+**durable roadmap:** consolidated in the [deferred-features tracker §2.6](../knowledge/deferred-features-cross-version-tracker.md) — DR-48 (relationship promotion state machine).
 
 **Entity-existence prerequisite**: extraction persists a relationship suggestion
 only when both endpoints already resolve to non-deleted KeyBlocks in the same

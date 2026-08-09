@@ -151,7 +151,7 @@ nexus42 agent run <agent-ref>
 - The `tokio::task::LocalSet` requirement: ACP SDK futures are `!Send`, requiring `spawn_local`. The CLI's `#[tokio::main]` creates a multi-threaded runtime by default. We must use `tokio::task::LocalSet` within the agent session to bridge this gap.
 - **Timeout**: Default 30-second timeout for `initialize`, 5-minute for `session/prompt` (configurable).
 - **Error handling**: Non-zero exit code, broken pipe, timeout — all map to `AcpError` variants with user-friendly messages.
-- **Daemon relationship**: daemon runtime is **NOT** involved in the ACP communication path. The CLI spawns and talks to agents directly. The daemon may expose Daemon API endpoints that agents can call (via `request_permission` tool grants), but this is V1.1+ scope.
+- **Daemon relationship**: daemon runtime is **NOT** involved in the ACP communication path. The CLI spawns and talks to agents directly. Daemon-mediated tool access, session persistence, and permission policy — **durable roadmap:** consolidated in the [deferred-features tracker §2.6](../knowledge/deferred-features-cross-version-tracker.md) — DR-20 (daemon-mediated tool access + permission policy engine), DR-21 (ACP session persistence).
 
 ### 2.4 Connection Management
 
@@ -321,16 +321,7 @@ No new Daemon API endpoints are required for V1.0 ACP integration. The existing 
 
 ### 4.3 V1.1+ Daemon API Expansion (Deferred)
 
-The following endpoints may be added in V1.1+ to support agent tool access:
-
-| Endpoint | Purpose | Deferred Reason |
-|----------|---------|----------------|
-| `POST /v1/local/acp/tool/grant` | Grant tool permission for agent | Requires permission policy engine |
-| `POST /v1/local/acp/tool/deny` | Deny tool permission | Requires UI for permission prompts |
-| `GET /v1/local/acp/sessions` | List active agent sessions | Requires session persistence |
-| `DELETE /v1/local/acp/sessions/{id}` | Terminate an agent session | Requires session management |
-
-**These are documented for future reference but NOT part of the V1.0 task breakdown.**
+> **Durable roadmap:** consolidated in the [deferred-features tracker §2.6](../knowledge/deferred-features-cross-version-tracker.md) — DR-20 (daemon-mediated tool access + centralized permission policy engine). These endpoints are documented for future reference but NOT part of the V1.0 task breakdown.
 
 ---
 
@@ -347,11 +338,8 @@ In the ACP protocol, the **client** (nexus42) declares its capabilities during `
 | `terminal.create` | Client can create terminal sessions for agent | **Yes** — via `terminal/create` handler |
 | `terminal.output` | Client can stream terminal output | **Yes** — via `terminal/output` handler |
 | `terminal.release` | Client can release terminal sessions | **Yes** — via `terminal/release` handler |
-| `terminal.kill` | Client can kill terminal sessions | **No** — deferred to V1.1 |
-| `terminal.wait_for_exit` | Client can wait for terminal exit | **No** — deferred to V1.1 |
-| `slash_commands` | Client supports slash command invocation | **No** — deferred to V1.1 |
-| `agent_plan` | Client supports agent plan display | **No** — deferred to V1.1 |
-| `session.modes` | Client supports mode switching (e.g., ask/act) | **No** — deferred to V1.1 |
+
+> **Durable roadmap:** consolidated in the [deferred-features tracker §2.6](../knowledge/deferred-features-cross-version-tracker.md) — DR-22 (`terminal.kill` / `terminal.wait_for_exit`, `slash_commands`, `agent_plan`, persistent skills manifest, binary auto-update, `session.modes`).
 
 ### 5.2 Capability ID Registry (Frozen for V1.0)
 
@@ -383,7 +371,7 @@ pub mod capabilities {
 
 ### 5.3 Skills Manifest (V1.0 Minimal)
 
-For V1.0, nexus42 does NOT export a formal skills manifest file. The capabilities are declared dynamically during `initialize`. A persistent skills manifest (`$HOME/.nexus42/skills.json`) can be added in V1.1+ for multi-agent host integration.
+For V1.0, nexus42 does NOT export a formal skills manifest file. The capabilities are declared dynamically during `initialize`. A persistent skills manifest (`$HOME/.nexus42/skills.json`) can be added in V1.1+ for multi-agent host integration — **durable roadmap:** consolidated in the [deferred-features tracker §2.6](../knowledge/deferred-features-cross-version-tracker.md) — DR-22 (persistent skills manifest).
 
 ---
 
@@ -836,15 +824,7 @@ For implementer reference, the ACP protocol lifecycle:
 
 ## Appendix B: Residual Findings for V1.1+
 
-| ID | Title | Severity | Target |
-|----|-------|----------|--------|
-| ACP-R3 | Terminal kill/wait_for_exit capability | low | V1.1 |
-| ACP-R4 | Slash commands UI integration | low | V1.1 |
-| ACP-R5 | Agent plan display support | low | V1.1 |
-| ACP-R6 | Session persistence across CLI invocations | medium | V1.1 |
-| ACP-R7 | Permission policy engine (grant/deny UI) | medium | V1.1 |
-| ACP-R8 | Daemon-mediated agent tool access | medium | V1.1 |
-| ACP-R9 | Skills manifest file for multi-agent hosts | low | V1.1 |
-| ACP-R10 | Binary agent auto-update mechanism | low | V1.1 |
-| ACP-R11 | Session modes (ask/act) switching | low | V1.1 |
+> **Durable roadmap:** consolidated in the [deferred-features tracker §2.6](../knowledge/deferred-features-cross-version-tracker.md) — DR-20, DR-21, DR-22 (ACP-R3..R11: daemon-mediated tool access + permission policy, session persistence, `terminal.kill`/`terminal.wait_for_exit`, `slash_commands`, `agent_plan`, persistent skills manifest, binary auto-update, `session.modes`).
+>
+> Historical V1.0-era framing; ACP hosting now runs in acp-worker child processes — verify before picking up.
 

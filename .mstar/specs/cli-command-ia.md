@@ -92,6 +92,8 @@ See [v1.45/delivery-compass.md](../../iterations/v1.45/delivery-compass.md) migr
 
 **Related deferral:** DF-42 (Daemon API KB redesign) — out of V1.35 implement scope.
 
+**Durable roadmap:** consolidated in the [deferred-features tracker §2.6](../knowledge/deferred-features-cross-version-tracker.md) — DR-19 (`creator kb` vs `creator knowledge` disambiguation decision).
+
 ---
 
 ## 4. Group responsibilities
@@ -137,7 +139,7 @@ See [v1.45/delivery-compass.md](../../iterations/v1.45/delivery-compass.md) migr
 | `daemon schedule` as first-run hint | `creator run` | Help text only; no command removal |
 | Top-level `preset` (never shipped) | `system preset`, `creator run` | Document only (DF-52) |
 
-**Hard delete** of `sync` top-level: **Out of V1.35** — earliest V1.36 after alias period.
+**Hard delete** of `sync` top-level: **Out of V1.35** — earliest V1.36 after alias period. **Durable roadmap:** consolidated in the [deferred-features tracker §2.6](../knowledge/deferred-features-cross-version-tracker.md) — DR-53 (top-level `sync` hard-delete).
 
 ---
 
