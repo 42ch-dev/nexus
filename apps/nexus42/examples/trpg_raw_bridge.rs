@@ -9,9 +9,7 @@ use anyhow::{anyhow, Context};
 use libp2p::identity::Keypair;
 use serde::Deserialize;
 use serde_json::{json, Value};
-use spoke_connect::{
-    parse_multiaddr, ConnectConfig, InvokeError, PeerSession, SpokeConnectNode,
-};
+use spoke_connect::{parse_multiaddr, ConnectConfig, InvokeError, PeerSession, SpokeConnectNode};
 use spoke_schemas::connect::connect_hello::HostCapabilityManifest;
 use std::collections::HashMap;
 use std::num::NonZeroU64;
