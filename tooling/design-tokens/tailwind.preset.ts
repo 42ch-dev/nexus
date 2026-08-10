@@ -202,6 +202,7 @@ const preset: Partial<Config> = {
           800: cv('blue-800'),
           900: cv('blue-900'),
           1000: cv('blue-1000'),
+          1100: cv('blue-1100'),
         },
         red: {
           700: cv('red-700'),
