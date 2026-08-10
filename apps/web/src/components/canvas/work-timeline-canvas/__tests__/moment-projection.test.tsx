@@ -280,8 +280,11 @@ describe('WorkTimelineCanvasAdapter — Moment projection reads fixture from ctx
 
     // Task 2 registered only the Narrative event node; Task 3 adds the
     // Moment scene + beat nodes. V1.126 P1 adds directedAxisSpine.
+    // V1.156 P2 T1 adds the reused World Timeline `timeline-brief-era` node
+    // (Work-Brief layer — no new node component family).
     expect(Object.keys(adapter.nodeTypes).sort()).toEqual([
       'directedAxisSpine',
+      'timeline-brief-era',
       'work-timeline-moment-beat',
       'work-timeline-moment-scene',
       'work-timeline-narrative-event',
