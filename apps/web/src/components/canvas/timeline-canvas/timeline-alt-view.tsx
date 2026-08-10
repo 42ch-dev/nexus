@@ -224,7 +224,11 @@ function compareNodes(
     case 'title':
       return (a.canonical_name ?? '').localeCompare(b.canonical_name ?? '');
     case 'kind':
-      return a.block_type.localeCompare(b.block_type);
+      // V1.156 P1 fix-wave 1 (F2) — null-safe: non-entity node families
+      // (Moment scene/beat carriers, the decoration spine) carry no
+      // `block_type` at runtime even though the type requires it. Mirror
+      // the title sort's null-safety so the Kind sort never throws.
+      return (a.block_type ?? '').localeCompare(b.block_type ?? '');
     case 'occurredAt': {
       // Undated events sort AFTER dated events (stable for both asc/desc by
       // inverting consistently — the sort dir wrapper handles the sign).

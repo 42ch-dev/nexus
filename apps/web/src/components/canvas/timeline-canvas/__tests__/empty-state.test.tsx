@@ -29,7 +29,7 @@
  * because the client mock intercepts before HTTP.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, screen, waitFor } from '@testing-library/react';
+import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 
 import { renderInApp } from '@/test/test-providers';
 import type { NexusClient } from '@/lib/nexus';
@@ -268,5 +268,201 @@ describe('TimelineCanvas — Brief-layer empty-state (V1.123 P1 T5)', () => {
     expect(screen.queryByTestId('timeline-brief-empty-state')).toBeNull();
     // The V1.122 global empty-state is also absent (graph is not empty).
     expect(screen.queryByText('This World\'s timeline is empty')).toBeNull();
+  });
+});
+
+// ─── V1.156 P1 T2 — World-Moment honest empty-state (PD-3) ─────────────────
+
+describe('TimelineCanvas — Moment-layer honest empty-state (V1.156 P1 T2)', () => {
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('does NOT render the Moment-empty panel on the default layer (Moment is never the default)', async () => {
+    // Spec §3.3.3: "Moment is never the default (read-only projection; one
+    // click away)." The panel only fires after an explicit switch to Moment
+    // — the default Brief/Narrative view MUST NOT surface Moment-empty copy.
+    const graph: WorldKbGraphResponse = {
+      entities: [
+        eraEntity({
+          key_block_id: 'kb-era-1',
+          canonical_name: 'The First Age',
+        }),
+      ],
+      source_anchors: [],
+      relationships: [],
+    };
+    renderInApp(<TimelineCanvas worldId="world-7" />, {
+      client: makeMockClient(graph),
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('timeline-canvas')).toBeInTheDocument();
+    });
+
+    expect(screen.queryByTestId('timeline-moment-empty-state')).toBeNull();
+  });
+
+  it('renders the Moment-empty panel when the user switches to Moment with no bound-Works fixture', async () => {
+    // Spec §3.3.3 empty-state honesty + PD-3: with no bound-Works scene/beat
+    // fixture the Moment projection emits zero nodes and the surface renders
+    // the honest panel — scenes come from bound Works' Outline data, not
+    // from World authoring.
+    const graph: WorldKbGraphResponse = {
+      entities: [
+        entity({
+          key_block_id: 'kb-event-1',
+          block_type: 'event',
+          canonical_name: 'Coronation',
+          body: { attributes: { occurred_at: '1042-03-01T00:00:00Z' } },
+        }),
+      ],
+      source_anchors: [],
+      relationships: [],
+    };
+    renderInApp(<TimelineCanvas worldId="world-7" />, {
+      client: makeMockClient(graph),
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('timeline-canvas')).toBeInTheDocument();
+    });
+
+    // Default = Narrative (no era data).
+    expect(screen.getByTestId('timeline-canvas')).toHaveAttribute(
+      'data-active-layer',
+      'narrative',
+    );
+
+    fireEvent.click(screen.getByTestId('timeline-layer-tab-moment'));
+
+    const momentEmpty = await screen.findByTestId('timeline-moment-empty-state');
+    expect(momentEmpty).toBeInTheDocument();
+    // PD-3 honest copy: scenes come from bound Works' Outline data.
+    expect(momentEmpty).toHaveTextContent('bound Works');
+    expect(momentEmpty).toHaveTextContent('Outline');
+    // The escape-hatch CTA back to Narrative (mirrors the Work Timeline +
+    // Brief-empty patterns).
+    expect(momentEmpty).toHaveTextContent('Switch to Narrative');
+  });
+
+  it('clicking the Moment-empty CTA switches back to Narrative (escape hatch)', async () => {
+    // Same escape-hatch contract as the Brief-empty panel: the CTA flips the
+    // active layer back to Narrative where events are visible.
+    const graph: WorldKbGraphResponse = {
+      entities: [
+        entity({
+          key_block_id: 'kb-event-1',
+          block_type: 'event',
+          canonical_name: 'Coronation',
+          body: { attributes: { occurred_at: '1042-03-01T00:00:00Z' } },
+        }),
+      ],
+      source_anchors: [],
+      relationships: [],
+    };
+    renderInApp(<TimelineCanvas worldId="world-7" />, {
+      client: makeMockClient(graph),
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('timeline-canvas')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('timeline-layer-tab-moment'));
+    const cta = await screen.findByTestId('timeline-moment-empty-cta');
+    expect(cta).toBeInTheDocument();
+
+    fireEvent.click(cta);
+    await waitFor(() => {
+      expect(screen.getByTestId('timeline-canvas')).toHaveAttribute(
+        'data-active-layer',
+        'narrative',
+      );
+    });
+
+    expect(screen.queryByTestId('timeline-moment-empty-state')).toBeNull();
+  });
+
+  it('does NOT render the Moment-empty panel when a scene/beat fixture provides data', async () => {
+    // The `sceneBeatFixture` prop flows orchestrator → adapter context →
+    // Moment projection: with scenes present the projection emits nodes and
+    // the canvas renders — NOT the empty panel. (The adapter-level node
+    // emission itself is covered by T1's `moment-projection.test.tsx`; this
+    // pins the orchestrator wiring end-to-end.)
+    const graph: WorldKbGraphResponse = {
+      entities: [
+        entity({
+          key_block_id: 'kb-event-1',
+          block_type: 'event',
+          canonical_name: 'Coronation',
+        }),
+      ],
+      source_anchors: [],
+      relationships: [],
+    };
+    renderInApp(
+      <TimelineCanvas
+        worldId="world-7"
+        sceneBeatFixture={{
+          scenes: [
+            {
+              sceneId: 'sc-1',
+              chapterId: 1,
+              title: 'Opening',
+              status: null,
+            },
+          ],
+          beats: [],
+        }}
+      />,
+      { client: makeMockClient(graph) },
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('timeline-canvas')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('timeline-layer-tab-moment'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('timeline-canvas')).toHaveAttribute(
+        'data-active-layer',
+        'moment',
+      );
+    });
+    expect(screen.queryByTestId('timeline-moment-empty-state')).toBeNull();
+  });
+
+  it('surfaces NO World-owned Moment authoring CTA (PD-3 — read/projection only)', async () => {
+    // PD-3 HARD: World Timeline Moment is a READ/projection layer — Moments
+    // remain Work-owned. The empty-state MUST NOT imply World-owned Moment
+    // authoring: the only actionable control is the "Switch to Narrative"
+    // escape hatch (no create-Moment CTA, no write flow).
+    const graph: WorldKbGraphResponse = {
+      entities: [
+        entity({
+          key_block_id: 'kb-event-1',
+          block_type: 'event',
+          canonical_name: 'Coronation',
+        }),
+      ],
+      source_anchors: [],
+      relationships: [],
+    };
+    renderInApp(<TimelineCanvas worldId="world-7" />, {
+      client: makeMockClient(graph),
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('timeline-canvas')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('timeline-layer-tab-moment'));
+    const momentEmpty = await screen.findByTestId('timeline-moment-empty-state');
+
+    const buttons = within(momentEmpty).getAllByRole('button');
+    expect(buttons).toHaveLength(1);
+    expect(buttons[0]).toHaveTextContent('Switch to Narrative');
   });
 });

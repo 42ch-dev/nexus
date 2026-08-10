@@ -1,6 +1,7 @@
 /**
  * Timeline canvas adapter — V1.122 P1 T2 (projection) + T4 (write boundary)
- *  + V1.123 P1 T2 (Brief layer projection).
+ *  + V1.123 P1 T2 (Brief layer projection) + V1.156 P1 T1 (Moment layer
+ *  projection).
  *
  * Projects a World's `WorldKbGraphResponse` onto a left-to-right when-axis
  * (the World-building hero surface, `CanvasSurfaceKind = "timeline"`).
@@ -30,9 +31,11 @@
  *   - No Fork marker nodes (Fork data renders as optional header chrome in T3).
  *
  * V1.123 layer model: `projectGraphForLayer(graph, 'brief' | 'narrative')`
- * selects the active layer. The default `projectGraph(graph)` delegates to
- * the adapter's active layer, which defaults to `'narrative'` for V1.122
- * backward compatibility (Task 3 wires Brief-default-on-World-entry).
+ * selects the active layer; V1.156 P1 T1 extends the layer union with
+ * `'moment'` (World Timeline Moment — see `TimelineLayer`). The default
+ * `projectGraph(graph)` delegates to the adapter's active layer, which
+ * defaults to `'narrative'` for V1.122 backward compatibility (Task 3 wires
+ * Brief-default-on-World-entry).
  *
  * Write boundary (T4 — architect-locked §4): the Timeline surface edits
  * World-scoped KeyBlock entities through `NexusClient.worldKbPatchEntity`
@@ -55,6 +58,14 @@
  * `BlockType = "era"` enum value (schema + Rust companion + codegen). V1.123
  * P1 Tasks 2+3 add zero wire diff: the adapter is a pure frontend filter
  * over the V1.73 `WorldKbGraphResponse` (architect §5).
+ *
+ * V1.156 P1 T1 (World Timeline Moment layer) — `wire_contracts_changed: false`:
+ * the Moment layer is a frontend-only read/projection. The `TimelineLayer`
+ * union extension is UI-only (not a wire DTO); the Moment carrier reuses the
+ * V1.108 `SceneBeatFixturePayload` fixture slot (the `WorkOutline` wire
+ * exposes no scenes/beats today — fixture-driven for dev/testing, honest
+ * empty-state in production; DR-26 tracks the future wire extension). No
+ * `schemas/` / codegen / daemon Rust / `@42ch/nexus-contracts` bump.
  */
 import type { MutableRefObject } from 'react';
 import type { Edge, Node } from '@xyflow/react';
@@ -68,11 +79,19 @@ import type {
 } from '@42ch/nexus-contracts';
 
 import type { WorldKbEdgeData } from '../world-kb/types';
+import type {
+  BeatFixture,
+  SceneBeatFixturePayload,
+  SceneFixture,
+} from '../outline-canvas/graph-projection';
+import type { WorkTimelineNodeData } from '../work-timeline-canvas/work-timeline-canvas-adapter';
+import { workTimelineNodeTypes } from '../work-timeline-canvas/work-timeline-node-types';
 import { TimelineInspector } from './timeline-inspector';
 import { TimelineComputeInspector } from './timeline-compute-inspector';
 import { TimelineBriefEraInspector } from './timeline-brief-era-inspector';
+import { renderTimelineMomentInspector } from './timeline-moment-inspector';
 import { TimelineAltView } from './timeline-alt-view';
-import type { BriefSpineConfig, DirectedAxisSpineNodeData, NarrativeSpineConfig } from './directed-axis-spine';
+import type { BriefSpineConfig, DirectedAxisSpineNodeData, MomentSpineConfig, NarrativeSpineConfig } from './directed-axis-spine';
 import { SPINE_Y_OFFSET } from './directed-axis-spine';
 import { timelineNodeTypes } from './timeline-node-types';
 
@@ -88,13 +107,19 @@ export type TimelineGraph = WorldKbGraphResponse;
  *                   Brief when-axis; minimal density; no relationship edges).
  * - `'narrative'` — V1.122 event timeline (`block_type=event` on the when-axis
  *                   + Context clusters + relationship edges).
+ * - `'moment'`    — V1.156 P1 T1 read/projection of bound Works' Scene/Beat
+ *                   data (fixture-driven via `SceneBeatFixturePayload`;
+ *                   mirrors the Work Timeline Moment layer feel — same
+ *                   carrier, same node types per V1.123 layer-feel §2.4).
  *
  * Architect-locked in `three-layer-architecture.md` §8 + `layer-feel-
- * differentiation.md` §2. The adapter's `projectGraphForLayer(graph, layer)`
- * selects the active projection; `projectGraph(graph)` delegates to the
- * adapter's active layer (default `'narrative'` for V1.122 backward compat).
+ * differentiation.md` §2 + `canvas-strategy-surface.md` §3.3.3 V1.156
+ * amendment. The adapter's `projectGraphForLayer(graph, layer)` selects the
+ * active projection; `projectGraph(graph)` delegates to the adapter's active
+ * layer (default `'narrative'` for V1.122 backward compat). UI-only union
+ * type — NOT a wire DTO (`wire_contracts_changed: false` for V1.156 P1).
  */
-export type TimelineLayer = 'brief' | 'narrative';
+export type TimelineLayer = 'brief' | 'narrative' | 'moment';
 
 /**
  * V1.147 P2 T3 — compute provenance carried by a merged Narrative compute
@@ -372,6 +397,23 @@ export interface TimelineCanvasAdapterContext {
    * inspector is read-only (tests without wiring).
    */
   onOpenRun?: (runId: string, moduleId: string) => void;
+  /**
+   * V1.156 P1 T1 — bound Works' Scene/Beat fixture (Moment-on-World
+   * carrier). The `WorkOutline` wire exposes no scenes/beats today (the
+   * Moment layer is a read/projection of Work-owned Moments into the World
+   * Timeline — product semantics PD-3, NOT a World Moment authoring
+   * surface); the orchestrator injects Design Studio / test fixtures at the
+   * projection call site. When undefined or empty, the Moment layer emits
+   * honest empty-state (zero nodes). Mirrors the Work Timeline adapter's
+   * `sceneBeatFixture` slot. DR-26 tracks the future wire extension.
+   *
+   * V1.156 P1 fix-wave 1 (F3) — the adapter factory's captured
+   * `sceneBeatFixture` parameter takes precedence over this slot at
+   * projection time (the orchestrator passes the fixture through the memo
+   * deps so identity changes re-project); this slot remains as the
+   * fallback for direct ctxRef wiring (tests / legacy callers).
+   */
+  sceneBeatFixture?: SceneBeatFixturePayload;
 }
 
 export type TimelineCanvasAdapter = CanvasSurfaceAdapter<
@@ -408,6 +450,25 @@ const EVENT_STEP_X = 280;
 const CONTEXT_STEP_X = 220;
 
 /**
+ * V1.156 P1 T1 — Moment layer vertical scene-stack metrics. Scenes stack
+ * top-to-bottom by chapter order; beats stack top-to-bottom inside each
+ * scene. The X coordinate groups scenes by chapter region so the
+ * chapter→scene→beat hierarchy reads spatially. IDENTICAL to the Work
+ * Timeline Moment layer metrics — World-Moment feel ≡ Work-Moment feel
+ * (V1.123 layer-feel §2.4; same carrier, same node types).
+ *
+ * `simplify:` deterministic vertical stack mirroring the Work Timeline
+ * adapter. P4 may swap in a richer manuscript-aware layout (anchored
+ * scene-card grid) per layer-feel §9.
+ */
+const MOMENT_ORIGIN_X = 40;
+const MOMENT_ORIGIN_Y = 40;
+const MOMENT_SCENE_STEP_Y = 160;
+const MOMENT_BEAT_ORIGIN_Y = 56;
+const MOMENT_BEAT_STEP_Y = 44;
+const MOMENT_CHAPTER_STEP_X = 360;
+
+/**
  * V1.123 P1 T4 — per-layer dagre layout options.
  *
  * `layer-feel-differentiation.md` §2.2 locks the Brief feel as a "horizontal
@@ -436,6 +497,21 @@ const NARRATIVE_LAYOUT_OPTIONS = {
   direction: 'LR' as const,
   hasSuppliedPositions: true,
 };
+/**
+ * V1.156 P1 T1 — Moment layer dagre options: vertical scene-stack (TB
+ * direction) with tighter rankSep / nodeSep so the chapter→scene→beat
+ * hierarchy reads as a dense manuscript stack. Mirrors the Work Timeline
+ * Moment layer options exactly (layer-feel §2.4). The
+ * `hasSuppliedPositions: true` flag is preserved so the adapter's
+ * deterministic stack survives first open; these values only take effect on
+ * an explicit `relayout()`.
+ */
+const MOMENT_LAYOUT_OPTIONS = {
+  direction: 'TB' as const,
+  rankSep: 60,
+  nodeSep: 30,
+  hasSuppliedPositions: true,
+};
 
 const NODE_ID_PREFIX = 'entity:';
 /** V1.147 P2 T3 — compute log-event node id prefix (`compute:<event_id>`). */
@@ -453,6 +529,24 @@ function nodeIdOf(keyBlockId: string): string {
 
 function computeNodeIdOf(eventId: string): string {
   return `${COMPUTE_NODE_ID_PREFIX}${eventId}`;
+}
+
+/**
+ * V1.156 P1 T1 — Moment node id prefixes. Identical to the Work Timeline
+ * Moment layer prefixes (`wt-scene:` / `wt-beat:`) — the Moment nodes reuse
+ * the Work Timeline node components + `WorkTimelineNodeData` carrier, so the
+ * ids stay namespaced the same way (stable across refetches, no collision
+ * with `entity:` / `compute:` World Timeline ids).
+ */
+const MOMENT_SCENE_NODE_ID_PREFIX = 'wt-scene:';
+const MOMENT_BEAT_NODE_ID_PREFIX = 'wt-beat:';
+
+function momentSceneNodeId(sceneId: string): string {
+  return `${MOMENT_SCENE_NODE_ID_PREFIX}${sceneId}`;
+}
+
+function momentBeatNodeId(beatId: string): string {
+  return `${MOMENT_BEAT_NODE_ID_PREFIX}${beatId}`;
 }
 
 /**
@@ -550,12 +644,24 @@ export function projectTimelineGraph(
   layer: TimelineLayer = 'narrative',
   events?: TimelineEventInfo[],
   moduleNames?: ReadonlyMap<string, string>,
+  fixture?: SceneBeatFixturePayload,
 ): {
   nodes: Node<TimelineNodeData>[];
   edges: Edge<TimelineEdgeData>[];
 } {
   if (layer === 'brief') {
     return projectBriefLayer(graph);
+  }
+  if (layer === 'moment') {
+    // V1.156 P1 T1 — Moment nodes carry the reused `WorkTimelineNodeData`
+    // carrier (`WorkTimelineNodeData` is structurally narrower than the
+    // adapter's `TimelineNodeData` base). Cast is deliberate cross-surface
+    // reuse — same carrier + same node components as the Work Timeline
+    // Moment layer (V1.123 layer-feel §2.4); see `projectMomentLayer`.
+    return projectMomentLayer(graph, fixture) as unknown as {
+      nodes: Node<TimelineNodeData>[];
+      edges: Edge<TimelineEdgeData>[];
+    };
   }
   return projectNarrativeLayer(graph, events, moduleNames);
 }
@@ -820,6 +926,220 @@ function entityToTimelineNodeData(
     layoutHint,
     ...(occurredAt !== undefined ? { occurredAtHint: occurredAt } : {}),
   };
+}
+
+// ─── Moment projection (V1.156 P1 T1) ───────────────────────────────────────
+
+/**
+ * Derive the World id for Moment node payloads. `WorldKbGraphResponse`
+ * carries no top-level `world_id` (unlike `WorkOutline.work_id`); the
+ * entities carry it per-row. Moment nodes only render when the fixture has
+ * scenes/beats, which implies the graph has bound-Work data — the first
+ * entity's `world_id` is the stable source. Empty string only when the
+ * graph is entity-less AND a fixture is present (test-only degenerate case;
+ * the node components do not read `workId` for rendering).
+ *
+ * Semantic caveat (qc3 F-4 / qc2 M-1): the returned WORLD id is stored into
+ * `WorkTimelineNodeData.workId`, whose documented meaning is "Work id the
+ * node belongs to" — a known mismatch on the World surface (a World-Moment
+ * node can't name one Work). No current consumer reads `workId` on Moment
+ * nodes (the node components + the World Moment inspector render without
+ * it, and the inspector deliberately renders NO Edit-in-Outline CTA that
+ * would navigate to `/works/<worldId>/outline`). DR-26 multi-Work
+ * aggregation must carry real per-node Work attribution.
+ */
+function worldIdOf(graph: TimelineGraph): string {
+  return graph.entities?.[0]?.world_id ?? '';
+}
+
+/**
+ * V1.156 P1 T1 — World Timeline Moment layer projection (architect
+ * `canvas-strategy-surface.md` §3.3.3 V1.156 amendment). Completes the
+ * World Timeline 3-layer matrix (Brief + Narrative + Moment).
+ *
+ * Mirrors the Work Timeline adapter's `projectMomentLayer` EXACTLY — same
+ * node-id prefix (`wt-scene:` / `wt-beat:`), same layout metrics, same
+ * fixture-slot pattern, same node types (World-Moment feel ≡ Work-Moment
+ * feel per V1.123 layer-feel-differentiation §2.4 — no new node component
+ * family).
+ *
+ * Carrier: `SceneBeatFixturePayload` (V1.108 outline-canvas fixture type).
+ * The `WorkOutline` wire exposes no scenes/beats today; the orchestrator
+ * injects Design Studio / test fixtures via `ctxRef.current.sceneBeatFixture`
+ * (fixture-driven read-projection — DR-26 tracks the future wire extension).
+ * When the fixture is absent or empty, the projection emits zero nodes
+ * (honest empty-state per product semantics PD-3 — World Timeline Moment is
+ * a READ/projection layer: Moments remain Work-owned, this is NOT a World
+ * Moment authoring surface, no World-owned Moment write flow).
+ *
+ * Product semantics (PD-3 — HARD): primary readable set = Moments from
+ * Works bound to that World, projected into the World Timeline. Node
+ * payloads reuse `WorkTimelineNodeData` (the Work-owned carrier) so the
+ * shared node components render unchanged.
+ *
+ * Scenes stack vertically by chapter order (numeric `chapterId` ascending);
+ * beats stack vertically inside their scene. The X coordinate groups scenes
+ * by chapter region so the chapter→scene→beat hierarchy reads spatially.
+ *
+ * `simplify:` deterministic vertical stack. P4 may swap in a richer
+ * manuscript-aware layout (anchored scene-card grid) per layer-feel §9.
+ */
+function projectMomentLayer(
+  graph: TimelineGraph,
+  fixture: SceneBeatFixturePayload | undefined,
+): {
+  nodes: Node<WorkTimelineNodeData>[];
+  edges: Edge<TimelineEdgeData>[];
+} {
+  if (!fixture || (fixture.scenes.length === 0 && fixture.beats.length === 0)) {
+    // Honest empty-state — T2 owns the visible copy. The adapter's
+    // contract is to emit zero nodes; the orchestrator renders the
+    // empty-state panel when the active layer has no projectable data.
+    return { nodes: [], edges: [] };
+  }
+
+  const workId = worldIdOf(graph);
+
+  // Group scenes by chapter so the vertical stack reads chapter → scene →
+  // beat top-to-bottom. Chapter ordering is numeric ascending.
+  const scenesByChapter = new Map<number, SceneFixture[]>();
+  for (const scene of fixture.scenes) {
+    const bucket = scenesByChapter.get(scene.chapterId);
+    if (bucket) bucket.push(scene);
+    else scenesByChapter.set(scene.chapterId, [scene]);
+  }
+  const sortedChapterIds = [...scenesByChapter.keys()].sort((a, b) => a - b);
+
+  const emittedSceneIds = new Set<string>();
+  const nodes: Node<WorkTimelineNodeData>[] = [];
+
+  // Scene cards — vertical stack per chapter region (X groups by chapter).
+  sortedChapterIds.forEach((chapterId, chapterIdx) => {
+    const scenes = scenesByChapter.get(chapterId) ?? [];
+    // Stable sort by sceneId within the chapter so the stack is
+    // deterministic across refetches.
+    const sortedScenes = [...scenes].sort((a, b) => a.sceneId.localeCompare(b.sceneId));
+    sortedScenes.forEach((scene, sceneIdx) => {
+      emittedSceneIds.add(scene.sceneId);
+      const data: WorkTimelineNodeData = {
+        workId,
+        nodeKind: 'scene',
+        nodeId: scene.sceneId,
+        sceneId: scene.sceneId,
+        label: scene.title ?? '',
+        status: scene.status,
+        manuscriptAnchor: { chapterId: scene.chapterId, sceneId: scene.sceneId },
+        realizesChapterId: scene.chapterId,
+      };
+      nodes.push({
+        id: momentSceneNodeId(scene.sceneId),
+        type: 'work-timeline-moment-scene',
+        position: {
+          x: MOMENT_ORIGIN_X + chapterIdx * MOMENT_CHAPTER_STEP_X,
+          y: MOMENT_ORIGIN_Y + sceneIdx * MOMENT_SCENE_STEP_Y,
+        },
+        data,
+      });
+    });
+  });
+
+  // Beat pins — children of Scene cards conceptually; positioned in a
+  // column next to / below their scene. Beats whose sceneId is absent
+  // from the emitted scenes are dropped (mirrors V1.108 rf-projection
+  // orphan guard).
+  const beatsByScene = new Map<string, BeatFixture[]>();
+  for (const beat of fixture.beats) {
+    if (!emittedSceneIds.has(beat.sceneId)) continue;
+    const bucket = beatsByScene.get(beat.sceneId);
+    if (bucket) bucket.push(beat);
+    else beatsByScene.set(beat.sceneId, [beat]);
+  }
+
+  // Index scenes by id → position so beats can stack relative to their
+  // scene's position.
+  const scenePositionById = new Map<string, { x: number; y: number; chapterId: number }>();
+  for (const node of nodes) {
+    if (node.data.nodeKind === 'scene') {
+      const d = node.data as WorkTimelineNodeData;
+      scenePositionById.set(d.sceneId!, {
+        x: node.position.x,
+        y: node.position.y,
+        chapterId: d.realizesChapterId ?? 0,
+      });
+    }
+  }
+
+  for (const [sceneId, beats] of beatsByScene) {
+    const scenePos = scenePositionById.get(sceneId);
+    if (!scenePos) continue;
+    const sortedBeats = [...beats].sort((a, b) => a.beatId.localeCompare(b.beatId));
+    sortedBeats.forEach((beat, beatIdx) => {
+      const data: WorkTimelineNodeData = {
+        workId,
+        nodeKind: 'beat',
+        nodeId: beat.beatId,
+        beatId: beat.beatId,
+        sceneId: beat.sceneId,
+        label: beat.title ?? '',
+        status: beat.status,
+        manuscriptAnchor: {
+          chapterId: scenePos.chapterId,
+          sceneId: beat.sceneId,
+          beatId: beat.beatId,
+        },
+        realizesChapterId: scenePos.chapterId,
+      };
+      nodes.push({
+        id: momentBeatNodeId(beat.beatId),
+        type: 'work-timeline-moment-beat',
+        position: {
+          x: scenePos.x + 16,
+          y: scenePos.y + MOMENT_BEAT_ORIGIN_Y + beatIdx * MOMENT_BEAT_STEP_Y,
+        },
+        data,
+      });
+    });
+  }
+
+  // V1.126 P1 — Moment directed axis spine (decoration-only, Y=0).
+  // Density-encoded: segment length proportional to scene count per ND-A1.
+  // Mirrors the Work Timeline Moment spine (same rhythm break from the
+  // Brief+Narrative time-span convention).
+  if (sortedChapterIds.length > 0) {
+    const chapterSegments: MomentSpineConfig['chapterSegments'] = sortedChapterIds.map(
+      (chapterId) => {
+        const scenes = scenesByChapter.get(chapterId) ?? [];
+        const sceneTicks = scenes.map((s) => s.sceneId);
+        return {
+          chapterId,
+          chapterLabel: `Ch. ${chapterId}`,
+          sceneCount: scenes.length,
+          sceneTicks,
+        };
+      },
+    );
+    const momentSpineData: DirectedAxisSpineNodeData = {
+      layer: 'moment',
+      spineConfig: {
+        kind: 'moment',
+        chapterSegments,
+      },
+      accentColor: 'var(--color-canvas-layer-moment-accent)',
+    };
+    nodes.push({
+      id: 'directed-axis-spine',
+      type: 'directedAxisSpine',
+      position: { x: 0, y: MOMENT_ORIGIN_Y + SPINE_Y_OFFSET },
+      data: momentSpineData as unknown as WorkTimelineNodeData,
+      selectable: false,
+      focusable: false,
+    });
+  }
+
+  // Moment layer: no explicit edges in V1.156 MVP. Beat succession within
+  // scene is encoded spatially by the vertical stack (layer-feel §2.4).
+  // `realizes_event` light links (beat → Narrative event) are P4 polish.
+  return { nodes, edges: [] };
 }
 
 // ─── Compute-result merge (V1.147 P2 T3) ────────────────────────────────────
@@ -1242,10 +1562,21 @@ export function createTimelineCanvasAdapter(
   activeLayer: TimelineLayer = 'narrative',
   timelineEvents?: TimelineEventInfo[],
   computeModuleNames?: ReadonlyMap<string, string>,
+  sceneBeatFixture?: SceneBeatFixturePayload,
 ): TimelineCanvasAdapter {
   return {
     surfaceKind: 'timeline',
-    nodeTypes: timelineNodeTypes,
+    nodeTypes: {
+      ...timelineNodeTypes,
+      // V1.156 P1 T1 — Moment layer reuses the Work Timeline Moment node
+      // components + `WorkTimelineNodeData` carrier (no new node component
+      // family per V1.123 layer-feel §2.4). Only the two Moment types are
+      // picked from the Work registry — the Work Narrative event node is NOT
+      // registered here (the World Narrative layer keeps its own
+      // `timeline-event` node).
+      'work-timeline-moment-scene': workTimelineNodeTypes['work-timeline-moment-scene'],
+      'work-timeline-moment-beat': workTimelineNodeTypes['work-timeline-moment-beat'],
+    },
     // `edgeTypes` is intentionally undefined: V1.122 P1 T2 ships no bespoke
     // edge components. The default React Flow renderer surfaces the label +
     // stroke styling emitted by `deriveTimelineEdges`. The
@@ -1253,14 +1584,19 @@ export function createTimelineCanvasAdapter(
     // for post-MVP edge components; the architect lock forbids
     // ForeshadowEdge / RealizesEdge / ForkFromEdge (Work-outline kinds).
     edgeTypes: undefined,
-    // V1.123 P1 T4 — layer-dependent dagre options. Brief carries wider
-    // `rankSep` + smaller `nodeSep` than the V1.122 Narrative default so
-    // an explicit `relayout()` produces the horizontal era sweep feel
-    // (layer-feel §2.2). The supplied era positions win on first open
-    // (`hasSuppliedPositions: true`); these options only kick in on
-    // explicit relayout.
+    // V1.123 P1 T4 + V1.156 P1 T1 — layer-dependent dagre options. Brief
+    // carries wider `rankSep` + smaller `nodeSep` than the V1.122 Narrative
+    // default so an explicit `relayout()` produces the horizontal era sweep
+    // feel (layer-feel §2.2); Moment prefers a vertical scene-stack (TB
+    // direction, tight density — mirrors the Work Timeline Moment layer).
+    // The supplied positions win on first open (`hasSuppliedPositions:
+    // true`); these options only kick in on explicit relayout.
     layoutOptions:
-      activeLayer === 'brief' ? BRIEF_LAYOUT_OPTIONS : NARRATIVE_LAYOUT_OPTIONS,
+      activeLayer === 'brief'
+        ? BRIEF_LAYOUT_OPTIONS
+        : activeLayer === 'moment'
+          ? MOMENT_LAYOUT_OPTIONS
+          : NARRATIVE_LAYOUT_OPTIONS,
 
     projectGraph(graph) {
       // V1.123 P1 T2 — delegates to the active layer. Default `'narrative'`
@@ -1273,7 +1609,27 @@ export function createTimelineCanvasAdapter(
       // V1.147 P2 T3 — the captured `timelineEvents` merge into the Narrative
       // projection; Brief ignores them. `computeModuleNames` resolves module
       // display names from the registry map (module_id fallback).
-      return projectTimelineGraph(graph, activeLayer, timelineEvents, computeModuleNames);
+      //
+      // V1.156 P1 T1 — the Moment projection reads the bound-Works
+      // Scene/Beat fixture (fixture-driven read-projection; honest
+      // empty-state when absent).
+      //
+      // V1.156 P1 fix-wave 1 (F3) — the fixture is CAPTURED at factory
+      // creation (like `activeLayer` + `timelineEvents`) so the
+      // orchestrator's adapter memo deps can include it: a fixture identity
+      // change recreates the adapter and re-projects deterministically on
+      // the same render. (Reading only via `ctxRef.current` left the
+      // projection stale — the ctxRef assignment runs AFTER the adapter
+      // memo, so a deps-only change would re-project with the previous
+      // render's fixture.) The ctxRef slot remains as a fallback for direct
+      // ctxRef wiring (tests / legacy callers); the captured value wins.
+      return projectTimelineGraph(
+        graph,
+        activeLayer,
+        timelineEvents,
+        computeModuleNames,
+        sceneBeatFixture ?? ctxRef.current.sceneBeatFixture,
+      );
     },
 
     adaptConflict(_error) {
@@ -1303,6 +1659,21 @@ export function createTimelineCanvasAdapter(
       // the `kb.patch_entity` write path is KB-only.
       if (data.layoutHint === 'compute') {
         return <TimelineComputeInspector node={node} ctxRef={ctxRef} />;
+      }
+      // V1.156 P1 fix-wave 1 (F1) — Moment scene/beat nodes carry the
+      // `WorkTimelineNodeData` carrier (`nodeKind: 'scene' | 'beat'`, no
+      // `layoutHint`, no `key_block_id`). They MUST NOT reach the generic
+      // KB `TimelineInspector` below: its Save fires `kb.patch_entity` from
+      // `node.data.key_block_id` — absent on Moment nodes → `entity_id:
+      // undefined`, a guaranteed-failing write request on a read/projection
+      // layer (PD-3 violation). Dispatch to the read-only Moment inspector
+      // instead (layer-feel parity with Work-Moment — both selectable, both
+      // read-only inspector).
+      const momentData = node.data as unknown as WorkTimelineNodeData;
+      if (momentData.nodeKind === 'scene' || momentData.nodeKind === 'beat') {
+        return renderTimelineMomentInspector(
+          node as unknown as Node<WorkTimelineNodeData>,
+        );
       }
       return <TimelineInspector node={node} ctxRef={ctxRef} />;
     },
@@ -1338,9 +1709,21 @@ function TimelineAltViewWrapper({
   ctxRef: MutableRefObject<TimelineCanvasAdapterContext>;
 }) {
   const ctx = ctxRef.current;
+  // V1.156 P1 fix-wave 1 (F2) — the alt-view is an entity table
+  // (`canonical_name` / `block_type` / `occurred_at` / anchor count /
+  // `updated_at` columns). Moment scene/beat nodes (the
+  // `WorkTimelineNodeData` carrier) and the decoration spine carry none of
+  // those fields; passing them through rendered blank rows and crashed the
+  // Kind sort (`block_type` undefined → `localeCompare` TypeError). Filter
+  // to KB-entity rows (nodes that carry a `block_type`) so the table stays
+  // functional for Brief/Narrative and honest on Moment (no non-entity
+  // rows, no row-click into the Moment inspector from the table).
+  const entityNodes = (ctx.nodes ?? []).filter(
+    (n) => typeof n.data.block_type === 'string',
+  );
   return (
     <TimelineAltView
-      nodes={ctx.nodes ?? []}
+      nodes={entityNodes}
       selectedNodeId={ctx.selectedNodeId ?? null}
       onSelectNode={(nodeId) => ctx.onSelectNode?.(nodeId)}
     />

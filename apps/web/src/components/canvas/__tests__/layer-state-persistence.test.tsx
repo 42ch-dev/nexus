@@ -9,8 +9,12 @@
  *   |----------------------|-------------------------------------------------|
  *   | Survive surface switch | URL `?layer=` on the Timeline route preserves   |
  *   |                      | the layer across Timeline → peer → back.        |
- *   | Invalid layer        | `?layer=moment` on World Timeline → ignored;    |
- *   |                      | `?layer=brief` on Work Timeline → ignored.      |
+ *   | Invalid layer        | Unknown `?layer=` values fall back to the       |
+ *   |                      | surface default. V1.156 lifts the World-Timeline |
+ *   |                      | Moment restriction (spec §3.3.3 — all three     |
+ *   |                      | layer values are valid on the World Timeline);  |
+ *   |                      | the Work Timeline still ignores `brief` until   |
+ *   |                      | V1.156 P2 (Work×Brief) ships.                   |
  *   | Default when absent  | World: Brief-if-era-data-else-Narrative;        |
  *   |                      | Work: Narrative (architect §7.3 override).      |
  *
@@ -152,10 +156,13 @@ describe('TimelineCanvas — layer-state persistence via URL ?layer= (P4 Task 6)
     });
   });
 
-  it('ignores invalid layer values (Moment not valid on World Timeline) and falls back to default', async () => {
-    // Moment is a Work-Timeline-only layer. URL ?layer=moment on the World
-    // Timeline must be ignored — the surface falls back to the era-driven
-    // default (Brief when era data exists).
+  it('restores the Moment layer from URL ?layer=moment (V1.156 — World-Moment restriction lifted)', async () => {
+    // V1.156 spec §3.3.3 amendment: `?layer=moment` is now VALID on the
+    // World Timeline (the V1.123 "moment is Work-only" restriction is
+    // lifted — both surfaces render all three layers). The URL must restore
+    // the Moment layer even though era data exists (default would otherwise
+    // be Brief). No fixture → the surface renders the honest Moment empty-
+    // state, but the active layer is Moment.
     const graph: WorldKbGraphResponse = {
       entities: [
         eraEntity({
@@ -169,6 +176,40 @@ describe('TimelineCanvas — layer-state persistence via URL ?layer= (P4 Task 6)
     renderInApp(<TimelineCanvas worldId="world-ps" />, {
       client: makeWorldMockClient(graph),
       initialRouterEntries: ['/worlds/world-ps/timeline?layer=moment'],
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('timeline-canvas')).toHaveAttribute(
+        'data-active-layer',
+        'moment',
+      );
+    });
+    expect(screen.getByTestId('timeline-layer-tab-moment')).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+  });
+
+  it('ignores invalid layer values (?layer=bogus) and falls back to the era-derived default', async () => {
+    // V1.156 spec §3.3.3: only 'brief' | 'narrative' | 'moment' are valid on
+    // the World Timeline. Unknown values must fall back to the era-derived
+    // default (era data present → Brief). This suite's old invalid-value
+    // test was repurposed into the moment-restore test above, unpinning the
+    // `urlLayerOverride` null-branch on World; the Work Timeline suite
+    // retains its own invalid-value test (`?layer=brief` → Narrative).
+    const graph: WorldKbGraphResponse = {
+      entities: [
+        eraEntity({
+          key_block_id: 'kb-era-1',
+          canonical_name: 'The First Age',
+        }),
+      ],
+      source_anchors: [],
+      relationships: [],
+    };
+    renderInApp(<TimelineCanvas worldId="world-ps" />, {
+      client: makeWorldMockClient(graph),
+      initialRouterEntries: ['/worlds/world-ps/timeline?layer=bogus'],
     });
 
     await waitFor(() => {
@@ -228,6 +269,53 @@ describe('TimelineCanvas — layer-state persistence via URL ?layer= (P4 Task 6)
     // URL must now carry ?layer=narrative so the choice survives a refresh
     // or a peer-surface round-trip.
     expect(captured.search).toContain('layer=narrative');
+  });
+
+  it('writes ?layer=moment back to the URL when the user swaps to the Moment tab (V1.156)', async () => {
+    // Spec §3.3.3 layer-state persistence (V1.156): all three layers persist
+    // on the World Timeline. A swap into Moment must write `?layer=moment`
+    // so the choice survives a refresh or a peer-surface round-trip.
+    const graph: WorldKbGraphResponse = {
+      entities: [
+        eraEntity({
+          key_block_id: 'kb-era-1',
+          canonical_name: 'The First Age',
+        }),
+      ],
+      source_anchors: [],
+      relationships: [],
+    };
+    const { captured, LocationSpy } = makeLocationSpy();
+    renderInApp(
+      <>
+        <TimelineCanvas worldId="world-ps" />
+        <LocationSpy />
+      </>,
+      {
+        client: makeWorldMockClient(graph),
+        initialRouterEntries: ['/worlds/world-ps/timeline'],
+      },
+    );
+
+    // Default — Brief (era data exists, no URL param).
+    await waitFor(() => {
+      expect(screen.getByTestId('timeline-canvas')).toHaveAttribute(
+        'data-active-layer',
+        'brief',
+      );
+    });
+
+    // User swaps to Moment via the layer tab.
+    fireEvent.click(screen.getByTestId('timeline-layer-tab-moment'));
+    await waitFor(() => {
+      expect(screen.getByTestId('timeline-canvas')).toHaveAttribute(
+        'data-active-layer',
+        'moment',
+      );
+    });
+
+    // URL must now carry ?layer=moment (shareable, refresh-safe).
+    expect(captured.search).toContain('layer=moment');
   });
 
   it('clears the URL param when the user swaps back to the default layer', async () => {
