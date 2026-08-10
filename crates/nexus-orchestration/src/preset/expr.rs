@@ -924,6 +924,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::approx_constant)] // -3.14 is the parser's expected output for literal "-3.14", not an approximation of π
     fn parse_literals() {
         let expr = parse("true").unwrap();
         assert_eq!(expr, Expr::Bool(true));
