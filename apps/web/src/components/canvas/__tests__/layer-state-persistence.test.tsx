@@ -24,7 +24,7 @@
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, screen, waitFor } from '@testing-library/react';
-import { useLocation } from 'react-router-dom';
+import { useLocation } from 'react-router';
 
 import { renderInApp } from '@/test/test-providers';
 import type { NexusClient } from '@/lib/nexus';

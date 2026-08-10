@@ -1,6 +1,6 @@
 import { ChevronRight, Ellipsis, type LucideIcon } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
-import { useLocation } from 'react-router-dom';
+import { useLocation } from 'react-router';
 
 import { cn } from '@/lib/utils';
 

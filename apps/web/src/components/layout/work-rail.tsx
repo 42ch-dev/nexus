@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Link, useMatch, useParams } from 'react-router-dom';
+import { Link, useMatch, useParams } from 'react-router';
 import { BookOpen } from 'lucide-react';
 
 import { flattenPages, useWork, useWorks } from '@/api/queries';

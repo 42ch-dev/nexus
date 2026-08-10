@@ -20,7 +20,7 @@ import {
   Routes,
   useLocation,
   useNavigate,
-} from 'react-router-dom';
+} from 'react-router';
 import { type ReactElement } from 'react';
 import { CanvasNavCommands } from '@/components/canvas/canvas-nav-commands';
 import { clearCommands, getCommands, type Command } from '@/lib/canvas/command-registry';

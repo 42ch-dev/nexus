@@ -1,4 +1,4 @@
-import { forwardRef, type TextareaHTMLAttributes } from 'react';
+import { type Ref, type TextareaHTMLAttributes } from 'react';
 
 import { cn } from '../lib/cn';
 
@@ -19,10 +19,12 @@ import { cn } from '../lib/cn';
 export interface TextareaProps extends TextareaHTMLAttributes<HTMLTextAreaElement> {
   /** Marks the field invalid: switches border to red-700 and sets aria-invalid="true". */
   invalid?: boolean;
+  /** DOM ref forwarded to the underlying textarea (React 19 ref-as-prop). */
+  ref?: Ref<HTMLTextAreaElement>;
 }
 
-export const Textarea = forwardRef<HTMLTextAreaElement, TextareaProps>(
-  ({ className, invalid, ...props }, ref) => (
+export function Textarea({ className, invalid, ref, ...props }: TextareaProps) {
+  return (
     <textarea
       ref={ref}
       aria-invalid={invalid ? true : undefined}
@@ -36,6 +38,6 @@ export const Textarea = forwardRef<HTMLTextAreaElement, TextareaProps>(
       )}
       {...props}
     />
-  ),
-);
+  );
+}
 Textarea.displayName = 'Textarea';

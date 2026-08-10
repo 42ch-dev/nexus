@@ -1,4 +1,4 @@
-import { forwardRef, type HTMLAttributes } from 'react';
+import { type HTMLAttributes, type Ref } from 'react';
 import { AlertCircle } from 'lucide-react';
 
 import { cn } from '../lib/cn';
@@ -144,6 +144,8 @@ export interface TransportErrorBlockProps
    * `undefined` is equivalent to "use the default".
    */
   secondaryCtaLabel?: string;
+  /** DOM ref forwarded to the underlying section (React 19 ref-as-prop). */
+  ref?: Ref<HTMLDivElement>;
 }
 
 /**
@@ -174,23 +176,20 @@ export interface TransportErrorBlockProps
  *   onOpenSettings={() => navigate('/settings/advanced#connection')}
  * />
  */
-export const TransportErrorBlock = forwardRef<HTMLDivElement, TransportErrorBlockProps>(
-  function TransportErrorBlock(
-    {
-      kind,
-      onRetry,
-      onOpenSettings,
-      detail,
-      title,
-      body,
-      primaryCtaLabel,
-      secondaryCtaLabel,
-      className,
-      ...rest
-    },
-    ref,
-  ) {
-    const headline = title ?? HEADLINE_COPY[kind];
+export function TransportErrorBlock({
+  kind,
+  onRetry,
+  onOpenSettings,
+  detail,
+  title,
+  body,
+  primaryCtaLabel,
+  secondaryCtaLabel,
+  className,
+  ref,
+  ...rest
+}: TransportErrorBlockProps) {
+  const headline = title ?? HEADLINE_COPY[kind];
     const bodyText = body ?? BODY_COPY[kind];
     const primary = PRIMARY_CTA[kind];
     const secondary = SECONDARY_CTA[kind];
@@ -254,9 +253,8 @@ export const TransportErrorBlock = forwardRef<HTMLDivElement, TransportErrorBloc
           </div>
         ) : null}
       </section>
-    );
-  },
-);
+  );
+}
 
 /**
  * Resolve a callback-driven CTA's `onClick`. `useDesktopApp` has no callback

@@ -1,5 +1,5 @@
 import { Plus } from 'lucide-react';
-import { forwardRef, type KeyboardEvent } from 'react';
+import { type KeyboardEvent, type Ref } from 'react';
 
 import { cn } from '@/lib/utils';
 
@@ -104,12 +104,13 @@ interface ProfileAvatarProps {
   tabIndex: number;
   onFocus: () => void;
   onSelect: () => void;
+  /** DOM ref forwarded to the underlying button (React 19 ref-as-prop). */
+  ref?: Ref<HTMLButtonElement>;
 }
 
-const ProfileAvatar = forwardRef<HTMLButtonElement, ProfileAvatarProps>(
-  ({ profile, tabIndex, onFocus, onSelect }, ref) => {
-    const initials = profile.displayName.slice(0, 1).toUpperCase();
-    return (
+function ProfileAvatar({ profile, tabIndex, onFocus, onSelect, ref }: ProfileAvatarProps) {
+  const initials = profile.displayName.slice(0, 1).toUpperCase();
+  return (
       <button
         ref={ref}
         type="button"
@@ -127,7 +128,6 @@ const ProfileAvatar = forwardRef<HTMLButtonElement, ProfileAvatarProps>(
       >
         {initials}
       </button>
-    );
-  },
-);
+  );
+}
 ProfileAvatar.displayName = 'ProfileAvatar';

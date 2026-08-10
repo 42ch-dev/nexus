@@ -13,7 +13,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { act, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { ReactElement } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router';
 import type { RunSummary } from '@42ch/nexus-contracts';
 
 import { renderInApp } from '@/test/test-providers';

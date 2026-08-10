@@ -3,7 +3,7 @@
  */
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { screen, waitFor } from '@testing-library/react';
-import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
+import { Navigate, Route, Routes, useLocation } from 'react-router';
 
 import { WorkShellLayout } from '@/components/layout/work-shell-layout';
 import { cn } from '@/lib/utils';

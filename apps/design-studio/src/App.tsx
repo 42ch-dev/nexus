@@ -1,4 +1,4 @@
-import { Link, Routes, Route } from 'react-router-dom';
+import { Link, Routes, Route } from 'react-router';
 import { TopNav } from '@/components/nav';
 import { ThemeToggle } from '@/components/theme-toggle';
 import { HomePage } from '@/pages/home';

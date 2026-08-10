@@ -7,7 +7,7 @@ import {
   useState,
   type ReactNode,
 } from 'react';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router';
 import { useTranslation } from 'react-i18next';
 
 import { BrowserClient, type NexusClient } from '@/lib/nexus';

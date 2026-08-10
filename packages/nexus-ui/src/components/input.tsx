@@ -1,4 +1,4 @@
-import { forwardRef, type InputHTMLAttributes } from 'react';
+import { type InputHTMLAttributes, type Ref } from 'react';
 
 import { cn } from '../lib/cn';
 
@@ -21,10 +21,12 @@ import { cn } from '../lib/cn';
 export interface InputProps extends InputHTMLAttributes<HTMLInputElement> {
   /** Marks the field invalid: switches border to red-700 and sets aria-invalid="true". */
   invalid?: boolean;
+  /** DOM ref forwarded to the underlying input (React 19 ref-as-prop). */
+  ref?: Ref<HTMLInputElement>;
 }
 
-export const Input = forwardRef<HTMLInputElement, InputProps>(
-  ({ className, invalid, ...props }, ref) => (
+export function Input({ className, invalid, ref, ...props }: InputProps) {
+  return (
     <input
       ref={ref}
       aria-invalid={invalid ? true : undefined}
@@ -38,6 +40,6 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
       )}
       {...props}
     />
-  ),
-);
+  );
+}
 Input.displayName = 'Input';

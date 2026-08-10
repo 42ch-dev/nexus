@@ -151,20 +151,29 @@ describe('useUpdateFinding — optimistic update + invalidation', () => {
       );
       return listSpies[workId];
     };
+    // Deferred gate (same pattern as the first test): the PATCH stays in-flight
+    // until we release it, so the optimistic window is observable — not racy
+    // against the settle → invalidate → refetch chain under React 19's
+    // synchronous store batching.
+    let releasePatch!: () => void;
+    const patchGate = new Promise<void>((resolve) => {
+      releasePatch = resolve;
+    });
     useHandlers(
       http.get('/v1/daemon/works/:workId/findings', ({ params }) =>
         listFor(String(params.workId))(),
       ),
-      http.patch('/v1/daemon/works/:workId/findings/:findingId', ({ params }) =>
-        HttpResponse.json(
+      http.patch('/v1/daemon/works/:workId/findings/:findingId', async ({ params }) => {
+        await patchGate;
+        return HttpResponse.json(
           makeFinding({
             work_id: String(params.workId),
             finding_id: 'f1',
             status: 'triaged',
             updated_at: 2,
           }),
-        ),
-      ),
+        );
+      }),
     );
 
     function TwoWorkHarness() {
@@ -196,13 +205,17 @@ describe('useUpdateFinding — optimistic update + invalidation', () => {
     expect(listSpies['w1']).toHaveBeenCalledTimes(1);
     expect(listSpies['w2']).toHaveBeenCalledTimes(1);
 
-    // Mutate a finding in w1. The optimistic patch flips w1's status.
+    // Mutate a finding in w1. The optimistic patch flips w1's status while the
+    // PATCH is held in-flight; w2's list is untouched.
     fireEvent.click(screen.getByRole('button', { name: /triage w1/i }));
     await waitFor(() => expect(screen.getByTestId('w1-status')).toHaveTextContent('triaged'));
+    expect(listSpies['w2']).toHaveBeenCalledTimes(1);
 
-    // On settle, w1's list is invalidated → refetched. TanStack processes every
-    // query invalidated by the same invalidation call in one batch, so by the
-    // time w1 has been called a second time, w2's fate is sealed too.
+    // Release the PATCH. On settle, w1's list is invalidated → refetched.
+    // TanStack processes every query invalidated by the same invalidation call
+    // in one batch, so by the time w1 has been called a second time, w2's fate
+    // is sealed too.
+    releasePatch();
     await waitFor(() => expect(listSpies['w1']).toHaveBeenCalledTimes(2));
     expect(listSpies['w2']).toHaveBeenCalledTimes(1);
   });

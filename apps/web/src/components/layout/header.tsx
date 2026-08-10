@@ -1,6 +1,6 @@
 import { Moon, Settings, Sun } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { NavLink } from 'react-router-dom';
+import { NavLink } from 'react-router';
 
 import { NexusLogo } from '@/components/brand/nexus-logo';
 import { DaemonHealthIndicator } from '@/components/daemon-health-indicator';

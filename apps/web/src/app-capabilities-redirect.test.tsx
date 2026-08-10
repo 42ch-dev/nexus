@@ -12,7 +12,7 @@
  */
 import { describe, expect, it, beforeEach } from 'vitest';
 import { screen, waitFor } from '@testing-library/react';
-import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
+import { Navigate, Route, Routes, useLocation } from 'react-router';
 
 import { renderInApp } from '@/test/test-providers';
 import { BrowserClient } from '@/lib/nexus';

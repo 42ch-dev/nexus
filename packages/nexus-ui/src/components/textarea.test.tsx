@@ -66,9 +66,9 @@ describe('Textarea', () => {
     expect(textarea).not.toHaveClass('border-red-700');
   });
 
-  // --- forwardRef ---
+  // --- ref-as-prop ---
 
-  it('forwards the ref to the underlying textarea element', () => {
+  it('passes the ref to the underlying textarea element', () => {
     let ref: HTMLTextAreaElement | null = null;
     const setRef = (el: HTMLTextAreaElement | null) => {
       ref = el;

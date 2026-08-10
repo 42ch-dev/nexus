@@ -1,4 +1,4 @@
-import { NavLink } from 'react-router-dom';
+import { NavLink } from 'react-router';
 
 /**
  * Primary navigation skeleton for the Design Studio.
