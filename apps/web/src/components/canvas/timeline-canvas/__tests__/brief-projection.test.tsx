@@ -530,7 +530,7 @@ describe('TimelineCanvasAdapter.projectGraph — default layer delegation', () =
 // ─── Node-type registry (additive over V1.122) ──────────────────────────────
 
 describe('TimelineCanvasAdapter — node-type registry (V1.123 P1 T2 + V1.126 P1)', () => {
-  it("registers 'timeline-brief-era' alongside V1.122 'timeline-event' + 'timeline-key-block' + V1.126 'directedAxisSpine' + V1.147 'timeline-compute-result'", () => {
+  it("registers 'timeline-brief-era' alongside V1.122 'timeline-event' + 'timeline-key-block' + V1.126 'directedAxisSpine' + V1.147 'timeline-compute-result' + V1.156 'work-timeline-moment-*'", () => {
     const adapter = createTimelineCanvasAdapter({ current: makeContext() });
     const keys = Object.keys(adapter.nodeTypes).sort();
     expect(keys).toEqual(
@@ -540,6 +540,11 @@ describe('TimelineCanvasAdapter — node-type registry (V1.123 P1 T2 + V1.126 P1
         'timeline-compute-result',
         'timeline-event',
         'timeline-key-block',
+        // V1.156 P1 T1 — Moment layer reuses the Work Timeline Moment node
+        // components (World-Moment feel ≡ Work-Moment feel; no new node
+        // component family).
+        'work-timeline-moment-beat',
+        'work-timeline-moment-scene',
       ].sort(),
     );
   });
@@ -551,10 +556,11 @@ describe('TimelineCanvasAdapter — node-type registry (V1.123 P1 T2 + V1.126 P1
   });
 
   it('exposes TimelineLayer type at runtime via the factory signature (smoke test)', () => {
-    // Compile-time assurance: the factory accepts both layer values. This
-    // test exists so a future rename of `TimelineLayer` that breaks the
-    // factory signature surfaces in the test suite, not in production.
-    const layers: TimelineLayer[] = ['brief', 'narrative'];
+    // Compile-time assurance: the factory accepts all layer values (brief /
+    // narrative / moment since V1.156 P1 T1). This test exists so a future
+    // rename of `TimelineLayer` that breaks the factory signature surfaces
+    // in the test suite, not in production.
+    const layers: TimelineLayer[] = ['brief', 'narrative', 'moment'];
     for (const layer of layers) {
       const adapter = createTimelineCanvasAdapter(
         { current: makeContext() },
