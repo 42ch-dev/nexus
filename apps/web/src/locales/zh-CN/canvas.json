@@ -642,7 +642,8 @@
     "layerSwitcher": {
       "ariaLabel": "时间轴图层",
       "brief": "概览",
-      "narrative": "叙事"
+      "narrative": "叙事",
+      "moment": "瞬间"
     },
     "breadcrumb": {
       "ariaLabel": "时间轴图层路径"
@@ -651,6 +652,13 @@
       "emptyState": {
         "title": "尚无纪元标记",
         "message": "概览展示世界跨越时代的形态。切换到叙事以浏览事件，或在概览载体就绪后添加纪元标记。",
+        "cta": "切换到叙事"
+      }
+    },
+    "moment": {
+      "emptyState": {
+        "title": "尚无场景或节拍数据",
+        "message": "当绑定的作品在其大纲中拥有场景/节拍数据时，此处即可呈现场景精度。请在绑定作品的大纲中添加场景与节拍，或切换到叙事查看事件。",
         "cta": "切换到叙事"
       }
     },
