@@ -392,7 +392,7 @@ mod tests {
         assert_eq!(peers[0].schema_version, manifest.schema_version);
     }
 
-    /// Duplicate host_id → one row: a second observation of the same peer
+    /// Duplicate `host_id` → one row: a second observation of the same peer
     /// upserts (fresh manifest, fresh capabilities) instead of duplicating.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn duplicate_host_id_recording_upserts_single_peer_row() {

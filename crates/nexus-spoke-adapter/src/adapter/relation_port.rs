@@ -1292,7 +1292,7 @@ mod tests {
         }
     }
 
-    /// DB failure on put_relation create path surfaces `InternalError`.
+    /// DB failure on `put_relation` create path surfaces `InternalError`.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn put_relation_create_on_dropped_table_surfaces_internal_error() {
         let (pool, _dir) = fresh_pool().await;
@@ -1316,7 +1316,7 @@ mod tests {
         }
     }
 
-    /// DB failure on put_relation update path surfaces `InternalError`.
+    /// DB failure on `put_relation` update path surfaces `InternalError`.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn put_relation_update_on_dropped_table_surfaces_internal_error() {
         let (pool, _dir) = fresh_pool().await;
@@ -1473,7 +1473,7 @@ mod tests {
     // ── V1.146 P5 T2: unknown extensions.nexus key round-trip ──────────
 
     /// Create a Relation with an unknown `extensions.nexus` key, then re-read
-    /// it and confirm the unknown key survives the SQLite round-trip.
+    /// it and confirm the unknown key survives the `SQLite` round-trip.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn put_relation_round_trips_unknown_nexus_key() {
         let (pool, _dir) = fresh_pool().await;

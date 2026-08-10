@@ -1086,7 +1086,7 @@ mod tests {
     use nexus_knowledge::world_kb::knowledge_entry::WorldKbBody;
     use serde_json::json;
 
-    /// Helper: build a WorldKbEntry with modules.activation.
+    /// Helper: build a `WorldKbEntry` with modules.activation.
     fn entry_with_activation(
         id: &str,
         name: &str,

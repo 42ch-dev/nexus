@@ -1,7 +1,7 @@
 //! Tests for `compute_runs` CRUD (V1.147 P0 T2).
 //!
 //! Covers: insert/get/status transitions/list pagination + filter;
-//! unique run_id violation; adapter-style row with NULL run_id coexists.
+//! unique `run_id` violation; adapter-style row with NULL `run_id` coexists.
 //!
 //! Task 2 fix wave adds: status-transition guards, rollback, no-op
 //! transition errors, empty-creator_world_ids filter behaviour.
@@ -21,12 +21,12 @@ async fn setup_db() -> (sqlx::SqlitePool, tempfile::TempDir) {
     (pool, dir)
 }
 
-/// Helper: insert a run and transition it to succeeded, returning the run_id.
+/// Helper: insert a run and transition it to succeeded, returning the `run_id`.
 async fn insert_and_succeed(pool: &sqlx::SqlitePool, world_id: &str, module_id: &str) -> String {
     let run_id = insert_run(pool, world_id, module_id, None, None, None, None)
         .await
         .unwrap();
-    let affected = set_run_succeeded(&pool, &run_id, r#"{}"#).await.unwrap();
+    let affected = set_run_succeeded(pool, &run_id, r"{}").await.unwrap();
     assert_eq!(affected, 1, "succeeded should affect exactly 1 row");
     run_id
 }
@@ -257,7 +257,7 @@ async fn set_applied_guard_requires_succeeded_after_failed() {
     let run_id = insert_run(&pool, "world-g3b", "mod-g3b", None, None, None, None)
         .await
         .unwrap();
-    set_run_failed(&pool, &run_id, r#"{}"#).await.unwrap();
+    set_run_failed(&pool, &run_id, r"{}").await.unwrap();
     // Failed → cannot accept
     let accepted_at = "2026-07-31T12:00:00+00:00";
     let mut tx = pool.begin().await.unwrap();
@@ -296,12 +296,12 @@ async fn transition_nonexistent_run_errors() {
     let (pool, _dir) = setup_db().await;
     let nonexistent = "run_00000000-0000-0000-0000-000000000000";
 
-    let err = set_run_succeeded(&pool, nonexistent, r#"{}"#)
+    let err = set_run_succeeded(&pool, nonexistent, r"{}")
         .await
         .unwrap_err();
     assert_constraint_violation(&err, "not in 'running' status");
 
-    let err = set_run_failed(&pool, nonexistent, r#"{}"#)
+    let err = set_run_failed(&pool, nonexistent, r"{}")
         .await
         .unwrap_err();
     assert_constraint_violation(&err, "not in 'running' status");
@@ -478,7 +478,7 @@ async fn list_runs_filter_by_status() {
     let r2 = insert_run(&pool, "world-s", "mod-x", None, None, None, None)
         .await
         .unwrap();
-    set_run_succeeded(&pool, &r2, r#"{}"#).await.unwrap();
+    set_run_succeeded(&pool, &r2, r"{}").await.unwrap();
 
     let filters = RunListFilters {
         status: Some(RUN_STATUS_RUNNING.to_string()),

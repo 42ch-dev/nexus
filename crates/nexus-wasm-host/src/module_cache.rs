@@ -437,8 +437,8 @@ mod tests {
     }
 
     /// P2 QC fix wave FW-2 + Greptile P1 manifest half: cache identity is
-    /// (id, bytes_hash, manifest_hash) — a changed module file under the
-    /// same id is a miss (recompile path), get_or_compile returns the SAME
+    /// (id, `bytes_hash`, `manifest_hash`) — a changed module file under the
+    /// same id is a miss (recompile path), `get_or_compile` returns the SAME
     /// entry for unchanged artifacts, and a MANIFEST-ONLY change (same
     /// wasm bytes) is a miss too, so new schemas / sandbox settings take
     /// effect without a wasm change.
@@ -451,7 +451,7 @@ mod tests {
         let manifest = embedded_module_manifest("basic-combat").unwrap();
 
         let first = cache
-            .get_or_compile(&engine, "basic-combat", &bytes, manifest)
+            .get_or_compile(&engine, "basic-combat", bytes, manifest)
             .expect("first compile");
         assert_eq!(cache.len(), 1);
         assert!(
@@ -476,7 +476,7 @@ mod tests {
         // Unchanged artifacts ⇒ get_or_compile is a pure cache hit (same
         // Arc — the timing-independent no-recompile observable).
         let second = cache
-            .get_or_compile(&engine, "basic-combat", &bytes, manifest)
+            .get_or_compile(&engine, "basic-combat", bytes, manifest)
             .expect("cache hit");
         assert!(
             Arc::ptr_eq(&first, &second),
@@ -493,7 +493,7 @@ mod tests {
             serde_json::to_string(&value).expect("manifest v2 serializes")
         };
         let third = cache
-            .get_or_compile(&engine, "basic-combat", &bytes, &manifest_v2)
+            .get_or_compile(&engine, "basic-combat", bytes, &manifest_v2)
             .expect("recompile after manifest-only change");
         assert_eq!(cache.len(), 1, "recompile overwrites, never duplicates");
         assert!(

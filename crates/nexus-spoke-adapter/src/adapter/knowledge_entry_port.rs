@@ -895,7 +895,7 @@ mod tests {
         }
     }
 
-    /// DB failure on put_create surfaces `InternalError`.
+    /// DB failure on `put_create` surfaces `InternalError`.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn put_create_on_dropped_table_surfaces_internal_error() {
         let (pool, _dir) = fresh_pool().await;
@@ -919,7 +919,7 @@ mod tests {
         }
     }
 
-    /// DB failure on put_update surfaces `InternalError`.
+    /// DB failure on `put_update` surfaces `InternalError`.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn put_update_on_dropped_table_surfaces_internal_error() {
         let (pool, _dir) = fresh_pool().await;
@@ -951,7 +951,7 @@ mod tests {
 
     // ── V1.146 P0: validation → InvalidInput (unchanged) ───────────────
 
-    /// Validation failure (missing entry_id / canonical_name — rejected by the
+    /// Validation failure (missing `entry_id` / `canonical_name` — rejected by the
     /// spoke boundary before any DB I/O) still surfaces `InvalidInput`.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn validation_still_rejects_invalid_input() {

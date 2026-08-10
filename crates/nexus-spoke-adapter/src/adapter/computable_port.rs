@@ -1112,11 +1112,11 @@ mod tests {
         .unwrap();
     }
 
-    /// Build a spoke KnowledgeEntry with computable state for a character.
-    /// Build a JSON key_block in the format the basic-combat WASM module
+    /// Build a spoke `KnowledgeEntry` with computable state for a character.
+    /// Build a JSON `key_block` in the format the basic-combat WASM module
     /// expects (flat `body.attributes` + `body.state.character`).
-    /// Build a spoke KnowledgeEntry with computable state (creates via
-    /// put_knowledge_entry). Uses the V1.145 P1a conversion seam.
+    /// Build a spoke `KnowledgeEntry` with computable state (creates via
+    /// `put_knowledge_entry`). Uses the V1.145 P1a conversion seam.
     fn spoke_character_entry(
         entry_id: &str,
         canonical_name: &str,
@@ -1184,7 +1184,7 @@ mod tests {
             "attacker_id".to_string(),
             Value::String("kb_hero".to_string()),
         );
-        state.insert("defender_id".to_string(), Value::String("".to_string()));
+        state.insert("defender_id".to_string(), Value::String(String::new()));
 
         let project_req = ProjectRequest {
             session_id: "ses_test_001".to_string(),
@@ -1331,8 +1331,8 @@ mod tests {
     /// Integration test: full project → compute round-trip with the
     /// embedded basic-combat module. Creates two character entries,
     /// stages a combat session, runs compute, and verifies the response.
-    /// Both character key_blocks are bundled into the ComputeInput so
-    /// the module can look up attacker and defender via kb_read.
+    /// Both character `key_blocks` are bundled into the `ComputeInput` so
+    /// the module can look up attacker and defender via `kb_read`.
     ///
     /// Gated behind `nexus_spoke_adapter_no_wasm_target` (set by build.rs
     /// when wasm32-unknown-unknown is absent) — the test exercises the
@@ -1429,7 +1429,7 @@ mod tests {
     }
 
     /// Integration test: project → compute with settle=true persists
-    /// the state_delta into the KnowledgeEntry.
+    /// the `state_delta` into the `KnowledgeEntry`.
     ///
     /// Gated behind `nexus_spoke_adapter_no_wasm_target` (set by build.rs
     /// when wasm32-unknown-unknown is absent).
@@ -1539,7 +1539,7 @@ mod tests {
     }
 
     /// When neither session state nor entry `body.computable` provide a
-    /// `module_id`, compute() must reject with `InvalidInput` — no silent
+    /// `module_id`, `compute()` must reject with `InvalidInput` — no silent
     /// default.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn compute_missing_module_id_rejects_invalid_input() {
@@ -2055,7 +2055,7 @@ mod tests {
                     std::fs::write(&wasm_path_t, changed).expect("write wasm B");
                     std::fs::write(&manifest_path_t, manifest_b).expect("write manifest B");
                 } else {
-                    std::fs::write(&wasm_path_t, &bytes).expect("write wasm A");
+                    std::fs::write(&wasm_path_t, bytes).expect("write wasm A");
                     std::fs::write(&manifest_path_t, manifest).expect("write manifest A");
                 }
                 pair_b = !pair_b;
@@ -2093,7 +2093,7 @@ mod tests {
 
     /// P2 QC fix wave FW-3 (adapter tier — TOCTOU defense): compute on a
     /// session whose target entry was deleted must reject with
-    /// `InvalidInput` ("target KnowledgeEntry not found"), mirroring
+    /// `InvalidInput` ("target `KnowledgeEntry` not found"), mirroring
     /// `project()` — never an unclassified `KnowledgeEntryNotFound` reject.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn compute_missing_entry_rejects_invalid_input() {
@@ -2177,7 +2177,7 @@ mod tests {
         );
         let other = match other {
             SpokeResult::Reject(r) => r,
-            SpokeResult::Ok(_) => panic!("reject helper must reject"),
+            SpokeResult::Ok(()) => panic!("reject helper must reject"),
         };
         assert!(!is_module_identity_missing_reject(&other));
     }
@@ -2231,14 +2231,14 @@ mod tests {
             .state
             .get("character")
             .and_then(|c| c.get("current_hp"))
-            .and_then(|v| v.as_i64())
+            .and_then(serde_json::Value::as_i64)
             .unwrap_or(-1);
         let pre_monster_hp = pre_monster
             .body
             .state
             .get("character")
             .and_then(|c| c.get("current_hp"))
-            .and_then(|v| v.as_i64())
+            .and_then(serde_json::Value::as_i64)
             .unwrap_or(-1);
         assert_eq!(pre_hero_hp, 100, "attacker starts at 100 HP");
         assert_eq!(pre_monster_hp, 60, "defender starts at 60 HP");
@@ -2306,14 +2306,14 @@ mod tests {
             .state
             .get("character")
             .and_then(|c| c.get("current_hp"))
-            .and_then(|v| v.as_i64())
+            .and_then(serde_json::Value::as_i64)
             .unwrap_or(-1);
         let post_monster_hp = post_monster
             .body
             .state
             .get("character")
             .and_then(|c| c.get("current_hp"))
-            .and_then(|v| v.as_i64())
+            .and_then(serde_json::Value::as_i64)
             .unwrap_or(-1);
 
         // F-001 key assertions:
@@ -2329,8 +2329,8 @@ mod tests {
         );
     }
 
-    /// F-003: cross-world references must be rejected as InvalidInput.
-    /// A compute session for world A must not pull key_block bodies from
+    /// F-003: cross-world references must be rejected as `InvalidInput`.
+    /// A compute session for world A must not pull `key_block` bodies from
     /// world B.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn cross_world_defender_rejects_invalid_input() {
@@ -2444,8 +2444,8 @@ mod tests {
         }
     }
 
-    /// F-005: module_id with path-traversal characters must be rejected
-    /// as InvalidInput (format allowlist via `embedded_module_ids()`).
+    /// F-005: `module_id` with path-traversal characters must be rejected
+    /// as `InvalidInput` (format allowlist via `embedded_module_ids()`).
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn compute_module_id_with_path_traversal_rejects_invalid_input() {
         let (pool, _dir) = fresh_pool().await;

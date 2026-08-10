@@ -163,7 +163,7 @@ fn import_url(world_id: &str) -> String {
     format!("/v1/daemon/worlds/{world_id}/kb/pack/import")
 }
 
-/// Same-DB cross-world import cannot reuse entry_ids owned by the source world.
+/// Same-DB cross-world import cannot reuse `entry_ids` owned by the source world.
 /// Mint fresh ids (and remap relation endpoints) so import exercises create paths.
 fn fresh_entry_ids_in_pack(pack: &mut Value) {
     let entries = pack
@@ -302,7 +302,7 @@ async fn pack_export_owned_world_returns_pack_envelope() {
     );
     let relations = body["relations"].as_array().expect("relations array");
     assert!(
-        relations.len() >= 1,
+        !relations.is_empty(),
         "expected at least one exported relation: {body}"
     );
 }

@@ -310,7 +310,7 @@ async fn add_relationship_reread_via_get_graph_confirms_persisted_mapping() {
 }
 
 /// A.2 — update happy: `patch_relationship(update)` bumps the revision and a
-/// `get_graph` re-read confirms the mutated fields (relation_type, symmetric,
+/// `get_graph` re-read confirms the mutated fields (`relation_type`, symmetric,
 /// confidence) persisted — proving the orchestrator CAS update writes through.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn update_then_reread_via_get_graph_confirms_data_persisted() {
@@ -398,14 +398,14 @@ async fn update_then_reread_via_get_graph_confirms_data_persisted() {
 /// A.4 — create-on-existing (`RelationAlreadyExists` → 409) is structurally
 /// unreachable from the HTTP `patch_relationship(add)` path: the handler
 /// generates a fresh `relationship_id` via `generate_relationship_id()` for
-/// every add (world_kb.rs `patch_relationship_add`) and never honors a
+/// every add (`world_kb.rs` `patch_relationship_add`) and never honors a
 /// client-supplied id, so two adds can never collide on the PK. This was
 /// equally true pre-cutover (the legacy path used the same id generator), so
 /// there is no behavior-equivalence regression to test at the handler layer.
 ///
 /// The invariant itself — "storage rejects a duplicate relation PK with
 /// `RelationAlreadyExists`, which `map_relate_reject` maps to 409" — is proven
-/// at the port layer against the real SQLite store by
+/// at the port layer against the real `SQLite` store by
 /// `put_relation_create_on_existing_rejects_already_exists` in
 /// `nexus-spoke-adapter/src/adapter/relation_port.rs` (real-server, not a
 /// mock). That test drives `RelationPort::put_relation(.., None)` twice with

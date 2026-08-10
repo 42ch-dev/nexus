@@ -627,7 +627,7 @@ mod tests {
 
     // ── V1.146 P0: InternalError on DB failure ─────────────────────────
 
-    /// DB failure (dropped table) on list_knowledge_entries surfaces `InternalError`.
+    /// DB failure (dropped table) on `list_knowledge_entries` surfaces `InternalError`.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn list_knowledge_entries_on_dropped_table_surfaces_internal_error() {
         let (pool, _dir) = fresh_pool().await;
@@ -650,7 +650,7 @@ mod tests {
         }
     }
 
-    /// DB failure (dropped table) on list_timeline_events surfaces `InternalError`.
+    /// DB failure (dropped table) on `list_timeline_events` surfaces `InternalError`.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn list_timeline_events_on_dropped_table_surfaces_internal_error() {
         let (pool, _dir) = fresh_pool().await;
