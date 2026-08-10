@@ -32,6 +32,9 @@
  * slot (DR-26 tracks the future wire extension).
  */
 import { describe, expect, it, vi } from 'vitest';
+import { fireEvent, screen, waitFor } from '@testing-library/react';
+import { useState } from 'react';
+import type { ReactElement } from 'react';
 import type { Node } from '@xyflow/react';
 
 import type {
@@ -40,6 +43,7 @@ import type {
 } from '@42ch/nexus-contracts';
 
 import type { NexusClient } from '@/lib/nexus';
+import { renderInApp } from '@/test/test-providers';
 import type {
   BeatFixture,
   SceneBeatFixturePayload,
@@ -52,6 +56,7 @@ import {
   type TimelineLayer,
   type TimelineNodeData,
 } from '../timeline-canvas-adapter';
+import { TimelineCanvas } from '../timeline-canvas';
 import type { WorkTimelineNodeData } from '../../work-timeline-canvas/work-timeline-canvas-adapter';
 
 // ─── Fixture builders ──────────────────────────────────────────────────────
@@ -110,6 +115,21 @@ function makeMockClient(): NexusClient {
     patchOutlineStructure: vi.fn(),
     patchOutlineChapter: vi.fn(),
     patchTimelineEvent: vi.fn(),
+  } as unknown as NexusClient;
+}
+
+/**
+ * Client mock for orchestrator-level `<TimelineCanvas>` mounts (F3 fix test).
+ * Mirrors `layer-state-persistence.test.tsx::makeWorldMockClient`: the
+ * orchestrator's read hooks (`useWorks`, `useWorldTimelineEvents`,
+ * `useComputeModules`) degrade gracefully when their client methods are
+ * absent, so only the graph read + workspace list + health need stubbing.
+ */
+function makeTimelineCanvasMockClient(graph: WorldKbGraphResponse): NexusClient {
+  return {
+    getWorldKbGraph: vi.fn().mockResolvedValue(graph),
+    getWorks: vi.fn().mockResolvedValue({ items: [], total: 0 }),
+    health: vi.fn().mockResolvedValue({ status: 'ok', version: 'test' }),
   } as unknown as NexusClient;
 }
 
@@ -370,5 +390,273 @@ describe('TimelineCanvasAdapter — Moment projection reads fixture from ctxRef'
       );
       expect(adapter.surfaceKind).toBe('timeline');
     }
+  });
+});
+
+// ─── F1: Moment nodes dispatch to the read-only Moment inspector ────────────
+//
+// Fix-wave 1 (qc1 I-001 / qc2 W-1 / qc3 F-1): Moment scene/beat nodes are
+// selectable but previously fell through `renderInspector` to the generic KB
+// `TimelineInspector`, whose Save fires `kb.patch_entity` with
+// `entity_id: undefined` (the `WorkTimelineNodeData` carrier has no
+// `key_block_id`) — a guaranteed-failing write request on a read/projection
+// layer (PD-3 violation). The dispatch now routes Moment nodes to the
+// read-only Moment inspector (layer-feel parity with Work-Moment).
+
+describe('TimelineCanvasAdapter.renderInspector — Moment nodes route to the read-only Moment inspector (F1 fix)', () => {
+  it('scene node renders the read-only Moment inspector — NOT the generic KB TimelineInspector', () => {
+    const g = graph();
+    const fx = fixture([
+      scene({ sceneId: 'sc-1', chapterId: 5, title: 'Coronation Scene' }),
+    ]);
+    const adapter = createTimelineCanvasAdapter(
+      { current: makeContext({ sceneBeatFixture: fx }) },
+      'moment',
+    );
+    const { nodes } = adapter.projectGraph(g);
+    const sceneNode = nodes.find((n) => n.id === 'wt-scene:sc-1')!;
+
+    const inspector = adapter.renderInspector!(sceneNode);
+    expect(inspector).not.toBeNull();
+
+    const { container } = renderInApp(inspector as ReactElement);
+    // The read-only Moment inspector form surfaces...
+    expect(
+      container.querySelector('[data-testid="timeline-moment-inspector"]'),
+    ).not.toBeNull();
+    // ...and the generic KB editor (title + Save → kb.patch_entity) does NOT.
+    expect(
+      container.querySelector('[data-testid="timeline-inspector-title"]'),
+    ).toBeNull();
+    expect(
+      container.querySelector('[data-testid="timeline-inspector-save"]'),
+    ).toBeNull();
+    // Scene identity + chapter + manuscript anchor surface read-only.
+    expect(container.textContent).toContain('Coronation Scene');
+    expect(container.textContent).toContain('sc-1');
+    expect(container.textContent).toContain('5');
+    // No Edit-in-Outline CTA — the Work Timeline CTA would navigate to
+    // /works/<worldId>/outline (qc3 F-4 footgun: the node's `workId` field
+    // carries the World id on this surface).
+    expect(
+      container.querySelector(
+        '[data-testid="work-timeline-inspector-edit-in-outline"]',
+      ),
+    ).toBeNull();
+  });
+
+  it('beat node renders the read-only Moment inspector with beat-level fields', () => {
+    const g = graph();
+    const fx = fixture(
+      [scene({ sceneId: 'sc-1', chapterId: 7 })],
+      [beat({ beatId: 'bt-1', sceneId: 'sc-1', title: 'Hook Beat' })],
+    );
+    const adapter = createTimelineCanvasAdapter(
+      { current: makeContext({ sceneBeatFixture: fx }) },
+      'moment',
+    );
+    const { nodes } = adapter.projectGraph(g);
+    const beatNode = nodes.find((n) => n.id === 'wt-beat:bt-1')!;
+
+    const inspector = adapter.renderInspector!(beatNode);
+    expect(inspector).not.toBeNull();
+
+    const { container } = renderInApp(inspector as ReactElement);
+    expect(
+      container.querySelector('[data-testid="timeline-moment-inspector"]'),
+    ).not.toBeNull();
+    expect(container.textContent).toContain('Hook Beat');
+    expect(container.textContent).toContain('bt-1');
+    expect(container.textContent).toContain('sc-1');
+    expect(
+      container.querySelector('[data-testid="timeline-inspector-title"]'),
+    ).toBeNull();
+    expect(
+      container.querySelector('[data-testid="timeline-inspector-save"]'),
+    ).toBeNull();
+  });
+
+  it('Narrative event node still routes to the generic Timeline inspector (V1.122 regression)', () => {
+    // F1 dispatch is ADDITIVE — the Moment branch must not steal the
+    // entity path. A `timeline-event` node still renders the generic KB
+    // inspector (title + body JSON editor).
+    const g = graph();
+    const adapter = createTimelineCanvasAdapter(
+      { current: makeContext() },
+      'narrative',
+    );
+    const { nodes } = adapter.projectGraph(g);
+    const eventNode = nodes.find((n) => n.id === 'entity:kb-1')!;
+
+    const inspector = adapter.renderInspector!(eventNode);
+    expect(inspector).not.toBeNull();
+
+    const { container } = renderInApp(inspector as ReactElement);
+    expect(
+      container.querySelector('[data-testid="timeline-inspector-title"]'),
+    ).not.toBeNull();
+    expect(
+      container.querySelector('[data-testid="timeline-moment-inspector"]'),
+    ).toBeNull();
+  });
+});
+
+// ─── F2: alt-view survives Moment rows (no Kind-sort crash) ────────────────
+//
+// Fix-wave 1 (qc2 W-2): `compareNodes` case 'kind' called
+// `a.block_type.localeCompare` on Moment rows (`WorkTimelineNodeData` has no
+// `block_type`) → TypeError → React render crash of the accessible
+// non-spatial view. The wrapper now filters to KB-entity rows AND the sort
+// comparator is null-safe.
+
+describe('TimelineCanvasAdapter.renderAltView — Moment rows do not crash the table (F2 fix)', () => {
+  it('filters Moment rows out while entity rows still render; the Kind sort does not throw', () => {
+    const g = graph();
+    const fx = fixture([
+      scene({ sceneId: 'sc-1', chapterId: 1, title: 'Opening Scene' }),
+    ]);
+    const momentAdapter = createTimelineCanvasAdapter(
+      { current: makeContext({ sceneBeatFixture: fx }) },
+      'moment',
+    );
+    const momentNodes = momentAdapter.projectGraph(g)
+      .nodes as Node<TimelineNodeData>[];
+
+    const eventNode: Node<TimelineNodeData> = {
+      id: 'entity:kb-event-1',
+      type: 'timeline-event',
+      position: { x: 0, y: 0 },
+      data: {
+        ...entity({
+          key_block_id: 'kb-event-1',
+          block_type: 'event',
+          canonical_name: 'Coronation',
+        }),
+        layoutHint: 'event',
+      },
+    };
+
+    const ctxRef = {
+      current: makeContext({
+        nodes: [...momentNodes, eventNode],
+        selectedNodeId: null,
+        onSelectNode: vi.fn(),
+      }),
+    };
+    const adapter = createTimelineCanvasAdapter(ctxRef, 'moment');
+    const { container } = renderInApp(<>{adapter.renderAltView!()}</>);
+
+    // Moment rows (scene card + directed-axis-spine) are filtered out — only
+    // the KB entity row renders.
+    expect(container.textContent).toContain('Coronation');
+    expect(container.textContent).not.toContain('Opening Scene');
+
+    // Clicking the "Kind" column header must not throw on Moment data
+    // (regression: `block_type` undefined → `localeCompare` TypeError).
+    const kindHeader = container.querySelectorAll('thead button')[1];
+    expect(kindHeader).toBeDefined();
+    expect(() => fireEvent.click(kindHeader)).not.toThrow();
+    // The entity row survives the sort.
+    expect(container.textContent).toContain('Coronation');
+  });
+
+  it('renders the honest empty row when the layer projects only Moment nodes', () => {
+    const g = graph();
+    const fx = fixture([
+      scene({ sceneId: 'sc-1', chapterId: 1, title: 'Opening Scene' }),
+    ]);
+    const momentAdapter = createTimelineCanvasAdapter(
+      { current: makeContext({ sceneBeatFixture: fx }) },
+      'moment',
+    );
+    const momentNodes = momentAdapter.projectGraph(g)
+      .nodes as Node<TimelineNodeData>[];
+
+    const ctxRef = {
+      current: makeContext({
+        nodes: momentNodes,
+        selectedNodeId: null,
+        onSelectNode: vi.fn(),
+      }),
+    };
+    const adapter = createTimelineCanvasAdapter(ctxRef, 'moment');
+    const { container } = renderInApp(<>{adapter.renderAltView!()}</>);
+
+    // No KB-entity rows → honest empty copy, no crash (the previous
+    // behavior would render blank Moment rows that crashed on Kind sort).
+    expect(container.textContent).not.toContain('Opening Scene');
+    expect(container.querySelectorAll('tbody tr')).toHaveLength(1);
+    expect(() => fireEvent.click(container.querySelectorAll('thead button')[1])).not.toThrow();
+  });
+});
+
+// ─── F3: fixture identity change re-projects without a layer swap ──────────
+//
+// Fix-wave 1 (qc3 F-2): `sceneBeatFixture` was excluded from the adapter
+// memo deps (and read late via `ctxRef.current` AFTER the memo), so a
+// fixture identity change after mount left the Moment projection stale until
+// a layer swap / graph refetch. The adapter now captures the fixture and the
+// memo deps include the stable `EMPTY_SCENE_BEAT_FIXTURE`-backed reference.
+
+describe('TimelineCanvas — fixture identity change re-projects the Moment layer (F3 fix)', () => {
+  it('injecting a sceneBeatFixture after mount removes the Moment empty-state without a layer swap', async () => {
+    const g = graph({
+      entities: [
+        entity({
+          key_block_id: 'kb-era-1',
+          block_type: 'era',
+          canonical_name: 'The First Age',
+        }),
+      ],
+    });
+
+    function FixtureSwapHarness() {
+      const [fx, setFx] = useState<SceneBeatFixturePayload | undefined>(
+        undefined,
+      );
+      return (
+        <>
+          <button
+            type="button"
+            onClick={() =>
+              setFx(
+                fixture([
+                  scene({
+                    sceneId: 'sc-1',
+                    chapterId: 1,
+                    title: 'Opening',
+                  }),
+                ]),
+              )
+            }
+          >
+            inject-fixture
+          </button>
+          <TimelineCanvas worldId="world-7" sceneBeatFixture={fx} />
+        </>
+      );
+    }
+
+    renderInApp(<FixtureSwapHarness />, {
+      client: makeTimelineCanvasMockClient(g),
+      initialRouterEntries: ['/worlds/world-7/timeline?layer=moment'],
+    });
+
+    // No fixture → honest Moment empty-state panel (zero projected nodes).
+    await waitFor(() => {
+      expect(
+        screen.getByTestId('timeline-moment-empty-state'),
+      ).toBeInTheDocument();
+    });
+
+    // Fixture identity change → adapter rebuilt (memo deps include the
+    // fixture) → re-projection → nodes exist → the empty-state panel
+    // disappears. No layer swap, no graph refetch.
+    fireEvent.click(screen.getByText('inject-fixture'));
+    await waitFor(() => {
+      expect(
+        screen.queryByTestId('timeline-moment-empty-state'),
+      ).toBeNull();
+    });
   });
 });

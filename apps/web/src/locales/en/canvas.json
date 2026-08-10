@@ -671,6 +671,22 @@
         "title": "No scene or beat data yet",
         "message": "Scene-precision is available when bound Works have scene/beat data in their Outline. Add scenes and beats to a bound Work, or switch to Narrative for events.",
         "cta": "Switch to Narrative"
+      },
+      "inspector": {
+        "aria": "World Timeline Moment inspector for {{name}}",
+        "sceneDescription": "Scene-level manuscript anchor on the Moment layer. Moments are owned by bound Works; edits route through the Outline surface.",
+        "beatDescription": "Beat pin inside a scene. Moments are owned by bound Works; edits route through the Outline surface.",
+        "unnamedScene": "(untitled scene)",
+        "unnamedBeat": "(untitled beat)",
+        "readOnly": "Read-only — Moments are owned by bound Works.",
+        "manuscriptAnchor": "Manuscript anchor",
+        "noManuscriptAnchor": "No manuscript anchor",
+        "fields": {
+          "sceneId": "Scene id",
+          "beatId": "Beat id",
+          "chapter": "Chapter",
+          "status": "Status"
+        }
       }
     },
     "inspector": {

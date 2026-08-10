@@ -31,9 +31,11 @@
  *   - No Fork marker nodes (Fork data renders as optional header chrome in T3).
  *
  * V1.123 layer model: `projectGraphForLayer(graph, 'brief' | 'narrative')`
- * selects the active layer. The default `projectGraph(graph)` delegates to
- * the adapter's active layer, which defaults to `'narrative'` for V1.122
- * backward compatibility (Task 3 wires Brief-default-on-World-entry).
+ * selects the active layer; V1.156 P1 T1 extends the layer union with
+ * `'moment'` (World Timeline Moment — see `TimelineLayer`). The default
+ * `projectGraph(graph)` delegates to the adapter's active layer, which
+ * defaults to `'narrative'` for V1.122 backward compatibility (Task 3 wires
+ * Brief-default-on-World-entry).
  *
  * Write boundary (T4 — architect-locked §4): the Timeline surface edits
  * World-scoped KeyBlock entities through `NexusClient.worldKbPatchEntity`
@@ -87,6 +89,7 @@ import { workTimelineNodeTypes } from '../work-timeline-canvas/work-timeline-nod
 import { TimelineInspector } from './timeline-inspector';
 import { TimelineComputeInspector } from './timeline-compute-inspector';
 import { TimelineBriefEraInspector } from './timeline-brief-era-inspector';
+import { renderTimelineMomentInspector } from './timeline-moment-inspector';
 import { TimelineAltView } from './timeline-alt-view';
 import type { BriefSpineConfig, DirectedAxisSpineNodeData, MomentSpineConfig, NarrativeSpineConfig } from './directed-axis-spine';
 import { SPINE_Y_OFFSET } from './directed-axis-spine';
@@ -403,6 +406,12 @@ export interface TimelineCanvasAdapterContext {
    * projection call site. When undefined or empty, the Moment layer emits
    * honest empty-state (zero nodes). Mirrors the Work Timeline adapter's
    * `sceneBeatFixture` slot. DR-26 tracks the future wire extension.
+   *
+   * V1.156 P1 fix-wave 1 (F3) — the adapter factory's captured
+   * `sceneBeatFixture` parameter takes precedence over this slot at
+   * projection time (the orchestrator passes the fixture through the memo
+   * deps so identity changes re-project); this slot remains as the
+   * fallback for direct ctxRef wiring (tests / legacy callers).
    */
   sceneBeatFixture?: SceneBeatFixturePayload;
 }
@@ -929,6 +938,15 @@ function entityToTimelineNodeData(
  * entity's `world_id` is the stable source. Empty string only when the
  * graph is entity-less AND a fixture is present (test-only degenerate case;
  * the node components do not read `workId` for rendering).
+ *
+ * Semantic caveat (qc3 F-4 / qc2 M-1): the returned WORLD id is stored into
+ * `WorkTimelineNodeData.workId`, whose documented meaning is "Work id the
+ * node belongs to" — a known mismatch on the World surface (a World-Moment
+ * node can't name one Work). No current consumer reads `workId` on Moment
+ * nodes (the node components + the World Moment inspector render without
+ * it, and the inspector deliberately renders NO Edit-in-Outline CTA that
+ * would navigate to `/works/<worldId>/outline`). DR-26 multi-Work
+ * aggregation must carry real per-node Work attribution.
  */
 function worldIdOf(graph: TimelineGraph): string {
   return graph.entities?.[0]?.world_id ?? '';
@@ -1544,6 +1562,7 @@ export function createTimelineCanvasAdapter(
   activeLayer: TimelineLayer = 'narrative',
   timelineEvents?: TimelineEventInfo[],
   computeModuleNames?: ReadonlyMap<string, string>,
+  sceneBeatFixture?: SceneBeatFixturePayload,
 ): TimelineCanvasAdapter {
   return {
     surfaceKind: 'timeline',
@@ -1592,14 +1611,24 @@ export function createTimelineCanvasAdapter(
       // display names from the registry map (module_id fallback).
       //
       // V1.156 P1 T1 — the Moment projection reads the bound-Works
-      // Scene/Beat fixture from `ctxRef.current.sceneBeatFixture`
-      // (fixture-driven read-projection; honest empty-state when absent).
+      // Scene/Beat fixture (fixture-driven read-projection; honest
+      // empty-state when absent).
+      //
+      // V1.156 P1 fix-wave 1 (F3) — the fixture is CAPTURED at factory
+      // creation (like `activeLayer` + `timelineEvents`) so the
+      // orchestrator's adapter memo deps can include it: a fixture identity
+      // change recreates the adapter and re-projects deterministically on
+      // the same render. (Reading only via `ctxRef.current` left the
+      // projection stale — the ctxRef assignment runs AFTER the adapter
+      // memo, so a deps-only change would re-project with the previous
+      // render's fixture.) The ctxRef slot remains as a fallback for direct
+      // ctxRef wiring (tests / legacy callers); the captured value wins.
       return projectTimelineGraph(
         graph,
         activeLayer,
         timelineEvents,
         computeModuleNames,
-        ctxRef.current.sceneBeatFixture,
+        sceneBeatFixture ?? ctxRef.current.sceneBeatFixture,
       );
     },
 
@@ -1630,6 +1659,21 @@ export function createTimelineCanvasAdapter(
       // the `kb.patch_entity` write path is KB-only.
       if (data.layoutHint === 'compute') {
         return <TimelineComputeInspector node={node} ctxRef={ctxRef} />;
+      }
+      // V1.156 P1 fix-wave 1 (F1) — Moment scene/beat nodes carry the
+      // `WorkTimelineNodeData` carrier (`nodeKind: 'scene' | 'beat'`, no
+      // `layoutHint`, no `key_block_id`). They MUST NOT reach the generic
+      // KB `TimelineInspector` below: its Save fires `kb.patch_entity` from
+      // `node.data.key_block_id` — absent on Moment nodes → `entity_id:
+      // undefined`, a guaranteed-failing write request on a read/projection
+      // layer (PD-3 violation). Dispatch to the read-only Moment inspector
+      // instead (layer-feel parity with Work-Moment — both selectable, both
+      // read-only inspector).
+      const momentData = node.data as unknown as WorkTimelineNodeData;
+      if (momentData.nodeKind === 'scene' || momentData.nodeKind === 'beat') {
+        return renderTimelineMomentInspector(
+          node as unknown as Node<WorkTimelineNodeData>,
+        );
       }
       return <TimelineInspector node={node} ctxRef={ctxRef} />;
     },
@@ -1665,9 +1709,21 @@ function TimelineAltViewWrapper({
   ctxRef: MutableRefObject<TimelineCanvasAdapterContext>;
 }) {
   const ctx = ctxRef.current;
+  // V1.156 P1 fix-wave 1 (F2) — the alt-view is an entity table
+  // (`canonical_name` / `block_type` / `occurred_at` / anchor count /
+  // `updated_at` columns). Moment scene/beat nodes (the
+  // `WorkTimelineNodeData` carrier) and the decoration spine carry none of
+  // those fields; passing them through rendered blank rows and crashed the
+  // Kind sort (`block_type` undefined → `localeCompare` TypeError). Filter
+  // to KB-entity rows (nodes that carry a `block_type`) so the table stays
+  // functional for Brief/Narrative and honest on Moment (no non-entity
+  // rows, no row-click into the Moment inspector from the table).
+  const entityNodes = (ctx.nodes ?? []).filter(
+    (n) => typeof n.data.block_type === 'string',
+  );
   return (
     <TimelineAltView
-      nodes={ctx.nodes ?? []}
+      nodes={entityNodes}
       selectedNodeId={ctx.selectedNodeId ?? null}
       onSelectNode={(nodeId) => ctx.onSelectNode?.(nodeId)}
     />

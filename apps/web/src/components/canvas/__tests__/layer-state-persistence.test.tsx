@@ -190,6 +190,36 @@ describe('TimelineCanvas — layer-state persistence via URL ?layer= (P4 Task 6)
     );
   });
 
+  it('ignores invalid layer values (?layer=bogus) and falls back to the era-derived default', async () => {
+    // V1.156 spec §3.3.3: only 'brief' | 'narrative' | 'moment' are valid on
+    // the World Timeline. Unknown values must fall back to the era-derived
+    // default (era data present → Brief). This suite's old invalid-value
+    // test was repurposed into the moment-restore test above, unpinning the
+    // `urlLayerOverride` null-branch on World; the Work Timeline suite
+    // retains its own invalid-value test (`?layer=brief` → Narrative).
+    const graph: WorldKbGraphResponse = {
+      entities: [
+        eraEntity({
+          key_block_id: 'kb-era-1',
+          canonical_name: 'The First Age',
+        }),
+      ],
+      source_anchors: [],
+      relationships: [],
+    };
+    renderInApp(<TimelineCanvas worldId="world-ps" />, {
+      client: makeWorldMockClient(graph),
+      initialRouterEntries: ['/worlds/world-ps/timeline?layer=bogus'],
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('timeline-canvas')).toHaveAttribute(
+        'data-active-layer',
+        'brief',
+      );
+    });
+  });
+
   it('writes the active layer back to the URL when the user swaps layers', async () => {
     const graph: WorldKbGraphResponse = {
       entities: [

@@ -104,9 +104,12 @@ export interface TimelineCanvasProps {
    * READ/projection layer: scenes come from Works bound to this World, and
    * Moments remain Work-owned (no World Moment authoring flow).
    *
-   * The fixture is forwarded to the adapter context so the adapter's
-   * `projectTimelineGraph(graph, 'moment')` can read it at projection time
-   * (mirrors the Work Timeline orchestrator's `sceneBeatFixture` slot).
+   * The fixture is captured by the adapter factory (alongside the active
+   * layer) so the adapter memo deps include it — a fixture identity change
+   * re-projects the Moment layer without a layer swap. It is also forwarded
+   * to the adapter context as the `sceneBeatFixture` slot (mirrors the Work
+   * Timeline orchestrator's slot); the captured value takes precedence at
+   * projection time.
    */
   sceneBeatFixture?: SceneBeatFixturePayload;
 }
@@ -121,6 +124,14 @@ export interface TimelineCanvasProps {
  * honestly not rendered (the projection renders only what it fetched).
  */
 const TIMELINE_EVENTS_PROJECTION_CAP = 500;
+
+/**
+ * V1.156 P1 fix-wave 1 (F3) — stable empty fixture payload for Worlds with
+ * no injected scene/beat fixture. Module-level so the adapter memo deps stay
+ * referentially stable across re-renders — no new object identity per render
+ * (mirrors the Outline Canvas `EMPTY_SCENE_BEAT_FIXTURE` pattern).
+ */
+const EMPTY_SCENE_BEAT_FIXTURE: SceneBeatFixturePayload = { scenes: [], beats: [] };
 
 /**
  * Build the V1.73 `WorldKbPatchEntityRequest` envelope from the adapter's
@@ -478,9 +489,25 @@ export function TimelineCanvas({ worldId, sceneBeatFixture }: TimelineCanvasProp
   // the module-name map change (data-driven re-projection: `useCanvasSurface`
   // memoises on `[graph, adapter]`, so a new adapter identity re-runs the
   // Narrative merge with the fresh events).
+  //
+  // V1.156 P1 fix-wave 1 (F3) — the adapter ALSO captures the Moment
+  // scene/beat fixture (`fixture` — the stable module-level empty constant
+  // when the prop is absent, so real Worlds never churn the memo). A fixture
+  // identity change recreates the adapter and re-projects the Moment layer
+  // without a layer swap (previously the fixture was only read via
+  // `ctxRef.current` AFTER this memo, so the projection stayed stale until
+  // a layer swap / graph refetch).
+  const fixture = sceneBeatFixture ?? EMPTY_SCENE_BEAT_FIXTURE;
   const adapter = useMemo(
-    () => createTimelineCanvasAdapter(ctxRef, activeLayer, eventsList, computeModuleNames),
-    [activeLayer, eventsList, computeModuleNames],
+    () =>
+      createTimelineCanvasAdapter(
+        ctxRef,
+        activeLayer,
+        eventsList,
+        computeModuleNames,
+        fixture,
+      ),
+    [activeLayer, eventsList, computeModuleNames, fixture],
   );
 
   const surface = useCanvasSurface(adapter, surfaceQuery);
