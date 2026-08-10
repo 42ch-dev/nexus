@@ -359,7 +359,7 @@ describe('CommandPalette — locale switching', () => {
     });
 
     renderPalette();
-    expect(screen.getByRole('option')).toHaveTextContent('Go to Strategies');
+    expect(screen.getByRole('option')).toHaveTextContent('Go to Harness');
 
     act(() => {
       i18n.changeLanguage('zh-CN');
@@ -367,7 +367,7 @@ describe('CommandPalette — locale switching', () => {
 
     // Palette is still open, option text is now Chinese, component was not remounted.
     expect(screen.getByRole('dialog')).toBeInTheDocument();
-    expect(screen.getByRole('option')).toHaveTextContent('前往策略');
+    expect(screen.getByRole('option')).toHaveTextContent('前往 Harness');
 
     // Restore English for subsequent tests.
     act(() => {

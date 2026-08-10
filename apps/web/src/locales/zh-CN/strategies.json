@@ -1,5 +1,5 @@
 {
-  "title": "策略",
+  "title": "Harness",
   "description": "在运行预设前进行验证 —  dry-run 是确认其已就绪的最安全方式。",
   "validatePreset": "验证",
   "scaffoldPreset": "生成",
@@ -29,11 +29,11 @@
   "delete": "删除",
   "deleteAria": "删除预设 {{name}}",
   "strategyDetail": {
-    "loading": "正在加载策略…",
+    "loading": "正在加载 Harness…",
     "back": "返回",
-    "notFoundTitle": "策略未找到",
-    "notFoundDescription": "请从策略列表中选择一个策略。",
-    "title": "策略",
+    "notFoundTitle": "未找到预设",
+    "notFoundDescription": "请从 Harness 列表中选择一个预设。",
+    "title": "预设",
     "description": "将预设视为状态机图，并用 Idea 引导执行。Nexus 拥有正文。"
   },
   "deleteConfirm": {

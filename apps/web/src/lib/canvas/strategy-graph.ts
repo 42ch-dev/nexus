@@ -11,7 +11,7 @@
  *   • conditional `next.rules[].to`    → branch edges; `next.default` → default edge
  *   • `inner_graphs.<n>.depends_on`    → depends_on edges inside the group
  *
- * UI label is **Strategy**; persisted identifiers remain `preset`/runtime names
+ * UI label is **Harness** (V1.156 PD-4); persisted identifiers remain `preset`/runtime names
  * (Draft §4.2 — no CLI/schema rename in V1.70). This adapter is a read
  * projection only — `wire_contracts_changed: FALSE`.
  *
