@@ -4,7 +4,7 @@
  * The Work detail action row must expose canvas entry points alongside the
  * existing **Open World KB** link:
  *   - **Open Outline** → `/works/:workId/outline` (always, Work exists)
- *   - **Open Strategy** → `/strategies/:presetId` (gated by `primary_preset_id`)
+ *   - **Open Harness** → `/strategies/:presetId` (gated by `primary_preset_id`)
  *   - **Open World KB** → `/worlds/:worldId/kb` (gated by `world_id`, existing)
  *
  * CTAs render as `Button asChild` + `Link`, so the anchor `href` is the routing
@@ -82,7 +82,7 @@ describe('WorkDetailPage canvas CTAs (V1.108 FB-UI-009)', () => {
     expect(outline).toHaveAttribute('href', '/works/w-123/outline');
   });
 
-  it('renders Open Strategy linking to /strategies/:presetId when primary_preset_id is set', async () => {
+  it('renders Open Harness linking to /strategies/:presetId when primary_preset_id is set', async () => {
     useHandlers(
       workDetailFixture('w-123', {
         title: 'Canvas Work',
@@ -94,11 +94,11 @@ describe('WorkDetailPage canvas CTAs (V1.108 FB-UI-009)', () => {
 
     renderWorkDetail();
 
-    const strategy = await screen.findByRole('link', { name: /Open Strategy/i });
+    const strategy = await screen.findByRole('link', { name: /Open Harness/i });
     expect(strategy).toHaveAttribute('href', '/strategies/preset-abc');
   });
 
-  it('hides Open Strategy when primary_preset_id is absent', async () => {
+  it('hides Open Harness when primary_preset_id is absent', async () => {
     // Empty string = no preset bound (WorkDetailResponse types it as required
     // string, so "" is the "not set" sentinel at runtime).
     useHandlers(
@@ -114,7 +114,7 @@ describe('WorkDetailPage canvas CTAs (V1.108 FB-UI-009)', () => {
 
     // Wait for the page to settle on a CTA that always renders.
     expect(await screen.findByRole('link', { name: /Open Outline/i })).toBeInTheDocument();
-    expect(screen.queryByRole('link', { name: /Open Strategy/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /Open Harness/i })).not.toBeInTheDocument();
   });
 
   it('retains Open World KB linking to /worlds/:worldId/kb when world_id is set', async () => {

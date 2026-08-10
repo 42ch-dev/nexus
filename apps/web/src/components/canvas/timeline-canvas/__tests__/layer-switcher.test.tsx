@@ -36,7 +36,7 @@
  * client mock intercepts before HTTP.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, screen, waitFor } from '@testing-library/react';
+import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 
 import { renderInApp } from '@/test/test-providers';
 import type { NexusClient } from '@/lib/nexus';
@@ -389,5 +389,328 @@ describe('TimelineCanvas — layer swap does not trigger forbidden writes (T3 ne
     expect(
       screen.queryByTestId('nle-timeline-clip-detach-ev-1'),
     ).not.toBeInTheDocument();
+  });
+});
+
+// ─── V1.156 P1 T2 — 3-way layer switcher (Brief | Narrative | Moment) ───────
+
+describe('TimelineCanvas — 3-way layer switcher Moment tab (V1.156 P1 T2)', () => {
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('renders the Moment layer tab alongside Brief + Narrative (3-way segmented control)', async () => {
+    // Spec §3.3.3 (V1.156 amendment): the World Timeline renders all three
+    // layers — Brief | Narrative | Moment (3×2 matrix completion). The
+    // existing two tabs remain; Moment is additive.
+    const graph: WorldKbGraphResponse = {
+      entities: [
+        eraEntity({
+          key_block_id: 'kb-era-1',
+          canonical_name: 'The First Age',
+        }),
+        entity({
+          key_block_id: 'kb-event-1',
+          block_type: 'event',
+          canonical_name: 'Coronation',
+        }),
+      ],
+      source_anchors: [],
+      relationships: [],
+    };
+    renderInApp(<TimelineCanvas worldId="world-7" />, {
+      client: makeMockClient(graph),
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('timeline-canvas')).toBeInTheDocument();
+    });
+
+    expect(screen.getByTestId('timeline-layer-tab-brief')).toBeInTheDocument();
+    expect(screen.getByTestId('timeline-layer-tab-narrative')).toBeInTheDocument();
+    expect(screen.getByTestId('timeline-layer-tab-moment')).toBeInTheDocument();
+  });
+
+  it('never defaults to the Moment layer (read-only projection — one click away)', async () => {
+    // Spec §3.3.3: "Moment is never the default (read-only projection; one
+    // click away)." With era data the default is Brief; the Moment tab
+    // starts unpressed in both default regimes.
+    const graph: WorldKbGraphResponse = {
+      entities: [
+        eraEntity({
+          key_block_id: 'kb-era-1',
+          canonical_name: 'The First Age',
+        }),
+      ],
+      source_anchors: [],
+      relationships: [],
+    };
+    renderInApp(<TimelineCanvas worldId="world-7" />, {
+      client: makeMockClient(graph),
+    });
+
+    const canvas = await screen.findByTestId('timeline-canvas');
+
+    expect(canvas).toHaveAttribute('data-active-layer', 'brief');
+    expect(screen.getByTestId('timeline-layer-tab-moment')).toHaveAttribute(
+      'aria-pressed',
+      'false',
+    );
+  });
+
+  it('clicking the Moment tab switches active layer to Moment (Brief → Moment)', async () => {
+    const graph: WorldKbGraphResponse = {
+      entities: [
+        eraEntity({
+          key_block_id: 'kb-era-1',
+          canonical_name: 'The First Age',
+        }),
+        entity({
+          key_block_id: 'kb-event-1',
+          block_type: 'event',
+          canonical_name: 'Coronation',
+        }),
+      ],
+      source_anchors: [],
+      relationships: [],
+    };
+    renderInApp(<TimelineCanvas worldId="world-7" />, {
+      client: makeMockClient(graph),
+    });
+
+    const canvas = await screen.findByTestId('timeline-canvas');
+
+    // Default = Brief (era data exists).
+    await waitFor(() => {
+      expect(canvas).toHaveAttribute('data-active-layer', 'brief');
+    });
+
+    fireEvent.click(screen.getByTestId('timeline-layer-tab-moment'));
+
+    await waitFor(() => {
+      expect(canvas).toHaveAttribute('data-active-layer', 'moment');
+    });
+    expect(screen.getByTestId('timeline-layer-tab-moment')).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    // The two original tabs are unpressed — additive 3-way swap, no
+    // regression of the Brief/Narrative pressed-state semantics.
+    expect(screen.getByTestId('timeline-layer-tab-brief')).toHaveAttribute(
+      'aria-pressed',
+      'false',
+    );
+    expect(screen.getByTestId('timeline-layer-tab-narrative')).toHaveAttribute(
+      'aria-pressed',
+      'false',
+    );
+  });
+
+  it('round-trips Brief → Narrative → Moment → Narrative → Brief without regression', async () => {
+    // Full 3-way cycle. The existing 2-way semantics (T3) must survive the
+    // additive third tab — the switcher stays a single active-layer
+    // discriminator.
+    const graph: WorldKbGraphResponse = {
+      entities: [
+        eraEntity({
+          key_block_id: 'kb-era-1',
+          canonical_name: 'The First Age',
+        }),
+        entity({
+          key_block_id: 'kb-event-1',
+          block_type: 'event',
+          canonical_name: 'Coronation',
+        }),
+      ],
+      source_anchors: [],
+      relationships: [],
+    };
+    renderInApp(<TimelineCanvas worldId="world-7" />, {
+      client: makeMockClient(graph),
+    });
+
+    const canvas = await screen.findByTestId('timeline-canvas');
+
+    await waitFor(() => {
+      expect(canvas).toHaveAttribute('data-active-layer', 'brief');
+    });
+
+    fireEvent.click(screen.getByTestId('timeline-layer-tab-narrative'));
+    await waitFor(() => {
+      expect(canvas).toHaveAttribute('data-active-layer', 'narrative');
+    });
+
+    fireEvent.click(screen.getByTestId('timeline-layer-tab-moment'));
+    await waitFor(() => {
+      expect(canvas).toHaveAttribute('data-active-layer', 'moment');
+    });
+
+    fireEvent.click(screen.getByTestId('timeline-layer-tab-narrative'));
+    await waitFor(() => {
+      expect(canvas).toHaveAttribute('data-active-layer', 'narrative');
+    });
+
+    fireEvent.click(screen.getByTestId('timeline-layer-tab-brief'));
+    await waitFor(() => {
+      expect(canvas).toHaveAttribute('data-active-layer', 'brief');
+    });
+    expect(screen.getByTestId('timeline-layer-tab-brief')).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+  });
+
+  it('hides the Moment layer tab from the empty-state branch (zero entities)', async () => {
+    // Same gate as the existing Brief/Narrative tabs: the empty-state
+    // branch owns the surface and the switcher is hidden entirely.
+    const graph: WorldKbGraphResponse = {
+      entities: [],
+      source_anchors: [],
+      relationships: [],
+    };
+    renderInApp(<TimelineCanvas worldId="world-7" />, {
+      client: makeMockClient(graph),
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('timeline-canvas')).toBeInTheDocument();
+    });
+
+    expect(screen.queryByTestId('timeline-layer-tab-moment')).toBeNull();
+    expect(screen.queryByTestId('timeline-layer-tab-brief')).toBeNull();
+    expect(screen.queryByTestId('timeline-layer-tab-narrative')).toBeNull();
+  });
+
+  it('does NOT trigger any forbidden write endpoint when swapping into Moment (read-only layer)', async () => {
+    // PD-3: World Timeline Moment is a READ/projection layer — no
+    // World-owned Moment write flow. The swap into Moment must leave every
+    // write endpoint untouched (mirrors the T3 negative pattern).
+    const graph: WorldKbGraphResponse = {
+      entities: [
+        eraEntity({
+          key_block_id: 'kb-era-1',
+          canonical_name: 'The First Age',
+        }),
+        entity({
+          key_block_id: 'kb-event-1',
+          block_type: 'event',
+          canonical_name: 'Coronation',
+        }),
+      ],
+      source_anchors: [],
+      relationships: [],
+    };
+    const client = makeMockClient(graph);
+
+    renderInApp(<TimelineCanvas worldId="world-7" />, { client });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('timeline-canvas')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('timeline-layer-tab-moment'));
+    await waitFor(() => {
+      expect(screen.getByTestId('timeline-layer-tab-moment')).toHaveAttribute(
+        'aria-pressed',
+        'true',
+      );
+    });
+
+    expect(client.worldKbPatchEntity).not.toHaveBeenCalled();
+    expect(client.worldKbPatchRelationship).not.toHaveBeenCalled();
+    expect(client.worldKbPromoteCandidate).not.toHaveBeenCalled();
+    expect(client.patchTimelineEvent).not.toHaveBeenCalled();
+  });
+});
+
+// ─── V1.156 P1 T2 — 3-way switcher a11y (keyboard + SR semantics) ──────────
+
+describe('TimelineCanvas — 3-way layer switcher a11y (V1.156 P1 T2)', () => {
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('wraps the three tabs in a labelled role="group" (SR summary)', async () => {
+    // The 2-way→3-way change must preserve the segmented-control group
+    // semantics: `role="group"` + i18n aria-label so SR users can navigate
+    // to the switcher by name (WCAG 2.1 — the switcher is a labelled
+    // toggle-button group).
+    const graph: WorldKbGraphResponse = {
+      entities: [
+        eraEntity({
+          key_block_id: 'kb-era-1',
+          canonical_name: 'The First Age',
+        }),
+      ],
+      source_anchors: [],
+      relationships: [],
+    };
+    renderInApp(<TimelineCanvas worldId="world-7" />, {
+      client: makeMockClient(graph),
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('timeline-canvas')).toBeInTheDocument();
+    });
+
+    const group = screen.getByRole('group', { name: 'Timeline layer' });
+    expect(group).toBeInTheDocument();
+    // The group contains exactly the three layer tabs.
+    expect(within(group).getByTestId('timeline-layer-tab-brief')).toBeInTheDocument();
+    expect(within(group).getByTestId('timeline-layer-tab-narrative')).toBeInTheDocument();
+    expect(within(group).getByTestId('timeline-layer-tab-moment')).toBeInTheDocument();
+  });
+
+  it('keeps every tab a native focusable button with aria-pressed toggle state', async () => {
+    // Segmented-control keyboard contract: each tab is a real <button>
+    // (Tab to focus, Enter/Space to activate — platform-native keyboard
+    // navigation) and carries `aria-pressed` so SR users hear the active
+    // layer as a toggle state. The Moment tab must participate exactly like
+    // the two original tabs.
+    const graph: WorldKbGraphResponse = {
+      entities: [
+        eraEntity({
+          key_block_id: 'kb-era-1',
+          canonical_name: 'The First Age',
+        }),
+      ],
+      source_anchors: [],
+      relationships: [],
+    };
+    renderInApp(<TimelineCanvas worldId="world-7" />, {
+      client: makeMockClient(graph),
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('timeline-canvas')).toBeInTheDocument();
+    });
+
+    const briefTab = screen.getByTestId('timeline-layer-tab-brief');
+    const narrativeTab = screen.getByTestId('timeline-layer-tab-narrative');
+    const momentTab = screen.getByTestId('timeline-layer-tab-moment');
+
+    for (const tab of [briefTab, narrativeTab, momentTab]) {
+      expect(tab.tagName).toBe('BUTTON');
+      expect(tab).toHaveAttribute('type', 'button');
+    }
+
+    // The Moment tab is keyboard-focusable (native button) and reports the
+    // pressed state.
+    momentTab.focus();
+    expect(momentTab).toHaveFocus();
+    expect(momentTab).toHaveAttribute('aria-pressed', 'false');
+
+    // Activating it flips the pressed state (SR toggle announcement) and the
+    // active layer.
+    fireEvent.click(momentTab);
+    await waitFor(() => {
+      expect(momentTab).toHaveAttribute('aria-pressed', 'true');
+    });
+    expect(screen.getByTestId('timeline-canvas')).toHaveAttribute(
+      'data-active-layer',
+      'moment',
+    );
+    // The previously-pressed Brief tab reports unpressed.
+    expect(briefTab).toHaveAttribute('aria-pressed', 'false');
   });
 });

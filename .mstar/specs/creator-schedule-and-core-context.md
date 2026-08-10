@@ -56,7 +56,7 @@ From the 2026-04-17 brainstorming and its follow-up (item 3 of the 2026-04-17 PM
 - **In-flight input edits are accepted but do not preempt the current execution** — a user `schedule edit <id>` writes a new `core_context` version; the running `Session` finishes the **current state's enter actions + exit evaluation** on the previous version and picks up the new version at the **next state transition**. This preserves the "core_context is stable during execution" guarantee while honouring user intent on the next cycle.
 - **`core_context` is immutable-versioned** — every derivation step produces a new `core_context_version` row; the Schedule holds a pointer to the current version; history is user-queryable.
 - **`iterated_experience` in V1.4 is "preset `context_update` hook only"** (Q1=D answer, 2026-04-17) — the derivation trace enum **reserves** `kind: "llm_summarize"` but V1.4 does not emit that kind; **V1.5 implemented** a `context.summarize` capability (`crates/nexus-orchestration/src/capability/builtins/context_summarize.rs`) that writes this kind without schema migration.
-- **Seed → first `core_context` semantics governed by preset** (Q2=C answer, 2026-04-17) — preset YAML declares the initial-action behaviour; V1.4 built-in presets default to "seed content becomes `core_context` v0 verbatim"; a future preset may declare a one-shot LLM expansion step and the engine will execute it.
+- **Seed → first `core_context` semantics governed by preset** (Q2=C answer, 2026-04-17) — preset YAML declares the initial-action behaviour; V1.4 built-in presets default to "seed content becomes `core_context` v0 verbatim"; a future preset may declare a one-shot LLM expansion step and the engine will execute it. **Durable roadmap:** [deferred-features tracker §2.6](../knowledge/deferred-features-cross-version-tracker.md) — DR-17.
 - **Trigger model**: V1.4 supported on-demand triggers (`schedule start`, auto-advance, `timer.wait_until`). **V1.5 WS-D added wall-clock / cron triggers** via a hand-rolled clock poller in `crates/nexus-orchestration/src/scheduler/` using `cron` + `chrono-tz` (see [`crate-selection-best-practices.md`](crate-selection-best-practices.md) §2.7 for the four hard constraints this implementation satisfies).
 - **Schedule and core_context types are local** — per [schemas-external-consumer-boundary.md](../knowledge/schemas-external-consumer-boundary.md) §2, platform never observes these; they live as hand-coded Rust in `crates/nexus-contracts/src/local/schedule/` (or the appropriate local submodule).
 - **Auto-chain side-input (V1.39)** — inspiration append (`creator run continue --note`, agent `nexus.work.patch`) and research KB writes during an active FL-E driver schedule produce new `core_context` versions or external KB artifacts but **must not** create a second active stage driver or cancel the current one. The running session completes the current state on the prior snapshot; enriched context is visible at the **next** state transition. See [creator-workflow.md](creator-workflow.md) §5.5.
@@ -542,13 +542,17 @@ Follows the V1.4 delivery compass WS7 ordering.
 
 Still V1.5+. If users want two different ACP agents driving the same creator in parallel, V1.4 Schedule admission can describe the intent (`ParallelAny` with different preset agents), but the worker model can't execute it. V1.5 either multiplexes one worker or spawns sibling workers.
 
+> **Durable roadmap:** consolidated in the [deferred-features tracker §2.6](../knowledge/deferred-features-cross-version-tracker.md) — DR-09 (multi-agent per creator).
+
 ### OQ-8 — User-authored capabilities
 
 Still V1.5+. Schedule-level policy (who can author a preset that invokes a capability the daemon doesn't ship?) is out of scope for V1.4; the built-in registry is the only source of capabilities in V1.4.
 
+> **Durable roadmap:** consolidated in the [deferred-features tracker §2.6](../knowledge/deferred-features-cross-version-tracker.md) — DR-10 (user-authored capabilities).
+
 ### OQ-6-extension — Cron / wall-clock triggers
 
-V1.4 reserves the `scheduled_at` column; V1.5 adds a clock poller that moves `Pending` Schedules to `Running` when `now() >= scheduled_at` (subject to admission rules). Zero schema migration required.
+V1.4 reserves the `scheduled_at` column; V1.5 adds a clock poller that moves `Pending` Schedules to `Running` when `now() >= scheduled_at` (subject to admission rules). Zero schema migration required. **(Shipped V1.5 WS-D — clock poller.)**
 
 ### OQ-S2 from schemas-boundary-v1 §9 — Schedule schema evolution policy
 

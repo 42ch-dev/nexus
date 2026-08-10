@@ -2,7 +2,7 @@
  * Strategy detail — route entry for the Canvas Strategy Surface (α).
  *
  * Renders the selected preset as a state-machine graph via {@link StrategyCanvas}.
- * UI label is "Strategy"; persisted identifiers remain "preset" (Draft §4.2).
+ * UI label is "Harness" (V1.156 PD-4); persisted identifiers remain "preset" (Draft §4.2).
  *
  * Route-split: this page (and therefore `@xyflow/react`) is lazy-loaded by
  * `App.tsx` so React Flow never enters the Control Room bootstrap chunk

@@ -187,14 +187,14 @@
     }
   },
   "strategy": {
-    "loading": "加载策略中…",
-    "loadError": "加载策略失败。",
-    "loadErrorTitle": "无法加载策略",
+    "loading": "加载 Harness 中…",
+    "loadError": "加载 Harness 失败。",
+    "loadErrorTitle": "无法加载 Harness",
     "engineUnavailableTitle": "编排引擎未运行",
     "engineUnavailableDescription": "请启动守护进程编排引擎后重试。",
-    "graphAriaLabel": "策略空间图谱",
+    "graphAriaLabel": "Harness 空间图谱",
     "header": {
-      "title": "策略",
+      "title": "预设",
       "description": "状态机与转换编辑器",
       "showGraph": "显示图谱",
       "showList": "显示列表",
@@ -224,9 +224,9 @@
       "currentExecutionNode": "当前执行节点"
     },
     "toast": {
-      "runQueued": "策略运行已排队",
-      "ideaSent": "想法已发送至策略",
-      "resumed": "策略已恢复"
+      "runQueued": "预设运行已排队",
+      "ideaSent": "想法已发送至预设",
+      "resumed": "预设已恢复"
     },
     "draftTransitionLabel": "草稿转换",
     "draftTransitionEditor": "草稿转换编辑器",
@@ -239,7 +239,7 @@
       "dangling": "悬空转换：{{target}}"
     },
     "altView": {
-      "ariaLabel": "按列表顺序显示策略状态与转换",
+      "ariaLabel": "按列表顺序显示 Harness 状态与转换",
       "statesTitle": "状态",
       "transitionsTitle": "转换",
       "innerGraph": "内部：{{id}}",
@@ -259,7 +259,7 @@
     },
     "artifacts": {
       "title": "产物",
-      "ariaLabel": "策略产物",
+      "ariaLabel": "Harness 产物",
       "empty": "暂无产物。"
     },
     "edgeCreate": {
@@ -284,7 +284,7 @@
       "draftAriaLabel": "从 {{source}} 到 {{target}} 的草稿转换"
     },
     "inspector": {
-      "ariaLabel": "策略检查器",
+      "ariaLabel": "Harness 检查器",
       "state": {
         "title": "状态",
         "ariaLabel": "状态检查器",
@@ -332,7 +332,7 @@
   },
   "conflict": {
     "strategy": {
-      "title": "策略冲突"
+      "title": "Harness 冲突"
     },
     "fields": {
       "label": "标签",
@@ -635,14 +635,15 @@
       "description": "世界的 when 轴。切换到世界知识库以编辑实体。",
       "peerNavAria": "同级面板",
       "worldKbLink": "世界知识库",
-      "strategyLink": "策略",
+      "strategyLink": "Harness",
       "showGraph": "显示图形",
       "showList": "显示列表视图"
     },
     "layerSwitcher": {
       "ariaLabel": "时间轴图层",
       "brief": "概览",
-      "narrative": "叙事"
+      "narrative": "叙事",
+      "moment": "瞬间"
     },
     "breadcrumb": {
       "ariaLabel": "时间轴图层路径"
@@ -652,6 +653,29 @@
         "title": "尚无纪元标记",
         "message": "概览展示世界跨越时代的形态。切换到叙事以浏览事件，或在概览载体就绪后添加纪元标记。",
         "cta": "切换到叙事"
+      }
+    },
+    "moment": {
+      "emptyState": {
+        "title": "尚无场景或节拍数据",
+        "message": "当绑定的作品在其大纲中拥有场景/节拍数据时，此处即可呈现场景精度。请在绑定作品的大纲中添加场景与节拍，或切换到叙事查看事件。",
+        "cta": "切换到叙事"
+      },
+      "inspector": {
+        "aria": "{{name}} 的世界时间轴瞬间检查器",
+        "sceneDescription": "瞬间图层上的场景级稿件锚点。瞬间归绑定作品所有；编辑请通过大纲表面进行。",
+        "beatDescription": "场景内的节拍引脚。瞬间归绑定作品所有；编辑请通过大纲表面进行。",
+        "unnamedScene": "（未命名场景）",
+        "unnamedBeat": "（未命名节拍）",
+        "readOnly": "只读 — 瞬间归绑定作品所有。",
+        "manuscriptAnchor": "稿件锚点",
+        "noManuscriptAnchor": "无稿件锚点",
+        "fields": {
+          "sceneId": "场景 ID",
+          "beatId": "节拍 ID",
+          "chapter": "章节",
+          "status": "状态"
+        }
       }
     },
     "inspector": {
@@ -772,18 +796,42 @@
     },
     "header": {
       "title": "作品时间轴",
-      "description": "作品的叙事与瞬间。切换到大纲进行编辑。",
+      "description": "作品的时间轴，涵盖概览、叙事与瞬间三个图层。切换到大纲进行编辑。",
       "peerNavAria": "同级面板",
       "outlineLink": "大纲",
       "inspectorLink": "装配检查器"
     },
     "layerSwitcher": {
       "ariaLabel": "作品时间轴图层",
+      "brief": "概览",
       "narrative": "叙事",
       "moment": "瞬间"
     },
     "breadcrumb": {
       "ariaLabel": "作品时间轴图层路径"
+    },
+    "brief": {
+      "emptyState": {
+        "title": "尚无世界形态上下文",
+        "message": "当此作品绑定到拥有纪元标记的世界时，此处会显示世界形态上下文。概览是绑定世界概览的只读投影。",
+        "cta": "切换到叙事"
+      }
+    },
+    "briefEraNode": {
+      "span": "{{start}} → {{end}}",
+      "temporalUnknown": "纪元时间跨度未知"
+    },
+    "briefEraInspector": {
+      "title": "概览纪元",
+      "description": "来自绑定世界概览的世界形态纪元标记。只读 — 概览属于世界脊柱。",
+      "aria": "{{name}} 的概览纪元检查器",
+      "identityAria": "纪元身份标记",
+      "readOnly": "只读 — 概览属于绑定世界。",
+      "field": {
+        "eraId": "纪元 ID",
+        "span": "时间跨度",
+        "worldSummary": "世界概述"
+      }
     },
     "narrativeEventNode": {
       "aria": "作品时间轴事件：{{name}}",
@@ -831,7 +879,8 @@
         "chapter": "章节",
         "description": "描述",
         "status": "状态"
-      }
+      },
+      "version": "v{{version}}"
     }
   },
   "globalTimeline": {

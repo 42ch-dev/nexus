@@ -13,10 +13,8 @@ applies_when: Extending a Canvas surface with multiple zoom layers (Brief/Narrat
 
 ## Context
 
-V1.123 (Three-Layer Timeline iteration) canonized Brief / Narrative / Moment as Timeline's three zoom layers and projected them onto **two distinct Canvas surfaces** with **domain-differentiated layer use**:
-
-- **World Timeline** (V1.122 peer surface, V1.123 deepened) — leads with **Brief + Narrative** layers
-- **Work Timeline** (V1.123 NEW peer surface) — leads with **Narrative + Moment** layers
+- **World Timeline** (V1.122 peer surface, V1.123 deepened) — **Brief + Narrative + Moment** layers (V1.156 completed the matrix; V1.123 shipped Brief+Narrative only)
+- **Work Timeline** (V1.123 NEW peer surface) — **Brief + Narrative + Moment** layers (V1.156 completed the matrix; V1.123 shipped Narrative+Moment only)
 
 The carrier choices are architect-locked per iteration (`iterations/v1.123/specs/three-layer-architecture.md`):
 
@@ -38,7 +36,7 @@ When extending a Canvas surface with multi-layer projection:
    - World Timeline: `'brief'` if `block_type=era` data exists, else `'narrative'` fallback
    - Work Timeline: `'narrative'` unconditionally per UX-risk override (V1.72 wire has no scene/beat data today; Moment-default would surface persistent empty-state)
 
-4. **URL `?layer=` persistence.** Layer state survives surface switches via URL query (`?layer=brief|narrative|moment`). Invalid values for the surface are ignored (`moment` on World; `brief` on Work). Default layer drops the URL param so graph-driven defaults can track changes.
+4. **URL `?layer=` persistence.** Layer state survives surface switches via URL query (`?layer=brief|narrative|moment`). **V1.156 lifted the V1.123 surface-layer restriction** — all three layers are now valid on both surfaces (`moment` on World and `brief` on Work, previously ignored, are now valid as of V1.156 P1/P2). Default layer drops the URL param so graph-driven defaults can track changes. **Lesson (V1.156 P1 QC):** when lifting a layer restriction, add a test that an invalid `?layer=` value still falls back to default (don't repurpose the old invalid-test slot for the now-valid value — re-pin the null branch).
 
 5. **Per-layer layout options.** Each layer has its own dagre layout direction + spacing:
    - Brief: LR sweep (wide `rankSep` ~240, small `nodeSep` ~40) — world-shape-at-a-glance feel
@@ -67,9 +65,7 @@ The carrier choices (Brief-on-KnowledgeEntry, Moment-on-Outline) prove that **ad
 ## When to Apply
 
 - Adding a new Canvas surface that should project at multiple zoom layers
-- Extending an existing Canvas surface with a new layer (e.g., promoting DF-V1123-WORLD-MOMENT or DF-V1123-WORK-BRIEF in V1.124+)
-- Designing cross-surface navigation between layers (e.g., a Future surface that should link to a specific layer on another surface)
-- Migrating a wire-only data carrier to a wire+DTO carrier (e.g., DF-V1123-MOMENT-WIRE when V1.124+ adds scene/beat wire data)
+- Promoting DF-V1123-WORLD-MOMENT or DF-V1123-WORK-BRIEF (**shipped V1.156** — both matrix cells complete)
 
 ## Examples
 
@@ -102,8 +98,5 @@ The carrier choices (Brief-on-KnowledgeEntry, Moment-on-Outline) prove that **ad
 
 ## References
 
-- V1.123 architecture LOCK: `iterations/v1.123/specs/three-layer-architecture.md`
-- V1.123 layer feel contract: `iterations/v1.123/specs/layer-feel-differentiation.md` (also promoted to `knowledge/conventions/three-layer-timeline-feel.md`)
-- V1.122 surface extraction pattern: `knowledge/architecture-patterns/canvas-surface-extraction-pattern.md` (V1.123 extends with multi-layer)
-- V1.114 Canvas adapter recipe: `specs/canvas-strategy-surface.md` §3.3.1
-- Wire-contracts frozen verification: `knowledge/conventions/wire-contracts-frozen-verification.md`
+- **V1.156 3×2 matrix completion**: P1 (World×Moment) + P2 (Work×Brief) shipped, making all three layers valid on both surfaces. Both are frontend-only (`wire_contracts_changed:false`): World-Moment = read/projection of bound Works' `OutlineSceneNodeData`/`OutlineBeatNodeData` (fixture-driven; DR-26 tracks the WorkOutline wire extension to real scene/beat data); Work-Brief = projection of bound World's `block_type=era` entities via V1.73 `kb/graph`. Read-only inspectors (PD-3/PD-2 — no `kb.patch_entity` write path from projected-layer nodes). See V1.156 compass + product-locks (PD-2/PD-3).
+- **V1.156 QC carry-forward lesson**: P1's QC fix-wave (read-only inspector W-1, alt-view crash W-2, memo-deps F-3, invalid-layer test F-4) was baked into P2's brief proactively → P2 needed only one converged fix (graph-query status gate). See `knowledge/workflow-patterns/carry-qc-lessons-to-sibling-plan.md`.

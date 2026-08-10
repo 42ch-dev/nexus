@@ -283,8 +283,8 @@ excluding `needs_review` rows; `?include_suggested=true` surfaces them.
 
 ## 6. Non-goals (V1.51 T-A P0)
 
-- Cross-chapter reconciliation (`creator kb rescan --work`) — T-A P1.
-- Missing-KB detection — T-A P2.
+- Cross-chapter reconciliation (`creator kb rescan --work`) — T-A P1. **(Shipped V1.51 — `creator kb rescan --work <work_ref>`; see cli-spec §6.2K.)**
+- Missing-KB detection — T-A P2. **(Shipped V1.51 — `creator world kb pending --missing-only`; see quality-loop §5.5.)**
 - Write-time extraction — explicitly OUT (compass §1.2 O12).
 - New `schemas/` wire JSON — OUT (compass §0.1 #9); the `KbCandidate` struct
   and the payload extension are local-only Rust types + SQLite columns.

@@ -146,6 +146,8 @@ The three profile-set IDs (`nexus.profile.minimal`, `nexus.profile.writer`, `nex
 | `nexus.pool.entry.manage` | Add/remove entries from the selection pool (pool DAO write) | shipped | V1.54 P0 | `host_tool` |
 | `nexus.reference.refresh` | Refresh a reference source body by fetching its URL and comparing content hash; honors refresh_policy (on_change / scheduled / offline) | shipped | V1.58 P1 | orchestration |
 
+> **Note:** `sync.*` runtime binding deferred — tracked [DF-46 (§2.3)](../knowledge/deferred-features-cross-version-tracker.md#23-open-features) / [PD-05 (§2.1)](../knowledge/deferred-features-cross-version-tracker.md#21-program-planning-decisions).
+
 ### 4.1 Host tool permissions note
 
 Public / invited / private world access is determined by world policy, membership, and pairing state; capability presence alone does not grant private access. `nexus.kb_snapshot.write` and `nexus.world.configure` require world ownership (creator-level gate).
@@ -219,6 +221,6 @@ If handshake succeeds but capability set is incomplete:
 
 ## 8. Open items
 
-- Map each logical `nexus.*` capability to concrete ACP tool/resource schemas.
+> **Durable roadmap:** consolidated in the [deferred-features tracker §2.6](../knowledge/deferred-features-cross-version-tracker.md) — DR-25 (capability→ACP tool/resource schema map + manuscript read/write quotas + default timeouts).
+
 - ~~Decide whether `world.delta.apply` is agent-side or runtime-side by default.~~ **Resolved V1.60 P0** — runtime-side; see [`world-delta-propose-apply.md`](world-delta-propose-apply.md) §3 (agent proposes, runtime applies under transaction + lost-update guard).
-- Define maximum manuscript read/write quotas and default timeouts.

@@ -1,23 +1,36 @@
 /**
- * Studio fixtures for Work Timeline node chrome (V1.124 P0 T4).
+ * Studio fixtures for Work Timeline node chrome (V1.124 P0 T4; V1.156 P2 T2
+ * Brief layer + Brief empty-state).
  *
  * Composes the same presentational extract App RF wrappers use:
  *   - `@web-canvas/node-chrome-shell` (card shell + spine accent)
- *   - `@web-canvas/timeline-node-chrome` (Narrative event / Moment scene / Moment beat)
+ *   - `@web-canvas/timeline-node-chrome` (Narrative event / Moment scene /
+ *     Moment beat / Brief-era body)
  *
- * Boundary (studio-timeline-fixture-boundaries.md §4.4–§4.6 + F1–F9):
+ * Boundary (studio-timeline-fixture-boundaries.md §4.4–§4.9 + F1–F9):
  *   No `@xyflow/react`, no `@42ch/nexus-contracts`, no daemon clients,
  *   no `useTranslation`. Static English product vocabulary only.
  *   Layer breadcrumb is out of scope (P2).
  *
- * Spines: Narrative → `accent="worldkb"`; Moment scene/beat → `accent="outline"`.
+ * Spines: Narrative → `accent="worldkb"`; Moment scene/beat → `accent="outline"`;
+ * Brief → `accent="worldkb"` (same `timeline-brief-era` node type the World
+ * surface uses — Work-Brief feel ≡ World-Brief feel).
  * Layer accents live inside the extract (Narrative → narrative-accent;
- * Moment → moment-accent). Moment = scene + beat (both frames required).
+ * Moment → moment-accent; Brief → brief-accent). Moment = scene + beat
+ * (both frames required).
+ *
+ * V1.156 — Work-Brief is a READ-only projection of the bound World's Brief
+ * (PD-2): era entities (`block_type=era`) from the bound World's KB graph
+ * (V1.73) render as `TimelineBriefEraChrome` on the worldkb spine; the
+ * empty-state frame mirrors the app's honest `BriefEmptyState` panel copy.
  */
 import { type ReactNode } from 'react';
 
+import { Button } from '@42ch/nexus-ui';
+import { EmptyState } from '@web-ui/states'; // transitional — keep-web (lucide-react asset boundary; product copy & app-composition callbacks)
 import { NodeChromeShell } from '@web-canvas/node-chrome-shell'; // @web-canvas/node-chrome-shell - transitional until package promotion criteria met
 import {
+  TimelineBriefEraChrome,
   WorkTimelineMomentBeatChrome,
   WorkTimelineMomentSceneChrome,
   WorkTimelineNarrativeEventChrome,
@@ -370,14 +383,164 @@ function MomentSpineFixtureFrame() {
 }
 
 /* ------------------------------------------------------------------ */
+/*  §4.8 Work Timeline — Brief layer (V1.156 P2 T2)                     */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Brief layer frame — era markers on the Work Timeline Brief axis. Work-
+ * Brief is a READ-only projection of the bound World's Brief (PD-2): era
+ * entities (`block_type=era`) from the bound World's KB graph (V1.73) are
+ * projected onto the same `timeline-brief-era` node type + `TimelineBriefEraChrome`
+ * the World surface uses — Work-Brief feel ≡ World-Brief feel (same carrier,
+ * same worldkb surface spine, same brief-accent badges). The Work does NOT
+ * gain an authored Brief; no Work-owned Brief write flow exists.
+ */
+function BriefLayerFixtureFrame() {
+  return (
+    <FixtureFrame
+      title="Work Timeline — Brief layer"
+      description="Brief layer era markers on the Work Timeline (V1.156). Bound-World era data (`block_type=era` from the bound World's KB graph — V1.73, no new route) renders as TimelineBriefEraChrome on the worldkb spine: Work-Brief feel ≡ World-Brief feel. Brief remains World spine; the Work gains no authored Brief (PD-2)."
+      testId="work-timeline-fixture-brief-layer"
+    >
+      <VariantMatrix testId="work-timeline-brief-layer-matrix">
+        <VariantChip label="Full span + summary">
+          <NodeChromeShell accent="worldkb">
+            <TimelineBriefEraChrome
+              title="The First Age"
+              blockTypeLabel="Era"
+              timeSpan="Year 0 → Year 412"
+              temporalUnknownLabel="Temporal unknown"
+              eraId="era-first"
+              worldSummary="Founding myths and the first knowledge entry lineages of the bound World."
+              sourceAnchorLabel="3 source anchors"
+              version={2}
+            />
+          </NodeChromeShell>
+        </VariantChip>
+
+        <VariantChip label="Start-only">
+          <NodeChromeShell accent="worldkb">
+            <TimelineBriefEraChrome
+              title="Age of Crossing"
+              blockTypeLabel="Era"
+              timeSpan="Year 412 →"
+              temporalUnknownLabel="Temporal unknown"
+              eraId="era-crossing"
+              sourceAnchorLabel="1 source anchor"
+              version={1}
+            />
+          </NodeChromeShell>
+        </VariantChip>
+
+        <VariantChip label="End-only">
+          <NodeChromeShell accent="worldkb">
+            <TimelineBriefEraChrome
+              title="Twilight Compact"
+              blockTypeLabel="Era"
+              timeSpan="→ Year 900"
+              temporalUnknownLabel="Temporal unknown"
+              sourceAnchorLabel="0 source anchors"
+              version={1}
+            />
+          </NodeChromeShell>
+        </VariantChip>
+
+        <VariantChip label="Temporal unknown">
+          <NodeChromeShell accent="worldkb">
+            <TimelineBriefEraChrome
+              title="Uncharted Brief"
+              blockTypeLabel="Era"
+              timeSpan={null}
+              temporalUnknownLabel="Temporal unknown"
+              sourceAnchorLabel="0 source anchors"
+              version={1}
+            />
+          </NodeChromeShell>
+        </VariantChip>
+
+        <VariantChip label="Selected">
+          <NodeChromeShell accent="worldkb" selected>
+            <TimelineBriefEraChrome
+              title="The First Age"
+              blockTypeLabel="Era"
+              timeSpan="Year 0 → Year 412"
+              temporalUnknownLabel="Temporal unknown"
+              eraId="era-first"
+              worldSummary="Selected Brief-era card — selection ring from NodeChromeShell."
+              sourceAnchorLabel="3 source anchors"
+              version={2}
+            />
+          </NodeChromeShell>
+        </VariantChip>
+
+        <VariantChip label="Dragging">
+          <NodeChromeShell accent="worldkb" dragging>
+            <TimelineBriefEraChrome
+              title="Age of Crossing"
+              blockTypeLabel="Era"
+              timeSpan="Year 412 → Year 700"
+              temporalUnknownLabel="Temporal unknown"
+              eraId="era-crossing"
+              sourceAnchorLabel="2 source anchors"
+              version={3}
+            />
+          </NodeChromeShell>
+        </VariantChip>
+      </VariantMatrix>
+    </FixtureFrame>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  §4.9 Work Timeline — Brief empty-state (V1.156 P2 T2)               */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Brief empty-state frame — honest panel when the active layer is Brief
+ * but the projection has zero nodes (no bound World; or the bound World's
+ * KB graph has no `block_type=era` entities, PD-2). Copy + testids mirror
+ * the app's `BriefEmptyState` verbatim: no "create Brief" CTA because the
+ * Work does NOT own Brief authoring — the escape hatch returns to
+ * Narrative.
+ */
+function BriefEmptyStateFixtureFrame() {
+  return (
+    <FixtureFrame
+      title="Work Timeline — Brief empty-state"
+      description="Honest Brief-layer empty state when no World is bound or the bound World's graph has no era entities (PD-2). World-shape context comes from the bound World's Brief; the panel says exactly that and offers a CTA back to Narrative — there is NO 'create Brief' CTA."
+      testId="work-timeline-fixture-brief-empty"
+    >
+      <div
+        data-testid="work-timeline-brief-empty-state"
+        className="rounded-card border border-gray-alpha-400 bg-background-100"
+      >
+        <EmptyState
+          title="No world-shape context yet"
+          description="World-shape context appears here when this Work is bound to a World with era markers. Brief is a read-only projection of the bound World’s Brief."
+          action={
+            <Button
+              type="button"
+              variant="primary"
+              data-testid="work-timeline-brief-empty-cta"
+            >
+              Switch to Narrative
+            </Button>
+          }
+        />
+      </div>
+    </FixtureFrame>
+  );
+}
+
+/* ------------------------------------------------------------------ */
 /*  Public fixture component                                            */
 /* ------------------------------------------------------------------ */
 
 /**
  * Work Timeline fixtures — Narrative event / Moment scene / Moment beat /
- * Moment spine covering boundary §4.4–§4.7 variant matrices.
- * Presentational-only; no daemon, no RF, no contracts, no i18n.
- * Moment = scene + beat (both required).
+ * Moment spine / Brief layer / Brief empty-state covering boundary
+ * §4.4–§4.9 variant matrices. Presentational-only; no daemon, no RF, no
+ * contracts, no i18n. Moment = scene + beat (both required).
  */
 export function WorkTimelineCanvasFixtures() {
   return (
@@ -386,6 +549,8 @@ export function WorkTimelineCanvasFixtures() {
       <MomentSceneFixtureFrame />
       <MomentBeatFixtureFrame />
       <MomentSpineFixtureFrame />
+      <BriefLayerFixtureFrame />
+      <BriefEmptyStateFixtureFrame />
     </div>
   );
 }

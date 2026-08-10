@@ -294,21 +294,32 @@ V1.122 P1 adds **only** a frontend `CanvasSurfaceKind = "timeline"` enum value +
 
 > **Architect-locked (seat 2).** This subsection is the normative Draft contract P1 + P2 implement. It is **additive** — it does not rewrite the shipped Strategy / Outline+Timeline / World KB β text in §3.3 table or the V1.122 Timeline peer surface text in §3.3.2. The authoritative iteration-scoped elaboration (Brief/Moment carrier verdicts, trade-off matrices, adapter TypeScript signatures, conformance rules, conflict policy, wire-contracts gate) is [`iterations/v1.123/specs/three-layer-architecture.md`](../iterations/v1.123/specs/three-layer-architecture.md). Where this overlay and the iteration-scoped architecture spec agree, both are normative; where they differ in detail, the architecture spec is the finer-grained P1/P2 reference.
 
-V1.123 deepens Timeline into **three zoom layers** — **Brief** (world-global era markers), **Narrative** (event-level, V1.122 reframed — the Timeline layer, distinct from prose-craft narrative writing), **Moment** (scene/beat precision — the Timeline layer, distinct from Moment Context Assembly) — with **domain-differentiated layer composition**: the World Timeline shows Brief + Narrative; the new Work Timeline peer surface shows Narrative + Moment. Cross-layer navigation is **within one Timeline surface** (Brief↔Narrative on World; Narrative↔Moment on Work) — not cross-surface (World Timeline ↔ Work Timeline cross-surface jump is P3 IA scope, not a layer switcher concern).
+> **V1.156 amendment (in flight) — 3×2 matrix completion.** The V1.156 compass ([`v1.156/delivery-compass.md`](../iterations/v1.156/delivery-compass.md)) closes the two deferred matrix cells: **World Timeline gains the Moment layer** (`DF-V1123-WORLD-MOMENT` — read/projection of bound Works' scene-precision; Moments remain Work-owned) and **Work Timeline gains the Brief layer** (`DF-V1123-WORK-BRIEF` — projection of the bound World's Brief; Brief remains World spine). When V1.156 ships, both surfaces render all three layers (Brief + Narrative + Moment). This is an **additive amendment** to the V1.123 overlay: it does not rewrite the V1.123 carrier locks or conflict policy; it extends each surface's layer set from two to three. Both amendments are **frontend-only** (`wire_contracts_changed: false` — see the "wire_contracts_changed: false verification (V1.156)" subsection below). Product semantics locked in [`iterations/v1.156/specs/product-locks.md`](../iterations/v1.156/specs/product-locks.md) PD-2 / PD-3. **Promotes to Normative: V1.156 P-last** (after P1–P3 ship + dogfood) — the V1.123 overlay shipped its two-layer composition in V1.123 but was not promoted at V1.123 P-last (spec-hygiene debt); this amendment completes the matrix and is the promotion point for the whole §3.3.3 overlay.
+
+V1.123 deepens Timeline into **three zoom layers** — **Brief** (world-global era markers), **Narrative** (event-level, V1.122 reframed — the Timeline layer, distinct from prose-craft narrative writing), **Moment** (scene/beat precision — the Timeline layer, distinct from Moment Context Assembly). V1.123 shipped two layers per surface (World Timeline: Brief + Narrative; Work Timeline: Narrative + Moment); **V1.156 completes the 3×2 matrix** so both surfaces render all three layers. Cross-layer navigation is **within one Timeline surface** (Brief↔Narrative↔Moment) — not cross-surface (World Timeline ↔ Work Timeline cross-surface jump uses explicit jump affordances per §3.3.3 cross-layer rules, not the layer switcher).
 
 #### Layer composition (LOCKED — product semantics; carrier implementation per iteration architecture)
 
 ```
-World Timeline (`CanvasSurfaceKind = "timeline"` — V1.122 preserved):
-  ├── Brief layer (hero)     — `block_type=era` KnowledgeEntry projection
+World Timeline (`CanvasSurfaceKind = "timeline"` — V1.122 + V1.123 + V1.156):
+  ├── Brief layer (hero)     — `block_type=era` KnowledgeEntry projection (V1.123)
   ├── Narrative layer (peer) — `block_type=event` KnowledgeEntry projection (V1.122 unchanged)
-  └── Moment layer           — NOT composed (DF-V1123-WORLD-MOMENT)
+  └── Moment layer (V1.156)  — projection of bound Works' Scene/Beat data
+                               (`OutlineSceneNodeData` / `OutlineBeatNodeData` from
+                               `WorkOutline`, V1.72 — composed client-side across
+                               the World's bound Works; honest empty-state until the
+                               WorkOutline wire exposes scenes/beats — DR-26)
 
-Work Timeline (`CanvasSurfaceKind = "work-timeline"` — V1.123 NEW):
-  ├── Brief layer            — NOT composed (DF-V1123-WORK-BRIEF)
+Work Timeline (`CanvasSurfaceKind = "work-timeline"` — V1.123 + V1.156):
+  ├── Brief layer (V1.156)   — projection of the bound World's Brief
+                               (`WorldKbGraphResponse.entities[block_type=era]`,
+                               V1.73 — composed client-side from the bound World;
+                               full bound-World Brief with source-World attribution)
   ├── Narrative layer (peer) — `WorkOutline.timeline_events[]` projection (V1.72 preserved)
   └── Moment layer (hero-on-demand) — V1.108 Scene/Beat projection from `WorkOutline`
 ```
+
+> **3×2 matrix (V1.156 — complete).** Both surfaces render Brief + Narrative + Moment. The two V1.123 deferred cells are closed: World×Moment (`DF-V1123-WORLD-MOMENT`) and Work×Brief (`DF-V1123-WORK-BRIEF`). The V1.123 author mental model ("World Timeline = Brief + Narrative; Work Timeline = Narrative + Moment") is now superseded: after V1.156, **both surfaces show the full three-layer stack**, with the **ownership invariant** preserved — Brief is authored on the World spine (`block_type=era` KnowledgeEntry); Moment is authored on the Work spine (Outline Scene/Beat); each surface's projection of the layer it does not own is **read-only** (World Timeline Moment = read projection of bound Works' scenes; Work Timeline Brief = read projection of bound World's eras).
 
 #### `CanvasSurfaceKind` enum extension (additive — V1.123)
 
@@ -332,37 +343,40 @@ export type CanvasSurfaceKind =
 
 No existing `CanvasSurfaceKind` value is renamed or removed. The V1.122 `timeline` surface is **not rewritten** — V1.123 adds a layer switcher to its canvas header and a Brief projection to its adapter, both internally to the surface (additive; the V1.122 §3.3.2 architect-locked contract is preserved).
 
-#### `timeline` surface — Brief↔Narrative layer switcher (V1.123 overlay on V1.122 §3.3.2)
+#### `timeline` surface — three-layer switcher (V1.123 Brief↔Narrative; V1.156 adds Moment)
 
 | Property | Contract |
 |----------|----------|
-| **Layer pair** | Brief + Narrative only (Moment out of scope for World Timeline — see explicit non-composition in iteration architecture §9) |
-| **Default layer** | **Brief if `block_type=era` data exists; else Narrative** with honest Brief empty-state in layer chrome |
+| **Layer set** | Brief + Narrative + **Moment** (V1.156). V1.123 shipped Brief + Narrative; V1.156 closes the World×Moment cell (`DF-V1123-WORLD-MOMENT`). Moment on the World Timeline is a **read-only projection** of scene-precision from Works bound to that World (PD-3) — not a World authoring surface. |
+| **Default layer** | **Brief if `block_type=era` data exists; else Narrative** with honest Brief empty-state in layer chrome. Moment is never the default (read-only projection; one click away). |
 | **Layer switcher placement** | Timeline canvas header (layer chrome + breadcrumbs) — see `iterations/v1.123/specs/layer-feel-differentiation.md` §3.4 |
-| **Switcher modes** | Explicit segmented control (Brief \| Narrative) AND optional semantic zoom past thresholds (P4 owns threshold numbers; see `layer-feel-differentiation.md` §3.2) |
-| **One-click rule** | Brief is one click from Narrative and vice versa |
-| **Carrier contract** | Brief = `WorldKbGraphResponse.entities[block_type=era]` projection (era is a cross-profile world-shape marker, not a profile-specific category); Narrative = V1.122 `WorldKbGraphResponse.entities[block_type=event]` projection (V1.122 §3.3.2 preserved) — see iteration architecture §2 (Brief-on-KnowledgeEntry LOCK) + §8 (data composition) |
-| **Write boundary** | Brief + Narrative both edit World-scoped KnowledgeEntries via `POST /v1/daemon/worlds/{world_id}/kb/patch-entity` (`kb.patch_entity`, V1.73). Brief-era writes use `block_type: "era"` in the patch. No new write route. |
-| **Conflict policy** | Reuses V1.73 `WorldKbConflictError` (409) + `WorldKbValidationError` (422) for both layers. No new conflict DTO. — see iteration architecture §6 |
-| **Empty-state honesty** | Brief empty (no `block_type=era` entities) → default to Narrative layer with Brief empty-state chrome explaining "Brief shows the world's shape across ages. Switch to Narrative to browse events, or add era markers when the Brief carrier is ready." (P4 owns final i18n strings.) |
+| **Switcher modes** | Explicit segmented control (Brief \| Narrative \| Moment) AND optional semantic zoom past thresholds (P4 owns threshold numbers; see `layer-feel-differentiation.md` §3.2) |
+| **One-click rule** | Each layer is one click from the other two (three-way segmented control) |
+| **Carrier contract** | Brief = `WorldKbGraphResponse.entities[block_type=era]` projection; Narrative = V1.122 `WorldKbGraphResponse.entities[block_type=event]` projection (V1.122 §3.3.2 preserved). **Moment (V1.156) = projection of bound Works' `OutlineSceneNodeData` / `OutlineBeatNodeData`** — the same carrier as Work Timeline Moment (V1.123 P2), composed client-side across the World's bound Works via `GET /v1/daemon/works/{work_id}/outline` (V1.72). Honest empty-state until the WorkOutline wire exposes scenes/beats (DR-26). See iteration architecture §3 (Moment-on-Outline LOCK). |
+| **Read path** | Brief + Narrative compose from `GET /v1/daemon/worlds/{world_id}/kb/graph` (V1.73, single graph source — V1.122 §3.3.2 preserved). Moment composes from **bound Works' `GET /v1/daemon/works/{work_id}/outline`** (V1.72) — client-side fan-out across the World's bound Works. The V1.147 `GET /v1/daemon/worlds/{world_id}/timeline/events` route reads `narrative_timeline_events` (Narrative-layer domain rows) and is **NOT** the Moment read path — it carries no scene/beat data. No new daemon route in V1.156. |
+| **Write boundary** | Brief + Narrative edit World-scoped KnowledgeEntries via `POST /v1/daemon/worlds/{world_id}/kb/patch-entity` (`kb.patch_entity`, V1.73). Brief-era writes use `block_type: "era"`. **Moment is read-only on the World Timeline** (PD-3: this iteration does not make World the Moment authoring home); scene/beat edits route through the Work Timeline / Outline. No new write route. |
+| **Conflict policy** | Reuses V1.73 `WorldKbConflictError` (409) + `WorldKbValidationError` (422) for Brief + Narrative. Moment has no direct writes (read-only projection). No new conflict DTO. |
+| **Empty-state honesty** | Brief empty (no `block_type=era` entities) → default to Narrative; Moment empty (no bound-Work scene/beat data) → honest empty-state explaining scenes come from bound Works and offering a CTA toward the Work Timeline / Outline. (P4 owns final i18n strings.) |
 
-#### `work-timeline` surface — NEW peer surface (V1.123)
+#### `work-timeline` surface — three-layer switcher (V1.123 Narrative↔Moment; V1.156 adds Brief)
 
-The Work Timeline is a **fourth peer surface** on the Work Canvas shell (alongside Outline, Strategy, World KB). It is **not** the Work default — Work entry stays Outline (V1.118 preserved). The surface is reachable from Work Canvas shell nav at `/works/:workId/timeline` (or equivalent peer-route path — implementer's choice).
+The Work Timeline is a peer surface on the Work Canvas shell (alongside Outline, Strategy, World KB). It is **not** the Work default — Work entry stays Outline (V1.118 preserved). The surface is reachable from Work Canvas shell nav at `/works/:workId/timeline`.
 
 | Property | Contract |
 |----------|----------|
-| **Surface kind** | `CanvasSurfaceKind = "work-timeline"` (new additive enum value) |
-| **Layer pair** | Narrative + Moment only (Brief out of scope for Work Timeline — see explicit non-composition in iteration architecture §9) |
-| **Default layer** | **Narrative** (architect UX-risk override — see iteration architecture §7.3). The product spec §4.3 preference was "Moment when Scene/Beat data exists"; the architect overrides because the V1.72 `WorkOutline` wire has no Scene/Beat data today (Moment-default would surface persistent empty-state). Moment is one click away via the layer switcher. When the WorkOutline wire extends to expose scenes/beats (V1.124+), the default may flip to Moment. |
+| **Surface kind** | `CanvasSurfaceKind = "work-timeline"` (V1.123 additive enum value) |
+| **Layer set** | **Brief** + Narrative + Moment (V1.156). V1.123 shipped Narrative + Moment; V1.156 closes the Work×Brief cell (`DF-V1123-WORK-BRIEF`). Brief on the Work Timeline is a **read-only projection** of the bound World's Brief (PD-2) — Work does not gain an independently authored Brief. |
+| **Default layer** | **Narrative** (architect UX-risk override — see iteration architecture §7.3; preserved in V1.156). Brief and Moment are each one click away. |
 | **Layer switcher placement** | Work Timeline canvas header (layer chrome + breadcrumbs) |
-| **Switcher modes** | Explicit segmented control (Narrative \| Moment) AND optional semantic zoom past thresholds (P4) |
-| **One-click rule** | Moment is one click from Narrative and vice versa |
-| **Carrier contract** | Narrative = `WorkOutline.timeline_events[]` projection (V1.72 preserved); optional client-side composition with bound World's `WorldKbGraphResponse.entities[block_type=event]` for cross-surface navigation binding. Moment = V1.108 `OutlineSceneNodeData` / `OutlineBeatNodeData` projection from `WorkOutline` (wire extension deferred to V1.124+; honest empty-state until then) — see iteration architecture §3 (Moment-on-Outline LOCK) + §8 (data composition) |
-| **Adapter contract** | `WorkTimelineLayerAdapter` TypeScript signature — see iteration architecture §7.1 (full signature) + §7.2 (conformance rules). Mirrors the V1.122 `TimelineCanvasAdapter` stable-factory pattern (`createWorkTimelineCanvasAdapter(ctxRef)`). |
-| **Write boundary** | Narrative writes route through `POST /v1/daemon/works/{work_id}/timeline/patch` (`timeline.patch_event`, V1.72). Moment is **read-only in V1.123** — edits route through Outline (`outline.patch_chapter` / `outline.patch_structure`) via "Edit in Outline" affordance. No new write route. |
-| **Conflict policy** | Narrative writes reuse V1.72 `OutlineConflictError` (409) + `OutlineValidationError` (422). Moment has no direct writes (read-only); Outline adapter owns the write when the user navigates there. No new conflict DTO. — see iteration architecture §6 |
-| **Empty-state honesty** | Moment empty (no Scene/Beat data) → default to Narrative with Moment empty-state chrome explaining "Moment is scene-precise and manuscript-anchored. Add scenes and beats in Outline, or switch to Narrative for events." (P4 owns final i18n strings.) Narrative empty (no `timeline_events[]`) → honest empty-state explaining how events appear on Work Timeline. |
+| **Switcher modes** | Explicit segmented control (Brief \| Narrative \| Moment) AND optional semantic zoom past thresholds (P4) |
+| **One-click rule** | Each layer is one click from the other two (three-way segmented control) |
+| **Carrier contract** | Narrative = `WorkOutline.timeline_events[]` projection (V1.72 preserved); optional client-side composition with bound World's `WorldKbGraphResponse.entities[block_type=event]` for cross-surface navigation binding. Moment = V1.108 `OutlineSceneNodeData` / `OutlineBeatNodeData` projection from `WorkOutline` (honest empty-state until wire extension — DR-26). **Brief (V1.156) = projection of the bound World's `WorldKbGraphResponse.entities[block_type=era]`** — the same carrier as World Timeline Brief (V1.123), composed client-side from the bound World. Brief is read-only on the Work Timeline (no Work-owned Brief authoring — PD-2). |
+| **Read path** | Narrative + Moment compose from `GET /v1/daemon/works/{work_id}/outline` (V1.72, single graph source — V1.123 §5.2 preserved). **Brief (V1.156) composes from the bound World's `GET /v1/daemon/worlds/{world_id}/kb/graph`** (V1.73) — the orchestrator resolves the bound World via `Work.world_id` (`useWork` query, already wired in the V1.123 P3 orchestrator). No new daemon route in V1.156. |
+| **Filter rule** | **Full bound-World Brief** (PM default, PD-2): the Work Timeline Brief layer projects all `block_type=era` entities from the bound World's graph, with source-World attribution. No Work-relevant filtering this iteration (avoid over-engineering; tighten later if dogfood shows noise). |
+| **Adapter contract** | `WorkTimelineLayerAdapter` TypeScript signature — see iteration architecture §7.1 (full signature) + §7.2 (conformance rules). V1.156 extends `WorkTimelineLayer` from `'narrative' | 'moment'` to `'brief' | 'narrative' | 'moment'`. Mirrors the V1.122 `TimelineCanvasAdapter` stable-factory pattern (`createWorkTimelineCanvasAdapter(ctxRef)`). |
+| **Write boundary** | Narrative writes route through `POST /v1/daemon/works/{work_id}/timeline/patch` (`timeline.patch_event`, V1.72). Moment is read-only (edits route through Outline). **Brief is read-only on the Work Timeline** (PD-2: Brief is World spine; Work-Brief = projection). No new write route. |
+| **Conflict policy** | Narrative writes reuse V1.72 `OutlineConflictError` (409) + `OutlineValidationError` (422). Moment + Brief have no direct writes (read-only projections). No new conflict DTO. |
+| **Empty-state honesty** | Moment empty → default to Narrative (V1.123 preserved). Brief empty (no bound-World era data, or no bound World) → honest empty-state explaining the world-shape context comes from the bound World's Brief and offering a CTA toward the World Timeline / World KB. Narrative empty → honest empty-state (V1.123 preserved). |
 
 #### Cross-layer navigation rules (LOCKED)
 
@@ -372,17 +386,21 @@ Cross-layer navigation is **within one Timeline surface**, not cross-surface:
 |-----------|---------|---------------|----------|
 | Brief → Narrative | World Timeline | "Drill into this era" | Narrative filters (or focuses) events whose `body.attributes.occurred_at` falls within the era's `start_hint`/`end_hint` when an era is selected; otherwise full Narrative |
 | Narrative → Brief | World Timeline | "Zoom out to world shape" | Brief becomes prominent layer |
+| Narrative → Moment | World Timeline | "Drill into scene-precision" (V1.156) | Moment projects scenes/beats from Works bound to this World near the selected event's chapter; honest empty-state if no bound-Work scene/beat data |
+| Moment → Narrative | World Timeline | "Zoom out to events" (V1.156) | Narrative becomes prominent layer |
+| Brief → Narrative | Work Timeline | "Drill into events" (V1.156) | Narrative becomes prominent layer (Brief is the coarsest layer) |
+| Narrative → Brief | Work Timeline | "Zoom out to world shape" (V1.156) | Brief projects the bound World's eras; honest empty-state if no bound World / no era data |
 | Narrative → Moment | Work Timeline | "Drill into this scene" | Moment filters to moments realized by the selected event/chapter when bound; otherwise full Moment stack |
 | Moment → Narrative | Work Timeline | "Zoom out to events" | Narrative becomes prominent layer |
 
-**Cross-layer is NOT cross-surface.** Cross-surface navigation (Work Timeline Moment ↔ bound World Timeline Narrative; World Timeline Narrative ↔ Work Timeline Moment realizing it) is **P3 IA scope** — it uses explicit jump affordances ("View on World Timeline" / "View in Work Timeline"), not the layer switcher. The layer switcher UI MUST NOT pretend to be cross-surface navigation.
+**Cross-layer is NOT cross-surface.** Cross-surface navigation (Work Timeline Moment ↔ bound World Timeline Narrative; World Timeline Narrative ↔ Work Timeline Moment realizing it) uses explicit jump affordances ("View on World Timeline" / "View in Work Timeline"), not the layer switcher. The layer switcher UI MUST NOT pretend to be cross-surface navigation. The V1.156 World-Moment and Work-Brief layers are **within-surface** layer switches, not cross-surface jumps — World-Moment reads bound-Work data but stays on the World Timeline surface; Work-Brief reads bound-World data but stays on the Work Timeline surface.
 
 #### Per-layer empty-state honesty rules (LOCKED)
 
-| Layer | Empty condition | Behavior |
-|-------|-----------------|----------|
 | **Brief** (World) | No `block_type=era` entities | Default to Narrative layer; show Brief empty-state in layer chrome ("No era markers yet — switch to Narrative to see events." + short why-Brief line + how to add era markers). P4 owns final i18n strings. |
 | **Narrative** (World) | No `block_type=event` entities | Reuse V1.122 Timeline empty-state (`timeline-canvas-architecture.md` §7 — "This World's timeline is empty. Events you add through World KB or chapter extraction will appear here." + CTA → World KB peer). |
+| **Moment** (World — V1.156) | No bound-Work scene/beat data | Honest empty-state: scenes come from Works bound to this World; show empty-state chrome explaining "Scene-precision is available when bound Works have scene/beat data in their Outline." + CTA toward Work Timeline / Outline. Moment is never the World default. |
+| **Brief** (Work — V1.156) | No bound-World era data, or no bound World | Honest empty-state: world-shape context comes from the bound World's Brief; show empty-state chrome explaining "World-shape context appears here when this Work is bound to a World with era markers." + CTA toward World Timeline / World KB. Brief is never the Work default. |
 | **Narrative** (Work) | No `WorkOutline.timeline_events[]` | Honest empty-state: "This Work's timeline is empty. Events you add in Outline will appear here." + CTA → Outline peer. |
 | **Moment** (Work) | No Scene/Beat data | Default to Narrative layer; show Moment empty-state in layer chrome ("No scene/beat data yet — switch to Narrative to see events." + CTA toward Outline beats). |
 
@@ -392,12 +410,20 @@ The adapter MUST NOT fabricate Brief eras from `updated_at` / `canonical_name` /
 
 | Requirement | Contract |
 |-------------|----------|
-| **Survive surface switch** | World Timeline → World KB → back restores Brief/Narrative choice; Work Timeline → Outline → back restores Narrative/Moment choice |
+| **Survive surface switch** | World Timeline → World KB → back restores Brief/Narrative/Moment choice; Work Timeline → Outline → back restores Brief/Narrative/Moment choice (V1.156: all three layers persisted on both surfaces) |
 | **Preferred encoding** | URL query `?layer=brief\|narrative\|moment` on the Timeline route (shareable, refresh-safe) |
 | **Secondary** | React context / session store for in-shell switches without full navigation |
-| **Invalid layer** | If URL asks for Moment on World Timeline → ignore, use Brief/Narrative; if Brief on Work Timeline → ignore, use Narrative/Moment |
-| **Default when absent** | World: Brief-if-`era`-data-else-Narrative; Work Timeline: Narrative (architect UX-risk override — see iteration architecture §7.3) |
-| **Test** | AC-V1123-23 layer-state-persistence test (P4) |
+| **Invalid layer** | V1.156: all three layer values (`brief` / `narrative` / `moment`) are valid on **both** surfaces. The V1.123 restriction ("Moment ignored on World Timeline; Brief ignored on Work Timeline") is **lifted** — both surfaces now render all three layers. Unknown layer values (`?layer=foo`) fall back to the surface default. |
+| **Default when absent** | World: Brief-if-`era`-data-else-Narrative (Moment never default — read-only projection); Work Timeline: Narrative (architect UX-risk override — see iteration architecture §7.3) |
+| **Test** | AC-V1123-23 layer-state-persistence test (P4); V1.156 extends it to assert all three layers persist on both surfaces |
+
+#### `wire_contracts_changed: false` verification (V1.156)
+
+V1.156 P1 + P2 are **frontend-only**. Both layer additions extend existing adapter projection functions and layer-switcher segmented controls from two layers to three. No schema change, no daemon route change, no codegen diff, no `@42ch/nexus-contracts` version bump, no new DTO, no new conflict DTO. Concretely:
+
+- **World Timeline Moment (P1):** extends `TimelineLayer` from `'brief' | 'narrative'` to `'brief' | 'narrative' | 'moment'` in `apps/web/src/components/canvas/timeline-canvas/timeline-canvas-adapter.tsx`. The Moment projection reuses the same `OutlineSceneNodeData` / `OutlineBeatNodeData` carrier as Work Timeline Moment (V1.123 P2), composed client-side from bound Works' `GET /v1/daemon/works/{work_id}/outline` (V1.72 shipped). The V1.147 `GET /v1/daemon/worlds/{world_id}/timeline/events` route is **NOT** the read path (it reads Narrative-layer `narrative_timeline_events`, not scene/beat data). No daemon Rust change.
+- **Work Timeline Brief (P2):** extends `WorkTimelineLayer` from `'narrative' | 'moment'` to `'brief' | 'narrative' | 'moment'` in `apps/web/src/components/canvas/work-timeline-canvas/work-timeline-canvas-adapter.tsx`. The Brief projection reuses the same `WorldKbGraphResponse.entities[block_type=era]` carrier as World Timeline Brief (V1.123), composed client-side from the bound World's `GET /v1/daemon/worlds/{world_id}/kb/graph` (V1.73 shipped) via `Work.world_id` (already wired in the V1.123 P3 orchestrator). No daemon Rust change.
+- **Adapter type extension is frontend-local** — `TimelineLayer` / `WorkTimelineLayer` are UI-only union types, not wire DTOs; extending them does not touch `schemas/` or `packages/nexus-contracts/`.
 
 #### `wire_contracts_changed: true` verification (V1.123)
 
@@ -606,7 +632,7 @@ The Canvas Shell must keep the `web-ui.md` §5 transport invariant: React compon
 - In UI and specs, use **Strategy / 策略** for the human-facing concept: the workflow that drives creation.
 - Keep runtime/file/CLI identifiers as **preset** in V1.67 and until an explicit breaking-change plan authorizes a rename. This includes preset YAML, existing Daemon API routes, generated DTO names, and CLI command names.
 - UI copy can bridge the terms during transition: **Strategy (preset)** on first mention, then **Strategy** in navigation and screen titles. Developer-facing inspectors may show `preset_id` as metadata to avoid hiding the underlying contract.
-- A future CLI/schema rename is a separate breaking design and migration task. (V1.68+ implement decision)
+- **V1.156 PD-4 — Harness rename (user-visible copy only):** the user-visible **pillar-entry** label changes **Strategy / Strategies → Harness**. "Strategy" remains the **concept / surface name** in this spec (the first canvas surface; the graph-of-graphs orchestration model). **Preset stays** as the mechanism name under Harness. Internal identifiers (`CanvasSurfaceKind = 'strategy'`, route `/strategies`, `strategy.patch_*` operations, `preset` wire/DTO fields, CSS classes) are **unchanged** — V1.156 P3 is a user-visible-copy-only rename; the architect-confirmed blast-radius decision is **default NO internal-identifier rename** (poor ROI; pre-1.0 allows breaking but the regression surface is disproportionate to zero user value). See [`web-ui.md`](web-ui.md) §29.4 + §29.18.2.
 
 ### 4.3 Per-surface UX architecture
 

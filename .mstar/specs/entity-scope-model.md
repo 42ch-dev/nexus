@@ -4,10 +4,10 @@
 
 | Attribute | Value |
 | --- | --- |
-| **Status** | Normative — entity scope hierarchy, uniqueness, crate ownership. **V1.40 Shipped**: §5.1.1 narrative taxonomy (`BlockType` + `novel_category` + `canonical_name` grammar). **V1.50 Shipped**: §5.5 World KB promotion state machine. **V1.51 Shipped**: §5.5.6 LLM pathway subsection. **V1.54 Shipped**: §5.1.1 game-bible taxonomy. **V1.55 P3**: §5.1.1 script taxonomy. **V1.62 Shipped**: §5.5.9 computable-flag semantics + structured validation mode (closes `R-V161P1-LOW-001`). **V1.74 Shipped β**: §5.6 World KB relationship semantics. **V1.139 architect §5.2**: §2 (crate table: `nexus-kb`→`nexus-knowledge`, KeyBlock→KnowledgeEntry in architecture-bearing prose). **V1.155 P2**: §5.5+ prose refs modernized to KnowledgeEntry; remaining `KeyBlock` mentions are structural wire/DB identifiers (`kb_key_blocks` table, `ComputeInput.key_blocks` field, `KeyBlockStatus`/`KeyBlockId` types, `BlockType` enum values) and historical implementation records (`crates/nexus-kb/…` paths as-shipped). Full V1.139 SPOKE alignment tracked in [`spoke-adapter-architecture.md`](spoke-adapter-architecture.md). |
+| **Status** | Normative — entity scope hierarchy, uniqueness, crate ownership. **V1.40 Shipped**: §5.1.1 narrative taxonomy (`BlockType` + `novel_category` + `canonical_name` grammar). **V1.50 Shipped**: §5.5 World KB promotion state machine. **V1.51 Shipped**: §5.5.6 LLM pathway subsection. **V1.54 Shipped**: §5.1.1 game-bible taxonomy. **V1.55 P3**: §5.1.1 script taxonomy. **V1.62 Shipped**: §5.5.9 computable-flag semantics + structured validation mode (closes `R-V161P1-LOW-001`). **V1.74 Shipped β**: §5.6 World KB relationship semantics. **V1.139 architect §5.2**: §2 (crate table: `nexus-kb`→`nexus-knowledge`, KeyBlock→KnowledgeEntry in architecture-bearing prose). **V1.155 P2**: §5.5+ prose refs modernized to KnowledgeEntry; remaining `KeyBlock` mentions are structural wire/DB identifiers (`kb_key_blocks` table, `ComputeInput.key_blocks` field, `KeyBlockStatus`/`KeyBlockId` types, `BlockType` enum values) and historical implementation records (`crates/nexus-kb/…` paths as-shipped). Full V1.139 SPOKE alignment tracked in [`spoke-adapter-architecture.md`](spoke-adapter-architecture.md). **V1.156**: §1.4 three-layer Draft overlay 3×2 matrix completion amendment (World×Moment + Work×Brief closed; frontend-only, `wire_contracts_changed: false` — no scope-ownership/transition change). |
 | **Document class** | Master |
 | **Scope** | Global/User/Creator/World/Timeline/Event/Moment hierarchy; entity ownership; `kb`/`knowledge` naming boundaries; scope transition rules |
-| **Last updated** | 2026-07-26 — V1.139 architect §5.2: crate table update + status note. |
+| **Last updated** | 2026-08-10 — V1.156 Review & Edit chain: §1.4 3×2 matrix completion amendment (writing-specialist hygiene pass). |
 | **Related** | [local-cloud-crate-architecture.md](./local-cloud-crate-architecture.md), [cli-spec.md](./cli-spec.md), [daemon-runtime.md](./daemon-runtime.md), [orchestration-engine.md](./orchestration-engine.md), [compute-module-abi.md](./compute-module-abi.md), [wasm-host.md](./wasm-host.md), [local-db-schema.md](./local-db-schema.md), [spoke-adapter-architecture.md](./spoke-adapter-architecture.md), [`docs/ARCHITECTURE.md`](../../../docs/ARCHITECTURE.md) |
 
 This file is normative for V1.23 crate wiring and naming alignment. When this file
@@ -56,7 +56,8 @@ Global
 
 > **Status**: Draft (V1.123 — locked in iteration [`v1.123/specs/three-layer-architecture.md`](../iterations/v1.123/specs/three-layer-architecture.md) by architect seat 2).
 > **Authoring plan**: `2026-07-18-v1.123-three-layer-timeline-spec` (P0).
-> **Promotes to Normative**: P-last of V1.123 (after P1–P4 ship + dogfood).
+> **Promotes to Normative**: **V1.156 P-last** (after P1–P3 ship + dogfood). V1.123 shipped the two-layer composition (World: Brief+Narrative; Work: Narrative+Moment) but the overlay was not promoted at V1.123 P-last (spec-hygiene debt, cf. tracker §2.6 migration note). V1.156 completes the 3×2 matrix (§1.4.4) and is the promotion point for this overlay, amendment included.
+> **V1.156 amendment**: the 3×2 matrix is completed (World×Moment + Work×Brief closed — see §1.4.4). The amendment is frontend-only (`wire_contracts_changed: false`); it adds no scope-ownership, uniqueness, or transition rule. The V1.123 carrier locks (§1.4.1) are unchanged. Product semantics: [`iterations/v1.156/specs/product-locks.md`](../iterations/v1.156/specs/product-locks.md) PD-2 / PD-3.
 
 This subsection is an **additive Draft overlay** — it does not rewrite §1.1 (canonical scope tree) or §1.2 (scope definitions). It canonizes three Timeline zoom layers — **Brief**, **Narrative**, **Moment** — as a re-projection of the existing `World > Timeline > Event > Moment` scope hierarchy, and locks the World/Work layer composition.
 
@@ -66,7 +67,7 @@ This subsection is an **additive Draft overlay** — it does not rewrite §1.1 (
 |-------|-------------|-----------|----------------|---------------------------------|
 | **Brief** | World-global | Multi-decade / era / age | **World** (World-global Timeline layer) | `block_type=era` KnowledgeEntry (new wire enum value — see §5.1.1 narrative taxonomy extension + iteration architecture §2) |
 | **Narrative** | Event-level | Human-paced (days/weeks/years) | **Shared** (both World Timeline and Work Timeline) | World scope: `block_type=event` KnowledgeEntry (V1.122 preserved). Work scope: `WorkOutline.timeline_events[]` (V1.72 preserved). |
-| **Moment** | Scene/beat-precise | Sub-scene (minutes/hours within a scene) | **Work** (Work-scoped Timeline layer) | Frontend-only projection of V1.108 `OutlineSceneNodeData` / `OutlineBeatNodeData` from V1.72 `WorkOutline` (wire extension deferred to V1.124+; honest empty-state until then — see iteration architecture §3) |
+| **Moment** | Scene/beat-precise | Sub-scene (minutes/hours within a scene) | **Work** (Work-scoped Timeline layer) | Frontend-only projection of V1.108 `OutlineSceneNodeData` / `OutlineBeatNodeData` from V1.72 `WorkOutline` (wire extension deferred to V1.124+ — **durable roadmap:** consolidated in the [deferred-features tracker §2.6](../knowledge/deferred-features-cross-version-tracker.md) — DR-26; honest empty-state until then — see iteration architecture §3) |
 
 #### 1.4.2 Brief canonization
 
@@ -89,16 +90,21 @@ The two meanings of "Moment" are disambiguated by context:
 - "Moment Context Assembly" = session-start snapshot (existing).
 - "Moment Timeline layer" or "Work Timeline Moment" = scene/beat projection (V1.123).
 
-#### 1.4.4 World/Work layer composition (LOCKED)
+#### 1.4.4 World/Work layer composition (LOCKED — V1.156 completes the 3×2 matrix)
 
 ```
-World Timeline (V1.123):
-  ├── Brief layer (hero)     — `block_type=era` KnowledgeEntry projection (era markers / world shape)
+World Timeline (V1.123 + V1.156):
+  ├── Brief layer (hero)     — `block_type=era` KnowledgeEntry projection (era markers / world shape) — V1.123
   ├── Narrative layer (peer) — `block_type=event` KnowledgeEntry projection (V1.122 baseline, reframed)
-  └── Moment layer           — NOT composed in V1.123 (DF-V1123-WORLD-MOMENT if ever promoted)
+  └── Moment layer (V1.156)  — projection of bound Works' Scene/Beat data (OutlineSceneNodeData /
+                               OutlineBeatNodeData from WorkOutline, V1.72 — composed client-side across
+                               the World's bound Works; read-only — Moments remain Work-owned per PD-3;
+                               honest empty-state until WorkOutline wire exposes scenes/beats — DR-26)
 
-Work Timeline (V1.123):
-  ├── Brief layer            — NOT composed in V1.123 (DF-V1123-WORK-BRIEF if ever promoted)
+Work Timeline (V1.123 + V1.156):
+  ├── Brief layer (V1.156)   — projection of the bound World's Brief (WorldKbGraphResponse.entities
+                               [block_type=era], V1.73 — composed client-side from the bound World;
+                               read-only — Brief remains World spine per PD-2; full bound-World Brief)
   ├── Narrative layer (peer) — `WorkOutline.timeline_events[]` projection (V1.72 preserved)
   └── Moment layer (hero-on-demand) — V1.108 Scene/Beat projection from `WorkOutline`
                                        (default layer = Narrative; Moment is one click away —
@@ -109,11 +115,19 @@ Work Timeline (V1.123):
 **Author mental model (do not invert in code comments or empty-state copy):**
 
 ```
-World Timeline = Brief (world shape) + Narrative (events)
-Work Timeline  = Narrative (events)  + Moment (scenes)
+Both surfaces = Brief + Narrative + Moment (3×2 matrix complete — V1.156)
+
+Spine ownership (unchanged):
+  Brief is authored on the World spine (block_type=era KnowledgeEntry)
+  Moment is authored on the Work spine (Outline Scene/Beat)
+  Narrative is the shared bridge (events at human pace)
+
+Projection invariant:
+  World Timeline Moment  = read-only projection of bound Works' scenes
+  Work Timeline Brief    = read-only projection of the bound World's eras
 ```
 
-Narrative is the **shared bridge**: events at human pace belong to both world history (World Timeline) and chapter realization (Work Timeline). Brief is the World's spine; Moment is the Work's spine.
+Narrative is the **shared bridge**: events at human pace belong to both world history (World Timeline) and chapter realization (Work Timeline). Brief is the World's spine; Moment is the Work's spine. The V1.156 matrix completion does **not** change spine ownership — it adds read-only projections of each surface's non-owned layer. `wire_contracts_changed: false` for V1.156 (frontend-only; see `canvas-strategy-surface.md` §3.3.3 "V1.156 wire verification").
 
 #### 1.4.5 Scope tree preservation
 
@@ -123,13 +137,14 @@ The canonical `World > Timeline > Event > Moment` scope tree (§1.1) is **unchan
 - Narrative → Event-level projection (already in §1.1 as `Timeline > Event`).
 - Moment → Work-scoped projection at `Event > Moment` granularity (with the dual meaning noted in §1.4.3).
 
-No new scope-ownership rule. No new uniqueness constraint. No new transition rule. The V1.123 changes are confined to (a) one additive wire enum value (`BlockType::Era`) per §5.1.1 narrative taxonomy extension and (b) one additive Draft overlay on the Canvas surface contract (`specs/canvas-strategy-surface.md` Draft (V1.123) overlay — see `canvas-strategy-surface.md`).
+No new scope-ownership rule. No new uniqueness constraint. No new transition rule. The V1.123 changes are confined to (a) one additive wire enum value (`BlockType::Era`) per §5.1.1 narrative taxonomy extension and (b) one additive Draft overlay on the Canvas surface contract (`specs/canvas-strategy-surface.md` Draft (V1.123) overlay — see `canvas-strategy-surface.md`). The V1.156 matrix completion adds **no** scope-ownership, uniqueness, or transition rule either — it is a frontend-only projection extension (`wire_contracts_changed: false`); both non-owned layers (World-Moment, Work-Brief) are read-only projections that preserve the existing `World > Timeline > Event > Moment` scope tree.
 
 #### 1.4.6 Cross-reference
 
 - **Iteration-scoped architecture (authoritative for carrier implementation):** [`iterations/v1.123/specs/three-layer-architecture.md`](../iterations/v1.123/specs/three-layer-architecture.md) §2 (Brief carrier), §3 (Moment carrier), §4 (wire_contracts_changed), §6 (conflict policy), §7 (Work Timeline adapter contract).
-- **Canvas surface contract overlay:** [`specs/canvas-strategy-surface.md`](canvas-strategy-surface.md) Draft (V1.123) overlay (layer switcher on `timeline` + new `work-timeline` peer + cross-layer rules + empty-state rules).
+- **Canvas surface contract overlay:** [`specs/canvas-strategy-surface.md`](canvas-strategy-surface.md) §3.3.3 (V1.123 three-layer overlay + V1.156 3×2 matrix completion amendment).
 - **Product spec (author voice + demo script):** [`iterations/v1.123/specs/three-layer-product-spec.md`](../iterations/v1.123/specs/three-layer-product-spec.md).
+- **V1.156 product locks (World-Moment + Work-Brief semantics):** [`iterations/v1.156/specs/product-locks.md`](../iterations/v1.156/specs/product-locks.md) PD-2 (Work-Brief projection) + PD-3 (World-Moment projection).
 - **Layer feel contract (P4 handoff):** [`iterations/v1.123/specs/layer-feel-differentiation.md`](../iterations/v1.123/specs/layer-feel-differentiation.md).
 
 ---
@@ -294,6 +309,8 @@ The current design intentionally trades query flexibility for schema simplicity.
 Post-1.0, if state-path queries emerge as a product requirement, a dedicated
 `key_block_state` table (normalized, indexed) should be considered as a
 replacement, not a supplement — avoiding two sources of truth for the same state.
+
+> **Durable roadmap:** consolidated in the [deferred-features tracker §2.6](../knowledge/deferred-features-cross-version-tracker.md) — DR-47 (computable state-path query perf).
 
 ##### 5.5.9.3 Structured validation mode
 
@@ -545,8 +562,8 @@ Minimum common `body` shape for script items:
 
 - Today, its default `work` scope is a local file/index workflow under the active `creator_id` and `workspace_slug`.
 - Its current implementation is not equivalent to the World-scoped narrative KB model.
-- Future `--scope world` behavior must route to the World-scoped narrative KB model (`nexus-knowledge` + `nexus-narrative`).
-- Future user/global knowledge behavior must route to `nexus-knowledge` (User-scoped), not to the World KB model.
+
+> **Durable roadmap:** consolidated in the [deferred-features tracker §2.6](../knowledge/deferred-features-cross-version-tracker.md) — DR-46 (`creator kb --scope world` / user-global knowledge routing).
 
 ### 5.4 Prohibited shorthand
 
@@ -594,7 +611,7 @@ Invalid transitions return `422` with stable error code on Daemon API.
 
 #### 5.5.4 Rejected retention
 
-Rejected promotion candidates are retained in `Logs/kb/rejected/<YYYY-MM-DD>-<extract_job_id>.md` for audit. Retention is **indefinite** by default (no TTL); future iterations may add a `--prune-rejected` CLI.
+Rejected promotion candidates are retained in `Logs/kb/rejected/<YYYY-MM-DD>-<extract_job_id>.md` for audit. Retention is **indefinite** by default (no TTL); future iterations may add a `--prune-rejected` CLI — **durable roadmap:** consolidated in the [deferred-features tracker §2.6](../knowledge/deferred-features-cross-version-tracker.md) — DR-18 (`creator world kb` rejected-candidate `--prune-rejected`).
 
 #### 5.5.5 Relationship to existing `nexus-kb` taxonomy
 
@@ -723,7 +740,8 @@ while `source = 'manual'` marks author-created rows. Extraction-sourced rows
 remain normal `kb_relationships` rows with OCC, symmetric projection, confidence
 validation, and optional grounding; **promotion is clearing `needs_review`**,
 not moving through a pending/confirmed/rejected relationship state machine. A
-full relationship promotion state machine (mirroring entities) is post-1.0.
+full relationship promotion state machine (mirroring entities) is post-1.0 —
+**durable roadmap:** consolidated in the [deferred-features tracker §2.6](../knowledge/deferred-features-cross-version-tracker.md) — DR-48 (relationship promotion state machine).
 
 **Entity-existence prerequisite**: extraction persists a relationship suggestion
 only when both endpoints already resolve to non-deleted KeyBlocks in the same

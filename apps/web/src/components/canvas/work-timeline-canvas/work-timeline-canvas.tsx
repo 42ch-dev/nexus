@@ -6,8 +6,10 @@
  *     `GET .../works/{work_id}/outline` — the single Work-outline read
  *     endpoint).
  *   - Adapter projection via `useCanvasSurface` (V1.114 P0 recipe).
- *   - Task 4 layer state: Narrative ↔ Moment tabs in the canvas header.
- *     Active layer drives `createWorkTimelineCanvasAdapter(ctxRef, layer)`
+ *   - Task 4 layer state + V1.156 P2 T2: Brief | Narrative | Moment tabs
+ *     in the canvas header (Brief added V1.156 — read-only projection of
+ *     the bound World's Brief, PD-2). Active layer drives
+ *     `createWorkTimelineCanvasAdapter(ctxRef, layer, boundWorldGraph)`
  *     so `useCanvasSurface`'s `[graph, adapter]` memo re-projects on layer
  *     swap (semantic discrete swap per layer-feel-differentiation.md §3.1
  *     — not continuous viewport zoom).
@@ -43,6 +45,7 @@ import {
 } from '@/components/canvas/use-canvas-surface';
 import { SemanticZoomBridge } from '@/components/canvas/use-semantic-zoom';
 import { useWorkOutline } from '@/lib/canvas/use-outline-data';
+import { useWorldKbGraph } from '@/lib/canvas/use-world-kb-data';
 import { useWork } from '@/api/queries';
 import { LoadingState, ErrorState, EmptyState } from '@/components/ui/states';
 import { Button } from '@42ch/nexus-ui';
@@ -106,6 +109,20 @@ export function WorkTimelineCanvas({ workId, sceneBeatFixture }: WorkTimelineCan
   const workDetailQuery = useWork(workId);
   const boundWorldId = workDetailQuery.data?.world_id ?? undefined;
 
+  // ── V1.156 P2 T2 — bound World's KB graph (Brief layer era data) ────────
+  //
+  // Work-Brief is a read-only **projection** of the bound World's Brief
+  // (PD-2): Brief remains World spine; the Work does NOT gain an authored
+  // Brief. The Brief layer composes from the bound World's
+  // `GET /v1/daemon/worlds/{world_id}/kb/graph` (V1.73 — no new route)
+  // via `Work.world_id` (already resolved above). `useWorldKbGraph` is
+  // disabled when no World is bound (`enabled: Boolean(worldId)` inside
+  // the hook), so `boundWorldGraph` stays undefined for unbound Works →
+  // the Brief projection emits zero nodes (honest empty-state, T2 owns
+  // the visible copy).
+  const worldKbGraphQuery = useWorldKbGraph(boundWorldId);
+  const boundWorldGraph = worldKbGraphQuery.data;
+
   // Cross-surface navigation hand-off. Composed once per render via
   // `useCallback`; the adapter context ref captures the latest closure so
   // the inspector's CTA always targets the current `boundWorldId`. The
@@ -128,22 +145,30 @@ export function WorkTimelineCanvas({ workId, sceneBeatFixture }: WorkTimelineCan
   // the surface stays Narrative-default so the UX does not flip between
   // real Works (no wire-scene/beat data today) and fixture-driven tests.
   //
-  // V1.123 P4 Task 6 — layer-state persistence. The user-chosen layer is
-  // encoded in the URL search param `?layer=narrative|moment`
-  // (layer-feel-differentiation.md §5). The URL survives Work Timeline →
-  // Outline → back round-trips + refresh. Invalid layer values for the
-  // surface (`?layer=brief` — Brief is World-only) are ignored.
+  // V1.123 P4 Task 6 + V1.156 P2 T2 — layer-state persistence. The
+  // user-chosen layer is encoded in the URL search param
+  // `?layer=brief|narrative|moment` (layer-feel-differentiation.md §5 +
+  // spec §3.3.3 layer-state persistence). The URL survives Work Timeline →
+  // Outline → back round-trips + refresh.
+  //
+  // V1.156 spec §3.3.3: all three layer values are valid on the Work
+  // Timeline — the V1.123 "Brief is World-only" restriction is lifted
+  // (Work×Brief cell closed). Unknown layer values (`?layer=foo`) fall
+  // back to the surface default.
   //
   // When the user swaps back to the default Narrative layer, the URL param
   // is dropped so the URL stays minimal.
   const [searchParams, setSearchParams] = useSearchParams();
   const urlLayerRaw = searchParams.get('layer');
   const activeLayer: WorkTimelineLayer = useMemo(() => {
-    if (urlLayerRaw === 'narrative' || urlLayerRaw === 'moment') {
+    if (
+      urlLayerRaw === 'brief' ||
+      urlLayerRaw === 'narrative' ||
+      urlLayerRaw === 'moment'
+    ) {
       return urlLayerRaw;
     }
-    // Invalid / absent → fall back to Narrative default. `brief` is
-    // World-Timeline-only and is silently ignored here.
+    // Invalid / absent → fall back to the Narrative default.
     return 'narrative';
   }, [urlLayerRaw]);
 
@@ -200,10 +225,16 @@ export function WorkTimelineCanvas({ workId, sceneBeatFixture }: WorkTimelineCan
   // can render the "View on World Timeline" affordance. The callback is
   // only forwarded when a bound World exists (the inspector hides the CTA
   // otherwise — honest scope cut).
+  //
+  // V1.156 P2 T2 — also wires the `boundWorldGraph` slot (the bound World's
+  // KB graph). The Brief layer reads era entities from it; the adapter
+  // factory's captured value takes precedence, so this slot is the ctxRef
+  // fallback (tests / direct wiring).
   ctxRef.current = {
     workId,
     sceneBeatFixture,
     worldId: boundWorldId,
+    boundWorldGraph,
     onViewOnWorldTimeline: boundWorldId ? onViewOnWorldTimeline : undefined,
   };
 
@@ -211,9 +242,15 @@ export function WorkTimelineCanvas({ workId, sceneBeatFixture }: WorkTimelineCan
   // adapter]` memo re-projects (semantic discrete swap per layer-feel §3.1).
   // The ctxRef stays mutable; the adapter just captures the new layer
   // value, so this is a cheap factory re-run, not a full layout rebuild.
+  //
+  // V1.156 P2 T2 — the adapter ALSO captures the bound World's KB graph
+  // (P1 fix-wave lesson F-3 applied proactively): data-driven re-projection
+  // requires the graph in the memo deps — a graph identity change (refetch)
+  // recreates the adapter and re-projects the Brief layer without a layer
+  // swap. Mirrors the World adapter's captured-fixture pattern.
   const adapter = useMemo(
-    () => createWorkTimelineCanvasAdapter(ctxRef, activeLayer),
-    [activeLayer],
+    () => createWorkTimelineCanvasAdapter(ctxRef, activeLayer, boundWorldGraph),
+    [activeLayer, boundWorldGraph],
   );
 
   const surface = useCanvasSurface(adapter, surfaceQuery);
@@ -236,6 +273,43 @@ export function WorkTimelineCanvas({ workId, sceneBeatFixture }: WorkTimelineCan
 
   const outline = outlineQuery.data;
   const isEmpty = !outline || (outline.timeline_events ?? []).length === 0;
+
+  // V1.156 P2 fix-wave F1 — bound-World graph query status gates (Brief
+  // layer only). The Brief layer's era data comes from the bound World's KB
+  // graph (`worldKbGraphQuery`) — a second async source independent of the
+  // outline projection. Without these gates the Brief-empty panel would
+  // misrepresent an in-flight fetch as "no world-shape context" (flash on
+  // `?layer=brief` deep links) and a failed fetch as a permanent honest
+  // empty-state with no retry. Mirrors the World Timeline orchestrator's
+  // `graph.isLoading` / `graph.isError` gates
+  // (`timeline-canvas.tsx:670-680`). Unbound Works skip the gate entirely
+  // (the hook is disabled → the honest Brief-empty panel below owns them).
+  const isBriefGraphPending =
+    !isEmpty && activeLayer === 'brief' && Boolean(boundWorldId);
+
+  if (isBriefGraphPending && worldKbGraphQuery.isLoading) {
+    return <LoadingState label={t('workTimeline.loading', { defaultValue: 'Loading Work Timeline…' })} />;
+  }
+  if (isBriefGraphPending && worldKbGraphQuery.isError) {
+    return (
+      <ErrorState
+        description={t('workTimeline.loadError', {
+          defaultValue: 'Could not load the work timeline.',
+        })}
+        onRetry={() => worldKbGraphQuery.refetch()}
+      />
+    );
+  }
+
+  // V1.156 P2 T2 — Work-Brief empty detection. Active layer is Brief AND
+  // the projection returned zero nodes (no bound World / no era data in the
+  // bound World's graph). The Brief layer is a read-only projection of the
+  // bound World's Brief (PD-2) — the panel explains the world-shape context
+  // comes from the bound World and offers a CTA back to Narrative. There is
+  // NO "create Brief" CTA: the Work does not own Brief authoring (Brief is
+  // World spine).
+  const isBriefEmpty =
+    !isEmpty && activeLayer === 'brief' && surface.nodes.length === 0;
 
   // V1.123 P2 Task 7 — Moment-empty detection. Active layer is Moment AND
   // the projection returned zero nodes (no scene/beat fixture / empty
@@ -272,6 +346,8 @@ export function WorkTimelineCanvas({ workId, sceneBeatFixture }: WorkTimelineCan
               'Outline events you add through the Outline surface will appear here.',
           })}
         />
+      ) : isBriefEmpty ? (
+        <BriefEmptyState onSwitchToNarrative={() => handleLayerChange('narrative')} />
       ) : isMomentEmpty ? (
         <MomentEmptyState onSwitchToNarrative={() => handleLayerChange('narrative')} />
       ) : (
@@ -339,10 +415,11 @@ export function WorkTimelineCanvas({ workId, sceneBeatFixture }: WorkTimelineCan
 }
 
 /**
- * Canvas header — surfaces the Work Timeline label + the Narrative ↔ Moment
- * layer switcher (Task 4) + the Outline peer-link (Task 5 — Work Canvas shell
- * peer nav). The Outline link is the canonical escape hatch back to where
- * the writes live (architect §6 — Work Timeline is read-only in V1.123).
+ * Canvas header — surfaces the Work Timeline label + the Brief | Narrative |
+ * Moment layer switcher (Task 4 + V1.156 P2 T2) + the Outline peer-link
+ * (Task 5 — Work Canvas shell peer nav). The Outline link is the canonical
+ * escape hatch back to where the writes live (architect §6 — Work Timeline
+ * is read-only in V1.123).
  */
 function WorkTimelineCanvasHeader({
   workId,
@@ -369,27 +446,31 @@ function WorkTimelineCanvasHeader({
         </h2>
         <p className="text-copy-13 text-gray-700">
           {t('workTimeline.header.description', {
-            defaultValue: 'The work’s narrative + moments. Pivots to Outline for edits.',
+            defaultValue:
+              'The work’s timeline across Brief, Narrative, and Moment layers. Pivots to Outline for edits.',
           })}
         </p>
       </div>
       <div className="flex flex-wrap items-center gap-2">
-        {/* V1.123 P4 Task 5 — layer breadcrumb. Shows the layer path
-            (Narrative, or Narrative > Moment when drilled). Mirrors the
-            Timeline surface's Brief ↔ Narrative breadcrumb pattern. */}
+        {/* V1.123 P4 Task 5 + V1.156 P2 T2 — layer breadcrumb. Shows the
+            layer path (Brief, or Brief > Narrative when drilled). Mirrors
+            the Timeline surface's Brief ↔ Narrative breadcrumb pattern —
+            Brief is the coarsest (world-shape) layer, Narrative the layer
+            below it; Moment sits outside the coarse/fine pair (same as the
+            World Timeline's Moment — reached via the switcher tabs). */}
         {showLayerSwitcher ? (
           <LayerBreadcrumb
             surfaceKey="work-timeline"
             coarseSegment={{
-              layer: 'narrative',
-              label: t('workTimeline.layerSwitcher.narrative', {
-                defaultValue: 'Narrative',
+              layer: 'brief',
+              label: t('workTimeline.layerSwitcher.brief', {
+                defaultValue: 'Brief',
               }),
             }}
             fineSegment={{
-              layer: 'moment',
-              label: t('workTimeline.layerSwitcher.moment', {
-                defaultValue: 'Moment',
+              layer: 'narrative',
+              label: t('workTimeline.layerSwitcher.narrative', {
+                defaultValue: 'Narrative',
               }),
             }}
             activeLayer={activeLayer}
@@ -438,10 +519,10 @@ function WorkTimelineCanvasHeader({
 }
 
 /**
- * V1.123 P2 Task 4 — Narrative ↔ Moment layer switcher
- * (layer-feel-differentiation.md §3.3 explicit layer control).
+ * V1.123 P2 Task 4 + V1.156 P2 T2 — Brief | Narrative | Moment layer
+ * switcher (layer-feel-differentiation.md §3.3 explicit layer control).
  *
- * Inline segmented control (two buttons with `aria-pressed`). Built inline
+ * Inline segmented control (three buttons with `aria-pressed`). Built inline
  * rather than promoting to `packages/nexus-ui` because:
  *   - The set of layers + the active-layer discriminator are Work-Timeline-
  *     surface-specific (not a generic primitive).
@@ -475,6 +556,16 @@ function WorkTimelineLayerSwitcher({
     labelKey: string;
     defaultValue: string;
   }> = [
+    {
+      // V1.156 P2 T2 — Brief tab. Additive first segment; Brief is the
+      // coarsest (world-shape) layer — read-only projection of the bound
+      // World's Brief (PD-2). Never the Work Timeline default (architect
+      // §7.3 — Narrative stays default).
+      layer: 'brief',
+      testId: 'work-timeline-layer-tab-brief',
+      labelKey: 'workTimeline.layerSwitcher.brief',
+      defaultValue: 'Brief',
+    },
     {
       layer: 'narrative',
       testId: 'work-timeline-layer-tab-narrative',
@@ -565,6 +656,60 @@ function MomentEmptyState({
             onClick={onSwitchToNarrative}
           >
             {t('workTimeline.moment.emptyState.cta', {
+              defaultValue: 'Switch to Narrative',
+            })}
+          </Button>
+        }
+      />
+    </div>
+  );
+}
+
+/**
+ * V1.156 P2 T2 — Work-Brief honest empty-state (PD-2).
+ *
+ * Renders when the active layer is Brief but the projection has zero nodes
+ * (no bound World; or the bound World's KB graph has no `block_type=era`
+ * entities). Work-Brief is a read-only **projection** of the bound World's
+ * Brief (PD-2): Brief is World spine, the Work does NOT gain an authored
+ * Brief, and there is NO Work-owned Brief write flow. The panel says exactly
+ * that (honest copy: world-shape context comes from the bound World's Brief)
+ * and offers a CTA back to Narrative — there is NO "create Brief" CTA,
+ * because this is NOT a Work Brief authoring surface.
+ *
+ * Mirrors the V1.123 P1 `BriefEmptyState` escape-hatch pattern (shared
+ * `EmptyState` primitive; primary-action CTA so keyboard + SR users have a
+ * direct escape hatch) with Work-specific copy per spec §3.3.3 empty-state
+ * honesty ("World-shape context appears here when this Work is bound to a
+ * World with era markers." + CTA toward Narrative).
+ */
+function BriefEmptyState({
+  onSwitchToNarrative,
+}: {
+  onSwitchToNarrative: () => void;
+}) {
+  const { t } = useTranslation('canvas');
+  return (
+    <div
+      data-testid="work-timeline-brief-empty-state"
+      className="rounded-card border border-gray-alpha-400 bg-background-100"
+    >
+      <EmptyState
+        title={t('workTimeline.brief.emptyState.title', {
+          defaultValue: 'No world-shape context yet',
+        })}
+        description={t('workTimeline.brief.emptyState.message', {
+          defaultValue:
+            'World-shape context appears here when this Work is bound to a World with era markers. Brief is a read-only projection of the bound World’s Brief.',
+        })}
+        action={
+          <Button
+            type="button"
+            variant="primary"
+            data-testid="work-timeline-brief-empty-cta"
+            onClick={onSwitchToNarrative}
+          >
+            {t('workTimeline.brief.emptyState.cta', {
               defaultValue: 'Switch to Narrative',
             })}
           </Button>

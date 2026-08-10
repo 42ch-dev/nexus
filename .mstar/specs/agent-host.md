@@ -413,7 +413,7 @@ Each native adapter should follow the per-provider stream adapter pattern (borro
 - Default command lookup: `claude` on PATH, overridable in config.
 - Default mode: non-interactive single-turn prompt through configured args (verified: `--print`).
 - Wave 1 capability reporting is intentionally narrower than ACP: managed subprocess ownership, prompt execution, cancellation by process termination, stdout/stderr event normalization, health/probe, and configured model/args/env.
-- Future native providers (Codex, Gemini, OpenCode, etc.) follow the same per-provider adapter pattern with their own normalization modules.
+- Future native providers (Codex, Gemini, OpenCode, etc.) follow the same per-provider adapter pattern with their own normalization modules. **Durable roadmap:** [deferred-features tracker §2.6](../knowledge/deferred-features-cross-version-tracker.md) — DR-14.
 
 ---
 
@@ -424,7 +424,7 @@ Each native adapter should follow the per-provider stream adapter pattern (borro
 Discovery is deterministic and ordered:
 
 1. **Static config** from `{NEXUS_HOME}/agent-host/config.toml`: explicit provider IDs, protocol kind, command template, args/env, allow/deny state, timeout/concurrency overrides.
-2. **PATH scan** for known native commands: Wave 1: `claude` only. Later waves: `codex`, `gemini`, `opencode`, `cursor`, `kimi`, etc. Use cross-platform probe (DF-26: `which::which()` crate for PATH resolution, with manual fallback scan). **Windows note**: the `which` crate handles `PATHEXT` extensions (`.exe`, `.cmd`, etc.) automatically. Edge cases with custom shell integrations or non-standard PATH separators fall back to a manual directory scan.
+2. **PATH scan** for known native commands: Wave 1: `claude` only. Later waves: `codex`, `gemini`, `opencode`, `cursor`, `kimi`, etc. (tracked in the deferred-features tracker §2.6 — DR-14). Use cross-platform probe (DF-26: `which::which()` crate for PATH resolution, with manual fallback scan). **Windows note**: the `which` crate handles `PATHEXT` extensions (`.exe`, `.cmd`, etc.) automatically. Edge cases with custom shell integrations or non-standard PATH separators fall back to a manual directory scan.
 3. **ACP registry** via `nexus_acp_host::RegistryClient`: include registry entries with runnable distributions for current platform, annotate as `protocol_kind = acp`, preserve registry metadata and trust source.
 
 ### 5.2 Deduplication rules
@@ -585,7 +585,7 @@ On timeout: cancel the operation and emit `OpFailed` with `error_category = "tim
 
 ```text
 {NEXUS_HOME}/agent-host/config.toml
-{NEXUS_HOME}/agent-host/sessions.json       # reserved for future host-level session persistence
+{NEXUS_HOME}/agent-host/sessions.json       # reserved for future host-level session persistence (deferred-features tracker §2.6 — DR-15)
 {NEXUS_HOME}/agent-host/events/             # optional JSONL event traces by run/session
 ```
 
@@ -621,7 +621,7 @@ Stage-level timeout defaults (15s init, 180s prompt) are validated production de
 
 ### 9.3 Session persistence
 
-Wave 1 uses in-memory session tracking only. ACP sessions may optionally use `nexus-acp-host::SessionManager` for ACP-level session restore. Native sessions have no persistence in Wave 1. The `sessions.json` path is reserved for future use.
+Wave 1 uses in-memory session tracking only. ACP sessions may optionally use `nexus-acp-host::SessionManager` for ACP-level session restore. Native sessions have no persistence in Wave 1. The `sessions.json` path is reserved for future use. **Durable roadmap:** [deferred-features tracker §2.6](../knowledge/deferred-features-cross-version-tracker.md) — DR-15.
 
 ---
 
@@ -685,8 +685,8 @@ Multica is an open-source AI-native team collaboration platform that wraps multi
 | Managed task/session state with deterministic terminal events | Session state machine (§6.1) |
 | Per-agent config (model, env, args, MCP, concurrency) | `[[providers]]` TOML config |
 | Orphan recovery (daemon restart) | `HostManager::shutdown()` drain (§6.3) |
-| Task lease + atomic claim | Future multi-session concurrent execution |
-| Skills injection (Markdown instructions) | Future "pre-session context injection" |
+| Task lease + atomic claim | Future multi-session concurrent execution — deferred-features tracker §2.6 DR-16 |
+| Skills injection (Markdown instructions) | Future "pre-session context injection" — deferred-features tracker §2.6 DR-16 |
 
 ### 11.4 Architecture mapping
 
