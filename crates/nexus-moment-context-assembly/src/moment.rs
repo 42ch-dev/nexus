@@ -2099,9 +2099,9 @@ mod tests {
         // Extended scan (V1.149 P0 T2): the activation key matches ONLY the
         // timeline outline-beat text (event title), not stage0 and not the
         // entry's own self-match text — the entry fires via timeline text.
+        use nexus_narrative::timeline_event::{TimelineEvent, TimelineEventType};
         let stores = TestStores::new();
 
-        use nexus_narrative::timeline_event::{TimelineEvent, TimelineEventType};
         let mut event = TimelineEvent::new("wld_1", "fbk_root", TimelineEventType::StoryAdvance, 1);
         event.title = Some("The dawn dock heist".to_string());
         stores.narrative.insert_event(event);

@@ -1829,6 +1829,23 @@ mod tests {
         use nexus_knowledge::world_kb::KbStore;
         use nexus_moment_context_assembly::MomentContext;
 
+        // `KbStore` has async methods (not dyn-compatible), so use a generic
+        // helper that runs `assemble_moment` against a concrete store type.
+        #[allow(clippy::future_not_send)]
+        async fn run<K: KbStore>(pool: &sqlx::SqlitePool, kb_store: &K) -> MomentContext {
+            let narrative =
+                nexus_local_db::narrative_gateway::SqliteNarrativeGateway::new(pool.clone());
+            let knowledge = SqliteKnowledgeStore::new(pool.clone());
+            let stage0 = Stage0Assembly {
+                personality: "P.".to_string(),
+                experience: "E.".to_string(),
+                user_prompt: "P.".to_string(),
+                ..Stage0Assembly::default()
+            };
+            let request = MomentRequest::new(stage0).with_world("wld_t4");
+            assemble_moment(&request, &narrative, kb_store, &knowledge).await
+        }
+
         let (pool, _dir) = fresh_pool().await;
         seed_mca_world(&pool).await;
 
@@ -1860,23 +1877,6 @@ mod tests {
             user_prompt: "P.".to_string(),
             ..Stage0Assembly::default()
         };
-
-        // `KbStore` has async methods (not dyn-compatible), so use a generic
-        // helper that runs `assemble_moment` against a concrete store type.
-        #[allow(clippy::future_not_send)]
-        async fn run<K: KbStore>(pool: &sqlx::SqlitePool, kb_store: &K) -> MomentContext {
-            let narrative =
-                nexus_local_db::narrative_gateway::SqliteNarrativeGateway::new(pool.clone());
-            let knowledge = SqliteKnowledgeStore::new(pool.clone());
-            let stage0 = Stage0Assembly {
-                personality: "P.".to_string(),
-                experience: "E.".to_string(),
-                user_prompt: "P.".to_string(),
-                ..Stage0Assembly::default()
-            };
-            let request = MomentRequest::new(stage0).with_world("wld_t4");
-            assemble_moment(&request, &narrative, kb_store, &knowledge).await
-        }
 
         let sqlite_store = nexus_local_db::kb_store::SqliteKbStore::new(pool.clone());
         let ctx_sqlite = run(&pool, &sqlite_store).await;

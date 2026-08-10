@@ -1190,7 +1190,7 @@ mod tests {
             session_id: "ses_test_001".to_string(),
             entry_id: "kb_hero".to_string(),
             state: state.clone(),
-            extensions: Default::default(),
+            extensions: HashMap::default(),
         };
 
         match adapter.project(project_req).await {
@@ -1229,7 +1229,7 @@ mod tests {
             session_id: "ses_missing".to_string(),
             entry_id: "kb_nonexistent".to_string(),
             state: Map::new(),
-            extensions: Default::default(),
+            extensions: HashMap::default(),
         };
 
         match adapter.project(project_req).await {
@@ -1237,7 +1237,7 @@ mod tests {
                 assert_eq!(r.code, SpokeRejectCode::InvalidInput);
                 assert!(r.message.contains("not found"));
             }
-            _ => panic!("expected InvalidInput reject"),
+            SpokeResult::Ok(_) => panic!("expected InvalidInput reject"),
         }
     }
 
@@ -1254,7 +1254,7 @@ mod tests {
             session_id: "ses_dup".to_string(),
             entry_id: "kb_dup_ses".to_string(),
             state: Map::new(),
-            extensions: Default::default(),
+            extensions: HashMap::default(),
         };
         unwrap_ok(adapter.project(project_req.clone()).await, "first project");
 
@@ -1263,7 +1263,7 @@ mod tests {
                 assert_eq!(r.code, SpokeRejectCode::InvalidInput);
                 assert!(r.message.contains("already exists"));
             }
-            _ => panic!("expected InvalidInput reject for duplicate"),
+            SpokeResult::Ok(_) => panic!("expected InvalidInput reject for duplicate"),
         }
     }
 
@@ -1280,7 +1280,7 @@ mod tests {
             entry_id: "kb_whatever".to_string(),
             computable: Map::new(),
             settle: None,
-            extensions: Default::default(),
+            extensions: HashMap::default(),
         };
 
         match adapter.compute(compute_req).await {
@@ -1288,7 +1288,7 @@ mod tests {
                 assert_eq!(r.code, SpokeRejectCode::InvalidInput);
                 assert!(r.message.contains("not found"));
             }
-            _ => panic!("expected InvalidInput for missing session"),
+            SpokeResult::Ok(_) => panic!("expected InvalidInput for missing session"),
         }
     }
 
@@ -1306,7 +1306,7 @@ mod tests {
             session_id: "ses_mismatch".to_string(),
             entry_id: "kb_mismatch".to_string(),
             state: Map::new(),
-            extensions: Default::default(),
+            extensions: HashMap::default(),
         };
         unwrap_ok(adapter.project(project_req).await, "project");
 
@@ -1316,7 +1316,7 @@ mod tests {
             entry_id: "kb_different".to_string(),
             computable: Map::new(),
             settle: None,
-            extensions: Default::default(),
+            extensions: HashMap::default(),
         };
 
         match adapter.compute(compute_req).await {
@@ -1324,7 +1324,7 @@ mod tests {
                 assert_eq!(r.code, SpokeRejectCode::InvalidInput);
                 assert!(r.message.contains("mismatch"));
             }
-            _ => panic!("expected InvalidInput for mismatch"),
+            SpokeResult::Ok(_) => panic!("expected InvalidInput for mismatch"),
         }
     }
 
@@ -1375,7 +1375,7 @@ mod tests {
                     session_id: "ses_combat_001".to_string(),
                     entry_id: "kb_hero_c".to_string(),
                     state,
-                    extensions: Default::default(),
+                    extensions: HashMap::default(),
                 })
                 .await,
             "project combat",
@@ -1403,7 +1403,7 @@ mod tests {
                     entry_id: "kb_hero_c".to_string(),
                     computable,
                     settle: Some(false),
-                    extensions: Default::default(),
+                    extensions: HashMap::default(),
                 })
                 .await,
             "compute combat",
@@ -1469,7 +1469,7 @@ mod tests {
                     session_id: "ses_settle".to_string(),
                     entry_id: "kb_settle_h".to_string(),
                     state,
-                    extensions: Default::default(),
+                    extensions: HashMap::default(),
                 })
                 .await,
             "project",
@@ -1493,7 +1493,7 @@ mod tests {
                     entry_id: "kb_settle_h".to_string(),
                     computable,
                     settle: Some(true),
-                    extensions: Default::default(),
+                    extensions: HashMap::default(),
                 })
                 .await,
             "compute settle",
@@ -1558,7 +1558,7 @@ mod tests {
                     session_id: "ses_no_mod".to_string(),
                     entry_id: "kb_no_mod".to_string(),
                     state: Map::new(),
-                    extensions: Default::default(),
+                    extensions: HashMap::default(),
                 })
                 .await,
             "project no-module",
@@ -1570,7 +1570,7 @@ mod tests {
                 entry_id: "kb_no_mod".to_string(),
                 computable: Map::new(),
                 settle: None,
-                extensions: Default::default(),
+                extensions: HashMap::default(),
             })
             .await
         {
@@ -1578,7 +1578,7 @@ mod tests {
                 assert_eq!(r.code, SpokeRejectCode::InvalidInput);
                 assert!(r.message.contains("module identity required"));
             }
-            _ => panic!("expected InvalidInput for missing module_id"),
+            SpokeResult::Ok(_) => panic!("expected InvalidInput for missing module_id"),
         }
     }
 
@@ -1605,7 +1605,7 @@ mod tests {
                     session_id: "ses_bad_mod".to_string(),
                     entry_id: "kb_unknown_mod".to_string(),
                     state,
-                    extensions: Default::default(),
+                    extensions: HashMap::default(),
                 })
                 .await,
             "project",
@@ -1617,7 +1617,7 @@ mod tests {
                 entry_id: "kb_unknown_mod".to_string(),
                 computable: Map::new(),
                 settle: None,
-                extensions: Default::default(),
+                extensions: HashMap::default(),
             })
             .await
         {
@@ -1626,7 +1626,7 @@ mod tests {
                 assert_eq!(r.code, SpokeRejectCode::InvalidInput);
                 assert!(r.message.contains("unknown embedded WASM module"));
             }
-            _ => panic!("expected InvalidInput for unknown module"),
+            SpokeResult::Ok(_) => panic!("expected InvalidInput for unknown module"),
         }
     }
 
@@ -2113,7 +2113,7 @@ mod tests {
                     session_id: "ses_vanished".to_string(),
                     entry_id: "kb_vanished".to_string(),
                     state: Map::new(),
-                    extensions: Default::default(),
+                    extensions: HashMap::default(),
                 })
                 .await,
             "project",
@@ -2132,7 +2132,7 @@ mod tests {
                 entry_id: "kb_vanished".to_string(),
                 computable: Map::new(),
                 settle: None,
-                extensions: Default::default(),
+                extensions: HashMap::default(),
             })
             .await
         {
@@ -2144,7 +2144,7 @@ mod tests {
                 );
                 assert!(r.message.contains("not found for compute"));
             }
-            _ => panic!("expected InvalidInput for missing compute target entry"),
+            SpokeResult::Ok(_) => panic!("expected InvalidInput for missing compute target entry"),
         }
     }
 
@@ -2263,7 +2263,7 @@ mod tests {
                     session_id: "ses_f001".to_string(),
                     entry_id: "kb_atk_r".to_string(),
                     state,
-                    extensions: Default::default(),
+                    extensions: HashMap::default(),
                 })
                 .await,
             "project",
@@ -2286,7 +2286,7 @@ mod tests {
                     entry_id: "kb_atk_r".to_string(),
                     computable,
                     settle: Some(true),
-                    extensions: Default::default(),
+                    extensions: HashMap::default(),
                 })
                 .await,
             "compute settle",
@@ -2334,6 +2334,9 @@ mod tests {
     /// world B.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn cross_world_defender_rejects_invalid_input() {
+        use crate::conversion::world_kb_to_spoke;
+        use nexus_contracts::BlockType;
+        use nexus_knowledge::world_kb::{WorldKbBody, WorldKbEntry};
         let (pool, _dir) = fresh_pool().await;
         // Seed two distinct worlds.
         seed_world(&pool).await;
@@ -2358,9 +2361,6 @@ mod tests {
         // Create a character in world B (wld_other).
         // spoke_character_entry hardcodes wld_cmp; we create a WorldKbEntry
         // for wld_other explicitly and convert.
-        use crate::conversion::world_kb_to_spoke;
-        use nexus_contracts::BlockType;
-        use nexus_knowledge::world_kb::{WorldKbBody, WorldKbEntry};
         let mut world_b = WorldKbEntry::new("wld_other", BlockType::Character, "OtherF003");
         world_b.entry_id = "kb_other_f003".to_string();
         world_b.revision = Some(1);
@@ -2410,7 +2410,7 @@ mod tests {
                     session_id: "ses_f003".to_string(),
                     entry_id: "kb_hero_f003".to_string(),
                     state,
-                    extensions: Default::default(),
+                    extensions: HashMap::default(),
                 })
                 .await,
             "project",
@@ -2432,7 +2432,7 @@ mod tests {
                 entry_id: "kb_hero_f003".to_string(),
                 computable,
                 settle: None,
-                extensions: Default::default(),
+                extensions: HashMap::default(),
             })
             .await
         {
@@ -2440,7 +2440,7 @@ mod tests {
                 assert_eq!(r.code, SpokeRejectCode::InvalidInput);
                 assert!(r.message.contains("cross-world"));
             }
-            _ => panic!("expected InvalidInput for cross-world reference"),
+            SpokeResult::Ok(_) => panic!("expected InvalidInput for cross-world reference"),
         }
     }
 
@@ -2467,7 +2467,7 @@ mod tests {
                     session_id: "ses_pathmod".to_string(),
                     entry_id: "kb_pathmod".to_string(),
                     state,
-                    extensions: Default::default(),
+                    extensions: HashMap::default(),
                 })
                 .await,
             "project",
@@ -2479,7 +2479,7 @@ mod tests {
                 entry_id: "kb_pathmod".to_string(),
                 computable: Map::new(),
                 settle: None,
-                extensions: Default::default(),
+                extensions: HashMap::default(),
             })
             .await
         {
@@ -2491,7 +2491,7 @@ mod tests {
                 );
                 assert!(r.message.contains("unknown embedded WASM module"));
             }
-            _ => panic!("expected InvalidInput for path-traversal module_id"),
+            SpokeResult::Ok(_) => panic!("expected InvalidInput for path-traversal module_id"),
         }
     }
 

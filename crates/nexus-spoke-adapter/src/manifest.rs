@@ -244,21 +244,21 @@ mod tests {
                 let _ = || {
                     let request: crate::UpsertRequest =
                         serde_json::from_value(serde_json::json!({})).expect("typecheck-only");
-                    let _ = crate::orchestrate_upsert(adapter, request);
+                    drop(crate::orchestrate_upsert(adapter, request));
                 };
             }
             "promote" => {
                 let _ = || {
                     let request: crate::PromoteRequest =
                         serde_json::from_value(serde_json::json!({})).expect("typecheck-only");
-                    let _ = crate::orchestrate_promote(adapter, request);
+                    drop(crate::orchestrate_promote(adapter, request));
                 };
             }
             "relate" => {
                 let _ = || {
                     let request: crate::RelateRequest =
                         serde_json::from_value(serde_json::json!({})).expect("typecheck-only");
-                    let _ = crate::orchestrate_relate(adapter, request);
+                    drop(crate::orchestrate_relate(adapter, request));
                 };
             }
             "check" => {
@@ -267,23 +267,23 @@ mod tests {
                         serde_json::from_value(serde_json::json!({})).expect("typecheck-only");
                     // Typecheck-only: the baseline no-op checker is the
                     // production run_checker shape (V1.148 daemon cutover).
-                    let _ = crate::orchestrate_check(adapter, request, |_input| {
+                    drop(crate::orchestrate_check(adapter, request, |_input| {
                         SpokeResult::Ok(vec![])
-                    });
+                    }));
                 };
             }
             "assemble" => {
                 let _ = || {
                     let request: crate::AssembleRequest =
                         serde_json::from_value(serde_json::json!({})).expect("typecheck-only");
-                    let _ = crate::orchestrate_assemble(adapter, request);
+                    drop(crate::orchestrate_assemble(adapter, request));
                 };
             }
             "compute" => {
                 let _ = || {
                     let request: crate::ComputeRequest =
                         serde_json::from_value(serde_json::json!({})).expect("typecheck-only");
-                    let _ = crate::orchestrate_compute(adapter, request);
+                    drop(crate::orchestrate_compute(adapter, request));
                 };
             }
             other => panic!("advertised op {other:?} is not backed by a production orchestrator"),

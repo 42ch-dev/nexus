@@ -114,7 +114,7 @@ fn add_request(
             symmetric: false,
             confidence: None,
             source_anchor_ids: Vec::new(),
-            metadata: Default::default(),
+            metadata: serde_json::Map::default(),
             needs_review: None,
         }),
     }
@@ -217,7 +217,7 @@ async fn update_relationship_returns_bumped_version_and_projected_row() {
             symmetric: true,
             confidence: Some(0.75),
             source_anchor_ids: Vec::new(),
-            metadata: Default::default(),
+            metadata: serde_json::Map::default(),
             needs_review: None,
         }),
     };
@@ -361,7 +361,7 @@ async fn update_then_reread_via_get_graph_confirms_data_persisted() {
             symmetric: true,
             confidence: Some(0.8),
             source_anchor_ids: Vec::new(),
-            metadata: Default::default(),
+            metadata: serde_json::Map::default(),
             needs_review: None,
         }),
     };
@@ -618,7 +618,7 @@ async fn update_stale_version_returns_409() {
             symmetric: true,
             confidence: Some(0.75),
             source_anchor_ids: Vec::new(),
-            metadata: Default::default(),
+            metadata: serde_json::Map::default(),
             needs_review: None,
         }),
     };
@@ -924,7 +924,7 @@ async fn update_cross_world_relationship_returns_403() {
             symmetric: true,
             confidence: Some(0.75),
             source_anchor_ids: Vec::new(),
-            metadata: Default::default(),
+            metadata: serde_json::Map::default(),
             needs_review: None,
         }),
     };
@@ -1124,7 +1124,7 @@ async fn promote_suggestion_clears_needs_review() {
             symmetric: true,
             confidence: Some(0.75),
             source_anchor_ids: Vec::new(),
-            metadata: Default::default(),
+            metadata: serde_json::Map::default(),
             needs_review: Some(false),
         }),
     };
@@ -1210,7 +1210,7 @@ async fn update_preserves_needs_review_when_omitted() {
             symmetric: true,
             confidence: Some(0.75),
             source_anchor_ids: Vec::new(),
-            metadata: Default::default(),
+            metadata: serde_json::Map::default(),
             needs_review: None,
         }),
     };
@@ -1259,6 +1259,8 @@ async fn seed_many_relationships(pool: &sqlx::SqlitePool, world_id: &str, count:
 
 #[tokio::test]
 async fn get_graph_truncates_relationships_at_cap() {
+    // GRAPH_RELATIONSHIP_CAP is 1000 in src/api/handlers/world_kb.rs.
+    const CAP: usize = 1000;
     let (_tmp, state) = fresh_state().await;
     seed_key_block(
         state.pool().unwrap(),
@@ -1279,8 +1281,6 @@ async fn get_graph_truncates_relationships_at_cap() {
     )
     .await;
 
-    // GRAPH_RELATIONSHIP_CAP is 1000 in src/api/handlers/world_kb.rs.
-    const CAP: usize = 1000;
     seed_many_relationships(state.pool().unwrap(), "wld_test_world", CAP + 2).await;
 
     let Json(graph) = get_graph(
@@ -1373,7 +1373,7 @@ async fn update_preserves_unknown_extensions_nexus_keys() {
             symmetric: false,
             confidence: None,
             source_anchor_ids: Vec::new(),
-            metadata: Default::default(),
+            metadata: serde_json::Map::default(),
             needs_review: None,
         }),
     };

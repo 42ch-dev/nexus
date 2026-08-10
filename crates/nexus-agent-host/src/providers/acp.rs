@@ -773,14 +773,14 @@ mod tests {
 
         match &acp_blocks[0] {
             NexusContentBlock::Text(t) => assert_eq!(t.text, "Hello"),
-            _ => panic!("expected Text block"),
+            NexusContentBlock::ResourceLink(_) => panic!("expected Text block"),
         }
 
         match &acp_blocks[1] {
             NexusContentBlock::ResourceLink(r) => {
                 assert_eq!(r.uri, "file:///test.rs");
             }
-            _ => panic!("expected ResourceLink block"),
+            NexusContentBlock::Text(_) => panic!("expected ResourceLink block"),
         }
     }
 

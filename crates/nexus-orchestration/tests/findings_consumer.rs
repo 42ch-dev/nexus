@@ -168,9 +168,9 @@ fn render_outline_prompt(preset_input: &serde_json::Value) -> String {
 ///    finding titles.
 #[tokio::test]
 async fn novel_writing_outline_includes_open_findings_block_when_seeded() {
-    let pool = test_pool().await;
     const WORK: &str = "wrk_fc_1";
     const WORK_REF: &str = "fc-test-novel-1";
+    let pool = test_pool().await;
 
     let work = novel_work(WORK, WORK_REF);
     works::create_work(&pool, &work).await.unwrap();
@@ -306,9 +306,9 @@ async fn novel_writing_outline_includes_open_findings_block_when_seeded() {
 /// (no empty sentinel noise).
 #[tokio::test]
 async fn novel_writing_outline_omits_block_when_no_findings() {
-    let pool = test_pool().await;
     const WORK: &str = "wrk_fc_2";
     const WORK_REF: &str = "fc-test-novel-2";
+    let pool = test_pool().await;
 
     let work = novel_work(WORK, WORK_REF);
     works::create_work(&pool, &work).await.unwrap();
@@ -470,9 +470,9 @@ fn novel_writing_preset_input_coerces_none_open_findings_block_to_empty() {
 /// excluded (the master-review surface owns those).
 #[tokio::test]
 async fn actionable_set_includes_triaged_and_excludes_in_review() {
-    let pool = test_pool().await;
     const WORK: &str = "wrk_fc_actionable";
     const WORK_REF: &str = "fc-actionable";
+    let pool = test_pool().await;
 
     let work = novel_work(WORK, WORK_REF);
     works::create_work(&pool, &work).await.unwrap();

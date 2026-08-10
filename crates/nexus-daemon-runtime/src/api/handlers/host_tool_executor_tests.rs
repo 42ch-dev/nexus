@@ -3201,10 +3201,10 @@ async fn manuscript_phase_set_rejects_invalid_phase() {
 /// T6 success: `nexus.workspace.paths` returns allowed roots.
 #[tokio::test]
 async fn workspace_paths_returns_allowed_roots() {
-    let (_tmp, nexus_home, db_path) = create_test_workspace().await;
+    let (tmp, nexus_home, db_path) = create_test_workspace().await;
     let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
     // Explicitly initialize the workspace path so `workspace_path()` returns Some.
-    let ws_path = _tmp.path().join("creative_ws");
+    let ws_path = tmp.path().join("creative_ws");
     std::fs::create_dir_all(&ws_path).expect("mkdir workspace");
     state
         .init_workspace(ws_path.to_str().expect("utf8"))

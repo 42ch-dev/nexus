@@ -425,12 +425,12 @@ async fn pending_review_count_returns_409_without_creator() {
 /// `{id}` path segments for DELETE — same pattern as `works_api` tests).
 #[tokio::test]
 async fn pending_review_delete_returns_401_without_creator() {
+    use axum::extract::{Path, Query, State};
     let (tmp, nexus_home, db_path) = test_utils::create_test_workspace().await;
     // Remove config.toml → no active creator → 401.
     std::fs::remove_file(nexus_home.join("config.toml")).expect("remove config.toml");
     let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
 
-    use axum::extract::{Path, Query, State};
     let result = nexus_daemon_runtime::api::handlers::memory::delete_pending_review(
         State(state),
         Path("pending_noauth".to_string()),
@@ -520,8 +520,8 @@ async fn seed_n_pending_reviews_raw(pool: &sqlx::SqlitePool, creator_id: &str, c
 /// call drains the remainder and reports `has_more = false`. No row is lost.
 #[tokio::test]
 async fn review_bounded_drain_walk_more_than_batch_limit() {
-    let ctx = test_ctx().await;
     const TOTAL: usize = 55; // > REVIEW_BATCH_LIMIT (50)
+    let ctx = test_ctx().await;
 
     seed_n_pending_reviews_raw(&ctx.pool, "ctr_testuser", TOTAL).await;
 
@@ -609,6 +609,7 @@ async fn review_overlapping_calls_no_duplicate_processing() {
     use nexus_daemon_runtime::api::handlers::memory::review;
     use nexus_daemon_runtime::workspace::WorkspaceState;
     use std::sync::Arc;
+    const SEED: usize = 5;
 
     let (tmp, nexus_home, db_path) = test_utils::create_test_workspace().await;
     // Active creator = ctr_testuser (required by the auth gate).
@@ -620,7 +621,6 @@ async fn review_overlapping_calls_no_duplicate_processing() {
     let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
     let pool = state.pool().unwrap().clone();
 
-    const SEED: usize = 5;
     seed_n_pending_reviews_raw(&pool, "ctr_testuser", SEED).await;
 
     // Two overlapping handler invocations sharing the same WorkspaceState (and

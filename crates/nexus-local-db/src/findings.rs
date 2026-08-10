@@ -1718,9 +1718,9 @@ mod tests {
     /// other-chapter rows are excluded.
     #[tokio::test]
     async fn list_open_findings_for_chapter_filters_by_chapter_and_work_level() {
-        let (pool, _dir) = fresh_pool().await;
         const CREATOR: &str = "ctr_test";
         const WORK: &str = "wrk_a";
+        let (pool, _dir) = fresh_pool().await;
         seed_minimal_work(&pool, WORK, CREATOR).await;
         seed_minimal_work(&pool, "wrk_other", CREATOR).await;
 
@@ -1815,8 +1815,8 @@ mod tests {
     /// the tiebreaker is `created_at` ASC (oldest first within the bucket).
     #[tokio::test]
     async fn list_open_findings_for_chapter_orders_by_created_at_asc_within_severity() {
-        let (pool, _dir) = fresh_pool().await;
         const WORK: &str = "wrk_b";
+        let (pool, _dir) = fresh_pool().await;
         seed_minimal_work(&pool, WORK, "ctr_test").await;
 
         // Three minors on chapter 1, inserted with decreasing created_at.
@@ -1873,9 +1873,9 @@ mod tests {
     ///  - `recent_resolved`— resolved, `updated_at` inside the window      ← kept (recent)
     #[tokio::test]
     async fn findings_retention_removes_old_resolved_rows() {
-        let (pool, _dir) = fresh_pool().await;
         const CREATOR: &str = "ctr_test";
         const WORK: &str = "wrk_prune";
+        let (pool, _dir) = fresh_pool().await;
         seed_minimal_work(&pool, WORK, CREATOR).await;
 
         let now: i64 = 10_000_000;
@@ -1956,9 +1956,9 @@ mod tests {
     /// [`prune_resolved_findings_older_than`] actually deletes (§9.4).
     #[tokio::test]
     async fn findings_retention_count_preview_matches_prune() {
-        let (pool, _dir) = fresh_pool().await;
         const CREATOR: &str = "ctr_test";
         const WORK: &str = "wrk_count";
+        let (pool, _dir) = fresh_pool().await;
         seed_minimal_work(&pool, WORK, CREATOR).await;
 
         let now: i64 = 20_000_000;
@@ -2042,9 +2042,9 @@ mod tests {
     /// `updated_at` is far past the retention window.
     #[tokio::test]
     async fn findings_retention_skips_open_rows() {
-        let (pool, _dir) = fresh_pool().await;
         const CREATOR: &str = "ctr_test";
         const WORK: &str = "wrk_prune_open";
+        let (pool, _dir) = fresh_pool().await;
         seed_minimal_work(&pool, WORK, CREATOR).await;
 
         let now: i64 = 20_000_000;
@@ -2090,9 +2090,9 @@ mod tests {
     /// retention window are kept.
     #[tokio::test]
     async fn findings_retention_skips_recent_resolved_rows() {
-        let (pool, _dir) = fresh_pool().await;
         const CREATOR: &str = "ctr_test";
         const WORK: &str = "wrk_prune_recent";
+        let (pool, _dir) = fresh_pool().await;
         seed_minimal_work(&pool, WORK, CREATOR).await;
 
         let now: i64 = 30_000_000;
@@ -2163,9 +2163,9 @@ mod tests {
     /// `Some(None)`, then verifies the column is NULL after the update.
     #[tokio::test]
     async fn update_finding_can_clear_rule_suggestion_to_null() {
-        let (pool, _dir) = fresh_pool().await;
         const CREATOR: &str = "ctr_test";
         const WORK: &str = "wrk_clr";
+        let (pool, _dir) = fresh_pool().await;
         seed_minimal_work(&pool, WORK, CREATOR).await;
 
         // Seed with a non-empty rule_suggestion.
@@ -2209,9 +2209,9 @@ mod tests {
     /// V1.48 P3 T3 — `Some(Some(value))` sets `rule_suggestion` to the value.
     #[tokio::test]
     async fn update_finding_can_set_rule_suggestion() {
-        let (pool, _dir) = fresh_pool().await;
         const CREATOR: &str = "ctr_test";
         const WORK: &str = "wrk_set";
+        let (pool, _dir) = fresh_pool().await;
         seed_minimal_work(&pool, WORK, CREATOR).await;
 
         // Seed with no rule_suggestion (NULL).
@@ -2248,9 +2248,9 @@ mod tests {
     /// V1.48 P3 T3 — `None` (outer) leaves `rule_suggestion` unchanged.
     #[tokio::test]
     async fn update_finding_can_omit_rule_suggestion_to_keep_unchanged() {
-        let (pool, _dir) = fresh_pool().await;
         const CREATOR: &str = "ctr_test";
         const WORK: &str = "wrk_omit";
+        let (pool, _dir) = fresh_pool().await;
         seed_minimal_work(&pool, WORK, CREATOR).await;
 
         // Seed with a non-empty rule_suggestion.
@@ -2409,9 +2409,9 @@ mod tests {
     /// `open → triaged → in_review → resolved` and stamps `updated_at`.
     #[tokio::test]
     async fn update_finding_accepts_canonical_lifecycle_path() {
-        let (pool, _dir) = fresh_pool().await;
         const CREATOR: &str = "ctr_test";
         const WORK: &str = "wrk_lifecycle";
+        let (pool, _dir) = fresh_pool().await;
         seed_minimal_work(&pool, WORK, CREATOR).await;
 
         super::create_finding(
@@ -2462,9 +2462,9 @@ mod tests {
     /// `open → wont_fix` and `open → duplicate` (no intermediate triage).
     #[tokio::test]
     async fn update_finding_accepts_open_to_terminal_transitions() {
-        let (pool, _dir) = fresh_pool().await;
         const CREATOR: &str = "ctr_test";
         const WORK: &str = "wrk_open_terminal";
+        let (pool, _dir) = fresh_pool().await;
         seed_minimal_work(&pool, WORK, CREATOR).await;
 
         super::create_finding(
@@ -2517,9 +2517,9 @@ mod tests {
     /// terminal-locked, self-loop, and reverse-edge classes.
     #[tokio::test]
     async fn update_finding_rejects_illegal_transitions() {
-        let (pool, _dir) = fresh_pool().await;
         const CREATOR: &str = "ctr_test";
         const WORK: &str = "wrk_reject";
+        let (pool, _dir) = fresh_pool().await;
         seed_minimal_work(&pool, WORK, CREATOR).await;
 
         // Seed a resolved row (terminal — no outbound transitions).
@@ -2631,9 +2631,9 @@ mod tests {
     /// `ConstraintViolation`, so the handler can map it to `INVALID_INPUT`.
     #[tokio::test]
     async fn update_finding_rejects_unknown_status_value() {
-        let (pool, _dir) = fresh_pool().await;
         const CREATOR: &str = "ctr_test";
         const WORK: &str = "wrk_unknown_status";
+        let (pool, _dir) = fresh_pool().await;
         seed_minimal_work(&pool, WORK, CREATOR).await;
         super::create_finding(
             &pool,
@@ -2675,9 +2675,9 @@ mod tests {
     /// and the terminal statuses by default.
     #[tokio::test]
     async fn list_open_findings_for_chapter_matches_v149_actionable_set() {
-        let (pool, _dir) = fresh_pool().await;
         const CREATOR: &str = "ctr_test";
         const WORK: &str = "wrk_actionable";
+        let (pool, _dir) = fresh_pool().await;
         seed_minimal_work(&pool, WORK, CREATOR).await;
 
         // Seed one finding per status, all on chapter 1, all the same
@@ -2740,9 +2740,9 @@ mod tests {
     /// work-level triaged finding must reach every chapter's prompt.
     #[tokio::test]
     async fn list_open_findings_for_chapter_includes_work_level_triaged() {
-        let (pool, _dir) = fresh_pool().await;
         const CREATOR: &str = "ctr_test";
         const WORK: &str = "wrk_work_triaged";
+        let (pool, _dir) = fresh_pool().await;
         seed_minimal_work(&pool, WORK, CREATOR).await;
 
         // Work-level triaged finding.

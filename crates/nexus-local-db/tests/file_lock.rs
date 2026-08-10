@@ -27,9 +27,8 @@ async fn concurrent_tasks_serialise_via_file_lock() {
 
     // Task 2 fails to acquire while task 1 holds the lock.
     let err = file_lock::try_acquire(&work_dir, "cli:task-2").unwrap_err();
-    let locked = match err {
-        FileLockError::Locked(locked) => locked,
-        _ => panic!("expected FileLockError::Locked, got {err:?}"),
+    let FileLockError::Locked(locked) = err else {
+        panic!("expected FileLockError::Locked, got {err:?}")
     };
     assert_eq!(locked.holder_name, "cli:task-1");
 

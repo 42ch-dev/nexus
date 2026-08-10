@@ -1237,6 +1237,8 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn pack_export_import_cross_world_complementarity() {
+        const WORLD_B: &str = "wld_pack_b";
+        const WORLD_B_TITLE: &str = "Pack World B";
         // ── Phase 1: Seed World A with 3 entries + 1 relation ─────────
         let (pool_a, _dir_a, _entry_ids_a, _rel_ids_a) = seeded_pool().await;
         assert_eq!(count_entries(&pool_a, WORLD).await, 3);
@@ -1246,9 +1248,6 @@ mod tests {
         let (pack_path, _pack_dir) = export_to_file(&pool_a).await;
 
         // ── Phase 2: Create fresh DB with World B (different world_id) ─
-        const WORLD_B: &str = "wld_pack_b";
-        const WORLD_B_TITLE: &str = "Pack World B";
-
         let dir_b = tempfile::tempdir().unwrap();
         let db_path_b = dir_b.path().join("state.db");
         let pool_b = crate::db::Schema::init(&db_path_b).await.unwrap();
@@ -1792,13 +1791,13 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn pack_io_modules_preserved_and_activation_round_trip() {
         use nexus_spoke_adapter::adapter::activation;
+        const WORLD_A: &str = "wld_activation_a";
+        const WORLD_B: &str = "wld_activation_b";
 
         // ── Phase 1: Seed world A with entries carrying modules ─────────
         let dir_a = tempfile::tempdir().unwrap();
         let db_path_a = dir_a.path().join("state.db");
         let pool_a = crate::db::Schema::init(&db_path_a).await.unwrap();
-
-        const WORLD_A: &str = "wld_activation_a";
 
         // Reuse owner/creator seeding from the shared helpers.
         // SAFETY: test-only INSERT.
@@ -1853,8 +1852,6 @@ mod tests {
         let (pack_path, _pack_dir) = export_to_file_custom_world(&pool_a, WORLD_A).await;
 
         // ── Phase 3: Fresh DB with world B, import pack ─────────────────
-        const WORLD_B: &str = "wld_activation_b";
-
         let dir_b = tempfile::tempdir().unwrap();
         let db_path_b = dir_b.path().join("state.db");
         let pool_b = crate::db::Schema::init(&db_path_b).await.unwrap();
@@ -2243,11 +2240,11 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn pack_io_modules_preserved_on_rename_and_overwrite_collision() {
         use nexus_spoke_adapter::adapter::activation;
+        const WORLD_A: &str = "wld_activation_rename";
         let dir_a = tempfile::tempdir().unwrap();
         let pool_a = crate::db::Schema::init(&dir_a.path().join("state.db"))
             .await
             .unwrap();
-        const WORLD_A: &str = "wld_activation_rename";
         sqlx::query("INSERT OR IGNORE INTO creators (creator_id, display_name, status, cached_at, data) VALUES (?, ?, 'active', datetime('now'), '{}')").bind(OWNER).bind(OWNER_NAME).execute(&pool_a).await.unwrap();
         nexus_local_db::kb_store::seed::world(
             &pool_a,

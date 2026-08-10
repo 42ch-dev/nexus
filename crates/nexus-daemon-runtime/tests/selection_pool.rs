@@ -538,6 +538,7 @@ async fn test_archive_pool_rejects_cross_creator() {
 #[tokio::test]
 #[serial]
 async fn test_archive_inspiration_rejects_cross_creator() {
+    use nexus_daemon_runtime::api::handlers::works::ArchiveInspirationRequest;
     let (state, _tmp) = handler_state().await;
 
     let (_status, resp) = nexus_daemon_runtime::api::handlers::works::add_inspiration(
@@ -560,7 +561,6 @@ async fn test_archive_inspiration_rejects_cross_creator() {
     )
     .unwrap();
 
-    use nexus_daemon_runtime::api::handlers::works::ArchiveInspirationRequest;
     let result = nexus_daemon_runtime::api::handlers::works::archive_inspiration_handler(
         State(state.clone()),
         axum::Json(ArchiveInspirationRequest {

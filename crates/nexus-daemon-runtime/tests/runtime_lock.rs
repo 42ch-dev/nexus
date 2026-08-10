@@ -29,10 +29,10 @@ struct TestCtx {
 }
 
 async fn test_ctx() -> TestCtx {
-    let (_tmp, nexus_home, db_path) = test_utils::create_test_workspace().await;
+    let (tmp, nexus_home, db_path) = test_utils::create_test_workspace().await;
     let state = WorkspaceState::new_for_testing(nexus_home.clone(), db_path.clone(), None).await;
     test_utils::seed_test_creator_and_world(state.pool().unwrap()).await;
-    TestCtx { _tmp, state }
+    TestCtx { _tmp: tmp, state }
 }
 
 /// Create a Work via handler and return its `work_id`.

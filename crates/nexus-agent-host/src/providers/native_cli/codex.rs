@@ -1194,10 +1194,10 @@ mod tests {
     /// Helper to create an executable mock codex script in a temp directory.
     #[cfg(unix)]
     fn write_mock_codex_script(temp_dir: &tempfile::TempDir, body: &str) -> std::path::PathBuf {
+        use std::os::unix::fs::PermissionsExt;
         let script_path = temp_dir.path().join("mock_codex.sh");
         let script = format!("#!/bin/sh\n{body}\n");
         std::fs::write(&script_path, &script).expect("write script");
-        use std::os::unix::fs::PermissionsExt;
         let mut perms = std::fs::metadata(&script_path).unwrap().permissions();
         perms.set_mode(0o755);
         std::fs::set_permissions(&script_path, perms).unwrap();
