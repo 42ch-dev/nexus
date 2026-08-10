@@ -58,6 +58,24 @@ describe('projectWorldTimelineNodesToNleTracks', () => {
 });
 
 describe('projectWorkTimelineNodesToNleTracks', () => {
+  it('maps Work-Brief era nodes to Brief + Undated tracks (V1.156 P2 T2)', () => {
+    // Work-Brief projects the World Timeline Brief nodes verbatim
+    // (`timeline-brief-era`) — the band must mirror the World Timeline
+    // Brief tracks (dated eras on the when-axis + undated cluster).
+    const nodes = [
+      node('era-1', 'timeline-brief-era', 40, 0, { canonical_name: 'First Age' }),
+      node('era-2', 'timeline-brief-era', 360, 220, { canonical_name: 'Undated Era' }),
+      node('spine', 'directedAxisSpine', 0, -8, {}),
+    ];
+
+    const { tracks } = projectWorkTimelineNodesToNleTracks(nodes, 'brief');
+    expect(tracks).toHaveLength(2);
+    expect(tracks[0]?.label).toBe('Brief');
+    expect(tracks[0]?.clips[0]?.label).toBe('First Age');
+    expect(tracks[1]?.label).toBe('Undated');
+    expect(tracks[1]?.clips[0]?.label).toBe('Undated Era');
+  });
+
   it('maps narrative events to a single Narrative track when all share anchor state', () => {
     const nodes = [
       node('wt-ev-1', 'work-timeline-narrative-event', 40, 0, {

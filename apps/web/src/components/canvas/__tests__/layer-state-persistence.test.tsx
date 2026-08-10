@@ -102,10 +102,24 @@ function makeWorldMockClient(graph: WorldKbGraphResponse): NexusClient {
   } as unknown as NexusClient;
 }
 
-function makeWorkMockClient(outline: WorkOutline): NexusClient {
+function makeWorkMockClient(
+  outline: WorkOutline,
+  world?: { worldId: string; graph: WorldKbGraphResponse },
+): NexusClient {
   return {
     getWorkOutline: vi.fn().mockResolvedValue(outline),
-    getWork: vi.fn().mockResolvedValue({ work_id: 'work-1', world_id: null }),
+    getWork: vi.fn().mockResolvedValue({
+      work_id: 'work-1',
+      world_id: world?.worldId ?? null,
+    }),
+    // V1.156 P2 T2 — the bound World's KB graph (Brief layer era data).
+    // Only fetched when a World is bound (`useWorldKbGraph` disables the
+    // query otherwise); the mock stays callable either way for negative
+    // assertions.
+    getWorldKbGraph: world ? vi.fn().mockResolvedValue(world.graph) : vi.fn(),
+    patchOutlineStructure: vi.fn(),
+    patchOutlineChapter: vi.fn(),
+    patchTimelineEvent: vi.fn(),
     health: vi.fn().mockResolvedValue({ status: 'ok', version: 'test' }),
   } as unknown as NexusClient;
 }
@@ -423,7 +437,54 @@ describe('WorkTimelineCanvas — layer-state persistence via URL ?layer= (P4 Tas
     });
   });
 
-  it('ignores invalid layer values (Brief not valid on Work Timeline) and falls back to Narrative default', async () => {
+  it('restores the Brief layer from URL ?layer=brief (V1.156 — Work-Brief restriction lifted)', async () => {
+    // V1.156 spec §3.3.3 amendment: `?layer=brief` is now VALID on the Work
+    // Timeline (the V1.123 "Brief is World-only" restriction is lifted —
+    // both surfaces render all three layers). The URL must restore the
+    // Brief layer when the Work is bound to a World with era markers.
+    const outline: WorkOutline = {
+      work_id: 'work-1',
+      outline_revision: 1,
+      volumes: [],
+      timeline_events: [
+        { event_id: 'evt-1', title: 'Inciting Incident', realizes_chapter_id: 1 },
+      ],
+      foreshadows: [],
+      chapter_titles: {},
+      updated_at: '2026-07-18T00:00:00Z',
+    } as WorkOutline;
+    const graph: WorldKbGraphResponse = {
+      entities: [
+        eraEntity({
+          key_block_id: 'kb-era-1',
+          canonical_name: 'The First Age',
+        }),
+      ],
+      source_anchors: [],
+      relationships: [],
+    };
+
+    renderInApp(<WorkTimelineCanvas workId="work-1" />, {
+      client: makeWorkMockClient(outline, { worldId: 'world-ps', graph }),
+      initialRouterEntries: ['/works/work-1/timeline?layer=brief'],
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('work-timeline-canvas')).toHaveAttribute(
+        'data-active-layer',
+        'brief',
+      );
+    });
+    expect(screen.getByTestId('work-timeline-layer-tab-brief')).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+  });
+
+  it('ignores unknown layer values (?layer=bogus) and falls back to the Narrative default', async () => {
+    // V1.156 spec §3.3.3: only 'brief' | 'narrative' | 'moment' are valid on
+    // the Work Timeline. Unknown values must fall back to the surface
+    // default (Narrative — architect §7.3 UX-risk override).
     const outline: WorkOutline = {
       work_id: 'work-1',
       outline_revision: 1,
@@ -438,7 +499,7 @@ describe('WorkTimelineCanvas — layer-state persistence via URL ?layer= (P4 Tas
 
     renderInApp(<WorkTimelineCanvas workId="work-1" />, {
       client: makeWorkMockClient(outline),
-      initialRouterEntries: ['/works/work-1/timeline?layer=brief'],
+      initialRouterEntries: ['/works/work-1/timeline?layer=bogus'],
     });
 
     await waitFor(() => {
@@ -504,5 +565,64 @@ describe('WorkTimelineCanvas — layer-state persistence via URL ?layer= (P4 Tas
     });
 
     expect(captured.search).toContain('layer=moment');
+  });
+
+  it('writes ?layer=brief back to the URL when the user swaps to the Brief tab (V1.156)', async () => {
+    // Spec §3.3.3 layer-state persistence (V1.156): all three layers persist
+    // on the Work Timeline. A swap into Brief must write `?layer=brief` so
+    // the choice survives a refresh or a peer-surface round-trip.
+    const outline: WorkOutline = {
+      work_id: 'work-1',
+      outline_revision: 1,
+      volumes: [],
+      timeline_events: [
+        { event_id: 'evt-1', title: 'Inciting Incident', realizes_chapter_id: 1 },
+      ],
+      foreshadows: [],
+      chapter_titles: {},
+      updated_at: '2026-07-18T00:00:00Z',
+    } as WorkOutline;
+    const graph: WorldKbGraphResponse = {
+      entities: [
+        eraEntity({
+          key_block_id: 'kb-era-1',
+          canonical_name: 'The First Age',
+        }),
+      ],
+      source_anchors: [],
+      relationships: [],
+    };
+
+    const { captured, LocationSpy } = makeLocationSpy();
+    renderInApp(
+      <>
+        <WorkTimelineCanvas workId="work-1" />
+        <LocationSpy />
+      </>,
+      {
+        client: makeWorkMockClient(outline, { worldId: 'world-ps', graph }),
+        initialRouterEntries: ['/works/work-1/timeline'],
+      },
+    );
+
+    // Default — Narrative (architect §7.3, unconditional).
+    await waitFor(() => {
+      expect(screen.getByTestId('work-timeline-canvas')).toHaveAttribute(
+        'data-active-layer',
+        'narrative',
+      );
+    });
+
+    // User swaps to Brief via the layer tab.
+    fireEvent.click(screen.getByTestId('work-timeline-layer-tab-brief'));
+    await waitFor(() => {
+      expect(screen.getByTestId('work-timeline-canvas')).toHaveAttribute(
+        'data-active-layer',
+        'brief',
+      );
+    });
+
+    // URL must now carry ?layer=brief (shareable, refresh-safe).
+    expect(captured.search).toContain('layer=brief');
   });
 });

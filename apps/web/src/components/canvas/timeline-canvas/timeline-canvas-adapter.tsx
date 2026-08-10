@@ -487,7 +487,7 @@ const MOMENT_CHAPTER_STEP_X = 360;
  * per surface entry (first open is supplied-positions; explicit relayout on
  * user action). No measurable cost to deriving these inline.
  */
-const BRIEF_LAYOUT_OPTIONS = {
+export const BRIEF_LAYOUT_OPTIONS = {
   direction: 'LR' as const,
   rankSep: 240,
   nodeSep: 40,
@@ -674,12 +674,18 @@ export function projectTimelineGraph(
  * they belong to the Narrative layer (V1.122). Relationship edges are NOT
  * rendered on Brief (minimal density per layer-feel §2.2).
  *
+ * V1.156 P2 T1 — exported for the Work Timeline Brief layer, which projects
+ * the bound World's Brief VERBATIM through this function (Work-Brief feel
+ * ≡ World-Brief feel — same carrier `block_type=era`, same `TimelineNodeData`
+ * with `layoutHint: 'brief'`, same spine). The era-marker extraction
+ * (`extractEraAttributes`) is reused transitively.
+ *
  * `simplify:` LR step metrics mirror the V1.122 Narrative lane scheme so
  * both layers share a familiar reading direction. Replace with an era-aware
  * temporal plugin if the Brief sweep grows beyond ~12 era markers (layer-feel
  * §2.2 density target).
  */
-function projectBriefLayer(graph: TimelineGraph): {
+export function projectBriefLayer(graph: TimelineGraph): {
   nodes: Node<TimelineNodeData>[];
   edges: Edge<TimelineEdgeData>[];
 } {

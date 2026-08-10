@@ -807,18 +807,42 @@
     },
     "header": {
       "title": "Work Timeline",
-      "description": "The work's narrative + moments. Pivots to Outline for edits.",
+      "description": "The work's timeline across Brief, Narrative, and Moment layers. Pivots to Outline for edits.",
       "peerNavAria": "Peer surfaces",
       "outlineLink": "Outline",
       "inspectorLink": "Assembly Inspector"
     },
     "layerSwitcher": {
       "ariaLabel": "Work Timeline layer",
+      "brief": "Brief",
       "narrative": "Narrative",
       "moment": "Moment"
     },
     "breadcrumb": {
       "ariaLabel": "Work Timeline layer path"
+    },
+    "brief": {
+      "emptyState": {
+        "title": "No world-shape context yet",
+        "message": "World-shape context appears here when this Work is bound to a World with era markers. Brief is a read-only projection of the bound World’s Brief.",
+        "cta": "Switch to Narrative"
+      }
+    },
+    "briefEraNode": {
+      "span": "{{start}} → {{end}}",
+      "temporalUnknown": "Era time span unknown"
+    },
+    "briefEraInspector": {
+      "title": "Brief era",
+      "description": "World-shape era marker from the bound World’s Brief. Read-only — Brief is World spine.",
+      "aria": "Brief-era inspector for {{name}}",
+      "identityAria": "Era identity markers",
+      "readOnly": "Read-only — Brief belongs to the bound World.",
+      "field": {
+        "eraId": "Era id",
+        "span": "Time span",
+        "worldSummary": "World summary"
+      }
     },
     "narrativeEventNode": {
       "aria": "Work timeline event: {{name}}",
@@ -866,7 +890,8 @@
         "chapter": "Chapter",
         "description": "Description",
         "status": "Status"
-      }
+      },
+      "version": "v{{version}}"
     }
   },
   "globalTimeline": {

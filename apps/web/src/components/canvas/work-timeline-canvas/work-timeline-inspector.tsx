@@ -36,10 +36,11 @@
  */
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router-dom';
-import { BookMarked, Flag, Globe, Milestone, Pencil } from 'lucide-react';
+import { BookMarked, Flag, Globe, Hourglass, Milestone, Pencil } from 'lucide-react';
 import type { Node } from '@xyflow/react';
 
 import type { WorkTimelineNodeData } from './work-timeline-canvas-adapter';
+import type { TimelineNodeData } from '../timeline-canvas/timeline-canvas-adapter';
 
 // ─── Shared shell ──────────────────────────────────────────────────────────
 
@@ -387,6 +388,186 @@ export function WorkTimelineMomentBeatInspector({
   );
 }
 
+// ─── V1.156 P2 T2 — read-only Brief-era inspector ──────────────────────────
+
+/**
+ * Work-Brief era inspector — read-only era detail for a `timeline-brief-era`
+ * node selected on the Work Timeline Brief layer.
+ *
+ * Work-Brief is a read-only **projection** of the bound World's Brief
+ * (PD-2): Brief is World spine; the Work does NOT gain an authored Brief
+ * and there is NO Work-owned Brief write flow. Mirrors the World Timeline's
+ * Brief-era inspector marker chrome (era id pill, time span, world summary,
+ * version) but is strictly display-only:
+ *   - NO title/body editors, NO Save, NO `kb.patch_entity` write path
+ *     (P1 fix-wave lesson W-1 applied proactively — the World surface owns
+ *     Brief writes via its own inspector; the Work surface never patches).
+ *   - NO "Edit in Outline" CTA — the era is World-owned, not a Work
+ *     manuscript node.
+ *   - A "View on World Timeline" Link to the bound World's Brief layer
+ *     (`/worlds/:worldId/timeline?layer=brief`) surfaces the source-World
+ *     attribution (spec §3.3.3 — full bound-World Brief with source-World
+ *     attribution). Hidden when no World is bound (honest scope cut).
+ */
+export function WorkTimelineBriefEraInspector({
+  node,
+  worldId,
+}: {
+  node: Node<WorkTimelineNodeData>;
+  /** Optional bound World id — drives the "View on World Timeline" CTA. */
+  worldId?: string;
+}) {
+  const { t } = useTranslation('canvas');
+  // Brief-era nodes carry the World Timeline carrier (`TimelineNodeData`
+  // with `layoutHint: 'brief'`) — Work-Brief reuses the World Brief
+  // projection verbatim (T1). The Work surface never reads
+  // `WorkTimelineNodeData` fields on Brief nodes; read the era markers
+  // from the World carrier.
+  const data = node.data as unknown as TimelineNodeData;
+  const eraId = data.eraId;
+  const startHint = data.startHint;
+  const endHint = data.endHint;
+  const worldSummary = data.worldSummary;
+
+  // The time-span label mirrors the Brief-era node card: prefer
+  // `start_hint → end_hint`; fall back to whichever hint exists; fall back
+  // to the temporal-unknown label when neither is present (same format as
+  // the World Timeline Brief-era inspector).
+  const span = (() => {
+    if (startHint && endHint) {
+      return t('workTimeline.briefEraNode.span', { start: startHint, end: endHint });
+    }
+    if (startHint) return startHint;
+    if (endHint) return endHint;
+    return t('workTimeline.briefEraNode.temporalUnknown', {
+      defaultValue: 'Era time span unknown',
+    });
+  })();
+
+  return (
+    <form
+      data-testid="work-timeline-brief-era-inspector"
+      aria-label={t('workTimeline.briefEraInspector.aria', {
+        name: data.canonical_name,
+        defaultValue: 'Brief-era inspector for {{name}}',
+      })}
+      className="flex flex-col gap-3"
+    >
+      <div className="flex items-center justify-between gap-2">
+        <h3
+          className="flex items-center gap-2 text-heading-14 font-heading font-semibold text-canvas-worldkb-accent"
+          // eslint-disable-next-line react/forbid-dom-props
+          data-testid="work-timeline-brief-era-inspector-title"
+        >
+          <Hourglass
+            className="h-4 w-4 flex-shrink-0 text-canvas-worldkb-accent"
+            aria-hidden
+          />
+          {t('workTimeline.briefEraInspector.title', { defaultValue: 'Brief era' })}
+        </h3>
+        {data.version !== undefined ? (
+          <span className="rounded-pill bg-gray-alpha-100 px-1.5 py-0.5 font-mono text-label-12 text-gray-700">
+            {t('workTimeline.inspector.version', {
+              version: data.version,
+              defaultValue: `v${data.version}`,
+            })}
+          </span>
+        ) : null}
+      </div>
+      <p className="text-copy-13 text-gray-700">
+        {t('workTimeline.briefEraInspector.description', {
+          defaultValue:
+            'World-shape era marker from the bound World’s Brief. Read-only — Brief is World spine.',
+        })}
+      </p>
+
+      {/* Era identity block — read-only marker fields surface the era's
+          identity (mirrors the World Timeline Brief-era inspector chrome). */}
+      <div
+        className="flex flex-col gap-2 rounded-card border border-gray-alpha-400 bg-background-100 p-3"
+        aria-label={t('workTimeline.briefEraInspector.identityAria', {
+          defaultValue: 'Era identity markers',
+        })}
+      >
+        {eraId ? (
+          <div className="flex flex-col gap-1">
+            <span className="text-label-12 font-semibold uppercase tracking-wide text-gray-700">
+              {t('workTimeline.briefEraInspector.field.eraId', {
+                defaultValue: 'Era id',
+              })}
+            </span>
+            <span
+              className="rounded-pill bg-gray-alpha-100 px-1.5 py-0.5 font-mono text-label-12 text-gray-900 self-start"
+              // eslint-disable-next-line react/forbid-dom-props
+              data-testid="work-timeline-brief-era-inspector-era-id"
+            >
+              {eraId}
+            </span>
+          </div>
+        ) : null}
+
+        <div className="flex flex-col gap-1">
+          <span className="text-label-12 font-semibold uppercase tracking-wide text-gray-700">
+            {t('workTimeline.briefEraInspector.field.span', {
+              defaultValue: 'Time span',
+            })}
+          </span>
+          <span
+            className="rounded-pill border border-canvas-worldkb-accent/30 bg-canvas-worldkb-accent/15 px-1.5 py-0.5 text-label-12 text-canvas-worldkb-accent self-start"
+            // eslint-disable-next-line react/forbid-dom-props
+            data-testid="work-timeline-brief-era-inspector-span"
+          >
+            {span}
+          </span>
+        </div>
+
+        {worldSummary ? (
+          <div className="flex flex-col gap-1">
+            <span className="text-label-12 font-semibold uppercase tracking-wide text-gray-700">
+              {t('workTimeline.briefEraInspector.field.worldSummary', {
+                defaultValue: 'World summary',
+              })}
+            </span>
+            <p
+              className="text-copy-13 text-gray-900"
+              // eslint-disable-next-line react/forbid-dom-props
+              data-testid="work-timeline-brief-era-inspector-world-summary"
+            >
+              {worldSummary}
+            </p>
+          </div>
+        ) : null}
+      </div>
+
+      {/* Read-only note (PD-2): the Work surface owns NO Brief write path.
+          The bound World owns Brief authoring (World spine). */}
+      <p className="text-copy-13 text-gray-700">
+        {t('workTimeline.briefEraInspector.readOnly', {
+          defaultValue: 'Read-only — Brief belongs to the bound World.',
+        })}
+      </p>
+
+      {/* Cross-surface affordance — source-World attribution (spec §3.3.3:
+          full bound-World Brief with source-World attribution). Direct Link
+          mirrors the Edit-in-Outline Link pattern; targets the bound World's
+          Timeline Brief layer. Hidden when no World is bound. */}
+      {worldId ? (
+        <Link
+          to={`/worlds/${encodeURIComponent(worldId)}/timeline?layer=brief`}
+          data-testid="work-timeline-brief-era-view-on-world-timeline"
+          data-world-id={worldId}
+          className="inline-flex items-center gap-1.5 self-start rounded-control border border-gray-alpha-400 bg-background-100 px-3 py-1.5 text-button-12 text-gray-900 shadow-elevation-2 hover:bg-gray-alpha-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-700 focus-visible:ring-offset-2"
+        >
+          <Globe className="h-3.5 w-3.5" aria-hidden />
+          {t('workTimeline.inspector.viewOnWorldTimeline', {
+            defaultValue: 'View on World Timeline',
+          })}
+        </Link>
+      ) : null}
+    </form>
+  );
+}
+
 // ─── Dispatch ──────────────────────────────────────────────────────────────
 
 /**
@@ -397,13 +578,22 @@ export function WorkTimelineMomentBeatInspector({
  *
  * The dispatch mirrors the V1.123 P1 Timeline adapter's
  * `renderInspector` dispatch (Brief-era vs Narrative event). Architect §6
- * (read-only in V1.123): every branch renders read-only details + the
- * Edit-in-Outline CTA; no write is invoked from the Work Timeline surface.
+ * (read-only in V1.123): every branch renders read-only details; the
+ * Narrative/Moment branches also add the Edit-in-Outline CTA while the
+ * Brief-era branch (PD-2 — read-only projection) is display-only without
+ * it; no write is invoked from the Work Timeline surface.
  *
  * V1.123 P3 Task 4 — the dispatcher now carries the cross-surface navigation
  * slots (`worldId` + `onViewOnWorldTimeline`) so the Narrative event
  * inspector can render the "View on World Timeline" affordance when the
  * orchestrator wires them.
+ *
+ * V1.156 P2 T2 — Brief-era nodes (`type === 'timeline-brief-era'`) carry the
+ * World Timeline carrier (`TimelineNodeData` with `layoutHint: 'brief'`),
+ * NOT `WorkTimelineNodeData` — dispatch on the registered node type FIRST so
+ * Brief-era selections surface the read-only Brief-era inspector (PD-2 —
+ * no write path from Brief nodes; P1 fix-wave lesson W-1 applied
+ * proactively).
  */
 export function renderWorkTimelineInspector(
   node: Node<WorkTimelineNodeData>,
@@ -414,6 +604,14 @@ export function renderWorkTimelineInspector(
   },
 ): React.ReactNode {
   const data = node.data;
+  if (node.type === 'timeline-brief-era') {
+    return (
+      <WorkTimelineBriefEraInspector
+        node={node}
+        worldId={crossSurface?.worldId}
+      />
+    );
+  }
   if (data.nodeKind === 'event') {
     return (
       <WorkTimelineEventInspector

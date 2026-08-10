@@ -1,6 +1,7 @@
 /**
  * Work Timeline canvas adapter — V1.123 P2 Task 2 (Narrative projection) +
- * Task 3 (Moment projection) + Task 4 (layer state).
+ * Task 3 (Moment projection) + Task 4 (layer state) + V1.156 P2 T1 (Brief
+ * layer projection).
  *
  * Projects a Work's V1.72 `WorkOutline` onto the Work Timeline surface
  * (`CanvasSurfaceKind = "work-timeline"` — Task 5 promotes the string
@@ -9,7 +10,8 @@
  *
  * Architect-locked contract — see
  * `iterations/v1.123/specs/three-layer-architecture.md` §3 + §6 + §7 + §8 +
- * `iterations/v1.123/specs/layer-feel-differentiation.md` §2.3 + §2.4:
+ * `iterations/v1.123/specs/layer-feel-differentiation.md` §2.3 + §2.4 +
+ * `canvas-strategy-surface.md` §3.3.3 V1.156 amendment:
  *   - Single graph source: `WorkOutline` (V1.72 shipped). No wrapper, no
  *     join with other DTOs (`WorkTimelineGraph = WorkOutline`).
  *   - **Narrative layer** (Task 2): `outline.timeline_events[]` →
@@ -25,11 +27,21 @@
  *     today; V1.124+ `DF-V1123-MOMENT-WIRE` upgrades the wire). Vertical
  *     scene-stack (TB layout direction per `layer-feel-differentiation.md`
  *     §2.4). Honest empty-state when no fixture / no scene-beat data.
+ *   - **Brief layer** (V1.156 P2 T1): read-only **projection** of the
+ *     bound World's Brief (`WorldKbGraphResponse.entities[block_type=era]`,
+ *     V1.73) onto the Work Timeline Brief when-axis — Work-Brief feel ≡
+ *     World-Brief feel (same `TimelineNodeData` with `layoutHint: 'brief'`,
+ *     same `timeline-brief-era` node type + directed-axis spine). Brief
+ *     remains World spine (PD-2); the Work does NOT gain an authored Brief
+ *     and no Work-owned Brief write flow exists. The bound World's graph
+ *     is supplied separately (factory param / ctxRef slot) — it is NOT
+ *     part of `WorkTimelineGraph`. Honest empty-state when no bound World /
+ *     no era data.
  *
- * Layer model: `projectGraphForLayer(graph, 'narrative' | 'moment')`
- * selects the active layer. The default `projectGraph(graph)` delegates to
- * the adapter's active layer, which defaults to `'narrative'` per
- * architect §7.3 UX-risk override (the V1.72 `WorkOutline` wire has no
+ * Layer model: `projectGraphForLayer(graph, 'brief' | 'narrative' |
+ * 'moment')` selects the active layer. The default `projectGraph(graph)`
+ * delegates to the adapter's active layer, which defaults to `'narrative'`
+ * per architect §7.3 UX-risk override (the V1.72 `WorkOutline` wire has no
  * Scene/Beat data today; Moment-default would surface persistent
  * empty-state in nearly all real Works).
  *
@@ -49,12 +61,19 @@
  * only; P2 adds zero `schemas/` / `crates/` / `packages/nexus-contracts`
  * diff. (The iteration-level `wire_contracts_changed: true` is
  * attributable entirely to P1's `BlockType = "era"`.)
+ *
+ * V1.156 P2 T1 — `wire_contracts_changed: false`: the Work Timeline Brief
+ * layer is frontend-only. `WorkTimelineLayer` gains `'brief'` as a UI-only
+ * union value (not a wire DTO); the Brief projection reuses the V1.73
+ * `GET /worlds/{id}/kb/graph` route + V1.123 Brief carrier
+ * (`WorldKbGraphResponse.entities[block_type=era]`) verbatim. No schema /
+ * codegen / daemon / contracts diff.
  */
 import type { MutableRefObject } from 'react';
 import type { Edge, Node } from '@xyflow/react';
 
 import type { CanvasSurfaceAdapter } from '../canvas-surface-adapter';
-import type { WorkOutline } from '@42ch/nexus-contracts';
+import type { WorkOutline, WorldKbGraphResponse } from '@42ch/nexus-contracts';
 
 import type {
   BeatFixture,
@@ -64,6 +83,16 @@ import type {
 } from '../outline-canvas/graph-projection';
 import type { DirectedAxisSpineNodeData, MomentSpineConfig, NarrativeSpineConfig } from '../timeline-canvas/directed-axis-spine';
 import { SPINE_Y_OFFSET } from '../timeline-canvas/directed-axis-spine';
+// V1.156 P2 T1 — Work-Brief reuses the World Timeline Brief projection
+// verbatim (same carrier `block_type=era`, same `TimelineNodeData` with
+// `layoutHint: 'brief'`); the Brief-era node component is picked from the
+// World registry so Work-Brief feel ≡ World-Brief feel (no new node
+// component family).
+import {
+  BRIEF_LAYOUT_OPTIONS,
+  projectBriefLayer as projectWorldBriefLayer,
+} from '../timeline-canvas/timeline-canvas-adapter';
+import { timelineNodeTypes } from '../timeline-canvas/timeline-node-types';
 import { workTimelineNodeTypes } from './work-timeline-node-types';
 import { renderWorkTimelineInspector } from './work-timeline-inspector';
 
@@ -73,14 +102,22 @@ import { renderWorkTimelineInspector } from './work-timeline-inspector';
 export type WorkTimelineGraph = WorkOutline;
 
 /**
- * Layer kind on the Work Timeline surface (architect §7.1).
+ * Layer kind on the Work Timeline surface (architect §7.1 + V1.156 §3.3.3
+ * amendment — 3×2 matrix completion).
  *
+ * - `'brief'`    — V1.156 P2 T1: read-only projection of the bound World's
+ *                  Brief (`WorldKbGraphResponse.entities[block_type=era]`,
+ *                  V1.73). Brief remains World spine (PD-2); the Work does
+ *                  NOT gain an authored Brief. Work-Brief feel ≡ World-Brief
+ *                  feel (same `TimelineNodeData` with `layoutHint: 'brief'`).
  * - `'narrative'` — Work-scoped events from `outline.timeline_events[]`.
  * - `'moment'`    — Scene/Beat precision from outline Scene/Beat data
  *                   (fixture-driven today; V1.124+ wire upgrade tracked
  *                   as `DF-V1123-MOMENT-WIRE`).
+ *
+ * UI-only union type — NOT a wire DTO (`wire_contracts_changed: false`).
  */
-export type WorkTimelineLayer = 'narrative' | 'moment';
+export type WorkTimelineLayer = 'brief' | 'narrative' | 'moment';
 
 /**
  * Node data payload for the Work Timeline surface.
@@ -89,6 +126,13 @@ export type WorkTimelineLayer = 'narrative' | 'moment';
  *   - `'event'`  for Narrative layer (Task 2).
  *   - `'scene'`  for Moment layer scene cards (Task 3).
  *   - `'beat'`   for Moment layer beat pins (Task 3).
+ *
+ * V1.156 P2 T1 — Brief layer nodes do NOT carry this payload: Work-Brief
+ * reuses the World Timeline's `TimelineNodeData` carrier (`layoutHint:
+ * 'brief'`, spread `WorldKbEntityProjection` + era markers). The Brief
+ * projection's `Node<TimelineNodeData>[]` result is cast to this surface's
+ * `Node<WorkTimelineNodeData>[]` (deliberate cross-surface reuse — the Work
+ * surface never reads `WorkTimelineNodeData` fields on Brief nodes).
  *
  * Optional fields are present conditionally on the discriminator. The
  * `[key: string]: unknown` index signature satisfies React Flow's
@@ -164,6 +208,19 @@ export interface WorkTimelineCanvasAdapterContext {
   workId: string;
   /** Optional bound World id (for P3 cross-surface navigation to World Timeline). */
   worldId?: string;
+  /**
+   * V1.156 P2 T1 — the bound World's KB graph (Brief layer era data).
+   * The Work Timeline Brief layer projects the bound World's Brief
+   * (`WorldKbGraphResponse.entities[block_type=era]`) — Brief is World
+   * spine; Work-Brief is a read-only projection (PD-2). The orchestrator
+   * fetches it from the bound World's `GET /v1/daemon/worlds/{world_id}/kb/graph`
+   * (V1.73, no new route) via `Work.world_id`. Undefined when no World is
+   * bound or the graph is still loading → the Brief layer emits honest
+   * empty-state (zero nodes). The factory also captures it as a parameter
+   * (captured value wins; this slot is the ctxRef fallback for direct
+   * wiring/tests, mirroring the World adapter's captured-fixture pattern).
+   */
+  boundWorldGraph?: WorldKbGraphResponse;
   /**
    * Optional `NexusClient` reference. The projection is a pure function of
    * the graph; the client slot exists so write-boundary isolation tests can
@@ -293,6 +350,7 @@ const NARRATIVE_LAYOUT_OPTIONS = {
   direction: 'LR' as const,
   hasSuppliedPositions: true,
 };
+
 const MOMENT_LAYOUT_OPTIONS = {
   direction: 'TB' as const,
   rankSep: 60,
@@ -622,6 +680,60 @@ function projectMomentLayer(
   return { nodes, edges: [] };
 }
 
+// ─── Brief projection (V1.156 P2 T1 — architect §3.3.3 amendment) ──────────
+
+/**
+ * V1.156 P2 T1 — Work Timeline Brief layer projection. Completes the Work
+ * Timeline 3-layer matrix (Brief + Narrative + Moment).
+ *
+ * Work-Brief = read-only **projection** of the bound World's Brief (PD-2):
+ * Brief remains World spine; the Work does NOT gain an authored Brief and
+ * there is NO Work-owned Brief write flow. The projection IS the World
+ * Timeline Brief layer (`timeline-canvas-adapter.tsx::projectBriefLayer`,
+ * which internally reuses `extractEraAttributes`) called verbatim — same
+ * carrier (`WorldKbGraphResponse.entities[block_type=era]`, V1.73), same
+ * node data (`TimelineNodeData` with `layoutHint: 'brief'`), same era
+ * markers (`eraId` / `startHint` / `endHint` / `worldSummary`), same node
+ * type (`timeline-brief-era`), same directed-axis spine — so Work-Brief
+ * feel ≡ World-Brief feel (V1.123 layer-feel §2.2). No Work-relevant
+ * filtering (architect LOCK — full bound-World Brief with source-World
+ * attribution; tighten later if dogfood shows noise).
+ *
+ * The bound World's graph is NOT part of `WorkTimelineGraph`
+ * (`WorkOutline`); it is supplied separately (captured factory param or
+ * `ctxRef.current.boundWorldGraph`) and fetched by the orchestrator from
+ * the bound World's `GET /v1/daemon/worlds/{world_id}/kb/graph` (V1.73 —
+ * no new route, no schema change; `wire_contracts_changed: false`).
+ *
+ * Honest empty-state: no bound World / no bound-World graph → zero nodes
+ * (the orchestrator owns the visible empty-state copy — T2).
+ *
+ * `simplify:` the cast is deliberate cross-surface reuse — the World
+ * `projectBriefLayer` produces `Node<TimelineNodeData>` (the World carrier)
+ * while the Work surface types nodes as `Node<WorkTimelineNodeData>`. The
+ * Work surface never reads `WorkTimelineNodeData` fields on Brief nodes
+ * (rendering dispatches on `node.type` / `layoutHint`; the Brief-era
+ * inspector is orchestrator-owned in T2). Mirrors the World adapter's
+ * Moment reuse of the Work carrier in reverse.
+ */
+function projectBriefLayer(
+  boundWorldGraph: WorldKbGraphResponse | undefined,
+): {
+  nodes: Node<WorkTimelineNodeData>[];
+  edges: Edge<WorkTimelineEdgeData>[];
+} {
+  if (!boundWorldGraph) {
+    // Honest empty-state — no bound World / no era data. The adapter's
+    // contract is to emit zero nodes; the orchestrator renders the
+    // empty-state panel when the active layer has no projectable data.
+    return { nodes: [], edges: [] };
+  }
+  return projectWorldBriefLayer(boundWorldGraph) as unknown as {
+    nodes: Node<WorkTimelineNodeData>[];
+    edges: Edge<WorkTimelineEdgeData>[];
+  };
+}
+
 // ─── Layer-aware projection (architect §7.1) ───────────────────────────────
 
 /**
@@ -631,6 +743,9 @@ function projectMomentLayer(
  * Moment layer reads from the V1.108 `SceneBeatFixturePayload` carried in
  * the adapter context (`ctxRef.current.sceneBeatFixture`); when absent,
  * the Moment layer emits honest empty-state (zero nodes).
+ * Brief layer (V1.156 P2 T1) reads the bound World's `WorldKbGraphResponse`
+ * (`entities[block_type=era]`) passed via `boundWorldGraph`; when absent,
+ * the Brief layer emits honest empty-state (zero nodes).
  *
  * Exposed publicly so layer-specific tests can call
  * `projectWorkTimelineGraph(graph, layer)` without instantiating the
@@ -641,10 +756,14 @@ export function projectWorkTimelineGraph(
   graph: WorkTimelineGraph,
   layer: WorkTimelineLayer = 'narrative',
   fixture?: SceneBeatFixturePayload,
+  boundWorldGraph?: WorldKbGraphResponse,
 ): {
   nodes: Node<WorkTimelineNodeData>[];
   edges: Edge<WorkTimelineEdgeData>[];
 } {
+  if (layer === 'brief') {
+    return projectBriefLayer(boundWorldGraph);
+  }
   if (layer === 'moment') {
     return projectMomentLayer(graph, fixture);
   }
@@ -708,11 +827,22 @@ export function summarizeWorkTimelineGraph(graph: WorkTimelineGraph): string {
  * The returned object MUST stay referentially stable across renders —
  * `useCanvasSurface` memoises on `adapter` and would otherwise re-project
  * on every orchestrator state change. The factory is therefore called
- * once per orchestrator mount (e.g. via `useMemo([activeLayer], ...)`);
- * only `activeLayer` invalidates the memo (Task 4 wires the layer swap).
+ * once per orchestrator mount (e.g. via `useMemo([activeLayer, ...], ...)`);
+ * only `activeLayer` + `boundWorldGraph` (V1.156 P2 T1 — the Brief layer
+ * era data source) invalidate the memo (Task 4 wires the layer swap; T2
+ * adds the bound-World graph to the memo deps).
  *
  * `activeLayer` selects which projection `projectGraph(graph)` delegates
  * to. Default `'narrative'` per architect §7.3 UX-risk override.
+ *
+ * V1.156 P2 T1 — `boundWorldGraph` carries the bound World's KB graph for
+ * the Brief layer (era entities, `WorldKbGraphResponse`, V1.73). Captured
+ * at factory creation like `activeLayer` so the orchestrator's adapter
+ * memo deps can include it (a graph identity change recreates the adapter
+ * and re-projects deterministically on the same render — mirroring the
+ * World adapter's captured-fixture pattern). The ctxRef slot
+ * (`ctxRef.current.boundWorldGraph`) remains as a fallback for direct
+ * ctxRef wiring (tests / legacy callers); the captured value wins.
  *
  * Task 5 promotes `'work-timeline'` to a real `CanvasSurfaceKind` enum
  * value. Until then this adapter casts the string literal so the contract
@@ -723,6 +853,7 @@ export function summarizeWorkTimelineGraph(graph: WorkTimelineGraph): string {
 export function createWorkTimelineCanvasAdapter(
   ctxRef: MutableRefObject<WorkTimelineCanvasAdapterContext>,
   activeLayer: WorkTimelineLayer = 'narrative',
+  boundWorldGraph?: WorldKbGraphResponse,
 ): WorkTimelineLayerAdapter {
   return {
     // V1.123 P2 Task 2 — the additive `'work-timeline'` value is part of
@@ -732,15 +863,34 @@ export function createWorkTimelineCanvasAdapter(
     // value alone is the minimum additive addition for adapter type-safety.
     surfaceKind: 'work-timeline',
     defaultLayer: 'narrative',
-    nodeTypes: workTimelineNodeTypes,
+    nodeTypes: {
+      ...workTimelineNodeTypes,
+      // V1.156 P2 T1 — Work-Brief reuses the World Timeline Brief era node
+      // component + `TimelineNodeData` carrier (no new node component
+      // family — layer-feel parity: Work-Brief feel ≡ World-Brief feel).
+      // Only the Brief era type is picked from the World registry; the
+      // Narrative/Moment node types stay Work-local.
+      'timeline-brief-era': timelineNodeTypes['timeline-brief-era'],
+    },
     edgeTypes: undefined,
     layoutOptions:
-      activeLayer === 'moment' ? MOMENT_LAYOUT_OPTIONS : NARRATIVE_LAYOUT_OPTIONS,
+      activeLayer === 'moment'
+        ? MOMENT_LAYOUT_OPTIONS
+        : activeLayer === 'brief'
+          ? BRIEF_LAYOUT_OPTIONS
+          : NARRATIVE_LAYOUT_OPTIONS,
 
     projectGraph(graph) {
       // Delegate to the active layer. The Moment projection reads the
       // V1.108 Scene/Beat fixture from `ctxRef.current.sceneBeatFixture`
-      // (Moment-on-Outline carrier — frontend-only projection).
+      // (Moment-on-Outline carrier — frontend-only projection). The Brief
+      // projection reads the bound World's kb/graph (era entities) from
+      // the captured `boundWorldGraph` (ctxRef fallback).
+      if (activeLayer === 'brief') {
+        return projectBriefLayer(
+          boundWorldGraph ?? ctxRef.current.boundWorldGraph,
+        );
+      }
       if (activeLayer === 'moment') {
         return projectMomentLayer(graph, ctxRef.current.sceneBeatFixture);
       }
@@ -749,7 +899,14 @@ export function createWorkTimelineCanvasAdapter(
 
     projectGraphForLayer(graph, layer) {
       // Public layer-aware projection. Reads the fixture from the context
-      // for the Moment layer (carrier = V1.108 Scene/Beat fixture).
+      // for the Moment layer (carrier = V1.108 Scene/Beat fixture); reads
+      // the bound World's graph for the Brief layer (carrier = V1.73
+      // `WorldKbGraphResponse.entities[block_type=era]`).
+      if (layer === 'brief') {
+        return projectBriefLayer(
+          boundWorldGraph ?? ctxRef.current.boundWorldGraph,
+        );
+      }
       if (layer === 'moment') {
         return projectMomentLayer(graph, ctxRef.current.sceneBeatFixture);
       }

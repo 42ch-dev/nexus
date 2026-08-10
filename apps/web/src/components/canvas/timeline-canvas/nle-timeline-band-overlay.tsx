@@ -30,6 +30,12 @@ export function NleTimelineBandOverlay({
 }: NleTimelineBandOverlayProps) {
   const { tracks, contentWidthPx } = useMemo(() => {
     if (surface === 'work') {
+      // V1.156 P2 T2 — Work-Brief NLE band. Work-Brief projects the World
+      // Timeline Brief nodes verbatim (`timeline-brief-era`), so the band
+      // mirrors the World Timeline Brief tracks (dated / undated eras).
+      if (activeLayer === 'brief') {
+        return projectWorkTimelineNodesToNleTracks(nodes, 'brief');
+      }
       if (activeLayer === 'moment') {
         return projectWorkTimelineNodesToNleTracks(nodes, 'moment');
       }
