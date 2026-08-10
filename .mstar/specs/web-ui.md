@@ -1443,7 +1443,7 @@ The Canvas shell now hosts **four** peer surfaces: Strategy / Outline (Timeline-
 
 #### 29.18.2 Pillar framing (P0)
 
-The Web UI is the primary home of the **Canvas** pillar (spatial steering surface, with Timeline-centric World building as the hero). The **Harness** pillar (orchestration/agent host/capability registry) is surfaced today as "Strategy/Preset" — the product rename to "Harness" is deferred (`DF-V1122-HARNESS-RENAME`), so V1.122 UI strings keep "Strategy". The **Computable** pillar (WASM reactivity) is backend-only in V1.122; compute-registry/canvas surfacing is deferred (`DF-V1122-COMPUTABLE-UI`, `DF-V1122-COMPUTE-ON-TIMELINE`). Pillar definitions: [`STRATEGY.md`](../../STRATEGY.md) + [`CONCEPTS.md`](../../CONCEPTS.md).
+The Web UI is the primary home of the **Canvas** pillar (spatial steering surface, with Timeline-centric World building as the hero). The **Harness** pillar (orchestration/agent host/capability registry) user-visible label **landed as "Harness" in V1.156 P3** (`DF-V1122-HARNESS-RENAME` closed; Preset stays as the mechanism name; internal identifiers unchanged — see V1.156 forward-pointer below). The **Computable** pillar (WASM reactivity) was backend-only in V1.122; compute-registry/canvas surfacing shipped in V1.147 (`DF-V1122-COMPUTABLE-UI`, `DF-V1122-COMPUTE-ON-TIMELINE` closed). Pillar definitions: [`STRATEGY.md`](../../STRATEGY.md) + [`CONCEPTS.md`](../../CONCEPTS.md).
 
 > **V1.147 forward-pointer:** the Computable pillar is no longer backend-only —
 > V1.147 shipped **Run Studio** on the Modules surface (`DF-V1122-COMPUTABLE-UI`
@@ -1457,7 +1457,7 @@ The Web UI is the primary home of the **Canvas** pillar (spatial steering surfac
 > identifiers (route `/strategies`, `CanvasSurfaceKind = 'strategy'`, `preset` wire fields,
 > CSS classes, hook names) remain **unchanged** — this is a user-visible-copy-only rename.
 > Product lock: [`iterations/v1.156/specs/product-locks.md`](../iterations/v1.156/specs/product-locks.md) PD-4.
-> `STRATEGY.md` deferral sentence ("UI strings stay 'Strategy' until this lands") is closed when P3 ships.
+> `STRATEGY.md` + `CONCEPTS.md` deferral sentences ("UI strings stay 'Strategy' until this lands") are **closed** — V1.156 P3 shipped the rename.
 > Blast-radius decision: **default NO internal-identifier rename** (architect-confirmed V1.156 — poor ROI;
 > pre-1.0 allows breaking but the regression surface is disproportionate to zero user value).
 
