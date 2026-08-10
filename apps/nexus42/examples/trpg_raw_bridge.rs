@@ -174,26 +174,6 @@ async fn main() -> anyhow::Result<()> {
             continue;
         }
         let command: BridgeCommand = serde_json::from_str(&line).context("parse NDJSON command")?;
-        session = match connect_host(&node, &addr, host_peer).await {
-            Ok(current_session) => current_session,
-            Err(error) => {
-                emit(
-                    &mut stdout,
-                    &json!({
-                        "id": command.id,
-                        "ok": false,
-                        "kind": "transport",
-                        "error": {
-                            "code": "TRANSPORT_UNAVAILABLE",
-                            "message": error,
-                        },
-                    }),
-                )
-                .await?;
-                continue;
-            }
-        };
-
         let invoke_result = session
             .invoke(command.op.clone(), command.payload.clone())
             .await;
