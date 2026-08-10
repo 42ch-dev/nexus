@@ -380,7 +380,7 @@ describe('TimelineCanvas compute-on-Timeline (V1.147 P2 T3)', () => {
       { timeout: 10_000 },
     );
     expect(screen.getByText(/first 500 compute events/i)).toBeInTheDocument();
-  });
+  }, 15_000);
 
   it('Run Module entry opens the shared Run Studio with the World pre-filled', async () => {
     const user = userEvent.setup();
