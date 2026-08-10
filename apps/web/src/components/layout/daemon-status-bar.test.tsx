@@ -11,7 +11,7 @@ import { http, HttpResponse } from 'msw';
 import { describe, expect, it, vi, afterEach } from 'vitest';
 import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { useLocation } from 'react-router-dom';
+import { useLocation } from 'react-router';
 
 import { DaemonStatusBar } from '@/components/layout/daemon-status-bar';
 import { renderInApp } from '@/test/test-providers';

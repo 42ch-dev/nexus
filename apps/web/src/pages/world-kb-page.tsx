@@ -13,7 +13,7 @@
  * Route-split: this page (and therefore `@xyflow/react`) is lazy-loaded by
  * `App.tsx` so React Flow never enters the Control Room bootstrap chunk.
  */
-import { useParams } from 'react-router-dom';
+import { useParams } from 'react-router';
 
 import { WorldKbCanvas } from '@/components/canvas/world-kb/world-kb-canvas';
 import { PackPanel } from '@/components/pack/pack-panel';

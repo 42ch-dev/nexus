@@ -66,9 +66,9 @@ describe('Input', () => {
     expect(input).not.toHaveClass('border-red-700');
   });
 
-  // --- forwardRef ---
+  // --- ref-as-prop ---
 
-  it('forwards the ref to the underlying input element', () => {
+  it('passes the ref to the underlying input element', () => {
     let ref: HTMLInputElement | null = null;
     const setRef = (el: HTMLInputElement | null) => {
       ref = el;

@@ -197,9 +197,9 @@ describe('Card', () => {
     expect(screen.getByTestId('merge-cc')).toHaveClass('prose');
   });
 
-  // --- forwardRef for Card ---
+  // --- ref-as-prop for Card ---
 
-  it('forwards the ref on Card', () => {
+  it('passes the ref on Card', () => {
     let ref: HTMLDivElement | null = null;
     const setRef = (el: HTMLDivElement | null) => {
       ref = el;

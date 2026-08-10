@@ -9,7 +9,7 @@
  */
 
 import { useTranslation } from 'react-i18next';
-import { NavLink, Outlet } from 'react-router-dom';
+import { NavLink, Outlet } from 'react-router';
 
 import {
   SETTINGS_SECTION_DESCRIPTORS,

@@ -15,7 +15,7 @@
  * highlights, and the annotation inspector.
  */
 import { useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
 import { ArrowLeft, ArrowUpRight } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 

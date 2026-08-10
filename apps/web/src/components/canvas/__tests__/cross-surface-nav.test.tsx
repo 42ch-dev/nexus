@@ -30,7 +30,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { fireEvent } from '@testing-library/react';
 import type { MutableRefObject } from 'react';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter } from 'react-router';
 import type { Node } from '@xyflow/react';
 
 import { TimelineInspector } from '../timeline-canvas/timeline-inspector';

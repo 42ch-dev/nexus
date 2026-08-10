@@ -1,5 +1,5 @@
 import { ChevronDown } from 'lucide-react';
-import { forwardRef, type SelectHTMLAttributes } from 'react';
+import { type Ref, type SelectHTMLAttributes } from 'react';
 
 import { cn } from '../lib/cn';
 
@@ -27,10 +27,12 @@ import { cn } from '../lib/cn';
 export interface SelectProps extends SelectHTMLAttributes<HTMLSelectElement> {
   /** Marks the field invalid: switches border to red-700 and sets aria-invalid="true". */
   invalid?: boolean;
+  /** DOM ref forwarded to the underlying select (React 19 ref-as-prop). */
+  ref?: Ref<HTMLSelectElement>;
 }
 
-export const Select = forwardRef<HTMLSelectElement, SelectProps>(
-  ({ className, invalid, children, ...props }, ref) => (
+export function Select({ className, invalid, children, ref, ...props }: SelectProps) {
+  return (
     <div className="relative">
       <select
         ref={ref}
@@ -54,6 +56,6 @@ export const Select = forwardRef<HTMLSelectElement, SelectProps>(
         <ChevronDown className="h-4 w-4 text-gray-700" aria-hidden="true" />
       </span>
     </div>
-  ),
-);
+  );
+}
 Select.displayName = 'Select';

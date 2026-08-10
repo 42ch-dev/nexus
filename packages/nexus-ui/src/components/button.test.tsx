@@ -144,9 +144,9 @@ describe('Button', () => {
     expect(btn).toHaveClass('ease-standard');
   });
 
-  // --- forwardRef ---
+  // --- ref-as-prop ---
 
-  it('forwards the ref to the underlying button element', () => {
+  it('passes the ref to the underlying button element', () => {
     let ref: HTMLButtonElement | null = null;
     const setRef = (el: HTMLButtonElement | null) => {
       ref = el;

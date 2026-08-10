@@ -9,7 +9,7 @@
  * open its inspector on mount. The param is read once and threaded in as the
  * canvas's initial selection; it does not override later user clicks.
  */
-import { useParams, useSearchParams } from 'react-router-dom';
+import { useParams, useSearchParams } from 'react-router';
 
 import { OutlineCanvas } from '@/components/canvas/outline-canvas';
 import { NotFoundPage } from '@/pages/not-found-page';

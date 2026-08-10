@@ -8,10 +8,11 @@ import { renderInApp, noopClient } from '@/test/test-providers';
 import { useHandlers } from '@/test/msw-server';
 import type { ConnectionConfig } from '@/lib/nexus/connection-storage';
 import * as clientContext from '@/lib/client-context';
+import type * as RouterModule from 'react-router';
 
 const mockedNavigate = vi.fn();
-vi.mock('react-router-dom', async () => {
-  const actual = await vi.importActual<typeof import('react-router-dom')>('react-router-dom');
+vi.mock('react-router', async () => {
+  const actual = await vi.importActual<typeof RouterModule>('react-router');
   return { ...actual, useNavigate: () => mockedNavigate };
 });
 

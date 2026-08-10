@@ -35,7 +35,7 @@
 import { useMemo, useRef } from 'react';
 import { useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router';
 
 import { CanvasShell } from '@/components/canvas/canvas-shell';
 import { LayerBreadcrumb } from '@/components/canvas/layer-breadcrumb';

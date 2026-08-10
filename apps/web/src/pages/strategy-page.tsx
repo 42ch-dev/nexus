@@ -16,7 +16,7 @@
  */
 import { ArrowLeft } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router';
 
 import { StrategyCanvas } from '@/components/canvas/strategy-canvas';
 import { Button } from '@/components/ui/button';

@@ -159,9 +159,9 @@ describe('Badge', () => {
     expect(badge).toHaveClass('bg-gray-alpha-100');
   });
 
-  // --- forwardRef ---
+  // --- ref-as-prop ---
 
-  it('forwards the ref to the underlying span element', () => {
+  it('passes the ref to the underlying span element', () => {
     let ref: HTMLSpanElement | null = null;
     const setRef = (el: HTMLSpanElement | null) => {
       ref = el;

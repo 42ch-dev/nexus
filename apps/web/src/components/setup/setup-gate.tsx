@@ -1,4 +1,4 @@
-import { Navigate } from 'react-router-dom';
+import { Navigate } from 'react-router';
 
 import { useSetupCompleted } from '@/lib/setup-completed-context';
 import type { ReactNode } from 'react';

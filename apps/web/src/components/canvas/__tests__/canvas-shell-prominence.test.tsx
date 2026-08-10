@@ -24,7 +24,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import type { ReactElement } from 'react';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter } from 'react-router';
 
 import { CanvasShellTimelineBadge } from '../canvas-shell';
 import { CanvasNavCommands } from '../canvas-nav-commands';

@@ -55,7 +55,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useCallback, useContext } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Link, useBeforeUnload, useNavigate, useSearchParams } from 'react-router-dom';
+import { Link, useBeforeUnload, useNavigate, useSearchParams } from 'react-router';
 import type { Node } from '@xyflow/react';
 import { useQueries } from '@tanstack/react-query';
 import { Cpu, Info } from 'lucide-react';

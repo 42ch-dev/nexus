@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { NavLink } from 'react-router-dom';
+import { NavLink } from 'react-router';
 
 import { DaemonHealthIndicatorChrome } from '@/components/layout/presentational/daemon-health-indicator-chrome';
 import { useConnectionConfig, useNexusClient } from '@/lib/client-context';
