@@ -165,7 +165,7 @@ describe('CanvasNavCommands — registration', () => {
   });
 });
 
-describe('CanvasNavCommands — Go to Strategies (always available)', () => {
+describe('CanvasNavCommands — Go to Harness (always available)', () => {
   it('is available on an unrelated route', () => {
     renderInLayout('/sessions');
     const cmd = findById('go.strategy');

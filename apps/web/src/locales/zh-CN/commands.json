@@ -12,7 +12,7 @@
   },
   "group": {
     "navigate": "导航",
-    "strategy": "策略",
+    "strategy": "Harness",
     "outline": "大纲",
     "world-kb": "世界知识库",
     "compute": "计算"
@@ -28,7 +28,7 @@
       }
     },
     "strategy": {
-      "label": "前往策略",
+      "label": "前往 Harness",
       "keywords": {
         "preset": "预设",
         "state-machine": "状态机",
@@ -75,7 +75,7 @@
   },
   "strategy": {
     "toggle-view": {
-      "label": "切换策略视图",
+      "label": "切换 Harness 视图",
       "keywords": {
         "graph": "图表",
         "list": "列表",

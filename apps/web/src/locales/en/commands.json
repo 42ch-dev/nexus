@@ -12,7 +12,7 @@
   },
   "group": {
     "navigate": "Navigate",
-    "strategy": "Strategy",
+    "strategy": "Harness",
     "outline": "Outline",
     "world-kb": "World KB",
     "compute": "Compute"
@@ -28,7 +28,7 @@
       }
     },
     "strategy": {
-      "label": "Go to Strategies",
+      "label": "Go to Harness",
       "keywords": {
         "preset": "preset",
         "state-machine": "state machine",
@@ -75,7 +75,7 @@
   },
   "strategy": {
     "toggle-view": {
-      "label": "Toggle Strategy View",
+      "label": "Toggle Harness View",
       "keywords": {
         "graph": "graph",
         "list": "list",

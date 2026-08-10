@@ -5,7 +5,7 @@
  * Mounted once in {@link RootLayout} so the canvas-surface entry routes
  * are reachable from the command palette (⌘K) wherever the user is:
  *
- *   - **Go to Strategies** → `/strategies` (always available; the list is the
+ *   - **Go to Harness** → `/strategies` (always available; the list is the
  *     entry point to the Strategy canvas, mirroring the sidebar).
  *   - **Go to Outline** → `/works/:workId/outline` (only when a `workId` is in
  *     the current URL).

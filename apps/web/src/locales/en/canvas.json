@@ -197,9 +197,9 @@
     "loadErrorTitle": "Could not load strategy",
     "engineUnavailableTitle": "Orchestration engine not running",
     "engineUnavailableDescription": "Start the daemon orchestration engine, then try again.",
-    "graphAriaLabel": "Strategy spatial graph",
+    "graphAriaLabel": "Harness spatial graph",
     "header": {
-      "title": "Strategy",
+      "title": "Preset",
       "description": "State machine and transition editor",
       "showGraph": "Show graph",
       "showList": "Show list",
@@ -229,9 +229,9 @@
       "currentExecutionNode": "Current execution node"
     },
     "toast": {
-      "runQueued": "Strategy run queued",
-      "ideaSent": "Idea sent to Strategy",
-      "resumed": "Strategy resumed"
+      "runQueued": "Preset run queued",
+      "ideaSent": "Idea sent to Preset",
+      "resumed": "Preset resumed"
     },
     "draftTransitionLabel": "Draft transition",
     "draftTransitionEditor": "Draft transition editor",
@@ -244,7 +244,7 @@
       "dangling": "Dangling transition: {{target}}"
     },
     "altView": {
-      "ariaLabel": "Strategy states and transitions in list order",
+      "ariaLabel": "Harness states and transitions in list order",
       "statesTitle": "States",
       "transitionsTitle": "Transitions",
       "innerGraph": "inner: {{id}}",
@@ -264,7 +264,7 @@
     },
     "artifacts": {
       "title": "Artifacts",
-      "ariaLabel": "Strategy artifacts",
+      "ariaLabel": "Harness artifacts",
       "empty": "No artifacts yet."
     },
     "edgeCreate": {
@@ -289,7 +289,7 @@
       "draftAriaLabel": "Draft transition from {{source}} to {{target}}"
     },
     "inspector": {
-      "ariaLabel": "Strategy inspector",
+      "ariaLabel": "Harness inspector",
       "state": {
         "title": "State",
         "ariaLabel": "State inspector",
@@ -337,7 +337,7 @@
   },
   "conflict": {
     "strategy": {
-      "title": "Strategy Conflict"
+      "title": "Harness Conflict"
     },
     "fields": {
       "label": "Label",
@@ -646,7 +646,7 @@
       "description": "The world's when-axis. Pivots to World KB for entity edits.",
       "peerNavAria": "Peer surfaces",
       "worldKbLink": "World KB",
-      "strategyLink": "Strategy",
+      "strategyLink": "Harness",
       "showGraph": "Show graph",
       "showList": "Show list view"
     },

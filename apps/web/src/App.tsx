@@ -1,4 +1,5 @@
 import { lazy, Suspense } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
 
 import {
@@ -96,6 +97,7 @@ function StrategyRedirect() {
 function AppRoutes() {
   const location = useLocation();
   const { open, backgroundLocation } = useSettingsModal();
+  const { t } = useTranslation('strategies');
   const routesLocation = open ? backgroundLocation : location;
 
   return (
@@ -188,7 +190,7 @@ function AppRoutes() {
         <Route
           path="strategies/:presetId"
           element={
-            <Suspense fallback={<LoadingState label="Loading Strategy…" />}>
+            <Suspense fallback={<LoadingState label={t('strategyDetail.loading')} />}>
               <StrategyDetailPage />
             </Suspense>
           }

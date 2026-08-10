@@ -33,7 +33,7 @@ const baseProps = {
 describe('ConflictModal', () => {
   it('renders the mandated headline and server revision', () => {
     render(<ConflictModal {...baseProps} />);
-    expect(screen.getByRole('heading', { name: 'Strategy Conflict' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Harness Conflict' })).toBeInTheDocument();
     expect(screen.getByText(/This entry changed while you were editing/i)).toBeInTheDocument();
     expect(screen.getByText('7', { selector: 'span.font-mono' })).toBeInTheDocument();
   });
