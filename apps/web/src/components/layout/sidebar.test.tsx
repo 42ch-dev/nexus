@@ -65,7 +65,7 @@ describe('Sidebar', () => {
 
     expect(screen.getByRole('tab', { name: 'Orchestrator', selected: true })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Memory' })).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Strategies' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Harness' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Sessions' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Schedule' })).toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Capabilities' })).not.toBeInTheDocument();
@@ -198,7 +198,7 @@ describe('Sidebar', () => {
     );
   });
 
-  it('orders Orchestrator groups Memory → Strategies → Runtime (V1.130)', async () => {
+  it('orders Orchestrator groups Memory → Harness → Runtime (V1.130)', async () => {
     const user = userEvent.setup();
     useSidebarHandlers();
 
@@ -207,10 +207,10 @@ describe('Sidebar', () => {
 
     const groupButtons = screen
       .getAllByRole('button')
-      .filter((el) => ['Memory', 'Strategies', 'Runtime'].includes(el.textContent ?? ''));
+      .filter((el) => ['Memory', 'Harness', 'Runtime'].includes(el.textContent ?? ''));
     expect(groupButtons.map((el) => el.textContent)).toEqual([
       'Memory',
-      'Strategies',
+      'Harness',
       'Runtime',
     ]);
   });
@@ -225,7 +225,7 @@ describe('Sidebar', () => {
     });
 
     expect(screen.getByRole('tab', { name: 'Orchestrator', selected: true })).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Strategies' })).toHaveClass('bg-gray-alpha-100');
+    expect(screen.getByRole('link', { name: 'Harness' })).toHaveClass('bg-gray-alpha-100');
   });
 
   it('nests Strategy under the Orchestration tab (AC-P2-4)', async () => {
@@ -236,7 +236,7 @@ describe('Sidebar', () => {
 
     await user.click(screen.getByRole('tab', { name: 'Orchestrator' }));
 
-    expect(screen.getByRole('link', { name: 'Strategies' })).toHaveAttribute(
+    expect(screen.getByRole('link', { name: 'Harness' })).toHaveAttribute(
       'href',
       '/strategies',
     );

@@ -1019,7 +1019,7 @@ The sidebar renders at `lg`+ (≥961px) as a fixed left panel. Below `lg`, the t
 | **Creator** | Works | (per-Work navigation nest: Chapters, Findings) |
 | | Creator | Memory, SOUL |
 | **Orchestrator** | Runtime | Sessions, Schedule, Capabilities |
-| | Strategies | (single entry: `/strategies` list → `/strategies/:presetId` canvas detail) |
+| | Harness *(user-visible label; route `/strategies` unchanged — V1.156 PD-4)* | (single entry: `/strategies` list → `/strategies/:presetId` canvas detail) |
 
 **Excluded from sidebar**:
 - **Connect** — Settings → **Connection** (`/settings/connection`); legacy `/connect` permanently redirects (V1.103 C1). Not a sidebar item. **Implement authority:** [settings-connection-section.md](../iterations/v1.103/specs/settings-connection-section.md).
@@ -1033,16 +1033,18 @@ The old 10-item flat `NAV_ITEMS` array is retired. Tab switch swaps the visible 
 - Per-Work nested nav (Chapters, Findings) is contextual to the currently active Work.
 - Creator nested nav (Memory, SOUL) is static per the creator scope.
 - Runtime nested nav (Sessions, Schedule, Capabilities) is static.
-- Strategies is a single top-level entry under Orchestrator — no nesting; clicking opens `/strategies` list.
+- Harness is a single top-level entry under Orchestrator — no nesting; clicking opens `/strategies` list. **User-visible label = "Harness"** (V1.156 PD-4 rename from "Strategies"); the route path `/strategies` and `CanvasSurfaceKind = 'strategy'` are internal identifiers that stay unchanged.
 
-### 29.4 Strategies unification
+### 29.4 Strategies unification (routes) — user-visible label = "Harness" (V1.156)
 
 The existing `/presets` (list) and `/strategy` (canvas) routes collapse to:
 
 - **`/strategies`** — list view (replaces `presets-page.tsx` as entry).
 - **`/strategies/:presetId`** — canvas detail view (preserves V1.70–V1.75 canvas surface verbatim).
 
-**Preservation invariant**: The full V1.70–V1.75 canvas surface is preserved verbatim at `/strategies/:presetId` — React Flow behaviour, write-boundary (strategy patch routes, graphRevision), conflict modals (strategy-flavored copy), non-spatial alternate views, keyboard paths, and all canvas-write DESIGN.md tokens. This is an entry-point reshape only; no canvas rewrite.
+**V1.156 PD-4 rename:** the user-visible pillar-entry label changes **Strategy / Strategies → Harness**. The route paths (`/strategies`, `/strategies/:presetId`), the `CanvasSurfaceKind = 'strategy'` enum value, the `preset` wire/DTO field names, CSS classes, and all internal identifiers stay **unchanged** — this is a user-visible-copy-only rename. **Preset stays** as the mechanism name under Harness (it is not a pillar synonym).
+
+**Preservation invariant**: The full V1.70–V1.75 canvas surface is preserved verbatim at `/strategies/:presetId` — React Flow behaviour, write-boundary (strategy patch routes, graphRevision), conflict modals, non-spatial alternate views, keyboard paths, and all canvas-write DESIGN.md tokens. This is an entry-point reshape only; no canvas rewrite.
 
 **Redirect compatibility**: `/presets` → `/strategies` (301/302); `/strategy` → `/strategies/:presetId` (requires a stored active preset ID or redirects to list). Deep links from V1.70–V1.75 must resolve.
 
@@ -1441,7 +1443,7 @@ The Canvas shell now hosts **four** peer surfaces: Strategy / Outline (Timeline-
 
 #### 29.18.2 Pillar framing (P0)
 
-The Web UI is the primary home of the **Canvas** pillar (spatial steering surface, with Timeline-centric World building as the hero). The **Harness** pillar (orchestration/agent host/capability registry) is surfaced today as "Strategy/Preset" — the product rename to "Harness" is deferred (`DF-V1122-HARNESS-RENAME`), so V1.122 UI strings keep "Strategy". The **Computable** pillar (WASM reactivity) is backend-only in V1.122; compute-registry/canvas surfacing is deferred (`DF-V1122-COMPUTABLE-UI`, `DF-V1122-COMPUTE-ON-TIMELINE`). Pillar definitions: [`STRATEGY.md`](../../STRATEGY.md) + [`CONCEPTS.md`](../../CONCEPTS.md).
+The Web UI is the primary home of the **Canvas** pillar (spatial steering surface, with Timeline-centric World building as the hero). The **Harness** pillar (orchestration/agent host/capability registry) user-visible label **landed as "Harness" in V1.156 P3** (`DF-V1122-HARNESS-RENAME` closed; Preset stays as the mechanism name; internal identifiers unchanged — see V1.156 forward-pointer below). The **Computable** pillar (WASM reactivity) was backend-only in V1.122; compute-registry/canvas surfacing shipped in V1.147 (`DF-V1122-COMPUTABLE-UI`, `DF-V1122-COMPUTE-ON-TIMELINE` closed). Pillar definitions: [`STRATEGY.md`](../../STRATEGY.md) + [`CONCEPTS.md`](../../CONCEPTS.md).
 
 > **V1.147 forward-pointer:** the Computable pillar is no longer backend-only —
 > V1.147 shipped **Run Studio** on the Modules surface (`DF-V1122-COMPUTABLE-UI`
@@ -1449,6 +1451,15 @@ The Web UI is the primary home of the **Canvas** pillar (spatial steering surfac
 > nodes (`DF-V1122-COMPUTE-ON-TIMELINE` closed; both tracker rows archived).
 > The direct lane routes: [`daemon-api-surface-conventions.md`](daemon-api-surface-conventions.md) §12.3.
 > Product lock: [`computable-author-behavior.md`](../iterations/v1.147/specs/computable-author-behavior.md).
+> **V1.156 forward-pointer:** the Harness pillar product rename **lands in V1.156 P3**
+> (the `DF-V1122-HARNESS-RENAME` tracker row closes at iteration-close). The user-visible pillar-entry label changes
+> **Strategy / Strategies → Harness**; **Preset stays** as the mechanism name. Internal
+> identifiers (route `/strategies`, `CanvasSurfaceKind = 'strategy'`, `preset` wire fields,
+> CSS classes, hook names) remain **unchanged** — this is a user-visible-copy-only rename.
+> Product lock: [`iterations/v1.156/specs/product-locks.md`](../iterations/v1.156/specs/product-locks.md) PD-4.
+> `STRATEGY.md` + `CONCEPTS.md` deferral sentences ("UI strings stay 'Strategy' until this lands") are **closed** — V1.156 P3 shipped the rename.
+> Blast-radius decision: **default NO internal-identifier rename** (architect-confirmed V1.156 — poor ROI;
+> pre-1.0 allows breaking but the regression surface is disproportionate to zero user value).
 
 #### 29.18.3 Contract boundary
 

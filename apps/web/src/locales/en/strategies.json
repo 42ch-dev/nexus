@@ -1,5 +1,5 @@
 {
-  "title": "Strategies",
+  "title": "Harness",
   "description": "Validate a preset before running it — the dry-run is the safest way to confirm it is ready.",
   "validatePreset": "Validate",
   "scaffoldPreset": "Scaffold",
@@ -29,11 +29,11 @@
   "delete": "Delete",
   "deleteAria": "Delete preset {{name}}",
   "strategyDetail": {
-    "loading": "Loading Strategy…",
+    "loading": "Loading Harness…",
     "back": "Back",
-    "notFoundTitle": "Strategy not found",
-    "notFoundDescription": "Choose a Strategy from the Strategies list.",
-    "title": "Strategy",
+    "notFoundTitle": "Preset not found",
+    "notFoundDescription": "Choose a Preset from the Harness list.",
+    "title": "Preset",
     "description": "See a preset as a state-machine graph and steer execution with an Idea. Nexus owns the prose."
   },
   "deleteConfirm": {

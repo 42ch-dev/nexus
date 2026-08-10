@@ -81,10 +81,10 @@ function projectWithRules(
   };
 }
 
-/** World Timeline — Brief ↔ Narrative layer tracks from adapter nodes. */
+/** World Timeline — Brief | Narrative | Moment layer tracks from adapter nodes. */
 export function projectWorldTimelineNodesToNleTracks(
   nodes: Node[],
-  layer: 'brief' | 'narrative',
+  layer: 'brief' | 'narrative' | 'moment',
 ): { tracks: NleTimelineTrack[]; contentWidthPx: number } {
   if (layer === 'brief') {
     return projectWithRules(nodes, [
@@ -101,6 +101,27 @@ export function projectWorldTimelineNodesToNleTracks(
         accent: 'brief',
         match: (node) =>
           node.type === 'timeline-brief-era' && node.position.y !== WORLD_WHEN_AXIS_Y,
+      },
+    ]);
+  }
+
+  if (layer === 'moment') {
+    // V1.156 P5 — World-Moment NLE band. The World Timeline reuses the Work
+    // Timeline Moment node types verbatim (`work-timeline-moment-scene` /
+    // `work-timeline-moment-beat`), so the World-Moment band mirrors the
+    // Work-Moment tracks (Scenes + Beats).
+    return projectWithRules(nodes, [
+      {
+        id: 'scenes',
+        label: 'Scenes',
+        accent: 'moment',
+        match: (node) => node.type === 'work-timeline-moment-scene',
+      },
+      {
+        id: 'beats',
+        label: 'Beats',
+        accent: 'moment',
+        match: (node) => node.type === 'work-timeline-moment-beat',
       },
     ]);
   }
@@ -131,11 +152,35 @@ export function projectWorldTimelineNodesToNleTracks(
   ]);
 }
 
-/** Work Timeline — Narrative ↔ Moment layer tracks from adapter nodes. */
+/**
+ * Work Timeline — Brief | Narrative | Moment layer tracks from adapter nodes.
+ *
+ * V1.156 P2 T2 — the Brief layer reuses the World Timeline Brief projection
+ * verbatim (`timeline-brief-era` nodes), so the Brief band mirrors the World
+ * Timeline Brief tracks (dated eras on the when-axis + undated cluster).
+ */
 export function projectWorkTimelineNodesToNleTracks(
   nodes: Node[],
-  layer: 'narrative' | 'moment',
+  layer: 'brief' | 'narrative' | 'moment',
 ): { tracks: NleTimelineTrack[]; contentWidthPx: number } {
+  if (layer === 'brief') {
+    return projectWithRules(nodes, [
+      {
+        id: 'brief',
+        label: 'Brief',
+        accent: 'brief',
+        match: (node) =>
+          node.type === 'timeline-brief-era' && node.position.y === WORLD_WHEN_AXIS_Y,
+      },
+      {
+        id: 'brief-undated',
+        label: 'Undated',
+        accent: 'brief',
+        match: (node) =>
+          node.type === 'timeline-brief-era' && node.position.y !== WORLD_WHEN_AXIS_Y,
+      },
+    ]);
+  }
   if (layer === 'narrative') {
     const split = projectWithRules(nodes, [
       {

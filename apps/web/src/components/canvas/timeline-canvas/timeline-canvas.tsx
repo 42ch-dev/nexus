@@ -5,13 +5,15 @@
  *   - Graph read via the shared `useWorldKbGraph(worldId)` hook (V1.73
  *     `GET .../kb/graph` — the single World-spine read endpoint).
  *   - Adapter projection via `useCanvasSurface` (V1.114 P0 recipe).
- *   - V1.123 P1 T3 layer state: Brief ↔ Narrative tabs in the canvas
- *     header. Active layer drives `createTimelineCanvasAdapter(ctxRef, layer)`
- *     so `useCanvasSurface`'s `[graph, adapter]` memo re-projects on layer
- *     swap (semantic discrete swap per layer-feel-differentiation.md §3.1 —
- *     not continuous viewport zoom). Default layer is `'brief'` when graph
- *     has any `block_type=era` entity; `'narrative'` fallback otherwise
- *     (plan Global Constraints + architect §7/§8).
+ *   - V1.123 P1 T3 + V1.156 P1 T2 layer state: Brief | Narrative | Moment
+ *     tabs in the canvas header (Moment added V1.156). Active layer drives
+ *     `createTimelineCanvasAdapter(ctxRef, layer)` so `useCanvasSurface`'s
+ *     `[graph, adapter]` memo re-projects on layer swap (semantic discrete
+ *     swap per layer-feel-differentiation.md §3.1 — not continuous viewport
+ *     zoom). Default layer is `'brief'` when graph has any
+ *     `block_type=era` entity; `'narrative'` fallback otherwise (plan
+ *     Global Constraints + architect §7/§8; Moment is never the default —
+ *     read-only projection per spec §3.3.3).
  *   - Write boundary: `usePatchWorldKbEntity(worldId)` is the ONLY write
  *     path. The inspector routes patches through `ctxRef.onPatchEntity`,
  *     which the orchestrator wires to `patchEntity.mutate(...)`. Forbidden
@@ -37,15 +39,18 @@
  * entry stays Outline (V1.118 regression gate).
  *
  * Layer state: the orchestrator owns the active layer via the URL search
- * param `?layer=brief|narrative` (V1.123 P4 Task 6 — refresh-safe +
- * survives Timeline → World KB → back). A `useMemo` derives the default
- * layer from the graph data (Brief if any `block_type=era` entity, else
- * Narrative); when the URL carries no layer (or an invalid value like
- * `moment`, which is Work-Timeline-only), the default wins. The user can
- * override via the layer tabs, the breadcrumb segments, or the semantic
- * zoom bridge — every override writes back to the URL so the choice is
- * shareable and survives refresh. Task 7 owns the honest empty-state copy
- * per layer; Task 5 owns the breadcrumb cross-layer affordance.
+ * param `?layer=brief|narrative|moment` (V1.123 P4 Task 6 + V1.156 P1 T2 —
+ * refresh-safe + survives Timeline → World KB → back). All three layer
+ * values are valid on the World Timeline per spec §3.3.3 — the V1.123
+ * "moment is Work-only" restriction is lifted (V1.156 amendment). A
+ * `useMemo` derives the default layer from the graph data (Brief if any
+ * `block_type=era` entity, else Narrative); when the URL carries no layer
+ * (or an unknown value), the default wins. The user can override via the
+ * layer tabs, the breadcrumb segments, or the semantic zoom bridge — every
+ * override writes back to the URL so the choice is shareable and survives
+ * refresh. Task 7 owns the honest empty-state copy per layer (V1.156 P1 T2
+ * adds the World-Moment panel); Task 5 owns the breadcrumb cross-layer
+ * affordance.
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useCallback, useContext } from 'react';
@@ -83,11 +88,30 @@ import {
 } from './timeline-canvas-adapter';
 import type { TimelineNodeData } from './timeline-canvas-adapter';
 import { WorldKbEntityConflictModal, type WorldKbEntityConflictDraft } from '../world-kb/world-kb-conflict-modal';
+import type { SceneBeatFixturePayload } from '../outline-canvas/graph-projection';
 import { NleTimelineBandOverlay } from './nle-timeline-band-overlay';
 import { filterTimelineEntityNodes } from './nle-timeline-projection';
 
 export interface TimelineCanvasProps {
   worldId: string;
+  /**
+   * Optional V1.108 Scene/Beat fixture for the Moment layer (V1.156 P1 T2 —
+   * architect spec §3.3.3 V1.156 amendment). The `WorkOutline` wire exposes
+   * no scenes/beats today (DR-26 tracks the extension); Design Studio / test
+   * fixtures inject scene/beat payloads at the projection layer. When
+   * undefined or empty, the Moment layer emits honest empty-state (zero
+   * nodes) per product semantics PD-3 — World Timeline Moment is a
+   * READ/projection layer: scenes come from Works bound to this World, and
+   * Moments remain Work-owned (no World Moment authoring flow).
+   *
+   * The fixture is captured by the adapter factory (alongside the active
+   * layer) so the adapter memo deps include it — a fixture identity change
+   * re-projects the Moment layer without a layer swap. It is also forwarded
+   * to the adapter context as the `sceneBeatFixture` slot (mirrors the Work
+   * Timeline orchestrator's slot); the captured value takes precedence at
+   * projection time.
+   */
+  sceneBeatFixture?: SceneBeatFixturePayload;
 }
 
 /**
@@ -100,6 +124,14 @@ export interface TimelineCanvasProps {
  * honestly not rendered (the projection renders only what it fetched).
  */
 const TIMELINE_EVENTS_PROJECTION_CAP = 500;
+
+/**
+ * V1.156 P1 fix-wave 1 (F3) — stable empty fixture payload for Worlds with
+ * no injected scene/beat fixture. Module-level so the adapter memo deps stay
+ * referentially stable across re-renders — no new object identity per render
+ * (mirrors the Outline Canvas `EMPTY_SCENE_BEAT_FIXTURE` pattern).
+ */
+const EMPTY_SCENE_BEAT_FIXTURE: SceneBeatFixturePayload = { scenes: [], beats: [] };
 
 /**
  * Build the V1.73 `WorldKbPatchEntityRequest` envelope from the adapter's
@@ -158,7 +190,7 @@ function buildConflictDraft(
   };
 }
 
-export function TimelineCanvas({ worldId }: TimelineCanvasProps) {
+export function TimelineCanvas({ worldId, sceneBeatFixture }: TimelineCanvasProps) {
   const { t } = useTranslation('canvas');
   const navigate = useNavigate();
   const graph = useWorldKbGraph(worldId);
@@ -386,15 +418,18 @@ export function TimelineCanvas({ worldId }: TimelineCanvasProps) {
   // from the graph data (Brief if any `block_type=era` entity, else
   // Narrative) per plan Global Constraints + architect §7/§8.
   //
-  // V1.123 P4 Task 6 — layer-state persistence. The user-chosen layer is
-  // encoded in the URL search param `?layer=brief|narrative|moment`
-  // (layer-feel-differentiation.md §5). The URL is the shareable,
+  // V1.123 P4 Task 6 + V1.156 P1 T2 — layer-state persistence. The
+  // user-chosen layer is encoded in the URL search param
+  // `?layer=brief|narrative|moment` (layer-feel-differentiation.md §5 +
+  // spec §3.3.3 layer-state persistence). The URL is the shareable,
   // refresh-safe source of truth for the active layer: it survives
   // Timeline → World KB → back round-trips and refresh. On mount, the URL
   // is read; on layer swap (via the layer tabs, breadcrumb, or semantic
-  // zoom), the URL is updated. Invalid layer values for the surface
-  // (e.g., `?layer=moment` on the World Timeline — Moment is Work-only)
-  // are ignored so the default-derived layer wins.
+  // zoom), the URL is updated. All three layer values are valid on the
+  // World Timeline — the V1.123 restriction ("`?layer=moment` ignored on
+  // World Timeline — Moment is Work-only") is LIFTED by the V1.156
+  // amendment; only unknown values (e.g. `?layer=foo`) are ignored so the
+  // default-derived layer wins.
   //
   // When the user picks the default layer (e.g., clicks Brief on a World
   // with era data), the URL param is dropped so the surface can resume
@@ -404,11 +439,14 @@ export function TimelineCanvas({ worldId }: TimelineCanvasProps) {
   const [searchParams, setSearchParams] = useSearchParams();
   const urlLayerRaw = searchParams.get('layer');
   const urlLayerOverride: TimelineLayer | null = useMemo(() => {
-    if (urlLayerRaw === 'brief' || urlLayerRaw === 'narrative') {
+    if (
+      urlLayerRaw === 'brief' ||
+      urlLayerRaw === 'narrative' ||
+      urlLayerRaw === 'moment'
+    ) {
       return urlLayerRaw;
     }
-    // Invalid / absent → fall back to the era-derived default. `moment`
-    // is Work-Timeline-only and is silently ignored here.
+    // Unknown / absent → fall back to the era-derived default.
     return null;
   }, [urlLayerRaw]);
 
@@ -451,9 +489,25 @@ export function TimelineCanvas({ worldId }: TimelineCanvasProps) {
   // the module-name map change (data-driven re-projection: `useCanvasSurface`
   // memoises on `[graph, adapter]`, so a new adapter identity re-runs the
   // Narrative merge with the fresh events).
+  //
+  // V1.156 P1 fix-wave 1 (F3) — the adapter ALSO captures the Moment
+  // scene/beat fixture (`fixture` — the stable module-level empty constant
+  // when the prop is absent, so real Worlds never churn the memo). A fixture
+  // identity change recreates the adapter and re-projects the Moment layer
+  // without a layer swap (previously the fixture was only read via
+  // `ctxRef.current` AFTER this memo, so the projection stayed stale until
+  // a layer swap / graph refetch).
+  const fixture = sceneBeatFixture ?? EMPTY_SCENE_BEAT_FIXTURE;
   const adapter = useMemo(
-    () => createTimelineCanvasAdapter(ctxRef, activeLayer, eventsList, computeModuleNames),
-    [activeLayer, eventsList, computeModuleNames],
+    () =>
+      createTimelineCanvasAdapter(
+        ctxRef,
+        activeLayer,
+        eventsList,
+        computeModuleNames,
+        fixture,
+      ),
+    [activeLayer, eventsList, computeModuleNames, fixture],
   );
 
   const surface = useCanvasSurface(adapter, surfaceQuery);
@@ -571,6 +625,11 @@ export function TimelineCanvas({ worldId }: TimelineCanvasProps) {
   // alt-view itself performs NO writes (architect-locked §4.2).
   ctxRef.current = {
     worldId,
+    // V1.156 P1 T2 — bound-Works Scene/Beat fixture slot. Forwarded to the
+    // adapter context so the Moment projection reads it at projection time
+    // (`ctxRef.current.sceneBeatFixture`). Production passes nothing
+    // (honest empty-state); Design Studio / tests inject fixture payloads.
+    sceneBeatFixture,
     onPatchEntity: handlePatchEntity,
     onConflict: (info) => setConflictInfo(info),
     nodes: surface.nodes,
@@ -643,6 +702,17 @@ export function TimelineCanvas({ worldId }: TimelineCanvasProps) {
     (e) => e.block_type === 'era',
   ).length;
   const isBriefEmpty = !isEmpty && activeLayer === 'brief' && eraCount === 0;
+
+  // V1.156 P1 T2 — World-Moment empty detection. Mirrors the Work Timeline
+  // orchestrator's `isMomentEmpty` pattern: the active layer is Moment AND
+  // the projection returned zero nodes (no bound-Works scene/beat fixture /
+  // empty fixture). The graph itself is NOT globally empty here (the global
+  // empty branch above owns zero-entity graphs); this branch only fires
+  // when there is content on Brief/Narrative but nothing projectable on
+  // Moment — the honest panel (PD-3) explains scenes come from bound Works'
+  // Outline data, with a CTA back to Narrative.
+  const isMomentEmpty =
+    !isEmpty && activeLayer === 'moment' && surface.nodes.length === 0;
 
   // Visible ordering-disclaimer gate (PR #156 fix 3 — Greptile P1). Mirrors
   // the adapter's `summarizeTimelineGraph` a11y-disclaimer condition: present
@@ -734,6 +804,11 @@ export function TimelineCanvas({ worldId }: TimelineCanvasProps) {
         />
       ) : isBriefEmpty ? (
         <BriefEmptyState onSwitchToNarrative={() => handleLayerChange('narrative')} />
+      ) : isMomentEmpty ? (
+        // V1.156 P1 T2 — World-Moment honest empty-state (PD-3): scenes come
+        // from bound Works' Outline data; Moments remain Work-owned. No
+        // World-owned Moment authoring CTA.
+        <MomentEmptyState onSwitchToNarrative={() => handleLayerChange('narrative')} />
       ) : showAltView ? (
         <div className="grid gap-3 lg:grid-cols-[1fr_360px]">
           {surface.altView}
@@ -829,10 +904,11 @@ export function TimelineCanvas({ worldId }: TimelineCanvasProps) {
  * World KB `WorldKbHeader` show-list button). Hidden when the Timeline has
  * zero entities (the empty-state branch owns its own CTA).
  *
- * V1.123 P1 T3: the header also surfaces the Brief ↔ Narrative layer
- * switcher (layer-feel-differentiation.md §3.2 — explicit layer control).
- * The switcher renders inside the header only when the canvas branch is
- * active (non-empty graph); the empty-state branch owns its own surface.
+ * V1.123 P1 T3 + V1.156 P1 T2: the header also surfaces the
+ * Brief | Narrative | Moment layer switcher (layer-feel-differentiation.md
+ * §3.2 — explicit layer control; Moment added V1.156 §3.3.3). The switcher
+ * renders inside the header only when the canvas branch is active
+ * (non-empty graph); the empty-state branch owns its own surface.
  */
 function TimelineCanvasHeader({
   worldId,
@@ -957,18 +1033,19 @@ function TimelineCanvasHeader({
 }
 
 /**
- * V1.123 P1 T3 — Brief ↔ Narrative layer switcher (layer-feel-differentiation.md
- * §3.2 explicit layer control).
+ * V1.123 P1 T3 + V1.156 P1 T2 — Brief | Narrative | Moment layer switcher
+ * (layer-feel-differentiation.md §3.2 explicit layer control; Moment added
+ * by the V1.156 spec amendment §3.3.3 — 3×2 matrix completion).
  *
- * Inline segmented control (two buttons with `aria-pressed`). Built inline
+ * Inline segmented control (three buttons with `aria-pressed`). Built inline
  * rather than promoting to `packages/nexus-ui` because:
  *   - The set of layers + the active-layer discriminator are Timeline-
  *     surface-specific (not a generic primitive).
  *   - YAGNI — no other surface consumes a generic SegmentedControl today
  *     (the World KB / Strategy / Outline surfaces each ship their own header
- *     toggle patterns). P4 may promote a generic primitive if more layers
- *     arrive (e.g. Work Timeline Narrative ↔ Moment); the per-surface
- *     inline control is the durable slice for V1.123 P1.
+ *     toggle patterns; the Work Timeline ships its own 2-way inline control
+ *     for Narrative ↔ Moment). The per-surface inline control is the
+ *     durable slice.
  *
  * Accessibility: each button carries `aria-pressed` so screen readers
  * announce the active layer as a toggle state (WCAG 2.1 — semantic
@@ -1002,6 +1079,14 @@ function TimelineLayerSwitcher({
       layer: 'narrative',
       testId: 'timeline-layer-tab-narrative',
       labelKey: 'timeline.layerSwitcher.narrative',
+    },
+    {
+      // V1.156 P1 T2 — Moment tab. Additive third segment; the existing
+      // Brief / Narrative semantics are unchanged. Moment is never the
+      // default (read-only projection — spec §3.3.3).
+      layer: 'moment',
+      testId: 'timeline-layer-tab-moment',
+      labelKey: 'timeline.layerSwitcher.moment',
     },
   ];
   return (
@@ -1071,6 +1156,57 @@ function BriefEmptyState({
             onClick={onSwitchToNarrative}
           >
             {t('timeline.brief.emptyState.cta')}
+          </Button>
+        }
+      />
+    </div>
+  );
+}
+
+/**
+ * V1.156 P1 T2 — World-Moment honest empty-state.
+ *
+ * Renders when the active layer is Moment but the projection has zero nodes
+ * (no bound-Works scene/beat fixture; or fixture is empty). Per product
+ * semantics PD-3 + spec §3.3.3 empty-state honesty (V1.156 amendment), the
+ * World Timeline Moment layer is a READ/projection layer: scenes come from
+ * Works bound to this World (their Outline scene/beat data), and Moments
+ * remain Work-owned. The panel says exactly that (honest copy + how to
+ * produce scene precision) and offers a CTA back to Narrative — there is NO
+ * "create Moment" CTA, because this is NOT a World Moment authoring surface
+ * (no World-owned Moment write flow).
+ *
+ * Mirrors the Work Timeline's `MomentEmptyState` copy pattern (V1.123 P2
+ * Task 7) + the World Timeline's `BriefEmptyState` escape-hatch pattern
+ * (built on the shared `EmptyState` primitive; primary-action CTA so
+ * keyboard + SR users have a direct escape hatch).
+ */
+function MomentEmptyState({
+  onSwitchToNarrative,
+}: {
+  onSwitchToNarrative: () => void;
+}) {
+  const { t } = useTranslation('canvas');
+  return (
+    <div data-testid="timeline-moment-empty-state" className="rounded-card border border-gray-alpha-400 bg-background-100">
+      <EmptyState
+        title={t('timeline.moment.emptyState.title', {
+          defaultValue: 'No scene or beat data yet',
+        })}
+        description={t('timeline.moment.emptyState.message', {
+          defaultValue:
+            'Scene-precision is available when bound Works have scene/beat data in their Outline. Add scenes and beats to a bound Work, or switch to Narrative for events.',
+        })}
+        action={
+          <Button
+            type="button"
+            variant="primary"
+            data-testid="timeline-moment-empty-cta"
+            onClick={onSwitchToNarrative}
+          >
+            {t('timeline.moment.emptyState.cta', {
+              defaultValue: 'Switch to Narrative',
+            })}
           </Button>
         }
       />

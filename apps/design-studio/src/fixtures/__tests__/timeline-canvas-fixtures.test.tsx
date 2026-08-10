@@ -1,9 +1,11 @@
 /**
- * World Timeline Studio fixtures — smoke + boundary tests (V1.124 P0 T3).
+ * World Timeline Studio fixtures — smoke + boundary tests (V1.124 P0 T3;
+ * V1.156 P1 T2 Moment layer + Moment empty-state).
  *
  * Acceptance evidence shapes (studio-fixture-acceptance-criteria.md §8):
  *   F1/F4 — fixture imports shared extract; no RF / contracts / daemon / i18n
- *   F3/F7 — three frames + product vocabulary (Brief / Event / KeyBlock / Timeline)
+ *   F3/F7 — frames + product vocabulary (Brief / Event / KeyBlock / Moment /
+ *           Timeline)
  *   F2/F5 — light + dark render without throw
  *   F9 — discoverable testids on Surfaces Canvas page section
  */
@@ -73,6 +75,9 @@ describe('timeline-canvas-fixtures presentational boundary', () => {
     expect(source).toMatch(/TimelineBriefEraChrome/);
     expect(source).toMatch(/TimelineEventChrome/);
     expect(source).toMatch(/TimelineKeyBlockChrome/);
+    // V1.156 — World Timeline Moment layer reuses the Work Moment chrome.
+    expect(source).toMatch(/WorkTimelineMomentSceneChrome/);
+    expect(source).toMatch(/WorkTimelineMomentBeatChrome/);
   });
 });
 
@@ -81,7 +86,7 @@ describe('timeline-canvas-fixtures presentational boundary', () => {
 // ---------------------------------------------------------------------------
 
 describe('TimelineCanvasFixtures render', () => {
-  it('renders all three World Timeline fixture frames without throw', () => {
+  it('renders all six World Timeline fixture frames without throw', () => {
     mockMatchMedia(false);
     render(<TimelineCanvasFixtures />);
 
@@ -89,9 +94,12 @@ describe('TimelineCanvasFixtures render', () => {
     expect(screen.getByTestId('timeline-fixture-brief-era')).toBeInTheDocument();
     expect(screen.getByTestId('timeline-fixture-event')).toBeInTheDocument();
     expect(screen.getByTestId('timeline-fixture-key-block')).toBeInTheDocument();
+    // V1.156 — Moment layer + Moment empty-state frames.
+    expect(screen.getByTestId('timeline-fixture-moment-layer')).toBeInTheDocument();
+    expect(screen.getByTestId('timeline-fixture-moment-empty')).toBeInTheDocument();
   });
 
-  it('exposes product vocabulary labels (Brief / Event / KeyBlock / Timeline)', () => {
+  it('exposes product vocabulary labels (Brief / Event / KeyBlock / Moment / Timeline)', () => {
     mockMatchMedia(false);
     render(<TimelineCanvasFixtures />);
 
@@ -109,6 +117,16 @@ describe('TimelineCanvasFixtures render', () => {
     expect(
       within(root).getByRole('heading', {
         name: 'World Timeline — KeyBlock Context cluster',
+      }),
+    ).toBeInTheDocument();
+    expect(
+      within(root).getByRole('heading', {
+        name: 'World Timeline — Moment layer',
+      }),
+    ).toBeInTheDocument();
+    expect(
+      within(root).getByRole('heading', {
+        name: 'World Timeline — Moment empty-state',
       }),
     ).toBeInTheDocument();
 
@@ -163,6 +181,48 @@ describe('TimelineCanvasFixtures render', () => {
     expect(within(keyBlocks).getByText('Ashen Gate')).toBeInTheDocument();
   });
 
+  it('covers the V1.156 Moment layer — scene + beat chrome from the sceneBeatFixture slot', () => {
+    mockMatchMedia(false);
+    render(<TimelineCanvasFixtures />);
+
+    const moment = screen.getByTestId('timeline-moment-layer-matrix');
+    expect(
+      within(moment).getAllByText('Arrival at the Ashen Gate').length,
+    ).toBeGreaterThanOrEqual(1);
+    expect(within(moment).getAllByText('sc-1').length).toBeGreaterThanOrEqual(1);
+    expect(within(moment).getByText('Unanchored Passage')).toBeInTheDocument();
+    expect(within(moment).getByText('sc-loose')).toBeInTheDocument();
+    expect(
+      within(moment).getAllByText('Ch. 1 · sc-1').length,
+    ).toBeGreaterThanOrEqual(1);
+    expect(within(moment).getByText('Hook Beat')).toBeInTheDocument();
+    expect(
+      within(moment).getAllByText('Ch. 1 · sc-1 · bt-1').length,
+    ).toBeGreaterThanOrEqual(1);
+    expect(within(moment).getByText('Loose Beat')).toBeInTheDocument();
+    expect(within(moment).getByText('Turn Beat')).toBeInTheDocument();
+  });
+
+  it('renders the V1.156 Moment empty-state with honest copy + Narrative CTA', () => {
+    mockMatchMedia(false);
+    render(<TimelineCanvasFixtures />);
+
+    const empty = screen.getByTestId('timeline-fixture-moment-empty');
+    expect(
+      within(empty).getByText('No scene or beat data yet'),
+    ).toBeInTheDocument();
+    expect(
+      within(empty).getByText(
+        'Scene-precision is available when bound Works have scene/beat data in their Outline. Add scenes and beats to a bound Work, or switch to Narrative for events.',
+      ),
+    ).toBeInTheDocument();
+    // Escape hatch mirrors the app's MomentEmptyState CTA (no "create Moment").
+    const panel = within(empty).getByTestId('timeline-moment-empty-state');
+    const buttons = within(panel).queryAllByRole('button');
+    expect(buttons).toHaveLength(1);
+    expect(buttons[0]).toHaveTextContent('Switch to Narrative');
+  });
+
   it('marks selected variants with canvas-node-border-selected', () => {
     mockMatchMedia(false);
     render(<TimelineCanvasFixtures />);
@@ -186,6 +246,13 @@ describe('TimelineCanvasFixtures render', () => {
         '[class*="border-canvas-node-border-selected"]',
       ).length,
     ).toBeGreaterThanOrEqual(1);
+
+    // V1.156 — Moment layer matrix carries a selected scene variant.
+    const moment = screen.getByTestId('timeline-moment-layer-matrix');
+    expect(
+      moment.querySelectorAll('[class*="border-canvas-node-border-selected"]')
+        .length,
+    ).toBeGreaterThanOrEqual(1);
   });
 
   it('renders under .dark without throw (theme class toggle)', () => {
@@ -196,5 +263,12 @@ describe('TimelineCanvasFixtures render', () => {
     expect(screen.getByTestId('timeline-fixture-brief-era')).toBeInTheDocument();
     expect(screen.getByTestId('timeline-fixture-event')).toBeInTheDocument();
     expect(screen.getByTestId('timeline-fixture-key-block')).toBeInTheDocument();
+    // V1.156 frames render in dark too.
+    expect(
+      screen.getByTestId('timeline-fixture-moment-layer'),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByTestId('timeline-fixture-moment-empty'),
+    ).toBeInTheDocument();
   });
 });

@@ -55,9 +55,43 @@ describe('projectWorldTimelineNodesToNleTracks', () => {
       'Context',
     ]);
   });
+
+  it('maps World Moment scenes and beats to separate tracks (V1.156 P5)', () => {
+    // The World Timeline reuses the Work Timeline Moment node types verbatim
+    // (`work-timeline-moment-scene` / `work-timeline-moment-beat`), so the
+    // World-Moment band mirrors the Work-Moment Scenes/Beats tracks instead
+    // of producing zero tracks (the pre-fix Narrative fallthrough).
+    const nodes = [
+      node('sc-1', 'work-timeline-moment-scene', 40, 0, { label: 'Opening Scene' }),
+      node('bt-1', 'work-timeline-moment-beat', 56, 120, { label: 'Hook Beat' }),
+    ];
+
+    const { tracks } = projectWorldTimelineNodesToNleTracks(nodes, 'moment');
+    expect(tracks.map((track) => track.label)).toEqual(['Scenes', 'Beats']);
+    expect(tracks[0]?.clips[0]?.label).toBe('Opening Scene');
+    expect(tracks[1]?.clips[0]?.label).toBe('Hook Beat');
+  });
 });
 
 describe('projectWorkTimelineNodesToNleTracks', () => {
+  it('maps Work-Brief era nodes to Brief + Undated tracks (V1.156 P2 T2)', () => {
+    // Work-Brief projects the World Timeline Brief nodes verbatim
+    // (`timeline-brief-era`) — the band must mirror the World Timeline
+    // Brief tracks (dated eras on the when-axis + undated cluster).
+    const nodes = [
+      node('era-1', 'timeline-brief-era', 40, 0, { canonical_name: 'First Age' }),
+      node('era-2', 'timeline-brief-era', 360, 220, { canonical_name: 'Undated Era' }),
+      node('spine', 'directedAxisSpine', 0, -8, {}),
+    ];
+
+    const { tracks } = projectWorkTimelineNodesToNleTracks(nodes, 'brief');
+    expect(tracks).toHaveLength(2);
+    expect(tracks[0]?.label).toBe('Brief');
+    expect(tracks[0]?.clips[0]?.label).toBe('First Age');
+    expect(tracks[1]?.label).toBe('Undated');
+    expect(tracks[1]?.clips[0]?.label).toBe('Undated Era');
+  });
+
   it('maps narrative events to a single Narrative track when all share anchor state', () => {
     const nodes = [
       node('wt-ev-1', 'work-timeline-narrative-event', 40, 0, {

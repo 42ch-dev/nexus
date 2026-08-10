@@ -939,3 +939,27 @@ Archived from [deferred-features-cross-version-tracker.md](deferred-features-cro
 | **Wire contracts** | unchanged (`wire_contracts_changed: false`) |
 | **Roadmap** | Next: residual hygiene (constraint taxonomy + session TTL); optional Control Room pack UI (out of scope V1.146) |
 
+
+## V1.156 — Timeline 3×2 matrix completion + Harness rename (2026-08-10)
+
+### Closed deferred-feature rows
+
+| ID | Feature | Shipped in | Notes |
+|----|---------|------------|-------|
+| ~~DF-V1123-WORLD-MOMENT~~ | World Timeline Moment layer (scene-precision within World history) | V1.156 P1 | Read/projection of bound Works' Outline scene/beat data (PD-3; Moments Work-owned); frontend-only (`wire_contracts_changed:false`); fixture-driven (DR-26 tracks WorkOutline wire extension for real scene/beat data). Plan: `2026-08-10-v1.156-p1-world-timeline-moment-layer`. |
+| ~~DF-V1123-WORK-BRIEF~~ | Work Timeline Brief layer (world-shape projection for a Work) | V1.156 P2 | Projection of bound World's Brief (all `block_type=era` via V1.73 `kb/graph`; PD-2 read-only); frontend-only (`wire_contracts_changed:false`). 3×2 Brief/Narrative/Moment matrix complete. Plan: `2026-08-10-v1.156-p2-work-timeline-brief-layer`. |
+| ~~DF-V1122-HARNESS-RENAME~~ | Strategy/Preset → Harness product copy (breaking UX rename) | V1.156 P3 | User-visible Strategy/Strategies → Harness (pillar entry); Preset stays (mechanism); internal identifiers unchanged (architect LOCKED). zh pillar = English "Harness" proper-noun. STRATEGY.md + CONCEPTS.md + web-ui.md deferrals closed. Plan: `2026-08-10-v1.156-p3-harness-product-rename`. |
+
+### Delivery Snapshot
+
+| Field | Value |
+|-------|-------|
+| **Iteration** | V1.156 (M — Timeline 3×2 matrix completion + Harness rename) |
+| **Integration / PR** | `iteration/v1.156` → `main` (PR pending Phase 4) |
+| **Plans** | P1 (World×Moment) + P2 (Work×Brief) + P3 (Harness rename) — all Done |
+| **Key surfaces** | World Timeline 3-layer (Brief+Narrative+Moment); Work Timeline 3-layer (Brief+Narrative+Moment); Harness pillar UI label (en+zh) |
+| **Wire contracts** | unchanged (`wire_contracts_changed: false` — all 3 plans frontend-only / display-text) |
+| **QC** | P1: tri Approve (1 fix-wave — read-only inspector + alt-view guard + memo deps + invalid-layer test); P2: tri Approve (1 fix-wave — graph-query status gate); P3: unanimous Approve (no fix-wave; web-ui.md deferral tightened inline) |
+| **QA** | all 3 plans PASS-with-notes (live-browser smoke optional for user) |
+| **Compound** | `architecture-patterns/three-layer-timeline-projection.md` updated (V1.156 matrix); new `workflow-patterns/carry-qc-lessons-to-sibling-plan.md` |
+| **Roadmap** | Next candidates: DF-V1122-FORK-UI (spine data ready), dependabot security sweep (5 alerts), deeper World-building remainder |

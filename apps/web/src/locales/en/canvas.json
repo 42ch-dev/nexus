@@ -192,14 +192,14 @@
     }
   },
   "strategy": {
-    "loading": "Loading strategy…",
-    "loadError": "Failed to load strategy.",
-    "loadErrorTitle": "Could not load strategy",
+    "loading": "Loading Harness…",
+    "loadError": "Failed to load Harness.",
+    "loadErrorTitle": "Could not load Harness",
     "engineUnavailableTitle": "Orchestration engine not running",
     "engineUnavailableDescription": "Start the daemon orchestration engine, then try again.",
-    "graphAriaLabel": "Strategy spatial graph",
+    "graphAriaLabel": "Harness spatial graph",
     "header": {
-      "title": "Strategy",
+      "title": "Preset",
       "description": "State machine and transition editor",
       "showGraph": "Show graph",
       "showList": "Show list",
@@ -229,9 +229,9 @@
       "currentExecutionNode": "Current execution node"
     },
     "toast": {
-      "runQueued": "Strategy run queued",
-      "ideaSent": "Idea sent to Strategy",
-      "resumed": "Strategy resumed"
+      "runQueued": "Preset run queued",
+      "ideaSent": "Idea sent to Preset",
+      "resumed": "Preset resumed"
     },
     "draftTransitionLabel": "Draft transition",
     "draftTransitionEditor": "Draft transition editor",
@@ -244,7 +244,7 @@
       "dangling": "Dangling transition: {{target}}"
     },
     "altView": {
-      "ariaLabel": "Strategy states and transitions in list order",
+      "ariaLabel": "Harness states and transitions in list order",
       "statesTitle": "States",
       "transitionsTitle": "Transitions",
       "innerGraph": "inner: {{id}}",
@@ -264,7 +264,7 @@
     },
     "artifacts": {
       "title": "Artifacts",
-      "ariaLabel": "Strategy artifacts",
+      "ariaLabel": "Harness artifacts",
       "empty": "No artifacts yet."
     },
     "edgeCreate": {
@@ -289,7 +289,7 @@
       "draftAriaLabel": "Draft transition from {{source}} to {{target}}"
     },
     "inspector": {
-      "ariaLabel": "Strategy inspector",
+      "ariaLabel": "Harness inspector",
       "state": {
         "title": "State",
         "ariaLabel": "State inspector",
@@ -337,7 +337,7 @@
   },
   "conflict": {
     "strategy": {
-      "title": "Strategy Conflict"
+      "title": "Harness Conflict"
     },
     "fields": {
       "label": "Label",
@@ -646,14 +646,15 @@
       "description": "The world's when-axis. Pivots to World KB for entity edits.",
       "peerNavAria": "Peer surfaces",
       "worldKbLink": "World KB",
-      "strategyLink": "Strategy",
+      "strategyLink": "Harness",
       "showGraph": "Show graph",
       "showList": "Show list view"
     },
     "layerSwitcher": {
       "ariaLabel": "Timeline layer",
       "brief": "Brief",
-      "narrative": "Narrative"
+      "narrative": "Narrative",
+      "moment": "Moment"
     },
     "breadcrumb": {
       "ariaLabel": "Timeline layer path"
@@ -663,6 +664,29 @@
         "title": "No era markers yet",
         "message": "Brief shows the world's shape across ages. Switch to Narrative to browse events, or add era markers when the Brief carrier is ready.",
         "cta": "Switch to Narrative"
+      }
+    },
+    "moment": {
+      "emptyState": {
+        "title": "No scene or beat data yet",
+        "message": "Scene-precision is available when bound Works have scene/beat data in their Outline. Add scenes and beats to a bound Work, or switch to Narrative for events.",
+        "cta": "Switch to Narrative"
+      },
+      "inspector": {
+        "aria": "World Timeline Moment inspector for {{name}}",
+        "sceneDescription": "Scene-level manuscript anchor on the Moment layer. Moments are owned by bound Works; edits route through the Outline surface.",
+        "beatDescription": "Beat pin inside a scene. Moments are owned by bound Works; edits route through the Outline surface.",
+        "unnamedScene": "(untitled scene)",
+        "unnamedBeat": "(untitled beat)",
+        "readOnly": "Read-only — Moments are owned by bound Works.",
+        "manuscriptAnchor": "Manuscript anchor",
+        "noManuscriptAnchor": "No manuscript anchor",
+        "fields": {
+          "sceneId": "Scene id",
+          "beatId": "Beat id",
+          "chapter": "Chapter",
+          "status": "Status"
+        }
       }
     },
     "inspector": {
@@ -783,18 +807,42 @@
     },
     "header": {
       "title": "Work Timeline",
-      "description": "The work's narrative + moments. Pivots to Outline for edits.",
+      "description": "The work's timeline across Brief, Narrative, and Moment layers. Pivots to Outline for edits.",
       "peerNavAria": "Peer surfaces",
       "outlineLink": "Outline",
       "inspectorLink": "Assembly Inspector"
     },
     "layerSwitcher": {
       "ariaLabel": "Work Timeline layer",
+      "brief": "Brief",
       "narrative": "Narrative",
       "moment": "Moment"
     },
     "breadcrumb": {
       "ariaLabel": "Work Timeline layer path"
+    },
+    "brief": {
+      "emptyState": {
+        "title": "No world-shape context yet",
+        "message": "World-shape context appears here when this Work is bound to a World with era markers. Brief is a read-only projection of the bound World’s Brief.",
+        "cta": "Switch to Narrative"
+      }
+    },
+    "briefEraNode": {
+      "span": "{{start}} → {{end}}",
+      "temporalUnknown": "Era time span unknown"
+    },
+    "briefEraInspector": {
+      "title": "Brief era",
+      "description": "World-shape era marker from the bound World’s Brief. Read-only — Brief is World spine.",
+      "aria": "Brief-era inspector for {{name}}",
+      "identityAria": "Era identity markers",
+      "readOnly": "Read-only — Brief belongs to the bound World.",
+      "field": {
+        "eraId": "Era id",
+        "span": "Time span",
+        "worldSummary": "World summary"
+      }
     },
     "narrativeEventNode": {
       "aria": "Work timeline event: {{name}}",
@@ -842,7 +890,8 @@
         "chapter": "Chapter",
         "description": "Description",
         "status": "Status"
-      }
+      },
+      "version": "v{{version}}"
     }
   },
   "globalTimeline": {

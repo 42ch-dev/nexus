@@ -66,7 +66,7 @@ describe('StrategyPage', () => {
       initialRouterEntries: ['/strategies/user%2Ffoo'],
     });
 
-    await waitFor(() => expect(screen.getByRole('heading', { name: 'Strategy' })).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Preset' })).toBeInTheDocument());
     expect(screen.getByTestId('strategy-canvas')).toHaveTextContent('user/foo');
     expect(screen.getByTestId('location')).toHaveTextContent('/strategies/user%2Ffoo');
     // AC-P0-2: a Back control to /strategies is rendered on the detail header.
@@ -89,7 +89,7 @@ describe('StrategyPage', () => {
     });
 
     await waitFor(() =>
-      expect(screen.getByText('Strategy not found')).toBeInTheDocument(),
+      expect(screen.getByText('Preset not found')).toBeInTheDocument(),
     );
     const backButton = screen.getByRole('button', { name: /Back/i });
     expect(backButton).toBeInTheDocument();

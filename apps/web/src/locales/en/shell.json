@@ -14,7 +14,7 @@
     "findings": "Findings",
     "memory": "Memory",
     "settings": "Settings",
-    "strategies": "Strategies"
+    "strategies": "Harness"
   },
   "nav": {
     "creator": "Creator",
@@ -33,7 +33,7 @@
     "capabilities": "Capabilities",
     "compute": "Compute",
     "modules": "Modules",
-    "strategies": "Strategies",
+    "strategies": "Harness",
     "settings": "Settings"
   },
   "theme": {
