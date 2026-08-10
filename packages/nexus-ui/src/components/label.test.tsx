@@ -43,9 +43,9 @@ describe('Label', () => {
     expect(label).toHaveAttribute('for', 'my-input');
   });
 
-  // --- forwardRef ---
+  // --- ref-as-prop ---
 
-  it('forwards the ref to the underlying label element', () => {
+  it('passes the ref to the underlying label element', () => {
     let ref: HTMLLabelElement | null = null;
     const setRef = (el: HTMLLabelElement | null) => {
       ref = el;

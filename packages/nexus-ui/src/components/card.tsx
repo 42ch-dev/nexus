@@ -1,4 +1,4 @@
-import { forwardRef, type HTMLAttributes } from 'react';
+import { type HTMLAttributes, type Ref } from 'react';
 
 import { cn } from '../lib/cn';
 
@@ -19,10 +19,12 @@ import { cn } from '../lib/cn';
 export interface CardProps extends HTMLAttributes<HTMLDivElement> {
   /** Opts the card into the v0.4 interactive elevation recipe (hover lift). */
   interactive?: boolean;
+  /** DOM ref forwarded to the underlying div (React 19 ref-as-prop). */
+  ref?: Ref<HTMLDivElement>;
 }
 
-const Card = forwardRef<HTMLDivElement, CardProps>(
-  ({ className, interactive = false, ...props }, ref) => (
+function Card({ className, interactive = false, ref, ...props }: CardProps) {
+  return (
     <div
       ref={ref}
       className={cn(
@@ -33,15 +35,13 @@ const Card = forwardRef<HTMLDivElement, CardProps>(
       )}
       {...props}
     />
-  ),
-);
+  );
+}
 Card.displayName = 'Card';
 
-const CardHeader = forwardRef<HTMLDivElement, HTMLAttributes<HTMLDivElement>>(
-  ({ className, ...props }, ref) => (
-    <div ref={ref} className={cn('flex flex-col space-y-1.5 pb-4', className)} {...props} />
-  ),
-);
+function CardHeader({ className, ref, ...props }: HTMLAttributes<HTMLDivElement> & { ref?: Ref<HTMLDivElement> }) {
+  return <div ref={ref} className={cn('flex flex-col space-y-1.5 pb-4', className)} {...props} />;
+}
 CardHeader.displayName = 'CardHeader';
 
 export interface CardTitleProps extends HTMLAttributes<HTMLHeadingElement> {
@@ -57,10 +57,12 @@ export interface CardTitleProps extends HTMLAttributes<HTMLHeadingElement> {
    *   discipline per §Design Concept.
    */
   voice?: 'interface' | 'content';
+  /** DOM ref forwarded to the underlying h3 (React 19 ref-as-prop). */
+  ref?: Ref<HTMLHeadingElement>;
 }
 
-const CardTitle = forwardRef<HTMLHeadingElement, CardTitleProps>(
-  ({ className, voice = 'interface', ...props }, ref) => (
+function CardTitle({ className, voice = 'interface', ref, ...props }: CardTitleProps) {
+  return (
     <h3
       ref={ref}
       className={cn(
@@ -73,22 +75,22 @@ const CardTitle = forwardRef<HTMLHeadingElement, CardTitleProps>(
       )}
       {...props}
     />
-  ),
-);
+  );
+}
 CardTitle.displayName = 'CardTitle';
 
-const CardDescription = forwardRef<HTMLParagraphElement, HTMLAttributes<HTMLParagraphElement>>(
-  ({ className, ...props }, ref) => (
-    <p ref={ref} className={cn('text-copy-14 text-gray-900', className)} {...props} />
-  ),
-);
+function CardDescription({
+  className,
+  ref,
+  ...props
+}: HTMLAttributes<HTMLParagraphElement> & { ref?: Ref<HTMLParagraphElement> }) {
+  return <p ref={ref} className={cn('text-copy-14 text-gray-900', className)} {...props} />;
+}
 CardDescription.displayName = 'CardDescription';
 
-const CardContent = forwardRef<HTMLDivElement, HTMLAttributes<HTMLDivElement>>(
-  ({ className, ...props }, ref) => (
-    <div ref={ref} className={cn('text-copy-14', className)} {...props} />
-  ),
-);
+function CardContent({ className, ref, ...props }: HTMLAttributes<HTMLDivElement> & { ref?: Ref<HTMLDivElement> }) {
+  return <div ref={ref} className={cn('text-copy-14', className)} {...props} />;
+}
 CardContent.displayName = 'CardContent';
 
 export { Card, CardHeader, CardTitle, CardDescription, CardContent };

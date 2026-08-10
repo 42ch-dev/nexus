@@ -4,7 +4,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
+import { Navigate, Route, Routes, useLocation } from 'react-router';
 
 import { SettingsAdvancedSection } from '@/pages/settings/settings-advanced-section';
 import { SettingsSetupSection } from '@/pages/settings/settings-setup-section';

@@ -9,7 +9,7 @@
  * dashboard entry.
  */
 import { useMemo, useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router';
 import { ArrowLeft, Check, FileText, Pencil, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 

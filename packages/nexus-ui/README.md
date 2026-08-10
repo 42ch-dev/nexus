@@ -85,7 +85,7 @@ The package carries its own runtime dependencies for class composition and primi
 | `@radix-ui/react-slot` | `asChild` pattern in `Button` | Non-singleton — no shared Radix context needed |
 | `clsx` + `tailwind-merge` | Internal `cn` helper for class de-duplication | Non-singleton; package-local configuration with DESIGN.md token class-group extension |
 
-`react` (>=18) and `react-dom` (>=18) remain peer dependencies — consumers supply their own React instance.
+`react` (>=19) and `react-dom` (>=19) remain peer dependencies — consumers supply their own React instance.
 
 ## Usage examples
 
@@ -221,7 +221,7 @@ pnpm --filter @42ch/nexus-ui run typecheck
 
 ### Current API (0.2.0)
 
-- **React brand components**: `<NexusLogo variant="..." src="...">` (presentational, explicit variant, `<img>`-based) and `<NexusMark>` (inline mono SVG, `currentColor`). React 18+ peer deps.
+- **React brand components**: `<NexusLogo variant="..." src="...">` (presentational, explicit variant, `<img>`-based) and `<NexusMark>` (inline mono SVG, `currentColor`). React 19+ peer deps.
 - **UI primitives**: `<Button>`, `<Badge>`, `<Card>`, `<Input>`, `<Label>`, `<Textarea>`, `<Select>`, `<Tabs>` — pure presentational, token-driven, compatible with both `apps/web` and `apps/design-studio`. Variant helpers stay internal; no deep subpath exports.
 - **Class composition**: package-local `cn` helper with DESIGN.md token class-group extension via `tailwind-merge` (public `cn` export).
 

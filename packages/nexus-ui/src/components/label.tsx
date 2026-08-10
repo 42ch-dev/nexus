@@ -1,4 +1,4 @@
-import { forwardRef, type LabelHTMLAttributes } from 'react';
+import { type LabelHTMLAttributes, type Ref } from 'react';
 
 import { cn } from '../lib/cn';
 
@@ -14,15 +14,18 @@ import { cn } from '../lib/cn';
  * - Nesting (`<label><input /></label>`) is allowed by spec but the default
  *   composition pattern uses explicit `htmlFor` + `id` association.
  */
-export type LabelProps = LabelHTMLAttributes<HTMLLabelElement>;
+export type LabelProps = LabelHTMLAttributes<HTMLLabelElement> & {
+  /** DOM ref forwarded to the underlying label (React 19 ref-as-prop). */
+  ref?: Ref<HTMLLabelElement>;
+};
 
-export const Label = forwardRef<HTMLLabelElement, LabelProps>(
-  ({ className, ...props }, ref) => (
+export function Label({ className, ref, ...props }: LabelProps) {
+  return (
     <label
       ref={ref}
       className={cn('text-label-14 font-medium text-gray-1000', className)}
       {...props}
     />
-  ),
-);
+  );
+}
 Label.displayName = 'Label';

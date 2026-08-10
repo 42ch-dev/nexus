@@ -62,7 +62,7 @@ This is a **different product** from any web UI in the private `nexus-platform`:
 
 | Layer | Choice | Why |
 | --- | --- | --- |
-| Framework | **React 18** | largest ecosystem; mental-model consistency with the existing `@42ch/nexus-contracts` TS consumer surface |
+| Framework | **React 19** (V1.157 upgrade from 18.3) | largest ecosystem; mental-model consistency with the existing `@42ch/nexus-contracts` TS consumer surface |
 | Build / dev server | **Vite** (SPA) | matches "single-binary local-first"; no Node runtime required in the shipped product (build-time only) |
 | Language | **TypeScript** (strict) | non-negotiable; the whole point of V1.63 codegen is end-to-end type safety |
 | Styling | **TailwindCSS** | utility-first, low design-debt, pairs with the component layer |

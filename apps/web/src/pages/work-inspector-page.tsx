@@ -19,7 +19,7 @@
  * surface (AC-I5), invalidating `useInspectMoment` on set/clear.
  */
 import { useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams } from 'react-router';
 import { useTranslation } from 'react-i18next';
 
 import { useInspectMoment, useWork } from '@/api/queries';

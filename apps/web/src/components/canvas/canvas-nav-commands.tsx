@@ -32,7 +32,7 @@
  * first mount.
  */
 import { useRef } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router';
 import { CalendarRange, Cpu, ListTree, Network, Sparkles, Clock } from 'lucide-react';
 
 import { useRegisterCommand } from '@/lib/canvas/command-registry';

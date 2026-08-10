@@ -9,7 +9,7 @@
  * affordances. Behavior is unchanged from the in-page hook it replaced.
  */
 import { useEffect } from 'react';
-import type { useNavigate } from 'react-router-dom';
+import type { useNavigate } from 'react-router';
 
 type Navigate = ReturnType<typeof useNavigate>;
 

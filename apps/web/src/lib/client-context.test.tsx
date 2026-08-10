@@ -1,6 +1,6 @@
 import { describe, expect, it, vi, beforeEach, type Mock } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
-import { MemoryRouter, Routes, Route, useLocation } from 'react-router-dom';
+import { MemoryRouter, Routes, Route, useLocation } from 'react-router';
 
 import { ClientProvider, useNexusClient, useFingerprintGateState, useConnectionConfig, useSetConnectionConfig } from '@/lib/client-context';
 import { createConnectionStorage, type ConnectionConfig } from '@/lib/nexus/connection-storage';

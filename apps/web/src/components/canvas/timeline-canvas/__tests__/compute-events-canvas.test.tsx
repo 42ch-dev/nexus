@@ -25,7 +25,7 @@ import { http, HttpResponse } from 'msw';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { Route, Routes, useLocation } from 'react-router-dom';
+import { Route, Routes, useLocation } from 'react-router';
 
 import {
   SettingsModalProvider,
@@ -348,9 +348,18 @@ describe('TimelineCanvas compute-on-Timeline (V1.147 P2 T3)', () => {
       id: `evt_page_${i}`,
       title: `Event #${i + 1}`,
     }));
-    const { state } = renderTimelineApp({ initialEvents: events });
+    const { container, state } = renderTimelineApp({ initialEvents: events });
 
-    await screen.findByText('Event #105');
+    // The last page's event renders as a canvas node — RF wraps each node in
+    // `.react-flow__node[data-id=…]`. Scope to the canvas node instead of a
+    // global unique-text lookup: the same event title also renders in the NLE
+    // band clip (the band projects the same compute nodes), so a bare
+    // `findByText` would match two elements.
+    await waitFor(() =>
+      expect(
+        container.querySelector('.react-flow__node[data-id="compute:evt_page_104"]'),
+      ).not.toBeNull(),
+    );
     await waitFor(() => expect(state.eventsFetchCount).toBeGreaterThanOrEqual(2));
   });
 
@@ -371,7 +380,7 @@ describe('TimelineCanvas compute-on-Timeline (V1.147 P2 T3)', () => {
       { timeout: 10_000 },
     );
     expect(screen.getByText(/first 500 compute events/i)).toBeInTheDocument();
-  });
+  }, 15_000);
 
   it('Run Module entry opens the shared Run Studio with the World pre-filled', async () => {
     const user = userEvent.setup();

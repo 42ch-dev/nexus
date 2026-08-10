@@ -11,7 +11,7 @@
  * controls compose `button.secondary` and the chrome uses the standard
  * background/border primitives (see DESIGN.md component table).
  */
-import { Link } from 'react-router-dom';
+import { Link } from 'react-router';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 

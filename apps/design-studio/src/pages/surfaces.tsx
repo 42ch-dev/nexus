@@ -1,5 +1,5 @@
 import { useRef, useState, type ReactNode } from 'react';
-import { NavLink, Outlet } from 'react-router-dom';
+import { NavLink, Outlet } from 'react-router';
 
 import { cn, Badge, Button } from '@42ch/nexus-ui';
 

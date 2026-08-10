@@ -14,7 +14,7 @@
  * consumed exclusively through DESIGN.md `reading-chrome-*` tokens. Unknown or
  * missing profiles fall back to `novel` chrome.
  */
-import { forwardRef, useMemo } from 'react';
+import { useMemo, type Ref } from 'react';
 import { Copy } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -35,12 +35,11 @@ export interface ReadingProseProps {
   isError: boolean;
   onRetry: () => void;
   workProfile?: string;
+  /** DOM ref forwarded to the prose surface (React 19 ref-as-prop). */
+  ref?: Ref<HTMLDivElement>;
 }
 
-export const ReadingProse = forwardRef<HTMLDivElement, ReadingProseProps>(function ReadingProse(
-  { body, isLoading, isError, onRetry, workProfile },
-  ref,
-) {
+export function ReadingProse({ body, isLoading, isError, onRetry, workProfile, ref }: ReadingProseProps) {
   const { t } = useTranslation('reading');
   const { t: commonT } = useTranslation('common');
   const { toast } = useToast();
@@ -125,8 +124,7 @@ export const ReadingProse = forwardRef<HTMLDivElement, ReadingProseProps>(functi
       )}
     </Card>
   );
-});
-
+}
 ReadingProse.displayName = 'ReadingProse';
 
 function stripFrontmatter(body: ChapterBody | undefined): string {

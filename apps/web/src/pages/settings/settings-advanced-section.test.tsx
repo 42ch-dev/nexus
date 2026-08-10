@@ -4,7 +4,7 @@
  */
 import { describe, expect, it, vi, afterEach } from 'vitest';
 import { screen } from '@testing-library/react';
-import { Routes, Route } from 'react-router-dom';
+import { Routes, Route } from 'react-router';
 
 import { SettingsAdvancedSection } from '@/pages/settings/settings-advanced-section';
 import { renderInApp } from '@/test/test-providers';

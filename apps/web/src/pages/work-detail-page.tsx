@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useParams } from 'react-router';
 import { ArrowLeft, ListTree, Network, Pencil, Sparkles } from 'lucide-react';
 
 import { StatusBadge } from '@/components/status-badge';

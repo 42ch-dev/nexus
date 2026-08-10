@@ -177,9 +177,9 @@ describe('Select', () => {
     expect(select).not.toHaveClass('border-red-700');
   });
 
-  // --- forwardRef ---
+  // --- ref-as-prop ---
 
-  it('forwards the ref to the underlying select element', () => {
+  it('passes the ref to the underlying select element', () => {
     let ref: HTMLSelectElement | null = null;
     const setRef = (el: HTMLSelectElement | null) => {
       ref = el;

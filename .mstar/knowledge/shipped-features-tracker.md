@@ -963,3 +963,19 @@ Archived from [deferred-features-cross-version-tracker.md](deferred-features-cro
 | **QA** | all 3 plans PASS-with-notes (live-browser smoke optional for user) |
 | **Compound** | `architecture-patterns/three-layer-timeline-projection.md` updated (V1.156 matrix); new `workflow-patterns/carry-qc-lessons-to-sibling-plan.md` |
 | **Roadmap** | Next candidates: DF-V1122-FORK-UI (spine data ready), dependabot security sweep (5 alerts), deeper World-building remainder |
+
+## V1.157 — Pure maintenance (2026-08-10)
+
+**Direction**: React 18→19 + react-router 7→8 + node 22 + accent-chip WCAG AA + transitive security + Rust-dep docs (2 plans, scale M)
+
+| Item | Detail |
+|------|--------|
+| **P1** | React 18.3→19.2.8 + react-router-dom→react-router 7→8 (consolidated package; 86 import sites rewritten) + engines.node >=22.22; 20 forwardRef sites migrated to ref-as-prop; 2 timing-fragile tests fixed; merged abe6377c |
+| **P2** | accent-chip WCAG AA (3 light-theme tokens darkened: amber-900/blue-1100/teal-900; zero component changes; DESIGN.dark.md unchanged) + nanoid override >=3.3.18 (closes GHSA-2v37-7h3g-55p8) + R1/R2 still-blocked docs; merged b1b1da13 |
+| **Wire contracts** | unchanged (`wire_contracts_changed: false` — frontend-only) |
+| **QC** | P1: tri Approve (1 fix-wave — F-001 doc sync + F-002 plan naming); P2: unanimous Approve (no fix-wave) |
+| **QA** | P1 PASS-with-notes (route smoke HTTP 200; 1879 tests; build green); P2 PASS (1879+307 tests; pnpm audit clean) |
+| **Compound** | Skip (maintenance iteration — dep upgrade + token fix; no non-trivial reusable knowledge) |
+| **Residuals closed** | R3 (react-router 7→8 — Dependabot #38), R-V1147P3-ACENT-CHIP-001 (accent-chip WCAG AA), DR-65 |
+| **Residuals still open** | R1 yamux (libp2p 0.56 blocked), R2 hickory (lockfile-only) — verified still-blocked 2026-08-10 |
+| **Roadmap** | Next candidates: DF-V1122-FORK-UI (spine data ready), run_checker evaluator (trigger-gated), ERA-TAXONOMY |

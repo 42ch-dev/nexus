@@ -15,7 +15,7 @@
 import { http, HttpResponse } from 'msw';
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { screen, within } from '@testing-library/react';
-import { Route, Routes } from 'react-router-dom';
+import { Route, Routes } from 'react-router';
 
 import { RootLayout } from './root-layout';
 import { renderInApp } from '@/test/test-providers';

@@ -31,7 +31,7 @@ import {
   useLocation,
   useNavigate,
   type Location,
-} from 'react-router-dom';
+} from 'react-router';
 
 import {
   DEFAULT_SETTINGS_BACKGROUND_PATH,
