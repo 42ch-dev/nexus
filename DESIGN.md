@@ -56,6 +56,9 @@ colors:
   blue-800: "#1FB8C6"
   blue-900: "#1896A2"
   blue-1000: "#117480"
+  # V1.157 P2 (DR-65): one step darker than blue-1000 — accent-chip text
+  # contrast on the /15 tint must clear WCAG AA (5.84:1 on canvas-node-fill).
+  blue-1100: "#0d5e6e"
 
   # ── Semantic accent scales (apps/web parity — four-step, shipped) ──
   red-700: "#e5484d"
@@ -590,10 +593,12 @@ components:
     canvas-minimap: "{colors.gray-alpha-600}"
     canvas-strategy-accent: "{colors.purple-700}"
     # V1.121 P3 T2: per-surface accent spines (§Canvas Surface — strategy =
-    # purple-700, outline = amber-700, World KB = teal-700). Each surface's
+    # purple-700, outline = amber-900, World KB = teal-900). Each surface's
     # spine is its own token so retuning one does not bleed into the others.
-    canvas-outline-accent: "{colors.amber-700}"
-    canvas-worldkb-accent: "{colors.teal-700}"
+    # V1.157 P2 (DR-65): outline/worldkb spines darkened one step (amber-900 /
+    # teal-900) so accent-chip text clears WCAG AA on the /15 tint.
+    canvas-outline-accent: "{colors.amber-900}"
+    canvas-worldkb-accent: "{colors.teal-900}"
     # V1.123 P3 T2: Timeline accent spine. Timeline is the central instrument
     # (iterations/v1.123/specs/three-layer-product-spec.md); brand-blue per the
     # Canvas/SOUL theme-split invariant (light blue-1000, dark blue-700).
@@ -601,17 +606,19 @@ components:
     canvas-timeline-accent: "{colors.blue-1000}"
     # V1.123 P4 Task 2: per-layer feel accents (layer-feel-differentiation.md
     # §6.1 — three-layer feel contract for AC-V1123-20 "three feels
-    # perceptibly different"). Brief=gold-bronze age tone (amber-700 alias —
+    # perceptibly different"). Brief=gold-bronze age tone (amber-900 alias —
     # Outline lives on a separate surface so the shared hue does not collide);
-    # Narrative=brand blue (aliases the V1.123 P3 Timeline accent — Narrative
-    # is the shared V1.122 baseline within the Timeline surface family);
+    # Narrative=brand blue (blue-1100 — the V1.157 P2 AA-darkened step of the
+    # V1.123 Timeline accent; Narrative is the shared V1.122 baseline within
+    # the Timeline surface family);
     # Moment=ink-on-paper manuscript tone (gray-900 alias — gray-900 projects
     # to #e0e0e0 in dark theme so the ink hue stays legible on inverted dark
     # canvas). No new palette color invented; tuning later is a token-only
     # edit, not a node-component sweep.
-    canvas-layer-brief-accent: "{colors.amber-700}"
-    # Narrative aliases Timeline accent — theme-split light blue-1000 / dark blue-700.
-    canvas-layer-narrative-accent: "{colors.blue-1000}"
+    canvas-layer-brief-accent: "{colors.amber-900}"
+    # V1.157 P2 (DR-65): Narrative accent darkened blue-1000 → blue-1100 —
+    # theme-split light blue-1100 / dark blue-700.
+    canvas-layer-narrative-accent: "{colors.blue-1100}"
     canvas-layer-moment-accent: "{colors.gray-900}"
     canvas-write-dirty: "{colors.amber-700}"
     canvas-write-conflict: "{colors.red-700}"
@@ -1494,7 +1501,7 @@ Infinite-canvas graph primitives and World KB entity-card / promotion / relation
 The canvas is the product's signature surface and follows §Design Concept strictly:
 
 - **Ambient.** The canvas field is an atmospheric surface, not a mode flip: ink in dark (`canvas-surface` on the `background-200/300` ink band), warm paper in light. The dot grid is decorative whisper-texture (`canvas-grid` alpha + `canvas-grid-gap` 20px + `canvas-grid-dot-size` 1.5px) — never strong enough to read as instrumentation. Minimap and controls inherit node fills/borders; node chrome carries `elevation` per §Elevation (rest `elevation-1`, hover `elevation-2`, dragging `elevation-4`).
-- **Chromatic hygiene.** Every status/marker/edge color resolves to the brand semantic scales (`blue-700`, `green-700`, `amber-700`, `red-700`, `teal-700`, `purple-700`, `pink-700`, `gray-500`) — Tailwind-palette leftovers were remapped hue-preserving in v0.4. The normative mapping table lives in §Appendix: Canvas Chromatic Hygiene Mapping. Per-surface accent spines stay semantic: strategy = `purple-700`, outline = `amber-700`, World KB = `teal-700`.
+- **Chromatic hygiene.** Every status/marker/edge color resolves to the brand semantic scales (`blue-700`, `green-700`, `amber-700`, `red-700`, `teal-700`, `purple-700`, `pink-700`, `gray-500`) — Tailwind-palette leftovers were remapped hue-preserving in v0.4. The normative mapping table lives in §Appendix: Canvas Chromatic Hygiene Mapping. Per-surface accent spines stay semantic: strategy = `purple-700`, outline = `amber-900`, World KB = `teal-900` (V1.157 P2 darkened outline/worldkb one step for accent-chip WCAG AA; the §Canvas Surface token block is authoritative).
 - **Node widths.** `components.canvas.node-width.<role>` fixes the five node width slots (`strategy-root` 260px, `strategy-primary` 140px, `strategy-secondary` 150px, `outline-scene-beat` 160px, `default` 176px) so node geometry is a design decision, not a per-component magic number.
 
 ---

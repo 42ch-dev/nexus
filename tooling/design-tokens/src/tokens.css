@@ -152,6 +152,7 @@
   --color-blue-800: #1fb8c6;
   --color-blue-900: #1896a2;
   --color-blue-1000: #117480;
+  --color-blue-1100: #0d5e6e;
 
   --color-red-700: #e5484d;
   --color-red-800: #d11f2a;
@@ -253,11 +254,13 @@
   --color-canvas-minimap: var(--color-gray-alpha-600);
   --color-canvas-strategy-accent: var(--color-purple-700);
   /* V1.121 P3 T2: per-surface accent spines (DESIGN.md §Canvas Surface —
-     strategy = purple-700, outline = amber-700, World KB = teal-700).
+     strategy = purple-700, outline = amber-900, World KB = teal-900).
+     V1.157 P2 (DR-65): darkened one step so accent-chip text clears WCAG AA
+     on the /15 tint (light theme only; dark block unchanged).
      Mirror the canvas-strategy-accent pattern so each surface's spine is
      a single tuning knob, not a hardcoded semantic color in component code. */
-  --color-canvas-outline-accent: var(--color-amber-700);
-  --color-canvas-worldkb-accent: var(--color-teal-700);
+  --color-canvas-outline-accent: var(--color-amber-900);
+  --color-canvas-worldkb-accent: var(--color-teal-900);
   /* V1.123 P3 T2: Timeline accent spine. Timeline is the central instrument
      per `iterations/v1.123/specs/three-layer-product-spec.md`; the brand-blue
      per the Canvas/SOUL theme-split invariant (light blue-1000, dark
@@ -270,16 +273,18 @@
      / Moment each carry a dedicated accent so a screenshot reads each as a
      distinct instrument without reading chrome labels (AC-V1123-20).
 
-       - Brief accent (gold-bronze "age" tone): reuses amber-700 — the
-         outline spine. The Brief-era node lives on the World Timeline
+       - Brief accent (gold-bronze "age" tone): reuses amber-900 — one
+         step darker than the pre-V1.157 outline spine for WCAG AA on the
+         /15 tint (DR-65). The Brief-era node lives on the World Timeline
          surface; Outline lives on a different surface, so the shared amber
          hue does not collide. The differentiation axis is per-LAYER within
          Timeline (Brief=amber vs Narrative=blue), not per-surface.
-       - Narrative accent (medium blue): aliases the V1.123 P3 Timeline
-         accent (brand-blue). Per layer-feel §6.1 the Narrative accent "may
-         alias existing Timeline/event accent (V1.122) — only add if
-         Narrative needs distinct chrome." P4 keeps the alias so the three-
-         layer accent triple stays cohesive.
+       - Narrative accent (medium blue): blue-1100 — the V1.157 P2
+         AA-darkened step of the V1.123 P3 Timeline accent (brand-blue).
+         Per layer-feel §6.1 the Narrative accent "may alias existing
+         Timeline/event accent (V1.122) — only add if Narrative needs
+         distinct chrome." P4 keeps the alias family; P2 darkens it for
+         chip-text contrast so the three-layer accent triple stays cohesive.
        - Moment accent (ink-on-paper manuscript tone): reuses gray-900 —
          a stable mid-dark "ink" hue that reads as manuscript ink against
          both light (paper) and dark (inverted paper) canvas backgrounds.
@@ -289,8 +294,8 @@
      entries so DESIGN.md / DESIGN.dark.md own the value pair. Tuning the
      accent triple later (e.g. to a custom sepia Moment tone) only needs a
      token edit, not a node-component sweep. */
-  --color-canvas-layer-brief-accent: var(--color-amber-700);
-  --color-canvas-layer-narrative-accent: var(--color-blue-1000);
+  --color-canvas-layer-brief-accent: var(--color-amber-900);
+  --color-canvas-layer-narrative-accent: var(--color-blue-1100);
   --color-canvas-layer-moment-accent: var(--color-gray-900);
   --color-canvas-write-dirty: var(--color-amber-700);
   --color-canvas-write-conflict: var(--color-red-700);
