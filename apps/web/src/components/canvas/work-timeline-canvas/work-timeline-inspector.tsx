@@ -578,8 +578,10 @@ export function WorkTimelineBriefEraInspector({
  *
  * The dispatch mirrors the V1.123 P1 Timeline adapter's
  * `renderInspector` dispatch (Brief-era vs Narrative event). Architect §6
- * (read-only in V1.123): every branch renders read-only details + the
- * Edit-in-Outline CTA; no write is invoked from the Work Timeline surface.
+ * (read-only in V1.123): every branch renders read-only details; the
+ * Narrative/Moment branches also add the Edit-in-Outline CTA while the
+ * Brief-era branch (PD-2 — read-only projection) is display-only without
+ * it; no write is invoked from the Work Timeline surface.
  *
  * V1.123 P3 Task 4 — the dispatcher now carries the cross-surface navigation
  * slots (`worldId` + `onViewOnWorldTimeline`) so the Narrative event

@@ -88,7 +88,10 @@ import { SPINE_Y_OFFSET } from '../timeline-canvas/directed-axis-spine';
 // `layoutHint: 'brief'`); the Brief-era node component is picked from the
 // World registry so Work-Brief feel ≡ World-Brief feel (no new node
 // component family).
-import { projectBriefLayer as projectWorldBriefLayer } from '../timeline-canvas/timeline-canvas-adapter';
+import {
+  BRIEF_LAYOUT_OPTIONS,
+  projectBriefLayer as projectWorldBriefLayer,
+} from '../timeline-canvas/timeline-canvas-adapter';
 import { timelineNodeTypes } from '../timeline-canvas/timeline-node-types';
 import { workTimelineNodeTypes } from './work-timeline-node-types';
 import { renderWorkTimelineInspector } from './work-timeline-inspector';
@@ -348,21 +351,6 @@ const NARRATIVE_LAYOUT_OPTIONS = {
   hasSuppliedPositions: true,
 };
 
-/**
- * V1.156 P2 T1 — Brief layer dagre options. IDENTICAL to the World Timeline
- * Brief layer options (layer-feel-differentiation.md §2.2 — wider `rankSep`
- * makes the era sweep read as sparse landmarks; tighter `nodeSep` keeps the
- * temporal-unknown era cluster compact). Work-Brief feel ≡ World-Brief feel.
- * The `hasSuppliedPositions: true` flag is preserved so the adapter's
- * deterministic era positions survive first open; these values only take
- * effect on an explicit `relayout()`.
- */
-const BRIEF_LAYOUT_OPTIONS = {
-  direction: 'LR' as const,
-  rankSep: 240,
-  nodeSep: 40,
-  hasSuppliedPositions: true,
-};
 const MOMENT_LAYOUT_OPTIONS = {
   direction: 'TB' as const,
   rankSep: 60,

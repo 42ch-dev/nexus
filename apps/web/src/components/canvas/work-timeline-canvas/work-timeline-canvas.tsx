@@ -274,6 +274,33 @@ export function WorkTimelineCanvas({ workId, sceneBeatFixture }: WorkTimelineCan
   const outline = outlineQuery.data;
   const isEmpty = !outline || (outline.timeline_events ?? []).length === 0;
 
+  // V1.156 P2 fix-wave F1 — bound-World graph query status gates (Brief
+  // layer only). The Brief layer's era data comes from the bound World's KB
+  // graph (`worldKbGraphQuery`) — a second async source independent of the
+  // outline projection. Without these gates the Brief-empty panel would
+  // misrepresent an in-flight fetch as "no world-shape context" (flash on
+  // `?layer=brief` deep links) and a failed fetch as a permanent honest
+  // empty-state with no retry. Mirrors the World Timeline orchestrator's
+  // `graph.isLoading` / `graph.isError` gates
+  // (`timeline-canvas.tsx:670-680`). Unbound Works skip the gate entirely
+  // (the hook is disabled → the honest Brief-empty panel below owns them).
+  const isBriefGraphPending =
+    !isEmpty && activeLayer === 'brief' && Boolean(boundWorldId);
+
+  if (isBriefGraphPending && worldKbGraphQuery.isLoading) {
+    return <LoadingState label={t('workTimeline.loading', { defaultValue: 'Loading Work Timeline…' })} />;
+  }
+  if (isBriefGraphPending && worldKbGraphQuery.isError) {
+    return (
+      <ErrorState
+        description={t('workTimeline.loadError', {
+          defaultValue: 'Could not load the work timeline.',
+        })}
+        onRetry={() => worldKbGraphQuery.refetch()}
+      />
+    );
+  }
+
   // V1.156 P2 T2 — Work-Brief empty detection. Active layer is Brief AND
   // the projection returned zero nodes (no bound World / no era data in the
   // bound World's graph). The Brief layer is a read-only projection of the
@@ -388,10 +415,11 @@ export function WorkTimelineCanvas({ workId, sceneBeatFixture }: WorkTimelineCan
 }
 
 /**
- * Canvas header — surfaces the Work Timeline label + the Narrative ↔ Moment
- * layer switcher (Task 4) + the Outline peer-link (Task 5 — Work Canvas shell
- * peer nav). The Outline link is the canonical escape hatch back to where
- * the writes live (architect §6 — Work Timeline is read-only in V1.123).
+ * Canvas header — surfaces the Work Timeline label + the Brief | Narrative |
+ * Moment layer switcher (Task 4 + V1.156 P2 T2) + the Outline peer-link
+ * (Task 5 — Work Canvas shell peer nav). The Outline link is the canonical
+ * escape hatch back to where the writes live (architect §6 — Work Timeline
+ * is read-only in V1.123).
  */
 function WorkTimelineCanvasHeader({
   workId,

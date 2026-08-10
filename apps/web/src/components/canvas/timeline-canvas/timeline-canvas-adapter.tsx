@@ -487,7 +487,7 @@ const MOMENT_CHAPTER_STEP_X = 360;
  * per surface entry (first open is supplied-positions; explicit relayout on
  * user action). No measurable cost to deriving these inline.
  */
-const BRIEF_LAYOUT_OPTIONS = {
+export const BRIEF_LAYOUT_OPTIONS = {
   direction: 'LR' as const,
   rankSep: 240,
   nodeSep: 40,

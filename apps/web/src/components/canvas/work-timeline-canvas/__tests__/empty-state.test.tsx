@@ -29,7 +29,7 @@
  * the client mock intercepts before HTTP.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, screen, waitFor } from '@testing-library/react';
+import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 
 import { renderInApp } from '@/test/test-providers';
 import type { NexusClient } from '@/lib/nexus';
@@ -99,10 +99,16 @@ function eraEntity(
  * the bound World's graph (the Brief layer's era data source). When absent,
  * the Work is unbound → `useWorldKbGraph` is disabled → the Brief layer has
  * no era data (honest Brief-empty panel).
+ *
+ * `getWorldKbGraphImpl` overrides the graph fetch (V1.156 P2 fix-wave F1 —
+ * loading/error status tests): pass a deferred or rejecting promise to
+ * exercise the orchestrator's `worldKbGraphQuery.isLoading` / `isError`
+ * gates instead of the immediate-resolve default.
  */
 function makeMockClient(
   outlineData: WorkOutline,
   world?: { worldId: string; graph: WorldKbGraphResponse },
+  getWorldKbGraphImpl?: (worldId: string) => Promise<WorldKbGraphResponse>,
 ): NexusClient {
   return {
     getWorkOutline: vi.fn().mockResolvedValue(outlineData),
@@ -110,7 +116,9 @@ function makeMockClient(
       work_id: 'work-1',
       world_id: world?.worldId ?? null,
     }),
-    getWorldKbGraph: world ? vi.fn().mockResolvedValue(world.graph) : vi.fn(),
+    getWorldKbGraph:
+      getWorldKbGraphImpl ??
+      (world ? vi.fn().mockResolvedValue(world.graph) : vi.fn()),
     patchOutlineStructure: vi.fn(),
     patchOutlineChapter: vi.fn(),
     patchTimelineEvent: vi.fn(),
@@ -419,5 +427,110 @@ describe('WorkTimelineCanvas — Brief-layer honest empty-state (V1.156 P2 T2)',
     expect(screen.queryByTestId('work-timeline-brief-empty-state')).toBeNull();
     // Layer switcher is hidden on the empty branch (Task 4 contract).
     expect(screen.queryByTestId('work-timeline-layer-tab-brief')).toBeNull();
+  });
+
+  it('shows a loading state (not the Brief-empty panel) while the bound-World graph is in flight', async () => {
+    // V1.156 P2 fix-wave F1: the Brief layer's era data comes from the bound
+    // World's KB graph — an async source independent of the outline. On a
+    // `?layer=brief` deep link the graph fetch is still in-flight after the
+    // outline resolves; the surface MUST show a loading state instead of
+    // flashing the dishonest "No world-shape context yet" Brief-empty panel
+    // while era data is incoming (mirrors the World Timeline's
+    // `graph.isLoading` gate — timeline-canvas.tsx:670-672).
+    let resolveGraph!: (value: WorldKbGraphResponse) => void;
+    const graphPromise = new Promise<WorldKbGraphResponse>((resolve) => {
+      resolveGraph = resolve;
+    });
+    const graphFn = vi.fn(() => graphPromise);
+
+    const client = makeMockClient(
+      outline(),
+      {
+        worldId: 'world-es',
+        graph: { entities: [], source_anchors: [], relationships: [] },
+      },
+      graphFn,
+    );
+    renderInApp(<WorkTimelineCanvas workId="work-1" />, {
+      client,
+      initialRouterEntries: ['/works/work-1/timeline?layer=brief'],
+    });
+
+    // The graph fetch has started (Work + outline resolved) but is still
+    // pending → loading state, and the Brief-empty panel MUST NOT flash.
+    await waitFor(() => {
+      expect(graphFn).toHaveBeenCalled();
+    });
+    expect(screen.getByText('Loading Work Timeline…')).toBeInTheDocument();
+    expect(screen.queryByTestId('work-timeline-brief-empty-state')).toBeNull();
+
+    // Resolve with era data → the Brief canvas renders; still no empty panel.
+    resolveGraph({
+      entities: [
+        eraEntity({
+          key_block_id: 'kb-era-1',
+          canonical_name: 'The First Age',
+        }),
+      ],
+      source_anchors: [],
+      relationships: [],
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('work-timeline-canvas')).toHaveAttribute(
+        'data-active-layer',
+        'brief',
+      );
+    });
+    expect(screen.queryByTestId('work-timeline-brief-empty-state')).toBeNull();
+  });
+
+  it('shows an ErrorState with a retry CTA (not the Brief-empty panel) when the bound-World graph fetch fails', async () => {
+    // V1.156 P2 fix-wave F1: a bound-World graph fetch failure must surface
+    // as a retryable error — NOT as the dishonest "No world-shape context
+    // yet" empty-state (the Work IS bound; that copy would be false).
+    // Mirrors the World Timeline's `graph.isError` + refetch pattern
+    // (timeline-canvas.tsx:673-680).
+    const client = makeMockClient(
+      outline(),
+      {
+        worldId: 'world-es',
+        graph: { entities: [], source_anchors: [], relationships: [] },
+      },
+      vi
+        .fn()
+        .mockRejectedValueOnce(new Error('graph fetch failed'))
+        .mockResolvedValueOnce({
+          entities: [
+            eraEntity({
+              key_block_id: 'kb-era-1',
+              canonical_name: 'The First Age',
+            }),
+          ],
+          source_anchors: [],
+          relationships: [],
+        }),
+    );
+    renderInApp(<WorkTimelineCanvas workId="work-1" />, {
+      client,
+      initialRouterEntries: ['/works/work-1/timeline?layer=brief'],
+    });
+
+    // Fetch failure → ErrorState with a retry affordance; the Brief-empty
+    // panel MUST NOT render.
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('Could not load the work timeline.');
+    expect(screen.queryByTestId('work-timeline-brief-empty-state')).toBeNull();
+
+    // Retry re-queries the graph → resolves → the Brief canvas renders.
+    fireEvent.click(within(alert).getByRole('button'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('work-timeline-canvas')).toHaveAttribute(
+        'data-active-layer',
+        'brief',
+      );
+    });
+    expect(screen.queryByTestId('work-timeline-brief-empty-state')).toBeNull();
   });
 });
