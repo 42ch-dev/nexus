@@ -175,7 +175,7 @@ pub async fn run_peers(command: PeersCommand) -> Result<()> {
 /// [`CliError::Config`] when the active workspace cannot be resolved, or
 /// [`CliError::Other`] when the DB open or the adapter read is rejected.
 async fn peers_list() -> Result<()> {
-    let pool = open_workspace_pool(None).await?;
+    let pool = open_workspace_pool(None, None).await?;
     let adapter = NexusAdapter::new(pool);
     let peers = match adapter.list_observed_peer_hosts().await {
         SpokeResult::Ok(peers) => peers,
@@ -539,7 +539,7 @@ pub async fn build_host_config(
     // (spoke-connect 0.9.2 `invoke_handler_v2` — caller identity is the
     // authenticated session peer; the legacy `invoke_handler` is not
     // selected, clean cutover per spec §5.2).
-    let pool = open_workspace_pool(workspace_db).await?;
+    let pool = open_workspace_pool(Some(home), workspace_db).await?;
     // P2: the adapter's ComputablePort resolves compute modules host-locally
     // from `~/.nexus42/modules/` (spec §2.1 — never peer-supplied bytes).
     let modules_dir = nexus_home_layout::user_modules_dir(home);
@@ -597,16 +597,24 @@ pub async fn record_dialed_peer(
 /// Open the active-workspace `SQLite` pool (WAL mode, migrations applied) —
 /// the `DbPool` the per-process `NexusAdapter` runs against.
 ///
-/// `workspace_db` is a test/embedding seam; `None` resolves the path by the
-/// daemon rules (active workspace from `~/.nexus42` config).
+/// `home` selects an explicit user home for embedded runtimes. `None` keeps
+/// the standard CLI behavior. `workspace_db` remains the direct test seam.
 ///
 /// # Errors
 /// [`CliError::Config`] when the active workspace cannot be resolved
 /// (fail-closed: the host refuses to boot without a workspace), or
 /// [`CliError`] from the DB open/migration path.
-async fn open_workspace_pool(workspace_db: Option<&Path>) -> Result<sqlx::SqlitePool> {
+async fn open_workspace_pool(
+    home: Option<&Path>,
+    workspace_db: Option<&Path>,
+) -> Result<sqlx::SqlitePool> {
     let db_path = if let Some(path) = workspace_db {
         path.to_path_buf()
+    } else if let Some(home) = home {
+        let config = crate::config::CliConfig::load_from_home(home)
+            .map_err(|e| CliError::Config(format!("active workspace resolution failed: {e}")))?;
+        crate::config::resolve_state_db_path_from_home(&config, home)
+            .map_err(|e| CliError::Config(format!("active workspace resolution failed: {e}")))?
     } else {
         let config = crate::config::CliConfig::load()
             .map_err(|e| CliError::Config(format!("active workspace resolution failed: {e}")))?;

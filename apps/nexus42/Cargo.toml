@@ -46,6 +46,21 @@ name = "runtime_smoke_probe"
 path = "examples/runtime_smoke_probe.rs"
 required-features = ["connect-host"]
 
+# Project-contained raw invoke bridge for the Trpg-legend standalone probe.
+# It reuses spoke-connect's Rust transport and exposes only parent-process
+# NDJSON over stdin/stdout; it is not a network service or Nexus product API.
+[[example]]
+name = "trpg_raw_bridge"
+path = "examples/trpg_raw_bridge.rs"
+required-features = ["connect-host"]
+
+# Creates one world in the standalone probe's disposable workspace through
+# Nexus' own schema and narrative-write API before the runtime starts.
+[[example]]
+name = "trpg_probe_bootstrap"
+path = "examples/trpg_probe_bootstrap.rs"
+required-features = ["connect-host"]
+
 [dependencies]
 nexus-contracts = { path = "../../crates/nexus-contracts" }
 nexus-orchestration = { path = "../../crates/nexus-orchestration" }

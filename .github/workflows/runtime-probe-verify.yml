@@ -1,0 +1,346 @@
+name: Runtime Probe Verify
+
+on:
+  workflow_call:
+    inputs:
+      build_run_id:
+        description: Runtime Probe Build run ID that owns the artifact
+        required: true
+        type: string
+      expected_head_sha:
+        description: Exact 40-character source commit recorded in the artifact
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  windows-x64:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    env:
+      BUILD_RUN_ID: ${{ inputs.build_run_id }}
+      EXPECTED_HEAD_SHA: ${{ inputs.expected_head_sha }}
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: trpg-nexus-context-probe-windows-x64
+          path: artifact
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.build_run_id }}
+
+      - name: Verify artifact provenance and hashes
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:EXPECTED_HEAD_SHA -notmatch '^[0-9a-fA-F]{40}$') {
+            throw "expected_head_sha must be exactly 40 hex characters: $env:EXPECTED_HEAD_SHA"
+          }
+          if ($env:BUILD_RUN_ID -notmatch '^[0-9]+$') {
+            throw "build_run_id must be numeric: $env:BUILD_RUN_ID"
+          }
+
+          $artifactDir = (Resolve-Path 'artifact').Path
+          $expectedFiles = @(
+            'nexus-runtime.exe',
+            'PROVENANCE.json',
+            'runtime_smoke_probe.exe',
+            'SHA256SUMS',
+            'trpg_probe_bootstrap.exe',
+            'trpg_raw_bridge.exe'
+          )
+          $expectedFiles = $expectedFiles | Sort-Object
+          $actualFiles = Get-ChildItem $artifactDir -File | Select-Object -ExpandProperty Name | Sort-Object
+          $fileDifference = Compare-Object $expectedFiles $actualFiles
+          if ($fileDifference) {
+            throw "artifact file set mismatch: $($fileDifference | Out-String)"
+          }
+
+          $provenancePath = Join-Path $artifactDir 'PROVENANCE.json'
+          $provenance = Get-Content -Raw -Encoding UTF8 $provenancePath | ConvertFrom-Json
+          if ($provenance.schema_version -ne 1) { throw 'unsupported provenance schema' }
+          if ($provenance.artifact_name -ne 'trpg-nexus-context-probe-windows-x64') { throw 'artifact name mismatch' }
+          if ($provenance.source_repository -ne $env:GITHUB_REPOSITORY) { throw 'source repository mismatch' }
+          if ($provenance.source_commit -ne $env:EXPECTED_HEAD_SHA.ToLowerInvariant()) { throw 'source commit mismatch' }
+          if ([string]$provenance.build_run_id -ne $env:BUILD_RUN_ID) { throw 'build run id mismatch' }
+          if ($provenance.target -ne 'x86_64-pc-windows-msvc') { throw 'artifact target mismatch' }
+          if ($provenance.profile -ne 'release') { throw 'artifact profile mismatch' }
+
+          $expectedHashedFiles = @(
+            'nexus-runtime.exe',
+            'PROVENANCE.json',
+            'runtime_smoke_probe.exe',
+            'trpg_probe_bootstrap.exe',
+            'trpg_raw_bridge.exe'
+          )
+          $seen = @{}
+          $hashLines = Get-Content -Encoding ASCII (Join-Path $artifactDir 'SHA256SUMS')
+          foreach ($line in $hashLines) {
+            $match = [regex]::Match($line, '^([0-9a-f]{64})  ([^\\/]+)$')
+            if (-not $match.Success) { throw "invalid SHA256SUMS line: $line" }
+            $name = $match.Groups[2].Value
+            if ($seen.ContainsKey($name)) { throw "duplicate SHA256SUMS entry: $name" }
+            $seen[$name] = $match.Groups[1].Value
+          }
+          foreach ($name in $expectedHashedFiles) {
+            if (-not $seen.ContainsKey($name)) { throw "missing SHA256SUMS entry: $name" }
+            $actualHash = (Get-FileHash -Algorithm SHA256 (Join-Path $artifactDir $name)).Hash.ToLowerInvariant()
+            if ($actualHash -ne $seen[$name]) { throw "SHA256 mismatch for $name" }
+          }
+          if ($seen.Count -ne $expectedHashedFiles.Count) { throw 'SHA256SUMS contains unexpected entries' }
+
+          $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+          [System.IO.File]::AppendAllText($env:GITHUB_ENV, "ARTIFACT_DIR=$artifactDir`n", $utf8NoBom)
+          Write-Output "verified build run $env:BUILD_RUN_ID at $($provenance.source_commit)"
+
+      - name: Run real runtime-to-reference-peer probe
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $runtimeHome = Join-Path $env:RUNNER_TEMP 'reference-home'
+          $nexusDir = Join-Path $runtimeHome '.nexus42'
+          $connectDir = Join-Path $nexusDir 'connect'
+          New-Item -ItemType Directory -Force -Path $connectDir | Out-Null
+          $globalNexusDir = Join-Path $env:USERPROFILE '.nexus42'
+          if (Test-Path $globalNexusDir) { throw "runner global Nexus home must start absent: $globalNexusDir" }
+
+          @'
+          active_creator_id = "ctr_smoke"
+
+          [active_workspace_slug_by_creator]
+          ctr_smoke = "default"
+          '@ | Set-Content -Encoding utf8NoBOM (Join-Path $nexusDir 'config.toml')
+
+          $runtime = Join-Path $env:ARTIFACT_DIR 'nexus-runtime.exe'
+          $probe = Join-Path $env:ARTIFACT_DIR 'runtime_smoke_probe.exe'
+          $probeIdentity = & $probe --print-peer-only
+          if ($LASTEXITCODE -ne 0) { throw "reference probe identity command exited $LASTEXITCODE" }
+          $probeMatch = [regex]::Match(($probeIdentity -join "`n"), '^PROBE_PEER_ID=(\S+)$')
+          if (-not $probeMatch.Success) { throw "reference probe peer id missing: $probeIdentity" }
+          $allowlist = @{ peer_ids = @($probeMatch.Groups[1].Value) }
+          $allowlistJson = $allowlist | ConvertTo-Json -Depth 3
+          $allowlistJson | Set-Content -Encoding utf8NoBOM (Join-Path $connectDir 'allowlist.json')
+
+          $stdout = Join-Path $env:RUNNER_TEMP 'nexus-runtime.stdout.log'
+          $stderr = Join-Path $env:RUNNER_TEMP 'nexus-runtime.stderr.log'
+          $process = $null
+          try {
+            $process = Start-Process -FilePath $runtime -ArgumentList @('--home', $runtimeHome) -WindowStyle Hidden -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru
+            $deadline = (Get-Date).AddSeconds(45)
+            $ready = ''
+            while ((Get-Date) -lt $deadline) {
+              Start-Sleep -Milliseconds 250
+              $process.Refresh()
+              if (Test-Path $stdout) {
+                $runtimeOut = Get-Content -Raw -Encoding UTF8 $stdout
+                $ready = if ($null -eq $runtimeOut) { '' } else { [string]$runtimeOut }
+              }
+              if ($process.HasExited -or $ready -match 'press Ctrl-C to stop') { break }
+            }
+
+            $runtimeErr = if (Test-Path $stderr) { Get-Content -Raw -Encoding UTF8 $stderr } else { '' }
+            Write-Output $ready
+            if ($runtimeErr) { Write-Output "runtime stderr:`n$runtimeErr" }
+            if ($process.HasExited) { throw "runtime exited early with code $($process.ExitCode)" }
+            if ([string]::IsNullOrWhiteSpace($ready)) { throw 'runtime readiness output was empty' }
+            if ($ready -notmatch 'upsert/promote/relate/check/assemble/compute served') { throw 'runtime readiness surface missing' }
+
+            $listenMatch = [regex]::Match($ready, '(?m)^\s*listen:\s*(\S+)\s*$')
+            $peerMatch = [regex]::Match($ready, '(?m)^\s*peer_id:\s*(\S+)\s*$')
+            if (-not $listenMatch.Success) { throw 'runtime readiness omitted listen address' }
+            if (-not $peerMatch.Success) { throw 'runtime readiness omitted peer id' }
+            $probeOutput = & $probe --addr $listenMatch.Groups[1].Value --host-peer $peerMatch.Groups[1].Value
+            Write-Output $probeOutput
+            if ($LASTEXITCODE -ne 0) { throw "reference probe exited $LASTEXITCODE" }
+            $probeText = $probeOutput -join "`n"
+            if ($probeText -notmatch 'DIAL_OK') { throw 'reference probe did not establish a session' }
+            if ($probeText -notmatch 'SERVED_OPS=upsert,promote,relate,check,assemble,compute') { throw 'served-op manifest mismatch' }
+            if ($probeText -notmatch 'SESSION_OK') { throw 'session did not remain usable' }
+            if (Test-Path $globalNexusDir) { throw "explicit --home touched runner global Nexus home: $globalNexusDir" }
+          } finally {
+            if ($process -and -not $process.HasExited) {
+              Stop-Process -Id $process.Id
+              $process.WaitForExit()
+            }
+          }
+
+      - name: Run scoped Trpg bridge probe
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $runtimeHome = Join-Path $env:RUNNER_TEMP 'trpg-bridge-home'
+          $nexusDir = Join-Path $runtimeHome '.nexus42'
+          $connectDir = Join-Path $nexusDir 'connect'
+          New-Item -ItemType Directory -Force -Path $connectDir | Out-Null
+          $globalNexusDir = Join-Path $env:USERPROFILE '.nexus42'
+          if (Test-Path $globalNexusDir) { throw "runner global Nexus home must remain absent: $globalNexusDir" }
+
+          @'
+          active_creator_id = "ctr_trpg_probe"
+
+          [active_workspace_slug_by_creator]
+          ctr_trpg_probe = "default"
+          '@ | Set-Content -Encoding utf8NoBOM (Join-Path $nexusDir 'config.toml')
+
+          $seed = Join-Path $env:RUNNER_TEMP 'trpg-bridge-seed.bin'
+          [System.IO.File]::WriteAllBytes($seed, [byte[]](1..32))
+          $runtime = Join-Path $env:ARTIFACT_DIR 'nexus-runtime.exe'
+          $bridge = Join-Path $env:ARTIFACT_DIR 'trpg_raw_bridge.exe'
+          $bootstrap = Join-Path $env:ARTIFACT_DIR 'trpg_probe_bootstrap.exe'
+          $bootstrapOutput = & $bootstrap --home $runtimeHome
+          if ($LASTEXITCODE -ne 0) { throw "probe bootstrap exited $LASTEXITCODE" }
+          $bootstrapResult = ($bootstrapOutput -join "`n") | ConvertFrom-Json
+          if ($bootstrapResult.schema_version -ne 1 -or $bootstrapResult.world_id -notmatch '^wld_') {
+            throw "probe bootstrap returned an invalid world: $bootstrapOutput"
+          }
+          $worldId = $bootstrapResult.world_id
+          $peerOutput = & $bridge --identity-seed $seed --print-peer-only
+          if ($LASTEXITCODE -ne 0) { throw "bridge identity command exited $LASTEXITCODE" }
+          $peerMatch = [regex]::Match(($peerOutput -join "`n"), '^BRIDGE_PEER_ID=(\S+)$')
+          if (-not $peerMatch.Success) { throw "bridge peer id missing: $peerOutput" }
+          $bridgePeer = $peerMatch.Groups[1].Value
+
+          $allowlist = @{
+            peer_ids = @(@{
+              peer_id = $bridgePeer
+              world_scope = @($worldId)
+              op_scope = @('upsert', 'promote', 'relate', 'assemble')
+              module_scope = @()
+            })
+          }
+          $allowlistJson = $allowlist | ConvertTo-Json -Depth 5
+          $allowlistJson | Set-Content -Encoding utf8NoBOM (Join-Path $connectDir 'allowlist.json')
+
+          $runtimeOut = Join-Path $env:RUNNER_TEMP 'trpg-runtime.stdout.log'
+          $runtimeErr = Join-Path $env:RUNNER_TEMP 'trpg-runtime.stderr.log'
+          $runtimeProcess = $null
+          $bridgeProcess = $null
+          try {
+            $runtimeProcess = Start-Process -FilePath $runtime -ArgumentList @('--home', $runtimeHome) -WindowStyle Hidden -RedirectStandardOutput $runtimeOut -RedirectStandardError $runtimeErr -PassThru
+            $deadline = (Get-Date).AddSeconds(45)
+            $ready = ''
+            while ((Get-Date) -lt $deadline) {
+              Start-Sleep -Milliseconds 250
+              $runtimeProcess.Refresh()
+              if (Test-Path $runtimeOut) {
+                $runtimeText = Get-Content -Raw -Encoding UTF8 $runtimeOut
+                $ready = if ($null -eq $runtimeText) { '' } else { [string]$runtimeText }
+              }
+              if ($runtimeProcess.HasExited -or $ready -match 'press Ctrl-C to stop') { break }
+            }
+            $runtimeErrorText = if (Test-Path $runtimeErr) { Get-Content -Raw -Encoding UTF8 $runtimeErr } else { '' }
+            if ($runtimeProcess.HasExited) { throw "runtime exited early with code $($runtimeProcess.ExitCode): $runtimeErrorText" }
+            if ([string]::IsNullOrWhiteSpace($ready)) { throw "runtime readiness output was empty: $runtimeErrorText" }
+            $listenMatch = [regex]::Match($ready, '(?m)^\s*listen:\s*(\S+)\s*$')
+            $hostPeerMatch = [regex]::Match($ready, '(?m)^\s*peer_id:\s*(\S+)\s*$')
+            if (-not $listenMatch.Success) { throw 'runtime readiness omitted listen address' }
+            if (-not $hostPeerMatch.Success) { throw 'runtime readiness omitted peer id' }
+
+            $bridgeArgs = @(
+              '--identity-seed', $seed,
+              '--addr', $listenMatch.Groups[1].Value,
+              '--host-peer', $hostPeerMatch.Groups[1].Value
+            )
+
+            function Write-BridgeCommand {
+              param(
+                [System.Diagnostics.Process]$Process,
+                [hashtable]$Document
+              )
+              $commandLine = $Document | ConvertTo-Json -Compress -Depth 5
+              $Process.StandardInput.WriteLine($commandLine)
+              $Process.StandardInput.Flush()
+            }
+
+            function Read-BridgeEvent {
+              param(
+                [System.Diagnostics.Process]$Process,
+                [string]$Label
+              )
+              $readTask = $Process.StandardOutput.ReadLineAsync()
+              if (-not $readTask.Wait(30000)) {
+                throw "timed out waiting for Trpg bridge event: $Label"
+              }
+              if ($null -eq $readTask.Result) {
+                throw "Trpg bridge stdout closed while waiting for event: $Label"
+              }
+              Write-Output "bridge event [$Label]: $($readTask.Result)"
+              return $readTask.Result | ConvertFrom-Json
+            }
+
+            $bridgeStartInfo = [System.Diagnostics.ProcessStartInfo]::new()
+            $bridgeStartInfo.FileName = $bridge
+            $bridgeStartInfo.UseShellExecute = $false
+            $bridgeStartInfo.CreateNoWindow = $true
+            $bridgeStartInfo.RedirectStandardInput = $true
+            $bridgeStartInfo.RedirectStandardOutput = $true
+            $bridgeStartInfo.RedirectStandardError = $true
+            $bridgeStartInfo.StandardOutputEncoding = [System.Text.Encoding]::UTF8
+            $bridgeStartInfo.StandardErrorEncoding = [System.Text.Encoding]::UTF8
+            foreach ($argument in $bridgeArgs) {
+              [void]$bridgeStartInfo.ArgumentList.Add([string]$argument)
+            }
+            $bridgeProcess = [System.Diagnostics.Process]::new()
+            $bridgeProcess.StartInfo = $bridgeStartInfo
+            if (-not $bridgeProcess.Start()) { throw 'failed to start Trpg bridge' }
+
+            $readyEvent = Read-BridgeEvent -Process $bridgeProcess -Label 'ready'
+
+            Write-BridgeCommand -Process $bridgeProcess -Document @{
+              id = 'allow-before-idle'
+              op = 'assemble'
+              payload = @{ scope = @{ scope_id = $worldId }; max_entries = 1 }
+            }
+            $allowedBeforeIdle = Read-BridgeEvent -Process $bridgeProcess -Label 'allow-before-idle'
+
+            Start-Sleep -Seconds 12
+
+            Write-BridgeCommand -Process $bridgeProcess -Document @{
+              id = 'allow-after-idle'
+              op = 'assemble'
+              payload = @{ scope = @{ scope_id = $worldId }; max_entries = 1 }
+            }
+            $allowedAfterIdle = Read-BridgeEvent -Process $bridgeProcess -Label 'allow-after-idle'
+
+            Write-BridgeCommand -Process $bridgeProcess -Document @{
+              id = 'deny-op'
+              op = 'check'
+              payload = @{ scope = @{ scope_id = $worldId } }
+            }
+            $deniedOp = Read-BridgeEvent -Process $bridgeProcess -Label 'deny-op'
+
+            Write-BridgeCommand -Process $bridgeProcess -Document @{
+              id = 'deny-world'
+              op = 'assemble'
+              payload = @{ scope = @{ scope_id = 'wld_other' }; max_entries = 1 }
+            }
+            $deniedWorld = Read-BridgeEvent -Process $bridgeProcess -Label 'deny-world'
+
+            $bridgeProcess.StandardInput.Close()
+            if (-not $bridgeProcess.WaitForExit(30000)) {
+              throw 'Trpg bridge did not exit after stdin EOF'
+            }
+            $bridgeErrorText = $bridgeProcess.StandardError.ReadToEnd()
+            if ($bridgeProcess.ExitCode -ne 0) {
+              throw "Trpg bridge exited $($bridgeProcess.ExitCode): $bridgeErrorText"
+            }
+
+            if ($readyEvent.peer_id -ne $bridgePeer) { throw 'bridge ready identity mismatch' }
+            if ($allowedBeforeIdle.ok -ne $true -or $null -eq $allowedBeforeIdle.payload.packet) { throw 'authorized assemble before idle did not succeed' }
+            if ($allowedAfterIdle.ok -ne $true -or $null -eq $allowedAfterIdle.payload.packet) { throw 'authorized assemble after idle did not reconnect and succeed' }
+            if ($deniedOp.ok -ne $false -or $deniedOp.error.code -ne 'op_unsupported') { throw 'unscoped check was not denied' }
+            if ($deniedWorld.ok -ne $false -or $deniedWorld.error.code -ne 'op_unsupported') { throw 'wrong-world assemble was not denied' }
+            if (Test-Path $globalNexusDir) { throw "bridge probe touched runner global Nexus home: $globalNexusDir" }
+          } finally {
+            if ($bridgeProcess -and -not $bridgeProcess.HasExited) {
+              Stop-Process -Id $bridgeProcess.Id
+              $bridgeProcess.WaitForExit()
+            }
+            if ($runtimeProcess -and -not $runtimeProcess.HasExited) {
+              Stop-Process -Id $runtimeProcess.Id
+              $runtimeProcess.WaitForExit()
+            }
+          }

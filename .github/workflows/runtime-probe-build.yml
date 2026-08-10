@@ -1,0 +1,121 @@
+name: Runtime Probe Build
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Build a reusable artifact or verify an existing build run
+        required: true
+        default: build
+        type: choice
+        options:
+          - build
+          - verify
+      build_run_id:
+        description: Build run ID (verify mode only)
+        required: false
+        type: string
+      expected_head_sha:
+        description: Exact artifact source commit (verify mode only)
+        required: false
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+env:
+  SQLX_OFFLINE: "true"
+  CARGO_INCREMENTAL: "0"
+
+jobs:
+  windows-x64:
+    if: inputs.mode == 'build'
+    runs-on: windows-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Install pinned nightly rustfmt
+        run: rustup toolchain install nightly-2026-06-26 --component rustfmt --no-self-update
+
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32
+        with:
+          shared-key: nexus-runtime
+          workspaces: .
+
+      - name: Check Rust formatting
+        run: cargo +nightly-2026-06-26 fmt --all -- --check
+
+      - name: Check explicit-home regression tests
+        run: cargo test --target x86_64-pc-windows-msvc -p nexus42 --lib --no-default-features --features connect-host explicit_home
+
+      - name: Build runtime and probe tools
+        run: cargo build --release --target x86_64-pc-windows-msvc -p nexus42 --bin nexus-runtime --example runtime_smoke_probe --example trpg_raw_bridge --example trpg_probe_bootstrap --no-default-features --features connect-host
+
+      - name: Package reusable artifact
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $out = New-Item -ItemType Directory -Path trpg-nexus-context-probe-windows-x64
+          Copy-Item "target/x86_64-pc-windows-msvc/release/nexus-runtime.exe" $out
+          Copy-Item "target/x86_64-pc-windows-msvc/release/examples/runtime_smoke_probe.exe" $out
+          Copy-Item "target/x86_64-pc-windows-msvc/release/examples/trpg_raw_bridge.exe" $out
+          Copy-Item "target/x86_64-pc-windows-msvc/release/examples/trpg_probe_bootstrap.exe" $out
+
+          $provenance = [ordered]@{
+            schema_version = 1
+            artifact_name = 'trpg-nexus-context-probe-windows-x64'
+            source_repository = $env:GITHUB_REPOSITORY
+            source_commit = $env:GITHUB_SHA
+            source_ref = $env:GITHUB_REF
+            build_run_id = $env:GITHUB_RUN_ID
+            target = 'x86_64-pc-windows-msvc'
+            profile = 'release'
+            rustc_version = (& rustc --version) -join "`n"
+            cargo_version = (& cargo --version) -join "`n"
+            built_at_utc = (Get-Date).ToUniversalTime().ToString('o')
+          }
+          $provenanceJson = $provenance | ConvertTo-Json -Depth 4
+          $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+          [System.IO.File]::WriteAllText((Join-Path $out 'PROVENANCE.json'), $provenanceJson + "`n", $utf8NoBom)
+
+          $hashTargets = Get-ChildItem $out -File | Sort-Object Name
+          $hashLines = $hashTargets | Get-FileHash -Algorithm SHA256 | ForEach-Object {
+            "{0}  {1}" -f $_.Hash.ToLowerInvariant(), $_.Path.Substring($out.FullName.Length + 1)
+          }
+          $hashLines | Set-Content -Encoding ascii -NoNewline:$false (Join-Path $out 'SHA256SUMS')
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: trpg-nexus-context-probe-windows-x64
+          path: trpg-nexus-context-probe-windows-x64/
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Smoke packaged binaries
+        shell: pwsh
+        run: |
+          $runtime = & "trpg-nexus-context-probe-windows-x64/nexus-runtime.exe" --version
+          $peer = & "trpg-nexus-context-probe-windows-x64/runtime_smoke_probe.exe" --print-peer-only
+          $seed = Join-Path $env:RUNNER_TEMP 'bridge-smoke-seed.bin'
+          [System.IO.File]::WriteAllBytes($seed, [byte[]](1..32))
+          $bridgePeer = & "trpg-nexus-context-probe-windows-x64/trpg_raw_bridge.exe" --identity-seed $seed --print-peer-only
+          Write-Output $runtime
+          Write-Output $peer
+          Write-Output $bridgePeer
+          if ($runtime -notmatch '^nexus-runtime ') { throw "unexpected runtime version: $runtime" }
+          if ($peer -notmatch '^PROBE_PEER_ID=12D3KooW') { throw "unexpected probe identity: $peer" }
+          if ($bridgePeer -notmatch '^BRIDGE_PEER_ID=12D3KooW') { throw "unexpected bridge identity: $bridgePeer" }
+          if (-not (Test-Path "trpg-nexus-context-probe-windows-x64/trpg_probe_bootstrap.exe")) { throw 'probe bootstrap missing' }
+
+  verify:
+    if: inputs.mode == 'verify'
+    uses: ./.github/workflows/runtime-probe-verify.yml
+    with:
+      build_run_id: ${{ inputs.build_run_id }}
+      expected_head_sha: ${{ inputs.expected_head_sha }}
