@@ -1,7 +1,7 @@
 # Nexus Local Web UI (`apps/web`)
 
 Daemon-served, local-first **Control Room + Setup** SPA for the Nexus runtime.
-React 18 + Vite + TypeScript + TailwindCSS + shadcn/ui primitives + TanStack
+React 19 + Vite + TypeScript + TailwindCSS + shadcn/ui primitives + TanStack
 Query + React Router. Transport-agnostic via the `NexusClient` adapter
 (`BrowserClient` today; `TauriClient` in V1.65). This is an OSS local-first
 surface — **not** the private cloud SaaS.

@@ -73,7 +73,7 @@ No daemon or Tauri required for any command.
 
 - **CSS pipeline**: shared `@nexus/design-tokens` workspace package (`tooling/design-tokens`) — Tailwind preset + `tokens.css`
 - **Import surface**: `@42ch/nexus-ui` (promoted primitives: Button, Badge, Card, Input, Label, Textarea, Select, Tabs, Toast, TransportErrorBlock, RunFormFields, EntityPickerField, ProposalSections, RunStatusBadge, RunsTable + brand layer + `cn`), `@web-ui/*` (transitional unpromoted: Dialog, States, Table), `@nexus/design-tokens` (CSS + preset)
-- **Toolchain**: Vite 6 + React 18 + TypeScript strict + Tailwind 3 + Vitest 3 — mirrors `apps/web`
+- **Toolchain**: Vite 6 + React 19 + TypeScript strict + Tailwind 3 + Vitest 3 — mirrors `apps/web`
 - **Boundaries**: no daemon transport, no `NexusClient`, no `@42ch/nexus-contracts`, no product-page imports
 
 For detailed rules see [`AGENTS.md`](./AGENTS.md).
