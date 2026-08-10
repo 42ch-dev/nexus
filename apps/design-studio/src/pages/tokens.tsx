@@ -69,7 +69,7 @@ const COLOR_GROUPS: TokenGroup[] = [
     title: 'Blue',
     hint:
       'Interactive cyan signal scale (light and dark). Light primary/active chrome uses blue-1000 ≡ brand-cyan-1000 (#117480); dark neon CTA uses blue-700 ≡ brand-cyan (#25D1E0). Focus rings: blue-1000 light / blue-700 dark. Not body-link ink on light (use brand-deep-blue).',
-    tokens: ['700', '800', '900', '1000'].map((s) => ({
+    tokens: ['700', '800', '900', '1000', '1100'].map((s) => ({
       label: `blue-${s}`,
       varName: `--color-blue-${s}`,
     })),
