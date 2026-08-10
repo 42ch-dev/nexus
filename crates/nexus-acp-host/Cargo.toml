@@ -38,3 +38,7 @@ wiremock = "0.6"
 assert_cmd = "2.0"
 predicates = "3.1"
 tempfile = "3"
+# R-V1148P0-001 / R-V1151P2-004: the fork/PATH-dependent scan-probe tests are
+# marked `#[serial]` so they never fork concurrently within this test binary
+# (same pin as nexus-daemon-runtime / nexus-orchestration).
+serial_test = "3"
