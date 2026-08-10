@@ -192,9 +192,9 @@
     }
   },
   "strategy": {
-    "loading": "Loading strategy…",
-    "loadError": "Failed to load strategy.",
-    "loadErrorTitle": "Could not load strategy",
+    "loading": "Loading Harness…",
+    "loadError": "Failed to load Harness.",
+    "loadErrorTitle": "Could not load Harness",
     "engineUnavailableTitle": "Orchestration engine not running",
     "engineUnavailableDescription": "Start the daemon orchestration engine, then try again.",
     "graphAriaLabel": "Harness spatial graph",

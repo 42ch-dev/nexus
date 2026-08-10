@@ -44,6 +44,13 @@ export function NleTimelineBandOverlay({
     if (activeLayer === 'brief') {
       return projectWorldTimelineNodesToNleTracks(nodes, 'brief');
     }
+    if (activeLayer === 'moment') {
+      // V1.156 P5 — World-Moment NLE band. The World Timeline reuses the Work
+      // Timeline Moment node types verbatim, so the World-Moment band
+      // projects Scenes/Beats tracks instead of falling through to the
+      // Narrative projection (which yields zero tracks for Moment nodes).
+      return projectWorldTimelineNodesToNleTracks(nodes, 'moment');
+    }
     return projectWorldTimelineNodesToNleTracks(nodes, 'narrative');
   }, [activeLayer, nodes, surface]);
 

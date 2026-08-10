@@ -660,3 +660,53 @@ describe('TimelineCanvas — fixture identity change re-projects the Moment laye
     });
   });
 });
+
+// ─── V1.156 P5 — World-Moment NLE band ─────────────────────────────────────
+//
+// Greptile finding: `nle-timeline-band-overlay.tsx` fell the World `moment`
+// layer through to the Narrative projection, which matches only
+// `timeline-event`/`timeline-compute-result` nodes — so a Moment fixture
+// (scene/beat nodes) produced zero tracks and the band vanished. The overlay
+// now projects World-Moment nodes into Scenes/Beats tracks; this test pins
+// the band at the orchestrator level (not null / not disappeared).
+
+describe('TimelineCanvas — World-Moment NLE band (V1.156 P5)', () => {
+  it('renders Scenes/Beats NLE tracks when the Moment layer has fixture data', async () => {
+    const g = graph({
+      entities: [
+        entity({
+          key_block_id: 'kb-era-1',
+          block_type: 'era',
+          canonical_name: 'The First Age',
+        }),
+      ],
+    });
+
+    renderInApp(
+      <TimelineCanvas
+        worldId="world-7"
+        sceneBeatFixture={fixture(
+          [scene({ sceneId: 'sc-1', chapterId: 1, title: 'Opening' })],
+          [beat({ beatId: 'bt-1', sceneId: 'sc-1', title: 'Hook' })],
+        )}
+      />,
+      {
+        client: makeTimelineCanvasMockClient(g),
+        initialRouterEntries: ['/worlds/world-7/timeline?layer=moment'],
+      },
+    );
+
+    // The band overlay renders (not null) and carries both Moment tracks —
+    // the pre-fix Narrative fallthrough produced zero tracks for scene/beat
+    // nodes and the overlay returned null.
+    await waitFor(() => {
+      expect(screen.getByTestId('nle-timeline-band-overlay')).toBeInTheDocument();
+    });
+    expect(screen.getByTestId('nle-timeline-label-scenes')).toHaveTextContent(
+      'Scenes',
+    );
+    expect(screen.getByTestId('nle-timeline-label-beats')).toHaveTextContent(
+      'Beats',
+    );
+  });
+});

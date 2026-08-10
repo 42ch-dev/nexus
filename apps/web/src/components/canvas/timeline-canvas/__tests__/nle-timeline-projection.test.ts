@@ -55,6 +55,22 @@ describe('projectWorldTimelineNodesToNleTracks', () => {
       'Context',
     ]);
   });
+
+  it('maps World Moment scenes and beats to separate tracks (V1.156 P5)', () => {
+    // The World Timeline reuses the Work Timeline Moment node types verbatim
+    // (`work-timeline-moment-scene` / `work-timeline-moment-beat`), so the
+    // World-Moment band mirrors the Work-Moment Scenes/Beats tracks instead
+    // of producing zero tracks (the pre-fix Narrative fallthrough).
+    const nodes = [
+      node('sc-1', 'work-timeline-moment-scene', 40, 0, { label: 'Opening Scene' }),
+      node('bt-1', 'work-timeline-moment-beat', 56, 120, { label: 'Hook Beat' }),
+    ];
+
+    const { tracks } = projectWorldTimelineNodesToNleTracks(nodes, 'moment');
+    expect(tracks.map((track) => track.label)).toEqual(['Scenes', 'Beats']);
+    expect(tracks[0]?.clips[0]?.label).toBe('Opening Scene');
+    expect(tracks[1]?.clips[0]?.label).toBe('Hook Beat');
+  });
 });
 
 describe('projectWorkTimelineNodesToNleTracks', () => {
