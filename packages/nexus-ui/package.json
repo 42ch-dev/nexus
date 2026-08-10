@@ -67,15 +67,17 @@
     "tailwind-merge": "^2.6.0"
   },
   "peerDependencies": {
-    "react": ">=18.0.0",
-    "react-dom": ">=18.0.0"
+    "react": ">=19.0.0",
+    "react-dom": ">=19.0.0"
   },
   "devDependencies": {
     "@testing-library/jest-dom": "^6.6.3",
     "@testing-library/react": "^16.1.0",
-    "@types/react": "^18.3.12",
-    "@types/react-dom": "^18.3.1",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
     "jsdom": "^25.0.1",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
     "tsup": "^8.0.0",
     "typescript": "7.0.2",
     "vitest": "^3.2.6"
