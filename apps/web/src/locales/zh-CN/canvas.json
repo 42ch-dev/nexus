@@ -796,18 +796,42 @@
     },
     "header": {
       "title": "作品时间轴",
-      "description": "作品的叙事与瞬间。切换到大纲进行编辑。",
+      "description": "作品的时间轴，涵盖概览、叙事与瞬间三个图层。切换到大纲进行编辑。",
       "peerNavAria": "同级面板",
       "outlineLink": "大纲",
       "inspectorLink": "装配检查器"
     },
     "layerSwitcher": {
       "ariaLabel": "作品时间轴图层",
+      "brief": "概览",
       "narrative": "叙事",
       "moment": "瞬间"
     },
     "breadcrumb": {
       "ariaLabel": "作品时间轴图层路径"
+    },
+    "brief": {
+      "emptyState": {
+        "title": "尚无世界形态上下文",
+        "message": "当此作品绑定到拥有纪元标记的世界时，此处会显示世界形态上下文。概览是绑定世界概览的只读投影。",
+        "cta": "切换到叙事"
+      }
+    },
+    "briefEraNode": {
+      "span": "{{start}} → {{end}}",
+      "temporalUnknown": "纪元时间跨度未知"
+    },
+    "briefEraInspector": {
+      "title": "概览纪元",
+      "description": "来自绑定世界概览的世界形态纪元标记。只读 — 概览属于世界脊柱。",
+      "aria": "{{name}} 的概览纪元检查器",
+      "identityAria": "纪元身份标记",
+      "readOnly": "只读 — 概览属于绑定世界。",
+      "field": {
+        "eraId": "纪元 ID",
+        "span": "时间跨度",
+        "worldSummary": "世界概述"
+      }
     },
     "narrativeEventNode": {
       "aria": "作品时间轴事件：{{name}}",
@@ -855,7 +879,8 @@
         "chapter": "章节",
         "description": "描述",
         "status": "状态"
-      }
+      },
+      "version": "v{{version}}"
     }
   },
   "globalTimeline": {

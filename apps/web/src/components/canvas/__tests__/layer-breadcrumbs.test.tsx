@@ -7,7 +7,7 @@
  *   | Surface        | Breadcrumb pattern                          |
  *   |----------------|---------------------------------------------|
  *   | World Timeline | `Brief` or `Brief > Narrative` or `Narrative`|
- *   | Work Timeline  | `Narrative` or `Narrative > Moment` or `Moment`|
+ *   | Work Timeline  | `Brief` or `Brief > Narrative` or `Narrative`|
  *
  * Breadcrumbs are clickable zoom-out targets (parent layer).
  *
@@ -17,9 +17,13 @@
  *     (zoom-out affordance).
  *   - World Timeline: when on Brief layer, breadcrumb shows just `Brief`
  *     (no parent layer to zoom out to).
- *   - Work Timeline: when on Moment layer, breadcrumb shows `Narrative > Moment`;
- *     clicking the Narrative segment switches back to Narrative.
- *   - Work Timeline: when on Narrative layer, breadcrumb shows just `Narrative`.
+ *   - Work Timeline (V1.156 P2 T2 — Work×Brief closed): the breadcrumb pair
+ *     becomes `Brief > Narrative`, mirroring the World Timeline — Brief is
+ *     the coarsest (world-shape) layer. Moment sits outside the pair (same
+ *     as World Timeline Moment); the switcher tabs remain its affordance.
+ *   - Work Timeline: when on Narrative layer, breadcrumb shows `Brief > Narrative`;
+ *     clicking the Brief segment switches back to Brief (zoom-out to world
+ *     shape). When on Brief layer, breadcrumb shows just `Brief`.
  *
  * The breadcrumb is the cross-layer navigation affordance on the canvas header
  * (sibling to the explicit layer switcher tabs). It reuses the same
@@ -187,14 +191,20 @@ describe('TimelineCanvas — layer breadcrumb (P4 Task 5)', () => {
   });
 });
 
-// ─── Work Timeline — Narrative ↔ Moment breadcrumb ───────────────────────
+// ─── Work Timeline — Brief ↔ Narrative breadcrumb (V1.156 P2 T2) ─────────
+//
+// V1.156 closes the Work×Brief cell: Brief is the coarsest (world-shape)
+// layer on the Work Timeline, so the breadcrumb pair becomes Brief ›
+// Narrative — mirroring the World Timeline's breadcrumb exactly. Moment
+// sits outside the coarse/fine pair (reached via the switcher tabs), the
+// same as the World Timeline's Moment.
 
-describe('WorkTimelineCanvas — layer breadcrumb (P4 Task 5)', () => {
+describe('WorkTimelineCanvas — layer breadcrumb (P4 Task 5 + V1.156 P2 T2)', () => {
   afterEach(() => {
     vi.clearAllMocks();
   });
 
-  it('renders just the Narrative segment when the Narrative layer is active', async () => {
+  it('renders the Brief > Narrative path when Narrative is active; clicking Brief zooms out', async () => {
     const outline: WorkOutline = {
       work_id: 'work-1',
       outline_revision: 1,
@@ -218,14 +228,73 @@ describe('WorkTimelineCanvas — layer breadcrumb (P4 Task 5)', () => {
       );
     });
 
+    // Breadcrumb shows the path Brief > Narrative (Brief = the coarsest
+    // layer — the world-shape zoom-out target). No "Moment" segment.
     const breadcrumb = screen.getByTestId('work-timeline-layer-breadcrumb');
     expect(breadcrumb).toBeInTheDocument();
+    expect(breadcrumb).toHaveTextContent('Brief');
     expect(breadcrumb).toHaveTextContent('Narrative');
-    // No "Moment" segment when Narrative is active.
+    expect(breadcrumb).not.toHaveTextContent('Moment');
+
+    // Click the Brief segment (zoom-out target) → switches to Brief.
+    fireEvent.click(
+      screen.getByTestId('work-timeline-layer-breadcrumb-segment-brief'),
+    );
+    await waitFor(() => {
+      expect(screen.getByTestId('work-timeline-canvas')).toHaveAttribute(
+        'data-active-layer',
+        'brief',
+      );
+    });
+  });
+
+  it('renders just the Brief segment when the Brief layer is active (no parent)', async () => {
+    const outline: WorkOutline = {
+      work_id: 'work-1',
+      outline_revision: 1,
+      volumes: [],
+      timeline_events: [
+        { event_id: 'evt-1', title: 'Inciting Incident', realizes_chapter_id: 1 },
+      ],
+      foreshadows: [],
+      chapter_titles: {},
+      updated_at: '2026-07-18T00:00:00Z',
+    } as WorkOutline;
+
+    renderInApp(<WorkTimelineCanvas workId="work-1" />, {
+      client: makeWorkMockClient(outline),
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('work-timeline-canvas')).toHaveAttribute(
+        'data-active-layer',
+        'narrative',
+      );
+    });
+
+    // Switch to Brief via the layer tab (no bound World → Brief-empty
+    // panel, but the header chrome with the breadcrumb still renders).
+    fireEvent.click(screen.getByTestId('work-timeline-layer-tab-brief'));
+    await waitFor(() => {
+      expect(screen.getByTestId('work-timeline-canvas')).toHaveAttribute(
+        'data-active-layer',
+        'brief',
+      );
+    });
+
+    // Breadcrumb shows just the Brief segment — Brief has no parent layer.
+    const breadcrumb = screen.getByTestId('work-timeline-layer-breadcrumb');
+    expect(breadcrumb).toBeInTheDocument();
+    expect(breadcrumb).toHaveTextContent('Brief');
+    expect(breadcrumb).not.toHaveTextContent('Narrative');
     expect(breadcrumb).not.toHaveTextContent('Moment');
   });
 
-  it('renders Narrative > Moment path when Moment is active; clicking Narrative zooms out', async () => {
+  it('keeps the breadcrumb safe when Moment is active (Moment sits outside the Brief > Narrative pair)', async () => {
+    // P1 mirror: the World Timeline breadcrumb pair is Brief › Narrative
+    // with Moment outside it; the Work Timeline mirrors that exactly. The
+    // breadcrumb must render without crashing on the Moment layer (the
+    // switcher tabs remain the primary Moment affordance).
     const outline: WorkOutline = {
       work_id: 'work-1',
       outline_revision: 1,
@@ -275,20 +344,8 @@ describe('WorkTimelineCanvas — layer breadcrumb (P4 Task 5)', () => {
       );
     });
 
-    // Breadcrumb now shows Narrative > Moment.
-    const breadcrumb = screen.getByTestId('work-timeline-layer-breadcrumb');
-    expect(breadcrumb).toHaveTextContent('Narrative');
-    expect(breadcrumb).toHaveTextContent('Moment');
-
-    // Click the Narrative segment (zoom-out target).
-    fireEvent.click(
-      screen.getByTestId('work-timeline-layer-breadcrumb-segment-narrative'),
-    );
-    await waitFor(() => {
-      expect(screen.getByTestId('work-timeline-canvas')).toHaveAttribute(
-        'data-active-layer',
-        'narrative',
-      );
-    });
+    // The breadcrumb stays mounted (Moment is outside its coarse/fine pair
+    // — the pair renders the Narrative fine segment). No crash on Moment.
+    expect(screen.getByTestId('work-timeline-layer-breadcrumb')).toBeInTheDocument();
   });
 });

@@ -13,13 +13,17 @@
  *    `defaultLayer: 'narrative'` — NOT Moment.").
  *
  * Coverage:
- *   - Narrative + Moment tabs render in the canvas header (layer-feel §3.3).
+ *   - Brief + Narrative + Moment tabs render in the canvas header
+ *     (layer-feel §3.3; Brief added V1.156 P2 T2).
  *   - Default layer = `'narrative'` UNCONDITIONALLY (architect §7.3
  *     override — even when scene/beat fixture data exists, the Work
  *     Timeline default is Narrative in V1.123 because real Works have no
  *     wire-scene/beat data today).
- *   - Clicking Moment tab switches active layer to Moment.
+ *   - Clicking Brief / Moment tab switches active layer to Brief / Moment.
  *   - Clicking Narrative tab switches active layer to Narrative.
+ *   - The 2-way→3-way extension preserves the segmented-control a11y
+ *     contract (role=group + aria-label + per-tab aria-pressed; keyboard
+ *     nav = native button semantics).
  *   - Switching layers is a discrete semantic swap (layer-feel §3.1).
  *   - Switching layers does NOT trigger any forbidden write endpoint
  *     (Work Timeline is read-only in V1.123 — `patchOutlineChapter`,
@@ -33,7 +37,7 @@
  * MSW is not needed because the client mock intercepts before HTTP.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, screen, waitFor } from '@testing-library/react';
+import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 
 import { renderInApp } from '@/test/test-providers';
 import type { NexusClient } from '@/lib/nexus';
@@ -83,6 +87,10 @@ function beat(partial: Partial<BeatFixture> & Pick<BeatFixture, 'beatId' | 'scen
 function makeMockClient(outlineData: WorkOutline): NexusClient {
   return {
     getWorkOutline: vi.fn().mockResolvedValue(outlineData),
+    // Explicit no-bound-World: the Work detail carries no `world_id`, so
+    // the Brief layer has no era data source → honest Brief-empty panel
+    // when the user switches to Brief (V1.156 P2 T2).
+    getWork: vi.fn().mockResolvedValue({ work_id: 'work-1', world_id: null }),
     patchOutlineStructure: vi.fn(),
     patchOutlineChapter: vi.fn(),
     patchTimelineEvent: vi.fn(),
@@ -97,7 +105,7 @@ describe('WorkTimelineCanvas — layer switcher UI (V1.123 P2 Task 4)', () => {
     vi.clearAllMocks();
   });
 
-  it('renders Narrative + Moment layer tabs in the canvas header', async () => {
+  it('renders Brief + Narrative + Moment layer tabs in the canvas header (V1.156 3-way)', async () => {
     const client = makeMockClient(outline());
     renderInApp(<WorkTimelineCanvas workId="work-1" />, { client });
 
@@ -105,9 +113,77 @@ describe('WorkTimelineCanvas — layer switcher UI (V1.123 P2 Task 4)', () => {
       expect(screen.getByTestId('work-timeline-canvas')).toBeInTheDocument();
     });
 
-    // Both layer tabs render — explicit layer control per layer-feel §3.3.
+    // All three layer tabs render — explicit layer control per layer-feel
+    // §3.3 (V1.156 adds the Brief segment; Narrative + Moment unchanged).
+    expect(screen.getByTestId('work-timeline-layer-tab-brief')).toBeInTheDocument();
     expect(screen.getByTestId('work-timeline-layer-tab-narrative')).toBeInTheDocument();
     expect(screen.getByTestId('work-timeline-layer-tab-moment')).toBeInTheDocument();
+  });
+
+  it('clicking the Brief tab switches active layer to Brief (Narrative → Brief)', async () => {
+    // V1.156 P2 T2 — Brief is the coarsest layer, one click from Narrative.
+    // No bound World in this fixture → the projection is empty, but the
+    // active layer swap is observable via `data-active-layer` + the tab's
+    // `aria-pressed` (the honest empty-state panel is covered by
+    // `empty-state.test.tsx`).
+    const client = makeMockClient(outline());
+    renderInApp(<WorkTimelineCanvas workId="work-1" />, { client });
+
+    const canvas = await screen.findByTestId('work-timeline-canvas');
+
+    // Default = Narrative.
+    await waitFor(() => {
+      expect(canvas).toHaveAttribute('data-active-layer', 'narrative');
+    });
+
+    fireEvent.click(screen.getByTestId('work-timeline-layer-tab-brief'));
+
+    await waitFor(() => {
+      expect(canvas).toHaveAttribute('data-active-layer', 'brief');
+    });
+    expect(screen.getByTestId('work-timeline-layer-tab-brief')).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    expect(screen.getByTestId('work-timeline-layer-tab-narrative')).toHaveAttribute(
+      'aria-pressed',
+      'false',
+    );
+    expect(screen.getByTestId('work-timeline-layer-tab-moment')).toHaveAttribute(
+      'aria-pressed',
+      'false',
+    );
+  });
+
+  it('keeps the segmented-control a11y contract on the 3-way switcher (role=group + aria-label + per-tab aria-pressed)', async () => {
+    // a11y contract (V1.123 P2 Task 4, preserved through the 2-way→3-way
+    // extension): the switcher is a labeled `role="group"`; each layer tab
+    // is a real button with `aria-pressed` so SR users hear the active
+    // layer as a toggle state. Keyboard nav is native button behavior
+    // (Tab focuses each tab; Space/Enter activates).
+    const client = makeMockClient(outline());
+    renderInApp(<WorkTimelineCanvas workId="work-1" />, { client });
+
+    await screen.findByTestId('work-timeline-canvas');
+
+    const group = screen.getByRole('group', { name: 'Work Timeline layer' });
+    expect(group).toBeInTheDocument();
+
+    // Three tabs inside the group, each a native button (implicit
+    // role="button" — keyboard focusable) with aria-pressed reflecting
+    // the active layer (default Narrative → only Narrative pressed).
+    const tabButtons = within(group).getAllByRole('button');
+    expect(tabButtons).toHaveLength(3);
+
+    const briefTab = screen.getByTestId('work-timeline-layer-tab-brief');
+    const narrativeTab = screen.getByTestId('work-timeline-layer-tab-narrative');
+    const momentTab = screen.getByTestId('work-timeline-layer-tab-moment');
+    expect(briefTab.tagName).toBe('BUTTON');
+    expect(narrativeTab.tagName).toBe('BUTTON');
+    expect(momentTab.tagName).toBe('BUTTON');
+    expect(briefTab).toHaveAttribute('aria-pressed', 'false');
+    expect(narrativeTab).toHaveAttribute('aria-pressed', 'true');
+    expect(momentTab).toHaveAttribute('aria-pressed', 'false');
   });
 
   it("defaults to 'narrative' layer (architect §7.3 UX-risk override — UNCONDITIONAL in V1.123)", async () => {
