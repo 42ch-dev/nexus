@@ -664,11 +664,13 @@ pub async fn run_assemble_moment(
     // expansion when activation is on (off-switch ⇒ no hop load; spec §6).
     // The edge source is the inherent `NexusAdapter::list_hop_edges_for_world`
     // — spoke `RelationPort` is get/put only, so the storage list primitive
-    // (`list_relationships_for_world`, confirmed graph) backs the loader.
-    // A storage-read failure degrades to activation-only (no hop pass),
-    // consistent with `assemble_moment`'s per-section degradation; a graph
-    // beyond the loader limit is truncated silently (documented at the
-    // loader, V1.149 P1 plan residual for the paginated follow-up).
+    // (`list_confirmed_relationships_paginated`, confirmed graph) backs the
+    // loader. A storage-read failure degrades to activation-only (no hop
+    // pass), consistent with `assemble_moment`'s per-section degradation.
+    // The default call returns the first page of up to
+    // `HOP_EDGE_LIST_LIMIT` (10_000) newest edges; a caller that needs the
+    // full graph walks it with `list_hop_edges_for_world_paginated` (V1.158
+    // P2 T3, R-V1149P1-001).
     let wid = world_id.unwrap_or("wld_default");
     let hop_edges = if activation_off {
         None

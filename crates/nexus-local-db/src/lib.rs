@@ -113,8 +113,9 @@ pub use knowledge_store::SqliteKnowledgeStore;
 // Re-export kb_relationships types (V1.74 A2)
 pub use kb_relationships::{
     delete_relationship_in_tx, generate_relationship_id, get_relationship,
-    insert_relationship_in_tx, list_relationships_for_world, update_relationship_in_tx,
-    InsertRelationshipParams, KbRelationshipRow, UpdateRelationshipParams,
+    insert_relationship_in_tx, list_confirmed_relationships_paginated,
+    list_relationships_for_world, update_relationship_in_tx, InsertRelationshipParams,
+    KbRelationshipRow, RelationshipCursor, UpdateRelationshipParams,
 };
 
 // Re-export reference_source types

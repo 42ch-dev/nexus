@@ -481,6 +481,75 @@ pub async fn list_relationships_for_world(
     Ok(rows)
 }
 
+/// Keyset cursor for paginated reads of a world's confirmed relation graph.
+///
+/// Encodes the `(updated_at, relationship_id)` of the **last** row of the
+/// previous page; the next page resumes strictly after it. `updated_at` is
+/// the stored RFC3339 text (BINARY collation — lexicographic order matches
+/// recency for the fixed format the daemon writes), and `relationship_id`
+/// (the TEXT PRIMARY KEY) is the tiebreaker that makes the ordering total.
+///
+/// The `(world_id, needs_review)` graph index covers the page filter, so
+/// keyset pagination needs no new index or migration (architect, V1.158 P2).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RelationshipCursor {
+    pub updated_at: String,
+    pub relationship_id: String,
+}
+
+/// Keyset-paginated read of a world's **confirmed** relation graph
+/// (`needs_review = 0`), ordered by `(updated_at DESC, relationship_id DESC)`.
+///
+/// The only consumer is hop-edge expansion (V1.158 P2 T3,
+/// `NexusAdapter::list_hop_edges_for_world_paginated`), which walks a large
+/// confirmed graph page by page instead of truncating at a hard cap. Callers
+/// pass `cursor = Some(...)` to resume after the previous page's last row;
+/// `None` starts at the newest rows. Pass `limit + 1` to detect overflow the
+/// same way [`list_relationships_for_world`] callers do — a result of
+/// `limit + 1` rows means the graph continues past the page.
+///
+/// # Errors
+///
+/// Returns [`LocalDbError::Sqlx`] on database failure.
+pub async fn list_confirmed_relationships_paginated(
+    pool: &SqlitePool,
+    world_id: &str,
+    limit: i64,
+    cursor: Option<&RelationshipCursor>,
+) -> Result<Vec<KbRelationshipRow>, LocalDbError> {
+    // SAFETY: runtime query — this keyset variant is not yet in the committed
+    // `.sqlx/` offline cache (`cargo sqlx prepare` re-run would promote it to
+    // a compile-time macro; repo convention for new queries, e.g. works.rs).
+    // Static SELECT with bind params only; `KbRelationshipRow: FromRow` maps
+    // the snake_case columns 1:1 (nullable columns are Option fields).
+    let sql = if cursor.is_some() {
+        "SELECT relationship_id, world_id, source_entity_id, target_entity_id,
+                relation_type, custom_label, symmetric, confidence,
+                source_anchor_ids, metadata, created_at, updated_at, revision,
+                needs_review, source, extensions_nexus_json
+         FROM kb_relationships
+         WHERE world_id = ? AND needs_review = 0
+           AND (updated_at < ? OR (updated_at = ? AND relationship_id < ?))
+         ORDER BY updated_at DESC, relationship_id DESC
+         LIMIT ?"
+    } else {
+        "SELECT relationship_id, world_id, source_entity_id, target_entity_id,
+                relation_type, custom_label, symmetric, confidence,
+                source_anchor_ids, metadata, created_at, updated_at, revision,
+                needs_review, source, extensions_nexus_json
+         FROM kb_relationships
+         WHERE world_id = ? AND needs_review = 0
+         ORDER BY updated_at DESC, relationship_id DESC
+         LIMIT ?"
+    };
+    let mut q = sqlx::query_as::<_, KbRelationshipRow>(sql).bind(world_id);
+    if let Some(c) = cursor {
+        q = q.bind(&c.updated_at).bind(&c.updated_at).bind(&c.relationship_id);
+    }
+    let rows = q.bind(limit).fetch_all(pool).await?;
+    Ok(rows)
+}
+
 // ── V1.76 extraction-suggestion support ───────────────────────────────
 
 /// Resolve a non-deleted `kb_key_blocks` id by `canonical_name` for one world.
@@ -1072,6 +1141,84 @@ mod tests {
             rows.len(),
             2,
             "SQL LIMIT pushdown caps the materialized row count"
+        );
+    }
+
+    // ── V1.158 P2 T3: keyset pagination (hop-edge walk, R-V1149P1-001) ──
+
+    #[tokio::test]
+    async fn list_confirmed_relationships_paginated_resumes_after_cursor() {
+        let (pool, _dir) = fresh_pool().await;
+        let (world_id, source_id, target_id) = seed_world_and_entities(&pool).await;
+
+        // Seed 5 confirmed rows with strictly increasing RFC3339 `updated_at`
+        // (lexicographic order == chronological order for the fixed format).
+        let mut tx = pool.begin().await.unwrap();
+        for i in 0..5 {
+            let ts = format!("2026-08-{:02}T00:00:00+00:00", i + 1);
+            insert_relationship_in_tx(
+                &mut tx,
+                &InsertRelationshipParams {
+                    relationship_id: format!("rel_pg{i}"),
+                    world_id: world_id.clone(),
+                    source_entity_id: source_id.clone(),
+                    target_entity_id: target_id.clone(),
+                    relation_type: "allied_with".to_string(),
+                    custom_label: None,
+                    symmetric: false,
+                    confidence: None,
+                    source_anchor_ids: vec![],
+                    metadata: None,
+                    created_at: ts.clone(),
+                    updated_at: ts,
+                    needs_review: false,
+                    source: SOURCE_MANUAL.to_string(),
+                    extensions_nexus_json: None,
+                },
+            )
+            .await
+            .unwrap();
+        }
+        tx.commit().await.unwrap();
+
+        // Page 1 (page size 2 + overflow probe): the caller passes
+        // `limit + 1` per the `list_relationships_for_world` convention; a
+        // result of `limit + 1` rows means the graph continues past the page.
+        let rows = list_confirmed_relationships_paginated(&pool, &world_id, 3, None)
+            .await
+            .unwrap();
+        assert_eq!(rows.len(), 3, "overflow probe returns page + 1 rows");
+        assert_eq!(rows[0].relationship_id, "rel_pg4");
+        assert_eq!(rows[1].relationship_id, "rel_pg3");
+        assert_eq!(rows[2].relationship_id, "rel_pg2", "probe row present");
+
+        // Resume after rel_pg3's keyset → the next two rows (plus the next
+        // probe), strictly after the cursor (no overlap, no gap).
+        let cursor = RelationshipCursor {
+            updated_at: rows[1].updated_at.clone(),
+            relationship_id: rows[1].relationship_id.clone(),
+        };
+        let rows2 = list_confirmed_relationships_paginated(&pool, &world_id, 3, Some(&cursor))
+            .await
+            .unwrap();
+        assert_eq!(
+            rows2.iter().map(|r| r.relationship_id.as_str()).collect::<Vec<_>>(),
+            vec!["rel_pg2", "rel_pg1", "rel_pg0"],
+            "keyset resumes strictly after the cursor row"
+        );
+
+        // One row remains; the final page returns it without a probe row.
+        let cursor2 = RelationshipCursor {
+            updated_at: rows2[1].updated_at.clone(),
+            relationship_id: rows2[1].relationship_id.clone(),
+        };
+        let rows3 = list_confirmed_relationships_paginated(&pool, &world_id, 3, Some(&cursor2))
+            .await
+            .unwrap();
+        assert_eq!(
+            rows3.iter().map(|r| r.relationship_id.as_str()).collect::<Vec<_>>(),
+            vec!["rel_pg0"],
+            "final page drains the remainder"
         );
     }
 

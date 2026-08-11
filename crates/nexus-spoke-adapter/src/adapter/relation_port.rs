@@ -65,17 +65,22 @@
 //! `world_conflict: true` details marker so hosts surface the fixed
 //! `world_conflict` wire code (spec §3.2).
 //!
-//! # `RelationPort` read gap + hop-edge loader (V1.149 P1, spec §5; iteration
-//! spec: `.mstar/iterations/v1.149/specs/fl-l-w4-activation.md` §5)
+//! # `RelationPort` read gap + hop-edge loader (V1.149 P1, spec §5;
+//! pagination V1.158 P2 T3, R-V1149P1-001)
 //!
 //! spoke 0.8.2 `RelationPort` is **get/put only** — there is no
 //! list-by-entity on the trait. Relation-hop expansion (lore activation,
 //! `adapter::activation`) therefore cannot read the graph through the port:
 //! [`NexusAdapter::list_hop_edges_for_world`] below is an **inherent** adapter
 //! helper that reads the storage list primitive
-//! `list_relationships_for_world` (confirmed graph only) and maps rows to
-//! engine-local [`HopEdge`]s (`super::activation::HopEdge` — not a spoke wire
-//! type). No hop/matcher logic lives in `spoke-operations`.
+//! [`list_confirmed_relationships_paginated`] (confirmed graph only) and maps
+//! rows to engine-local [`HopEdge`]s (`super::activation::HopEdge` — not a
+//! spoke wire type). The paginated variant
+//! [`NexusAdapter::list_hop_edges_for_world_paginated`] walks graphs beyond
+//! [`HOP_EDGE_LIST_LIMIT`] with a keyset cursor on `(updated_at,
+//! relationship_id)`; the plain method keeps the pre-pagination first-page
+//! (truncate-at-10_000) behavior for existing callers. No hop/matcher logic
+//! lives in `spoke-operations`.
 
 use super::activation::HopEdge;
 use super::NexusAdapter;
@@ -84,8 +89,8 @@ use crate::{
 };
 use async_trait::async_trait;
 use nexus_local_db::kb_relationships::{
-    get_relationship, list_relationships_for_world, update_relationship_in_tx, KbRelationshipRow,
-    UpdateRelationshipParams, SOURCE_MANUAL,
+    get_relationship, list_confirmed_relationships_paginated, update_relationship_in_tx,
+    KbRelationshipRow, RelationshipCursor, UpdateRelationshipParams, SOURCE_MANUAL,
 };
 use nexus_local_db::LocalDbError;
 use serde_json::{json, Map, Value};
@@ -128,16 +133,32 @@ impl RelationPort for NexusAdapter<'_> {
     }
 }
 
-/// Upper bound for one hop-edge load — confirmed relation rows per world
-/// (V1.149 P1, spec §5).
+/// Default page size for one hop-edge load — confirmed relation rows per
+/// world (V1.149 P1, spec §5; V1.158 P2 T3 R-V1149P1-001).
 ///
 /// Generous but finite: a world whose confirmed graph exceeds this limit is
-/// **truncated** to the `HOP_EDGE_LIST_LIMIT` newest rows (the `cap + 1`
-/// probe row is dropped). Truncation is silent — no panic, no error — the
-/// engine simply sees fewer edges. Worlds that routinely exceed the limit
-/// are tracked in the V1.149 P1 plan residual (paginated / neighbor-indexed
-/// read is the follow-up).
+/// **paginated** — the default (omitted-params) call returns the first
+/// [`HOP_EDGE_LIST_LIMIT`] newest rows, and
+/// [`NexusAdapter::list_hop_edges_for_world_paginated`] walks the rest with
+/// a keyset cursor on `(updated_at, relationship_id)`. Callers that only use
+/// the default first page keep the pre-pagination truncate-at-10_000
+/// behavior (the `cap + 1` probe row is dropped).
 pub const HOP_EDGE_LIST_LIMIT: i64 = 10_000;
+
+/// One page of hop edges plus the keyset cursor for the next page
+/// (V1.158 P2 T3, R-V1149P1-001).
+///
+/// [`HopEdgePage::next_cursor`] is `Some` when the world's confirmed graph
+/// continues past this page (the page was full and an overflow probe row
+/// existed); pass it as the `cursor` argument to
+/// [`NexusAdapter::list_hop_edges_for_world_paginated`] to fetch the next
+/// page. The cursor is opaque to callers — constructed only from the last
+/// row of the page that produced it.
+#[derive(Debug, Clone)]
+pub struct HopEdgePage {
+    pub edges: Vec<HopEdge>,
+    pub next_cursor: Option<RelationshipCursor>,
+}
 
 impl NexusAdapter<'_> {
     /// Load the confirmed relation edges of a world for relation-hop
@@ -148,18 +169,19 @@ impl NexusAdapter<'_> {
     /// spoke 0.8.2 [`RelationPort`] is get/put only — no list-by-entity — so
     /// hop expansion cannot use the port. This **inherent** helper (not a
     /// trait method) reads the storage list primitive
-    /// [`list_relationships_for_world`] directly with
-    /// `include_suggested = false` (the confirmed graph; extraction
-    /// suggestions stay out of lore hops) and maps rows to engine-local
-    /// [`HopEdge`]s (`adapter::activation::HopEdge` — not a spoke wire type).
-    /// Matching/hop logic itself lives in the pure activation engine, never
-    /// in `spoke-operations`.
+    /// [`list_confirmed_relationships_paginated`] directly (the confirmed
+    /// graph; extraction suggestions stay out of lore hops) and maps rows to
+    /// engine-local [`HopEdge`]s (`adapter::activation::HopEdge` — not a
+    /// spoke wire type). Matching/hop logic itself lives in the pure
+    /// activation engine, never in `spoke-operations`.
     ///
-    /// # Truncation
+    /// # Pagination (V1.158 P2 T3, R-V1149P1-001)
     ///
-    /// At most [`HOP_EDGE_LIST_LIMIT`] edges are returned; a larger graph is
-    /// silently truncated to the newest rows (no panic, no error — see the
-    /// constant docs and the V1.149 P1 plan residual).
+    /// This convenience method returns the **first page** only — the
+    /// [`HOP_EDGE_LIST_LIMIT`] newest edges (the pre-pagination truncate
+    /// behavior, preserved for existing callers). Walk a larger graph with
+    /// [`Self::list_hop_edges_for_world_paginated`], which returns a
+    /// [`HopEdgePage`] carrying the keyset cursor for the next page.
     ///
     /// # Errors
     ///
@@ -168,18 +190,66 @@ impl NexusAdapter<'_> {
         &self,
         world_id: &str,
     ) -> Result<Vec<HopEdge>, LocalDbError> {
+        let page = self
+            .list_hop_edges_for_world_paginated(world_id, HOP_EDGE_LIST_LIMIT, None)
+            .await?;
+        Ok(page.edges)
+    }
+
+    /// Load one page of a world's confirmed hop edges, resuming after
+    /// `cursor` (V1.158 P2 T3, R-V1149P1-001).
+    ///
+    /// Keyset pagination on `(updated_at, relationship_id)`: rows are ordered
+    /// newest-first by `updated_at` (RFC3339 text, BINARY collation) with
+    /// `relationship_id` as the deterministic tiebreaker; the returned
+    /// [`HopEdgePage::next_cursor`] encodes the last row of this page and is
+    /// passed back as `cursor` to fetch the next page. `next_cursor` is
+    /// `None` once the end of the graph is reached.
+    ///
+    /// `limit` is the page size (clamped to at least 1); pass
+    /// [`HOP_EDGE_LIST_LIMIT`] (the default) for backward-compatible pages.
+    /// A `limit + 1` probe detects overflow, so a page that exactly fills
+    /// `limit` rows does **not** yield a cursor unless more rows exist.
+    ///
+    /// This is an internal adapter API — hop edges feed the activation engine
+    /// only; there is **no** daemon HTTP list surface for them (architect,
+    /// V1.158 P2). No spoke `RelationPort` change.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LocalDbError`] on database failure.
+    pub async fn list_hop_edges_for_world_paginated(
+        &self,
+        world_id: &str,
+        limit: i64,
+        cursor: Option<&RelationshipCursor>,
+    ) -> Result<HopEdgePage, LocalDbError> {
         let pool = self.pool.clone();
         let world_id = world_id.to_string();
-        // `cap + 1` probe per the `list_relationships_for_world` caller
-        // convention: a result of `cap + 1` rows signals overflow; the
-        // probe row is dropped below (truncate, no panic). The const
-        // (10_000) always fits `usize`; the fallback is defensive only.
-        let limit = usize::try_from(HOP_EDGE_LIST_LIMIT).unwrap_or(usize::MAX);
+        // Degenerate page sizes make no sense for keyset walking — clamp so
+        // the probe/cursor math below stays sound (a 0-row page could never
+        // advance, and `take - 1` must not underflow).
+        let limit = limit.max(1);
+        // `limit + 1` probe per the `list_relationships_for_world` caller
+        // convention: a page of `limit + 1` rows signals overflow and yields
+        // a `next_cursor`; the probe row is dropped below. `saturating_add`
+        // guards the `i64::MAX` degenerate case (defensive only — no SQLite
+        // table will ever hold that many rows).
+        let probe_limit = limit.saturating_add(1);
+        let take = usize::try_from(limit).unwrap_or(usize::MAX);
         let rows =
-            list_relationships_for_world(&pool, &world_id, false, HOP_EDGE_LIST_LIMIT + 1).await?;
+            list_confirmed_relationships_paginated(&pool, &world_id, probe_limit, cursor).await?;
+        let has_more = rows.len() > take;
+        let next_cursor = has_more.then(|| {
+            let last = &rows[take - 1];
+            RelationshipCursor {
+                updated_at: last.updated_at.clone(),
+                relationship_id: last.relationship_id.clone(),
+            }
+        });
         let edges = rows
             .into_iter()
-            .take(limit)
+            .take(take)
             .map(|row| HopEdge {
                 relation_id: row.relationship_id,
                 from_id: row.source_entity_id,
@@ -187,7 +257,7 @@ impl NexusAdapter<'_> {
                 relation_type: row.relation_type,
             })
             .collect();
-        Ok(edges)
+        Ok(HopEdgePage { edges, next_cursor })
     }
 }
 
@@ -703,7 +773,10 @@ fn serialize_extensions_nexus_json(relation: &Relation) -> Option<String> {
 mod tests {
     use super::*;
     use crate::RelationPort;
-    use nexus_local_db::kb_relationships::{get_relationship, list_relationships_for_world};
+    use nexus_local_db::kb_relationships::{
+        get_relationship, insert_relationship_in_tx, list_relationships_for_world,
+        InsertRelationshipParams,
+    };
     use nexus_local_db::{open_pool, run_migrations};
     use serde_json::json;
 
@@ -1649,6 +1722,205 @@ mod tests {
         assert!(
             !by_id.contains_key("rel_sugg"),
             "extraction suggestion must not appear in hop edges"
+        );
+    }
+
+    // ── V1.158 P2 T3: hop-edge pagination (R-V1149P1-001) ──────────────
+
+    /// Seed a confirmed relation row with an explicit `updated_at` (RFC3339
+    /// text) so pagination ordering assertions are deterministic.
+    async fn seed_relation_row(pool: &sqlx::SqlitePool, id: &str, updated_at: &str) {
+        let mut tx = pool.begin().await.unwrap();
+        insert_relationship_in_tx(
+            &mut tx,
+            &InsertRelationshipParams {
+                relationship_id: id.to_string(),
+                world_id: "wld_rel".to_string(),
+                source_entity_id: "kb_src".to_string(),
+                target_entity_id: "kb_dst".to_string(),
+                relation_type: "allied_with".to_string(),
+                custom_label: None,
+                symmetric: false,
+                confidence: None,
+                source_anchor_ids: vec![],
+                metadata: None,
+                created_at: updated_at.to_string(),
+                updated_at: updated_at.to_string(),
+                needs_review: false,
+                source: SOURCE_MANUAL.to_string(),
+                extensions_nexus_json: None,
+            },
+        )
+        .await
+        .expect("seed confirmed relation row");
+        tx.commit().await.unwrap();
+    }
+
+    /// Walk a graph page by page with `list_hop_edges_for_world_paginated`,
+    /// returning `(pages, ids)` in traversal order.
+    async fn walk_hop_pages(
+        adapter: &NexusAdapter<'_>,
+        page_size: i64,
+    ) -> (usize, Vec<String>) {
+        let mut seen = Vec::new();
+        let mut cursor: Option<RelationshipCursor> = None;
+        let mut pages = 0;
+        loop {
+            let page = adapter
+                .list_hop_edges_for_world_paginated("wld_rel", page_size, cursor.as_ref())
+                .await
+                .expect("paginated hop-edge load succeeds");
+            assert!(
+                !page.edges.is_empty(),
+                "non-terminal page must not be empty (cursor walk must advance)"
+            );
+            seen.extend(page.edges.iter().map(|e| e.relation_id.clone()));
+            pages += 1;
+            match page.next_cursor {
+                Some(c) => cursor = Some(c),
+                None => break,
+            }
+        }
+        (pages, seen)
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn hop_edge_pagination_traverses_multi_page_graph() {
+        let (pool, _dir) = fresh_pool().await;
+        seed_world_and_endpoints(&pool).await;
+        // Oldest → newest: t0 < t1 < ... < t4; page ordering is newest-first.
+        for (i, t) in [
+            "2026-08-01T00:00:00+00:00",
+            "2026-08-02T00:00:00+00:00",
+            "2026-08-03T00:00:00+00:00",
+            "2026-08-04T00:00:00+00:00",
+            "2026-08-05T00:00:00+00:00",
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            seed_relation_row(&pool, &format!("rel_pg{i}"), t).await;
+        }
+
+        let adapter = NexusAdapter::new(pool);
+        let (pages, seen) = walk_hop_pages(&adapter, 2).await;
+        assert_eq!(pages, 3, "5 edges at page size 2 → 3 pages");
+        assert_eq!(
+            seen,
+            vec!["rel_pg4", "rel_pg3", "rel_pg2", "rel_pg1", "rel_pg0"],
+            "newest-first traversal without duplicates or gaps"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn hop_edge_pagination_edge_cases() {
+        let (pool, _dir) = fresh_pool().await;
+        seed_world_and_endpoints(&pool).await;
+        let adapter = NexusAdapter::new(pool.clone());
+
+        // Empty graph: empty first page, no next cursor.
+        let page = adapter
+            .list_hop_edges_for_world_paginated("wld_rel", 2, None)
+            .await
+            .expect("empty-graph page succeeds");
+        assert!(page.edges.is_empty(), "empty graph → empty page");
+        assert!(page.next_cursor.is_none(), "empty graph → no next cursor");
+
+        // Exactly at limit: 2 rows, page size 2 → full page, NO next cursor
+        // (the overflow probe sees exactly `limit` rows, so the graph is
+        // exhausted — no phantom trailing page).
+        seed_relation_row(&pool, "rel_exact1", "2026-08-01T00:00:00+00:00").await;
+        seed_relation_row(&pool, "rel_exact2", "2026-08-02T00:00:00+00:00").await;
+        let page = adapter
+            .list_hop_edges_for_world_paginated("wld_rel", 2, None)
+            .await
+            .expect("exactly-at-limit page succeeds");
+        assert_eq!(page.edges.len(), 2, "page exactly fills the limit");
+        assert!(page.next_cursor.is_none(), "exactly at limit → graph exhausted");
+
+        // Overflow probe: add a third row → the full first page now yields a
+        // cursor; the second page drains the remainder and terminates.
+        seed_relation_row(&pool, "rel_extra", "2026-08-03T00:00:00+00:00").await;
+        let page1 = adapter
+            .list_hop_edges_for_world_paginated("wld_rel", 2, None)
+            .await
+            .unwrap();
+        assert_eq!(page1.edges.len(), 2, "full first page");
+        let cursor = page1.next_cursor.expect("overflow → next cursor present");
+        let page2 = adapter
+            .list_hop_edges_for_world_paginated("wld_rel", 2, Some(&cursor))
+            .await
+            .unwrap();
+        assert_eq!(page2.edges.len(), 1, "second page drains the remainder");
+        assert!(page2.next_cursor.is_none(), "second page terminates");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn hop_edge_pagination_tiebreaks_on_relationship_id() {
+        let (pool, _dir) = fresh_pool().await;
+        seed_world_and_endpoints(&pool).await;
+        // Identical `updated_at` — ordering must fall back to the
+        // `relationship_id` tiebreaker (the total order that makes the
+        // keyset walk deterministic and gap-free).
+        seed_relation_row(&pool, "rel_tie_a", "2026-08-01T00:00:00+00:00").await;
+        seed_relation_row(&pool, "rel_tie_b", "2026-08-01T00:00:00+00:00").await;
+
+        let adapter = NexusAdapter::new(pool);
+        let page1 = adapter
+            .list_hop_edges_for_world_paginated("wld_rel", 1, None)
+            .await
+            .expect("page 1 succeeds");
+        assert_eq!(page1.edges.len(), 1);
+        assert_eq!(
+            page1.edges[0].relation_id, "rel_tie_b",
+            "DESC tiebreak → higher relationship_id first"
+        );
+        let cursor = page1.next_cursor.expect("same-timestamp pair must still paginate");
+
+        let page2 = adapter
+            .list_hop_edges_for_world_paginated("wld_rel", 1, Some(&cursor))
+            .await
+            .expect("page 2 succeeds");
+        assert_eq!(page2.edges.len(), 1);
+        assert_eq!(page2.edges[0].relation_id, "rel_tie_a");
+        assert!(page2.next_cursor.is_none(), "tiebreak pair fully drained");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn hop_edge_pagination_default_matches_first_page() {
+        let (pool, _dir) = fresh_pool().await;
+        seed_world_and_endpoints(&pool).await;
+        for (i, t) in [
+            "2026-08-01T00:00:00+00:00",
+            "2026-08-02T00:00:00+00:00",
+            "2026-08-03T00:00:00+00:00",
+            "2026-08-04T00:00:00+00:00",
+            "2026-08-05T00:00:00+00:00",
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            seed_relation_row(&pool, &format!("rel_def{i}"), t).await;
+        }
+
+        let adapter = NexusAdapter::new(pool);
+        let all = adapter
+            .list_hop_edges_for_world("wld_rel")
+            .await
+            .expect("default hop-edge load succeeds");
+        let page = adapter
+            .list_hop_edges_for_world_paginated("wld_rel", HOP_EDGE_LIST_LIMIT, None)
+            .await
+            .expect("default-size page succeeds");
+        let ids_default: Vec<&str> = all.iter().map(|e| e.relation_id.as_str()).collect();
+        let ids_page: Vec<&str> = page.edges.iter().map(|e| e.relation_id.as_str()).collect();
+        assert_eq!(
+            ids_default, ids_page,
+            "omitted-params call ≡ first page at the default page size"
+        );
+        assert!(
+            page.next_cursor.is_none(),
+            "graph under the default limit has no next cursor"
         );
     }
 }
