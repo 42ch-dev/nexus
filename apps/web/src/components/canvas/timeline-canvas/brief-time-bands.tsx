@@ -101,6 +101,13 @@ export function BriefTimeBands({ tree, onSelectEra }: BriefTimeBandsProps) {
     () => new Set(),
   );
 
+  // Empty forest → no bands (hooks above already ran). The no-era-data copy
+  // is owned by the V1.123 Brief empty-state panel in `timeline-canvas.tsx`
+  // (`isBriefEmpty` gates it upstream, so this branch is defense-in-depth
+  // for direct callers): the renderer must not fabricate a band surface for
+  // a zero-node tree.
+  if (tree.length === 0) return null;
+
   const toggle = (eraId: string): void => {
     setCollapsedIds((prev) => {
       const next = new Set(prev);

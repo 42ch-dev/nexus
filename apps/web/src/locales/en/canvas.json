@@ -662,7 +662,7 @@
     "brief": {
       "emptyState": {
         "title": "No era markers yet",
-        "message": "Brief shows the world's shape across ages. Switch to Narrative to browse events, or add era markers when the Brief carrier is ready.",
+        "message": "Brief shows the world's shape across ages. Switch to Narrative to browse events, or add era markers with the New era button.",
         "cta": "Switch to Narrative"
       }
     },

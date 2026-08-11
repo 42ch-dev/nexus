@@ -754,12 +754,16 @@ export function TimelineCanvas({ worldId, sceneBeatFixture }: TimelineCanvasProp
         activeLayer={activeLayer}
         onLayerChange={handleLayerChange}
         showLayerSwitcher={!isEmpty}
-        // V1.159 P1 T3 — "新建 era" entry in the Brief-layer chrome
+        // V1.159 P1 T3 + T4 — "新建 era" entry in the Brief-layer chrome
         // (spec §3.3.3 "Create entry", sibling to the layer switcher tabs).
-        // Hidden on the empty-state branch (that branch owns its own
-        // surface + CTA) and on non-Brief layers (the create entry is
-        // Brief-specific — Work-Brief stays read-only per spec §3.3.3).
-        showCreateEra={activeLayer === 'brief' && !isEmpty}
+        // Gated on the active layer only (plan Task 3 DoD): visible whenever
+        // Brief is active — INCLUDING the Brief empty state, where it is the
+        // "create your first era" path (V1.159 T4 DoD) — and hidden on
+        // Narrative/Moment (the create entry is Brief-specific; Work-Brief
+        // stays read-only per spec §3.3.3). The global empty-state branch
+        // never shows it in practice: zero-era graphs default to Narrative,
+        // so `activeLayer === 'brief'` is false there.
+        showCreateEra={activeLayer === 'brief'}
         onCreateEra={() => setEraCreateOpen(true)}
         // V1.159 P1 T3 (T2-M2 carry-forward fix) — the alt-view toggle is
         // not available on the Brief layer when the time-band panel is
