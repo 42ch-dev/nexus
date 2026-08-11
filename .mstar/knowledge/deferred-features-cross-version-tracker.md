@@ -1,6 +1,6 @@
 # Deferred Features — Cross-Version Tracker v2
 
-**Quick status**: **V1.160 in progress (2026-08-11)** — ERA-TAXONOMY completion (entity creation backend + era create UI + Work Brief time-band inheritance; R-V1159P1-001 + R-V1159P1-002 closing). Recent shipped: V1.159 (rich era taxonomy) · V1.158 (stabilization sweep) · V1.157 (React 19 + RR8 + accent-chip WCAG AA) · V1.156 (Timeline 3×2 matrix + Harness rename) · V1.155 (FL-R EPIC complete). Full shipped history → [shipped archive](shipped-features-tracker.md).
+**Quick status**: **V1.160 shipped (2026-08-12)** — ERA-TAXONOMY completion (entity creation backend + era create UI + Work Brief time-band inheritance; R-V1159P1-001 + R-V1159P1-002 closed). Recent shipped: V1.159 (rich era taxonomy) · V1.158 (stabilization sweep) · V1.157 (React 19 + RR8 + accent-chip WCAG AA) · V1.156 (Timeline 3×2 matrix + Harness rename) · V1.155 (FL-R EPIC complete). Full shipped history → [shipped archive](shipped-features-tracker.md).
 
 **Purpose**: Single source of truth for **open** and **backlog** features deferred from delivery compasses. Closed/shipped history lives in shipped archive.
 **Scope**: `nexus` OSS repository only.
@@ -208,9 +208,9 @@ Residual findings are tracked in [`status.json`](../status.json) → `residual_f
 
 ## 5) Quick index
 
-**Active iteration**: [V1.160](../iterations/v1.160/delivery-compass.md) (in progress — ERA-TAXONOMY completion: entity creation backend + era create UI + Work Brief time-band inheritance; 2 plans, scale M)
+**Active iteration**: None
 
-**Latest shipped**: [V1.159](../iterations/v1.159/delivery-compass.md) (rich era taxonomy — typed nested time-bands; 2 plans). Prior: [V1.158](../iterations/v1.158/delivery-compass.md) (stabilization sweep). Prior: [V1.157](../iterations/v1.157/delivery-compass.md) (React 19 + RR8 + accent-chip WCAG AA). Prior: [V1.156](../iterations/v1.156/delivery-compass.md) (Timeline 3×2 matrix + Harness rename). Prior: [V1.155](../iterations/v1.155/delivery-compass.md) (FL-R EPIC complete).
+**Latest shipped**: [V1.160](../iterations/v1.160/delivery-compass.md) (ERA-TAXONOMY completion — entity creation backend + era create UI + Work Brief time-band inheritance; 2 plans, scale M). Prior: [V1.159](../iterations/v1.159/delivery-compass.md) (rich era taxonomy — typed nested time-bands; 2 plans). Prior: [V1.158](../iterations/v1.158/delivery-compass.md) (stabilization sweep). Prior: [V1.157](../iterations/v1.157/delivery-compass.md) (React 19 + RR8 + accent-chip WCAG AA). Prior: [V1.156](../iterations/v1.156/delivery-compass.md) (Timeline 3×2 matrix + Harness rename). Prior: [V1.155](../iterations/v1.155/delivery-compass.md) (FL-R EPIC complete).
 
 **Full iteration index**: [iterations/README.md](../iterations/README.md)
 
