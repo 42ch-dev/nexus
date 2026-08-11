@@ -28,6 +28,12 @@ export interface UseCanvasSurfaceResult<TNodeData extends Record<string, unknown
   showAlt: boolean;
   setShowAlt: (value: boolean) => void;
   altView: ReactNode;
+  /**
+   * V1.159 P1 T2 — Brief-layer time-band panel (adapter slot). Rendered by
+   * the surface when the Brief layer is active; `null` when the adapter
+   * does not implement `renderBriefTimeBands` (non-Timeline surfaces).
+   */
+  briefTimeBands: ReactNode;
   inspector: ReactNode;
   selectedNode: Node<TNodeData> | null;
   selectedNodeId: string | null;
@@ -118,6 +124,18 @@ export function useCanvasSurface<TGraph, TNodeData extends Record<string, unknow
   }, [graph, adapter]);
 
   const altView = useMemo(() => adapter.renderAltView?.() ?? null, [adapter]);
+  // V1.159 P1 T2 — Brief time-band panel. The Timeline adapter exposes the
+  // slot on its local intersection type (not the shared `CanvasSurfaceAdapter`
+  // base — `timeline-canvas-adapter.tsx`); non-Timeline adapters never define
+  // it, so the optional duck-typed read yields null for them. Re-computed on
+  // graph/adapter change so a refetch reflows the bands.
+  const briefTimeBands = useMemo(() => {
+    if (!graph) return null;
+    const renderBriefTimeBands = (adapter as {
+      renderBriefTimeBands?: (g: TGraph) => ReactNode;
+    }).renderBriefTimeBands;
+    return renderBriefTimeBands ? renderBriefTimeBands(graph) : null;
+  }, [graph, adapter]);
   const inspector = useMemo(() => {
     if (!selectedNode) return null;
     return adapter.renderInspector?.(selectedNode) ?? null;
@@ -149,6 +167,7 @@ export function useCanvasSurface<TGraph, TNodeData extends Record<string, unknow
     showAlt,
     setShowAlt,
     altView,
+    briefTimeBands,
     inspector,
     selectedNode,
     selectedNodeId,

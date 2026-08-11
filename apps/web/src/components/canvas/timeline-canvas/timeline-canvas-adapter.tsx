@@ -67,7 +67,7 @@
  * empty-state in production; DR-26 tracks the future wire extension). No
  * `schemas/` / codegen / daemon Rust / `@42ch/nexus-contracts` bump.
  */
-import type { MutableRefObject } from 'react';
+import type { MutableRefObject, ReactNode } from 'react';
 import type { Edge, Node } from '@xyflow/react';
 
 import type { CanvasSurfaceAdapter } from '../canvas-surface-adapter';
@@ -94,6 +94,8 @@ import { TimelineAltView } from './timeline-alt-view';
 import type { BriefSpineConfig, DirectedAxisSpineNodeData, MomentSpineConfig, NarrativeSpineConfig } from './directed-axis-spine';
 import { SPINE_Y_OFFSET } from './directed-axis-spine';
 import { timelineNodeTypes } from './timeline-node-types';
+import { buildEraTree } from './brief-era-tree';
+import { BriefTimeBands } from './brief-time-bands';
 
 // ─── Public types (architect-locked §3.1 + V1.123 §2/§8) ────────────────────
 
@@ -420,7 +422,19 @@ export type TimelineCanvasAdapter = CanvasSurfaceAdapter<
   TimelineGraph,
   TimelineNodeData,
   TimelineEdgeData
->;
+> & {
+  /**
+   * V1.159 P1 T2 — Brief time-band rendering slot. Builds the era forest
+   * from the graph (`buildEraTree`, Task 1) and renders the vertical
+   * time-band model (spec §3.3.3 V1.159 amendment) that supersedes the
+   * V1.123 horizontal era sweep on the Brief layer. The returned panel is
+   * read-only; band selection routes through the ctxRef `onSelectNode`
+   * hand-off so the era inspector opens exactly like a React Flow node
+   * click. Absent on non-Timeline adapters (`useCanvasSurface` surfaces it
+   * as `null`); frontend-local — no wire contract change.
+   */
+  renderBriefTimeBands?(graph: TimelineGraph): ReactNode;
+};
 
 // ─── Projection constants ───────────────────────────────────────────────────
 
@@ -679,6 +693,19 @@ export function projectTimelineGraph(
  * ≡ World-Brief feel — same carrier `block_type=era`, same `TimelineNodeData`
  * with `layoutHint: 'brief'`, same spine). The era-marker extraction
  * (`extractEraAttributes`) is reused transitively.
+ *
+ * DUAL-PROJECTION BRIDGE (QC1-I-001) — do not delete this path while
+ * Brief-band mode is live: the World Timeline Brief layer renders the
+ * vertical time-band model (`renderBriefTimeBands` → `buildEraTree` →
+ * `<BriefTimeBands />`), which SUPERSEDES this horizontal sweep visually.
+ * However, band clicks still route through `onSelectNode(nodeIdOf(eraId))`
+ * → React Flow node selection → the era inspector. This RF projection is
+ * therefore still REQUIRED as the selection/inspector carrier even though
+ * it is hidden behind the band UI — the two era models (band tree vs RF
+ * sweep) stay aligned by construction on the same graph read. When a
+ * tree-native selection carrier exists (e.g. selection driven directly from
+ * `EraTreeNode` + a thin selection map), drop this projection for Brief
+ * bands and keep it only for Work-Brief / non-band Brief fallback.
  *
  * `simplify:` LR step metrics mirror the V1.122 Narrative lane scheme so
  * both layers share a familiar reading direction. Replace with an era-aware
@@ -1693,6 +1720,27 @@ export function createTimelineCanvasAdapter(
       // count when events are present.
       return summarizeTimelineGraph(graph, timelineEvents);
      },
+
+    // V1.159 P1 T2 — Brief layer vertical time-band model (spec §3.3.3 V1.159
+    // amendment). Builds the era forest from the SAME graph read the Brief
+    // projection consumes (`entities[block_type=era]` + `relationships`
+    // parent_era edges — Task 1) and renders `<BriefTimeBands />`, which
+    // supersedes the V1.123 flat era sweep on the Brief layer. Selection
+    // routes through the existing ctxRef `onSelectNode` hand-off (T5), so a
+    // band click selects the matching React Flow node and opens the era
+    // inspector — selection-only, no writes (architect-locked §4.2).
+    renderBriefTimeBands(graph) {
+      const tree = buildEraTree(
+        graph.entities ?? [],
+        graph.relationships ?? [],
+      );
+      return (
+        <BriefTimeBands
+          tree={tree}
+          onSelectEra={(eraId) => ctxRef.current.onSelectNode?.(nodeIdOf(eraId))}
+        />
+      );
+    },
   };
 }
 
