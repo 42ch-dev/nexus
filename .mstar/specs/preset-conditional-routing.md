@@ -52,11 +52,7 @@ Pre-V1.42 state:
 
 When Status advances to **Draft** or **Normative**, orchestration-engine §7.5 defers to this document for the full conditional `next` schema.
 
-### 3.1 N-way labeled routing (Draft V1.52 overlay — shipped T-B P0)
-
-**Status**: Draft (V1.52 T-B P0 shipped — implemented in plan `2026-06-19-v1.52-n-way-gonogo-routing`)
-**Authoring plan**: `2026-06-19-v1.52-n-way-gonogo-routing`
-**Promotes to Normative**: P-last of V1.52
+### 3.1 N-way labeled routing (V1.52 T-B P0 — Normative)
 
 N-way labeled routing generalizes the binary GO/NOGO routing into multi-label routing for `llm_judge` states. The judge returns a label string (e.g. `"outline"`, `"research"`, `"abandon"`), and the runtime selects the first matching `LabeledNext` edge.
 
@@ -94,11 +90,7 @@ When `next` contains `Labeled` (or `GoNogo` via auto-conversion), the orchestrat
 
 **Substring matching caveat**: matching uses `String::contains()` (substring containment). Authors should choose labels that are unlikely to appear as substrings of unrelated words. The descending-length sort mitigates the most common case (e.g., `"nogo"` checked before `"go"`). A future iteration may add word-boundary or exact matching.
 
-### 3.2 Merge semantics (Draft V1.52 overlay — shipped T-B P1)
-
-**Status**: Draft (V1.52 T-B P1 shipped — implemented in plan `2026-06-19-v1.52-multi-branch-merge-semantics`)
-**Authoring plan**: `2026-06-19-v1.52-multi-branch-merge-semantics`
-**Promotes to Normative**: P-last of V1.52
+### 3.2 Merge semantics (V1.52 T-B P1 — Normative)
 
 When multiple `LabeledNext` edges from different `llm_judge` states converge on a single state, the orchestration engine uses merge semantics to decide when to advance to that state.
 
@@ -159,11 +151,7 @@ Violations produce `DiagnosticCategory::MergeIntegrity` errors and block preset 
 - Existing binary `GoNogo` + N-way `Labeled` presets continue to work without modification — the `merge:` field is additive.
 - `GoNogo` edges are also counted as incoming labeled edges for merge node purposes (labels `"go"` and `"nogo"`).
 
-### 3.3 Arbitrary stage-level conditional `next` + expression routing (Draft V1.56 P2 — shipped in plan `2026-06-22-v1.56-df56-independent-slice`)
-
-**Status**: Draft (V1.56 P2 shipped)
-**Authoring plan**: `2026-06-22-v1.56-df56-independent-slice`
-**Promotes to Normative**: P-last of V1.56
+### 3.3 Arbitrary stage-level conditional `next` + expression routing (V1.56 P2 — Normative)
 
 Extends the conditional routing engine from `llm_judge`-only to **arbitrary state kinds**, adds a simple expression grammar for rule-based routing, and defines explicit converge (merge-point) state nodes.
 
@@ -255,11 +243,7 @@ states:
 
 **Converge timeout** (V1.58 P2 — R-V156P2-L003): the current implementation does **not** enforce a timeout on `wait_for_all` converge nodes. A converge state with `strategy: wait_for_all` that never receives all predecessor arrivals will wait indefinitely (returns `NextAction::WaitForInput` on each `run()` call). The engine relies on external signals (Resume, Cancel) to break deadlocks. A configurable `wait_for_all_timeout_seconds` field (default 3600s) with deadline-based enforcement is planned but deferred — **Durable roadmap:** consolidated in the [deferred-features tracker §2.6](../knowledge/deferred-features-cross-version-tracker.md) — DR-06 — adding it requires schema changes to `ConvergeConfig` (out of scope for P2: "schemas/ changes") and runtime behavior changes to the converge gate in `StateCompositeTask::run()`. For local-only single-user daemons (pre-1.0), indefinite wait is acceptabl…
 
-### 3.4 Registry and workspace context fields (Draft V1.56 P3 — shipped in plan `2026-06-22-v1.56-df56-dependent-slice`)
-
-**Status**: Draft (V1.56 P3 shipped)
-**Authoring plan**: `2026-06-22-v1.56-df56-dependent-slice`
-**Promotes to Normative**: P-last of V1.56
+### 3.4 Registry and workspace context fields (V1.56 P3 — Normative)
 
 Extends the expression grammar's context namespace with two new sub-objects — `registry_refresh` and `workspace` — enabling conditional routing decisions driven by capability registry output and workspace session state.
 

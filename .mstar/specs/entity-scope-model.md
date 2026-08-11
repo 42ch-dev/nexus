@@ -52,14 +52,11 @@ Global
 4. `User` and `Pairing` are cloud-domain concepts. Cloud transport MUST use `nexus-cloud-domain` for their invariants.
 5. Local `workspace_slug` is a storage partition under the active Creator. It can bind or stage multiple Worlds, but it is not a canonical entity scope in this hierarchy.
 
-### 1.4 Three-Layer Timeline projection (Draft V1.123 overlay)
+### 1.4 Three-Layer Timeline projection (V1.123 — Normative)
 
-> **Status**: Draft (V1.123 — locked in iteration [`v1.123/specs/three-layer-architecture.md`](../iterations/v1.123/specs/three-layer-architecture.md) by architect seat 2).
-> **Authoring plan**: `2026-07-18-v1.123-three-layer-timeline-spec` (P0).
-> **Promotes to Normative**: **V1.156 P-last** (after P1–P3 ship + dogfood). V1.123 shipped the two-layer composition (World: Brief+Narrative; Work: Narrative+Moment) but the overlay was not promoted at V1.123 P-last (spec-hygiene debt, cf. tracker §2.6 migration note). V1.156 completes the 3×2 matrix (§1.4.4) and is the promotion point for this overlay, amendment included.
-> **V1.156 amendment**: the 3×2 matrix is completed (World×Moment + Work×Brief closed — see §1.4.4). The amendment is frontend-only (`wire_contracts_changed: false`); it adds no scope-ownership, uniqueness, or transition rule. The V1.123 carrier locks (§1.4.1) are unchanged. Product semantics: [`iterations/v1.156/specs/product-locks.md`](../iterations/v1.156/specs/product-locks.md) PD-2 / PD-3.
+> **V1.156 amendment (shipped)**: the 3×2 matrix is completed (World×Moment + Work×Brief closed — see §1.4.4). The amendment is frontend-only (`wire_contracts_changed: false`); it adds no scope-ownership, uniqueness, or transition rule. The V1.123 carrier locks (§1.4.1) are unchanged. Product semantics: [`iterations/v1.156/specs/product-locks.md`](../iterations/v1.156/specs/product-locks.md) PD-2 / PD-3.
 
-This subsection is an **additive Draft overlay** — it does not rewrite §1.1 (canonical scope tree) or §1.2 (scope definitions). It canonizes three Timeline zoom layers — **Brief**, **Narrative**, **Moment** — as a re-projection of the existing `World > Timeline > Event > Moment` scope hierarchy, and locks the World/Work layer composition.
+This subsection is **additive** — it does not rewrite §1.1 (canonical scope tree) or §1.2 (scope definitions). It canonizes three Timeline zoom layers — **Brief**, **Narrative**, **Moment** — as a re-projection of the existing `World > Timeline > Event > Moment` scope hierarchy, and locks the World/Work layer composition.
 
 #### 1.4.1 Layer definitions (LOCKED — product semantics)
 
@@ -90,7 +87,7 @@ The two meanings of "Moment" are disambiguated by context:
 - "Moment Context Assembly" = session-start snapshot (existing).
 - "Moment Timeline layer" or "Work Timeline Moment" = scene/beat projection (V1.123).
 
-#### 1.4.4 World/Work layer composition (LOCKED — V1.156 completes the 3×2 matrix)
+#### 1.4.4 World/Work layer composition (LOCKED — V1.156 completed the 3×2 matrix)
 
 ```
 World Timeline (V1.123 + V1.156):
@@ -137,7 +134,7 @@ The canonical `World > Timeline > Event > Moment` scope tree (§1.1) is **unchan
 - Narrative → Event-level projection (already in §1.1 as `Timeline > Event`).
 - Moment → Work-scoped projection at `Event > Moment` granularity (with the dual meaning noted in §1.4.3).
 
-No new scope-ownership rule. No new uniqueness constraint. No new transition rule. The V1.123 changes are confined to (a) one additive wire enum value (`BlockType::Era`) per §5.1.1 narrative taxonomy extension and (b) one additive Draft overlay on the Canvas surface contract (`specs/canvas-strategy-surface.md` Draft (V1.123) overlay — see `canvas-strategy-surface.md`). The V1.156 matrix completion adds **no** scope-ownership, uniqueness, or transition rule either — it is a frontend-only projection extension (`wire_contracts_changed: false`); both non-owned layers (World-Moment, Work-Brief) are read-only projections that preserve the existing `World > Timeline > Event > Moment` scope tree.
+No new scope-ownership rule. No new uniqueness constraint. No new transition rule. The V1.123 changes are confined to (a) one additive wire enum value (`BlockType::Era`) per §5.1.1 narrative taxonomy extension and (b) one additive overlay on the Canvas surface contract (`specs/canvas-strategy-surface.md` V1.123 overlay — see `canvas-strategy-surface.md`). The V1.156 matrix completion adds **no** scope-ownership, uniqueness, or transition rule either — it is a frontend-only projection extension (`wire_contracts_changed: false`); both non-owned layers (World-Moment, Work-Brief) are read-only projections that preserve the existing `World > Timeline > Event > Moment` scope tree.
 
 #### 1.4.6 Cross-reference
 
@@ -480,7 +477,7 @@ Minimum common `body` shape for game-bible items:
 
 **Script profile semantics (body layer — V1.55 P3):** Three new `BlockType` wire enum variants are registered in `schemas/common/common.schema.json` for script domain concepts. The corresponding body-layer category is `script_category` (string, carried in `KnowledgeEntry.body.attributes`). It does **not** replace wire `block_type`.
 
-**Three-Layer Timeline semantics (cross-profile, V1.123 Draft overlay):** One new `BlockType` wire enum variant is registered in `schemas/common/common.schema.json` for the V1.123 Brief layer. The corresponding body-layer semantics live in `KnowledgeEntry.body.attributes` as freeform era-marker fields (`era_id`, `start_hint`, `end_hint`, `world_summary`); there is **no `brief_category` body-layer string** because Brief is cross-profile world-shape, not a profile-specific category. See [`iterations/v1.123/specs/three-layer-architecture.md`](../iterations/v1.123/specs/three-layer-architecture.md) §2 for the architect-locked carrier rationale.
+**Three-Layer Timeline semantics (cross-profile, V1.123 — Normative):** One new `BlockType` wire enum variant is registered in `schemas/common/common.schema.json` for the V1.123 Brief layer. The corresponding body-layer semantics live in `KnowledgeEntry.body.attributes` as freeform era-marker fields (`era_id`, `start_hint`, `end_hint`, `world_summary`); there is **no `brief_category` body-layer string** because Brief is cross-profile world-shape, not a profile-specific category. See [`iterations/v1.123/specs/three-layer-architecture.md`](../iterations/v1.123/specs/three-layer-architecture.md) §2 for the architect-locked carrier rationale.
 
 Shipped `BlockType` values (snake_case on wire) extended with:
 
@@ -490,9 +487,9 @@ Shipped `BlockType` values (snake_case on wire) extended with:
 
 Existing variants (`character`, `ability`, `scene`, `organization`, `item`, `conflict`, `info_point`, `event`, `species`, `faction`, `magic_system`, `technology`, `deity`, `level`, `economy_tier`, `dialogue`, `beat`, `act`) are reused unchanged.
 
-**V1.123 Draft overlay implementation:** `nexus-kb::validation` does NOT add a new `ValidationMode` for `era` — `era` is cross-profile and not subject to `novel_category` / `game_bible_category` / `script_category` enforcement (mirroring how `event` — the V1.122 Timeline event block type — is handled today). Advisory warnings only. `canonical_name` validation is identical across all modes. The wire enum change is additive; daemon Rust handlers that accept `BlockType` (notably `world_kb::patch_entity` and `world_kb::get_graph`) require **no** code change because they already parse any valid `BlockType` value through `parse_block_type` (see iteration architecture §2.4 for codebase evidence).
+**V1.123 implementation:** `nexus-kb::validation` does NOT add a new `ValidationMode` for `era` — `era` is cross-profile and not subject to `novel_category` / `game_bible_category` / `script_category` enforcement (mirroring how `event` — the V1.122 Timeline event block type — is handled today). Advisory warnings only. `canonical_name` validation is identical across all modes. The wire enum change is additive; daemon Rust handlers that accept `BlockType` (notably `world_kb::patch_entity` and `world_kb::get_graph`) require **no** code change because they already parse any valid `BlockType` value through `parse_block_type` (see iteration architecture §2.4 for codebase evidence).
 
-Minimum common `body` shape for Brief-era items (V1.123 Draft):
+Minimum common `body` shape for Brief-era items (V1.123):
 
 ```json
 {
@@ -644,11 +641,7 @@ how it transitions. When the LLM worker is unavailable, the hook falls back to
 the V1.50 heuristic so no-worker environments (hermetic tests,
 daemon-without-worker) remain functional.
 
-#### 5.5.7 Work→KnowledgeEntry provenance linkage (Draft V1.52 overlay)
-
-**Status**: Draft (V1.52 — body authored in plan `2026-06-19-v1.52-work-keyblock-provenance-and-essay-profile`)  
-**Authoring plan**: `2026-06-19-v1.52-work-keyblock-provenance-and-essay-profile`  
-**Promotes to Normative**: P-last of V1.52
+#### 5.5.7 Work→KnowledgeEntry provenance linkage (V1.52 T-A P2 — Normative)
 
 ##### 5.5.7.1 Purpose
 

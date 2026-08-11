@@ -180,11 +180,7 @@ When a `novel-writing` schedule completes and the active chapter transitions to 
 6. **Idempotency**: re-running finalize on the same day overwrites the same log file so repeated transitions do not accumulate duplicate entries.
 7. **Best-effort**: errors are logged at `warn!` and do **not** fail the schedule terminal transition.
 
-### 5.6 Auto-promote high-confidence KB candidates (Draft V1.52 overlay)
-
-**Status**: Draft (V1.52 — body authored in plan `2026-06-19-v1.52-outline-five-q-and-auto-promote`)  
-**Authoring plan**: `2026-06-19-v1.52-outline-five-q-and-auto-promote`  
-**Promotes to Normative**: P-last of V1.52
+### 5.6 Auto-promote high-confidence KB candidates (V1.52 T-A P0 — Normative)
 
 The CLI command `creator world kb adopt --auto <world_ref>` promotes pending `kb_extract_jobs` rows to confirmed KnowledgeEntries without per-row author confirmation, provided every safety predicate holds:
 
