@@ -200,7 +200,7 @@ describe('buildEraTree', () => {
     // The back-edge (B → A) must have been detected and logged.
     expect(warn).toHaveBeenCalledTimes(1);
     expect(warn.mock.calls[0][0]).toContain('era-b" -> "era-a');
-    expect(warn.mock.calls[0][0]).toContain('already placed');
+    expect(warn.mock.calls[0][0]).toContain('cycle detected');
   });
 
   it('orphan_child_relation_target_not_in_entities → edge skipped; no crash', () => {
@@ -267,35 +267,39 @@ describe('buildEraTree', () => {
     expect(idsAtDepth(tree, 1)).toEqual(['era-sub']);
   });
 
-  it('multi_parent_dropped → era with two parents keeps only the first parent', () => {
-    // Greptile P1: two parent_era edges targeting the same child must not
-    // silently vanish — the single-parent invariant picks the first edge
-    // (by relationship iteration order) and warns about the duplicate.
+  it('multi_parent_dag → era with two parents appears under both (no data loss)', () => {
+    // Greptile P1: two parent_era edges targeting the same child must NOT
+    // silently vanish. The tree builder renders a DAG forest — the child
+    // appears under BOTH parents. No warnings (multi-parent is valid data).
     const entities = [
       eraEntity({ key_block_id: 'era-a', canonical_name: 'Parent A' }),
       eraEntity({ key_block_id: 'era-b', canonical_name: 'Parent B' }),
       eraEntity({ key_block_id: 'era-c', canonical_name: 'Child C' }),
     ];
     const relationships = [
-      parentEraRel('era-a', 'era-c', 0), // first parent
-      parentEraRel('era-b', 'era-c', 1), // second parent (dropped)
+      parentEraRel('era-a', 'era-c', 0),
+      parentEraRel('era-b', 'era-c', 1),
     ];
 
     const warn = captureWarnings();
     const tree = buildEraTree(entities, relationships);
 
-    // C appears exactly once (not duplicated under both parents).
+    // C appears TWICE — once under A, once under B (DAG forest, no loss).
     const all = flattenTree(tree);
     const cNodes = all.filter((n) => n.era.key_block_id === 'era-c');
-    expect(cNodes).toHaveLength(1);
+    expect(cNodes).toHaveLength(2);
+    expect(cNodes.every((n) => n.depth === 1)).toBe(true);
 
-    // C is a child of A (first parent), not B.
-    expect(cNodes[0].depth).toBe(1);
-    expect(cNodes[0].children).toHaveLength(0);
-    expect(idsAtDepth(tree, 0)).toEqual(['era-a', 'era-b']);
-    expect(idsAtDepth(tree, 1)).toEqual(['era-c']);
+    // A and B are depth-0 roots, each with C as child.
+    expect(tree).toHaveLength(2);
+    expect(tree[0].era.key_block_id).toBe('era-a');
+    expect(tree[0].children).toHaveLength(1);
+    expect(tree[0].children[0].era.key_block_id).toBe('era-c');
+    expect(tree[1].era.key_block_id).toBe('era-b');
+    expect(tree[1].children).toHaveLength(1);
+    expect(tree[1].children[0].era.key_block_id).toBe('era-c');
 
-    // A warning was logged about the duplicate parent.
-    expect(warn.mock.calls.some((c) => String(c[0]).includes('multiple parents'))).toBe(true);
+    // No warnings — multi-parent is valid data in a DAG.
+    expect(warn).not.toHaveBeenCalled();
   });
 });

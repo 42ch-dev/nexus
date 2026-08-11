@@ -106,66 +106,39 @@ export function buildEraTree(
   // Valid parent edges only: both endpoints must be era entities (architect
   // Q3). Orphan edges (target missing from the set) are skipped silently.
   //
-  // Single-parent invariant (Greptile P1 fix): era taxonomy is a TREE by
-  // product model — each era has at most one parent. If multiple parent_era
-  // edges target the same child, we pick the parent with the smallest
-  // key_block_id (deterministic — independent of API response ordering)
-  // and warn. This prevents the global visited-set from silently dropping
-  // the second parent edge, and ensures the tree is stable across refetches
-  // regardless of relationship `updated_at` ordering.
-
-  // Sort valid edges by source (parent) key_block_id so the tiebreaker is
-  // deterministic — the parent with the smallest id always wins (Greptile P1
-  // iteration 2: parent selection must not change across refetches).
-  const validEdges: Array<{ parentId: string; childId: string }> = [];
+  // Multi-parent handling (Greptile P1): the Relation system is a general
+  // graph and CAN persist multiple parent_era edges for one child. The tree
+  // builder renders a **DAG forest** — a child with two parents appears
+  // under BOTH parents (no data loss). Cycle safety uses a **per-path**
+  // visited set (not global): A→B→A is still detected, but a diamond
+  // (A→C, B→C) renders C under both A and B.
+  const childrenByParent = new Map<string, string[]>();
+  const hasParent = new Set<string>();
   for (const rel of relationships) {
     if (!isParentEraRelationship(rel)) continue;
     const parent = eraById.get(rel.source_entity_id);
     const child = eraById.get(rel.target_entity_id);
     if (parent === undefined || child === undefined) continue;
-    validEdges.push({ parentId: parent.key_block_id, childId: child.key_block_id });
-  }
-  validEdges.sort((a, b) => a.parentId.localeCompare(b.parentId));
-
-  const firstParentOf = new Map<string, string>();
-  for (const edge of validEdges) {
-    const existing = firstParentOf.get(edge.childId);
-    if (existing !== undefined && existing !== edge.parentId) {
-      // eslint-disable-next-line no-console
-      console.warn(
-        `[brief-era-tree] era "${edge.childId}" has multiple parents: ` +
-          `"${existing}" (kept) and "${edge.parentId}" (dropped). ` +
-          `Era taxonomy is a tree — the parent with the smallest key_block_id is used.`,
-      );
-      continue;
-    }
-    firstParentOf.set(edge.childId, edge.parentId);
-  }
-
-  // Build childrenByParent from the single-parent map (deterministic).
-  const childrenByParent = new Map<string, string[]>();
-  const hasParent = new Set<string>();
-  for (const [childId, parentId] of firstParentOf) {
-    const siblings = childrenByParent.get(parentId);
+    const siblings = childrenByParent.get(parent.key_block_id);
     if (siblings === undefined) {
-      childrenByParent.set(parentId, [childId]);
+      childrenByParent.set(parent.key_block_id, [child.key_block_id]);
     } else {
-      siblings.push(childId);
+      siblings.push(child.key_block_id);
     }
-    hasParent.add(childId);
+    hasParent.add(child.key_block_id);
   }
   for (const siblings of childrenByParent.values()) {
     siblings.sort((a, b) => a.localeCompare(b));
   }
 
-  const visited = new Set<string>();
   const tree: EraTreeNode[] = [];
+  const reachable = new Set<string>();
 
-  const visit = (id: string, depth: number): EraTreeNode => {
-    // `id` is always a known era: roots/sweep iterate `eras`, and children
-    // come from `childrenByParent`, which only records validated era ids.
+  // DFS with per-path visited set for cycle detection. A child can appear
+  // under multiple parents (DAG); only true cycles (A→B→A) are cut.
+  const visit = (id: string, depth: number, pathAncestors: Set<string>): EraTreeNode => {
+    reachable.add(id);
     const era = eraById.get(id) as WorldKbEntityProjection;
-    visited.add(id);
     const node: EraTreeNode = {
       era,
       era_type: eraTypeOf(era),
@@ -173,17 +146,18 @@ export function buildEraTree(
       depth,
     };
     for (const childId of childrenByParent.get(id) ?? []) {
-      if (visited.has(childId)) {
-        // Back-edge (cycle A→B→A) or duplicate parent edge: the child is
-        // already placed at its first encounter — do not re-render it here.
+      if (pathAncestors.has(childId)) {
+        // Back-edge (cycle A→B→A): cut the cycle, warn.
         // eslint-disable-next-line no-console
         console.warn(
-          `[brief-era-tree] skipped parent_era edge "${id}" -> "${childId}": ` +
-            `"${childId}" already placed (cycle or duplicate edge)`,
+          `[brief-era-tree] cycle detected: "${id}" -> "${childId}" — ` +
+            `edge cut to prevent infinite recursion`,
         );
         continue;
       }
-      node.children.push(visit(childId, depth + 1));
+      const childPath = new Set(pathAncestors);
+      childPath.add(id);
+      node.children.push(visit(childId, depth + 1, childPath));
     }
     return node;
   };
@@ -191,17 +165,22 @@ export function buildEraTree(
   // Roots: eras with no parent_era edge targeting them.
   for (const era of eras) {
     if (!hasParent.has(era.key_block_id)) {
-      tree.push(visit(era.key_block_id, 0));
+      const pathAncestors = new Set<string>();
+      pathAncestors.add(era.key_block_id);
+      tree.push(visit(era.key_block_id, 0, pathAncestors));
     }
   }
 
-  // Cycle islands: eras unreachable from any root are still placed once, as
-  // depth-0 roots — a cycle flattens instead of vanishing or recursing.
+  // Cycle islands: eras unreachable from any root (pure cycle with no
+  // root entry) are placed as depth-0 roots so no era vanishes.
   for (const era of eras) {
-    if (!visited.has(era.key_block_id)) {
-      tree.push(visit(era.key_block_id, 0));
+    if (!reachable.has(era.key_block_id)) {
+      const pathAncestors = new Set<string>();
+      pathAncestors.add(era.key_block_id);
+      tree.push(visit(era.key_block_id, 0, pathAncestors));
     }
   }
+
 
   return tree;
 }
