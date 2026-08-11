@@ -763,7 +763,9 @@
       "creating": "Creating…",
       "validationError": "The daemon rejected this era. Review the name and era type, then try again.",
       "conflictError": "This era could not be created — it already exists or was changed concurrently. Close and try again.",
-      "genericError": "Could not create the era. Try again."
+      "genericError": "Could not create the era. Try again.",
+      "parentLinkFailedTitle": "Era created, but the parent relationship failed",
+      "parentLinkFailedDescription": "The era is saved. Add the parent link from the World KB surface."
     },
     "keyBlockNode": {
       "unnamed": "(unnamed entity)",

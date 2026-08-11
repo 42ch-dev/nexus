@@ -650,6 +650,78 @@ async fn patch_entity_create_missing_block_type_rejected_422() {
     assert_eq!(err.error_code(), "world_kb_validation_failed");
 }
 
+/// V1.160 P1 fix-wave (QC2-F001): a whitespace-only `title` (e.g. `"   "`)
+/// passes the handler's `validate_canonical_name` (spaces are not rejected
+/// there) and the schema `minLength: 1`, but the orchestrator rejects it with
+/// `EmptyCanonicalName` — which previously fell through `map_upsert_reject`
+/// to a 500. The create arm must reject whitespace-only titles as 422 BEFORE
+/// building the spoke request.
+#[tokio::test]
+async fn patch_entity_create_whitespace_title_rejected_422() {
+    let (_tmp, state) = fresh_state().await;
+    let req = WorldKbPatchEntityRequest {
+        entity_id: "kb_9f8e7d6c5b4a39281726354453627180".to_string(),
+        expected_version: 0,
+        patch: serde_json::from_value(serde_json::json!({
+            "title": "   ",
+            "block_type": "era",
+        }))
+        .unwrap(),
+    };
+    let err = patch_entity(
+        State(state.clone()),
+        Path("wld_test_world".to_string()),
+        Json(req),
+    )
+    .await
+    .expect_err("create with whitespace-only title must 422");
+    assert_eq!(
+        err.status_code(),
+        axum::http::StatusCode::UNPROCESSABLE_ENTITY
+    );
+    assert_eq!(err.error_code(), "world_kb_validation_failed");
+}
+
+/// V1.160 P1 fix-wave (QC2-F002 / QC3-S004): the `kb_key_blocks` CHECK
+/// constraint only enforces the `kb_%` prefix, so an arbitrary `entity_id`
+/// passes the handler and fails the INSERT with a CHECK error → 500. Spec
+/// §5.1.2 makes `kb_<hex>` normative — the create arm must reject
+/// non-conforming ids as 422 before building the spoke request. No row may be
+/// written for any malformed id.
+#[tokio::test]
+async fn patch_entity_create_malformed_entity_id_rejected_422() {
+    let (_tmp, state) = fresh_state().await;
+    for malformed in [
+        "entity_123",                                  // no kb_ prefix
+        "kb_",                                         // empty hex suffix
+        "kb_zzz",                                      // non-hex suffix
+        "kb_9f8e7d6c5b4a39281726354453627180!",        // trailing non-hex
+    ] {
+        let req = WorldKbPatchEntityRequest {
+            entity_id: malformed.to_string(),
+            expected_version: 0,
+            patch: serde_json::from_value(serde_json::json!({
+                "title": "Valid Title",
+                "block_type": "era",
+            }))
+            .unwrap(),
+        };
+        let err = patch_entity(
+            State(state.clone()),
+            Path("wld_test_world".to_string()),
+            Json(req),
+        )
+        .await
+        .expect_err("malformed entity_id must 422");
+        assert_eq!(
+            err.status_code(),
+            axum::http::StatusCode::UNPROCESSABLE_ENTITY,
+            "entity_id {malformed:?} must be 422"
+        );
+        assert_eq!(err.error_code(), "world_kb_validation_failed");
+    }
+}
+
 /// V1.160 P1 authz-first regression (entity-scope-model §5.1.2): the create
 /// arm runs only on store `NotFound` under an already-authz-checked PATH
 /// `world_id`. A foreign (non-owned) world must 403 BEFORE any entity read —

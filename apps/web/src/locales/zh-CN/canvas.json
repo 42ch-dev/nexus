@@ -752,7 +752,9 @@
       "creating": "创建中…",
       "validationError": "守护进程拒绝了此纪元。请检查名称与类型后重试。",
       "conflictError": "无法创建纪元——它已存在或已被并发修改。请关闭后重试。",
-      "genericError": "创建纪元失败，请重试。"
+      "genericError": "创建纪元失败，请重试。",
+      "parentLinkFailedTitle": "纪元已创建，但父纪元关系建立失败",
+      "parentLinkFailedDescription": "纪元已保存，可在 World KB 界面补充父纪元关系。"
     },
     "keyBlockNode": {
       "unnamed": "(未命名实体)",

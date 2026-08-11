@@ -491,8 +491,37 @@ async fn patch_entity_create(
     };
     let block_type: nexus_contracts::BlockType = wire_cast(block_type);
 
+    // V1.160 P1 fix-wave (QC2-F001): a whitespace-only title (e.g. `"   "`)
+    // passes `validate_canonical_name` (spaces are legal there) and the
+    // schema `minLength: 1`, but the orchestrator rejects it with
+    // `EmptyCanonicalName` — which previously fell through `map_upsert_reject`
+    // to a 500. Reject here, before the spoke request is built.
+    if title.trim().is_empty() {
+        return Err(NexusApiError::world_kb_validation_failed(
+            &["create requires a non-empty patch.title (whitespace-only titles are rejected)"
+                .to_string()],
+            &[],
+        ));
+    }
+
     validate_canonical_name(title.as_str())
         .map_err(|e| NexusApiError::world_kb_validation_failed(&[e.to_string()], &[]))?;
+
+    // V1.160 P1 fix-wave (QC2-F002 / QC3-S004): the `kb_key_blocks` CHECK
+    // constraint only enforces the `kb_%` prefix, so an arbitrary `entity_id`
+    // passes the handler and fails the INSERT with a CHECK error → 500. Spec
+    // §5.1.2 makes `kb_<hex>` normative — enforce the prefix + non-empty hex
+    // suffix here, before the orchestrator / store see the id.
+    let entity_id_conforms = req
+        .entity_id
+        .strip_prefix("kb_")
+        .is_some_and(|suffix| !suffix.is_empty() && suffix.chars().all(|c| c.is_ascii_hexdigit()));
+    if !entity_id_conforms {
+        return Err(NexusApiError::world_kb_validation_failed(
+            &["entity_id must follow kb_<hex> convention".to_string()],
+            &[],
+        ));
+    }
 
     // Fresh entity: client-minted `entity_id`, PATH `world_id`, default
     // new-entity status (provisional), create revision 0 (the orchestrator's
@@ -1120,6 +1149,7 @@ fn build_spoke_upsert_request(entry: &WorldKbEntry) -> UpsertRequest {
 /// |-----------------------------------------|----------------------------|
 /// | `StoredRevisionStale` / `RevisionConflict` / `KnowledgeEntryAlreadyExists` | `world_kb_conflict` (409) |
 /// | `KnowledgeEntryTerminalStatus` / `InvalidKnowledgeEntryStatus` / `InvalidKnowledgeEntryStatusTransition` | `world_kb_validation_failed` (422) |
+/// | `EmptyCanonicalName` / `MissingRequiredField` (V1.160 P1 fix-wave) | `world_kb_validation_failed` (422) |
 /// | `InvalidInput` (V1.146 P0)               | `InvalidInput` (400)       |
 /// | `InternalError` (V1.146 P0)             | `Internal` (500)           |
 /// | other / `Variant1` error envelope       | `Internal` (500)           |
@@ -1221,7 +1251,13 @@ async fn map_upsert_reject(
         }
         SpokeRejectCode::KnowledgeEntryTerminalStatus
         | SpokeRejectCode::InvalidKnowledgeEntryStatus
-        | SpokeRejectCode::InvalidKnowledgeEntryStatusTransition => {
+        | SpokeRejectCode::InvalidKnowledgeEntryStatusTransition
+        // V1.160 P1 fix-wave (QC2-F001): defense in depth — the create-branch
+        // pre-validation catches whitespace titles / malformed ids, but any
+        // remaining `EmptyCanonicalName` / `MissingRequiredField` reject is a
+        // client-input problem (422), never a server fault (500).
+        | SpokeRejectCode::EmptyCanonicalName
+        | SpokeRejectCode::MissingRequiredField => {
             NexusApiError::world_kb_validation_failed(&[reject.message], &[])
         }
         // explicit 400 contract for validation rejects (S-001)
