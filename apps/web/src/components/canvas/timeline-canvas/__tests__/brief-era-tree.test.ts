@@ -266,4 +266,36 @@ describe('buildEraTree', () => {
     expect(idsAtDepth(tree, 0)).toEqual(['era-empty', 'era-typed', 'era-untyped']);
     expect(idsAtDepth(tree, 1)).toEqual(['era-sub']);
   });
+
+  it('multi_parent_dropped → era with two parents keeps only the first parent', () => {
+    // Greptile P1: two parent_era edges targeting the same child must not
+    // silently vanish — the single-parent invariant picks the first edge
+    // (by relationship iteration order) and warns about the duplicate.
+    const entities = [
+      eraEntity({ key_block_id: 'era-a', canonical_name: 'Parent A' }),
+      eraEntity({ key_block_id: 'era-b', canonical_name: 'Parent B' }),
+      eraEntity({ key_block_id: 'era-c', canonical_name: 'Child C' }),
+    ];
+    const relationships = [
+      parentEraRel('era-a', 'era-c', 0), // first parent
+      parentEraRel('era-b', 'era-c', 1), // second parent (dropped)
+    ];
+
+    const warn = captureWarnings();
+    const tree = buildEraTree(entities, relationships);
+
+    // C appears exactly once (not duplicated under both parents).
+    const all = flattenTree(tree);
+    const cNodes = all.filter((n) => n.era.key_block_id === 'era-c');
+    expect(cNodes).toHaveLength(1);
+
+    // C is a child of A (first parent), not B.
+    expect(cNodes[0].depth).toBe(1);
+    expect(cNodes[0].children).toHaveLength(0);
+    expect(idsAtDepth(tree, 0)).toEqual(['era-a', 'era-b']);
+    expect(idsAtDepth(tree, 1)).toEqual(['era-c']);
+
+    // A warning was logged about the duplicate parent.
+    expect(warn.mock.calls.some((c) => String(c[0]).includes('multiple parents'))).toBe(true);
+  });
 });

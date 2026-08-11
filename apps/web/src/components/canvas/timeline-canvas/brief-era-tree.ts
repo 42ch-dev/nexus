@@ -105,20 +105,42 @@ export function buildEraTree(
 
   // Valid parent edges only: both endpoints must be era entities (architect
   // Q3). Orphan edges (target missing from the set) are skipped silently.
-  const childrenByParent = new Map<string, string[]>();
-  const hasParent = new Set<string>();
+  //
+  // Single-parent invariant (Greptile P1 fix): era taxonomy is a TREE by
+  // product model — each era has at most one parent. If multiple parent_era
+  // edges target the same child, we pick the first (deterministic sort by
+  // source key_block_id) and warn. This prevents the global visited-set from
+  // silently dropping the second parent edge as a "cycle or duplicate".
+  const firstParentOf = new Map<string, string>();
   for (const rel of relationships) {
     if (!isParentEraRelationship(rel)) continue;
     const parent = eraById.get(rel.source_entity_id);
     const child = eraById.get(rel.target_entity_id);
     if (parent === undefined || child === undefined) continue;
-    const siblings = childrenByParent.get(parent.key_block_id);
-    if (siblings === undefined) {
-      childrenByParent.set(parent.key_block_id, [child.key_block_id]);
-    } else {
-      siblings.push(child.key_block_id);
+    const existing = firstParentOf.get(child.key_block_id);
+    if (existing !== undefined && existing !== parent.key_block_id) {
+      // eslint-disable-next-line no-console
+      console.warn(
+        `[brief-era-tree] era "${child.key_block_id}" has multiple parents: ` +
+          `"${existing}" (kept) and "${parent.key_block_id}" (dropped). ` +
+          `Era taxonomy is a tree — only the first parent (by edge order) is used.`,
+      );
+      continue;
     }
-    hasParent.add(child.key_block_id);
+    firstParentOf.set(child.key_block_id, parent.key_block_id);
+  }
+
+  // Build childrenByParent from the single-parent map (deterministic).
+  const childrenByParent = new Map<string, string[]>();
+  const hasParent = new Set<string>();
+  for (const [childId, parentId] of firstParentOf) {
+    const siblings = childrenByParent.get(parentId);
+    if (siblings === undefined) {
+      childrenByParent.set(parentId, [childId]);
+    } else {
+      siblings.push(childId);
+    }
+    hasParent.add(childId);
   }
   for (const siblings of childrenByParent.values()) {
     siblings.sort((a, b) => a.localeCompare(b));
