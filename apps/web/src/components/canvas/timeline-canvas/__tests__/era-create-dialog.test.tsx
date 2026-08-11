@@ -1,15 +1,10 @@
 /**
- * era-create-dialog — V1.159 P1 Task 3 component tests.
+ * era-create-dialog — V1.159 P1 Task 3 component tests (activated V1.160
+ * P1 T2 — F-001 / R-V1159P1-001 closed: the V1.160 P1 T1 backend
+ * create-on-absent path makes `patch-entity` create the era when the minted
+ * entity id is absent, so the create dialog path is LIVE).
  *
- * ⚠️ SKIPPED (F-001 / R-V1159P1-001): the era create path is DEFERRED —
- * the World KB has no entity creation route (`patch-entity` is edit-only
- * and 500s on a missing entity), so the create dialog cannot work at
- * runtime. These tests mock `usePatchWorldKbEntity` /
- * `usePatchWorldKbRelationship` and therefore stay green while the real
- * path is dead — re-enable (remove `.skip`) when a backend create carrier
- * lands.
- *
- * Original coverage (kept for re-activation):
+ * Coverage:
  *   1. creates_era_without_parent  — patch-entity called with the correct
  *      create payload (minted id, expected_version 0, era patch); no
  *      relationship mutation fires.
@@ -27,8 +22,9 @@
  *      flows into `body.attributes.era_type`.
  *   7. (canvas wiring) "新建 era" entry visible on the Brief layer + the
  *      T2-M2 alt-view precedence fix (time-bands win; toggle hidden).
- *      The entry-visibility case is also skipped with the deferral; the
- *      T2-M2 precedence case stays live (it does not depend on the entry).
+ *      The entry-visibility case asserts the live gate
+ *      (`showCreateEra={activeLayer === 'brief'}`); the T2-M2 precedence
+ *      case stays live (it does not depend on the entry).
  *
  * The mutation hooks are stubbed (mirrors the relationship-inspector test
  * pattern); the World KB graph hook stays real and is fed through a mocked
@@ -164,9 +160,9 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-// ─── Required dialog cases (SKIPPED — F-001 deferral, see header) ─────────
+// ─── Required dialog cases (live since V1.160 P1 T2 — F-001 closed) ───────
 
-describe.skip('EraCreateDialog', () => {
+describe('EraCreateDialog', () => {
   it('creates_era_without_parent — patch-entity with minted id + era patch; no relationship', async () => {
     patchEntitySuccess();
     const props = renderDialog();
@@ -323,15 +319,15 @@ describe.skip('EraCreateDialog', () => {
 });
 
 // ─── Canvas wiring: "新建 era" entry + T2-M2 alt-view precedence ───────────
-// The entry-visibility case is skipped with the F-001 deferral (the entry
-// is hard-hidden); the T2-M2 precedence case stays live.
+// The entry-visibility case is live since V1.160 P1 T2 (F-001 closed — the
+// gate is `showCreateEra={activeLayer === 'brief'}`); the T2-M2 precedence
+// case pins the band-panel-vs-alt-view behavior.
 
 describe('TimelineCanvas — Brief create entry + T2-M2 fix', () => {
-  it.skip('shows the New era entry on the Brief layer and opens the dialog', async () => {
-    // SKIPPED (F-001 / R-V1159P1-001): the "新建 era" entry is hard-hidden
-    // while the World KB entity-creation gap is open — re-enable with the
-    // create dialog when the backend create path lands.
-    // Brief is the default layer when era entities exist.
+  it('shows the New era entry on the Brief layer and opens the dialog', async () => {
+    // V1.160 P1 T2 — the entry is live: Brief is the default layer when era
+    // entities exist, and the gate `showCreateEra={activeLayer === 'brief'}`
+    // renders the "新建 era" button in the header chrome.
     renderInApp(<TimelineCanvas worldId="world-7" />, {
       client: makeMockClient(eraGraph),
     });
