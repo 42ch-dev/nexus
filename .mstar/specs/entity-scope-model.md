@@ -4,10 +4,10 @@
 
 | Attribute | Value |
 | --- | --- |
-| **Status** | Normative — entity scope hierarchy, uniqueness, crate ownership. **V1.40 Shipped**: §5.1.1 narrative taxonomy (`BlockType` + `novel_category` + `canonical_name` grammar). **V1.50 Shipped**: §5.5 World KB promotion state machine. **V1.51 Shipped**: §5.5.6 LLM pathway subsection. **V1.54 Shipped**: §5.1.1 game-bible taxonomy. **V1.55 P3**: §5.1.1 script taxonomy. **V1.62 Shipped**: §5.5.9 computable-flag semantics + structured validation mode (closes `R-V161P1-LOW-001`). **V1.74 Shipped β**: §5.6 World KB relationship semantics. **V1.139 architect §5.2**: §2 (crate table: `nexus-kb`→`nexus-knowledge`, KeyBlock→KnowledgeEntry in architecture-bearing prose). **V1.155 P2**: §5.5+ prose refs modernized to KnowledgeEntry; remaining `KeyBlock` mentions are structural wire/DB identifiers (`kb_key_blocks` table, `ComputeInput.key_blocks` field, `KeyBlockStatus`/`KeyBlockId` types, `BlockType` enum values) and historical implementation records (`crates/nexus-kb/…` paths as-shipped). Full V1.139 SPOKE alignment tracked in [`spoke-adapter-architecture.md`](spoke-adapter-architecture.md). **V1.156**: §1.4 three-layer Draft overlay 3×2 matrix completion amendment (World×Moment + Work×Brief closed; frontend-only, `wire_contracts_changed: false` — no scope-ownership/transition change). |
+| **Status** | Normative — entity scope hierarchy, uniqueness, crate ownership. **V1.40 Shipped**: §5.1.1 narrative taxonomy (`BlockType` + `novel_category` + `canonical_name` grammar). **V1.50 Shipped**: §5.5 World KB promotion state machine. **V1.51 Shipped**: §5.5.6 LLM pathway subsection. **V1.54 Shipped**: §5.1.1 game-bible taxonomy. **V1.55 P3**: §5.1.1 script taxonomy. **V1.62 Shipped**: §5.5.9 computable-flag semantics + structured validation mode (closes `R-V161P1-LOW-001`). **V1.74 Shipped β**: §5.6 World KB relationship semantics. **V1.139 architect §5.2**: §2 (crate table: `nexus-kb`→`nexus-knowledge`, KeyBlock→KnowledgeEntry in architecture-bearing prose). **V1.155 P2**: §5.5+ prose refs modernized to KnowledgeEntry; remaining `KeyBlock` mentions are structural wire/DB identifiers (`kb_key_blocks` table, `ComputeInput.key_blocks` field, `KeyBlockStatus`/`KeyBlockId` types, `BlockType` enum values) and historical implementation records (`crates/nexus-kb/…` paths as-shipped). Full V1.139 SPOKE alignment tracked in [`spoke-adapter-architecture.md`](spoke-adapter-architecture.md). **V1.156**: §1.4 three-layer Draft overlay 3×2 matrix completion amendment (World×Moment + Work×Brief closed; frontend-only, `wire_contracts_changed: false` — no scope-ownership/transition change). **V1.159**: §5.1.1 era taxonomy amendment — `era_type` freeform field + era-era nesting via §5.6 `custom`/`custom_label: "parent_era"` (additive; `wire_contracts_changed: false`). |
 | **Document class** | Master |
 | **Scope** | Global/User/Creator/World/Timeline/Event/Moment hierarchy; entity ownership; `kb`/`knowledge` naming boundaries; scope transition rules |
-| **Last updated** | 2026-08-10 — V1.156 Review & Edit chain: §1.4 3×2 matrix completion amendment (writing-specialist hygiene pass). |
+| **Last updated** | 2026-08-11 — V1.159 Review & Edit chain: §5.1.1 era taxonomy amendment (`era_type` + nesting carrier; writing-specialist hygiene pass). |
 | **Related** | [local-cloud-crate-architecture.md](./local-cloud-crate-architecture.md), [cli-spec.md](./cli-spec.md), [daemon-runtime.md](./daemon-runtime.md), [orchestration-engine.md](./orchestration-engine.md), [compute-module-abi.md](./compute-module-abi.md), [wasm-host.md](./wasm-host.md), [local-db-schema.md](./local-db-schema.md), [spoke-adapter-architecture.md](./spoke-adapter-architecture.md), [`docs/ARCHITECTURE.md`](../../../docs/ARCHITECTURE.md) |
 
 This file is normative for V1.23 crate wiring and naming alignment. When this file
@@ -503,6 +503,36 @@ Minimum common `body` shape for Brief-era items (V1.123):
   "tags": ["brief", "era"]
 }
 ```
+
+**Era taxonomy type semantics (V1.159 — Normative amendment to §5.1.1).** The V1.123 `era` block_type carried flat, untyped era markers. V1.159 deepens the Brief-era carrier with a **typed nesting model** (DF-V1123-ERA-TAXONOMY): an era gains an optional `body.attributes.era_type` (freeform string) and may participate in a parent-child nesting via the §5.6 World KB relationship graph. This is an **additive amendment** — it does not change the V1.123 `era` wire `BlockType`, the existing `body.attributes` era-marker fields (`era_id` / `start_hint` / `end_hint` / `world_summary`), or the V1.123 implementation note (no `ValidationMode` for `era`).
+
+**`era_type` field (V1.159 — cross-profile, freeform, no validation mode).**
+
+- **Carrier:** `KnowledgeEntry.body.attributes.era_type` — an optional freeform string. Because `body.attributes` is already freeform JSON (§5.1.1 + §5.5.9.2), adding `era_type` is **additive with no schema/codegen change** (`wire_contracts_changed: false`).
+- **Recommended values:** `kingdom` / `age` / `epoch` / `period` / `sub-age` (matching product-locks PD-2). These are author-facing taxonomy hints, not an enforced enum; values are freeform strings (snake_case is conventional but not required — the product-locked `sub-age` spelling is canonical).
+- **Custom values allowed:** authors MAY use any string (`dynasty`, `reign`, `eon`, …). Unknown values are NOT rejected and render with a default Brief-layer color (no validation error). This mirrors the V1.123 decision that `era` is cross-profile world-shape and is **not** subject to `novel_category` / `game_bible_category` / `script_category` enforcement.
+- **No `ValidationMode::Era` and no `era_category` body-layer string.** V1.159 deliberately does NOT introduce a validation mode or a parallel category string (mirrors the V1.123 "no `brief_category`" rationale: era taxonomy is cross-profile world-shape, not a profile-specific category). `nexus-kb::validation` gains no new mode in V1.159.
+- **Cross-profile consistency:** `era_type` is read the same way across profiles; the Brief layer colors known recommended types and falls back to the default Brief accent for unknown/absent values. A missing `era_type` (legacy V1.123 flat-era data) renders at the default nesting depth with the default color — V1.156-era flat era data is **backward-compatible**.
+
+**Era nesting carrier (V1.159 — reuses §5.6 World KB relationships, no new data model).** Era-era parent-child nesting is modeled as a directed World KB relationship edge (§5.6), NOT as a self-referential `parent_era_id` column. The nesting edge uses the **sanctioned §5.6.3 escape hatch**: `relation_type = "custom"` with `custom_label = "parent_era"`, directed `source → target` where source is the **parent** (coarser) era and target is the **child** (finer) era. Rationale: `parent_era` is a single domain relationship kind, not a third concrete use case for extending the closed `WorldKbRelationshipKind` wire enum (STRATEGY guiding principle #3 — simplicity over premature abstraction); the `custom` + `custom_label` mechanism exists precisely for domain-specific relationship kinds and round-trips honestly through the graph read path (`project_relationship` preserves `custom_label`). `wire_contracts_changed: false`. See [`canvas-strategy-surface.md`](./canvas-strategy-surface.md) §3.3.3 V1.159 amendment for the Brief-layer nesting UI contract.
+
+Minimum common `body` shape for a typed nested Brief-era item (V1.159):
+
+```json
+{
+  "summary": "The Second Age — the era of expansion beneath the Kingdom of Erethon.",
+  "attributes": {
+    "era_id": "age_of_expansion",
+    "era_type": "age",
+    "start_hint": "year 17",
+    "end_hint": "year 840",
+    "world_summary": "Erethon's colonies spread; the parent kingdom era is 'age_of_stars'."
+  },
+  "tags": ["brief", "era"]
+}
+```
+
+The nesting edge for the example above (parent `age_of_stars` → child `age_of_expansion`) is a §5.6 relationship row: `relation_type = "custom"`, `custom_label = "parent_era"`, `source_entity_id = <age_of_stars key_block_id>`, `target_entity_id = <age_of_expansion key_block_id>`, `symmetric = false` (nesting is directional). Created via `kb.relate` (V1.144 spoke `RelationPort`) or `kb.patch_relationship` (V1.74) — both accept `custom` + `custom_label`; no new write route.
 
 
 
