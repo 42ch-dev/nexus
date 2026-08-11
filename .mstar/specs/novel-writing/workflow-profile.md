@@ -484,11 +484,7 @@ Explicit promotion from index rows to World KB remains **manual/opt-in** per §3
 
 The 五问 template file lives at `embedded-presets/novel-writing/prompts/finalize-exit.md` (P3 deliverable). It references [writing-craft-rules.md §2 五问质量检验](../writing-craft-rules.md) when present; otherwise the template embeds the five questions inline.
 
-### 5.1.1 Outline 五问 gate (Draft V1.52 overlay)
-
-**Status**: Draft (V1.52 — body authored in plan `2026-06-19-v1.52-outline-five-q-and-auto-promote`)  
-**Authoring plan**: `2026-06-19-v1.52-outline-five-q-and-auto-promote`  
-**Promotes to Normative**: P-last of V1.52
+### 5.1.1 Outline 五问 gate (V1.52 T-A P0 — Normative)
 
 `novel-writing` gains an `outline_review` state between `outline_chapter` and `draft_chapter`. Its `exit_when: kind: llm_judge` evaluates `prompts/outline-exit.md`, which asks five outline-specific questions:
 
