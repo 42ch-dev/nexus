@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT host_id as \"host_id!\", manifest_json, last_seen FROM peer_hosts ORDER BY last_seen DESC, host_id ASC",
+  "query": "SELECT host_id as \"host_id!\", manifest_json, last_seen, last_peer_id FROM peer_hosts ORDER BY last_seen DESC, host_id ASC",
   "describe": {
     "columns": [
       {
@@ -17,6 +17,11 @@
         "name": "last_seen",
         "ordinal": 2,
         "type_info": "Text"
+      },
+      {
+        "name": "last_peer_id",
+        "ordinal": 3,
+        "type_info": "Text"
       }
     ],
     "parameters": {
@@ -25,8 +30,9 @@
     "nullable": [
       true,
       false,
-      false
+      false,
+      true
     ]
   },
-  "hash": "34c46a9e7f984736cca5a8ac170e5c6e13719ce4dd6df4866b7cb1979dcdd199"
+  "hash": "29e032c8a89e79eab092b898c10c2a11cee593c57b29e7dcff5b575c171e0298"
 }

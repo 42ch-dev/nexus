@@ -16,7 +16,8 @@
 //! dialed peer's manifest at `connect()` return (fail-closed on dial or
 //! record errors); `connect peers list` reads the observed-peer store
 //! through the adapter boundary (`NexusAdapter::list_observed_peer_hosts` —
-//! `host_id`, capabilities, `last_seen`; empty store → `no peers observed`).
+//! `host_id`, capabilities, `last_peer_id`, `last_seen`; empty store →
+//! `no peers observed`).
 //!
 //! V1.155 P1 (capability-token production): `connect token issue` is the
 //! operator issuance surface — `~/.nexus42/connect/issuer.key` lifecycle
@@ -167,9 +168,11 @@ pub async fn run_peers(command: PeersCommand) -> Result<()> {
 ///
 /// Output: one row per observed peer host — `host_id`, `capabilities`
 /// (typed `manifest.capabilities`, the single honest spoke-shaped view),
-/// `last_seen` (the nexus-local observation timestamp, the only
-/// non-manifest field). Ordering preserved from the storage contract:
-/// `last_seen` DESC, `host_id` ASC. Empty store → `no peers observed`.
+/// `last_peer_id` (V1.158 P2 / R-V1155P0-001 — the dialed peer's libp2p
+/// `PeerId`, the spoof/collision signal), `last_seen` (the nexus-local
+/// observation timestamp, the only other non-manifest field). Ordering
+/// preserved from the storage contract: `last_seen` DESC, `host_id` ASC.
+/// Empty store → `no peers observed`.
 ///
 /// # Errors
 /// [`CliError::Config`] when the active workspace cannot be resolved, or
@@ -196,30 +199,37 @@ async fn peers_list() -> Result<()> {
 /// Render the `connect peers list` output lines (pure, testable).
 ///
 /// Empty store → the single line `no peers observed`. Otherwise a header
-/// row (`HOST_ID`, `CAPABILITIES`, `LAST_SEEN`) followed by one row per
-/// observed peer host: `host_id` (typed manifest), `capabilities` (typed
-/// `manifest.capabilities` joined with `", "` — the single honest
-/// spoke-shaped view), `last_seen` (the nexus-local observation timestamp,
-/// the only non-manifest field). Callers print each line verbatim.
+/// row (`HOST_ID`, `CAPABILITIES`, `PEER_ID`, `LAST_SEEN`) followed by one
+/// row per observed peer host: `host_id` (typed manifest), `capabilities`
+/// (typed `manifest.capabilities` joined with `", "` — the single honest
+/// spoke-shaped view), `last_peer_id` (V1.158 P2 / R-V1155P0-001 — the
+/// dialed peer's libp2p `PeerId`, the spoof/collision signal; blank when
+/// the row predates the column), `last_seen` (the nexus-local observation
+/// timestamp, the only other non-manifest field). Callers print each line
+/// verbatim.
 ///
 /// Render hardening (QC fix wave): peer-controlled strings (`host_id`,
-/// capabilities) are control-char-stripped before they reach the operator's
-/// terminal (F-003), and `last_seen` is normalized to fixed millisecond
-/// RFC 3339 precision (S-003).
+/// capabilities, `last_peer_id`) are control-char-stripped before they
+/// reach the operator's terminal (F-003), and `last_seen` is normalized to
+/// fixed millisecond RFC 3339 precision (S-003).
 fn render_peer_lines(peers: &[ObservedPeerHost]) -> Vec<String> {
     if peers.is_empty() {
         return vec!["no peers observed".to_string()];
     }
     let mut lines = Vec::with_capacity(peers.len() + 1);
     lines.push(format!(
-        "{:<40} {:<32} {}",
-        "HOST_ID", "CAPABILITIES", "LAST_SEEN"
+        "{:<40} {:<32} {:<56} {}",
+        "HOST_ID", "CAPABILITIES", "PEER_ID", "LAST_SEEN"
     ));
     for peer in peers {
         lines.push(format!(
-            "{:<40} {:<32} {}",
+            "{:<40} {:<32} {:<56} {}",
             sanitize_cell(peer.manifest.host_id.as_str()),
             sanitize_cell(&peer.manifest.capabilities.join(", ")),
+            peer.last_peer_id
+                .as_deref()
+                .map(sanitize_cell)
+                .unwrap_or_default(),
             normalize_last_seen(&peer.last_seen)
         ));
     }
@@ -559,7 +569,10 @@ pub async fn build_host_config(
 /// SSOT round-trip) and the adapter validates it at the spoke-schema
 /// boundary (`host_id` non-empty/within cap) and upserts it into the
 /// `peer_hosts` table of this host's workspace DB, fail-closed — a
-/// malformed manifest is never stored. Inbound-only peers (a peer dials us)
+/// malformed manifest is never stored. `session.remote_peer_id()` is
+/// recorded alongside as `last_peer_id` (V1.158 P2 / R-V1155P0-001) — the
+/// spoof/collision signal, operator-visibility diagnostics only (no
+/// auth/allowlist input). Inbound-only peers (a peer dials us)
 /// are not recorded: the invoke boundary carries only `&PeerId`, and the
 /// inbound-manifest API change is a spoke-connect change, out of nexus
 /// scope (spec lock #1 fallback).
@@ -585,7 +598,11 @@ pub async fn record_dialed_peer(
                 )));
             }
         };
-    match adapter.record_peer_manifest(&manifest).await {
+    // V1.158 P2 (R-V1155P0-001): record the dialed peer's actual libp2p
+    // `PeerId` alongside the claimed `host_id` — the spoof/collision signal
+    // (operator-visibility diagnostics only; no auth/allowlist input).
+    let peer_id = session.remote_peer_id().to_string();
+    match adapter.record_peer_manifest(&manifest, Some(&peer_id)).await {
         SpokeResult::Ok(()) => Ok(()),
         SpokeResult::Reject(reject) => Err(CliError::Other(format!(
             "peer manifest recording rejected: {}",
@@ -634,7 +651,12 @@ async fn open_workspace_pool(
 mod tests {
     use super::*;
 
-    fn observed_peer(host_id: &str, capabilities: &[&str], last_seen: &str) -> ObservedPeerHost {
+    fn observed_peer(
+        host_id: &str,
+        capabilities: &[&str],
+        last_peer_id: Option<&str>,
+        last_seen: &str,
+    ) -> ObservedPeerHost {
         let manifest = match nexus_spoke_adapter::manifest::build_local_host_manifest(host_id) {
             SpokeResult::Ok(m) => m,
             SpokeResult::Reject(r) => panic!("manifest build is Ok: {r:?}"),
@@ -649,6 +671,7 @@ mod tests {
         ObservedPeerHost {
             manifest,
             last_seen: last_seen.to_string(),
+            last_peer_id: last_peer_id.map(str::to_string),
         }
     }
 
@@ -664,17 +687,28 @@ mod tests {
             observed_peer(
                 "peer-host-uuid-0001",
                 &["spoke-baseline", "l2-computable"],
+                Some("12D3KooWPeerId0001"),
                 "2026-08-08T10:00:00Z",
             ),
-            observed_peer("peer-host-uuid-0002", &[], "2026-08-08T09:00:00.123456Z"),
+            observed_peer(
+                "peer-host-uuid-0002",
+                &[],
+                None,
+                "2026-08-08T09:00:00.123456Z",
+            ),
         ];
         let lines = render_peer_lines(&peers);
         assert_eq!(lines.len(), 3, "header + one line per peer");
         assert!(lines[0].starts_with("HOST_ID"), "header names HOST_ID");
         assert!(lines[0].contains("CAPABILITIES"));
+        assert!(lines[0].contains("PEER_ID"));
         assert!(lines[0].contains("LAST_SEEN"));
         assert!(lines[1].starts_with("peer-host-uuid-0001"));
         assert!(lines[1].contains("spoke-baseline, l2-computable"));
+        assert!(
+            lines[1].contains("12D3KooWPeerId0001"),
+            "peer id rendered in its column (R-V1155P0-001)"
+        );
         assert!(
             lines[1].contains("2026-08-08T10:00:00.000Z"),
             "last_seen normalized to fixed millisecond precision (S-003)"
@@ -692,12 +726,13 @@ mod tests {
 
     #[test]
     fn render_peer_lines_strips_control_chars_from_peer_controlled_cells() {
-        // F-003: host_id / capabilities originate from the remote peer's
-        // claimed manifest — ANSI escapes and newlines must never reach the
+        // F-003: host_id / capabilities / last_peer_id originate from the
+        // remote peer — ANSI escapes and newlines must never reach the
         // operator's terminal.
         let peers = vec![observed_peer(
             "peer-\u{1b}[31mred\u{1b}[0m-uuid\n0003",
             &["spoke-baseline", "l2-\u{1b}[32mcompute\u{1b}[0m"],
+            Some("12D3KooW\u{1b}[31mred\u{1b}[0m\n0003"),
             "2026-08-08T10:00:00Z",
         )];
         let lines = render_peer_lines(&peers);
@@ -713,6 +748,10 @@ mod tests {
         );
         assert!(row.contains("uuid"), "printable host_id content preserved");
         assert!(row.contains("compute"));
+        assert!(
+            row.contains("12D3KooW"),
+            "printable peer_id prefix preserved: {row:?}"
+        );
     }
 
     #[test]

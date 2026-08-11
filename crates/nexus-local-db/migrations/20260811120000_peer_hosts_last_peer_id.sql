@@ -1,0 +1,14 @@
+-- V1.158 P2 (R-V1155P0-001) — peer_id session recording.
+--
+-- Additive diagnostics column on `peer_hosts`: the dialed peer's libp2p
+-- `PeerId`, recorded at the outbound `connect()` return ALONGSIDE the
+-- claimed `host_id` (from `PeerSession::remote_peer_id()`). The actual
+-- transport identity is the spoof/collision signal when a dialed peer
+-- claims a different `host_id` (spoke-adapter spec §10.6 N-C3; product
+-- lock PD-6): peer identity is observability only — it is NOT bound to
+-- `host_id` for authorization and no allowlist policy reads it.
+--
+-- NULL for rows recorded before this migration (the peer id was not
+-- captured at record time — no backfill possible); fresh observations
+-- upsert it.
+ALTER TABLE peer_hosts ADD COLUMN last_peer_id TEXT;
