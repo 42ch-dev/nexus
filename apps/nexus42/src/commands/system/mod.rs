@@ -562,6 +562,8 @@ mod tests {
     use clap::Parser;
 
     #[test]
+    // Empty arms are deliberate compile-time shape checks of the clap variants.
+    #[allow(clippy::match_same_arms)]
     fn system_preset_list_parses() {
         let cmd = SystemPresetCli::try_parse_from(["system", "preset", "list"]).unwrap();
 

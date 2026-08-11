@@ -621,8 +621,7 @@ mod tests {
         // All locations (scenes)
         assert_eq!(block.locations_referenced.len(), 1);
         // No background items in active_rules (only foundation + rules)
-        let rule_names: Vec<&str> = block.active_rules.iter().map(|r| r.name.as_str()).collect();
-        assert!(!rule_names.contains(&"evt_bg"));
+        assert!(!block.active_rules.iter().any(|r| r.name == "evt_bg"));
     }
 
     // QC1-W002 fix: chapter_text heuristic narrows fallback when world_refs is empty.
@@ -719,10 +718,10 @@ mod tests {
         // This test documents the convention: if world_id is None at caller,
         // the function is not called and no block is produced.
         // The function signature makes this clear: world_id is String, not Option<String>.
-        assert!(
-            true,
-            "legacy worldless Works skip build_chapter_kb_block at caller level"
-        );
+        // Intentionally unconditional: this test documents a caller-level
+        // convention (world_id is always present when the function is called).
+        // There is nothing to assert at runtime — the contract lives in the
+        // signature (world_id: String, not Option<String>).
     }
 
     // AC6: Missing world_id in query → store returns empty, block has empty sections.

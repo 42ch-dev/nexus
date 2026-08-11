@@ -27,9 +27,8 @@ async fn concurrent_tasks_serialise_via_file_lock() {
 
     // Task 2 fails to acquire while task 1 holds the lock.
     let err = file_lock::try_acquire(&work_dir, "cli:task-2").unwrap_err();
-    let locked = match err {
-        FileLockError::Locked(locked) => locked,
-        _ => panic!("expected FileLockError::Locked, got {err:?}"),
+    let FileLockError::Locked(locked) = err else {
+        panic!("expected FileLockError::Locked, got {err:?}")
     };
     assert_eq!(locked.holder_name, "cli:task-1");
 
@@ -65,10 +64,13 @@ async fn zombie_lock_overwritten_on_reacquire() {
         let _g = file_lock::try_acquire(&work_dir, "cli:zombie").unwrap();
         // Write stale expires_at_ms directly to the file.
         let lock_path = work_dir.join(".lock");
-        let stale_ms = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_millis() as u64
+        let stale_ms = u64::try_from(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_millis(),
+        )
+        .unwrap_or(u64::MAX)
             - 120_000; // 2 min ago
         let stale_body = format!("99999:cli:zombie-stale:{stale_ms}");
         std::fs::write(&lock_path, &stale_body).unwrap();

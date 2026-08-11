@@ -4,6 +4,10 @@
 //! gate is evaluated before the HTTP listener is created.
 
 #![allow(clippy::unwrap_used)]
+// ENV_TEST_LOCK is deliberately held across awaits: it serializes env-var
+// tests (NEXUS42_DAEMON_API_KEY / NEXUS_DAEMON_REMOTE_BIND) so concurrent
+// boot tests don't observe each other's environment.
+#![allow(clippy::await_holding_lock)]
 
 use nexus_daemon_runtime::boot::{run_daemon, DaemonConfig};
 use nexus_daemon_runtime::test_utils::create_test_workspace;

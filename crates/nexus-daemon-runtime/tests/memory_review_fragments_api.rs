@@ -50,6 +50,8 @@ async fn test_ctx_with_active_creator(active_creator: &str) -> TestCtx {
 }
 
 /// Seed a pending review entry via the daemon API.
+// axum_test's AutoFuture is not Send; this helper is awaited directly by #[tokio::test], never spawned
+#[allow(clippy::future_not_send)]
 async fn seed_pending_review(ctx: &TestCtx, pending_id: &str) {
     let body = json!({
         "pending_id": pending_id,
@@ -278,6 +280,9 @@ async fn pending_review_list_still_works() {
 // ─── R-V133P4-01/02: Auth enforcement + cross-creator tests ──────────────
 
 /// Assert Tier-2 `require_active_creator` middleware rejects with 409 uninitialized.
+// By-value keeps the 5+ call sites free of `&`; the response is consumed by
+// the assertion and never reused.
+#[allow(clippy::needless_pass_by_value)]
 fn assert_uninitialized_response(resp: axum_test::TestResponse) {
     resp.assert_status(axum::http::StatusCode::CONFLICT);
     let body: Value = resp.json();
@@ -425,12 +430,12 @@ async fn pending_review_count_returns_409_without_creator() {
 /// `{id}` path segments for DELETE — same pattern as `works_api` tests).
 #[tokio::test]
 async fn pending_review_delete_returns_401_without_creator() {
+    use axum::extract::{Path, Query, State};
     let (tmp, nexus_home, db_path) = test_utils::create_test_workspace().await;
     // Remove config.toml → no active creator → 401.
     std::fs::remove_file(nexus_home.join("config.toml")).expect("remove config.toml");
     let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
 
-    use axum::extract::{Path, Query, State};
     let result = nexus_daemon_runtime::api::handlers::memory::delete_pending_review(
         State(state),
         Path("pending_noauth".to_string()),
@@ -520,8 +525,8 @@ async fn seed_n_pending_reviews_raw(pool: &sqlx::SqlitePool, creator_id: &str, c
 /// call drains the remainder and reports `has_more = false`. No row is lost.
 #[tokio::test]
 async fn review_bounded_drain_walk_more_than_batch_limit() {
-    let ctx = test_ctx().await;
     const TOTAL: usize = 55; // > REVIEW_BATCH_LIMIT (50)
+    let ctx = test_ctx().await;
 
     seed_n_pending_reviews_raw(&ctx.pool, "ctr_testuser", TOTAL).await;
 
@@ -594,7 +599,7 @@ async fn review_bounded_drain_walk_more_than_batch_limit() {
         + second_promoted
         + second_fragmented
         + second_dropped;
-    assert_eq!(grand_total as usize, TOTAL);
+    assert_eq!(usize::try_from(grand_total).unwrap_or(usize::MAX), TOTAL);
 }
 
 /// Per-creator serialization: two overlapping review calls for the same creator
@@ -609,6 +614,7 @@ async fn review_overlapping_calls_no_duplicate_processing() {
     use nexus_daemon_runtime::api::handlers::memory::review;
     use nexus_daemon_runtime::workspace::WorkspaceState;
     use std::sync::Arc;
+    const SEED: usize = 5;
 
     let (tmp, nexus_home, db_path) = test_utils::create_test_workspace().await;
     // Active creator = ctr_testuser (required by the auth gate).
@@ -620,7 +626,6 @@ async fn review_overlapping_calls_no_duplicate_processing() {
     let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
     let pool = state.pool().unwrap().clone();
 
-    const SEED: usize = 5;
     seed_n_pending_reviews_raw(&pool, "ctr_testuser", SEED).await;
 
     // Two overlapping handler invocations sharing the same WorkspaceState (and
@@ -647,7 +652,7 @@ async fn review_overlapping_calls_no_duplicate_processing() {
     // an empty queue (counters sum to 0).
     assert_eq!(
         total_a + total_b,
-        SEED as i64,
+        i64::try_from(SEED).unwrap_or(i64::MAX),
         "overlapping calls must not double-process rows; got {total_a} + {total_b}"
     );
     // One of the two calls drained the queue; the other saw nothing.
@@ -906,6 +911,8 @@ async fn review_perpetually_failing_row_keeps_has_more_true_across_calls() {
 // ─── R-V181P0-QC1-W001: world_id propagation through review → fragments ─────
 
 /// Seed a pending review entry WITH a `world_id` via the daemon API.
+// axum_test's AutoFuture is not Send; this helper is awaited directly by #[tokio::test], never spawned
+#[allow(clippy::future_not_send)]
 async fn seed_pending_review_with_world(ctx: &TestCtx, pending_id: &str, world_id: &str) {
     let body = json!({
         "pending_id": pending_id,

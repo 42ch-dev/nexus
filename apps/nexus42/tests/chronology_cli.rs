@@ -83,7 +83,9 @@ async fn chronology_advance_round_trip() {
             assert_eq!(next_volume, 2);
             assert_eq!(chapters_seeded, 3);
         }
-        other => panic!("advance should succeed, got {other:?}"),
+        AdvanceOutcome::Skipped { .. } => {
+            panic!("advance should succeed, got Skipped")
+        }
     }
 
     // Outline created at the spec path layout.

@@ -24,6 +24,11 @@
 // site and whose `.expect(...)` panics are the fixture contract.
 #![allow(clippy::missing_panics_doc)]
 #![allow(clippy::must_use_candidate)]
+// The mock's Mutex guards are held across the whole port method (the lock
+// protects the in-memory store for the method's duration); the nursery
+// significant_drop_* suggestions to shorten their lifetime are noise here.
+#![allow(clippy::significant_drop_tightening)]
+#![allow(clippy::significant_drop_in_scrutinee)]
 
 use std::collections::HashMap;
 use std::sync::Mutex;

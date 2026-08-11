@@ -2799,6 +2799,9 @@ mod tests {
     // log is the primary operator observability for why the heuristic gate
     // blocked draft generation.
     #[test]
+    // The captured-log lock is held through the assertion (the failure message
+    // reads `msgs`); early-drop adds nothing in this test.
+    #[allow(clippy::significant_drop_tightening)]
     fn outline_five_q_nogo_info_logs_dimensions() {
         use std::sync::{Arc, Mutex};
 

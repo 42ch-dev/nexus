@@ -771,8 +771,8 @@ mod tests {
 
     // ── V1.150 P2: generation-stage gate (spec §4 / AC-I4) ────────────────
 
-    /// A mixed matched list covering every routing shape: before_defs,
-    /// after_defs, the reserved style outlet, two open outlets, and a
+    /// A mixed matched list covering every routing shape: `before_defs`,
+    /// `after_defs`, the reserved style outlet, two open outlets, and a
     /// no-hint neutral entry.
     fn mixed_matched_list() -> Vec<WorldKbEntry> {
         vec![

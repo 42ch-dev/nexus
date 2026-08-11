@@ -14,7 +14,6 @@ use nexus_contracts::daemon_api::reading::{
     ReadingAnnotationCreateRequest, ReadingAnnotationListQuery, ReadingAnnotationPatchRequest,
     ReadingProgressQuery, ReadingProgressRequest,
 };
-use nexus_daemon_runtime::api::errors::NexusApiError;
 use nexus_daemon_runtime::api::handlers::reading;
 use nexus_daemon_runtime::api::handlers::works::{create_work, CreateWorkRequest};
 use nexus_daemon_runtime::test_utils;
@@ -69,14 +68,6 @@ async fn create_test_work(state: &WorkspaceState) -> String {
     .await
     .expect("create work");
     resp.work_id.clone()
-}
-
-/// Extract the inner code of a `NexusApiError::BadRequest`.
-fn bad_request_code(err: &NexusApiError) -> Option<&str> {
-    match err {
-        NexusApiError::BadRequest { code, .. } => Some(code),
-        _ => None,
-    }
 }
 
 // ─── Progress ───────────────────────────────────────────────────────────────

@@ -276,7 +276,7 @@ mod tests {
     }
 
     /// The single atomic upsert contract (QC fix wave F-002): a second
-    /// observation is ONE statement — manifest_json + last_seen refresh
+    /// observation is ONE statement — `manifest_json` + `last_seen` refresh
     /// together; there is no denormalized column that could drift. Pinned
     /// here by asserting the row content after a conflict, and structurally
     /// by the absence of any second write path (the module no longer

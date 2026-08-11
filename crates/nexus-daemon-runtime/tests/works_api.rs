@@ -30,7 +30,7 @@ use serde_json::{json, Value};
 // ─── Helpers ───────────────────────────────────────────────────────────────
 
 struct TestCtx {
-    _tmp: TestTempRoot,
+    tmp: TestTempRoot,
     server: TestServer,
 }
 
@@ -41,7 +41,7 @@ async fn test_ctx() -> TestCtx {
     let auth_config = DaemonApiConfig::keyless();
     let app = api::create_router(state, auth_config);
     let server = TestServer::new(app).expect("failed to create test server");
-    TestCtx { _tmp: tmp, server }
+    TestCtx { tmp, server }
 }
 
 async fn test_ctx_no_creator() -> TestCtx {
@@ -60,7 +60,7 @@ async fn test_ctx_no_creator() -> TestCtx {
     let server = TestServer::new(app).expect("failed to create test server");
     std::mem::forget(tmp);
     TestCtx {
-        _tmp: test_utils::create_test_workspace().await.0,
+        tmp: test_utils::create_test_workspace().await.0,
         server,
     }
 }
@@ -104,7 +104,7 @@ async fn test_ctx_other_creator() -> (TestCtx, std::path::PathBuf) {
     std::mem::forget(tmp);
     (
         TestCtx {
-            _tmp: test_utils::create_test_workspace().await.0,
+            tmp: test_utils::create_test_workspace().await.0,
             server,
         },
         db_path,
@@ -130,6 +130,9 @@ fn make_create_body_with_title(title: &str) -> Value {
 }
 
 /// Create a work via HTTP and return its `work_id`.
+// `axum_test`'s AutoFuture is not `Send`; this helper only runs inside
+// current-thread `#[tokio::test]` bodies, so the future need not be `Send`.
+#[allow(clippy::future_not_send)]
 async fn create_work_with_title(server: &TestServer, title: &str) -> String {
     let resp = server
         .post("/v1/daemon/works")
@@ -954,10 +957,10 @@ async fn creator_isolation_get_work_returns_404_for_other_creator() {
     let work_id = resp.work_id.clone();
 
     // Try to GET with other creator
-    let (ctx_b, _db_b) = test_ctx_other_creator().await;
+    let (ctx_b, db_b) = test_ctx_other_creator().await;
     let _result = nexus_daemon_runtime::api::handlers::works::get_work(
         State(
-            WorkspaceState::new_for_testing(ctx_b._tmp.path().join(".nexus42"), _db_b, None).await,
+            WorkspaceState::new_for_testing(ctx_b.tmp.path().join(".nexus42"), db_b, None).await,
         ),
         Path(work_id.clone()),
     )
@@ -990,7 +993,7 @@ async fn creator_isolation_patch_work_returns_404_for_other_creator() {
 
     // Try to PATCH with other creator's state
     let (ctx_b, db_b) = test_ctx_other_creator().await;
-    let nh_b = ctx_b._tmp.path().join(".nexus42");
+    let nh_b = ctx_b.tmp.path().join(".nexus42");
     // Different DB so the work_id doesn't exist
     let patch = PatchWorkRequest {
         title: Some("Hacked".into()),

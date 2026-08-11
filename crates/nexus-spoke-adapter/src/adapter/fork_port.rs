@@ -205,8 +205,8 @@ mod tests {
         ("wld_fork".to_string(), event_ids)
     }
 
-    /// Build a spoke `Scope` with fork_id set (the fork port's required field)
-    /// plus optional event_ids filter.
+    /// Build a spoke `Scope` with `fork_id` set (the fork port's required field)
+    /// plus optional `event_ids` filter.
     fn fork_scope(world_id: &str, fork_id: &str, event_ids: &[&str]) -> Scope {
         let mut wire = serde_json::Map::new();
         wire.insert("scope_id".into(), Value::String(world_id.to_string()));

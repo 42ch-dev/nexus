@@ -163,7 +163,7 @@ fn import_url(world_id: &str) -> String {
     format!("/v1/daemon/worlds/{world_id}/kb/pack/import")
 }
 
-/// Same-DB cross-world import cannot reuse entry_ids owned by the source world.
+/// Same-DB cross-world import cannot reuse `entry_ids` owned by the source world.
 /// Mint fresh ids (and remap relation endpoints) so import exercises create paths.
 fn fresh_entry_ids_in_pack(pack: &mut Value) {
     let entries = pack
@@ -202,12 +202,16 @@ fn fresh_entry_ids_in_pack(pack: &mut Value) {
     }
 }
 
+// axum_test's AutoFuture is not Send; this helper is awaited directly by #[tokio::test], never spawned
+#[allow(clippy::future_not_send)]
 async fn export_pack(server: &TestServer, world_id: &str) -> Value {
     let resp = server.post(&export_url(world_id)).json(&json!({})).await;
     assert_eq!(resp.status_code(), StatusCode::OK, "body={}", resp.text());
     resp.json()
 }
 
+// axum_test's AutoFuture is not Send; this helper is awaited directly by #[tokio::test], never spawned
+#[allow(clippy::future_not_send)]
 async fn import_pack_http(
     server: &TestServer,
     world_id: &str,
@@ -302,7 +306,7 @@ async fn pack_export_owned_world_returns_pack_envelope() {
     );
     let relations = body["relations"].as_array().expect("relations array");
     assert!(
-        relations.len() >= 1,
+        !relations.is_empty(),
         "expected at least one exported relation: {body}"
     );
 }

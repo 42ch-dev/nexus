@@ -343,7 +343,7 @@ mod tests {
 
     #[test]
     fn format_and_parse_roundtrip() {
-        let body = format_lock_body("cli:cron-set", 1718700000000);
+        let body = format_lock_body("cli:cron-set", 1_718_700_000_000);
 
         // Verify the body uses the correct format with three colon-delimited segments.
         // Holder names may contain colons, so we use first/last colon parsing.
@@ -359,13 +359,13 @@ mod tests {
         let parsed = parse_lock_body(&body).unwrap();
         assert_eq!(parsed.0, std::process::id());
         assert_eq!(parsed.1, "cli:cron-set");
-        assert_eq!(parsed.2, 1718700000000);
+        assert_eq!(parsed.2, 1_718_700_000_000);
 
         // Test with a daemon-style holder name with multiple colons.
-        let body2 = format_lock_body("daemon:schedule:SCH20260618120000", 1718800000000);
+        let body2 = format_lock_body("daemon:schedule:SCH20260618120000", 1_718_800_000_000);
         let parsed2 = parse_lock_body(&body2).unwrap();
         assert_eq!(parsed2.1, "daemon:schedule:SCH20260618120000");
-        assert_eq!(parsed2.2, 1718800000000);
+        assert_eq!(parsed2.2, 1_718_800_000_000);
     }
 
     #[test]
@@ -413,9 +413,8 @@ mod tests {
         let _guard = try_acquire(&work_dir, "cli:holder-a").unwrap();
 
         let err = try_acquire(&work_dir, "cli:holder-b").unwrap_err();
-        let locked = match err {
-            FileLockError::Locked(locked) => locked,
-            _ => panic!("expected FileLockError::Locked, got {err:?}"),
+        let FileLockError::Locked(locked) = err else {
+            panic!("expected FileLockError::Locked, got {err:?}")
         };
         assert_eq!(locked.holder_name, "cli:holder-a");
         assert_eq!(locked.holder_pid, std::process::id());
@@ -530,9 +529,8 @@ mod tests {
 
         let guard_a = try_acquire(&work_dir, "cli:scope-a").unwrap();
         let err = try_acquire(&work_dir, "cli:scope-b").unwrap_err();
-        let locked = match err {
-            FileLockError::Locked(locked) => locked,
-            _ => panic!("expected FileLockError::Locked, got {err:?}"),
+        let FileLockError::Locked(locked) = err else {
+            panic!("expected FileLockError::Locked, got {err:?}")
         };
         assert_eq!(locked.holder_name, "cli:scope-a");
 

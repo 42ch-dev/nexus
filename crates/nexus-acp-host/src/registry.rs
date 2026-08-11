@@ -517,7 +517,7 @@ const SCAN_VERSION_TIMEOUT: Duration = Duration::from_secs(2);
 /// - Concurrency is bounded to [`SCAN_MAX_CONCURRENT`].
 /// - Each probe is capped at [`SCAN_VERSION_TIMEOUT`].
 pub async fn scan_local_installations(registry: &Registry) -> Vec<LocalInstallation> {
-    scan_local_installations_impl(registry, &[]).await
+    scan_local_installations_impl(registry, &[], SCAN_VERSION_TIMEOUT).await
 }
 
 /// Like [`scan_local_installations`], but probes binaries against an explicit
@@ -531,12 +531,20 @@ pub async fn scan_local_installations_with_path(
     registry: &Registry,
     path_dirs: &[PathBuf],
 ) -> Vec<LocalInstallation> {
-    scan_local_installations_impl(registry, path_dirs).await
+    scan_local_installations_impl(registry, path_dirs, SCAN_VERSION_TIMEOUT).await
 }
 
+/// Shared scan implementation.
+///
+/// `probe_timeout` bounds each `<binary> --version` probe; production callers
+/// pass [`SCAN_VERSION_TIMEOUT`]. The parameter is test-only plumbing (same as
+/// `path_dirs`): R-V1148P0-001 / R-V1151P2-004 — under full-parallel
+/// `cargo test --all`, process-fork + exec latency can exceed the 2s production
+/// window, so the scan-probe tests probe with a generous test-only timeout.
 async fn scan_local_installations_impl(
     registry: &Registry,
     path_dirs: &[PathBuf],
+    probe_timeout: Duration,
 ) -> Vec<LocalInstallation> {
     use std::collections::HashSet;
     use tokio::sync::Semaphore;
@@ -577,7 +585,7 @@ async fn scan_local_installations_impl(
         let handle = tokio::spawn(async move {
             // Hold the permit for the duration of the probe.
             let _permit = permit;
-            probe_local_binary(&binary, SCAN_VERSION_TIMEOUT, &path_dirs).await
+            probe_local_binary(&binary, probe_timeout, &path_dirs).await
         });
         handles.push(handle);
     }
@@ -665,6 +673,7 @@ async fn probe_local_binary(
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
+    use serial_test::serial;
     use tempfile::TempDir;
 
     /// Sample registry JSON matching the live ACP CDN format.
@@ -1090,6 +1099,19 @@ mod tests {
 
     // ── Local Installation Scan Tests ─────────────────────────────
 
+    // R-V1148P0-001 / R-V1151P2-004 RCA: `scan_local_installations_*` fork a
+    // real `<shim> --version` subprocess per probe, bounded by the production
+    // `SCAN_VERSION_TIMEOUT` (2s). Under full-parallel `cargo test --all`,
+    // process-fork + exec latency on otherwise-fast shims can exceed 2s, so
+    // the probe times out and the version is reported as `None` — flaking the
+    // fast-path assertions (~50% recurrence in CI). Fix: the fork/PATH cohort
+    // below is marked `#[serial]` (no concurrent forks inside this binary) and
+    // the fast-path tests probe with a generous test-only timeout; the
+    // timeout-path test (`scan_local_installations_handles_timeout`) still
+    // exercises the real `SCAN_VERSION_TIMEOUT`. Production behavior is
+    // unchanged (wrappers pass `SCAN_VERSION_TIMEOUT`).
+    const TEST_PROBE_TIMEOUT: Duration = Duration::from_secs(30);
+
     fn make_shim(tmp: &tempfile::TempDir, name: &str, script: &str) -> std::path::PathBuf {
         let shim = tmp.path().join(name);
         std::fs::write(&shim, script).expect("write shim");
@@ -1135,13 +1157,18 @@ mod tests {
     }
 
     #[tokio::test]
+    #[serial]
     async fn scan_local_installations_finds_installed_binary() {
         let tmp = tempfile::tempdir().expect("temp dir");
         make_shim(&tmp, "test-agent", "#!/bin/sh\necho \"test-agent 1.2.3\"\n");
 
         let registry = registry_with_binary("test-agent");
-        let results =
-            scan_local_installations_with_path(&registry, &[tmp.path().to_path_buf()]).await;
+        let results = scan_local_installations_impl(
+            &registry,
+            &[tmp.path().to_path_buf()],
+            TEST_PROBE_TIMEOUT,
+        )
+        .await;
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].binary, "test-agent");
         assert!(results[0].version.is_some());
@@ -1159,19 +1186,25 @@ mod tests {
     }
 
     #[tokio::test]
+    #[serial]
     async fn scan_local_installations_strips_relative_path_prefix() {
         let tmp = tempfile::tempdir().expect("temp dir");
         make_shim(&tmp, "kimi", "#!/bin/sh\necho \"kimi 1.0.0\"\n");
 
         let registry = registry_with_binary("./kimi");
-        let results =
-            scan_local_installations_with_path(&registry, &[tmp.path().to_path_buf()]).await;
+        let results = scan_local_installations_impl(
+            &registry,
+            &[tmp.path().to_path_buf()],
+            TEST_PROBE_TIMEOUT,
+        )
+        .await;
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].binary, "kimi");
         assert_eq!(results[0].version.as_deref(), Some("kimi 1.0.0"));
     }
 
     #[tokio::test]
+    #[serial]
     async fn scan_local_installations_strips_nested_relative_path() {
         let tmp = tempfile::tempdir().expect("temp dir");
         make_shim(
@@ -1181,14 +1214,19 @@ mod tests {
         );
 
         let registry = registry_with_binary("./dist-package/cursor-agent");
-        let results =
-            scan_local_installations_with_path(&registry, &[tmp.path().to_path_buf()]).await;
+        let results = scan_local_installations_impl(
+            &registry,
+            &[tmp.path().to_path_buf()],
+            TEST_PROBE_TIMEOUT,
+        )
+        .await;
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].binary, "cursor-agent");
         assert_eq!(results[0].version.as_deref(), Some("cursor-agent 2.0.0"));
     }
 
     #[tokio::test]
+    #[serial]
     async fn scan_local_installations_handles_timeout() {
         let tmp = tempfile::tempdir().expect("temp dir");
         let sleep_secs = SCAN_VERSION_TIMEOUT.as_secs() + 2;
@@ -1216,13 +1254,18 @@ mod tests {
     }
 
     #[tokio::test]
+    #[serial]
     async fn scan_local_installations_keeps_bare_command_name() {
         let tmp = tempfile::tempdir().expect("temp dir");
         make_shim(&tmp, "opencode", "#!/bin/sh\necho \"opencode 3.0.0\"\n");
 
         let registry = registry_with_binary("opencode");
-        let results =
-            scan_local_installations_with_path(&registry, &[tmp.path().to_path_buf()]).await;
+        let results = scan_local_installations_impl(
+            &registry,
+            &[tmp.path().to_path_buf()],
+            TEST_PROBE_TIMEOUT,
+        )
+        .await;
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].binary, "opencode");
         assert_eq!(results[0].version.as_deref(), Some("opencode 3.0.0"));

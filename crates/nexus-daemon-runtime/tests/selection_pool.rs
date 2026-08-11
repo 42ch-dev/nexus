@@ -371,12 +371,10 @@ async fn test_inspiration_promote_creates_work_and_pool_row() {
     )
     .await
     .unwrap();
-    let active_entries: Vec<_> = pool_resp
-        .entries
-        .iter()
-        .filter(|e| e.status == "active")
-        .collect();
-    assert_eq!(active_entries.len(), 1);
+    assert_eq!(
+        pool_resp.entries.iter().filter(|e| e.status == "active").count(),
+        1
+    );
 
     // Verify inspiration item is promoted
     let insp_resp = nexus_daemon_runtime::api::handlers::works::list_inspiration(
@@ -538,6 +536,7 @@ async fn test_archive_pool_rejects_cross_creator() {
 #[tokio::test]
 #[serial]
 async fn test_archive_inspiration_rejects_cross_creator() {
+    use nexus_daemon_runtime::api::handlers::works::ArchiveInspirationRequest;
     let (state, _tmp) = handler_state().await;
 
     let (_status, resp) = nexus_daemon_runtime::api::handlers::works::add_inspiration(
@@ -560,7 +559,6 @@ async fn test_archive_inspiration_rejects_cross_creator() {
     )
     .unwrap();
 
-    use nexus_daemon_runtime::api::handlers::works::ArchiveInspirationRequest;
     let result = nexus_daemon_runtime::api::handlers::works::archive_inspiration_handler(
         State(state.clone()),
         axum::Json(ArchiveInspirationRequest {

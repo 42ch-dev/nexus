@@ -1697,6 +1697,9 @@ states:
         assert_eq!(body, "original content");
     }
 
+    // res_a/res_b + task_a/task_b are the conventional tokio::join! naming for
+    // the two concurrent patch attempts; pedantic similar_names is noise here.
+    #[allow(clippy::similar_names)]
     #[tokio::test]
     async fn concurrent_patch_state_serializes_on_lock() {
         use crate::test_utils::create_test_workspace;

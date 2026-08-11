@@ -113,15 +113,10 @@ fn render_outline_prompt(preset_input: &serde_json::Value) -> String {
         .expect("novel-writing outline-chapter.md must be embedded");
 
     // Strip the YAML frontmatter; render only the Markdown body.
-    let body = if let Some(rest) = raw.strip_prefix("---\n") {
-        if let Some(end) = rest.find("\n---\n") {
-            &rest[end + "\n---\n".len()..]
-        } else {
-            rest
-        }
-    } else {
-        &raw[..]
-    };
+    let body = raw.strip_prefix("---\n").map_or(&raw[..], |rest| {
+        rest.find("\n---\n")
+            .map_or(rest, |end| &rest[end + "\n---\n".len()..])
+    });
 
     // The prompt uses `{{world_kb_block}}` and `{{open_findings_block}}`
     // as top-level vars; the preset wires `preset.input.X` → prompt var
@@ -167,10 +162,12 @@ fn render_outline_prompt(preset_input: &serde_json::Value) -> String {
 ///    block, contains the `## Open Findings to Address` section and the
 ///    finding titles.
 #[tokio::test]
+// Long integration test; splitting would obscure the end-to-end scenario
+#[allow(clippy::too_many_lines)]
 async fn novel_writing_outline_includes_open_findings_block_when_seeded() {
-    let pool = test_pool().await;
     const WORK: &str = "wrk_fc_1";
     const WORK_REF: &str = "fc-test-novel-1";
+    let pool = test_pool().await;
 
     let work = novel_work(WORK, WORK_REF);
     works::create_work(&pool, &work).await.unwrap();
@@ -306,9 +303,9 @@ async fn novel_writing_outline_includes_open_findings_block_when_seeded() {
 /// (no empty sentinel noise).
 #[tokio::test]
 async fn novel_writing_outline_omits_block_when_no_findings() {
-    let pool = test_pool().await;
     const WORK: &str = "wrk_fc_2";
     const WORK_REF: &str = "fc-test-novel-2";
+    let pool = test_pool().await;
 
     let work = novel_work(WORK, WORK_REF);
     works::create_work(&pool, &work).await.unwrap();
@@ -470,9 +467,9 @@ fn novel_writing_preset_input_coerces_none_open_findings_block_to_empty() {
 /// excluded (the master-review surface owns those).
 #[tokio::test]
 async fn actionable_set_includes_triaged_and_excludes_in_review() {
-    let pool = test_pool().await;
     const WORK: &str = "wrk_fc_actionable";
     const WORK_REF: &str = "fc-actionable";
+    let pool = test_pool().await;
 
     let work = novel_work(WORK, WORK_REF);
     works::create_work(&pool, &work).await.unwrap();

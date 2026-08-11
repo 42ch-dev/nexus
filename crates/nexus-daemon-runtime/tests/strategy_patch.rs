@@ -761,8 +761,8 @@ async fn concurrent_patch_state_serializes_and_one_writer_gets_conflict() {
         .await
     });
 
-    let (res_a, res_b) = tokio::join!(task_a, task_b);
-    let outcomes = [res_a.unwrap(), res_b.unwrap()];
+    let (result_a, result_b) = tokio::join!(task_a, task_b);
+    let outcomes = [result_a.unwrap(), result_b.unwrap()];
     let successes = outcomes.iter().filter(|r| r.is_ok()).count();
     let conflicts = outcomes
         .iter()

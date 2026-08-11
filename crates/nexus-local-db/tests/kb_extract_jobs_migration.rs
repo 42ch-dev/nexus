@@ -281,11 +281,11 @@ async fn pending_index_supports_filtered_list() {
 /// Uses `EXPLAIN QUERY PLAN` (hermetic, deterministic on `SQLite`'s planner).
 #[tokio::test]
 async fn pending_list_uses_world_id_covering_index() {
+    use nexus_local_db::kb_extract_job::insert_pending;
     let (pool, _dir) = fresh_pool().await;
 
     // Seed one pending row so the planner has stats (not strictly required for
     // EXPLAIN QUERY PLAN, but mirrors a realistic state).
-    use nexus_local_db::kb_extract_job::insert_pending;
     insert_pending(
         &pool,
         "ctr_1",
@@ -303,6 +303,7 @@ async fn pending_list_uses_world_id_covering_index() {
     // Mirror the list_pending_for_world query shape verbatim.
     // SAFETY: test-only EXPLAIN QUERY PLAN inspection; static SQL mirror.
     // EXPLAIN QUERY PLAN columns: (id INTEGER, parent INTEGER, notused INTEGER, detail TEXT).
+    #[allow(clippy::type_complexity)] // row shape is dictated by sqlx/sqlite, not by us
     let plan: Vec<(Option<i64>, Option<i64>, Option<i64>, String)> = sqlx::query_as(
         "EXPLAIN QUERY PLAN \
          SELECT job_id FROM kb_extract_jobs \
@@ -359,10 +360,10 @@ async fn v151_forward_migration_adds_llm_columns() {
 /// (additive migration; no backfill; no destructive change).
 #[tokio::test]
 async fn v151_legacy_rows_default_llm_columns_to_null() {
+    use nexus_local_db::kb_extract_job::insert_pending;
     let (pool, _dir) = fresh_pool().await;
 
     // Insert a V1.50-style heuristic pending row via the legacy entry point.
-    use nexus_local_db::kb_extract_job::insert_pending;
     let row = insert_pending(
         &pool,
         "ctr_v151",

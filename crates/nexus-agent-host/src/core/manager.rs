@@ -1430,9 +1430,8 @@ mod tests {
             .await;
 
         assert!(result.is_err());
-        let err = match result {
-            Err(e) => e,
-            Ok(_) => panic!("expected error, got success"),
+        let Err(err) = result else {
+            panic!("expected error, got success")
         };
         assert_eq!(err.category(), "policy_denied");
         assert!(

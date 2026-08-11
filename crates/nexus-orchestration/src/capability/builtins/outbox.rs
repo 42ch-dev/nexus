@@ -276,7 +276,7 @@ mod tests {
         updated_at: Option<&str>,
     ) {
         let now = chrono::Utc::now().to_rfc3339();
-        let updated_val = updated_at.map_or("NULL".to_string(), |u| format!("'{u}'"));
+        let updated_val = updated_at.map_or_else(|| "NULL".to_string(), |u| format!("'{u}'"));
         // SAFETY: test-only DDL — dynamic SQL for flexible test helper.
         sqlx::query(&format!(
             "INSERT INTO outbox_entries

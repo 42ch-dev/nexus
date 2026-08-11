@@ -1157,7 +1157,9 @@ mod tests {
             .expect("initialize");
         assert!(state.pool().is_none());
 
-        set_active_creator(
+        // The handler's `Json` response is #[must_use]; the test only checks
+        // the side effect (pool opened), so discard the response value.
+        let _ = set_active_creator(
             State(state.clone()),
             Json(SetActiveCreatorRequest {
                 creator_id: CREATOR_ID.to_string(),

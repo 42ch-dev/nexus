@@ -2,13 +2,13 @@
 //! HTTP integration tests.
 //!
 //! Exercises the tier-2 cursor-paginated timeline-events read route over a
-//! real axum router + SQLite:
+//! real axum router + `SQLite`:
 //!
 //! - happy list (seeded world + events incl. `compute_result` with extensions)
 //! - branch filter
 //! - status filter (enum, default `canon`)
-//! - event_type exact-match filter
-//! - cursor pagination (keyset on (branch_id, sequence_no))
+//! - `event_type` exact-match filter
+//! - cursor pagination (keyset on (`branch_id`, `sequence_no`))
 //! - not-owner → 403, unknown world → 404
 //! - empty list
 //!
@@ -107,6 +107,9 @@ async fn seed_foreign_world(pool: &sqlx::SqlitePool) {
     .unwrap();
 }
 
+// `axum_test`'s AutoFuture is not `Send`; this helper only runs inside
+// current-thread `#[tokio::test]` bodies, so the future need not be `Send`.
+#[allow(clippy::future_not_send)]
 async fn list_events(ctx: &Ctx, world_id: &str, query: &str) -> axum_test::TestResponse {
     ctx.server
         .get(&format!(
@@ -115,7 +118,7 @@ async fn list_events(ctx: &Ctx, world_id: &str, query: &str) -> axum_test::TestR
         .await
 }
 
-/// T1: happy list — canon default, root-branch default, compute_result with
+/// T1: happy list — canon default, root-branch default, `compute_result` with
 /// extensions parsed, keyset ordering.
 #[tokio::test]
 async fn happy_list_includes_compute_result_with_extensions() {
@@ -264,7 +267,7 @@ async fn branch_filter_narrows_results() {
     assert_eq!(items[0]["title"], "Other branch event");
 }
 
-/// T1: event_type exact-match filter.
+/// T1: `event_type` exact-match filter.
 #[tokio::test]
 async fn event_type_filter_narrows_results() {
     let ctx = ctx().await;
@@ -305,7 +308,7 @@ async fn event_type_filter_narrows_results() {
     assert_eq!(body["items"].as_array().unwrap().len(), 0);
 }
 
-/// T1: keyset cursor pagination on (branch_id, sequence_no).
+/// T1: keyset cursor pagination on (`branch_id`, `sequence_no`).
 #[tokio::test]
 async fn cursor_pagination() {
     let ctx = ctx().await;
@@ -361,7 +364,7 @@ async fn cursor_pagination() {
     assert_eq!(items3[0]["sequence_no"], 4);
 }
 
-/// T1: invalid cursor → 400 invalid_input.
+/// T1: invalid cursor → 400 `invalid_input`.
 #[tokio::test]
 async fn invalid_cursor_rejected() {
     let ctx = ctx().await;
@@ -371,7 +374,7 @@ async fn invalid_cursor_rejected() {
     assert_eq!(body["error"]["code"], "invalid_input");
 }
 
-/// T1: invalid status filter → 400 invalid_input.
+/// T1: invalid status filter → 400 `invalid_input`.
 #[tokio::test]
 async fn invalid_status_rejected() {
     let ctx = ctx().await;
@@ -392,7 +395,7 @@ async fn not_owner_forbidden() {
     assert_eq!(body["error"]["code"], "forbidden");
 }
 
-/// T1: unknown world → 404 not_found.
+/// T1: unknown world → 404 `not_found`.
 #[tokio::test]
 async fn unknown_world_not_found() {
     let ctx = ctx().await;
@@ -402,7 +405,7 @@ async fn unknown_world_not_found() {
     assert_eq!(body["error"]["code"], "not_found");
 }
 
-/// T1: world with no events → empty list, has_more false.
+/// T1: world with no events → empty list, `has_more` false.
 #[tokio::test]
 async fn empty_list() {
     let ctx = ctx().await;
