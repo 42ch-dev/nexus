@@ -373,4 +373,4 @@ The runtime scans compiled expression ASTs for `registry_refresh` and `workspace
 
 ---
 
-*Draft V1.42 SSOT for preset conditional routing (DF-56 minimal slice). Full routing authority remains a future locked compass.*
+*Normative SSOT for preset conditional routing. V1.42 Draft established minimal `llm_judge` GO/NOGO; V1.52 promoted N-way labeled routing + multi-branch merge semantics; V1.56 promoted expression grammar + context namespace. All overlays promoted to Normative (V1.158 P3).*

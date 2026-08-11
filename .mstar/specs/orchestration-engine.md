@@ -652,7 +652,7 @@ Suggest ten concrete research directions, each as a bullet with a one-line justi
 
 ### 7.5 Conditional `next` + Converge State Kinds
 
-**Normative SSOT:** [preset-conditional-routing.md](preset-conditional-routing.md) — Status **Draft (V1.56 P2 shipped)**. This subsection is a cross-reference; the full conditional schema, expression grammar, multi-branch routing, and merge semantics live in that document.
+**Normative SSOT:** [preset-conditional-routing.md](preset-conditional-routing.md) — **Normative** (all overlays promoted V1.158 P3). This subsection is a cross-reference; the full conditional schema, expression grammar, multi-branch routing, and merge semantics live in that document.
 
 **Converge (merge-point) state kind** (V1.56 P2 fix-wave, H-001/W-002): states may declare a `converge` config with a `strategy` field to act as explicit join points for multiple incoming edges:
 
