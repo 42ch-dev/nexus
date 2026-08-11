@@ -28,6 +28,8 @@ fn sample_bundle_root() -> std::path::PathBuf {
 }
 
 #[test]
+// Long integration test; splitting would obscure the end-to-end scenario
+#[allow(clippy::too_many_lines)]
 fn game_narrative_sample_validates_clean() {
     let caps = CapabilityRegistry::with_builtins();
     let bundle_root = sample_bundle_root();

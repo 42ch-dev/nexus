@@ -1028,14 +1028,12 @@ mod tests {
             "bound put must not be visible before outer commit"
         );
 
-        tx_cell
+        let tx = tx_cell
             .lock()
             .expect("tx mutex")
             .take()
-            .expect("tx in cell")
-            .commit()
-            .await
-            .unwrap();
+            .expect("tx in cell");
+        tx.commit().await.unwrap();
         assert!(
             store.get_knowledge_entry(&entry_id).await.is_ok(),
             "bound put must be visible after outer commit"

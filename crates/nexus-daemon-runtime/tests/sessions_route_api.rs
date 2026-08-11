@@ -39,6 +39,8 @@ async fn test_server_with_engine() -> EngineCtx {
     EngineCtx { _tmp: tmp, server }
 }
 
+// axum_test's AutoFuture is not Send; this helper is awaited directly by #[tokio::test], never spawned
+#[allow(clippy::future_not_send)]
 async fn create_session(server: &TestServer, creator_id: &str, preset_id: &str) -> String {
     let req = CreateSessionRequest {
         creator_id: creator_id.to_string(),

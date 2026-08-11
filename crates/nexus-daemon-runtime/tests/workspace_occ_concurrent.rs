@@ -25,8 +25,6 @@ use nexus_local_db as db;
 use std::sync::Arc;
 use tokio::task::JoinHandle;
 
-const OWNER: &str = "ctr_occ_v158";
-
 async fn fresh_pool() -> (Arc<sqlx::SqlitePool>, tempfile::TempDir) {
     let dir = tempfile::tempdir().unwrap();
     let db_path = dir.path().join("state.db");

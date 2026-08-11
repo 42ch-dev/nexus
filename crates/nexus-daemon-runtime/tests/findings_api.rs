@@ -175,6 +175,8 @@ async fn findings_list_filter_by_work_id() {
 /// produce-prompt consumer (`assemble_open_findings_block`) now sends this
 /// query so the V1.49 actionable set `{open, triaged}` reaches chapter
 /// prompts in a single round trip.
+// Long integration test; splitting would obscure the end-to-end scenario.
+#[allow(clippy::too_many_lines)]
 #[tokio::test]
 async fn findings_list_filter_by_comma_separated_status() {
     let (state, _tmp) = handler_state().await;

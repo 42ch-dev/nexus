@@ -2002,14 +2002,8 @@ mod tests {
         // but does NOT appear in placement.
         assert_eq!(activation_trace[1]["entry_id"], "kb_castle");
         assert_eq!(activation_trace[1]["accepted"], false);
-        let placement_ids: Vec<&str> = placement
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|e| e["entry_id"].as_str().unwrap())
-            .collect();
         assert!(
-            !placement_ids.contains(&"kb_castle"),
+            !placement.as_array().unwrap().iter().any(|e| e["entry_id"].as_str() == Some("kb_castle")),
             "Castle must not appear in placement (unmatched)"
         );
     }
@@ -2038,7 +2032,7 @@ mod tests {
         );
     }
 
-    /// P4 T3: activation_trace is None (no activation enabled) → empty arrays.
+    /// P4 T3: `activation_trace` is None (no activation enabled) → empty arrays.
     #[test]
     fn inspector_packet_no_trace_produces_empty_arrays() {
         let ctx = MomentContext {
@@ -2108,7 +2102,7 @@ mod tests {
     // ── V1.151 P0 T4: assemble-moment --inspect + enriched --emit-packet ──
 
     /// Build a `MomentContext` carrying the full enriched surface (activation
-    /// trace + slot_map + budget + directive meta) for the renderer /
+    /// trace + `slot_map` + budget + directive meta) for the renderer /
     /// emission tests — the same shape `build_inspector_packet` consumes.
     fn enriched_mock_ctx() -> MomentContext {
         use nexus_moment_context_assembly::directive::{
@@ -2263,7 +2257,7 @@ mod tests {
                     ContextCommand::AssembleMoment { inspect, .. } => {
                         assert!(inspect, "--inspect must set inspect = true");
                     }
-                    _ => panic!("unexpected context subcommand"),
+                    ContextCommand::Assemble { .. } => panic!("unexpected context subcommand"),
                 },
                 _ => panic!("unexpected platform subcommand"),
             },

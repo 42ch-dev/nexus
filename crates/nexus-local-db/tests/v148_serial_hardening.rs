@@ -100,6 +100,8 @@ async fn v148_serial_resume_draft_no_duplicate_row() {
 /// §4.5.7 #5 — `creator run reconcile-chapters <work_id>` rebuilds missing
 /// `work_chapters` rows from `Stories/` and preserves DB-as-status-SSOT when
 /// filesystem frontmatter disagrees with the DB row (§4.5.3).
+// Long integration test; splitting would obscure the end-to-end scenario.
+#[allow(clippy::too_many_lines)]
 #[tokio::test]
 async fn v148_serial_reconcile_preserves_db_status_and_creates_missing() {
     let tmp = tempfile::tempdir().unwrap();

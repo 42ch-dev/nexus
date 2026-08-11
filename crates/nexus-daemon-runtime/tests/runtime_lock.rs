@@ -480,6 +480,10 @@ async fn test_reconcile_chapters_read_phase_runs_unlocked() {
 /// file whose frontmatter would force a `created` row in the mutating path.
 /// The dry-run path must report the same `created: 1` without writing the row
 /// or touching the file.
+// End-to-end dry-run scenario: setup, dry-run report assertions, zero
+// FS/DB mutation checks, and a mutating sanity path all share one fixture;
+// splitting would fragment the single-scenario narrative.
+#[allow(clippy::too_many_lines)]
 #[tokio::test]
 async fn test_reconcile_chapters_dry_run_makes_zero_mutations() {
     use nexus_daemon_runtime::api::handlers::works::ReconcileDryRunQuery;

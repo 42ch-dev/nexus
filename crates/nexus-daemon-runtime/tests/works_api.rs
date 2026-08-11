@@ -130,6 +130,9 @@ fn make_create_body_with_title(title: &str) -> Value {
 }
 
 /// Create a work via HTTP and return its `work_id`.
+// `axum_test`'s AutoFuture is not `Send`; this helper only runs inside
+// current-thread `#[tokio::test]` bodies, so the future need not be `Send`.
+#[allow(clippy::future_not_send)]
 async fn create_work_with_title(server: &TestServer, title: &str) -> String {
     let resp = server
         .post("/v1/daemon/works")

@@ -31,7 +31,7 @@ use nexus_local_db::works::{self, WorkRecord};
 use nexus_orchestration::schedule::supervisor::ScheduleSupervisor;
 use serde_json::{json, Value};
 use serial_test::serial;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 struct TestCtx {
@@ -69,7 +69,7 @@ async fn test_ctx() -> TestCtx {
 
 /// Seed a minimal Work row so gated presets can load a Work snapshot during
 /// gate evaluation. Returns the pool for further seeding if needed.
-async fn seed_work(db_path: &PathBuf, work_id: &str, creator_id: &str) {
+async fn seed_work(db_path: &Path, work_id: &str, creator_id: &str) {
     let db_url = format!("sqlite:{}?mode=rw", db_path.display());
     let pool = sqlx::SqlitePool::connect(&db_url).await.unwrap();
     let record = WorkRecord {
@@ -479,6 +479,9 @@ async fn gated_preset_without_work_id_is_rejected() {
 // unique creator id); the sort cohort is additionally marked `#[serial]` for
 // deterministic isolation per plan (no blanket timeout inflation).
 
+// `axum_test`'s AutoFuture is not `Send`; this helper only runs inside
+// current-thread `#[tokio::test]` bodies, so the future need not be `Send`.
+#[allow(clippy::future_not_send)]
 async fn create_schedule_with_label(server: &TestServer, creator_id: &str, label: &str) {
     let req = AddScheduleRequest {
         creator_id: creator_id.to_string(),

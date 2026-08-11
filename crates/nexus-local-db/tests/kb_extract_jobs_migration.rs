@@ -303,6 +303,7 @@ async fn pending_list_uses_world_id_covering_index() {
     // Mirror the list_pending_for_world query shape verbatim.
     // SAFETY: test-only EXPLAIN QUERY PLAN inspection; static SQL mirror.
     // EXPLAIN QUERY PLAN columns: (id INTEGER, parent INTEGER, notused INTEGER, detail TEXT).
+    #[allow(clippy::type_complexity)] // row shape is dictated by sqlx/sqlite, not by us
     let plan: Vec<(Option<i64>, Option<i64>, Option<i64>, String)> = sqlx::query_as(
         "EXPLAIN QUERY PLAN \
          SELECT job_id FROM kb_extract_jobs \

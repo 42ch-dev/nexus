@@ -732,6 +732,11 @@ fn platform_binary_commands(binary: &nexus_acp_host::registry::BinaryDistributio
 
 #[cfg(test)]
 mod tests {
+    // SCAN_PATH_LOCK is deliberately held across awaits: it serializes
+    // PATH-mutating scan tests so concurrent probes don't see each other's
+    // shim directories (see the lock's doc comment below).
+    #![allow(clippy::await_holding_lock)]
+
     use super::*;
     use crate::test_utils::create_test_workspace;
     use crate::workspace::WorkspaceState;

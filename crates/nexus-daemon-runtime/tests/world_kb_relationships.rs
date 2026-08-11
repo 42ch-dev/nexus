@@ -234,7 +234,10 @@ async fn update_relationship_returns_bumped_version_and_projected_row() {
     assert_eq!(rel.relationship_id, rel_id);
     assert_eq!(rel.relation_type.to_string(), "mentor_of");
     assert!(rel.symmetric);
-    assert_eq!(rel.confidence.unwrap(), 0.75);
+    assert!(
+        (rel.confidence.unwrap() - 0.75).abs() < f64::EPSILON,
+        "confidence should round-trip as 0.75"
+    );
 }
 
 // ── V1.144 P2 T4: relate-cutover behavior-equivalence (post-state) ──────────
@@ -392,7 +395,10 @@ async fn update_then_reread_via_get_graph_confirms_data_persisted() {
         .expect("updated row visible in graph");
     assert_eq!(stored.relation_type.to_string(), "mentor_of");
     assert!(stored.symmetric, "symmetric=true persisted");
-    assert_eq!(stored.confidence.unwrap(), 0.8, "confidence=0.8 persisted");
+    assert!(
+        (stored.confidence.unwrap() - 0.8).abs() < f64::EPSILON,
+        "confidence=0.8 persisted"
+    );
 }
 
 /// A.4 — create-on-existing (`RelationAlreadyExists` → 409) is structurally

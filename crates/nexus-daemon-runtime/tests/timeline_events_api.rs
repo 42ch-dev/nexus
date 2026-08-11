@@ -107,6 +107,9 @@ async fn seed_foreign_world(pool: &sqlx::SqlitePool) {
     .unwrap();
 }
 
+// `axum_test`'s AutoFuture is not `Send`; this helper only runs inside
+// current-thread `#[tokio::test]` bodies, so the future need not be `Send`.
+#[allow(clippy::future_not_send)]
 async fn list_events(ctx: &Ctx, world_id: &str, query: &str) -> axum_test::TestResponse {
     ctx.server
         .get(&format!(

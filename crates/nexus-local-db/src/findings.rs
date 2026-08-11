@@ -2150,6 +2150,9 @@ mod tests {
     // ── V1.48 P3 T3: FindingPatch tri-state rule_suggestion (R-V147P0-03) ───
 
     /// Helper: build a `FindingPatch` with only `rule_suggestion` set.
+    // `Some(None)` deliberately clears the column to SQL NULL — the double
+    // Option is the tri-state contract, not an accident.
+    #[allow(clippy::option_option)]
     fn patch_rule_suggestion(v: Option<Option<String>>) -> FindingPatch {
         FindingPatch {
             rule_suggestion: v,

@@ -60,6 +60,9 @@ async fn seed_key_block(
 
 /// Like [`seed_key_block`] but sets `created_from_command_id` for promote
 /// attribution tests.
+// All params are distinct fixture dimensions; bundling them into a struct
+// would obscure the per-argument seeding.
+#[allow(clippy::too_many_arguments)]
 async fn seed_key_block_attributed(
     pool: &sqlx::SqlitePool,
     key_block_id: &str,
@@ -187,7 +190,7 @@ async fn patch_entity_title_bumps_version() {
 /// `WorldKbBody` through the orchestrator upsert cutover. Spoke's
 /// `BodyAttributeValue` only models string/number/bool; null/array/object
 /// attribute values used to be silently dropped on the persist round-trip
-/// (build_spoke_upsert_request → spoke seam → put_update). The conversion seam
+/// (`build_spoke_upsert_request` → spoke seam → `put_update`). The conversion seam
 /// now carries the full body losslessly via a reserved
 /// `extensions.nexus._nexus_body` carrier, so a title-only patch on an entity
 /// whose body carries null/array/object attributes preserves them exactly.
@@ -1234,6 +1237,8 @@ async fn get_candidates_returns_pending() {
 /// derived from the seeded rows using the same `(created_at, job_id)`
 /// comparator the storage query uses, so the assertion holds whether or not
 /// the inserts land in the same `datetime('now')` second.
+// Long integration test; splitting would obscure the end-to-end scenario.
+#[allow(clippy::too_many_lines)]
 #[tokio::test]
 async fn get_candidates_multi_page_cursor_reaches_all_rows() {
     let (_tmp, state) = fresh_state().await;

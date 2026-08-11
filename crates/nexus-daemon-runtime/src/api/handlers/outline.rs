@@ -1494,6 +1494,8 @@ mod tests {
     /// early (pre-lock) read and the locked re-read. The handler must persist
     /// the body that was present at locked-read time, not the stale snapshot
     /// from the early read.
+    // Long integration test; splitting would obscure the end-to-end scenario.
+    #[allow(clippy::too_many_lines)]
     #[tokio::test]
     async fn patch_write_uses_body_from_locked_re_read() {
         use crate::api::handlers::works::{CreateWorkRequest, PatchWorkRequest};
@@ -1965,6 +1967,8 @@ mod tests {
     /// (409) when `base_revision` is stale, even for the `unlink_foreshadow`
     /// op. This verifies the revision gate fires before the operation is
     /// dispatched.
+    // Long integration test; splitting would obscure the end-to-end scenario.
+    #[allow(clippy::too_many_lines)]
     #[tokio::test]
     async fn patch_timeline_event_stale_revision_unlink_returns_conflict() {
         use crate::api::handlers::works::{CreateWorkRequest, PatchWorkRequest};

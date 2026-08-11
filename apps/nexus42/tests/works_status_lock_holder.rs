@@ -21,10 +21,13 @@ fn lock_holder_json_serialises_correctly() {
 
     // Write a lock file with known metadata.
     let lock_path = work_dir.join(".lock");
-    let now_ms = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_millis() as u64;
+    let now_ms = u64::try_from(
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis(),
+    )
+    .unwrap_or(u64::MAX);
     let body = format!("12345:cli:test-holder:{}", now_ms + 60_000);
     std::fs::write(&lock_path, &body).unwrap();
 

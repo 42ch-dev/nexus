@@ -607,8 +607,7 @@ async fn adapter_row_with_null_run_id_coexists() {
     // The adapter row should NOT appear in list_runs (which filters WHERE run_id IS NOT NULL).
     let filters = RunListFilters::default();
     let (items, _) = list_runs(&pool, &filters, None, 10).await.unwrap();
-    let direct_ids: Vec<&str> = items.iter().map(|r| r.run_id.as_str()).collect();
-    assert!(direct_ids.contains(&run_id.as_str()));
+    assert!(items.iter().any(|r| r.run_id == run_id));
     // Adapter row (NULL run_id) not returned.
     assert_eq!(items.len(), 1);
 }

@@ -1644,8 +1644,8 @@ mod tests {
 
         // Install the embedded basic-combat bytes as a user module under a
         // hermetic module store.
-        let modules_dir = tempfile::tempdir().unwrap();
-        let module_dir = modules_dir.path().join("basic-combat");
+        let module_root = tempfile::tempdir().unwrap();
+        let module_dir = module_root.path().join("basic-combat");
         std::fs::create_dir_all(&module_dir).unwrap();
         let wasm_path = module_dir.join("basic-combat.wasm");
         let manifest_path = module_dir.join("manifest.json");
@@ -1657,7 +1657,7 @@ mod tests {
         std::fs::write(&manifest_path, manifest).expect("write module manifest");
 
         let adapter =
-            NexusAdapter::new(pool).with_user_modules_dir(modules_dir.path().to_path_buf());
+            NexusAdapter::new(pool).with_user_modules_dir(module_root.path().to_path_buf());
         let cache = adapter.module_cache();
         assert_eq!(cache.len(), 0, "fresh adapter starts with an empty cache");
 
@@ -1756,8 +1756,8 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn user_module_load_accepts_matching_wasm_sha256() {
         let (pool, _db_dir) = fresh_pool().await;
-        let modules_dir = tempfile::tempdir().unwrap();
-        let module_dir = modules_dir.path().join("basic-combat");
+        let module_root = tempfile::tempdir().unwrap();
+        let module_dir = module_root.path().join("basic-combat");
         std::fs::create_dir_all(&module_dir).unwrap();
         let wasm_path = module_dir.join("basic-combat.wasm");
         let manifest_path = module_dir.join("manifest.json");
@@ -1777,7 +1777,7 @@ mod tests {
         std::fs::write(&manifest_path, manifest).expect("write module manifest");
 
         let adapter =
-            NexusAdapter::new(pool).with_user_modules_dir(modules_dir.path().to_path_buf());
+            NexusAdapter::new(pool).with_user_modules_dir(module_root.path().to_path_buf());
         let cache = adapter.module_cache();
         let (module, served_manifest) = unwrap_ok(
             adapter.load_module("basic-combat"),
@@ -1803,8 +1803,8 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn user_module_load_rejects_mismatched_wasm_sha256_without_caching() {
         let (pool, _db_dir) = fresh_pool().await;
-        let modules_dir = tempfile::tempdir().unwrap();
-        let module_dir = modules_dir.path().join("basic-combat");
+        let module_root = tempfile::tempdir().unwrap();
+        let module_dir = module_root.path().join("basic-combat");
         std::fs::create_dir_all(&module_dir).unwrap();
         let wasm_path = module_dir.join("basic-combat.wasm");
         let manifest_path = module_dir.join("manifest.json");
@@ -1826,7 +1826,7 @@ mod tests {
         std::fs::write(&manifest_path, manifest).expect("write module manifest");
 
         let adapter =
-            NexusAdapter::new(pool).with_user_modules_dir(modules_dir.path().to_path_buf());
+            NexusAdapter::new(pool).with_user_modules_dir(module_root.path().to_path_buf());
         let cache = adapter.module_cache();
         assert_eq!(cache.len(), 0, "fresh adapter starts with an empty cache");
 
@@ -1862,8 +1862,8 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn user_module_load_without_wasm_sha256_falls_back_to_stat_fence() {
         let (pool, _db_dir) = fresh_pool().await;
-        let modules_dir = tempfile::tempdir().unwrap();
-        let module_dir = modules_dir.path().join("basic-combat");
+        let module_root = tempfile::tempdir().unwrap();
+        let module_dir = module_root.path().join("basic-combat");
         std::fs::create_dir_all(&module_dir).unwrap();
         let wasm_path = module_dir.join("basic-combat.wasm");
         let manifest_path = module_dir.join("manifest.json");
@@ -1884,7 +1884,7 @@ mod tests {
         std::fs::write(&manifest_path, &legacy_manifest).expect("write legacy module manifest");
 
         let adapter =
-            NexusAdapter::new(pool).with_user_modules_dir(modules_dir.path().to_path_buf());
+            NexusAdapter::new(pool).with_user_modules_dir(module_root.path().to_path_buf());
         let (module, served_manifest) = unwrap_ok(
             adapter.load_module("basic-combat"),
             "legacy manifest without wasm_sha256 loads via the stat fence",
@@ -2023,8 +2023,8 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn user_module_load_under_concurrent_replace_never_serves_mixed_pair() {
         let (pool, _db_dir) = fresh_pool().await;
-        let modules_dir = tempfile::tempdir().unwrap();
-        let module_dir = modules_dir.path().join("basic-combat");
+        let module_root = tempfile::tempdir().unwrap();
+        let module_dir = module_root.path().join("basic-combat");
         std::fs::create_dir_all(&module_dir).unwrap();
         let wasm_path = module_dir.join("basic-combat.wasm");
         let manifest_path = module_dir.join("manifest.json");
@@ -2040,7 +2040,7 @@ mod tests {
         std::fs::write(&manifest_path, manifest).expect("write module manifest");
 
         let adapter =
-            NexusAdapter::new(pool).with_user_modules_dir(modules_dir.path().to_path_buf());
+            NexusAdapter::new(pool).with_user_modules_dir(module_root.path().to_path_buf());
         let adapter = std::sync::Arc::new(adapter);
 
         // Churn writer: alternate the pair while the loader runs.
@@ -2202,6 +2202,8 @@ mod tests {
     /// by the delta value while the attacker's HP remains unchanged.
     #[cfg(not(nexus_spoke_adapter_no_wasm_target))]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+// Long integration test; splitting would obscure the end-to-end scenario
+#[allow(clippy::too_many_lines)]
     async fn settle_routes_deltas_by_target_key_block_id() {
         let (pool, _dir) = fresh_pool().await;
         seed_world(&pool).await;

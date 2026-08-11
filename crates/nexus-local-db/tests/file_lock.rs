@@ -64,10 +64,13 @@ async fn zombie_lock_overwritten_on_reacquire() {
         let _g = file_lock::try_acquire(&work_dir, "cli:zombie").unwrap();
         // Write stale expires_at_ms directly to the file.
         let lock_path = work_dir.join(".lock");
-        let stale_ms = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_millis() as u64
+        let stale_ms = u64::try_from(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_millis(),
+        )
+        .unwrap_or(u64::MAX)
             - 120_000; // 2 min ago
         let stale_body = format!("99999:cli:zombie-stale:{stale_ms}");
         std::fs::write(&lock_path, &stale_body).unwrap();

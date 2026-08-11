@@ -123,6 +123,9 @@ async fn seed_character(
 }
 
 /// World-aware variant of [`seed_character`] (foreign-world KB fixtures).
+// All params are distinct fixture dimensions; bundling them into a struct
+// would obscure the per-argument seeding.
+#[allow(clippy::too_many_arguments)]
 async fn seed_character_in_world(
     pool: &sqlx::SqlitePool,
     world_id: &str,
@@ -192,6 +195,8 @@ async fn seed_foreign_world(pool: &sqlx::SqlitePool) {
     .unwrap();
 }
 
+// axum_test's AutoFuture is not Send; this helper is awaited directly by #[tokio::test], never spawned
+#[allow(clippy::future_not_send)]
 async fn post_run(
     server: &TestServer,
     world_id: &str,
@@ -209,6 +214,8 @@ async fn post_run(
 }
 
 /// POST /run with the standard seeded combatants; returns the `run_id`.
+// axum_test's AutoFuture is not Send; this helper is awaited directly by #[tokio::test], never spawned
+#[allow(clippy::future_not_send)]
 async fn run_succeeded(c: &Ctx) -> String {
     let resp = post_run(
         &c.server,
@@ -710,13 +717,7 @@ async fn list_paginates_and_scopes_to_owned_worlds() {
     assert_eq!(p1["items"].as_array().unwrap().len(), 2);
     assert_eq!(p1["has_more"], true);
     let cursor = p1["next_cursor"].as_str().expect("cursor").to_string();
-    let page1_ids: Vec<&str> = p1["items"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|i| i["run_id"].as_str().unwrap())
-        .collect();
-    assert!(!page1_ids.contains(&foreign.as_str()));
+    assert!(!p1["items"].as_array().unwrap().iter().any(|i| i["run_id"].as_str() == Some(foreign.as_str())));
 
     let page2 = c
         .server
@@ -961,6 +962,9 @@ async fn craft_succeeded_run(pool: &sqlx::SqlitePool, proposals: Value) -> Strin
 /// event titles (each event carries the minimal valid `NexusTimelineEvent`
 /// fields; the Accept handler consumes `title/summary/affected_key_block_ids`).
 /// `affected_ids`, when `Some`, is stamped onto every event.
+// By-value keeps call sites that build the delta inline (`vec![json!(...)]`)
+// free of temporary borrows; the delta is embedded into the output envelope.
+#[allow(clippy::needless_pass_by_value)]
 fn crafted_proposals(
     state_delta: Vec<Value>,
     event_titles: &[&str],
@@ -1155,6 +1159,8 @@ async fn seed_branch_event_in_world(pool: &sqlx::SqlitePool, world_id: &str, bra
 }
 
 /// POST /run with an explicit `branch_id`.
+// axum_test's AutoFuture is not Send; this helper is awaited directly by #[tokio::test], never spawned
+#[allow(clippy::future_not_send)]
 async fn post_run_on_branch(server: &TestServer, branch_id: &str) -> axum_test::TestResponse {
     server
         .post("/v1/daemon/compute/run")
@@ -1527,6 +1533,8 @@ async fn accept_with_explicit_null_timeline_ids_accepts_all() {
 // ── V1.147 P3 T2 — DELETE /v1/daemon/compute/runs (Clear history) ───────────
 
 /// `DELETE /v1/daemon/compute/runs` with optional `world_id` / `status`.
+// axum_test's AutoFuture is not Send; this helper is awaited directly by #[tokio::test], never spawned
+#[allow(clippy::future_not_send)]
 async fn delete_runs(
     server: &TestServer,
     world_id: Option<&str>,
@@ -1559,6 +1567,8 @@ struct RunStatusSeed {
     foreign_failed: String,
 }
 
+// axum_test's AutoFuture is not Send; this helper is awaited directly by #[tokio::test], never spawned
+#[allow(clippy::future_not_send)]
 async fn seed_run_status_mix(c: &Ctx) -> RunStatusSeed {
     seed_character(&c.pool, "kb_atk", "Striker", 20, 3, 100, 100).await;
     seed_character(&c.pool, "kb_def", "Guardian", 10, 5, 30, 50).await;

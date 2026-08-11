@@ -113,15 +113,10 @@ fn render_outline_prompt(preset_input: &serde_json::Value) -> String {
         .expect("novel-writing outline-chapter.md must be embedded");
 
     // Strip the YAML frontmatter; render only the Markdown body.
-    let body = if let Some(rest) = raw.strip_prefix("---\n") {
-        if let Some(end) = rest.find("\n---\n") {
-            &rest[end + "\n---\n".len()..]
-        } else {
-            rest
-        }
-    } else {
-        &raw[..]
-    };
+    let body = raw.strip_prefix("---\n").map_or(&raw[..], |rest| {
+        rest.find("\n---\n")
+            .map_or(rest, |end| &rest[end + "\n---\n".len()..])
+    });
 
     // The prompt uses `{{world_kb_block}}` and `{{open_findings_block}}`
     // as top-level vars; the preset wires `preset.input.X` → prompt var
@@ -167,6 +162,8 @@ fn render_outline_prompt(preset_input: &serde_json::Value) -> String {
 ///    block, contains the `## Open Findings to Address` section and the
 ///    finding titles.
 #[tokio::test]
+// Long integration test; splitting would obscure the end-to-end scenario
+#[allow(clippy::too_many_lines)]
 async fn novel_writing_outline_includes_open_findings_block_when_seeded() {
     const WORK: &str = "wrk_fc_1";
     const WORK_REF: &str = "fc-test-novel-1";

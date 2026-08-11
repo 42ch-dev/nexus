@@ -718,16 +718,14 @@ mod tests {
         store
             .list_by_world(world_id)
             .await
-            .map(|v| v.len())
-            .unwrap_or(0)
+            .map_or(0, |v| v.len())
     }
 
     /// Count relations in a world via `list_relationships_for_world`.
     async fn count_relations(pool: &SqlitePool, world_id: &str) -> usize {
         list_relationships_for_world(pool, world_id, false, i64::MAX)
             .await
-            .map(|v| v.len())
-            .unwrap_or(0)
+            .map_or(0, |v| v.len())
     }
 
     // ── Import tests ────────────────────────────────────────────────────
@@ -1039,7 +1037,7 @@ mod tests {
     }
 
     /// Greptile P1 / PR #200: same-world export → re-import must honor overwrite
-    /// (not unconditionally skip on entry_id PK collision).
+    /// (not unconditionally skip on `entry_id` PK collision).
     #[tokio::test(flavor = "multi_thread")]
     async fn import_same_world_reimport_overwrite_updates_body() {
         let (pool, _dir, entry_ids, _rel_ids) = seeded_pool().await;
@@ -1089,7 +1087,7 @@ mod tests {
     }
 
     /// Greptile P1 / PR #200: same-world export → re-import under rename must
-    /// mint disambiguated copies instead of skipping on entry_id collision.
+    /// mint disambiguated copies instead of skipping on `entry_id` collision.
     #[tokio::test(flavor = "multi_thread")]
     async fn import_same_world_reimport_rename_creates_disambiguated_entries() {
         let (pool, _dir, _entry_ids, _rel_ids) = seeded_pool().await;
@@ -1123,7 +1121,7 @@ mod tests {
         );
     }
 
-    /// Greptile P1 / PR #193: global entry_id collision with a foreign-world row
+    /// Greptile P1 / PR #193: global `entry_id` collision with a foreign-world row
     /// must not admit that id into `target_entry_ids` (no cross-world edges).
     #[tokio::test(flavor = "multi_thread")]
     async fn import_skips_foreign_world_entry_id_collision_endpoints() {
@@ -1166,7 +1164,7 @@ mod tests {
         let _ = entry_ids_a;
     }
 
-    /// Greptile P1 follow-up: foreign entry_id + target-world canonical-name
+    /// Greptile P1 follow-up: foreign `entry_id` + target-world canonical-name
     /// match must still remap pack id → target id so relations import.
     #[tokio::test(flavor = "multi_thread")]
     async fn import_foreign_entry_id_remaps_via_canonical_name() {
@@ -1357,6 +1355,8 @@ mod tests {
 
     /// V1.152 P2 dogfood: export→import round-trip on activation-carrying entries +
     /// relations preserves provenance, `modules.activation`, and skip-idempotency.
+    // Long integration test; splitting would obscure the end-to-end scenario.
+    #[allow(clippy::too_many_lines)]
     #[tokio::test(flavor = "multi_thread")]
     async fn dogfood_pack_round_trip_preserves_activation_and_relations() {
         const WORLD_A: &str = "wld_dogfood_a";
@@ -1623,7 +1623,7 @@ mod tests {
 
     // ── F-002: canonical-name collision remap ──────────────────────────
 
-    /// Pre-create Carol under a different entry_id in the target world,
+    /// Pre-create Carol under a different `entry_id` in the target world,
     /// import a pack that has Alice→Carol relation. After import, the
     /// relation must point at the **existing** Carol id (remap), not the
     /// pack's Carol id.
@@ -1788,6 +1788,8 @@ mod tests {
     /// Proves:
     /// 1. `modules_json` survives the full pack I/O path (closes R-V1146P3-001).
     /// 2. The activation engine works on entries that arrived via pack import.
+    // Long integration test; splitting would obscure the end-to-end scenario.
+    #[allow(clippy::too_many_lines)]
     #[tokio::test(flavor = "multi_thread")]
     async fn pack_io_modules_preserved_and_activation_round_trip() {
         use nexus_spoke_adapter::adapter::activation;
@@ -1940,23 +1942,13 @@ mod tests {
         );
         assert_eq!(result.unmatched.len(), 1, "Ghost should be unmatched");
 
-        let matched_names: Vec<&str> = result
-            .matched
-            .iter()
-            .map(|e| e.canonical_name.as_str())
-            .collect();
         assert!(
-            matched_names.contains(&"Dragon"),
+            result.matched.iter().any(|e| e.canonical_name == "Dragon"),
             "Dragon must be in matched set"
         );
 
-        let unmatched_names: Vec<&str> = result
-            .unmatched
-            .iter()
-            .map(|e| e.canonical_name.as_str())
-            .collect();
         assert!(
-            unmatched_names.contains(&"Ghost"),
+            result.unmatched.iter().any(|e| e.canonical_name == "Ghost"),
             "Ghost must be in unmatched set"
         );
 

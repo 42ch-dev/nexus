@@ -125,7 +125,7 @@ async fn pending_review_list_respects_limit_when_dataset_is_large() {
     let items = body["items"].as_array().unwrap();
     assert_eq!(
         items.len(),
-        PAGE_SIZE as usize,
+        usize::try_from(PAGE_SIZE).unwrap_or(usize::MAX),
         "first page must return exactly limit items, not the full {SEED_COUNT}"
     );
     assert!(
@@ -154,14 +154,16 @@ async fn pending_review_full_cursor_walk_returns_all_rows_once() {
     let mut pages = 0usize;
 
     loop {
-        let path = match &cursor {
-            Some(c) => format!(
-                "/v1/daemon/memory/pending-review?creator_id={ACTIVE_CREATOR}&limit={PAGE_SIZE}&cursor={c}"
-            ),
-            None => format!(
+        let path = cursor.as_ref().map_or_else(
+            || format!(
                 "/v1/daemon/memory/pending-review?creator_id={ACTIVE_CREATOR}&limit={PAGE_SIZE}"
             ),
-        };
+            |c| {
+                format!(
+                    "/v1/daemon/memory/pending-review?creator_id={ACTIVE_CREATOR}&limit={PAGE_SIZE}&cursor={c}"
+                )
+            },
+        );
         let resp = ctx.server.get(&path).await;
         resp.assert_status(axum::http::StatusCode::OK);
         let body: Value = resp.json();
@@ -198,9 +200,9 @@ async fn pending_review_full_cursor_walk_returns_all_rows_once() {
     );
     assert_eq!(
         pages,
-        SEED_COUNT / PAGE_SIZE as usize,
+        SEED_COUNT / usize::try_from(PAGE_SIZE).unwrap_or(usize::MAX),
         "expected {} pages of {}",
-        SEED_COUNT / PAGE_SIZE as usize,
+        SEED_COUNT / usize::try_from(PAGE_SIZE).unwrap_or(usize::MAX),
         PAGE_SIZE
     );
 }
@@ -249,7 +251,7 @@ async fn pending_review_deleted_cursor_falls_back_to_first_page() {
     resp.assert_status(axum::http::StatusCode::OK);
     let body: Value = resp.json();
     let items = body["items"].as_array().unwrap();
-    assert_eq!(items.len(), PAGE_SIZE as usize, "fallback page size");
+    assert_eq!(items.len(), usize::try_from(PAGE_SIZE).unwrap_or(usize::MAX), "fallback page size");
     // The first item of the fallback page is the newest remaining row, which
     // is the same as page 1's first item (the deleted row was the *last* of
     // page 1, so the head of the order is unchanged).
@@ -281,7 +283,7 @@ async fn fragments_list_respects_limit_when_dataset_is_large() {
     let fragments = body["fragments"].as_array().unwrap();
     assert_eq!(
         fragments.len(),
-        PAGE_SIZE as usize,
+        usize::try_from(PAGE_SIZE).unwrap_or(usize::MAX),
         "fragments endpoint must return exactly limit items, not the full {SEED_COUNT}"
     );
     // The fragments endpoint is NOT paginated (no cursor); it returns the

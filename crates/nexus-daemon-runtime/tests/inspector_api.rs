@@ -370,7 +370,7 @@ async fn inspect_moment_expands_confirmed_relation_hops() {
     let hop = trace
         .iter()
         .find(|t| t["entry_id"] == HOP_TARGET_ENTRY && t["accepted"] == true)
-        .expect("hopped entry must be present: {body}");
+        .unwrap_or_else(|| panic!("hopped entry must be present: {body}"));
     assert!(
         hop["reason"]
             .as_str()

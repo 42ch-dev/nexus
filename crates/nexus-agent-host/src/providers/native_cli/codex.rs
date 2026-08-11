@@ -838,6 +838,11 @@ fn plain_text_args(json_args: &[String]) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
+    // Lock guards (session registry / persistent handles) are intentionally
+    // held to the end of the visible test scope for readability; the nursery
+    // significant_drop_tightening suggestion to drop them earlier is noise here.
+    #![allow(clippy::significant_drop_tightening)]
+
     use super::*;
 
     async fn collect_events(stream: HostEventStream) -> Vec<HostEvent> {

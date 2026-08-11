@@ -77,6 +77,9 @@ pub fn subscriber_with(layer: CaptureLayer) -> impl tracing::Subscriber + Send +
 ///
 /// Use inside the `set_default` guard scope OR after it (the buffer is shared
 /// and outlives the guard).
+// The guard is held through the assert (the failure message reads `msgs`);
+// dropping it earlier adds nothing.
+#[allow(clippy::significant_drop_tightening)]
 pub fn assert_info_emitted(messages: &Arc<Mutex<Vec<String>>>, needles: &[&str]) {
     let msgs = messages.lock().unwrap();
     assert!(

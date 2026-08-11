@@ -1123,10 +1123,12 @@ mod tests {
     /// V1.60 P0 (R-V159P0-002): Replaced the manual 28-element match list with
     /// a catalog-driven derivation. The test now parses the §4 table's `Status`
     /// + `Registry row ref` columns: a catalog id is expected in
-    /// `host_tool_registry()` iff Status=`shipped` AND Registry row
+    ///   `host_tool_registry()` iff Status=`shipped` AND Registry row
     ///   ref=`host_tool`. Orchestration-scope shipped ids (e.g.
     ///   `nexus.reference.refresh`, the 5 DF-46 capabilities) are correctly
     ///   excluded from the `host_tool` direction — no manual list to maintain.
+    // Long integration test; splitting would obscure the end-to-end scenario.
+    #[allow(clippy::too_many_lines)]
     #[test]
     fn catalog_registry_invariant_all_ids_present() {
         use std::collections::HashSet;

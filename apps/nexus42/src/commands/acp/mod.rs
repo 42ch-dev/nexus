@@ -1360,8 +1360,10 @@ mod tests {
 
     #[test]
     fn agent_use_rejects_empty_ref() {
-        let mut config = CliConfig::default();
-        config.active_creator_id = Some("ctr_test".to_string());
+        let config = CliConfig {
+            active_creator_id: Some("ctr_test".to_string()),
+            ..Default::default()
+        };
         let result = cmd_agent_use("", &config);
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
@@ -1373,8 +1375,10 @@ mod tests {
 
     #[test]
     fn agent_use_rejects_whitespace_ref() {
-        let mut config = CliConfig::default();
-        config.active_creator_id = Some("ctr_test".to_string());
+        let config = CliConfig {
+            active_creator_id: Some("ctr_test".to_string()),
+            ..Default::default()
+        };
         let result = cmd_agent_use("   ", &config);
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();

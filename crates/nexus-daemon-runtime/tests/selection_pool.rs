@@ -371,12 +371,10 @@ async fn test_inspiration_promote_creates_work_and_pool_row() {
     )
     .await
     .unwrap();
-    let active_entries: Vec<_> = pool_resp
-        .entries
-        .iter()
-        .filter(|e| e.status == "active")
-        .collect();
-    assert_eq!(active_entries.len(), 1);
+    assert_eq!(
+        pool_resp.entries.iter().filter(|e| e.status == "active").count(),
+        1
+    );
 
     // Verify inspiration item is promoted
     let insp_resp = nexus_daemon_runtime::api::handlers::works::list_inspiration(

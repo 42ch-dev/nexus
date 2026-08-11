@@ -202,12 +202,16 @@ fn fresh_entry_ids_in_pack(pack: &mut Value) {
     }
 }
 
+// axum_test's AutoFuture is not Send; this helper is awaited directly by #[tokio::test], never spawned
+#[allow(clippy::future_not_send)]
 async fn export_pack(server: &TestServer, world_id: &str) -> Value {
     let resp = server.post(&export_url(world_id)).json(&json!({})).await;
     assert_eq!(resp.status_code(), StatusCode::OK, "body={}", resp.text());
     resp.json()
 }
 
+// axum_test's AutoFuture is not Send; this helper is awaited directly by #[tokio::test], never spawned
+#[allow(clippy::future_not_send)]
 async fn import_pack_http(
     server: &TestServer,
     world_id: &str,

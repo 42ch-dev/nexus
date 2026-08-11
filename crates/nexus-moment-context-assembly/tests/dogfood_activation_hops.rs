@@ -154,6 +154,8 @@ fn entry(
     e
 }
 
+// Long integration test; splitting would obscure the end-to-end scenario
+#[allow(clippy::too_many_lines)]
 async fn seed_harbor_kb(kb: &InMemoryKbStore) -> Vec<WorldKbEntry> {
     let entries = vec![
         // Constant seed — always fires, top of the constant band.
@@ -426,6 +428,8 @@ fn trace_by_id(ctx: &MomentContext) -> HashMap<String, Vec<ActivationTraceEntry>
 }
 
 #[tokio::test]
+// Long integration test; splitting would obscure the end-to-end scenario
+#[allow(clippy::too_many_lines)]
 async fn dogfood_world_a_activation_hops_end_to_end() {
     let (narrative, kb, stage0) = build_harbor_fixture();
     seed_harbor_kb(&kb).await;

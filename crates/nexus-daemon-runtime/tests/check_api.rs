@@ -2,7 +2,7 @@
 //!
 //! Proves the spoke `orchestrate_check` Daemon HTTP surface end-to-end
 //! (closes V1.146 Non-Goal 5a — the check op is lib-import-only until this
-//! route) over a real axum router + SQLite:
+//! route) over a real axum router + `SQLite`:
 //!
 //! - Happy path (owned World; seeded `spoke_rules` row resolved via
 //!   `RuleQueryPort`) → 200, `findings` array (empty with the baseline
@@ -168,7 +168,7 @@ async fn check_owned_world_with_seeded_rule_returns_200_findings() {
 }
 
 /// Ownership gate: a World owned by another creator must reject with 403
-/// before any check behavior runs (compute_runs pattern — world existence
+/// before any check behavior runs (`compute_runs` pattern — world existence
 /// stays unobservable to foreign creators).
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn check_foreign_world_rejects_403() {
@@ -219,7 +219,7 @@ async fn check_empty_rules_returns_200_empty_findings() {
 
 /// Tier2 gate: with no active creator configured, `require_active_creator`
 /// rejects with 409 `uninitialized` before the handler runs (same status the
-/// compute_runs / memory routes use — verified against tier2 reality).
+/// `compute_runs` / memory routes use — verified against tier2 reality).
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn check_without_active_creator_rejects_409() {
     let ctx = ctx_without_creator().await;
