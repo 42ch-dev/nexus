@@ -54,12 +54,14 @@ use axum::{extract::State, Json};
 use nexus_contracts::generated::daemon_api::inspector::moment_directive_request::{
     MomentDirectiveRequest, MomentDirectiveRequestAction, MomentDirectiveRequestScopeKind,
 };
+use nexus_contracts::generated::daemon_api::inspector::moment_directive_response::{
+    MomentDirectiveResponse,
+};
 use nexus_local_db::moment_directive::{
     clear, get_active_for_work, get_active_for_world, replace_active, scope_kind, set_active,
-    NewMomentDirective,
+    MomentDirectiveRow, NewMomentDirective,
 };
 use nexus_local_db::{get_work, narrative_write, LocalDbError};
-use serde_json::{json, Value};
 
 // ── POST /v1/daemon/moment-directive ────────────────────────────────────
 
@@ -74,7 +76,7 @@ use serde_json::{json, Value};
 pub async fn moment_directive(
     State(state): State<WorkspaceState>,
     Json(req): Json<MomentDirectiveRequest>,
-) -> Result<Json<Value>, NexusApiError> {
+) -> Result<Json<MomentDirectiveResponse>, NexusApiError> {
     let pool = state.pool_or_uninit()?;
     let creator_id =
         read_active_creator_id(state.nexus_home()).ok_or(NexusApiError::AuthRequired)?;
@@ -111,10 +113,12 @@ pub async fn moment_directive(
     };
 
     match req.action {
-        MomentDirectiveRequestAction::Set => set(pool, &creator_id, &req, kind, scope_id).await,
-        MomentDirectiveRequestAction::Show => show(pool, &creator_id, kind, scope_id).await,
+        MomentDirectiveRequestAction::Set => {
+            Ok(Json(set(pool, &creator_id, &req, kind, scope_id).await?))
+        }
+        MomentDirectiveRequestAction::Show => Ok(Json(show(pool, &creator_id, kind, scope_id).await?)),
         MomentDirectiveRequestAction::Clear => {
-            clear_action(pool, &creator_id, kind, scope_id).await
+            Ok(Json(clear_action(pool, &creator_id, kind, scope_id).await?))
         }
     }
 }
@@ -127,7 +131,7 @@ async fn set(
     req: &MomentDirectiveRequest,
     kind: &str,
     scope_id: &str,
-) -> Result<Json<Value>, NexusApiError> {
+) -> Result<MomentDirectiveResponse, NexusApiError> {
     // Non-empty body after trim (CLI `handle_set`, spec §3.1).
     let Some(body) = req.body.as_deref() else {
         return Err(validation("body", "is required for set"));
@@ -192,7 +196,7 @@ async fn set(
         }
     };
 
-    Ok(Json(row_json(&row)?))
+    response_from_row(&row)
 }
 
 /// `show` — resolve the **effective** directive for the scope (incl. body,
@@ -209,7 +213,7 @@ async fn show(
     creator_id: &str,
     kind: &str,
     scope_id: &str,
-) -> Result<Json<Value>, NexusApiError> {
+) -> Result<MomentDirectiveResponse, NexusApiError> {
     let row = if kind == scope_kind::WORK {
         match get_active_for_work(pool, creator_id, scope_id).await {
             // Work-wins.
@@ -237,10 +241,7 @@ async fn show(
             .map_err(|e| database_error(&e))?
     };
 
-    match row {
-        Some(row) => Ok(Json(row_json(&row)?)),
-        None => Ok(Json(json!({}))),
-    }
+    row.map_or_else(|| Ok(empty_response()), |row| response_from_row(&row))
 }
 
 /// `clear` — soft-delete the active row (retained for DF-76 inspection);
@@ -250,11 +251,11 @@ async fn clear_action(
     creator_id: &str,
     kind: &str,
     scope_id: &str,
-) -> Result<Json<Value>, NexusApiError> {
+) -> Result<MomentDirectiveResponse, NexusApiError> {
     clear(pool, creator_id, kind, scope_id, now_ms())
         .await
         .map_err(|e| database_error(&e))?;
-    Ok(Json(json!({})))
+    Ok(empty_response())
 }
 
 /// Work ownership: `works::get_work` is creator-scoped in the query itself —
@@ -270,14 +271,32 @@ async fn is_work_owned(
         .map_err(|e| database_error(&e))
 }
 
-/// Serialize the directive row for the `show`/`set` response.
-fn row_json(
-    row: &nexus_local_db::moment_directive::MomentDirectiveRow,
-) -> Result<Value, NexusApiError> {
-    serde_json::to_value(row).map_err(|e| NexusApiError::Internal {
+/// Map a directive row onto the typed response (the `Directive` oneOf branch).
+///
+/// JSON round-trip bridge (check.rs precedent): the row's `serde::Serialize`
+/// output IS the wire shape, so `from_value` converts it into the generated
+/// enum — including the String → closed-enum conversions — and fails loudly
+/// (500) if the row ever carries a value outside the schema vocabulary,
+/// instead of silently widening the wire contract. The generated enum keeps
+/// the nullable fields present-as-`null` (no `skip_serializing_if`), so the
+/// serialized response is byte-identical to the pre-schema `Json<Value>`.
+fn response_from_row(
+    row: &MomentDirectiveRow,
+) -> Result<MomentDirectiveResponse, NexusApiError> {
+    let wire = serde_json::to_value(row).map_err(|e| NexusApiError::Internal {
         code: "DIRECTIVE_ROW_SERIALIZE".to_string(),
         message: e.to_string(),
+    })?;
+    serde_json::from_value(wire).map_err(|e| NexusApiError::Internal {
+        code: "DIRECTIVE_RESPONSE_DECODE".to_string(),
+        message: e.to_string(),
     })
+}
+
+/// The `Empty` oneOf branch — serializes to `{}` (`show` with no effective
+/// directive / `clear`; mirrors the pre-schema wire behavior).
+fn empty_response() -> MomentDirectiveResponse {
+    MomentDirectiveResponse::Empty(serde_json::Map::new())
 }
 
 /// Invalid-input (400) helper.

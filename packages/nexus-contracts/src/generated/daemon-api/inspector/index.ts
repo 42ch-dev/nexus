@@ -5,5 +5,6 @@
  */
 
 export type { MomentDirectiveRequest } from './moment-directive-request';
+export type { MomentDirectiveResponse } from './moment-directive-response';
 export type { MomentInspectRequest } from './moment-inspect-request';
 export type { MomentInspectResponse } from './moment-inspect-response';
