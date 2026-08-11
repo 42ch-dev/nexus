@@ -652,6 +652,6 @@ mod tests {
         // Should end with .nexus42/acp/sessions.json
         assert!(path.to_string_lossy().contains(".nexus42"));
         assert!(path.to_string_lossy().contains("acp"));
-        assert!(path.file_name().unwrap() == "sessions.json");
+        assert_eq!(path.file_name().unwrap(), "sessions.json");
     }
 }
