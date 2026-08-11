@@ -367,11 +367,17 @@ describe('TimelineCanvas — layer swap does not trigger forbidden writes (T3 ne
   });
 
   it('renders NLE multi-track band overlay in the canvas host (V1.128 P1 T3)', async () => {
+    // V1.159 P1 T2 — the Brief layer now renders vertical time-bands instead
+    // of the NLE era-sweep clips (spec §3.3.3 supersede), so the NLE overlay
+    // contract is asserted on the Narrative layer here; the Brief-layer
+    // time-band contract is covered by the sibling test below.
     const graph: WorldKbGraphResponse = {
       entities: [
-        eraEntity({
-          key_block_id: 'kb-era-1',
-          canonical_name: 'The First Age',
+        entity({
+          key_block_id: 'kb-event-1',
+          block_type: 'event',
+          canonical_name: 'Coronation',
+          body: { attributes: { occurred_at: '1042-03-01T00:00:00Z' } },
         }),
       ],
       source_anchors: [],
@@ -385,10 +391,46 @@ describe('TimelineCanvas — layer swap does not trigger forbidden writes (T3 ne
       expect(screen.getByTestId('nle-timeline-band-overlay')).toBeInTheDocument();
     });
     expect(screen.getByTestId('nle-timeline-chrome-app')).toBeInTheDocument();
-    expect(screen.getByTestId('nle-timeline-label-brief')).toHaveTextContent('Brief');
+    expect(screen.getByTestId('nle-timeline-label-narrative')).toHaveTextContent('Narrative');
     expect(
       screen.queryByTestId('nle-timeline-clip-detach-ev-1'),
     ).not.toBeInTheDocument();
+  });
+
+  it('renders vertical time-bands for the Brief layer (V1.159 P1 T2 supersede)', async () => {
+    // Spec §3.3.3 V1.159 amendment: the Brief layer's rendering model is the
+    // vertical time-band panel (built from `buildEraTree`); the V1.123 flat
+    // era sweep + NLE band overlay no longer render for Brief.
+    const graph: WorldKbGraphResponse = {
+      entities: [
+        eraEntity({
+          key_block_id: 'kb-era-1',
+          canonical_name: 'The First Age',
+        }),
+        eraEntity({
+          key_block_id: 'kb-era-2',
+          canonical_name: 'The Second Age',
+        }),
+      ],
+      source_anchors: [],
+      relationships: [],
+    };
+    renderInApp(<TimelineCanvas worldId="world-7" />, {
+      client: makeMockClient(graph),
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('brief-time-bands')).toBeInTheDocument();
+    });
+    // Every era renders as a band (the fixture era names also appear in the
+    // world-summary lines, so scope to the band container).
+    expect(
+      within(screen.getByTestId('brief-time-bands')).getAllByTestId(
+        'brief-time-band',
+      ),
+    ).toHaveLength(2);
+    // The superseded flat NLE band is absent on the Brief layer.
+    expect(screen.queryByTestId('nle-timeline-band-overlay')).not.toBeInTheDocument();
   });
 });
 

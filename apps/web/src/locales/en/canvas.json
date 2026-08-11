@@ -738,6 +738,11 @@
         "worldSummary": "World summary"
       }
     },
+    "briefTimeBands": {
+      "ariaLabel": "Brief time bands",
+      "collapse": "Collapse {{name}}",
+      "expand": "Expand {{name}}"
+    },
     "keyBlockNode": {
       "unnamed": "(unnamed entity)",
       "selected": "Selected context entity",

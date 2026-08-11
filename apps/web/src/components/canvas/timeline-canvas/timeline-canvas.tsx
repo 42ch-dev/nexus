@@ -818,6 +818,39 @@ export function TimelineCanvas({ worldId, sceneBeatFixture }: TimelineCanvasProp
             </div>
           ) : null}
         </div>
+      ) : activeLayer === 'brief' && surface.briefTimeBands ? (
+        // V1.159 P1 T2 — Brief layer vertical time-bands (spec §3.3.3 V1.159
+        // amendment). The time-band panel SUPERSEDES the V1.123 horizontal
+        // era sweep as the Brief-layer rendering model: eras stack as
+        // indented, type-colored bands (`<BriefTimeBands />`, adapter-built
+        // from `buildEraTree`). Band selection opens the era inspector via
+        // the adapter's `onSelectNode` hand-off (read-only rendering — no
+        // inline edit; era creation is V1.159 Task 3). Narrative/Moment keep
+        // the spatial canvas below; the layer tabs remain the primary
+        // affordance. `simplify:` the semantic-zoom bridge is canvas-bound
+        // and intentionally absent on the band panel — the layer tabs carry
+        // Brief ↔ Narrative switching (per plan Global Constraints §"Semantic
+        // zoom feasibility" the tabs are the primary affordance).
+        <div
+          key="brief-time-bands"
+          className="nexus-layer-enter"
+          data-testid="timeline-canvas-layer-transition"
+        >
+          <div className="grid gap-3 lg:grid-cols-[1fr_360px]">
+            <div className="rounded-card border border-gray-alpha-400 bg-background-100 p-4 shadow-elevation-1">
+              {surface.briefTimeBands}
+            </div>
+            {surface.inspector ? (
+              <div className="rounded-card border border-gray-alpha-400 bg-background-100 p-4 shadow-popover">
+                {surface.inspector}
+              </div>
+            ) : null}
+          </div>
+          {/* Screen-reader graph summary — parity with CanvasShell (A8 #3). */}
+          <div className="sr-only" role="status" aria-live="polite" aria-atomic="true">
+            {surface.summaryText}
+          </div>
+        </div>
       ) : (
         // V1.123 P4 Task 4 — layer transition animation. The `key` forces a
         // remount on layer swap so the CSS keyframe animation replays; the

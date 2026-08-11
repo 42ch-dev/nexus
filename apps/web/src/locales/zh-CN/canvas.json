@@ -727,6 +727,11 @@
         "worldSummary": "世界概述"
       }
     },
+    "briefTimeBands": {
+      "ariaLabel": "概览时间带",
+      "collapse": "折叠 {{name}}",
+      "expand": "展开 {{name}}"
+    },
     "keyBlockNode": {
       "unnamed": "(未命名实体)",
       "selected": "已选中上下文实体",
