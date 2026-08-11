@@ -108,26 +108,38 @@ export function buildEraTree(
   //
   // Single-parent invariant (Greptile P1 fix): era taxonomy is a TREE by
   // product model — each era has at most one parent. If multiple parent_era
-  // edges target the same child, we pick the first (deterministic sort by
-  // source key_block_id) and warn. This prevents the global visited-set from
-  // silently dropping the second parent edge as a "cycle or duplicate".
-  const firstParentOf = new Map<string, string>();
+  // edges target the same child, we pick the parent with the smallest
+  // key_block_id (deterministic — independent of API response ordering)
+  // and warn. This prevents the global visited-set from silently dropping
+  // the second parent edge, and ensures the tree is stable across refetches
+  // regardless of relationship `updated_at` ordering.
+
+  // Sort valid edges by source (parent) key_block_id so the tiebreaker is
+  // deterministic — the parent with the smallest id always wins (Greptile P1
+  // iteration 2: parent selection must not change across refetches).
+  const validEdges: Array<{ parentId: string; childId: string }> = [];
   for (const rel of relationships) {
     if (!isParentEraRelationship(rel)) continue;
     const parent = eraById.get(rel.source_entity_id);
     const child = eraById.get(rel.target_entity_id);
     if (parent === undefined || child === undefined) continue;
-    const existing = firstParentOf.get(child.key_block_id);
-    if (existing !== undefined && existing !== parent.key_block_id) {
+    validEdges.push({ parentId: parent.key_block_id, childId: child.key_block_id });
+  }
+  validEdges.sort((a, b) => a.parentId.localeCompare(b.parentId));
+
+  const firstParentOf = new Map<string, string>();
+  for (const edge of validEdges) {
+    const existing = firstParentOf.get(edge.childId);
+    if (existing !== undefined && existing !== edge.parentId) {
       // eslint-disable-next-line no-console
       console.warn(
-        `[brief-era-tree] era "${child.key_block_id}" has multiple parents: ` +
-          `"${existing}" (kept) and "${parent.key_block_id}" (dropped). ` +
-          `Era taxonomy is a tree — only the first parent (by edge order) is used.`,
+        `[brief-era-tree] era "${edge.childId}" has multiple parents: ` +
+          `"${existing}" (kept) and "${edge.parentId}" (dropped). ` +
+          `Era taxonomy is a tree — the parent with the smallest key_block_id is used.`,
       );
       continue;
     }
-    firstParentOf.set(child.key_block_id, parent.key_block_id);
+    firstParentOf.set(edge.childId, edge.parentId);
   }
 
   // Build childrenByParent from the single-parent map (deterministic).
