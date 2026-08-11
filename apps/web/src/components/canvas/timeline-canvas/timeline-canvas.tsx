@@ -616,9 +616,11 @@ export function TimelineCanvas({ worldId, sceneBeatFixture }: TimelineCanvasProp
   // empty-state branch (there are no rows to list).
   const [showAltView, setShowAltView] = useState(false);
 
-  // V1.159 P1 T3 — "新建 era" entry point. The create dialog owns the era
-  // entity + optional parent-relationship mutations; this state only gates
-  // the dialog mount.
+  // V1.159 P1 T3 — "新建 era" entry point. DEFERRED (F-001 /
+  // R-V1159P1-001): the World KB has no entity creation route (`patch-entity`
+  // is edit-only), so the create path is dormant — see `showCreateEra`
+  // below. The create dialog owns the era entity + optional
+  // parent-relationship mutations; this state only gates the dialog mount.
   const [eraCreateOpen, setEraCreateOpen] = useState(false);
 
   // Existing era entities for the dialog's optional parent picker (spec
@@ -756,14 +758,19 @@ export function TimelineCanvas({ worldId, sceneBeatFixture }: TimelineCanvasProp
         showLayerSwitcher={!isEmpty}
         // V1.159 P1 T3 + T4 — "新建 era" entry in the Brief-layer chrome
         // (spec §3.3.3 "Create entry", sibling to the layer switcher tabs).
-        // Gated on the active layer only (plan Task 3 DoD): visible whenever
-        // Brief is active — INCLUDING the Brief empty state, where it is the
-        // "create your first era" path (V1.159 T4 DoD) — and hidden on
-        // Narrative/Moment (the create entry is Brief-specific; Work-Brief
-        // stays read-only per spec §3.3.3). The global empty-state branch
-        // never shows it in practice: zero-era graphs default to Narrative,
-        // so `activeLayer === 'brief'` is false there.
-        showCreateEra={activeLayer === 'brief'}
+        // DEFERRED (F-001 / R-V1159P1-001): the World KB has NO entity
+        // creation route — `patch-entity` is edit-only (pre-reads the
+        // entity → 500 when absent), so the create dialog cannot work at
+        // runtime. The entry is hard-hidden until the backend create path
+        // lands (next iteration, backend scope). The dormant path stays
+        // below for one-flag activation:
+        //   `showCreateEra={activeLayer === 'brief'}`
+        // which shows it whenever Brief is active — INCLUDING the Brief
+        // empty state (the "create your first era" path, T4 DoD) — and
+        // hides it on Narrative/Moment (Work-Brief stays read-only per
+        // spec §3.3.3). era_type editing on existing eras is UNAFFECTED
+        // (the edit path pre-reads an existing entity).
+        showCreateEra={false}
         onCreateEra={() => setEraCreateOpen(true)}
         // V1.159 P1 T3 (T2-M2 carry-forward fix) — the alt-view toggle is
         // not available on the Brief layer when the time-band panel is
@@ -963,19 +970,18 @@ export function TimelineCanvas({ worldId, sceneBeatFixture }: TimelineCanvasProp
         />
       ) : null}
 
-      {/* V1.159 P1 T3 — "新建 era" create dialog. The dialog owns the
-          patch-entity (+ optional patch-relationship) mutations; the hooks
-          invalidate the graph query on success, so `onSuccess` only needs to
-          refetch explicitly for the time-bands memo to reflow against the
-          freshest graph. */}
+      {/* V1.159 P1 T3 — "新建 era" create dialog. DEFERRED (F-001 /
+          R-V1159P1-001) alongside the header entry — see `showCreateEra`
+          above; the dialog is unreachable while the entry is hidden. The
+          mutation hooks (`usePatchWorldKbEntity` /
+          `usePatchWorldKbRelationship`) already invalidate the World KB
+          graph query on success, so NO manual `graph.refetch()` is needed
+          here (QC3-S-002). */}
       <EraCreateDialog
         open={eraCreateOpen}
         onOpenChange={setEraCreateOpen}
         worldId={worldId}
         existingEras={existingEras}
-        onSuccess={() => {
-          void graph.refetch();
-        }}
       />
     </div>
   );
@@ -1025,10 +1031,15 @@ function TimelineCanvasHeader({
   showLayerSwitcher: boolean;
   /**
    * V1.159 P1 T3 — "新建 era" entry visibility (Brief-layer chrome).
-   * True when the Brief layer is active and the graph is non-empty.
+   * DEFERRED (F-001 / R-V1159P1-001): the World KB has no entity creation
+   * route (`patch-entity` is edit-only), so the orchestrator passes `false`
+   * until the backend create path lands. When re-enabled, the entry shows
+   * whenever the Brief layer is active (`activeLayer === 'brief'`) —
+   * INCLUDING the Brief empty state (create-first-era path) — and hides on
+   * Narrative/Moment (Work-Brief stays read-only).
    */
   showCreateEra: boolean;
-  /** V1.159 P1 T3 — opens the era create dialog. */
+  /** V1.159 P1 T3 — opens the era create dialog (dormant while deferred). */
   onCreateEra: () => void;
   /**
    * V1.159 P1 T3 (T2-M2 carry-forward fix) — gates the spatial↔list toggle.
@@ -1093,7 +1104,10 @@ function TimelineCanvasHeader({
         ) : null}
         {/* V1.159 P1 T3 — "新建 era" entry (spec §3.3.3 "Create entry"),
             sibling to the layer switcher tabs. Brief-layer chrome only:
-            Work-Brief stays a read-only projection (spec §3.3.3). */}
+            Work-Brief stays a read-only projection (spec §3.3.3).
+            DEFERRED (F-001 / R-V1159P1-001): rendered only while
+            `showCreateEra` is true — the orchestrator hard-passes `false`
+            until the World KB entity-creation backend gap lands. */}
         {showCreateEra ? (
           <Button
             type="button"

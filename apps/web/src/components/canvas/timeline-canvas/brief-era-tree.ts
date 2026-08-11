@@ -36,8 +36,12 @@ import type {
   WorldKbRelationshipProjection,
 } from '@42ch/nexus-contracts';
 
-/** The custom-relation label that carries era nesting (architect VC-1 option c). */
-const PARENT_ERA_LABEL = 'parent_era';
+/**
+ * The custom-relation label that carries era nesting (architect VC-1
+ * option c). Single source of truth — the era create dialog imports this
+ * constant instead of re-declaring it (QC1-M-004).
+ */
+export const PARENT_ERA_LABEL = 'parent_era';
 
 /**
  * One node of the Brief era forest. `era_type` rides in the freeform

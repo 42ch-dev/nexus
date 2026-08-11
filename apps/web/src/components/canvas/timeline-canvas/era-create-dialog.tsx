@@ -1,7 +1,20 @@
 /**
  * Era create dialog — V1.159 P1 Task 3 (DF-V1123-ERA-TAXONOMY).
  *
- * The "新建 era" entry point for the World Timeline Brief layer (spec
+ * ⚠️ DEFERRED (F-001 / R-V1159P1-001) — do not activate until the World KB
+ * entity-creation backend gap lands. World KB has NO entity creation route:
+ * `patch-entity` is edit-only (pre-reads the entity → 500 DATABASE_ERROR
+ * when the minted id does not exist), so this dialog's create path would
+ * fail at runtime. The "新建 era" entry in the Brief-layer chrome is
+ * hard-hidden (`showCreateEra={false}` in `timeline-canvas.tsx`) while
+ * deferred. The component is retained verbatim for one-flag activation when
+ * a backend create carrier exists (next iteration, backend scope). The
+ * QC1-I-002 split-create edge (entity created but parent relationship step
+ * fails) is likewise deferred with F-001 — it is moot while the dialog is
+ * unreachable.
+ *
+ * Original purpose (kept for context): the "新建 era" entry point for the
+ * World Timeline Brief layer (spec
  * `.mstar/specs/canvas-strategy-surface.md` §3.3.3 V1.159 amendment —
  * "Create entry"). Opens from the Brief-layer header chrome and creates a
  * new `block_type=era` KnowledgeEntry via the existing World KB write
@@ -25,7 +38,8 @@
  *
  * Success closes the dialog and fires `onSuccess(newEraId)` — the mutation
  * hooks already invalidate the World KB graph query, so the time-bands
- * reflow with the new era. Errors surface inline in the dialog: 422
+ * reflow with the new era (no manual `graph.refetch()` — QC3-S-002).
+ * Errors surface inline in the dialog: 422
  * (`world_kb_validation_failed`) shows `validation_summary.errors[]`; 409
  * (`world_kb_conflict`) shows a retry hint (the minted id already exists /
  * concurrent write); any other failure falls through to the hook's global
@@ -51,6 +65,7 @@ import {
   usePatchWorldKbEntity,
   usePatchWorldKbRelationship,
 } from '@/lib/canvas/use-world-kb-data';
+import { PARENT_ERA_LABEL } from './brief-era-tree';
 
 export interface EraCreateDialogProps {
   open: boolean;
@@ -85,9 +100,6 @@ const RECOMMENDED_ERA_TYPES = [
 
 /** Sentinel `<option>` value for the freeform era-type input. */
 const CUSTOM_ERA_TYPE = '__custom__';
-
-/** Parent-relationship carrier (architect VC-1 option c). */
-const PARENT_ERA_LABEL = 'parent_era';
 
 /**
  * Mint a fresh World KB entity id. Mirrors the pack-import convention

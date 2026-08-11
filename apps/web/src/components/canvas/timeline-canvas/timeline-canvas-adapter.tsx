@@ -694,6 +694,19 @@ export function projectTimelineGraph(
  * with `layoutHint: 'brief'`, same spine). The era-marker extraction
  * (`extractEraAttributes`) is reused transitively.
  *
+ * DUAL-PROJECTION BRIDGE (QC1-I-001) — do not delete this path while
+ * Brief-band mode is live: the World Timeline Brief layer renders the
+ * vertical time-band model (`renderBriefTimeBands` → `buildEraTree` →
+ * `<BriefTimeBands />`), which SUPERSEDES this horizontal sweep visually.
+ * However, band clicks still route through `onSelectNode(nodeIdOf(eraId))`
+ * → React Flow node selection → the era inspector. This RF projection is
+ * therefore still REQUIRED as the selection/inspector carrier even though
+ * it is hidden behind the band UI — the two era models (band tree vs RF
+ * sweep) stay aligned by construction on the same graph read. When a
+ * tree-native selection carrier exists (e.g. selection driven directly from
+ * `EraTreeNode` + a thin selection map), drop this projection for Brief
+ * bands and keep it only for Work-Brief / non-band Brief fallback.
+ *
  * `simplify:` LR step metrics mirror the V1.122 Narrative lane scheme so
  * both layers share a familiar reading direction. Replace with an era-aware
  * temporal plugin if the Brief sweep grows beyond ~12 era markers (layer-feel
