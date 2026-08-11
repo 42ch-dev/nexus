@@ -692,10 +692,10 @@ async fn patch_entity_create_whitespace_title_rejected_422() {
 async fn patch_entity_create_malformed_entity_id_rejected_422() {
     let (_tmp, state) = fresh_state().await;
     for malformed in [
-        "entity_123",                                  // no kb_ prefix
-        "kb_",                                         // empty hex suffix
-        "kb_zzz",                                      // non-hex suffix
-        "kb_9f8e7d6c5b4a39281726354453627180!",        // trailing non-hex
+        "entity_123",                           // no kb_ prefix
+        "kb_",                                  // empty hex suffix
+        "kb_zzz",                               // non-hex suffix
+        "kb_9f8e7d6c5b4a39281726354453627180!", // trailing non-hex
     ] {
         let req = WorldKbPatchEntityRequest {
             entity_id: malformed.to_string(),

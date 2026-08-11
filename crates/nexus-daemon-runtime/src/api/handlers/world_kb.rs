@@ -498,8 +498,10 @@ async fn patch_entity_create(
     // to a 500. Reject here, before the spoke request is built.
     if title.trim().is_empty() {
         return Err(NexusApiError::world_kb_validation_failed(
-            &["create requires a non-empty patch.title (whitespace-only titles are rejected)"
-                .to_string()],
+            &[
+                "create requires a non-empty patch.title (whitespace-only titles are rejected)"
+                    .to_string(),
+            ],
             &[],
         ));
     }
