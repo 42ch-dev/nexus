@@ -248,6 +248,16 @@ pub fn validate_canonical_name(name: &str) -> Result<(), KbError> {
     Ok(())
 }
 
+/// `true` for cross-profile block types whose bodies are freeform world-shape
+/// markers, not profile-specific categories (entity-scope-model §5.1.1):
+/// `event` (V1.122 Timeline layer) and `era` (V1.123 Brief layer). These are
+/// exempt from `novel_category` / `game_bible_category` / `script_category`
+/// enforcement in every `ValidationMode` — category hints are advisory only.
+#[must_use]
+const fn is_cross_profile_block_type(block_type: BlockType) -> bool {
+    matches!(block_type, BlockType::Event | BlockType::Era)
+}
+
 /// Validate a `WorldKbBody` for the given `BlockType` and `ValidationMode`.
 ///
 /// # Errors
@@ -274,6 +284,29 @@ pub fn validate_body(
                 }));
             }
         }
+    }
+
+    // Cross-profile block types (`event`, `era`) are NOT subject to
+    // `novel_category` / `game_bible_category` / `script_category`
+    // enforcement (entity-scope-model §5.1.1 — V1.123 implementation note,
+    // reaffirmed V1.159): their `body.attributes` are freeform world-shape
+    // markers. Profile-category hints carried on such bodies are advisory
+    // only — warn, never reject. This is what makes the era-create payload
+    // (`era_type` / `world_summary`, no profile category) valid under
+    // `ValidationMode::Novel` for the daemon's patch-entity create path.
+    if is_cross_profile_block_type(block_type) {
+        if let Some(attrs) = body.and_then(|b| b.attributes.as_ref()) {
+            if attrs.get("novel_category").is_some()
+                || attrs.get("game_bible_category").is_some()
+                || attrs.get("script_category").is_some()
+            {
+                tracing::warn!(
+                    ?block_type,
+                    "profile category on a cross-profile body is advisory and ignored"
+                );
+            }
+        }
+        return Ok(());
     }
 
     match mode {

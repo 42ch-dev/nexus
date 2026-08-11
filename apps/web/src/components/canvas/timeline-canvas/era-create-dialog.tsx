@@ -1,17 +1,17 @@
 /**
- * Era create dialog — V1.159 P1 Task 3 (DF-V1123-ERA-TAXONOMY).
+ * Era create dialog — V1.159 P1 Task 3 (DF-V1123-ERA-TAXONOMY), LIVE since
+ * V1.160 P1 T2 (F-001 / R-V1159P1-001 closed).
  *
- * ⚠️ DEFERRED (F-001 / R-V1159P1-001) — do not activate until the World KB
- * entity-creation backend gap lands. World KB has NO entity creation route:
- * `patch-entity` is edit-only (pre-reads the entity → 500 DATABASE_ERROR
- * when the minted id does not exist), so this dialog's create path would
- * fail at runtime. The "新建 era" entry in the Brief-layer chrome is
- * hard-hidden (`showCreateEra={false}` in `timeline-canvas.tsx`) while
- * deferred. The component is retained verbatim for one-flag activation when
- * a backend create carrier exists (next iteration, backend scope). The
- * QC1-I-002 split-create edge (entity created but parent relationship step
- * fails) is likewise deferred with F-001 — it is moot while the dialog is
- * unreachable.
+ * The World KB entity-creation backend gap shipped in V1.160 P1 T1:
+ * `patch-entity` now creates the entity when the minted id is absent (the
+ * `expected_version: 0` create convention), so this dialog's create path
+ * is active at runtime. The "新建 era" entry in the Brief-layer chrome is
+ * gated on `showCreateEra={activeLayer === 'brief'}` in
+ * `timeline-canvas.tsx`. The QC1-I-002 split-create edge (entity created
+ * but the parent relationship step fails) is handled in `handleSubmit`:
+ * one submit = one era — the dialog closes and `onSuccess` fires (the
+ * graph refetches and shows the new era), with a warning toast that the
+ * parent link can be added later from the World KB surface.
  *
  * Original purpose (kept for context): the "新建 era" entry point for the
  * World Timeline Brief layer (spec
@@ -36,14 +36,17 @@
  *      `source_entity_id` = parent (coarser), `target_entity_id` = new era
  *      (finer), `symmetric: false` (architect VC-1 option c; directed).
  *
- * Success closes the dialog and fires `onSuccess(newEraId)` — the mutation
- * hooks already invalidate the World KB graph query, so the time-bands
- * reflow with the new era (no manual `graph.refetch()` — QC3-S-002).
- * Errors surface inline in the dialog: 422
- * (`world_kb_validation_failed`) shows `validation_summary.errors[]`; 409
- * (`world_kb_conflict`) shows a retry hint (the minted id already exists /
- * concurrent write); any other failure falls through to the hook's global
- * error toast plus a generic inline message.
+ * Once the entity is committed, the dialog closes and fires
+ * `onSuccess(newEraId)` — the mutation hooks already invalidate the World
+ * KB graph query, so the time-bands reflow with the new era (no manual
+ * `graph.refetch()` — QC3-S-002). This holds even when the optional
+ * parent-relationship step fails (see the split-create note above); only
+ * entity-create failures keep the dialog open. Entity errors surface
+ * inline: 422 (`world_kb_validation_failed`) shows
+ * `validation_summary.errors[]`; 409 (`world_kb_conflict`) shows a retry
+ * hint (the minted id already exists / concurrent write); any other
+ * failure falls through to the hook's global error toast plus a generic
+ * inline message.
  *
  * Form fields (per task brief):
  *   1. Era name (required) — becomes `canonical_name`.
@@ -65,6 +68,7 @@ import {
   usePatchWorldKbEntity,
   usePatchWorldKbRelationship,
 } from '@/lib/canvas/use-world-kb-data';
+import { useToast } from '@/lib/use-toast';
 import { PARENT_ERA_LABEL } from './brief-era-tree';
 
 export interface EraCreateDialogProps {
@@ -77,10 +81,12 @@ export interface EraCreateDialogProps {
    */
   existingEras: { entity_id: string; canonical_name: string }[];
   /**
-   * Fired with the new era's `key_block_id` after BOTH the entity create and
-   * the optional parent-relationship create succeed. The mutation hooks
-   * already invalidate the graph query; this callback lets the orchestrator
-   * react (e.g. explicit refetch).
+   * Fired with the new era's `key_block_id` once the entity create commits
+   * — including when the optional parent-relationship create fails (the
+   * dialog closes and this fires so the graph refetches and shows the new
+   * era; the failed link is surfaced via a warning toast). The mutation
+   * hooks already invalidate the graph query; this callback lets the
+   * orchestrator react (e.g. explicit refetch).
    */
   onSuccess?: (newEraId: string) => void;
 }
@@ -120,6 +126,7 @@ export function EraCreateDialog({
   const { t } = useTranslation('canvas');
   const patchEntity = usePatchWorldKbEntity(worldId);
   const patchRelationship = usePatchWorldKbRelationship(worldId);
+  const { toast } = useToast();
 
   const [name, setName] = useState('');
   const [eraTypeChoice, setEraTypeChoice] = useState<string>('');
@@ -220,16 +227,33 @@ export function EraCreateDialog({
       const newEraId = res.entity.key_block_id;
 
       if (parentId) {
-        await patchRelationship.mutateAsync({
-          action: 'add',
-          relationship: {
-            source_entity_id: parentId,
-            target_entity_id: newEraId,
-            relation_type: 'custom',
-            custom_label: PARENT_ERA_LABEL,
-            symmetric: false,
-          },
-        });
+        try {
+          await patchRelationship.mutateAsync({
+            action: 'add',
+            relationship: {
+              source_entity_id: parentId,
+              target_entity_id: newEraId,
+              relation_type: 'custom',
+              custom_label: PARENT_ERA_LABEL,
+              symmetric: false,
+            },
+          });
+        } catch {
+          // The era entity is committed — one submit = one era. Do NOT keep
+          // the dialog open for retry (a retry mints a fresh entity id →
+          // duplicate era): fall through to close + `onSuccess` so the graph
+          // refetches and shows the new era, and surface the missing parent
+          // link as a warning toast instead of an inline retry error. (The
+          // relationship hook's `onError` also toasts non-409/422 failures;
+          // this warning carries the "era WAS created" context.)
+          toast({
+            variant: 'warning',
+            title: t('timeline.eraCreateDialog.parentLinkFailedTitle'),
+            description: t(
+              'timeline.eraCreateDialog.parentLinkFailedDescription',
+            ),
+          });
+        }
       }
 
       onOpenChange(false);

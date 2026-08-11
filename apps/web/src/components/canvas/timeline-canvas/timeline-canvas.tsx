@@ -616,11 +616,12 @@ export function TimelineCanvas({ worldId, sceneBeatFixture }: TimelineCanvasProp
   // empty-state branch (there are no rows to list).
   const [showAltView, setShowAltView] = useState(false);
 
-  // V1.159 P1 T3 — "新建 era" entry point. DEFERRED (F-001 /
-  // R-V1159P1-001): the World KB has no entity creation route (`patch-entity`
-  // is edit-only), so the create path is dormant — see `showCreateEra`
-  // below. The create dialog owns the era entity + optional
-  // parent-relationship mutations; this state only gates the dialog mount.
+  // V1.159 P1 T3 + V1.160 P1 T2 — "新建 era" entry point. SHIPPED: the
+  // backend create-on-absent path landed in V1.160 P1 T1 (`patch-entity`
+  // creates when the minted entity id is absent; F-001 / R-V1159P1-001
+  // closed), so the create path is LIVE — see `showCreateEra` below. The
+  // create dialog owns the era entity + optional parent-relationship
+  // mutations; this state only gates the dialog mount.
   const [eraCreateOpen, setEraCreateOpen] = useState(false);
 
   // Existing era entities for the dialog's optional parent picker (spec
@@ -758,19 +759,16 @@ export function TimelineCanvas({ worldId, sceneBeatFixture }: TimelineCanvasProp
         showLayerSwitcher={!isEmpty}
         // V1.159 P1 T3 + T4 — "新建 era" entry in the Brief-layer chrome
         // (spec §3.3.3 "Create entry", sibling to the layer switcher tabs).
-        // DEFERRED (F-001 / R-V1159P1-001): the World KB has NO entity
-        // creation route — `patch-entity` is edit-only (pre-reads the
-        // entity → 500 when absent), so the create dialog cannot work at
-        // runtime. The entry is hard-hidden until the backend create path
-        // lands (next iteration, backend scope). The dormant path stays
-        // below for one-flag activation:
+        // V1.160 P1 T2 — SHIPPED: the backend create-on-absent path landed
+        // in V1.160 P1 T1 (`patch-entity` creates when the minted entity id
+        // is absent; F-001 / R-V1159P1-001 closed), so the gate is live:
         //   `showCreateEra={activeLayer === 'brief'}`
         // which shows it whenever Brief is active — INCLUDING the Brief
         // empty state (the "create your first era" path, T4 DoD) — and
         // hides it on Narrative/Moment (Work-Brief stays read-only per
         // spec §3.3.3). era_type editing on existing eras is UNAFFECTED
         // (the edit path pre-reads an existing entity).
-        showCreateEra={false}
+        showCreateEra={activeLayer === 'brief'}
         onCreateEra={() => setEraCreateOpen(true)}
         // V1.159 P1 T3 (T2-M2 carry-forward fix) — the alt-view toggle is
         // not available on the Brief layer when the time-band panel is
@@ -970,11 +968,11 @@ export function TimelineCanvas({ worldId, sceneBeatFixture }: TimelineCanvasProp
         />
       ) : null}
 
-      {/* V1.159 P1 T3 — "新建 era" create dialog. DEFERRED (F-001 /
-          R-V1159P1-001) alongside the header entry — see `showCreateEra`
-          above; the dialog is unreachable while the entry is hidden. The
-          mutation hooks (`usePatchWorldKbEntity` /
-          `usePatchWorldKbRelationship`) already invalidate the World KB
+      {/* V1.159 P1 T3 + V1.160 P1 T2 — "新建 era" create dialog. SHIPPED:
+          the entry gate (`showCreateEra={activeLayer === 'brief'}`) is live
+          since the V1.160 P1 T1 backend create-on-absent path (F-001 /
+          R-V1159P1-001 closed). The mutation hooks (`usePatchWorldKbEntity`
+          / `usePatchWorldKbRelationship`) already invalidate the World KB
           graph query on success, so NO manual `graph.refetch()` is needed
           here (QC3-S-002). */}
       <EraCreateDialog
@@ -1030,16 +1028,15 @@ function TimelineCanvasHeader({
    */
   showLayerSwitcher: boolean;
   /**
-   * V1.159 P1 T3 — "新建 era" entry visibility (Brief-layer chrome).
-   * DEFERRED (F-001 / R-V1159P1-001): the World KB has no entity creation
-   * route (`patch-entity` is edit-only), so the orchestrator passes `false`
-   * until the backend create path lands. When re-enabled, the entry shows
-   * whenever the Brief layer is active (`activeLayer === 'brief'`) —
-   * INCLUDING the Brief empty state (create-first-era path) — and hides on
-   * Narrative/Moment (Work-Brief stays read-only).
+   * V1.159 P1 T3 + V1.160 P1 T2 — "新建 era" entry visibility
+   * (Brief-layer chrome). SHIPPED: the V1.160 P1 T1 backend create-on-absent
+   * path closed F-001 / R-V1159P1-001, so the orchestrator passes
+   * `activeLayer === 'brief'`. The entry shows whenever the Brief layer is
+   * active — INCLUDING the Brief empty state (create-first-era path) — and
+   * hides on Narrative/Moment (Work-Brief stays read-only).
    */
   showCreateEra: boolean;
-  /** V1.159 P1 T3 — opens the era create dialog (dormant while deferred). */
+  /** V1.159 P1 T3 + V1.160 P1 T2 — opens the era create dialog (live). */
   onCreateEra: () => void;
   /**
    * V1.159 P1 T3 (T2-M2 carry-forward fix) — gates the spatial↔list toggle.
@@ -1102,12 +1099,13 @@ function TimelineCanvasHeader({
             onLayerChange={onLayerChange}
           />
         ) : null}
-        {/* V1.159 P1 T3 — "新建 era" entry (spec §3.3.3 "Create entry"),
-            sibling to the layer switcher tabs. Brief-layer chrome only:
-            Work-Brief stays a read-only projection (spec §3.3.3).
-            DEFERRED (F-001 / R-V1159P1-001): rendered only while
-            `showCreateEra` is true — the orchestrator hard-passes `false`
-            until the World KB entity-creation backend gap lands. */}
+        {/* V1.159 P1 T3 + V1.160 P1 T2 — "新建 era" entry (spec §3.3.3
+            "Create entry"), sibling to the layer switcher tabs. Brief-layer
+            chrome only: Work-Brief stays a read-only projection (spec
+            §3.3.3). SHIPPED: rendered while `showCreateEra` is true — the
+            orchestrator passes `activeLayer === 'brief'` since the V1.160
+            P1 T1 backend create-on-absent path (F-001 / R-V1159P1-001
+            closed). */}
         {showCreateEra ? (
           <Button
             type="button"

@@ -21,6 +21,7 @@ use nexus_daemon_runtime::api::handlers::world_kb::{
     CandidatesQuery, GraphQuery,
 };
 use nexus_daemon_runtime::workspace::WorkspaceState;
+use nexus_knowledge::world_kb::KbStore;
 use nexus_local_db::kb_extract_job::insert_pending;
 use nexus_local_db::kb_store::SqliteKbStore;
 
@@ -512,6 +513,381 @@ async fn patch_entity_create_on_existing_returns_409() {
     let details = err.error_details().expect("conflict details");
     assert_eq!(details["current_version"], 3);
     assert_eq!(details["entity_id"], "kb_old");
+}
+
+/// V1.160 P1 create-on-absent happy path (entity-scope-model §5.1.2): store
+/// `NotFound` + `expected_version: 0` is the create convention (client-minted
+/// `entity_id` + absent row + version 0). The handler must branch to the
+/// create path — NOT the pre-V1.160 500 — build a fresh `KnowledgeEntry`,
+/// route it through `orchestrate_upsert` → `put_create`, and return HTTP 200
+/// (NOT 201) with `version = 1` and the row persisted in the store.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn patch_entity_create_on_absent_happy_path() {
+    let (_tmp, state) = fresh_state().await;
+    // NO entity seeded — the store read must return NotFound for the create
+    // convention to fire. `kb_<32-hex>` mirrors the client-minted id shape
+    // the frontend era-create-dialog sends.
+    let entity_id = "kb_9f8e7d6c5b4a39281726354453627180".to_string();
+    let req = WorldKbPatchEntityRequest {
+        entity_id: entity_id.clone(),
+        expected_version: 0,
+        patch: serde_json::from_value(serde_json::json!({
+            "title": "New Era",
+            "block_type": "era",
+            "body": {
+                "attributes": {
+                    "era_type": "kingdom",
+                    "world_summary": "The age of the three kingdoms.",
+                }
+            },
+        }))
+        .unwrap(),
+    };
+    let Json(resp) = patch_entity(
+        State(state.clone()),
+        Path("wld_test_world".to_string()),
+        Json(req),
+    )
+    .await
+    .expect("create-on-absent should succeed");
+
+    assert_eq!(resp.version, 1, "create must land at revision 1");
+    assert_eq!(resp.entity.key_block_id, entity_id);
+    assert_eq!(resp.entity.canonical_name.to_string(), "New Era");
+    assert_eq!(resp.entity.block_type.to_string(), "era");
+    assert_eq!(resp.entity.status, "provisional");
+
+    // The row must be persisted: same id, world, revision 1.
+    let store = SqliteKbStore::new(state.pool().unwrap().clone());
+    let stored = store
+        .get_knowledge_entry(&entity_id)
+        .await
+        .expect("created row must exist in the store");
+    assert_eq!(stored.entry_id, entity_id);
+    assert_eq!(stored.world_id, "wld_test_world");
+    assert_eq!(stored.revision, Some(1));
+    assert_eq!(stored.status, "provisional");
+}
+
+/// V1.160 P1 update-on-absent (entity-scope-model §5.1.2): store `NotFound`
+/// with `expected_version > 0` is client staleness — an update targeted at an
+/// entity that does not exist must 409 `WorldKbConflictError`, never a silent
+/// create. The absent row's revision is NULL-normalized to 0.
+#[tokio::test]
+async fn patch_entity_update_on_absent_returns_409() {
+    let (_tmp, state) = fresh_state().await;
+    let req = WorldKbPatchEntityRequest {
+        entity_id: "kb_ghost".to_string(),
+        expected_version: 3, // client believes the entity exists at rev 3
+        patch: serde_json::from_value(serde_json::json!({"title": "Ghost"})).unwrap(),
+    };
+    let err = patch_entity(
+        State(state.clone()),
+        Path("wld_test_world".to_string()),
+        Json(req),
+    )
+    .await
+    .expect_err("update-on-absent must 409");
+    assert_eq!(err.status_code(), axum::http::StatusCode::CONFLICT);
+    assert_eq!(err.error_code(), "world_kb_conflict");
+    let details = err.error_details().expect("conflict details");
+    assert_eq!(details["current_version"], 0);
+    assert_eq!(details["entity_id"], "kb_ghost");
+}
+
+/// V1.160 P1 create required-field validation: create has no pre-read entity
+/// to inherit a canonical name from, so a missing `patch.title` is a 422
+/// `WorldKbValidationError` — the create arm must never reach the
+/// orchestrator with an empty canonical name.
+#[tokio::test]
+async fn patch_entity_create_missing_title_rejected_422() {
+    let (_tmp, state) = fresh_state().await;
+    let req = WorldKbPatchEntityRequest {
+        entity_id: "kb_no_title".to_string(),
+        expected_version: 0,
+        patch: serde_json::from_value(serde_json::json!({
+            "block_type": "era",
+            "body": { "attributes": { "era_type": "kingdom" } },
+        }))
+        .unwrap(),
+    };
+    let err = patch_entity(
+        State(state.clone()),
+        Path("wld_test_world".to_string()),
+        Json(req),
+    )
+    .await
+    .expect_err("create without title must 422");
+    assert_eq!(
+        err.status_code(),
+        axum::http::StatusCode::UNPROCESSABLE_ENTITY
+    );
+    assert_eq!(err.error_code(), "world_kb_validation_failed");
+}
+
+/// V1.160 P1 create required-field validation: a missing `patch.block_type`
+/// is a 422 `WorldKbValidationError` (no pre-read entity to inherit the
+/// block type from).
+#[tokio::test]
+async fn patch_entity_create_missing_block_type_rejected_422() {
+    let (_tmp, state) = fresh_state().await;
+    let req = WorldKbPatchEntityRequest {
+        entity_id: "kb_no_type".to_string(),
+        expected_version: 0,
+        patch: serde_json::from_value(serde_json::json!({"title": "No Type"})).unwrap(),
+    };
+    let err = patch_entity(
+        State(state.clone()),
+        Path("wld_test_world".to_string()),
+        Json(req),
+    )
+    .await
+    .expect_err("create without block_type must 422");
+    assert_eq!(
+        err.status_code(),
+        axum::http::StatusCode::UNPROCESSABLE_ENTITY
+    );
+    assert_eq!(err.error_code(), "world_kb_validation_failed");
+}
+
+/// V1.160 P1 fix-wave (QC2-F001): a whitespace-only `title` (e.g. `"   "`)
+/// passes the handler's `validate_canonical_name` (spaces are not rejected
+/// there) and the schema `minLength: 1`, but the orchestrator rejects it with
+/// `EmptyCanonicalName` — which previously fell through `map_upsert_reject`
+/// to a 500. The create arm must reject whitespace-only titles as 422 BEFORE
+/// building the spoke request.
+#[tokio::test]
+async fn patch_entity_create_whitespace_title_rejected_422() {
+    let (_tmp, state) = fresh_state().await;
+    let req = WorldKbPatchEntityRequest {
+        entity_id: "kb_9f8e7d6c5b4a39281726354453627180".to_string(),
+        expected_version: 0,
+        patch: serde_json::from_value(serde_json::json!({
+            "title": "   ",
+            "block_type": "era",
+        }))
+        .unwrap(),
+    };
+    let err = patch_entity(
+        State(state.clone()),
+        Path("wld_test_world".to_string()),
+        Json(req),
+    )
+    .await
+    .expect_err("create with whitespace-only title must 422");
+    assert_eq!(
+        err.status_code(),
+        axum::http::StatusCode::UNPROCESSABLE_ENTITY
+    );
+    assert_eq!(err.error_code(), "world_kb_validation_failed");
+}
+
+/// V1.160 P1 fix-wave (QC2-F002 / QC3-S004): the `kb_key_blocks` CHECK
+/// constraint only enforces the `kb_%` prefix, so an arbitrary `entity_id`
+/// passes the handler and fails the INSERT with a CHECK error → 500. Spec
+/// §5.1.2 makes `kb_<hex>` normative — the create arm must reject
+/// non-conforming ids as 422 before building the spoke request. No row may be
+/// written for any malformed id.
+#[tokio::test]
+async fn patch_entity_create_malformed_entity_id_rejected_422() {
+    let (_tmp, state) = fresh_state().await;
+    for malformed in [
+        "entity_123",                           // no kb_ prefix
+        "kb_",                                  // empty hex suffix
+        "kb_zzz",                               // non-hex suffix
+        "kb_9f8e7d6c5b4a39281726354453627180!", // trailing non-hex
+    ] {
+        let req = WorldKbPatchEntityRequest {
+            entity_id: malformed.to_string(),
+            expected_version: 0,
+            patch: serde_json::from_value(serde_json::json!({
+                "title": "Valid Title",
+                "block_type": "era",
+            }))
+            .unwrap(),
+        };
+        let err = patch_entity(
+            State(state.clone()),
+            Path("wld_test_world".to_string()),
+            Json(req),
+        )
+        .await
+        .expect_err("malformed entity_id must 422");
+        assert_eq!(
+            err.status_code(),
+            axum::http::StatusCode::UNPROCESSABLE_ENTITY,
+            "entity_id {malformed:?} must be 422"
+        );
+        assert_eq!(err.error_code(), "world_kb_validation_failed");
+    }
+}
+
+/// V1.160 P1 authz-first regression (entity-scope-model §5.1.2): the create
+/// arm runs only on store `NotFound` under an already-authz-checked PATH
+/// `world_id`. A foreign (non-owned) world must 403 BEFORE any entity read —
+/// even when the entity is absent (create intent), so no existence signal
+/// leaks across world boundaries.
+#[tokio::test]
+async fn patch_entity_create_cross_author_forbidden() {
+    let (_tmp, state) = fresh_state().await;
+    // World owned by a different creator (seed creator + world for FK).
+    // SAFETY: test-only seed of a foreign-owned world + its owner creator.
+    sqlx::query(
+        "INSERT OR IGNORE INTO creators (creator_id, display_name, status, cached_at, data) \
+         VALUES ('other_creator', 'Other', 'active', datetime('now'), '{}')",
+    )
+    .execute(state.pool().unwrap())
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT OR IGNORE INTO narrative_worlds \
+         (world_id, workspace_id, owner_creator_id, title, slug, status, visibility, \
+          time_policy, metadata_json, created_at) \
+         VALUES ('wld_other', 'ws', 'other_creator', 'Other', 'other-world', 'active', 'private', \
+          'manual', '{}', datetime('now'))",
+    )
+    .execute(state.pool().unwrap())
+    .await
+    .unwrap();
+
+    // Create-shaped request (minted id, expected_version 0) against the
+    // foreign world — must 403, not 404/422/200.
+    let req = WorldKbPatchEntityRequest {
+        entity_id: "kb_other_new".to_string(),
+        expected_version: 0,
+        patch: serde_json::from_value(serde_json::json!({
+            "title": "New Thing",
+            "block_type": "era",
+        }))
+        .unwrap(),
+    };
+    let err = patch_entity(
+        State(state.clone()),
+        Path("wld_other".to_string()),
+        Json(req),
+    )
+    .await
+    .expect_err("create in a foreign world must 403");
+    assert_eq!(err.status_code(), axum::http::StatusCode::FORBIDDEN);
+}
+
+/// V1.160 P1 terminal Found ≠ absent (entity-scope-model §5.1.2, VC-2): a
+/// soft-deleted row is `Ok(kb)` — Found, not `NotFound` — so a create-shaped
+/// request (`expected_version: 0`) against a deleted id hits the existing
+/// terminal-status guard (422), NEVER the create arm. No insert may occur.
+#[tokio::test]
+async fn patch_entity_create_on_deleted_entity_rejected_422() {
+    let (_tmp, state) = fresh_state().await;
+    seed_key_block(
+        state.pool().unwrap(),
+        "kb_dead",
+        "wld_test_world",
+        "character",
+        "Ghost",
+        "deleted",
+        Some(0),
+        None,
+    )
+    .await;
+
+    let req = WorldKbPatchEntityRequest {
+        entity_id: "kb_dead".to_string(),
+        expected_version: 0, // create-shaped — but the id is Found (deleted)
+        patch: serde_json::from_value(serde_json::json!({
+            "title": "Ghost Reborn",
+            "block_type": "character",
+        }))
+        .unwrap(),
+    };
+    let err = patch_entity(
+        State(state.clone()),
+        Path("wld_test_world".to_string()),
+        Json(req),
+    )
+    .await
+    .expect_err("deleted entity patch must 422 (terminal, not create)");
+    assert_eq!(
+        err.status_code(),
+        axum::http::StatusCode::UNPROCESSABLE_ENTITY
+    );
+    assert_eq!(err.error_code(), "world_kb_validation_failed");
+
+    // The terminal guard fired before any write: the row is still deleted at
+    // the seeded revision, and no create insert happened.
+    let store = SqliteKbStore::new(state.pool().unwrap().clone());
+    let stored = store
+        .get_knowledge_entry("kb_dead")
+        .await
+        .expect("seeded row still present");
+    assert_eq!(stored.status, "deleted");
+    assert_eq!(stored.revision, Some(0));
+    assert_eq!(stored.canonical_name, "Ghost");
+}
+
+/// V1.160 P1 era create round-trip (entity-scope-model §5.1.2): the
+/// era-create-dialog payload (`body.attributes.era_type` + `world_summary`)
+/// must survive the orchestrator persist + response projection exactly.
+/// `era` is cross-profile (no `novel_category` enforcement), so the body
+/// validates under `ValidationMode::Novel`.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn patch_entity_create_with_era_block_type() {
+    let (_tmp, state) = fresh_state().await;
+    let entity_id = "kb_5a4b3c2d1e0f9a8b7c6d5e4f3a2b1c0d".to_string();
+    let req = WorldKbPatchEntityRequest {
+        entity_id: entity_id.clone(),
+        expected_version: 0,
+        patch: serde_json::from_value(serde_json::json!({
+            "title": "The Long Peace",
+            "block_type": "era",
+            "body": {
+                "attributes": {
+                    "era_type": "kingdom",
+                    "world_summary": "A century without war.",
+                }
+            },
+        }))
+        .unwrap(),
+    };
+    let Json(resp) = patch_entity(
+        State(state.clone()),
+        Path("wld_test_world".to_string()),
+        Json(req),
+    )
+    .await
+    .expect("era create should succeed");
+    assert_eq!(resp.version, 1);
+    assert_eq!(resp.entity.block_type.to_string(), "era");
+
+    // The era body attributes must round-trip through the orchestrator.
+    let attrs = resp
+        .entity
+        .body
+        .get("attributes")
+        .expect("persisted body has attributes");
+    assert_eq!(attrs["era_type"], serde_json::json!("kingdom"));
+    assert_eq!(
+        attrs["world_summary"],
+        serde_json::json!("A century without war.")
+    );
+
+    // Store-side verification: body attributes persisted verbatim.
+    let store = SqliteKbStore::new(state.pool().unwrap().clone());
+    let stored = store
+        .get_knowledge_entry(&entity_id)
+        .await
+        .expect("created era row exists");
+    let stored_attrs = stored
+        .body
+        .as_ref()
+        .expect("stored body present")
+        .attributes
+        .as_ref()
+        .expect("stored body has attributes");
+    assert_eq!(stored_attrs["era_type"], serde_json::json!("kingdom"));
+    assert_eq!(
+        stored_attrs["world_summary"],
+        serde_json::json!("A century without war.")
+    );
 }
 
 /// V1.143 P1 T3 / C1 regression (reviewer-requested): the orchestrator's

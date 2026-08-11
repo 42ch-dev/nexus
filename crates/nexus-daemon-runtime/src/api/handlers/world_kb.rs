@@ -44,7 +44,7 @@ use nexus_knowledge::world_kb::knowledge_entry::{WorldKbBody, WorldKbEntry};
 use nexus_knowledge::world_kb::validation::{
     validate_body, validate_canonical_name, ValidationMode,
 };
-use nexus_knowledge::world_kb::KbStore;
+use nexus_knowledge::world_kb::{KbStore, KbStoreError};
 use nexus_local_db::kb_extract_job::{
     get_promotion, list_pending_for_world_after, mark_confirmed_in_tx_with_cas, KbExtractPromotion,
 };
@@ -298,13 +298,36 @@ pub async fn patch_entity(
         pool.clone(),
         ValidationMode::Novel,
     );
-    let kb = store
-        .get_knowledge_entry(&req.entity_id)
-        .await
-        .map_err(|e| NexusApiError::Internal {
-            code: "DATABASE_ERROR".to_string(),
-            message: e.to_string(),
-        })?;
+    // V1.160 P1 create-on-absent (entity-scope-model §5.1.2): the handler is
+    // now a true create-or-update surface, branching on the store read result.
+    // `Ok(kb)` → the existing update flow below (UNCHANGED — terminal guard +
+    // OCC + cross-world scope fire here, including for soft-deleted / merged
+    // rows, which `get_knowledge_entry` returns as Found, never NotFound).
+    // `Err(NotFound)` + `expected_version == 0` → create convention
+    // (client-minted `entity_id` + absent row + version 0) → create branch.
+    // `Err(NotFound)` + `expected_version > 0` → update-on-absent is client
+    // staleness, never a silent create → 409.
+    // `Err(other)` → genuine storage error → 500 (unchanged).
+    let kb = match store.get_knowledge_entry(&req.entity_id).await {
+        Ok(kb) => kb,
+        Err(KbStoreError::NotFound(_)) if req.expected_version == 0 => {
+            return patch_entity_create(pool, &world_id, &req).await;
+        }
+        Err(KbStoreError::NotFound(_)) => {
+            return Err(NexusApiError::world_kb_conflict(
+                0,
+                &req.entity_id,
+                "version",
+                "the entity does not exist; refetch the World KB graph and reapply",
+            ));
+        }
+        Err(e) => {
+            return Err(NexusApiError::Internal {
+                code: "DATABASE_ERROR".to_string(),
+                message: e.to_string(),
+            });
+        }
+    };
     if kb.world_id != world_id {
         return Err(NexusApiError::NotFound(format!(
             "entity {} in world {world_id}",
@@ -414,6 +437,126 @@ pub async fn patch_entity(
     // Re-read canonical post-write state for the response projection (mirrors
     // the pre-cutover re-read; `cas_update_key_block_fields` sets `updated_at`
     // server-side, which the orchestrator's returned entry does not carry).
+    let updated = store
+        .get_knowledge_entry(&req.entity_id)
+        .await
+        .map_err(|e| NexusApiError::Internal {
+            code: "DATABASE_ERROR".to_string(),
+            message: e.to_string(),
+        })?;
+
+    Ok(Json(WorldKbPatchEntityResponse {
+        entity: wire_cast(project_entity(&updated)),
+        version: new_version,
+        validation_summary: wire_cast(validation_summary(&[], &[])),
+    }))
+}
+
+/// V1.160 P1 create-on-absent branch of [`patch_entity`] (entity-scope-model
+/// §5.1.2). Fires only when the store reports `NotFound` AND the client sent
+/// `expected_version: 0` — the create convention (client-minted `entity_id`,
+/// PATH `world_id` already authz-checked by `require_world_owner`).
+///
+/// Unlike update, there is no pre-read entity to inherit unchanged fields
+/// from, so `patch.title` (→ `canonical_name`) and `patch.block_type` are
+/// REQUIRED; missing either is a 422. `patch.body` / `patch.aliases` are
+/// optional and merged through the same [`compute_body`] seam as the update
+/// path. `canonical_name` / `body` run the same V1.40 validation
+/// (`validate_canonical_name` + `validate_body(..., ValidationMode::Novel)`).
+///
+/// The fresh entry is routed through the same `orchestrate_upsert` seam as
+/// update: the orchestrator derives `expected_base_revision = None` from its
+/// own absent read and `put_create` INSERTs at revision 1. Success returns
+/// HTTP 200 (NOT 201) with the standard `WorldKbPatchEntityResponse`
+/// (`version = 1`) — byte-for-byte indistinguishable from an update response,
+/// so existing clients need no new parsing branch.
+async fn patch_entity_create(
+    pool: &sqlx::SqlitePool,
+    world_id: &str,
+    req: &WorldKbPatchEntityRequest,
+) -> Result<Json<WorldKbPatchEntityResponse>, NexusApiError> {
+    // Create has no pre-read entity to inherit from: title + block_type are
+    // required, body/aliases optional.
+    let Some(title) = req.patch.title.as_ref() else {
+        return Err(NexusApiError::world_kb_validation_failed(
+            &["create requires patch.title (canonical_name)".to_string()],
+            &[],
+        ));
+    };
+    let Some(block_type) = req.patch.block_type else {
+        return Err(NexusApiError::world_kb_validation_failed(
+            &["create requires patch.block_type".to_string()],
+            &[],
+        ));
+    };
+    let block_type: nexus_contracts::BlockType = wire_cast(block_type);
+
+    // V1.160 P1 fix-wave (QC2-F001): a whitespace-only title (e.g. `"   "`)
+    // passes `validate_canonical_name` (spaces are legal there) and the
+    // schema `minLength: 1`, but the orchestrator rejects it with
+    // `EmptyCanonicalName` — which previously fell through `map_upsert_reject`
+    // to a 500. Reject here, before the spoke request is built.
+    if title.trim().is_empty() {
+        return Err(NexusApiError::world_kb_validation_failed(
+            &[
+                "create requires a non-empty patch.title (whitespace-only titles are rejected)"
+                    .to_string(),
+            ],
+            &[],
+        ));
+    }
+
+    validate_canonical_name(title.as_str())
+        .map_err(|e| NexusApiError::world_kb_validation_failed(&[e.to_string()], &[]))?;
+
+    // V1.160 P1 fix-wave (QC2-F002 / QC3-S004): the `kb_key_blocks` CHECK
+    // constraint only enforces the `kb_%` prefix, so an arbitrary `entity_id`
+    // passes the handler and fails the INSERT with a CHECK error → 500. Spec
+    // §5.1.2 makes `kb_<hex>` normative — enforce the prefix + non-empty hex
+    // suffix here, before the orchestrator / store see the id.
+    let entity_id_conforms = req
+        .entity_id
+        .strip_prefix("kb_")
+        .is_some_and(|suffix| !suffix.is_empty() && suffix.chars().all(|c| c.is_ascii_hexdigit()));
+    if !entity_id_conforms {
+        return Err(NexusApiError::world_kb_validation_failed(
+            &["entity_id must follow kb_<hex> convention".to_string()],
+            &[],
+        ));
+    }
+
+    // Fresh entity: client-minted `entity_id`, PATH `world_id`, default
+    // new-entity status (provisional), create revision 0 (the orchestrator's
+    // `validate_create_path` accepts None/0; `put_create` sets it to 1).
+    let mut fresh = WorldKbEntry::new(world_id, block_type, title.as_str());
+    fresh.entry_id = req.entity_id.clone();
+    fresh.revision = Some(0);
+
+    // Body/aliases merge + validation (same seam as the update path).
+    let body_for_validation = compute_body(&fresh, &req.patch)?;
+    if let Some(body) = &body_for_validation {
+        validate_body(block_type, Some(body), ValidationMode::Novel)
+            .map_err(|e| NexusApiError::world_kb_validation_failed(&[e.to_string()], &[]))?;
+    }
+    fresh.body = body_for_validation;
+
+    let spoke_req = build_spoke_upsert_request(&fresh);
+    let adapter = NexusAdapter::new(pool.clone());
+    let result = adapter
+        .with_bound_tx(|| orchestrate_upsert(&adapter, spoke_req))
+        .await;
+    let persisted = map_upsert_response(result, pool, &req.entity_id).await?;
+    let new_version = persisted.revision.unwrap_or(0);
+
+    info!(entity_id = %req.entity_id, new_version, "world_kb.patch_entity create committed");
+
+    // Re-read canonical post-write state for the response projection (mirrors
+    // the update path's re-read — server-side timestamps are not carried by
+    // the orchestrator's returned entry).
+    let store = nexus_local_db::kb_store::SqliteKbStore::with_validation_mode(
+        pool.clone(),
+        ValidationMode::Novel,
+    );
     let updated = store
         .get_knowledge_entry(&req.entity_id)
         .await
@@ -1008,6 +1151,7 @@ fn build_spoke_upsert_request(entry: &WorldKbEntry) -> UpsertRequest {
 /// |-----------------------------------------|----------------------------|
 /// | `StoredRevisionStale` / `RevisionConflict` / `KnowledgeEntryAlreadyExists` | `world_kb_conflict` (409) |
 /// | `KnowledgeEntryTerminalStatus` / `InvalidKnowledgeEntryStatus` / `InvalidKnowledgeEntryStatusTransition` | `world_kb_validation_failed` (422) |
+/// | `EmptyCanonicalName` / `MissingRequiredField` (V1.160 P1 fix-wave) | `world_kb_validation_failed` (422) |
 /// | `InvalidInput` (V1.146 P0)               | `InvalidInput` (400)       |
 /// | `InternalError` (V1.146 P0)             | `Internal` (500)           |
 /// | other / `Variant1` error envelope       | `Internal` (500)           |
@@ -1109,7 +1253,13 @@ async fn map_upsert_reject(
         }
         SpokeRejectCode::KnowledgeEntryTerminalStatus
         | SpokeRejectCode::InvalidKnowledgeEntryStatus
-        | SpokeRejectCode::InvalidKnowledgeEntryStatusTransition => {
+        | SpokeRejectCode::InvalidKnowledgeEntryStatusTransition
+        // V1.160 P1 fix-wave (QC2-F001): defense in depth — the create-branch
+        // pre-validation catches whitespace titles / malformed ids, but any
+        // remaining `EmptyCanonicalName` / `MissingRequiredField` reject is a
+        // client-input problem (422), never a server fault (500).
+        | SpokeRejectCode::EmptyCanonicalName
+        | SpokeRejectCode::MissingRequiredField => {
             NexusApiError::world_kb_validation_failed(&[reject.message], &[])
         }
         // explicit 400 contract for validation rejects (S-001)

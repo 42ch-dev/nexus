@@ -2,14 +2,16 @@
  * Brief empty-state + backward-compat — V1.159 P1 Task 4.
  *
  * Hardens the Brief layer against every era-shape edge case and pins the
- * "新建 era" entry deferral contract (F-001 / R-V1159P1-001 — the World KB
- * has no entity creation route, so the create entry is hard-hidden until a
- * backend create carrier lands; spec §3.3.3 V1.159 amendment "Create entry"
- * visibility returns with it):
+ * "新建 era" entry gating contract (V1.160 P1 T2 — F-001 / R-V1159P1-001
+ * closed: the V1.160 P1 T1 backend create-on-absent path made `patch-entity`
+ * create when the minted entity id is absent, so the create entry is LIVE
+ * behind `showCreateEra={activeLayer === 'brief'}`; spec §3.3.3 V1.159
+ * amendment "Create entry" visibility is restored):
  *
  *   1. empty_era_data_shows_v1_123_empty_state — no `block_type=era`
  *      entities → the V1.123 Brief empty-state panel (title + CTA) renders
- *      and the "新建 era" button stays HIDDEN while deferred.
+ *      and the "新建 era" button is VISIBLE on the empty Brief panel (the
+ *      create-first-era path).
  *   2. flat_eras_render_as_depth_0_bands        — untyped, unnested eras →
  *      depth-0 bands, default Brief-accent color, no type badge (V1.156
  *      flat rendering backward compatible).
@@ -18,9 +20,11 @@
  *      the default color and no badge.
  *   4. partial_nesting_orphans_and_nested       — a forest mixing depth-0
  *      orphan roots with nested branches renders both shapes.
- *   5. create_era_entry_hidden_while_deferred   — the create entry never
- *      renders on any layer (deferral contract; was "visible on empty
- *      state" pre-deferral).
+ *   5. create_era_entry_visible_on_brief_empty_state — the create entry
+ *      renders on the Brief empty panel (create-first-era path, T4 DoD).
+ *   6. create_era_entry_brief_layer_only — Brief visible (empty panel
+ *      included), Narrative / Moment hidden (Work-Brief stays read-only;
+ *      the Brief-layer gating contract).
  *
  * Component-level cases build trees through the real `buildEraTree` (Task 1)
  * so the Task 1 → Task 2 → Task 4 pipeline is exercised end to end (mirrors
@@ -183,9 +187,8 @@ describe('Brief empty-state + backward-compat (V1.159 P1 T4)', () => {
   it('empty_era_data_shows_v1_123_empty_state', async () => {
     // No `block_type=era` entities → the V1.123 Brief empty-state panel
     // (title + Narrative CTA) renders when the user switches to Brief. The
-    // "新建 era" create entry is NOT rendered while deferred (F-001 /
-    // R-V1159P1-001 — World KB has no entity creation route; the entry
-    // returns when a backend create carrier lands).
+    // "新建 era" create entry IS rendered on the empty panel (V1.160 P1 T2 —
+    // F-001 / R-V1159P1-001 closed; the create-first-era path, T4 DoD).
     renderInApp(<TimelineCanvas worldId="world-7" />, {
       client: makeMockClient(eventsOnlyGraph()),
     });
@@ -202,8 +205,8 @@ describe('Brief empty-state + backward-compat (V1.159 P1 T4)', () => {
     expect(briefEmpty).toHaveTextContent('No era markers yet');
     expect(briefEmpty).toHaveTextContent('Switch to Narrative');
 
-    // The create entry is hidden on the empty state while deferred.
-    expect(screen.queryByTestId('timeline-create-era-entry')).toBeNull();
+    // The create entry is visible on the empty Brief panel (live gate).
+    expect(screen.getByTestId('timeline-create-era-entry')).toBeInTheDocument();
   });
 
   it('flat_eras_render_as_depth_0_bands', () => {
@@ -302,11 +305,11 @@ describe('Brief empty-state + backward-compat (V1.159 P1 T4)', () => {
     });
   });
 
-  it('create_era_entry_hidden_while_deferred', async () => {
-    // F-001 deferral: the "新建 era" create entry never renders — on the
-    // Brief empty panel or anywhere — because the World KB has no entity
-    // creation route (`patch-entity` is edit-only). The empty panel keeps
-    // its V1.123 copy + Narrative CTA as the only affordance.
+  it('create_era_entry_visible_on_brief_empty_state', async () => {
+    // V1.160 P1 T2 (F-001 / R-V1159P1-001 closed): the "新建 era" create
+    // entry renders on the Brief empty panel — the create-first-era path
+    // (T4 DoD). The empty panel keeps its V1.123 copy + Narrative CTA, and
+    // the create entry sits in the header chrome above it.
     renderInApp(<TimelineCanvas worldId="world-7" />, {
       client: makeMockClient(eventsOnlyGraph()),
     });
@@ -318,16 +321,17 @@ describe('Brief empty-state + backward-compat (V1.159 P1 T4)', () => {
     fireEvent.click(screen.getByTestId('timeline-layer-tab-brief'));
     await screen.findByTestId('timeline-brief-empty-state');
 
-    // No create entry on the empty panel (deferred — no dialog to open).
-    expect(screen.queryByTestId('timeline-create-era-entry')).toBeNull();
-    expect(screen.queryByLabelText(/Era name/i)).toBeNull();
+    // Create entry visible on the empty panel; the dialog opens on click.
+    const entry = screen.getByTestId('timeline-create-era-entry');
+    expect(entry).toBeInTheDocument();
+    await userEvent.click(entry);
+    expect(await screen.findByLabelText(/Era name/i)).toBeInTheDocument();
   });
 
-  it('create_era_entry_hidden_on_all_layers_while_deferred', async () => {
-    // F-001 deferral: the create entry is hidden on every layer — Brief
-    // included — until the World KB entity-creation backend gap lands
-    // (pre-deferral it was Brief-layer chrome only: hidden on Narrative
-    // and Moment, visible on Brief).
+  it('create_era_entry_brief_layer_only', async () => {
+    // V1.160 P1 T2 — the create entry is Brief-layer chrome only: visible
+    // on Brief, hidden on Narrative and Moment (Work-Brief stays a
+    // read-only projection per spec §3.3.3).
     const user = userEvent.setup();
     renderInApp(<TimelineCanvas worldId="world-7" />, {
       client: makeMockClient(eraGraph()),
@@ -337,9 +341,8 @@ describe('Brief empty-state + backward-compat (V1.159 P1 T4)', () => {
       expect(screen.getByTestId('timeline-canvas')).toBeInTheDocument();
     });
 
-    // Brief is the default layer (era data exists) → entry still hidden
-    // (deferred).
-    expect(screen.queryByTestId('timeline-create-era-entry')).toBeNull();
+    // Brief is the default layer (era data exists) → entry visible.
+    expect(screen.getByTestId('timeline-create-era-entry')).toBeInTheDocument();
 
     // Narrative → hidden.
     await user.click(screen.getByTestId('timeline-layer-tab-narrative'));
@@ -362,7 +365,7 @@ describe('Brief empty-state + backward-compat (V1.159 P1 T4)', () => {
     });
     expect(screen.queryByTestId('timeline-create-era-entry')).toBeNull();
 
-    // Back to Brief → still hidden (deferred).
+    // Back to Brief → visible again.
     await user.click(screen.getByTestId('timeline-layer-tab-brief'));
     await waitFor(() => {
       expect(screen.getByTestId('timeline-canvas')).toHaveAttribute(
@@ -370,6 +373,6 @@ describe('Brief empty-state + backward-compat (V1.159 P1 T4)', () => {
         'brief',
       );
     });
-    expect(screen.queryByTestId('timeline-create-era-entry')).toBeNull();
+    expect(screen.getByTestId('timeline-create-era-entry')).toBeInTheDocument();
   });
 });
