@@ -30,7 +30,8 @@ use nexus_local_db::list_force_gates_audit;
 use nexus_local_db::works::{self, WorkRecord};
 use nexus_orchestration::schedule::supervisor::ScheduleSupervisor;
 use serde_json::{json, Value};
-use std::path::PathBuf;
+use serial_test::serial;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 struct TestCtx {
@@ -68,7 +69,7 @@ async fn test_ctx() -> TestCtx {
 
 /// Seed a minimal Work row so gated presets can load a Work snapshot during
 /// gate evaluation. Returns the pool for further seeding if needed.
-async fn seed_work(db_path: &PathBuf, work_id: &str, creator_id: &str) {
+async fn seed_work(db_path: &Path, work_id: &str, creator_id: &str) {
     let db_url = format!("sqlite:{}?mode=rw", db_path.display());
     let pool = sqlx::SqlitePool::connect(&db_url).await.unwrap();
     let record = WorkRecord {
@@ -468,7 +469,19 @@ async fn gated_preset_without_work_id_is_rejected() {
 }
 
 // ── F-F1 sort tests ─────────────────────────────────────────────────────────
+//
+// R-V1149-CROSS-001 RCA: `schedule_list_sort_by_label_ascending` (and the two
+// sibling sort tests below) was observed as an interference flake (rerun-pass)
+// under full-parallel `cargo test --all` — concurrent schedule tests sharing
+// the process (tokio's sqlx blocking-thread pool, the shared clock used to
+// mint `SCH{ms}` schedule IDs, tempdir/DB churn) can interleave inserts and
+// pollute the ordered list. Fixtures are already per-test (fresh tempdir DB +
+// unique creator id); the sort cohort is additionally marked `#[serial]` for
+// deterministic isolation per plan (no blanket timeout inflation).
 
+// `axum_test`'s AutoFuture is not `Send`; this helper only runs inside
+// current-thread `#[tokio::test]` bodies, so the future need not be `Send`.
+#[allow(clippy::future_not_send)]
 async fn create_schedule_with_label(server: &TestServer, creator_id: &str, label: &str) {
     let req = AddScheduleRequest {
         creator_id: creator_id.to_string(),
@@ -490,6 +503,7 @@ async fn create_schedule_with_label(server: &TestServer, creator_id: &str, label
 }
 
 #[tokio::test]
+#[serial]
 async fn schedule_list_sort_by_label_ascending() {
     let ctx = test_ctx().await;
     create_schedule_with_label(&ctx.server, "ctr_sort", "Beta").await;
@@ -511,6 +525,7 @@ async fn schedule_list_sort_by_label_ascending() {
 }
 
 #[tokio::test]
+#[serial]
 async fn schedule_list_sort_descending_and_pagination() {
     let ctx = test_ctx().await;
     create_schedule_with_label(&ctx.server, "ctr_sort2", "Alpha").await;
@@ -545,6 +560,7 @@ async fn schedule_list_sort_descending_and_pagination() {
 }
 
 #[tokio::test]
+#[serial]
 async fn schedule_list_invalid_sort_key_returns_schedule_sort_invalid() {
     let ctx = test_ctx().await;
     create_schedule_with_label(&ctx.server, "ctr_sort3", "Alpha").await;

@@ -530,13 +530,15 @@ mod tests {
                     .get(&key)
                     .and_then(|ns| ns.get("branch_id"))
                     .and_then(Value::as_str)
-                    .map(str::to_owned)
-                    .unwrap_or_else(|| {
-                        panic!(
-                            "missing extensions.nexus.branch_id on {}",
-                            e.timeline_event_id
-                        )
-                    })
+                    .map_or_else(
+                        || {
+                            panic!(
+                                "missing extensions.nexus.branch_id on {}",
+                                e.timeline_event_id
+                            )
+                        },
+                        str::to_owned,
+                    )
             })
             .collect();
         let mut unique = branches.clone();
@@ -555,7 +557,7 @@ mod tests {
 
     // ── V1.146 P0: InternalError on DB failure ─────────────────────────
 
-    /// DB failure (dropped table) on list_timeline_events_ordered surfaces
+    /// DB failure (dropped table) on `list_timeline_events_ordered` surfaces
     /// `InternalError`.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn list_timeline_events_ordered_on_dropped_table_surfaces_internal_error() {

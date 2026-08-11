@@ -1220,10 +1220,12 @@ mod tests {
     // ── V1.150 P1: Moment Directive injection (spec §3) ──────────────
 
     /// In-memory `DirectiveStore` stub: serves a fixed directive and records
-    /// `after_injection` calls (directive_id, event_id, work_id).
+    /// `after_injection` calls (`directive_id`, `event_id`, `work_id`).
     #[derive(Default)]
     struct TestDirectiveStore {
         active: Option<ActiveDirective>,
+        // Test stub records (directive_id, event_id, work_id) triples.
+        #[allow(clippy::type_complexity)]
         calls: Arc<std::sync::Mutex<Vec<(String, Option<String>, Option<String>)>>>,
     }
 
@@ -1281,6 +1283,9 @@ mod tests {
 
     /// Seed a world + a timeline event so `world_state` and `timeline` are
     /// both present (the directive region has three interior positions).
+    // Kept async for symmetric call shape with the other seed helpers; the
+    // body is synchronous.
+    #[allow(clippy::unused_async)]
     async fn seed_world_and_timeline(stores: &TestStores) {
         let world = nexus_narrative::world::World::new(
             "wld_1",
@@ -2099,9 +2104,9 @@ mod tests {
         // Extended scan (V1.149 P0 T2): the activation key matches ONLY the
         // timeline outline-beat text (event title), not stage0 and not the
         // entry's own self-match text — the entry fires via timeline text.
+        use nexus_narrative::timeline_event::{TimelineEvent, TimelineEventType};
         let stores = TestStores::new();
 
-        use nexus_narrative::timeline_event::{TimelineEvent, TimelineEventType};
         let mut event = TimelineEvent::new("wld_1", "fbk_root", TimelineEventType::StoryAdvance, 1);
         event.title = Some("The dawn dock heist".to_string());
         stores.narrative.insert_event(event);

@@ -1,0 +1,105 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/daemon-api/inspector/moment-directive-response.schema.json",
+  "schema_version": 1,
+  "title": "NexusDaemonMomentDirectiveResponse",
+  "description": "Response for POST /v1/daemon/moment-directive (V1.151 P0 DF-76; DR-63 schema-tightening). Formalizes the live wire shape the handler already emits: `set`/`show` return the full directive row (all 15 fields, incl. body — the author surface, NOT the inspector packet; AC-I3 governs only the packet's status-only `moment_directive` section), and `show` with no effective directive / `clear` return `{}`. Both branches are honest payloads today, so both are valid responses; the schema adds the typed contract without any wire change (additive only).",
+  "type": "object",
+  "oneOf": [
+    {
+      "type": "object",
+      "title": "NexusDaemonMomentDirectiveResponseDirective",
+      "description": "The active directive row (set, or show with an effective directive). Mirrors `nexus_local_db::moment_directive::MomentDirectiveRow` 1:1 — the nullable fields serialize as explicit JSON null (never omitted), matching the row's `serde::Serialize` output.",
+      "required": [
+        "directive_id",
+        "creator_id",
+        "scope_kind",
+        "scope_id",
+        "body",
+        "insert_depth",
+        "ttl_kind",
+        "ttl_remaining",
+        "clear_on_scene_change",
+        "status",
+        "last_focused_event_id",
+        "created_at",
+        "updated_at",
+        "expires_at",
+        "replaced_by"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "directive_id": {
+          "type": "string",
+          "description": "Unique directive id (application-generated, `dir_<uuid v4>`)."
+        },
+        "creator_id": {
+          "type": "string",
+          "description": "Owning creator."
+        },
+        "scope_kind": {
+          "type": "string",
+          "enum": ["work", "world"],
+          "description": "Scope kind of the directive: work | world."
+        },
+        "scope_id": {
+          "type": "string",
+          "description": "Work id (scope_kind=work) or world id (scope_kind=world) the directive is scoped to. For an inherited World override on a Work show, names the inherited source."
+        },
+        "body": {
+          "type": "string",
+          "description": "Author instruction text (author surface — this route carries the body by design; the inspector packet's `moment_directive` section is status-only per AC-I3)."
+        },
+        "insert_depth": {
+          "type": "string",
+          "enum": ["head", "mid", "tail"],
+          "description": "Placement within the directive region: head | mid | tail."
+        },
+        "ttl_kind": {
+          "type": "string",
+          "enum": ["generations", "chapters"],
+          "description": "TTL kind: count down by assembling generations or chapter advances."
+        },
+        "ttl_remaining": {
+          "type": "integer",
+          "description": "Remaining TTL count (decremented in place; 0 ⇒ expired, so an active row always carries >= 1)."
+        },
+        "clear_on_scene_change": {
+          "type": "boolean",
+          "description": "Clear when the focused moment anchor changes between assembles."
+        },
+        "status": {
+          "type": "string",
+          "enum": ["active", "expired"],
+          "description": "Directive lifecycle status: active | expired (soft-delete)."
+        },
+        "last_focused_event_id": {
+          "type": ["string", "null"],
+          "description": "Last focused `MomentRequest.event_id` seen at an injecting assemble (scene-change signal). Null until the first injection."
+        },
+        "created_at": {
+          "type": "integer",
+          "description": "Unix epoch millis when created."
+        },
+        "updated_at": {
+          "type": "integer",
+          "description": "Unix epoch millis of the last lifecycle write."
+        },
+        "expires_at": {
+          "type": ["integer", "null"],
+          "description": "Unix epoch millis when soft-deleted (TTL-0 / scene-clear / manual clear). Null while active."
+        },
+        "replaced_by": {
+          "type": ["string", "null"],
+          "description": "New directive id when `--replace` superseded this row. Null otherwise."
+        }
+      }
+    },
+    {
+      "type": "object",
+      "title": "NexusDaemonMomentDirectiveResponseEmpty",
+      "description": "No directive: `show` with no effective directive for the scope, or a successful `clear`. An empty object `{}` — the pre-schema wire behavior, unchanged.",
+      "maxProperties": 0
+    }
+  ]
+}

@@ -214,6 +214,21 @@ async fn set_show_clear_work_scope_round_trip() {
     assert_eq!(set["insert_depth"], "mid", "body={set}");
     assert_eq!(set["ttl_kind"], "generations", "body={set}");
     assert_eq!(set["ttl_remaining"], 3, "body={set}");
+    // DR-63 (V1.158 P2): the typed response keeps the exact 15-field row
+    // shape the pre-schema `Json<Value>` emitted — including the nullable
+    // fields present-as-`null` (never omitted) and no extra keys.
+    assert_eq!(
+        set.as_object().map(serde_json::Map::len),
+        Some(15),
+        "set must return exactly the 15 directive-row fields, got: {set}"
+    );
+    assert_eq!(set["last_focused_event_id"], Value::Null, "body={set}");
+    assert_eq!(set["expires_at"], Value::Null, "body={set}");
+    assert_eq!(set["replaced_by"], Value::Null, "body={set}");
+    assert!(set["creator_id"].is_string(), "body={set}");
+    assert!(set["created_at"].is_i64(), "body={set}");
+    assert!(set["updated_at"].is_i64(), "body={set}");
+    assert!(set["clear_on_scene_change"].is_boolean(), "body={set}");
     let directive_id = set["directive_id"]
         .as_str()
         .expect("directive_id")

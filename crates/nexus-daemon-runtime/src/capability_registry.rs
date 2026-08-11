@@ -1123,13 +1123,36 @@ mod tests {
     /// V1.60 P0 (R-V159P0-002): Replaced the manual 28-element match list with
     /// a catalog-driven derivation. The test now parses the §4 table's `Status`
     /// + `Registry row ref` columns: a catalog id is expected in
-    /// `host_tool_registry()` iff Status=`shipped` AND Registry row
-    /// ref=`host_tool`. Orchestration-scope shipped ids (e.g.
-    /// `nexus.reference.refresh`, the 5 DF-46 capabilities) are correctly
-    /// excluded from the `host_tool` direction — no manual list to maintain.
+    ///   `host_tool_registry()` iff Status=`shipped` AND Registry row
+    ///   ref=`host_tool`. Orchestration-scope shipped ids (e.g.
+    ///   `nexus.reference.refresh`, the 5 DF-46 capabilities) are correctly
+    ///   excluded from the `host_tool` direction — no manual list to maintain.
+    // Long integration test; splitting would obscure the end-to-end scenario.
+    #[allow(clippy::too_many_lines)]
     #[test]
     fn catalog_registry_invariant_all_ids_present() {
         use std::collections::HashSet;
+
+        // V1.60 P0: parse structured rows from the §4 table so the host_tool
+        // direction is auto-derived from the `Status` + `Registry row ref`
+        // columns rather than a manual match list (closes R-V159P0-002).
+        // V1.67 P2 (R-V160P0-QC1-W002): parse by header name instead of hardcoded
+        // positional indices so future column insertions do not silently shift
+        // the parsed values.
+        // Row shape: | `nexus.<id>` | description | status | shipped_in | registry_ref |
+        struct CatalogRow {
+            id: String,
+            status: String,
+            registry_ref: String,
+        }
+
+        // First pass: locate the header row and map column names to indices.
+        #[derive(Debug, Default)]
+        struct ColumnIndex {
+            id: Option<usize>,
+            status: Option<usize>,
+            registry_ref: Option<usize>,
+        }
 
         let reg = host_tool_registry();
         let registry_ids: HashSet<&str> = reg.ids().collect();
@@ -1148,28 +1171,8 @@ mod tests {
         let catalog_content =
             std::fs::read_to_string(catalog_path).expect("acp-capability-set.md must be readable");
 
-        // V1.60 P0: parse structured rows from the §4 table so the host_tool
-        // direction is auto-derived from the `Status` + `Registry row ref`
-        // columns rather than a manual match list (closes R-V159P0-002).
-        // V1.67 P2 (R-V160P0-QC1-W002): parse by header name instead of hardcoded
-        // positional indices so future column insertions do not silently shift
-        // the parsed values.
-        // Row shape: | `nexus.<id>` | description | status | shipped_in | registry_ref |
-        struct CatalogRow {
-            id: String,
-            status: String,
-            registry_ref: String,
-        }
-
         let lines: Vec<&str> = catalog_content.lines().collect();
 
-        // First pass: locate the header row and map column names to indices.
-        #[derive(Debug, Default)]
-        struct ColumnIndex {
-            id: Option<usize>,
-            status: Option<usize>,
-            registry_ref: Option<usize>,
-        }
         let mut header: Option<ColumnIndex> = None;
         for line in &lines {
             let trimmed = line.trim();

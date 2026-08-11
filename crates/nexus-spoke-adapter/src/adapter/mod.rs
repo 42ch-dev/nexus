@@ -137,7 +137,7 @@ impl<'a> NexusAdapter<'a> {
     /// seam: in-crate tests observe cache hits / recompiles through it.
     #[cfg(test)]
     #[must_use]
-    pub(crate) fn module_cache(&self) -> &ModuleCache {
+    pub(crate) const fn module_cache(&self) -> &ModuleCache {
         &self.module_cache
     }
 

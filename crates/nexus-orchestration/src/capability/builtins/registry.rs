@@ -756,7 +756,7 @@ mod tests {
         let out = cap.run(serde_json::json!({})).await.unwrap();
 
         // Verify every known capability ID is embedded
-        let count = out["capabilityCount"].as_u64().unwrap() as usize;
+        let count = usize::try_from(out["capabilityCount"].as_u64().unwrap()).unwrap_or(usize::MAX);
         assert_eq!(count, REGISTRY_SNAPSHOT_CAPABILITIES.len());
         assert!(count >= 31, "expected at least 31 capabilities in snapshot");
     }

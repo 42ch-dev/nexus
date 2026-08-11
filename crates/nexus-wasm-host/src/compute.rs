@@ -1327,7 +1327,10 @@ mod tests {
             "over-the-limit",
             Some(crate::sandbox::DEFAULT_FUEL * 10), // 10× host default
             Some(crate::sandbox::DEFAULT_MEMORY_MIB * 4), // 4× host default
-            Some(crate::sandbox::DEFAULT_WALL_TIME.as_millis() as u64 * 5), // 5× host default
+            Some(
+                u64::try_from(crate::sandbox::DEFAULT_WALL_TIME.as_millis()).unwrap_or(u64::MAX)
+                    * 5,
+            ), // 5× host default
         );
         let resolved = engine.resolve_sandbox(&manifest);
         assert_eq!(resolved.fuel, crate::sandbox::DEFAULT_FUEL);
@@ -1343,7 +1346,8 @@ mod tests {
         let engine = WasmEngine::new().unwrap();
         let half_fuel = crate::sandbox::DEFAULT_FUEL / 2;
         let half_mem_mib = crate::sandbox::DEFAULT_MEMORY_MIB / 2;
-        let half_wall_ms = crate::sandbox::DEFAULT_WALL_TIME.as_millis() as u64 / 2;
+        let half_wall_ms =
+            u64::try_from(crate::sandbox::DEFAULT_WALL_TIME.as_millis()).unwrap_or(u64::MAX) / 2;
         let manifest = make_manifest(
             "under-the-limit",
             Some(half_fuel),

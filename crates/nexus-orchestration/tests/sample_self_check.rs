@@ -5,7 +5,7 @@
 //! 1. The bundled `strategy-samples/game-narrative/` strategy stays valid
 //!    against the real validator core (`load_preset` + `validate_preset_semantic`
 //!    + `validate_assets_in_bundle` + `validate_path_safety`), with zero error
-//!    AND zero warning diagnostics.
+//!      AND zero warning diagnostics.
 //! 2. The expression-routing constraint that forced the sample's `llm_judge`
 //!    lane selector: a dotted `preset.input.*` key is unreachable in
 //!    `_context` expressions (the context is a flat map and the grammar has no
@@ -28,6 +28,8 @@ fn sample_bundle_root() -> std::path::PathBuf {
 }
 
 #[test]
+// Long integration test; splitting would obscure the end-to-end scenario
+#[allow(clippy::too_many_lines)]
 fn game_narrative_sample_validates_clean() {
     let caps = CapabilityRegistry::with_builtins();
     let bundle_root = sample_bundle_root();

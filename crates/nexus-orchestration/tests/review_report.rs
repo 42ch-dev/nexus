@@ -415,15 +415,15 @@ Adequate; no actionable issues this pass.
 #[serial_test::serial]
 #[tokio::test]
 async fn large_report_falls_back_to_placeholder() {
+    // 300 KiB of padding > 256 KiB cap. The literal mirrors the
+    // `MAX_REVIEW_REPORT_BYTES` constant in `auto_chain.rs`; if that constant
+    // changes, bump this fixture to match (the assert! below guards it).
+    const CAP_BYTES: usize = 256 * 1024;
     let pool = test_pool().await;
     let work = novel_work("wrk_large", "large-novel", 3, 5);
     works::create_work(&pool, &work).await.unwrap();
     insert_review_schedule(&pool, "sch_large_review", "wrk_large").await;
 
-    // 300 KiB of padding > 256 KiB cap. The literal mirrors the
-    // `MAX_REVIEW_REPORT_BYTES` constant in `auto_chain.rs`; if that constant
-    // changes, bump this fixture to match (the assert! below guards it).
-    const CAP_BYTES: usize = 256 * 1024;
     let pad = "x".repeat(300 * 1024);
     let report = format!(
         "# Review Report\n\n## Issues\n\

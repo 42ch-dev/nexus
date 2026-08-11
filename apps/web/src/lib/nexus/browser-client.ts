@@ -53,6 +53,7 @@ import type {
   ListWorksQuery,
   ListWorksResponse,
   MomentDirectiveRequest,
+  MomentDirectiveResponse,
   MomentInspectRequest,
   MomentInspectResponse,
   ModuleDetail,
@@ -125,7 +126,6 @@ import type {
   DiscardRunResponse,
   ListRunsQuery,
   ListTimelineEventsQuery,
-  MomentDirectiveResponse,
   NexusClient,
 } from './types';
 

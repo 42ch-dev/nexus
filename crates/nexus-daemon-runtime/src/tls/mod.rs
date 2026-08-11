@@ -422,8 +422,7 @@ mod tests {
     #[test]
     fn build_sans_includes_non_loopback_bind_host_dns() {
         let sans = build_subject_alt_names("nexus.local");
-        let sans_str: Vec<String> = sans.iter().map(san_to_string).collect();
-        assert!(sans_str.contains(&"nexus.local".to_string()));
+        assert!(sans.iter().any(|san| san_to_string(san) == "nexus.local"));
     }
 
     #[test]

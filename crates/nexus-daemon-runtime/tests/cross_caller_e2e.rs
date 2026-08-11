@@ -142,20 +142,6 @@ fn assert_outputs_equivalent(
     worker: &serde_json::Value,
     schedule: &serde_json::Value,
 ) {
-    // Check all 3 have the same top-level keys
-    let http_keys: std::collections::BTreeSet<_> = http.as_object().unwrap().keys().collect();
-    let worker_keys: std::collections::BTreeSet<_> = worker.as_object().unwrap().keys().collect();
-    let schedule_keys: std::collections::BTreeSet<_> =
-        schedule.as_object().unwrap().keys().collect();
-    assert_eq!(
-        http_keys, worker_keys,
-        "{tool_id}: HTTP ⇔ Worker key mismatch"
-    );
-    assert_eq!(
-        http_keys, schedule_keys,
-        "{tool_id}: HTTP ⇔ Schedule key mismatch"
-    );
-
     // Compare non-deterministic fields that may drift between near-simultaneous
     // calls: timestamps, per-invocation generated correlation IDs, and uptime
     // counters (which advance between calls).
@@ -173,6 +159,21 @@ fn assert_outputs_equivalent(
         // V1.59 P0: runtime.health uptime may drift between near-instant calls.
         "uptime_seconds",
     ];
+
+    // Check all 3 have the same top-level keys
+    let http_keys: std::collections::BTreeSet<_> = http.as_object().unwrap().keys().collect();
+    let worker_keys: std::collections::BTreeSet<_> = worker.as_object().unwrap().keys().collect();
+    let schedule_keys: std::collections::BTreeSet<_> =
+        schedule.as_object().unwrap().keys().collect();
+    assert_eq!(
+        http_keys, worker_keys,
+        "{tool_id}: HTTP ⇔ Worker key mismatch"
+    );
+    assert_eq!(
+        http_keys, schedule_keys,
+        "{tool_id}: HTTP ⇔ Schedule key mismatch"
+    );
+
     for key in http_keys {
         if NON_DETERMINISTIC_KEYS.contains(&key.as_str()) {
             continue; // Allow drift for non-deterministic fields.

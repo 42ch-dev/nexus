@@ -1,0 +1,110 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT relationship_id, world_id, source_entity_id, target_entity_id,\n                    relation_type, custom_label, symmetric, confidence,\n                    source_anchor_ids, metadata, created_at, updated_at, revision,\n                    needs_review, source, extensions_nexus_json\n             FROM kb_relationships\n             WHERE world_id = ? AND needs_review = 0\n             ORDER BY updated_at DESC, relationship_id DESC\n             LIMIT ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "relationship_id",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "world_id",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "source_entity_id",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "target_entity_id",
+        "ordinal": 3,
+        "type_info": "Text"
+      },
+      {
+        "name": "relation_type",
+        "ordinal": 4,
+        "type_info": "Text"
+      },
+      {
+        "name": "custom_label",
+        "ordinal": 5,
+        "type_info": "Text"
+      },
+      {
+        "name": "symmetric",
+        "ordinal": 6,
+        "type_info": "Integer"
+      },
+      {
+        "name": "confidence",
+        "ordinal": 7,
+        "type_info": "Float"
+      },
+      {
+        "name": "source_anchor_ids",
+        "ordinal": 8,
+        "type_info": "Text"
+      },
+      {
+        "name": "metadata",
+        "ordinal": 9,
+        "type_info": "Text"
+      },
+      {
+        "name": "created_at",
+        "ordinal": 10,
+        "type_info": "Text"
+      },
+      {
+        "name": "updated_at",
+        "ordinal": 11,
+        "type_info": "Text"
+      },
+      {
+        "name": "revision",
+        "ordinal": 12,
+        "type_info": "Integer"
+      },
+      {
+        "name": "needs_review",
+        "ordinal": 13,
+        "type_info": "Integer"
+      },
+      {
+        "name": "source",
+        "ordinal": 14,
+        "type_info": "Text"
+      },
+      {
+        "name": "extensions_nexus_json",
+        "ordinal": 15,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      true,
+      true,
+      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "81d28d7c603e73f82968618bd5306965ef698c87c3a6bb86d0f54c4bdb137e5a"
+}

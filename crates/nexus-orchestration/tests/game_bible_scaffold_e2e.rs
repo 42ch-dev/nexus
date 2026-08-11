@@ -214,12 +214,7 @@ async fn bootstrap_game_bible_idempotent() {
 
     // First run
     let output1 = cap.run(input.clone()).await.expect("first scaffold");
-    let files1: Vec<String> = output1["files_created"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|v| v.as_str().unwrap().to_string())
-        .collect();
+    let files1_count = output1["files_created"].as_array().unwrap().iter().count();
 
     // Second run — should succeed (no overwrite, files already exist)
     let output2 = cap.run(input).await.expect("second scaffold (idempotent)");
@@ -244,7 +239,7 @@ async fn bootstrap_game_bible_idempotent() {
     );
 
     // At minimum, verify second run succeeds and produces expected output structure
-    assert_eq!(files1.len(), 13, "first run: 13 files");
+    assert_eq!(files1_count, 13, "first run: 13 files");
     // Second run: files get overwritten (tokio::fs::write), so they appear again
     // in files_created. The exact count may vary; this tests idempotent success.
     assert!(

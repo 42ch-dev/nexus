@@ -143,8 +143,8 @@ async fn adopt_json_output_includes_llm_metadata() {
 /// its LLM columns stay NULL (backward compat).
 #[tokio::test]
 async fn adopt_works_on_heuristic_candidate_with_null_llm_fields() {
-    let (pool, _dir) = fresh_pool().await;
     use nexus_local_db::kb_extract_job::insert_pending;
+    let (pool, _dir) = fresh_pool().await;
     // Valid novel-profile body (heuristic shape) so adopt-time Novel validation passes.
     let payload = serde_json::json!({
         "summary": "A heuristic hero",

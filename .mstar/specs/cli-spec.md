@@ -9,7 +9,7 @@
 **V1.45 Shipped amendments:** §6.2D generic `creator run <preset_id>` — see [creator-run-preset-entry.md](creator-run-preset-entry.md) (**Shipped Master**); legacy subcommand enum removed from clap surface.  
 **V1.46 Shipped amendment:** §6.2E FL-E stage subcommand block deleted (superseded by V1.45 generic preset runner — see changelog). Normative CLI IA: [creator-run-preset-entry.md](creator-run-preset-entry.md).  
 **V1.51 Shipped amendments:** §6.2K `creator world kb adopt` LLM metadata surfaces; `creator kb rescan --work <work_ref>` cross-chapter reconciliation; `creator world kb pending --missing-only` (T-A P0/P1/P2).
-**V1.52 T-A P1 Draft overlay:** §6.2G.2 Legacy `creator kb --scope world` alias + deprecation for World KB CLI surface consolidation (closes R-V150KBED-01).
+**V1.52 Shipped amendments:** §6.2G.1 `creator world kb adopt --auto` + §6.2G.2 Legacy `creator kb --scope world` alias + deprecation for World KB CLI surface consolidation (closes R-V150KBED-01); both sections promoted to Normative (V1.158).
 **V1.54 P0 Draft overlay:** §6.2M ACP host write-tool CLI mappings — 6 new mutation-capable `nexus.*` host tools map to `creator world kb edit/adopt`, `creator world configure`, `creator works cron set`, `creator findings resolve`, and `creator pool` entry management (DF-46).
 **V1.64 P3 Draft overlay:** §6.3 daemon Web UI serving — `daemon start` logs Web UI URL; new `daemon ui`/`daemon web` convenience command; §7.1 first-run path updated. See also [web-ui.md](./web-ui.md) §11 and [daemon-runtime.md](./daemon-runtime.md) §4.4.
 **V1.65 Prepare amendment:** outline and chapter-structure editing becomes UI-first through the bundled Web UI chapter-content Daemon API. CLI parity for existing creator/run/chapter workflows is retained; no shipped CLI command is removed or renamed by this UI-first slice.
@@ -580,11 +580,7 @@ Rules:
 
 **Target (V1.51 T-A P2):** plan `2026-06-18-v1.51-missing-kb-detection`.
 
-### 6.2G.1 World KB CLI consolidation + `--auto` flag (Draft V1.52 overlay)
-
-**Status**: Draft (V1.52 — body authored in plan `2026-06-19-v1.52-outline-five-q-and-auto-promote`)  
-**Authoring plan**: `2026-06-19-v1.52-outline-five-q-and-auto-promote`  
-**Promotes to Normative**: P-last of V1.52
+### 6.2G.1 World KB CLI consolidation + `--auto` flag (V1.52 T-A P0 — Normative)
 
 `creator world kb adopt` gains an `--auto` mode for high-confidence, provenance-backed candidates.
 
@@ -603,11 +599,7 @@ Rules:
 - Audit logs are written under `Works/<work_ref>/Logs/kb/auto-promoted/<YYYY-MM-DD>-<extract_job_id>.md` when a workspace root is bound.
 - The canonical World KB surface remains `creator world kb ...`; no new aliases or deprecations are introduced in V1.52.
 
-### 6.2G.2 Legacy `creator kb --scope world` alias + deprecation (Draft V1.52 overlay)
-
-**Status**: Draft (V1.52 — body authored in plan `2026-06-19-v1.52-cli-surface-consolidation-auto`)
-**Authoring plan**: `2026-06-19-v1.52-cli-surface-consolidation-auto`
-**Promotes to Normative**: P-last of V1.52
+### 6.2G.2 Legacy `creator kb --scope world` alias + deprecation (V1.52 T-A P1 — Normative)
 
 `creator kb --scope world <subcmd>` is a **deprecated alias** for `creator world kb <subcmd>`.
 

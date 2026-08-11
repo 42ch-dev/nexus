@@ -1265,6 +1265,6 @@ mod tests {
         .fetch_one(&pool)
         .await
         .unwrap();
-        assert_eq!(applied_count as usize, total);
+        assert_eq!(usize::try_from(applied_count).unwrap_or(usize::MAX), total);
     }
 }

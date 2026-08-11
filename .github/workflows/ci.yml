@@ -120,7 +120,7 @@ jobs:
       - name: Check formatting
         run: cargo +"${FMT_NIGHTLY}" fmt --all -- --check
       - name: Run clippy
-        run: cargo clippy --all -- -D warnings
+        run: cargo clippy --all --all-targets -- -D warnings
 
   verify-sqlx-offline:
     name: Verify sqlx offline metadata
@@ -236,8 +236,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+      # check-wire-drift.sh runs `cargo test -p nexus-contracts --test schema_drift_detection`
+      # plus node-based spoke pin checks; setup-monorepo provides Rust + Node (no deps needed).
+      - uses: ./.github/actions/setup-monorepo
+        with:
+          install-deps: "false"
       - name: Run schema consistency checks
         run: bash tooling/check-schema-drift.sh
+      - name: Check wire schema drift
+        run: bash tooling/check-wire-drift.sh
 
   ui-guardrails:
     name: UI guardrails — wrapper drift & Studio boundaries

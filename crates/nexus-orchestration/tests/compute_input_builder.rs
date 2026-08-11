@@ -69,7 +69,7 @@ async fn seed_world_with_head(pool: &sqlx::SqlitePool, world_id: &str, head_even
     .unwrap();
 }
 
-/// Seed a computable `WorldKbEntry` with the given block_type and attributes.
+/// Seed a computable `WorldKbEntry` with the given `block_type` and attributes.
 async fn seed_kb_entry(
     pool: &sqlx::SqlitePool,
     world_id: &str,
@@ -188,7 +188,7 @@ async fn non_computable_entries_excluded() {
     assert_eq!(entry_id, computable.entry_id);
 }
 
-/// Step 4: Referenced `_id` entries are loaded into key_blocks.
+/// Step 4: Referenced `_id` entries are loaded into `key_blocks`.
 ///
 /// The attacker is computable and already in the manifest filter set;
 /// the defender is non-computable so it exercises the `_id` load path

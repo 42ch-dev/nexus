@@ -112,6 +112,7 @@ import type {
   TimelinePatchEventRequest,
   ListTimelineEventsResponse,
   MomentDirectiveRequest,
+  MomentDirectiveResponse,
   MomentInspectRequest,
   MomentInspectResponse,
   PackExportRequest,
@@ -219,32 +220,6 @@ export interface ListTimelineEventsQuery {
   limit?: number;
   /** Opaque cursor from a previous page's `next_cursor`. */
   cursor?: string;
-}
-
-/**
- * Response for `POST /v1/daemon/moment-directive` (V1.151 P1 — DF-76).
- * App-side type: P0 shipped no generated schema for it — the handler returns
- * `Json<Value>` with the full directive row on `set`/`show` (incl. body — the
- * author surface, not the inspector packet) and `{}` on `clear`. The UI only
- * consumes success/failure, never the row fields, so every field is optional
- * (mirrors the `DiscardRunResponse` precedent for schema-less inline shapes).
- */
-export interface MomentDirectiveResponse {
-  directive_id?: string;
-  creator_id?: string;
-  scope_kind?: string;
-  scope_id?: string;
-  body?: string;
-  insert_depth?: string;
-  ttl_kind?: string;
-  ttl_remaining?: number;
-  clear_on_scene_change?: boolean;
-  status?: string;
-  last_focused_event_id?: string | null;
-  created_at?: number;
-  updated_at?: number;
-  expires_at?: number | null;
-  replaced_by?: string | null;
 }
 
 /**

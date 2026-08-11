@@ -1112,11 +1112,11 @@ mod tests {
         .unwrap();
     }
 
-    /// Build a spoke KnowledgeEntry with computable state for a character.
-    /// Build a JSON key_block in the format the basic-combat WASM module
+    /// Build a spoke `KnowledgeEntry` with computable state for a character.
+    /// Build a JSON `key_block` in the format the basic-combat WASM module
     /// expects (flat `body.attributes` + `body.state.character`).
-    /// Build a spoke KnowledgeEntry with computable state (creates via
-    /// put_knowledge_entry). Uses the V1.145 P1a conversion seam.
+    /// Build a spoke `KnowledgeEntry` with computable state (creates via
+    /// `put_knowledge_entry`). Uses the V1.145 P1a conversion seam.
     fn spoke_character_entry(
         entry_id: &str,
         canonical_name: &str,
@@ -1184,13 +1184,13 @@ mod tests {
             "attacker_id".to_string(),
             Value::String("kb_hero".to_string()),
         );
-        state.insert("defender_id".to_string(), Value::String("".to_string()));
+        state.insert("defender_id".to_string(), Value::String(String::new()));
 
         let project_req = ProjectRequest {
             session_id: "ses_test_001".to_string(),
             entry_id: "kb_hero".to_string(),
             state: state.clone(),
-            extensions: Default::default(),
+            extensions: HashMap::default(),
         };
 
         match adapter.project(project_req).await {
@@ -1229,7 +1229,7 @@ mod tests {
             session_id: "ses_missing".to_string(),
             entry_id: "kb_nonexistent".to_string(),
             state: Map::new(),
-            extensions: Default::default(),
+            extensions: HashMap::default(),
         };
 
         match adapter.project(project_req).await {
@@ -1237,7 +1237,7 @@ mod tests {
                 assert_eq!(r.code, SpokeRejectCode::InvalidInput);
                 assert!(r.message.contains("not found"));
             }
-            _ => panic!("expected InvalidInput reject"),
+            SpokeResult::Ok(_) => panic!("expected InvalidInput reject"),
         }
     }
 
@@ -1254,7 +1254,7 @@ mod tests {
             session_id: "ses_dup".to_string(),
             entry_id: "kb_dup_ses".to_string(),
             state: Map::new(),
-            extensions: Default::default(),
+            extensions: HashMap::default(),
         };
         unwrap_ok(adapter.project(project_req.clone()).await, "first project");
 
@@ -1263,7 +1263,7 @@ mod tests {
                 assert_eq!(r.code, SpokeRejectCode::InvalidInput);
                 assert!(r.message.contains("already exists"));
             }
-            _ => panic!("expected InvalidInput reject for duplicate"),
+            SpokeResult::Ok(_) => panic!("expected InvalidInput reject for duplicate"),
         }
     }
 
@@ -1280,7 +1280,7 @@ mod tests {
             entry_id: "kb_whatever".to_string(),
             computable: Map::new(),
             settle: None,
-            extensions: Default::default(),
+            extensions: HashMap::default(),
         };
 
         match adapter.compute(compute_req).await {
@@ -1288,7 +1288,7 @@ mod tests {
                 assert_eq!(r.code, SpokeRejectCode::InvalidInput);
                 assert!(r.message.contains("not found"));
             }
-            _ => panic!("expected InvalidInput for missing session"),
+            SpokeResult::Ok(_) => panic!("expected InvalidInput for missing session"),
         }
     }
 
@@ -1306,7 +1306,7 @@ mod tests {
             session_id: "ses_mismatch".to_string(),
             entry_id: "kb_mismatch".to_string(),
             state: Map::new(),
-            extensions: Default::default(),
+            extensions: HashMap::default(),
         };
         unwrap_ok(adapter.project(project_req).await, "project");
 
@@ -1316,7 +1316,7 @@ mod tests {
             entry_id: "kb_different".to_string(),
             computable: Map::new(),
             settle: None,
-            extensions: Default::default(),
+            extensions: HashMap::default(),
         };
 
         match adapter.compute(compute_req).await {
@@ -1324,15 +1324,15 @@ mod tests {
                 assert_eq!(r.code, SpokeRejectCode::InvalidInput);
                 assert!(r.message.contains("mismatch"));
             }
-            _ => panic!("expected InvalidInput for mismatch"),
+            SpokeResult::Ok(_) => panic!("expected InvalidInput for mismatch"),
         }
     }
 
     /// Integration test: full project → compute round-trip with the
     /// embedded basic-combat module. Creates two character entries,
     /// stages a combat session, runs compute, and verifies the response.
-    /// Both character key_blocks are bundled into the ComputeInput so
-    /// the module can look up attacker and defender via kb_read.
+    /// Both character `key_blocks` are bundled into the `ComputeInput` so
+    /// the module can look up attacker and defender via `kb_read`.
     ///
     /// Gated behind `nexus_spoke_adapter_no_wasm_target` (set by build.rs
     /// when wasm32-unknown-unknown is absent) — the test exercises the
@@ -1375,7 +1375,7 @@ mod tests {
                     session_id: "ses_combat_001".to_string(),
                     entry_id: "kb_hero_c".to_string(),
                     state,
-                    extensions: Default::default(),
+                    extensions: HashMap::default(),
                 })
                 .await,
             "project combat",
@@ -1403,7 +1403,7 @@ mod tests {
                     entry_id: "kb_hero_c".to_string(),
                     computable,
                     settle: Some(false),
-                    extensions: Default::default(),
+                    extensions: HashMap::default(),
                 })
                 .await,
             "compute combat",
@@ -1429,7 +1429,7 @@ mod tests {
     }
 
     /// Integration test: project → compute with settle=true persists
-    /// the state_delta into the KnowledgeEntry.
+    /// the `state_delta` into the `KnowledgeEntry`.
     ///
     /// Gated behind `nexus_spoke_adapter_no_wasm_target` (set by build.rs
     /// when wasm32-unknown-unknown is absent).
@@ -1469,7 +1469,7 @@ mod tests {
                     session_id: "ses_settle".to_string(),
                     entry_id: "kb_settle_h".to_string(),
                     state,
-                    extensions: Default::default(),
+                    extensions: HashMap::default(),
                 })
                 .await,
             "project",
@@ -1493,7 +1493,7 @@ mod tests {
                     entry_id: "kb_settle_h".to_string(),
                     computable,
                     settle: Some(true),
-                    extensions: Default::default(),
+                    extensions: HashMap::default(),
                 })
                 .await,
             "compute settle",
@@ -1539,7 +1539,7 @@ mod tests {
     }
 
     /// When neither session state nor entry `body.computable` provide a
-    /// `module_id`, compute() must reject with `InvalidInput` — no silent
+    /// `module_id`, `compute()` must reject with `InvalidInput` — no silent
     /// default.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn compute_missing_module_id_rejects_invalid_input() {
@@ -1558,7 +1558,7 @@ mod tests {
                     session_id: "ses_no_mod".to_string(),
                     entry_id: "kb_no_mod".to_string(),
                     state: Map::new(),
-                    extensions: Default::default(),
+                    extensions: HashMap::default(),
                 })
                 .await,
             "project no-module",
@@ -1570,7 +1570,7 @@ mod tests {
                 entry_id: "kb_no_mod".to_string(),
                 computable: Map::new(),
                 settle: None,
-                extensions: Default::default(),
+                extensions: HashMap::default(),
             })
             .await
         {
@@ -1578,7 +1578,7 @@ mod tests {
                 assert_eq!(r.code, SpokeRejectCode::InvalidInput);
                 assert!(r.message.contains("module identity required"));
             }
-            _ => panic!("expected InvalidInput for missing module_id"),
+            SpokeResult::Ok(_) => panic!("expected InvalidInput for missing module_id"),
         }
     }
 
@@ -1605,7 +1605,7 @@ mod tests {
                     session_id: "ses_bad_mod".to_string(),
                     entry_id: "kb_unknown_mod".to_string(),
                     state,
-                    extensions: Default::default(),
+                    extensions: HashMap::default(),
                 })
                 .await,
             "project",
@@ -1617,7 +1617,7 @@ mod tests {
                 entry_id: "kb_unknown_mod".to_string(),
                 computable: Map::new(),
                 settle: None,
-                extensions: Default::default(),
+                extensions: HashMap::default(),
             })
             .await
         {
@@ -1626,7 +1626,7 @@ mod tests {
                 assert_eq!(r.code, SpokeRejectCode::InvalidInput);
                 assert!(r.message.contains("unknown embedded WASM module"));
             }
-            _ => panic!("expected InvalidInput for unknown module"),
+            SpokeResult::Ok(_) => panic!("expected InvalidInput for unknown module"),
         }
     }
 
@@ -1644,8 +1644,8 @@ mod tests {
 
         // Install the embedded basic-combat bytes as a user module under a
         // hermetic module store.
-        let modules_dir = tempfile::tempdir().unwrap();
-        let module_dir = modules_dir.path().join("basic-combat");
+        let module_root = tempfile::tempdir().unwrap();
+        let module_dir = module_root.path().join("basic-combat");
         std::fs::create_dir_all(&module_dir).unwrap();
         let wasm_path = module_dir.join("basic-combat.wasm");
         let manifest_path = module_dir.join("manifest.json");
@@ -1657,7 +1657,7 @@ mod tests {
         std::fs::write(&manifest_path, manifest).expect("write module manifest");
 
         let adapter =
-            NexusAdapter::new(pool).with_user_modules_dir(modules_dir.path().to_path_buf());
+            NexusAdapter::new(pool).with_user_modules_dir(module_root.path().to_path_buf());
         let cache = adapter.module_cache();
         assert_eq!(cache.len(), 0, "fresh adapter starts with an empty cache");
 
@@ -1756,8 +1756,8 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn user_module_load_accepts_matching_wasm_sha256() {
         let (pool, _db_dir) = fresh_pool().await;
-        let modules_dir = tempfile::tempdir().unwrap();
-        let module_dir = modules_dir.path().join("basic-combat");
+        let module_root = tempfile::tempdir().unwrap();
+        let module_dir = module_root.path().join("basic-combat");
         std::fs::create_dir_all(&module_dir).unwrap();
         let wasm_path = module_dir.join("basic-combat.wasm");
         let manifest_path = module_dir.join("manifest.json");
@@ -1777,7 +1777,7 @@ mod tests {
         std::fs::write(&manifest_path, manifest).expect("write module manifest");
 
         let adapter =
-            NexusAdapter::new(pool).with_user_modules_dir(modules_dir.path().to_path_buf());
+            NexusAdapter::new(pool).with_user_modules_dir(module_root.path().to_path_buf());
         let cache = adapter.module_cache();
         let (module, served_manifest) = unwrap_ok(
             adapter.load_module("basic-combat"),
@@ -1803,8 +1803,8 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn user_module_load_rejects_mismatched_wasm_sha256_without_caching() {
         let (pool, _db_dir) = fresh_pool().await;
-        let modules_dir = tempfile::tempdir().unwrap();
-        let module_dir = modules_dir.path().join("basic-combat");
+        let module_root = tempfile::tempdir().unwrap();
+        let module_dir = module_root.path().join("basic-combat");
         std::fs::create_dir_all(&module_dir).unwrap();
         let wasm_path = module_dir.join("basic-combat.wasm");
         let manifest_path = module_dir.join("manifest.json");
@@ -1826,7 +1826,7 @@ mod tests {
         std::fs::write(&manifest_path, manifest).expect("write module manifest");
 
         let adapter =
-            NexusAdapter::new(pool).with_user_modules_dir(modules_dir.path().to_path_buf());
+            NexusAdapter::new(pool).with_user_modules_dir(module_root.path().to_path_buf());
         let cache = adapter.module_cache();
         assert_eq!(cache.len(), 0, "fresh adapter starts with an empty cache");
 
@@ -1862,8 +1862,8 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn user_module_load_without_wasm_sha256_falls_back_to_stat_fence() {
         let (pool, _db_dir) = fresh_pool().await;
-        let modules_dir = tempfile::tempdir().unwrap();
-        let module_dir = modules_dir.path().join("basic-combat");
+        let module_root = tempfile::tempdir().unwrap();
+        let module_dir = module_root.path().join("basic-combat");
         std::fs::create_dir_all(&module_dir).unwrap();
         let wasm_path = module_dir.join("basic-combat.wasm");
         let manifest_path = module_dir.join("manifest.json");
@@ -1884,7 +1884,7 @@ mod tests {
         std::fs::write(&manifest_path, &legacy_manifest).expect("write legacy module manifest");
 
         let adapter =
-            NexusAdapter::new(pool).with_user_modules_dir(modules_dir.path().to_path_buf());
+            NexusAdapter::new(pool).with_user_modules_dir(module_root.path().to_path_buf());
         let (module, served_manifest) = unwrap_ok(
             adapter.load_module("basic-combat"),
             "legacy manifest without wasm_sha256 loads via the stat fence",
@@ -2023,8 +2023,8 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn user_module_load_under_concurrent_replace_never_serves_mixed_pair() {
         let (pool, _db_dir) = fresh_pool().await;
-        let modules_dir = tempfile::tempdir().unwrap();
-        let module_dir = modules_dir.path().join("basic-combat");
+        let module_root = tempfile::tempdir().unwrap();
+        let module_dir = module_root.path().join("basic-combat");
         std::fs::create_dir_all(&module_dir).unwrap();
         let wasm_path = module_dir.join("basic-combat.wasm");
         let manifest_path = module_dir.join("manifest.json");
@@ -2040,7 +2040,7 @@ mod tests {
         std::fs::write(&manifest_path, manifest).expect("write module manifest");
 
         let adapter =
-            NexusAdapter::new(pool).with_user_modules_dir(modules_dir.path().to_path_buf());
+            NexusAdapter::new(pool).with_user_modules_dir(module_root.path().to_path_buf());
         let adapter = std::sync::Arc::new(adapter);
 
         // Churn writer: alternate the pair while the loader runs.
@@ -2055,7 +2055,7 @@ mod tests {
                     std::fs::write(&wasm_path_t, changed).expect("write wasm B");
                     std::fs::write(&manifest_path_t, manifest_b).expect("write manifest B");
                 } else {
-                    std::fs::write(&wasm_path_t, &bytes).expect("write wasm A");
+                    std::fs::write(&wasm_path_t, bytes).expect("write wasm A");
                     std::fs::write(&manifest_path_t, manifest).expect("write manifest A");
                 }
                 pair_b = !pair_b;
@@ -2093,7 +2093,7 @@ mod tests {
 
     /// P2 QC fix wave FW-3 (adapter tier — TOCTOU defense): compute on a
     /// session whose target entry was deleted must reject with
-    /// `InvalidInput` ("target KnowledgeEntry not found"), mirroring
+    /// `InvalidInput` ("target `KnowledgeEntry` not found"), mirroring
     /// `project()` — never an unclassified `KnowledgeEntryNotFound` reject.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn compute_missing_entry_rejects_invalid_input() {
@@ -2113,7 +2113,7 @@ mod tests {
                     session_id: "ses_vanished".to_string(),
                     entry_id: "kb_vanished".to_string(),
                     state: Map::new(),
-                    extensions: Default::default(),
+                    extensions: HashMap::default(),
                 })
                 .await,
             "project",
@@ -2132,7 +2132,7 @@ mod tests {
                 entry_id: "kb_vanished".to_string(),
                 computable: Map::new(),
                 settle: None,
-                extensions: Default::default(),
+                extensions: HashMap::default(),
             })
             .await
         {
@@ -2144,7 +2144,7 @@ mod tests {
                 );
                 assert!(r.message.contains("not found for compute"));
             }
-            _ => panic!("expected InvalidInput for missing compute target entry"),
+            SpokeResult::Ok(_) => panic!("expected InvalidInput for missing compute target entry"),
         }
     }
 
@@ -2177,7 +2177,7 @@ mod tests {
         );
         let other = match other {
             SpokeResult::Reject(r) => r,
-            SpokeResult::Ok(_) => panic!("reject helper must reject"),
+            SpokeResult::Ok(()) => panic!("reject helper must reject"),
         };
         assert!(!is_module_identity_missing_reject(&other));
     }
@@ -2202,6 +2202,8 @@ mod tests {
     /// by the delta value while the attacker's HP remains unchanged.
     #[cfg(not(nexus_spoke_adapter_no_wasm_target))]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    // Long integration test; splitting would obscure the end-to-end scenario
+    #[allow(clippy::too_many_lines)]
     async fn settle_routes_deltas_by_target_key_block_id() {
         let (pool, _dir) = fresh_pool().await;
         seed_world(&pool).await;
@@ -2231,14 +2233,14 @@ mod tests {
             .state
             .get("character")
             .and_then(|c| c.get("current_hp"))
-            .and_then(|v| v.as_i64())
+            .and_then(serde_json::Value::as_i64)
             .unwrap_or(-1);
         let pre_monster_hp = pre_monster
             .body
             .state
             .get("character")
             .and_then(|c| c.get("current_hp"))
-            .and_then(|v| v.as_i64())
+            .and_then(serde_json::Value::as_i64)
             .unwrap_or(-1);
         assert_eq!(pre_hero_hp, 100, "attacker starts at 100 HP");
         assert_eq!(pre_monster_hp, 60, "defender starts at 60 HP");
@@ -2263,7 +2265,7 @@ mod tests {
                     session_id: "ses_f001".to_string(),
                     entry_id: "kb_atk_r".to_string(),
                     state,
-                    extensions: Default::default(),
+                    extensions: HashMap::default(),
                 })
                 .await,
             "project",
@@ -2286,7 +2288,7 @@ mod tests {
                     entry_id: "kb_atk_r".to_string(),
                     computable,
                     settle: Some(true),
-                    extensions: Default::default(),
+                    extensions: HashMap::default(),
                 })
                 .await,
             "compute settle",
@@ -2306,14 +2308,14 @@ mod tests {
             .state
             .get("character")
             .and_then(|c| c.get("current_hp"))
-            .and_then(|v| v.as_i64())
+            .and_then(serde_json::Value::as_i64)
             .unwrap_or(-1);
         let post_monster_hp = post_monster
             .body
             .state
             .get("character")
             .and_then(|c| c.get("current_hp"))
-            .and_then(|v| v.as_i64())
+            .and_then(serde_json::Value::as_i64)
             .unwrap_or(-1);
 
         // F-001 key assertions:
@@ -2329,11 +2331,14 @@ mod tests {
         );
     }
 
-    /// F-003: cross-world references must be rejected as InvalidInput.
-    /// A compute session for world A must not pull key_block bodies from
+    /// F-003: cross-world references must be rejected as `InvalidInput`.
+    /// A compute session for world A must not pull `key_block` bodies from
     /// world B.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn cross_world_defender_rejects_invalid_input() {
+        use crate::conversion::world_kb_to_spoke;
+        use nexus_contracts::BlockType;
+        use nexus_knowledge::world_kb::{WorldKbBody, WorldKbEntry};
         let (pool, _dir) = fresh_pool().await;
         // Seed two distinct worlds.
         seed_world(&pool).await;
@@ -2358,9 +2363,6 @@ mod tests {
         // Create a character in world B (wld_other).
         // spoke_character_entry hardcodes wld_cmp; we create a WorldKbEntry
         // for wld_other explicitly and convert.
-        use crate::conversion::world_kb_to_spoke;
-        use nexus_contracts::BlockType;
-        use nexus_knowledge::world_kb::{WorldKbBody, WorldKbEntry};
         let mut world_b = WorldKbEntry::new("wld_other", BlockType::Character, "OtherF003");
         world_b.entry_id = "kb_other_f003".to_string();
         world_b.revision = Some(1);
@@ -2410,7 +2412,7 @@ mod tests {
                     session_id: "ses_f003".to_string(),
                     entry_id: "kb_hero_f003".to_string(),
                     state,
-                    extensions: Default::default(),
+                    extensions: HashMap::default(),
                 })
                 .await,
             "project",
@@ -2432,7 +2434,7 @@ mod tests {
                 entry_id: "kb_hero_f003".to_string(),
                 computable,
                 settle: None,
-                extensions: Default::default(),
+                extensions: HashMap::default(),
             })
             .await
         {
@@ -2440,12 +2442,12 @@ mod tests {
                 assert_eq!(r.code, SpokeRejectCode::InvalidInput);
                 assert!(r.message.contains("cross-world"));
             }
-            _ => panic!("expected InvalidInput for cross-world reference"),
+            SpokeResult::Ok(_) => panic!("expected InvalidInput for cross-world reference"),
         }
     }
 
-    /// F-005: module_id with path-traversal characters must be rejected
-    /// as InvalidInput (format allowlist via `embedded_module_ids()`).
+    /// F-005: `module_id` with path-traversal characters must be rejected
+    /// as `InvalidInput` (format allowlist via `embedded_module_ids()`).
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn compute_module_id_with_path_traversal_rejects_invalid_input() {
         let (pool, _dir) = fresh_pool().await;
@@ -2467,7 +2469,7 @@ mod tests {
                     session_id: "ses_pathmod".to_string(),
                     entry_id: "kb_pathmod".to_string(),
                     state,
-                    extensions: Default::default(),
+                    extensions: HashMap::default(),
                 })
                 .await,
             "project",
@@ -2479,7 +2481,7 @@ mod tests {
                 entry_id: "kb_pathmod".to_string(),
                 computable: Map::new(),
                 settle: None,
-                extensions: Default::default(),
+                extensions: HashMap::default(),
             })
             .await
         {
@@ -2491,7 +2493,7 @@ mod tests {
                 );
                 assert!(r.message.contains("unknown embedded WASM module"));
             }
-            _ => panic!("expected InvalidInput for path-traversal module_id"),
+            SpokeResult::Ok(_) => panic!("expected InvalidInput for path-traversal module_id"),
         }
     }
 

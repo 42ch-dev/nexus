@@ -1014,6 +1014,11 @@ impl ClaudeCliProvider {
 
 #[cfg(test)]
 mod tests {
+    // Lock guards (session registry / persistent handles) are intentionally
+    // held to the end of the visible test scope for readability; the nursery
+    // significant_drop_tightening suggestion to drop them earlier is noise here.
+    #![allow(clippy::significant_drop_tightening)]
+
     use super::*;
 
     #[test]

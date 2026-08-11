@@ -97,6 +97,11 @@ pub struct ObservedPeerHost {
     /// RFC 3339 UTC timestamp of the observation (the `peer_hosts`
     /// `last_seen` column).
     pub last_seen: String,
+    /// The dialed peer's libp2p `PeerId` at the observation (V1.158 P2 /
+    /// R-V1155P0-001 — the `peer_hosts` `last_peer_id` column). Nexus-local
+    /// diagnostics (the spoof/collision signal); `None` for rows recorded
+    /// before the column existed.
+    pub last_peer_id: Option<String>,
 }
 
 impl NexusAdapter<'_> {
@@ -151,6 +156,7 @@ fn observed_from_rows(
         observed.push(ObservedPeerHost {
             manifest,
             last_seen: row.last_seen,
+            last_peer_id: row.last_peer_id,
         });
     }
     SpokeResult::Ok(observed)
@@ -194,6 +200,12 @@ impl NexusAdapter<'_> {
     /// with an empty or oversized `host_id` is rejected before insert;
     /// storage failures surface as rejects (never swallowed).
     ///
+    /// `last_peer_id` (V1.158 P2 / R-V1155P0-001) is the dialed peer's
+    /// libp2p `PeerId` from `PeerSession::remote_peer_id()`, recorded
+    /// alongside the claimed `host_id` as the spoof/collision signal.
+    /// Diagnostics only — never an authorization or allowlist input. `None`
+    /// records a row without a peer id.
+    ///
     /// `last_seen` is generated at **fixed millisecond precision**
     /// (`SecondsFormat::Millis`, `Z` suffix) so the storage ordering
     /// contract (`last_seen` DESC) is lexicographically stable across
@@ -203,7 +215,11 @@ impl NexusAdapter<'_> {
     /// `InvalidInput` when the manifest `host_id` is empty or exceeds
     /// [`nexus_local_db::MAX_HOST_ID_CHARS`]; `InternalError` on
     /// serialization or storage failure.
-    pub async fn record_peer_manifest(&self, manifest: &HostCapabilityManifest) -> SpokeResult<()> {
+    pub async fn record_peer_manifest(
+        &self,
+        manifest: &HostCapabilityManifest,
+        last_peer_id: Option<&str>,
+    ) -> SpokeResult<()> {
         let host_id = manifest.host_id.as_str();
         if host_id.is_empty() {
             return SpokeResult::Reject(reject_invalid_input(
@@ -225,7 +241,14 @@ impl NexusAdapter<'_> {
             }
         };
         let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
-        match nexus_local_db::record_peer_manifest(&self.pool, host_id, &manifest_json, &now).await
+        match nexus_local_db::record_peer_manifest(
+            &self.pool,
+            host_id,
+            &manifest_json,
+            &now,
+            last_peer_id,
+        )
+        .await
         {
             Ok(()) => SpokeResult::Ok(()),
             Err(e) => SpokeResult::Reject(reject_internal(format!(
@@ -257,6 +280,9 @@ const fn reject_internal(message: String) -> crate::SpokeReject {
 mod tests {
     use super::*;
     use crate::HostManifestPort;
+
+    /// libp2p-style base58 `PeerId` fixture (R-V1155P0-001 diagnostics).
+    const TEST_PEER_ID: &str = "12D3KooWTestPeerId0000000000000000000000000000000";
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn self_manifest_reports_injected_host_id_and_n_c1_contract() {
@@ -369,7 +395,10 @@ mod tests {
             SpokeResult::Ok(m) => m,
             SpokeResult::Reject(r) => panic!("manifest build is Ok: {r:?}"),
         };
-        match adapter.record_peer_manifest(&manifest).await {
+        match adapter
+            .record_peer_manifest(&manifest, Some(TEST_PEER_ID))
+            .await
+        {
             SpokeResult::Ok(()) => {}
             SpokeResult::Reject(r) => panic!("recording is Ok: {r:?}"),
         }
@@ -392,7 +421,7 @@ mod tests {
         assert_eq!(peers[0].schema_version, manifest.schema_version);
     }
 
-    /// Duplicate host_id → one row: a second observation of the same peer
+    /// Duplicate `host_id` → one row: a second observation of the same peer
     /// upserts (fresh manifest, fresh capabilities) instead of duplicating.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn duplicate_host_id_recording_upserts_single_peer_row() {
@@ -408,11 +437,11 @@ mod tests {
         };
         let mut second = first.clone();
         second.capabilities.push("extra-capability".to_string());
-        match adapter.record_peer_manifest(&first).await {
+        match adapter.record_peer_manifest(&first, None).await {
             SpokeResult::Ok(()) => {}
             SpokeResult::Reject(r) => panic!("first record is Ok: {r:?}"),
         }
-        match adapter.record_peer_manifest(&second).await {
+        match adapter.record_peer_manifest(&second, None).await {
             SpokeResult::Ok(()) => {}
             SpokeResult::Reject(r) => panic!("second record is Ok: {r:?}"),
         }
@@ -446,7 +475,7 @@ mod tests {
             SpokeResult::Ok(m) => m,
             SpokeResult::Reject(r) => panic!("manifest build is Ok: {r:?}"),
         };
-        match adapter.record_peer_manifest(&manifest).await {
+        match adapter.record_peer_manifest(&manifest, None).await {
             SpokeResult::Reject(r) => {
                 assert_eq!(r.code, SpokeRejectCode::InvalidInput);
             }
@@ -494,7 +523,10 @@ mod tests {
             SpokeResult::Ok(m) => m,
             SpokeResult::Reject(r) => panic!("manifest build is Ok: {r:?}"),
         };
-        match adapter.record_peer_manifest(&manifest).await {
+        match adapter
+            .record_peer_manifest(&manifest, Some(TEST_PEER_ID))
+            .await
+        {
             SpokeResult::Ok(()) => {}
             SpokeResult::Reject(r) => panic!("recording is Ok: {r:?}"),
         }
@@ -511,6 +543,11 @@ mod tests {
         assert_eq!(
             observed[0].manifest.capabilities, manifest.capabilities,
             "typed manifest capabilities round-trip"
+        );
+        assert_eq!(
+            observed[0].last_peer_id.as_deref(),
+            Some(TEST_PEER_ID),
+            "last_peer_id round-trips through the adapter read (R-V1155P0-001)"
         );
         // `last_seen` is the RFC 3339 UTC observation timestamp the adapter
         // recorded (chrono::Utc::now().to_rfc3339() — repo convention).

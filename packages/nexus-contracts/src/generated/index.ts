@@ -103,6 +103,7 @@ export const SCHEMA_VERSIONS: Record<string, number> = {
   StaleFindingsResponse: 1,
   UpdateFindingRequest: 1,
   MomentDirectiveRequest: 1,
+  MomentDirectiveResponse: 1,
   MomentInspectRequest: 1,
   MomentInspectResponse: 1,
   AddKbEntryRequest: 1,

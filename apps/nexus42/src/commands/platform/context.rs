@@ -664,11 +664,13 @@ pub async fn run_assemble_moment(
     // expansion when activation is on (off-switch ⇒ no hop load; spec §6).
     // The edge source is the inherent `NexusAdapter::list_hop_edges_for_world`
     // — spoke `RelationPort` is get/put only, so the storage list primitive
-    // (`list_relationships_for_world`, confirmed graph) backs the loader.
-    // A storage-read failure degrades to activation-only (no hop pass),
-    // consistent with `assemble_moment`'s per-section degradation; a graph
-    // beyond the loader limit is truncated silently (documented at the
-    // loader, V1.149 P1 plan residual for the paginated follow-up).
+    // (`list_confirmed_relationships_paginated`, confirmed graph) backs the
+    // loader. A storage-read failure degrades to activation-only (no hop
+    // pass), consistent with `assemble_moment`'s per-section degradation.
+    // The default call returns the first page of up to
+    // `HOP_EDGE_LIST_LIMIT` (10_000) newest edges; a caller that needs the
+    // full graph walks it with `list_hop_edges_for_world_paginated` (V1.158
+    // P2 T3, R-V1149P1-001).
     let wid = world_id.unwrap_or("wld_default");
     let hop_edges = if activation_off {
         None
@@ -1829,6 +1831,23 @@ mod tests {
         use nexus_knowledge::world_kb::KbStore;
         use nexus_moment_context_assembly::MomentContext;
 
+        // `KbStore` has async methods (not dyn-compatible), so use a generic
+        // helper that runs `assemble_moment` against a concrete store type.
+        #[allow(clippy::future_not_send)]
+        async fn run<K: KbStore>(pool: &sqlx::SqlitePool, kb_store: &K) -> MomentContext {
+            let narrative =
+                nexus_local_db::narrative_gateway::SqliteNarrativeGateway::new(pool.clone());
+            let knowledge = SqliteKnowledgeStore::new(pool.clone());
+            let stage0 = Stage0Assembly {
+                personality: "P.".to_string(),
+                experience: "E.".to_string(),
+                user_prompt: "P.".to_string(),
+                ..Stage0Assembly::default()
+            };
+            let request = MomentRequest::new(stage0).with_world("wld_t4");
+            assemble_moment(&request, &narrative, kb_store, &knowledge).await
+        }
+
         let (pool, _dir) = fresh_pool().await;
         seed_mca_world(&pool).await;
 
@@ -1860,23 +1879,6 @@ mod tests {
             user_prompt: "P.".to_string(),
             ..Stage0Assembly::default()
         };
-
-        // `KbStore` has async methods (not dyn-compatible), so use a generic
-        // helper that runs `assemble_moment` against a concrete store type.
-        #[allow(clippy::future_not_send)]
-        async fn run<K: KbStore>(pool: &sqlx::SqlitePool, kb_store: &K) -> MomentContext {
-            let narrative =
-                nexus_local_db::narrative_gateway::SqliteNarrativeGateway::new(pool.clone());
-            let knowledge = SqliteKnowledgeStore::new(pool.clone());
-            let stage0 = Stage0Assembly {
-                personality: "P.".to_string(),
-                experience: "E.".to_string(),
-                user_prompt: "P.".to_string(),
-                ..Stage0Assembly::default()
-            };
-            let request = MomentRequest::new(stage0).with_world("wld_t4");
-            assemble_moment(&request, &narrative, kb_store, &knowledge).await
-        }
 
         let sqlite_store = nexus_local_db::kb_store::SqliteKbStore::new(pool.clone());
         let ctx_sqlite = run(&pool, &sqlite_store).await;
@@ -2002,14 +2004,12 @@ mod tests {
         // but does NOT appear in placement.
         assert_eq!(activation_trace[1]["entry_id"], "kb_castle");
         assert_eq!(activation_trace[1]["accepted"], false);
-        let placement_ids: Vec<&str> = placement
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|e| e["entry_id"].as_str().unwrap())
-            .collect();
         assert!(
-            !placement_ids.contains(&"kb_castle"),
+            !placement
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|e| e["entry_id"].as_str() == Some("kb_castle")),
             "Castle must not appear in placement (unmatched)"
         );
     }
@@ -2038,7 +2038,7 @@ mod tests {
         );
     }
 
-    /// P4 T3: activation_trace is None (no activation enabled) → empty arrays.
+    /// P4 T3: `activation_trace` is None (no activation enabled) → empty arrays.
     #[test]
     fn inspector_packet_no_trace_produces_empty_arrays() {
         let ctx = MomentContext {
@@ -2108,7 +2108,7 @@ mod tests {
     // ── V1.151 P0 T4: assemble-moment --inspect + enriched --emit-packet ──
 
     /// Build a `MomentContext` carrying the full enriched surface (activation
-    /// trace + slot_map + budget + directive meta) for the renderer /
+    /// trace + `slot_map` + budget + directive meta) for the renderer /
     /// emission tests — the same shape `build_inspector_packet` consumes.
     fn enriched_mock_ctx() -> MomentContext {
         use nexus_moment_context_assembly::directive::{
@@ -2263,7 +2263,7 @@ mod tests {
                     ContextCommand::AssembleMoment { inspect, .. } => {
                         assert!(inspect, "--inspect must set inspect = true");
                     }
-                    _ => panic!("unexpected context subcommand"),
+                    ContextCommand::Assemble { .. } => panic!("unexpected context subcommand"),
                 },
                 _ => panic!("unexpected platform subcommand"),
             },

@@ -63,7 +63,7 @@ Spec files live **flat** in this directory except **`novel-writing/`** — the n
 | Document | Class | Status |
 | --- | --- | --- |
 | [local-cloud-crate-architecture.md](local-cloud-crate-architecture.md) | Master | Active |
-| [entity-scope-model.md](entity-scope-model.md) | Master | Normative — V1.40 Shipped §5.1.1; V1.51 Shipped §5.5.6; **V1.62 Shipped** §5.5.9 (computable-flag + structured validation). **V1.156**: §1.4 three-layer Draft overlay 3×2 matrix completion amendment (World×Moment + Work×Brief closed; frontend-only, `wire_contracts_changed: false`) |
+| [entity-scope-model.md](entity-scope-model.md) | Master | Normative — V1.40 Shipped §5.1.1; V1.51 Shipped §5.5.6; **V1.62 Shipped** §5.5.9 (computable-flag + structured validation). **V1.158**: §1.4 V1.123 three-layer overlay + V1.156 3×2 matrix completion amendment promoted to Normative (World×Moment + Work×Brief closed; frontend-only, `wire_contracts_changed: false`) |
 | [local-runtime-boundary.md](local-runtime-boundary.md) | Master | Normative |
 | [schemas-directory-layout.md](schemas-directory-layout.md) | Master | Normative — V1.64 Shipped (local-api common + findings list-response) |
 | [local-api-surface-conventions.md](local-api-surface-conventions.md) | Master | Normative — **V1.67 amended** (§3.2 casing ratification, §4 `items` enforcement, §5 sort-param contract; 0.5.0→0.6.0) |
@@ -80,7 +80,7 @@ Also: [schemas-external-consumer-boundary.md](../knowledge/schemas-external-cons
 | [daemon-runtime.md](daemon-runtime.md) | Master | Normative — V1.64 amendment (bundled local Web UI static serving); **V1.118 amendment** (§17 no-Profile boot + lazy `state.db` open) |
 | [local-db-schema.md](local-db-schema.md) | Master | Normative — V1.40 Shipped §4.1.2 (KB validation + narrative_worlds + kb_extract_jobs artifact locator) |
 | [concurrency.md](concurrency.md) | Master | **Normative — V1.51 Shipped (T-B P0/P1)** — advisory lock + heartbeat + OCC + zombie detection |
-| [canvas-strategy-surface.md](canvas-strategy-surface.md) | Draft overlay | **Shipped α (V1.70)** — Canvas product vision (Nexus = AI-autonomous executor; human steers via Canvas, AI owns prose) + 3 surfaces (Strategy/outline+timeline/World KB) on React Flow + no-raw-file-editing principle + TipTap-as-in-node + Preset→Strategy terminology. **V1.70** shipped the Strategy read/overlay/Idea-steer α slice; write-boundary + node-granular edits + outline/timeline + World KB remain Draft for V1.71+. **V1.122 Draft overlay (§3.3.2 + §4.5)** — fourth peer surface `CanvasSurfaceKind = "timeline"` (World-building hero) + architect-locked World-building projection + write-boundary reuse + Timeline-as-default-World-entry IA; shipped β text preserved (additive); `wire_contracts_changed: false`. **V1.156 amendment (§3.3.3, in flight)**: 3×2 matrix completion — World×Moment + Work×Brief closed (frontend-only, `wire_contracts_changed: false`); §3.3.3 overlay promotes to Normative at V1.156 P-last. |
+| [canvas-strategy-surface.md](canvas-strategy-surface.md) | Draft overlay | **Shipped α (V1.70)** — Canvas product vision (Nexus = AI-autonomous executor; human steers via Canvas, AI owns prose) + 3 surfaces (Strategy/outline+timeline/World KB) on React Flow + no-raw-file-editing principle + TipTap-as-in-node + Preset→Strategy terminology. **V1.70** shipped the Strategy read/overlay/Idea-steer α slice; write-boundary + node-granular edits + outline/timeline + World KB remain Draft for V1.71+. **V1.122 Draft overlay (§3.3.2 + §4.5)** — fourth peer surface `CanvasSurfaceKind = "timeline"` (World-building hero) + architect-locked World-building projection + write-boundary reuse + Timeline-as-default-World-entry IA; shipped β text preserved (additive); `wire_contracts_changed: false`. **V1.158**: §3.3.3 (V1.123 three-layer overlay + V1.156 3×2 matrix completion amendment) promoted to Normative — World×Moment + Work×Brief closed (frontend-only, `wire_contracts_changed: false`); row remains Draft overlay (other sections stay Draft). |
 | [body-editor.md](body-editor.md) | Archived (pointer stub) | **Superseded (2026-06-26)** — body-editor direction rejected; pointer to `canvas-strategy-surface.md`; full text archived at [../../archived/knowledge/body-editor.md](../../archived/knowledge/body-editor.md) |
 | [reference-store-layout.md](reference-store-layout.md) | Master | Normative |
 | [chapter-content-local-api.md](chapter-content-local-api.md) | Draft overlay | Draft (V1.65) — chapter-content Daemon API field contract (`/v1/daemon/works/{work_id}/chapters/*`); cited by daemon-api-surface-conventions §6 |
@@ -96,7 +96,7 @@ Also: [schemas-external-consumer-boundary.md](../knowledge/schemas-external-cons
 
 | Document | Class | Status |
 | --- | --- | --- |
-| [cli-spec.md](cli-spec.md) | Master | **Normative — V1.51 Shipped** — V1.40 §6.2G world binding + **V1.51** `kb adopt`/`rescan`/`pending --missing-only` (T-A P0/P1/P2); legacy V1.46 overlay fully merged |
+| [cli-spec.md](cli-spec.md) | Master | **Normative — V1.51 Shipped** — V1.40 §6.2G world binding + **V1.51** `kb adopt`/`rescan`/`pending --missing-only` (T-A P0/P1/P2); legacy V1.46 overlay fully merged; V1.52 §6.2G.2/§6.2G.1 overlays promoted (V1.158) |
 | [cli-command-ia.md](cli-command-ia.md) | Master (Shipped V1.35) | Shipped (V1.35) |
 | [creator-centric-entry-model.md](creator-centric-entry-model.md) | Master (Shipped V1.35) | Shipped (V1.35) |
 
@@ -108,7 +108,7 @@ Also: [schemas-external-consumer-boundary.md](../knowledge/schemas-external-cons
 | --- | --- | --- |
 | [orchestration-engine.md](orchestration-engine.md) | Master | Active; **V1.62 Shipped** §5.2 narrative.compute + §8.4 combat-engine |
 | [creator-schedule-and-core-context.md](creator-schedule-and-core-context.md) | Legacy scope | Active (WS7 schedule/core_context) |
-| [preset-conditional-routing.md](preset-conditional-routing.md) | Feature line | **Shipped (V1.42 P2)** — DF-56 `llm_judge` GO/NOGO minimal slice |
+| [preset-conditional-routing.md](preset-conditional-routing.md) | Feature line | **Shipped (V1.42 P2)** — DF-56 `llm_judge` GO/NOGO minimal slice; V1.52/V1.56 overlays promoted (V1.158) |
 | [llm-extract.md](llm-extract.md) | Master | **Normative — V1.51 Shipped (T-A P0)** — `nexus.llm.extract` capability + `LlmExtractTask` + `kb_extract_jobs` LLM payload extension (closes R-V150KBED-01) |
 
 ### Creator product lines

@@ -42,6 +42,9 @@ async fn http_get(host: &str, port: u16, path: &str) -> String {
 }
 
 #[tokio::test]
+// ENV_TEST_LOCK is deliberately held across awaits: it serializes env-var
+// boot tests so concurrent runs don't observe each other's environment.
+#[allow(clippy::await_holding_lock)]
 async fn run_daemon_boots_without_active_creator_and_serves_health() {
     let _guard = ENV_TEST_LOCK.lock().expect("env test lock");
 

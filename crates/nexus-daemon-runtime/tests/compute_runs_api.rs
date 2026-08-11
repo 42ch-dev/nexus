@@ -1,7 +1,7 @@
 //! V1.147 P0 — compute invoke daemon routes: HTTP integration tests.
 //!
 //! Exercises the five tier-2 routes end-to-end (route spec §6 matrix) over a
-//! real axum router + SQLite + wasmtime engine + embedded `basic-combat`
+//! real axum router + `SQLite` + wasmtime engine + embedded `basic-combat`
 //! module:
 //!
 //! - `POST /v1/daemon/compute/run` — invoke, proposals, error taxonomy
@@ -88,8 +88,8 @@ async fn ctx_with_engine(engine: WasmEngine, extra: &[(&str, ModuleManifest, Vec
     }
 }
 
-/// Seed a world owned by `test_creator` (ids must match the ComputeInput
-/// `^wld_[a-zA-Z0-9]+$` pattern for the run handler's world_ref assembly).
+/// Seed a world owned by `test_creator` (ids must match the `ComputeInput`
+/// `^wld_[a-zA-Z0-9]+$` pattern for the run handler's `world_ref` assembly).
 async fn seed_world(pool: &sqlx::SqlitePool, world_id: &str) {
     // SAFETY: test-only seed against the known narrative_worlds schema.
     sqlx::query(
@@ -123,6 +123,9 @@ async fn seed_character(
 }
 
 /// World-aware variant of [`seed_character`] (foreign-world KB fixtures).
+// All params are distinct fixture dimensions; bundling them into a struct
+// would obscure the per-argument seeding.
+#[allow(clippy::too_many_arguments)]
 async fn seed_character_in_world(
     pool: &sqlx::SqlitePool,
     world_id: &str,
@@ -192,6 +195,8 @@ async fn seed_foreign_world(pool: &sqlx::SqlitePool) {
     .unwrap();
 }
 
+// axum_test's AutoFuture is not Send; this helper is awaited directly by #[tokio::test], never spawned
+#[allow(clippy::future_not_send)]
 async fn post_run(
     server: &TestServer,
     world_id: &str,
@@ -208,7 +213,9 @@ async fn post_run(
         .await
 }
 
-/// POST /run with the standard seeded combatants; returns the run_id.
+/// POST /run with the standard seeded combatants; returns the `run_id`.
+// axum_test's AutoFuture is not Send; this helper is awaited directly by #[tokio::test], never spawned
+#[allow(clippy::future_not_send)]
 async fn run_succeeded(c: &Ctx) -> String {
     let resp = post_run(
         &c.server,
@@ -710,13 +717,11 @@ async fn list_paginates_and_scopes_to_owned_worlds() {
     assert_eq!(p1["items"].as_array().unwrap().len(), 2);
     assert_eq!(p1["has_more"], true);
     let cursor = p1["next_cursor"].as_str().expect("cursor").to_string();
-    let page1_ids: Vec<&str> = p1["items"]
+    assert!(!p1["items"]
         .as_array()
         .unwrap()
         .iter()
-        .map(|i| i["run_id"].as_str().unwrap())
-        .collect();
-    assert!(!page1_ids.contains(&foreign.as_str()));
+        .any(|i| i["run_id"].as_str() == Some(foreign.as_str())));
 
     let page2 = c
         .server
@@ -875,7 +880,7 @@ async fn concurrent_runs_serialize_compute_and_long_survives_short_watchdog() {
     let cfg = SandboxConfig {
         fuel: 100_000_000_000, // huge — the loops cannot exhaust fuel
         max_memory_bytes: 64 * 1024 * 1024,
-        wall_time: Duration::from_millis(5000), // host ceiling above both manifests
+        wall_time: Duration::from_secs(5), // host ceiling above both manifests
     };
     let c = ctx_with_engine(
         WasmEngine::with_config(cfg).expect("engine"),
@@ -947,7 +952,7 @@ async fn craft_succeeded_run(pool: &sqlx::SqlitePool, proposals: Value) -> Strin
         Some("1.0.0"),
         None,
         None,
-        Some(r#"{}"#),
+        Some(r"{}"),
     )
     .await
     .unwrap();
@@ -958,9 +963,12 @@ async fn craft_succeeded_run(pool: &sqlx::SqlitePool, proposals: Value) -> Strin
 }
 
 /// Craft a `ComputeOutput` envelope with the given state deltas and timeline
-/// event titles (each event carries the minimal valid NexusTimelineEvent
-/// fields; the Accept handler consumes title/summary/affected_key_block_ids).
+/// event titles (each event carries the minimal valid `NexusTimelineEvent`
+/// fields; the Accept handler consumes `title/summary/affected_key_block_ids`).
 /// `affected_ids`, when `Some`, is stamped onto every event.
+// By-value keeps call sites that build the delta inline (`vec![json!(...)]`)
+// free of temporary borrows; the delta is embedded into the output envelope.
+#[allow(clippy::needless_pass_by_value)]
 fn crafted_proposals(
     state_delta: Vec<Value>,
     event_titles: &[&str],
@@ -1010,8 +1018,8 @@ async fn world_entry_hp(pool: &sqlx::SqlitePool, entry_id: &str) -> i64 {
         .unwrap()
 }
 
-/// F-001: Accept with a state_delta targeting another world's KB must reject
-/// the whole Accept (422 invalid_input) and leave every table untouched.
+/// F-001: Accept with a `state_delta` targeting another world's KB must reject
+/// the whole Accept (422 `invalid_input`) and leave every table untouched.
 #[tokio::test]
 #[serial]
 async fn accept_foreign_delta_target_rejects_with_422_and_rolls_back() {
@@ -1154,7 +1162,9 @@ async fn seed_branch_event_in_world(pool: &sqlx::SqlitePool, world_id: &str, bra
     .unwrap();
 }
 
-/// POST /run with an explicit branch_id.
+/// POST /run with an explicit `branch_id`.
+// axum_test's AutoFuture is not Send; this helper is awaited directly by #[tokio::test], never spawned
+#[allow(clippy::future_not_send)]
 async fn post_run_on_branch(server: &TestServer, branch_id: &str) -> axum_test::TestResponse {
     server
         .post("/v1/daemon/compute/run")
@@ -1308,7 +1318,7 @@ async fn seed_broken_character(pool: &sqlx::SqlitePool, entry_id: &str) {
 /// F2 (dogfood, V1.147 P3): an input entry that violates the manifest schema
 /// poisons the run — HTTP **422** `invalid_input` with per-entry failure
 /// detail (`error.details.invalid_entries` = entry id + reason), NOT a 500.
-/// The run row is still recorded `failed` with the honest per-entry error_json;
+/// The run row is still recorded `failed` with the honest per-entry `error_json`;
 /// no timeline events are written.
 #[tokio::test]
 #[serial]
@@ -1442,7 +1452,7 @@ async fn accept_subset_appends_only_listed_events() {
 }
 
 /// W2: an unknown `timeline_event_ids_to_accept` id rejects the whole Accept
-/// BEFORE any write (422 invalid_input; run stays succeeded).
+/// BEFORE any write (422 `invalid_input`; run stays succeeded).
 #[tokio::test]
 #[serial]
 async fn accept_subset_with_unknown_id_returns_422_and_writes_nothing() {
@@ -1527,6 +1537,8 @@ async fn accept_with_explicit_null_timeline_ids_accepts_all() {
 // ── V1.147 P3 T2 — DELETE /v1/daemon/compute/runs (Clear history) ───────────
 
 /// `DELETE /v1/daemon/compute/runs` with optional `world_id` / `status`.
+// axum_test's AutoFuture is not Send; this helper is awaited directly by #[tokio::test], never spawned
+#[allow(clippy::future_not_send)]
 async fn delete_runs(
     server: &TestServer,
     world_id: Option<&str>,
@@ -1559,6 +1571,8 @@ struct RunStatusSeed {
     foreign_failed: String,
 }
 
+// axum_test's AutoFuture is not Send; this helper is awaited directly by #[tokio::test], never spawned
+#[allow(clippy::future_not_send)]
 async fn seed_run_status_mix(c: &Ctx) -> RunStatusSeed {
     seed_character(&c.pool, "kb_atk", "Striker", 20, 3, 100, 100).await;
     seed_character(&c.pool, "kb_def", "Guardian", 10, 5, 30, 50).await;

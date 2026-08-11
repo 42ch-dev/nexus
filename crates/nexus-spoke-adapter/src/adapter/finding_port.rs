@@ -670,7 +670,7 @@ mod tests {
 
     // ── V1.146 P0: InternalError on DB failure ─────────────────────────
 
-    /// DB failure (dropped table) on put_findings surfaces `InternalError`.
+    /// DB failure (dropped table) on `put_findings` surfaces `InternalError`.
     /// One representative test covers tx-begin/insert/commit — the first
     /// INSERT inside the transaction hits the missing table and rejects.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

@@ -1201,7 +1201,7 @@ mod tests {
             ..Default::default()
         });
         let result = store.insert_knowledge_entry(kb_block).await.unwrap();
-        let _block_id = result.entry_id;
+        drop(result.entry_id);
 
         // Exactly mirror the forwarding code at kb.rs:448-454:
         //   deprecation_notice_legacy_world_kb("list");

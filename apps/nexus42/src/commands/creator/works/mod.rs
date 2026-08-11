@@ -2535,7 +2535,7 @@ mod tests {
 
     #[test]
     fn enrich_novel_stale_inserts_findings_stale() {
-        let stale = serde_json::json!({ "stale_count": 3, "threshold_seconds": 345600 });
+        let stale = serde_json::json!({ "stale_count": 3, "threshold_seconds": 345_600 });
         let out = enrich_status_json(novel_work_resp(), None, Some(&stale));
         let stale_out = out
             .get("findings_stale")
@@ -2550,7 +2550,7 @@ mod tests {
 
     #[test]
     fn enrich_novel_zero_stale_omits_findings_stale() {
-        let stale = serde_json::json!({ "stale_count": 0, "threshold_seconds": 345600 });
+        let stale = serde_json::json!({ "stale_count": 0, "threshold_seconds": 345_600 });
         let out = enrich_status_json(novel_work_resp(), None, Some(&stale));
         assert!(
             out.get("findings_stale").is_none(),
@@ -3198,8 +3198,8 @@ mod tests {
             actual.contains(expected_msg),
             "error should mention creator bootstrap"
         );
-        // Suppress unused variable warning
-        let _ = result;
+        // Suppress unused variable warning (result is a dropped, un-awaited future)
+        drop(result);
     }
 
     // ── V1.46 P2 (Grill #9): on-disk chapter path hint tests ──────────────
