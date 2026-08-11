@@ -1,7 +1,7 @@
 ---
 iteration_id: V1.161
 start_date: 2026-08-12
-status: locked
+status: completed
 iteration_base_branch: main
 target_branch: main
 plans:
@@ -113,15 +113,19 @@ Iteration-level Done definition (all must be machine- or artifact-checkable):
 
 | plan_id | QC decision | QA gate | Residuals | Durable summary |
 |---------|-------------|---------|-----------|-----------------|
-| 2026-08-12-v1.161-p1-rust-dependency-refresh | TBD | pm-acceptance (ops/lockfile; local CI-equivalent evidence) | none expected | TBD |
-| 2026-08-12-v1.161-p2-tech-debt-documentation-cleanup | TBD | pm-acceptance (docs/ledger) | open product/security rows unchanged except freshness notes | TBD |
+| 2026-08-12-v1.161-p1-rust-dependency-refresh | Approve (inline N=1) | pm-acceptance — PASS | none | `sdd/.../review/qc.md` |
+| 2026-08-12-v1.161-p2-tech-debt-documentation-cleanup | Approve with residuals (inline N=1; W-001/002/005 fixed; W-003/004 pre-existing) | pm-acceptance — PASS | W-003 (R-V1151P2-004 SSOT conflict, pre-existing), W-004 (Profile B partial archival, low-pri) | `sdd/.../review/qc.md` |
 
 **Findings cleanup (default):** `zero-residual` for plan-introduced issues. Pre-existing open product/security residuals are **in-scope only as documentation/archival**, not as implementation burn-down.
 
 ## Compound Round Summary
 
-> Filled at iteration-close.
+- 结晶文档数：0 (maintenance iteration; no novel pattern)
+- 新增 CONCEPTS.md 条目：0
+- 触发 compound-refresh：否
 
 ## Iteration Retrospective (minimal)
 
-> Filled at iteration-close.
+- 做得好的：Autonomous direction lock + full verification (191 deps, 1916 tests). cargo-audit baseline captured.
+- 可改进的：status.json accidentally committed to git (QC caught it); P2 Profile B archival was in-place only (not move-to-archived-residuals/).
+- 下迭代建议：DF-V1122-FORK-UI 或 feature direction。
