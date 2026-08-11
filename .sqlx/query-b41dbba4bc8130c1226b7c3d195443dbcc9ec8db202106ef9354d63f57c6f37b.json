@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO peer_hosts (host_id, manifest_json, last_seen, last_peer_id) VALUES (?, ?, ?, ?) ON CONFLICT(host_id) DO UPDATE SET manifest_json = excluded.manifest_json, last_seen = excluded.last_seen, last_peer_id = excluded.last_peer_id",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": []
+  },
+  "hash": "b41dbba4bc8130c1226b7c3d195443dbcc9ec8db202106ef9354d63f57c6f37b"
+}

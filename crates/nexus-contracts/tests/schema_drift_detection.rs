@@ -221,6 +221,16 @@ fn build_schema_map() -> Vec<SchemaEntry> {
             Strict,
             MomentDirectiveRequest
         ),
+        // DR-63 (V1.158 P2, R-V1151P2-002): moment-directive RESPONSE schema.
+        // oneOf-root (directive row | empty `{}`) with no top-level
+        // `properties` — registered for inventory completeness but skipped by
+        // the drift loop (same `properties.is_empty()` guard as CheckResponse;
+        // wire exactness is enforced by nexus-daemon-runtime/tests/directive_api.rs).
+        entry!(
+            "schemas/daemon-api/inspector/moment-directive-response.schema.json",
+            Strict,
+            MomentDirectiveResponse
+        ),
         // ── daemon-api/compute/ ───────────────────────────────────────────
         // V1.62 reorganization: compute envelopes moved here from compute/.
         // V1.61 WASM compute ABI envelopes (compass Q3/Q8). Only the top-level

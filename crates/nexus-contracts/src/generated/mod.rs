@@ -113,6 +113,7 @@ pub const SCHEMA_VERSIONS: &[(&str, u32)] = &[
     ("StaleFindingsResponse", 1),
     ("UpdateFindingRequest", 1),
     ("MomentDirectiveRequest", 1),
+    ("MomentDirectiveResponse", 1),
     ("MomentInspectRequest", 1),
     ("MomentInspectResponse", 1),
     ("AddKbEntryRequest", 1),
