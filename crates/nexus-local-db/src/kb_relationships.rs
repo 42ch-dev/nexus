@@ -517,39 +517,47 @@ pub async fn list_confirmed_relationships_paginated(
     limit: i64,
     cursor: Option<&RelationshipCursor>,
 ) -> Result<Vec<KbRelationshipRow>, LocalDbError> {
-    // SAFETY: runtime query — this keyset variant is not yet in the committed
-    // `.sqlx/` offline cache (`cargo sqlx prepare` re-run would promote it to
-    // a compile-time macro; repo convention for new queries, e.g. works.rs).
-    // Static SELECT with bind params only; `KbRelationshipRow: FromRow` maps
-    // the snake_case columns 1:1 (nullable columns are Option fields).
-    let sql = if cursor.is_some() {
-        "SELECT relationship_id, world_id, source_entity_id, target_entity_id,
-                relation_type, custom_label, symmetric, confidence,
-                source_anchor_ids, metadata, created_at, updated_at, revision,
-                needs_review, source, extensions_nexus_json
-         FROM kb_relationships
-         WHERE world_id = ? AND needs_review = 0
-           AND (updated_at < ? OR (updated_at = ? AND relationship_id < ?))
-         ORDER BY updated_at DESC, relationship_id DESC
-         LIMIT ?"
+    // Two compile-time-checked `query_as!` branches: the cursor branch adds
+    // the keyset predicate `(updated_at < ? OR (updated_at = ? AND
+    // relationship_id < ?))`; the no-cursor branch omits it. Both use bind
+    // params only — no string interpolation.
+    let rows = if let Some(c) = cursor {
+        sqlx::query_as!(
+            KbRelationshipRow,
+            "SELECT relationship_id, world_id, source_entity_id, target_entity_id,
+                    relation_type, custom_label, symmetric, confidence,
+                    source_anchor_ids, metadata, created_at, updated_at, revision,
+                    needs_review, source, extensions_nexus_json
+             FROM kb_relationships
+             WHERE world_id = ? AND needs_review = 0
+               AND (updated_at < ? OR (updated_at = ? AND relationship_id < ?))
+             ORDER BY updated_at DESC, relationship_id DESC
+             LIMIT ?",
+            world_id,
+            c.updated_at,
+            c.updated_at,
+            c.relationship_id,
+            limit
+        )
+        .fetch_all(pool)
+        .await?
     } else {
-        "SELECT relationship_id, world_id, source_entity_id, target_entity_id,
-                relation_type, custom_label, symmetric, confidence,
-                source_anchor_ids, metadata, created_at, updated_at, revision,
-                needs_review, source, extensions_nexus_json
-         FROM kb_relationships
-         WHERE world_id = ? AND needs_review = 0
-         ORDER BY updated_at DESC, relationship_id DESC
-         LIMIT ?"
+        sqlx::query_as!(
+            KbRelationshipRow,
+            "SELECT relationship_id, world_id, source_entity_id, target_entity_id,
+                    relation_type, custom_label, symmetric, confidence,
+                    source_anchor_ids, metadata, created_at, updated_at, revision,
+                    needs_review, source, extensions_nexus_json
+             FROM kb_relationships
+             WHERE world_id = ? AND needs_review = 0
+             ORDER BY updated_at DESC, relationship_id DESC
+             LIMIT ?",
+            world_id,
+            limit
+        )
+        .fetch_all(pool)
+        .await?
     };
-    let mut q = sqlx::query_as::<_, KbRelationshipRow>(sql).bind(world_id);
-    if let Some(c) = cursor {
-        q = q
-            .bind(&c.updated_at)
-            .bind(&c.updated_at)
-            .bind(&c.relationship_id);
-    }
-    let rows = q.bind(limit).fetch_all(pool).await?;
     Ok(rows)
 }
 

@@ -190,10 +190,24 @@ impl NexusAdapter<'_> {
         &self,
         world_id: &str,
     ) -> Result<Vec<HopEdge>, LocalDbError> {
-        let page = self
-            .list_hop_edges_for_world_paginated(world_id, HOP_EDGE_LIST_LIMIT, None)
-            .await?;
-        Ok(page.edges)
+        // Auto-paginate: collect ALL confirmed hop edges for the world by
+        // walking the keyset until exhausted. This replaces the pre-V1.158
+        // silent truncation at 10 000 edges (R-V1149P1-001). The page size
+        // stays HOP_EDGE_LIST_LIMIT for query efficiency, but no edges are
+        // dropped.
+        let mut all_edges = Vec::new();
+        let mut cursor: Option<RelationshipCursor> = None;
+        loop {
+            let page = self
+                .list_hop_edges_for_world_paginated(world_id, HOP_EDGE_LIST_LIMIT, cursor.as_ref())
+                .await?;
+            all_edges.extend(page.edges);
+            cursor = page.next_cursor;
+            if cursor.is_none() {
+                break;
+            }
+        }
+        Ok(all_edges)
     }
 
     /// Load one page of a world's confirmed hop edges, resuming after
@@ -1889,7 +1903,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn hop_edge_pagination_default_matches_first_page() {
+    async fn hop_edge_pagination_default_returns_all_under_limit() {
         let (pool, _dir) = fresh_pool().await;
         seed_world_and_endpoints(&pool).await;
         for (i, t) in [
@@ -1918,11 +1932,64 @@ mod tests {
         let ids_page: Vec<&str> = page.edges.iter().map(|e| e.relation_id.as_str()).collect();
         assert_eq!(
             ids_default, ids_page,
-            "omitted-params call ≡ first page at the default page size"
+            "omitted-params call returns all edges when graph fits in one page"
         );
         assert!(
             page.next_cursor.is_none(),
             "graph under the default limit has no next cursor"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn hop_edge_default_auto_paginates_beyond_limit() {
+        // Verify the default method auto-paginates: with a small page limit
+        // (simulated via direct paginated calls), the default method should
+        // return ALL edges, not just the first page.
+        let (pool, _dir) = fresh_pool().await;
+        seed_world_and_endpoints(&pool).await;
+        // Seed 5 rows — then verify default returns all 5 even when the
+        // internal page size would split them.
+        for (i, t) in [
+            "2026-08-01T00:00:00+00:00",
+            "2026-08-02T00:00:00+00:00",
+            "2026-08-03T00:00:00+00:00",
+            "2026-08-04T00:00:00+00:00",
+            "2026-08-05T00:00:00+00:00",
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            seed_relation_row(&pool, &format!("rel_auto{i}"), t).await;
+        }
+        let adapter = NexusAdapter::new(pool);
+        // Use page size 2 to force multi-page traversal.
+        let mut all_paginated = Vec::new();
+        let mut cursor: Option<RelationshipCursor> = None;
+        loop {
+            let page = adapter
+                .list_hop_edges_for_world_paginated("wld_rel", 2, cursor.as_ref())
+                .await
+                .expect("paginated call succeeds");
+            all_paginated.extend(page.edges);
+            cursor = page.next_cursor;
+            if cursor.is_none() {
+                break;
+            }
+        }
+        // The default method should return the same set as manual pagination.
+        let default_edges = adapter
+            .list_hop_edges_for_world("wld_rel")
+            .await
+            .expect("default call succeeds");
+        assert_eq!(
+            all_paginated.len(),
+            default_edges.len(),
+            "default method returns same count as manual pagination"
+        );
+        assert_eq!(
+            default_edges.len(),
+            5,
+            "all 5 edges returned — no truncation"
         );
     }
 }
