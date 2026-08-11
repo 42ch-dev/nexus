@@ -54,9 +54,7 @@ use axum::{extract::State, Json};
 use nexus_contracts::generated::daemon_api::inspector::moment_directive_request::{
     MomentDirectiveRequest, MomentDirectiveRequestAction, MomentDirectiveRequestScopeKind,
 };
-use nexus_contracts::generated::daemon_api::inspector::moment_directive_response::{
-    MomentDirectiveResponse,
-};
+use nexus_contracts::generated::daemon_api::inspector::moment_directive_response::MomentDirectiveResponse;
 use nexus_local_db::moment_directive::{
     clear, get_active_for_work, get_active_for_world, replace_active, scope_kind, set_active,
     MomentDirectiveRow, NewMomentDirective,
@@ -116,7 +114,9 @@ pub async fn moment_directive(
         MomentDirectiveRequestAction::Set => {
             Ok(Json(set(pool, &creator_id, &req, kind, scope_id).await?))
         }
-        MomentDirectiveRequestAction::Show => Ok(Json(show(pool, &creator_id, kind, scope_id).await?)),
+        MomentDirectiveRequestAction::Show => {
+            Ok(Json(show(pool, &creator_id, kind, scope_id).await?))
+        }
         MomentDirectiveRequestAction::Clear => {
             Ok(Json(clear_action(pool, &creator_id, kind, scope_id).await?))
         }
@@ -280,9 +280,7 @@ async fn is_work_owned(
 /// instead of silently widening the wire contract. The generated enum keeps
 /// the nullable fields present-as-`null` (no `skip_serializing_if`), so the
 /// serialized response is byte-identical to the pre-schema `Json<Value>`.
-fn response_from_row(
-    row: &MomentDirectiveRow,
-) -> Result<MomentDirectiveResponse, NexusApiError> {
+fn response_from_row(row: &MomentDirectiveRow) -> Result<MomentDirectiveResponse, NexusApiError> {
     let wire = serde_json::to_value(row).map_err(|e| NexusApiError::Internal {
         code: "DIRECTIVE_ROW_SERIALIZE".to_string(),
         message: e.to_string(),

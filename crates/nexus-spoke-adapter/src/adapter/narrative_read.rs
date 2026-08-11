@@ -529,12 +529,16 @@ mod tests {
                 e.extensions
                     .get(&key)
                     .and_then(|ns| ns.get("branch_id"))
-                    .and_then(Value::as_str).map_or_else(|| {
-                        panic!(
-                            "missing extensions.nexus.branch_id on {}",
-                            e.timeline_event_id
-                        )
-                    }, str::to_owned)
+                    .and_then(Value::as_str)
+                    .map_or_else(
+                        || {
+                            panic!(
+                                "missing extensions.nexus.branch_id on {}",
+                                e.timeline_event_id
+                            )
+                        },
+                        str::to_owned,
+                    )
             })
             .collect();
         let mut unique = branches.clone();

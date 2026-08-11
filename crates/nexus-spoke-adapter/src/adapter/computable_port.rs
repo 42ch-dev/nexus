@@ -2202,8 +2202,8 @@ mod tests {
     /// by the delta value while the attacker's HP remains unchanged.
     #[cfg(not(nexus_spoke_adapter_no_wasm_target))]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-// Long integration test; splitting would obscure the end-to-end scenario
-#[allow(clippy::too_many_lines)]
+    // Long integration test; splitting would obscure the end-to-end scenario
+    #[allow(clippy::too_many_lines)]
     async fn settle_routes_deltas_by_target_key_block_id() {
         let (pool, _dir) = fresh_pool().await;
         seed_world(&pool).await;

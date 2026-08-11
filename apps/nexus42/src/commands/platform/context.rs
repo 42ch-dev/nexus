@@ -2005,7 +2005,11 @@ mod tests {
         assert_eq!(activation_trace[1]["entry_id"], "kb_castle");
         assert_eq!(activation_trace[1]["accepted"], false);
         assert!(
-            !placement.as_array().unwrap().iter().any(|e| e["entry_id"].as_str() == Some("kb_castle")),
+            !placement
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|e| e["entry_id"].as_str() == Some("kb_castle")),
             "Castle must not appear in placement (unmatched)"
         );
     }

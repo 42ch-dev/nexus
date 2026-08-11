@@ -602,7 +602,10 @@ pub async fn record_dialed_peer(
     // `PeerId` alongside the claimed `host_id` — the spoof/collision signal
     // (operator-visibility diagnostics only; no auth/allowlist input).
     let peer_id = session.remote_peer_id().to_string();
-    match adapter.record_peer_manifest(&manifest, Some(&peer_id)).await {
+    match adapter
+        .record_peer_manifest(&manifest, Some(&peer_id))
+        .await
+    {
         SpokeResult::Ok(()) => Ok(()),
         SpokeResult::Reject(reject) => Err(CliError::Other(format!(
             "peer manifest recording rejected: {}",

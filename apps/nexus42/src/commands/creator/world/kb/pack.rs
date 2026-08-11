@@ -715,10 +715,7 @@ mod tests {
     /// Count entries in a world via `list_by_world`.
     async fn count_entries(pool: &SqlitePool, world_id: &str) -> usize {
         let store = SqliteKbStore::new(pool.clone());
-        store
-            .list_by_world(world_id)
-            .await
-            .map_or(0, |v| v.len())
+        store.list_by_world(world_id).await.map_or(0, |v| v.len())
     }
 
     /// Count relations in a world via `list_relationships_for_world`.

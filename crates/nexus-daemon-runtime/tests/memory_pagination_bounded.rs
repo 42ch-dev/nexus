@@ -251,7 +251,11 @@ async fn pending_review_deleted_cursor_falls_back_to_first_page() {
     resp.assert_status(axum::http::StatusCode::OK);
     let body: Value = resp.json();
     let items = body["items"].as_array().unwrap();
-    assert_eq!(items.len(), usize::try_from(PAGE_SIZE).unwrap_or(usize::MAX), "fallback page size");
+    assert_eq!(
+        items.len(),
+        usize::try_from(PAGE_SIZE).unwrap_or(usize::MAX),
+        "fallback page size"
+    );
     // The first item of the fallback page is the newest remaining row, which
     // is the same as page 1's first item (the deleted row was the *last* of
     // page 1, so the head of the order is unchanged).

@@ -544,7 +544,10 @@ pub async fn list_confirmed_relationships_paginated(
     };
     let mut q = sqlx::query_as::<_, KbRelationshipRow>(sql).bind(world_id);
     if let Some(c) = cursor {
-        q = q.bind(&c.updated_at).bind(&c.updated_at).bind(&c.relationship_id);
+        q = q
+            .bind(&c.updated_at)
+            .bind(&c.updated_at)
+            .bind(&c.relationship_id);
     }
     let rows = q.bind(limit).fetch_all(pool).await?;
     Ok(rows)
@@ -1202,7 +1205,10 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(
-            rows2.iter().map(|r| r.relationship_id.as_str()).collect::<Vec<_>>(),
+            rows2
+                .iter()
+                .map(|r| r.relationship_id.as_str())
+                .collect::<Vec<_>>(),
             vec!["rel_pg2", "rel_pg1", "rel_pg0"],
             "keyset resumes strictly after the cursor row"
         );
@@ -1216,7 +1222,10 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(
-            rows3.iter().map(|r| r.relationship_id.as_str()).collect::<Vec<_>>(),
+            rows3
+                .iter()
+                .map(|r| r.relationship_id.as_str())
+                .collect::<Vec<_>>(),
             vec!["rel_pg0"],
             "final page drains the remainder"
         );

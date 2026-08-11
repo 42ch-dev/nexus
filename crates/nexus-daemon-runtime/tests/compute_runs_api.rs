@@ -717,7 +717,11 @@ async fn list_paginates_and_scopes_to_owned_worlds() {
     assert_eq!(p1["items"].as_array().unwrap().len(), 2);
     assert_eq!(p1["has_more"], true);
     let cursor = p1["next_cursor"].as_str().expect("cursor").to_string();
-    assert!(!p1["items"].as_array().unwrap().iter().any(|i| i["run_id"].as_str() == Some(foreign.as_str())));
+    assert!(!p1["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|i| i["run_id"].as_str() == Some(foreign.as_str())));
 
     let page2 = c
         .server

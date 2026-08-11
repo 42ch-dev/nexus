@@ -372,7 +372,11 @@ async fn test_inspiration_promote_creates_work_and_pool_row() {
     .await
     .unwrap();
     assert_eq!(
-        pool_resp.entries.iter().filter(|e| e.status == "active").count(),
+        pool_resp
+            .entries
+            .iter()
+            .filter(|e| e.status == "active")
+            .count(),
         1
     );
 

@@ -959,9 +959,7 @@ async fn creator_isolation_get_work_returns_404_for_other_creator() {
     // Try to GET with other creator
     let (ctx_b, db_b) = test_ctx_other_creator().await;
     let _result = nexus_daemon_runtime::api::handlers::works::get_work(
-        State(
-            WorkspaceState::new_for_testing(ctx_b.tmp.path().join(".nexus42"), db_b, None).await,
-        ),
+        State(WorkspaceState::new_for_testing(ctx_b.tmp.path().join(".nexus42"), db_b, None).await),
         Path(work_id.clone()),
     )
     .await;

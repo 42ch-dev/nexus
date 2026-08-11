@@ -395,7 +395,10 @@ mod tests {
             SpokeResult::Ok(m) => m,
             SpokeResult::Reject(r) => panic!("manifest build is Ok: {r:?}"),
         };
-        match adapter.record_peer_manifest(&manifest, Some(TEST_PEER_ID)).await {
+        match adapter
+            .record_peer_manifest(&manifest, Some(TEST_PEER_ID))
+            .await
+        {
             SpokeResult::Ok(()) => {}
             SpokeResult::Reject(r) => panic!("recording is Ok: {r:?}"),
         }
@@ -520,7 +523,10 @@ mod tests {
             SpokeResult::Ok(m) => m,
             SpokeResult::Reject(r) => panic!("manifest build is Ok: {r:?}"),
         };
-        match adapter.record_peer_manifest(&manifest, Some(TEST_PEER_ID)).await {
+        match adapter
+            .record_peer_manifest(&manifest, Some(TEST_PEER_ID))
+            .await
+        {
             SpokeResult::Ok(()) => {}
             SpokeResult::Reject(r) => panic!("recording is Ok: {r:?}"),
         }

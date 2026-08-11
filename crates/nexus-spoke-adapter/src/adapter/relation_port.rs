@@ -1758,10 +1758,7 @@ mod tests {
 
     /// Walk a graph page by page with `list_hop_edges_for_world_paginated`,
     /// returning `(pages, ids)` in traversal order.
-    async fn walk_hop_pages(
-        adapter: &NexusAdapter<'_>,
-        page_size: i64,
-    ) -> (usize, Vec<String>) {
+    async fn walk_hop_pages(adapter: &NexusAdapter<'_>, page_size: i64) -> (usize, Vec<String>) {
         let mut seen = Vec::new();
         let mut cursor: Option<RelationshipCursor> = None;
         let mut pages = 0;
@@ -1836,7 +1833,10 @@ mod tests {
             .await
             .expect("exactly-at-limit page succeeds");
         assert_eq!(page.edges.len(), 2, "page exactly fills the limit");
-        assert!(page.next_cursor.is_none(), "exactly at limit → graph exhausted");
+        assert!(
+            page.next_cursor.is_none(),
+            "exactly at limit → graph exhausted"
+        );
 
         // Overflow probe: add a third row → the full first page now yields a
         // cursor; the second page drains the remainder and terminates.
@@ -1875,7 +1875,9 @@ mod tests {
             page1.edges[0].relation_id, "rel_tie_b",
             "DESC tiebreak → higher relationship_id first"
         );
-        let cursor = page1.next_cursor.expect("same-timestamp pair must still paginate");
+        let cursor = page1
+            .next_cursor
+            .expect("same-timestamp pair must still paginate");
 
         let page2 = adapter
             .list_hop_edges_for_world_paginated("wld_rel", 1, Some(&cursor))

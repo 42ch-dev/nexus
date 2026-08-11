@@ -301,9 +301,7 @@ async fn transition_nonexistent_run_errors() {
         .unwrap_err();
     assert_constraint_violation(&err, "not in 'running' status");
 
-    let err = set_run_failed(&pool, nonexistent, r"{}")
-        .await
-        .unwrap_err();
+    let err = set_run_failed(&pool, nonexistent, r"{}").await.unwrap_err();
     assert_constraint_violation(&err, "not in 'running' status");
 
     let err = set_run_discarded(&pool, nonexistent).await.unwrap_err();

@@ -5,7 +5,10 @@
 
 #![deny(clippy::unwrap_used)]
 // Test modules use ergonomic `.unwrap()`/`.expect()`; production keeps the strict deny.
-#![cfg_attr(test, allow(clippy::unwrap_used, clippy::unwrap_in_result, clippy::expect_used))]
+#![cfg_attr(
+    test,
+    allow(clippy::unwrap_used, clippy::unwrap_in_result, clippy::expect_used)
+)]
 
 pub mod api;
 pub mod auth;
