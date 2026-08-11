@@ -732,6 +732,28 @@
       "collapse": "折叠 {{name}}",
       "expand": "展开 {{name}}"
     },
+    "eraCreateDialog": {
+      "button": "新建 era",
+      "buttonAria": "新建纪元",
+      "title": "新建纪元",
+      "description": "在概览层添加一个纪元，可选嵌套到父纪元之下。",
+      "nameLabel": "纪元名称",
+      "namePlaceholder": "例如：星辰纪元",
+      "nameRequired": "纪元名称必填。",
+      "typeLabel": "纪元类型",
+      "typeNone": "无类型",
+      "typeCustom": "自定义…",
+      "typeCustomPlaceholder": "输入自定义纪元类型…",
+      "parentLabel": "父纪元",
+      "parentPlaceholder": "搜索纪元…",
+      "parentEmpty": "暂无可以嵌套的纪元。",
+      "parentClear": "清除父纪元",
+      "create": "创建纪元",
+      "creating": "创建中…",
+      "validationError": "守护进程拒绝了此纪元。请检查名称与类型后重试。",
+      "conflictError": "无法创建纪元——它已存在或已被并发修改。请关闭后重试。",
+      "genericError": "创建纪元失败，请重试。"
+    },
     "keyBlockNode": {
       "unnamed": "(未命名实体)",
       "selected": "已选中上下文实体",

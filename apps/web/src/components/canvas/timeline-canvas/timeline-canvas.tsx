@@ -58,7 +58,7 @@ import { useTranslation } from 'react-i18next';
 import { Link, useBeforeUnload, useNavigate, useSearchParams } from 'react-router';
 import type { Node } from '@xyflow/react';
 import { useQueries } from '@tanstack/react-query';
-import { Cpu, Info } from 'lucide-react';
+import { Cpu, Info, Plus } from 'lucide-react';
 
 import { CanvasShell } from '@/components/canvas/canvas-shell';
 import { LayerBreadcrumb } from '@/components/canvas/layer-breadcrumb';
@@ -91,6 +91,7 @@ import { WorldKbEntityConflictModal, type WorldKbEntityConflictDraft } from '../
 import type { SceneBeatFixturePayload } from '../outline-canvas/graph-projection';
 import { NleTimelineBandOverlay } from './nle-timeline-band-overlay';
 import { filterTimelineEntityNodes } from './nle-timeline-projection';
+import { EraCreateDialog } from './era-create-dialog';
 
 export interface TimelineCanvasProps {
   worldId: string;
@@ -615,6 +616,22 @@ export function TimelineCanvas({ worldId, sceneBeatFixture }: TimelineCanvasProp
   // empty-state branch (there are no rows to list).
   const [showAltView, setShowAltView] = useState(false);
 
+  // V1.159 P1 T3 — "新建 era" entry point. The create dialog owns the era
+  // entity + optional parent-relationship mutations; this state only gates
+  // the dialog mount.
+  const [eraCreateOpen, setEraCreateOpen] = useState(false);
+
+  // Existing era entities for the dialog's optional parent picker (spec
+  // §3.3.3 V1.159 "Create entry"). Derived from the same graph read the
+  // Brief time-bands consume.
+  const existingEras = useMemo(
+    () =>
+      (graph.data?.entities ?? [])
+        .filter((e) => e.block_type === 'era')
+        .map((e) => ({ entity_id: e.key_block_id, canonical_name: e.canonical_name })),
+    [graph.data],
+  );
+
   // Keep the adapter context current. The adapter object stays referentially
   // stable; only the values inside ctxRef.current change.
   //
@@ -737,6 +754,20 @@ export function TimelineCanvas({ worldId, sceneBeatFixture }: TimelineCanvasProp
         activeLayer={activeLayer}
         onLayerChange={handleLayerChange}
         showLayerSwitcher={!isEmpty}
+        // V1.159 P1 T3 — "新建 era" entry in the Brief-layer chrome
+        // (spec §3.3.3 "Create entry", sibling to the layer switcher tabs).
+        // Hidden on the empty-state branch (that branch owns its own
+        // surface + CTA) and on non-Brief layers (the create entry is
+        // Brief-specific — Work-Brief stays read-only per spec §3.3.3).
+        showCreateEra={activeLayer === 'brief' && !isEmpty}
+        onCreateEra={() => setEraCreateOpen(true)}
+        // V1.159 P1 T3 (T2-M2 carry-forward fix) — the alt-view toggle is
+        // not available on the Brief layer when the time-band panel is
+        // present (the bands are the Brief rendering model; the toggle would
+        // only hide them).
+        showAltViewToggle={
+          !(activeLayer === 'brief' && surface.briefTimeBands !== null)
+        }
         onRunModule={onRunModule}
       />
 
@@ -809,15 +840,6 @@ export function TimelineCanvas({ worldId, sceneBeatFixture }: TimelineCanvasProp
         // from bound Works' Outline data; Moments remain Work-owned. No
         // World-owned Moment authoring CTA.
         <MomentEmptyState onSwitchToNarrative={() => handleLayerChange('narrative')} />
-      ) : showAltView ? (
-        <div className="grid gap-3 lg:grid-cols-[1fr_360px]">
-          {surface.altView}
-          {surface.inspector ? (
-            <div className="rounded-card border border-gray-alpha-400 bg-background-100 p-4 shadow-popover">
-              {surface.inspector}
-            </div>
-          ) : null}
-        </div>
       ) : activeLayer === 'brief' && surface.briefTimeBands ? (
         // V1.159 P1 T2 — Brief layer vertical time-bands (spec §3.3.3 V1.159
         // amendment). The time-band panel SUPERSEDES the V1.123 horizontal
@@ -831,6 +853,13 @@ export function TimelineCanvas({ worldId, sceneBeatFixture }: TimelineCanvasProp
         // and intentionally absent on the band panel — the layer tabs carry
         // Brief ↔ Narrative switching (per plan Global Constraints §"Semantic
         // zoom feasibility" the tabs are the primary affordance).
+        //
+        // V1.159 P1 T3 (T2-M2 carry-forward fix): this branch sits BEFORE the
+        // alt-view branch so the Brief time-bands take precedence over the
+        // spatial↔list toggle — a Brief-layer author sees the band model even
+        // if `showAltView` was left on from a Narrative visit (the toggle is
+        // also hidden on this branch via the header `showAltViewToggle`
+        // gate, so the two mechanisms agree).
         <div
           key="brief-time-bands"
           className="nexus-layer-enter"
@@ -850,6 +879,15 @@ export function TimelineCanvas({ worldId, sceneBeatFixture }: TimelineCanvasProp
           <div className="sr-only" role="status" aria-live="polite" aria-atomic="true">
             {surface.summaryText}
           </div>
+        </div>
+      ) : showAltView ? (
+        <div className="grid gap-3 lg:grid-cols-[1fr_360px]">
+          {surface.altView}
+          {surface.inspector ? (
+            <div className="rounded-card border border-gray-alpha-400 bg-background-100 p-4 shadow-popover">
+              {surface.inspector}
+            </div>
+          ) : null}
         </div>
       ) : (
         // V1.123 P4 Task 4 — layer transition animation. The `key` forces a
@@ -920,6 +958,21 @@ export function TimelineCanvas({ worldId, sceneBeatFixture }: TimelineCanvasProp
           }}
         />
       ) : null}
+
+      {/* V1.159 P1 T3 — "新建 era" create dialog. The dialog owns the
+          patch-entity (+ optional patch-relationship) mutations; the hooks
+          invalidate the graph query on success, so `onSuccess` only needs to
+          refetch explicitly for the time-bands memo to reflow against the
+          freshest graph. */}
+      <EraCreateDialog
+        open={eraCreateOpen}
+        onOpenChange={setEraCreateOpen}
+        worldId={worldId}
+        existingEras={existingEras}
+        onSuccess={() => {
+          void graph.refetch();
+        }}
+      />
     </div>
   );
 }
@@ -950,6 +1003,9 @@ function TimelineCanvasHeader({
   activeLayer,
   onLayerChange,
   showLayerSwitcher,
+  showCreateEra,
+  onCreateEra,
+  showAltViewToggle,
   onRunModule,
 }: {
   worldId: string;
@@ -963,6 +1019,19 @@ function TimelineCanvasHeader({
    * when the graph is empty (Task 5 owns the per-layer empty-state copy).
    */
   showLayerSwitcher: boolean;
+  /**
+   * V1.159 P1 T3 — "新建 era" entry visibility (Brief-layer chrome).
+   * True when the Brief layer is active and the graph is non-empty.
+   */
+  showCreateEra: boolean;
+  /** V1.159 P1 T3 — opens the era create dialog. */
+  onCreateEra: () => void;
+  /**
+   * V1.159 P1 T3 (T2-M2 carry-forward fix) — gates the spatial↔list toggle.
+   * Hidden on the Brief layer when the time-band panel is the rendering
+   * model (bands take precedence over the alt view).
+   */
+  showAltViewToggle: boolean;
   /**
    * V1.147 P2 T3 — Run Module entry (behavior spec §1 P2 hero shortcut).
    * Opens the shared Run Studio (Settings → Modules) with the World
@@ -1018,14 +1087,32 @@ function TimelineCanvasHeader({
             onLayerChange={onLayerChange}
           />
         ) : null}
-        <button
-          type="button"
-          onClick={onToggleView}
-          className="rounded-control border border-gray-alpha-400 bg-background-100 px-3 py-1.5 text-button-12 text-gray-900 shadow-elevation-2 hover:bg-gray-alpha-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-700 focus-visible:ring-offset-2"
-          aria-pressed={showAltView}
-        >
-          {showAltView ? t('timeline.header.showGraph') : t('timeline.header.showList')}
-        </button>
+        {/* V1.159 P1 T3 — "新建 era" entry (spec §3.3.3 "Create entry"),
+            sibling to the layer switcher tabs. Brief-layer chrome only:
+            Work-Brief stays a read-only projection (spec §3.3.3). */}
+        {showCreateEra ? (
+          <Button
+            type="button"
+            variant="secondary"
+            size="small"
+            onClick={onCreateEra}
+            data-testid="timeline-create-era-entry"
+            aria-label={t('timeline.eraCreateDialog.buttonAria')}
+          >
+            <Plus className="h-3.5 w-3.5" aria-hidden />
+            {t('timeline.eraCreateDialog.button')}
+          </Button>
+        ) : null}
+        {showAltViewToggle ? (
+          <button
+            type="button"
+            onClick={onToggleView}
+            className="rounded-control border border-gray-alpha-400 bg-background-100 px-3 py-1.5 text-button-12 text-gray-900 shadow-elevation-2 hover:bg-gray-alpha-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-700 focus-visible:ring-offset-2"
+            aria-pressed={showAltView}
+          >
+            {showAltView ? t('timeline.header.showGraph') : t('timeline.header.showList')}
+          </button>
+        ) : null}
         {/* V1.147 P2 T3 — Run Module entry (hero shortcut per behavior spec
             §1 P2). Opens the shared Run Studio with the World pre-filled;
             the Cpu icon marks the compute affordance family (spec §5

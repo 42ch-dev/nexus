@@ -743,6 +743,28 @@
       "collapse": "Collapse {{name}}",
       "expand": "Expand {{name}}"
     },
+    "eraCreateDialog": {
+      "button": "New era",
+      "buttonAria": "Create a new era",
+      "title": "New era",
+      "description": "Add an era to the Brief layer. Optionally nest it under a parent era.",
+      "nameLabel": "Era name",
+      "namePlaceholder": "e.g. The Age of Stars",
+      "nameRequired": "Era name is required.",
+      "typeLabel": "Era type",
+      "typeNone": "No type",
+      "typeCustom": "Custom…",
+      "typeCustomPlaceholder": "Type a custom era type…",
+      "parentLabel": "Parent era",
+      "parentPlaceholder": "Search eras…",
+      "parentEmpty": "No eras to nest under yet.",
+      "parentClear": "Clear parent era",
+      "create": "Create era",
+      "creating": "Creating…",
+      "validationError": "The daemon rejected this era. Review the name and era type, then try again.",
+      "conflictError": "This era could not be created — it already exists or was changed concurrently. Close and try again.",
+      "genericError": "Could not create the era. Try again."
+    },
     "keyBlockNode": {
       "unnamed": "(unnamed entity)",
       "selected": "Selected context entity",
