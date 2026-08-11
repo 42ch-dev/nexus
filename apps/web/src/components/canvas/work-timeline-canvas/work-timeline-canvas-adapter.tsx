@@ -69,7 +69,7 @@
  * (`WorldKbGraphResponse.entities[block_type=era]`) verbatim. No schema /
  * codegen / daemon / contracts diff.
  */
-import type { MutableRefObject } from 'react';
+import type { MutableRefObject, ReactNode } from 'react';
 import type { Edge, Node } from '@xyflow/react';
 
 import type { CanvasSurfaceAdapter } from '../canvas-surface-adapter';
@@ -83,6 +83,11 @@ import type {
 } from '../outline-canvas/graph-projection';
 import type { DirectedAxisSpineNodeData, MomentSpineConfig, NarrativeSpineConfig } from '../timeline-canvas/directed-axis-spine';
 import { SPINE_Y_OFFSET } from '../timeline-canvas/directed-axis-spine';
+// V1.160 P2 T1 — Work-Brief time-band rendering reuses the V1.159 era
+// forest + band renderer from the World Timeline verbatim (same
+// `buildEraTree` taxonomy, same `<BriefTimeBands />` panel — no fork).
+import { buildEraTree } from '../timeline-canvas/brief-era-tree';
+import { BriefTimeBands } from '../timeline-canvas/brief-time-bands';
 // V1.156 P2 T1 — Work-Brief reuses the World Timeline Brief projection
 // verbatim (same carrier `block_type=era`, same `TimelineNodeData` with
 // `layoutHint: 'brief'`); the Brief-era node component is picked from the
@@ -264,7 +269,20 @@ export type WorkTimelineCanvasAdapter = CanvasSurfaceAdapter<
   WorkTimelineGraph,
   WorkTimelineNodeData,
   WorkTimelineEdgeData
->;
+> & {
+  /**
+   * V1.160 P2 T1 — Work-Brief time-band rendering slot (mirrors the World
+   * Timeline adapter's V1.159 `renderBriefTimeBands`). Builds the era
+   * forest from the bound World's KB graph (`buildEraTree`) and renders
+   * the vertical time-band model (`<BriefTimeBands />`) that supersedes
+   * the V1.156 horizontal era sweep on the Work Brief layer — Work-Brief
+   * feel ≡ World-Brief feel. The panel is read-only (PD-2): no
+   * `onSelectEra` hand-off — the Work surface has no era selection.
+   * Absent on non-Timeline adapters (`useCanvasSurface` surfaces it as
+   * `null`); frontend-local — no wire contract change.
+   */
+  renderBriefTimeBands?(graph: WorkTimelineGraph): ReactNode;
+};
 
 /**
  * The Work Timeline adapter extends the base V1.114 `CanvasSurfaceAdapter`
@@ -945,6 +963,34 @@ export function createWorkTimelineCanvasAdapter(
 
     summarizeGraph(graph) {
       return summarizeWorkTimelineGraph(graph);
+    },
+
+    // V1.160 P2 T1 — Work-Brief vertical time-band rendering (mirror the
+    // World Timeline adapter's V1.159 `renderBriefTimeBands`). Builds the
+    // era forest from the bound World's KB graph (`buildEraTree` — the
+    // SAME graph read the Brief projection consumes:
+    // `entities[block_type=era]` + `relationships` parent_era edges) and
+    // renders `<BriefTimeBands />`, which supersedes the V1.156 flat era
+    // sweep on the Work Brief layer — Work-Brief feel ≡ World-Brief feel.
+    //
+    // The era data source is the captured `boundWorldGraph` (ctxRef
+    // fallback), NOT the Work outline graph — `WorkTimelineGraph`
+    // (`WorkOutline.timeline_events[]`) carries no era entities. The
+    // `graph` argument is therefore unused (the `useCanvasSurface` slot
+    // contract passes it; the bound World's graph is supplied separately
+    // as the captured factory param, mirroring the Brief projection).
+    //
+    // Work Brief is a read-only projection (PD-2) with no era selection
+    // hand-off — `WorkTimelineCanvasAdapterContext` has no `onSelectNode`
+    // — so `onSelectEra` is omitted (`BriefTimeBands` renders
+    // selection-free bands; the prop is optional).
+    renderBriefTimeBands(_graph) {
+      const worldGraph = boundWorldGraph ?? ctxRef.current.boundWorldGraph;
+      const tree = buildEraTree(
+        worldGraph?.entities ?? [],
+        worldGraph?.relationships ?? [],
+      );
+      return <BriefTimeBands tree={tree} />;
     },
   };
 }

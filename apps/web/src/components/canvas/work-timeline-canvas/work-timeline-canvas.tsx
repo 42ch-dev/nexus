@@ -350,6 +350,44 @@ export function WorkTimelineCanvas({ workId, sceneBeatFixture }: WorkTimelineCan
         <BriefEmptyState onSwitchToNarrative={() => handleLayerChange('narrative')} />
       ) : isMomentEmpty ? (
         <MomentEmptyState onSwitchToNarrative={() => handleLayerChange('narrative')} />
+      ) : activeLayer === 'brief' && surface.briefTimeBands ? (
+        // V1.160 P2 T1 — Work-Brief vertical time-bands (mirror the World
+        // Timeline's V1.159 time-band panel, `timeline-canvas.tsx`). The
+        // time-band panel SUPERSEDES the V1.156 horizontal era sweep as
+        // the Work Brief-layer rendering model: eras stack as indented,
+        // type-colored bands (`<BriefTimeBands />`, adapter-built from the
+        // bound World's era forest via `buildEraTree`). Work-Brief is a
+        // read-only projection (PD-2) — the panel renders selection-free
+        // bands (no `onSelectEra` hand-off; the Work surface has no era
+        // selection), so the inspector column stays empty unless a node
+        // selection survives from another layer. Narrative/Moment keep the
+        // spatial canvas below; the layer tabs remain the primary
+        // affordance.
+        //
+        // This branch sits BEFORE the spatial-canvas branch so the
+        // time-band panel is the Brief-layer rendering model (the
+        // Work canvas has no alt-view, so the World T2-M2 precedence fix
+        // does not apply here).
+        <div
+          key="brief-time-bands"
+          className="nexus-layer-enter"
+          data-testid="work-timeline-canvas-layer-transition"
+        >
+          <div className="grid gap-3 lg:grid-cols-[1fr_360px]">
+            <div className="rounded-card border border-gray-alpha-400 bg-background-100 p-4 shadow-elevation-1">
+              {surface.briefTimeBands}
+            </div>
+            {surface.inspector ? (
+              <div className="rounded-card border border-gray-alpha-400 bg-background-100 p-4 shadow-popover">
+                {surface.inspector}
+              </div>
+            ) : null}
+          </div>
+          {/* Screen-reader graph summary — parity with CanvasShell (A8 #3). */}
+          <div className="sr-only" role="status" aria-live="polite" aria-atomic="true">
+            {surface.summaryText}
+          </div>
+        </div>
       ) : (
         // V1.123 P4 Task 4 — layer transition animation. The `key` forces a
         // remount on layer swap so the CSS keyframe animation replays; the
