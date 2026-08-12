@@ -818,7 +818,34 @@
       "affectedTitle": "Affected knowledge",
       "runTitle": "Run",
       "paramsTitle": "Parameters",
-      "openRun": "Open Run"
+      "openRun": "Open Run",
+      "forkHere": "Branch this world's timeline from here"
+    },
+    "forkCreateDialog": {
+      "title": "Branch this world's timeline",
+      "description": "Create a new branch of this world's timeline diverging from the picked event. The original timeline stays untouched.",
+      "forkPointLabel": "Branching from",
+      "labelLabel": "Branch label (optional)",
+      "labelPlaceholder": "e.g. Alternate ending",
+      "create": "Create branch",
+      "creating": "Creating…",
+      "missingForkPoint": "Pick an event to branch from first.",
+      "missingBranchContext": "No branch context for this world yet.",
+      "invalidForkPoint": "The daemon could not branch from this event — pick a different fork point and try again.",
+      "genericError": "Could not create the branch. Try again.",
+      "createdTitle": "Branch created"
+    },
+    "forkLineage": {
+      "badge": "This branch is a fork",
+      "parentLabel": "Parent branch",
+      "forkPointLabel": "Forked from event",
+      "labelLabel": "Label",
+      "openParent": "Open parent branch",
+      "openParentAria": "Open the parent branch timeline",
+      "unavailableBadge": "Fork — lineage unavailable",
+      "unavailableDetail": "Could not load this branch's lineage.",
+      "retry": "Retry",
+      "retryAria": "Retry loading the branch lineage"
     },
     "runModuleEntry": {
       "button": "Run Module",

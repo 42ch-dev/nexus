@@ -34,6 +34,7 @@ pub mod compute_runs;
 pub mod creators;
 pub mod directive;
 pub mod findings;
+pub mod fork;
 pub mod host_tool_executor;
 pub mod host_tool_handlers;
 pub mod inspector;

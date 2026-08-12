@@ -41,6 +41,9 @@ import { TimelineCanvas } from '../timeline-canvas';
 
 // ─── Wire fixtures (daemon contract shapes) ─────────────────────────────────
 
+/** Bugbot 1 — a forked branch id used for the `?branch=` pre-fill tests. */
+const FORK_BRANCH_ID = 'fbk_fork_1';
+
 const KB_EVENT = {
   key_block_id: 'kb-coro',
   world_id: 'world-7',
@@ -177,13 +180,17 @@ function SettingsCloseButton() {
  * the canvas events query refetch picks it up through the `timeline.all`
  * invalidation.
  */
-function computeTimelineJourney(over: { initialEvents?: unknown[]; kbEntities?: unknown[] } = {}) {
+function computeTimelineJourney(
+  over: { initialEvents?: unknown[]; kbEntities?: unknown[]; branch?: string } = {},
+) {
   const state = {
     eventsStore: [...(over.initialEvents ?? [])],
     lastEventsUrl: null as string | null,
     eventsFetchCount: 0,
     runsStore: [] as unknown[],
     acceptCalls: 0,
+    /** Bugbot 1 — captured POST /compute/run request bodies. */
+    runBodies: [] as unknown[],
   };
 
   const handlers = [
@@ -195,12 +202,20 @@ function computeTimelineJourney(over: { initialEvents?: unknown[]; kbEntities?: 
       }),
     ),
     http.get('/v1/daemon/worlds/:worldId/timeline/events', ({ request }) => {
-      state.lastEventsUrl = request.url;
       state.eventsFetchCount += 1;
+      // V1.162 P2 T2 — the fork-lineage chrome reads the SAME route with
+      // its own `event_type=fork_created&limit=1` filter (separate hook).
+      // The contract assertions below target the canvas's compute_result
+      // projection query, so only that family updates `lastEventsUrl`;
+      // the fork_created read keeps its own filter and must not overwrite
+      // the slot the assertions inspect.
+      const url = new URL(request.url);
+      if (url.searchParams.get('event_type') === 'compute_result') {
+        state.lastEventsUrl = request.url;
+      }
       // Page the store by the daemon's limit/cursor contract so
       // `has_more: true` + a second page can be exercised (review F1
       // regression: the canvas auto-fetches remaining pages).
-      const url = new URL(request.url);
       const limit = Number(url.searchParams.get('limit')) || 100;
       const cursorRaw = url.searchParams.get('cursor');
       const cursor = cursorRaw ? Number(cursorRaw) : 0;
@@ -232,6 +247,7 @@ function computeTimelineJourney(over: { initialEvents?: unknown[]; kbEntities?: 
     ),
     http.post('/v1/daemon/compute/run', async ({ request }) => {
       const body = (await request.json()) as { world_id: string };
+      state.runBodies.push(body);
       if (body.world_id !== 'world-7') {
         return HttpResponse.json(
           { success: false, error: { code: 'world_not_found', message: 'no' } },
@@ -282,16 +298,22 @@ function computeTimelineJourney(over: { initialEvents?: unknown[]; kbEntities?: 
   return { state, handlers };
 }
 
-function renderTimelineApp(over: { initialEvents?: unknown[]; kbEntities?: unknown[] } = {}) {
+function renderTimelineApp(
+  over: { initialEvents?: unknown[]; kbEntities?: unknown[]; branch?: string } = {},
+) {
   const { state, handlers } = computeTimelineJourney(over);
   useHandlers(...handlers);
+  const initial =
+    over.branch === undefined
+      ? ['/worlds/world-7/timeline']
+      : [`/worlds/world-7/timeline?branch=${over.branch}`];
   const result = renderInApp(
     <SettingsModalProvider>
       <ModalAppRoutes />
       <SettingsModalHost />
       <SettingsCloseButton />
     </SettingsModalProvider>,
-    { client: new BrowserClient(), initialRouterEntries: ['/worlds/world-7/timeline'] },
+    { client: new BrowserClient(), initialRouterEntries: initial },
   );
   return { ...result, state };
 }
@@ -450,6 +472,14 @@ describe('TimelineCanvas compute-on-Timeline (V1.147 P2 T3)', () => {
     await user.click(screen.getByTestId('run-studio-run'));
     await screen.findByTestId('proposal-section-report');
 
+    // Bugbot 1 — from the ROOT Timeline (no `?branch=`), the run request
+    // omits `branch_id` (the daemon defaults to the World's root).
+    expect(state.runBodies[0]).toMatchObject({
+      world_id: 'world-7',
+      module_id: 'basic-combat',
+    });
+    expect((state.runBodies[0] as Record<string, unknown>).branch_id).toBeUndefined();
+
     // 4. Accept — the daemon appends the compute_result event; the canvas
     // (still mounted behind the modal) refetches via the timeline.all
     // invalidation WITHOUT any manual refresh.
@@ -464,5 +494,45 @@ describe('TimelineCanvas compute-on-Timeline (V1.147 P2 T3)', () => {
     const computeNode = await screen.findByTestId('compute-result-node-chrome');
     expect(within(computeNode).getByText('Aria strikes Brann')).toBeInTheDocument();
     expect(within(computeNode).getByText('Compute result')).toBeInTheDocument();
+  });
+
+  it('Run Module from a forked-branch Timeline pre-fills the branch and submits branch_id (Bugbot 1)', async () => {
+    const user = userEvent.setup();
+    // Active branch = fork (`?branch=fbk_fork_1` — the T1 mirror).
+    const { state } = renderTimelineApp({ branch: FORK_BRANCH_ID });
+
+    // 1. Entry: Run Module from the forked-branch Timeline toolbar. The
+    // open URL now carries BOTH `?world=` and `?branch=<fork>`.
+    await user.click(await screen.findByTestId('timeline-run-module-entry'));
+    await screen.findByTestId('settings-modal-body');
+    await user.click(await screen.findByRole('button', { name: 'Basic Combat' }));
+    await screen.findByTestId('run-studio');
+
+    // 2. World + fork branch pre-filled.
+    await waitFor(() =>
+      expect(screen.getByTestId('run-studio-world')).toHaveValue('world-7'),
+    );
+
+    // 3. Fill the guided form + run.
+    await screen.findByRole('combobox', { name: /^Attacker/ });
+    await user.selectOptions(
+      screen.getByRole('combobox', { name: /^Attacker/ }),
+      'kb-aria',
+    );
+    await user.selectOptions(
+      screen.getByRole('combobox', { name: /^Defender/ }),
+      'kb-brann',
+    );
+    await waitFor(() => expect(screen.getByTestId('run-studio-run')).toBeEnabled());
+    await user.click(screen.getByTestId('run-studio-run'));
+    await screen.findByTestId('proposal-section-report');
+
+    // 4. The run request carries the fork branch — compute run/accept
+    // writes the fork, NOT the world root (Bugbot 1).
+    expect(state.runBodies[0]).toMatchObject({
+      world_id: 'world-7',
+      module_id: 'basic-combat',
+      branch_id: FORK_BRANCH_ID,
+    });
   });
 });

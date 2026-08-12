@@ -350,6 +350,10 @@ fn canvas_outline_routes() -> Router<WorkspaceState> {
 ///
 /// Also hosts the V1.129 P2 `DELETE /v1/daemon/worlds/:world_id` hard-delete
 /// route (R-V1126P0-T2-001) — it shares the `:world_id` path prefix.
+///
+/// Also hosts the V1.162 P1 T2 `POST /v1/daemon/worlds/:world_id/forks`
+/// fork-create route (plan `2026-08-12-v1.162-p1-fork-backend-foundation`) —
+/// it shares the same `:world_id` prefix and tier2 mount.
 fn world_kb_routes() -> Router<WorkspaceState> {
     Router::new()
         .route("/v1/daemon/worlds", post(handlers::narrative::create_world))
@@ -380,6 +384,10 @@ fn world_kb_routes() -> Router<WorkspaceState> {
         .route(
             "/v1/daemon/worlds/:world_id/kb/key-blocks/:key_block_id/state",
             get(handlers::world_kb::get_key_block_state),
+        )
+        .route(
+            "/v1/daemon/worlds/:world_id/forks",
+            post(handlers::fork::create_fork),
         )
 }
 

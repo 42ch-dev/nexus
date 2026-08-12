@@ -429,6 +429,67 @@ pub async fn append_event_canon_with_extensions_in_tx(
     .await
 }
 
+/// Append a **canon** timeline event via the pool, with `extensions_nexus_json`.
+///
+/// Pool-scoped variant of [`append_event_canon_with_extensions_in_tx`] for
+/// callers that write without a surrounding transaction. V1.162 P1 T1
+/// (plan `2026-08-12-v1.162-p1-fork-backend-foundation`, carrier B): the
+/// `fork.create` marker writer — the capability materializes a fork branch by
+/// appending a `fork_created` event whose `extensions_nexus_json` carries the
+/// `fork_lineage` object (`parent_branch_id`, `forked_from_event_id`,
+/// `label`). Canon status reflects that a fork creation is a committed
+/// structural fact and makes the marker findable in canon-filtered reads.
+///
+/// Semantically distinct from the Accept-path provenance writer
+/// ([`append_event_canon_with_extensions_in_tx`]), which remains the sole
+/// provenance write path; this writer's extensions carry fork lineage, not
+/// provenance.
+///
+/// # Preconditions
+///
+/// Non-transactional check-then-insert; safe for a caller-exclusive branch
+/// (the fork marker allocates a fresh `branch_id` per call). Reuse on a
+/// shared branch risks `SequenceConflict` from a concurrent `MAX(sequence_no)`
+/// race.
+///
+/// # Errors
+///
+/// Same error variants as [`append_event`].
+pub async fn append_event_canon_with_extensions(
+    pool: &SqlitePool,
+    world_id: &str,
+    branch_id: &str,
+    event_type: &str,
+    title: Option<&str>,
+    summary: Option<&str>,
+    extensions_nexus_json: &str,
+) -> Result<AppendEventResult, NarrativeWriteError> {
+    // Validate world_id prefix
+    validate_id_prefix(world_id, "wld_", "world_id")?;
+
+    if !world_exists(pool, world_id).await? {
+        return Err(NarrativeWriteError::FkNotFound {
+            table: "world".to_string(),
+            id: world_id.to_string(),
+        });
+    }
+    let sequence_no = max_sequence_no(pool, world_id, branch_id).await?;
+
+    append_event_core(
+        pool,
+        world_id,
+        branch_id,
+        event_type,
+        title,
+        summary,
+        sequence_no,
+        Some(extensions_nexus_json),
+        None, // affected_key_block_ids_json — fork markers carry none
+        "canon",
+    )
+    .await
+}
+
 /// Shared preamble for the append family (qc1 S-2 consolidation): validates
 /// the `world_id` FK and returns whether a `narrative_worlds` row exists.
 ///
@@ -470,8 +531,9 @@ where
     Ok(max_seq.unwrap_or(-1) + 1)
 }
 
-/// Shared INSERT logic for [`append_event`], [`append_event_in_tx`], and
-/// [`append_event_canon_with_extensions_in_tx`].
+/// Shared INSERT logic for [`append_event`], [`append_event_in_tx`],
+/// [`append_event_canon_with_extensions_in_tx`], and
+/// [`append_event_canon_with_extensions`].
 ///
 /// `executor` must be an object that can run a single sqlx query (e.g. `&Pool`
 /// or `&mut Transaction`). Only one query is issued here, so the generic

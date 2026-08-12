@@ -2,8 +2,13 @@
 //!
 //! Implements the `NarrativeGateway` trait from `nexus-narrative` using
 //! the workspace `state.db` pool. Uses compile-time checked `sqlx` queries
-//! for all static SQL. Fork info is not stored in this V1.26 iteration
-//! (forks are in-memory only), so `is_fork` always returns `false`.
+//! for all static SQL. Local forks ARE stored since V1.60 — a fork is a
+//! `fork_created` marker event on a dedicated branch; branch-level lineage
+//! rides the marker's `extensions_nexus_json` (`fork_lineage`), surfaced via
+//! the timeline-events route's `extensions` field. The world-level fork fields
+//! (`is_fork`, `fork_branch_id`, `parent_world_id`, `forked_from_event_id`)
+//! stay hardcoded: they model the platform-only world fork, which has no local
+//! counterpart (the branch-level lineage is the carrier).
 //!
 //! # Test helpers
 //!

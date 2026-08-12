@@ -66,6 +66,7 @@
     "couldNotDeleteWork": "无法删除作品",
     "couldNotDeleteWorld": "无法删除世界",
     "couldNotCreateWorld": "无法创建世界",
+    "couldNotCreateFork": "无法创建分支",
     "couldNotUpdateFinding": "无法更新发现",
     "couldNotUpdateFindings": "无法批量更新发现",
     "couldNotScaffoldPreset": "无法生成预设模板",

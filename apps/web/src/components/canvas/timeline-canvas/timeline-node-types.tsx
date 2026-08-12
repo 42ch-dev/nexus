@@ -29,9 +29,10 @@
  * via `NodeChromeShell`. Surface spine stays `accent="worldkb"`. Layer
  * accents (brief / narrative) live on the body extract badges/icons.
  *
- * No `TimelineForkMarkerNode` exists in V1.122 / V1.123. Fork data is
- * reserved for an optional canvas-header badge from the `WorldState`
- * sidecar (V1.122 T3 chrome).
+ * No `TimelineForkMarkerNode` exists. Fork chrome is branch-level and
+ * marker-derived (V1.162 P2 T2): the `ForkLineageBadge` reads the active
+ * branch's canon `fork_created` marker (spec §6.6.3 carrier B) — NEVER the
+ * world-level WorldState fork fields.
  */
 import { memo } from 'react';
 import { useTranslation } from 'react-i18next';

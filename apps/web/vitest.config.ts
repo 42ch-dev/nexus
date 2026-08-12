@@ -70,6 +70,19 @@ export default defineConfig({
     // Keep the baseline fast and deterministic; no watch by default in CI.
     clearMocks: true,
     restoreMocks: true,
+    // V1.162 Phase 5: jsdom + msw + react-query + third-party components
+    // (e.g. @xyflow/react) can leave residual timers/sockets that prevent
+    // worker forks from exiting cleanly once their event loop drains. If the
+    // vitest main process is interrupted (subagent cancel, shell teardown,
+    // teardown timeout), worker forks become orphans that never terminate
+    // (observed: 27 orphaned ~600MB workers after a `pnpm test` run).
+    // `forceExit` makes the main process SIGKILL all workers the instant it
+    // finishes, guaranteeing no orphans regardless of residual handles.
+    // `maxWorkers` caps the fan-out so even a partial leak is bounded.
+    forceExit: true,
+    poolOptions: {
+      forks: { maxWorkers: '50%' },
+    },
     // Architectural-surface coverage baseline (R-V164-QC1-S1-P1 T5). Scope is
     // deliberately narrow — the adapter boundary, error parsing, theme/provider,
     // and the notification hook — because those are the surfaces P2 builds on.

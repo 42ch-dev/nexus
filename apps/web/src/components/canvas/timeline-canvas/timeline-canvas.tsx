@@ -65,12 +65,22 @@ import { LayerBreadcrumb } from '@/components/canvas/layer-breadcrumb';
 import { useCanvasSurface, type CanvasSurfaceQueryResult } from '@/components/canvas/use-canvas-surface';
 import { SemanticZoomBridge } from '@/components/canvas/use-semantic-zoom';
 import { useWorldKbGraph, usePatchWorldKbEntity } from '@/lib/canvas/use-world-kb-data';
-import { flattenPages, useComputeModules, useWorldTimelineEvents, useWorks } from '@/api/queries';
+import {
+  flattenPages,
+  useComputeModules,
+  useForkLineage,
+  useNarrativeWorlds,
+  useWorldTimelineEvents,
+  useWorks,
+} from '@/api/queries';
 import { useNexusClient } from '@/lib/client-context';
 import { SettingsModalContext } from '@/components/layout/settings-modal-context';
 import { LoadingState, ErrorState, EmptyState } from '@/components/ui/states';
 import { Button } from '@42ch/nexus-ui';
+import { useToast } from '@/lib/use-toast';
+import { shortId } from '@/lib/format';
 import type {
+  CreateForkResponse,
   WorkDetailResponse,
   WorkSummary,
   WorldKbGraphResponse,
@@ -92,6 +102,8 @@ import type { SceneBeatFixturePayload } from '../outline-canvas/graph-projection
 import { NleTimelineBandOverlay } from './nle-timeline-band-overlay';
 import { filterTimelineEntityNodes } from './nle-timeline-projection';
 import { EraCreateDialog } from './era-create-dialog';
+import { ForkCreateDialog } from './fork-create-dialog';
+import { ForkLineageBadge } from './fork-lineage-badge';
 
 export interface TimelineCanvasProps {
   worldId: string;
@@ -125,6 +137,16 @@ export interface TimelineCanvasProps {
  * honestly not rendered (the projection renders only what it fetched).
  */
 const TIMELINE_EVENTS_PROJECTION_CAP = 500;
+
+/**
+ * Bugbot 2 — root-branch fallback when `narrative_worlds.root_fork_branch_id`
+ * is unset. Mirrors the daemon's root resolution (`resolve_run_branch` /
+ * timeline-events root fallback in `compute_runs.rs` + `timeline_events.rs`).
+ * Root is otherwise represented as NO `?branch=` param; comparing against
+ * this id lets the parent hop normalize a root parent to `undefined` instead
+ * of writing the root id into the URL (the dual-representation bug).
+ */
+const ROOT_BRANCH_ID_FALLBACK = 'fbk_root';
 
 /**
  * V1.156 P1 fix-wave 1 (F3) — stable empty fixture payload for Worlds with
@@ -196,18 +218,118 @@ export function TimelineCanvas({ worldId, sceneBeatFixture }: TimelineCanvasProp
   const navigate = useNavigate();
   const graph = useWorldKbGraph(worldId);
   const patchEntity = usePatchWorldKbEntity(worldId);
+  const { toast } = useToast();
+
+  // ── V1.162 P2 T1 + fix wave W-1 — active branch context (PD-6
+  // enabler; LOCKED) ──────────────────────────────────────────────────────
+  //
+  // `activeBranchId` is the World Timeline's branch context: `undefined` =
+  // the World's root/default branch; a `fbk_…` id = the forked branch the
+  // canvas is showing. It is the ONLY branch state the canvas holds (no
+  // general branch switcher — plan Global Constraints) and threads into
+  // `useWorldTimelineEvents` below as the existing `branch_id` query param
+  // (no daemon change — the read route already honors it; the query key
+  // includes the filter, so a branch switch auto-fetches the new branch's
+  // events).
+  //
+  // W-1 fix (QC tri common blocker) — `?branch=` is the SSOT, mirroring
+  // the `?layer=` model below (~:509): the active branch is DERIVED from
+  // `searchParams` every render, so browser Back/Forward (history
+  // navigation) updates the rendered branch — the URL and the view can
+  // never diverge. `handleBranchChange` only writes the URL (`replace:
+  // false` keeps a history entry per hop — browser Back returns to the
+  // previous branch view). `undefined` = no param = the World's root.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const branchRaw = searchParams.get('branch');
+  const activeBranchId: string | undefined =
+    branchRaw && branchRaw.length > 0 ? branchRaw : undefined;
+  const handleBranchChange = useCallback(
+    (branchId: string | undefined) => {
+      const next = new URLSearchParams(searchParams);
+      if (branchId === undefined || branchId.length === 0) {
+        next.delete('branch');
+      } else {
+        next.set('branch', branchId);
+      }
+      setSearchParams(next, { replace: false });
+    },
+    [searchParams, setSearchParams],
+  );
+
+  // Bugbot 2 — the World's ROOT branch id, from the narrative-worlds DTO
+  // (`World.root_fork_branch_id`; daemon fallback `fbk_root` when unset).
+  // `handleOpenParentBranch` compares the parent against this so a hop to
+  // the World's root CLEARS `?branch=` (root = no param) instead of setting
+  // the root id — the degraded-badge guard (`forkLineageUnavailable`) must
+  // never see a truthy root `activeBranchId`. The shared worlds query key
+  // means the list is reused (not re-fetched) when the app already loaded it.
+  const worlds = useNarrativeWorlds();
+  const rootBranchId = useMemo(
+    () =>
+      worlds.data?.find((w) => w.world_id === worldId)?.root_fork_branch_id ??
+      ROOT_BRANCH_ID_FALLBACK,
+    [worlds.data, worldId],
+  );
 
   // ── V1.147 P2 T3 — compute events + module registry ──────────────────────
   //
   // The Narrative projection merges the World's canon compute_result log
   // events (T1 route) with the KB graph. The events query hard-filters
-  // `event_type=compute_result&status=canon` and omits `branch_id` so the
-  // daemon resolves the World's current branch (the canvas's existing
-  // world-state source). Accept invalidation flows through
-  // `queryKeys.timeline.all` (already wired in `useAcceptRun`), so an
-  // accepted Run's node appears without a manual refresh.
-  const timelineEvents = useWorldTimelineEvents(worldId);
+  // `event_type=compute_result&status=canon` and forwards the canvas's
+  // `activeBranchId` as `branch_id` (V1.162 P2 T1); when `undefined` the
+  // daemon resolves the World's current branch (root fallback). Accept
+  // invalidation flows through `queryKeys.timeline.all` (already wired in
+  // `useAcceptRun`), so an accepted Run's node appears without a manual
+  // refresh. PD-6: after a fork create, `handleBranchChange(new_branch_id)`
+  // changes the filter → a fresh query key → the forked branch's Timeline
+  // renders immediately (no extra click, no manual refetch).
+  const timelineEvents = useWorldTimelineEvents(worldId, {
+    branch_id: activeBranchId,
+  });
   const computeModules = useComputeModules();
+
+  // ── V1.162 P2 T2 + fix wave W-2 — read-only fork lineage chrome
+  // (carrier B) ───────────────────────────────────────────────────────────
+  //
+  // The chrome derives the ACTIVE branch's fork state from its
+  // `fork_created` canon marker (branch-level, spec §6.6.3) — never the
+  // world-level WorldState fork fields. The hook re-keys on branch change
+  // (same query-key mechanism as `useWorldTimelineEvents`), so after a
+  // PD-6 landing OR a parent hop the badge reflects the new branch without
+  // a manual refetch.
+  //
+  // W-2 fix — loading and error are NEVER collapsed into "not a fork":
+  // `isPending` (loading) keeps the chrome hidden (a root read returns
+  // zero markers → no chrome); an ERROR on a NON-ROOT branch renders a
+  // degraded badge ("fork — lineage unavailable") with a retry, so a
+  // transient marker-query failure can never remove the only in-canvas
+  // return path (PD-6 parent hop). Root reads hide on error too — the
+  // root carries no fork chrome to degrade.
+  const forkLineage = useForkLineage(worldId, activeBranchId);
+  const forkLineageUnavailable = forkLineage.isError && Boolean(activeBranchId);
+  const forkLineageData = useMemo(
+    () =>
+      forkLineageUnavailable
+        ? { is_fork: true }
+        : forkLineage.data ?? { is_fork: false },
+    [forkLineage.data, forkLineageUnavailable],
+  );
+  // One-hop parent hand-off (plan §2 branch-context lock): reuses T1's
+  // `handleBranchChange` so the timeline-events query re-keys to the
+  // parent branch and the parent Timeline renders immediately. No merge /
+  // edit / multi-branch workspace — parent hop ONLY.
+  //
+  // Bugbot 2 — a parent that IS the World's root branch hops to `undefined`
+  // (clears `?branch=`), never to the root id string: root is canonically
+  // NO param, and the degraded-badge guard treats any truthy
+  // `activeBranchId` as a non-root fork (a lineage read failure on a root
+  // `?branch=<rootId>` URL would otherwise render the degraded fork badge
+  // on the root Timeline).
+  const handleOpenParentBranch = useCallback(() => {
+    const parentId = forkLineageData.parent_branch_id;
+    if (!parentId) return;
+    handleBranchChange(parentId === rootBranchId ? undefined : parentId);
+  }, [forkLineageData.parent_branch_id, handleBranchChange, rootBranchId]);
 
   const eventsList = useMemo(
     () => flattenPages(timelineEvents.data),
@@ -269,14 +391,20 @@ export function TimelineCanvas({ worldId, sceneBeatFixture }: TimelineCanvasProp
 
   // Timeline-scoped Run Studio: World pre-filled via `?world=` (behavior
   // spec §1 P2 — context pre-fill + entry chrome, not a second studio).
+  // Bugbot 1 — when the canvas shows a FORKED branch, the entry ALSO
+  // pre-fills `?branch=<activeBranchId>` so the run request carries
+  // `branch_id` and compute run/accept writes the fork (not the world
+  // root). Root (undefined) → no branch param, unchanged.
   const onRunModule = useCallback(() => {
     settingsModal?.openSettings(
       'modules',
       undefined,
       undefined,
-      `?world=${encodeURIComponent(worldId)}`,
+      `?world=${encodeURIComponent(worldId)}${
+        activeBranchId ? `&branch=${encodeURIComponent(activeBranchId)}` : ''
+      }`,
     );
-  }, [settingsModal, worldId]);
+  }, [settingsModal, worldId, activeBranchId]);
 
   // Open Run from a Compute result node → Settings → Modules run detail
   // (deep link selects the module + opens the run inspector).
@@ -437,7 +565,6 @@ export function TimelineCanvas({ worldId, sceneBeatFixture }: TimelineCanvasProp
   // tracking graph changes (e.g., if the user clears all eras via World
   // KB, the default would flip to Narrative — a sticky `?layer=brief`
   // would prevent that).
-  const [searchParams, setSearchParams] = useSearchParams();
   const urlLayerRaw = searchParams.get('layer');
   const urlLayerOverride: TimelineLayer | null = useMemo(() => {
     if (
@@ -635,6 +762,53 @@ export function TimelineCanvas({ worldId, sceneBeatFixture }: TimelineCanvasProp
     [graph.data],
   );
 
+  // ── V1.162 P2 T1 — fork creation flow (World-Timeline-scoped) ────────────
+  //
+  // The fork-point picker entry lives on Compute result nodes: selecting a
+  // node opens the compute inspector, whose "Branch this world's timeline
+  // from here" affordance fires `handleCreateFork(eventId)` with the node's
+  // timeline event id. The parent branch is derived from the picked event's
+  // OWN `branch_id` (the event rendered from the current branch's events
+  // query — root when `activeBranchId` is undefined, else the fork branch).
+  const [forkDialogOpen, setForkDialogOpen] = useState(false);
+  const [pendingFork, setPendingFork] = useState<{
+    eventId: string;
+    branchId: string;
+    label?: string;
+  } | null>(null);
+
+  const handleCreateFork = useCallback(
+    (eventId: string) => {
+      const event = eventsList.find((e) => e.id === eventId);
+      if (!event) return; // defensive — the node rendered from eventsList
+      setPendingFork({
+        eventId,
+        branchId: event.branch_id,
+        label: event.title ?? undefined,
+      });
+      setForkDialogOpen(true);
+    },
+    [eventsList],
+  );
+
+  // PD-6 post-create landing (MANDATORY): on 200 the canvas switches the
+  // active branch context to the new fork's `branch_id`, which re-keys the
+  // `useWorldTimelineEvents` query → the forked branch's World Timeline
+  // renders immediately (no extra click). The success notice carries the
+  // label when provided, else the branch id. A toast-only parent landing is
+  // the rejected alternative (dead-ends the authoring loop — plan §2).
+  const handleForkCreated = useCallback(
+    (response: CreateForkResponse, label?: string) => {
+      handleBranchChange(response.branch_id);
+      toast({
+        variant: 'success',
+        title: t('timeline.forkCreateDialog.createdTitle'),
+        description: label ?? shortId(response.branch_id),
+      });
+    },
+    [handleBranchChange, t, toast],
+  );
+
   // Keep the adapter context current. The adapter object stays referentially
   // stable; only the values inside ctxRef.current change.
   //
@@ -677,6 +851,10 @@ export function TimelineCanvas({ worldId, sceneBeatFixture }: TimelineCanvasProp
     // Wired only when the Settings modal context exists (production always
     // provides it; isolated canvas tests degrade to read-only inspectors).
     onOpenRun: settingsModal ? onOpenRun : undefined,
+    // V1.162 P2 T1 — fork-point hand-off from the compute node inspector.
+    // Opens the fork-create dialog pre-seeded with the picked event (the
+    // fork point); always wired — the button only renders on compute nodes.
+    onCreateFork: handleCreateFork,
   };
 
   // When the user navigates to a different node, clear a stale validation
@@ -703,7 +881,14 @@ export function TimelineCanvas({ worldId, sceneBeatFixture }: TimelineCanvasProp
   // the merged compute log events. A World whose only Narrative content is an
   // accepted compute Run must render its Compute result node, not the
   // global empty state.
+  //
+  // V1.162 fix wave S-1 (qc3) — the events query is included in the
+  // loading gate: during a branch-switch refetch the re-keyed
+  // `useInfiniteQuery` has no data (`flattenPages → []`), so without this
+  // gate a World with zero KB entities would flash "This World's timeline
+  // is empty" + the run-module CTA on a branch that HAS events.
   const isEmpty =
+    !timelineEvents.isFetching &&
     ((!graph.data || (graph.data.entities ?? []).length === 0) &&
       eventsList.length === 0);
 
@@ -778,6 +963,24 @@ export function TimelineCanvas({ worldId, sceneBeatFixture }: TimelineCanvasProp
           !(activeLayer === 'brief' && surface.briefTimeBands !== null)
         }
         onRunModule={onRunModule}
+      />
+
+      {/* V1.162 P2 T2 — read-only fork lineage chrome. Renders only when
+          the ACTIVE branch carries a fork_created marker (`is_fork` —
+          marker-derived, NOT a world-level WorldState field). Shows the
+          parent branch + fork-point event read-only and offers the one-hop
+          "open parent branch" control. Mounted above the empty-state
+          branch so a freshly created (still empty) fork still tells the
+          author where they are + how to return (PD-6 landing context). */}
+      <ForkLineageBadge
+        lineage={forkLineageData}
+        unavailable={forkLineageUnavailable}
+        onRetry={
+          forkLineageUnavailable ? () => void forkLineage.refetch() : undefined
+        }
+        onOpenParent={
+          forkLineageData.parent_branch_id ? handleOpenParentBranch : undefined
+        }
       />
 
       {validationBanner && validationBanner.length > 0 ? (
@@ -980,6 +1183,26 @@ export function TimelineCanvas({ worldId, sceneBeatFixture }: TimelineCanvasProp
         onOpenChange={setEraCreateOpen}
         worldId={worldId}
         existingEras={existingEras}
+      />
+
+      {/* V1.162 P2 T1 — fork-create dialog (World Timeline only). Opened
+          from a compute node's "Branch this world's timeline from here";
+          the fork point is the picked event. On success `handleForkCreated`
+          lands on the forked branch (PD-6). */}
+      <ForkCreateDialog
+        open={forkDialogOpen}
+        onOpenChange={(open) => {
+          setForkDialogOpen(open);
+          // S-4 fix (qc3): clear the stale pending fork point when the
+          // dialog closes without success. Reopening always re-derives it
+          // via `handleCreateFork`, so nothing lingers between flows.
+          if (!open) setPendingFork(null);
+        }}
+        worldId={worldId}
+        parentBranchId={pendingFork?.branchId}
+        forkedFromEventId={pendingFork?.eventId ?? ''}
+        forkPointLabel={pendingFork?.label}
+        onSuccess={handleForkCreated}
       />
     </div>
   );

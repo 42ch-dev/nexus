@@ -1,0 +1,26 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/daemon-api/worlds/create-fork-request.schema.json",
+  "schema_version": 1,
+  "title": "Nexus CreateForkRequest",
+  "description": "Request body for POST /v1/daemon/worlds/:world_id/forks. The daemon resolves the active creator; clients never send ownership. Creates a local timeline fork — a new branch within the owned world diverging from the fork-point event on the stated parent branch.",
+  "type": "object",
+  "required": ["parent_branch_id", "forked_from_event_id"],
+  "properties": {
+    "parent_branch_id": {
+      "type": "string",
+      "description": "The branch the new fork diverges from (the world's root branch or an existing fork branch)."
+    },
+    "forked_from_event_id": {
+      "type": "string",
+      "description": "The event on the parent branch that is the fork point (branch head after which the new branch diverges)."
+    },
+    "label": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200,
+      "description": "Optional human-readable label for the new fork branch (1-200 chars when present)."
+    }
+  },
+  "additionalProperties": false
+}

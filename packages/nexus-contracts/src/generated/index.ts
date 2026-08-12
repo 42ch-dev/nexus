@@ -206,6 +206,8 @@ export const SCHEMA_VERSIONS: Record<string, number> = {
   SetActiveWorkspaceRequest: 1,
   SetActiveWorkspaceResponse: 1,
   WorkspaceSummary: 1,
+  CreateForkRequest: 1,
+  CreateForkResponse: 1,
   CreateWorldRequest: 1,
   CreateWorldResponse: 1,
   Creator: 1,

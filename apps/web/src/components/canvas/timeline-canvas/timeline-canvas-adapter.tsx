@@ -400,6 +400,16 @@ export interface TimelineCanvasAdapterContext {
    */
   onOpenRun?: (runId: string, moduleId: string) => void;
   /**
+   * V1.162 P2 T1 — fork-point hand-off from the compute node inspector.
+   * Fires with the compute event's timeline event id when the author
+   * activates "Branch this world's timeline from here" on a Compute result
+   * node. The orchestrator opens the fork-create dialog pre-seeded with
+   * that fork point (deriving the parent branch from the event's own
+   * `branch_id`). Undefined when the compute inspector is read-only (tests
+   * without wiring) — the button hides.
+   */
+  onCreateFork?: (eventId: string) => void;
+  /**
    * V1.156 P1 T1 — bound Works' Scene/Beat fixture (Moment-on-World
    * carrier). The `WorkOutline` wire exposes no scenes/beats today (the
    * Moment layer is a read/projection of Work-owned Moments into the World

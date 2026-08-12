@@ -85,7 +85,9 @@ impl Capability for ForkCreate {
     }
 
     fn input_schema(&self) -> &'static str {
-        r#"{"type":"object","properties":{"world_id":{"type":"string"},"creator_id":{"type":"string"},"parent_branch_id":{"type":"string"},"forked_from_event_id":{"type":"string"},"label":{"type":"string"}},"required":["world_id","creator_id","parent_branch_id","forked_from_event_id"],"additionalProperties":false}"#
+        // label bounds mirror the HTTP schema (create-fork-request.schema.json,
+        // 1–200 chars when present) — orchestration/preset surface parity.
+        r#"{"type":"object","properties":{"world_id":{"type":"string"},"creator_id":{"type":"string"},"parent_branch_id":{"type":"string"},"forked_from_event_id":{"type":"string"},"label":{"type":"string","minLength":1,"maxLength":200}},"required":["world_id","creator_id","parent_branch_id","forked_from_event_id"],"additionalProperties":false}"#
     }
 
     fn output_schema(&self) -> &'static str {
@@ -140,13 +142,28 @@ impl Capability for ForkCreate {
             "forked from {}/{} ({label})",
             parsed.parent_branch_id, parsed.forked_from_event_id
         );
-        let marker = nexus_local_db::narrative_write::append_event(
+        // Carrier B (plan 2026-08-12-v1.162-p1-fork-backend-foundation): the
+        // marker is written `status=canon` with structured lineage in
+        // `extensions_nexus_json` (`fork_lineage`). Canon status reflects that
+        // a fork creation is a committed structural fact and makes the marker
+        // findable in the canon-default timeline read; lineage surfaces via
+        // `TimelineEventInfo.extensions` on the existing timeline-events route.
+        let lineage_json = json!({
+            "fork_lineage": {
+                "parent_branch_id": &parsed.parent_branch_id,
+                "forked_from_event_id": &parsed.forked_from_event_id,
+                "label": &label,
+            }
+        })
+        .to_string();
+        let marker = nexus_local_db::narrative_write::append_event_canon_with_extensions(
             pool,
             &parsed.world_id,
             &new_branch_id,
             "fork_created",
             Some(&label),
             Some(&marker_summary),
+            &lineage_json,
         )
         .await
         .map_err(|e| CapabilityError::Internal(format!("fork marker append: {e}")))?;
@@ -278,5 +295,125 @@ mod tests {
             .await
             .unwrap_err();
         assert!(matches!(err, CapabilityError::InputInvalid(_)));
+    }
+
+    #[tokio::test]
+    async fn forked_branch_marker_carries_lineage() {
+        let (pool, _dir) = fresh_pool().await;
+        seed_creator(&pool, "ctr_a").await;
+        let (world_id, parent_branch, fork_point) = seed_world_with_event(&pool, "ctr_a").await;
+
+        let cap = ForkCreate::with_pool(pool.clone());
+        let out = cap
+            .run(json!({
+                "world_id": world_id,
+                "creator_id": "ctr_a",
+                "parent_branch_id": parent_branch,
+                "forked_from_event_id": fork_point,
+                "label": "alt-ending",
+            }))
+            .await
+            .unwrap();
+        let new_branch = out["branch_id"].as_str().unwrap();
+
+        // SAFETY: test-only SELECT against known narrative_timeline_events schema.
+        let rows: Vec<(String, String, String)> = sqlx::query_as(
+            "SELECT status, extensions_nexus_json, event_type \
+             FROM narrative_timeline_events \
+             WHERE world_id = ? AND branch_id = ? AND event_type = 'fork_created'",
+        )
+        .bind(&world_id)
+        .bind(new_branch)
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+
+        assert_eq!(rows.len(), 1, "exactly one fork_created marker expected");
+        let (status, extensions_json, event_type) = &rows[0];
+        assert_eq!(event_type, "fork_created");
+        assert_eq!(status, "canon");
+        let extensions: Value = serde_json::from_str(extensions_json).unwrap();
+        assert_eq!(
+            extensions["fork_lineage"]["parent_branch_id"],
+            parent_branch
+        );
+        assert_eq!(
+            extensions["fork_lineage"]["forked_from_event_id"],
+            fork_point
+        );
+        assert_eq!(extensions["fork_lineage"]["label"], "alt-ending");
+    }
+
+    #[tokio::test]
+    async fn root_branch_has_no_fork_marker() {
+        let (pool, _dir) = fresh_pool().await;
+        seed_creator(&pool, "ctr_a").await;
+        let (world_id, parent_branch, _fork_point) = seed_world_with_event(&pool, "ctr_a").await;
+
+        // SAFETY: test-only SELECT against known narrative_timeline_events schema.
+        let count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM narrative_timeline_events \
+             WHERE world_id = ? AND branch_id = ? AND event_type = 'fork_created'",
+        )
+        .bind(&world_id)
+        .bind(&parent_branch)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+        assert_eq!(count, 0, "root branch must have no fork_created marker");
+    }
+
+    #[tokio::test]
+    async fn fork_marker_is_canon() {
+        let (pool, _dir) = fresh_pool().await;
+        seed_creator(&pool, "ctr_a").await;
+        let (world_id, parent_branch, fork_point) = seed_world_with_event(&pool, "ctr_a").await;
+
+        let cap = ForkCreate::with_pool(pool.clone());
+        let out = cap
+            .run(json!({
+                "world_id": world_id,
+                "creator_id": "ctr_a",
+                "parent_branch_id": parent_branch,
+                "forked_from_event_id": fork_point,
+            }))
+            .await
+            .unwrap();
+        let new_branch = out["branch_id"].as_str().unwrap();
+
+        // The marker must be findable in a canon-filtered read — exactly the
+        // SQL the timeline-events route runs (`status` defaults to `canon`,
+        // `event_type` exact-match; see `list_timeline_events_page`). This
+        // verifies the Narrative-layer read does not choke on the
+        // `fork_created` event type (plan risk: canon-merge/overview
+        // interaction).
+        let rows = nexus_local_db::narrative_gateway::list_timeline_events_page(
+            &pool,
+            &world_id,
+            Some(new_branch),
+            Some("canon"),
+            Some("fork_created"),
+            None,
+            10,
+        )
+        .await
+        .unwrap();
+        assert_eq!(rows.len(), 1, "fork marker must be written status=canon");
+        assert_eq!(rows[0].status, "canon");
+        assert_eq!(rows[0].event_type, "fork_created");
+        let extensions: Value =
+            serde_json::from_str(rows[0].extensions_nexus_json.as_deref().unwrap()).unwrap();
+        assert_eq!(
+            extensions["fork_lineage"]["parent_branch_id"],
+            parent_branch
+        );
+        assert_eq!(
+            extensions["fork_lineage"]["forked_from_event_id"],
+            fork_point
+        );
+        // Default-label contract: the caller omitted `label`, so the marker
+        // must carry the canonical `"fork"` default.
+        assert_eq!(extensions["fork_lineage"]["label"], "fork");
     }
 }
