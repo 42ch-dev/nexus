@@ -113,6 +113,20 @@ export function TimelineComputeInspector({
             : undefined
         }
       />
+      {/* V1.162 P2 T1 — fork-point affordance (World Timeline only). The
+          picked compute event is the fork point; the orchestrator opens the
+          fork-create dialog (PD-6 landing). Hidden when no wiring (read-only
+          test mounts). Copy follows the PD-5 lazy-branch model. */}
+      {ctx.onCreateFork ? (
+        <button
+          type="button"
+          onClick={() => ctx.onCreateFork?.(payload.eventId)}
+          data-testid="compute-inspector-fork-here"
+          className="mt-3 w-full rounded-control border border-gray-alpha-400 bg-background-100 px-3 py-2 text-copy-13 text-gray-900 hover:bg-gray-alpha-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-700"
+        >
+          {t('timeline.computeInspector.forkHere')}
+        </button>
+      ) : null}
     </div>
   );
 }

@@ -21,6 +21,8 @@ import type {
   ChapterDetail,
   ChapterOutline,
   CountPendingReviewsResponse,
+  CreateForkRequest,
+  CreateForkResponse,
   CreateWorkRequest,
   CreateWorkResponse,
   CreateWorldRequest,
@@ -573,6 +575,14 @@ export class BrowserClient implements NexusClient {
     return this.get<ListTimelineEventsResponse>(
       `/v1/daemon/worlds/${encodeURIComponent(worldId)}/timeline/events`,
       query,
+    );
+  }
+
+  // ── World timeline forks (V1.162 P1 T2 + P2 T1) ─────────────────────────
+  createFork(worldId: string, request: CreateForkRequest): Promise<CreateForkResponse> {
+    return this.post<CreateForkResponse>(
+      `/v1/daemon/worlds/${encodeURIComponent(worldId)}/forks`,
+      request,
     );
   }
 

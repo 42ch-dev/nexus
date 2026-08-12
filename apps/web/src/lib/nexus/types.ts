@@ -38,6 +38,8 @@ import type {
   ChapterDetail,
   ChapterOutline,
   CountPendingReviewsResponse,
+  CreateForkRequest,
+  CreateForkResponse,
   CreateWorkRequest,
   CreateWorkResponse,
   CreateWorldRequest,
@@ -497,6 +499,17 @@ export interface NexusClient {
     worldId: string,
     query?: ListTimelineEventsQuery,
   ): Promise<ListTimelineEventsResponse>;
+  /**
+   * `POST /v1/daemon/worlds/:world_id/forks` — create a local timeline fork
+   * (V1.162 P1 T2 route, thin delegate to the `fork.create` capability): a
+   * new `branch_id` within the owned World diverging from the picked
+   * fork-point event on the stated parent branch. The response carries the
+   * new `branch_id` (+ parent + fork-point + `created_at`) which the World
+   * Timeline consumes immediately for the PD-6 post-create landing.
+   * 422 (`invalid_input`) = bad / non-existent fork point; 403 = foreign
+   * World (should not occur from an owned World Timeline).
+   */
+  createFork(worldId: string, request: CreateForkRequest): Promise<CreateForkResponse>;
 
   // ── Creator Memory review-loop (V1.78) ─────────────────────────────────────
   // All memory endpoints are creator-scoped: the daemon rejects a `creator_id`
@@ -640,6 +653,8 @@ export interface NexusClient {
 export type {
   CapabilityInfo,
   CountPendingReviewsResponse,
+  CreateForkRequest,
+  CreateForkResponse,
   CreatorDetail,
   DeletePendingReviewResponse,
   FindingDetailResponse,

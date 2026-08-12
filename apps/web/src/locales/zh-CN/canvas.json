@@ -807,7 +807,22 @@
       "affectedTitle": "受影响的知识",
       "runTitle": "运行",
       "paramsTitle": "参数",
-      "openRun": "打开运行"
+      "openRun": "打开运行",
+      "forkHere": "从此处分支此世界的时间线"
+    },
+    "forkCreateDialog": {
+      "title": "从此处分支此世界的时间线",
+      "description": "基于所选事件创建此世界时间线的新分支。原时间线保持不变。",
+      "forkPointLabel": "分支起点",
+      "labelLabel": "分支标签（可选）",
+      "labelPlaceholder": "例如：另一个结局",
+      "create": "创建分支",
+      "creating": "创建中…",
+      "missingForkPoint": "请先选择一个要分支的事件。",
+      "missingBranchContext": "此世界尚无分支上下文。",
+      "invalidForkPoint": "守护进程无法从此事件分支——请选择其他分支起点后重试。",
+      "genericError": "创建分支失败，请重试。",
+      "createdTitle": "分支已创建"
     },
     "runModuleEntry": {
       "button": "运行模块",

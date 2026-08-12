@@ -22,6 +22,7 @@ import type {
   ChapterContentQuery,
   ChapterSummary,
   CountPendingReviewsResponse,
+  CreateForkRequest,
   CreateWorkRequest,
   CreateWorldRequest,
   FindingDetailResponse,
@@ -1435,10 +1436,15 @@ export interface WorldTimelineComputeEventsQuery {
  * Cursor-paginated per-World timeline log events for the Timeline canvas
  * Narrative merge. Hard-filtered to the machine-written `compute_result`
  * family in `canon` state (plan Global Constraints merge discipline; the T1
- * route defaults status to canon anyway). `branch_id` is intentionally NOT
- * sent by the canvas — the daemon defaults to the World's current branch
- * (root fallback), which is the canvas's existing world-state source. Pages
- * map to the shared `CursorPage` shape so `flattenPages` works.
+ * route defaults status to canon anyway). Pages map to the shared
+ * `CursorPage` shape so `flattenPages` works.
+ *
+ * `branch_id` is the caller-controlled branch context (V1.162 P2 T1): the
+ * canvas passes its local `activeBranchId` (`undefined` → the World's
+ * root/default branch; a `fbk_…` id → the forked branch being shown). The
+ * query key includes the filter, so a branch switch creates a fresh cache
+ * entry and the forked branch's events load automatically — the PD-6
+ * post-create landing needs no manual refetch.
  *
  * Invalidation: `useAcceptRun` / `useDiscardRun` already invalidate
  * `queryKeys.timeline.all`, which prefix-matches `['timeline','events',…]` —
@@ -1476,6 +1482,54 @@ export function useWorldTimelineEvents(
       lastPage.pagination.has_more ? lastPage.pagination.next_cursor : undefined,
     enabled: Boolean(worldId),
     staleTime: 10_000,
+  });
+}
+
+// ── World timeline forks (V1.162 P1 T2 + P2 T1) ────────────────────────────
+
+/**
+ * True when a daemon error is the fork-create 422 (`invalid_input` — bad /
+ * non-existent fork point on the stated parent branch). The create dialog
+ * surfaces this INLINE and the author stays on the parent Timeline (plan
+ * §2 error handling); every other failure follows the standard error toast.
+ */
+export function isForkInvalidInputError(
+  error: unknown,
+): error is NexusClientError & { status: 422; code: 'invalid_input' } {
+  return (
+    error instanceof NexusClientError &&
+    error.status === 422 &&
+    error.code === 'invalid_input'
+  );
+}
+
+/**
+ * `POST /v1/daemon/worlds/:world_id/forks` — create a local timeline fork
+ * from a picked fork-point event on the current branch (V1.162 P2 T1
+ * creation flow). The response carries the new `branch_id`, which the World
+ * Timeline consumes immediately for the PD-6 landing
+ * (`setActiveBranchId(response.branch_id)` → the timeline-events query
+ * keyed on the new branch).
+ *
+ * Invalidation is intentionally NOT wired here: the forked branch's events
+ * query has never run (fresh cache key), so the landing refetch is
+ * automatic; the parent branch's cache stays valid.
+ *
+ * 422 (`invalid_input`) is handled inline by the create dialog and is
+ * deliberately NOT toasted here (no duplicate error); 403 / 5xx / network
+ * failures follow the standard error toast, and the dialog mirrors a
+ * generic inline message so it never closes silently on failure.
+ */
+export function useCreateFork() {
+  const client = useNexusClient();
+  const errorToast = useErrorToast();
+  return useMutation({
+    mutationFn: (vars: { worldId: string; request: CreateForkRequest }) =>
+      client.createFork(vars.worldId, vars.request),
+    onError: (error) => {
+      if (isForkInvalidInputError(error)) return;
+      errorToast(error, 'error.couldNotCreateFork');
+    },
   });
 }
 
