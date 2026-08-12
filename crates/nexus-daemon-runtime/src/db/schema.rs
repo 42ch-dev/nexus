@@ -24,15 +24,6 @@ impl Schema {
         db_path: &std::path::Path,
     ) -> Result<sqlx::SqlitePool, nexus_local_db::LocalDbError> {
         let pool = nexus_local_db::init_pool(db_path).await?;
-        // R-V159P1-002: legacy `outbox` table deprecation notice belongs on
-        // the PRODUCTION init path (not the `#[cfg(test)]` DDL-assertion
-        // block where it previously lived). The table is still created by
-        // the initial migration but has zero active Rust consumers; phased
-        // removal is planned for V1.61+ (outbox-consolidation.md §6).
-        tracing::warn!(
-            "legacy outbox table deprecated — zero active consumers; phased removal planned post-V1.59. \
-             See .mstar/specs/outbox-consolidation.md §6."
-        );
         Ok(pool)
     }
 }
@@ -71,12 +62,6 @@ mod tests {
         );
 
         // Daemon-only tables
-        // DEPRECATED (V1.59 P1 T3): legacy `outbox` table has zero active consumers
-        // and is planned for phased removal (see outbox-consolidation.md §6).
-        // Table is still created by initial migration but no Rust code reads/writes it.
-        // R-V159P1-002: the deprecation `tracing::warn!` lives on the production
-        // `Schema::init` path now; this block keeps only the DDL-presence assertion.
-        assert!(table_names.contains(&"outbox"), "missing legacy outbox");
         assert!(table_names.contains(&"auth_tokens"), "missing auth_tokens");
         assert!(
             table_names.contains(&"acp_tool_audit_log"),
