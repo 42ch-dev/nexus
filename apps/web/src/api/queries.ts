@@ -1576,7 +1576,7 @@ export function useForkLineage(
       // `event_type` is re-checked so a stray non-marker row can never be
       // misread as a fork (the derivation stays honest about "marker").
       const marker = res.items[0];
-      if (!marker || marker.event_type !== 'fork_created') return { is_fork: false };
+      if (marker?.event_type !== 'fork_created') return { is_fork: false };
       return forkLineageOf(marker);
     },
     enabled: Boolean(worldId),
