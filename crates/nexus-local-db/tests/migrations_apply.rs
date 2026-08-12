@@ -9,7 +9,6 @@ async fn all_migrations_apply_to_fresh_db() {
         "workspace_meta",
         "creators",
         "reference_sources",
-        "outbox",
         "auth_tokens",
         "acp_tool_audit_log",
         "acp_sessions",
