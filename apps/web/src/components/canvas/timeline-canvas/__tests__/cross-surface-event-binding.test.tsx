@@ -199,7 +199,7 @@ function crossSurfaceJourney(
       }),
     ),
     http.get('/v1/daemon/works/:workId', ({ params }) => {
-      const detail = (over.details ?? {})[String(params.workId)];
+      const detail = over.details?.[String(params.workId)];
       return HttpResponse.json(
         detail ? workDetail(String(params.workId), detail.world_id) : workDetail(String(params.workId), null),
       );
@@ -209,7 +209,7 @@ function crossSurfaceJourney(
       if (over.outlineDelayMs !== undefined) {
         await delay(over.outlineDelayMs);
       }
-      const o = (over.outlines ?? {})[String(params.workId)];
+      const o = over.outlines?.[String(params.workId)];
       return HttpResponse.json(o ?? outline(String(params.workId), []));
     }),
     http.get('/v1/daemon/compute/modules', () =>
