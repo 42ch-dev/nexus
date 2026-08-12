@@ -6,6 +6,7 @@
 **Scope**: `nexus` OSS repository only.
 **Created**: 2026-04-21 · **Last updated**: 2026-08-12
 
+- **2026-08-12**: §2.1 PD-01 row reconciled (V1.162 P1 T3) — "platform-only" clarified to mean the **community/social fork** only (cross-creator, publish; `nexus-platform`); the **local authoring fork** (`nexus.fork.create` + V1.162 daemon `POST /v1/daemon/worlds/:world_id/forks` + P2 UI; no sync/publish) is **in-scope and ships V1.162**. Doc-aligns-to-shipped-reality — not new policy (matches `fork.rs:8-15` + product-locks PD-2 + entity-scope-model §6.6.1/§6.6.2).
 - **2026-08-12**: V1.162 active — quick-status + §5 Active iteration updated (Fork spine completion); DF-V1122-FORK-UI §2.3 row history/target advanced to V1.162 (create + read-only lineage; fork-merge stays BL-01). §2.1 PD-01 wording reconciliation deferred to V1.162 P1 T3.
 - **2026-08-11**: BL-10 + DF-80 registered (SillyTavern absorption-roadmap `03`/`05` gap cross-check); V1.158 P3 spec-corpus hygiene; V1.158 shipped (PR #208 `f23d0c22`).
 - **2026-08-11**: V1.160 tracker hygiene — archived 5 stale shipped rows (FEAT-WASM-COMPUTE V1.61 · DF-V1122-HARNESS-RENAME V1.156 · DF-V1123-WORLD-MOMENT V1.156 · DF-V1123-WORK-BRIEF V1.156 · DF-V1123-ERA-TAXONOMY V1.159+V1.160) from §2.3 open → shipped archive; V1.160 shipped (ERA-TAXONOMY completion).
@@ -35,7 +36,7 @@
 
 | ID | Decision | Notes |
 |----|----------|-------|
-| PD-01 | **World fork is platform-only** | Community/social feature; **no** local `nexus42` CLI or daemon fork. |
+| PD-01 | **World fork is platform-only** | "Platform-only" = **community/social fork** (cross-creator sharing / publishing a fork to a community) — out of this repo (`nexus-platform`). **Local authoring fork** (single creator branches an owned world via `nexus.fork.create` + V1.162 daemon `POST /v1/daemon/worlds/:world_id/forks` + P2 UI; no sync, no cross-creator, no platform publish) is **in-scope and ships V1.162**. |
 | PD-05 | Cloud sync is **not** a short-term iteration focus | CLI `sync push/pull` unchanged; orchestration `sync.pull`/`sync.push` stubs remain Open. |
 | PD-08 | Preset orchestration + Agentic Design Patterns | See FL-D. |
 | PD-09 | **Third-party narrative reasoning prefers L1 SPOKE Connect over Daemon HTTP / Canvas** | Integrators that own their own UI + preset orchestration and only need headless narrative ops consume Nexus via **spoke-connect** → **NexusAdapter** `orchestrate_*` (Adapter-full). Daemon HTTP + Control Room + Canvas remain the **creator-facing** product surface (Product-full). Adapter-full ≠ Product-full: Connect does **not** expose Harness UI, ACP-as-server, or Canvas. Nexus stays an ACP **client**; no MCP server revival (DF-49 cancelled). Capability-token / world scoping required before exposing Adapter-full to multi-tenant end users. Delivery tracked under FL-R / DF-72 / DF-73. |
