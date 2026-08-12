@@ -824,6 +824,13 @@
       "genericError": "创建分支失败，请重试。",
       "createdTitle": "分支已创建"
     },
+    "forkLineage": {
+      "badge": "此分支是分叉",
+      "parentLabel": "父分支",
+      "forkPointLabel": "分叉自事件",
+      "openParent": "打开父分支",
+      "openParentAria": "打开父分支时间线"
+    },
     "runModuleEntry": {
       "button": "运行模块",
       "aria": "为此世界打开运行工作室"

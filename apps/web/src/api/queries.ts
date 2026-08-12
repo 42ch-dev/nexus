@@ -1485,7 +1485,104 @@ export function useWorldTimelineEvents(
   });
 }
 
-// ── World timeline forks (V1.162 P1 T2 + P2 T1) ────────────────────────────
+// ── World timeline forks (V1.162 P1 T2 + P2 T1/T2) ─────────────────────────
+
+/**
+ * Branch-level fork lineage (V1.162 P2 T2 — carrier B, spec §6.6.3).
+ *
+ * Derived client-side from the active branch's `fork_created` canon marker
+ * (0-or-1 rows on the existing timeline-events route):
+ *   - `is_fork` = marker present (NOT a world-level WorldState field).
+ *   - `parent_branch_id` / `forked_from_event_id` / `label?` come from the
+ *     marker's `extensions.fork_lineage` (P1 carrier B write).
+ *
+ * The chrome reads THIS shape only — never `WorldState.{is_fork,
+ * parent_world_id}` (those stay world-level/platform-fork, untouched).
+ */
+export interface ForkLineage {
+  is_fork: boolean;
+  parent_branch_id?: string;
+  forked_from_event_id?: string;
+  label?: string;
+}
+
+/**
+ * Narrow the marker's `extensions.fork_lineage` namespace. Mirrors the
+ * adapter's `computeProvenanceOf` leniency: unknown / malformed shapes
+ * degrade to absent fields, never a fabricated lineage. `is_fork` is the
+ * marker's presence (the caller has already selected the `fork_created`
+ * row); the lineage fields ride inside the extension.
+ */
+interface ForkLineageExtensionShape {
+  parent_branch_id?: unknown;
+  forked_from_event_id?: unknown;
+  label?: unknown;
+}
+
+function forkLineageOf(marker: TimelineEventInfo): ForkLineage {
+  const ext = marker.extensions;
+  if (ext === null || typeof ext !== 'object') return { is_fork: true };
+  const lineage = (ext as Record<string, unknown>).fork_lineage;
+  if (lineage === null || typeof lineage !== 'object') return { is_fork: true };
+  const l = lineage as ForkLineageExtensionShape;
+  return {
+    is_fork: true,
+    parent_branch_id: readForkLineageString(l.parent_branch_id),
+    forked_from_event_id: readForkLineageString(l.forked_from_event_id),
+    label: readForkLineageString(l.label),
+  };
+}
+
+function readForkLineageString(value: unknown): string | undefined {
+  return typeof value === 'string' && value.length > 0 ? value : undefined;
+}
+
+/**
+ * Read-only fork lineage for the World Timeline chrome (V1.162 P2 T2).
+ *
+ * Fetches the active branch's `fork_created` marker via the EXISTING
+ * timeline-events route (`event_type=fork_created&status=canon`; the
+ * daemon defaults `branch_id` to the World's current branch when
+ * `branchId` is undefined, so the root read works without special-casing).
+ * 0-or-1 marker row → `{ is_fork, parent_branch_id?, forked_from_event_id?,
+ * label? }` (spec §6.6.3 carrier B; `is_fork` = marker present).
+ *
+ * Consumes the generated `TimelineEventInfo` DTO only — no hand-written
+ * lineage wire shape. The query key carries the branch filter, so a branch
+ * switch (PD-6 landing or the chrome's parent hop) auto-refetches the new
+ * branch's marker — same mechanism as `useWorldTimelineEvents`.
+ */
+export function useForkLineage(
+  worldId: string | undefined,
+  branchId: string | undefined,
+) {
+  const client = useNexusClient();
+  return useQuery({
+    queryKey: queryKeys.timeline.events.list(worldId ?? '', {
+      branch_id: branchId,
+      event_type: 'fork_created',
+      status: 'canon',
+      limit: 1,
+    }),
+    queryFn: async (): Promise<ForkLineage> => {
+      const res = await client.getTimelineEvents(worldId!, {
+        branch_id: branchId,
+        event_type: 'fork_created',
+        status: 'canon',
+        limit: 1,
+      });
+      // `is_fork` = a `fork_created` MARKER row present. The query is
+      // hard-filtered to `event_type=fork_created`, and the DTO's
+      // `event_type` is re-checked so a stray non-marker row can never be
+      // misread as a fork (the derivation stays honest about "marker").
+      const marker = res.items[0];
+      if (!marker || marker.event_type !== 'fork_created') return { is_fork: false };
+      return forkLineageOf(marker);
+    },
+    enabled: Boolean(worldId),
+    staleTime: 10_000,
+  });
+}
 
 /**
  * True when a daemon error is the fork-create 422 (`invalid_input` — bad /

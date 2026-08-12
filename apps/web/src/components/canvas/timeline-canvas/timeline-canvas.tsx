@@ -65,7 +65,7 @@ import { LayerBreadcrumb } from '@/components/canvas/layer-breadcrumb';
 import { useCanvasSurface, type CanvasSurfaceQueryResult } from '@/components/canvas/use-canvas-surface';
 import { SemanticZoomBridge } from '@/components/canvas/use-semantic-zoom';
 import { useWorldKbGraph, usePatchWorldKbEntity } from '@/lib/canvas/use-world-kb-data';
-import { flattenPages, useComputeModules, useWorldTimelineEvents, useWorks } from '@/api/queries';
+import { flattenPages, useComputeModules, useForkLineage, useWorldTimelineEvents, useWorks } from '@/api/queries';
 import { useNexusClient } from '@/lib/client-context';
 import { SettingsModalContext } from '@/components/layout/settings-modal-context';
 import { LoadingState, ErrorState, EmptyState } from '@/components/ui/states';
@@ -96,6 +96,7 @@ import { NleTimelineBandOverlay } from './nle-timeline-band-overlay';
 import { filterTimelineEntityNodes } from './nle-timeline-projection';
 import { EraCreateDialog } from './era-create-dialog';
 import { ForkCreateDialog } from './fork-create-dialog';
+import { ForkLineageBadge } from './fork-lineage-badge';
 
 export interface TimelineCanvasProps {
   worldId: string;
@@ -252,6 +253,30 @@ export function TimelineCanvas({ worldId, sceneBeatFixture }: TimelineCanvasProp
     branch_id: activeBranchId,
   });
   const computeModules = useComputeModules();
+
+  // ── V1.162 P2 T2 — read-only fork lineage chrome (carrier B) ───────────
+  //
+  // The chrome derives the ACTIVE branch's fork state from its
+  // `fork_created` canon marker (branch-level, spec §6.6.3) — never the
+  // world-level WorldState fork fields. The hook re-keys on branch change
+  // (same query-key mechanism as `useWorldTimelineEvents`), so after a
+  // PD-6 landing OR a parent hop the badge reflects the new branch without
+  // a manual refetch. `data ?? { is_fork: false }` keeps the badge hidden
+  // while the marker query is loading/errored — a root branch read returns
+  // zero markers and renders no chrome.
+  const forkLineage = useForkLineage(worldId, activeBranchId);
+  const forkLineageData = useMemo(
+    () => forkLineage.data ?? { is_fork: false },
+    [forkLineage.data],
+  );
+  // One-hop parent hand-off (plan §2 branch-context lock): reuses T1's
+  // `handleBranchChange` so the timeline-events query re-keys to the
+  // parent branch and the parent Timeline renders immediately. No merge /
+  // edit / multi-branch workspace — parent hop ONLY.
+  const handleOpenParentBranch = useCallback(() => {
+    if (!forkLineageData.parent_branch_id) return;
+    handleBranchChange(forkLineageData.parent_branch_id);
+  }, [forkLineageData.parent_branch_id, handleBranchChange]);
 
   const eventsList = useMemo(
     () => flattenPages(timelineEvents.data),
@@ -872,6 +897,20 @@ export function TimelineCanvas({ worldId, sceneBeatFixture }: TimelineCanvasProp
           !(activeLayer === 'brief' && surface.briefTimeBands !== null)
         }
         onRunModule={onRunModule}
+      />
+
+      {/* V1.162 P2 T2 — read-only fork lineage chrome. Renders only when
+          the ACTIVE branch carries a fork_created marker (`is_fork` —
+          marker-derived, NOT a world-level WorldState field). Shows the
+          parent branch + fork-point event read-only and offers the one-hop
+          "open parent branch" control. Mounted above the empty-state
+          branch so a freshly created (still empty) fork still tells the
+          author where they are + how to return (PD-6 landing context). */}
+      <ForkLineageBadge
+        lineage={forkLineageData}
+        onOpenParent={
+          forkLineageData.parent_branch_id ? handleOpenParentBranch : undefined
+        }
       />
 
       {validationBanner && validationBanner.length > 0 ? (

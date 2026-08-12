@@ -835,6 +835,13 @@
       "genericError": "Could not create the branch. Try again.",
       "createdTitle": "Branch created"
     },
+    "forkLineage": {
+      "badge": "This branch is a fork",
+      "parentLabel": "Parent branch",
+      "forkPointLabel": "Forked from event",
+      "openParent": "Open parent branch",
+      "openParentAria": "Open the parent branch timeline"
+    },
     "runModuleEntry": {
       "button": "Run Module",
       "aria": "Open the Run Studio for this World"

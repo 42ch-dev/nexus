@@ -195,12 +195,20 @@ function computeTimelineJourney(over: { initialEvents?: unknown[]; kbEntities?: 
       }),
     ),
     http.get('/v1/daemon/worlds/:worldId/timeline/events', ({ request }) => {
-      state.lastEventsUrl = request.url;
       state.eventsFetchCount += 1;
+      // V1.162 P2 T2 — the fork-lineage chrome reads the SAME route with
+      // its own `event_type=fork_created&limit=1` filter (separate hook).
+      // The contract assertions below target the canvas's compute_result
+      // projection query, so only that family updates `lastEventsUrl`;
+      // the fork_created read keeps its own filter and must not overwrite
+      // the slot the assertions inspect.
+      const url = new URL(request.url);
+      if (url.searchParams.get('event_type') === 'compute_result') {
+        state.lastEventsUrl = request.url;
+      }
       // Page the store by the daemon's limit/cursor contract so
       // `has_more: true` + a second page can be exercised (review F1
       // regression: the canvas auto-fetches remaining pages).
-      const url = new URL(request.url);
       const limit = Number(url.searchParams.get('limit')) || 100;
       const cursorRaw = url.searchParams.get('cursor');
       const cursor = cursorRaw ? Number(cursorRaw) : 0;
