@@ -1605,8 +1605,8 @@ export function isForkInvalidInputError(
  * from a picked fork-point event on the current branch (V1.162 P2 T1
  * creation flow). The response carries the new `branch_id`, which the World
  * Timeline consumes immediately for the PD-6 landing
- * (`setActiveBranchId(response.branch_id)` → the timeline-events query
- * keyed on the new branch).
+ * (`handleBranchChange(response.branch_id)` — URL-as-SSOT `?branch=` →
+ * the timeline-events query keyed on the new branch).
  *
  * Invalidation is intentionally NOT wired here: the forked branch's events
  * query has never run (fresh cache key), so the landing refetch is

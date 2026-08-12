@@ -11,7 +11,8 @@
  * inline error slot, submit-disabled-while-pending, `onSuccess` hand-off):
  *   - On success the dialog closes and `onSuccess(response)` fires with the
  *     full `CreateForkResponse` — the orchestrator owns the PD-6 landing
- *     (setActiveBranchId + success notice), so the dialog stays dumb.
+ *     (`handleBranchChange(response.branch_id)` — URL-as-SSOT `?branch=` +
+ *     success notice), so the dialog stays dumb.
  *   - 422 (`invalid_input` — bad / non-existent fork point) surfaces
  *     INLINE and the dialog stays open: the author remains on the parent
  *     Timeline, no branch switch (plan §2 error handling).

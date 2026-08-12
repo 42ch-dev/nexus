@@ -13,8 +13,9 @@
  *
  * Dumb presentational component: the orchestrator passes the already-
  * derived `ForkLineage` + an `onOpenParent` callback wired to T1's
- * branch-context mechanism (`setActiveBranchId(parent_branch_id)` → the
- * timeline-events query re-keys → the parent Timeline renders).
+ * branch-context mechanism (`handleBranchChange(parent_branch_id)` — the
+ * URL-as-SSOT `?branch=` → the timeline-events query re-keys → the parent
+ * Timeline renders).
  */
 import { useTranslation } from 'react-i18next';
 import { GitFork } from 'lucide-react';

@@ -119,9 +119,13 @@ function forkJourney(over: { initialEvents?: unknown[] } = {}) {
       return HttpResponse.json({ items, has_more: false });
     }),
     http.post('/v1/daemon/worlds/:worldId/forks', async ({ request }) => {
-      if (state.forkDelayMs) await delay(state.forkDelayMs);
+      // Record the request BEFORE the artificial delay: the double-submit
+      // test needs the count visible while the mutation is still pending.
+      // (Recording after `delay` would only observe resolved mutations —
+      // the W-3 false-pass window.)
       const body = (await request.json()) as Record<string, unknown>;
       state.forkCalls.push(body);
+      if (state.forkDelayMs) await delay(state.forkDelayMs);
       if (state.forkStatus !== 200) {
         return HttpResponse.json(state.forkErrorBody ?? {}, { status: state.forkStatus });
       }
@@ -299,7 +303,9 @@ describe('TimelineCanvas fork creation (V1.162 P2 T1)', () => {
     await user.click(screen.getByTestId('compute-inspector-fork-here'));
     await screen.findByTestId('fork-create-submit');
 
-    // Submit once — the mutation is now pending (POST delayed in MSW).
+    // Submit once — the mutation is now pending: `forkCalls` is recorded
+    // before the MSW delay, so `waitFor` resolves WHILE the POST is still
+    // in flight and the dialog is still open.
     const form = screen.getByTestId('fork-create-submit').closest('form')!;
     fireEvent.submit(form);
     await waitFor(() => expect(state.forkCalls).toHaveLength(1));
@@ -309,11 +315,11 @@ describe('TimelineCanvas fork creation (V1.162 P2 T1)', () => {
     // The in-handler `isPending` guard must swallow it: exactly ONE POST
     // (duplicate fork branches are the W-3 bug).
     fireEvent.submit(form);
-    // Settle window (same pattern as modules-page/worlds-page tests) so a
-    // buggy second POST — equally 100 ms-delayed in MSW — has landed if
-    // the guard is missing.
+    // Settle window > the 100 ms MSW delay: a buggy second POST would be
+    // recorded (before its own delay) inside this window, so a missing
+    // guard now fails the length-1 assertion.
     await new Promise((resolve) => {
-      setTimeout(resolve, 50);
+      setTimeout(resolve, 150);
     });
     expect(state.forkCalls).toHaveLength(1);
 
