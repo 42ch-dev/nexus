@@ -29,7 +29,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { http, HttpResponse } from 'msw';
+import { delay, http, HttpResponse } from 'msw';
 import type { MutableRefObject } from 'react';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router';
 import type { Node } from '@xyflow/react';
@@ -168,6 +168,8 @@ function crossSurfaceJourney(
     works?: ReturnType<typeof workSummary>[];
     details?: Record<string, { world_id: string | null }>;
     outlines?: Record<string, WorkOutline>;
+    /** QC3 F-2 (fix wave) — artificial outline latency for the reactive-CTA test. */
+    outlineDelayMs?: number;
   } = {},
 ) {
   // AC-V1163-7 write-path recorder — any patch reaching the World Timeline's
@@ -176,6 +178,9 @@ function crossSurfaceJourney(
   // assert this array stays empty after CTA navigation, pinning that the
   // cross-surface affordance is navigation-only.
   const writes: string[] = [];
+  // QC3 F-1 (fix wave) — outline GET counter. The selection-lazy fan-out
+  // contract: zero outline reads until a Narrative event is selected.
+  const outlineGets = { count: 0 };
   const handlers = [
     http.get('/v1/daemon/worlds/:worldId/kb/graph', () =>
       HttpResponse.json({
@@ -199,7 +204,11 @@ function crossSurfaceJourney(
         detail ? workDetail(String(params.workId), detail.world_id) : workDetail(String(params.workId), null),
       );
     }),
-    http.get('/v1/daemon/works/:workId/outline', ({ params }) => {
+    http.get('/v1/daemon/works/:workId/outline', async ({ params }) => {
+      outlineGets.count += 1;
+      if (over.outlineDelayMs !== undefined) {
+        await delay(over.outlineDelayMs);
+      }
       const o = (over.outlines ?? {})[String(params.workId)];
       return HttpResponse.json(o ?? outline(String(params.workId), []));
     }),
@@ -222,7 +231,7 @@ function crossSurfaceJourney(
       return HttpResponse.json({ error: 'unexpected write' }, { status: 409 });
     }),
   ];
-  return { handlers, writes };
+  return { handlers, writes, outlineGets };
 }
 
 function CrossSurfaceAppRoutes() {
@@ -244,14 +253,14 @@ function CrossSurfaceAppRoutes() {
 function renderCrossSurfaceApp(
   over: Parameters<typeof crossSurfaceJourney>[0] = {},
   initial = ['/worlds/world-7/timeline'],
-): { writes: string[] } {
-  const { handlers, writes } = crossSurfaceJourney(over);
+): { writes: string[]; outlineGets: { count: number } } {
+  const { handlers, writes, outlineGets } = crossSurfaceJourney(over);
   useHandlers(...handlers);
   renderInApp(<CrossSurfaceAppRoutes />, {
     client: new BrowserClient(),
     initialRouterEntries: initial,
   });
-  return { writes };
+  return { writes, outlineGets };
 }
 
 /** Select the KB event row via the sortable alt-view (established pattern). */
@@ -277,6 +286,7 @@ describe('V1.163 Task 2 — World inspector CTA slots (event-level)', () => {
           ctxRef={ctxRefWith({
             boundWorkId: 'work-1',
             boundWorkEventId: 'evt-work-1',
+            boundWorkEventWorkId: 'work-1',
             onViewInWorkTimeline: () => undefined,
           })}
         />
@@ -287,7 +297,31 @@ describe('V1.163 Task 2 — World inspector CTA slots (event-level)', () => {
     expect(cta).not.toBeNull();
     expect(cta).toHaveTextContent('View in Work Timeline');
     // The CTA target carries the event id when an event-level match exists
-    // (PD-5 state 1: deep-link `?layer=narrative&event=…`).
+    // (PD-5 state 1: deep-link `?layer=narrative&event=…`), and the work id
+    // of the navigation target (QC1 W-001).
+    expect(cta).toHaveAttribute('data-event-id', 'evt-work-1');
+    expect(cta).toHaveAttribute('data-work-id', 'work-1');
+  });
+
+  it('QC1 W-001: data-work-id carries the PD-7 winner when it differs from the surface fallback Work', () => {
+    render(
+      <MemoryRouter>
+        <TimelineInspector
+          node={timelineEventNode()}
+          ctxRef={ctxRefWith({
+            // Surface-level fallback (most-recent realizing Work)…
+            boundWorkId: 'work-surface',
+            // …vs the event-level navigation target (PD-7 winner).
+            boundWorkEventId: 'evt-work-1',
+            boundWorkEventWorkId: 'work-event',
+            onViewInWorkTimeline: () => undefined,
+          })}
+        />
+      </MemoryRouter>,
+    );
+
+    const cta = screen.getByTestId('timeline-view-in-work-timeline');
+    expect(cta).toHaveAttribute('data-work-id', 'work-event');
     expect(cta).toHaveAttribute('data-event-id', 'evt-work-1');
   });
 
@@ -395,7 +429,12 @@ describe('V1.163 Task 2 — World → Work event deep-link (AC-V1163-2/4/5, PD-5
 
     await selectEventRow(user);
     const cta = await screen.findByTestId('timeline-view-in-work-timeline');
-    expect(cta).toHaveAttribute('data-event-id', 'evt-work-1');
+    // The reverse fan-out is selection-lazy (QC3 F-1): the outline read
+    // starts on selection, so the event-level bind settles asynchronously —
+    // wait for it (the F-2 reactive inspector upgrades the CTA in place).
+    await waitFor(() => expect(cta).toHaveAttribute('data-event-id', 'evt-work-1'));
+    // QC1 W-001 — the DOM work id matches the navigation target.
+    expect(cta).toHaveAttribute('data-work-id', 'work-1');
 
     fireEvent.click(cta);
 
@@ -485,7 +524,8 @@ describe('V1.163 Task 2 — World → Work event deep-link (AC-V1163-2/4/5, PD-5
 
     await selectEventRow(user);
     const cta = await screen.findByTestId('timeline-view-in-work-timeline');
-    expect(cta).toHaveAttribute('data-event-id', 'evt-new');
+    await waitFor(() => expect(cta).toHaveAttribute('data-event-id', 'evt-new'));
+    expect(cta).toHaveAttribute('data-work-id', 'work-new');
 
     fireEvent.click(cta);
 
@@ -517,7 +557,93 @@ describe('V1.163 Task 2 — World → Work event deep-link (AC-V1163-2/4/5, PD-5
 
     await selectEventRow(user);
     const cta = await screen.findByTestId('timeline-view-in-work-timeline');
-    expect(cta).toHaveAttribute('data-event-id', 'evt-aa');
+    await waitFor(() => expect(cta).toHaveAttribute('data-event-id', 'evt-aa'));
+    expect(cta).toHaveAttribute('data-work-id', 'work-b');
+  });
+
+  it('QC3 F-1: outline fan-out is selection-lazy — zero outline GETs until a Narrative event is selected', async () => {
+    const user = userEvent.setup();
+    const { outlineGets } = renderCrossSurfaceApp({
+      works: [workSummary('work-1', '2026-08-02T00:00:00Z')],
+      details: { 'work-1': { world_id: 'world-7' } },
+      outlines: {
+        'work-1': outline('work-1', [
+          { event_id: 'evt-work-1', title: 'Coronation beat', world_event_id: KB_EVENT_ID },
+        ]),
+      },
+    });
+
+    // Mount + works/detail fan-out settle — the reverse outline fan-out
+    // must NOT fire while nothing is selected (was up to N=20 eager GETs).
+    await screen.findByTestId('timeline-canvas');
+    expect(outlineGets.count).toBe(0);
+
+    // Selecting the Narrative event flips the gate → the fan-out fetches.
+    await selectEventRow(user);
+    await waitFor(() => expect(outlineGets.count).toBe(1));
+  });
+
+  it('QC3 F-2: CTA upgrades in place when the outline resolves after the event was selected (no reselect)', async () => {
+    const user = userEvent.setup();
+    renderCrossSurfaceApp({
+      works: [workSummary('work-1', '2026-08-02T00:00:00Z')],
+      details: { 'work-1': { world_id: 'world-7' } },
+      outlines: {
+        'work-1': outline('work-1', [
+          { event_id: 'evt-work-1', title: 'Coronation beat', world_event_id: KB_EVENT_ID },
+        ]),
+      },
+      // Outline resolution lands well after the selection is applied.
+      outlineDelayMs: 200,
+    });
+
+    await selectEventRow(user);
+    // The CTA renders surface-level while the outline is in flight…
+    const cta = await screen.findByTestId('timeline-view-in-work-timeline');
+    expect(cta).not.toHaveAttribute('data-event-id');
+    // …and upgrades to the event-level deep-link when the outline settles —
+    // WITHOUT the user reselecting (reactive inspector, QC3 F-2).
+    await waitFor(() => expect(cta).toHaveAttribute('data-event-id', 'evt-work-1'));
+    expect(cta).toHaveAttribute('data-work-id', 'work-1');
+  });
+
+  it('QC1 W-001: data-work-id carries the PD-7 winner when it differs from the surface fallback Work', async () => {
+    const user = userEvent.setup();
+    renderCrossSurfaceApp({
+      works: [
+        // Most-recent realizing Work → the V1.123 surface-level fallback.
+        workSummary('work-new', '2026-08-01T00:00:00Z'),
+        // Less-recent Work whose outline realizes the selected event → PD-7
+        // winner (the ONLY candidate).
+        workSummary('work-old', '2026-01-01T00:00:00Z'),
+      ],
+      details: {
+        'work-new': { world_id: 'world-7' },
+        'work-old': { world_id: 'world-7' },
+      },
+      outlines: {
+        'work-new': outline('work-new', [
+          { event_id: 'evt-other', title: 'Other beat', world_event_id: 'kb-other' },
+        ]),
+        'work-old': outline('work-old', [
+          { event_id: 'evt-old', title: 'Old beat', world_event_id: KB_EVENT_ID },
+        ]),
+      },
+    });
+
+    await selectEventRow(user);
+    const cta = await screen.findByTestId('timeline-view-in-work-timeline');
+    await waitFor(() => expect(cta).toHaveAttribute('data-event-id', 'evt-old'));
+    // The DOM contract matches the ACTUAL navigation target (PD-7 winner),
+    // not the surface-level most-recent fallback.
+    expect(cta).toHaveAttribute('data-work-id', 'work-old');
+
+    fireEvent.click(cta);
+    await waitFor(() =>
+      expect(screen.getByTestId('location-probe').textContent).toBe(
+        '/works/work-old/timeline?layer=narrative&event=evt-old',
+      ),
+    );
   });
 });
 
@@ -552,6 +678,53 @@ describe('V1.163 Task 2 — inbound `?event=` focus on the World Timeline (AC-V1
       ),
     );
     // The unknown id must NOT fabricate a selection (no inspector opens).
+    expect(screen.queryByTestId('timeline-inspector-title')).toBeNull();
+  });
+
+  it('QC1 W-003: inbound ?event= without ?layer coerces the World Timeline to Narrative', async () => {
+    const eraEntity = kbEntity({
+      key_block_id: 'kb-era-1',
+      block_type: 'era',
+      canonical_name: 'Age of Embers',
+    });
+    // No `layer` param — the era entity makes Brief the era-derived default.
+    renderCrossSurfaceApp(
+      { kbEntities: [KB_EVENT, KB_CONTEXT, eraEntity] },
+      ['/worlds/world-7/timeline?event=' + KB_EVENT_ID],
+    );
+
+    // The inbound event deep-link coerces the URL to Narrative so the
+    // `entity:kb-evt-1` node exists in the projection…
+    await waitFor(() =>
+      expect(screen.getByTestId('timeline-canvas')).toHaveAttribute(
+        'data-active-layer',
+        'narrative',
+      ),
+    );
+    // …and the focus effect selects the event (inspector opens).
+    await screen.findByTestId('timeline-inspector-title');
+    const probe = screen.getByTestId('location-probe').textContent;
+    expect(probe).toContain('event=' + KB_EVENT_ID);
+    expect(probe).toContain('layer=narrative');
+  });
+
+  it('QC2 F-001: inbound ?event= targeting a context entity id must NOT select it (event-only focus)', async () => {
+    // KB_CONTEXT is a character entity — its node id shares the `entity:`
+    // prefix (`entity:kb-char-1`) but its layoutHint is 'context', not
+    // 'event'. A crafted deep-link must not fabricate a selection of it.
+    renderCrossSurfaceApp(
+      {},
+      ['/worlds/world-7/timeline?layer=narrative&event=kb-char-1'],
+    );
+
+    await screen.findByTestId('timeline-canvas');
+    await waitFor(() =>
+      expect(screen.getByTestId('timeline-canvas')).toHaveAttribute(
+        'data-active-layer',
+        'narrative',
+      ),
+    );
+    // No inspector opens — the context entity was NOT selected.
     expect(screen.queryByTestId('timeline-inspector-title')).toBeNull();
   });
 });
@@ -672,6 +845,12 @@ describe('V1.163 Task 4 — PD-5 three-state matrix, World → Work (table-drive
       }
 
       const ctaEl = await screen.findByTestId('timeline-view-in-work-timeline');
+      // Selection-lazy fan-out (QC3 F-1): rows expecting an event-level URL
+      // must wait for the outline to settle and the CTA to upgrade (F-2)
+      // before clicking — otherwise the click navigates surface-level.
+      if (expectedUrl?.includes('event=')) {
+        await waitFor(() => expect(ctaEl).toHaveAttribute('data-event-id'));
+      }
       fireEvent.click(ctaEl);
 
       await waitFor(() =>

@@ -240,7 +240,12 @@ export function TimelineInspector({ node, ctxRef }: TimelineInspectorProps) {
         <button
           type="button"
           data-testid="timeline-view-in-work-timeline"
-          data-work-id={ctx.boundWorkId}
+          // QC1 W-001 (fix wave) — `data-work-id` must match the Work the
+          // click ACTUALLY navigates to: the PD-7 winner when an event-level
+          // bind exists, else the V1.123 surface-level fallback. In
+          // multi-Work Worlds the two can differ — the DOM contract follows
+          // the navigation target, not the surface fallback.
+          data-work-id={ctx.boundWorkEventWorkId ?? ctx.boundWorkId}
           // V1.163 P1 Task 2 — when the selected World event has an
           // event-level bind (`boundWorkEventId`), the CTA target deep-links
           // to the specific Work outline event

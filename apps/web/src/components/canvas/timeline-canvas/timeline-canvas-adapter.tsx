@@ -399,6 +399,15 @@ export interface TimelineCanvasAdapterContext {
    */
   boundWorkEventId?: string;
   /**
+   * V1.163 P1 QC fix-wave (QC1 W-001) — PD-7 winning WORK id for the
+   * event-level deep-link. When `boundWorkEventId` is set, the CTA
+   * navigates to THIS work (the PD-7 winner), which can differ from the
+   * surface-level fallback `boundWorkId` in multi-Work Worlds. Exposed so
+   * the CTA's `data-work-id` matches the actual navigation target. Undefined
+   * → the surface-level `boundWorkId` applies (V1.123 semantics preserved).
+   */
+  boundWorkEventWorkId?: string;
+  /**
    * V1.123 P3 Task 4 — cross-surface navigation hand-off. Fires when the
    * user clicks "View in Work Timeline" on a World Timeline Narrative event.
    * The orchestrator navigates to `/works/:workId/timeline?layer=narrative`

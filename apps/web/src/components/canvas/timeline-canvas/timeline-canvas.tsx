@@ -494,25 +494,10 @@ export function TimelineCanvas({ worldId, sceneBeatFixture }: TimelineCanvasProp
     return sorted[0].workId;
   }, [realizingWorks]);
 
-  // V1.163 P1 Task 2 — event-level reverse resolve carrier: a `WorkOutline`
-  // read per realizing Work (the capped candidate set), so the orchestrator
-  // can scan `timeline_events[].world_event_id` for the selected World event
-  // (architect lock — reverse fan-out cap N=20 reuses the V1.123 P3 fan-out).
-  // The query key is the SHARED outline detail key (`queryKeys.outline
-  // .detail`) — the Work Timeline surface's `useWorkOutline` hook reads the
-  // same cache entry, so the fan-out costs at most one outline fetch per
-  // Work per session.
-  const workOutlineQueries = useQueries({
-    queries: realizingWorks.map(({ workId }) => ({
-      queryKey: queryKeys.outline.detail(workId),
-      queryFn: (): Promise<WorkOutline> => nexusClient.getWorkOutline(workId),
-      staleTime: 30_000,
-    })),
-  });
-
   // Cross-surface navigation hand-off is composed below `useCanvasSurface`
   // (V1.163 P1 Task 2 — the event-level target is derived from the CURRENT
-  // selection, so the callback must read the projected `surface`).
+  // selection, so the callback must read the projected `surface`). The
+  // reverse outline fan-out lives there too (QC3 F-1 — selection-lazy).
   //
   // Captured conflict info (T4) — set by the mutation `onError` when the
   // daemon returns 409 / 422. The node ref lets the modal re-submit on
@@ -587,6 +572,10 @@ export function TimelineCanvas({ worldId, sceneBeatFixture }: TimelineCanvasProp
   // KB, the default would flip to Narrative — a sticky `?layer=brief`
   // would prevent that).
   const urlLayerRaw = searchParams.get('layer');
+  // V1.163 P1 Task 2 — inbound event deep-link param. Read here (with the
+  // layer state) so the QC1 W-003 layer-coercion effect and the inbound
+  // focus effect share ONE source of truth for the `?event=` value.
+  const eventParamRaw = searchParams.get('event');
   const urlLayerOverride: TimelineLayer | null = useMemo(() => {
     if (
       urlLayerRaw === 'brief' ||
@@ -606,6 +595,27 @@ export function TimelineCanvas({ worldId, sceneBeatFixture }: TimelineCanvasProp
   }, [graph.data]);
 
   const activeLayer: TimelineLayer = urlLayerOverride ?? defaultLayer;
+
+  // QC1 W-003 (fix wave) — inbound `?event=` layer coercion. Product
+  // deep-links always pair `?event=` with `?layer=narrative` (PD-6; both
+  // CTA directions emit both params). A hand-edited URL or bookmark that
+  // omits `layer` lands on the era-derived default — Brief on era Worlds —
+  // where the `entity:<key_block_id>` node does not exist in the projection
+  // (honest but weak empty focus, AC-V1163-3). Coerce the URL once per
+  // inbound event value so the Narrative projection renders the node. The
+  // one-shot ref (keyed on the event value) ensures a LATER user layer
+  // choice is never overridden by this effect.
+  const inboundEventParam = eventParamRaw && eventParamRaw.length > 0 ? eventParamRaw : null;
+  const inboundLayerCoercedRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!inboundEventParam) return;
+    if (inboundLayerCoercedRef.current === inboundEventParam) return;
+    inboundLayerCoercedRef.current = inboundEventParam;
+    if (searchParams.get('layer') === 'narrative') return;
+    const next = new URLSearchParams(searchParams);
+    next.set('layer', 'narrative');
+    setSearchParams(next, { replace: true });
+  }, [inboundEventParam, searchParams, setSearchParams]);
 
   // Layer swap callback — single source of truth for layer changes from
   // the layer tabs, the breadcrumb, and the semantic zoom bridge. Writes
@@ -661,6 +671,32 @@ export function TimelineCanvas({ worldId, sceneBeatFixture }: TimelineCanvasProp
 
   const surface = useCanvasSurface(adapter, surfaceQuery);
 
+  // V1.163 P1 Task 2 — event-level reverse resolve carrier: a `WorkOutline`
+  // read per realizing Work (the capped candidate set), so the orchestrator
+  // can scan `timeline_events[].world_event_id` for the selected World event
+  // (architect lock — reverse fan-out cap N=20 reuses the V1.123 P3 fan-out).
+  // The query key is the SHARED outline detail key (`queryKeys.outline
+  // .detail`) — the Work Timeline surface's `useWorkOutline` hook reads the
+  // same cache entry, so the fan-out costs at most one outline fetch per
+  // Work per session.
+  //
+  // QC3 F-1 (fix wave) — the fan-out is SELECTION-LAZY, not eager-on-mount.
+  // The reads are consumed only by `boundWorkEventTarget` below, which
+  // requires a selected Narrative event (`layoutHint === 'event'`); gating
+  // the queries on that selection means a World Timeline mount with no
+  // selection performs ZERO outline GETs (previously up to N=20 per mount).
+  // On selection the gate flips, the fan-out fetches, and the F-2 reactive
+  // inspector below re-renders the open CTA when the data settles.
+  const outlineFanOutEnabled = surface.selectedNode?.data.layoutHint === 'event';
+  const workOutlineQueries = useQueries({
+    queries: realizingWorks.map(({ workId }) => ({
+      queryKey: queryKeys.outline.detail(workId),
+      queryFn: (): Promise<WorkOutline> => nexusClient.getWorkOutline(workId),
+      staleTime: 30_000,
+      enabled: outlineFanOutEnabled,
+    })),
+  });
+
   // ── V1.163 P1 Task 2 — event-level reverse resolve (World → Work) ────────
   //
   // The World Timeline inspector shows a Narrative event (a `block_type=event`
@@ -714,6 +750,26 @@ export function TimelineCanvas({ worldId, sceneBeatFixture }: TimelineCanvasProp
   }, [workOutlineQueries, realizingWorks, surface.selectedNode]);
 
   const boundWorkEventId = boundWorkEventTarget?.eventId;
+  // QC1 W-001 (fix wave) — the PD-7 winning WORK id. The CTA navigates to
+  // THIS work when `boundWorkEventId` is set; in multi-Work Worlds it can
+  // differ from the surface-level fallback `boundWorkId` (most-recent
+  // realizing Work). Carried through ctxRef so the CTA's `data-work-id`
+  // matches the actual navigation target.
+  const boundWorkEventWorkId = boundWorkEventTarget?.workId;
+
+  // QC3 F-2 (fix wave) — reactive inspector element. The shared
+  // `useCanvasSurface` hook memoizes the inspector on `[selectedNode,
+  // adapter]`; a LATE outline resolution mutates `ctxRef.current`
+  // (`boundWorkEventId` / `boundWorkEventWorkId`) without changing either
+  // dep, so the open inspector element would not re-render (the CTA stays
+  // surface-level until the user reselects). Re-create the element here
+  // keyed on the bind value so the open inspector upgrades its CTA in
+  // place when the outline settles. The element reads the freshest ctxRef
+  // at render time, so no other wiring changes.
+  const inspector = useMemo(() => {
+    if (!surface.selectedNode) return null;
+    return adapter.renderInspector?.(surface.selectedNode) ?? null;
+  }, [surface.selectedNode, adapter, boundWorkEventId]);
 
   // Cross-surface navigation hand-off. Composed via `useCallback`; the
   // adapter context ref captures the latest closure so the inspector's CTA
@@ -751,9 +807,7 @@ export function TimelineCanvas({ worldId, sceneBeatFixture }: TimelineCanvasProp
   // user selection is never fought by a re-running effect: once the deep-link
   // selection has been applied (or the id is unknown), the effect stays quiet
   // until the `?event=` value itself changes.
-  const eventParamRaw = searchParams.get('event');
-  const inboundEventNodeId =
-    eventParamRaw && eventParamRaw.length > 0 ? nodeIdOf(eventParamRaw) : null;
+  const inboundEventNodeId = inboundEventParam ? nodeIdOf(inboundEventParam) : null;
   const appliedInboundFocusRef = useRef<string | null>(null);
   useEffect(() => {
     if (!inboundEventNodeId) return;
@@ -764,8 +818,15 @@ export function TimelineCanvas({ worldId, sceneBeatFixture }: TimelineCanvasProp
       appliedInboundFocusRef.current = inboundEventNodeId;
       return;
     }
-    const exists = surface.nodes.some((n) => n.id === inboundEventNodeId);
-    if (!exists) return; // unknown id — no fabricated node (AC-V1163-3)
+    // QC2 F-001 (fix wave): the inbound focus targets Narrative EVENT nodes
+    // only (AC-V1163-3 — "focuses the named event"). The shared `entity:`
+    // node-id prefix is also used by context entities and Brief-era nodes —
+    // a crafted `?event=<context-entity-id>` must not select those. Same
+    // `layoutHint === 'event'` discriminator `boundWorkEventTarget` uses.
+    const exists = surface.nodes.some(
+      (n) => n.id === inboundEventNodeId && n.data.layoutHint === 'event',
+    );
+    if (!exists) return; // unknown / non-event id — no fabricated selection
     const changes = surface.nodes.map((n) => ({
       type: 'select' as const,
       id: n.id,
@@ -986,6 +1047,10 @@ export function TimelineCanvas({ worldId, sceneBeatFixture }: TimelineCanvasProp
     // outline event; the inspector's CTA deep-links to it. Undefined → the
     // V1.123 surface-level fallback (`?layer=narrative` only) applies.
     boundWorkEventId,
+    // QC1 W-001 (fix wave) — PD-7 winning WORK id for the event-level
+    // deep-link (can differ from `boundWorkId` in multi-Work Worlds), so
+    // the CTA's `data-work-id` matches the actual navigation target.
+    boundWorkEventWorkId,
     onViewInWorkTimeline: boundWorkId ? onViewInWorkTimeline : undefined,
     // V1.147 P2 T3 — Open Run hand-off from the compute node inspector.
     // Wired only when the Settings modal context exists (production always
@@ -1221,9 +1286,9 @@ export function TimelineCanvas({ worldId, sceneBeatFixture }: TimelineCanvasProp
             <div className="rounded-card border border-gray-alpha-400 bg-background-100 p-4 shadow-elevation-1">
               {surface.briefTimeBands}
             </div>
-            {surface.inspector ? (
+            {inspector ? (
               <div className="rounded-card border border-gray-alpha-400 bg-background-100 p-4 shadow-popover">
-                {surface.inspector}
+                {inspector}
               </div>
             ) : null}
           </div>
@@ -1235,9 +1300,9 @@ export function TimelineCanvas({ worldId, sceneBeatFixture }: TimelineCanvasProp
       ) : showAltView ? (
         <div className="grid gap-3 lg:grid-cols-[1fr_360px]">
           {surface.altView}
-          {surface.inspector ? (
+          {inspector ? (
             <div className="rounded-card border border-gray-alpha-400 bg-background-100 p-4 shadow-popover">
-              {surface.inspector}
+              {inspector}
             </div>
           ) : null}
         </div>
@@ -1284,9 +1349,9 @@ export function TimelineCanvas({ worldId, sceneBeatFixture }: TimelineCanvasProp
               onLayerChange={handleLayerChange}
               chain={{ coarseLayer: 'brief', fineLayer: 'narrative' }}
             />
-            {surface.inspector ? (
+            {inspector ? (
               <div className="pointer-events-auto absolute right-3 top-3 w-[340px] max-w-[calc(100%-1.5rem)] rounded-card border border-gray-alpha-400 bg-background-100 p-4 shadow-popover">
-                {surface.inspector}
+                {inspector}
               </div>
             ) : null}
           </CanvasShell>
