@@ -839,8 +839,13 @@
       "badge": "This branch is a fork",
       "parentLabel": "Parent branch",
       "forkPointLabel": "Forked from event",
+      "labelLabel": "Label",
       "openParent": "Open parent branch",
-      "openParentAria": "Open the parent branch timeline"
+      "openParentAria": "Open the parent branch timeline",
+      "unavailableBadge": "Fork — lineage unavailable",
+      "unavailableDetail": "Could not load this branch's lineage.",
+      "retry": "Retry",
+      "retryAria": "Retry loading the branch lineage"
     },
     "runModuleEntry": {
       "button": "Run Module",

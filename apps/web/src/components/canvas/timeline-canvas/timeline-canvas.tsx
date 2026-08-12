@@ -203,7 +203,8 @@ export function TimelineCanvas({ worldId, sceneBeatFixture }: TimelineCanvasProp
   const patchEntity = usePatchWorldKbEntity(worldId);
   const { toast } = useToast();
 
-  // ── V1.162 P2 T1 — active branch context (PD-6 enabler; LOCKED) ─────────
+  // ── V1.162 P2 T1 + fix wave W-1 — active branch context (PD-6
+  // enabler; LOCKED) ──────────────────────────────────────────────────────
   //
   // `activeBranchId` is the World Timeline's branch context: `undefined` =
   // the World's root/default branch; a `fbk_…` id = the forked branch the
@@ -212,20 +213,21 @@ export function TimelineCanvas({ worldId, sceneBeatFixture }: TimelineCanvasProp
   // `useWorldTimelineEvents` below as the existing `branch_id` query param
   // (no daemon change — the read route already honors it; the query key
   // includes the filter, so a branch switch auto-fetches the new branch's
-  // events). Mirrored to `?branch=fbk_…` (dropped on root) so the active
-  // branch survives reload + is shareable; local state stays the source of
-  // truth (plan §2). `replace: false` keeps a history entry per hop —
-  // browser Back returns to the previous branch view.
+  // events).
+  //
+  // W-1 fix (QC tri common blocker) — `?branch=` is the SSOT, mirroring
+  // the `?layer=` model below (~:509): the active branch is DERIVED from
+  // `searchParams` every render, so browser Back/Forward (history
+  // navigation) updates the rendered branch — the URL and the view can
+  // never diverge. `handleBranchChange` only writes the URL (`replace:
+  // false` keeps a history entry per hop — browser Back returns to the
+  // previous branch view). `undefined` = no param = the World's root.
   const [searchParams, setSearchParams] = useSearchParams();
-  const [activeBranchId, setActiveBranchIdState] = useState<string | undefined>(
-    () => {
-      const branchRaw = searchParams.get('branch');
-      return branchRaw && branchRaw.length > 0 ? branchRaw : undefined;
-    },
-  );
+  const branchRaw = searchParams.get('branch');
+  const activeBranchId: string | undefined =
+    branchRaw && branchRaw.length > 0 ? branchRaw : undefined;
   const handleBranchChange = useCallback(
     (branchId: string | undefined) => {
-      setActiveBranchIdState(branchId);
       const next = new URLSearchParams(searchParams);
       if (branchId === undefined || branchId.length === 0) {
         next.delete('branch');
@@ -254,20 +256,31 @@ export function TimelineCanvas({ worldId, sceneBeatFixture }: TimelineCanvasProp
   });
   const computeModules = useComputeModules();
 
-  // ── V1.162 P2 T2 — read-only fork lineage chrome (carrier B) ───────────
+  // ── V1.162 P2 T2 + fix wave W-2 — read-only fork lineage chrome
+  // (carrier B) ───────────────────────────────────────────────────────────
   //
   // The chrome derives the ACTIVE branch's fork state from its
   // `fork_created` canon marker (branch-level, spec §6.6.3) — never the
   // world-level WorldState fork fields. The hook re-keys on branch change
   // (same query-key mechanism as `useWorldTimelineEvents`), so after a
   // PD-6 landing OR a parent hop the badge reflects the new branch without
-  // a manual refetch. `data ?? { is_fork: false }` keeps the badge hidden
-  // while the marker query is loading/errored — a root branch read returns
-  // zero markers and renders no chrome.
+  // a manual refetch.
+  //
+  // W-2 fix — loading and error are NEVER collapsed into "not a fork":
+  // `isPending` (loading) keeps the chrome hidden (a root read returns
+  // zero markers → no chrome); an ERROR on a NON-ROOT branch renders a
+  // degraded badge ("fork — lineage unavailable") with a retry, so a
+  // transient marker-query failure can never remove the only in-canvas
+  // return path (PD-6 parent hop). Root reads hide on error too — the
+  // root carries no fork chrome to degrade.
   const forkLineage = useForkLineage(worldId, activeBranchId);
+  const forkLineageUnavailable = forkLineage.isError && Boolean(activeBranchId);
   const forkLineageData = useMemo(
-    () => forkLineage.data ?? { is_fork: false },
-    [forkLineage.data],
+    () =>
+      forkLineageUnavailable
+        ? { is_fork: true }
+        : forkLineage.data ?? { is_fork: false },
+    [forkLineage.data, forkLineageUnavailable],
   );
   // One-hop parent hand-off (plan §2 branch-context lock): reuses T1's
   // `handleBranchChange` so the timeline-events query re-keys to the
@@ -822,7 +835,14 @@ export function TimelineCanvas({ worldId, sceneBeatFixture }: TimelineCanvasProp
   // the merged compute log events. A World whose only Narrative content is an
   // accepted compute Run must render its Compute result node, not the
   // global empty state.
+  //
+  // V1.162 fix wave S-1 (qc3) — the events query is included in the
+  // loading gate: during a branch-switch refetch the re-keyed
+  // `useInfiniteQuery` has no data (`flattenPages → []`), so without this
+  // gate a World with zero KB entities would flash "This World's timeline
+  // is empty" + the run-module CTA on a branch that HAS events.
   const isEmpty =
+    !timelineEvents.isFetching &&
     ((!graph.data || (graph.data.entities ?? []).length === 0) &&
       eventsList.length === 0);
 
@@ -908,6 +928,10 @@ export function TimelineCanvas({ worldId, sceneBeatFixture }: TimelineCanvasProp
           author where they are + how to return (PD-6 landing context). */}
       <ForkLineageBadge
         lineage={forkLineageData}
+        unavailable={forkLineageUnavailable}
+        onRetry={
+          forkLineageUnavailable ? () => void forkLineage.refetch() : undefined
+        }
         onOpenParent={
           forkLineageData.parent_branch_id ? handleOpenParentBranch : undefined
         }
@@ -1121,7 +1145,13 @@ export function TimelineCanvas({ worldId, sceneBeatFixture }: TimelineCanvasProp
           lands on the forked branch (PD-6). */}
       <ForkCreateDialog
         open={forkDialogOpen}
-        onOpenChange={setForkDialogOpen}
+        onOpenChange={(open) => {
+          setForkDialogOpen(open);
+          // S-4 fix (qc3): clear the stale pending fork point when the
+          // dialog closes without success. Reopening always re-derives it
+          // via `handleCreateFork`, so nothing lingers between flows.
+          if (!open) setPendingFork(null);
+        }}
         worldId={worldId}
         parentBranchId={pendingFork?.branchId}
         forkedFromEventId={pendingFork?.eventId ?? ''}

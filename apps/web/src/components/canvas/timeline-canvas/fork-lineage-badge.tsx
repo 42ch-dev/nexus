@@ -32,9 +32,22 @@ export interface ForkLineageBadgeProps {
    * lineage carries no parent (defensive — a fork marker always has one).
    */
   onOpenParent?: () => void;
+  /**
+   * W-2 — the lineage marker query failed on a non-root branch: render a
+   * degraded strip ("fork — lineage unavailable") with a retry instead of
+   * hiding the fork chrome (the chrome doubles as the one-hop return path).
+   */
+  unavailable?: boolean;
+  /** Retry the failed lineage read (wired to the hook's `refetch`). */
+  onRetry?: () => void;
 }
 
-export function ForkLineageBadge({ lineage, onOpenParent }: ForkLineageBadgeProps) {
+export function ForkLineageBadge({
+  lineage,
+  onOpenParent,
+  unavailable = false,
+  onRetry,
+}: ForkLineageBadgeProps) {
   const { t } = useTranslation('canvas');
   if (!lineage.is_fork) return null;
   return (
@@ -45,28 +58,59 @@ export function ForkLineageBadge({ lineage, onOpenParent }: ForkLineageBadgeProp
     >
       <span className="flex items-center gap-1.5 font-medium text-gray-900">
         <GitFork className="h-4 w-4 text-gray-700" aria-hidden />
-        {t('timeline.forkLineage.badge')}
+        {unavailable
+          ? t('timeline.forkLineage.unavailableBadge')
+          : t('timeline.forkLineage.badge')}
       </span>
-      <span data-testid="fork-lineage-parent">
-        {t('timeline.forkLineage.parentLabel')}:{' '}
-        {lineage.parent_branch_id ? shortId(lineage.parent_branch_id) : '—'}
-      </span>
-      <span data-testid="fork-lineage-fork-point">
-        {t('timeline.forkLineage.forkPointLabel')}:{' '}
-        {lineage.forked_from_event_id ? shortId(lineage.forked_from_event_id) : '—'}
-      </span>
-      {lineage.parent_branch_id && onOpenParent ? (
-        <Button
-          type="button"
-          variant="secondary"
-          size="small"
-          onClick={onOpenParent}
-          data-testid="fork-lineage-open-parent"
-          aria-label={t('timeline.forkLineage.openParentAria')}
-        >
-          {t('timeline.forkLineage.openParent')}
-        </Button>
-      ) : null}
+      {unavailable ? (
+        <>
+          <span data-testid="fork-lineage-unavailable">
+            {t('timeline.forkLineage.unavailableDetail')}
+          </span>
+          {onRetry ? (
+            <Button
+              type="button"
+              variant="secondary"
+              size="small"
+              onClick={onRetry}
+              data-testid="fork-lineage-retry"
+              aria-label={t('timeline.forkLineage.retryAria')}
+            >
+              {t('timeline.forkLineage.retry')}
+            </Button>
+          ) : null}
+        </>
+      ) : (
+        <>
+          <span data-testid="fork-lineage-parent">
+            {t('timeline.forkLineage.parentLabel')}:{' '}
+            {lineage.parent_branch_id ? shortId(lineage.parent_branch_id) : '—'}
+          </span>
+          <span data-testid="fork-lineage-fork-point">
+            {t('timeline.forkLineage.forkPointLabel')}:{' '}
+            {lineage.forked_from_event_id ? shortId(lineage.forked_from_event_id) : '—'}
+          </span>
+          {/* S-3 — the create-time label (spec §6.6.3) surfaces read-only in
+              the chrome when set; never an edit affordance. */}
+          {lineage.label ? (
+            <span data-testid="fork-lineage-label">
+              {t('timeline.forkLineage.labelLabel')}: {lineage.label}
+            </span>
+          ) : null}
+          {lineage.parent_branch_id && onOpenParent ? (
+            <Button
+              type="button"
+              variant="secondary"
+              size="small"
+              onClick={onOpenParent}
+              data-testid="fork-lineage-open-parent"
+              aria-label={t('timeline.forkLineage.openParentAria')}
+            >
+              {t('timeline.forkLineage.openParent')}
+            </Button>
+          ) : null}
+        </>
+      )}
     </div>
   );
 }

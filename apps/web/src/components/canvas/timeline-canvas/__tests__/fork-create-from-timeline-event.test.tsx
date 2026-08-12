@@ -18,7 +18,7 @@
  * branch-scoped (`branch_id` param → per-branch store) so the PD-6 re-key
  * proves the landing; the forks route simulates P1's create response.
  */
-import { http, HttpResponse, type JsonBodyType } from 'msw';
+import { delay, http, HttpResponse, type JsonBodyType } from 'msw';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -97,6 +97,9 @@ function forkJourney(over: { initialEvents?: unknown[] } = {}) {
     forkCalls: [] as Array<Record<string, unknown>>,
     forkStatus: 200 as number,
     forkErrorBody: null as JsonBodyType | null,
+    /** W-3 — artificial latency for the POST so a pending mutation is
+     * observable while the dialog stays open. */
+    forkDelayMs: 0,
   };
 
   const handlers = [
@@ -116,6 +119,7 @@ function forkJourney(over: { initialEvents?: unknown[] } = {}) {
       return HttpResponse.json({ items, has_more: false });
     }),
     http.post('/v1/daemon/worlds/:worldId/forks', async ({ request }) => {
+      if (state.forkDelayMs) await delay(state.forkDelayMs);
       const body = (await request.json()) as Record<string, unknown>;
       state.forkCalls.push(body);
       if (state.forkStatus !== 200) {
@@ -282,5 +286,47 @@ describe('TimelineCanvas fork creation (V1.162 P2 T1)', () => {
     await waitFor(() =>
       expect(screen.queryByText('Aria strikes Brann')).not.toBeInTheDocument(),
     );
+  });
+
+  it('fork_create_rapid_double_submit_single_post — double submit fires exactly ONE POST (W-3)', async () => {
+    const user = userEvent.setup();
+    const { state } = renderForkApp();
+    // Keep the POST in flight so the mutation stays pending while the
+    // dialog is open (the double-submit window the QC flagged).
+    state.forkDelayMs = 100;
+
+    await openComputeInspector(user);
+    await user.click(screen.getByTestId('compute-inspector-fork-here'));
+    await screen.findByTestId('fork-create-submit');
+
+    // Submit once — the mutation is now pending (POST delayed in MSW).
+    const form = screen.getByTestId('fork-create-submit').closest('form')!;
+    fireEvent.submit(form);
+    await waitFor(() => expect(state.forkCalls).toHaveLength(1));
+
+    // A second submit attempt while pending — the implicit-Enter /
+    // pre-render double-click vector that bypasses the disabled button.
+    // The in-handler `isPending` guard must swallow it: exactly ONE POST
+    // (duplicate fork branches are the W-3 bug).
+    fireEvent.submit(form);
+    // Settle window (same pattern as modules-page/worlds-page tests) so a
+    // buggy second POST — equally 100 ms-delayed in MSW — has landed if
+    // the guard is missing.
+    await new Promise((resolve) => {
+      setTimeout(resolve, 50);
+    });
+    expect(state.forkCalls).toHaveLength(1);
+
+    // The single POST carries the correct shape…
+    expect(state.forkCalls[0]).toEqual({
+      parent_branch_id: ROOT_BRANCH_ID,
+      forked_from_event_id: 'evt_compute_1',
+    });
+    // …and the flow still lands on the forked branch (PD-6).
+    expect(await screen.findByText('Branch created')).toBeInTheDocument();
+    await waitFor(() => {
+      const url = new URL(state.lastEventsUrl!, 'http://localhost');
+      expect(url.searchParams.get('branch_id')).toBe(FORK_BRANCH_ID);
+    });
   });
 });

@@ -21,9 +21,11 @@
  * marker with `fork_lineage`, the root branch carries none — exactly the
  * P1 projection contract (`0-or-1` marker; root has no marker).
  */
-import { http, HttpResponse } from 'msw';
+import { delay, http, HttpResponse } from 'msw';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
+import { useNavigate } from 'react-router';
+import type { ReactElement } from 'react';
 
 import { renderInApp } from '@/test/test-providers';
 import { useHandlers } from '@/test/msw-server';
@@ -101,7 +103,9 @@ const RUN_DETAIL = {
 
 // ─── MSW handler set with a mutable per-branch event store ──────────────────
 
-function forkChrome(over: { initialEvents?: unknown[] } = {}) {
+function forkChrome(
+  over: { initialEvents?: unknown[]; kbEntities?: unknown[] } = {},
+) {
   const state = {
     eventsByBranch: {
       // The fork branch store carries the canon fork_created marker (and
@@ -111,21 +115,35 @@ function forkChrome(over: { initialEvents?: unknown[] } = {}) {
     } as Record<string, unknown[]>,
     lastEventsUrl: null as string | null,
     branchFetchCount: 0,
+    /** W-2 — remaining failures for the fork_created marker read. */
+    lineageFailures: 0,
+    /** qc3 S-1 — artificial latency for the events route. */
+    eventsDelayMs: 0,
   };
 
   const handlers = [
     http.get('/v1/daemon/worlds/:worldId/kb/graph', () =>
       HttpResponse.json({
-        entities: [KB_EVENT],
+        entities: over.kbEntities ?? [KB_EVENT],
         source_anchors: [],
         relationships: [],
       }),
     ),
-    http.get('/v1/daemon/worlds/:worldId/timeline/events', ({ request }) => {
+    http.get('/v1/daemon/worlds/:worldId/timeline/events', async ({ request }) => {
+      if (state.eventsDelayMs) await delay(state.eventsDelayMs);
       state.lastEventsUrl = request.url;
       const url = new URL(request.url);
       const branchId = url.searchParams.get('branch_id');
       if (branchId) state.branchFetchCount += 1;
+      // W-2 — fail the lineage marker read on demand (transient 5xx) so
+      // the degraded-badge path is exercisable.
+      if (
+        state.lineageFailures > 0 &&
+        url.searchParams.get('event_type') === 'fork_created'
+      ) {
+        state.lineageFailures -= 1;
+        return HttpResponse.json({ error: 'boom' }, { status: 500 });
+      }
       // Mirror the daemon's filter contract: the route honors
       // `event_type` / `status` / `branch_id`. The lineage hook reads
       // `event_type=fork_created&status=canon`; the canvas reads
@@ -170,7 +188,15 @@ function forkChrome(over: { initialEvents?: unknown[] } = {}) {
   return { state, handlers };
 }
 
-function renderForkChrome(over: { initialEvents?: unknown[]; branch?: string } = {}) {
+function renderForkChrome(
+  over: {
+    initialEvents?: unknown[];
+    kbEntities?: unknown[];
+    branch?: string;
+    /** Extra sibling inside the router (e.g. a navigate spy for W-1). */
+    extra?: ReactElement;
+  } = {},
+) {
   const { state, handlers } = forkChrome(over);
   useHandlers(...handlers);
   const initial =
@@ -178,7 +204,10 @@ function renderForkChrome(over: { initialEvents?: unknown[]; branch?: string } =
       ? ['/worlds/world-7/timeline']
       : [`/worlds/world-7/timeline?branch=${over.branch}`];
   const result = renderInApp(
-    <TimelineCanvas worldId="world-7" />,
+    <>
+      {over.extra ?? null}
+      <TimelineCanvas worldId="world-7" />
+    </>,
     { client: new BrowserClient(), initialRouterEntries: initial },
   );
   return { ...result, state };
@@ -210,6 +239,10 @@ describe('TimelineCanvas fork lineage chrome (V1.162 P2 T2)', () => {
     );
     expect(within(badge).getByTestId('fork-lineage-fork-point')).toHaveTextContent(
       `Forked from event: ${FORK_POINT_EVENT_ID}`,
+    );
+    // S-3 — the create-time label surfaces read-only in the chrome.
+    expect(within(badge).getByTestId('fork-lineage-label')).toHaveTextContent(
+      'Label: Alternate ending',
     );
     // The one-hop control is present.
     expect(within(badge).getByTestId('fork-lineage-open-parent')).toBeInTheDocument();
@@ -270,5 +303,91 @@ describe('TimelineCanvas fork lineage chrome (V1.162 P2 T2)', () => {
     await waitFor(() =>
       expect(screen.queryByTestId('fork-lineage-badge')).not.toBeInTheDocument(),
     );
+  });
+
+  it('fork_badge_degrades_on_lineage_error — marker query failure on a fork branch shows a degraded badge + retry (W-2)', async () => {
+    const { state } = renderForkChrome({ branch: FORK_BRANCH_ID });
+    state.lineageFailures = 1;
+
+    // The lineage read fails → the fork chrome must NOT vanish (it is the
+    // only in-canvas return path); it degrades with a retry instead. It
+    // must never collapse to the "not a fork" state.
+    const badge = await screen.findByTestId('fork-lineage-badge');
+    expect(badge).toHaveTextContent(/lineage unavailable/i);
+    expect(within(badge).getByTestId('fork-lineage-unavailable')).toBeInTheDocument();
+    expect(within(badge).getByTestId('fork-lineage-retry')).toBeInTheDocument();
+    // The parent hop is not offered while the lineage is unknown.
+    expect(within(badge).queryByTestId('fork-lineage-open-parent')).not.toBeInTheDocument();
+
+    // Retry (the failure was consumed) recovers the full badge.
+    fireEvent.click(within(badge).getByTestId('fork-lineage-retry'));
+    expect(await within(badge).findByTestId('fork-lineage-parent')).toHaveTextContent(
+      `Parent branch: ${ROOT_BRANCH_ID}`,
+    );
+    expect(within(badge).getByTestId('fork-lineage-open-parent')).toBeInTheDocument();
+    expect(within(badge).queryByTestId('fork-lineage-unavailable')).not.toBeInTheDocument();
+  });
+
+  it('fork_badge_no_degraded_chrome_on_root_error — root marker failure renders nothing (no fork chrome on root)', async () => {
+    const { state } = renderForkChrome();
+    state.lineageFailures = 100;
+
+    await waitFor(() => expect(state.lastEventsUrl).not.toBeNull());
+    expect(screen.queryByTestId('fork-lineage-badge')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('fork-lineage-unavailable')).not.toBeInTheDocument();
+  });
+
+  it('fork_branch_back_forward_sync — browser Back/Forward re-derives the active branch from the URL (W-1)', async () => {
+    const nav: { navigate?: (delta: number) => void } = {};
+    function NavSpy() {
+      const navigate = useNavigate();
+      nav.navigate = (delta: number) => navigate(delta);
+      return null;
+    }
+    const { state } = renderForkChrome({ branch: FORK_BRANCH_ID, extra: <NavSpy /> });
+
+    // Fork branch active (URL `?branch=` is the SSOT) → fork chrome shown.
+    const badge = await screen.findByTestId('fork-lineage-badge');
+    expect(within(badge).getByTestId('fork-lineage-parent')).toBeInTheDocument();
+
+    // Parent hop pushes a history entry (URL → root branch) → chrome gone.
+    fireEvent.click(within(badge).getByTestId('fork-lineage-open-parent'));
+    await waitFor(() =>
+      expect(screen.queryByTestId('fork-lineage-badge')).not.toBeInTheDocument(),
+    );
+
+    // Browser Back: the URL returns to `?branch=<fork>` and the rendered
+    // branch follows — derived from searchParams every render, so there is
+    // no state left to desync. The fork chrome is back.
+    act(() => nav.navigate!(-1));
+    await waitFor(() => {
+      const url = new URL(state.lastEventsUrl!, 'http://localhost');
+      expect(url.searchParams.get('branch_id')).toBe(FORK_BRANCH_ID);
+    });
+    expect(await screen.findByTestId('fork-lineage-badge')).toBeInTheDocument();
+
+    // Browser Forward: back to the parent branch → chrome gone again.
+    act(() => nav.navigate!(1));
+    await waitFor(() =>
+      expect(screen.queryByTestId('fork-lineage-badge')).not.toBeInTheDocument(),
+    );
+  });
+
+  it('empty_state_no_flash_while_events_loading — EmptyState is gated on the events fetch (qc3 S-1)', async () => {
+    // World with ZERO KB entities + a delayed events read: during the
+    // switch refetch the canvas must not claim the timeline is empty on a
+    // branch that HAS events (the "No events yet" flash is the S-1 bug).
+    const { state } = renderForkChrome({
+      kbEntities: [],
+      initialEvents: [COMPUTE_EVENT],
+    });
+    state.eventsDelayMs = 60;
+
+    // While the events fetch is in flight: no EmptyState flash.
+    expect(screen.queryByText(/timeline is empty/i)).not.toBeInTheDocument();
+
+    // After resolution the compute event renders — the world is NOT empty.
+    await screen.findByTestId('compute-result-node-chrome');
+    expect(screen.queryByText(/timeline is empty/i)).not.toBeInTheDocument();
   });
 });

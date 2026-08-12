@@ -83,6 +83,12 @@ export function ForkCreateDialog({
 
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
+    // W-3 fix (qc3): in-handler pending guard. The submit button is
+    // disabled while pending, but Enter-key implicit submission (the label
+    // Input) and a fast double-click before the isPending re-render
+    // commits can still fire `submit` — this guarantees exactly ONE POST
+    // per flow.
+    if (createFork.isPending) return;
     if (!forkedFromEventId) {
       setError(t('timeline.forkCreateDialog.missingForkPoint'));
       return;

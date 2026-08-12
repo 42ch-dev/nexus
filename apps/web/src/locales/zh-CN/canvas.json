@@ -828,8 +828,13 @@
       "badge": "此分支是分叉",
       "parentLabel": "父分支",
       "forkPointLabel": "分叉自事件",
+      "labelLabel": "标签",
       "openParent": "打开父分支",
-      "openParentAria": "打开父分支时间线"
+      "openParentAria": "打开父分支时间线",
+      "unavailableBadge": "分叉 — 谱系不可用",
+      "unavailableDetail": "无法加载此分支的谱系。",
+      "retry": "重试",
+      "retryAria": "重试加载分支谱系"
     },
     "runModuleEntry": {
       "button": "运行模块",
