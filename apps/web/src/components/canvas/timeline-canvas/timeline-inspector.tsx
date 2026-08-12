@@ -241,6 +241,13 @@ export function TimelineInspector({ node, ctxRef }: TimelineInspectorProps) {
           type="button"
           data-testid="timeline-view-in-work-timeline"
           data-work-id={ctx.boundWorkId}
+          // V1.163 P1 Task 2 — when the selected World event has an
+          // event-level bind (`boundWorkEventId`), the CTA target deep-links
+          // to the specific Work outline event
+          // (`?layer=narrative&event=<id>`); absent → the V1.123 surface-level
+          // jump (`?layer=narrative` only). The attribute carries the event
+          // id so the DOM exposes which target the click will land on.
+          data-event-id={ctx.boundWorkEventId}
           onClick={ctx.onViewInWorkTimeline}
           aria-label={t('timeline.inspector.viewInWorkTimelineAria', {
             defaultValue: 'Open the Work that realizes this World on the Work Timeline',
