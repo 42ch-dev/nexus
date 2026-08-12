@@ -15,6 +15,9 @@
  *     fallback preserves V1.123 `?layer=narrative` CTA; no bind → hidden).
  *   - PD-5 three-state matrix, PD-7 single deterministic reverse target
  *     (most-recently-updated realizing Work, then stable `event_id`).
+ *   - Task 4: PD-5 matrix re-pinned TABLE-DRIVEN for both directions, and
+ *     AC-V1163-7 (no write path — the inspector exposes no control to
+ *     set/clear `world_event_id`; CTA clicks navigate and never emit a patch).
  *
  * Two layers of coverage:
  *   1. Inspector-level (mirrors `cross-surface-nav.test.tsx`) — the CTA slot
@@ -167,6 +170,12 @@ function crossSurfaceJourney(
     outlines?: Record<string, WorkOutline>;
   } = {},
 ) {
+  // AC-V1163-7 write-path recorder — any patch reaching the World Timeline's
+  // legitimate entity write (`worldKbPatchEntity`) or the Work timeline patch
+  // surface (`patchTimelineEvent`) is recorded. The Task 4 no-write tests
+  // assert this array stays empty after CTA navigation, pinning that the
+  // cross-surface affordance is navigation-only.
+  const writes: string[] = [];
   const handlers = [
     http.get('/v1/daemon/worlds/:worldId/kb/graph', () =>
       HttpResponse.json({
@@ -202,8 +211,18 @@ function crossSurfaceJourney(
         worlds: [{ world_id: 'world-7', title: 'Test World' }],
       }),
     ),
+    // Write surfaces are expected to stay untouched in every test here —
+    // recording them lets the no-write assertions observe any regression.
+    http.post('/v1/daemon/worlds/:worldId/kb/patch-entity', () => {
+      writes.push('worldKbPatchEntity');
+      return HttpResponse.json({ error: 'unexpected write' }, { status: 409 });
+    }),
+    http.post('/v1/daemon/works/:workId/timeline/patch', () => {
+      writes.push('patchTimelineEvent');
+      return HttpResponse.json({ error: 'unexpected write' }, { status: 409 });
+    }),
   ];
-  return { handlers };
+  return { handlers, writes };
 }
 
 function CrossSurfaceAppRoutes() {
@@ -225,13 +244,14 @@ function CrossSurfaceAppRoutes() {
 function renderCrossSurfaceApp(
   over: Parameters<typeof crossSurfaceJourney>[0] = {},
   initial = ['/worlds/world-7/timeline'],
-) {
-  const { handlers } = crossSurfaceJourney(over);
+): { writes: string[] } {
+  const { handlers, writes } = crossSurfaceJourney(over);
   useHandlers(...handlers);
-  return renderInApp(<CrossSurfaceAppRoutes />, {
+  renderInApp(<CrossSurfaceAppRoutes />, {
     client: new BrowserClient(),
     initialRouterEntries: initial,
   });
+  return { writes };
 }
 
 /** Select the KB event row via the sortable alt-view (established pattern). */
@@ -533,5 +553,213 @@ describe('V1.163 Task 2 — inbound `?event=` focus on the World Timeline (AC-V1
     );
     // The unknown id must NOT fabricate a selection (no inspector opens).
     expect(screen.queryByTestId('timeline-inspector-title')).toBeNull();
+  });
+});
+
+// ─── Task 4: PD-5 three-state matrix, table-driven (World → Work) ───────────
+
+/**
+ * PD-5 honest scope cut — same CTA chrome, three states. World → Work
+ * direction: surface bind = realizing Work (`boundWorkId`), event bind =
+ * matching outline `world_event_id` (`boundWorkEventId`). Expected CTA +
+ * URL contract per the plan's Task 4 table.
+ */
+type WorldPd5MatrixState = {
+  state: string;
+  surfaceBind: boolean;
+  eventBind: boolean;
+  cta: 'hidden' | 'shown';
+  eventId?: string;
+};
+
+const WORLD_PD5_MATRIX: WorldPd5MatrixState[] = [
+  { state: 'no surface bind, no event bind', surfaceBind: false, eventBind: false, cta: 'hidden' },
+  { state: 'surface bind only (V1.123 fallback)', surfaceBind: true, eventBind: false, cta: 'shown' },
+  { state: 'surface + event bind (deep-link)', surfaceBind: true, eventBind: true, cta: 'shown', eventId: 'evt-work-1' },
+];
+
+/** Orchestrator-level journey inputs for the same three states. */
+type WorldPd5MatrixJourney = {
+  state: string;
+  works: ReturnType<typeof workSummary>[];
+  details: Record<string, { world_id: string | null }>;
+  outlines: Record<string, WorkOutline>;
+  cta: 'hidden' | 'shown';
+  expectedUrl?: string;
+};
+
+const WORLD_PD5_JOURNEYS: WorldPd5MatrixJourney[] = [
+  {
+    state: 'no surface bind → CTA hidden, no navigation',
+    works: [],
+    details: {},
+    outlines: {},
+    cta: 'hidden',
+  },
+  {
+    state: 'surface bind only → ?layer=narrative (no event)',
+    works: [workSummary('work-1', '2026-08-02T00:00:00Z')],
+    details: { 'work-1': { world_id: 'world-7' } },
+    outlines: {
+      'work-1': outline('work-1', [
+        { event_id: 'evt-work-1', title: 'Coronation beat' },
+      ]),
+    },
+    cta: 'shown',
+    expectedUrl: '/works/work-1/timeline?layer=narrative',
+  },
+  {
+    state: 'surface + event bind → ?layer=narrative&event=<id>',
+    works: [workSummary('work-1', '2026-08-02T00:00:00Z')],
+    details: { 'work-1': { world_id: 'world-7' } },
+    outlines: {
+      'work-1': outline('work-1', [
+        { event_id: 'evt-work-1', title: 'Coronation beat', world_event_id: KB_EVENT_ID },
+      ]),
+    },
+    cta: 'shown',
+    expectedUrl: '/works/work-1/timeline?layer=narrative&event=evt-work-1',
+  },
+];
+
+describe('V1.163 Task 4 — PD-5 three-state matrix, World → Work (table-driven)', () => {
+  it.each(WORLD_PD5_MATRIX)(
+    'inspector: $state → CTA $cta',
+    ({ surfaceBind, eventBind, cta, eventId }) => {
+      render(
+        <MemoryRouter>
+          <TimelineInspector
+            node={timelineEventNode()}
+            ctxRef={ctxRefWith({
+              ...(surfaceBind ? { boundWorkId: 'work-1' } : {}),
+              ...(eventBind ? { boundWorkEventId: 'evt-work-1' } : {}),
+              ...(surfaceBind ? { onViewInWorkTimeline: () => undefined } : {}),
+            })}
+          />
+        </MemoryRouter>,
+      );
+
+      const ctaEl = screen.queryByTestId('timeline-view-in-work-timeline');
+      if (cta === 'hidden') {
+        expect(ctaEl).toBeNull();
+        return;
+      }
+      expect(ctaEl).not.toBeNull();
+      if (eventId) {
+        expect(ctaEl).toHaveAttribute('data-event-id', eventId);
+      } else {
+        expect(ctaEl).not.toHaveAttribute('data-event-id');
+      }
+    },
+  );
+
+  it.each(WORLD_PD5_JOURNEYS)(
+    'orchestrator: $state',
+    async ({ state: _state, works, details, outlines, cta, expectedUrl }) => {
+      const user = userEvent.setup();
+      const { writes } = renderCrossSurfaceApp({ works, details, outlines });
+
+      await selectEventRow(user);
+
+      if (cta === 'hidden') {
+        await waitFor(() =>
+          expect(screen.queryByTestId('timeline-view-in-work-timeline')).toBeNull(),
+        );
+        // No navigation happened; no write op fired.
+        expect(screen.getByTestId('location-probe').textContent).toBe('/worlds/world-7/timeline');
+        expect(writes).toEqual([]);
+        return;
+      }
+
+      const ctaEl = await screen.findByTestId('timeline-view-in-work-timeline');
+      fireEvent.click(ctaEl);
+
+      await waitFor(() =>
+        expect(screen.getByTestId('location-probe').textContent).toBe(expectedUrl),
+      );
+      // AC-V1163-7: the CTA navigates — it never emits a patch/bind write.
+      expect(writes).toEqual([]);
+    },
+  );
+});
+
+// ─── Task 4: AC-V1163-7 — no write path for world_event_id (World side) ─────
+
+describe('V1.163 Task 4 — AC-V1163-7: no write path for world_event_id (World side)', () => {
+  it('inspector exposes no control to edit world_event_id on a fully bound event node', () => {
+    const { container } = render(
+      <MemoryRouter>
+        <TimelineInspector
+          node={timelineEventNode()}
+          ctxRef={ctxRefWith({
+            boundWorkId: 'work-1',
+            boundWorkEventId: 'evt-work-1',
+            onViewInWorkTimeline: () => undefined,
+            onPatchEntity: () => undefined,
+          })}
+        />
+      </MemoryRouter>,
+    );
+
+    // The ONLY editable fields are title + body (the pre-existing entity
+    // patch surface). Block type renders read-only. No field — editable or
+    // not — references the bind carrier.
+    const editable = Array.from(
+      container.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>(
+        'input:not([readonly]):not([type="hidden"]), textarea',
+      ),
+    );
+    expect(editable.map((el) => el.id)).toEqual(['tl-title', 'tl-body']);
+
+    for (const el of container.querySelectorAll('input, textarea, select')) {
+      expect(el.getAttribute('id') ?? '').not.toMatch(/world[-_]?event/i);
+      expect(el.getAttribute('name') ?? '').not.toMatch(/world[-_]?event/i);
+    }
+    expect(screen.queryByLabelText(/world event/i)).toBeNull();
+
+    // The cross-surface affordance is a navigation button, not a form submit.
+    expect(screen.getByTestId('timeline-view-in-work-timeline')).toHaveAttribute('type', 'button');
+  });
+
+  it('the entity patch write path cannot carry world_event_id (emitted patch has no bind key)', async () => {
+    const user = userEvent.setup();
+    const onPatchEntity = vi.fn();
+    render(
+      <MemoryRouter>
+        <TimelineInspector node={timelineEventNode()} ctxRef={ctxRefWith({ onPatchEntity })} />
+      </MemoryRouter>,
+    );
+
+    const titleInput = screen.getByDisplayValue('Coronation');
+    await user.clear(titleInput);
+    await user.type(titleInput, 'Coronation of Aria');
+    fireEvent.click(screen.getByTestId('timeline-inspector-save'));
+
+    await waitFor(() => expect(onPatchEntity).toHaveBeenCalledTimes(1));
+    const [, patch, dirtyFields] = onPatchEntity.mock.calls[0];
+    expect(dirtyFields).toEqual(['title']);
+    expect(patch).not.toHaveProperty('world_event_id');
+  });
+
+  it('clicking the cross-surface CTA navigates — it never emits a patch (no write path)', () => {
+    const onPatchEntity = vi.fn();
+    const onViewInWorkTimeline = vi.fn();
+    render(
+      <MemoryRouter>
+        <TimelineInspector
+          node={timelineEventNode()}
+          ctxRef={ctxRefWith({
+            boundWorkId: 'work-1',
+            boundWorkEventId: 'evt-work-1',
+            onViewInWorkTimeline,
+            onPatchEntity,
+          })}
+        />
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(screen.getByTestId('timeline-view-in-work-timeline'));
+    expect(onViewInWorkTimeline).toHaveBeenCalledTimes(1);
+    expect(onPatchEntity).not.toHaveBeenCalled();
   });
 });

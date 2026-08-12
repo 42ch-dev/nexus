@@ -17,6 +17,9 @@
  *     cross-surface CTA).
  *   - PD-5 three-state matrix: event bind → `?layer=narrative&event=<id>`;
  *     surface bind only → V1.123 `?layer=narrative`; no bind → hidden.
+ *   - Task 4: PD-5 matrix re-pinned TABLE-DRIVEN for both directions, and
+ *     AC-V1163-7 (no write path — the inspectors expose no control to
+ *     set/clear `world_event_id`; CTA clicks navigate and never patch).
  *
  * Two layers of coverage:
  *   1. Inspector-level (mirrors `cross-surface-nav.test.tsx`) — the CTA slot
@@ -185,16 +188,17 @@ function WorkTimelineRoutes() {
 function renderWorkApp(
   over: { outlineData?: WorkOutline; worldId?: string | null } = {},
   initial = ['/works/work-1/timeline'],
-) {
+): { client: NexusClient } {
   const { outlineData, worldId } = over;
   const client = makeMockClient(
     outlineData ?? outline('work-1', []),
     worldId ?? null,
   );
-  return renderInApp(<WorkTimelineRoutes />, {
+  renderInApp(<WorkTimelineRoutes />, {
     client,
     initialRouterEntries: initial,
   });
+  return { client };
 }
 
 afterEach(() => {
@@ -427,5 +431,134 @@ describe('V1.163 Task 3 — inbound `?event=` focus on the Work Timeline (AC-V11
     );
     // The unknown id must NOT fabricate a selection (no inspector opens).
     expect(screen.queryByTestId('work-timeline-inspector')).toBeNull();
+  });
+});
+
+// ─── Task 4: PD-5 three-state matrix, table-driven (Work → World) ───────────
+
+/**
+ * PD-5 honest scope cut — same CTA chrome, three states. Work → World
+ * direction: surface bind = bound World (`worldId`), event bind =
+ * `world_event_id` projected onto the node (`worldEventId`). Expected CTA +
+ * URL contract per the plan's Task 4 table.
+ */
+type WorkPd5MatrixState = {
+  state: string;
+  surfaceBind: boolean;
+  eventBind: boolean;
+  cta: 'hidden' | 'shown';
+  eventId?: string;
+};
+
+const WORK_PD5_MATRIX: WorkPd5MatrixState[] = [
+  { state: 'no surface bind, no event bind', surfaceBind: false, eventBind: false, cta: 'hidden' },
+  { state: 'surface bind only (V1.123 fallback)', surfaceBind: true, eventBind: false, cta: 'shown' },
+  { state: 'surface + event bind (deep-link)', surfaceBind: true, eventBind: true, cta: 'shown', eventId: WORLD_EVENT_ID },
+];
+
+describe('V1.163 Task 4 — PD-5 three-state matrix, Work → World (table-driven)', () => {
+  it.each(WORK_PD5_MATRIX)(
+    'inspector: $state → CTA $cta',
+    ({ surfaceBind, eventBind, cta, eventId }) => {
+      render(
+        <MemoryRouter>
+          <WorkTimelineEventInspector
+            node={workTimelineEventNode(eventBind ? { worldEventId: WORLD_EVENT_ID } : {})}
+            workId="work-1"
+            worldId={surfaceBind ? 'world-9' : undefined}
+            onViewOnWorldTimeline={surfaceBind ? () => undefined : undefined}
+          />
+        </MemoryRouter>,
+      );
+
+      const ctaEl = screen.queryByTestId('work-timeline-view-on-world-timeline');
+      if (cta === 'hidden') {
+        expect(ctaEl).toBeNull();
+        return;
+      }
+      expect(ctaEl).not.toBeNull();
+      if (eventId) {
+        expect(ctaEl).toHaveAttribute('data-event-id', eventId);
+      } else {
+        expect(ctaEl).not.toHaveAttribute('data-event-id');
+      }
+    },
+  );
+
+  it.each(WORK_PD5_MATRIX)(
+    'orchestrator: $state → $cta, URL $#',
+    async ({ surfaceBind, eventBind, cta }) => {
+      const { client } = renderWorkApp(
+        {
+          outlineData: outline(
+            'work-1',
+            eventBind
+              ? [
+                  {
+                    event_id: 'evt-1',
+                    title: 'Coronation beat',
+                    world_event_id: WORLD_EVENT_ID,
+                  },
+                ]
+              : [{ event_id: 'evt-1', title: 'Coronation beat' }],
+          ),
+          worldId: surfaceBind ? 'world-9' : null,
+        },
+        ['/works/work-1/timeline?layer=narrative&event=evt-1'],
+      );
+
+      if (cta === 'hidden') {
+        // Inbound focus still opens the inspector; the CTA must be absent.
+        const inspector = await screen.findByTestId('work-timeline-inspector');
+        expect(
+          within(inspector).queryByTestId('work-timeline-view-on-world-timeline'),
+        ).toBeNull();
+      } else {
+        const ctaEl = await screen.findByTestId('work-timeline-view-on-world-timeline');
+        fireEvent.click(ctaEl);
+
+        await waitFor(() =>
+          expect(screen.getByTestId('location-probe').textContent).toBe(
+            eventBind
+              ? `/worlds/world-9/timeline?layer=narrative&event=${WORLD_EVENT_ID}`
+              : '/worlds/world-9/timeline?layer=narrative',
+          ),
+        );
+      }
+
+      // AC-V1163-7: navigation (or honest hide) never fires a write op.
+      expect(client.patchTimelineEvent).not.toHaveBeenCalled();
+      expect(client.patchOutlineStructure).not.toHaveBeenCalled();
+      expect(client.patchOutlineChapter).not.toHaveBeenCalled();
+    },
+  );
+});
+
+// ─── Task 4: AC-V1163-7 — no write path for world_event_id (Work side) ──────
+
+describe('V1.163 Task 4 — AC-V1163-7: no write path for world_event_id (Work side)', () => {
+  it('event inspector exposes no editable control at all on a fully bound node', () => {
+    const { container } = render(
+      <MemoryRouter>
+        <WorkTimelineEventInspector
+          node={workTimelineEventNode({ worldEventId: WORLD_EVENT_ID })}
+          workId="work-1"
+          worldId="world-9"
+          onViewOnWorldTimeline={() => undefined}
+        />
+      </MemoryRouter>,
+    );
+
+    // The Work Timeline inspector is read-only — no input/textarea/select/
+    // contenteditable anywhere (edits route through the Outline surface via
+    // the Edit-in-Outline link). No control or label references the carrier.
+    expect(
+      container.querySelector('input, textarea, select, [contenteditable="true"]'),
+    ).toBeNull();
+    expect(screen.queryByLabelText(/world event/i)).toBeNull();
+    expect(screen.queryByText('world_event_id')).toBeNull();
+
+    // The cross-surface affordance is a navigation button, not a form submit.
+    expect(screen.getByTestId('work-timeline-view-on-world-timeline')).toHaveAttribute('type', 'button');
   });
 });
