@@ -384,6 +384,30 @@ export interface TimelineCanvasAdapterContext {
    */
   boundWorkId?: string;
   /**
+   * V1.163 P1 Task 2 — bound Work EVENT id (event-level cross-surface
+   * deep-link). When the SELECTED World Narrative event's `key_block_id`
+   * matches a realizing Work outline `timeline_events[].world_event_id`,
+   * this slot carries the matching outline `event_id` (PD-7 single
+   * deterministic target — most-recently-updated realizing Work, then
+   * stable `event_id`). The inspector's CTA target then deep-links to
+   * `/works/:workId/timeline?layer=narrative&event=<id>`.
+   *
+   * Undefined when no event-level match exists for the current selection —
+   * the V1.123 surface-level fallback (`boundWorkId` +
+   * `onViewInWorkTimeline` → `?layer=narrative` only) applies instead
+   * (PD-5 honest three-state matrix).
+   */
+  boundWorkEventId?: string;
+  /**
+   * V1.163 P1 QC fix-wave (QC1 W-001) — PD-7 winning WORK id for the
+   * event-level deep-link. When `boundWorkEventId` is set, the CTA
+   * navigates to THIS work (the PD-7 winner), which can differ from the
+   * surface-level fallback `boundWorkId` in multi-Work Worlds. Exposed so
+   * the CTA's `data-work-id` matches the actual navigation target. Undefined
+   * → the surface-level `boundWorkId` applies (V1.123 semantics preserved).
+   */
+  boundWorkEventWorkId?: string;
+  /**
    * V1.123 P3 Task 4 — cross-surface navigation hand-off. Fires when the
    * user clicks "View in Work Timeline" on a World Timeline Narrative event.
    * The orchestrator navigates to `/works/:workId/timeline?layer=narrative`
@@ -547,7 +571,14 @@ const COMPUTE_NODE_ID_PREFIX = 'compute:';
  */
 const COMPUTE_KEY_BLOCK_PREFIX = 'log:';
 
-function nodeIdOf(keyBlockId: string): string {
+/**
+ * Map a World KB entity `key_block_id` to its React Flow node id
+ * (`entity:<key_block_id>`). V1.163 P1 Task 2 — exported so the
+ * orchestrator's inbound `?event=` focus selects the same node id the
+ * Narrative projection emits (architect lock: referent = World KB entity
+ * `key_block_id`).
+ */
+export function nodeIdOf(keyBlockId: string): string {
   return `${NODE_ID_PREFIX}${keyBlockId}`;
 }
 
