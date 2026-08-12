@@ -1136,6 +1136,21 @@ fn build_schema_map() -> Vec<SchemaEntry> {
             Strict,
             ListTimelineEventsResponse
         ),
+        // ── daemon-api/worlds/ (V1.162 P1 T2 — local timeline fork create) ──
+        // Daemon HTTP surface for the `nexus.fork.create` capability (plan
+        // `2026-08-12-v1.162-p1-fork-backend-foundation`): POST
+        // /v1/daemon/worlds/:world_id/forks. Both are plain-object root
+        // schemas → Strict.
+        entry!(
+            "schemas/daemon-api/worlds/create-fork-request.schema.json",
+            Strict,
+            CreateForkRequest
+        ),
+        entry!(
+            "schemas/daemon-api/worlds/create-fork-response.schema.json",
+            Strict,
+            CreateForkResponse
+        ),
     ]
 }
 

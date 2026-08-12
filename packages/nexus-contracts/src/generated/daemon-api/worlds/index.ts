@@ -4,5 +4,7 @@
  * Generator: json-schema-to-typescript (tooling/codegen/src/ts-gen.ts)
  */
 
+export type { CreateForkRequest } from './create-fork-request';
+export type { CreateForkResponse } from './create-fork-response';
 export type { CreateWorldRequest } from './create-world-request';
 export type { CreateWorldResponse } from './create-world-response';
