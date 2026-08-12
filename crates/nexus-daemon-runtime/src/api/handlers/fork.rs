@@ -33,12 +33,15 @@
 //!
 //! Returns 401 when no active creator can be read from config (tier2
 //! middleware normally rejects earlier), 403 when the World is not owned by
-//! the active creator, 422 when the fork-point event is not on the stated
-//! parent branch / non-existent (capability `InputInvalid`), 503 when the
-//! capability worker is unavailable, and 500 for storage / internal
-//! failures. Malformed request bodies (missing fields, `label` outside the
-//! schema's 1–200 char constraint) are rejected by the generated DTO at the
-//! axum extractor boundary (400).
+//! the active creator, 404 when no `narrative_worlds` row exists for the
+//! `world_id` (`require_world_owner`; pre-existing daemon convention — no
+//! fork-point read on the 404 path), 422 when the fork-point event is not on
+//! the stated parent branch / non-existent (capability `InputInvalid`), 503
+//! when the capability worker is unavailable, and 500 for storage / internal
+//! failures. Malformed JSON bodies are rejected by the axum `Json` extractor
+//! (400 `JsonSyntaxError`); valid JSON that fails the generated DTO (missing
+//! fields, `label` outside the schema's 1–200 char constraint) is rejected at
+//! the same extractor boundary as 422 `JsonDataError` (axum 0.7 default).
 
 use crate::api::errors::NexusApiError;
 use crate::api::handlers::works::read_active_creator_id;
@@ -56,7 +59,8 @@ use serde_json::json;
 ///
 /// Thin delegate to the `nexus.fork.create` capability: parse the generated
 /// `CreateForkRequest`, resolve the active creator, run the daemon
-/// `require_world_owner` guard FIRST (403 before any fork-point read), then
+/// `require_world_owner` guard FIRST (403 foreign world / 404 missing world,
+/// before any fork-point read), then
 /// call `ForkCreate::run` with the wire fields + creator context. The
 /// capability re-checks ownership (its admission gate), validates the
 /// fork-point (422), allocates the `fbk_` branch id, and appends the canon
@@ -69,6 +73,8 @@ pub async fn create_fork(
     Json(req): Json<CreateForkRequest>,
 ) -> Result<Json<CreateForkResponse>, NexusApiError> {
     let pool = state.pool_or_uninit()?;
+    // Active creator from daemon config — parity with `create_world` in the
+    // same `world_kb_routes()` mount (tier2 already gates active creator).
     let creator_id =
         read_active_creator_id(state.nexus_home()).ok_or(NexusApiError::AuthRequired)?;
 
@@ -127,8 +133,10 @@ fn map_fork_capability_error(e: nexus_orchestration::capability::CapabilityError
             resource: "world".to_string(),
             reason,
         },
-        CapabilityError::InputInvalid(reason) => NexusApiError::InputValidationFailed {
-            details: json!({ "fork_point": reason }),
+        // Stable field-scoped message — never echo the capability's reason
+        // verbatim (it includes caller-supplied fork-point/branch/world ids).
+        CapabilityError::InputInvalid(_reason) => NexusApiError::InputValidationFailed {
+            details: json!({ "fork_point": "fork point not found on parent branch" }),
         },
         CapabilityError::WorkerUnavailable => NexusApiError::ServiceUnavailable {
             message: "fork.create capability worker unavailable".to_string(),

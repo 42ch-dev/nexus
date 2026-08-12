@@ -445,6 +445,13 @@ pub async fn append_event_canon_with_extensions_in_tx(
 /// provenance write path; this writer's extensions carry fork lineage, not
 /// provenance.
 ///
+/// # Preconditions
+///
+/// Non-transactional check-then-insert; safe for a caller-exclusive branch
+/// (the fork marker allocates a fresh `branch_id` per call). Reuse on a
+/// shared branch risks `SequenceConflict` from a concurrent `MAX(sequence_no)`
+/// race.
+///
 /// # Errors
 ///
 /// Same error variants as [`append_event`].
@@ -524,8 +531,9 @@ where
     Ok(max_seq.unwrap_or(-1) + 1)
 }
 
-/// Shared INSERT logic for [`append_event`], [`append_event_in_tx`], and
-/// [`append_event_canon_with_extensions_in_tx`].
+/// Shared INSERT logic for [`append_event`], [`append_event_in_tx`],
+/// [`append_event_canon_with_extensions_in_tx`], and
+/// [`append_event_canon_with_extensions`].
 ///
 /// `executor` must be an object that can run a single sqlx query (e.g. `&Pool`
 /// or `&mut Transaction`). Only one query is issued here, so the generic

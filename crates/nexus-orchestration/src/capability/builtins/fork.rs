@@ -85,7 +85,9 @@ impl Capability for ForkCreate {
     }
 
     fn input_schema(&self) -> &'static str {
-        r#"{"type":"object","properties":{"world_id":{"type":"string"},"creator_id":{"type":"string"},"parent_branch_id":{"type":"string"},"forked_from_event_id":{"type":"string"},"label":{"type":"string"}},"required":["world_id","creator_id","parent_branch_id","forked_from_event_id"],"additionalProperties":false}"#
+        // label bounds mirror the HTTP schema (create-fork-request.schema.json,
+        // 1–200 chars when present) — orchestration/preset surface parity.
+        r#"{"type":"object","properties":{"world_id":{"type":"string"},"creator_id":{"type":"string"},"parent_branch_id":{"type":"string"},"forked_from_event_id":{"type":"string"},"label":{"type":"string","minLength":1,"maxLength":200}},"required":["world_id","creator_id","parent_branch_id","forked_from_event_id"],"additionalProperties":false}"#
     }
 
     fn output_schema(&self) -> &'static str {
@@ -410,5 +412,8 @@ mod tests {
             extensions["fork_lineage"]["forked_from_event_id"],
             fork_point
         );
+        // Default-label contract: the caller omitted `label`, so the marker
+        // must carry the canonical `"fork"` default.
+        assert_eq!(extensions["fork_lineage"]["label"], "fork");
     }
 }
