@@ -7,7 +7,7 @@
 | **Status** | Normative — entity scope hierarchy, uniqueness, crate ownership. **V1.40 Shipped**: §5.1.1 narrative taxonomy (`BlockType` + `novel_category` + `canonical_name` grammar). **V1.50 Shipped**: §5.5 World KB promotion state machine. **V1.51 Shipped**: §5.5.6 LLM pathway subsection. **V1.54 Shipped**: §5.1.1 game-bible taxonomy. **V1.55 P3**: §5.1.1 script taxonomy. **V1.62 Shipped**: §5.5.9 computable-flag semantics + structured validation mode (closes `R-V161P1-LOW-001`). **V1.74 Shipped β**: §5.6 World KB relationship semantics. **V1.139 architect §5.2**: §2 (crate table: `nexus-kb`→`nexus-knowledge`, KeyBlock→KnowledgeEntry in architecture-bearing prose). **V1.155 P2**: §5.5+ prose refs modernized to KnowledgeEntry; remaining `KeyBlock` mentions are structural wire/DB identifiers (`kb_key_blocks` table, `ComputeInput.key_blocks` field, `KeyBlockStatus`/`KeyBlockId` types, `BlockType` enum values) and historical implementation records (`crates/nexus-kb/…` paths as-shipped). Full V1.139 SPOKE alignment tracked in [`spoke-adapter-architecture.md`](spoke-adapter-architecture.md). **V1.156**: §1.4 three-layer Draft overlay 3×2 matrix completion amendment (World×Moment + Work×Brief closed; frontend-only, `wire_contracts_changed: false` — no scope-ownership/transition change). **V1.159**: §5.1.1 era taxonomy amendment — `era_type` freeform field + era-era nesting via §5.6 `custom`/`custom_label: "parent_era"` (additive; `wire_contracts_changed: false`). **V1.160 Review & Edit chain (architect pass 2)**: §5.1.2 `patch_entity` create-on-absent write boundary (normative; closes create half of `R-V1159P1-001`; `wire_contracts_changed: false`). |
 | **Document class** | Master |
 | **Scope** | Global/User/Creator/World/Timeline/Event/Moment hierarchy; entity ownership; `kb`/`knowledge` naming boundaries; scope transition rules |
-| **Last updated** | 2026-08-11 — V1.160 Review & Edit chain (architect pass 2): §5.1.2 `patch_entity` create-on-absent write boundary (VC-1 normative resolution). |
+| **Last updated** | 2026-08-12 — V1.162 Review & Edit chain (architect pass 2): §6.6 fork-creation write boundary + lineage projection contract (PD-01 local-vs-platform reconciliation; carrier approach B locked). |
 | **Related** | [local-cloud-crate-architecture.md](./local-cloud-crate-architecture.md), [cli-spec.md](./cli-spec.md), [daemon-runtime.md](./daemon-runtime.md), [orchestration-engine.md](./orchestration-engine.md), [compute-module-abi.md](./compute-module-abi.md), [wasm-host.md](./wasm-host.md), [local-db-schema.md](./local-db-schema.md), [spoke-adapter-architecture.md](./spoke-adapter-architecture.md), [`docs/ARCHITECTURE.md`](../../../docs/ARCHITECTURE.md) |
 
 This file is normative for V1.23 crate wiring and naming alignment. When this file
@@ -843,10 +843,56 @@ as a session-start snapshot, not as the owner of narrative state.
 ### 6.6 Timeline and history changes
 
 Timeline/Event history is immutable for canonical narrative purposes. Corrections,
-alternate histories, or rewrites use Fork semantics through `nexus-narrative`; they do
-not mutate prior Event ownership in place.
+alternate histories, or rewrites use Fork semantics; they do not mutate prior Event
+records in place. There are two distinct fork kinds, and the boundary between them is
+normative.
 
-**World fork / community branching is platform scope.** The local `nexus42` CLI and daemon do not implement fork creation, fork listing, or fork merge commands. `World::fork` in `nexus-narrative` may carry the domain model for platform sync, but no local product surface exposes fork operations. See planning decision PD-01 in the deferred-features tracker.
+#### 6.6.1 Local authoring fork (in-scope; local surface)
+
+A **local authoring fork** is a single creator branching the timeline of a world they
+own, so a divergent rewrite can be explored without disturbing the parent branch. It
+performs no sync, no cross-creator sharing, and no platform publish. The local authoring
+fork is implemented by the `nexus.fork.create` capability (V1.60 P0, DF-46); the daemon
+HTTP route and Canvas UI that expose it to authors are added in V1.162.
+
+**Lazy-branch model (V1.26+, preserved).** A local fork is a new `branch_id` carried by
+`narrative_timeline_events` rows within an existing owned world — it is NOT a new world
+copy and does NOT duplicate world storage. The fork is materialized by appending a
+`fork_created` marker event at `sequence_no` 0 on the new branch. There is no dedicated
+`fork_branches` storage table for local forks (the lazy model deliberately rejects one);
+lineage is carried as structured metadata on the marker event (see §6.6.3).
+
+**Fork-creation write boundary (normative):**
+
+1. **Owner-gated.** Only the world's owning creator may create a local fork. Authorization is enforced before any fork-point read (`require_world_owner` / `ensure_world_owned`); a foreign world yields **403** and MUST NOT reveal whether the fork-point event exists.
+2. **Fork-point event validation.** The stated `forked_from_event_id` MUST exist on the stated `parent_branch_id` within the same `world_id`; otherwise the create is rejected (**422**). A fork always diverges from a real event on a real branch of the owned world.
+3. **Atomic materialization.** `fork.create` allocates a new `fbk_<uuid12>` `branch_id` and appends the `fork_created` marker event establishing the branch. The branch does not exist until the marker is appended (lazy forks are otherwise invisible until the first event).
+4. **No merge / no edit / no cross-creator.** Local fork-merge, lineage editing, reparenting, and cross-creator sharing are out of scope (deferred — `BL-01` fork-merge; V1.162 compass Non-Goals).
+
+#### 6.6.2 Platform / social / community fork (platform-only; out of this repo)
+
+**Community/social fork** — sharing a world across creators or publishing a fork to a
+community — is platform scope (planning decision PD-01). It lives in `nexus-platform`,
+not in this repo. `World::fork` / the in-memory `ForkBranch` aggregate in
+`nexus-narrative` MAY carry the platform world-copy domain model (including
+`parent_world_id`) for platform sync, but no LOCAL product surface exposes platform fork
+operations. PD-01's "World fork is platform-only" refers to THIS community/social kind,
+NOT to the local authoring fork in §6.6.1. (Tracker §2.1 PD-01 wording is reconciled to
+match by V1.162 P1 T3 — doc-aligns-to-shipped-reality, not new policy.)
+
+#### 6.6.3 Lineage projection contract (V1.162 — normative)
+
+Because a local fork is a branch within a world (not a forked world), fork lineage is a
+**branch-level** projection, distinct from the world-level `WorldState` fork fields.
+
+- **Carrier (architect-locked, V1.162): approach B — structured marker metadata.** The `fork_created` marker event's `extensions_nexus_json` carries the lineage payload. The marker is the single source of truth for the fork's existence and lineage (consistent with the lazy model: no second store, no `fork_branches` table, no new read route). The marker is written with `status = canon` (a fork creation is a committed structural fact, findable in canon-filtered reads).
+- **Branch-level lineage fields** (derived from the marker; surfaced to clients through the existing `TimelineEventInfo.extensions` field on the `GET /v1/daemon/worlds/:world_id/timeline/events` read, filtered by `event_type=fork_created`):
+  - `is_fork` — `true` iff a `fork_created` marker exists on the branch; `false` for root/non-fork branches.
+  - `parent_branch_id` — the branch this fork diverged from (drives one-hop return-to-parent).
+  - `forked_from_event_id` — the fork-point event on the parent branch.
+  - `label` (optional) — the human-readable label given at create.
+- **World-level `WorldState` fork fields** (`is_fork`, `fork_branch_id`, `parent_world_id`, `forked_from_event_id`) describe the platform world-copy fork model (§6.6.2); they are NOT the carrier for local branch lineage and are NOT populated for local forks on the SQLite read path. Compute branch derivation reads `WorldState.fork_branch_id` as the world's current branch — that world-level semantic is unchanged by V1.162.
+- **No spoke dependence.** The nexus-local lineage projection is independent of spoke round-trip fidelity (DR-44 stays deferred); lineage is read from the local `narrative_timeline_events` marker, never reconstructed from a spoke round-trip.
 
 ### 6.7 Creator/User pairing
 
