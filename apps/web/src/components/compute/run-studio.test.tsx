@@ -114,12 +114,18 @@ function deepLinkHandlers(worlds: unknown[] = []) {
   ];
 }
 
-function renderStudio(initialRunId?: string, initialWorldId?: string, module: ModuleDetail = MODULE) {
+function renderStudio(
+  initialRunId?: string,
+  initialWorldId?: string,
+  module: ModuleDetail = MODULE,
+  initialBranchId?: string,
+) {
   return renderInApp(
     <RunStudio
       module={module}
       initialRunId={initialRunId}
       initialWorldId={initialWorldId}
+      initialBranchId={initialBranchId}
     />,
     { client: new BrowserClient() },
   );
@@ -444,5 +450,70 @@ describe('RunStudio module-switch re-sync (V1.147 PR #194 round 4)', () => {
       expect(screen.queryByTestId('run-inspector')).not.toBeInTheDocument(),
     );
     expect(screen.queryByText('Fresh run event')).not.toBeInTheDocument();
+  });
+});
+
+describe('RunStudio branch pre-fill (`?branch=` — Bugbot 1)', () => {
+  /** Worlds + Runs history + per-run detail + World KB graph + a capturing
+   * run POST (the Bugbot 1 contract: the Run request carries the fork). */
+  function branchRunHandlers(worlds: unknown[], runBodies: unknown[]) {
+    return [
+      ...deepLinkHandlers(worlds),
+      http.get('/v1/daemon/worlds/:worldId/kb/graph', () =>
+        HttpResponse.json({ entities: [], source_anchors: [], relationships: [] }),
+      ),
+      http.post('/v1/daemon/compute/run', async ({ request }) => {
+        runBodies.push(await request.json());
+        return HttpResponse.json({
+          run_id: 'run_branch_1',
+          status: 'succeeded',
+          module_id: 'basic-combat',
+          module_version: '1.0.0',
+          world_id: 'w1',
+          proposals: {
+            schema_version: 1,
+            state_delta: [],
+            timeline_events: [{ title: 'Branch run event', summary: '...' }],
+            new_key_blocks: [],
+            battle_report: { kind: 'combat' },
+          },
+          created_at: '2026-08-01T04:00:00Z',
+        });
+      }),
+    ];
+  }
+
+  it('submits the fork branch as `branch_id` when the entry carried `?branch=`', async () => {
+    const runBodies: unknown[] = [];
+    useHandlers(...branchRunHandlers([{ world_id: 'w1', title: 'Test World' }], runBodies));
+    const user = userEvent.setup();
+
+    // Timeline Run Module entry from a forked-branch view (`?branch=fbk_fork_1`).
+    renderStudio(undefined, 'w1', MODULE, 'fbk_fork_1');
+    await waitFor(() => expect(screen.getByTestId('run-studio-world')).toBeEnabled());
+
+    await user.click(screen.getByTestId('run-studio-run'));
+    await waitFor(() => expect(runBodies).toHaveLength(1));
+    expect(runBodies[0]).toMatchObject({
+      world_id: 'w1',
+      module_id: 'basic-combat',
+      branch_id: 'fbk_fork_1',
+    });
+  });
+
+  it('omits `branch_id` when the entry came from the root Timeline (no `?branch=`)', async () => {
+    const runBodies: unknown[] = [];
+    useHandlers(...branchRunHandlers([{ world_id: 'w1', title: 'Test World' }], runBodies));
+    const user = userEvent.setup();
+
+    renderStudio(undefined, 'w1', MODULE);
+    await waitFor(() => expect(screen.getByTestId('run-studio-world')).toBeEnabled());
+
+    await user.click(screen.getByTestId('run-studio-run'));
+    await waitFor(() => expect(runBodies).toHaveLength(1));
+    const body = runBodies[0] as Record<string, unknown>;
+    expect(body.world_id).toBe('w1');
+    expect(body.module_id).toBe('basic-combat');
+    expect(body.branch_id).toBeUndefined();
   });
 });

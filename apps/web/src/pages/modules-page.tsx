@@ -16,7 +16,8 @@
  * Timeline Run Module entry mounts the SAME studio with context pre-fill).
  * This page gains the deep-link selection mechanism: `?module=<id>&run=<id>`
  * (compute node "Open Run" → Settings → Modules run detail) and
- * `?world=<id>` (Timeline Run Module entry → World pre-filled). Module
+ * `?world=<id>` + `?branch=<id>` (Timeline Run Module entry → World + fork
+ * branch pre-filled — Bugbot 1). Module
  * selection + run opening write the params back so refresh keeps the detail.
  */
 import { Cpu, RefreshCw } from 'lucide-react';
@@ -67,10 +68,16 @@ export function ModulesPageBody() {
     setSelectedId(moduleParam);
   }, [moduleParam]);
 
+  // Bugbot 1 — `?branch=` pre-fill for the Run Studio, normalized like the
+  // Timeline's branch derivation (`?branch=` empty → undefined/root — never
+  // an empty-string branch id, which the daemon would reject as invalid).
+  const branchParam = searchParams.get('branch');
+  const branchSeed = branchParam && branchParam.length > 0 ? branchParam : undefined;
+
   function selectModule(id: string) {
     setSelectedId(id);
-    // Preserve the `?world=` entry pre-fill (Timeline Run Module entry);
-    // a module change invalidates the deep-linked run context.
+    // Preserve the `?world=` / `?branch=` entry pre-fill (Timeline Run
+    // Module entry); a module change invalidates the deep-linked run context.
     const next = new URLSearchParams(searchParams);
     next.set('module', id);
     next.delete('run');
@@ -168,6 +175,7 @@ export function ModulesPageBody() {
                 <ModuleDetailPanel
                   moduleId={selectedId}
                   initialWorldId={searchParams.get('world') ?? undefined}
+                  initialBranchId={branchSeed}
                   initialRunId={searchParams.get('run') ?? undefined}
                   onRunOpen={(runId) => {
                     // Keep `?world=` (entry pre-fill) alongside the run
@@ -196,12 +204,15 @@ export function ModulesPageBody() {
 function ModuleDetailPanel({
   moduleId,
   initialWorldId,
+  initialBranchId,
   initialRunId,
   onRunOpen,
 }: {
   moduleId: string;
   /** V1.147 P2 T3 — Timeline Run Module entry pre-fill (`?world=`). */
   initialWorldId?: string;
+  /** Bugbot 1 — Timeline Run Module entry fork pre-fill (`?branch=`). */
+  initialBranchId?: string;
   /** V1.147 P2 T3 — compute node "Open Run" deep link (`?run=`). */
   initialRunId?: string;
   /** V1.147 P2 T3 — Runs-table open → URL write-back (`?module&run`). */
@@ -318,6 +329,7 @@ function ModuleDetailPanel({
       <RunStudio
         module={m}
         initialWorldId={initialWorldId}
+        initialBranchId={initialBranchId}
         initialRunId={initialRunId}
         onRunOpen={onRunOpen}
       />

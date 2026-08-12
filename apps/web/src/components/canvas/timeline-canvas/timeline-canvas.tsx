@@ -65,7 +65,14 @@ import { LayerBreadcrumb } from '@/components/canvas/layer-breadcrumb';
 import { useCanvasSurface, type CanvasSurfaceQueryResult } from '@/components/canvas/use-canvas-surface';
 import { SemanticZoomBridge } from '@/components/canvas/use-semantic-zoom';
 import { useWorldKbGraph, usePatchWorldKbEntity } from '@/lib/canvas/use-world-kb-data';
-import { flattenPages, useComputeModules, useForkLineage, useWorldTimelineEvents, useWorks } from '@/api/queries';
+import {
+  flattenPages,
+  useComputeModules,
+  useForkLineage,
+  useNarrativeWorlds,
+  useWorldTimelineEvents,
+  useWorks,
+} from '@/api/queries';
 import { useNexusClient } from '@/lib/client-context';
 import { SettingsModalContext } from '@/components/layout/settings-modal-context';
 import { LoadingState, ErrorState, EmptyState } from '@/components/ui/states';
@@ -130,6 +137,16 @@ export interface TimelineCanvasProps {
  * honestly not rendered (the projection renders only what it fetched).
  */
 const TIMELINE_EVENTS_PROJECTION_CAP = 500;
+
+/**
+ * Bugbot 2 — root-branch fallback when `narrative_worlds.root_fork_branch_id`
+ * is unset. Mirrors the daemon's root resolution (`resolve_run_branch` /
+ * timeline-events root fallback in `compute_runs.rs` + `timeline_events.rs`).
+ * Root is otherwise represented as NO `?branch=` param; comparing against
+ * this id lets the parent hop normalize a root parent to `undefined` instead
+ * of writing the root id into the URL (the dual-representation bug).
+ */
+const ROOT_BRANCH_ID_FALLBACK = 'fbk_root';
 
 /**
  * V1.156 P1 fix-wave 1 (F3) — stable empty fixture payload for Worlds with
@@ -239,6 +256,21 @@ export function TimelineCanvas({ worldId, sceneBeatFixture }: TimelineCanvasProp
     [searchParams, setSearchParams],
   );
 
+  // Bugbot 2 — the World's ROOT branch id, from the narrative-worlds DTO
+  // (`World.root_fork_branch_id`; daemon fallback `fbk_root` when unset).
+  // `handleOpenParentBranch` compares the parent against this so a hop to
+  // the World's root CLEARS `?branch=` (root = no param) instead of setting
+  // the root id — the degraded-badge guard (`forkLineageUnavailable`) must
+  // never see a truthy root `activeBranchId`. The shared worlds query key
+  // means the list is reused (not re-fetched) when the app already loaded it.
+  const worlds = useNarrativeWorlds();
+  const rootBranchId = useMemo(
+    () =>
+      worlds.data?.find((w) => w.world_id === worldId)?.root_fork_branch_id ??
+      ROOT_BRANCH_ID_FALLBACK,
+    [worlds.data, worldId],
+  );
+
   // ── V1.147 P2 T3 — compute events + module registry ──────────────────────
   //
   // The Narrative projection merges the World's canon compute_result log
@@ -286,10 +318,18 @@ export function TimelineCanvas({ worldId, sceneBeatFixture }: TimelineCanvasProp
   // `handleBranchChange` so the timeline-events query re-keys to the
   // parent branch and the parent Timeline renders immediately. No merge /
   // edit / multi-branch workspace — parent hop ONLY.
+  //
+  // Bugbot 2 — a parent that IS the World's root branch hops to `undefined`
+  // (clears `?branch=`), never to the root id string: root is canonically
+  // NO param, and the degraded-badge guard treats any truthy
+  // `activeBranchId` as a non-root fork (a lineage read failure on a root
+  // `?branch=<rootId>` URL would otherwise render the degraded fork badge
+  // on the root Timeline).
   const handleOpenParentBranch = useCallback(() => {
-    if (!forkLineageData.parent_branch_id) return;
-    handleBranchChange(forkLineageData.parent_branch_id);
-  }, [forkLineageData.parent_branch_id, handleBranchChange]);
+    const parentId = forkLineageData.parent_branch_id;
+    if (!parentId) return;
+    handleBranchChange(parentId === rootBranchId ? undefined : parentId);
+  }, [forkLineageData.parent_branch_id, handleBranchChange, rootBranchId]);
 
   const eventsList = useMemo(
     () => flattenPages(timelineEvents.data),
@@ -351,14 +391,20 @@ export function TimelineCanvas({ worldId, sceneBeatFixture }: TimelineCanvasProp
 
   // Timeline-scoped Run Studio: World pre-filled via `?world=` (behavior
   // spec §1 P2 — context pre-fill + entry chrome, not a second studio).
+  // Bugbot 1 — when the canvas shows a FORKED branch, the entry ALSO
+  // pre-fills `?branch=<activeBranchId>` so the run request carries
+  // `branch_id` and compute run/accept writes the fork (not the world
+  // root). Root (undefined) → no branch param, unchanged.
   const onRunModule = useCallback(() => {
     settingsModal?.openSettings(
       'modules',
       undefined,
       undefined,
-      `?world=${encodeURIComponent(worldId)}`,
+      `?world=${encodeURIComponent(worldId)}${
+        activeBranchId ? `&branch=${encodeURIComponent(activeBranchId)}` : ''
+      }`,
     );
-  }, [settingsModal, worldId]);
+  }, [settingsModal, worldId, activeBranchId]);
 
   // Open Run from a Compute result node → Settings → Modules run detail
   // (deep link selects the module + opens the run inspector).

@@ -18,9 +18,11 @@
  * fresh-run context; forcing event context would violate the "don't force
  * it" constraint — spec §1 P2 optional, plan brief).
  *
- * Branch scope: the studio sends no `branch_id` on Run — the daemon defaults
- * to the World's current branch (root fallback), which matches the World
- * Timeline's world-state source.
+ * Branch scope (Bugbot 1): the studio threads the Timeline entry's `?branch=`
+ * pre-fill into the Run request as `branch_id`, so compute run/accept writes
+ * the forked branch — not the World root. Omitted when the entry came from
+ * the root Timeline (no `?branch=`): the daemon defaults to the World's
+ * current branch (root fallback), matching the root Timeline's source.
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -71,6 +73,13 @@ export interface RunStudioProps {
    */
   initialWorldId?: string;
   /**
+   * Bugbot 1 — pre-filled fork branch (Timeline Run Module entry from a
+   * forked-branch view, `?branch=`). Threaded into the Run request as
+   * `branch_id`; omitted/undefined → the daemon defaults to the World's
+   * current branch (root).
+   */
+  initialBranchId?: string;
+  /**
    * V1.147 P2 T3 — deep-linked run id (compute node "Open Run"). The run
    * inspector opens immediately; status flips (Needs review → Applied /
    * Discarded) render from the shared run-detail query.
@@ -97,7 +106,13 @@ const RUN_STATUS_FILTER_OPTIONS: { value: RunStatus; labelKey: string }[] = [
   { value: 'failed', labelKey: 'run.runsStatus.failed' },
 ];
 
-export function RunStudio({ module, initialWorldId, initialRunId, onRunOpen }: RunStudioProps) {
+export function RunStudio({
+  module,
+  initialWorldId,
+  initialBranchId,
+  initialRunId,
+  onRunOpen,
+}: RunStudioProps) {
   const { t } = useTranslation('modules');
   const { toast } = useToast();
 
@@ -110,6 +125,25 @@ export function RunStudio({ module, initialWorldId, initialRunId, onRunOpen }: R
   const worlds = useNarrativeWorlds();
   const [worldId, setWorldId] = useState(initialWorldId ?? '');
   const worldGraph = useWorldKbGraph(worldId || undefined);
+
+  // Bugbot 1 — `?branch=` pre-fill re-sync, mirroring the `?world=` pattern
+  // below: the Settings Modules section stays mounted across Timeline "Run
+  // Module" entries (search-params-only navigation), so the state seed alone
+  // would keep the previous fork's branch on the next run request — a Run
+  // would write the wrong branch. Keyed on the prop VALUE with a ref guard:
+  // a new `?branch=` switches the scoped branch, `?branch=` removal resets
+  // to undefined (world root), and an unchanged prop never clobbers state.
+  // The invocation values are NOT reset here — fork branches share the
+  // World's KB, so params remain valid within the same World (the `?world=`
+  // re-sync below owns cross-World resets).
+  const [branchId, setBranchId] = useState(initialBranchId ?? undefined);
+  const lastBranchSeedRef = useRef(initialBranchId);
+  useEffect(() => {
+    if (initialBranchId !== lastBranchSeedRef.current) {
+      lastBranchSeedRef.current = initialBranchId;
+      setBranchId(initialBranchId ?? undefined);
+    }
+  }, [initialBranchId]);
 
   // V1.147 PR #194 — deep-link `?world=` re-sync. The Settings Modules
   // section stays mounted when a second Timeline "Run Module" entry lands on
@@ -327,7 +361,14 @@ export function RunStudio({ module, initialWorldId, initialRunId, onRunOpen }: R
     }
     setJsonError(null);
     runCompute.mutate(
-      { world_id: worldId, module_id: module.module_id, invocation_params: params },
+      {
+        world_id: worldId,
+        module_id: module.module_id,
+        invocation_params: params,
+        // Bugbot 1 — fork branch scope (from the Timeline `?branch=`
+        // pre-fill); undefined = world root, daemon default.
+        branch_id: branchId ?? undefined,
+      },
       {
         onSuccess: (res) => {
           setLatestRun(res);

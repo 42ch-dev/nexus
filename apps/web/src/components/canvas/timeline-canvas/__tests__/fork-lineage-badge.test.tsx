@@ -174,7 +174,7 @@ function forkChrome(
     ),
     http.get('/v1/daemon/narrative/worlds', () =>
       HttpResponse.json({
-        worlds: [{ world_id: 'world-7', title: 'Test World' }],
+        worlds: [{ world_id: 'world-7', title: 'Test World', root_fork_branch_id: ROOT_BRANCH_ID }],
       }),
     ),
     http.get('/v1/daemon/compute/runs/:runId', () =>
@@ -289,13 +289,14 @@ describe('TimelineCanvas fork lineage chrome (V1.162 P2 T2)', () => {
     const badge = await screen.findByTestId('fork-lineage-badge');
     fireEvent.click(within(badge).getByTestId('fork-lineage-open-parent'));
 
-    // activeBranchId = parent_branch_id → the timeline-events query re-keys
-    // to the parent branch (the observable branch-context switch; mirrors
-    // T1's PD-6 assertion). Both the canvas events query AND the lineage
-    // hook read the active branch, so the daemon reads now carry the parent.
+    // Bugbot 2 — the parent is the World's ROOT branch, so the hop CLEARS
+    // `?branch=` (root = no param) instead of setting the root id. The
+    // timeline-events reads re-key to the parent with NO `branch_id` param
+    // (the daemon defaults to the World root) — the observable branch-
+    // context switch; mirrors T1's PD-6 assertion.
     await waitFor(() => {
       const url = new URL(state.lastEventsUrl!, 'http://localhost');
-      expect(url.searchParams.get('branch_id')).toBe(ROOT_BRANCH_ID);
+      expect(url.searchParams.get('branch_id')).toBeNull();
     });
 
     // The root branch has no fork marker → the fork chrome disappears (the
@@ -334,6 +335,31 @@ describe('TimelineCanvas fork lineage chrome (V1.162 P2 T2)', () => {
 
     await waitFor(() => expect(state.lastEventsUrl).not.toBeNull());
     expect(screen.queryByTestId('fork-lineage-badge')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('fork-lineage-unavailable')).not.toBeInTheDocument();
+  });
+
+  it('fork_badge_parent_hop_to_root — hop to root clears `?branch=`; a root lineage error does NOT degrade (Bugbot 2)', async () => {
+    const { state } = renderForkChrome({ branch: FORK_BRANCH_ID });
+
+    const badge = await screen.findByTestId('fork-lineage-badge');
+    // Fail every subsequent fork_created read (the root read after the hop).
+    state.lineageFailures = 100;
+    fireEvent.click(within(badge).getByTestId('fork-lineage-open-parent'));
+
+    // The hop to the World's root CLEARS the branch param: the reads re-key
+    // to root WITHOUT `branch_id` (root = no param — the daemon default).
+    await waitFor(() => {
+      const url = new URL(state.lastEventsUrl!, 'http://localhost');
+      expect(url.searchParams.get('branch_id')).toBeNull();
+    });
+
+    // The root lineage read FAILED — but root must never render the
+    // degraded fork badge (the guard only degrades on a NON-ROOT branch).
+    // Before Bugbot 2 the hop set `?branch=<rootId>`, making
+    // `activeBranchId` truthy on root → the degraded badge appeared.
+    await waitFor(() =>
+      expect(screen.queryByTestId('fork-lineage-badge')).not.toBeInTheDocument(),
+    );
     expect(screen.queryByTestId('fork-lineage-unavailable')).not.toBeInTheDocument();
   });
 
