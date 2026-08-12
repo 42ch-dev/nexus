@@ -166,6 +166,11 @@ function ManuscriptAnchorBlock({
  * it has a valid World id and a real `useNavigate`). Honest scope cut:
  * either slot absent → CTA hidden, no silent degradation.
  *
+ * V1.163 P1 Task 3 — the button also exposes `data-event-id` from
+ * `node.data.worldEventId` when the Work event carries an event-level bind
+ * (World KB `key_block_id`); absent → attribute omitted (V1.123 surface
+ * fallback). The orchestrator reads the node on click to compose the URL.
+ *
  * The affordance is reserved for the Narrative-event binding axis (architect
  * §3.4 — Moment-on-Outline carrier has no Work-event → World-event binding
  * today). Scene + beat inspectors do NOT surface this CTA in V1.123.
@@ -189,6 +194,14 @@ function ViewOnWorldTimelineAffordance({
       type="button"
       data-testid="work-timeline-view-on-world-timeline"
       data-world-id={worldId}
+      // V1.163 P1 Task 3 — when the selected Work event carries an event-level
+      // bind (`worldEventId` — the World KB entity `key_block_id`), the CTA
+      // target deep-links to the specific World event
+      // (`?layer=narrative&event=<id>`); absent → the V1.123 surface-level
+      // jump (`?layer=narrative` only). The attribute carries the event id so
+      // the DOM exposes which target the click will land on (PD-5 three-state
+      // matrix; undefined → attribute omitted → V1.123 fallback).
+      data-event-id={node.data.worldEventId}
       onClick={() => onViewOnWorldTimeline(node)}
       aria-label={t('workTimeline.inspector.viewOnWorldTimelineAria', {
         defaultValue: "Open this Work's bound World on the World Timeline",
