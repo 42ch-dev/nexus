@@ -169,6 +169,16 @@ export interface WorkTimelineNodeData {
   };
   /** Event id (Narrative layer only). */
   eventId?: string;
+  /**
+   * V1.163 P1 Task 3 — World Timeline Narrative event this Work event
+   * realizes (`WorkOutline.timeline_events[].world_event_id`, additive Task 1
+   * carrier). The value is a World KB entity `key_block_id` (`block_type=event`
+   * KnowledgeEntry) — the World Timeline Narrative node id base. Present only
+   * when the outline event carries the bind; the inspector's "View on World
+   * Timeline" CTA deep-links to `?layer=narrative&event=<worldEventId>` when
+   * set (PD-5 state 1), else falls back to the V1.123 surface-level jump.
+   */
+  worldEventId?: string;
   /** Scene id (Moment layer only). */
   sceneId?: string;
   /** Beat id (Moment layer only). */
@@ -380,7 +390,12 @@ const NARRATIVE_NODE_ID_PREFIX = 'wt-event:';
 const MOMENT_SCENE_NODE_ID_PREFIX = 'wt-scene:';
 const MOMENT_BEAT_NODE_ID_PREFIX = 'wt-beat:';
 
-function narrativeEventNodeId(eventId: string): string {
+/**
+ * V1.163 P1 Task 3 — exported for the orchestrator's inbound `?event=` focus
+ * (architect lock: Work Timeline selects `wt-event:${eventParam}` after
+ * projection). Mirrors the World adapter's exported `nodeIdOf`.
+ */
+export function narrativeEventNodeId(eventId: string): string {
   return `${NARRATIVE_NODE_ID_PREFIX}${eventId}`;
 }
 function momentSceneNodeId(sceneId: string): string {
@@ -443,6 +458,12 @@ function projectNarrativeLayer(graph: WorkTimelineGraph): {
     if (evt.realizes_chapter_id !== undefined && evt.realizes_chapter_id !== null) {
       data.realizesChapterId = evt.realizes_chapter_id;
       data.manuscriptAnchor = { chapterId: evt.realizes_chapter_id };
+    }
+    // V1.163 P1 Task 3 — cross-surface event bind (Task 1 additive carrier).
+    // Present only when the outline event realizes a World Narrative event;
+    // the inspector's CTA deep-links to the specific World event when set.
+    if (evt.world_event_id !== undefined && evt.world_event_id !== null) {
+      data.worldEventId = evt.world_event_id;
     }
     return {
       id: narrativeEventNodeId(evt.event_id),

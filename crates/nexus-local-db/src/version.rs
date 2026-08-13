@@ -12,7 +12,8 @@
 // V1.150 (residual close): 12 → 13 — moment_directives rebuild dropping last_chapter_no + new moment_directive_chapter_anchors table (R-V1150P2-004/R-V1150P2-008: per-(directive, work) chapter delta TTL burn).
 // V1.155: 13 → 14 — peer_hosts table (N-C3 multi-host production, P0 T1).
 // V1.158: 14 → 15 — peer_hosts.last_peer_id column (R-V1155P0-001 peer_id session recording, P2 T2).
-pub const DB_SCHEMA_VERSION: u32 = 15;
+// V1.163: 15 → 16 — legacy outbox table DROP (DR-08; migration 20260812_drop_legacy_outbox.sql).
+pub const DB_SCHEMA_VERSION: u32 = 16;
 
 /// Contract schema version from generated wire types
 ///

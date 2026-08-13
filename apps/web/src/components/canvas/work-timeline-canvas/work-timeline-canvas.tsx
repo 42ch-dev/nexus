@@ -32,10 +32,10 @@
  * registration; Task 2 ships the canvas facade with the `workId` prop
  * contract ready).
  */
-import { useMemo, useRef } from 'react';
-import { useCallback } from 'react';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link, useNavigate, useSearchParams } from 'react-router';
+import type { Node } from '@xyflow/react';
 
 import { CanvasShell } from '@/components/canvas/canvas-shell';
 import { LayerBreadcrumb } from '@/components/canvas/layer-breadcrumb';
@@ -53,8 +53,10 @@ import type { SceneBeatFixturePayload } from '../outline-canvas/graph-projection
 
 import {
   createWorkTimelineCanvasAdapter,
+  narrativeEventNodeId,
   type WorkTimelineCanvasAdapterContext,
   type WorkTimelineLayer,
+  type WorkTimelineNodeData,
 } from './work-timeline-canvas-adapter';
 import { NleTimelineBandOverlay } from '../timeline-canvas/nle-timeline-band-overlay';
 import { filterTimelineEntityNodes } from '../timeline-canvas/nle-timeline-projection';
@@ -129,12 +131,32 @@ export function WorkTimelineCanvas({ workId, sceneBeatFixture }: WorkTimelineCan
   // callback is only referenced by the adapter context when `boundWorldId`
   // is present, so a stale-closure risk would not arise in practice — but
   // the memo keeps the referential shape stable for the ctxRef assignment.
-  const onViewOnWorldTimeline = useCallback(() => {
-    if (!boundWorldId) return;
-    navigate(
-      `/worlds/${encodeURIComponent(boundWorldId)}/timeline?layer=narrative`,
-    );
-  }, [boundWorldId, navigate]);
+  //
+  // V1.163 P1 Task 3 — event-level forward deep-link (PD-5 three-state
+  // matrix). The callback now receives the selected Work Timeline node and
+  // reads `node.data.worldEventId` (projected from the Task 1 carrier
+  // `WorkOutline.timeline_events[].world_event_id` — the World KB entity
+  // `key_block_id`):
+  //   1. Event-level bind → `/worlds/:worldId/timeline?layer=narrative&event=<worldEventId>`
+  //      (the World Timeline selects `entity:<id>` on arrival — Task 2).
+  //   2. Surface bind only → V1.123 fallback `?layer=narrative` (no event).
+  //   3. No bind → callback not wired (`boundWorldId` undefined) → CTA hidden.
+  const onViewOnWorldTimeline = useCallback(
+    (node: Node<WorkTimelineNodeData>) => {
+      if (!boundWorldId) return;
+      const worldEventId = node.data.worldEventId;
+      if (worldEventId) {
+        navigate(
+          `/worlds/${encodeURIComponent(boundWorldId)}/timeline?layer=narrative&event=${encodeURIComponent(worldEventId)}`,
+        );
+        return;
+      }
+      navigate(
+        `/worlds/${encodeURIComponent(boundWorldId)}/timeline?layer=narrative`,
+      );
+    },
+    [boundWorldId, navigate],
+  );
 
   // ── V1.123 P2 Task 4 + P4 Task 6 — layer state + URL persistence ────────
   //
@@ -254,6 +276,47 @@ export function WorkTimelineCanvas({ workId, sceneBeatFixture }: WorkTimelineCan
   );
 
   const surface = useCanvasSurface(adapter, surfaceQuery);
+
+  // ── V1.163 P1 Task 3 — inbound event focus (architect lock) ───────────────
+  //
+  // The REVERSE-direction destination: a World→Work deep-link
+  // (`/worlds/... → /works/:workId/timeline?layer=narrative&event=<workEventId>`,
+  // Task 2) lands here. Reads `?event=` via the existing `useSearchParams()`
+  // plumbing and selects the React Flow node `wt-event:${eventParam}` after
+  // projection (the same node id `projectNarrativeLayer` emits via
+  // `narrativeEventNodeId(event_id)`). Selection drives the existing
+  // inspector — no new focus primitive.
+  //
+  // AC-V1163-3 honest empty focus: an unknown id matches no node → nothing is
+  // selected and nothing errors — the Narrative layer loads normally. The
+  // `appliedInboundFocusRef` one-shot guard (per URL value) ensures a LATER
+  // user selection is never fought by a re-running effect: once the deep-link
+  // selection has been applied (or the id is unknown), the effect stays quiet
+  // until the `?event=` value itself changes. Mirrors the World Timeline
+  // orchestrator's Task 2 inbound focus (`timeline-canvas.tsx`).
+  const eventParamRaw = searchParams.get('event');
+  const inboundEventNodeId =
+    eventParamRaw && eventParamRaw.length > 0 ? narrativeEventNodeId(eventParamRaw) : null;
+  const appliedInboundFocusRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!inboundEventNodeId) return;
+    if (appliedInboundFocusRef.current === inboundEventNodeId) return;
+    if (surface.selectedNodeId === inboundEventNodeId) {
+      // Selection already applied (e.g. it survived a projection rebuild) —
+      // mark it applied so we never fight a later user selection.
+      appliedInboundFocusRef.current = inboundEventNodeId;
+      return;
+    }
+    const exists = surface.nodes.some((n) => n.id === inboundEventNodeId);
+    if (!exists) return; // unknown id — no fabricated node (AC-V1163-3)
+    const changes = surface.nodes.map((n) => ({
+      type: 'select' as const,
+      id: n.id,
+      selected: n.id === inboundEventNodeId,
+    }));
+    surface.onNodesChange(changes);
+    appliedInboundFocusRef.current = inboundEventNodeId;
+  }, [inboundEventNodeId, surface.nodes, surface.selectedNodeId, surface.onNodesChange]);
 
   // ── Render ────────────────────────────────────────────────────────────────
 

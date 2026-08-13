@@ -191,3 +191,9 @@ Engineering reference for the Nexus OSS harness **knowledge** tree.
 | --- | --- |
 | [architecture-patterns/three-layer-timeline-projection.md](architecture-patterns/three-layer-timeline-projection.md) | **Updated** — V1.156 3×2 matrix completion: P1 (World×Moment, read/projection of bound Works' Outline scene/beat data) + P2 (Work×Brief, projection of bound World's era entities) shipped; all three layers now valid on both surfaces (V1.123 surface-layer URL restriction lifted); read-only inspectors on projected layers (PD-2/PD-3); DR-26 tracks the WorkOutline wire extension for real Moment data. Both frontend-only (`wire_contracts_changed:false`). Compound V1.156 |
 | [workflow-patterns/carry-qc-lessons-to-sibling-plan.md](workflow-patterns/carry-qc-lessons-to-sibling-plan.md) | Carry QC lessons to sibling plans proactively — when an iteration ships mirror plans (same pattern, different surface), bake the first plan's QC fix-wave findings into later siblings' briefs proactively; turns a likely N-finding fix-wave into fewer (V1.156: P2 baked in P1's 4 lessons → 1 converged fix vs P1's 4). Source plan `2026-08-10-v1.156-p2-work-timeline-brief-layer` — Status: Active (compound V1.156) |
+
+### V1.163 additions
+
+| Document | Description |
+| --- | --- |
+| [engineering/codegen-optional-field-callsite-coverage.md](engineering/codegen-optional-field-callsite-coverage.md) | Codegen optional field callsite coverage — `pnpm run codegen` regenerates Rust structs but does NOT update struct-literal callsites; `cargo check --workspace` after codegen catches `E0063` before it blocks downstream crates (V1.163 P1 schema change broke P2 compile; compound V1.163) |

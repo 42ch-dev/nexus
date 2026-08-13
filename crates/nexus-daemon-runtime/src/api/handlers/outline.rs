@@ -1214,6 +1214,7 @@ fn timeline_add_event(
             title,
             description: req.description.clone(),
             realizes_chapter_id: req.realizes_chapter_id,
+            world_event_id: None,
         });
     Ok(())
 }
@@ -1702,12 +1703,14 @@ mod tests {
                     title: "Plant".to_string(),
                     description: None,
                     realizes_chapter_id: Some(std::num::NonZeroU64::new(1).unwrap()),
+                    world_event_id: None,
                 },
                 WorkOutlineTimelineEventsItem {
                     event_id: "evt_b".to_string(),
                     title: "Payoff".to_string(),
                     description: None,
                     realizes_chapter_id: Some(std::num::NonZeroU64::new(2).unwrap()),
+                    world_event_id: None,
                 },
             ],
             foreshadows: vec![WorkOutlineForeshadowsItem {
@@ -1907,6 +1910,7 @@ mod tests {
                 title: "Payoff".to_string(),
                 description: None,
                 realizes_chapter_id: Some(std::num::NonZeroU64::new(2).unwrap()),
+                world_event_id: None,
             }],
             // The edge evt_a → evt_b is still present, but evt_a no longer exists.
             foreshadows: vec![WorkOutlineForeshadowsItem {
@@ -1948,6 +1952,7 @@ mod tests {
                 title: "Plant".to_string(),
                 description: None,
                 realizes_chapter_id: Some(std::num::NonZeroU64::new(1).unwrap()),
+                world_event_id: None,
             }],
             foreshadows: vec![WorkOutlineForeshadowsItem {
                 source_event_id: "evt_a".to_string(),
