@@ -23,6 +23,11 @@ nexus-contracts = { path = "../nexus-contracts" }
 nexus-home-layout = { path = "../nexus-home-layout" }
 nexus-narrative = { path = "../nexus-narrative" }
 nexus-knowledge = { path = "../nexus-knowledge" }
+# V1.164 P2 (l5-mind): spoke `validate_mind_state` gate on the `mind_states`
+# write path (plan Task 2 — the store calls the spoke validator before
+# persisting; a wire-shape rejection surfaces as
+# `LocalDbError::ValidationError` and nothing is stored).
+spoke-operations.workspace = true
 async-trait.workspace = true
 futures-util = { workspace = true }
 

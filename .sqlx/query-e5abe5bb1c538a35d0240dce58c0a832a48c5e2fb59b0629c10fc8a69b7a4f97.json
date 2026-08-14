@@ -1,0 +1,86 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT mind_state_id as \"mind_state_id!\", schema_version, holder_entry_id, canonical_name, occurred_at, sort_key, snapshot_json, deltas_json, source_anchor_json, created_at, updated_at, extensions_json FROM mind_states WHERE holder_entry_id = ? ORDER BY occurred_at ASC, sort_key ASC",
+  "describe": {
+    "columns": [
+      {
+        "name": "mind_state_id!",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "schema_version",
+        "ordinal": 1,
+        "type_info": "Integer"
+      },
+      {
+        "name": "holder_entry_id",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "canonical_name",
+        "ordinal": 3,
+        "type_info": "Text"
+      },
+      {
+        "name": "occurred_at",
+        "ordinal": 4,
+        "type_info": "Text"
+      },
+      {
+        "name": "sort_key",
+        "ordinal": 5,
+        "type_info": "Text"
+      },
+      {
+        "name": "snapshot_json",
+        "ordinal": 6,
+        "type_info": "Text"
+      },
+      {
+        "name": "deltas_json",
+        "ordinal": 7,
+        "type_info": "Text"
+      },
+      {
+        "name": "source_anchor_json",
+        "ordinal": 8,
+        "type_info": "Text"
+      },
+      {
+        "name": "created_at",
+        "ordinal": 9,
+        "type_info": "Text"
+      },
+      {
+        "name": "updated_at",
+        "ordinal": 10,
+        "type_info": "Text"
+      },
+      {
+        "name": "extensions_json",
+        "ordinal": 11,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "e5abe5bb1c538a35d0240dce58c0a832a48c5e2fb59b0629c10fc8a69b7a4f97"
+}

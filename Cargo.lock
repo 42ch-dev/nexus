@@ -3847,6 +3847,7 @@ dependencies = [
  "nix 0.28.0",
  "serde",
  "serde_json",
+ "spoke-operations",
  "sqlx",
  "tempfile",
  "thiserror 1.0.69",

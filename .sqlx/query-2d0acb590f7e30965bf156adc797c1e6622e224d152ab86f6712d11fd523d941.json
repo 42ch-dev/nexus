@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO mind_states (\n            mind_state_id, schema_version, holder_entry_id, canonical_name,\n            occurred_at, sort_key, snapshot_json, deltas_json, source_anchor_json,\n            created_at, updated_at, extensions_json\n        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 12
+    },
+    "nullable": []
+  },
+  "hash": "2d0acb590f7e30965bf156adc797c1e6622e224d152ab86f6712d11fd523d941"
+}
