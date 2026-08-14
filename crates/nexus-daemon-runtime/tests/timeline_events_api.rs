@@ -178,6 +178,71 @@ async fn happy_list_includes_compute_result_with_extensions() {
     assert!(!items[1]["created_at"].is_null());
 }
 
+/// V1.164 P3 T1 (AR-2): `TimelineEventInfo.modules` carries the
+/// functional-dialect modules verbatim from `narrative_timeline_events
+/// .modules_json` (event seeded with `modules.observation.observers`), and
+/// stays absent for events without modules data.
+#[tokio::test]
+async fn list_serializes_modules_from_modules_json() {
+    let ctx = ctx().await;
+    let world = "wld_test_world";
+    // Event WITHOUT modules data — `modules` must be absent from the wire.
+    seed_event(
+        &ctx.pool,
+        world,
+        ROOT_BRANCH,
+        "story_advance",
+        "canon",
+        0,
+        "Plain event",
+        None,
+    )
+    .await;
+    // Event WITH `modules.observation` — carried verbatim.
+    // SAFETY: test-only seed against the known narrative_timeline_events
+    // schema (incl. the V1.164 P1 `modules_json` column).
+    sqlx::query(
+        "INSERT INTO narrative_timeline_events \
+            (timeline_event_id, world_id, branch_id, event_type, status, sequence_no, \
+             title, summary, metadata_json, modules_json, created_at) \
+           VALUES (?, ?, ?, 'story_advance', 'canon', 1, 'Observed event', \
+             'summary of Observed event', '{}', ?, '2026-07-31T00:00:00Z')",
+    )
+    .bind(format!("evt_{world}_{ROOT_BRANCH}_1"))
+    .bind(world)
+    .bind(ROOT_BRANCH)
+    .bind(
+        r#"{"observation":{"observers":["kb_char_1","kb_char_2"],"access":{"line_of_sight":true}}}"#,
+    )
+    .execute(&ctx.pool)
+    .await
+    .unwrap();
+
+    let resp = list_events(&ctx, world, "").await;
+    assert_eq!(resp.status_code(), StatusCode::OK);
+    let items = resp.json::<Value>()["items"].as_array().unwrap().clone();
+    assert_eq!(items.len(), 2);
+
+    // Plain event: no modules key on the wire.
+    assert_eq!(items[0]["event_type"], "story_advance");
+    assert!(
+        items[0].get("modules").is_none(),
+        "event without modules_json must not emit a modules key: {}",
+        items[0]
+    );
+
+    // Observed event: modules.observation carried verbatim.
+    assert_eq!(items[1]["event_type"], "story_advance");
+    assert_eq!(
+        items[1]["modules"]["observation"]["observers"],
+        json!(["kb_char_1", "kb_char_2"])
+    );
+    assert_eq!(
+        items[1]["modules"]["observation"]["access"],
+        json!({"line_of_sight": true})
+    );
+}
+
 /// T1: default status filter is `canon` — provisional/rejected excluded.
 #[tokio::test]
 async fn default_status_filter_is_canon() {

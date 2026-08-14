@@ -13,7 +13,9 @@
 // V1.155: 13 → 14 — peer_hosts table (N-C3 multi-host production, P0 T1).
 // V1.158: 14 → 15 — peer_hosts.last_peer_id column (R-V1155P0-001 peer_id session recording, P2 T2).
 // V1.163: 15 → 16 — legacy outbox table DROP (DR-08; migration 20260812_drop_legacy_outbox.sql).
-pub const DB_SCHEMA_VERSION: u32 = 16;
+// V1.164: 16 → 17 — narrative_timeline_events.modules_json column (migration 20260814000001_add_timeline_event_modules_json.sql).
+// V1.164: 17 → 18 — mind_states table (migration 20260814000002_create_mind_states.sql).
+pub const DB_SCHEMA_VERSION: u32 = 18;
 
 /// Contract schema version from generated wire types
 ///

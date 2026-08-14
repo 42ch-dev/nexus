@@ -27,6 +27,7 @@ pub mod kb_relationships;
 pub mod kb_store;
 pub mod knowledge_store;
 pub mod memory_fragment;
+pub mod mind_state_store;
 pub mod moment_directive;
 pub mod narrative_gateway;
 pub mod narrative_write;
@@ -93,6 +94,11 @@ pub use memory_fragment::{
 pub use soul_narrative::{
     build_stats_fingerprint, get_soul_narrative, soul_narrative_fragment_stats,
     upsert_soul_narrative, SoulNarrativeFragmentStats, SoulNarrativeRecord,
+};
+
+// Re-export mind_state_store types (V1.164 P2, l5-mind when-axis storage)
+pub use mind_state_store::{
+    delete_mind_state, get_mind_state, insert_mind_state, list_mind_states_by_holder, MindStateRow,
 };
 
 // Re-export world_stories types

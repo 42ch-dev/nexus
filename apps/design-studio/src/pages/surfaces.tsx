@@ -32,6 +32,7 @@ import { CreatorShellFixtures } from '@/fixtures/creator-shell-fixtures';
 import { ChronosTitlebarFixtures } from '@/fixtures/chronos-titlebar-fixtures';
 import { GlobalTimelineFixtures } from '@/fixtures/global-timeline-fixtures';
 import { LayerBreadcrumbFixtures } from '@/fixtures/layer-breadcrumb-fixtures';
+import { MentalSurfacingFixtures } from '@/fixtures/mental-surfacing-fixtures';
 import { SelectionSubmenuStubFixtures } from '@/fixtures/selection-submenu-fixtures';
 import { NleTimelineCanvasFixtures } from '@/fixtures/nle-timeline-canvas-fixtures';
 import { TimelineCanvasFixtures } from '@/fixtures/timeline-canvas-fixtures';
@@ -868,6 +869,39 @@ export function SurfacesCanvasPage() {
           — light/dark acceptance here carries to the App graph.
         </p>
         <CanvasSurfacesFixtures />
+      </section>
+
+      {/* V1.164 P3 T2 — Mental surfacing inspector states (AR-6 studio-first) */}
+      <section className="mt-10" data-testid="surfaces-mental-surfacing">
+        <SurfaceHeading>Mental Surfacing</SurfaceHeading>
+        <p className="text-copy-14 text-gray-700 mb-6">
+          Read-only inspector states for the mental layer — character{' '}
+          <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+            modules.mental
+          </code>{' '}
+          fields and Timeline event{' '}
+          <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+            modules.observation.observers
+          </code>{' '}
+          — pinned before App wiring (V1.164 P3 AR-6 studio-first; the visual
+          contract for Tasks 3–4). Five frames: populated mental fields
+          (beliefs / goals / emotions proof), missing{' '}
+          <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+            modules.mental
+          </code>{' '}
+          (no empty panel), recorded observers (id + resolved name), explicit{' '}
+          <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+            observers: []
+          </code>{' '}
+          ("No observers" line, PD-9), and absent observation (section hidden).
+          Static English labels, no input controls. Wire shapes are
+          hand-mirrored locally — no{' '}
+          <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+            @42ch/nexus-contracts
+          </code>{' '}
+          (studio boundary).
+        </p>
+        <MentalSurfacingFixtures />
       </section>
 
       {/* V1.128 P1 T1 — NLE multi-track Timeline band */}

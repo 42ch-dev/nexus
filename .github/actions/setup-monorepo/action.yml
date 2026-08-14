@@ -40,7 +40,11 @@ runs:
     - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4
       with:
         node-version: ${{ inputs.node-version }}
-        cache: pnpm
+        # Cache only when dependencies are actually installed. Jobs that set
+        # install-deps: "false" (e.g. schema-consistency) never create the pnpm
+        # store, and actions/setup-node's post-step cache-save hard-fails with
+        # "Path Validation Error" when the cache path is absent (V1.164 PR #214).
+        cache: ${{ inputs.install-deps == 'true' && 'pnpm' || '' }}
 
     - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8  # stable
       if: ${{ inputs.rust-toolchain != '' }}

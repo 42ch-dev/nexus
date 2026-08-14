@@ -169,6 +169,7 @@ pub async fn list_timeline_events_scoped(
                 caused_by_event_ids_json,
                 affected_key_block_ids_json,
                 source_command_id,
+                modules_json,
                 created_at
             FROM narrative_timeline_events
             WHERE world_id = ? AND branch_id = ?"
@@ -185,6 +186,7 @@ pub async fn list_timeline_events_scoped(
                 caused_by_event_ids_json,
                 affected_key_block_ids_json,
                 source_command_id,
+                modules_json,
                 created_at
             FROM narrative_timeline_events
             WHERE world_id = ?"
@@ -218,8 +220,9 @@ pub async fn list_timeline_events_scoped(
 ///
 /// Serves `GET /v1/daemon/worlds/:world_id/timeline/events`. Unlike
 /// [`list_timeline_events_scoped`] (orchestrator read path, returns domain
-/// [`TimelineEvent`]s without the JSON extension columns), this page read
-/// returns the full row surface the daemon wire DTO needs — including
+/// [`TimelineEvent`]s with `modules_json` deserialized into their `modules`
+/// field), this page read returns the full row surface the daemon wire DTO
+/// needs — including
 /// `metadata_json` and `extensions_nexus_json` — and applies optional
 /// `status` / `event_type` equality filters plus a keyset cursor on
 /// `(branch_id, sequence_no)`.
@@ -278,6 +281,7 @@ pub async fn list_timeline_events_page(
                 source_command_id,
                 metadata_json,
                 extensions_nexus_json,
+                modules_json,
                 created_at
             FROM narrative_timeline_events
             WHERE world_id = ?",
@@ -344,6 +348,10 @@ pub struct TimelineEventPageRow {
     pub source_command_id: Option<String>,
     pub metadata_json: Option<String>,
     pub extensions_nexus_json: Option<String>,
+    // V1.164 P3 T1: full serialized `modules` namespace (l5-mind observation),
+    // surfaced on the daemon wire DTO `TimelineEventInfo.modules`. NULL when
+    // unrecorded (same semantics as `TimelineEventRow.modules_json`).
+    pub modules_json: Option<String>,
     pub created_at: String,
 }
 
@@ -395,6 +403,11 @@ struct TimelineEventRow {
     caused_by_event_ids_json: Option<String>,
     affected_key_block_ids_json: Option<String>,
     source_command_id: Option<String>,
+    // V1.164 P1: full serialized `modules` namespace (l5-mind observation).
+    // Carries per-event functional-dialect modules as a JSON object. NULL for
+    // rows written before the additive migration or without modules data
+    // (unrecorded per spoke handbook).
+    modules_json: Option<String>,
     created_at: String,
 }
 
@@ -419,6 +432,13 @@ impl TimelineEventRow {
                 .as_ref()
                 .and_then(|s| serde_json::from_str(s).ok()),
             source_command_id: self.source_command_id.clone(),
+            // V1.164 P1: surface modules_json as TimelineEvent.modules — NULL
+            // → None (unrecorded), verbatim JSON otherwise (matches the
+            // kb_key_blocks.modules_json read pattern in kb_store.rs).
+            modules: self
+                .modules_json
+                .as_ref()
+                .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok()),
             created_at: self.created_at.clone(),
         }
     }
@@ -492,6 +512,7 @@ impl NarrativeGateway for SqliteNarrativeGateway {
                     caused_by_event_ids_json,
                     affected_key_block_ids_json,
                     source_command_id,
+                    modules_json,
                     created_at
                 FROM narrative_timeline_events
                 WHERE world_id = ? AND branch_id = ?
@@ -517,6 +538,7 @@ impl NarrativeGateway for SqliteNarrativeGateway {
                     caused_by_event_ids_json,
                     affected_key_block_ids_json,
                     source_command_id,
+                    modules_json,
                     created_at
                 FROM narrative_timeline_events
                 WHERE world_id = ?
@@ -550,6 +572,7 @@ impl NarrativeGateway for SqliteNarrativeGateway {
                 caused_by_event_ids_json,
                 affected_key_block_ids_json,
                 source_command_id,
+                modules_json,
                 created_at as "created_at!"
             FROM narrative_timeline_events
             WHERE timeline_event_id = ?"#,

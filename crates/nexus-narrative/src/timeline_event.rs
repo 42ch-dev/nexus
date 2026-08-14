@@ -79,6 +79,17 @@ pub struct TimelineEvent {
     pub affected_key_block_ids: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source_command_id: Option<String>,
+    /// Per-event functional-dialect modules (`modules.*`) — l5-mind observation
+    /// metadata carrier (V1.164 P1). Preserved verbatim across the `SQLite`
+    /// read-modify-write cycle and the spoke conversion seam. `None` when no
+    /// modules data is present (unrecorded per spoke handbook — distinct from
+    /// explicit empty). Matches the `WorldKbEntry.modules` precedent.
+    ///
+    /// Malformed shapes (non-object map values, regex-invalid keys) are
+    /// REJECTED at the spoke seam (panic) — writers must pre-validate; P2
+    /// writer validation is roadmap-tracked.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub modules: Option<serde_json::Value>,
     pub created_at: String,
 }
 
@@ -106,6 +117,7 @@ impl TimelineEvent {
             caused_by_event_ids: None,
             affected_key_block_ids: None,
             source_command_id: None,
+            modules: None,
             created_at: chrono::Utc::now().to_rfc3339(),
         }
     }
@@ -302,6 +314,7 @@ impl From<nexus_contracts::TimelineEvent> for TimelineEvent {
                 Some(c.affected_key_block_ids)
             },
             source_command_id: c.source_command_id.map(|id| id.to_string()),
+            modules: None,
             created_at: c.created_at.to_rfc3339(),
         }
     }
@@ -369,6 +382,8 @@ impl From<TimelineEvent> for nexus_contracts::TimelineEvent {
 //     source_anchor, computable_logs) — lossy: None/empty on forward, dropped
 //     on reverse (nexus doesn't yet participate in spoke's fork model — V1.145).
 //   • sort_key — forward only: sequence_no.to_string() (ordering hint).
+//   • modules — bidirectional passthrough (V1.164 P1: l5-mind observation
+//     metadata; modules.observation carried verbatim, unknown keys round-trip).
 
 use serde_json::Value;
 use spoke_schemas::timeline_event::{TimelineEventCanonicalName, TimelineEventExtensionsKey};
@@ -450,6 +465,20 @@ impl From<TimelineEvent> for SpokeTimelineEvent {
             description: d.summary,
             extensions,
             fork_id: None,
+            // modules: bidirectional passthrough — nexus Option<Value> → spoke
+            // typed map. None → empty map (spoke serializes empty away via
+            // skip_serializing_if = is_empty); Some → serde round-trip into the
+            // spoke HashMap<TimelineEventModulesKey, TimelineEventModulesValue>.
+            // Malformed modules (e.g. a non-object) is a bug and panics here
+            // rather than silently dropping data at the seam.
+            modules: d
+                .modules
+                .map_or_else(std::collections::HashMap::new, |value| {
+                    serde_json::from_value(value).expect(
+                        "modules must deserialize into the spoke typed module map \
+                         (object of module-name → object|array)",
+                    )
+                }),
             occurred_at: None,
             parent_fork_id: None,
             participant_entry_ids: d.affected_key_block_ids.unwrap_or_default(),
@@ -536,6 +565,21 @@ impl From<SpokeTimelineEvent> for TimelineEvent {
                 Some(s.participant_entry_ids)
             },
             source_command_id,
+            // modules: bidirectional passthrough — spoke typed map → nexus
+            // Option<Value>. Empty spoke map ≡ unrecorded (None) per spoke
+            // handbook — an explicit empty object cannot round-trip through
+            // the non-Option spoke `modules` map (it collapses to None);
+            // non-empty → the map serialized back to a JSON object
+            // (keys/values are spoke transparent/untagged newtypes, so
+            // content is preserved verbatim).
+            modules: if s.modules.is_empty() {
+                None
+            } else {
+                Some(
+                    serde_json::to_value(&s.modules)
+                        .expect("spoke modules map is always JSON-serializable"),
+                )
+            },
             created_at: s
                 .created_at
                 .map_or_else(|| chrono::Utc::now().to_rfc3339(), |dt| dt.to_rfc3339()),

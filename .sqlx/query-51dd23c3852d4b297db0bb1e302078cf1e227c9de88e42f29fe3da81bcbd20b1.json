@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM mind_states WHERE mind_state_id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "51dd23c3852d4b297db0bb1e302078cf1e227c9de88e42f29fe3da81bcbd20b1"
+}

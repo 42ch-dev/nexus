@@ -197,3 +197,11 @@ Engineering reference for the Nexus OSS harness **knowledge** tree.
 | Document | Description |
 | --- | --- |
 | [engineering/codegen-optional-field-callsite-coverage.md](engineering/codegen-optional-field-callsite-coverage.md) | Codegen optional field callsite coverage — `pnpm run codegen` regenerates Rust structs but does NOT update struct-literal callsites; `cargo check --workspace` after codegen catches `E0063` before it blocks downstream crates (V1.163 P1 schema change broke P2 compile; compound V1.163) |
+
+### V1.164 additions
+
+| Document | Description |
+| --- | --- |
+| [conventions/pnpm-toolchain-pin-and-supply-chain-age.md](conventions/pnpm-toolchain-pin-and-supply-chain-age.md) | pnpm 9 CI pin vs local pnpm 11 minimumReleaseAge policy — same-day package installs rejected; failed installs can wipe node_modules; always `npx -y pnpm@9` (hit 3× in V1.164) |
+| [architecture-patterns/spoke-op-gate-at-adapter-boundary.md](architecture-patterns/spoke-op-gate-at-adapter-boundary.md) | Spoke-op validation gates live at the nexus-spoke-adapter boundary; storage crates stay pure (sole-consumer rule spans 3 docs); V1.146 + V1.164 both caught the same near-miss |
+| [engineering/order-insensitive-json-assertions-on-typed-seams.md](engineering/order-insensitive-json-assertions-on-typed-seams.md) | Never assert raw-string equality on JSON crossing a typed seam — BTreeMap-backed spoke types serialize keys alphabetically; parse-both-sides compare (V1.164 P1 QA blocker RCA) |

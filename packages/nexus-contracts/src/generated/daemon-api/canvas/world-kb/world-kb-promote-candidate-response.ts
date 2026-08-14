@@ -73,6 +73,12 @@ export interface NexusWorldKbEntityProjection {
     [k: string]: unknown | undefined;
   };
   /**
+   * Per-entry functional-dialect modules (modules.mental, modules.belief, etc.) carried verbatim from kb_key_blocks.modules_json. Absent when no modules data is present (V1.164 P3, AR-2).
+   */
+  modules?: {
+    [k: string]: unknown | undefined;
+  };
+  /**
    * Alias names for the entity.
    */
   aliases?: string[];
