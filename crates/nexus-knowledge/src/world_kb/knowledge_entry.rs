@@ -220,6 +220,149 @@ impl WorldKbEntry {
         self.updated_at = Some(chrono::Utc::now().to_rfc3339());
         Ok(())
     }
+
+    /// Typed parse of the `modules.mental` nine-field dialect from
+    /// `modules_json` (V1.164 P2 T1, l5-mind).
+    ///
+    /// `None` when the module is absent or not a JSON object — malformed
+    /// dialect data reads as absent, same consumer-only discipline as
+    /// `modules.activation` (the authoritative shape stays `modules_json`
+    /// JSON; the typed view is a read lens, not a second authority).
+    #[must_use]
+    pub fn parse_mental_fields(&self) -> Option<MentalFieldsRaw> {
+        let modules = self.modules.as_ref()?;
+        let mental = modules.get("mental")?;
+        let obj = mental.as_object()?;
+        serde_json::from_value(serde_json::Value::Object(obj.clone())).ok()
+    }
+
+    /// Typed parse of the `modules.belief` proposition array from
+    /// `modules_json` (V1.164 P2 T1, l5-mind).
+    ///
+    /// One [`BeliefPropositionRaw`] per array element; rows that are not
+    /// JSON objects are skipped. Empty when the module is absent or not an
+    /// array. Handbook field names are locked (`holder` / `access` /
+    /// `source`) — paper aliases (`actor` / `knowledge_access` /
+    /// `mental_source`) are not fields of the parse type (PD-5 / TL-5).
+    #[must_use]
+    pub fn parse_belief_rows(&self) -> Vec<BeliefPropositionRaw> {
+        let Some(rows) = self
+            .modules
+            .as_ref()
+            .and_then(|m| m.get("belief"))
+            .and_then(serde_json::Value::as_array)
+        else {
+            return Vec::new();
+        };
+        rows.iter()
+            .filter_map(|row| serde_json::from_value(row.clone()).ok())
+            .collect()
+    }
+}
+
+// ── Mental-layer dialect raw types (V1.164 P2 T1, l5-mind) ────────────────
+//
+// Typed serde raw intermediates for the spoke `modules.mental` (nine-field)
+// and `modules.belief` (proposition array) dialects, following the
+// `ActivationConfigRaw` precedent (`nexus-spoke-adapter/src/adapter/
+// activation.rs`): serde types over the handbook shape where the
+// authoritative source is `modules_json` JSON — parse what the handbook
+// names, leave the rest in the raw JSON. Handbook:
+// spoke `domain-profile-mental-state.md`; field-vocabulary copy in
+// `.mstar/iterations/v1.164/specs/v1.164-mental-layer-product-locks.md`.
+//
+// Handbook field names are LOCKED (TL-5 / PD-5): `holder` / `access` /
+// `source` — never the OmniToM paper aliases `actor` / `knowledge_access` /
+// `mental_source`. These types carry no fields for the aliases, so an
+// emitted row never contains them and a paper-alias row does not round-trip
+// through the typed form (AC-V1164-7). Unknown keys inside the dialect bag
+// stay in `modules_json` and survive the adapter seam verbatim (PD-13) —
+// the typed view is a handbook-names lens, not a lossless re-emitter.
+
+/// Typed view of the `modules.mental` nine-field dialect on a holder
+/// `KnowledgeEntry`.
+///
+/// All nine fields are optional — a holder carries the subset the author or
+/// engine populated. Each field admits a scalar or a structured value
+/// (handbook scalar-vs-nested guidance), so values stay raw JSON in this
+/// intermediate type; the authoritative shape is `modules_json` JSON.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct MentalFieldsRaw {
+    /// Mental identity (self-concept, role, occupation) — not the wire
+    /// `entry_id`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub identity: Option<serde_json::Value>,
+    /// Summary / count / `entry_id` refs — never a second copy of the
+    /// labeled `modules.belief` array (PD-14).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub beliefs: Option<serde_json::Value>,
+    /// Current focus of perception or thought.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attention: Option<serde_json::Value>,
+    /// Desired end states.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub goals: Option<serde_json::Value>,
+    /// Planned courses of action toward goals.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub intentions: Option<serde_json::Value>,
+    /// Affective state.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub emotions: Option<serde_json::Value>,
+    /// Preferences, values, personality traits.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dispositions: Option<serde_json::Value>,
+    /// Rules and customs the entity regards as binding.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub norms: Option<serde_json::Value>,
+    /// Obligations and prohibitions on behavior.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub constraints: Option<serde_json::Value>,
+}
+
+/// One `modules.belief` proposition record (handbook field table).
+///
+/// Serves both narrated world facts (`holder: "world"`) and actor beliefs
+/// (`holder: <entry_id>`); the `holder` field is the semantic discriminator.
+/// All fields optional for forward-compat (raw intermediate — the
+/// authoritative shape is `modules_json` JSON). Closed label spaces
+/// (handbook exact) are not enforced here: adapters round-trip the record
+/// verbatim and an unknown label is an emitter error, not an adapter error.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct BeliefPropositionRaw {
+    /// Belief holder: an `entry_id`, a group id, or the special `world`
+    /// marking a narrated fact. Not `actor` (TL-5).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub holder: Option<String>,
+    /// Minimal content being represented.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub proposition: Option<String>,
+    /// Recursive belief depth: `0` = world-level narrated fact, `1` =
+    /// first-order belief about the world, `2`/`3` = deeper nesting as flat
+    /// rows (depth cap 3).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub order: Option<i64>,
+    /// Truth Status: `True` / `False` / `Unknown`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub truth: Option<String>,
+    /// Knowledge Access: `Private` / `Shared` / `Public`. Not
+    /// `knowledge_access` (TL-5).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub access: Option<String>,
+    /// Representation: `Explicit` / `Implicit`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub representation: Option<String>,
+    /// Content Type (closed space, slash-containing labels are literal).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub content_type: Option<String>,
+    /// Mental Source: `Narration` / `Perception` / `Memory` / `Testimony` /
+    /// `Inference` / `Imagination` / `Unknown`. Not `mental_source` (TL-5).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
+    /// Context: `Deceptive` / `Temporal` / `Counterfactual` / `Neutral`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context: Option<String>,
 }
 
 #[cfg(test)]
@@ -366,5 +509,139 @@ mod tests {
             .as_object()
             .unwrap()
             .contains_key("character"));
+    }
+
+    // ── Mental-layer dialect (V1.164 P2 T1, l5-mind) ─────────────────
+
+    /// Fixture entry carrying the handbook `modules.mental` subset +
+    /// `modules.belief` rows (worked-example box/basket story).
+    fn mental_dialect_entry(entry_id: &str, block_type: BlockType) -> WorldKbEntry {
+        let mut kb = WorldKbEntry::new("wld_test", block_type, "Dialect Holder");
+        kb.entry_id = entry_id.to_string();
+        kb.modules = Some(serde_json::json!({
+            "mental": {
+                "identity": { "role": "harbor_master" },
+                "beliefs": { "ref": "kb_bo_beliefs", "count": 12 },
+                "attention": { "target": "kb_tw_dawn_dock", "modality": "visual" },
+                "goals": [{ "goal": "clear the dawn berths", "status": "active" }],
+                "emotions": [{ "emotion": "alert", "intensity": 0.6 }],
+                "norms": ["greet arriving captains"],
+                "constraints": ["cannot waive dockside law"]
+            },
+            "belief": [
+                {
+                    "holder": "kb_bo",
+                    "proposition": "The marble is in the box",
+                    "order": 1,
+                    "truth": "False",
+                    "access": "Private",
+                    "representation": "Implicit",
+                    "content_type": "Location",
+                    "source": "Perception",
+                    "context": "Temporal"
+                },
+                {
+                    "holder": "world",
+                    "proposition": "The marble is in the basket",
+                    "order": 0,
+                    "truth": "True",
+                    "access": "Public",
+                    "representation": "Explicit",
+                    "content_type": "Location",
+                    "source": "Narration",
+                    "context": "Temporal"
+                }
+            ]
+        }));
+        kb
+    }
+
+    #[test]
+    fn test_parse_mental_fields_reads_nine_field_dialect() {
+        let kb = mental_dialect_entry("kb_bo", BlockType::Character);
+        let mental = kb
+            .parse_mental_fields()
+            .expect("modules.mental parses to MentalFieldsRaw");
+        assert_eq!(
+            mental.identity,
+            Some(serde_json::json!({ "role": "harbor_master" }))
+        );
+        assert_eq!(
+            mental.beliefs,
+            Some(serde_json::json!({ "ref": "kb_bo_beliefs", "count": 12 }))
+        );
+        assert_eq!(
+            mental.goals,
+            Some(serde_json::json!([{ "goal": "clear the dawn berths", "status": "active" }]))
+        );
+        assert_eq!(
+            mental.emotions,
+            Some(serde_json::json!([{ "emotion": "alert", "intensity": 0.6 }]))
+        );
+        assert_eq!(mental.intentions, None);
+        assert_eq!(mental.dispositions, None);
+    }
+
+    #[test]
+    fn test_parse_belief_rows_reads_handbook_rows() {
+        let kb = mental_dialect_entry("kb_bo", BlockType::Character);
+        let rows = kb.parse_belief_rows();
+        assert_eq!(rows.len(), 2);
+        let actor = &rows[0];
+        assert_eq!(actor.holder.as_deref(), Some("kb_bo"));
+        assert_eq!(
+            actor.proposition.as_deref(),
+            Some("The marble is in the box")
+        );
+        assert_eq!(actor.order, Some(1));
+        assert_eq!(actor.truth.as_deref(), Some("False"));
+        assert_eq!(actor.access.as_deref(), Some("Private"));
+        assert_eq!(actor.source.as_deref(), Some("Perception"));
+        let world = &rows[1];
+        assert_eq!(world.holder.as_deref(), Some("world"));
+        assert_eq!(world.order, Some(0));
+        assert_eq!(world.truth.as_deref(), Some("True"));
+    }
+
+    #[test]
+    fn test_mental_absent_or_non_object_parses_as_none() {
+        let bare = WorldKbEntry::new("wld_test", BlockType::Character, "Bare");
+        assert!(bare.parse_mental_fields().is_none());
+        assert!(bare.parse_belief_rows().is_empty());
+
+        let mut scalar = WorldKbEntry::new("wld_test", BlockType::Character, "Scalar");
+        scalar.modules = Some(serde_json::json!({ "mental": "not-an-object" }));
+        assert!(scalar.parse_mental_fields().is_none());
+
+        let mut not_array = WorldKbEntry::new("wld_test", BlockType::Character, "NotArray");
+        not_array.modules = Some(serde_json::json!({ "belief": { "holder": "world" } }));
+        assert!(not_array.parse_belief_rows().is_empty());
+    }
+
+    #[test]
+    fn test_paper_alias_row_is_not_produced_and_does_not_round_trip() {
+        // AC-V1164-7 / TL-5: a row using the OmniToM paper aliases
+        // `actor` / `knowledge_access` / `mental_source` is not produced by
+        // the parse type and does not round-trip as-is.
+        let alias_row = serde_json::json!({
+            "actor": "kb_bo",
+            "proposition": "The marble is in the box",
+            "order": 1,
+            "knowledge_access": "Private",
+            "mental_source": "Perception"
+        });
+        let parsed: BeliefPropositionRaw =
+            serde_json::from_value(alias_row.clone()).expect("raw type ignores unknown keys");
+        // Handbook fields are not populated from paper aliases.
+        assert_eq!(parsed.holder, None);
+        assert_eq!(parsed.access, None);
+        assert_eq!(parsed.source, None);
+        // Re-emission never contains the aliases and differs from the input
+        // (the typed form is handbook-names only).
+        let emitted = serde_json::to_value(&parsed).unwrap();
+        assert_ne!(emitted, alias_row);
+        assert!(emitted.get("actor").is_none());
+        assert!(emitted.get("knowledge_access").is_none());
+        assert!(emitted.get("mental_source").is_none());
     }
 }

@@ -15,6 +15,7 @@ pub mod auth;
 pub mod auto_chronology;
 pub mod boot;
 pub mod capability_registry;
+pub mod check;
 pub mod config;
 pub mod cron_supervisor;
 pub mod db;
