@@ -445,6 +445,7 @@ async fn append_timeline_events(
             event_type,
             evt.title.as_deref().map(String::as_str),
             evt.summary.as_deref(),
+            None, // modules_json — compute lane writes no modules
         )
         .await
         .map_err(|e| CapabilityError::Internal(format!("append timeline event: {e}")))?;
@@ -484,6 +485,7 @@ async fn handle_compute_error(
         "state_update",
         Some("compute_error"),
         Some(error_detail),
+        None, // modules_json — error marker writes no modules
     )
     .await;
 

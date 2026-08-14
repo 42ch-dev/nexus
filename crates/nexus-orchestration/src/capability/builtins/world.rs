@@ -826,6 +826,7 @@ mod tests {
             "story_advance",
             Some("E1"),
             None,
+            None, // modules_json — test seed writes no modules
         )
         .await
         .unwrap();
