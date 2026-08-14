@@ -717,6 +717,8 @@
       "bodyPlaceholder": "Free-form body JSON…",
       "viewInWorkTimeline": "View in Work Timeline",
       "viewInWorkTimelineAria": "Open the Work that realizes this World on the Work Timeline",
+      "observers": "Observers:",
+      "noObservers": "No observers",
       "field": {
         "title": "Title",
         "body": "Body",
