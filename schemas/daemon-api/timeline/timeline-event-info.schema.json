@@ -63,6 +63,10 @@
       "type": ["object", "null"],
       "description": "Parsed extensions_nexus_json namespace — carries compute provenance (module_id, module_version, run_id, source_kind) and any future extension keys."
     },
+    "modules": {
+      "type": ["object", "null"],
+      "description": "Per-event functional-dialect modules (modules.observation) carried verbatim from narrative_timeline_events.modules_json. Null when unrecorded (V1.164 P3, AR-2)."
+    },
     "created_at": {
       "type": "string",
       "format": "date-time",

@@ -150,6 +150,10 @@ fn rows_to_items(
         source_command_id: r.source_command_id,
         metadata: parse_json_object(r.metadata_json.as_deref()).unwrap_or_default(),
         extensions: parse_json_object(r.extensions_nexus_json.as_deref()),
+        // V1.164 P3 T1 (AR-2): carry the functional-dialect modules verbatim
+        // from `narrative_timeline_events.modules_json` (NULL → None, same
+        // lenient parse as `extensions`; schema allows null).
+        modules: parse_json_object(r.modules_json.as_deref()),
         created_at: nexus_narrative::timeline_event::parse_created_at(&r.created_at)
             .unwrap_or(chrono::DateTime::UNIX_EPOCH),
     })

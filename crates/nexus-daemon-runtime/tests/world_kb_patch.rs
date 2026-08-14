@@ -1574,6 +1574,84 @@ async fn get_graph_returns_non_deleted_entities() {
     );
 }
 
+/// V1.164 P3 T1 (AR-2): `WorldKbEntityProjection.modules` carries the
+/// functional-dialect modules verbatim from `kb_key_blocks.modules_json`
+/// (entity seeded with `modules.mental`), and stays absent (empty map on the
+/// Rust side, omitted from the wire via `skip_serializing_if`) for entities
+/// without modules data.
+#[tokio::test]
+async fn get_graph_projects_modules_from_modules_json() {
+    let (_tmp, state) = fresh_state().await;
+    let pool = state.pool().unwrap();
+    // SAFETY: test-only seed against the known kb_key_blocks schema
+    // (20260525_kb_key_blocks.sql + 20260731120000_modules_json.sql).
+    sqlx::query(
+        "INSERT INTO kb_key_blocks \
+            (key_block_id, world_id, block_type, canonical_name, status, revision, \
+             modules_json, created_at, updated_at) \
+           VALUES (?, ?, 'character', 'Harbor Master', 'confirmed', 1, ?, \
+             datetime('now'), datetime('now'))",
+    )
+    .bind("kb_mental")
+    .bind("wld_test_world")
+    .bind(
+        r#"{"mental":{"beliefs":{"ref":"kb_harbor_beliefs","count":2},"goals":["rule the harbor"],"emotions":{"fear":"storms"}}}"#,
+    )
+    .execute(pool)
+    .await
+    .unwrap();
+    // Entity without modules data — modules must project as absent.
+    sqlx::query(
+        "INSERT INTO kb_key_blocks \
+            (key_block_id, world_id, block_type, canonical_name, status, revision, \
+             created_at, updated_at) \
+           VALUES (?, ?, 'item', 'Plain Anchor', 'confirmed', 0, \
+             datetime('now'), datetime('now'))",
+    )
+    .bind("kb_plain")
+    .bind("wld_test_world")
+    .execute(pool)
+    .await
+    .unwrap();
+
+    let Json(resp) = get_graph(
+        State(state.clone()),
+        Path("wld_test_world".to_string()),
+        Query(GraphQuery {
+            include_suggested: None,
+        }),
+    )
+    .await
+    .expect("graph should succeed");
+    assert_eq!(resp.entities.len(), 2);
+
+    let mental = resp
+        .entities
+        .iter()
+        .find(|e| e.key_block_id == "kb_mental")
+        .expect("mental entity present");
+    assert_eq!(
+        mental.modules.get("mental").and_then(|m| m.get("goals")),
+        Some(&serde_json::json!(["rule the harbor"])),
+        "modules.mental.goals carried verbatim"
+    );
+    assert_eq!(
+        mental.modules.get("mental").and_then(|m| m.get("emotions")),
+        Some(&serde_json::json!({"fear": "storms"})),
+        "modules.mental.emotions carried verbatim"
+    );
+
+    let plain = resp
+        .entities
+        .iter()
+        .find(|e| e.key_block_id == "kb_plain")
+        .expect("plain entity present");
+    assert!(
+        plain.modules.is_empty(),
+        "no modules data → empty modules map (omitted from wire)"
+    );
+}
+
 #[tokio::test]
 async fn get_candidates_returns_pending() {
     let (_tmp, state) = fresh_state().await;
