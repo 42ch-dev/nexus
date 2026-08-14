@@ -1151,6 +1151,15 @@ fn build_schema_map() -> Vec<SchemaEntry> {
             Strict,
             CreateForkResponse
         ),
+        // V1.165 P1 T3 (DR-68 / AR-3): world findings read surface DTO.
+        // Plain-object root (`findings` + `truncated`) → Strict; the inline
+        // item shape is validated indirectly via the parent schema (same
+        // convention as the check-response findings item).
+        entry!(
+            "schemas/daemon-api/worlds/world-findings-list-response.schema.json",
+            Strict,
+            WorldFindingsListResponse
+        ),
     ]
 }
 
