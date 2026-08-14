@@ -7,22 +7,20 @@
 //! `kb_key_blocks.modules_json`). This table stores temporal
 //! snapshots/deltas — `occurred_at` is the when-axis placement.
 //!
-//! The write path is gated by spoke `validate_mind_state` (spoke-operations
-//! 0.10.0, l5-mind capability): required fields (`schema_version`,
-//! `mind_state_id`, `holder_entry_id`, `extensions`), the closed envelope
-//! (no unknown properties), and `snapshot` / `deltas` / `source_anchor` /
-//! timestamp types are enforced. A wire-shape rejection is surfaced as
-//! [`LocalDbError::ValidationError`] with the spoke reject code/message and
-//! nothing is persisted.
+//! **Pure storage (V1.164 P2 layering fix):** this module is spoke-free —
+//! it persists raw column values and performs no wire-shape validation.
+//! The spoke `validate_mind_state` gate lives at the adapter boundary
+//! (`nexus-spoke-adapter::adapter::mind_state::validate_and_store_mind_state`
+//! — the sole `spoke-operations` consumer, spec §8 dep-graph reversal /
+//! entity-scope-model.md:219).
 //!
 //! Column naming mirrors the spoke `mind-state.schema.json` keys: wire
 //! `snapshot` / `deltas` / `source_anchor` / `extensions` map to the
 //! `*_json` columns; `schema_version` is stored as a plain `i64` (the wire
-//! requires a non-zero unsigned integer).
+//! requires a non-zero unsigned integer). `created_at` / `updated_at` are
+//! stamped by the store at insert time (RFC 3339).
 
 use crate::LocalDbError;
-use serde_json::Value;
-use spoke_operations::{validate_mind_state, SpokeResult};
 use sqlx::SqlitePool;
 
 /// Row type matching the `mind_states` DDL
@@ -48,92 +46,42 @@ pub struct MindStateRow {
     pub deltas_json: Option<String>,
     /// Serialized `source_anchor` object (when present).
     pub source_anchor_json: Option<String>,
-    /// Row creation timestamp (wire `created_at` when present, else insert time).
+    /// Row creation timestamp (store-stamped at insert).
     pub created_at: String,
-    /// Row last-update timestamp (wire `updated_at` when present, else insert time).
+    /// Row last-update timestamp (store-stamped at insert).
     pub updated_at: String,
     /// Serialized `extensions` object (required by the wire validator).
     pub extensions_json: Option<String>,
 }
 
-/// Insert a `MindState` when-axis record from its wire envelope.
+/// Insert a `MindState` when-axis record from raw column values.
 ///
-/// The envelope is gated by spoke `validate_mind_state` BEFORE anything
-/// reaches the database — a rejection (required field missing, unknown
-/// property, malformed `snapshot` / `deltas` / `source_anchor` / timestamp)
-/// is surfaced as [`LocalDbError::ValidationError`] and no row is written.
-///
-/// Column mapping mirrors the spoke `mind-state.schema.json` keys: `snapshot`
-/// / `deltas` / `source_anchor` / `extensions` are serialized into the
-/// `*_json` columns; `created_at` / `updated_at` fall back to the current
-/// UTC time when the envelope omits them.
+/// Pure storage: no validation is performed here — the caller (the
+/// adapter-boundary gate `validate_and_store_mind_state`) is responsible
+/// for the spoke wire-shape check. `created_at` / `updated_at` are stamped
+/// with the current UTC time (RFC 3339).
 ///
 /// # Errors
 ///
-/// Returns [`LocalDbError::ValidationError`] when `validate_mind_state`
-/// rejects the envelope, [`LocalDbError::Sqlx`] on database failure —
-/// including a duplicate `mind_state_id` primary key and an unknown
+/// Returns [`LocalDbError::Sqlx`] on database failure — including a
+/// duplicate `mind_state_id` primary key and an unknown
 /// `holder_entry_id` foreign key.
-pub async fn insert_mind_state(pool: &SqlitePool, value: &Value) -> Result<(), LocalDbError> {
-    match validate_mind_state(value) {
-        SpokeResult::Ok(()) => {}
-        SpokeResult::Reject(reject) => {
-            return Err(LocalDbError::ValidationError(format!(
-                "mind_state rejected [{}]: {}",
-                reject.code, reject.message
-            )));
-        }
-    }
-
-    // The gate above guarantees a non-null plain object; keep this branch
-    // fail-closed (defensive) instead of panicking on an impossible shape.
-    let Some(state) = value.as_object() else {
-        return Err(LocalDbError::ValidationError(
-            "mind_state must be a non-null plain object".to_string(),
-        ));
-    };
-
-    // `schema_version` was validated as an integer >= 1; the f64 → i64 cast
-    // is exact for whole numbers in the validated range.
-    #[allow(clippy::cast_possible_truncation)]
-    let schema_version = state
-        .get("schema_version")
-        .and_then(Value::as_f64)
-        .unwrap_or(0.0) as i64;
-    let mind_state_id = state
-        .get("mind_state_id")
-        .and_then(Value::as_str)
-        .unwrap_or_default()
-        .to_string();
-    let holder_entry_id = state
-        .get("holder_entry_id")
-        .and_then(Value::as_str)
-        .unwrap_or_default()
-        .to_string();
-    let canonical_name = state
-        .get("canonical_name")
-        .and_then(Value::as_str)
-        .map(str::to_owned);
-    let occurred_at = state
-        .get("occurred_at")
-        .and_then(Value::as_str)
-        .map(str::to_owned);
-    let sort_key = state
-        .get("sort_key")
-        .and_then(Value::as_str)
-        .map(str::to_owned);
-    let created_at = state
-        .get("created_at")
-        .and_then(Value::as_str)
-        .map_or_else(|| chrono::Utc::now().to_rfc3339(), str::to_owned);
-    let updated_at = state
-        .get("updated_at")
-        .and_then(Value::as_str)
-        .map_or_else(|| chrono::Utc::now().to_rfc3339(), str::to_owned);
-    let snapshot_json = state.get("snapshot").map(Value::to_string);
-    let deltas_json = state.get("deltas").map(Value::to_string);
-    let source_anchor_json = state.get("source_anchor").map(Value::to_string);
-    let extensions_json = state.get("extensions").map(Value::to_string);
+#[allow(clippy::too_many_arguments)] // raw column values — the full row shape
+pub async fn insert_mind_state(
+    pool: &SqlitePool,
+    mind_state_id: &str,
+    schema_version: i64,
+    holder_entry_id: &str,
+    canonical_name: Option<&str>,
+    occurred_at: Option<&str>,
+    sort_key: Option<&str>,
+    snapshot_json: Option<&str>,
+    deltas_json: Option<&str>,
+    source_anchor_json: Option<&str>,
+    extensions_json: Option<&str>,
+) -> Result<(), LocalDbError> {
+    let created_at = chrono::Utc::now().to_rfc3339();
+    let updated_at = created_at.clone();
 
     sqlx::query!(
         "INSERT INTO mind_states (

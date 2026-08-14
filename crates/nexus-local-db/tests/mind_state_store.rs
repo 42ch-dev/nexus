@@ -1,7 +1,10 @@
-//! `MindState` store CRUD + `validate_mind_state` gate tests (V1.164 P2 T2).
+//! `MindState` store CRUD tests (V1.164 P2 T2 fix) — pure storage, no
+//! validation. The store persists raw column values; the spoke
+//! `validate_mind_state` gate (and its rejection tests) lives at the
+//! adapter boundary — see
+//! `crates/nexus-spoke-adapter/tests/mind_state_gate.rs`.
 //!
 //! Covers: insert → read-back verbatim; when-axis list ordering; delete;
-//! wire-shape rejection (missing required field / unknown envelope key);
 //! FK integrity (unknown holder rejected; holder delete cascades).
 
 #![allow(clippy::unwrap_used)]
@@ -13,7 +16,6 @@ use nexus_local_db::mind_state_store::{
     delete_mind_state, get_mind_state, insert_mind_state, list_mind_states_by_holder,
 };
 use nexus_local_db::{open_pool, run_migrations, LocalDbError};
-use serde_json::json;
 
 async fn setup_db() -> (sqlx::SqlitePool, tempfile::TempDir) {
     let dir = tempfile::tempdir().unwrap();
@@ -53,26 +55,15 @@ async fn seed_holder(pool: &sqlx::SqlitePool) -> String {
     holder_id
 }
 
-/// A valid `MindState` wire envelope (all required + optional when-axis fields).
-fn valid_envelope(holder_entry_id: &str) -> serde_json::Value {
-    json!({
-        "schema_version": 1,
-        "mind_state_id": "ms_001",
-        "holder_entry_id": holder_entry_id,
-        "canonical_name": "Bo at the transfer",
-        "occurred_at": "2026-08-14T10:00:00Z",
-        "sort_key": "0001",
-        "snapshot": {
-            "attention": "the box",
-            "emotions": [{ "emotion": "hope", "intensity": 0.6 }]
-        },
-        "deltas": [{ "path": "attention", "previous": null, "next": "the box" }],
-        "source_anchor": { "event_id": "evt_transfer" },
-        "created_at": "2026-08-14T10:00:00Z",
-        "updated_at": "2026-08-14T10:00:00Z",
-        "extensions": { "nexus": { "note": "derivative snapshot" } }
-    })
-}
+/// Raw column values for the store — the full valid row used by the
+/// verbatim round-trip (mirrors the spoke `mind-state.schema.json` keys;
+/// `snapshot` / `deltas` / `source_anchor` / `extensions` arrive as JSON
+/// strings).
+const VALID_SNAPSHOT_JSON: &str =
+    r#"{"attention":"the box","emotions":[{"emotion":"hope","intensity":0.6}]}"#;
+const VALID_DELTAS_JSON: &str = r#"[{"path":"attention","previous":null,"next":"the box"}]"#;
+const VALID_SOURCE_ANCHOR_JSON: &str = r#"{"event_id":"evt_transfer"}"#;
+const VALID_EXTENSIONS_JSON: &str = r#"{"nexus":{"note":"derivative snapshot"}}"#;
 
 // ── insert + get (verbatim round-trip) ─────────────────────────
 
@@ -81,8 +72,21 @@ async fn insert_valid_mind_state_roundtrips_verbatim() {
     let (pool, _dir) = setup_db().await;
     let holder_id = seed_holder(&pool).await;
 
-    let envelope = valid_envelope(&holder_id);
-    insert_mind_state(&pool, &envelope).await.unwrap();
+    insert_mind_state(
+        &pool,
+        "ms_001",
+        1,
+        &holder_id,
+        Some("Bo at the transfer"),
+        Some("2026-08-14T10:00:00Z"),
+        Some("0001"),
+        Some(VALID_SNAPSHOT_JSON),
+        Some(VALID_DELTAS_JSON),
+        Some(VALID_SOURCE_ANCHOR_JSON),
+        Some(VALID_EXTENSIONS_JSON),
+    )
+    .await
+    .unwrap();
 
     let row = get_mind_state(&pool, "ms_001")
         .await
@@ -94,24 +98,16 @@ async fn insert_valid_mind_state_roundtrips_verbatim() {
     assert_eq!(row.canonical_name.as_deref(), Some("Bo at the transfer"));
     assert_eq!(row.occurred_at.as_deref(), Some("2026-08-14T10:00:00Z"));
     assert_eq!(row.sort_key.as_deref(), Some("0001"));
-    assert_eq!(
-        row.snapshot_json.as_deref(),
-        Some(envelope["snapshot"].to_string().as_str())
-    );
-    assert_eq!(
-        row.deltas_json.as_deref(),
-        Some(envelope["deltas"].to_string().as_str())
-    );
+    assert_eq!(row.snapshot_json.as_deref(), Some(VALID_SNAPSHOT_JSON));
+    assert_eq!(row.deltas_json.as_deref(), Some(VALID_DELTAS_JSON));
     assert_eq!(
         row.source_anchor_json.as_deref(),
-        Some(envelope["source_anchor"].to_string().as_str())
+        Some(VALID_SOURCE_ANCHOR_JSON)
     );
-    assert_eq!(
-        row.extensions_json.as_deref(),
-        Some(envelope["extensions"].to_string().as_str())
-    );
-    assert_eq!(row.created_at, "2026-08-14T10:00:00Z");
-    assert_eq!(row.updated_at, "2026-08-14T10:00:00Z");
+    assert_eq!(row.extensions_json.as_deref(), Some(VALID_EXTENSIONS_JSON));
+    // created_at / updated_at are store-stamped at insert (RFC 3339).
+    assert!(!row.created_at.is_empty());
+    assert!(!row.updated_at.is_empty());
 
     // Exactly one row persisted (no duplicate envelope expansion).
     // SAFETY: test-only — row-count verification against the mind_states DDL.
@@ -137,48 +133,68 @@ async fn list_mind_states_by_holder_orders_by_occurred_at_then_sort_key() {
     let (pool, _dir) = setup_db().await;
     let holder_id = seed_holder(&pool).await;
 
-    let mk = |id: &str, occurred_at: Option<&str>, sort_key: Option<&str>| {
-        let mut v = json!({
-            "schema_version": 1,
-            "mind_state_id": id,
-            "holder_entry_id": holder_id,
-            "extensions": {}
-        });
-        if let Some(ts) = occurred_at {
-            v.as_object_mut()
-                .unwrap()
-                .insert("occurred_at".to_string(), json!(ts));
-        }
-        if let Some(sk) = sort_key {
-            v.as_object_mut()
-                .unwrap()
-                .insert("sort_key".to_string(), json!(sk));
-        }
-        v
-    };
     // Same occurred_at → sort_key tiebreak (reverse key order on purpose).
     insert_mind_state(
         &pool,
-        &mk("ms_late", Some("2026-08-14T12:00:00Z"), Some("0003")),
+        "ms_late",
+        1,
+        &holder_id,
+        None,
+        Some("2026-08-14T12:00:00Z"),
+        Some("0003"),
+        None,
+        None,
+        None,
+        None,
     )
     .await
     .unwrap();
     insert_mind_state(
         &pool,
-        &mk("ms_early", Some("2026-08-14T09:00:00Z"), Some("0001")),
+        "ms_early",
+        1,
+        &holder_id,
+        None,
+        Some("2026-08-14T09:00:00Z"),
+        Some("0001"),
+        None,
+        None,
+        None,
+        None,
     )
     .await
     .unwrap();
     insert_mind_state(
         &pool,
-        &mk("ms_same", Some("2026-08-14T12:00:00Z"), Some("0002")),
+        "ms_same",
+        1,
+        &holder_id,
+        None,
+        Some("2026-08-14T12:00:00Z"),
+        Some("0002"),
+        None,
+        None,
+        None,
+        None,
     )
     .await
     .unwrap();
     // No occurred_at → NULL sorts first within the holder.
-    insert_mind_state(&pool, &mk("ms_null", None, Some("0099")))
-        .await
-        .unwrap();
+    insert_mind_state(
+        &pool,
+        "ms_null",
+        1,
+        &holder_id,
+        None,
+        None,
+        Some("0099"),
+        None,
+        None,
+        None,
+        None,
+    )
+    .await
+    .unwrap();
 
     let rows = list_mind_states_by_holder(&pool, &holder_id).await.unwrap();
     let ids: Vec<&str> = rows.iter().map(|r| r.mind_state_id.as_str()).collect();
@@ -198,8 +214,21 @@ async fn delete_mind_state_removes_row_and_reports_existence() {
     let (pool, _dir) = setup_db().await;
     let holder_id = seed_holder(&pool).await;
 
-    let envelope = valid_envelope(&holder_id);
-    insert_mind_state(&pool, &envelope).await.unwrap();
+    insert_mind_state(
+        &pool,
+        "ms_001",
+        1,
+        &holder_id,
+        Some("Bo at the transfer"),
+        Some("2026-08-14T10:00:00Z"),
+        Some("0001"),
+        None,
+        None,
+        None,
+        Some("{}"),
+    )
+    .await
+    .unwrap();
 
     assert!(delete_mind_state(&pool, "ms_001").await.unwrap());
     assert!(get_mind_state(&pool, "ms_001").await.unwrap().is_none());
@@ -207,62 +236,26 @@ async fn delete_mind_state_removes_row_and_reports_existence() {
     assert!(!delete_mind_state(&pool, "ms_001").await.unwrap());
 }
 
-// ── validate_mind_state gate ────────────────────────────────────
-
-#[tokio::test]
-async fn insert_missing_required_field_is_rejected_and_nothing_stored() {
-    let (pool, _dir) = setup_db().await;
-    let holder_id = seed_holder(&pool).await;
-
-    let mut envelope = valid_envelope(&holder_id);
-    envelope.as_object_mut().unwrap().remove("holder_entry_id");
-
-    let err = insert_mind_state(&pool, &envelope).await.unwrap_err();
-    match err {
-        LocalDbError::ValidationError(msg) => {
-            assert!(
-                msg.contains("holder_entry_id"),
-                "rejection must name the missing field: {msg}"
-            );
-        }
-        other => panic!("expected ValidationError, got {other:?}"),
-    }
-    assert!(
-        get_mind_state(&pool, "ms_001").await.unwrap().is_none(),
-        "rejected envelope must not persist"
-    );
-}
-
-#[tokio::test]
-async fn insert_unknown_envelope_key_is_rejected_by_closed_envelope() {
-    let (pool, _dir) = setup_db().await;
-    let holder_id = seed_holder(&pool).await;
-
-    let mut envelope = valid_envelope(&holder_id);
-    envelope
-        .as_object_mut()
-        .unwrap()
-        .insert("bogus_key".to_string(), json!(1));
-
-    let err = insert_mind_state(&pool, &envelope).await.unwrap_err();
-    match err {
-        LocalDbError::ValidationError(msg) => {
-            assert!(
-                msg.contains("unknown property") || msg.contains("bogus_key"),
-                "rejection must flag the unknown key: {msg}"
-            );
-        }
-        other => panic!("expected ValidationError, got {other:?}"),
-    }
-}
-
 // ── FK integrity (DDL) ──────────────────────────────────────────
 
 #[tokio::test]
 async fn insert_with_unknown_holder_fails_foreign_key() {
     let (pool, _dir) = setup_db().await;
-    let envelope = valid_envelope("kb_no_such_holder");
-    let err = insert_mind_state(&pool, &envelope).await.unwrap_err();
+    let err = insert_mind_state(
+        &pool,
+        "ms_001",
+        1,
+        "kb_no_such_holder",
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        Some("{}"),
+    )
+    .await
+    .unwrap_err();
     assert!(
         matches!(err, LocalDbError::Sqlx(_)),
         "unknown holder must surface as a DB (FK) error, got {err:?}"
@@ -274,17 +267,36 @@ async fn deleting_holder_cascades_mind_states() {
     let (pool, _dir) = setup_db().await;
     let holder_id = seed_holder(&pool).await;
 
-    insert_mind_state(&pool, &valid_envelope(&holder_id))
-        .await
-        .unwrap();
-    let second = json!({
-        "schema_version": 1,
-        "mind_state_id": "ms_002",
-        "holder_entry_id": holder_id,
-        "occurred_at": "2026-08-14T11:00:00Z",
-        "extensions": {}
-    });
-    insert_mind_state(&pool, &second).await.unwrap();
+    insert_mind_state(
+        &pool,
+        "ms_001",
+        1,
+        &holder_id,
+        Some("Bo at the transfer"),
+        Some("2026-08-14T10:00:00Z"),
+        Some("0001"),
+        None,
+        None,
+        None,
+        Some("{}"),
+    )
+    .await
+    .unwrap();
+    insert_mind_state(
+        &pool,
+        "ms_002",
+        1,
+        &holder_id,
+        None,
+        Some("2026-08-14T11:00:00Z"),
+        None,
+        None,
+        None,
+        None,
+        Some("{}"),
+    )
+    .await
+    .unwrap();
 
     // The store API soft-deletes (status='deleted'); the DDL cascade fires on
     // a hard DELETE of the holder row, so exercise the row deletion directly.
