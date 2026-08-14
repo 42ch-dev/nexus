@@ -222,8 +222,12 @@ export function TimelineInspector({ node, ctxRef }: TimelineInspectorProps) {
           explicitly nobody → the explicit "No observers" claim renders;
           malformed (non-array) observers is skipped leniently (mirrors the
           Task 2 fixture + P2 checker). Names resolve only from the already
-          loaded graph — no new fetch. */}
-      {Array.isArray(observers) ? (
+          loaded graph — no new fetch.
+          S-4 (QC fix wave) — the observers axis is narrative-event-only:
+          observation semantics describe who witnessed an EVENT, and this
+          inspector is shared with context nodes (characters/locations), so
+          the line is gated to `layoutHint === 'event'`. */}
+      {data.layoutHint === 'event' && Array.isArray(observers) ? (
         <p className="mt-2 text-copy-13" data-testid="event-observers-line">
           <span className="font-semibold text-gray-900">
             {t('timeline.inspector.observers')}

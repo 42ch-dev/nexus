@@ -189,4 +189,37 @@ describe('TimelineInspector — modules.observation.observers line (V1.164 P3 Ta
 
     expect(screen.queryByTestId('event-observers-line')).not.toBeInTheDocument();
   });
+
+  it('omits the observers line when modules.observation is a non-object (defensive degradation)', () => {
+    renderInspector({
+      node: eventNode({
+        modules: { observation: 'not-an-object' },
+      }),
+    });
+
+    expect(screen.queryByTestId('event-observers-line')).not.toBeInTheDocument();
+    expect(screen.queryByText('Observers:')).not.toBeInTheDocument();
+  });
+
+  it('omits the observers line when observers is null (defensive null degradation)', () => {
+    renderInspector({
+      node: eventNode({
+        modules: { observation: { observers: null } },
+      }),
+    });
+
+    expect(screen.queryByTestId('event-observers-line')).not.toBeInTheDocument();
+  });
+
+  it('omits the observers line on context nodes even when modules.observation is populated (S-4 — event-only axis)', () => {
+    renderInspector({
+      node: eventNode({
+        ...EVENT_WITH_OBSERVERS,
+        layoutHint: 'context',
+      }),
+    });
+
+    expect(screen.queryByTestId('event-observers-line')).not.toBeInTheDocument();
+    expect(screen.queryByText('Observers:')).not.toBeInTheDocument();
+  });
 });

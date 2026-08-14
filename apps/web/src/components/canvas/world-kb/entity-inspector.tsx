@@ -337,7 +337,13 @@ export function EntityInspector({
         </Button>
       </div>
 
-      {mental ? <MentalStateSection mental={mental} /> : null}
+      {mental ? (
+        // Keyed by entity id (S-3, QC fix wave): React otherwise keeps the
+        // component instance (and its `open` collapse state) when switching
+        // between two entities that both have `modules.mental` — the section
+        // must reset to expanded for the newly selected entity.
+        <MentalStateSection key={entity.key_block_id} mental={mental} />
+      ) : null}
     </form>
   );
 }

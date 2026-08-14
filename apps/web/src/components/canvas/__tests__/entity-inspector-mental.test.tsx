@@ -151,6 +151,38 @@ describe('EntityInspector — modules.mental section (V1.164 P3 Task 3)', () => 
     expect(screen.queryByText('Mental State')).not.toBeInTheDocument();
   });
 
+  it('omits the mental section when modules.mental is a non-object (defensive degradation)', () => {
+    const entityWithStringMental: WorldKbEntityProjection = {
+      ...entityWithoutMental,
+      key_block_id: 'kb-string',
+      canonical_name: 'Stringbag',
+      modules: { mental: 'not-an-object' },
+    };
+    renderWith(
+      makeClient(),
+      <EntityInspector worldId="w-1" node={node} entity={entityWithStringMental} onConflict={vi.fn()} />,
+    );
+
+    expect(screen.queryByTestId('mental-state-section')).not.toBeInTheDocument();
+    expect(screen.queryByText('Mental State')).not.toBeInTheDocument();
+  });
+
+  it('omits the mental section when modules.mental is an empty object (no populated keys)', () => {
+    const entityWithEmptyMental: WorldKbEntityProjection = {
+      ...entityWithoutMental,
+      key_block_id: 'kb-empty',
+      canonical_name: 'Emptybag',
+      modules: { mental: {} },
+    };
+    renderWith(
+      makeClient(),
+      <EntityInspector worldId="w-1" node={node} entity={entityWithEmptyMental} onConflict={vi.fn()} />,
+    );
+
+    expect(screen.queryByTestId('mental-state-section')).not.toBeInTheDocument();
+    expect(screen.queryByText('Mental State')).not.toBeInTheDocument();
+  });
+
   it('collapses and re-expands the mental section via the header toggle', async () => {
     const user = userEvent.setup();
     renderWith(
@@ -172,5 +204,50 @@ describe('EntityInspector — modules.mental section (V1.164 P3 Task 3)', () => 
     await user.click(toggle);
     expect(toggle).toHaveAttribute('aria-expanded', 'true');
     expect(within(section).getByText('Beliefs')).toBeInTheDocument();
+  });
+
+  it('resets the collapse state to expanded when switching to another entity with modules.mental (S-3)', async () => {
+    const user = userEvent.setup();
+    const client = makeClient();
+    const secondEntity: WorldKbEntityProjection = {
+      ...entityWithMental,
+      key_block_id: 'kb-ana',
+      canonical_name: 'Ana',
+      modules: {
+        mental: { goals: [{ goal: 'keep the docks quiet', status: 'active' }] },
+      },
+    };
+    const { rerender } = renderWith(
+      client,
+      <EntityInspector worldId="w-1" node={node} entity={entityWithMental} onConflict={vi.fn()} />,
+    );
+
+    // Collapse Bo's mental section.
+    await user.click(screen.getByRole('button', { name: 'Mental State' }));
+    expect(screen.getByRole('button', { name: 'Mental State' })).toHaveAttribute(
+      'aria-expanded',
+      'false',
+    );
+
+    // Switch selection to Ana (same component position, different entity id) —
+    // the section must reset to expanded instead of inheriting Bo's collapse.
+    // (rerender replaces the whole root element, so re-wrap the providers.)
+    rerender(
+      <QueryClientProvider client={makeQueryClient()}>
+        <ToastProvider>
+          <ClientProvider client={client}>
+            <EntityInspector worldId="w-1" node={node} entity={secondEntity} onConflict={vi.fn()} />
+          </ClientProvider>
+          <Toaster />
+        </ToastProvider>
+      </QueryClientProvider>,
+    );
+    expect(screen.getByRole('button', { name: 'Mental State' })).toHaveAttribute(
+      'aria-expanded',
+      'true',
+    );
+    const section = screen.getByTestId('mental-state-section');
+    expect(within(section).getByText('Goals')).toBeInTheDocument();
+    expect(within(section).getByText(/keep the docks quiet/)).toBeInTheDocument();
   });
 });

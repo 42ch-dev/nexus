@@ -1650,6 +1650,13 @@ async fn get_graph_projects_modules_from_modules_json() {
         plain.modules.is_empty(),
         "no modules data → empty modules map (omitted from wire)"
     );
+    // Struct-side emptiness is indistinguishable from `{}`; pin the actual
+    // wire behavior — `skip_serializing_if` must omit the `modules` KEY.
+    let plain_wire = serde_json::to_value(plain).expect("plain entity serializes");
+    assert!(
+        plain_wire.get("modules").is_none(),
+        "no modules data → 'modules' key must be absent from serialized JSON: {plain_wire}"
+    );
 }
 
 #[tokio::test]
