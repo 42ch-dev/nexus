@@ -192,6 +192,15 @@ fn project_entity(kb: &WorldKbEntry) -> WorldKbEntityProjection {
         body: body_value
             .and_then(|v| v.as_object().cloned())
             .unwrap_or_default(),
+        // V1.164 P3 T1 (AR-2): carry the functional-dialect modules verbatim
+        // from `kb_key_blocks.modules_json` (`WorldKbEntry.modules`). None →
+        // empty map → omitted from the wire (schema: "Absent when no modules
+        // data is present"), matching the `body` projection pattern.
+        modules: kb
+            .modules
+            .as_ref()
+            .and_then(|v| v.as_object().cloned())
+            .unwrap_or_default(),
         aliases: aliases.unwrap_or_default(),
         source_anchor_count: Some(source_anchor_count),
         updated_at: kb.updated_at.clone(),

@@ -458,6 +458,20 @@
         "body": "Body",
         "aliases": "Aliases",
         "blockType": "Block Type"
+      },
+      "mentalState": {
+        "title": "Mental State",
+        "field": {
+          "identity": "Identity",
+          "beliefs": "Beliefs",
+          "attention": "Attention",
+          "goals": "Goals",
+          "intentions": "Intentions",
+          "emotions": "Emotions",
+          "dispositions": "Dispositions",
+          "norms": "Norms",
+          "constraints": "Constraints"
+        }
       }
     },
     "relationshipInspector": {
@@ -703,6 +717,8 @@
       "bodyPlaceholder": "Free-form body JSON…",
       "viewInWorkTimeline": "View in Work Timeline",
       "viewInWorkTimelineAria": "Open the Work that realizes this World on the Work Timeline",
+      "observers": "Observers:",
+      "noObservers": "No observers",
       "field": {
         "title": "Title",
         "body": "Body",

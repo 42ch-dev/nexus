@@ -70,6 +70,30 @@ function computeDirty(
   return dirty;
 }
 
+/**
+ * Resolve observer entry_ids → canonical names using ONLY entities already
+ * in the loaded graph (`ctx.nodes` — the projected `surface.nodes` the
+ * orchestrator supplies, each carrying `key_block_id` + `canonical_name`).
+ * PD-18: no new fan-out fetch solely for this panel — ids without a name in
+ * memory render raw. Mirrors the Task 2 fixture's `name (id)` format.
+ */
+function observerLabels(
+  observers: unknown[],
+  ctx: TimelineCanvasAdapterContext,
+): string[] {
+  const names = new Map<string, string>();
+  for (const node of ctx.nodes ?? []) {
+    const id = node.data.key_block_id;
+    const name = node.data.canonical_name;
+    if (id && name) names.set(id, name);
+  }
+  return observers.map((observer) => {
+    const id = String(observer);
+    const name = names.get(id);
+    return name !== undefined && name !== id ? `${name} (${id})` : id;
+  });
+}
+
 export interface TimelineInspectorProps {
   node: Node<TimelineNodeData>;
   ctxRef: MutableRefObject<TimelineCanvasAdapterContext>;
@@ -94,6 +118,21 @@ export function TimelineInspector({ node, ctxRef }: TimelineInspectorProps) {
   const dirty = computeDirty(form, data);
   const blockTypeLabel =
     BLOCK_TYPE_LABELS[data.block_type as BlockType] ?? data.block_type;
+
+  // V1.164 P3 Task 4 — observation modules ride on the event's KB projection
+  // (`data.modules`, additive Task 1 wire field; TimelineNodeData extends
+  // WorldKbEntityProjection). Null / non-object guards keep the read safe on
+  // every wire state; `observers` stays `undefined` (→ no line) unless a
+  // present observation object actually carries it.
+  const modules = data.modules;
+  const observation =
+    modules !== null && typeof modules === 'object'
+      ? (modules as Record<string, unknown>).observation
+      : undefined;
+  const observers =
+    observation !== null && typeof observation === 'object'
+      ? (observation as Record<string, unknown>).observers
+      : undefined;
 
   async function handleSubmit() {
     if (dirty.length === 0) return;
@@ -174,6 +213,36 @@ export function TimelineInspector({ node, ctxRef }: TimelineInspectorProps) {
       <p className="text-copy-13 text-gray-700">
         {t('timeline.inspector.description')}
       </p>
+
+      {/* V1.164 P3 Task 4 — read-only observers metadata line (PD-9 / PD-18).
+          `modules.observation.observers` rides on the event's KB projection
+          (TimelineNodeData extends WorldKbEntityProjection; the daemon ships
+          `modules` verbatim). Absent `modules` / `modules.observation` =
+          unrecorded → the line is skipped entirely; `observers: []` =
+          explicitly nobody → the explicit "No observers" claim renders;
+          malformed (non-array) observers is skipped leniently (mirrors the
+          Task 2 fixture + P2 checker). Names resolve only from the already
+          loaded graph — no new fetch.
+          S-4 (QC fix wave) — the observers axis is narrative-event-only:
+          observation semantics describe who witnessed an EVENT, and this
+          inspector is shared with context nodes (characters/locations), so
+          the line is gated to `layoutHint === 'event'`. */}
+      {data.layoutHint === 'event' && Array.isArray(observers) ? (
+        <p className="mt-2 text-copy-13" data-testid="event-observers-line">
+          <span className="font-semibold text-gray-900">
+            {t('timeline.inspector.observers')}
+          </span>{' '}
+          {observers.length === 0 ? (
+            <span className="text-gray-1000">
+              {t('timeline.inspector.noObservers')}
+            </span>
+          ) : (
+            <span className="font-mono text-gray-1000">
+              {observerLabels(observers, ctx).join(', ')}
+            </span>
+          )}
+        </p>
+      ) : null}
 
       <div className="flex flex-col gap-1">
         <Label htmlFor="tl-title">

@@ -452,6 +452,20 @@
         "body": "正文",
         "aliases": "别名",
         "blockType": "块类型"
+      },
+      "mentalState": {
+        "title": "心理状态",
+        "field": {
+          "identity": "身份",
+          "beliefs": "信念",
+          "attention": "注意力",
+          "goals": "目标",
+          "intentions": "意图",
+          "emotions": "情绪",
+          "dispositions": "倾向",
+          "norms": "规范",
+          "constraints": "约束"
+        }
       }
     },
     "relationshipInspector": {
@@ -692,6 +706,8 @@
       "bodyPlaceholder": "自由格式的正文 JSON…",
       "viewInWorkTimeline": "在作品时间轴中查看",
       "viewInWorkTimelineAria": "在 Work Timeline 中打开承接此世界的作品",
+      "observers": "观察者：",
+      "noObservers": "无观察者",
       "field": {
         "title": "标题",
         "body": "正文",

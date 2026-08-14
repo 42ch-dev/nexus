@@ -281,6 +281,7 @@ pub async fn list_timeline_events_page(
                 source_command_id,
                 metadata_json,
                 extensions_nexus_json,
+                modules_json,
                 created_at
             FROM narrative_timeline_events
             WHERE world_id = ?",
@@ -347,6 +348,10 @@ pub struct TimelineEventPageRow {
     pub source_command_id: Option<String>,
     pub metadata_json: Option<String>,
     pub extensions_nexus_json: Option<String>,
+    // V1.164 P3 T1: full serialized `modules` namespace (l5-mind observation),
+    // surfaced on the daemon wire DTO `TimelineEventInfo.modules`. NULL when
+    // unrecorded (same semantics as `TimelineEventRow.modules_json`).
+    pub modules_json: Option<String>,
     pub created_at: String,
 }
 

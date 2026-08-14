@@ -61,6 +61,12 @@ export interface TimelineEventInfo {
     [k: string]: unknown | undefined;
   } | null;
   /**
+   * Per-event functional-dialect modules (modules.observation) carried verbatim from narrative_timeline_events.modules_json. Absent when unrecorded (V1.164 P3, AR-2).
+   */
+  modules?: {
+    [k: string]: unknown | undefined;
+  };
+  /**
    * ISO 8601 UTC timestamp of event creation.
    */
   created_at: string;
