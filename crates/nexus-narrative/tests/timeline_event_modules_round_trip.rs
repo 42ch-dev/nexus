@@ -91,3 +91,64 @@ fn modules_none_round_trips_to_none() {
         "spoke empty map must map back to nexus None (unrecorded ≡ empty)"
     );
 }
+
+// ── Malformed modules: reject-not-drop at the forward seam ─────────────────
+//
+// The forward conversion deserializes nexus `Option<Value>` into the spoke
+// typed module map with an `expect` (timeline_event.rs ~477-480). Any valid
+// JSON that is NOT a module-name → object|array map — scalar, array, null, or
+// a regex-invalid key (`^[a-z][a-z0-9_-]*$`) — fails deserialization and
+// panics rather than silently dropping data at the seam (plan-locked
+// behavior; writers must pre-validate — P2 writer validation is
+// roadmap-tracked). `json!({})` is deliberately NOT tested here: an empty
+// object is a VALID empty map on the forward pass.
+
+#[test]
+#[should_panic(expected = "modules must deserialize into the spoke typed module map")]
+fn modules_scalar_string_rejected_at_seam() {
+    let mut event = TimelineEvent::new("wld_1", "fbk_root", TimelineEventType::StoryAdvance, 3);
+    event.modules = Some(json!("not-an-object"));
+    let _spoke: SpokeTimelineEvent = event.into();
+}
+
+#[test]
+#[should_panic(expected = "modules must deserialize into the spoke typed module map")]
+fn modules_scalar_number_rejected_at_seam() {
+    let mut event = TimelineEvent::new("wld_1", "fbk_root", TimelineEventType::StoryAdvance, 4);
+    event.modules = Some(json!(42));
+    let _spoke: SpokeTimelineEvent = event.into();
+}
+
+#[test]
+#[should_panic(expected = "modules must deserialize into the spoke typed module map")]
+fn modules_scalar_bool_rejected_at_seam() {
+    let mut event = TimelineEvent::new("wld_1", "fbk_root", TimelineEventType::StoryAdvance, 5);
+    event.modules = Some(json!(true));
+    let _spoke: SpokeTimelineEvent = event.into();
+}
+
+#[test]
+#[should_panic(expected = "modules must deserialize into the spoke typed module map")]
+fn modules_array_rejected_at_seam() {
+    let mut event = TimelineEvent::new("wld_1", "fbk_root", TimelineEventType::StoryAdvance, 6);
+    event.modules = Some(json!([1, 2]));
+    let _spoke: SpokeTimelineEvent = event.into();
+}
+
+#[test]
+#[should_panic(expected = "modules must deserialize into the spoke typed module map")]
+fn modules_null_rejected_at_seam() {
+    let mut event = TimelineEvent::new("wld_1", "fbk_root", TimelineEventType::StoryAdvance, 7);
+    event.modules = Some(json!(null));
+    let _spoke: SpokeTimelineEvent = event.into();
+}
+
+#[test]
+#[should_panic(expected = "modules must deserialize into the spoke typed module map")]
+fn modules_invalid_key_rejected_at_seam() {
+    // "Bad-Key" violates the key pattern `^[a-z][a-z0-9_-]*$` (uppercase 'B')
+    // and fails the key newtype's FromStr validation during map deserialize.
+    let mut event = TimelineEvent::new("wld_1", "fbk_root", TimelineEventType::StoryAdvance, 8);
+    event.modules = Some(json!({"Bad-Key": {}}));
+    let _spoke: SpokeTimelineEvent = event.into();
+}

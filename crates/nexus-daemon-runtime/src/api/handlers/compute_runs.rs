@@ -511,8 +511,10 @@ pub async fn accept_run(
             evt.summary.as_deref(),
             &provenance,
             affected_json.as_deref(),
-            // modules_json — compute Accept writes no l5-mind observation
-            // modules; the observation carrier is a future writer (V1.164 P1 T4).
+            // modules_json — compute proposals do not carry `modules` on the
+            // domain wire (`domain/timeline-event.schema.json`); the
+            // persistence plumbing exists for future writers (P2 observation
+            // authoring).
             None,
         )
         .await

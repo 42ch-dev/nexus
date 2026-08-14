@@ -84,6 +84,10 @@ pub struct TimelineEvent {
     /// read-modify-write cycle and the spoke conversion seam. `None` when no
     /// modules data is present (unrecorded per spoke handbook — distinct from
     /// explicit empty). Matches the `WorldKbEntry.modules` precedent.
+    ///
+    /// Malformed shapes (non-object map values, regex-invalid keys) are
+    /// REJECTED at the spoke seam (panic) — writers must pre-validate; P2
+    /// writer validation is roadmap-tracked.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub modules: Option<serde_json::Value>,
     pub created_at: String,
@@ -562,9 +566,12 @@ impl From<SpokeTimelineEvent> for TimelineEvent {
             },
             source_command_id,
             // modules: bidirectional passthrough — spoke typed map → nexus
-            // Option<Value>. Empty map ≡ unrecorded (None); non-empty → the
-            // map serialized back to a JSON object (keys/values are spoke
-            // transparent/untagged newtypes, so content is preserved verbatim).
+            // Option<Value>. Empty spoke map ≡ unrecorded (None) per spoke
+            // handbook — an explicit empty object cannot round-trip through
+            // the non-Option spoke `modules` map (it collapses to None);
+            // non-empty → the map serialized back to a JSON object
+            // (keys/values are spoke transparent/untagged newtypes, so
+            // content is preserved verbatim).
             modules: if s.modules.is_empty() {
                 None
             } else {
