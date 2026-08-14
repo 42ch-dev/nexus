@@ -44,6 +44,7 @@ pub mod spoke_rules;
 pub mod work_chapters;
 pub mod works;
 pub mod workspace_session;
+pub mod world_findings;
 pub mod world_stories;
 
 mod error;
