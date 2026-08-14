@@ -8,8 +8,9 @@
  * V1.73 entity body is a free-form `Record<string, unknown>` projection; a rich
  * body editor is V1.74.
  */
-import { useEffect, useState } from 'react';
+import { useEffect, useId, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { ChevronDown, ChevronRight } from 'lucide-react';
 
 import { Textarea } from '@/components/ui/textarea';
 import { Select } from '@/components/ui/select';
@@ -58,6 +59,86 @@ const FIELD_LABEL_KEYS: Record<WorldKbEntityField, string> = {
   block_type: 'worldKb.entityInspector.field.blockType',
 };
 
+/** Handbook order for the nine-field mental table (product locks §Mental field vocabulary). */
+const MENTAL_FIELD_ORDER = [
+  'identity',
+  'beliefs',
+  'attention',
+  'goals',
+  'intentions',
+  'emotions',
+  'dispositions',
+  'norms',
+  'constraints',
+] as const;
+
+const MENTAL_FIELD_LABEL_KEYS: Record<(typeof MENTAL_FIELD_ORDER)[number], string> = {
+  identity: 'worldKb.entityInspector.mentalState.field.identity',
+  beliefs: 'worldKb.entityInspector.mentalState.field.beliefs',
+  attention: 'worldKb.entityInspector.mentalState.field.attention',
+  goals: 'worldKb.entityInspector.mentalState.field.goals',
+  intentions: 'worldKb.entityInspector.mentalState.field.intentions',
+  emotions: 'worldKb.entityInspector.mentalState.field.emotions',
+  dispositions: 'worldKb.entityInspector.mentalState.field.dispositions',
+  norms: 'worldKb.entityInspector.mentalState.field.norms',
+  constraints: 'worldKb.entityInspector.mentalState.field.constraints',
+};
+
+/**
+ * Read-only "Mental State" section (V1.164 P3 Task 3, AC-V1164-12/15 + PD-16).
+ *
+ * Collapsible via the header toggle. Renders every populated nine-field key
+ * (bold label + JSON value row, no input controls). Returns null when
+ * `modules.mental` is absent / null / has no populated keys — no empty panel,
+ * no "N/A" placeholders.
+ */
+function MentalStateSection({ mental }: { mental: Record<string, unknown> }) {
+  const { t } = useTranslation('canvas');
+  const [open, setOpen] = useState(true);
+  const regionId = useId();
+  const fields = MENTAL_FIELD_ORDER.filter((key) => mental[key] !== undefined);
+  if (fields.length === 0) {
+    return null;
+  }
+  const title = t('worldKb.entityInspector.mentalState.title');
+  return (
+    <section
+      className="mt-3 border-t border-gray-alpha-300 pt-2"
+      data-testid="mental-state-section"
+      aria-label={title}
+    >
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        aria-controls={regionId}
+        className="flex w-full items-center gap-1.5 text-left text-label-14 font-semibold text-gray-900"
+      >
+        {open ? (
+          <ChevronDown className="h-4 w-4 text-gray-700" aria-hidden />
+        ) : (
+          <ChevronRight className="h-4 w-4 text-gray-700" aria-hidden />
+        )}
+        {title}
+      </button>
+      {open ? (
+        <dl id={regionId} className="mt-1.5 flex flex-col gap-2">
+          {fields.map((key) => (
+            <div key={key} className="flex flex-col gap-0.5">
+              <dt className="text-label-14 font-semibold text-gray-900">
+                {t(MENTAL_FIELD_LABEL_KEYS[key])}
+              </dt>
+              <dd className="text-copy-13 font-mono text-gray-1000 whitespace-pre-wrap break-words">
+                {JSON.stringify(mental[key], null, 2)}
+              </dd>
+            </div>
+          ))}
+        </dl>
+      ) : null}
+    </section>
+  );
+}
+
 export interface EntityInspectorProps {
   worldId: string;
   /** The selected node (for display + version). */
@@ -90,6 +171,15 @@ export function EntityInspector({
   const { t } = useTranslation('canvas');
   const [form, setForm] = useState<EntityEditForm>(() => formFromEntity(entity));
   const [validationErrors, setValidationErrors] = useState<string[]>([]);
+
+  // PD-16: null / undefined / non-object modules.mental skips the whole
+  // section — no empty panel, no placeholder rows.
+  const mental =
+    entity.modules?.mental !== undefined &&
+    entity.modules.mental !== null &&
+    typeof entity.modules.mental === 'object'
+      ? (entity.modules.mental as Record<string, unknown>)
+      : undefined;
 
   // Reseed when the selection (or an external reseed signal) changes.
   useEffect(() => {
@@ -246,6 +336,8 @@ export function EntityInspector({
           {patch.isPending ? t('worldKb.entityInspector.saving') : t('worldKb.entityInspector.save')}
         </Button>
       </div>
+
+      {mental ? <MentalStateSection mental={mental} /> : null}
     </form>
   );
 }
