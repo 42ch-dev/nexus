@@ -191,8 +191,8 @@ Rules:
 
 ---
 
-| DR-67 | World-scoped check finding attribution — `findings.work_id` NOT NULL FK→`works` vs world-scoped mental-layer findings (checker stamps work_id=world_id → put_findings 500). Fix needs product decision: bound-work attribution / FK relaxation / world-scoped findings table. R-V1164P2QC-001 (high, open). | [qc2.md F-001 source trace](../../sdd/2026-08-14-v1.164-p2-mental-belief-dialect-mindstate-checker/review/qc2.md) | V1.165+ | product decision + non-empty-findings E2E green | Canvas/Harness | — |
-| DR-68 | Observation authoring path ergonomics — canvas observers reads KB-entity `modules`; HTTP patch DTO lacks modules; spoke-protocol `orchestrate_upsert` authors it. R-V1164P3QC-001 (medium, open). | [qc-consolidated.md](../../sdd/2026-08-14-v1.164-p3-canvas-readonly-mental-surfacing/review/qc-consolidated.md) | V1.165+ | authoring UX decision (patch-DTO modules / narrative→KB join / fixture-only) | Canvas | — |
+| DR-68 | World-scoped check finding attribution — `findings.work_id` NOT NULL FK→`works` vs world-scoped mental-layer findings (checker stamps work_id=world_id → put_findings 500). Fix needs product decision: bound-work attribution / FK relaxation / world-scoped findings table. R-V1164P2QC-001 (high, open). | [qc2.md F-001 source trace](../../sdd/2026-08-14-v1.164-p2-mental-belief-dialect-mindstate-checker/review/qc2.md) | V1.165+ | product decision + non-empty-findings E2E green | Canvas/Harness | — |
+| DR-69 | Observation authoring path ergonomics — canvas observers reads KB-entity `modules`; HTTP patch DTO lacks modules; spoke-protocol `orchestrate_upsert` authors it. R-V1164P3QC-001 (medium, open). | [qc-consolidated.md](../../sdd/2026-08-14-v1.164-p3-canvas-readonly-mental-surfacing/review/qc-consolidated.md) | V1.165+ | authoring UX decision (patch-DTO modules / narrative→KB join / fixture-only) | Canvas | — |
 
 ## 3) Residuals (SSOT pointer)
 
@@ -221,6 +221,6 @@ Residual findings are tracked in [`status.json`](../status.json) → `residual_f
 
 **Shipped archive**: [shipped-features-tracker.md](shipped-features-tracker.md)
 
-**Spec durable roadmaps**: §2.6 (DR-01..DR-67, consolidated 2026-08-09)
+**Spec durable roadmaps**: §2.6 (DR-01..DR-69; DR-01..DR-67 consolidated 2026-08-09; DR-68/69 added V1.164 close)
 
 **Machine state**: [`status.json`](../status.json)
