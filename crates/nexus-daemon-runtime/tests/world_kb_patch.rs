@@ -956,6 +956,459 @@ async fn patch_entity_merged_status_rejected_by_orchestrator() {
     assert_eq!(err.error_code(), "world_kb_validation_failed");
 }
 
+// ─── patch-entity modules (V1.165 P2 / AR-4) ────────────────────────────────
+
+/// Seed a `kb_key_blocks` row carrying `modules_json` at revision 0
+/// (V1.146 P4 modules column).
+async fn seed_key_block_with_modules(
+    pool: &sqlx::SqlitePool,
+    key_block_id: &str,
+    block_type: &str,
+    canonical_name: &str,
+    status: &str,
+    modules_json: Option<&str>,
+) {
+    // SAFETY: test-only seed against the known kb_key_blocks schema
+    // (20260525_kb_key_blocks.sql + 20260731120000_modules_json.sql).
+    sqlx::query(
+        "INSERT INTO kb_key_blocks \
+         (key_block_id, world_id, block_type, canonical_name, status, revision, \
+          modules_json, created_at, updated_at) \
+         VALUES (?, 'wld_test_world', ?, ?, ?, 0, ?, datetime('now'), datetime('now'))",
+    )
+    .bind(key_block_id)
+    .bind(block_type)
+    .bind(canonical_name)
+    .bind(status)
+    .bind(modules_json)
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
+/// (a) AR-4 / PD-12 provided-key upsert: a provided first-level key replaces
+/// the WHOLE first-level value (no deep merge — old sub-keys of the replaced
+/// value must disappear), and unspecified sibling keys are preserved.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn patch_entity_modules_upsert_replaces_first_level_value() {
+    let (_tmp, state) = fresh_state().await;
+    seed_key_block_with_modules(
+        state.pool().unwrap(),
+        "kb_hero",
+        "character",
+        "Aria",
+        "confirmed",
+        Some(r#"{"mental":{"goals":["old goal"],"fear":"storms"},"belief":{"ref":"kb_beliefs"}}"#),
+    )
+    .await;
+
+    let req = WorldKbPatchEntityRequest {
+        entity_id: "kb_hero".to_string(),
+        expected_version: 0,
+        // `mental` upserts; `belief` is an unspecified sibling key.
+        patch: serde_json::from_value(serde_json::json!({
+            "modules": { "mental": { "goals": ["new goal"] } }
+        }))
+        .unwrap(),
+    };
+    let Json(resp) = patch_entity(
+        State(state.clone()),
+        Path("wld_test_world".to_string()),
+        Json(req),
+    )
+    .await
+    .expect("patch should succeed");
+
+    let mental = resp
+        .entity
+        .modules
+        .get("mental")
+        .expect("modules.mental present");
+    assert_eq!(
+        mental,
+        &serde_json::json!({"goals": ["new goal"]}),
+        "provided key replaces the whole first-level value"
+    );
+    assert!(
+        mental.get("fear").is_none(),
+        "whole-value replace: old sub-keys of the replaced value must not survive"
+    );
+    assert_eq!(
+        resp.entity.modules.get("belief"),
+        Some(&serde_json::json!({"ref": "kb_beliefs"})),
+        "unspecified sibling key preserved"
+    );
+    assert_eq!(resp.version, 1);
+}
+
+/// (b) Omit `modules` → the post-patch entity inherits `kb.modules` via the
+/// clone (zero change).
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn patch_entity_omit_modules_preserves_existing() {
+    let (_tmp, state) = fresh_state().await;
+    seed_key_block_with_modules(
+        state.pool().unwrap(),
+        "kb_hero",
+        "character",
+        "Aria",
+        "confirmed",
+        Some(r#"{"mental":{"goals":["rule"]},"belief":{"ref":"kb_beliefs"}}"#),
+    )
+    .await;
+
+    // Title-only patch — `modules` omitted entirely.
+    let req = WorldKbPatchEntityRequest {
+        entity_id: "kb_hero".to_string(),
+        expected_version: 0,
+        patch: serde_json::from_value(serde_json::json!({"title": "Aria Stormwind"})).unwrap(),
+    };
+    let Json(resp) = patch_entity(
+        State(state.clone()),
+        Path("wld_test_world".to_string()),
+        Json(req),
+    )
+    .await
+    .expect("patch should succeed");
+
+    assert_eq!(
+        resp.entity.modules.get("mental"),
+        Some(&serde_json::json!({"goals": ["rule"]})),
+        "omitted modules → stored modules preserved"
+    );
+    assert_eq!(
+        resp.entity.modules.get("belief"),
+        Some(&serde_json::json!({"ref": "kb_beliefs"})),
+        "omitted modules → stored modules preserved"
+    );
+}
+
+/// (c) `modules: {}` is identical to omit (PD-12) — it does NOT wipe the
+/// stored dialects.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn patch_entity_empty_modules_does_not_wipe() {
+    let (_tmp, state) = fresh_state().await;
+    seed_key_block_with_modules(
+        state.pool().unwrap(),
+        "kb_hero",
+        "character",
+        "Aria",
+        "confirmed",
+        Some(r#"{"mental":{"goals":["rule"]},"belief":{"ref":"kb_beliefs"}}"#),
+    )
+    .await;
+
+    // Title + empty modules object alongside another field.
+    let req = WorldKbPatchEntityRequest {
+        entity_id: "kb_hero".to_string(),
+        expected_version: 0,
+        patch: serde_json::from_value(serde_json::json!({
+            "title": "Aria Stormwind",
+            "modules": {}
+        }))
+        .unwrap(),
+    };
+    let Json(resp) = patch_entity(
+        State(state.clone()),
+        Path("wld_test_world".to_string()),
+        Json(req),
+    )
+    .await
+    .expect("patch should succeed");
+
+    assert_eq!(
+        resp.entity.modules.get("mental"),
+        Some(&serde_json::json!({"goals": ["rule"]})),
+        "modules: {{}} must not wipe stored dialects"
+    );
+    assert_eq!(
+        resp.entity.modules.get("belief"),
+        Some(&serde_json::json!({"ref": "kb_beliefs"})),
+        "modules: {{}} must not wipe stored dialects"
+    );
+}
+
+/// (d) Unknown keys round-trip verbatim (V1.164 PD-13): a key the nexus
+/// domain does not know is stored byte-identically, alongside preserved
+/// siblings. Array values ride the same carrier.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn patch_entity_unknown_module_keys_round_trip_verbatim() {
+    let (_tmp, state) = fresh_state().await;
+    seed_key_block_with_modules(
+        state.pool().unwrap(),
+        "kb_hero",
+        "character",
+        "Aria",
+        "confirmed",
+        Some(r#"{"known":{"a":1}}"#),
+    )
+    .await;
+
+    let req = WorldKbPatchEntityRequest {
+        entity_id: "kb_hero".to_string(),
+        expected_version: 0,
+        patch: serde_json::from_value(serde_json::json!({
+            "modules": {
+                "custom_namespace": { "deep": { "x": [1, 2] } },
+                "placement": ["a", "b"]
+            }
+        }))
+        .unwrap(),
+    };
+    let Json(resp) = patch_entity(
+        State(state.clone()),
+        Path("wld_test_world".to_string()),
+        Json(req),
+    )
+    .await
+    .expect("patch should succeed");
+
+    assert_eq!(
+        resp.entity.modules.get("known"),
+        Some(&serde_json::json!({"a": 1})),
+        "unspecified sibling key preserved"
+    );
+    assert_eq!(
+        resp.entity.modules.get("custom_namespace"),
+        Some(&serde_json::json!({"deep": {"x": [1, 2]}})),
+        "unknown key round-trips verbatim"
+    );
+    assert_eq!(
+        resp.entity.modules.get("placement"),
+        Some(&serde_json::json!(["a", "b"])),
+        "array module value round-trips verbatim"
+    );
+}
+
+/// (e) AR-4 lock 4: non-ModuleMap keys / scalar values are rejected AT THE
+/// BOUNDARY — the generated `modules` field is a typed `HashMap` whose key
+/// newtype enforces `^[a-z][a-z0-9_-]*$` and whose value enum only admits
+/// objects/arrays, so malformed input fails JSON deserialization (the same
+/// boundary the axum `Json` extractor rejects with 400). Nothing is
+/// silently dropped by the conversion seam.
+#[test]
+fn patch_modules_rejects_non_modulemap_keys_and_scalar_values() {
+    for bad in [
+        serde_json::json!({"modules": {"Bad Key": {}}}),
+        serde_json::json!({"modules": {"mental": 5}}),
+        serde_json::json!({"modules": {"mental": null}}),
+        serde_json::json!({"modules": {"mental": "string"}}),
+        serde_json::json!({"modules": {"": {}}}),
+        serde_json::json!({"modules": {"9lives": {}}}),
+    ] {
+        assert!(
+            serde_json::from_value::<WorldKbPatchEntityRequest>(serde_json::json!({
+                "entity_id": "kb_hero",
+                "expected_version": 0,
+                "patch": bad
+            }))
+            .is_err(),
+            "must reject patch {bad}"
+        );
+    }
+    // Sanity: a conforming map parses (object + array values).
+    let req = serde_json::from_value::<WorldKbPatchEntityRequest>(serde_json::json!({
+        "entity_id": "kb_hero",
+        "expected_version": 0,
+        "patch": {
+            "modules": { "mental": { "goals": ["x"] }, "placement": ["a"] }
+        }
+    }))
+    .expect("conforming modules parse");
+    assert_eq!(req.patch.modules.len(), 2);
+}
+
+/// (f) A modules-only patch is valid (AR-4 lock 3) — including on a
+/// `confirmed` KE (AR-4 lock 1: no mutability gate for `modules`).
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn patch_entity_modules_only_patch_on_confirmed_ke() {
+    let (_tmp, state) = fresh_state().await;
+    seed_key_block(
+        state.pool().unwrap(),
+        "kb_hero",
+        "wld_test_world",
+        "character",
+        "Aria",
+        "confirmed",
+        None,
+        None,
+    )
+    .await;
+
+    // No title/body/aliases/block_type — `modules` is the only field.
+    let req = WorldKbPatchEntityRequest {
+        entity_id: "kb_hero".to_string(),
+        expected_version: 0,
+        patch: serde_json::from_value(serde_json::json!({
+            "modules": { "mental": { "goals": ["rule the harbor"] } }
+        }))
+        .unwrap(),
+    };
+    let Json(resp) = patch_entity(
+        State(state.clone()),
+        Path("wld_test_world".to_string()),
+        Json(req),
+    )
+    .await
+    .expect("modules-only patch must succeed on a confirmed KE");
+
+    assert_eq!(resp.version, 1);
+    assert_eq!(resp.entity.status, "confirmed");
+    assert_eq!(
+        resp.entity.modules.get("mental"),
+        Some(&serde_json::json!({"goals": ["rule the harbor"]})),
+        "modules-only patch applied"
+    );
+}
+
+/// (g) AC-V165-9: PATCH `modules.mental` + `modules.belief` on a character
+/// KE via the same carrier → KB graph read returns both verbatim.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn patch_entity_mental_and_belief_round_trip_on_graph_read() {
+    let (_tmp, state) = fresh_state().await;
+    seed_key_block(
+        state.pool().unwrap(),
+        "kb_ana",
+        "wld_test_world",
+        "character",
+        "Ana",
+        "confirmed",
+        None,
+        None,
+    )
+    .await;
+
+    let req = WorldKbPatchEntityRequest {
+        entity_id: "kb_ana".to_string(),
+        expected_version: 0,
+        patch: serde_json::from_value(serde_json::json!({
+            "modules": {
+                "mental": { "beliefs": { "ref": "kb_ana_beliefs", "count": 2 }, "goals": ["win"] },
+                "belief": { "core": ["honesty"], "drives": ["truth"] }
+            }
+        }))
+        .unwrap(),
+    };
+    let Json(resp) = patch_entity(
+        State(state.clone()),
+        Path("wld_test_world".to_string()),
+        Json(req),
+    )
+    .await
+    .expect("patch should succeed");
+
+    // Response projection carries both dialects verbatim…
+    assert_eq!(
+        resp.entity.modules.get("mental"),
+        Some(&serde_json::json!({
+            "beliefs": { "ref": "kb_ana_beliefs", "count": 2 },
+            "goals": ["win"]
+        })),
+        "modules.mental on the patch response"
+    );
+    assert_eq!(
+        resp.entity.modules.get("belief"),
+        Some(&serde_json::json!({"core": ["honesty"], "drives": ["truth"]})),
+        "modules.belief on the patch response"
+    );
+
+    // …and the KB graph read round-trips the same persisted modules.
+    let Json(graph) = get_graph(
+        State(state.clone()),
+        Path("wld_test_world".to_string()),
+        Query(GraphQuery {
+            include_suggested: None,
+        }),
+    )
+    .await
+    .expect("graph should succeed");
+    let ana = graph
+        .entities
+        .iter()
+        .find(|e| e.key_block_id == "kb_ana")
+        .expect("kb_ana in graph");
+    assert_eq!(
+        ana.modules.get("mental").and_then(|m| m.get("beliefs")),
+        Some(&serde_json::json!({"ref": "kb_ana_beliefs", "count": 2})),
+        "graph read: modules.mental.beliefs verbatim (AC-V165-9)"
+    );
+    assert_eq!(
+        ana.modules.get("belief"),
+        Some(&serde_json::json!({"core": ["honesty"], "drives": ["truth"]})),
+        "graph read: modules.belief verbatim (AC-V165-9)"
+    );
+}
+
+/// (h) AC-V165-8 carrier: PATCH `modules.observation` on a KB event entity
+/// → KB graph read returns it — the referent T3 asserts against
+/// (`WorldKbEntityProjection.modules` on `block_type === 'event'`).
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn patch_entity_observation_on_event_entity_round_trip_on_graph_read() {
+    let (_tmp, state) = fresh_state().await;
+    seed_key_block(
+        state.pool().unwrap(),
+        "kb_observation",
+        "wld_test_world",
+        "event",
+        "Hidden Transfer",
+        "confirmed",
+        None,
+        None,
+    )
+    .await;
+
+    let req = WorldKbPatchEntityRequest {
+        entity_id: "kb_observation".to_string(),
+        expected_version: 0,
+        patch: serde_json::from_value(serde_json::json!({
+            "modules": {
+                "observation": {
+                    "observers": ["kb_ana"],
+                    "access": { "read": ["kb_ana"] }
+                }
+            }
+        }))
+        .unwrap(),
+    };
+    let Json(resp) = patch_entity(
+        State(state.clone()),
+        Path("wld_test_world".to_string()),
+        Json(req),
+    )
+    .await
+    .expect("patch should succeed");
+    assert_eq!(
+        resp.entity.modules.get("observation"),
+        Some(&serde_json::json!({
+            "observers": ["kb_ana"],
+            "access": { "read": ["kb_ana"] }
+        })),
+        "modules.observation on the patch response"
+    );
+
+    let Json(graph) = get_graph(
+        State(state.clone()),
+        Path("wld_test_world".to_string()),
+        Query(GraphQuery {
+            include_suggested: None,
+        }),
+    )
+    .await
+    .expect("graph should succeed");
+    let evt = graph
+        .entities
+        .iter()
+        .find(|e| e.key_block_id == "kb_observation")
+        .expect("kb_observation in graph");
+    assert_eq!(
+        evt.modules.get("observation"),
+        Some(&serde_json::json!({
+            "observers": ["kb_ana"],
+            "access": { "read": ["kb_ana"] }
+        })),
+        "graph read: modules.observation verbatim (AC-V165-8 carrier)"
+    );
+}
+
 // ─── promote-candidate ──────────────────────────────────────────────────────
 
 const NOVEL_CHARACTER_BODY: &str =
@@ -1527,6 +1980,52 @@ async fn promote_stale_version_returns_409() {
     .expect_err("stale promote must 409");
     assert_eq!(err.status_code(), axum::http::StatusCode::CONFLICT);
     assert_eq!(err.error_code(), "world_kb_conflict");
+}
+
+/// V1.165 P2 (AR-4): the promote request `$ref`s the entity patch schema, so
+/// `patch.modules` is now wire-valid there — but adopt refinements only
+/// consume `title`/`body`/`aliases`/`block_type`. The handler must reject a modules
+/// refinement with 400 (not silently drop it — the schema previously
+/// rejected the key outright at deserialize).
+#[tokio::test]
+async fn promote_adopt_rejects_patch_modules_refinement() {
+    let (_tmp, state) = fresh_state().await;
+    let candidate = insert_pending(
+        state.pool().unwrap(),
+        "test_creator",
+        "ws",
+        "wld_test_world",
+        None,
+        None,
+        "character",
+        "Adopta",
+        NOVEL_CHARACTER_BODY,
+    )
+    .await
+    .unwrap();
+
+    let req = WorldKbPromoteCandidateRequest {
+        job_id: candidate.job_id.clone(),
+        candidate_id: "kb_cand".to_string(),
+        action: "adopt".parse().unwrap(),
+        expected_version: u64::try_from(candidate.version).unwrap_or(0),
+        merge_target_id: None,
+        patch: Some(
+            serde_json::from_value(serde_json::json!({
+                "modules": { "mental": { "goals": ["x"] } }
+            }))
+            .unwrap(),
+        ),
+    };
+    let err = promote_candidate(
+        State(state.clone()),
+        Path("wld_test_world".to_string()),
+        Json(req),
+    )
+    .await
+    .expect_err("modules refinement on promote-adopt must reject, not silently drop");
+    assert_eq!(err.status_code(), axum::http::StatusCode::BAD_REQUEST);
+    assert_eq!(err.error_code(), "invalid_input");
 }
 
 // ─── read endpoints ─────────────────────────────────────────────────────────

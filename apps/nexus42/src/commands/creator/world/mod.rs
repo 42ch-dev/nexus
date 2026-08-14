@@ -58,6 +58,15 @@ pub enum WorldCommand {
         /// Event summary
         #[arg(long)]
         summary: Option<String>,
+        /// Observer entry ID recorded in `modules.observation` (repeatable;
+        /// e.g. `kb_ana`). Any observer starts the observation module.
+        #[arg(long)]
+        observer: Vec<String>,
+        /// Observation access as a JSON object string (optional; e.g.
+        /// `{"line_of_sight":true}`). Providing `--access` without any
+        /// `--observer` records `observers: []` (explicit nobody).
+        #[arg(long)]
+        access: Option<String>,
     },
 
     /// List all worlds in the active workspace
@@ -113,6 +122,8 @@ pub async fn run(cmd: WorldCommand, config: &CliConfig) -> Result<()> {
             event_type,
             title,
             summary,
+            observer,
+            access,
         } => {
             run_event_add(
                 config,
@@ -121,6 +132,8 @@ pub async fn run(cmd: WorldCommand, config: &CliConfig) -> Result<()> {
                 &event_type,
                 title.as_deref(),
                 summary.as_deref(),
+                &observer,
+                access.as_deref(),
             )
             .await
         }
@@ -194,6 +207,10 @@ async fn run_create(
 }
 
 /// Run `creator world event-add`.
+#[allow(clippy::too_many_arguments)]
+// ^ justification: mirrors run_event_add's flat event-add field surface;
+// grouping the AR-5 observation flags into a struct would add indirection
+// for the two new callers (CLI + tests).
 async fn run_event_add(
     config: &CliConfig,
     world_id: &str,
@@ -201,8 +218,13 @@ async fn run_event_add(
     event_type: &str,
     title: Option<&str>,
     summary: Option<&str>,
+    observers: &[String],
+    access: Option<&str>,
 ) -> Result<()> {
     let pool = open_workspace_pool(config).await?;
+
+    // Build `modules.observation` from the AR-5 flags (None = unrecorded).
+    let modules_json = build_observation_modules(observers, access)?;
 
     // If no branch_id specified, look up the world's root_fork_branch_id
     let branch_id_resolved = if let Some(bid) = branch_id {
@@ -231,6 +253,7 @@ async fn run_event_add(
         event_type,
         title,
         summary,
+        modules_json.as_deref(),
     )
     .await
     .map_err(|e| crate::errors::CliError::Other(format!("Failed to append event: {e}")))?;
@@ -246,6 +269,54 @@ async fn run_event_add(
         println!("  Summary:   {s}");
     }
     Ok(())
+}
+
+/// Build the `modules.observation` JSON payload from `event-add` observation
+/// flags (AR-5 lock — tri-state).
+///
+/// - No observation flags → `None`: the appended event stores
+///   `modules_json = NULL` (absent / unrecorded).
+/// - ≥1 `--observer` → `{"observation": {"observers": [...], "access": {...}?}}`.
+/// - Zero `--observer` **with** `--access` → `observers: []` + access
+///   (explicit nobody — the PD-9 empty state is authorable).
+///
+/// Malformed input is rejected here, at the CLI boundary (not at the DB):
+/// `--access` must parse as a JSON **object**, and observer values must be
+/// non-empty strings.
+fn build_observation_modules(observers: &[String], access: Option<&str>) -> Result<Option<String>> {
+    if observers.is_empty() && access.is_none() {
+        return Ok(None);
+    }
+
+    for obs in observers {
+        if obs.trim().is_empty() {
+            return Err(crate::errors::CliError::Other(
+                "--observer values must be non-empty strings".to_string(),
+            ));
+        }
+    }
+
+    let mut observation = serde_json::Map::new();
+    observation.insert("observers".to_string(), serde_json::json!(observers));
+
+    if let Some(access_str) = access {
+        let access_value: serde_json::Value = serde_json::from_str(access_str).map_err(|e| {
+            crate::errors::CliError::Other(format!(
+                "--access must be a JSON object string (parse error: {e})"
+            ))
+        })?;
+        if !access_value.is_object() {
+            return Err(crate::errors::CliError::Other(
+                "--access must be a JSON object string (got a non-object value)".to_string(),
+            ));
+        }
+        observation.insert("access".to_string(), access_value);
+    }
+
+    let modules = serde_json::json!({ "observation": observation });
+    serde_json::to_string(&modules).map(Some).map_err(|e| {
+        crate::errors::CliError::Other(format!("failed to serialize observation modules: {e}"))
+    })
 }
 
 /// Run `creator world list`.
@@ -310,4 +381,169 @@ async fn run_show(config: &CliConfig, world_id: &str) -> Result<()> {
     }
     println!("Created:      {}", world.created_at);
     Ok(())
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::*;
+    use clap::Parser;
+
+    /// Minimal CLI struct for hermetic parsing tests of `creator world`.
+    #[derive(Parser)]
+    struct WorldCli {
+        #[command(subcommand)]
+        command: WorldCommand,
+    }
+
+    // ── AR-5: event-add observation flag parsing ──────────────────────
+
+    #[test]
+    fn event_add_parses_observer_and_access_flags() {
+        let cli = WorldCli::try_parse_from([
+            "nexus42",
+            "event-add",
+            "--world-id",
+            "wld_abc123",
+            "--observer",
+            "kb_ana",
+            "--observer",
+            "kb_guard",
+            "--access",
+            r#"{"line_of_sight":true}"#,
+        ])
+        .expect("event-add with observation flags should parse");
+        match cli.command {
+            WorldCommand::EventAdd {
+                observer,
+                access,
+                world_id,
+                ..
+            } => {
+                assert_eq!(world_id, "wld_abc123");
+                assert_eq!(
+                    observer,
+                    vec!["kb_ana".to_string(), "kb_guard".to_string()],
+                    "--observer is repeatable and preserves order"
+                );
+                assert_eq!(access.as_deref(), Some(r#"{"line_of_sight":true}"#));
+            }
+            _ => panic!("expected EventAdd variant"),
+        }
+    }
+
+    #[test]
+    fn event_add_parses_without_observation_flags() {
+        let cli = WorldCli::try_parse_from(["nexus42", "event-add", "--world-id", "wld_abc123"])
+            .expect("event-add without observation flags should parse");
+        match cli.command {
+            WorldCommand::EventAdd {
+                observer, access, ..
+            } => {
+                assert!(observer.is_empty(), "no --observer → empty list");
+                assert!(access.is_none(), "no --access → None");
+            }
+            _ => panic!("expected EventAdd variant"),
+        }
+    }
+
+    // ── AR-5: observation modules builder (tri-state) ─────────────────
+
+    #[test]
+    fn build_observation_modules_none_without_flags() {
+        // (b) no observation flags → None → modules_json stays NULL at rest.
+        assert!(
+            build_observation_modules(&[], None).unwrap().is_none(),
+            "no observation flags must yield no modules payload"
+        );
+    }
+
+    #[test]
+    fn build_observation_modules_observer_and_access() {
+        // (a) observer + access → observation object with both keys.
+        let modules = build_observation_modules(
+            &["kb_ana".to_string()],
+            Some(r#"{"line_of_sight":true,"hearing_range":true}"#),
+        )
+        .unwrap()
+        .expect("observer flags must produce a modules payload");
+        let value: serde_json::Value = serde_json::from_str(&modules).unwrap();
+        assert_eq!(
+            value,
+            serde_json::json!({
+                "observation": {
+                    "observers": ["kb_ana"],
+                    "access": {"line_of_sight": true, "hearing_range": true}
+                }
+            })
+        );
+    }
+
+    #[test]
+    fn build_observation_modules_multiple_observers_preserve_order() {
+        let modules =
+            build_observation_modules(&["kb_ana".to_string(), "kb_guard".to_string()], None)
+                .unwrap()
+                .expect("observers without access must still produce a payload");
+        let value: serde_json::Value = serde_json::from_str(&modules).unwrap();
+        assert_eq!(
+            value,
+            serde_json::json!({
+                "observation": {"observers": ["kb_ana", "kb_guard"]}
+            })
+        );
+    }
+
+    #[test]
+    fn build_observation_modules_zero_observers_with_access() {
+        // (c) explicit nobody: observers: [] + access (PD-9 empty state).
+        let modules = build_observation_modules(&[], Some(r#"{"line_of_sight":true}"#))
+            .unwrap()
+            .expect("access without observers must produce a payload");
+        let value: serde_json::Value = serde_json::from_str(&modules).unwrap();
+        assert_eq!(
+            value,
+            serde_json::json!({
+                "observation": {
+                    "observers": [],
+                    "access": {"line_of_sight": true}
+                }
+            })
+        );
+    }
+
+    #[test]
+    fn build_observation_modules_rejects_non_object_access() {
+        // (d) non-object --access rejected at the CLI boundary.
+        for bad in [r"[1,2,3]", r#""just a string""#, "42", "null"] {
+            let err = build_observation_modules(&["kb_ana".to_string()], Some(bad)).unwrap_err();
+            assert!(
+                err.to_string().contains("--access must be a JSON object"),
+                "expected object rejection for {bad}, got: {err}"
+            );
+        }
+    }
+
+    #[test]
+    fn build_observation_modules_rejects_invalid_json_access() {
+        let err = build_observation_modules(&[], Some("{not json")).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("--access must be a JSON object string"),
+            "got: {err}"
+        );
+    }
+
+    #[test]
+    fn build_observation_modules_rejects_empty_observer() {
+        // (d) empty/whitespace observer values rejected.
+        for bad in ["", "   "] {
+            let err = build_observation_modules(&[bad.to_string()], None).unwrap_err();
+            assert!(
+                err.to_string()
+                    .contains("--observer values must be non-empty strings"),
+                "expected empty-observer rejection for {bad:?}, got: {err}"
+            );
+        }
+    }
 }

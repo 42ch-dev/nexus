@@ -812,6 +812,7 @@ async fn run_demo_seed(config: &CliConfig, force: bool) -> Result<()> {
         "story_advance",
         Some("The Journey Begins"),
         Some("A hero embarks on their first adventure."),
+        None, // modules_json — the demo seed writes no modules
     )
     .await
     .map_err(|e| CliError::Other(format!("Failed to create demo event: {e}")))?;

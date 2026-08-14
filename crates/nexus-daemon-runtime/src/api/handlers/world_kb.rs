@@ -30,7 +30,10 @@ use crate::workspace::WorkspaceState;
 use axum::extract::{Path, Query, State};
 use axum::Json;
 use nexus_contracts::{
-    world_kb_patch_entity_request::NexusWorldKbEntityPatch,
+    world_kb_patch_entity_request::{
+        NexusWorldKbEntityPatch, NexusWorldKbEntityPatchModulesKey,
+        NexusWorldKbEntityPatchModulesValue,
+    },
     world_kb_patch_relationship_request::{
         NexusWorldKbRelationshipInput, NexusWorldKbRelationshipKind,
     },
@@ -77,6 +80,7 @@ use nexus_spoke_adapter::{
     SpokeResult, UpsertRequest, UpsertResponse,
 };
 use serde::Deserialize;
+use std::collections::HashMap;
 use std::num::NonZeroU64;
 use std::sync::{Arc, Mutex};
 use tracing::{info, warn};
@@ -374,7 +378,8 @@ pub async fn patch_entity(
     if patch_is_empty(&req.patch) {
         return Err(NexusApiError::InvalidInput {
             field: "patch".to_string(),
-            reason: "at least one of title/body/aliases/block_type must be provided".to_string(),
+            reason: "at least one of title/body/aliases/block_type/modules must be provided"
+                .to_string(),
         });
     }
 
@@ -408,18 +413,7 @@ pub async fn patch_entity(
     // is the current (pre-bump) revision: the orchestrator's
     // `assert_revision_match` requires candidate.revision == stored.revision,
     // and the adapter's `put_update` bumps the revision on the CAS write.
-    let mut post_patch = kb.clone();
-    if let Some(ref name) = new_name {
-        post_patch.canonical_name = name.clone();
-    }
-    if let Some(bt) = new_block_type {
-        post_patch.block_type = wire_cast(bt);
-    }
-    if let Some(ref body) = body_for_validation {
-        post_patch.body = Some(body.clone());
-    }
-    post_patch.revision = Some(current_version);
-
+    let post_patch = build_post_patch(&kb, &req.patch, body_for_validation.as_ref());
     let spoke_req = build_spoke_upsert_request(&post_patch);
     let adapter = NexusAdapter::new(pool.clone());
     // `with_bound_tx` is a no-op when the adapter has no shared tx cell
@@ -549,6 +543,11 @@ async fn patch_entity_create(
     }
     fresh.body = body_for_validation;
 
+    // V1.165 P2 (AR-4): create has no pre-read entity to inherit modules
+    // from — a provided `modules` map becomes the fresh entry's modules
+    // (empty map = omitted, identical to the update path's no-op).
+    apply_patch_modules(&mut fresh, None, &req.patch);
+
     let spoke_req = build_spoke_upsert_request(&fresh);
     let adapter = NexusAdapter::new(pool.clone());
     let result = adapter
@@ -582,11 +581,101 @@ async fn patch_entity_create(
 }
 
 /// `true` when the patch carries no editable field.
+///
+/// V1.165 P2 (AR-4): `modules` counts as a provided field — a modules-only
+/// patch is valid. `modules: {}` deserializes to an empty map and is
+/// therefore NOT a provided field (identical to omit, PD-12).
 fn patch_is_empty(patch: &NexusWorldKbEntityPatch) -> bool {
     patch.title.is_none()
         && patch.body.is_empty()
         && patch.aliases.is_empty()
         && patch.block_type.is_none()
+        && patch.modules.is_empty()
+}
+
+/// Build the POST-PATCH entity: clone `kb` and apply the patch's
+/// `title`/`block_type`/`body` fields, the current (pre-bump) revision, and
+/// (V1.165 P2 / AR-4) the merged `modules` (see [`apply_patch_modules`]).
+///
+/// Extracted from [`patch_entity`] to keep the handler under the
+/// `too_many_lines` budget (same convention as `merge_candidate_summary`).
+fn build_post_patch(
+    kb: &WorldKbEntry,
+    patch: &NexusWorldKbEntityPatch,
+    body_for_validation: Option<&WorldKbBody>,
+) -> WorldKbEntry {
+    let mut post_patch = kb.clone();
+    if let Some(ref name) = patch.title {
+        post_patch.canonical_name = name.to_string();
+    }
+    if let Some(bt) = patch.block_type {
+        post_patch.block_type = wire_cast(bt);
+    }
+    if let Some(body) = body_for_validation {
+        post_patch.body = Some(body.clone());
+    }
+    post_patch.revision = Some(kb.revision.unwrap_or(0));
+    apply_patch_modules(&mut post_patch, kb.modules.as_ref(), patch);
+    post_patch
+}
+
+/// Apply the patch's `modules` onto the post-patch entity (V1.165 P2 /
+/// AR-4): no-op when the patch carries no modules keys; otherwise first-level
+/// key-merge over `base` (the pre-patch entity's stored modules).
+///
+/// Extracted from [`patch_entity`] / [`patch_entity_create`] to keep both
+/// handlers under the `too_many_lines` budget.
+fn apply_patch_modules(
+    post_patch: &mut WorldKbEntry,
+    base: Option<&serde_json::Value>,
+    patch: &NexusWorldKbEntityPatch,
+) {
+    if !patch.modules.is_empty() {
+        post_patch.modules = merge_modules(base, &patch.modules);
+    }
+}
+
+/// Merge provided patch `modules` into the entry's modules JSON (AR-4 /
+/// PD-12): first-level key upsert — provided keys replace the whole
+/// first-level value (not a deep merge); unspecified sibling keys are
+/// preserved; `{}` (empty map) is a no-op; an omitted `modules` field
+/// inherits the stored modules via `base`.
+///
+/// The generated patch type already enforces the spoke `ModuleMap` shape at
+/// JSON deserialization — `NexusWorldKbEntityPatchModulesKey` is a regex
+/// newtype (`^[a-z][a-z0-9_-]*$`) and `NexusWorldKbEntityPatchModulesValue`
+/// is an untagged `{object, array}` enum — so non-matching keys / scalar
+/// values reject as 400 before this runs (axum `Json` extractor). This is
+/// what makes PD-12 fidelity true: the `world_kb_to_spoke` conversion seam
+/// silently drops non-conforming entries
+/// (`conversion/knowledge_entry.rs:366-374`), so the wire boundary is the
+/// rejection point (AR-4 lock 4).
+fn merge_modules(
+    base: Option<&serde_json::Value>,
+    provided: &HashMap<NexusWorldKbEntityPatchModulesKey, NexusWorldKbEntityPatchModulesValue>,
+) -> Option<serde_json::Value> {
+    if provided.is_empty() {
+        return base.cloned();
+    }
+    // `WorldKbEntry.modules` is documented as a JSON object; a non-object
+    // base (should not occur) is treated as empty and replaced by the
+    // provided keys.
+    let mut map = base
+        .and_then(|v| v.as_object())
+        .cloned()
+        .unwrap_or_default();
+    for (key, value) in provided {
+        let json_val = match value {
+            NexusWorldKbEntityPatchModulesValue::Variant0(obj) => {
+                serde_json::Value::Object(obj.clone())
+            }
+            NexusWorldKbEntityPatchModulesValue::Variant1(arr) => {
+                serde_json::Value::Array(arr.clone())
+            }
+        };
+        map.insert(key.to_string(), json_val);
+    }
+    Some(serde_json::Value::Object(map))
 }
 
 /// Resolve the new `WorldKbBody` for validation from the patch + the current
@@ -743,6 +832,20 @@ fn build_adopt_plan(
             )
         })?;
     if let Some(ref p) = req.patch {
+        // V1.165 P2 (AR-4): the promote request `$ref`s the entity patch
+        // schema, so `patch.modules` now deserializes here — but adopt
+        // refinements only consume title/body/aliases/block_type. Reject
+        // instead of silently dropping the provided modules (the schema
+        // previously rejected the key outright with 400 at deserialize;
+        // this guard preserves explicit rejection with a clearer message).
+        if !p.modules.is_empty() {
+            return Err(NexusApiError::InvalidInput {
+                field: "patch.modules".to_string(),
+                reason: "modules cannot be refined on promote-adopt; PATCH the KB entity \
+                         directly after adoption"
+                    .to_string(),
+            });
+        }
         if !p.body.is_empty() {
             body =
                 serde_json::from_value(serde_json::Value::Object(p.body.clone())).map_err(|e| {
