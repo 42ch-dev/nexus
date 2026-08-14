@@ -220,8 +220,9 @@ pub async fn list_timeline_events_scoped(
 ///
 /// Serves `GET /v1/daemon/worlds/:world_id/timeline/events`. Unlike
 /// [`list_timeline_events_scoped`] (orchestrator read path, returns domain
-/// [`TimelineEvent`]s without the JSON extension columns), this page read
-/// returns the full row surface the daemon wire DTO needs — including
+/// [`TimelineEvent`]s with `modules_json` deserialized into their `modules`
+/// field), this page read returns the full row surface the daemon wire DTO
+/// needs — including
 /// `metadata_json` and `extensions_nexus_json` — and applies optional
 /// `status` / `event_type` equality filters plus a keyset cursor on
 /// `(branch_id, sequence_no)`.

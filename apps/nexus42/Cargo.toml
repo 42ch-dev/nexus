@@ -90,7 +90,7 @@ nexus-spoke-adapter = { path = "../../crates/nexus-spoke-adapter" }
 spoke-connect = { workspace = true, optional = true }
 # V1.153 P1 N-C1: the connect wire `ErrorEnvelope`
 # (`spoke_schemas::connect::connect_invoke_response::ErrorEnvelope`) the
-# invoke handler returns. Same 0.9.2 pin; optional + feature-gated with
+# invoke handler returns. Same 0.10.0 pin; optional + feature-gated with
 # `connect-host` (spoke-schemas is a lightweight schema crate, but the
 # connect path is the only consumer).
 spoke-schemas = { workspace = true, optional = true }
