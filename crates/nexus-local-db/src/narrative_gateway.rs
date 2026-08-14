@@ -419,6 +419,9 @@ impl TimelineEventRow {
                 .as_ref()
                 .and_then(|s| serde_json::from_str(s).ok()),
             source_command_id: self.source_command_id.clone(),
+            // modules: None — SQLite modules_json persistence is Task 4 (V1.164
+            // P1); the additive field keeps this read path compiling meanwhile.
+            modules: None,
             created_at: self.created_at.clone(),
         }
     }
