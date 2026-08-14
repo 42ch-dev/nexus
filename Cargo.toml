@@ -107,7 +107,7 @@ chrono-tz = "0.10"
 regress = "0.10"
 # V1.139 T1: SPOKE foundation deps. Lockstep exact pin at 0.6.0 across both
 # Rust crates and both npm packages (compass Q14). The `=` prefix forces an
-# exact resolution (no caret/tilde range). Published on crates.io at 0.9.2.
+# exact resolution (no caret/tilde range). Published on crates.io at 0.10.0.
 # V1.153 P0 (FL-R E1): 0.8.2 → 0.9.1 — lockstep re-baseline on the connect
 # v2 wire. 0.9.0's connect changes (dial-bound hello, envelope-auth v2
 # signature fields) are internal to spoke-connect (pub(crate), owned by
@@ -119,6 +119,11 @@ regress = "0.10"
 # `InvokeHandlerV2` session-peer handler API (Fn(&PeerId, &str, Value)) plus
 # removal of the never-enabled `mdns` feature. Legacy `InvokeHandler` still
 # compiles; nexus handler migration lands in P0 T2.
+# V1.164 P1 (L5-mind mental layer): 0.9.2 → 0.10.0 — l5-mind capability
+# release: MindState wire + `validate_mind_state` validator,
+# `TimelineEvent.modules` (ModuleMap) additive field, and MentalFieldMap /
+# MindDelta types. TimelineEvent.modules is a struct-literal break for
+# nexus-narrative (adapted in P1 T2); the rest is additive for nexus.
 # V1.148: 0.6.1 → 0.8.2 — the connect family is additive: 0.7.0 added the
 # connect interaction wire surface (schemas/connect/*, + libp2p spike) and
 # the pack-catalog demote (ModuleMap / KE.modules description-only — catalog
@@ -133,20 +138,23 @@ regress = "0.10"
 # additive + KnowledgeEntry.modules (capability-flagged, additive).
 # Consumers (the upcoming spoke-adapter crate + nexus-contracts generated
 # types) will reference these via `spoke-schemas.workspace = true`.
-spoke-schemas = "=0.9.2"
-spoke-operations = "=0.9.2"
+spoke-schemas = "=0.10.0"
+spoke-operations = "=0.10.0"
 # V1.148 P3 N-C0 (DF-72): spoke-connect — Connect Host facade (signed
 # hello, allowlist, capability-token gate). V1.153 P0: 0.8.2 → 0.9.1
 # (dial-bound hello + envelope-auth v2 are internal to spoke-connect;
 # nexus surface unchanged). V1.154 P0: 0.9.1 → 0.9.2 (additive
 # InvokeHandlerV2 session-peer API; `mdns` feature removed upstream —
-# nexus never enabled it). Opt-in ONLY: libp2p 0.56 is a
+# nexus never enabled it). V1.164 P1: 0.9.2 → 0.10.0 (additive
+# `ProtocolVersionMismatch` reject variant aligned with the l5-mind wire;
+# nexus `matches!` is non-exhaustive — no consumer change). Opt-in ONLY:
+# libp2p 0.56 is a
 # transitive dep, so this entry is consumed behind feature `connect-host` on
 # `apps/nexus42` and the DEFAULT daemon graph stays libp2p-free.
-# spoke-connect 0.9.2 exposes no `mdns` feature (removed upstream);
+# spoke-connect removed the `mdns` feature in 0.9.2 (not present in 0.10.0);
 # hickory/libp2p-mdns stay lockfile-only via libp2p 0.56 optional deps,
 # never compiled.
-spoke-connect = "=0.9.2"
+spoke-connect = "=0.10.0"
 # V1.148 P3 N-C0: libp2p 0.56 — identity/PeerId/Multiaddr types for the
 # `nexus42 connect` CLI (ed25519 keypair + protobuf key serialization only).
 # Pinned exactly to spoke-connect's transport so the feature-on graph shares
