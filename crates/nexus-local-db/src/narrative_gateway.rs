@@ -169,6 +169,7 @@ pub async fn list_timeline_events_scoped(
                 caused_by_event_ids_json,
                 affected_key_block_ids_json,
                 source_command_id,
+                modules_json,
                 created_at
             FROM narrative_timeline_events
             WHERE world_id = ? AND branch_id = ?"
@@ -185,6 +186,7 @@ pub async fn list_timeline_events_scoped(
                 caused_by_event_ids_json,
                 affected_key_block_ids_json,
                 source_command_id,
+                modules_json,
                 created_at
             FROM narrative_timeline_events
             WHERE world_id = ?"
@@ -395,6 +397,11 @@ struct TimelineEventRow {
     caused_by_event_ids_json: Option<String>,
     affected_key_block_ids_json: Option<String>,
     source_command_id: Option<String>,
+    // V1.164 P1: full serialized `modules` namespace (l5-mind observation).
+    // Carries per-event functional-dialect modules as a JSON object. NULL for
+    // rows written before the additive migration or without modules data
+    // (unrecorded per spoke handbook).
+    modules_json: Option<String>,
     created_at: String,
 }
 
@@ -419,9 +426,13 @@ impl TimelineEventRow {
                 .as_ref()
                 .and_then(|s| serde_json::from_str(s).ok()),
             source_command_id: self.source_command_id.clone(),
-            // modules: None — SQLite modules_json persistence is Task 4 (V1.164
-            // P1); the additive field keeps this read path compiling meanwhile.
-            modules: None,
+            // V1.164 P1: surface modules_json as TimelineEvent.modules — NULL
+            // → None (unrecorded), verbatim JSON otherwise (matches the
+            // kb_key_blocks.modules_json read pattern in kb_store.rs).
+            modules: self
+                .modules_json
+                .as_ref()
+                .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok()),
             created_at: self.created_at.clone(),
         }
     }
@@ -495,6 +506,7 @@ impl NarrativeGateway for SqliteNarrativeGateway {
                     caused_by_event_ids_json,
                     affected_key_block_ids_json,
                     source_command_id,
+                    modules_json,
                     created_at
                 FROM narrative_timeline_events
                 WHERE world_id = ? AND branch_id = ?
@@ -520,6 +532,7 @@ impl NarrativeGateway for SqliteNarrativeGateway {
                     caused_by_event_ids_json,
                     affected_key_block_ids_json,
                     source_command_id,
+                    modules_json,
                     created_at
                 FROM narrative_timeline_events
                 WHERE world_id = ?
@@ -553,6 +566,7 @@ impl NarrativeGateway for SqliteNarrativeGateway {
                 caused_by_event_ids_json,
                 affected_key_block_ids_json,
                 source_command_id,
+                modules_json,
                 created_at as "created_at!"
             FROM narrative_timeline_events
             WHERE timeline_event_id = ?"#,

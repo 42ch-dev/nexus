@@ -511,6 +511,9 @@ pub async fn accept_run(
             evt.summary.as_deref(),
             &provenance,
             affected_json.as_deref(),
+            // modules_json — compute Accept writes no l5-mind observation
+            // modules; the observation carrier is a future writer (V1.164 P1 T4).
+            None,
         )
         .await
         .map_err(|e| NexusApiError::Internal {

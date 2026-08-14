@@ -320,6 +320,7 @@ pub async fn append_event(
         sequence_no,
         None, // extensions_nexus_json — default (no provenance)
         None, // affected_key_block_ids_json — default (none)
+        None, // modules_json — default (no modules)
         "provisional",
     )
     .await
@@ -364,6 +365,7 @@ pub async fn append_event_in_tx(
         sequence_no,
         None, // extensions_nexus_json — default (no provenance)
         None, // affected_key_block_ids_json — default (none)
+        None, // modules_json — default (no modules)
         "provisional",
     )
     .await
@@ -387,6 +389,11 @@ pub async fn append_event_in_tx(
 /// inspector's "Affected knowledge" section can resolve the proposal's
 /// affected entries (V1.147 P2 QC S-affected).
 ///
+/// `modules_json`, when `Some`, is written to
+/// `narrative_timeline_events.modules_json` (V1.164 P1 — the l5-mind
+/// observation payload survives the `SQLite` read-modify-write cycle); when
+/// `None` the column stays `NULL` (unrecorded per spoke handbook).
+///
 /// # Errors
 ///
 /// Same error variants as [`append_event_in_tx`].
@@ -402,6 +409,7 @@ pub async fn append_event_canon_with_extensions_in_tx(
     summary: Option<&str>,
     extensions_nexus_json: &str,
     affected_key_block_ids_json: Option<&str>,
+    modules_json: Option<&str>,
 ) -> Result<AppendEventResult, NarrativeWriteError> {
     // Validate world_id prefix
     validate_id_prefix(world_id, "wld_", "world_id")?;
@@ -424,6 +432,7 @@ pub async fn append_event_canon_with_extensions_in_tx(
         sequence_no,
         Some(extensions_nexus_json),
         affected_key_block_ids_json,
+        modules_json,
         "canon",
     )
     .await
@@ -485,6 +494,7 @@ pub async fn append_event_canon_with_extensions(
         sequence_no,
         Some(extensions_nexus_json),
         None, // affected_key_block_ids_json — fork markers carry none
+        None, // modules_json — fork markers carry no l5-mind modules
         "canon",
     )
     .await
@@ -549,11 +559,16 @@ where
 /// Accept path persists the proposal's affected entries for the compute
 /// inspector); when `None` the column stays `NULL`.
 ///
+/// `modules_json`, when `Some`, is written to
+/// `narrative_timeline_events.modules_json` (V1.164 P1 — the l5-mind
+/// observation payload rides the canon Accept path verbatim); when `None` the
+/// column stays `NULL` (unrecorded per spoke handbook).
+///
 /// `status` is the timeline event status written on insert (`provisional` for
 /// pending/appended events; `canon` for author-committed events such as
 /// accepted direct-lane compute Runs).
 #[allow(clippy::too_many_arguments)]
-// ^ justification: internal helper; all 10 scalar args map 1:1 to INSERT columns.
+// ^ justification: internal helper; all 11 scalar args map 1:1 to INSERT columns.
 // Grouping into a struct would add indirection for zero abstraction gain.
 async fn append_event_core<'e, E: sqlx::Executor<'e, Database = Sqlite>>(
     executor: E,
@@ -565,19 +580,21 @@ async fn append_event_core<'e, E: sqlx::Executor<'e, Database = Sqlite>>(
     sequence_no: i64,
     extensions_nexus_json: Option<&str>,
     affected_key_block_ids_json: Option<&str>,
+    modules_json: Option<&str>,
     status: &str,
 ) -> Result<AppendEventResult, NarrativeWriteError> {
     let event_id = generate_event_id();
     let created_at = chrono::Utc::now().to_rfc3339();
 
     // SAFETY: INSERT matches narrative_timeline_events DDL in 20260524_narrative_worlds.sql
-    //         + 20260729_000001_timeline_extensions_nexus.sql (extensions_nexus_json column).
+    //         + 20260729_000001_timeline_extensions_nexus.sql (extensions_nexus_json column)
+    //         + 20260814000001_add_timeline_event_modules_json.sql (modules_json column).
     let result = sqlx::query(
         "INSERT INTO narrative_timeline_events \
             (timeline_event_id, world_id, branch_id, event_type, status, sequence_no, \
              title, summary, metadata_json, extensions_nexus_json, \
-             affected_key_block_ids_json, created_at) \
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, '{}', ?, ?, ?)",
+             affected_key_block_ids_json, modules_json, created_at) \
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, '{}', ?, ?, ?, ?)",
     )
     .bind(&event_id)
     .bind(world_id)
@@ -589,6 +606,7 @@ async fn append_event_core<'e, E: sqlx::Executor<'e, Database = Sqlite>>(
     .bind(summary)
     .bind(extensions_nexus_json)
     .bind(affected_key_block_ids_json)
+    .bind(modules_json)
     .bind(&created_at)
     .execute(executor)
     .await;
@@ -942,6 +960,7 @@ mod tests {
             None,
             provenance,
             Some(affected),
+            None, // modules_json — this path writes no l5-mind modules
         )
         .await
         .unwrap();
@@ -965,6 +984,134 @@ mod tests {
             row.2.as_deref(),
             Some(affected),
             "affected_key_block_ids_json must round-trip from the proposals"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_append_event_canon_with_extensions_in_tx_persists_modules_json() {
+        // V1.164 P1 T4 (AC-V1164-4): the l5-mind observation payload written
+        // via the canon Accept path must survive the SQLite write→read cycle
+        // byte-for-byte — including unknown keys inside the observation object
+        // (mirrors Task 3's AC-V1164-3 seam gate).
+        let (pool, _dir) = fresh_pool().await;
+        seed_creator(&pool).await;
+
+        let world = create_world(
+            &pool,
+            "ctr_test",
+            "Modules Persistence Test",
+            "modules-persistence-test",
+            "private",
+            "manual",
+        )
+        .await
+        .unwrap();
+
+        let modules_str = r#"{"observation":{"observers":["kb_char_1"],"access":{"line_of_sight":true,"hearing_range":true,"modality":["visual","auditory"]},"position":"in-room"}}"#;
+
+        let mut tx = pool.begin().await.unwrap();
+        let result = append_event_canon_with_extensions_in_tx(
+            &mut tx,
+            &world.world_id,
+            &world.root_fork_branch_id,
+            "observation",
+            Some("Observation recorded"),
+            None,
+            r#"{"compute":{"module_id":"l5-mind","module_version":"0.1.0","run_id":"run_obs","source_kind":"direct_invoke"}}"#,
+            None,
+            Some(modules_str),
+        )
+        .await
+        .unwrap();
+        tx.commit().await.unwrap();
+
+        // Byte-for-byte: the stored column equals the serialized payload.
+        // SAFETY: test-only query against vetted table.
+        let stored: Option<String> = sqlx::query_scalar(
+            "SELECT modules_json FROM narrative_timeline_events WHERE timeline_event_id = ?",
+        )
+        .bind(&result.event_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            stored.as_deref(),
+            Some(modules_str),
+            "modules_json must persist the observation payload verbatim"
+        );
+
+        // Read-path: both TimelineEventRow surfaces (get_timeline list read +
+        // get_event single read) deserialize modules back to the same Value.
+        let gw = crate::narrative_gateway::SqliteNarrativeGateway::new(pool);
+        let expected: serde_json::Value = serde_json::from_str(modules_str).unwrap();
+
+        let timeline = gw
+            .get_timeline(&world.world_id, Some(&world.root_fork_branch_id), None)
+            .await
+            .unwrap();
+        assert_eq!(timeline.len(), 1);
+        assert_eq!(
+            timeline[0].modules.as_ref(),
+            Some(&expected),
+            "get_timeline must surface modules verbatim"
+        );
+
+        let event = gw.get_event(&result.event_id).await.unwrap();
+        assert_eq!(
+            event.modules.as_ref(),
+            Some(&expected),
+            "get_event must surface modules verbatim"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_append_event_writes_null_modules_json() {
+        // Backward compat: writers without modules data must store NULL (no
+        // modules = unrecorded per spoke handbook), and the read path maps
+        // NULL → None.
+        let (pool, _dir) = fresh_pool().await;
+        seed_creator(&pool).await;
+
+        let world = create_world(
+            &pool,
+            "ctr_test",
+            "Null Modules Test",
+            "null-modules-test",
+            "private",
+            "manual",
+        )
+        .await
+        .unwrap();
+
+        let event = append_event(
+            &pool,
+            &world.world_id,
+            &world.root_fork_branch_id,
+            "story_advance",
+            Some("No Modules"),
+            None,
+        )
+        .await
+        .unwrap();
+
+        // SAFETY: test-only query against vetted table.
+        let row: (Option<String>,) = sqlx::query_as(
+            "SELECT modules_json FROM narrative_timeline_events WHERE timeline_event_id = ?",
+        )
+        .bind(&event.event_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert!(
+            row.0.is_none(),
+            "append without modules must write NULL in modules_json"
+        );
+
+        let gw = crate::narrative_gateway::SqliteNarrativeGateway::new(pool);
+        let read_back = gw.get_event(&event.event_id).await.unwrap();
+        assert!(
+            read_back.modules.is_none(),
+            "NULL modules_json must deserialize to None"
         );
     }
 
