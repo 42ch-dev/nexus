@@ -33,7 +33,7 @@ pub mod validation;
 pub use errors::{KbError, ValidationError, ValidationKind};
 pub use extract_finalize::{finalize_extract, ExtractFinalizeInput};
 pub use extract_sync::{compute_kb_diff, diff_and_apply, KbSyncDiff, KbSyncUpdate};
-pub use knowledge_entry::{WorldKbBody, WorldKbEntry};
+pub use knowledge_entry::{BeliefPropositionRaw, MentalFieldsRaw, WorldKbBody, WorldKbEntry};
 pub use query::{KbInsertResult, KbQuery, KbQueryResult};
 pub use store::{InMemoryKbStore, KbStore, KbStoreError};
 pub use validation::{
