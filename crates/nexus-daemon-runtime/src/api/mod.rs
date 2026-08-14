@@ -389,6 +389,12 @@ fn world_kb_routes() -> Router<WorkspaceState> {
             "/v1/daemon/worlds/:world_id/forks",
             post(handlers::fork::create_fork),
         )
+        // World-attached check findings read surface (V1.165 P1 T3 / DR-68,
+        // AR-3) — same `:world_id` prefix family and tier2 mount.
+        .route(
+            "/v1/daemon/worlds/:world_id/findings",
+            get(handlers::world_findings::list_world_findings),
+        )
 }
 
 /// Works routes — Work CRUD + inspiration + reconcile-chapters (V1.33 §7.2, V1.36 §8).

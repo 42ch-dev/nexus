@@ -1,0 +1,104 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT finding_id as \"finding_id!\", world_id, schema_version, severity, status, title, description, kind, target_entry_id, source_anchor_json, suggested_fix, text_position_json, extensions_json, created_at, updated_at FROM world_findings WHERE world_id = ? AND target_entry_id = ? ORDER BY created_at DESC, finding_id ASC",
+  "describe": {
+    "columns": [
+      {
+        "name": "finding_id!",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "world_id",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "schema_version",
+        "ordinal": 2,
+        "type_info": "Integer"
+      },
+      {
+        "name": "severity",
+        "ordinal": 3,
+        "type_info": "Text"
+      },
+      {
+        "name": "status",
+        "ordinal": 4,
+        "type_info": "Text"
+      },
+      {
+        "name": "title",
+        "ordinal": 5,
+        "type_info": "Text"
+      },
+      {
+        "name": "description",
+        "ordinal": 6,
+        "type_info": "Text"
+      },
+      {
+        "name": "kind",
+        "ordinal": 7,
+        "type_info": "Text"
+      },
+      {
+        "name": "target_entry_id",
+        "ordinal": 8,
+        "type_info": "Text"
+      },
+      {
+        "name": "source_anchor_json",
+        "ordinal": 9,
+        "type_info": "Text"
+      },
+      {
+        "name": "suggested_fix",
+        "ordinal": 10,
+        "type_info": "Text"
+      },
+      {
+        "name": "text_position_json",
+        "ordinal": 11,
+        "type_info": "Text"
+      },
+      {
+        "name": "extensions_json",
+        "ordinal": 12,
+        "type_info": "Text"
+      },
+      {
+        "name": "created_at",
+        "ordinal": 13,
+        "type_info": "Integer"
+      },
+      {
+        "name": "updated_at",
+        "ordinal": 14,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "4aff29f88ca6b31d35ca552d77a09efc9cf5c3fdba522c66640d9f35852b98dd"
+}

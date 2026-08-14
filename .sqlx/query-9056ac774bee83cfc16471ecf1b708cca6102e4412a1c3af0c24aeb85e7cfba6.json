@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO world_findings (\n            finding_id, world_id, schema_version, severity, status, title,\n            description, kind, target_entry_id, source_anchor_json,\n            suggested_fix, text_position_json, extensions_json,\n            created_at, updated_at\n        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 15
+    },
+    "nullable": []
+  },
+  "hash": "9056ac774bee83cfc16471ecf1b708cca6102e4412a1c3af0c24aeb85e7cfba6"
+}

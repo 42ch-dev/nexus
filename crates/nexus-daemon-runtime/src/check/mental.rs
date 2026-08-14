@@ -50,12 +50,15 @@
 //!
 //! - Severity uses the spoke Finding vocabulary (`info` / `warning` /
 //!   `error`) — never Nexus Work-finding `minor`/`major`/`blocker` (PD-15).
-//! - `extensions.nexus.work_id` + `extensions.nexus.creator_id` are
-//!   REQUIRED for persistence: `FindingPort::put_findings` maps spoke
-//!   findings into the nexus `findings` table and rejects a finding missing
-//!   either (`finding_port.rs` `map_spoke_to_nexus`). The handler supplies
-//!   the active creator id; the world id is `request.scope.scope_id` (the
-//!   handler already validated it equals `world_id`).
+//! - `extensions.nexus.world_id` is the persistence routing key:
+//!   `FindingPort::put_findings` discriminates on `extensions.nexus`
+//!   (`finding_port.rs`): findings carrying `world_id` (no `work_id`) persist
+//!   into the `world_findings` table with spoke vocabulary verbatim; findings
+//!   carrying `work_id` keep the legacy `findings` work path (byte-identical,
+//!   mapping unchanged). `creator_id` is still stamped (provenance — the
+//!   world path has no creator column, AR-1). The world id is
+//!   `request.scope.scope_id` (the handler already validated it equals
+//!   `world_id`).
 //! - The checker is advisory and pure (no store access): the callback input
 //!   carries the scoped `entries` AND the scoped `events` (`CheckRunInput`),
 //!   so classification never reads the database (verified against
@@ -96,8 +99,8 @@ const SEVERITY_INFO: &str = "info";
 /// table and the PD-9 skip rule.
 ///
 /// `creator_id` is the active creator (the handler already read it); it is
-/// stamped onto `extensions.nexus` so `FindingPort::put_findings` can
-/// persist the findings (required field, see module docs).
+/// stamped onto `extensions.nexus` as provenance (the world path has no
+/// creator column — see module docs; `world_id` is the routing key).
 #[must_use]
 pub fn run_check(input: &CheckRunInput, creator_id: &str) -> SpokeResult<Vec<Finding>> {
     let world_id = &input.request.scope.scope_id;
@@ -263,8 +266,9 @@ fn event_name(event: &TimelineEvent) -> String {
     event.canonical_name.as_str().to_string()
 }
 
-/// Build a spoke `Finding` ready for `FindingPort::put_findings` (carries
-/// the nexus-required `work_id` / `creator_id` extension fields).
+/// Build a spoke `Finding` ready for `FindingPort::put_findings` (stamps
+/// `extensions.nexus.world_id` — the routing key — plus `creator_id` as
+/// provenance).
 fn finding(
     kind: &str,
     severity: &str,
@@ -274,9 +278,11 @@ fn finding(
     description: String,
 ) -> Finding {
     let mut nexus = serde_json::Map::new();
-    // `work_id` / `creator_id` are injected here — `put_findings` rejects
-    // findings missing them (finding_port.rs `map_spoke_to_nexus`).
-    nexus.insert("work_id".to_string(), Value::String(world_id.to_string()));
+    // `world_id` is the routing key injected here — `put_findings`
+    // discriminates on `extensions.nexus` (finding_port.rs): `world_id`
+    // (no `work_id`) → world path. `creator_id` rides along as provenance
+    // (AR-1 — no creator column on the world path).
+    nexus.insert("world_id".to_string(), Value::String(world_id.to_string()));
     nexus.insert(
         "creator_id".to_string(),
         Value::String(creator_id.to_string()),

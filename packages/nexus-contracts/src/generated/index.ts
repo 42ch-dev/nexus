@@ -210,6 +210,7 @@ export const SCHEMA_VERSIONS: Record<string, number> = {
   CreateForkResponse: 1,
   CreateWorldRequest: 1,
   CreateWorldResponse: 1,
+  WorldFindingsListResponse: 1,
   Creator: 1,
   ForkBranch: 1,
   Memory: 1,
