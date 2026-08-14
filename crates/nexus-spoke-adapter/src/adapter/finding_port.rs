@@ -48,6 +48,20 @@
 //! point). The spoke `Finding` has neither field; they MUST be supplied
 //! via `extensions.nexus.{work_id, creator_id}`. Missing values reject
 //! with `INVALID_INPUT`.
+//!
+//! # AR-2 routing gate (DR-68)
+//!
+//! Since V1.165 `put_findings` routes **per finding** off the
+//! `extensions.nexus` discriminator (architect lock, `primary_spec` §AR-2):
+//!
+//! | `extensions.nexus` state (per finding) | Route |
+//! |---|---|
+//! | `work_id` present, `world_id` absent | Legacy work path — byte-identical mapping (table + `map_severity`/`map_status` above unchanged) |
+//! | `world_id` present, `work_id` absent | World path — spoke `Finding` → `world_findings` row (spoke vocabulary **verbatim**, epoch timestamps, same W-1 batch transaction) |
+//! | both, or neither | `INVALID_INPUT` reject naming the `finding_id` |
+//!
+//! The checker stamps the world id into `extensions.nexus.world_id`
+//! (`check/mental.rs`); findings carrying `work_id` keep the legacy table.
 
 use super::NexusAdapter;
 use crate::{
@@ -56,6 +70,7 @@ use crate::{
 };
 use async_trait::async_trait;
 use nexus_local_db::findings::{validate_finding_enums, Finding as NexusFinding};
+use nexus_local_db::world_findings::insert_world_finding_in_tx;
 use nexus_local_db::LocalDbError;
 use serde_json::{json, Map, Value};
 
@@ -83,17 +98,63 @@ impl FindingPort for NexusAdapter<'_> {
         };
 
         for finding in findings {
-            let nexus_finding = match map_spoke_to_nexus(&finding) {
-                Ok(n) => n,
-                Err(rejection) => return SpokeResult::Reject(rejection),
-            };
-            let finding_id = nexus_finding.finding_id.clone();
-            if let Err(e) = insert_finding_tx(&mut tx, &nexus_finding).await {
-                return reject(
-                    SpokeRejectCode::InternalError,
-                    format!("storage error on finding {finding_id} insert: {e}"),
-                    json!({ "finding_id": finding_id }),
-                );
+            let ext = extract_nexus_extension(&finding);
+            let finding_id = finding.finding_id.clone();
+
+            // AR-2 routing gate (primary_spec §AR-2): exactly one routing
+            // key — `work_id` → legacy work path (byte-identical), `world_id`
+            // → world path. Both or neither rejects `INVALID_INPUT` naming
+            // the finding.
+            match (ext.work_id.as_deref(), ext.world_id.as_deref()) {
+                (Some(_), None) => {
+                    let nexus_finding = match map_spoke_to_nexus(&finding) {
+                        Ok(n) => n,
+                        Err(rejection) => return SpokeResult::Reject(rejection),
+                    };
+                    let finding_id = nexus_finding.finding_id.clone();
+                    if let Err(e) = insert_finding_tx(&mut tx, &nexus_finding).await {
+                        return reject(
+                            SpokeRejectCode::InternalError,
+                            format!("storage error on finding {finding_id} insert: {e}"),
+                            json!({ "finding_id": finding_id }),
+                        );
+                    }
+                }
+                (None, Some(world_id)) => {
+                    if let Err(e) = insert_world_finding_tx(&mut tx, &finding, world_id).await {
+                        return reject(
+                            SpokeRejectCode::InternalError,
+                            format!("storage error on world finding {finding_id} insert: {e}"),
+                            json!({ "finding_id": finding_id, "world_id": world_id }),
+                        );
+                    }
+                }
+                (Some(_), Some(_)) => {
+                    return reject(
+                        SpokeRejectCode::InvalidInput,
+                        format!(
+                            "Finding {finding_id} carries both extensions.nexus.work_id and \
+                             extensions.nexus.world_id; exactly one routing key is required"
+                        ),
+                        json!({
+                            "finding_id": finding_id,
+                            "conflict": ["extensions.nexus.work_id", "extensions.nexus.world_id"],
+                        }),
+                    );
+                }
+                (None, None) => {
+                    return reject(
+                        SpokeRejectCode::InvalidInput,
+                        format!(
+                            "Finding {finding_id} is missing the extensions.nexus routing key; \
+                             exactly one of work_id / world_id is required"
+                        ),
+                        json!({
+                            "finding_id": finding_id,
+                            "missing": ["extensions.nexus.work_id", "extensions.nexus.world_id"],
+                        }),
+                    );
+                }
             }
             persisted.push(finding);
         }
@@ -159,6 +220,67 @@ async fn insert_finding_tx(
     Ok(())
 }
 
+/// Insert a spoke [`SpokeFinding`] into the `world_findings` table inside a
+/// caller-owned transaction (AR-2 world path).
+///
+/// Mirrors [`insert_finding_tx`]'s caller-owned-transaction shape so the
+/// `put_findings` batch wraps work- and world-scoped rows in one atomic
+/// `BEGIN`/`COMMIT` (W-1, qc3). The routing gate has already verified the
+/// finding carries `extensions.nexus.world_id` (no `work_id`). Spoke
+/// severity/status persist **verbatim** (AR-1 vocabulary lock — no nexus
+/// mapping for world rows); epoch timestamps mirror `map_spoke_to_nexus`
+/// (RFC 3339 → Unix epoch, `now` fallback); `extensions_json` carries the
+/// full spoke `ExtensionMap` verbatim (incl. the stamped
+/// `extensions.nexus.world_id` / `creator_id`).
+///
+/// # Errors
+///
+/// Returns [`LocalDbError`] on database failure — including a duplicate
+/// `finding_id` primary key and an unknown `world_id` foreign key.
+async fn insert_world_finding_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    f: &SpokeFinding,
+    world_id: &str,
+) -> Result<(), LocalDbError> {
+    let now_epoch = chrono::Utc::now().timestamp();
+    let created_at = f.created_at.map_or(now_epoch, |dt| dt.timestamp());
+    let updated_at = f.updated_at.map_or(now_epoch, |dt| dt.timestamp());
+    let source_anchor_json = f
+        .source_anchor
+        .as_ref()
+        .map(|sa| serde_json::to_string(sa).unwrap_or_default());
+    // `text_position` / `extensions` are JSON values; serialization cannot
+    // realistically fail, and the fallbacks honor the DDL defaults (mirrors
+    // the adapter's `unwrap_or_default` storage convention).
+    let text_position_json =
+        serde_json::to_string(&f.text_position).unwrap_or_else(|_| "{}".to_string());
+    let extensions_json = serde_json::to_string(&f.extensions).unwrap_or_else(|_| "{}".to_string());
+    // `schema_version` is a small non-zero schema version (the wire fixture
+    // uses 1); u64 → i64 can only wrap at values above `i64::MAX`, which no
+    // schema version reaches — mirrors the `mind_state.rs` cast discipline.
+    #[allow(clippy::cast_possible_wrap)]
+    let schema_version = f.schema_version.get() as i64;
+    insert_world_finding_in_tx(
+        tx,
+        &f.finding_id,
+        world_id,
+        schema_version,
+        &f.severity,
+        &f.status,
+        &f.title,
+        &f.description,
+        f.kind.as_deref(),
+        f.target_entry_id.as_deref(),
+        source_anchor_json.as_deref(),
+        f.suggested_fix.as_deref(),
+        &text_position_json,
+        &extensions_json,
+        created_at,
+        updated_at,
+    )
+    .await
+}
+
 /// Map a single spoke [`SpokeFinding`] onto a nexus [`NexusFinding`] row
 /// ready for `create_finding`. Extracts nexus-required fields from
 /// `extensions.nexus`, applies the vocabulary mapping, and rejects with
@@ -167,7 +289,7 @@ fn map_spoke_to_nexus(finding: &SpokeFinding) -> Result<NexusFinding, SpokeRejec
     let finding_id = finding.finding_id.clone();
     let ext = extract_nexus_extension(finding);
 
-    let Some(work_id) = ext.world_id else {
+    let Some(work_id) = ext.work_id else {
         return Err(reject_obj(
             SpokeRejectCode::InvalidInput,
             format!("Finding {finding_id} is missing required extensions.nexus.work_id"),
@@ -258,9 +380,11 @@ fn reject_obj(code: SpokeRejectCode, message: String, details: Value) -> SpokeRe
     }
 }
 
-/// Borrowed view of the nexus-required fields carried under
-/// `extensions.nexus` on a spoke `Finding`.
+/// Borrowed view of the nexus fields carried under `extensions.nexus` on a
+/// spoke `Finding`. `work_id` / `world_id` are the AR-2 routing keys —
+/// exactly one must be present per finding.
 struct NexusExtension {
+    work_id: Option<String>,
     world_id: Option<String>,
     creator_id: Option<String>,
     chapter: Option<i64>,
@@ -276,6 +400,7 @@ fn extract_nexus_extension(finding: &SpokeFinding) -> NexusExtension {
     // `KnowledgeEntryExtensionsKey` pattern).
     let Ok(key) = FindingExtensionsKey::try_from("nexus") else {
         return NexusExtension {
+            work_id: None,
             world_id: None,
             creator_id: None,
             chapter: None,
@@ -284,6 +409,7 @@ fn extract_nexus_extension(finding: &SpokeFinding) -> NexusExtension {
     };
     let Some(ns) = finding.extensions.get(&key) else {
         return NexusExtension {
+            work_id: None,
             world_id: None,
             creator_id: None,
             chapter: None,
@@ -291,7 +417,8 @@ fn extract_nexus_extension(finding: &SpokeFinding) -> NexusExtension {
         };
     };
     NexusExtension {
-        world_id: ns.get("work_id").and_then(Value::as_str).map(String::from),
+        work_id: ns.get("work_id").and_then(Value::as_str).map(String::from),
+        world_id: ns.get("world_id").and_then(Value::as_str).map(String::from),
         creator_id: ns
             .get("creator_id")
             .and_then(Value::as_str)
