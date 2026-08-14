@@ -4,8 +4,8 @@
 //!
 //! One route:
 //! - `POST /v1/daemon/check` — run spoke `orchestrate_check` over an owned
-//!   World; returns the persisted Finding(s) (or an empty list with the
-//!   baseline checker).
+//!   World; returns the persisted Finding(s) (mental-layer checker pair
+//!   since V1.164 P2 T3).
 //!
 //! ## Response mapping decision (V1.148 P2 architect lock)
 //!
@@ -49,13 +49,15 @@
 //!
 //! ## Checker callback
 //!
-//! P2 ships `run_checker` as a **baseline no-op evaluator**
-//! (`Ok(Vec::new())` → zero findings = no violations reported). Rules are
-//! still **resolved** via `RuleQueryPort` inside `orchestrate_check`. A real
-//! quality-loop evaluator is a tracked follow-up residual (owner:
-//! product/architect; trigger: author needs non-empty findings without
-//! embedded rules), not required to close Non-Goal 5a ("reachable on daemon
-//! route").
+//! V1.148 P2 shipped `run_checker` as a baseline no-op evaluator
+//! (`Ok(Vec::new())` → zero findings). **V1.164 P2 T3 replaces it** with
+//! the mental-layer checker pair (`check::mental::run_check`): the callback
+//! reads the scoped entry `modules.belief` rows (Task 1 dialect) and the
+//! scoped `TimelineEvent.modules.observation` metadata (P1 passthrough)
+//! from its `CheckRunInput` and emits `stale_belief_drift` (warning) /
+//! `dramatic_irony_asymmetry` (info) findings. The callback input already
+//! carries the scoped events, so the checker never touches the store. Rules
+//! are still **resolved** via `RuleQueryPort` inside `orchestrate_check`.
 //!
 //! # Errors
 //!
@@ -92,8 +94,8 @@ use serde_json::json;
 /// Guard order (plan lock): tier2 middleware (API key + active creator) →
 /// world ownership (`is_world_owned`, 403) → scope consistency
 /// (`scope.scope_id == world_id`, 400) → spoke `CheckRequest` wire mapping
-/// (400) → `orchestrate_check` (baseline no-op checker) → response mapping
-/// (see module docs).
+/// (400) → `orchestrate_check` (mental-layer checker — V1.164 P2 T3) →
+/// response mapping (see module docs).
 #[allow(clippy::missing_errors_doc)]
 pub async fn run_check(
     State(state): State<WorkspaceState>,
@@ -153,11 +155,16 @@ pub async fn run_check(
             reason: format!("request does not map onto the spoke CheckRequest wire shape: {e}"),
         })?;
 
-    // Baseline no-op checker (plan lock): zero findings — rules still resolve
-    // via RuleQueryPort inside orchestrate_check; a real quality-loop
-    // evaluator is a tracked residual.
+    // Mental-layer checker (V1.164 P2 T3): the callback input carries the
+    // scoped entries + events (`CheckRunInput`), so the checker classifies
+    // purely from the input (no store reads) — it emits the
+    // `stale_belief_drift` / `dramatic_irony_asymmetry` pair and stamps
+    // `extensions.nexus.work_id`/`creator_id` (required by FindingPort).
     let adapter = NexusAdapter::new(pool.clone());
-    let result = orchestrate_check(&adapter, check_req, |_input| SpokeResult::Ok(vec![])).await;
+    let result = orchestrate_check(&adapter, check_req, |input| {
+        crate::check::mental::run_check(&input, &creator_id)
+    })
+    .await;
 
     match result {
         // Success branch: findings (possibly empty). Round-trip through JSON
