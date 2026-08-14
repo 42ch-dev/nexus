@@ -450,6 +450,11 @@ impl From<TimelineEvent> for SpokeTimelineEvent {
             description: d.summary,
             extensions,
             fork_id: None,
+            // modules: compile-minimum — nexus TimelineEvent has no `modules`
+            // field yet, and spoke 0.10.0's field is a non-Option map, so the
+            // literal carries an empty map. Task 3 adds the nexus-side field
+            // and the real bidirectional passthrough.
+            modules: std::collections::HashMap::new(),
             occurred_at: None,
             parent_fork_id: None,
             participant_entry_ids: d.affected_key_block_ids.unwrap_or_default(),
