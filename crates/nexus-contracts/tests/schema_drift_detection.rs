@@ -1447,7 +1447,25 @@ fn make_dummy_value(
                             |ap| make_dummy_value(ap, schema_cache, current_dir),
                         );
                         let mut m = serde_json::Map::new();
-                        m.insert("_".to_string(), val);
+                        // `propertyNames.pattern` constrains the map keys:
+                        // typify emits a pattern-validated key newtype (e.g.
+                        // the spoke ModuleMap key `^[a-z][a-z0-9_-]*$` on the
+                        // V1.165 patch-DTO `modules` field). The `"_"` default
+                        // fails that pattern — use a lowercase key when the
+                        // pattern's first class is `[a-z]` (the only
+                        // propertyNames shape in the schema corpus today;
+                        // same heuristic spirit as `make_dummy_string`).
+                        let key = if prop_def
+                            .get("propertyNames")
+                            .and_then(|pn| pn.get("pattern"))
+                            .and_then(|p| p.as_str())
+                            .is_some_and(|p| p.starts_with("^[a-z]"))
+                        {
+                            "key"
+                        } else {
+                            "_"
+                        };
+                        m.insert(key.to_string(), val);
                         Value::Object(m)
                     },
                     |sub_props| {
