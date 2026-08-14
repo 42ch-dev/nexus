@@ -3339,9 +3339,15 @@ async fn n_c2_compute_request_module_override_denied() {
             .await
             .expect("read staged session");
     assert_eq!(
-        stored.as_deref(),
-        Some(r#"{"attacker_id":"kb_pin_a","defender_id":"kb_pin_d","module_id":"basic-combat"}"#),
-        "the denied overrides must not advance session state"
+        stored
+            .as_deref()
+            .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok()),
+        Some(serde_json::json!({
+            "attacker_id": "kb_pin_a",
+            "defender_id": "kb_pin_d",
+            "module_id": "basic-combat",
+        })),
+        "the denied overrides must not advance session state (order-insensitive)"
     );
 
     // A same-id override (repeat of the gated id) is legal and served —
