@@ -191,6 +191,9 @@ Rules:
 
 ---
 
+| DR-65 | World-scoped check finding attribution — `findings.work_id` NOT NULL FK→`works` vs world-scoped mental-layer findings (checker stamps work_id=world_id → put_findings 500). Fix needs product decision: bound-work attribution / FK relaxation / world-scoped findings table. R-V1164P2QC-001 (high, open). | [qc2.md F-001 source trace](../../sdd/2026-08-14-v1.164-p2-mental-belief-dialect-mindstate-checker/review/qc2.md) | V1.165+ | product decision + non-empty-findings E2E green | Canvas/Harness | — |
+| DR-66 | Observation authoring path ergonomics — canvas observers reads KB-entity `modules`; HTTP patch DTO lacks modules; spoke-protocol `orchestrate_upsert` authors it. R-V1164P3QC-001 (medium, open). | [qc-consolidated.md](../../sdd/2026-08-14-v1.164-p3-canvas-readonly-mental-surfacing/review/qc-consolidated.md) | V1.165+ | authoring UX decision (patch-DTO modules / narrative→KB join / fixture-only) | Canvas | — |
+
 ## 3) Residuals (SSOT pointer)
 
 Residual findings are tracked in [`status.json`](../status.json) → `residual_findings` + `metadata.tech_debt_summary`. The tracker does **not** mirror residual rows — `status.json` is authoritative. Roadmap registers linked to residuals live in §2.6 (DR-* rows reference R-* by ID only; severity/lifecycle stays in `status.json`). Current rollup: see `metadata.tech_debt_summary` (updated 2026-07-22). Closed/historical: `.mstar/archived/residuals/<plan-id>.json`.
@@ -210,9 +213,9 @@ Residual findings are tracked in [`status.json`](../status.json) → `residual_f
 
 ## 5) Quick index
 
-**Active iteration**: none (V1.163 shipped 2026-08-12). Next candidate direction not yet chosen.
+**Active iteration**: none (V1.164 shipped 2026-08-14). Next candidate direction not yet chosen (candidates: R-V1164P2QC-001/R-V1164P3QC-001 product decisions — world-scoped finding attribution + observation authoring UX; run_checker DR-64).
 
-**Latest shipped**: [V1.163](../iterations/v1.163/delivery-compass.md) (Cross-surface event binding — Work Timeline Narrative ↔ World Timeline Narrative read-only event-level deep-links + reliability sweep (DR-08 outbox drop + acp-host flake); 2 plans, scale M). Prior: [V1.162](../iterations/v1.162/delivery-compass.md) (Fork spine completion; 2 plans, scale L). Prior: [V1.161](../iterations/v1.161/delivery-compass.md) (maintenance sweep; 2 plans, scale M). Prior: [V1.160](../iterations/v1.160/delivery-compass.md) (ERA-TAXONOMY completion; 2 plans, scale M). Prior: [V1.159](../iterations/v1.159/delivery-compass.md) (rich era taxonomy; 2 plans). Prior: [V1.158](../iterations/v1.158/delivery-compass.md) (stabilization sweep).
+**Latest shipped**: [V1.164](../iterations/v1.164/delivery-compass.md) (L5-mind mental layer — spoke 0.10.0 lockstep + mental/belief dialect + MindState + checker pair + Canvas read-only surfacing; 3 plans, scale L). Prior: [V1.163](../iterations/v1.163/delivery-compass.md) (Cross-surface event binding — Work Timeline Narrative ↔ World Timeline Narrative read-only event-level deep-links + reliability sweep (DR-08 outbox drop + acp-host flake); 2 plans, scale M). Prior: [V1.162](../iterations/v1.162/delivery-compass.md) (Fork spine completion; 2 plans, scale L). Prior: [V1.161](../iterations/v1.161/delivery-compass.md) (maintenance sweep; 2 plans, scale M). Prior: [V1.160](../iterations/v1.160/delivery-compass.md) (ERA-TAXONOMY completion; 2 plans, scale M). Prior: [V1.159](../iterations/v1.159/delivery-compass.md) (rich era taxonomy; 2 plans). Prior: [V1.158](../iterations/v1.158/delivery-compass.md) (stabilization sweep).
 
 **Full iteration index**: [iterations/README.md](../iterations/README.md)
 
