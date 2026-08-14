@@ -22,8 +22,12 @@
 //!
 //! V1.164 informing-event rule (documented heuristic; fixture-sized worlds):
 //! the latest narrative timeline event in the check scope by `sequence_no`.
-//! Relevance matching (proposition ↔ event semantics) is an explicit
-//! non-goal with a durable-roadmap entry (plan roadmap).
+//! Tie-break (explicit): the gateway event stream sorts by `branch_id ASC,
+//! sequence_no ASC` (no-branch ordering), and the checker's stable
+//! `max_by_key` picks the LAST element on equal `sequence_no` — so
+//! same-sequence events resolve deterministically to the later list
+//! position. Relevance matching (proposition ↔ event semantics) is an
+//! explicit non-goal with a durable-roadmap entry (plan roadmap).
 //!
 //! - Informing event **has** `modules.observation` and the actor **IS** in
 //!   `observers` → **`stale_belief_drift`** (severity `warning`) — the
@@ -161,7 +165,9 @@ fn event_sequence_no(event: &TimelineEvent) -> Option<u64> {
 ///
 /// `None` when the observation module is absent OR the observer list is
 /// missing/malformed — both are skipped by the classifier (PD-9: unrecorded
-/// and unknown observer sets are never treated as "nobody").
+/// and unknown observer sets are never treated as "nobody"). A single
+/// non-string element makes the whole set unknown (never partial — silently
+/// dropping non-strings could flip drift ↔ irony).
 fn observation_observers(event: &TimelineEvent) -> Option<Vec<String>> {
     let Ok(Value::Object(map)) = serde_json::to_value(&event.modules) else {
         return None;
@@ -172,13 +178,12 @@ fn observation_observers(event: &TimelineEvent) -> Option<Vec<String>> {
     let Value::Array(observers) = observation.get("observers")? else {
         return None;
     };
-    Some(
-        observers
-            .iter()
-            .filter_map(Value::as_str)
-            .map(str::to_owned)
-            .collect(),
-    )
+    // PD-9: any non-string element → the observer set is unknown → the whole
+    // set is malformed (collect into Option: one None makes the result None).
+    observers
+        .iter()
+        .map(|observer| observer.as_str().map(str::to_owned))
+        .collect()
 }
 
 /// Classify one false-belief candidate into zero or one Finding (the branch
@@ -250,8 +255,10 @@ fn classify(
     }
 }
 
-/// Human-readable event label for descriptions (canonical name — the nexus
-/// seam falls back to title → summary → event id).
+/// Human-readable event label for descriptions — the event's `canonical_name`.
+/// The title → summary → event-id fallback chain lives at the nexus→spoke
+/// seam (`nexus-narrative::timeline_event` `From<TimelineEvent>`), where
+/// `canonical_name` is populated; this function performs no fallback itself.
 fn event_name(event: &TimelineEvent) -> String {
     event.canonical_name.as_str().to_string()
 }
@@ -376,13 +383,9 @@ mod tests {
         )
     }
 
-    /// `evt_transfer`: the narrative timeline event carrying the optional
-    /// observation module. `observers: None` → no `modules` at all (fixture C).
-    fn evt_transfer(sequence_no: u64, observers: Option<Vec<&str>>) -> TimelineEvent {
-        let modules = observers.map_or_else(
-            || json!({}),
-            |list| json!({ "observation": { "observers": list } }),
-        );
+    /// `evt_transfer` with an arbitrary `modules` payload (for malformed
+    /// observation shapes — non-string observer elements).
+    fn evt_transfer_modules(sequence_no: u64, modules: &Value) -> TimelineEvent {
         serde_json::from_value(json!({
             "canonical_name": "Marble transfer",
             "timeline_event_id": "evt_transfer",
@@ -392,6 +395,16 @@ mod tests {
             "modules": modules,
         }))
         .expect("fixture TimelineEvent is well-formed")
+    }
+
+    /// `evt_transfer`: the narrative timeline event carrying the optional
+    /// observation module. `observers: None` → no `modules` at all (fixture C).
+    fn evt_transfer(sequence_no: u64, observers: Option<Vec<&str>>) -> TimelineEvent {
+        let modules = observers.map_or_else(
+            || json!({}),
+            |list| json!({ "observation": { "observers": list } }),
+        );
+        evt_transfer_modules(sequence_no, &modules)
     }
 
     fn check_input(entries: Vec<KnowledgeEntry>, events: Vec<TimelineEvent>) -> CheckRunInput {
@@ -534,6 +547,52 @@ mod tests {
         assert!(
             findings.is_empty(),
             "a truth-True actor row is not a false-belief candidate: {findings:?}"
+        );
+    }
+
+    /// Malformed observer set with a non-string element (S-1 fix):
+    /// `['kb_ana', 42]` must NOT silently truncate to `['kb_ana']` (which
+    /// could flip drift ↔ irony) — the whole set is unknown → skip (PD-9).
+    #[test]
+    fn malformed_observers_with_non_string_element_skip() {
+        let input = check_input(
+            vec![world_entry(), kb_ana_entry(), kb_bo_entry("False")],
+            vec![evt_transfer_modules(
+                1,
+                &json!({ "observation": { "observers": ["kb_ana", 42] } }),
+            )],
+        );
+
+        let findings = match run_check(&input, "ctr_test") {
+            SpokeResult::Ok(findings) => findings,
+            SpokeResult::Reject(reject) => panic!("checker must not reject: {reject:?}"),
+        };
+
+        assert!(
+            findings.is_empty(),
+            "a non-string observer element makes the set unknown — must skip: {findings:?}"
+        );
+    }
+
+    /// All-non-string observer list — equally unknown, must skip.
+    #[test]
+    fn all_non_string_observers_skip() {
+        let input = check_input(
+            vec![world_entry(), kb_ana_entry(), kb_bo_entry("False")],
+            vec![evt_transfer_modules(
+                1,
+                &json!({ "observation": { "observers": [42] } }),
+            )],
+        );
+
+        let findings = match run_check(&input, "ctr_test") {
+            SpokeResult::Ok(findings) => findings,
+            SpokeResult::Reject(reject) => panic!("checker must not reject: {reject:?}"),
+        };
+
+        assert!(
+            findings.is_empty(),
+            "a fully non-string observer list is unknown — must skip: {findings:?}"
         );
     }
 

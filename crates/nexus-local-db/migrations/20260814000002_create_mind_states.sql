@@ -19,5 +19,4 @@ CREATE TABLE IF NOT EXISTS mind_states (
     FOREIGN KEY (holder_entry_id) REFERENCES kb_key_blocks(key_block_id) ON DELETE CASCADE
 );
 
-CREATE INDEX IF NOT EXISTS idx_mind_states_holder ON mind_states(holder_entry_id);
 CREATE INDEX IF NOT EXISTS idx_mind_states_holder_occurred ON mind_states(holder_entry_id, occurred_at);

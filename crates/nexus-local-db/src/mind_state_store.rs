@@ -19,6 +19,13 @@
 //! `*_json` columns; `schema_version` is stored as a plain `i64` (the wire
 //! requires a non-zero unsigned integer). `created_at` / `updated_at` are
 //! stamped by the store at insert time (RFC 3339).
+//!
+//! **Retention (intentional):** `mind_states` rows are derivative history —
+//! they survive the holder's *lifecycle* changes. The FK
+//! `ON DELETE CASCADE` fires only on a hard `DELETE` of the holder
+//! `kb_key_blocks` row; soft-deletion (holder `status` transitions, e.g.
+//! `deprecated` / `merged` / `deleted`) does NOT remove `mind_states` rows,
+//! so when-axis history deliberately outlives the holder's current status.
 
 use crate::LocalDbError;
 use sqlx::SqlitePool;
