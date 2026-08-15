@@ -139,6 +139,8 @@ import type {
   WorldKbPatchRelationshipResponse,
   WorldKbPromoteCandidateRequest,
   WorldKbPromoteCandidateResponse,
+  WorldFindingsListResponse,
+  WorldRulesListResponse,
 } from '@42ch/nexus-contracts';
 
 /** Daemon health probe result (`GET /v1/daemon/runtime/health`). App-side type. */
@@ -449,6 +451,27 @@ export interface NexusClient {
     worldId: string,
     request: WorldKbPatchRelationshipRequest,
   ): Promise<WorldKbPatchRelationshipResponse>;
+
+  // ── World check findings (V1.165 / DR-64 surfacing) ──────────────────────
+  /**
+   * `GET /v1/daemon/worlds/{world_id}/findings` — world-scoped check findings
+   * (mental pair + rule-derived). Newest-first, 500-cap with an honest
+   * `truncated` flag. Spoke vocabulary verbatim (`info|warning|error` severity,
+   * `open|resolved|dismissed` status — no nexus remap). Read-only surface
+   * (PD-2): the panel never writes.
+   */
+  listWorldFindings(worldId: string): Promise<WorldFindingsListResponse>;
+
+  // ── World rules (V1.166 P1 route / DR-64 surfacing half) ────────────────
+  /**
+   * `GET /v1/daemon/worlds/{world_id}/rules` — world-scoped structured rules
+   * (V1.166 AR-3). Author-metadata list in `canonical_name ASC, rule_id ASC`
+   * order, 500-cap with an honest `truncated` flag; each item projects the
+   * spoke Rule vocabulary verbatim plus the AR-2 constraint carrier
+   * first-class. Read-only surface (PD-2): rules are CLI-authored (PD-1),
+   * this client method never writes.
+   */
+  listWorldRules(worldId: string): Promise<WorldRulesListResponse>;
 
   // ── Compute modules (V1.114 P2) ─────────────────────────────────────────
   /** `GET /v1/daemon/compute/modules` — cursor list of registered compute modules. */

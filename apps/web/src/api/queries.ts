@@ -196,6 +196,46 @@ export function flattenPages<T>(data: { pages: CursorPage<T>[] } | undefined): T
   return data.pages.flatMap((p) => p.items);
 }
 
+// ── World check findings (V1.165 route, DR-64 surfacing half) ───────────────
+
+/**
+ * World-scoped check findings — `GET /v1/daemon/worlds/{world_id}/findings`
+ * (mental pair + rule-derived, persisted since V1.165). Newest-first with a
+ * 500-cap + honest `truncated` flag; spoke severity/status vocabulary is
+ * rendered verbatim by the panel (PD-2 — no remap to the work findings
+ * `minor/major/blocker` vocabulary). Read-only surface: this hook is the
+ * panel's only data source and no mutation invalidates it.
+ */
+export function useWorldFindings(worldId: string | undefined) {
+  const client = useNexusClient();
+  return useQuery({
+    queryKey: queryKeys.worldFindings.list(worldId ?? ''),
+    queryFn: () => client.listWorldFindings(worldId!),
+    enabled: Boolean(worldId),
+    staleTime: 5_000,
+  });
+}
+
+// ── World rules (V1.166 P1 route, DR-64 surfacing half) ─────────────────────
+
+/**
+ * World-scoped rules — `GET /v1/daemon/worlds/{world_id}/rules` (V1.166
+ * AR-3). Author-metadata list in `canonical_name ASC, rule_id ASC` order with
+ * a 500-cap + honest `truncated` flag; spoke status vocabulary renders
+ * verbatim (`draft`/`active`/`deprecated` — all shown so authors see what
+ * auto-include skips, PD-1). Read-only surface: this hook is the section's
+ * only data source and no mutation invalidates it (rules are CLI-authored).
+ */
+export function useWorldRules(worldId: string | undefined) {
+  const client = useNexusClient();
+  return useQuery({
+    queryKey: queryKeys.worldRules.list(worldId ?? ''),
+    queryFn: () => client.listWorldRules(worldId!),
+    enabled: Boolean(worldId),
+    staleTime: 5_000,
+  });
+}
+
 // Forward-staging closure: a `useFinding(workId, findingId)` detail hook was
 // considered for the V1.77 remediation surface but is intentionally absent
 // here. The FindingDetailPanel reads the selected row from the work-scoped

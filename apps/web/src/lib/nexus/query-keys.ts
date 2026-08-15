@@ -91,6 +91,18 @@ export const queryKeys = {
     candidates: (worldId: string, query?: object) =>
       [...queryKeys.worldKb.all, 'candidates', worldId, query ?? {}] as const,
   },
+  // V1.166 P2 — world-scoped check findings (DR-64 surfacing half). Read-only:
+  // no mutation ever invalidates this key (the panel observes the route).
+  worldFindings: {
+    all: ['worldFindings'] as const,
+    list: (worldId: string) => [...queryKeys.worldFindings.all, 'list', worldId] as const,
+  },
+  // V1.166 P2 — world-scoped rules (DR-64 surfacing half). Read-only: rules
+  // are CLI-authored (PD-1) and no mutation ever invalidates this key.
+  worldRules: {
+    all: ['worldRules'] as const,
+    list: (worldId: string) => [...queryKeys.worldRules.all, 'list', worldId] as const,
+  },
   memory: {
     all: ['memory'] as const,
     pendingLists: () => [...queryKeys.memory.all, 'pending', 'list'] as const,

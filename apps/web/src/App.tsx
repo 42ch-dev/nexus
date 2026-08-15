@@ -73,6 +73,14 @@ const TimelinePage = lazy(() =>
   import('@/pages/timeline-page').then((m) => ({ default: m.TimelinePage })),
 );
 
+// V1.166 P2 (DR-64 surfacing half) — World Findings is a light Control-Room
+// list page (no `@xyflow/react`), sibling of the world `timeline` / `kb`
+// routes (PD-2 locked placement). Lazy-loaded to keep the route-split
+// convention uniform.
+const WorldFindingsPage = lazy(() =>
+  import('@/pages/world-findings-page').then((m) => ({ default: m.WorldFindingsPage })),
+);
+
 /**
  * App routes — Control Room + Setup shell.
  *
@@ -175,6 +183,19 @@ function AppRoutes() {
             element={
               <Suspense fallback={<LoadingState label="Loading World KB…" />}>
                 <WorldKbPage />
+              </Suspense>
+            }
+          />
+          {/* V1.166 P2 (DR-64 surfacing half) — World Findings peer surface.
+              Sibling of `timeline` + `kb` at `/worlds/:worldId/findings`
+              (PD-2 locked placement: Control Room list/sections, read-only).
+              The index redirect stays Timeline — this is a peer, not the
+              World entry. */}
+          <Route
+            path="findings"
+            element={
+              <Suspense fallback={<LoadingState label="Loading World Findings…" />}>
+                <WorldFindingsPage />
               </Suspense>
             }
           />

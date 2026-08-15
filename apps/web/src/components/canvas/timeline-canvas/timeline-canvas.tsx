@@ -1584,6 +1584,15 @@ function TimelineCanvasHeader({
           >
             {t('timeline.header.worldKbLink')}
           </Link>
+          {/* V1.166 P2 (DR-64 surfacing half) — World Findings peer surface.
+              Exposed from the Timeline header the same way World KB is
+              (PD-2: world peer-nav conventions). */}
+          <Link
+            to={`/worlds/${encodeURIComponent(worldId)}/findings`}
+            className="rounded-control border border-gray-alpha-400 bg-background-100 px-3 py-1.5 text-button-12 text-gray-900 shadow-elevation-2 hover:bg-gray-alpha-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-700 focus-visible:ring-offset-2"
+          >
+            {t('timeline.header.worldFindingsLink')}
+          </Link>
           <Link
             to="/strategies"
             className="rounded-control border border-gray-alpha-400 bg-background-100 px-3 py-1.5 text-button-12 text-gray-900 shadow-elevation-2 hover:bg-gray-alpha-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-700 focus-visible:ring-offset-2"

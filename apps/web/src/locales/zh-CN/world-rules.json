@@ -1,0 +1,20 @@
+{
+  "section": {
+    "title": "规则",
+    "description": "Check 应用于此世界条目与时间线的规则。显示所有状态——自动包含仅评估 active（激活）规则。",
+    "structuralNote": "每条规则携带结构性约束（模块存在/缺失、必填字段、观察者数量），不评估叙事质量。",
+    "emptyTitle": "暂无规则",
+    "emptyDescription": "此世界暂无规则。可使用 creator CLI（`creator world rule add`）添加规则。",
+    "truncated": "按名称显示前 500 条规则，其余规则未显示。",
+    "errorTitle": "无法加载规则",
+    "errorDescription": "无法加载此世界的规则。",
+    "loading": "正在加载规则…",
+    "count_one": "{{count}} 条规则",
+    "count_other": "{{count}} 条规则",
+    "expandAria": "展开规则 {{id}}",
+    "collapseAria": "收起规则 {{id}}",
+    "constraint": "约束",
+    "targetTypes": "目标条目类型",
+    "allEntryTypes": "全部条目类型"
+  }
+}

@@ -124,8 +124,8 @@ describe('TauriClient transport parity (thin-over-BrowserClient)', () => {
     };
     const client = new TauriClient({ fetchImpl });
     const workId = 'w1';
-    // Exercise the core NexusClient data surfaces promoted through V1.89
-    // (health + 40 data method invocations here). The three preset methods
+    // Exercise the core NexusClient data surfaces promoted through V1.166 P2
+    // (health + 42 data method invocations here). The three preset methods
     // (getPreset/updatePreset/deletePreset) were promoted in V1.67 G2
     // (R-V167P1-QC3-S1), the four outline+timeline methods
     // (getWorkOutline/patchOutlineStructure/patchOutlineChapter/patchTimelineEvent)
@@ -203,13 +203,19 @@ describe('TauriClient transport parity (thin-over-BrowserClient)', () => {
     });
     await client.patchReadingAnnotation('a1', { color: 'blue', note: 'note' });
     await client.deleteReadingAnnotation('a1');
+    // V1.166 P2 (DR-64 surfacing half) — world-scoped read-only surfaces:
+    // findings panel (T1) + rules section (T2). Both are plain GETs through
+    // the shared transport; pinning them here keeps the parity set complete
+    // even though TauriClient inherits them via `extends BrowserClient`.
+    await client.listWorldFindings(workId);
+    await client.listWorldRules(workId);
 
     // Every method must have hit a /v1/daemon/* path (transport parity with the
     // browser client). If a method silently no-op'd or threw — as the V1.65
     // stub did — its path would be missing and this set would be smaller.
     const paths = [...seen].sort();
     expect(paths.every((p) => p.includes('/v1/daemon/'))).toBe(true);
-    expect(seen.size).toBe(41);
+    expect(seen.size).toBe(43);
     // Spot-check the chapter surface (the Q5 action target).
     expect(seen).toContain('GET /v1/daemon/works/w1/chapters/1/body');
     expect(seen).toContain('GET /v1/daemon/works/w1/chapters/1/outline');
@@ -239,6 +245,9 @@ describe('TauriClient transport parity (thin-over-BrowserClient)', () => {
     expect(seen).toContain('POST /v1/daemon/reading/annotations');
     expect(seen).toContain('PATCH /v1/daemon/reading/annotations/a1');
     expect(seen).toContain('DELETE /v1/daemon/reading/annotations/a1');
+    // Spot-check the V1.166 P2 world findings/rules surface.
+    expect(seen).toContain('GET /v1/daemon/worlds/w1/findings');
+    expect(seen).toContain('GET /v1/daemon/worlds/w1/rules');
   });
 });
 

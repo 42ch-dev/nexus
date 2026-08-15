@@ -660,6 +660,7 @@
       "description": "The world's when-axis. Pivots to World KB for entity edits.",
       "peerNavAria": "Peer surfaces",
       "worldKbLink": "World KB",
+      "worldFindingsLink": "Findings",
       "strategyLink": "Harness",
       "showGraph": "Show graph",
       "showList": "Show list view"

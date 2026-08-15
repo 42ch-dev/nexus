@@ -54,6 +54,15 @@
         "lore": "lore"
       }
     },
+    "world-findings": {
+      "label": "Go to World Findings",
+      "keywords": {
+        "checks": "checks",
+        "severity": "severity",
+        "advisory": "advisory",
+        "quality": "quality"
+      }
+    },
     "work-timeline": {
       "label": "Go to Work Timeline",
       "keywords": {
