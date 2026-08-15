@@ -5,9 +5,8 @@ problem_type: knowledge
 category: architecture-patterns
 severity: medium
 plan_id: 2026-08-14-v1.165-p1-entry-scoped-findings-alignment
-tags: [spoke, findings, extensions-discriminator, dual-table, world-scope, work-scope, routing]
+tags: [spoke, findings, extensions-discriminator, dual-table, world-scope, work-scope, routing, wrapper-seam, manifest-guard]
 last_updated: 2026-08-15
-applies_when: Persisting spoke port outputs whose nexus home differs by scope (world vs work); extending FindingPort behavior; adding a second storage home behind one spoke port method; any plan touching finding_port.rs routing
 ---
 
 # Scope-Discriminated Port Persistence (extensions.nexus Routing)
@@ -33,11 +32,17 @@ Route **inside the adapter's port impl** using the `extensions.nexus` namespace 
 
 The rejected alternatives both fail structurally: a spoke port split needs a spoke release (pinned lockstep); handler-side routing would fork `orchestrate_*` sequencing. The extensions discriminator is the only place where scope is available without changing the protocol — and it generalizes to any future scope-split port output (relations, rules, mind-axis ops).
 
+## V1.166 Extension: Read-Side Wrappers Need the Same Discipline
+
+When the scope constraint is on the **resolution/input side** (not the persistence side), the same boundary hosts a **wrapper around the spoke orchestrator** instead of port-impl routing. V1.166 `orchestrate_check_world_scoped` (`rule_query_port.rs`) world-scopes check rule resolution — spoke `RuleQueryPort::list_rules` has no world param and `resolve_check_rules` skips `list_rules` when refs are empty, so auto-include must be pre-expansion at the wrapper:
+
+- Gates fire **before** delegation (reject evaluates nothing, persists nothing — fail-closed whole-operation)
+- **Both production callers must cross the wrapper** (daemon `check.rs` + Connect N-C2 `invoke.rs`) — a handler-only gate leaves the other caller unguarded; the wrapper is the single choke point
+- **The compile-time manifest guard must certify the REAL production entrypoint.** V1.166 QC caught (`manifest.rs` op-mapping proof still typechecking raw `orchestrate_check` after the wrapper landed): a stale guard stays green while a future caller reverts to the raw function — the exact seam-bypass drift the guard exists to catch. When a wrapper becomes the production path, update the guard arm in the same change.
+- **Validation-gate placement follows wire topology:** carriers never arrive on the check wire (embedded rules hard-rejected at the wrapper), so a CLI-only carrier validation gate provably covers Connect too — no daemon-side revalidation needed. Derive gate location from what can appear on each wire, not from defensiveness.
+
 ## When to Apply
 
 - Any spoke port persistence whose nexus home is scope-dependent
 - Reviewing diffs that add columns to a legacy table to "support both scopes" — check for whole-table enumerating consumers (global watchers, prunes, per-creator lists) before widening
-
-## Examples
-
-V1.165 P1: `finding_port.rs` discriminator + `world_findings` table (spoke vocabulary verbatim on the world path; work-path severity mapping unchanged). V1.164's bug was the checker mis-stamping the world id into `work_id` — the discriminator made the mis-stamp a reject instead of an FK 500.
+- Adding a wrapper around a spoke orchestrator for scope/isolation semantics — both production callers adopt it and the manifest compile guard certifies the wrapper, not the raw function
