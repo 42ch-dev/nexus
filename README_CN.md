@@ -14,7 +14,7 @@
 
 [English](README.md) · [Concepts](CONCEPTS.md) · [Strategy](STRATEGY.md)
 
-Nexus 是一款本地优先的创意写作工具。
+Nexus 是一款本地优先、AI驱动的叙事编排引擎。
 
 ## 快速开始
 
