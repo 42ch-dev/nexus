@@ -202,7 +202,7 @@ Engineering reference for the Nexus OSS harness **knowledge** tree.
 
 | Document | Description |
 | --- | --- |
-| [conventions/pnpm-toolchain-pin-and-supply-chain-age.md](conventions/pnpm-toolchain-pin-and-supply-chain-age.md) | pnpm 9 CI pin vs local pnpm 11 minimumReleaseAge policy — same-day package installs rejected; failed installs can wipe node_modules; always `npx -y pnpm@9` (hit 3× in V1.164) |
+| [conventions/pnpm-toolchain-pin-and-supply-chain-age.md](conventions/pnpm-toolchain-pin-and-supply-chain-age.md) | pnpm 11 pin (2026-08-15): settings live in pnpm-workspace.yaml (pnpm 11 ignores package.json `pnpm` field); `allowBuilds` allowlist or frozen install fails ERR_PNPM_IGNORED_BUILDS; local `minimumReleaseAge` policy rejects same-day publishes; MODULE_NOT_FOUND after failed install = partial wipe (hit 3× in V1.164 under the old 9-pin split) |
 | [architecture-patterns/spoke-op-gate-at-adapter-boundary.md](architecture-patterns/spoke-op-gate-at-adapter-boundary.md) | Spoke-op validation gates live at the nexus-spoke-adapter boundary; storage crates stay pure (sole-consumer rule spans 3 docs); V1.146 + V1.164 both caught the same near-miss |
 | [engineering/order-insensitive-json-assertions-on-typed-seams.md](engineering/order-insensitive-json-assertions-on-typed-seams.md) | Never assert raw-string equality on JSON crossing a typed seam — BTreeMap-backed spoke types serialize keys alphabetically; parse-both-sides compare (V1.164 P1 QA blocker RCA) |
 
