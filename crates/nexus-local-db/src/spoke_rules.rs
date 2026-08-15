@@ -7,9 +7,14 @@
 //! `extensions_json`) are carried as opaque strings and parsed at the
 //! `nexus-spoke-adapter` boundary.
 //!
-//! P1 scope is deliberately narrow: read-by-ids + a test/dev seed helper.
-//! Author-facing rule write/CRUD is out of scope (plan
-//! `2026-08-04-v1.148-p1-rule-query-port-production` residuals).
+//! V1.166 (DR-64, AR-3) adds the production write path: full-row insert
+//! ([`insert_rule`], PK conflict classified as
+//! [`LocalDbError::ConstraintViolation`]), world-guarded status transition
+//! ([`set_rule_status`]), and world-scoped list ([`list_rules_by_world`] —
+//! all statuses, `canonical_name ASC, rule_id ASC`). Status filtering
+//! ("active") happens at the adapter boundary (AR-1) — spoke vocabulary
+//! stays out of pure storage. [`insert_spoke_rule_for_test`] remains for
+//! existing test/dev seeds, routing through the production insert.
 
 use crate::LocalDbError;
 use sqlx::SqlitePool;
@@ -79,17 +84,135 @@ pub async fn get_spoke_rules_by_ids(
     Ok(rows)
 }
 
-/// Insert a `spoke_rules` row (test/dev seed helper — P1 has no production
-/// write path).
+/// Production insert (full row).
+///
+/// A PK conflict is detected and classified here as
+/// [`LocalDbError::ConstraintViolation`] `{ table: "spoke_rules",
+/// constraint: "rule_id" }` — callers never string-sniff sqlx errors.
 ///
 /// # Errors
 ///
-/// Returns [`LocalDbError::Sqlx`] on database failure (including duplicate
-/// `rule_id` primary key).
-pub async fn insert_spoke_rule_for_test(
+/// Returns [`LocalDbError::ConstraintViolation`] when a row with the same
+/// `rule_id` already exists; [`LocalDbError::Sqlx`] on any other database
+/// failure.
+pub async fn insert_rule(pool: &SqlitePool, row: &SpokeRuleRow) -> Result<(), LocalDbError> {
+    match insert_rule_sql(pool, row).await {
+        Err(LocalDbError::Sqlx(sqlx::Error::Database(ref db_err)))
+            if db_err.is_unique_violation() =>
+        {
+            Err(LocalDbError::ConstraintViolation {
+                table: "spoke_rules".to_string(),
+                constraint: "rule_id".to_string(),
+            })
+        }
+        other => other,
+    }
+}
+
+/// World-guarded status transition: `UPDATE spoke_rules SET status = ?,
+/// updated_at = ? WHERE rule_id = ? AND world_id = ?`.
+///
+/// `Ok(true)` = updated; `Ok(false)` = no row matched (unknown id OR foreign
+/// world — storage does not distinguish; the CLI turns `false` into the PD-1
+/// named reject naming the `rule_id`). `updated_at` is refreshed to the
+/// current Unix epoch seconds on every matched transition.
+///
+/// # Errors
+///
+/// Returns [`LocalDbError::Sqlx`] on database failure.
+pub async fn set_rule_status(
     pool: &SqlitePool,
-    row: &SpokeRuleRow,
-) -> Result<(), LocalDbError> {
+    world_id: &str,
+    rule_id: &str,
+    status: &str,
+) -> Result<bool, LocalDbError> {
+    let now_epoch = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| i64::try_from(d.as_secs()).unwrap_or(i64::MAX))
+        .unwrap_or_default();
+    let result = sqlx::query!(
+        "UPDATE spoke_rules SET status = ?, updated_at = ? \
+         WHERE rule_id = ? AND world_id = ?",
+        status,
+        now_epoch,
+        rule_id,
+        world_id,
+    )
+    .execute(pool)
+    .await?;
+    Ok(result.rows_affected() == 1)
+}
+
+/// All statuses of one world, ordered `canonical_name ASC, rule_id ASC`
+/// (PD-1 list order + deterministic tie-break).
+///
+/// Status filtering ("active") happens at the adapter boundary (AR-1) —
+/// spoke vocabulary stays out of pure storage.
+///
+/// Returns `Ok(vec![])` for an unknown world.
+///
+/// # Errors
+///
+/// Returns [`LocalDbError::Sqlx`] on database failure.
+pub async fn list_rules_by_world(
+    pool: &SqlitePool,
+    world_id: &str,
+) -> Result<Vec<SpokeRuleRow>, LocalDbError> {
+    let rows = sqlx::query_as!(
+        SpokeRuleRow,
+        "SELECT rule_id, world_id, schema_version, canonical_name, kind, statement, \
+         description, target_entry_types_json, severity_hint, status, source_anchor_json, \
+         extensions_json, created_at, updated_at \
+         FROM spoke_rules \
+         WHERE world_id = ? \
+         ORDER BY canonical_name ASC, rule_id ASC",
+        world_id,
+    )
+    .fetch_all(pool)
+    .await?;
+    Ok(rows)
+}
+
+/// Bounded world-scoped list for the read route (AR-3: SQL-side `LIMIT ?`
+/// probe — Bugbot 4bad2fca idiom, mirroring
+/// [`crate::world_findings::list_world_findings_by_world`]).
+///
+/// Same `canonical_name ASC, rule_id ASC` order as [`list_rules_by_world`];
+/// the caller passes `cap + 1` as `limit` so the overflow row proves
+/// truncation without loading the full set. `SQLite` treats a negative
+/// `LIMIT` as "no limit" — clamped so a buggy caller can never silently
+/// reintroduce the unbounded query.
+///
+/// # Errors
+///
+/// Returns [`LocalDbError::Sqlx`] on database failure.
+pub async fn list_rules_by_world_limited(
+    pool: &SqlitePool,
+    world_id: &str,
+    limit: i64,
+) -> Result<Vec<SpokeRuleRow>, LocalDbError> {
+    let limit = limit.max(0);
+    let rows = sqlx::query_as!(
+        SpokeRuleRow,
+        "SELECT rule_id, world_id, schema_version, canonical_name, kind, statement, \
+         description, target_entry_types_json, severity_hint, status, source_anchor_json, \
+         extensions_json, created_at, updated_at \
+         FROM spoke_rules \
+         WHERE world_id = ? \
+         ORDER BY canonical_name ASC, rule_id ASC \
+         LIMIT ?",
+        world_id,
+        limit,
+    )
+    .fetch_all(pool)
+    .await?;
+    Ok(rows)
+}
+
+/// Shared INSERT statement — the only `spoke_rules` write path. Kept private;
+/// the classification wrapper ([`insert_rule`]) owns the UNIQUE-violation
+/// mapping so callers never see raw sqlx errors.
+async fn insert_rule_sql(pool: &SqlitePool, row: &SpokeRuleRow) -> Result<(), LocalDbError> {
     sqlx::query!(
         r#"INSERT INTO spoke_rules
            (rule_id, world_id, schema_version, canonical_name, kind, statement,
@@ -114,6 +237,23 @@ pub async fn insert_spoke_rule_for_test(
     .execute(pool)
     .await?;
     Ok(())
+}
+
+/// Insert a `spoke_rules` row (test/dev seed helper — V1.148 P1; kept for
+/// existing seeds, superseded by [`insert_rule`] for production callers).
+///
+/// Routes through the production insert: a duplicate `rule_id` surfaces as
+/// [`LocalDbError::ConstraintViolation`] (`table: "spoke_rules"`,
+/// `constraint: "rule_id"`) rather than a raw sqlx error.
+///
+/// # Errors
+///
+/// See [`insert_rule`].
+pub async fn insert_spoke_rule_for_test(
+    pool: &SqlitePool,
+    row: &SpokeRuleRow,
+) -> Result<(), LocalDbError> {
+    insert_rule(pool, row).await
 }
 
 #[cfg(test)]

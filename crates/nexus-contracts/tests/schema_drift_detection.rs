@@ -1160,6 +1160,15 @@ fn build_schema_map() -> Vec<SchemaEntry> {
             Strict,
             WorldFindingsListResponse
         ),
+        // V1.166 P1 T4 (DR-64 / AR-3): world rules read surface DTO.
+        // Plain-object root (`rules` + `truncated`) → Strict; item mirrors
+        // the spoke Rule author metadata + the first-class AR-2 constraint
+        // carrier (extensions bag not exposed).
+        entry!(
+            "schemas/daemon-api/worlds/world-rules-list-response.schema.json",
+            Strict,
+            WorldRulesListResponse
+        ),
     ]
 }
 

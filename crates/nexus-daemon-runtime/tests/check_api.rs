@@ -217,6 +217,81 @@ async fn check_empty_rules_returns_200_empty_findings() {
     );
 }
 
+/// V1.166 AR-1 (PD-3, fail closed): a `rule_refs` id owned by a different
+/// world rejects the WHOLE check with 400 `invalid_input` naming the
+/// offending id — no partial evaluation, no persistence. The reason names
+/// rule ids only (no statement / `canonical_name` leak).
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn check_foreign_rule_ref_rejects_400_invalid_input_naming_ids() {
+    let ctx = ctx().await;
+    // A rule row whose owner world differs from the check's world
+    // (`OWNED_WORLD`) — `spoke_rules.world_id` has no FK to
+    // `narrative_worlds`, so a bare foreign world id is a valid seed.
+    seed_rule(&ctx.pool, "check_rule_foreign", "wld_other_world").await;
+
+    let body = json!({
+        "world_id": OWNED_WORLD,
+        "scope": { "scope_id": OWNED_WORLD },
+        "rule_refs": ["check_rule_foreign"],
+    });
+    let resp = ctx.server.post("/v1/daemon/check").json(&body).await;
+    assert_eq!(
+        resp.status_code(),
+        StatusCode::BAD_REQUEST,
+        "foreign rule_ref must reject the whole check: {}",
+        resp.text()
+    );
+    let body: Value = resp.json();
+    assert_eq!(body["success"], false, "body={body}");
+    assert_eq!(body["error"]["code"], "invalid_input", "body={body}");
+    assert_eq!(body["error"]["details"]["field"], "check", "body={body}");
+    let message = body["error"]["message"].as_str().expect("message");
+    assert!(
+        message.contains("rule_refs contain rule(s) owned by a different world: "),
+        "locked message prefix: {message}"
+    );
+    assert!(
+        message.contains("check_rule_foreign"),
+        "reason must name the foreign rule id: {message}"
+    );
+}
+
+/// V1.166 AR-1: embedded `rules` in the request are not an authoring path —
+/// reject with 400 `invalid_input` and the locked message (they would bypass
+/// world binding via spoke's by-`rule_id` priority over resolved refs).
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn check_embedded_rules_reject_400_invalid_input() {
+    let ctx = ctx().await;
+
+    let body = json!({
+        "world_id": OWNED_WORLD,
+        "scope": { "scope_id": OWNED_WORLD },
+        "rules": [{
+            "schema_version": 1,
+            "rule_id": "rul_embedded",
+            "canonical_name": "Embedded",
+            "kind": "rule",
+            "extensions": {},
+        }],
+    });
+    let resp = ctx.server.post("/v1/daemon/check").json(&body).await;
+    assert_eq!(
+        resp.status_code(),
+        StatusCode::BAD_REQUEST,
+        "embedded rules must reject: {}",
+        resp.text()
+    );
+    let body: Value = resp.json();
+    assert_eq!(body["error"]["code"], "invalid_input", "body={body}");
+    assert_eq!(body["error"]["details"]["field"], "check", "body={body}");
+    assert_eq!(
+        body["error"]["message"],
+        "Invalid input: embedded rules are not an authoring path this iteration; \
+         use rule_refs or world auto-include",
+        "locked message verbatim (daemon InvalidInput prefixes the reason)"
+    );
+}
+
 /// Tier2 gate: with no active creator configured, `require_active_creator`
 /// rejects with 409 `uninitialized` before the handler runs (same status the
 /// `compute_runs` / memory routes use — verified against tier2 reality).

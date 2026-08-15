@@ -6,9 +6,11 @@ pub mod create_fork_response;
 pub mod create_world_request;
 pub mod create_world_response;
 pub mod world_findings_list_response;
+pub mod world_rules_list_response;
 
 pub use create_fork_request::*;
 pub use create_fork_response::*;
 pub use create_world_request::*;
 pub use create_world_response::*;
 pub use world_findings_list_response::*;
+pub use world_rules_list_response::*;

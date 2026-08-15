@@ -1,5 +1,5 @@
 //! `creator world` subcommand — create worlds, add events, list/show worlds,
-//! and manage World KB knowledge entries.
+//! manage World KB knowledge entries, and author structured check rules.
 //!
 //! Product write path for narrative worlds. Writes go through
 //! `nexus_local_db::narrative_write`, NOT through the `NarrativeGateway` trait.
@@ -7,8 +7,12 @@
 //!
 //! World KB author surface (`creator world kb list/show/edit/delete`) lives in
 //! the [`kb`] submodule (V1.50 T-B P0).
+//!
+//! Structured-rule author surface (`creator world rule add|list|deactivate`)
+//! lives in the [`rule`] submodule (V1.166 PD-1 / AR-2 / AR-3, DR-64).
 
 pub mod kb;
+pub mod rule;
 
 use crate::config::CliConfig;
 use crate::errors::Result;
@@ -87,6 +91,15 @@ pub enum WorldCommand {
         #[command(subcommand)]
         command: kb::WorldKbCommand,
     },
+
+    /// Structured-rule author surface (add/list/deactivate) — V1.166 PD-1.
+    ///
+    /// The CLI is the only write path for `spoke_rules` rows and the
+    /// CLI-only validation gate for the AR-2 constraint carrier.
+    Rule {
+        #[command(subcommand)]
+        command: rule::RuleCommand,
+    },
 }
 
 /// Run a world subcommand.
@@ -140,6 +153,7 @@ pub async fn run(cmd: WorldCommand, config: &CliConfig) -> Result<()> {
         WorldCommand::List => run_list(config).await,
         WorldCommand::Show { world_id } => run_show(config, &world_id).await,
         WorldCommand::Kb { command } => kb::run(command, config).await,
+        WorldCommand::Rule { command } => rule::run(command, config).await,
     }
 }
 

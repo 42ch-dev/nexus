@@ -211,6 +211,7 @@ export const SCHEMA_VERSIONS: Record<string, number> = {
   CreateWorldRequest: 1,
   CreateWorldResponse: 1,
   WorldFindingsListResponse: 1,
+  WorldRulesListResponse: 1,
   Creator: 1,
   ForkBranch: 1,
   Memory: 1,

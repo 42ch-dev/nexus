@@ -1,0 +1,46 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/daemon-api/worlds/world-rules-list-response.schema.json",
+  "schema_version": 1,
+  "title": "Nexus WorldRulesListResponse",
+  "description": "Read surface for a world's structured rules (V1.166 DR-64 / AR-3): GET /v1/daemon/worlds/{world_id}/rules. Items project the spoke Rule author metadata verbatim (canonical_name, kind, statement, severity_hint, status, target_entry_types — open spoke vocabulary, no nexus coercion at rest) plus the AR-2 constraint carrier surfaced first-class from extensions.nexus.constraint (absent/malformed → omitted; the extensions bag itself is NOT exposed). The projection converts the stored INTEGER Unix-epoch timestamps to RFC 3339. Store order is canonical_name ASC, rule_id ASC (author-metadata list, not newest-first); `truncated` is the honest flag for the 500-rule safety cap: true only when more rows exist than the cap. Owned world with zero rules → 200 + {\"rules\": [], \"truncated\": false}.",
+  "type": "object",
+  "required": ["rules", "truncated"],
+  "additionalProperties": false,
+  "properties": {
+    "rules": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "description": "One spoke Rule projected for the read surface (AR-3 row_to_item mirror).",
+        "required": ["rule_id", "canonical_name", "kind", "target_entry_types"],
+        "additionalProperties": false,
+        "properties": {
+          "rule_id": { "type": "string", "description": "Stable rule id (rul_<uuid v4 simple>, AR-2)." },
+          "canonical_name": { "type": "string", "description": "Human-stable name (author-metadata list order key)." },
+          "kind": { "type": "string", "description": "Open string. Core vocabulary (documented, not enforced): rule, prohibition, style. Stored verbatim — author classification, not Finding kind (PD-1)." },
+          "statement": { "type": ["string", "null"], "description": "Human summary only — never parsed by the evaluator (PD-1)." },
+          "description": { "type": ["string", "null"], "description": "Longer explanation for integrators or authors." },
+          "severity_hint": { "type": ["string", "null"], "description": "Open string. Core vocabulary (documented, not enforced): info, warning, error. Verbatim; the evaluator defaults to warning when absent (AR-4)." },
+          "status": { "type": ["string", "null"], "description": "Open string. Core vocabulary (documented, not enforced): draft, active, deprecated. Verbatim; auto-include only evaluates status=active (PD-1)." },
+          "target_entry_types": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Targeting axis for the three entry families; empty = all entry types in check scope (PD-1). Inapplicable to observer_cardinality (events carry no entry_type — the CLI rejects the combination, AR-2)."
+          },
+          "constraint": {
+            "type": "object",
+            "additionalProperties": true,
+            "description": "The AR-2 constraint carrier (extensions.nexus.constraint) projected first-class: raw typed JSON object discriminated by family. Absent/malformed stored carrier → omitted. The extensions bag itself is not exposed — the carrier is the only product payload."
+          },
+          "created_at": { "type": "string", "format": "date-time", "description": "RFC 3339 UTC datetime string (projected from stored epoch seconds)." },
+          "updated_at": { "type": "string", "format": "date-time", "description": "RFC 3339 UTC datetime string (projected from stored epoch seconds)." }
+        }
+      }
+    },
+    "truncated": {
+      "type": "boolean",
+      "description": "True when the 500-rule safety cap was exceeded and rules is the first 500 of canonical_name ASC, rule_id ASC order (pagination lands with the Control Room panel — roadmap)."
+    }
+  }
+}

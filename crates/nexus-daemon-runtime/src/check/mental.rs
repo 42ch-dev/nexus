@@ -74,11 +74,8 @@
 //! so the checker parses `sort_key` as `u64` for true numeric ordering.
 
 use nexus_knowledge::world_kb::BeliefPropositionRaw;
-use nexus_spoke_adapter::{
-    CheckRunInput, Finding, FindingExtensionsKey, KnowledgeEntry, SpokeResult, TimelineEvent,
-};
+use nexus_spoke_adapter::{CheckRunInput, Finding, KnowledgeEntry, SpokeResult, TimelineEvent};
 use serde_json::Value;
-use std::collections::HashMap;
 
 /// Finding kinds this checker emits (handbook-exact strings).
 pub const KIND_STALE_BELIEF_DRIFT: &str = "stale_belief_drift";
@@ -164,31 +161,6 @@ fn event_sequence_no(event: &TimelineEvent) -> Option<u64> {
         .and_then(|key| key.parse::<u64>().ok())
 }
 
-/// The informing event's observer list (`modules.observation.observers`).
-///
-/// `None` when the observation module is absent OR the observer list is
-/// missing/malformed — both are skipped by the classifier (PD-9: unrecorded
-/// and unknown observer sets are never treated as "nobody"). A single
-/// non-string element makes the whole set unknown (never partial — silently
-/// dropping non-strings could flip drift ↔ irony).
-fn observation_observers(event: &TimelineEvent) -> Option<Vec<String>> {
-    let Ok(Value::Object(map)) = serde_json::to_value(&event.modules) else {
-        return None;
-    };
-    let Value::Object(observation) = map.get("observation")? else {
-        return None;
-    };
-    let Value::Array(observers) = observation.get("observers")? else {
-        return None;
-    };
-    // PD-9: any non-string element → the observer set is unknown → the whole
-    // set is malformed (collect into Option: one None makes the result None).
-    observers
-        .iter()
-        .map(|observer| observer.as_str().map(str::to_owned))
-        .collect()
-}
-
 /// Classify one false-belief candidate into zero or one Finding (the branch
 /// table in the module docs).
 fn classify(
@@ -202,9 +174,10 @@ fn classify(
     let Some(informing) = informing_event(events) else {
         // Branch b: no events in the check scope — the false belief has no
         // recorded informational basis (consistency bug).
-        return vec![finding(
+        return vec![super::finding(
             KIND_STALE_BELIEF_DRIFT,
             SEVERITY_WARNING,
+            actor,
             actor,
             world_id,
             creator_id,
@@ -216,7 +189,7 @@ fn classify(
         )];
     };
 
-    let Some(observers) = observation_observers(informing) else {
+    let Some(observers) = super::observation_observers(informing) else {
         // PD-9 (AC-V1164-11): the informing event exists but the observation
         // is unrecorded — skip, never treat as nobody/everybody.
         return Vec::new();
@@ -226,9 +199,10 @@ fn classify(
     if observers.iter().any(|observer| observer == actor) {
         // Branch a: the actor should have seen the informing event — the
         // stale belief is a consistency bug.
-        vec![finding(
+        vec![super::finding(
             KIND_STALE_BELIEF_DRIFT,
             SEVERITY_WARNING,
+            actor,
             actor,
             world_id,
             creator_id,
@@ -242,9 +216,10 @@ fn classify(
     } else {
         // The correct stale structure: the actor did not observe the
         // informing event — the divergent belief is deliberate (irony).
-        vec![finding(
+        vec![super::finding(
             KIND_DRAMATIC_IRONY_ASYMMETRY,
             SEVERITY_INFO,
+            actor,
             actor,
             world_id,
             creator_id,
@@ -266,54 +241,10 @@ fn event_name(event: &TimelineEvent) -> String {
     event.canonical_name.as_str().to_string()
 }
 
-/// Build a spoke `Finding` ready for `FindingPort::put_findings` (stamps
-/// `extensions.nexus.world_id` — the routing key — plus `creator_id` as
-/// provenance).
-fn finding(
-    kind: &str,
-    severity: &str,
-    actor: &str,
-    world_id: &str,
-    creator_id: &str,
-    description: String,
-) -> Finding {
-    let mut nexus = serde_json::Map::new();
-    // `world_id` is the routing key injected here — `put_findings`
-    // discriminates on `extensions.nexus` (finding_port.rs): `world_id`
-    // (no `work_id`) → world path. `creator_id` rides along as provenance
-    // (AR-1 — no creator column on the world path).
-    nexus.insert("world_id".to_string(), Value::String(world_id.to_string()));
-    nexus.insert(
-        "creator_id".to_string(),
-        Value::String(creator_id.to_string()),
-    );
-    let mut extensions = HashMap::new();
-    extensions.insert(
-        FindingExtensionsKey::try_from("nexus")
-            .expect("\"nexus\" matches the ^[a-z][a-z0-9_-]*$ namespace regex"),
-        nexus,
-    );
-    Finding {
-        created_at: None,
-        description,
-        extensions,
-        finding_id: format!("fnd_{kind}_{}", uuid::Uuid::new_v4().simple()),
-        kind: Some(kind.to_string()),
-        schema_version: std::num::NonZeroU64::new(1).expect("1 is non-zero"),
-        severity: severity.to_string(),
-        source_anchor: None,
-        status: "open".to_string(),
-        suggested_fix: None,
-        target_entry_id: Some(actor.to_string()),
-        text_position: serde_json::Map::new(),
-        title: format!("{kind}: {actor}"),
-        updated_at: None,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use nexus_spoke_adapter::FindingExtensionsKey;
     use serde_json::json;
 
     // ── Spoke handbook worked-example fixtures (box/basket story) ──────

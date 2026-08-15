@@ -43,10 +43,13 @@
 //! [`insert_spoke_rule_for_test`].
 
 use super::NexusAdapter;
-use crate::{Rule, RuleQueryPort, SpokeReject, SpokeRejectCode, SpokeResult};
+use crate::{
+    orchestrate_check, CheckRequest, CheckResponse, CheckRunInput, Finding, Rule, RuleQueryPort,
+    SpokeReject, SpokeRejectCode, SpokeResult,
+};
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
-use nexus_local_db::spoke_rules::{get_spoke_rules_by_ids, SpokeRuleRow};
+use nexus_local_db::spoke_rules::{get_spoke_rules_by_ids, list_rules_by_world, SpokeRuleRow};
 use serde_json::{json, Map, Value};
 use spoke_schemas::data::rule::{RuleCanonicalName, RuleExtensionsKey};
 use std::collections::HashMap;
@@ -127,6 +130,121 @@ fn reject<T>(code: SpokeRejectCode, message: impl Into<String>, details: Value) 
         message: message.into(),
         details: details_map,
     })
+}
+
+/// V1.166 AR-1 — world-scoped `orchestrate_check` seam.
+///
+/// The single choke point where `CheckRequest.rule_refs` become
+/// world-owned before spoke orchestration. Both production callers (daemon
+/// `check.rs`, Connect `invoke.rs` `Route::Check`) cross this wrapper —
+/// spoke `orchestrate_check` itself stays world-agnostic, so the PD-3
+/// isolation gate lives here, not in the port.
+///
+/// Gate order (all **before** delegating to spoke — a reject persists
+/// nothing and evaluates nothing):
+///
+/// 1. **Embedded-rules reject (PD-3 hole closure):** `request.rules`
+///    non-empty → `InvalidInput`; embedded wire rules carry no `world_id`
+///    and spoke gives them by-`rule_id` priority over resolved refs
+///    (`orchestrate.rs` merge), which would bypass world binding.
+/// 2. **Auto-include materialization (PD-1):** empty/omitted `rule_refs`
+///    → this world's `status = 'active'` `rule_id`s via
+///    [`list_rules_by_world`], filtered at **this boundary** (spoke
+///    vocabulary stays out of pure storage); expansion order = storage
+///    order (`canonical_name ASC, rule_id ASC`) — deterministic. Zero
+///    active rules ⇒ refs stay `[]` ⇒ spoke skips `list_rules` (the
+///    empty-rules fast path is emergent, AR-4).
+/// 3. **Foreign-id reject (PD-3, fail closed):** refs non-empty →
+///    [`get_spoke_rules_by_ids`]; any row with `world_id != world_id` →
+///    `InvalidInput` naming the foreign `rule_id`s **only** (never
+///    `statement` / `canonical_name` / extensions — no cross-world data
+///    leak), all foreign ids in one reject, no partial set proceeds,
+///    `details = { "foreign_rule_ids": [...] }`.
+/// 4. **Unknown ids (no row) pass through verbatim** — spoke subset-omit
+///    stays (PD-1: no 400 on typos; AR-1 declines to tighten).
+/// 5. **Storage failure** → `InternalError` (the [`reject`] helper idiom).
+///
+/// Then delegates to [`orchestrate_check`] with the rewritten `rule_refs`.
+/// The adapter [`RuleQueryPort::list_rules`] impl stays by-id only — this
+/// wrapper is the world-scoping choke point (existing port tests
+/// unchanged).
+pub async fn orchestrate_check_world_scoped<F>(
+    adapter: &NexusAdapter<'_>,
+    world_id: &str,
+    mut request: CheckRequest,
+    run_checker: F,
+) -> SpokeResult<CheckResponse>
+where
+    F: FnOnce(CheckRunInput) -> SpokeResult<Vec<Finding>>,
+{
+    // Gate 1 — embedded rules are not an authoring path this iteration
+    // (AR-1): they would punch a hole in world binding via spoke's
+    // by-`rule_id` priority over resolved refs.
+    if !request.rules.is_empty() {
+        return reject(
+            SpokeRejectCode::InvalidInput,
+            "embedded rules are not an authoring path this iteration; use rule_refs or world auto-include",
+            json!({}),
+        );
+    }
+
+    let pool = adapter.pool.clone();
+
+    // Gate 2 — auto-include: empty/omitted `rule_refs` materialize this
+    // world's active rules (status filter at this boundary; storage order).
+    if request.rule_refs.is_empty() {
+        let rows = match list_rules_by_world(&pool, world_id).await {
+            Ok(rows) => rows,
+            Err(e) => {
+                return reject(
+                    SpokeRejectCode::InternalError,
+                    format!("storage error on world rule list: {e}"),
+                    json!({}),
+                );
+            }
+        };
+        request.rule_refs = rows
+            .iter()
+            .filter(|row| row.status.as_deref() == Some("active"))
+            .map(|row| row.rule_id.clone())
+            .collect();
+        // Zero active rules ⇒ refs stay [] ⇒ spoke skips `list_rules`.
+    }
+
+    // Gate 3 — foreign-id reject (fail closed): refs non-empty → verify
+    // every resolvable row is owned by `world_id`. Unknown ids (no row)
+    // are not foreign — they pass through to spoke subset-omit (gate 4).
+    if !request.rule_refs.is_empty() {
+        let rows = match get_spoke_rules_by_ids(&pool, &request.rule_refs).await {
+            Ok(rows) => rows,
+            Err(e) => {
+                return reject(
+                    SpokeRejectCode::InternalError,
+                    format!("storage error on rule lookup: {e}"),
+                    json!({}),
+                );
+            }
+        };
+        let foreign_ids: Vec<&str> = rows
+            .iter()
+            .filter(|row| row.world_id != world_id)
+            .map(|row| row.rule_id.as_str())
+            .collect();
+        if !foreign_ids.is_empty() {
+            return reject(
+                SpokeRejectCode::InvalidInput,
+                format!(
+                    "rule_refs contain rule(s) owned by a different world: {}",
+                    foreign_ids.join(", ")
+                ),
+                json!({ "foreign_rule_ids": foreign_ids }),
+            );
+        }
+    }
+
+    // Gates 4 + delegate: unknown ids pass through verbatim (spoke
+    // subset-omit); world-scoped refs run the spoke orchestrator.
+    orchestrate_check(adapter, request, run_checker).await
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────
@@ -315,6 +433,293 @@ mod tests {
                     r.code,
                     SpokeRejectCode::InternalError,
                     "storage failure must surface INTERNAL_ERROR"
+                );
+            }
+            SpokeResult::Ok(_) => panic!("expected InternalError reject"),
+        }
+    }
+
+    // ── orchestrate_check_world_scoped (V1.166 AR-1) ────────────────
+
+    /// Seed a rule with explicit `canonical_name` + `status` (auto-include
+    /// order / status tests need control over both).
+    async fn seed_rule_full(
+        pool: &sqlx::SqlitePool,
+        rule_id: &str,
+        world_id: &str,
+        canonical_name: &str,
+        status: &str,
+    ) {
+        let row = SpokeRuleRow {
+            rule_id: rule_id.to_string(),
+            world_id: world_id.to_string(),
+            schema_version: 1,
+            canonical_name: canonical_name.to_string(),
+            kind: "rule".to_string(),
+            statement: Some(format!("Statement for {rule_id}")),
+            description: None,
+            target_entry_types_json: "[]".to_string(),
+            severity_hint: Some("warning".to_string()),
+            status: Some(status.to_string()),
+            source_anchor_json: None,
+            extensions_json: "{}".to_string(),
+            created_at: Some(1_700_000_000),
+            updated_at: Some(1_700_000_100),
+        };
+        insert_spoke_rule_for_test(pool, &row).await.unwrap();
+    }
+
+    /// A minimal valid `CheckRequest` over `scope_id` with the given refs.
+    fn check_request(scope_id: &str, rule_refs: &[&str]) -> CheckRequest {
+        serde_json::from_value(json!({
+            "scope": { "scope_id": scope_id },
+            "rule_refs": rule_refs,
+        }))
+        .unwrap()
+    }
+
+    /// AR-1 gate 1: embedded `request.rules` reject with the locked message
+    /// BEFORE any storage access — embedded wire rules carry no `world_id`
+    /// and spoke gives them by-`rule_id` priority over resolved refs, which
+    /// would bypass world binding (PD-3 hole closure).
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn world_scoped_embedded_rules_reject_invalid_input_verbatim() {
+        let (pool, _dir) = fresh_pool().await;
+        let adapter = NexusAdapter::new(pool);
+        let embedded: spoke_schemas::check_request::Rule = serde_json::from_value(json!({
+            "schema_version": 1,
+            "rule_id": "rul_embedded",
+            "canonical_name": "Embedded",
+            "kind": "rule",
+            "extensions": {},
+        }))
+        .unwrap();
+        let mut request = check_request("wld_1", &[]);
+        request.rules = vec![embedded];
+
+        match orchestrate_check_world_scoped(&adapter, "wld_1", request, |_input| {
+            panic!("embedded rules must reject before the checker runs");
+        })
+        .await
+        {
+            SpokeResult::Reject(r) => {
+                assert_eq!(r.code, SpokeRejectCode::InvalidInput);
+                assert_eq!(
+                    r.message,
+                    "embedded rules are not an authoring path this iteration; \
+                     use rule_refs or world auto-include"
+                );
+            }
+            SpokeResult::Ok(_) => panic!("embedded rules must reject the check"),
+        }
+    }
+
+    /// AR-1 gate 2: empty `rule_refs` expand to this world's `status=active`
+    /// rule ids in storage order (`canonical_name ASC, rule_id ASC`) —
+    /// drafts/deprecated stay out and foreign-world active rules are never
+    /// pulled in (world-filtered by construction).
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn world_scoped_auto_include_expands_active_only_in_storage_order() {
+        let (pool, _dir) = fresh_pool().await;
+        // Storage order: Alpha, Beta, Charlie, Delta → active expansion is
+        // exactly [rul_a, rul_d].
+        seed_rule_full(&pool, "rul_b", "wld_1", "Beta", "draft").await;
+        seed_rule_full(&pool, "rul_a", "wld_1", "Alpha", "active").await;
+        seed_rule_full(&pool, "rul_d", "wld_1", "Delta", "active").await;
+        seed_rule_full(&pool, "rul_c", "wld_1", "Charlie", "deprecated").await;
+        seed_rule_full(&pool, "rul_zulu", "wld_2", "Zulu", "active").await;
+
+        let adapter = NexusAdapter::new(pool);
+        let request = check_request("wld_1", &[]);
+        match orchestrate_check_world_scoped(&adapter, "wld_1", request, |input| {
+            assert_eq!(
+                input.request.rule_refs,
+                vec!["rul_a".to_string(), "rul_d".to_string()],
+                "auto-include must expand to active-only ids in storage order"
+            );
+            let mut resolved: Vec<&str> = input.rules.iter().map(|r| r.rule_id.as_str()).collect();
+            resolved.sort_unstable();
+            assert_eq!(resolved, vec!["rul_a", "rul_d"]);
+            SpokeResult::Ok(vec![])
+        })
+        .await
+        {
+            SpokeResult::Ok(_) => {}
+            SpokeResult::Reject(r) => panic!("auto-include check must not reject: {r:?}"),
+        }
+    }
+
+    /// AR-1 gate 2 zero-active case: world with no `active` rules → refs
+    /// stay `[]` → spoke skips `list_rules` (the empty-rules fast path is
+    /// emergent — the checker receives an empty rule set, not an error).
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn world_scoped_auto_include_zero_active_keeps_empty_refs() {
+        let (pool, _dir) = fresh_pool().await;
+        seed_rule_full(&pool, "rul_draft", "wld_1", "Draft", "draft").await;
+        seed_rule_full(&pool, "rul_dep", "wld_1", "Dep", "deprecated").await;
+
+        let adapter = NexusAdapter::new(pool);
+        let request = check_request("wld_1", &[]);
+        match orchestrate_check_world_scoped(&adapter, "wld_1", request, |input| {
+            assert!(
+                input.request.rule_refs.is_empty(),
+                "zero active rules must keep refs empty (spoke fast path)"
+            );
+            assert!(
+                input.rules.is_empty(),
+                "spoke must skip list_rules on empty refs"
+            );
+            SpokeResult::Ok(vec![])
+        })
+        .await
+        {
+            SpokeResult::Ok(_) => {}
+            SpokeResult::Reject(r) => panic!("empty active set must not reject: {r:?}"),
+        }
+    }
+
+    /// AR-1 gate 3 (PD-3, fail closed): a mixed refs set (same-world + two
+    /// foreign) rejects the WHOLE check in ONE `InvalidInput` naming every
+    /// foreign id — `details.foreign_rule_ids` carries the ids only (no
+    /// statement / `canonical_name` leak), the checker never runs, nothing
+    /// persists.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn world_scoped_foreign_refs_reject_naming_all_ids_fail_closed() {
+        let (pool, _dir) = fresh_pool().await;
+        seed_rule_full(&pool, "rul_own", "wld_1", "Own", "active").await;
+        seed_rule_full(&pool, "rul_f1", "wld_2", "Foreign One", "active").await;
+        seed_rule_full(&pool, "rul_f2", "wld_2", "Foreign Two", "active").await;
+
+        let adapter = NexusAdapter::new(pool.clone());
+        let request = check_request("wld_1", &["rul_f1", "rul_own", "rul_f2"]);
+        let result = orchestrate_check_world_scoped(&adapter, "wld_1", request, |_input| {
+            panic!("foreign refs must reject before the checker runs");
+        })
+        .await;
+        match result {
+            SpokeResult::Reject(r) => {
+                assert_eq!(r.code, SpokeRejectCode::InvalidInput);
+                let mut foreign_ids: Vec<&str> = r
+                    .details
+                    .as_ref()
+                    .and_then(|d| d.get("foreign_rule_ids"))
+                    .and_then(Value::as_array)
+                    .map(|ids| ids.iter().filter_map(Value::as_str).collect())
+                    .unwrap_or_default();
+                foreign_ids.sort_unstable();
+                assert_eq!(
+                    foreign_ids,
+                    vec!["rul_f1", "rul_f2"],
+                    "all foreign ids named in one reject, ids only"
+                );
+                assert!(
+                    r.message
+                        .starts_with("rule_refs contain rule(s) owned by a different world: "),
+                    "locked message prefix: {}",
+                    r.message
+                );
+                assert!(
+                    r.message.contains("rul_f1") && r.message.contains("rul_f2"),
+                    "message must name every foreign id: {}",
+                    r.message
+                );
+                assert!(
+                    !r.message.contains("Foreign"),
+                    "statement / canonical_name must not leak: {}",
+                    r.message
+                );
+            }
+            SpokeResult::Ok(_) => panic!("foreign refs must reject the whole check"),
+        }
+
+        // No persistence: the reject fires before FindingPort runs.
+        let persisted: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM world_findings")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(persisted, 0, "foreign reject must persist nothing");
+    }
+
+    /// AR-1 gate 4: unknown ids (no row) pass through to spoke VERBATIM —
+    /// the wrapper never drops or rewrites them; spoke subset-omit resolves
+    /// the known same-world ref only.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn world_scoped_unknown_and_same_world_refs_pass_through_verbatim() {
+        let (pool, _dir) = fresh_pool().await;
+        seed_rule_full(&pool, "rul_same", "wld_1", "Same", "active").await;
+
+        let adapter = NexusAdapter::new(pool);
+        let request = check_request("wld_1", &["rul_unknown", "rul_same"]);
+        match orchestrate_check_world_scoped(&adapter, "wld_1", request, |input| {
+            assert_eq!(
+                input.request.rule_refs,
+                vec!["rul_unknown".to_string(), "rul_same".to_string()],
+                "unknown ids must pass through verbatim"
+            );
+            let mut resolved: Vec<&str> = input.rules.iter().map(|r| r.rule_id.as_str()).collect();
+            resolved.sort_unstable();
+            assert_eq!(resolved, vec!["rul_same"], "spoke omits the unknown ref");
+            SpokeResult::Ok(vec![])
+        })
+        .await
+        {
+            SpokeResult::Ok(_) => {}
+            SpokeResult::Reject(r) => panic!("same-world refs must not reject: {r:?}"),
+        }
+    }
+
+    /// AR-1 gate 5 (auto-include path): storage failure surfaces
+    /// `InternalError` (the `reject()` helper idiom).
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn world_scoped_storage_failure_on_auto_include_rejects_internal_error() {
+        let (pool, _dir) = fresh_pool().await;
+        sqlx::query("DROP TABLE spoke_rules")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let adapter = NexusAdapter::new(pool);
+        let request = check_request("wld_1", &[]);
+        match orchestrate_check_world_scoped(&adapter, "wld_1", request, |_input| {
+            panic!("storage failure must reject before the checker runs");
+        })
+        .await
+        {
+            SpokeResult::Reject(r) => {
+                assert_eq!(r.code, SpokeRejectCode::InternalError);
+                assert!(
+                    r.message.starts_with("storage error on world rule list"),
+                    "{}",
+                    r.message
+                );
+            }
+            SpokeResult::Ok(_) => panic!("expected InternalError reject"),
+        }
+    }
+
+    /// AR-1 gate 5 (foreign-check path): storage failure on the
+    /// by-ids lookup surfaces `InternalError`.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn world_scoped_storage_failure_on_foreign_check_rejects_internal_error() {
+        let (pool, _dir) = fresh_pool().await;
+        sqlx::query("DROP TABLE spoke_rules")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let adapter = NexusAdapter::new(pool);
+        let request = check_request("wld_1", &["rul_x"]);
+        match orchestrate_check_world_scoped(&adapter, "wld_1", request, |_input| {
+            panic!("storage failure must reject before the checker runs");
+        })
+        .await
+        {
+            SpokeResult::Reject(r) => {
+                assert_eq!(r.code, SpokeRejectCode::InternalError);
+                assert!(
+                    r.message.starts_with("storage error on rule lookup"),
+                    "{}",
+                    r.message
                 );
             }
             SpokeResult::Ok(_) => panic!("expected InternalError reject"),

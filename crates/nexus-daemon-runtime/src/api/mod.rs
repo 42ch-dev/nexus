@@ -395,6 +395,12 @@ fn world_kb_routes() -> Router<WorkspaceState> {
             "/v1/daemon/worlds/:world_id/findings",
             get(handlers::world_findings::list_world_findings),
         )
+        // World-attached structured-rule read surface (V1.166 P1 T4 /
+        // DR-64, AR-3) — same `:world_id` prefix family and tier2 mount.
+        .route(
+            "/v1/daemon/worlds/:world_id/rules",
+            get(handlers::world_rules::list_world_rules),
+        )
 }
 
 /// Works routes — Work CRUD + inspiration + reconcile-chapters (V1.33 §7.2, V1.36 §8).

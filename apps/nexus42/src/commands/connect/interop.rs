@@ -2233,10 +2233,13 @@ async fn n_c1_relate_create_rejects_foreign_world_endpoints() {
 /// N-C2 (V1.154 P1): the `check` op round-trips over Connect through the
 /// real handler. The peer is scoped to WORLD_A with the full served-op set;
 /// the invoke payload deserializes directly into `spoke_schemas::CheckRequest`
-/// (spec §5.1 lock) and runs `orchestrate_check` with the production
-/// baseline no-op checker (the V1.148 daemon cutover shape) — the response
-/// carries the orchestrator's findings (empty for the baseline checker) and
-/// the checked world's data flowed through the read ports.
+/// (spec §5.1 lock) and runs `orchestrate_check_world_scoped` (V1.166 AR-1:
+/// empty `rule_refs` auto-include the scope world's `status=active` rules;
+/// foreign-world / embedded rules reject fail-closed BEFORE orchestration)
+/// with the production baseline no-op checker (the V1.148 daemon cutover
+/// shape) — the response carries the orchestrator's findings (empty for the
+/// baseline checker) and the checked world's data flowed through the read
+/// ports.
 #[tokio::test(flavor = "multi_thread")]
 async fn n_c2_peer_runs_check_over_connect() {
     let _guard = network_test_guard().await;
