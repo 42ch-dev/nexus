@@ -8,14 +8,15 @@
  * `/kb` — a Control Room list/sections surface, not a canvas mount and not
  * the Work `/findings` page (work-scoped remediation vocabulary).
  *
- * Read-only: the panel has zero write controls (PD-2). Composition room:
- * Task 2 mounts the Rules section below the findings panel on this same
+ * Read-only: both sections have zero write controls (PD-2). Composition:
+ * the Rules section (Task 2) mounts below the findings panel on this same
  * page.
  */
 import { useParams } from 'react-router';
 import { useTranslation } from 'react-i18next';
 
 import { WorldFindingsPanel } from '@/components/worlds/world-findings/world-findings-panel';
+import { WorldRulesSection } from '@/components/worlds/world-rules/world-rules-section';
 import { NotFoundPage } from '@/pages/not-found-page';
 
 export function WorldFindingsPage() {
@@ -29,8 +30,7 @@ export function WorldFindingsPage() {
         <p className="text-copy-14 text-gray-900">{t('page.description')}</p>
       </div>
       <WorldFindingsPanel worldId={worldId} />
-      {/* V1.166 P2 Task 2: the Rules read-only section mounts below the
-          findings panel on this same page. */}
+      <WorldRulesSection worldId={worldId} />
     </div>
   );
 }

@@ -220,12 +220,15 @@ describe('WorldFindingsPanel — truncated honesty', () => {
 });
 
 describe('WorldFindingsPage — route', () => {
-  it('renders the panel for the worldId from the URL', async () => {
+  it('renders the panel and the rules section for the worldId from the URL', async () => {
     useHandlers(
       http.get('/v1/daemon/worlds/:worldId/findings', () =>
         HttpResponse.json(
           findingsResponse([makeFinding({ finding_id: 'fnd_route', title: 'Routed item' })]),
         ),
+      ),
+      http.get('/v1/daemon/worlds/:worldId/rules', () =>
+        HttpResponse.json({ rules: [], truncated: false }),
       ),
     );
 
@@ -238,5 +241,6 @@ describe('WorldFindingsPage — route', () => {
 
     await waitFor(() => expect(screen.getByTestId('world-findings-page')).toBeInTheDocument());
     expect(await screen.findByText('Routed item')).toBeInTheDocument();
+    expect(await screen.findByTestId('world-rules-section')).toBeInTheDocument();
   });
 });
