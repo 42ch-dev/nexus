@@ -107,6 +107,11 @@ describe('WorldFindingsPanel — populated', () => {
 
     // Count reflects the returned rows.
     expect(screen.getByTestId('world-findings-count')).toHaveTextContent('4');
+
+    // Structural-note copy (PD-1) renders under the header in en.
+    expect(screen.getByTestId('world-findings-structural-note')).toHaveTextContent(
+      'Check evaluates structural constraints — modules, required fields, observer counts — not narrative quality.',
+    );
   });
 
   it('shows the shortened target entry id per row and full id on expand', async () => {
@@ -216,6 +221,66 @@ describe('WorldFindingsPanel — truncated honesty', () => {
     renderPanel();
     await waitFor(() => expect(screen.getByText('Not truncated')).toBeInTheDocument());
     expect(screen.queryByTestId('world-findings-truncated')).not.toBeInTheDocument();
+  });
+});
+
+describe('WorldFindingsPanel — loading', () => {
+  it('renders LoadingState while the findings request is in flight', async () => {
+    // Hold the MSW response open until the assertion has observed the
+    // in-flight state (deferred-promise resolver, deterministic — no timing).
+    let resolveFindings!: (value: WorldFindingsListResponse) => void;
+    useHandlers(
+      http.get('/v1/daemon/worlds/:worldId/findings', async () => {
+        await new Promise<WorldFindingsListResponse>((resolve) => {
+          resolveFindings = resolve;
+        });
+        return HttpResponse.json(
+          findingsResponse([makeFinding({ finding_id: 'fnd_load', title: 'Loaded item' })]),
+        );
+      }),
+    );
+
+    renderPanel();
+    // In-flight request → LoadingState; neither the count nor the rows flash.
+    expect(screen.getByText('Loading findings…')).toBeInTheDocument();
+    expect(screen.queryByTestId('world-findings-count')).not.toBeInTheDocument();
+
+    // Wait until the request has reached the handler, then resolve it — the
+    // deferred promise only exists once MSW invokes the resolver.
+    await waitFor(() => expect(resolveFindings).toBeTypeOf('function'));
+    resolveFindings(findingsResponse([makeFinding({ finding_id: 'fnd_load', title: 'Loaded item' })]));
+    await waitFor(() => expect(screen.getByText('Loaded item')).toBeInTheDocument());
+  });
+});
+
+describe('WorldFindingsPanel — error + retry', () => {
+  it('renders ErrorState on failure and retry refetches the list', async () => {
+    let failNext = true;
+    useHandlers(
+      http.get('/v1/daemon/worlds/:worldId/findings', () => {
+        if (failNext) {
+          failNext = false;
+          return HttpResponse.json(
+            { error: { code: 'internal', message: 'boom' } },
+            { status: 500 },
+          );
+        }
+        return HttpResponse.json(
+          findingsResponse([makeFinding({ finding_id: 'fnd_retry', title: 'Retried item' })]),
+        );
+      }),
+    );
+
+    renderPanel();
+    // 500 → ErrorState with the retry affordance; no rows/count render.
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('Could not load findings');
+    expect(screen.queryByTestId('world-findings-count')).not.toBeInTheDocument();
+
+    // Retry re-queries → the second attempt resolves → the list renders.
+    fireEvent.click(within(alert).getByRole('button'));
+    await waitFor(() => expect(screen.getByText('Retried item')).toBeInTheDocument());
+    expect(screen.getByTestId('world-findings-count')).toHaveTextContent('1');
   });
 });
 

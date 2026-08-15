@@ -171,6 +171,11 @@ describe('WorldRulesSection — populated', () => {
 
     // Count reflects the returned rows.
     expect(screen.getByTestId('world-rules-count')).toHaveTextContent('4');
+
+    // Structural-note copy (PD-1) renders under the header in en.
+    expect(screen.getByTestId('world-rules-structural-note')).toHaveTextContent(
+      'Each rule carries a structural constraint — module presence/absence, required fields, observer counts — not narrative quality.',
+    );
   });
 
   it('expands a rule to show statement, constraint summary, and target entry types', async () => {
@@ -371,6 +376,66 @@ describe('WorldRulesSection — truncated honesty', () => {
     renderSection();
     await waitFor(() => expect(screen.getByText('Not truncated')).toBeInTheDocument());
     expect(screen.queryByTestId('world-rules-truncated')).not.toBeInTheDocument();
+  });
+});
+
+describe('WorldRulesSection — loading', () => {
+  it('renders LoadingState while the rules request is in flight', async () => {
+    // Hold the MSW response open until the assertion has observed the
+    // in-flight state (deferred-promise resolver, deterministic — no timing).
+    let resolveRules!: (value: WorldRulesListResponse) => void;
+    useHandlers(
+      http.get('/v1/daemon/worlds/:worldId/rules', async () => {
+        await new Promise<WorldRulesListResponse>((resolve) => {
+          resolveRules = resolve;
+        });
+        return HttpResponse.json(
+          rulesResponse([makeRule({ rule_id: 'rul_load', canonical_name: 'Loaded rule' })]),
+        );
+      }),
+    );
+
+    renderSection();
+    // In-flight request → LoadingState; neither the count nor the rows flash.
+    expect(screen.getByText('Loading rules…')).toBeInTheDocument();
+    expect(screen.queryByTestId('world-rules-count')).not.toBeInTheDocument();
+
+    // Wait until the request has reached the handler, then resolve it — the
+    // deferred promise only exists once MSW invokes the resolver.
+    await waitFor(() => expect(resolveRules).toBeTypeOf('function'));
+    resolveRules(rulesResponse([makeRule({ rule_id: 'rul_load', canonical_name: 'Loaded rule' })]));
+    await waitFor(() => expect(screen.getByText('Loaded rule')).toBeInTheDocument());
+  });
+});
+
+describe('WorldRulesSection — error + retry', () => {
+  it('renders ErrorState on failure and retry refetches the list', async () => {
+    let failNext = true;
+    useHandlers(
+      http.get('/v1/daemon/worlds/:worldId/rules', () => {
+        if (failNext) {
+          failNext = false;
+          return HttpResponse.json(
+            { error: { code: 'internal', message: 'boom' } },
+            { status: 500 },
+          );
+        }
+        return HttpResponse.json(
+          rulesResponse([makeRule({ rule_id: 'rul_retry', canonical_name: 'Retried rule' })]),
+        );
+      }),
+    );
+
+    renderSection();
+    // 500 → ErrorState with the retry affordance; no rows/count render.
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('Could not load rules');
+    expect(screen.queryByTestId('world-rules-count')).not.toBeInTheDocument();
+
+    // Retry re-queries → the second attempt resolves → the list renders.
+    fireEvent.click(within(alert).getByRole('button'));
+    await waitFor(() => expect(screen.getByText('Retried rule')).toBeInTheDocument());
+    expect(screen.getByTestId('world-rules-count')).toHaveTextContent('1');
   });
 });
 

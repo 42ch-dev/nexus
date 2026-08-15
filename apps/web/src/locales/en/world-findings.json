@@ -1,8 +1,7 @@
 {
   "page": {
     "title": "Findings",
-    "description": "Check findings for this World — structural constraints from rules and mental-pair checks. Read-only.",
-    "loading": "Loading World Findings…"
+    "description": "Check findings for this World — structural constraints from rules and mental-pair checks. Read-only."
   },
   "panel": {
     "title": "Findings",
@@ -19,8 +18,6 @@
     "expandAria": "Expand finding {{id}}",
     "collapseAria": "Collapse finding {{id}}",
     "targetEntry": "Target entry",
-    "created": "Created",
-    "kind": "Kind",
-    "severity": "Severity"
+    "created": "Created"
   }
 }

@@ -1,8 +1,7 @@
 {
   "page": {
     "title": "发现",
-    "description": "此世界的检查发现——来自规则与心智对检查的结构性约束。只读。",
-    "loading": "正在加载世界发现…"
+    "description": "此世界的检查发现——来自规则与心智对检查的结构性约束。只读。"
   },
   "panel": {
     "title": "发现",
@@ -19,8 +18,6 @@
     "expandAria": "展开发现 {{id}}",
     "collapseAria": "收起发现 {{id}}",
     "targetEntry": "目标条目",
-    "created": "创建时间",
-    "kind": "类型",
-    "severity": "严重程度"
+    "created": "创建时间"
   }
 }
