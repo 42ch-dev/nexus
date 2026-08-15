@@ -5,7 +5,10 @@
 //! One route:
 //! - `POST /v1/daemon/check` — run spoke `orchestrate_check` over an owned
 //!   World; returns the persisted Finding(s) (mental-layer checker pair
-//!   since V1.164 P2 T3).
+//!   since V1.164 P2 T3). Since V1.166 (AR-1) the handler crosses the
+//!   world-scoped seam [`orchestrate_check_world_scoped`]: empty
+//!   `rule_refs` auto-include the world's `status=active` rules and
+//!   foreign-world / embedded rules reject with 400 before any evaluation.
 //!
 //! ## Response mapping decision (V1.148 P2 architect lock)
 //!
@@ -36,8 +39,8 @@
 //!
 //! | `SpokeRejectCode` | `NexusApiError` |
 //! |-------------------|-----------------|
-//! | `InvalidInput` (spoke scope/finding wire problems) | `InvalidInput` (400) |
-//! | `InternalError` (`RuleQueryPort` / `ScopeQueryPort` / `FindingPort` storage failures) | `Internal` (500) |
+//! | `InvalidInput` (spoke scope/finding wire problems; AR-1 wrapper rejects — embedded rules, foreign-world `rule_refs`) | `InvalidInput` (400) |
+//! | `InternalError` (`RuleQueryPort` / `ScopeQueryPort` / `FindingPort` storage failures; AR-1 storage errors) | `Internal` (500) |
 //! | other / defensive | `Internal` (500, `SPOKE_ORCHESTRATOR_REJECT`) |
 //!
 //! ## Auto-apply constraint
@@ -56,8 +59,15 @@
 //! scoped `TimelineEvent.modules.observation` metadata (P1 passthrough)
 //! from its `CheckRunInput` and emits `stale_belief_drift` (warning) /
 //! `dramatic_irony_asymmetry` (info) findings. The callback input already
-//! carries the scoped events, so the checker never touches the store. Rules
-//! are still **resolved** via `RuleQueryPort` inside `orchestrate_check`.
+//! carries the scoped events, so the checker never touches the store.
+//!
+//! V1.166 AR-1 (world scoping): rules are **world-scoped before
+//! orchestration** by [`orchestrate_check_world_scoped`] — empty
+//! `rule_refs` expand to the check world's `status=active` rule ids at the
+//! adapter boundary, foreign-world refs reject the whole check (PD-3, fail
+//! closed), and embedded `rules` are refused (not an authoring path).
+//! Spoke `orchestrate_check` still resolves the (now world-owned) refs via
+//! `RuleQueryPort`.
 //!
 //! # Errors
 //!
@@ -83,7 +93,8 @@ use nexus_contracts::generated::daemon_api::check::{
 };
 use nexus_local_db::narrative_write;
 use nexus_spoke_adapter::{
-    orchestrate_check, CheckRequest, NexusAdapter, SpokeReject, SpokeRejectCode, SpokeResult,
+    orchestrate_check_world_scoped, CheckRequest, NexusAdapter, SpokeReject, SpokeRejectCode,
+    SpokeResult,
 };
 use serde_json::json;
 
@@ -94,8 +105,10 @@ use serde_json::json;
 /// Guard order (plan lock): tier2 middleware (API key + active creator) →
 /// world ownership (`is_world_owned`, 403) → scope consistency
 /// (`scope.scope_id == world_id`, 400) → spoke `CheckRequest` wire mapping
-/// (400) → `orchestrate_check` (mental-layer checker — V1.164 P2 T3) →
-/// response mapping (see module docs).
+/// (400) → `orchestrate_check_world_scoped` (V1.166 AR-1 seam: embedded-rules
+/// reject / auto-include / foreign-id reject, then spoke orchestration with
+/// the mental-layer checker — V1.164 P2 T3) → response mapping (see module
+/// docs).
 #[allow(clippy::missing_errors_doc)]
 pub async fn run_check(
     State(state): State<WorkspaceState>,
@@ -163,10 +176,16 @@ pub async fn run_check(
     // (provenance). FindingPort routes world-scoped findings onto
     // `world_findings` (DR-68, AR-2).
     let adapter = NexusAdapter::new(pool.clone());
-    let result = orchestrate_check(&adapter, check_req, |input| {
-        crate::check::mental::run_check(&input, &creator_id)
-    })
-    .await;
+    // V1.166 AR-1 — world-scoped seam: `orchestrate_check_world_scoped`
+    // pre-expands empty `rule_refs` to this world's `status=active` rules
+    // and fail-closes on embedded rules / foreign-world refs BEFORE spoke
+    // orchestration (a reject persists nothing, evaluates nothing). The
+    // spoke `orchestrate_check` itself stays world-agnostic.
+    let result =
+        orchestrate_check_world_scoped(&adapter, req.world_id.as_str(), check_req, |input| {
+            crate::check::mental::run_check(&input, &creator_id)
+        })
+        .await;
 
     match result {
         // Success branch: findings (possibly empty). Round-trip through JSON

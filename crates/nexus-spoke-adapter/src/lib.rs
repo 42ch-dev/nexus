@@ -172,3 +172,11 @@ pub use spoke_operations::{
     FullAdapter, FullPorts, HostManifestPort, KnowledgeEntryPort, RelationPort, RuleQueryPort,
     ScopeQueryPort,
 };
+
+// V1.166 AR-1 — the world-scoped `orchestrate_check` seam (nexus semantics
+// at the spoke import boundary, spoke untouched): pre-expands empty
+// `rule_refs` to the check world's `status=active` rules and fail-closes on
+// foreign-world refs before delegating to spoke `orchestrate_check`. Both
+// production callers (daemon `check.rs`, Connect `invoke.rs` Route::Check)
+// cross this single choke point.
+pub use adapter::rule_query_port::orchestrate_check_world_scoped;

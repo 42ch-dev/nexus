@@ -153,7 +153,7 @@ use libp2p::PeerId;
 use nexus_spoke_adapter::extensions::get_world_id;
 use nexus_spoke_adapter::{
     is_module_identity_missing_reject, is_safe_module_id, is_world_conflict_reject,
-    orchestrate_assemble, orchestrate_check, orchestrate_compute, orchestrate_promote,
+    orchestrate_assemble, orchestrate_check_world_scoped, orchestrate_compute, orchestrate_promote,
     orchestrate_relate, orchestrate_upsert, AssembleRequest, AssembleResponse, CheckRequest,
     CheckResponse, ComputeRequest, ComputeResponse, KnowledgeEntryPort, NexusAdapter,
     PromoteRequest, PromoteResponse, RelateRequest, RelateResponse, Relation,
@@ -610,14 +610,23 @@ async fn route_orchestrator(
         // DIRECTLY into the spoke wire types; the request scope is the
         // schema's `scope` object (world-scoped by the step-5 gate).
         // `run_checker` is the production baseline no-op evaluator — the
-        // V1.148 daemon-route cutover shape (zero findings; rules still
-        // resolve via `RuleQueryPort` inside the orchestrator).
+        // V1.148 daemon-route cutover shape (zero findings). V1.166 AR-1:
+        // the call crosses `orchestrate_check_world_scoped` — empty
+        // `rule_refs` auto-include the scope world's `status=active` rules
+        // and foreign-world / embedded rules reject BEFORE spoke
+        // orchestration (fail closed, zero side effects). `scope_id` is
+        // cloned because the request itself moves into the wrapper.
         Route::Check => {
             let request: CheckRequest = match serde_json::from_value(payload) {
                 Ok(request) => request,
                 Err(error) => return Err(map_reject(&invalid_payload("check", &error))),
             };
-            match orchestrate_check(adapter, request, |_input| SpokeResult::Ok(vec![])).await {
+            let world_id = request.scope.scope_id.clone();
+            match orchestrate_check_world_scoped(adapter, &world_id, request, |_input| {
+                SpokeResult::Ok(vec![])
+            })
+            .await
+            {
                 SpokeResult::Ok(response) => serialize_response::<CheckResponse>(&response),
                 SpokeResult::Reject(reject) => Err(map_reject(&reject)),
             }
@@ -2044,6 +2053,74 @@ mod tests {
                 "a malformed payload must map to the invalid_input envelope"
             ),
             Ok(_) => panic!("a malformed payload must reject with invalid_input"),
+        }
+    }
+
+    /// V1.166 AR-1 (PD-3, fail closed): the N-C2 `check` read half crosses
+    /// the same world-scoped wrapper as the daemon route — a foreign-world
+    /// `rule_ref` rejects with the locked `invalid_input` envelope (the
+    /// `map_reject` row) naming the offending id, `details.foreign_rule_ids`
+    /// rides through, and no evaluation happens.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn check_foreign_rule_ref_rejects_invalid_input_envelope() {
+        let peer = fixed_keypair(14).public().to_peer_id();
+        let scope = scoped_scope_for(peer, &["check"]);
+        let (_temp, pool) = test_pool().await;
+        // A rule whose owner world differs from the check's scope world
+        // (`WORLD_A`) — `spoke_rules.world_id` has no FK, so a bare foreign
+        // world id is a valid seed.
+        let foreign_row = nexus_local_db::spoke_rules::SpokeRuleRow {
+            rule_id: "rul_foreign_world".to_string(),
+            world_id: "wld_foreign_rules".to_string(),
+            schema_version: 1,
+            canonical_name: "Foreign Rule".to_string(),
+            kind: "rule".to_string(),
+            statement: Some("Do not leak me".to_string()),
+            description: None,
+            target_entry_types_json: "[]".to_string(),
+            severity_hint: Some("warning".to_string()),
+            status: Some("active".to_string()),
+            source_anchor_json: None,
+            extensions_json: "{}".to_string(),
+            created_at: Some(1_700_000_000),
+            updated_at: Some(1_700_000_100),
+        };
+        nexus_local_db::spoke_rules::insert_spoke_rule_for_test(&pool, &foreign_row)
+            .await
+            .expect("seed foreign rule");
+        let adapter = Arc::new(NexusAdapter::new(pool));
+        let (handler, _lane, _serializer) =
+            build_handler_with_limits(scope, adapter, BridgeLimits::default());
+        let payload = serde_json::json!({
+            "scope": { "scope_id": WORLD_A },
+            "rule_refs": ["rul_foreign_world"],
+        });
+        match handler(&peer, "check", payload) {
+            Err(envelope) => {
+                assert_eq!(
+                    envelope.code, "invalid_input",
+                    "a foreign rule_ref must map to the invalid_input envelope: {envelope:?}"
+                );
+                assert!(
+                    envelope.message.contains("rul_foreign_world"),
+                    "the envelope must name the foreign rule id: {}",
+                    envelope.message
+                );
+                assert!(
+                    !envelope.message.contains("Do not leak me"),
+                    "the foreign statement must not leak: {}",
+                    envelope.message
+                );
+                assert_eq!(
+                    envelope
+                        .details
+                        .get("foreign_rule_ids")
+                        .and_then(Value::as_array),
+                    Some(&vec![Value::String("rul_foreign_world".to_string())]),
+                    "details.foreign_rule_ids carries the offending ids"
+                );
+            }
+            Ok(_) => panic!("a foreign rule_ref must reject the whole check"),
         }
     }
 
