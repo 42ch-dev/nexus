@@ -197,6 +197,33 @@ async fn list_rules_by_world_orders_and_isolates() {
         "canonical_name ASC with rule_id ASC tie-break; other worlds absent"
     );
 
+    // AR-3: the store returns ALL statuses — no status filter at this
+    // layer (the adapter boundary owns the active-only auto-include).
+    // Transition two rows off the default `draft` seed so one world holds
+    // all three spoke statuses at once.
+    set_rule_status(&pool, "wld_1", "rul_beta1", "active")
+        .await
+        .unwrap();
+    set_rule_status(&pool, "wld_1", "rul_gamma", "deprecated")
+        .await
+        .unwrap();
+    let listed = list_rules_by_world(&pool, "wld_1").await.unwrap();
+    let statuses: Vec<(&str, Option<&str>)> = listed
+        .iter()
+        .map(|r| (r.rule_id.as_str(), r.status.as_deref()))
+        .collect();
+    assert_eq!(
+        statuses,
+        vec![
+            ("rul_alpha", Some("draft")),
+            ("rul_beta1", Some("active")),
+            ("rul_beta2", Some("draft")),
+            ("rul_gamma", Some("deprecated")),
+        ],
+        "all three statuses coexist in one world's list — storage applies \
+         no status filter (AR-3)"
+    );
+
     // Unknown world → empty vec, not an error.
     let none = list_rules_by_world(&pool, "wld_nope").await.unwrap();
     assert!(none.is_empty(), "unknown world must return an empty vec");

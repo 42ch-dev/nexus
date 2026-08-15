@@ -156,7 +156,10 @@ pub async fn run(cmd: RuleCommand, config: &CliConfig) -> Result<()> {
 /// fresh as `{"nexus": {"constraint": <carrier verbatim>}}` (rules carry no
 /// other nexus keys today).
 ///
-/// Returns the minted `rule_id`.
+/// Returns the minted `rule_id`. Emits a soft stderr warning when `--status`
+/// is outside the documented core set (draft / active / deprecated) — the
+/// value is still stored verbatim (PD-1, no coercion at rest); the warning
+/// flags the auto-include footgun (S-002).
 ///
 /// # Errors
 ///
@@ -231,6 +234,18 @@ pub async fn rule_add(
     insert_rule(pool, &row)
         .await
         .map_err(|e| CliError::Other(format!("Failed to insert rule '{rule_id}': {e}")))?;
+
+    // S-002: `--status` is an open string stored verbatim (PD-1 — never
+    // coerced at rest), but the AR-1 auto-include filter matches exactly
+    // `status == "active"`. Warn when it's outside the documented core set
+    // so a typo'd status doesn't silently create a never-included rule.
+    if !matches!(status, "draft" | "active" | "deprecated") {
+        eprintln!(
+            "Warning: --status {status:?} is outside the documented core set \
+             (draft / active / deprecated) — stored verbatim (PD-1), but the rule \
+             will never auto-include (the AR-1 filter matches exactly 'active')."
+        );
+    }
 
     println!("✓ Rule added: {rule_id}");
     println!("  World:       {world_id}");

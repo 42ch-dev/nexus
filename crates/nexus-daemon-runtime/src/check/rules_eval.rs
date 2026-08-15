@@ -273,7 +273,10 @@ fn check_observer_cardinality(
                 format!(
                     "rule '{}' (observer_cardinality [{}..{}]): event {} has {} recorded observer(s) — outside the allowed range",
                     rule.canonical_name.as_str(),
-                    min.map_or_else(|| "0".to_string(), |lo| lo.to_string()),
+                    // AR-2 treats min as optional — an absent lower bound is
+                    // unbounded, not a concrete 0 (qc1-S2 wording; evaluation
+                    // still treats None as unbounded above).
+                    min.map_or_else(|| "no lower bound".to_string(), |lo| lo.to_string()),
                     max.map_or_else(|| "unbounded".to_string(), |hi| hi.to_string()),
                     event.timeline_event_id,
                     count
@@ -305,6 +308,11 @@ fn matching_entries<'a>(rule: &Rule, entries: &'a [KnowledgeEntry]) -> Vec<&'a K
 /// Whether the entry carries `modules.<module_key>` (key present — on the
 /// typed wire `KnowledgeEntryModulesValue` is exactly object-or-array, so
 /// key-present == carried, AR-2).
+// simplify: serializes `entry.modules` once per (rule, entry) call — R rules
+// × E entries ⇒ up to R·E full module-map serializations here alone
+// (2·R·E combined with module_rows_missing_field). Bounded by the check
+// scope (one world's entries) and fine today; hoist the map once per entry
+// if world sizes grow.
 fn carries_module(entry: &KnowledgeEntry, module_key: &str) -> bool {
     let Ok(Value::Object(map)) = serde_json::to_value(&entry.modules) else {
         return false;
@@ -318,6 +326,9 @@ fn carries_module(entry: &KnowledgeEntry, module_key: &str) -> bool {
 /// rows are skipped (mental.rs `belief_rows` parse precedent). Absent
 /// module / object-form module / zero rows ⇒ vacuous pass (presence is
 /// `module_presence`'s job).
+// simplify: same per-call `serde_json::to_value(&entry.modules)` as
+// carries_module — combined 2·R·E full module-map serializations per check
+// (R rules × E entries). Hoist the map once per entry if world sizes grow.
 fn module_rows_missing_field(entry: &KnowledgeEntry, module_key: &str, field: &str) -> bool {
     let Ok(Value::Object(map)) = serde_json::to_value(&entry.modules) else {
         return false;
@@ -776,6 +787,45 @@ mod tests {
     }
 
     #[test]
+    fn required_field_module_row_vacuous_passes_emit_no_finding() {
+        // AR-2 vacuous pass (qc2 S-05): presence of the module is
+        // `module_presence`'s job — absent module key / object-form module /
+        // zero-row array each pass without a finding.
+        let rules = vec![rule(
+            "rul_vacuous",
+            "Vacuous rows",
+            None,
+            &[],
+            &json!({ "family": "required_field", "module_key": "belief", "field": "source" }),
+        )];
+        let entries = vec![
+            // Absent module key → vacuous pass (module_presence's job).
+            entry("kb_absent", "Absent", "character", &json!({}), &json!({})),
+            // Object-form module (not an array) → vacuous pass.
+            entry(
+                "kb_object",
+                "Object",
+                "character",
+                &json!({}),
+                &json!({ "belief": { "source": "Perception" } }),
+            ),
+            // Zero-row array → vacuous pass.
+            entry(
+                "kb_zero",
+                "Zero",
+                "character",
+                &json!({}),
+                &json!({ "belief": [] }),
+            ),
+        ];
+        let findings = run(rules, entries, vec![]);
+        assert!(
+            findings.is_empty(),
+            "absent/object-form/zero-row modules must not match: {findings:?}"
+        );
+    }
+
+    #[test]
     fn required_field_module_row_non_string_populated_and_null() {
         let rules = vec![rule(
             "rul_row2",
@@ -917,6 +967,35 @@ mod tests {
         assert!(
             findings.is_empty(),
             "absent/malformed observation never matches even against max 0: {findings:?}"
+        );
+    }
+
+    #[test]
+    fn observer_cardinality_max_only_description_renders_no_lower_bound() {
+        // A max-only carrier (no min) must describe the absent lower bound
+        // as unbounded — not as a concrete 0 (qc1-S2; AR-2 treats min as
+        // optional; evaluation logic is unchanged).
+        let rules = vec![rule(
+            "rul_max_only",
+            "Max two",
+            None,
+            &[],
+            &json!({ "family": "observer_cardinality", "max": 2 }),
+        )];
+        let events = vec![event(
+            "evt_a",
+            "Three observers",
+            &json!({ "observation": { "observers": ["kb_a", "kb_b", "kb_c"] } }),
+        )];
+        let findings = run(rules, vec![], events);
+        let description = findings[0].description.as_str();
+        assert!(
+            description.contains("no lower bound"),
+            "max-only range must state the unbounded lower bound: {description}"
+        );
+        assert!(
+            !description.contains("[0.."),
+            "must not render a concrete 0 lower bound: {description}"
         );
     }
 

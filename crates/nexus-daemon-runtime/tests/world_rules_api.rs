@@ -662,12 +662,41 @@ async fn embedded_rules_reject_400_invalid_input() {
 /// A world whose only rule is `status=draft` auto-includes nothing → check
 /// 200 with mental-pair-only findings (no rule-family kinds) — the emergent
 /// empty-rules fast path (AR-4), never an error. The read route still lists
-/// the draft rule (all statuses visible, PD-1/PD-2).
+/// the draft rule (all statuses visible, PD-1/PD-2). The mental pair MUST
+/// still run: a seeded false-belief candidate produces its finding beside
+/// zero rule-family kinds (qc1-S4).
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn zero_active_rules_draft_only_200_mental_pair_only() {
     let ctx = ctx().await;
-    // A summary-less entry (would violate the draft rule if it evaluated)
-    // with no belief rows → mental pair runs, produces nothing.
+    // Minimal mental fixture (one false-belief candidate, box/basket shape):
+    // kb_bo holds a private `truth: False` belief; the informing event is
+    // observed by kb_ana only → dramatic-irony finding on kb_bo. The belief
+    // row and event follow the AC-V166-4 worked example verbatim.
+    seed_kb_entry(
+        &ctx.pool,
+        DRAFT_WORLD,
+        "kb_bo",
+        "character",
+        "Bo",
+        &json!({ "summary": "Bo's summary" }),
+        &json!({
+            "belief": [
+                { "holder": "kb_bo", "proposition": "The marble is in the box",
+                  "order": 1, "truth": "False", "access": "Private", "source": "Perception" }
+            ]
+        }),
+    )
+    .await;
+    seed_event(
+        &ctx.pool,
+        DRAFT_WORLD,
+        "evt_wld_draft_world_transfer",
+        "Marble transfer",
+        1,
+        &json!({ "observation": { "observers": ["kb_ana"] } }),
+    )
+    .await;
+    // A summary-less entry (would violate the draft rule if it evaluated).
     seed_kb_entry(
         &ctx.pool,
         DRAFT_WORLD,
@@ -699,12 +728,18 @@ async fn zero_active_rules_draft_only_200_mental_pair_only() {
     let body: Value = resp.json();
     let findings = body["findings"].as_array().expect("findings array");
     assert!(
-        findings.is_empty(),
-        "draft rule not auto-included; mental pair finds no candidates: {body}"
+        !findings.is_empty(),
+        "mental pair fires on the false-belief candidate: {body}"
+    );
+    assert!(
+        findings.iter().any(|f| {
+            f["kind"] == "dramatic_irony_asymmetry" && f["target_entry_id"] == "kb_bo"
+        }),
+        "draft-only fast path keeps the mental pair running: {body}"
     );
     assert!(
         !findings.iter().any(|f| f["kind"] == "required_field"),
-        "no rule-family findings: {body}"
+        "no rule-family findings — draft rule not auto-included: {body}"
     );
 
     // The read route lists the draft rule (all statuses visible).
@@ -769,17 +804,37 @@ async fn read_foreign_world_returns_403() {
 /// `CAP + 2` (502) stored rules the response carries exactly the first 500
 /// of `canonical_name ASC, rule_id ASC` and flags `truncated: true`; with
 /// fewer than the cap it returns all rows and flags `truncated: false`.
+/// The boundary itself is asserted: the returned 500 are the first 500 of
+/// store order, decided by `canonical_name ASC, rule_id ASC` (S-004).
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn read_route_caps_and_flags_truncation() {
     let ctx = ctx().await;
 
-    // 502 stored rows (CAP 500 + 2 overflow) — the Bugbot scenario.
-    for i in 0..502 {
+    // 502 stored rows (CAP 500 + 2 overflow) — the Bugbot scenario. Names
+    // seed in store order; the three rows sharing the 500th name exercise
+    // the `rule_id ASC` tie-break exactly at the truncation boundary.
+    for i in 0..499 {
         seed_rule(
             &ctx.pool,
             &format!("rul_bulk_{i:03}"),
             EMPTY_WORLD,
             &format!("Bulk rule {i:03}"),
+            None,
+            "active",
+            &[],
+            &json!({ "family": "module_presence", "module_key": "x" }),
+        )
+        .await;
+    }
+    // "Bulk rule 499" × 3 — the tie-break decides which survive the cap:
+    // rul_aaa_499 < rul_bulk_499 < rul_zzz_499, so exactly rul_aaa_499 is
+    // the 500th (last) returned item and the two later ids fall outside.
+    for rule_id in ["rul_aaa_499", "rul_bulk_499", "rul_zzz_499"] {
+        seed_rule(
+            &ctx.pool,
+            rule_id,
+            EMPTY_WORLD,
+            "Bulk rule 499",
             None,
             "active",
             &[],
@@ -799,6 +854,18 @@ async fn read_route_caps_and_flags_truncation() {
         items.len(),
         500,
         "exactly the first 500 of store order: {body}"
+    );
+    // The returned 500 ARE the first 500 of `canonical_name ASC, rule_id ASC`.
+    assert_eq!(items[0]["canonical_name"], "Bulk rule 000", "first by name");
+    assert_eq!(items[0]["rule_id"], "rul_bulk_000", "first by name+id");
+    assert_eq!(
+        items[499]["canonical_name"], "Bulk rule 499",
+        "boundary name present"
+    );
+    assert_eq!(
+        items[499]["rule_id"], "rul_aaa_499",
+        "boundary decided by the rule_id ASC tie-break — the two later ids \
+         of the shared name are truncated (S-004)"
     );
 
     // Fewer than the cap → all rows, honest `truncated: false`.

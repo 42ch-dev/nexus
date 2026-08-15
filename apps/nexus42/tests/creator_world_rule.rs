@@ -463,3 +463,34 @@ async fn draft_status_row_stored_verbatim() {
     assert_eq!(rows[0].status.as_deref(), Some("draft"));
     assert_eq!(rows[0].canonical_name, "Staged rule");
 }
+
+/// S-002: a non-core `--status` value (typo, capitalization, dialect) is
+/// stored **verbatim** — the `add` path emits a soft stderr warning but
+/// never coerces at rest (PD-1 open strings; the AR-1 auto-include filter
+/// matches exactly `active`, so such a rule simply never auto-includes).
+#[tokio::test]
+async fn non_core_status_stored_verbatim_no_coercion() {
+    let (pool, _dir) = fresh_pool().await;
+    rule_add(
+        &pool,
+        OWNER,
+        WORLD,
+        "Typos happen",
+        "rule",
+        "statement",
+        "warning",
+        &[],
+        "Active", // capitalized typo — outside the documented core set
+        MODULE_PRESENCE_CARRIER,
+    )
+    .await
+    .unwrap();
+
+    let rows = list_rules_by_world(&pool, WORLD).await.unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(
+        rows[0].status.as_deref(),
+        Some("Active"),
+        "non-core status must be stored verbatim — the CLI warns, never coerces (PD-1)"
+    );
+}

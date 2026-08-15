@@ -265,11 +265,17 @@ mod tests {
                 let _ = || {
                     let request: crate::CheckRequest =
                         serde_json::from_value(serde_json::json!({})).expect("typecheck-only");
-                    // Typecheck-only: the baseline no-op checker is the
-                    // production run_checker shape (V1.148 daemon cutover).
-                    drop(crate::orchestrate_check(adapter, request, |_input| {
-                        SpokeResult::Ok(vec![])
-                    }));
+                    // Typecheck-only: the production check path is the AR-1
+                    // world-scoped wrapper (auto-include of the world's
+                    // `status=active` rules + fail-closed foreign/embedded
+                    // reject); the baseline no-op checker is the production
+                    // run_checker shape (V1.148 daemon cutover).
+                    drop(crate::orchestrate_check_world_scoped(
+                        adapter,
+                        "wld_typecheck",
+                        request,
+                        |_input| SpokeResult::Ok(vec![]),
+                    ));
                 };
             }
             "assemble" => {
