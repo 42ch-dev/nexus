@@ -14,7 +14,7 @@
 
 [中文](README_CN.md) · [Concepts](CONCEPTS.md) · [Strategy](STRATEGY.md)
 
-Nexus is a local-first creative writing tool.
+Nexus is a local-first, AI-driven narrative orchestration engine.
 
 ## Quick Start
 
