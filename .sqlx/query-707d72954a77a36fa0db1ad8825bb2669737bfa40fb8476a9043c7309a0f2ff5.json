@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE spoke_rules SET status = ?, updated_at = ? WHERE rule_id = ? AND world_id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": []
+  },
+  "hash": "707d72954a77a36fa0db1ad8825bb2669737bfa40fb8476a9043c7309a0f2ff5"
+}
