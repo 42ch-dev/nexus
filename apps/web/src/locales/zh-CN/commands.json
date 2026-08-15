@@ -54,6 +54,15 @@
         "lore": "背景设定"
       }
     },
+    "world-findings": {
+      "label": "前往世界发现",
+      "keywords": {
+        "checks": "检查",
+        "severity": "严重程度",
+        "advisory": "建议",
+        "quality": "质量"
+      }
+    },
     "work-timeline": {
       "label": "前往作品时间轴",
       "keywords": {

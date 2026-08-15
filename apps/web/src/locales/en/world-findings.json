@@ -1,0 +1,23 @@
+{
+  "page": {
+    "title": "Findings",
+    "description": "Check findings for this World — structural constraints from rules and mental-pair checks. Read-only."
+  },
+  "panel": {
+    "title": "Findings",
+    "description": "Findings raised against this World's knowledge and timeline.",
+    "structuralNote": "Check evaluates structural constraints — modules, required fields, observer counts — not narrative quality.",
+    "emptyTitle": "No findings",
+    "emptyDescription": "No findings are recorded for this World yet. Run a check to generate findings from rules and mental-pair checks.",
+    "truncated": "Showing the 500 newest findings. Earlier findings are not displayed.",
+    "errorTitle": "Could not load findings",
+    "errorDescription": "Could not load findings for this World.",
+    "loading": "Loading findings…",
+    "count_one": "{{count}} finding",
+    "count_other": "{{count}} findings",
+    "expandAria": "Expand finding {{id}}",
+    "collapseAria": "Collapse finding {{id}}",
+    "targetEntry": "Target entry",
+    "created": "Created"
+  }
+}

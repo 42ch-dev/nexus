@@ -99,6 +99,7 @@ function renderInLayout(
           <Route path="works/:workId/timeline" element={<div />} />
           <Route path="works/:workId/inspector" element={<div />} />
           <Route path="worlds/:worldId/kb" element={<div />} />
+          <Route path="worlds/:worldId/findings" element={<div />} />
           <Route path="strategies" element={<div />} />
           <Route path="sessions" element={<div />} />
         </Route>
@@ -134,7 +135,9 @@ describe('CanvasNavCommands — registration', () => {
   // and does not appear on `/sessions`).
   // V1.151 P1 T3 — `go.work-inspector` (Assembly Inspector debug surface;
   // workId-gated like `go.work-timeline`).
-  it('registers the Navigate + Compute jump commands (V1.111 trio + Work Timeline + global Timeline + Run Module + Assembly Inspector)', () => {
+  // V1.166 P2 T1 — `go.world-findings` (world-scoped check findings peer
+  // surface; worldId-gated like `go.world-kb`).
+  it('registers the Navigate + Compute jump commands (V1.111 trio + Work Timeline + global Timeline + Run Module + Assembly Inspector + World Findings)', () => {
     renderInLayout('/sessions');
     expect(getCommands().map((c) => c.id).sort()).toEqual([
       'compute.run-module',
@@ -144,13 +147,14 @@ describe('CanvasNavCommands — registration', () => {
       'go.timeline',
       'go.work-inspector',
       'go.work-timeline',
+      'go.world-findings',
       'go.world-kb',
     ]);
   });
 
   it('unregisters all commands on unmount (no leak across mounts)', () => {
     const { unmount } = renderInLayout('/sessions');
-    expect(getCommands()).toHaveLength(8);
+    expect(getCommands()).toHaveLength(9);
     unmount();
     expect(getCommands()).toEqual([]);
   });
@@ -227,6 +231,31 @@ describe('CanvasNavCommands — Go to World KB (worldId-gated)', () => {
       cmd?.handler();
     });
     expect(probe.read()).toBe('/worlds/world-9/kb');
+  });
+});
+
+describe('CanvasNavCommands — Go to World Findings (worldId-gated, V1.166 P2 T1)', () => {
+  // PD-2 locked placement: `/worlds/:worldId/findings` is a peer surface of
+  // World KB; the command mirrors `go.world-kb`'s worldId-gating so it
+  // surfaces only on World-scoped routes.
+  it('is hidden when no worldId is in the URL', () => {
+    renderInLayout('/works/w-1');
+    expect(findById('go.world-findings')?.available?.()).toBe(false);
+  });
+
+  it('is available and navigates with the worldId when on a World route', () => {
+    const { probe } = renderInLayout('/worlds/world-9/findings');
+    const cmd = findById('go.world-findings');
+    expect(cmd?.available?.()).toBe(true);
+    act(() => {
+      cmd?.handler();
+    });
+    expect(probe.read()).toBe('/worlds/world-9/findings');
+  });
+
+  it('is available on the World KB route (worldId still present — peer reachable)', () => {
+    renderInLayout('/worlds/world-9/kb');
+    expect(findById('go.world-findings')?.available?.()).toBe(true);
   });
 });
 

@@ -282,6 +282,8 @@ V1.48 closes the novel quality loop: durable findings enrich the writing prompt,
 - Reset path: `creator works rules reset [<work_id>]` restores the default scaffold (supports `--dry-run` for preview, `--yes`/`-y` to skip prompt; default prompts via `dialoguer`).
 - R-V147P0-04 (AGENTS.md runtime + accept + reset) — **closed**.
 
+> **Forward pointer (V1.166, DR-64):** §9.3 is the work-scoped three-layer rules runtime (`read_rules_layers`); it is distinct from the daemon check callback — post-V1.164 `POST /v1/daemon/check` runs the frozen mental checker pair (`stale_belief_drift` / `dramatic_irony_asymmetry`), and V1.166 adds the deterministic rule evaluator over world-scoped `spoke_rules` (four constraint families; empty `rule_refs` auto-includes `status=active`; foreign-world ids fail closed). Iteration locks: [`../../iterations/v1.166/specs/v1.166-quality-loop-locks.md`](../../iterations/v1.166/specs/v1.166-quality-loop-locks.md).
+
 ### 9.4 Data hygiene (V1.48 P3)
 
 - Retention: `prune_resolved_findings_older_than(pool, now_epoch, retention_seconds)` DAO removes `resolved` rows whose `updated_at` is older than `RETENTION_DEFAULT_DAYS` (default 90 days). Skips `open` and `wont_fix` rows. CLI command (e.g. `creator works findings prune`) is a future wiring item; the DAO is the seam.

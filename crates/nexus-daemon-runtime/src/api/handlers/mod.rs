@@ -60,3 +60,4 @@ pub mod world_findings;
 pub mod world_kb;
 pub mod world_kb_guards;
 pub mod world_kb_pack;
+pub mod world_rules;
