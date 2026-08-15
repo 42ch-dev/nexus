@@ -2,3 +2,22 @@ packages:
   - 'apps/*'
   - 'packages/*'
   - 'tooling/*'
+
+# pnpm 10+ reads settings (overrides, etc.) from pnpm-workspace.yaml;
+# pnpm 11 stopped reading the package.json `pnpm` field entirely.
+# Keep security/version overrides here so they apply under the CI pin.
+overrides:
+  fast-uri: '>=4.1.2'
+  linkify-it: '>=5.0.2 <6'
+  brace-expansion: '>=5.0.9'
+  js-yaml: '>=4.3.1 <5'
+  esbuild: '^0.28.1'
+  nanoid: '>=3.3.18 <4'
+
+# pnpm >= 10 blocks dependency lifecycle scripts unless allowlisted
+# (`allowBuilds`, name -> bool map). These two ran their postinstall
+# scripts under pnpm 9; keep that behavior (esbuild needs its binary,
+# msw's postinstall is a guarded no-op) so frozen installs stay green.
+allowBuilds:
+  esbuild: true
+  msw: true
