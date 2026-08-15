@@ -6,7 +6,7 @@
 **Location**: `.mstar/knowledge/` (shared result; closed-row archive companion to the active deferred tracker).  
 **Split from**: [deferred-features-cross-version-tracker.md](deferred-features-cross-version-tracker.md) §4–§5 (2026-05-30 restructure)  
 **Created**: 2026-05-30  
-**Last updated**: 2026-08-15 (V1.165 — mental-layer pipeline close-out shipped: world-scoped findings home + FindingPort scope routing + observation authoring (patch-DTO modules + CLI flags); 2 plans, scale M; R-V1164P2QC-001/R-V1164P3QC-001 both closed). Prior: 2026-08-14 (V1.164 — L5-mind mental layer shipped: spoke 0.10.0 lockstep + modules.mental/belief dialect + MindState + checker pair + Canvas read-only surfacing; 3 plans, scale L). Prior: 2026-08-12 (V1.162 — DF-V1122-FORK-UI create + read-only lineage half shipped; closed from active tracker). Prior: 2026-08-06 (V1.152 — DF-77 Knowledge Pack productization shipped; closed from active tracker). Prior: 2026-08-05 (V1.151 — DF-76 assembly inspector shipped; closed from active tracker). Prior: 2026-08-05 (V1.150 — DF-75 preset injection slots + Moment Directive + generation-type gates shipped; closed from active tracker). Prior: 2026-08-04 (V1.149 — DF-74 default-on lore activation + Relation hop expand shipped; closed from active tracker). Prior: 2026-08-01 (V1.147 — DF-V1122-COMPUTABLE-UI + DF-V1122-COMPUTE-ON-TIMELINE shipped; closed from active tracker)
+**Last updated**: 2026-08-15 (V1.166 — DR-64 quality-loop close-out shipped: world-scoped rule resolution wrapper (orchestrate_check_world_scoped, dual-caller) + spoke_rules production CRUD + creator world rule CLI + four-family structured evaluator (module_presence/module_absence/required_field/observer_cardinality) + GET /worlds/:id/rules read route + Control Room /worlds/:worldId/findings panel + rules section; 2 plans, scale M; R-V1148P2-001 closed; DR-70 NL lane registered). Prior: 2026-08-15 (V1.165 — mental-layer pipeline close-out shipped: world-scoped findings home + FindingPort scope routing + observation authoring (patch-DTO modules + CLI flags); 2 plans, scale M; R-V1164P2QC-001/R-V1164P3QC-001 both closed). Prior: 2026-08-14 (V1.164 — L5-mind mental layer shipped: spoke 0.10.0 lockstep + modules.mental/belief dialect + MindState + checker pair + Canvas read-only surfacing; 3 plans, scale L). Prior: 2026-08-12 (V1.162 — DF-V1122-FORK-UI create + read-only lineage half shipped; closed from active tracker). Prior: 2026-08-06 (V1.152 — DF-77 Knowledge Pack productization shipped; closed from active tracker). Prior: 2026-08-05 (V1.151 — DF-76 assembly inspector shipped; closed from active tracker). Prior: 2026-08-05 (V1.150 — DF-75 preset injection slots + Moment Directive + generation-type gates shipped; closed from active tracker). Prior: 2026-08-04 (V1.149 — DF-74 default-on lore activation + Relation hop expand shipped; closed from active tracker). Prior: 2026-08-01 (V1.147 — DF-V1122-COMPUTABLE-UI + DF-V1122-COMPUTE-ON-TIMELINE shipped; closed from active tracker)
 
 **Last updated (V1.55 history)**: 2026-06-22 (V1.55 closeout: 7 plans all Done — P-1 prepare + P0 DF-43 SQLite persistence / crate-model alignment (closed) + P1 DF-31 workspace interface skeleton + P2 game-bible Depth 3.5 (design-writing + design 五问 rubric + section completion detection + KB extraction; Master spec) + P3 Script profile scaffold (V1.54-style parity + additive BlockType dialogue/beat/act + script_category + ScaffoldTransaction closure on BOTH non-novel scaffolds) + P-mid QC rhythm + P-last closeout (Profile B compaction + spec promotion + tracker ship snapshot + tech-debt rollup); R-V154P1-W001 + R-V154P1-S002 + DF-43 + DF-31 all closed; 1 new R-V155P2-F002 → V1.56+; wire contracts unchanged)
 
@@ -162,6 +162,18 @@ Archived from [deferred-features-cross-version-tracker.md](deferred-features-cro
 ---
 
 ## 2) Per-version summary
+
+### Shipped in V1.166
+
+| Category | Count | IDs / Notes |
+|----------|-------|-------------|
+| DR roadmap rows closed | 1 | DR-64 (real run_checker evaluator — full pipeline; R-V1148P2-001 archived-closed) |
+| Features from tracker | 1 | Control Room world-findings panel + rules read-only section (tracker quick-index candidate, folded into the DR-64 close-out) |
+| New DR rows registered | 1 | DR-70 (NL agent-judge rules lane — dogfood-gated deferral) |
+| Wire contracts | additive | `world-rules-list-response` DTO + drift entry (`wire_contracts_changed: true` on P1) |
+| New residuals | 0 | zero-residual both plans (QC tri Approve + fix waves; QA PASS ×2) |
+| **Merge** | PR #217 | merge commit `02afa036` (2026-08-15) |
+
 
 ### Shipped in V1.7
 
