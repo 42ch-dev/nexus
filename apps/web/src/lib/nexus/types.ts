@@ -139,6 +139,7 @@ import type {
   WorldKbPatchRelationshipResponse,
   WorldKbPromoteCandidateRequest,
   WorldKbPromoteCandidateResponse,
+  WorldFindingsListResponse,
 } from '@42ch/nexus-contracts';
 
 /** Daemon health probe result (`GET /v1/daemon/runtime/health`). App-side type. */
@@ -449,6 +450,16 @@ export interface NexusClient {
     worldId: string,
     request: WorldKbPatchRelationshipRequest,
   ): Promise<WorldKbPatchRelationshipResponse>;
+
+  // ── World check findings (V1.165 / DR-64 surfacing) ──────────────────────
+  /**
+   * `GET /v1/daemon/worlds/{world_id}/findings` — world-scoped check findings
+   * (mental pair + rule-derived). Newest-first, 500-cap with an honest
+   * `truncated` flag. Spoke vocabulary verbatim (`info|warning|error` severity,
+   * `open|resolved|dismissed` status — no nexus remap). Read-only surface
+   * (PD-2): the panel never writes.
+   */
+  listWorldFindings(worldId: string): Promise<WorldFindingsListResponse>;
 
   // ── Compute modules (V1.114 P2) ─────────────────────────────────────────
   /** `GET /v1/daemon/compute/modules` — cursor list of registered compute modules. */

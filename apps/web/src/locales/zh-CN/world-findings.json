@@ -1,0 +1,26 @@
+{
+  "page": {
+    "title": "发现",
+    "description": "此世界的检查发现——来自规则与心智对检查的结构性约束。只读。",
+    "loading": "正在加载世界发现…"
+  },
+  "panel": {
+    "title": "发现",
+    "description": "针对此世界的知识与时间线产生的发现。",
+    "structuralNote": "检查评估结构性约束（模块、必填字段、观察者数量），不评估叙事质量。",
+    "emptyTitle": "暂无发现",
+    "emptyDescription": "此世界暂无发现记录。运行检查后，规则与心智对检查将生成发现。",
+    "truncated": "仅显示最新 500 条发现，更早的发现未显示。",
+    "errorTitle": "无法加载发现",
+    "errorDescription": "无法加载此世界的发现。",
+    "loading": "正在加载发现…",
+    "count_one": "{{count}} 条发现",
+    "count_other": "{{count}} 条发现",
+    "expandAria": "展开发现 {{id}}",
+    "collapseAria": "收起发现 {{id}}",
+    "targetEntry": "目标条目",
+    "created": "创建时间",
+    "kind": "类型",
+    "severity": "严重程度"
+  }
+}

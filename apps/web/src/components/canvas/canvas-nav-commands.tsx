@@ -33,7 +33,7 @@
  */
 import { useRef } from 'react';
 import { useNavigate, useParams } from 'react-router';
-import { CalendarRange, Cpu, ListTree, Network, Sparkles, Clock } from 'lucide-react';
+import { AlertTriangle, CalendarRange, Cpu, ListTree, Network, Sparkles, Clock } from 'lucide-react';
 
 import { useRegisterCommand } from '@/lib/canvas/command-registry';
 
@@ -112,6 +112,28 @@ export function CanvasNavCommands(): null {
     handler: () => {
       const { worldId: w } = idsRef.current;
       if (w) navigate(`/worlds/${encodeURIComponent(w)}/kb`);
+    },
+    available: () => Boolean(idsRef.current.worldId),
+  });
+
+  // V1.166 P2 (DR-64 surfacing half) — World Findings peer surface. Mirrors
+  // `go.world-kb`'s worldId-gating: the command surfaces only on World-scoped
+  // routes and jumps to the read-only check-findings panel at
+  // `/worlds/:worldId/findings` (PD-2 locked placement, sibling of World KB).
+  useRegisterCommand({
+    id: 'go.world-findings',
+    labelKey: 'go.world-findings.label',
+    groupKey: 'group.navigate',
+    keywordKeys: [
+      'go.world-findings.keywords.checks',
+      'go.world-findings.keywords.severity',
+      'go.world-findings.keywords.advisory',
+      'go.world-findings.keywords.quality',
+    ],
+    icon: AlertTriangle,
+    handler: () => {
+      const { worldId: w } = idsRef.current;
+      if (w) navigate(`/worlds/${encodeURIComponent(w)}/findings`);
     },
     available: () => Boolean(idsRef.current.worldId),
   });

@@ -118,6 +118,7 @@ import type {
   WorldKbPatchRelationshipResponse,
   WorldKbPromoteCandidateRequest,
   WorldKbPromoteCandidateResponse,
+  WorldFindingsListResponse,
 } from '@42ch/nexus-contracts';
 
 import { NexusClientError, type TransportErrorKind } from './errors';
@@ -524,6 +525,13 @@ export class BrowserClient implements NexusClient {
     return this.post<WorldKbPatchRelationshipResponse>(
       `/v1/daemon/worlds/${encodeURIComponent(worldId)}/kb/patch-relationship`,
       request,
+    );
+  }
+
+  // ── World check findings (V1.165 / DR-64 surfacing) ─────────────────────
+  listWorldFindings(worldId: string): Promise<WorldFindingsListResponse> {
+    return this.get<WorldFindingsListResponse>(
+      `/v1/daemon/worlds/${encodeURIComponent(worldId)}/findings`,
     );
   }
 

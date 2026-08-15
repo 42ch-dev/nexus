@@ -649,6 +649,7 @@
       "description": "世界的 when 轴。切换到世界知识库以编辑实体。",
       "peerNavAria": "同级面板",
       "worldKbLink": "世界知识库",
+      "worldFindingsLink": "发现",
       "strategyLink": "Harness",
       "showGraph": "显示图形",
       "showList": "显示列表视图"

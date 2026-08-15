@@ -196,6 +196,26 @@ export function flattenPages<T>(data: { pages: CursorPage<T>[] } | undefined): T
   return data.pages.flatMap((p) => p.items);
 }
 
+// ── World check findings (V1.165 route, DR-64 surfacing half) ───────────────
+
+/**
+ * World-scoped check findings — `GET /v1/daemon/worlds/{world_id}/findings`
+ * (mental pair + rule-derived, persisted since V1.165). Newest-first with a
+ * 500-cap + honest `truncated` flag; spoke severity/status vocabulary is
+ * rendered verbatim by the panel (PD-2 — no remap to the work findings
+ * `minor/major/blocker` vocabulary). Read-only surface: this hook is the
+ * panel's only data source and no mutation invalidates it.
+ */
+export function useWorldFindings(worldId: string | undefined) {
+  const client = useNexusClient();
+  return useQuery({
+    queryKey: queryKeys.worldFindings.list(worldId ?? ''),
+    queryFn: () => client.listWorldFindings(worldId!),
+    enabled: Boolean(worldId),
+    staleTime: 5_000,
+  });
+}
+
 // Forward-staging closure: a `useFinding(workId, findingId)` detail hook was
 // considered for the V1.77 remediation surface but is intentionally absent
 // here. The FindingDetailPanel reads the selected row from the work-scoped
