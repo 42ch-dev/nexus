@@ -159,7 +159,9 @@ pub async fn run_check(
     // scoped entries + events (`CheckRunInput`), so the checker classifies
     // purely from the input (no store reads) — it emits the
     // `stale_belief_drift` / `dramatic_irony_asymmetry` pair and stamps
-    // `extensions.nexus.work_id`/`creator_id` (required by FindingPort).
+    // `extensions.nexus.world_id` (the AR-2 routing key) + `creator_id`
+    // (provenance). FindingPort routes world-scoped findings onto
+    // `world_findings` (DR-68, AR-2).
     let adapter = NexusAdapter::new(pool.clone());
     let result = orchestrate_check(&adapter, check_req, |input| {
         crate::check::mental::run_check(&input, &creator_id)

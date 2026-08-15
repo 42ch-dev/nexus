@@ -13,6 +13,15 @@
  * absent = unrecorded). Malformed (non-array) observers also skips —
  * lenient like the P2 checker. Copy resolves through the existing web i18n
  * (canvas namespace, `timeline.inspector.observers` / `.noObservers`).
+ *
+ * V1.165 P2 T3 — AC-V165-8 completion E2E (R-V1164P3QC-001): the
+ * graph-derived tests below feed a `WorldKbGraphResponse` shaped exactly
+ * like the daemon's post-patch wire (T1's daemon test
+ * `patch_entity_observation_on_event_entity_round_trip_on_graph_read`
+ * returns `entities[].modules.observation` from a T1 KB patch) through
+ * `projectGraph` → `projectNarrativeLayer` (block_type filter) →
+ * `entityToTimelineNodeData` (spread) → `TimelineInspector` reads
+ * `data.modules.observation.observers` gated `layoutHint === 'event'`.
  */
 import { render, screen, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
@@ -23,9 +32,10 @@ import { QueryClientProvider } from '@tanstack/react-query';
 import { ClientProvider } from '@/lib/client-context';
 import { ToastProvider, Toaster } from '@/lib/use-toast';
 import type { NexusClient } from '@/lib/nexus';
-import type { WorldKbEntityProjection } from '@42ch/nexus-contracts';
+import type { WorldKbEntityProjection, WorldKbGraphResponse } from '@42ch/nexus-contracts';
 
 import {
+  createTimelineCanvasAdapter,
   type TimelineCanvasAdapterContext,
   type TimelineNodeData,
 } from '../timeline-canvas-adapter';
@@ -90,6 +100,42 @@ const EVENT_WITH_OBSERVERS: Partial<TimelineNodeData> = {
     },
   },
 };
+
+/**
+ * AC-V165-8 — the daemon wire shape after a T1 KB patch on a `block_type =
+ * event` entity: `GET /worlds/:id/kb/graph` returns `entities[].modules`
+ * verbatim (mirrors T1's `patch_entity_observation_on_event_entity_
+ * round_trip_on_graph_read` assertion shape). The observers are the KB
+ * character entities so the PD-18 name resolution has an in-graph source.
+ */
+function observedEventGraph(): WorldKbGraphResponse {
+  return {
+    entities: [
+      entityEvent({
+        key_block_id: 'kb_event',
+        canonical_name: 'Hidden Transfer',
+        modules: {
+          observation: {
+            observers: ['kb_char_1', 'kb_char_2'],
+            access: { read: ['kb_char_1', 'kb_char_2'] },
+          },
+        },
+      }),
+      entityEvent({
+        key_block_id: 'kb_char_1',
+        block_type: 'character',
+        canonical_name: 'Char One',
+      }),
+      entityEvent({
+        key_block_id: 'kb_char_2',
+        block_type: 'character',
+        canonical_name: 'Char Two',
+      }),
+    ],
+    source_anchors: [],
+    relationships: [],
+  };
+}
 
 function makeClient(): NexusClient {
   return {
@@ -219,6 +265,79 @@ describe('TimelineInspector — modules.observation.observers line (V1.164 P3 Ta
       }),
     });
 
+    expect(screen.queryByTestId('event-observers-line')).not.toBeInTheDocument();
+    expect(screen.queryByText('Observers:')).not.toBeInTheDocument();
+  });
+});
+
+// ─── AC-V165-8 E2E — observation→canvas via the KB patch carrier (T3) ───────
+
+describe('TimelineInspector — AC-V165-8: observation→canvas via the KB patch wire (T3)', () => {
+  function project(graph: WorldKbGraphResponse) {
+    const adapter = createTimelineCanvasAdapter({
+      current: { worldId: 'world-7', client: makeClient() },
+    });
+    return adapter.projectGraph(graph);
+  }
+
+  it('renders the observers line from the post-patch graph wire (graph → projection → spread → inspector)', () => {
+    const { nodes } = project(observedEventGraph());
+
+    // Chain link 1+2 — projectNarrativeLayer keeps block_type=event and
+    // entityToTimelineNodeData spreads `...entity`, so `modules` rides the
+    // node data verbatim (the AR-7 referent: WorldKbEntityProjection.modules).
+    const eventNode = nodes.find((n) => n.data.key_block_id === 'kb_event');
+    expect(eventNode).toBeDefined();
+    expect(eventNode!.data.layoutHint).toBe('event');
+    expect(eventNode!.data.modules).toEqual({
+      observation: {
+        observers: ['kb_char_1', 'kb_char_2'],
+        access: { read: ['kb_char_1', 'kb_char_2'] },
+      },
+    });
+
+    // Chain link 3 — the inspector reads data.modules.observation.observers
+    // (PD-18: ctx.nodes mirrors surface.nodes — the full projected graph).
+    renderInspector({ node: eventNode!, ctxOverrides: { nodes } });
+
+    const line = screen.getByTestId('event-observers-line');
+    expect(line).toBeInTheDocument();
+    expect(within(line).getByText('Observers:')).toBeInTheDocument();
+    expect(
+      within(line).getByText('Char One (kb_char_1), Char Two (kb_char_2)'),
+    ).toBeInTheDocument();
+  });
+
+  it('omits the line for non-event entities carrying the same modules (block_type filter → context gate)', () => {
+    const graph: WorldKbGraphResponse = {
+      entities: [
+        entityEvent({
+          key_block_id: 'kb_char_1',
+          block_type: 'character',
+          canonical_name: 'Char One',
+          modules: { observation: { observers: ['kb_char_2'] } },
+        }),
+        entityEvent({
+          key_block_id: 'kb_char_2',
+          block_type: 'character',
+          canonical_name: 'Char Two',
+        }),
+      ],
+      source_anchors: [],
+      relationships: [],
+    };
+    const { nodes } = project(graph);
+
+    // The projection spreads modules onto every entity; only the event gate
+    // (layoutHint === 'event') surfaces the Observers line.
+    const charNode = nodes.find((n) => n.data.key_block_id === 'kb_char_1');
+    expect(charNode).toBeDefined();
+    expect(charNode!.data.layoutHint).toBe('context');
+    expect(charNode!.data.modules).toEqual({
+      observation: { observers: ['kb_char_2'] },
+    });
+
+    renderInspector({ node: charNode!, ctxOverrides: { nodes } });
     expect(screen.queryByTestId('event-observers-line')).not.toBeInTheDocument();
     expect(screen.queryByText('Observers:')).not.toBeInTheDocument();
   });

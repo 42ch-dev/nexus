@@ -59,6 +59,7 @@ async fn seed_world_with_fork_point(pool: &sqlx::SqlitePool) -> (String, String,
         "story_advance",
         Some("Parent event"),
         None,
+        None, // modules_json — test seed writes no modules
     )
     .await
     .expect("append parent event");
@@ -241,6 +242,7 @@ async fn fork_create_wrong_branch_422() {
         "story_advance",
         Some("Other branch event"),
         None,
+        None, // modules_json — test seed writes no modules
     )
     .await
     .expect("append event on second branch");

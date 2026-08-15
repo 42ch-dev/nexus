@@ -285,6 +285,11 @@ pub async fn is_world_owned(
 /// by querying `MAX(sequence_no) + 1`. Validates that `world_id` references
 /// an existing world row.
 ///
+/// `modules_json`, when `Some`, is written to
+/// `narrative_timeline_events.modules_json` (AR-5 — the CLI observation flags
+/// land `modules.observation` through this parameter); when `None` the column
+/// stays `NULL` (unrecorded per spoke handbook).
+///
 /// # Errors
 ///
 /// Returns `NarrativeWriteError` if:
@@ -298,6 +303,7 @@ pub async fn append_event(
     event_type: &str,
     title: Option<&str>,
     summary: Option<&str>,
+    modules_json: Option<&str>,
 ) -> Result<AppendEventResult, NarrativeWriteError> {
     // Validate world_id prefix
     validate_id_prefix(world_id, "wld_", "world_id")?;
@@ -320,7 +326,7 @@ pub async fn append_event(
         sequence_no,
         None, // extensions_nexus_json — default (no provenance)
         None, // affected_key_block_ids_json — default (none)
-        None, // modules_json — default (no modules)
+        modules_json,
         "provisional",
     )
     .await
@@ -754,6 +760,7 @@ mod tests {
             "story_advance",
             Some("The Beginning"),
             Some("A story begins."),
+            None, // modules_json — no modules
         )
         .await
         .unwrap();
@@ -785,6 +792,7 @@ mod tests {
             "story_advance",
             None,
             None,
+            None, // modules_json — no modules
         )
         .await
         .unwrap();
@@ -797,6 +805,7 @@ mod tests {
             "story_advance",
             None,
             None,
+            None, // modules_json — no modules
         )
         .await
         .unwrap();
@@ -809,6 +818,7 @@ mod tests {
             "story_advance",
             None,
             None,
+            None, // modules_json — no modules
         )
         .await
         .unwrap();
@@ -826,6 +836,7 @@ mod tests {
             "story_advance",
             None,
             None,
+            None, // modules_json — no modules
         )
         .await;
 
@@ -847,6 +858,7 @@ mod tests {
             "story_advance",
             None,
             None,
+            None, // modules_json — no modules
         )
         .await;
 
@@ -898,6 +910,7 @@ mod tests {
             "story_advance",
             Some("Chapter 1"),
             None,
+            None, // modules_json — no modules
         )
         .await
         .unwrap();
@@ -908,6 +921,7 @@ mod tests {
             "story_advance",
             Some("Chapter 2"),
             None,
+            None, // modules_json — no modules
         )
         .await
         .unwrap();
@@ -1090,6 +1104,7 @@ mod tests {
             "story_advance",
             Some("No Modules"),
             None,
+            None, // modules_json — explicit absence
         )
         .await
         .unwrap();
@@ -1112,6 +1127,138 @@ mod tests {
         assert!(
             read_back.modules.is_none(),
             "NULL modules_json must deserialize to None"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_append_event_persists_observation_modules_json() {
+        // AR-5 (a): `creator world event-add --observer … [--access …]` builds
+        // a `modules.observation` payload; `append_event` must persist it
+        // verbatim in `modules_json` and both read paths (get_event +
+        // get_timeline) must surface it back — the checker-consumed log
+        // round-trip (AC-V165-7).
+        let (pool, _dir) = fresh_pool().await;
+        seed_creator(&pool).await;
+
+        let world = create_world(
+            &pool,
+            "ctr_test",
+            "Observation Modules Test",
+            "observation-modules-test",
+            "private",
+            "manual",
+        )
+        .await
+        .unwrap();
+
+        let modules_str =
+            r#"{"observation":{"observers":["kb_ana"],"access":{"line_of_sight":true}}}"#;
+
+        let event = append_event(
+            &pool,
+            &world.world_id,
+            &world.root_fork_branch_id,
+            "story_advance",
+            Some("Observation recorded"),
+            None,
+            Some(modules_str),
+        )
+        .await
+        .unwrap();
+
+        // Byte-for-byte: the stored column equals the payload the CLI built.
+        // SAFETY: test-only query against vetted table.
+        let stored: Option<String> = sqlx::query_scalar(
+            "SELECT modules_json FROM narrative_timeline_events WHERE timeline_event_id = ?",
+        )
+        .bind(&event.event_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            stored.as_deref(),
+            Some(modules_str),
+            "append_event must persist the observation payload verbatim"
+        );
+
+        // Read-back round-trip through both gateway surfaces.
+        let gw = crate::narrative_gateway::SqliteNarrativeGateway::new(pool);
+        let expected: serde_json::Value = serde_json::from_str(modules_str).unwrap();
+
+        let timeline = gw
+            .get_timeline(&world.world_id, Some(&world.root_fork_branch_id), None)
+            .await
+            .unwrap();
+        assert_eq!(timeline.len(), 1);
+        assert_eq!(
+            timeline[0].modules.as_ref(),
+            Some(&expected),
+            "get_timeline must surface the observation modules"
+        );
+
+        let event_read = gw.get_event(&event.event_id).await.unwrap();
+        assert_eq!(
+            event_read.modules.as_ref(),
+            Some(&expected),
+            "get_event must surface the observation modules"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_append_event_provisional_visible_in_check_scope() {
+        // AR-5 (e): appended events are `status='provisional'` and the
+        // checker's scope read (`list_timeline_events_scoped`, backing
+        // `ScopeQueryPort::list_timeline_events`) filters world/branch/ids
+        // only — no status filter — so the provisional observation event must
+        // appear in the check scope with its modules intact.
+        let (pool, _dir) = fresh_pool().await;
+        seed_creator(&pool).await;
+
+        let world = create_world(
+            &pool,
+            "ctr_test",
+            "Checker Scope Test",
+            "checker-scope-test",
+            "private",
+            "manual",
+        )
+        .await
+        .unwrap();
+
+        let modules_str = r#"{"observation":{"observers":["kb_ana"]}}"#;
+        let event = append_event(
+            &pool,
+            &world.world_id,
+            &world.root_fork_branch_id,
+            "story_advance",
+            Some("Provisional observation"),
+            None,
+            Some(modules_str),
+        )
+        .await
+        .unwrap();
+
+        // The scope read primitive (world + branch, no status filter).
+        let scoped = crate::narrative_gateway::list_timeline_events_scoped(
+            &pool,
+            &world.world_id,
+            Some(&world.root_fork_branch_id),
+            &[],
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            scoped.len(),
+            1,
+            "the provisional event must be visible in the check scope"
+        );
+        assert_eq!(scoped[0].timeline_event_id, event.event_id);
+        assert_eq!(scoped[0].status, "provisional");
+        let expected: serde_json::Value = serde_json::from_str(modules_str).unwrap();
+        assert_eq!(
+            scoped[0].modules.as_ref(),
+            Some(&expected),
+            "the scope read must surface the observation modules for the checker"
         );
     }
 

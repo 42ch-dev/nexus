@@ -220,6 +220,7 @@ pub const SCHEMA_VERSIONS: &[(&str, u32)] = &[
     ("CreateForkResponse", 1),
     ("CreateWorldRequest", 1),
     ("CreateWorldResponse", 1),
+    ("WorldFindingsListResponse", 1),
     ("Creator", 1),
     ("ForkBranch", 1),
     ("Memory", 1),
