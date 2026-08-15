@@ -50,6 +50,11 @@
 //! spoke-only.)
 
 pub mod adapter;
+// V1.166 AR-2 — the structured-rule constraint carrier (types + strict
+// validator + evaluator read path). Sole consumer of the carrier grammar at
+// the spoke-adapter boundary (spoke-type handling + carrier types stay here;
+// evaluator logic is daemon-side).
+pub mod constraint;
 pub mod conversion;
 pub mod extensions;
 pub mod ops;
