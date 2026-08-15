@@ -34,7 +34,7 @@ use nexus_daemon_runtime::api;
 use nexus_daemon_runtime::api::auth_middleware::DaemonApiConfig;
 use nexus_daemon_runtime::test_utils::{self, TestTempRoot};
 use nexus_daemon_runtime::workspace::WorkspaceState;
-use nexus_local_db::world_findings::list_world_findings_by_world;
+use nexus_local_db::world_findings::{insert_world_finding_in_tx, list_world_findings_by_world};
 use serde_json::{json, Value};
 
 /// World owned by `test_creator` (seeded by `seed_test_creator_and_world`).
@@ -97,6 +97,38 @@ async fn seed_world(pool: &sqlx::SqlitePool, world_id: &str, title: &str, owner_
     .execute(pool)
     .await
     .unwrap();
+}
+
+/// Insert a `world_findings` row directly (test-only; bypasses the check
+/// route to seed read-surface boundary cases).
+async fn insert_finding(
+    pool: &sqlx::SqlitePool,
+    finding_id: &str,
+    world_id: &str,
+    created_at: i64,
+) {
+    let mut tx = pool.begin().await.unwrap();
+    insert_world_finding_in_tx(
+        &mut tx,
+        finding_id,
+        world_id,
+        1,
+        "info",
+        "open",
+        "A seeded finding",
+        "Seeded body",
+        Some("dramatic_irony_asymmetry"),
+        None,
+        Some(r#"{"event_id":"evt_transfer"}"#),
+        None,
+        r#"{"paragraph":1}"#,
+        r#"{"nexus":{"world_id":"wld_any","creator_id":"test_creator"}}"#,
+        created_at,
+        created_at,
+    )
+    .await
+    .unwrap();
+    tx.commit().await.unwrap();
 }
 
 /// Seed the box/basket World (spoke handbook worked example): the
@@ -261,7 +293,7 @@ async fn box_basket_check_200_persists_and_read_route_lists() {
     );
 
     // 2. Persistence in the AR-1 world-attached home (AC-V165-2/3).
-    let rows = list_world_findings_by_world(&ctx.pool, OWNED_WORLD)
+    let rows = list_world_findings_by_world(&ctx.pool, OWNED_WORLD, 10)
         .await
         .expect("list world findings");
     assert_eq!(rows.len(), 1, "exactly one persisted row");
@@ -372,4 +404,58 @@ async fn read_foreign_world_returns_403() {
         .get(&format!("/v1/daemon/worlds/{FOREIGN_WORLD}/findings"))
         .await;
     assert_error_envelope(&resp, StatusCode::FORBIDDEN, "forbidden");
+}
+
+// ─── Bugbot 4bad2fca: SQL-side LIMIT boundary ─────────────────────────────
+
+/// The read route bounds the store SQL-side (Bugbot 4bad2fca): with
+/// `CAP + 2` (502) stored findings the response carries exactly the newest
+/// 500 and flags `truncated: true`; with fewer than the cap it returns all
+/// rows and flags `truncated: false`.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn read_route_caps_and_flags_truncation() {
+    let ctx = ctx().await;
+
+    // 502 stored rows (CAP 500 + 2 overflow) — the Bugbot scenario.
+    for i in 0..502 {
+        insert_finding(
+            &ctx.pool,
+            &format!("fnd_bulk_{i:03}"),
+            OWNED_WORLD,
+            1_000 + i64::from(i), // monotonic created_at → deterministic order
+        )
+        .await;
+    }
+    let resp = ctx
+        .server
+        .get(&format!("/v1/daemon/worlds/{OWNED_WORLD}/findings"))
+        .await;
+    assert_eq!(resp.status_code(), StatusCode::OK, "body={}", resp.text());
+    let body: Value = resp.json();
+    assert_eq!(body["truncated"], true, "overflow must be flagged: {body}");
+    let items = body["findings"].as_array().expect("findings array");
+    assert_eq!(items.len(), 500, "exactly the newest 500: {body}");
+
+    // Fewer than the cap → all rows, honest `truncated: false`.
+    for i in 0..3 {
+        insert_finding(
+            &ctx.pool,
+            &format!("fnd_few_{i}"),
+            EMPTY_WORLD,
+            2_000 + i64::from(i),
+        )
+        .await;
+    }
+    let resp = ctx
+        .server
+        .get(&format!("/v1/daemon/worlds/{EMPTY_WORLD}/findings"))
+        .await;
+    assert_eq!(resp.status_code(), StatusCode::OK, "body={}", resp.text());
+    let body: Value = resp.json();
+    assert_eq!(body["truncated"], false, "fewer than cap: {body}");
+    assert_eq!(
+        body["findings"].as_array().expect("findings array").len(),
+        3,
+        "all stored rows returned when under the cap: {body}"
+    );
 }

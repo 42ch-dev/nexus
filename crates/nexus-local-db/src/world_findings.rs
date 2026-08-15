@@ -162,13 +162,25 @@ pub async fn get_world_finding(
 /// the world prefix and the `finding_id ASC` tiebreak makes the order
 /// deterministic. Empty world → `Ok(vec![])`.
 ///
+/// # Bounding (Bugbot 4bad2fca)
+///
+/// The caller owns the upper bound: `limit` is bound into the SQL `LIMIT ?`
+/// so the read surface never loads an unbounded result set. Pass a probe of
+/// `cap + 1` to detect truncation without fetching the full table. `limit`
+/// is clamped to `>= 0` — `SQLite` treats a negative `LIMIT` as "no limit",
+/// which would silently reintroduce the unbounded query.
+///
 /// # Errors
 ///
 /// Returns [`LocalDbError::Sqlx`] on database failure.
 pub async fn list_world_findings_by_world(
     pool: &SqlitePool,
     world_id: &str,
+    limit: i64,
 ) -> Result<Vec<WorldFindingRow>, LocalDbError> {
+    // SQLite treats a negative `LIMIT` as "no limit" — clamp so a buggy
+    // caller can never silently reintroduce the unbounded query.
+    let limit = limit.max(0);
     let rows = sqlx::query_as!(
         WorldFindingRow,
         "SELECT finding_id as \"finding_id!\", world_id, schema_version, severity, status, \
@@ -176,8 +188,10 @@ pub async fn list_world_findings_by_world(
                 suggested_fix, text_position_json, extensions_json, created_at, updated_at \
          FROM world_findings \
          WHERE world_id = ? \
-         ORDER BY created_at DESC, finding_id ASC",
+         ORDER BY created_at DESC, finding_id ASC \
+         LIMIT ?",
         world_id,
+        limit,
     )
     .fetch_all(pool)
     .await?;
@@ -191,6 +205,12 @@ pub async fn list_world_findings_by_world(
 /// (`created_at DESC, finding_id ASC`). No rows for the target →
 /// `Ok(vec![])`.
 ///
+/// # Bounding (Bugbot 4bad2fca)
+///
+/// Same caller-owned bound as [`list_world_findings_by_world`]: `limit` is
+/// bound into the SQL `LIMIT ?` (clamped to `>= 0` — `SQLite` treats a
+/// negative `LIMIT` as "no limit").
+///
 /// # Errors
 ///
 /// Returns [`LocalDbError::Sqlx`] on database failure.
@@ -198,7 +218,11 @@ pub async fn list_world_findings_by_target(
     pool: &SqlitePool,
     world_id: &str,
     target_entry_id: &str,
+    limit: i64,
 ) -> Result<Vec<WorldFindingRow>, LocalDbError> {
+    // SQLite treats a negative `LIMIT` as "no limit" — clamp so a buggy
+    // caller can never silently reintroduce the unbounded query.
+    let limit = limit.max(0);
     let rows = sqlx::query_as!(
         WorldFindingRow,
         "SELECT finding_id as \"finding_id!\", world_id, schema_version, severity, status, \
@@ -206,9 +230,11 @@ pub async fn list_world_findings_by_target(
                 suggested_fix, text_position_json, extensions_json, created_at, updated_at \
          FROM world_findings \
          WHERE world_id = ? AND target_entry_id = ? \
-         ORDER BY created_at DESC, finding_id ASC",
+         ORDER BY created_at DESC, finding_id ASC \
+         LIMIT ?",
         world_id,
         target_entry_id,
+        limit,
     )
     .fetch_all(pool)
     .await?;

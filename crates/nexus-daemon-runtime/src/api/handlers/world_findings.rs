@@ -26,10 +26,11 @@
 //! # Ordering + cap (AR-3)
 //!
 //! `ORDER BY created_at DESC, finding_id ASC` (legacy list convention) is
-//! the store's query; the route applies the safety cap of the newest 500
-//! and reports `truncated: true` when more rows exist — an honest flag on
-//! a read surface. Pagination lands with the Control Room panel (plan
-//! roadmap). Owned world with zero findings → 200 +
+//! the store's query, bounded SQL-side by a caller-owned `LIMIT ?`
+//! (`cap + 1` probe — Bugbot 4bad2fca); the route applies the safety cap of
+//! the newest 500 and reports `truncated: true` when the probe exceeded the
+//! cap — an honest flag on a read surface. Pagination lands with the
+//! Control Room panel (plan roadmap). Owned world with zero findings → 200 +
 //! `{"findings": [], "truncated": false}` (PD-3).
 //!
 //! # Errors
@@ -52,6 +53,13 @@ use std::num::NonZeroU64;
 /// (AR-3). Pagination lands with the Control Room panel — roadmap.
 const WORLD_FINDINGS_CAP: usize = 500;
 
+/// SQL-side probe bound for the store query: one past
+/// [`WORLD_FINDINGS_CAP`], so the `LIMIT ?` returns the overflow row and
+/// `truncated` stays honest without loading the full set (Bugbot
+/// 4bad2fca). Derived from the cap so the two cannot drift.
+#[allow(clippy::cast_possible_wrap)] // const-evaluated literal (500): always fits i64
+const WORLD_FINDINGS_PROBE: i64 = WORLD_FINDINGS_CAP as i64 + 1;
+
 /// `GET /v1/daemon/worlds/:world_id/findings` — list world-attached
 /// check findings, newest-first, capped at [`WORLD_FINDINGS_CAP`].
 #[allow(clippy::missing_errors_doc)]
@@ -63,7 +71,11 @@ pub async fn list_world_findings(
     let pool = state.pool_or_uninit()?;
     require_world_owner(pool, &world_id, &creator_id).await?;
 
-    let rows = list_world_findings_by_world(pool, &world_id)
+    // Fetch one past the cap (501): the store bounds the read SQL-side via
+    // `LIMIT ?` (Bugbot 4bad2fca) — the +1 probe returns the single row
+    // just beyond the cap so `truncated` below stays honest without ever
+    // loading the full set.
+    let rows = list_world_findings_by_world(pool, &world_id, WORLD_FINDINGS_PROBE)
         .await
         .map_err(|e| NexusApiError::Internal {
             code: "DATABASE_ERROR".to_string(),

@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT finding_id as \"finding_id!\", world_id, schema_version, severity, status, title, description, kind, target_entry_id, source_anchor_json, suggested_fix, text_position_json, extensions_json, created_at, updated_at FROM world_findings WHERE world_id = ? ORDER BY created_at DESC, finding_id ASC",
+  "query": "SELECT finding_id as \"finding_id!\", world_id, schema_version, severity, status, title, description, kind, target_entry_id, source_anchor_json, suggested_fix, text_position_json, extensions_json, created_at, updated_at FROM world_findings WHERE world_id = ? AND target_entry_id = ? ORDER BY created_at DESC, finding_id ASC LIMIT ?",
   "describe": {
     "columns": [
       {
@@ -80,7 +80,7 @@
       }
     ],
     "parameters": {
-      "Right": 1
+      "Right": 3
     },
     "nullable": [
       true,
@@ -100,5 +100,5 @@
       false
     ]
   },
-  "hash": "6a63fa46f1372d66e9773292df47f3d992a010028217ff5f371d4a9a04787c9b"
+  "hash": "cfded5ec6572deddcc45930370e3eb08e7989a2641d68cf2212cbd676c00323c"
 }
