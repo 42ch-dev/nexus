@@ -9,3 +9,4 @@ export type { CreateForkResponse } from './create-fork-response';
 export type { CreateWorldRequest } from './create-world-request';
 export type { CreateWorldResponse } from './create-world-response';
 export type { WorldFindingsListResponse } from './world-findings-list-response';
+export type { WorldRulesListResponse } from './world-rules-list-response';

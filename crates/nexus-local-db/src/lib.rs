@@ -217,7 +217,7 @@ pub use force_gates_audit::{
 // Re-export spoke_rules types (V1.148 P1; production CRUD V1.166 DR-64 AR-3)
 pub use spoke_rules::{
     get_spoke_rules_by_ids, insert_rule, insert_spoke_rule_for_test, list_rules_by_world,
-    set_rule_status, SpokeRuleRow,
+    list_rules_by_world_limited, set_rule_status, SpokeRuleRow,
 };
 
 // Re-export runtime_lock types (V1.42 P0)

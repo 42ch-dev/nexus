@@ -173,6 +173,42 @@ pub async fn list_rules_by_world(
     Ok(rows)
 }
 
+/// Bounded world-scoped list for the read route (AR-3: SQL-side `LIMIT ?`
+/// probe — Bugbot 4bad2fca idiom, mirroring
+/// [`crate::world_findings::list_world_findings_by_world`]).
+///
+/// Same `canonical_name ASC, rule_id ASC` order as [`list_rules_by_world`];
+/// the caller passes `cap + 1` as `limit` so the overflow row proves
+/// truncation without loading the full set. `SQLite` treats a negative
+/// `LIMIT` as "no limit" — clamped so a buggy caller can never silently
+/// reintroduce the unbounded query.
+///
+/// # Errors
+///
+/// Returns [`LocalDbError::Sqlx`] on database failure.
+pub async fn list_rules_by_world_limited(
+    pool: &SqlitePool,
+    world_id: &str,
+    limit: i64,
+) -> Result<Vec<SpokeRuleRow>, LocalDbError> {
+    let limit = limit.max(0);
+    let rows = sqlx::query_as!(
+        SpokeRuleRow,
+        "SELECT rule_id, world_id, schema_version, canonical_name, kind, statement, \
+         description, target_entry_types_json, severity_hint, status, source_anchor_json, \
+         extensions_json, created_at, updated_at \
+         FROM spoke_rules \
+         WHERE world_id = ? \
+         ORDER BY canonical_name ASC, rule_id ASC \
+         LIMIT ?",
+        world_id,
+        limit,
+    )
+    .fetch_all(pool)
+    .await?;
+    Ok(rows)
+}
+
 /// Shared INSERT statement — the only `spoke_rules` write path. Kept private;
 /// the classification wrapper ([`insert_rule`]) owns the UNIQUE-violation
 /// mapping so callers never see raw sqlx errors.
