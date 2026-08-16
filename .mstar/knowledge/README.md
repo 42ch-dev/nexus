@@ -212,3 +212,11 @@ Engineering reference for the Nexus OSS harness **knowledge** tree.
 | --- | --- |
 | [conventions/crash-resilient-subagent-report-dispatch.md](conventions/crash-resilient-subagent-report-dispatch.md) | Long-running dispatches write report skeletons FIRST + append incrementally; mid-edit crashes require damage-survey re-dispatchs (4 crashes across V1.164–V1.165) |
 | [architecture-patterns/scope-discriminated-port-persistence.md](architecture-patterns/scope-discriminated-port-persistence.md) | Route single-method spoke port outputs to multiple nexus homes via extensions.nexus discriminator (world_id vs work_id; V1.165) — and the read-side twin: scope wrappers around spoke orchestrators must be adopted by BOTH callers + manifest compile guard certifies the real entrypoint + validation-gate placement follows wire topology (V1.166 run_checker) |
+
+### V1.167 additions
+
+| Document | Description |
+| --- | --- |
+| [architecture-patterns/creator-bootstrap-two-store-materialization.md](architecture-patterns/creator-bootstrap-two-store-materialization.md) | Creator bootstrap materializes TWO stores — minting an identity (global state.db) + setting active config is insufficient; the first workspace write FK-prechecks the per-creator+workspace db `creators` row (`ensure_creator_row` helper; register --local complete path; system identity create parity gap tracked) (V1.167 P2 dogfood-sweep fix distilled; compound V1.167) |
+| [workflow-patterns/cargo-lockfile-feature-independent-dependabot.md](workflow-patterns/cargo-lockfile-feature-independent-dependabot.md) | **Updated** — lockfile presence ≠ compile reachability: a default-feature-absent entry can be activated under a CI-built feature combo (yamux #41 via connect-host); triage with four probes incl. `cargo tree -i pkg@version --features …`; `cargo metadata` has no `--target` flag (V1.167 P1 disposition distilled) |
+| [workflow-patterns/nexus42-cli-home-resolution-hermetic.md](workflow-patterns/nexus42-cli-home-resolution-hermetic.md) | **Updated** — `creator register --local` is now the hermetic bootstrap path (V1.167 P2); plain register remains platform-only |

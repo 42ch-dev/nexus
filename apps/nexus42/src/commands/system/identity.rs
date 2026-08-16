@@ -150,7 +150,10 @@ async fn list_identities() -> Result<()> {
 }
 
 /// Create a new local identity.
-async fn create_identity(kind: IdentityKindArg, name: Option<String>) -> Result<()> {
+///
+/// `pub(crate)` since V1.167 P2 T1: `creator register --local` delegates
+/// here so local minting + active-creator write stay in one seam.
+pub(crate) async fn create_identity(kind: IdentityKindArg, name: Option<String>) -> Result<()> {
     // R3(identity): Validate display_name — reject empty or whitespace-only
     let trimmed_name = name.as_deref().map(str::trim).filter(|n| !n.is_empty());
     if let Some(raw) = &name {

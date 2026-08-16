@@ -1,6 +1,7 @@
 ---
 module: nexus42-cli
 date: 2026-08-08
+last_updated: 2026-08-16
 problem_type: developer_experience
 category: workflow-patterns
 severity: low
@@ -42,10 +43,13 @@ nexus-runtime ...                  # boots against the same temp home
 
 A walkthrough that "works" on the author's machine (real home present) silently
 pollutes the real `~/.nexus42` for anyone following it, and fails closed for
-anyone with an empty home. Same-class trap: `nexus42 creator register` is a
-platform operation (auth token + network; writes `auth.json`, not
-`config.toml`) — hermetic flows must use `workspace init`'s FS fallback
-(`active_creator_id=local`).
+anyone with an empty home. Same-class trap (updated V1.167): `nexus42 creator
+register` **without flags** is a platform operation (auth token + network;
+writes `auth.json`, not `config.toml`) — hermetic flows use `creator register
+--local --name <n>` (V1.167 P2: mints persistent `ctr_local*`, sets active,
+and materializes the workspace `creators` row so `world create` works — see
+[creator-bootstrap-two-store-materialization.md](../../architecture-patterns/creator-bootstrap-two-store-materialization.md))
+or `workspace init`'s FS fallback (`active_creator_id=local`).
 
 ## When to Apply
 
