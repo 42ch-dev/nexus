@@ -9,7 +9,7 @@ applies_when:
   - "Deciding whether removing an unused cargo feature closes a security alert"
   - "Triaging dependabot rust alerts blocked on upstream crate versions"
 tags: [cargo, dependabot, cargo-lock, feature-independent, hickory-proto, libp2p]
----
+last_updated: 2026-08-16
 
 # Cargo.lock is feature-independent — removing a feature does not remove its lockfile entries
 
@@ -74,3 +74,39 @@ Cargo.lock keeps hickory-proto/libp2p-mdns/libp2p-dns entries while
 libp2p 0.56.0 remains. Alerts close only with libp2p ≥0.57 (unreleased)."
 Deferral recorded with the upstream target; the feature removal shipped as
 cleanup, not as the alert fix.
+
+## Update (V1.167, 2026-08-16): lockfile presence ≠ compile reachability — triage with feature-combo probes
+
+Alert #41 (yamux 0.12.1, high) added a nuance the original doc did not
+separate: a lockfile entry can be **never compiled under default features**
+yet **activated under a feature combo CI actually builds**. In nexus,
+`yamux@0.12.1` is absent from the default resolve but is an activated dep
+(`libp2p 0.56.0 → libp2p-yamux 0.47.0 → {yamux 0.12.1, yamux 0.13.10}`) under
+`--features nexus42/connect-host` — the combo `runtime-build.yml` /
+`runtime-probe-build.yml` build for the `nexus-runtime` artifact. So #41 is a
+**real reachable vulnerability in that artifact**, while #42/#43
+(hickory-proto) remain lockfile-only false positives under every combo.
+
+Triage recipe (all four probes, `SQLX_OFFLINE=true`, from repo root):
+
+```bash
+# 1. Default-feature resolve — is the pkg absent by default?
+cargo metadata --format-version 1            # check resolve.nodes
+# 2. Feature-on resolve (the combo CI builds) — does it appear?
+cargo metadata --format-version 1 --features nexus42/connect-host
+# 3. Compile truth for the vulnerable version:
+cargo tree -p nexus42 --features connect-host --target all -i yamux@0.12.1
+# 4. Compile truth for the other pkg:
+cargo tree -p nexus42 --features connect-host --target all -i hickory-proto
+```
+
+Gotchas: `cargo metadata` has **no** `--target` flag (an invalid-flag run
+silently proves nothing — V1.167 grill grounding was corrected for exactly
+this); `cargo tree -i <pkg>@<version>` is the only probe that distinguishes
+two co-resolved versions of the same crate. Check which feature combos the CI
+workflows actually build before calling an entry "unreachable".
+
+Outcome pattern: disposition-with-evidence (probe transcripts in the
+iteration package) + upstream-unblock deferral; hand-pruned entries are
+re-added by the next resolve (verified again 2026-08-16: removing the
+hickory-proto block → next `cargo metadata` re-writes it).
