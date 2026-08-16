@@ -16,6 +16,7 @@
 pub mod cas;
 pub mod compute_runs;
 pub mod compute_session;
+pub mod creators;
 #[cfg(unix)]
 pub mod file_lock;
 pub mod findings;
@@ -72,6 +73,9 @@ pub use identity::{
     create_local_identity, delete_local_identity, get_local_identity, link_to_platform,
     list_local_identities, unlink_from_platform, LocalIdentityRow,
 };
+
+// Re-export creators types (V1.167 P2 T2)
+pub use creators::ensure_creator_row;
 
 // Re-export soul_meta types
 pub use soul_meta::{
