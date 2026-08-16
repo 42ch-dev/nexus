@@ -187,7 +187,7 @@ Archived from [deferred-features-cross-version-tracker.md](deferred-features-cro
 | Wire contracts | unchanged | `wire_contracts_changed: false` (CLI + local-db helper only) |
 | New residuals | 0 | zero-residual all plans |
 | Knowledge | 1 new + 2 updated | creator-bootstrap-two-store-materialization (new); cargo-lockfile-feature-independent-dependabot + nexus42-cli-home-resolution-hermetic (updated) |
-| **Merge** | (PR pending Phase 4) | integration `iteration/v1.167` |
+| **Merge** | PR #218 | merge commit `83281b14` (2026-08-16) |
 
 
 ### Shipped in V1.7
