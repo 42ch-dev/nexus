@@ -27,6 +27,7 @@ pub mod world;
 
 use crate::auth;
 use crate::challenge::{solve_challenge_with_fallback, UnavailableLlmSolver};
+use crate::commands::system::identity::{create_identity, IdentityKindArg};
 use crate::config::{
     find_workspace_root, nexus_home, workspace_config_path, workspace_nexus_dir, CliConfig,
     DEFAULT_WORKSPACE_SLUG,
@@ -329,7 +330,7 @@ fn print_next_steps() {
     println!("  nexus42 daemon schedule add --preset <id> --creator <id>");
     println!("                                 — start a preset-driven workflow");
     println!("  nexus42 platform auth login   — authenticate with the platform");
-    println!("  nexus42 creator register      — create a Creator entity");
+    println!("  nexus42 creator register --name <name> [--local]  — create a Creator entity");
     println!();
     println!("Workspace artifacts (stories, research reports) are created");
     println!("automatically by preset workflows as needed.");
@@ -485,7 +486,8 @@ pub enum CreatorCommand {
     /// Register a new Creator entity
     ///
     /// Creates a Creator identity on the platform and stores credentials locally.
-    /// Usage: nexus42 creator register --name "My Agent" [--source `cli|web_agent`] [--handle <handle>]
+    /// With `--local`, registers a local-only creator with no platform involvement.
+    /// Usage: nexus42 creator register --name "My Agent" [--source `cli|web_agent`] [--handle <handle>] [--local]
     Register {
         /// Display name for the Creator (required)
         #[arg(long)]
@@ -496,6 +498,9 @@ pub enum CreatorCommand {
         /// Creator handle — 4–15 chars, lowercase alphanumeric, dots, hyphens, underscores
         #[arg(long)]
         handle: Option<String>,
+        /// Register a local-only creator (no platform account; conflicts with --source/--handle)
+        #[arg(long, conflicts_with_all = ["source", "handle"])]
+        local: bool,
     },
 
     /// Switch the active Creator identity
@@ -702,7 +707,8 @@ pub async fn run(cmd: CreatorCommand, config: &CliConfig) -> Result<()> {
             name,
             source,
             handle,
-        } => register_creator(config, name, source, handle).await,
+            local,
+        } => register_creator(config, name, source, handle, local).await,
         CreatorCommand::Status { creator_id } => creator_status(config, creator_id).await,
         CreatorCommand::Use { creator_ref } => use_creator(config, creator_ref.as_str()).await,
         CreatorCommand::List => list_creators(config),
@@ -1093,12 +1099,19 @@ async fn register_creator(
     name: String,
     source: String,
     handle: Option<String>,
+    local: bool,
 ) -> Result<()> {
     // WS-B T4: validate name length (cheap check before regex)
     if name.len() > MAX_CREATOR_NAME_LENGTH {
         return Err(CliError::Other(format!(
             "Creator name exceeds maximum length ({MAX_CREATOR_NAME_LENGTH} characters)"
         )));
+    }
+    // --- Local-only mode (AC-V167-P2-1): delegate to identity machinery ---
+    // `--local` conflicts with `--source`/`--handle` at the clap layer, so
+    // platform-only concepts are guaranteed absent. No network is touched.
+    if local {
+        return register_local_creator(name).await;
     }
     // Validate handle if provided
     let validated_handle = match &handle {
@@ -1113,8 +1126,14 @@ async fn register_creator(
 
     // Try to find a user access token from the daemon-managed auth flow.
     // The PlatformClient requires a bearer token; if none is available,
-    // prompt the user to authenticate first.
-    let auth_token = obtain_auth_token(&auth_store)?;
+    // name both exits so the user isn't stuck: authenticate, or go local.
+    let auth_token = obtain_auth_token(&auth_store).map_err(|_| {
+        CliError::Other(
+            "Platform authentication required. Authenticate with `nexus42 platform auth login`, \
+             or re-run with `--local` for local-only mode."
+                .to_string(),
+        )
+    })?;
 
     // --- Step 2: Create platform client and call register ---
     println!("Registering creator \"{name}\"...");
@@ -1241,6 +1260,29 @@ async fn register_creator(
             message: "Account is permanently locked due to too many failed attempts.".to_string(),
         }),
     }
+}
+
+/// Register a local-only creator identity (AC-V167-P2-1).
+///
+/// Delegates to the shared identity machinery: [`create_identity`] mints the
+/// persistent `ctr_local*` identity via `create_local_identity` and writes
+/// `active_creator_id` (the same seam `system identity create`/`use` use), so
+/// there is exactly one minting path. No `PlatformClient` calls — zero network.
+async fn register_local_creator(name: String) -> Result<()> {
+    create_identity(IdentityKindArg::Persistent, Some(name)).await?;
+
+    // Read back the active creator id written by create_identity for the
+    // summary block — same readback pattern as `use_identity`.
+    let creator_id = CliConfig::load()?
+        .active_creator_id
+        .ok_or_else(|| CliError::Other("Local identity was not set as active.".to_string()))?;
+
+    println!();
+    println!("✓ Registered local creator: {creator_id}");
+    println!("  Local-only (no platform) — no platform account created.");
+    println!();
+
+    Ok(())
 }
 
 /// Submit a verification answer with automatic retry on wrong answer.
@@ -1501,7 +1543,7 @@ fn list_creators(_config: &CliConfig) -> Result<()> {
 
     if all_ids.is_empty() {
         println!("No registered Creators found.");
-        println!("Use: nexus42 creator register --name <name>");
+        println!("Use: nexus42 creator register --name <name> [--local]");
         return Ok(());
     }
 
@@ -2323,5 +2365,103 @@ mod tests {
             result.verify.is_none(),
             "gate-B2 verify should not be reached when gate-B1 fails"
         );
+    }
+
+    // ── V1.167 P2 T1: `creator register --local` ──────────────────
+
+    /// (a) AC-V167-P2-1: local register in an isolated HOME mints a
+    /// persistent `ctr_local*` identity and sets it active — with zero
+    /// platform involvement (no auth token anywhere in the store).
+    #[tokio::test]
+    async fn register_local_mints_ctr_local_and_sets_active() {
+        let _home = crate::testutil::isolated_home();
+        let config = CliConfig::load().expect("load default config");
+
+        register_creator(
+            &config,
+            "Local Tester".to_string(),
+            "cli".to_string(),
+            None,
+            true,
+        )
+        .await
+        .expect("local register should succeed");
+
+        // Active creator must be set to the freshly minted local identity.
+        let config = CliConfig::load().expect("reload config");
+        let active = config
+            .active_creator_id
+            .expect("active_creator_id should be set");
+        assert!(
+            active.starts_with("ctr_local"),
+            "expected a ctr_local* identity, got {active}"
+        );
+
+        // The identity must resolve through the shared resolution path as
+        // a persistent (non-anonymous, non-platform) local identity.
+        let resolved = crate::commands::system::identity::resolve_active_identity()
+            .await
+            .expect("resolve active identity")
+            .expect("active identity should resolve");
+        assert_eq!(resolved.creator_id, active);
+        assert!(resolved.is_persistent);
+        assert!(!resolved.is_anonymous);
+        assert!(!resolved.platform_linked);
+    }
+
+    /// (b) AC-V167-P2-2: platform-path register with no auth token fails
+    /// with a hint naming both exits — `platform auth login` and `--local`.
+    #[tokio::test]
+    async fn register_platform_without_auth_token_hints_both_exits() {
+        let _home = crate::testutil::isolated_home();
+        let config = CliConfig::load().expect("load default config");
+
+        let err = register_creator(
+            &config,
+            "No Auth".to_string(),
+            "cli".to_string(),
+            None,
+            false,
+        )
+        .await
+        .expect_err("platform register without a token must fail");
+
+        let display = format!("{err}");
+        assert!(
+            display.contains("platform auth login"),
+            "hint must name the auth exit; got: {display}"
+        );
+        assert!(
+            display.contains("--local"),
+            "hint must name the --local exit; got: {display}"
+        );
+    }
+
+    /// (c) AC-V167-P2-3: `--local` conflicts with the platform-only flags
+    /// `--source` and `--handle` at the clap layer.
+    #[test]
+    fn register_local_conflicts_with_source_and_handle() {
+        // Full CLI command tree (same builder `system completion` uses).
+        let command = crate::cli::build_command();
+
+        for args in [
+            vec![
+                "nexus42", "creator", "register", "--local", "--source", "cli", "--name", "T",
+            ],
+            vec![
+                "nexus42", "creator", "register", "--local", "--handle", "myagent", "--name", "T",
+            ],
+        ] {
+            let result = command.clone().try_get_matches_from(args);
+            assert!(
+                result.is_err(),
+                "--local must conflict with the platform-only flag"
+            );
+        }
+
+        // `--local` alone (with the required --name) parses fine.
+        let ok = command
+            .try_get_matches_from(["nexus42", "creator", "register", "--local", "--name", "T"]);
+        assert!(ok.is_ok(), "--local alone must parse: {ok:?}");
     }
 }
