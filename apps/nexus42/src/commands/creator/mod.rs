@@ -485,7 +485,7 @@ pub enum CreatorCommand {
     // ── Primary tier ────────────────────────────────────────────────
     /// Register a new Creator entity
     ///
-    /// Creates a Creator identity on the platform and stores credentials locally.
+    /// Creates a Creator identity (platform or local-only with `--local`).
     /// With `--local`, registers a local-only creator with no platform involvement.
     /// Usage: nexus42 creator register --name "My Agent" [--source `cli|web_agent`] [--handle <handle>] [--local]
     Register {
@@ -1127,12 +1127,16 @@ async fn register_creator(
     // Try to find a user access token from the daemon-managed auth flow.
     // The PlatformClient requires a bearer token; if none is available,
     // name both exits so the user isn't stuck: authenticate, or go local.
-    let auth_token = obtain_auth_token(&auth_store).map_err(|_| {
-        CliError::Other(
+    // Map only the no-token case to the dual-exit hint; any other error from
+    // `obtain_auth_token` (e.g. a future store-I/O failure) propagates unmapped
+    // so it is never masked as "Platform authentication required".
+    let auth_token = obtain_auth_token(&auth_store).map_err(|err| match err {
+        CliError::AuthenticationRequired => CliError::Other(
             "Platform authentication required. Authenticate with `nexus42 platform auth login`, \
              or re-run with `--local` for local-only mode."
                 .to_string(),
-        )
+        ),
+        other => other,
     })?;
 
     // --- Step 2: Create platform client and call register ---
@@ -1281,7 +1285,7 @@ async fn register_local_creator(name: String) -> Result<()> {
     create_identity(IdentityKindArg::Persistent, Some(name)).await?;
 
     // Read back the active creator id written by create_identity for the
-    // summary block — same readback pattern as `use_identity`.
+    // workspace `creators` row — same readback pattern as `use_identity`.
     let config = CliConfig::load()?;
     let creator_id = config
         .active_creator_id
@@ -1294,10 +1298,9 @@ async fn register_local_creator(name: String) -> Result<()> {
     let pool = crate::db::Schema::init(&db_path).await?;
     nexus_local_db::ensure_creator_row(&pool, creator_id, &display_name).await?;
 
-    println!();
-    println!("✓ Registered local creator: {creator_id}");
+    // `create_identity` already printed the mint + active lines; add the one
+    // local-only exit marker so the register flow still names its mode.
     println!("  Local-only (no platform) — no platform account created.");
-    println!();
 
     Ok(())
 }
@@ -2422,7 +2425,10 @@ mod tests {
         let pool = crate::db::Schema::init(&db_path)
             .await
             .expect("init workspace pool");
-        // SAFETY: one-off test assertion mirroring create_world's FK precheck.
+        // SAFETY: one-off test assertion mirroring create_world's FK precheck,
+        // intentionally stronger: narrative_write.rs:214 EXISTS checks
+        // creator_id only; here we also pin status = 'active' as written by
+        // ensure_creator_row.
         let creator_exists: i64 = sqlx::query_scalar(
             "SELECT EXISTS(SELECT 1 FROM creators WHERE creator_id = ? AND status = 'active')",
         )
@@ -2509,13 +2515,15 @@ mod tests {
         .expect_err("platform register without a token must fail");
 
         let display = format!("{err}");
-        assert!(
-            display.contains("platform auth login"),
-            "hint must name the auth exit; got: {display}"
-        );
-        assert!(
-            display.contains("--local"),
-            "hint must name the --local exit; got: {display}"
+        // Frozen one-block hint copy (see the map_err in `register_creator`):
+        // exact match after trim — a copy regression that drops or rewrites any
+        // word must fail this test, not just the two exit names.
+        assert_eq!(
+            display.trim(),
+            "Platform authentication required. Authenticate with `nexus42 platform auth login`, \
+             or re-run with `--local` for local-only mode."
+                .trim(),
+            "hint copy must be the frozen one-block string; got: {display}"
         );
     }
 
