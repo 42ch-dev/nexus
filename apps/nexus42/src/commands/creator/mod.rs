@@ -1268,14 +1268,31 @@ async fn register_creator(
 /// persistent `ctr_local*` identity via `create_local_identity` and writes
 /// `active_creator_id` (the same seam `system identity create`/`use` use), so
 /// there is exactly one minting path. No `PlatformClient` calls — zero network.
+///
+/// V1.167 P2 T2: after the identity is active, the workspace state db
+/// `creators` row is materialized via [`nexus_local_db::ensure_creator_row`] —
+/// `create_world` prechecks that table for the owner creator, so the bootstrap
+/// must complete (or error honestly) here rather than deferring the failure to
+/// a confusing `creator world create` FK error.
 async fn register_local_creator(name: String) -> Result<()> {
+    // `create_identity` stores the R3-trimmed name on the identity; mirror it
+    // for the workspace `creators` row so both tables agree on display_name.
+    let display_name = name.trim().to_string();
     create_identity(IdentityKindArg::Persistent, Some(name)).await?;
 
     // Read back the active creator id written by create_identity for the
     // summary block — same readback pattern as `use_identity`.
-    let creator_id = CliConfig::load()?
+    let config = CliConfig::load()?;
+    let creator_id = config
         .active_creator_id
+        .as_deref()
         .ok_or_else(|| CliError::Other("Local identity was not set as active.".to_string()))?;
+
+    // Resolve the workspace state db exactly like `creator world create` does,
+    // then materialize the `creators` row the FK precheck requires.
+    let db_path = crate::config::resolve_state_db_path(&config)?;
+    let pool = crate::db::Schema::init(&db_path).await?;
+    nexus_local_db::ensure_creator_row(&pool, creator_id, &display_name).await?;
 
     println!();
     println!("✓ Registered local creator: {creator_id}");
@@ -2391,10 +2408,31 @@ mod tests {
         let config = CliConfig::load().expect("reload config");
         let active = config
             .active_creator_id
+            .as_deref()
             .expect("active_creator_id should be set");
         assert!(
             active.starts_with("ctr_local"),
             "expected a ctr_local* identity, got {active}"
+        );
+
+        // V1.167 P2 T2 (AC-V167-P2-1 second half): the workspace state db
+        // `creators` row must exist so `creator world create` passes its FK
+        // precheck — same resolution seam as `creator world create`.
+        let db_path = crate::config::resolve_state_db_path(&config).expect("resolve state db path");
+        let pool = crate::db::Schema::init(&db_path)
+            .await
+            .expect("init workspace pool");
+        // SAFETY: one-off test assertion mirroring create_world's FK precheck.
+        let creator_exists: i64 = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM creators WHERE creator_id = ? AND status = 'active')",
+        )
+        .bind(active)
+        .fetch_one(&pool)
+        .await
+        .expect("query workspace creators row");
+        assert_eq!(
+            creator_exists, 1,
+            "workspace creators row must exist for the registered local creator"
         );
 
         // The identity must resolve through the shared resolution path as
@@ -2407,6 +2445,50 @@ mod tests {
         assert!(resolved.is_persistent);
         assert!(!resolved.is_anonymous);
         assert!(!resolved.platform_linked);
+    }
+
+    /// (d) V1.167 P2 T2 (AC-V167-P2-1 second half): after `register --local`,
+    /// `create_world` on the resolved workspace pool succeeds — the missing
+    /// `creators` row is materialized by the register bootstrap, no daemon
+    /// HTTP workaround required.
+    #[tokio::test]
+    async fn register_local_then_world_create_succeeds() {
+        let _home = crate::testutil::isolated_home();
+        let config = CliConfig::load().expect("load default config");
+
+        register_creator(
+            &config,
+            "World Builder".to_string(),
+            "cli".to_string(),
+            None,
+            true,
+        )
+        .await
+        .expect("local register should succeed");
+
+        let config = CliConfig::load().expect("reload config");
+        let active = config
+            .active_creator_id
+            .as_deref()
+            .expect("active_creator_id should be set");
+
+        // Resolve the workspace state db exactly like `creator world create`.
+        let db_path = crate::config::resolve_state_db_path(&config).expect("resolve state db path");
+        let pool = crate::db::Schema::init(&db_path)
+            .await
+            .expect("init workspace pool");
+
+        let result = nexus_local_db::create_world(
+            &pool,
+            active,
+            "Test World",
+            "test-world",
+            "public",
+            "manual",
+        )
+        .await
+        .expect("create_world must succeed after local register (no HTTP workaround)");
+        assert!(result.world_id.starts_with("wld_"));
     }
 
     /// (b) AC-V167-P2-2: platform-path register with no auth token fails
