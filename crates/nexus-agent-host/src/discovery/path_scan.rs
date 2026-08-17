@@ -1,8 +1,9 @@
-//! PATH-based discovery for Wave 1 native CLI providers.
+//! PATH-based discovery for native CLI providers.
 //!
-//! Scans the `PATH` environment variable for known commands. Wave 1 supports
-//! only `claude`. Native CLI entries use distinct `provider_ids` (e.g., `claude-native`)
-//! to avoid collision with ACP registry's `claude` (R-004, R-008).
+//! Scans the `PATH` environment variable for known commands (`claude`,
+//! `codex`, `dsh-jsonrpc-agent`). Native CLI entries use distinct
+//! `provider_ids` (e.g., `claude-native`) to avoid collision with ACP
+//! registry's `claude` (R-004, R-008).
 //!
 //! # Cross-platform probe (DF-26)
 //!
@@ -25,11 +26,19 @@ use crate::error::{HostError, HostResult};
 use crate::ids::ProviderId;
 use crate::{DiscoverySource, LaunchStrategy, ProviderCatalogEntry, TrustLevel};
 
-/// Wave 1 known CLI commands and their provider ID mappings.
+/// Known CLI commands and their provider ID mappings.
 ///
 /// Each entry maps a command name to a distinct `provider_id` that won't collide
-/// with ACP registry agent IDs.
-const KNOWN_COMMANDS: &[(&str, &str)] = &[("claude", "claude-native"), ("codex", "codex-native")];
+/// with ACP registry agent IDs. `dsh-jsonrpc-agent` maps to `dsh-native`
+/// (PD-4): the same command is also honored via the `DSH_RUNTIME_BIN` env
+/// var, and the scan emits a `dsh-native` row for that route too — a
+/// non-empty `DSH_RUNTIME_BIN` counts as present even when the command is
+/// not on PATH (same catalog fields, same dedup/suppression rules).
+const KNOWN_COMMANDS: &[(&str, &str)] = &[
+    ("claude", "claude-native"),
+    ("codex", "codex-native"),
+    ("dsh-jsonrpc-agent", "dsh-native"),
+];
 
 /// Discover native CLI providers by scanning PATH.
 ///
@@ -93,27 +102,54 @@ pub fn scan_path_in(
             continue;
         }
 
-        // Search the provided dirs (and process PATH as a which fallback).
-        if let Some(found_path) = find_command(path_dirs, cmd) {
+        // The dsh row advertises the AR-6 documented narrower descriptor
+        // (`streaming`/`cancellation` false — the SDK surface has neither),
+        // never the broader native CLI claim; claude/codex keep
+        // `native_cli_limited()`.
+        let capabilities = if provider_id_str == "dsh-native" {
+            CapabilityDescriptor::dsh_limited()
+        } else {
+            CapabilityDescriptor::native_cli_limited()
+        };
+
+        let mut push_row = |command: String| {
             entries.push(ProviderCatalogEntry {
                 provider_id: pid.clone(),
                 display_name: format!("{cmd} (native CLI)"),
                 protocol_kind: ProtocolKind::NativeCli,
                 launch: LaunchStrategy::NativeCli {
-                    command: found_path.to_string_lossy().into_owned(),
+                    command,
                     args: vec![],
                     env: HashMap::new(),
                 },
                 source: DiscoverySource::PathScan,
                 trust: TrustLevel::LocalPath,
-                capabilities: CapabilityDescriptor::native_cli_limited(),
+                capabilities: capabilities.clone(),
                 health: ProviderHealth {
-                    provider_id: pid,
+                    provider_id: pid.clone(),
                     available: true,
                     latency_ms: None,
                     message: None,
                 },
             });
+        };
+
+        // Search the provided dirs (and process PATH as a which fallback).
+        if let Some(found_path) = find_command(path_dirs, cmd) {
+            push_row(found_path.to_string_lossy().into_owned());
+        } else if cmd == "dsh-jsonrpc-agent" {
+            // Env route (PD-4): a non-empty `DSH_RUNTIME_BIN` counts as
+            // present even when the command is not on PATH — same catalog
+            // row, same fields (the launch command carries the env value;
+            // the SDK resolves the env var itself when a provider is
+            // spawned from this entry, `resolve_runtime` order 3). Only
+            // reached when the PATH lookup missed, so the two routes can
+            // never duplicate the row.
+            if let Some(env_bin) = std::env::var_os("DSH_RUNTIME_BIN") {
+                if !env_bin.is_empty() {
+                    push_row(env_bin.to_string_lossy().into_owned());
+                }
+            }
         }
     }
 
@@ -196,6 +232,17 @@ pub fn scan_custom_path(
             continue;
         }
 
+        // Same capability honesty as the production scan: the dsh row
+        // carries the AR-6 narrower descriptor. The `DSH_RUNTIME_BIN`
+        // env route is intentionally absent here — this helper is the
+        // custom-PATH test seam and stays deterministic against the
+        // process environment.
+        let capabilities = if provider_id_str == "dsh-native" {
+            CapabilityDescriptor::dsh_limited()
+        } else {
+            CapabilityDescriptor::native_cli_limited()
+        };
+
         if let Some(found_path) = find_command_in_dirs(custom_path_dirs, cmd) {
             entries.push(ProviderCatalogEntry {
                 provider_id: pid.clone(),
@@ -208,7 +255,7 @@ pub fn scan_custom_path(
                 },
                 source: DiscoverySource::PathScan,
                 trust: TrustLevel::LocalPath,
-                capabilities: CapabilityDescriptor::native_cli_limited(),
+                capabilities,
                 health: ProviderHealth {
                     provider_id: pid,
                     available: true,
@@ -296,10 +343,12 @@ mod tests {
         assert!(entries.is_empty(), "suppressed ID should be skipped");
     }
 
-    /// Serialize tests that mutate `PATH` so concurrent tests do not see each
-    /// other's isolated environments. Mirrors the `SCAN_PATH_LOCK` pattern in
-    /// `crates/nexus-daemon-runtime/src/api/handlers/agent_host.rs:934`.
-    static SCAN_PATH_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    // PATH / DSH_RUNTIME_BIN mutations below use the crate-wide
+    // `PROCESS_ENV_LOCK` (lib.rs `test_support`), which ALSO serializes
+    // against the python-fixture spawn tests in claude/codex/dsh: the
+    // fixtures' `#!/usr/bin/env python3` shebang resolves python3 through
+    // the process PATH, so a concurrently isolated PATH kills the child
+    // (flaky stream_closed / missing-REQ_LOG failures).
 
     /// RAII guard that replaces `PATH` with a single directory on construction
     /// and restores the previous value on drop. Ensures the test genuinely
@@ -329,8 +378,40 @@ mod tests {
         }
     }
 
+    /// RAII guard that replaces `DSH_RUNTIME_BIN` on construction and
+    /// restores the previous value on drop. The dsh env-route tests must
+    /// not inherit (or leak) a developer's env value — boot and probe
+    /// treat a non-empty value as present, so determinism requires
+    /// explicit control.
+    struct DshEnvGuard {
+        previous: Option<String>,
+    }
+
+    impl DshEnvGuard {
+        fn set(value: &str) -> Self {
+            let previous = std::env::var("DSH_RUNTIME_BIN").ok();
+            std::env::set_var("DSH_RUNTIME_BIN", value);
+            Self { previous }
+        }
+
+        fn remove() -> Self {
+            let previous = std::env::var("DSH_RUNTIME_BIN").ok();
+            std::env::remove_var("DSH_RUNTIME_BIN");
+            Self { previous }
+        }
+    }
+
+    impl Drop for DshEnvGuard {
+        fn drop(&mut self) {
+            match &self.previous {
+                Some(value) => std::env::set_var("DSH_RUNTIME_BIN", value),
+                None => std::env::remove_var("DSH_RUNTIME_BIN"),
+            }
+        }
+    }
+
     /// Verify that `scan_path_in` (the production scan path, not the test-only
-    /// `scan_custom_path` helper) discovers BOTH native CLI providers when both
+    /// `scan_custom_path` helper) discovers ALL native CLI providers when the
     /// stub binaries are present and executable in the scanned directory.
     ///
     /// This exercises `find_command` → `which::which_in` (the primary
@@ -341,27 +422,36 @@ mod tests {
     ///
     /// **PATH isolation (qc1 W-002):** `find_command` has a fallback that
     /// calls `which::which(command)` against the process PATH. If the host has
-    /// real `codex`/`claude` installed, that fallback would make the test pass
-    /// even without the stubs. `PathGuard::isolate(temp_dir)` replaces PATH
-    /// with the temp directory for the test scope so the test genuinely
-    /// depends on the stubs.
+    /// real `codex`/`claude`/`dsh-jsonrpc-agent` installed, that fallback
+    /// would make the test pass even without the stubs. `PathGuard::isolate(temp_dir)`
+    /// replaces PATH with the temp directory for the test scope so the test
+    /// genuinely depends on the stubs.
     #[test]
-    fn scan_path_in_discovers_both_providers_when_stubs_executable() {
-        let _lock = SCAN_PATH_LOCK.lock().expect("lock scan tests");
+    fn scan_path_in_discovers_all_native_providers_when_stubs_executable() {
+        let _lock = crate::test_support::PROCESS_ENV_LOCK
+            .lock()
+            .expect("lock env tests");
 
         let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
 
         let claude_path = temp_dir.path().join("claude");
         let codex_path = temp_dir.path().join("codex");
+        let dsh_path = temp_dir.path().join("dsh-jsonrpc-agent");
         std::fs::write(&claude_path, "#!/bin/sh\necho hello\n").expect("write claude stub");
         std::fs::write(&codex_path, "#!/bin/sh\necho hello\n").expect("write codex stub");
+        std::fs::write(&dsh_path, "#!/bin/sh\necho hello\n").expect("write dsh stub");
 
         set_executable(&claude_path);
         set_executable(&codex_path);
+        set_executable(&dsh_path);
 
         // Isolate PATH so the test depends on the stubs, not on any real
-        // codex/claude that might be installed on the host (qc1 W-002).
+        // codex/claude/dsh-jsonrpc-agent that might be installed on the host
+        // (qc1 W-002).
         let _path_guard = PathGuard::isolate(temp_dir.path());
+        // A set `DSH_RUNTIME_BIN` must not duplicate the PATH-found dsh
+        // row (the PATH route wins; the env route only fires on a miss).
+        let _env_guard = DshEnvGuard::set("/opt/dsh/dsh-jsonrpc-agent");
 
         let config = AgentHostConfig::default();
         let entries = scan_path_in(&config, &[], &[temp_dir.path().to_path_buf()])
@@ -369,8 +459,8 @@ mod tests {
 
         assert_eq!(
             entries.len(),
-            2,
-            "both codex and claude should be discovered"
+            3,
+            "codex, claude, and dsh-jsonrpc-agent should all be discovered"
         );
 
         let ids: Vec<&str> = entries.iter().map(|e| e.provider_id.0.as_str()).collect();
@@ -382,6 +472,7 @@ mod tests {
             ids.contains(&"claude-native"),
             "claude-native missing: {ids:?}"
         );
+        assert!(ids.contains(&"dsh-native"), "dsh-native missing: {ids:?}");
 
         for entry in &entries {
             assert_eq!(entry.protocol_kind, ProtocolKind::NativeCli);
@@ -389,6 +480,126 @@ mod tests {
             assert_eq!(entry.trust, TrustLevel::LocalPath);
             assert!(entry.health.available, "entry should be marked available");
         }
+
+        // B-2: the dsh row advertises the AR-6 narrower descriptor, never
+        // the broader native CLI claim; claude/codex keep the native CLI
+        // descriptor.
+        for entry in &entries {
+            match entry.provider_id.0.as_str() {
+                "dsh-native" => {
+                    assert!(
+                        !entry.capabilities.streaming,
+                        "dsh-native must not claim streaming (AR-6)"
+                    );
+                    assert!(
+                        !entry.capabilities.cancellation,
+                        "dsh-native must not claim cancellation (AR-6)"
+                    );
+                    assert!(entry.capabilities.session_restore);
+                }
+                "claude-native" | "codex-native" => {
+                    assert!(entry.capabilities.streaming);
+                    assert!(entry.capabilities.cancellation);
+                }
+                other => panic!("unexpected entry: {other}"),
+            }
+        }
+    }
+
+    /// B-1 env-only case: with `dsh-jsonrpc-agent` NOT on the scanned dirs
+    /// but `DSH_RUNTIME_BIN` set-and-nonempty, `scan_path_in` still emits
+    /// the `dsh-native` catalog row (PD-4 parity with daemon boot) — same
+    /// fields as the PATH row, with the env value as the launch command
+    /// and the AR-6 descriptor.
+    #[test]
+    fn scan_path_in_emits_env_route_dsh_row_when_env_set() {
+        let _lock = crate::test_support::PROCESS_ENV_LOCK
+            .lock()
+            .expect("lock env tests");
+
+        let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
+        let _path_guard = PathGuard::isolate(temp_dir.path());
+        let _env_guard = DshEnvGuard::set("/opt/dsh/dsh-jsonrpc-agent");
+
+        let config = AgentHostConfig::default();
+        let entries = scan_path_in(&config, &[], &[temp_dir.path().to_path_buf()])
+            .expect("scan_path_in should succeed");
+
+        assert_eq!(
+            entries.len(),
+            1,
+            "env-only dsh must be the only entry: {entries:?}"
+        );
+        let dsh = &entries[0];
+        assert_eq!(dsh.provider_id.0, "dsh-native");
+        assert_eq!(dsh.protocol_kind, ProtocolKind::NativeCli);
+        assert_eq!(dsh.source, DiscoverySource::PathScan);
+        assert_eq!(dsh.trust, TrustLevel::LocalPath);
+        assert!(dsh.health.available);
+        let LaunchStrategy::NativeCli { command, args, env } = &dsh.launch else {
+            panic!("dsh row must be a NativeCli launch");
+        };
+        assert_eq!(command, "/opt/dsh/dsh-jsonrpc-agent");
+        assert!(args.is_empty());
+        assert!(env.is_empty());
+        assert!(
+            !dsh.capabilities.streaming,
+            "dsh row must not claim streaming (AR-6)"
+        );
+        assert!(
+            !dsh.capabilities.cancellation,
+            "dsh row must not claim cancellation (AR-6)"
+        );
+        assert!(dsh.capabilities.session_restore);
+    }
+
+    /// B-1 absent case: no `dsh-jsonrpc-agent` on the scanned dirs and
+    /// `DSH_RUNTIME_BIN` unset/empty → no `dsh-native` row at all.
+    #[test]
+    fn scan_path_in_omits_dsh_row_when_command_absent_and_env_unset() {
+        let _lock = crate::test_support::PROCESS_ENV_LOCK
+            .lock()
+            .expect("lock env tests");
+
+        let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
+        let _path_guard = PathGuard::isolate(temp_dir.path());
+        let _env_guard = DshEnvGuard::remove();
+
+        let config = AgentHostConfig::default();
+        let entries = scan_path_in(&config, &[], &[temp_dir.path().to_path_buf()])
+            .expect("scan_path_in should succeed");
+
+        assert!(
+            entries.is_empty(),
+            "no provider may be listed when nothing is discoverable: {entries:?}"
+        );
+    }
+
+    /// B-1 suppression case: the env-route row respects the same
+    /// suppression rules as the PATH row — a suppressed `dsh-native` stays
+    /// absent even when `DSH_RUNTIME_BIN` is set.
+    #[test]
+    fn scan_path_in_suppresses_env_route_dsh_row() {
+        let _lock = crate::test_support::PROCESS_ENV_LOCK
+            .lock()
+            .expect("lock env tests");
+
+        let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
+        let _path_guard = PathGuard::isolate(temp_dir.path());
+        let _env_guard = DshEnvGuard::set("/opt/dsh/dsh-jsonrpc-agent");
+
+        let config = AgentHostConfig::default();
+        let entries = scan_path_in(
+            &config,
+            &[ProviderId::new("dsh-native")],
+            &[temp_dir.path().to_path_buf()],
+        )
+        .expect("scan_path_in should succeed");
+
+        assert!(
+            entries.is_empty(),
+            "suppressed dsh-native must stay absent even with DSH_RUNTIME_BIN set: {entries:?}"
+        );
     }
 
     /// Set the executable bit on a path (Unix only).
@@ -413,12 +624,15 @@ mod tests {
 
     #[test]
     fn known_commands_mapping() {
-        // Verify Wave 1 mapping: claude -> claude-native, codex -> codex-native
-        assert_eq!(KNOWN_COMMANDS.len(), 2);
+        // Verify the mapping: claude -> claude-native, codex -> codex-native,
+        // dsh-jsonrpc-agent -> dsh-native
+        assert_eq!(KNOWN_COMMANDS.len(), 3);
         assert_eq!(KNOWN_COMMANDS[0].0, "claude");
         assert_eq!(KNOWN_COMMANDS[0].1, "claude-native");
         assert_eq!(KNOWN_COMMANDS[1].0, "codex");
         assert_eq!(KNOWN_COMMANDS[1].1, "codex-native");
+        assert_eq!(KNOWN_COMMANDS[2].0, "dsh-jsonrpc-agent");
+        assert_eq!(KNOWN_COMMANDS[2].1, "dsh-native");
     }
 
     // ── DF-26: Cross-platform probe tests (AH5.1) ─────────────────────
