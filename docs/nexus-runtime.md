@@ -4,8 +4,9 @@
 spoke-connect invoke surface against the shared `~/.nexus42` home and the
 active workspace database, with no daemon HTTP router, no embedded web UI,
 and no Setup/Canvas/Control Room. It is the integration surface for
-third-party reasoners that talk to a nexus installation over spoke-connect
-(pinned `=0.9.2`).
+third-party reasoners that talk to a nexus installation over spoke-connect.
+Use the spoke-connect client version that matches your `nexus-runtime` build
+— the wire contract is negotiated by your client, not pinned here.
 
 `nexus42 connect start` is the in-app equivalent: the same boot
 (`connect::build_host_config`), the same invoke surface, the same fail-closed
@@ -87,7 +88,7 @@ upsert  promote  relate  check  assemble  compute
 
 - Everything else — `project`, unknown ops — is refused with
   `op_unsupported`.
-- Caller identity is the authenticated session peer (spoke-connect 0.9.2
+- Caller identity is the authenticated session peer (spoke-connect
   `InvokeHandlerV2`); the payload `extensions.nexus.peer_id` is informational
   only and must match the session peer.
 - Per-invoke gates, all fail-closed: op scope → world scope (every target
