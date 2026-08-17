@@ -26,17 +26,17 @@
 //! read-only command actions (`Allow`) are accepted, everything else
 //! (`Ask` / `Deny`) is denied (headless fail-safe, logged).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use codex_codes::messages::ServerRequest;
+use codex_codes::messages::{Notification, ServerRequest};
 use codex_codes::protocol::{
     AskForApproval, CommandAction, SandboxPolicy, TurnInterruptParams, TurnStartParams, UserInput,
 };
 use codex_codes::{AsyncClient, Error as CodexError, RequestId, ServerMessage};
 use futures_util::StreamExt;
-use tokio::sync::RwLock;
+use tokio::sync::{Mutex, RwLock};
 
 use crate::capability::model::{
     CapabilityDescriptor, HostContentBlock, HostEvent, HostEventStream, ManagedSessionHandle,
@@ -48,8 +48,12 @@ use crate::ids::{HostOperationId, HostSessionId, ProviderId};
 use crate::providers::native_cli::map_codex::{classify_stream_error, map_codex};
 use crate::ProviderAdapter;
 
-/// Internal state for a managed codex native session.
-struct NativeSession {
+/// Crate-client-scoped state for a managed codex session, guarded by the
+/// per-session mutex (B-2): only this session's operations contend on it —
+/// cancel/shutdown of other sessions never wait on this session's frame
+/// reads or setup RPCs. The provider-global registry `RwLock` is only for
+/// short lookups.
+struct ClientState {
     /// The codex app-server async client, started lazily on the first
     /// execute. Dropping it kills the app-server process — no raw `Child`
     /// handles are tracked by the provider.
@@ -59,8 +63,15 @@ struct NativeSession {
     /// the app-server restarts (AR-5).
     thread_id: Option<String>,
     /// The turn currently streaming on this session, used by `cancel()` /
-    /// stream-timeout `turn/interrupt`. Cleared when the stream ends.
+    /// stream-timeout `turn/interrupt` and to filter stale notifications
+    /// (B-1). Cleared when the stream ends.
     active_turn_id: Option<String>,
+}
+
+/// Internal state for a managed codex native session.
+struct NativeSession {
+    /// Per-session lock around the crate client and turn state (B-2).
+    state: Arc<Mutex<ClientState>>,
     /// Working directory for the app-server process, retained from
     /// `LaunchSpec::cwd`.
     cwd: std::path::PathBuf,
@@ -68,12 +79,20 @@ struct NativeSession {
 
 impl std::fmt::Debug for NativeSession {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("NativeSession")
-            .field("client_started", &self.client.is_some())
-            .field("thread_id", &self.thread_id.as_deref())
-            .field("active_turn_id", &self.active_turn_id.as_deref())
-            .field("cwd", &self.cwd.display())
-            .finish()
+        let mut debug = f.debug_struct("NativeSession");
+        debug.field("cwd", &self.cwd.display());
+        match self.state.try_lock() {
+            Ok(state) => {
+                debug
+                    .field("client_started", &state.client.is_some())
+                    .field("thread_id", &state.thread_id.as_deref())
+                    .field("active_turn_id", &state.active_turn_id.as_deref());
+            }
+            Err(_) => {
+                debug.field("client_state", &"<locked>");
+            }
+        }
+        debug.finish()
     }
 }
 
@@ -140,32 +159,42 @@ impl CodexNativeProvider {
     /// (`ServerClosed` / `ConnectionClosed` on `turn/start`), the dead
     /// client is dropped, a fresh app-server is started, and the thread is
     /// restored with `thread/resume` before retrying once (AR-5).
-    // The session lock is deliberately held across the whole setup (client +
-    // thread + turn/start) so a concurrent execute/shutdown cannot race a
-    // half-initialized session; the significant_drop_tightening suggestion
-    // to drop it early would break that invariant. too_many_lines: the
-    // restart/retry loop reads linearly and splitting it would obscure it.
+    // The per-session lock is deliberately held across the whole setup
+    // (client + thread + turn/start) so a concurrent execute/cancel/shutdown
+    // cannot race a half-initialized session — and, unlike the old
+    // provider-global write lock (B-2), only this session's operations are
+    // serialized by it. too_many_lines: the restart/retry loop reads
+    // linearly and splitting it would obscure it.
     #[allow(clippy::significant_drop_tightening, clippy::too_many_lines)]
     async fn ensure_client_and_start_turn(
         &self,
         session_id: &HostSessionId,
         prompt_text: &str,
     ) -> HostResult<String> {
-        let mut sessions = self.sessions.write().await;
-        let native_session = sessions.get_mut(session_id).ok_or_else(|| {
-            HostError::internal(format!(
-                "session {session_id} not found in native CLI provider"
-            ))
-        })?;
+        // Clone the per-session state under a short registry read (B-2);
+        // every setup RPC then runs under the per-session lock only.
+        let (state, cwd) = {
+            let sessions = self.sessions.read().await;
+            let native_session = sessions.get(session_id).ok_or_else(|| {
+                HostError::internal(format!(
+                    "session {session_id} not found in native CLI provider"
+                ))
+            })?;
+            let state = Arc::clone(&native_session.state);
+            let cwd = native_session.cwd.clone();
+            drop(sessions);
+            (state, cwd)
+        };
 
+        let mut guard = state.lock().await;
         let mut attempts = 0;
         loop {
             attempts += 1;
 
-            if native_session.client.is_none() {
+            if guard.client.is_none() {
                 let builder = codex_codes::AppServerBuilder::new()
                     .command(self.command.clone())
-                    .working_directory(native_session.cwd.clone())
+                    .working_directory(cwd.clone())
                     .envs(self.env.clone());
                 let client = codex_codes::AsyncClient::start_with(builder)
                     .await
@@ -176,19 +205,17 @@ impl CodexNativeProvider {
                             Some(e.to_string()),
                         )
                     })?;
-                native_session.client = Some(client);
+                guard.client = Some(client);
             }
 
-            let client = native_session
-                .client
-                .as_mut()
-                .expect("client was just ensured");
-
-            let thread_id = if let Some(thread_id) = native_session.thread_id.as_ref() {
+            let thread_id = if let Some(thread_id) = guard.thread_id.clone() {
                 if attempts > 1 {
                     // The app-server restarted: replay thread history so
                     // turns continue where they left off (AR-5).
-                    client
+                    guard
+                        .client
+                        .as_mut()
+                        .expect("client was just ensured")
                         .thread_resume(&codex_codes::ThreadResumeParams {
                             thread_id: thread_id.clone(),
                             ..codex_codes::ThreadResumeParams::default()
@@ -207,16 +234,19 @@ impl CodexNativeProvider {
                         "Codex app-server restarted; thread resumed"
                     );
                 }
-                thread_id.clone()
+                thread_id
             } else {
-                let response = client
+                let response = guard
+                    .client
+                    .as_mut()
+                    .expect("client was just ensured")
                     .thread_start(&codex_codes::ThreadStartParams::default())
                     .await
                     .map_err(|e| {
                         HostError::protocol_error("codex thread start failed", Some(e.to_string()))
                     })?;
                 let thread_id = response.thread.id.clone();
-                native_session.thread_id = Some(thread_id.clone());
+                guard.thread_id = Some(thread_id.clone());
                 tracing::info!(
                     session_id = %session_id,
                     provider_id = %self.provider_id,
@@ -229,7 +259,10 @@ impl CodexNativeProvider {
             // AR-4: every turn/start runs inside the read-only sandbox with
             // no approval prompts — never more writable than today's
             // headless `-s read-only`.
-            match client
+            match guard
+                .client
+                .as_mut()
+                .expect("client was just ensured")
                 .turn_start(&TurnStartParams {
                     thread_id,
                     input: vec![UserInput::Text {
@@ -245,21 +278,21 @@ impl CodexNativeProvider {
                 .await
             {
                 Ok(response) => {
-                    native_session.active_turn_id = Some(response.turn.id.clone());
+                    guard.active_turn_id = Some(response.turn.id.clone());
                     return Ok(response.turn.id);
                 }
                 // The app-server died between turns — reconnect once and
                 // resume the thread (AR-5). Only when a thread already
                 // exists; a fresh session re-attempts from thread/start.
                 Err(CodexError::ServerClosed | CodexError::ConnectionClosed)
-                    if attempts == 1 && native_session.thread_id.is_some() =>
+                    if attempts == 1 && guard.thread_id.is_some() =>
                 {
                     tracing::warn!(
                         session_id = %session_id,
                         provider_id = %self.provider_id,
                         "Codex app-server connection lost; restarting client",
                     );
-                    native_session.client = None;
+                    guard.client = None;
                 }
                 Err(error) => {
                     return Err(HostError::protocol_error(
@@ -273,22 +306,28 @@ impl CodexNativeProvider {
 
     /// Build the event stream for an active turn.
     ///
-    /// Pumps `AsyncClient::next_message` under the session lock with a
-    /// per-frame timeout (parity with the old stdout line timeout) and maps
-    /// every frame through the T1 `map_codex` mapper. Emits at most one
-    /// terminal event:
+    /// Pumps `AsyncClient::next_message` under the per-session lock (B-2;
+    /// only this session's operations contend on it) with a per-frame
+    /// timeout (parity with the old stdout line timeout) and maps every
+    /// frame through the T1 `map_codex` mapper. Emits at most one terminal
+    /// event:
     ///
     /// - `TurnCompleted` with a mapped terminal ends the stream.
     /// - `Ok(None)` at EOF (or the session being torn down by `shutdown()`)
     ///   before a terminal → one `OpFailed(stream_closed)` (PD-3 stream
     ///   abort / stream-abort backstop).
-    /// - A crate stream error (`Error::Deserialization` and kin) → one
-    ///   `OpFailed` from `classify_stream_error` (AR-7).
-    /// - A per-frame read timeout interrupts the turn and emits one
-    ///   `OpFailed(timeout)`.
+    /// - A crate stream error (`Error::Deserialization` and kin) interrupts
+    ///   the server-side turn, drains its leftover terminal (B-1), and
+    ///   emits one `OpFailed` from `classify_stream_error` (AR-7).
+    /// - A per-frame read timeout interrupts the turn, drains its leftover
+    ///   terminal (B-1), and emits one `OpFailed(timeout)`.
     ///
-    /// Residual approval server-requests are auto-answered (AR-4) and never
-    /// surface as host events.
+    /// Turn-scoped notifications whose turn id does not match the session's
+    /// `active_turn_id` are skipped (B-1): a stale terminal left in the pipe
+    /// by an abandoned stream must not end the next turn empty-success.
+    /// Frames that map to no host event are skipped and the loop keeps
+    /// reading. Residual approval server-requests are auto-answered (AR-4)
+    /// and never surface as host events.
     #[allow(clippy::too_many_lines)]
     fn build_event_stream(
         &self,
@@ -299,110 +338,175 @@ impl CodexNativeProvider {
         let read_timeout = self.timeouts.prompt_duration();
 
         futures_util::stream::unfold(
-            (sessions, op_id, session_id, read_timeout, false),
-            |(sessions, op_id, session_id, read_timeout, finished)| async move {
+            (sessions, op_id, session_id, read_timeout, VecDeque::new(), false),
+            |(sessions, op_id, session_id, read_timeout, mut pending, finished)| async move {
+                // Drain events mapped from a previous frame first: one
+                // frame can carry multiple host events.
+                if let Some(event) = pending.pop_front() {
+                    return Some((
+                        Ok(event),
+                        (sessions, op_id, session_id, read_timeout, pending, finished),
+                    ));
+                }
                 if finished {
                     return None;
                 }
 
-                let read = async {
-                    let mut guard = sessions.write().await;
-                    match guard
-                        .get_mut(&session_id)
-                        .and_then(|native_session| native_session.client.as_mut())
-                    {
-                        Some(client) => client.next_message().await,
-                        // Session removed by shutdown(): the client was
-                        // dropped (app-server killed) — backstop below.
-                        None => Ok(None),
-                    }
-                };
-
-                let outcome = tokio::time::timeout(read_timeout, read).await;
-
-                let step: (Option<HostResult<HostEvent>>, bool) = match outcome {
-                    Ok(Ok(Some(ServerMessage::Notification(notification)))) => {
-                        let events = map_codex(
-                            &[ServerMessage::Notification(notification)],
-                            &session_id,
-                            &op_id,
-                        );
-                        match events.into_iter().next() {
-                            // map_codex emits at most one event per frame.
-                            Some(event)
-                                if matches!(
-                                    event,
-                                    HostEvent::OpFinished(_) | HostEvent::OpFailed(_)
-                                ) =>
-                            {
-                                clear_active_turn(&sessions, &session_id).await;
-                                (Some(Ok(event)), true)
-                            }
-                            Some(event) => (Some(Ok(event)), false),
-                            // Skipped frame (unknown method, unmapped
-                            // notification) — keep reading.
-                            None => (None, false),
-                        }
-                    }
-                    Ok(Ok(Some(ServerMessage::Request { id, request }))) => {
-                        // AR-4: never surfaced to the author.
-                        let mut guard = sessions.write().await;
-                        if let Some(client) = guard
-                            .get_mut(&session_id)
-                            .and_then(|native_session| native_session.client.as_mut())
-                        {
-                            auto_answer_approval(client, id, &request).await;
-                        }
+                // Read frames until one maps to host events or the turn
+                // ends (terminal event / stream error / timeout). The read
+                // runs under the session's own lock (B-2): other sessions'
+                // cancel/shutdown never wait on this frame read.
+                loop {
+                    let read = async {
+                        let state = {
+                            let guard = sessions.read().await;
+                            guard.get(&session_id).map(|ns| Arc::clone(&ns.state))
+                        };
+                        let Some(state) = state else {
+                            // Session removed by shutdown(): the client was
+                            // dropped (app-server killed) — backstop below.
+                            return (Ok(None), None);
+                        };
+                        let mut guard = state.lock().await;
+                        let active_turn_id = guard.active_turn_id.clone();
+                        let message = match guard.client.as_mut() {
+                            Some(client) => client.next_message().await,
+                            None => Ok(None),
+                        };
                         drop(guard);
-                        (None, false)
-                    }
-                    Ok(Ok(None)) => {
-                        // Stream abort (EOF or session torn down) before a
-                        // terminal frame: exactly one OpFailed (PD-3).
-                        clear_active_turn(&sessions, &session_id).await;
-                        (
-                            Some(Ok(HostEvent::OpFailed(OperationFailedEvent {
-                                session_id: session_id.clone(),
-                                op_id: op_id.clone(),
-                                error_category: "stream_closed".to_string(),
-                                error_message:
-                                    "codex app-server closed the stream before the turn completed"
-                                        .to_string(),
-                            }))),
-                            true,
-                        )
-                    }
-                    Ok(Err(error)) => {
-                        // Typed-decode failure / connection error: the frame
-                        // is lost, so the turn fails once (PD-3, AR-7).
-                        clear_active_turn(&sessions, &session_id).await;
-                        let failed = classify_stream_error(&error, &session_id, &op_id)
-                            .expect("stream error always classifies to a terminal");
-                        (Some(Ok(HostEvent::OpFailed(failed))), true)
-                    }
-                    Err(_elapsed) => {
-                        // Per-frame read timeout: stop the turn server-side
-                        // (best effort), then fail once with the AR-7
-                        // `timeout` token (parity with the old stream read
-                        // timeout).
-                        interrupt_turn(&sessions, &session_id).await;
-                        clear_active_turn(&sessions, &session_id).await;
-                        (
-                            Some(Ok(HostEvent::OpFailed(OperationFailedEvent {
-                                session_id: session_id.clone(),
-                                op_id: op_id.clone(),
-                                error_category: "timeout".to_string(),
-                                error_message: format!(
-                                    "codex stream read timed out after {read_timeout:?}"
-                                ),
-                            }))),
-                            true,
-                        )
-                    }
-                };
+                        (message, active_turn_id)
+                    };
 
-                step.0
-                    .map(|event| (event, (sessions, op_id, session_id, read_timeout, step.1)))
+                    let outcome = tokio::time::timeout(read_timeout, read).await;
+
+                    match outcome {
+                        Ok((Ok(Some(ServerMessage::Notification(notification))), active_turn_id)) => {
+                            // B-1: a turn-scoped notification from a
+                            // previous turn (stale terminal/deltas left in
+                            // the pipe by an abandoned stream) must not
+                            // drive this stream — keep reading.
+                            let stale = notification.turn_id().is_some_and(|turn| {
+                                active_turn_id.as_deref() != Some(turn)
+                            });
+                            if stale {
+                                tracing::debug!(
+                                    session_id = %session_id,
+                                    op_id = %op_id,
+                                    turn_id = notification.turn_id(),
+                                    active_turn_id = active_turn_id.as_deref(),
+                                    "skipping stale codex notification from a previous turn",
+                                );
+                                continue;
+                            }
+
+                            let events = map_codex(
+                                &[ServerMessage::Notification(notification)],
+                                &session_id,
+                                &op_id,
+                            );
+                            if events.is_empty() {
+                                // Skipped frame (unknown method, unmapped
+                                // notification) — keep reading.
+                                continue;
+                            }
+                            // map_codex puts the terminal (if any) last.
+                            let terminal = matches!(
+                                events.last(),
+                                Some(HostEvent::OpFinished(_) | HostEvent::OpFailed(_))
+                            );
+                            if terminal {
+                                clear_active_turn(&sessions, &session_id).await;
+                            }
+                            let mut iter = events.into_iter();
+                            let first = iter.next().expect("events is non-empty");
+                            pending.extend(iter);
+                            return Some((
+                                Ok(first),
+                                (
+                                    sessions,
+                                    op_id,
+                                    session_id,
+                                    read_timeout,
+                                    pending,
+                                    terminal,
+                                ),
+                            ));
+                        }
+                        Ok((Ok(Some(ServerMessage::Request { id, request })), _)) => {
+                            // AR-4: never surfaced to the author.
+                            let state = {
+                                let guard = sessions.read().await;
+                                guard.get(&session_id).map(|ns| Arc::clone(&ns.state))
+                            };
+                            if let Some(state) = state {
+                                let mut guard = state.lock().await;
+                                if let Some(client) = guard.client.as_mut() {
+                                    auto_answer_approval(client, id, &request).await;
+                                }
+                            }
+                        }
+                        Ok((Ok(None), _)) => {
+                            // Stream abort (EOF or session torn down) before
+                            // a terminal frame: exactly one OpFailed (PD-3).
+                            clear_active_turn(&sessions, &session_id).await;
+                            return Some((
+                                Ok(HostEvent::OpFailed(OperationFailedEvent {
+                                    session_id: session_id.clone(),
+                                    op_id: op_id.clone(),
+                                    error_category: "stream_closed".to_string(),
+                                    error_message:
+                                        "codex app-server closed the stream before the turn completed"
+                                            .to_string(),
+                                })),
+                                (
+                                    sessions,
+                                    op_id,
+                                    session_id,
+                                    read_timeout,
+                                    pending,
+                                    true,
+                                ),
+                            ));
+                        }
+                        Ok((Err(error), _)) => {
+                            // Typed-decode failure / connection error: the
+                            // frame is lost, so the turn fails once (PD-3,
+                            // AR-7). The server-side turn is interrupted and
+                            // its leftover terminal drained so the next
+                            // execute cannot consume it (B-1).
+                            interrupt_turn(&sessions, &session_id).await;
+                            drain_turn_terminal(&sessions, &session_id).await;
+                            clear_active_turn(&sessions, &session_id).await;
+                            let failed = classify_stream_error(&error, &session_id, &op_id)
+                                .expect("stream error always classifies to a terminal");
+                            return Some((
+                                Ok(HostEvent::OpFailed(failed)),
+                                (sessions, op_id, session_id, read_timeout, pending, true),
+                            ));
+                        }
+                        Err(_elapsed) => {
+                            // Per-frame read timeout: stop the turn
+                            // server-side (best effort), drain its leftover
+                            // terminal (B-1), then fail once with the AR-7
+                            // `timeout` token (parity with the old stream
+                            // read timeout).
+                            interrupt_turn(&sessions, &session_id).await;
+                            drain_turn_terminal(&sessions, &session_id).await;
+                            clear_active_turn(&sessions, &session_id).await;
+                            return Some((
+                                Ok(HostEvent::OpFailed(OperationFailedEvent {
+                                    session_id: session_id.clone(),
+                                    op_id: op_id.clone(),
+                                    error_category: "timeout".to_string(),
+                                    error_message: format!(
+                                        "codex stream read timed out after {read_timeout:?}"
+                                    ),
+                                })),
+                                (sessions, op_id, session_id, read_timeout, pending, true),
+                            ));
+                        }
+                    }
+                }
             },
         )
         .boxed()
@@ -517,29 +621,24 @@ async fn auto_answer_approval(client: &mut AsyncClient, id: RequestId, request: 
 /// Interrupt the session's active turn via the crate client, if any.
 ///
 /// Best-effort: a turn that already completed server-side makes
-/// `turn/interrupt` fail with a JSON-RPC error, which is logged only.
+/// `turn/interrupt` fail with a JSON-RPC error, which is logged only. Runs
+/// under the per-session lock (B-2); only this session's in-flight frame
+/// read (bounded by the read timeout) can delay it.
 async fn interrupt_turn(
     sessions: &Arc<RwLock<HashMap<HostSessionId, NativeSession>>>,
     session_id: &HostSessionId,
 ) {
-    let (thread_id, turn_id) = {
+    let state = {
         let guard = sessions.read().await;
-        match guard.get(session_id) {
-            Some(native_session) => (
-                native_session.thread_id.clone(),
-                native_session.active_turn_id.clone(),
-            ),
-            None => return,
-        }
+        guard.get(session_id).map(|ns| Arc::clone(&ns.state))
     };
-    let (Some(thread_id), Some(turn_id)) = (thread_id, turn_id) else {
+    let Some(state) = state else { return };
+    let mut guard = state.lock().await;
+    let (Some(thread_id), Some(turn_id)) = (guard.thread_id.clone(), guard.active_turn_id.clone())
+    else {
         return;
     };
-    let mut guard = sessions.write().await;
-    if let Some(client) = guard
-        .get_mut(session_id)
-        .and_then(|native_session| native_session.client.as_mut())
-    {
+    if let Some(client) = guard.client.as_mut() {
         if let Err(error) = client
             .turn_interrupt(&TurnInterruptParams { thread_id, turn_id })
             .await
@@ -558,9 +657,75 @@ async fn clear_active_turn(
     sessions: &Arc<RwLock<HashMap<HostSessionId, NativeSession>>>,
     session_id: &HostSessionId,
 ) {
-    let mut guard = sessions.write().await;
-    if let Some(native_session) = guard.get_mut(session_id) {
-        native_session.active_turn_id = None;
+    let state = {
+        let guard = sessions.read().await;
+        guard.get(session_id).map(|ns| Arc::clone(&ns.state))
+    };
+    let Some(state) = state else { return };
+    let mut guard = state.lock().await;
+    guard.active_turn_id = None;
+}
+
+/// Budget for draining an interrupted turn's leftover terminal (B-1).
+///
+/// The app-server answers `turn/interrupt` with `turn/completed`; that frame
+/// must not linger in the stream for the next execute to consume. Distinct
+/// from the prompt-setup budget: it bounds only the interrupt response wait.
+const TURN_DRAIN_BUDGET: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// Best-effort drain: after interrupting the active turn, keep reading
+/// frames until that turn's terminal arrives (or the budget / EOF / stream
+/// error ends the drain), so the next execute cannot consume a leftover
+/// terminal from this turn (B-1). Runs under the per-session lock; a
+/// concurrent execute's setup is serialized behind the drain.
+async fn drain_turn_terminal(
+    sessions: &Arc<RwLock<HashMap<HostSessionId, NativeSession>>>,
+    session_id: &HostSessionId,
+) {
+    let state = {
+        let guard = sessions.read().await;
+        guard.get(session_id).map(|ns| Arc::clone(&ns.state))
+    };
+    let Some(state) = state else { return };
+    let mut guard = state.lock().await;
+    let Some(active_turn_id) = guard.active_turn_id.clone() else {
+        return;
+    };
+    let deadline = tokio::time::Instant::now() + TURN_DRAIN_BUDGET;
+    loop {
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        if remaining.is_zero() {
+            return;
+        }
+        let outcome = tokio::time::timeout(remaining, async {
+            match guard.client.as_mut() {
+                Some(client) => client.next_message().await,
+                None => Ok(None),
+            }
+        })
+        .await;
+        match outcome {
+            Ok(Ok(Some(ServerMessage::Notification(notification)))) => {
+                // The interrupted turn's terminal ends the drain.
+                if matches!(
+                    &notification,
+                    Notification::TurnCompleted(completed)
+                        if completed.turn.id == active_turn_id
+                ) {
+                    return;
+                }
+                // Any other leftover frame from the interrupted turn is
+                // noise — keep draining.
+            }
+            // Leftover approval request: the turn is being torn down, the
+            // interrupt response follows; nothing to answer.
+            Ok(Ok(Some(ServerMessage::Request { .. }))) => {}
+            // EOF / stream error / budget elapsed: nothing more to drain.
+            Ok(Ok(None) | Err(_)) | Err(_) => {
+                drop(guard);
+                return;
+            }
+        }
     }
 }
 
@@ -633,9 +798,11 @@ impl ProviderAdapter for CodexNativeProvider {
             sessions.insert(
                 host_session_id.clone(),
                 NativeSession {
-                    client: None,
-                    thread_id: None,
-                    active_turn_id: None,
+                    state: Arc::new(Mutex::new(ClientState {
+                        client: None,
+                        thread_id: None,
+                        active_turn_id: None,
+                    })),
                     cwd: spec.cwd.clone(),
                 },
             );
@@ -728,8 +895,9 @@ impl ProviderAdapter for CodexNativeProvider {
         op_id: HostOperationId,
     ) -> HostResult<()> {
         // The app-server owns the turn; interrupt it through the crate
-        // client. The app-server reports `Interrupted`, which maps to a
-        // clean `OpFinished(EndTurn)` on the stream (AR-1).
+        // client under the per-session lock (B-2: only this session's frame
+        // read can delay it). The app-server reports `Interrupted`, which
+        // maps to a clean `OpFinished(EndTurn)` on the stream (AR-1).
         interrupt_turn(&self.sessions, &session.session_id).await;
         tracing::info!(
             session_id = %session.session_id,
@@ -741,9 +909,12 @@ impl ProviderAdapter for CodexNativeProvider {
     }
 
     async fn shutdown(&self, session: ManagedSessionHandle) -> HostResult<()> {
-        // Removing the session drops the crate client, which kills the
-        // app-server process (AsyncClient teardown owns the child — no raw
-        // Child map, no ChildReaper).
+        // Removing the session drops the crate client once no in-flight
+        // frame read holds it, which kills the app-server process (AsyncClient
+        // teardown owns the child — no raw Child map, no ChildReaper). An
+        // in-flight read releases the per-session lock when it returns
+        // (bounded by the read timeout), then the last state Arc drops the
+        // client.
         let mut sessions = self.sessions.write().await;
         sessions.remove(&session.session_id);
         drop(sessions);
@@ -902,13 +1073,17 @@ mod tests {
         assert!(native_session.is_some(), "session should be registered");
 
         let ns = native_session.unwrap();
-        assert!(ns.client.is_none(), "client should start lazily on execute");
+        let state = ns.state.lock().await;
         assert!(
-            ns.thread_id.is_none(),
+            state.client.is_none(),
+            "client should start lazily on execute"
+        );
+        assert!(
+            state.thread_id.is_none(),
             "thread_id should be None before first execute"
         );
         assert!(
-            ns.active_turn_id.is_none(),
+            state.active_turn_id.is_none(),
             "active_turn_id should be None before first execute"
         );
     }
@@ -944,7 +1119,7 @@ mod tests {
         let sessions = provider.sessions.read().await;
         let ns = sessions.get(&handle.session_id).expect("session exists");
         assert!(
-            ns.client.is_none(),
+            ns.state.lock().await.client.is_none(),
             "no client should be retained after a failed start"
         );
     }
@@ -976,14 +1151,18 @@ mod tests {
 
         let sessions = provider.sessions.read().await;
         let ns = sessions.get(&handle.session_id).expect("session exists");
-        assert!(ns.client.is_some(), "client must stay alive after the turn");
+        let state = ns.state.lock().await;
+        assert!(
+            state.client.is_some(),
+            "client must stay alive after the turn"
+        );
         assert_eq!(
-            ns.thread_id.as_deref(),
+            state.thread_id.as_deref(),
             Some("mock-thread-1"),
             "thread id must be captured from thread/start"
         );
         assert!(
-            ns.active_turn_id.is_none(),
+            state.active_turn_id.is_none(),
             "active turn must be cleared when the stream ends"
         );
     }
@@ -1124,6 +1303,182 @@ mod tests {
             .cancel(&handle, HostOperationId::new())
             .await
             .expect("cancel with no active turn must succeed");
+    }
+
+    /// B-1 regression: a `turn/completed` left in the pipe from a PREVIOUS
+    /// turn must not terminate the new turn's stream (empty-success). The
+    /// mock emits the stale terminal for `mock-turn-1` before the second
+    /// turn's own frames; the stream must skip it and read only its own
+    /// turn's events.
+    #[tokio::test]
+    async fn stale_turn_terminal_from_previous_turn_does_not_end_new_stream() {
+        let provider = mock_provider(HashMap::from([(
+            "STALE_TURN_COMPLETED".to_string(),
+            "1".to_string(),
+        )]));
+
+        let handle = provider.launch(launch_spec()).await.expect("launch");
+
+        let stream1 = provider
+            .execute(
+                &handle,
+                HostOperation::Prompt {
+                    op_id: HostOperationId::new(),
+                    content: vec![HostContentBlock::Text {
+                        text: "first".to_string(),
+                    }],
+                },
+            )
+            .await
+            .expect("first execute");
+        let events1 = collect_events(stream1).await;
+        assert_eq!(terminal_count(&events1), 1);
+
+        let stream2 = provider
+            .execute(
+                &handle,
+                HostOperation::Prompt {
+                    op_id: HostOperationId::new(),
+                    content: vec![HostContentBlock::Text {
+                        text: "second".to_string(),
+                    }],
+                },
+            )
+            .await
+            .expect("second execute");
+        let events2 = collect_events(stream2).await;
+
+        assert!(
+            matches!(&events2[0], HostEvent::OpStarted(_)),
+            "new turn must start, not terminate on the stale terminal: {events2:?}"
+        );
+        assert!(
+            matches!(&events2[1], HostEvent::MessageDelta(d) if d.text == "hello from mock codex"),
+            "new turn must stream its own delta: {events2:?}"
+        );
+        assert!(
+            matches!(&events2[2], HostEvent::OpFinished(f) if f.reason == FinishReason::EndTurn),
+            "new turn must end on its own terminal: {events2:?}"
+        );
+        assert_eq!(events2.len(), 3, "started + delta + terminal: {events2:?}");
+        assert_eq!(terminal_count(&events2), 1);
+    }
+
+    /// B-1: a typed-decode failure interrupts the server-side turn and
+    /// drains its leftover terminal, so the next execute starts a clean
+    /// turn instead of consuming the interrupted turn's `turn/completed`.
+    #[tokio::test]
+    async fn decode_error_interrupts_and_drains_turn() {
+        let provider = mock_provider(HashMap::from([("BAD_FRAME".to_string(), "1".to_string())]));
+
+        let handle = provider.launch(launch_spec()).await.expect("launch");
+
+        let stream1 = provider
+            .execute(
+                &handle,
+                HostOperation::Prompt {
+                    op_id: HostOperationId::new(),
+                    content: vec![HostContentBlock::Text {
+                        text: "hi".to_string(),
+                    }],
+                },
+            )
+            .await
+            .expect("first execute");
+        let events1 = collect_events(stream1).await;
+        assert!(
+            matches!(
+                events1.last(),
+                Some(HostEvent::OpFailed(f)) if f.error_category == "decode_error"
+            ),
+            "bad frame must fail the turn once with decode_error: {events1:?}"
+        );
+        assert_eq!(terminal_count(&events1), 1);
+
+        let stream2 = provider
+            .execute(
+                &handle,
+                HostOperation::Prompt {
+                    op_id: HostOperationId::new(),
+                    content: vec![HostContentBlock::Text {
+                        text: "again".to_string(),
+                    }],
+                },
+            )
+            .await
+            .expect("second execute");
+        let events2 = collect_events(stream2).await;
+        assert!(
+            matches!(&events2[0], HostEvent::OpStarted(_)),
+            "new turn must start cleanly: {events2:?}"
+        );
+        assert!(
+            matches!(&events2[1], HostEvent::MessageDelta(d) if d.text == "hello from mock codex"),
+            "new turn must stream its own delta: {events2:?}"
+        );
+        assert!(
+            matches!(&events2[2], HostEvent::OpFinished(f) if f.reason == FinishReason::EndTurn),
+            "new turn must end on its own terminal: {events2:?}"
+        );
+        assert_eq!(events2.len(), 3, "started + delta + terminal: {events2:?}");
+        assert_eq!(terminal_count(&events2), 1);
+    }
+
+    /// B-2: with session A's frame read in flight (`BLOCK_TURN`), cancel and
+    /// shutdown of session B must complete promptly — the per-session lock
+    /// replaces the provider-global write lock.
+    #[tokio::test]
+    async fn session_b_cancel_and_shutdown_do_not_wait_on_session_a_read() {
+        let provider = mock_provider(HashMap::from([("BLOCK_TURN".to_string(), "1".to_string())]));
+
+        let handle_a = provider.launch(launch_spec()).await.expect("launch a");
+        let stream_a = provider
+            .execute(
+                &handle_a,
+                HostOperation::Prompt {
+                    op_id: HostOperationId::new(),
+                    content: vec![HostContentBlock::Text {
+                        text: "blocked".to_string(),
+                    }],
+                },
+            )
+            .await
+            .expect("execute a");
+
+        // Keep session A's stream polling so its frame read is in flight.
+        let pump = tokio::spawn(async move {
+            let _ = stream_a.collect::<Vec<_>>().await;
+        });
+        // Let the read settle into the blocked frame read.
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+
+        let handle_b = provider.launch(launch_spec()).await.expect("launch b");
+
+        let cancel = tokio::time::timeout(
+            std::time::Duration::from_secs(2),
+            provider.cancel(&handle_b, HostOperationId::new()),
+        )
+        .await;
+        assert!(
+            cancel.is_ok(),
+            "cancel of session B must not wait on session A's frame read"
+        );
+
+        let shutdown = tokio::time::timeout(
+            std::time::Duration::from_secs(2),
+            provider.shutdown(handle_b),
+        )
+        .await;
+        assert!(
+            shutdown.is_ok(),
+            "shutdown of session B must not wait on session A's frame read"
+        );
+
+        // Clean up session A: abort the pump (releasing the blocked read),
+        // then tear the session down so no child process leaks.
+        pump.abort();
+        let _ = pump.await;
+        provider.shutdown(handle_a).await.expect("shutdown a");
     }
 
     #[tokio::test]
