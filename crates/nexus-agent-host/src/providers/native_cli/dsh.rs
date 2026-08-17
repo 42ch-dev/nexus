@@ -28,6 +28,19 @@
 //! [`CapabilityDescriptor::dsh_limited`] (`streaming: false`,
 //! `cancellation: false`) and `cancel()` is an honest no-op: killing the
 //! runtime mid-turn would abandon the turn, not cancel it.
+//!
+//! # Timeout behavior (B-3)
+//!
+//! The per-turn `tokio::time::timeout` wraps the whole run coroutine
+//! (lazy harness start + `Session::run`). When it fires, the SDK
+//! coroutine is dropped but the runtime keeps executing the already-sent
+//! prompt — no cancel RPC exists — so the turn completes in the runtime
+//! with side effects the caller believes failed (a "zombie" turn). The
+//! stored `dsh_session_id` is therefore rotated on timeout
+//! ([`rotate_dsh_session_id`]): the next execute starts a fresh
+//! agent+session pair (unknown ids are lazily created by the runtime) and
+//! can never be spliced into the abandoned turn. Sessions are cheap; the
+//! zombie turn finishes harmlessly in the background under the old id.
 
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
@@ -342,12 +355,22 @@ impl DshNativeProvider {
                         Ok(Err(RunError::Sdk(error))) => vec![HostEvent::OpFailed(
                             classify_run_error(&error, &session_id, &op_id),
                         )],
-                        Err(_elapsed) => vec![HostEvent::OpFailed(OperationFailedEvent {
-                            session_id: session_id.clone(),
-                            op_id: op_id.clone(),
-                            error_category: "timeout".to_string(),
-                            error_message: format!("dsh turn timed out after {prompt_ms}ms"),
-                        })],
+                        Err(_elapsed) => {
+                            // B-3: the timeout dropped the run coroutine
+                            // (and its per-session lock guard) but the
+                            // runtime keeps executing the prompt under
+                            // the OLD session id — a zombie turn. Rotate
+                            // the stored id so a retry starts a fresh
+                            // agent+session pair; the abandoned turn can
+                            // then never receive a spliced retry prompt.
+                            rotate_dsh_session_id(&sessions, &session_id).await;
+                            vec![HostEvent::OpFailed(OperationFailedEvent {
+                                session_id: session_id.clone(),
+                                op_id: op_id.clone(),
+                                error_category: "timeout".to_string(),
+                                error_message: format!("dsh turn timed out after {prompt_ms}ms"),
+                            })]
+                        }
                     };
                 let mut iter = events.into_iter();
                 let first = iter.next().expect("the turn maps to at least one event");
@@ -373,6 +396,40 @@ impl DshNativeProvider {
         )
         .boxed()
     }
+}
+
+/// Rotate the stored DSH session id after a turn timeout (B-3).
+///
+/// The timeout drops the `Session::run` coroutine, but the runtime keeps
+/// running the already-sent prompt under the old id (no cancel RPC —
+/// AR-6). Replacing the stored id makes the next `execute` start a fresh
+/// agent+session pair (the runtime lazily creates unknown ids), so a
+/// retry can never be spliced into the abandoned "zombie" turn. Runs
+/// under the per-session lock, which the timed-out coroutine released
+/// when it was dropped, so this never waits on the zombie turn. A session
+/// already removed by `shutdown()` makes this a no-op.
+// The guard must be held across the mutation (the rotation is the point
+// of the function); dropping it "earlier" would drop it before the
+// write. The significant_drop_tightening suggestion is a false positive
+// for this tail-of-function drop.
+#[allow(clippy::significant_drop_tightening)]
+async fn rotate_dsh_session_id(
+    sessions: &Arc<RwLock<HashMap<HostSessionId, NativeSession>>>,
+    session_id: &HostSessionId,
+) {
+    let state = {
+        let guard = sessions.read().await;
+        guard.get(session_id).map(|ns| Arc::clone(&ns.state))
+    };
+    let Some(state) = state else {
+        return;
+    };
+    let mut guard = state.lock().await;
+    guard.dsh_session_id = uuid::Uuid::new_v4().to_string();
+    tracing::info!(
+        session_id = %session_id,
+        "dsh turn timed out; rotated dsh session id so a retry starts a fresh session",
+    );
 }
 
 /// Failure of the turn's `Session::run` attempt.
@@ -585,8 +642,11 @@ impl ProviderAdapter for DshNativeProvider {
 
     async fn shutdown(&self, session: ManagedSessionHandle) -> HostResult<()> {
         // Removing the session first stops new executes; the per-session
-        // lock is then awaited (an in-flight run holds it — bounded by the
-        // turn timeout) and the harness is closed via the SDK close ladder,
+        // lock is then awaited. An in-flight run holds it, so shutdown can
+        // wait up to `prompt_ms` behind an active turn (N-1): the SDK owns
+        // the runtime child and exposes no kill, so there is nothing to
+        // signal — the wait is bounded by the turn timeout, never
+        // unbounded. The harness is then closed via the SDK close ladder,
         // which reaps the child even when a ladder tier reports an error.
         let removed = {
             let mut sessions = self.sessions.write().await;
@@ -626,11 +686,20 @@ mod tests {
     // Lock guards (session registry / crate client) are intentionally held
     // to the end of the visible test scope for readability; the nursery
     // significant_drop_tightening suggestion to drop them earlier is noise
-    // here.
+    // here. `PROCESS_ENV_LOCK` (lib.rs test_support) is deliberately held
+    // across awaits: it serializes python-fixture spawns and
+    // `DSH_RUNTIME_BIN` reads against the env-mutating discovery tests
+    // (see its doc comment).
     #![allow(clippy::significant_drop_tightening)]
+    #![allow(clippy::await_holding_lock)]
 
     use super::*;
-    use crate::capability::model::{HostOperation, LaunchSpec};
+    use crate::capability::model::{FinishReason, HostOperation, LaunchSpec};
+
+    const MOCK_DSH_AGENT: &str = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/native_protocol/mock_dsh_agent.py"
+    );
 
     fn launch_spec() -> LaunchSpec {
         LaunchSpec {
@@ -639,6 +708,70 @@ mod tests {
             mode: None,
             mcp_servers: vec![],
         }
+    }
+
+    async fn collect_events(stream: HostEventStream) -> Vec<HostEvent> {
+        let results: Vec<_> = stream.collect().await;
+        results
+            .into_iter()
+            .map(|r| r.expect("stream item should be Ok"))
+            .collect()
+    }
+
+    fn terminal_count(events: &[HostEvent]) -> usize {
+        events
+            .iter()
+            .filter(|e| matches!(e, HostEvent::OpFinished(_) | HostEvent::OpFailed(_)))
+            .count()
+    }
+
+    /// Run one prompt turn to completion and return the collected events.
+    // The held `PROCESS_ENV_LOCK` guard makes the future !Send; test-only
+    // helper, run on tokio's current-thread test runtime (no Send needed).
+    #[allow(clippy::future_not_send)]
+    async fn run_turn(
+        provider: &DshNativeProvider,
+        handle: &ManagedSessionHandle,
+        text: &str,
+    ) -> Vec<HostEvent> {
+        // Serialize with the env-mutating discovery tests: the stub is
+        // spawned via `#!/usr/bin/env python3`, which resolves python3
+        // through PATH at execve time (see lib.rs test_support).
+        let _env_lock = crate::test_support::PROCESS_ENV_LOCK
+            .lock()
+            .expect("lock env tests");
+        let stream = provider
+            .execute(
+                handle,
+                HostOperation::Prompt {
+                    op_id: HostOperationId::new(),
+                    content: vec![HostContentBlock::Text {
+                        text: text.to_string(),
+                    }],
+                },
+            )
+            .await
+            .expect("execute");
+        collect_events(stream).await
+    }
+
+    /// Read the provider's stored DSH session id for a launched session
+    /// (short registry read, then the per-session lock — same order as the
+    /// production paths).
+    async fn stored_dsh_session_id(
+        provider: &DshNativeProvider,
+        session_id: &HostSessionId,
+    ) -> String {
+        let state = {
+            let guard = provider.sessions.read().await;
+            guard.get(session_id).map(|ns| Arc::clone(&ns.state))
+        };
+        state
+            .expect("session must be registered")
+            .lock()
+            .await
+            .dsh_session_id
+            .clone()
     }
 
     #[test]
@@ -678,6 +811,11 @@ mod tests {
 
     #[tokio::test]
     async fn probe_unavailable_when_command_not_found_and_env_unset() {
+        // Serialize with the env-mutating discovery tests: this probe and
+        // its assertion both read the process-global `DSH_RUNTIME_BIN`.
+        let _env_lock = crate::test_support::PROCESS_ENV_LOCK
+            .lock()
+            .expect("lock env tests");
         let provider = DshNativeProvider::new(
             ProviderId::new("nonexistent-dsh-xyz"),
             "Fake".to_string(),
@@ -709,6 +847,11 @@ mod tests {
 
     #[tokio::test]
     async fn probe_available_when_env_route_set() {
+        // Serialize with the env-mutating discovery tests: this probe and
+        // its assertion both read the process-global `DSH_RUNTIME_BIN`.
+        let _env_lock = crate::test_support::PROCESS_ENV_LOCK
+            .lock()
+            .expect("lock env tests");
         // The env route is only asserted when it is actually set; the test
         // is a no-op otherwise (the unavailable case above covers the rest).
         if std::env::var_os("DSH_RUNTIME_BIN").is_some_and(|value| !value.is_empty()) {
@@ -839,6 +982,225 @@ mod tests {
         assert!(
             matches!(result, Err(HostError::InternalHostError { .. })),
             "execute after shutdown must fail"
+        );
+    }
+
+    // ── B-4 / N-3: fake `dsh-jsonrpc-agent` stub coverage ────────────────
+
+    /// End-to-end success arm over the fixture stub (B-4): one turn maps
+    /// to exactly one `MessageDelta(final_response)` + one terminal
+    /// `OpFinished`, and the wire `session/prompt` carries the provider's
+    /// stored DSH session id.
+    #[tokio::test]
+    async fn dsh_turn_completes_via_stub() {
+        let req_log_dir = tempfile::tempdir().expect("temp dir");
+        let req_log = req_log_dir.path().join("reqs.jsonl");
+        let provider = DshNativeProvider::new(
+            ProviderId::new("test-dsh-stub"),
+            "Test".to_string(),
+            Some(MOCK_DSH_AGENT.to_string()),
+            HashMap::from([(
+                "REQ_LOG".to_string(),
+                req_log.to_string_lossy().into_owned(),
+            )]),
+            TimeoutConfig::default(),
+        );
+        let handle = provider.launch(launch_spec()).await.expect("launch");
+        let stored_before = stored_dsh_session_id(&provider, &handle.session_id).await;
+
+        let events = run_turn(&provider, &handle, "hello dsh").await;
+
+        assert_eq!(terminal_count(&events), 1, "exactly one terminal event");
+        let deltas: Vec<&str> = events
+            .iter()
+            .filter_map(|e| match e {
+                HostEvent::MessageDelta(delta) => Some(delta.text.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(deltas, vec!["mock dsh reply"], "events: {events:?}");
+        let finish_reasons: Vec<_> = events
+            .iter()
+            .filter_map(|e| match e {
+                HostEvent::OpFinished(f) => Some(&f.reason),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            finish_reasons,
+            vec![&FinishReason::EndTurn],
+            "turn/end kind 'stop' maps to EndTurn"
+        );
+
+        // The wire prompt must use the stored session id (multi-turn
+        // continuity, AR-2/AR-5).
+        let log = std::fs::read_to_string(&req_log).expect("REQ_LOG written");
+        let prompts: Vec<serde_json::Value> = log
+            .lines()
+            .filter_map(|line| {
+                let value: serde_json::Value = serde_json::from_str(line).ok()?;
+                (value["method"] == "session/prompt").then_some(value)
+            })
+            .collect();
+        assert_eq!(prompts.len(), 1, "one prompt on the wire: {log}");
+        assert_eq!(
+            prompts[0]["sessionId"].as_str(),
+            Some(stored_before.as_str()),
+            "wire session id must match the stored dsh session id"
+        );
+    }
+
+    /// Timeout arm over the fixture stub (B-4 + B-3): with the stub
+    /// holding the turn open, the provider timeout emits exactly one
+    /// `OpFailed(timeout)` AND rotates the stored `dsh_session_id`, so a
+    /// retry starts a fresh agent+session pair instead of being spliced
+    /// into the abandoned (zombie) turn.
+    #[tokio::test]
+    async fn dsh_timeout_arm_fails_turn_and_rotates_session() {
+        let req_log_dir = tempfile::tempdir().expect("temp dir");
+        let req_log = req_log_dir.path().join("reqs.jsonl");
+        let timeouts = TimeoutConfig {
+            prompt_ms: 2000,
+            ..TimeoutConfig::default()
+        };
+        let provider = DshNativeProvider::new(
+            ProviderId::new("test-dsh-timeout"),
+            "Test".to_string(),
+            Some(MOCK_DSH_AGENT.to_string()),
+            HashMap::from([
+                (
+                    "REQ_LOG".to_string(),
+                    req_log.to_string_lossy().into_owned(),
+                ),
+                ("HOLD_TURN".to_string(), "1".to_string()),
+            ]),
+            timeouts,
+        );
+        let handle = provider.launch(launch_spec()).await.expect("launch");
+        let first_id = stored_dsh_session_id(&provider, &handle.session_id).await;
+
+        let events = run_turn(&provider, &handle, "slow turn 1").await;
+        assert_eq!(terminal_count(&events), 1);
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, HostEvent::OpFailed(f) if f.error_category == "timeout")),
+            "timeout arm must emit OpFailed(timeout): {events:?}"
+        );
+
+        let second_id = stored_dsh_session_id(&provider, &handle.session_id).await;
+        assert_ne!(
+            second_id, first_id,
+            "a timed-out turn must rotate the dsh session id"
+        );
+
+        // A retry on the same host session must also be bounded (fresh
+        // session, same zombie-avoidance) and rotate again.
+        let events = run_turn(&provider, &handle, "slow turn 2").await;
+        assert_eq!(terminal_count(&events), 1);
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, HostEvent::OpFailed(f) if f.error_category == "timeout")),
+            "second timeout arm must emit OpFailed(timeout): {events:?}"
+        );
+        let third_id = stored_dsh_session_id(&provider, &handle.session_id).await;
+        assert_ne!(third_id, second_id, "each timeout rotates again");
+        assert_ne!(third_id, first_id);
+
+        // At least one prompt must have reached the stub over the wire
+        // (the exact count depends on whether a timeout caught the cold
+        // harness start, which this test does not need to pin).
+        let log = std::fs::read_to_string(&req_log).expect("REQ_LOG written");
+        assert!(
+            log.lines().any(|line| line.contains("session/prompt")),
+            "at least one session/prompt must reach the stub: {log}"
+        );
+
+        provider
+            .shutdown(handle)
+            .await
+            .expect("shutdown with a live harness must succeed");
+    }
+
+    /// Stream-abort backstop (B-4): a session closed by `shutdown()` before
+    /// the stream's first poll emits exactly one `OpFailed(stream_closed)`
+    /// — no harness is started for a gone session.
+    #[tokio::test]
+    async fn dsh_stream_abort_backstop_when_session_closed_before_run() {
+        let provider = DshNativeProvider::new(
+            ProviderId::new("test-dsh-backstop"),
+            "Test".to_string(),
+            Some(MOCK_DSH_AGENT.to_string()),
+            HashMap::new(),
+            TimeoutConfig::default(),
+        );
+        let handle = provider.launch(launch_spec()).await.expect("launch");
+
+        // Create the stream while the session exists, then close the
+        // session before the stream is polled — the first poll finds no
+        // session and emits the stream-abort backstop.
+        let stream = provider
+            .execute(
+                &handle,
+                HostOperation::Prompt {
+                    op_id: HostOperationId::new(),
+                    content: vec![HostContentBlock::Text {
+                        text: "hi".to_string(),
+                    }],
+                },
+            )
+            .await
+            .expect("execute");
+
+        provider.shutdown(handle).await.expect("shutdown");
+
+        let events = collect_events(stream).await;
+        assert_eq!(terminal_count(&events), 1);
+        assert!(
+            events.iter().any(
+                |e| matches!(e, HostEvent::OpFailed(f) if f.error_category == "stream_closed")
+            ),
+            "backstop must emit OpFailed(stream_closed): {events:?}"
+        );
+    }
+
+    /// N-3: the probe's PATH-found branch — a configured runtime binary
+    /// that `which` resolves must probe available, naming the resolved
+    /// path. Uses an absolute path to an executable file so the test is
+    /// deterministic and independent of the process environment (and the
+    /// resolved-path arm wins over any `DSH_RUNTIME_BIN`).
+    #[tokio::test]
+    async fn probe_available_when_runtime_bin_resolves_on_path() {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let bin = temp_dir.path().join("dsh-jsonrpc-agent");
+        std::fs::write(&bin, "#!/bin/sh\necho mock\n").expect("write stub");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut perms = std::fs::metadata(&bin).expect("stat").permissions();
+            perms.set_mode(0o755);
+            std::fs::set_permissions(&bin, perms).expect("chmod +x");
+        }
+
+        let provider = DshNativeProvider::new(
+            ProviderId::new("path-dsh-xyz"),
+            "Path".to_string(),
+            Some(bin.to_string_lossy().into_owned()),
+            HashMap::new(),
+            TimeoutConfig::default(),
+        );
+
+        let health = provider
+            .probe(crate::capability::model::ProbeRequest { timeout_ms: 5000 })
+            .await
+            .expect("probe should succeed");
+        assert!(health.available, "PATH-found runtime must probe available");
+        let bin_str = bin.to_string_lossy();
+        assert_eq!(
+            health.message.as_deref(),
+            Some(bin_str.as_ref()),
+            "message names the resolved binary"
         );
     }
 }

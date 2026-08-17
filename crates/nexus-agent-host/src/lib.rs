@@ -255,3 +255,24 @@ pub enum LaunchStrategy {
         env: std::collections::HashMap<String, String>,
     },
 }
+
+#[cfg(test)]
+pub(crate) mod test_support {
+    //! Shared serialization for tests that touch the process-global
+    //! environment (see [`PROCESS_ENV_LOCK`]).
+
+    /// Serializes tests that mutate the process-global environment with
+    /// tests that spawn fixture children.
+    ///
+    /// The fixture mocks (`mock_claude_cli.py`, `mock_codex_app_server.py`,
+    /// `mock_dsh_agent.py`) are spawned via their
+    /// `#!/usr/bin/env python3` shebang, so the kernel resolves `python3`
+    /// **through the process PATH at execve time**. `discovery::path_scan`
+    /// env tests replace the process `PATH` / `DSH_RUNTIME_BIN`
+    /// (`PathGuard` / `DshEnvGuard`); a python fixture spawned in that window
+    /// fails its `env python3` lookup and dies before producing output —
+    /// surfaced as flaky `stream_closed` / missing-REQ_LOG failures. Every
+    /// env-mutating test AND every python-spawning provider test takes
+    /// this lock so the two groups never overlap.
+    pub static PROCESS_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+}
