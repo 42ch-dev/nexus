@@ -14,7 +14,7 @@
 - [daemon-api-surface-conventions.md](daemon-api-surface-conventions.md) §9 (local daemon port discovery; `local-api-surface-conventions.md` is a V1.90 redirect stub)
 - [agent-nexus-tool-bridge.md](agent-nexus-tool-bridge.md) / `host_tool_handlers.rs` (W-002 path-guard reference for `openWith`/`revealInFinder` scope)
 - [repo-root `DESIGN.md`](../../DESIGN.md) + [`DESIGN.dark.md`](../../DESIGN.dark.md) — Desktop Shell Supplement (window/menu/dialog/context-menu/status tokens) *(V1.98: sole SSOT; former `apps/web/DESIGN*.md` retired)*
-- [schemas-external-consumer-boundary.md](../knowledge/schemas-external-consumer-boundary.md) — `wire_contracts_changed: false` (V1.66); desktop-native methods are Tauri IPC, not Daemon API wire. **V1.94:** `wire_contracts_changed: true` (additive `POST /v1/daemon/agent-host/scan` schemas; `@42ch/nexus-contracts` 0.20.0 → 0.21.0).
+- [schemas-external-consumer-boundary.md](schemas-external-consumer-boundary.md) — `wire_contracts_changed: false` (V1.66); desktop-native methods are Tauri IPC, not Daemon API wire. **V1.94:** `wire_contracts_changed: true` (additive `POST /v1/daemon/agent-host/scan` schemas; `@42ch/nexus-contracts` 0.20.0 → 0.21.0).
 - [daemon-runtime.md](daemon-runtime.md) — health-probe plumbing reused for per-launch daemon-ready gate; `setup_completed` field additive to `~/.nexus42/config.toml`
 - [web-ui.md](web-ui.md) — sidebar IA (two-tab + nested nav + footer), daemon status bar simplification, Strategies unification, button contrast invariant
 

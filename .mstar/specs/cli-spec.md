@@ -515,7 +515,7 @@ be supplied; supplying both (or neither) fails closed with remediation.
 | `nexus42 creator kb rescan --work <work_ref> [--dry-run] [--json]` | V1.51 work-scoped rescan. Iterates **all** chapters in `Works/<work_ref>/Stories/`, aggregates candidates by `canonical_name` across chapters, and reconciles so a recurring entity collapses to a single `pending` candidate carrying cross-chapter provenance (e.g. `source_chapters: [3,5,7]`). |
 
 Rules (build on §6.2G V1.40 rules; see also
-[world-kb-runtime-architecture.md §5.5.1](../world-kb-runtime-architecture.md)):
+[world-kb-runtime-architecture.md §5.5.1](world-kb-runtime-architecture.md)):
 
 - **Mutual exclusivity.** `--work <work_ref>` and the positional
   `<work_ref>/<chapter>` cannot be combined. `--work` resolves the Work by

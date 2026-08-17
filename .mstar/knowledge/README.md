@@ -7,7 +7,7 @@ Engineering reference for the Nexus OSS harness **knowledge** tree.
 | **[`../specs/`](../specs/README.md)** | Normative OSS specifications (`{SPECS_DIR}`) |
 | **[`architecture-patterns/`](architecture-patterns/)** | Distilled reusable patterns (compound output) |
 | **[`api-design/`](api-design/)** | Distilled reusable API design patterns (compound output) |
-| **This directory (root files)** | Cross-cutting policy, boundaries, trackers |
+| **This directory (root files)** | Cross-cutting policy, boundaries |
 
 **Rules:** [AGENTS.md](AGENTS.md) · **Harness:** [`.mstar/AGENTS.md`](../AGENTS.md) · **Iterations:** [`.mstar/iterations/`](../iterations/README.md)
 
@@ -18,8 +18,8 @@ Engineering reference for the Nexus OSS harness **knowledge** tree.
 | Document | Role |
 | --- | --- |
 | [crate-selection-best-practices.md](crate-selection-best-practices.md) | Rust workspace dependency conventions |
-| [schemas-external-consumer-boundary.md](schemas-external-consumer-boundary.md) | Wire vs local-only contract types |
-| [deferred-features-cross-version-tracker.md](../roadmaps/deferred-features-cross-version-tracker.md) | Open/backlog deferred features (**local roadmap** — `.mstar/roadmaps/`, gitignored) |
+| [schemas-external-consumer-boundary.md](../specs/schemas-external-consumer-boundary.md) | **Moved to specs** (2026-08-17) — wire vs local-only contract types |
+| [world-kb-runtime-architecture.md](../specs/world-kb-runtime-architecture.md) | **Moved to specs** (2026-08-17) — World KB implementation SSOT |
 | [architecture-patterns/canvas-surface-implementation-pattern.md](architecture-patterns/canvas-surface-implementation-pattern.md) | Canvas surface implementation pattern — six-layer coupled contract + projection data-completeness + spatial edges + fixture-projection + viewport guard + **layer 11 discoverability** (V1.67–V1.76 distilled; V1.108–V1.111 updates; compound V1.77/V1.109/V1.111) |
 | [spoke-adapter-conversion-seam.md](architecture-patterns/spoke-adapter-conversion-seam.md) | 2026-07-26-v1.139-p1-rust-domain-migration | SPOKE adapter conversion-seam: product domain type ↔ spoke wire type; sole extension point for body schema evolution | Active |
 | [architecture-patterns/action-registry-command-palette.md](architecture-patterns/action-registry-command-palette.md) | Action registry + command palette — module store + `useSyncExternalStore`, render-time `available?()`, `useHotkey` conflict-avoidance, WAI-ARIA combobox (V1.111 P0 distilled; compound V1.111) |
@@ -52,8 +52,7 @@ Engineering reference for the Nexus OSS harness **knowledge** tree.
 
 **All OSS feature specs:** [`../specs/README.md`](../specs/README.md) (full index by domain).
 
-**Shipped archive:** [shipped-features-tracker.md](../roadmaps/shipped-features-tracker.md) — closed deferred-feature rows / delivery snapshots (**local roadmap tree**, gitignored).
-**Local process archive:** `.mstar/archived/` (gitignored — plan snapshots, legacy knowledge dumps; not clone SSOT).
+**Local process archive:** `.mstar/archived/` (gitignored — plan snapshots, legacy knowledge dumps; not clone SSOT). Roadmap trackers (deferred/shipped) are local under `.mstar/roadmaps/` — intentionally not indexed here.
 
 ### V1.119 additions
 

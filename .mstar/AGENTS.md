@@ -92,7 +92,7 @@ Narrative (ship stories, QC summaries) → **`notes.json`**, commits, or compass
 
 ### Profile B compaction (local)
 
-Hot `plans[]` = non-`Done` only; snapshots under `archived/plans/` locally. Delivery snapshots → [`roadmaps/shipped-features-tracker.md`](roadmaps/shipped-features-tracker.md) (local tree, gitignored) or compound into `{KNOWLEDGE_DIR}` patterns.
+Hot `plans[]` = non-`Done` only; snapshots under `archived/plans/` locally. Delivery snapshots go to the local roadmaps shipped tracker (`.mstar/roadmaps/`, gitignored) or compound into `{KNOWLEDGE_DIR}` patterns.
 
 ### Residual detail (local)
 

@@ -10,7 +10,7 @@
 
 - [cli-spec.md](cli-spec.md) §6.3 (daemon command group — Web UI access) + §7.1 (first-run path)
 - [daemon-runtime.md](daemon-runtime.md) §2 (normative layering) — static-asset serving on the axum router
-- [schemas-external-consumer-boundary.md](../knowledge/schemas-external-consumer-boundary.md) — the bundled UI is a first-class external consumer of `@42ch/nexus-contracts`
+- [schemas-external-consumer-boundary.md](schemas-external-consumer-boundary.md) — the bundled UI is a first-class external consumer of `@42ch/nexus-contracts`
 - [local-cloud-crate-architecture.md](local-cloud-crate-architecture.md) §1 — strict local-product vs cloud-product separation
 - Repo-root [`DESIGN.md`](../../DESIGN.md) + [`DESIGN.dark.md`](../../DESIGN.dark.md) — sole normative DESIGN pair *(V1.98: supersedes former `apps/web/DESIGN*.md` — see §30)*
 - [daemon-api-surface-conventions.md](daemon-api-surface-conventions.md) (NEW, `@architect`-authored Master) — cursor pagination / `ErrorResponse` / naming conventions the UI data layer relies on

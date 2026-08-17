@@ -12,7 +12,7 @@
 - [creator-workflow.md](../creator-workflow.md) — FL-E stages (audit is **out-of-band**)
 - [cli-spec.md](../cli-spec.md) — `creator run audit-chapter` IA (P0 implement)
 - [entity-scope-model.md](../entity-scope-model.md) — World-bound extract mode
-- [world-kb-runtime-architecture.md](../../world-kb-runtime-architecture.md) — `kb.extract_work` on-demand path
+- [world-kb-runtime-architecture.md](../world-kb-runtime-architecture.md) — `kb.extract_work` on-demand path
 
 **Iteration compass**: [v1.44/delivery-compass.md](../../iterations/v1.44/delivery-compass.md)  
 **Tracker**: DF-69
