@@ -1,8 +1,9 @@
-//! PATH-based discovery for Wave 1 native CLI providers.
+//! PATH-based discovery for native CLI providers.
 //!
-//! Scans the `PATH` environment variable for known commands. Wave 1 supports
-//! only `claude`. Native CLI entries use distinct `provider_ids` (e.g., `claude-native`)
-//! to avoid collision with ACP registry's `claude` (R-004, R-008).
+//! Scans the `PATH` environment variable for known commands (`claude`,
+//! `codex`, `dsh-jsonrpc-agent`). Native CLI entries use distinct
+//! `provider_ids` (e.g., `claude-native`) to avoid collision with ACP
+//! registry's `claude` (R-004, R-008).
 //!
 //! # Cross-platform probe (DF-26)
 //!
@@ -25,11 +26,17 @@ use crate::error::{HostError, HostResult};
 use crate::ids::ProviderId;
 use crate::{DiscoverySource, LaunchStrategy, ProviderCatalogEntry, TrustLevel};
 
-/// Wave 1 known CLI commands and their provider ID mappings.
+/// Known CLI commands and their provider ID mappings.
 ///
 /// Each entry maps a command name to a distinct `provider_id` that won't collide
-/// with ACP registry agent IDs.
-const KNOWN_COMMANDS: &[(&str, &str)] = &[("claude", "claude-native"), ("codex", "codex-native")];
+/// with ACP registry agent IDs. `dsh-jsonrpc-agent` maps to `dsh-native`
+/// (PD-4): the same command is also honored via the `DSH_RUNTIME_BIN` env var
+/// at daemon boot, but PATH scan is by command name only.
+const KNOWN_COMMANDS: &[(&str, &str)] = &[
+    ("claude", "claude-native"),
+    ("codex", "codex-native"),
+    ("dsh-jsonrpc-agent", "dsh-native"),
+];
 
 /// Discover native CLI providers by scanning PATH.
 ///
@@ -330,7 +337,7 @@ mod tests {
     }
 
     /// Verify that `scan_path_in` (the production scan path, not the test-only
-    /// `scan_custom_path` helper) discovers BOTH native CLI providers when both
+    /// `scan_custom_path` helper) discovers ALL native CLI providers when the
     /// stub binaries are present and executable in the scanned directory.
     ///
     /// This exercises `find_command` → `which::which_in` (the primary
@@ -341,26 +348,30 @@ mod tests {
     ///
     /// **PATH isolation (qc1 W-002):** `find_command` has a fallback that
     /// calls `which::which(command)` against the process PATH. If the host has
-    /// real `codex`/`claude` installed, that fallback would make the test pass
-    /// even without the stubs. `PathGuard::isolate(temp_dir)` replaces PATH
-    /// with the temp directory for the test scope so the test genuinely
-    /// depends on the stubs.
+    /// real `codex`/`claude`/`dsh-jsonrpc-agent` installed, that fallback
+    /// would make the test pass even without the stubs. `PathGuard::isolate(temp_dir)`
+    /// replaces PATH with the temp directory for the test scope so the test
+    /// genuinely depends on the stubs.
     #[test]
-    fn scan_path_in_discovers_both_providers_when_stubs_executable() {
+    fn scan_path_in_discovers_all_native_providers_when_stubs_executable() {
         let _lock = SCAN_PATH_LOCK.lock().expect("lock scan tests");
 
         let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
 
         let claude_path = temp_dir.path().join("claude");
         let codex_path = temp_dir.path().join("codex");
+        let dsh_path = temp_dir.path().join("dsh-jsonrpc-agent");
         std::fs::write(&claude_path, "#!/bin/sh\necho hello\n").expect("write claude stub");
         std::fs::write(&codex_path, "#!/bin/sh\necho hello\n").expect("write codex stub");
+        std::fs::write(&dsh_path, "#!/bin/sh\necho hello\n").expect("write dsh stub");
 
         set_executable(&claude_path);
         set_executable(&codex_path);
+        set_executable(&dsh_path);
 
         // Isolate PATH so the test depends on the stubs, not on any real
-        // codex/claude that might be installed on the host (qc1 W-002).
+        // codex/claude/dsh-jsonrpc-agent that might be installed on the host
+        // (qc1 W-002).
         let _path_guard = PathGuard::isolate(temp_dir.path());
 
         let config = AgentHostConfig::default();
@@ -369,8 +380,8 @@ mod tests {
 
         assert_eq!(
             entries.len(),
-            2,
-            "both codex and claude should be discovered"
+            3,
+            "codex, claude, and dsh-jsonrpc-agent should all be discovered"
         );
 
         let ids: Vec<&str> = entries.iter().map(|e| e.provider_id.0.as_str()).collect();
@@ -382,6 +393,7 @@ mod tests {
             ids.contains(&"claude-native"),
             "claude-native missing: {ids:?}"
         );
+        assert!(ids.contains(&"dsh-native"), "dsh-native missing: {ids:?}");
 
         for entry in &entries {
             assert_eq!(entry.protocol_kind, ProtocolKind::NativeCli);
@@ -413,12 +425,15 @@ mod tests {
 
     #[test]
     fn known_commands_mapping() {
-        // Verify Wave 1 mapping: claude -> claude-native, codex -> codex-native
-        assert_eq!(KNOWN_COMMANDS.len(), 2);
+        // Verify the mapping: claude -> claude-native, codex -> codex-native,
+        // dsh-jsonrpc-agent -> dsh-native
+        assert_eq!(KNOWN_COMMANDS.len(), 3);
         assert_eq!(KNOWN_COMMANDS[0].0, "claude");
         assert_eq!(KNOWN_COMMANDS[0].1, "claude-native");
         assert_eq!(KNOWN_COMMANDS[1].0, "codex");
         assert_eq!(KNOWN_COMMANDS[1].1, "codex-native");
+        assert_eq!(KNOWN_COMMANDS[2].0, "dsh-jsonrpc-agent");
+        assert_eq!(KNOWN_COMMANDS[2].1, "dsh-native");
     }
 
     // ── DF-26: Cross-platform probe tests (AH5.1) ─────────────────────

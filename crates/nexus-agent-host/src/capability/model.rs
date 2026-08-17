@@ -401,6 +401,43 @@ impl CapabilityDescriptor {
         }
     }
 
+    /// Native CLI descriptor for the `DeepSeek Harness` runtime
+    /// (`dsh-native`) — the documented narrower descriptor (locks § AR-6).
+    ///
+    /// `streaming` and `cancellation` are honest `false`: the chosen
+    /// high-level surface (`DeepSeekHarness` + `Session::run`, AR-2)
+    /// returns only after the root session reports idle and derives
+    /// `final_response` from the last `assistant/message` event — the SDK
+    /// has no incremental delta API, no token-delta notification
+    /// vocabulary, and no cancel/session-close RPC. Raising either field
+    /// later needs an upstream delta vocabulary or a low-level
+    /// `HarnessClient` rewrite (Durable Roadmap in the P2 plan).
+    ///
+    /// `session_restore` stays true (AR-2/AR-5): `start_session(Some(id))`
+    /// reuses the host-generated session id across executes, and a session
+    /// id unknown to the runtime lazily creates the agent+session pair,
+    /// so later executes resume. Every other field matches
+    /// [`native_cli_limited`].
+    #[must_use]
+    pub const fn dsh_limited() -> Self {
+        Self {
+            text_prompt: true,
+            streaming: false,
+            cancellation: false,
+            session_restore: true,
+            structured_tool_calls: false,
+            mcp_http: false,
+            mcp_sse: false,
+            mcp_stdio: false,
+            images: false,
+            audio: false,
+            embedded_context: false,
+            set_model: false,
+            set_mode: false,
+            diagnostics: false,
+        }
+    }
+
     /// Disabled descriptor — all capabilities off.
     #[must_use]
     pub const fn disabled() -> Self {
@@ -587,6 +624,43 @@ mod descriptor_audit_tests {
             !desc.structured_tool_calls,
             "native_cli_limited must not claim structured_tool_calls"
         );
+    }
+
+    /// `dsh_limited` is the documented narrower descriptor (locks § AR-6):
+    /// `streaming` and `cancellation` must be honest `false` (no incremental
+    /// delta API, no cancel RPC on the `Session::run` surface), while
+    /// `text_prompt` / `session_restore` stay true and every other field
+    /// matches `native_cli_limited` — never silently claim more or less.
+    #[test]
+    fn dsh_limited_is_narrower_descriptor() {
+        let desc = CapabilityDescriptor::dsh_limited();
+        assert!(desc.text_prompt, "dsh_limited must support text_prompt");
+        assert!(
+            !desc.streaming,
+            "dsh_limited must not claim streaming: Session::run returns only \
+             after the root session is idle (AR-6)"
+        );
+        assert!(
+            !desc.cancellation,
+            "dsh_limited must not claim cancellation: the SDK has no cancel \
+             RPC (AR-6)"
+        );
+        assert!(
+            desc.session_restore,
+            "dsh_limited must claim session_restore: the host-generated \
+             session id is reused across executes (AR-2/AR-5)"
+        );
+        let native = CapabilityDescriptor::native_cli_limited();
+        assert_eq!(desc.structured_tool_calls, native.structured_tool_calls);
+        assert_eq!(desc.mcp_http, native.mcp_http);
+        assert_eq!(desc.mcp_sse, native.mcp_sse);
+        assert_eq!(desc.mcp_stdio, native.mcp_stdio);
+        assert_eq!(desc.images, native.images);
+        assert_eq!(desc.audio, native.audio);
+        assert_eq!(desc.embedded_context, native.embedded_context);
+        assert_eq!(desc.set_model, native.set_model);
+        assert_eq!(desc.set_mode, native.set_mode);
+        assert_eq!(desc.diagnostics, native.diagnostics);
     }
 
     /// `disabled` descriptor must have all capabilities off.

@@ -169,6 +169,15 @@ libp2p = { version = "=0.56.0", features = ["ed25519"] }
 # not in default and must stay off (PD-2). Consumed by `nexus-agent-host`.
 claude-codes = { version = "=2.1.232", default-features = false, features = ["async-client"] }
 codex-codes = { version = "=0.146.4", default-features = false, features = ["async-client"] }
+# V1.168 P2 (dsh-native provider): Rust SDK for the DeepSeek Harness runtime
+# (PD-4). crates.io exact pin, chosen at implement on 2026-08-17
+# (`cargo search deepseek-harness-sdk` → 0.1.0). The crate publishes no
+# features (`features: {}` in the registry index) — a plain exact pin,
+# nothing to turn off (AR-3). The local SDK checkout
+# (`~/workspace/ai/deepseek/dsh-rust-sdk`) is reference only, never a path
+# dep. Consumed by `nexus-agent-host`. Version must never be mirrored in
+# `docs/` (PD-6).
+deepseek-harness-sdk = "=0.1.0"
 
 # --- Dev profile: keep local `target/` smaller ---
 # Default `debug = true` (full) inflates deps/rlibs and test binaries. Line-limited

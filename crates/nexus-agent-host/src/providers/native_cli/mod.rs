@@ -5,8 +5,10 @@
 
 pub mod claude;
 pub mod codex;
+pub mod dsh;
 pub mod map_claude;
 pub mod map_codex;
+pub mod map_dsh;
 
 /// Cap a crate error's `Display` string for `OpFailed::error_message` (N-2).
 ///

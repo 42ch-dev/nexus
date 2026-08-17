@@ -728,7 +728,7 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
     // --- Section 5: Agent Host subsystem ---
     let agent_host_facade: Arc<dyn nexus_agent_host::HostFacade> = {
         use nexus_agent_host::providers::native_cli::{
-            claude::ClaudeCliProvider, codex::CodexNativeProvider,
+            claude::ClaudeCliProvider, codex::CodexNativeProvider, dsh::DshNativeProvider,
         };
 
         let manager = nexus_agent_host::core::manager::HostManager::new();
@@ -773,6 +773,42 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
             tracing::warn!(
                 provider = "claude-native",
                 "CLI not found on PATH; skipping registration"
+            );
+        }
+
+        // dsh-native (PD-4): bring-your-own runtime, same skip-if-missing
+        // rule as claude/codex. Discovery: PATH command `dsh-jsonrpc-agent`
+        // OR a non-empty `DSH_RUNTIME_BIN` env var (the SDK treats empty as
+        // absent).
+        //
+        // Runtime handoff (P2 plan T2): PATH-discovered → the resolved
+        // absolute path is handed to the provider as `Config::runtime_bin`;
+        // env-only → `runtime_bin` stays unset so the SDK's own resolution
+        // order 3 (`DSH_RUNTIME_BIN` from the parent environment) picks the
+        // binary (`resolve_runtime`: launch_args_override → runtime_bin →
+        // DSH_RUNTIME_BIN → RuntimeNotFound).
+        if let Ok(dsh_path) = which::which("dsh-jsonrpc-agent") {
+            manager
+                .register_provider(Arc::new(DshNativeProvider::with_runtime_bin(Some(
+                    dsh_path.to_string_lossy().into_owned(),
+                ))))
+                .await;
+            providers_registered += 1;
+            tracing::info!(provider = "dsh-native", "registered native agent provider");
+        } else if std::env::var_os("DSH_RUNTIME_BIN").is_some_and(|value| !value.is_empty()) {
+            manager
+                .register_provider(Arc::new(DshNativeProvider::with_runtime_bin(None)))
+                .await;
+            providers_registered += 1;
+            tracing::info!(
+                provider = "dsh-native",
+                "registered native agent provider via DSH_RUNTIME_BIN"
+            );
+        } else {
+            tracing::warn!(
+                provider = "dsh-native",
+                "runtime not found on PATH (dsh-jsonrpc-agent) or DSH_RUNTIME_BIN; \
+                 skipping registration"
             );
         }
 
