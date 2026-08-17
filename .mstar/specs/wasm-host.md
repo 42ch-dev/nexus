@@ -6,10 +6,10 @@
 | --- | --- |
 | **Status** | Normative — V1.62 Shipped |
 | **Document class** | Master |
-| **Pillar (V1.122)** | **Computable** — this spec is the host-runtime contract for the [Computable](../../STRATEGY.md) pillar (the WASM layer that makes worlds *react*). Computable is a product pillar distinct from the `Compute (Capability)` mechanism ([`CONCEPTS.md`](../../CONCEPTS.md)); this crate is the host side of the [`compute-module-abi.md`](./compute-module-abi.md) contract. Pillar framing: [`pillar-framing.md`](../iterations/v1.122/specs/pillar-framing.md). |
+| **Pillar (V1.122)** | **Computable** — this spec is the host-runtime contract for the [Computable](../../STRATEGY.md) pillar (the WASM layer that makes worlds *react*). Computable is a product pillar distinct from the `Compute (Capability)` mechanism ([`CONCEPTS.md`](../../CONCEPTS.md)); this crate is the host side of the [`compute-module-abi.md`](./compute-module-abi.md) contract. Pillar framing: `pillar-framing.md`. |
 | **Scope** | `nexus-wasm-host` crate: wasmtime runtime, engine lifecycle, per-invocation sandbox, limits, wall-time watchdog, embedded module loading, user module discovery, error taxonomy, host function implementation |
 | **Last updated** | 2026-06-23 — V1.62 P2; 2026-08-01 — V1.147 added §2.3 direct-lane invocation note (no ABI change) |
-| **Related** | [compute-module-abi.md](./compute-module-abi.md), [orchestration-engine.md](./orchestration-engine.md) §8 (narrative.compute), [entity-scope-model.md](./entity-scope-model.md) §5.5.9, [`crates/nexus-wasm-host/AGENTS.md`](../../../crates/nexus-wasm-host/AGENTS.md) |
+| **Related** | [compute-module-abi.md](./compute-module-abi.md), [orchestration-engine.md](./orchestration-engine.md) §8 (narrative.compute), [entity-scope-model.md](./entity-scope-model.md) §5.5.9, [`crates/nexus-wasm-host/AGENTS.md`](../../crates/nexus-wasm-host/AGENTS.md) |
 
 This Master is normative for the `nexus-wasm-host` crate — the sandboxed
 WebAssembly runtime that hosts compute modules for the `narrative.compute`
@@ -265,7 +265,7 @@ This lets users override or patch shipped modules.
 ### 7.3 Registry API (V1.114 P2)
 
 `nexus-wasm-host` exposes the embedded module set as a read-only registry via
-[`src/registry.rs`](../../../crates/nexus-wasm-host/src/registry.rs) for the
+[`src/registry.rs`](../../crates/nexus-wasm-host/src/registry.rs) for the
 daemon runtime:
 
 - `list_modules()` → `Vec<ModuleSummary>` — summary of every installed module.
@@ -278,8 +278,8 @@ These functions back the daemon endpoints:
 
 Both endpoints reuse the existing `manifest.json` shape; the runtime maps the
 hand-written `ModuleManifest` struct to the generated wire type via a JSON
-round-trip. See [`schemas/daemon-api/compute/`](../../../schemas/daemon-api/compute/)
-for the generated contracts and [`modules/README.md`](../../../modules/README.md)
+round-trip. See [`schemas/daemon-api/compute/`](../../schemas/daemon-api/compute/)
+for the generated contracts and [`modules/README.md`](../../modules/README.md)
 for the authoring guide.
 
 ---
@@ -360,7 +360,7 @@ nexus::kb_read(id_ptr: u32, id_len: u32, out_ptr: u32, out_cap: u32) -> i64
 
 Implementation (in `crates/nexus-wasm-host/src/host.rs`):
 
-1. Read `id_len` bytes from the instance's linear memory at `[id_ptr, id_ptr+id_len)`.
+1. Read `id_len` bytes from the instance's linear memory at `id_ptr, id_ptr+id_len)`.
 2. Parse as UTF-8 → `id_str`.
 3. Look up `id_str` in `InvocationState.ctx.key_blocks` (a `HashMap<String, serde_json::Value>`
    built from the `ComputeInput.key_blocks` array at invocation start).
@@ -383,7 +383,7 @@ Implementation:
 1. Read `q_len` bytes from `[q_ptr, q_ptr+q_len)`.
 2. Parse as JSON → `query`.
 3. In V1, ignore the query and return `InvocationState.ctx.narrative_state` verbatim.
-   A richer query engine is planned for a later iteration. **Durable roadmap:** consolidated in the [deferred-features tracker §2.6](../roadmaps/deferred-features-cross-version-tracker.md) — DR-50 (richer `narrative_query` engine).
+   A richer query engine is planned for a later iteration. **Durable roadmap:** consolidated in the [deferred-features tracker §2.6 — DR-50 (richer `narrative_query` engine).
 4. Serialize the response and write to `[out_ptr, out_ptr+written)`; return `written`.
 5. On errors, return `-1`. If `out_cap` too small, return `-2`.
 

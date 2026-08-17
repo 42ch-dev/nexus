@@ -6,7 +6,7 @@
 | --- | --- |
 | **Status** | Normative — V1.62 Shipped |
 | **Document class** | Master |
-| **Pillar (V1.122)** | **Computable** — this spec is the module-side ABI contract for the [Computable](../../STRATEGY.md) pillar (the WASM layer that makes worlds *react*). Computable is a product pillar distinct from the `Compute (Capability)` mechanism ([`CONCEPTS.md`](../../CONCEPTS.md)). Pillar framing: [`pillar-framing.md`](../iterations/v1.122/specs/pillar-framing.md). |
+| **Pillar (V1.122)** | **Computable** — this spec is the module-side ABI contract for the [Computable](../../STRATEGY.md) pillar (the WASM layer that makes worlds *react*). Computable is a product pillar distinct from the `Compute (Capability)` mechanism ([`CONCEPTS.md`](../../CONCEPTS.md)). Pillar framing: `pillar-framing.md`. |
 | **Scope** | V1 envelope ABI: `ComputeInput` / `ComputeOutput` wire contracts, module exports table, host import ABI, marshalling convention, `manifest.json` contract, sandbox cross-ref, versioning policy |
 | **Last updated** | 2026-06-23 — V1.62 Shipped; 2026-07-13 — V1.115 P2 clarified wire vs runtime-only split in §7.6 (no normative change); 2026-08-01 — V1.147 added §5.6 direct-lane invocation note (no ABI change) |
 | **Related** | [wasm-host.md](./wasm-host.md), [schemas-directory-layout.md](./schemas-directory-layout.md) §3.5, [orchestration-engine.md](./orchestration-engine.md) §8 (narrative.compute), [entity-scope-model.md](./entity-scope-model.md) §5.5.9 |
@@ -104,7 +104,7 @@ Use `kb_read` / `narrative_query` only when a module needs to look up
 ## 4. `ComputeInput` envelope structure
 
 The `ComputeInput` envelope is defined in
-[`schemas/local-api/compute/compute-input.schema.json`](../../../schemas/local-api/compute/compute-input.schema.json).
+[`schemas/daemon-api/compute/compute-input.schema.json`](../../schemas/daemon-api/compute/compute-input.schema.json).
 It is the **single source of truth** for the input shape — the Rust
 `generated::local_api::compute::compute_input::ComputeInput` struct is derived
 from it via codegen.
@@ -151,7 +151,7 @@ non-computable entries may still appear in the snapshot for read-only reference.
 ## 5. `ComputeOutput` 4-part envelope
 
 The `ComputeOutput` envelope is defined in
-[`schemas/local-api/compute/compute-output.schema.json`](../../../schemas/local-api/compute/compute-output.schema.json).
+[`schemas/daemon-api/compute/compute-output.schema.json`](../../schemas/daemon-api/compute/compute-output.schema.json).
 The module's `compute` export must emit a JSON object with exactly four
 top-level keys.
 
@@ -315,7 +315,7 @@ The module must ensure `out_ptr` does not overlap with the request data.
 Every compute module ships a `manifest.json` next to its `.wasm`. The manifest
 declares identity, the required input surface, the export names, and optional
 sandbox overrides. The exact structure is defined in
-[`modules/README.md`](../../../modules/README.md); this section is the normative
+[`modules/README.md`](../../modules/README.md); this section is the normative
 reference for the contract fields.
 
 ### 7.1 Required fields
@@ -437,7 +437,7 @@ read-only through the daemon registry API:
   `ComputeModuleDetail`.
 
 These endpoints reuse the manifest fields defined above; they do not introduce
-a parallel module DTO. See [`schemas/daemon-api/compute/`](../../../schemas/daemon-api/compute/)
+a parallel module DTO. See [`schemas/daemon-api/compute/`](../../schemas/daemon-api/compute/)
 for the generated wire contracts.
 
 ### 7.6 Wire vs runtime-only fields
@@ -497,7 +497,7 @@ the module's expected envelope shape and the host's schema.
 The following items from the V1.61 compass non-goals (§1.2) are deferred to
 future major ABI versions (V2.0+). They are **not** supported in the V1 envelope:
 
-> **Durable roadmap:** consolidated in the [deferred-features tracker §2.6](../roadmaps/deferred-features-cross-version-tracker.md) — DR-49 (compute-module ABI V2 bundle: multi-module composition/chaining, CDN distribution + Ed25519 signing, Generic Combat Protocol interop, 3P game-server bridge, KB→UI editor).
+> **Durable roadmap:** consolidated in the deferred-features tracker §2.6 — DR-49 (compute-module ABI V2 bundle: multi-module composition/chaining, CDN distribution + Ed25519 signing, Generic Combat Protocol interop, 3P game-server bridge, KB→UI editor).
 
 No new deferred items are added in V1.62 — the V1.62 scope is a course
 correction of the V1.61 compute architecture, not an expansion.

@@ -61,6 +61,6 @@ Settings chrome (five-section nav, modal size) must appear in Design Studio fixt
 
 ## See also
 
-- Spec: `.mstar/iterations/v1.131/specs/shell-ia-finish.md`
+- Spec: `shell-ia-finish.md`
 - Plans: `2026-07-22-v1.131-p0-chronos-titlebar` (gear), `…-p2-shell-ia-finish` (modal primary)
 - Related: [ui-component-promotion-workflow.md](ui-component-promotion-workflow.md), [creator-shell-content-mode-pattern.md](creator-shell-content-mode-pattern.md)

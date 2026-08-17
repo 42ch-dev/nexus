@@ -19,7 +19,7 @@ This document does **not** override:
 
 - `AGENTS.md` — release discipline, codegen rules, reachability rules.
 - `v1-spec/` (ADRs / codegen strategy / wire schemas) — wire and protocol decisions (e.g. `agent-client-protocol` SDK pin) remain owned there.
-- Architecture SSOTs — **`specs/local-cloud-crate-architecture.md`** (crate graph & local/cloud lines), `orchestration-engine.md`, `daemon-runtime.md`, `creator-schedule-and-core-context.md`, `acp-client-tech-spec.md`, [`schemas-external-consumer-boundary.md`](../specs/schemas-external-consumer-boundary.md); archived: `schemas-boundary.md`, `daemon-lifecycle-api.md`, `local-db-refactor.md`, `architecture-alignment-review.md`.
+- Architecture SSOTs — **`specs/local-cloud-crate-architecture.md`** (crate graph & local/cloud lines), `orchestration-engine.md`, `daemon-runtime.md`, [`creator-schedule-and-core-context.md`](../specs/creator-schedule-and-core-context.md), [`acp-client-tech-spec.md`](../specs/acp-client-tech-spec.md), [`schemas-external-consumer-boundary.md`](../specs/schemas-external-consumer-boundary.md).
 
 **Conflict order**: `AGENTS.md` > `v1-spec` / ADR > architecture SSOTs > this document > other knowledge.
 
@@ -68,14 +68,14 @@ Changing a decision in §2 follows the flow in §4. Do not silently swap crates,
 | 2.1 | **JSON-RPC** (daemon ↔ `acp-worker` IPC) | `jsonrpsee-core` + proc macros + custom `RpcTransport` trait + NDJSON via `tokio_util::codec::LinesCodec` | Hand-rolled `serde_json` framing; `json-rpc-rs`; `tokio-jrpc`; `karyon-jsonrpc` | `2026-04-17-v1.4-ws2-orchestration-skeleton.md` Task 5; `orchestration-engine.md` §6 |
 | 2.2 | **Orchestration SessionStorage** | `sqlx` (sqlite + runtime-tokio + macros + migrate + chrono + uuid) on the unified **`state.db`** via the `Arc<SqlitePool>` exposed by `nexus-local-db` (post-WS8). `orchestration_sessions` table added through the same `sqlx migrate` pipeline. | Keep `rusqlite` + `deadpool-sqlite`; separate `.db` file; `sea-orm` | `2026-04-17-v1.4-ws2-orchestration-skeleton.md` Task 3 (depends on WS8) |
 | 2.3 | **`nexus-local-db` / `state.db` engine** | **Migrated from `rusqlite` + `deadpool-sqlite` + bespoke sequential migrations → to `sqlx` (sqlite + runtime-tokio + macros + migrate)** as **V1.4 WS8** (done). Bespoke `Migration` registry replaced by `sqlx::migrate!`-driven `.sql` files. | Keep rusqlite (A-4 rejected by PM 2026-04-17) | `2026-04-17-v1.4-ws8-local-db-sqlx-migration.md` (new plan row); `local-db-refactor.md` revised at WS8 T9 |
-| 2.4 | **Platform user auth / JWT** | `jsonwebtoken` only | `oauth2` v5.x (deferred — not rejected) | `device-flow-oauth-scope-v1.md` (TD-10 deferral) |
+| 2.4 | **Platform user auth / JWT** | `jsonwebtoken` only | `oauth2` v5.x (deferred — not rejected) | TD-10 deferral (retired device-flow exploration) |
 | 2.5 | **Challenge arithmetic evaluator** | Hand-rolled shunting-yard (current implementation under `crates/nexus42/src/challenge/`) | `meval`; `evalexpr` | §3.5 below (DoS guard TODOs tracked here, not in `status.json`) |
 | 2.6 | **File watcher** (deferred) | Recommended stack when implemented: `notify` 8 + `notify-debouncer-full` + async mpsc | Raw `RecommendedWatcher` only | `crates/nexus42d/src/workspace/mod.rs` (deferral note) |
-| 2.7 | **Cron / scheduler** (V1.5 — implemented) | **V1.5 WS-D implemented** a hand-rolled clock poller in `crates/nexus-orchestration/src/scheduler/` using `cron` + `chrono-tz`. The four constraints from §3.7 are satisfied. See `creator-schedule-and-core-context.md` for the full design. | `tokio-cron-scheduler` 0.15.x (rejected); hand-rolled `cron` + `chrono-tz` + `sleep_until` (**selected & shipped**) | `creator-schedule-and-core-context.md` |
+| 2.7 | **Cron / scheduler** (V1.5 — implemented) | **V1.5 WS-D implemented** a hand-rolled clock poller in `crates/nexus-orchestration/src/scheduler/` using `cron` + `chrono-tz`. The four constraints from §3.7 are satisfied. See [`creator-schedule-and-core-context.md`](../specs/creator-schedule-and-core-context.md) for the full design. | `tokio-cron-scheduler` 0.15.x (rejected); hand-rolled `cron` + `chrono-tz` + `sleep_until` (**selected & shipped**) | [`creator-schedule-and-core-context.md`](../specs/creator-schedule-and-core-context.md) |
 | 2.8 | **Layered config** (future) | `figment` + `secrecy` for redaction (when needed) | `config-rs`; hand-rolled | — (not yet scheduled) |
 | 2.9 | **Snapshot testing** (dev) | Recommended: `insta` + redactions for new CLI/HTTP integration tests | Hand-rolled golden files | — (optional; per-test-author discretion) |
 
-> Full per-decision details in §3. Original external research captured in [`../reports/2026-04-17-crate-selection-research/research-log.md`](../reports/2026-04-17-crate-selection-research/research-log.md).
+> Full per-decision details in §3.
 
 ---
 
@@ -184,7 +184,7 @@ sqlx = { version = "0.8", default-features = false, features = [
 
 **Decision**: V1.x uses `jsonwebtoken` to validate access tokens issued by the platform. **No `oauth2` crate in V1.x.**
 
-**Rationale**: TD-10 (real Device Authorization Grant) is intentionally deferred per `device-flow-oauth-scope-v1.md`; the current stub `verify_device_code` returns `Ok(false)` on purpose. Pulling in a full OAuth client now would add surface area without unlocking any scheduled functionality.
+**Rationale**: TD-10 (real Device Authorization Grant) is intentionally intentionally deferred (TD-10); the current stub `verify_device_code` returns `Ok(false)` on purpose. Pulling in a full OAuth client now would add surface area without unlocking any scheduled functionality.
 
 **When TD-10 is scheduled**: `oauth2` v5.x is the first candidate (RFC 8628 support is first-class); evaluate at that time and update this document to v2. Candidate is **deferred**, not rejected.
 
@@ -230,7 +230,7 @@ sqlx = { version = "0.8", default-features = false, features = [
 
 ### 3.7 Cron / scheduler — V1.4 defers; V1.5 decides
 
-**Decision**: V1.4 does **not** select a scheduler crate. `orchestration-engine.md` defers wall-clock cron to V1.5+; `creator-schedule-and-core-context.md` (WS7) delivers only the data model + state machine.
+**Decision**: V1.4 does **not** select a scheduler crate. `orchestration-engine.md` defers wall-clock cron to V1.5+; [`creator-schedule-and-core-context.md`](../specs/creator-schedule-and-core-context.md) (WS7) delivers only the data model + state machine.
 
 **Constraints any future implementation must satisfy** (binding on V1.5 design):
 
@@ -290,7 +290,7 @@ let config: Config = figment.extract()?;
 When a decision in §2 needs to change (new requirement, crate EOL, security advisory, etc.):
 
 1. **Problem statement + candidates** — describe what the current decision fails to cover; enumerate at least two candidates (may include "keep current").
-2. **Comparison** — evaluate across the same dimensions used in this document's research log (dep footprint, safety, async fit, error quality, test cost, maintenance risk). Record in a new entry under `.mstar/plans/<YYYY-MM-DD-crate-<topic>-research>.md
+2. **Comparison** — evaluate across the same dimensions used in this document's research log (dep footprint, safety, async fit, error quality, test cost, maintenance risk). Record in a new entry under `<YYYY-MM-DD-crate-<topic>-research>.md
 3. **Decision** — update the affected row in §2, bump this file to `v<N+1>` if the change is substantive (otherwise in-place amendment with a dated note is fine), and update consumers per §5.
 4. **Impact tracking** — any code / plan changes flow through the normal plan system; they do not bypass this document.
 
@@ -306,7 +306,6 @@ Documents and plans that cite this best-practices file:
 - `orchestration-engine.md` — §4 (graph-flow integration), §5 (capability store), §6 (worker IPC).
 - `creator-schedule-and-core-context.md` — wall-clock deferral clause.
 - `2026-04-17-v1.4-ws2-orchestration-skeleton.md` — Tech Stack + Task 1 (sqlx features) + Task 5 (IPC implementation).
-- `2026-04-17-crate-selection-research/research-log.md` — the archival source of the comparisons behind §2 rows.
 
 Before editing any of the above in a way that changes crate selection, update **this** document first.
 
@@ -314,13 +313,10 @@ Before editing any of the above in a way that changes crate selection, update **
 
 ## 6. References
 
-- Research log (archival): [`../reports/2026-04-17-crate-selection-research/research-log.md`](../reports/2026-04-17-crate-selection-research/research-log.md)
-- V1.4 delivery compass: [`v1.4/delivery-compass.md`](../iterations/v1.4/delivery-compass.md)
+- V1.4 delivery compass: `delivery-compass.md`
 - Orchestration engine SSOT: [`orchestration-engine.md`](../specs/orchestration-engine.md)
-- Schedule / core context SSOT: [`creator-schedule-and-core-context.md`](creator-schedule-and-core-context.md)
-- Local DB ownership: [`local-db-refactor.md`](archived/knowledge/local-db-refactor.md)
-- Device flow deferral: [`device-flow-oauth-scope-v1.md`](device-flow-oauth-scope-v1.md)
-- Repository-wide rules: [`AGENTS.md`](../../../AGENTS.md) — §"Documentation & plans", dependency / release discipline.
+- Schedule / core context SSOT: [`creator-schedule-and-core-context.md`](../specs/creator-schedule-and-core-context.md)
+- Repository-wide rules: [`AGENTS.md`](AGENTS.md) — §"Documentation & plans", dependency / release discipline.
 
 ---
 

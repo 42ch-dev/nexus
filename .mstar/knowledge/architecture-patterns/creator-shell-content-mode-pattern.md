@@ -89,7 +89,7 @@ App integration tests should cover at least one entity kind (Work); symmetric Wo
 
 ## References
 
-- Iteration spec: [creator-create-controller-shell.md](../../iterations/v1.128/specs/creator-create-controller-shell.md)
+- Iteration spec: `creator-create-controller-shell.md`
 - Presentational extract: `apps/web/src/components/layout/presentational/creator-shell-content.tsx`
 - Context: `apps/web/src/components/layout/creator-entity-selection-context.tsx`
 - App host: `apps/web/src/pages/creator-hub-page.tsx`

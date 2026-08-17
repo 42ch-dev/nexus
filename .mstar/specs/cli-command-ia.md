@@ -69,7 +69,7 @@ No sixth top-level group in V1.35. Pre-release allows deprecation aliases (see �
 
 **Removed in V1.45 (hard delete):** `review-master`, `audit-chapter`, `stage`, `start`, `continue`, `resume`, `reconcile-chapters` under `creator run`.
 
-See [v1.45/delivery-compass.md](../../iterations/v1.45/delivery-compass.md) migration appendix.
+See `delivery-compass.md` migration appendix.
 
 <!-- V1.44 shipped table (superseded by V1.45):
 | `review-master <work_id>` | … | V1.44 P1 |
@@ -78,7 +78,7 @@ See [v1.45/delivery-compass.md](../../iterations/v1.45/delivery-compass.md) migr
 
 ### 3.2 `creator kb` vs `creator knowledge` (P3 lock)
 
-**Problem (KCA-003):** Users conflate `creator kb`, `creator knowledge`, and World KB. Evidence and UX IDs: [V1.35 compass Appendix A](../../iterations/v1.35/delivery-compass.md#appendix-a-cli-usability-audit-v135) UX-004.
+**Problem (KCA-003):** Users conflate `creator kb`, `creator knowledge`, and World KB. Evidence and UX IDs: V1.35 compass Appendix A UX-004.
 
 **Compass must lock one option before P3 implement:**
 
@@ -92,7 +92,7 @@ See [v1.45/delivery-compass.md](../../iterations/v1.45/delivery-compass.md) migr
 
 **Related deferral:** DF-42 (Daemon API KB redesign) — out of V1.35 implement scope.
 
-**Durable roadmap:** consolidated in the [deferred-features tracker §2.6](../roadmaps/deferred-features-cross-version-tracker.md) — DR-19 (`creator kb` vs `creator knowledge` disambiguation decision).
+**Durable roadmap:** consolidated in the deferred-features tracker §2.6 — DR-19 (`creator kb` vs `creator knowledge` disambiguation decision).
 
 ---
 
@@ -139,7 +139,7 @@ See [v1.45/delivery-compass.md](../../iterations/v1.45/delivery-compass.md) migr
 | `daemon schedule` as first-run hint | `creator run` | Help text only; no command removal |
 | Top-level `preset` (never shipped) | `system preset`, `creator run` | Document only (DF-52) |
 
-**Hard delete** of `sync` top-level: **Out of V1.35** — earliest V1.36 after alias period. **Durable roadmap:** consolidated in the [deferred-features tracker §2.6](../roadmaps/deferred-features-cross-version-tracker.md) — DR-53 (top-level `sync` hard-delete).
+**Hard delete** of `sync` top-level: **Out of V1.35** — earliest V1.36 after alias period. **Durable roadmap:** consolidated in the deferred-features tracker §2.6 — DR-53 (top-level `sync` hard-delete).
 
 ---
 

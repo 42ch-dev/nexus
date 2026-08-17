@@ -8,7 +8,7 @@
 | **Document class** | Master |
 | **Scope** | Folder names, consumer-scope mapping, README rules, rename policy; **not** field-level DTO definitions (those stay in platform `v1-spec` + `data-model-v1`) |
 | **Last updated** | 2026-07-26 — V1.139 architect §5.2: domain/ key-block.schema.json deleted; spoke-sourced KB type. |
-| **Related** | [schemas-external-consumer-boundary.md](schemas-external-consumer-boundary.md), [local-cloud-crate-architecture.md](./local-cloud-crate-architecture.md), [compute-module-abi.md](./compute-module-abi.md) §4–§5, [wasm-host.md](./wasm-host.md) §6–§7, [spoke-adapter-architecture.md](./spoke-adapter-architecture.md), [schemas/AGENTS.md](../../../schemas/AGENTS.md), [tooling/AGENTS.md](../../../tooling/AGENTS.md) |
+| **Related** | [schemas-external-consumer-boundary.md](schemas-external-consumer-boundary.md), [local-cloud-crate-architecture.md](./local-cloud-crate-architecture.md), [compute-module-abi.md](./compute-module-abi.md) §4–§5, [wasm-host.md](./wasm-host.md) §6–§7, [spoke-adapter-architecture.md](./spoke-adapter-architecture.md), [schemas/AGENTS.md](../../schemas/AGENTS.md), [tooling/AGENTS.md](../../tooling/AGENTS.md) |
 
 **Do not confuse:**
 
@@ -89,7 +89,7 @@ schemas/
 - **Not** Daemon API proxies (V1.20 removed world/explore **daemon** routes; platform HTTP contracts **remain** wire here).
 - Grouping is **flat** (no `http-bff/explore/` subfolders) — use filename prefix: `explore-*`, `world-*`, `publish-*`, `notifications-*`, `context-assembly-v1`, etc.
 - `$id` / `$ref` URIs use `https://nexus42.invalid/schemas/platform/http-bff/...`.
-- Maintain [`platform/http-bff/README.md`](../../../schemas/platform/http-bff/README.md) index when adding files.
+- Maintain [`platform/http-bff/README.md`](../../schemas/platform/http-bff/README.md) index when adding files.
 
 ### 3.2 `platform/sync/`
 
@@ -97,7 +97,7 @@ schemas/
 - **`bundle.schema.json`** is the **codegen canonical** `Bundle` type. **`bundle-refinement.schema.json`** is a **validation refinement** (allOf of the canonical bundle with CLI-specific constraints) — codegen skips it (see `tooling/codegen/src/ts-gen.ts` `SKIP_LIST` / `tooling/codegen/rust-gen/src/main.rs` `SKIP_SCHEMAS`).
 - `delta.schema.json` and `sync-command.schema.json` moved here from `domain/` (V1.62 P0) because they are sync-protocol payloads, not wire entities.
 - `$id` / `$ref` URIs use `https://nexus42.invalid/schemas/platform/sync/...`.
-- Maintain [`platform/sync/README.md`](../../../schemas/platform/sync/README.md).
+- Maintain [`platform/sync/README.md`](../../schemas/platform/sync/README.md).
 
 ### 3.3 `domain/`
 
@@ -115,7 +115,7 @@ Wire entities aligned with platform `data-model-v1` §5–§10. Current inventor
 
 (bundle/delta/sync-command moved to `platform/sync/` in V1.62 P0 — they are sync payloads, not wire entities.)
 
-[`domain/README.md`](../../../schemas/domain/README.md) MUST list only files that exist under `schemas/domain/*.json`.
+[`domain/README.md`](../../schemas/domain/README.md) MUST list only files that exist under `schemas/domain/*.json`.
 
 ### 3.4 `common/`
 
@@ -129,9 +129,9 @@ Wire entities aligned with platform `data-model-v1` §5–§10. Current inventor
 
 - Compute module ABI envelopes consumed by **external** WASM compute modules (and, in future, the WebApp/Web-UI): `compute-input.schema.json`, `compute-output.schema.json`.
 - These are cross-language contracts (Rust host ↔ wasm32 module), so they live under `schemas/` and run through codegen, not as hand-written local types.
-- Per-module shape declarations (per-BlockType attributes/state) do **not** live here — they live in each module's `manifest.json` `schemas` block (V1.62 P1). See [modules/README.md](../../../modules/README.md).
+- Per-module shape declarations (per-BlockType attributes/state) do **not** live here — they live in each module's `manifest.json` `schemas` block (V1.62 P1). See [modules/README.md](../../modules/README.md).
 - `$id` / `$ref` URIs use `https://nexus42.invalid/schemas/local-api/compute/...`.
-- Maintain [`local-api/compute/README.md`](../../../schemas/local-api/compute/README.md). Compute ABI normative detail: [compute-module-abi.md](./compute-module-abi.md). Host-side runtime detail: [wasm-host.md](./wasm-host.md).
+- Maintain [`daemon-api/compute/README.md`](../../schemas/daemon-api/compute/README.md). Compute ABI normative detail: [compute-module-abi.md](./compute-module-abi.md). Host-side runtime detail: [wasm-host.md](./wasm-host.md).
 
 ### 3.5A `local-api/common/` (V1.64)
 
@@ -223,7 +223,7 @@ Authoritative count: run `pnpm run validate-schemas` after materializing V1.64 s
 | --- | --- | --- |
 | `common/` | 3 | `common`, `source-anchor`, `version-ref` |
 | `domain/` | 10 → **9** (V1.139: `key-block.schema.json` deleted) | Wire entities (see §3.3 table) |
-| `platform/http-bff/` | 34 | Platform HTTP bodies (flat; prefix grouping in [http-bff/README.md](../../../schemas/platform/http-bff/README.md)) |
+| `platform/http-bff/` | 34 | Platform HTTP bodies (flat; prefix grouping in [http-bff/README.md](../../schemas/platform/http-bff/README.md)) |
 | `platform/sync/` | 7 | `bundle`, `bundle-refinement` (codegen-skipped), `delta`, `sync-command`, `sync-pull-request`, `sync-pull-response`, `conflict-response` |
 | `local-api/common/` | 1 | `error-response` (V1.64 F-E1) |
 | `local-api/compute/` | 2 | `compute-input`, `compute-output` |
@@ -241,7 +241,7 @@ Do not hand-maintain an exact total here; `schemas/README.md` and `pnpm run vali
 
 **Not in tree:** `acp-runtime/`, `meta/`, `cli-sync/`, `cloud-sync/`, `compute/` (all removed/renamed).
 
-Historical audit (pre-rename paths): [archived schemas-boundary §5.2](../archived/knowledge/schemas-boundary.md) — use this section for current paths.
+Historical audit (pre-rename paths): archived schemas-boundary §5.2 — use this section for current paths.
 
 ---
 

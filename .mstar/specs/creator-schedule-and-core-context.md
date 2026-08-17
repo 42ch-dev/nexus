@@ -1,13 +1,13 @@
 # Creator Schedule and Core Context — Specification
 
-**Status**: Shipped (V1.4 WS7 → V1.34 agent-host + schedule wiring). The schedule/core_context primitives landed across V1.4–V1.34; the canonical SSOT for ongoing schedule work is now [`creator-schedule-and-core-context.md`](creator-schedule-and-core-context.md) cross-referenced from `orchestration-engine.md`. Future scope (e.g. multi-Schedule priority / preemption) tracked in [`deferred-features-cross-version-tracker.md`](../roadmaps/deferred-features-cross-version-tracker.md) §3.3.  
+**Status**: Shipped (V1.4 WS7 → V1.34 agent-host + schedule wiring). The schedule/core_context primitives landed across V1.4–V1.34; the canonical SSOT for ongoing schedule work is now [`creator-schedule-and-core-context.md`](creator-schedule-and-core-context.md) cross-referenced from `orchestration-engine.md`. Future scope (e.g. multi-Schedule priority / preemption) tracked in `deferred-features-cross-version-tracker.md` §3.3.  
 **Document class**: Master  
 **Author**: @project-manager (2026-04-17 prep-phase spec); to be co-signed by @architect before WS7 implement.
 **Scope**: Multi-Schedule lifecycle per creator + the immutable versioned `core_context` that stabilises preset execution across edits.
 **Wave-0 design inputs consumed**:
 
 - [orchestration-engine.md](orchestration-engine.md) — Task/Capability/Session primitives this spec builds on
-- [v1.4/delivery-compass.md](../../iterations/v1.4/delivery-compass.md) — program-level scope and milestones
+- `delivery-compass.md` — program-level scope and milestones
 - [schemas-external-consumer-boundary.md](schemas-external-consumer-boundary.md) — confirms Schedule / core_context types are **local** (not wire)
 
 **Answers for open questions originally parked in `orchestration-engine.md` §11**: OQ-1, OQ-2, OQ-3, OQ-4, OQ-5 are resolved here (see §2 "Confirmed Decisions"). OQ-6 is scoped for V1.4; OQ-7/OQ-8 remain V1.5+.
@@ -56,7 +56,7 @@ From the 2026-04-17 brainstorming and its follow-up (item 3 of the 2026-04-17 PM
 - **In-flight input edits are accepted but do not preempt the current execution** — a user `schedule edit <id>` writes a new `core_context` version; the running `Session` finishes the **current state's enter actions + exit evaluation** on the previous version and picks up the new version at the **next state transition**. This preserves the "core_context is stable during execution" guarantee while honouring user intent on the next cycle.
 - **`core_context` is immutable-versioned** — every derivation step produces a new `core_context_version` row; the Schedule holds a pointer to the current version; history is user-queryable.
 - **`iterated_experience` in V1.4 is "preset `context_update` hook only"** (Q1=D answer, 2026-04-17) — the derivation trace enum **reserves** `kind: "llm_summarize"` but V1.4 does not emit that kind; **V1.5 implemented** a `context.summarize` capability (`crates/nexus-orchestration/src/capability/builtins/context_summarize.rs`) that writes this kind without schema migration.
-- **Seed → first `core_context` semantics governed by preset** (Q2=C answer, 2026-04-17) — preset YAML declares the initial-action behaviour; V1.4 built-in presets default to "seed content becomes `core_context` v0 verbatim"; a future preset may declare a one-shot LLM expansion step and the engine will execute it. **Durable roadmap:** [deferred-features tracker §2.6](../roadmaps/deferred-features-cross-version-tracker.md) — DR-17.
+- **Seed → first `core_context` semantics governed by preset** (Q2=C answer, 2026-04-17) — preset YAML declares the initial-action behaviour; V1.4 built-in presets default to "seed content becomes `core_context` v0 verbatim"; a future preset may declare a one-shot LLM expansion step and the engine will execute it. **Durable roadmap:** deferred-features tracker §2.6 — DR-17.
 - **Trigger model**: V1.4 supported on-demand triggers (`schedule start`, auto-advance, `timer.wait_until`). **V1.5 WS-D added wall-clock / cron triggers** via a hand-rolled clock poller in `crates/nexus-orchestration/src/scheduler/` using `cron` + `chrono-tz` (see [`crate-selection-best-practices.md`](../knowledge/crate-selection-best-practices.md) §2.7 for the four hard constraints this implementation satisfies).
 - **Schedule and core_context types are local** — per [schemas-external-consumer-boundary.md](schemas-external-consumer-boundary.md) §2, platform never observes these; they live as hand-coded Rust in `crates/nexus-contracts/src/local/schedule/` (or the appropriate local submodule).
 - **Auto-chain side-input (V1.39)** — inspiration append (`creator run continue --note`, agent `nexus.work.patch`) and research KB writes during an active FL-E driver schedule produce new `core_context` versions or external KB artifacts but **must not** create a second active stage driver or cancel the current one. The running session completes the current state on the prior snapshot; enriched context is visible at the **next** state transition. See [creator-workflow.md](creator-workflow.md) §5.5.
@@ -384,7 +384,7 @@ Returns a human-readable summary of the creator's Schedule timeline (past N days
 
 ## 9. HTTP Surface (`/v1/local/orchestration/schedules/*`)
 
-Following the pattern established in [acp-client-tech-spec.md](local/acp-client-tech-spec.md) §4.3 (orchestration control endpoints), the new endpoints:
+Following the pattern established in [acp-client-tech-spec.md](acp-client-tech-spec.md) §4.3 (orchestration control endpoints), the new endpoints:
 
 | Method | Path                                                                  | Purpose                                                     |
 | ------ | --------------------------------------------------------------------- | ----------------------------------------------------------- |
@@ -542,13 +542,13 @@ Follows the V1.4 delivery compass WS7 ordering.
 
 Still V1.5+. If users want two different ACP agents driving the same creator in parallel, V1.4 Schedule admission can describe the intent (`ParallelAny` with different preset agents), but the worker model can't execute it. V1.5 either multiplexes one worker or spawns sibling workers.
 
-> **Durable roadmap:** consolidated in the [deferred-features tracker §2.6](../roadmaps/deferred-features-cross-version-tracker.md) — DR-09 (multi-agent per creator).
+> **Durable roadmap:** consolidated in the deferred-features tracker §2.6 — DR-09 (multi-agent per creator).
 
 ### OQ-8 — User-authored capabilities
 
 Still V1.5+. Schedule-level policy (who can author a preset that invokes a capability the daemon doesn't ship?) is out of scope for V1.4; the built-in registry is the only source of capabilities in V1.4.
 
-> **Durable roadmap:** consolidated in the [deferred-features tracker §2.6](../roadmaps/deferred-features-cross-version-tracker.md) — DR-10 (user-authored capabilities).
+> **Durable roadmap:** consolidated in the deferred-features tracker §2.6 — DR-10 (user-authored capabilities).
 
 ### OQ-6-extension — Cron / wall-clock triggers
 
@@ -563,10 +563,10 @@ Schedule and core_context Rust types in `crates/nexus-contracts/src/local/schedu
 Internal:
 
 - [orchestration-engine.md](orchestration-engine.md) — engine primitives; §11 OQ list now answered here
-- [v1.4/delivery-compass.md](../../iterations/v1.4/delivery-compass.md) — program scope (WS7)
+- `delivery-compass.md` — program scope (WS7)
 - [schemas-external-consumer-boundary.md](schemas-external-consumer-boundary.md) — confirms Schedule types are local
-- [acp-client-tech-spec.md](local/acp-client-tech-spec.md) §4.3 — orchestration HTTP surface pattern
-- [daemon-lifecycle-api.md](../../archived/knowledge/daemon-lifecycle-api.md) — supervisor start/stop coupled to `Running`/`Stopping`
+- [acp-client-tech-spec.md](acp-client-tech-spec.md) §4.3 — orchestration HTTP surface pattern
+- `daemon-lifecycle-api.md` — supervisor start/stop coupled to `Running`/`Stopping`
 
 External:
 

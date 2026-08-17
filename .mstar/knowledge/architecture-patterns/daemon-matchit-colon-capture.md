@@ -40,7 +40,7 @@ Creator routes were fixed earlier; orchestration presets/sessions/modules were f
 
 ## Evidence
 
-- Guide: `.mstar/iterations/v1.132/guides/p0-orch-load-404-rca.md`
+- Guide: `p0-orch-load-404-rca.md`
 - V1.132 P0 fix: colon capture for presets/sessions/modules/strategy reload in `api/mod.rs`
 - V1.133 P0 fix: full sweep of all remaining ~30 brace-form routes + `:cancel` edge case + 8 router-level regression tests
 - Residual: `R-V1132P0-QC2-S-001` resolved by V1.133 P0; `R-V1133P0-QC1-S-001` (nit: handler doc comments) remains open

@@ -8,10 +8,10 @@
 | **Document class** | Master |
 | **Scope** | Stable rules: local vs cloud product lines, crate responsibilities, contracts usage, dependency forbidden edges, current-vs-target wiring, Daemon API *classes* allowed/forbidden |
 | **Scope model SSOT** | [entity-scope-model.md](./entity-scope-model.md) — authoritative for scope hierarchy, crate ownership, and `kb`/`knowledge` naming boundaries |
-| **Delivery compass** | Iteration-scoped milestones, phases, acceptance tests → [v1.21/delivery-compass.md](../../iterations/v1.21/delivery-compass.md) |
+| **Delivery compass** | Iteration-scoped milestones, phases, acceptance tests → `delivery-compass.md` |
 | **Related** | [entity-scope-model.md](./entity-scope-model.md), [local-runtime-boundary.md](./local-runtime-boundary.md), [daemon-runtime.md](./daemon-runtime.md), [cli-spec.md](./cli-spec.md), [schemas-directory-layout.md](./schemas-directory-layout.md), [../schemas-external-consumer-boundary.md](schemas-external-consumer-boundary.md) |
 
-**This file is not an implementation checklist.** Do not add migration batches, branch names, or “done by V1.21” task tables here — put those in the matching **iteration compass** and `.mstar/plans/`.
+**This file is not an implementation checklist.** Do not add migration batches, branch names, or “done by V1.21” task tables here — put those in the matching **iteration compass** and local plan documents (harness process artifacts, not tracked specs).
 
 **Current-vs-target rule:** sections below explicitly separate **Cargo dependency wiring** from **product integration**. A Cargo edge is not a claim that CLI commands or daemon HTTP handlers use that crate at runtime.
 
@@ -122,7 +122,7 @@ The legacy crate name `nexus-domain` is **not** retained after the split program
 
 - **`nexus-knowledge` (World-scoped):** Narrative KB graph assets (KnowledgeEntries, SourceAnchors, graph insertion/query) coordinated with `nexus-narrative`. Formerly the separate `nexus-kb` crate (merged in V1.139).
 - **`nexus-knowledge` (User-scoped):** Global knowledge/reference material. Tag-driven, may be pulled into Moment context assembly. Not Creator-scoped, does not own World narrative KnowledgeEntries.
-- **CLI `creator kb`:** today is a local work-scope file/index workflow under the active Creator/workspace. It is not equivalent to the World-scoped narrative KB model until later tasks route or rename it. **Durable roadmap:** [deferred-features tracker §2.6](../roadmaps/deferred-features-cross-version-tracker.md) — DR-46.
+- **CLI `creator kb`:** today is a local work-scope file/index workflow under the active Creator/workspace. It is not equivalent to the World-scoped narrative KB model until later tasks route or rename it. **Durable roadmap:** deferred-features tracker §2.6 — DR-46.
 
 ### 3.6 `nexus-moment-context-assembly`
 
@@ -274,7 +274,7 @@ Authoritative route list for a given release lives in **`crates/nexus-daemon-run
 
 **Always forbidden on daemon:** `/sync/*`, `/creators/registrations*`, platform world/explore proxies, public `/acp/*` (use agent-host namespace), `nexus-cloud-sync`, `nexus-cloud-domain`, and platform HTTP paths.
 
-Auth model: see [V1.20 delivery compass](../../iterations/v1.20/delivery-compass.md) (`X-API-Key`, keyless-localhost).
+Auth model: see V1.20 delivery compass (`X-API-Key`, keyless-localhost).
 
 ### 6.1 V1.24 product-integration gap cross-links
 
@@ -282,9 +282,9 @@ These are runtime/product gaps after Cargo alignment, not missing dependency edg
 
 | Gap | Boundary impact | V1.24 audit cross-link |
 | --- | --- | --- |
-| Daemon context assembly route retired | `POST /v1/local/context/assemble` is not registered and is retired by KCA-002 B2; context assembly stays CLI in-process. | [KCA-002](../../iterations/v1.24/delivery-compass.md#42-missing-local-api-context-assemble-kca-002) |
-| Work KB path remains work-scoped | `/v1/local/kb/*` and `creator kb` are `scope=work` local file-index APIs only, not World KB (`nexus-knowledge`) APIs. | [KCA-003](../../iterations/v1.24/delivery-compass.md#41-dual-kb-semantics-without-route-qualification-kca-003) |
-| Domain crates are only partially product-wired | `nexus-narrative`, `nexus-knowledge`, and moment assembly are linked in Cargo but not fully surfaced through daemon HTTP/product workflows. | [KCA-004/KCA-005](../../iterations/v1.24/delivery-compass.md#43-compile-time-only-domain-linkage-kca-005) |
+| Daemon context assembly route retired | `POST /v1/local/context/assemble` is not registered and is retired by KCA-002 B2; context assembly stays CLI in-process. | KCA-002 |
+| Work KB path remains work-scoped | `/v1/local/kb/*` and `creator kb` are `scope=work` local file-index APIs only, not World KB (`nexus-knowledge`) APIs. | KCA-003 |
+| Domain crates are only partially product-wired | `nexus-narrative`, `nexus-knowledge`, and moment assembly are linked in Cargo but not fully surfaced through daemon HTTP/product workflows. | KCA-004/KCA-005 |
 
 ---
 
@@ -315,4 +315,4 @@ Workspace file writes remain agent-mediated (agent-host internal tool execution)
 
 ---
 
-*Long-term SSOT. Implementation tracking: [v1.21/delivery-compass.md](../../iterations/v1.21/delivery-compass.md) and V1.23 plan `.mstar/plans/2026-05-21-v1.23-architecture-crate-wiring-alignment.md`.*
+*Long-term SSOT. Implementation tracking: `delivery-compass.md` and V1.23 plan `2026-05-21-v1.23-architecture-crate-wiring-alignment.md`.*

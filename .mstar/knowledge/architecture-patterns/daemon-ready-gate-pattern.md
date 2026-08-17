@@ -131,7 +131,7 @@ Rules 5+6+7 together make the consumer resilient to **any** timing of the event 
 
 ### Source
 
-Distilled from V1.96 plan `2026-07-07-v1.96-implement-rework` (T3 sidecar stderr capture + T4 mount-probe/starting-branch/timeout/detail-render). Iteration-scoped RCA with code sketches: `.mstar/iterations/v1.96/guides/daemon-startup-rca.md` (snapshot; promoted here).
+Distilled from V1.96 plan `2026-07-07-v1.96-implement-rework` (T3 sidecar stderr capture + T4 mount-probe/starting-branch/timeout/detail-render). Iteration-scoped RCA with code sketches: `daemon-startup-rca.md` (snapshot; promoted here).
 
 ## V1.97 refinements: initial-state correctness + Tauri v2 spawn-name resolution
 
@@ -219,4 +219,4 @@ V1.101 P0 closed `R-V1100P0SMOKE-AGENT-SCAN`: macOS GUI / Tauri-launched daemons
 
 ### Source
 
-Distilled from V1.97 plan `2026-07-07-v1.97-desktop-first-launch-hardening` (T1 prototype intake + T4 sidecar FSM + T5 sidecar spawn-name fix `ab618ee9`, verified by clean-state smoke re-run). Tauri v2 sidecar resolution rule confirmed against `https://v2.tauri.app/develop/sidecar` ("expects only the filename of the sidecar, not its full path"). Iteration-scoped invariants + prototype intake rule: `.mstar/iterations/v1.97/guides/sidecar-startup-state-machine.md` (snapshot; durable rules promoted here). **Rule 13 distilled from V1.100 P0** plan `2026-07-08-v1.100-desktop-clean-state-first-launch` (T1 contract + T2 `ensure_setup_bootstrap` + gating; verified by clean-state smoke 2026-07-09). **Rule 14 distilled from V1.101 P0** plan `2026-07-09-v1.101-agent-detection-picker` (`path_enrichment.rs` + AgentPicker scan path; residual `R-V1100P0SMOKE-AGENT-SCAN` closed). **Rule 15 distilled from V1.105** P0–P2 (`DaemonLaunchGate`, D2 always-start, Agent→Workspace→Done, portrait shell).
+Distilled from V1.97 plan `2026-07-07-v1.97-desktop-first-launch-hardening` (T1 prototype intake + T4 sidecar FSM + T5 sidecar spawn-name fix `ab618ee9`, verified by clean-state smoke re-run). Tauri v2 sidecar resolution rule confirmed against `https://v2.tauri.app/develop/sidecar` ("expects only the filename of the sidecar, not its full path"). Iteration-scoped invariants + prototype intake rule: `sidecar-startup-state-machine.md` (snapshot; durable rules promoted here). **Rule 13 distilled from V1.100 P0** plan `2026-07-08-v1.100-desktop-clean-state-first-launch` (T1 contract + T2 `ensure_setup_bootstrap` + gating; verified by clean-state smoke 2026-07-09). **Rule 14 distilled from V1.101 P0** plan `2026-07-09-v1.101-agent-detection-picker` (`path_enrichment.rs` + AgentPicker scan path; residual `R-V1100P0SMOKE-AGENT-SCAN` closed). **Rule 15 distilled from V1.105** P0–P2 (`DaemonLaunchGate`, D2 always-start, Agent→Workspace→Done, portrait shell).

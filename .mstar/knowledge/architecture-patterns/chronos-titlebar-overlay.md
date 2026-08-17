@@ -47,7 +47,7 @@ Double-click maximize needs explicit Tauri commands (`is_maximized` / `maximize`
 | Compile, H1 ink paint, gear → Settings modal, automated drag-contract (A1–A4) | Agent / CI |
 | Traffic lights (H2), logo/title/spacer drag (H3–H5), control click islands (H6), dist/HMR parity (D1), double-click maximize (D2), logo/title maximize guard (D3) | **Human** when Screen Recording / Accessibility TCC block agent capture |
 
-Do **not** mark Overlay live-smoke residuals resolved without human evidence for **H2–H6 + D1–D3**. Product code can still Profile-B Done with an open residual and the durable V1.132 protocol (`.mstar/iterations/v1.132/guides/titlebar-window-drag-overlay-smoke.md`).
+Do **not** mark Overlay live-smoke residuals resolved without human evidence for **H2–H6 + D1–D3**. Product code can still Profile-B Done with an open residual and the durable V1.132 protocol (`titlebar-window-drag-overlay-smoke.md`).
 
 ## What did not work
 
@@ -56,8 +56,8 @@ Do **not** mark Overlay live-smoke residuals resolved without human evidence for
 
 ## See also
 
-- Spec (V1.132): `.mstar/iterations/v1.132/specs/titlebar-window-drag.md`
-- Smoke protocol (V1.132): `.mstar/iterations/v1.132/guides/titlebar-window-drag-overlay-smoke.md`
-- V1.131 baseline: `.mstar/iterations/v1.131/specs/chronos-titlebar-chrome.md`
+- Spec (V1.132): `titlebar-window-drag.md`
+- Smoke protocol (V1.132): `titlebar-window-drag-overlay-smoke.md`
+- V1.131 baseline: `chronos-titlebar-chrome.md`
 - Brand tokens: [nexus-brand-token-hierarchy.md](nexus-brand-token-hierarchy.md)
 - Settings gear target: [settings-modal-primary-host.md](settings-modal-primary-host.md)

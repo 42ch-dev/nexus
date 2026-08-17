@@ -86,7 +86,7 @@ Narrative (ship stories, QC summaries) → **`notes.json`**, commits, or compass
 
 **Rule:** if a `metadata` value is a sentence or paragraph, it is forbidden. Counts, enums, dates, paths, and short IDs are OK.
 
-**`tech_debt_summary`:** optional rollup per `mstar-plan-artifacts/references/status-and-residuals.md` — counts only. Refresh with `tech-debt-rollup.sh`.
+**`tech_debt_summary`:** optional rollup per `mstar-plan-artifacts/references/status-and-residuals.md` — counts only. Refresh per that reference (engine `techDebtRollup` when available; else recompute counts from the open list).
 
 **Branch metadata:** upstream canonical fields only (`iteration_base_branch`, `spec_integration_branch`, `target_branch`; per-plan `working_branch`, `merge_target`).
 

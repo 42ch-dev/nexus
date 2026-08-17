@@ -3,7 +3,7 @@
 **Status**: Shipped (V1.33 — Work loop + Creative Brief Intake + `creator run` + `run_intents`)  
 **Document class**: Feature line  
 **Created**: 2026-06-04  
-**Shipped**: 2026-06-04 (compass [v1.33/delivery-compass.md](../../iterations/v1.33/delivery-compass.md) — 5 plans P1–P5 all Done)  
+**Shipped**: 2026-06-04 (compass `delivery-compass.md` — 5 plans P1–P5 all Done)  
 **Scope**: Product-level **Work** container, user journey, Creative Brief Intake, preset run intents, and relationship to workspace / World / schedules  
 **Coordinates with**:
 
@@ -278,7 +278,7 @@ FL-E reuses V1.33 `creator bootstrap` (composite onboarding) and `creator run <p
 
 ---
 
-*Normative product model for Work + FL-E. V1.33 plans: `.mstar/plans/2026-06-04-v1.33-*`. V1.34: `.mstar/plans/2026-06-04-v1.34-*`.*
+*Normative product model for Work + FL-E. V1.33 plans: `2026-06-04-v1.33-*`. V1.34: `2026-06-04-v1.34-*`.*
 
 ---
 

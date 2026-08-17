@@ -61,7 +61,7 @@ P1 (no prior sibling) went through the full fix-wave discovery; P2 (with the car
 
 ## References
 
-- V1.156 compass: `iterations/v1.156/delivery-compass.md` (P1+P2 sibling structure)
-- V1.156 P1 QC consolidated: `sdd/2026-08-10-v1.156-p1-world-timeline-moment-layer/review/qc-consolidated.md` (the four lessons)
+- V1.156 compass `delivery-compass.md` (P1+P2 sibling structure; local)
+- V1.156 P1 QC consolidated `qc-consolidated.md` (the four lessons; local)
 - Three-layer projection pattern: `architecture-patterns/three-layer-timeline-projection.md`
 - Residual findings sweep playbook (adjacent iteration-level QC pattern): `workflow-patterns/residual-findings-sweep-playbook.md`

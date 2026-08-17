@@ -3,8 +3,8 @@
 Functional and normative specifications for the Nexus OSS repo.
 
 **Rules (invariants):** [AGENTS.md](AGENTS.md)  
-**Machine state:** [`.mstar/status.json`](../status.json) → `metadata.latest_ship` / `metadata.latest_active_compass`; wave-0 spec per active compass §Normative specs; full index is this README
-**Not here:** trackers and schema-boundary policy → [knowledge root](../knowledge/README.md); delivery evidence → [iterations](../iterations/README.md)
+**Machine state:** `status.json` → `metadata.latest_ship` / `metadata.latest_active_compass`; wave-0 spec per active compass §Normative specs; full index is this README
+**Not here:** trackers and schema-boundary policy → [knowledge root](../knowledge/README.md); delivery evidence → iterations
 
 ---
 
@@ -29,7 +29,7 @@ Exploration               →  future engine/product lines without implement aut
 
 **Discovery:** this README is the only maintained index. After adding or retiring a spec, update the tables below — do not duplicate the list in AGENTS.md.
 
-**Three pillars (V1.122 canonized):** Nexus OSS specs describe a product built on three pillars — **Harness** (control strategy / orchestration / agent host / capability registry / presets; UI still reads "Strategy/Preset"), **Canvas** (spatial steering surface, with **Timeline-centric World building** as the hero World-entry surface), and **Computable** (the WASM layer that makes worlds react). Pillar definitions live in repo-root [`STRATEGY.md`](../../STRATEGY.md) + [`CONCEPTS.md`](../../CONCEPTS.md); iteration framing in [`iterations/v1.122/specs/pillar-framing.md`](../iterations/v1.122/specs/pillar-framing.md). Specs carry a `Pillar (V1.122)` header cross-reference where applicable (e.g. `orchestration-engine.md` → Harness; `compute-module-abi.md` + `wasm-host.md` → Computable; `canvas-strategy-surface.md` + `web-ui.md` → Canvas).
+**Three pillars (V1.122 canonized):** Nexus OSS specs describe a product built on three pillars — **Harness** (control strategy / orchestration / agent host / capability registry / presets; UI still reads "Strategy/Preset"), **Canvas** (spatial steering surface, with **Timeline-centric World building** as the hero World-entry surface), and **Computable** (the WASM layer that makes worlds react). Pillar definitions live in repo-root [`STRATEGY.md`](../../STRATEGY.md) + [`CONCEPTS.md`](../../CONCEPTS.md); iteration framing in `pillar-framing.md`. Specs carry a `Pillar (V1.122)` header cross-reference where applicable (e.g. `orchestration-engine.md` → Harness; `compute-module-abi.md` + `wasm-host.md` → Computable; `canvas-strategy-surface.md` + `web-ui.md` → Canvas).
 
 ---
 
@@ -80,8 +80,7 @@ Spec files live **flat** in this directory except **`novel-writing/`** — the n
 | [daemon-runtime.md](daemon-runtime.md) | Master | Normative — V1.64 amendment (bundled local Web UI static serving); **V1.118 amendment** (§17 no-Profile boot + lazy `state.db` open) |
 | [local-db-schema.md](local-db-schema.md) | Master | Normative — V1.40 Shipped §4.1.2 (KB validation + narrative_worlds + kb_extract_jobs artifact locator) |
 | [concurrency.md](concurrency.md) | Master | **Normative — V1.51 Shipped (T-B P0/P1)** — advisory lock + heartbeat + OCC + zombie detection |
-| [canvas-strategy-surface.md](canvas-strategy-surface.md) | Draft overlay | **Shipped α (V1.70)** — Canvas product vision (Nexus = AI-autonomous executor; human steers via Canvas, AI owns prose) + 3 surfaces (Strategy/outline+timeline/World KB) on React Flow + no-raw-file-editing principle + TipTap-as-in-node + Preset→Strategy terminology. **V1.70** shipped the Strategy read/overlay/Idea-steer α slice; write-boundary + node-granular edits + outline/timeline + World KB remain Draft for V1.71+. **V1.122 Draft overlay (§3.3.2 + §4.5)** — fourth peer surface `CanvasSurfaceKind = "timeline"` (World-building hero) + architect-locked World-building projection + write-boundary reuse + Timeline-as-default-World-entry IA; shipped β text preserved (additive); `wire_contracts_changed: false`. **V1.158**: §3.3.3 (V1.123 three-layer overlay + V1.156 3×2 matrix completion amendment) promoted to Normative — World×Moment + Work×Brief closed (frontend-only, `wire_contracts_changed: false`); row remains Draft overlay (other sections stay Draft). **V1.159**: §3.3.3 Brief layer time-band UI contract amendment (typed nested era taxonomy — `era_type` + `custom`/`custom_label: "parent_era"` nesting; architect-locked, frontend-only, `wire_contracts_changed: false`). **V1.162**: §3.3.2 fork chrome consumption amendment (shipped fork UI consumes `GET /worlds/{world_id}/timeline/events` `TimelineEventInfo.extensions` fork markers + `POST /worlds/{world_id}/forks`; not the narrative-sidecar route). **V1.163**: §3.3.3 event-level cross-surface binding carrier amendment (DF-V1123-CROSS-SURFACE-BINDING — additive `world_event_id?: string` on `WorkOutline.timeline_events[]`; referent = World KB entity `key_block_id`; architect-locked, `wire_contracts_changed: true`, `additionalProperties: false` preserved; iteration-scoped elaboration in [`iterations/v1.163/specs/cross-surface-event-binding-product-locks.md`](../iterations/v1.163/specs/cross-surface-event-binding-product-locks.md)). |
-| [body-editor.md](body-editor.md) | Archived (pointer stub) | **Superseded (2026-06-26)** — body-editor direction rejected; pointer to `canvas-strategy-surface.md`; full text archived at [../../archived/knowledge/body-editor.md](../../archived/knowledge/body-editor.md) |
+| [canvas-strategy-surface.md](canvas-strategy-surface.md) | Draft overlay | **Shipped α (V1.70)** — Canvas product vision (Nexus = AI-autonomous executor; human steers via Canvas, AI owns prose) + 3 surfaces (Strategy/outline+timeline/World KB) on React Flow + no-raw-file-editing principle + TipTap-as-in-node + Preset→Strategy terminology. **V1.70** shipped the Strategy read/overlay/Idea-steer α slice; write-boundary + node-granular edits + outline/timeline + World KB remain Draft for V1.71+. **V1.122 Draft overlay (§3.3.2 + §4.5)** — fourth peer surface `CanvasSurfaceKind = "timeline"` (World-building hero) + architect-locked World-building projection + write-boundary reuse + Timeline-as-default-World-entry IA; shipped β text preserved (additive); `wire_contracts_changed: false`. **V1.158**: §3.3.3 (V1.123 three-layer overlay + V1.156 3×2 matrix completion amendment) promoted to Normative — World×Moment + Work×Brief closed (frontend-only, `wire_contracts_changed: false`); row remains Draft overlay (other sections stay Draft). **V1.159**: §3.3.3 Brief layer time-band UI contract amendment (typed nested era taxonomy — `era_type` + `custom`/`custom_label: "parent_era"` nesting; architect-locked, frontend-only, `wire_contracts_changed: false`). **V1.162**: §3.3.2 fork chrome consumption amendment (shipped fork UI consumes `GET /worlds/{world_id}/timeline/events` `TimelineEventInfo.extensions` fork markers + `POST /worlds/{world_id}/forks`; not the narrative-sidecar route). **V1.163**: §3.3.3 event-level cross-surface binding carrier amendment (DF-V1123-CROSS-SURFACE-BINDING — additive `world_event_id?: string` on `WorkOutline.timeline_events[]`; referent = World KB entity `key_block_id`; architect-locked, `wire_contracts_changed: true`, `additionalProperties: false` preserved; iteration-scoped elaboration in `cross-surface-event-binding-product-locks.md`). |
 | [reference-store-layout.md](reference-store-layout.md) | Master | Normative |
 | [chapter-content-local-api.md](chapter-content-local-api.md) | Draft overlay | Draft (V1.65) — chapter-content Daemon API field contract (`/v1/daemon/works/{work_id}/chapters/*`); cited by daemon-api-surface-conventions §6 |
 
@@ -144,7 +143,6 @@ Spec files live **flat** in this directory except **`novel-writing/`** — the n
 | Document | Class | Status |
 | --- | --- | --- |
 | [canonical-hash.md](canonical-hash.md) | Companion | Normative (OSS notes; platform ADR-006 authoritative) |
-| [non-novel-profiles-roadmap.md](non-novel-profiles-roadmap.md) | Archived (pointer stub) | **Superseded (2026-06-26)** — all 3 targets shipped (game-bible/script/essay); pointer to archive; normative content in the 3 Feature line specs |
 | [world-delta-propose-apply.md](world-delta-propose-apply.md) | Feature line | Normative — V1.60 P-last promotion (world-delta propose/apply local parity) |
 
 *Novel-writing sync module contract: [novel-writing/sync-contract.md](novel-writing/sync-contract.md).*
@@ -218,16 +216,16 @@ Cite **`nexus-platform`** `v1-spec/` for cloud product, shared ADRs, and archite
 
 | Former spec | Superseded by |
 | --- | --- |
-| [daemon-api-workspace-write-architecture.md](../archived/knowledge/daemon-api-workspace-write-architecture.md) | Stale — historical |
-| [local-fs-layout-creator-workspace.md](../archived/knowledge/local-fs-layout-creator-workspace.md) | Pointer stub |
+| `daemon-api-workspace-write-architecture.md` | Stale — historical |
+| `local-fs-layout-creator-workspace.md` | Retired |
 | `nexus42-single-binary-daemon-runtime-architecture.md` | [daemon-runtime.md](daemon-runtime.md) |
 | `agent-host-architecture.md` | [agent-host.md](agent-host.md) §8 |
-| [fl-d-conditional-routing-exploration-v1.35-prepare.md](../archived/knowledge/fl-d-conditional-routing-exploration-v1.35-prepare.md) | [preset-conditional-routing.md](preset-conditional-routing.md) |
-| [archived/knowledge/novel-findings-maturity.md](../archived/knowledge/novel-findings-maturity.md) | [novel-writing/quality-loop.md](novel-writing/quality-loop.md) §9 |
-| [archived/knowledge/body-editor.md](../archived/knowledge/body-editor.md) | [canvas-strategy-surface.md](canvas-strategy-surface.md) (2026-06-26 — body-editor direction rejected) |
-| [archived/knowledge/non-novel-profiles-roadmap.md](../archived/knowledge/non-novel-profiles-roadmap.md) | [game-bible-profile.md](game-bible-profile.md) + [script-profile.md](script-profile.md) + [essay-profile.md](essay-profile.md) (all targets shipped) |
-| [archived/knowledge/novel-writing/findings-lifecycle.md](../archived/knowledge/novel-writing/findings-lifecycle.md) | [novel-writing/quality-loop.md](novel-writing/quality-loop.md) §2 |
-| [archived/knowledge/novel-writing/narrative-indexes.md](../archived/knowledge/novel-writing/narrative-indexes.md) | [novel-writing/workflow-profile.md](novel-writing/workflow-profile.md) §4.6 |
+| `fl-d-conditional-routing-exploration-v1.35-prepare.md` | [preset-conditional-routing.md](preset-conditional-routing.md) |
+| `novel-findings-maturity.md` | [novel-writing/quality-loop.md](novel-writing/quality-loop.md) §9 |
+| `body-editor.md` | [canvas-strategy-surface.md](canvas-strategy-surface.md) (2026-06-26 — body-editor direction rejected) |
+| `non-novel-profiles-roadmap.md` | [game-bible-profile.md](game-bible-profile.md) + [script-profile.md](script-profile.md) + [essay-profile.md](essay-profile.md) (all targets shipped) |
+| `findings-lifecycle.md` | [novel-writing/quality-loop.md](novel-writing/quality-loop.md) §2 |
+| `narrative-indexes.md` | [novel-writing/workflow-profile.md](novel-writing/workflow-profile.md) §4.6 |
 
 **Former filename:** `local-platform-isolation-and-crate-architecture.md` → `local-cloud-crate-architecture.md` (2026-05-20).
 

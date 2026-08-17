@@ -14,7 +14,7 @@
 - [manuscript-audit.md](manuscript-audit.md) — DF-69 on-demand audit (V1.44 P0)
 - [author-experience.md](author-experience.md) — quickstart §5 cross-refs (V1.43 shipped)
 
-**Iteration compass**: [v1.39/delivery-compass.md](../../iterations/v1.39/delivery-compass.md) · [v1.44/delivery-compass.md](../../iterations/v1.44/delivery-compass.md) · [v1.47/delivery-compass.md](../../iterations/v1.47/delivery-compass.md) (active)
+**Iteration compass**: `delivery-compass.md` · `delivery-compass.md` · `delivery-compass.md` (active)
 
 ---
 
@@ -282,7 +282,7 @@ V1.48 closes the novel quality loop: durable findings enrich the writing prompt,
 - Reset path: `creator works rules reset [<work_id>]` restores the default scaffold (supports `--dry-run` for preview, `--yes`/`-y` to skip prompt; default prompts via `dialoguer`).
 - R-V147P0-04 (AGENTS.md runtime + accept + reset) — **closed**.
 
-> **Forward pointer (V1.166, DR-64):** §9.3 is the work-scoped three-layer rules runtime (`read_rules_layers`); it is distinct from the daemon check callback — post-V1.164 `POST /v1/daemon/check` runs the frozen mental checker pair (`stale_belief_drift` / `dramatic_irony_asymmetry`), and V1.166 adds the deterministic rule evaluator over world-scoped `spoke_rules` (four constraint families; empty `rule_refs` auto-includes `status=active`; foreign-world ids fail closed). Iteration locks: [`../../iterations/v1.166/specs/v1.166-quality-loop-locks.md`](../../iterations/v1.166/specs/v1.166-quality-loop-locks.md).
+> **Forward pointer (V1.166, DR-64):** §9.3 is the work-scoped three-layer rules runtime (`read_rules_layers`); it is distinct from the daemon check callback — post-V1.164 `POST /v1/daemon/check` runs the frozen mental checker pair (`stale_belief_drift` / `dramatic_irony_asymmetry`), and V1.166 adds the deterministic rule evaluator over world-scoped `spoke_rules` (four constraint families; empty `rule_refs` auto-includes `status=active`; foreign-world ids fail closed). Iteration locks: `v1.166-quality-loop-locks.md`.
 
 ### 9.4 Data hygiene (V1.48 P3)
 

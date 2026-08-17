@@ -14,7 +14,7 @@
 - [creator-workflow.md](creator-workflow.md) — FL-E stage ↔ preset mapping
 - [novel-writing/work-pool.md](novel-writing/work-pool.md) — pool `active` default
 
-**Iteration compass**: [v1.45/delivery-compass.md](../../iterations/v1.45/delivery-compass.md)  
+**Iteration compass**: `delivery-compass.md`  
 **Tracker**: BL-12
 
 ---
@@ -129,7 +129,7 @@ The CLI **does not** filter presets by `run_intents` subcommand (`start`/`contin
 
 ## 6. Migration (V1.44 → V1.45)
 
-See compass [migration appendix](../../iterations/v1.45/delivery-compass.md) §2.
+See compass migration appendix §2.
 
 Hard delete legacy subcommands — **no deprecated aliases** (pre-release).
 

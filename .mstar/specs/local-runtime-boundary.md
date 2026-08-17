@@ -15,7 +15,7 @@ This document defines boundaries between:
 
 It preserves the ACP client-only topology from nexus-platform `v1-spec/architecture.md` §6.2.1 and the single-binary daemon runtime boundary (see nexus-platform `v1-spec/adr/adr-026-single-binary-daemon-runtime-and-hybrid-agent-host.md`).
 
-ACP Registry 默认上游索引与仓库入口见 [`registry-integration.md`](./registry-integration.md) §0.1、[`references-learnings.md`](../../references-learnings.md) §0.1。
+ACP Registry 默认上游索引与仓库入口见 [`registry-integration.md`](./registry-integration.md) §0.1。
 
 Logical `nexus.*` capabilities are shared with platform-hosted creators; this document only defines the **local** runtime boundary, not a separate capability model.
 
@@ -86,7 +86,7 @@ ACP is for agent integration. Nexus still needs a stable internal interface for:
 
 The Daemon API is the **codegen-ready** internal contract between CLI, daemon, and local automation.
 
-**Routing policy (long-term):** [local-cloud-crate-architecture.md](./local-cloud-crate-architecture.md) §5. **Removal acceptance:** [v1.21 delivery compass](../../iterations/v1.21/delivery-compass.md).
+**Routing policy (long-term):** [local-cloud-crate-architecture.md](./local-cloud-crate-architecture.md) §5. **Removal acceptance:** v1.21 delivery compass.
 
 | Endpoint / family | Status on daemon | Notes |
 | --- | --- | --- |

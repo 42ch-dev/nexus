@@ -6,7 +6,7 @@
 | **Document class** | Master |
 | **Scope** | Cross-resource Daemon API response/query conventions for schemas under `schemas/daemon-api/` and handlers under `nexus-daemon-runtime` |
 | **Coordinates with** | [schemas-directory-layout.md](./schemas-directory-layout.md), [schemas-external-consumer-boundary.md](schemas-external-consumer-boundary.md), [daemon-runtime.md](./daemon-runtime.md), [findings-lifecycle.md](./findings-lifecycle.md) |
-| **Evidence** | [surface-audit.md](../../plans/2026-06-24-v1.63-local-api-orchestration-and-preset-dtos.md) |
+| **Evidence** | `surface-audit.md` |
 
 ---
 
@@ -390,7 +390,7 @@ Revision conflicts are **pre-write** failures: if `base_revision` does not equal
 
 The owning domain chooses the revision storage location, but it MUST name a single source of truth and expose the current revision on canonical reads. V1.71 Strategy uses a `revision:` key in the preset YAML header; existing presets without the key read as revision `0` and write `revision: 1` on the first accepted patch.
 
-V1.72 Outline+Timeline canvas surfaces reuse this convention with an outline markdown frontmatter `outline_revision:` key (mirroring the V1.71 preset YAML `revision:` choice): existing outlines without the key read as revision `0` and write `1` on the first accepted patch. The owning domain chooses the revision storage location, but it MUST name a single source of truth and expose the current revision on canonical reads; a future DB-backed revisions table is deferred until audit history, multi-device sync, or collaborative edits require it, and would backfill from frontmatter rather than become a second source of truth. **Durable roadmap:** consolidated in the [deferred-features tracker §2.6](../roadmaps/deferred-features-cross-version-tracker.md) — DR-56 (DB-backed revisions table).
+V1.72 Outline+Timeline canvas surfaces reuse this convention with an outline markdown frontmatter `outline_revision:` key (mirroring the V1.71 preset YAML `revision:` choice): existing outlines without the key read as revision `0` and write `1` on the first accepted patch. The owning domain chooses the revision storage location, but it MUST name a single source of truth and expose the current revision on canonical reads; a future DB-backed revisions table is deferred until audit history, multi-device sync, or collaborative edits require it, and would backfill from frontmatter rather than become a second source of truth. **Durable roadmap:** consolidated in the deferred-features tracker §2.6 — DR-56 (DB-backed revisions table).
 
 V1.72 adds 3 outline/timeline patch routes following the V1.71 pattern:
 
@@ -517,7 +517,7 @@ V1.64 closes F-P1, F-P2, and F-E1 for the Web UI data-layer baseline, while docu
 
 ## 10. Daemon port discovery (V1.66 desktop shell)
 
-Daemon API clients that connect over loopback HTTP use a **resolved daemon base URL**, not a schema-defined discovery endpoint. (Compass: [v1.66 §5 #3 LOCKED](../iterations/v1.66/delivery-compass.md).)
+Daemon API clients that connect over loopback HTTP use a **resolved daemon base URL**, not a schema-defined discovery endpoint. (Compass: v1.66 §5 #3 LOCKED.)
 
 V1.66 desktop-shell convention:
 

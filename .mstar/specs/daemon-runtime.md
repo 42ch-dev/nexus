@@ -439,7 +439,7 @@ current implementation is correct and documented):
   already confirms metrics overhead is negligible at the capability layer.
    Deferred; revisit only if profiling shows > 1% of cold path.
 
-> **Durable roadmap:** consolidated in the [deferred-features tracker §2.6](../roadmaps/deferred-features-cross-version-tracker.md) — DR-01 (jitter range), DR-02 (metrics benchmarking).
+> **Durable roadmap:** consolidated in the deferred-features tracker §2.6 — DR-01 (jitter range), DR-02 (metrics benchmarking).
 
 ## 10. Refresh-scheduler hook (V1.58 P1 / P3)
 
@@ -523,7 +523,7 @@ Both capabilities receive the `sqlx::SqlitePool` through the standard `with_pool
 
 ## 12. Tauri sidecar mode (V1.66)
 
-The Tauri desktop shell ([desktop-shell.md](desktop-shell.md)) may bundle the user-facing `nexus42` binary as a sidecar process. This does **not** create a second daemon product binary: the sidecar is still `nexus42`, launched in daemon foreground mode by the desktop app. (Compass: [v1.66 §5 #2/#3 LOCKED](../iterations/v1.66/delivery-compass.md).)
+The Tauri desktop shell ([desktop-shell.md](desktop-shell.md)) may bundle the user-facing `nexus42` binary as a sidecar process. This does **not** create a second daemon product binary: the sidecar is still `nexus42`, launched in daemon foreground mode by the desktop app. (Compass: v1.66 §5 #2/#3 LOCKED.)
 
 ### 12.1 Launch contract
 
@@ -588,11 +588,11 @@ In desktop mode, Tauri serves the bundled `apps/web/dist` via `build.frontendDis
 
 This section codifies the normative security contract for the daemon's Daemon API trust boundary. It closes the three-link attack chain identified in V1.86 (permissive CORS + keyless-localhost → remote-reach; fs/* bypass without workspace → arbitrary-file R/W; string-prefix path comparison → sibling-directory escape). The normative hooks in §4.4.3 (`require_api_key` on data routes) and §4.5 (W-002-style workspace path guard) already provide authority; this section adds the Origin gate, the deny-fs-without-workspace invariant, and the component-wise path guard requirement.
 
-**Coordinates with:** the V1.86 delivery compass ([v1.86/delivery-compass.md](../../iterations/v1.86/delivery-compass.md)), `api/path_guard.rs` (`resolve_guarded_path`), `api/auth_middleware.rs` (keyless-localhost mode), `api/mod.rs` (CORS layer configuration).
+**Coordinates with:** the V1.86 delivery compass (`delivery-compass.md`), `api/path_guard.rs` (`resolve_guarded_path`), `api/auth_middleware.rs` (keyless-localhost mode), `api/mod.rs` (CORS layer configuration).
 
 ### 13.1 Origin allowlist gate
 
-The daemon's CORS configuration is the primary browser-origin trust boundary. Per [STRATEGY.md](../../../STRATEGY.md) Guiding Principle #1 ("Local-first privacy"), cross-origin access from arbitrary websites MUST be denied by default.
+The daemon's CORS configuration is the primary browser-origin trust boundary. Per [STRATEGY.md](../../STRATEGY.md) Guiding Principle #1 ("Local-first privacy"), cross-origin access from arbitrary websites MUST be denied by default.
 
 #### 13.1.1 Allowlist composition
 
@@ -943,7 +943,7 @@ The daemon's Origin allowlist (§13.1) already covers: own-origin, Tauri webview
 | Web SPA | `localStorage` | SPA trust boundary equal to the app itself. Key is always user-entered, never compiled in. |
 | Tauri desktop | OS keychain (Tauri secure-store plugin) where available; fallback to app-data dir | Keychain is the preferred secure storage; fallback is a local-first trade-off for platforms without OS keychain support. |
 
-The API key is always **user-entered** — never compiled into the binary, never stored in version control, never embedded in build artifacts. Full secret-store hardening (hardware-backed keystore, biometric unlock) is a future concern. **Durable roadmap:** consolidated in the [deferred-features tracker §2.6](../roadmaps/deferred-features-cross-version-tracker.md) — DR-05 (secret-store hardening).
+The API key is always **user-entered** — never compiled into the binary, never stored in version control, never embedded in build artifacts. Full secret-store hardening (hardware-backed keystore, biometric unlock) is a future concern. **Durable roadmap:** consolidated in the deferred-features tracker §2.6 — DR-05 (secret-store hardening).
 
 ### 16.6 Raw-browser-tab remote navigation (explicit non-goal)
 
@@ -955,7 +955,7 @@ The supported remote-access path is always through the app's "Connect to Daemon"
 
 ## 17. V1.118 Amendments — Daemon no-Profile boot + lazy `state.db`
 
-**Iteration SSOT:** [`.mstar/iterations/v1.118/specs/daemon-no-profile-boot.md`](../iterations/v1.118/specs/daemon-no-profile-boot.md) + [delivery-compass.md](../iterations/v1.118/delivery-compass.md) § Architect decisions (AD-P0).
+**Iteration SSOT:** `daemon-no-profile-boot.md` + `delivery-compass.md` § Architect decisions (AD-P0).
 
 ### 17.1 Product invariant
 

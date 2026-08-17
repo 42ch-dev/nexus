@@ -151,7 +151,7 @@ nexus42 agent run <agent-ref>
 - The `tokio::task::LocalSet` requirement: ACP SDK futures are `!Send`, requiring `spawn_local`. The CLI's `#[tokio::main]` creates a multi-threaded runtime by default. We must use `tokio::task::LocalSet` within the agent session to bridge this gap.
 - **Timeout**: Default 30-second timeout for `initialize`, 5-minute for `session/prompt` (configurable).
 - **Error handling**: Non-zero exit code, broken pipe, timeout — all map to `AcpError` variants with user-friendly messages.
-- **Daemon relationship**: daemon runtime is **NOT** involved in the ACP communication path. The CLI spawns and talks to agents directly. Daemon-mediated tool access, session persistence, and permission policy — **durable roadmap:** consolidated in the [deferred-features tracker §2.6](../roadmaps/deferred-features-cross-version-tracker.md) — DR-20 (daemon-mediated tool access + permission policy engine), DR-21 (ACP session persistence).
+- **Daemon relationship**: daemon runtime is **NOT** involved in the ACP communication path. The CLI spawns and talks to agents directly. Daemon-mediated tool access, session persistence, and permission policy — **durable roadmap:** consolidated in the deferred-features tracker §2.6 — DR-20 (daemon-mediated tool access + permission policy engine), DR-21 (ACP session persistence).
 
 ### 2.4 Connection Management
 
@@ -321,7 +321,7 @@ No new Daemon API endpoints are required for V1.0 ACP integration. The existing 
 
 ### 4.3 V1.1+ Daemon API Expansion (Deferred)
 
-> **Durable roadmap:** consolidated in the [deferred-features tracker §2.6](../roadmaps/deferred-features-cross-version-tracker.md) — DR-20 (daemon-mediated tool access + centralized permission policy engine). These endpoints are documented for future reference but NOT part of the V1.0 task breakdown.
+> **Durable roadmap:** consolidated in the deferred-features tracker §2.6 — DR-20 (daemon-mediated tool access + centralized permission policy engine). These endpoints are documented for future reference but NOT part of the V1.0 task breakdown.
 
 ---
 
@@ -339,7 +339,7 @@ In the ACP protocol, the **client** (nexus42) declares its capabilities during `
 | `terminal.output` | Client can stream terminal output | **Yes** — via `terminal/output` handler |
 | `terminal.release` | Client can release terminal sessions | **Yes** — via `terminal/release` handler |
 
-> **Durable roadmap:** consolidated in the [deferred-features tracker §2.6](../roadmaps/deferred-features-cross-version-tracker.md) — DR-22 (`terminal.kill` / `terminal.wait_for_exit`, `slash_commands`, `agent_plan`, persistent skills manifest, binary auto-update, `session.modes`).
+> **Durable roadmap:** consolidated in the deferred-features tracker §2.6 — DR-22 (`terminal.kill` / `terminal.wait_for_exit`, `slash_commands`, `agent_plan`, persistent skills manifest, binary auto-update, `session.modes`).
 
 ### 5.2 Capability ID Registry (Frozen for V1.0)
 
@@ -371,7 +371,7 @@ pub mod capabilities {
 
 ### 5.3 Skills Manifest (V1.0 Minimal)
 
-For V1.0, nexus42 does NOT export a formal skills manifest file. The capabilities are declared dynamically during `initialize`. A persistent skills manifest (`$HOME/.nexus42/skills.json`) can be added in V1.1+ for multi-agent host integration — **durable roadmap:** consolidated in the [deferred-features tracker §2.6](../roadmaps/deferred-features-cross-version-tracker.md) — DR-22 (persistent skills manifest).
+For V1.0, nexus42 does NOT export a formal skills manifest file. The capabilities are declared dynamically during `initialize`. A persistent skills manifest (`$HOME/.nexus42/skills.json`) can be added in V1.1+ for multi-agent host integration — **durable roadmap:** consolidated in the deferred-features tracker §2.6 — DR-22 (persistent skills manifest).
 
 ---
 
@@ -824,7 +824,7 @@ For implementer reference, the ACP protocol lifecycle:
 
 ## Appendix B: Residual Findings for V1.1+
 
-> **Durable roadmap:** consolidated in the [deferred-features tracker §2.6](../roadmaps/deferred-features-cross-version-tracker.md) — DR-20, DR-21, DR-22 (ACP-R3..R11: daemon-mediated tool access + permission policy, session persistence, `terminal.kill`/`terminal.wait_for_exit`, `slash_commands`, `agent_plan`, persistent skills manifest, binary auto-update, `session.modes`).
+> **Durable roadmap:** consolidated in the deferred-features tracker §2.6 — DR-20, DR-21, DR-22 (ACP-R3..R11: daemon-mediated tool access + permission policy, session persistence, `terminal.kill`/`terminal.wait_for_exit`, `slash_commands`, `agent_plan`, persistent skills manifest, binary auto-update, `session.modes`).
 >
 > Historical V1.0-era framing; ACP hosting now runs in acp-worker child processes — verify before picking up.
 

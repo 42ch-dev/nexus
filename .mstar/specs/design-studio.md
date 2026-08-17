@@ -4,21 +4,21 @@
 **Document class**: Dev-surface auxiliary app (not author-facing product)  
 **Created**: 2026-07-08 (`@product-manager`)  
 **Scope**: `apps/design-studio` — read-only gallery and visual proving ground for Nexus DESIGN SSOT, brand VI, shared presentational primitives, and representative surface fixtures
-**Iteration compass**: [v1.98/delivery-compass.md](../iterations/v1.98/delivery-compass.md)  
-**V1.99 compass**: [v1.99/delivery-compass.md](../iterations/v1.99/delivery-compass.md)
-**IA guide**: [design-studio-information-architecture.md](../iterations/v1.98/guides/design-studio-information-architecture.md)  
+**Iteration compass**: `delivery-compass.md`  
+**V1.99 compass**: `delivery-compass.md`
+**IA guide**: `design-studio-information-architecture.md`  
 **Coordinates with**:
 
 - Repo-root [`DESIGN.md`](../../DESIGN.md) + [`DESIGN.dark.md`](../../DESIGN.dark.md) — sole normative token SSOT after V1.98 merge
 - [`web-ui.md`](web-ui.md) §30 — V1.98 stage note (studio is dev tooling, not Control Room feature)
-- [`design-unification.md`](../iterations/v1.98/specs/design-unification.md) — merge rules (architect-owned, P-1)
-- [`component-promotion-boundary.md`](../iterations/v1.99/specs/component-promotion-boundary.md) — V1.99 draft boundary for selected pure presentational primitives in `@42ch/nexus-ui`
-- [`studio-first-ui-workflow.md`](../iterations/v1.99/guides/studio-first-ui-workflow.md) — V1.99 validation path from studio fixtures to package promotion to Web integration
-- [`studio-first-visual-then-app.md`](../iterations/v1.101/guides/studio-first-visual-then-app.md) — V1.101 process note (Studio visual → App wiring; human smoke separate)
-- [`studio-first-visual-then-app.md`](../iterations/v1.102/guides/studio-first-visual-then-app.md) — V1.102 process note (same discipline; Badge tone + Settings chrome + optional Surfaces Stretch)
-- [`studio-first-visual-then-app.md`](../iterations/v1.103/guides/studio-first-visual-then-app.md) — V1.103 process note (Settings shell + section fixtures; DESIGN Voice copy tables in section specs)
-- [`studio-first-invariant.md`](../iterations/v1.107/guides/studio-first-invariant.md) — **V1.107 locked invariant** (需求 → Studio↔DESIGN.md → App); supersedes V1.106 guide for active iteration
-- [`studio-ui-tune.md`](../iterations/v1.107/specs/studio-ui-tune.md) — **V1.107 Must** — Studio Tailwind content, visual FBs, Toast App adoption, shell/Settings presentational SSOT
+- `design-unification.md` — merge rules (architect-owned, P-1)
+- `component-promotion-boundary.md` — V1.99 draft boundary for selected pure presentational primitives in `@42ch/nexus-ui`
+- `studio-first-ui-workflow.md` — V1.99 validation path from studio fixtures to package promotion to Web integration
+- `studio-first-visual-then-app.md` — V1.101 process note (Studio visual → App wiring; human smoke separate)
+- `studio-first-visual-then-app.md` — V1.102 process note (same discipline; Badge tone + Settings chrome + optional Surfaces Stretch)
+- `studio-first-visual-then-app.md` — V1.103 process note (Settings shell + section fixtures; DESIGN Voice copy tables in section specs)
+- `studio-first-invariant.md` — **V1.107 locked invariant** (需求 → Studio↔DESIGN.md → App); supersedes V1.106 guide for active iteration
+- `studio-ui-tune.md` — **V1.107 Must** — Studio Tailwind content, visual FBs, Toast App adoption, shell/Settings presentational SSOT
 - `@42ch/nexus-ui` — brand layer plus approved presentational primitives (V1.99 Button/Badge/Card; V1.100 form fields; V1.101 `Select`; V1.102 Badge `tone` soft/solid)
 - `apps/web/src/components/ui/*` — transitional gallery source for primitives not yet promoted
 - `apps/web/src/components/setup/*` — app-shared setup compositions (e.g. `AgentPicker`); Studio may import via gallery alias — **not** `@42ch/nexus-ui`
@@ -66,7 +66,7 @@ Design Studio is a **standalone Vite + React SPA** (`apps/design-studio`) that m
 | App presentational extract | `@web-layout/*`, `@web-canvas/*`, `@web-setup/*`, `@web-settings/*`, `@web-global-timeline/*`, `@web-shell/*`, … | Monorepo-only alias → `apps/web` props-driven chrome |
 | Transitional primitive | `@web-ui/*` | Unpromoted `apps/web/src/components/ui/*` mirror |
 
-Surfaces gallery sections display source badges distinguishing extract vs promoted. Mass migration of `@web-*` into `@42ch/nexus-ui` is **out of scope** — clarity over consolidation. Detail: [web-alias-clarity](../iterations/v1.128/specs/web-alias-clarity.md).
+Surfaces gallery sections display source badges distinguishing extract vs promoted. Mass migration of `@web-*` into `@42ch/nexus-ui` is **out of scope** — clarity over consolidation. Detail: web-alias-clarity.
 
 | Source | Allowed | Notes |
 | --- | --- | --- |
@@ -151,10 +151,10 @@ Exact port and script aliases finalized in P0 `README` / `AGENTS.md`.
 | Tokens | P0 | Colors, typography, spacing, rounded; elevation/motion if present in SSOT |
 | Brand VI | P0 | 4 logo variants + `NexusMark` + `theme.css` swatches + clear-space callout |
 | Components | P0 | All `apps/web/src/components/ui/*.tsx` primitives (variant/state matrix) |
-| Voice & Content | P1 | Labeled specimens per [IA guide §4.4](../iterations/v1.98/guides/design-studio-information-architecture.md) — strings from DESIGN § Voice & Content |
-| Surfaces | P1 | Setup step card + App shell chrome fixtures per [IA guide §4.5](../iterations/v1.98/guides/design-studio-information-architecture.md) |
+| Voice & Content | P1 | Labeled specimens per IA guide §4.4 — strings from DESIGN § Voice & Content |
+| Surfaces | P1 | Setup step card + App shell chrome fixtures per IA guide §4.5 |
 
-Section nav labels and per-component matrix: [IA guide](../iterations/v1.98/guides/design-studio-information-architecture.md).
+Section nav labels and per-component matrix: IA guide.
 
 ---
 
@@ -166,11 +166,11 @@ Section nav labels and per-component matrix: [IA guide](../iterations/v1.98/guid
 - No unbounded migration of shadcn primitives into `@42ch/nexus-ui`; V1.99 allows only approved pure presentational primitives
 - No daemon/Tauri integration, schema changes, or `@42ch/nexus-contracts` bump
 - Not a replacement for `apps/web` product QA — studio complements, does not gate author flows
-- Desktop clean-state / first-launch author onboarding is owned by **V1.105** (setup wizard chrome via Studio fixtures — see [v1.105/delivery-compass.md](../iterations/v1.105/delivery-compass.md)); Design Studio itself does not ship author onboarding.
+- Desktop clean-state / first-launch author onboarding is owned by **V1.105** (setup wizard chrome via Studio fixtures — see `delivery-compass.md`); Design Studio itself does not ship author onboarding.
 
 ### V1.106 Surfaces additions (P0 Must — iteration detail)
 
-**Authority:** [`studio-first-pipeline.md`](../iterations/v1.106/specs/studio-first-pipeline.md) §SP-V1106-003.
+**Authority:** `studio-first-pipeline.md` §SP-V1106-003.
 
 | Route | Fixture file | Classification |
 |-------|--------------|----------------|
@@ -181,7 +181,7 @@ Register Launch in `SURFACES_SECTIONS` alongside existing Setup / Shell / AgentP
 
 ### V1.107 Surfaces and import amendments (P0 Must — iteration detail)
 
-**Authority:** [`studio-ui-tune.md`](../iterations/v1.107/specs/studio-ui-tune.md).
+**Authority:** `studio-ui-tune.md`.
 
 | Topic | Lock |
 |-------|------|

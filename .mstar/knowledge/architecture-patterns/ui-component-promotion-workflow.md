@@ -85,16 +85,16 @@ V1.100 (P1 + P2) hardened the promotion workflow from reviewer-instruction to **
 2. **cn class-merge config has one authority** (`@42ch/nexus-ui/src/lib/cn.ts`). Do NOT move it to `@nexus/design-tokens` while design-tokens depends on the UI package (cycle). Public `cn` export via the barrel; deep imports forbidden.
 3. **Form-field promotion is semantics-first, not lift-and-shift.** V1.99 deferred Input/Label/Textarea because moving code without locking helper/error/required semantics "would only move code." V1.100 P2 locked an explicit contract first: label/control association (`htmlFor`+`id`, **app-owned** id generation), `invalid`→`aria-invalid="true"` (`invalid || undefined` coercion so false/omitted omits the attribute), `aria-describedby` **app-wired**, helper/error/required copy **app-owned**, **no stateful `FormField` package export**. The package owns only the presentational surface + native attribute passthrough. Promote the contract BEFORE the code.
 
-**Promotion checklist (locked, reusable):** move source+tests → `packages/nexus-ui/src/components/`; add to barrel; Web wrapper = thin re-export; Studio switches `@web-ui/<name>` → `@42ch/nexus-ui`; update the guardrail promoted set + transitional table. See `.mstar/iterations/v1.100/specs/ui-guardrails-cn-ssot.md` § "Promotion checklist" (iteration snapshot).
+**Promotion checklist (locked, reusable):** move source+tests → `packages/nexus-ui/src/components/`; add to barrel; Web wrapper = thin re-export; Studio switches `@web-ui/<name>` → `@42ch/nexus-ui`; update the guardrail promoted set + transitional table. See `ui-guardrails-cn-ssot.md` § "Promotion checklist" (iteration snapshot).
 
 ## V1.101 Extension — Select promotion + app-shared vs package placement
 
 V1.101 proved two complementary placement rules on the same studio-first track:
 
 1. **`Select` is a package promotion (Stretch P2).** Same semantics-first ladder as V1.100 form fields: lock a11y/composition contract → Studio fixtures → `@42ch/nexus-ui` presentational export + tests → Studio-direct import → Web thin re-export → update `tooling/check-ui-guardrails.sh` + Studio README import surface. Transitional `@web-ui/*` remains only for unpromoted keep-web primitives (Dialog, States, Table, Tabs). **Docs must match guardrails** — listing a promoted primitive under `@web-ui/*` in README is a QC blocker even when code is correct.
-2. **`AgentPicker` is app-shared, not package (Must P0).** Reusable across wizard and Settings (**V1.102** thin host → **V1.103** `/settings/agent` section) at `apps/web/src/components/setup/agent-picker.tsx`, but it composes scan/profile/outbound-link product semantics — **do not** promote to `@42ch/nexus-ui` until the surface is presentational-only. Studio may import via a scoped alias. **V1.103** delivers S3 Settings shell (Agent/Connection/Setup; Stretch Workspace deferred → **V1.104**). **V1.104** delivers Workspace W2 Must — execution-mode matrix remains DF-70 deferred. See [settings-shell-ia.md](../../iterations/v1.103/specs/settings-shell-ia.md) and [v1.104 workspace section](../../iterations/v1.104/specs/settings-workspace-section.md).
+2. **`AgentPicker` is app-shared, not package (Must P0).** Reusable across wizard and Settings (**V1.102** thin host → **V1.103** `/settings/agent` section) at `apps/web/src/components/setup/agent-picker.tsx`, but it composes scan/profile/outbound-link product semantics — **do not** promote to `@42ch/nexus-ui` until the surface is presentational-only. Studio may import via a scoped alias. **V1.103** delivers S3 Settings shell (Agent/Connection/Setup; Stretch Workspace deferred → **V1.104**). **V1.104** delivers Workspace W2 Must — execution-mode matrix remains DF-70 deferred. See `settings-shell-ia.md` and v1.104 workspace section.
 
-**Studio-first + smoke separation (process):** UI-visual work = Studio fixtures → visual acceptance → App wiring on a separate track. Interactive macOS desktop smoke is a **human gate**, not an automated Done / CI blocker. Distilled from `.mstar/iterations/v1.101/guides/studio-first-visual-then-app.md` (workspace snapshot).
+**Studio-first + smoke separation (process):** UI-visual work = Studio fixtures → visual acceptance → App wiring on a separate track. Interactive macOS desktop smoke is a **human gate**, not an automated Done / CI blocker. Distilled from `studio-first-visual-then-app.md` (workspace snapshot).
 
 ## V1.103 Extension — Settings shell modules + form extract
 
@@ -104,13 +104,13 @@ V1.103 deepened the thin Settings host into an S3 multi-section shell without pr
 2. **Extract product forms beside the shell, not into the package.** Connection reused Connect UI via `apps/web/src/components/settings/connect-daemon-form.tsx` (extract from the legacy page); Settings mounts the form and owns post-save stay-on-section + `/connect` → `/settings/connection` redirect.
 3. **Marker context races are directional.** Re-run Setup vs wizard Finish need asymmetric `setCompleted` timing — see [asymmetric-setup-completed-context.md](./asymmetric-setup-completed-context.md).
 
-**Process note:** V1.103 reaffirmed studio-first per section (Studio chrome → App IPC) in `.mstar/iterations/v1.103/guides/studio-first-visual-then-app.md` (workspace snapshot; not promoted as a second process doc).
+**Process note:** V1.103 reaffirmed studio-first per section (Studio chrome → App IPC) in `studio-first-visual-then-app.md` (workspace snapshot; not promoted as a second process doc).
 
 ## V1.106 Extension — Toast package promotion + re-export hazard
 
 V1.106 P0 promoted `ToastProvider` / `useToast` / `Toaster` to `@42ch/nexus-ui` so Studio `/components` could fixture variant matrices. The package landed, but App kept a near-verbatim duplicate at `apps/web/src/lib/use-toast.tsx` (~40+ call sites) — residual **`R-V1106P0-001`**.
 
-**Lesson:** package promotion is **not** complete until the App adopts the **thin re-export** pattern from §Consumer wrapper strategy. Verbatim copy creates drift risk and false “pipeline complete” claims. Toast also introduced a **`lucide-react` package runtime dependency** for variant icons — documented exception in [`component-promotion-boundary.md`](../../iterations/v1.99/specs/component-promotion-boundary.md) (`R-V1106P0-002`).
+**Lesson:** package promotion is **not** complete until the App adopts the **thin re-export** pattern from §Consumer wrapper strategy. Verbatim copy creates drift risk and false “pipeline complete” claims. Toast also introduced a **`lucide-react` package runtime dependency** for variant icons — documented exception in `component-promotion-boundary.md` (`R-V1106P0-002`).
 
 ## V1.107 Extension — App Toast adoption + presentational gallery aliases
 
@@ -159,4 +159,4 @@ Daemon Surfaces sections that only compose promoted primitives must badge `@42ch
 
 NLE Timeline chrome (`nle-timeline-chrome`, V1.128 P1) is an `@web-canvas/*` presentational extract — **must not** import `@xyflow/react`. App RF hosts (`timeline-canvas.tsx`, `work-timeline-canvas.tsx`) mount a thin overlay (`nle-timeline-band-overlay.tsx`) that projects RF node data into extract props. Pull-off demo stays Studio fixture local state only; App adopt is chrome swap, not new RF DnD scope.
 
-**Normative iteration detail:** [web-alias-clarity.md](../../iterations/v1.128/specs/web-alias-clarity.md) · [nle-timeline-canvas.md](../../iterations/v1.128/specs/nle-timeline-canvas.md).
+**Normative iteration detail:** `web-alias-clarity.md` · `nle-timeline-canvas.md`.

@@ -1,7 +1,7 @@
 # Reading Chrome Profile Checklist
 
 > **Version**: V1.91 — locked in P-1 Prepare.
-> **Source of truth**: repo-root [`DESIGN.md`](../../../DESIGN.md) `## Reading Chrome` token section.
+> **Source of truth**: repo-root [`DESIGN.md`](../../DESIGN.md) `## Reading Chrome` token section.
 > **Purpose**: Acceptance bar for P0 implementation of profile-specific reading chrome.
 > **Fallback rule**: unknown `work_profile` values render as `novel` chrome.
 

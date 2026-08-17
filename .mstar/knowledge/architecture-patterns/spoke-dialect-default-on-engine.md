@@ -98,4 +98,4 @@ Slot filling is gated by the creator-workflow `stage` (`intake`/`research`/`prod
 - V1.150 P1 `crates/nexus-moment-context-assembly/src/directive.rs` + `crates/nexus-local-db/src/moment_directive.rs` (Moment Directive + `DirectiveStore` trait + `NoDirectiveStore` default + compile-time `query_as!`).
 - V1.150 P2 `crates/nexus-moment-context-assembly/src/generation.rs` (`apply_stage_gate` §4 matrix; `Unspecified` zero-cost pass-through).
 - Spec: `.mstar/specs/spoke-adapter-architecture.md` §7.4 (V1.150 slot + Directive matrix promoted by P2 sweep).
-- Iteration guide: `.mstar/iterations/v1.150/guides/mca-section-audit.md` (MCA section-heading evidence).
+- Iteration guide: `mca-section-audit.md` (MCA section-heading evidence).

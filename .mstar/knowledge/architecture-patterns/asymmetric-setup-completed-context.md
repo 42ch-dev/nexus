@@ -39,6 +39,6 @@ Expose one API `setCompleted(next: boolean)` with **asymmetric** semantics:
 
 ## Related
 
-- Iteration specs: `.mstar/iterations/v1.103/specs/settings-setup-section.md`
-- Broader Settings IA: `.mstar/iterations/v1.103/specs/settings-shell-ia.md`
+- Iteration specs: `settings-setup-section.md`
+- Broader Settings IA: `settings-shell-ia.md`
 - UI studio-first process: [ui-component-promotion-workflow.md](./ui-component-promotion-workflow.md)

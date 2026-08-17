@@ -19,8 +19,8 @@ The sync module scans the workspace for novel-writing artifacts when `work_profi
 
 - Only `.md` files **directly under** `Works/<work_ref>/Stories/` are sync chapter candidates
 - Hidden files (starting with `.`) are skipped
-- `README.md`, `Outlines/**`, `Logs/**` are **never** chapter candidates. Per-chapter metadata is derived from the **`work_chapters` table** in `state.db` (per [novel-writing/workflow-profile.md §4.1](./novel-writing/workflow-profile.md)); the legacy `work-status.md` file is removed in V1.36.
-- `Works/<work_ref>/Worldbuilding/` subtree is **not present** in V1.36 (world content lives in World KB per [entity-scope-model.md §5.4](./entity-scope-model.md) + [novel-writing/workflow-profile.md §3.5](./novel-writing/workflow-profile.md))
+- `README.md`, `Outlines/**`, `Logs/**` are **never** chapter candidates. Per-chapter metadata is derived from the **`work_chapters` table** in `state.db` (per [workflow-profile.md §4.1](workflow-profile.md)); the legacy `work-status.md` file is removed in V1.36.
+- `Works/<work_ref>/Worldbuilding/` subtree is **not present** in V1.36 (world content lives in World KB per [entity-scope-model.md §5.4](../entity-scope-model.md) + [workflow-profile.md §3.5](workflow-profile.md))
 - Workspace-root `Stories/<story_ref>/` is **not** scanned (legacy; removed pre-1.0)
 - Each `work_ref` directory under `Works/` represents one novel Work's artifact tree
 
@@ -83,7 +83,7 @@ struct ChapterContent {
 ## 5. Platform Handoff Boundary
 
 - The sync module produces `StoryBundle`s
-- **Target (long-term):** platform upload is handled by **`nexus-cloud-sync`** when the CLI runs `nexus42 sync push` (cloud product line). The module does **not** call platform HTTP directly. **Durable roadmap:** [deferred-features tracker §2.6](../../roadmaps/deferred-features-cross-version-tracker.md) — DR-54.
-- **Legacy (pre–V1.21):** some builds still route upload through the `nexus-sync` crate and `POST /v1/local/sync/push` on the daemon; that path is **retired** per [local-cloud-crate-architecture.md](./local-cloud-crate-architecture.md) §5–§6.
+- **Target (long-term):** platform upload is handled by **`nexus-cloud-sync`** when the CLI runs `nexus42 sync push` (cloud product line). The module does **not** call platform HTTP directly. **Durable roadmap:** deferred-features tracker §2.6 — DR-54.
+- **Legacy (pre–V1.21):** some builds still route upload through the `nexus-sync` crate and `POST /v1/local/sync/push` on the daemon; that path is **retired** per [local-cloud-crate-architecture.md](../local-cloud-crate-architecture.md) §5–§6.
 - Wire bundles use types from `@42ch/nexus-contracts` / `schemas/domain/` + `schemas/platform/sync/` (no duplicate DTOs)
 - **V1.36 scope**: structured sync only; platform publish (DF-59) is explicitly OUT
