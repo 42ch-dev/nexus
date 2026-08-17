@@ -1,0 +1,16 @@
+{
+  "type": "assistant",
+  "message": {
+    "id": "msg_01",
+    "type": "message",
+    "role": "assistant",
+    "model": "claude-sonnet-4-5",
+    "content": [
+      { "type": "text", "text": "Hello from claude" },
+      { "type": "thinking", "thinking": "let me think about this", "signature": "sig_01" }
+    ],
+    "stop_reason": "end_turn"
+  },
+  "session_id": "sess_01",
+  "uuid": "00000000-0000-0000-0000-000000000001"
+}

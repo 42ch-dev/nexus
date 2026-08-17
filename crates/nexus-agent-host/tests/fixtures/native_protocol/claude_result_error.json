@@ -1,0 +1,12 @@
+{
+  "type": "result",
+  "subtype": "error_during_execution",
+  "is_error": true,
+  "duration_ms": 1200,
+  "duration_api_ms": 1100,
+  "num_turns": 1,
+  "session_id": "sess_01",
+  "total_cost_usd": 0.01,
+  "result": "tool failed",
+  "errors": ["Bash command failed with exit code 1"]
+}

@@ -1,0 +1,1 @@
+{"method":"turn/completed","params":{"threadId":"th_01","turn":{"id":"t_01","status":"failed","items":[],"error":{"message":"rate limit exceeded"}}}}

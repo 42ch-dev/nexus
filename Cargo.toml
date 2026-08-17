@@ -161,6 +161,14 @@ spoke-connect = "=0.10.0"
 # ONE libp2p build. Consumed behind feature `connect-host` on `apps/nexus42`;
 # the DEFAULT daemon graph stays libp2p-free.
 libp2p = { version = "=0.56.0", features = ["ed25519"] }
+# V1.168 P1 (native claude/codex replace): typed Rust SDKs for the Claude Code
+# CLI stream-json protocol and the Codex app-server JSON-RPC protocol (PD-2).
+# Exact pins: the T1 mapper tests lock the decode contract against these exact
+# crate versions (AR-1, AR-3); bump deliberately with the next iteration.
+# `default-features = false` drops `sync-client`; claude's `auth` feature is
+# not in default and must stay off (PD-2). Consumed by `nexus-agent-host`.
+claude-codes = { version = "=2.1.232", default-features = false, features = ["async-client"] }
+codex-codes = { version = "=0.146.4", default-features = false, features = ["async-client"] }
 
 # --- Dev profile: keep local `target/` smaller ---
 # Default `debug = true` (full) inflates deps/rlibs and test binaries. Line-limited
