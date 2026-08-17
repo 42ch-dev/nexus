@@ -6,7 +6,7 @@
 **Location**: `.mstar/knowledge/` (shared result; closed-row archive companion to the active deferred tracker).  
 **Split from**: [deferred-features-cross-version-tracker.md](deferred-features-cross-version-tracker.md) §4–§5 (2026-05-30 restructure)  
 **Created**: 2026-05-30  
-**Last updated**: 2026-08-16 (V1.167 — dogfood sweep shipped: V1.164–166 window validation via evidence-backed findings register (32 assets) + DF-A-02 fix `creator register --local` (two-store creator bootstrap: identity mint + active + workspace `creators` row via `ensure_creator_row`) + dependabot #41/#42/#43 disposition-with-evidence (deferral accepted; alerts stay open; zero lockfile diff); DF-81/DF-82/DF-83 registered; DR-70 gate answered N; 3 plans, scale M). Prior: 2026-08-15 (V1.166 — DR-64 quality-loop close-out shipped: world-scoped rule resolution wrapper (orchestrate_check_world_scoped, dual-caller) + spoke_rules production CRUD + creator world rule CLI + four-family structured evaluator (module_presence/module_absence/required_field/observer_cardinality) + GET /worlds/:id/rules read route + Control Room /worlds/:worldId/findings panel + rules section; 2 plans, scale M; R-V1148P2-001 closed; DR-70 NL lane registered).
+**Last updated**: 2026-08-17 (V1.168 — native host provider series shipped: Claude/Codex native internals fully replaced by `claude-codes`/`codex-codes` protocol clients (stream-json / app-server; decode-drift contract locked; per-session locks; turn-id filtering) + new `dsh-native` provider via crates.io `deepseek-harness-sdk` (PATH/`DSH_RUNTIME_BIN` discovery, honest `dsh_limited` descriptor); ACP rail unchanged; zero residuals; 2 plans, scale M; PR #220 `409cd39f`). Prior: 2026-08-16 (V1.167 — dogfood sweep shipped: V1.164–166 window validation via evidence-backed findings register (32 assets) + DF-A-02 fix `creator register --local` (two-store creator bootstrap: identity mint + active + workspace `creators` row via `ensure_creator_row`) + dependabot #41/#42/#43 disposition-with-evidence (deferral accepted; alerts stay open; zero lockfile diff); DF-81/DF-82/DF-83 registered; DR-70 gate answered N; 3 plans, scale M).
 
 **Last updated (V1.55 history)**: 2026-06-22 (V1.55 closeout: 7 plans all Done — P-1 prepare + P0 DF-43 SQLite persistence / crate-model alignment (closed) + P1 DF-31 workspace interface skeleton + P2 game-bible Depth 3.5 (design-writing + design 五问 rubric + section completion detection + KB extraction; Master spec) + P3 Script profile scaffold (V1.54-style parity + additive BlockType dialogue/beat/act + script_category + ScaffoldTransaction closure on BOTH non-novel scaffolds) + P-mid QC rhythm + P-last closeout (Profile B compaction + spec promotion + tracker ship snapshot + tech-debt rollup); R-V154P1-W001 + R-V154P1-S002 + DF-43 + DF-31 all closed; 1 new R-V155P2-F002 → V1.56+; wire contracts unchanged)
 
@@ -188,6 +188,20 @@ Archived from [deferred-features-cross-version-tracker.md](deferred-features-cro
 | New residuals | 0 | zero-residual all plans |
 | Knowledge | 1 new + 2 updated | creator-bootstrap-two-store-materialization (new); cargo-lockfile-feature-independent-dependabot + nexus42-cli-home-resolution-hermetic (updated) |
 | **Merge** | PR #218 | merge commit `83281b14` (2026-08-16) |
+
+
+### Shipped in V1.168
+
+| Category | Count | IDs / Notes |
+|----------|-------|-------------|
+| Native provider replaces | 2 | `claude-native` → claude-codes stream-json (T1 b5efb649 + T3 2917fc81); `codex-native` → codex-codes **app-server** (T2 da1a3863) — self-written `--print`/exec-JSONL/persistent-mode/ChildReaper stack deleted; fix wave 79ca73b2 (QC B-1 stale turn / B-2 global lock / B-3 frame-gap timeout) |
+| New native providers | 1 | `dsh-native` via crates.io `deepseek-harness-sdk` =0.1.0 (T1 991a14c3 + T2 449a97e9 + fix wave 2abc61ba: env-route scan row / honest `dsh_limited` rows / timeout session rotation / mock dsh stub) |
+| Decode-drift contract | locked | unknown variant skip vs typed-decode/stream-abort → single terminal `OpFailed` (AR-7 tokens; 512-byte message cap) |
+| ACP rail | unchanged | `nexus-acp-host` / claude-acp / codex-acp untouched |
+| Wire contracts | unchanged | `wire_contracts_changed: false` |
+| New residuals | 0 | zero-residual both plans; QC tri → targeted revalidation Approve; QA full Pass with notes (live CLI/dsh smoke deferred — no binaries on machine) |
+| Knowledge | 1 new + 1 updated | process-env-lock-fixture-spawn-serialization (new); native-cli-provider-adapter-pattern (updated, crate-client pattern) |
+| **Merge** | PR #220 | merge commit `409cd39f` (2026-08-17) |
 
 
 ### Shipped in V1.7
