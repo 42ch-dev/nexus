@@ -681,8 +681,11 @@ mod tests {
     // Lock guards (session registry / crate client) are intentionally held
     // to the end of the visible test scope for readability; the nursery
     // significant_drop_tightening suggestion to drop them earlier is noise
-    // here.
+    // here. `PROCESS_ENV_LOCK` (lib.rs test_support) is deliberately held
+    // across awaits: it serializes python-fixture spawns against the
+    // env-mutating discovery tests (see its doc comment).
     #![allow(clippy::significant_drop_tightening)]
+    #![allow(clippy::await_holding_lock)]
 
     use super::*;
     use crate::capability::model::{FinishReason, HostOperation, LaunchSpec};
@@ -728,10 +731,19 @@ mod tests {
         )
     }
 
+    // The held `PROCESS_ENV_LOCK` guard makes the future !Send; test-only
+    // helper, run on tokio's current-thread test runtime (no Send needed).
+    #[allow(clippy::future_not_send)]
     async fn launch_and_execute(
         provider: &ClaudeCliProvider,
         text: &str,
     ) -> (ManagedSessionHandle, HostEventStream) {
+        // Serialize with the env-mutating discovery tests: the fixture is
+        // spawned via `#!/usr/bin/env python3`, which resolves python3
+        // through PATH at execve time (see lib.rs test_support).
+        let _env_lock = crate::test_support::PROCESS_ENV_LOCK
+            .lock()
+            .expect("lock env tests");
         let handle = provider.launch(launch_spec()).await.expect("launch");
         let stream = provider
             .execute(
@@ -891,6 +903,11 @@ mod tests {
     /// argv per spawn).
     #[tokio::test]
     async fn second_execute_resumes_session() {
+        // Serialize with env-mutating discovery tests (fixture spawns
+        // resolve python3 through PATH; see lib.rs test_support).
+        let _env_lock = crate::test_support::PROCESS_ENV_LOCK
+            .lock()
+            .expect("lock env tests");
         let temp_dir = tempfile::tempdir().expect("temp dir");
         let req_log = temp_dir.path().join("argv.jsonl");
         let req_log_path = req_log.to_string_lossy().into_owned();
@@ -1180,6 +1197,11 @@ mod tests {
     /// replaces the provider-global write lock.
     #[tokio::test]
     async fn session_b_cancel_and_shutdown_do_not_wait_on_session_a_read() {
+        // Serialize with env-mutating discovery tests (fixture spawns
+        // resolve python3 through PATH; see lib.rs test_support).
+        let _env_lock = crate::test_support::PROCESS_ENV_LOCK
+            .lock()
+            .expect("lock env tests");
         let provider = mock_provider(HashMap::from([("BLOCK_TURN".to_string(), "1".to_string())]));
 
         let handle_a = provider.launch(launch_spec()).await.expect("launch a");
@@ -1236,6 +1258,11 @@ mod tests {
     /// `working_directory` (observed as the child's working directory).
     #[tokio::test]
     async fn launch_cwd_is_applied_to_cli_child() {
+        // Serialize with env-mutating discovery tests (fixture spawns
+        // resolve python3 through PATH; see lib.rs test_support).
+        let _env_lock = crate::test_support::PROCESS_ENV_LOCK
+            .lock()
+            .expect("lock env tests");
         let temp_dir = tempfile::tempdir().expect("temp dir");
         let cwd = temp_dir.path().to_path_buf();
         let req_log = temp_dir.path().join("argv.jsonl");
