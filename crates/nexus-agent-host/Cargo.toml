@@ -27,6 +27,8 @@ chrono = { workspace = true }
 toml = { workspace = true }
 which = { workspace = true }
 regex = { workspace = true }
+claude-codes = { workspace = true }
+codex-codes = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }

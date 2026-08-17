@@ -5,3 +5,5 @@
 
 pub mod claude;
 pub mod codex;
+pub mod map_claude;
+pub mod map_codex;

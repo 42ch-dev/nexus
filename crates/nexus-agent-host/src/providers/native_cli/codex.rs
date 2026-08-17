@@ -1,83 +1,89 @@
-//! Codex CLI native provider adapter.
+//! Codex native provider adapter (`codex-codes` app-server client).
 //!
-//! Implements a native CLI provider for `OpenAI`'s `codex` command-line tool.
-//! Codex is **subcommand-based** (`codex exec`), unlike Claude's flag-based
-//! (`claude --print`) interface. The adapter parses the `--json` JSONL event
-//! stream and captures codex-generated session IDs for multi-turn resume.
+//! Implements a native provider for `OpenAI`'s `codex` CLI through the
+//! `codex-codes` async client (PD-2): a long-lived `codex app-server`
+//! process speaking JSON-RPC over stdio. Nexus owns only the `HostEvent`
+//! normalization (`map_codex`) and the approval auto-policy (AR-4); the
+//! crate owns the wire parser, the process lifecycle, and teardown.
 //!
 //! # Session Model
 //!
-//! Each `launch()` registers a host session with `codex_session_id: None`.
-//! The first `execute()` spawns `codex exec --json -s read-only` and writes the
-//! prompt to stdin. While reading the JSONL stream, the adapter looks for a
-//! `session_start` event and stores its `session_id` in the native session.
-//! Subsequent `execute()` calls use `codex exec resume <id> --json` to continue
-//! the same codex session across separate process invocations.
+//! Each `launch()` registers a host session with no client yet. The first
+//! `execute()` lazily starts the app-server client
+//! ([`codex_codes::AsyncClient::start_with`]), creates a codex thread
+//! (`thread/start`), and runs `turn/start` per prompt. The thread id is
+//! reused while the app-server lives; if the app-server connection is lost
+//! between turns, the client is restarted and the thread is restored via
+//! `thread/resume` (AR-5 — replaces the old `exec resume <id>`).
 //!
-//! # Fallback
+//! # Approvals
 //!
-//! If codex `--json` output is not structured (e.g., older versions, custom builds,
-//! or incompatible event shapes), the adapter falls back to plain stdout line
-//! streaming: unparsable lines are emitted as [`HostEvent::MessageDelta`] text
-//! and the session ID is never captured, so future invocations spawn fresh
-//! rather than attempting `resume`.
-//!
-//! This adapter only supports **per-invocation mode**. Codex `exec` exits after
-//! one prompt; there is no persistent child reuse like Claude's delimited mode.
+//! Every `turn/start` carries `approval_policy: AskForApproval::Never` and
+//! `sandbox_policy: SandboxPolicy::ReadOnly { network_access: None }` — the
+//! app-server equivalent of today's headless `codex exec -s read-only`
+//! (AR-4). Any residual approval server-request is auto-answered from the
+//! native permission classification without surfacing to the author:
+//! read-only command actions (`Allow`) are accepted, everything else
+//! (`Ask` / `Deny`) is denied (headless fail-safe, logged).
 
 use std::collections::HashMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use codex_codes::messages::ServerRequest;
+use codex_codes::protocol::{
+    AskForApproval, CommandAction, SandboxPolicy, TurnInterruptParams, TurnStartParams, UserInput,
+};
+use codex_codes::{AsyncClient, Error as CodexError, RequestId, ServerMessage};
 use futures_util::StreamExt;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
 use tokio::sync::RwLock;
 
 use crate::capability::model::{
-    CapabilityDescriptor, FinishReason, HostContentBlock, HostEvent, HostEventStream,
-    ManagedSessionHandle, OperationFailedEvent, OperationFinishedEvent, OperationStartedEvent,
-    ProtocolKind, ProviderDescriptor, ProviderHealth, TextDeltaEvent,
+    CapabilityDescriptor, HostContentBlock, HostEvent, HostEventStream, ManagedSessionHandle,
+    OperationFailedEvent, ProtocolKind, ProviderDescriptor, ProviderHealth,
 };
 use crate::config::TimeoutConfig;
 use crate::error::{HostError, HostResult};
 use crate::ids::{HostOperationId, HostSessionId, ProviderId};
+use crate::providers::native_cli::map_codex::{classify_stream_error, map_codex};
 use crate::ProviderAdapter;
 
-/// Internal state for a managed codex native CLI session.
+/// Internal state for a managed codex native session.
 struct NativeSession {
-    /// The codex-generated session ID used for `exec resume <id>`.
-    /// Captured from the first `session_start` JSONL event.
-    codex_session_id: Option<String>,
-    /// Working directory for the CLI process, retained from `LaunchSpec::cwd`.
+    /// The codex app-server async client, started lazily on the first
+    /// execute. Dropping it kills the app-server process — no raw `Child`
+    /// handles are tracked by the provider.
+    client: Option<AsyncClient>,
+    /// The codex thread (conversation) id. Created on the first execute and
+    /// reused while the app-server lives; restored via `thread/resume` if
+    /// the app-server restarts (AR-5).
+    thread_id: Option<String>,
+    /// The turn currently streaming on this session, used by `cancel()` /
+    /// stream-timeout `turn/interrupt`. Cleared when the stream ends.
+    active_turn_id: Option<String>,
+    /// Working directory for the app-server process, retained from
+    /// `LaunchSpec::cwd`.
     cwd: std::path::PathBuf,
-    /// Whether the first `execute()` has been performed for this session.
-    first_exec_done: bool,
-    /// Whether the first `execute()` successfully captured a codex session ID.
-    /// If false after the first execute, future invocations drop `--json`.
-    json_capable: bool,
-    /// Child processes for in-flight operations, keyed by host operation ID.
-    /// Tracked so `cancel()` and `shutdown()` can kill running children.
-    operation_children: HashMap<HostOperationId, tokio::process::Child>,
 }
 
 impl std::fmt::Debug for NativeSession {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("NativeSession")
-            .field("codex_session_id", &self.codex_session_id.as_deref())
+            .field("client_started", &self.client.is_some())
+            .field("thread_id", &self.thread_id.as_deref())
+            .field("active_turn_id", &self.active_turn_id.as_deref())
             .field("cwd", &self.cwd.display())
-            .field("first_exec_done", &self.first_exec_done)
-            .field("json_capable", &self.json_capable)
-            .field("operation_children", &self.operation_children.keys())
             .finish()
     }
 }
 
-/// Codex CLI native provider.
+/// Codex native provider.
 ///
-/// Spawns `codex` (or a configured command) as a subprocess and normalizes its
-/// stdout into `HostEvent` items. Supports per-invocation mode only: each
-/// `execute()` spawns a new child, with multi-turn continuity via codex's
-/// `exec resume <id>` subcommand.
+/// Spawns `codex app-server` (via the `codex-codes` crate) and normalizes
+/// its JSON-RPC notifications into `HostEvent` items. Multi-turn continuity
+/// is the app-server thread: `thread/start` on first execute, the thread id
+/// reused while the app-server lives, `thread/resume` after a restart
+/// (AR-5).
 pub struct CodexNativeProvider {
     /// Provider ID (typically `codex-native` to avoid collision with ACP registry).
     provider_id: ProviderId,
@@ -85,9 +91,7 @@ pub struct CodexNativeProvider {
     display_name: String,
     /// Command to execute (e.g., `codex`).
     command: String,
-    /// Default arguments for non-interactive JSONL mode.
-    args: Vec<String>,
-    /// Environment variables to inject.
+    /// Environment variables to inject into the app-server process.
     env: HashMap<String, String>,
     /// Active sessions: host session ID → native session state.
     sessions: Arc<RwLock<HashMap<HostSessionId, NativeSession>>>,
@@ -96,13 +100,12 @@ pub struct CodexNativeProvider {
 }
 
 impl CodexNativeProvider {
-    /// Create a new Codex CLI provider with the given configuration.
+    /// Create a new Codex provider with the given configuration.
     #[must_use]
     pub fn new(
         provider_id: ProviderId,
         display_name: String,
         command: String,
-        args: Vec<String>,
         env: HashMap<String, String>,
         timeouts: TimeoutConfig,
     ) -> Self {
@@ -110,7 +113,6 @@ impl CodexNativeProvider {
             provider_id,
             display_name,
             command,
-            args,
             env,
             sessions: Arc::new(RwLock::new(HashMap::new())),
             timeouts,
@@ -124,405 +126,441 @@ impl CodexNativeProvider {
             ProviderId::new("codex-native"),
             "Codex CLI (native)".to_string(),
             "codex".to_string(),
-            vec![
-                "exec".to_string(),
-                "--json".to_string(),
-                "-s".to_string(),
-                "read-only".to_string(),
-            ],
             HashMap::new(),
             TimeoutConfig::default(),
         )
     }
 
-    /// Build the event stream from stdout.
+    /// Ensure the app-server client and thread exist, then start a turn.
     ///
-    /// In `--json` mode, parses each line as a JSONL event. If a line is not
-    /// valid JSON, it is emitted as a plain-text `MessageDelta` (fallback).
-    /// Unknown JSON event types are logged and skipped.
+    /// Mirrors the old spawn+stdin-write setup phase: it runs under the
+    /// caller's prompt timeout and returns an error (no stream) on failure.
     ///
-    /// Emits `OpStarted`, then `MessageDelta`/`ThoughtDelta` per event, and a
-    /// terminal `OpFinished`/`OpFailed` when stdout reaches EOF or an I/O error
-    /// occurs.
+    /// If the app-server connection was lost between turns
+    /// (`ServerClosed` / `ConnectionClosed` on `turn/start`), the dead
+    /// client is dropped, a fresh app-server is started, and the thread is
+    /// restored with `thread/resume` before retrying once (AR-5).
+    // The session lock is deliberately held across the whole setup (client +
+    // thread + turn/start) so a concurrent execute/shutdown cannot race a
+    // half-initialized session; the significant_drop_tightening suggestion
+    // to drop it early would break that invariant. too_many_lines: the
+    // restart/retry loop reads linearly and splitting it would obscure it.
+    #[allow(clippy::significant_drop_tightening, clippy::too_many_lines)]
+    async fn ensure_client_and_start_turn(
+        &self,
+        session_id: &HostSessionId,
+        prompt_text: &str,
+    ) -> HostResult<String> {
+        let mut sessions = self.sessions.write().await;
+        let native_session = sessions.get_mut(session_id).ok_or_else(|| {
+            HostError::internal(format!(
+                "session {session_id} not found in native CLI provider"
+            ))
+        })?;
+
+        let mut attempts = 0;
+        loop {
+            attempts += 1;
+
+            if native_session.client.is_none() {
+                let builder = codex_codes::AppServerBuilder::new()
+                    .command(self.command.clone())
+                    .working_directory(native_session.cwd.clone())
+                    .envs(self.env.clone());
+                let client = codex_codes::AsyncClient::start_with(builder)
+                    .await
+                    .map_err(|e| {
+                        HostError::launch_failed(
+                            self.provider_id.clone(),
+                            format!("failed to start '{}' app-server", self.command),
+                            Some(e.to_string()),
+                        )
+                    })?;
+                native_session.client = Some(client);
+            }
+
+            let client = native_session
+                .client
+                .as_mut()
+                .expect("client was just ensured");
+
+            let thread_id = if let Some(thread_id) = native_session.thread_id.as_ref() {
+                if attempts > 1 {
+                    // The app-server restarted: replay thread history so
+                    // turns continue where they left off (AR-5).
+                    client
+                        .thread_resume(&codex_codes::ThreadResumeParams {
+                            thread_id: thread_id.clone(),
+                            ..codex_codes::ThreadResumeParams::default()
+                        })
+                        .await
+                        .map_err(|e| {
+                            HostError::protocol_error(
+                                "codex thread resume failed",
+                                Some(e.to_string()),
+                            )
+                        })?;
+                    tracing::info!(
+                        session_id = %session_id,
+                        provider_id = %self.provider_id,
+                        thread_id = %thread_id,
+                        "Codex app-server restarted; thread resumed"
+                    );
+                }
+                thread_id.clone()
+            } else {
+                let response = client
+                    .thread_start(&codex_codes::ThreadStartParams::default())
+                    .await
+                    .map_err(|e| {
+                        HostError::protocol_error("codex thread start failed", Some(e.to_string()))
+                    })?;
+                let thread_id = response.thread.id.clone();
+                native_session.thread_id = Some(thread_id.clone());
+                tracing::info!(
+                    session_id = %session_id,
+                    provider_id = %self.provider_id,
+                    thread_id = %thread_id,
+                    "Codex thread started"
+                );
+                thread_id
+            };
+
+            // AR-4: every turn/start runs inside the read-only sandbox with
+            // no approval prompts — never more writable than today's
+            // headless `-s read-only`.
+            match client
+                .turn_start(&TurnStartParams {
+                    thread_id,
+                    input: vec![UserInput::Text {
+                        text: prompt_text.to_string(),
+                        text_elements: None,
+                    }],
+                    approval_policy: Some(AskForApproval::Never),
+                    sandbox_policy: Some(SandboxPolicy::ReadOnly {
+                        network_access: None,
+                    }),
+                    ..TurnStartParams::default()
+                })
+                .await
+            {
+                Ok(response) => {
+                    native_session.active_turn_id = Some(response.turn.id.clone());
+                    return Ok(response.turn.id);
+                }
+                // The app-server died between turns — reconnect once and
+                // resume the thread (AR-5). Only when a thread already
+                // exists; a fresh session re-attempts from thread/start.
+                Err(CodexError::ServerClosed | CodexError::ConnectionClosed)
+                    if attempts == 1 && native_session.thread_id.is_some() =>
+                {
+                    tracing::warn!(
+                        session_id = %session_id,
+                        provider_id = %self.provider_id,
+                        "Codex app-server connection lost; restarting client",
+                    );
+                    native_session.client = None;
+                }
+                Err(error) => {
+                    return Err(HostError::protocol_error(
+                        "codex turn start failed",
+                        Some(error.to_string()),
+                    ));
+                }
+            }
+        }
+    }
+
+    /// Build the event stream for an active turn.
+    ///
+    /// Pumps `AsyncClient::next_message` under the session lock with a
+    /// per-frame timeout (parity with the old stdout line timeout) and maps
+    /// every frame through the T1 `map_codex` mapper. Emits at most one
+    /// terminal event:
+    ///
+    /// - `TurnCompleted` with a mapped terminal ends the stream.
+    /// - `Ok(None)` at EOF (or the session being torn down by `shutdown()`)
+    ///   before a terminal → one `OpFailed(stream_closed)` (PD-3 stream
+    ///   abort / stream-abort backstop).
+    /// - A crate stream error (`Error::Deserialization` and kin) → one
+    ///   `OpFailed` from `classify_stream_error` (AR-7).
+    /// - A per-frame read timeout interrupts the turn and emits one
+    ///   `OpFailed(timeout)`.
+    ///
+    /// Residual approval server-requests are auto-answered (AR-4) and never
+    /// surface as host events.
     #[allow(clippy::too_many_lines)]
     fn build_event_stream(
         &self,
-        stdout: Option<tokio::process::ChildStdout>,
         op_id: HostOperationId,
         session_id: HostSessionId,
-        read_timeout: std::time::Duration,
     ) -> HostEventStream {
-        let started = futures_util::stream::once({
-            let op_id = op_id.clone();
-            let session_id = session_id.clone();
-            async move {
-                Ok(HostEvent::OpStarted(OperationStartedEvent {
-                    op_id,
-                    session_id,
-                }))
-            }
-        });
+        let sessions = Arc::clone(&self.sessions);
+        let read_timeout = self.timeouts.prompt_duration();
 
-        let stdout_stream: HostEventStream = if let Some(stdout) = stdout {
-            let sessions = Arc::clone(&self.sessions);
-            let provider_id = self.provider_id.clone();
-            let reaper = ChildReaper {
-                sessions: Arc::clone(&self.sessions),
-                session_id: session_id.clone(),
-                op_id: op_id.clone(),
-            };
-            let stdout_reader = tokio::io::BufReader::new(stdout);
-            futures_util::stream::unfold(
-                (stdout_reader, op_id, session_id, false, reaper),
-                move |(mut stdout_reader, op_id, session_id, finished, reaper)| {
-                    let sessions = Arc::clone(&sessions);
-                    let provider_id = provider_id.clone();
-                    async move {
-                        if finished {
-                            return None;
-                        }
+        futures_util::stream::unfold(
+            (sessions, op_id, session_id, read_timeout, false),
+            |(sessions, op_id, session_id, read_timeout, finished)| async move {
+                if finished {
+                    return None;
+                }
 
-                        loop {
-                            let mut line = String::new();
-                            match tokio::time::timeout(
-                                read_timeout,
-                                stdout_reader.read_line(&mut line),
-                            )
-                            .await
+                let read = async {
+                    let mut guard = sessions.write().await;
+                    match guard
+                        .get_mut(&session_id)
+                        .and_then(|native_session| native_session.client.as_mut())
+                    {
+                        Some(client) => client.next_message().await,
+                        // Session removed by shutdown(): the client was
+                        // dropped (app-server killed) — backstop below.
+                        None => Ok(None),
+                    }
+                };
+
+                let outcome = tokio::time::timeout(read_timeout, read).await;
+
+                let step: (Option<HostResult<HostEvent>>, bool) = match outcome {
+                    Ok(Ok(Some(ServerMessage::Notification(notification)))) => {
+                        let events = map_codex(
+                            &[ServerMessage::Notification(notification)],
+                            &session_id,
+                            &op_id,
+                        );
+                        match events.into_iter().next() {
+                            // map_codex emits at most one event per frame.
+                            Some(event)
+                                if matches!(
+                                    event,
+                                    HostEvent::OpFinished(_) | HostEvent::OpFailed(_)
+                                ) =>
                             {
-                                Ok(Ok(0)) => {
-                                    // EOF — emit terminal event and mark finished.
-                                    return Some((
-                                        Ok(HostEvent::OpFinished(OperationFinishedEvent {
-                                            session_id,
-                                            op_id: op_id.clone(),
-                                            reason: FinishReason::EndTurn,
-                                        })),
-                                        (stdout_reader, op_id, HostSessionId::new(), true, reaper),
-                                    ));
-                                }
-                                Ok(Ok(_)) => {
-                                    let trimmed = line
-                                        .trim_end_matches('\n')
-                                        .trim_end_matches('\r')
-                                        .to_string();
-                                    if let Some(event) = parse_codex_jsonl_line(
-                                        &trimmed,
-                                        &session_id,
-                                        &op_id,
-                                        &sessions,
-                                        &provider_id,
-                                    )
-                                    .await
-                                    {
-                                        return Some((
-                                            Ok(event),
-                                            (stdout_reader, op_id, session_id, false, reaper),
-                                        ));
-                                    }
-                                    // Event was skipped (e.g., session_start
-                                    // internal update) — continue reading.
-                                }
-                                Ok(Err(e)) => {
-                                    return Some((
-                                        Ok(HostEvent::OpFailed(OperationFailedEvent {
-                                            session_id,
-                                            op_id: op_id.clone(),
-                                            error_category: "io_error".to_string(),
-                                            error_message: e.to_string(),
-                                        })),
-                                        (stdout_reader, op_id, HostSessionId::new(), true, reaper),
-                                    ));
-                                }
-                                Err(_) => {
-                                    reaper.kill().await;
-                                    return Some((
-                                        Ok(HostEvent::OpFailed(OperationFailedEvent {
-                                            session_id,
-                                            op_id: op_id.clone(),
-                                            error_category: "timeout".to_string(),
-                                            error_message: format!(
-                                                "codex stream read timed out after {read_timeout:?}"
-                                            ),
-                                        })),
-                                        (stdout_reader, op_id, HostSessionId::new(), true, reaper),
-                                    ));
-                                }
+                                clear_active_turn(&sessions, &session_id).await;
+                                (Some(Ok(event)), true)
                             }
+                            Some(event) => (Some(Ok(event)), false),
+                            // Skipped frame (unknown method, unmapped
+                            // notification) — keep reading.
+                            None => (None, false),
                         }
                     }
-                },
-            )
-            .boxed()
-        } else {
-            futures_util::stream::once(async move {
-                Ok(HostEvent::OpFailed(OperationFailedEvent {
-                    session_id,
-                    op_id,
-                    error_category: "io_error".to_string(),
-                    error_message: "stdout not captured".to_string(),
-                }))
-            })
-            .boxed()
-        };
+                    Ok(Ok(Some(ServerMessage::Request { id, request }))) => {
+                        // AR-4: never surfaced to the author.
+                        let mut guard = sessions.write().await;
+                        if let Some(client) = guard
+                            .get_mut(&session_id)
+                            .and_then(|native_session| native_session.client.as_mut())
+                        {
+                            auto_answer_approval(client, id, &request).await;
+                        }
+                        drop(guard);
+                        (None, false)
+                    }
+                    Ok(Ok(None)) => {
+                        // Stream abort (EOF or session torn down) before a
+                        // terminal frame: exactly one OpFailed (PD-3).
+                        clear_active_turn(&sessions, &session_id).await;
+                        (
+                            Some(Ok(HostEvent::OpFailed(OperationFailedEvent {
+                                session_id: session_id.clone(),
+                                op_id: op_id.clone(),
+                                error_category: "stream_closed".to_string(),
+                                error_message:
+                                    "codex app-server closed the stream before the turn completed"
+                                        .to_string(),
+                            }))),
+                            true,
+                        )
+                    }
+                    Ok(Err(error)) => {
+                        // Typed-decode failure / connection error: the frame
+                        // is lost, so the turn fails once (PD-3, AR-7).
+                        clear_active_turn(&sessions, &session_id).await;
+                        let failed = classify_stream_error(&error, &session_id, &op_id)
+                            .expect("stream error always classifies to a terminal");
+                        (Some(Ok(HostEvent::OpFailed(failed))), true)
+                    }
+                    Err(_elapsed) => {
+                        // Per-frame read timeout: stop the turn server-side
+                        // (best effort), then fail once with the AR-7
+                        // `timeout` token (parity with the old stream read
+                        // timeout).
+                        interrupt_turn(&sessions, &session_id).await;
+                        clear_active_turn(&sessions, &session_id).await;
+                        (
+                            Some(Ok(HostEvent::OpFailed(OperationFailedEvent {
+                                session_id: session_id.clone(),
+                                op_id: op_id.clone(),
+                                error_category: "timeout".to_string(),
+                                error_message: format!(
+                                    "codex stream read timed out after {read_timeout:?}"
+                                ),
+                            }))),
+                            true,
+                        )
+                    }
+                };
 
-        started.chain(stdout_stream).boxed()
-    }
-
-    /// Spawn the CLI subprocess and write the prompt to stdin.
-    ///
-    /// Returns `(stdout, stderr, child)` ready for event stream construction.
-    async fn spawn_and_write_stdin(
-        &self,
-        full_args: &[String],
-        prompt_text: &str,
-        cwd: &std::path::Path,
-    ) -> HostResult<(
-        Option<tokio::process::ChildStdout>,
-        Option<tokio::process::ChildStderr>,
-        tokio::process::Child,
-    )> {
-        let mut cmd = tokio::process::Command::new(&self.command);
-        cmd.args(full_args)
-            .current_dir(cwd)
-            .stdin(std::process::Stdio::piped())
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
-            .envs(&self.env);
-
-        let mut child = cmd.spawn().map_err(|e| {
-            HostError::launch_failed(
-                self.provider_id.clone(),
-                format!("failed to spawn '{}'", self.command),
-                Some(e.to_string()),
-            )
-        })?;
-
-        // Write prompt to stdin with a timeout and close it. If the write fails
-        // or times out, reap the child before returning so it cannot outlive host
-        // management.
-        let prompt_dur = self.timeouts.prompt_duration();
-        let stdin = child.stdin.take();
-        if let Some(mut stdin) = stdin {
-            let write_result =
-                tokio::time::timeout(prompt_dur, stdin.write_all(prompt_text.as_bytes())).await;
-
-            match write_result {
-                Ok(Ok(())) => {
-                    drop(stdin);
-                }
-                Ok(Err(e)) => {
-                    let _ = child.kill().await;
-                    let _ = child.wait().await;
-                    return Err(HostError::protocol_error(
-                        "failed to write prompt to stdin",
-                        Some(e.to_string()),
-                    ));
-                }
-                Err(_) => {
-                    let _ = child.kill().await;
-                    let _ = child.wait().await;
-                    return Err(HostError::timeout(
-                        "prompt",
-                        format!(
-                            "CLI process setup timed out after {}ms",
-                            self.timeouts.prompt_ms
-                        ),
-                    ));
-                }
-            }
-        }
-
-        Ok((child.stdout.take(), child.stderr.take(), child))
+                step.0
+                    .map(|event| (event, (sessions, op_id, session_id, read_timeout, step.1)))
+            },
+        )
+        .boxed()
     }
 }
 
-/// RAII guard that reaps a child process when the event stream ends.
+/// Auto-answer a residual codex approval server-request (AR-4).
 ///
-/// Per-invocation codex children run until EOF. Once the stream consumer
-/// reaches EOF (or drops the stream), this guard removes the child handle from
-/// the session and waits on it, preventing zombies.
-struct ChildReaper {
-    sessions: Arc<RwLock<HashMap<HostSessionId, NativeSession>>>,
-    session_id: HostSessionId,
-    op_id: HostOperationId,
-}
-
-impl Drop for ChildReaper {
-    fn drop(&mut self) {
-        let sessions = Arc::clone(&self.sessions);
-        let session_id = self.session_id.clone();
-        let op_id = self.op_id.clone();
-        tokio::spawn(async move {
-            let mut sessions = sessions.write().await;
-            if let Some(ns) = sessions.get_mut(&session_id) {
-                if let Some(mut child) = ns.operation_children.remove(&op_id) {
-                    let _ = child.kill().await;
-                    let _ = child.wait().await;
-                }
-            }
-        });
-    }
-}
-
-impl ChildReaper {
-    /// Kill the child process now (used for stream timeout).
-    async fn kill(&self) {
-        let mut sessions = self.sessions.write().await;
-        if let Some(ns) = sessions.get_mut(&self.session_id) {
-            if let Some(mut child) = ns.operation_children.remove(&self.op_id) {
-                let _ = child.kill().await;
-                let _ = child.wait().await;
-            }
-        }
-    }
-}
-
-/// Parsed JSONL event shape from `codex --json`.
-///
-/// This is intentionally tolerant: only fields the adapter cares about are
-/// required. Unknown fields are ignored by serde.
-#[derive(Debug, serde::Deserialize)]
-struct CodexJsonlEvent {
-    #[serde(rename = "type")]
-    event_type: String,
-    #[serde(default)]
-    session_id: Option<String>,
-    #[serde(default)]
-    delta: Option<serde_json::Value>,
-    #[serde(default, rename = "finish_reason")]
-    finish_reason: Option<String>,
-    #[serde(default)]
-    reason: Option<String>,
-}
-
-/// Parse a single JSONL line from codex `--json` output.
-///
-/// Returns `Some(HostEvent)` when the line produces a host-visible event.
-/// Returns `None` when the line is consumed internally (e.g., session ID
-/// capture) and the caller should continue reading.
-async fn parse_codex_jsonl_line(
-    line: &str,
-    session_id: &HostSessionId,
-    op_id: &HostOperationId,
-    sessions: &Arc<RwLock<HashMap<HostSessionId, NativeSession>>>,
-    provider_id: &ProviderId,
-) -> Option<HostEvent> {
-    // Try to parse as JSON. If it fails, fall back to plain-text line streaming.
-    let event: CodexJsonlEvent = match serde_json::from_str(line) {
-        Ok(event) => event,
-        Err(e) => {
-            tracing::debug!(
-                provider_id = %provider_id,
-                line = %line,
-                error = %e,
-                "JSONL parse failed; falling back to plain text line"
+/// Uses the native permission classification: read-only command actions
+/// classify `Allow` → accept; everything else (`Ask` / `Deny`) is denied —
+/// the headless fail-safe, logged, never surfaced to the author. Failures
+/// to respond are logged at warn (the turn already carries
+/// `approval_policy: Never`, so these are unexpected belt-and-braces).
+async fn auto_answer_approval(client: &mut AsyncClient, id: RequestId, request: &ServerRequest) {
+    match request {
+        ServerRequest::CmdExecApproval(params) => {
+            let read_only = params.command_actions.as_ref().is_some_and(|actions| {
+                actions.iter().all(|action| {
+                    matches!(
+                        action,
+                        CommandAction::Read { .. }
+                            | CommandAction::ListFiles { .. }
+                            | CommandAction::Search { .. }
+                    )
+                })
+            });
+            let response = if read_only {
+                codex_codes::CommandExecutionRequestApprovalResponse::accept()
+            } else {
+                codex_codes::CommandExecutionRequestApprovalResponse::decline()
+            };
+            let decision = if read_only { "accept" } else { "decline" };
+            tracing::info!(
+                method = request.method(),
+                decision,
+                "Auto-answering codex command approval (AR-4 native permission policy)"
             );
-            return Some(HostEvent::MessageDelta(TextDeltaEvent {
-                session_id: session_id.clone(),
-                op_id: op_id.clone(),
-                text: line.to_string(),
-            }));
+            if let Err(error) = client.respond(id, &response).await {
+                tracing::warn!(error = %error, "Failed to answer codex approval request");
+            }
+        }
+        ServerRequest::FileChangeApproval(_) => {
+            tracing::info!(
+                method = request.method(),
+                decision = "decline",
+                "Auto-denying codex file-change approval (AR-4 read-only sandbox)"
+            );
+            if let Err(error) = client
+                .respond(
+                    id,
+                    &codex_codes::FileChangeRequestApprovalResponse::decline(),
+                )
+                .await
+            {
+                tracing::warn!(error = %error, "Failed to answer codex approval request");
+            }
+        }
+        ServerRequest::ApplyPatchApproval(_) => {
+            tracing::info!(
+                method = request.method(),
+                decision = "deny",
+                "Auto-denying codex apply-patch approval (AR-4 read-only sandbox)"
+            );
+            if let Err(error) = client
+                .respond(
+                    id,
+                    &codex_codes::ApplyPatchApprovalResponse::denied(
+                        "denied by nexus read-only policy",
+                    ),
+                )
+                .await
+            {
+                tracing::warn!(error = %error, "Failed to answer codex approval request");
+            }
+        }
+        ServerRequest::ExecCommandApproval(_) => {
+            tracing::info!(
+                method = request.method(),
+                decision = "deny",
+                "Auto-denying codex exec approval (AR-4 read-only sandbox)"
+            );
+            if let Err(error) = client
+                .respond(
+                    id,
+                    &codex_codes::ExecCommandApprovalResponse::denied(
+                        "denied by nexus read-only policy",
+                    ),
+                )
+                .await
+            {
+                tracing::warn!(error = %error, "Failed to answer codex approval request");
+            }
+        }
+        // Permission/user-input/tool/auth requests are not approvals we can
+        // classify — deny with a JSON-RPC error (headless fail-safe).
+        _ => {
+            tracing::info!(
+                method = request.method(),
+                decision = "deny",
+                "Auto-denying unclassified codex server request (AR-4 headless fail-safe)"
+            );
+            if let Err(error) = client
+                .respond_error(id, -32000, "denied by nexus headless policy")
+                .await
+            {
+                tracing::warn!(error = %error, "Failed to answer codex server request");
+            }
+        }
+    }
+}
+
+/// Interrupt the session's active turn via the crate client, if any.
+///
+/// Best-effort: a turn that already completed server-side makes
+/// `turn/interrupt` fail with a JSON-RPC error, which is logged only.
+async fn interrupt_turn(
+    sessions: &Arc<RwLock<HashMap<HostSessionId, NativeSession>>>,
+    session_id: &HostSessionId,
+) {
+    let (thread_id, turn_id) = {
+        let guard = sessions.read().await;
+        match guard.get(session_id) {
+            Some(native_session) => (
+                native_session.thread_id.clone(),
+                native_session.active_turn_id.clone(),
+            ),
+            None => return,
         }
     };
-
-    // Capture codex session ID from any event that carries it.
-    if let Some(codex_id) = event.session_id {
-        let session_id_owned = session_id.clone();
-        let sessions = Arc::clone(sessions);
-        let codex_id_clone = codex_id.clone();
-        let mut sessions_guard = sessions.write().await;
-        if let Some(ns) = sessions_guard.get_mut(&session_id_owned) {
-            ns.codex_session_id = Some(codex_id_clone);
-            ns.json_capable = true;
-            tracing::info!(
-                session_id = %session_id_owned,
-                codex_session_id = %codex_id,
-                "Captured codex session ID from JSONL event"
+    let (Some(thread_id), Some(turn_id)) = (thread_id, turn_id) else {
+        return;
+    };
+    let mut guard = sessions.write().await;
+    if let Some(client) = guard
+        .get_mut(session_id)
+        .and_then(|native_session| native_session.client.as_mut())
+    {
+        if let Err(error) = client
+            .turn_interrupt(&TurnInterruptParams { thread_id, turn_id })
+            .await
+        {
+            tracing::warn!(
+                session_id = %session_id,
+                error = %error,
+                "Codex turn interrupt failed (turn may have completed)"
             );
-        }
-    }
-
-    match event.event_type.as_str() {
-        "session_start" => {
-            // Internal event used for session ID capture; do not emit a host event.
-            None
-        }
-        "message_delta" => {
-            let text = extract_delta_text(event.delta.as_ref()).unwrap_or_default();
-            Some(HostEvent::MessageDelta(TextDeltaEvent {
-                session_id: session_id.clone(),
-                op_id: op_id.clone(),
-                text,
-            }))
-        }
-        "thought_delta" => {
-            let text = extract_delta_text(event.delta.as_ref()).unwrap_or_default();
-            Some(HostEvent::ThoughtDelta(TextDeltaEvent {
-                session_id: session_id.clone(),
-                op_id: op_id.clone(),
-                text,
-            }))
-        }
-        "tool_call" | "tool_call_update" => {
-            // MVP: log and skip structured tool events; native CLI limited
-            // capabilities do not claim structured tool calls.
-            tracing::debug!(
-                provider_id = %provider_id,
-                event_type = %event.event_type,
-                "Skipping structured tool event in native CLI provider"
-            );
-            None
-        }
-        "finish" => {
-            let reason = parse_finish_reason(event.finish_reason.as_deref())
-                .or_else(|| parse_finish_reason(event.reason.as_deref()))
-                .unwrap_or(FinishReason::EndTurn);
-            Some(HostEvent::OpFinished(OperationFinishedEvent {
-                session_id: session_id.clone(),
-                op_id: op_id.clone(),
-                reason,
-            }))
-        }
-        _ => {
-            tracing::debug!(
-                provider_id = %provider_id,
-                event_type = %event.event_type,
-                "Unknown codex JSONL event type; skipping"
-            );
-            None
         }
     }
 }
 
-/// Extract displayable text from a `delta` JSON value.
-///
-/// Handles several plausible codex shapes:
-/// - `"delta": "hello"` (string)
-/// - `"delta": { "content": "hello" }` (object with content)
-/// - `"delta": { "text": "hello" }` (object with text)
-fn extract_delta_text(delta: Option<&serde_json::Value>) -> Option<String> {
-    let delta = delta?;
-    match delta {
-        serde_json::Value::String(text) => Some(text.clone()),
-        serde_json::Value::Object(obj) => obj
-            .get("content")
-            .or_else(|| obj.get("text"))
-            .and_then(|v| v.as_str())
-            .map(std::string::ToString::to_string),
-        _ => None,
-    }
-}
-
-/// Parse a codex finish reason into the host `FinishReason` enum.
-fn parse_finish_reason(reason: Option<&str>) -> Option<FinishReason> {
-    let reason = reason?;
-    match reason.to_lowercase().as_str() {
-        "max_tokens" | "length" => Some(FinishReason::MaxTokens),
-        "max_turn_requests" | "max_turns" => Some(FinishReason::MaxTurnRequests),
-        "refusal" | "content_filter" => Some(FinishReason::Refusal),
-        // Default: normal end-of-turn for end_turn, stop, completed, or unknown reasons.
-        _ => Some(FinishReason::EndTurn),
+/// Clear the session's active-turn marker (stream ended).
+async fn clear_active_turn(
+    sessions: &Arc<RwLock<HashMap<HostSessionId, NativeSession>>>,
+    session_id: &HostSessionId,
+) {
+    let mut guard = sessions.write().await;
+    if let Some(native_session) = guard.get_mut(session_id) {
+        native_session.active_turn_id = None;
     }
 }
 
@@ -586,8 +624,8 @@ impl ProviderAdapter for CodexNativeProvider {
         &self,
         spec: crate::capability::model::LaunchSpec,
     ) -> HostResult<ManagedSessionHandle> {
-        // For native CLI providers, launch() only registers session state
-        // (no process spawned yet — the actual process spawns in execute()).
+        // Native provider launch only registers session state — the
+        // app-server process starts lazily on the first execute().
         let host_session_id = HostSessionId::new();
 
         {
@@ -595,11 +633,10 @@ impl ProviderAdapter for CodexNativeProvider {
             sessions.insert(
                 host_session_id.clone(),
                 NativeSession {
-                    codex_session_id: None,
+                    client: None,
+                    thread_id: None,
+                    active_turn_id: None,
                     cwd: spec.cwd.clone(),
-                    first_exec_done: false,
-                    json_capable: true,
-                    operation_children: HashMap::new(),
                 },
             );
         }
@@ -608,7 +645,7 @@ impl ProviderAdapter for CodexNativeProvider {
             session_id = %host_session_id,
             provider_id = %self.provider_id,
             cwd = %spec.cwd.display(),
-            "Native CLI session registered (process spawns on first execute)"
+            "Native CLI session registered (app-server starts on first execute)"
         );
 
         Ok(ManagedSessionHandle {
@@ -618,7 +655,6 @@ impl ProviderAdapter for CodexNativeProvider {
         })
     }
 
-    #[allow(clippy::too_many_lines)]
     async fn execute(
         &self,
         session: &ManagedSessionHandle,
@@ -649,115 +685,41 @@ impl ProviderAdapter for CodexNativeProvider {
             ));
         }
 
-        // Look up session state and determine invocation flags.
-        let (full_args, is_first, cwd) = {
-            let mut sessions = self.sessions.write().await;
-            let native_session = sessions.get_mut(&session.session_id).ok_or_else(|| {
-                HostError::internal(format!(
-                    "session {} not found in native CLI provider",
-                    session.session_id
-                ))
-            })?;
-
-            let cwd = native_session.cwd.clone();
-            let is_first = !native_session.first_exec_done;
-
-            let mut full_args = Vec::new();
-            full_args.push("exec".to_string());
-
-            if is_first {
-                // First invocation: `codex exec --json -s read-only`
-                full_args.extend(self.args.iter().skip(1).cloned());
-            } else if native_session.json_capable {
-                if let Some(ref codex_id) = native_session.codex_session_id {
-                    // Subsequent invocation with captured session ID:
-                    // `codex exec resume <id> --json -s read-only`
-                    full_args.push("resume".to_string());
-                    full_args.push(codex_id.clone());
-                    full_args.extend(self.args.iter().skip(1).cloned());
-                } else {
-                    // JSONL mode failed to capture an ID; spawn fresh without --json.
-                    native_session.json_capable = false;
-                    full_args.extend(plain_text_args(&self.args));
-                }
-            } else {
-                // Confirmed fallback to plain stdout line streaming.
-                full_args.extend(plain_text_args(&self.args));
-            }
-
-            drop(sessions);
-            (full_args, is_first, cwd)
-        };
-
-        // Spawn the subprocess with prompt_ms timeout for the setup phase
-        // (spawn + stdin write). The timeout is enforced inside
-        // spawn_and_write_stdin so a timed-out or failed write reaps the child
-        // before the error is returned. The streaming phase runs until EOF.
-        let spawn_result = self
-            .spawn_and_write_stdin(&full_args, &prompt_text, &cwd)
-            .await
-            .map_err(|e| {
-                e.with_provider(self.provider_id.clone())
-                    .with_session(session.session_id.clone())
-                    .with_op(op_id.clone())
-            })?;
-
-        let (stdout, stderr, mut child) = spawn_result;
-
-        // Mark the first execute as done only after the process was spawned and
-        // its stdin written successfully. Track the child handle so cancel()/
-        // shutdown() can kill it. If the session was removed while we were
-        // spawning, kill the child so it is not orphaned.
-        {
-            let mut sessions = self.sessions.write().await;
-            if let Some(ns) = sessions.get_mut(&session.session_id) {
-                ns.first_exec_done = true;
-                ns.operation_children.insert(op_id.clone(), child);
-            } else {
-                let _ = child.kill().await;
-                let _ = child.wait().await;
-                return Err(HostError::internal(format!(
-                    "session {} was removed while spawning child",
-                    session.session_id
-                )));
-            }
-        }
-
-        let stream = self.build_event_stream(
-            stdout,
-            op_id.clone(),
-            session.session_id.clone(),
+        // Setup phase (client + thread + turn/start) runs under the prompt
+        // timeout, mirroring the old spawn + stdin-write enforcement. A
+        // failure returns an error, not a stream.
+        let turn_id = tokio::time::timeout(
             self.timeouts.prompt_duration(),
+            self.ensure_client_and_start_turn(&session.session_id, &prompt_text),
+        )
+        .await
+        .map_err(|_| {
+            HostError::timeout(
+                "prompt",
+                format!(
+                    "CLI process setup timed out after {}ms",
+                    self.timeouts.prompt_ms
+                ),
+            )
+            .with_provider(self.provider_id.clone())
+            .with_session(session.session_id.clone())
+            .with_op(op_id.clone())
+        })?
+        .map_err(|e| {
+            e.with_provider(self.provider_id.clone())
+                .with_session(session.session_id.clone())
+                .with_op(op_id.clone())
+        })?;
+
+        tracing::info!(
+            session_id = %session.session_id,
+            provider_id = %self.provider_id,
+            op_id = %op_id,
+            turn_id = %turn_id,
+            "Codex turn started"
         );
 
-        // Spawn a background task to drain stderr and log warnings.
-        if let Some(stderr) = stderr {
-            let provider_id = self.provider_id.clone();
-            tokio::spawn(async move {
-                let reader = tokio::io::BufReader::new(stderr);
-                let mut lines = reader.lines();
-                while let Ok(Some(line)) = lines.next_line().await {
-                    tracing::warn!(
-                        provider_id = %provider_id,
-                        stderr = %line,
-                        "Native CLI stderr output"
-                    );
-                }
-            });
-        }
-
-        if is_first {
-            // After the first execute, if the stream fails to capture a session ID,
-            // the stream closure will leave json_capable = true and codex_session_id
-            // = None. The next execute will detect that and drop --json.
-            tracing::info!(
-                session_id = %session.session_id,
-                provider_id = %self.provider_id,
-                "Codex native CLI first execute spawned"
-            );
-        }
-
-        Ok(stream)
+        Ok(self.build_event_stream(op_id, session.session_id.clone()))
     }
 
     async fn cancel(
@@ -765,55 +727,31 @@ impl ProviderAdapter for CodexNativeProvider {
         session: &ManagedSessionHandle,
         op_id: HostOperationId,
     ) -> HostResult<()> {
-        let mut sessions = self.sessions.write().await;
-        if let Some(ns) = sessions.get_mut(&session.session_id) {
-            if let Some(mut child) = ns.operation_children.remove(&op_id) {
-                tracing::info!(
-                    session_id = %session.session_id,
-                    op_id = %op_id,
-                    provider_id = %self.provider_id,
-                    "Native CLI cancel: killing child process"
-                );
-                let _ = child.kill().await;
-                let _ = child.wait().await;
-            }
-        }
-        drop(sessions);
+        // The app-server owns the turn; interrupt it through the crate
+        // client. The app-server reports `Interrupted`, which maps to a
+        // clean `OpFinished(EndTurn)` on the stream (AR-1).
+        interrupt_turn(&self.sessions, &session.session_id).await;
         tracing::info!(
+            session_id = %session.session_id,
+            op_id = %op_id,
             provider_id = %self.provider_id,
-            "Native CLI cancel requested"
+            "Native CLI cancel: turn interrupt requested"
         );
         Ok(())
     }
 
     async fn shutdown(&self, session: ManagedSessionHandle) -> HostResult<()> {
-        // Take the child handles out of the session before removing the session,
-        // then kill them. This avoids dropping a live child handle when a
-        // concurrent execute is between spawn and registration.
+        // Removing the session drops the crate client, which kills the
+        // app-server process (AsyncClient teardown owns the child — no raw
+        // Child map, no ChildReaper).
         let mut sessions = self.sessions.write().await;
-        let children = if let Some(ns) = sessions.get_mut(&session.session_id) {
-            std::mem::take(&mut ns.operation_children)
-        } else {
-            HashMap::new()
-        };
         sessions.remove(&session.session_id);
         drop(sessions);
-
-        for (op_id, mut child) in children {
-            tracing::info!(
-                session_id = %session.session_id,
-                op_id = %op_id,
-                provider_id = %self.provider_id,
-                "Native CLI shutdown: killing child process"
-            );
-            let _ = child.kill().await;
-            let _ = child.wait().await;
-        }
 
         tracing::info!(
             session_id = %session.session_id,
             provider_id = %self.provider_id,
-            "Native CLI session shut down"
+            "Native CLI session shut down (app-server killed via crate client teardown)"
         );
         Ok(())
     }
@@ -823,27 +761,30 @@ impl ProviderAdapter for CodexNativeProvider {
     }
 }
 
-/// Build a plain-text argument list by removing the `--json` flag.
-///
-/// Used when JSONL mode fails so the adapter falls back to line-streaming
-/// stdout like claude-native.
-fn plain_text_args(json_args: &[String]) -> Vec<String> {
-    json_args
-        .iter()
-        .skip(1)
-        .filter(|arg| arg.as_str() != "--json")
-        .cloned()
-        .collect()
-}
-
 #[cfg(test)]
 mod tests {
-    // Lock guards (session registry / persistent handles) are intentionally
-    // held to the end of the visible test scope for readability; the nursery
-    // significant_drop_tightening suggestion to drop them earlier is noise here.
+    // Lock guards (session registry / client) are intentionally held to the
+    // end of the visible test scope for readability; the nursery
+    // significant_drop_tightening suggestion to drop them earlier is noise
+    // here.
     #![allow(clippy::significant_drop_tightening)]
 
     use super::*;
+    use crate::capability::model::{FinishReason, HostOperation, LaunchSpec};
+
+    const MOCK_APP_SERVER: &str = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/native_protocol/mock_codex_app_server.py"
+    );
+
+    fn launch_spec() -> LaunchSpec {
+        LaunchSpec {
+            cwd: std::path::PathBuf::from("/tmp"),
+            model: None,
+            mode: None,
+            mcp_servers: vec![],
+        }
+    }
 
     async fn collect_events(stream: HostEventStream) -> Vec<HostEvent> {
         let results: Vec<_> = stream.collect().await;
@@ -851,6 +792,45 @@ mod tests {
             .into_iter()
             .map(|r| r.expect("stream item should be Ok"))
             .collect()
+    }
+
+    fn terminal_count(events: &[HostEvent]) -> usize {
+        events
+            .iter()
+            .filter(|e| matches!(e, HostEvent::OpFinished(_) | HostEvent::OpFailed(_)))
+            .count()
+    }
+
+    /// Provider wired to the fixture mock app-server (a small Python
+    /// JSON-RPC speaker; see `MOCK_APP_SERVER`).
+    fn mock_provider(env: HashMap<String, String>) -> CodexNativeProvider {
+        CodexNativeProvider::new(
+            ProviderId::new("test-codex-app-server"),
+            "Test".to_string(),
+            MOCK_APP_SERVER.to_string(),
+            env,
+            TimeoutConfig::default(),
+        )
+    }
+
+    async fn launch_and_execute(
+        provider: &CodexNativeProvider,
+        text: &str,
+    ) -> (ManagedSessionHandle, HostEventStream) {
+        let handle = provider.launch(launch_spec()).await.expect("launch");
+        let stream = provider
+            .execute(
+                &handle,
+                HostOperation::Prompt {
+                    op_id: HostOperationId::new(),
+                    content: vec![HostContentBlock::Text {
+                        text: text.to_string(),
+                    }],
+                },
+            )
+            .await
+            .expect("execute");
+        (handle, stream)
     }
 
     #[test]
@@ -866,24 +846,15 @@ mod tests {
         assert!(!desc.capabilities.structured_tool_calls);
         assert!(
             desc.capabilities.session_restore,
-            "native CLI now supports session_restore via exec resume"
+            "native CLI supports session_restore via the app-server thread (AR-5)"
         );
         assert!(!desc.capabilities.mcp_http);
     }
 
     #[test]
-    fn default_config_has_exec_json_args() {
+    fn default_config_command() {
         let provider = CodexNativeProvider::default_config();
         assert_eq!(provider.command, "codex");
-        assert_eq!(
-            provider.args,
-            vec![
-                "exec".to_string(),
-                "--json".to_string(),
-                "-s".to_string(),
-                "read-only".to_string(),
-            ]
-        );
     }
 
     #[tokio::test]
@@ -892,7 +863,6 @@ mod tests {
             ProviderId::new("nonexistent-codex-xyz"),
             "Fake".to_string(),
             "nonexistent_codex_xyz_12345".to_string(),
-            vec![],
             HashMap::new(),
             TimeoutConfig::default(),
         );
@@ -912,158 +882,128 @@ mod tests {
             ProviderId::new("my-codex"),
             "My Codex".to_string(),
             "/opt/codex/bin/codex".to_string(),
-            vec!["exec".to_string(), "--json".to_string()],
             HashMap::from([("OPENAI_API_KEY".to_string(), "sk-test".to_string())]),
             TimeoutConfig::default(),
         );
 
         assert_eq!(provider.provider_id.0, "my-codex");
         assert_eq!(provider.command, "/opt/codex/bin/codex");
-        assert_eq!(provider.args.len(), 2);
         assert_eq!(provider.env.get("OPENAI_API_KEY").unwrap(), "sk-test");
     }
 
     #[tokio::test]
-    async fn launch_registers_session_without_session_id() {
+    async fn launch_registers_session_without_client() {
         let provider = CodexNativeProvider::default_config();
 
-        let handle = provider
-            .launch(crate::capability::model::LaunchSpec {
-                cwd: std::path::PathBuf::from("/tmp"),
-                model: None,
-                mode: None,
-                mcp_servers: vec![],
-            })
-            .await
-            .expect("launch should succeed");
+        let handle = provider.launch(launch_spec()).await.expect("launch");
 
         let sessions = provider.sessions.read().await;
         let native_session = sessions.get(&handle.session_id);
         assert!(native_session.is_some(), "session should be registered");
 
         let ns = native_session.unwrap();
+        assert!(ns.client.is_none(), "client should start lazily on execute");
         assert!(
-            ns.codex_session_id.is_none(),
-            "codex_session_id should be None initially"
+            ns.thread_id.is_none(),
+            "thread_id should be None before first execute"
         );
         assert!(
-            !ns.first_exec_done,
-            "first_exec_done should be false initially"
+            ns.active_turn_id.is_none(),
+            "active_turn_id should be None before first execute"
         );
-        assert!(ns.json_capable, "json_capable should be true initially");
     }
 
-    #[cfg(unix)]
     #[tokio::test]
-    async fn execute_parses_jsonl_and_captures_session_id() {
-        let temp_dir = tempfile::tempdir().expect("temp dir");
-        let script = r#"printf '%s\n' '{"type":"session_start","session_id":"sess_test_123"}' '{"type":"message_delta","delta":"hello"}' '{"type":"finish","reason":"end_turn"}'"#;
-        let script_path = write_mock_codex_script(&temp_dir, script);
-
+    async fn execute_fails_when_binary_missing() {
         let provider = CodexNativeProvider::new(
-            ProviderId::new("test-codex-jsonl"),
+            ProviderId::new("test-codex-missing"),
             "Test".to_string(),
-            script_path.to_string_lossy().into_owned(),
-            vec![
-                "exec".to_string(),
-                "--json".to_string(),
-                "-s".to_string(),
-                "read-only".to_string(),
-            ],
+            "nonexistent_codex_xyz_12345".to_string(),
             HashMap::new(),
             TimeoutConfig::default(),
         );
 
-        let handle = provider
-            .launch(crate::capability::model::LaunchSpec {
-                cwd: std::path::PathBuf::from("/tmp"),
-                model: None,
-                mode: None,
-                mcp_servers: vec![],
-            })
-            .await
-            .expect("launch");
-
-        let stream = provider
+        let handle = provider.launch(launch_spec()).await.expect("launch");
+        let result = provider
             .execute(
                 &handle,
-                crate::capability::model::HostOperation::Prompt {
+                HostOperation::Prompt {
                     op_id: HostOperationId::new(),
                     content: vec![HostContentBlock::Text {
                         text: "hi".to_string(),
                     }],
                 },
             )
-            .await
-            .expect("execute");
+            .await;
 
-        let events = collect_events(stream).await;
-
-        let deltas: Vec<String> = events
-            .iter()
-            .filter_map(|e| match e {
-                HostEvent::MessageDelta(d) => Some(d.text.clone()),
-                _ => None,
-            })
-            .collect();
-        assert_eq!(deltas, vec!["hello"]);
+        assert!(
+            result.is_err(),
+            "execute with a missing binary must error, not stream"
+        );
 
         let sessions = provider.sessions.read().await;
         let ns = sessions.get(&handle.session_id).expect("session exists");
         assert!(
-            ns.first_exec_done,
-            "first_exec_done should be true after execute"
+            ns.client.is_none(),
+            "no client should be retained after a failed start"
         );
-        assert_eq!(
-            ns.codex_session_id.as_deref(),
-            Some("sess_test_123"),
-            "codex session ID should be captured from JSONL"
-        );
-        assert!(ns.json_capable, "json_capable should remain true");
     }
 
-    #[cfg(unix)]
+    /// A turn against the mock app-server maps through `map_codex`:
+    /// `OpStarted` (turn/started), `MessageDelta`, one `OpFinished(EndTurn)`
+    /// (turn/completed), and the client/thread survive for later turns.
     #[tokio::test]
-    async fn execute_second_call_uses_resume_subcommand() {
+    async fn execute_maps_turn_events_and_keeps_client() {
+        let provider = mock_provider(HashMap::new());
+
+        let (handle, stream) = launch_and_execute(&provider, "hi").await;
+        let events = collect_events(stream).await;
+
+        assert!(
+            matches!(&events[0], HostEvent::OpStarted(_)),
+            "first event should be OpStarted: {events:?}"
+        );
+        assert!(
+            matches!(&events[1], HostEvent::MessageDelta(d) if d.text == "hello from mock codex"),
+            "delta must map through the T1 mapper: {events:?}"
+        );
+        assert!(
+            matches!(&events[2], HostEvent::OpFinished(f) if f.reason == FinishReason::EndTurn),
+            "completed turn must end cleanly: {events:?}"
+        );
+        assert_eq!(events.len(), 3, "started + delta + terminal: {events:?}");
+        assert_eq!(terminal_count(&events), 1);
+
+        let sessions = provider.sessions.read().await;
+        let ns = sessions.get(&handle.session_id).expect("session exists");
+        assert!(ns.client.is_some(), "client must stay alive after the turn");
+        assert_eq!(
+            ns.thread_id.as_deref(),
+            Some("mock-thread-1"),
+            "thread id must be captured from thread/start"
+        );
+        assert!(
+            ns.active_turn_id.is_none(),
+            "active turn must be cleared when the stream ends"
+        );
+    }
+
+    /// Session restore (AR-5): the second execute reuses the app-server
+    /// thread — no second `thread/start`, and both turns run on
+    /// `mock-thread-1`.
+    #[tokio::test]
+    async fn second_execute_reuses_thread() {
         let temp_dir = tempfile::tempdir().expect("temp dir");
-        let args_file = temp_dir.path().join("args.txt");
-        let args_file_path = args_file.to_string_lossy().to_string();
+        let req_log = temp_dir.path().join("requests.jsonl");
+        let req_log_path = req_log.to_string_lossy().into_owned();
+        let provider = mock_provider(HashMap::from([("REQ_LOG".to_string(), req_log_path)]));
 
-        // Mock script: records argv to a file, then emits JSONL with session ID.
-        let script = format!(
-            r#"printf '%s\n' "$@" >> "{args_file_path}"; printf '%s\n' '{{"type":"session_start","session_id":"sess_test_123"}}' '{{"type":"message_delta","delta":"hello"}}' '{{"type":"finish","reason":"end_turn"}}'"#
-        );
-        let script_path = write_mock_codex_script(&temp_dir, &script);
+        let handle = provider.launch(launch_spec()).await.expect("launch");
 
-        let provider = CodexNativeProvider::new(
-            ProviderId::new("test-codex-resume"),
-            "Test".to_string(),
-            script_path.to_string_lossy().into_owned(),
-            vec![
-                "exec".to_string(),
-                "--json".to_string(),
-                "-s".to_string(),
-                "read-only".to_string(),
-            ],
-            HashMap::new(),
-            TimeoutConfig::default(),
-        );
-
-        let handle = provider
-            .launch(crate::capability::model::LaunchSpec {
-                cwd: std::path::PathBuf::from("/tmp"),
-                model: None,
-                mode: None,
-                mcp_servers: vec![],
-            })
-            .await
-            .expect("launch");
-
-        // First execute: captures session ID.
         let stream1 = provider
             .execute(
                 &handle,
-                crate::capability::model::HostOperation::Prompt {
+                HostOperation::Prompt {
                     op_id: HostOperationId::new(),
                     content: vec![HostContentBlock::Text {
                         text: "hi".to_string(),
@@ -1073,21 +1013,12 @@ mod tests {
             .await
             .expect("first execute");
         let events1 = collect_events(stream1).await;
+        assert_eq!(terminal_count(&events1), 1);
 
-        let deltas1: Vec<String> = events1
-            .iter()
-            .filter_map(|e| match e {
-                HostEvent::MessageDelta(d) => Some(d.text.clone()),
-                _ => None,
-            })
-            .collect();
-        assert_eq!(deltas1, vec!["hello"]);
-
-        // Second execute: should use `resume <id>`.
         let stream2 = provider
             .execute(
                 &handle,
-                crate::capability::model::HostOperation::Prompt {
+                HostOperation::Prompt {
                     op_id: HostOperationId::new(),
                     content: vec![HostContentBlock::Text {
                         text: "again".to_string(),
@@ -1097,131 +1028,109 @@ mod tests {
             .await
             .expect("second execute");
         let events2 = collect_events(stream2).await;
+        assert_eq!(terminal_count(&events2), 1);
 
-        let deltas2: Vec<String> = events2
-            .iter()
-            .filter_map(|e| match e {
-                HostEvent::MessageDelta(d) => Some(d.text.clone()),
-                _ => None,
-            })
+        let log = std::fs::read_to_string(&req_log).expect("read request log");
+        let requests: Vec<serde_json::Value> = log
+            .lines()
+            .map(|line| serde_json::from_str(line).expect("log line is JSON"))
             .collect();
-        assert_eq!(deltas2, vec!["hello"]);
 
-        // Verify the second invocation recorded `resume <id>` in argv.
-        let args_content = std::fs::read_to_string(&args_file).expect("read args file");
-        let args_lines: Vec<&str> = args_content.lines().collect();
-
-        // First execute should have recorded the base args once.
-        assert!(
-            args_lines.contains(&"exec"),
-            "execute should pass 'exec' subcommand; args: {args_lines:?}"
-        );
-        // Second execute should have recorded resume and the captured session ID.
-        let resume_positions: Vec<usize> = args_lines
+        let thread_starts = requests
             .iter()
-            .enumerate()
-            .filter_map(|(i, s)| if *s == "resume" { Some(i) } else { None })
+            .filter(|r| r["method"] == "thread/start")
+            .count();
+        assert_eq!(thread_starts, 1, "thread must be created exactly once");
+        let turn_starts: Vec<&serde_json::Value> = requests
+            .iter()
+            .filter(|r| r["method"] == "turn/start")
             .collect();
+        assert_eq!(turn_starts.len(), 2, "one turn/start per execute");
         assert!(
-            !resume_positions.is_empty(),
-            "second execute should pass 'resume' subcommand; args: {args_lines:?}"
-        );
-        let resume_pos = resume_positions[0];
-        assert!(
-            resume_pos + 1 < args_lines.len() && args_lines[resume_pos + 1] == "sess_test_123",
-            "second execute should pass captured session ID after 'resume'; args: {args_lines:?}"
+            turn_starts.iter().all(|r| r["threadId"] == "mock-thread-1"),
+            "both turns must run on the reused thread: {requests:?}"
         );
     }
 
-    #[cfg(unix)]
+    /// `cancel()` interrupts the running turn through the crate client; the
+    /// app-server reports `Interrupted`, which maps to a clean
+    /// `OpFinished(EndTurn)` (AR-1).
     #[tokio::test]
-    async fn execute_fallback_to_plain_text_when_jsonl_parse_fails() {
-        let temp_dir = tempfile::tempdir().expect("temp dir");
-        let script = r"printf 'plain text line\nanother line\n'";
-        let script_path = write_mock_codex_script(&temp_dir, script);
+    async fn cancel_interrupts_active_turn() {
+        let provider = mock_provider(HashMap::from([("BLOCK_TURN".to_string(), "1".to_string())]));
 
-        let provider = CodexNativeProvider::new(
-            ProviderId::new("test-codex-fallback"),
-            "Test".to_string(),
-            script_path.to_string_lossy().into_owned(),
-            vec![
-                "exec".to_string(),
-                "--json".to_string(),
-                "-s".to_string(),
-                "read-only".to_string(),
-            ],
-            HashMap::new(),
-            TimeoutConfig::default(),
+        let (handle, stream) = launch_and_execute(&provider, "hi").await;
+        let events_fut = Box::pin(collect_events(stream));
+
+        provider
+            .cancel(&handle, HostOperationId::new())
+            .await
+            .expect("cancel");
+
+        let events = events_fut.await;
+        assert!(
+            matches!(&events[0], HostEvent::OpStarted(_)),
+            "turn must have started: {events:?}"
         );
+        assert!(
+            matches!(
+                &events.last().unwrap(),
+                HostEvent::OpFinished(f) if f.reason == FinishReason::EndTurn
+            ),
+            "interrupted turn must end cleanly: {events:?}"
+        );
+        assert_eq!(terminal_count(&events), 1);
+    }
 
-        let handle = provider
-            .launch(crate::capability::model::LaunchSpec {
-                cwd: std::path::PathBuf::from("/tmp"),
-                model: None,
-                mode: None,
-                mcp_servers: vec![],
-            })
-            .await
-            .expect("launch");
+    /// `shutdown()` tears down the crate client (killing the app-server) and
+    /// removes the session; the in-flight stream still emits exactly one
+    /// terminal — `OpFailed(stream_closed)` (PD-3 backstop).
+    #[tokio::test]
+    async fn shutdown_tears_down_client_and_stream_terminates() {
+        let provider = mock_provider(HashMap::from([("BLOCK_TURN".to_string(), "1".to_string())]));
 
-        let stream = provider
-            .execute(
-                &handle,
-                crate::capability::model::HostOperation::Prompt {
-                    op_id: HostOperationId::new(),
-                    content: vec![HostContentBlock::Text {
-                        text: "hi".to_string(),
-                    }],
-                },
-            )
-            .await
-            .expect("execute");
+        let (handle, stream) = launch_and_execute(&provider, "hi").await;
+        let mut stream = stream;
 
-        let events = collect_events(stream).await;
+        // Pump the first event so the turn is visibly streaming.
+        let first = stream.next().await.expect("first event").expect("ok");
+        assert!(matches!(first, HostEvent::OpStarted(_)));
 
-        let deltas: Vec<String> = events
-            .iter()
-            .filter_map(|e| match e {
-                HostEvent::MessageDelta(d) => Some(d.text.clone()),
-                _ => None,
-            })
-            .collect();
-        assert_eq!(deltas, vec!["plain text line", "another line"]);
+        provider.shutdown(handle.clone()).await.expect("shutdown");
+
+        let rest = collect_events(stream).await;
+        assert!(
+            rest.last().is_some_and(|e| matches!(
+                e,
+                HostEvent::OpFailed(f) if f.error_category == "stream_closed"
+            )),
+            "stream must end with one OpFailed(stream_closed): {rest:?}"
+        );
+        assert_eq!(terminal_count(&rest), 1);
 
         let sessions = provider.sessions.read().await;
-        let ns = sessions.get(&handle.session_id).expect("session exists");
         assert!(
-            ns.codex_session_id.is_none(),
-            "session ID should not be captured in fallback mode"
+            sessions.is_empty(),
+            "session must be removed after shutdown"
         );
     }
 
-    /// Helper to create an executable mock codex script in a temp directory.
-    #[cfg(unix)]
-    fn write_mock_codex_script(temp_dir: &tempfile::TempDir, body: &str) -> std::path::PathBuf {
-        use std::os::unix::fs::PermissionsExt;
-        let script_path = temp_dir.path().join("mock_codex.sh");
-        let script = format!("#!/bin/sh\n{body}\n");
-        std::fs::write(&script_path, &script).expect("write script");
-        let mut perms = std::fs::metadata(&script_path).unwrap().permissions();
-        perms.set_mode(0o755);
-        std::fs::set_permissions(&script_path, perms).unwrap();
-        script_path
+    #[tokio::test]
+    async fn cancel_with_no_active_turn_is_noop() {
+        let provider = mock_provider(HashMap::new());
+        let handle = provider.launch(launch_spec()).await.expect("launch");
+
+        provider
+            .cancel(&handle, HostOperationId::new())
+            .await
+            .expect("cancel with no active turn must succeed");
     }
 
     #[tokio::test]
     async fn shutdown_removes_session() {
         let provider = CodexNativeProvider::default_config();
 
-        let handle = provider
-            .launch(crate::capability::model::LaunchSpec {
-                cwd: std::path::PathBuf::from("/tmp"),
-                model: None,
-                mode: None,
-                mcp_servers: vec![],
-            })
-            .await
-            .expect("launch");
+        let handle = provider.launch(launch_spec()).await.expect("launch");
 
         provider.shutdown(handle).await.expect("shutdown");
 
@@ -1232,49 +1141,21 @@ mod tests {
         );
     }
 
-    #[test]
-    fn parse_finish_reason_mapping() {
-        assert_eq!(
-            parse_finish_reason(Some("end_turn")),
-            Some(FinishReason::EndTurn)
-        );
-        assert_eq!(
-            parse_finish_reason(Some("max_tokens")),
-            Some(FinishReason::MaxTokens)
-        );
-        assert_eq!(
-            parse_finish_reason(Some("max_turn_requests")),
-            Some(FinishReason::MaxTurnRequests)
-        );
-        assert_eq!(
-            parse_finish_reason(Some("refusal")),
-            Some(FinishReason::Refusal)
-        );
-        assert_eq!(
-            parse_finish_reason(Some("unknown")),
-            Some(FinishReason::EndTurn)
-        );
-        assert_eq!(parse_finish_reason(None), None);
-    }
+    #[tokio::test]
+    async fn empty_prompt_is_rejected() {
+        let provider = mock_provider(HashMap::new());
+        let handle = provider.launch(launch_spec()).await.expect("launch");
 
-    #[test]
-    fn extract_delta_text_handles_variants() {
-        let string_delta = serde_json::json!("hello");
-        assert_eq!(
-            extract_delta_text(Some(&string_delta)),
-            Some("hello".to_string())
-        );
+        let result = provider
+            .execute(
+                &handle,
+                HostOperation::Prompt {
+                    op_id: HostOperationId::new(),
+                    content: vec![],
+                },
+            )
+            .await;
 
-        let content_delta = serde_json::json!({"content": "world"});
-        assert_eq!(
-            extract_delta_text(Some(&content_delta)),
-            Some("world".to_string())
-        );
-
-        let text_delta = serde_json::json!({"text": "foo"});
-        assert_eq!(
-            extract_delta_text(Some(&text_delta)),
-            Some("foo".to_string())
-        );
+        assert!(result.is_err(), "empty prompt must be rejected");
     }
 }

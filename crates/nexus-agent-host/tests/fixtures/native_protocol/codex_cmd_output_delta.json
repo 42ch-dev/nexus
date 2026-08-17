@@ -1,0 +1,1 @@
+{"method":"item/commandExecution/outputDelta","params":{"delta":"$ ls\n","itemId":"it_02","threadId":"th_01","turnId":"t_01"}}

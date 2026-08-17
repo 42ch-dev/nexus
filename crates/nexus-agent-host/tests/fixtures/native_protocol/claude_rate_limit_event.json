@@ -1,0 +1,6 @@
+{
+  "type": "rate_limit_event",
+  "rate_limit_info": { "status": "allowed" },
+  "session_id": "sess_01",
+  "uuid": "00000000-0000-0000-0000-000000000003"
+}
