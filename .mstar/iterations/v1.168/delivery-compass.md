@@ -60,8 +60,8 @@ Resolved in [specs/v1.168-native-host-locks.md](specs/v1.168-native-host-locks.m
 
 | plan_id | Name | Status | Notes |
 |---------|------|--------|-------|
-| 2026-08-17-v1.168-p1-native-claude-codex-replace | Replace Claude/Codex native internals | Todo | T1 mapper+decode → T2 Codex app-server → T3 Claude stream-json |
-| 2026-08-17-v1.168-p2-dsh-native-provider | Add dsh-native provider | Todo | blocked_by P1 (shared `path_scan` / `boot.rs` / `native_cli/mod.rs`) |
+| 2026-08-17-v1.168-p1-native-claude-codex-replace | Replace Claude/Codex native internals | Done | T1 b5efb649 + T2 da1a3863 + T3 2917fc81 + fix wave 79ca73b2 (QC B-1/B-2/B-3); QC tri → Request Changes → targeted revalidation ×3 Approve; QA full Pass with notes; merge 0be48f0c |
+| 2026-08-17-v1.168-p2-dsh-native-provider | Add dsh-native provider | InProgress | unblocked (P1 merged); dsh.rs + map_dsh.rs + pin + path_scan/boot |
 
 Status values: `Todo` | `InProgress` | `InReview` | `Done` | `Blocked`
 
