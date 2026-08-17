@@ -10,6 +10,6 @@
 - `script` → [script-profile.md](script-profile.md) (Master, V1.60)
 - `essay` → [essay-profile.md](essay-profile.md) (Master, V1.63)
 
-The roadmap's status-tracking tables were last updated V1.55 and are stale; the normative content now lives in the three Feature line specs above. Pre-V1.55 V2.0+ backlog lives in [deferred-features-cross-version-tracker.md](../deferred-features-cross-version-tracker.md).
+The roadmap's status-tracking tables were last updated V1.55 and are stale; the normative content now lives in the three Feature line specs above. Pre-V1.55 V2.0+ backlog lives in [deferred-features-cross-version-tracker.md](../roadmaps/deferred-features-cross-version-tracker.md).
 
 ➡️ **Archived full text**: [../../archived/knowledge/non-novel-profiles-roadmap.md](../../archived/knowledge/non-novel-profiles-roadmap.md)

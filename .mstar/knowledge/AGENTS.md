@@ -17,8 +17,8 @@ Behavioral rules for the harness **knowledge** tree. **Do not** duplicate file i
 | Iteration scope, grill decisions, audit evidence | `iterations/` (**local / ignored**) | Become permanent spec without promotion into `{SPECS_DIR}` |
 | Open plans, residuals, branch names | local `status.json` (**ignored**) | Be treated as clone SSOT |
 
-Active deferred tracker: [`deferred-features-cross-version-tracker.md`](deferred-features-cross-version-tracker.md).  
-Shipped / cancelled archive (shared): [`shipped-features-tracker.md`](shipped-features-tracker.md).
+Active deferred tracker: [`deferred-features-cross-version-tracker.md`](../roadmaps/deferred-features-cross-version-tracker.md) — **local roadmap tree** `.mstar/roadmaps/` (gitignored; not clone SSOT).
+Shipped / cancelled archive: [`shipped-features-tracker.md`](../roadmaps/shipped-features-tracker.md) — same local roadmaps tree.
 
 End-user docs stay in repo-root `docs/`.
 
@@ -50,7 +50,7 @@ When implementing runtime behavior, read the active **local** iteration compass 
 
 1. **Append-only** — never delete closed rows or snapshots.
 2. **No open backlog** — new deferrals go to active tracker only.
-3. **Path** — [`shipped-features-tracker.md`](shipped-features-tracker.md) under `{KNOWLEDGE_DIR}` (tracked result).
+3. **Path** — [`shipped-features-tracker.md`](../roadmaps/shipped-features-tracker.md) under `.mstar/roadmaps/` (local, gitignored).
 
 Spec supersession uses the archiving rules below — independent from feature-tracker lifecycle.
 

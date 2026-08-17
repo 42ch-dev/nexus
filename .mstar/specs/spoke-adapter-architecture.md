@@ -214,7 +214,7 @@ The daemon API HTTP route paths under `/v1/daemon/.../kb/` are **not renamed** i
 | Reason | Detail |
 |--------|--------|
 | Path stability | `kb` = knowledge base — semantically accurate. Changing it breaks other consuming clients unnecessarily. |
-| Deferred concern | Route path renaming is a separate CLI-IA concern, not a data-model refactor. **Durable roadmap:** consolidated in the [deferred-features tracker §2.6](../knowledge/deferred-features-cross-version-tracker.md) — DR-42 (holistic route-path review). |
+| Deferred concern | Route path renaming is a separate CLI-IA concern, not a data-model refactor. **Durable roadmap:** consolidated in the [deferred-features tracker §2.6](../roadmaps/deferred-features-cross-version-tracker.md) — DR-42 (holistic route-path review). |
 | Product alignment | The `nexus42 kb ...` CLI subcommand already stays as `kb` — consistent with the daemon path. |
 | Client impact | The daemon API is consumed by the bundled web UI (same repo) and potentially by the Tauri desktop shell. Renaming paths would cascade into client-side URL builders for no data-model benefit. |
 
@@ -498,7 +498,7 @@ examples/
 | **Hops** | On primary/constant fire, expand ≤ **2** hops over undirected adjacency built from confirmed `kb_relationships` via inherent `NexusAdapter::list_hop_edges_for_world` (`list_relationships_for_world(..., include_suggested=false)`). spoke `RelationPort` remains get/put only — **no** list-by-entity on the trait. Hop-pulled entries do **not** re-fire keyword activation. Token budget = remaining MCA budget after primary match when `max_tokens` set; personality never truncated. Cycle-safe (`visited` on `entry_id`). |
 | **Trace** | Per-entry reason + hop-origin / hop-depth / source-relation for hopped rows (`--emit-packet`; Control Room inspector = DF-76). |
 
-Product behavior detail (author story, DF mapping, Prepare locks): iteration draft [`../iterations/v1.149/specs/fl-l-w4-activation.md`](../iterations/v1.149/specs/fl-l-w4-activation.md) (process path until P2 closeout promotes any durable deltas here). DF mapping + tracker: [`../knowledge/deferred-features-cross-version-tracker.md`](../knowledge/deferred-features-cross-version-tracker.md) — DF-74 delivered (V1.149) / DF-75 delivered (V1.150) / DF-76 next (V1.151 — assembly inspector).
+Product behavior detail (author story, DF mapping, Prepare locks): iteration draft [`../iterations/v1.149/specs/fl-l-w4-activation.md`](../iterations/v1.149/specs/fl-l-w4-activation.md) (process path until P2 closeout promotes any durable deltas here). DF mapping + tracker: [`../knowledge/deferred-features-cross-version-tracker.md`](../roadmaps/deferred-features-cross-version-tracker.md) — DF-74 delivered (V1.149) / DF-75 delivered (V1.150) / DF-76 next (V1.151 — assembly inspector).
 
 #### Slot vocabulary + Moment Directive + generation-stage gates (V1.150 / DF-75 — shipped)
 
@@ -514,7 +514,7 @@ V1.150 (DF-75, plans P0+P1+P2) adds **product-local** assembly shaping on top of
 | **Neutral-only guarantee** | Unchanged (AC-I1b, HARD): no activation entries + no active directive + `unspecified` ⇒ byte-identical to V1.149. Golden suites (`golden_neutral_only_default_on`, `golden_slots_neutral_only`, `golden_flag_off`) green at V1.150 P2 close. |
 | **Off-switch interaction** | Slot routing + stage gate are **activation-product shaping steps**: with `NEXUS_MCA_LORE_ACTIVATION=off` every candidate entry is emitted unchanged as the V1.149 flat block (no sub-headings, no gating). |
 
-DF mapping + tracker: [`../knowledge/deferred-features-cross-version-tracker.md`](../knowledge/deferred-features-cross-version-tracker.md) — DF-74 delivered (V1.149) / **DF-75 delivered (V1.150, P0+P1+P2)** / DF-76 next (assembly inspector + thin Control Room Moment Directive input).
+DF mapping + tracker: [`../knowledge/deferred-features-cross-version-tracker.md`](../roadmaps/deferred-features-cross-version-tracker.md) — DF-74 delivered (V1.149) / **DF-75 delivered (V1.150, P0+P1+P2)** / DF-76 next (assembly inspector + thin Control Room Moment Directive input).
 
 #### Inspector packet field surface (V1.151 / DF-76 — shipped; P2 dogfood-confirmed)
 
@@ -605,7 +605,7 @@ spoke `Scope` supports `entry_ids`, `entry_types`, `source_id`, `fork_id`, `time
 
 **P2 — MCA WorldKB read:** MCA's `fetch_world_kb` (in `nexus-moment-context-assembly/src/moment.rs`) switches from `SqliteKbStore` to a `SpokeBackedKbStore` wrapper (`nexus-spoke-adapter/src/adapter/mca_read.rs`) that implements `KbStore` by translating `KbQuery` → spoke `Scope` (native `entry_types` from `block_type` + the nexus-specific filters under `scope.extensions["nexus"]`) → `NexusAdapter::list_knowledge_entries_scoped` (an async inherent method, NOT the spoke `ScopeQueryPort` trait method, so MCA does not inherit the spoke port's reject-on-overflow). The wrapper converts spoke `KnowledgeEntry` → nexus `WorldKbEntry` via the free function `spoke_to_world_kb` (V1.145 P1a conversion seam; lossless body carrier preserves summary/tags/attributes). The MCA read is wired at `apps/nexus42/src/commands/platform/context.rs::run_assemble_moment` (the single production `assemble_moment` KB-store call site). MCA's generic `K: KbStore` signature is unchanged — only the injected implementation changes.
 
-**P2 scope boundary (explicit):** MCA is the only production consumer cut over in V1.145. Daemon CRUD read paths (`get_graph`, `get_candidates`) stay on `SqliteKbStore` directly — these are UI views, not spoke integration concerns. **Durable roadmap:** consolidated in the [deferred-features tracker §2.6](../knowledge/deferred-features-cross-version-tracker.md) — DR-43 (MCA read-path cutover evaluation).
+**P2 scope boundary (explicit):** MCA is the only production consumer cut over in V1.145. Daemon CRUD read paths (`get_graph`, `get_candidates`) stay on `SqliteKbStore` directly — these are UI views, not spoke integration concerns. **Durable roadmap:** consolidated in the [deferred-features tracker §2.6](../roadmaps/deferred-features-cross-version-tracker.md) — DR-43 (MCA read-path cutover evaluation).
 
 **Narrative timeline ordering through the adapter (deferred to V1.146):** P3 shipped production `ScopeQueryPort.list_timeline_events` (table query + scope filter). The remaining goal — routing the narrative gateway's `get_timeline_ordered` ordering through the adapter boundary so the spoke `order_timeline_events_by_ids` helper is called via adapter re-export rather than a direct `spoke-operations` import in `narrative_gateway.rs` — is **deferred to V1.146**. It is a real refactor: `narrative_gateway` lives in `nexus-local-db` (pure storage, no spoke-adapter dep post-P1b reversal) and in `nexus-narrative`, neither of which can depend on `nexus-spoke-adapter` without re-introducing the reversed edge. The ordering therefore needs to move to a spoke-adapter-dependent layer. Until then, `nexus-local-db` and `nexus-narrative` take `spoke-operations` directly as a **standard leaf library dep** (no cycle) for the ordering helper.
 
@@ -666,9 +666,9 @@ Both decisions are accepted residuals (`R-V1143P2-ACCEPT-01`, `R-V1143P2-ACCEPT-
 | `sequence_no` | `sort_key` (`sequence_no.to_string()`) | nexus→spoke |
 | `source_command_id` | `extensions.nexus.source_command_id` | bidirectional |
 
-spoke-only fields (`fork_id`, `parent_fork_id`, `timeline_scale`, `source_anchor`, `computable_logs`) are lossily filled (`None`/empty) — **durable roadmap:** consolidated in the [deferred-features tracker §2.6](../knowledge/deferred-features-cross-version-tracker.md) — DR-44 (spoke fork-model participation).
+spoke-only fields (`fork_id`, `parent_fork_id`, `timeline_scale`, `source_anchor`, `computable_logs`) are lossily filled (`None`/empty) — **durable roadmap:** consolidated in the [deferred-features tracker §2.6](../roadmaps/deferred-features-cross-version-tracker.md) — DR-44 (spoke fork-model participation).
 
-**Beat-assist helper adoption:** `order_timeline_events_by_ids` is the primary production adoption target (V1.143 P0 T2). The helper operates on `timeline_event_id` alone and requires no peripheral infrastructure. `order_timeline_events_by_precedes` — **durable roadmap:** consolidated in the [deferred-features tracker §2.6](../knowledge/deferred-features-cross-version-tracker.md) — DR-45 (`order_timeline_events_by_precedes` adapter adoption).
+**Beat-assist helper adoption:** `order_timeline_events_by_ids` is the primary production adoption target (V1.143 P0 T2). The helper operates on `timeline_event_id` alone and requires no peripheral infrastructure. `order_timeline_events_by_precedes` — **durable roadmap:** consolidated in the [deferred-features tracker §2.6](../roadmaps/deferred-features-cross-version-tracker.md) — DR-45 (`order_timeline_events_by_precedes` adapter adoption).
 
 **`ScopeQueryPort.list_timeline_events`** is now **production** (V1.145 P3) — queries `narrative_timeline_events` table, converts via the V1.143 conversion seam, filters by Scope. The V1.142 stub (`Ok(Vec::new())`) is replaced.
 

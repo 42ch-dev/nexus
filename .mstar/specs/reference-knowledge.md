@@ -34,7 +34,7 @@ scheduler). V1.58 P3 adds the CLI subcommand and cross-cut E2E tests.
 
 Non-goals: CLI subcommand (`nexus42 reference refresh`) deferred to P3;
 cross-cut E2E tests deferred to P3; `entity-scope-model.md` unchanged
-(reference refresh is reference-source-scoped, not KB-scoped). **Durable roadmap:** [deferred-features tracker §2.6](../knowledge/deferred-features-cross-version-tracker.md) — DR-07.
+(reference refresh is reference-source-scoped, not KB-scoped). **Durable roadmap:** [deferred-features tracker §2.6](../roadmaps/deferred-features-cross-version-tracker.md) — DR-07.
 
 ---
 
@@ -153,7 +153,7 @@ DAO methods added to `crates/nexus-local-db/src/reference_source.rs`:
 deferred to P3 if the user-facing surface (CLI) requires them. P1 ships only
 `nexus.reference.refresh` as the core pipeline capability.
 
-> **Durable roadmap:** consolidated in the [deferred-features tracker §2.6](../knowledge/deferred-features-cross-version-tracker.md) — DR-07 (refresh caps + CLI + E2E + cross-process OCC).
+> **Durable roadmap:** consolidated in the [deferred-features tracker §2.6](../roadmaps/deferred-features-cross-version-tracker.md) — DR-07 (refresh caps + CLI + E2E + cross-process OCC).
 
 ---
 

@@ -122,7 +122,7 @@ The legacy crate name `nexus-domain` is **not** retained after the split program
 
 - **`nexus-knowledge` (World-scoped):** Narrative KB graph assets (KnowledgeEntries, SourceAnchors, graph insertion/query) coordinated with `nexus-narrative`. Formerly the separate `nexus-kb` crate (merged in V1.139).
 - **`nexus-knowledge` (User-scoped):** Global knowledge/reference material. Tag-driven, may be pulled into Moment context assembly. Not Creator-scoped, does not own World narrative KnowledgeEntries.
-- **CLI `creator kb`:** today is a local work-scope file/index workflow under the active Creator/workspace. It is not equivalent to the World-scoped narrative KB model until later tasks route or rename it. **Durable roadmap:** [deferred-features tracker §2.6](../knowledge/deferred-features-cross-version-tracker.md) — DR-46.
+- **CLI `creator kb`:** today is a local work-scope file/index workflow under the active Creator/workspace. It is not equivalent to the World-scoped narrative KB model until later tasks route or rename it. **Durable roadmap:** [deferred-features tracker §2.6](../roadmaps/deferred-features-cross-version-tracker.md) — DR-46.
 
 ### 3.6 `nexus-moment-context-assembly`
 
