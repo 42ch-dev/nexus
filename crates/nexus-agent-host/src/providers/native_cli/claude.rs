@@ -17,15 +17,19 @@
 //! [`claude_codes::ClaudeCliBuilder::resume`] (AR-5) — Nexus never assembles
 //! `--session-id`/`--resume` argv. Each execute spawns a fresh child that is
 //! killed when the turn's stream ends (terminal `Result` frame, stream
-//! error, read timeout, or cancel/shutdown).
+//! error, EOF, or cancel/shutdown). The stream has no inter-frame timeout
+//! (B-3: the old rail read until EOF); a silent-but-alive child keeps the
+//! turn waiting, and cancel/shutdown stay prompt by signalling the child by
+//! PID when an in-flight frame read holds the per-session lock (B-2).
 
 use std::collections::{HashMap, VecDeque};
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use claude_codes::{AsyncClient, ClaudeCliBuilder, ClaudeInput, Error as ClaudeError};
 use futures_util::StreamExt;
-use tokio::sync::RwLock;
+use tokio::sync::{Mutex, RwLock};
 
 use crate::capability::model::{
     CapabilityDescriptor, HostContentBlock, HostEvent, HostEventStream, ManagedSessionHandle,
@@ -37,8 +41,12 @@ use crate::ids::{HostOperationId, HostSessionId, ProviderId};
 use crate::providers::native_cli::map_claude::{classify_stream_error, map_claude};
 use crate::ProviderAdapter;
 
-/// Internal state for a managed claude native session.
-struct NativeSession {
+/// Crate-client-scoped state for a managed claude session, guarded by the
+/// per-session mutex (B-2): only this session's operations contend on it —
+/// cancel/shutdown of other sessions never wait on this session's frame
+/// reads or setup I/O. The provider-global registry `RwLock` is only for
+/// short lookups.
+struct ClientState {
     /// Host-generated Claude session UUID (AR-5): the first execute passes
     /// it via `ClaudeCliBuilder::session_id`; later executes use
     /// `.resume(uuid)`. The crate emits the `--session-id`/`--resume` argv.
@@ -51,13 +59,37 @@ struct NativeSession {
     client: Option<AsyncClient>,
 }
 
+/// Internal state for a managed claude native session.
+struct NativeSession {
+    /// Per-session lock around the crate client and session metadata (B-2).
+    state: Arc<Mutex<ClientState>>,
+    /// PID of the spawned CLI child, for the cancel/shutdown fallback when
+    /// the per-session lock is held by an in-flight frame read (the crate
+    /// client is unreachable without `&mut`). 0 = no live child recorded.
+    child_pid: AtomicU32,
+    /// Working directory for the CLI child, retained from `LaunchSpec::cwd`
+    /// (N-1).
+    cwd: std::path::PathBuf,
+}
+
 impl std::fmt::Debug for NativeSession {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("NativeSession")
-            .field("claude_session_id", &self.claude_session_id.to_string())
-            .field("first_exec_done", &self.first_exec_done)
-            .field("client_started", &self.client.is_some())
-            .finish()
+        let mut debug = f.debug_struct("NativeSession");
+        debug
+            .field("child_pid", &self.child_pid.load(Ordering::Relaxed))
+            .field("cwd", &self.cwd.display());
+        match self.state.try_lock() {
+            Ok(state) => {
+                debug
+                    .field("claude_session_id", &state.claude_session_id.to_string())
+                    .field("first_exec_done", &state.first_exec_done)
+                    .field("client_started", &state.client.is_some());
+            }
+            Err(_) => {
+                debug.field("client_state", &"<locked>");
+            }
+        }
+        debug.finish()
     }
 }
 
@@ -117,10 +149,12 @@ impl ClaudeCliProvider {
 
     /// Build the event stream for an active turn.
     ///
-    /// Pumps [`AsyncClient::receive`] under the session lock with a
-    /// per-frame timeout (parity with the T2 codex rail) and maps every
-    /// frame through the T1 [`map_claude`] mapper. Emits at most one
-    /// terminal event:
+    /// Pumps [`AsyncClient::receive`] under the per-session lock (B-2; only
+    /// this session's operations contend on it) with NO inter-frame timeout
+    /// (B-3: the old rail read until EOF — a turn that is silent for longer
+    /// than the prompt-setup budget must keep waiting, not hard-fail) and
+    /// maps every frame through the T1 [`map_claude`] mapper. Emits at most
+    /// one terminal event:
     ///
     /// - The CLI `Result` frame maps to `OpFinished(EndTurn)` /
     ///   `OpFailed(provider_error)` and ends the stream.
@@ -130,7 +164,6 @@ impl ClaudeCliProvider {
     /// - A crate stream error (`Error::Deserialization` and kin) → one
     ///   `OpFailed` from `classify_stream_error` (AR-7); the frame is lost,
     ///   so the turn fails once (PD-3 row 2).
-    /// - A per-frame read timeout → one `OpFailed(timeout)`.
     ///
     /// The child is killed (crate client dropped) when the turn's stream
     /// ends.
@@ -141,46 +174,47 @@ impl ClaudeCliProvider {
         session_id: HostSessionId,
     ) -> HostEventStream {
         let sessions = Arc::clone(&self.sessions);
-        let read_timeout = self.timeouts.prompt_duration();
 
         futures_util::stream::unfold(
-            (
-                sessions,
-                op_id,
-                session_id,
-                read_timeout,
-                VecDeque::new(),
-                false,
-            ),
-            |(sessions, op_id, session_id, read_timeout, mut pending, finished)| async move {
+            (sessions, op_id, session_id, VecDeque::new(), false),
+            |(sessions, op_id, session_id, mut pending, finished)| async move {
                 // Drain events mapped from a previous frame first: one
                 // assistant frame can carry multiple content blocks.
                 if let Some(event) = pending.pop_front() {
-                    return Some((
-                        Ok(event),
-                        (sessions, op_id, session_id, read_timeout, pending, finished),
-                    ));
+                    return Some((Ok(event), (sessions, op_id, session_id, pending, finished)));
                 }
                 if finished {
                     return None;
                 }
 
                 // Read frames until one maps to host events or the turn
-                // ends (terminal event / stream error / timeout).
+                // ends (terminal event / stream error / EOF). The read runs
+                // under the session's own lock (B-2): other sessions'
+                // cancel/shutdown never wait on this frame read.
                 loop {
                     let read = async {
-                        let mut guard = sessions.write().await;
-                        match guard.get_mut(&session_id).and_then(|ns| ns.client.as_mut()) {
-                            Some(client) => client.receive().await,
+                        let state = {
+                            let guard = sessions.read().await;
+                            guard.get(&session_id).map(|ns| Arc::clone(&ns.state))
+                        };
+                        let Some(state) = state else {
                             // Session removed by shutdown() / client killed
                             // by cancel(): EOF — the backstop below.
+                            return Err(ClaudeError::ConnectionClosed);
+                        };
+                        let mut guard = state.lock().await;
+                        match guard.client.as_mut() {
+                            Some(client) => client.receive().await,
                             None => Err(ClaudeError::ConnectionClosed),
                         }
                     };
-                    let outcome = tokio::time::timeout(read_timeout, read).await;
+                    // B-3: no inter-frame timeout — the old rail read until
+                    // EOF; a distinct frame-gap budget would reintroduce the
+                    // hard-fail this removal fixes.
+                    let outcome = read.await;
 
                     match outcome {
-                        Ok(Ok(output)) => {
+                        Ok(output) => {
                             let events = map_claude(&[output], &session_id, &op_id);
                             if events.is_empty() {
                                 // Skipped frame (unknown nested variant,
@@ -201,10 +235,10 @@ impl ClaudeCliProvider {
                             pending.extend(iter);
                             return Some((
                                 Ok(first),
-                                (sessions, op_id, session_id, read_timeout, pending, terminal),
+                                (sessions, op_id, session_id, pending, terminal),
                             ));
                         }
-                        Ok(Err(ClaudeError::ConnectionClosed)) => {
+                        Err(ClaudeError::ConnectionClosed) => {
                             // Stream abort (EOF or client killed) before a
                             // terminal frame: exactly one OpFailed (PD-3).
                             drop_client(&sessions, &session_id).await;
@@ -216,10 +250,10 @@ impl ClaudeCliProvider {
                                     error_message: "claude stream closed before the turn completed"
                                         .to_string(),
                                 })),
-                                (sessions, op_id, session_id, read_timeout, pending, true),
+                                (sessions, op_id, session_id, pending, true),
                             ));
                         }
-                        Ok(Err(error)) => {
+                        Err(error) => {
                             // Typed-decode failure / io error: the frame is
                             // lost, so the turn fails once (PD-3, AR-7).
                             drop_client(&sessions, &session_id).await;
@@ -227,24 +261,7 @@ impl ClaudeCliProvider {
                                 .expect("stream error always classifies to a terminal");
                             return Some((
                                 Ok(HostEvent::OpFailed(failed)),
-                                (sessions, op_id, session_id, read_timeout, pending, true),
-                            ));
-                        }
-                        Err(_elapsed) => {
-                            // Per-frame read timeout: kill the child and
-                            // fail the turn once with the AR-7 `timeout`
-                            // token (parity with the T2 codex rail).
-                            drop_client(&sessions, &session_id).await;
-                            return Some((
-                                Ok(HostEvent::OpFailed(OperationFailedEvent {
-                                    session_id: session_id.clone(),
-                                    op_id: op_id.clone(),
-                                    error_category: "timeout".to_string(),
-                                    error_message: format!(
-                                        "claude stream read timed out after {read_timeout:?}"
-                                    ),
-                                })),
-                                (sessions, op_id, session_id, read_timeout, pending, true),
+                                (sessions, op_id, session_id, pending, true),
                             ));
                         }
                     }
@@ -256,14 +273,51 @@ impl ClaudeCliProvider {
 }
 
 /// Kill the session's in-flight CLI child by dropping the crate client (the
-/// crate's `Drop` kills the process).
+/// crate's `Drop` kills the process). Runs under the per-session lock (B-2).
 async fn drop_client(
     sessions: &Arc<RwLock<HashMap<HostSessionId, NativeSession>>>,
     session_id: &HostSessionId,
 ) {
-    let mut guard = sessions.write().await;
-    if let Some(native_session) = guard.get_mut(session_id) {
-        native_session.client = None;
+    let state = {
+        // Short registry write: also clear the recorded PID so a stale
+        // cancel fallback can never signal a recycled pid.
+        let mut guard = sessions.write().await;
+        match guard.get_mut(session_id) {
+            Some(ns) => {
+                ns.child_pid.store(0, Ordering::Relaxed);
+                Arc::clone(&ns.state)
+            }
+            None => return,
+        }
+    };
+    let mut guard = state.lock().await;
+    guard.client = None;
+}
+
+/// Best-effort SIGTERM for the spawned CLI child by PID.
+///
+/// Fallback for cancel/shutdown when the per-session lock is held by an
+/// in-flight frame read (B-2): the crate client is unreachable without
+/// `&mut`, so the child is signalled directly; the read returns EOF and the
+/// stream backstop emits the one `OpFailed(stream_closed)`. The child is
+/// our own direct descendant; the recorded PID is cleared whenever the
+/// client is dropped, so the tiny pid-reuse window only exists while the
+/// child is verifiably alive (the read is blocked on its stdout).
+fn kill_child_by_pid(pid: u32) {
+    if pid == 0 {
+        return;
+    }
+    let status = std::process::Command::new("kill")
+        .arg("-TERM")
+        .arg(pid.to_string())
+        .status();
+    match status {
+        Ok(_) => {
+            tracing::info!(pid, "Signalled claude CLI child (cancel/shutdown fallback)");
+        }
+        Err(error) => {
+            tracing::warn!(pid, error = %error, "Failed to signal claude CLI child");
+        }
     }
 }
 
@@ -341,9 +395,13 @@ impl ProviderAdapter for ClaudeCliProvider {
             sessions.insert(
                 host_session_id.clone(),
                 NativeSession {
-                    claude_session_id,
-                    first_exec_done: false,
-                    client: None,
+                    state: Arc::new(Mutex::new(ClientState {
+                        claude_session_id,
+                        first_exec_done: false,
+                        client: None,
+                    })),
+                    child_pid: AtomicU32::new(0),
+                    cwd: spec.cwd.clone(),
                 },
             );
         }
@@ -396,48 +454,60 @@ impl ProviderAdapter for ClaudeCliProvider {
             ));
         }
 
-        // Session continuity state + stale-client cleanup under one write
-        // lock so a concurrent execute/shutdown cannot race a
-        // half-initialized session.
-        let (claude_session_id, is_resume) = {
-            let mut sessions = self.sessions.write().await;
-            let native_session = sessions.get_mut(&session.session_id).ok_or_else(|| {
+        // Clone the per-session state + working directory under a short
+        // registry read (B-2, N-1); the setup I/O then runs lock-free or
+        // under the per-session lock only, never the provider-global one.
+        let (state, cwd) = {
+            let sessions = self.sessions.read().await;
+            let native_session = sessions.get(&session.session_id).ok_or_else(|| {
                 HostError::internal(format!(
                     "session {} not found in native CLI provider",
                     session.session_id
                 ))
             })?;
+            let state = Arc::clone(&native_session.state);
+            let cwd = native_session.cwd.clone();
+            drop(sessions);
+            (state, cwd)
+        };
+
+        // Session continuity state + stale-client cleanup under the
+        // per-session lock so a concurrent execute/shutdown cannot race a
+        // half-initialized session.
+        let (claude_session_id, is_resume) = {
+            let mut guard = state.lock().await;
 
             // A previous turn's stream that was abandoned before its
             // terminal (the consumer dropped it): kill the stale child.
-            if native_session.client.is_some() {
+            if guard.client.is_some() {
                 tracing::info!(
                     session_id = %session.session_id,
                     provider_id = %self.provider_id,
                     "Dropping stale claude client from an abandoned turn"
                 );
-                native_session.client = None;
+                guard.client = None;
             }
 
-            let id = native_session.claude_session_id;
-            let resume = native_session.first_exec_done;
-            native_session.first_exec_done = true;
-            drop(sessions);
+            let id = guard.claude_session_id;
+            let resume = guard.first_exec_done;
+            guard.first_exec_done = true;
+            drop(guard);
             (id, resume)
         };
 
         // Spawn the CLI child via the crate builder and send the prompt
         // (crate owns all flags — `--print`, stream-json, `--session-id`,
-        // `--resume`). The setup phase runs under the prompt timeout,
-        // mirroring the old spawn + stdin-write enforcement; a failure
-        // returns an error, not a stream.
+        // `--resume`, `--working-directory`). The setup phase runs under the
+        // prompt timeout, mirroring the old spawn + stdin-write enforcement;
+        // a failure returns an error, not a stream.
         let provider_id = self.provider_id.clone();
         let command = self.command.clone();
         let env = self.env.clone();
         let prompt_dur = self.timeouts.prompt_duration();
-        let client = tokio::time::timeout(prompt_dur, async move {
+        let (client, child_pid) = tokio::time::timeout(prompt_dur, async move {
             let builder = ClaudeCliBuilder::new()
                 .command(command.clone())
+                .working_directory(cwd)
                 .session_id(claude_session_id);
             let builder = if is_resume {
                 builder.resume(Some(claude_session_id.to_string()))
@@ -460,6 +530,10 @@ impl ProviderAdapter for ClaudeCliProvider {
                     Some(e.to_string()),
                 )
             })?;
+            // Record the child PID before moving it into the crate client:
+            // cancel/shutdown fall back to signalling it when the per-session
+            // lock is held by an in-flight frame read (B-2).
+            let child_pid = child.id().unwrap_or(0);
             let mut client = AsyncClient::new(child).map_err(|e| {
                 HostError::launch_failed(
                     provider_id.clone(),
@@ -476,7 +550,7 @@ impl ProviderAdapter for ClaudeCliProvider {
                         Some(e.to_string()),
                     )
                 })?;
-            Ok::<_, HostError>(client)
+            Ok::<_, HostError>((client, child_pid))
         })
         .await
         .map_err(|_| {
@@ -493,9 +567,13 @@ impl ProviderAdapter for ClaudeCliProvider {
         })??;
 
         {
+            let mut guard = state.lock().await;
+            guard.client = Some(client);
+        }
+        {
             let mut sessions = self.sessions.write().await;
             if let Some(native_session) = sessions.get_mut(&session.session_id) {
-                native_session.client = Some(client);
+                native_session.child_pid.store(child_pid, Ordering::Relaxed);
             }
         }
 
@@ -517,21 +595,46 @@ impl ProviderAdapter for ClaudeCliProvider {
     ) -> HostResult<()> {
         // Best-effort graceful stop request, then kill: the crate client is
         // dropped (its Drop kills the child) and the stream backstop emits
-        // exactly one `OpFailed(stream_closed)` (AR-1 table).
-        let mut sessions = self.sessions.write().await;
-        if let Some(native_session) = sessions.get_mut(&session.session_id) {
-            if let Some(client) = native_session.client.as_mut() {
-                if let Err(error) = client.interrupt().await {
-                    tracing::warn!(
-                        session_id = %session.session_id,
-                        error = %error,
-                        "Claude interrupt request failed; killing child"
-                    );
+        // exactly one `OpFailed(stream_closed)` (AR-1 table). Runs under the
+        // per-session lock (B-2); if an in-flight frame read holds it, the
+        // child is signalled by PID instead so cancel stays prompt.
+        let state_and_pid = {
+            let guard = self.sessions.read().await;
+            guard
+                .get(&session.session_id)
+                .map(|ns| (Arc::clone(&ns.state), ns.child_pid.load(Ordering::Relaxed)))
+        };
+        let Some((state, pid)) = state_and_pid else {
+            return Ok(());
+        };
+
+        match state.try_lock() {
+            Ok(mut guard) => {
+                if let Some(client) = guard.client.as_mut() {
+                    if let Err(error) = client.interrupt().await {
+                        tracing::warn!(
+                            session_id = %session.session_id,
+                            error = %error,
+                            "Claude interrupt request failed; killing child"
+                        );
+                    }
                 }
-                native_session.client = None;
+                guard.client = None;
+                drop(guard);
+                // The client is dropped (child killed); clear the recorded
+                // PID so a later fallback can never signal a recycled pid.
+                if let Some(ns) = self.sessions.write().await.get_mut(&session.session_id) {
+                    ns.child_pid.store(0, Ordering::Relaxed);
+                }
+            }
+            Err(_) => {
+                // An in-flight frame read holds the per-session lock: kill
+                // the child by PID; the read returns EOF and the stream
+                // backstop emits the one terminal.
+                kill_child_by_pid(pid);
             }
         }
-        drop(sessions);
+
         tracing::info!(
             session_id = %session.session_id,
             op_id = %op_id,
@@ -542,11 +645,23 @@ impl ProviderAdapter for ClaudeCliProvider {
     }
 
     async fn shutdown(&self, session: ManagedSessionHandle) -> HostResult<()> {
-        // Removing the session drops the crate client, which kills the CLI
-        // child (crate-owned teardown — no raw Child map, no PID killer).
-        let mut sessions = self.sessions.write().await;
-        sessions.remove(&session.session_id);
-        drop(sessions);
+        // Removing the session drops the crate client (killing the CLI
+        // child) once no in-flight frame read holds it; if one does, the
+        // child is signalled by PID so shutdown stays prompt (B-2).
+        let removed = {
+            let mut sessions = self.sessions.write().await;
+            sessions.remove(&session.session_id)
+        };
+        if let Some(native_session) = removed {
+            match native_session.state.try_lock() {
+                Ok(mut guard) => {
+                    guard.client = None;
+                }
+                Err(_) => {
+                    kill_child_by_pid(native_session.child_pid.load(Ordering::Relaxed));
+                }
+            }
+        }
 
         tracing::info!(
             session_id = %session.session_id,
@@ -712,16 +827,21 @@ mod tests {
         assert!(native_session.is_some(), "session should be registered");
 
         let ns = native_session.unwrap();
-        assert!(ns.client.is_none(), "client should start lazily on execute");
+        let state = ns.state.lock().await;
         assert!(
-            !ns.first_exec_done,
+            state.client.is_none(),
+            "client should start lazily on execute"
+        );
+        assert!(
+            !state.first_exec_done,
             "first_exec_done should be false initially"
         );
         assert_ne!(
-            ns.claude_session_id,
+            state.claude_session_id,
             uuid::Uuid::nil(),
             "claude_session_id should be a generated UUID"
         );
+        assert_eq!(ns.child_pid.load(Ordering::Relaxed), 0);
     }
 
     /// A turn against the mock CLI maps through `map_claude`: one
@@ -748,13 +868,19 @@ mod tests {
 
         let sessions = provider.sessions.read().await;
         let ns = sessions.get(&handle.session_id).expect("session exists");
+        let state = ns.state.lock().await;
         assert!(
-            ns.client.is_none(),
+            state.client.is_none(),
             "client must be dropped (child killed) when the turn ends"
         );
         assert!(
-            ns.first_exec_done,
+            state.first_exec_done,
             "first_exec_done must be set after the first execute"
+        );
+        assert_eq!(
+            ns.child_pid.load(Ordering::Relaxed),
+            0,
+            "child pid must be cleared when the client is dropped"
         );
     }
 
@@ -773,10 +899,9 @@ mod tests {
         let handle = provider.launch(launch_spec()).await.expect("launch");
         let session_uuid = {
             let sessions = provider.sessions.read().await;
-            sessions
-                .get(&handle.session_id)
-                .expect("session exists")
-                .claude_session_id
+            let ns = sessions.get(&handle.session_id).expect("session exists");
+            let state = ns.state.lock().await;
+            state.claude_session_id
         };
 
         let stream1 = provider
@@ -810,37 +935,45 @@ mod tests {
         assert_eq!(terminal_count(&events2), 1);
 
         let log = std::fs::read_to_string(&req_log).expect("read argv log");
-        let spawns: Vec<Vec<String>> = log
+        let spawns: Vec<serde_json::Value> = log
             .lines()
             .map(|line| serde_json::from_str(line).expect("log line is JSON"))
             .collect();
         assert_eq!(spawns.len(), 2, "one child spawn per execute");
 
+        let argv0: Vec<String> = spawns[0]["argv"]
+            .as_array()
+            .expect("argv array")
+            .iter()
+            .map(|arg| arg.as_str().expect("argv string").to_string())
+            .collect();
+        let argv1: Vec<String> = spawns[1]["argv"]
+            .as_array()
+            .expect("argv array")
+            .iter()
+            .map(|arg| arg.as_str().expect("argv string").to_string())
+            .collect();
+
         let uuid_str = session_uuid.to_string();
         assert!(
-            spawns[0].iter().any(|arg| arg == "--session-id"),
-            "first spawn must carry --session-id: {:?}",
-            spawns[0]
+            argv0.iter().any(|arg| arg == "--session-id"),
+            "first spawn must carry --session-id: {argv0:?}"
         );
         assert!(
-            spawns[0].iter().any(|arg| arg == &uuid_str),
-            "first spawn must carry the host uuid: {:?}",
-            spawns[0]
+            argv0.iter().any(|arg| arg == &uuid_str),
+            "first spawn must carry the host uuid: {argv0:?}"
         );
         assert!(
-            spawns[1].iter().any(|arg| arg == "--resume"),
-            "second spawn must carry --resume: {:?}",
-            spawns[1]
+            argv1.iter().any(|arg| arg == "--resume"),
+            "second spawn must carry --resume: {argv1:?}"
         );
         assert!(
-            spawns[1].iter().any(|arg| arg == &uuid_str),
-            "second spawn must resume the same host uuid: {:?}",
-            spawns[1]
+            argv1.iter().any(|arg| arg == &uuid_str),
+            "second spawn must resume the same host uuid: {argv1:?}"
         );
         assert!(
-            !spawns[1].iter().any(|arg| arg == "--session-id"),
-            "resume spawn must not pass --session-id: {:?}",
-            spawns[1]
+            !argv1.iter().any(|arg| arg == "--session-id"),
+            "resume spawn must not pass --session-id: {argv1:?}"
         );
     }
 
@@ -878,7 +1011,10 @@ mod tests {
 
         let sessions = provider.sessions.read().await;
         let ns = sessions.get(&handle.session_id).expect("session exists");
-        assert!(ns.client.is_none(), "client must be dropped after cancel");
+        assert!(
+            ns.state.lock().await.client.is_none(),
+            "client must be dropped after cancel"
+        );
     }
 
     /// `shutdown()` tears down the crate client (killing the CLI child) and
@@ -941,8 +1077,208 @@ mod tests {
         let sessions = provider.sessions.read().await;
         let ns = sessions.get(&handle.session_id).expect("session exists");
         assert!(
-            ns.client.is_none(),
+            ns.state.lock().await.client.is_none(),
             "client must be dropped after the failed turn"
+        );
+    }
+
+    /// B-3: a silent-but-alive child must not hard-fail with
+    /// `OpFailed(timeout)` after the prompt-setup budget. The mock holds
+    /// the turn open (`BLOCK_TURN`); the stream must stay quiet well past a
+    /// tiny prompt budget instead of emitting a timeout terminal.
+    #[tokio::test]
+    async fn silent_turn_does_not_time_out_on_prompt_budget() {
+        let timeouts = TimeoutConfig {
+            prompt_ms: 1000,
+            ..TimeoutConfig::default()
+        };
+        let provider = ClaudeCliProvider::new(
+            ProviderId::new("test-claude-silent"),
+            "Test".to_string(),
+            MOCK_CLAUDE_CLI.to_string(),
+            HashMap::from([("BLOCK_TURN".to_string(), "1".to_string())]),
+            timeouts,
+        );
+
+        let (handle, stream) = launch_and_execute(&provider, "hi").await;
+        let mut stream = stream;
+
+        // Pump the first frame so the turn is visibly streaming.
+        let first = stream.next().await.expect("first event").expect("ok");
+        assert!(matches!(
+            first,
+            HostEvent::MessageDelta(d) if d.text == "hello from mock claude"
+        ));
+
+        // The next frame never arrives (the child is silent). With the old
+        // prompt_ms-based per-frame timeout this emitted OpFailed(timeout)
+        // after ~1s; the fixed rail keeps waiting (old-rail EOF semantics).
+        let next =
+            tokio::time::timeout(std::time::Duration::from_millis(2500), stream.next()).await;
+        assert!(
+            next.is_err(),
+            "silent turn must keep waiting, not emit a timeout terminal"
+        );
+
+        // Tear down so no child process leaks.
+        provider.shutdown(handle).await.expect("shutdown");
+    }
+
+    /// B-2: cancel must stay prompt even when the session's OWN frame read
+    /// is in flight (silent child). The per-session lock is held by the
+    /// read, so the fallback signals the child by PID; the read returns
+    /// EOF and the stream backstop emits exactly one `OpFailed(stream_closed)`.
+    #[tokio::test]
+    async fn cancel_is_prompt_when_own_frame_read_is_in_flight() {
+        let provider = mock_provider(HashMap::from([("BLOCK_TURN".to_string(), "1".to_string())]));
+
+        let (handle, stream) = launch_and_execute(&provider, "hi").await;
+        let mut stream = stream;
+
+        // Pump the first frame so the turn is visibly streaming.
+        let first = stream.next().await.expect("first event").expect("ok");
+        assert!(matches!(
+            first,
+            HostEvent::MessageDelta(d) if d.text == "hello from mock claude"
+        ));
+
+        // Poll in a background task so the next frame read is in flight.
+        let pump = tokio::spawn(async move { stream.collect::<Vec<_>>().await });
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+
+        let cancel = tokio::time::timeout(
+            std::time::Duration::from_secs(2),
+            provider.cancel(&handle, HostOperationId::new()),
+        )
+        .await;
+        assert!(
+            cancel.is_ok(),
+            "cancel must not wait on the session's own in-flight frame read"
+        );
+
+        // The stream terminates with the backstop once the child is dead.
+        let events = tokio::time::timeout(std::time::Duration::from_secs(2), pump)
+            .await
+            .expect("stream must terminate promptly after cancel")
+            .expect("pump task");
+        let results: Vec<HostEvent> = events
+            .into_iter()
+            .map(|r| r.expect("stream item should be Ok"))
+            .collect();
+        assert!(
+            results.last().is_some_and(|e| matches!(
+                e,
+                HostEvent::OpFailed(f) if f.error_category == "stream_closed"
+            )),
+            "cancel must end with one OpFailed(stream_closed): {results:?}"
+        );
+        assert_eq!(terminal_count(&results), 1);
+    }
+
+    /// B-2: with session A's frame read in flight (`BLOCK_TURN`), cancel and
+    /// shutdown of session B must complete promptly — the per-session lock
+    /// replaces the provider-global write lock.
+    #[tokio::test]
+    async fn session_b_cancel_and_shutdown_do_not_wait_on_session_a_read() {
+        let provider = mock_provider(HashMap::from([("BLOCK_TURN".to_string(), "1".to_string())]));
+
+        let handle_a = provider.launch(launch_spec()).await.expect("launch a");
+        let stream_a = provider
+            .execute(
+                &handle_a,
+                HostOperation::Prompt {
+                    op_id: HostOperationId::new(),
+                    content: vec![HostContentBlock::Text {
+                        text: "blocked".to_string(),
+                    }],
+                },
+            )
+            .await
+            .expect("execute a");
+
+        // Keep session A's stream polling so its frame read is in flight.
+        let pump = tokio::spawn(async move {
+            let _ = stream_a.collect::<Vec<_>>().await;
+        });
+        // Let the read settle into the blocked frame read.
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+
+        let handle_b = provider.launch(launch_spec()).await.expect("launch b");
+
+        let cancel = tokio::time::timeout(
+            std::time::Duration::from_secs(2),
+            provider.cancel(&handle_b, HostOperationId::new()),
+        )
+        .await;
+        assert!(
+            cancel.is_ok(),
+            "cancel of session B must not wait on session A's frame read"
+        );
+
+        let shutdown = tokio::time::timeout(
+            std::time::Duration::from_secs(2),
+            provider.shutdown(handle_b),
+        )
+        .await;
+        assert!(
+            shutdown.is_ok(),
+            "shutdown of session B must not wait on session A's frame read"
+        );
+
+        // Clean up session A: abort the pump (releasing the blocked read),
+        // then tear the session down so no child process leaks.
+        pump.abort();
+        let _ = pump.await;
+        provider.shutdown(handle_a).await.expect("shutdown a");
+    }
+
+    /// N-1: `LaunchSpec.cwd` is applied to the CLI child via the crate's
+    /// `working_directory` (observed as the child's working directory).
+    #[tokio::test]
+    async fn launch_cwd_is_applied_to_cli_child() {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let cwd = temp_dir.path().to_path_buf();
+        let req_log = temp_dir.path().join("argv.jsonl");
+        let req_log_path = req_log.to_string_lossy().into_owned();
+        let provider = mock_provider(HashMap::from([("REQ_LOG".to_string(), req_log_path)]));
+
+        let handle = provider
+            .launch(LaunchSpec {
+                cwd: cwd.clone(),
+                model: None,
+                mode: None,
+                mcp_servers: vec![],
+            })
+            .await
+            .expect("launch");
+
+        let stream = provider
+            .execute(
+                &handle,
+                HostOperation::Prompt {
+                    op_id: HostOperationId::new(),
+                    content: vec![HostContentBlock::Text {
+                        text: "hi".to_string(),
+                    }],
+                },
+            )
+            .await
+            .expect("execute");
+        let events = collect_events(stream).await;
+        assert_eq!(terminal_count(&events), 1);
+
+        let log = std::fs::read_to_string(&req_log).expect("read argv log");
+        let spawn: serde_json::Value = log
+            .lines()
+            .next()
+            .map(|line| serde_json::from_str(line).expect("log line is JSON"))
+            .expect("one spawn logged");
+        let child_cwd = std::fs::canonicalize(spawn["cwd"].as_str().expect("cwd string"))
+            .expect("child cwd exists");
+        let launch_cwd = std::fs::canonicalize(&cwd).expect("launch cwd exists");
+        assert_eq!(
+            child_cwd, launch_cwd,
+            "LaunchSpec.cwd must reach the CLI child (symlinks resolved)"
         );
     }
 
@@ -977,7 +1313,7 @@ mod tests {
         let sessions = provider.sessions.read().await;
         let ns = sessions.get(&handle.session_id).expect("session exists");
         assert!(
-            ns.client.is_none(),
+            ns.state.lock().await.client.is_none(),
             "no client should be retained after a failed start"
         );
     }

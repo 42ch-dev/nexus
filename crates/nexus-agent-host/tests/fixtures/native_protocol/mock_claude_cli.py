@@ -33,7 +33,9 @@ def log_argv():
     if not path:
         return
     with open(path, "a", encoding="utf-8") as f:
-        f.write(json.dumps(sys.argv[1:]) + "\n")
+        # cwd is included so tests can assert LaunchSpec.cwd is applied via
+        # the crate's `--working-directory` (N-1).
+        f.write(json.dumps({"argv": sys.argv[1:], "cwd": os.getcwd()}) + "\n")
 
 
 def assistant_frame():

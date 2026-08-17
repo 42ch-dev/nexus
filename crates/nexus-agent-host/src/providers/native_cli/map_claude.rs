@@ -173,8 +173,9 @@ pub fn classify_stream_error(
         session_id: session_id.clone(),
         op_id: op_id.clone(),
         error_category: category.to_string(),
-        // AR-7: the crate error's Display, verbatim.
-        error_message: error.to_string(),
+        // AR-7: the crate error's Display — capped so the raw wire line the
+        // Deserialization Display embeds is not echoed unboundedly (N-2).
+        error_message: crate::providers::native_cli::truncate_error_message(&error.to_string()),
     })
 }
 
@@ -366,7 +367,16 @@ mod tests {
         let failed = classify_stream_error(&err, &session_id, &op_id)
             .expect("decode failure must classify to a terminal event");
         assert_eq!(failed.error_category, "decode_error");
-        assert_eq!(failed.error_message, err.to_string());
+        // N-2: error_message is the crate Display, capped at 512 bytes.
+        let full = err.to_string();
+        let prefix = failed
+            .error_message
+            .strip_suffix("... (truncated)")
+            .unwrap_or(&failed.error_message);
+        assert!(
+            full.starts_with(prefix),
+            "error_message must be the (truncated) Display prefix: {failed:?}"
+        );
         assert_eq!(terminal_count(&[HostEvent::OpFailed(failed)]), 1);
     }
 
@@ -397,7 +407,16 @@ mod tests {
             let failed = classify_stream_error(&error, &session_id, &op_id)
                 .unwrap_or_else(|| panic!("{expected} must classify: {error}"));
             assert_eq!(failed.error_category, expected, "for error {error}");
-            assert_eq!(failed.error_message, error.to_string());
+            // N-2: error_message is the crate Display, capped at 512 bytes.
+            let full = error.to_string();
+            let prefix = failed
+                .error_message
+                .strip_suffix("... (truncated)")
+                .unwrap_or(&failed.error_message);
+            assert!(
+                full.starts_with(prefix),
+                "error_message must be the (truncated) Display prefix for {error}: {failed:?}"
+            );
         }
     }
 
@@ -410,5 +429,30 @@ mod tests {
             panic!("fixture must parse as a Result frame");
         };
         assert!(matches!(result.subtype, ResultSubtype::Unknown(_)));
+    }
+
+    /// N-2: a multi-MB raw wire line embedded in the Deserialization Display
+    /// must be capped in `error_message`, not echoed unboundedly.
+    #[test]
+    fn decode_error_message_truncates_raw_wire() {
+        let (session_id, op_id) = ids();
+
+        let parse_err = claude_codes::ParseError {
+            raw_line: "y".repeat(4096),
+            raw_json: None,
+            error_message: "expected value".to_string(),
+        };
+        let err = ClaudeError::Deserialization(parse_err);
+
+        let failed = classify_stream_error(&err, &session_id, &op_id)
+            .expect("decode failure must classify to a terminal event");
+        assert_eq!(failed.error_category, "decode_error");
+        assert!(failed.error_message.ends_with("... (truncated)"));
+        assert!(
+            failed.error_message.len() < 1024,
+            "error_message must be bounded: {} bytes",
+            failed.error_message.len()
+        );
+        assert_eq!(terminal_count(&[HostEvent::OpFailed(failed)]), 1);
     }
 }
