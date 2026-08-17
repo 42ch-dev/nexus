@@ -104,9 +104,13 @@ pub struct DshNativeProvider {
     provider_id: ProviderId,
     /// Display name.
     display_name: String,
-    /// Runtime binary name (e.g., `dsh-jsonrpc-agent`), handed to the SDK
-    /// as `Config::runtime_bin`.
-    command: String,
+    /// Runtime binary handed to the SDK as `Config::runtime_bin`. `Some`
+    /// with a resolved absolute path when discovery found the command on
+    /// PATH; `Some` with a bare command name spawns it via PATH; `None`
+    /// leaves the SDK's own resolution to `DSH_RUNTIME_BIN` (its
+    /// `resolve_runtime` order 3: `launch_args_override` → `runtime_bin` →
+    /// `DSH_RUNTIME_BIN` → `RuntimeNotFound`).
+    runtime_bin: Option<String>,
     /// Environment variables to inject into the runtime process.
     env: HashMap<String, String>,
     /// Active sessions: host session ID → native session state.
@@ -121,14 +125,14 @@ impl DshNativeProvider {
     pub fn new(
         provider_id: ProviderId,
         display_name: String,
-        command: String,
+        runtime_bin: Option<String>,
         env: HashMap<String, String>,
         timeouts: TimeoutConfig,
     ) -> Self {
         Self {
             provider_id,
             display_name,
-            command,
+            runtime_bin,
             env,
             sessions: Arc::new(RwLock::new(HashMap::new())),
             timeouts,
@@ -136,12 +140,32 @@ impl DshNativeProvider {
     }
 
     /// Create with default configuration for the `dsh-jsonrpc-agent` runtime.
+    ///
+    /// The bare command name is handed to the SDK as `Config::runtime_bin`,
+    /// which spawns it via PATH resolution.
     #[must_use]
     pub fn default_config() -> Self {
         Self::new(
             ProviderId::new("dsh-native"),
             "DeepSeek Harness (native)".to_string(),
-            "dsh-jsonrpc-agent".to_string(),
+            Some("dsh-jsonrpc-agent".to_string()),
+            HashMap::new(),
+            TimeoutConfig::default(),
+        )
+    }
+
+    /// Register-time constructor used by daemon boot (T2): `runtime_bin` is
+    /// the boot-resolved absolute path when discovery found
+    /// `dsh-jsonrpc-agent` on PATH, or `None` when discovery was via the
+    /// `DSH_RUNTIME_BIN` env var only — the SDK then resolves the env var
+    /// itself (resolution order 3 of its `resolve_runtime` chain), which
+    /// keeps the two discovery routes consistent at spawn time.
+    #[must_use]
+    pub fn with_runtime_bin(runtime_bin: Option<String>) -> Self {
+        Self::new(
+            ProviderId::new("dsh-native"),
+            "DeepSeek Harness (native)".to_string(),
+            runtime_bin,
             HashMap::new(),
             TimeoutConfig::default(),
         )
@@ -176,7 +200,7 @@ impl DshNativeProvider {
     ) -> HostEventStream {
         let sessions = Arc::clone(&self.sessions);
         let provider_id = self.provider_id.clone();
-        let command = self.command.clone();
+        let runtime_bin = self.runtime_bin.clone();
         let env = self.env.clone();
         let run_timeout = self.timeouts.prompt_duration();
         let prompt_ms = self.timeouts.prompt_ms;
@@ -185,7 +209,7 @@ impl DshNativeProvider {
             (
                 sessions,
                 provider_id,
-                command,
+                runtime_bin,
                 env,
                 op_id,
                 session_id,
@@ -199,7 +223,7 @@ impl DshNativeProvider {
             |(
                 sessions,
                 provider_id,
-                command,
+                runtime_bin,
                 env,
                 op_id,
                 session_id,
@@ -218,7 +242,7 @@ impl DshNativeProvider {
                         (
                             sessions,
                             provider_id,
-                            command,
+                            runtime_bin,
                             env,
                             op_id,
                             session_id,
@@ -251,7 +275,7 @@ impl DshNativeProvider {
                     let provider_id = provider_id.clone();
                     let prompt_text = prompt_text.clone();
                     let cwd = cwd.clone();
-                    let command = command.clone();
+                    let runtime_bin = runtime_bin.clone();
                     let env = env.clone();
                     async move {
                         let state = {
@@ -272,15 +296,14 @@ impl DshNativeProvider {
                         }
                         if guard.harness.is_none() {
                             // AR-2: lazy start, one harness per provider
-                            // session.
-                            // simplify: T1 hands the command NAME to the
-                            // SDK; the T2 runtime handoff replaces it with
-                            // the boot-resolved PATH path (or leaves it
-                            // unset so the SDK resolves DSH_RUNTIME_BIN
-                            // itself).
+                            // session. The runtime handoff (T2): a
+                            // PATH-discovered provider carries the
+                            // boot-resolved absolute path here; an
+                            // env-only provider carries `None`, so the SDK
+                            // resolves DSH_RUNTIME_BIN itself (order 3).
                             let config = Config {
                                 cwd: Some(cwd),
-                                runtime_bin: Some(command),
+                                runtime_bin: runtime_bin.clone(),
                                 env: Some(env),
                                 ..Config::default()
                             };
@@ -334,7 +357,7 @@ impl DshNativeProvider {
                     (
                         sessions,
                         provider_id,
-                        command,
+                        runtime_bin,
                         env,
                         op_id,
                         session_id,
@@ -379,14 +402,23 @@ impl ProviderAdapter for DshNativeProvider {
         // `DSH_RUNTIME_BIN` env var (non-empty; the SDK treats empty as
         // absent). Cross-platform command lookup via the `which` crate, in
         // spawn_blocking under the launch timeout (same shape as
-        // claude/codex).
-        let command = self.command.clone();
+        // claude/codex). The lookup runs against the configured runtime
+        // binary — a resolved absolute path from PATH discovery, or a bare
+        // command name — and is skipped entirely when the provider was
+        // registered via `DSH_RUNTIME_BIN` only (`runtime_bin` is `None`;
+        // the env check below decides availability).
+        let runtime_bin = self.runtime_bin.clone();
+        let runtime_bin_for_msg = runtime_bin.clone();
         let provider_id = self.provider_id.clone();
         let launch_dur = self.timeouts.launch_duration();
 
         let which_result = tokio::time::timeout(
             launch_dur,
-            tokio::task::spawn_blocking(move || which::which(&command)),
+            tokio::task::spawn_blocking(move || {
+                runtime_bin
+                    .as_ref()
+                    .map_or(Ok(None), |bin| which::which(bin).map(Some))
+            }),
         )
         .await
         .map_err(|_| {
@@ -403,7 +435,7 @@ impl ProviderAdapter for DshNativeProvider {
         let env_route = std::env::var_os("DSH_RUNTIME_BIN").is_some_and(|value| !value.is_empty());
 
         let health = match (which_result, env_route) {
-            (Ok(Ok(resolved_path)), _) => ProviderHealth {
+            (Ok(Ok(Some(resolved_path))), _) => ProviderHealth {
                 provider_id,
                 available: true,
                 latency_ms: None,
@@ -415,15 +447,19 @@ impl ProviderAdapter for DshNativeProvider {
                 latency_ms: None,
                 message: Some("DSH_RUNTIME_BIN is set".to_string()),
             },
-            _ => ProviderHealth {
-                provider_id,
-                available: false,
-                latency_ms: None,
-                message: Some(format!(
-                    "command '{}' not found on PATH and DSH_RUNTIME_BIN unset",
-                    self.command
-                )),
-            },
+            _ => {
+                let bin = runtime_bin_for_msg
+                    .as_deref()
+                    .unwrap_or("(none configured)");
+                ProviderHealth {
+                    provider_id,
+                    available: false,
+                    latency_ms: None,
+                    message: Some(format!(
+                        "runtime binary '{bin}' not found on PATH and DSH_RUNTIME_BIN unset"
+                    )),
+                }
+            }
         };
         Ok(health)
     }
@@ -630,9 +666,13 @@ mod tests {
     }
 
     #[test]
-    fn default_config_command() {
+    fn default_config_runtime_bin() {
         let provider = DshNativeProvider::default_config();
-        assert_eq!(provider.command, "dsh-jsonrpc-agent");
+        assert_eq!(
+            provider.runtime_bin.as_deref(),
+            Some("dsh-jsonrpc-agent"),
+            "default config spawns the runtime by command name via PATH"
+        );
         assert!(provider.env.is_empty());
     }
 
@@ -641,7 +681,7 @@ mod tests {
         let provider = DshNativeProvider::new(
             ProviderId::new("nonexistent-dsh-xyz"),
             "Fake".to_string(),
-            "nonexistent_dsh_runtime_xyz_12345".to_string(),
+            Some("nonexistent_dsh_runtime_xyz_12345".to_string()),
             HashMap::new(),
             TimeoutConfig::default(),
         );
@@ -675,7 +715,7 @@ mod tests {
             let provider = DshNativeProvider::new(
                 ProviderId::new("env-dsh-xyz"),
                 "Env".to_string(),
-                "nonexistent_dsh_runtime_xyz_12345".to_string(),
+                Some("nonexistent_dsh_runtime_xyz_12345".to_string()),
                 HashMap::new(),
                 TimeoutConfig::default(),
             );
