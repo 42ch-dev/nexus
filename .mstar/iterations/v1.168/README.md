@@ -17,4 +17,5 @@ Native host series: authors keep `claude-native` / `codex-native` without Nexus-
 
 | Source | Promoted to | Date | Notes |
 |--------|-------------|------|-------|
-| | | | |
+| [specs/v1.168-native-host-locks.md](specs/v1.168-native-host-locks.md) | `.mstar/knowledge/architecture-patterns/native-cli-provider-adapter-pattern.md` (updated) | 2026-08-17 | Essence promoted: decode-drift contract (PD-3/AR-1/AR-7), per-session client locks, no frame-gap timeouts, turn-id filtering, `dsh_limited` honest descriptor, mock-stub testing, discovery routes. Locks kept as iteration snapshot. |
+| `.mstar/sdd/*/fix-wave-1-report.md` (P2) | `.mstar/knowledge/workflow-patterns/process-env-lock-fixture-spawn-serialization.md` (new) | 2026-08-17 | PROCESS_ENV_LOCK flake root-cause. |

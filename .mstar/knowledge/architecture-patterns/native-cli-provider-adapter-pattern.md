@@ -1,26 +1,65 @@
 ---
 module: nexus-agent-host
 date: 2026-07-14
+last_updated: 2026-08-17
 problem_type: architecture_pattern
 category: architecture-patterns
 severity: medium
 plan_id: 2026-07-13-v1.116-agent-detection-codex-native
-tags: [native-cli-provider, agent-host, codex-native, claude-native, acp-registry, bare-command, scan-endpoint]
-applies_when: adding a new native CLI provider to the agent-host, or debugging agent detection false negatives
+tags: [native-cli-provider, agent-host, codex-native, claude-native, dsh-native, acp-registry, bare-command, scan-endpoint, protocol-client, decode-drift]
+applies_when: adding a new native CLI provider to the agent-host, swapping a provider's process/parse internals to an external protocol client, or debugging agent detection false negatives
 ---
 
 # Native CLI Provider Adapter Pattern + ACP Registry Bare-Command Extraction
 
-## Context
+## V1.168 update — external protocol clients replace self-written wire parsers
+
+Since V1.168, native providers do **not** own vendor wire formats. The provider is a thin `ProviderAdapter` shell; an external crates.io protocol client owns spawn + protocol:
+
+| Provider | Client crate (pin in workspace `Cargo.toml` only, never in `docs/`) | Wire |
+|----------|---------------------------------------------------------------|------|
+| `claude-native` | `claude-codes` (`default-features = false`, `async-client`) | Claude Code stream-json |
+| `codex-native` | `codex-codes` (`default-features = false`, `async-client`) | `codex app-server` JSON-RPC |
+| `dsh-native` | `deepseek-harness-sdk` | DSH runtime stdio JSON-RPC 2.0 |
+
+Hard-won rules from the V1.168 replacement (QC findings B-1..B-3, B-1..B-4):
+
+1. **Never hold the session-registry `RwLock` across crate I/O.** `receive()`/`next_message()`/setup RPCs run behind a **per-session `Mutex`** on the crate client; the map lock is for short metadata lookups only. A global write lock across frame reads serializes every session on the provider and stalls `cancel()`/`shutdown()` for up to a full frame budget.
+2. **Do not reuse the prompt-setup timeout as an inter-frame read timeout.** Long-silent turns (tool execution) emit no frames for minutes; a 180 s frame-gap timeout hard-fails them. Streaming reads wait until stream end; keep a separate budget only if a lock explicitly says so.
+3. **Long-lived app-server clients must filter turn-scoped notifications by the active turn id** and interrupt+drain on decode-error/timeout/cancel — otherwise a stale `turn/completed` ends the *next* turn empty-success.
+4. **Decode-drift contract (fixed):** unknown nested variant / unknown method → per-item skip + debug; typed-decode failure / stream abort → exactly one terminal `OpFailed` for the turn (`decode_error` / `stream_closed` / `provider_error` / `timeout` / `io_error` tokens; `error_message` truncated at 512 bytes — crate `Display` embeds raw wire frames).
+5. **No-protocol-RPC runtimes (e.g. dsh, no cancel)**: on execute timeout, rotate the stored session id so a retry starts a fresh session instead of splicing into a zombie turn.
+6. **Honest capability descriptors:** declare only what the client surface supports. dsh uses `CapabilityDescriptor::dsh_limited()` (`streaming: false`, `cancellation: false`, `session_restore: true`, `text_prompt: true`) — do not borrow `native_cli_limited()` when the surface differs.
+7. **Test protocol adapters with spawnable mock protocol stubs** (`mock_claude_cli.py`, `mock_codex_app_server.py`, `mock_dsh_agent.py` under `crates/nexus-agent-host/tests/fixtures/native_protocol/`) — real protocol shapes without the vendor binary. Do not fake protocols with `echo` scripts.
+8. **Discovery can have more than one route.** dsh-native registers from PATH (`dsh-jsonrpc-agent`) **or** `DSH_RUNTIME_BIN`; the scan/catalog surface must show the env-route row too or boot and Setup disagree.
+9. No `NATIVE_PREFERRED_FAMILIES` row unless an ACP twin exists.
+
+The V1.116 guidance below still applies for ACP bare-command extraction and scan dedup; the session/lifecycle sections there describe the retired self-written adapters and are kept as history.
+
+## Historical (pre-V1.168): self-written adapters
+
+### Per-invocation vs persistent process (retired)
+
+- The old `claude-native` had a persistent empty-line-delimited mode — **deleted in V1.168**; the old `codex-native` used `codex exec --json` per-invocation with a hand-rolled JSONL parser — **replaced by the app-server client**.
+- Hand-rolled `--session-id`/`--resume` argv assembly is gone; session continuity is crate-owned (`.session_id` / `.resume` / `thread_resume`).
+
+### Session ID ownership (historical)
+
+- ACP providers: host generates session ID.
+- claude-native: host generates session ID (then passes it to the crate).
+- codex-native (old): codex generated the session ID captured from JSONL; **now** the app-server thread id.
+- dsh-native: host generates and reuses the session id via `start_session(Some(id))`.
+
+## Context (V1.116)
 
 Nexus supports two kinds of agent providers:
 1. **ACP providers** — agents registered in the ACP registry, communicating via JSON-RPC
-2. **Native CLI providers** — agents invoked directly as CLI processes (claude-native, codex-native)
+2. **Native CLI providers** — agents invoked directly as CLI processes (claude-native, codex-native; dsh-native since V1.168)
 
-Native CLI providers exist for mainstream agent CLIs (claude, codex) whose authors
+Native CLI providers exist for mainstream agent CLIs whose authors
 want to use them directly, not through a community-provided ACP adapter. The
-`claude-native` provider (Wave 1) was the first; `codex-native` (V1.116) is the
-second, establishing the pattern for future additions.
+`claude-native` provider (Wave 1) was the first; `codex-native` (V1.116) was the
+second; `dsh-native` (V1.168) is the third and first driven by a crates.io SDK client.
 
 ## Guidance
 

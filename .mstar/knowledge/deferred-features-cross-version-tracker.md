@@ -4,8 +4,9 @@
 
 **Purpose**: Single source of truth for **open** and **backlog** features deferred from delivery compasses. Closed/shipped history lives in shipped archive.
 **Scope**: `nexus` OSS repository only.
-**Created**: 2026-04-21 · **Last updated**: 2026-08-16
+**Created**: 2026-04-21 · **Last updated**: 2026-08-17
 
+- **2026-08-17**: V1.168 shipped — native host provider series: Claude/Codex native internals fully replaced by `claude-codes`/`codex-codes` protocol clients (decode-drift contract: unknown-variant skip vs typed-decode OpFailed; per-session locks; turn-id filtering; no frame-gap timeouts); new `dsh-native` provider via crates.io `deepseek-harness-sdk` (PATH/`DSH_RUNTIME_BIN` discovery, `dsh_limited` honest descriptor). ACP rail unchanged. No new DF/DR rows; DF-81/DF-82 remain the next-iteration candidates.
 - **2026-08-16**: V1.167 shipped — dogfood sweep of the V1.164–166 window (findings register + DF-A-02 creator register --local fix + dependabot #41/#42/#43 disposition); DF-81/DF-82/DF-83 registered from dogfood gate-notes + QC dispositions; DR-70 gate answered **N** (no four-family expressiveness gap observed).
 - **2026-08-12**: V1.162 shipped — DF-V1122-FORK-UI (create + read-only lineage half) moved §2.3 → [shipped archive](shipped-features-tracker.md) (fork-merge remains BL-01 backlog). Quick-status + §5 index updated.
 - **2026-08-12**: §2.1 PD-01 row reconciled (V1.162 P1 T3) — "platform-only" clarified to mean the **community/social fork** only (cross-creator, publish; `nexus-platform`); the **local authoring fork** (`nexus.fork.create` + V1.162 daemon `POST /v1/daemon/worlds/:world_id/forks` + P2 UI; no sync/publish) is **in-scope and ships V1.162**. Doc-aligns-to-shipped-reality — not new policy (matches `fork.rs:8-15` + product-locks PD-2 + entity-scope-model §6.6.1/§6.6.2).

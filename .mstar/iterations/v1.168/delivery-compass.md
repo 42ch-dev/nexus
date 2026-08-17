@@ -1,7 +1,8 @@
 ---
 iteration_id: v1.168
 start_date: 2026-08-17
-status: locked
+status: completed
+end_date: 2026-08-17
 iteration_base_branch: main
 target_branch: main
 plans:
@@ -61,7 +62,7 @@ Resolved in [specs/v1.168-native-host-locks.md](specs/v1.168-native-host-locks.m
 | plan_id | Name | Status | Notes |
 |---------|------|--------|-------|
 | 2026-08-17-v1.168-p1-native-claude-codex-replace | Replace Claude/Codex native internals | Done | T1 b5efb649 + T2 da1a3863 + T3 2917fc81 + fix wave 79ca73b2 (QC B-1/B-2/B-3); QC tri → Request Changes → targeted revalidation ×3 Approve; QA full Pass with notes; merge 0be48f0c |
-| 2026-08-17-v1.168-p2-dsh-native-provider | Add dsh-native provider | InProgress | unblocked (P1 merged); dsh.rs + map_dsh.rs + pin + path_scan/boot |
+| 2026-08-17-v1.168-p2-dsh-native-provider | Add dsh-native provider | Done | T1 991a14c3 + T2 449a97e9 + fix wave 2abc61ba (QC B-1..B-4); QC tri → qc1/qc3 Request Changes → targeted revalidation Approve, qc2 Approve; QA full Pass with notes; merge df584482 |
 
 Status values: `Todo` | `InProgress` | `InReview` | `Done` | `Blocked`
 
@@ -98,7 +99,7 @@ Status values: `Todo` | `InProgress` | `InReview` | `Done` | `Blocked`
 
 ## Roadmap Position
 
-- **Current iteration (V1.168)**: stabilize the **native** Harness rail by replacing brittle self-written Claude/Codex adapters with maintained protocol clients, and add first-party DeepSeek Harness (`dsh-native`) as a third native provider. Native remains supplementary to ACP.
+- **Current iteration (V1.168)**: **delivered** — native Harness rail stabilized: Claude/Codex internals fully replaced by external protocol clients (decode-drift contract, per-session locks, turn-id filtering); `dsh-native` third provider shipped (bring-your-own runtime, honest `dsh_limited`). Native remains supplementary to ACP.
 - **Next iteration**: DF-81 or DF-82 (both dogfood-evidence Y from V1.167); owner: product-manager; trigger: next `/iteration-start` pick. This iteration is a locked detour, not a cancellation of that pick. Optional follow-up: raise `structured_tool_calls` once mappings + permission are proven; optional crate fork if decode hardness remains a product issue.
 - **End goal**: authors harness local agents (ACP or native) without Nexus owning vendor wire parsers.
 
@@ -132,17 +133,22 @@ Status values: `Todo` | `InProgress` | `InReview` | `Done` | `Blocked`
 
 ## Quality Gate Summary
 
-> Filled at iteration-close.
-
 | plan_id | QC decision | QA gate | Residuals | Durable summary |
 |---------|-------------|---------|-----------|-----------------|
-| 2026-08-17-v1.168-p1-native-claude-codex-replace | | mandatory | | |
-| 2026-08-17-v1.168-p2-dsh-native-provider | | mandatory | | |
+| 2026-08-17-v1.168-p1-native-claude-codex-replace | Request Changes (tri) → **Approve** (targeted revalidation ×3) | mandatory — **Pass with notes** | none (zero-residual) | B-1 stale turn terminal / B-2 provider-global lock / B-3 frame-gap timeout fixed (79ca73b2); live vendor CLI smoke deferred (no binaries on machine) |
+| 2026-08-17-v1.168-p2-dsh-native-provider | qc2 Approve; qc1/qc3 Request Changes → **Approve** (targeted revalidation) | mandatory — **Pass with notes** | none (zero-residual) | B-1 env-route scan row / B-2 honest `dsh_limited` catalog rows / B-3 session rotation on timeout / B-4 mock dsh stub (2abc61ba); live dsh runtime smoke deferred (absent) |
 
 ## Compound Round Summary
 
-> Filled at iteration-close.
+- 结晶文档数：1 new + 1 updated
+  - updated `architecture-patterns/native-cli-provider-adapter-pattern.md`（V1.168 crate-client pattern: decode-drift contract / per-session locks / no frame-gap timeout / turn-id filter / honest descriptors / mock stubs）
+  - new `workflow-patterns/process-env-lock-fixture-spawn-serialization.md`（PROCESS_ENV_LOCK env-mutation × fixture-spawn flake）
+- Package 盘点：locks → promoted (essence) 至 adapter pattern doc; README promotion log 已填; guides 空（无需）
+- 新增 CONCEPTS.md 条目：0（无新领域词）
+- 触发 compound-refresh：否
 
 ## Iteration Retrospective (minimal)
 
-> Filled at iteration-close.
+- 做得好的：QC tri 在首波抓到三个真实可靠性缺陷（B-1/B-2/B-3）并有针对性复验；grill-me 前置把 decode 契约的「skip vs OpFailed」歧义在写代码前收敛；SDD 每 task L2 全绿。
+- 可改进的：P1/P2 均在一次 QC 后各来了一轮 fix wave —— 下一轮 native 协议工作时，mock-stub 测试与「session 锁范围」应在 plan Global Constraints 里直接写明。
+- 下迭代建议：DF-81 或 DF-82（V1.167 dogfood 证据均 Y）；DR-70 继续 gated。
