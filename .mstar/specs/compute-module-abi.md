@@ -497,7 +497,7 @@ the module's expected envelope shape and the host's schema.
 The following items from the V1.61 compass non-goals (§1.2) are deferred to
 future major ABI versions (V2.0+). They are **not** supported in the V1 envelope:
 
-> **Durable roadmap:** consolidated in the [deferred-features tracker §2.6](../knowledge/deferred-features-cross-version-tracker.md) — DR-49 (compute-module ABI V2 bundle: multi-module composition/chaining, CDN distribution + Ed25519 signing, Generic Combat Protocol interop, 3P game-server bridge, KB→UI editor).
+> **Durable roadmap:** consolidated in the [deferred-features tracker §2.6](../roadmaps/deferred-features-cross-version-tracker.md) — DR-49 (compute-module ABI V2 bundle: multi-module composition/chaining, CDN distribution + Ed25519 signing, Generic Combat Protocol interop, 3P game-server bridge, KB→UI editor).
 
 No new deferred items are added in V1.62 — the V1.62 scope is a course
 correction of the V1.61 compute architecture, not an expansion.

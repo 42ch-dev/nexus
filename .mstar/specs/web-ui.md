@@ -10,7 +10,7 @@
 
 - [cli-spec.md](cli-spec.md) §6.3 (daemon command group — Web UI access) + §7.1 (first-run path)
 - [daemon-runtime.md](daemon-runtime.md) §2 (normative layering) — static-asset serving on the axum router
-- [schemas-external-consumer-boundary.md](../knowledge/schemas-external-consumer-boundary.md) — the bundled UI is a first-class external consumer of `@42ch/nexus-contracts`
+- [schemas-external-consumer-boundary.md](schemas-external-consumer-boundary.md) — the bundled UI is a first-class external consumer of `@42ch/nexus-contracts`
 - [local-cloud-crate-architecture.md](local-cloud-crate-architecture.md) §1 — strict local-product vs cloud-product separation
 - Repo-root [`DESIGN.md`](../../DESIGN.md) + [`DESIGN.dark.md`](../../DESIGN.dark.md) — sole normative DESIGN pair *(V1.98: supersedes former `apps/web/DESIGN*.md` — see §30)*
 - [daemon-api-surface-conventions.md](daemon-api-surface-conventions.md) (NEW, `@architect`-authored Master) — cursor pagination / `ErrorResponse` / naming conventions the UI data layer relies on
@@ -179,11 +179,11 @@ Explicitly deferred with durable tracking (compass §1.2 + §6; satisfies the Du
 - **Tauri desktop shell (`apps/desktop`)** — V1.65. The SPA is Tauri-ready now; the shell wraps the same `apps/web/dist`.
 - **Content-authoring UI** — chapter rich-text editor, outline editor, KB editor — V1.65+. CLI continues content production this iteration.
 - **Findings-remediation UI** — **Ships in V1.77 (§23).** Findings were *visible* in V1.64; remediation (status transitions, `target_executor` assignment, inline edit) is the V1.77 lead surface. Remaining remediation follow-up (inline fix / re-run from finding) is deferred — **DR-28**.
-- **Schedule / cron editor** — deferred. **Durable roadmap:** consolidated in the [deferred-features tracker §2.6](../knowledge/deferred-features-cross-version-tracker.md) — DR-27 (Control Room cron editing).
-- **Mobile (Tauri v2 mobile targets)** — deferred. **Durable roadmap:** consolidated in the [deferred-features tracker §2.6](../knowledge/deferred-features-cross-version-tracker.md) — DR-61 (mobile / Tauri v2 mobile targets).
+- **Schedule / cron editor** — deferred. **Durable roadmap:** consolidated in the [deferred-features tracker §2.6](../roadmaps/deferred-features-cross-version-tracker.md) — DR-27 (Control Room cron editing).
+- **Mobile (Tauri v2 mobile targets)** — deferred. **Durable roadmap:** consolidated in the [deferred-features tracker §2.6](../roadmaps/deferred-features-cross-version-tracker.md) — DR-61 (mobile / Tauri v2 mobile targets).
 - **OpenAPI spec generation + generated TS client SDK (C2)** — deferred; TanStack Query + codegen TS types suffice for the SPA.
 - **Remote (non-loopback) access / any new auth** — out of scope; would require its own auth spec.
-- **agent-host sessions/operations/events(SSE) DTO promotion** — deferred. **Durable roadmap:** consolidated in the [deferred-features tracker §2.6](../knowledge/deferred-features-cross-version-tracker.md) — DR-57 (agent-host sessions/operations/events (SSE) DTO promotion).
+- **agent-host sessions/operations/events(SSE) DTO promotion** — deferred. **Durable roadmap:** consolidated in the [deferred-features tracker §2.6](../roadmaps/deferred-features-cross-version-tracker.md) — DR-57 (agent-host sessions/operations/events (SSE) DTO promotion).
 - **F-P3 (rename list arrays to `items`)** + **F-F1 (`sort_by`/`sort_order`)** — adapter-covered in V1.64; structural closure V1.66+ — **(shipped V1.67 via convergence)**.
 
 ---
@@ -456,9 +456,9 @@ Explicitly deferred with rationale (compass §1.2; satisfies the Durable Roadmap
 - **Structured node-granular *edits*** — rename state, rewire edge, patch prompt template (Draft §3.5 operation DTOs) — **V1.71**. V1.70 Strategy canvas is read + overlay + Idea-steer only.
 - **Canvas outline+timeline surface** (Draft §3.3 surface 2) — **V1.71+**.
 - **Canvas World KB surface** (Draft §3.3 surface 3) — **V1.71+**.
-- **CLI / schema rename of `preset` → `strategy`** — breaking; deferred. V1.70 adopts **Strategy** terminology in UI copy only (Draft §4.2). The user-visible Strategy/Strategies → **Harness** rename shipped V1.156 P3 (closed → [shipped archive](../knowledge/shipped-features-tracker.md)); the internal CLI/schema `preset` → `strategy` identifier rename remains deferred (architect LOCKED: internal identifiers unchanged).
-- **Desktop distribution v2** (signing / tri-OS / auto-update) — deferred. **Durable roadmap:** consolidated in the [deferred-features tracker §2.6](../knowledge/deferred-features-cross-version-tracker.md) — DR-58 (desktop distribution v2).
-- **Rich live overlay** (completed-path history, child-session hierarchy) — deferred. **Durable roadmap:** consolidated in the [deferred-features tracker §2.6](../knowledge/deferred-features-cross-version-tracker.md) — DR-29 (rich live overlay).
+- **CLI / schema rename of `preset` → `strategy`** — breaking; deferred. V1.70 adopts **Strategy** terminology in UI copy only (Draft §4.2). The user-visible Strategy/Strategies → **Harness** rename shipped V1.156 P3 (closed → [shipped archive](../roadmaps/shipped-features-tracker.md)); the internal CLI/schema `preset` → `strategy` identifier rename remains deferred (architect LOCKED: internal identifiers unchanged).
+- **Desktop distribution v2** (signing / tri-OS / auto-update) — deferred. **Durable roadmap:** consolidated in the [deferred-features tracker §2.6](../roadmaps/deferred-features-cross-version-tracker.md) — DR-58 (desktop distribution v2).
+- **Rich live overlay** (completed-path history, child-session hierarchy) — deferred. **Durable roadmap:** consolidated in the [deferred-features tracker §2.6](../roadmaps/deferred-features-cross-version-tracker.md) — DR-29 (rich live overlay).
 - **Tauri WKWebView runtime smoke** — implementer documented they could not run Tauri locally; QA ran `cargo check` only. Full gesture/keyboard/pan-zoom validation inside actual WKWebView is a V1.71 follow-up if deeper runtime validation is needed.
 
 ### 16.6 User stories (V1.70 α slice)
@@ -784,11 +784,11 @@ V1.78 closed the third and final author-in-command loop (creator memory). V1.79 
 
 ### 25.3 Non-goals for V1.79
 
-- **Standalone maturation dashboard** (multi-chart cross-Work/World aggregate; BL-09) — deferred. **Durable roadmap:** consolidated in the [deferred-features tracker §2.6](../knowledge/deferred-features-cross-version-tracker.md) — DR-30 (standalone maturation dashboard).
+- **Standalone maturation dashboard** (multi-chart cross-Work/World aggregate; BL-09) — deferred. **Durable roadmap:** consolidated in the [deferred-features tracker §2.6](../roadmaps/deferred-features-cross-version-tracker.md) — DR-30 (standalone maturation dashboard).
 - **Independent growth-curve view** as a separate SOUL visualization — folded into temporal drift; standalone deferred.
 - **Persisted reading progress + annotations/highlights (MVP)** — **Shipped in V1.89**. See §28 (V1.89 Amendment — Deeper Manuscript Reading). Session-only behavior was V1.79; persistence + highlights (with drift notice and body-ownership invariant) shipped in V1.89.
-- **Per-World SOUL filtering** — deferred. **Durable roadmap:** consolidated in the [deferred-features tracker §2.6](../knowledge/deferred-features-cross-version-tracker.md) — DR-32 (per-World SOUL filtering).
-- **Profile-specific reading chrome** (essay section breaks, game-bible cross-refs, novel typography presets) — deferred (BL-11 tracker row). **Durable roadmap:** consolidated in the [deferred-features tracker §2.6](../knowledge/deferred-features-cross-version-tracker.md) — DR-31 (profile-specific reading chrome; BL-11).
+- **Per-World SOUL filtering** — deferred. **Durable roadmap:** consolidated in the [deferred-features tracker §2.6](../roadmaps/deferred-features-cross-version-tracker.md) — DR-32 (per-World SOUL filtering).
+- **Profile-specific reading chrome** (essay section breaks, game-bible cross-refs, novel typography presets) — deferred (BL-11 tracker row). **Durable roadmap:** consolidated in the [deferred-features tracker §2.6](../roadmaps/deferred-features-cross-version-tracker.md) — DR-31 (profile-specific reading chrome; BL-11).
 - **DF-49 (Standalone MCP server)** — **cancelled** (not deferred), conflicts with ACP-client product direction and creates circular-invocation risk.
 - **Any new write route on the reading surface** — read-only consumption only.
 - **New canvas surfaces** — the canvas program is complete (V1.67–V1.76). V1.79 deepens the Control-Room reading + memory surfaces.
@@ -872,9 +872,9 @@ This product model is user-visible in the UI — the world selector explicitly f
 
 ### 26.3 Non-goals for V1.81
 
-- **Per-World LLM narratives** — deferred. **Durable roadmap:** consolidated in the [deferred-features tracker §2.6](../knowledge/deferred-features-cross-version-tracker.md) — DR-32 (per-World SOUL narratives + filtering).
-- **Narrative editing / curation by the author** — deferred. **Durable roadmap:** consolidated in the [deferred-features tracker §2.6](../knowledge/deferred-features-cross-version-tracker.md) — DR-33 (SOUL narrative curation/editing + export/share).
-- **Narrative export / share** — deferred. **Durable roadmap:** consolidated in the [deferred-features tracker §2.6](../knowledge/deferred-features-cross-version-tracker.md) — DR-33 (SOUL narrative curation/editing + export/share).
+- **Per-World LLM narratives** — deferred. **Durable roadmap:** consolidated in the [deferred-features tracker §2.6](../roadmaps/deferred-features-cross-version-tracker.md) — DR-32 (per-World SOUL narratives + filtering).
+- **Narrative editing / curation by the author** — deferred. **Durable roadmap:** consolidated in the [deferred-features tracker §2.6](../roadmaps/deferred-features-cross-version-tracker.md) — DR-33 (SOUL narrative curation/editing + export/share).
+- **Narrative export / share** — deferred. **Durable roadmap:** consolidated in the [deferred-features tracker §2.6](../roadmaps/deferred-features-cross-version-tracker.md) — DR-33 (SOUL narrative curation/editing + export/share).
 - **Async background-job infrastructure** — on-demand generation only (consistent with V1.80 discipline).
 - **BL-09 standalone maturation dashboard** — remains backlog.
 - **BL-11 deeper manuscript reading (MVP slice)** — **Shipped V1.89**: persisted reading progress + character-offset annotations/highlights with drift notice. Profile-specific reading chrome remains deferred (see tracker).
@@ -943,8 +943,8 @@ This model is locked in the UI. The world selector shows titles (not ids) and dr
 ### 27.3 Non-goals for V1.82 (see also compass §7)
 
 - Narrative comparison across worlds (side-by-side or diff view) — out of scope.
-- Narrative editing or curation by the author — read-only LLM output; only "re-reflect." **Durable roadmap:** consolidated in the [deferred-features tracker §2.6](../knowledge/deferred-features-cross-version-tracker.md) — DR-33 (SOUL narrative curation/editing + export/share).
-- Narrative export or share paths. **Durable roadmap:** consolidated in the [deferred-features tracker §2.6](../knowledge/deferred-features-cross-version-tracker.md) — DR-33 (SOUL narrative curation/editing + export/share).
+- Narrative editing or curation by the author — read-only LLM output; only "re-reflect." **Durable roadmap:** consolidated in the [deferred-features tracker §2.6](../roadmaps/deferred-features-cross-version-tracker.md) — DR-33 (SOUL narrative curation/editing + export/share).
+- Narrative export or share paths. **Durable roadmap:** consolidated in the [deferred-features tracker §2.6](../roadmaps/deferred-features-cross-version-tracker.md) — DR-33 (SOUL narrative curation/editing + export/share).
 - Realtime websocket / push (poll + invalidation only).
 - A new backend worlds endpoint (existing one is wired).
 - Rewrite of V1.81 SOUL components beyond the per-World extension (surgical).
@@ -989,9 +989,9 @@ When a highlight's stored offsets no longer fit the current body text (after a b
 ### 28.5 Non-goals
 
 - Profile-specific reading chrome (essay section breaks, game-bible cross-reference overlays, novel typography presets, etc.).
-  > **Durable roadmap:** consolidated in the [deferred-features tracker §2.6](../knowledge/deferred-features-cross-version-tracker.md) — DR-31 (profile-specific reading chrome; BL-11).
+  > **Durable roadmap:** consolidated in the [deferred-features tracker §2.6](../roadmaps/deferred-features-cross-version-tracker.md) — DR-31 (profile-specific reading chrome; BL-11).
 - Standalone maturation dashboard (BL-09).
-  > **Durable roadmap:** consolidated in the [deferred-features tracker §2.6](../knowledge/deferred-features-cross-version-tracker.md) — DR-30 (standalone maturation dashboard; BL-09).
+  > **Durable roadmap:** consolidated in the [deferred-features tracker §2.6](../roadmaps/deferred-features-cross-version-tracker.md) — DR-30 (standalone maturation dashboard; BL-09).
 - Body or outline editing from the reading surface.
 - Annotation range reconciliation or fingerprinting across body edits.
 - Rich-text or threaded annotations on highlights.
@@ -1089,9 +1089,9 @@ The wizard and per-launch daemon-ready gate are **desktop-first**:
 ### 29.9 Non-goals
 
 - Full multi-creator CRUD / profile management (rename, delete, avatar upload) — footer switcher only selects existing or creates via existing endpoint.
-  > **Durable roadmap:** consolidated in the [deferred-features tracker §2.6](../knowledge/deferred-features-cross-version-tracker.md) — DR-34 (multi-creator CRUD / multi-workspace UI / workspace switcher).
+  > **Durable roadmap:** consolidated in the [deferred-features tracker §2.6](../roadmaps/deferred-features-cross-version-tracker.md) — DR-34 (multi-creator CRUD / multi-workspace UI / workspace switcher).
 - Multi-workspace UI / workspace switcher.
-  > **Durable roadmap:** consolidated in the [deferred-features tracker §2.6](../knowledge/deferred-features-cross-version-tracker.md) — DR-34 (multi-creator CRUD / multi-workspace UI / workspace switcher).
+  > **Durable roadmap:** consolidated in the [deferred-features tracker §2.6](../roadmaps/deferred-features-cross-version-tracker.md) — DR-34 (multi-creator CRUD / multi-workspace UI / workspace switcher).
 - Agent detection during non-first-launch.
 - Mobile full rewrite (the `<lg` collapse preserves the two-tab structure as a dropdown/pill scroller but is not optimized for touch-first patterns).
 
@@ -1242,7 +1242,7 @@ Bootstrap (`ensureSetupBootstrap`) on Workspace **Continue** only.
 #### 29.13.6 Non-goals
 
 - Tauri PATH agent scan; multi-workspace switcher; BYOK; Settings shell IA redesign; wire/schema changes unless P0 proves unavoidable.
-  > **Durable roadmap:** consolidated in the [deferred-features tracker §2.6](../knowledge/deferred-features-cross-version-tracker.md) — DR-35 (Tauri PATH agent scan), DR-34 (multi-workspace switcher + Settings shell IA redesign). BYOK: tracked as **DF-70** ([tracker §2.3](../knowledge/deferred-features-cross-version-tracker.md)).
+  > **Durable roadmap:** consolidated in the [deferred-features tracker §2.6](../roadmaps/deferred-features-cross-version-tracker.md) — DR-35 (Tauri PATH agent scan), DR-34 (multi-workspace switcher + Settings shell IA redesign). BYOK: tracked as **DF-70** ([tracker §2.3](../roadmaps/deferred-features-cross-version-tracker.md)).
 
 ### 30. V1.98 Amendments — Design Studio dev surface (not author-facing)
 

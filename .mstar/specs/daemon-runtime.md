@@ -439,7 +439,7 @@ current implementation is correct and documented):
   already confirms metrics overhead is negligible at the capability layer.
    Deferred; revisit only if profiling shows > 1% of cold path.
 
-> **Durable roadmap:** consolidated in the [deferred-features tracker §2.6](../knowledge/deferred-features-cross-version-tracker.md) — DR-01 (jitter range), DR-02 (metrics benchmarking).
+> **Durable roadmap:** consolidated in the [deferred-features tracker §2.6](../roadmaps/deferred-features-cross-version-tracker.md) — DR-01 (jitter range), DR-02 (metrics benchmarking).
 
 ## 10. Refresh-scheduler hook (V1.58 P1 / P3)
 
@@ -943,7 +943,7 @@ The daemon's Origin allowlist (§13.1) already covers: own-origin, Tauri webview
 | Web SPA | `localStorage` | SPA trust boundary equal to the app itself. Key is always user-entered, never compiled in. |
 | Tauri desktop | OS keychain (Tauri secure-store plugin) where available; fallback to app-data dir | Keychain is the preferred secure storage; fallback is a local-first trade-off for platforms without OS keychain support. |
 
-The API key is always **user-entered** — never compiled into the binary, never stored in version control, never embedded in build artifacts. Full secret-store hardening (hardware-backed keystore, biometric unlock) is a future concern. **Durable roadmap:** consolidated in the [deferred-features tracker §2.6](../knowledge/deferred-features-cross-version-tracker.md) — DR-05 (secret-store hardening).
+The API key is always **user-entered** — never compiled into the binary, never stored in version control, never embedded in build artifacts. Full secret-store hardening (hardware-backed keystore, biometric unlock) is a future concern. **Durable roadmap:** consolidated in the [deferred-features tracker §2.6](../roadmaps/deferred-features-cross-version-tracker.md) — DR-05 (secret-store hardening).
 
 ### 16.6 Raw-browser-tab remote navigation (explicit non-goal)
 

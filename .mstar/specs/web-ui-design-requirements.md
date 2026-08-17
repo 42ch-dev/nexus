@@ -122,7 +122,7 @@ V1.66 wraps the V1.65 SPA in a Tauri v2 desktop shell (see [web-ui.md](web-ui.md
 - **Minimum/resizable size**: comfortable for both data-dense Control Room tables AND the authoring editor.
 - **Light + dark parity**: chrome follows system appearance; matches SPA theme tokens in both.
 
-> **Durable polish roadmap** consolidated in the [deferred-features tracker §2.6](../knowledge/deferred-features-cross-version-tracker.md) — DR-58/DR-59/DR-60.
+> **Durable polish roadmap** consolidated in the [deferred-features tracker §2.6](../roadmaps/deferred-features-cross-version-tracker.md) — DR-58/DR-59/DR-60.
 
 ### 6.2 App menu structure
 

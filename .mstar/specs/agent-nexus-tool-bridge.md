@@ -373,7 +373,7 @@ Required side effects: no platform HTTP attempt; audit row recorded with `audit_
 
 ## 11. Contract gap list
 
-This section is informational for P3 and documents current contract gaps. P3 does **not** add schemas or run codegen. The future codegen envelope work (gap table below) is consolidated in the [deferred-features tracker §2.6](../knowledge/deferred-features-cross-version-tracker.md) — DR-23.
+This section is informational for P3 and documents current contract gaps. P3 does **not** add schemas or run codegen. The future codegen envelope work (gap table below) is consolidated in the [deferred-features tracker §2.6](../roadmaps/deferred-features-cross-version-tracker.md) — DR-23.
 
 Current repo snapshot checked for this spec:
 

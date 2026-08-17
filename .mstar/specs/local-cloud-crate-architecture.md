@@ -9,7 +9,7 @@
 | **Scope** | Stable rules: local vs cloud product lines, crate responsibilities, contracts usage, dependency forbidden edges, current-vs-target wiring, Daemon API *classes* allowed/forbidden |
 | **Scope model SSOT** | [entity-scope-model.md](./entity-scope-model.md) — authoritative for scope hierarchy, crate ownership, and `kb`/`knowledge` naming boundaries |
 | **Delivery compass** | Iteration-scoped milestones, phases, acceptance tests → [v1.21/delivery-compass.md](../../iterations/v1.21/delivery-compass.md) |
-| **Related** | [entity-scope-model.md](./entity-scope-model.md), [local-runtime-boundary.md](./local-runtime-boundary.md), [daemon-runtime.md](./daemon-runtime.md), [cli-spec.md](./cli-spec.md), [schemas-directory-layout.md](./schemas-directory-layout.md), [../schemas-external-consumer-boundary.md](../knowledge/schemas-external-consumer-boundary.md) |
+| **Related** | [entity-scope-model.md](./entity-scope-model.md), [local-runtime-boundary.md](./local-runtime-boundary.md), [daemon-runtime.md](./daemon-runtime.md), [cli-spec.md](./cli-spec.md), [schemas-directory-layout.md](./schemas-directory-layout.md), [../schemas-external-consumer-boundary.md](schemas-external-consumer-boundary.md) |
 
 **This file is not an implementation checklist.** Do not add migration batches, branch names, or “done by V1.21” task tables here — put those in the matching **iteration compass** and `.mstar/plans/`.
 
@@ -36,7 +36,7 @@
 
 ## 2. Contracts boundary (frozen)
 
-All **wire shapes** and **platform-aligned DTOs** come from the **`nexus-contracts`** crate (§3.1): generated from `schemas/` (layout: [schemas-directory-layout.md](./schemas-directory-layout.md)) or hand-written under `src/local/` per [schemas-external-consumer-boundary.md](../knowledge/schemas-external-consumer-boundary.md).
+All **wire shapes** and **platform-aligned DTOs** come from the **`nexus-contracts`** crate (§3.1): generated from `schemas/` (layout: [schemas-directory-layout.md](./schemas-directory-layout.md)) or hand-written under `src/local/` per [schemas-external-consumer-boundary.md](schemas-external-consumer-boundary.md).
 
 | Rule | Detail |
 | --- | --- |
@@ -122,7 +122,7 @@ The legacy crate name `nexus-domain` is **not** retained after the split program
 
 - **`nexus-knowledge` (World-scoped):** Narrative KB graph assets (KnowledgeEntries, SourceAnchors, graph insertion/query) coordinated with `nexus-narrative`. Formerly the separate `nexus-kb` crate (merged in V1.139).
 - **`nexus-knowledge` (User-scoped):** Global knowledge/reference material. Tag-driven, may be pulled into Moment context assembly. Not Creator-scoped, does not own World narrative KnowledgeEntries.
-- **CLI `creator kb`:** today is a local work-scope file/index workflow under the active Creator/workspace. It is not equivalent to the World-scoped narrative KB model until later tasks route or rename it. **Durable roadmap:** [deferred-features tracker §2.6](../knowledge/deferred-features-cross-version-tracker.md) — DR-46.
+- **CLI `creator kb`:** today is a local work-scope file/index workflow under the active Creator/workspace. It is not equivalent to the World-scoped narrative KB model until later tasks route or rename it. **Durable roadmap:** [deferred-features tracker §2.6](../roadmaps/deferred-features-cross-version-tracker.md) — DR-46.
 
 ### 3.6 `nexus-moment-context-assembly`
 

@@ -413,7 +413,7 @@ Each native adapter should follow the per-provider stream adapter pattern (borro
 - Default command lookup: `claude` on PATH, overridable in config.
 - Default mode: non-interactive single-turn prompt through configured args (verified: `--print`).
 - Wave 1 capability reporting is intentionally narrower than ACP: managed subprocess ownership, prompt execution, cancellation by process termination, stdout/stderr event normalization, health/probe, and configured model/args/env.
-- Future native providers (Codex, Gemini, OpenCode, etc.) follow the same per-provider adapter pattern with their own normalization modules. **Durable roadmap:** [deferred-features tracker §2.6](../knowledge/deferred-features-cross-version-tracker.md) — DR-14.
+- Future native providers (Codex, Gemini, OpenCode, etc.) follow the same per-provider adapter pattern with their own normalization modules. **Durable roadmap:** [deferred-features tracker §2.6](../roadmaps/deferred-features-cross-version-tracker.md) — DR-14.
 
 ---
 
@@ -621,7 +621,7 @@ Stage-level timeout defaults (15s init, 180s prompt) are validated production de
 
 ### 9.3 Session persistence
 
-Wave 1 uses in-memory session tracking only. ACP sessions may optionally use `nexus-acp-host::SessionManager` for ACP-level session restore. Native sessions have no persistence in Wave 1. The `sessions.json` path is reserved for future use. **Durable roadmap:** [deferred-features tracker §2.6](../knowledge/deferred-features-cross-version-tracker.md) — DR-15.
+Wave 1 uses in-memory session tracking only. ACP sessions may optionally use `nexus-acp-host::SessionManager` for ACP-level session restore. Native sessions have no persistence in Wave 1. The `sessions.json` path is reserved for future use. **Durable roadmap:** [deferred-features tracker §2.6](../roadmaps/deferred-features-cross-version-tracker.md) — DR-15.
 
 ---
 

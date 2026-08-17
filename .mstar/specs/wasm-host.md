@@ -383,7 +383,7 @@ Implementation:
 1. Read `q_len` bytes from `[q_ptr, q_ptr+q_len)`.
 2. Parse as JSON → `query`.
 3. In V1, ignore the query and return `InvocationState.ctx.narrative_state` verbatim.
-   A richer query engine is planned for a later iteration. **Durable roadmap:** consolidated in the [deferred-features tracker §2.6](../knowledge/deferred-features-cross-version-tracker.md) — DR-50 (richer `narrative_query` engine).
+   A richer query engine is planned for a later iteration. **Durable roadmap:** consolidated in the [deferred-features tracker §2.6](../roadmaps/deferred-features-cross-version-tracker.md) — DR-50 (richer `narrative_query` engine).
 4. Serialize the response and write to `[out_ptr, out_ptr+written)`; return `written`.
 5. On errors, return `-1`. If `out_cap` too small, return `-2`.
 

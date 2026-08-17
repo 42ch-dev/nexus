@@ -1,8 +1,8 @@
 # Orchestration Engine — Design Specification
 
-**Status**: Shipped (V1.4–V1.34 — orchestration engine SSOT, preset loader, worker IPC, capability registry). **V1.39 target**: DF-53 on_complete auto-chain + DF-68 boot resume policy. **V1.62 Shipped**: §5.2 `narrative.compute` capability + §8.4 `combat-engine` preset (deferred from V1.61 P3). FL-D (DF-29/31/56) remain in [`deferred-features-cross-version-tracker.md`](deferred-features-cross-version-tracker.md) §3.3.  
+**Status**: Shipped (V1.4–V1.34 — orchestration engine SSOT, preset loader, worker IPC, capability registry). **V1.39 target**: DF-53 on_complete auto-chain + DF-68 boot resume policy. **V1.62 Shipped**: §5.2 `narrative.compute` capability + §8.4 `combat-engine` preset (deferred from V1.61 P3). FL-D (DF-29/31/56) remain in [`deferred-features-cross-version-tracker.md`](../roadmaps/deferred-features-cross-version-tracker.md) §3.3.  
 **Document class**: Master  
-**Pillar (V1.122)**: **Harness** — this spec is the control-strategy engine contract for the [Harness](../../STRATEGY.md) pillar (orchestration engine + agent host + capability registry + presets). Harness is the "how an author harnesses AI agents to execute creative work" pillar; the user-visible Strategy/Strategies → **Harness** product rename shipped V1.156 P3 (closed → [shipped archive](../knowledge/shipped-features-tracker.md)); internal identifiers remain `strategy`/`preset` (architect LOCKED). Pillar framing: [`pillar-framing.md`](../iterations/v1.122/specs/pillar-framing.md).
+**Pillar (V1.122)**: **Harness** — this spec is the control-strategy engine contract for the [Harness](../../STRATEGY.md) pillar (orchestration engine + agent host + capability registry + presets). Harness is the "how an author harnesses AI agents to execute creative work" pillar; the user-visible Strategy/Strategies → **Harness** product rename shipped V1.156 P3 (closed → [shipped archive](../roadmaps/shipped-features-tracker.md)); internal identifiers remain `strategy`/`preset` (architect LOCKED). Pillar framing: [`pillar-framing.md`](../iterations/v1.122/specs/pillar-framing.md).
 **Author**: @project-manager (brainstorm consolidation) / to be co-authored by @architect before first implement
 **Date**: 2026-04-17; **Last updated**: 2026-06-23 — V1.62 P2 §5.2 + §8.4
 **Scope**: daemon runtime (daemon), new `crates/nexus-acp-host`, new `crates/nexus-orchestration`, `nexus42` CLI additions, preset bundle format.
@@ -189,7 +189,7 @@ Per [effort-estimation.md](https://github.com/btspoony/mstar-harness/blob/main/d
 
 ## 4. Orchestration Engine (graph-flow integration)
 
-> **Crate selection cross-reference**: `graph-flow = "=0.2.3"` pinning, `sqlx` adoption for the shared pool, and the general dependency conventions are now governed by [`crate-selection-best-practices.md`](crate-selection-best-practices.md) (see §1 conventions + §2.1/§2.2/§2.3 decisions). This section remains the design SSOT for *how* those crates are integrated; it defers crate-identity and versioning policy to the best-practices document.
+> **Crate selection cross-reference**: `graph-flow = "=0.2.3"` pinning, `sqlx` adoption for the shared pool, and the general dependency conventions are now governed by [`crate-selection-best-practices.md`](../knowledge/crate-selection-best-practices.md) (see §1 conventions + §2.1/§2.2/§2.3 decisions). This section remains the design SSOT for *how* those crates are integrated; it defers crate-identity and versioning policy to the best-practices document.
 
 ### 4.1 Library adoption decision
 
@@ -235,7 +235,7 @@ impl graph_flow::SessionStorage for SqliteSessionStorage {
 }
 ```
 
-**Pool ownership (post-WS8)**: `nexus-local-db` exposes `Arc<sqlx::SqlitePool>` as the single workspace pool for `state.db` after V1.4 **WS8** unifies the DB engine on `sqlx` ([`2026-04-17-v1.4-ws8-local-db-sqlx-migration.md`](../../plans/2026-04-17-v1.4-ws8-local-db-sqlx-migration.md); decision SSOT: [`crate-selection-best-practices.md`](../crate-selection-best-practices.md) §2.3 + §3.3). `SqliteSessionStorage` takes that `Arc<SqlitePool>` at construction time; no separate connection or separate `.db` file. The `orchestration_sessions` table lands as one more `.sql` migration file under `crates/nexus-local-db/migrations/`, authored in WS2 Task 3 **after** WS8 T1–T2.
+**Pool ownership (post-WS8)**: `nexus-local-db` exposes `Arc<sqlx::SqlitePool>` as the single workspace pool for `state.db` after V1.4 **WS8** unifies the DB engine on `sqlx` ([`2026-04-17-v1.4-ws8-local-db-sqlx-migration.md`](../../plans/2026-04-17-v1.4-ws8-local-db-sqlx-migration.md); decision SSOT: [`crate-selection-best-practices.md`](../knowledge/crate-selection-best-practices.md) §2.3 + §3.3). `SqliteSessionStorage` takes that `Arc<SqlitePool>` at construction time; no separate connection or separate `.db` file. The `orchestration_sessions` table lands as one more `.sql` migration file under `crates/nexus-local-db/migrations/`, authored in WS2 Task 3 **after** WS8 T1–T2.
 
 Schema (new table in the unified `state.db` owned by `nexus-local-db`; schema migration file added under `crates/nexus-local-db/migrations/`):
 
@@ -292,7 +292,7 @@ All impls live in `crates/nexus-orchestration/src/tasks/`. Task implementations 
 
 **Explicit non-goal:** conditional `next` on NOGO (e.g. return to `gathering`) remains deferred until loader accepts `next.kind: conditional`.
 
-> **Durable roadmap:** consolidated in the [deferred-features tracker §2.6](../knowledge/deferred-features-cross-version-tracker.md) — DR-11 (conditional-next routing).
+> **Durable roadmap:** consolidated in the [deferred-features tracker §2.6](../roadmaps/deferred-features-cross-version-tracker.md) — DR-11 (conditional-next routing).
 
 ### 4.5 Pausing, cancelling, and signals
 
@@ -305,7 +305,7 @@ All impls live in `crates/nexus-orchestration/src/tasks/`. Task implementations 
 
 ## 5. Capability Registry
 
-> **Crate selection cross-reference**: Capability implementations MAY depend on third-party crates (e.g. `notify` for file-watch capabilities, `jsonwebtoken` for auth-related capabilities). Any new crate introduced here follows [`crate-selection-best-practices.md`](crate-selection-best-practices.md) §1 (conventions) — in particular §1.5 (PM introduction gate) and §1.3 (feature flag whitelist).
+> **Crate selection cross-reference**: Capability implementations MAY depend on third-party crates (e.g. `notify` for file-watch capabilities, `jsonwebtoken` for auth-related capabilities). Any new crate introduced here follows [`crate-selection-best-practices.md`](../knowledge/crate-selection-best-practices.md) §1 (conventions) — in particular §1.5 (PM introduction gate) and §1.3 (feature flag whitelist).
 
 ### 5.1 `Capability` trait
 
@@ -353,13 +353,13 @@ All capabilities below are registered at daemon runtime startup. Adding a new ca
 | `judge.rule`                | Evaluate a pure rule over `contextData`                        | `nexus-orchestration`  | **Real** — boolean literals, field equality/inequality, numeric comparisons (V1.31 DF-32) |
 | `context.summarize`         | Summarize context through a worker-backed ACP prompt           | `nexus-orchestration`  | **Real** — returns `{ summary, prompt_hash }` (V1.31 DF-34/37) |
 | `narrative.compute`         | Invoke WASM compute module; apply state_delta, timeline_events, new_key_blocks, return battle_report | `nexus-orchestration`  | **Real** — calls `nexus-wasm-host::compute()` (V1.61 P3; spec-seal V1.62 P2); see §8.4.1 |
-| `timer.wait_until`          | Schedule a wake-up signal (requires B-track clock)             | `nexus-orchestration`  | Deferred clock integration — **Durable roadmap:** [deferred-features tracker §2.6](../knowledge/deferred-features-cross-version-tracker.md) — DR-12 |
+| `timer.wait_until`          | Schedule a wake-up signal (requires B-track clock)             | `nexus-orchestration`  | Deferred clock integration — **Durable roadmap:** [deferred-features tracker §2.6](../roadmaps/deferred-features-cross-version-tracker.md) — DR-12 |
 
 > **V1.31 de-stub note:** `creator.*`, `judge.rule`, `judge.llm`, and `context.summarize` are real runtime capabilities as of V1.31. DF-37 reduces worker-backed fallback to explicit standalone/test construction paths; daemon/preset execution injects runtime dependencies through the registry factory.
 
 ### 5.3 Capability input/output schemas
 
-Each capability ships its `input_schema` and `output_schema` as constants (JSON Schema draft 2020-12) in Rust. **These schemas are local** (per [schemas-external-consumer-boundary.md](../knowledge/schemas-external-consumer-boundary.md)) and live under `crates/nexus-contracts/src/local/orchestration/` (or adjacent module), **not** under `schemas/` — they are not wire contracts.
+Each capability ships its `input_schema` and `output_schema` as constants (JSON Schema draft 2020-12) in Rust. **These schemas are local** (per [schemas-external-consumer-boundary.md](schemas-external-consumer-boundary.md)) and live under `crates/nexus-contracts/src/local/orchestration/` (or adjacent module), **not** under `schemas/` — they are not wire contracts.
 
 > **Daemon builds:** `sync.*` MUST NOT call `nexus-cloud-sync` on the daemon hot path; see [local-cloud-crate-architecture.md](local-cloud-crate-architecture.md) §7. `outbox.flush` / `outbox.compact` (V1.59) are local-only pool-backed capabilities that operate directly on `outbox_entries` via `nexus-local-db` — they do not depend on `nexus-cloud-sync`.
 
@@ -418,13 +418,13 @@ The dual-outbox architecture identified in TD-8 ([dual-outbox-architecture.md](.
 - Worker holds **one** ACP agent subprocess at a time (initial MVP); the choice of *which* ACP agent to run is determined by the preset / Schedule and passed on worker start as `--agent <agent_ref>`.
 - Switching agents within a creator requires **worker restart** in MVP (acceptable for V1.4). Multi-agent workers deferred to V1.5+.
 
-> **Durable roadmap:** consolidated in the [deferred-features tracker §2.6](../knowledge/deferred-features-cross-version-tracker.md) — DR-13 (multi-agent workers).
+> **Durable roadmap:** consolidated in the [deferred-features tracker §2.6](../roadmaps/deferred-features-cross-version-tracker.md) — DR-13 (multi-agent workers).
 
 ### 6.3 IPC transport
 
 Selected transport: **parent↔child stdin/stdout** with **JSON-RPC 2.0** framing.
 
-**Implementation crate selection (closed 2026-04-17)**: `jsonrpsee-core` + proc macros + custom `RpcTransport` trait + newline-delimited framing via `tokio_util::codec::LinesCodec`. Decision SSOT: [`crate-selection-best-practices.md`](crate-selection-best-practices.md) §2.1 + §3.1. The `RpcTransport` trait is the insurance layer if jsonrpsee-core ever needs replacement — callers depend on the trait, not on `jsonrpsee::*` directly.
+**Implementation crate selection (closed 2026-04-17)**: `jsonrpsee-core` + proc macros + custom `RpcTransport` trait + newline-delimited framing via `tokio_util::codec::LinesCodec`. Decision SSOT: [`crate-selection-best-practices.md`](../knowledge/crate-selection-best-practices.md) §2.1 + §3.1. The `RpcTransport` trait is the insurance layer if jsonrpsee-core ever needs replacement — callers depend on the trait, not on `jsonrpsee::*` directly.
 
 Rationale:
 
@@ -756,7 +756,7 @@ The binary includes embedded presets under `crates/nexus-orchestration/embedded-
 | `creative-brief-intake` | **V1.33 Shipped** (`2026-06-04-v1.33-creative-brief-intake-preset` P2 plan) — grill-me intake preset | intake → done | `acp.prompt` |
 | `essay-writing` | **V1.63 P2 Shipped** — essay production preset with 4-dimension quality rubric (thesis clarity, evidence support, coherence, ending takeaway) | intake → outline → draft → revise → finalize → finalize_commit → done | `creator.inject_prompt`, `acp.prompt`, `judge.llm`, `essay.draft_status.finalize` |
 
-All shipped presets use **linear** `next` transitions unless noted; conditional routing remains deferred (§7.5). **Durable roadmap:** [deferred-features tracker §2.6](../knowledge/deferred-features-cross-version-tracker.md) — DR-11.
+All shipped presets use **linear** `next` transitions unless noted; conditional routing remains deferred (§7.5). **Durable roadmap:** [deferred-features tracker §2.6](../roadmaps/deferred-features-cross-version-tracker.md) — DR-11.
 
 ### 7.8 Preset `run_intents` (V1.33)
 
@@ -913,7 +913,7 @@ CLI and daemon `POST /v1/local/presets:validate` call these functions directly w
 | `inner_graphs.<name>.nodes[].depends_on`              | `add_edge(dep, this)` in inner graph                                              |
 | `inner_graphs.<name>.output_binding`                  | `InnerGraphTask` post-run: reads `ctx[binding_path]`, writes `state.<x>.output`   |
 
-> **Durable roadmap:** `next.kind=conditional` loader acceptance (the `(future)` row above) is consolidated in the [deferred-features tracker §2.6](../knowledge/deferred-features-cross-version-tracker.md) — DR-11.
+> **Durable roadmap:** `next.kind=conditional` loader acceptance (the `(future)` row above) is consolidated in the [deferred-features tracker §2.6](../roadmaps/deferred-features-cross-version-tracker.md) — DR-11.
 
 ### 8.3 Caching and reloading
 
@@ -1170,8 +1170,8 @@ The following questions were originally parked as B-track in this document. Afte
 | OQ-4  | `seed + user_edits + iterated_experience → core_context` derivation + versioning                         | **Partially answered in WS7**; V1.4 implements seed / user_edit / preset_hook derivation kinds and reserves `LlmSummarize` for V1.5. See [creator-schedule-and-core-context.md](creator-schedule-and-core-context.md) §6 + §11. |
 | OQ-5  | `nexus42 schedule add/update/remove/inspect` semantics — editing in-flight                              | **Answered in WS7** — full CRUD; in-flight edits accepted but take effect at next state transition ("core_context is stable during execution"). See §3.3 + §6.4. |
 | OQ-6  | Timer / clock model for wall-clock triggers                                                             | **Partially answered** — V1.4 on-demand only; `scheduled_at` column reserved; V1.5 adds clock poller zero-migration. See WS7 §2 + §10. |
-| OQ-7  | Multi-agent per creator (worker hosts > 1 agent)                                                        | **Still deferred** to V1.5+ (see WS7 §13). **Durable roadmap:** [deferred-features tracker §2.6](../knowledge/deferred-features-cross-version-tracker.md) — DR-09. |
-| OQ-8  | User-authored capabilities (shell / WASM plugin ABI)                                                    | **Still deferred** to V1.5+ (see WS7 §13). **Durable roadmap:** [deferred-features tracker §2.6](../knowledge/deferred-features-cross-version-tracker.md) — DR-10. |
+| OQ-7  | Multi-agent per creator (worker hosts > 1 agent)                                                        | **Still deferred** to V1.5+ (see WS7 §13). **Durable roadmap:** [deferred-features tracker §2.6](../roadmaps/deferred-features-cross-version-tracker.md) — DR-09. |
+| OQ-8  | User-authored capabilities (shell / WASM plugin ABI)                                                    | **Still deferred** to V1.5+ (see WS7 §13). **Durable roadmap:** [deferred-features tracker §2.6](../roadmaps/deferred-features-cross-version-tracker.md) — DR-10. |
 
 ---
 

@@ -145,7 +145,7 @@ struct AcpWire {
 For V1.53, all entries use human-readable inline shape descriptions
 (e.g. `r#"{"work_id":"string"}"#`). Full JSON Schema drafts are
 deferred to a future plan that introduces schema-aware codegen —
-**durable roadmap:** consolidated in the [deferred-features tracker §2.6](../knowledge/deferred-features-cross-version-tracker.md) — DR-24 (ACP wire full JSON Schema drafts).
+**durable roadmap:** consolidated in the [deferred-features tracker §2.6](../roadmaps/deferred-features-cross-version-tracker.md) — DR-24 (ACP wire full JSON Schema drafts).
 
 **Cross-reference**: `acp-capability-set.md` is the logical catalog
 (one-liner per ID). This field provides the wire contract detail.

@@ -8,7 +8,7 @@
 | **Document class** | Master |
 | **Scope** | Folder names, consumer-scope mapping, README rules, rename policy; **not** field-level DTO definitions (those stay in platform `v1-spec` + `data-model-v1`) |
 | **Last updated** | 2026-07-26 — V1.139 architect §5.2: domain/ key-block.schema.json deleted; spoke-sourced KB type. |
-| **Related** | [schemas-external-consumer-boundary.md](../knowledge/schemas-external-consumer-boundary.md), [local-cloud-crate-architecture.md](./local-cloud-crate-architecture.md), [compute-module-abi.md](./compute-module-abi.md) §4–§5, [wasm-host.md](./wasm-host.md) §6–§7, [spoke-adapter-architecture.md](./spoke-adapter-architecture.md), [schemas/AGENTS.md](../../../schemas/AGENTS.md), [tooling/AGENTS.md](../../../tooling/AGENTS.md) |
+| **Related** | [schemas-external-consumer-boundary.md](schemas-external-consumer-boundary.md), [local-cloud-crate-architecture.md](./local-cloud-crate-architecture.md), [compute-module-abi.md](./compute-module-abi.md) §4–§5, [wasm-host.md](./wasm-host.md) §6–§7, [spoke-adapter-architecture.md](./spoke-adapter-architecture.md), [schemas/AGENTS.md](../../../schemas/AGENTS.md), [tooling/AGENTS.md](../../../tooling/AGENTS.md) |
 
 **Do not confuse:**
 
@@ -245,4 +245,4 @@ Historical audit (pre-rename paths): [archived schemas-boundary §5.2](../archiv
 
 ---
 
-*Normative Master. V1.62 P0 consumer-scope reorganization (2026-06-23); V1.62 P2 spec-seal polish; V1.63 local-api expansion; V1.64 common ErrorResponse + findings list-response amendment. Boundary rule: [schemas-external-consumer-boundary.md](../knowledge/schemas-external-consumer-boundary.md).*
+*Normative Master. V1.62 P0 consumer-scope reorganization (2026-06-23); V1.62 P2 spec-seal polish; V1.63 local-api expansion; V1.64 common ErrorResponse + findings list-response amendment. Boundary rule: [schemas-external-consumer-boundary.md](schemas-external-consumer-boundary.md).*

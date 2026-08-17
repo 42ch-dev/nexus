@@ -210,7 +210,7 @@ The `creator-workflow.md` `persist` stage already maps Work → World KB to `cre
 - **Legacy worldless Work** (V1.39 and earlier): extraction is skipped or remains local Work scope; it MUST NOT silently create a new World or promote content into an arbitrary World.
 - **Explicit promotion**: rows in `Outlines/event-index.md` and `Outlines/foreshadowing.md` may be promoted to World KB items only when the Work is World-bound and the agent/user marks the promotion explicitly (e.g. "promote E012 as background" or "promote F007 as rule").
 
-**V1.40 acceptance** (per plan P0–P3): hermetic tests for valid/invalid/missing `world_id`, prompt block presence for new World-bound Works, legacy worldless read compatibility, `world_refs` warning/error timing, and `kb-extract` target selection. On ship, close DF-63 in [deferred-features-cross-version-tracker.md](../deferred-features-cross-version-tracker.md).
+**V1.40 acceptance** (per plan P0–P3): hermetic tests for valid/invalid/missing `world_id`, prompt block presence for new World-bound Works, legacy worldless read compatibility, `world_refs` warning/error timing, and `kb-extract` target selection. On ship, close DF-63 in [deferred-features-cross-version-tracker.md](../../roadmaps/deferred-features-cross-version-tracker.md).
 
 **Anti-patterns** explicitly rejected:
 
@@ -218,7 +218,7 @@ The `creator-workflow.md` `persist` stage already maps Work → World KB to `cre
 - Hard-coded character name references in `novel-writing` prompts without KB lookup — produces drift from World state.
 - Inheriting the reference-system `{作品目录}/世界设定/` subtree shape into OSS — wrong layer (per-Work is the wrong layer for world content).
 
-See DF-63 in [deferred-features-cross-version-tracker.md](../deferred-features-cross-version-tracker.md) for the full cross-Work roadmap (World KB extraction path, KB item schema, World KB ↔ Work binding protocol).
+See DF-63 in [deferred-features-cross-version-tracker.md](../../roadmaps/deferred-features-cross-version-tracker.md) for the full cross-Work roadmap (World KB extraction path, KB item schema, World KB ↔ Work binding protocol).
 
 ---
 
@@ -386,7 +386,7 @@ This keeps `novel-writing` a single preset that scales from chapter 1 to chapter
 
 **V1.42 P1 (Implemented subset):** Test #6 (Future multi-volume migration: the `(work_id, chapter)` → `(work_id, volume, chapter)` migration is idempotent and preserves row data) is implemented. Verified by `w01_v142_migration_idempotent` test in `crates/nexus-local-db/tests/v142_migration_fixes.rs`. Index coverage for `next_chapter_volume_aware` query is also verified by `w02_volume_aware_index_coverage` test. Other tests (#1–#5) remain future per the existing roadmap below.
 
-A future implementation plan for this roadmap must include at least these tests — **Durable roadmap:** consolidated in the [deferred-features tracker §2.6](../../knowledge/deferred-features-cross-version-tracker.md) — DR-67 (future acceptance tests #1–5):
+A future implementation plan for this roadmap must include at least these tests — **Durable roadmap:** consolidated in the [deferred-features tracker §2.6](../../roadmaps/deferred-features-cross-version-tracker.md) — DR-67 (future acceptance tests #1–5):
 
 1. **Chapter selection**: a 3-chapter Work with rows at varied statuses; assert `next_chapter(work_id)` returns the lowest eligible row per §4.5.2.
 2. **`current_chapter` transitions**: `current_chapter` changes only when a row transitions to `finalized`, and it becomes the just-finalized chapter number.
@@ -453,7 +453,7 @@ The orchestration engine reads `Outlines/foreshadowing.md` before each draft pro
 
 #### 4.6.7 E### read stub
 
-Event-index (`Outlines/event-index.md`): **P1 minimum** — preserve scaffold; read existing rows for prompt if present. Full E### promotion (write + upsert) deferred to V1.50 — **Durable roadmap:** consolidated in the [deferred-features tracker §2.6](../../knowledge/deferred-features-cross-version-tracker.md) — DR-66 (E### event-index write+upsert promotion).
+Event-index (`Outlines/event-index.md`): **P1 minimum** — preserve scaffold; read existing rows for prompt if present. Full E### promotion (write + upsert) deferred to V1.50 — **Durable roadmap:** consolidated in the [deferred-features tracker §2.6](../../roadmaps/deferred-features-cross-version-tracker.md) — DR-66 (E### event-index write+upsert promotion).
 
 #### 4.6.8 World KB boundary
 

@@ -129,5 +129,5 @@ Typify inlines a distinct struct copy for every schema that references a shared 
 
 ## Evidence
 
-- Shipped: [shipped-features-tracker.md § V1.138](../shipped-features-tracker.md) — bespoke generators retired; library-driven `pnpm run codegen`; drift + workspace gates green.
+- Shipped: V1.138 (per-version snapshot in the local roadmaps shipped tracker) — bespoke generators retired; library-driven `pnpm run codegen`; drift + workspace gates green.
 - Plan: V1.138 P0 (jstt) + P1 (typify); integration branch `iteration/v1.138`.
