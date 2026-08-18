@@ -14,9 +14,9 @@
 - [cli-spec.md](cli-spec.md) — creator entry and workspace layout
 - [orchestration-engine.md](orchestration-engine.md) — preset execution model
 - [entity-scope-model.md](entity-scope-model.md) — World/KB binding and BlockType taxonomy
-- [non-novel-profiles-roadmap.md](non-novel-profiles-roadmap.md) — prior Exploration (now promoted)
+- Prior Exploration: the non-novel profiles roadmap (targets since promoted to Feature line specs)
 
-**Plan**: [2026-06-22-v1.54-game-bible-scaffold.md](../../plans/2026-06-22-v1.54-game-bible-scaffold.md)
+**Plan**: `2026-06-22-v1.54-game-bible-scaffold.md`
 
 ---
 
@@ -399,7 +399,7 @@ Game-bible uses `work_profile = "game_bible"` (TEXT column, consistent with `"no
 | `design-writing` preset | LLM-driven per-section drafting with review loop + auto section_status transition (V1.55 P2 shipped; V1.56 P-last R-V155P2-F002 closed) | V1.54 scaffold |
 | Section completion detection | Daemon evaluates `section_status` frontmatter across all Design files (V1.55 P2 shipped) | V1.54 section model |
 | KB extraction for game-bible | LLM extracts design facts into World KB with `game_bible_category` (V1.55 P2 shipped) | V1.54 BlockType + ValidationMode |
-| Game-bible auto-chain | Optional stage sequencing for multi-section production — **Durable roadmap:** [deferred-features tracker §2.6](../roadmaps/deferred-features-cross-version-tracker.md) DR-41 | V1.54 preset stubs |
+| Game-bible auto-chain | Optional stage sequencing for multi-section production — **Durable roadmap:** deferred-features tracker §2.6 DR-41 | V1.54 preset stubs |
 | Script profile scaffold | Follow game-bible pattern for script/dialogue Works (V1.55 P3 shipped) | V1.54 pattern validated |
 
 ---

@@ -14,7 +14,7 @@
 - [entity-scope-model.md](entity-scope-model.md) — optional World/KB binding boundaries
 - [novel-writing/workflow-profile.md](novel-writing/workflow-profile.md) — prior `work_profile: novel` Feature line pattern
 
-**Iteration compass**: [v1.52/delivery-compass.md](../iterations/v1.52/delivery-compass.md)
+**Iteration compass**: `delivery-compass.md`
 
 ---
 

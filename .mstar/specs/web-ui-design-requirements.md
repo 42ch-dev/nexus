@@ -2,7 +2,7 @@
 
 **Status**: Input brief (Prepare Phase 2b) — **not** the DESIGN.md itself  
 **Author**: `@product-manager`  
-**Consumer**: `@architect` (authors repo-root [`DESIGN.md`](../../../DESIGN.md), the design-token SSOT; completeness level **Standard** per compass §5 item #6) *(V1.98: sole SSOT — former `apps/web/DESIGN*.md` retired)*  
+**Consumer**: `@architect` (authors repo-root [`DESIGN.md`](../../DESIGN.md), the design-token SSOT; completeness level **Standard** per compass §5 item #6) *(V1.98: sole SSOT — former `apps/web/DESIGN*.md` retired)*  
 **Iteration**: V1.64 (V1.65 authoring-surface amendment appended in §5)  
 **Drives**: [web-ui.md](web-ui.md) §6 (MVP surface) — the screens whose look/feel this brief constrains
 
@@ -92,7 +92,7 @@ All three V1.65 component classes — editor, table, context menu — must ship 
 
 ## What this brief deliberately does NOT decide
 
-- Token values (colors, type scale, spacing, radii, elevation, motion durations) → repo-root [`DESIGN.md`](../../../DESIGN.md) (`@architect`).
+- Token values (colors, type scale, spacing, radii, elevation, motion durations) → repo-root [`DESIGN.md`](../../DESIGN.md) (`@architect`).
 - Component inventory beyond "strong tables + strong forms + status/severity primitives + loading/empty/error states" (V1.64) plus the V1.65 "editor + structure table + read-only context menu" increment (§5) → repo-root `DESIGN.md`.
 - Completeness level beyond **Standard** for V1.64 + **Standard+ increment** for V1.65 authoring components (Production-level polish/animations are V1.66, compass §5 item #6/#7).
 
@@ -122,7 +122,7 @@ V1.66 wraps the V1.65 SPA in a Tauri v2 desktop shell (see [web-ui.md](web-ui.md
 - **Minimum/resizable size**: comfortable for both data-dense Control Room tables AND the authoring editor.
 - **Light + dark parity**: chrome follows system appearance; matches SPA theme tokens in both.
 
-> **Durable polish roadmap** consolidated in the [deferred-features tracker §2.6](../roadmaps/deferred-features-cross-version-tracker.md) — DR-58/DR-59/DR-60.
+> **Durable polish roadmap** consolidated in the deferred-features tracker §2.6 — DR-58/DR-59/DR-60.
 
 ### 6.2 App menu structure
 

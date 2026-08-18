@@ -1,8 +1,8 @@
 # Orchestration Engine — Design Specification
 
-**Status**: Shipped (V1.4–V1.34 — orchestration engine SSOT, preset loader, worker IPC, capability registry). **V1.39 target**: DF-53 on_complete auto-chain + DF-68 boot resume policy. **V1.62 Shipped**: §5.2 `narrative.compute` capability + §8.4 `combat-engine` preset (deferred from V1.61 P3). FL-D (DF-29/31/56) remain in [`deferred-features-cross-version-tracker.md`](../roadmaps/deferred-features-cross-version-tracker.md) §3.3.  
+**Status**: Shipped (V1.4–V1.34 — orchestration engine SSOT, preset loader, worker IPC, capability registry). **V1.39 target**: DF-53 on_complete auto-chain + DF-68 boot resume policy. **V1.62 Shipped**: §5.2 `narrative.compute` capability + §8.4 `combat-engine` preset (deferred from V1.61 P3). FL-D (DF-29/31/56) remain in `deferred-features-cross-version-tracker.md` §3.3.  
 **Document class**: Master  
-**Pillar (V1.122)**: **Harness** — this spec is the control-strategy engine contract for the [Harness](../../STRATEGY.md) pillar (orchestration engine + agent host + capability registry + presets). Harness is the "how an author harnesses AI agents to execute creative work" pillar; the user-visible Strategy/Strategies → **Harness** product rename shipped V1.156 P3 (closed → [shipped archive](../roadmaps/shipped-features-tracker.md)); internal identifiers remain `strategy`/`preset` (architect LOCKED). Pillar framing: [`pillar-framing.md`](../iterations/v1.122/specs/pillar-framing.md).
+**Pillar (V1.122)**: **Harness** — this spec is the control-strategy engine contract for the [Harness](../../STRATEGY.md) pillar (orchestration engine + agent host + capability registry + presets). Harness is the "how an author harnesses AI agents to execute creative work" pillar; the user-visible Strategy/Strategies → **Harness** product rename shipped V1.156 P3 (closed → shipped archive); internal identifiers remain `strategy`/`preset` (architect LOCKED). Pillar framing: `pillar-framing.md`.
 **Author**: @project-manager (brainstorm consolidation) / to be co-authored by @architect before first implement
 **Date**: 2026-04-17; **Last updated**: 2026-06-23 — V1.62 P2 §5.2 + §8.4
 **Scope**: daemon runtime (daemon), new `crates/nexus-acp-host`, new `crates/nexus-orchestration`, `nexus42` CLI additions, preset bundle format.
@@ -11,8 +11,7 @@
 
 - [local-cloud-crate-architecture.md](local-cloud-crate-architecture.md) — crate owners for sync/memory capabilities (§5.2 target names; legacy `nexus-sync` / `nexus-domain` until V1.21)
 - [acp-client-tech-spec.md](acp-client-tech-spec.md) — §2.3 worker-delegated hosting amendment; §4 Daemon API additions; §11 `nexus-acp-host` crate spec
-- [daemon-lifecycle-api.md](../../archived/knowledge/daemon-lifecycle-api.md) — full 6-state statig HSM closing TD-9
-- [architecture-alignment-review.md](../../archived/knowledge/architecture-alignment-review.md) — TD-9 status moves from "gap" to "closed via statig HSM in v2 lifecycle doc"
+- TD-9 closed: full 6-state HSM lifecycle (status moves from "gap" to "closed")
 
 **Non-goals** (explicit):
 
@@ -20,9 +19,9 @@
 - LLM-driven `core_context` summarisation / auto-iteration — V1.4 reserves the data-model variant but does not implement the capability (see [creator-schedule-and-core-context.md](creator-schedule-and-core-context.md) §11); V1.5+.
 - Schedule cron / wall-clock triggers — V1.5+ (schema ready in V1.4).
 - Preset third-party registry / signing / publish — V1.5+.
-- Full `schemas/` vs local-type boundary refactor — **WS5** of V1.4, designed separately in [schemas-boundary.md](../../archived/knowledge/schemas-boundary.md); parallel to WS2 of that compass.
+- Full `schemas/` vs local-type boundary refactor — **WS5** of V1.4, designed separately in `schemas-boundary.md`; parallel to WS2 of that compass.
 
-> This document is the **orchestration engine design** from the 2026-04-17 brainstorming session. Scope has since expanded: the `schemas/` boundary refactor is tracked as WS5 ([schemas-boundary.md](../../archived/knowledge/schemas-boundary.md)); the former "B-track" Schedule + core_context work is tracked as WS7 ([creator-schedule-and-core-context.md](creator-schedule-and-core-context.md)). Open questions originally parked in §11 of this document are **now answered** by WS7's spec (see §11 below for the reconciliation table).
+> This document is the **orchestration engine design** from the 2026-04-17 brainstorming session. Scope has since expanded: the `schemas/` boundary refactor is tracked as WS5 (`schemas-boundary.md`); the former "B-track" Schedule + core_context work is tracked as WS7 ([creator-schedule-and-core-context.md](creator-schedule-and-core-context.md)). Open questions originally parked in §11 of this document are **now answered** by WS7's spec (see §11 below for the reconciliation table).
 
 ---
 
@@ -69,7 +68,7 @@ Users need to express creator workflows as configurable, prompt-driven strategie
 3. daemon runtime gains: orchestration engine runtime, statig lifecycle HSM, Worker Manager, IPC server.
 4. `nexus42` gains: `acp-worker` hidden subcommand (worker entrypoint); `schedule` command group (B-track — not in A's deliverables except a stub that surfaces engine state).
 5. First built-in preset: `_system.maintenance` (mandatory) and one user-facing sample `novel-writing`.
-6. Knowledge docs revised: [acp-client-tech-spec.md](acp-client-tech-spec.md), [daemon-lifecycle-api.md](../../archived/knowledge/daemon-lifecycle-api.md).
+6. Knowledge docs revised: [acp-client-tech-spec.md](acp-client-tech-spec.md).
 
 ### 1.4 Effort (agent-oriented)
 
@@ -106,7 +105,7 @@ Per [effort-estimation.md](https://github.com/btspoony/mstar-harness/blob/main/d
 | `nexus42 schedule` CLI command family semantics                                | B-track                                                           |
 | Seed-prompt → stable core-context derivation & versioning                      | B-track                                                           |
 | Preset distribution / registry / signing                                       | Future (V1.5+)                                                   |
-| Wire schemas vs local types boundary refactor                                  | [v1.4/delivery-compass.md](../../iterations/v1.4/delivery-compass.md) §4 WS5 |
+| Wire schemas vs local types boundary refactor                                  | `delivery-compass.md` §4 WS5 |
 | ACP SDK migration (e.g. to `sacp` v1.0)                                        | Governed by [acp-client-tech-spec.md](acp-client-tech-spec.md) §1.2 adapter-layer policy |
 
 ### 2.3 Non-goals (explicit)
@@ -235,7 +234,7 @@ impl graph_flow::SessionStorage for SqliteSessionStorage {
 }
 ```
 
-**Pool ownership (post-WS8)**: `nexus-local-db` exposes `Arc<sqlx::SqlitePool>` as the single workspace pool for `state.db` after V1.4 **WS8** unifies the DB engine on `sqlx` ([`2026-04-17-v1.4-ws8-local-db-sqlx-migration.md`](../../plans/2026-04-17-v1.4-ws8-local-db-sqlx-migration.md); decision SSOT: [`crate-selection-best-practices.md`](../knowledge/crate-selection-best-practices.md) §2.3 + §3.3). `SqliteSessionStorage` takes that `Arc<SqlitePool>` at construction time; no separate connection or separate `.db` file. The `orchestration_sessions` table lands as one more `.sql` migration file under `crates/nexus-local-db/migrations/`, authored in WS2 Task 3 **after** WS8 T1–T2.
+**Pool ownership (post-WS8)**: `nexus-local-db` exposes `Arc<sqlx::SqlitePool>` as the single workspace pool for `state.db` after V1.4 **WS8** unifies the DB engine on `sqlx` (`2026-04-17-v1.4-ws8-local-db-sqlx-migration.md`; decision SSOT: [`crate-selection-best-practices.md`](../knowledge/crate-selection-best-practices.md) §2.3 + §3.3). `SqliteSessionStorage` takes that `Arc<SqlitePool>` at construction time; no separate connection or separate `.db` file. The `orchestration_sessions` table lands as one more `.sql` migration file under `crates/nexus-local-db/migrations/`, authored in WS2 Task 3 **after** WS8 T1–T2.
 
 Schema (new table in the unified `state.db` owned by `nexus-local-db`; schema migration file added under `crates/nexus-local-db/migrations/`):
 
@@ -292,7 +291,7 @@ All impls live in `crates/nexus-orchestration/src/tasks/`. Task implementations 
 
 **Explicit non-goal:** conditional `next` on NOGO (e.g. return to `gathering`) remains deferred until loader accepts `next.kind: conditional`.
 
-> **Durable roadmap:** consolidated in the [deferred-features tracker §2.6](../roadmaps/deferred-features-cross-version-tracker.md) — DR-11 (conditional-next routing).
+> **Durable roadmap:** consolidated in the deferred-features tracker §2.6 — DR-11 (conditional-next routing).
 
 ### 4.5 Pausing, cancelling, and signals
 
@@ -353,7 +352,7 @@ All capabilities below are registered at daemon runtime startup. Adding a new ca
 | `judge.rule`                | Evaluate a pure rule over `contextData`                        | `nexus-orchestration`  | **Real** — boolean literals, field equality/inequality, numeric comparisons (V1.31 DF-32) |
 | `context.summarize`         | Summarize context through a worker-backed ACP prompt           | `nexus-orchestration`  | **Real** — returns `{ summary, prompt_hash }` (V1.31 DF-34/37) |
 | `narrative.compute`         | Invoke WASM compute module; apply state_delta, timeline_events, new_key_blocks, return battle_report | `nexus-orchestration`  | **Real** — calls `nexus-wasm-host::compute()` (V1.61 P3; spec-seal V1.62 P2); see §8.4.1 |
-| `timer.wait_until`          | Schedule a wake-up signal (requires B-track clock)             | `nexus-orchestration`  | Deferred clock integration — **Durable roadmap:** [deferred-features tracker §2.6](../roadmaps/deferred-features-cross-version-tracker.md) — DR-12 |
+| `timer.wait_until`          | Schedule a wake-up signal (requires B-track clock)             | `nexus-orchestration`  | Deferred clock integration — **Durable roadmap:** deferred-features tracker §2.6 — DR-12 |
 
 > **V1.31 de-stub note:** `creator.*`, `judge.rule`, `judge.llm`, and `context.summarize` are real runtime capabilities as of V1.31. DF-37 reduces worker-backed fallback to explicit standalone/test construction paths; daemon/preset execution injects runtime dependencies through the registry factory.
 
@@ -388,7 +387,7 @@ Operational semantics:
 
 ### 5.7 Outbox consolidation (V1.59)
 
-The dual-outbox architecture identified in TD-8 ([dual-outbox-architecture.md](../../archived/knowledge/dual-outbox-architecture.md)) is consolidated in V1.59. The unified outbox schema uses `outbox_entries` / `partial_apply_states` (migration `20260420_outbox_tables.sql`) as the single source of truth.
+The dual-outbox architecture identified in TD-8 (`dual-outbox-architecture.md`) is consolidated in V1.59. The unified outbox schema uses `outbox_entries` / `partial_apply_states` (migration `20260420_outbox_tables.sql`) as the single source of truth.
 
 **Single-writer rule**: each outbox event type has exactly one authorized writer subsystem. `nexus-cloud-sync::outbox::Outbox` owns sync push/pull commands. `nexus-orchestration` capabilities (`outbox.flush`, `outbox.compact`) own maintenance operations. The daemon legacy `outbox` queue table is deprecated and has zero active consumers (V1.59 T3 audit).
 
@@ -418,7 +417,7 @@ The dual-outbox architecture identified in TD-8 ([dual-outbox-architecture.md](.
 - Worker holds **one** ACP agent subprocess at a time (initial MVP); the choice of *which* ACP agent to run is determined by the preset / Schedule and passed on worker start as `--agent <agent_ref>`.
 - Switching agents within a creator requires **worker restart** in MVP (acceptable for V1.4). Multi-agent workers deferred to V1.5+.
 
-> **Durable roadmap:** consolidated in the [deferred-features tracker §2.6](../roadmaps/deferred-features-cross-version-tracker.md) — DR-13 (multi-agent workers).
+> **Durable roadmap:** consolidated in the deferred-features tracker §2.6 — DR-13 (multi-agent workers).
 
 ### 6.3 IPC transport
 
@@ -756,7 +755,7 @@ The binary includes embedded presets under `crates/nexus-orchestration/embedded-
 | `creative-brief-intake` | **V1.33 Shipped** (`2026-06-04-v1.33-creative-brief-intake-preset` P2 plan) — grill-me intake preset | intake → done | `acp.prompt` |
 | `essay-writing` | **V1.63 P2 Shipped** — essay production preset with 4-dimension quality rubric (thesis clarity, evidence support, coherence, ending takeaway) | intake → outline → draft → revise → finalize → finalize_commit → done | `creator.inject_prompt`, `acp.prompt`, `judge.llm`, `essay.draft_status.finalize` |
 
-All shipped presets use **linear** `next` transitions unless noted; conditional routing remains deferred (§7.5). **Durable roadmap:** [deferred-features tracker §2.6](../roadmaps/deferred-features-cross-version-tracker.md) — DR-11.
+All shipped presets use **linear** `next` transitions unless noted; conditional routing remains deferred (§7.5). **Durable roadmap:** deferred-features tracker §2.6 — DR-11.
 
 ### 7.8 Preset `run_intents` (V1.33)
 
@@ -913,7 +912,7 @@ CLI and daemon `POST /v1/local/presets:validate` call these functions directly w
 | `inner_graphs.<name>.nodes[].depends_on`              | `add_edge(dep, this)` in inner graph                                              |
 | `inner_graphs.<name>.output_binding`                  | `InnerGraphTask` post-run: reads `ctx[binding_path]`, writes `state.<x>.output`   |
 
-> **Durable roadmap:** `next.kind=conditional` loader acceptance (the `(future)` row above) is consolidated in the [deferred-features tracker §2.6](../roadmaps/deferred-features-cross-version-tracker.md) — DR-11.
+> **Durable roadmap:** `next.kind=conditional` loader acceptance (the `(future)` row above) is consolidated in the deferred-features tracker §2.6 — DR-11.
 
 ### 8.3 Caching and reloading
 
@@ -1071,7 +1070,7 @@ Phase 3 (preset loader + novel-writing E2E)
 Phase 5 (knowledge doc revisions + spec amendments in place)
 ```
 
-Compass WS5 (`schemas/` boundary refactor) is fully parallel and has no dependencies on this spec's phases — see [v1.4/delivery-compass.md](../../iterations/v1.4/delivery-compass.md) §4 WS5 for detailed scope.
+Compass WS5 (`schemas/` boundary refactor) is fully parallel and has no dependencies on this spec's phases — see `delivery-compass.md` §4 WS5 for detailed scope.
 
 ### 10.2 Phase 1 — `nexus-acp-host` crate extraction (M; 1–2 agent sessions)
 
@@ -1141,7 +1140,7 @@ Compass WS5 (`schemas/` boundary refactor) is fully parallel and has no dependen
 
 ### 10.5 Phase 4 — statig daemon lifecycle (S+; 1 agent session; parallel with Phase 2)
 
-Owned by [daemon-lifecycle-api.md](daemon-lifecycle-api.md); A-track just consumes it. See that doc for state graph, entry/exit actions, event catalogue, and HTTP surface migration (status field now exposes real 6-state values).
+Owned by the daemon lifecycle state machine (6-state; see [daemon-runtime.md](daemon-runtime.md) §10); A-track just consumes it. Entry/exit actions, event catalogue, and the HTTP surface migration live with the lifecycle owner (status field exposes real 6-state values).
 
 **Integration point with engine**: HSM `Running.entry` calls `engine.start()`; `Stopping.entry` calls `engine.shutdown(grace_ms)`; `Degraded` is entered when any of `{sync, acp_registry, worker_manager}` report sustained failures (threshold defined in v2 lifecycle doc).
 
@@ -1151,10 +1150,10 @@ In the same change window as each phase:
 
 - Phase 1 → commit [acp-client-tech-spec.md](acp-client-tech-spec.md) §11 (crate layout).
 - Phase 2 → commit §4.3 (Daemon API additions) in the same spec.
-- Phase 4 → commit [daemon-lifecycle-api.md](daemon-lifecycle-api.md).
+- Phase 4 → commit the lifecycle doc updates.
 - Phase 3 → this document updated: move sections to "Delivered" once implemented.
 - **Phase 5b (new)** → WS7 lands [creator-schedule-and-core-context.md](creator-schedule-and-core-context.md) implementation; engine consumes the `ScheduleSupervisor` signal path added in that spec's §4.
-- [architecture-alignment-review.md](architecture-alignment-review.md) §2.6 row for TD-9 updated from "Partial" to "Resolved (v2)".
+- TD-9 tracking row updated from "Partial" to "Resolved (v2)".
 
 ---
 
@@ -1170,14 +1169,14 @@ The following questions were originally parked as B-track in this document. Afte
 | OQ-4  | `seed + user_edits + iterated_experience → core_context` derivation + versioning                         | **Partially answered in WS7**; V1.4 implements seed / user_edit / preset_hook derivation kinds and reserves `LlmSummarize` for V1.5. See [creator-schedule-and-core-context.md](creator-schedule-and-core-context.md) §6 + §11. |
 | OQ-5  | `nexus42 schedule add/update/remove/inspect` semantics — editing in-flight                              | **Answered in WS7** — full CRUD; in-flight edits accepted but take effect at next state transition ("core_context is stable during execution"). See §3.3 + §6.4. |
 | OQ-6  | Timer / clock model for wall-clock triggers                                                             | **Partially answered** — V1.4 on-demand only; `scheduled_at` column reserved; V1.5 adds clock poller zero-migration. See WS7 §2 + §10. |
-| OQ-7  | Multi-agent per creator (worker hosts > 1 agent)                                                        | **Still deferred** to V1.5+ (see WS7 §13). **Durable roadmap:** [deferred-features tracker §2.6](../roadmaps/deferred-features-cross-version-tracker.md) — DR-09. |
-| OQ-8  | User-authored capabilities (shell / WASM plugin ABI)                                                    | **Still deferred** to V1.5+ (see WS7 §13). **Durable roadmap:** [deferred-features tracker §2.6](../roadmaps/deferred-features-cross-version-tracker.md) — DR-10. |
+| OQ-7  | Multi-agent per creator (worker hosts > 1 agent)                                                        | **Still deferred** to V1.5+ (see WS7 §13). **Durable roadmap:** deferred-features tracker §2.6 — DR-09. |
+| OQ-8  | User-authored capabilities (shell / WASM plugin ABI)                                                    | **Still deferred** to V1.5+ (see WS7 §13). **Durable roadmap:** deferred-features tracker §2.6 — DR-10. |
 
 ---
 
 ## 12. Coordinated Work Tracks and Knowledge Doc Revisions
 
-This document defines the **orchestration engine design itself** — workstream ordering, effort estimation, and program-level coordination with the `schemas/` boundary refactor live in **[v1.4/delivery-compass.md](../../iterations/v1.4/delivery-compass.md)**. Refer to that compass for:
+This document defines the **orchestration engine design itself** — workstream ordering, effort estimation, and program-level coordination with the `schemas/` boundary refactor live in **`delivery-compass.md`**. Refer to that compass for:
 
 - How WS1–WS4 of this spec map to V1.4 waves and milestones.
 - How the `schemas/` boundary refactor (formerly noted here as a "parallel small plan") is formalised as **WS5** of the V1.4 delivery compass.
@@ -1189,10 +1188,9 @@ If you landed on this section looking for the `schemas/` refactor scope, open th
 
 | v1 (preserved, now carries superseded-by pointer) | v2 (new; authoritative)                                         |
 | ------------------------------------------------- | --------------------------------------------------------------- |
-| [daemon-lifecycle-api-legacy.md](../../archived/knowledge/daemon-lifecycle-api-legacy.md) (archived) | [daemon-lifecycle-api.md](../../archived/knowledge/daemon-lifecycle-api.md)  |
-| [acp-client-tech-spec-legacy.md](../../archived/knowledge/acp-client-tech-spec-legacy.md) (archived) | [acp-client-tech-spec.md](acp-client-tech-spec.md)  |
+| `acp-client-tech-spec-legacy.md` (archived) | [acp-client-tech-spec.md](acp-client-tech-spec.md)  |
 
-**Archived 2026-04-17** (historical): v1 lifecycle/ACP companion files moved to `.mstar/archived/knowledge/`. This orchestration-engine spec remains **active** under `.mstar/specs/` (structure paths in §3–§8 may lag implementation; semantics remain authoritative).
+**Retired 2026-04-17** (historical): the v1 lifecycle/ACP companion specs were retired. This orchestration-engine spec remains **active** (structure paths in §3–§8 may lag implementation; semantics remain authoritative).
 
 ---
 
@@ -1218,11 +1216,8 @@ If you landed on this section looking for the `schemas/` refactor scope, open th
 Internal:
 
 - [acp-client-tech-spec.md](acp-client-tech-spec.md) — companion spec for ACP host split and worker-delegated hosting
-- [daemon-lifecycle-api.md](../../archived/knowledge/daemon-lifecycle-api.md) — companion spec for the 6-state HSM (closes TD-9)
-- [architecture-alignment-review.md](../../archived/knowledge/architecture-alignment-review.md) — TD matrix; §2.6 TD-9 row updated to "Resolved via v2" after Phase 4 ships
-- [local-db-refactor.md](../../archived/knowledge/local-db-refactor.md) — `nexus-local-db` ownership rules for the new `orchestration_sessions` table. See [local-db-refactor.md §4](../../archived/knowledge/local-db-refactor.md#4-modularization-plan) for pool sharing model.
-- [acp-client-tech-spec-legacy.md](../../archived/knowledge/acp-client-tech-spec-legacy.md) — archived; do not rely on directly (see Superseded header)
-- [daemon-lifecycle-api-legacy.md](../../archived/knowledge/daemon-lifecycle-api-legacy.md) — archived; do not rely on directly (see Superseded header)
+- `local-db-refactor.md` — `nexus-local-db` ownership rules for the new `orchestration_sessions` table. See `local-db-refactor.md §4` for pool sharing model.
+- `acp-client-tech-spec-legacy.md` — archived; do not rely on directly (see Superseded header)
 
 External (stable, public):
 
@@ -1234,7 +1229,7 @@ External (stable, public):
 
 ---
 
-*End of specification. The companion knowledge documents ([daemon-lifecycle-api.md](../../archived/knowledge/daemon-lifecycle-api.md), [acp-client-tech-spec.md](acp-client-tech-spec.md), [creator-schedule-and-core-context.md](creator-schedule-and-core-context.md)) fill in details that would otherwise clutter this document; read them together when extending orchestration.*
+*End of specification. The companion documents ([acp-client-tech-spec.md](acp-client-tech-spec.md), [creator-schedule-and-core-context.md](creator-schedule-and-core-context.md), [daemon-runtime.md](daemon-runtime.md)) fill in details that would otherwise clutter this document; read them together when extending orchestration.*
 
 ---
 

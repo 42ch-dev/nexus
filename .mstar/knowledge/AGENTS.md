@@ -2,7 +2,7 @@
 
 Behavioral rules for the harness **knowledge** tree. **Do not** duplicate file indexes here — discover documents via [`README.md`](README.md) or directory listing.
 
-> Project and crate rules: root [`AGENTS.md`](../../AGENTS.md). Harness layout and path symbols (`{SPECS_DIR}` = `specs/`): [`.mstar/AGENTS.md`](../AGENTS.md).
+> Project and crate rules: root [`AGENTS.md`](AGENTS.md). Harness layout and path symbols (`{SPECS_DIR}` = `specs/`): [`.mstar/AGENTS.md`](AGENTS.md).
 
 ---
 
@@ -60,7 +60,7 @@ Spec supersession uses the archiving rules below — independent from feature-tr
 
 When any knowledge or spec document is superseded:
 
-1. Move to local `.mstar/archived/knowledge/` (gitignored process archive), **or** leave a short stub in tracked `knowledge/` pointing at the replacement.
+1. Remove the document from tracked `knowledge/` / `specs/` **entirely** — no archive-pointer stubs. A copy may live in the local `.mstar/archived/knowledge/` process archive, but tracked files must not reference it (no paths, no "archived full text" pointers). Record supersession in the README index.
 2. Fix all **tracked** in-repo links in the same change.
 3. Update **README indexes only** — not AGENTS files.
 

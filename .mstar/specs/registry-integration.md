@@ -13,7 +13,7 @@ Related docs: nexus-platform `v1-spec/architecture.md` §6.4–6.5, [`cli-spec.m
 
 The **Agent Client Protocol registry** is maintained upstream as open data and tooling: agent listings, distribution metadata, and JSON schemas live in the community project **`agentclientprotocol/registry`**, with a published **HTTPS index** for clients to fetch. Nexus does not host that authority.
 
-- **Concrete URLs, GitHub repo, and schema links** (only allowed external HTTP index for `v1-spec`): [`references-learnings.md`](../../references-learnings.md) §0.1 — rows **ACP Registry** / **分发用索引**.
+- **Concrete URLs, GitHub repo, and schema links** (only allowed external HTTP index for `v1-spec`): the **ACP Registry** / **分发用索引** rows in §0.1 below.
 - **Default remote canonical source**: implementations SHOULD use the upstream **registry index JSON** as the default for §3.1 item 1 unless a workspace override or enterprise mirror is configured. Entry shape and fields MUST follow upstream **`FORMAT.md`** and **`registry.schema.json` / `agent.schema.json`** as versioned by that repo; Nexus MAY pin a specific index version or ETag once the fetch contract is stable.
 
 Authentication expectations for listed agents (e.g. `authMethods` in handshake) are defined upstream; see that repo’s **`AUTHENTICATION.md`** via the same references index.
@@ -178,8 +178,8 @@ Minimum recommended:
 
 ## 9. Open items
 
-> **Durable roadmap:** the open items below (pin upstream schema compat, enterprise mirror, binary distribution) are consolidated in the [deferred-features tracker §2.6](../roadmaps/deferred-features-cross-version-tracker.md) — DR-55.
+> **Durable roadmap:** the open items below (pin upstream schema compat, enterprise mirror, binary distribution) are consolidated in the deferred-features tracker §2.6 — DR-55.
 
-- Pin field-level compatibility to upstream **`registry.schema.json` / `agent.schema.json`** revisions as they ship in the **`agentclientprotocol/registry`** project (repo URL and default index in [`references-learnings.md`](../../references-learnings.md) §0.1).
+- Pin field-level compatibility to upstream **`registry.schema.json` / `agent.schema.json`** revisions as they ship in the **`agentclientprotocol/registry`** project (repo URL and default index in §0.1 below).
 - Enterprise mirror documentation and trust roots.
 - Binary agent distribution vs path-only local agents.

@@ -1,7 +1,7 @@
 # Badge soft / solid tone axis
 
 **Status:** crystallized from V1.102  
-**Source:** `.mstar/iterations/v1.102/specs/badge-soft-solid-contract.md`
+**Source:** `badge-soft-solid-contract.md`
 
 ## Summary
 

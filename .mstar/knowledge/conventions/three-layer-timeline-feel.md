@@ -113,7 +113,7 @@ const handleLayerChange = (layer) => {
 
 ## References
 
-- V1.123 layer feel spec: `iterations/v1.123/specs/layer-feel-differentiation.md` (this doc promoted from there)
-- V1.123 P4 implementer reports: `sdd/2026-07-18-v1.123-three-layer-zoom-experience/batch-a-report.md` + `batch-b-report.md`
+- V1.123 layer feel spec: the V1.123 iteration spec `layer-feel-differentiation.md` (this doc promoted from there)
+- V1.123 P4 implementer reports: the V1.123 SDD reports `batch-a-report.md` + `batch-b-report.md` (local)
 - Three-layer timeline projection pattern: `knowledge/architecture-patterns/three-layer-timeline-projection.md`
 - DESIGN.md + DESIGN.dark.md: V0.5 layer-feel section

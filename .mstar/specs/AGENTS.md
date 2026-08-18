@@ -2,7 +2,7 @@
 
 Decision rules for normative documents in **`specs/`**. **Do not** maintain file lists or domain indexes here — use [`README.md`](README.md) and each spec's header (`Status`, `Document class`, `Coordinates with`).
 
-Parent rules: [`knowledge/AGENTS.md`](../AGENTS.md). Repo root: [`AGENTS.md`](../../../AGENTS.md).
+Parent rules: [`knowledge/AGENTS.md`](AGENTS.md). Repo root: [`AGENTS.md`](AGENTS.md).
 
 ---
 
@@ -11,7 +11,7 @@ Parent rules: [`knowledge/AGENTS.md`](../AGENTS.md). Repo root: [`AGENTS.md`](..
 - **Default: flat** — one spec file per kebab-case basename at `specs/` root; no version suffix in filenames.
 - **`novel-writing/` subtree** — all `work_profile: novel` Feature line specs and Draft overlays (index: [novel-writing/README.md](novel-writing/README.md)).
 - **No other subdirectories** unless an ADR authorizes bulk link migration.
-- **Exploration and draft overlays** live here with explicit header status — not under `knowledge/` root or `iterations/`.
+- **Exploration and draft overlays** live here with explicit header status — not under `knowledge/` root or local iteration scratch.
 
 ---
 
@@ -81,9 +81,9 @@ Execute at **iteration close** or a dedicated spec-hygiene plan.
 
 | Class transition | Rule |
 | --- | --- |
-| **Draft overlay → Master** | Fold overlay sections into Master; archive overlay with `Superseded by:` stub |
+| **Draft overlay → Master** | Fold overlay sections into Master; remove the overlay file from tracked `specs/` entirely (record supersession in the README index; any archive copy stays local and unreferenced) |
 | **Exploration → normative** | Promote Status; fold into Master § if small, else keep Feature/Exploration Master with normative Status |
-| **Companion obsolete** | Archive when platform ADR + code drop the OSS hook |
+| **Companion obsolete** | Remove from tracked `specs/` when platform ADR + code drop the OSS hook (record in README index) |
 | **Legacy scope** | Do not grow; new engine behavior goes to orchestration Master |
 
 After any retire: fix links, update README, never leave duplicate normative paragraphs.

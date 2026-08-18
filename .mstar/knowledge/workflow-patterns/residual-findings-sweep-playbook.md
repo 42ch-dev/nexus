@@ -89,12 +89,15 @@ dependabot trio: yamux/libp2p ≥0.57, hickory-proto, react-router 7→8) or
 Durable Roadmap defers (roadmap pointer per row). Do not close external
 blockers "because the EPIC dropped them" — they stay open with updated targets.
 
-### 8. `_recovery_note` string key breaks tech-debt-rollup.sh
+### 8. Non-array `residual_findings` keys break array-only tooling
 
-The rollup script's canonical filter is **arrays only** — a string-valued
-`_recovery_note` key confuses the count. Keep `_recovery_note` untouched as a
-recovery artifact; never let it enter the rollup input. After the wave,
-recompute `metadata.tech_debt_summary` with the canonical filter and assert
+Rollup/validation tooling treats `residual_findings` values as **arrays
+only** — the historical rollup script counted with that filter, and the
+current engine validator (`mstar status validate`) hard-fails on any
+non-array key (observed 2026-08-18). A string-valued `_recovery_note` key
+therefore breaks both. Prose/recovery notes belong in the program timeline —
+never as a `residual_findings` key. After a sweep, recompute
+`metadata.tech_debt_summary` with the array-only filter and assert
 `total_open == by_severity == by_target == by_plan` (15 == 15 == 15 == 15 in
 V1.155).
 

@@ -8,7 +8,6 @@
 **Coordinates with**:
 - [orchestration-engine.md](orchestration-engine.md) §5.2 (capability roster — `outbox.flush` / `outbox.compact` rows move from Deferred wiring → Shipped)
 - [daemon-runtime.md](daemon-runtime.md) §10 (flush/compact invocation path)
-- [dual-outbox-architecture.md](../../archived/knowledge/dual-outbox-architecture.md) (archived problem statement — this spec resolves the three recommended follow-ups)
 
 ---
 
@@ -19,7 +18,7 @@ Prior to V1.59, two outbox concepts coexisted:
 1. **Sync outbox** (`outbox_entries` table, DDL in `20260420_outbox_tables.sql` migration, managed by `nexus-cloud-sync::outbox::Outbox`) — full delivery-state machine (staged → ready → sent → acked/conflicted/failed), retry with exponential backoff, partial-apply persistence.
 2. **Daemon legacy outbox** (`outbox` table, DDL in initial migration `20260417_000001_initial.sql`) — simple command queue (`id`, `command_type`, `payload`, `status`, `created_at`, `sent_at`, `error`) with **no active Rust-level consumers** (confirmed by V1.59 T3 audit). Exists only as DDL with a single test assertion in `nexus-daemon-runtime/src/db/schema.rs`.
 
-The split was identified in V1.1-era TD-8 ([dual-outbox-architecture.md](../../archived/knowledge/dual-outbox-architecture.md)) and deferred for a later consolidation. V1.59 P1 is that consolidation.
+The split was identified in V1.1-era TD-8 and deferred for a later consolidation. V1.59 P1 is that consolidation.
 
 ---
 
@@ -220,7 +219,7 @@ The legacy `outbox` table (defined in `20260417_000001_initial.sql`) was audited
 | V1.60 | Add `_deprecated` suffix comment to migration; verify no external tooling references the table |
 | V1.61+ | Drop table in a new migration; remove test assertion |
 
-> **Durable roadmap:** the phased removal (V1.60 suffix comment, V1.61+ drop) is consolidated in the [deferred-features tracker §2.6](../roadmaps/deferred-features-cross-version-tracker.md) — DR-08.
+> **Durable roadmap:** the phased removal (V1.60 suffix comment, V1.61+ drop) is consolidated in the deferred-features tracker §2.6 — DR-08.
 
 ---
 

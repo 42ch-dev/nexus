@@ -1,7 +1,7 @@
 # Schemas — External-Consumer Boundary
 
 **Status**: Active — V1.64 amendment: bundled local Web UI is an external Local API consumer
-**Supersedes**: `schemas-wire-platform-sync-boundary.md` (renamed 2026-06-23, V1.62 P0; same file, expanded scope). Companion to archived [schemas-boundary.md](../archived/knowledge/schemas-boundary.md).
+**Supersedes**: `schemas-wire-platform-sync-boundary.md` (renamed 2026-06-23, V1.62 P0; same file, expanded scope). Companion to archived `schemas-boundary.md`.
 **Aligned with**: `nexus` `schemas/AGENTS.md`, `crates/nexus-contracts/src/local/`
 
 ---
@@ -55,15 +55,15 @@ V1.62 reorganized `schemas/` along consumer-scope lines (compass v1.62 §1.3): t
 - **Stale path risk**: do not reference `schemas/cli-sync/`, `schemas/meta/`, `schemas/acp-runtime/`, `schemas/cloud-sync/`, or `schemas/compute/` — removed or renamed (see layout spec §1 + §5 historical renames).
 - **Codegen**: only files under `schemas/` generate TS in `@42ch/nexus-contracts`; platform upgrades follow npm semver + `schema_version`.
 - **Promoted Local API handlers**: handlers must return generated contract shapes for promoted schemas; strict drift detection is required before a schema-promoted route is considered consumer-safe.
-- **Full audit table**: [archived/knowledge/schemas-boundary.md](../archived/knowledge/schemas-boundary.md) §5.2 (53 wire / 10 local at audit time). Re-run audit before further moves; `rg <TypeName>` on `nexus-platform` before deleting generated TS.
+- **Full audit table**: `schemas-boundary.md` §5.2 (53 wire / 10 local at audit time). Re-run audit before further moves; `rg <TypeName>` on `nexus-platform` before deleting generated TS.
 
 ## Related
 
 - [local-cloud-crate-architecture.md](../specs/local-cloud-crate-architecture.md) — local vs cloud product lines, crate graph, daemon API classes
-- [archived/knowledge/daemon-api-workspace-write-architecture.md](../archived/knowledge/daemon-api-workspace-write-architecture.md) — **superseded** route table (use V1.20 compass + `daemon-runtime` / crate architecture SSOT)
-- [v1.20/delivery-compass.md](../iterations/v1.20/delivery-compass.md) — shipped local API redesign
-- [v1.21/delivery-compass.md](../iterations/v1.21/delivery-compass.md) — daemon sync route removal program
-- [v1.62/delivery-compass.md](../iterations/v1.62/delivery-compass.md) — consumer-scope reorganization + `local-api/` tree
+- `daemon-api-workspace-write-architecture.md` — **superseded** route table (use V1.20 compass + `daemon-runtime` / crate architecture SSOT)
+- `delivery-compass.md` — shipped local API redesign
+- `delivery-compass.md` — daemon sync route removal program
+- `delivery-compass.md` — consumer-scope reorganization + `local-api/` tree
 
 ---
 

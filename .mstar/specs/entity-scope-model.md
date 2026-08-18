@@ -8,7 +8,7 @@
 | **Document class** | Master |
 | **Scope** | Global/User/Creator/World/Timeline/Event/Moment hierarchy; entity ownership; `kb`/`knowledge` naming boundaries; scope transition rules |
 | **Last updated** | 2026-08-12 — V1.162 Review & Edit chain (architect pass 2): §6.6 fork-creation write boundary + lineage projection contract (PD-01 local-vs-platform reconciliation; carrier approach B locked). |
-| **Related** | [local-cloud-crate-architecture.md](./local-cloud-crate-architecture.md), [cli-spec.md](./cli-spec.md), [daemon-runtime.md](./daemon-runtime.md), [orchestration-engine.md](./orchestration-engine.md), [compute-module-abi.md](./compute-module-abi.md), [wasm-host.md](./wasm-host.md), [local-db-schema.md](./local-db-schema.md), [spoke-adapter-architecture.md](./spoke-adapter-architecture.md), [`docs/ARCHITECTURE.md`](../../../docs/ARCHITECTURE.md) |
+| **Related** | [local-cloud-crate-architecture.md](./local-cloud-crate-architecture.md), [cli-spec.md](./cli-spec.md), [daemon-runtime.md](./daemon-runtime.md), [orchestration-engine.md](./orchestration-engine.md), [compute-module-abi.md](./compute-module-abi.md), [wasm-host.md](./wasm-host.md), [local-db-schema.md](./local-db-schema.md), [spoke-adapter-architecture.md](./spoke-adapter-architecture.md), [`docs/ARCHITECTURE.md`](../../docs/ARCHITECTURE.md) |
 
 This file is normative for V1.23 crate wiring and naming alignment. When this file
 overlaps older wording in prior specs, keep the locked decisions here and update the
@@ -54,7 +54,7 @@ Global
 
 ### 1.4 Three-Layer Timeline projection (V1.123 — Normative)
 
-> **V1.156 amendment (shipped)**: the 3×2 matrix is completed (World×Moment + Work×Brief closed — see §1.4.4). The amendment is frontend-only (`wire_contracts_changed: false`); it adds no scope-ownership, uniqueness, or transition rule. The V1.123 carrier locks (§1.4.1) are unchanged. Product semantics: [`iterations/v1.156/specs/product-locks.md`](../iterations/v1.156/specs/product-locks.md) PD-2 / PD-3.
+> **V1.156 amendment (shipped)**: the 3×2 matrix is completed (World×Moment + Work×Brief closed — see §1.4.4). The amendment is frontend-only (`wire_contracts_changed: false`); it adds no scope-ownership, uniqueness, or transition rule. The V1.123 carrier locks (§1.4.1) are unchanged. Product semantics: `product-locks.md` PD-2 / PD-3.
 
 This subsection is **additive** — it does not rewrite §1.1 (canonical scope tree) or §1.2 (scope definitions). It canonizes three Timeline zoom layers — **Brief**, **Narrative**, **Moment** — as a re-projection of the existing `World > Timeline > Event > Moment` scope hierarchy, and locks the World/Work layer composition.
 
@@ -64,7 +64,7 @@ This subsection is **additive** — it does not rewrite §1.1 (canonical scope t
 |-------|-------------|-----------|----------------|---------------------------------|
 | **Brief** | World-global | Multi-decade / era / age | **World** (World-global Timeline layer) | `block_type=era` KnowledgeEntry (new wire enum value — see §5.1.1 narrative taxonomy extension + iteration architecture §2) |
 | **Narrative** | Event-level | Human-paced (days/weeks/years) | **Shared** (both World Timeline and Work Timeline) | World scope: `block_type=event` KnowledgeEntry (V1.122 preserved). Work scope: `WorkOutline.timeline_events[]` (V1.72 preserved). |
-| **Moment** | Scene/beat-precise | Sub-scene (minutes/hours within a scene) | **Work** (Work-scoped Timeline layer) | Frontend-only projection of V1.108 `OutlineSceneNodeData` / `OutlineBeatNodeData` from V1.72 `WorkOutline` (wire extension deferred to V1.124+ — **durable roadmap:** consolidated in the [deferred-features tracker §2.6](../roadmaps/deferred-features-cross-version-tracker.md) — DR-26; honest empty-state until then — see iteration architecture §3) |
+| **Moment** | Scene/beat-precise | Sub-scene (minutes/hours within a scene) | **Work** (Work-scoped Timeline layer) | Frontend-only projection of V1.108 `OutlineSceneNodeData` / `OutlineBeatNodeData` from V1.72 `WorkOutline` (wire extension deferred to V1.124+ — **durable roadmap:** consolidated in the deferred-features tracker §2.6 — DR-26; honest empty-state until then — see iteration architecture §3) |
 
 #### 1.4.2 Brief canonization
 
@@ -138,11 +138,11 @@ No new scope-ownership rule. No new uniqueness constraint. No new transition rul
 
 #### 1.4.6 Cross-reference
 
-- **Iteration-scoped architecture (authoritative for carrier implementation):** [`iterations/v1.123/specs/three-layer-architecture.md`](../iterations/v1.123/specs/three-layer-architecture.md) §2 (Brief carrier), §3 (Moment carrier), §4 (wire_contracts_changed), §6 (conflict policy), §7 (Work Timeline adapter contract).
+- **Iteration-scoped architecture (authoritative for carrier implementation):** `three-layer-architecture.md` §2 (Brief carrier), §3 (Moment carrier), §4 (wire_contracts_changed), §6 (conflict policy), §7 (Work Timeline adapter contract).
 - **Canvas surface contract overlay:** [`specs/canvas-strategy-surface.md`](canvas-strategy-surface.md) §3.3.3 (V1.123 three-layer overlay + V1.156 3×2 matrix completion amendment).
-- **Product spec (author voice + demo script):** [`iterations/v1.123/specs/three-layer-product-spec.md`](../iterations/v1.123/specs/three-layer-product-spec.md).
-- **V1.156 product locks (World-Moment + Work-Brief semantics):** [`iterations/v1.156/specs/product-locks.md`](../iterations/v1.156/specs/product-locks.md) PD-2 (Work-Brief projection) + PD-3 (World-Moment projection).
-- **Layer feel contract (P4 handoff):** [`iterations/v1.123/specs/layer-feel-differentiation.md`](../iterations/v1.123/specs/layer-feel-differentiation.md).
+- **Product spec (author voice + demo script):** `three-layer-product-spec.md`.
+- **V1.156 product locks (World-Moment + Work-Brief semantics):** `product-locks.md` PD-2 (Work-Brief projection) + PD-3 (World-Moment projection).
+- **Layer feel contract (P4 handoff):** `layer-feel-differentiation.md`.
 
 ---
 
@@ -307,7 +307,7 @@ Post-1.0, if state-path queries emerge as a product requirement, a dedicated
 `key_block_state` table (normalized, indexed) should be considered as a
 replacement, not a supplement — avoiding two sources of truth for the same state.
 
-> **Durable roadmap:** consolidated in the [deferred-features tracker §2.6](../roadmaps/deferred-features-cross-version-tracker.md) — DR-47 (computable state-path query perf).
+> **Durable roadmap:** consolidated in the deferred-features tracker §2.6 — DR-47 (computable state-path query perf).
 
 ##### 5.5.9.3 Structured validation mode
 
@@ -407,7 +407,7 @@ Recommended default mapping when ingesting or authoring novel items (P1 validati
 | `rules` | `conflict` | Magic/tech/legal constraints |
 | `economy` | `item` | Trade, currency, resources |
 
-`world_refs` in novel chapter frontmatter reference **stable `canonical_name`** values (optionally prefixed in prose as `char_lin_xia` — resolved against `(world_id, block_type, canonical_name)` via P0 validator). Iteration: [v1.40/delivery-compass.md](../../iterations/v1.40/delivery-compass.md); runtime layering: [world-kb-runtime-architecture.md](world-kb-runtime-architecture.md).
+`world_refs` in novel chapter frontmatter reference **stable `canonical_name`** values (optionally prefixed in prose as `char_lin_xia` — resolved against `(world_id, block_type, canonical_name)` via P0 validator). Iteration: `delivery-compass.md`; runtime layering: [world-kb-runtime-architecture.md](world-kb-runtime-architecture.md).
 
 Minimum common `body` shape for novel-profile items (V1.40 P1):
 
@@ -477,13 +477,13 @@ Minimum common `body` shape for game-bible items:
 
 **Script profile semantics (body layer — V1.55 P3):** Three new `BlockType` wire enum variants are registered in `schemas/common/common.schema.json` for script domain concepts. The corresponding body-layer category is `script_category` (string, carried in `KnowledgeEntry.body.attributes`). It does **not** replace wire `block_type`.
 
-**Three-Layer Timeline semantics (cross-profile, V1.123 — Normative):** One new `BlockType` wire enum variant is registered in `schemas/common/common.schema.json` for the V1.123 Brief layer. The corresponding body-layer semantics live in `KnowledgeEntry.body.attributes` as freeform era-marker fields (`era_id`, `start_hint`, `end_hint`, `world_summary`); there is **no `brief_category` body-layer string** because Brief is cross-profile world-shape, not a profile-specific category. See [`iterations/v1.123/specs/three-layer-architecture.md`](../iterations/v1.123/specs/three-layer-architecture.md) §2 for the architect-locked carrier rationale.
+**Three-Layer Timeline semantics (cross-profile, V1.123 — Normative):** One new `BlockType` wire enum variant is registered in `schemas/common/common.schema.json` for the V1.123 Brief layer. The corresponding body-layer semantics live in `KnowledgeEntry.body.attributes` as freeform era-marker fields (`era_id`, `start_hint`, `end_hint`, `world_summary`); there is **no `brief_category` body-layer string** because Brief is cross-profile world-shape, not a profile-specific category. See `three-layer-architecture.md` §2 for the architect-locked carrier rationale.
 
 Shipped `BlockType` values (snake_case on wire) extended with:
 
 | Wire `block_type` | UI label | Body-layer | Design section |
 | --- | --- | --- | --- |
-| `era` | Era (Brief marker) | `body.attributes.era_id` / `start_hint` / `end_hint` / `world_summary` (freeform) | [`iterations/v1.123/specs/three-layer-architecture.md`](../iterations/v1.123/specs/three-layer-architecture.md) §2 (Brief-on-KeyBlock LOCK) |
+| `era` | Era (Brief marker) | `body.attributes.era_id` / `start_hint` / `end_hint` / `world_summary` (freeform) | `three-layer-architecture.md` §2 (Brief-on-KeyBlock LOCK) |
 
 Existing variants (`character`, `ability`, `scene`, `organization`, `item`, `conflict`, `info_point`, `event`, `species`, `faction`, `magic_system`, `technology`, `deity`, `level`, `economy_tier`, `dialogue`, `beat`, `act`) are reused unchanged.
 
@@ -617,7 +617,7 @@ Minimum common `body` shape for script items:
 - Today, its default `work` scope is a local file/index workflow under the active `creator_id` and `workspace_slug`.
 - Its current implementation is not equivalent to the World-scoped narrative KB model.
 
-> **Durable roadmap:** consolidated in the [deferred-features tracker §2.6](../roadmaps/deferred-features-cross-version-tracker.md) — DR-46 (`creator kb --scope world` / user-global knowledge routing).
+> **Durable roadmap:** consolidated in the deferred-features tracker §2.6 — DR-46 (`creator kb --scope world` / user-global knowledge routing).
 
 ### 5.4 Prohibited shorthand
 
@@ -630,7 +630,7 @@ The term `KB` MUST be qualified in architecture/spec text when ambiguity matters
 ### 5.5 World KB promotion state machine (V1.50 normative)
 
 > **Status**: Normative (V1.50) — V1.50 T-B P1 shipped on 2026-06-18. Migration `202606180002_kb_extract_jobs.sql` landed; review-time extraction hook verified end-to-end; promotion row promoted Draft → Normative at V1.50 P-last.
-> **Plan**: [2026-06-18-v1.50-kb-auto-promotion.md](../../plans/2026-06-18-v1.50-kb-auto-promotion.md) (Done; archived)
+> **Plan**: `2026-06-18-v1.50-kb-auto-promotion.md` (Done; archived)
 > **Cross-refs**: [workflow-profile.md §11.5](novel-writing/workflow-profile.md#115-auto-chronology-per-work-opt-in) — auto-advance logs auto-promotion status; [quality-loop.md §3](novel-writing/quality-loop.md) — review-time extraction hook.
 
 World KB rows enter the World through a **promotion state machine** governed by `kb_extract_jobs.status` and the World-scoped KnowledgeEntries (`nexus-knowledge` storage, see §5.1.1).
@@ -665,7 +665,7 @@ Invalid transitions return `422` with stable error code on Daemon API.
 
 #### 5.5.4 Rejected retention
 
-Rejected promotion candidates are retained in `Logs/kb/rejected/<YYYY-MM-DD>-<extract_job_id>.md` for audit. Retention is **indefinite** by default (no TTL); future iterations may add a `--prune-rejected` CLI — **durable roadmap:** consolidated in the [deferred-features tracker §2.6](../roadmaps/deferred-features-cross-version-tracker.md) — DR-18 (`creator world kb` rejected-candidate `--prune-rejected`).
+Rejected promotion candidates are retained in `Logs/kb/rejected/<YYYY-MM-DD>-<extract_job_id>.md` for audit. Retention is **indefinite** by default (no TTL); future iterations may add a `--prune-rejected` CLI — **durable roadmap:** consolidated in the deferred-features tracker §2.6 — DR-18 (`creator world kb` rejected-candidate `--prune-rejected`).
 
 #### 5.5.5 Relationship to existing `nexus-kb` taxonomy
 
@@ -791,7 +791,7 @@ remain normal `kb_relationships` rows with OCC, symmetric projection, confidence
 validation, and optional grounding; **promotion is clearing `needs_review`**,
 not moving through a pending/confirmed/rejected relationship state machine. A
 full relationship promotion state machine (mirroring entities) is post-1.0 —
-**durable roadmap:** consolidated in the [deferred-features tracker §2.6](../roadmaps/deferred-features-cross-version-tracker.md) — DR-48 (relationship promotion state machine).
+**durable roadmap:** consolidated in the deferred-features tracker §2.6 — DR-48 (relationship promotion state machine).
 
 **Entity-existence prerequisite**: extraction persists a relationship suggestion
 only when both endpoints already resolve to non-deleted KeyBlocks in the same

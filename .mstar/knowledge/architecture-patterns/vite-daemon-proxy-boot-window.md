@@ -37,4 +37,4 @@ Packaged Tauri (non-5173) uses direct loopback — refusal surfaces as fetch fai
 ## See also
 
 - `daemon-ready-gate-pattern.md` — Tauri readiness ownership
-- Iteration guide: `.mstar/iterations/v1.134/guides/p0-startup-500-rca.md`
+- Iteration guide: `p0-startup-500-rca.md`

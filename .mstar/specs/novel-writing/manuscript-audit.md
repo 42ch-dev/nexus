@@ -14,7 +14,7 @@
 - [entity-scope-model.md](../entity-scope-model.md) — World-bound extract mode
 - [world-kb-runtime-architecture.md](../world-kb-runtime-architecture.md) — `kb.extract_work` on-demand path
 
-**Iteration compass**: [v1.44/delivery-compass.md](../../iterations/v1.44/delivery-compass.md)  
+**Iteration compass**: `delivery-compass.md`  
 **Tracker**: DF-69
 
 ---
@@ -123,7 +123,7 @@ Minimum preset surface:
 2. Hermetic test: extract mode on World-bound Work promotes at least one KnowledgeEntry path (mock LLM acceptable).
 3. Hermetic test: extract on worldless Work fails closed with documented error.
 4. No regression: auto-chain driver invariants unchanged (one active FL-E driver per Work).
-5. CLI help cites [docs/novel-writing-quickstart.md](../../../docs/novel-writing-quickstart.md) §5 after P1 merge.
+5. CLI help cites [docs/README.md](../../../docs/README.md) § novel-writing quickstart after P1 merge.
 
 ---
 

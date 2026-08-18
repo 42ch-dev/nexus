@@ -16,7 +16,7 @@ applies_when: Extending a Canvas surface with multiple zoom layers (Brief/Narrat
 - **World Timeline** (V1.122 peer surface, V1.123 deepened) — **Brief + Narrative + Moment** layers (V1.156 completed the matrix; V1.123 shipped Brief+Narrative only)
 - **Work Timeline** (V1.123 NEW peer surface) — **Brief + Narrative + Moment** layers (V1.156 completed the matrix; V1.123 shipped Narrative+Moment only)
 
-The carrier choices are architect-locked per iteration (`iterations/v1.123/specs/three-layer-architecture.md`):
+The carrier choices are architect-locked per iteration (architect-locked in the V1.123 iteration spec `three-layer-architecture.md`):
 
 | Layer | Carrier (V1.123 LOCK) | Rationale |
 |-------|----------------------|-----------|

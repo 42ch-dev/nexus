@@ -48,7 +48,7 @@ register` **without flags** is a platform operation (auth token + network;
 writes `auth.json`, not `config.toml`) — hermetic flows use `creator register
 --local --name <n>` (V1.167 P2: mints persistent `ctr_local*`, sets active,
 and materializes the workspace `creators` row so `world create` works — see
-[creator-bootstrap-two-store-materialization.md](../../architecture-patterns/creator-bootstrap-two-store-materialization.md))
+[creator-bootstrap-two-store-materialization.md](../architecture-patterns/creator-bootstrap-two-store-materialization.md))
 or `workspace init`'s FS fallback (`active_creator_id=local`).
 
 ## When to Apply

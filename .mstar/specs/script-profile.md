@@ -15,9 +15,9 @@
 - [cli-spec.md](cli-spec.md) — creator entry and workspace layout
 - [orchestration-engine.md](orchestration-engine.md) — preset execution model
 - [entity-scope-model.md](entity-scope-model.md) — World/KB binding and BlockType taxonomy
-- [non-novel-profiles-roadmap.md](non-novel-profiles-roadmap.md) — prior Exploration (now promoted)
+- Prior Exploration: the non-novel profiles roadmap (targets since promoted to Feature line specs)
 
-**Plan**: [2026-06-22-v1.60-script-depth-35.md](../../plans/2026-06-22-v1.60-script-depth-35.md)
+**Plan**: `2026-06-22-v1.60-script-depth-35.md`
 
 ---
 
@@ -363,11 +363,11 @@ Script uses `work_profile = "script"` (TEXT column). Registration:
 
 | Feature | Description | Depends on | Durable roadmap |
 | --- | --- | --- | --- |
-| Script auto-chain | Optional stage sequencing for multi-act production | V1.60 preset chain | [deferred-features tracker §2.6](../roadmaps/deferred-features-cross-version-tracker.md) — DR-36 |
-| Screenplay export | Formatting normalization + FDX/PDF export | V1.60 scaffold | [deferred-features tracker §2.6](../roadmaps/deferred-features-cross-version-tracker.md) — DR-37 |
-| Multi-character voice tracking | Per-character dialogue consistency scoring | V1.60 KB extraction | [deferred-features tracker §2.6](../roadmaps/deferred-features-cross-version-tracker.md) — DR-38 |
-| Real-time collaboration | Concurrent script editing with OCC | DF-52 workspace OCC | [deferred-features tracker §2.6](../roadmaps/deferred-features-cross-version-tracker.md) — DR-39 |
-| Script-to-storyboard pipeline | Beat → visual scene plan generation | V1.60 beat structure | [deferred-features tracker §2.6](../roadmaps/deferred-features-cross-version-tracker.md) — DR-40 |
+| Script auto-chain | Optional stage sequencing for multi-act production | V1.60 preset chain | deferred-features tracker §2.6 — DR-36 |
+| Screenplay export | Formatting normalization + FDX/PDF export | V1.60 scaffold | deferred-features tracker §2.6 — DR-37 |
+| Multi-character voice tracking | Per-character dialogue consistency scoring | V1.60 KB extraction | deferred-features tracker §2.6 — DR-38 |
+| Real-time collaboration | Concurrent script editing with OCC | DF-52 workspace OCC | deferred-features tracker §2.6 — DR-39 |
+| Script-to-storyboard pipeline | Beat → visual scene plan generation | V1.60 beat structure | deferred-features tracker §2.6 — DR-40 |
 
 ---
 

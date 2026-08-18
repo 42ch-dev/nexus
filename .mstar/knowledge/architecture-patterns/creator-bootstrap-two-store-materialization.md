@@ -75,7 +75,7 @@ changes.
 
 - V1.167 P2: T1 (`510b6797`) = flag + delegation (insufficient alone); T2
   (`743060e4`) = `ensure_creator_row` + wiring; live acceptance evidence in
-  `.mstar/iterations/v1.167/guides/dogfood-findings-register.md` (DF-A-02).
+  `dogfood-findings-register.md` (DF-A-02).
 - SQL duplication note: daemon keeps its private copy until it refactors
   onto `nexus-local-db` for creator upserts (durable roadmap row in the P2
   plan); the two SQL strings are intentionally byte-identical so the `.sqlx`

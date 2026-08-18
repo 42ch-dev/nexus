@@ -132,7 +132,7 @@ A common mistake (made and corrected during V1.141 P1 T2): collapse both mismatc
 
 ## Production boundary (shipped V1.142; updated V1.146)
 
-> **Update (V1.142):** The production `BaselinePorts` implementation (`NexusAdapter`, V1.146 rename) was originally landed in `nexus-local-db/src/spoke_adapter/`, **not** "downstream in nexus-knowledge" as the V1.141 doc speculated. `nexus-knowledge` is a domain-types-and-traits crate with no SQLite dependency — it cannot be the production port home. V1.145 P1b rehomed the adapter to `nexus-spoke-adapter/src/adapter/` (spec §7.4 / §8 dep-graph reversal). See spec [`spoke-adapter-architecture.md`](../../../specs/spoke-adapter-architecture.md) §7.4 for the production-vs-stub matrix and dependency rationale.
+> **Update (V1.142):** The production `BaselinePorts` implementation (`NexusAdapter`, V1.146 rename) was originally landed in `nexus-local-db/src/spoke_adapter/`, **not** "downstream in nexus-knowledge" as the V1.141 doc speculated. `nexus-knowledge` is a domain-types-and-traits crate with no SQLite dependency — it cannot be the production port home. V1.145 P1b rehomed the adapter to `nexus-spoke-adapter/src/adapter/` (spec §7.4 / §8 dep-graph reversal). See spec [`spoke-adapter-architecture.md`](../../specs/spoke-adapter-architecture.md) §7.4 for the production-vs-stub matrix and dependency rationale.
 
 V1.142 shipped the production adapter in `nexus-local-db` implementing all 6 baseline port families against existing SQLite storage (V1.145 P1b rehome to `nexus-spoke-adapter`):
 

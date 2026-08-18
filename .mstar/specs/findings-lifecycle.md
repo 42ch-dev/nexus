@@ -10,7 +10,7 @@
 - [`crates/nexus-local-db/src/findings.rs`](../../crates/nexus-local-db/src/findings.rs) — DAO enforcement (canonical `is_valid_transition`, `VALID_STATUSES`, `enforce_status_transition`)
 - [`crates/nexus-daemon-runtime/src/api/handlers/findings.rs`](../../crates/nexus-daemon-runtime/src/api/handlers/findings.rs) — PATCH handler error mapping
 
-**Supersedes**: [`novel-writing/findings-lifecycle.md`](novel-writing/findings-lifecycle.md) (pointer stub — full text archived at `../../archived/knowledge/novel-writing/findings-lifecycle.md`).
+**Supersedes**: the former novel-writing findings-lifecycle overlay (folded into `quality-loop.md` §2, V1.49).
 
 ---
 

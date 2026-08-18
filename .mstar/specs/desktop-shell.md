@@ -4,7 +4,7 @@
 **Document class**: Feature line
 **Created**: 2026-06-25 (Phase 2b, `@architect`)
 **Scope**: Nexus desktop shell contract — `apps/desktop` Tauri v2 wrapper, SPA adapter selection (`TauriClient`), desktop-only `NexusClient` extensions, native file actions + path guard, bundled `nexus42` sidecar lifecycle, port discovery, capability detection, macOS-first unsigned dev build. V1.67+ deferrals (signing, multi-OS, auto-update, in-process lib link, body editor) recorded in §2.
-**Iteration compass**: [v1.66/delivery-compass.md](../iterations/v1.66/delivery-compass.md) (scope/roadmap SSOT — §0 grill decisions, §1.1 Track A, §5 locked design items)
+**Iteration compass**: `delivery-compass.md` (scope/roadmap SSOT — §0 grill decisions, §1.1 Track A, §5 locked design items)
 
 **Coordinates with**:
 
@@ -29,8 +29,8 @@ Defines the V1.66 desktop shell boundary: a Tauri v2 wrapper (`apps/desktop`) ar
 Recorded so deferrals are tracked, not lost:
 
 - Body full-text editor + per-chapter edit lock (V1.67 lead authoring slice).
-- System tray / menu-bar app / global hotkeys / native notifications; custom title bar / animated transitions (Production polish). **Menu-bar daemon status + stop/start control** tracked as [DF-71](../roadmaps/deferred-features-cross-version-tracker.md) (interim quit dialog shipped on the agent-detection hotfix; tray remains opportunistic polish).
-> **Durable roadmap:** consolidated in the [deferred-features tracker §2.6](../roadmaps/deferred-features-cross-version-tracker.md) — DR-58 (signing/distribution v2), DR-59 (UI productivity wave), DR-60 (tray/menu-bar/hotkeys/notifications), DR-61 (mobile).
+- System tray / menu-bar app / global hotkeys / native notifications; custom title bar / animated transitions (Production polish). **Menu-bar daemon status + stop/start control** tracked as DF-71 (interim quit dialog shipped on the agent-detection hotfix; tray remains opportunistic polish).
+> **Durable roadmap:** consolidated in the deferred-features tracker §2.6 — DR-58 (signing/distribution v2), DR-59 (UI productivity wave), DR-60 (tray/menu-bar/hotkeys/notifications), DR-61 (mobile).
 
 ## 3. Application structure
 
@@ -117,7 +117,7 @@ Window chrome / app menu / native dialogs / desktop context menu / daemon-status
 ## 13. Setup Wizard (V1.94)
 
 **Status**: Draft (V1.94) — normative contract frozen by P-1; implement authority P0 + P1.
-**Iteration compass**: [v1.94/delivery-compass.md](../iterations/v1.94/delivery-compass.md) §1 (locked decisions A2+B1, C1, H1) + §5 (acceptance criteria).
+**Iteration compass**: `delivery-compass.md` §1 (locked decisions A2+B1, C1, H1) + §5 (acceptance criteria).
 
 ### 13.1 Purpose
 
@@ -147,7 +147,7 @@ The `setup_completed` marker still gates main UI vs `/setup` **after** Ready —
 - **Semantics**: absent or `false` = first-launch (wizard at `/setup` after `DaemonLaunchGate` Ready); `true` = skip wizard, enter main UI after Ready (§13.10.2).
 - **Additive**: the field is optional; existing config files without it are treated as absent (= first-launch). TOML deserialiser must use `#[serde(default)]` or equivalent — the field must tolerate unknown config shapes.
 - **Persistence**: the Tauri shell writes `setup_completed = true` on wizard completion via the existing `set_setup_completed` command (P0). The CLI config path (`apps/nexus42/src/config.rs`) accepts the field additively.
-- **Reset**: Settings → **Setup** exposes **Re-run Setup**, which clears the `setup_completed` marker (R1). Missing marker = fail-safe to wizard. **V1.103 implement authority:** [settings-setup-section.md](../iterations/v1.103/specs/settings-setup-section.md).
+- **Reset**: Settings → **Setup** exposes **Re-run Setup**, which clears the `setup_completed` marker (R1). Missing marker = fail-safe to wizard. **V1.103 implement authority:** `settings-setup-section.md`.
 
 ### 13.4 Per-launch daemon-ready gate (historical pre-V1.105 — see §13.10.2)
 
@@ -298,7 +298,7 @@ V1.97 does not change daemon routes, JSON schemas, generated TypeScript/Rust con
 
 > **Superseded by §13.11 (V1.118):** Daemon boot no longer requires `active_creator_id`; bootstrap IPC is wizard convenience only, not a sidecar boot gate.
 
-**Contract location:** The authoritative implementation-ready contract is [`.mstar/iterations/v1.100/specs/desktop-first-launch-bootstrap.md`](../iterations/v1.100/specs/desktop-first-launch-bootstrap.md). This section records the product behavior; the iteration contract is SSOT for implementation details (bootstrap mechanism, daemon-start timing matrix, minimum state, idempotency contract, reuse targets).
+**Contract location:** The authoritative implementation-ready contract is `desktop-first-launch-bootstrap.md`. This section records the product behavior; the iteration contract is SSOT for implementation details (bootstrap mechanism, daemon-start timing matrix, minimum state, idempotency contract, reuse targets).
 
 #### 13.9.1 Wizard flow change
 
@@ -325,7 +325,7 @@ V1.100 does not change daemon routes, JSON schemas, generated TypeScript/Rust co
 
 ### 13.10 V1.105 Amendments — First-launch wizard reshape (Agent-first + app-level Daemon gate)
 
-**Product behavior target.** V1.105 makes daemon readiness a **launch ritual** (fullscreen gate) and reduces the setup wizard to three author choices. **Iteration SSOT:** [`.mstar/iterations/v1.105/delivery-compass.md`](../iterations/v1.105/delivery-compass.md) + [`v1.105/specs/`](../iterations/v1.105/specs/).
+**Product behavior target.** V1.105 makes daemon readiness a **launch ritual** (fullscreen gate) and reduces the setup wizard to three author choices. **Iteration SSOT:** `delivery-compass.md` + `v1.105/specs/`.
 
 #### 13.10.1 Rule 13 rewrite — always auto-start sidecar (D2)
 
@@ -360,7 +360,7 @@ Bootstrap timing moves to Workspace Continue (not between Welcome and Daemon as 
 
 #### 13.10.4 Settings Re-run Setup (V1.103 R1)
 
-- Re-run still clears `setup_completed` marker only ([settings-setup-section.md](../iterations/v1.103/specs/settings-setup-section.md)).
+- Re-run still clears `setup_completed` marker only (`settings-setup-section.md`).
 - After confirm: fullscreen gate → `/setup` on Agent step (new IA).
 - Workspace path and agent profile files are **not** deleted.
 
@@ -370,7 +370,7 @@ Prefer `wire_contracts_changed: false`. Portrait shell: `wizard-max-width` **480
 
 #### 13.10.6 V1.106 Amendments — Studio fixtures + shared chrome SSOT
 
-**Iteration SSOT:** [`.mstar/iterations/v1.106/delivery-compass.md`](../iterations/v1.106/delivery-compass.md).
+**Iteration SSOT:** `delivery-compass.md`.
 
 - **DaemonReadySplash fixtures:** Studio `/surfaces/launch` imports presentational `@web-setup/daemon-ready-splash` — same module as App outer gate.
 - **MainBanner fixtures:** composition-only props-driven chrome in Studio — App `main-banner.tsx` stays daemon-hook-owned; no extract in V1.106.
@@ -379,7 +379,7 @@ Prefer `wire_contracts_changed: false`. Portrait shell: `wizard-max-width` **480
 
 #### 13.10.7 V1.107 Amendments — Studio paint + presentational SSOT
 
-**Iteration SSOT:** [`.mstar/iterations/v1.107/delivery-compass.md`](../iterations/v1.107/delivery-compass.md) + [`studio-ui-tune.md`](../iterations/v1.107/specs/studio-ui-tune.md).
+**Iteration SSOT:** `delivery-compass.md` + `studio-ui-tune.md`.
 
 - **Studio Tailwind content:** Design Studio must scan `apps/web/src/components/setup/**`, `layout/presentational/**`, and `packages/nexus-ui/src/**` so wizard and matrix utilities paint (FB-000).
 - **Shell chrome SSOT:** Extract props-driven modules under `apps/web/src/components/layout/presentational/`; App wrappers (`sidebar.tsx`, `footer-profiles.tsx`, `daemon-health-indicator.tsx`) delegate markup; Studio imports via `@web-layout/*` (FB-013..014).
@@ -390,7 +390,7 @@ Prefer `wire_contracts_changed: false`. Portrait shell: `wizard-max-width` **480
 
 ### 13.11 V1.118 Amendments — Daemon no-Profile boot
 
-> **Status:** P0 shipped (V1.118, 2026-07-15). Iteration SSOT: [`.mstar/iterations/v1.118/specs/daemon-no-profile-boot.md`](../iterations/v1.118/specs/daemon-no-profile-boot.md). Runtime detail: [daemon-runtime.md](./daemon-runtime.md) §17. Fold into this Master at V1.118 P5 hygiene.
+> **Status:** P0 shipped (V1.118, 2026-07-15). Iteration SSOT: `daemon-no-profile-boot.md`. Runtime detail: [daemon-runtime.md](./daemon-runtime.md) §17. Fold into this Master at V1.118 P5 hygiene.
 
 **Product behavior target.** The daemon **must** reach healthy Running on an empty `~/.nexus42` home **without** `active_creator_id`. Profile creation/selection remains in setup and footer Profiles — not a sidecar boot prerequisite.
 
@@ -421,7 +421,7 @@ Prefer `wire_contracts_changed: false`. Portrait shell: `wizard-max-width` **480
 
 **Handler**: `crates/nexus-daemon-runtime/src/api/handlers/agent_host.rs` — new `scan` function, wired into the existing agent-host router (same route group as `health`, `sessions`).
 
-**Consumers**: Setup wizard agent step (V1.101 Must / P0 — app-shared `AgentPicker` at `apps/web/src/components/setup/agent-picker.tsx`); **V1.102** thin Settings host (`/settings`) remounts the same picker for post-setup agent change; **V1.103** deepens into S3 Settings shell with `/settings/agent` + `getAgentProfile` preselect (G1). **Current IA authority:** [settings-shell-ia.md](../iterations/v1.103/specs/settings-shell-ia.md) + [settings-agent-section.md](../iterations/v1.103/specs/settings-agent-section.md). Execution-mode matrix remains deferred post-V1.103 (DF-70).
+**Consumers**: Setup wizard agent step (V1.101 Must / P0 — app-shared `AgentPicker` at `apps/web/src/components/setup/agent-picker.tsx`); **V1.102** thin Settings host (`/settings`) remounts the same picker for post-setup agent change; **V1.103** deepens into S3 Settings shell with `/settings/agent` + `getAgentProfile` preselect (G1). **Current IA authority:** `settings-shell-ia.md` + `settings-agent-section.md`. Execution-mode matrix remains deferred post-V1.103 (DF-70).
 
 ### 14.2 Contract shapes
 
@@ -462,7 +462,7 @@ The handler joins the registry list with the scan results to produce the annotat
 
 - Agent installation / download / update (registry-only detection; the user manages their own ACP agent binaries).
 - Full `AgentProfile` CRUD API (wizard + Settings Agent section write the default profile via desktop `setAgentProfile`; broader CRUD remains a separate future iteration).
-- Execution-mode matrix / BYOK / AgentPicker package promotion (out of V1.103 scope; see [V1.103 compass](../iterations/v1.103/delivery-compass.md) Non-Goals). Multi-section Settings shell for Agent/Connection/Setup is **in scope V1.103** — not a non-goal here.
+- Execution-mode matrix / BYOK / AgentPicker package promotion (out of V1.103 scope; see V1.103 compass Non-Goals). Multi-section Settings shell for Agent/Connection/Setup is **in scope V1.103** — not a non-goal here.
 
 ---
 

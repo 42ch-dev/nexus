@@ -119,12 +119,12 @@ Typify inlines a distinct struct copy for every schema that references a shared 
 
 | Resource | Role |
 | --- | --- |
-| [`tooling/codegen/`](../../../../tooling/codegen/) | Pipeline orchestrator, prep, ts-gen, rust-gen binary |
-| [`tooling/codegen/README.md`](../../../../tooling/codegen/README.md) | Stage table, env contract, output layout |
-| [`crates/nexus-contracts/AGENTS.md`](../../../../crates/nexus-contracts/AGENTS.md) | Generated-crate rules, `enum_conversions.rs` |
-| [`schemas/AGENTS.md`](../../../../schemas/AGENTS.md) | Schema authoring + codegen flow |
+| [`tooling/codegen/`](../../../tooling/codegen/) | Pipeline orchestrator, prep, ts-gen, rust-gen binary |
+| [`tooling/codegen/README.md`](../../../tooling/codegen/README.md) | Stage table, env contract, output layout |
+| [`crates/nexus-contracts/AGENTS.md`](../../../crates/nexus-contracts/AGENTS.md) | Generated-crate rules, `enum_conversions.rs` |
+| [`schemas/AGENTS.md`](../../../schemas/AGENTS.md) | Schema authoring + codegen flow |
 | [`contracts-gap-on-shipped-backend.md`](contracts-gap-on-shipped-backend.md) | Closing schema gaps on shipped handlers (orthogonal but same contracts boundary) |
-| Residuals `R-V1138P0-*` | Closed/archived 2026-08-08 (V1.155 P2 sweep) — `archived/residuals/2026-07-23-v1.138-p0-ts-codegen-third-party.json` |
+| Residuals `R-V1138P0-*` | Closed 2026-08-08 (V1.155 P2 residual sweep) |
 | Residual `R-V1138P1-001` | Canonical-hash spec golden sync — closed 2026-08-08; spec at [`../../specs/canonical-hash.md`](../../specs/canonical-hash.md) |
 
 ## Evidence

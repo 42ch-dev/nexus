@@ -14,7 +14,7 @@
 - [quality-loop.md](quality-loop.md) — findings + review visibility
 - [creator-workflow.md](../creator-workflow.md) — FL-E stage names in narrative
 
-**Iteration compass**: [v1.46/delivery-compass.md](../../iterations/v1.46/delivery-compass.md)
+**Iteration compass**: `delivery-compass.md`
 
 ---
 
@@ -184,7 +184,7 @@ When error/remediation conditions occur, user-visible output must include a **si
 
 ## 6. P-last author-path tech-debt (pointer)
 
-See [2026-06-14-v1.46-hygiene-and-closeout.md](../../plans/2026-06-14-v1.46-hygiene-and-closeout.md). This spec does not duplicate `status.json` rows.
+See `2026-06-14-v1.46-hygiene-and-closeout.md`. This spec does not duplicate `status.json` rows.
 
 ---
 
@@ -201,7 +201,7 @@ At V1.46 P-last:
 ## 8. Author desk deltas (Shipped V1.49 P2)
 
 > **Status**: Shipped (V1.49 P2) — P2 overlay merged into Master.  
-> **Plan**: [2026-06-17-v1.49-author-desk-ux.md](../../plans/2026-06-17-v1.49-author-desk-ux.md)
+> **Plan**: `2026-06-17-v1.49-author-desk-ux.md`
 > **Cross-refs**: findings lifecycle → [quality-loop.md §2](quality-loop.md#2-findings-lifecycle) (6-state V1.49 P0); narrative indexes → [workflow-profile.md §4.6](workflow-profile.md#46-narrative-indexes--f-e-runtime-v149-p1) (V1.49 P1)
 
 ### 8.1 Intake re-trigger on existing Work (R-V147P1-01)
