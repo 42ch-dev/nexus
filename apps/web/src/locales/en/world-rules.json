@@ -72,6 +72,7 @@
     "severityLabel": "Severity",
     "severityDefault": "Default (warning)",
     "severityHelp": "Not set — Check evaluates the rule as warning.",
+    "severityStoredHelp": "Stored severity: {{severity}}. Pick another value to change it.",
     "kindLabel": "Kind",
     "kindHelp": "Optional — stored verbatim.",
     "targetTypesLabel": "Target entry types",
@@ -85,6 +86,7 @@
     "genericError": "Could not add the rule. Try again.",
     "genericUpdateError": "Could not save the rule. Try again.",
     "notFoundError": "This rule could not be found. It may have been removed.",
+    "worldNotFoundError": "This World could not be found. It may have been removed.",
     "errors": {
       "familyRequired": "Choose a constraint family.",
       "nameRequired": "Name is required.",
@@ -96,6 +98,7 @@
       "moduleFieldReserved": "Entry-level field values cannot be combined with a module row.",
       "minRequired": "At least one bound is required.",
       "boundInvalid": "Must be a whole number.",
+      "boundTooLarge": "Must be a whole number up to 9,007,199,254,740,991.",
       "minMax": "Min must not exceed max.",
       "targetTypesConflict": "Target entry types cannot be combined with an observer-count constraint."
     }

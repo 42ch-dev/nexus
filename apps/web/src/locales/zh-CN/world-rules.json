@@ -72,6 +72,7 @@
     "severityLabel": "严重程度",
     "severityDefault": "默认（警告）",
     "severityHelp": "未设置时，Check 按警告评估该规则。",
+    "severityStoredHelp": "已存储严重程度：{{severity}}。选择其他值以更改。",
     "kindLabel": "类型",
     "kindHelp": "可选——原样存储。",
     "targetTypesLabel": "目标条目类型",
@@ -85,6 +86,7 @@
     "genericError": "无法添加规则，请重试。",
     "genericUpdateError": "无法保存规则，请重试。",
     "notFoundError": "找不到此规则，可能已被删除。",
+    "worldNotFoundError": "找不到此世界，可能已被删除。",
     "errors": {
       "familyRequired": "请选择约束族。",
       "nameRequired": "名称不能为空。",
@@ -96,6 +98,7 @@
       "moduleFieldReserved": "条目级字段值不能与模块行组合。",
       "minRequired": "至少需要一个边界。",
       "boundInvalid": "必须是整数。",
+      "boundTooLarge": "必须是 9,007,199,254,740,991 以内的整数。",
       "minMax": "最小值不能大于最大值。",
       "targetTypesConflict": "目标条目类型不能与观察者数量约束组合。"
     }

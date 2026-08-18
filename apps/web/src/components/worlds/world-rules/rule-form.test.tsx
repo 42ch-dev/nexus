@@ -247,6 +247,21 @@ describe('RuleForm — four-family happy path + submit payload shape', () => {
       target_entry_types: ['character'],
     });
   });
+
+  it('sends a typed kind in the create payload (mirrors the edit builder)', async () => {
+    const capture: { body?: WorldRuleCreateRequest } = {};
+    useCreateCapture(capture);
+    renderForm();
+
+    selectFamily('module_presence');
+    fillNameAndSummary('Kind carry rule', 'Carries a kind.');
+    fireEvent.change(screen.getByLabelText('Module key'), { target: { value: 'm' } });
+    fireEvent.change(screen.getByLabelText('Kind'), { target: { value: 'prohibition' } });
+    submit();
+
+    await waitFor(() => expect(capture.body).toBeDefined());
+    expect(capture.body?.kind).toBe('prohibition');
+  });
 });
 
 describe('RuleForm — client validation mirror intercepts before submit', () => {
@@ -496,6 +511,130 @@ describe('RuleForm — API field-level error echo (AR-2 vocabulary, SSOT)', () =
     );
     expect(onClose).not.toHaveBeenCalled();
   });
+
+  it('echoes a status 400 onto the Status field (field-adjacent, AR-2)', async () => {
+    const capture: { body?: WorldRuleCreateRequest } = {};
+    useCreateCapture(capture, () =>
+      HttpResponse.json(
+        {
+          success: false,
+          error: {
+            code: 'invalid_input',
+            message: 'bad status',
+            details: {
+              field: 'status',
+              reason: 'status must be one of draft | active | deprecated',
+            },
+          },
+        },
+        { status: 400 },
+      ),
+    );
+    renderForm();
+
+    selectFamily('module_presence');
+    fillNameAndSummary('Name', 'Summary');
+    fireEvent.change(screen.getByLabelText('Module key'), { target: { value: 'belief' } });
+    submit();
+
+    await waitFor(() =>
+      expect(screen.getByText('status must be one of draft | active | deprecated')).toHaveAttribute(
+        'id',
+        'rule-form-status-error',
+      ),
+    );
+  });
+
+  it('echoes a severity_hint 400 onto the Severity field (field-adjacent, AR-2)', async () => {
+    const capture: { body?: WorldRuleCreateRequest } = {};
+    useCreateCapture(capture, () =>
+      HttpResponse.json(
+        {
+          success: false,
+          error: {
+            code: 'invalid_input',
+            message: 'bad severity',
+            details: { field: 'severity_hint', reason: 'severity_hint must not be empty' },
+          },
+        },
+        { status: 400 },
+      ),
+    );
+    renderForm();
+
+    selectFamily('module_presence');
+    fillNameAndSummary('Name', 'Summary');
+    fireEvent.change(screen.getByLabelText('Module key'), { target: { value: 'belief' } });
+    submit();
+
+    await waitFor(() =>
+      expect(screen.getByText('severity_hint must not be empty')).toHaveAttribute(
+        'id',
+        'rule-form-severity-error',
+      ),
+    );
+  });
+
+  it('surfaces an unmapped constraint 400 at the submit level (never invisible)', async () => {
+    const capture: { body?: WorldRuleCreateRequest } = {};
+    useCreateCapture(capture, () =>
+      HttpResponse.json(
+        {
+          success: false,
+          error: {
+            code: 'invalid_input',
+            message: 'bad carrier',
+            details: { field: 'constraint', reason: 'constraint must be a JSON object' },
+          },
+        },
+        { status: 400 },
+      ),
+    );
+    renderForm();
+
+    selectFamily('module_presence');
+    fillNameAndSummary('Name', 'Summary');
+    fireEvent.change(screen.getByLabelText('Module key'), { target: { value: 'belief' } });
+    submit();
+
+    await waitFor(() =>
+      expect(screen.getByTestId('rule-form-submit-error')).toHaveTextContent(
+        'constraint must be a JSON object',
+      ),
+    );
+  });
+
+  it('create-mode 404 shows the missing-world copy (AR-6), not the edit rule copy', async () => {
+    const capture: { body?: WorldRuleCreateRequest } = {};
+    useCreateCapture(capture, () =>
+      HttpResponse.json(
+        {
+          success: false,
+          error: {
+            code: 'not_found',
+            message: 'world world-9',
+            details: { resource: 'world', reason: 'unknown world' },
+          },
+        },
+        { status: 404 },
+      ),
+    );
+    renderForm();
+
+    selectFamily('module_presence');
+    fillNameAndSummary('Name', 'Summary');
+    fireEvent.change(screen.getByLabelText('Module key'), { target: { value: 'belief' } });
+    submit();
+
+    await waitFor(() =>
+      expect(screen.getByTestId('rule-form-submit-error')).toHaveTextContent(
+        'This World could not be found. It may have been removed.',
+      ),
+    );
+    expect(
+      screen.queryByText('This rule could not be found. It may have been removed.'),
+    ).not.toBeInTheDocument();
+  });
 });
 
 describe('RuleForm — family switch + observer × target exclusivity', () => {
@@ -573,6 +712,17 @@ describe('validateRuleForm — client mirror (pure)', () => {
     };
     expect(validateRuleForm(state)).toEqual({ 'constraint.field': 'moduleFieldReserved' });
   });
+
+  it('rejects a whole bound beyond the safe-integer mirror range with the honest code', () => {
+    const state: RuleFormState = {
+      ...initialRuleFormState(),
+      family: 'observer_cardinality',
+      canonicalName: 'Name',
+      statement: 'Summary',
+      min: '9007199254740993', // whole u64, but beyond 2^53−1 (qc F-004)
+    };
+    expect(validateRuleForm(state)).toEqual({ 'constraint.min': 'boundTooLarge' });
+  });
 });
 
 describe('buildCreateWorldRuleRequest — payload shape', () => {
@@ -606,6 +756,29 @@ describe('buildCreateWorldRuleRequest — payload shape', () => {
     const request = buildCreateWorldRuleRequest(state);
     expect(request?.canonical_name).toBe('Name');
     expect(request?.statement).toBe('Summary');
+  });
+
+  it('sends a trimmed non-empty kind; omits a blank one', () => {
+    const withKind: RuleFormState = {
+      ...initialRuleFormState(),
+      family: 'module_presence',
+      moduleKey: 'm',
+      canonicalName: 'Name',
+      statement: 'Summary',
+      kind: '  prohibition  ',
+    };
+    expect(buildCreateWorldRuleRequest(withKind)?.kind).toBe('prohibition');
+
+    const blankKind: RuleFormState = {
+      ...initialRuleFormState(),
+      family: 'module_presence',
+      moduleKey: 'm',
+      canonicalName: 'Name',
+      statement: 'Summary',
+      kind: '   ',
+    };
+    const request = buildCreateWorldRuleRequest(blankKind);
+    expect(request?.kind).toBeUndefined();
   });
 });
 
@@ -806,6 +979,32 @@ describe('RuleForm — edit mode: PATCH semantics (AR-3)', () => {
 
     await waitFor(() => expect(capture.body).toBeDefined());
     expect(capture.body?.status).toBe('active');
+  });
+});
+
+describe('RuleForm — edit mode: severity honesty (stored hint, no inert Default)', () => {
+  it('hides the inert Default option and states the stored hint when one is stored', async () => {
+    renderEditForm(makeStoredRule()); // makeStoredRule stores severity_hint: 'warning'
+
+    const severity = screen.getByLabelText('Severity') as HTMLSelectElement;
+    expect(severity.value).toBe('warning');
+    // No silent no-op: "Default (warning)" cannot be chosen for a stored hint
+    // (no null-clearing, AR-3) — the option is not rendered.
+    expect(screen.queryByRole('option', { name: 'Default (warning)' })).not.toBeInTheDocument();
+    expect(
+      screen.getByText('Stored severity: warning. Pick another value to change it.'),
+    ).toBeInTheDocument();
+  });
+
+  it('keeps the Default option and the not-set helper when no hint is stored', async () => {
+    renderEditForm(makeStoredRule({ severity_hint: null }));
+
+    const severity = screen.getByLabelText('Severity') as HTMLSelectElement;
+    expect(severity.value).toBe('');
+    expect(screen.getByRole('option', { name: 'Default (warning)' })).toBeInTheDocument();
+    expect(
+      screen.getByText('Not set — Check evaluates the rule as warning.'),
+    ).toBeInTheDocument();
   });
 });
 

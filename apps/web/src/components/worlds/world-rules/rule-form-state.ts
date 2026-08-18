@@ -138,20 +138,23 @@ export type RuleFormErrorCode =
   | 'moduleFieldReserved'
   | 'minRequired'
   | 'boundInvalid'
+  | 'boundTooLarge'
   | 'minMax'
   | 'targetTypesConflict';
 
 export type RuleFormErrors = Partial<Record<RuleFormErrorKey, string>>;
 
-/** Parse an observer bound: absent (empty), invalid (non-whole), or a valid u64. */
-type Bound = { kind: 'absent' } | { kind: 'invalid' } | { kind: 'valid'; value: number };
+/** Parse an observer bound: absent (empty), invalid (non-whole), too large
+ * for the JS number mirror (whole u64 beyond 2^53−1 — the API accepts it,
+ * the mirror cannot represent it), or a valid u64. */
+type Bound = { kind: 'absent' } | { kind: 'invalid' } | { kind: 'tooLarge' } | { kind: 'valid'; value: number };
 
 function parseBound(value: string): Bound {
   const trimmed = value.trim();
   if (trimmed.length === 0) return { kind: 'absent' };
   if (!/^\d+$/.test(trimmed)) return { kind: 'invalid' };
   const n = Number(trimmed);
-  return Number.isSafeInteger(n) ? { kind: 'valid', value: n } : { kind: 'invalid' };
+  return Number.isSafeInteger(n) ? { kind: 'valid', value: n } : { kind: 'tooLarge' };
 }
 
 /**
@@ -200,7 +203,9 @@ export function validateRuleForm(state: RuleFormState): Partial<Record<RuleFormE
         errors['constraint.min'] = 'minRequired';
       } else {
         if (min.kind === 'invalid') errors['constraint.min'] = 'boundInvalid';
+        else if (min.kind === 'tooLarge') errors['constraint.min'] = 'boundTooLarge';
         if (max.kind === 'invalid') errors['constraint.max'] = 'boundInvalid';
+        else if (max.kind === 'tooLarge') errors['constraint.max'] = 'boundTooLarge';
         if (min.kind === 'valid' && max.kind === 'valid' && min.value > max.value) {
           errors['constraint.min'] = 'minMax';
         }
@@ -257,7 +262,8 @@ export function buildConstraintCarrier(state: RuleFormState): Record<string, unk
  * Build the `WorldRuleCreateRequest` (P1, AR-1/AR-3). Status is always sent;
  * `severity_hint` is omitted when unset (stored NULL → evaluation defaults
  * `warning`, PD-1); `target_entry_types` is omitted when empty (= all entry
- * types in check scope, AR-3). `kind` stays omitted → server default `rule`.
+ * types in check scope, AR-3); `kind` is sent when the author typed one
+ * (stored verbatim) and omitted when blank (server default `rule`).
  */
 export function buildCreateWorldRuleRequest(state: RuleFormState): WorldRuleCreateRequest | null {
   const constraint = buildConstraintCarrier(state);
@@ -270,6 +276,7 @@ export function buildCreateWorldRuleRequest(state: RuleFormState): WorldRuleCrea
   };
   if (state.severityHint !== '') request.severity_hint = state.severityHint;
   if (state.targetEntryTypes.length > 0) request.target_entry_types = [...state.targetEntryTypes];
+  if (state.kind.trim() !== '') request.kind = state.kind.trim();
   return request;
 }
 

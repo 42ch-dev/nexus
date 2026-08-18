@@ -66,6 +66,17 @@ export function WorldRulesSection({ worldId }: { worldId: string }) {
     setEditingRuleId(null);
   }
 
+  /**
+   * Close the edit form when the edited rule is Deactivated (qc F-002): the
+   * form state is initialized once from the mount-time rule and would keep
+   * `status: 'active'` after the list refresh, so a later save could
+   * silently reactivate a rule the author just deactivated. Closing here
+   * makes reactivation an explicit Edit → `active` choice only.
+   */
+  function handleDeactivated(ruleId: string) {
+    if (editingRuleId === ruleId) closeForm();
+  }
+
   const editingRule = editingRuleId
     ? rules.data?.rules.find((rule) => rule.rule_id === editingRuleId)
     : undefined;
@@ -145,7 +156,13 @@ export function WorldRulesSection({ worldId }: { worldId: string }) {
             ) : null}
             <ul className="flex flex-col gap-2">
               {rules.data.rules.map((rule) => (
-                <WorldRuleRow key={rule.rule_id} worldId={worldId} rule={rule} onEdit={openEdit} />
+                <WorldRuleRow
+                  key={rule.rule_id}
+                  worldId={worldId}
+                  rule={rule}
+                  onEdit={openEdit}
+                  onDeactivated={handleDeactivated}
+                />
               ))}
             </ul>
           </div>
@@ -170,10 +187,13 @@ function WorldRuleRow({
   worldId,
   rule,
   onEdit,
+  onDeactivated,
 }: {
   worldId: string;
   rule: WorldRule;
   onEdit: (ruleId: string) => void;
+  /** Called after a successful Deactivate so the section can close a stale edit form. */
+  onDeactivated: (ruleId: string) => void;
 }) {
   const { t } = useTranslation('worldRules');
   const [expanded, setExpanded] = useState(false);
@@ -182,7 +202,10 @@ function WorldRuleRow({
   const deactivatable = rule.status !== 'deprecated';
 
   function handleDeactivate() {
-    updateRule.mutate({ ruleId: rule.rule_id, request: { status: 'deprecated' } });
+    updateRule.mutate(
+      { ruleId: rule.rule_id, request: { status: 'deprecated' } },
+      { onSuccess: () => onDeactivated(rule.rule_id) },
+    );
   }
 
   return (

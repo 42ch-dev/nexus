@@ -680,6 +680,58 @@ describe('WorldRulesSection — edit + Deactivate (V1.169 P2 T2)', () => {
     expect(await screen.findByTestId('world-rule-status')).toHaveTextContent('active');
   });
 
+  it('Deactivate while its edit form is open closes the form so save cannot silently reactivate', async () => {
+    let list = rulesResponse([
+      makeRule({
+        rule_id: 'rul_combo',
+        canonical_name: 'Combo rule',
+        status: 'active',
+        constraint: { family: 'module_presence', module_key: 'belief' },
+      }),
+    ]);
+    const patches: WorldRuleUpdateRequest[] = [];
+    useHandlers(
+      http.get('/v1/daemon/worlds/:worldId/rules', () => HttpResponse.json(list)),
+      http.patch('/v1/daemon/worlds/:worldId/rules/:ruleId', async ({ request }) => {
+        const body = (await request.json()) as WorldRuleUpdateRequest;
+        patches.push(body);
+        list = rulesResponse([
+          makeRule({
+            rule_id: 'rul_combo',
+            canonical_name: 'Combo rule',
+            status: 'deprecated',
+            constraint: { family: 'module_presence', module_key: 'belief' },
+          }),
+        ]);
+        return HttpResponse.json(
+          makeRule({
+            rule_id: 'rul_combo',
+            canonical_name: 'Combo rule',
+            status: 'deprecated',
+            constraint: { family: 'module_presence', module_key: 'belief' },
+          }),
+          { status: 200 },
+        );
+      }),
+    );
+
+    renderSection();
+    const row = await screen.findByTestId('world-rule-row');
+    fireEvent.click(row);
+    fireEvent.click(await screen.findByTestId('world-rule-edit'));
+    await screen.findByTestId('world-rule-form');
+    expect((screen.getByLabelText('Status') as HTMLSelectElement).value).toBe('active');
+
+    // Deactivate the rule whose edit form is open.
+    fireEvent.click(screen.getByTestId('world-rule-deactivate'));
+
+    // The form closes once deactivation succeeds: the stale form state
+    // (status: 'active') can never be saved to silently reactivate the rule.
+    await waitFor(() => expect(screen.queryByTestId('world-rule-form')).not.toBeInTheDocument());
+    expect(patches).toEqual([{ status: 'deprecated' }]);
+    expect(screen.getByTestId('world-rule-status')).toHaveTextContent('deprecated');
+  });
+
   it('list refresh after PATCH keeps the read-route ordering contract', async () => {
     let list = rulesResponse([
       makeRule({

@@ -105,14 +105,22 @@ export function RuleForm({ worldId, rule, onClose }: RuleFormProps) {
     if (isRuleInvalidInputError(error)) {
       const details = error.details as { field?: string; reason?: string } | undefined;
       if (details && typeof details.field === 'string' && typeof details.reason === 'string') {
-        // AR-2 vocabulary maps 1:1 onto form fields — echo verbatim.
-        setErrors((prev) => ({ ...prev, [details.field as RuleFormErrorKey]: details.reason }));
+        // AR-2 vocabulary maps 1:1 onto form fields — echo verbatim. The
+        // form-level keys (`constraint`, `patch`) have no field surface:
+        // surface them at the submit level so the echo is never invisible.
+        if (details.field === 'constraint' || details.field === 'patch') {
+          setSubmitError(details.reason);
+        } else {
+          setErrors((prev) => ({ ...prev, [details.field as RuleFormErrorKey]: details.reason }));
+        }
       } else {
         setSubmitError(error.message);
       }
     } else if (isRuleNotFoundError(error)) {
-      // P1 404 envelope (AR-6): honest non-field error, no id/world leak.
-      setSubmitError(t('form.notFoundError'));
+      // P1 404 envelope (AR-6): a create-mode 404 is the missing-world guard
+      // (world gone mid-form); an edit-mode 404 is an unknown/foreign rule —
+      // honest copy per mode, no id/world leak.
+      setSubmitError(isEdit ? t('form.notFoundError') : t('form.worldNotFoundError'));
     } else {
       // The hook toasts non-envelope failures; mirror a generic inline
       // message so the form never closes silently on failure.
@@ -161,6 +169,11 @@ export function RuleForm({ worldId, rule, onClose }: RuleFormProps) {
 
   const familyHelp = state.family ? t(`form.families.${state.family}.help`) : null;
   const targetAxisDisabled = state.family === 'observer_cardinality';
+  // Edit-mode severity honesty: when a hint is stored, the "Default
+  // (warning)" option is a silent no-op (no null-clearing, AR-3) and its
+  // label misstates the rule's evaluation — hide it and state the stored
+  // value instead (qc F-001).
+  const storedSeverity = isEdit && rule?.severity_hint ? rule.severity_hint : null;
 
   return (
     <form
@@ -305,7 +318,12 @@ export function RuleForm({ worldId, rule, onClose }: RuleFormProps) {
         </div>
       ) : null}
 
-      <RuleFormField label={t('form.statusLabel')} htmlFor="rule-form-status" helper={t('form.statusHelp')}>
+      <RuleFormField
+        label={t('form.statusLabel')}
+        htmlFor="rule-form-status"
+        helper={t('form.statusHelp')}
+        error={errors.status}
+      >
         <Select
           id="rule-form-status"
           value={state.status}
@@ -319,7 +337,16 @@ export function RuleForm({ worldId, rule, onClose }: RuleFormProps) {
         </Select>
       </RuleFormField>
 
-      <RuleFormField label={t('form.severityLabel')} htmlFor="rule-form-severity" helper={t('form.severityHelp')}>
+      <RuleFormField
+        label={t('form.severityLabel')}
+        htmlFor="rule-form-severity"
+        helper={
+          storedSeverity
+            ? t('form.severityStoredHelp', { severity: storedSeverity })
+            : t('form.severityHelp')
+        }
+        error={errors.severity_hint}
+      >
         <Select
           id="rule-form-severity"
           value={state.severityHint}
@@ -327,7 +354,9 @@ export function RuleForm({ worldId, rule, onClose }: RuleFormProps) {
             update({ severityHint: e.target.value as RuleFormState['severityHint'] })
           }
         >
-          <option value="">{t('form.severityDefault')}</option>
+          {storedSeverity === null ? (
+            <option value="">{t('form.severityDefault')}</option>
+          ) : null}
           {SEVERITY_OPTIONS.map((severity) => (
             <option key={severity} value={severity}>
               {severity}
