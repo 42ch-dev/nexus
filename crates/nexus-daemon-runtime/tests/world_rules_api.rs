@@ -1442,6 +1442,49 @@ async fn patch_whole_carrier_replacement_preserves_extensions_bag() {
     );
 }
 
+/// AR-3 fail-closed: a row whose stored `extensions_json` is not valid
+/// JSON is storage corruption — a carrier-replacing PATCH rejects with
+/// 500 `internal` (never a 200 that silently clobbers the bag) and writes
+/// nothing (the corrupt row stays byte-identical, timestamps frozen).
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn patch_malformed_extensions_json_500_internal_no_write() {
+    let ctx = ctx().await;
+    let row = SpokeRuleRow {
+        rule_id: "rul_corrupt".to_string(),
+        world_id: OWNED_WORLD.to_string(),
+        schema_version: 1,
+        canonical_name: "Corrupt".to_string(),
+        kind: "rule".to_string(),
+        statement: Some("S".to_string()),
+        description: None,
+        target_entry_types_json: "[]".to_string(),
+        severity_hint: None,
+        status: Some("active".to_string()),
+        source_anchor_json: None,
+        extensions_json: "{not valid json".to_string(),
+        created_at: Some(1_700_000_000),
+        updated_at: Some(1_700_000_100),
+    };
+    insert_rule(&ctx.pool, &row).await.expect("seed");
+
+    let resp = ctx
+        .server
+        .patch(&patch_url(OWNED_WORLD, "rul_corrupt"))
+        .json(&json!({ "constraint": { "family": "module_presence", "module_key": "m" } }))
+        .await;
+    assert_error_envelope(&resp, StatusCode::INTERNAL_SERVER_ERROR, "internal");
+
+    // Fail-closed before the UPDATE: no write occurred.
+    let row = fetch_rule(&ctx.pool, "rul_corrupt").await;
+    assert_eq!(row.extensions_json, "{not valid json");
+    assert_eq!(row.canonical_name, "Corrupt");
+    assert_eq!(
+        row.updated_at,
+        Some(1_700_000_100),
+        "500 must not touch updated_at"
+    );
+}
+
 /// Deactivate = `PATCH status=deprecated` (product lock — no DELETE route).
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn patch_status_deprecated_deactivates() {
@@ -1527,6 +1570,44 @@ async fn patch_empty_target_entry_types_clears_axis_absent_leaves_unchanged() {
         item["target_entry_types"],
         json!(["y"]),
         "absent ≠ clear: {item}"
+    );
+}
+
+/// `target_entry_types: null` on the wire is the ratified deviation
+/// null ≡ absent (serde `Option`): the axis stays unchanged — never
+/// cleared, never an extractor rejection. Pair a real field so the PATCH
+/// is non-empty (a null-only body would be the empty-PATCH 400).
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn patch_null_target_entry_types_leaves_unchanged() {
+    let ctx = ctx().await;
+    seed_rule(
+        &ctx.pool,
+        "rul_null",
+        OWNED_WORLD,
+        "Null",
+        None,
+        "active",
+        &["y"],
+        &json!({ "family": "module_presence", "module_key": "m" }),
+    )
+    .await;
+
+    let resp = ctx
+        .server
+        .patch(&patch_url(OWNED_WORLD, "rul_null"))
+        .json(&json!({ "target_entry_types": null, "statement": "null is absent" }))
+        .await;
+    assert_eq!(resp.status_code(), StatusCode::OK, "body={}", resp.text());
+    let item: Value = resp.json();
+    assert_eq!(
+        item["target_entry_types"],
+        json!(["y"]),
+        "null ≡ absent, axis unchanged: {item}"
+    );
+    let row = fetch_rule(&ctx.pool, "rul_null").await;
+    assert_eq!(
+        row.target_entry_types_json, "[\"y\"]",
+        "stored axis untouched by null"
     );
 }
 
@@ -1642,6 +1723,57 @@ async fn patch_cross_world_rule_404_no_existence_leak() {
     assert!(ids.contains(&"rul_other_world"), "rule untouched: {ids:?}");
 }
 
+/// AR-5 discriminating pair: addressing precedes payload validation. An
+/// INVALID payload (`status: "banana"` — 400 `invalid_input` `status` if
+/// the payload were ever validated) must still 404 for an unknown
+/// `rule_id` AND for a cross-world `rule_id` — proving the 404 semantics
+/// are not an artifact of valid-payload routing. A reorder that validated
+/// the payload first would surface 400 here and fail the test.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn patch_invalid_payload_404_precedes_payload_validation() {
+    let ctx = ctx().await;
+    seed_rule(
+        &ctx.pool,
+        "rul_cross_invalid",
+        DRAFT_WORLD,
+        "CrossWorldInvalid",
+        None,
+        "active",
+        &[],
+        &json!({ "family": "module_presence", "module_key": "m" }),
+    )
+    .await;
+
+    // (a) unknown rule_id + invalid payload → 404, not 400.
+    let resp = ctx
+        .server
+        .patch(&patch_url(OWNED_WORLD, "rul_unknown_invalid"))
+        .json(&json!({ "status": "banana" }))
+        .await;
+    assert_error_envelope(&resp, StatusCode::NOT_FOUND, "not_found");
+
+    // (b) cross-world rule_id (same creator) + invalid payload → 404, not
+    // 400, and still no existence leak (AR-6 holds under invalid payloads).
+    let resp = ctx
+        .server
+        .patch(&patch_url(OWNED_WORLD, "rul_cross_invalid"))
+        .json(&json!({ "status": "banana" }))
+        .await;
+    assert_error_envelope(&resp, StatusCode::NOT_FOUND, "not_found");
+    let message = resp.json::<Value>()["error"]["message"]
+        .as_str()
+        .expect("message")
+        .to_string();
+    assert!(
+        message.contains("rul_cross_invalid"),
+        "404 names the id: {message}"
+    );
+    assert!(
+        !message.contains("CrossWorldInvalid"),
+        "canonical_name must not leak: {message}"
+    );
+}
+
 /// The pair rule judges the EFFECTIVE pair (AR-5): provided or stored on
 /// each side. Changing one side into a conflict rejects on
 /// `target_entry_types`; an unrelated statement PATCH on a stored observer
@@ -1742,6 +1874,42 @@ async fn patch_meta_field_value_checks() {
     let row = fetch_rule(&ctx.pool, "rul_meta").await;
     assert_eq!(row.canonical_name, "Meta");
     assert_eq!(row.status.as_deref(), Some("active"));
+    assert_eq!(row.updated_at, Some(1_700_000_100));
+}
+
+/// PATCH-side extractor-rejection parity (qc1-S3): an unknown top-level
+/// member trips the DTO's `deny_unknown_fields` — an axum `Json`
+/// extractor rejection, 4xx with a framework body, never the daemon
+/// envelope (AR-2 not-envelope cases). The handler never runs: row
+/// untouched.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn patch_extractor_rejection_framework_not_envelope() {
+    let ctx = ctx().await;
+    seed_rule(
+        &ctx.pool,
+        "rul_extractor",
+        OWNED_WORLD,
+        "Extractor",
+        None,
+        "active",
+        &[],
+        &json!({ "family": "module_presence", "module_key": "m" }),
+    )
+    .await;
+
+    let unknown_member = ctx
+        .server
+        .patch(&patch_url(OWNED_WORLD, "rul_extractor"))
+        .json(&json!({ "statement": "x", "bogus": 1 }))
+        .await;
+    assert_extractor_rejection(&unknown_member);
+
+    let row = fetch_rule(&ctx.pool, "rul_extractor").await;
+    assert_eq!(
+        row.statement.as_deref(),
+        Some("Human summary for Extractor"),
+        "rejected before any write"
+    );
     assert_eq!(row.updated_at, Some(1_700_000_100));
 }
 
