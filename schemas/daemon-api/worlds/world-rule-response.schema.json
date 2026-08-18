@@ -1,0 +1,60 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/daemon-api/worlds/world-rule-response.schema.json",
+  "schema_version": 1,
+  "title": "Nexus WorldRuleResponse",
+  "description": "Single rule item returned by POST /v1/daemon/worlds/{world_id}/rules (201) and PATCH /v1/daemon/worlds/{world_id}/rules/{rule_id} (200) (V1.169 P1 / AR-1). The WorldRulesListResponseRulesItem shape verbatim: spoke Rule author metadata projected verbatim (canonical_name, kind, statement, severity_hint, status, target_entry_types — open spoke vocabulary, no nexus coercion at rest) plus the AR-2 constraint carrier surfaced first-class from extensions.nexus.constraint (absent/malformed → omitted; the extensions bag itself is NOT exposed). The projection converts the stored INTEGER Unix-epoch timestamps to RFC 3339.",
+  "type": "object",
+  "required": ["rule_id", "canonical_name", "kind", "target_entry_types"],
+  "additionalProperties": false,
+  "properties": {
+    "rule_id": {
+      "type": "string",
+      "description": "Stable rule id (rul_<uuid v4 simple>, AR-2) — minted server-side, immutable, path-addressed, never a DTO field."
+    },
+    "canonical_name": {
+      "type": "string",
+      "description": "Human-stable name (author-metadata list order key)."
+    },
+    "kind": {
+      "type": "string",
+      "description": "Open string. Core vocabulary (documented, not enforced): rule, prohibition, style. Stored verbatim — author classification, not Finding kind (PD-1)."
+    },
+    "statement": {
+      "type": ["string", "null"],
+      "description": "Human summary only — never parsed by the evaluator (PD-1)."
+    },
+    "description": {
+      "type": ["string", "null"],
+      "description": "Longer explanation for integrators or authors. Not mutable on the write surface (product field set); NULL at API create."
+    },
+    "severity_hint": {
+      "type": ["string", "null"],
+      "description": "Open string. Core vocabulary (documented, not enforced): info, warning, error. Verbatim; the evaluator defaults to warning when absent (AR-4)."
+    },
+    "status": {
+      "type": ["string", "null"],
+      "description": "Open string. Core vocabulary (documented, not enforced): draft, active, deprecated. Verbatim; auto-include only evaluates status=active (PD-1)."
+    },
+    "target_entry_types": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Targeting axis for the three entry families; empty = all entry types in check scope (PD-1). Inapplicable to observer_cardinality (events carry no entry_type — the combination is rejected on write, AR-2)."
+    },
+    "constraint": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "The AR-2 constraint carrier (extensions.nexus.constraint) projected first-class: raw typed JSON object discriminated by family. Absent/malformed stored carrier → omitted. The extensions bag itself is not exposed."
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "RFC 3339 UTC datetime string (projected from stored epoch seconds)."
+    },
+    "updated_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "RFC 3339 UTC datetime string (projected from stored epoch seconds)."
+    }
+  }
+}

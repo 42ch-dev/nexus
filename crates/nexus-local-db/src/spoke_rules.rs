@@ -15,6 +15,10 @@
 //! ("active") happens at the adapter boundary (AR-1) — spoke vocabulary
 //! stays out of pure storage. [`insert_spoke_rule_for_test`] remains for
 //! existing test/dev seeds, routing through the production insert.
+//!
+//! V1.169 (P1, AR-4) adds the world-guarded multi-field update
+//! ([`update_rule`] — `None` fields keep their stored value via SQL
+//! `COALESCE`; the JSON columns stay opaque pre-serialized strings).
 
 use crate::LocalDbError;
 use sqlx::SqlitePool;
@@ -134,6 +138,73 @@ pub async fn set_rule_status(
         "UPDATE spoke_rules SET status = ?, updated_at = ? \
          WHERE rule_id = ? AND world_id = ?",
         status,
+        now_epoch,
+        rule_id,
+        world_id,
+    )
+    .execute(pool)
+    .await?;
+    Ok(result.rows_affected() == 1)
+}
+
+/// V1.169 AR-4: world-guarded multi-field update.
+///
+/// `None` fields keep their stored value (SQL `COALESCE`); `updated_at`
+/// refreshes to the current Unix epoch seconds on every matched row;
+/// `created_at` is never touched. `Ok(false)` = no row matched (unknown id OR
+/// foreign world — storage does not distinguish; the handler maps it to 404).
+pub struct RuleUpdate {
+    pub canonical_name: Option<String>,
+    pub statement: Option<String>,
+    pub severity_hint: Option<String>,
+    pub status: Option<String>,
+    pub kind: Option<String>,
+    pub target_entry_types_json: Option<String>, // pre-serialized array (opaque)
+    pub extensions_json: Option<String>,         // pre-serialized bag (opaque)
+}
+
+/// World-guarded multi-field update: single static `UPDATE ... COALESCE`
+/// statement (offline-prepare-friendly; no dynamic SQL fragments).
+///
+/// `Ok(true)` = updated; `Ok(false)` = no row matched (unknown id OR foreign
+/// world — storage does not distinguish; the handler maps it to 404).
+/// `updated_at` is refreshed to the current Unix epoch seconds on every
+/// matched update — including one whose new values equal the stored ones
+/// (last-write-wins, same as [`set_rule_status`]); `created_at` is never
+/// touched. The JSON columns are stored verbatim as the pre-serialized
+/// strings provided — no parsing or assembly here.
+///
+/// # Errors
+///
+/// Returns [`LocalDbError::Sqlx`] on database failure.
+pub async fn update_rule(
+    pool: &SqlitePool,
+    world_id: &str,
+    rule_id: &str,
+    update: &RuleUpdate,
+) -> Result<bool, LocalDbError> {
+    let now_epoch = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| i64::try_from(d.as_secs()).unwrap_or(i64::MAX))
+        .unwrap_or_default();
+    let result = sqlx::query!(
+        "UPDATE spoke_rules SET \
+         canonical_name = COALESCE(?, canonical_name), \
+         statement = COALESCE(?, statement), \
+         severity_hint = COALESCE(?, severity_hint), \
+         status = COALESCE(?, status), \
+         kind = COALESCE(?, kind), \
+         target_entry_types_json = COALESCE(?, target_entry_types_json), \
+         extensions_json = COALESCE(?, extensions_json), \
+         updated_at = ? \
+         WHERE rule_id = ? AND world_id = ?",
+        update.canonical_name,
+        update.statement,
+        update.severity_hint,
+        update.status,
+        update.kind,
+        update.target_entry_types_json,
+        update.extensions_json,
         now_epoch,
         rule_id,
         world_id,
