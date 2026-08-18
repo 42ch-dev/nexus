@@ -142,7 +142,7 @@ regress = "0.10"
 # schemas additive: `ToolDescriptor` generated type + optional
 # `HostCapabilityManifest.tools[]` (serde-omitted when empty — nexus builders
 # declare `tools: Vec::new()`; struct-literal break fixed at manifest.rs and
-# the two connect-host example fixtures). operations additive: `tools` module
+# the connect-host example fixtures). operations additive: `tools` module
 # (`ToolInvokePort` / `orchestrate_invoke_tool` / capability-id grammar
 # helpers) + new `regress` dep (already workspace-pinned at 0.10 — single
 # build, `cargo tree -i regress` one version). connect: responder /

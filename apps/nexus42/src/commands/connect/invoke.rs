@@ -2185,4 +2185,62 @@ mod tests {
         };
         assert_eq!(map_reject(&stale_reject).code, "stored_revision_stale");
     }
+
+    /// V1.169 P0 (locks AR-4 layer 2): a `tools.*` op that somehow reaches
+    /// the nexus invoke handler is refused by the SERVED_OPS pre-routing
+    /// gate with the `op_unsupported` envelope — code + the locked message
+    /// prefix (`op <op> is not supported: …`, NOT the scope-denial
+    /// `op denied:` shape) — before any lane permit acquisition or
+    /// orchestrator route. The lane-hold probe machine-checks the
+    /// precedence: with the only lane permit held (a served op would fail
+    /// with `invoke_busy`), the `tools.*` op is STILL refused as
+    /// `op_unsupported`, proving the gate runs before the lane. Zero side
+    /// effects are structural (the gate is dispatch step 1 — no permit is
+    /// consumed, no orchestrator is reached), observable as a served op
+    /// round-tripping after the refusals once the permit frees.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn tools_ops_refused_by_served_ops_gate() {
+        let (handler, lane, _serializer, peer, _temp) = test_handler(BridgeLimits {
+            max_concurrent_invokes: 1,
+            ..BridgeLimits::default()
+        })
+        .await;
+        let _held = lane
+            .clone()
+            .try_acquire_owned()
+            .expect("test holds the only lane permit");
+        for op in ["tools.math.add", "tools.demo.lookup"] {
+            match handler(&peer, op, serde_json::json!({ "extensions": {} })) {
+                Err(envelope) => {
+                    assert_eq!(
+                        envelope.code, "op_unsupported",
+                        "op {op} must be refused with op_unsupported"
+                    );
+                    assert!(
+                        envelope
+                            .message
+                            .starts_with(&format!("op {op} is not supported:")),
+                        "op {op} must carry the locked refusal message prefix: {}",
+                        envelope.message
+                    );
+                }
+                Ok(_) => panic!("op {op} must be refused, got a served response"),
+            }
+        }
+        drop(_held);
+        // Zero side effects: the refusals consumed nothing — a served op
+        // round-trips normally afterwards.
+        let served = handler(
+            &peer,
+            "upsert",
+            serde_json::json!({
+                "knowledge_entries": [entry_fixture("kb_after_tools_refusal", WORLD_A)],
+            }),
+        )
+        .expect("a served op round-trips after the tools.* refusals");
+        assert_eq!(
+            served["knowledge_entries"][0]["entry_id"],
+            "kb_after_tools_refusal"
+        );
+    }
 }

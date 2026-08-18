@@ -2608,7 +2608,12 @@ async fn n_c2_check_and_assemble_wrong_world_and_absent_scope_denied() {
 /// N-C2 (V1.154 P2) refusal matrix: through the real handler, `project`
 /// and unknown ops are refused with `op_unsupported` and zero side effects
 /// — even for a peer whose `op_scope` covers the full served set (the
-/// SERVED_OPS gate refuses before any scope logic). `compute` is SERVED as
+/// SERVED_OPS gate refuses before any scope logic). V1.169 P0 (locks AR-4
+/// layer 1): `tools.*` ops join the matrix — the spoke-side dispatch gate
+/// (0.11.1 core rule: the op string itself is the required capability;
+/// nexus never negotiates a `tools.*` capability, AR-1) refuses
+/// `tools.math.add` with the same `op_unsupported` wire envelope BEFORE
+/// the nexus handler runs. `compute` is SERVED as
 /// of P2: a malformed compute payload passes the served-op gate and maps
 /// through the typed parse to `invalid_input` (NOT `op_unsupported`),
 /// pinning that the gate really admits it. The session stays usable.
@@ -2657,9 +2662,13 @@ async fn n_c2_refusal_matrix_project_and_unknown_ops() {
         .await
         .expect("scoped peer handshake");
 
-    // project and unknown ops are refused by the served-op gate regardless
-    // of op_scope / payload shape.
-    for op in ["project", "garbage-op"] {
+    // project, unknown, and tools.* ops are refused regardless of
+    // op_scope / payload shape. `tools.math.add` is refused by the
+    // SPOKE-side dispatch gate (layer 1): the 0.11.1 core rule requires
+    // the exact op string as a negotiated capability, and nexus never
+    // negotiates a tools.* capability — the gate answers the
+    // op_unsupported wire envelope before the nexus handler runs.
+    for op in ["project", "garbage-op", "tools.math.add"] {
         assert_op_unsupported(&session, op).await;
     }
 
