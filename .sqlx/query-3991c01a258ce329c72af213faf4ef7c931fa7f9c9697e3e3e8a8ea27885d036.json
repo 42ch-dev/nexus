@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE spoke_rules SET canonical_name = COALESCE(?, canonical_name), statement = COALESCE(?, statement), severity_hint = COALESCE(?, severity_hint), status = COALESCE(?, status), kind = COALESCE(?, kind), target_entry_types_json = COALESCE(?, target_entry_types_json), extensions_json = COALESCE(?, extensions_json), updated_at = ? WHERE rule_id = ? AND world_id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 10
+    },
+    "nullable": []
+  },
+  "hash": "3991c01a258ce329c72af213faf4ef7c931fa7f9c9697e3e3e8a8ea27885d036"
+}
