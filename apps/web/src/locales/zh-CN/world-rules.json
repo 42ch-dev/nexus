@@ -3,8 +3,9 @@
     "title": "规则",
     "description": "Check 应用于此世界条目与时间线的规则。显示所有状态——自动包含仅评估 active（激活）规则。",
     "structuralNote": "每条规则携带结构性约束（模块存在/缺失、必填字段、观察者数量），不评估叙事质量。",
-    "emptyTitle": "暂无规则",
-    "emptyDescription": "此世界暂无规则。可使用 creator CLI（`creator world rule add`）添加规则。",
+    "emptyTitle": "还没有规则",
+    "emptyDescription": "添加一条结构性规则，让 Check 可以评估此世界的条目与时间线。",
+    "addRule": "添加规则",
     "truncated": "按名称显示前 500 条规则，其余规则未显示。",
     "errorTitle": "无法加载规则",
     "errorDescription": "无法加载此世界的规则。",
@@ -15,6 +16,91 @@
     "collapseAria": "收起规则 {{id}}",
     "constraint": "约束",
     "targetTypes": "目标条目类型",
-    "allEntryTypes": "全部条目类型"
+    "allEntryTypes": "全部条目类型",
+    "edit": "编辑",
+    "deactivate": "停用",
+    "deactivateHelp": "阻止 Check 自动包含此规则。规则仍保留在列表中。"
+  },
+  "form": {
+    "title": "添加规则",
+    "editTitle": "编辑规则",
+    "familyLabel": "约束族",
+    "familyPlaceholder": "选择约束族…",
+    "families": {
+      "module_presence": {
+        "label": "要求某个模块",
+        "help": "匹配的条目必须携带此模块键。"
+      },
+      "module_absence": {
+        "label": "禁止某个模块",
+        "help": "匹配的条目不得携带此模块键。"
+      },
+      "required_field": {
+        "label": "要求某个字段",
+        "help": "匹配的条目必须填写此字段。"
+      },
+      "observer_cardinality": {
+        "label": "限制观察者数量",
+        "help": "匹配的事件其观察者数量必须在范围内。"
+      }
+    },
+    "nameLabel": "名称",
+    "nameHelp": "一个稳定名称，便于在列表中识别。",
+    "statementLabel": "摘要",
+    "statementHelp": "Check 不读取此内容。约束由下方字段定义。",
+    "moduleKeyLabel": "模块键",
+    "operandLabel": "操作数形式",
+    "operand": {
+      "entry": {
+        "label": "条目级字段",
+        "help": "作用于封闭的条目级字段之一。"
+      },
+      "module-row": {
+        "label": "模块行",
+        "help": "作用于该模块行上的自由字段。"
+      }
+    },
+    "entryFieldLabel": "字段",
+    "entryFieldPlaceholder": "选择字段…",
+    "minLabel": "最小观察者数",
+    "maxLabel": "最大观察者数",
+    "statusLabel": "状态",
+    "statusActive": "激活",
+    "statusDraft": "草稿",
+    "statusDeprecated": "已停用",
+    "statusHelp": "激活规则会自动包含在 Check 中；草稿规则会保存但不会自动包含。",
+    "severityLabel": "严重程度",
+    "severityDefault": "默认（警告）",
+    "severityHelp": "未设置时，Check 按警告评估该规则。",
+    "severityStoredHelp": "已存储严重程度：{{severity}}。选择其他值以更改。",
+    "kindLabel": "类型",
+    "kindHelp": "可选——原样存储。",
+    "targetTypesLabel": "目标条目类型",
+    "targetTypesHelp": "未选择 → 检查范围内的全部条目类型。",
+    "targetTypesDisabledHelp": "不适用于限制观察者数量——事件不携带条目类型。",
+    "submit": "添加规则",
+    "submitPending": "添加中…",
+    "save": "保存更改",
+    "savePending": "保存中…",
+    "cancel": "取消",
+    "genericError": "无法添加规则，请重试。",
+    "genericUpdateError": "无法保存规则，请重试。",
+    "notFoundError": "找不到此规则，可能已被删除。",
+    "worldNotFoundError": "找不到此世界，可能已被删除。",
+    "errors": {
+      "familyRequired": "请选择约束族。",
+      "nameRequired": "名称不能为空。",
+      "statementRequired": "摘要不能为空。",
+      "moduleKeyRequired": "模块键不能为空。",
+      "operandRequired": "请选择一种操作数形式：条目级字段或模块行。",
+      "entryFieldRequired": "请选择一个条目级字段。",
+      "moduleFieldRequired": "字段不能为空。",
+      "moduleFieldReserved": "条目级字段值不能与模块行组合。",
+      "minRequired": "至少需要一个边界。",
+      "boundInvalid": "必须是整数。",
+      "boundTooLarge": "必须是 9,007,199,254,740,991 以内的整数。",
+      "minMax": "最小值不能大于最大值。",
+      "targetTypesConflict": "目标条目类型不能与观察者数量约束组合。"
+    }
   }
 }

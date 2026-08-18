@@ -11,7 +11,9 @@
  *     first-class `constraint` object (AR-2/AR-3): all four families +
  *     module-row form, unknown families get family + generic operands, odd
  *     shapes never crash, absent constraint → no summary row;
- *   - the section is read-only — no create/edit/deactivate controls.
+ *   - the section's per-row surface stays read-only (expand toggles only);
+ *     the V1.169 P2 create entry is the CardHeader **Add rule** CTA (same
+ *     CTA as the empty state) which opens the inline create form.
  */
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
@@ -23,7 +25,7 @@ import { worldRuleStatusVariant } from '@/components/worlds/world-rules/world-ru
 import { BrowserClient } from '@/lib/nexus';
 import { renderInApp } from '@/test/test-providers';
 import { useHandlers } from '@/test/msw-server';
-import type { WorldRulesListResponse } from '@42ch/nexus-contracts';
+import type { WorldRuleUpdateRequest, WorldRulesListResponse } from '@42ch/nexus-contracts';
 
 type WorldRule = WorldRulesListResponse['rules'][number];
 
@@ -303,7 +305,7 @@ describe('WorldRulesSection — populated', () => {
     fireEvent.click(rows[5]);
   });
 
-  it('is read-only: no create/edit/deactivate controls, only expand toggles', async () => {
+  it('collapsed rows stay expand-only; expanded rows expose Edit + Deactivate', async () => {
     useHandlers(
       http.get('/v1/daemon/worlds/:worldId/rules', () =>
         HttpResponse.json(
@@ -318,22 +320,31 @@ describe('WorldRulesSection — populated', () => {
     renderSection();
     await waitFor(() => expect(screen.getByText('Read-only rule')).toBeInTheDocument());
 
-    // No authoring controls (PD-2 — rules are CLI-authored, PD-1).
-    expect(
-      screen.queryByRole('button', { name: /create|edit|deactivate|add|delete/i }),
-    ).not.toBeInTheDocument();
+    // The V1.169 P2 create entry (CardHeader CTA) is present.
+    expect(screen.getByTestId('world-rules-add-rule')).toHaveTextContent('Add rule');
 
-    // Every button is a read-only expand/collapse toggle.
-    const buttons = screen.getAllByRole('button');
+    // Collapsed rows expose no per-row authoring controls — the row click
+    // stays expand-only (T2 lock: Edit lives inside the expanded row).
+    expect(screen.queryByTestId('world-rule-edit')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('world-rule-deactivate')).not.toBeInTheDocument();
+
+    // Every non-CTA button is a read-only expand/collapse toggle.
+    const addRule = screen.getByTestId('world-rules-add-rule');
+    const buttons = screen.getAllByRole('button').filter((button) => button !== addRule);
     expect(buttons.length).toBeGreaterThanOrEqual(2);
     for (const button of buttons) {
       expect(button).toHaveAttribute('aria-expanded');
     }
+
+    // Expanding a row reveals the authoring controls (T2).
+    fireEvent.click(buttons[0]);
+    await waitFor(() => expect(screen.getByTestId('world-rule-edit')).toBeInTheDocument());
+    expect(screen.getByTestId('world-rule-deactivate')).toBeInTheDocument();
   });
 });
 
 describe('WorldRulesSection — empty state', () => {
-  it('renders the honest empty copy when the world has no rules', async () => {
+  it('renders the locked empty copy with an in-panel Add rule CTA (no CLI pointer)', async () => {
     useHandlers(
       http.get('/v1/daemon/worlds/:worldId/rules', () =>
         HttpResponse.json(rulesResponse([], false)),
@@ -341,9 +352,72 @@ describe('WorldRulesSection — empty state', () => {
     );
 
     renderSection();
-    await waitFor(() => expect(screen.getByText('No rules')).toBeInTheDocument());
-    expect(screen.getByText(/This World has no rules yet/)).toBeInTheDocument();
+    // Locked copy (plan clarify): title / description / CTA.
+    await waitFor(() => expect(screen.getByText('No rules yet')).toBeInTheDocument());
+    expect(
+      screen.getByText(/Add a structural rule so Check can evaluate this World's entries and timeline\./),
+    ).toBeInTheDocument();
+    // The CLI pointer is gone (DF-82 blocker).
+    expect(screen.queryByText(/creator world rule add/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/CLI/)).not.toBeInTheDocument();
     expect(screen.queryByTestId('world-rules-count')).not.toBeInTheDocument();
+
+    // The empty-state CTA opens the inline create form.
+    fireEvent.click(screen.getByTestId('world-rules-empty-add-rule'));
+    await waitFor(() => expect(screen.getByTestId('world-rule-form')).toBeInTheDocument());
+    expect(screen.getByTestId('world-rule-form')).toHaveTextContent('Constraint family');
+  });
+
+  it('the CardHeader Add rule CTA also opens the inline form', async () => {
+    useHandlers(
+      http.get('/v1/daemon/worlds/:worldId/rules', () =>
+        HttpResponse.json(rulesResponse([], false)),
+      ),
+    );
+
+    renderSection();
+    await waitFor(() => expect(screen.getByText('No rules yet')).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId('world-rules-add-rule'));
+    await waitFor(() => expect(screen.getByTestId('world-rule-form')).toBeInTheDocument());
+  });
+
+  it('a successful create refreshes the list and renders the new rule in read order', async () => {
+    let list = rulesResponse([], false);
+    useHandlers(
+      http.get('/v1/daemon/worlds/:worldId/rules', () => HttpResponse.json(list)),
+      http.post('/v1/daemon/worlds/:worldId/rules', async ({ request }) => {
+        const body = (await request.json()) as { canonical_name?: string };
+        const created = makeRule({
+          rule_id: 'rul_created',
+          canonical_name: body.canonical_name ?? 'Created rule',
+          status: 'active',
+        });
+        list = rulesResponse([created]);
+        return HttpResponse.json(created, { status: 201 });
+      }),
+    );
+
+    renderSection();
+    await waitFor(() => expect(screen.getByText('No rules yet')).toBeInTheDocument());
+
+    fireEvent.click(screen.getByTestId('world-rules-empty-add-rule'));
+    await waitFor(() => expect(screen.getByTestId('world-rule-form')).toBeInTheDocument());
+
+    // Fill the module_presence happy path.
+    fireEvent.change(screen.getByLabelText('Constraint family'), {
+      target: { value: 'module_presence' },
+    });
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Belief module required' } });
+    fireEvent.change(screen.getByLabelText('Summary'), {
+      target: { value: 'Entries must carry the belief module.' },
+    });
+    fireEvent.change(screen.getByLabelText('Module key'), { target: { value: 'belief' } });
+    fireEvent.click(screen.getByTestId('rule-form-submit'));
+
+    // The form closes and the refreshed list shows the new row.
+    await waitFor(() => expect(screen.queryByTestId('world-rule-form')).not.toBeInTheDocument());
+    expect(await screen.findByText('Belief module required')).toBeInTheDocument();
+    expect(screen.getByTestId('world-rules-count')).toHaveTextContent('1');
   });
 });
 
@@ -449,10 +523,269 @@ describe('WorldRulesSection — zh-CN locale parity', () => {
     );
 
     renderSection();
-    await waitFor(() => expect(screen.getByText('暂无规则')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('还没有规则')).toBeInTheDocument());
     expect(screen.getByText('规则')).toBeInTheDocument();
     expect(
       screen.getByText(/结构性约束（模块存在\/缺失、必填字段、观察者数量）/),
     ).toBeInTheDocument();
+
+    // Clean up the persisted preference so later tests render in en again
+    // (setup.ts only resets the i18next language, not localStorage).
+    window.localStorage.removeItem('nexus-web-locale');
+  });
+});
+
+describe('WorldRulesSection — edit + Deactivate (V1.169 P2 T2)', () => {
+  it('Edit opens the inline edit form prefilled from the stored rule', async () => {
+    useHandlers(
+      http.get('/v1/daemon/worlds/:worldId/rules', () =>
+        HttpResponse.json(
+          rulesResponse([
+            makeRule({
+              rule_id: 'rul_edit',
+              canonical_name: 'Belief module required',
+              statement: 'Entries must carry the belief module.',
+              constraint: { family: 'module_presence', module_key: 'belief' },
+            }),
+          ]),
+        ),
+      ),
+    );
+
+    renderSection();
+    const row = await screen.findByTestId('world-rule-row');
+    fireEvent.click(row);
+    fireEvent.click(await screen.findByTestId('world-rule-edit'));
+
+    const form = await screen.findByTestId('world-rule-form');
+    expect(form).toHaveTextContent('Edit rule');
+    expect((screen.getByLabelText('Name') as HTMLInputElement).value).toBe(
+      'Belief module required',
+    );
+    expect((screen.getByLabelText('Constraint family') as HTMLSelectElement).value).toBe(
+      'module_presence',
+    );
+    expect((screen.getByLabelText('Module key') as HTMLInputElement).value).toBe('belief');
+  });
+
+  it('opening edit cancels create and vice versa (one form at a time)', async () => {
+    useHandlers(
+      http.get('/v1/daemon/worlds/:worldId/rules', () =>
+        HttpResponse.json(
+          rulesResponse([makeRule({ rule_id: 'rul_edit', canonical_name: 'Editable rule' })]),
+        ),
+      ),
+    );
+
+    renderSection();
+    await screen.findByTestId('world-rule-row');
+
+    // Create first, then edit: the create form closes.
+    fireEvent.click(screen.getByTestId('world-rules-add-rule'));
+    await waitFor(() => expect(screen.getByTestId('world-rule-form')).toHaveTextContent('Add rule'));
+    const row = screen.getByTestId('world-rule-row');
+    fireEvent.click(row);
+    fireEvent.click(await screen.findByTestId('world-rule-edit'));
+    await waitFor(() => expect(screen.getByTestId('world-rule-form')).toHaveTextContent('Edit rule'));
+
+    // Edit first, then create: the edit form closes.
+    fireEvent.click(screen.getByTestId('world-rules-add-rule'));
+    await waitFor(() => expect(screen.getByTestId('world-rule-form')).toHaveTextContent('Add rule'));
+  });
+
+  it('Deactivate PATCHes status=deprecated; the row stays visible with the deprecated badge', async () => {
+    let list = rulesResponse([
+      makeRule({ rule_id: 'rul_dep', canonical_name: 'Doomed rule', status: 'active' }),
+    ]);
+    const patch: { body?: WorldRuleUpdateRequest } = {};
+    useHandlers(
+      http.get('/v1/daemon/worlds/:worldId/rules', () => HttpResponse.json(list)),
+      http.patch('/v1/daemon/worlds/:worldId/rules/:ruleId', async ({ request }) => {
+        const body = (await request.json()) as WorldRuleUpdateRequest;
+        patch.body = body;
+        list = rulesResponse([
+          makeRule({ rule_id: 'rul_dep', canonical_name: 'Doomed rule', status: 'deprecated' }),
+        ]);
+        return HttpResponse.json(
+          makeRule({ rule_id: 'rul_dep', canonical_name: 'Doomed rule', status: 'deprecated' }),
+          { status: 200 },
+        );
+      }),
+    );
+
+    renderSection();
+    const row = await screen.findByTestId('world-rule-row');
+    fireEvent.click(row);
+    // Locked Deactivate helper copy (plan clarify, verbatim).
+    expect(screen.getByTestId('world-rule-deactivate-help')).toHaveTextContent(
+      'Stops Check from auto-including this rule. The rule stays in the list.',
+    );
+    fireEvent.click(screen.getByTestId('world-rule-deactivate'));
+
+    await waitFor(() => expect(patch.body).toEqual({ status: 'deprecated' }));
+    // The row stays visible with the deprecated badge; Deactivate is gone.
+    expect(await screen.findByText('Doomed rule')).toBeInTheDocument();
+    expect(screen.getByTestId('world-rule-status')).toHaveTextContent('deprecated');
+    expect(screen.queryByTestId('world-rule-deactivate')).not.toBeInTheDocument();
+  });
+
+  it('reactivates a deprecated rule via Edit → status active', async () => {
+    let list = rulesResponse([
+      makeRule({
+        rule_id: 'rul_react',
+        canonical_name: 'Retired rule',
+        status: 'deprecated',
+        constraint: { family: 'module_presence', module_key: 'belief' },
+      }),
+    ]);
+    const patch: { body?: WorldRuleUpdateRequest } = {};
+    useHandlers(
+      http.get('/v1/daemon/worlds/:worldId/rules', () => HttpResponse.json(list)),
+      http.patch('/v1/daemon/worlds/:worldId/rules/:ruleId', async ({ request }) => {
+        const body = (await request.json()) as WorldRuleUpdateRequest;
+        patch.body = body;
+        list = rulesResponse([
+          makeRule({
+            rule_id: 'rul_react',
+            canonical_name: 'Retired rule',
+            status: 'active',
+            constraint: { family: 'module_presence', module_key: 'belief' },
+          }),
+        ]);
+        return HttpResponse.json(
+          makeRule({
+            rule_id: 'rul_react',
+            canonical_name: 'Retired rule',
+            status: 'active',
+            constraint: { family: 'module_presence', module_key: 'belief' },
+          }),
+          { status: 200 },
+        );
+      }),
+    );
+
+    renderSection();
+    const row = await screen.findByTestId('world-rule-row');
+    fireEvent.click(row);
+    fireEvent.click(await screen.findByTestId('world-rule-edit'));
+
+    await screen.findByTestId('world-rule-form');
+    expect((screen.getByLabelText('Status') as HTMLSelectElement).value).toBe('deprecated');
+    fireEvent.change(screen.getByLabelText('Status'), { target: { value: 'active' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+
+    await waitFor(() => expect(patch.body?.status).toBe('active'));
+    // The form closes and the refreshed list shows the active badge.
+    await waitFor(() => expect(screen.queryByTestId('world-rule-form')).not.toBeInTheDocument());
+    expect(await screen.findByTestId('world-rule-status')).toHaveTextContent('active');
+  });
+
+  it('Deactivate while its edit form is open closes the form so save cannot silently reactivate', async () => {
+    let list = rulesResponse([
+      makeRule({
+        rule_id: 'rul_combo',
+        canonical_name: 'Combo rule',
+        status: 'active',
+        constraint: { family: 'module_presence', module_key: 'belief' },
+      }),
+    ]);
+    const patches: WorldRuleUpdateRequest[] = [];
+    useHandlers(
+      http.get('/v1/daemon/worlds/:worldId/rules', () => HttpResponse.json(list)),
+      http.patch('/v1/daemon/worlds/:worldId/rules/:ruleId', async ({ request }) => {
+        const body = (await request.json()) as WorldRuleUpdateRequest;
+        patches.push(body);
+        list = rulesResponse([
+          makeRule({
+            rule_id: 'rul_combo',
+            canonical_name: 'Combo rule',
+            status: 'deprecated',
+            constraint: { family: 'module_presence', module_key: 'belief' },
+          }),
+        ]);
+        return HttpResponse.json(
+          makeRule({
+            rule_id: 'rul_combo',
+            canonical_name: 'Combo rule',
+            status: 'deprecated',
+            constraint: { family: 'module_presence', module_key: 'belief' },
+          }),
+          { status: 200 },
+        );
+      }),
+    );
+
+    renderSection();
+    const row = await screen.findByTestId('world-rule-row');
+    fireEvent.click(row);
+    fireEvent.click(await screen.findByTestId('world-rule-edit'));
+    await screen.findByTestId('world-rule-form');
+    expect((screen.getByLabelText('Status') as HTMLSelectElement).value).toBe('active');
+
+    // Deactivate the rule whose edit form is open.
+    fireEvent.click(screen.getByTestId('world-rule-deactivate'));
+
+    // The form closes once deactivation succeeds: the stale form state
+    // (status: 'active') can never be saved to silently reactivate the rule.
+    await waitFor(() => expect(screen.queryByTestId('world-rule-form')).not.toBeInTheDocument());
+    expect(patches).toEqual([{ status: 'deprecated' }]);
+    expect(screen.getByTestId('world-rule-status')).toHaveTextContent('deprecated');
+  });
+
+  it('list refresh after PATCH keeps the read-route ordering contract', async () => {
+    let list = rulesResponse([
+      makeRule({
+        rule_id: 'rul_a',
+        canonical_name: 'Alpha rule',
+        constraint: { family: 'module_presence', module_key: 'belief' },
+      }),
+      makeRule({
+        rule_id: 'rul_b',
+        canonical_name: 'Beta rule',
+        constraint: { family: 'module_absence', module_key: 'tone' },
+      }),
+    ]);
+    const patch: { body?: WorldRuleUpdateRequest } = {};
+    useHandlers(
+      http.get('/v1/daemon/worlds/:worldId/rules', () => HttpResponse.json(list)),
+      http.patch('/v1/daemon/worlds/:worldId/rules/:ruleId', async ({ request }) => {
+        const body = (await request.json()) as WorldRuleUpdateRequest;
+        patch.body = body;
+        // The read route re-sorts: the renamed rule moves to its new position.
+        list = rulesResponse([
+          makeRule({
+            rule_id: 'rul_b',
+            canonical_name: 'Beta rule',
+            constraint: { family: 'module_absence', module_key: 'tone' },
+          }),
+          makeRule({
+            rule_id: 'rul_a',
+            canonical_name: 'Zulu rule',
+            constraint: { family: 'module_presence', module_key: 'belief' },
+          }),
+        ]);
+        return HttpResponse.json(
+          makeRule({
+            rule_id: 'rul_a',
+            canonical_name: 'Zulu rule',
+            constraint: { family: 'module_presence', module_key: 'belief' },
+          }),
+          { status: 200 },
+        );
+      }),
+    );
+
+    renderSection();
+    const rows = await screen.findAllByTestId('world-rule-row');
+    fireEvent.click(rows[0]); // Alpha
+    fireEvent.click(await screen.findByTestId('world-rule-edit'));
+    fireEvent.change(await screen.findByLabelText('Name'), { target: { value: 'Zulu rule' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+
+    await waitFor(() => expect(patch.body?.canonical_name).toBe('Zulu rule'));
+    await waitFor(() => expect(screen.queryByTestId('world-rule-form')).not.toBeInTheDocument());
+    const refreshed = await screen.findAllByTestId('world-rule-row');
+    expect(within(refreshed[0]).getByText('Beta rule')).toBeInTheDocument();
+    expect(within(refreshed[1]).getByText('Zulu rule')).toBeInTheDocument();
   });
 });

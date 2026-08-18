@@ -119,6 +119,9 @@ import type {
   WorldKbPromoteCandidateRequest,
   WorldKbPromoteCandidateResponse,
   WorldFindingsListResponse,
+  WorldRuleCreateRequest,
+  WorldRuleResponse,
+  WorldRuleUpdateRequest,
   WorldRulesListResponse,
 } from '@42ch/nexus-contracts';
 
@@ -536,10 +539,38 @@ export class BrowserClient implements NexusClient {
     );
   }
 
-  // ── World rules (V1.166 P1 / DR-64 surfacing) ───────────────────────────
+  // ── World rules (V1.166 P1 / DR-64 surfacing; V1.169 P1 authoring) ─────
   listWorldRules(worldId: string): Promise<WorldRulesListResponse> {
     return this.get<WorldRulesListResponse>(
       `/v1/daemon/worlds/${encodeURIComponent(worldId)}/rules`,
+    );
+  }
+  /**
+   * `POST /v1/daemon/worlds/{world_id}/rules` — create a structured rule
+   * (V1.169 P1, AR-5). 400 `invalid_input` carries the AR-2 field-level
+   * `details` (`{ field, reason }`) that the authoring form echoes onto the
+   * matching form field.
+   */
+  createWorldRule(worldId: string, body: WorldRuleCreateRequest): Promise<WorldRuleResponse> {
+    return this.post<WorldRuleResponse>(
+      `/v1/daemon/worlds/${encodeURIComponent(worldId)}/rules`,
+      body,
+    );
+  }
+  /**
+   * `PATCH /v1/daemon/worlds/{world_id}/rules/{rule_id}` — per-field edit
+   * (V1.169 P1, AR-3/AR-5): `constraint` is whole-carrier replacement,
+   * absent fields stay unchanged. `status: "deprecated"` is the Deactivate
+   * recovery (product lock — no DELETE route).
+   */
+  updateWorldRule(
+    worldId: string,
+    ruleId: string,
+    body: WorldRuleUpdateRequest,
+  ): Promise<WorldRuleResponse> {
+    return this.patch<WorldRuleResponse>(
+      `/v1/daemon/worlds/${encodeURIComponent(worldId)}/rules/${encodeURIComponent(ruleId)}`,
+      body,
     );
   }
 
