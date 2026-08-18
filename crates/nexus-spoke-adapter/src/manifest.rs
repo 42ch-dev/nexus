@@ -14,6 +14,7 @@
 //! | `capabilities` | `["spoke-baseline", "l2-computable", "l5-fork"]` | unchanged | unchanged | unchanged |
 //! | `namespaces` | `["nexus"]` | unchanged | unchanged | unchanged |
 //! | `authority` | `None` | unchanged | unchanged | unchanged |
+//! | `tools` | `[]` | unchanged | unchanged | `[]` (wire-omitted; V1.169 — no tool ABI declared) |
 //! | `extensions.nexus` | `{ "connect_host_slice": "n-c0", "daemon_http_coexists": true }` | `{ "connect_host_slice": "n-c1", "served_ops": ["upsert", "promote", "relate"], "daemon_http_coexists": true }` | `connect_host_slice` → `"n-c2"`; `served_ops` → `["upsert", "promote", "relate", "check", "assemble"]` | `served_ops` → `+ "compute"` |
 //!
 //! Honesty rules: `l5-fork` is included because `ForkTimelineQueryPort` is
@@ -130,6 +131,11 @@ pub fn build_local_host_manifest(host_id: &str) -> SpokeResult<HostCapabilityMan
         capabilities: LOCAL_CAPABILITIES.iter().map(ToString::to_string).collect(),
         namespaces,
         authority: None,
+        // V1.169 (0.11.1): honest empty tools declaration — no tool ABI is
+        // served; the serde rule (`skip_serializing_if = Vec::is_empty`)
+        // omits the member on the wire, and an absent member deserializes
+        // back to `Vec::new()` (locks AR-1/AR-2).
+        tools: Vec::new(),
         extensions,
     })
 }
