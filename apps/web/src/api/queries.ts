@@ -256,6 +256,22 @@ export function isRuleInvalidInputError(
 }
 
 /**
+ * True when a daemon error is the rule-write 404 (`not_found` — AR-6: unknown
+ * rule id or a rule of another world; the envelope names only the id, never
+ * the owning world or rule content). The edit form echoes an honest non-field
+ * error (no leak); the list refresh drops the row when it is gone.
+ */
+export function isRuleNotFoundError(
+  error: unknown,
+): error is NexusClientError & { status: 404; code: 'not_found' } {
+  return (
+    error instanceof NexusClientError &&
+    error.status === 404 &&
+    error.code === 'not_found'
+  );
+}
+
+/**
  * `POST /v1/daemon/worlds/:world_id/rules` — create a structured rule
  * (V1.169 P1, AR-5). On success the world-rules list cache is invalidated so
  * the new row renders in the read route's order (`canonical_name ASC,

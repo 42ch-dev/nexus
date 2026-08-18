@@ -1,5 +1,5 @@
 /**
- * RuleForm state + client validation mirror (V1.169 P2 T1, DF-82).
+ * RuleForm state + client validation mirror (V1.169 P2 T1/T2, DF-82).
  *
  * The mirror validates the AR-2 carrier grammar (`constraint.rs`
  * member-aware parse) just enough to intercept obvious mistakes at submit
@@ -16,8 +16,17 @@
  *   { family: required_field, field ∈ body.summary|body.tags }
  *   { family: required_field, module_key, field }
  *   { family: observer_cardinality, min?, max? }  (≥1 bound, min ≤ max)
+ *
+ * T2 adds the edit-mode seam: {@link ruleFormStateFromRule} deserializes the
+ * stored read-item projection (carrier → family form) and
+ * {@link buildUpdateWorldRuleRequest} builds the AR-3 per-field PATCH
+ * (carrier = whole replacement; untouched meta fields not sent; no
+ * null-clearing).
  */
-import type { WorldRuleCreateRequest } from '@42ch/nexus-contracts';
+import type { WorldRuleCreateRequest, WorldRuleUpdateRequest, WorldRulesListResponse } from '@42ch/nexus-contracts';
+
+/** The read item projection the edit form prefills from (T2). */
+export type WorldRule = WorldRulesListResponse['rules'][number];
 
 /** The closed four-family set (DR-70 lane owns any fifth family). */
 export const RULE_FAMILIES = [
@@ -35,8 +44,18 @@ export const ENTRY_FIELDS = ['body.summary', 'body.tags'] as const;
 export const SEVERITY_OPTIONS = ['info', 'warning', 'error'] as const;
 export type SeverityOption = (typeof SEVERITY_OPTIONS)[number];
 
+/** The closed write status vocabulary (AR-2: draft | active | deprecated). */
+export type RuleStatus = 'active' | 'draft' | 'deprecated';
+
 /** Create statuses: default `active` (auto-include), optional `draft`. */
-export const RULE_STATUS_OPTIONS = ['active', 'draft'] as const;
+export const RULE_STATUS_OPTIONS: RuleStatus[] = ['active', 'draft'];
+
+/**
+ * Edit statuses: the full core set. `deprecated` must be representable so a
+ * Deactivated rule can be reactivated via Edit → `active` (product lock) and
+ * the select never shows a blank value for a stored deprecated rule.
+ */
+export const EDIT_RULE_STATUS_OPTIONS: RuleStatus[] = ['active', 'draft', 'deprecated'];
 
 /** `required_field` operand forms: entry-level closed field vs module-row. */
 export type RequiredFieldOperand = 'entry' | 'module-row';
@@ -59,9 +78,11 @@ export interface RuleFormState {
   /** observer_cardinality bounds as raw input strings. */
   min: string;
   max: string;
-  status: (typeof RULE_STATUS_OPTIONS)[number];
+  status: RuleStatus;
   /** '' = omitted → the daemon stores NULL → evaluation defaults `warning`. */
   severityHint: '' | SeverityOption;
+  /** Open string, stored verbatim (core vocabulary: rule/prohibition/style). '' = omitted at create. */
+  kind: string;
   /** Target axis for the three entry families (mutually exclusive with observer_cardinality). */
   targetEntryTypes: string[];
 }
@@ -80,6 +101,7 @@ export function initialRuleFormState(): RuleFormState {
     max: '',
     status: 'active',
     severityHint: '',
+    kind: '',
     targetEntryTypes: [],
   };
 }
@@ -101,6 +123,7 @@ export type RuleFormErrorKey =
   | 'target_entry_types'
   | 'severity_hint'
   | 'status'
+  | 'kind'
   | 'patch';
 
 /** Validation result: AR-2 field → error code (component maps codes → copy). */
@@ -266,6 +289,103 @@ export function withFamily(state: RuleFormState, family: RuleFamily | null): Rul
     statement: state.statement,
     status: state.status,
     severityHint: state.severityHint,
+    kind: state.kind,
     targetEntryTypes: family === 'observer_cardinality' ? [] : state.targetEntryTypes,
   };
+}
+
+/**
+ * Deserialize a stored read-item projection into the family form (T2 edit
+ * prefill). Meta fields prefill verbatim; the AR-2 carrier is mapped onto
+ * the per-family operands so an untouched submit re-sends the stored carrier
+ * (whole replacement, AR-3). Open-string statuses/severity outside the core
+ * vocabulary cannot be represented by the pickers: status normalizes to
+ * `active` (the write path enforces the core set — the author sees the
+ * select value before saving), severity normalizes to '' (Default — the
+ * diff never sends it, so the stored hint is preserved, AR-3 no null-clear).
+ * Unknown/absent carrier families leave the picker unselected: the author
+ * must make an explicit family choice before the carrier can be replaced.
+ */
+export function ruleFormStateFromRule(rule: WorldRule): RuleFormState {
+  const state = initialRuleFormState();
+  state.canonicalName = rule.canonical_name;
+  state.statement = rule.statement ?? '';
+  state.kind = rule.kind ?? '';
+  state.status = (EDIT_RULE_STATUS_OPTIONS as readonly string[]).includes(rule.status ?? '')
+    ? (rule.status as RuleStatus)
+    : 'active';
+  state.severityHint = (SEVERITY_OPTIONS as readonly string[]).includes(rule.severity_hint ?? '')
+    ? (rule.severity_hint as SeverityOption)
+    : '';
+  state.targetEntryTypes = [...rule.target_entry_types];
+
+  const constraint = rule.constraint;
+  if (constraint && typeof constraint === 'object') {
+    const family = constraint.family;
+    if (family === 'module_presence' || family === 'module_absence') {
+      state.family = family;
+      state.moduleKey = typeof constraint.module_key === 'string' ? constraint.module_key : '';
+    } else if (family === 'required_field') {
+      state.family = family;
+      const moduleKey = constraint.module_key;
+      const field = constraint.field;
+      if (typeof moduleKey === 'string' && moduleKey.length > 0) {
+        state.requiredFieldOperand = 'module-row';
+        state.requiredModuleKey = moduleKey;
+        state.requiredModuleField = typeof field === 'string' ? field : '';
+      } else if (typeof field === 'string' && field.length > 0) {
+        state.requiredFieldOperand = 'entry';
+        state.entryField = field;
+      }
+    } else if (family === 'observer_cardinality') {
+      state.family = family;
+      state.min = typeof constraint.min === 'number' ? String(constraint.min) : '';
+      state.max = typeof constraint.max === 'number' ? String(constraint.max) : '';
+    }
+    // Unknown family → family stays null (explicit choice before replacement).
+  }
+  return state;
+}
+
+/**
+ * Build the `WorldRuleUpdateRequest` (P1, AR-3) for the edit form.
+ *
+ * The carrier is ALWAYS sent — whole-carrier replacement (the form always
+ * has one; an identical carrier is a no-op replace). Meta fields are sent
+ * only when the form value differs from the stored value ("untouched meta
+ * fields simply not sent"). `severity_hint` / `kind` are never sent empty
+ * (no null-clearing, AR-3 — an author picking "Default (warning)" on a
+ * stored hint keeps the stored hint). `target_entry_types: []` IS sent when
+ * the author clears the axis (explicit clear, AR-3).
+ */
+export function buildUpdateWorldRuleRequest(
+  state: RuleFormState,
+  stored: WorldRule,
+): WorldRuleUpdateRequest | null {
+  const constraint = buildConstraintCarrier(state);
+  if (constraint === null) return null;
+
+  const request: WorldRuleUpdateRequest = { constraint };
+  if (state.canonicalName.trim() !== stored.canonical_name) {
+    request.canonical_name = state.canonicalName.trim();
+  }
+  if (state.statement.trim() !== (stored.statement ?? '')) {
+    request.statement = state.statement.trim();
+  }
+  if (state.status !== (stored.status ?? 'active')) {
+    request.status = state.status;
+  }
+  if (state.kind.trim() !== '' && state.kind.trim() !== (stored.kind ?? '')) {
+    request.kind = state.kind.trim();
+  }
+  if (state.severityHint !== '' && state.severityHint !== (stored.severity_hint ?? '')) {
+    request.severity_hint = state.severityHint;
+  }
+  if (
+    state.targetEntryTypes.length !== stored.target_entry_types.length ||
+    state.targetEntryTypes.some((value, index) => value !== stored.target_entry_types[index])
+  ) {
+    request.target_entry_types = [...state.targetEntryTypes];
+  }
+  return request;
 }

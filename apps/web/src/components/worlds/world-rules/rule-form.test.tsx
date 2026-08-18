@@ -15,14 +15,23 @@ import { describe, expect, it, vi } from 'vitest';
 import { RuleForm } from '@/components/worlds/world-rules/rule-form';
 import {
   buildCreateWorldRuleRequest,
+  buildUpdateWorldRuleRequest,
   initialRuleFormState,
+  ruleFormStateFromRule,
   validateRuleForm,
   type RuleFormState,
 } from '@/components/worlds/world-rules/rule-form-state';
 import { BrowserClient } from '@/lib/nexus';
 import { renderInApp } from '@/test/test-providers';
 import { useHandlers } from '@/test/msw-server';
-import type { WorldRuleCreateRequest, WorldRuleResponse } from '@42ch/nexus-contracts';
+import type {
+  WorldRuleCreateRequest,
+  WorldRuleResponse,
+  WorldRuleUpdateRequest,
+  WorldRulesListResponse,
+} from '@42ch/nexus-contracts';
+
+type WorldRule = WorldRulesListResponse['rules'][number];
 
 const WORLD_ID = 'world-9';
 
@@ -69,6 +78,45 @@ function fillNameAndSummary(name: string, summary: string) {
 
 function submit() {
   fireEvent.click(screen.getByRole('button', { name: 'Add rule' }));
+}
+
+/** A stored read-item projection for edit-mode tests (T2). */
+function makeStoredRule(over: Partial<WorldRule> = {}): WorldRule {
+  return {
+    rule_id: 'rul_edit',
+    canonical_name: 'Stored rule',
+    kind: 'rule',
+    target_entry_types: [],
+    status: 'active',
+    severity_hint: 'warning',
+    statement: 'Stored statement',
+    constraint: { family: 'module_presence', module_key: 'belief' },
+    ...over,
+  };
+}
+
+/** Capture the PATCH body; `respond` may return a custom HttpResponse. */
+function useUpdateCapture(
+  capture: { body?: WorldRuleUpdateRequest },
+  respond?: (body: WorldRuleUpdateRequest) => Response,
+) {
+  useHandlers(
+    http.patch('/v1/daemon/worlds/:worldId/rules/:ruleId', async ({ request }) => {
+      const body = (await request.json()) as WorldRuleUpdateRequest;
+      capture.body = body;
+      return respond ? respond(body) : HttpResponse.json(ruleResponse(), { status: 200 });
+    }),
+  );
+}
+
+function renderEditForm(rule: WorldRule, onClose = vi.fn()) {
+  return renderInApp(<RuleForm worldId={WORLD_ID} rule={rule} onClose={onClose} />, {
+    client: new BrowserClient(),
+  });
+}
+
+function submitEdit() {
+  fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
 }
 
 describe('RuleForm — four-family happy path + submit payload shape', () => {
@@ -558,5 +606,291 @@ describe('buildCreateWorldRuleRequest — payload shape', () => {
     const request = buildCreateWorldRuleRequest(state);
     expect(request?.canonical_name).toBe('Name');
     expect(request?.statement).toBe('Summary');
+  });
+});
+
+describe('RuleForm — edit mode: prefill round-trip (stored carrier → form → PATCH)', () => {
+  it('module_presence: prefills meta fields + carrier; untouched submit sends only the stored carrier', async () => {
+    const capture: { body?: WorldRuleUpdateRequest } = {};
+    useUpdateCapture(capture);
+    const onClose = vi.fn();
+    renderEditForm(makeStoredRule(), onClose);
+
+    // Prefill: meta fields + the stored carrier deserialized into the form.
+    expect((screen.getByLabelText('Constraint family') as HTMLSelectElement).value).toBe(
+      'module_presence',
+    );
+    expect((screen.getByLabelText('Name') as HTMLInputElement).value).toBe('Stored rule');
+    expect((screen.getByLabelText('Summary') as HTMLTextAreaElement).value).toBe('Stored statement');
+    expect((screen.getByLabelText('Module key') as HTMLInputElement).value).toBe('belief');
+    expect((screen.getByLabelText('Status') as HTMLSelectElement).value).toBe('active');
+    expect((screen.getByLabelText('Severity') as HTMLSelectElement).value).toBe('warning');
+    expect((screen.getByLabelText('Kind') as HTMLInputElement).value).toBe('rule');
+
+    submitEdit();
+
+    await waitFor(() => expect(capture.body).toBeDefined());
+    // Untouched meta fields are not sent (AR-3); the carrier is whole replacement.
+    expect(capture.body).toEqual({ constraint: { family: 'module_presence', module_key: 'belief' } });
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+  });
+
+  it('module_absence: prefill round-trip', async () => {
+    const capture: { body?: WorldRuleUpdateRequest } = {};
+    useUpdateCapture(capture);
+    renderEditForm(makeStoredRule({ constraint: { family: 'module_absence', module_key: 'tone' } }));
+
+    expect((screen.getByLabelText('Constraint family') as HTMLSelectElement).value).toBe(
+      'module_absence',
+    );
+    expect((screen.getByLabelText('Module key') as HTMLInputElement).value).toBe('tone');
+    submitEdit();
+
+    await waitFor(() => expect(capture.body).toBeDefined());
+    expect(capture.body).toEqual({ constraint: { family: 'module_absence', module_key: 'tone' } });
+  });
+
+  it('required_field entry-level: prefill round-trip', async () => {
+    const capture: { body?: WorldRuleUpdateRequest } = {};
+    useUpdateCapture(capture);
+    renderEditForm(
+      makeStoredRule({ constraint: { family: 'required_field', field: 'body.summary' } }),
+    );
+
+    expect((screen.getByLabelText('Constraint family') as HTMLSelectElement).value).toBe(
+      'required_field',
+    );
+    expect(screen.getByRole('radio', { name: /Entry-level field/ })).toBeChecked();
+    expect((screen.getByLabelText('Field') as HTMLSelectElement).value).toBe('body.summary');
+    submitEdit();
+
+    await waitFor(() => expect(capture.body).toBeDefined());
+    expect(capture.body).toEqual({ constraint: { family: 'required_field', field: 'body.summary' } });
+  });
+
+  it('required_field module-row: prefill round-trip', async () => {
+    const capture: { body?: WorldRuleUpdateRequest } = {};
+    useUpdateCapture(capture);
+    renderEditForm(
+      makeStoredRule({
+        constraint: { family: 'required_field', module_key: 'journal', field: 'tags' },
+      }),
+    );
+
+    expect(screen.getByRole('radio', { name: /Module row/ })).toBeChecked();
+    expect((screen.getByLabelText('Module key') as HTMLInputElement).value).toBe('journal');
+    expect((screen.getByLabelText('Field') as HTMLInputElement).value).toBe('tags');
+    submitEdit();
+
+    await waitFor(() => expect(capture.body).toBeDefined());
+    expect(capture.body).toEqual({
+      constraint: { family: 'required_field', module_key: 'journal', field: 'tags' },
+    });
+  });
+
+  it('observer_cardinality: prefill round-trip', async () => {
+    const capture: { body?: WorldRuleUpdateRequest } = {};
+    useUpdateCapture(capture);
+    renderEditForm(
+      makeStoredRule({ constraint: { family: 'observer_cardinality', min: 0, max: 3 } }),
+    );
+
+    expect((screen.getByLabelText('Min observers') as HTMLInputElement).value).toBe('0');
+    expect((screen.getByLabelText('Max observers') as HTMLInputElement).value).toBe('3');
+    submitEdit();
+
+    await waitFor(() => expect(capture.body).toBeDefined());
+    expect(capture.body).toEqual({ constraint: { family: 'observer_cardinality', min: 0, max: 3 } });
+  });
+});
+
+describe('RuleForm — edit mode: PATCH semantics (AR-3)', () => {
+  it('whole-carrier replacement: changing an operand replaces the stored carrier', async () => {
+    const capture: { body?: WorldRuleUpdateRequest } = {};
+    useUpdateCapture(capture);
+    renderEditForm(makeStoredRule());
+
+    fireEvent.change(screen.getByLabelText('Module key'), { target: { value: 'new-module' } });
+    submitEdit();
+
+    await waitFor(() => expect(capture.body).toBeDefined());
+    expect(capture.body?.constraint).toEqual({ family: 'module_presence', module_key: 'new-module' });
+  });
+
+  it('meta-only PATCH: renaming canonical_name sends only the name + carrier', async () => {
+    const capture: { body?: WorldRuleUpdateRequest } = {};
+    useUpdateCapture(capture);
+    renderEditForm(makeStoredRule());
+
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Renamed rule' } });
+    submitEdit();
+
+    await waitFor(() => expect(capture.body).toBeDefined());
+    expect(capture.body).toEqual({
+      canonical_name: 'Renamed rule',
+      constraint: { family: 'module_presence', module_key: 'belief' },
+    });
+  });
+
+  it('status switching: draft → active sends status', async () => {
+    const capture: { body?: WorldRuleUpdateRequest } = {};
+    useUpdateCapture(capture);
+    renderEditForm(makeStoredRule({ status: 'draft' }));
+
+    expect((screen.getByLabelText('Status') as HTMLSelectElement).value).toBe('draft');
+    fireEvent.change(screen.getByLabelText('Status'), { target: { value: 'active' } });
+    submitEdit();
+
+    await waitFor(() => expect(capture.body).toBeDefined());
+    expect(capture.body?.status).toBe('active');
+  });
+
+  it('status switching: active → draft sends status', async () => {
+    const capture: { body?: WorldRuleUpdateRequest } = {};
+    useUpdateCapture(capture);
+    renderEditForm(makeStoredRule());
+
+    fireEvent.change(screen.getByLabelText('Status'), { target: { value: 'draft' } });
+    submitEdit();
+
+    await waitFor(() => expect(capture.body).toBeDefined());
+    expect(capture.body?.status).toBe('draft');
+  });
+
+  it('severity change sends severity_hint', async () => {
+    const capture: { body?: WorldRuleUpdateRequest } = {};
+    useUpdateCapture(capture);
+    renderEditForm(makeStoredRule());
+
+    fireEvent.change(screen.getByLabelText('Severity'), { target: { value: 'error' } });
+    submitEdit();
+
+    await waitFor(() => expect(capture.body).toBeDefined());
+    expect(capture.body?.severity_hint).toBe('error');
+  });
+
+  it('clearing all target entry types sends [] (explicit clear, AR-3)', async () => {
+    const capture: { body?: WorldRuleUpdateRequest } = {};
+    useUpdateCapture(capture);
+    renderEditForm(makeStoredRule({ target_entry_types: ['character'] }));
+
+    expect(screen.getByRole('checkbox', { name: 'Character' })).toBeChecked();
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Character' }));
+    submitEdit();
+
+    await waitFor(() => expect(capture.body).toBeDefined());
+    expect(capture.body?.target_entry_types).toEqual([]);
+  });
+
+  it('kind change sends kind; the edit form prefills the stored kind', async () => {
+    const capture: { body?: WorldRuleUpdateRequest } = {};
+    useUpdateCapture(capture);
+    renderEditForm(makeStoredRule({ kind: 'prohibition' }));
+
+    expect((screen.getByLabelText('Kind') as HTMLInputElement).value).toBe('prohibition');
+    fireEvent.change(screen.getByLabelText('Kind'), { target: { value: 'style' } });
+    submitEdit();
+
+    await waitFor(() => expect(capture.body).toBeDefined());
+    expect(capture.body?.kind).toBe('style');
+  });
+
+  it('edit form represents deprecated status and reactivates via active', async () => {
+    const capture: { body?: WorldRuleUpdateRequest } = {};
+    useUpdateCapture(capture);
+    renderEditForm(makeStoredRule({ status: 'deprecated' }));
+
+    expect((screen.getByLabelText('Status') as HTMLSelectElement).value).toBe('deprecated');
+    fireEvent.change(screen.getByLabelText('Status'), { target: { value: 'active' } });
+    submitEdit();
+
+    await waitFor(() => expect(capture.body).toBeDefined());
+    expect(capture.body?.status).toBe('active');
+  });
+});
+
+describe('RuleForm — edit mode: unknown-id 404 echo (AR-6, no leak)', () => {
+  it('echoes an honest non-field error and keeps the form open', async () => {
+    const capture: { body?: WorldRuleUpdateRequest } = {};
+    useUpdateCapture(capture, () =>
+      HttpResponse.json(
+        {
+          success: false,
+          error: {
+            code: 'not_found',
+            message: 'rule rul_edit',
+            details: { resource: 'rule', reason: 'unknown rule' },
+          },
+        },
+        { status: 404 },
+      ),
+    );
+    const onClose = vi.fn();
+    renderEditForm(makeStoredRule(), onClose);
+
+    submitEdit();
+
+    await waitFor(() =>
+      expect(screen.getByTestId('rule-form-submit-error')).toHaveTextContent(
+        'This rule could not be found. It may have been removed.',
+      ),
+    );
+    expect(screen.getByTestId('world-rule-form')).toBeInTheDocument();
+    expect(onClose).not.toHaveBeenCalled();
+  });
+});
+
+describe('buildUpdateWorldRuleRequest — PATCH semantics (pure, AR-3)', () => {
+  const stored: WorldRule = {
+    rule_id: 'rul_edit',
+    canonical_name: 'Stored rule',
+    kind: 'rule',
+    target_entry_types: ['character'],
+    status: 'active',
+    severity_hint: 'warning',
+    statement: 'Stored statement',
+    constraint: { family: 'module_presence', module_key: 'belief' },
+  };
+
+  it('untouched form sends only the carrier (whole replacement)', () => {
+    const request = buildUpdateWorldRuleRequest(ruleFormStateFromRule(stored), stored);
+    expect(request).toEqual({ constraint: { family: 'module_presence', module_key: 'belief' } });
+  });
+
+  it('never sends an empty severity_hint (no null-clearing, AR-3)', () => {
+    const state = ruleFormStateFromRule(stored);
+    state.severityHint = ''; // author picks "Default (warning)" on a stored hint
+    const request = buildUpdateWorldRuleRequest(state, stored);
+    expect(request?.severity_hint).toBeUndefined();
+  });
+
+  it('never sends an empty kind (cannot be unset, AR-3)', () => {
+    const state = ruleFormStateFromRule(stored);
+    state.kind = '   ';
+    const request = buildUpdateWorldRuleRequest(state, stored);
+    expect(request?.kind).toBeUndefined();
+  });
+});
+
+describe('ruleFormStateFromRule — carrier deserialization (pure)', () => {
+  it('unknown family leaves the picker unselected (explicit choice before replacement)', () => {
+    const state = ruleFormStateFromRule({
+      rule_id: 'rul_x',
+      canonical_name: 'Odd rule',
+      kind: 'rule',
+      target_entry_types: [],
+      constraint: { family: 'custom_family', mode: 'strict' },
+    });
+    expect(state.family).toBeNull();
+  });
+
+  it('absent constraint leaves the picker unselected', () => {
+    const state = ruleFormStateFromRule({
+      rule_id: 'rul_x',
+      canonical_name: 'No carrier',
+      kind: 'rule',
+      target_entry_types: [],
+    });
+    expect(state.family).toBeNull();
   });
 });

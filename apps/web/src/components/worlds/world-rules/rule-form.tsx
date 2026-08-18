@@ -1,13 +1,21 @@
 /**
- * RuleForm — inline create form for the world-rules section (V1.169 P2 T1,
- * DF-82).
+ * RuleForm — inline create/edit form for the world-rules section (V1.169 P2
+ * T1/T2, DF-82).
  *
  * Four-family constraint authoring without JSON: family picker first (locked
  * labels/help), per-family operand fields appear after the pick and reset on
  * family change, plus `canonical_name` / `statement` / status / severity /
- * target entry types. The client validation mirror intercepts obvious
+ * kind / target entry types. The client validation mirror intercepts obvious
  * mistakes at submit time (API = SSOT, AR-2); 400 `invalid_input` errors are
- * echoed per field using the AR-2 field vocabulary verbatim.
+ * echoed per field using the AR-2 field vocabulary verbatim; a 404 echoes an
+ * honest non-field error (AR-6, no leak).
+ *
+ * Edit mode (T2): pass the stored read-item projection as `rule` — the form
+ * prefills from it (carrier deserialized into the family form) and submits a
+ * per-field PATCH (AR-3): the carrier is whole replacement, untouched meta
+ * fields are not sent, `severity_hint`/`kind` are never sent empty (no
+ * null-clearing). The status select includes `deprecated` so a Deactivated
+ * rule can be reactivated via Edit → `active`.
  *
  * No modal, no Dialog, no raw-JSON textarea (plan locks) — the form renders
  * inline in the world-rules Card.
@@ -15,7 +23,7 @@
 import { Children, cloneElement, isValidElement, useState, type FormEvent, type ReactElement, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { isRuleInvalidInputError, useCreateWorldRule } from '@/api/queries';
+import { isRuleInvalidInputError, isRuleNotFoundError, useCreateWorldRule, useUpdateWorldRule } from '@/api/queries';
 import { BLOCK_TYPE_LABELS } from '@/components/canvas/world-kb/types';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -25,11 +33,15 @@ import { Textarea } from '@/components/ui/textarea';
 import type { BlockType } from '@42ch/nexus-contracts';
 
 import {
+  EDIT_RULE_STATUS_OPTIONS,
   ENTRY_FIELDS,
   RULE_FAMILIES,
+  RULE_STATUS_OPTIONS,
   SEVERITY_OPTIONS,
   buildCreateWorldRuleRequest,
+  buildUpdateWorldRuleRequest,
   initialRuleFormState,
+  ruleFormStateFromRule,
   validateRuleForm,
   withFamily,
   type RequiredFieldOperand,
@@ -37,6 +49,7 @@ import {
   type RuleFormErrorKey,
   type RuleFormErrors,
   type RuleFormState,
+  type WorldRule,
 } from './rule-form-state';
 
 /** Target-entry-types axis: the full spoke BlockType set with labels. */
@@ -46,16 +59,26 @@ const ENTRY_TYPE_OPTIONS: { value: BlockType; label: string }[] = (
 
 interface RuleFormProps {
   worldId: string;
-  /** Called after a successful create (the section closes the form). */
+  /**
+   * The stored read-item projection being edited. Absent = create mode.
+   * The section keys the form by `rule_id` so switching rules remounts.
+   */
+  rule?: WorldRule;
+  /** Called after a successful create/edit (the section closes the form). */
   onClose: () => void;
 }
 
-export function RuleForm({ worldId, onClose }: RuleFormProps) {
+export function RuleForm({ worldId, rule, onClose }: RuleFormProps) {
   const { t } = useTranslation('worldRules');
   const createRule = useCreateWorldRule(worldId);
-  const [state, setState] = useState<RuleFormState>(initialRuleFormState);
+  const updateRule = useUpdateWorldRule(worldId);
+  const [state, setState] = useState<RuleFormState>(() =>
+    rule ? ruleFormStateFromRule(rule) : initialRuleFormState(),
+  );
   const [errors, setErrors] = useState<RuleFormErrors>({});
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const isEdit = rule !== undefined;
+  const isPending = isEdit ? updateRule.isPending : createRule.isPending;
 
   function update(patch: Partial<RuleFormState>) {
     setState((s) => ({ ...s, ...patch }));
@@ -78,6 +101,25 @@ export function RuleForm({ worldId, onClose }: RuleFormProps) {
     setErrors({});
   }
 
+  function handleError(error: unknown) {
+    if (isRuleInvalidInputError(error)) {
+      const details = error.details as { field?: string; reason?: string } | undefined;
+      if (details && typeof details.field === 'string' && typeof details.reason === 'string') {
+        // AR-2 vocabulary maps 1:1 onto form fields — echo verbatim.
+        setErrors((prev) => ({ ...prev, [details.field as RuleFormErrorKey]: details.reason }));
+      } else {
+        setSubmitError(error.message);
+      }
+    } else if (isRuleNotFoundError(error)) {
+      // P1 404 envelope (AR-6): honest non-field error, no id/world leak.
+      setSubmitError(t('form.notFoundError'));
+    } else {
+      // The hook toasts non-envelope failures; mirror a generic inline
+      // message so the form never closes silently on failure.
+      setSubmitError(isEdit ? t('form.genericUpdateError') : t('form.genericError'));
+    }
+  }
+
   function handleSubmit(event: FormEvent) {
     event.preventDefault();
     setSubmitError(null);
@@ -95,26 +137,25 @@ export function RuleForm({ worldId, onClose }: RuleFormProps) {
       return;
     }
 
+    if (isEdit) {
+      const request = buildUpdateWorldRuleRequest(state, rule);
+      if (request === null) return; // unreachable: validation requires a family
+      updateRule.mutate(
+        { ruleId: rule.rule_id, request },
+        {
+          onSuccess: () => onClose(),
+          onError: handleError,
+        },
+      );
+      return;
+    }
+
     const request = buildCreateWorldRuleRequest(state);
     if (request === null) return; // unreachable: validation requires a family
 
     createRule.mutate(request, {
       onSuccess: () => onClose(),
-      onError: (error) => {
-        if (isRuleInvalidInputError(error)) {
-          const details = error.details as { field?: string; reason?: string } | undefined;
-          if (details && typeof details.field === 'string' && typeof details.reason === 'string') {
-            // AR-2 vocabulary maps 1:1 onto form fields — echo verbatim.
-            setErrors((prev) => ({ ...prev, [details.field as RuleFormErrorKey]: details.reason }));
-          } else {
-            setSubmitError(error.message);
-          }
-        } else {
-          // The hook toasts non-envelope failures; mirror a generic inline
-          // message so the form never closes silently on failure.
-          setSubmitError(t('form.genericError'));
-        }
-      },
+      onError: handleError,
     });
   }
 
@@ -129,8 +170,10 @@ export function RuleForm({ worldId, onClose }: RuleFormProps) {
       data-testid="world-rule-form"
     >
       <div className="flex items-center justify-between gap-2">
-        <h3 className="text-heading-16 font-heading text-gray-1000">{t('form.title')}</h3>
-        <Button type="button" variant="tertiary" size="small" onClick={onClose} disabled={createRule.isPending}>
+        <h3 className="text-heading-16 font-heading text-gray-1000">
+          {isEdit ? t('form.editTitle') : t('form.title')}
+        </h3>
+        <Button type="button" variant="tertiary" size="small" onClick={onClose} disabled={isPending}>
           {t('form.cancel')}
         </Button>
       </div>
@@ -268,8 +311,11 @@ export function RuleForm({ worldId, onClose }: RuleFormProps) {
           value={state.status}
           onChange={(e) => update({ status: e.target.value as RuleFormState['status'] })}
         >
-          <option value="active">{t('form.statusActive')}</option>
-          <option value="draft">{t('form.statusDraft')}</option>
+          {(isEdit ? EDIT_RULE_STATUS_OPTIONS : RULE_STATUS_OPTIONS).map((status) => (
+            <option key={status} value={status}>
+              {t(`form.status${status.charAt(0).toUpperCase()}${status.slice(1)}`)}
+            </option>
+          ))}
         </Select>
       </RuleFormField>
 
@@ -288,6 +334,17 @@ export function RuleForm({ worldId, onClose }: RuleFormProps) {
             </option>
           ))}
         </Select>
+      </RuleFormField>
+
+      <RuleFormField label={t('form.kindLabel')} htmlFor="rule-form-kind" helper={t('form.kindHelp')} error={errors.kind}>
+        <Input
+          id="rule-form-kind"
+          value={state.kind}
+          onChange={(e) => {
+            update({ kind: e.target.value });
+            clearFieldError('kind');
+          }}
+        />
       </RuleFormField>
 
       <fieldset className="flex flex-col gap-2" disabled={targetAxisDisabled} data-testid="rule-form-target-types">
@@ -334,11 +391,17 @@ export function RuleForm({ worldId, onClose }: RuleFormProps) {
       ) : null}
 
       <div className="flex justify-end gap-2">
-        <Button type="button" variant="tertiary" size="small" onClick={onClose} disabled={createRule.isPending}>
+        <Button type="button" variant="tertiary" size="small" onClick={onClose} disabled={isPending}>
           {t('form.cancel')}
         </Button>
-        <Button type="submit" variant="primary" size="small" disabled={createRule.isPending} data-testid="rule-form-submit">
-          {createRule.isPending ? t('form.submitPending') : t('form.submit')}
+        <Button type="submit" variant="primary" size="small" disabled={isPending} data-testid="rule-form-submit">
+          {isPending
+            ? isEdit
+              ? t('form.savePending')
+              : t('form.submitPending')
+            : isEdit
+              ? t('form.save')
+              : t('form.submit')}
         </Button>
       </div>
     </form>
