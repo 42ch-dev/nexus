@@ -1,0 +1,562 @@
+/**
+ * RuleForm tests — V1.169 P2 T1 (DF-82 create form).
+ *
+ * Covers the four-family happy path + submit payload shape, the client
+ * validation mirror (immediate interception; the API's field-level errors
+ * stay the SSOT — AR-2), 400 `invalid_input` field-level echo mapped 1:1
+ * onto the AR-2 field vocabulary, success close, family-switch operand
+ * reset, observer × target-entry-types exclusivity, and the no-raw-JSON
+ * rule.
+ */
+import { fireEvent, screen, waitFor } from '@testing-library/react';
+import { http, HttpResponse } from 'msw';
+import { describe, expect, it, vi } from 'vitest';
+
+import { RuleForm } from '@/components/worlds/world-rules/rule-form';
+import {
+  buildCreateWorldRuleRequest,
+  initialRuleFormState,
+  validateRuleForm,
+  type RuleFormState,
+} from '@/components/worlds/world-rules/rule-form-state';
+import { BrowserClient } from '@/lib/nexus';
+import { renderInApp } from '@/test/test-providers';
+import { useHandlers } from '@/test/msw-server';
+import type { WorldRuleCreateRequest, WorldRuleResponse } from '@42ch/nexus-contracts';
+
+const WORLD_ID = 'world-9';
+
+function ruleResponse(over: Partial<WorldRuleResponse> = {}): WorldRuleResponse {
+  return {
+    rule_id: 'rul_created',
+    canonical_name: 'Created rule',
+    kind: 'rule',
+    target_entry_types: [],
+    status: 'active',
+    statement: 'Created statement',
+    ...over,
+  };
+}
+
+function renderForm(onClose = vi.fn()) {
+  return renderInApp(<RuleForm worldId={WORLD_ID} onClose={onClose} />, {
+    client: new BrowserClient(),
+  });
+}
+
+/** Capture the POST body; `respond` may return a custom HttpResponse. */
+function useCreateCapture(
+  capture: { body?: WorldRuleCreateRequest },
+  respond?: (body: WorldRuleCreateRequest) => Response,
+) {
+  useHandlers(
+    http.post('/v1/daemon/worlds/:worldId/rules', async ({ request }) => {
+      const body = (await request.json()) as WorldRuleCreateRequest;
+      capture.body = body;
+      return respond ? respond(body) : HttpResponse.json(ruleResponse(), { status: 201 });
+    }),
+  );
+}
+
+function selectFamily(value: RuleFormState['family']) {
+  fireEvent.change(screen.getByLabelText('Constraint family'), { target: { value } });
+}
+
+function fillNameAndSummary(name: string, summary: string) {
+  fireEvent.change(screen.getByLabelText('Name'), { target: { value: name } });
+  fireEvent.change(screen.getByLabelText('Summary'), { target: { value: summary } });
+}
+
+function submit() {
+  fireEvent.click(screen.getByRole('button', { name: 'Add rule' }));
+}
+
+describe('RuleForm — four-family happy path + submit payload shape', () => {
+  it('module_presence: locked family copy, locked helpers, default-status carrier', async () => {
+    const capture: { body?: WorldRuleCreateRequest } = {};
+    useCreateCapture(capture);
+    const onClose = vi.fn();
+    renderForm(onClose);
+
+    selectFamily('module_presence');
+    // Locked one-line family hint (plan table, verbatim).
+    expect(screen.getByTestId('rule-form-family-help')).toHaveTextContent(
+      'Matching entries must carry this module key.',
+    );
+    // Locked field helpers (plan clarify, verbatim).
+    expect(
+      screen.getByText('A stable name you will recognize in the list.'),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText('Check does not read this. The constraint is the fields below.'),
+    ).toBeInTheDocument();
+
+    fillNameAndSummary('Belief module required', 'Entries must carry the belief module.');
+    fireEvent.change(screen.getByLabelText('Module key'), { target: { value: 'belief' } });
+    submit();
+
+    await waitFor(() => expect(capture.body).toBeDefined());
+    expect(capture.body).toEqual({
+      canonical_name: 'Belief module required',
+      statement: 'Entries must carry the belief module.',
+      constraint: { family: 'module_presence', module_key: 'belief' },
+      status: 'active',
+    });
+    // Success closes the form.
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+  });
+
+  it('module_absence: locked family copy + carrier', async () => {
+    const capture: { body?: WorldRuleCreateRequest } = {};
+    useCreateCapture(capture);
+    renderForm();
+
+    selectFamily('module_absence');
+    expect(screen.getByTestId('rule-form-family-help')).toHaveTextContent(
+      'Matching entries must not carry this module key.',
+    );
+    fillNameAndSummary('Tone module forbidden', 'Entries must not carry the tone module.');
+    fireEvent.change(screen.getByLabelText('Module key'), { target: { value: 'tone' } });
+    submit();
+
+    await waitFor(() => expect(capture.body).toBeDefined());
+    expect(capture.body?.constraint).toEqual({ family: 'module_absence', module_key: 'tone' });
+  });
+
+  it('required_field entry-level: radio operand + closed field set', async () => {
+    const capture: { body?: WorldRuleCreateRequest } = {};
+    useCreateCapture(capture);
+    renderForm();
+
+    selectFamily('required_field');
+    expect(screen.getByTestId('rule-form-family-help')).toHaveTextContent(
+      'Matching entries must have this field populated.',
+    );
+    fillNameAndSummary('Summary required', 'Every entry must carry a body summary.');
+    fireEvent.click(screen.getByRole('radio', { name: /Entry-level field/ }));
+    fireEvent.change(screen.getByLabelText('Field'), { target: { value: 'body.summary' } });
+    submit();
+
+    await waitFor(() => expect(capture.body).toBeDefined());
+    expect(capture.body?.constraint).toEqual({ family: 'required_field', field: 'body.summary' });
+  });
+
+  it('required_field module-row: module_key + free field', async () => {
+    const capture: { body?: WorldRuleCreateRequest } = {};
+    useCreateCapture(capture);
+    renderForm();
+
+    selectFamily('required_field');
+    fillNameAndSummary('Journal tags required', 'Journal rows must carry tags.');
+    fireEvent.click(screen.getByRole('radio', { name: /Module row/ }));
+    fireEvent.change(screen.getByLabelText('Module key'), { target: { value: 'journal' } });
+    fireEvent.change(screen.getByLabelText('Field'), { target: { value: 'tags' } });
+    submit();
+
+    await waitFor(() => expect(capture.body).toBeDefined());
+    expect(capture.body?.constraint).toEqual({
+      family: 'required_field',
+      module_key: 'journal',
+      field: 'tags',
+    });
+  });
+
+  it('observer_cardinality: numeric min/max bounds as numbers', async () => {
+    const capture: { body?: WorldRuleCreateRequest } = {};
+    useCreateCapture(capture);
+    renderForm();
+
+    selectFamily('observer_cardinality');
+    expect(screen.getByTestId('rule-form-family-help')).toHaveTextContent(
+      'Matching events must have an observer count in range.',
+    );
+    fillNameAndSummary('Observer cap', 'Timeline events must record 0-3 observers.');
+    fireEvent.change(screen.getByLabelText('Min observers'), { target: { value: '0' } });
+    fireEvent.change(screen.getByLabelText('Max observers'), { target: { value: '3' } });
+    submit();
+
+    await waitFor(() => expect(capture.body).toBeDefined());
+    expect(capture.body?.constraint).toEqual({ family: 'observer_cardinality', min: 0, max: 3 });
+  });
+
+  it('sends draft status, explicit severity, and target entry types when chosen', async () => {
+    const capture: { body?: WorldRuleCreateRequest } = {};
+    useCreateCapture(capture);
+    renderForm();
+
+    selectFamily('module_presence');
+    fillNameAndSummary('Staged rule', 'Staged constraint.');
+    fireEvent.change(screen.getByLabelText('Module key'), { target: { value: 'm' } });
+    fireEvent.change(screen.getByLabelText('Status'), { target: { value: 'draft' } });
+    fireEvent.change(screen.getByLabelText('Severity'), { target: { value: 'error' } });
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Character' }));
+    submit();
+
+    await waitFor(() => expect(capture.body).toBeDefined());
+    expect(capture.body).toMatchObject({
+      status: 'draft',
+      severity_hint: 'error',
+      target_entry_types: ['character'],
+    });
+  });
+});
+
+describe('RuleForm — client validation mirror intercepts before submit', () => {
+  it('requires a family', async () => {
+    const capture: { body?: WorldRuleCreateRequest } = {};
+    useCreateCapture(capture);
+    renderForm();
+
+    fillNameAndSummary('No family', 'No family.');
+    submit();
+
+    await waitFor(() =>
+      expect(screen.getByText('Choose a constraint family.')).toBeInTheDocument(),
+    );
+    expect(capture.body).toBeUndefined();
+  });
+
+  it('requires non-blank name and summary after trim', async () => {
+    const capture: { body?: WorldRuleCreateRequest } = {};
+    useCreateCapture(capture);
+    renderForm();
+
+    selectFamily('module_presence');
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: '   ' } });
+    fireEvent.change(screen.getByLabelText('Summary'), { target: { value: '' } });
+    fireEvent.change(screen.getByLabelText('Module key'), { target: { value: 'belief' } });
+    submit();
+
+    await waitFor(() => expect(screen.getByText('Name is required.')).toBeInTheDocument());
+    expect(screen.getByText('Summary is required.')).toBeInTheDocument();
+    expect(capture.body).toBeUndefined();
+  });
+
+  it('intercepts an empty module_key for the module families', async () => {
+    const capture: { body?: WorldRuleCreateRequest } = {};
+    useCreateCapture(capture);
+    renderForm();
+
+    selectFamily('module_absence');
+    fillNameAndSummary('Empty key', 'No module key.');
+    submit();
+
+    await waitFor(() =>
+      expect(screen.getByText('Module key is required.')).toBeInTheDocument(),
+    );
+    expect(capture.body).toBeUndefined();
+  });
+
+  it('intercepts min > max for observer_cardinality', async () => {
+    const capture: { body?: WorldRuleCreateRequest } = {};
+    useCreateCapture(capture);
+    renderForm();
+
+    selectFamily('observer_cardinality');
+    fillNameAndSummary('Inverted bounds', 'Min exceeds max.');
+    fireEvent.change(screen.getByLabelText('Min observers'), { target: { value: '5' } });
+    fireEvent.change(screen.getByLabelText('Max observers'), { target: { value: '2' } });
+    submit();
+
+    await waitFor(() =>
+      expect(screen.getByText('Min must not exceed max.')).toBeInTheDocument(),
+    );
+    expect(capture.body).toBeUndefined();
+  });
+
+  it('requires at least one observer bound', async () => {
+    const capture: { body?: WorldRuleCreateRequest } = {};
+    useCreateCapture(capture);
+    renderForm();
+
+    selectFamily('observer_cardinality');
+    fillNameAndSummary('No bounds', 'Neither bound.');
+    submit();
+
+    await waitFor(() =>
+      expect(screen.getByText('At least one bound is required.')).toBeInTheDocument(),
+    );
+    expect(capture.body).toBeUndefined();
+  });
+
+  it('rejects non-whole observer bounds', async () => {
+    const capture: { body?: WorldRuleCreateRequest } = {};
+    useCreateCapture(capture);
+    renderForm();
+
+    selectFamily('observer_cardinality');
+    fillNameAndSummary('Fractional bound', 'Half an observer.');
+    fireEvent.change(screen.getByLabelText('Min observers'), { target: { value: '1.5' } });
+    submit();
+
+    await waitFor(() =>
+      expect(screen.getByText('Must be a whole number.')).toBeInTheDocument(),
+    );
+    expect(capture.body).toBeUndefined();
+  });
+
+  it('intercepts required_field with no operand form chosen (both absent)', async () => {
+    const capture: { body?: WorldRuleCreateRequest } = {};
+    useCreateCapture(capture);
+    renderForm();
+
+    selectFamily('required_field');
+    fillNameAndSummary('No operand', 'No operand chosen.');
+    submit();
+
+    await waitFor(() =>
+      expect(
+        screen.getByText('Choose an operand form: entry-level field or module row.'),
+      ).toBeInTheDocument(),
+    );
+    expect(capture.body).toBeUndefined();
+  });
+
+  it('intercepts required_field operand misuse: entry-level value combined with module row (both present)', async () => {
+    const capture: { body?: WorldRuleCreateRequest } = {};
+    useCreateCapture(capture);
+    renderForm();
+
+    selectFamily('required_field');
+    fillNameAndSummary('Mixed operand', 'Entry field on a module row.');
+    fireEvent.click(screen.getByRole('radio', { name: /Module row/ }));
+    fireEvent.change(screen.getByLabelText('Module key'), { target: { value: 'journal' } });
+    fireEvent.change(screen.getByLabelText('Field'), { target: { value: 'body.summary' } });
+    submit();
+
+    await waitFor(() =>
+      expect(
+        screen.getByText('Entry-level field values cannot be combined with a module row.'),
+      ).toBeInTheDocument(),
+    );
+    expect(capture.body).toBeUndefined();
+  });
+});
+
+describe('RuleForm — API field-level error echo (AR-2 vocabulary, SSOT)', () => {
+  it('echoes a constraint.module_key 400 onto the module key field and stays open', async () => {
+    const capture: { body?: WorldRuleCreateRequest } = {};
+    useCreateCapture(capture, () =>
+      HttpResponse.json(
+        {
+          success: false,
+          error: {
+            code: 'invalid_input',
+            message: 'invalid carrier',
+            details: {
+              field: 'constraint.module_key',
+              reason: '"module_key" must be a non-empty string',
+            },
+          },
+        },
+        { status: 400 },
+      ),
+    );
+    const onClose = vi.fn();
+    renderForm(onClose);
+
+    selectFamily('module_presence');
+    fillNameAndSummary('Name', 'Summary');
+    fireEvent.change(screen.getByLabelText('Module key'), { target: { value: 'belief' } });
+    submit();
+
+    await waitFor(() =>
+      expect(screen.getByText('"module_key" must be a non-empty string')).toBeInTheDocument(),
+    );
+    expect(screen.getByTestId('world-rule-form')).toBeInTheDocument();
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('echoes a canonical_name 400 onto the name field', async () => {
+    const capture: { body?: WorldRuleCreateRequest } = {};
+    useCreateCapture(capture, () =>
+      HttpResponse.json(
+        {
+          success: false,
+          error: {
+            code: 'invalid_input',
+            message: 'bad name',
+            details: { field: 'canonical_name', reason: 'canonical_name must not be empty' },
+          },
+        },
+        { status: 400 },
+      ),
+    );
+    renderForm();
+
+    selectFamily('module_presence');
+    fillNameAndSummary('Name', 'Summary');
+    fireEvent.change(screen.getByLabelText('Module key'), { target: { value: 'belief' } });
+    submit();
+
+    await waitFor(() =>
+      expect(screen.getByText('canonical_name must not be empty')).toBeInTheDocument(),
+    );
+  });
+
+  it('echoes a target_entry_types 400 onto the target types group', async () => {
+    const capture: { body?: WorldRuleCreateRequest } = {};
+    useCreateCapture(capture, () =>
+      HttpResponse.json(
+        {
+          success: false,
+          error: {
+            code: 'invalid_input',
+            message: 'bad targets',
+            details: {
+              field: 'target_entry_types',
+              reason:
+                'target_entry_types cannot be combined with an observer_cardinality constraint: observer_cardinality applies to timeline events, which carry no entry_type',
+            },
+          },
+        },
+        { status: 400 },
+      ),
+    );
+    renderForm();
+
+    selectFamily('observer_cardinality');
+    fillNameAndSummary('Observer cap', 'Bounds only.');
+    fireEvent.change(screen.getByLabelText('Min observers'), { target: { value: '0' } });
+    fireEvent.change(screen.getByLabelText('Max observers'), { target: { value: '3' } });
+    submit();
+
+    await waitFor(() =>
+      expect(
+        screen.getByText(/cannot be combined with an observer_cardinality constraint/),
+      ).toBeInTheDocument(),
+    );
+  });
+
+  it('surfaces a generic inline error for non-envelope failures and keeps the form open', async () => {
+    const capture: { body?: WorldRuleCreateRequest } = {};
+    useCreateCapture(capture, () =>
+      HttpResponse.json({ error: { code: 'internal', message: 'boom' } }, { status: 500 }),
+    );
+    const onClose = vi.fn();
+    renderForm(onClose);
+
+    selectFamily('module_presence');
+    fillNameAndSummary('Name', 'Summary');
+    fireEvent.change(screen.getByLabelText('Module key'), { target: { value: 'belief' } });
+    submit();
+
+    await waitFor(() =>
+      expect(screen.getByTestId('rule-form-submit-error')).toHaveTextContent(
+        'Could not add the rule. Try again.',
+      ),
+    );
+    expect(onClose).not.toHaveBeenCalled();
+  });
+});
+
+describe('RuleForm — family switch + observer × target exclusivity', () => {
+  it('resets operand fields when the family changes', async () => {
+    const capture: { body?: WorldRuleCreateRequest } = {};
+    useCreateCapture(capture);
+    renderForm();
+
+    selectFamily('module_presence');
+    fireEvent.change(screen.getByLabelText('Module key'), { target: { value: 'belief' } });
+    selectFamily('observer_cardinality');
+    expect(screen.getByLabelText('Min observers')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Module key')).not.toBeInTheDocument();
+    selectFamily('module_presence');
+    const moduleKey = screen.getByLabelText('Module key') as HTMLInputElement;
+    expect(moduleKey.value).toBe('');
+  });
+
+  it('keeps meta fields across a family switch', async () => {
+    renderForm();
+    selectFamily('module_presence');
+    fillNameAndSummary('Stable name', 'Stable summary.');
+    selectFamily('observer_cardinality');
+    selectFamily('module_absence');
+    expect((screen.getByLabelText('Name') as HTMLInputElement).value).toBe('Stable name');
+    expect((screen.getByLabelText('Summary') as HTMLTextAreaElement).value).toBe('Stable summary.');
+  });
+
+  it('disables the target entry types axis for observer_cardinality and clears it', async () => {
+    renderForm();
+    selectFamily('module_presence');
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Character' }));
+    selectFamily('observer_cardinality');
+    const character = screen.getByRole('checkbox', { name: 'Character' }) as HTMLInputElement;
+    expect(character).toBeDisabled();
+    expect(character.checked).toBe(false);
+    expect(
+      screen.getByText('Not available for Limit observers — events carry no entry type.'),
+    ).toBeInTheDocument();
+  });
+});
+
+describe('RuleForm — no raw-JSON textarea', () => {
+  it('renders exactly one textarea (the human summary) — no constraint JSON editor', async () => {
+    renderForm();
+    selectFamily('module_presence');
+    const textareas = document.querySelectorAll('textarea');
+    expect(textareas).toHaveLength(1);
+    expect(textareas[0]).toHaveAccessibleName('Summary');
+  });
+});
+
+describe('validateRuleForm — client mirror (pure)', () => {
+  it('rejects observer_cardinality combined with target entry types (exclusivity guard)', () => {
+    const state: RuleFormState = {
+      ...initialRuleFormState(),
+      family: 'observer_cardinality',
+      canonicalName: 'Name',
+      statement: 'Summary',
+      min: '1',
+      targetEntryTypes: ['character'],
+    };
+    expect(validateRuleForm(state)).toEqual({ target_entry_types: 'targetTypesConflict' });
+  });
+
+  it('rejects required_field module-row field in the reserved entry-level set', () => {
+    const state: RuleFormState = {
+      ...initialRuleFormState(),
+      family: 'required_field',
+      canonicalName: 'Name',
+      statement: 'Summary',
+      requiredFieldOperand: 'module-row',
+      requiredModuleKey: 'journal',
+      requiredModuleField: 'body.tags',
+    };
+    expect(validateRuleForm(state)).toEqual({ 'constraint.field': 'moduleFieldReserved' });
+  });
+});
+
+describe('buildCreateWorldRuleRequest — payload shape', () => {
+  it('always sends status; omits severity_hint and target_entry_types when unset', () => {
+    const state: RuleFormState = {
+      ...initialRuleFormState(),
+      family: 'module_presence',
+      moduleKey: 'belief',
+      canonicalName: 'Name',
+      statement: 'Summary',
+    };
+    const request = buildCreateWorldRuleRequest(state);
+    expect(request).toEqual({
+      canonical_name: 'Name',
+      statement: 'Summary',
+      constraint: { family: 'module_presence', module_key: 'belief' },
+      status: 'active',
+    });
+    expect(request?.severity_hint).toBeUndefined();
+    expect(request?.target_entry_types).toBeUndefined();
+  });
+
+  it('trims canonical_name and statement', () => {
+    const state: RuleFormState = {
+      ...initialRuleFormState(),
+      family: 'module_presence',
+      moduleKey: 'm',
+      canonicalName: '  Name  ',
+      statement: '  Summary  ',
+    };
+    const request = buildCreateWorldRuleRequest(state);
+    expect(request?.canonical_name).toBe('Name');
+    expect(request?.statement).toBe('Summary');
+  });
+});

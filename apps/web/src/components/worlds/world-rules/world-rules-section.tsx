@@ -1,9 +1,12 @@
 /**
- * World Rules section — V1.166 P2 (DR-64 surfacing half, Task 2).
+ * World Rules section — V1.166 P2 (DR-64 surfacing half, Task 2) extended by
+ * V1.169 P2 T1 with the inline create form (DF-82).
  *
- * Read-only rules section mounted BELOW the findings panel on the world
- * findings page (PD-2). Consumes `GET /v1/daemon/worlds/:world_id/rules` via
- * {@link useWorldRules} with the generated `WorldRulesListResponse` types.
+ * Rules section mounted BELOW the findings panel on the world findings page
+ * (PD-2). Consumes `GET /v1/daemon/worlds/:world_id/rules` via
+ * {@link useWorldRules} with the generated `WorldRulesListResponse` types;
+ * the inline {@link RuleForm} (create mode) posts through the V1.169 P1
+ * write route and invalidates the list on success (new row in read order).
  *
  * Vocabulary contract (PD-1/PD-2, locked): status renders spoke
  * `draft|active|deprecated` verbatim plus an open-string fallback — ALL
@@ -15,22 +18,24 @@
  * (`canonical_name ASC, rule_id ASC`); `truncated: true` renders honest copy
  * mirroring the AR-3 500-cap.
  *
- * Read-only: zero write controls (no create/edit/deactivate UI — rules are
- * CLI-authored, PD-1); the only interactive element is the per-row
- * `aria-expanded` display toggle. No filtering/sorting/polling (roadmap).
+ * Authoring: CardHeader **Add rule** CTA (same CTA as the empty state) opens
+ * one inline create form at a time; rows stay read-only expand toggles (edit
+ * + Deactivate land in T2). No modal/Dialog, no raw-JSON editor (plan locks).
  */
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { ChevronDown } from 'lucide-react';
+import { ChevronDown, Plus } from 'lucide-react';
 
 import { useWorldRules } from '@/api/queries';
 import { WorldSeverityBadge } from '@/components/worlds/world-findings/world-severity-badge';
+import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { EmptyState, ErrorState, LoadingState } from '@/components/ui/states';
 import { cn } from '@/lib/utils';
 import type { WorldRulesListResponse } from '@42ch/nexus-contracts';
 
 import { renderConstraintSummary } from './constraint-summary';
+import { RuleForm } from './rule-form';
 import { WorldRuleStatusBadge } from './world-rule-status-badge';
 
 type WorldRule = WorldRulesListResponse['rules'][number];
@@ -38,6 +43,7 @@ type WorldRule = WorldRulesListResponse['rules'][number];
 export function WorldRulesSection({ worldId }: { worldId: string }) {
   const { t } = useTranslation('worldRules');
   const rules = useWorldRules(worldId);
+  const [creating, setCreating] = useState(false);
 
   return (
     <Card className="shadow-card" data-testid="world-rules-section">
@@ -47,17 +53,29 @@ export function WorldRulesSection({ worldId }: { worldId: string }) {
             <CardTitle>{t('section.title')}</CardTitle>
             <CardDescription>{t('section.description')}</CardDescription>
           </div>
-          {rules.data && rules.data.rules.length > 0 ? (
-            <span className="text-copy-13 text-gray-700" data-testid="world-rules-count">
-              {t('section.count', { count: rules.data.rules.length })}
-            </span>
-          ) : null}
+          <div className="flex items-center gap-2">
+            {rules.data && rules.data.rules.length > 0 ? (
+              <span className="text-copy-13 text-gray-700" data-testid="world-rules-count">
+                {t('section.count', { count: rules.data.rules.length })}
+              </span>
+            ) : null}
+            <Button
+              type="button"
+              variant="secondary"
+              size="small"
+              onClick={() => setCreating(true)}
+              data-testid="world-rules-add-rule"
+            >
+              <Plus className="h-4 w-4" aria-hidden /> {t('section.addRule')}
+            </Button>
+          </div>
         </div>
       </CardHeader>
       <CardContent className="flex flex-col gap-3">
         <p className="text-copy-13 text-gray-700" data-testid="world-rules-structural-note">
           {t('section.structuralNote')}
         </p>
+        {creating ? <RuleForm worldId={worldId} onClose={() => setCreating(false)} /> : null}
         {rules.isLoading ? (
           <LoadingState label={t('section.loading')} />
         ) : rules.isError ? (
@@ -67,7 +85,21 @@ export function WorldRulesSection({ worldId }: { worldId: string }) {
             onRetry={() => void rules.refetch()}
           />
         ) : !rules.data || rules.data.rules.length === 0 ? (
-          <EmptyState title={t('section.emptyTitle')} description={t('section.emptyDescription')} />
+          <EmptyState
+            title={t('section.emptyTitle')}
+            description={t('section.emptyDescription')}
+            action={
+              <Button
+                type="button"
+                variant="secondary"
+                size="small"
+                onClick={() => setCreating(true)}
+                data-testid="world-rules-empty-add-rule"
+              >
+                <Plus className="h-4 w-4" aria-hidden /> {t('section.addRule')}
+              </Button>
+            }
+          />
         ) : (
           <div className="flex flex-col gap-3">
             {rules.data.truncated ? (

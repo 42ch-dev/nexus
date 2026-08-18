@@ -3,8 +3,9 @@
     "title": "Rules",
     "description": "Rules Check applies to this World's entries and timeline. All statuses are shown — auto-include evaluates active rules only.",
     "structuralNote": "Each rule carries a structural constraint — module presence/absence, required fields, observer counts — not narrative quality.",
-    "emptyTitle": "No rules",
-    "emptyDescription": "This World has no rules yet. Add rules with the creator CLI (`creator world rule add`).",
+    "emptyTitle": "No rules yet",
+    "emptyDescription": "Add a structural rule so Check can evaluate this World's entries and timeline.",
+    "addRule": "Add rule",
     "truncated": "Showing the first 500 rules by name. Remaining rules are not displayed.",
     "errorTitle": "Could not load rules",
     "errorDescription": "Could not load rules for this World.",
@@ -16,5 +17,76 @@
     "constraint": "Constraint",
     "targetTypes": "Target entry types",
     "allEntryTypes": "All entry types"
+  },
+  "form": {
+    "title": "Add rule",
+    "familyLabel": "Constraint family",
+    "familyPlaceholder": "Choose a family…",
+    "families": {
+      "module_presence": {
+        "label": "Require a module",
+        "help": "Matching entries must carry this module key."
+      },
+      "module_absence": {
+        "label": "Forbid a module",
+        "help": "Matching entries must not carry this module key."
+      },
+      "required_field": {
+        "label": "Require a field",
+        "help": "Matching entries must have this field populated."
+      },
+      "observer_cardinality": {
+        "label": "Limit observers",
+        "help": "Matching events must have an observer count in range."
+      }
+    },
+    "nameLabel": "Name",
+    "nameHelp": "A stable name you will recognize in the list.",
+    "statementLabel": "Summary",
+    "statementHelp": "Check does not read this. The constraint is the fields below.",
+    "moduleKeyLabel": "Module key",
+    "operandLabel": "Operand form",
+    "operand": {
+      "entry": {
+        "label": "Entry-level field",
+        "help": "Applies to one of the closed entry-level fields."
+      },
+      "module-row": {
+        "label": "Module row",
+        "help": "Applies to a free-form field on a row of this module."
+      }
+    },
+    "entryFieldLabel": "Field",
+    "entryFieldPlaceholder": "Choose a field…",
+    "minLabel": "Min observers",
+    "maxLabel": "Max observers",
+    "statusLabel": "Status",
+    "statusActive": "Active",
+    "statusDraft": "Draft",
+    "statusHelp": "Active rules are auto-included in Check; draft rules are saved but not auto-included.",
+    "severityLabel": "Severity",
+    "severityDefault": "Default (warning)",
+    "severityHelp": "Not set — Check evaluates the rule as warning.",
+    "targetTypesLabel": "Target entry types",
+    "targetTypesHelp": "None selected → all entry types in check scope.",
+    "targetTypesDisabledHelp": "Not available for Limit observers — events carry no entry type.",
+    "submit": "Add rule",
+    "submitPending": "Adding…",
+    "cancel": "Cancel",
+    "genericError": "Could not add the rule. Try again.",
+    "errors": {
+      "familyRequired": "Choose a constraint family.",
+      "nameRequired": "Name is required.",
+      "statementRequired": "Summary is required.",
+      "moduleKeyRequired": "Module key is required.",
+      "operandRequired": "Choose an operand form: entry-level field or module row.",
+      "entryFieldRequired": "Choose an entry-level field.",
+      "moduleFieldRequired": "Field is required.",
+      "moduleFieldReserved": "Entry-level field values cannot be combined with a module row.",
+      "minRequired": "At least one bound is required.",
+      "boundInvalid": "Must be a whole number.",
+      "minMax": "Min must not exceed max.",
+      "targetTypesConflict": "Target entry types cannot be combined with an observer-count constraint."
+    }
   }
 }

@@ -67,6 +67,8 @@
     "couldNotDeleteWorld": "Could not delete World",
     "couldNotCreateWorld": "Could not create World",
     "couldNotCreateFork": "Could not create branch",
+    "couldNotCreateWorldRule": "Could not create rule",
+    "couldNotUpdateWorldRule": "Could not update rule",
     "couldNotUpdateFinding": "Could not update finding",
     "couldNotUpdateFindings": "Could not update findings",
     "couldNotScaffoldPreset": "Could not scaffold preset",

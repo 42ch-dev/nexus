@@ -11,7 +11,9 @@
  *     first-class `constraint` object (AR-2/AR-3): all four families +
  *     module-row form, unknown families get family + generic operands, odd
  *     shapes never crash, absent constraint → no summary row;
- *   - the section is read-only — no create/edit/deactivate controls.
+ *   - the section's per-row surface stays read-only (expand toggles only);
+ *     the V1.169 P2 create entry is the CardHeader **Add rule** CTA (same
+ *     CTA as the empty state) which opens the inline create form.
  */
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
@@ -303,7 +305,7 @@ describe('WorldRulesSection — populated', () => {
     fireEvent.click(rows[5]);
   });
 
-  it('is read-only: no create/edit/deactivate controls, only expand toggles', async () => {
+  it('rows stay read-only expand toggles — the only write control is the header Add rule CTA', async () => {
     useHandlers(
       http.get('/v1/daemon/worlds/:worldId/rules', () =>
         HttpResponse.json(
@@ -318,13 +320,15 @@ describe('WorldRulesSection — populated', () => {
     renderSection();
     await waitFor(() => expect(screen.getByText('Read-only rule')).toBeInTheDocument());
 
-    // No authoring controls (PD-2 — rules are CLI-authored, PD-1).
-    expect(
-      screen.queryByRole('button', { name: /create|edit|deactivate|add|delete/i }),
-    ).not.toBeInTheDocument();
+    // The V1.169 P2 create entry (CardHeader CTA) is present.
+    expect(screen.getByTestId('world-rules-add-rule')).toHaveTextContent('Add rule');
 
-    // Every button is a read-only expand/collapse toggle.
-    const buttons = screen.getAllByRole('button');
+    // No per-row authoring controls yet (edit + Deactivate land in T2).
+    expect(screen.queryByRole('button', { name: /edit|deactivate/i })).not.toBeInTheDocument();
+
+    // Every non-CTA button is a read-only expand/collapse toggle.
+    const addRule = screen.getByTestId('world-rules-add-rule');
+    const buttons = screen.getAllByRole('button').filter((button) => button !== addRule);
     expect(buttons.length).toBeGreaterThanOrEqual(2);
     for (const button of buttons) {
       expect(button).toHaveAttribute('aria-expanded');
@@ -333,7 +337,7 @@ describe('WorldRulesSection — populated', () => {
 });
 
 describe('WorldRulesSection — empty state', () => {
-  it('renders the honest empty copy when the world has no rules', async () => {
+  it('renders the locked empty copy with an in-panel Add rule CTA (no CLI pointer)', async () => {
     useHandlers(
       http.get('/v1/daemon/worlds/:worldId/rules', () =>
         HttpResponse.json(rulesResponse([], false)),
@@ -341,9 +345,72 @@ describe('WorldRulesSection — empty state', () => {
     );
 
     renderSection();
-    await waitFor(() => expect(screen.getByText('No rules')).toBeInTheDocument());
-    expect(screen.getByText(/This World has no rules yet/)).toBeInTheDocument();
+    // Locked copy (plan clarify): title / description / CTA.
+    await waitFor(() => expect(screen.getByText('No rules yet')).toBeInTheDocument());
+    expect(
+      screen.getByText(/Add a structural rule so Check can evaluate this World's entries and timeline\./),
+    ).toBeInTheDocument();
+    // The CLI pointer is gone (DF-82 blocker).
+    expect(screen.queryByText(/creator world rule add/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/CLI/)).not.toBeInTheDocument();
     expect(screen.queryByTestId('world-rules-count')).not.toBeInTheDocument();
+
+    // The empty-state CTA opens the inline create form.
+    fireEvent.click(screen.getByTestId('world-rules-empty-add-rule'));
+    await waitFor(() => expect(screen.getByTestId('world-rule-form')).toBeInTheDocument());
+    expect(screen.getByTestId('world-rule-form')).toHaveTextContent('Constraint family');
+  });
+
+  it('the CardHeader Add rule CTA also opens the inline form', async () => {
+    useHandlers(
+      http.get('/v1/daemon/worlds/:worldId/rules', () =>
+        HttpResponse.json(rulesResponse([], false)),
+      ),
+    );
+
+    renderSection();
+    await waitFor(() => expect(screen.getByText('No rules yet')).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId('world-rules-add-rule'));
+    await waitFor(() => expect(screen.getByTestId('world-rule-form')).toBeInTheDocument());
+  });
+
+  it('a successful create refreshes the list and renders the new rule in read order', async () => {
+    let list = rulesResponse([], false);
+    useHandlers(
+      http.get('/v1/daemon/worlds/:worldId/rules', () => HttpResponse.json(list)),
+      http.post('/v1/daemon/worlds/:worldId/rules', async ({ request }) => {
+        const body = (await request.json()) as { canonical_name?: string };
+        const created = makeRule({
+          rule_id: 'rul_created',
+          canonical_name: body.canonical_name ?? 'Created rule',
+          status: 'active',
+        });
+        list = rulesResponse([created]);
+        return HttpResponse.json(created, { status: 201 });
+      }),
+    );
+
+    renderSection();
+    await waitFor(() => expect(screen.getByText('No rules yet')).toBeInTheDocument());
+
+    fireEvent.click(screen.getByTestId('world-rules-empty-add-rule'));
+    await waitFor(() => expect(screen.getByTestId('world-rule-form')).toBeInTheDocument());
+
+    // Fill the module_presence happy path.
+    fireEvent.change(screen.getByLabelText('Constraint family'), {
+      target: { value: 'module_presence' },
+    });
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Belief module required' } });
+    fireEvent.change(screen.getByLabelText('Summary'), {
+      target: { value: 'Entries must carry the belief module.' },
+    });
+    fireEvent.change(screen.getByLabelText('Module key'), { target: { value: 'belief' } });
+    fireEvent.click(screen.getByTestId('rule-form-submit'));
+
+    // The form closes and the refreshed list shows the new row.
+    await waitFor(() => expect(screen.queryByTestId('world-rule-form')).not.toBeInTheDocument());
+    expect(await screen.findByText('Belief module required')).toBeInTheDocument();
+    expect(screen.getByTestId('world-rules-count')).toHaveTextContent('1');
   });
 });
 
@@ -449,7 +516,7 @@ describe('WorldRulesSection — zh-CN locale parity', () => {
     );
 
     renderSection();
-    await waitFor(() => expect(screen.getByText('暂无规则')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('还没有规则')).toBeInTheDocument());
     expect(screen.getByText('规则')).toBeInTheDocument();
     expect(
       screen.getByText(/结构性约束（模块存在\/缺失、必填字段、观察者数量）/),

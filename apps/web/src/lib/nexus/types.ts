@@ -140,6 +140,9 @@ import type {
   WorldKbPromoteCandidateRequest,
   WorldKbPromoteCandidateResponse,
   WorldFindingsListResponse,
+  WorldRuleCreateRequest,
+  WorldRuleResponse,
+  WorldRuleUpdateRequest,
   WorldRulesListResponse,
 } from '@42ch/nexus-contracts';
 
@@ -462,16 +465,37 @@ export interface NexusClient {
    */
   listWorldFindings(worldId: string): Promise<WorldFindingsListResponse>;
 
-  // ── World rules (V1.166 P1 route / DR-64 surfacing half) ────────────────
+  // ── World rules (V1.166 P1 route / DR-64 surfacing half; V1.169 P1 authoring) ─
   /**
    * `GET /v1/daemon/worlds/{world_id}/rules` — world-scoped structured rules
    * (V1.166 AR-3). Author-metadata list in `canonical_name ASC, rule_id ASC`
    * order, 500-cap with an honest `truncated` flag; each item projects the
    * spoke Rule vocabulary verbatim plus the AR-2 constraint carrier
-   * first-class. Read-only surface (PD-2): rules are CLI-authored (PD-1),
-   * this client method never writes.
+   * first-class.
    */
   listWorldRules(worldId: string): Promise<WorldRulesListResponse>;
+  /**
+   * `POST /v1/daemon/worlds/{world_id}/rules` — create a structured rule
+   * (V1.169 P1, AR-5). The request is the AR-2 constraint carrier plus
+   * author metadata; the daemon mints `rule_id` server-side and applies the
+   * AR-3 create defaults (`status` → `active`, `kind` → `rule`,
+   * `severity_hint` → NULL → evaluation `warning`, `target_entry_types` →
+   * `[]`). 400 `invalid_input` carries the AR-2 field-level `details`
+   * (`{ field, reason }`) that the authoring form echoes onto the matching
+   * field.
+   */
+  createWorldRule(worldId: string, body: WorldRuleCreateRequest): Promise<WorldRuleResponse>;
+  /**
+   * `PATCH /v1/daemon/worlds/{world_id}/rules/{rule_id}` — per-field edit
+   * (V1.169 P1, AR-3/AR-5): `constraint` is whole-carrier replacement,
+   * absent fields stay unchanged, no null-clearing. `status: "deprecated"`
+   * is the Deactivate recovery (product lock — no DELETE route).
+   */
+  updateWorldRule(
+    worldId: string,
+    ruleId: string,
+    body: WorldRuleUpdateRequest,
+  ): Promise<WorldRuleResponse>;
 
   // ── Compute modules (V1.114 P2) ─────────────────────────────────────────
   /** `GET /v1/daemon/compute/modules` — cursor list of registered compute modules. */
