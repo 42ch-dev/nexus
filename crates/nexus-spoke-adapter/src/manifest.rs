@@ -14,6 +14,7 @@
 //! | `capabilities` | `["spoke-baseline", "l2-computable", "l5-fork"]` | unchanged | unchanged | unchanged |
 //! | `namespaces` | `["nexus"]` | unchanged | unchanged | unchanged |
 //! | `authority` | `None` | unchanged | unchanged | unchanged |
+//! | `tools` | `[]` | unchanged | unchanged | `[]` (wire-omitted; V1.169 — no tool ABI declared) |
 //! | `extensions.nexus` | `{ "connect_host_slice": "n-c0", "daemon_http_coexists": true }` | `{ "connect_host_slice": "n-c1", "served_ops": ["upsert", "promote", "relate"], "daemon_http_coexists": true }` | `connect_host_slice` → `"n-c2"`; `served_ops` → `["upsert", "promote", "relate", "check", "assemble"]` | `served_ops` → `+ "compute"` |
 //!
 //! Honesty rules: `l5-fork` is included because `ForkTimelineQueryPort` is
@@ -130,6 +131,11 @@ pub fn build_local_host_manifest(host_id: &str) -> SpokeResult<HostCapabilityMan
         capabilities: LOCAL_CAPABILITIES.iter().map(ToString::to_string).collect(),
         namespaces,
         authority: None,
+        // V1.169 (0.11.1): honest empty tools declaration — no tool ABI is
+        // served; the serde rule (`skip_serializing_if = Vec::is_empty`)
+        // omits the member on the wire, and an absent member deserializes
+        // back to `Vec::new()` (locks AR-1/AR-2).
+        tools: Vec::new(),
         extensions,
     })
 }
@@ -553,5 +559,79 @@ mod tests {
         assert_eq!(back.host_id, data.host_id);
         assert_eq!(back.capabilities, data.capabilities);
         assert_eq!(back.roles, data.roles);
+    }
+
+    /// V1.169 P0 (locks AR-1 + AR-4): the honest-empty `tools` declaration
+    /// is `Vec::new()` in memory and the member **omitted** on the wire —
+    /// the generated serde rule (`skip_serializing_if = Vec::is_empty`)
+    /// never serializes an empty `tools: []` array, and an absent member
+    /// deserializes back to `Vec::new()`. Pinned for BOTH generated types
+    /// (data + `connect_hello`) so a future schema desync between them
+    /// fails loudly (AR-3 hello shape). Plus the no-tools-capability
+    /// lockstep: neither the advertised capabilities nor the served-op
+    /// table may carry a `tools.`-prefixed string — nexus never negotiates
+    /// a tool capability, so the spoke-connect dispatch gate refuses
+    /// `tools.*` before the nexus handler (AR-4 layer 1).
+    #[test]
+    fn manifest_tools_omitted_on_the_wire_and_no_tools_capability() {
+        let data = match build_local_host_manifest("test-device-uuid-0000") {
+            SpokeResult::Ok(m) => m,
+            SpokeResult::Reject(r) => panic!("builder rejected: {r:?}"),
+        };
+        let hello = match build_connect_hello_manifest("test-device-uuid-0000") {
+            SpokeResult::Ok(m) => m,
+            SpokeResult::Reject(r) => panic!("connect hello builder rejected: {r:?}"),
+        };
+
+        // Honest-empty in memory on both generated types.
+        assert!(
+            data.tools.is_empty(),
+            "the local manifest must declare tools empty (no tool ABI served)"
+        );
+        assert!(
+            hello.tools.is_empty(),
+            "the connect_hello manifest must declare tools empty (single-builder SSOT)"
+        );
+
+        // Wire form: the `tools` member is OMITTED (skip_serializing_if),
+        // never an empty array — for the data type AND the connect_hello
+        // wire type (AR-1 + AR-3 hello shape).
+        let data_json = serde_json::to_value(&data).expect("data manifest serializes");
+        let hello_json = serde_json::to_value(&hello).expect("hello manifest serializes");
+        for (label, json) in [
+            ("data manifest", &data_json),
+            ("connect_hello manifest", &hello_json),
+        ] {
+            assert!(
+                !json
+                    .as_object()
+                    .expect("manifest is a JSON object")
+                    .contains_key("tools"),
+                "{label} must omit the tools member on the wire (empty tools is never serialized)"
+            );
+        }
+
+        // Round-trip: the wire form (member omitted) deserializes back to
+        // `Vec::new()` — the absent member defaults.
+        let round_tripped: HostCapabilityManifest =
+            serde_json::from_value(data_json).expect("wire form deserializes");
+        assert!(
+            round_tripped.tools.is_empty(),
+            "an absent tools member must deserialize back to Vec::new()"
+        );
+
+        // No-tools-capability lockstep (AR-4): neither the advertised
+        // capabilities nor the served-op table carries a `tools.`-prefixed
+        // string, so the manifest can never negotiate a tool capability and
+        // the spoke dispatch gate refuses `tools.*` before the handler
+        // (layer 1).
+        assert!(
+            !LOCAL_CAPABILITIES.iter().any(|c| c.starts_with("tools.")),
+            "LOCAL_CAPABILITIES must contain no tools.-prefixed capability"
+        );
+        assert!(
+            !LOCAL_SERVED_OPS.iter().any(|op| op.starts_with("tools.")),
+            "LOCAL_SERVED_OPS must contain no tools.-prefixed op"
+        );
     }
 }

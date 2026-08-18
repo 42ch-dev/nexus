@@ -161,5 +161,7 @@ fn spoke_connect_manifest() -> ConnectHelloManifest {
         namespaces: Vec::new(),
         roles: vec!["input-source".into()],
         schema_version: std::num::NonZeroU64::new(1).expect("non-zero"),
+        // V1.169 (0.11.1): honest empty tools declaration (no tool ABI served).
+        tools: Vec::new(),
     }
 }
