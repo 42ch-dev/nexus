@@ -397,9 +397,16 @@ fn world_kb_routes() -> Router<WorkspaceState> {
         )
         // World-attached structured-rule read surface (V1.166 P1 T4 /
         // DR-64, AR-3) — same `:world_id` prefix family and tier2 mount.
+        // V1.169 P1 (AR-5): the write surface joins it — POST create (201)
+        // + PATCH edit (200), same guard chain, field-level envelope.
         .route(
             "/v1/daemon/worlds/:world_id/rules",
-            get(handlers::world_rules::list_world_rules),
+            get(handlers::world_rules::list_world_rules)
+                .post(handlers::world_rules::create_world_rule),
+        )
+        .route(
+            "/v1/daemon/worlds/:world_id/rules/:rule_id",
+            patch(handlers::world_rules::update_world_rule),
         )
 }
 
