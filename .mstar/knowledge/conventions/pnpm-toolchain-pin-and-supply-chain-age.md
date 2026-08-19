@@ -6,7 +6,7 @@ category: conventions
 severity: medium
 plan_id: 2026-08-14-v1.164-p1-spoke-010-upgrade-observation-passthrough
 tags: [pnpm, toolchain, supply-chain, minimumReleaseAge, lockfile, ci-pin, allowBuilds]
-last_updated: 2026-08-15
+last_updated: 2026-08-19
 applies_when: Installing or upgrading npm deps (especially same-day releases, spoke lockstep bumps); any pnpm install failure mentioning ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION, ERR_PNPM_IGNORED_BUILDS, or MODULE_NOT_FOUND after a partial install
 ---
 
@@ -24,9 +24,9 @@ Historical note (why this pin lagged): until 2026-08-15 CI pinned pnpm 9 while d
 ## Guidance
 
 1. **Ambient pnpm is now the CI pin** — plain `pnpm install` / `pnpm run` is correct; no more `npx -y pnpm@9` shims.
+   - **Repo-level decision (2026-08-19, V1.169 PR #223)**: pnpm 11's DEFAULT `minimumReleaseAge: 1440` (24h) has no per-package exemption and blocked the same-day `@42ch/spoke-*@0.11.1` lockstep at `pnpm install --frozen-lockfile` in CI (4 jobs died at the setup step — code was fine). Lowered to **`720` (12h)** in `pnpm-workspace.yaml` per user decision: first-party lockstep can follow spoke releases within 12h; third-party freshness gate retained. Do not "restore" 1440 without solving the first-party exemption problem (pnpm has none; only `trustPolicyExclude` exists, which is a different mechanism).
 2. **On `ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION`** (local policy, currently unset on this machine but can return): don't retry the same command and don't edit the lockfile — temporarily relax the local policy (`pnpm config set minimumReleaseAge 0`, revert after) or wait out the window.
 3. **On `ERR_PNPM_IGNORED_BUILDS`**: a new dep with a postinstall needs an `allowBuilds` entry in `pnpm-workspace.yaml`. Deliberate — review what the script does before allowing it.
-4. **On `MODULE_NOT_FOUND` after any failed install**: assume partial wipe — `rm -rf node_modules && pnpm install --frozen-lockfile`, then re-run typecheck.
 5. **Lockfile updates**: any pnpm 11 writes `lockfileVersion: 9.0` (same as 9.x); no cross-version churn.
 
 ## Why This Matters

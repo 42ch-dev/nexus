@@ -3,9 +3,8 @@ title: Codegen optional field callsite coverage
 category: engineering
 track: knowledge
 source_plan: 2026-08-12-v1.163-p2-outbox-drop-and-flake-sweep
-source_iteration: V1.163
+last_updated: 2026-08-19
 created: 2026-08-12
-last_updated: 2026-08-12
 status: active
 ---
 
@@ -40,6 +39,8 @@ A schema change in one crate (`schemas/` → `nexus-contracts`) can silently bre
 ## Examples
 
 **V1.163 P1**: Added `world_event_id?: string` to `work-outline.schema.json`. Codegen updated `WorkOutlineTimelineEventsItem` in `nexus-contracts` (added `pub world_event_id: Option<String>`). But 5 struct-literal callsites in `crates/nexus-daemon-runtime/src/api/handlers/outline.rs` (1 production `timeline_add_event` + 4 tests) were not updated → `E0063` on `cargo check --workspace`. Fixed in P2 commit `d6af9859` with `world_event_id: None` at each site.
+
+**V1.169 P1** (typify optional-**array** collapse — semantic quirk, not a compile break): typify renders an optional JSON-Schema array member as `Vec<T>` + `serde(default)`, making **absent ≡ `[]` indistinguishable**. For PATCH DTOs where "not provided" (unchanged) must differ from an explicit empty array (meaningful clear), a plain optional array breaks the contract silently. Fix: `["array","null"]` union on the member → generated `Option<Vec<T>>` where absent/null = unchanged and `Some(vec![])` = clear. Documented in the update schema's description so the union is not "simplified" away later. Observed on `world-rule-update-request.schema.json` `target_entry_types` (AR-1/AR-3 deviation ratified in V1.169).
 
 ## Prevention
 

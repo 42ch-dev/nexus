@@ -138,8 +138,24 @@ regress = "0.10"
 # additive + KnowledgeEntry.modules (capability-flagged, additive).
 # Consumers (the upcoming spoke-adapter crate + nexus-contracts generated
 # types) will reference these via `spoke-schemas.workspace = true`.
-spoke-schemas = "=0.10.0"
-spoke-operations = "=0.10.0"
+# V1.169 P0: 0.10.0 → 0.11.1 — lockstep across all three crates.
+# schemas additive: `ToolDescriptor` generated type + optional
+# `HostCapabilityManifest.tools[]` (serde-omitted when empty — nexus builders
+# declare `tools: Vec::new()`; struct-literal break fixed at manifest.rs and
+# the connect-host example fixtures). operations additive: `tools` module
+# (`ToolInvokePort` / `orchestrate_invoke_tool` / capability-id grammar
+# helpers) + new `regress` dep (already workspace-pinned at 0.10 — single
+# build, `cargo tree -i regress` one version). connect: responder /
+# serve_ports / reverse-invoke added (nexus does not consume);
+# `required_capability` return lifetime `Option<&'static str>` → `Option<&str>`
+# (nexus has zero callers). New core dispatch-gate rule: an op starting
+# `tools.` requires the exact op string as negotiated capability — nexus never
+# negotiates one (capabilities unchanged spoke-baseline/l2-computable/l5-fork)
+# and the invoke handler's SERVED_OPS gate refuses `tools.*` pre-routing
+# (`op_unsupported`, double defense). libp2p stays =0.56.0 (upstream same);
+# the default daemon graph stays libp2p-free.
+spoke-schemas = "=0.11.1"
+spoke-operations = "=0.11.1"
 # V1.148 P3 N-C0 (DF-72): spoke-connect — Connect Host facade (signed
 # hello, allowlist, capability-token gate). V1.153 P0: 0.8.2 → 0.9.1
 # (dial-bound hello + envelope-auth v2 are internal to spoke-connect;
@@ -154,7 +170,7 @@ spoke-operations = "=0.10.0"
 # spoke-connect removed the `mdns` feature in 0.9.2 (not present in 0.10.0);
 # hickory/libp2p-mdns stay lockfile-only via libp2p 0.56 optional deps,
 # never compiled.
-spoke-connect = "=0.10.0"
+spoke-connect = "=0.11.1"
 # V1.148 P3 N-C0: libp2p 0.56 — identity/PeerId/Multiaddr types for the
 # `nexus42 connect` CLI (ed25519 keypair + protobuf key serialization only).
 # Pinned exactly to spoke-connect's transport so the feature-on graph shares

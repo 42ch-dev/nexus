@@ -1169,6 +1169,29 @@ fn build_schema_map() -> Vec<SchemaEntry> {
             Strict,
             WorldRulesListResponse
         ),
+        // V1.169 P1 (AR-1): world rules write surface DTOs. Plain-object
+        // roots → Strict. Type structure only (no minLength/enum/format):
+        // value validation lives in the daemon handler so form-producible
+        // failures surface through the field-level envelope (AR-2), never
+        // the axum Json extractor.
+        entry!(
+            "schemas/daemon-api/worlds/world-rule-create-request.schema.json",
+            Strict,
+            WorldRuleCreateRequest
+        ),
+        entry!(
+            "schemas/daemon-api/worlds/world-rule-update-request.schema.json",
+            Strict,
+            WorldRuleUpdateRequest
+        ),
+        // V1.169 P1 (AR-1): single-item response schema serving both POST
+        // 201 and PATCH 200 — the WorldRulesListResponseRulesItem shape
+        // verbatim → Strict.
+        entry!(
+            "schemas/daemon-api/worlds/world-rule-response.schema.json",
+            Strict,
+            WorldRuleResponse
+        ),
     ]
 }
 

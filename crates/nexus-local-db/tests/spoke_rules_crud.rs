@@ -10,12 +10,16 @@
 //! `status`/`updated_at` refreshed; unknown id → `Ok(false)`; foreign world with
 //! known id → `Ok(false)`, row untouched); world-scoped list with
 //! `canonical_name ASC, rule_id ASC` ordering incl. tie-break, all statuses,
-//! cross-world isolation, unknown world → empty.
+//! cross-world isolation, unknown world → empty; world-guarded multi-field
+//! update (V1.169 P1, AR-4: every mutable field replaced, `None` fields kept,
+//! opaque whole-bag carrier replacement, unknown id / foreign world →
+//! `Ok(false)`, `updated_at` refreshed on every matched update incl.
+//! value-identical ones, `created_at` untouched, JSON columns stored verbatim).
 
 #![allow(clippy::unwrap_used)]
 
 use nexus_local_db::spoke_rules::{
-    insert_rule, list_rules_by_world, set_rule_status, SpokeRuleRow,
+    insert_rule, list_rules_by_world, set_rule_status, update_rule, RuleUpdate, SpokeRuleRow,
 };
 use nexus_local_db::{open_pool, run_migrations, LocalDbError};
 
@@ -227,4 +231,332 @@ async fn list_rules_by_world_orders_and_isolates() {
     // Unknown world → empty vec, not an error.
     let none = list_rules_by_world(&pool, "wld_nope").await.unwrap();
     assert!(none.is_empty(), "unknown world must return an empty vec");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn update_rule_replaces_every_mutable_field() {
+    let (pool, _dir) = setup_db().await;
+    insert_rule(&pool, &full_row("rul_upd", "wld_1", "before"))
+        .await
+        .unwrap();
+
+    let updated = update_rule(
+        &pool,
+        "wld_1",
+        "rul_upd",
+        &RuleUpdate {
+            canonical_name: Some("after".to_string()),
+            statement: Some("new statement".to_string()),
+            severity_hint: Some("fatal".to_string()),
+            status: Some("deprecated".to_string()),
+            kind: Some("prohibition".to_string()),
+            target_entry_types_json: Some(r#"["character"]"#.to_string()),
+            extensions_json: Some(
+                r#"{"nexus":{"constraint":{"family":"module_presence","module_key":"karma"}}}"#
+                    .to_string(),
+            ),
+        },
+    )
+    .await
+    .unwrap();
+    assert!(updated, "same-world update must match");
+
+    let listed = list_rules_by_world(&pool, "wld_1").await.unwrap();
+    assert_eq!(listed.len(), 1);
+    let got = &listed[0];
+    assert_eq!(got.canonical_name, "after");
+    assert_eq!(got.statement.as_deref(), Some("new statement"));
+    assert_eq!(got.severity_hint.as_deref(), Some("fatal"));
+    assert_eq!(got.status.as_deref(), Some("deprecated"));
+    assert_eq!(got.kind, "prohibition");
+    assert_eq!(got.target_entry_types_json, r#"["character"]"#);
+    assert_eq!(
+        got.extensions_json,
+        r#"{"nexus":{"constraint":{"family":"module_presence","module_key":"karma"}}}"#
+    );
+    // Non-mutable columns are untouched.
+    assert_eq!(
+        got.description.as_deref(),
+        Some("before description"),
+        "description is not a mutable field"
+    );
+    assert_eq!(
+        got.source_anchor_json.as_deref(),
+        Some(r#"{"kind":"paragraph","ref":"ch3#p12"}"#),
+        "source_anchor_json is not a mutable field"
+    );
+    assert_eq!(
+        got.schema_version, 1,
+        "schema_version is not a mutable field"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn update_rule_none_fields_keep_stored_values() {
+    let (pool, _dir) = setup_db().await;
+    insert_rule(&pool, &full_row("rul_keep", "wld_1", "keep me"))
+        .await
+        .unwrap();
+
+    let updated = update_rule(
+        &pool,
+        "wld_1",
+        "rul_keep",
+        &RuleUpdate {
+            canonical_name: Some("renamed".to_string()),
+            statement: None,
+            severity_hint: None,
+            status: None,
+            kind: None,
+            target_entry_types_json: None,
+            extensions_json: None,
+        },
+    )
+    .await
+    .unwrap();
+    assert!(updated, "single-field update must match");
+
+    let listed = list_rules_by_world(&pool, "wld_1").await.unwrap();
+    assert_eq!(listed.len(), 1);
+    let got = &listed[0];
+    assert_eq!(got.canonical_name, "renamed");
+    // COALESCE pass-through: every `None` field keeps its stored value.
+    assert_eq!(got.statement.as_deref(), Some("keep me statement"));
+    assert_eq!(got.severity_hint.as_deref(), Some("error"));
+    assert_eq!(got.status.as_deref(), Some("draft"));
+    assert_eq!(got.kind, "prohibition");
+    assert_eq!(got.target_entry_types_json, r#"["character","event"]"#);
+    assert_eq!(
+        got.extensions_json,
+        r#"{"nexus":{"constraint":{"family":"required_field","field":"body.summary"}}}"#
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn update_rule_replaces_whole_extensions_bag_opaque() {
+    let (pool, _dir) = setup_db().await;
+    let mut row = full_row("rul_car", "wld_1", "carrier");
+    row.extensions_json =
+        r#"{"nexus":{"constraint":{"family":"required_field","field":"body.summary"},"other_nexus_key":1},"other_namespace":{"a":true}}"#
+            .to_string();
+    insert_rule(&pool, &row).await.unwrap();
+
+    let new_bag =
+        r#"{"nexus":{"constraint":{"family":"module_presence","module_key":"tone"}},"third_ns":[1,2]}"#
+            .to_string();
+    let updated = update_rule(
+        &pool,
+        "wld_1",
+        "rul_car",
+        &RuleUpdate {
+            canonical_name: None,
+            statement: None,
+            severity_hint: None,
+            status: None,
+            kind: None,
+            target_entry_types_json: None,
+            extensions_json: Some(new_bag.clone()),
+        },
+    )
+    .await
+    .unwrap();
+    assert!(updated, "carrier replacement must match");
+
+    let listed = list_rules_by_world(&pool, "wld_1").await.unwrap();
+    assert_eq!(listed.len(), 1);
+    assert_eq!(
+        listed[0].extensions_json, new_bag,
+        "extensions_json is opaque whole-bag replacement — the old bag's \
+         nexus keys and namespaces must not be merged in"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn update_rule_unknown_rule_id_returns_false() {
+    let (pool, _dir) = setup_db().await;
+    insert_rule(&pool, &full_row("rul_known", "wld_1", "known"))
+        .await
+        .unwrap();
+
+    let updated = update_rule(
+        &pool,
+        "wld_1",
+        "rul_missing",
+        &RuleUpdate {
+            canonical_name: Some("nope".to_string()),
+            statement: None,
+            severity_hint: None,
+            status: None,
+            kind: None,
+            target_entry_types_json: None,
+            extensions_json: None,
+        },
+    )
+    .await
+    .unwrap();
+    assert!(!updated, "unknown rule_id must not match");
+
+    let listed = list_rules_by_world(&pool, "wld_1").await.unwrap();
+    assert_eq!(listed[0].canonical_name, "known");
+    assert_eq!(listed[0].updated_at, Some(1_700_000_042));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn update_rule_foreign_world_rule_id_returns_false() {
+    let (pool, _dir) = setup_db().await;
+    insert_rule(&pool, &full_row("rul_w1", "wld_1", "world one"))
+        .await
+        .unwrap();
+    insert_rule(&pool, &full_row("rul_w2", "wld_2", "world two"))
+        .await
+        .unwrap();
+
+    // Known rule_id, foreign world_id — the world guard must hold it back.
+    let updated = update_rule(
+        &pool,
+        "wld_2",
+        "rul_w1",
+        &RuleUpdate {
+            canonical_name: Some("hijacked".to_string()),
+            statement: None,
+            severity_hint: None,
+            status: None,
+            kind: None,
+            target_entry_types_json: None,
+            extensions_json: None,
+        },
+    )
+    .await
+    .unwrap();
+    assert!(!updated, "foreign world_id must not match");
+
+    // The guarded attempt must not have mutated the row.
+    let listed = list_rules_by_world(&pool, "wld_1").await.unwrap();
+    assert_eq!(listed[0].rule_id, "rul_w1");
+    assert_eq!(listed[0].canonical_name, "world one");
+    assert_eq!(listed[0].updated_at, Some(1_700_000_042));
+
+    // The other world's own update still works (isolation, not a lock).
+    let updated = update_rule(
+        &pool,
+        "wld_2",
+        "rul_w2",
+        &RuleUpdate {
+            canonical_name: Some("world two renamed".to_string()),
+            statement: None,
+            severity_hint: None,
+            status: None,
+            kind: None,
+            target_entry_types_json: None,
+            extensions_json: None,
+        },
+    )
+    .await
+    .unwrap();
+    assert!(updated, "same-world update in the other world must match");
+    let listed = list_rules_by_world(&pool, "wld_2").await.unwrap();
+    assert_eq!(listed[0].canonical_name, "world two renamed");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn update_rule_refreshes_updated_at_keeps_created_at() {
+    let (pool, _dir) = setup_db().await;
+    insert_rule(&pool, &full_row("rul_ts", "wld_1", "timestamps"))
+        .await
+        .unwrap();
+
+    // Value-changing update: `updated_at` must move past the seeded value,
+    // `created_at` must stay untouched.
+    let updated = update_rule(
+        &pool,
+        "wld_1",
+        "rul_ts",
+        &RuleUpdate {
+            canonical_name: Some("timestamps v2".to_string()),
+            statement: None,
+            severity_hint: None,
+            status: None,
+            kind: None,
+            target_entry_types_json: None,
+            extensions_json: None,
+        },
+    )
+    .await
+    .unwrap();
+    assert!(updated, "value-changing update must match");
+    let first = &list_rules_by_world(&pool, "wld_1").await.unwrap()[0];
+    let first_updated_at = first
+        .updated_at
+        .expect("updated_at must be refreshed on update");
+    assert!(
+        first_updated_at > 1_700_000_042,
+        "updated_at must move past the seeded value, got {first_updated_at}"
+    );
+    assert_eq!(first.created_at, Some(1_700_000_000));
+
+    // Value-identical update (the row matched): still `Ok(true)` and
+    // `updated_at` is refreshed again (AR-4 — matched write wins, no OCC);
+    // `created_at` still untouched.
+    let updated = update_rule(
+        &pool,
+        "wld_1",
+        "rul_ts",
+        &RuleUpdate {
+            canonical_name: Some("timestamps v2".to_string()),
+            statement: None,
+            severity_hint: None,
+            status: None,
+            kind: None,
+            target_entry_types_json: None,
+            extensions_json: None,
+        },
+    )
+    .await
+    .unwrap();
+    assert!(updated, "value-identical update must still match");
+    let second = &list_rules_by_world(&pool, "wld_1").await.unwrap()[0];
+    let second_updated_at = second
+        .updated_at
+        .expect("updated_at must be refreshed on every matched update");
+    assert!(
+        second_updated_at >= first_updated_at,
+        "a matched-but-identical update must still refresh updated_at \
+         (got {second_updated_at} < first refresh {first_updated_at})"
+    );
+    assert_eq!(second.created_at, Some(1_700_000_000));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn update_rule_stores_pre_serialized_json_verbatim() {
+    let (pool, _dir) = setup_db().await;
+    insert_rule(&pool, &full_row("rul_raw", "wld_1", "raw json"))
+        .await
+        .unwrap();
+
+    // Non-canonical JSON text (extra whitespace) — storage must not parse or
+    // re-serialize; the bytes given must be the bytes stored (no JSON
+    // assembly happens here; the daemon pre-serializes).
+    let target_json = r#"[ "character" ,  "event" ]"#.to_string();
+    let extensions_json = r#"{ "nexus" : { "constraint" : { "family" : "required_field" , "field" : "body.summary" } } }"#.to_string();
+    let updated = update_rule(
+        &pool,
+        "wld_1",
+        "rul_raw",
+        &RuleUpdate {
+            canonical_name: None,
+            statement: None,
+            severity_hint: None,
+            status: None,
+            kind: None,
+            target_entry_types_json: Some(target_json.clone()),
+            extensions_json: Some(extensions_json.clone()),
+        },
+    )
+    .await
+    .unwrap();
+    assert!(updated, "verbatim JSON update must match");
+
+    let listed = list_rules_by_world(&pool, "wld_1").await.unwrap();
+    assert_eq!(listed[0].target_entry_types_json, target_json);
+    assert_eq!(listed[0].extensions_json, extensions_json);
 }

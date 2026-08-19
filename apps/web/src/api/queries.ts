@@ -68,6 +68,8 @@ import type {
   ValidatePresetRequest,
   WorkSummary,
   World,
+  WorldRuleCreateRequest,
+  WorldRuleUpdateRequest,
 } from '@42ch/nexus-contracts';
 
 import { useToast } from '@/lib/use-toast';
@@ -223,8 +225,8 @@ export function useWorldFindings(worldId: string | undefined) {
  * AR-3). Author-metadata list in `canonical_name ASC, rule_id ASC` order with
  * a 500-cap + honest `truncated` flag; spoke status vocabulary renders
  * verbatim (`draft`/`active`/`deprecated` — all shown so authors see what
- * auto-include skips, PD-1). Read-only surface: this hook is the section's
- * only data source and no mutation invalidates it (rules are CLI-authored).
+ * auto-include skips, PD-1). Invalidated by the V1.169 P2 create/edit
+ * mutations so a submitted rule appears in read order.
  */
 export function useWorldRules(worldId: string | undefined) {
   const client = useNexusClient();
@@ -233,6 +235,91 @@ export function useWorldRules(worldId: string | undefined) {
     queryFn: () => client.listWorldRules(worldId!),
     enabled: Boolean(worldId),
     staleTime: 5_000,
+  });
+}
+
+/**
+ * True when a daemon error is a rule-write 400 (`invalid_input` — the AR-2
+ * field-level envelope). The authoring form echoes `details.field` /
+ * `details.reason` onto the matching form field INLINE (locks AR-2 — the
+ * form maps inputs onto exactly the closed `constraint.*` / meta field
+ * vocabulary); every other failure follows the standard error toast.
+ */
+export function isRuleInvalidInputError(
+  error: unknown,
+): error is NexusClientError & { status: 400; code: 'invalid_input' } {
+  return (
+    error instanceof NexusClientError &&
+    error.status === 400 &&
+    error.code === 'invalid_input'
+  );
+}
+
+/**
+ * True when a daemon error is the rule-write 404 (`not_found` — AR-6: unknown
+ * rule id or a rule of another world; the envelope names only the id, never
+ * the owning world or rule content). The edit form echoes an honest non-field
+ * error (no leak); the list refresh drops the row when it is gone.
+ */
+export function isRuleNotFoundError(
+  error: unknown,
+): error is NexusClientError & { status: 404; code: 'not_found' } {
+  return (
+    error instanceof NexusClientError &&
+    error.status === 404 &&
+    error.code === 'not_found'
+  );
+}
+
+/**
+ * `POST /v1/daemon/worlds/:world_id/rules` — create a structured rule
+ * (V1.169 P1, AR-5). On success the world-rules list cache is invalidated so
+ * the new row renders in the read route's order (`canonical_name ASC,
+ * rule_id ASC`).
+ *
+ * 400 `invalid_input` is handled inline by the form (per-field echo) and is
+ * deliberately NOT toasted here (no duplicate error); 403 / 5xx / network
+ * failures follow the standard error toast, and the form mirrors a generic
+ * inline message so it never closes silently on failure.
+ */
+export function useCreateWorldRule(worldId: string) {
+  const client = useNexusClient();
+  const qc = useQueryClient();
+  const errorToast = useErrorToast();
+  return useMutation({
+    mutationFn: (request: WorldRuleCreateRequest) => client.createWorldRule(worldId, request),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: queryKeys.worldRules.list(worldId) });
+    },
+    onError: (error) => {
+      if (isRuleInvalidInputError(error)) return;
+      errorToast(error, 'error.couldNotCreateWorldRule');
+    },
+  });
+}
+
+/**
+ * `PATCH /v1/daemon/worlds/:world_id/rules/:rule_id` — per-field edit
+ * (V1.169 P1, AR-3/AR-5). On success the world-rules list cache is
+ * invalidated so the edited row re-renders in place. `status: "deprecated"`
+ * is the Deactivate recovery (product lock — no DELETE route). Error
+ * handling mirrors {@link useCreateWorldRule} (inline 400 echo, toast for
+ * everything else).
+ */
+export function useUpdateWorldRule(worldId: string) {
+  const client = useNexusClient();
+  const qc = useQueryClient();
+  const errorToast = useErrorToast();
+  return useMutation({
+    mutationFn: (vars: { ruleId: string; request: WorldRuleUpdateRequest }) =>
+      client.updateWorldRule(worldId, vars.ruleId, vars.request),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: queryKeys.worldRules.list(worldId) });
+    },
+    onError: (error) => {
+      if (isRuleInvalidInputError(error)) return;
+      errorToast(error, 'error.couldNotUpdateWorldRule');
+    },
   });
 }
 

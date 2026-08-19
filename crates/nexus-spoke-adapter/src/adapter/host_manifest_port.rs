@@ -421,6 +421,72 @@ mod tests {
         assert_eq!(peers[0].schema_version, manifest.schema_version);
     }
 
+    /// V1.169 P0 (spoke 0.11.1 lockstep, locks AR-3): a peer manifest that
+    /// CARRIES a `ToolDescriptor` round-trips through the store/re-read path
+    /// with `tools` intact — nexus tolerates tools-carrying peers while
+    /// declaring none itself. Fixture shape mirrors the spoke-connect test
+    /// fixture (`tools.math.add` with matching `capabilities`/`namespaces`).
+    /// The fail-closed re-parse contract is unchanged (corrupt row →
+    /// `InternalError`, pinned by the test below).
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn tools_carrying_peer_manifest_round_trips_through_port() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("test.db");
+        let pool = nexus_local_db::open_pool(&db_path).await.unwrap();
+        nexus_local_db::run_migrations(&pool).await.unwrap();
+
+        let manifest: HostCapabilityManifest = serde_json::from_value(serde_json::json!({
+            "schema_version": 1,
+            "host_id": "peer-host-uuid-0002",
+            "roles": ["data-store"],
+            "capabilities": ["spoke-baseline", "tools.math.add"],
+            "namespaces": ["math"],
+            "extensions": {},
+            "tools": [{
+                "schema_version": 1,
+                "capability_id": "tools.math.add",
+                "op": "tools.math.add",
+                "description": "Add two integers",
+                "input": { "type": "object" },
+                "output": { "type": "object" },
+            }],
+        }))
+        .expect("tools-carrying manifest parses");
+
+        let adapter = NexusAdapter::new(pool);
+        match adapter.record_peer_manifest(&manifest, None).await {
+            SpokeResult::Ok(()) => {}
+            SpokeResult::Reject(r) => panic!("recording is Ok: {r:?}"),
+        }
+
+        let peers = match adapter.list_peer_host_capability_manifests().await {
+            SpokeResult::Ok(p) => p,
+            SpokeResult::Reject(r) => panic!("peer list is Ok: {r:?}"),
+        };
+        assert_eq!(peers.len(), 1, "recorded peer is listed");
+        assert_eq!(peers[0].host_id, manifest.host_id);
+        assert_eq!(
+            peers[0].tools.len(),
+            1,
+            "tools-carrying peer keeps its tool descriptor"
+        );
+        assert_eq!(
+            peers[0].tools[0].capability_id.as_str(),
+            "tools.math.add",
+            "tool capability_id round-trips"
+        );
+        assert_eq!(
+            peers[0].tools[0].op.as_str(),
+            "tools.math.add",
+            "tool op round-trips"
+        );
+        assert_eq!(
+            serde_json::to_value(&peers[0].tools).expect("serializes"),
+            serde_json::to_value(&manifest.tools).expect("serializes"),
+            "tools array round-trips field for field through the typed wire"
+        );
+    }
+
     /// Duplicate `host_id` → one row: a second observation of the same peer
     /// upserts (fresh manifest, fresh capabilities) instead of duplicating.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

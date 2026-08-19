@@ -3,6 +3,13 @@ packages:
   - 'packages/*'
   - 'tooling/*'
 
+# pnpm 11 defaults minimumReleaseAge to 1440 (24h) with no per-package
+# exemption; it blocked same-day @42ch/spoke lockstep bumps in PR #223 CI
+# (2026-08-19). Lowered to 720 (12h) per user decision so first-party
+# lockstep can follow spoke releases within 12h while keeping a freshness
+# gate for third-party. Defenses that remain: frozen lockfile + allowBuilds + overrides.
+minimumReleaseAge: 720
+
 # pnpm 10+ reads settings (overrides, etc.) from pnpm-workspace.yaml;
 # pnpm 11 stopped reading the package.json `pnpm` field entirely.
 # Keep security/version overrides here so they apply under the CI pin.

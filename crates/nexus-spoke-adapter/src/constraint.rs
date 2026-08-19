@@ -20,6 +20,10 @@
 //!
 //! Shapes are **closed** — unknown members are rejected (the carrier is not
 //! an open bag), and [`parse_carrier_json`] errors name the offending member.
+//! V1.169 AR-2 adds the member-aware projection [`parse_carrier_json_member`]
+//! (same grammar; the error carries the offending member name for the daemon's
+//! field-level envelope) — [`parse_carrier_json`] delegates to it, so CLI
+//! messages are byte-identical.
 //! The CLI `creator world rule add` is the validation gate (fail early); the
 //! evaluator read path ([`constraint_from_rule`]) is lenient by design:
 //! absent or unparseable carriers yield `None` and the rule is skipped.
@@ -78,34 +82,69 @@ impl Constraint {
     }
 }
 
-/// Strictly parse a carrier [`Value`] into a [`Constraint`] (AR-2 shapes).
+/// Member-aware carrier parse error (V1.169 AR-2).
 ///
-/// This is the **CLI-only validation gate** (`creator world rule add`, fail
-/// early). The carrier must be a JSON **object** matching exactly one of the
-/// six locked shapes: `family` is required and must be one of the four closed
-/// families; unknown extra members are rejected; operand requirements are
-/// enforced per family.
+/// [`member`](CarrierError::member) names the offending carrier member for
+/// field-level API projection (`"constraint"` for the non-object root case,
+/// else `family` / `module_key` / `field` / `min` / `max`); the daemon
+/// projects `format!("constraint.{member}")`. Closed-shape violations whose
+/// offending member is none of the five grammar members (e.g. an unknown
+/// extra key — a dynamic string that `&'static str` cannot carry) report
+/// `"constraint"`: the carrier as a whole is the offending member, and
+/// [`reason`](CarrierError::reason) names the exact key.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CarrierError {
+    /// Offending carrier member: `"constraint"` (root/non-object and
+    /// closed-shape cases) or `family` / `module_key` / `field` / `min` /
+    /// `max`.
+    pub member: &'static str,
+    /// Human message naming the offending member — byte-identical to the
+    /// [`parse_carrier_json`] error strings (CLI non-regression by
+    /// construction, AR-7).
+    pub reason: String,
+}
+
+/// Strictly parse a carrier [`Value`] into a [`Constraint`] (AR-2 shapes),
+/// member-aware.
+///
+/// Identical grammar to [`parse_carrier_json`]; the error additionally
+/// names the offending carrier member so the daemon can project it onto the
+/// closed `constraint.*` envelope vocabulary without string-sniffing
+/// messages (AR-2). The CLI path keeps using [`parse_carrier_json`], which
+/// delegates here.
 ///
 /// # Errors
 ///
-/// Returns a human message **naming the offending member** (e.g.
-/// `unknown family "tone"; expected module_presence | module_absence |
-/// required_field | observer_cardinality`) for any shape violation. The
-/// caller (CLI) prefixes it with `--constraint:`.
-pub fn parse_carrier_json(value: &Value) -> Result<Constraint, String> {
-    let obj = value.as_object().ok_or_else(|| {
-        format!(
+/// Returns a [`CarrierError`] whose `reason` is the same human message
+/// [`parse_carrier_json`] produces (e.g. `unknown family "tone"; expected
+/// module_presence | module_absence | required_field |
+/// observer_cardinality`), plus the offending `member`.
+#[allow(clippy::too_many_lines)]
+// ^ one monolithic dispatch: the six locked carrier shapes are a single
+// grammar (AR-2); splitting would fragment the shape table it documents.
+pub fn parse_carrier_json_member(value: &Value) -> Result<Constraint, CarrierError> {
+    let obj = value.as_object().ok_or_else(|| CarrierError {
+        member: "constraint",
+        reason: format!(
             "constraint must be a JSON object, got {}",
             json_kind_name(value)
-        )
+        ),
     })?;
 
     let family = match obj.get("family") {
         Some(Value::String(s)) => s.as_str(),
         Some(_) => {
-            return Err("\"family\" must be a string".to_string());
+            return Err(CarrierError {
+                member: "family",
+                reason: "\"family\" must be a string".to_string(),
+            });
         }
-        None => return Err("missing required member \"family\"".to_string()),
+        None => {
+            return Err(CarrierError {
+                member: "family",
+                reason: "missing required member \"family\"".to_string(),
+            });
+        }
     };
 
     let constraint = match family {
@@ -125,12 +164,15 @@ pub fn parse_carrier_json(value: &Value) -> Result<Constraint, String> {
                 // Module-row operand form: module_key + free-form field.
                 let module_key = require_non_empty_string(obj, "module_key")?;
                 if matches!(field.as_str(), "body.summary" | "body.tags") {
-                    return Err(format!(
-                        "unknown \"field\" value \"{field}\"; \"{field}\" is the \
-                         entry-level operand, which cannot be combined with \
-                         \"module_key\" — required_field takes exactly one operand \
-                         form (entry-level field OR module-row module_key + field)"
-                    ));
+                    return Err(CarrierError {
+                        member: "field",
+                        reason: format!(
+                            "unknown \"field\" value \"{field}\"; \"{field}\" is the \
+                             entry-level operand, which cannot be combined with \
+                             \"module_key\" — required_field takes exactly one operand \
+                             form (entry-level field OR module-row module_key + field)"
+                        ),
+                    });
                 }
                 Constraint::RequiredField {
                     target: RequiredFieldTarget::ModuleRow { module_key, field },
@@ -141,10 +183,13 @@ pub fn parse_carrier_json(value: &Value) -> Result<Constraint, String> {
                     "body.summary" => EntryField::BodySummary,
                     "body.tags" => EntryField::BodyTags,
                     other => {
-                        return Err(format!(
-                            "unknown \"field\" value \"{other}\"; entry-level \
-                             required_field expects \"body.summary\" | \"body.tags\""
-                        ));
+                        return Err(CarrierError {
+                            member: "field",
+                            reason: format!(
+                                "unknown \"field\" value \"{other}\"; entry-level \
+                                 required_field expects \"body.summary\" | \"body.tags\""
+                            ),
+                        });
                     }
                 };
                 Constraint::RequiredField {
@@ -164,26 +209,54 @@ pub fn parse_carrier_json(value: &Value) -> Result<Constraint, String> {
             };
             match (min, max) {
                 (None, None) => {
-                    return Err(
-                        "observer_cardinality requires at least one of \"min\" or \"max\""
+                    return Err(CarrierError {
+                        member: "min",
+                        reason: "observer_cardinality requires at least one of \"min\" or \"max\""
                             .to_string(),
-                    );
+                    });
                 }
                 (Some(min), Some(max)) if min > max => {
-                    return Err(format!("\"min\" ({min}) must not exceed \"max\" ({max})"));
+                    return Err(CarrierError {
+                        member: "min",
+                        reason: format!("\"min\" ({min}) must not exceed \"max\" ({max})"),
+                    });
                 }
                 (min, max) => Constraint::ObserverCardinality { min, max },
             }
         }
         other => {
-            return Err(format!(
-                "unknown family \"{other}\"; expected module_presence | module_absence \
-                 | required_field | observer_cardinality"
-            ));
+            return Err(CarrierError {
+                member: "family",
+                reason: format!(
+                    "unknown family \"{other}\"; expected module_presence | module_absence \
+                     | required_field | observer_cardinality"
+                ),
+            });
         }
     };
 
     Ok(constraint)
+}
+
+/// Strictly parse a carrier [`Value`] into a [`Constraint`] (AR-2 shapes).
+///
+/// This is the **CLI-only validation gate** (`creator world rule add`, fail
+/// early). The carrier must be a JSON **object** matching exactly one of the
+/// six locked shapes: `family` is required and must be one of the four closed
+/// families; unknown extra members are rejected; operand requirements are
+/// enforced per family.
+///
+/// V1.169 AR-2: delegates to [`parse_carrier_json_member`] and drops the
+/// member — the CLI messages (and their tests) are byte-identical.
+///
+/// # Errors
+///
+/// Returns a human message **naming the offending member** (e.g.
+/// `unknown family "tone"; expected module_presence | module_absence |
+/// required_field | observer_cardinality`) for any shape violation. The
+/// caller (CLI) prefixes it with `--constraint:`.
+pub fn parse_carrier_json(value: &Value) -> Result<Constraint, String> {
+    parse_carrier_json_member(value).map_err(|e| e.reason)
 }
 
 /// Evaluator read path: extract the AR-2 carrier from a spoke [`Rule`].
@@ -200,31 +273,58 @@ pub fn constraint_from_rule(rule: &Rule) -> Option<Constraint> {
     parse_carrier_json(constraint).ok()
 }
 
-/// Require `key` in `obj` be a non-empty string; error names `key`.
-fn require_non_empty_string(obj: &Map<String, Value>, key: &str) -> Result<String, String> {
+/// Require `key` in `obj` be a non-empty string; error names `key`
+/// (member-aware, V1.169 AR-2). `key` is a grammar literal, so the member
+/// is `'static`.
+fn require_non_empty_string(
+    obj: &Map<String, Value>,
+    key: &'static str,
+) -> Result<String, CarrierError> {
     match obj.get(key) {
         Some(Value::String(s)) if !s.trim().is_empty() => Ok(s.clone()),
-        Some(Value::String(_)) => Err(format!("\"{key}\" must be a non-empty string")),
-        Some(_) => Err(format!("\"{key}\" must be a string")),
-        None => Err(format!("missing required member \"{key}\"")),
+        Some(Value::String(_)) => Err(CarrierError {
+            member: key,
+            reason: format!("\"{key}\" must be a non-empty string"),
+        }),
+        Some(_) => Err(CarrierError {
+            member: key,
+            reason: format!("\"{key}\" must be a string"),
+        }),
+        None => Err(CarrierError {
+            member: key,
+            reason: format!("missing required member \"{key}\""),
+        }),
     }
 }
 
-/// Require `key` in `obj` be a `u64 ≥ 0`; error names `key`.
-fn require_u64(value: &Value, key: &str) -> Result<u64, String> {
+/// Require `key` in `obj` be a `u64 ≥ 0`; error names `key`
+/// (member-aware, V1.169 AR-2).
+fn require_u64(value: &Value, key: &'static str) -> Result<u64, CarrierError> {
     match value {
-        Value::Number(n) => n
-            .as_u64()
-            .ok_or_else(|| format!("\"{key}\" must be a non-negative integer, got {n}")),
-        _ => Err(format!("\"{key}\" must be a non-negative integer")),
+        Value::Number(n) => n.as_u64().ok_or_else(|| CarrierError {
+            member: key,
+            reason: format!("\"{key}\" must be a non-negative integer, got {n}"),
+        }),
+        _ => Err(CarrierError {
+            member: key,
+            reason: format!("\"{key}\" must be a non-negative integer"),
+        }),
     }
 }
 
 /// Reject closed-shape violations: any member outside `allowed` names itself.
-fn reject_unknown_members(obj: &Map<String, Value>, allowed: &[&str]) -> Result<(), String> {
+///
+/// The offending member is the (dynamic) unknown key, which `&'static str`
+/// cannot carry — the error reports the carrier-level member
+/// `"constraint"` (within the closed AR-2 vocabulary) and the reason names
+/// the exact key.
+fn reject_unknown_members(obj: &Map<String, Value>, allowed: &[&str]) -> Result<(), CarrierError> {
     for key in obj.keys() {
         if !allowed.contains(&key.as_str()) {
-            return Err(format!("unknown member \"{key}\" in constraint"));
+            return Err(CarrierError {
+                member: "constraint",
+                reason: format!("unknown member \"{key}\" in constraint"),
+            });
         }
     }
     Ok(())
