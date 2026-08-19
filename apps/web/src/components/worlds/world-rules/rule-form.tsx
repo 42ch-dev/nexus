@@ -145,6 +145,12 @@ export function RuleForm({ worldId, rule, onClose }: RuleFormProps) {
       return;
     }
 
+    // Clean slate before the API round-trip: from here on the error state
+    // holds only what the server echoes, so a stale field message from an
+    // earlier submit can never survive next to a field the new response did
+    // not reject (bugbot 677244f5).
+    setErrors({});
+
     if (isEdit) {
       const request = buildUpdateWorldRuleRequest(state, rule);
       if (request === null) return; // unreachable: validation requires a family

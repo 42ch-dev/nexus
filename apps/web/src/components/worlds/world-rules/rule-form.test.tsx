@@ -637,6 +637,75 @@ describe('RuleForm — API field-level error echo (AR-2 vocabulary, SSOT)', () =
   });
 });
 
+describe('RuleForm — submit attempts start from a clean error slate (bugbot 677244f5)', () => {
+  it('drops a stale client-side field error when the next submit echoes a different field', async () => {
+    const capture: { body?: WorldRuleCreateRequest } = {};
+    useCreateCapture(capture, () =>
+      HttpResponse.json(
+        {
+          success: false,
+          error: {
+            code: 'invalid_input',
+            message: 'bad targets',
+            details: {
+              field: 'target_entry_types',
+              reason:
+                'target_entry_types cannot be combined with an observer_cardinality constraint: observer_cardinality applies to timeline events, which carry no entry_type',
+            },
+          },
+        },
+        { status: 400 },
+      ),
+    );
+    renderForm();
+
+    selectFamily('observer_cardinality');
+    fillNameAndSummary('Inverted cap', 'Min exceeds max.');
+    fireEvent.change(screen.getByLabelText('Min observers'), { target: { value: '5' } });
+    fireEvent.change(screen.getByLabelText('Max observers'), { target: { value: '2' } });
+    // First submit fails client validation on the Min field (min > max).
+    submit();
+    await waitFor(() => expect(screen.getByText('Min must not exceed max.')).toBeInTheDocument());
+    expect(capture.body).toBeUndefined();
+
+    // Fix the constraint by raising Max (that edit clears only the Max
+    // field error, so the Min message is still stale) and resubmit: the
+    // server rejects a *different* field, so the stale Min message must not
+    // survive next to the new echo.
+    fireEvent.change(screen.getByLabelText('Max observers'), { target: { value: '9' } });
+    submit();
+
+    await waitFor(() =>
+      expect(
+        screen.getByText(/cannot be combined with an observer_cardinality constraint/),
+      ).toBeInTheDocument(),
+    );
+    expect(screen.queryByText('Min must not exceed max.')).not.toBeInTheDocument();
+  });
+
+  it('clears stale field errors when a later submit succeeds', async () => {
+    const capture: { body?: WorldRuleCreateRequest } = {};
+    useCreateCapture(capture);
+    const onClose = vi.fn();
+    renderForm(onClose);
+
+    selectFamily('observer_cardinality');
+    fillNameAndSummary('Inverted cap', 'Min exceeds max.');
+    fireEvent.change(screen.getByLabelText('Min observers'), { target: { value: '5' } });
+    fireEvent.change(screen.getByLabelText('Max observers'), { target: { value: '2' } });
+    submit();
+    await waitFor(() => expect(screen.getByText('Min must not exceed max.')).toBeInTheDocument());
+
+    fireEvent.change(screen.getByLabelText('Max observers'), { target: { value: '9' } });
+    submit();
+
+    await waitFor(() => expect(onClose).toHaveBeenCalled());
+    // The form stays mounted (onClose is a no-op mock): no stale error may
+    // linger next to the submitted fields.
+    expect(screen.queryByText('Min must not exceed max.')).not.toBeInTheDocument();
+  });
+});
+
 describe('RuleForm — family switch + observer × target exclusivity', () => {
   it('resets operand fields when the family changes', async () => {
     const capture: { body?: WorldRuleCreateRequest } = {};
