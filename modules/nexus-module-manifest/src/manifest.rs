@@ -154,6 +154,98 @@ impl ModuleManifest {
             ))
         }
     }
+
+    /// Validate the manifest against the V1 contract (AR-6 checks, CLI-facing
+    /// copy).
+    ///
+    /// Checks: required-field presence (non-empty identity/export strings),
+    /// `host_functions ⊆ ["kb_read", "narrative_query"]` (structural — the
+    /// [`HostFunction`] enum rejects unknown names at parse time), the DR-49
+    /// pin `nexus_abi_version == 1`, `compute_export` non-empty, `wasm_sha256`
+    /// format (64 lowercase hex when present), and `schemas` fragments parse
+    /// as JSON objects.
+    ///
+    /// This is the CLI/tooling-facing implementation (`nexus42 compute
+    /// validate` path-deps this crate, AR-9). The SDK carries a hand-maintained
+    /// mirror under its closed dependency list (AR-1); the tests below pin the
+    /// same checks on both sides so the two cannot silently diverge.
+    ///
+    /// # Errors
+    ///
+    /// Returns every failing check as a human-readable message.
+    pub fn validate(&self) -> Result<(), Vec<String>> {
+        let mut errors = Vec::new();
+
+        // Required-field presence: the typed struct guarantees the fields
+        // exist; the meaningful check is that the identity/export strings
+        // are non-empty.
+        for (field, value) in [
+            ("module_id", self.module_id.as_str()),
+            ("name", self.name.as_str()),
+            ("version", self.version.as_str()),
+            ("compute_export", self.compute_export.as_str()),
+            ("init_export", self.init_export.as_str()),
+        ] {
+            if value.is_empty() {
+                errors.push(format!("{field} must be non-empty"));
+            }
+        }
+
+        // `host_functions ⊆ ["kb_read", "narrative_query"]` is enforced
+        // structurally by the `HostFunction` enum (serde rejects unknown
+        // names at parse time), so no runtime check is needed here.
+
+        // The DR-49 pin: the ABI refuses V2 concepts.
+        if self.nexus_abi_version != 1 {
+            errors.push(format!(
+                "nexus_abi_version must be 1 (ABI V1), got {}",
+                self.nexus_abi_version
+            ));
+        }
+
+        if let Some(hash) = &self.wasm_sha256 {
+            let valid =
+                hash.len() == 64 && hash.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'));
+            if !valid {
+                errors.push("wasm_sha256 must be 64 lowercase hex characters".to_string());
+            }
+        }
+
+        if let Some(schemas) = &self.schemas {
+            if let Some(attrs) = &schemas.key_block_attributes {
+                for (k, v) in attrs {
+                    if !v.is_object() {
+                        errors.push(format!(
+                            "schemas.key_block_attributes.{k} must be a JSON object"
+                        ));
+                    }
+                }
+            }
+            if let Some(state) = &schemas.key_block_state {
+                for (k, v) in state {
+                    if !v.is_object() {
+                        errors.push(format!("schemas.key_block_state.{k} must be a JSON object"));
+                    }
+                }
+            }
+            if let Some(inv) = &schemas.invocation {
+                if !inv.is_object() {
+                    errors.push("schemas.invocation must be a JSON object".to_string());
+                }
+            }
+            if let Some(report) = &schemas.battle_report {
+                if !report.is_object() {
+                    errors.push("schemas.battle_report must be a JSON object".to_string());
+                }
+            }
+        }
+
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors)
+        }
+    }
 }
 
 #[cfg(test)]
@@ -353,5 +445,124 @@ mod tests {
             err.contains("wasm does not match manifest wasm_sha256"),
             "mismatch message must carry the pairing error: {err}"
         );
+    }
+
+    // ── validate() — mirrors `nexus-module-sdk`'s AR-6 validate tests ─────
+
+    fn valid_manifest() -> ModuleManifest {
+        ModuleManifest {
+            module_id: "basic-combat".to_string(),
+            name: "Basic Combat".to_string(),
+            version: "1.0.0".to_string(),
+            nexus_abi_version: 1,
+            required_key_block_types: vec!["character".to_string()],
+            compute_export: "compute".to_string(),
+            init_export: "init".to_string(),
+            description: None,
+            author: None,
+            host_functions: vec![],
+            schemas: None,
+            battle_report_kind: Some("combat".to_string()),
+            max_fuel: None,
+            max_memory_mib: None,
+            max_wall_time_ms: None,
+            wasm_sha256: None,
+        }
+    }
+
+    #[test]
+    fn validate_accepts_valid_manifest() {
+        assert!(valid_manifest().validate().is_ok());
+    }
+
+    #[test]
+    fn validate_accepts_wasm_sha256_lowercase_hex() {
+        let mut m = valid_manifest();
+        m.wasm_sha256 =
+            Some("7ed89295ba49e06652eef8e3a085fa35abae5fcccc3de3700b2f03ca098bcd6f".to_string());
+        assert!(m.validate().is_ok());
+    }
+
+    #[test]
+    fn validate_rejects_wrong_abi_version() {
+        let mut m = valid_manifest();
+        m.nexus_abi_version = 2;
+        let errs = m.validate().expect_err("ABI 2 must be rejected");
+        assert!(
+            errs.iter()
+                .any(|e| e.contains("nexus_abi_version must be 1")),
+            "{errs:?}"
+        );
+    }
+
+    #[test]
+    fn validate_rejects_bad_wasm_sha256_formats() {
+        for bad in [
+            "7ED89295BA49E06652EEF8E3A085FA35ABAE5FCCCC3DE3700B2F03CA098BCD6F", // uppercase
+            "abc",                                                              // too short
+            "7ed89295ba49e06652eef8e3a085fa35abae5fcccc3de3700b2f03ca098bcd6",  // 63 chars
+            "7ed89295ba49e06652eef8e3a085fa35abae5fcccc3de3700b2f03ca098bcd6g", // non-hex
+        ] {
+            let mut m = valid_manifest();
+            m.wasm_sha256 = Some(bad.to_string());
+            let errs = m.validate().expect_err("bad hash must be rejected");
+            assert!(
+                errs.iter()
+                    .any(|e| e.contains("wasm_sha256 must be 64 lowercase hex")),
+                "hash {bad:?} → {errs:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn validate_rejects_empty_required_strings() {
+        let mut m = valid_manifest();
+        m.compute_export = String::new();
+        m.module_id = String::new();
+        let errs = m.validate().expect_err("empty strings must be rejected");
+        assert!(
+            errs.iter().any(|e| e == "module_id must be non-empty"),
+            "{errs:?}"
+        );
+        assert!(
+            errs.iter().any(|e| e == "compute_export must be non-empty"),
+            "{errs:?}"
+        );
+    }
+
+    #[test]
+    fn validate_rejects_non_object_schema_fragments() {
+        let mut m = valid_manifest();
+        m.schemas = Some(ModuleSchemas {
+            key_block_attributes: Some(HashMap::from([(
+                "character".to_string(),
+                serde_json::json!(["not", "an", "object"]),
+            )])),
+            key_block_state: None,
+            invocation: Some(serde_json::json!("string fragment")),
+            battle_report: None,
+        });
+        let errs = m
+            .validate()
+            .expect_err("non-object fragments must be rejected");
+        assert!(
+            errs.iter()
+                .any(|e| e == "schemas.key_block_attributes.character must be a JSON object"),
+            "{errs:?}"
+        );
+        assert!(
+            errs.iter()
+                .any(|e| e == "schemas.invocation must be a JSON object"),
+            "{errs:?}"
+        );
+    }
+
+    #[test]
+    fn validate_reports_multiple_errors() {
+        let mut m = valid_manifest();
+        m.nexus_abi_version = 2;
+        m.wasm_sha256 = Some("nope".to_string());
+        let errs = m.validate().expect_err("multiple failures");
+        assert_eq!(errs.len(), 2, "{errs:?}");
     }
 }

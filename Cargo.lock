@@ -4053,6 +4053,7 @@ dependencies = [
  "nexus-home-layout",
  "nexus-knowledge",
  "nexus-local-db",
+ "nexus-module-manifest",
  "nexus-moment-context-assembly",
  "nexus-narrative",
  "nexus-orchestration",

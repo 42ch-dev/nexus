@@ -163,6 +163,18 @@ pub enum CliError {
         actual_version: Option<i64>,
     },
 
+    /// V1.170 P0 (AR-9): `nexus42 compute` exit-code contract. The AR-9
+    /// vocabulary does not fit the CLI-wide 1/75/76/78 mapping, so the compute
+    /// group returns this variant with its own code: 1 = build/toolchain
+    /// failure, 2 = manifest validation failure, 3 = `wasm_sha256` pairing
+    /// mismatch, 4 = daemon unreachable / run rejected.
+    ComputeExit {
+        /// AR-9 exit code (1 | 2 | 3 | 4).
+        code: i32,
+        /// User-facing message (daemon errors surfaced verbatim).
+        message: String,
+    },
+
     Other(String),
 }
 
@@ -307,6 +319,7 @@ impl fmt::Display for CliError {
                 )
             }
             Self::Other(msg) => write!(f, "{msg}"),
+            Self::ComputeExit { message, .. } => write!(f, "{message}"),
         }
     }
 }
