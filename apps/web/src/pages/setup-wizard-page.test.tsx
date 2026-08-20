@@ -6,6 +6,7 @@ import { Route, Routes, useLocation } from 'react-router';
 
 import { SetupWizardPage } from '@/pages/setup-wizard-page';
 import { SetupGate } from '@/components/setup/setup-gate';
+import { EntranceProvider } from '@/lib/entrance-context';
 import { renderInApp } from '@/test/test-providers';
 import { useHandlers } from '@/test/msw-server';
 import { BrowserClient } from '@/lib/nexus';
@@ -30,6 +31,8 @@ function makeDesktop(overrides: Partial<DesktopCapabilities> = {}): DesktopCapab
     resetLocalDatabase: () => Promise.resolve(),
     getSetupCompleted: () => Promise.resolve(false),
     setSetupCompleted: () => Promise.resolve(),
+    getEntrance: () => Promise.resolve('content-creator'),
+    setEntrance: () => Promise.resolve(),
     setAgentProfile: () => Promise.resolve(),
     getAgentProfile: () => Promise.resolve(null),
     getWorkspaceRoot: () => Promise.resolve('/tmp/nexus'),
@@ -79,6 +82,14 @@ function useWizardScanHandlers() {
   );
 }
 
+async function advanceEntrance(user: ReturnType<typeof userEvent.setup>) {
+  // Step 1 (AR-17): Continue on the Entrance step → Agent.
+  await user.click(screen.getByRole('button', { name: 'Continue' }));
+  await waitFor(() =>
+    expect(screen.getByRole('heading', { name: 'Choose an agent' })).toBeInTheDocument(),
+  );
+}
+
 async function advanceAgentToWorkspace(user: ReturnType<typeof userEvent.setup>) {
   // codex-native (priority 0, installed) renders in the default grid.
   await waitFor(() => expect(screen.getByText('Codex')).toBeInTheDocument());
@@ -102,7 +113,9 @@ describe('SetupWizardPage', () => {
   it('renders a portrait card with top Steps and no left rail', () => {
     useWizardScanHandlers();
     renderInApp(
-      <SetupWizardPage />,
+      <EntranceProvider>
+        <SetupWizardPage />
+      </EntranceProvider>,
       { client: makeClient(), initialRouterEntries: ['/setup'] },
     );
 
@@ -126,9 +139,9 @@ describe('SetupWizardPage', () => {
     expect(list).not.toHaveClass('flex-col');
 
     const activeStep = screen.getByRole('listitem', { current: 'step' });
-    expect(activeStep).toHaveAttribute('data-step-id', 'agent');
+    expect(activeStep).toHaveAttribute('data-step-id', 'entrance');
     expect(activeStep).toHaveTextContent('1');
-    expect(activeStep).toHaveTextContent('Agent');
+    expect(activeStep).toHaveTextContent('Entrance');
 
     const circle = screen.getByText('1').closest('span');
     expect(circle).toHaveClass('h-setup-wizard-step-circle-size');
@@ -159,11 +172,13 @@ describe('SetupWizardPage', () => {
   it('renders the first-impression step title in the content voice (serif display tier)', () => {
     useWizardScanHandlers();
     renderInApp(
-      <SetupWizardPage />,
+      <EntranceProvider>
+        <SetupWizardPage />
+      </EntranceProvider>,
       { client: makeClient(), initialRouterEntries: ['/setup'] },
     );
 
-    const title = screen.getByRole('heading', { name: 'Choose an agent' });
+    const title = screen.getByRole('heading', { name: 'How do you use Nexus?' });
     expect(title).toHaveClass('font-display');
     expect(title).toHaveClass('text-display-24');
     expect(title).not.toHaveClass('font-heading');
@@ -172,43 +187,66 @@ describe('SetupWizardPage', () => {
   it('renders horizontal top Steps with connectors between circles', () => {
     useWizardScanHandlers();
     renderInApp(
-      <SetupWizardPage />,
+      <EntranceProvider>
+        <SetupWizardPage />
+      </EntranceProvider>,
       { client: makeClient(), initialRouterEntries: ['/setup'] },
     );
 
     const steps = screen.getAllByRole('listitem');
-    expect(steps).toHaveLength(3);
+    expect(steps).toHaveLength(4);
 
     steps.forEach((li, index) => {
       expect(li).toHaveClass('items-center');
-      expect(li).toHaveAttribute('data-step-id', ['agent', 'workspace', 'done'][index]);
+      expect(li).toHaveAttribute('data-step-id', ['entrance', 'agent', 'workspace', 'done'][index]);
 
       const spans = Array.from(li.children).filter((child) => child.tagName === 'SPAN');
       expect(spans).toHaveLength(2);
       expect(spans[0]).toHaveTextContent(String(index + 1));
-      expect(spans[1]).toHaveTextContent(['Agent', 'Workspace', 'Done'][index]);
+      expect(spans[1]).toHaveTextContent(['Entrance', 'Agent', 'Workspace', 'Done'][index]);
     });
 
-    for (let i = 0; i < 2; i++) {
+    for (let i = 0; i < 3; i++) {
       const connector = steps[i].querySelector('[data-testid="step-connector"]');
       expect(connector).toBeInTheDocument();
       expect(connector).toHaveClass('h-px');
       expect(connector).toHaveClass('bg-setup-wizard-step-connector');
     }
 
-    expect(steps[2].querySelector('[data-testid="step-connector"]')).not.toBeInTheDocument();
+    expect(steps[3].querySelector('[data-testid="step-connector"]')).not.toBeInTheDocument();
   });
 
   it('maps Steps complete/active/pending statuses as the wizard advances', async () => {
     const user = userEvent.setup();
     useWizardScanHandlers();
 
-    renderInApp(<SetupWizardPage />, {
-      client: makeClient(),
-      initialRouterEntries: ['/setup'],
-    });
+    renderInApp(
+      <EntranceProvider>
+        <SetupWizardPage />
+      </EntranceProvider>,
+      {
+        client: makeClient(),
+        initialRouterEntries: ['/setup'],
+      },
+    );
 
     const progress = screen.getByRole('navigation', { name: 'Setup progress' });
+    expect(progress.querySelector('[data-step-id="entrance"]')).toHaveAttribute(
+      'data-step-status',
+      'active',
+    );
+    expect(progress.querySelector('[data-step-id="agent"]')).toHaveAttribute(
+      'data-step-status',
+      'pending',
+    );
+    expect(screen.getByTestId('wizard-cta-row').querySelector('button[aria-label="Back"]')).not.toBeInTheDocument();
+
+    await advanceEntrance(user);
+
+    expect(progress.querySelector('[data-step-id="entrance"]')).toHaveAttribute(
+      'data-step-status',
+      'complete',
+    );
     expect(progress.querySelector('[data-step-id="agent"]')).toHaveAttribute(
       'data-step-status',
       'active',
@@ -217,7 +255,6 @@ describe('SetupWizardPage', () => {
       'data-step-status',
       'pending',
     );
-    expect(screen.getByTestId('wizard-cta-row').querySelector('button[aria-label="Back"]')).not.toBeInTheDocument();
 
     await advanceAgentToWorkspace(user);
 
@@ -256,19 +293,24 @@ describe('SetupWizardPage', () => {
     expect(screen.getByTestId('wizard-cta-row').querySelector('button[aria-label="Back"]')).toBeInTheDocument();
   });
 
-  it('moves through Agent → Workspace → Done and finishes', async () => {
+  it('moves through Entrance → Agent → Workspace → Done and finishes', async () => {
     const user = userEvent.setup();
     useWizardScanHandlers();
 
     renderInApp(
-      <>
-        <LocationDisplay />
-        <SetupWizardPage />
-      </>,
+      <EntranceProvider>
+        <>
+          <LocationDisplay />
+          <SetupWizardPage />
+        </>
+      </EntranceProvider>,
       { client: makeClient(), initialRouterEntries: ['/setup'] },
     );
 
-    expect(screen.getByRole('heading', { name: 'Choose an agent' })).toBeInTheDocument();
+    expect(
+      screen.getByRole('heading', { name: 'How do you use Nexus?' }),
+    ).toBeInTheDocument();
+    await advanceEntrance(user);
     await advanceAgentToWorkspace(user);
 
     await fillProfileName(user);
@@ -280,21 +322,105 @@ describe('SetupWizardPage', () => {
     await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/works'));
   });
 
-  it('navigates Back from Workspace to Agent and from Done to Workspace', async () => {
+  it('finish lands on the developer land route when the developer entrance is chosen (AR-17)', async () => {
     const user = userEvent.setup();
     useWizardScanHandlers();
 
-    renderInApp(<SetupWizardPage />, {
-      client: makeClient(),
-      initialRouterEntries: ['/setup'],
-    });
+    renderInApp(
+      <EntranceProvider>
+        <>
+          <LocationDisplay />
+          <SetupWizardPage />
+        </>
+      </EntranceProvider>,
+      { client: makeClient(), initialRouterEntries: ['/setup'] },
+    );
 
+    await user.click(screen.getByTestId('entrance-option-developer'));
+    await advanceEntrance(user);
+    await advanceAgentToWorkspace(user);
+    await fillProfileName(user);
+    await user.click(screen.getByRole('button', { name: 'Continue' }));
+
+    await waitFor(() => expect(screen.getByRole('heading', { name: /You're ready/ })).toBeInTheDocument());
+    await user.click(screen.getByRole('button', { name: 'Open' }));
+
+    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/developer'));
+  });
+
+  it('re-run with a stored developer entrance pre-highlights Developer and finish() preserves it (W-1)', async () => {
+    const user = userEvent.setup();
+    const setEntrance = vi.fn(() => Promise.resolve());
+    const setSetupCompleted = vi.fn(() => Promise.resolve());
+    useWizardScanHandlers();
+
+    renderInApp(
+      <EntranceProvider initialEntrance="developer">
+        <>
+          <LocationDisplay />
+          <SetupWizardPage />
+        </>
+      </EntranceProvider>,
+      {
+        client: makeClient(),
+        desktop: makeDesktop({ setEntrance, setSetupCompleted }),
+        initialRouterEntries: ['/setup'],
+      },
+    );
+
+    // Desktop-shell.md §13.10.4: the stored entrance is re-offered as the
+    // pre-highlighted default — Developer, not the content-creator default.
+    expect(screen.getByTestId('entrance-option-developer')).toHaveAttribute(
+      'aria-checked',
+      'true',
+    );
+    expect(screen.getByTestId('entrance-option-content-creator')).toHaveAttribute(
+      'aria-checked',
+      'false',
+    );
+
+    // Unchanged Continue (no explicit re-pick) — the stored value must survive.
+    await advanceEntrance(user);
+    await advanceAgentToWorkspace(user);
+    await fillProfileName(user);
+    await user.click(screen.getByRole('button', { name: 'Continue' }));
+
+    await waitFor(() => expect(screen.getByRole('heading', { name: /You're ready/ })).toBeInTheDocument());
+    await user.click(screen.getByRole('button', { name: 'Open' }));
+
+    // finish() persists the STORED developer entrance and lands on /developer
+    // — no silent overwrite to content-creator (AR-16/AR-17 persistence).
+    expect(setEntrance).toHaveBeenCalledWith('developer');
+    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/developer'));
+  });
+
+  it('navigates Back from Workspace to Agent, Agent to Entrance, and Done to Workspace', async () => {
+    const user = userEvent.setup();
+    useWizardScanHandlers();
+
+    renderInApp(
+      <EntranceProvider>
+        <SetupWizardPage />
+      </EntranceProvider>,
+      {
+        client: makeClient(),
+        initialRouterEntries: ['/setup'],
+      },
+    );
+
+    await advanceEntrance(user);
     await advanceAgentToWorkspace(user);
     await user.click(screen.getByRole('button', { name: 'Back' }));
     await waitFor(() =>
       expect(screen.getByRole('heading', { name: 'Choose an agent' })).toBeInTheDocument(),
     );
 
+    await user.click(screen.getByRole('button', { name: 'Back' }));
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: 'How do you use Nexus?' })).toBeInTheDocument(),
+    );
+
+    await advanceEntrance(user);
     await advanceAgentToWorkspace(user);
     await fillProfileName(user);
     await user.click(screen.getByRole('button', { name: 'Continue' }));
@@ -312,17 +438,21 @@ describe('SetupWizardPage', () => {
     const user = userEvent.setup();
     const setAgentProfile = vi.fn(() => Promise.resolve());
     const setSetupCompleted = vi.fn(() => Promise.resolve());
+    const setEntrance = vi.fn(() => Promise.resolve());
     useWizardScanHandlers();
 
     renderInApp(
-      <SetupWizardPage />,
+      <EntranceProvider>
+        <SetupWizardPage />
+      </EntranceProvider>,
       {
         client: makeClient(),
-        desktop: makeDesktop({ setAgentProfile, setSetupCompleted }),
+        desktop: makeDesktop({ setAgentProfile, setSetupCompleted, setEntrance }),
         initialRouterEntries: ['/setup'],
       },
     );
 
+    await advanceEntrance(user);
     await advanceAgentToWorkspace(user);
     await fillProfileName(user);
     await user.click(screen.getByRole('button', { name: 'Continue' }));
@@ -332,6 +462,11 @@ describe('SetupWizardPage', () => {
 
     await waitFor(() => expect(setAgentProfile).toHaveBeenCalledWith('codex', 'codex'));
     await waitFor(() => expect(setSetupCompleted).toHaveBeenCalledWith(true));
+    // AR-17: the entrance persists BEFORE setup completes.
+    expect(setEntrance).toHaveBeenCalledWith('content-creator');
+    const entranceCallOrder = setEntrance.mock.invocationCallOrder[0]!;
+    const completedCallOrder = setSetupCompleted.mock.invocationCallOrder[0]!;
+    expect(entranceCallOrder).toBeLessThan(completedCallOrder);
   });
 
   it('shows a toast and stays on the workspace step when the profile display name update fails', async () => {
@@ -349,10 +484,12 @@ describe('SetupWizardPage', () => {
     );
 
     renderInApp(
-      <>
-        <LocationDisplay />
-        <SetupWizardPage />
-      </>,
+      <EntranceProvider>
+        <>
+          <LocationDisplay />
+          <SetupWizardPage />
+        </>
+      </EntranceProvider>,
       {
         client: makeClient(),
         desktop: makeDesktop({ setAgentProfile, setSetupCompleted }),
@@ -360,6 +497,7 @@ describe('SetupWizardPage', () => {
       },
     );
 
+    await advanceEntrance(user);
     await advanceAgentToWorkspace(user);
     await fillProfileName(user);
     await user.click(screen.getByRole('button', { name: 'Continue' }));
@@ -386,31 +524,35 @@ describe('SetupWizardPage', () => {
         }),
     );
     const setAgentProfile = vi.fn(() => Promise.resolve());
+    const setEntrance = vi.fn(() => Promise.resolve());
     useWizardScanHandlers();
 
     renderInApp(
-      <>
-        <LocationDisplay />
-        <Routes>
-          <Route path="/setup" element={<SetupWizardPage />} />
-          <Route
-            path="/works"
-            element={
-              <SetupGate>
-                <div data-testid="main-shell">Works</div>
-              </SetupGate>
-            }
-          />
-        </Routes>
-      </>,
+      <EntranceProvider>
+        <>
+          <LocationDisplay />
+          <Routes>
+            <Route path="/setup" element={<SetupWizardPage />} />
+            <Route
+              path="/works"
+              element={
+                <SetupGate>
+                  <div data-testid="main-shell">Works</div>
+                </SetupGate>
+              }
+            />
+          </Routes>
+        </>
+      </EntranceProvider>,
       {
         client: makeClient(),
-        desktop: makeDesktop({ setAgentProfile, setSetupCompleted }),
+        desktop: makeDesktop({ setAgentProfile, setSetupCompleted, setEntrance }),
         initialRouterEntries: ['/setup'],
         setupCompleted: false,
       },
     );
 
+    await advanceEntrance(user);
     await advanceAgentToWorkspace(user);
     await fillProfileName(user);
     await user.click(screen.getByRole('button', { name: 'Continue' }));
@@ -423,10 +565,12 @@ describe('SetupWizardPage', () => {
     await waitFor(() => expect(screen.getByTestId('main-shell')).toBeInTheDocument());
     expect(screen.getByTestId('location')).toHaveTextContent('/works');
     expect(setSetupCompleted).toHaveBeenCalledWith(true);
+    expect(setEntrance).toHaveBeenCalledWith('content-creator');
     resolveIpc();
   });
 
   it('scrolls long agent lists inside the portrait wizard card', async () => {
+    const user = userEvent.setup();
     // Use common priority ids so cards render in the common grid (visible
     // without expanding More). Two extra non-common agents exercise the rest
     // partition behind the More toggle.
@@ -451,16 +595,22 @@ describe('SetupWizardPage', () => {
       ),
     );
 
-    renderInApp(<SetupWizardPage />, {
-      client: makeClient(),
-      initialRouterEntries: ['/setup'],
-    });
+    renderInApp(
+      <EntranceProvider>
+        <SetupWizardPage />
+      </EntranceProvider>,
+      {
+        client: makeClient(),
+        initialRouterEntries: ['/setup'],
+      },
+    );
 
     const card = screen.getByTestId('setup-wizard-card');
     const main = screen.getByRole('main');
     expect(card).toHaveClass('overflow-hidden');
     expect(main).toHaveClass('min-h-0', 'min-w-0', 'flex-1', 'overflow-hidden');
 
+    await advanceEntrance(user);
     await waitFor(() => expect(screen.getByTestId('agent-picker-grid')).toBeInTheDocument());
     const grid = screen.getByTestId('agent-picker-grid');
     expect(grid.children.length).toBeGreaterThan(6);

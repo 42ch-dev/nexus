@@ -135,6 +135,7 @@ export function SetupStepAgent({ state, onChange, onNext, onBack }: SetupStepAge
   const workspaceRoot = state.workspaceRoot;
   const workspacePicked = state.workspacePicked;
   const profileDisplayName = state.profileDisplayName;
+  const entrance = state.entrance;
 
   const stateRef = useRef(state);
   stateRef.current = state;
@@ -159,6 +160,7 @@ export function SetupStepAgent({ state, onChange, onNext, onBack }: SetupStepAge
     const agent = pickerSelection.byPickerId.get(id);
     if (!agent?.installed) return;
     onChange({
+      entrance,
       workspaceRoot,
       workspacePicked,
       profileDisplayName,
@@ -170,6 +172,7 @@ export function SetupStepAgent({ state, onChange, onNext, onBack }: SetupStepAge
   function useCustom(command: string) {
     setVerifyStatus('idle');
     onChange({
+      entrance,
       workspaceRoot,
       workspacePicked,
       profileDisplayName,

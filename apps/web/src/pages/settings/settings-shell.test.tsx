@@ -129,6 +129,13 @@ function modulesListHandler() {
 }
 
 function renderModalApp(initialRouterEntries: string[]) {
+  // The modal suite pins the full-Control-Room settings surface (gear → agent,
+  // full rail, all sections). Post-entrance-split that surface is the DEVELOP
+  // tree (plan QC W-2) — render on the developer entrance so the pinned
+  // behavior stays valid; the Create variant (filtered rail + first visible
+  // section) is covered by settings-section-frame.test.tsx and
+  // chronos-titlebar.test.tsx.
+  window.localStorage.setItem('nexus-entrance', 'developer');
   return renderInApp(
     <>
       <ModalAppShell />
@@ -374,6 +381,8 @@ describe('Settings modal primary', () => {
   it('blocks dirty route leave to a non-settings path until discard confirms', async () => {
     const user = userEvent.setup();
     useHandlers(scanHandler(), creatorsHandler(), healthHandler());
+    // Develop-tree pin (gear → agent) — see renderModalApp's entrance note.
+    window.localStorage.setItem('nexus-entrance', 'developer');
 
     let navigateAway: (() => void) | undefined;
 

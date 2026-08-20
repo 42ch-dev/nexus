@@ -10,6 +10,8 @@ import { useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { useSettingsModal } from '@/components/layout/settings-modal-context';
+import { ENTRANCE_BY_ID } from '@/components/layout/entrance-registry';
+import { useEntrance } from '@/lib/entrance-context';
 import {
   DEFAULT_SETTINGS_SECTION,
   SETTINGS_SECTION_BY_ID,
@@ -45,6 +47,7 @@ function SettingsSectionBody({
 
 export function SettingsModalHost() {
   const { t } = useTranslation('settings');
+  const { entrance } = useEntrance();
   const {
     open,
     activeSection,
@@ -78,6 +81,7 @@ export function SettingsModalHost() {
             <SettingsSectionFrame
               activeSection={activeSection}
               onSelectSection={selectSection}
+              hiddenSettingsSections={ENTRANCE_BY_ID[entrance].hiddenSettingsSections}
             >
               <SettingsSectionBody
                 section={activeSection}

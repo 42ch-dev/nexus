@@ -13,6 +13,7 @@ import { MemoryRouter } from 'react-router';
 import { ClientProvider } from '@/lib/client-context';
 import { ActiveCreatorProvider } from '@/lib/active-creator-context';
 import { SetupCompletedProvider } from '@/lib/setup-completed-context';
+import { EntranceProvider } from '@/lib/entrance-context';
 import { CreatorEntitySelectionProvider } from '@/components/layout/creator-entity-selection-context';
 import { LocaleProvider } from '@/components/locale-provider';
 import type { NexusClient } from '@/lib/nexus';
@@ -75,14 +76,16 @@ export function renderInApp(
           <ClientProvider client={activeClient} desktop={desktop ?? null} connectionConfig={null}>
             <ActiveCreatorProvider initialCreatorId={activeCreatorId}>
               <SetupCompletedProvider initialCompleted={setupCompleted}>
-                <CreatorEntitySelectionProvider>
-                <LocaleProvider>
-                  <ToastProvider>
-                    {children}
-                    <Toaster />
-                  </ToastProvider>
-                </LocaleProvider>
-                </CreatorEntitySelectionProvider>
+                <EntranceProvider>
+                  <CreatorEntitySelectionProvider>
+                    <LocaleProvider>
+                      <ToastProvider>
+                        {children}
+                        <Toaster />
+                      </ToastProvider>
+                    </LocaleProvider>
+                  </CreatorEntitySelectionProvider>
+                </EntranceProvider>
               </SetupCompletedProvider>
             </ActiveCreatorProvider>
           </ClientProvider>

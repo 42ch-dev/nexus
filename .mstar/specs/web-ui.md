@@ -1006,6 +1006,8 @@ When a highlight's stored offsets no longer fit the current body text (after a b
 
 Replace the V1.64 flat 10-item sidebar with a two-tab information architecture (Creator | Orchestrator) with nested nav, footer profile switcher, and simplified daemon status bar. The reshape addresses author-reported defects 3 (menu IA) and 4 (footer profiles) as one coherent IA pass.
 
+**Entrance axis (V1.170 P1, AR-15):** the two-tab structure is a **separate axis** from the [Entrance](#entrance) (User-layer `developer` | `content-creator`). The sidebar renders entrance-filtered `navGroups` from `ENTRANCE_DESCRIPTORS[entrance]`; the Creator|Orchestrator tabs and `tabFromPathname` are untouched. **Create** (content-creator) is a *reduced* tree that hides the EL §3 operator chrome (agent catalog, preset manager, sessions, schedule, rules authoring, inspector, Connect, capability browser); **Develop** (developer) is the full Control Room plus the Develop hub v1 land route. `_system.*` presets stay hidden in both trees. Normative: `v1.170-entrance-locks.md` §2–§4.
+
 ### 29.2 Sidebar — two-tab structure
 
 The sidebar renders at `lg`+ (≥961px) as a fixed left panel. Below `lg`, the two-tab structure collapses to a top dropdown or pill scroller.
@@ -1024,6 +1026,8 @@ The sidebar renders at `lg`+ (≥961px) as a fixed left panel. Below `lg`, the t
 - **Daemon status** — leaves sidebar; lives in the status bar (running = restart-icon only) and the main-banner (degraded/error).
 
 The old 10-item flat `NAV_ITEMS` array is retired. Tab switch swaps the visible nav items; the footer Profiles row is always visible regardless of active tab.
+
+**Entrance-filtered nav (V1.170 P1, AR-15):** the sidebar's nav groups come from `ENTRANCE_DESCRIPTORS[entrance].navGroups` (typed `ShellNavGroup[]` in `entrance-registry.ts`), not a single static tree. The footer also gains a **Switch entrance** control (not a third top-level tab) that remounts the matching layout tree without resetting Creator, workspace, or `setup_completed`. Create hides the EL §3 hide-table surfaces from nav, settings, and in-tree links (soft-remove — pages are not deleted; direct navigation bounces to the Create land route `/works` with the `entrance.bounceToast` one-shot toast, except `allowDeepLink` surfaces such as the strategy canvas). Develop lands on `/developer` (Develop hub v1) and reaches every surface.
 
 ### 29.3 Nested nav behaviour
 
@@ -1095,7 +1099,7 @@ The wizard and per-launch daemon-ready gate are **desktop-first**:
 
 ### 29.10 V1.95 Amendments (historical — superseded by §29.13 for current wizard)
 
-> **Current wizard IA and chrome:** §29.13 (Agent → Workspace → Done; portrait card; top horizontal Steps; app-level `DaemonLaunchGate`). This section records V1.95 shipped behavior for traceability only.
+> **Current wizard IA and chrome:** §29.13 (Entrance → Agent → Workspace → Done; portrait card; top horizontal Steps; app-level `DaemonLaunchGate`). This section records V1.95 shipped behavior for traceability only.
 
 #### 29.10.1 Setup wizard layout redesign (V1.95 shipped behavior)
 
@@ -1191,9 +1195,9 @@ All V1.95 amendments (ClientProvider, migration reset, workspace default rules, 
 - The daemon step observes existing desktop daemon-status state and `detail` only. It must not require new daemon API fields, generated schemas, or contract package changes.
 - Clean-state smoke and existing-install smoke are hard product verification gates, not new UI features. Their evidence may be captured manually or with automation, but unit tests alone do not prove the author-visible first-launch path.
 
-### 29.13 V1.105 Amendments — First-launch wizard reshape (Agent-first + app-level Daemon gate)
+### 29.13 V1.105 Amendments — First-launch wizard reshape (Entrance-first + app-level Daemon gate)
 
-**Product behavior (author-visible).** V1.105 separates daemon readiness from wizard steps and reduces the wizard to three author-facing choices. **Iteration SSOT:** .
+**Product behavior (author-visible).** V1.105 separates daemon readiness from wizard steps and reduces the wizard to author-facing choices; V1.170 P1 (AR-17) adds the Entrance step first (Entrance → Agent → Workspace → Done). **Iteration SSOT:** .
 
 #### 29.13.1 App-level fullscreen Daemon gate (not a wizard step)
 
@@ -1204,15 +1208,18 @@ All V1.95 amendments (ClientProvider, migration reset, workspace default rules, 
 - The **Daemon wizard step is retired**. Diagnostic UX (timeout, retry, stderr detail, reset-local-database recovery) moves to the splash/gate surface — not a numbered setup step.
 - Happy path does **not** use `startDaemon` IPC from the wizard; recovery only on splash error paths.
 
-#### 29.13.2 Three-step wizard IA (Agent → Workspace → Done)
+#### 29.13.2 Four-step wizard IA (Entrance → Agent → Workspace → Done)
 
 | Step | Step ID | Author-facing label | Module |
 |------|---------|---------------------|--------|
-| 1 | `agent` | Agent | `setup-step-agent.tsx` |
-| 2 | `workspace` | Workspace | `setup-step-workspace.tsx` (new; extract from Welcome) |
-| 3 | `done` | Done | `setup-step-done.tsx` |
+| 1 | `entrance` | Entrance | `setup-step-entrance.tsx` (new, V1.170 P1 — AR-17) |
+| 2 | `agent` | Agent | `setup-step-agent.tsx` |
+| 3 | `workspace` | Workspace | `setup-step-workspace.tsx` (new; extract from Welcome) |
+| 4 | `done` | Done | `setup-step-done.tsx` |
 
-Orchestrator: `setup-wizard-page.tsx` — `WizardStep = 'agent' | 'workspace' | 'done'`; initial step `agent`.
+Orchestrator: `setup-wizard-page.tsx` — `WizardStep = 'entrance' | 'agent' | 'workspace' | 'done'`; initial step `entrance`.
+
+**V1.170 P1 (AR-17):** the Entrance step is first — the choice is cheap and daemon-independent, so the remaining steps can frame themselves for the chosen layout, and the first gated render after `finish()` already sees the chosen tree. `WizardState.entrance` (init `content-creator`) is persisted via `setEntrance` **before** `markCompleted()` so post-wizard navigation lands in the right layout. Desktop-only (browser `setup_completed` is always true; the browser path uses the first-run identity page instead).
 
 **Removed:** Welcome step (`setup-step-welcome.tsx`); Daemon step (`setup-step-daemon.tsx`).
 
@@ -1223,14 +1230,14 @@ Bootstrap (`ensureSetupBootstrap`) on Workspace **Continue** only.
 #### 29.13.3 Portrait wizard shell
 
 - Fixed portrait card: **`480px`** max width (`--color-setup-wizard-wizard-max-width`), **`min(720px, 85vh)`** height (`wizard-max-height: 720px` + `max-h-[85vh]`); content scrolls inside the card (`flex-1 overflow-y-auto` on step body).
-- Top horizontal `TopStepIndicator` (Agent / Workspace / Done); **no** left `w-setup-wizard-surface-step-panel-width` (208px) rail.
+- Top horizontal `TopStepIndicator` (Entrance / Agent / Workspace / Done — V1.170 P1); **no** left `w-setup-wizard-surface-step-panel-width` (208px) rail.
 - Studio visual SSOT: `apps/design-studio/src/fixtures/setup-wizard-chrome-fixtures.tsx` before App wiring.
 - V1.96 centered-card patterns (toast errors, bottom CTA, Browse adjacency) preserved where applicable — only layout chrome changes in P2.
 
 #### 29.13.4 Settings Re-run Setup (V1.103 R1 compatibility)
 
 - Settings → Setup → **Re-run Setup** semantics unchanged: confirm clears `setup_completed` marker only; workspace path and agent profile **not** deleted.
-- After confirm, author passes the V1.105 fullscreen gate, then enters the **new** three-step wizard (Agent-first — not legacy Welcome-first).
+- After confirm, author passes the V1.105 fullscreen gate, then enters the **new** four-step wizard (Entrance-first — not legacy Welcome-first).
 - **Implement authority for re-run action:** `settings-setup-section.md`.
 
 #### 29.13.5 Browser-build contract (unchanged)

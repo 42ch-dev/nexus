@@ -2,11 +2,14 @@ import { useTranslation } from 'react-i18next';
 
 import { cn } from '@/lib/utils';
 
-export type WizardStep = 'agent' | 'workspace' | 'done';
+export type WizardStep = 'entrance' | 'agent' | 'workspace' | 'done';
 
 type StepDef = { id: WizardStep; key: string };
 
 const STEP_DEFS: StepDef[] = [
+  // V1.170 P1 (AR-17): Entrance is step 1 — cheap and daemon-independent, so
+  // the remaining steps can frame themselves for the chosen layout.
+  { id: 'entrance', key: 'setup:progress.entrance' },
   { id: 'agent', key: 'setup:progress.agent' },
   { id: 'workspace', key: 'setup:progress.workspace' },
   { id: 'done', key: 'setup:progress.done' },

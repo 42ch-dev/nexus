@@ -24,6 +24,7 @@ function makeClient() {
 
 function makeState(overrides: Partial<WizardState> = {}): WizardState {
   return {
+    entrance: 'content-creator',
     workspaceRoot: '',
     selectedAgent: null,
     customLaunchCommand: '',
@@ -57,6 +58,8 @@ function makeDesktop(
     resetLocalDatabase: () => Promise.resolve(),
     getSetupCompleted: () => Promise.resolve(true),
     setSetupCompleted: () => Promise.resolve(),
+    getEntrance: () => Promise.resolve('content-creator'),
+    setEntrance: () => Promise.resolve(),
     setAgentProfile: () => Promise.resolve(),
     getAgentProfile: () => Promise.resolve(null),
     getWorkspaceRoot: () => Promise.resolve('/tmp/nexus'),

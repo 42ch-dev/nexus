@@ -6,7 +6,9 @@ import { CommandPalette, openPalette } from '@/components/command-palette';
 import { CreatorEntitySelectionProvider } from '@/components/layout/creator-entity-selection-context';
 import { ChronosTitlebar } from '@/components/layout/chronos-titlebar';
 import { DaemonStatusBar } from '@/components/layout/daemon-status-bar';
+import { resolveEntranceBounce } from '@/components/layout/entrance-guard';
 import { Sidebar } from '@/components/layout/sidebar';
+import { useEntrance } from '@/lib/entrance-context';
 import { useHotkey } from '@/lib/use-hotkey';
 import { useTimelineShortcut } from '@/lib/keyboard-shortcuts';
 import { isWorkShellRoute } from '@/lib/work-shell-routes';
@@ -59,8 +61,16 @@ export function RootLayout() {
   const { t } = useTranslation('shell');
   const { pathname } = useLocation();
   const navigate = useNavigate();
+  const { entrance } = useEntrance();
   const title = useRouteTitle();
   const workShell = isWorkShellRoute(pathname);
+
+  // W-3 (plan QC): the mobile top nav must not leak develop-only links on the
+  // Create tree — the guard classification is the single source (`null` = no
+  // bounce = visible on this entrance). Develop keeps the full list.
+  const mobileNav = MOBILE_NAV_KEYS.filter(
+    ({ to }) => resolveEntranceBounce(entrance, to, '') === null,
+  );
 
   // ⌘K/Ctrl+K opens the command palette. The palette owns its open/close
   // (module-level store in `command-palette.tsx`); the hotkey just calls
@@ -96,7 +106,7 @@ export function RootLayout() {
           aria-label={t('aria.primary')}
           className="flex gap-1 overflow-x-auto border-b border-gray-alpha-400 bg-background-100 px-2 py-2 lg:hidden"
         >
-          {MOBILE_NAV_KEYS.map(({ to, key }) => (
+          {mobileNav.map(({ to, key }) => (
             <NavLink
               key={to}
               to={to}

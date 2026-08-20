@@ -29,6 +29,8 @@ function makeDesktopCapabilities(): DesktopCapabilities {
     resetLocalDatabase: vi.fn(() => Promise.resolve()),
     getSetupCompleted: vi.fn(() => Promise.resolve(true)),
     setSetupCompleted: vi.fn(() => Promise.resolve()),
+    getEntrance: vi.fn(() => Promise.resolve('content-creator' as const)),
+    setEntrance: vi.fn(() => Promise.resolve()),
     setAgentProfile: vi.fn(() => Promise.resolve()),
     getAgentProfile: vi.fn(() => Promise.resolve(null)),
     ensureSetupBootstrap: vi.fn(() =>
