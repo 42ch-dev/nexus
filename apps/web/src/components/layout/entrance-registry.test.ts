@@ -13,6 +13,7 @@ import {
   ENTRANCE_DESCRIPTORS,
   ENTRANCE_IDS,
   ENTRANCE_ROUTE_RULES,
+  firstSettingsSectionFor,
   isEntranceId,
   matchEntranceRouteRule,
 } from '@/components/layout/entrance-registry';
@@ -52,6 +53,13 @@ describe('entrance registry (AR-15)', () => {
       'advanced',
     ]);
     expect(ENTRANCE_BY_ID['developer'].hiddenSettingsSections).toEqual([]);
+  });
+
+  it('resolves the first entrance-visible settings section (W-2)', () => {
+    // Create: `agent` (the historic default) is develop-only → workspace.
+    expect(firstSettingsSectionFor('content-creator')).toBe('workspace');
+    // Develop: full Control Room — the historic `agent` default is kept.
+    expect(firstSettingsSectionFor('developer')).toBe('agent');
   });
 
   it('pins the develop-only bounce table verbatim (AR-15)', () => {

@@ -138,6 +138,14 @@ export function EntranceProvider({ children, initialEntrance }: EntranceProvider
     if (initialEntrance !== undefined || !hasIpcSeam || urlOverride !== null) {
       return;
     }
+    // NOTE (plan QC F-2, hardening only — no write-generation guard this
+    // iteration): a cold desktop load that lands on a fast `setEntrance`
+    // (e.g. `/entrance` with an instant Continue) could let this in-flight
+    // mount read apply a STALE stored value over the just-written in-memory
+    // state. Storage already holds the new value, so the next reload
+    // self-heals; the same theoretical window exists in the inherited
+    // `SetupCompletedProvider` pattern (precedent). Guarding would require a
+    // write-generation counter that outlives the provider — deferred.
     let cancelled = false;
     persister
       .read()

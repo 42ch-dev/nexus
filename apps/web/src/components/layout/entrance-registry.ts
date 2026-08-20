@@ -31,7 +31,11 @@ import {
 } from 'lucide-react';
 
 import type { ShellNavGroup } from '@/components/layout/presentational/shell-sidebar-chrome';
-import type { SettingsSectionId } from '@/components/layout/settings-section-registry';
+import {
+  DEFAULT_SETTINGS_SECTION,
+  SETTINGS_SECTION_IDS,
+  type SettingsSectionId,
+} from '@/components/layout/settings-section-registry';
 
 export type EntranceId = 'content-creator' | 'developer'; // chrome labels: Create | Develop
 
@@ -99,6 +103,39 @@ export function isEntranceId(value: string | null | undefined): value is Entranc
   return value === 'content-creator' || value === 'developer';
 }
 
+/**
+ * Both-visibility nav groups (EL §3 keep-visible table) — ONE source shared by
+ * both entrance descriptors (plan QC S-1): adding a surface visible on both
+ * trees edits this constant only, not the two descriptor lists.
+ */
+const WORKS_GROUP: ShellNavGroup = {
+  id: 'works',
+  label: 'nav.works',
+  items: [
+    { to: '/works', label: 'nav.works', icon: Layers },
+    { to: '/timeline', label: 'nav.timeline', icon: History },
+    { to: '/findings', label: 'nav.findings', icon: FileText },
+  ],
+};
+
+const WORLDS_GROUP: ShellNavGroup = {
+  id: 'worlds',
+  label: 'nav.worlds',
+  items: [{ to: '/worlds', label: 'nav.worlds', icon: Globe }],
+};
+
+const MEMORY_GROUP: ShellNavGroup = {
+  id: 'memory',
+  label: 'nav.memory',
+  items: [{ to: '/memory', label: 'nav.memory', icon: BrainCircuit }],
+};
+
+const COMMON_NAV_GROUPS: readonly ShellNavGroup[] = [
+  WORKS_GROUP,
+  WORLDS_GROUP,
+  MEMORY_GROUP,
+];
+
 export const ENTRANCE_DESCRIPTORS: readonly EntranceDescriptor[] = [
   {
     id: 'content-creator',
@@ -106,27 +143,7 @@ export const ENTRANCE_DESCRIPTORS: readonly EntranceDescriptor[] = [
     personaLabel: 'Content creator',
     landRoute: '/works',
     // EL §3 — reduced tree: primary JTBD (works/worlds), Memory, findings.
-    navGroups: [
-      {
-        id: 'works',
-        label: 'nav.works',
-        items: [
-          { to: '/works', label: 'nav.works', icon: Layers },
-          { to: '/timeline', label: 'nav.timeline', icon: History },
-          { to: '/findings', label: 'nav.findings', icon: FileText },
-        ],
-      },
-      {
-        id: 'worlds',
-        label: 'nav.worlds',
-        items: [{ to: '/worlds', label: 'nav.worlds', icon: Globe }],
-      },
-      {
-        id: 'memory',
-        label: 'nav.memory',
-        items: [{ to: '/memory', label: 'nav.memory', icon: BrainCircuit }],
-      },
-    ],
+    navGroups: COMMON_NAV_GROUPS,
     hiddenSettingsSections: ['agent', 'modules', 'advanced'],
     bounceToastKey: 'entrance.bounceToast',
   },
@@ -142,20 +159,8 @@ export const ENTRANCE_DESCRIPTORS: readonly EntranceDescriptor[] = [
         label: 'nav.develop',
         items: [{ to: '/developer', label: 'nav.develop', icon: Compass }],
       },
-      {
-        id: 'works',
-        label: 'nav.works',
-        items: [
-          { to: '/works', label: 'nav.works', icon: Layers },
-          { to: '/timeline', label: 'nav.timeline', icon: History },
-          { to: '/findings', label: 'nav.findings', icon: FileText },
-        ],
-      },
-      {
-        id: 'worlds',
-        label: 'nav.worlds',
-        items: [{ to: '/worlds', label: 'nav.worlds', icon: Globe }],
-      },
+      WORKS_GROUP,
+      WORLDS_GROUP,
       {
         id: 'strategies',
         label: 'nav.strategies',
@@ -177,11 +182,7 @@ export const ENTRANCE_DESCRIPTORS: readonly EntranceDescriptor[] = [
           { to: '/settings/modules', label: 'nav.modules', icon: Cpu },
         ],
       },
-      {
-        id: 'memory',
-        label: 'nav.memory',
-        items: [{ to: '/memory', label: 'nav.memory', icon: BrainCircuit }],
-      },
+      MEMORY_GROUP,
     ],
     hiddenSettingsSections: [],
     bounceToastKey: 'entrance.bounceToast',
@@ -193,6 +194,20 @@ export const ENTRANCE_BY_ID: Readonly<
 > = Object.fromEntries(
   ENTRANCE_DESCRIPTORS.map((d) => [d.id, d]),
 ) as Record<EntranceId, EntranceDescriptor>;
+
+/**
+ * First Settings section visible on the given entrance (plan QC W-2): the
+ * titlebar gear (and any default-section opener) must land on a section the
+ * entrance does not hide — Create → `workspace`, Develop → `agent`
+ * (unchanged full-Control-Room default). Section order follows
+ * `SETTINGS_SECTION_DESCRIPTORS`.
+ */
+export function firstSettingsSectionFor(entrance: EntranceId): SettingsSectionId {
+  const hidden = ENTRANCE_BY_ID[entrance].hiddenSettingsSections;
+  return (
+    SETTINGS_SECTION_IDS.find((id) => !hidden.includes(id)) ?? DEFAULT_SETTINGS_SECTION
+  );
+}
 
 /**
  * Longest-prefix rule match for a pathname (AR-19). `:param` segments match

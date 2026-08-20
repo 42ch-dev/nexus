@@ -95,8 +95,14 @@ function flattenKeys(obj: JsonRecord, prefix = ''): string[] {
   return keys;
 }
 
-/** Entrance keys that must exist in BOTH locales (AR-21 + EL §2/§4/§5). */
-const ENTRANCE_KEYS: readonly string[] = [
+/**
+ * Entrance keys owned by the `shell` namespace (AR-21 + EL §2/§4/§5): switch
+ * control, bounce toast, layout labels, identity page, Develop hub v1 cards.
+ * Membership is namespace-exact — a shell-owned key must exist in `shell`
+ * (and its zh-CN twin), never in `setup` (plan QC F-5: no cross-namespace
+ * escape hatch for the entrance pin).
+ */
+const SHELL_ENTRANCE_KEYS: readonly string[] = [
   // shell — switch control + bounce toast + layout labels
   'entrance.switchLabel',
   'entrance.bounceToast',
@@ -130,7 +136,10 @@ const ENTRANCE_KEYS: readonly string[] = [
   'hub.develop.runStudio.description',
   'hub.develop.connect.title',
   'hub.develop.connect.description',
-  // setup — wizard step + progress labels (AR-17)
+];
+
+/** Setup keys owned by the `setup` namespace — wizard step + progress labels (AR-17). */
+const SETUP_ENTRANCE_KEYS: readonly string[] = [
   'step.entrance.title',
   'step.entrance.description',
   'step.entrance.optionsLabel',
@@ -159,16 +168,19 @@ describe('locale key parity (en ↔ zh-CN)', () => {
     expect(NAMESPACE_PAIRS).toHaveLength(20);
   });
 
-  it('ships every entrance key in BOTH en and zh-CN (AR-21 + EL §2/§4/§5)', () => {
-    const enKeys = new Set(flattenKeys(enShell));
-    const zhKeys = new Set(flattenKeys(zhShell));
+  it('ships every entrance key in its OWNING namespace, en and zh-CN (AR-21 + EL §2/§4/§5)', () => {
+    const enShellKeys = new Set(flattenKeys(enShell));
+    const zhShellKeys = new Set(flattenKeys(zhShell));
     const enSetupKeys = new Set(flattenKeys(enSetup));
     const zhSetupKeys = new Set(flattenKeys(zhSetup));
 
-    for (const key of ENTRANCE_KEYS) {
-      const inShell = enKeys.has(key) && zhKeys.has(key);
-      const inSetup = enSetupKeys.has(key) && zhSetupKeys.has(key);
-      expect(inShell || inSetup, `entrance key "${key}" missing in en or zh-CN`).toBe(true);
+    for (const key of SHELL_ENTRANCE_KEYS) {
+      expect(enShellKeys.has(key), `shell key "${key}" missing in en`).toBe(true);
+      expect(zhShellKeys.has(key), `shell key "${key}" missing in zh-CN`).toBe(true);
+    }
+    for (const key of SETUP_ENTRANCE_KEYS) {
+      expect(enSetupKeys.has(key), `setup key "${key}" missing in en`).toBe(true);
+      expect(zhSetupKeys.has(key), `setup key "${key}" missing in zh-CN`).toBe(true);
     }
   });
 });

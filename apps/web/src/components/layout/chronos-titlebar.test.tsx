@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 
 import { ChronosTitlebar } from '@/components/layout/chronos-titlebar';
+import { EntranceProvider } from '@/lib/entrance-context';
 import { SettingsModalProvider } from '@/components/layout/settings-modal-context';
 import { SettingsModalHost } from '@/components/layout/settings-modal-host';
 import { ThemeProvider } from '@/components/theme-provider';
@@ -35,14 +36,20 @@ function mockMatchMedia(prefersDark: boolean) {
   vi.spyOn(window, 'matchMedia').mockReturnValue(media as unknown as MediaQueryList);
 }
 
-function renderTitlebar(desktop: DesktopCapabilities | null = null) {
-  return renderInApp(
+function renderTitlebar(
+  desktop: DesktopCapabilities | null = null,
+  entrance?: 'content-creator' | 'developer',
+) {
+  const inner = (
     <ThemeProvider>
       <SettingsModalProvider>
         <ChronosTitlebar title="Works" />
         <SettingsModalHost />
       </SettingsModalProvider>
-    </ThemeProvider>,
+    </ThemeProvider>
+  );
+  return renderInApp(
+    entrance ? <EntranceProvider initialEntrance={entrance}>{inner}</EntranceProvider> : inner,
     { client: new BrowserClient(), desktop },
   );
 }
@@ -120,6 +127,43 @@ describe('ChronosTitlebar', () => {
       expect(screen.queryByTestId('settings-modal-body')).not.toBeInTheDocument();
     });
     expect(gear).toHaveFocus();
+  });
+
+  it('opens the first entrance-visible settings section on Create — workspace, not the develop-only agent (W-2)', async () => {
+    const user = userEvent.setup();
+    renderTitlebar();
+
+    await user.click(screen.getByTestId('chronos-titlebar-settings-gear'));
+
+    await waitFor(() =>
+      expect(screen.getByTestId('settings-workspace-section')).toBeInTheDocument(),
+    );
+    // The rail hides the develop-only sections on Create (agent/modules/advanced).
+    expect(screen.queryByTestId('settings-section-nav-agent')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('settings-section-nav-modules')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('settings-section-nav-advanced')).not.toBeInTheDocument();
+    expect(screen.getByTestId('settings-section-nav-workspace')).toHaveAttribute(
+      'aria-current',
+      'page',
+    );
+  });
+
+  it('keeps the full Control Room default (agent) on Develop (W-2)', async () => {
+    const user = userEvent.setup();
+    renderTitlebar(null, 'developer');
+
+    await user.click(screen.getByTestId('chronos-titlebar-settings-gear'));
+
+    await waitFor(() =>
+      expect(screen.getByTestId('settings-agent-section')).toBeInTheDocument(),
+    );
+    expect(screen.getByTestId('settings-section-nav-agent')).toHaveAttribute(
+      'aria-current',
+      'page',
+    );
+    // Full rail — no hidden sections on Develop.
+    expect(screen.getByTestId('settings-section-nav-modules')).toBeInTheDocument();
+    expect(screen.getByTestId('settings-section-nav-advanced')).toBeInTheDocument();
   });
 
   it('marks logo and title as draggable chrome with no-drag controls in desktop mode', () => {

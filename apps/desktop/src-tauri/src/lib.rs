@@ -424,15 +424,40 @@ fn set_setup_completed(value: bool) -> Result<(), String> {
     write_setup_completed(value).map_err(|e| format!("failed to write setup_completed: {e}"))
 }
 
-/// Default user-layer entrance (AR-15/AR-16) — mirrors `DEFAULT_ENTRANCE` in
-/// `apps/web/src/components/layout/entrance-registry.ts`.
+/// Default user-layer entrance (AR-15/AR-16).
+///
+/// The two valid entrance values are the string forms of the `EntranceId`
+/// union in `apps/web/src/components/layout/entrance-registry.ts`
+/// (`'content-creator' | 'developer'`) — keep them in sync with that enum
+/// (plan QC S-3: note-only cross-reference, no new abstraction here).
 const DEFAULT_ENTRANCE: &str = "content-creator";
+
+/// True when `value` is one of the two `EntranceId` enum values (AR-16).
+/// Mirrors `isEntranceId` in `apps/web/src/components/layout/entrance-registry.ts`.
+fn is_entrance_value(value: &str) -> bool {
+    value == "developer" || value == "content-creator"
+}
 
 /// Read `~/.nexus42/config.toml` and return the `entrance` marker.
 /// Missing field is treated as `content-creator` (default entrance, AR-16).
+/// A hand-edited non-enum value is REJECTED (mirrors `set_entrance` write-side
+/// validation — plan QC S-1): the web side fail-opens to `content-creator`.
 #[tauri::command]
-fn get_entrance() -> String {
-    read_entrance().unwrap_or_else(|| DEFAULT_ENTRANCE.to_string())
+fn get_entrance() -> Result<String, String> {
+    let path = nexus_config_path()
+        .ok_or_else(|| "cannot determine home directory".to_string())?;
+    get_entrance_at(&path)
+}
+
+/// Path-local `get_entrance` (unit-testable without a Tauri app handle).
+/// Missing/unreadable config (first run) and missing key → default without
+/// error; a stored non-enum value → error (write-side validation mirror).
+fn get_entrance_at(path: &Path) -> Result<String, String> {
+    match read_entrance_at(path) {
+        Ok(Some(value)) if is_entrance_value(&value) => Ok(value),
+        Ok(Some(value)) => Err(format!("invalid stored entrance value: {value}")),
+        Ok(None) | Err(_) => Ok(DEFAULT_ENTRANCE.to_string()),
+    }
 }
 
 /// Write `entrance` to `~/.nexus42/config.toml`. Only the two valid
@@ -440,7 +465,7 @@ fn get_entrance() -> String {
 /// malformed IPC call cannot corrupt the persisted config.
 #[tauri::command]
 fn set_entrance(value: String) -> Result<(), String> {
-    if value != "developer" && value != "content-creator" {
+    if !is_entrance_value(&value) {
         return Err(format!("invalid entrance value: {value}"));
     }
     write_entrance(&value).map_err(|e| format!("failed to write entrance: {e}"))
@@ -1196,11 +1221,11 @@ mod tests {
     //! daemon actually stores (`Works/<ref>/Stories/…`) and traversal attempts.
 
     use super::{
-        default_workspace_root, guard_path, read_agent_profile_at, read_entrance_at,
-        read_setup_completed_at, reset_local_database_at, resolve_workspace_root_at,
-        setup_auto_starts_sidecar, switch_active_creator_at, validate_url_scheme,
-        write_agent_profile_at, write_entrance_at, write_setup_completed_at,
-        write_workspace_path_at, write_workspace_path_by_creator_at,
+        default_workspace_root, get_entrance_at, guard_path, read_agent_profile_at,
+        read_entrance_at, read_setup_completed_at, reset_local_database_at,
+        resolve_workspace_root_at, setup_auto_starts_sidecar, switch_active_creator_at,
+        validate_url_scheme, write_agent_profile_at, write_entrance_at,
+        write_setup_completed_at, write_workspace_path_at, write_workspace_path_by_creator_at,
         write_workspace_path_for_active_creator_at, AgentProfile, PathGuardError, WorkspaceRoot,
     };
     use super::{ensure_setup_bootstrap_at, generate_local_creator_id, read_bootstrap_state};
@@ -1478,6 +1503,59 @@ mod tests {
             read_entrance_at(&config_path).unwrap(),
             None,
             "missing entrance key must read None (get_entrance defaults to content-creator)"
+        );
+    }
+
+    #[test]
+    fn get_entrance_valid_stored_value_roundtrips() {
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let config_path = tmp.path().join("config.toml");
+        write_entrance_at(&config_path, "developer").expect("write developer");
+
+        assert_eq!(
+            get_entrance_at(&config_path).unwrap(),
+            "developer",
+            "a valid stored entrance must be returned as-is"
+        );
+    }
+
+    #[test]
+    fn get_entrance_rejects_hand_edited_non_enum_value() {
+        // Plan QC S-1: `get_entrance` mirrors `set_entrance` write-side
+        // validation — a hand-edited config.toml with a non-`EntranceId`
+        // value is rejected at the Rust boundary (web fail-opens to the
+        // default), instead of silently returning a third state.
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let config_path = tmp.path().join("config.toml");
+        std::fs::write(&config_path, "entrance = \"admin\"\n").expect("write config");
+
+        let err = get_entrance_at(&config_path).expect_err("invalid value must error");
+        assert!(err.contains("invalid stored entrance value"), "got: {err}");
+    }
+
+    #[test]
+    fn get_entrance_missing_key_defaults() {
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let config_path = tmp.path().join("config.toml");
+        std::fs::write(&config_path, "workspace_path = \"/existing\"\n").expect("write config");
+
+        assert_eq!(
+            get_entrance_at(&config_path).unwrap(),
+            "content-creator",
+            "missing entrance key must resolve the default without error (AR-16 first run)"
+        );
+    }
+
+    #[test]
+    fn get_entrance_missing_config_defaults() {
+        // First run: no config.toml yet — must NOT error; resolves default.
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let config_path = tmp.path().join("does-not-exist.toml");
+
+        assert_eq!(
+            get_entrance_at(&config_path).unwrap(),
+            "content-creator",
+            "unreadable/missing config must fail open to the default"
         );
     }
 

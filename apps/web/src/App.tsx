@@ -22,7 +22,6 @@ import { DaemonLaunchGate } from '@/components/setup/daemon-launch-gate';
 import { SetupGate } from '@/components/setup/setup-gate';
 import { ChapterPage } from '@/pages/chapter-page';
 import { ChaptersPage } from '@/pages/chapters-page';
-import { CapabilitiesPage } from '@/pages/capabilities-page';
 import { FindingsPage } from '@/pages/findings-page';
 import { GlobalTimelinePage } from '@/pages/global-timeline-page';
 import { MemoryPage } from '@/pages/memory-page';
@@ -93,6 +92,13 @@ const WorldFindingsPage = lazy(() =>
 // of the bootstrap path (canvases keep React Flow out; the hub is static cards).
 const DeveloperHubPage = lazy(() =>
   import('@/pages/developer-hub-page').then((m) => ({ default: m.DeveloperHubPage })),
+);
+
+// Route-split: the Capability browser is a Develop-tree-only surface (V1.170
+// P1 — EL-6; Create bounces). Lazy-loaded like the hub so the Create-default
+// bootstrap stays lean (plan QC S-2/F-3 — chunk symmetry with /developer).
+const CapabilitiesPage = lazy(() =>
+  import('@/pages/capabilities-page').then((m) => ({ default: m.CapabilitiesPage })),
 );
 
 /**
@@ -236,7 +242,14 @@ function AppRoutes() {
             GET /v1/daemon/orchestration/capabilities). The V1.120 P2 soft-remove
             redirect is replaced by the entrance guard: Create bounces to
             `/works`, Develop renders the browser (AR-15/AR-19). */}
-        <Route path="capabilities" element={<CapabilitiesPage />} />
+        <Route
+          path="capabilities"
+          element={
+            <Suspense fallback={<LoadingState label="Loading Capability browser…" />}>
+              <CapabilitiesPage />
+            </Suspense>
+          }
+        />
         {/* Compatibility only — Settings modal owns Modules (V1.131 P2). */}
         <Route path="modules" element={<ModulesPage />} />
         <Route path="findings" element={<FindingsPage />} />
@@ -283,8 +296,11 @@ export function App() {
           <SettingsModalProvider>
             <EntranceProvider>
               <AppRoutes />
+              {/* Inside EntranceProvider so the modal rail can filter by the
+                  resolved entrance (W-2). Rendered after AppRoutes — the
+                  Dialog overlays the route tree either way. */}
+              <SettingsModalHost />
             </EntranceProvider>
-            <SettingsModalHost />
           </SettingsModalProvider>
         </DaemonLaunchGate>
       </SetupCompletedProvider>

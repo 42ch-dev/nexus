@@ -60,7 +60,8 @@ function useCreatorHandler() {
   );
 }
 
-function renderLayout() {
+function renderLayout(entrance: 'content-creator' | 'developer' = 'content-creator') {
+  window.localStorage.setItem('nexus-entrance', entrance);
   return renderInApp(
     <Routes>
       <Route element={<RootLayout />}>
@@ -160,21 +161,42 @@ describe('RootLayout — mobile nav key list (V1.120 P2 T2)', () => {
     ) as HTMLElement | undefined;
   }
 
-  it('exposes the mobile top-nav links (AC-P2-5)', () => {
+  it('exposes the mobile top-nav links on Develop (full Control Room, AC-P2-5)', () => {
+    useCreatorHandler();
+    const { container } = renderLayout('developer');
+
+    const mobileNav = getMobileNav(container);
+    expect(mobileNav).toBeDefined();
+
+    // Develop: the full operator surface is linked.
+    expect(mobileNav!.querySelector('a[href="/sessions"]')).not.toBeNull();
+    expect(mobileNav!.querySelector('a[href="/works"]')).not.toBeNull();
+    expect(mobileNav!.querySelector('a[href="/schedule"]')).not.toBeNull();
+    expect(mobileNav!.querySelector('a[href="/strategies"]')).not.toBeNull();
+    expect(mobileNav!.querySelector('a[href="/settings"]')).not.toBeNull();
+    expect(mobileNav!.querySelector('a[href="/memory"]')).not.toBeNull();
+  });
+
+  it('filters develop-only links out of the Create mobile nav (W-3, EL §3 hide table)', () => {
     useCreatorHandler();
     const { container } = renderLayout();
 
     const mobileNav = getMobileNav(container);
     expect(mobileNav).toBeDefined();
 
-    // Control: the list still renders the expected author-facing surfaces.
-    expect(mobileNav!.querySelector('a[href="/sessions"]')).not.toBeNull();
+    // Create keeps the author-facing surfaces of the compact top nav.
     expect(mobileNav!.querySelector('a[href="/works"]')).not.toBeNull();
+    expect(mobileNav!.querySelector('a[href="/memory"]')).not.toBeNull();
+    // Develop-only operator chrome is hidden, not advertised-then-bounced.
+    expect(mobileNav!.querySelector('a[href="/sessions"]')).toBeNull();
+    expect(mobileNav!.querySelector('a[href="/schedule"]')).toBeNull();
+    expect(mobileNav!.querySelector('a[href="/strategies"]')).toBeNull();
+    expect(mobileNav!.querySelector('a[href="/settings"]')).toBeNull();
   });
 
   it('has no Capabilities item in the mobile top nav (AC-P2-2)', () => {
     useCreatorHandler();
-    const { container } = renderLayout();
+    const { container } = renderLayout('developer');
 
     const mobileNav = getMobileNav(container);
     expect(mobileNav).toBeDefined();

@@ -348,6 +348,52 @@ describe('SetupWizardPage', () => {
     await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/developer'));
   });
 
+  it('re-run with a stored developer entrance pre-highlights Developer and finish() preserves it (W-1)', async () => {
+    const user = userEvent.setup();
+    const setEntrance = vi.fn(() => Promise.resolve());
+    const setSetupCompleted = vi.fn(() => Promise.resolve());
+    useWizardScanHandlers();
+
+    renderInApp(
+      <EntranceProvider initialEntrance="developer">
+        <>
+          <LocationDisplay />
+          <SetupWizardPage />
+        </>
+      </EntranceProvider>,
+      {
+        client: makeClient(),
+        desktop: makeDesktop({ setEntrance, setSetupCompleted }),
+        initialRouterEntries: ['/setup'],
+      },
+    );
+
+    // Desktop-shell.md §13.10.4: the stored entrance is re-offered as the
+    // pre-highlighted default — Developer, not the content-creator default.
+    expect(screen.getByTestId('entrance-option-developer')).toHaveAttribute(
+      'aria-checked',
+      'true',
+    );
+    expect(screen.getByTestId('entrance-option-content-creator')).toHaveAttribute(
+      'aria-checked',
+      'false',
+    );
+
+    // Unchanged Continue (no explicit re-pick) — the stored value must survive.
+    await advanceEntrance(user);
+    await advanceAgentToWorkspace(user);
+    await fillProfileName(user);
+    await user.click(screen.getByRole('button', { name: 'Continue' }));
+
+    await waitFor(() => expect(screen.getByRole('heading', { name: /You're ready/ })).toBeInTheDocument());
+    await user.click(screen.getByRole('button', { name: 'Open' }));
+
+    // finish() persists the STORED developer entrance and lands on /developer
+    // — no silent overwrite to content-creator (AR-16/AR-17 persistence).
+    expect(setEntrance).toHaveBeenCalledWith('developer');
+    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/developer'));
+  });
+
   it('navigates Back from Workspace to Agent, Agent to Entrance, and Done to Workspace', async () => {
     const user = userEvent.setup();
     useWizardScanHandlers();
