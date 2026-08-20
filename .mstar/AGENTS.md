@@ -34,8 +34,9 @@ On conflicts (unless the user overrides):
 | `iterations/` | Process | Compass, guides, iteration packages |
 | `sdd/` | Process | SDD scratch + QC/QA raw review bundles |
 | `archived/` | Process | Local / archived process snapshots (plans-done, residuals, legacy knowledge dumps) |
-| `status.json` | Process | Plan/residual coordination state |
-| `notes.json` | Process | Local narrative timeline |
+| `status.json` | Process | v2 active-lifecycle register |
+| `workflows/` | Process | Per-lifecycle snapshot + `notes.jsonl` ledger |
+| `projects/` | Process | Per-project `roadmap.md`, residual register, research |
 
 **Rules:**
 
@@ -57,6 +58,8 @@ Wire/schema **code** SSOT remains repo-root `schemas/` (outside `.mstar/`). Lang
 | `{PLAN_DIR}` | `.mstar/plans/` | ignored |
 | `{ITERATION_DIR}` | `.mstar/iterations/` | ignored |
 | `{SDD_DIR}` | `.mstar/sdd/<plan-id>/` | ignored |
+| `{WORKFLOW_DIR}` | `.mstar/workflows/` | ignored |
+| `{PROJECT_DIR}` | `.mstar/projects/` | ignored |
 
 Plan `metadata.primary_spec` / `spec_refs` should point at paths under `{SPECS_DIR}` when the contract is team-shared. Iteration-scoped drafts under `{ITERATION_DIR}/…/specs/` are **local process** until promoted into `{SPECS_DIR}`.
 
@@ -69,6 +72,8 @@ Plan `metadata.primary_spec` / `spec_refs` should point at paths under `{SPECS_D
 | `{PLAN_DIR}` | PM, implementers (checkboxes) | One `.md` per plan; never `plans/<plan-id>/` as a directory |
 | `{ITERATION_DIR}` | PM, Phase 1 specialists | Compass + guides; local process |
 | `{SDD_DIR}` | implementers, QC, QA | Ephemeral; durable QC/QA conclusions summarize into the main plan (locally) |
+| `{WORKFLOW_DIR}` | PM | Lifecycle snapshots and notes ledger |
+| `{PROJECT_DIR}` | PM | Roadmap, residuals, project research |
 
 **Do not** put plan progress, residual prose, or QC narratives in root `AGENTS.md`.
 
@@ -82,7 +87,7 @@ These govern **local** harness files. They are **not** clone SSOT.
 
 ### `status.json` — structured metadata only
 
-Narrative (ship stories, QC summaries) → **`notes.json`**, commits, or compass — not `metadata` prose.
+Narrative (ship stories, QC summaries) → **`workflows/<id>/notes.jsonl`**, commits, or compass — not `metadata` prose.
 
 **Rule:** if a `metadata` value is a sentence or paragraph, it is forbidden. Counts, enums, dates, paths, and short IDs are OK.
 
@@ -92,15 +97,15 @@ Narrative (ship stories, QC summaries) → **`notes.json`**, commits, or compass
 
 ### Profile B compaction (local)
 
-Hot `plans[]` = non-`Done` only; snapshots under `archived/plans/` locally. Delivery snapshots go to the local roadmaps shipped tracker (`.mstar/roadmaps/`, gitignored) or compound into `{KNOWLEDGE_DIR}` patterns.
+Hot `plans[]` = non-`Done` only; snapshots under `archived/plans/` locally. Delivery snapshots go to the project trackers (`.mstar/projects/<id>/`, gitignored) or compound into `{KNOWLEDGE_DIR}` patterns.
 
 ### Residual detail (local)
 
-Open QC residual rows live under root `residual_findings` in local `status.json`. Closed rows may archive under `archived/residuals/` locally. Prefer `tracking_link` to durable **tracked** surfaces (`{SPECS_DIR}`, `{KNOWLEDGE_DIR}`) when sharing with the team.
+Open QC residual rows live in the project register (`projects/<id>/residuals.json`). Prefer `tracking_link` to durable **tracked** surfaces (`{SPECS_DIR}`, `{KNOWLEDGE_DIR}`) when sharing with the team.
 
 ### Pre-merge checklist (PM)
 
-1. Local `status.json` + `notes.json` coherent for the session  
+1. Local `status.json` + `workflows/<id>/notes.jsonl` coherent for the session  
 2. `pnpm run codegen` if `schemas/` changed  
 3. Share **results** only: `{SPECS_DIR}`, `{KNOWLEDGE_DIR}`, product code — not process paths  
 4. Profile B closeout locally as needed  
@@ -114,7 +119,7 @@ All landings on the protected branch (`target_branch`, usually `main`) via **Git
 
 ### Post-merge hotfix
 
-1. Register residuals in local `status.json` before branching.  
+1. Register residuals in `projects/<id>/residuals.json` before branching.  
 2. `fix/*` from current `main` HEAD.  
 3. Surgical fix + regression test.  
 4. Open PR to `main` and merge with the commit-count rule above (≤30 merge commit / >30 squash); update local `status.json`.  
@@ -125,7 +130,7 @@ Before accepting “pre-existing” to waive a test/QC finding: reproduce agains
 
 ## Anti-patterns
 
-- Committing `status.json`, `notes.json`, `plans/`, `iterations/`, `archived/`, or `sdd/`
+- Committing `status.json`, `workflows/`, `projects/`, `plans/`, `iterations/`, `archived/`, or `sdd/`
 - Using `{KNOWLEDGE_DIR}` as a dumping ground for unfinished specs
 - Duplicating wire contracts under `{SPECS_DIR}` that belong in root `schemas/`
 - Force-adding ignored harness paths “for convenience”
