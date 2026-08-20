@@ -36,8 +36,7 @@
     "strategies": "Harness",
     "settings": "Settings",
     "develop": "Develop",
-    "findings": "Findings",
-    "compute": "Compute"
+    "findings": "Findings"
   },
   "theme": {
     "switchToLight": "Switch to light theme",
@@ -175,6 +174,36 @@
     }
   },
   "hub": {
+    "develop": {
+      "title": "Develop",
+      "description": "Your full Control Room — modules, presets, capabilities, Connect, and more.",
+      "presets": {
+        "title": "Presets",
+        "description": "Your saved and built-in presets — inspect, validate, and manage them.",
+        "count_one": "{{count}} preset",
+        "count_other": "{{count}} presets"
+      },
+      "capabilities": {
+        "title": "Capabilities",
+        "description": "Browse the builtin capability schemas the daemon serves."
+      },
+      "modules": {
+        "title": "Compute modules",
+        "description": "Install and run compute modules."
+      },
+      "strategyCanvas": {
+        "title": "Strategy canvas",
+        "description": "See how a preset orchestrates your strategies."
+      },
+      "runStudio": {
+        "title": "Run Studio",
+        "description": "Run, inspect, and accept or discard compute."
+      },
+      "connect": {
+        "title": "Connect",
+        "description": "Host status and connection tokens."
+      }
+    },
     "tabs": {
       "world": "Worlds",
       "work": "Works",

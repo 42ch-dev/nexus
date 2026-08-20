@@ -36,8 +36,7 @@
     "strategies": "Harness",
     "settings": "设置",
     "develop": "开发",
-    "findings": "发现",
-    "compute": "计算"
+    "findings": "发现"
   },
   "theme": {
     "switchToLight": "切换至浅色主题",
@@ -175,6 +174,36 @@
     }
   },
   "hub": {
+    "develop": {
+      "title": "开发",
+      "description": "你的完整控制室 — 模块、预设、能力、Connect 等。",
+      "presets": {
+        "title": "预设",
+        "description": "查看并管理你的预设与内置预设。",
+        "count_one": "{{count}} 个预设",
+        "count_other": "{{count}} 个预设"
+      },
+      "capabilities": {
+        "title": "能力",
+        "description": "浏览守护进程提供的内置能力模式。"
+      },
+      "modules": {
+        "title": "计算模块",
+        "description": "安装并运行计算模块。"
+      },
+      "strategyCanvas": {
+        "title": "策略画布",
+        "description": "查看预设如何编排你的策略。"
+      },
+      "runStudio": {
+        "title": "运行工作室",
+        "description": "运行、检查并接受或舍弃计算结果。"
+      },
+      "connect": {
+        "title": "Connect",
+        "description": "主机状态与连接令牌。"
+      }
+    },
     "tabs": {
       "world": "世界",
       "work": "作品",
