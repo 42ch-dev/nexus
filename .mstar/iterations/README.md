@@ -188,3 +188,4 @@ Implementation-detail SSOT that is not iteration-scoped stays in [`.mstar/knowle
 | V1.167 | [v1.167/](v1.167/) | completed | Dogfood sweep — V1.164–166 full window validated (findings register + gate-notes: DR-70=N, mental/rules-UI=Y) + `creator register --local` two-store bootstrap fix (DF-A-02) + dependabot #41/#42/#43 disposition (3 plans; grill-me lock) |
 | V1.168 | [v1.168/](v1.168/) | completed | Native host provider series — replace Claude/Codex internals (`claude-codes`/`codex-codes`) + add `dsh-native` (`deepseek-harness-sdk`) (2 plans; grill-me lock) |
 | V1.169 | [v1.169/](v1.169/) | completed | SPOKE 0.11.1 lockstep + DF-82 rules authoring forms (3 plans, scale M; autonomous lock) |
+| V1.170 | [v1.170/](v1.170/) | active | Developer-first pivot A+B — compute-module SDK/CLI/CI + User-layer entrance split (2 plans, scale M) |
