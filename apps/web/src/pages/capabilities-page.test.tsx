@@ -64,6 +64,20 @@ describe('CapabilitiesPage', () => {
     expect(await screen.findByText('No capabilities')).toBeInTheDocument();
   });
 
+  it('renders the error state when the capabilities fetch fails', async () => {
+    useHandlers(
+      http.get('/v1/daemon/orchestration/capabilities', () =>
+        HttpResponse.json({ message: 'server error' }, { status: 500 }),
+      ),
+    );
+
+    renderCaps();
+
+    expect(await screen.findByText('Could not load capabilities.')).toBeInTheDocument();
+    expect(screen.getByRole('alert')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument();
+  });
+
   it('switches to zh-CN locale without remounting', async () => {
     useHandlers(
       http.get('/v1/daemon/orchestration/capabilities', () =>

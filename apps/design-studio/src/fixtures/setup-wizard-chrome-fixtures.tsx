@@ -23,6 +23,7 @@ import {
 } from '@web-setup/workspace-path-field';
 
 const STEP_TITLES: Record<WizardStep, string> = {
+  entrance: 'How do you use Nexus?',
   agent: 'Choose an agent',
   workspace: 'Choose a workspace',
   done: "You're ready 🎉",

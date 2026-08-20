@@ -1,12 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useLocation, useNavigate } from 'react-router';
-import {
-  BrainCircuit,
-  CalendarClock,
-  ListChecks,
-  Sparkles,
-} from 'lucide-react';
 
 import { useCreateWork, useCreateWorld } from '@/api/queries';
 import { FooterProfiles } from '@/components/layout/footer-profiles';
@@ -159,6 +153,7 @@ function EntranceSwitchControl() {
 export function Sidebar() {
   const { t } = useTranslation('shell');
   const { pathname } = useLocation();
+  const { entrance } = useEntrance();
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState<ShellSidebarTab>(() => tabFromPathname(pathname));
 
@@ -174,28 +169,20 @@ export function Sidebar() {
     setActiveTab(tab);
   }
 
-  const orchestratorGroups: ShellNavGroup[] = useMemo(
-    () => [
-      {
-        id: 'memory',
-        label: t('nav.memory'),
-        items: [{ to: '/memory', label: t('nav.memory'), icon: BrainCircuit }],
-      },
-      {
-        id: 'strategies',
-        label: t('nav.strategies'),
-        items: [{ to: '/strategies', label: t('nav.strategies'), icon: Sparkles }],
-      },
-      {
-        id: 'runtime',
-        label: t('nav.runtime'),
-        items: [
-          { to: '/sessions', label: t('nav.sessions'), icon: ListChecks },
-          { to: '/schedule', label: t('nav.schedule'), icon: CalendarClock },
-        ],
-      },
-    ],
-    [t],
+  // V1.170 P1 (AR-15) — the nav slot renders the entrance-filtered tree from
+  // the registry (labels are `shell` i18n keys, resolved here). Create omits
+  // the EL §3 hide-table surfaces; Develop shows the full Control Room + hub.
+  // The Creator|Orchestrator tabs stay untouched — entrance is a separate
+  // axis (`tabFromPathname` unchanged), so the groups render in the
+  // orchestrator nav slot exactly like the V1.94 orchestrator groups did.
+  const navGroups: ShellNavGroup[] = useMemo(
+    () =>
+      ENTRANCE_BY_ID[entrance].navGroups.map((group) => ({
+        ...group,
+        label: t(group.label),
+        items: group.items.map((item) => ({ ...item, label: t(item.label) })),
+      })),
+    [entrance, t],
   );
 
   const creatorPanel = activeTab === 'creator' ? <CreatorCreatePanel /> : undefined;
@@ -205,7 +192,7 @@ export function Sidebar() {
       <ShellSidebarChrome
         activeTab={activeTab}
         activeRoute={pathname}
-        navGroups={activeTab === 'orchestrator' ? orchestratorGroups : []}
+        navGroups={activeTab === 'orchestrator' ? navGroups : []}
         panelContent={creatorPanel}
         onTabChange={handleTabChange}
         footer={

@@ -36,6 +36,7 @@
     "strategies": "Harness",
     "settings": "Settings",
     "develop": "Develop",
+    "findings": "Findings",
     "compute": "Compute"
   },
   "theme": {

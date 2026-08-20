@@ -22,6 +22,7 @@ import { DaemonLaunchGate } from '@/components/setup/daemon-launch-gate';
 import { SetupGate } from '@/components/setup/setup-gate';
 import { ChapterPage } from '@/pages/chapter-page';
 import { ChaptersPage } from '@/pages/chapters-page';
+import { CapabilitiesPage } from '@/pages/capabilities-page';
 import { FindingsPage } from '@/pages/findings-page';
 import { GlobalTimelinePage } from '@/pages/global-timeline-page';
 import { MemoryPage } from '@/pages/memory-page';
@@ -230,7 +231,12 @@ function AppRoutes() {
         </Route>
         <Route path="sessions" element={<SessionsPage />} />
         <Route path="schedule" element={<SchedulePage />} />
-        <Route path="capabilities" element={<Navigate to="/sessions" replace />} />
+        {/* V1.170 P1 (EL-6) — capability browser restored as a live Develop-tree
+            surface (read-only builtin capability schemas from
+            GET /v1/daemon/orchestration/capabilities). The V1.120 P2 soft-remove
+            redirect is replaced by the entrance guard: Create bounces to
+            `/works`, Develop renders the browser (AR-15/AR-19). */}
+        <Route path="capabilities" element={<CapabilitiesPage />} />
         {/* Compatibility only — Settings modal owns Modules (V1.131 P2). */}
         <Route path="modules" element={<ModulesPage />} />
         <Route path="findings" element={<FindingsPage />} />
