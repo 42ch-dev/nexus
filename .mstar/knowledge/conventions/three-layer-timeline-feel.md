@@ -4,7 +4,6 @@ date: 2026-07-19
 problem_type: design-pattern
 category: conventions
 severity: low
-plan_id: 2026-07-18-v1.123-three-layer-zoom-experience
 tags: [canvas, timeline, three-layer, feel, layout, visual-language, semantic-zoom, v1.123]
 applies_when: Designing per-layer visual/layout/zoom feel differentiation for a multi-layer Canvas surface
 ---

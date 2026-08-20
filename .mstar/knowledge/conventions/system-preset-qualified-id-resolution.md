@@ -4,7 +4,6 @@ date: 2026-07-17
 problem_type: convention
 category: conventions
 severity: medium
-plan_id: 2026-07-17-v1.120-strategies-repair
 tags: [presets, system-preset, qualified-id, locate_preset, daemon, path-resolution, sessions-filter]
 ---
 

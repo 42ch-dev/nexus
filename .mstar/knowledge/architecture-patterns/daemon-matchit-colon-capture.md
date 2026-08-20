@@ -4,7 +4,6 @@ date: 2026-07-22
 problem_type: architecture-pattern
 category: architecture-patterns
 severity: high
-plan_id: 2026-07-22-v1.132-p0-orch-load-404
 tags: [daemon, axum, matchit, routing, 404, orchestration]
 applies_when: adding or changing parametric HTTP routes under crates/nexus-daemon-runtime; diagnosing empty-body framework 404 vs handler envelope 404
 last_updated: 2026-07-23

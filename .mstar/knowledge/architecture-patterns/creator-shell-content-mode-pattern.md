@@ -4,7 +4,6 @@ date: 2026-07-20
 problem_type: architecture_pattern
 category: architecture-patterns
 severity: medium
-plan_id: 2026-07-20-v1.128-p2-creator-create-controller-shell
 tags: [creator-shell, layout, react-context, control-room, studio-first, presentational-extract]
 applies_when: switching the Creator hub content region between empty-state Create CTAs and a selected-entity Controller surface without coupling to canvas routes or sidebar submenu anchor state
 ---

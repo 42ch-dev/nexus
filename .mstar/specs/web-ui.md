@@ -4,7 +4,6 @@
 **Document class**: Feature line  
 **Created**: 2026-06-24  
 **Scope**: Nexus local Web UI product contract — placement (`apps/web`), stack, daemon-served model, `tauri-api` adapter boundary, MVP surface (Control Room + Setup), Content-Authoring stage (V1.65), Tauri / body-editor roadmap (V1.66), and strict separation from the private cloud SaaS  
-**Iteration compass**: `delivery-compass.md` (V1.64 ship) · `delivery-compass.md` (V1.65 Content-Authoring stage) · `delivery-compass.md` (V1.69 Design System Maturation & Canvas Draft — DESIGN.md Production migration + Canvas Exploration → Draft) · `delivery-compass.md` (V1.70 Canvas Strategy Implement α + CI/desktop-build optimization — the first canvas surface ships) · `delivery-compass.md` (V1.71 Canvas Strategy Write-Boundary β + hygiene companion)
 
 **Coordinates with**:
 
@@ -179,11 +178,11 @@ Explicitly deferred with durable tracking (compass §1.2 + §6; satisfies the Du
 - **Tauri desktop shell (`apps/desktop`)** — V1.65. The SPA is Tauri-ready now; the shell wraps the same `apps/web/dist`.
 - **Content-authoring UI** — chapter rich-text editor, outline editor, KB editor — V1.65+. CLI continues content production this iteration.
 - **Findings-remediation UI** — **Ships in V1.77 (§23).** Findings were *visible* in V1.64; remediation (status transitions, `target_executor` assignment, inline edit) is the V1.77 lead surface. Remaining remediation follow-up (inline fix / re-run from finding) is deferred — **DR-28**.
-- **Schedule / cron editor** — deferred. **Durable roadmap:** consolidated in the deferred-features tracker §2.6 — DR-27 (Control Room cron editing).
-- **Mobile (Tauri v2 mobile targets)** — deferred. **Durable roadmap:** consolidated in the deferred-features tracker §2.6 — DR-61 (mobile / Tauri v2 mobile targets).
+- **Schedule / cron editor** — deferred. **Durable roadmap:** DR-27 (Control Room cron editing).
+- **Mobile (Tauri v2 mobile targets)** — deferred. **Durable roadmap:** DR-61 (mobile / Tauri v2 mobile targets).
 - **OpenAPI spec generation + generated TS client SDK (C2)** — deferred; TanStack Query + codegen TS types suffice for the SPA.
 - **Remote (non-loopback) access / any new auth** — out of scope; would require its own auth spec.
-- **agent-host sessions/operations/events(SSE) DTO promotion** — deferred. **Durable roadmap:** consolidated in the deferred-features tracker §2.6 — DR-57 (agent-host sessions/operations/events (SSE) DTO promotion).
+- **agent-host sessions/operations/events(SSE) DTO promotion** — deferred. **Durable roadmap:** DR-57 (agent-host sessions/operations/events (SSE) DTO promotion).
 - **F-P3 (rename list arrays to `items`)** + **F-F1 (`sort_by`/`sort_order`)** — adapter-covered in V1.64; structural closure V1.66+ — **(shipped V1.67 via convergence)**.
 
 ---
@@ -249,7 +248,7 @@ Versioning, npm/Rust bumps, and the single breaking shape change (Works list) ar
 
 V1.64 made the runtime **legible and configurable** (Control Room + Setup). V1.65 takes the next step: the UI becomes an **authoring entry surface** — authors can plan, review, and restructure chapter **outlines and structure** directly in the browser, with the chapter **body rendered read-only**. This is the single highest-leverage product-completeness move after V1.64: the runtime is feature-complete for writing and now UI-reachable, but the UI cannot yet *shape* the writing — only observe and configure it.
 
-> **Scope and roadmap SSOT**: `delivery-compass.md` §0 (grill decisions) + §1.1 (Track A) + §1.2 (V1.66 roadmap) + §5 (open design items). This section records the product contract; the compass is authoritative for scope, batching, and residual tracking.
+> **Scope and roadmap SSOT**:  §0 (grill decisions) + §1.1 (Track A) + §1.2 (V1.66 roadmap) + §5 (open design items). This section records the product contract; the compass is authoritative for scope, batching, and residual tracking.
 
 ### 13.1 What ships in V1.65 (Track A lead slice)
 
@@ -303,7 +302,7 @@ The authoring surface consumes new chapter-content schemas (additive, owned by T
 
 V1.65 made the UI an **authoring entry surface** in the browser. V1.66 takes Nexus from **"open a browser tab to `localhost:8420`"** to a **double-clickable macOS desktop application**. The browser SPA transport stays **unchanged** (screen data access remains transport-agnostic); a new `apps/desktop` Tauri v2 wrapper loads the `apps/web` dist, the `TauriClient` impl of `NexusClient` swaps in, and the bundled `nexus42` daemon comes up transparently on launch. This is the gating prerequisite for everything desktop-native in the roadmap (signing, multi-OS, auto-update, mobile).
 
-> **Scope and roadmap SSOT**: `delivery-compass.md` §0 (grill decisions Q1/Q2) + §1.1 (Track A) + §1.2 (V1.67+ roadmap) + §5 (locked design items). Contract detail: [desktop-shell.md](desktop-shell.md). This section records the product contract; the compass is authoritative for scope, batching, and residual tracking.
+> **Scope and roadmap SSOT**:  §0 (grill decisions Q1/Q2) + §1.1 (Track A) + §1.2 (V1.67+ roadmap) + §5 (locked design items). Contract detail: [desktop-shell.md](desktop-shell.md). This section records the product contract; the compass is authoritative for scope, batching, and residual tracking.
 
 ### 14.1 What ships in V1.66 (Track A lead slice)
 
@@ -361,7 +360,7 @@ All other `NexusClient` methods = identical HTTP transport to the localhost daem
 
 V1.66 shipped the Tauri desktop shell. V1.67 is a **hygiene-lead consolidation & de-risk** iteration: it converges the Daemon API surface to one error envelope + one array-key convention + casing discipline, closes ~26 residuals, polishes the just-shipped desktop shell, closes the work-profile selector gap, and authors the **Canvas Strategy Surface Exploration** that de-risks the V1.68 lead. **No new author-facing features ship** — the only user-visible change is a work-profile selector in the Create-Work dialog. The canvas *implement* is V1.68; V1.67 authors its *design* only (see §15.3). *(Revised 2026-06-26: the prior body-editor lead was rejected — Nexus is an AI-autonomous executor; the AI owns prose, the human steers via Canvas.)*
 
-> **Scope and roadmap SSOT**: `delivery-compass.md` §0 (grill decisions + 2026-06-26 re-discussion Q4–Q6) + §1.1 (Tracks A–F) + §1.2 (V1.68 roadmap) + §5 (locked design items). This section records the product contract; the compass is authoritative for scope, batching, and residual tracking.
+> **Scope and roadmap SSOT**:  §0 (grill decisions + 2026-06-26 re-discussion Q4–Q6) + §1.1 (Tracks A–F) + §1.2 (V1.68 roadmap) + §5 (locked design items). This section records the product contract; the compass is authoritative for scope, batching, and residual tracking.
 
 ### 15.1 What ships in V1.67 (author-visible surface)
 
@@ -413,7 +412,7 @@ Explicitly deferred with rationale (compass §0 Q2/Q3, §1.2; satisfies the Dura
 
 V1.69 shipped the **Canvas Strategy Surface Draft** (interface contracts + structured write-boundary + canvas→DESIGN.md token contract) and the Design System Production migration. V1.70 turns the Draft into the **first human-steerable Canvas surface** at α depth, and runs a parallel **CI/desktop-build optimization** ops track that unblocks the PR feedback loop (Rust-only PRs stop triggering a 75 min macOS packaging build; distributable release packages move to a release-gated workflow).
 
-> **Scope and roadmap SSOT**: `delivery-compass.md` §0 (grill decisions Q1–Q3) + §1.1 (Tracks A+B) + §1.2 (V1.71+ roadmap) + §5 (locked design items). This section records the product contract; the compass is authoritative for scope, batching, and residual tracking. Architectural detail: [canvas-strategy-surface.md](canvas-strategy-surface.md) (V1.70 Shipped α — write-boundary + outline/timeline + World KB remain Draft V1.71+).
+> **Scope and roadmap SSOT**:  §0 (grill decisions Q1–Q3) + §1.1 (Tracks A+B) + §1.2 (V1.71+ roadmap) + §5 (locked design items). This section records the product contract; the compass is authoritative for scope, batching, and residual tracking. Architectural detail: [canvas-strategy-surface.md](canvas-strategy-surface.md) (V1.70 Shipped α — write-boundary + outline/timeline + World KB remain Draft V1.71+).
 
 ### 16.1 What ships in V1.70 (Track A — Canvas α)
 
@@ -456,9 +455,9 @@ Explicitly deferred with rationale (compass §1.2; satisfies the Durable Roadmap
 - **Structured node-granular *edits*** — rename state, rewire edge, patch prompt template (Draft §3.5 operation DTOs) — **V1.71**. V1.70 Strategy canvas is read + overlay + Idea-steer only.
 - **Canvas outline+timeline surface** (Draft §3.3 surface 2) — **V1.71+**.
 - **Canvas World KB surface** (Draft §3.3 surface 3) — **V1.71+**.
-- **CLI / schema rename of `preset` → `strategy`** — breaking; deferred. V1.70 adopts **Strategy** terminology in UI copy only (Draft §4.2). The user-visible Strategy/Strategies → **Harness** rename shipped V1.156 P3 (closed → shipped archive); the internal CLI/schema `preset` → `strategy` identifier rename remains deferred (architect LOCKED: internal identifiers unchanged).
-- **Desktop distribution v2** (signing / tri-OS / auto-update) — deferred. **Durable roadmap:** consolidated in the deferred-features tracker §2.6 — DR-58 (desktop distribution v2).
-- **Rich live overlay** (completed-path history, child-session hierarchy) — deferred. **Durable roadmap:** consolidated in the deferred-features tracker §2.6 — DR-29 (rich live overlay).
+- **CLI / schema rename of `preset` → `strategy`** — breaking; deferred. V1.70 adopts **Strategy** terminology in UI copy only (Draft §4.2). The user-visible Strategy/Strategies → **Harness** rename shipped V1.156 P3; the internal CLI/schema `preset` → `strategy` identifier rename remains deferred (architect LOCKED: internal identifiers unchanged).
+- **Desktop distribution v2** (signing / tri-OS / auto-update) — deferred. **Durable roadmap:** DR-58 (desktop distribution v2).
+- **Rich live overlay** (completed-path history, child-session hierarchy) — deferred. **Durable roadmap:** DR-29 (rich live overlay).
 - **Tauri WKWebView runtime smoke** — implementer documented they could not run Tauri locally; QA ran `cargo check` only. Full gesture/keyboard/pan-zoom validation inside actual WKWebView is a V1.71 follow-up if deeper runtime validation is needed.
 
 ### 16.6 User stories (V1.70 α slice)
@@ -474,7 +473,7 @@ Explicitly deferred with rationale (compass §1.2; satisfies the Durable Roadmap
 
 V1.70 made the Strategy canvas legible and steerable. V1.71 makes the **Strategy surface editable at node granularity** while preserving the core boundary: the browser/Tauri webview never writes raw files. All Strategy edits flow through schema-backed Daemon API patch routes, daemon validation, atomic persistence, and graphRevision conflict handling.
 
-> **Scope and roadmap SSOT**: `delivery-compass.md` §1.1 Track A (A1–A9), §1.3 wire contracts, §2 normative specs, and §6 risk notes. Architectural detail: [canvas-strategy-surface.md](canvas-strategy-surface.md) (V1.71 Shipped β) and [daemon-api-surface-conventions.md](daemon-api-surface-conventions.md) §7 patch-route pattern.
+> **Scope and roadmap SSOT**:  §1.1 Track A (A1–A9), §1.3 wire contracts, §2 normative specs, and §6 risk notes. Architectural detail: [canvas-strategy-surface.md](canvas-strategy-surface.md) (V1.71 Shipped β) and [daemon-api-surface-conventions.md](daemon-api-surface-conventions.md) §7 patch-route pattern.
 
 ### 17.1 What ships in V1.71 (Track A — Strategy β writes)
 
@@ -515,7 +514,7 @@ V1.70 made the Strategy canvas legible and steerable. V1.71 makes the **Strategy
 
 V1.71 made the Strategy canvas editable at node granularity. V1.72 extends the canvas to the **Outline+Timeline surface** — the second of the three Draft canvas surfaces — bringing Work-structure (Volume → Chapter → Scene/Beat) and timeline events onto the graph with structured patch routes, outlineRevision conflict handling, and non-spatial alternate views.
 
-> **Scope and roadmap SSOT**: `delivery-compass.md` §1.1 Tracks A+B, §1.3 wire contracts, §2 normative specs. This section records the product contract; the compass is authoritative for scope, batching, and residual tracking.
+> **Scope and roadmap SSOT**:  §1.1 Tracks A+B, §1.3 wire contracts, §2 normative specs. This section records the product contract; the compass is authoritative for scope, batching, and residual tracking.
 
 ### 18.1 What ships in V1.72 (Track A — Outline+Timeline β)
 
@@ -552,7 +551,7 @@ V1.71 made the Strategy canvas editable at node granularity. V1.72 extends the c
 
 V1.72 shipped the Outline+Timeline canvas. V1.73 completes the Canvas program's third surface — **World KB β** — the final of the three Draft canvas surfaces. The World KB canvas surfaces the author's accumulated world knowledge (characters, locations, items, events, organizations, conflicts, and computable derived entities) as a graph with entity nodes, promotion-state lifecycle badges, source-anchor provenance edges, and structured patch operations. This is the first canvas surface to require a **backend prerequisite**: promoting World KB read+write operations from CLI-direct-DB to first-class Daemon API routes with per-row OCC revision tracking.
 
-> **Scope and roadmap SSOT**: `delivery-compass.md` §1.1 Tracks A+B, §1.3 wire contracts, §2 normative specs. This section records the product contract; the compass is authoritative for scope, batching, and residual tracking.
+> **Scope and roadmap SSOT**:  §1.1 Tracks A+B, §1.3 wire contracts, §2 normative specs. This section records the product contract; the compass is authoritative for scope, batching, and residual tracking.
 
 ### 19.1 What ships in V1.73 (Track A — World KB β)
 
@@ -592,7 +591,7 @@ V1.72 shipped the Outline+Timeline canvas. V1.73 completes the Canvas program's 
 
 V1.74 completes the World KB canvas surface by promoting first-class typed relationships from the V1.73 deferred slot into a shipped authoring surface. The relationship route is reachable from both the canvas graph and the complete non-spatial relationship view; both entry points call the same Daemon API contract and preserve the §5 `NexusClient` boundary.
 
-> **Scope and roadmap SSOT**: `delivery-compass.md` §0 grill decisions, §1.1 Track A, §1.3 wire contracts, and §2 normative specs. Architectural detail: [canvas-strategy-surface.md](canvas-strategy-surface.md) (V1.74 Shipped β), [entity-scope-model.md](entity-scope-model.md) §5.6, and [daemon-api-surface-conventions.md](daemon-api-surface-conventions.md) §7.6.
+> **Scope and roadmap SSOT**:  §0 grill decisions, §1.1 Track A, §1.3 wire contracts, and §2 normative specs. Architectural detail: [canvas-strategy-surface.md](canvas-strategy-surface.md) (V1.74 Shipped β), [entity-scope-model.md](entity-scope-model.md) §5.6, and [daemon-api-surface-conventions.md](daemon-api-surface-conventions.md) §7.6.
 
 ### 20.1 What ships in V1.74 (Track A — relationship β)
 
@@ -630,7 +629,7 @@ V1.74 completes the World KB canvas surface by promoting first-class typed relat
 
 V1.76 shipped the World KB Relationship γ surface, completing the canvas program (V1.67–V1.76, 10 iterations). V1.77 pivots from the canvas to the **quality loop**: the Control-Room findings page — read-only since V1.64 — is promoted to a full **remediation authoring surface** that closes the "observe → triage → resolve" quality loop in the UI, exactly as the canvas closed the "steer → execute → review" writing loop. The backend already ships the full findings PATCH surface (6-state lifecycle adjacency enforcement, 7-field `UpdateFindingRequest` payload, full CRUD routes, stale-count endpoint); V1.77 consumes them from the web app with no new backend routes.
 
-> **Scope and roadmap SSOT**: `delivery-compass.md` §0 grill decisions (Q1–Q4 locked), §1.1 Track A scope, §2 normative specs, §Phase 2b D4 (UX lock — authoritative), and §6 risk notes (all RESOLVED). This section records the product contract; the compass is authoritative for scope, batching, and residual tracking. Lifecycle detail: [findings-lifecycle.md](findings-lifecycle.md) (architect-drafted Master). API surface: [daemon-api-surface-conventions.md](daemon-api-surface-conventions.md) (findings PATCH reference).
+> **Scope and roadmap SSOT**:  §0 grill decisions (Q1–Q4 locked), §1.1 Track A scope, §2 normative specs, §Phase 2b D4 (UX lock — authoritative), and §6 risk notes (all RESOLVED). This section records the product contract; the compass is authoritative for scope, batching, and residual tracking. Lifecycle detail: [findings-lifecycle.md](findings-lifecycle.md) (architect-drafted Master). API surface: [daemon-api-surface-conventions.md](daemon-api-surface-conventions.md) (findings PATCH reference).
 
 ### 23.1 What ships in V1.77
 
@@ -690,7 +689,7 @@ Explicitly deferred with rationale (compass §1.2 + grill Q2 option C rejected; 
 
 V1.77 closed the quality loop in the UI. V1.78 closes the **creator self-loop** (capture → review → internalize): the Control-Room gains a creator-scoped **Memory** page that lets an author review the pending captures their sessions produced, summarize them into long-term memory, and browse the resulting fragments — all from the web app, without dropping to the terminal. The memory Daemon API has shipped since V1.33 (`handlers/memory.rs`) but was never contracted; V1.78 publishes the OSS schemas (`schemas/local-api/memory/`), normalizes the hand-written handler DTOs to generated types (fixing the daemon-runtime no-hand-written-DTO invariant), and consumes the typed surface from the web app. `createPendingReview` stays CLI/producer-only — the session-end capture pipeline owns creation; the UI is review/consume-only, exactly mirroring V1.77's `createFinding` CLI-only decision.
 
-> **Scope and roadmap SSOT**: `delivery-compass.md` §0 grill decisions, §1.1 Track A scope, §Phase 2b D-UX (UX lock — authoritative), and §Phase 2b open items #1–#5 (frontend wiring). This section records the product contract; the compass is authoritative for scope, batching, and residual tracking. Batch 1 (contracts/backend) ships the schemas + codegen + handler DTO normalization; Batch 2 (this frontend stage) consumes the typed surface.
+> **Scope and roadmap SSOT**:  §0 grill decisions, §1.1 Track A scope, §Phase 2b D-UX (UX lock — authoritative), and §Phase 2b open items #1–#5 (frontend wiring). This section records the product contract; the compass is authoritative for scope, batching, and residual tracking. Batch 1 (contracts/backend) ships the schemas + codegen + handler DTO normalization; Batch 2 (this frontend stage) consumes the typed surface.
 
 ### 24.1 What ships in V1.78 (frontend stage)
 
@@ -748,7 +747,7 @@ Explicitly deferred with rationale (compass §1.2 + D-UX LOCKED; satisfies the D
 
 V1.78 closed the third and final author-in-command loop (creator memory). V1.79 is the first **post-loop-closure iteration** and takes the natural next step: rather than opening a new loop, it deepens the author's ability to **reflect on** what the closed loops produce. Two independent UI tracks ship under the shared theme **"Author Reflection"** — a manuscript reading surface with in-context maturation indicators (Track A) and a SOUL personality visualization over internalized memory fragments (Track B).
 
-> **Scope and roadmap SSOT**: `delivery-compass.md` §1 grill decisions, §2 scope, and §6 acceptance criteria. This section records the product contract; the compass is authoritative for scope, batching, and residual tracking.
+> **Scope and roadmap SSOT**:  §1 grill decisions, §2 scope, and §6 acceptance criteria. This section records the product contract; the compass is authoritative for scope, batching, and residual tracking.
 
 ### 25.1 What ships in V1.79 (dual-track)
 
@@ -784,11 +783,11 @@ V1.78 closed the third and final author-in-command loop (creator memory). V1.79 
 
 ### 25.3 Non-goals for V1.79
 
-- **Standalone maturation dashboard** (multi-chart cross-Work/World aggregate; BL-09) — deferred. **Durable roadmap:** consolidated in the deferred-features tracker §2.6 — DR-30 (standalone maturation dashboard).
+- **Standalone maturation dashboard** (multi-chart cross-Work/World aggregate; BL-09) — deferred. **Durable roadmap:** DR-30 (standalone maturation dashboard).
 - **Independent growth-curve view** as a separate SOUL visualization — folded into temporal drift; standalone deferred.
 - **Persisted reading progress + annotations/highlights (MVP)** — **Shipped in V1.89**. See §28 (V1.89 Amendment — Deeper Manuscript Reading). Session-only behavior was V1.79; persistence + highlights (with drift notice and body-ownership invariant) shipped in V1.89.
-- **Per-World SOUL filtering** — deferred. **Durable roadmap:** consolidated in the deferred-features tracker §2.6 — DR-32 (per-World SOUL filtering).
-- **Profile-specific reading chrome** (essay section breaks, game-bible cross-refs, novel typography presets) — deferred (BL-11 tracker row). **Durable roadmap:** consolidated in the deferred-features tracker §2.6 — DR-31 (profile-specific reading chrome; BL-11).
+- **Per-World SOUL filtering** — deferred. **Durable roadmap:** DR-32 (per-World SOUL filtering).
+- **Profile-specific reading chrome** (essay section breaks, game-bible cross-refs, novel typography presets) — deferred (BL-11 tracker row). **Durable roadmap:** DR-31 (profile-specific reading chrome; BL-11).
 - **DF-49 (Standalone MCP server)** — **cancelled** (not deferred), conflicts with ACP-client product direction and creates circular-invocation risk.
 - **Any new write route on the reading surface** — read-only consumption only.
 - **New canvas surfaces** — the canvas program is complete (V1.67–V1.76). V1.79 deepens the Control-Room reading + memory surfaces.
@@ -807,7 +806,7 @@ V1.79 gave the author their first reflection surface — keyword clusters and a 
 
 This product model is user-visible in the UI — the world selector explicitly frames a world projection as "a subset of your Creator SOUL," not a separate identity.
 
-> **Scope and roadmap SSOT**: `delivery-compass.md` §1 grill decisions, §2 scope, and §6 acceptance criteria. This section records the product contract; the compass is authoritative for scope, batching, and residual tracking.
+> **Scope and roadmap SSOT**:  §1 grill decisions, §2 scope, and §6 acceptance criteria. This section records the product contract; the compass is authoritative for scope, batching, and residual tracking.
 
 ### 26.1 What ships in V1.81 (four spec points)
 
@@ -872,9 +871,9 @@ This product model is user-visible in the UI — the world selector explicitly f
 
 ### 26.3 Non-goals for V1.81
 
-- **Per-World LLM narratives** — deferred. **Durable roadmap:** consolidated in the deferred-features tracker §2.6 — DR-32 (per-World SOUL narratives + filtering).
-- **Narrative editing / curation by the author** — deferred. **Durable roadmap:** consolidated in the deferred-features tracker §2.6 — DR-33 (SOUL narrative curation/editing + export/share).
-- **Narrative export / share** — deferred. **Durable roadmap:** consolidated in the deferred-features tracker §2.6 — DR-33 (SOUL narrative curation/editing + export/share).
+- **Per-World LLM narratives** — deferred. **Durable roadmap:** DR-32 (per-World SOUL narratives + filtering).
+- **Narrative editing / curation by the author** — deferred. **Durable roadmap:** DR-33 (SOUL narrative curation/editing + export/share).
+- **Narrative export / share** — deferred. **Durable roadmap:** DR-33 (SOUL narrative curation/editing + export/share).
 - **Async background-job infrastructure** — on-demand generation only (consistent with V1.80 discipline).
 - **BL-09 standalone maturation dashboard** — remains backlog.
 - **BL-11 deeper manuscript reading (MVP slice)** — **Shipped V1.89**: persisted reading progress + character-offset annotations/highlights with drift notice. Profile-specific reading chrome remains deferred (see tracker).
@@ -900,7 +899,7 @@ V1.81 shipped the Creator-SOUL narrative (the whole, world-agnostic) and the wor
 
 This model is locked in the UI. The world selector shows titles (not ids) and drives both visualization scope and narrative scope. A world may have insufficient data for its own narrative even when the Creator whole does not.
 
-> **Scope and roadmap SSOT**: `delivery-compass.md` §1 grill decisions, §2 scope, §6 acceptance criteria, and §7 non-goals. This section records the product contract; the compass is authoritative for scope, batching, and residual tracking.
+> **Scope and roadmap SSOT**:  §1 grill decisions, §2 scope, §6 acceptance criteria, and §7 non-goals. This section records the product contract; the compass is authoritative for scope, batching, and residual tracking.
 
 ### 27.1 What ships in V1.82 (two spec points)
 
@@ -943,8 +942,8 @@ This model is locked in the UI. The world selector shows titles (not ids) and dr
 ### 27.3 Non-goals for V1.82 (see also compass §7)
 
 - Narrative comparison across worlds (side-by-side or diff view) — out of scope.
-- Narrative editing or curation by the author — read-only LLM output; only "re-reflect." **Durable roadmap:** consolidated in the deferred-features tracker §2.6 — DR-33 (SOUL narrative curation/editing + export/share).
-- Narrative export or share paths. **Durable roadmap:** consolidated in the deferred-features tracker §2.6 — DR-33 (SOUL narrative curation/editing + export/share).
+- Narrative editing or curation by the author — read-only LLM output; only "re-reflect." **Durable roadmap:** DR-33 (SOUL narrative curation/editing + export/share).
+- Narrative export or share paths. **Durable roadmap:** DR-33 (SOUL narrative curation/editing + export/share).
 - Realtime websocket / push (poll + invalidation only).
 - A new backend worlds endpoint (existing one is wired).
 - Rewrite of V1.81 SOUL components beyond the per-World extension (surgical).
@@ -989,9 +988,9 @@ When a highlight's stored offsets no longer fit the current body text (after a b
 ### 28.5 Non-goals
 
 - Profile-specific reading chrome (essay section breaks, game-bible cross-reference overlays, novel typography presets, etc.).
-  > **Durable roadmap:** consolidated in the deferred-features tracker §2.6 — DR-31 (profile-specific reading chrome; BL-11).
+  > **Durable roadmap:** DR-31 (profile-specific reading chrome; BL-11).
 - Standalone maturation dashboard (BL-09).
-  > **Durable roadmap:** consolidated in the deferred-features tracker §2.6 — DR-30 (standalone maturation dashboard; BL-09).
+  > **Durable roadmap:** DR-30 (standalone maturation dashboard; BL-09).
 - Body or outline editing from the reading surface.
 - Annotation range reconciliation or fingerprinting across body edits.
 - Rich-text or threaded annotations on highlights.
@@ -1002,7 +1001,6 @@ When a highlight's stored offsets no longer fit the current body text (after a b
 ## 29. Information Architecture (V1.94)
 
 **Status**: Draft (V1.94) — normative contract frozen by P-1; implement authority P1.
-**Iteration compass**: `delivery-compass.md` §1 (locked decisions D1, E1, F1, C1, G1) + §5 (acceptance criteria).
 
 ### 29.1 Purpose
 
@@ -1089,9 +1087,9 @@ The wizard and per-launch daemon-ready gate are **desktop-first**:
 ### 29.9 Non-goals
 
 - Full multi-creator CRUD / profile management (rename, delete, avatar upload) — footer switcher only selects existing or creates via existing endpoint.
-  > **Durable roadmap:** consolidated in the deferred-features tracker §2.6 — DR-34 (multi-creator CRUD / multi-workspace UI / workspace switcher).
+  > **Durable roadmap:** DR-34 (multi-creator CRUD / multi-workspace UI / workspace switcher).
 - Multi-workspace UI / workspace switcher.
-  > **Durable roadmap:** consolidated in the deferred-features tracker §2.6 — DR-34 (multi-creator CRUD / multi-workspace UI / workspace switcher).
+  > **Durable roadmap:** DR-34 (multi-creator CRUD / multi-workspace UI / workspace switcher).
 - Agent detection during non-first-launch.
 - Mobile full rewrite (the `<lg` collapse preserves the two-tab structure as a dropdown/pill scroller but is not optimized for touch-first patterns).
 
@@ -1195,7 +1193,7 @@ All V1.95 amendments (ClientProvider, migration reset, workspace default rules, 
 
 ### 29.13 V1.105 Amendments — First-launch wizard reshape (Agent-first + app-level Daemon gate)
 
-**Product behavior (author-visible).** V1.105 separates daemon readiness from wizard steps and reduces the wizard to three author-facing choices. **Iteration SSOT:** `delivery-compass.md` + `v1.105/specs/`.
+**Product behavior (author-visible).** V1.105 separates daemon readiness from wizard steps and reduces the wizard to three author-facing choices. **Iteration SSOT:** .
 
 #### 29.13.1 App-level fullscreen Daemon gate (not a wizard step)
 
@@ -1242,13 +1240,13 @@ Bootstrap (`ensureSetupBootstrap`) on Workspace **Continue** only.
 #### 29.13.6 Non-goals
 
 - Tauri PATH agent scan; multi-workspace switcher; BYOK; Settings shell IA redesign; wire/schema changes unless P0 proves unavoidable.
-  > **Durable roadmap:** consolidated in the deferred-features tracker §2.6 — DR-35 (Tauri PATH agent scan), DR-34 (multi-workspace switcher + Settings shell IA redesign). BYOK: tracked as **DF-70** (tracker §2.3).
+  > **Durable roadmap:** DR-35 (Tauri PATH agent scan), DR-34 (multi-workspace switcher + Settings shell IA redesign). BYOK: tracked as **DF-70** (tracker §2.3).
 
 ### 30. V1.98 Amendments — Design Studio dev surface (not author-facing)
 
 **Product classification.** `apps/design-studio` is a **contributor/dev auxiliary app** — a read-only gallery for the unified DESIGN SSOT, brand VI, and `apps/web` UI primitives. It is **not** part of the local Web UI product surface authors use. Authors do not receive a Design Studio nav item, route, or menu entry in Control Room, Setup, or desktop shell.
 
-**Normative spec:** [`design-studio.md`](design-studio.md) · **IA:** `design-studio-information-architecture.md` · **Merge rules:** `design-unification.md` · **Compass:** `delivery-compass.md`.
+**Normative spec:** [`design-studio.md`](design-studio.md) · **IA:** `design-studio-information-architecture.md` · **Merge rules:** `design-unification.md` · **Compass:** .
 
 #### 30.1 DESIGN SSOT move (web consumer)
 
@@ -1287,7 +1285,7 @@ Token tuning: edit repo-root [`DESIGN.md`](../../DESIGN.md) pair on disk → ref
 
 ### 29.14 V1.106 Amendments — Studio-first pipeline + first-launch polish
 
-**Iteration SSOT:** `delivery-compass.md` + `v1.106/specs/`. **Implement authority** for Stretch Settings IA: `ui-continuity.md` (P2 — may defer).
+**Iteration SSOT:**  + `v1.106/specs/`. **Implement authority** for Stretch Settings IA: `ui-continuity.md` (P2 — may defer).
 
 #### 29.14.1 TopStepIndicator SSOT (P1 Must)
 
@@ -1323,7 +1321,7 @@ Normative copy lives in repo-root [`DESIGN.md`](../../DESIGN.md) (`### Launch & 
 
 ### 29.15 V1.107 Amendments — Studio UI tune + coverage hygiene
 
-**Iteration SSOT:** `delivery-compass.md` + `studio-ui-tune.md`.
+**Iteration SSOT:** .
 
 #### 29.15.1 Studio Tailwind content (FB-000)
 
@@ -1354,7 +1352,7 @@ Prefer `wire_contracts_changed: false`. Studio-first invariant: `studio-first-in
 
 ### 29.16 V1.112 Amendments — Frontend i18n (shipped)
 
-**Iteration SSOT:** `delivery-compass.md` + `v1.112/specs/`. Normative product detail for this slice lives in the iteration workspace until P5 merge.
+**Iteration SSOT:**  + `v1.112/specs/`. Normative product detail for this slice lives in the iteration workspace until P5 merge.
 
 **Implement authority (iteration workspace):**
 
@@ -1369,7 +1367,7 @@ When shipped: Settings nav becomes **Agent · Workspace · Appearance · Advance
 
 **Status:** Draft (V1.118) — architect plan **done** (2026-07-15); implement authority in iteration workspace until P5 merge.
 
-**Iteration SSOT:** `delivery-compass.md` + `README.md`.
+**Iteration SSOT:**  + `README.md`.
 
 **Implement authority (iteration workspace):**
 
@@ -1408,7 +1406,7 @@ Outline and World KB are **not** Creation peer groups. Strategy remains under Or
 
 **Status:** Draft (V1.125) — supersedes §29.17.1 **Creator tab list-mode peer groups only** (not §29.18 Canvas World-entry Timeline default).
 
-**Iteration SSOT:** `delivery-compass.md` + `creation-world-first-ia.md`.
+**Iteration SSOT:**  + `creation-world-first-ia.md`.
 
 | Creator tab group | Contents | Route |
 | --- | --- | --- |
@@ -1421,13 +1419,13 @@ Outline and World KB are **not** Creation peer groups. Strategy remains under Or
 
 **Status:** Draft (V1.122) — P0 spec refactor in flight on `iteration/v1.122`; P1 implement authority in iteration workspace until P5 merge.
 
-**Iteration SSOT:** `delivery-compass.md` (Three-Pillar Pivot: Harness · Canvas · Computable).
+**Iteration SSOT:**  (Three-Pillar Pivot: Harness · Canvas · Computable).
 
 **Implement authority (iteration workspace):**
 
 | Plan | Spec | Scope |
 | --- | --- | --- |
-| P0 — Three-pillar spec refactor | `pillar-framing.md` + `timeline-canvas-architecture.md` | Canonize Harness/Canvas/Computable in STRATEGY + CONCEPTS; `CanvasSurfaceKind = "timeline"` Draft overlay; corpus pillar cross-refs |
+| P0 — Three-pillar spec refactor | Canonize Harness/Canvas/Computable in STRATEGY + CONCEPTS; `CanvasSurfaceKind = "timeline"` Draft overlay; corpus pillar cross-refs |
 | P1 — Timeline-first Canvas | `timeline-hero-product-spec.md` + `timeline-canvas-architecture.md` | Elevate Timeline to peer surface + World-building projection + **World-entry default = Timeline** |
 
 #### 29.18.1 Canvas IA — World entry default flips to Timeline (P1)

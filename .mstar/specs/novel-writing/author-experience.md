@@ -14,8 +14,6 @@
 - [quality-loop.md](quality-loop.md) — findings + review visibility
 - [creator-workflow.md](../creator-workflow.md) — FL-E stage names in narrative
 
-**Iteration compass**: `delivery-compass.md`
-
 ---
 
 ## 1. Purpose
@@ -37,7 +35,7 @@ V1.36–V1.45 implemented novel-writing **capabilities** across crates. V1.46 do
 | §3 Author path | Bootstrap → first chapter → serial → quality loop → completion | P1 (narrative); CLI detail in Master |
 | §4 Author visibility | Human + machine-readable status surfaces | P0 delta on V1.43 baseline |
 | §4.1 `--json` contract | `findings[]` + optional `findings_stale` | P0 |
-| §5 Residual pointer | `status.json` SSOT | P-last |
+| §5 Residual pointer | local process (not clone SSOT) | P-last |
 
 **Invariant**: Every command in §3 must exist in [creator-run-preset-entry.md](../creator-run-preset-entry.md) or [cli-spec.md](../cli-spec.md) at ship time.
 
@@ -184,7 +182,7 @@ When error/remediation conditions occur, user-visible output must include a **si
 
 ## 6. P-last author-path tech-debt (pointer)
 
-See `2026-06-14-v1.46-hygiene-and-closeout.md`. This spec does not duplicate `status.json` rows.
+This spec does not duplicate local residual registers.
 
 ---
 
@@ -201,7 +199,7 @@ At V1.46 P-last:
 ## 8. Author desk deltas (Shipped V1.49 P2)
 
 > **Status**: Shipped (V1.49 P2) — P2 overlay merged into Master.  
-> **Plan**: `2026-06-17-v1.49-author-desk-ux.md`
+> **Plan**: 
 > **Cross-refs**: findings lifecycle → [quality-loop.md §2](quality-loop.md#2-findings-lifecycle) (6-state V1.49 P0); narrative indexes → [workflow-profile.md §4.6](workflow-profile.md#46-narrative-indexes--f-e-runtime-v149-p1) (V1.49 P1)
 
 ### 8.1 Intake re-trigger on existing Work (R-V147P1-01)

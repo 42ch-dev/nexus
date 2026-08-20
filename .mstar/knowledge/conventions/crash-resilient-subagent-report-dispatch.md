@@ -4,7 +4,6 @@ date: 2026-08-15
 problem_type: knowledge
 category: conventions
 severity: low
-plan_id: 2026-08-14-v1.165-p1-entry-scoped-findings-alignment
 tags: [subagent-crash, evidence-preservation, report-skeleton, qa-dispatch, redispatch]
 last_updated: 2026-08-15
 applies_when: Dispatching long-running verification/review subagents (QA gates, large test suites); any subagent that crashed mid-run before writing its output artifact

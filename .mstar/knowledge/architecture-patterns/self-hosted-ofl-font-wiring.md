@@ -4,7 +4,6 @@ date: 2026-07-18
 problem_type: architecture-pattern
 category: architecture-patterns
 severity: medium
-plan_id: V1.121-P0 (design language v0.4 "Literary Engine")
 tags: [fonts, self-hosted, ofl, source-serif-4, font-face, preload, bundle-gate, bundler-agnostic]
 applies_when: adding a self-hosted OFL font to the Nexus design system (display tier, mono companion, CJK serif companion for zh-CN content titles)
 last_updated: 2026-07-18 (V1.121 v0.4 Literary Engine — Source Serif 4 self-hosted)

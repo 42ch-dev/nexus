@@ -293,7 +293,7 @@ V2 命令面按以下顶层执行（pre-release 允许破坏性调整）。**V1.
 - `nexus42 creator knowledge ...`：User knowledge / reference 管理入口（`nexus-knowledge`）
 - `nexus42 creator demo-seed ...`：演示数据填充（world + KB seed）
 
-**V1.29 additions** (compass: v1.29):
+**V1.29 additions**:
 
 - `nexus42 creator memory pending-list` — list items in `memory_pending_review` awaiting review
 - `nexus42 creator memory pending-show <id>` — show detail of a single pending memory item
@@ -308,7 +308,7 @@ V2 命令面按以下顶层执行（pre-release 允许破坏性调整）。**V1.
 
 - **`--scope work`（默认，V1.23 必须保留；V1.24 KCA-003 C2 强化为唯一已实现 scope）**：表示活跃 `creator_id` + 活跃 `workspace_slug` 下的 **CLI local work KB index**。当前实现通过 daemon local API `/v1/local/kb/entries` 优先处理，失败时回退到 `$HOME/.nexus42/creators/<creator_id>/workspaces/<workspace_slug>/...` 下的本地文件 / `index.json` 工作索引。它是工作资料/文件索引，**不是** `nexus-kb` 的 World graph，**也不是** `nexus-knowledge` 的 User/global knowledge index。V1.24 的 daemon handler (`handlers/kb.rs`) 和 CLI (`creator kb`) 均已明确标注为 work-scope only。
 - **`--scope world`（V1.27+ shipped）**：要求可解析的 `world_id`（显式 flag 或当前 workspace binding），并路由到 `nexus-narrative` + `nexus-knowledge`。该路径查询的是 World-scoped narrative KB assets（KnowledgeEntries、SourceAnchors、graph/query primitives），不得回退到 `--scope work` 文件索引。
-- **User/global knowledge（未来目标）**：不得塞进 `creator kb` 或 `creator kb --scope user`。User-scoped global knowledge/reference material 应通过 `nexus-knowledge` 的 CLI 入口暴露；在六组顶层命令锁定下，推荐入口为 `nexus42 platform knowledge ...`（或等价的 platform/user knowledge 子命令），并由 `nexus-knowledge` 处理存储、标签检索与供 Moment assembly 读取的切片。**Durable roadmap:** consolidated in the deferred-features tracker §2.6 — DR-52 (user/global knowledge entry surface).
+- **User/global knowledge（未来目标）**：不得塞进 `creator kb` 或 `creator kb --scope user`。User-scoped global knowledge/reference material 应通过 `nexus-knowledge` 的 CLI 入口暴露；在六组顶层命令锁定下，推荐入口为 `nexus42 platform knowledge ...`（或等价的 platform/user knowledge 子命令），并由 `nexus-knowledge` 处理存储、标签检索与供 Moment assembly 读取的切片。**Durable roadmap:** DR-52 (user/global knowledge entry surface).
 
 命名与行为建议：
 
@@ -334,7 +334,7 @@ V1.23 结束时，KB / knowledge 相关 CLI 路由目标应固定为：
 | --- | --- | --- | --- | --- |
 | Manage local work files / notes as workspace assets | `nexus42 creator kb ...` (default `--scope work`); preferred alias candidate `nexus42 creator assets ...` | active `creator_id`, active `workspace_slug` | `nexus42` command router + daemon local API / local workspace storage; later storage may move behind local-domain crates | List/search/show/add/remove local work index entries only. Must not create World KnowledgeEntries or User knowledge rows. |
 | Manage narrative knowledge inside a World | `nexus42 creator kb ... --scope world --world-id <world_id>` or workspace-bound equivalent | active `creator_id`, `workspace_slug`, explicit/resolved `world_id` | `nexus-narrative` + `nexus-knowledge` | Route to World-scoped narrative KB graph. Must preserve KnowledgeEntry / SourceAnchor provenance and narrative ownership. No silent fallback to work index. |
-| Manage User/global reference knowledge | `nexus42 creator knowledge ...` | authenticated User / Pairing context; optional Creator only as acting context, not owner | `nexus-knowledge` | Store/search/list user-scoped global knowledge/reference material. May be pulled into Moment assembly; promotion into World KB is an explicit cross-scope operation. **Durable roadmap:** consolidated in the deferred-features tracker §2.6 — DR-52 (user/global knowledge entry surface). |
+| Manage User/global reference knowledge | `nexus42 creator knowledge ...` | authenticated User / Pairing context; optional Creator only as acting context, not owner | `nexus-knowledge` | Store/search/list user-scoped global knowledge/reference material. May be pulled into Moment assembly; promotion into World KB is an explicit cross-scope operation. **Durable roadmap:** DR-52 (user/global knowledge entry surface). |
 | Create / browse World narrative state | `nexus42 creator world create\|list\|show ...` | active `creator_id`, workspace_slug; `create` requires `--title` (`--name` alias) and narrative kind is implicit in V1.40 | `nexus-narrative` + `nexus-kb` | **V1.40 P0**: `create` returns `world_id` and persists World row. `list`/`show` are read-only. No local fork (PD-01: fork is platform-only). |
 | Seed demo data | `nexus42 creator demo-seed ...` | active `creator_id`, workspace_slug | `nexus-creator` + `nexus-narrative` + `nexus-kb` | Populate demo world + KB entries for testing. |
 | Assemble direct platform cloud context | `nexus42 platform context assemble` | `--world-id`; optional workspace/creator and include/limit flags | Future direct platform context assembly path | **Deferred (V1.26).** Platform cloud assembly is not yet available; CLI exits with clear guidance to use `assemble-moment`. It must not call the retired daemon context-assemble Daemon API. |
@@ -455,8 +455,6 @@ Rules:
 
 **V1.45 shipped:** Generic `RunCommand` struct replaces enum; `creator/mod.rs` uses `#[command(flatten)]` instead of `#[command(subcommand)]`. Legacy handler code preserved as `#[allow(dead_code)]` for P1/P2 migration. Old `start`/`continue`/`stage`/`resume`/`audit-chapter`/`review-master` subcommands are no longer exposed.
 
-
-
 ### 6.2E `nexus42 creator run stage` — Superseded by V1.45 generic preset runner
 
 > **Removed in V1.45.** The FL-E `creator run stage list` / `stage advance` subcommands were deleted from the clap surface and replaced by the generic **`creator run <preset_id>`** runner. Stage-gate validation and Work stage PATCH now happen inside the preset runner before enqueue. Authoritative IA: [creator-run-preset-entry.md](./creator-run-preset-entry.md) §4 (Execution flow). See changelog: V1.45 compass migration appendix.
@@ -479,7 +477,7 @@ Rules:
 - World binding on new Work creation is enforced by `creator bootstrap` (V1.45); missing `world_id` fails closed with remediation to `creator world create --title` or `creator world list` (not skip/stay worldless).
 - `show` for a nonexistent `world_id` prints remediation pointing to `creator world create --title` or `creator world list`.
 
-**Target (V1.40 P0):** plan `2026-06-10-v1.40-world-create-and-validation`.
+**Target (V1.40 P0):** .
 
 **V1.51 T-A P0 amendment — `creator world kb adopt` surfaces LLM extraction metadata.**
 When a `pending` candidate was produced by the `nexus.llm.extract` pathway
@@ -501,7 +499,7 @@ includes `llm_confidence` and `llm_source_quote` keys (nullable). The promotion
 gate (§5.5.3 of entity-scope-model) and `ValidationMode::Novel` re-run are
 unchanged.
 
-**Target (V1.51 T-A P0):** plan `2026-06-18-v1.51-llm-extraction`.
+**Target (V1.51 T-A P0):** .
 
 **V1.51 T-A P1 amendment — `creator kb rescan --work <work_ref>` cross-chapter reconciliation.**
 The V1.50 chapter-scoped `creator kb rescan <work_ref>/<chapter>` (T-B P2) is
@@ -547,7 +545,7 @@ Rules (build on §6.2G V1.40 rules; see also
   into rescan is out of scope (LLM extraction is review-time/finalize-time;
   rescan is a sync tool).
 
-**Target (V1.51 T-A P1):** plan `2026-06-18-v1.51-cross-chapter-rescan`. Closes
+**Target (V1.51 T-A P1):** . Closes
 `R-V150KBED-08` (cross-chapter rescan scope).
 
 **V1.51 T-A P2 amendment — `creator world kb pending --missing-only`.**
@@ -578,7 +576,7 @@ Rules:
   the World KB through the normal `creator world kb adopt` flow after creating a
   `pending` candidate (e.g. via `creator kb rescan`).
 
-**Target (V1.51 T-A P2):** plan `2026-06-18-v1.51-missing-kb-detection`.
+**Target (V1.51 T-A P2):** .
 
 ### 6.2G.1 World KB CLI consolidation + `--auto` flag (V1.52 T-A P0 — Normative)
 
@@ -651,9 +649,9 @@ Normative: [novel-writing/multi-work-lifecycle.md](./novel-writing/multi-work-li
 
 **OUT V1.41:** `creator work switch` / global switch mutex (grill-me 2026-06-10).
 
-**Entry path pointer (no standalone quickstart in V1.41):** multi-book flow extends [creator-centric-entry-model.md](./creator-centric-entry-model.md) §3.1 step 7 — see compass `delivery-compass.md` §2.
+**Entry path pointer (no standalone quickstart in V1.41):** multi-book flow extends [creator-centric-entry-model.md](./creator-centric-entry-model.md) §3.1 step 7 — 
 
-**Target (V1.41):** plans `2026-06-10-v1.41-multi-work-switch`, `2026-06-10-v1.41-selection-pool`.
+**Target (V1.41):** .
 
 ### 6.2M ACP host write-tool CLI mappings (V1.54 Draft — DF-46)
 
@@ -699,7 +697,7 @@ There is **no** top-level `nexus42 preset ...` command group. User creative entr
 - `nexus42 acp agent use|list`
 - *Omitted:* `nexus42 acp skills export|verify` — intentionally removed in V1.53 (DF-50 Cancelled; pre-1.0 OSS breaking-change removal).
 
-> **V1.53 intentional breaking-change removal** (pre-1.0 OSS, DF-50 Cancelled — shipped-features archive row 83): `nexus42 acp skills export|verify` was removed in V1.53 P-c (`2026-06-22-v1.53-skills-cli-cleanup`) because the runtime export command was redundant with the static committed `embedded-skills/` model (see §13.2). The corresponding spec `skills-export-compatibility.md` was retired in V1.53 P-1.
+> **V1.53 intentional breaking-change removal** (pre-1.0 OSS, DF-50 Cancelled): `nexus42 acp skills export|verify` was removed in V1.53 because the runtime export command was redundant with the static committed `embedded-skills/` model (see §13.2). The corresponding spec `skills-export-compatibility.md` was retired in V1.53 P-1.
 
 **Embedded skills（安装 / 升级）**：实现应将 `nexus-orchestration/embedded-skills/` 同步到 `$HOME/.nexus42/skills/`，并通过 `{$workspace_dir}/.agents/skills/` 暴露/链接，使 ACP `recommended_skills` 可被首轮会话解析。
 
@@ -1297,7 +1295,6 @@ v1 至少应保证：
 ## V1.57 P1 Draft overlay: §6.2M `host-call` subcommand
 
 **Status**: Draft (V1.57 P1)  
-**Plan**: `2026-06-22-v1.57-daemon-refactor-and-caller-adapters`
 
 ### §6.2M `nexus42 host-call <tool_id> --args <json>`
 
@@ -1335,7 +1332,6 @@ callable through this single entry point.
 ## V1.58 P3 Draft overlay: §6.2N `reference refresh` subcommand
 
 **Status**: Draft (V1.58 P3)
-**Plan**: `2026-06-22-v1.58-reference-cli-and-cross-cut-tests`
 
 ### §6.2N `nexus42 creator reference refresh [ref_id|all] [--dry-run]`
 

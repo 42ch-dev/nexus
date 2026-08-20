@@ -4,7 +4,6 @@ date: 2026-07-01
 problem_type: knowledge
 category: architecture-patterns
 severity: medium
-plan_id: 2026-07-01-v1.80-memory-review-reliability
 tags: [drain-loop, has-more, bounded-processing, partial-progress, deadline, in-flight-serialization, local-api, reliability, nexus-contracts]
 applies_when: designing a bounded/serialized/deadline-aware synchronous processing endpoint whose client must drain a queue via repeated calls
 ---

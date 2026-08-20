@@ -256,7 +256,6 @@ Daemon runtime is a **local supervisor**. It is **not** an ACP Agent or ACP Serv
 ## V1.57 P1 Draft overlay: Host tool executor — 3-caller entry points
 
 **Status**: Draft (V1.57 P1)  
-**Plan**: `2026-06-22-v1.57-daemon-refactor-and-caller-adapters`
 
 ### Host tool dispatch topology
 
@@ -284,7 +283,6 @@ through the same `CapabilityRegistry::dispatch(tool_id, input)` call.
 ### V1.57 P3: Worker IPC allowlist — dynamic derivation
 
 **Status**: Shipped (V1.57 P3)
-**Plan**: `2026-06-22-v1.57-worker-ipc-and-cross-caller-e2e`
 
 The admission pipeline's Gate 1 (tool ID allowlist) now uses
 `CapabilityRegistry::lookup()` as its dynamic SSOT instead of the static
@@ -302,7 +300,6 @@ verifies dispatch equivalence across all 3 caller paths for all 18 IDs
 ## V1.58 P0 Draft overlay: .sqlx cache hygiene protocol (R-V156-PROCESS-01 + R-V156P1-CACHE-01)
 
 **Status**: Draft (V1.58 P0)
-**Plans**: `2026-06-22-v1.58-workspace-occ-hardening` (T18)
 
 The `.sqlx/` compile-time query cache must be regenerated whenever a SQL
 migration or `sqlx::query!` / `sqlx::query_as!` / `sqlx::query_scalar!` macro
@@ -357,7 +354,7 @@ locally with `cargo test -p nexus-local-db --test sqlx_cache_intact`.
 ## V1.58 P0 Draft overlay: Workspace OCC hardening (R-V156P0-M001..M006)
 
 **Status**: Draft (V1.58 P0)
-**Plans**: `2026-06-22-v1.58-workspace-occ-hardening` (T1–T6)
+
 **Coordinates with**: `concurrency.md` §7 (per-row OCC)
 
 ### Path canonicalization contract (R-V156P0-M002)
@@ -439,7 +436,7 @@ current implementation is correct and documented):
   already confirms metrics overhead is negligible at the capability layer.
    Deferred; revisit only if profiling shows > 1% of cold path.
 
-> **Durable roadmap:** consolidated in the deferred-features tracker §2.6 — DR-01 (jitter range), DR-02 (metrics benchmarking).
+> **Durable roadmap:** DR-01 (jitter range), DR-02 (metrics benchmarking).
 
 ## 10. Refresh-scheduler hook (V1.58 P1 / P3)
 
@@ -588,7 +585,7 @@ In desktop mode, Tauri serves the bundled `apps/web/dist` via `build.frontendDis
 
 This section codifies the normative security contract for the daemon's Daemon API trust boundary. It closes the three-link attack chain identified in V1.86 (permissive CORS + keyless-localhost → remote-reach; fs/* bypass without workspace → arbitrary-file R/W; string-prefix path comparison → sibling-directory escape). The normative hooks in §4.4.3 (`require_api_key` on data routes) and §4.5 (W-002-style workspace path guard) already provide authority; this section adds the Origin gate, the deny-fs-without-workspace invariant, and the component-wise path guard requirement.
 
-**Coordinates with:** the V1.86 delivery compass (`delivery-compass.md`), `api/path_guard.rs` (`resolve_guarded_path`), `api/auth_middleware.rs` (keyless-localhost mode), `api/mod.rs` (CORS layer configuration).
+**Coordinates with:** the V1.86 delivery compass, `api/path_guard.rs` (`resolve_guarded_path`), `api/auth_middleware.rs` (keyless-localhost mode), `api/mod.rs` (CORS layer configuration).
 
 ### 13.1 Origin allowlist gate
 
@@ -943,7 +940,7 @@ The daemon's Origin allowlist (§13.1) already covers: own-origin, Tauri webview
 | Web SPA | `localStorage` | SPA trust boundary equal to the app itself. Key is always user-entered, never compiled in. |
 | Tauri desktop | OS keychain (Tauri secure-store plugin) where available; fallback to app-data dir | Keychain is the preferred secure storage; fallback is a local-first trade-off for platforms without OS keychain support. |
 
-The API key is always **user-entered** — never compiled into the binary, never stored in version control, never embedded in build artifacts. Full secret-store hardening (hardware-backed keystore, biometric unlock) is a future concern. **Durable roadmap:** consolidated in the deferred-features tracker §2.6 — DR-05 (secret-store hardening).
+The API key is always **user-entered** — never compiled into the binary, never stored in version control, never embedded in build artifacts. Full secret-store hardening (hardware-backed keystore, biometric unlock) is a future concern. **Durable roadmap:** DR-05 (secret-store hardening).
 
 ### 16.6 Raw-browser-tab remote navigation (explicit non-goal)
 
@@ -955,7 +952,7 @@ The supported remote-access path is always through the app's "Connect to Daemon"
 
 ## 17. V1.118 Amendments — Daemon no-Profile boot + lazy `state.db`
 
-**Iteration SSOT:** `daemon-no-profile-boot.md` + `delivery-compass.md` § Architect decisions (AD-P0).
+**Iteration SSOT:** `daemon-no-profile-boot.md` +  § Architect decisions (AD-P0).
 
 ### 17.1 Product invariant
 

@@ -2,7 +2,6 @@
 title: Codegen optional field callsite coverage
 category: engineering
 track: knowledge
-source_plan: 2026-08-12-v1.163-p2-outbox-drop-and-flake-sweep
 last_updated: 2026-08-19
 created: 2026-08-12
 status: active

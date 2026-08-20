@@ -4,7 +4,6 @@ date: 2026-07-06
 problem_type: architecture-pattern
 category: architecture-patterns
 severity: medium
-plan_id: V1.83-P-last (compound of brand UI foundation iteration); V1.94-P-last (contrast rule correction); V1.98-P0 (DESIGN SSOT unification + shared token pipeline + design-studio); V1.121-P0 (v0.4 Literary Engine); 2026-07-22-vi-logo-upgrade (Chronos dual-role + timeline logo system); 2026-07-22-v1.132-p2-vi-aesthetic-retune (plain vs square split, compact mark, theme-split primary)
 tags: [brand, design-tokens, nexus-ui, design-md, git-lfs, svg, npm-package, button-contrast, dark-theme, design-studio, tailwind-preset, ssot-unification, literary-engine, ink-atmosphere, display-typography, motion-recipes, structural-namespace, chronos, dual-role, logo-system]
 applies_when: adding or consuming cross-application Nexus brand/design tokens (new product surface, platform package, Web shell refresh, or a new app consuming the design system); also when defining any button background/text colour combination, adding a display typography tier, tuning surface atmosphere, extending elevation/motion, or registering a structural (non-color) CSS variable family; also when choosing ink vs cyan roles or logo lockup variants
 last_updated: 2026-07-23 (V1.137: white-on-teal fill audit must cover semantic tokens; Button tiny; TE quiet label-12; Tabs promoted)

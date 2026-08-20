@@ -12,7 +12,7 @@ This is the **public open-source monorepo** containing `nexus42` CLI (Rust, with
 
 **Not in this repo:** `nexus-platform` (private TypeScript monorepo for web/API/services) — do not reference its tech stack here.
 
-**Harness coordination (local):** Open QC residual rows and plan status live in **local** `.mstar/status.json` (gitignored). Shared harness results: [`.mstar/knowledge/`](.mstar/knowledge/), [`.mstar/specs/`](.mstar/specs/), [`.mstar/AGENTS.md`](.mstar/AGENTS.md). Runtime harness behavior: upstream **[Morning Star (mstar-harness)](https://github.com/btspoony/mstar-harness)** `mstar-*` skills — read `mstar-harness-core` before non-trivial harness work.
+**Harness coordination:** Shared results are [`.mstar/knowledge/`](.mstar/knowledge/), [`.mstar/specs/`](.mstar/specs/), and [`.mstar/AGENTS.md`](.mstar/AGENTS.md). Delivery state is local process (gitignored) — not clone SSOT. Runtime: upstream **[Morning Star (mstar-harness)](https://github.com/btspoony/mstar-harness)** `mstar-*` skills.
 
 ## Morning Star harness (layering)
 
@@ -21,10 +21,10 @@ This repo is a **consumer** of Morning Star, not the harness maintenance repo.
 | Layer | File | Holds |
 |-------|------|-------|
 | Project | Root `AGENTS.md` (this file) | Repo identity, tech stack, build/test policy, git hygiene, crate index |
-| Harness | [`.mstar/AGENTS.md`](.mstar/AGENTS.md) | Path symbols, content boundaries, Profile B compaction, Nexus-only deviations |
-| Runtime | `mstar-*` skills (Cursor plugin / OpenCode bundle) | State machine, phase gates, dispatch, QC/QA, SDD, iteration Phase 1–5 |
+| Harness | [`.mstar/AGENTS.md`](.mstar/AGENTS.md) | Process vs results; `specs/` / `knowledge/` / `docs/` / `schemas/` boundaries |
+| Runtime | `mstar-*` skills | State machine, phase gates, dispatch, QC/QA, SDD, iteration |
 
-**Do not** duplicate harness runtime rules in root `AGENTS.md`. **Do not** put dynamic plan progress, residuals detail, or QC conclusions in root `AGENTS.md` — use local `status.json` / `notes.json` / `.mstar/plans/` (process, gitignored) and share durable outcomes via `.mstar/knowledge/` + `.mstar/specs/`.
+**Do not** duplicate `mstar-*` runtime rules here. **Do not** put plan progress, residual detail, or QC conclusions in this file — share durable outcomes via `.mstar/knowledge/` and `.mstar/specs/`.
 
 ## Tech Stack & Protocol Decisions
 
@@ -192,11 +192,11 @@ git submodule update --init --recursive   # after pull if skill dirs are empty
 | Rule | Practice |
 |------|----------|
 | Iteration / hotfix landing | GitHub PR → `target_branch` only (never local `git merge` onto the protected branch). **Merge method by PR commit count** (commits on the PR head vs base): **≤30 → merge commit** (`gh pr merge --merge`); **>30 → squash** (`gh pr merge --squash`). Rationale: harness process noise stays local, so most PRs stay small enough for a merge commit; squash only when the history is too long to keep. |
-| Harness **results** | Commit `.mstar/knowledge/`, `.mstar/specs/`, `.mstar/AGENTS.md` when shared; **do not** commit process paths (`plans/`, `iterations/`, `archived/`, `status.json`, `notes.json`, `sdd/`) |
+| Harness **results** | Commit `.mstar/knowledge/`, `.mstar/specs/`, `.mstar/AGENTS.md` when shared; do **not** commit ignored process under `.mstar/` |
 | Codegen | Schema changes and generated output in the **same commit** (see [`docs/CONTRIBUTING.md`](docs/CONTRIBUTING.md)) |
 | Never commit | `target/`, `.worktrees/`, `node_modules/`, `.mstar` process paths above (gitignored — agents must self-check) |
 
-Harness process paths are **local** (see [`.mstar/AGENTS.md`](.mstar/AGENTS.md)). Optional local hygiene: `wc -c .mstar/status.json` when the file grows large.
+Harness process paths are **local** (see [`.mstar/AGENTS.md`](.mstar/AGENTS.md)).
 
 **Periodic maintenance (monthly or every ~5 iterations):**
 
@@ -209,9 +209,9 @@ cargo sweep --time 30     # drop artifacts unused for 30+ days
 
 If `.git` exceeds ~100 MiB or clone slows again: consider `git filter-repo` or an orphan history squash (solo maintainer only; see team before force-push on a shared default branch).
 
-**Anti-patterns:** committing `.mstar` process paths (`status.json`, `plans/`, `iterations/`, …); per-worktree `target/` without cleanup; developer clone with `--no-recurse-submodules` and no follow-up `submodule update`; `cargo build --all` inside every worktree during daily iteration.
+**Anti-patterns:** committing ignored `.mstar/` process paths; per-worktree `target/` without cleanup; developer clone with `--no-recurse-submodules` and no follow-up `submodule update`; `cargo build --all` inside every worktree during daily iteration.
 
-**Merge discipline:** All PRs to the protected branch (`target_branch`, usually `main`) — iteration integration, hotfixes, etc. — land via **GitHub PR** only; never local `git merge` directly onto the protected branch. Choose the GitHub merge method by **PR commit count** (head vs base): **≤30 commits → merge commit**; **>30 commits → squash**. Branch policy and naming → `.mstar/AGENTS.md` + upstream `mstar-iteration` / `mstar-branch-worktree`.
+**Merge discipline:** All PRs to the protected branch (`target_branch`, usually `main`) land via **GitHub PR** only; never local `git merge` onto the protected branch. Merge method by **PR commit count** (head vs base): **≤30 → merge commit**; **>30 → squash**. Branch naming → upstream `mstar-iteration` / `mstar-branch-worktree`.
 
 ## Versioning Policy
 

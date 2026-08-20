@@ -5,7 +5,6 @@ last_updated: 2026-07-24
 problem_type: architecture-pattern
 category: architecture-patterns
 severity: high
-plan_id: 2026-07-24-v1.138-third-party-codegen
 tags: [contracts, codegen, json-schema, typify, json-schema-to-typescript, jstt, nexus-contracts, wire-drift, common-types]
 applies_when: adopting or upgrading third-party schema-to-code generators; regenerating wire types after a codegen engine swap; diagnosing consumer breakage after `pnpm run codegen`
 ---

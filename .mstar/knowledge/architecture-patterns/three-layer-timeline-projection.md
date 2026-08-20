@@ -4,7 +4,6 @@ date: 2026-07-19
 problem_type: architecture-pattern
 category: architecture-patterns
 severity: low
-plan_id: 2026-07-18-v1.123-three-layer-timeline-spec
 tags: [canvas, timeline, three-layer, adapter, brief, narrative, moment, world, work, v1.123]
 applies_when: Extending a Canvas surface with multiple zoom layers (Brief/Narrative/Moment) or projecting a domain timeline at multiple granularities
 ---

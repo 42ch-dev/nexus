@@ -16,7 +16,6 @@ tags:
   - partial-success
   - additive-endpoint
   - sqlite
-plan_id: 2026-07-05-v1.91-findings-batch
 ---
 
 # Additive Batch PATCH Helper with Partial Success

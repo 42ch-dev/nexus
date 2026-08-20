@@ -4,7 +4,6 @@ date: 2026-07-01
 problem_type: architecture-pattern
 category: architecture-patterns
 severity: medium
-plan_id: 2026-07-01-v1.78-creator-memory-surface
 tags: [contracts, codegen, json-schema, dto-normalization, sqlx, orphan-rule, daemon-runtime]
 applies_when: [authoring-local-api-surface, normalizing-handwritten-dtos, adding-schemas-to-shipped-handler]
 ---

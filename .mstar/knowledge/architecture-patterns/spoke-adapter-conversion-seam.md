@@ -4,7 +4,6 @@ date: 2026-07-26
 problem_type: architecture_pattern
 category: architecture-patterns
 severity: low
-plan_id: 2026-07-26-v1.139-p1-rust-domain-migration
 tags: [spoke, adapter, conversion-seam, extensions, knowledge-entry, wire-boundary, surface-a]
 last_updated: 2026-07-28
 applies_when: Consuming SPOKE protocol packages in a product that has product-local body content not yet covered by spoke's typed body schema; using SPOKE pure-helper delegates (Surface A) where the caller manages its own storage

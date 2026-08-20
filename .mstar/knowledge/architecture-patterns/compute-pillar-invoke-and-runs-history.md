@@ -46,4 +46,4 @@ mutable history.
 
 - `daemon-api-surface-conventions.md` §12.3 (route table), `compute-module-abi.md`,
   `wasm-host.md`, `web-ui.md` (forward pointer)
-- Tracker rows: `DF-V1122-COMPUTABLE-UI`, `DF-V1122-COMPUTE-ON-TIMELINE` (shipped archive)
+- Tracker rows: `DF-V1122-COMPUTABLE-UI`, `DF-V1122-COMPUTE-ON-TIMELINE`

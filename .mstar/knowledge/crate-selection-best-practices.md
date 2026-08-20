@@ -65,11 +65,11 @@ Changing a decision in §2 follows the flow in §4. Do not silently swap crates,
 
 | # | Module | Decision | Alternative(s) considered | Plan / SSOT linkage |
 |---|--------|----------|---------------------------|---------------------|
-| 2.1 | **JSON-RPC** (daemon ↔ `acp-worker` IPC) | `jsonrpsee-core` + proc macros + custom `RpcTransport` trait + NDJSON via `tokio_util::codec::LinesCodec` | Hand-rolled `serde_json` framing; `json-rpc-rs`; `tokio-jrpc`; `karyon-jsonrpc` | `2026-04-17-v1.4-ws2-orchestration-skeleton.md` Task 5; `orchestration-engine.md` §6 |
-| 2.2 | **Orchestration SessionStorage** | `sqlx` (sqlite + runtime-tokio + macros + migrate + chrono + uuid) on the unified **`state.db`** via the `Arc<SqlitePool>` exposed by `nexus-local-db` (post-WS8). `orchestration_sessions` table added through the same `sqlx migrate` pipeline. | Keep `rusqlite` + `deadpool-sqlite`; separate `.db` file; `sea-orm` | `2026-04-17-v1.4-ws2-orchestration-skeleton.md` Task 3 (depends on WS8) |
-| 2.3 | **`nexus-local-db` / `state.db` engine** | **Migrated from `rusqlite` + `deadpool-sqlite` + bespoke sequential migrations → to `sqlx` (sqlite + runtime-tokio + macros + migrate)** as **V1.4 WS8** (done). Bespoke `Migration` registry replaced by `sqlx::migrate!`-driven `.sql` files. | Keep rusqlite (A-4 rejected by PM 2026-04-17) | `2026-04-17-v1.4-ws8-local-db-sqlx-migration.md` (new plan row); `local-db-refactor.md` revised at WS8 T9 |
+| 2.1 | **JSON-RPC** (daemon ↔ `acp-worker` IPC) | `jsonrpsee-core` + proc macros + custom `RpcTransport` trait + NDJSON via `tokio_util::codec::LinesCodec` | Hand-rolled `serde_json` framing; `json-rpc-rs`; `tokio-jrpc`; `karyon-jsonrpc` |  Task 5; `orchestration-engine.md` §6 |
+| 2.2 | **Orchestration SessionStorage** | `sqlx` (sqlite + runtime-tokio + macros + migrate + chrono + uuid) on the unified **`state.db`** via the `Arc<SqlitePool>` exposed by `nexus-local-db` (post-WS8). `orchestration_sessions` table added through the same `sqlx migrate` pipeline. | Keep `rusqlite` + `deadpool-sqlite`; separate `.db` file; `sea-orm` |  Task 3 (depends on WS8) |
+| 2.3 | **`nexus-local-db` / `state.db` engine** | **Migrated from `rusqlite` + `deadpool-sqlite` + bespoke sequential migrations → to `sqlx` (sqlite + runtime-tokio + macros + migrate)** as **V1.4 WS8** (done). Bespoke `Migration` registry replaced by `sqlx::migrate!`-driven `.sql` files. | Keep rusqlite (A-4 rejected by PM 2026-04-17) |  (new plan row); `local-db-refactor.md` revised at WS8 T9 |
 | 2.4 | **Platform user auth / JWT** | `jsonwebtoken` only | `oauth2` v5.x (deferred — not rejected) | TD-10 deferral (retired device-flow exploration) |
-| 2.5 | **Challenge arithmetic evaluator** | Hand-rolled shunting-yard (current implementation under `crates/nexus42/src/challenge/`) | `meval`; `evalexpr` | §3.5 below (DoS guard TODOs tracked here, not in `status.json`) |
+| 2.5 | **Challenge arithmetic evaluator** | Hand-rolled shunting-yard (current implementation under `crates/nexus42/src/challenge/`) | `meval`; `evalexpr` | §3.5 below (DoS guard TODOs tracked here) |
 | 2.6 | **File watcher** (deferred) | Recommended stack when implemented: `notify` 8 + `notify-debouncer-full` + async mpsc | Raw `RecommendedWatcher` only | `crates/nexus42d/src/workspace/mod.rs` (deferral note) |
 | 2.7 | **Cron / scheduler** (V1.5 — implemented) | **V1.5 WS-D implemented** a hand-rolled clock poller in `crates/nexus-orchestration/src/scheduler/` using `cron` + `chrono-tz`. The four constraints from §3.7 are satisfied. See [`creator-schedule-and-core-context.md`](../specs/creator-schedule-and-core-context.md) for the full design. | `tokio-cron-scheduler` 0.15.x (rejected); hand-rolled `cron` + `chrono-tz` + `sleep_until` (**selected & shipped**) | [`creator-schedule-and-core-context.md`](../specs/creator-schedule-and-core-context.md) |
 | 2.8 | **Layered config** (future) | `figment` + `secrecy` for redaction (when needed) | `config-rs`; hand-rolled | — (not yet scheduled) |
@@ -156,7 +156,7 @@ sqlx = { version = "0.8", default-features = false, features = [
 
 ### 3.3 `nexus-local-db` / `state.db` — sqlx unification (V1.4 WS8)
 
-**Decision**: fully migrated `nexus-local-db` from `rusqlite` + `deadpool-sqlite` + the hand-rolled `Migration` registry **to `sqlx` + `sqlx migrate`**. This was V1.4 workstream **WS8**, completed 2026-04-18; see the dedicated plan row `2026-04-17-v1.4-ws8-local-db-sqlx-migration.md` for the ordered task breakdown.
+**Decision**: fully migrated `nexus-local-db` from `rusqlite` + `deadpool-sqlite` + the hand-rolled `Migration` registry **to `sqlx` + `sqlx migrate`**. This was V1.4 workstream **WS8**, completed 2026-04-18; see the dedicated plan row  for the ordered task breakdown.
 
 **What changes**:
 
@@ -302,10 +302,9 @@ Breaking crate upgrades (e.g. `sqlx 0.8 → 0.9` with API churn) follow the same
 
 Documents and plans that cite this best-practices file:
 
-- `v1.4/delivery-compass.md` — Tech Stack / Risk sections.
 - `orchestration-engine.md` — §4 (graph-flow integration), §5 (capability store), §6 (worker IPC).
 - `creator-schedule-and-core-context.md` — wall-clock deferral clause.
-- `2026-04-17-v1.4-ws2-orchestration-skeleton.md` — Tech Stack + Task 1 (sqlx features) + Task 5 (IPC implementation).
+-  — Tech Stack + Task 1 (sqlx features) + Task 5 (IPC implementation).
 
 Before editing any of the above in a way that changes crate selection, update **this** document first.
 
@@ -313,7 +312,6 @@ Before editing any of the above in a way that changes crate selection, update **
 
 ## 6. References
 
-- V1.4 delivery compass: `delivery-compass.md`
 - Orchestration engine SSOT: [`orchestration-engine.md`](../specs/orchestration-engine.md)
 - Schedule / core context SSOT: [`creator-schedule-and-core-context.md`](../specs/creator-schedule-and-core-context.md)
 - Repository-wide rules: [`AGENTS.md`](AGENTS.md) — §"Documentation & plans", dependency / release discipline.

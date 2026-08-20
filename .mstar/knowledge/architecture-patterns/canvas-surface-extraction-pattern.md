@@ -4,7 +4,6 @@ date: 2026-07-18
 problem_type: architecture_pattern
 category: architecture-patterns
 severity: medium
-plan_id: "2026-07-18-v1.122-timeline-first-canvas (V1.122 P1; compound of timeline-canvas-architecture.md)"
 tags: [canvas, surface-extraction, additive-enum, wire-free, canvas-surface-adapter, timeline, projection]
 applies_when:
   - "Extracting a new Canvas surface from an existing bundled surface (e.g., splitting Timeline from Outline+Timeline)"

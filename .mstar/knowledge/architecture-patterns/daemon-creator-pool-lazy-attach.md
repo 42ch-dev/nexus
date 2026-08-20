@@ -4,7 +4,6 @@ date: 2026-07-16
 problem_type: architecture_pattern
 category: architecture-patterns
 severity: medium
-plan_id: 2026-07-15-v1.119-setup-continue-unblock
 tags: [daemon, creator-pool, bootstrap, setup-wizard, lazy-attach, tauri, first-run]
 applies_when: "Editing creator DB pool lifecycle, Setup Continue path, or any handler that accesses creator data before daemon restart"
 ---

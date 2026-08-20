@@ -4,7 +4,6 @@ date: 2026-07-01
 problem_type: knowledge
 category: architecture-patterns
 severity: low
-plan_id: 2026-07-01-v1.79-manuscript-reading-surface
 tags: [pagination, cursor, has-more, count-ui, wire-contract, local-api, nexus-contracts]
 applies_when: building a UI count/badge affordance over a Nexus cursor-paginated list endpoint
 ---

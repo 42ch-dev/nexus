@@ -4,7 +4,6 @@ date: 2026-08-04
 problem_type: knowledge
 category: architecture-patterns
 severity: medium
-plan_id: 2026-08-04-v1.148-p3-spoke-connect-host-facade-n-c0
 tags: [spoke-connect, connect-host, feature-gate, libp2p, host-capability-manifest, op-refusal, fl-r, n-c0]
 last_updated: 2026-08-08
 applies_when: adopting a heavy optional transport/network dependency behind a feature gate; building an honest capability manifest; landing a "handshake-only, no-write-ops" host surface

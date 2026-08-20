@@ -4,7 +4,6 @@ date: 2026-07-28
 problem_type: architecture_pattern
 category: architecture-patterns
 severity: medium
-plan_id: 2026-07-28-v1.141-p1-adapter-port-architecture-adoption
 tags: [spoke, adapter, baseline-ports, orchestration, surface-b, cas, occ, call-boundary-invariant, mock-test-pattern]
 last_updated: 2026-08-08
 applies_when: Consuming SPOKE ≥ 0.3.0 adapter-port + injection-orchestration architecture from a product adapter boundary (Surface B adoption); deciding between pure delegates (Surface A) and port+orchestrator (Surface B); verifying CAS through orchestrators; enforcing call-boundary invariant mechanically

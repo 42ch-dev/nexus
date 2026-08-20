@@ -12,8 +12,6 @@
 - [local-runtime-boundary.md](local-runtime-boundary.md) — CLI vs daemon vs Agent topology
 - [creator-workflow.md](creator-workflow.md) — FL-E stages; Work read/patch tools
 
-**Iteration compass**: `delivery-compass.md`
-
 ---
 
 ## 1. Purpose
@@ -223,8 +221,6 @@ DF-47 row in the deferred tracker is narrowed. Full DF-46 capability matrix (all
 
 **Status**: **Shipped** (V1.42 P3 — 2026-06-11)
 
-**Plan**: `2026-06-11-v1.42-agent-tool-production-wiring.md`
-
 **Shipped scope**:
 
 1. `DaemonToolDispatch` trait in `nexus-orchestration` for daemon-side `nexus.*` tool dispatch.
@@ -373,7 +369,7 @@ Required side effects: no platform HTTP attempt; audit row recorded with `audit_
 
 ## 11. Contract gap list
 
-This section is informational for P3 and documents current contract gaps. P3 does **not** add schemas or run codegen. The future codegen envelope work (gap table below) is consolidated in the deferred-features tracker §2.6 — DR-23.
+This section is informational for P3 and documents current contract gaps. P3 does **not** add schemas or run codegen. The future codegen envelope work (gap table below) is DR-23.
 
 Current repo snapshot checked for this spec:
 
@@ -381,7 +377,7 @@ Current repo snapshot checked for this spec:
 - `crates/nexus-contracts/src/generated/context_assembly_v1.rs` already contains generated `ContextAssembleRequestV1` / `ContextAssembleResponseV1` from `schemas/platform/context-assembly-v1.schema.json`, but its comments mark the shape as deferred/direct platform cloud + CLI local assembly, not the V1.34 daemon tool wrapper.
 - `crates/nexus-contracts/src/local/acp/types.rs` contains Nexus-owned ACP session/protocol DTOs, not host tool execution DTOs.
 
-**Tracked DR-23** — the gap table below documents current contract gaps; the codegen closure is tracked in the deferred-features tracker §2.6.
+**Tracked DR-23** — the gap table below documents current contract gaps; the codegen closure is tracked in future work.
 
 | Spec §5 / handler shape | Current `nexus-contracts` status | Gap / future codegen note |
 | --- | --- | --- |

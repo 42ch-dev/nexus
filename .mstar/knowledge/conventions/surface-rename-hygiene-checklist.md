@@ -5,7 +5,6 @@ category: conventions
 severity: medium
 date: 2026-07-05
 last_updated: 2026-07-06
-plan_id: 2026-07-05-v1.90-closure
 tags: [rename, hygiene, grep, local-api, daemon-api, codegen, docs, anchor, stutter]
 ---
 

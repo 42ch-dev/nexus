@@ -4,7 +4,6 @@ date: 2026-08-14
 problem_type: knowledge
 category: architecture-patterns
 severity: medium
-plan_id: 2026-08-14-v1.164-p2-mental-belief-dialect-mindstate-checker
 tags: [spoke, adapter-boundary, layering, validate-gate, pure-storage, sole-consumer, mind-state]
 last_updated: 2026-08-14
 applies_when: Adding any storage that is written through a spoke-operation validator (validate_* helpers, future mind-axis ops); deciding where a validate gate belongs; any PR that would add spoke-schemas/spoke-operations to a crate other than nexus-spoke-adapter

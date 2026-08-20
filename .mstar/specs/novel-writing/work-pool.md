@@ -11,8 +11,6 @@
 - [cli-spec.md](../cli-spec.md) — `creator works` command group
 - [local-db-schema.md](../local-db-schema.md) — table definitions
 
-**Iteration compass**: `delivery-compass.md` (Shipped)
-
 ---
 
 ## 1. Purpose

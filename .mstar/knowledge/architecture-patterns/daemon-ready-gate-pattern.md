@@ -5,7 +5,6 @@ last_updated: 2026-07-15
 problem_type: architecture-pattern
 category: architecture-patterns
 severity: medium
-plan_id: V1.94-P-last (compound of desktop onboarding & IA pass); V1.96 refinements from 2026-07-07-v1.96-implement-rework; V1.97 refinements from 2026-07-07-v1.97-desktop-first-launch-hardening; V1.101 Class B PATH enrichment; V1.105 DaemonLaunchGate + D2 always-start; V1.110 three-valued port-probe gate (FB-D1); V1.118 no-Profile boot supersession note
 tags: [daemon-runtime, sidecar, health-probe, desktop-shell, setup-wizard, daemon-status-bar, gate, two-consumer-pattern, late-subscription-race, stderr-capture, bounded-timeout, tauri-v2-sidecar-resolution, stopped-initial-state, attach-without-ownership, path-enrichment, agent-scan, daemon-launch-gate, d2-always-start]
 applies_when: gating main-UI entry on daemon readiness; designing any "wait for service X before entering app" UX; wiring observers to a process lifecycle event stream that may fire before subscription; surfacing supervised-process crash reasons to the user
 ---
@@ -85,7 +84,7 @@ V1.110 optimized the cold-start path. Previously `start_with_budget` ran the ful
 
 ## V1.96 refinements: late-subscription race + diagnostic surfacing
 
-V1.96 (plan `2026-07-07-v1.96-implement-rework`) hit a P0 blocker: the setup wizard Step 2 hung indefinitely in "Starting daemon…" on a clean `~/.nexus42/` first launch. RCA revealed **three** consumer-side root causes (pre-V1.118, the daemon also crashed within milliseconds when `WorkspaceState::initialize()` found no `active_creator_id`; the wizard just never learned about it). The fixes distill into four durable rules that apply to **any** observer of a process lifecycle event stream, not just the daemon-ready gate.
+V1.96 () hit a P0 blocker: the setup wizard Step 2 hung indefinitely in "Starting daemon…" on a clean `~/.nexus42/` first launch. RCA revealed **three** consumer-side root causes (pre-V1.118, the daemon also crashed within milliseconds when `WorkspaceState::initialize()` found no `active_creator_id`; the wizard just never learned about it). The fixes distill into four durable rules that apply to **any** observer of a process lifecycle event stream, not just the daemon-ready gate.
 
 > **V1.118 supersession (daemon no-Profile boot):** After V1.118 P0 ships, clean home reaches T0 health without `active_creator_id`; the gate opens on `running` and Profile selection is post-gate business flow. Crash-on-no-creator RCA below is **pre-V1.118** only. See [daemon-runtime.md §17](../../specs/daemon-runtime.md) + [desktop-shell.md §13.11](../../specs/desktop-shell.md).
 
@@ -131,11 +130,11 @@ Rules 5+6+7 together make the consumer resilient to **any** timing of the event 
 
 ### Source
 
-Distilled from V1.96 plan `2026-07-07-v1.96-implement-rework` (T3 sidecar stderr capture + T4 mount-probe/starting-branch/timeout/detail-render). Iteration-scoped RCA with code sketches: `daemon-startup-rca.md` (snapshot; promoted here).
+Distilled from V1.96 . Iteration-scoped RCA with code sketches: `daemon-startup-rca.md` (snapshot; promoted here).
 
 ## V1.97 refinements: initial-state correctness + Tauri v2 spawn-name resolution
 
-V1.97 (plan `2026-07-07-v1.97-desktop-first-launch-hardening`) ran the first real clean-state desktop smoke against the bundled sidecar and found **two latent first-launch blockers** that had been present since V1.66 but never surfaced (no prior iteration had actually spawned the sidecar end-to-end). Both distil into durable rules that apply to the supervisor state machine and the Tauri shell-plugin contract.
+V1.97 () ran the first real clean-state desktop smoke against the bundled sidecar and found **two latent first-launch blockers** that had been present since V1.66 but never surfaced (no prior iteration had actually spawned the sidecar end-to-end). Both distil into durable rules that apply to the supervisor state machine and the Tauri shell-plugin contract.
 
 ### Rule 9: a freshly constructed SidecarManager starts in `Stopped`, never `Starting`
 
@@ -197,7 +196,7 @@ Rules 9 + 10 fix the supervisor state machine so a real spawn is actually attemp
 
 **Why:** Authors must pick an ACP Agent first, but scan needs a Ready daemon. Making wait app-level (not a wizard preference) keeps the product narrative honest while preserving the V1.100 bootstrap IPC contract at a later step.
 
-**Source:** V1.105 plans `2026-07-10-v1.105-daemon-fullscreen-gate` + `wizard-ia-reorder` + `portrait-shell-steps`; masters `desktop-shell.md` §13.10 / `web-ui.md` §29.13.
+**Source:** V1.105  + `wizard-ia-reorder` + `portrait-shell-steps`; masters `desktop-shell.md` §13.10 / `web-ui.md` §29.13.
 
 > Residual `R-V197-SMOKE-CLEAN-STATE` was closed by V1.100 P0. V1.105 moves bootstrap **after** Ready (Workspace Continue) while keeping always-start. **V1.118 P0 supersedes the no-creator boot failure:** clean home reaches T0 health without `active_creator_id`; bootstrap remains optional wizard convenience (§13.11 / daemon-runtime §17).
 
@@ -219,4 +218,4 @@ V1.101 P0 closed `R-V1100P0SMOKE-AGENT-SCAN`: macOS GUI / Tauri-launched daemons
 
 ### Source
 
-Distilled from V1.97 plan `2026-07-07-v1.97-desktop-first-launch-hardening` (T1 prototype intake + T4 sidecar FSM + T5 sidecar spawn-name fix `ab618ee9`, verified by clean-state smoke re-run). Tauri v2 sidecar resolution rule confirmed against `https://v2.tauri.app/develop/sidecar` ("expects only the filename of the sidecar, not its full path"). Iteration-scoped invariants + prototype intake rule: `sidecar-startup-state-machine.md` (snapshot; durable rules promoted here). **Rule 13 distilled from V1.100 P0** plan `2026-07-08-v1.100-desktop-clean-state-first-launch` (T1 contract + T2 `ensure_setup_bootstrap` + gating; verified by clean-state smoke 2026-07-09). **Rule 14 distilled from V1.101 P0** plan `2026-07-09-v1.101-agent-detection-picker` (`path_enrichment.rs` + AgentPicker scan path; residual `R-V1100P0SMOKE-AGENT-SCAN` closed). **Rule 15 distilled from V1.105** P0–P2 (`DaemonLaunchGate`, D2 always-start, Agent→Workspace→Done, portrait shell).
+Distilled from V1.97 . Tauri v2 sidecar resolution rule confirmed against `https://v2.tauri.app/develop/sidecar` ("expects only the filename of the sidecar, not its full path"). Iteration-scoped invariants + prototype intake rule: `sidecar-startup-state-machine.md` (snapshot; durable rules promoted here). **Rule 13 distilled from V1.100 P0** . **Rule 14 distilled from V1.101 P0** . **Rule 15 distilled from V1.105** P0–P2 (`DaemonLaunchGate`, D2 always-start, Agent→Workspace→Done, portrait shell).

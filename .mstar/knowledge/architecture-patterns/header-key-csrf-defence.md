@@ -4,7 +4,6 @@ date: 2026-07-05
 problem_type: architecture-decision
 category: architecture-patterns
 severity: medium
-plan_id: 2026-07-05-v1.92-closure
 tags: [csrf, security, auth, origin-allowlist, header-key, remote-bind, local-first]
 applies_when: considering adding a CSRF token framework (double-submit cookie / synchronizer token / SameSite session) to a Daemon API that authenticates remote clients via a custom request header
 ---

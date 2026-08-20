@@ -14,7 +14,6 @@
 - [creator-workflow.md](creator-workflow.md) — FL-E stage ↔ preset mapping
 - [novel-writing/work-pool.md](novel-writing/work-pool.md) — pool `active` default
 
-**Iteration compass**: `delivery-compass.md`  
 **Tracker**: BL-12
 
 ---

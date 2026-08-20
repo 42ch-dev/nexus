@@ -4,7 +4,6 @@ date: 2026-07-02
 problem_type: knowledge
 category: architecture-patterns
 severity: medium
-plan_id: 2026-07-01-v1.81-creator-soul-narrative-and-world-foundation
 tags: [read-path-cost, live-aggregate, fingerprint-cache, polling, bounded-endpoint, sound-count, local-api, reliability, nexus-contracts]
 applies_when: a polled local endpoint's response contract requires a live "current" aggregate that is expensive to compute exactly, under a small-write / large-read ratio
 ---

@@ -14,7 +14,6 @@
 - [entity-scope-model.md](../entity-scope-model.md) — World-bound extract mode
 - [world-kb-runtime-architecture.md](../world-kb-runtime-architecture.md) — `kb.extract_work` on-demand path
 
-**Iteration compass**: `delivery-compass.md`  
 **Tracker**: DF-69
 
 ---
@@ -132,7 +131,6 @@ Minimum preset surface:
 At V1.44 P-last hygiene:
 
 - [ ] Promote Status to **Shipped (V1.44)** or merge into `novel-writing/quality-loop.md` §3 if section stabilizes.
-- [ ] Update deferred tracker DF-69 → shipped archive.
 
 ---
 

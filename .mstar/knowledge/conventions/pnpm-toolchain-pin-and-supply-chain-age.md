@@ -4,7 +4,6 @@ date: 2026-08-14
 problem_type: knowledge
 category: conventions
 severity: medium
-plan_id: 2026-08-14-v1.164-p1-spoke-010-upgrade-observation-passthrough
 tags: [pnpm, toolchain, supply-chain, minimumReleaseAge, lockfile, ci-pin, allowBuilds]
 last_updated: 2026-08-19
 applies_when: Installing or upgrading npm deps (especially same-day releases, spoke lockstep bumps); any pnpm install failure mentioning ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION, ERR_PNPM_IGNORED_BUILDS, or MODULE_NOT_FOUND after a partial install

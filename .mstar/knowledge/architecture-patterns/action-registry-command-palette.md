@@ -4,7 +4,6 @@ date: 2026-07-12
 problem_type: architecture-pattern
 category: architecture-patterns
 severity: medium
-plan_id: 2026-07-12-v1.111-canvas-command-palette
 tags: [command-palette, action-registry, useSyncExternalStore, useHotkey, discoverability, a11y]
 applies_when:
   - "adding a global ⌘K/Ctrl+K command palette or keyboard-driven action surface"

@@ -4,7 +4,6 @@ date: 2026-07-18
 problem_type: architecture_pattern
 category: architecture-patterns
 severity: medium
-plan_id: "2026-07-18-v1.122-timeline-first-canvas (V1.122 P1; compound of timeline-canvas-architecture.md)"
 tags: [canvas, scope, world-vs-work, data-composition, spine-projection, timeline]
 applies_when:
   - "Deciding which data sources a Canvas surface should compose"

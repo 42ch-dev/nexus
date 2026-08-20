@@ -4,7 +4,6 @@ date: 2026-08-07
 problem_type: best_practice
 category: architecture-patterns
 severity: high
-plan_id: 2026-08-06-v1.153-p1-connect-inbound-write-ops-n-c1
 applies_when: [reviewing or building a scoped or multi-tenant write path, adding OCC/CAS updates on rows keyed by id+revision only, adding create paths for relations or other endpoint-bearing rows, exposing OCC reject details to a peer or client]
 tags: [connect, scope-verification, occ, cas, world-scope, security-review, cross-scope-write]
 ---

@@ -4,7 +4,6 @@ date: 2026-07-23
 problem_type: architecture-pattern
 category: architecture-patterns
 severity: medium
-plan_id: 2026-07-23-v1.134-p0-desktop-startup-500
 tags: [vite, proxy, daemon, ECONNREFUSED, startup, desktop-dev]
 applies_when: debugging desktop/web startup HTTP 500s; wiring Vite proxy to local daemon; placing queries outside DaemonLaunchGate
 last_updated: 2026-07-23

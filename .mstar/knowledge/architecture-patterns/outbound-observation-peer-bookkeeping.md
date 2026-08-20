@@ -4,7 +4,6 @@ date: 2026-08-08
 problem_type: architecture_pattern
 category: architecture-patterns
 severity: medium
-plan_id: 2026-08-08-v1.155-p0-n-c3-multi-host-production
 tags: [multi-host, peer-bookkeeping, outbound-observation, local-first, host-id, peer-hosts, spoke-connect, n-c3]
 applies_when: persisting observations of remote peers/hosts from a local-first node; deciding what identity to key peer state on; exposing a "what have I seen" list without fabricating data
 ---

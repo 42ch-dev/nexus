@@ -2,7 +2,7 @@
 
 **Status**: Normative — V1.74 Shipped (§2 `kb_relationships` store + symmetric read projection; prior V1.51 §5.5 LLM pathway + §6 OCC extension). **V1.139 SPOKE alignment**: crate `nexus-kb` merged INTO `nexus-knowledge`; `KeyBlock` → `KnowledgeEntry` (technical wire name). Crate table §2 updated to reflect current topology. Full terminology sweep deferred to P3.  
 **Authority**: Implementation SSOT below normative specs. Does not override [entity-scope-model.md](../specs/entity-scope-model.md) or [novel-writing/workflow-profile.md](../specs/novel-writing/workflow-profile.md).  
-**Iteration**: `delivery-compass.md` · `delivery-compass.md` (SPOKE alignment)
+**Iteration**:  ·  (SPOKE alignment)
 
 ---
 
