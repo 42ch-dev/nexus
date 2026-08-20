@@ -3906,6 +3906,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "nexus-module-manifest"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+]
+
+[[package]]
 name = "nexus-moment-context-assembly"
 version = "0.1.0"
 dependencies = [
@@ -4008,6 +4017,7 @@ version = "0.1.0"
 dependencies = [
  "include_dir",
  "nexus-contracts",
+ "nexus-module-manifest",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -4043,6 +4053,7 @@ dependencies = [
  "nexus-home-layout",
  "nexus-knowledge",
  "nexus-local-db",
+ "nexus-module-manifest",
  "nexus-moment-context-assembly",
  "nexus-narrative",
  "nexus-orchestration",

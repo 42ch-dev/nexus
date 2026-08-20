@@ -1,0 +1,111 @@
+[
+  {
+    "label": "wrong ABI version",
+    "manifest": {
+      "module_id": "m",
+      "name": "M",
+      "version": "1.0.0",
+      "nexus_abi_version": 2,
+      "required_key_block_types": [],
+      "compute_export": "compute",
+      "init_export": "init"
+    },
+    "expect": "nexus_abi_version must be 1"
+  },
+  {
+    "label": "uppercase wasm_sha256",
+    "manifest": {
+      "module_id": "m",
+      "name": "M",
+      "version": "1.0.0",
+      "nexus_abi_version": 1,
+      "required_key_block_types": [],
+      "compute_export": "compute",
+      "init_export": "init",
+      "wasm_sha256": "7ED89295BA49E06652EEF8E3A085FA35ABAE5FCCCC3DE3700B2F03CA098BCD6F"
+    },
+    "expect": "wasm_sha256 must be 64 lowercase hex"
+  },
+  {
+    "label": "short wasm_sha256",
+    "manifest": {
+      "module_id": "m",
+      "name": "M",
+      "version": "1.0.0",
+      "nexus_abi_version": 1,
+      "required_key_block_types": [],
+      "compute_export": "compute",
+      "init_export": "init",
+      "wasm_sha256": "abc"
+    },
+    "expect": "wasm_sha256 must be 64 lowercase hex"
+  },
+  {
+    "label": "empty compute_export",
+    "manifest": {
+      "module_id": "m",
+      "name": "M",
+      "version": "1.0.0",
+      "nexus_abi_version": 1,
+      "required_key_block_types": [],
+      "compute_export": "",
+      "init_export": "init"
+    },
+    "expect": "compute_export must be non-empty"
+  },
+  {
+    "label": "empty module_id",
+    "manifest": {
+      "module_id": "",
+      "name": "M",
+      "version": "1.0.0",
+      "nexus_abi_version": 1,
+      "required_key_block_types": [],
+      "compute_export": "compute",
+      "init_export": "init"
+    },
+    "expect": "module_id must be non-empty"
+  },
+  {
+    "label": "traversal module_id",
+    "manifest": {
+      "module_id": "../evil",
+      "name": "M",
+      "version": "1.0.0",
+      "nexus_abi_version": 1,
+      "required_key_block_types": [],
+      "compute_export": "compute",
+      "init_export": "init"
+    },
+    "expect": "module_id is not path-safe"
+  },
+  {
+    "label": "module_id with path separator",
+    "manifest": {
+      "module_id": "a/b",
+      "name": "M",
+      "version": "1.0.0",
+      "nexus_abi_version": 1,
+      "required_key_block_types": [],
+      "compute_export": "compute",
+      "init_export": "init"
+    },
+    "expect": "module_id is not path-safe"
+  },
+  {
+    "label": "non-object invocation schema fragment",
+    "manifest": {
+      "module_id": "m",
+      "name": "M",
+      "version": "1.0.0",
+      "nexus_abi_version": 1,
+      "required_key_block_types": [],
+      "compute_export": "compute",
+      "init_export": "init",
+      "schemas": {
+        "invocation": "not an object"
+      }
+    },
+    "expect": "schemas.invocation must be a JSON object"
+  }
+]

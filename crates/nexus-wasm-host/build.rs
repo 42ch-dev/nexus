@@ -33,9 +33,6 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::SystemTime;
 
-use serde_json::Value;
-use sha2::{Digest, Sha256};
-
 mod build_walk;
 
 /// Module ids that must be embedded. Each id must match a source crate under
@@ -165,56 +162,19 @@ fn build_module(id: &str, modules_root: &Path, embedded_root: &Path) {
     inject_wasm_sha256(id, &dest_wasm, &dest_manifest);
 }
 
-/// Lowercase hex encoding (avoids the `format_collect` lint and a hex dep).
-fn hex_encode(bytes: &[u8]) -> String {
-    use std::fmt::Write as _;
-    let mut out = String::with_capacity(bytes.len() * 2);
-    for b in bytes {
-        let _ = write!(out, "{b:02x}");
-    }
-    out
-}
-
 /// Inject `wasm_sha256` into the staged `manifest.json`, computed from the
 /// staged `.wasm` bytes. The embedded manifest always declares the hash of
 /// the artifact it ships with, so the loader's content-based pairing check
 /// can never reject an embedded module. The source `modules/<id>/manifest.json`
 /// is left untouched; if it carries a `wasm_sha256` of its own, this value
 /// (derived from the actual compiled bytes) wins in the embedded copy.
+///
+/// V1.170 P0 (AR-8): delegates to the shared helper in `nexus-module-manifest`
+/// (byte-identical staged-manifest bar — same semantics, same serialization).
 fn inject_wasm_sha256(id: &str, wasm_path: &Path, manifest_path: &Path) {
-    let wasm_bytes = fs::read(wasm_path).unwrap_or_else(|e| {
-        die(&format!(
-            "module `{id}`: read embedded wasm {}: {e}",
-            wasm_path.display()
-        ))
-    });
-    let digest = Sha256::digest(&wasm_bytes);
-    let hex = hex_encode(&digest);
-    let manifest_bytes = fs::read(manifest_path).unwrap_or_else(|e| {
-        die(&format!(
-            "module `{id}`: read embedded manifest {}: {e}",
-            manifest_path.display()
-        ))
-    });
-    let mut value: Value = serde_json::from_slice(&manifest_bytes).unwrap_or_else(|e| {
-        die(&format!(
-            "module `{id}`: parse embedded manifest {}: {e}",
-            manifest_path.display()
-        ))
-    });
-    value["wasm_sha256"] = Value::String(hex);
-    let out = serde_json::to_string_pretty(&value).unwrap_or_else(|e| {
-        die(&format!(
-            "module `{id}`: serialize embedded manifest {}: {e}",
-            manifest_path.display()
-        ))
-    });
-    fs::write(manifest_path, out).unwrap_or_else(|e| {
-        die(&format!(
-            "module `{id}`: write embedded manifest {}: {e}",
-            manifest_path.display()
-        ))
-    });
+    if let Err(e) = nexus_module_manifest::inject_wasm_sha256(id, wasm_path, manifest_path) {
+        die(&e);
+    }
 }
 
 /// Emit one `cargo:rerun-if-changed` directive per file under `dir` (walk).

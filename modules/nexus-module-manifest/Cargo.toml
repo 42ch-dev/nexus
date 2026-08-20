@@ -1,0 +1,30 @@
+# nexus-module-manifest — shared compute-module manifest contract + wasm_sha256 injection
+#
+# This is a STANDALONE crate (V1.170 P0, AR-1): it is NOT a member of the nexus
+# workspace. The root workspace `exclude`s it so workspace members
+# (`nexus-wasm-host`, later `apps/nexus42`) can path-depend on it without
+# conflicting with Cargo's workspace resolution. Build/test it from this
+# directory with:
+#
+#   cargo test
+[package]
+name = "nexus-module-manifest"
+version = "0.1.0"
+edition = "2021"
+authors = ["42ch"]
+license = "Apache-2.0"
+description = "Shared compute-module manifest types, validation core, and wasm_sha256 injection for Nexus compute modules (V1.170 P0, AR-8)."
+publish = true
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# Matches the workspace pin (root Cargo.toml `sha2 = "0.10"`).
+sha2 = "0.10"
+
+[dev-dependencies]
+tempfile = "3"
+
+# Standalone workspace root so `cargo build`/`cargo test` here does not
+# traverse up into the nexus workspace.
+[workspace]

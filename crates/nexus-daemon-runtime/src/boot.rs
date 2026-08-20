@@ -285,7 +285,16 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
                 Err(e) => tracing::warn!(error = %e, "embedded WASM module warmup had errors"),
             }
             // T3: user-installed modules under ~/.nexus42/modules/.
-            let user_modules_dir = nexus_home_layout::user_modules_dir(state.nexus_home());
+            // nexus-home-layout helpers take the RAW user home and join
+            // `.nexus42` internally (conventions/nexus-home-layout-path-helpers.md);
+            // passing `state.nexus_home()` (already `<home>/.nexus42`) would
+            // double-nest to `<home>/.nexus42/.nexus42/modules` and miss the
+            // pair `nexus42 compute install` writes to the AR-9 path.
+            let raw_home = state
+                .nexus_home()
+                .parent()
+                .ok_or_else(|| anyhow::anyhow!("nexus_home has no parent directory"))?;
+            let user_modules_dir = nexus_home_layout::user_modules_dir(raw_home);
             match cache.warm_dir(&engine, &user_modules_dir) {
                 Ok(n) => {
                     if n > 0 {

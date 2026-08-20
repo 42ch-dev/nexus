@@ -81,6 +81,11 @@ nexus-knowledge = { path = "../../crates/nexus-knowledge" }
 # V1.145 P2 — MCA WorldKB read routes through the spoke-adapter boundary
 # (`SpokeBackedKbStore`), injected at the `assemble_moment` wiring site.
 nexus-spoke-adapter = { path = "../../crates/nexus-spoke-adapter" }
+# V1.170 P0 (AR-9): shared compute-module manifest contract + wasm_sha256
+# injection for the `nexus42 compute` group. Non-workspace path dep — legal
+# because the root workspace `exclude`s the crate (AR-1). No `connect-host`
+# feature: the compute group never pulls libp2p into the default graph.
+nexus-module-manifest = { path = "../../modules/nexus-module-manifest" }
 # V1.148 P3 N-C0 (DF-72): Connect Host facade, opt-in via feature
 # `connect-host` below. spoke-connect pulls libp2p 0.56 transitively — the
 # default build (and `daemon start`) must stay libp2p-free, so this dep is

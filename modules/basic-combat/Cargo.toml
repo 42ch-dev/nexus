@@ -21,12 +21,13 @@ publish = false
 crate-type = ["cdylib"]
 
 [dependencies]
-serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-# Global allocator for wasm32-unknown-unknown (std has no default allocator on
-# this target). dlmalloc grows linear memory on demand; the host's memory cap
-# bounds it.
-dlmalloc = { version = "0.2", features = ["global"] }
+# The official module SDK owns every ABI-facing symbol: `nexus_entry!` generates
+# the `alloc`/`init`/`compute` exports and wires the global allocator (dlmalloc,
+# wasm-target-only) — this crate no longer declares any `#[no_mangle]` code.
+# Path form for in-repo development (AR-1: published releases use
+# `nexus-module-sdk = "0.1"`).
+nexus-module-sdk = { path = "../nexus-module-sdk" }
 
 [profile.release]
 opt-level = "z"

@@ -1,0 +1,34 @@
+# nexus-module-sdk — official SDK for Nexus compute modules (V1.170 P0, AR-1..AR-6)
+#
+# This is a STANDALONE crate: it is NOT a member of the nexus workspace. Module
+# crates consume it via crates.io (`nexus-module-sdk = "0.1"`) or a path
+# override (`{ path = "../nexus-module-sdk" }`). Build/test it from this
+# directory with:
+#
+#   cargo test
+#
+# The SDK compiles for host targets (its own `cargo test` runs in CI) and for
+# `wasm32-unknown-unknown` (consumed by module cdylibs). Only final module
+# crates declare `crate-type = ["cdylib"]`.
+[package]
+name = "nexus-module-sdk"
+version = "0.1.0"
+edition = "2021"
+authors = ["42ch"]
+license = "Apache-2.0"
+description = "Official SDK for Nexus compute modules: ABI export shims, typed envelope, host-import wrappers, and manifest helper (V1.170 P0)."
+publish = true
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Global allocator for wasm32-unknown-unknown (std provides none on this
+# target). Wasm-target-only: host-target builds keep std's allocator so SDK
+# unit tests run on the host.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+dlmalloc = { version = "0.2", features = ["global"] }
+
+# Standalone workspace root so `cargo build`/`cargo test` here does not
+# traverse up into the nexus workspace.
+[workspace]

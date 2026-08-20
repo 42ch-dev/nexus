@@ -1,0 +1,38 @@
+# nexus-module-test — ABI-conformance mini-host for Nexus compute modules
+# (V1.170 P0, AR-10).
+#
+# This is a STANDALONE crate: it is NOT a member of the nexus workspace. Module
+# crates add it as a host-target DEV-dependency to run ABI-conformance tests
+# against their compiled `.wasm`. Build/test it from this directory with:
+#
+#   cargo test
+#
+# The SDK path dep is required by the AR-10 signature
+# (`run(wasm_bytes, &ModuleManifest, &ComputeInput) -> Result<ComputeOutput,
+# MiniHostError>`) — the typed envelope/manifest are SDK-owned types (AR-2/AR-3).
+# This crate never lands in a wasm artifact (host-target only), so the SDK's
+# closed dependency list (AR-1) does not apply to it.
+[package]
+name = "nexus-module-test"
+version = "0.1.0"
+edition = "2021"
+authors = ["42ch"]
+license = "Apache-2.0"
+description = "ABI-conformance mini-host for Nexus compute modules: wasmtime-based test harness (V1.170 P0, AR-10)."
+publish = true
+
+[dependencies]
+# Matches the nexus-wasm-host pin (crates/nexus-wasm-host/Cargo.toml).
+wasmtime = "46"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+nexus-module-sdk = { path = "../nexus-module-sdk" }
+
+[dev-dependencies]
+# Compiles WebAssembly text → binary for unit tests that exercise the ABI
+# without shipping a real module (same convention as nexus-wasm-host).
+wat = "1"
+
+# Standalone workspace root so `cargo build`/`cargo test` here does not
+# traverse up into the nexus workspace.
+[workspace]

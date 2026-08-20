@@ -1,0 +1,34 @@
+{
+  "module_id": "template-dice",
+  "name": "Template Dice",
+  "version": "0.1.0",
+  "nexus_abi_version": 1,
+  "description": "SDK hello-world demo module (template scaffold): deterministic dice roll + state tick on a computable state path. Copy modules/_template/ to scaffold a new module and adapt the module_id, crate name, and logic.",
+  "author": "42ch",
+  "required_key_block_types": [],
+  "compute_export": "compute",
+  "init_export": "init",
+  "host_functions": [],
+  "battle_report_kind": "dice",
+  "schemas": {
+    "invocation": {
+      "type": "object",
+      "properties": {
+        "sides": {"type": "integer", "minimum": 1}
+      },
+      "additionalProperties": true
+    },
+    "battle_report": {
+      "type": "object",
+      "properties": {
+        "kind": {"type": "string", "const": "dice"},
+        "block_id": {"type": "string"},
+        "sides": {"type": "integer"},
+        "roll": {"type": "integer"},
+        "ticks": {"type": "integer"}
+      },
+      "required": ["kind", "sides", "roll"],
+      "additionalProperties": true
+    }
+  }
+}
