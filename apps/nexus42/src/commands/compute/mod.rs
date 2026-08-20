@@ -9,7 +9,7 @@
 //! | Code | Meaning |
 //! |------|---------|
 //! | 0    | success |
-//! | 1    | build/toolchain failure (missing `wasm32-unknown-unknown` sysroot gets the honest message) |
+//! | 1    | build/toolchain failure; install I/O/home errors (generic CLI failure) |
 //! | 2    | manifest validation failure (field list; `--json` machine-readable) |
 //! | 3    | `wasm_sha256` pairing mismatch (`validate --wasm`, `install`) |
 //! | 4    | daemon unreachable / run rejected (daemon error surfaced verbatim) |
@@ -29,8 +29,12 @@ use crate::errors::{CliError, Result};
 
 /// AR-9 exit codes.
 mod exit {
-    /// Build/toolchain failure.
+    /// Build/toolchain failure; also the generic CLI failure code for
+    /// install I/O/home errors (AR-9 reserves 2/3/4 for validation,
+    /// pairing, and daemon failures respectively).
     pub const BUILD: i32 = 1;
+    /// Install I/O / home-resolution failure (generic CLI failure code).
+    pub const IO: i32 = 1;
     /// Manifest validation failure.
     pub const VALIDATION: i32 = 2;
     /// `wasm_sha256` pairing mismatch.
@@ -179,6 +183,17 @@ fn cmd_build(manifest_path: &Path, release: bool) -> Result<()> {
     }
     let module_id = &manifest.module_id;
 
+    // The manifest-supplied id becomes a directory name under dist/ — apply
+    // the same single-path-component safety rule as install before staging
+    // (I4): a value containing `../` or an absolute path must not escape the
+    // intended dist tree.
+    nexus_home_layout::validate_run_id_safe(module_id).map_err(|e| {
+        compute_exit(
+            exit::VALIDATION,
+            format!("invalid manifest.module_id {module_id:?}: {e}"),
+        )
+    })?;
+
     // Same invocation the wasm-host build.rs uses (compile_module).
     let mut cmd = Command::new("cargo");
     cmd.arg("build")
@@ -284,7 +299,23 @@ fn cmd_build(manifest_path: &Path, release: bool) -> Result<()> {
 ///
 /// Exit 2 on manifest failure (field-level), exit 3 on pairing mismatch.
 fn cmd_validate(manifest_path: &Path, wasm_path: Option<&Path>, json_output: bool) -> Result<()> {
-    let manifest_bytes = read_json_file_validation(manifest_path)?;
+    // A missing/unreadable manifest is a validation failure with the same
+    // field-level shape as any other error — `--json` callers must get the
+    // promised `{valid, manifest, errors}` document, not a bare message (I8).
+    let manifest_bytes = match std::fs::read(manifest_path) {
+        Ok(bytes) => bytes,
+        Err(e) => {
+            return fail_validation(
+                manifest_path,
+                &[FieldError {
+                    field: "manifest".to_string(),
+                    message: format!("cannot read {}: {e}", manifest_path.display()),
+                }],
+                json_output,
+                exit::VALIDATION,
+            );
+        }
+    };
     let manifest: ModuleManifest = match serde_json::from_slice(&manifest_bytes) {
         Ok(m) => m,
         Err(e) => {
@@ -358,19 +389,7 @@ fn fail_validation(
     exit_code: i32,
 ) -> Result<()> {
     if json_output {
-        let errors_json: Vec<Value> = errors
-            .iter()
-            .map(|e| serde_json::json!({ "field": e.field, "message": e.message }))
-            .collect();
-        println!(
-            "{}",
-            serde_json::to_string_pretty(&serde_json::json!({
-                "valid": false,
-                "manifest": manifest_path.display().to_string(),
-                "errors": errors_json,
-            }))
-            .expect("json serialization cannot fail")
-        );
+        println!("{}", validation_failure_json(manifest_path, errors));
     } else {
         println!("✗ Invalid manifest ({} error(s)):", errors.len());
         for e in errors {
@@ -381,6 +400,21 @@ fn fail_validation(
         exit_code,
         format!("manifest validation failed: {} error(s)", errors.len()),
     ))
+}
+
+/// The machine-readable `--json` failure verdict (pure formatter so tests
+/// pin the exact shape without capturing stdout).
+fn validation_failure_json(manifest_path: &Path, errors: &[FieldError]) -> String {
+    let errors_json: Vec<Value> = errors
+        .iter()
+        .map(|e| serde_json::json!({ "field": e.field, "message": e.message }))
+        .collect();
+    serde_json::to_string_pretty(&serde_json::json!({
+        "valid": false,
+        "manifest": manifest_path.display().to_string(),
+        "errors": errors_json,
+    }))
+    .expect("json serialization cannot fail")
 }
 
 /// A field-level validation error.
@@ -395,8 +429,14 @@ struct FieldError {
 fn field_error(message: String) -> FieldError {
     let field = message
         .find('`')
-        .and_then(|start| message[start + 1..].find('`').map(|end| start + 1 + end))
-        .map(|end| message[..end].rsplit('`').next().unwrap_or("").to_string())
+        .and_then(|start| {
+            // Extract the bytes BETWEEN the two backticks — slicing up to
+            // the closing backtick and re-splitting yields `missing field `,
+            // not the field name (C1).
+            message[start + 1..]
+                .find('`')
+                .map(|end| message[start + 1..start + 1 + end].to_string())
+        })
         .filter(|f| !f.is_empty())
         .or_else(|| {
             message
@@ -411,6 +451,12 @@ fn field_error(message: String) -> FieldError {
 // ─── compute install ───────────────────────────────────────────────────────
 
 /// Re-verify pairing and copy the pair into `~/.nexus42/modules/<id>/`.
+///
+/// Exit vocabulary (I1): 2 = validation failure (bad module id, unreadable/
+/// unparseable manifest, `--module-id`/manifest identity mismatch), 3 =
+/// `wasm_sha256` pairing failure (absent or mismatched hash), 1 = install
+/// I/O/home failure (generic CLI failure — AR-9 reserves 2/3/4 for
+/// validation, pairing, and daemon failures).
 fn cmd_install(
     module_id: &str,
     manifest_path: &Path,
@@ -420,21 +466,47 @@ fn cmd_install(
     // Path-traversal guard — the module id becomes a directory name.
     nexus_home_layout::validate_run_id_safe(module_id).map_err(|e| {
         compute_exit(
-            exit::PAIRING,
+            exit::VALIDATION,
             format!("invalid module id {module_id:?}: {e}"),
         )
     })?;
 
-    let manifest_bytes = read_json_file(exit::PAIRING, manifest_path, "manifest")?;
+    // Manifest read/parse failures are validation failures (exit 2).
+    let manifest_bytes = read_json_file(exit::VALIDATION, manifest_path, "manifest")?;
     let manifest: ModuleManifest = serde_json::from_slice(&manifest_bytes).map_err(|e| {
         compute_exit(
-            exit::PAIRING,
+            exit::VALIDATION,
             format!("failed to parse {}: {e}", manifest_path.display()),
         )
     })?;
+
+    // The advertised module-id/manifest identity must match (I2): staging a
+    // manifest under a directory keyed by a different id would create an
+    // invalid/ambiguous store pair the daemon loader cannot repair.
+    if manifest.module_id != module_id {
+        return Err(compute_exit(
+            exit::VALIDATION,
+            format!(
+                "--module-id {module_id:?} does not match manifest.module_id {:?}",
+                manifest.module_id
+            ),
+        ));
+    }
+
+    // AR-9 pairing: install REQUIRES a content hash (I10). An absent
+    // `wasm_sha256` bypasses the pairing requirement and permits a
+    // manifest/wasm mismatch; the staged `build` output always injects one.
+    if manifest.wasm_sha256.is_none() {
+        return Err(compute_exit(
+            exit::PAIRING,
+            "manifest has no wasm_sha256 — install requires a content hash; \
+             run `nexus42 compute build` to stage a pair with the hash injected"
+                .to_string(),
+        ));
+    }
     let wasm_bytes = std::fs::read(wasm_path).map_err(|e| {
         compute_exit(
-            exit::PAIRING,
+            exit::IO,
             format!("failed to read {}: {e}", wasm_path.display()),
         )
     })?;
@@ -444,27 +516,15 @@ fn cmd_install(
         .verify_wasm_sha256(&wasm_bytes)
         .map_err(|e| compute_exit(exit::PAIRING, e))?;
 
-    let home = dirs::home_dir()
-        .ok_or_else(|| compute_exit(exit::PAIRING, "cannot resolve home directory"))?;
+    let home =
+        dirs::home_dir().ok_or_else(|| compute_exit(exit::IO, "cannot resolve home directory"))?;
     let dir = nexus_home_layout::user_modules_dir(&home).join(module_id);
-    std::fs::create_dir_all(&dir).map_err(|e| {
-        compute_exit(
-            exit::PAIRING,
-            format!("failed to create {}: {e}", dir.display()),
-        )
-    })?;
-    std::fs::copy(wasm_path, dir.join(format!("{module_id}.wasm"))).map_err(|e| {
-        compute_exit(
-            exit::PAIRING,
-            format!("failed to install {module_id}.wasm: {e}"),
-        )
-    })?;
-    std::fs::copy(manifest_path, dir.join("manifest.json")).map_err(|e| {
-        compute_exit(
-            exit::PAIRING,
-            format!("failed to install manifest.json: {e}"),
-        )
-    })?;
+    std::fs::create_dir_all(&dir)
+        .map_err(|e| compute_exit(exit::IO, format!("failed to create {}: {e}", dir.display())))?;
+    std::fs::copy(wasm_path, dir.join(format!("{module_id}.wasm")))
+        .map_err(|e| compute_exit(exit::IO, format!("failed to install {module_id}.wasm: {e}")))?;
+    std::fs::copy(manifest_path, dir.join("manifest.json"))
+        .map_err(|e| compute_exit(exit::IO, format!("failed to install manifest.json: {e}")))?;
 
     if json_output {
         println!(
@@ -550,40 +610,25 @@ async fn cmd_run(
             compute_exit(exit::DAEMON, format!("compute run failed: {e}{hint}"))
         })?;
 
-    let run_id = resp.get("run_id").and_then(Value::as_str).unwrap_or("?");
-    let status = resp.get("status").and_then(Value::as_str).unwrap_or("?");
-
-    match output {
-        RunOutput::Json => {
-            println!("{}", serde_json::to_string_pretty(&resp).expect("json"));
-        }
-        RunOutput::Text => {
-            println!("run {run_id} · module `{module_id}` · status {status}");
-            if let Some(proposals) = resp.get("proposals") {
-                if proposals.is_null() {
-                    println!("  proposals: none (check status/error)");
-                } else {
-                    println!(
-                        "  proposals: {} state delta(s), {} timeline event(s), {} new key block(s)",
-                        proposals
-                            .get("state_delta")
-                            .and_then(Value::as_array)
-                            .map_or(0, Vec::len),
-                        proposals
-                            .get("timeline_events")
-                            .and_then(Value::as_array)
-                            .map_or(0, Vec::len),
-                        proposals
-                            .get("new_key_blocks")
-                            .and_then(Value::as_array)
-                            .map_or(0, Vec::len),
-                    );
-                }
-            }
-            if let Some(err) = resp.get("error") {
-                println!("  daemon error: {err}");
-            }
-        }
+    // AR-9: a rejected/failed run exits 4 with the daemon error surfaced
+    // verbatim; accept is never called for a failed or missing run id (I6).
+    let run_id = resp.get("run_id").and_then(Value::as_str).unwrap_or("");
+    let status = resp.get("status").and_then(Value::as_str).unwrap_or("");
+    if run_id.is_empty() {
+        return Err(compute_exit(
+            exit::DAEMON,
+            "compute run failed: daemon response has no run_id".to_string(),
+        ));
+    }
+    if status != "succeeded" {
+        let detail = resp.get("error").map_or_else(
+            || "no error detail in response".to_string(),
+            Value::to_string,
+        );
+        return Err(compute_exit(
+            exit::DAEMON,
+            format!("compute run rejected: status {status:?} — {detail}"),
+        ));
     }
 
     if accept {
@@ -597,12 +642,12 @@ async fn cmd_run(
             .map_err(|e| compute_exit(exit::DAEMON, format!("accept failed: {e}")))?;
         match output {
             RunOutput::Json => {
-                println!(
-                    "{}",
-                    serde_json::to_string_pretty(&accept_resp).expect("json")
-                );
+                // Single JSON envelope (I5): exactly one machine-readable
+                // document carrying both responses.
+                println!("{}", run_json_output(&resp, Some(&accept_resp)));
             }
             RunOutput::Text => {
+                print_run_text(&resp, run_id, &module_id, status);
                 let applied = accept_resp
                     .get("status")
                     .and_then(Value::as_str)
@@ -614,9 +659,54 @@ async fn cmd_run(
                 println!("accepted run {run_id} ({applied}, {n_events} timeline event(s))");
             }
         }
+    } else {
+        match output {
+            RunOutput::Json => println!("{}", run_json_output(&resp, None)),
+            RunOutput::Text => print_run_text(&resp, run_id, &module_id, status),
+        }
     }
 
     Ok(())
+}
+
+/// Render the run response as text (shared by the accept and no-accept
+/// paths so the two cannot drift).
+fn print_run_text(resp: &Value, run_id: &str, module_id: &str, status: &str) {
+    println!("run {run_id} · module `{module_id}` · status {status}");
+    if let Some(proposals) = resp.get("proposals") {
+        if proposals.is_null() {
+            println!("  proposals: none (check status/error)");
+        } else {
+            println!(
+                "  proposals: {} state delta(s), {} timeline event(s), {} new key block(s)",
+                proposals
+                    .get("state_delta")
+                    .and_then(Value::as_array)
+                    .map_or(0, Vec::len),
+                proposals
+                    .get("timeline_events")
+                    .and_then(Value::as_array)
+                    .map_or(0, Vec::len),
+                proposals
+                    .get("new_key_blocks")
+                    .and_then(Value::as_array)
+                    .map_or(0, Vec::len),
+            );
+        }
+    }
+    if let Some(err) = resp.get("error") {
+        println!("  daemon error: {err}");
+    }
+}
+
+/// Build the single JSON document printed for `compute run` (AR-9 wire
+/// discipline: exactly one JSON value on stdout, even with `--accept`).
+fn run_json_output(run_resp: &Value, accept_resp: Option<&Value>) -> String {
+    let envelope = accept_resp.map_or_else(
+        || run_resp.clone(),
+        |accept| serde_json::json!({ "run": run_resp, "accept": accept }),
+    );
+    serde_json::to_string_pretty(&envelope).expect("json serialization cannot fail")
 }
 
 /// Resolve the module id from a `manifest.json` beside the input fixture
@@ -659,16 +749,6 @@ fn read_json_file(exit_code: i32, path: &Path, label: &str) -> Result<Vec<u8>> {
         compute_exit(
             exit_code,
             format!("failed to read {label} {}: {e}", path.display()),
-        )
-    })
-}
-
-/// Read a manifest for `validate` (exit 2 on I/O error).
-fn read_json_file_validation(path: &Path) -> Result<Vec<u8>> {
-    std::fs::read(path).map_err(|e| {
-        compute_exit(
-            exit::VALIDATION,
-            format!("failed to read manifest {}: {e}", path.display()),
         )
     })
 }
@@ -735,6 +815,257 @@ mod tests {
     #[test]
     fn field_error_empty_message_uses_manifest() {
         assert_eq!(field_error(String::new()).field, "manifest");
+    }
+
+    #[test]
+    fn field_error_extracts_unknown_field_backtick() {
+        // serde unknown-field errors also backtick the field name.
+        let e = field_error("unknown field `battle_report_kind`, expected one of ...".to_string());
+        assert_eq!(e.field, "battle_report_kind");
+    }
+
+    #[test]
+    fn run_json_output_accept_is_single_envelope() {
+        // I5: `--output json --accept` must emit exactly ONE JSON document
+        // carrying both responses — not two adjacent JSON values.
+        let run = json!({"run_id": "run_1", "status": "succeeded"});
+        let accept = json!({"run_id": "run_1", "status": "applied"});
+        let out = run_json_output(&run, Some(&accept));
+        let parsed: Value = serde_json::from_str(&out).expect("single JSON document");
+        assert_eq!(parsed["run"]["run_id"], "run_1");
+        assert_eq!(parsed["accept"]["status"], "applied");
+    }
+
+    #[test]
+    fn run_json_output_without_accept_is_run_only() {
+        let run = json!({"run_id": "run_1", "status": "succeeded"});
+        let out = run_json_output(&run, None);
+        let parsed: Value = serde_json::from_str(&out).expect("single JSON document");
+        assert_eq!(parsed["run_id"], "run_1");
+        assert!(parsed.get("accept").is_none());
+    }
+
+    #[test]
+    fn validation_failure_json_shape() {
+        // I8: the `--json` failure verdict is the promised
+        // `{valid, manifest, errors}` shape with field-level errors.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("manifest.json");
+        let out = validation_failure_json(
+            &path,
+            &[FieldError {
+                field: "manifest".to_string(),
+                message: "cannot read".to_string(),
+            }],
+        );
+        let parsed: Value = serde_json::from_str(&out).expect("single JSON document");
+        assert_eq!(parsed["valid"], false);
+        assert_eq!(parsed["manifest"], path.display().to_string());
+        assert_eq!(parsed["errors"][0]["field"], "manifest");
+        assert_eq!(parsed["errors"][0]["message"], "cannot read");
+    }
+
+    #[test]
+    fn cmd_validate_read_failure_exits_validation() {
+        // I8: a missing/unreadable manifest is a validation failure (exit 2)
+        // routed through the same failure path as field errors.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let missing = dir.path().join("missing.json");
+        let err = cmd_validate(&missing, None, true).expect_err("missing manifest must fail");
+        assert!(
+            matches!(err, CliError::ComputeExit { code: 2, .. }),
+            "read failure must exit 2, got {err}"
+        );
+    }
+
+    fn valid_manifest_json(module_id: &str) -> serde_json::Value {
+        json!({
+            "module_id": module_id,
+            "name": "Test Module",
+            "version": "1.0.0",
+            "nexus_abi_version": 1,
+            "required_key_block_types": ["character"],
+            "compute_export": "compute",
+            "init_export": "init",
+        })
+    }
+
+    #[test]
+    fn cmd_install_rejects_module_id_mismatch() {
+        // I2: `--module-id` must match `manifest.module_id` — a mismatch is
+        // rejected before any copy (exit 2, validation).
+        let dir = tempfile::tempdir().expect("tempdir");
+        let manifest_path = dir.path().join("manifest.json");
+        std::fs::write(
+            &manifest_path,
+            serde_json::to_vec(&valid_manifest_json("basic-combat")).expect("json"),
+        )
+        .expect("write manifest");
+        let wasm_path = dir.path().join("module.wasm");
+        std::fs::write(&wasm_path, b"wasm bytes").expect("write wasm");
+
+        let err = cmd_install("alias", &manifest_path, &wasm_path, false)
+            .expect_err("id mismatch must fail");
+        assert!(
+            matches!(err, CliError::ComputeExit { code: 2, .. }),
+            "id mismatch must exit 2, got {err}"
+        );
+        // No store pair may be created.
+        assert!(!dir.path().join(".nexus42").exists());
+    }
+
+    #[test]
+    fn cmd_install_rejects_absent_hash() {
+        // I10: install REQUIRES `wasm_sha256` — an absent hash bypasses the
+        // AR-9 pairing requirement and must be rejected (exit 3, pairing).
+        let dir = tempfile::tempdir().expect("tempdir");
+        let manifest_path = dir.path().join("manifest.json");
+        std::fs::write(
+            &manifest_path,
+            serde_json::to_vec(&valid_manifest_json("basic-combat")).expect("json"),
+        )
+        .expect("write manifest");
+        let wasm_path = dir.path().join("module.wasm");
+        std::fs::write(&wasm_path, b"wasm bytes").expect("write wasm");
+
+        let err = cmd_install("basic-combat", &manifest_path, &wasm_path, false)
+            .expect_err("absent hash must fail");
+        assert!(
+            matches!(err, CliError::ComputeExit { code: 3, .. }),
+            "absent hash must exit 3, got {err}"
+        );
+        assert!(!dir.path().join(".nexus42").exists());
+    }
+
+    #[test]
+    fn cmd_build_rejects_path_traversal_module_id() {
+        // I4: the manifest-supplied module id becomes a directory name under
+        // dist/ — a traversal value must be rejected before staging (exit 2).
+        let dir = tempfile::tempdir().expect("tempdir");
+        let manifest_path = dir.path().join("manifest.json");
+        std::fs::write(
+            &manifest_path,
+            serde_json::to_vec(&valid_manifest_json("../evil")).expect("json"),
+        )
+        .expect("write manifest");
+
+        let err = cmd_build(&manifest_path, false).expect_err("traversal id must fail");
+        assert!(
+            matches!(err, CliError::ComputeExit { code: 2, .. }),
+            "traversal module id must exit 2, got {err}"
+        );
+        assert!(!dir.path().join("dist").exists());
+    }
+
+    #[tokio::test]
+    async fn cmd_run_failed_status_exits_daemon_code() {
+        // I6: a `status: "failed"` run exits 4 with the daemon error surfaced
+        // and accept is NEVER called.
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/v1/daemon/compute/run"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "run_id": "run_failed",
+                "module_id": "basic-combat",
+                "module_version": "1.0.0",
+                "status": "failed",
+                "error": {"code": "sandbox_limit", "message": "fuel exhausted"},
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        // Accept must never be called for a failed run.
+        Mock::given(method("POST"))
+            .and(path("/v1/daemon/compute/runs/run_failed/accept"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({})))
+            .expect(0)
+            .mount(&server)
+            .await;
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let fixture = dir.path().join("input.json");
+        std::fs::write(
+            &fixture,
+            serde_json::to_vec(&json!({"a": 1})).expect("json"),
+        )
+        .expect("write fixture");
+
+        let config = CliConfig {
+            daemon_url: server.uri(),
+            ..Default::default()
+        };
+        let err = cmd_run(
+            &config,
+            "wld_combat",
+            &fixture,
+            Some("basic-combat"),
+            true,
+            RunOutput::Json,
+        )
+        .await
+        .expect_err("failed run must exit 4");
+        assert!(
+            matches!(err, CliError::ComputeExit { code: 4, .. }),
+            "failed run must exit 4, got {err}"
+        );
+        assert!(
+            err.to_string().contains("fuel exhausted"),
+            "daemon error must be surfaced verbatim: {err}"
+        );
+        server.verify().await;
+    }
+
+    #[tokio::test]
+    async fn cmd_run_missing_run_id_exits_daemon_code() {
+        // I6: a malformed successful response without a run id is rejected
+        // (exit 4) — accept is never attempted with a placeholder id.
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/v1/daemon/compute/run"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "status": "succeeded",
+                "proposals": {"state_delta": []},
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let fixture = dir.path().join("input.json");
+        std::fs::write(
+            &fixture,
+            serde_json::to_vec(&json!({"a": 1})).expect("json"),
+        )
+        .expect("write fixture");
+
+        let config = CliConfig {
+            daemon_url: server.uri(),
+            ..Default::default()
+        };
+        let err = cmd_run(
+            &config,
+            "wld_combat",
+            &fixture,
+            Some("basic-combat"),
+            true,
+            RunOutput::Json,
+        )
+        .await
+        .expect_err("missing run_id must exit 4");
+        assert!(
+            matches!(err, CliError::ComputeExit { code: 4, .. }),
+            "missing run_id must exit 4, got {err}"
+        );
+        server.verify().await;
     }
 
     #[test]

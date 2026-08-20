@@ -158,12 +158,13 @@ impl ModuleManifest {
     /// Validate the manifest against the V1 contract (AR-6 checks, CLI-facing
     /// copy).
     ///
-    /// Checks: required-field presence (non-empty identity/export strings),
-    /// `host_functions ⊆ ["kb_read", "narrative_query"]` (structural — the
-    /// [`HostFunction`] enum rejects unknown names at parse time), the DR-49
-    /// pin `nexus_abi_version == 1`, `compute_export` non-empty, `wasm_sha256`
-    /// format (64 lowercase hex when present), and `schemas` fragments parse
-    /// as JSON objects.
+    /// Checks: required-field presence (non-empty identity/export strings —
+    /// `init_export` MAY be empty when the module has no init export, ABI
+    /// §7.1), `host_functions ⊆ ["kb_read", "narrative_query"]` (structural —
+    /// the [`HostFunction`] enum rejects unknown names at parse time), the
+    /// DR-49 pin `nexus_abi_version == 1`, `compute_export` non-empty,
+    /// `wasm_sha256` format (64 lowercase hex when present), and `schemas`
+    /// fragments parse as JSON objects.
     ///
     /// This is the CLI/tooling-facing implementation (`nexus42 compute
     /// validate` path-deps this crate, AR-9). The SDK carries a hand-maintained
@@ -178,13 +179,14 @@ impl ModuleManifest {
 
         // Required-field presence: the typed struct guarantees the fields
         // exist; the meaningful check is that the identity/export strings
-        // are non-empty.
+        // are non-empty. `init_export` is deliberately excluded — the ABI
+        // allows an empty `init_export` when the module has no init export
+        // (the real host and existing host fixtures use `init_export: ""`).
         for (field, value) in [
             ("module_id", self.module_id.as_str()),
             ("name", self.name.as_str()),
             ("version", self.version.as_str()),
             ("compute_export", self.compute_export.as_str()),
-            ("init_export", self.init_export.as_str()),
         ] {
             if value.is_empty() {
                 errors.push(format!("{field} must be non-empty"));
@@ -473,6 +475,16 @@ mod tests {
     #[test]
     fn validate_accepts_valid_manifest() {
         assert!(valid_manifest().validate().is_ok());
+    }
+
+    #[test]
+    fn validate_accepts_empty_init_export() {
+        // ABI §7.1: `init_export` may be empty when the module has no init
+        // export (the real host and existing host fixtures use
+        // `init_export: ""`). `compute_export` must still be non-empty.
+        let mut m = valid_manifest();
+        m.init_export = String::new();
+        assert!(m.validate().is_ok());
     }
 
     #[test]

@@ -60,6 +60,10 @@ fn main() {
         } else {
             1
         };
+        // M4: flush stdout before exit — compute commands print status/JSON
+        // to stdout, and `std::process::exit` skips the normal stdout
+        // teardown; piped consumers would lose the buffered tail.
+        let _ = std::io::Write::flush(&mut std::io::stdout());
         std::process::exit(code);
     }
 }

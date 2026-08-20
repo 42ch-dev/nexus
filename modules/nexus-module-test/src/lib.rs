@@ -123,7 +123,16 @@ impl InvocationState {
         let mut key_blocks = HashMap::new();
         for kb in &input.key_blocks {
             if let Ok(json) = serde_json::to_value(kb) {
-                if let Some(id) = kb.get("entry_id").and_then(serde_json::Value::as_str) {
+                // Index `entry_id` first with `key_block_id` fallback (I7):
+                // the canonical fixture (and the real host's basic_combat
+                // fixture) use `key_block_id`, while spoke-produced blocks
+                // use `entry_id` — same accessor semantics as the SDK's
+                // `entry_id_of` (AR-3).
+                let id = kb
+                    .get("entry_id")
+                    .and_then(serde_json::Value::as_str)
+                    .or_else(|| kb.get("key_block_id").and_then(serde_json::Value::as_str));
+                if let Some(id) = id {
                     key_blocks.insert(id.to_string(), json);
                 }
             }
@@ -623,6 +632,24 @@ mod tests {
         })]);
         let wasm = wat::parse_str(kb_read_module("kb_atk", 4096)).expect("wat parses");
         let (written, buf) = read_probe(&wasm, &manifest, &input, 0x31000);
+        assert!(written > 0, "kb_read must write bytes, got {written}");
+        let text = String::from_utf8_lossy(&buf);
+        assert!(text.contains("kb_atk"), "{text}");
+        assert!(text.contains("Striker"), "{text}");
+    }
+
+    #[test]
+    fn kb_read_indexes_key_block_id_fallback() {
+        // I7: the canonical fixture (fixtures/combat-input.json) indexes its
+        // blocks by `key_block_id`, not `entry_id` — the mini-host must serve
+        // `kb_read("kb_atk")` against it (fixture parity with the real host).
+        let fixture: ComputeInput =
+            serde_json::from_str(include_str!("../fixtures/combat-input.json"))
+                .expect("canonical fixture parses as ComputeInput");
+        let mut manifest = manifest();
+        manifest.host_functions = vec![HostFunction::KbRead];
+        let wasm = wat::parse_str(kb_read_module("kb_atk", 4096)).expect("wat parses");
+        let (written, buf) = read_probe(&wasm, &manifest, &fixture, 0x31000);
         assert!(written > 0, "kb_read must write bytes, got {written}");
         let text = String::from_utf8_lossy(&buf);
         assert!(text.contains("kb_atk"), "{text}");

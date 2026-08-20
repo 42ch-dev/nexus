@@ -39,7 +39,13 @@ pub struct Cli {
     verbose: bool,
 
     /// Output format (text or json)
-    #[arg(short = 'o', long = "output", global = true, default_value = "text")]
+    #[arg(
+        short = 'o',
+        long = "output",
+        global = true,
+        default_value = "text",
+        value_parser = ["text", "json"]
+    )]
     output_format: String,
 }
 
