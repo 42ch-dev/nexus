@@ -10,6 +10,8 @@ import {
 
 import { useCreateWork, useCreateWorld } from '@/api/queries';
 import { FooterProfiles } from '@/components/layout/footer-profiles';
+import { useEntrance } from '@/lib/entrance-context';
+import { ENTRANCE_BY_ID } from '@/components/layout/entrance-registry';
 import {
   CreatorShellContent,
   type CreatorShellInlineWorkSubmit,
@@ -127,6 +129,33 @@ function CreatorCreatePanel() {
 const CREATOR_HUB_PATH = '/works';
 const ORCHESTRATOR_HUB_PATH = '/strategies';
 
+/**
+ * Footer "Switch entrance" affordance (V1.170 P1 — AR-15 / EL §2).
+ *
+ * Persistent shell-chrome control — NOT a third top-level tab (the
+ * Creator | Orchestrator tabs stay untouched). Opens the identity page, which
+ * is the two-option control; only its Continue persists (AR-20). Shows the
+ * current layout name so the affordance doubles as a status readout.
+ */
+function EntranceSwitchControl() {
+  const { t } = useTranslation('shell');
+  const { entrance } = useEntrance();
+  const navigate = useNavigate();
+  return (
+    <button
+      type="button"
+      onClick={() => navigate('/entrance')}
+      data-testid="entrance-switch-control"
+      className="flex w-full items-center justify-between gap-2 rounded-control px-2 py-1.5 text-button-14 font-button text-gray-700 transition-colors duration-state ease-standard motion-reduce:transition-none hover:bg-gray-alpha-100 hover:text-gray-1000 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-700"
+    >
+      <span>{t('entrance.switchLabel')}</span>
+      <span className="text-label-12 font-medium text-gray-900">
+        {t(`entrance.layout.${ENTRANCE_BY_ID[entrance].id}`)}
+      </span>
+    </button>
+  );
+}
+
 export function Sidebar() {
   const { t } = useTranslation('shell');
   const { pathname } = useLocation();
@@ -179,7 +208,12 @@ export function Sidebar() {
         navGroups={activeTab === 'orchestrator' ? orchestratorGroups : []}
         panelContent={creatorPanel}
         onTabChange={handleTabChange}
-        footer={<FooterProfiles />}
+        footer={
+          <>
+            <EntranceSwitchControl />
+            <FooterProfiles />
+          </>
+        }
         creatorTabLabel={t('nav.creator')}
         orchestratorTabLabel={t('nav.orchestrator')}
         primaryNavigationAriaLabel={t('aria.primaryNavigation')}

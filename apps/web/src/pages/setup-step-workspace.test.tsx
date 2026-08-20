@@ -35,6 +35,8 @@ function makeDesktop(overrides: Partial<DesktopCapabilities> = {}): DesktopCapab
     resetLocalDatabase: () => Promise.resolve(),
     getSetupCompleted: () => Promise.resolve(false),
     setSetupCompleted: () => Promise.resolve(),
+    getEntrance: () => Promise.resolve('content-creator'),
+    setEntrance: () => Promise.resolve(),
     setAgentProfile: () => Promise.resolve(),
     getAgentProfile: () => Promise.resolve(null),
     getWorkspaceRoot: () => Promise.resolve('/tmp/nexus'),
@@ -50,6 +52,7 @@ function makeDesktop(overrides: Partial<DesktopCapabilities> = {}): DesktopCapab
 
 function makeState(overrides: Partial<WizardState> = {}): WizardState {
   return {
+    entrance: 'content-creator',
     workspaceRoot: '',
     selectedAgent: null,
     customLaunchCommand: '',

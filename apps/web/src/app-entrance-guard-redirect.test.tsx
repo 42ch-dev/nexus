@@ -113,8 +113,10 @@ describe('EntranceGuard redirects (AR-19)', () => {
     });
     expect(resolvedPathname).toBe('/works');
     expect(screen.queryByTestId('strategies-route')).not.toBeInTheDocument();
-    await screen.findByText('entrance.bounceToast');
-    expect(screen.getAllByText('entrance.bounceToast')).toHaveLength(1);
+    await screen.findByText('Available in the Develop layout — switch entrance to use this.');
+    expect(
+      screen.getAllByText('Available in the Develop layout — switch entrance to use this.'),
+    ).toHaveLength(1);
   });
 
   it('bounces Create on /sessions to /works', async () => {
@@ -131,7 +133,7 @@ describe('EntranceGuard redirects (AR-19)', () => {
     await waitFor(() => {
       expect(screen.getByTestId('works-route')).toBeInTheDocument();
     });
-    await screen.findByText('entrance.bounceToast');
+    await screen.findByText('Available in the Develop layout — switch entrance to use this.');
   });
 
   it('passes Create through on an allowed settings section (/settings/workspace)', async () => {
@@ -139,7 +141,9 @@ describe('EntranceGuard redirects (AR-19)', () => {
     await waitFor(() => {
       expect(screen.getByTestId('settings-workspace-route')).toBeInTheDocument();
     });
-    expect(screen.queryByText('entrance.bounceToast')).not.toBeInTheDocument();
+    expect(
+      screen.queryByText('Available in the Develop layout — switch entrance to use this.'),
+    ).not.toBeInTheDocument();
   });
 
   it('passes Create through the strategy canvas deep link (allowDeepLink, no toast)', async () => {
@@ -147,7 +151,9 @@ describe('EntranceGuard redirects (AR-19)', () => {
     await waitFor(() => {
       expect(screen.getByTestId('canvas-route')).toBeInTheDocument();
     });
-    expect(screen.queryByText('entrance.bounceToast')).not.toBeInTheDocument();
+    expect(
+      screen.queryByText('Available in the Develop layout — switch entrance to use this.'),
+    ).not.toBeInTheDocument();
   });
 
   it('passes Create through on both-visibility routes (/works)', async () => {
@@ -155,7 +161,9 @@ describe('EntranceGuard redirects (AR-19)', () => {
     await waitFor(() => {
       expect(screen.getByTestId('works-route')).toBeInTheDocument();
     });
-    expect(screen.queryByText('entrance.bounceToast')).not.toBeInTheDocument();
+    expect(
+      screen.queryByText('Available in the Develop layout — switch entrance to use this.'),
+    ).not.toBeInTheDocument();
   });
 
   it('passes unknowns through to the catch-all (guard never 404s)', async () => {
@@ -163,7 +171,9 @@ describe('EntranceGuard redirects (AR-19)', () => {
     await waitFor(() => {
       expect(screen.getByTestId('not-found')).toBeInTheDocument();
     });
-    expect(screen.queryByText('entrance.bounceToast')).not.toBeInTheDocument();
+    expect(
+      screen.queryByText('Available in the Develop layout — switch entrance to use this.'),
+    ).not.toBeInTheDocument();
   });
 
   it('never bounces the Develop entrance, including develop-only routes', async () => {
@@ -171,14 +181,18 @@ describe('EntranceGuard redirects (AR-19)', () => {
     await waitFor(() => {
       expect(screen.getByTestId('strategies-route')).toBeInTheDocument();
     });
-    expect(screen.queryByText('entrance.bounceToast')).not.toBeInTheDocument();
+    expect(
+      screen.queryByText('Available in the Develop layout — switch entrance to use this.'),
+    ).not.toBeInTheDocument();
     first.unmount();
 
     renderGuardTree(['/developer?entrance=developer']);
     await waitFor(() => {
       expect(screen.getByTestId('developer-route')).toBeInTheDocument();
     });
-    expect(screen.queryByText('entrance.bounceToast')).not.toBeInTheDocument();
+    expect(
+      screen.queryByText('Available in the Develop layout — switch entrance to use this.'),
+    ).not.toBeInTheDocument();
   });
 });
 
@@ -190,6 +204,7 @@ function IndexTree({ onPathname }: { onPathname: (p: string) => void }) {
       <EntranceProvider>
         <Routes>
           <Route index element={<EntranceIndexRedirect />} />
+          <Route path="entrance" element={<div data-testid="entrance-route">Entrance</div>} />
           <Route path="works" element={<div data-testid="works-route">Works</div>} />
           <Route
             path="developer"
@@ -206,7 +221,8 @@ describe('EntranceIndexRedirect (AR-18)', () => {
     window.localStorage.clear();
   });
 
-  it('redirects / to /works for the default content-creator entrance', async () => {
+  it('redirects / to /works for a stored content-creator entrance', async () => {
+    window.localStorage.setItem('nexus-entrance', 'content-creator');
     let resolvedPath = '';
     renderIndexRedirect(['/'], (p) => (resolvedPath = p));
     await waitFor(() => {
@@ -215,7 +231,26 @@ describe('EntranceIndexRedirect (AR-18)', () => {
     expect(resolvedPath).toBe('/works');
   });
 
-  it('redirects / to /developer when the URL override is developer', async () => {
+  it('redirects / to /entrance on browser first-run (nothing stored, EL §2)', async () => {
+    let resolvedPath = '';
+    renderIndexRedirect(['/'], (p) => (resolvedPath = p));
+    await waitFor(() => {
+      expect(screen.getByTestId('entrance-route')).toBeInTheDocument();
+    });
+    expect(resolvedPath).toBe('/entrance');
+  });
+
+  it('redirects / to /entrance on first-run even with a URL override (pre-highlight, AR-20)', async () => {
+    let resolvedPath = '';
+    renderIndexRedirect(['/?entrance=developer'], (p) => (resolvedPath = p));
+    await waitFor(() => {
+      expect(screen.getByTestId('entrance-route')).toBeInTheDocument();
+    });
+    expect(resolvedPath).toBe('/entrance');
+  });
+
+  it('redirects / to /developer when the URL override is developer and an entrance is stored', async () => {
+    window.localStorage.setItem('nexus-entrance', 'content-creator');
     let resolvedPath = '';
     renderIndexRedirect(['/?entrance=developer'], (p) => (resolvedPath = p));
     await waitFor(() => {

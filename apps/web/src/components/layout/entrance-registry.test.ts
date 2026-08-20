@@ -13,6 +13,7 @@ import {
   ENTRANCE_DESCRIPTORS,
   ENTRANCE_IDS,
   ENTRANCE_ROUTE_RULES,
+  isEntranceId,
   matchEntranceRouteRule,
 } from '@/components/layout/entrance-registry';
 import { SETTINGS_SECTION_IDS } from '@/components/layout/settings-section-registry';
@@ -20,6 +21,15 @@ import { SETTINGS_SECTION_IDS } from '@/components/layout/settings-section-regis
 describe('entrance registry (AR-15)', () => {
   it('defaults to content-creator (AR-16)', () => {
     expect(DEFAULT_ENTRANCE).toBe('content-creator');
+  });
+
+  it('isEntranceId accepts exactly the two pinned ids (AR-16)', () => {
+    expect(isEntranceId('content-creator')).toBe(true);
+    expect(isEntranceId('developer')).toBe(true);
+    expect(isEntranceId('admin')).toBe(false);
+    expect(isEntranceId('')).toBe(false);
+    expect(isEntranceId(null)).toBe(false);
+    expect(isEntranceId(undefined)).toBe(false);
   });
 
   it('indexes exactly the two pinned entrance ids', () => {

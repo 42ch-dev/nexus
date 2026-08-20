@@ -424,6 +424,28 @@ fn set_setup_completed(value: bool) -> Result<(), String> {
     write_setup_completed(value).map_err(|e| format!("failed to write setup_completed: {e}"))
 }
 
+/// Default user-layer entrance (AR-15/AR-16) — mirrors `DEFAULT_ENTRANCE` in
+/// `apps/web/src/components/layout/entrance-registry.ts`.
+const DEFAULT_ENTRANCE: &str = "content-creator";
+
+/// Read `~/.nexus42/config.toml` and return the `entrance` marker.
+/// Missing field is treated as `content-creator` (default entrance, AR-16).
+#[tauri::command]
+fn get_entrance() -> String {
+    read_entrance().unwrap_or_else(|| DEFAULT_ENTRANCE.to_string())
+}
+
+/// Write `entrance` to `~/.nexus42/config.toml`. Only the two valid
+/// `EntranceId` values are accepted (AR-16) — anything else is rejected so a
+/// malformed IPC call cannot corrupt the persisted config.
+#[tauri::command]
+fn set_entrance(value: String) -> Result<(), String> {
+    if value != "developer" && value != "content-creator" {
+        return Err(format!("invalid entrance value: {value}"));
+    }
+    write_entrance(&value).map_err(|e| format!("failed to write entrance: {e}"))
+}
+
 fn nexus_config_path() -> Option<PathBuf> {
     let home = dirs::home_dir()?;
     Some(home.join(".nexus42").join("config.toml"))
@@ -477,6 +499,47 @@ fn write_setup_completed_at(path: &Path, value: bool) -> anyhow::Result<()> {
     };
 
     doc["setup_completed"] = toml_edit::value(value);
+    std::fs::write(path, doc.to_string())?;
+    Ok(())
+}
+
+fn read_entrance() -> Option<String> {
+    let path = nexus_config_path()?;
+    read_entrance_at(&path).ok()?
+}
+
+fn read_entrance_at(path: &Path) -> anyhow::Result<Option<String>> {
+    let content = std::fs::read_to_string(path)?;
+    #[derive(serde::Deserialize, Default)]
+    struct ConfigFile {
+        #[serde(default)]
+        entrance: Option<String>,
+    }
+    Ok(toml::from_str::<ConfigFile>(&content)?.entrance)
+}
+
+fn write_entrance(value: &str) -> anyhow::Result<()> {
+    let path =
+        nexus_config_path().ok_or_else(|| anyhow::anyhow!("cannot determine home directory"))?;
+    write_entrance_at(&path, value)
+}
+
+fn write_entrance_at(path: &Path, value: &str) -> anyhow::Result<()> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    // Preserve existing keys by round-tripping through a toml edit document
+    // (same discipline as `write_setup_completed_at` — a parse failure is
+    // propagated rather than overwriting a partially-written config).
+    let mut doc = if path.exists() {
+        let text = std::fs::read_to_string(path)?;
+        text.parse::<toml_edit::DocumentMut>()?
+    } else {
+        toml_edit::DocumentMut::new()
+    };
+
+    doc["entrance"] = toml_edit::value(value);
     std::fs::write(path, doc.to_string())?;
     Ok(())
 }
@@ -1017,6 +1080,8 @@ pub fn run() {
             switch_active_creator,
             get_setup_completed,
             set_setup_completed,
+            get_entrance,
+            set_entrance,
             set_agent_profile,
             get_agent_profile,
             ensure_setup_bootstrap,
@@ -1131,10 +1196,11 @@ mod tests {
     //! daemon actually stores (`Works/<ref>/Stories/…`) and traversal attempts.
 
     use super::{
-        default_workspace_root, guard_path, read_agent_profile_at, read_setup_completed_at,
-        reset_local_database_at, resolve_workspace_root_at, setup_auto_starts_sidecar,
-        switch_active_creator_at, validate_url_scheme, write_agent_profile_at,
-        write_setup_completed_at, write_workspace_path_at, write_workspace_path_by_creator_at,
+        default_workspace_root, guard_path, read_agent_profile_at, read_entrance_at,
+        read_setup_completed_at, reset_local_database_at, resolve_workspace_root_at,
+        setup_auto_starts_sidecar, switch_active_creator_at, validate_url_scheme,
+        write_agent_profile_at, write_entrance_at, write_setup_completed_at,
+        write_workspace_path_at, write_workspace_path_by_creator_at,
         write_workspace_path_for_active_creator_at, AgentProfile, PathGuardError, WorkspaceRoot,
     };
     use super::{ensure_setup_bootstrap_at, generate_local_creator_id, read_bootstrap_state};
@@ -1337,6 +1403,81 @@ mod tests {
         assert!(
             !text.contains("setup_completed"),
             "setup_completed must not be written on parse failure"
+        );
+    }
+
+    #[test]
+    fn entrance_roundtrips_through_config_toml() {
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let config_path = tmp.path().join("config.toml");
+
+        write_entrance_at(&config_path, "developer").expect("write developer");
+        assert_eq!(
+            read_entrance_at(&config_path).unwrap().as_deref(),
+            Some("developer")
+        );
+
+        write_entrance_at(&config_path, "content-creator").expect("write content-creator");
+        assert_eq!(
+            read_entrance_at(&config_path).unwrap().as_deref(),
+            Some("content-creator")
+        );
+    }
+
+    #[test]
+    fn entrance_write_preserves_existing_keys() {
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let config_path = tmp.path().join("config.toml");
+        std::fs::write(
+            &config_path,
+            "workspace_path = \"/existing/workspace\"\nruntime_mode = \"local_only\"\n",
+        )
+        .expect("write initial config");
+
+        write_entrance_at(&config_path, "developer").expect("write entrance");
+
+        let text = std::fs::read_to_string(&config_path).expect("read config");
+        assert!(text.contains("workspace_path = \"/existing/workspace\""));
+        assert!(text.contains("runtime_mode = \"local_only\""));
+        assert!(text.contains("entrance = \"developer\""));
+    }
+
+    #[test]
+    fn entrance_write_rejects_malformed_toml() {
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let config_path = tmp.path().join("config.toml");
+        let original = "workspace_path = \"/existing/workspace\"\nmalformed = \"unclosed\n";
+        std::fs::write(&config_path, original).expect("write malformed config");
+
+        let result = write_entrance_at(&config_path, "developer");
+        assert!(result.is_err(), "malformed TOML should be rejected");
+
+        // The corrupt file must NOT be overwritten with a single-key document.
+        let text = std::fs::read_to_string(&config_path).expect("read config");
+        assert!(
+            text.contains("workspace_path = \"/existing/workspace\""),
+            "existing keys must survive a failed write"
+        );
+        assert!(
+            !text.contains("entrance"),
+            "entrance must not be written on parse failure"
+        );
+    }
+
+    #[test]
+    fn entrance_missing_field_reads_none() {
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let config_path = tmp.path().join("config.toml");
+        std::fs::write(
+            &config_path,
+            "workspace_path = \"/existing/workspace\"\n",
+        )
+        .expect("write config without entrance");
+
+        assert_eq!(
+            read_entrance_at(&config_path).unwrap(),
+            None,
+            "missing entrance key must read None (get_entrance defaults to content-creator)"
         );
     }
 

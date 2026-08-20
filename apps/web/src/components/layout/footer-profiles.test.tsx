@@ -27,6 +27,8 @@ function makeDesktop(overrides: Partial<DesktopCapabilities> = {}): DesktopCapab
     resetLocalDatabase: vi.fn().mockResolvedValue(undefined),
     getSetupCompleted: vi.fn().mockResolvedValue(true),
     setSetupCompleted: vi.fn().mockResolvedValue(undefined),
+    getEntrance: vi.fn().mockResolvedValue('content-creator'),
+    setEntrance: vi.fn().mockResolvedValue(undefined),
     setAgentProfile: vi.fn().mockResolvedValue(undefined),
     getAgentProfile: vi.fn().mockResolvedValue(null),
     getWorkspaceRoot: vi.fn().mockResolvedValue('/cached/root'),

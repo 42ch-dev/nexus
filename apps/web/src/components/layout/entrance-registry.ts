@@ -93,6 +93,12 @@ export const ENTRANCE_IDS: readonly EntranceId[] = ['content-creator', 'develope
 
 export const DEFAULT_ENTRANCE: EntranceId = 'content-creator';
 
+/** Type guard for persisted/stored entrance strings (AR-16). Unparseable
+ * values resolve to the default — never to a third state. */
+export function isEntranceId(value: string | null | undefined): value is EntranceId {
+  return value === 'content-creator' || value === 'developer';
+}
+
 export const ENTRANCE_DESCRIPTORS: readonly EntranceDescriptor[] = [
   {
     id: 'content-creator',

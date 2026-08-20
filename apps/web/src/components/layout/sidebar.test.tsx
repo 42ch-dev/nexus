@@ -144,6 +144,38 @@ describe('Sidebar', () => {
     expect(screen.getByTestId('sidebar-create-tab-bar').querySelector('[role="tablist"]')).toBeInTheDocument();
   });
 
+  it('renders the footer Switch entrance control with the current layout label (V1.170 P1)', () => {
+    useSidebarHandlers();
+
+    renderInApp(<Sidebar />, { client: makeClient(), activeCreatorId: 'creator-a' });
+
+    const control = screen.getByTestId('entrance-switch-control');
+    expect(control).toHaveTextContent('Switch entrance');
+    // Default entrance is content-creator → chrome layout label "Create".
+    expect(control).toHaveTextContent('Create');
+    // Not a third tab: the Creator|Orchestrator tablist stays the only tablist
+    // in the mode-switch chrome.
+    expect(screen.getByTestId('shell-mode-switch').querySelectorAll('[role="tab"]')).toHaveLength(2);
+  });
+
+  it('navigates to the identity page from the Switch entrance control', async () => {
+    const user = userEvent.setup();
+    useSidebarHandlers();
+
+    renderInApp(
+      <>
+        <Routes>
+          <Route path="/" element={<Sidebar />} />
+          <Route path="/entrance" element={<div data-testid="entrance-route">Entrance</div>} />
+        </Routes>
+      </>,
+      { client: makeClient(), activeCreatorId: 'creator-a', initialRouterEntries: ['/'] },
+    );
+
+    await user.click(screen.getByTestId('entrance-switch-control'));
+    await waitFor(() => expect(screen.getByTestId('entrance-route')).toBeInTheDocument());
+  });
+
   it('does not expose a Settings row in the sidebar footer (V1.125 P2)', async () => {
     useSidebarHandlers();
 

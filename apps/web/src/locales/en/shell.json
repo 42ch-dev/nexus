@@ -34,11 +34,38 @@
     "compute": "Compute",
     "modules": "Modules",
     "strategies": "Harness",
-    "settings": "Settings"
+    "settings": "Settings",
+    "develop": "Develop",
+    "compute": "Compute"
   },
   "theme": {
     "switchToLight": "Switch to light theme",
     "switchToDark": "Switch to dark theme"
+  },
+  "entrance": {
+    "switchLabel": "Switch entrance",
+    "bounceToast": "Available in the Develop layout — switch entrance to use this.",
+    "layout": {
+      "content-creator": "Create",
+      "developer": "Develop"
+    },
+    "page": {
+      "title": "How do you use Nexus?",
+      "subtitle": "This chooses your workspace layout. It is not your writing identity — Creator profiles stay as they are.",
+      "optionsLabel": "Workspace layout",
+      "option": {
+        "contentCreator": {
+          "title": "Content creator",
+          "description": "Write and worldbuild. Agents help you. You do not install modules or edit presets."
+        },
+        "developer": {
+          "title": "Developer",
+          "description": "Build on Nexus. Modules, presets, capabilities, Connect, and the full Control Room."
+        }
+      },
+      "continue": "Continue",
+      "persistFailed": "Could not save your choice"
+    }
   },
   "notFound": {
     "title": "Page not found",

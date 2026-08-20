@@ -13,6 +13,7 @@ import { useDesktopCapabilities } from '@/lib/client-context';
 import type { DesktopCapabilities } from '@/lib/nexus/desktop-capabilities';
 import {
   DEFAULT_ENTRANCE,
+  isEntranceId,
   type EntranceId,
 } from '@/components/layout/entrance-registry';
 
@@ -24,6 +25,13 @@ interface EntranceContextValue {
   entrance: EntranceId;
   /** True while the desktop shell is being queried for the persisted value. */
   isLoading: boolean;
+  /**
+   * Browser first-run (EL §2): true when nothing is stored and there is no
+   * desktop IPC seam — the index redirect sends those users to the identity
+   * page once. Desktop first-run is the wizard step (AR-17), so this is
+   * always false there. Independent of the session-only URL override (AR-20).
+   */
+  isFirstRun: boolean;
   /**
    * Persist and sync the entrance (localStorage / Tauri IPC). No optimistic
    * write: a landing-layout switch must not flash the wrong tree (AR-16).
@@ -56,7 +64,7 @@ interface EntranceIpcSeam {
 }
 
 function parseEntrance(value: string | null): EntranceId | null {
-  return value === 'developer' || value === 'content-creator' ? value : null;
+  return isEntranceId(value) ? value : null;
 }
 
 function browserPersister(): EntrancePersister {
@@ -118,6 +126,13 @@ export function EntranceProvider({ children, initialEntrance }: EntranceProvider
   const [isLoading, setIsLoading] = useState(
     () => hasIpcSeam && initialEntrance === undefined && urlOverride === null,
   );
+  // First-run detection (EL §2): false until a persisted value exists. Browser
+  // reads synchronously; desktop resolves in the mount effect below.
+  const [hasStoredEntrance, setHasStoredEntrance] = useState(() => {
+    if (initialEntrance !== undefined) return true;
+    if (!hasIpcSeam) return readBrowserStoredEntrance() !== null;
+    return false;
+  });
 
   useEffect(() => {
     if (initialEntrance !== undefined || !hasIpcSeam || urlOverride !== null) {
@@ -129,6 +144,7 @@ export function EntranceProvider({ children, initialEntrance }: EntranceProvider
       .then((stored) => {
         if (cancelled || stored === null) return;
         setEntranceState(stored);
+        setHasStoredEntrance(true);
       })
       .catch(() => {
         // Fail open (mirrors SetupCompletedProvider): command error keeps the
@@ -146,12 +162,15 @@ export function EntranceProvider({ children, initialEntrance }: EntranceProvider
     async (value: EntranceId) => {
       await persister.write(value);
       setEntranceState(value);
+      setHasStoredEntrance(true);
     },
     [persister],
   );
 
+  const isFirstRun = !hasIpcSeam && !hasStoredEntrance;
+
   return (
-    <EntranceContext.Provider value={{ entrance, isLoading, setEntrance }}>
+    <EntranceContext.Provider value={{ entrance, isLoading, isFirstRun, setEntrance }}>
       {children}
     </EntranceContext.Provider>
   );

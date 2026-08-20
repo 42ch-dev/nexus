@@ -22,12 +22,13 @@ import type { EntranceId } from '@/components/layout/entrance-registry';
 interface ProbeValue {
   entrance: EntranceId;
   isLoading: boolean;
+  isFirstRun: boolean;
 }
 
 /** Renders the current context value + a setEntrance('developer') affordance. */
 function EntranceProbe({ onChange }: { onChange: (value: ProbeValue) => void }) {
-  const { entrance, isLoading, setEntrance } = useEntrance();
-  onChange({ entrance, isLoading });
+  const { entrance, isLoading, isFirstRun, setEntrance } = useEntrance();
+  onChange({ entrance, isLoading, isFirstRun });
   return (
     <button
       type="button"
@@ -74,7 +75,11 @@ describe('EntranceProvider resolution (AR-16/AR-20)', () => {
   it('resolves to content-creator when nothing is stored and no override is present (no write)', () => {
     const setItemSpy = vi.spyOn(Storage.prototype, 'setItem');
     const probe = renderProbe(['/']);
-    expect(probe.get()).toEqual({ entrance: 'content-creator', isLoading: false });
+    expect(probe.get()).toEqual({
+      entrance: 'content-creator',
+      isLoading: false,
+      isFirstRun: true,
+    });
     expect(setItemSpy).not.toHaveBeenCalledWith(ENTRANCE_STORAGE_KEY, expect.anything());
   });
 
@@ -82,6 +87,21 @@ describe('EntranceProvider resolution (AR-16/AR-20)', () => {
     window.localStorage.setItem(ENTRANCE_STORAGE_KEY, 'developer');
     const probe = renderProbe(['/']);
     expect(probe.get()?.entrance).toBe('developer');
+    expect(probe.get()?.isFirstRun).toBe(false);
+  });
+
+  it('flags first-run (no stored value) even when a URL override is present', () => {
+    const probe = renderProbe(['/?entrance=developer']);
+    expect(probe.get()?.entrance).toBe('developer');
+    expect(probe.get()?.isFirstRun).toBe(true);
+  });
+
+  it('clears first-run after setEntrance persists', async () => {
+    const probe = renderProbe(['/']);
+    expect(probe.get()?.isFirstRun).toBe(true);
+    fireEvent.click(probe.getByTestId('set-developer'));
+    await waitFor(() => expect(probe.get()?.entrance).toBe('developer'));
+    expect(probe.get()?.isFirstRun).toBe(false);
   });
 
   it('gives the URL override precedence over the stored value', () => {
@@ -134,6 +154,21 @@ describe('EntranceProvider resolution (AR-16/AR-20)', () => {
     });
     await waitFor(() => expect(probe.get()?.entrance).toBe('developer'));
     expect(probe.get()?.isLoading).toBe(false);
+    // Desktop first-run is the wizard (AR-17) — never the identity page.
+    expect(probe.get()?.isFirstRun).toBe(false);
+  });
+
+  it('never flags first-run on desktop, even when the IPC read fails', async () => {
+    const probe = renderProbe(['/'], {
+      desktop: ipcDesktop({
+        getEntrance: async () => {
+          throw new Error('command not registered');
+        },
+      }),
+    });
+    await waitFor(() => expect(probe.get()?.isLoading).toBe(false));
+    expect(probe.get()?.entrance).toBe('content-creator');
+    expect(probe.get()?.isFirstRun).toBe(false);
   });
 
   it('fails open to content-creator when the desktop command errors', async () => {

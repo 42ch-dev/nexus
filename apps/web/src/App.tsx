@@ -32,6 +32,7 @@ import { SessionsPage } from '@/pages/sessions-page';
 import { WorkShellLayout } from '@/components/layout/work-shell-layout';
 import { CreatorHubPage } from '@/pages/creator-hub-page';
 import { SetupWizardPage } from '@/pages/setup-wizard-page';
+import { EntrancePage } from '@/pages/entrance-page';
 import { StrategiesPage } from '@/pages/strategies-page';
 import { LoadingState } from '@/components/ui/states';
 
@@ -123,6 +124,11 @@ function AppRoutes() {
   return (
     <Routes location={routesLocation}>
       <Route path="setup" element={<SetupWizardPage />} />
+      {/* V1.170 P1 (AR-16/AR-20) — entrance identity page. Standalone (sibling
+          of /setup, outside the gated tree): first-run land for unset browser
+          installs + the footer switch control's destination. Only Continue
+          persists. */}
+      <Route path="entrance" element={<EntrancePage />} />
       <Route
         element={
           <SetupGate>

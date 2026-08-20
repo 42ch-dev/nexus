@@ -98,9 +98,15 @@ export function EntranceGuard({ children }: { children: ReactNode }) {
  * Entrance-aware index redirect (AR-18): `content-creator` → `/works`,
  * `developer` → `/developer`. `landRoute` is the single source for guard
  * bounces AND this redirect.
+ *
+ * First-run (EL §2): browser installs with nothing stored land on the
+ * identity page (`/entrance`) once instead of a layout tree — the page's
+ * Continue is the only path that persists (AR-20). Desktop first-run is the
+ * wizard step (AR-17); returning desktop installs use the footer switch.
  */
 export function EntranceIndexRedirect() {
-  const { entrance, isLoading } = useEntrance();
+  const { entrance, isLoading, isFirstRun } = useEntrance();
   if (isLoading) return null;
+  if (isFirstRun) return <Navigate to="/entrance" replace />;
   return <Navigate to={ENTRANCE_BY_ID[entrance].landRoute} replace />;
 }

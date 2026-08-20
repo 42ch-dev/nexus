@@ -235,4 +235,37 @@ describe('TauriDesktopCapabilities', () => {
     expect(invoke).toHaveBeenCalledWith('toggle_maximize_window', undefined);
     restoreTauri();
   });
+
+  it('getEntrance invokes get_entrance and returns the persisted value', async () => {
+    const { invoke } = mockTauri(() => Promise.resolve('developer'));
+    const caps = new TauriDesktopCapabilities();
+    await expect(caps.getEntrance()).resolves.toBe('developer');
+    expect(invoke).toHaveBeenCalledWith('get_entrance');
+    restoreTauri();
+  });
+
+  it('getEntrance resolves a stored-but-unparseable value to content-creator (AR-16)', async () => {
+    mockTauri(() => Promise.resolve('admin'));
+    const caps = new TauriDesktopCapabilities();
+    await expect(caps.getEntrance()).resolves.toBe('content-creator');
+    restoreTauri();
+  });
+
+  it('getEntrance unwraps a command error into DesktopCapabilityError', async () => {
+    mockTauri(() => Promise.reject({ code: 'invoke_failed', message: 'command not registered' }));
+    const caps = new TauriDesktopCapabilities();
+    await expect(caps.getEntrance()).rejects.toMatchObject({
+      code: 'invoke_failed',
+      message: 'command not registered',
+    });
+    restoreTauri();
+  });
+
+  it('setEntrance invokes set_entrance with the value payload', async () => {
+    const { invoke } = mockTauri(() => Promise.resolve(undefined));
+    const caps = new TauriDesktopCapabilities();
+    await caps.setEntrance('content-creator');
+    expect(invoke).toHaveBeenCalledWith('set_entrance', { value: 'content-creator' });
+    restoreTauri();
+  });
 });
