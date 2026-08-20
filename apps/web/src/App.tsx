@@ -7,6 +7,11 @@ import {
   DefaultProfileCoordinator,
 } from '@/lib/active-creator-context';
 import { SetupCompletedProvider } from '@/lib/setup-completed-context';
+import { EntranceProvider } from '@/lib/entrance-context';
+import {
+  EntranceGuard,
+  EntranceIndexRedirect,
+} from '@/components/layout/entrance-guard';
 import { RootLayout } from '@/components/layout/root-layout';
 import { SettingsModalHost } from '@/components/layout/settings-modal-host';
 import {
@@ -81,6 +86,13 @@ const WorldFindingsPage = lazy(() =>
   import('@/pages/world-findings-page').then((m) => ({ default: m.WorldFindingsPage })),
 );
 
+// Route-split: the Develop hub (V1.170 P1 — AR-18) is the developer-entrance
+// land route. Lazy-loaded like the canvas routes so the hub chunk stays out
+// of the bootstrap path (canvases keep React Flow out; the hub is static cards).
+const DeveloperHubPage = lazy(() =>
+  import('@/pages/developer-hub-page').then((m) => ({ default: m.DeveloperHubPage })),
+);
+
 /**
  * App routes — Control Room + Setup shell.
  *
@@ -111,8 +123,18 @@ function AppRoutes() {
   return (
     <Routes location={routesLocation}>
       <Route path="setup" element={<SetupWizardPage />} />
-      <Route element={<SetupGate><RootLayout /></SetupGate>}>
-        <Route index element={<Navigate to="/works" replace />} />
+      <Route
+        element={
+          <SetupGate>
+            <EntranceGuard>
+              <RootLayout />
+            </EntranceGuard>
+          </SetupGate>
+        }
+      >
+        {/* V1.170 P1 (AR-18) — index redirect is entrance-aware: Create → /works,
+            Develop → /developer. `landRoute` is the single source. */}
+        <Route index element={<EntranceIndexRedirect />} />
         {/* V1.123 P3 Task 1 — global Timeline entry in primary nav.
             Cross-World overview composed client-side; sibling of `/works`
             and `/worlds`. Per-World Timeline stays at
@@ -221,6 +243,17 @@ function AppRoutes() {
           path="connect"
           element={<Navigate to="/settings/advanced#connection" replace />}
         />
+        {/* V1.170 P1 (AR-18) — Develop hub v1: developer-entrance land route.
+            Develop-only (guard-bounced on Create); lazy-split with the other
+            route-split pages. */}
+        <Route
+          path="developer"
+          element={
+            <Suspense fallback={<LoadingState label="Loading Develop hub…" />}>
+              <DeveloperHubPage />
+            </Suspense>
+          }
+        />
         <Route path="*" element={<NotFoundPage />} />
       </Route>
     </Routes>
@@ -236,7 +269,9 @@ export function App() {
               pre-boot `/v1/daemon/creators*` traffic during dist-load startup. */}
           <DefaultProfileCoordinator />
           <SettingsModalProvider>
-            <AppRoutes />
+            <EntranceProvider>
+              <AppRoutes />
+            </EntranceProvider>
             <SettingsModalHost />
           </SettingsModalProvider>
         </DaemonLaunchGate>
