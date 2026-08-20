@@ -6,7 +6,6 @@
 **Last updated**: 2026-06-22 (V1.57 P-last — folded in P0 test vectors + P1 3-caller dispatch + P3 dynamic allowlist mechanism)  
 **Scope**: Runtime SSOT for Nexus `nexus.*` capability dispatch — 18 host tools (per V1.57 P0 acp §4 roster, reconciled from 35 plan estimate) + dynamic worker allowlist (per V1.57 P3) + 3-caller entry point shape (per V1.57 P1)  
 **Coordinates with**: [acp-capability-set.md](acp-capability-set.md), [agent-nexus-tool-bridge.md](agent-nexus-tool-bridge.md) (now Master), [acp-client-tech-spec.md](acp-client-tech-spec.md), [orchestration-engine.md](orchestration-engine.md) (§6.4 worker IPC), [daemon-runtime.md](daemon-runtime.md) (3-caller topology), [local-runtime-boundary.md](local-runtime-boundary.md) (3-caller adapter pattern)  
-**Iteration compass**: `delivery-compass.md`
 
 ---
 
@@ -145,7 +144,7 @@ struct AcpWire {
 For V1.53, all entries use human-readable inline shape descriptions
 (e.g. `r#"{"work_id":"string"}"#`). Full JSON Schema drafts are
 deferred to a future plan that introduces schema-aware codegen —
-**durable roadmap:** consolidated in the deferred-features tracker §2.6 — DR-24 (ACP wire full JSON Schema drafts).
+**durable roadmap:** DR-24 (ACP wire full JSON Schema drafts).
 
 **Cross-reference**: `acp-capability-set.md` is the logical catalog
 (one-liner per ID). This field provides the wire contract detail.
@@ -203,7 +202,7 @@ verifies that all 7 fields are populated for every registered row.
 
 ## 3. Authority chain
 
-1. Repo root `AGENTS.md` and active iteration compass define scope and local-first boundaries.
+1. Repo root `AGENTS.md` defines scope and local-first boundaries.
 2. `acp-capability-set.md` defines the logical capability catalog.
 3. This Draft overlay defines the runtime registry contract for active V1.53 work.
 4. `agent-nexus-tool-bridge.md` defines mediated external-agent tool invocation and admission invariants.
@@ -241,7 +240,6 @@ Promote decision checklist for P-last:
 ## V1.58 P0 Draft overlay: `registry.refresh` capability body extension
 
 **Status**: Draft (V1.58 P0)
-**Plans**: `2026-06-22-v1.58-workspace-occ-hardening` (T7–T16, T20)
 
 ### Body extension
 
@@ -290,7 +288,7 @@ Failure-path test vectors for `registry.refresh`:
 ## V1.59 P0: DF-47 manuscript & misc capability parity batch (9 host tools)
 
 **Status**: Shipped (V1.59 P0)
-**Plans**: `2026-06-22-v1.59-df47-manuscript-and-misc-capabilities`
+
 **Host tool count**: 21 → 30
 
 All 9 capabilities transition from `catalog-only` (Registry row ref = orchestration)
@@ -408,7 +406,7 @@ documents the runtime contract and per-ID test vectors (success + failure paths)
 ## V1.60 P0: DF-46 local capability parity batch (5 orchestration capabilities)
 
 **Status**: Shipped (V1.60 P0)
-**Plans**: `2026-06-22-v1.60-df46-local-parity`
+
 **Orchestration registry count**: 26 → 31
 
 All 5 capabilities transition from `catalog-only` to `shipped` with an

@@ -14,8 +14,6 @@
 - [manuscript-audit.md](manuscript-audit.md) — DF-69 on-demand audit (V1.44 P0)
 - [author-experience.md](author-experience.md) — quickstart §5 cross-refs (V1.43 shipped)
 
-**Iteration compass**: `delivery-compass.md` · `delivery-compass.md` · `delivery-compass.md` (active)
-
 ---
 
 ## 1. Purpose

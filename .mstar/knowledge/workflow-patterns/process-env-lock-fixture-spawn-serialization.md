@@ -4,7 +4,6 @@ date: 2026-08-17
 problem_type: testing_pattern
 category: workflow-patterns
 severity: medium
-plan_id: 2026-08-17-v1.168-p2-dsh-native-provider
 tags: [env-mutation, test-flake, process-env-lock, path-isolation, python-fixture, cargo-test]
 applies_when: tests mutate process env (PATH / HOME / DSH_RUNTIME_BIN) while other tests spawn fixtures through the same env
 ---

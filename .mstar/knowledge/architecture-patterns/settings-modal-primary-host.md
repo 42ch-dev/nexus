@@ -4,7 +4,6 @@ date: 2026-07-22
 problem_type: architecture_pattern
 category: architecture-patterns
 severity: medium
-plan_id: 2026-07-22-v1.131-p2-shell-ia-finish
 tags: [settings-modal, shell-ia, react-router, dirty-guard, studio-first]
 applies_when: Settings is the primary configuration surface (modal, not full-page), with deep links, section registry, and dirty-aware close
 ---
@@ -62,5 +61,5 @@ Settings chrome (five-section nav, modal size) must appear in Design Studio fixt
 ## See also
 
 - Spec: `shell-ia-finish.md`
-- Plans: `2026-07-22-v1.131-p0-chronos-titlebar` (gear), `…-p2-shell-ia-finish` (modal primary)
+- Plans:  (gear), `…-p2-shell-ia-finish` (modal primary)
 - Related: [ui-component-promotion-workflow.md](ui-component-promotion-workflow.md), [creator-shell-content-mode-pattern.md](creator-shell-content-mode-pattern.md)

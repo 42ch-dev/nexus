@@ -2,7 +2,6 @@
 title: Field-level error envelope for generated DTO write surfaces
 category: api-design
 track: knowledge
-source_plan: 2026-08-19-v1.169-p1-rules-write-api
 source_iteration: V1.169
 created: 2026-08-19
 last_updated: 2026-08-19
@@ -36,4 +35,4 @@ Any new daemon mutation route consumed by a Control Room form (CRUD panels, sett
 
 ## Examples
 
-- World rules write API (V1.169 P1): 13-row closed vocabulary, member-aware `parse_carrier_json_member`, 404-before-payload, `[]`-clear null-union. QC/QA evidence: `.mstar/sdd/2026-08-19-v1.169-p1-rules-write-api/` (local harness).
+- World rules write API (V1.169 P1): 13-row closed vocabulary, member-aware `parse_carrier_json_member`, 404-before-payload, `[]`-clear null-union. 

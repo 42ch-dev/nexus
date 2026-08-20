@@ -257,7 +257,6 @@ V1.53 cancelled the skills-export CLI/spec line (DF-50). Nexus keeps the static 
 ## V1.57 P1 Draft overlay: 3-caller adapter topology
 
 **Status**: Draft (V1.57 P1)  
-**Plan**: `2026-06-22-v1.57-daemon-refactor-and-caller-adapters`
 
 ### Updated topology diagram
 

@@ -5,7 +5,6 @@ last_updated: 2026-08-17
 problem_type: architecture_pattern
 category: architecture-patterns
 severity: medium
-plan_id: 2026-07-13-v1.116-agent-detection-codex-native
 tags: [native-cli-provider, agent-host, codex-native, claude-native, dsh-native, acp-registry, bare-command, scan-endpoint, protocol-client, decode-drift]
 applies_when: adding a new native CLI provider to the agent-host, swapping a provider's process/parse internals to an external protocol client, or debugging agent detection false negatives
 ---

@@ -4,7 +4,6 @@ date: 2026-07-07
 problem_type: build-config
 category: architecture-patterns
 severity: low
-plan_id: 2026-07-07-v1.95-implement-fixes
 tags: [tailwind, design-tokens, css, setup-wizard, theme-config]
 applies_when: adding sizing/spacing/maxWidth tokens that the JSX consumes as max-w-*/p-*/h-*/w-* utilities
 ---

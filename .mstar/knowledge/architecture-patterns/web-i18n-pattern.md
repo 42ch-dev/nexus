@@ -4,7 +4,6 @@ date: 2026-07-12
 problem_type: knowledge
 category: architecture-patterns
 severity: low
-plan_id: 2026-07-12-v1.112-i18n-foundation, 2026-07-12-v1.113-i18n-completion
 tags: [i18n, i18next, react-i18next, locale, LocaleProvider, command-registry, format, intl, design-studio, test-setup]
 applies_when: Adding or extending i18n in apps/web; adding user-facing strings; wiring Intl formatters; setting up i18n in test environments that import shared web components
 ---

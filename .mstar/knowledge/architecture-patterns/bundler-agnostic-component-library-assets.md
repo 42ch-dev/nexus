@@ -4,7 +4,6 @@ date: 2026-07-03
 problem_type: architecture-pattern
 category: architecture-patterns
 severity: medium
-plan_id: 2026-07-03-v1.87-nexus-ui-component-library (compound of V1.87); 2026-07-22-vi-logo-upgrade (shell primary-only)
 tags: [nexus-ui, react-component-library, tsup, esbuild, bundler-agnostic, svg, vite, peer-deps, presentational-component, logo-system]
 applies_when: adding an asset-consuming React component to a publishable workspace package built with tsup/esbuild, or promoting an assets-only package to a component library
 last_updated: 2026-07-22 (V1.132: shell plate uses logo-primary-square; titlebar uses plain logo-white at logoCompactMarkHeightPx)

@@ -12,9 +12,6 @@
 - [cli-spec.md](cli-spec.md) — `creator works cron set`, `creator run`, `creator world kb adopt`
 - [daemon-runtime.md](daemon-runtime.md) — daemon tick / cron supervisor
 
-**Iteration compass**: `delivery-compass.md`
-**Plan**: `2026-06-18-v1.51-advisory-lock.md`
-
 ---
 
 ## 1. Problem Statement

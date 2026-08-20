@@ -219,7 +219,7 @@ The legacy `outbox` table (defined in `20260417_000001_initial.sql`) was audited
 | V1.60 | Add `_deprecated` suffix comment to migration; verify no external tooling references the table |
 | V1.61+ | Drop table in a new migration; remove test assertion |
 
-> **Durable roadmap:** the phased removal (V1.60 suffix comment, V1.61+ drop) is consolidated in the deferred-features tracker §2.6 — DR-08.
+> **Durable roadmap:** the phased removal (V1.60 suffix comment, V1.61+ drop) is DR-08.
 
 ---
 

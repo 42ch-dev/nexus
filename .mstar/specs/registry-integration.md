@@ -178,7 +178,7 @@ Minimum recommended:
 
 ## 9. Open items
 
-> **Durable roadmap:** the open items below (pin upstream schema compat, enterprise mirror, binary distribution) are consolidated in the deferred-features tracker §2.6 — DR-55.
+> **Durable roadmap:** the open items below (pin upstream schema compat, enterprise mirror, binary distribution) are DR-55.
 
 - Pin field-level compatibility to upstream **`registry.schema.json` / `agent.schema.json`** revisions as they ship in the **`agentclientprotocol/registry`** project (repo URL and default index in §0.1 below).
 - Enterprise mirror documentation and trust roots.

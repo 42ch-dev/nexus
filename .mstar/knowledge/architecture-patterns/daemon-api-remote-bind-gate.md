@@ -4,7 +4,6 @@ problem_type: architecture_pattern
 category: architecture-patterns
 severity: high
 date: 2026-07-05
-plan_id: 2026-07-05-v1.90-closure
 tags: [daemon-api, remote-bind, security, loopback, api-key, axum, boot]
 ---
 

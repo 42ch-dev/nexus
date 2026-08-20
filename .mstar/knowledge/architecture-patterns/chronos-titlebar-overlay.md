@@ -4,7 +4,6 @@ date: 2026-07-22
 problem_type: architecture_pattern
 category: architecture-patterns
 severity: medium
-plan_id: 2026-07-22-v1.131-p0-chronos-titlebar
 tags: [chronos, titlebar, tauri-v2, overlay, drag-region]
 applies_when: shipping a full-width Chronos ink titlebar on web + Tauri v2 macOS with native traffic lights
 ---

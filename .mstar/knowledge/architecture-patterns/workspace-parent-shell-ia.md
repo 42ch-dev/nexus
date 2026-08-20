@@ -4,7 +4,6 @@ date: 2026-07-22
 problem_type: architecture-pattern
 category: architecture-patterns
 severity: medium
-plan_id: 2026-07-22-v1.132-p3-creator-orch-gongnengqu-ia
 tags: [shell, sidebar, workspace, footer, creator-hub, ia, inline-create]
 applies_when: changing Control Room left shell, creator hub, mode switch 创作/编排, or 工作区 footer gating
 last_updated: 2026-07-23

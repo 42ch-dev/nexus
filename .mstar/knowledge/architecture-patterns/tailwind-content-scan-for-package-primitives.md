@@ -4,7 +4,6 @@ date: 2026-07-17
 problem_type: build-config
 category: architecture-patterns
 severity: low
-plan_id: 2026-07-17-v1.120-shell-form-polish
 tags: [tailwind, content-scan, jit, nexus-ui, css, monorepo]
 applies_when: an app's Tailwind build consumes class utilities that only appear in `packages/nexus-ui/src` (shared primitives)
 ---

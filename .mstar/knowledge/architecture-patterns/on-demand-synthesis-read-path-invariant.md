@@ -4,7 +4,6 @@ date: 2026-07-02
 problem_type: knowledge
 category: architecture-patterns
 severity: high
-plan_id: 2026-07-01-v1.81-creator-soul-narrative-and-world-foundation
 tags: [on-demand-synthesis, llm-gating, read-path-invariant, poll-side-effects, headless-qa-gap, static-analysis-review, greptile, local-api, reliability, correctness]
 applies_when: designing (or reviewing) an on-demand LLM/agent-call endpoint where a client polls for status and synthesis must fire only on explicit user intent
 ---

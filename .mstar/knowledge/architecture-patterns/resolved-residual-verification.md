@@ -5,7 +5,6 @@ last_updated: 2026-07-06
 problem_type: process-convention
 category: architecture-patterns
 severity: medium
-plan_id: 2026-07-03-v1.86-local-api-trust-hardening
 tags: [residual, lifecycle, verification, regression-of-resolution, security, deferred-already-satisfied]
 applies_when: treating a prior residual's `lifecycle` field (either `resolved` OR `deferred`) as evidence about the current code state
 ---

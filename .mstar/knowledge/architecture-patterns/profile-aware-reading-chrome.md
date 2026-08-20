@@ -15,7 +15,6 @@ tags:
   - react-markdown
   - read-only-invariant
   - apps/web
-plan_id: 2026-07-05-v1.91-reading-chrome
 ---
 
 # Profile-Aware Reading Chrome

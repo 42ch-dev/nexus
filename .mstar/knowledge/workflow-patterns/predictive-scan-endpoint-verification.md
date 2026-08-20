@@ -4,7 +4,6 @@ date: 2026-07-20
 problem_type: workflow_convention
 category: workflow-patterns
 severity: medium
-plan_id: 2026-07-20-v1.127-p1-native-agent-provider-registration
 tags: [harness, predictive-scan, explore, endpoint-verification, ac-reframing, qc]
 applies_when: PM uses an `explore` subagent (or any predictive read-only scan) to surface candidate bugs before manual testing, and the scan claims a user-visible symptom
 ---

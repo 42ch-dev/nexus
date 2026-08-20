@@ -4,7 +4,6 @@ date: 2026-07-11
 problem_type: architecture-pattern
 category: architecture-patterns
 severity: high
-plan_id: 2026-07-11-v1.110-agent-scan-path-reliability
 tags: [path-enrichment, agent-scan, gui-process, version-managers, nvm, volta, fnm, pnpm, yarn, which, login-shell, detection, false-negative]
 applies_when: any feature that probes PATH for binaries from a GUI-launched process; any "agents/tools show as not installed despite being installed" report; extending login_equivalent_bin_dirs()
 ---

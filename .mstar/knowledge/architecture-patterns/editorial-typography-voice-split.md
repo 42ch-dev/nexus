@@ -4,7 +4,6 @@ date: 2026-07-18
 problem_type: architecture-pattern
 category: architecture-patterns
 severity: medium
-plan_id: V1.121-P0 (design language v0.4 "Literary Engine")
 tags: [typography, voice-split, font-display, content-voice, interface-voice, design-system, literary-engine]
 applies_when: adding a new surface that presents a creative entity (work, world, chapter, manuscript) or an authoring empty state; also when reviewing a PR for serif usage on chrome or sans on entity titles
 last_updated: 2026-07-18 (V1.121 v0.4 Literary Engine)

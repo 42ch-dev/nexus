@@ -69,8 +69,6 @@ No sixth top-level group in V1.35. Pre-release allows deprecation aliases (see �
 
 **Removed in V1.45 (hard delete):** `review-master`, `audit-chapter`, `stage`, `start`, `continue`, `resume`, `reconcile-chapters` under `creator run`.
 
-See `delivery-compass.md` migration appendix.
-
 <!-- V1.44 shipped table (superseded by V1.45):
 | `review-master <work_id>` | … | V1.44 P1 |
 | `audit-chapter <work_id>` | … | V1.44 P0 |
@@ -78,7 +76,7 @@ See `delivery-compass.md` migration appendix.
 
 ### 3.2 `creator kb` vs `creator knowledge` (P3 lock)
 
-**Problem (KCA-003):** Users conflate `creator kb`, `creator knowledge`, and World KB. Evidence and UX IDs: V1.35 compass Appendix A UX-004.
+**Problem (KCA-003):** Users conflate `creator kb`, `creator knowledge`, and World KB. Evidence and UX IDs: V1.35 UX-004.
 
 **Compass must lock one option before P3 implement:**
 
@@ -88,11 +86,11 @@ See `delivery-compass.md` migration appendix.
 | B. Alias `creator assets` → work index | Matches cli-spec alias direction | Two names to maintain |
 | C. Rename `kb` → `work-index` | Clearest | Breaking; scripts |
 
-**Default if compass silent:** Option A. Option C requires `gitnexus_impact` before rename.
+**Default:** Option A. Option C requires `gitnexus_impact` before rename.
 
 **Related deferral:** DF-42 (Daemon API KB redesign) — out of V1.35 implement scope.
 
-**Durable roadmap:** consolidated in the deferred-features tracker §2.6 — DR-19 (`creator kb` vs `creator knowledge` disambiguation decision).
+**Durable roadmap:** DR-19 (`creator kb` vs `creator knowledge` disambiguation decision).
 
 ---
 
@@ -139,7 +137,7 @@ See `delivery-compass.md` migration appendix.
 | `daemon schedule` as first-run hint | `creator run` | Help text only; no command removal |
 | Top-level `preset` (never shipped) | `system preset`, `creator run` | Document only (DF-52) |
 
-**Hard delete** of `sync` top-level: **Out of V1.35** — earliest V1.36 after alias period. **Durable roadmap:** consolidated in the deferred-features tracker §2.6 — DR-53 (top-level `sync` hard-delete).
+**Hard delete** of `sync` top-level: **Out of V1.35** — earliest V1.36 after alias period. **Durable roadmap:** DR-53 (top-level `sync` hard-delete).
 
 ---
 
@@ -176,7 +174,7 @@ Local-first must reach `creator bootstrap` in ≤7 commands (see creator-centric
 
 ## 9. Change control
 
-- **Authority**: Active V1.35 compass > this spec > cli-spec §6.0B legacy text until P5 hygiene merge.
+- **Authority**: this spec > cli-spec §6.0B legacy text until P5 hygiene merge.
 - **Platform unpause**: Does not automatically add top-level groups; extends `platform` subcommands only.
 - **Impact before rename**: `gitnexus_impact` required for any `creator kb` rename (P3).
 

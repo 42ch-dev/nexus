@@ -13,8 +13,7 @@
 - [work-experience-model.md](../work-experience-model.md) — Work is single-Work; pool `active` is CLI default only
 - [agent-nexus-tool-bridge.md](../agent-nexus-tool-bridge.md) — `nexus.work.patch` obeys same locks
 
-**Iteration compass**: `delivery-compass.md` (Shipped)  
-**V1.42 amend**: §4.2 production acquire gap — `delivery-compass.md` P0
+**V1.42 amend**: §4.2 production acquire gap —  P0
 
 ---
 
@@ -131,7 +130,7 @@ Daemon API and `nexus.work.patch` **must** use the same acquire/release paths as
 
 ~~**Gap (PR #53 security re-review)**: V1.41 shipped DB columns and spec rules but **production paths do not yet acquire** `runtime_lock_holder`.~~
 
-**Resolved (V1.42 P0)**: All mutating paths now acquire/release `runtime_lock_holder` via `RuntimeLockGuard` RAII + `nexus_local_db::runtime_lock` module. See plan `2026-06-11-v1.42-runtime-lock-and-hygiene`.
+**Resolved (V1.42 P0)**: All mutating paths now acquire/release `runtime_lock_holder` via `RuntimeLockGuard` RAII + `nexus_local_db::runtime_lock` module. .
 
 | Path | Acquire before mutate | Release |
 | --- | --- | --- |

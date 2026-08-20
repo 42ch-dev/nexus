@@ -12,9 +12,6 @@
 - [on-demand-synthesis-read-path-invariant.md](../knowledge/architecture-patterns/on-demand-synthesis-read-path-invariant.md) — read-path LLM gating (applies per world)
 - [fingerprint-cached-live-aggregate.md](../knowledge/architecture-patterns/fingerprint-cached-live-aggregate.md) — read-path cost (cache key per (creator, world))
 
-**Iteration compass**: `delivery-compass.md` (§7.2.4); supersets `delivery-compass.md`
-**Plans**: `2026-07-01-v1.81-creator-soul-narrative-and-world-foundation.md` (V1.81 P0) · `2026-07-02-v1.82-per-world-narrative-backend.md` (V1.82 P0)
-
 ## 1. Purpose
 
 This spec records the durable lifecycle rules for Creator memory fragments that

@@ -4,7 +4,6 @@ date: 2026-07-05
 problem_type: integration-pattern
 category: architecture-patterns
 severity: medium
-plan_id: 2026-07-05-v1.92-closure
 tags: [tls, rustls, rcgen, axum-server, self-signed-cert, san, tofu, remote-bind, listener]
 applies_when: adding TLS to an axum-based local-first daemon that must serve trusted-LAN clients via a self-signed cert + TOFU pinning
 ---

@@ -4,7 +4,6 @@ date: 2026-08-15
 problem_type: knowledge
 category: architecture-patterns
 severity: medium
-plan_id: 2026-08-14-v1.165-p1-entry-scoped-findings-alignment
 tags: [spoke, findings, extensions-discriminator, dual-table, world-scope, work-scope, routing, wrapper-seam, manifest-guard]
 last_updated: 2026-08-15
 ---

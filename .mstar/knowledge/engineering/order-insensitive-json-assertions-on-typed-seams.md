@@ -4,7 +4,6 @@ date: 2026-08-14
 problem_type: knowledge
 category: engineering
 severity: low
-plan_id: 2026-08-14-v1.164-p1-spoke-010-upgrade-observation-passthrough
 tags: [testing, json-assertions, key-order, btreesemap, typed-seams, spoke, serde]
 last_updated: 2026-08-14
 applies_when: Writing test assertions that compare serialized JSON strings across a typed seam (spoke generated types, serde maps); any test asserting exact string equality on state_json/body_json/modules_json style columns

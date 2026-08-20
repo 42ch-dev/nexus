@@ -4,7 +4,6 @@ date: 2026-08-04
 problem_type: knowledge
 category: conventions
 severity: low
-plan_id: 2026-08-04-v1.148-p4-connect-dogfood-sweep-and-specs-alignment
 tags: [nexus-home-layout, path-helpers, device-id, raw-home, convention]
 applies_when: writing or calling a path helper under `nexus-home-layout`; adding a new `~/.nexus42/...` artifact path
 ---

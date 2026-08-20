@@ -4,7 +4,6 @@ date: 2026-07-15
 problem_type: architecture-pattern
 category: architecture-patterns
 severity: medium
-plan_id: 2026-07-14-v1.117-profiles-workspace
 tags: [creator, display_name, ssot, dual-store, identity-cache, sql, config-toml, daemon-api, drift]
 applies_when: adding any write path for creator display_name / identity fields; reading creator name in a new UI surface; touching daemon creators handler
 ---

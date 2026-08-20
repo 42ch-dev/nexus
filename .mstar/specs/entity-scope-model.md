@@ -64,7 +64,7 @@ This subsection is **additive** — it does not rewrite §1.1 (canonical scope t
 |-------|-------------|-----------|----------------|---------------------------------|
 | **Brief** | World-global | Multi-decade / era / age | **World** (World-global Timeline layer) | `block_type=era` KnowledgeEntry (new wire enum value — see §5.1.1 narrative taxonomy extension + iteration architecture §2) |
 | **Narrative** | Event-level | Human-paced (days/weeks/years) | **Shared** (both World Timeline and Work Timeline) | World scope: `block_type=event` KnowledgeEntry (V1.122 preserved). Work scope: `WorkOutline.timeline_events[]` (V1.72 preserved). |
-| **Moment** | Scene/beat-precise | Sub-scene (minutes/hours within a scene) | **Work** (Work-scoped Timeline layer) | Frontend-only projection of V1.108 `OutlineSceneNodeData` / `OutlineBeatNodeData` from V1.72 `WorkOutline` (wire extension deferred to V1.124+ — **durable roadmap:** consolidated in the deferred-features tracker §2.6 — DR-26; honest empty-state until then — see iteration architecture §3) |
+| **Moment** | Scene/beat-precise | Sub-scene (minutes/hours within a scene) | **Work** (Work-scoped Timeline layer) | Frontend-only projection of V1.108 `OutlineSceneNodeData` / `OutlineBeatNodeData` from V1.72 `WorkOutline` (wire extension deferred to V1.124+ — **durable roadmap:** DR-26; honest empty-state until then — see iteration architecture §3) |
 
 #### 1.4.2 Brief canonization
 
@@ -307,7 +307,7 @@ Post-1.0, if state-path queries emerge as a product requirement, a dedicated
 `key_block_state` table (normalized, indexed) should be considered as a
 replacement, not a supplement — avoiding two sources of truth for the same state.
 
-> **Durable roadmap:** consolidated in the deferred-features tracker §2.6 — DR-47 (computable state-path query perf).
+> **Durable roadmap:** DR-47 (computable state-path query perf).
 
 ##### 5.5.9.3 Structured validation mode
 
@@ -407,7 +407,7 @@ Recommended default mapping when ingesting or authoring novel items (P1 validati
 | `rules` | `conflict` | Magic/tech/legal constraints |
 | `economy` | `item` | Trade, currency, resources |
 
-`world_refs` in novel chapter frontmatter reference **stable `canonical_name`** values (optionally prefixed in prose as `char_lin_xia` — resolved against `(world_id, block_type, canonical_name)` via P0 validator). Iteration: `delivery-compass.md`; runtime layering: [world-kb-runtime-architecture.md](world-kb-runtime-architecture.md).
+`world_refs` in novel chapter frontmatter reference **stable `canonical_name`** values (optionally prefixed in prose as `char_lin_xia` — resolved against `(world_id, block_type, canonical_name)` via P0 validator). runtime layering: [world-kb-runtime-architecture.md](world-kb-runtime-architecture.md).
 
 Minimum common `body` shape for novel-profile items (V1.40 P1):
 
@@ -534,8 +534,6 @@ Minimum common `body` shape for a typed nested Brief-era item (V1.159):
 
 The nesting edge for the example above (parent `age_of_stars` → child `age_of_expansion`) is a §5.6 relationship row: `relation_type = "custom"`, `custom_label = "parent_era"`, `source_entity_id = <age_of_stars key_block_id>`, `target_entity_id = <age_of_expansion key_block_id>`, `symmetric = false` (nesting is directional). Created via `kb.relate` (V1.144 spoke `RelationPort`) or `kb.patch_relationship` (V1.74) — both accept `custom` + `custom_label`; no new write route.
 
-
-
 Script profile `BlockType` additions (V1.55 P3, snake_case on wire):
 
 | Wire `block_type` | UI label | `script_category` | Primary section |
@@ -617,7 +615,7 @@ Minimum common `body` shape for script items:
 - Today, its default `work` scope is a local file/index workflow under the active `creator_id` and `workspace_slug`.
 - Its current implementation is not equivalent to the World-scoped narrative KB model.
 
-> **Durable roadmap:** consolidated in the deferred-features tracker §2.6 — DR-46 (`creator kb --scope world` / user-global knowledge routing).
+> **Durable roadmap:** DR-46 (`creator kb --scope world` / user-global knowledge routing).
 
 ### 5.4 Prohibited shorthand
 
@@ -630,7 +628,7 @@ The term `KB` MUST be qualified in architecture/spec text when ambiguity matters
 ### 5.5 World KB promotion state machine (V1.50 normative)
 
 > **Status**: Normative (V1.50) — V1.50 T-B P1 shipped on 2026-06-18. Migration `202606180002_kb_extract_jobs.sql` landed; review-time extraction hook verified end-to-end; promotion row promoted Draft → Normative at V1.50 P-last.
-> **Plan**: `2026-06-18-v1.50-kb-auto-promotion.md` (Done; archived)
+> **Plan**: 
 > **Cross-refs**: [workflow-profile.md §11.5](novel-writing/workflow-profile.md#115-auto-chronology-per-work-opt-in) — auto-advance logs auto-promotion status; [quality-loop.md §3](novel-writing/quality-loop.md) — review-time extraction hook.
 
 World KB rows enter the World through a **promotion state machine** governed by `kb_extract_jobs.status` and the World-scoped KnowledgeEntries (`nexus-knowledge` storage, see §5.1.1).
@@ -665,7 +663,7 @@ Invalid transitions return `422` with stable error code on Daemon API.
 
 #### 5.5.4 Rejected retention
 
-Rejected promotion candidates are retained in `Logs/kb/rejected/<YYYY-MM-DD>-<extract_job_id>.md` for audit. Retention is **indefinite** by default (no TTL); future iterations may add a `--prune-rejected` CLI — **durable roadmap:** consolidated in the deferred-features tracker §2.6 — DR-18 (`creator world kb` rejected-candidate `--prune-rejected`).
+Rejected promotion candidates are retained in `Logs/kb/rejected/<YYYY-MM-DD>-<extract_job_id>.md` for audit. Retention is **indefinite** by default (no TTL); future iterations may add a `--prune-rejected` CLI — **durable roadmap:** DR-18 (`creator world kb` rejected-candidate `--prune-rejected`).
 
 #### 5.5.5 Relationship to existing `nexus-kb` taxonomy
 
@@ -791,7 +789,7 @@ remain normal `kb_relationships` rows with OCC, symmetric projection, confidence
 validation, and optional grounding; **promotion is clearing `needs_review`**,
 not moving through a pending/confirmed/rejected relationship state machine. A
 full relationship promotion state machine (mirroring entities) is post-1.0 —
-**durable roadmap:** consolidated in the deferred-features tracker §2.6 — DR-48 (relationship promotion state machine).
+**durable roadmap:** DR-48 (relationship promotion state machine).
 
 **Entity-existence prerequisite**: extraction persists a relationship suggestion
 only when both endpoints already resolve to non-deleted KeyBlocks in the same

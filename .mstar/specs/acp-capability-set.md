@@ -221,6 +221,6 @@ If handshake succeeds but capability set is incomplete:
 
 ## 8. Open items
 
-> **Durable roadmap:** consolidated in the deferred-features tracker §2.6 — DR-25 (capability→ACP tool/resource schema map + manuscript read/write quotas + default timeouts).
+> **Durable roadmap:** DR-25 (capability→ACP tool/resource schema map + manuscript read/write quotas + default timeouts).
 
 - ~~Decide whether `world.delta.apply` is agent-side or runtime-side by default.~~ **Resolved V1.60 P0** — runtime-side; see [`world-delta-propose-apply.md`](world-delta-propose-apply.md) §3 (agent proposes, runtime applies under transaction + lost-update guard).

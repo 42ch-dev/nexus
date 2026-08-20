@@ -4,7 +4,6 @@ date: 2026-08-10
 problem_type: workflow-pattern
 category: workflow-patterns
 severity: low
-plan_id: 2026-08-10-v1.156-p2-work-timeline-brief-layer
 tags: [process, qc, sibling-plan, carry-forward, fix-wave, proactive]
 applies_when: An iteration ships multiple sibling plans that mirror each other (same pattern, different surface/scope) and the first plan's QC produces reusable lessons
 ---
@@ -61,7 +60,5 @@ P1 (no prior sibling) went through the full fix-wave discovery; P2 (with the car
 
 ## References
 
-- V1.156 compass `delivery-compass.md` (P1+P2 sibling structure; local)
 - V1.156 P1 QC consolidated `qc-consolidated.md` (the four lessons; local)
 - Three-layer projection pattern: `architecture-patterns/three-layer-timeline-projection.md`
-- Residual findings sweep playbook (adjacent iteration-level QC pattern): `workflow-patterns/residual-findings-sweep-playbook.md`

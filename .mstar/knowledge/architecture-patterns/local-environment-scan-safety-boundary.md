@@ -4,7 +4,6 @@ date: 2026-07-06
 problem_type: architecture-pattern
 category: architecture-patterns
 severity: high
-plan_id: V1.94-P-last (compound of desktop onboarding & IA pass)
 tags: [acp, agent-host, path-scan, security, execution-boundary, subprocess, bounded-concurrency, timeout, setup-wizard]
 applies_when: scanning the local environment for installed tools/agents the daemon could talk to; any feature that probes PATH for binaries; any "auto-detect local X" UX where X is an executable
 ---

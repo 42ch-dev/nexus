@@ -4,7 +4,6 @@ date: 2026-07-18
 problem_type: convention
 category: conventions
 severity: medium
-plan_id: "2026-07-18-v1.122-timeline-first-canvas (V1.122 P1; compound of timeline-canvas-architecture.md §9)"
 tags: [wire-contracts, verification, codegen, schemas, additive-frontend, regression]
 applies_when:
   - "Verifying that an additive-frontend iteration produced no wire-contract drift"

@@ -81,4 +81,3 @@ changes.
   plan); the two SQL strings are intentionally byte-identical so the `.sqlx`
   offline cache keys collide harmlessly.
 
-Source: `iteration:v1.167/plans/2026-08-16-v1.167-p2-creator-register-local.md`

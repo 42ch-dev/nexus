@@ -301,6 +301,6 @@ excluding `needs_review` rows; `?include_suggested=true` surfaces them.
 | §4.2 `LlmExtractTask` hermetic tests (golden → golden, mock worker) | `tasks/mod.rs` `llm_extract_task_*` tests |
 | §4.3 `novel-review-master` uses llm_extract; E2E asserts payload carries 4 LLM keys | §5, `tests/novel_review_master.rs` |
 | §4.4 adopt shows confidence + source_quote | cli-spec §6.2G, `creator_world_kb_adopt.rs` |
-| §4.5 R-V150KBED-01 closed | `status.json` residual_findings |
+| §4.5 R-V150KBED-01 closed | shipped |
 | §4.7 additive DB migration | §3.2, `202606180006_kb_extract_jobs_llm_payload.sql` |
 | §4.8 wire contracts unchanged | §6 (no `schemas/` change) |

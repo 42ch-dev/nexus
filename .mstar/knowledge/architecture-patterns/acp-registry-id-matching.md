@@ -4,7 +4,6 @@ date: 2026-07-11
 problem_type: architecture-pattern
 category: architecture-patterns
 severity: medium
-plan_id: 2026-07-11-v1.110-agent-picker-ux-polish
 tags: [agent-picker, acp-registry, registry_agent_id, matching, display-name, priority, common-first, partition, false-negative]
 applies_when: matching UI elements against the ACP CDN registry; any "priority" or "pinned" list of agents; ordering agents by user preference
 ---

@@ -13,8 +13,6 @@
 - [orchestration-engine.md](orchestration-engine.md) — presets, schedules, capabilities
 - [agent-nexus-tool-bridge.md](agent-nexus-tool-bridge.md) — Agent-initiated context/tools (parallel channel)
 
-**Iteration compass**: `delivery-compass.md`
-
 ---
 
 ## 1. Purpose
@@ -207,4 +205,4 @@ Wire contract: `schemas/local-api/memory/memory-fragment-info.schema.json` exten
 
 ---
 
-*Normative staged creator workflow. Shipped V1.34 via `2026-06-04-v1.34-*`.*
+*Normative staged creator workflow. Shipped V1.34.*

@@ -4,7 +4,6 @@ date: 2026-07-20
 problem_type: workflow_convention
 category: conventions
 severity: medium
-plan_id: 2026-07-20-v1.126-p0-shell-selection-submenu
 tags: [harness, subagents, dispatch, openCode, fallback, sdd]
 applies_when: PM dispatches a specialist subagent (frontend-dev / qc-specialist* / etc.) for SDD task implementation or review and receives an empty / no-content response
 ---
@@ -47,7 +46,7 @@ If `git log` shows no new commits AND `git status` is clean AND the task_result 
 
 ### PM inline fallback (whitelist only)
 
-For **non-behavioral text edits only** (e.g. updating spec Status lines, fixing obvious terminology drift flagged by a specialist report, registering residuals in status.json), PM may apply the fix inline per the PM whitelist (`mstar-roles/references/project-manager.md` § "Minimal non-behavioral text edits"). V1.126 P0 §1.6 writing-specialist seat 3 returned empty; PM applied the spec Status line updates + Iteration package column directly (documented as `inline fallback` in spec status). **PM MUST NOT inline-implement product code** — that violates `mstar-dispatch-gates`.
+For **non-behavioral text edits only** (e.g. updating spec Status lines, fixing obvious terminology drift flagged by a specialist report, registering residuals locally), PM may apply the fix inline per the PM whitelist (`mstar-roles/references/project-manager.md` § "Minimal non-behavioral text edits"). V1.126 P0 §1.6 writing-specialist seat 3 returned empty; PM applied the spec Status line updates + Iteration package column directly (documented as `inline fallback` in spec status). **PM MUST NOT inline-implement product code** — that violates `mstar-dispatch-gates`.
 
 ### Documentation requirement
 

@@ -10,7 +10,6 @@
 
 - [orchestration-engine.md](orchestration-engine.md) §7.5 — current linear-only contract; this doc is the future normative target when conditional routing ships
 - [creator-workflow.md](creator-workflow.md) — linear creator workflow stages (shipped V1.34); conditional routing layers beneath, does not replace FL-E enum in the first ship slice
-- `deferred-features-cross-version-tracker.md` — DF-56, DF-29, DF-31
 
 This file is the long-term SSOT.
 
@@ -26,7 +25,7 @@ Authors need presets that branch on runtime signals (judge outcome, tool result,
 - Graph wires a conditional edge using `_judge_result` from context.
 - GO → `go` target; NOGO or worker-unavailable → `nogo` target.
 - Only valid on `exit_when: { kind: llm_judge }` states. Full expression-based conditional routing remains post-V1.42 (see §3.6.3).
-- Plan: `2026-06-11-v1.42-conditional-routing.md`.
+- 
 
 Pre-V1.42 state:
 
@@ -241,7 +240,7 @@ states:
 
 **DAG enforcement**: cycles remain rejected at load time. Acyclic paths through converge nodes (e.g. `A → M → B`, `C → M → B` where M waits for both A and C) are allowed.
 
-**Converge timeout** (V1.58 P2 — R-V156P2-L003): the current implementation does **not** enforce a timeout on `wait_for_all` converge nodes. A converge state with `strategy: wait_for_all` that never receives all predecessor arrivals will wait indefinitely (returns `NextAction::WaitForInput` on each `run()` call). The engine relies on external signals (Resume, Cancel) to break deadlocks. A configurable `wait_for_all_timeout_seconds` field (default 3600s) with deadline-based enforcement is planned but deferred — **Durable roadmap:** consolidated in the deferred-features tracker §2.6 — DR-06 — adding it requires schema changes to `ConvergeConfig` (out of scope for P2: "schemas/ changes") and runtime behavior changes to the converge gate in `StateCompositeTask::run()`. For local-only single-user daemons (pre-1.0), indefinite wait is acceptabl…
+**Converge timeout** (V1.58 P2 — R-V156P2-L003): the current implementation does **not** enforce a timeout on `wait_for_all` converge nodes. A converge state with `strategy: wait_for_all` that never receives all predecessor arrivals will wait indefinitely (returns `NextAction::WaitForInput` on each `run()` call). The engine relies on external signals (Resume, Cancel) to break deadlocks. A configurable `wait_for_all_timeout_seconds` field (default 3600s) with deadline-based enforcement is planned but deferred — **Durable roadmap:** DR-06 — adding it requires schema changes to `ConvergeConfig` (out of scope for P2: "schemas/ changes") and runtime behavior changes to the converge gate in `StateCompositeTask::run()`. For local-only single-user daemons (pre-1.0), indefinite wait is acceptabl…
 
 ### 3.4 Registry and workspace context fields (V1.56 P3 — Normative)
 
@@ -357,8 +356,8 @@ The runtime scans compiled expression ASTs for `registry_refresh` and `workspace
 ## 8. References
 
 - PD-08: Preset orchestration + Agentic Design Patterns (deferred tracker product line)
-- `delivery-compass.md`
-- `delivery-compass.md` §1.2 OUT: conditional routing
+- 
+-  §1.2 OUT: conditional routing
 - External: https://github.com/evoiz/Agentic-Design-Patterns
 
 ---

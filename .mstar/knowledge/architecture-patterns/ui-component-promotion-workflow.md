@@ -5,7 +5,6 @@ last_updated: 2026-07-20
 problem_type: architecture_decision
 category: architecture-patterns
 severity: medium
-plan_id: 2026-07-08-v1.99-nexus-ui-component-promotion; V1.100 guardrails+form-fields; V1.101 Select + AgentPicker placement; V1.106 Toast promotion; V1.107 App Toast adoption
 tags: [nexus-ui, component-promotion, design-studio, presentational-primitives, package-boundary, agent-picker, select, studio-first]
 applies_when: promoting a UI primitive from app ownership into @42ch/nexus-ui, or deciding where a new UI component should live
 ---

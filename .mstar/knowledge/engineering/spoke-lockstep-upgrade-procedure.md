@@ -2,7 +2,6 @@
 title: Spoke lockstep upgrade procedure
 category: engineering
 track: knowledge
-source_plan: 2026-08-19-v1.169-p0-spoke-011-upgrade
 source_iteration: V1.169
 created: 2026-08-19
 last_updated: 2026-08-19
@@ -37,4 +36,4 @@ Any spoke version bump in the nexus workspace (lockstep policy, V1.139+).
 
 ## Examples
 
-- V1.169 (0.10.0 → 0.11.1): additive `manifest.tools` — 4 literal sites (1 production builder + 3 feature-gated examples), npm + drift-gate lockstep, `tools.*` refusal pinning. QC/QA evidence: `.mstar/sdd/2026-08-19-v1.169-p0-spoke-011-upgrade/` (local harness).
+- V1.169 (0.10.0 → 0.11.1): additive `manifest.tools` — 4 literal sites (1 production builder + 3 feature-gated examples), npm + drift-gate lockstep, `tools.*` refusal pinning. 

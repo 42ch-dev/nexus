@@ -5,7 +5,6 @@ last_updated: 2026-07-13
 problem_type: architecture-pattern
 category: architecture-patterns
 severity: medium
-plan_id: V1.114-P0 (compound of V1.67–V1.76 canvas program; updated V1.108, V1.109, V1.111, V1.114, V1.115)
 tags: [canvas, write-boundary, occ, conflict-modal, react-flow, design-tokens, local-api, projection-completeness, pagination, spatial-edge-editing, fixture-projection, viewport-preservation, command-palette, sidebar-ia, studio-first, surface-adapter, dagre-auto-layout, contract-convergence, surface-inventory, dagre-compound-limitation]
 applies_when: implementing a new graph-editing surface on the Nexus canvas (or any structured-authoring surface with concurrent daemon + human edits)
 ---
