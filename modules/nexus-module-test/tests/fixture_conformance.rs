@@ -72,9 +72,12 @@ fn probe_manifest(module_id: &str) -> ModuleManifest {
 fn fixture_parses_as_compute_input() {
     let input = fixture_input();
     assert_eq!(input.schema_version, 1);
-    assert_eq!(input.world_ref.world_id, "wld_combat");
-    assert_eq!(input.world_ref.branch_id, "root");
-    assert_eq!(input.world_ref.timeline_head_event_id, "evt_0");
+    assert_eq!(input.world_ref.world_id.as_deref(), Some("wld_combat"));
+    assert_eq!(input.world_ref.branch_id.as_deref(), Some("root"));
+    assert_eq!(
+        input.world_ref.timeline_head_event_id.as_deref(),
+        Some("evt_0")
+    );
 
     assert_eq!(input.key_blocks.len(), 2, "two computable characters");
     let atk = &input.key_blocks[0];

@@ -173,9 +173,9 @@ mod tests {
         let input = ComputeInput {
             schema_version: 1,
             world_ref: WorldRef {
-                world_id: "w".to_string(),
-                branch_id: "root".to_string(),
-                timeline_head_event_id: "evt_0".to_string(),
+                world_id: Some("w".to_string()),
+                branch_id: Some("root".to_string()),
+                timeline_head_event_id: Some("evt_0".to_string()),
             },
             key_blocks: vec![],
             narrative_state: json!({}),

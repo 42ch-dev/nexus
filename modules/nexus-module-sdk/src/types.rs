@@ -14,11 +14,21 @@
 use serde::{Deserialize, Serialize};
 
 /// World and timeline locator for one invocation.
+///
+/// Every field is optional on the wire: the compute-input schema declares
+/// `world_ref` required but its inner properties are not, and the host's
+/// generated `ComputeInputWorldRef` mirrors that with `Option<String>` fields
+/// (the killing-blow fixture in `basic_combat.rs` sends `{"world_id": …}`
+/// only). Absent fields deserialize to `None`; modules apply their own
+/// fallbacks (e.g. `branch_id` → `"root"`).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct WorldRef {
-    pub world_id: String,
-    pub branch_id: String,
-    pub timeline_head_event_id: String,
+    #[serde(default)]
+    pub world_id: Option<String>,
+    #[serde(default)]
+    pub branch_id: Option<String>,
+    #[serde(default)]
+    pub timeline_head_event_id: Option<String>,
 }
 
 /// Standard input envelope passed into a WASM compute module.
@@ -99,9 +109,12 @@ mod tests {
         }"#;
         let input: ComputeInput = serde_json::from_str(raw).unwrap();
         assert_eq!(input.schema_version, 1);
-        assert_eq!(input.world_ref.world_id, "wld_combat");
-        assert_eq!(input.world_ref.branch_id, "root");
-        assert_eq!(input.world_ref.timeline_head_event_id, "evt_0");
+        assert_eq!(input.world_ref.world_id.as_deref(), Some("wld_combat"));
+        assert_eq!(input.world_ref.branch_id.as_deref(), Some("root"));
+        assert_eq!(
+            input.world_ref.timeline_head_event_id.as_deref(),
+            Some("evt_0")
+        );
         assert_eq!(input.key_blocks.len(), 1);
         assert_eq!(input.key_blocks[0]["key_block_id"], "kb_atk");
         assert_eq!(input.narrative_state["current_chapter"], "ch-1");
@@ -139,6 +152,23 @@ mod tests {
         let input: ComputeInput = serde_json::from_str(raw).unwrap();
         assert!(input.narrative_state.is_null());
         assert!(input.invocation.is_null());
+    }
+
+    /// `world_ref` inner fields are all optional on the wire (the schema
+    /// requires `world_ref` itself, not its properties; the host's generated
+    /// type mirrors that). The real-host killing-blow fixture sends only
+    /// `world_id` — the SDK must accept it (AR-11 byte-compat bar).
+    #[test]
+    fn compute_input_world_ref_fields_are_optional() {
+        let raw = r#"{
+            "schema_version": 1,
+            "world_ref": {"world_id": "wld_kill"},
+            "key_blocks": []
+        }"#;
+        let input: ComputeInput = serde_json::from_str(raw).unwrap();
+        assert_eq!(input.world_ref.world_id.as_deref(), Some("wld_kill"));
+        assert_eq!(input.world_ref.branch_id, None);
+        assert_eq!(input.world_ref.timeline_head_event_id, None);
     }
 
     /// The canonical output sample (ABI §5) must round-trip with the delta-op

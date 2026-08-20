@@ -400,9 +400,9 @@ mod tests {
         ComputeInput {
             schema_version: 1,
             world_ref: WorldRef {
-                world_id: "wld_test".to_string(),
-                branch_id: "root".to_string(),
-                timeline_head_event_id: "evt_0".to_string(),
+                world_id: Some("wld_test".to_string()),
+                branch_id: Some("root".to_string()),
+                timeline_head_event_id: Some("evt_0".to_string()),
             },
             key_blocks,
             narrative_state: json!({"current_chapter": "ch-1"}),
