@@ -1,9 +1,12 @@
-//! Module manifest (`manifest.json`) deserialization.
+//! Module manifest (`manifest.json`) types and validation core.
+//!
+//! Extracted from `crates/nexus-wasm-host/src/manifest.rs` (V1.170 P0, AR-8)
+//! so the host, the `nexus42 compute` CLI, and module tooling share ONE
+//! manifest contract. `nexus-wasm-host` re-exports these types unchanged.
 //!
 //! A compute module ships a `manifest.json` alongside its compiled `.wasm`.
-//! The manifest declares the module's identity, its required input surface, and
-//! optional sandbox overrides. This resolves open design item #3 (which fields
-//! are required vs optional).
+//! The manifest declares the module's identity, its required input surface,
+//! and optional sandbox overrides.
 //!
 //! ## Required fields
 //!
@@ -32,102 +35,124 @@
 
 use std::collections::HashMap;
 
-use nexus_contracts::generated::daemon_api::compute::module_detail::{
-    ModuleDetail, ModuleDetailHostFunctionsItem, ModuleDetailSchemas,
-};
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
+use std::fmt::Write as _;
 
-// V1.170 P0 (AR-8): the manifest types + validation core (`allows`,
-// `verify_wasm_sha256`) moved to the shared `nexus-module-manifest` crate.
-// This module re-exports them so every existing importer (`host.rs`,
-// `compute.rs`, `module_cache.rs`, `registry.rs`, daemon handlers, tests)
-// keeps compiling unchanged.
-pub use nexus_module_manifest::{HostFunction, ModuleManifest, ModuleSchemas};
-
-fn json_object_to_map(value: &serde_json::Value) -> serde_json::Map<String, serde_json::Value> {
-    value.as_object().cloned().unwrap_or_default()
+/// Whitelisted host functions a module may import (open design item #4).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HostFunction {
+    /// `nexus::kb_read` — read a `KeyBlock` by ID from the invocation snapshot.
+    KbRead,
+    /// `nexus::narrative_query` — query narrative context.
+    NarrativeQuery,
 }
 
-fn schema_fragment_maps_to_detail(
-    src: Option<&HashMap<String, serde_json::Value>>,
-) -> HashMap<String, serde_json::Map<String, serde_json::Value>> {
-    src.map(|fragments| {
-        fragments
-            .iter()
-            .map(|(k, v)| (k.clone(), json_object_to_map(v)))
-            .collect()
-    })
-    .unwrap_or_default()
+/// Module schemas — inline JSON-Schema fragments for per-module
+/// input/output validation (V1.62 manifest dynamics).
+///
+/// Every sub-field is optional: a manifest may declare none, some, or
+/// all four fragments. Omitted fields → no validation for that aspect.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+#[allow(clippy::derive_partial_eq_without_eq)]
+// ^ `serde_json::Value` in field types does not implement `Eq`.
+pub struct ModuleSchemas {
+    /// Per-BlockType attribute shape fragments (immutable compute params).
+    /// Keyed by `block_type` (e.g. "character"). Skipped if absent.
+    #[serde(default)]
+    pub key_block_attributes: Option<HashMap<String, serde_json::Value>>,
+    /// Per-BlockType state shape fragments (mutable runtime data).
+    #[serde(default)]
+    pub key_block_state: Option<HashMap<String, serde_json::Value>>,
+    /// Shape for the `ComputeInput.invocation` freeform field.
+    #[serde(default)]
+    pub invocation: Option<serde_json::Value>,
+    /// Shape for the `ComputeOutput.battle_report` freeform field.
+    #[serde(default)]
+    pub battle_report: Option<serde_json::Value>,
 }
 
-fn module_schemas_to_detail(schemas: &ModuleSchemas) -> ModuleDetailSchemas {
-    ModuleDetailSchemas {
-        key_block_attributes: schema_fragment_maps_to_detail(schemas.key_block_attributes.as_ref()),
-        key_block_state: schema_fragment_maps_to_detail(schemas.key_block_state.as_ref()),
-        invocation: schemas
-            .invocation
-            .as_ref()
-            .map(json_object_to_map)
-            .unwrap_or_default(),
-        battle_report: schemas
-            .battle_report
-            .as_ref()
-            .map(json_object_to_map)
-            .unwrap_or_default(),
+/// Module manifest (`manifest.json`).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ModuleManifest {
+    pub module_id: String,
+    pub name: String,
+    pub version: String,
+    pub nexus_abi_version: u32,
+    pub required_key_block_types: Vec<String>,
+    pub compute_export: String,
+    pub init_export: String,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub author: Option<String>,
+    /// Whitelisted host functions the module may call. Defaults to none.
+    #[serde(default)]
+    pub host_functions: Vec<HostFunction>,
+    /// Inline JSON-Schema fragments for input/output validation (V1.62).
+    /// When declared, the host validates `KeyBlocks`, invocation, and
+    /// `battle_report` against these shapes. Omitted → no validation.
+    #[serde(default)]
+    pub schemas: Option<ModuleSchemas>,
+    #[serde(default)]
+    pub battle_report_kind: Option<String>,
+    #[serde(default)]
+    pub max_fuel: Option<u64>,
+    #[serde(default)]
+    pub max_memory_mib: Option<u32>,
+    #[serde(default)]
+    pub max_wall_time_ms: Option<u64>,
+    /// SHA-256 of the compiled `.wasm` bytes this manifest pairs with
+    /// (64 lowercase hex chars). Operators SHOULD set this: when present,
+    /// the loader verifies content-based pairing — the loaded bytes must
+    /// hash to this value — and rejects a mismatched pair before it can
+    /// be compiled or cached (Greptile P1: an old manifest + new wasm
+    /// always mismatches). When absent (legacy manifests), the loader
+    /// falls back to the stat fence (size + mtime), which cannot detect
+    /// a same-size swap landing outside its observation windows.
+    /// `inject_wasm_sha256` maintains this field for staged/embedded
+    /// modules, computing it from the compiled artifact at build time.
+    #[serde(default)]
+    pub wasm_sha256: Option<String>,
+}
+
+impl ModuleManifest {
+    /// Whether the module is permitted to call the given host function.
+    #[must_use]
+    pub fn allows(&self, f: HostFunction) -> bool {
+        self.host_functions.contains(&f)
     }
-}
 
-/// Typed conversion from the runtime manifest to the generated wire detail.
-///
-/// (V1.170 P0, AR-8 note: this was `impl From<&ModuleManifest> for ModuleDetail`,
-/// but the orphan rule forbids a foreign trait impl over two foreign types —
-/// `ModuleManifest` now lives in `nexus-module-manifest` — so it is a free
-/// function. The field mapping is unchanged.)
-///
-/// Because this function maps every field explicitly, manifest↔generated drift
-/// becomes a **compile error**:
-///
-/// * Removing a field from [`ModuleDetail`] without updating this function
-///   fails `cargo build -p nexus-wasm-host`.
-/// * Adding a field to [`ModuleManifest`] without mapping it here is caught by
-///   the `from_manifest_maps_all_fields` test.
-///
-/// This conversion catches changes to [`ModuleDetail`] (generated) — if a field
-/// is removed from the generated type, this function won't compile. It does NOT
-/// catch a field added to [`ModuleManifest`] that is not in [`ModuleDetail`]
-/// (that would silently drop). The `schema_drift_detection` gate catches
-/// schema↔generated drift; this function catches generated-side structural
-/// changes.
-///
-/// This is stronger than the previous JSON round-trip, which silently dropped
-/// mismatched fields.
-pub fn manifest_to_detail(manifest: &ModuleManifest) -> ModuleDetail {
-    ModuleDetail {
-        module_id: manifest.module_id.clone(),
-        name: manifest.name.clone(),
-        version: manifest.version.clone(),
-        nexus_abi_version: i64::from(manifest.nexus_abi_version),
-        required_key_block_types: manifest.required_key_block_types.clone(),
-        compute_export: manifest.compute_export.clone(),
-        init_export: manifest.init_export.clone(),
-        description: manifest.description.clone(),
-        author: manifest.author.clone(),
-        host_functions: manifest
-            .host_functions
-            .iter()
-            .map(|f| match f {
-                HostFunction::KbRead => ModuleDetailHostFunctionsItem::KbRead,
-                HostFunction::NarrativeQuery => ModuleDetailHostFunctionsItem::NarrativeQuery,
-            })
-            .collect(),
-        schemas: manifest.schemas.as_ref().map(module_schemas_to_detail),
-        battle_report_kind: manifest.battle_report_kind.clone(),
-        max_fuel: manifest
-            .max_fuel
-            .map(|v| i64::try_from(v).unwrap_or(i64::MAX)),
-        max_memory_mib: manifest.max_memory_mib.map(i64::from),
-        max_wall_time_ms: manifest
-            .max_wall_time_ms
-            .map(|v| i64::try_from(v).unwrap_or(i64::MAX)),
+    /// Verify content-based pairing: when `wasm_sha256` is set, `wasm_bytes`
+    /// must hash to the declared value (64 lowercase hex chars). A mismatch
+    /// means the `.wasm` and `manifest.json` are not the pair the manifest
+    /// declares — e.g. an operator swapped in a new `.wasm` without updating
+    /// the manifest — and must be rejected before the pair is compiled or
+    /// cached (Greptile P1: an old manifest + new wasm always mismatches).
+    /// `None` (legacy manifest) skips verification; callers then rely on the
+    /// stat fence (size + mtime), which cannot detect a same-size swap
+    /// landing outside its observation windows.
+    ///
+    /// # Errors
+    ///
+    /// Returns the mismatch message; callers classify it as a host fault.
+    pub fn verify_wasm_sha256(&self, wasm_bytes: &[u8]) -> Result<(), String> {
+        let Some(expected) = &self.wasm_sha256 else {
+            return Ok(());
+        };
+        let digest = Sha256::digest(wasm_bytes);
+        let mut computed = String::with_capacity(64);
+        for b in digest {
+            let _ = write!(computed, "{b:02x}");
+        }
+        if computed == *expected {
+            Ok(())
+        } else {
+            Err(format!(
+                "wasm does not match manifest wasm_sha256 (manifest {expected}, computed {computed})"
+            ))
+        }
     }
 }
 
@@ -227,65 +252,6 @@ mod tests {
         }"#;
         let m: ModuleManifest = serde_json::from_str(json).unwrap();
         assert!(m.schemas.is_none(), "V1.61 manifest must have schemas=None");
-    }
-
-    #[test]
-    fn from_manifest_maps_all_fields() {
-        let schemas = ModuleSchemas {
-            key_block_attributes: Some(HashMap::from([(
-                "character".to_string(),
-                serde_json::json!({"type": "object"}),
-            )])),
-            key_block_state: None,
-            invocation: Some(serde_json::json!({"type": "object"})),
-            battle_report: None,
-        };
-        let manifest = ModuleManifest {
-            module_id: "test-module".to_string(),
-            name: "Test Module".to_string(),
-            version: "1.2.3".to_string(),
-            nexus_abi_version: 1,
-            required_key_block_types: vec!["character".to_string()],
-            compute_export: "compute".to_string(),
-            init_export: "init".to_string(),
-            description: Some("A test module".to_string()),
-            author: Some("tester".to_string()),
-            host_functions: vec![HostFunction::KbRead, HostFunction::NarrativeQuery],
-            schemas: Some(schemas),
-            battle_report_kind: Some("combat".to_string()),
-            max_fuel: Some(42),
-            max_memory_mib: Some(128),
-            max_wall_time_ms: Some(60_000),
-            wasm_sha256: None,
-        };
-
-        let detail = manifest_to_detail(&manifest);
-
-        assert_eq!(detail.module_id, "test-module");
-        assert_eq!(detail.name, "Test Module");
-        assert_eq!(detail.version, "1.2.3");
-        assert_eq!(detail.nexus_abi_version, 1);
-        assert_eq!(
-            detail.required_key_block_types,
-            vec!["character".to_string()]
-        );
-        assert_eq!(detail.compute_export, "compute");
-        assert_eq!(detail.init_export, "init");
-        assert_eq!(detail.description.as_deref(), Some("A test module"));
-        assert_eq!(detail.author.as_deref(), Some("tester"));
-        assert_eq!(
-            detail
-                .host_functions
-                .iter()
-                .map(std::string::ToString::to_string)
-                .collect::<Vec<_>>(),
-            vec!["kb_read".to_string(), "narrative_query".to_string()]
-        );
-        assert!(detail.schemas.is_some());
-        assert_eq!(detail.battle_report_kind.as_deref(), Some("combat"));
-        assert_eq!(detail.max_fuel, Some(42));
-        assert_eq!(detail.max_memory_mib, Some(128));
-        assert_eq!(detail.max_wall_time_ms, Some(60_000));
     }
 
     #[test]

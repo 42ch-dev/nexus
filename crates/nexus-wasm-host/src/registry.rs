@@ -10,7 +10,7 @@ use nexus_contracts::generated::daemon_api::compute::{
 use tracing::warn;
 
 use crate::embedded::{embedded_module_ids, embedded_module_manifest};
-use crate::manifest::ModuleManifest;
+use crate::manifest::{manifest_to_detail, ModuleManifest};
 
 /// List all embedded compute modules as summaries.
 ///
@@ -54,11 +54,11 @@ pub fn get_module(id: &str) -> Result<Option<ModuleDetail>, serde_json::Error> {
         return Ok(None);
     };
     let manifest: ModuleManifest = serde_json::from_str(manifest_json)?;
-    Ok(Some(ModuleDetail::from(&manifest)))
+    Ok(Some(manifest_to_detail(&manifest)))
 }
 
 fn manifest_to_summary(manifest: &ModuleManifest) -> ModuleSummary {
-    // Keep field mapping aligned with `From<&ModuleManifest> for ModuleDetail` in manifest.rs.
+    // Keep field mapping aligned with `manifest_to_detail` in manifest.rs.
     ModuleSummary {
         module_id: manifest.module_id.clone(),
         name: manifest.name.clone(),
@@ -203,6 +203,6 @@ mod tests {
         manifest_json: &str,
     ) -> Result<Option<ModuleDetail>, serde_json::Error> {
         let manifest: ModuleManifest = serde_json::from_str(manifest_json)?;
-        Ok(Some(ModuleDetail::from(&manifest)))
+        Ok(Some(manifest_to_detail(&manifest)))
     }
 }
