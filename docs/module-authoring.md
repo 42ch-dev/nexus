@@ -14,10 +14,23 @@ The normative ABI contract is
 [`.mstar/specs/compute-module-abi.md`](../.mstar/specs/compute-module-abi.md) —
 this doc is the authoring reference: the contract at a glance, the
 `manifest.json` contract (incl. `wasm_sha256`), the allowlist gate, and the
-operator install. The reference implementation to copy is
-[`modules/basic-combat/`](../modules/basic-combat/) (`manifest.json`,
-`Cargo.toml`, `src/lib.rs`); the module-authoring walkthrough lives in
+operator install. The module-authoring walkthrough lives in
 [`modules/README.md`](../modules/README.md).
+
+## Author with the SDK
+
+New modules should be authored on the official `nexus-module-sdk`
+([`modules/nexus-module-sdk/`](../modules/nexus-module-sdk/)): `nexus_entry!`
+generates the three ABI exports (`alloc` / `init` / `compute`) and wires the
+global allocator, and the typed envelope skeleton + accessor helpers cover the
+V1 surface — zero hand-copied marshalling. Scaffold from the in-repo template
+([`modules/_template/`](../modules/_template/)) and drive the authoring loop
+with `nexus42 compute build|validate|install|run` (see the walkthrough in
+[`modules/README.md`](../modules/README.md)). For a guided authoring
+reference, use the `compute-module-author` skill in the external
+[`42ch-dev/agent-toolkit`](https://github.com/42ch-dev/agent-toolkit)
+repository (no agent skill ships in this repo). The ABI contract below stays
+normative — the SDK is a generator for it, not a replacement.
 
 ## ABI at a glance
 
@@ -91,8 +104,11 @@ Host functions use the same convention (`-1` = not found / unsupported query).
 
 ### Worked example: `basic-combat` marshalling
 
-[`basic-combat/src/lib.rs`](../modules/basic-combat/src/lib.rs) is the pattern
-to reuse:
+[`basic-combat/src/lib.rs`](../modules/basic-combat/src/lib.rs) (now SDK-based)
+documents the wire mechanics the SDK's shim implements — module authors do not
+copy this by hand; `nexus_entry!` generates the exports for them (see
+[Author with the SDK](#author-with-the-sdk)). The convention itself is
+normative:
 
 - **`alloc`** builds a `Vec` and `mem::forget`s it — the leak is intentional
   (the per-invocation instance is discarded right after the call, so there is
