@@ -71,24 +71,26 @@ for pkg in @42ch/spoke-schemas @42ch/spoke-operations; do
   echo "OK: package.json ${pkg} = ${npm_spoke}"
 done
 
-# ── Gate 1c: docs-pin conformance (strategy-samples/README.md) ─────────────
-# Every `@42ch/spoke-connect@<version>` occurrence in the integrator README
+# ── Gate 1c: docs-pin conformance (strategy-samples/ tree) ─────────────────
+# Every `@42ch/spoke-connect@<version>` occurrence in the integrator docs
 # must equal the lockstep pin — the doc cannot rot back to an older spoke
-# release (V1.170 P0, AR-13).
-README="${PROJECT_ROOT}/strategy-samples/README.md"
+# release (V1.170 P0, AR-13). Scoped to the WHOLE sample tree (README +
+# forkable game-narrative templates), not just the README: integrators copy
+# the template bundles, so a stale pin there is the same rot channel AR-13
+# exists to close (P0 QC fix wave, qc1 W-1).
 bad_doc_pin=0
 while IFS= read -r ver; do
   if [ "$ver" != "$SPOKE_PIN" ]; then
-    echo "FAIL: strategy-samples/README.md pins @42ch/spoke-connect@${ver} != pin '${SPOKE_PIN}'"
+    echo "FAIL: strategy-samples/** pins @42ch/spoke-connect@${ver} != pin '${SPOKE_PIN}'"
     bad_doc_pin=1
   fi
-done < <(grep -oE '@42ch/spoke-connect@[0-9]+\.[0-9]+\.[0-9]+' "$README" | sed -E 's/.*@//')
+done < <(grep -oRE '@42ch/spoke-connect@[0-9]+\.[0-9]+\.[0-9]+' "${PROJECT_ROOT}/strategy-samples" | sed -E 's/.*@//')
 
 if [ "$bad_doc_pin" != "0" ]; then
-  echo "FAIL: strategy-samples/README.md docs pin is not lockstep with SPOKE_PIN=${SPOKE_PIN}"
+  echo "FAIL: strategy-samples/** docs pin is not lockstep with SPOKE_PIN=${SPOKE_PIN}"
   exit 1
 fi
-echo "OK: strategy-samples/README.md @42ch/spoke-connect pins = ${SPOKE_PIN}"
+echo "OK: strategy-samples/** @42ch/spoke-connect pins = ${SPOKE_PIN}"
 echo ""
 
 echo "=== Wire Schema Drift Detection ==="

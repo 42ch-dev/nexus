@@ -197,6 +197,26 @@ impl ModuleManifest {
         // structurally by the `HostFunction` enum (serde rejects unknown
         // names at parse time), so no runtime check is needed here.
 
+        // Module-id path-safety (P0 QC fix wave, qc2 W-1): the id becomes a
+        // directory name under `dist/<id>/` (build) and
+        // `~/.nexus42/modules/<id>/` (install, the daemon's warm_dir scan
+        // contract), so a traversal id must fail validation — `validate`
+        // must not report `valid: true` for an id the authoring loop cannot
+        // stage. Mirrors `nexus-home-layout::validate_run_id_safe`; neither
+        // this crate nor the SDK mirror can depend on nexus-home-layout
+        // (closed dependency list, AR-1), so the check is inlined and the
+        // mirrored tests below pin both sides.
+        if self.module_id.contains('/')
+            || self.module_id.contains('\\')
+            || self.module_id.contains("..")
+            || self.module_id.chars().any(char::is_control)
+        {
+            errors.push(format!(
+                "module_id is not path-safe: {:?} — rejected for safety",
+                self.module_id
+            ));
+        }
+
         // The DR-49 pin: the ABI refuses V2 concepts.
         if self.nexus_abi_version != 1 {
             errors.push(format!(
@@ -576,5 +596,50 @@ mod tests {
         m.wasm_sha256 = Some("nope".to_string());
         let errs = m.validate().expect_err("multiple failures");
         assert_eq!(errs.len(), 2, "{errs:?}");
+    }
+
+    #[test]
+    fn validate_rejects_path_traversal_module_id() {
+        // qc2 W-1: the module id becomes a directory name in the store —
+        // traversal values must fail validation, not just the CLI guard.
+        for bad in ["../evil", "a/b", "a\\b", "a..b", "a\u{0}b"] {
+            let mut m = valid_manifest();
+            m.module_id = bad.to_string();
+            let errs = m.validate().expect_err("unsafe id must be rejected");
+            assert!(
+                errs.iter()
+                    .any(|e| e.contains("module_id is not path-safe")),
+                "{bad:?} → {errs:?}"
+            );
+        }
+    }
+
+    /// Shared invalid-manifest corpus (qc1 S-1): the file lives in
+    /// `nexus-module-sdk/tests/fixtures/` and is asserted by BOTH
+    /// validators (this crate and the SDK mirror) — a build break if the
+    /// corpus is deleted, so the two cannot silently diverge. Add new
+    /// invalid cases to the shared file, not just one side.
+    const INVALID_MANIFESTS: &str =
+        include_str!("../../nexus-module-sdk/tests/fixtures/invalid-manifests.json");
+
+    #[test]
+    fn validate_rejects_shared_invalid_manifest_corpus() {
+        let corpus: serde_json::Value =
+            serde_json::from_str(INVALID_MANIFESTS).expect("corpus parses as JSON");
+        let cases = corpus.as_array().expect("corpus is an array");
+        assert!(!cases.is_empty(), "corpus must not be empty");
+        for case in cases {
+            let label = case["label"].as_str().unwrap_or("?");
+            let manifest: ModuleManifest = serde_json::from_value(case["manifest"].clone())
+                .expect("corpus manifest must deserialize");
+            let errs = manifest
+                .validate()
+                .expect_err("corpus manifest must be invalid");
+            let expect = case["expect"].as_str().unwrap_or_default();
+            assert!(
+                errs.iter().any(|e| e.contains(expect)),
+                "{label}: expected an error containing {expect:?}, got {errs:?}"
+            );
+        }
     }
 }

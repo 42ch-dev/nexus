@@ -851,6 +851,37 @@ mod tests {
         }
     }
 
+    /// P0 QC fix wave (qc1 S-2): boot's user-module warm-up derives the RAW
+    /// user home from `state.nexus_home().parent()` (deviation #1, boot.rs)
+    /// to feed `nexus-home-layout::user_modules_dir` (which joins `.nexus42`
+    /// internally). Pin the invariant that `nexus_home` is ALWAYS
+    /// `<raw user home>/.nexus42`, so the `.parent()` derivation stays
+    /// correct and matches the `nexus42 compute install` store path.
+    #[tokio::test]
+    #[serial]
+    async fn nexus_home_is_raw_user_home_joined_nexus42() {
+        let tmp = tempfile::TempDir::new().expect("temp dir");
+        let user_home = tmp.path();
+        let nexus_home = user_home.join(".nexus42");
+        nexus_home_layout::ensure_system_layout(&nexus_home).expect("system layout");
+
+        let original_home = std::env::var("HOME").ok();
+        std::env::set_var("HOME", user_home);
+
+        let state = WorkspaceState::initialize().await.expect("initialize");
+        assert_eq!(
+            state.nexus_home().parent(),
+            Some(user_home),
+            "nexus_home must be `<raw user home>/.nexus42` — boot.rs derives \
+             the raw home via .parent() for nexus-home-layout helpers"
+        );
+
+        match original_home {
+            Some(v) => std::env::set_var("HOME", v),
+            None => std::env::remove_var("HOME"),
+        }
+    }
+
     /// AC-P0-5: after Profile attach config is written, `ensure_creator_pool` opens the DB.
     #[tokio::test]
     #[serial]

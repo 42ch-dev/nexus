@@ -313,10 +313,37 @@ jobs:
           # `ModuleManifest` (the extracted validator's contract) and runs the
           # full 4-part ABI round-trip against the freshly built artifact —
           # the `nexus42 compute validate` equivalent without a full CLI build.
-          NEXUS_MODULE_TEST_WASM="${PWD}/target/wasm32-unknown-unknown/release/basic_combat.wasm" \
-          NEXUS_MODULE_TEST_MANIFEST="${PWD}/manifest.json" \
+          # qc3 F-003: the env-gated conformance test skips (fail-open) when
+          # the env pair is unset — that path is for LOCAL DEV only. CI must
+          # run it for real: assert the artifact pair exists so a future step
+          # refactor cannot silently turn the gate into a visible SKIP.
+          WASM="${PWD}/target/wasm32-unknown-unknown/release/basic_combat.wasm"
+          MANIFEST="${PWD}/manifest.json"
+          test -f "${WASM}" || { echo "FAIL: ${WASM} missing — real-artifact conformance cannot run"; exit 1; }
+          test -f "${MANIFEST}" || { echo "FAIL: ${MANIFEST} missing — real-artifact conformance cannot run"; exit 1; }
+          NEXUS_MODULE_TEST_WASM="${WASM}" NEXUS_MODULE_TEST_MANIFEST="${MANIFEST}" \
           cargo test --manifest-path ../nexus-module-test/Cargo.toml \
             --test fixture_conformance real_basic_combat_artifact_conformance
+      - name: Build _template for wasm32
+        if: github.event_name == 'workflow_dispatch' || steps.filter.outputs['module-dx'] == 'true'
+        run: cargo build --release --target wasm32-unknown-unknown --manifest-path modules/_template/Cargo.toml
+      - name: Validate _template manifest + mini-host round-trip (extracted validator)
+        if: github.event_name == 'workflow_dispatch' || steps.filter.outputs['module-dx'] == 'true'
+        run: |
+          cd modules/_template
+          # qc3 F-002: the template scaffold (the author-copying starting
+          # point) must be CI-compiled and its manifest validated through the
+          # extracted validator (mini-host conformance) — a scaffold break
+          # must fail the PR, not ship silently. Same fail-open SKIP contract
+          # as the basic-combat conformance (qc3 F-003): assert the artifact
+          # pair exists here so CI always runs the real gate.
+          WASM="${PWD}/target/wasm32-unknown-unknown/release/template_dice.wasm"
+          MANIFEST="${PWD}/manifest.json"
+          test -f "${WASM}" || { echo "FAIL: ${WASM} missing — template conformance cannot run"; exit 1; }
+          test -f "${MANIFEST}" || { echo "FAIL: ${MANIFEST} missing — template conformance cannot run"; exit 1; }
+          NEXUS_MODULE_TEST_WASM="${WASM}" NEXUS_MODULE_TEST_MANIFEST="${MANIFEST}" \
+          cargo test --manifest-path ../nexus-module-test/Cargo.toml \
+            --test fixture_conformance real_template_artifact_conformance
       - name: Real-host byte-compat gate (basic_combat fixtures)
         if: github.event_name == 'workflow_dispatch' || steps.filter.outputs['module-dx'] == 'true'
         run: cargo test -p nexus-wasm-host --test basic_combat

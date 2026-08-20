@@ -90,11 +90,29 @@ where
     }
     let out_ptr = crate::shim::alloc(out_cap);
     let ret = f(req_ptr, req_bytes.len() as u32, out_ptr);
-    map_host_ret(ret)?;
-    // SAFETY: the host wrote exactly `ret` bytes at `out_ptr` (an address
-    // previously returned by our own `alloc`).
-    let bytes = unsafe { std::slice::from_raw_parts(out_ptr as *const u8, ret as usize) }.to_vec();
+    let written = checked_written(ret, out_cap)?;
+    // SAFETY: the host wrote exactly `written` bytes at `out_ptr` (an address
+    // previously returned by our own `alloc`), bounded by `out_cap` — the
+    // `checked_written` guard rejects any host claim beyond the allocation.
+    let bytes = unsafe { std::slice::from_raw_parts(out_ptr as *const u8, written) }.to_vec();
     Ok(bytes)
+}
+
+/// Map a host-function return value to the number of bytes written.
+///
+/// Rejects the AR-4 sentinels via [`map_host_ret`] AND any positive count
+/// beyond the caller's buffer (qc2 S-2): a conforming host returns `-2`
+/// (`RET_OVERFLOW`) when the response does not fit `out_cap`, so a positive
+/// `ret > out_cap` is an ABI contract violation from a buggy/malicious host
+/// and must not be trusted — `from_raw_parts` would read past the leaked
+/// allocation. Treated as the same condition as `-2`: the response did not
+/// fit the caller's buffer.
+fn checked_written(ret: i64, out_cap: u32) -> Result<usize, HostError> {
+    map_host_ret(ret)?;
+    if ret as usize > out_cap as usize {
+        return Err(HostError::OutputTooSmall);
+    }
+    Ok(ret as usize)
 }
 
 /// Map a host-function return value to the typed error (AR-4 sentinel
@@ -121,5 +139,25 @@ mod tests {
         assert_eq!(map_host_ret(-2), Err(HostError::OutputTooSmall));
         assert_eq!(map_host_ret(-3), Err(HostError::Unknown(-3)));
         assert_eq!(map_host_ret(-100), Err(HostError::Unknown(-100)));
+    }
+
+    #[test]
+    fn checked_written_rejects_ret_exceeding_out_cap() {
+        // qc2 S-2: a host return larger than the allocated out_cap must not
+        // be trusted (from_raw_parts would read past the leaked buffer) —
+        // rejected as OutputTooSmall, the same condition as the `-2`
+        // sentinel. (Tested on the helper: call_host itself writes into
+        // shim::alloc'd buffers whose host-target pointers are truncated,
+        // so the guard logic is exercised without touching linear memory.)
+        assert_eq!(checked_written(0, 16), Ok(0));
+        assert_eq!(checked_written(16, 16), Ok(16));
+        assert_eq!(checked_written(17, 16), Err(HostError::OutputTooSmall));
+        assert_eq!(
+            checked_written(i64::from(u32::MAX), 16),
+            Err(HostError::OutputTooSmall)
+        );
+        assert_eq!(checked_written(-1, 16), Err(HostError::NotFound));
+        assert_eq!(checked_written(-2, 16), Err(HostError::OutputTooSmall));
+        assert_eq!(checked_written(-3, 16), Err(HostError::Unknown(-3)));
     }
 }

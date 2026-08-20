@@ -39,6 +39,11 @@ pub struct Cli {
     verbose: bool,
 
     /// Output format (text or json)
+    // NOTE (qc1 S-3): this GLOBAL flag is a hard text|json gate for every
+    // command — clap rejects any other value before dispatch. Future
+    // commands needing a different output vocabulary must use a LOCAL arg
+    // (the `acp registry list --format` precedent), NOT widen this
+    // value_parser.
     #[arg(
         short = 'o',
         long = "output",

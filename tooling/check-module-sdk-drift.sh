@@ -106,11 +106,28 @@ test_path = root / "crates/nexus-wasm-host/tests/basic_combat.rs"
 
 fixture = json.loads(fixture_path.read_text())
 test_src = test_path.read_text()
-m = re.search(r'let raw = r#"(.*?)"#;', test_src, re.S)
+# Anchor the extraction to the `combat_input()` function body (qc3 F-001):
+# basic_combat.rs contains TWO raw-string JSON blocks (the combat-input
+# fixture in `combat_input()` and the killing-blow input in
+# `killing_blow_marks_defender_not_alive()`), so an unanchored first-match
+# would silently compare against the wrong block if the file order ever
+# changes.
+m = re.search(r'fn combat_input\(\)[^{]*\{\s*let raw = r#"(.*?)"#;', test_src, re.S)
 if not m:
     print("FAIL: could not extract the inline `combat_input()` JSON from basic_combat.rs")
     sys.exit(1)
 inline = json.loads(m.group(1))
+# Structural sanity: the combat fixture bundles attacker `kb_atk` (the
+# killing-blow fixture uses `kb_a`/`kb_d` under `wld_kill`), so a wrong-block
+# extraction fails closed here rather than silently passing.
+if not any(
+    kb.get("key_block_id") == "kb_atk" for kb in inline.get("key_blocks", [])
+):
+    print(
+        "FAIL: extracted combat_input() JSON lacks the kb_atk key block — "
+        "wrong raw-string block matched"
+    )
+    sys.exit(1)
 
 if fixture != inline:
     print(

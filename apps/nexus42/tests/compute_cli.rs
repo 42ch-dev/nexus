@@ -90,6 +90,65 @@ fn compute_validate_pairing_mismatch_exits_three() {
 }
 
 #[test]
+fn compute_validate_wasm_absent_hash_exits_three() {
+    // qc2 S-1: `validate --wasm` requests pairing verification — an absent
+    // `wasm_sha256` cannot be paired, so it must fail with the pairing exit
+    // code (3) and a field-level `wasm_sha256` error, not silently pass.
+    let dir = tempfile::tempdir().expect("tempdir");
+    let manifest = write_manifest(dir.path(), "basic-combat", &json!({}));
+    let wasm = dir.path().join("module.wasm");
+    std::fs::write(&wasm, b"some wasm bytes").expect("write wasm");
+
+    nexus42()
+        .env("HOME", dir.path())
+        .args(["compute", "validate", "--manifest"])
+        .arg(&manifest)
+        .args(["--wasm"])
+        .arg(&wasm)
+        .assert()
+        .code(3)
+        .stdout(predicate::str::contains(
+            "hash required for pairing verification",
+        ));
+}
+
+#[test]
+fn compute_validate_rejects_path_traversal_module_id() {
+    // qc2 W-1: `validate` must not report a traversal module id as valid —
+    // the id becomes a directory name under dist/ and the module store.
+    // The JSON verdict carries a field-level `module_id` error (exit 2).
+    let dir = tempfile::tempdir().expect("tempdir");
+    let manifest = write_manifest(dir.path(), "../evil", &json!({}));
+
+    nexus42()
+        .env("HOME", dir.path())
+        .args(["compute", "validate", "--json", "--manifest"])
+        .arg(&manifest)
+        .assert()
+        .code(2)
+        .stdout(predicate::str::contains("module_id"))
+        .stdout(predicate::str::contains("path-safe"));
+}
+
+#[test]
+fn compute_run_missing_input_exits_one() {
+    // qc2 S-3 / qc3 F-004: a missing `--input` fixture is a LOCAL I/O error
+    // (exit 1), NOT a daemon failure (exit 4) — the run command must not
+    // suggest daemon troubleshooting for a fixture problem. The input read
+    // happens before any daemon call, so this is hermetic.
+    let dir = tempfile::tempdir().expect("tempdir");
+    let missing = dir.path().join("missing-input.json");
+
+    nexus42()
+        .env("HOME", dir.path())
+        .args(["compute", "run", "--world", "wld_test", "--input"])
+        .arg(&missing)
+        .assert()
+        .code(1)
+        .stderr(predicate::str::contains("failed to read --input"));
+}
+
+#[test]
 fn compute_install_rejects_module_id_mismatch() {
     let dir = tempfile::tempdir().expect("tempdir");
     let manifest = write_manifest(dir.path(), "basic-combat", &json!({}));

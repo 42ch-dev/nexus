@@ -113,8 +113,12 @@ fn fixture_runs_through_mini_host() {
 
 #[test]
 fn real_basic_combat_artifact_conformance() {
-    // Full conformance against a real compiled module. Enabled via env vars
-    // (the AR-12 module-dx CI leg); skipped with a visible note otherwise.
+    // Full conformance against a real compiled module. Env-gated: enabled
+    // by the AR-12 module-dx CI leg, which MUST set the env pair (the CI
+    // step asserts the artifact files exist before invoking, qc3 F-003).
+    // This SKIP path is a fail-open convenience for LOCAL DEV ONLY — a CI
+    // run turning into a visible SKIP is a gate regression the step's file
+    // assertions catch.
     let (Some(wasm_path), Some(manifest_path)) = (
         std::env::var("NEXUS_MODULE_TEST_WASM").ok(),
         std::env::var("NEXUS_MODULE_TEST_MANIFEST").ok(),
@@ -151,4 +155,52 @@ fn real_basic_combat_artifact_conformance() {
     assert!(output.new_key_blocks.is_empty(), "no new key blocks");
 
     assert_eq!(output.battle_report["kind"], "combat");
+}
+
+/// Conformance against the in-repo `modules/_template` scaffold (qc3
+/// F-002): the template is the author-copying starting point, so CI must
+/// compile it AND prove it runs through the mini-host with the canonical
+/// fixture. Env-gated like the basic-combat conformance; the module-dx CI
+/// leg asserts the artifact pair exists before invoking (same fail-open
+/// SKIP-for-local-dev-only contract, qc3 F-003).
+#[test]
+fn real_template_artifact_conformance() {
+    let (Some(wasm_path), Some(manifest_path)) = (
+        std::env::var("NEXUS_MODULE_TEST_WASM").ok(),
+        std::env::var("NEXUS_MODULE_TEST_MANIFEST").ok(),
+    ) else {
+        eprintln!(
+            "SKIP real-template conformance: set NEXUS_MODULE_TEST_WASM and \
+             NEXUS_MODULE_TEST_MANIFEST to the compiled _template pair"
+        );
+        return;
+    };
+
+    let wasm = std::fs::read(&wasm_path).expect("read NEXUS_MODULE_TEST_WASM");
+    let manifest_json =
+        std::fs::read_to_string(&manifest_path).expect("read NEXUS_MODULE_TEST_MANIFEST");
+    let manifest: ModuleManifest =
+        serde_json::from_str(&manifest_json).expect("manifest parses as ModuleManifest");
+    // The extracted-validator equivalent: the template's manifest must pass
+    // the full SDK validate() contract (incl. the module_id path-safety
+    // guard, qc2 W-1).
+    manifest.validate().expect("template manifest is valid");
+
+    let output = run(&wasm, &manifest, &fixture_input()).expect("template runs");
+
+    // The template is a "dice tick": it ticks the FIRST bundled key block's
+    // `<block_type>.dice` state path and emits a `dice` battle report. The
+    // canonical combat fixture bundles character blocks, so the tick lands
+    // on `character.dice`.
+    assert_eq!(output.schema_version, 1);
+    let tick = output
+        .state_delta
+        .iter()
+        .find(|d| d.path.ends_with(".dice"))
+        .expect("dice tick delta present");
+    assert_eq!(tick.op, DeltaOp::Set);
+    assert!(tick.value.is_some(), "tick delta carries the dice state");
+    assert_eq!(output.timeline_events.len(), 1, "one state_update event");
+    assert_eq!(output.timeline_events[0]["event_type"], "state_update");
+    assert_eq!(output.battle_report["kind"], "dice");
 }

@@ -9,7 +9,7 @@
 //! | Code | Meaning |
 //! |------|---------|
 //! | 0    | success |
-//! | 1    | build/toolchain failure; install I/O/home errors (generic CLI failure) |
+//! | 1    | build/toolchain failure; install I/O/home errors; `run` --input read/parse failures (generic CLI failure) |
 //! | 2    | manifest validation failure (field list; `--json` machine-readable) |
 //! | 3    | `wasm_sha256` pairing mismatch (`validate --wasm`, `install`) |
 //! | 4    | daemon unreachable / run rejected (daemon error surfaced verbatim) |
@@ -30,10 +30,14 @@ use crate::errors::{CliError, Result};
 /// AR-9 exit codes.
 mod exit {
     /// Build/toolchain failure; also the generic CLI failure code for
-    /// install I/O/home errors (AR-9 reserves 2/3/4 for validation,
-    /// pairing, and daemon failures respectively).
+    /// install I/O/home errors and `run` --input read/parse failures
+    /// (AR-9 reserves 2/3/4 for validation, pairing, and daemon failures).
     pub const BUILD: i32 = 1;
-    /// Install I/O / home-resolution failure (generic CLI failure code).
+    /// Install I/O / home-resolution failure; `run` --input read/parse
+    /// failures (generic CLI failure code).
+    // NOTE (qc1 S-4): BUILD and IO deliberately alias at 1 — AR-9 assigns
+    // one generic CLI-failure code to all local I/O/CLI classes; the two
+    // names document the call sites' intent, not two distinct codes.
     pub const IO: i32 = 1;
     /// Manifest validation failure.
     pub const VALIDATION: i32 = 2;
@@ -99,7 +103,8 @@ pub enum ComputeCommand {
         #[arg(long)]
         world: String,
         /// Input JSON fixture: a `ComputeInput` envelope (its `invocation`
-        /// field is sent) or a raw `invocation_params` object.
+        /// field is sent) or a raw `invocation_params` object. Local
+        /// read/parse failures exit 1; daemon failures exit 4.
         #[arg(long)]
         input: PathBuf,
         /// Installed module id (default: read `module_id` from a
@@ -333,7 +338,34 @@ fn cmd_validate(manifest_path: &Path, wasm_path: Option<&Path>, json_output: boo
         errors.extend(errs.into_iter().map(field_error));
     }
 
+    // qc2 W-1: the module id becomes a directory name under dist/ (build)
+    // and ~/.nexus42/modules/<id>/ (install), so `validate` must not report
+    // `valid: true` for a traversal id the authoring loop cannot stage —
+    // build/install already reject it (exit 2); validate now agrees
+    // (defense in depth, same field-level shape).
+    if let Err(e) = nexus_home_layout::validate_run_id_safe(&manifest.module_id) {
+        errors.push(FieldError {
+            field: "module_id".to_string(),
+            message: e,
+        });
+    }
+
     if let Some(wasm_path) = wasm_path {
+        // qc2 S-1: `--wasm` requests pairing verification, so an absent
+        // `wasm_sha256` cannot be paired — reject with the pairing exit
+        // code (3) and a field-level error instead of silently passing
+        // (mirrors `install`, which requires the hash, I10).
+        if manifest.wasm_sha256.is_none() {
+            return fail_validation(
+                manifest_path,
+                &[FieldError {
+                    field: "wasm_sha256".to_string(),
+                    message: "hash required for pairing verification".to_string(),
+                }],
+                json_output,
+                exit::PAIRING,
+            );
+        }
         let wasm_bytes = match std::fs::read(wasm_path) {
             Ok(bytes) => bytes,
             Err(e) => {
@@ -549,8 +581,10 @@ fn cmd_install(
 
 /// Thin HTTP client over `POST /v1/daemon/compute/run` (+ `--accept`).
 ///
-/// All failures exit 4 (AR-9): daemon unreachable / run rejected, with the
-/// daemon error surfaced verbatim.
+/// Local `--input` read/parse failures (and fixture module-id resolution
+/// failures) exit 1 (generic CLI failure, qc2 S-3 / qc3 F-004); daemon
+/// unreachable / run rejected exit 4 (AR-9), with the daemon error surfaced
+/// verbatim.
 #[allow(clippy::too_many_lines)]
 async fn cmd_run(
     config: &CliConfig,
@@ -562,13 +596,13 @@ async fn cmd_run(
 ) -> Result<()> {
     let input_bytes = std::fs::read(input_path).map_err(|e| {
         compute_exit(
-            exit::DAEMON,
+            exit::IO,
             format!("failed to read --input {}: {e}", input_path.display()),
         )
     })?;
     let input_value: Value = serde_json::from_slice(&input_bytes).map_err(|e| {
         compute_exit(
-            exit::DAEMON,
+            exit::IO,
             format!("--input {} is not valid JSON: {e}", input_path.display()),
         )
     })?;
@@ -580,7 +614,7 @@ async fn cmd_run(
         .unwrap_or_else(|| input_value.clone());
     let invocation_params = invocation_params.as_object().ok_or_else(|| {
         compute_exit(
-            exit::DAEMON,
+            exit::IO,
             "--input must be a JSON object (or a ComputeInput envelope whose \
              `invocation` field is an object)"
                 .to_string(),
@@ -726,7 +760,7 @@ fn resolve_module_id_from_fixture(input_path: &Path) -> Result<String> {
         dir = d.parent();
     }
     Err(compute_exit(
-        exit::DAEMON,
+        exit::IO,
         "cannot resolve module id: pass --module-id, or place the --input \
          fixture next to a manifest.json (e.g. <module-dir>/fixtures/)"
             .to_string(),
@@ -955,6 +989,83 @@ mod tests {
             "traversal module id must exit 2, got {err}"
         );
         assert!(!dir.path().join("dist").exists());
+    }
+
+    #[test]
+    fn cmd_validate_rejects_path_traversal_module_id() {
+        // qc2 W-1: `validate` must not report a traversal module id as
+        // valid — the id becomes a directory name under dist/ and the
+        // module store, so the authoring loop's validator agrees with
+        // build/install (exit 2, field-level error on module_id).
+        let dir = tempfile::tempdir().expect("tempdir");
+        let manifest_path = dir.path().join("manifest.json");
+        std::fs::write(
+            &manifest_path,
+            serde_json::to_vec(&valid_manifest_json("../evil")).expect("json"),
+        )
+        .expect("write manifest");
+
+        let err = cmd_validate(&manifest_path, None, true).expect_err("traversal id must fail");
+        assert!(
+            matches!(err, CliError::ComputeExit { code: 2, .. }),
+            "traversal module id must exit 2, got {err}"
+        );
+        // The field-level module_id error shape is pinned by the hermetic
+        // test (compute_cli.rs) and validation_failure_json tests.
+    }
+
+    #[tokio::test]
+    async fn cmd_run_missing_input_exits_io_code() {
+        // qc2 S-3 / qc3 F-004: a missing `--input` fixture is a LOCAL I/O
+        // error (exit 1), NOT a daemon failure (exit 4) — the AR-9 exit
+        // table reserves 4 for daemon-unreachable/run-rejected only.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let missing = dir.path().join("missing-input.json");
+        let config = CliConfig {
+            daemon_url: "http://127.0.0.1:1".to_string(),
+            ..Default::default()
+        };
+        let err = cmd_run(
+            &config,
+            "wld_combat",
+            &missing,
+            Some("basic-combat"),
+            false,
+            RunOutput::Text,
+        )
+        .await
+        .expect_err("missing input must fail");
+        assert!(
+            matches!(err, CliError::ComputeExit { code: 1, .. }),
+            "missing input must exit 1, got {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn cmd_run_invalid_json_input_exits_io_code() {
+        // qc2 S-3: an unparseable `--input` fixture is a local CLI error
+        // (exit 1), not a daemon failure (exit 4).
+        let dir = tempfile::tempdir().expect("tempdir");
+        let fixture = dir.path().join("input.json");
+        std::fs::write(&fixture, b"not json").expect("write fixture");
+        let config = CliConfig {
+            daemon_url: "http://127.0.0.1:1".to_string(),
+            ..Default::default()
+        };
+        let err = cmd_run(
+            &config,
+            "wld_combat",
+            &fixture,
+            Some("basic-combat"),
+            false,
+            RunOutput::Text,
+        )
+        .await
+        .expect_err("invalid input JSON must fail");
+        assert!(
+            matches!(err, CliError::ComputeExit { code: 1, .. }),
+            "invalid input JSON must exit 1, got {err}"
+        );
     }
 
     #[tokio::test]
