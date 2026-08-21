@@ -1338,9 +1338,6 @@ pub async fn edit_schedule(
     // `label` is only touched when the body provides one — an absent field
     // preserves the column, `Some("")` clears it to NULL. A PATCH always
     // bumps `updated_at` (last-edited stamp stays honest).
-    // `label` is only touched when the body provides one — an absent field
-    // preserves the column, `Some("")` clears it to NULL. A PATCH always
-    // bumps `updated_at` (last-edited stamp stays honest).
     let now = chrono::Utc::now().timestamp();
     if body.label.is_some() {
         // `Some("")` → NULL (clear); `Some("…")` → the label.

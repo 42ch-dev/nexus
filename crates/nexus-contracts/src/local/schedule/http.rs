@@ -202,6 +202,10 @@ pub struct SignalScheduleResponse {
 /// Partial edit of schedule metadata (AR-29). Only `label` is updateable
 /// today; the `creator_schedules` table carries no other metadata columns.
 /// Status/core-context have dedicated endpoints (AR-31).
+///
+/// Asymmetry vs [`AddScheduleRequest`]: on `POST /schedules` the label is
+/// stored verbatim, while on this PATCH `""` is normalized to NULL, i.e. a
+/// label cleared (never stored as an empty string).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EditScheduleRequest {
     /// New label. `null` / absent → label unchanged. `Some("")` clears it.
@@ -256,16 +260,19 @@ pub struct WorkCronResponse {
 /// per-Work cron configuration.
 ///
 /// The body is the complete `WorkSchedule` shape; `expected_current_json` is
-/// an optional CAS pre-image (the exact stored `schedule_json` text) that
-/// must match for the write to apply.
+/// an optional CAS pre-image — the exact stored `schedule_json` text that
+/// must match for the write to apply. An empty/whitespace string means "the
+/// stored config must currently be unset" (same as the default state);
+/// omitting the field means an unconditional write.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UpdateWorkCronRequest {
     /// IANA timezone string. Daemon converts to UTC for cron firing.
     pub tz: String,
     /// Per-role cron entries.
     pub roles: WorkCronRolesDto,
-    /// CAS pre-image: the current stored `schedule_json` blob. `null`/absent
-    /// means "must currently be unset (defaults)"; pass the value returned by
+    /// CAS pre-image: the exact stored `schedule_json` blob. An
+    /// empty/whitespace value means "must currently be unset (defaults)";
+    /// `null`/absent means an unconditional write. Pass the value returned by
     /// a prior `GET` to guard against concurrent writers.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub expected_current_json: Option<String>,
