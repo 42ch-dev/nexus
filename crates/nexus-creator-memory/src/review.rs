@@ -933,6 +933,8 @@ mod tests {
 
         // Mock summarizer
         struct MockSummarizer;
+        // `unused_async_trait_impl` (clippy 1.98): test mock, no async I/O — trait contract.
+        #[allow(clippy::unused_async_trait_impl)]
         impl SessionDigestSummarizer for MockSummarizer {
             async fn summarize(
                 &self,
@@ -973,6 +975,8 @@ mod tests {
         use std::path::PathBuf;
 
         struct MockSummarizer;
+        // `unused_async_trait_impl` (clippy 1.98): test mock, no async I/O — trait contract.
+        #[allow(clippy::unused_async_trait_impl)]
         impl SessionDigestSummarizer for MockSummarizer {
             async fn summarize(
                 &self,
@@ -1010,6 +1014,8 @@ mod tests {
         use std::path::PathBuf;
 
         struct FailingSummarizer;
+        // `unused_async_trait_impl` (clippy 1.98): test mock, no async I/O — trait contract.
+        #[allow(clippy::unused_async_trait_impl)]
         impl SessionDigestSummarizer for FailingSummarizer {
             async fn summarize(
                 &self,
@@ -1080,7 +1086,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&home);
 
         struct Passthrough;
-        #[allow(async_fn_in_trait)]
+        #[allow(async_fn_in_trait, clippy::unused_async_trait_impl)]
         impl SessionDigestSummarizer for Passthrough {
             async fn summarize(
                 &self,
@@ -1141,7 +1147,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&home);
 
         struct Passthrough;
-        #[allow(async_fn_in_trait)]
+        #[allow(async_fn_in_trait, clippy::unused_async_trait_impl)]
         impl SessionDigestSummarizer for Passthrough {
             async fn summarize(
                 &self,

@@ -210,6 +210,10 @@ fn entry_type_to_block_type(s: &str) -> Option<nexus_contracts::BlockType> {
 // single-threaded SQLite usage within our tokio runtime (mirrors the
 // `SqliteKbStore` impl).
 #[allow(clippy::future_not_send)]
+// `unused_async_trait_impl` (new in clippy 1.98): the read-only write stubs
+// (insert/attach/update/delete) return `Err` without awaiting; `async` is by
+// `KbStore` trait contract — toolchain-drift debt.
+#[allow(clippy::unused_async_trait_impl)]
 impl KbStore for SpokeBackedKbStore {
     async fn query(&self, query: &KbQuery) -> Result<KbQueryResult, KbStoreError> {
         // Build the spoke Scope: native `entry_types` (from block_type) + the

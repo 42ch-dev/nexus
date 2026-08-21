@@ -186,7 +186,7 @@ impl<'a> NexusAdapter<'a> {
     pub(crate) fn is_bound(&self) -> bool {
         self.bound_tx_cell
             .as_ref()
-            .is_some_and(|cell| cell.lock().ok().is_some_and(|guard| guard.is_some()))
+            .is_some_and(|cell| cell.lock().is_ok_and(|guard| guard.is_some()))
     }
 }
 

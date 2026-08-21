@@ -37,7 +37,7 @@ export function resolveEntranceBounce(
       const rule = ENTRANCE_ROUTE_RULES.find(
         (r) => r.settingsSection === resolved.section,
       );
-      if (rule && rule.visibility === 'develop-only') {
+      if (rule?.visibility === 'develop-only') {
         return ENTRANCE_BY_ID[entrance].landRoute;
       }
     }
@@ -45,7 +45,7 @@ export function resolveEntranceBounce(
   }
 
   const rule = matchEntranceRouteRule(pathname);
-  if (rule && rule.visibility === 'develop-only' && !rule.allowDeepLink) {
+  if (rule?.visibility === 'develop-only' && !rule.allowDeepLink) {
     return ENTRANCE_BY_ID[entrance].landRoute;
   }
   return null;

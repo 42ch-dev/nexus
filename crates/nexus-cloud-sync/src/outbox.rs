@@ -147,7 +147,7 @@ impl Outbox {
     ///
     /// # Errors
     /// Returns the specific error type if the operation fails.
-    #[allow(clippy::unused_async)]
+    #[allow(clippy::unused_async, clippy::unused_async_trait_impl)]
     pub async fn with_pool(pool: OutboxPool) -> SyncResult<Self> {
         Ok(Self {
             pool,

@@ -92,6 +92,9 @@ pub trait LlmSolver: Send + Sync {
 /// requiring an LLM provider.
 pub struct UnavailableLlmSolver;
 
+// `unused_async_trait_impl` (clippy 1.98): returns `None` without async I/O;
+// `async` is by `LlmSolver` trait contract — toolchain-drift debt.
+#[allow(clippy::unused_async_trait_impl)]
 impl LlmSolver for UnavailableLlmSolver {
     async fn solve(&self, _challenge_text: &str) -> Option<String> {
         None
@@ -253,6 +256,8 @@ mod tests {
         }
     }
 
+    // `unused_async_trait_impl` (clippy 1.98): test mock, no async I/O — trait contract.
+    #[allow(clippy::unused_async_trait_impl)]
     impl LlmSolver for MockLlmSolver {
         async fn solve(&self, _challenge_text: &str) -> Option<String> {
             self.response.clone()

@@ -217,6 +217,11 @@ impl Default for InMemoryKbStore {
     }
 }
 
+// `async` here is by trait contract, not by need: `KbStore` is async to
+// match the future SQLite backend (see the trait docs) and this in-memory
+// impl mirrors it. The methods perform no real async I/O, so clippy 1.98's
+// `unused_async_trait_impl` (new in 1.98, toolchain drift) is silenced.
+#[allow(clippy::unused_async_trait_impl)]
 impl KbStore for InMemoryKbStore {
     async fn insert_knowledge_entry(
         &self,

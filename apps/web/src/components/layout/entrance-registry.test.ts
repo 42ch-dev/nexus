@@ -96,14 +96,16 @@ describe('entrance registry (AR-15)', () => {
     const sectionRules = ENTRANCE_ROUTE_RULES.filter(
       (rule) => rule.settingsSection !== undefined,
     );
-    expect(sectionRules.map((rule) => rule.settingsSection).sort()).toEqual(
+    expect(
+      sectionRules.map((rule) => rule.settingsSection).sort((a, b) => (a ?? '').localeCompare(b ?? '')),
+    ).toEqual(
       [...SETTINGS_SECTION_IDS].sort(),
     );
     // develop-only sections == Create's hiddenSettingsSections (guard parity).
     const developOnlySections = sectionRules
       .filter((rule) => rule.visibility === 'develop-only')
       .map((rule) => rule.settingsSection)
-      .sort();
+      .sort((a, b) => (a ?? '').localeCompare(b ?? ''));
     expect(developOnlySections).toEqual(
       [...ENTRANCE_BY_ID['content-creator'].hiddenSettingsSections].sort(),
     );
