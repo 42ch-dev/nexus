@@ -101,7 +101,9 @@ export function StrategiesPage() {
         <div className="flex flex-col gap-4">
           <StrategyCatalog
             presets={presets.data}
-            onSelect={(id) => navigate(`/strategies/${encodeURIComponent(id)}`)}
+            // PL-13 drill-down: selecting a catalog preset opens its profile
+            // view; the canvas editor stays at `/strategies/:presetId` (PL-14).
+            onSelect={(id) => navigate(`/strategies/${encodeURIComponent(id)}/profile`)}
           />
           <PresetGroup
             title={t('userPresets.title')}
@@ -254,7 +256,7 @@ function CatalogRow({
           type="button"
           onClick={() => onSelect(preset.id)}
           className="flex items-center gap-2 text-left"
-          aria-label={t('catalog.openAria', { name: preset.id })}
+          aria-label={t('profile.openAria', { name: preset.id })}
         >
           <Sparkles className="h-4 w-4 text-purple-700" aria-hidden />
           <span className="text-copy-13-mono text-gray-1000">{preset.id}</span>

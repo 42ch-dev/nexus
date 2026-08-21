@@ -12,6 +12,8 @@
 import { http, HttpResponse } from 'msw';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { Route, Routes, useLocation } from 'react-router';
 
 import { StrategiesPage } from '@/pages/strategies-page';
 import { ENTRANCE_ROUTE_RULES } from '@/components/layout/entrance-registry';
@@ -210,5 +212,44 @@ describe('StrategyCatalog', () => {
     expect(listRule?.visibility).toBe('develop-only');
     expect(detailRule?.visibility).toBe('develop-only');
     expect(detailRule?.allowDeepLink).toBe(true);
+  });
+
+  it('opens the profile drill-down when a catalog row is selected (PL-13)', async () => {
+    function LocationProbe() {
+      const location = useLocation();
+      return <div data-testid="location-probe">{location.pathname}</div>;
+    }
+
+    const user = userEvent.setup();
+    useHandlers(
+      http.get('/v1/daemon/presets', () =>
+        HttpResponse.json({
+          user: [],
+          system: [],
+          embedded: [{ id: 'game-narrative', source: 'embedded' }],
+        }),
+      ),
+      profileHandler('game-narrative', GAME_NARRATIVE_LANES),
+    );
+
+    renderInApp(
+      <>
+        <LocationProbe />
+        <Routes>
+          <Route path="/strategies" element={<StrategiesPage />} />
+          <Route path="*" element={<div data-testid="probe-route" />} />
+        </Routes>
+      </>,
+      { client: makeClient(), activeCreatorId: 'creator-a', initialRouterEntries: ['/strategies'] },
+    );
+
+    const row = await screen.findByTestId('catalog-row-game-narrative');
+    await user.click(within(row).getByRole('button', { name: 'View profile of game-narrative' }));
+
+    await waitFor(() =>
+      expect(screen.getByTestId('location-probe')).toHaveTextContent(
+        '/strategies/game-narrative/profile',
+      ),
+    );
   });
 });

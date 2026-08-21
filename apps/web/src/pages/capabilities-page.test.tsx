@@ -78,6 +78,38 @@ describe('CapabilitiesPage', () => {
     expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument();
   });
 
+  it('seeds the filter from the ?filter= search param (PL-13 capability deep link)', async () => {
+    useHandlers(
+      http.get('/v1/daemon/orchestration/capabilities', () =>
+        HttpResponse.json({
+          items: [
+            {
+              name: 'nexus.world.describe',
+              input_schema: '{"type":"object"}',
+              output_schema: '{"type":"string"}',
+            },
+            {
+              name: 'nexus.other.cap',
+              input_schema: '{"type":"object"}',
+              output_schema: '{"type":"string"}',
+            },
+          ],
+          pagination: { limit: 20, has_more: false },
+        }),
+      ),
+    );
+
+    renderInApp(<CapabilitiesPage />, {
+      client: client(),
+      initialRouterEntries: ['/capabilities?filter=nexus.world.describe'],
+    });
+
+    // The linked schema is visible on arrival; others are filtered out.
+    expect(await screen.findByText('nexus.world.describe')).toBeInTheDocument();
+    expect(screen.queryByText('nexus.other.cap')).not.toBeInTheDocument();
+    expect(screen.getByDisplayValue('nexus.world.describe')).toBeInTheDocument();
+  });
+
   it('switches to zh-CN locale without remounting', async () => {
     useHandlers(
       http.get('/v1/daemon/orchestration/capabilities', () =>
