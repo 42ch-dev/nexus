@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { useQueries, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router';
 import { Plus, RefreshCw, Sparkles, Trash2 } from 'lucide-react';
@@ -8,8 +9,10 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
 import { EmptyState, ErrorState, LoadingState, UnavailableState } from '@/components/ui/states';
-import { useDeletePreset, usePresetProfile, usePresets, useReloadPreset, type PresetGroups } from '@/api/queries';
+import { useDeletePreset, usePresets, useReloadPreset, presetProfileQueryOptions, type PresetGroups, type PresetProfileQuery } from '@/api/queries';
+import { useNexusClient } from '@/lib/client-context';
 import { isOrchestrationEngineUnavailable } from '@/lib/nexus/errors';
+import { queryKeys } from '@/lib/nexus/query-keys';
 import type { PresetSummary } from '@42ch/nexus-contracts';
 
 import { ScaffoldPresetDialog } from './dialogs/scaffold-preset-dialog';
@@ -29,6 +32,7 @@ import { ValidatePresetDialog } from './dialogs/validate-preset-dialog';
  */
 export function StrategiesPage() {
   const { t } = useTranslation('strategies');
+  const qc = useQueryClient();
   const presets = usePresets();
   const reload = useReloadPreset();
   const removePreset = useDeletePreset();
@@ -68,7 +72,7 @@ export function StrategiesPage() {
             type="button"
             variant="tertiary"
             size="small"
-            onClick={() => presets.refetch()}
+            onClick={() => void qc.invalidateQueries({ queryKey: queryKeys.presets.all })}
             disabled={presets.isFetching}
             aria-label={t('refreshAria')}
           >
@@ -181,14 +185,24 @@ function isAuthorSystemPreset(preset: PresetSummary): boolean {
  *
  * Lists USER + embedded (non-hidden) presets with trigger-lane badges and
  * honest entry paths, read from each preset's P0 profile through
- * `NexusClient` (`usePresetProfile`). The preset LIST endpoint returns ids
- * only — no lane/role/capability data is derived client-side from list
- * facts (AR-27). A missing profile renders a graceful summary (id + list
- * facts), never a hard "preset gone" error (PL-13 boundary).
+ * `NexusClient` (one `useQueries` fan-out sharing `usePresetProfile`'s
+ * `['presets','profile',<id>]` cache keys via `presetProfileQueryOptions`).
+ * The preset LIST endpoint returns ids only — no lane/role/capability data
+ * is derived client-side from list facts (AR-27). A missing profile renders
+ * a graceful summary (id + list facts), never a hard "preset gone" error
+ * (PL-13 boundary).
  *
  * The catalog attaches to the existing `/strategies` route, already
  * `develop-only` in `ENTRANCE_ROUTE_RULES` (AR-28) — no new guard
  * mechanism; the creator entrance bounces via the existing rule table.
+ *
+ * Profile fan-out: the profile queries are lifted into this component so the
+ * catalog can aggregate errors. When the orchestration engine is down (503)
+ * every mounted profile query fails with the same engine-unavailable error —
+ * the catalog renders ONE engine-unavailable state with a retry (matching
+ * the detail page and the list-level handling) instead of N identical
+ * per-row unavailable lines. Mixed/other errors keep the per-row graceful
+ * summary (PL-13).
  */
 function StrategyCatalog({
   presets,
@@ -208,6 +222,23 @@ function StrategyCatalog({
     ],
     [presets],
   );
+  // One profile query per catalog preset via `useQueries` — a single stable
+  // hook (unconditional, dynamic length safe) that shares the exact
+  // `['presets','profile',<id>]` cache keys of `usePresetProfile` via
+  // `presetProfileQueryOptions`, so the detail drill-down stays a cache hit.
+  //
+  // simplify: N parallel `GET /profile` on mount (list is ids-only — AR-27)
+  // and no batch endpoint exists in P1 (AR-33). Bounded today by catalog
+  // size (USER + embedded non-hidden); the tracked upgrade path when preset
+  // counts grow is a batch profile endpoint (QC3 W-2 / QC1 S-3 / F-5).
+  const client = useNexusClient();
+  const profiles = useQueries({
+    queries: catalogPresets.map((preset) => presetProfileQueryOptions(preset.id, client)),
+  });
+
+  const engineDown =
+    profiles.length > 0
+    && profiles.every((profile) => profile.isError && isOrchestrationEngineUnavailable(profile.error));
 
   return (
     <Card className="shadow-card" data-testid="strategy-catalog">
@@ -218,10 +249,25 @@ function StrategyCatalog({
       <CardContent>
         {catalogPresets.length === 0 ? (
           <EmptyState title={t('catalog.empty')} />
+        ) : engineDown ? (
+          <UnavailableState
+            title={t('engineUnavailableTitle')}
+            description={t('engineUnavailableDescription')}
+            // Retry refetches every mounted profile query (the list already
+            // succeeded — the engine was down for the profile derivation).
+            onRetry={() => {
+              for (const profile of profiles) void profile.refetch();
+            }}
+          />
         ) : (
           <ul className="flex flex-col gap-2">
-            {catalogPresets.map((preset) => (
-              <CatalogRow key={preset.id} preset={preset} onSelect={onSelect} />
+            {catalogPresets.map((preset, index) => (
+              <CatalogRow
+                key={preset.id}
+                preset={preset}
+                profile={profiles[index]}
+                onSelect={onSelect}
+              />
             ))}
           </ul>
         )}
@@ -232,13 +278,14 @@ function StrategyCatalog({
 
 function CatalogRow({
   preset,
+  profile,
   onSelect,
 }: {
   preset: PresetSummary;
+  profile: PresetProfileQuery;
   onSelect: (id: string) => void;
 }) {
   const { t } = useTranslation('strategies');
-  const profile = usePresetProfile(preset.id);
   const lanes = profile.data?.lanes;
   // PL-8 vocabulary: trigger lane = the integrator or product fires it
   // (session start / direct run); scheduled lane = time-driven entry

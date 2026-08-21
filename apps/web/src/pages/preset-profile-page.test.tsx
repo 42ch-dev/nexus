@@ -284,6 +284,31 @@ describe('PresetProfilePage', () => {
     expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument();
   });
 
+  it('omits the "still listed in the catalog" sentence when the preset is absent from the list (F-4 / QC3 S-1)', async () => {
+    useHandlers(
+      // The deep-linked id is NOT in any list group — the copy must not
+      // claim it is still listed.
+      listHandler(),
+      http.get('/v1/daemon/orchestration/presets/unknown%2Fpreset/profile', () =>
+        HttpResponse.json(
+          { error: { code: 'not_found', message: 'no such preset' } },
+          { status: 404 },
+        ),
+      ),
+    );
+
+    renderProfile('unknown/preset');
+
+    const summary = await screen.findByTestId('preset-profile-unavailable');
+    // Base honest copy still renders…
+    expect(summary).toHaveTextContent('The profile for unknown/preset could not be loaded.');
+    // …but "still listed in the catalog" is absent (list lookup found
+    // nothing) and no source badge is shown (no list facts for the id).
+    expect(summary).not.toHaveTextContent('The preset is still listed in the catalog.');
+    expect(screen.queryByTestId('profile-unavailable-source')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument();
+  });
+
   it('renders the unavailable state when the orchestration engine is down (503)', async () => {
     useHandlers(
       listHandler(),

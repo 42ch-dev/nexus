@@ -65,6 +65,12 @@ const NO_LANES: PresetProfileLanes = {
   direct: false,
 };
 
+/** Daemon 503 envelope when the orchestration engine is not running. */
+const ENGINE_503_BODY = {
+  success: false,
+  error: { code: 'service_unavailable', message: 'engine not available' },
+};
+
 beforeEach(async () => {
   await i18n.changeLanguage('en');
 });
@@ -260,5 +266,109 @@ describe('StrategyCatalog', () => {
         '/strategies/game-narrative/profile',
       ),
     );
+  });
+
+  it('updates catalog lane badges after a preset reload without navigation (F-1 / QC1 W-1)', async () => {
+    const user = userEvent.setup();
+    // The reload request swaps the on-disk manifest lane set before the
+    // invalidated profile query refetches — a mounted catalog must pick the
+    // change up without a remount.
+    let lanes: PresetProfileLanes = NO_LANES;
+    useHandlers(
+      http.get('/v1/daemon/presets', () =>
+        HttpResponse.json({
+          user: [{ id: 'user/foo', source: 'user' }],
+          system: [],
+          embedded: [],
+        }),
+      ),
+      http.get('/v1/daemon/orchestration/presets/user%2Ffoo/profile', () =>
+        HttpResponse.json({
+          id: 'user/foo',
+          version: 2,
+          sourceHash: 'b'.repeat(64),
+          lanes,
+          states: [],
+        }),
+      ),
+      http.post('/v1/daemon/presets/user%2Ffoo:reload', () => {
+        lanes = CRON_LANES;
+        return HttpResponse.json({ id: 'user/foo', reloaded: true });
+      }),
+    );
+
+    renderStrategies();
+
+    const row = await screen.findByTestId('catalog-row-user/foo');
+    // Pre-reload manifest declares no lanes — no badges.
+    expect(within(row).queryByTestId('catalog-trigger-user/foo')).not.toBeInTheDocument();
+    expect(within(row).queryByTestId('catalog-scheduled-user/foo')).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Reload' }));
+
+    // `useReloadPreset` invalidates `presets.all`, so the mounted profile
+    // refetches and the badge updates — still on the same page.
+    await waitFor(() =>
+      expect(screen.getByTestId('catalog-trigger-user/foo')).toBeInTheDocument(),
+    );
+    expect(screen.getByTestId('catalog-scheduled-user/foo')).toBeInTheDocument();
+    expect(screen.getByTestId('strategy-catalog')).toBeInTheDocument();
+  });
+
+  it('renders ONE catalog-level engine-unavailable state with retry when every profile 503s (F-2 / QC3 W-3)', async () => {
+    const user = userEvent.setup();
+    // Engine down for the first profile attempts; recovers before retry.
+    let engineDown = true;
+    useHandlers(
+      http.get('/v1/daemon/presets', () =>
+        HttpResponse.json({
+          user: [{ id: 'user/foo', source: 'user' }],
+          system: [],
+          embedded: [{ id: 'game-narrative', source: 'embedded' }],
+        }),
+      ),
+      http.get('/v1/daemon/orchestration/presets/user%2Ffoo/profile', () =>
+        engineDown
+          ? HttpResponse.json(ENGINE_503_BODY, { status: 503 })
+          : HttpResponse.json({
+              id: 'user/foo',
+              version: 1,
+              sourceHash: 'b'.repeat(64),
+              lanes: NO_LANES,
+              states: [],
+            }),
+      ),
+      http.get('/v1/daemon/orchestration/presets/game-narrative/profile', () =>
+        engineDown
+          ? HttpResponse.json(ENGINE_503_BODY, { status: 503 })
+          : HttpResponse.json({
+              id: 'game-narrative',
+              version: 1,
+              sourceHash: 'c'.repeat(64),
+              lanes: GAME_NARRATIVE_LANES,
+              states: [],
+            }),
+      ),
+    );
+
+    renderStrategies();
+
+    const catalog = await screen.findByTestId('strategy-catalog');
+    await waitFor(() =>
+      expect(within(catalog).getByText('Orchestration engine not running')).toBeInTheDocument(),
+    );
+    // ONE catalog-level state: no rows, no N per-row unavailable lines.
+    expect(within(catalog).getByRole('button', { name: 'Try again' })).toBeInTheDocument();
+    expect(within(catalog).queryByTestId('catalog-row-user/foo')).not.toBeInTheDocument();
+    expect(within(catalog).queryByTestId('catalog-row-game-narrative')).not.toBeInTheDocument();
+    expect(within(catalog).queryAllByTestId(/catalog-profile-unavailable-/)).toHaveLength(0);
+
+    // Retry refetches the profile queries; the engine recovered → rows render.
+    engineDown = false;
+    await user.click(within(catalog).getByRole('button', { name: 'Try again' }));
+
+    const row = await screen.findByTestId('catalog-row-game-narrative');
+    expect(await within(row).findByTestId('catalog-trigger-game-narrative')).toBeInTheDocument();
+    expect(within(row).getByTestId('catalog-scheduled-game-narrative')).toBeInTheDocument();
   });
 });

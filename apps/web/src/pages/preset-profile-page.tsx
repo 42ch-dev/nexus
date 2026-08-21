@@ -182,7 +182,11 @@ export function PresetProfilePage() {
           <CardHeader>
             <CardTitle>{t('profile.unavailableTitle')}</CardTitle>
             <CardDescription>
+              {/* The "still listed" sentence is only true when the preset was
+               * actually found in the list lookup — deep links to ids absent
+               * from the list must not claim it (QC3 S-1 / F-4). */}
               {t('profile.unavailableDescription', { name: presetId ?? '' })}
+              {summary ? ` ${t('profile.unavailableListed')}` : null}
             </CardDescription>
           </CardHeader>
           <CardContent>
