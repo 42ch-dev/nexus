@@ -28,6 +28,15 @@
     "saving": "Saving…",
     "genericError": "Could not update the label. Check the daemon message above and try again."
   },
+  "delete": {
+    "trigger": "Delete",
+    "triggerAria": "Delete schedule {{id}}",
+    "title": "Delete \"{{name}}\"",
+    "description": "This schedule will be removed from the daemon. This cannot be undone.",
+    "delete": "Delete",
+    "deleting": "Deleting…",
+    "genericError": "Could not delete the schedule. Check the daemon message above and try again."
+  },
   "workCron": {
     "sectionTitle": "Work cron",
     "sectionDescription": "Per-Work cron roles (brainstorm / write / review) and timezone. Config only — firing is not shipped.",

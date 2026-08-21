@@ -1,4 +1,4 @@
-import { RefreshCw, Pencil } from 'lucide-react';
+import { RefreshCw, Pencil, Trash2 } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
@@ -11,6 +11,7 @@ import { flattenPages, useActiveCreatorId, useSchedules, useWorks } from '@/api/
 import { formatRelative, shortId } from '@/lib/format';
 import type { ScheduleSummary } from '@42ch/nexus-contracts';
 import { CreateScheduleDialog } from './dialogs/create-schedule-dialog';
+import { DeleteScheduleDialog } from './dialogs/delete-schedule-dialog';
 import { EditScheduleLabelDialog } from './dialogs/edit-schedule-label-dialog';
 import { WorkCronEditorDialog } from './dialogs/work-cron-editor-dialog';
 
@@ -41,6 +42,7 @@ export function SchedulePage() {
   const [createOpen, setCreateOpen] = useState(false);
   const [editLabel, setEditLabel] = useState<ScheduleSummary | null>(null);
   const [editCron, setEditCron] = useState<{ workId: string; workTitle: string } | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<ScheduleSummary | null>(null);
 
   return (
     <div className="flex flex-col gap-4">
@@ -108,16 +110,28 @@ export function SchedulePage() {
                     </TableCell>
                     <TableCell className="text-gray-900">{formatRelative(s.updated_at)}</TableCell>
                     <TableCell>
-                      <Button
-                        type="button"
-                        variant="tertiary"
-                        size="tiny"
-                        onClick={() => setEditLabel(s)}
-                        aria-label={t('editLabel.triggerAria', { id: shortId(s.schedule_id) })}
-                      >
-                        <Pencil className="h-3.5 w-3.5" aria-hidden />
-                        {t('editLabel.trigger')}
-                      </Button>
+                      <div className="flex items-center gap-2">
+                        <Button
+                          type="button"
+                          variant="tertiary"
+                          size="tiny"
+                          onClick={() => setEditLabel(s)}
+                          aria-label={t('editLabel.triggerAria', { id: shortId(s.schedule_id) })}
+                        >
+                          <Pencil className="h-3.5 w-3.5" aria-hidden />
+                          {t('editLabel.trigger')}
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="tertiary"
+                          size="tiny"
+                          onClick={() => setDeleteTarget(s)}
+                          aria-label={t('delete.triggerAria', { id: shortId(s.schedule_id) })}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" aria-hidden />
+                          {t('delete.trigger')}
+                        </Button>
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))}
@@ -196,6 +210,15 @@ export function SchedulePage() {
           open={Boolean(editCron)}
           onOpenChange={(open) => {
             if (!open) setEditCron(null);
+          }}
+        />
+      )}
+      {deleteTarget && (
+        <DeleteScheduleDialog
+          schedule={deleteTarget}
+          open={Boolean(deleteTarget)}
+          onOpenChange={(open) => {
+            if (!open) setDeleteTarget(null);
           }}
         />
       )}

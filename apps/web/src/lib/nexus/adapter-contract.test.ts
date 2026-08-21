@@ -887,19 +887,20 @@ describe('NexusClient compute-run-method parity guard (V1.147 P1)', () => {
 // ── 9. Schedule-edit + work-cron parity guard (V1.171 P2 AR-29) ──────────────
 
 /**
- * The V1.171 P2 AR-29 promotion added `editSchedule` / `getWorkCron` /
- * `putWorkCron` to the `NexusClient` interface. This guard mirrors the
- * compute-run guard: it fails at compile time (the `satisfies` constraint) if
- * the interface drops any method, and at runtime if an adapter implementation
- * is missing it.
+ * The V1.171 P2 AR-29/AR-31 promotions added `editSchedule` / `getWorkCron` /
+ * `putWorkCron` / `deleteSchedule` to the `NexusClient` interface. This guard
+ * mirrors the compute-run guard: it fails at compile time (the `satisfies`
+ * constraint) if the interface drops any method, and at runtime if an adapter
+ * implementation is missing it.
  */
 const SCHEDULE_EDIT_METHODS = [
   'editSchedule',
   'getWorkCron',
   'putWorkCron',
+  'deleteSchedule',
 ] as const satisfies readonly (keyof NexusClient)[];
 
-describe('NexusClient schedule-edit + work-cron parity guard (V1.171 P2 AR-29)', () => {
+describe('NexusClient schedule-edit + work-cron + delete parity guard (V1.171 P2 AR-29/AR-31)', () => {
   it('BrowserClient implements every schedule-edit method on the NexusClient interface', () => {
     const client = new BrowserClient();
     for (const method of SCHEDULE_EDIT_METHODS) {
@@ -920,7 +921,7 @@ describe('NexusClient schedule-edit + work-cron parity guard (V1.171 P2 AR-29)',
     }
   });
 
-  it('routes the schedule-edit methods to the right verb + path + body shape', async () => {
+  it('routes the schedule-edit + delete methods to the right verb + path + body shape', async () => {
     const seen: { method: string; url: string; body?: unknown }[] = [];
     const fetchImpl: typeof fetch = async (input, init) => {
       seen.push({
@@ -946,6 +947,7 @@ describe('NexusClient schedule-edit + work-cron parity guard (V1.171 P2 AR-29)',
       },
       expected_current_json: '{"tz":"UTC"}',
     });
+    await client.deleteSchedule('sched-1');
 
     expect(seen).toEqual([
       {
@@ -966,6 +968,11 @@ describe('NexusClient schedule-edit + work-cron parity guard (V1.171 P2 AR-29)',
           },
           expected_current_json: '{"tz":"UTC"}',
         },
+      },
+      {
+        method: 'DELETE',
+        url: '/v1/daemon/orchestration/schedules/sched-1',
+        body: undefined,
       },
     ]);
   });

@@ -560,4 +560,124 @@ describe('SchedulePage', () => {
     expect(error).toHaveTextContent('E_CRON_INVALID_EXPR');
     expect(error).toHaveTextContent('invalid cron expression');
   });
+
+  // ── V1.171 P2 delete journey (PL-15/AR-31) ────────────────────────────────
+
+  it('deletes a schedule after confirmation: DELETE called, list invalidated, row gone', async () => {
+    const user = userEvent.setup();
+    let deleted = false;
+    let deletedId: string | null = null;
+    useHandlers(
+      http.get('/v1/daemon/works', () => HttpResponse.json(WORKS_EMPTY)),
+      http.get('/v1/daemon/presets', () => HttpResponse.json(PRESETS)),
+      http.get('/v1/daemon/orchestration/schedules', () =>
+        HttpResponse.json({
+          items: deleted ? [] : [SCHEDULE_ROW],
+          pagination: { limit: 20, has_more: false },
+        }),
+      ),
+      http.delete('/v1/daemon/orchestration/schedules/sched-1', ({ request }) => {
+        deleted = true;
+        deletedId = new URL(request.url).pathname;
+        return HttpResponse.json({ deleted: true });
+      }),
+    );
+
+    renderScheduleWithCreator();
+
+    await screen.findByText('Daily digest');
+    await user.click(screen.getByRole('button', { name: 'Delete schedule sched-1' }));
+
+    // Confirmation dialog names the schedule.
+    await screen.findByRole('heading', { name: 'Delete "Daily digest"' });
+    expect(screen.getByText(/This schedule will be removed from the daemon/i)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /^Delete$/ }));
+
+    // DELETE called against the right id.
+    await waitFor(() => expect(deleted).toBe(true));
+    expect(deletedId).toBe('/v1/daemon/orchestration/schedules/sched-1');
+    // Invalidation refetched the list; the row is gone and the dialog closed.
+    await waitFor(() => expect(screen.queryByText('Daily digest')).not.toBeInTheDocument());
+    await waitFor(() =>
+      expect(screen.queryByRole('heading', { name: 'Delete "Daily digest"' })).not.toBeInTheDocument(),
+    );
+  });
+
+  it('surfaces a non-terminal 4xx visibly and keeps the confirm dialog open', async () => {
+    const user = userEvent.setup();
+    let deleted = false;
+    useHandlers(
+      http.get('/v1/daemon/works', () => HttpResponse.json(WORKS_EMPTY)),
+      http.get('/v1/daemon/presets', () => HttpResponse.json(PRESETS)),
+      http.get('/v1/daemon/orchestration/schedules', () =>
+        HttpResponse.json({
+          items: [SCHEDULE_ROW],
+          pagination: { limit: 20, has_more: false },
+        }),
+      ),
+      http.delete('/v1/daemon/orchestration/schedules/sched-1', () => {
+        deleted = true;
+        return HttpResponse.json(
+          {
+            success: false,
+            error: {
+              code: 'not_found',
+              message: 'schedule sched-1 not found',
+            },
+          },
+          { status: 404 },
+        );
+      }),
+    );
+
+    renderScheduleWithCreator();
+
+    await screen.findByText('Daily digest');
+    await user.click(screen.getByRole('button', { name: 'Delete schedule sched-1' }));
+    await screen.findByRole('heading', { name: 'Delete "Daily digest"' });
+    await user.click(screen.getByRole('button', { name: /^Delete$/ }));
+
+    // The daemon message surfaces visibly (error toast) — never silent.
+    await screen.findByText('schedule sched-1 not found');
+    // Inline error keeps the dialog open.
+    expect(
+      screen.getByText(/Could not delete the schedule\. Check the daemon message above and try again/i),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Delete "Daily digest"' })).toBeInTheDocument();
+    expect(deleted).toBe(true);
+  });
+
+  it('cancel closes the confirm dialog without calling DELETE', async () => {
+    const user = userEvent.setup();
+    let deleted = false;
+    useHandlers(
+      http.get('/v1/daemon/works', () => HttpResponse.json(WORKS_EMPTY)),
+      http.get('/v1/daemon/presets', () => HttpResponse.json(PRESETS)),
+      http.get('/v1/daemon/orchestration/schedules', () =>
+        HttpResponse.json({
+          items: [SCHEDULE_ROW],
+          pagination: { limit: 20, has_more: false },
+        }),
+      ),
+      http.delete('/v1/daemon/orchestration/schedules/sched-1', () => {
+        deleted = true;
+        return HttpResponse.json({ deleted: true });
+      }),
+    );
+
+    renderScheduleWithCreator();
+
+    await screen.findByText('Daily digest');
+    await user.click(screen.getByRole('button', { name: 'Delete schedule sched-1' }));
+    await screen.findByRole('heading', { name: 'Delete "Daily digest"' });
+
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+
+    // Dialog closes; the row stays; DELETE was never fired.
+    await waitFor(() =>
+      expect(screen.queryByRole('heading', { name: 'Delete "Daily digest"' })).not.toBeInTheDocument(),
+    );
+    expect(screen.getByText('Daily digest')).toBeInTheDocument();
+    expect(deleted).toBe(false);
+  });
 });

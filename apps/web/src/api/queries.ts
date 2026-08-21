@@ -601,6 +601,29 @@ export function usePutWorkCron() {
   });
 }
 
+/**
+ * Delete a schedule (V1.171 P2 — PL-15/AR-31). Wraps
+ * `DELETE /v1/daemon/orchestration/schedules/{schedule_id}` — the daemon
+ * cancels non-terminal schedules before deletion and responds `200` with
+ * `{ deleted: true }`. Unknown ids resolve to 404; any refusal (non-terminal
+ * enforcement) surfaces via the shared error toast — no client-side
+ * pre-filter. Invalidates the whole `['schedules']` key set on success so the
+ * deleted row leaves the list and the by-preset/strategy-cache views refetch
+ * (mirrors `useDeletePreset`).
+ */
+export function useDeleteSchedule() {
+  const client = useNexusClient();
+  const qc = useQueryClient();
+  const errorToast = useErrorToast();
+  return useMutation({
+    mutationFn: (scheduleId: string) => client.deleteSchedule(scheduleId),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: queryKeys.schedules.all });
+    },
+    onError: (error) => errorToast(error, 'error.couldNotDeleteSchedule'),
+  });
+}
+
 export function usePatchWork() {
   const client = useNexusClient();
   const qc = useQueryClient();

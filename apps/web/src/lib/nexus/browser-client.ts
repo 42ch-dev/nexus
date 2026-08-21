@@ -29,6 +29,7 @@ import type {
   CreateWorldResponse,
   CreatorDetail,
   DeletePendingReviewResponse,
+  DeleteScheduleResponse,
   EditCoreContextRequest,
   EditCoreContextResponse,
   FindingDetailResponse,
@@ -330,6 +331,12 @@ export class BrowserClient implements NexusClient {
     return this.put<WorkCronResponse>(
       `/v1/daemon/works/${encodeURIComponent(workId)}/cron`,
       request,
+    );
+  }
+  // V1.171 P2 AR-31 — schedule delete (terminal-only daemon enforcement).
+  deleteSchedule(scheduleId: string): Promise<DeleteScheduleResponse> {
+    return this.delete<DeleteScheduleResponse>(
+      `/v1/daemon/orchestration/schedules/${encodeURIComponent(scheduleId)}`,
     );
   }
 

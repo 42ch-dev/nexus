@@ -28,6 +28,15 @@
     "saving": "正在保存…",
     "genericError": "无法更新标签。请查看上方守护进程消息后重试。"
   },
+  "delete": {
+    "trigger": "删除",
+    "triggerAria": "删除日程 {{id}}",
+    "title": "删除 \"{{name}}\"",
+    "description": "此日程将从守护进程中移除。此操作无法撤销。",
+    "delete": "删除",
+    "deleting": "正在删除…",
+    "genericError": "无法删除日程。请查看上方守护进程消息后重试。"
+  },
   "workCron": {
     "sectionTitle": "作品 cron",
     "sectionDescription": "每个作品的 cron 角色（brainstorm / write / review）和时区。仅配置——尚未提供触发。",

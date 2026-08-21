@@ -46,6 +46,7 @@ import type {
   CreateWorldResponse,
   CreatorDetail,
   DeletePendingReviewResponse,
+  DeleteScheduleResponse,
   EditCoreContextRequest,
   EditCoreContextResponse,
   FindingDetailResponse,
@@ -418,6 +419,15 @@ export interface NexusClient {
    * on invalid input; 404 on unknown work).
    */
   putWorkCron(workId: string, request: UpdateWorkCronRequest): Promise<WorkCronResponse>;
+  /**
+   * `DELETE /v1/daemon/orchestration/schedules/{schedule_id}` — remove a
+   * schedule (V1.171 P2 — PL-15/AR-31). The daemon cancels non-terminal
+   * schedules before deletion and responds `200` with
+   * `{ deleted: true }`; unknown ids resolve to 404. Errors (including any
+   * non-terminal refusal) surface via the shared error toast — the UI does
+   * not pre-filter client-side beyond the daemon's enforcement.
+   */
+  deleteSchedule(scheduleId: string): Promise<DeleteScheduleResponse>;
 
   // ── Capabilities ──────────────────────────────────────────────────────────
   /** `GET /v1/daemon/orchestration/capabilities` — cursor list (F-P3/F-F1; canonical `items` key). */

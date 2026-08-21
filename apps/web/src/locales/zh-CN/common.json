@@ -68,6 +68,7 @@
     "couldNotCreateWorld": "无法创建世界",
     "couldNotCreateSchedule": "无法创建日程",
     "couldNotUpdateSchedule": "无法更新日程",
+    "couldNotDeleteSchedule": "无法删除日程",
     "couldNotUpdateWorkCron": "无法更新作品 cron",
     "couldNotCreateFork": "无法创建分支",
     "couldNotCreateWorldRule": "无法创建规则",
