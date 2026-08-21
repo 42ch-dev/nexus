@@ -80,6 +80,12 @@ pub mod platform;
     test,
     allow(clippy::unwrap_used, clippy::unwrap_in_result, clippy::expect_used)
 )]
+pub mod preset;
+#[deny(clippy::unwrap_used)]
+#[cfg_attr(
+    test,
+    allow(clippy::unwrap_used, clippy::unwrap_in_result, clippy::expect_used)
+)]
 pub mod sync;
 #[deny(clippy::unwrap_used)]
 #[cfg_attr(

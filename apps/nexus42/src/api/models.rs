@@ -203,7 +203,7 @@ pub struct ScaffoldPresetRequest {
 }
 
 /// Response from `POST /v1/daemon/presets`.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ScaffoldPresetResponse {
     pub id: String,
     pub path: String,

@@ -166,7 +166,7 @@ pub struct ListPresetsResponse {
 /// `_system.` qualified system preset). Every field is a pure read of the
 /// already-loaded preset — no invented defaults; manifest fields the preset
 /// does not carry serialize absent (AR-21).
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PresetProfileResponse {
     /// Preset identifier from the loaded manifest (`LoadedPreset.id`).
@@ -205,7 +205,7 @@ pub struct PresetProfileResponse {
 // state machine. Refactoring into enums would change the JSON shape the
 // CLI `preset show --json` must match verbatim (AR-25).
 #[allow(clippy::struct_excessive_bools)]
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PresetProfileLanes {
     /// Cron (Work roles): this preset id is one of the works-cron role
@@ -220,7 +220,7 @@ pub struct PresetProfileLanes {
 }
 
 /// A single state in the outer state machine.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PresetProfileState {
     /// Unique state identifier within this preset.
@@ -244,7 +244,7 @@ pub struct PresetProfileState {
 }
 
 /// A single enter action on a state.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PresetProfileEnterAction {
     /// Action kind: `capability`, `inner_graph`, or `host_tool`.
@@ -254,7 +254,7 @@ pub struct PresetProfileEnterAction {
 }
 
 /// Exit condition for a state.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PresetProfileExitWhen {
     /// Exit condition kind: `llm_judge` / `rule` / `graph_complete` /
@@ -275,7 +275,7 @@ pub struct PresetProfileExitWhen {
 }
 
 /// Next transition form for a state.
-#[derive(Debug, Clone, Default, Serialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PresetProfileNext {
     /// Next form: `linear` / `goNogo` / `labeled` / `conditional` /
@@ -305,7 +305,7 @@ pub struct PresetProfileNext {
 }
 
 /// A labeled next edge (`labeled` form).
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PresetProfileLabeledNext {
     /// Label the judge returns to select this edge.
@@ -315,7 +315,7 @@ pub struct PresetProfileLabeledNext {
 }
 
 /// A conditional rule (expression → target edge).
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PresetProfileConditionalRule {
     /// Expression evaluated against context.
@@ -325,7 +325,7 @@ pub struct PresetProfileConditionalRule {
 }
 
 /// A role definition for multi-agent presets.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PresetProfileRole {
     /// Unique role ID within this preset.
@@ -340,7 +340,7 @@ pub struct PresetProfileRole {
 }
 
 /// A declared signal binding (declared, not delivered).
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PresetProfileSignal {
     /// Declared signal name.
