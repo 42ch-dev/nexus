@@ -116,6 +116,14 @@ describe('entrance registry (AR-15)', () => {
     expect(matchEntranceRouteRule('/strategies/preset-1')?.path).toBe(
       '/strategies/:presetId',
     );
+    // V1.171 P1 (PL-13/AR-28) — profile drill-down deep-link: the trailing
+    // `/profile` segment inherits the canvas rule's `allowDeepLink` via
+    // longest-prefix match. No separate registry row (App.tsx: "no registry
+    // change"); a dedicated rule would be a second deep-link mechanism.
+    expect(matchEntranceRouteRule('/strategies/preset-1/profile')?.path).toBe(
+      '/strategies/:presetId',
+    );
+    expect(matchEntranceRouteRule('/strategies/preset-1/profile')?.allowDeepLink).toBe(true);
     expect(matchEntranceRouteRule('/works/w1/inspector')?.path).toBe(
       '/works/:workId/inspector',
     );
