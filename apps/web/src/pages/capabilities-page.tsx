@@ -1,6 +1,7 @@
 import { Info, RefreshCw } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useState } from 'react';
+import { useSearchParams } from 'react-router';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -20,7 +21,11 @@ import { useCapabilities } from '@/api/queries';
 export function CapabilitiesPage() {
   const { t } = useTranslation('capabilities');
   const caps = useCapabilities();
-  const [filter, setFilter] = useState('');
+  const [searchParams] = useSearchParams();
+  // V1.171 P1 (PL-13) — the preset profile deep-links required capabilities
+  // with `?filter=<name>`; seed the local filter so the linked schema is
+  // visible on arrival. No param → empty filter (existing behavior).
+  const [filter, setFilter] = useState(() => searchParams.get('filter') ?? '');
 
   const filtered =
     caps.data?.filter((c) =>

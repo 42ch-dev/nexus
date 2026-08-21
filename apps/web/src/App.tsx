@@ -43,6 +43,14 @@ const StrategyDetailPage = lazy(() =>
   import('@/pages/strategy-page').then((m) => ({ default: m.StrategyPage })),
 );
 
+// Route-split: the per-preset profile drill-down (V1.171 P1 — PL-13) is a
+// light read-only page (no `@xyflow/react`), sibling of the canvas route at
+// `/strategies/:presetId/profile`. Lazy-loaded for chunk symmetry with the
+// other route-split pages.
+const PresetProfilePage = lazy(() =>
+  import('@/pages/preset-profile-page').then((m) => ({ default: m.PresetProfilePage })),
+);
+
 // Route-split: the Outline canvas contains the outline/timeline interactive
 // surface and is not part of the Control Room bootstrap path.
 const OutlinePage = lazy(() =>
@@ -255,6 +263,20 @@ function AppRoutes() {
         <Route path="findings" element={<FindingsPage />} />
         <Route path="memory" element={<MemoryPage />} />
         <Route path="strategies" element={<StrategiesPage />} />
+        {/* V1.171 P1 (PL-13/AR-28) — per-preset profile drill-down. Sibling of
+            the canvas route: the canvas stays at `/strategies/:presetId`
+            (PL-14 write-boundary preserved); the profile view lives at a
+            trailing `/profile` segment (AR-20 literal-segment precedent).
+            Deep links are covered by the existing `/strategies/:presetId`
+            develop-only + allowDeepLink entrance rule — no registry change. */}
+        <Route
+          path="strategies/:presetId/profile"
+          element={
+            <Suspense fallback={<LoadingState label={t('profile.loading')} />}>
+              <PresetProfilePage />
+            </Suspense>
+          }
+        />
         <Route
           path="strategies/:presetId"
           element={

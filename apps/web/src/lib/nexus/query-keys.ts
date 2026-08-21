@@ -47,6 +47,11 @@ export const queryKeys = {
     // `invalidateQueries` wiring lands in V1.70 when the canvas consumes these.
     details: () => [...queryKeys.presets.all, 'detail'] as const,
     detail: (presetId: string) => [...queryKeys.presets.details(), presetId] as const,
+    // V1.171 P1 — per-preset profile (AR-27). Under `presets.all` so the
+    // scaffold/reload/delete mutations invalidate the whole `['presets']`
+    // key set and refresh catalog lanes after a manifest change — see the
+    // staleness contract on `usePresetProfile`.
+    profile: (presetId: string) => [...queryKeys.presets.all, 'profile', presetId] as const,
   },
   // V1.94 — Creator profile switcher + agent scan.
   creators: {

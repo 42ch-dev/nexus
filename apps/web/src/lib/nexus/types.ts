@@ -146,6 +146,8 @@ import type {
   WorldRulesListResponse,
 } from '@42ch/nexus-contracts';
 
+import type { PresetProfileResponse } from './preset-profile';
+
 /** Daemon health probe result (`GET /v1/daemon/runtime/health`). App-side type. */
 export interface DaemonHealth {
   /** `ok` when the daemon is reachable and healthy. */
@@ -376,6 +378,15 @@ export interface NexusClient {
   updatePreset(presetId: string, request: UpdatePresetRequest): Promise<UpdatePresetResponse>;
   /** `DELETE /v1/daemon/presets/{id}` — delete a user preset bundle; 204 No Content (V1.67 G2 promotion). */
   deletePreset(presetId: string): Promise<void>;
+
+  // ── Preset profiles (V1.171 P1 — AR-27) ───────────────────────────────────
+  /**
+   * `GET /v1/daemon/orchestration/presets/{id}/profile` — manifest-derived
+   * profile (trigger lanes, states, roles, capabilities, declared signals)
+   * for any resolvable preset. The app-side type mirrors the hand-coded Rust
+   * DTO 1:1 (camelCase); unknown ids resolve to 404 (PL-2).
+   */
+  getPresetProfile(presetId: string): Promise<PresetProfileResponse>;
 
   // ── Strategy canvas (V1.71 Track A) ───────────────────────────────────────
   /** `POST /v1/daemon/strategies/{strategy_id}/states/{state_id}/patch` — patch a state. */

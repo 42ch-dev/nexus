@@ -57,6 +57,14 @@ function GuardTree({ onPathname }: { onPathname: (p: string) => void }) {
             }
           />
           <Route
+            path="strategies/:presetId/profile"
+            element={
+              <EntranceGuard>
+                <div data-testid="profile-route">Profile</div>
+              </EntranceGuard>
+            }
+          />
+          <Route
             path="sessions"
             element={
               <EntranceGuard>
@@ -151,6 +159,21 @@ describe('EntranceGuard redirects (AR-19)', () => {
     await waitFor(() => {
       expect(screen.getByTestId('canvas-route')).toBeInTheDocument();
     });
+    expect(
+      screen.queryByText('Available in the Develop layout — switch entrance to use this.'),
+    ).not.toBeInTheDocument();
+  });
+
+  it('passes Create through the strategy profile deep link (no bounce, no toast, no new guard)', async () => {
+    // V1.171 P1 (PL-13/AR-28): `/strategies/:presetId/profile` longest-prefix
+    // matches the canvas rule (`/strategies/:presetId` develop-only +
+    // allowDeepLink) — the profile view is not a new bounce surface.
+    let resolvedPathname = '';
+    renderGuardTree(['/strategies/preset-1/profile'], (p) => (resolvedPathname = p));
+    await waitFor(() => {
+      expect(screen.getByTestId('profile-route')).toBeInTheDocument();
+    });
+    expect(resolvedPathname).toBe('/strategies/preset-1/profile');
     expect(
       screen.queryByText('Available in the Develop layout — switch entrance to use this.'),
     ).not.toBeInTheDocument();
@@ -287,6 +310,7 @@ describe('resolveEntranceBounce (AR-19 classification)', () => {
 
   it('passes allow-deep-link and both-visibility surfaces through', () => {
     expect(resolveEntranceBounce('content-creator', '/strategies/p1', '')).toBeNull();
+    expect(resolveEntranceBounce('content-creator', '/strategies/p1/profile', '')).toBeNull();
     expect(resolveEntranceBounce('content-creator', '/settings/workspace', '')).toBeNull();
     expect(resolveEntranceBounce('content-creator', '/settings/appearance', '')).toBeNull();
     expect(resolveEntranceBounce('content-creator', '/works', '')).toBeNull();

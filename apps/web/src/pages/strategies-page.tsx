@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
+import { useQueries, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router';
 import { Plus, RefreshCw, Sparkles, Trash2 } from 'lucide-react';
@@ -8,8 +9,10 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
 import { EmptyState, ErrorState, LoadingState, UnavailableState } from '@/components/ui/states';
-import { useDeletePreset, usePresets, useReloadPreset } from '@/api/queries';
+import { useDeletePreset, usePresets, useReloadPreset, presetProfileQueryOptions, type PresetGroups, type PresetProfileQuery } from '@/api/queries';
+import { useNexusClient } from '@/lib/client-context';
 import { isOrchestrationEngineUnavailable } from '@/lib/nexus/errors';
+import { queryKeys } from '@/lib/nexus/query-keys';
 import type { PresetSummary } from '@42ch/nexus-contracts';
 
 import { ScaffoldPresetDialog } from './dialogs/scaffold-preset-dialog';
@@ -29,6 +32,7 @@ import { ValidatePresetDialog } from './dialogs/validate-preset-dialog';
  */
 export function StrategiesPage() {
   const { t } = useTranslation('strategies');
+  const qc = useQueryClient();
   const presets = usePresets();
   const reload = useReloadPreset();
   const removePreset = useDeletePreset();
@@ -68,7 +72,7 @@ export function StrategiesPage() {
             type="button"
             variant="tertiary"
             size="small"
-            onClick={() => presets.refetch()}
+            onClick={() => void qc.invalidateQueries({ queryKey: queryKeys.presets.all })}
             disabled={presets.isFetching}
             aria-label={t('refreshAria')}
           >
@@ -99,11 +103,18 @@ export function StrategiesPage() {
         </Card>
       ) : !presets.data ? null : (
         <div className="flex flex-col gap-4">
+          <StrategyCatalog
+            presets={presets.data}
+            // PL-13 drill-down: selecting a catalog preset opens its profile
+            // view; the canvas editor stays at `/strategies/:presetId` (PL-14).
+            onSelect={(id) => navigate(`/strategies/${encodeURIComponent(id)}/profile`)}
+          />
           <PresetGroup
             title={t('userPresets.title')}
             description={t('userPresets.description')}
             presets={presets.data.user}
             canDelete
+            testId="preset-group-user"
             onReload={(id) => reload.mutate(id)}
             onValidate={() => setValidateOpen(true)}
             onDelete={(id) => setDeleteTarget(id)}
@@ -115,6 +126,7 @@ export function StrategiesPage() {
             title={t('systemPresets.title')}
             description={t('systemPresets.description')}
             presets={systemPresets}
+            testId="preset-group-system"
             onReload={(id) => reload.mutate(id)}
             onValidate={() => setValidateOpen(true)}
             onSelect={(id) => navigate(`/strategies/${encodeURIComponent(id)}`)}
@@ -125,6 +137,7 @@ export function StrategiesPage() {
             title={t('embeddedPresets.title')}
             description={t('embeddedPresets.description')}
             presets={presets.data.embedded}
+            testId="preset-group-embedded"
             onReload={(id) => reload.mutate(id)}
             onValidate={() => setValidateOpen(true)}
             onSelect={(id) => navigate(`/strategies/${encodeURIComponent(id)}`)}
@@ -167,11 +180,196 @@ function isAuthorSystemPreset(preset: PresetSummary): boolean {
   return !preset.id.startsWith('_system.');
 }
 
+/**
+ * V1.171 P1 — Develop strategy catalog (PL-8/PL-9, AR-27/AR-28).
+ *
+ * Lists USER + embedded (non-hidden) presets with trigger-lane badges and
+ * honest entry paths, read from each preset's P0 profile through
+ * `NexusClient` (one `useQueries` fan-out sharing `usePresetProfile`'s
+ * `['presets','profile',<id>]` cache keys via `presetProfileQueryOptions`).
+ * The preset LIST endpoint returns ids only — no lane/role/capability data
+ * is derived client-side from list facts (AR-27). A missing profile renders
+ * a graceful summary (id + list facts), never a hard "preset gone" error
+ * (PL-13 boundary).
+ *
+ * The catalog attaches to the existing `/strategies` route, already
+ * `develop-only` in `ENTRANCE_ROUTE_RULES` (AR-28) — no new guard
+ * mechanism; the creator entrance bounces via the existing rule table.
+ *
+ * Profile fan-out: the profile queries are lifted into this component so the
+ * catalog can aggregate errors. When the orchestration engine is down (503)
+ * every mounted profile query fails with the same engine-unavailable error —
+ * the catalog renders ONE engine-unavailable state with a retry (matching
+ * the detail page and the list-level handling) instead of N identical
+ * per-row unavailable lines. Mixed/other errors keep the per-row graceful
+ * summary (PL-13).
+ */
+function StrategyCatalog({
+  presets,
+  onSelect,
+}: {
+  presets: PresetGroups;
+  onSelect: (id: string) => void;
+}) {
+  const { t } = useTranslation('strategies');
+  // USER + embedded non-hidden presets (PL-8). Non-hidden = not a `_system.`
+  // internal (AD-P0-3 filter reuse). The list endpoint returns ids only —
+  // lane data comes from each preset's profile (AR-27).
+  const catalogPresets = useMemo(
+    () => [
+      ...presets.user,
+      ...presets.embedded.filter((preset) => !preset.id.startsWith('_system.')),
+    ],
+    [presets],
+  );
+  // One profile query per catalog preset via `useQueries` — a single stable
+  // hook (unconditional, dynamic length safe) that shares the exact
+  // `['presets','profile',<id>]` cache keys of `usePresetProfile` via
+  // `presetProfileQueryOptions`, so the detail drill-down stays a cache hit.
+  //
+  // simplify: N parallel `GET /profile` on mount (list is ids-only — AR-27)
+  // and no batch endpoint exists in P1 (AR-33). Bounded today by catalog
+  // size (USER + embedded non-hidden); the tracked upgrade path when preset
+  // counts grow is a batch profile endpoint (QC3 W-2 / QC1 S-3 / F-5).
+  const client = useNexusClient();
+  const profiles = useQueries({
+    queries: catalogPresets.map((preset) => presetProfileQueryOptions(preset.id, client)),
+  });
+
+  const engineDown =
+    profiles.length > 0
+    && profiles.every((profile) => profile.isError && isOrchestrationEngineUnavailable(profile.error));
+
+  return (
+    <Card className="shadow-card" data-testid="strategy-catalog">
+      <CardHeader>
+        <CardTitle>{t('catalog.title')}</CardTitle>
+        <CardDescription>{t('catalog.description')}</CardDescription>
+      </CardHeader>
+      <CardContent>
+        {catalogPresets.length === 0 ? (
+          <EmptyState title={t('catalog.empty')} />
+        ) : engineDown ? (
+          <UnavailableState
+            title={t('engineUnavailableTitle')}
+            description={t('engineUnavailableDescription')}
+            // Retry refetches every mounted profile query (the list already
+            // succeeded — the engine was down for the profile derivation).
+            onRetry={() => {
+              for (const profile of profiles) void profile.refetch();
+            }}
+          />
+        ) : (
+          <ul className="flex flex-col gap-2">
+            {catalogPresets.map((preset, index) => (
+              <CatalogRow
+                key={preset.id}
+                preset={preset}
+                profile={profiles[index]}
+                onSelect={onSelect}
+              />
+            ))}
+          </ul>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function CatalogRow({
+  preset,
+  profile,
+  onSelect,
+}: {
+  preset: PresetSummary;
+  profile: PresetProfileQuery;
+  onSelect: (id: string) => void;
+}) {
+  const { t } = useTranslation('strategies');
+  const lanes = profile.data?.lanes;
+  // PL-8 vocabulary: trigger lane = the integrator or product fires it
+  // (session start / direct run); scheduled lane = time-driven entry
+  // (daemon schedule and/or Work cron).
+  const triggerLane = lanes ? lanes.session || lanes.direct : false;
+  const scheduledLane = lanes ? lanes.wallClock || lanes.cron : false;
+
+  return (
+    <li
+      className="flex flex-col gap-2 rounded-card border border-gray-alpha-400 p-3"
+      data-testid={`catalog-row-${preset.id}`}
+    >
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <button
+          type="button"
+          onClick={() => onSelect(preset.id)}
+          className="flex items-center gap-2 text-left"
+          aria-label={t('profile.openAria', { name: preset.id })}
+        >
+          <Sparkles className="h-4 w-4 text-purple-700" aria-hidden />
+          <span className="text-copy-13-mono text-gray-1000">{preset.id}</span>
+        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          {lanes && triggerLane && (
+            <Badge variant="running" data-testid={`catalog-trigger-${preset.id}`}>
+              {t('catalog.triggerBadge')}
+            </Badge>
+          )}
+          {lanes && scheduledLane && (
+            <Badge variant="queued" data-testid={`catalog-scheduled-${preset.id}`}>
+              {t('catalog.scheduledBadge')}
+            </Badge>
+          )}
+          <Badge variant="preset" data-testid={`catalog-source-${preset.id}`}>
+            {preset.source === 'user' ? t('catalog.sourceUser') : t('catalog.sourceEmbedded')}
+          </Badge>
+        </div>
+      </div>
+      {lanes ? (
+        <div className="flex flex-col gap-1" data-testid={`catalog-paths-${preset.id}`}>
+          <span className="text-label-12 text-gray-700">{t('catalog.entryPathsTitle')}</span>
+          <ul className="flex flex-col gap-1">
+            {triggerLane && (
+              <li className="flex flex-col gap-0.5">
+                <span className="text-copy-13 text-gray-900">{t('catalog.pathConnect')}</span>
+                <span className="text-copy-12 text-gray-700">{t('catalog.pathConnectDetail')}</span>
+              </li>
+            )}
+            {lanes.wallClock && (
+              <li className="flex flex-col gap-0.5">
+                <span className="text-copy-13 text-gray-900">{t('catalog.pathDaemon')}</span>
+                <span className="text-copy-12 text-gray-700">{t('catalog.pathDaemonDetail')}</span>
+              </li>
+            )}
+            {lanes.cron && (
+              <li className="flex flex-col gap-0.5">
+                <span className="text-copy-13 text-gray-900">{t('catalog.pathCron')}</span>
+                <span className="text-copy-12 text-gray-700">{t('catalog.pathCronDetail')}</span>
+              </li>
+            )}
+          </ul>
+        </div>
+      ) : profile.isLoading ? (
+        <p className="text-copy-12 text-gray-700" data-testid={`catalog-lanes-loading-${preset.id}`}>
+          {t('catalog.lanesLoading')}
+        </p>
+      ) : (
+        <p
+          className="text-copy-12 text-gray-700"
+          data-testid={`catalog-profile-unavailable-${preset.id}`}
+        >
+          {t('catalog.profileUnavailable')}
+        </p>
+      )}
+    </li>
+  );
+}
+
 function PresetGroup({
   title,
   description,
   presets,
   canDelete = false,
+  testId,
   onReload,
   onValidate,
   onDelete,
@@ -183,6 +381,7 @@ function PresetGroup({
   description: string;
   presets: PresetSummary[];
   canDelete?: boolean;
+  testId?: string;
   onReload: (id: string) => void;
   onValidate: () => void;
   onDelete?: (id: string) => void;
@@ -192,7 +391,7 @@ function PresetGroup({
 }) {
   const { t } = useTranslation('strategies');
   return (
-    <Card className="shadow-card">
+    <Card className="shadow-card" data-testid={testId}>
       <CardHeader>
         <CardTitle>{title}</CardTitle>
         <CardDescription>{description}</CardDescription>
