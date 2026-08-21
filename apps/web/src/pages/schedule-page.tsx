@@ -16,12 +16,13 @@ import { EditScheduleLabelDialog } from './dialogs/edit-schedule-label-dialog';
 import { WorkCronEditorDialog } from './dialogs/work-cron-editor-dialog';
 
 /**
- * Schedule / cron view (Control Room — READ) — web-ui.md §6.1 #3.
+ * Schedule / cron view (Control Room — READ/WRITE) — web-ui.md §6.1 #3.
  *
- * Lists every scheduled role per Work with status, preset, and last update.
- * Parity with CLI `creator works cron` for the schedule list; hand-editing cron
- * is deferred to V1.65+ (web-ui.md §8). ScheduleSummary does not carry a
- * next-fire timestamp, so we show the last-updated relative time.
+ * Lists queued preset runs (schedules) with status, preset, and last update,
+ * plus the per-Work cron section. Parity with CLI `creator works cron` for the
+ * cron list; hand-editing cron was deferred to V1.65+ (web-ui.md §8).
+ * ScheduleSummary does not carry a next-fire timestamp, so we show the
+ * last-updated relative time — never a fabricated next-run (PL-17).
  *
  * V1.171 P2 (PL-15/PL-16): the Develop entrance gains a create journey — the
  * "Create schedule" button opens a dialog wrapping the existing

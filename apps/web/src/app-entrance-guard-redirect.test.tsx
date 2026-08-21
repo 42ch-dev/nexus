@@ -73,6 +73,14 @@ function GuardTree({ onPathname }: { onPathname: (p: string) => void }) {
             }
           />
           <Route
+            path="schedule"
+            element={
+              <EntranceGuard>
+                <div data-testid="schedule-route">Schedule</div>
+              </EntranceGuard>
+            }
+          />
+          <Route
             path="settings/agent"
             element={
               <EntranceGuard>
@@ -134,6 +142,21 @@ describe('EntranceGuard redirects (AR-19)', () => {
       expect(screen.getByTestId('works-route')).toBeInTheDocument();
     });
     expect(resolvedPath).toBe('/works');
+  });
+
+  it('bounces Create on /schedule (V1.171 P2 — schedule CRUD stays develop-only; no creator chrome)', async () => {
+    // P2 PL-15/PL-8: the schedule operator surface stays hidden on the Create
+    // entrance even though the page now carries create/edit/delete chrome —
+    // the existing develop-only rule must keep bouncing it (AR-28).
+    let resolvedPath = '';
+    renderGuardTree(['/schedule'], (p) => (resolvedPath = p));
+    await waitFor(() => {
+      expect(screen.getByTestId('works-route')).toBeInTheDocument();
+    });
+    expect(resolvedPath).toBe('/works');
+    expect(
+      screen.queryByText('Available in the Develop layout — switch entrance to use this.'),
+    ).toBeInTheDocument();
   });
 
   it('bounces Create on a hidden settings section (/settings/agent)', async () => {

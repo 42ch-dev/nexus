@@ -1,12 +1,12 @@
 {
   "title": "Schedule",
-  "description": "Cron roles per Work, with status and last update.",
+  "description": "Scheduled preset runs and per-Work cron roles, with status and last update.",
   "refreshAria": "Refresh schedule",
   "refresh": "Refresh",
   "errorDescription": "Could not load schedules.",
   "loading": "Loading schedule…",
   "emptyTitle": "No schedules",
-  "emptyDescription": "Schedules appear here once a Work has cron roles configured.",
+  "emptyDescription": "Create a schedule to queue a preset run on the daemon.",
   "columns": {
     "schedule": "Schedule",
     "label": "Label",

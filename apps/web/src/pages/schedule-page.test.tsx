@@ -78,7 +78,7 @@ describe('SchedulePage', () => {
 
     expect(await screen.findByText('No schedules')).toBeInTheDocument();
     expect(
-      screen.getByText(/Schedules appear here once a Work has cron roles configured/i),
+      screen.getByText(/Create a schedule to queue a preset run on the daemon/i),
     ).toBeInTheDocument();
   });
 
@@ -679,5 +679,49 @@ describe('SchedulePage', () => {
     );
     expect(screen.getByText('Daily digest')).toBeInTheDocument();
     expect(deleted).toBe(false);
+  });
+
+  // ── V1.171 P2 T4 honesty sweep (PL-17 / AR-30) ──────────────────────────
+
+  it('shows the schedule list honestly: last-updated column, no next-run clock, no firing-cadence promise (PL-17/AR-30)', async () => {
+    useHandlers(
+      http.get('/v1/daemon/works', () => HttpResponse.json(WORKS_EMPTY)),
+      http.get('/v1/daemon/orchestration/schedules', () =>
+        HttpResponse.json({
+          items: [SCHEDULE_ROW],
+          pagination: { limit: 20, has_more: false },
+        }),
+      ),
+    );
+
+    renderScheduleWithCreator();
+
+    await screen.findByText('Daily digest');
+    // Lifecycle fields surface honestly: status badge + relative last-updated.
+    expect(screen.getByText(/Updated/i)).toBeInTheDocument();
+    // No fabricated next-run / next-fire anywhere on the page.
+    expect(screen.queryByText(/next run/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/next fire/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/fires every/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/cadence/i)).not.toBeInTheDocument();
+    // The page copy names the two surfaces it actually shows: scheduled runs + cron roles.
+    expect(
+      screen.getByText(/Scheduled preset runs and per-Work cron roles, with status and last update/i),
+    ).toBeInTheDocument();
+  });
+
+  it('never promises firing cadence on the empty list either (AR-30)', async () => {
+    useHandlers(
+      http.get('/v1/daemon/works', () => HttpResponse.json(WORKS_EMPTY)),
+      http.get('/v1/daemon/orchestration/schedules', () => HttpResponse.json(SCHEDULES_EMPTY)),
+    );
+
+    renderScheduleWithCreator();
+
+    await screen.findByText('No schedules');
+    expect(screen.queryByText(/next run/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/next fire/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/fires every/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/cadence/i)).not.toBeInTheDocument();
   });
 });

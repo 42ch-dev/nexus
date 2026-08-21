@@ -1,12 +1,12 @@
 {
   "title": "日程",
-  "description": "每个作品的 cron 角色、状态和最后更新时间。",
+  "description": "排队的预设运行和每个作品的 cron 角色，包含状态和最后更新时间。",
   "refreshAria": "刷新日程",
   "refresh": "刷新",
   "errorDescription": "无法加载日程。",
   "loading": "正在加载日程…",
   "emptyTitle": "暂无日程",
-  "emptyDescription": "作品配置 cron 角色后，日程将显示在此处。",
+  "emptyDescription": "创建日程可在守护进程中排队运行预设。",
   "columns": {
     "schedule": "日程",
     "label": "标签",

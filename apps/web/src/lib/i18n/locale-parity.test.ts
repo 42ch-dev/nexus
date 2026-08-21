@@ -95,6 +95,18 @@ function flattenKeys(obj: JsonRecord, prefix = ''): string[] {
   return keys;
 }
 
+/** Collect leaf VALUES (strings) of a nested namespace object. */
+function flattenValues(obj: JsonRecord, values: string[] = []): string[] {
+  for (const value of Object.values(obj)) {
+    if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
+      flattenValues(value as JsonRecord, values);
+    } else if (typeof value === 'string') {
+      values.push(value);
+    }
+  }
+  return values;
+}
+
 /**
  * Entrance keys owned by the `shell` namespace (AR-21 + EL §2/§4/§5): switch
  * control, bounce toast, layout labels, identity page, Develop hub v1 cards.
@@ -166,6 +178,34 @@ describe('locale key parity (en ↔ zh-CN)', () => {
 
   it('keeps the 20-namespace catalog unchanged (AR-21: no new namespace)', () => {
     expect(NAMESPACE_PAIRS).toHaveLength(20);
+  });
+
+  it('ships no firing-cadence / next-fire promise or CLI-removal claim in the schedule copy, en and zh-CN (AR-30/PL-18)', () => {
+    // PL-17/AR-30: the schedule surface never promises a firing cadence or a
+    // fabricated next run; the copy is config-only. PL-18: the in-product
+    // surface does not claim the CLI was removed (CLI stays a power tool).
+    const enValues = Object.values(flattenValues(enSchedule)).join(' ');
+    const zhValues = Object.values(flattenValues(zhSchedule)).join(' ');
+    for (const [locale, values] of [
+      ['en', enValues],
+      ['zh-CN', zhValues],
+    ] as const) {
+      expect(values, `${locale}: no next-run promise`).not.toMatch(/next run/i);
+      expect(values, `${locale}: no next-fire promise`).not.toMatch(/next fire/i);
+      expect(values, `${locale}: no firing cadence promise`).not.toMatch(/fires? every/i);
+      expect(values, `${locale}: no cadence word`).not.toMatch(/cadence/i);
+      expect(values, `${locale}: no CLI-removal claim`).not.toMatch(/CLI.{0,40}remov|remov.{0,40}CLI/i);
+      expect(values, `${locale}: no command-line-removal claim`).not.toMatch(
+        /command[- ]?line.{0,40}remov|remov.{0,40}command[- ]?line/i,
+      );
+    }
+  });
+
+  it('ships no firing-cadence promise in the common keys P2 added (AR-30)', () => {
+    const enValues = Object.values(flattenValues(enCommon)).join(' ');
+    const zhValues = Object.values(flattenValues(zhCommon)).join(' ');
+    expect(enValues).not.toMatch(/next run|next fire|fires? every|cadence/i);
+    expect(zhValues).not.toMatch(/next run|next fire|fires? every|cadence/i);
   });
 
   it('ships every entrance key in its OWNING namespace, en and zh-CN (AR-21 + EL §2/§4/§5)', () => {
